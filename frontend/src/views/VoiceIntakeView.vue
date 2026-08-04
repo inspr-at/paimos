@@ -10,6 +10,7 @@
 // and one-click create land in later slices (PAI-705…709); their cards are
 // scaffolded here so the layout already matches the approved mockup.
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 
 import ProjectConfidenceChip from "@/components/intake/ProjectConfidenceChip.vue";
 import TranscriptInput from "@/components/intake/TranscriptInput.vue";
@@ -26,6 +27,9 @@ const {
   stage,
   projectMatch,
   pinProject,
+  createdIssue,
+  createIssue,
+  activeProjectId,
   checkpoints,
   viewSeq,
   viewState,
@@ -164,12 +168,45 @@ async function onRestore() {
   scrubPos.value = headRev.value;
 }
 
+const creating = ref(false);
+const canCreate = computed(
+  () =>
+    !!session.value &&
+    session.value.status === "active" &&
+    activeProjectId() != null &&
+    (specDraft.value.trim() !== "" || !!ticketPreview.value),
+);
+
+async function onCreateIssue() {
+  if (creating.value || !canCreate.value) return;
+  creating.value = true;
+  try {
+    if (draftDirty.value) await onSaveSpec();
+    await createIssue();
+  } finally {
+    creating.value = false;
+  }
+}
+
+const router = useRouter();
+
+function onJumpToIssue() {
+  const issue = createdIssue.value;
+  if (!issue) return;
+  const pid = issue.project_id;
+  router.push(pid != null ? `/projects/${pid}/issues/${issue.id}` : `/issues/${issue.id}`);
+}
+
 async function onNewSession() {
+  const carryProject = activeProjectId();
   talking.value = false;
   draftDirty.value = false;
   specDraft.value = "";
   reset();
   await start();
+  // Non-destructive continuity: the next idea usually belongs to the same
+  // project — carry the previous target forward as a pin the user can lift.
+  if (carryProject != null) await pinProject(carryProject);
 }
 
 onBeforeUnmount(() => {
@@ -377,11 +414,35 @@ onBeforeUnmount(() => {
         <button class="vi-btn" type="button" :disabled="!session" @click="onNewSession">
           New session
         </button>
-        <button class="vi-create" type="button" disabled title="Arrives with PAI-707">
-          Create Issue →
+        <button
+          class="vi-create"
+          type="button"
+          :disabled="!canCreate || creating"
+          :title="canCreate ? '' : 'Needs an active session, a target project, and some content'"
+          @click="onCreateIssue"
+        >
+          {{ creating ? "Creating…" : "Create Issue →" }}
         </button>
       </div>
     </footer>
+
+    <div v-if="createdIssue" class="vi-postcreate-backdrop">
+      <div class="vi-postcreate vi-card">
+        <h2>✓ {{ createdIssue.issue_key }} created</h2>
+        <p class="vi-hint">What next?</p>
+        <div class="vi-postcreate-actions">
+          <button class="vi-create" type="button" autofocus @click="onNewSession">
+            New session (default)
+          </button>
+          <button class="vi-btn" type="button" @click="createdIssue = null">
+            Stay and refine
+          </button>
+          <button class="vi-btn" type="button" @click="onJumpToIssue">
+            Open {{ createdIssue.issue_key }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -690,6 +751,29 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 13px;
+}
+.vi-postcreate-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vi-postcreate {
+  min-width: 340px;
+  text-align: center;
+}
+.vi-postcreate h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+.vi-postcreate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
 }
 .vi-create {
   padding: 10px 22px;

@@ -44,7 +44,7 @@ import {
   type IntakeSpecPayload,
   type IntakeStreamEvent,
 } from "@/api/intake";
-import { errMsg } from "@/api/client";
+import { api, errMsg } from "@/api/client";
 
 export type IntakeConnection = "disconnected" | "connecting" | "open" | "retrying";
 
@@ -94,6 +94,7 @@ const specSeq = ref(0);
 const ticketPreview = ref<IntakeTicketPreview | null>(null);
 const stage = ref<IntakeStage | null>(null);
 const projectMatch = ref<IntakeProjectMatch | null>(null);
+const createdIssue = ref<{ id: number; issue_key: string; project_id: number | null } | null>(null);
 const revIndex = ref<IntakeRevision[]>([]);
 const checkpoints = ref<IntakeCheckpoint[]>([]);
 const viewSeq = ref<number | null>(null); // null = live/HEAD
@@ -334,6 +335,31 @@ async function pinProject(projectId: number) {
   session.value = updated;
 }
 
+/** The project the session currently targets: pin wins over detection. */
+function activeProjectId(): number | null {
+  const s = session.value;
+  if (!s) return null;
+  return s.pinned_project_id ?? s.detected_project_id ?? null;
+}
+
+/** File the issue from the session's current state (idempotent server-side). */
+async function createIssue() {
+  const s = session.value;
+  const pid = activeProjectId();
+  if (!s || pid == null) return null;
+  try {
+    const issue = await api.post<{ id: number; issue_key: string; project_id: number | null }>(
+      `/projects/${pid}/intake-sessions/${s.id}/issue`,
+      {},
+    );
+    createdIssue.value = issue;
+    return issue;
+  } catch (e) {
+    error.value = errMsg(e, "Could not create the issue");
+    throw e;
+  }
+}
+
 async function saveCheckpoint(label: string) {
   const s = session.value;
   if (!s) return;
@@ -401,6 +427,7 @@ function reset() {
   ticketPreview.value = null;
   stage.value = null;
   projectMatch.value = null;
+  createdIssue.value = null;
   revIndex.value = [];
   checkpoints.value = [];
   viewSeq.value = null;
@@ -422,6 +449,9 @@ export function useIntakeSession() {
     stage,
     projectMatch,
     pinProject,
+    createdIssue,
+    createIssue,
+    activeProjectId,
     revIndex,
     checkpoints,
     viewSeq,
