@@ -51,6 +51,9 @@ type User struct {
 	// PAI-368 / M103: per-user search-scope shortcut. JSON blob (see
 	// handlers/profile.go validation) or empty string when disabled.
 	SearchScopeShortcut string `json:"search_scope_shortcut"`
+	// PAI-706 / M135: voice-intake auto-switch confidence threshold
+	// override (50..100). NULL = use the instance default.
+	IntakeConfidenceThreshold *int `json:"intake_confidence_threshold"`
 	// Last login timestamp (migration 54)
 	LastLoginAt *string `json:"last_login_at"`
 	// 2FA status — populated by admin list/update endpoints

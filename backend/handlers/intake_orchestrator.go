@@ -189,28 +189,60 @@ func runIntakePipeline(sessionID int64) {
 		return
 	}
 
-	settings, provider, reason := intakeAIRuntime()
-	if provider == nil {
-		publishIntakeStage(sessionID, "spec", "degraded", reason)
-		return
-	}
-
 	userID, isAdmin, err := intakeSessionOwnerRole(ctx, s.UserID)
 	if err != nil {
 		log.Printf("intake orchestrator: owner lookup session %d: %v", sessionID, err)
 		return
 	}
-	if ok, _, over, bypass := CheckUsageCap(userID, isAdmin); !ok || (over && !bypass) {
-		publishIntakeStage(sessionID, "spec", "degraded", "daily_cap")
-		return
-	}
-	if s.sessionTokensUsed() >= intakeSessionTokenBudget {
-		publishIntakeStage(sessionID, "spec", "degraded", "session_budget")
+	transcript, err := loadIntakeTranscript(ctx, sessionID)
+	if err != nil || transcript == "" {
 		return
 	}
 
-	transcript, err := loadIntakeTranscript(ctx, sessionID)
-	if err != nil || transcript == "" {
+	settings, provider, reason := intakeAIRuntime()
+	capOK := true
+	if ok, _, over, bypass := CheckUsageCap(userID, isAdmin); !ok || (over && !bypass) {
+		capOK = false
+	}
+	budgetOK := s.sessionTokensUsed() < intakeSessionTokenBudget
+
+	// Project detection (PAI-706) runs every cycle: deterministic Stage A
+	// even in degraded mode (its scores are capped below the auto-switch
+	// threshold), LLM Stage B only when healthy.
+	var matchAx *aiActionContext
+	if provider != nil {
+		options, uerr := resolveAIActionOptions(settings, "intake_project_match", aiActionOptions{}, nil)
+		if uerr == nil {
+			matchAx = &aiActionContext{
+				Ctx: ctx, UserID: userID, IsAdmin: isAdmin,
+				Provider: provider, Settings: settings, Options: options, DB: db.DB,
+			}
+		}
+	}
+	mp, mc := runIntakeMatchStage(ctx, s, transcript, matchAx, provider != nil && capOK && budgetOK)
+	if mp > 0 || mc > 0 {
+		if _, err := db.DB.ExecContext(ctx,
+			`UPDATE intake_sessions
+			 SET session_prompt_tokens = session_prompt_tokens + ?,
+			     session_completion_tokens = session_completion_tokens + ?
+			 WHERE id = ?`, mp, mc, sessionID); err != nil {
+			log.Printf("intake orchestrator: match budget update session %d: %v", sessionID, err)
+		}
+		s.SessionPromptTokens += mp
+		s.SessionCompletionTokens += mc
+		budgetOK = s.sessionTokensUsed() < intakeSessionTokenBudget
+	}
+
+	if provider == nil {
+		publishIntakeStage(sessionID, "spec", "degraded", reason)
+		return
+	}
+	if !capOK {
+		publishIntakeStage(sessionID, "spec", "degraded", "daily_cap")
+		return
+	}
+	if !budgetOK {
+		publishIntakeStage(sessionID, "spec", "degraded", "session_budget")
 		return
 	}
 	priorSpec := ""

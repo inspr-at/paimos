@@ -5,6 +5,7 @@ import { api, errMsg } from "@/api/client";
 
 interface SystemSettings {
   undo_stack_depth: number;
+  intake_confidence_threshold: number;
 }
 
 interface RetentionPolicy {
@@ -15,7 +16,7 @@ const loading = ref(true);
 const saving = ref(false);
 const error = ref("");
 const saved = ref(false);
-const form = ref<SystemSettings>({ undo_stack_depth: 3 });
+const form = ref<SystemSettings>({ undo_stack_depth: 3, intake_confidence_threshold: 90 });
 const retention = ref<RetentionPolicy | null>(null);
 
 async function load() {
@@ -82,6 +83,27 @@ onMounted(() => {
         </label>
         <div class="system-card__meta">
           <span>Applies to the next recorded mutation immediately.</span>
+        </div>
+      </article>
+
+      <article class="system-card">
+        <h3>Voice-intake auto-switch confidence</h3>
+        <p class="system-card__copy">
+          Minimum project-match confidence (%) before the Voice Intake
+          workbench switches projects automatically. Users can override this
+          on their own account.
+        </p>
+        <label class="system-card__field">
+          <span>Threshold (50–100)</span>
+          <input
+            v-model.number="form.intake_confidence_threshold"
+            type="number"
+            min="50"
+            max="100"
+          />
+        </label>
+        <div class="system-card__meta">
+          <span>Applies to the next detection cycle immediately.</span>
         </div>
       </article>
 

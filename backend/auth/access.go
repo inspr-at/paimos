@@ -264,6 +264,65 @@ func AccessibleProjectIDs(r *http.Request) []int64 {
 	return ids
 }
 
+// AccessibleProjectIDsForUser is the request-free variant of
+// AccessibleProjectIDs for background workers (PAI-706 intake project
+// detection). Same semantics: nil = admin (all projects), empty = none.
+// Recompute per use — permission changes must take effect immediately
+// (INV-INTAKE-03: the intake candidate set is derived from this).
+func AccessibleProjectIDsForUser(userID int64) []int64 {
+	var role, status string
+	if err := db.DB.QueryRow(
+		"SELECT role, status FROM users WHERE id=?", userID).Scan(&role, &status); err != nil || status != "active" {
+		return []int64{}
+	}
+	if IsAdminRole(role) {
+		return nil
+	}
+	explicit := map[int64]AccessLevel{}
+	rows, err := db.DB.Query(
+		"SELECT project_id, access_level FROM project_members WHERE user_id=?", userID)
+	if err != nil {
+		log.Printf("AccessibleProjectIDsForUser: query: %v", err)
+		return []int64{}
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pid int64
+		var lvl string
+		if err := rows.Scan(&pid, &lvl); err != nil {
+			continue
+		}
+		explicit[pid] = AccessLevel(lvl)
+	}
+	if role == "external" {
+		ids := make([]int64, 0, len(explicit))
+		for pid, lvl := range explicit {
+			if lvl == AccessViewer || lvl == AccessEditor {
+				ids = append(ids, pid)
+			}
+		}
+		return ids
+	}
+	prows, err := db.DB.Query("SELECT id FROM projects WHERE status != 'deleted'")
+	if err != nil {
+		log.Printf("AccessibleProjectIDsForUser: list projects: %v", err)
+		return []int64{}
+	}
+	defer prows.Close()
+	ids := []int64{}
+	for prows.Next() {
+		var pid int64
+		if err := prows.Scan(&pid); err != nil {
+			continue
+		}
+		if lvl, ok := explicit[pid]; ok && lvl == AccessNone {
+			continue
+		}
+		ids = append(ids, pid)
+	}
+	return ids
+}
+
 // SeedAccessForUser auto-grants editor access to all non-deleted projects
 // for a newly created admin/member. External users are not seeded — they
 // must receive explicit grants via the user-memberships endpoints.
