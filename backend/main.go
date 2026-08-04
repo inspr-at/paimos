@@ -693,6 +693,7 @@ func mountAPI(r chi.Router) {
 		r.Get("/intake/sessions/{id}/state", handlers.GetIntakeState)
 		r.Post("/intake/sessions/{id}/restore", handlers.RestoreIntakeSession)
 		r.Post("/intake/sessions/{id}/refresh", handlers.RefreshIntakeSession)
+		r.Post("/intake/sessions/{id}/audio", handlers.TranscribeIntakeAudio)
 		r.With(auth.RequireProjectEdit, handlers.IdempotencyMiddleware).Post("/projects/{id}/intake-sessions/{sessionID}/issue", handlers.CreateIntakeIssue)
 		r.Get("/intake/sessions/{id}/stream", handlers.IntakeSessionStream)
 
@@ -830,6 +831,8 @@ func mountAPI(r chi.Router) {
 		// it on every render that shows an AI button.
 		r.With(auth.RequireAdmin).Get("/ai/settings", handlers.GetAISettings)
 		r.With(auth.RequireAdmin).Put("/ai/settings", handlers.PutAISettings)
+		r.With(auth.RequireAdmin).Get("/ai/voice-settings", handlers.GetVoiceSettings)
+		r.With(auth.RequireAdmin).Put("/ai/voice-settings", handlers.PutVoiceSettings)
 		// PAI-159: admin-only test-connection ping. Mounted in the
 		// admin group; CSRF middleware (PAI-113) covers it.
 		r.With(auth.RequireAdmin).Post("/ai/test", handlers.AITestConnection)

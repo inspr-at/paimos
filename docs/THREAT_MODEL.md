@@ -336,6 +336,7 @@ PAI-110 shipped the **INV-FILES-03** application-layer fix end-to-end. Uploads n
 | **INV-INTAKE-03** | The project-detection candidate set is strictly a subset of the session owner's accessible projects, recomputed every run; no non-accessible project name or id enters any prompt or response. | `handlers/intake_project_match.go:intakeProjectCandidates` + `auth/access.go:AccessibleProjectIDsForUser` | `intake_project_match_internal_test.go:TestIntakeProjectCandidates_RestrictedUniverse` |
 | **INV-INTAKE-04** | Every orchestrator provider call passes the daily cap and the per-session budget and emits exactly one audit line plus one `ai_calls` row. | `handlers/intake_orchestrator.go` (all three stages) | `intake_orchestrator_internal_test.go` |
 | **INV-INTAKE-05** | Issue creation from a session is idempotent: a replayed Idempotency-Key or an already-completed session never files a second issue. | `handlers/intake_create_issue.go:CreateIntakeIssue` + `IdempotencyMiddleware` | `intake_create_issue_test.go:TestIntakeCreateIssue_HappyPathAndIdempotency` |
+| **INV-INTAKE-06** | Spoken audio is transcribed and dropped: audio bytes never reach disk, the DB, logs, or `ai_calls`; the STT key is encrypted at rest and never sent to the browser. | `handlers/intake_audio.go:TranscribeIntakeAudio`, `handlers/voice_settings.go` | `intake_audio_test.go` (metadata-only paper trail; key never in responses) |
 
 ---
 

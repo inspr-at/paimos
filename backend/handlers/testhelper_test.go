@@ -292,6 +292,7 @@ func buildRouter() http.Handler {
 			r.Get("/intake/sessions/{id}/state", handlers.GetIntakeState)
 			r.Post("/intake/sessions/{id}/restore", handlers.RestoreIntakeSession)
 			r.Post("/intake/sessions/{id}/refresh", handlers.RefreshIntakeSession)
+			r.Post("/intake/sessions/{id}/audio", handlers.TranscribeIntakeAudio)
 			r.With(auth.RequireProjectEdit, handlers.IdempotencyMiddleware).Post("/projects/{id}/intake-sessions/{sessionID}/issue", handlers.CreateIntakeIssue)
 			r.Get("/intake/sessions/{id}/stream", handlers.IntakeSessionStream)
 			r.Get("/undo/activity", handlers.ListMyMutationActivity)
@@ -362,6 +363,8 @@ func buildRouter() http.Handler {
 			// AI
 			r.With(auth.RequireAdmin).Get("/ai/settings", handlers.GetAISettings)
 			r.With(auth.RequireAdmin).Put("/ai/settings", handlers.PutAISettings)
+			r.With(auth.RequireAdmin).Get("/ai/voice-settings", handlers.GetVoiceSettings)
+			r.With(auth.RequireAdmin).Put("/ai/voice-settings", handlers.PutVoiceSettings)
 			r.With(auth.RequireAdmin).Post("/ai/test", handlers.AITestConnection)
 			r.With(auth.RequireAdmin).Get("/ai/models", handlers.AIListModels)
 			r.With(auth.RequireAdmin).Get("/ai/usage", handlers.AIUsage)

@@ -148,3 +148,47 @@ export function restoreIntakeSession(id: number, seq: number) {
 export function intakeStreamURL(id: number, sinceSeq = 0): string {
   return `/api/intake/sessions/${id}/stream?since=${encodeURIComponent(String(sinceSeq))}`;
 }
+
+/**
+ * PAI-710: ship one spoken utterance for server-side transcription. Raw
+ * audio body (not multipart), so it bypasses the JSON client; CSRF is
+ * echoed manually the same way api.upload does.
+ */
+export async function postIntakeAudio(
+  id: number,
+  blob: Blob,
+): Promise<{ seq: number; text: string }> {
+  const csrf =
+    document.cookie
+      .split("; ")
+      .find((c) => c.startsWith("csrf_token="))
+      ?.split("=")[1] ?? "";
+  const res = await fetch(`/api/intake/sessions/${id}/audio`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": blob.type || "audio/webm",
+      "X-CSRF-Token": csrf,
+    },
+    body: blob,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(
+      (data && (data.detail || data.error)) || `voice transcription failed (${res.status})`,
+    );
+  }
+  return (await res.json()) as { seq: number; text: string };
+}
+
+/** Whether speech input is configured on this instance (from /ai/status). */
+export async function voiceAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/ai/status", { credentials: "include" });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { voice_available?: boolean };
+    return data.voice_available === true;
+  } catch {
+    return false;
+  }
+}
