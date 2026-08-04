@@ -5,6 +5,32 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.0] — 2026-08-04
+
+### Added — Voice Intake / Spec Workbench (PAI-703)
+
+- **Talk-to-ticket workbench** at `/intake`: capture an idea as transcript chunks (dev text mode; the transcript layer is pluggable for future speech sources), watch a structured Markdown specification build live, and file the issue with one click (PAI-704…709).
+- **Continuous project detection** with confidence gating: deterministic FTS pre-filter over your accessible projects plus a clamped LLM re-rank; auto-switch at a configurable threshold (instance default + per-user override, default 90%), manual pin always wins (PAI-706).
+- **Live specification loop**: `intake_spec` regenerates the full spec from prior spec + newest transcript, EN ↔ DE toggle, user edits always win with an apply-latest banner (PAI-705).
+- **Impact analysis**: mixed retrieval + blast radius surface touched / conflicting / extended issues; categories file as real relations on create (PAI-708).
+- **Understanding check**: ELI5 / ELI10 / ELI15 summaries with staleness badges (PAI-709).
+- **Time travel**: append-only session history with named checkpoints, scrubbing, diff-vs-live, and non-destructive restore (PAI-704/709).
+- Everything degrades gracefully: capture, editing, checkpoints, restore, and create keep working with AI unconfigured or budgets exhausted.
+
+### Fixed
+
+- Dev-stack vite proxy now aligns the Origin header with the proxied host, so cookie-auth mutations work from the dev SPA (PAI-709).
+- PAI-709: understanding check + time-travel polish + e2e (slice 6 of PAI-703) (#57)
+- PAI-708: impact analysis — retrieval fan-in, blast radius, category cards (slice 5 of PAI-703) (#56)
+- PAI-707: one-click issue creation from an intake session (slice 4 of PAI-703) (#55)
+- PAI-706: project detection — FTS pre-filter, clamped LLM rank, confidence chip, thresholds (slice 3 of PAI-703) (#54)
+- PAI-705: live spec loop — intake_spec action, per-session orchestrator, generation UX (slice 2 of PAI-703) (#53)
+- PAI-704: Voice Intake session core (slice 1 of PAI-703) (#52)
+- fix(frontend): bump dompurify to 3.4.12, run useMarkdown tests on jsdom (PAI-701) (#51)
+- chore: point registry, deploy, and release tooling at inspr-at
+- chore: rename Go module to the inspr-at namespace
+- fix(deploy): reach csb1 via Tailscale IP, not MagicDNS name
+
 ## [Unreleased]
 
 ## [5.0.0] — 2026-07-23
