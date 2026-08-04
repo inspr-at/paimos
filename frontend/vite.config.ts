@@ -44,6 +44,16 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8888',
         changeOrigin: true,
+        // changeOrigin rewrites Host but NOT Origin, so cookie-auth
+        // mutations from the dev SPA trip the backend's same-origin CSRF
+        // guard (Origin localhost:5173 vs Host localhost:8888). Align
+        // Origin with the proxied Host — matches the single-host prod
+        // deployment the guard is designed for. (PAI-709)
+        configure(proxy) {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            if (req.headers.origin) proxyReq.setHeader('origin', 'http://localhost:8888')
+          })
+        },
       },
     },
   },

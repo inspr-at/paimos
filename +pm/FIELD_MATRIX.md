@@ -82,6 +82,11 @@ All v2 columns hidden by default (opt-in via column selector).
 - `ticket` = story / change request / bug — central work item
 - `task` = smallest leaf; no billing, no jira, no dates
 - `release` and `sprint` are container/planning types — no billing fields
+- The Voice Intake workbench (PAI-703) creates issues with the canonical
+  fields only: `title`, `type` (ticket/epic/task), `description` (the spec
+  markdown), `acceptance_criteria` (dropped for `task` per this matrix),
+  default `status=new` / `priority=medium`, plus relation edges mapped from
+  the impact-analysis categories. All other fields are edited post-create.
 - `parent_id` hidden for `epic` (top of hierarchy, no parent)
 - `acceptance_criteria` only for types with deliverable scope (epic, cost_unit, ticket)
 - New columns are all hidden by default — user opts in via column selector

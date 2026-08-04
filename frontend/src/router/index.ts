@@ -159,15 +159,14 @@ const router = createRouter({
       path: "/reporting/projektbericht",
       component: () => import("@/views/LieferberichtView.vue"),
     },
+    {
+      // PAI-703: Voice Intake workbench — first-class route since the epic
+      // shipped end-to-end (promoted from the DEV gate in the PAI-709 slice).
+      path: "/intake",
+      component: () => import("@/views/VoiceIntakeView.vue"),
+    },
     ...(import.meta.env.DEV
       ? [
-          {
-            // PAI-704: Voice Intake workbench — DEV-gated until the epic
-            // (PAI-703) ships end-to-end; promotion to a first-class route
-            // happens with the release slice.
-            path: "/intake",
-            component: () => import("@/views/VoiceIntakeView.vue"),
-          },
           {
             path: "/dev/ai-ux",
             component: () => import("@/components/ai/AiUxDevReference.vue"),

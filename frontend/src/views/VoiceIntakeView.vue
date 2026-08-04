@@ -12,10 +12,13 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
+import AiSurfaceFeedback from "@/components/ai/AiSurfaceFeedback.vue";
 import ProjectConfidenceChip from "@/components/intake/ProjectConfidenceChip.vue";
+import { LS_INTAKE_ELI_LEVEL } from "@/constants/storage";
 import TranscriptInput from "@/components/intake/TranscriptInput.vue";
 import { useIntakeSession } from "@/composables/useIntakeSession";
 import { useMarkdown } from "@/composables/useMarkdown";
+import { lineDiff } from "@/components/ai/lineDiff";
 
 const {
   session,
@@ -28,6 +31,8 @@ const {
   projectMatch,
   pinProject,
   impacts,
+  summaries,
+  summariesSeq,
   createdIssue,
   createIssue,
   activeProjectId,
@@ -49,6 +54,10 @@ const {
 
 const talking = ref(false);
 const previewEnabled = ref(true);
+const eliLevel = ref<"eli5" | "eli10" | "eli15">(
+  (localStorage.getItem(LS_INTAKE_ELI_LEVEL) as "eli5" | "eli10" | "eli15") || "eli10",
+);
+watch(eliLevel, (lvl) => localStorage.setItem(LS_INTAKE_ELI_LEVEL, lvl));
 const specDraft = ref("");
 const draftDirty = ref(false);
 const draftBaseSeq = ref(0);
@@ -169,6 +178,23 @@ async function onRestore() {
   scrubPos.value = headRev.value;
 }
 
+const showDiff = ref(false);
+// Flattened line diff of the scrubbed revision vs the live spec, capped so
+// a pathological diff can't lock the UI.
+const historyDiff = computed(() => {
+  if (!isViewingHistory.value || !showDiff.value) return [];
+  const result = lineDiff(viewState.value?.spec?.markdown ?? "", spec.value?.markdown ?? "");
+  const lines: { type: string; text: string }[] = [];
+  for (const row of result.left) {
+    if (row.type === "del") lines.push({ type: "del", text: row.text ?? "" });
+  }
+  for (const row of result.right) {
+    if (row.type === "add") lines.push({ type: "add", text: row.text ?? "" });
+    else if (row.type === "eq") lines.push({ type: "eq", text: row.text ?? "" });
+  }
+  return lines.slice(0, 400);
+});
+
 const creating = ref(false);
 const canCreate = computed(
   () =>
@@ -246,6 +272,9 @@ onBeforeUnmount(() => {
     </header>
 
     <p v-if="error" class="vi-error">{{ error }}</p>
+    <!-- Shared AI feedback host for any useAiAction-backed control on this
+         page; generation activity itself streams via the session SSE. -->
+    <AiSurfaceFeedback host-key="intake:workbench" />
 
     <div class="vi-grid">
       <section class="vi-card vi-spec">
@@ -298,11 +327,23 @@ onBeforeUnmount(() => {
         <div v-if="isViewingHistory" class="vi-history-banner">
           Viewing rev {{ viewSeq }} of {{ headRev }} —
           <button class="vi-link" type="button" @click="scrubPos = headRev">back to live</button>
-          or
+          ·
           <button class="vi-link" type="button" @click="onRestore">restore this state</button>
+          ·
+          <button class="vi-link" type="button" @click="showDiff = !showDiff">
+            {{ showDiff ? "hide diff" : "diff vs live" }}
+          </button>
+        </div>
+        <div v-if="isViewingHistory && showDiff" class="vi-diff">
+          <template v-for="(line, i) in historyDiff" :key="i">
+            <div class="vi-diff-line" :class="`vi-diff--${line.type}`">
+              <span class="vi-diff-sign">{{ line.type === "add" ? "+" : line.type === "del" ? "−" : " " }}</span>
+              <span>{{ line.text }}</span>
+            </div>
+          </template>
         </div>
         <textarea
-          v-if="!previewOn"
+          v-else-if="!previewOn"
           v-model="specDraft"
           v-auto-grow
           class="vi-spec-editor"
@@ -311,7 +352,7 @@ onBeforeUnmount(() => {
           @input="onSpecInput"
           @blur="draftDirty && onSaveSpec()"
         />
-        <div v-else class="vi-spec-preview md-rendered" v-html="previewHtml" />
+        <div v-else-if="!(isViewingHistory && showDiff)" class="vi-spec-preview md-rendered" v-html="previewHtml" />
         <div v-if="draftDirty && !isViewingHistory" class="vi-draft-note">
           Unsaved edits — <button class="vi-link" type="button" @click="onSaveSpec">save</button>
         </div>
@@ -368,8 +409,26 @@ onBeforeUnmount(() => {
           </p>
         </section>
         <section class="vi-card">
-          <header class="vi-card-head"><h2>Understanding Check</h2></header>
-          <p class="vi-empty">ELI5 / ELI10 / ELI15 summaries arrive with the AI loop (PAI-709).</p>
+          <header class="vi-card-head">
+            <h2>Understanding Check</h2>
+            <div v-if="summaries" class="vi-tabs">
+              <button
+                v-for="lvl in ['eli5', 'eli10', 'eli15'] as const"
+                :key="lvl"
+                :class="{ active: eliLevel === lvl }"
+                @click="eliLevel = lvl"
+              >
+                {{ lvl.toUpperCase() }}
+              </button>
+            </div>
+          </header>
+          <template v-if="summaries">
+            <p class="vi-eli-text">{{ summaries[eliLevel] || "—" }}</p>
+            <p v-if="summariesSeq < specSeq" class="vi-eli-stale">
+              ⏳ refers to an earlier revision — refreshes with the next generation
+            </p>
+          </template>
+          <p v-else class="vi-empty">ELI5 / ELI10 / ELI15 summaries appear after the first generations.</p>
         </section>
         <section class="vi-card">
           <header class="vi-card-head"><h2>Ticket Preview</h2></header>
@@ -628,6 +687,41 @@ onBeforeUnmount(() => {
   color: #b91c1c;
 }
 .vi-stage--degraded {
+  color: #b45309;
+}
+.vi-diff {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.vi-diff-line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+}
+.vi-diff--add {
+  background: #dcfce7;
+}
+.vi-diff--del {
+  background: #fee2e2;
+  text-decoration: line-through;
+}
+.vi-diff-sign {
+  width: 12px;
+  color: var(--text-muted);
+}
+.vi-eli-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.vi-eli-stale {
+  margin: 8px 0 0;
+  font-size: 11.5px;
   color: #b45309;
 }
 .vi-impact-group {

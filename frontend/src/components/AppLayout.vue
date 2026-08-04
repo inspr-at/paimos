@@ -2,8 +2,8 @@
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
-// PAI-704: the Voice Intake nav item is DEV-only until epic PAI-703 ships.
-const voiceIntakeEnabled = import.meta.env.DEV
+// PAI-703: Voice Intake shipped with the epic — first-class nav item.
+const voiceIntakeEnabled = true
 import { useAuthStore } from '@/stores/auth'
 import { useSearchStore } from '@/stores/search'
 import { useSidebarColors } from '@/composables/useSidebarColors'

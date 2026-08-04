@@ -94,6 +94,13 @@ export interface IntakeImpactEntry {
   via: "retrieval" | "graph";
 }
 
+export interface IntakeSummaries {
+  eli5: string;
+  eli10: string;
+  eli15: string;
+  language?: IntakeLanguage;
+}
+
 export interface IntakeImpacts {
   impacted: IntakeImpactEntry[];
   related: IntakeImpactEntry[];
@@ -110,6 +117,8 @@ const stage = ref<IntakeStage | null>(null);
 const projectMatch = ref<IntakeProjectMatch | null>(null);
 const createdIssue = ref<{ id: number; issue_key: string; project_id: number | null } | null>(null);
 const impacts = ref<IntakeImpacts | null>(null);
+const summaries = ref<IntakeSummaries | null>(null);
+const summariesSeq = ref(0);
 const revIndex = ref<IntakeRevision[]>([]);
 const checkpoints = ref<IntakeCheckpoint[]>([]);
 const viewSeq = ref<number | null>(null); // null = live/HEAD
@@ -158,6 +167,14 @@ function applyPersistedEvent(ev: IntakeStreamEvent) {
       if (payload?.title !== undefined) ticketPreview.value = payload;
       break;
     }
+    case "summaries": {
+      const payload = ev.payload as IntakeSummaries | undefined;
+      if (payload && (payload.eli5 || payload.eli10 || payload.eli15)) {
+        summaries.value = payload;
+        summariesSeq.value = seq;
+      }
+      break;
+    }
     case "impacts": {
       const payload = ev.payload as IntakeImpacts | undefined;
       if (payload?.impacted !== undefined) impacts.value = payload;
@@ -203,6 +220,8 @@ async function hydrate(id: number) {
   projectMatch.value =
     (head.state.artifacts?.project_match as IntakeProjectMatch | undefined) ?? null;
   impacts.value = (head.state.artifacts?.impacts as IntakeImpacts | undefined) ?? null;
+  summaries.value = (head.state.artifacts?.summaries as IntakeSummaries | undefined) ?? null;
+  summariesSeq.value = summaries.value ? head.state.at_seq : 0;
   checkpoints.value = head.checkpoints ?? [];
   lastSeq = head.session.rev;
   // The metadata timeline is rebuilt lazily; SSE replay from 0 would
@@ -450,6 +469,8 @@ function reset() {
   projectMatch.value = null;
   createdIssue.value = null;
   impacts.value = null;
+  summaries.value = null;
+  summariesSeq.value = 0;
   revIndex.value = [];
   checkpoints.value = [];
   viewSeq.value = null;
@@ -474,6 +495,8 @@ export function useIntakeSession() {
     createdIssue,
     createIssue,
     impacts,
+    summaries,
+    summariesSeq,
     activeProjectId,
     revIndex,
     checkpoints,

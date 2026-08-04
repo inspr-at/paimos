@@ -78,6 +78,7 @@ func init() {
 		// with plain text work too and carry no session state.
 		{Key: "intake_spec", Label: "Intake: live specification", Surface: "intake", Placement: "text", Handler: stubHandler},
 		{Key: "intake_project_match", Label: "Intake: project match", Surface: "intake", Placement: "text", Handler: stubHandler},
+		{Key: "intake_summaries", Label: "Intake: understanding check (ELI5/10/15)", Surface: "intake", Placement: "text", Handler: stubHandler},
 
 		// PAI-358: structure_manifest / structure_guardrails /
 		// structure_glossary / structure_dev / structure_ops removed.
