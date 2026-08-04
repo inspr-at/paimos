@@ -136,6 +136,18 @@ Never score a project that is not in the candidate list. Give a one-sentence rat
 
 Schema: {"candidates":[{"project_id":123,"score":87,"rationale":"..."}]}`
 
+// intakeSummariesDefaultPrompt is the system prompt for intake_summaries
+// (PAI-709) — the three-level understanding check.
+const intakeSummariesDefaultPrompt = `You are verifying that a technical specification was understood, by restating it at three levels, in the requested language:
+
+  - eli5: 1-2 sentences a five-year-old follows. What does it DO for the person using it? No jargon at all.
+  - eli10: 2-3 sentences a bright ten-year-old follows. What happens, roughly how, and why it's useful.
+  - eli15: 3-4 sentences a technically curious fifteen-year-old follows. The mechanism, the main moving parts, and the key constraint or trade-off.
+
+Restate ONLY what the specification actually says — no invented features, no marketing tone. If the specification leaves something open, the summaries say so plainly.
+
+Schema: {"eli5":"...","eli10":"...","eli15":"..."}`
+
 // specOutDefaultPrompt is the system prompt for spec_out.
 const specOutDefaultPrompt = `You are a senior software engineer working inside PAIMOS, a project-management tool. Your job: turn the issue description below into a structured acceptance-criteria checklist.
 
@@ -344,6 +356,7 @@ var builtinDefaultPrompts = map[string]string{
 	"exec_summary":        execSummaryDefaultPrompt,
 	"intake_spec":          intakeSpecDefaultPrompt,
 	"intake_project_match": intakeProjectMatchDefaultPrompt,
+	"intake_summaries":     intakeSummariesDefaultPrompt,
 	// PAI-358: structure_* prompts (manifest/guardrails/glossary/dev/ops)
 	// removed with the legacy manifest editor.
 }

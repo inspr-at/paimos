@@ -387,6 +387,89 @@ func runIntakePipeline(sessionID int64) {
 		specRelations[rel.IssueKey] = rel.Category
 	}
 	runIntakeImpactsStage(ctx, s, impactQuery, specRelations)
+
+	// Understanding check (PAI-709): every other spec cycle, lagging one
+	// revision at most — the ELI cards show a staleness badge meanwhile.
+	var specEvents int
+	if err := db.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM intake_events WHERE session_id=? AND kind='spec' AND source='ai'`,
+		sessionID).Scan(&specEvents); err == nil && specEvents%2 == 1 {
+		runIntakeSummariesStage(ctx, s, spec.Markdown, ax)
+	}
+}
+
+// runIntakeSummariesStage generates and stores the ELI5/10/15 artifact,
+// replicating the dispatcher obligations like every orchestrator call.
+func runIntakeSummariesStage(ctx context.Context, s *intakeSession, specMarkdown string, base *aiActionContext) {
+	if s.sessionTokensUsed() >= intakeSessionTokenBudget {
+		publishIntakeStage(s.ID, "summaries", "degraded", "session_budget")
+		return
+	}
+	options, uerr := resolveAIActionOptions(base.Settings, "intake_summaries", aiActionOptions{}, nil)
+	if uerr != nil {
+		return
+	}
+	params, _ := json.Marshal(intakeSummariesParams{Language: s.Language})
+	sx := *base
+	sx.Options = options
+	sx.Params = params
+	sx.Text = specMarkdown
+
+	requestID := newAIRequestID()
+	publishIntakeStage(s.ID, "summaries", "running", "")
+	started := time.Now()
+	body, model, ptok, ctok, _, err := intakeSummariesHandler(&sx)
+	latency := time.Since(started)
+	outcome, errorClass := "ok", ""
+	if err != nil {
+		outcome, errorClass = "fail_upstream", "upstream"
+	}
+	auditAction(requestID, sx.UserID, "intake_summaries", "", "", 0, model, outcome, latency, ptok, ctok, options)
+	recordAICall(ctx, aiCallArgs{
+		RequestID: requestID, UserID: &sx.UserID, ActionKey: "intake_summaries",
+		Surface: "intake", ProjectID: s.activeProjectID(),
+		Provider: sx.Settings.Provider, Model: model,
+		ProfileID: options.ProfileID, Effort: options.Effort,
+		PromptPresetRef: options.PromptPresetRef, ContextPack: options.ContextPack,
+		PromptTokens: ptok, CompletionTokens: ctok,
+		Outcome: outcome, ErrorClass: errorClass, LatencyMs: latency.Milliseconds(),
+	})
+	if ptok > 0 || ctok > 0 {
+		RecordUsage(sx.UserID, ptok, ctok)
+		if _, err := db.DB.ExecContext(ctx,
+			`UPDATE intake_sessions
+			 SET session_prompt_tokens = session_prompt_tokens + ?,
+			     session_completion_tokens = session_completion_tokens + ?
+			 WHERE id = ?`, ptok, ctok, s.ID); err != nil {
+			log.Printf("intake orchestrator: summaries budget update session %d: %v", s.ID, err)
+		}
+	}
+	if err != nil {
+		publishIntakeStage(s.ID, "summaries", "error", errorClass)
+		return
+	}
+	sum, ok := body.(intakeSummariesBody)
+	if !ok || (sum.ELI5 == "" && sum.ELI10 == "" && sum.ELI15 == "") {
+		publishIntakeStage(s.ID, "summaries", "error", "response_parse")
+		return
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"eli5": sum.ELI5, "eli10": sum.ELI10, "eli15": sum.ELI15, "language": s.Language,
+	})
+	count, err := intakeEventCount(ctx, db.DB, s.ID)
+	if err != nil || count >= intakeMaxEventsPerSess {
+		return
+	}
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+	seq, err := appendIntakeEventTx(ctx, tx, s.ID, "summaries", "ai", "", string(payload))
+	if err == nil && tx.Commit() == nil {
+		publishIntakeEvent(ctx, s.ID, seq)
+		publishIntakeStage(s.ID, "summaries", "ok", "")
+	}
 }
 
 // appendIntakeGeneration stores the regenerated spec + ticket preview as

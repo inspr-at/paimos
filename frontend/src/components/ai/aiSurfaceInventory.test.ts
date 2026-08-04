@@ -45,6 +45,12 @@ describe('AI surface inventory wiring', () => {
     const promptsTab = read('components/settings/SettingsAIPromptsTab.vue')
     expect(promptsTab).toContain('AiActivityStrip')
     expect(promptsTab).toContain('AiResultStrip')
+
+    // PAI-703: the Voice Intake workbench is a first-class AI surface.
+    // Generation feedback is driven by the session SSE stream (stage
+    // events), with AiSurfaceFeedback mounted for useAiAction-backed
+    // controls under the stable intake host key.
+    expectHost('views/VoiceIntakeView.vue', 'host-key="intake:workbench"')
   })
 
   it('does not reintroduce the legacy optimize-button host path', () => {

@@ -327,6 +327,16 @@ PAI-110 shipped the **INV-FILES-03** application-layer fix end-to-end. Uploads n
 | **INV-RUNNER-04** | `POST /implement` is project-editor gated; run reads/updates are requester or admin only. | `handlers/agent_runs.go:canManageAgentRun` + `main.go` routes | `agent_runs_test.go` |
 | **INV-RUNNER-05** | Draft Implement-this providers cannot use local runner, repo mutation, test, or deploy paths, and local endpoint labels do not display credentials. | `handlers/agent_runs.go:implementDraftIssue`, `handlers/ai_execution_options.go:safeEndpointLabel` | `agent_runs_test.go` |
 
+### 4.9 · Voice-intake workbench (PAI-703)
+
+| ID | Statement | Code path | Verification |
+|---|---|---|---|
+| **INV-INTAKE-01** | Intake sessions, events, and streams are owner-or-admin; non-owner access answers 404 (no existence oracle). | `handlers/intake_sessions.go:requireIntakeSession` | `intake_sessions_test.go:TestIntakeSession_AuthzMatrix` |
+| **INV-INTAKE-02** | Transcript, spec, summary, and preview bodies live only in `intake_events`; they never reach stdout logs, audit lines, `mutation_log`, or `ai_calls`. | `handlers/intake_orchestrator.go:runIntakePipeline` (metadata-only `auditAction`/`recordAICall` args) | `intake_orchestrator_internal_test.go` (ai_calls body scan) |
+| **INV-INTAKE-03** | The project-detection candidate set is strictly a subset of the session owner's accessible projects, recomputed every run; no non-accessible project name or id enters any prompt or response. | `handlers/intake_project_match.go:intakeProjectCandidates` + `auth/access.go:AccessibleProjectIDsForUser` | `intake_project_match_internal_test.go:TestIntakeProjectCandidates_RestrictedUniverse` |
+| **INV-INTAKE-04** | Every orchestrator provider call passes the daily cap and the per-session budget and emits exactly one audit line plus one `ai_calls` row. | `handlers/intake_orchestrator.go` (all three stages) | `intake_orchestrator_internal_test.go` |
+| **INV-INTAKE-05** | Issue creation from a session is idempotent: a replayed Idempotency-Key or an already-completed session never files a second issue. | `handlers/intake_create_issue.go:CreateIntakeIssue` + `IdempotencyMiddleware` | `intake_create_issue_test.go:TestIntakeCreateIssue_HappyPathAndIdempotency` |
+
 ---
 
 ## 5 · Out of scope

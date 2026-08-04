@@ -87,8 +87,11 @@ func TestIntakeOrchestrator_PipelineAppendsSpecAndMetersUsage(t *testing.T) {
 
 	runIntakePipeline(sessionID)
 
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("provider calls = %d, want 1", got)
+	// Two provider calls: intake_spec, then intake_summaries (odd spec
+	// cycles run the understanding check; the fake body fails its JSON
+	// parse, which is itself a metered + audited attempt).
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("provider calls = %d, want 2 (spec + summaries)", got)
 	}
 	var specPayload, previewPayload string
 	if err := db.DB.QueryRow(
@@ -108,16 +111,19 @@ func TestIntakeOrchestrator_PipelineAppendsSpecAndMetersUsage(t *testing.T) {
 		t.Fatalf("preview payload = %s", previewPayload)
 	}
 
-	// Paper trail: one row, metadata only — the transcript and the spec
-	// body must not appear anywhere in it (INV-INTAKE-02).
+	// Paper trail: one row per attempt, metadata only — the transcript and
+	// the spec body must not appear anywhere in it (INV-INTAKE-02).
 	var count int
-	var actionKey, outcome string
-	if err := db.DB.QueryRow(
-		`SELECT COUNT(*), MAX(action_key), MAX(outcome) FROM ai_calls`).Scan(&count, &actionKey, &outcome); err != nil {
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM ai_calls`).Scan(&count); err != nil {
 		t.Fatalf("ai_calls: %v", err)
 	}
-	if count != 1 || actionKey != "intake_spec" || outcome != "ok" {
-		t.Fatalf("ai_calls = (%d, %s, %s), want (1, intake_spec, ok)", count, actionKey, outcome)
+	if count != 2 {
+		t.Fatalf("ai_calls rows = %d, want 2 (spec + summaries)", count)
+	}
+	var specOutcome string
+	if err := db.DB.QueryRow(
+		`SELECT outcome FROM ai_calls WHERE action_key='intake_spec'`).Scan(&specOutcome); err != nil || specOutcome != "ok" {
+		t.Fatalf("intake_spec outcome = %q (%v), want ok", specOutcome, err)
 	}
 	rows, err := db.DB.Query(`SELECT * FROM ai_calls`)
 	if err != nil {
@@ -152,15 +158,15 @@ func TestIntakeOrchestrator_PipelineAppendsSpecAndMetersUsage(t *testing.T) {
 		sessionID).Scan(&ptok, &ctok); err != nil {
 		t.Fatal(err)
 	}
-	if ptok != 100 || ctok != 50 {
-		t.Fatalf("session meters = (%d,%d), want (100,50)", ptok, ctok)
+	if ptok != 200 || ctok != 100 {
+		t.Fatalf("session meters = (%d,%d), want (200,100) for two calls", ptok, ctok)
 	}
 	var usage int
 	if err := db.DB.QueryRow(`SELECT COALESCE(SUM(prompt_tokens+completion_tokens),0) FROM ai_usage`).Scan(&usage); err != nil {
 		t.Fatal(err)
 	}
-	if usage != 150 {
-		t.Fatalf("ai_usage total = %d, want 150", usage)
+	if usage != 300 {
+		t.Fatalf("ai_usage total = %d, want 300 for two calls", usage)
 	}
 }
 
@@ -250,7 +256,8 @@ func TestIntakeOrchestrator_DebounceCoalesces(t *testing.T) {
 	}
 	// Give a would-be duplicate run time to fire before asserting.
 	time.Sleep(500 * time.Millisecond)
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("provider calls = %d, want exactly 1 (coalesced)", got)
+	// One coalesced pipeline run = spec + summaries provider calls.
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("provider calls = %d, want exactly 2 (one coalesced run)", got)
 	}
 }

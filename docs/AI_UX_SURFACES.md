@@ -22,9 +22,14 @@
 | project detail description | `frontend/src/views/ProjectDetailView.vue` | live |
 | project create description | `frontend/src/views/ProjectsView.vue` | live |
 | AI prompts dry-run preview | `frontend/src/components/settings/SettingsAIPromptsTab.vue` | live |
+| Voice Intake workbench (`intake:workbench`) | `frontend/src/views/VoiceIntakeView.vue` | live |
 
 ## Feedback model
 
 - every host passes a stable `hostKey`
 - activity, errors, and result overlays render only on the initiating host
 - issue history shows issue-scoped AI calls from the backend paper trail
+- the Voice Intake workbench (PAI-703) is the one surface whose generation
+  feedback streams over the session SSE channel (`stage` events) instead of
+  `useAiAction` runs; its `AiSurfaceFeedback` mount covers any
+  action-dispatcher controls added to the page

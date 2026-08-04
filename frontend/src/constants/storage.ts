@@ -103,3 +103,6 @@ export const lsLastViewKey = (userId: number | undefined, scope: string) =>
 /** Toolbar sprint selection per project (or "global"). */
 export const lsSprintNavKey = (id: number | string) =>
   `paimos:sprint-nav:${id}`
+
+/** PAI-709: Voice Intake — persisted ELI tab level ("eli5" | "eli10" | "eli15"). */
+export const LS_INTAKE_ELI_LEVEL = 'paimos:intake:eli-level'

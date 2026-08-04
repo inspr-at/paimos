@@ -226,6 +226,10 @@ func ExportSubject(w http.ResponseWriter, r *http.Request) {
 		"recent_projects":  gdprRows(`SELECT user_id, project_id, visited_at FROM user_recent_projects WHERE user_id=?`, id),
 		"project_members":  gdprRows(`SELECT user_id, project_id, access_level FROM project_members WHERE user_id=?`, id),
 		"ai_calls":         gdprRows(`SELECT id, request_id, action_key, sub_action, surface, issue_id, project_id, customer_id, cooperation_id, provider, model, profile_id, effort, prompt_preset_ref, context_pack, prompt_tokens, completion_tokens, total_tokens, cost_micro_usd, outcome, error_class, latency_ms, created_at FROM ai_calls WHERE user_id=?`, id),
+		// PAI-709: voice-intake sessions carry spoken/typed content — full
+		// transcript + event payloads belong to the subject.
+		"intake_sessions": gdprRows(`SELECT id, status, language, detected_project_id, pinned_project_id, created_issue_id, transcript, created_at, updated_at, completed_at FROM intake_sessions WHERE user_id=?`, id),
+		"intake_events":   gdprRows(`SELECT e.id, e.session_id, e.seq, e.kind, e.source, e.label, e.payload_json, e.created_at FROM intake_events e JOIN intake_sessions s ON s.id = e.session_id WHERE s.user_id=?`, id),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -296,6 +300,11 @@ func EraseSubject(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := tx.Exec(`UPDATE ai_calls SET user_id=NULL WHERE user_id=?`, id); err != nil {
 		log.Printf("EraseSubject: null ai_calls: %v", err)
+	}
+	// PAI-709: intake sessions hold the subject's spoken/typed content —
+	// hard delete (intake_events cascade via FK).
+	if _, err := tx.Exec(`DELETE FROM intake_sessions WHERE user_id=?`, id); err != nil {
+		log.Printf("EraseSubject: delete intake_sessions: %v", err)
 	}
 	if _, err := tx.Exec(`UPDATE mutation_log SET user_id=NULL, session_id=NULL WHERE user_id=?`, id); err != nil {
 		log.Printf("EraseSubject: scrub mutation_log identities: %v", err)
