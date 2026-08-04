@@ -61,6 +61,16 @@ const (
 // they are inputs or markers, not materialized artifacts.
 var intakeArtifactKinds = []string{"spec", "summaries", "ticket_preview", "project_match", "impacts"}
 
+// intakeEventKindAllowed mirrors the intake_events.kind CHECK constraint.
+func intakeEventKindAllowed(kind string) bool {
+	switch kind {
+	case "transcript_chunk", "spec", "summaries", "ticket_preview",
+		"project_match", "impacts", "checkpoint", "restore", "language", "status":
+		return true
+	}
+	return false
+}
+
 type intakeSession struct {
 	ID                int64   `json:"id"`
 	UserID            int64   `json:"user_id"`
@@ -564,15 +574,25 @@ func ListIntakeEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	var kindFilter []string
 	if raw := strings.TrimSpace(r.URL.Query().Get("kinds")); raw != "" {
-		kindFilter = strings.Split(raw, ",")
+		for k := range strings.SplitSeq(raw, ",") {
+			k = strings.TrimSpace(k)
+			if !intakeEventKindAllowed(k) {
+				jsonError(w, "invalid kind: "+k, http.StatusBadRequest)
+				return
+			}
+			kindFilter = append(kindFilter, k)
+		}
 	}
 	q := `SELECT seq, kind, source, label, LENGTH(payload_json), created_at
 	      FROM intake_events WHERE session_id = ? AND seq > ?`
 	args := []any{s.ID, since}
 	if len(kindFilter) > 0 {
+		// #nosec G202 G701 -- only literal "?," placeholders are concatenated;
+		// every kind value is bound as a parameter and validated against the
+		// closed intake event-kind set above.
 		q += ` AND kind IN (` + strings.Repeat("?,", len(kindFilter)-1) + `?)`
 		for _, k := range kindFilter {
-			args = append(args, strings.TrimSpace(k))
+			args = append(args, k)
 		}
 	}
 	q += ` ORDER BY seq ASC`
