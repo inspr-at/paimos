@@ -110,7 +110,14 @@ Also derive the ticket preview fields:
   - description: 2-5 sentence condensation of the spec (NOT the whole document).
   - acceptance_criteria: the AC checklist as plain markdown checkboxes, or "" when issue_type is "task".
 
-Schema: {"markdown":"...","title":"...","issue_type":"ticket|epic|task","description":"...","acceptance_criteria":"..."}`
+When a list of EXISTING ISSUES is provided, judge each against the idea and return a relation ONLY for genuine connections:
+  - "touches": implementing the idea will change or interact with that issue's area.
+  - "conflicts": the idea contradicts or collides with that issue's intent.
+  - "extends": the idea builds directly on that issue's outcome.
+  - "related": useful decision context, no direct dependency.
+Never invent issue keys not in the list; omit issues with no real connection.
+
+Schema: {"markdown":"...","title":"...","issue_type":"ticket|epic|task","description":"...","acceptance_criteria":"...","relations":[{"issue_key":"PAI-1","category":"touches|conflicts|extends|related"}]}`
 
 // intakeProjectMatchDefaultPrompt is the system prompt for
 // intake_project_match (PAI-706) — LLM re-rank of the deterministic

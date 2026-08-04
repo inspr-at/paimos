@@ -86,6 +86,20 @@ export interface IntakeProjectMatch {
   detected_score: number;
 }
 
+export interface IntakeImpactEntry {
+  issue_key: string;
+  title: string;
+  category: "touches" | "conflicts" | "extends" | "related";
+  mapped_relation?: string;
+  via: "retrieval" | "graph";
+}
+
+export interface IntakeImpacts {
+  impacted: IntakeImpactEntry[];
+  related: IntakeImpactEntry[];
+  graph_hits: { entity_type: string; title: string }[];
+}
+
 const session = ref<IntakeSession | null>(null);
 const connection = ref<IntakeConnection>("disconnected");
 const transcript = ref("");
@@ -95,6 +109,7 @@ const ticketPreview = ref<IntakeTicketPreview | null>(null);
 const stage = ref<IntakeStage | null>(null);
 const projectMatch = ref<IntakeProjectMatch | null>(null);
 const createdIssue = ref<{ id: number; issue_key: string; project_id: number | null } | null>(null);
+const impacts = ref<IntakeImpacts | null>(null);
 const revIndex = ref<IntakeRevision[]>([]);
 const checkpoints = ref<IntakeCheckpoint[]>([]);
 const viewSeq = ref<number | null>(null); // null = live/HEAD
@@ -143,6 +158,11 @@ function applyPersistedEvent(ev: IntakeStreamEvent) {
       if (payload?.title !== undefined) ticketPreview.value = payload;
       break;
     }
+    case "impacts": {
+      const payload = ev.payload as IntakeImpacts | undefined;
+      if (payload?.impacted !== undefined) impacts.value = payload;
+      break;
+    }
     case "project_match": {
       const payload = ev.payload as IntakeProjectMatch | undefined;
       if (payload?.matches !== undefined) {
@@ -182,6 +202,7 @@ async function hydrate(id: number) {
     (head.state.artifacts?.ticket_preview as IntakeTicketPreview | undefined) ?? null;
   projectMatch.value =
     (head.state.artifacts?.project_match as IntakeProjectMatch | undefined) ?? null;
+  impacts.value = (head.state.artifacts?.impacts as IntakeImpacts | undefined) ?? null;
   checkpoints.value = head.checkpoints ?? [];
   lastSeq = head.session.rev;
   // The metadata timeline is rebuilt lazily; SSE replay from 0 would
@@ -428,6 +449,7 @@ function reset() {
   stage.value = null;
   projectMatch.value = null;
   createdIssue.value = null;
+  impacts.value = null;
   revIndex.value = [];
   checkpoints.value = [];
   viewSeq.value = null;
@@ -451,6 +473,7 @@ export function useIntakeSession() {
     pinProject,
     createdIssue,
     createIssue,
+    impacts,
     activeProjectId,
     revIndex,
     checkpoints,

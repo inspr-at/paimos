@@ -233,16 +233,36 @@ func runIntakePipeline(sessionID int64) {
 		budgetOK = s.sessionTokensUsed() < intakeSessionTokenBudget
 	}
 
-	if provider == nil {
-		publishIntakeStage(sessionID, "spec", "degraded", reason)
-		return
+	// Query for retrieval-based stages: the transcript tail's material.
+	impactQuery := transcript
+	if len(impactQuery) > 600 {
+		impactQuery = impactQuery[len(impactQuery)-600:]
 	}
-	if !capOK {
-		publishIntakeStage(sessionID, "spec", "degraded", "daily_cap")
-		return
+	var candidateIssues []intakeSpecCandidateIssue
+	if target := s.activeProjectID(); target != nil {
+		if hits, err := intakeCandidateIssues(*target, impactQuery); err == nil {
+			for _, h := range hits {
+				key, _ := h["issue_key"].(string)
+				title, _ := h["title"].(string)
+				if key != "" && len(candidateIssues) < 8 {
+					candidateIssues = append(candidateIssues, intakeSpecCandidateIssue{IssueKey: key, Title: title})
+				}
+			}
+		}
 	}
-	if !budgetOK {
-		publishIntakeStage(sessionID, "spec", "degraded", "session_budget")
+
+	if provider == nil || !capOK || !budgetOK {
+		// Degraded: impacts still compute with heuristic categories
+		// (PAI-708) before the spec stage bails out.
+		runIntakeImpactsStage(ctx, s, impactQuery, nil)
+		switch {
+		case provider == nil:
+			publishIntakeStage(sessionID, "spec", "degraded", reason)
+		case !capOK:
+			publishIntakeStage(sessionID, "spec", "degraded", "daily_cap")
+		default:
+			publishIntakeStage(sessionID, "spec", "degraded", "session_budget")
+		}
 		return
 	}
 	priorSpec := ""
@@ -269,7 +289,9 @@ func runIntakePipeline(sessionID int64) {
 		publishIntakeStage(sessionID, "spec", "degraded", "options")
 		return
 	}
-	params, _ := json.Marshal(intakeSpecParams{PriorSpec: priorSpec, Language: s.Language})
+	params, _ := json.Marshal(intakeSpecParams{
+		PriorSpec: priorSpec, Language: s.Language, CandidateIssues: candidateIssues,
+	})
 
 	requestID := newAIRequestID()
 	ax := &aiActionContext{
@@ -358,6 +380,13 @@ func runIntakePipeline(sessionID int64) {
 		return
 	}
 	publishIntakeStage(sessionID, "spec", "ok", "")
+
+	// Impact analysis (PAI-708) with the LLM's relation categories.
+	specRelations := map[string]string{}
+	for _, rel := range spec.Relations {
+		specRelations[rel.IssueKey] = rel.Category
+	}
+	runIntakeImpactsStage(ctx, s, impactQuery, specRelations)
 }
 
 // appendIntakeGeneration stores the regenerated spec + ticket preview as

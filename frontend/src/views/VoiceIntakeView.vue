@@ -27,6 +27,7 @@ const {
   stage,
   projectMatch,
   pinProject,
+  impacts,
   createdIssue,
   createIssue,
   activeProjectId,
@@ -323,7 +324,48 @@ onBeforeUnmount(() => {
       <aside class="vi-side">
         <section class="vi-card">
           <header class="vi-card-head"><h2>Impact Analysis</h2></header>
-          <p class="vi-empty">Impacted and related issues appear here once project detection lands (PAI-706/708).</p>
+          <template v-if="impacts && (impacts.impacted.length || impacts.related.length || impacts.graph_hits.length)">
+            <div v-for="cat in ['touches', 'conflicts', 'extends']" :key="cat">
+              <template v-if="impacts.impacted.some((e) => e.category === cat)">
+                <p class="vi-impact-group">{{ cat }}</p>
+                <div class="vi-impact-rows">
+                  <RouterLink
+                    v-for="e in impacts.impacted.filter((x) => x.category === cat)"
+                    :key="e.issue_key"
+                    :to="`/issues/${e.issue_key}`"
+                    class="vi-impact-row"
+                    :title="`filed as '${e.mapped_relation}' on create · via ${e.via}`"
+                  >
+                    <span class="vi-impact-key" :class="`vi-impact--${cat}`">{{ e.issue_key }}</span>
+                    <span class="vi-impact-title">{{ e.title }}</span>
+                  </RouterLink>
+                </div>
+              </template>
+            </div>
+            <template v-if="impacts.related.length">
+              <p class="vi-impact-group">related context</p>
+              <div class="vi-impact-rows">
+                <RouterLink
+                  v-for="e in impacts.related.slice(0, 6)"
+                  :key="e.issue_key"
+                  :to="`/issues/${e.issue_key}`"
+                  class="vi-impact-row"
+                >
+                  <span class="vi-impact-key">{{ e.issue_key }}</span>
+                  <span class="vi-impact-title">{{ e.title }}</span>
+                </RouterLink>
+              </div>
+            </template>
+            <template v-if="impacts.graph_hits.length">
+              <p class="vi-impact-group">knowledge-graph hits</p>
+              <p v-for="(g, i) in impacts.graph_hits" :key="i" class="vi-impact-graphhit">
+                {{ g.entity_type }} · {{ g.title }}
+              </p>
+            </template>
+          </template>
+          <p v-else class="vi-empty">
+            Impacted and related issues appear here once a project is detected or pinned.
+          </p>
         </section>
         <section class="vi-card">
           <header class="vi-card-head"><h2>Understanding Check</h2></header>
@@ -587,6 +629,61 @@ onBeforeUnmount(() => {
 }
 .vi-stage--degraded {
   color: #b45309;
+}
+.vi-impact-group {
+  margin: 10px 0 4px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.vi-impact-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vi-impact-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12.5px;
+  text-decoration: none;
+  color: var(--text);
+  padding: 3px 4px;
+  border-radius: 6px;
+}
+.vi-impact-row:hover {
+  background: var(--bg);
+}
+.vi-impact-key {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.vi-impact--touches {
+  border-color: var(--brand-blue);
+  color: var(--brand-blue);
+}
+.vi-impact--conflicts {
+  border-color: #b45309;
+  color: #b45309;
+}
+.vi-impact--extends {
+  border-color: #15803d;
+  color: #15803d;
+}
+.vi-impact-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vi-impact-graphhit {
+  margin: 2px 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 .vi-preview-row {
   display: flex;
