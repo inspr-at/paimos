@@ -693,6 +693,7 @@ func mountAPI(r chi.Router) {
 		r.Get("/intake/sessions/{id}/state", handlers.GetIntakeState)
 		r.Post("/intake/sessions/{id}/restore", handlers.RestoreIntakeSession)
 		r.Post("/intake/sessions/{id}/refresh", handlers.RefreshIntakeSession)
+		r.With(auth.RequireProjectEdit, handlers.IdempotencyMiddleware).Post("/projects/{id}/intake-sessions/{sessionID}/issue", handlers.CreateIntakeIssue)
 		r.Get("/intake/sessions/{id}/stream", handlers.IntakeSessionStream)
 
 		// Issue relations (v2)
