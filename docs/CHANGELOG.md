@@ -5,6 +5,15 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.2.0] — 2026-08-04
+
+### Added — Continuous-listening speech input (PAI-710)
+
+- The Voice Intake workbench now listens for real: browser microphone capture with utterance segmentation (client-side silence gate), server-side transcription via ElevenLabs Scribe, and transcripts flowing through the identical pipeline as typed input. Speak, pause, watch the spec grow.
+- Admin-configurable under Settings → Integrations → AI → Voice input: encrypted API key, EU-residency-ready base URL (the Enterprise EU host uses its own hostname and key), model selection.
+- Privacy: audio is transcribed and dropped — never stored anywhere (INV-INTAKE-06). The typed input remains one click away and is the automatic fallback for missing mics, denied permissions, or an unconfigured provider.
+- PAI-710: continuous-listening speech input via ElevenLabs Scribe (#58)
+
 ## [5.1.0] — 2026-08-04
 
 ### Added — Voice Intake / Spec Workbench (PAI-703)
