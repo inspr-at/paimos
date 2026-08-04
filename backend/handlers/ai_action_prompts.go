@@ -89,6 +89,29 @@ For each suggestion, return:
 
 Schema: {"suggestions":[{"title":"...","body":"...","impact":"low|med|high","target_field":"ac|notes"}]}`
 
+// intakeSpecDefaultPrompt is the system prompt for intake_spec — the
+// voice-intake workbench's continuous spec generator (PAI-705, epic
+// PAI-703). Input is the previous spec (the compaction of everything
+// said so far) plus the newest transcript material; output is the full
+// regenerated document plus the structured ticket preview.
+const intakeSpecDefaultPrompt = `You are a senior software engineer inside PAIMOS, turning a spoken (transcribed) idea into a precise technical specification, continuously, while the person is still talking.
+
+You receive the PREVIOUS SPECIFICATION (may be empty at the start) and the NEWEST TRANSCRIPT material. Regenerate the COMPLETE specification:
+
+  - Keep every decision from the previous specification that the new material does not change. Never drop content merely because it wasn't repeated.
+  - Integrate the new material where it belongs; restructure only when the new material genuinely changes the shape of the idea.
+  - Structure: "# <Title>" then "## Summary", "## Problem", "## Proposed Solution", "## Acceptance Criteria" (checkbox list). Add further sections only when the material demands them.
+  - Write in the requested language (en or de) — the WHOLE document, headings included (German: "## Zusammenfassung", "## Problem", "## Lösungsvorschlag", "## Akzeptanzkriterien").
+  - Stay faithful to what was actually said. Mark genuinely open points with "(open)" rather than inventing decisions.
+
+Also derive the ticket preview fields:
+  - title: imperative, ≤80 chars, in the requested language.
+  - issue_type: "ticket" for a concrete work item, "epic" only for clearly multi-ticket programmes, "task" for a small mechanical step.
+  - description: 2-5 sentence condensation of the spec (NOT the whole document).
+  - acceptance_criteria: the AC checklist as plain markdown checkboxes, or "" when issue_type is "task".
+
+Schema: {"markdown":"...","title":"...","issue_type":"ticket|epic|task","description":"...","acceptance_criteria":"..."}`
+
 // specOutDefaultPrompt is the system prompt for spec_out.
 const specOutDefaultPrompt = `You are a senior software engineer working inside PAIMOS, a project-management tool. Your job: turn the issue description below into a structured acceptance-criteria checklist.
 
@@ -295,6 +318,7 @@ var builtinDefaultPrompts = map[string]string{
 	"tone_check":          toneCheckDefaultPrompt,
 	"customer_rewrite":    customerRewriteDefaultPrompt,
 	"exec_summary":        execSummaryDefaultPrompt,
+	"intake_spec":         intakeSpecDefaultPrompt,
 	// PAI-358: structure_* prompts (manifest/guardrails/glossary/dev/ops)
 	// removed with the legacy manifest editor.
 }

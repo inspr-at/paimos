@@ -291,6 +291,7 @@ func buildRouter() http.Handler {
 			r.Get("/intake/sessions/{id}/events", handlers.ListIntakeEvents)
 			r.Get("/intake/sessions/{id}/state", handlers.GetIntakeState)
 			r.Post("/intake/sessions/{id}/restore", handlers.RestoreIntakeSession)
+			r.Post("/intake/sessions/{id}/refresh", handlers.RefreshIntakeSession)
 			r.Get("/intake/sessions/{id}/stream", handlers.IntakeSessionStream)
 			r.Get("/undo/activity", handlers.ListMyMutationActivity)
 			r.Post("/undo/{id}", handlers.UndoMutation)

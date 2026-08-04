@@ -82,6 +82,8 @@ type intakeSession struct {
 	CreatedIssueID    *int64  `json:"created_issue_id"`
 	TranscriptBytes   int     `json:"transcript_bytes"`
 	Rev               int64   `json:"rev"`
+	SessionPromptTokens     int `json:"session_prompt_tokens"`
+	SessionCompletionTokens int `json:"session_completion_tokens"`
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
 	CompletedAt       *string `json:"completed_at"`
@@ -109,14 +111,16 @@ type intakeState struct {
 }
 
 const intakeSessionCols = `id, user_id, status, language, detected_project_id, detected_score,
-	pinned_project_id, created_issue_id, transcript_bytes, rev, created_at, updated_at, completed_at`
+	pinned_project_id, created_issue_id, transcript_bytes, rev,
+	session_prompt_tokens, session_completion_tokens, created_at, updated_at, completed_at`
 
 func scanIntakeSession(row interface{ Scan(...any) error }) (*intakeSession, error) {
 	var s intakeSession
 	var detected, pinned, created sql.NullInt64
 	var completed sql.NullString
 	err := row.Scan(&s.ID, &s.UserID, &s.Status, &s.Language, &detected, &s.DetectedScore,
-		&pinned, &created, &s.TranscriptBytes, &s.Rev, &s.CreatedAt, &s.UpdatedAt, &completed)
+		&pinned, &created, &s.TranscriptBytes, &s.Rev,
+		&s.SessionPromptTokens, &s.SessionCompletionTokens, &s.CreatedAt, &s.UpdatedAt, &completed)
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +398,25 @@ func IngestIntakeTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	publishIntakeEvent(ctx, s.ID, seq)
+	notifyIntakeOrchestrator(s.ID)
 	jsonOK(w, map[string]any{"seq": seq, "transcript_bytes": s.TranscriptBytes + len(sep) + len(text)})
+}
+
+// RefreshIntakeSession handles POST /api/intake/sessions/{id}/refresh —
+// force a regeneration cycle now (bypasses the quiet-period debounce
+// only in the sense that it counts as a fresh poke).
+func RefreshIntakeSession(w http.ResponseWriter, r *http.Request) {
+	s, _, ok := requireIntakeSession(w, r)
+	if !ok {
+		return
+	}
+	if s.Status != "active" {
+		jsonError(w, "intake session is not active", http.StatusConflict)
+		return
+	}
+	notifyIntakeOrchestrator(s.ID)
+	w.WriteHeader(http.StatusAccepted)
+	jsonOK(w, map[string]any{"ok": true})
 }
 
 // PatchIntakeSession handles PATCH /api/intake/sessions/{id}:
@@ -434,6 +456,7 @@ func PatchIntakeSession(w http.ResponseWriter, r *http.Request) {
 				`UPDATE intake_sessions SET language=? WHERE id=?`, lang, s.ID); handleDBError(w, err, "intake session") {
 				return
 			}
+			notifyIntakeOrchestrator(s.ID)
 		}
 	}
 
@@ -712,6 +735,7 @@ func RestoreIntakeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	publishIntakeEventsFrom(ctx, s.ID, firstSeq)
+	notifyIntakeOrchestrator(s.ID)
 	updated, err := loadIntakeSession(ctx, s.ID)
 	if handleDBError(w, err, "intake restore") {
 		return
