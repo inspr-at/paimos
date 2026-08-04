@@ -49,14 +49,28 @@ func init() {
 type intakeSpecParams struct {
 	PriorSpec string `json:"prior_spec"`
 	Language  string `json:"language"`
+	// PAI-708: top retrieval issue hits from the target project so the
+	// model can categorize relations against real issues.
+	CandidateIssues []intakeSpecCandidateIssue `json:"candidate_issues,omitempty"`
+}
+
+type intakeSpecCandidateIssue struct {
+	IssueKey string `json:"issue_key"`
+	Title    string `json:"title"`
+}
+
+type intakeSpecRelation struct {
+	IssueKey string `json:"issue_key"`
+	Category string `json:"category"` // touches | conflicts | extends | related
 }
 
 type intakeSpecBody struct {
-	Markdown           string `json:"markdown"`
-	Title              string `json:"title"`
-	IssueType          string `json:"issue_type"`
-	Description        string `json:"description"`
-	AcceptanceCriteria string `json:"acceptance_criteria"`
+	Markdown           string               `json:"markdown"`
+	Title              string               `json:"title"`
+	IssueType          string               `json:"issue_type"`
+	Description        string               `json:"description"`
+	AcceptanceCriteria string               `json:"acceptance_criteria"`
+	Relations          []intakeSpecRelation `json:"relations"`
 }
 
 func intakeSpecHandler(ax *aiActionContext) (any, string, int, int, string, error) {
@@ -85,6 +99,12 @@ func intakeSpecHandler(ax *aiActionContext) (any, string, int, int, string, erro
 	}
 	u.WriteString("\nNEWEST TRANSCRIPT MATERIAL:\n")
 	u.WriteString(ax.Text)
+	if len(params.CandidateIssues) > 0 {
+		u.WriteString("\n\nEXISTING ISSUES in the target project (categorize a relation ONLY when the idea genuinely touches, conflicts with, or extends one — omit the rest):\n")
+		for _, c := range params.CandidateIssues {
+			fmt.Fprintf(&u, "- %s: %s\n", c.IssueKey, c.Title)
+		}
+	}
 	u.WriteString("\n\nRegenerate the complete specification and the ticket preview. Return the JSON object.")
 
 	ctx, cancel := context.WithTimeout(ax.Ctx, 75*time.Second)
@@ -99,6 +119,23 @@ func intakeSpecHandler(ax *aiActionContext) (any, string, int, int, string, erro
 	default:
 		body.IssueType = "ticket"
 	}
+	// Relations must reference candidate issues only, with known categories.
+	allowed := map[string]bool{}
+	for _, c := range params.CandidateIssues {
+		allowed[c.IssueKey] = true
+	}
+	kept := body.Relations[:0]
+	for _, rel := range body.Relations {
+		switch rel.Category {
+		case "touches", "conflicts", "extends", "related":
+		default:
+			continue
+		}
+		if allowed[rel.IssueKey] {
+			kept = append(kept, rel)
+		}
+	}
+	body.Relations = kept
 	if len(body.Markdown) > intakeSpecMaxBytes {
 		body.Markdown = body.Markdown[:intakeSpecMaxBytes]
 	}

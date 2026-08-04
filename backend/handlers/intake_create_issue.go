@@ -160,6 +160,36 @@ func CreateIntakeIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	issueID, _ := res.LastInsertId()
+
+	// PAI-708: file the analysis categories as real relations
+	// (touches→related, extends→follows_from, conflicts→impacts). The
+	// "related" analysis bucket is decision context only — not filed.
+	filedRelations := [][2]int64{} // {targetID, ...} with type index below
+	filedTypes := []string{}
+	if raw, ok := state.Artifacts["impacts"]; ok {
+		var impacts struct {
+			Impacted []intakeImpactEntry `json:"impacted"`
+		}
+		if json.Unmarshal(raw, &impacts) == nil {
+			for _, e := range impacts.Impacted {
+				relType := intakeCategoryRelation[e.Category]
+				if relType == "" {
+					continue
+				}
+				targetID, ok := auth.ResolveIssueRef(e.IssueKey)
+				if !ok {
+					continue
+				}
+				if _, err := tx.ExecContext(r.Context(),
+					`INSERT OR IGNORE INTO issue_relations(source_id, target_id, type) VALUES(?,?,?)`,
+					issueID, targetID, relType); err == nil {
+					filedRelations = append(filedRelations, [2]int64{issueID, targetID})
+					filedTypes = append(filedTypes, relType)
+				}
+			}
+		}
+	}
+
 	// Session completion inside the same tx: filing and completing are one
 	// atomic step, so a crash can't leave a filed-but-active session.
 	if _, err := tx.ExecContext(r.Context(), `
@@ -182,6 +212,9 @@ func CreateIntakeIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	saveSnapshot(issue, user, r)
+	for i, pair := range filedRelations {
+		upsertIssueEntityRelation(pair[0], pair[1], filedTypes[i])
+	}
 
 	// Close the loop on the event log + stream.
 	payload, _ := json.Marshal(map[string]any{
