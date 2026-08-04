@@ -547,6 +547,9 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M129 | `agent_runs` provider/action fields, `auto_watch_subscriptions.actions_json` | Explicit implement-this provider/action metadata and runner capability payloads. |
 | M130 | `ai_calls.profile_id/effort/prompt_preset_ref/context_pack` | Safe AI execution-option provenance for action calls. |
 | M131 | `ai_settings.base_url`, `agent_runs` draft metadata/status | OpenRouter/local-model draft provider support, including `drafted` status and safe run provenance. |
+| M132 | `agent_runs.source_draft_run_id/followup_run_id`, `projects.ai_defaults_json/ai_policy_json` | Draft→follow-up handoff links and per-project AI defaults/policy metadata (PAI-665/PAI-666). |
+| M133 | `issue_key_aliases` | Former issue keys keep resolving after cross-project moves (PAI-690). |
+| M134 | `intake_sessions`, `intake_events` | Voice-intake workbench sessions: append-only per-session event log doubling as time-travel history and SSE replay source (PAI-704). |
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 

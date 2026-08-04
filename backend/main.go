@@ -678,6 +678,22 @@ func mountAPI(r chi.Router) {
 		r.Post("/redo/request/{requestID}", handlers.RedoMutationByRequestID)
 		r.With(auth.RequireIssueEdit).Post("/issues/{id}/complete-epic", handlers.CompleteEpic)
 
+		// PAI-704 (epic PAI-703): voice-intake workbench sessions. UI-internal
+		// surface, intentionally not in /api/openapi.json. Ownership is
+		// enforced inside the handlers (owner-or-admin, non-owner → 404,
+		// INV-INTAKE-01) because sessions are project-less until detection.
+		r.Post("/intake/sessions", handlers.CreateIntakeSession)
+		r.Get("/intake/sessions", handlers.ListIntakeSessions)
+		r.Get("/intake/sessions/{id}", handlers.GetIntakeSession)
+		r.Patch("/intake/sessions/{id}", handlers.PatchIntakeSession)
+		r.Delete("/intake/sessions/{id}", handlers.AbandonIntakeSession)
+		r.Post("/intake/sessions/{id}/transcript", handlers.IngestIntakeTranscript)
+		r.Post("/intake/sessions/{id}/checkpoints", handlers.CreateIntakeCheckpoint)
+		r.Get("/intake/sessions/{id}/events", handlers.ListIntakeEvents)
+		r.Get("/intake/sessions/{id}/state", handlers.GetIntakeState)
+		r.Post("/intake/sessions/{id}/restore", handlers.RestoreIntakeSession)
+		r.Get("/intake/sessions/{id}/stream", handlers.IntakeSessionStream)
+
 		// Issue relations (v2)
 		r.With(auth.RequireIssueAccess).Get("/issues/{id}/relations", handlers.ListIssueRelations)
 		r.With(auth.RequireIssueEdit, handlers.IdempotencyMiddleware).Post("/issues/{id}/relations", handlers.CreateIssueRelation)

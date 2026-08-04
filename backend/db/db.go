@@ -5478,6 +5478,52 @@ func migrate(db *sql.DB) error {
 			)`,
 			`CREATE INDEX IF NOT EXISTS idx_issue_key_aliases_issue ON issue_key_aliases(issue_id)`,
 		}},
+		// M134 / PAI-704: voice-intake workbench sessions. A session is private
+		// to its creator and project-less until detection/pin. intake_events is
+		// an append-only per-session log with a gapless seq: it is at once the
+		// time-travel history, the SSE replay source, and the scrub timeline.
+		// Artifact events (spec/summaries/ticket_preview/...) store full
+		// snapshots so scrubbing is O(1); restore appends, never rewrites.
+		// Bodies live only here — they must never reach mutation_log, audit
+		// lines, or ai_calls (INV-INTAKE-02).
+		{134, []string{
+			`CREATE TABLE IF NOT EXISTS intake_sessions (
+				id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+				user_id                   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				status                    TEXT NOT NULL DEFAULT 'active'
+				                            CHECK(status IN ('active','completed','abandoned')),
+				language                  TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','de')),
+				detected_project_id       INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+				detected_score            INTEGER NOT NULL DEFAULT 0,
+				pinned_project_id         INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+				created_issue_id          INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+				transcript                TEXT NOT NULL DEFAULT '',
+				transcript_bytes          INTEGER NOT NULL DEFAULT 0,
+				rev                       INTEGER NOT NULL DEFAULT 0,
+				session_prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+				session_completion_tokens INTEGER NOT NULL DEFAULT 0,
+				created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+				updated_at                TEXT NOT NULL DEFAULT (datetime('now')),
+				completed_at              TEXT
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_intake_sessions_user ON intake_sessions(user_id, status)`,
+			`CREATE INDEX IF NOT EXISTS idx_intake_sessions_updated ON intake_sessions(updated_at)`,
+			`CREATE TABLE IF NOT EXISTS intake_events (
+				id           INTEGER PRIMARY KEY AUTOINCREMENT,
+				session_id   INTEGER NOT NULL REFERENCES intake_sessions(id) ON DELETE CASCADE,
+				seq          INTEGER NOT NULL,
+				kind         TEXT NOT NULL CHECK(kind IN
+				               ('transcript_chunk','spec','summaries','ticket_preview',
+				                'project_match','impacts','checkpoint','restore',
+				                'language','status')),
+				source       TEXT NOT NULL DEFAULT 'ai' CHECK(source IN ('ai','user','system')),
+				label        TEXT NOT NULL DEFAULT '',
+				payload_json TEXT NOT NULL DEFAULT '',
+				created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_intake_events_seq ON intake_events(session_id, seq)`,
+			`CREATE INDEX IF NOT EXISTS idx_intake_events_kind ON intake_events(session_id, kind, seq DESC)`,
+		}},
 	}
 
 	for _, m := range migrations {

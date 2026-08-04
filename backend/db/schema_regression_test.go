@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const latestSchemaVersion = 133
+const latestSchemaVersion = 134
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -60,6 +60,20 @@ func TestSchemaMigrationsReachLatestVersion(t *testing.T) {
 	}
 	if maxVersion != latestSchemaVersion {
 		t.Fatalf("max schema version=%d want %d", maxVersion, latestSchemaVersion)
+	}
+}
+
+func TestSchemaIntakeTables(t *testing.T) {
+	db := openTestDB(t)
+	for _, col := range []string{"status", "language", "transcript", "rev", "pinned_project_id"} {
+		if !columnExists(t, db, "intake_sessions", col) {
+			t.Fatalf("expected intake_sessions.%s to exist (PAI-704 / M134)", col)
+		}
+	}
+	for _, col := range []string{"session_id", "seq", "kind", "source", "payload_json"} {
+		if !columnExists(t, db, "intake_events", col) {
+			t.Fatalf("expected intake_events.%s to exist (PAI-704 / M134)", col)
+		}
 	}
 }
 
