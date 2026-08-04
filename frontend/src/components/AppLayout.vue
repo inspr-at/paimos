@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+
+// PAI-704: the Voice Intake nav item is DEV-only until epic PAI-703 ships.
+const voiceIntakeEnabled = import.meta.env.DEV
 import { useAuthStore } from '@/stores/auth'
 import { useSearchStore } from '@/stores/search'
 import { useSidebarColors } from '@/composables/useSidebarColors'
@@ -224,6 +227,9 @@ onBeforeUnmount(() => {
           </RouterLink>
           <RouterLink to="/issues"   :class="['nav-item', { active: isActive('/issues') }]"   :title="isExpanded ? '' : 'Issues'">
             <AppIcon name="layout-list" /><span class="sl">Issues</span>
+          </RouterLink>
+          <RouterLink v-if="voiceIntakeEnabled" to="/intake" :class="['nav-item', { active: isActive('/intake') }]" :title="isExpanded ? '' : 'Voice Intake'">
+            <AppIcon name="mic" /><span class="sl">Voice Intake</span>
           </RouterLink>
           <RouterLink v-if="sidebarSprints.length" to="/sprint-board" :class="['nav-item', { active: isActive('/sprint-board') }]" :title="isExpanded ? '' : 'Sprint Board'">
             <AppIcon name="layout-grid" /><span class="sl">Sprint Board</span>

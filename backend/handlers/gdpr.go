@@ -75,6 +75,8 @@ type retentionPolicy struct {
 	AICalls         int `json:"ai_calls_days"`
 	MutationLog     int `json:"mutation_log_days"`
 	TOTPPending     int `json:"totp_pending_minutes"`
+	IntakeSessions  int `json:"intake_sessions_days"`
+	IntakeIdle      int `json:"intake_idle_days"`
 }
 
 func currentPolicy() retentionPolicy {
@@ -87,6 +89,8 @@ func currentPolicy() retentionPolicy {
 		AICalls:         retentionDays("AI_CALLS", 365),
 		MutationLog:     retentionDays("MUTATION_LOG", 90),
 		TOTPPending:     retentionDays("TOTP_PENDING_MIN", 60), // minutes, not days
+		IntakeSessions:  retentionDays("INTAKE_SESSIONS", 30),
+		IntakeIdle:      retentionDays("INTAKE_IDLE", 7),
 	}
 }
 
@@ -138,6 +142,17 @@ func runRetentionSweep() {
 	sweepOlderThan("mutation_log",
 		"DELETE FROM mutation_log WHERE created_at < datetime('now', ?)",
 		p.MutationLog)
+	// Voice-intake sessions (PAI-704): stale active sessions become
+	// abandoned first, then finished sessions age out entirely
+	// (intake_events cascade on delete).
+	sweepOlderThan("intake_sessions_idle",
+		"UPDATE intake_sessions SET status='abandoned', updated_at=datetime('now') "+
+			"WHERE status='active' AND updated_at < datetime('now', ?)",
+		p.IntakeIdle)
+	sweepOlderThan("intake_sessions",
+		"DELETE FROM intake_sessions WHERE status IN ('completed','abandoned') "+
+			"AND updated_at < datetime('now', ?)",
+		p.IntakeSessions)
 	// TOTP pending is measured in minutes — already gated by expires_at;
 	// this just trims rows that the verify path never got around to.
 	if _, err := db.DB.Exec(
