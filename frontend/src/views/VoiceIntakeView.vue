@@ -20,6 +20,9 @@ const {
   connection,
   transcript,
   spec,
+  specSeq,
+  ticketPreview,
+  stage,
   checkpoints,
   viewSeq,
   viewState,
@@ -28,6 +31,7 @@ const {
   start,
   sendTranscript,
   saveSpec,
+  setLanguage,
   saveCheckpoint,
   scrub,
   restore,
@@ -39,15 +43,52 @@ const talking = ref(false);
 const previewEnabled = ref(true);
 const specDraft = ref("");
 const draftDirty = ref(false);
+const draftBaseSeq = ref(0);
 const checkpointLabel = ref("");
 const showCheckpointInput = ref(false);
 const scrubPos = ref(0);
 
 // The editor mirrors the live spec until the user diverges; then the draft
-// wins until saved (full conflict banner arrives with the AI loop in PAI-705).
+// wins: incoming generations advance HEAD but never touch the textarea.
+// A banner offers "Apply latest" / the draft is saved on blur ("keep mine").
 watch(spec, (next) => {
   if (!draftDirty.value) specDraft.value = next?.markdown ?? "";
 });
+
+const pendingGeneration = computed(
+  () => draftDirty.value && specSeq.value > draftBaseSeq.value,
+);
+
+const stageLabel = computed(() => {
+  const st = stage.value;
+  if (!st) return "";
+  if (st.state === "running") return "Generating specification…";
+  if (st.state === "degraded") {
+    switch (st.reason) {
+      case "unconfigured":
+        return "AI assist is not configured — capture and manual editing still work.";
+      case "daily_cap":
+        return "Daily AI budget exhausted — spec frozen, capture still works.";
+      case "session_budget":
+        return "Session AI budget exhausted — spec frozen, capture still works.";
+      default:
+        return `AI degraded (${st.reason ?? "unknown"}) — capture still works.`;
+    }
+  }
+  if (st.state === "error") return `Generation failed (${st.reason ?? "error"}) — retrying on next input.`;
+  return "";
+});
+
+async function onToggleLanguage(lang: "en" | "de") {
+  if (!session.value || session.value.language === lang) return;
+  await setLanguage(lang);
+}
+
+function applyLatestGeneration() {
+  specDraft.value = spec.value?.markdown ?? "";
+  draftDirty.value = false;
+  draftBaseSeq.value = specSeq.value;
+}
 
 const displayedMarkdown = computed(() =>
   isViewingHistory.value ? (viewState.value?.spec?.markdown ?? "") : specDraft.value,
@@ -88,12 +129,14 @@ async function onChunk(text: string) {
 }
 
 function onSpecInput() {
+  if (!draftDirty.value) draftBaseSeq.value = specSeq.value;
   draftDirty.value = true;
 }
 
 async function onSaveSpec() {
   await saveSpec(specDraft.value);
   draftDirty.value = false;
+  draftBaseSeq.value = specSeq.value;
 }
 
 async function onSaveCheckpoint() {
@@ -165,6 +208,22 @@ onBeforeUnmount(() => {
         <header class="vi-card-head">
           <h2>Live Specification</h2>
           <div class="vi-spec-tools">
+            <div class="vi-tabs vi-lang" role="tablist" aria-label="Specification language">
+              <button
+                :class="{ active: (session?.language ?? 'en') === 'en' }"
+                :disabled="!session"
+                @click="onToggleLanguage('en')"
+              >
+                EN
+              </button>
+              <button
+                :class="{ active: session?.language === 'de' }"
+                :disabled="!session"
+                @click="onToggleLanguage('de')"
+              >
+                DE
+              </button>
+            </div>
             <div class="vi-tabs" role="tablist">
               <button
                 role="tab"
@@ -186,6 +245,12 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </header>
+        <p v-if="stageLabel" class="vi-stage" :class="`vi-stage--${stage?.state}`">{{ stageLabel }}</p>
+        <div v-if="pendingGeneration && !isViewingHistory" class="vi-history-banner">
+          A newer generated specification is available (rev {{ specSeq }}) —
+          <button class="vi-link" type="button" @click="applyLatestGeneration">apply latest</button>
+          or keep editing (your text is saved on blur and becomes the basis for the next generation).
+        </div>
         <div v-if="isViewingHistory" class="vi-history-banner">
           Viewing rev {{ viewSeq }} of {{ headRev }} —
           <button class="vi-link" type="button" @click="scrubPos = headRev">back to live</button>
@@ -223,7 +288,30 @@ onBeforeUnmount(() => {
         </section>
         <section class="vi-card">
           <header class="vi-card-head"><h2>Ticket Preview</h2></header>
-          <p class="vi-empty">The ticket that will be created is previewed here (PAI-707).</p>
+          <template v-if="ticketPreview">
+            <div class="vi-preview-row">
+              <span class="vi-preview-label">Title</span>
+              <strong>{{ ticketPreview.title }}</strong>
+            </div>
+            <div class="vi-preview-row">
+              <span class="vi-preview-label">Type</span>
+              <span class="vi-type-badge">{{ ticketPreview.issue_type }}</span>
+            </div>
+            <div class="vi-preview-row vi-preview-block">
+              <span class="vi-preview-label">Description</span>
+              <p class="vi-preview-text">{{ ticketPreview.description }}</p>
+            </div>
+            <div
+              v-if="ticketPreview.acceptance_criteria"
+              class="vi-preview-row vi-preview-block"
+            >
+              <span class="vi-preview-label">Acceptance criteria</span>
+              <p class="vi-preview-text vi-preview-mono">{{ ticketPreview.acceptance_criteria }}</p>
+            </div>
+          </template>
+          <p v-else class="vi-empty">
+            The ticket that will be created is previewed here once the first generation lands.
+          </p>
         </section>
         <section class="vi-card">
           <header class="vi-card-head"><h2>Transcript</h2></header>
@@ -418,6 +506,56 @@ onBeforeUnmount(() => {
 .vi-tabs button.active {
   background: var(--brand-blue);
   color: #fff;
+}
+.vi-stage {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.vi-stage--running {
+  color: var(--brand-blue);
+}
+.vi-stage--error {
+  color: #b91c1c;
+}
+.vi-stage--degraded {
+  color: #b45309;
+}
+.vi-preview-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.vi-preview-block {
+  flex-direction: column;
+  gap: 3px;
+}
+.vi-preview-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  min-width: 70px;
+}
+.vi-preview-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.vi-preview-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.vi-type-badge {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+.vi-lang {
+  margin-right: 8px;
 }
 .vi-history-banner {
   margin-bottom: 10px;

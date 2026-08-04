@@ -70,6 +70,14 @@ func init() {
 			SubKeys: []string{"release_note", "feature", "fix", "stability", "security_hardening"}},
 		{Key: "exec_summary", Label: "Generate as executive summary", Surface: "customer", Placement: "text", Handler: stubHandler},
 
+		// PAI-703 voice-intake workbench actions. Surface "intake" is a
+		// grouping label for the admin prompt UI; Placement "text" is
+		// semantically true (they operate on caller-supplied text with
+		// field="" and issue_id=0 — the documented escape hatch). The
+		// orchestrator calls the handlers directly; dispatcher-path calls
+		// with plain text work too and carry no session state.
+		{Key: "intake_spec", Label: "Intake: live specification", Surface: "intake", Placement: "text", Handler: stubHandler},
+
 		// PAI-358: structure_manifest / structure_guardrails /
 		// structure_glossary / structure_dev / structure_ops removed.
 		// They targeted the legacy manifest editor's tabbed JSON

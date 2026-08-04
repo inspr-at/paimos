@@ -56,11 +56,27 @@ export interface IntakeRevision {
   at: string;
 }
 
+export interface IntakeTicketPreview {
+  title: string;
+  issue_type: "ticket" | "epic" | "task";
+  description: string;
+  acceptance_criteria?: string;
+  language?: IntakeLanguage;
+}
+
+export interface IntakeStage {
+  stage: string;
+  state: "running" | "ok" | "degraded" | "error";
+  reason?: string;
+}
+
 const session = ref<IntakeSession | null>(null);
 const connection = ref<IntakeConnection>("disconnected");
 const transcript = ref("");
 const spec = ref<IntakeSpecPayload | null>(null);
 const specSeq = ref(0);
+const ticketPreview = ref<IntakeTicketPreview | null>(null);
+const stage = ref<IntakeStage | null>(null);
 const revIndex = ref<IntakeRevision[]>([]);
 const checkpoints = ref<IntakeCheckpoint[]>([]);
 const viewSeq = ref<number | null>(null); // null = live/HEAD
@@ -104,6 +120,11 @@ function applyPersistedEvent(ev: IntakeStreamEvent) {
       }
       break;
     }
+    case "ticket_preview": {
+      const payload = ev.payload as IntakeTicketPreview | undefined;
+      if (payload?.title !== undefined) ticketPreview.value = payload;
+      break;
+    }
     case "checkpoint": {
       if (ev.label) checkpoints.value.push({ seq, label: ev.label, created_at: ev.created_at });
       break;
@@ -128,6 +149,8 @@ async function hydrate(id: number) {
   const specArtifact = head.state.artifacts?.spec as IntakeSpecPayload | undefined;
   spec.value = specArtifact ?? null;
   specSeq.value = specArtifact ? head.state.at_seq : 0;
+  ticketPreview.value =
+    (head.state.artifacts?.ticket_preview as IntakeTicketPreview | undefined) ?? null;
   checkpoints.value = head.checkpoints ?? [];
   lastSeq = head.session.rev;
   // The metadata timeline is rebuilt lazily; SSE replay from 0 would
@@ -176,6 +199,16 @@ function connect(id: number) {
       applyPersistedEvent(ev);
     });
   }
+  es.addEventListener("stage", (event) => {
+    const msg = event as MessageEvent<string>;
+    try {
+      const ev = JSON.parse(msg.data) as IntakeStreamEvent;
+      const payload = ev.payload as IntakeStage | undefined;
+      if (payload?.stage) stage.value = payload;
+    } catch {
+      /* ignore */
+    }
+  });
   es.addEventListener("session", (event) => {
     const msg = event as MessageEvent<string>;
     try {
@@ -210,6 +243,8 @@ async function start(language?: IntakeLanguage) {
     transcript.value = "";
     spec.value = null;
     specSeq.value = 0;
+    ticketPreview.value = null;
+    stage.value = null;
     revIndex.value = [];
     checkpoints.value = [];
     viewSeq.value = null;
@@ -324,6 +359,8 @@ function reset() {
   transcript.value = "";
   spec.value = null;
   specSeq.value = 0;
+  ticketPreview.value = null;
+  stage.value = null;
   revIndex.value = [];
   checkpoints.value = [];
   viewSeq.value = null;
@@ -341,6 +378,8 @@ export function useIntakeSession() {
     transcript,
     spec,
     specSeq,
+    ticketPreview,
+    stage,
     revIndex,
     checkpoints,
     viewSeq,
