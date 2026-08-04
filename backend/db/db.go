@@ -5530,6 +5530,17 @@ func migrate(db *sql.DB) error {
 		{135, []string{
 			`ALTER TABLE users ADD COLUMN intake_confidence_threshold INTEGER`,
 		}},
+		// M136 / PAI-710: speech-to-text provider settings for the voice
+		// intake workbench, on the M74 singleton row. Key is secretvault-
+		// encrypted (domain ai:elevenlabs); voice_base_url exists for the
+		// ElevenLabs Enterprise EU residency host, which uses a DIFFERENT
+		// hostname AND key than api.elevenlabs.io (START research finding).
+		{136, []string{
+			`ALTER TABLE ai_settings ADD COLUMN voice_provider TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE ai_settings ADD COLUMN voice_api_key_encrypted BLOB`,
+			`ALTER TABLE ai_settings ADD COLUMN voice_base_url TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE ai_settings ADD COLUMN voice_stt_model TEXT NOT NULL DEFAULT ''`,
+		}},
 	}
 
 	for _, m := range migrations {

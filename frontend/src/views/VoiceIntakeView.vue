@@ -18,6 +18,8 @@ import { LS_INTAKE_ELI_LEVEL } from "@/constants/storage";
 import TranscriptInput from "@/components/intake/TranscriptInput.vue";
 import { useIntakeSession } from "@/composables/useIntakeSession";
 import { useMarkdown } from "@/composables/useMarkdown";
+import { useMicTranscript } from "@/composables/useMicTranscript";
+import { postIntakeAudio, voiceAvailable } from "@/api/intake";
 import { lineDiff } from "@/components/ai/lineDiff";
 
 const {
@@ -119,6 +121,11 @@ const { html: previewHtml } = useMarkdown(mdSource, previewOn);
 
 const headRev = computed(() => session.value?.rev ?? 0);
 const connectionLabel = computed(() => {
+  if (talking.value && !textMode.value) {
+    if (mic.state.value === "transcribing") return "Transcribing…";
+    if (mic.state.value === "listening") return "Listening";
+    if (mic.state.value === "starting") return "Mic starting…";
+  }
   switch (connection.value) {
     case "open":
       return talking.value ? "Listening" : "Connected";
@@ -131,13 +138,46 @@ const connectionLabel = computed(() => {
   }
 });
 
+// PAI-710: continuous-listening microphone (ElevenLabs STT server-side).
+// Preference order: mic when the instance has voice configured AND the
+// browser supports capture; the typed input is always one click away and
+// is the automatic fallback on any mic failure.
+const mic = useMicTranscript();
+const voiceReady = ref(false);
+const textMode = ref(false);
+void voiceAvailable().then((ok) => {
+  voiceReady.value = ok;
+  if (!ok || !mic.micSupported()) textMode.value = true;
+});
+const micActive = mic.isActive;
+const micLevel = mic.level;
+
 async function onStartTalking() {
   if (!session.value) await start();
   talking.value = true;
+  if (!textMode.value && voiceReady.value && mic.micSupported()) {
+    const ok = await mic.start(async (blob) => {
+      const s = session.value;
+      if (!s) return;
+      try {
+        await postIntakeAudio(s.id, blob);
+      } catch (e) {
+        error.value = e instanceof Error ? e.message : "voice transcription failed";
+      }
+    });
+    if (!ok) textMode.value = true; // permission denied → typed input
+  }
 }
 
 function onStopTalking() {
   talking.value = false;
+  mic.stop();
+}
+
+function onToggleTextMode() {
+  textMode.value = !textMode.value;
+  if (textMode.value) mic.stop();
+  else if (talking.value) void onStartTalking();
 }
 
 async function onChunk(text: string) {
@@ -264,10 +304,19 @@ onBeforeUnmount(() => {
         >
           ● Start Talking
         </button>
-        <button v-else class="vi-talk-btn vi-talk-stop" type="button" @click="onStopTalking">
+        <button
+          v-else
+          class="vi-talk-btn vi-talk-stop"
+          type="button"
+          :style="micActive ? { boxShadow: `0 0 0 ${4 + micLevel * 14}px rgba(185,28,28,0.18)` } : undefined"
+          @click="onStopTalking"
+        >
           ■ Stop Talking
         </button>
         <span class="vi-conn" :class="`vi-conn--${connection}`">{{ connectionLabel }}</span>
+        <button v-if="voiceReady" class="vi-link vi-mode-toggle" type="button" @click="onToggleTextMode">
+          {{ textMode ? "🎤 use microphone" : "⌨ type instead" }}
+        </button>
       </div>
     </header>
 
@@ -357,8 +406,14 @@ onBeforeUnmount(() => {
           Unsaved edits — <button class="vi-link" type="button" @click="onSaveSpec">save</button>
         </div>
         <footer class="vi-spec-foot">
-          <TranscriptInput v-if="talking" :disabled="isViewingHistory" @chunk="onChunk" />
-          <p v-else class="vi-hint">Start talking (dev mode: typed input) to build the spec.</p>
+          <p v-if="mic.errorMessage.value" class="vi-hint vi-mic-error">{{ mic.errorMessage.value }}</p>
+          <TranscriptInput v-if="talking && (textMode || !voiceReady)" :disabled="isViewingHistory" @chunk="onChunk" />
+          <p v-else-if="talking" class="vi-hint">
+            🎤 Speak naturally — each pause sends an utterance for transcription.
+          </p>
+          <p v-else class="vi-hint">
+            {{ voiceReady ? "Start talking to build the spec — the mic listens continuously." : "Start talking (typed input) to build the spec." }}
+          </p>
         </footer>
       </section>
 
@@ -609,6 +664,13 @@ onBeforeUnmount(() => {
 .vi-conn {
   font-size: 12px;
   color: var(--text-muted);
+}
+.vi-mode-toggle {
+  font-size: 12px;
+}
+.vi-mic-error {
+  color: #b45309;
+  margin-bottom: 8px;
 }
 .vi-conn--open {
   color: #15803d;

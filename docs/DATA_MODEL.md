@@ -551,6 +551,7 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M133 | `issue_key_aliases` | Former issue keys keep resolving after cross-project moves (PAI-690). |
 | M134 | `intake_sessions`, `intake_events` | Voice-intake workbench sessions: append-only per-session event log doubling as time-travel history and SSE replay source (PAI-704). |
 | M135 | `users.intake_confidence_threshold` | Per-user override for the voice-intake auto-switch confidence threshold; NULL = instance default (PAI-706). |
+| M136 | `ai_settings.voice_*` | Speech-to-text provider settings (ElevenLabs) for voice intake: provider, encrypted key, base URL (EU residency host support), model (PAI-710). |
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 

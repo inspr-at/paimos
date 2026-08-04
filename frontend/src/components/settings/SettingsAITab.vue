@@ -170,6 +170,60 @@ const form = reactive<AISettings>({
 const hasStoredKey = ref(false)
 const replacingKey = ref(false)
 
+// PAI-710: voice input (ElevenLabs STT) settings — separate endpoint,
+// same key discipline as the OpenRouter card.
+const voiceEnabled = ref(false)
+const voiceHasKey = ref(false)
+const voiceReplacingKey = ref(false)
+const voiceForm = reactive({ api_key: '', base_url: '', stt_model: 'scribe_v1' })
+
+async function loadVoice() {
+  try {
+    const s = await api.get<{ provider: string; has_api_key: boolean; base_url: string; stt_model: string }>(
+      '/ai/voice-settings',
+    )
+    voiceEnabled.value = s.provider === 'elevenlabs'
+    voiceHasKey.value = s.has_api_key
+    voiceForm.base_url = s.base_url === 'https://api.elevenlabs.io' ? '' : s.base_url
+    voiceForm.stt_model = s.stt_model
+  } catch {
+    /* non-admin or load failure — card simply stays in default state */
+  }
+}
+
+async function saveVoice() {
+  // api_key omitted = keep the stored key.
+  await api.put('/ai/voice-settings', {
+    provider: voiceEnabled.value ? 'elevenlabs' : '',
+    base_url: voiceForm.base_url,
+    stt_model: voiceForm.stt_model,
+  })
+  await loadVoice()
+}
+
+async function saveVoiceKey() {
+  if (!voiceForm.api_key.trim()) return
+  await api.put('/ai/voice-settings', {
+    provider: 'elevenlabs',
+    api_key: voiceForm.api_key,
+    base_url: voiceForm.base_url,
+    stt_model: voiceForm.stt_model,
+  })
+  voiceForm.api_key = ''
+  voiceReplacingKey.value = false
+  await loadVoice()
+}
+
+async function clearVoiceKey() {
+  await api.put('/ai/voice-settings', {
+    provider: voiceEnabled.value ? 'elevenlabs' : '',
+    api_key: '',
+    base_url: voiceForm.base_url,
+    stt_model: voiceForm.stt_model,
+  })
+  await loadVoice()
+}
+
 const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
@@ -275,6 +329,7 @@ onMounted(() => {
   load()
   loadModels()
   loadUsage()
+  loadVoice()
 })
 
 function startReplace() {
@@ -638,6 +693,60 @@ function relTime(iso: string): string {
           Stored unencrypted in the PAIMOS database — keep the data
           volume on encrypted storage if your threat model needs that.
         </p>
+      </section>
+
+      <!-- ── 4b. VOICE INPUT (PAI-710) ───────────────────────────── -->
+      <section class="ai-card">
+        <header class="ai-card-headrow">
+          <span class="ai-card-headicon"><AppIcon name="mic" :size="15" /></span>
+          <h3 class="ai-card-title">Voice input (ElevenLabs speech-to-text)</h3>
+        </header>
+        <label class="ai-field-label">
+          <input v-model="voiceEnabled" type="checkbox" @change="saveVoice" />
+          Enable speech input in the Voice Intake workbench
+        </label>
+        <template v-if="voiceEnabled">
+          <div v-if="!voiceReplacingKey && voiceHasKey" class="ai-key-set">
+            <span class="ai-key-dots" aria-hidden="true">●●●●●●●●●●</span>
+            <span class="ai-key-state">Key configured</span>
+            <div class="ai-key-actions">
+              <button type="button" class="btn btn-ghost btn-sm" @click="voiceReplacingKey = true">
+                <AppIcon name="key-round" :size="12" /> Replace
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm ai-key-clear" @click="clearVoiceKey">
+                Clear
+              </button>
+            </div>
+          </div>
+          <div v-else class="ai-key-input-row">
+            <input
+              v-model="voiceForm.api_key"
+              type="password"
+              autocomplete="new-password"
+              placeholder="xi-…"
+              class="ai-input"
+              @change="saveVoiceKey"
+            />
+            <button
+              v-if="voiceHasKey"
+              type="button"
+              class="btn btn-ghost btn-sm"
+              @click="voiceReplacingKey = false"
+            >Cancel</button>
+          </div>
+          <input
+            v-model="voiceForm.base_url"
+            class="ai-input"
+            placeholder="https://api.elevenlabs.io"
+            @change="saveVoice"
+          />
+          <p class="ai-help">
+            Key is encrypted at rest and never sent to the browser; audio is
+            transcribed and dropped, never stored. EU data residency
+            (Enterprise) uses <code>https://api.eu.residency.elevenlabs.io</code>
+            — note it needs its own key; a standard key will not work there.
+          </p>
+        </template>
       </section>
 
       <!-- ── 5. MODEL ────────────────────────────────────────────── -->

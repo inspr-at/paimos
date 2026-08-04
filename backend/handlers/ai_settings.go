@@ -273,5 +273,12 @@ func AIStatus(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]bool{"available": false})
 		return
 	}
-	jsonOK(w, map[string]bool{"available": s.AvailableForOptimize()})
+	voiceAvailable := false
+	if vs, verr := LoadVoiceSettings(); verr == nil {
+		voiceAvailable = vs.Available()
+	}
+	jsonOK(w, map[string]bool{
+		"available":       s.AvailableForOptimize(),
+		"voice_available": voiceAvailable, // PAI-710: speech input for the intake workbench
+	})
 }
