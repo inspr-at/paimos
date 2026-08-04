@@ -11,6 +11,7 @@
 // scaffolded here so the layout already matches the approved mockup.
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 
+import ProjectConfidenceChip from "@/components/intake/ProjectConfidenceChip.vue";
 import TranscriptInput from "@/components/intake/TranscriptInput.vue";
 import { useIntakeSession } from "@/composables/useIntakeSession";
 import { useMarkdown } from "@/composables/useMarkdown";
@@ -23,6 +24,8 @@ const {
   specSeq,
   ticketPreview,
   stage,
+  projectMatch,
+  pinProject,
   checkpoints,
   viewSeq,
   viewState,
@@ -182,9 +185,12 @@ onBeforeUnmount(() => {
         <span class="vi-crumb-sep">/</span>
         <strong>Spec Workbench</strong>
       </div>
-      <div class="vi-project-chip" title="Project detection arrives with PAI-706">
-        <span class="vi-chip-label">{{ session ? "No project detected yet" : "No session" }}</span>
-      </div>
+      <ProjectConfidenceChip
+        :session="session"
+        :match="projectMatch"
+        @pin="(id: number) => pinProject(id)"
+        @unpin="pinProject(0)"
+      />
       <div class="vi-talk">
         <button
           v-if="!talking"

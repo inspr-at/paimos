@@ -37,6 +37,8 @@ const profileForm = ref({
   show_alt_unit_detail: false,
   accruals_stats_enabled: false,
   search_scope_shortcut: '',
+  // PAI-706: 0 = use the instance default
+  intake_confidence_threshold: 0,
 })
 // PAI-371: autosave replaces the explicit "Save Profile" button. The
 // watcher debounces field changes (~600ms) and PATCHes the whole form.
@@ -106,6 +108,7 @@ function initProfileForm() {
     show_alt_unit_detail: auth.user.show_alt_unit_detail ?? false,
     accruals_stats_enabled: auth.user.accruals_stats_enabled ?? false,
     search_scope_shortcut: auth.user.search_scope_shortcut ?? '',
+    intake_confidence_threshold: auth.user.intake_confidence_threshold ?? 0,
   }
   void nextTick(() => { suppressAutoSave = false })
 }
@@ -635,6 +638,15 @@ init()
           <input
             v-model.number="profileForm.recent_timers_limit"
             type="number" min="0" max="20" step="1"
+            style="width: 72px;"
+          />
+        </div>
+
+        <div class="field">
+          <label>Voice-intake auto-switch confidence <span class="label-hint">— minimum project-match % before the Voice Intake workbench switches projects automatically (50–100; 0 = instance default)</span></label>
+          <input
+            v-model.number="profileForm.intake_confidence_threshold"
+            type="number" min="0" max="100" step="1"
             style="width: 72px;"
           />
         </div>

@@ -112,6 +112,23 @@ Also derive the ticket preview fields:
 
 Schema: {"markdown":"...","title":"...","issue_type":"ticket|epic|task","description":"...","acceptance_criteria":"..."}`
 
+// intakeProjectMatchDefaultPrompt is the system prompt for
+// intake_project_match (PAI-706) — LLM re-rank of the deterministic
+// candidate list. The candidate set is fixed by the caller; the model
+// must never invent projects outside it.
+const intakeProjectMatchDefaultPrompt = `You are matching a spoken (transcribed) idea to the project it belongs to, inside PAIMOS.
+
+You receive a fixed list of candidate projects (id, key, name, deterministic lexical score) and the transcript. Score EVERY candidate 0-100 for how strongly the idea belongs to that project:
+
+  - 90-100: the transcript explicitly names the project or its unmistakable domain.
+  - 70-89: strong topical fit; the idea clearly extends this project's known scope.
+  - 40-69: plausible fit among others; wording is generic.
+  - 0-39: weak or no fit.
+
+Never score a project that is not in the candidate list. Give a one-sentence rationale per candidate, grounded in the transcript's actual words.
+
+Schema: {"candidates":[{"project_id":123,"score":87,"rationale":"..."}]}`
+
 // specOutDefaultPrompt is the system prompt for spec_out.
 const specOutDefaultPrompt = `You are a senior software engineer working inside PAIMOS, a project-management tool. Your job: turn the issue description below into a structured acceptance-criteria checklist.
 
@@ -318,7 +335,8 @@ var builtinDefaultPrompts = map[string]string{
 	"tone_check":          toneCheckDefaultPrompt,
 	"customer_rewrite":    customerRewriteDefaultPrompt,
 	"exec_summary":        execSummaryDefaultPrompt,
-	"intake_spec":         intakeSpecDefaultPrompt,
+	"intake_spec":          intakeSpecDefaultPrompt,
+	"intake_project_match": intakeProjectMatchDefaultPrompt,
 	// PAI-358: structure_* prompts (manifest/guardrails/glossary/dev/ops)
 	// removed with the legacy manifest editor.
 }

@@ -53,6 +53,8 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		AccrualsStatsEnabled    *bool   `json:"accruals_stats_enabled"`
 		AccrualsExtraStatuses   *string `json:"accruals_extra_statuses"`
 		SearchScopeShortcut     *string `json:"search_scope_shortcut"`
+		// PAI-706: nullable override; 0 clears back to the instance default.
+		IntakeConfidenceThreshold *int `json:"intake_confidence_threshold"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid body", http.StatusBadRequest)
@@ -76,6 +78,22 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	if body.IssueAutoRefreshSeconds != nil && *body.IssueAutoRefreshSeconds < 10 {
 		v := 10
 		body.IssueAutoRefreshSeconds = &v
+	}
+	// PAI-706: 0 clears the override (falls back to the instance default);
+	// anything else must be inside 50..100.
+	if body.IntakeConfidenceThreshold != nil {
+		v := *body.IntakeConfidenceThreshold
+		if v != 0 && (v < 50 || v > 100) {
+			jsonError(w, "intake_confidence_threshold must be between 50 and 100 (or 0 to clear)", http.StatusBadRequest)
+			return
+		}
+		if v == 0 {
+			if _, err := db.DB.Exec(`UPDATE users SET intake_confidence_threshold=NULL WHERE id=?`, user.ID); err != nil {
+				jsonError(w, "update failed", http.StatusInternalServerError)
+				return
+			}
+			body.IntakeConfidenceThreshold = nil
+		}
 	}
 	// Convert *bool to *int for SQLite COALESCE (SQLite has no native bool)
 	var mdDefault, monoFields, altTable, altDetail, issueAutoRefreshEnabled, accrualsEnabled *int
@@ -122,9 +140,10 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request) {
 			issue_auto_refresh_interval_seconds = COALESCE(?, issue_auto_refresh_interval_seconds),
 			accruals_stats_enabled  = COALESCE(?, accruals_stats_enabled),
 			accruals_extra_statuses = COALESCE(?, accruals_extra_statuses),
-			search_scope_shortcut   = COALESCE(?, search_scope_shortcut)
+			search_scope_shortcut   = COALESCE(?, search_scope_shortcut),
+			intake_confidence_threshold = COALESCE(?, intake_confidence_threshold)
 		WHERE id = ?
-	`, body.FirstName, body.LastName, body.Email, mdDefault, monoFields, body.RecentProjectsLimit, body.RecentTimersLimit, body.Timezone, altTable, altDetail, body.Locale, body.PreviewHoverDelay, issueAutoRefreshEnabled, body.IssueAutoRefreshSeconds, accrualsEnabled, body.AccrualsExtraStatuses, body.SearchScopeShortcut, user.ID)
+	`, body.FirstName, body.LastName, body.Email, mdDefault, monoFields, body.RecentProjectsLimit, body.RecentTimersLimit, body.Timezone, altTable, altDetail, body.Locale, body.PreviewHoverDelay, issueAutoRefreshEnabled, body.IssueAutoRefreshSeconds, accrualsEnabled, body.AccrualsExtraStatuses, body.SearchScopeShortcut, body.IntakeConfidenceThreshold, user.ID)
 	if err != nil {
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return

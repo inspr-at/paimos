@@ -751,6 +751,8 @@ export interface User {
   issue_auto_refresh_interval_seconds: number
   // PAI-368 / M103: search-scope shortcut (JSON blob; '' = disabled).
   search_scope_shortcut: string
+  // PAI-706 / M135: voice-intake auto-switch threshold override (null = instance default)
+  intake_confidence_threshold?: number | null
   last_login_at: string | null
   created_at: string
   totp_enabled: boolean

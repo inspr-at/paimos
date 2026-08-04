@@ -60,6 +60,8 @@ export interface User {
   // PAI-368 / M103: search-scope shortcut (JSON or '' = disabled).
   // See useSearchScopeShortcut for parse + matcher.
   search_scope_shortcut: string
+  // PAI-706 / M135: voice-intake auto-switch threshold override (null = instance default)
+  intake_confidence_threshold?: number | null
   // Last login timestamp (migration 54)
   last_login_at: string | null
   // Accruals report preferences (migration 62) — admin-only feature

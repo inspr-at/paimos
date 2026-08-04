@@ -70,6 +70,22 @@ export interface IntakeStage {
   reason?: string;
 }
 
+export interface IntakeMatchCandidate {
+  project_id: number;
+  key: string;
+  name: string;
+  score: number;
+  confidence: "high" | "med" | "low";
+  rationale?: string;
+}
+
+export interface IntakeProjectMatch {
+  matches: IntakeMatchCandidate[];
+  threshold: number;
+  detected_project_id: number | null;
+  detected_score: number;
+}
+
 const session = ref<IntakeSession | null>(null);
 const connection = ref<IntakeConnection>("disconnected");
 const transcript = ref("");
@@ -77,6 +93,7 @@ const spec = ref<IntakeSpecPayload | null>(null);
 const specSeq = ref(0);
 const ticketPreview = ref<IntakeTicketPreview | null>(null);
 const stage = ref<IntakeStage | null>(null);
+const projectMatch = ref<IntakeProjectMatch | null>(null);
 const revIndex = ref<IntakeRevision[]>([]);
 const checkpoints = ref<IntakeCheckpoint[]>([]);
 const viewSeq = ref<number | null>(null); // null = live/HEAD
@@ -125,6 +142,17 @@ function applyPersistedEvent(ev: IntakeStreamEvent) {
       if (payload?.title !== undefined) ticketPreview.value = payload;
       break;
     }
+    case "project_match": {
+      const payload = ev.payload as IntakeProjectMatch | undefined;
+      if (payload?.matches !== undefined) {
+        projectMatch.value = payload;
+        if (session.value) {
+          session.value.detected_project_id = payload.detected_project_id;
+          session.value.detected_score = payload.detected_score;
+        }
+      }
+      break;
+    }
     case "checkpoint": {
       if (ev.label) checkpoints.value.push({ seq, label: ev.label, created_at: ev.created_at });
       break;
@@ -151,6 +179,8 @@ async function hydrate(id: number) {
   specSeq.value = specArtifact ? head.state.at_seq : 0;
   ticketPreview.value =
     (head.state.artifacts?.ticket_preview as IntakeTicketPreview | undefined) ?? null;
+  projectMatch.value =
+    (head.state.artifacts?.project_match as IntakeProjectMatch | undefined) ?? null;
   checkpoints.value = head.checkpoints ?? [];
   lastSeq = head.session.rev;
   // The metadata timeline is rebuilt lazily; SSE replay from 0 would
@@ -245,6 +275,7 @@ async function start(language?: IntakeLanguage) {
     specSeq.value = 0;
     ticketPreview.value = null;
     stage.value = null;
+    projectMatch.value = null;
     revIndex.value = [];
     checkpoints.value = [];
     viewSeq.value = null;
@@ -293,6 +324,14 @@ async function setLanguage(language: IntakeLanguage) {
   const s = session.value;
   if (!s || s.language === language) return;
   await patchIntakeSession(s.id, { language });
+}
+
+/** Pin the session to a project (manual override); 0 releases the pin. */
+async function pinProject(projectId: number) {
+  const s = session.value;
+  if (!s) return;
+  const updated = await patchIntakeSession(s.id, { pinned_project_id: projectId });
+  session.value = updated;
 }
 
 async function saveCheckpoint(label: string) {
@@ -361,6 +400,7 @@ function reset() {
   specSeq.value = 0;
   ticketPreview.value = null;
   stage.value = null;
+  projectMatch.value = null;
   revIndex.value = [];
   checkpoints.value = [];
   viewSeq.value = null;
@@ -380,6 +420,8 @@ export function useIntakeSession() {
     specSeq,
     ticketPreview,
     stage,
+    projectMatch,
+    pinProject,
     revIndex,
     checkpoints,
     viewSeq,

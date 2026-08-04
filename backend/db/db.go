@@ -5524,6 +5524,12 @@ func migrate(db *sql.DB) error {
 			`CREATE UNIQUE INDEX IF NOT EXISTS idx_intake_events_seq ON intake_events(session_id, seq)`,
 			`CREATE INDEX IF NOT EXISTS idx_intake_events_kind ON intake_events(session_id, kind, seq DESC)`,
 		}},
+		// M135 / PAI-706: per-user override for the voice-intake project
+		// auto-switch confidence threshold. NULL = use the instance default
+		// (app_settings key intake_confidence_threshold, default 90).
+		{135, []string{
+			`ALTER TABLE users ADD COLUMN intake_confidence_threshold INTEGER`,
+		}},
 	}
 
 	for _, m := range migrations {

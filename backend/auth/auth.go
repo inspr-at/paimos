@@ -300,8 +300,9 @@ func userScanDests(u *models.User) []any {
 		&u.RecentTimersLimit, &u.Timezone, &u.PreviewHoverDelay,
 		&u.IssueAutoRefreshEnabled, &u.IssueAutoRefreshIntervalSeconds, &u.LastLoginAt,
 		&u.AccrualsStatsEnabled, &u.AccrualsExtraStatuses,
-		&u.IsSuperAdmin,        // PAI-335
-		&u.SearchScopeShortcut, // PAI-368 / M103
+		&u.IsSuperAdmin,               // PAI-335
+		&u.SearchScopeShortcut,        // PAI-368 / M103
+		&u.IntakeConfidenceThreshold,  // PAI-706 / M135
 	}
 }
 
@@ -316,7 +317,7 @@ const userRoleSelectExpr = `CASE
 	ELSE 'member'
 END`
 const userSuperAdminSelectExpr = `CASE WHEN ` + userRoleSelectExpr + ` = 'super_admin' OR u.is_super_admin = 1 THEN 1 ELSE 0 END`
-const userSelectCols = `u.id, u.username, ` + userRoleSelectExpr + `, u.status, u.created_at, u.nickname, u.first_name, u.last_name, u.email, u.avatar_path, u.markdown_default, u.monospace_fields, u.recent_projects_limit, u.internal_rate_hourly, u.show_alt_unit_table, u.show_alt_unit_detail, u.locale, u.recent_timers_limit, u.timezone, u.preview_hover_delay, u.issue_auto_refresh_enabled, u.issue_auto_refresh_interval_seconds, u.last_login_at, u.accruals_stats_enabled, u.accruals_extra_statuses, ` + userSuperAdminSelectExpr + `, u.search_scope_shortcut`
+const userSelectCols = `u.id, u.username, ` + userRoleSelectExpr + `, u.status, u.created_at, u.nickname, u.first_name, u.last_name, u.email, u.avatar_path, u.markdown_default, u.monospace_fields, u.recent_projects_limit, u.internal_rate_hourly, u.show_alt_unit_table, u.show_alt_unit_detail, u.locale, u.recent_timers_limit, u.timezone, u.preview_hover_delay, u.issue_auto_refresh_enabled, u.issue_auto_refresh_interval_seconds, u.last_login_at, u.accruals_stats_enabled, u.accruals_extra_statuses, ` + userSuperAdminSelectExpr + `, u.search_scope_shortcut, u.intake_confidence_threshold`
 
 func userSelectColsFor(alias string) string {
 	return strings.ReplaceAll(userSelectCols, "u.", alias+".")
