@@ -321,8 +321,21 @@ func TestRegression_Hdr_001_BaselineHeaders(t *testing.T) {
 			t.Errorf("INV-HDR-001 violated: %s=%q, want %q", k, got, v)
 		}
 	}
-	if resp.Header.Get("Permissions-Policy") == "" {
+	pp := resp.Header.Get("Permissions-Policy")
+	if pp == "" {
 		t.Error("INV-HDR-001 violated: Permissions-Policy missing")
+	}
+	// PAI-717: microphone must be (self) — the Voice Intake workbench
+	// records speech same-origin. A blanket microphone=() overrides the
+	// browser's own site permission and suppresses the prompt entirely
+	// ("mic blocked, never asked"). Everything else stays disabled.
+	if !strings.Contains(pp, "microphone=(self)") {
+		t.Errorf("PAI-717 regression: Permissions-Policy must allow microphone=(self); got %q", pp)
+	}
+	for _, disabled := range []string{"geolocation=()", "camera=()", "payment=()", "usb=()"} {
+		if !strings.Contains(pp, disabled) {
+			t.Errorf("Permissions-Policy lost a disabled feature: want %s in %q", disabled, pp)
+		}
 	}
 }
 

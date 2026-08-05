@@ -58,8 +58,13 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "SAMEORIGIN")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// PAI-717: microphone=(self) — the Voice Intake workbench (PAI-710)
+		// records speech same-origin. A blanket microphone=() overrides the
+		// browser's own site permission AND suppresses the permission
+		// prompt entirely, which presents as "mic blocked, never asked"
+		// no matter what the user allows. Everything else stays disabled.
 		h.Set("Permissions-Policy",
-			"geolocation=(), microphone=(), camera=(), payment=(), usb=(), "+
+			"geolocation=(), microphone=(self), camera=(), payment=(), usb=(), "+
 				"interest-cohort=()")
 
 		if os.Getenv("COOKIE_SECURE") == "true" {
