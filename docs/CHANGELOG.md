@@ -5,6 +5,15 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.2] — 2026-08-05
+
+### Fixed — Continuous talking survives every interruption (PAI-719)
+
+- Returning to the workbench reconnects the live session stream — previously the mic kept posting but the spec silently stopped updating.
+- Listening can no longer die silently: the no-speech give-up is gone (silent stretches recycle the recorder), the stop-then-start zombie-recorder race is fixed, hidden tabs can't wedge an utterance open, and the talk button always tells the truth.
+- Leaving the page hard-stops the microphone; Start Talking on a completed session begins a fresh one; creating the issue releases the mic.
+- PAI-719: voice lifecycle — capture can no longer die silently, sessions survive every interruption (#61)
+
 ## [5.3.1] — 2026-08-05
 
 ### Fixed — Microphone could never prompt (PAI-717)
