@@ -5,6 +5,16 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.0] — 2026-08-05
+
+### Added — Voice Intake polish (PAI-715)
+
+- Permanent microphone-permission chip with live tracking (updates the moment the browser's site setting flips), one-click re-prompt while the browser still allows it, and honest guidance when the mic is blocked.
+- First project detection is threshold-free — with nothing selected, any signal beats no project — and your most recently visited project gets a head start for the opening rounds, so auto-selection lands fast. The confidence threshold still guards every later switch.
+- The right-column cards collapse to live one-line summaries (top impact chips with hover previews, ELI digest, ticket title, transcript tail); the scrubber and session actions stay pinned at the bottom; the transcript grows and follows at its newest line.
+- Start Talking calmed down: outline when idle, solid red with a soft breathing ring only while the microphone is live.
+- PAI-715: live mic-permission status + talk button restyle (#59)
+
 ## [5.2.0] — 2026-08-04
 
 ### Added — Continuous-listening speech input (PAI-710)
