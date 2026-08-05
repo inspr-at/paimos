@@ -16,6 +16,8 @@ import { LS_INTAKE_CARDS } from "@/constants/storage";
 const props = defineProps<{
   id: string;
   title: string;
+  /** PAI-721: lucide icon name rendered as a soft tile before the title. */
+  icon?: string;
 }>();
 
 function readState(): Record<string, boolean> {
@@ -39,6 +41,7 @@ watch(open, (v) => {
   <section class="vi-card ic-card" :class="{ 'ic-open': open }">
     <header class="ic-head" role="button" tabindex="0" @click="open = !open" @keydown.enter="open = !open">
       <AppIcon :name="open ? 'chevron-down' : 'chevron-right'" :size="14" class="ic-chev" />
+      <span v-if="icon" class="ic-tile"><AppIcon :name="icon" :size="14" /></span>
       <h2 class="ic-title">{{ title }}</h2>
       <div v-if="!open" class="ic-summary" @click.stop>
         <slot name="summary" />
@@ -68,6 +71,17 @@ watch(open, (v) => {
 .ic-chev {
   flex-shrink: 0;
   color: var(--text-muted);
+}
+.ic-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--brand-blue-pale, #eff6ff);
+  color: var(--brand-blue);
+  flex-shrink: 0;
 }
 .ic-title {
   margin: 0;
