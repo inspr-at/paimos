@@ -5,6 +5,19 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.4.0] — 2026-08-05
+
+### Added — The workbench speaks its understanding (PAI-714)
+
+- The selected ELI5/10/15 summary is read aloud (ElevenLabs) after each update — only when its text actually changed, and once when you switch levels. Muted by default; toggle on the Understanding Check card.
+- A microphone interlock suspends listening while the workbench talks and resumes after — it never transcribes its own voice; starting to talk cuts the playback.
+- Nothing is stored: speech returns as bytes and is dropped, with a metadata-only audit trail. Configurable TTS voice under Settings → Integrations → AI.
+
+### Changed
+
+- The per-session AI budget is now configurable (Settings → System, default 60,000 tokens) after a real dictation session exhausted the old 20k guard; the freeze message now says what to do.
+- PAI-714: speak the selected ELI summary aloud (ElevenLabs TTS) + configurable session AI budget (#63)
+
 ## [5.3.3] — 2026-08-05
 
 ### Changed — Voice Intake polish (PAI-721)
