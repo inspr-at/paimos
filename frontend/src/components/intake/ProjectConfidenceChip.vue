@@ -51,6 +51,10 @@ const state = computed(() => {
   if (!props.session) return "idle";
   if (pinned.value) return "pinned";
   if (!activeProject.value) return "searching";
+  // PAI-715: the FIRST selection is threshold-free — with no incumbent,
+  // any signal beats no project. The threshold only gates switching AWAY
+  // from something already selected.
+  if (props.match?.first_detection) return "auto";
   return (activeProject.value.score ?? 0) >= threshold.value ? "auto" : "suggested";
 });
 

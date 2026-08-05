@@ -106,3 +106,6 @@ export const lsSprintNavKey = (id: number | string) =>
 
 /** PAI-709: Voice Intake — persisted ELI tab level ("eli5" | "eli10" | "eli15"). */
 export const LS_INTAKE_ELI_LEVEL = 'paimos:intake:eli-level'
+
+/** PAI-715: Voice Intake — per-card expanded/collapsed state (JSON map id→open). */
+export const LS_INTAKE_CARDS = 'paimos:intake:cards'
