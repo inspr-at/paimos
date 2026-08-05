@@ -13,11 +13,13 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import AiSurfaceFeedback from "@/components/ai/AiSurfaceFeedback.vue";
+import AppIcon from "@/components/AppIcon.vue";
 import ProjectConfidenceChip from "@/components/intake/ProjectConfidenceChip.vue";
 import { LS_INTAKE_ELI_LEVEL } from "@/constants/storage";
 import TranscriptInput from "@/components/intake/TranscriptInput.vue";
 import { useIntakeSession } from "@/composables/useIntakeSession";
 import { useMarkdown } from "@/composables/useMarkdown";
+import { useMicPermission } from "@/composables/useMicPermission";
 import { useMicTranscript } from "@/composables/useMicTranscript";
 import { postIntakeAudio, voiceAvailable } from "@/api/intake";
 import { lineDiff } from "@/components/ai/lineDiff";
@@ -149,6 +151,49 @@ void voiceAvailable().then((ok) => {
   voiceReady.value = ok;
   if (!ok || !mic.micSupported()) textMode.value = true;
 });
+
+// PAI-715: permanent, live-updating mic-permission status. The chip is
+// always visible while voice is configured, so "can speech detection
+// work right now?" is answered at a glance.
+const micPerm = useMicPermission();
+void micPerm.init();
+const permHint = ref(false);
+const micPermMeta = computed(() => {
+  switch (micPerm.permission.value) {
+    case "granted":
+      return { cls: "vi-perm--ok", label: "Mic allowed", action: null as string | null };
+    case "prompt":
+      return { cls: "vi-perm--ask", label: "Mic not enabled", action: "Enable" };
+    case "denied":
+      return { cls: "vi-perm--denied", label: "Mic blocked", action: "Re-check" };
+    default:
+      return { cls: "vi-perm--unknown", label: "Mic status unknown", action: "Check" };
+  }
+});
+watch(micPerm.permission, (state) => {
+  if (state === "granted") permHint.value = false;
+});
+
+async function onPermAction() {
+  const state = micPerm.permission.value;
+  if (state === "prompt" || state === "unknown") {
+    const result = await micPerm.requestAccess();
+    permHint.value = result === "denied";
+    // Permission just granted mid-session: leave text mode if we only
+    // fell back because of a denial.
+    if (result === "granted" && mic.errorMessage.value) {
+      mic.errorMessage.value = null;
+      textMode.value = false;
+    }
+  } else {
+    const result = await micPerm.recheck();
+    permHint.value = result === "denied";
+    if (result === "granted") {
+      mic.errorMessage.value = null;
+      textMode.value = false;
+    }
+  }
+}
 const micActive = mic.isActive;
 const micLevel = mic.level;
 
@@ -314,12 +359,28 @@ onBeforeUnmount(() => {
           ■ Stop Talking
         </button>
         <span class="vi-conn" :class="`vi-conn--${connection}`">{{ connectionLabel }}</span>
+        <span v-if="voiceReady" class="vi-perm" :class="micPermMeta.cls" :title="micPermMeta.label">
+          <AppIcon :name="micPerm.permission.value === 'granted' ? 'mic' : 'mic-off'" :size="13" />
+          <button
+            v-if="micPermMeta.action"
+            class="vi-perm-action"
+            type="button"
+            @click="onPermAction"
+          >
+            {{ micPermMeta.action }}
+          </button>
+        </span>
         <button v-if="voiceReady" class="vi-link vi-mode-toggle" type="button" @click="onToggleTextMode">
           {{ textMode ? "🎤 use microphone" : "⌨ type instead" }}
         </button>
       </div>
     </header>
 
+    <p v-if="permHint" class="vi-error">
+      The browser has the microphone blocked for this site — it will not ask again by itself.
+      Allow the microphone in the browser's site settings (the icon left of the address bar),
+      then it re-enables here automatically.
+    </p>
     <p v-if="error" class="vi-error">{{ error }}</p>
     <!-- Shared AI feedback host for any useAiAction-backed control on this
          page; generation activity itself streams via the session SSE. -->
@@ -643,23 +704,78 @@ onBeforeUnmount(() => {
 .vi-talk-btn {
   padding: 10px 22px;
   border-radius: 999px;
-  border: none;
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
-  color: #fff;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
 }
+/* PAI-715: idle is quiet — outline only. Solid red is reserved for the
+   moments the microphone is actually live. */
 .vi-talk-start {
-  background: #b91c1c;
+  background: transparent;
+  border: 1.5px solid #b91c1c;
+  color: #b91c1c;
+}
+.vi-talk-start:hover {
+  background: rgba(185, 28, 28, 0.06);
 }
 .vi-talk-stop {
   background: #b91c1c;
-  animation: vi-pulse 1.6s ease-in-out infinite;
+  border: 1.5px solid #b91c1c;
+  color: #fff;
+  animation: vi-breathe 2.4s ease-in-out infinite;
 }
-@keyframes vi-pulse {
-  50% {
-    box-shadow: 0 0 0 6px rgba(185, 28, 28, 0.15);
+/* Soft professional breathing: a gentle ring + barely-there opacity swell,
+   slow enough to read as "live", never as an alarm. The level-reactive
+   inline ring (mic RMS) layers on top while speech is heard. */
+@keyframes vi-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(185, 28, 28, 0.22);
   }
+  50% {
+    box-shadow: 0 0 0 7px rgba(185, 28, 28, 0.08);
+  }
+}
+.vi-perm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+.vi-perm--ok {
+  color: #15803d;
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+.vi-perm--ask {
+  color: #a16207;
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+.vi-perm--denied {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.vi-perm--unknown {
+  color: var(--text-muted);
+}
+.vi-perm-action {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 .vi-conn {
   font-size: 12px;
