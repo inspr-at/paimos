@@ -320,6 +320,15 @@ watch(displayedTranscript, async () => {
   if (el) el.scrollTop = el.scrollHeight; // transcript grows at the bottom
 });
 
+// PAI-721: empty-state hero — the card teaches the interaction model
+// before any content exists, and clicking it starts talking.
+const showHero = computed(
+  () => !isViewingHistory.value && displayedMarkdown.value.trim() === "" && !draftDirty.value,
+);
+async function onHeroClick() {
+  if (!talking.value) await onStartTalking();
+}
+
 const showDiff = ref(false);
 // Flattened line diff of the scrubbed revision vs the live spec, capped so
 // a pathological diff can't lock the UI.
@@ -456,11 +465,6 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <p v-if="permHint" class="vi-error">
-      The browser has the microphone blocked for this site — it will not ask again by itself.
-      Allow the microphone in the browser's site settings (the icon left of the address bar),
-      then it re-enables here automatically.
-    </p>
     <p v-if="error" class="vi-error">{{ error }}</p>
     <!-- Shared AI feedback host for any useAiAction-backed control on this
          page; generation activity itself streams via the session SSE. -->
@@ -532,6 +536,43 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </div>
+        <div
+          v-else-if="showHero && previewOn"
+          class="vi-hero"
+          role="button"
+          tabindex="0"
+          @click="onHeroClick"
+          @keydown.enter="onHeroClick"
+        >
+          <div class="vi-hero-mark" :class="{ 'vi-hero-mark--live': talking }">
+            <svg viewBox="0 0 120 48" class="vi-hero-wave" aria-hidden="true">
+              <path
+                d="M4 24 q6 -14 12 0 t12 0 q4 -22 8 0 t8 0 q6 -10 12 0 t12 0 q4 -18 8 0 t8 0 q6 -8 12 0 t12 0"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+              />
+            </svg>
+            <span class="vi-hero-mic"><AppIcon name="mic" :size="15" /></span>
+          </div>
+          <h3 class="vi-hero-title">{{ talking ? "Listening…" : "Ready when you are" }}</h3>
+          <p class="vi-hero-sub">
+            {{ talking
+              ? "Speak naturally — each pause sends an utterance and the specification builds here."
+              : voiceReady && !textMode
+                ? "Start talking to capture requirements. The microphone listens continuously."
+                : "Start talking (typed input) to capture requirements." }}
+          </p>
+          <p v-if="permHint" class="vi-hero-hint">
+            💡 The browser has the microphone blocked for this site and will not ask again by
+            itself — allow it in the site settings (icon left of the address bar) and it
+            re-enables here automatically.
+          </p>
+          <p v-else-if="mic.errorMessage.value" class="vi-hero-hint">
+            💡 {{ mic.errorMessage.value }}
+          </p>
+        </div>
         <textarea
           v-else-if="!previewOn"
           v-model="specDraft"
@@ -547,19 +588,18 @@ onBeforeUnmount(() => {
           Unsaved edits — <button class="vi-link" type="button" @click="onSaveSpec">save</button>
         </div>
         <footer class="vi-spec-foot">
-          <p v-if="mic.errorMessage.value" class="vi-hint vi-mic-error">{{ mic.errorMessage.value }}</p>
           <TranscriptInput v-if="talking && (textMode || !voiceReady)" :disabled="isViewingHistory" @chunk="onChunk" />
           <p v-else-if="talking" class="vi-hint">
             🎤 Speak naturally — each pause sends an utterance for transcription.
           </p>
-          <p v-else class="vi-hint">
+          <p v-else-if="!showHero" class="vi-hint">
             {{ voiceReady ? "Start talking to build the spec — the mic listens continuously." : "Start talking (typed input) to build the spec." }}
           </p>
         </footer>
       </section>
 
       <aside class="vi-side">
-        <IntakeCard id="impact" title="Impact Analysis">
+        <IntakeCard id="impact" title="Impact Analysis" icon="bar-chart-2">
           <template #summary>
             <template v-if="topImpactChips.length">
               <button
@@ -575,7 +615,7 @@ onBeforeUnmount(() => {
                 {{ e.issue_key }}
               </button>
             </template>
-            <span v-else>no hits yet</span>
+            <span v-else>No hits yet</span>
           </template>
           <template v-if="impacts && (impacts.impacted.length || impacts.related.length || impacts.graph_hits.length)">
             <div v-for="cat in ['touches', 'conflicts', 'extends']" :key="cat">
@@ -625,9 +665,9 @@ onBeforeUnmount(() => {
           </p>
         </IntakeCard>
 
-        <IntakeCard id="understanding" title="Understanding Check">
+        <IntakeCard id="understanding" title="Understanding Check" icon="shield-check">
           <template #summary>
-            <span class="vi-sum-text">{{ eliSummary || "appears after the first generations" }}</span>
+            <span class="vi-sum-text">{{ eliSummary || "Appears after the first generation" }}</span>
           </template>
           <template #headerExtra>
             <div v-if="summaries" class="vi-tabs">
@@ -650,13 +690,13 @@ onBeforeUnmount(() => {
           <p v-else class="vi-empty">ELI5 / ELI10 / ELI15 summaries appear after the first generations.</p>
         </IntakeCard>
 
-        <IntakeCard id="preview" title="Ticket Preview">
+        <IntakeCard id="preview" title="Ticket Preview" icon="ticket">
           <template #summary>
             <template v-if="ticketPreview">
               <span class="vi-type-badge">{{ ticketPreview.issue_type }}</span>
               <span class="vi-sum-text">{{ ticketPreview.title }}</span>
             </template>
-            <span v-else>appears after the first generation</span>
+            <span v-else>Appears after the first generation</span>
           </template>
           <template v-if="ticketPreview">
             <div class="vi-preview-row">
@@ -684,9 +724,9 @@ onBeforeUnmount(() => {
           </p>
         </IntakeCard>
 
-        <IntakeCard id="transcript" title="Transcript">
+        <IntakeCard id="transcript" title="Transcript" icon="file-text">
           <template #summary>
-            <span class="vi-sum-text">{{ transcriptTail || "nothing captured yet" }}</span>
+            <span class="vi-sum-text">{{ transcriptTail || "Nothing captured yet" }}</span>
           </template>
           <p ref="transcriptEl" class="vi-transcript">{{ displayedTranscript || "Nothing captured yet." }}</p>
         </IntakeCard>
@@ -1130,6 +1170,74 @@ onBeforeUnmount(() => {
   text-decoration: underline;
   font-size: inherit;
   cursor: pointer;
+}
+.vi-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 320px;
+  cursor: pointer;
+  text-align: center;
+  padding: 24px;
+  border-radius: 8px;
+}
+.vi-hero:hover {
+  background: var(--bg);
+}
+.vi-hero-mark {
+  position: relative;
+  width: 132px;
+  height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+.vi-hero-mark--live {
+  color: var(--brand-blue);
+}
+.vi-hero-wave {
+  width: 120px;
+  height: 48px;
+}
+.vi-hero-mic {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--brand-blue);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+}
+.vi-hero-mark--live .vi-hero-mic {
+  background: #b91c1c;
+  animation: vi-breathe 2.4s ease-in-out infinite;
+}
+.vi-hero-title {
+  margin: 0;
+  font-size: 19px;
+}
+.vi-hero-sub {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-muted);
+  max-width: 420px;
+}
+.vi-hero-hint {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  max-width: 460px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
 }
 .vi-spec-editor {
   width: 100%;
