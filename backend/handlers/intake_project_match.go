@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -348,12 +349,48 @@ func applyIntakeHysteresis(candidates []intakeMatchCandidate, incumbent *int64, 
 func runIntakeMatchStage(ctx context.Context, s *intakeSession, transcript string, ax *aiActionContext, allowLLM bool) (ptok, ctok int) {
 	accessible := authAccessibleProjectIDsForUser(s.UserID)
 	incumbentScore := s.DetectedScore
+	firstDetection := s.DetectedProjectID == nil && s.PinnedProjectID == nil
 	candidates, err := intakeProjectCandidates(ctx, transcript, accessible, s.DetectedProjectID)
 	if err != nil {
 		publishIntakeStage(s.ID, "project_match", "error", "store")
 		return 0, 0
 	}
 	threshold := intakeConfidenceThresholdFor(ctx, s.UserID)
+
+	// PAI-715: while nothing is selected yet, the user's most recently
+	// visited project gets a head start (+10) for the first two detection
+	// rounds — the very likely target wins the opening exchange faster.
+	// Once anything is detected or pinned, the normal hysteresis rules
+	// own every switch.
+	if firstDetection {
+		var rounds int
+		_ = db.DB.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM intake_events WHERE session_id=? AND kind='project_match'`,
+			s.ID).Scan(&rounds)
+		if rounds < 2 {
+			if recent := intakeMostRecentProject(ctx, s.UserID, accessible); recent != 0 {
+				boosted := false
+				for i := range candidates {
+					if candidates[i].ProjectID == recent {
+						candidates[i].Score = min(candidates[i].Score+intakeStickyBoost, 100)
+						candidates[i].Confidence = intakeConfidenceForScore(candidates[i].Score)
+						boosted = true
+						break
+					}
+				}
+				if !boosted {
+					if key, name, ok := intakeProjectLabel(ctx, recent); ok {
+						candidates = append(candidates, intakeMatchCandidate{
+							ProjectID: recent, Key: key, Name: name,
+							Score: intakeStickyBoost, Confidence: "low",
+							Rationale: "recently worked on",
+						})
+					}
+				}
+				sort.Slice(candidates, func(i, j int) bool { return candidates[i].Score > candidates[j].Score })
+			}
+		}
+	}
 
 	unresolved := len(candidates) > 0 &&
 		(candidates[0].Score < intakeMatchResolvedScore ||
@@ -415,6 +452,9 @@ func runIntakeMatchStage(ctx context.Context, s *intakeSession, transcript strin
 		"threshold":           threshold,
 		"detected_project_id": detected,
 		"detected_score":      score,
+		// PAI-715: the first selection is threshold-free client-side —
+		// there is nothing to displace, so any signal beats no project.
+		"first_detection": firstDetection,
 	})
 	count, err := intakeEventCount(ctx, db.DB, s.ID)
 	if err != nil || count >= intakeMaxEventsPerSess {
@@ -437,6 +477,27 @@ func intakeMatchTranscriptTail(transcript string) string {
 		return transcript[len(transcript)-4096:]
 	}
 	return transcript
+}
+
+// intakeMostRecentProject returns the user's most recently visited
+// accessible project (0 = none).
+func intakeMostRecentProject(ctx context.Context, userID int64, accessible []int64) int64 {
+	var pid int64
+	if err := db.DB.QueryRowContext(ctx,
+		`SELECT project_id FROM user_recent_projects WHERE user_id=? ORDER BY visited_at DESC LIMIT 1`,
+		userID).Scan(&pid); err != nil {
+		return 0
+	}
+	if accessible == nil || slices.Contains(accessible, pid) {
+		return pid
+	}
+	return 0
+}
+
+func intakeProjectLabel(ctx context.Context, projectID int64) (key, name string, ok bool) {
+	err := db.DB.QueryRowContext(ctx,
+		`SELECT key, name FROM projects WHERE id=? AND status='active'`, projectID).Scan(&key, &name)
+	return key, name, err == nil
 }
 
 // authAccessibleProjectIDsForUser is swappable for tests.

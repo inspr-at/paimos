@@ -84,9 +84,12 @@ export interface IntakeProjectMatch {
   threshold: number;
   detected_project_id: number | null;
   detected_score: number;
+  /** PAI-715: true while nothing was selected yet — the first pick is threshold-free. */
+  first_detection?: boolean;
 }
 
 export interface IntakeImpactEntry {
+  issue_id?: number;
   issue_key: string;
   title: string;
   category: "touches" | "conflicts" | "extends" | "related";

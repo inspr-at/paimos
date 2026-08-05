@@ -31,6 +31,9 @@ test('voice intake: transcript → spec → detect project → create issue', as
   await expect(input).toBeVisible()
   await input.fill('We need a CSV export button on the reporting page so controlling can pull monthly numbers.')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
+  // The right-column cards are collapsed by default (PAI-715) — the
+  // summary carries the transcript tail; expand for the full text.
+  await page.getByRole('heading', { name: 'Transcript' }).click()
   await expect(page.locator('.vi-transcript')).toContainText('CSV export button')
 
   // Manual spec edit (degraded mode: no AI in the e2e stack).

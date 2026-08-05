@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 )
 
@@ -40,6 +41,7 @@ var intakeCategoryRelation = map[string]string{
 }
 
 type intakeImpactEntry struct {
+	IssueID        int64   `json:"issue_id,omitempty"`
 	IssueKey       string  `json:"issue_key"`
 	Title          string  `json:"title"`
 	Category       string  `json:"category"`
@@ -131,6 +133,7 @@ func runIntakeImpactsStage(ctx context.Context, s *intakeSession, query string, 
 			return
 		}
 		seen[key] = true
+		issueID, _ := auth.ResolveIssueRef(key)
 		category := specRelations[key]
 		if category == "" {
 			if reached[key] {
@@ -140,7 +143,7 @@ func runIntakeImpactsStage(ctx context.Context, s *intakeSession, query string, 
 			}
 		}
 		e := intakeImpactEntry{
-			IssueKey: key, Title: title, Category: category,
+			IssueID: issueID, IssueKey: key, Title: title, Category: category,
 			MappedRelation: intakeCategoryRelation[category], Score: score, Via: via,
 		}
 		if category == "related" {

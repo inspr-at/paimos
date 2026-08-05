@@ -9,15 +9,19 @@
 // and time-travel. AI generation, project detection, impact analysis, ELIs
 // and one-click create land in later slices (PAI-705…709); their cards are
 // scaffolded here so the layout already matches the approved mockup.
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import AiSurfaceFeedback from "@/components/ai/AiSurfaceFeedback.vue";
+import AppIcon from "@/components/AppIcon.vue";
 import ProjectConfidenceChip from "@/components/intake/ProjectConfidenceChip.vue";
 import { LS_INTAKE_ELI_LEVEL } from "@/constants/storage";
 import TranscriptInput from "@/components/intake/TranscriptInput.vue";
 import { useIntakeSession } from "@/composables/useIntakeSession";
 import { useMarkdown } from "@/composables/useMarkdown";
+import IntakeCard from "@/components/intake/IntakeCard.vue";
+import { useIssuePreview } from "@/composables/useIssuePreview";
+import { useMicPermission } from "@/composables/useMicPermission";
 import { useMicTranscript } from "@/composables/useMicTranscript";
 import { postIntakeAudio, voiceAvailable } from "@/api/intake";
 import { lineDiff } from "@/components/ai/lineDiff";
@@ -149,6 +153,49 @@ void voiceAvailable().then((ok) => {
   voiceReady.value = ok;
   if (!ok || !mic.micSupported()) textMode.value = true;
 });
+
+// PAI-715: permanent, live-updating mic-permission status. The chip is
+// always visible while voice is configured, so "can speech detection
+// work right now?" is answered at a glance.
+const micPerm = useMicPermission();
+void micPerm.init();
+const permHint = ref(false);
+const micPermMeta = computed(() => {
+  switch (micPerm.permission.value) {
+    case "granted":
+      return { cls: "vi-perm--ok", label: "Mic allowed", action: null as string | null };
+    case "prompt":
+      return { cls: "vi-perm--ask", label: "Mic not enabled", action: "Enable" };
+    case "denied":
+      return { cls: "vi-perm--denied", label: "Mic blocked", action: "Re-check" };
+    default:
+      return { cls: "vi-perm--unknown", label: "Mic status unknown", action: "Check" };
+  }
+});
+watch(micPerm.permission, (state) => {
+  if (state === "granted") permHint.value = false;
+});
+
+async function onPermAction() {
+  const state = micPerm.permission.value;
+  if (state === "prompt" || state === "unknown") {
+    const result = await micPerm.requestAccess();
+    permHint.value = result === "denied";
+    // Permission just granted mid-session: leave text mode if we only
+    // fell back because of a denial.
+    if (result === "granted" && mic.errorMessage.value) {
+      mic.errorMessage.value = null;
+      textMode.value = false;
+    }
+  } else {
+    const result = await micPerm.recheck();
+    permHint.value = result === "denied";
+    if (result === "granted") {
+      mic.errorMessage.value = null;
+      textMode.value = false;
+    }
+  }
+}
 const micActive = mic.isActive;
 const micLevel = mic.level;
 
@@ -217,6 +264,29 @@ async function onRestore() {
   await restore(viewSeq.value);
   scrubPos.value = headRev.value;
 }
+
+// PAI-715: collapsed-card summaries + hover previews + transcript autoscroll.
+const preview = useIssuePreview();
+const topImpactChips = computed(() => {
+  const im = impacts.value;
+  if (!im) return [];
+  const pool = im.impacted.length ? im.impacted : im.related;
+  return pool.slice(0, 3);
+});
+const eliSummary = computed(() => {
+  const text = summaries.value?.[eliLevel.value] ?? "";
+  return text.length > 90 ? text.slice(0, 90) + "…" : text;
+});
+const transcriptTail = computed(() => {
+  const t = displayedTranscript.value;
+  return t.length > 60 ? "…" + t.slice(-60) : t;
+});
+const transcriptEl = ref<HTMLElement | null>(null);
+watch(displayedTranscript, async () => {
+  await nextTick();
+  const el = transcriptEl.value;
+  if (el) el.scrollTop = el.scrollHeight; // transcript grows at the bottom
+});
 
 const showDiff = ref(false);
 // Flattened line diff of the scrubbed revision vs the live spec, capped so
@@ -314,12 +384,28 @@ onBeforeUnmount(() => {
           ■ Stop Talking
         </button>
         <span class="vi-conn" :class="`vi-conn--${connection}`">{{ connectionLabel }}</span>
+        <span v-if="voiceReady" class="vi-perm" :class="micPermMeta.cls" :title="micPermMeta.label">
+          <AppIcon :name="micPerm.permission.value === 'granted' ? 'mic' : 'mic-off'" :size="13" />
+          <button
+            v-if="micPermMeta.action"
+            class="vi-perm-action"
+            type="button"
+            @click="onPermAction"
+          >
+            {{ micPermMeta.action }}
+          </button>
+        </span>
         <button v-if="voiceReady" class="vi-link vi-mode-toggle" type="button" @click="onToggleTextMode">
           {{ textMode ? "🎤 use microphone" : "⌨ type instead" }}
         </button>
       </div>
     </header>
 
+    <p v-if="permHint" class="vi-error">
+      The browser has the microphone blocked for this site — it will not ask again by itself.
+      Allow the microphone in the browser's site settings (the icon left of the address bar),
+      then it re-enables here automatically.
+    </p>
     <p v-if="error" class="vi-error">{{ error }}</p>
     <!-- Shared AI feedback host for any useAiAction-backed control on this
          page; generation activity itself streams via the session SSE. -->
@@ -418,8 +504,24 @@ onBeforeUnmount(() => {
       </section>
 
       <aside class="vi-side">
-        <section class="vi-card">
-          <header class="vi-card-head"><h2>Impact Analysis</h2></header>
+        <IntakeCard id="impact" title="Impact Analysis">
+          <template #summary>
+            <template v-if="topImpactChips.length">
+              <button
+                v-for="e in topImpactChips"
+                :key="e.issue_key"
+                class="vi-impact-key vi-chipbtn"
+                :class="`vi-impact--${e.category}`"
+                type="button"
+                @mouseenter="e.issue_id && preview.showPreview(e.issue_id, $event)"
+                @mouseleave="preview.hidePreview()"
+                @click="router.push(`/issues/${e.issue_key}`)"
+              >
+                {{ e.issue_key }}
+              </button>
+            </template>
+            <span v-else>no hits yet</span>
+          </template>
           <template v-if="impacts && (impacts.impacted.length || impacts.related.length || impacts.graph_hits.length)">
             <div v-for="cat in ['touches', 'conflicts', 'extends']" :key="cat">
               <template v-if="impacts.impacted.some((e) => e.category === cat)">
@@ -431,6 +533,8 @@ onBeforeUnmount(() => {
                     :to="`/issues/${e.issue_key}`"
                     class="vi-impact-row"
                     :title="`filed as '${e.mapped_relation}' on create · via ${e.via}`"
+                    @mouseenter="e.issue_id && preview.showPreview(e.issue_id, $event)"
+                    @mouseleave="preview.hidePreview()"
                   >
                     <span class="vi-impact-key" :class="`vi-impact--${cat}`">{{ e.issue_key }}</span>
                     <span class="vi-impact-title">{{ e.title }}</span>
@@ -446,6 +550,8 @@ onBeforeUnmount(() => {
                   :key="e.issue_key"
                   :to="`/issues/${e.issue_key}`"
                   class="vi-impact-row"
+                  @mouseenter="e.issue_id && preview.showPreview(e.issue_id, $event)"
+                  @mouseleave="preview.hidePreview()"
                 >
                   <span class="vi-impact-key">{{ e.issue_key }}</span>
                   <span class="vi-impact-title">{{ e.title }}</span>
@@ -462,10 +568,13 @@ onBeforeUnmount(() => {
           <p v-else class="vi-empty">
             Impacted and related issues appear here once a project is detected or pinned.
           </p>
-        </section>
-        <section class="vi-card">
-          <header class="vi-card-head">
-            <h2>Understanding Check</h2>
+        </IntakeCard>
+
+        <IntakeCard id="understanding" title="Understanding Check">
+          <template #summary>
+            <span class="vi-sum-text">{{ eliSummary || "appears after the first generations" }}</span>
+          </template>
+          <template #headerExtra>
             <div v-if="summaries" class="vi-tabs">
               <button
                 v-for="lvl in ['eli5', 'eli10', 'eli15'] as const"
@@ -476,7 +585,7 @@ onBeforeUnmount(() => {
                 {{ lvl.toUpperCase() }}
               </button>
             </div>
-          </header>
+          </template>
           <template v-if="summaries">
             <p class="vi-eli-text">{{ summaries[eliLevel] || "—" }}</p>
             <p v-if="summariesSeq < specSeq" class="vi-eli-stale">
@@ -484,9 +593,16 @@ onBeforeUnmount(() => {
             </p>
           </template>
           <p v-else class="vi-empty">ELI5 / ELI10 / ELI15 summaries appear after the first generations.</p>
-        </section>
-        <section class="vi-card">
-          <header class="vi-card-head"><h2>Ticket Preview</h2></header>
+        </IntakeCard>
+
+        <IntakeCard id="preview" title="Ticket Preview">
+          <template #summary>
+            <template v-if="ticketPreview">
+              <span class="vi-type-badge">{{ ticketPreview.issue_type }}</span>
+              <span class="vi-sum-text">{{ ticketPreview.title }}</span>
+            </template>
+            <span v-else>appears after the first generation</span>
+          </template>
           <template v-if="ticketPreview">
             <div class="vi-preview-row">
               <span class="vi-preview-label">Title</span>
@@ -511,11 +627,14 @@ onBeforeUnmount(() => {
           <p v-else class="vi-empty">
             The ticket that will be created is previewed here once the first generation lands.
           </p>
-        </section>
-        <section class="vi-card">
-          <header class="vi-card-head"><h2>Transcript</h2></header>
-          <p class="vi-transcript">{{ displayedTranscript || "Nothing captured yet." }}</p>
-        </section>
+        </IntakeCard>
+
+        <IntakeCard id="transcript" title="Transcript">
+          <template #summary>
+            <span class="vi-sum-text">{{ transcriptTail || "nothing captured yet" }}</span>
+          </template>
+          <p ref="transcriptEl" class="vi-transcript">{{ displayedTranscript || "Nothing captured yet." }}</p>
+        </IntakeCard>
       </aside>
     </div>
 
@@ -643,23 +762,78 @@ onBeforeUnmount(() => {
 .vi-talk-btn {
   padding: 10px 22px;
   border-radius: 999px;
-  border: none;
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
-  color: #fff;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
 }
+/* PAI-715: idle is quiet — outline only. Solid red is reserved for the
+   moments the microphone is actually live. */
 .vi-talk-start {
-  background: #b91c1c;
+  background: transparent;
+  border: 1.5px solid #b91c1c;
+  color: #b91c1c;
+}
+.vi-talk-start:hover {
+  background: rgba(185, 28, 28, 0.06);
 }
 .vi-talk-stop {
   background: #b91c1c;
-  animation: vi-pulse 1.6s ease-in-out infinite;
+  border: 1.5px solid #b91c1c;
+  color: #fff;
+  animation: vi-breathe 2.4s ease-in-out infinite;
 }
-@keyframes vi-pulse {
-  50% {
-    box-shadow: 0 0 0 6px rgba(185, 28, 28, 0.15);
+/* Soft professional breathing: a gentle ring + barely-there opacity swell,
+   slow enough to read as "live", never as an alarm. The level-reactive
+   inline ring (mic RMS) layers on top while speech is heard. */
+@keyframes vi-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(185, 28, 28, 0.22);
   }
+  50% {
+    box-shadow: 0 0 0 7px rgba(185, 28, 28, 0.08);
+  }
+}
+.vi-perm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+.vi-perm--ok {
+  color: #15803d;
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+.vi-perm--ask {
+  color: #a16207;
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+.vi-perm--denied {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.vi-perm--unknown {
+  color: var(--text-muted);
+}
+.vi-perm-action {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 .vi-conn {
   font-size: 12px;
@@ -717,7 +891,14 @@ onBeforeUnmount(() => {
 .vi-side {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  /* PAI-715: the column scrolls on its own so the sticky action bar
+     below never gets pushed out of the viewport. */
+  max-height: calc(100vh - 330px);
+  overflow-y: auto;
+  position: sticky;
+  top: 12px;
+  padding-right: 2px;
 }
 .vi-tabs {
   display: inline-flex;
@@ -937,14 +1118,29 @@ onBeforeUnmount(() => {
   font-size: 12.5px;
   color: var(--text);
   white-space: pre-wrap;
-  max-height: 180px;
+  max-height: 220px;
   overflow-y: auto;
+}
+.vi-sum-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vi-chipbtn {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
 }
 .vi-timeline-card {
   display: flex;
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
+  /* PAI-715: scrubber + session actions stay pinned while content grows. */
+  position: sticky;
+  bottom: 10px;
+  z-index: 25;
+  box-shadow: 0 -6px 18px rgba(15, 23, 42, 0.06), 0 2px 8px rgba(15, 23, 42, 0.08);
 }
 .vi-timeline-left,
 .vi-timeline-right {
