@@ -5,6 +5,17 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.1] — 2026-08-05
+
+### Fixed — Microphone could never prompt (PAI-717)
+
+- The pre-voice `Permissions-Policy: microphone=()` header overrode the browser's own site permission and silently suppressed the permission prompt — speech input showed "mic blocked" even when the site was set to Allow. Now `microphone=(self)`; all other features remain disabled, and a regression test pins the policy.
+
+### Changed
+
+- "auto-switch ≥ 90%" is now an actual switch: off pins the current project (nothing moves), on hands the selection back to detection.
+- PAI-717: mic Permissions-Policy fix + auto-switch toggle (#60)
+
 ## [5.3.0] — 2026-08-05
 
 ### Added — Voice Intake polish (PAI-715)
