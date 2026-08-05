@@ -46,6 +46,20 @@ test('voice intake: transcript → spec → detect project → create issue', as
   await page.getByRole('button', { name: /Save checkpoint/ }).click()
   await page.getByRole('button', { name: 'Save', exact: true }).click()
 
+  // PAI-719 regression: leave the workbench via in-app navigation and
+  // come back — the session stream must reconnect and further input
+  // must keep updating the UI (this was the "listens but the spec
+  // stops updating" bug).
+  await page.getByRole('link', { name: 'Issues' }).click()
+  await expect(page).toHaveURL(/\/issues/)
+  await page.getByRole('link', { name: 'Voice Intake' }).click()
+  await page.getByRole('button', { name: /Start Talking/ }).click()
+  const input2 = page.getByPlaceholder(/Type or paste what you would say/)
+  await expect(input2).toBeVisible()
+  await input2.fill('After returning, updates must still flow into the session.')
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.locator('.vi-transcript')).toContainText('After returning', { timeout: 10_000 })
+
   // No pin needed: deterministic project detection (Stage A, works in
   // degraded mode) sets the target from the transcript's lexical matches —
   // the Create button enables once the project_match event lands.

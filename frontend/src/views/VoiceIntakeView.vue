@@ -9,7 +9,7 @@
 // and time-travel. AI generation, project detection, impact analysis, ELIs
 // and one-click create land in later slices (PAI-705…709); their cards are
 // scaffolded here so the layout already matches the approved mockup.
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import AiSurfaceFeedback from "@/components/ai/AiSurfaceFeedback.vue";
@@ -48,6 +48,7 @@ const {
   isViewingHistory,
   error,
   start,
+  resume,
   sendTranscript,
   saveSpec,
   setLanguage,
@@ -199,17 +200,48 @@ async function onPermAction() {
 const micActive = mic.isActive;
 const micLevel = mic.level;
 
+// PAI-719: the talk button must never lie. If the mic module leaves the
+// active states while voice mode is on (real device error, permission
+// revoked mid-session), the button follows immediately.
+watch(mic.state, (st) => {
+  if (talking.value && !textMode.value && (st === "idle" || st === "error")) {
+    talking.value = false;
+  }
+});
+
 async function onStartTalking() {
-  if (!session.value) await start();
+  // PAI-719: a completed/abandoned session cannot take input — Start
+  // Talking begins a fresh one, carrying the project target forward.
+  if (session.value && session.value.status !== "active") {
+    await onNewSession();
+  } else if (!session.value) {
+    await start();
+  } else if (connection.value === "disconnected") {
+    // Returning to a live session whose stream was closed on unmount.
+    await resume(session.value.id);
+  }
   talking.value = true;
   if (!textMode.value && voiceReady.value && mic.micSupported()) {
     const ok = await mic.start(async (blob) => {
       const s = session.value;
-      if (!s) return;
+      if (!s || s.status !== "active") {
+        mic.stop();
+        talking.value = false;
+        return;
+      }
       try {
         await postIntakeAudio(s.id, blob);
       } catch (e) {
-        error.value = e instanceof Error ? e.message : "voice transcription failed";
+        const msg = e instanceof Error ? e.message : "voice transcription failed";
+        if (msg.includes("not active")) {
+          // Session ended under us (issue created elsewhere / swept):
+          // stop listening cleanly; the next Start Talking begins fresh.
+          mic.stop();
+          talking.value = false;
+          error.value = "This session has ended — Start Talking begins a new one.";
+        } else {
+          error.value = msg;
+        }
       }
     });
     if (!ok) textMode.value = true; // permission denied → typed input
@@ -320,6 +352,9 @@ async function onCreateIssue() {
   try {
     if (draftDirty.value) await onSaveSpec();
     await createIssue();
+    // PAI-719: the session is completed now — release the microphone.
+    mic.stop();
+    talking.value = false;
   } finally {
     creating.value = false;
   }
@@ -346,7 +381,27 @@ async function onNewSession() {
   if (carryProject != null) await pinProject(carryProject);
 }
 
+// PAI-719: mount/unmount lifecycle. The composable state is a module
+// singleton so the session survives navigation — the STREAM and the MIC
+// must not. On return, reconnect + rehydrate so updates flow again (the
+// missing piece behind "it listens but the spec stops updating"); on
+// leave, hard-stop the microphone (never leave it hot) and close the
+// stream.
+onMounted(async () => {
+  if (mic.isActive.value && !talking.value) mic.stop(); // stray from a previous visit
+  const s = session.value;
+  if (s && connection.value === "disconnected") {
+    try {
+      await resume(s.id);
+    } catch {
+      /* session may have been swept — start() will make a new one */
+    }
+  }
+});
+
 onBeforeUnmount(() => {
+  talking.value = false;
+  mic.stop();
   disconnect();
 });
 </script>
