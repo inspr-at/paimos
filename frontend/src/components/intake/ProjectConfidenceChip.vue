@@ -73,6 +73,16 @@ const confClass = computed(() => {
   return "vi-chip--low";
 });
 
+function onAutoSwitchToggle() {
+  if (pinned.value) {
+    emit("unpin"); // switch ON → detection owns the selection again
+    return;
+  }
+  // Switch OFF → pin whatever is active right now so it can't move.
+  const detId = props.session?.detected_project_id;
+  if (detId != null) emit("pin", detId);
+}
+
 // Flash "Switched to X" when the detected project changes while unpinned.
 watch(
   () => props.session?.detected_project_id,
@@ -107,7 +117,26 @@ watch(
       </template>
     </button>
     <span v-if="switchedFlash" class="vi-chip-flash">{{ switchedFlash }}</span>
-    <span v-if="state !== 'idle'" class="vi-chip-hint">auto-switch ≥ {{ threshold }}%</span>
+    <!-- PAI-717 (per Markus): auto-switch is a real switch. Off maps to
+         pinning the active project (the existing non-destructive manual
+         mode); on releases the pin and detection takes over again. -->
+    <label
+      v-if="state !== 'idle'"
+      class="vi-chip-autoswitch"
+      :class="{ 'vi-chip-autoswitch--off': pinned }"
+      :title="pinned ? 'Auto-switch is off — the project is pinned' : `Switches projects automatically at ≥ ${threshold}% confidence`"
+    >
+      <span class="vi-switch" :class="{ on: !pinned }" role="switch" :aria-checked="!pinned">
+        <input
+          type="checkbox"
+          :checked="!pinned"
+          :disabled="!pinned && !activeProject"
+          @change="onAutoSwitchToggle"
+        />
+        <span class="vi-switch-knob" />
+      </span>
+      auto-switch ≥ {{ threshold }}%
+    </label>
     <button
       v-if="pinnedSuggestion"
       class="vi-chip-suggest"
@@ -202,9 +231,53 @@ watch(
     opacity: 0.5;
   }
 }
-.vi-chip-hint {
+.vi-chip-autoswitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.vi-chip-autoswitch--off {
+  color: #a16207;
+}
+.vi-switch {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background-color 0.15s ease;
+  flex-shrink: 0;
+}
+.vi-switch.on {
+  background: #15803d;
+}
+.vi-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.vi-switch input:disabled {
+  cursor: default;
+}
+.vi-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+  pointer-events: none;
+}
+.vi-switch.on .vi-switch-knob {
+  transform: translateX(12px);
 }
 .vi-chip-flash {
   font-size: 12px;
