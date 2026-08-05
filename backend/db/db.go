@@ -5541,6 +5541,13 @@ func migrate(db *sql.DB) error {
 			`ALTER TABLE ai_settings ADD COLUMN voice_base_url TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE ai_settings ADD COLUMN voice_stt_model TEXT NOT NULL DEFAULT ''`,
 		}},
+		// M137 / PAI-714: text-to-speech settings for the intake
+		// understanding check (speak the selected ELI summary). Same
+		// provider + key as STT (M136); voice/model are TTS-specific.
+		{137, []string{
+			`ALTER TABLE ai_settings ADD COLUMN tts_voice_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE ai_settings ADD COLUMN tts_model TEXT NOT NULL DEFAULT ''`,
+		}},
 	}
 
 	for _, m := range migrations {

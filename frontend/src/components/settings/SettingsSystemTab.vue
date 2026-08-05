@@ -6,6 +6,7 @@ import { api, errMsg } from "@/api/client";
 interface SystemSettings {
   undo_stack_depth: number;
   intake_confidence_threshold: number;
+  intake_session_token_budget: number;
 }
 
 interface RetentionPolicy {
@@ -16,7 +17,11 @@ const loading = ref(true);
 const saving = ref(false);
 const error = ref("");
 const saved = ref(false);
-const form = ref<SystemSettings>({ undo_stack_depth: 3, intake_confidence_threshold: 90 });
+const form = ref<SystemSettings>({
+  undo_stack_depth: 3,
+  intake_confidence_threshold: 90,
+  intake_session_token_budget: 60000,
+});
 const retention = ref<RetentionPolicy | null>(null);
 
 async function load() {
@@ -104,6 +109,28 @@ onMounted(() => {
         </label>
         <div class="system-card__meta">
           <span>Applies to the next detection cycle immediately.</span>
+        </div>
+      </article>
+
+      <article class="system-card">
+        <h3>Voice-intake session AI budget</h3>
+        <p class="system-card__copy">
+          Token ceiling per intake session (all AI stages combined). When
+          exhausted, generation freezes but capture, editing and create keep
+          working. Long dictation sessions need headroom.
+        </p>
+        <label class="system-card__field">
+          <span>Tokens (1,000–500,000)</span>
+          <input
+            v-model.number="form.intake_session_token_budget"
+            type="number"
+            min="1000"
+            max="500000"
+            step="1000"
+          />
+        </label>
+        <div class="system-card__meta">
+          <span>Applies to the next generation cycle immediately.</span>
         </div>
       </article>
 

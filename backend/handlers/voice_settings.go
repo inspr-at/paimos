@@ -45,15 +45,21 @@ const voiceSecretDomain = "ai:elevenlabs"
 const (
 	voiceDefaultBaseURL  = "https://api.elevenlabs.io"
 	voiceDefaultSTTModel = "scribe_v1"
+	// PAI-714: "Rachel", an ElevenLabs premade voice available to every
+	// account — sensible default so speak-back works without extra setup.
+	voiceDefaultTTSVoice = "21m00Tcm4TlvDq8ikWAM"
+	voiceDefaultTTSModel = "eleven_multilingual_v2"
 )
 
 // VoiceSettings is the resolved shape. APIKey never leaves the process.
 type VoiceSettings struct {
-	Provider string `json:"provider"` // "" (off) | "elevenlabs"
-	APIKey   string `json:"-"`
-	HasKey   bool   `json:"has_api_key"`
-	BaseURL  string `json:"base_url"`
-	STTModel string `json:"stt_model"`
+	Provider   string `json:"provider"` // "" (off) | "elevenlabs"
+	APIKey     string `json:"-"`
+	HasKey     bool   `json:"has_api_key"`
+	BaseURL    string `json:"base_url"`
+	STTModel   string `json:"stt_model"`
+	TTSVoiceID string `json:"tts_voice_id"` // PAI-714
+	TTSModel   string `json:"tts_model"`    // PAI-714
 }
 
 // LoadVoiceSettings reads the voice columns off the M74 singleton row.
@@ -62,9 +68,10 @@ func LoadVoiceSettings() (VoiceSettings, error) {
 	var encrypted []byte
 	err := db.DB.QueryRow(
 		`SELECT COALESCE(voice_provider,''), voice_api_key_encrypted,
-		        COALESCE(voice_base_url,''), COALESCE(voice_stt_model,'')
+		        COALESCE(voice_base_url,''), COALESCE(voice_stt_model,''),
+		        COALESCE(tts_voice_id,''), COALESCE(tts_model,'')
 		 FROM ai_settings WHERE id = 1`,
-	).Scan(&s.Provider, &encrypted, &s.BaseURL, &s.STTModel)
+	).Scan(&s.Provider, &encrypted, &s.BaseURL, &s.STTModel, &s.TTSVoiceID, &s.TTSModel)
 	if errors.Is(err, sql.ErrNoRows) {
 		return VoiceSettings{BaseURL: voiceDefaultBaseURL, STTModel: voiceDefaultSTTModel}, nil
 	}
@@ -84,6 +91,12 @@ func LoadVoiceSettings() (VoiceSettings, error) {
 	}
 	if s.STTModel == "" {
 		s.STTModel = voiceDefaultSTTModel
+	}
+	if s.TTSVoiceID == "" {
+		s.TTSVoiceID = voiceDefaultTTSVoice
+	}
+	if s.TTSModel == "" {
+		s.TTSModel = voiceDefaultTTSModel
 	}
 	return s, nil
 }
@@ -106,10 +119,12 @@ func GetVoiceSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 type voiceSettingsPayload struct {
-	Provider string  `json:"provider"`
-	APIKey   *string `json:"api_key"` // nil = keep, "" = clear
-	BaseURL  string  `json:"base_url"`
-	STTModel string  `json:"stt_model"`
+	Provider   string  `json:"provider"`
+	APIKey     *string `json:"api_key"` // nil = keep, "" = clear
+	BaseURL    string  `json:"base_url"`
+	STTModel   string  `json:"stt_model"`
+	TTSVoiceID string  `json:"tts_voice_id"`
+	TTSModel   string  `json:"tts_model"`
 }
 
 // PutVoiceSettings — admin write, same key semantics as PutAISettings.
@@ -128,9 +143,11 @@ func PutVoiceSettings(w http.ResponseWriter, r *http.Request) {
 		if _, err := db.DB.Exec(
 			`UPDATE ai_settings
 			 SET voice_provider = ?, voice_base_url = ?, voice_stt_model = ?,
+			     tts_voice_id = ?, tts_model = ?,
 			     updated_at = datetime('now')
 			 WHERE id = 1`,
 			p.Provider, strings.TrimSpace(p.BaseURL), strings.TrimSpace(p.STTModel),
+			strings.TrimSpace(p.TTSVoiceID), strings.TrimSpace(p.TTSModel),
 		); err != nil {
 			log.Printf("voice_settings update: %v", err)
 			jsonError(w, "internal error", http.StatusInternalServerError)
@@ -151,9 +168,11 @@ func PutVoiceSettings(w http.ResponseWriter, r *http.Request) {
 			`UPDATE ai_settings
 			 SET voice_provider = ?, voice_api_key_encrypted = ?,
 			     voice_base_url = ?, voice_stt_model = ?,
+			     tts_voice_id = ?, tts_model = ?,
 			     updated_at = datetime('now')
 			 WHERE id = 1`,
 			p.Provider, encrypted, strings.TrimSpace(p.BaseURL), strings.TrimSpace(p.STTModel),
+			strings.TrimSpace(p.TTSVoiceID), strings.TrimSpace(p.TTSModel),
 		); err != nil {
 			log.Printf("voice_settings update: %v", err)
 			jsonError(w, "internal error", http.StatusInternalServerError)

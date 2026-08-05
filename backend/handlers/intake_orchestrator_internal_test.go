@@ -177,7 +177,7 @@ func TestIntakeOrchestrator_SessionBudgetStopsGeneration(t *testing.T) {
 	sessionID := openIntakeTestDB(t)
 	if _, err := db.DB.Exec(
 		`UPDATE intake_sessions SET session_prompt_tokens=?, session_completion_tokens=0 WHERE id=?`,
-		intakeSessionTokenBudget, sessionID); err != nil {
+		intakeSessionTokenBudgetDefault, sessionID); err != nil {
 		t.Fatal(err)
 	}
 	var calls atomic.Int64

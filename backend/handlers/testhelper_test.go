@@ -293,6 +293,7 @@ func buildRouter() http.Handler {
 			r.Post("/intake/sessions/{id}/restore", handlers.RestoreIntakeSession)
 			r.Post("/intake/sessions/{id}/refresh", handlers.RefreshIntakeSession)
 			r.Post("/intake/sessions/{id}/audio", handlers.TranscribeIntakeAudio)
+			r.Post("/intake/sessions/{id}/tts", handlers.SpeakIntakeSummary)
 			r.With(auth.RequireProjectEdit, handlers.IdempotencyMiddleware).Post("/projects/{id}/intake-sessions/{sessionID}/issue", handlers.CreateIntakeIssue)
 			r.Get("/intake/sessions/{id}/stream", handlers.IntakeSessionStream)
 			r.Get("/undo/activity", handlers.ListMyMutationActivity)
