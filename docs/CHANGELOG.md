@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.3] — 2026-08-05
+
+### Changed — Voice Intake polish (PAI-721)
+
+- The empty workbench greets you properly: a waveform hero with "Ready when you are", click-to-talk, a live Listening state, and microphone guidance as a calm hint instead of a red banner.
+- The right-column cards carry soft icon tiles and clearer "Appears after the first generation" empty copy. Live collapsed summaries stay.
+- PAI-721: voice-intake polish — empty-state hero, card icon tiles, calm permission guidance (#62)
+
 ## [5.3.2] — 2026-08-05
 
 ### Fixed — Continuous talking survives every interruption (PAI-719)
