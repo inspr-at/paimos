@@ -109,3 +109,6 @@ export const LS_INTAKE_ELI_LEVEL = 'paimos:intake:eli-level'
 
 /** PAI-715: Voice Intake — per-card expanded/collapsed state (JSON map id→open). */
 export const LS_INTAKE_CARDS = 'paimos:intake:cards'
+
+/** PAI-714: Voice Intake — ELI speak-back muted state ("1" = muted). Default muted. */
+export const LS_INTAKE_TTS_MUTED = 'paimos:intake:tts-muted'

@@ -15,7 +15,7 @@ import { useRouter } from "vue-router";
 import AiSurfaceFeedback from "@/components/ai/AiSurfaceFeedback.vue";
 import AppIcon from "@/components/AppIcon.vue";
 import ProjectConfidenceChip from "@/components/intake/ProjectConfidenceChip.vue";
-import { LS_INTAKE_ELI_LEVEL } from "@/constants/storage";
+import { LS_INTAKE_ELI_LEVEL, LS_INTAKE_TTS_MUTED } from "@/constants/storage";
 import TranscriptInput from "@/components/intake/TranscriptInput.vue";
 import { useIntakeSession } from "@/composables/useIntakeSession";
 import { useMarkdown } from "@/composables/useMarkdown";
@@ -94,7 +94,7 @@ const stageLabel = computed(() => {
       case "daily_cap":
         return "Daily AI budget exhausted — spec frozen, capture still works.";
       case "session_budget":
-        return "Session AI budget exhausted — spec frozen, capture still works.";
+        return "This session hit its AI budget — capture and editing still work. Raise the budget under Settings → System, or start a new session.";
       default:
         return `AI degraded (${st.reason ?? "unknown"}) — capture still works.`;
     }
@@ -210,6 +210,7 @@ watch(mic.state, (st) => {
 });
 
 async function onStartTalking() {
+  stopSpeaking(); // barge-in: the user's voice always wins
   // PAI-719: a completed/abandoned session cannot take input — Start
   // Talking begins a fresh one, carrying the project target forward.
   if (session.value && session.value.status !== "active") {
@@ -222,7 +223,13 @@ async function onStartTalking() {
   }
   talking.value = true;
   if (!textMode.value && voiceReady.value && mic.micSupported()) {
-    const ok = await mic.start(async (blob) => {
+    const ok = await startMicCapture();
+    if (!ok) textMode.value = true; // permission denied → typed input
+  }
+}
+
+async function startMicCapture(): Promise<boolean> {
+  return mic.start(async (blob) => {
       const s = session.value;
       if (!s || s.status !== "active") {
         mic.stop();
@@ -244,8 +251,6 @@ async function onStartTalking() {
         }
       }
     });
-    if (!ok) textMode.value = true; // permission denied → typed input
-  }
 }
 
 function onStopTalking() {
@@ -318,6 +323,66 @@ watch(displayedTranscript, async () => {
   await nextTick();
   const el = transcriptEl.value;
   if (el) el.scrollTop = el.scrollHeight; // transcript grows at the bottom
+});
+
+// PAI-714: speak the selected ELI summary after each update. Muted by
+// default (nobody gets surprise audio); persisted. The mic/TTS interlock
+// suspends capture while audio plays so the workbench never transcribes
+// its own voice, then resumes listening.
+const ttsMuted = ref(localStorage.getItem(LS_INTAKE_TTS_MUTED) !== "0");
+watch(ttsMuted, (m) => localStorage.setItem(LS_INTAKE_TTS_MUTED, m ? "1" : "0"));
+let lastSpokenText = "";
+let ttsAudio: HTMLAudioElement | null = null;
+let ttsResumeMic = false;
+
+function stopSpeaking() {
+  if (ttsAudio) {
+    ttsAudio.pause();
+    ttsAudio.src = "";
+    ttsAudio = null;
+  }
+  if (ttsResumeMic) {
+    ttsResumeMic = false;
+    if (talking.value && !textMode.value) void startMicCapture();
+  }
+}
+
+async function speakSelectedEli() {
+  const s = session.value;
+  const text = summaries.value?.[eliLevel.value]?.trim() ?? "";
+  if (!s || ttsMuted.value || !voiceReady.value || text === "" || text === lastSpokenText) return;
+  lastSpokenText = text;
+  stopSpeaking();
+  // Interlock: suspend the mic while the workbench talks.
+  if (mic.isActive.value) {
+    ttsResumeMic = true;
+    mic.stop();
+  }
+  try {
+    const res = await fetch(`/api/intake/sessions/${s.id}/tts`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token":
+          document.cookie.split("; ").find((c) => c.startsWith("csrf_token="))?.split("=")[1] ?? "",
+      },
+      body: JSON.stringify({ level: eliLevel.value }),
+    });
+    if (!res.ok) throw new Error(`tts ${res.status}`);
+    const blob = await res.blob();
+    const audio = new Audio(URL.createObjectURL(blob));
+    ttsAudio = audio;
+    audio.onended = stopSpeaking;
+    audio.onerror = stopSpeaking;
+    await audio.play();
+  } catch {
+    stopSpeaking(); // degrade silently — speech is a bonus, never a blocker
+  }
+}
+
+watch([summaries, eliLevel, ttsMuted], () => {
+  void speakSelectedEli();
 });
 
 // PAI-721: empty-state hero — the card teaches the interaction model
@@ -410,6 +475,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   talking.value = false;
+  ttsResumeMic = false;
+  stopSpeaking();
   mic.stop();
   disconnect();
 });
@@ -670,6 +737,15 @@ onBeforeUnmount(() => {
             <span class="vi-sum-text">{{ eliSummary || "Appears after the first generation" }}</span>
           </template>
           <template #headerExtra>
+            <button
+              v-if="voiceReady"
+              class="vi-tts-toggle"
+              type="button"
+              :title="ttsMuted ? 'Unmute — speak the summary after updates' : 'Mute speak-back'"
+              @click="ttsMuted = !ttsMuted"
+            >
+              {{ ttsMuted ? "🔇" : "🔊" }}
+            </button>
             <div v-if="summaries" class="vi-tabs">
               <button
                 v-for="lvl in ['eli5', 'eli10', 'eli15'] as const"
@@ -1051,6 +1127,15 @@ onBeforeUnmount(() => {
 .vi-diff-sign {
   width: 12px;
   color: var(--text-muted);
+}
+.vi-tts-toggle {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: 7px;
+  padding: 2px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-right: 8px;
 }
 .vi-eli-text {
   margin: 0;

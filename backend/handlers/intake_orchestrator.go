@@ -32,6 +32,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -46,7 +47,10 @@ import (
 )
 
 const (
-	intakeSessionTokenBudget = 20_000
+	// Default per-session token budget — the instance can override via
+	// app_settings intake_session_token_budget (PAI-714 follow-up after
+	// a real 26-rev dictation session exhausted the original 20k).
+	intakeSessionTokenBudgetDefault = 60_000
 	intakeDebounceQuiet      = 2500 * time.Millisecond
 	intakeDebounceMax        = 10 * time.Second
 	intakeWorkerIdleExit     = 60 * time.Second
@@ -149,6 +153,20 @@ func (w *intakeWorker) run() {
 	}
 }
 
+// intakeSessionTokenBudgetFor resolves the per-session token budget:
+// instance app_settings override, else the default. Bounds 1k..500k.
+func intakeSessionTokenBudgetFor(ctx context.Context) int {
+	var raw string
+	if err := db.DB.QueryRowContext(ctx,
+		`SELECT value FROM app_settings WHERE key='intake_session_token_budget'`).Scan(&raw); err == nil {
+		var n int
+		if _, err := fmt.Sscanf(raw, "%d", &n); err == nil && n >= 1_000 && n <= 500_000 {
+			return n
+		}
+	}
+	return intakeSessionTokenBudgetDefault
+}
+
 // intakeAIRuntime resolves the AI settings + provider for a pipeline run.
 // A nil provider means degraded mode; the string is the reason. Swappable
 // var so orchestrator tests can inject a fake provider without touching
@@ -204,7 +222,8 @@ func runIntakePipeline(sessionID int64) {
 	if ok, _, over, bypass := CheckUsageCap(userID, isAdmin); !ok || (over && !bypass) {
 		capOK = false
 	}
-	budgetOK := s.sessionTokensUsed() < intakeSessionTokenBudget
+	sessionBudget := intakeSessionTokenBudgetFor(ctx)
+	budgetOK := s.sessionTokensUsed() < sessionBudget
 
 	// Project detection (PAI-706) runs every cycle: deterministic Stage A
 	// even in degraded mode (its scores are capped below the auto-switch
@@ -230,7 +249,7 @@ func runIntakePipeline(sessionID int64) {
 		}
 		s.SessionPromptTokens += mp
 		s.SessionCompletionTokens += mc
-		budgetOK = s.sessionTokensUsed() < intakeSessionTokenBudget
+		budgetOK = s.sessionTokensUsed() < sessionBudget
 	}
 
 	// Query for retrieval-based stages: the transcript tail's material.
@@ -401,7 +420,7 @@ func runIntakePipeline(sessionID int64) {
 // runIntakeSummariesStage generates and stores the ELI5/10/15 artifact,
 // replicating the dispatcher obligations like every orchestrator call.
 func runIntakeSummariesStage(ctx context.Context, s *intakeSession, specMarkdown string, base *aiActionContext) {
-	if s.sessionTokensUsed() >= intakeSessionTokenBudget {
+	if s.sessionTokensUsed() >= intakeSessionTokenBudgetFor(ctx) {
 		publishIntakeStage(s.ID, "summaries", "degraded", "session_budget")
 		return
 	}

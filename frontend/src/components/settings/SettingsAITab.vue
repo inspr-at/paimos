@@ -175,17 +175,18 @@ const replacingKey = ref(false)
 const voiceEnabled = ref(false)
 const voiceHasKey = ref(false)
 const voiceReplacingKey = ref(false)
-const voiceForm = reactive({ api_key: '', base_url: '', stt_model: 'scribe_v1' })
+const voiceForm = reactive({ api_key: '', base_url: '', stt_model: 'scribe_v1', tts_voice_id: '' })
 
 async function loadVoice() {
   try {
-    const s = await api.get<{ provider: string; has_api_key: boolean; base_url: string; stt_model: string }>(
+    const s = await api.get<{ provider: string; has_api_key: boolean; base_url: string; stt_model: string; tts_voice_id: string }>(
       '/ai/voice-settings',
     )
     voiceEnabled.value = s.provider === 'elevenlabs'
     voiceHasKey.value = s.has_api_key
     voiceForm.base_url = s.base_url === 'https://api.elevenlabs.io' ? '' : s.base_url
     voiceForm.stt_model = s.stt_model
+    voiceForm.tts_voice_id = s.tts_voice_id === '21m00Tcm4TlvDq8ikWAM' ? '' : s.tts_voice_id
   } catch {
     /* non-admin or load failure — card simply stays in default state */
   }
@@ -197,6 +198,7 @@ async function saveVoice() {
     provider: voiceEnabled.value ? 'elevenlabs' : '',
     base_url: voiceForm.base_url,
     stt_model: voiceForm.stt_model,
+    tts_voice_id: voiceForm.tts_voice_id,
   })
   await loadVoice()
 }
@@ -208,6 +210,7 @@ async function saveVoiceKey() {
     api_key: voiceForm.api_key,
     base_url: voiceForm.base_url,
     stt_model: voiceForm.stt_model,
+    tts_voice_id: voiceForm.tts_voice_id,
   })
   voiceForm.api_key = ''
   voiceReplacingKey.value = false
@@ -220,6 +223,7 @@ async function clearVoiceKey() {
     api_key: '',
     base_url: voiceForm.base_url,
     stt_model: voiceForm.stt_model,
+    tts_voice_id: voiceForm.tts_voice_id,
   })
   await loadVoice()
 }
@@ -738,6 +742,12 @@ function relTime(iso: string): string {
             v-model="voiceForm.base_url"
             class="ai-input"
             placeholder="https://api.elevenlabs.io"
+            @change="saveVoice"
+          />
+          <input
+            v-model="voiceForm.tts_voice_id"
+            class="ai-input"
+            placeholder="TTS voice id (default: Rachel — 21m00Tcm4TlvDq8ikWAM)"
             @change="saveVoice"
           />
           <p class="ai-help">
