@@ -42,16 +42,28 @@ func authLoginCmd() *cobra.Command {
 		Long: `Configures a named PAIMOS instance.
 
 The URL and instance name are written to ~/.paimos/config.yaml; the
-API key is stored in the OS keyring (Keychain on macOS, Secret Service
-or KWallet on Linux, Credential Manager on Windows). Set
-PAIMOS_API_KEY in environments without a session keyring (CI,
-headless boxes) — it overrides the keyring lookup. Set PAIMOS_URL +
-PAIMOS_API_KEY together to bypass config/keyring resolution entirely.
+API key is entered at the hidden interactive prompt and stored in the
+OS keyring (Keychain on macOS, Secret Service or KWallet on Linux,
+Credential Manager on Windows) — it never appears in process
+arguments, shell history, or on disk.
 
-Prompts for URL + API key unless --url and --api-key are passed
-(useful for scripting). The first configured instance becomes
+Headless / CI environments don't log in: set PAIMOS_API_KEY as a
+runtime-only override (with PAIMOS_URL to bypass config resolution
+entirely). It is never persisted to the keyring or YAML.
+
+--url skips the URL prompt. The first configured instance becomes
 default_instance automatically.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// PAI-685: an argv credential lands in process lists and
+			// shell history. The flag stays registered (hidden) so old
+			// scripts fail with guidance instead of a parse error — the
+			// value is never used.
+			if keyFlag != "" {
+				keyFlag = ""
+				return &usageError{msg: "--api-key was removed (credentials must not appear in process arguments):\n" +
+					"  workstations: run `paimos auth login` and use the hidden prompt\n" +
+					"  headless/CI:  set " + envAPIKey + " as a runtime-only override"}
+			}
 			stdin := bufio.NewReader(os.Stdin)
 			if nameFlag == "" {
 				nameFlag = "default"
@@ -139,7 +151,10 @@ default_instance automatically.`,
 	}
 	c.Flags().StringVar(&urlFlag, "url", "", "instance URL (skips prompt)")
 	c.Flags().StringVar(&nameFlag, "name", "", `name for this instance in config (default "default")`)
-	c.Flags().StringVar(&keyFlag, "api-key", "", "API key (skips prompt; prefer the prompt for security)")
+	// PAI-685: retired credential path — registered only so legacy
+	// invocations get an actionable error instead of "unknown flag".
+	c.Flags().StringVar(&keyFlag, "api-key", "", "removed — use the hidden prompt (workstations) or PAIMOS_API_KEY (headless)")
+	_ = c.Flags().MarkHidden("api-key")
 	return c
 }
 
