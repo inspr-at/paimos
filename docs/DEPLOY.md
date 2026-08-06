@@ -12,9 +12,9 @@ derived from or pinned to it.
 
 One production instance pulls from the registry:
 
-| Instance | Host                  | Auth                | Storage           |
-| -------- | --------------------- | ------------------- | ----------------- |
-| **ppm**  | `pm.barta.cm` (csb1)  | SSH key (`mba@100.64.0.4:2222`, Tailscale IP) | named volume |
+| Instance | Host                  | Auth                | Storage           | Deploy mechanism |
+| -------- | --------------------- | ------------------- | ----------------- | ---------------- |
+| **ppm**  | `pm.barta.cm` (csb1)  | SSH key (`mba@100.64.0.4:2222`, Tailscale IP) | named volume | NixOS composeStack (since OPS-116) — **not** `deploy.sh` |
 
 Registry: `ghcr.io/inspr-at/paimos`. Images produced per-commit on `main`
 (`:latest`, `:sha-<short>`) and per semver tag (`:X.Y.Z`, `:X.Y`, `:X`).
@@ -22,12 +22,12 @@ CI source of truth: [`.github/workflows/ci-v2.yml`](../.github/workflows/ci-v2.y
 
 ---
 
-## The four commands
+## The four steps
 
 ```
 just release [patch|minor|major|x.y.z]   # cut a release (VERSION + README + CHANGELOG + tag + push)
 just verify-release <tag>                # verify signature + SBOM attestations + provenance before deploy
-just deploy-ppm <target>                 # deploy a release tag or sha-* image to ppm
+# deploy ppm via the composeStack path — see "Deploying ppm" below
 just doc-sync [tag]                      # file a "doc/site sync follow-up" ticket in PAIMOS
 ```
 
@@ -48,14 +48,36 @@ printing the `verify-release` and `doc-sync` reminders as part of its "Next:"
 output, so "image tag exists" is never confused with "release evidence is
 complete."
 
-For untagged main-commit canaries, wait for CI to publish the commit image,
-then deploy it explicitly:
+## Deploying ppm (composeStack, since OPS-116)
 
-```
-just deploy-ppm sha-4808a9f
-# or, from a checkout at that commit:
-just deploy-ppm-current
-```
+csb1's containers are reconciled from the NixOS system closure by the
+composeStack module — there is **no docker-compose.yml on the host** to
+edit, so `just deploy-ppm` / `scripts/deploy.sh ppm` fail at "stop ppm"
+by design. The image pin lives in the **nixcfg** repo at
+`hosts/csb1/docker/compose-spec.nix` and must never float (OPS-116 QA
+caught a would-be downgrade from a floating reconcile). The proven
+sequence (v5.1.0 → v5.6.2):
+
+1. `just release <level>` → wait for tag CI → `just verify-release vX.Y.Z`.
+2. **Volume backup on csb1** — throwaway alpine tars `csb1_ppm_data` to
+   `/home/mba/paimos-backups/ppm/<utc-ts>/data.tar.gz`, plus a
+   `manifest.yaml` naming pre- and target images.
+3. **Bump the pin** in nixcfg `hosts/csb1/docker/compose-spec.nix` to
+   `ghcr.io/inspr-at/paimos:X.Y.Z`. `main` is branch-protected: PR,
+   checks, `gh pr merge --squash --auto`.
+4. **On csb1**: `git pull` in `/home/mba/Code/nixcfg`, then
+   `sudo nixos-rebuild switch --flake .#csb1` (mba has passwordless
+   sudo; csb1's login shell is fish — pipe scripts to `bash -s`).
+5. **Verify**: `docker ps` shows the new image; `curl
+   https://pm.barta.cm/api/health` reports the exact version;
+   `paimos --instance ppm doctor` passes.
+
+Rollback = restore the volume tarball **and** repin the previous image
+in compose-spec.nix **and** rebuild — DB migrations are one-way, so the
+tarball always travels with the image (see Rollback below).
+
+The live operational copy of this procedure is the ppm knowledge-plane
+runbook `ppm-deploy-composestack` (#4278).
 
 ## `just release`
 
@@ -108,7 +130,13 @@ This applies to release tags. Untagged `sha-*` canaries are CI images, not
 fully published releases, so they do not have the same release-evidence
 surface.
 
-## `just deploy-ppm`
+## `scripts/deploy.sh` (generic compose instances — **not ppm**)
+
+`deploy.sh` remains the mechanism for instances that run from a plain
+`docker-compose.yml` on the host. ppm stopped being one at OPS-116;
+running `just deploy-ppm` against it fails at "stop ppm" because no
+compose file exists there. Keep this section for any future
+compose-based instance.
 
 Deploy targets are explicit by default:
 
@@ -185,7 +213,6 @@ smoke, configure a matching `paimos` CLI instance and run:
 
 ```
 paimos --instance ppm doctor
-paimos --instance ppm doctor
 ```
 
 If an operator only has SSH deploy access for an instance, `doctor` may be
@@ -213,16 +240,22 @@ sed -i 's|paimos:[^ ]*|<previous-image>|' docker-compose.yml
 docker compose up -d <service>
 ```
 
+**ppm (composeStack) rollback** — same principle, different pin: stop
+the container, restore the volume tarball as above, repin the previous
+image in nixcfg `hosts/csb1/docker/compose-spec.nix` (PR + merge), and
+`sudo nixos-rebuild switch --flake .#csb1` on the host.
+
 **Critical:** schema migrations in `backend/db/db.go` are one-way. Rolling
 back the image without restoring the tarball may leave the old binary
 staring at a schema it doesn't understand. Always restore the DB too.
 
 ## What this replaces
 
-- Any out-of-repo `just deploy-ppm` scripts on your laptop: move to
-  `scripts/deploy.sh ppm`.
-- Ad-hoc `ssh csb1 'docker compose pull && up -d'`: replaced by the
-  backup-first flow in `scripts/_deploy-lib.sh`.
+- `just deploy-ppm` / `scripts/deploy.sh ppm` for the ppm instance:
+  replaced by the composeStack pin-bump + `nixos-rebuild` path above
+  (OPS-116). The script remains valid for compose-based instances.
+- Ad-hoc `ssh csb1 'docker compose pull && up -d'`: impossible on the
+  composeStack host and replaced by the reconcile.
 - Manual `VERSION` + README badge + `CHANGELOG` edits: replaced by
   `just release`, which does them atomically with the tag.
 

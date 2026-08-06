@@ -69,11 +69,12 @@ project work
 This is useful without AI as a focused project system. With agents, the same
 model becomes the context and accountability layer around their work.
 
-## What ships in 4.8
+## What ships in 5.6
 
 | Area                | Current capability                                                                                                                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Project work        | Hierarchical issues, relations, sprints, releases, priorities, tags, saved views, bulk changes, time tracking, budgets, comments, attachments, and full-text search.                                         |
+| Voice intake        | A spec workbench that turns continuous speech (or typed input) into a live, editable specification with project detection, impact analysis, ELI5/10/15 understanding checks with spoken playback, per-language (EN/DE) cached artifacts, time-travel history, and one-click issue creation. Voice endpoints are rate-limited, budgeted, and cost-metered. |
 | Project context     | Linked repositories, typed knowledge, canonical project-agent artifacts, issue-to-file anchors, entity graph and blast-radius reads, and mixed-context retrieval.                                            |
 | Agent interfaces    | A typed `paimos` CLI, `paimos-mcp`, REST, curated OpenAPI, self-describing schema, JSON output, file-first multiline input, dry runs, idempotent transitions, and declarative bulk apply.                    |
 | Assisted work       | Thirteen in-app AI actions with operator-managed prompts, usage limits, cost records, execution profiles, context packs, and metadata-only audit records.                                                    |
@@ -86,17 +87,25 @@ model becomes the context and accountability layer around their work.
 The [claim and evidence matrix](docs/claim-matrix.md) connects public claims to
 shipped code and documented verification.
 
-### What changed in 4.8
+### What changed in the 5.x line
 
-- Generic OIDC login now covers authorization code with PKCE, verified-email
-  matching, invite-only provisioning by default, and local Paimos authorization.
-  Zitadel is the validated reference provider.
-- AI actions and implementation runs share explicit provider, profile, effort,
-  prompt, context-pack, project-agent, and runner metadata.
-- Claude Code and Codex are distinct local execution choices. OpenRouter and
-  OpenAI-compatible local endpoints remain draft-only model paths.
-- Knowledge entries can provide scoped prompt context while preserving existing
-  metadata unless a caller explicitly replaces it.
+- Voice Intake shipped end-to-end (5.1.0–5.4.0): ElevenLabs Scribe speech
+  capture that survives interruptions, a live spec workbench with project
+  auto-detection and impact analysis, spoken ELI summaries, and a
+  configurable per-session AI budget.
+- The paid voice endpoints gained cost gates and real metering (5.5.0):
+  per-user concurrency, burst caps, daily audio/character budgets, and
+  estimated cost on the AI paper trail.
+- Language switching became a cached view switch (5.6.0) — no
+  regeneration cost — and the workbench toolbar moved into the app
+  header. The orchestrator can no longer drop an end-of-dictation
+  update (5.6.1).
+- CLI credential hygiene (5.6.2): no API keys via process arguments;
+  legacy plaintext keys always migrate into the OS keyring.
+- From 4.8: generic OIDC with PKCE (Zitadel-validated), shared
+  provider/profile/effort/prompt metadata across AI actions and
+  implementation runs, and Claude Code / Codex as distinct local
+  execution choices.
 
 For release-by-release detail, read the [changelog](docs/CHANGELOG.md).
 
