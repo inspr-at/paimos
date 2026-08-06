@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.5.0] — 2026-08-06
+
+### Security — Paid voice endpoints are rate-limited and metered (PAI-724)
+
+- Every voice call (speech-to-text and text-to-speech) now passes cost gates before touching the paid provider: per-user concurrency, per-minute burst caps, the daily AI cap, and per-user daily voice budgets — 2 audio-hours STT / 60k characters TTS, overridable via `PAIMOS_VOICE_STT_DAILY_SECONDS` / `PAIMOS_VOICE_TTS_DAILY_CHARS`. Exceeding any gate answers 429 with Retry-After; budgets survive restarts.
+- Voice spend is no longer invisible: each call records its billed units (audio seconds / characters) and an estimated cost on the AI papertrail instead of zero.
+- PAI-724: rate-limit and meter the paid voice endpoints (#64)
+
 ## [5.4.0] — 2026-08-05
 
 ### Added — The workbench speaks its understanding (PAI-714)
