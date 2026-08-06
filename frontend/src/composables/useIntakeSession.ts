@@ -133,6 +133,50 @@ let source: EventSource | null = null;
 let lastSeq = 0;
 let clientSeqCounter = 0;
 
+// PAI-734: per-language artifact caches. The displayed spec/summaries/
+// ticket refs always point at the active language's cache (falling back
+// to the newest cached language while a first generation is pending),
+// so an EN/DE toggle is a view switch — never a regeneration wait.
+interface CachedArtifact<T> {
+  payload: T;
+  seq: number;
+}
+let specCache: Partial<Record<IntakeLanguage, CachedArtifact<IntakeSpecPayload>>> = {};
+let summariesCache: Partial<Record<IntakeLanguage, CachedArtifact<IntakeSummaries>>> = {};
+let previewCache: Partial<Record<IntakeLanguage, CachedArtifact<IntakeTicketPreview>>> = {};
+
+function activeLanguage(): IntakeLanguage {
+  return session.value?.language ?? "en";
+}
+
+function newestCached<T>(
+  cache: Partial<Record<IntakeLanguage, CachedArtifact<T>>>,
+): CachedArtifact<T> | null {
+  let best: CachedArtifact<T> | null = null;
+  for (const entry of Object.values(cache) as CachedArtifact<T>[]) {
+    if (entry && (!best || entry.seq > best.seq)) best = entry;
+  }
+  return best;
+}
+
+function clearArtifactCaches() {
+  specCache = {};
+  summariesCache = {};
+  previewCache = {};
+}
+
+function refreshDisplayedArtifacts() {
+  const lang = activeLanguage();
+  const sp = specCache[lang] ?? newestCached(specCache);
+  spec.value = sp?.payload ?? null;
+  specSeq.value = sp?.seq ?? 0;
+  const su = summariesCache[lang] ?? newestCached(summariesCache);
+  summaries.value = su?.payload ?? null;
+  summariesSeq.value = su?.seq ?? 0;
+  const tp = previewCache[lang] ?? newestCached(previewCache);
+  ticketPreview.value = tp?.payload ?? null;
+}
+
 function headRev(): number {
   return session.value?.rev ?? 0;
 }
@@ -160,21 +204,24 @@ function applyPersistedEvent(ev: IntakeStreamEvent) {
     case "spec": {
       const payload = ev.payload as IntakeSpecPayload | undefined;
       if (payload?.markdown !== undefined) {
-        spec.value = payload;
-        specSeq.value = seq;
+        specCache[payload.language ?? activeLanguage()] = { payload, seq };
+        refreshDisplayedArtifacts();
       }
       break;
     }
     case "ticket_preview": {
       const payload = ev.payload as IntakeTicketPreview | undefined;
-      if (payload?.title !== undefined) ticketPreview.value = payload;
+      if (payload?.title !== undefined) {
+        previewCache[payload.language ?? activeLanguage()] = { payload, seq };
+        refreshDisplayedArtifacts();
+      }
       break;
     }
     case "summaries": {
       const payload = ev.payload as IntakeSummaries | undefined;
       if (payload && (payload.eli5 || payload.eli10 || payload.eli15)) {
-        summaries.value = payload;
-        summariesSeq.value = seq;
+        summariesCache[payload.language ?? activeLanguage()] = { payload, seq };
+        refreshDisplayedArtifacts();
       }
       break;
     }
@@ -200,7 +247,10 @@ function applyPersistedEvent(ev: IntakeStreamEvent) {
     }
     case "language": {
       const lang = (ev.payload as { language?: IntakeLanguage } | undefined)?.language;
-      if (lang && session.value) session.value.language = lang;
+      if (lang && session.value) {
+        session.value.language = lang;
+        refreshDisplayedArtifacts();
+      }
       break;
     }
     default:
@@ -215,21 +265,41 @@ async function hydrate(id: number) {
   const head = await getIntakeSession(id);
   session.value = head.session;
   transcript.value = head.state.transcript;
-  const specArtifact = head.state.artifacts?.spec as IntakeSpecPayload | undefined;
-  spec.value = specArtifact ?? null;
-  specSeq.value = specArtifact ? head.state.at_seq : 0;
-  ticketPreview.value =
-    (head.state.artifacts?.ticket_preview as IntakeTicketPreview | undefined) ?? null;
+  // State artifacts arrive language-preferred (server-side PAI-734
+  // selection); seed the caches under each payload's own language.
+  clearArtifactCaches();
+  seedArtifactCaches(head.state.artifacts, head.state.at_seq);
+  refreshDisplayedArtifacts();
   projectMatch.value =
     (head.state.artifacts?.project_match as IntakeProjectMatch | undefined) ?? null;
   impacts.value = (head.state.artifacts?.impacts as IntakeImpacts | undefined) ?? null;
-  summaries.value = (head.state.artifacts?.summaries as IntakeSummaries | undefined) ?? null;
-  summariesSeq.value = summaries.value ? head.state.at_seq : 0;
   checkpoints.value = head.checkpoints ?? [];
   lastSeq = head.session.rev;
   // The metadata timeline is rebuilt lazily; SSE replay from 0 would
   // duplicate hydration, so the stream resumes from the hydrated rev.
   revIndex.value = [];
+}
+
+function seedArtifactCaches(
+  artifacts: Partial<Record<string, unknown>> | undefined,
+  atSeq: number,
+) {
+  const sp = artifacts?.spec as IntakeSpecPayload | undefined;
+  if (sp?.markdown !== undefined) {
+    const lang = sp.language ?? activeLanguage();
+    if ((specCache[lang]?.seq ?? 0) <= atSeq) specCache[lang] = { payload: sp, seq: atSeq };
+  }
+  const su = artifacts?.summaries as IntakeSummaries | undefined;
+  if (su && (su.eli5 || su.eli10 || su.eli15)) {
+    const lang = su.language ?? activeLanguage();
+    if ((summariesCache[lang]?.seq ?? 0) <= atSeq)
+      summariesCache[lang] = { payload: su, seq: atSeq };
+  }
+  const tp = artifacts?.ticket_preview as IntakeTicketPreview | undefined;
+  if (tp?.title !== undefined) {
+    const lang = tp.language ?? activeLanguage();
+    if ((previewCache[lang]?.seq ?? 0) <= atSeq) previewCache[lang] = { payload: tp, seq: atSeq };
+  }
 }
 
 function connect(id: number) {
@@ -315,6 +385,7 @@ async function start(language?: IntakeLanguage) {
     const s = await createIntakeSession(language);
     session.value = s;
     transcript.value = "";
+    clearArtifactCaches();
     spec.value = null;
     specSeq.value = 0;
     ticketPreview.value = null;
@@ -368,6 +439,24 @@ async function setLanguage(language: IntakeLanguage) {
   const s = session.value;
   if (!s || s.language === language) return;
   await patchIntakeSession(s.id, { language });
+  // Optimistic view switch: the cached artifacts for the new language
+  // display instantly (the SSE echo of the toggle is seq-guarded and
+  // idempotent on top of this).
+  s.language = language;
+  refreshDisplayedArtifacts();
+  if (!specCache[language]) {
+    // Nothing cached locally — hydration only carried the previous
+    // language. One cheap head-state fetch heals the cache when the
+    // server has a generation for this language; when it has none, the
+    // orchestrator is already regenerating and SSE delivers it.
+    try {
+      const state = await getIntakeState(s.id);
+      seedArtifactCaches(state.artifacts, state.at_seq);
+      refreshDisplayedArtifacts();
+    } catch {
+      /* non-fatal: SSE heals the view */
+    }
+  }
 }
 
 /** Pin the session to a project (manual override); 0 releases the pin. */
@@ -438,9 +527,11 @@ async function restore(seq: number) {
     const res = await restoreIntakeSession(s.id, seq);
     session.value = res.session;
     transcript.value = res.state.transcript;
-    const sp = res.state.artifacts?.spec as IntakeSpecPayload | undefined;
-    spec.value = sp ?? null;
-    specSeq.value = sp ? res.state.at_seq : 0;
+    // Time travel invalidates the caches wholesale; reseed from the
+    // restored state (SSE re-delivers the appended snapshots idempotently).
+    clearArtifactCaches();
+    seedArtifactCaches(res.state.artifacts, res.state.at_seq);
+    refreshDisplayedArtifacts();
     viewSeq.value = null;
     viewState.value = null;
     // SSE will deliver the appended restore events; lastSeq advances there.
@@ -465,6 +556,7 @@ function reset() {
   disconnect();
   session.value = null;
   transcript.value = "";
+  clearArtifactCaches();
   spec.value = null;
   specSeq.value = 0;
   ticketPreview.value = null;

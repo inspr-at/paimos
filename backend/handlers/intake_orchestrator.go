@@ -111,6 +111,47 @@ func (o *intakeOrchestrator) release(sessionID int64) {
 	o.mu.Unlock()
 }
 
+// intakeForceRegen marks sessions whose next pipeline run must skip the
+// PAI-734 freshness gate: manual refresh means "regenerate now" even
+// though no new input landed. In-memory on purpose — refresh is an
+// immediate-action UX, not durable state.
+var intakeForceRegen sync.Map // sessionID → struct{}
+
+func markIntakeForceRegen(sessionID int64) { intakeForceRegen.Store(sessionID, struct{}{}) }
+
+func takeIntakeForceRegen(sessionID int64) bool {
+	_, ok := intakeForceRegen.LoadAndDelete(sessionID)
+	return ok
+}
+
+// intakeSpecFresh reports whether the newest spec event in the given
+// language postdates every transcript chunk and restore — i.e. the
+// cached spec already reflects all input and a regeneration would only
+// re-spend tokens on identical material. This is what makes a language
+// toggle a view switch (PAI-734): toggling back to a language whose
+// spec is fresh costs zero provider calls.
+func intakeSpecFresh(ctx context.Context, sessionID int64, language string) (bool, error) {
+	var specSeq sql.NullInt64
+	if err := db.DB.QueryRowContext(ctx,
+		`SELECT MAX(seq) FROM intake_events
+		  WHERE session_id = ? AND kind = 'spec'
+		    AND json_extract(payload_json, '$.language') = ?`,
+		sessionID, language).Scan(&specSeq); err != nil {
+		return false, err
+	}
+	if !specSeq.Valid {
+		return false, nil
+	}
+	var inputSeq sql.NullInt64
+	if err := db.DB.QueryRowContext(ctx,
+		`SELECT MAX(seq) FROM intake_events
+		  WHERE session_id = ? AND kind IN ('transcript_chunk', 'restore')`,
+		sessionID).Scan(&inputSeq); err != nil {
+		return false, err
+	}
+	return specSeq.Int64 > inputSeq.Int64, nil
+}
+
 // run is the worker loop: debounce pokes (quiet ≥2.5s OR 10s since the
 // first pending poke), run the pipeline serialized, exit after 60s idle.
 func (w *intakeWorker) run() {
@@ -215,6 +256,17 @@ func runIntakePipeline(sessionID int64) {
 	transcript, err := loadIntakeTranscript(ctx, sessionID)
 	if err != nil || transcript == "" {
 		return
+	}
+
+	// PAI-734 freshness gate: when the active language's spec already
+	// reflects every input event, this poke was a view-level change
+	// (language toggle, restore) — skip the whole pipeline instead of
+	// re-spending tokens. Manual refresh bypasses via markIntakeForceRegen.
+	if !takeIntakeForceRegen(sessionID) {
+		if fresh, ferr := intakeSpecFresh(ctx, sessionID, s.Language); ferr == nil && fresh {
+			publishIntakeStage(sessionID, "spec", "ok", "cached")
+			return
+		}
 	}
 
 	settings, provider, reason := intakeAIRuntime()

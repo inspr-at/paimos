@@ -61,6 +61,12 @@ const (
 // they are inputs or markers, not materialized artifacts.
 var intakeArtifactKinds = []string{"spec", "summaries", "ticket_preview", "project_match", "impacts"}
 
+// Kinds whose payloads carry a language and are cached per language
+// (PAI-734): state selection prefers the artifact matching the active
+// language, so a toggle shows the cached version instead of waiting for
+// (or paying for) a regeneration. project_match/impacts are language-blind.
+var intakeLanguageScopedKinds = map[string]bool{"spec": true, "summaries": true, "ticket_preview": true}
+
 // intakeEventKindAllowed mirrors the intake_events.kind CHECK constraint.
 func intakeEventKindAllowed(kind string) bool {
 	switch kind {
@@ -404,7 +410,8 @@ func IngestIntakeTranscript(w http.ResponseWriter, r *http.Request) {
 
 // RefreshIntakeSession handles POST /api/intake/sessions/{id}/refresh —
 // force a regeneration cycle now (bypasses the quiet-period debounce
-// only in the sense that it counts as a fresh poke).
+// only in the sense that it counts as a fresh poke, and skips the
+// PAI-734 freshness gate: an explicit refresh always regenerates).
 func RefreshIntakeSession(w http.ResponseWriter, r *http.Request) {
 	s, _, ok := requireIntakeSession(w, r)
 	if !ok {
@@ -414,6 +421,7 @@ func RefreshIntakeSession(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "intake session is not active", http.StatusConflict)
 		return
 	}
+	markIntakeForceRegen(s.ID)
 	notifyIntakeOrchestrator(s.ID)
 	w.WriteHeader(http.StatusAccepted)
 	jsonOK(w, map[string]any{"ok": true})
@@ -448,7 +456,10 @@ func PatchIntakeSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if lang != s.Language {
-			raw, _ := json.Marshal(map[string]string{"language": lang})
+			// "from" preserves the pre-toggle language so time-travel
+			// views can resolve the active language before the first
+			// toggle (PAI-734, intakeLanguageAt).
+			raw, _ := json.Marshal(map[string]string{"language": lang, "from": s.Language})
 			if !appendIntakeEventHTTP(w, ctx, s.ID, "language", "user", "", string(raw)) {
 				return
 			}
@@ -756,12 +767,26 @@ func RestoreIntakeSession(w http.ResponseWriter, r *http.Request) {
 // marker's target, then chunks after it.
 func intakeStateAt(ctx context.Context, sessionID, atSeq int64) (*intakeState, error) {
 	state := &intakeState{AtSeq: atSeq, Artifacts: map[string]json.RawMessage{}}
+	lang := intakeLanguageAt(ctx, sessionID, atSeq)
 	for _, kind := range intakeArtifactKinds {
 		var payload string
-		err := db.DB.QueryRowContext(ctx,
-			`SELECT payload_json FROM intake_events
-			 WHERE session_id = ? AND kind = ? AND seq <= ?
-			 ORDER BY seq DESC LIMIT 1`, sessionID, kind, atSeq).Scan(&payload)
+		err := sql.ErrNoRows
+		if intakeLanguageScopedKinds[kind] && lang != "" {
+			// PAI-734: prefer the newest artifact in the active language …
+			err = db.DB.QueryRowContext(ctx,
+				`SELECT payload_json FROM intake_events
+				 WHERE session_id = ? AND kind = ? AND seq <= ?
+				   AND json_extract(payload_json, '$.language') = ?
+				 ORDER BY seq DESC LIMIT 1`, sessionID, kind, atSeq, lang).Scan(&payload)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			// … falling back to the newest in any language, so a language
+			// with no generation yet still shows the latest content.
+			err = db.DB.QueryRowContext(ctx,
+				`SELECT payload_json FROM intake_events
+				 WHERE session_id = ? AND kind = ? AND seq <= ?
+				 ORDER BY seq DESC LIMIT 1`, sessionID, kind, atSeq).Scan(&payload)
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -778,6 +803,46 @@ func intakeStateAt(ctx context.Context, sessionID, atSeq int64) (*intakeState, e
 	}
 	state.Transcript = transcript
 	return state, nil
+}
+
+// intakeLanguageAt resolves the session's active language as of atSeq:
+// the latest toggle at or before it wins; before the first toggle the
+// earliest later toggle's "from" field names the starting language; a
+// session never toggled uses its current row value. (Toggle events
+// predating PAI-734 lack "from" — those degrade to the row value, which
+// only affects historical scrubs of already-toggled sessions.)
+func intakeLanguageAt(ctx context.Context, sessionID, atSeq int64) string {
+	var payload string
+	err := db.DB.QueryRowContext(ctx,
+		`SELECT payload_json FROM intake_events
+		 WHERE session_id = ? AND kind = 'language' AND seq <= ?
+		 ORDER BY seq DESC LIMIT 1`, sessionID, atSeq).Scan(&payload)
+	if err == nil {
+		var body struct {
+			Language string `json:"language"`
+		}
+		if json.Unmarshal([]byte(payload), &body) == nil && body.Language != "" {
+			return body.Language
+		}
+	}
+	err = db.DB.QueryRowContext(ctx,
+		`SELECT payload_json FROM intake_events
+		 WHERE session_id = ? AND kind = 'language' AND seq > ?
+		 ORDER BY seq ASC LIMIT 1`, sessionID, atSeq).Scan(&payload)
+	if err == nil {
+		var body struct {
+			From string `json:"from"`
+		}
+		if json.Unmarshal([]byte(payload), &body) == nil && body.From != "" {
+			return body.From
+		}
+	}
+	var lang string
+	if err := db.DB.QueryRowContext(ctx,
+		`SELECT language FROM intake_sessions WHERE id = ?`, sessionID).Scan(&lang); err == nil {
+		return lang
+	}
+	return ""
 }
 
 // intakeTranscriptAt rebuilds the transcript as of atSeq. Restore markers
