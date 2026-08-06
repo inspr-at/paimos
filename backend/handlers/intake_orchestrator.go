@@ -98,17 +98,30 @@ func notifyIntakeOrchestrator(sessionID int64) {
 		o.workers[sessionID] = w
 		go w.run()
 	}
-	o.mu.Unlock()
+	// PAI-725: the send happens under the same mutex as retire(), so a
+	// poke can only ever land in a channel whose worker is either alive
+	// or will see it during retirement — never in one nobody reads.
 	select {
 	case w.poke <- struct{}{}:
 	default: // a pending poke already guarantees a follow-up run
 	}
+	o.mu.Unlock()
 }
 
-func (o *intakeOrchestrator) release(sessionID int64) {
+// retire is the only way a worker leaves the map (PAI-725). Under the
+// orchestrator mutex it either consumes a poke that raced the idle-exit
+// decision — keeping the worker alive — or removes the worker for good.
+// Returns true when the worker may exit.
+func (o *intakeOrchestrator) retire(w *intakeWorker) bool {
 	o.mu.Lock()
-	delete(o.workers, sessionID)
-	o.mu.Unlock()
+	defer o.mu.Unlock()
+	select {
+	case <-w.poke:
+		return false
+	default:
+		delete(o.workers, w.sessionID)
+		return true
+	}
 }
 
 // intakeForceRegen marks sessions whose next pipeline run must skip the
@@ -154,44 +167,54 @@ func intakeSpecFresh(ctx context.Context, sessionID int64, language string) (boo
 
 // run is the worker loop: debounce pokes (quiet ≥2.5s OR 10s since the
 // first pending poke), run the pipeline serialized, exit after 60s idle.
+// Exit goes through retire() so a poke racing the idle decision keeps
+// the worker alive instead of being dropped (PAI-725).
 func (w *intakeWorker) run() {
-	defer globalIntakeOrchestrator.release(w.sessionID)
 	idle := time.NewTimer(intakeWorkerIdleExit)
 	defer idle.Stop()
 	for {
 		select {
 		case <-idle.C:
-			return
+			if globalIntakeOrchestrator.retire(w) {
+				return
+			}
+			// retire consumed a poke that raced the idle exit — fall
+			// through to a normal debounce + pipeline run.
 		case <-w.poke:
-			// Debounce window: extend on further pokes until quiet or max.
-			first := time.Now()
-			quiet := time.NewTimer(intakeDebounceQuiet)
-		debounce:
-			for {
-				select {
-				case <-w.poke:
-					if time.Since(first) >= intakeDebounceMax {
-						break debounce
-					}
-					if !quiet.Stop() {
-						<-quiet.C
-					}
-					quiet.Reset(intakeDebounceQuiet)
-				case <-quiet.C:
-					break debounce
-				}
+		}
+		w.debounceAndRun()
+		if !idle.Stop() {
+			select {
+			case <-idle.C:
+			default:
 			}
-			quiet.Stop()
-			runIntakePipeline(w.sessionID)
-			if !idle.Stop() {
-				select {
-				case <-idle.C:
-				default:
-				}
+		}
+		idle.Reset(intakeWorkerIdleExit)
+	}
+}
+
+// debounceAndRun coalesces the burst that follows a first poke (quiet
+// ≥2.5s OR 10s since the burst began), then runs one pipeline cycle.
+func (w *intakeWorker) debounceAndRun() {
+	first := time.Now()
+	quiet := time.NewTimer(intakeDebounceQuiet)
+debounce:
+	for {
+		select {
+		case <-w.poke:
+			if time.Since(first) >= intakeDebounceMax {
+				break debounce
 			}
-			idle.Reset(intakeWorkerIdleExit)
+			if !quiet.Stop() {
+				<-quiet.C
+			}
+			quiet.Reset(intakeDebounceQuiet)
+		case <-quiet.C:
+			break debounce
 		}
 	}
+	quiet.Stop()
+	runIntakePipeline(w.sessionID)
 }
 
 // intakeSessionTokenBudgetFor resolves the per-session token budget:
