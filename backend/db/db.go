@@ -163,6 +163,20 @@ func enableWALMode(db *sql.DB) error {
 	return err
 }
 
+// PromoteSeededAdminSQL is migration M138 (PAI-739): promote the seeded
+// bootstrap 'admin' account to super_admin, but only on instances that
+// have no super-admin at all — exactly the ones deadlocked by the old
+// admin-only seed. Exported so the migration semantics are directly
+// testable against planted legacy states.
+const PromoteSeededAdminSQL = `UPDATE users
+	SET role_key = 'super_admin', is_super_admin = 1
+	WHERE username = 'admin'
+	  AND role = 'admin'
+	  AND is_super_admin = 0
+	  AND NOT EXISTS (
+		SELECT 1 FROM users WHERE is_super_admin = 1 OR role_key = 'super_admin'
+	  )`
+
 func migrate(db *sql.DB) error {
 	// In test mode, skip fsync and keep the journal in memory so the ~70
 	// migration statements don't each pay a disk-sync cost. Applied here
@@ -5548,6 +5562,15 @@ func migrate(db *sql.DB) error {
 			`ALTER TABLE ai_settings ADD COLUMN tts_voice_id TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE ai_settings ADD COLUMN tts_model TEXT NOT NULL DEFAULT ''`,
 		}},
+
+		// M138 / PAI-739: break the super-admin bootstrap deadlock on
+		// existing installs. The first-run seed used to create the
+		// 'admin' user with role admin only, while granting super_admin
+		// requires being one — instances bootstrapped that way could
+		// never reach the role without DB surgery. Promote exactly the
+		// seeded account, and only when the instance has no super-admin
+		// at all (instances that already have one are left untouched).
+		{138, []string{PromoteSeededAdminSQL}},
 	}
 
 	for _, m := range migrations {

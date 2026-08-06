@@ -279,15 +279,20 @@ func seedAdmin() {
 		log.Printf("seed: hash error: %v", err)
 		return
 	}
+	// PAI-739: the bootstrap user must be super_admin — granting
+	// super_admin requires being one, so an admin-only seed made the
+	// role unreachable on fresh installs. Column triple mirrors what
+	// the users handler writes for a super_admin (legacy role shim +
+	// canonical role_key + compat flag).
 	_, err = db.DB.Exec(
-		"INSERT INTO users(username,password,role) VALUES(?,?,?)",
-		"admin", hash, "admin",
+		"INSERT INTO users(username,password,role,role_key,is_super_admin) VALUES(?,?,?,?,1)",
+		"admin", hash, auth.LegacyRoleForPublicRole(auth.RoleSuperAdmin), auth.RoleSuperAdmin,
 	)
 	if err != nil {
 		log.Printf("seed: insert error: %v", err)
 		return
 	}
-	log.Println("seed: created admin user (username: admin)")
+	log.Println("seed: created super-admin bootstrap user (username: admin)")
 }
 
 func getPort() string {
