@@ -5,6 +5,15 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.6.0] — 2026-08-06
+
+### Changed — The workbench switches languages instantly and owns its header (PAI-734, PAI-735)
+
+- Switching EN/DE is now a view switch, not a regeneration: each language keeps its own cached spec, summaries and ticket preview, toggling back costs zero AI calls, and a generation in one language never overwrites the view of the other. New input regenerates only the language you're looking at; the manual refresh button still forces a full regeneration.
+- The workbench toolbar (breadcrumb, project chip, talk controls) moved into the app header — one chrome row instead of two. The search field steps aside on this screen; `/` and `⌘K` still summon it.
+- PAI-734: per-language spec cache — EN/DE toggle is a view switch (#65)
+- PAI-735: workbench toolbar lives in the app header (#66)
+
 ## [5.5.0] — 2026-08-06
 
 ### Security — Paid voice endpoints are rate-limited and metered (PAI-724)
