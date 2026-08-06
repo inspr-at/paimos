@@ -100,6 +100,15 @@ func SpeakIntakeSummary(w http.ResponseWriter, r *http.Request) {
 	if len(text) > intakeTTSMaxChars {
 		text = text[:intakeTTSMaxChars]
 	}
+	// PAI-724: paid-call gates (concurrency, burst, daily budgets)
+	// before any provider spend. Units are the characters synthesized —
+	// what ElevenLabs bills by.
+	chars := int64(len([]rune(text)))
+	release, admitted := voiceAdmit(w, r, user, "intake_tts", chars)
+	if !admitted {
+		return
+	}
+	defer release()
 
 	started := time.Now()
 	audio, ttsErr := synthesizeWithElevenLabs(r.Context(), vs, text, summaries.Language)
@@ -108,14 +117,15 @@ func SpeakIntakeSummary(w http.ResponseWriter, r *http.Request) {
 	if ttsErr != nil {
 		outcome, errorClass = "fail_upstream", "upstream"
 	}
-	var userID *int64
-	if user != nil {
-		userID = &user.ID
+	var billedChars int64
+	if ttsErr == nil {
+		billedChars = chars
 	}
 	recordAICall(r.Context(), aiCallArgs{
-		RequestID: newAIRequestID(), UserID: userID, ActionKey: "intake_tts",
+		RequestID: newAIRequestID(), UserID: &user.ID, ActionKey: "intake_tts",
 		SubAction: body.Level, Surface: "intake", ProjectID: s.activeProjectID(),
 		Provider: vs.Provider, Model: vs.TTSModel,
+		PromptTokens: int(billedChars), CostMicroUSD: billedChars * voiceTTSMicroUSDPerChar,
 		Outcome: outcome, ErrorClass: errorClass, LatencyMs: latency.Milliseconds(),
 	})
 	if ttsErr != nil {

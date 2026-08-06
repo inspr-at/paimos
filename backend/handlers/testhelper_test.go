@@ -95,6 +95,10 @@ func newTestServer(t *testing.T) *testServer {
 	// Ensure system tags (At Risk etc.) are set up — mirrors main.go
 	handlers.EnsureAtRiskTag()
 
+	// In-memory limiter state survives across tests in one package run;
+	// reset it like the DB so cases stay independent (PAI-724).
+	handlers.ResetVoiceLimitsForTest()
+
 	r := buildRouter()
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)

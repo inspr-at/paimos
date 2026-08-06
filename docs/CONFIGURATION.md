@@ -346,6 +346,26 @@ soft block but get an `X-AI-Over-Cap: true` response header for UI
 warning. Settings → AI surfaces the org-wide totals + per-user
 table.
 
+### Voice cost gates (PAI-724)
+
+The intake voice endpoints (`.../audio` STT, `.../tts`) call paid
+provider APIs and run their own gates before every provider call:
+per-user concurrency (2 in flight), per-minute burst caps (20 STT /
+10 TTS), the PAI-161 usage cap above, and per-user daily unit
+budgets, all answering `429` + `Retry-After` when exceeded. The daily
+budgets are soft caps (admins pass) summed from today's `ai_calls`
+rows — STT in estimated audio seconds, TTS in characters:
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `PAIMOS_VOICE_STT_DAILY_SECONDS` | `7200` | Per-user daily speech-to-text budget in estimated audio seconds (2 audio-hours). Non-positive / non-numeric values fall back to the default. |
+| `PAIMOS_VOICE_TTS_DAILY_CHARS` | `60000` | Per-user daily text-to-speech budget in characters (~30 full-length spoken summaries). Same fallback rule. |
+
+Successful voice calls record their units in `prompt_tokens` and an
+estimated `cost_micro_usd` on the paper trail (Scribe ≈ $0.40/audio-
+hour, multilingual TTS ≈ $0.10/1k chars), so voice spend shows up in
+the cost totals instead of as zero.
+
 ### Paper trail (`PAI-207` / `PAI-208`)
 
 `ai_calls` (M81) stores one metadata row per AI attempt:

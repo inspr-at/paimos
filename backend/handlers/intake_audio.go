@@ -40,7 +40,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 )
 
@@ -56,7 +55,7 @@ var voiceSTTHTTPClient = &http.Client{Timeout: intakeAudioSTTTimeout}
 
 // TranscribeIntakeAudio handles POST /api/intake/sessions/{id}/audio.
 func TranscribeIntakeAudio(w http.ResponseWriter, r *http.Request) {
-	s, _, ok := requireIntakeSession(w, r)
+	s, user, ok := requireIntakeSession(w, r)
 	if !ok {
 		return
 	}
@@ -100,26 +99,37 @@ func TranscribeIntakeAudio(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "session transcript is full — create the issue or start a new session", http.StatusConflict)
 		return
 	}
+	// PAI-724: paid-call gates (concurrency, burst, daily budgets)
+	// before any provider spend.
+	estSeconds := voiceEstimateSeconds(len(audio))
+	release, admitted := voiceAdmit(w, r, user, "intake_stt", estSeconds)
+	if !admitted {
+		return
+	}
+	defer release()
 
 	started := time.Now()
 	text, sttErr := transcribeWithElevenLabs(r.Context(), vs, contentType, audio, s.Language)
 	latency := time.Since(started)
 	// Paper-trail parity with every other provider call (INV-INTAKE-04):
-	// metadata only — never audio, never the transcript text.
+	// metadata only — never audio, never the transcript text. Units are
+	// estimated audio seconds; the provider bills them even when the
+	// transcript comes back empty (no_op).
 	outcome, errorClass := "ok", ""
 	if sttErr != nil {
 		outcome, errorClass = "fail_upstream", "upstream"
 	} else if strings.TrimSpace(text) == "" {
 		outcome = "no_op"
 	}
-	var userID *int64
-	if u := auth.GetUser(r); u != nil {
-		userID = &u.ID
+	var billedSeconds int64
+	if sttErr == nil {
+		billedSeconds = estSeconds
 	}
 	recordAICall(r.Context(), aiCallArgs{
-		RequestID: newAIRequestID(), UserID: userID, ActionKey: "intake_stt",
+		RequestID: newAIRequestID(), UserID: &user.ID, ActionKey: "intake_stt",
 		Surface: "intake", ProjectID: s.activeProjectID(),
 		Provider: vs.Provider, Model: vs.STTModel,
+		PromptTokens: int(billedSeconds), CostMicroUSD: billedSeconds * voiceSTTMicroUSDPerSecond,
 		Outcome: outcome, ErrorClass: errorClass, LatencyMs: latency.Milliseconds(),
 	})
 	if sttErr != nil {
