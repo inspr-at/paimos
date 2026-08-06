@@ -158,4 +158,45 @@ describe("useIntakeSession", () => {
     expect(s.transcript.value).toBe("");
     expect(s.connection.value).toBe("disconnected");
   });
+
+  it("caches artifacts per language and toggles as a view switch (PAI-734)", async () => {
+    const s = useIntakeSession();
+    await s.start();
+    const src = lastSource();
+    src.onopen?.();
+
+    src.emit("transcript_chunk", { seq: 1, kind: "transcript_chunk", payload: { text: "idea" } });
+    src.emit("spec", { seq: 2, kind: "spec", payload: { markdown: "# EN", language: "en" } });
+    expect(s.spec.value?.markdown).toBe("# EN");
+
+    // A DE generation arriving while EN is active must not clobber the view.
+    src.emit("spec", { seq: 3, kind: "spec", payload: { markdown: "# DE", language: "de" } });
+    expect(s.spec.value?.markdown).toBe("# EN");
+    expect(s.specSeq.value).toBe(2);
+
+    // The toggle echo swaps the displayed spec from the cache instantly.
+    src.emit("language", { seq: 4, kind: "language", payload: { language: "de", from: "en" } });
+    expect(s.session.value?.language).toBe("de");
+    expect(s.spec.value?.markdown).toBe("# DE");
+
+    // Toggling back re-displays the cached EN spec unchanged.
+    src.emit("language", { seq: 5, kind: "language", payload: { language: "en", from: "de" } });
+    expect(s.spec.value?.markdown).toBe("# EN");
+  });
+
+  it("falls back to the newest cached language while a first generation is pending", async () => {
+    const s = useIntakeSession();
+    await s.start();
+    const src = lastSource();
+    src.onopen?.();
+
+    src.emit("spec", { seq: 1, kind: "spec", payload: { markdown: "# EN", language: "en" } });
+    src.emit("language", { seq: 2, kind: "language", payload: { language: "de", from: "en" } });
+    // No DE spec yet — the EN one stays visible instead of a blank card.
+    expect(s.spec.value?.markdown).toBe("# EN");
+
+    // When the DE generation lands, the active view picks it up.
+    src.emit("spec", { seq: 3, kind: "spec", payload: { markdown: "# DE", language: "de" } });
+    expect(s.spec.value?.markdown).toBe("# DE");
+  });
 });
