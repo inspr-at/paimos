@@ -35,7 +35,7 @@ Five criteria. A deployment becomes a reference when **all five** hold.
 | 1 | **Active operator** — someone is responsible for the deployment, monitors it, and would notice if it broke | Without an active operator, the install isn't being validated; it's just running. |
 | 2 | **Multi-month uptime in production-like usage** — at least 90 days of real user activity, not test data | A 90-day window catches configuration drift, certificate renewals, log rotation, retention sweeps, and seasonal patterns that a one-week pilot misses. |
 | 3 | **Real users with real data** — not synthetic; the operator would care if the data were lost | Synthetic data hides bugs that only appear with realistic content (long descriptions, attached files, complex relations, etc.). |
-| 4 | **Survived at least one upgrade cycle** — operator has run `just deploy-ppm v<X.Y.Z>` from one minor version to the next | Upgrade is the highest-risk operation; surviving one is the strongest single signal that the runbook works. |
+| 4 | **Survived at least one upgrade cycle** — operator has deployed from one minor version to the next via the documented path (composeStack pin-bump for ppm; `deploy.sh` for compose instances) | Upgrade is the highest-risk operation; surviving one is the strongest single signal that the runbook works. |
 | 5 | **At least one backup / restore exercise** — real or drilled, captured in writing | Backups that have never been restored aren't backups; they're tarballs with hopeful filenames. |
 
 A deployment that meets 4-of-5 (e.g., never upgraded yet) is a *candidate* reference, not a reference. The matrix in §3 below tracks each criterion per deployment.
@@ -44,7 +44,7 @@ A deployment that meets 4-of-5 (e.g., never upgraded yet) is a *candidate* refer
 
 ## 2 · Reference deployment register
 
-The register contains two validated deployment histories. As of 2026-06-30, ppm is the only active deploy target; the second-operator instance is historical and inactive since the operator exit in June 2026. The current ppm proof is the live `4.8.0` deployment verified on 2026-07-08.
+The register contains two validated deployment histories. As of 2026-06-30, ppm is the only active deploy target; the second-operator instance is historical and inactive since the operator exit in June 2026. The current ppm proof is the live `5.6.2` deployment verified on 2026-08-06 (fifth composeStack pin-bump deploy of that day: v5.5.0 → v5.6.2).
 
 ### 2.1 · ppm · `pm.barta.cm`
 
@@ -58,8 +58,8 @@ The register contains two validated deployment histories. As of 2026-06-30, ppm 
 | AI assist | OpenRouter (configured), `anthropic/claude-sonnet-4.5` model |
 | OIDC | configured against Zitadel (`auth.inspr.at`) via generic OIDC + PKCE; local password + TOTP remain available |
 | Active since | v1.x (continuously upgraded; no fresh-install in current era) |
-| Last verified runtime | 2026-07-08: `4.8.0` (`/api/health`, OIDC status, SSO browser round-trip) |
-| Backup pattern | per-deploy via `scripts/deploy.sh`; `$BACKUP_ROOT` on the same host (acknowledged limitation tracked under [§3 Findings](#3--structured-findings) F-08) |
+| Last verified runtime | 2026-08-06: `5.6.2` (`/api/health`, `paimos --instance ppm doctor` incl. auth + schema `2.0.0`) |
+| Backup pattern | per-deploy volume tar + manifest under `/home/mba/paimos-backups/ppm/<ts>/` (composeStack path, see [`DEPLOY.md`](DEPLOY.md)); backups on the same host (acknowledged limitation tracked under [§3 Findings](#3--structured-findings) F-08) |
 | Audience | the maintainer + a small group; current production canary |
 
 **Role in the project:** ppm is the **active production deployment and release canary**. While the second-operator instance was active, the release flow continued from ppm to that independent second deployment. Current releases stop at ppm unless another active reference operator is added.

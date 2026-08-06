@@ -346,6 +346,22 @@ soft block but get an `X-AI-Over-Cap: true` response header for UI
 warning. Settings → AI surfaces the org-wide totals + per-user
 table.
 
+### Voice provider + session budget (PAI-703 … PAI-714)
+
+Voice input/output for the intake workbench is configured at
+Settings → Integrations → AI (admin; `PUT /api/ai/voice-settings`):
+`provider` (`""` = off, `elevenlabs`), `api_key` (write-only — reads
+report `has_api_key` only), `base_url` (e.g. the EU residency host),
+`stt_model`, `tts_model`, and `tts_voice_id`. Audio is transcribed and
+dropped — never stored (INV-INTAKE-06); TTS returns bytes with
+`Cache-Control: no-store`.
+
+Each intake session also has an LLM token budget so a runaway dictation
+can't spend unbounded: `app_settings` key
+`intake_session_token_budget` (Settings → System; default `60000`,
+bounds 1 000–500 000). When exhausted, capture keeps working and the
+spec freezes with an explanatory stage message.
+
 ### Voice cost gates (PAI-724)
 
 The intake voice endpoints (`.../audio` STT, `.../tts`) call paid
