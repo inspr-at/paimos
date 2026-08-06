@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.6.2] — 2026-08-06
+
+### Security — CLI credentials can no longer leak via argv or stale YAML (PAI-685)
+
+- `paimos auth login --api-key` is retired: legacy invocations fail with guidance instead of putting the key into process lists and shell history. Workstations use the hidden prompt; headless/CI sets `PAIMOS_API_KEY` as a runtime-only override.
+- A legacy `api_key:` in `config.yaml` now migrates into the OS keyring even when `PAIMOS_API_KEY` is set; keyring-less machines get a loud manual-cleanup warning instead of silent skipping.
+- PAI-685: CLI credential hygiene — no argv keys, always scrub legacy YAML (#68)
+
 ## [5.6.1] — 2026-08-06
 
 ### Fixed — The last utterance of a session can no longer be silently dropped (PAI-725)
