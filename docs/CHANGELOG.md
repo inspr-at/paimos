@@ -5,6 +5,13 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.6.1] — 2026-08-06
+
+### Fixed — The last utterance of a session can no longer be silently dropped (PAI-725)
+
+- A wakeup racing the orchestrator worker's idle exit could land in a channel nobody reads, leaving the spec stale until the next input. Pokes and worker retirement are now serialized under one mutex: a raced wakeup keeps the worker alive and runs the pipeline. Covered by race-detector regression tests.
+- PAI-725: fix orchestrator idle-exit lost-wakeup race (#67)
+
 ## [5.6.0] — 2026-08-06
 
 ### Changed — The workbench switches languages instantly and owns its header (PAI-734, PAI-735)
