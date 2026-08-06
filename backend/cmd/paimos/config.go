@@ -92,20 +92,30 @@ func loadConfig() (Config, error) {
 // into the OS keyring and rewrites the config file without the field.
 // Called once per loadConfig; a no-op when the keys are already gone
 // (the common steady-state case after the first migration).
+//
+// PAI-685: a set PAIMOS_API_KEY used to skip migration entirely, so a
+// legacy plaintext key could sit in config.yaml forever on machines
+// that always export the env var. Env is a runtime override, never a
+// reason to keep secrets on disk — migration now always runs. Only
+// when the keyring itself is unusable (headless box) does the field
+// stay, with a loud nag instead of a hard failure, because deleting
+// the only stored copy would destroy the credential.
 func migrateAPIKeysToKeyring(cfg *Config, path string) error {
-	if os.Getenv(envAPIKey) != "" {
-		for name, inst := range cfg.Instances {
-			inst.APIKey = ""
-			cfg.Instances[name] = inst
-		}
-		return nil
-	}
 	migrated := make([]string, 0)
 	for name, inst := range cfg.Instances {
 		if inst.APIKey == "" {
 			continue
 		}
 		if err := keyringSet(name, inst.APIKey); err != nil {
+			if os.Getenv(envAPIKey) != "" {
+				fmt.Fprintf(stderr, "paimos: WARNING: legacy api_key for instance %q remains in %s (keyring unavailable: %v) — remove it manually; %s is a runtime-only override\n",
+					name, path, err, envAPIKey)
+				// In-memory scrub: nothing downstream may read the
+				// YAML credential; resolution uses env → keyring only.
+				inst.APIKey = ""
+				cfg.Instances[name] = inst
+				continue
+			}
 			return fmt.Errorf("migrate api_key for instance %q to keyring: %w (set %s to bypass)", name, err, envAPIKey)
 		}
 		inst.APIKey = ""

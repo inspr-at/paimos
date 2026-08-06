@@ -109,6 +109,15 @@ Service / KWallet on Linux, Credential Manager on Windows — under
 service `paimos-cli`, account `<instance-name>`. It is never written
 to disk in plaintext.
 
+> **Upgrading from ≤ 5.6:** `paimos auth login --api-key …` was removed
+> (a credential in process arguments lands in `ps` output and shell
+> history). Workstations use the hidden prompt above; automation sets
+> `PAIMOS_API_KEY` as a runtime-only override — there is deliberately
+> no way to pass a credential via argv. Any legacy `api_key:` field
+> still in `config.yaml` is migrated into the keyring on the next CLI
+> run — even when `PAIMOS_API_KEY` is set; on keyring-less machines the
+> CLI warns instead and asks you to delete the field manually.
+
 ### 2. Try a read-only command
 
 ```bash
