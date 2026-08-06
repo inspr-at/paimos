@@ -5,6 +5,13 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.6.3] — 2026-08-06
+
+### Fixed — Fresh installs can finally have a super-admin (PAI-739)
+
+- The first-run seed created an admin-only user while granting `super_admin` requires being one — the role was unreachable on new instances without DB surgery. The seeded bootstrap user is now a super-admin, and migration M138 promotes the seeded `admin` account on existing instances that have no super-admin at all (instances that already have one are untouched).
+- PAI-739: break the super-admin bootstrap deadlock (#70)
+
 ## [5.6.2] — 2026-08-06
 
 ### Security — CLI credentials can no longer leak via argv or stale YAML (PAI-685)
