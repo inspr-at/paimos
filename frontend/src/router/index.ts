@@ -162,8 +162,11 @@ const router = createRouter({
     {
       // PAI-703: Voice Intake workbench — first-class route since the epic
       // shipped end-to-end (promoted from the DEV gate in the PAI-709 slice).
+      // PAI-735: the workbench toolbar lives in the app header; the search
+      // field yields its spot but / and ⌘K still reveal it.
       path: "/intake",
       component: () => import("@/views/VoiceIntakeView.vue"),
+      meta: { headerSearchHidden: true },
     },
     ...(import.meta.env.DEV
       ? [

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useRouter } from "vue-router";
 import AppIcon from "@/components/AppIcon.vue";
@@ -25,6 +25,13 @@ const ISSUE_AUTO_REFRESH_MIN_SECONDS = 10;
 const ISSUE_AUTO_REFRESH_STEP_SECONDS = 10;
 
 const searchFocused = ref(false);
+// PAI-735: focused-tool routes (Voice Intake workbench) claim the header
+// for their own toolbar and hide the search FIELD — not the capability.
+// / and ⌘K land in focus() below, which reveals the input transiently;
+// leaving it (blur/escape/navigation) hides it again.
+const searchHiddenByRoute = computed(() => route.meta?.headerSearchHidden === true);
+const searchRevealed = ref(false);
+const searchVisible = computed(() => !searchHiddenByRoute.value || searchRevealed.value);
 const topbarInput = ref<HTMLInputElement | null>(null);
 const searchWrap = ref<HTMLElement | null>(null);
 const paletteRef = ref<InstanceType<typeof SearchPalette> | null>(null);
@@ -96,6 +103,8 @@ function onBlur() {
   // Delay closing palette so mousedown on palette items fires first
   setTimeout(() => {
     paletteVisible.value = false;
+    // A transiently revealed field (PAI-735) collapses once left.
+    searchRevealed.value = false;
   }, 200);
 }
 
@@ -250,6 +259,14 @@ watch(
   },
 );
 
+// Navigating away collapses a transiently revealed search (PAI-735).
+watch(
+  () => route.path,
+  () => {
+    searchRevealed.value = false;
+  },
+);
+
 watch(
   routeProjectId,
   async (id) => {
@@ -293,10 +310,20 @@ const refreshPromptTitle = computed(
   () => `${issueRefresh.label}. Refresh issue list (⌘R).`,
 );
 
-// Exposed so AppLayout can focus on / shortcut
+// Exposed so AppLayout can focus on / or ⌘K. On routes that hide the
+// search field (PAI-735) the shortcut reveals it first, then focuses
+// once the input exists.
 defineExpose({
   focus() {
     if (issueRefresh.visible) return;
+    if (searchHiddenByRoute.value && !searchRevealed.value) {
+      searchRevealed.value = true;
+      void nextTick(() => {
+        topbarInput.value?.focus();
+        topbarInput.value?.select();
+      });
+      return;
+    }
     topbarInput.value?.focus();
     topbarInput.value?.select();
   },
@@ -351,7 +378,7 @@ defineExpose({
                am I in" from "what am I typing", and frees the
                input's right-padding so the clear button is the only
                thing that lives inside the rounded chrome. -->
-          <div v-else key="search" class="ah-search-row">
+          <div v-else-if="searchVisible" key="search" class="ah-search-row">
             <div
               ref="searchWrap"
               :class="[
