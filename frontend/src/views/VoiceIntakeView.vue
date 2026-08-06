@@ -484,7 +484,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="vi-page">
-    <header class="vi-topbar">
+    <!-- PAI-735: the workbench toolbar lives in the app header — one
+         chrome row instead of a stacked page toolbar. Scoped styles
+         still apply to teleported nodes (data-v attributes travel). -->
+    <Teleport defer to="#app-header-left">
       <div class="vi-title">
         <span class="vi-crumb">Voice Intake</span>
         <span class="vi-crumb-sep">/</span>
@@ -496,6 +499,8 @@ onBeforeUnmount(() => {
         @pin="(id: number) => pinProject(id)"
         @unpin="pinProject(0)"
       />
+    </Teleport>
+    <Teleport defer to="#app-header-right">
       <div class="vi-talk">
         <button
           v-if="!talking"
@@ -530,7 +535,7 @@ onBeforeUnmount(() => {
           {{ textMode ? "🎤 use microphone" : "⌨ type instead" }}
         </button>
       </div>
-    </header>
+    </Teleport>
 
     <p v-if="error" class="vi-error">{{ error }}</p>
     <!-- Shared AI feedback host for any useAiAction-backed control on this
@@ -900,15 +905,12 @@ onBeforeUnmount(() => {
   padding: 20px 24px;
   max-width: 1500px;
 }
-.vi-topbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
+/* PAI-735: toolbar nodes teleport into the 52px app header — sizes and
+   wrapping follow the header's chrome rules (32px controls, nowrap). */
 .vi-title {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 .vi-title strong {
   color: var(--text);
@@ -925,21 +927,38 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
 }
 .vi-talk {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 10px;
+  white-space: nowrap;
 }
 .vi-talk-btn {
-  padding: 10px 22px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 16px;
   border-radius: 999px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   transition:
     background-color 0.18s ease,
     color 0.18s ease,
     box-shadow 0.18s ease;
+}
+
+/* Header tiers (container appchrome, matching AppHeader's breakpoints):
+   shed the informational extras before the talk button ever truncates. */
+@container appchrome (max-width: 1100px) {
+  .vi-conn,
+  .vi-mode-toggle {
+    display: none;
+  }
+}
+@container appchrome (max-width: 920px) {
+  .vi-title {
+    display: none;
+  }
 }
 /* PAI-715: idle is quiet — outline only. Solid red is reserved for the
    moments the microphone is actually live. */

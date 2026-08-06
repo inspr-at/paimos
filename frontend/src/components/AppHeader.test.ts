@@ -12,6 +12,7 @@ const { routerPush, routerReplace, apiGet, mockRoute, mockAuthStore, mockSearchS
     path: "/issues",
     params: {} as Record<string, string>,
     query: {} as Record<string, string>,
+    meta: {} as Record<string, unknown>,
   },
   mockAuthStore: { user: null as Record<string, unknown> | null },
   mockSearchStore: (() => {
@@ -139,12 +140,13 @@ async function mountHeader(userOverrides: Record<string, unknown> = {}) {
 
   const app = createApp(AppHeader);
   app.use(pinia);
-  app.mount(el);
+  const vm = app.mount(el) as unknown as { focus: () => void };
   await nextTick();
 
   return {
     el,
     store,
+    vm,
     async unmount() {
       app.unmount();
       el.remove();
@@ -195,6 +197,7 @@ describe("AppHeader issue refresh prompt", () => {
     mockRoute.path = "/issues";
     mockRoute.params = {};
     mockRoute.query = {};
+    mockRoute.meta = {};
     document.body.innerHTML = "";
     vi.clearAllMocks();
   });
@@ -420,6 +423,35 @@ describe("AppHeader issue refresh prompt", () => {
 
     expect(refresh).not.toHaveBeenCalled();
 
+    await mounted.unmount();
+  });
+
+  it("hides the search field on headerSearchHidden routes and reveals it via focus() (PAI-735)", async () => {
+    mockRoute.path = "/intake";
+    mockRoute.meta = { headerSearchHidden: true };
+    const mounted = await mountHeader();
+
+    // Field hidden — a focused-tool route owns the header.
+    expect(mounted.el.querySelector(".ah-search-input")).toBeNull();
+
+    // / and ⌘K land in the exposed focus(): reveal + focus transiently.
+    mounted.vm.focus();
+    await flushCenterSwapTransition();
+    const input = mounted.el.querySelector<HTMLInputElement>(".ah-search-input");
+    expect(input).not.toBeNull();
+
+    // Leaving the field hides it again (blur handler collapses the reveal).
+    input?.dispatchEvent(new FocusEvent("blur"));
+    await new Promise((resolve) => window.setTimeout(resolve, 220));
+    await flushCenterSwapTransition();
+    expect(mounted.el.querySelector(".ah-search-input")).toBeNull();
+
+    await mounted.unmount();
+  });
+
+  it("keeps the search field on normal routes (PAI-735 regression guard)", async () => {
+    const mounted = await mountHeader();
+    expect(mounted.el.querySelector(".ah-search-input")).not.toBeNull();
     await mounted.unmount();
   });
 });
