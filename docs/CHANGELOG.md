@@ -5,6 +5,15 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.7.0] — 2026-08-07
+
+### Added — Identifier-first login (PAI-743)
+
+- Sign-in now asks who you are first, then shows only the method that applies. Password managers stop autofilling-and-arming a password before you can reach the SSO button, and SSO users never see a password field they shouldn't use.
+- Routing is home realm discovery from operator config — the new `OIDC_SSO_DOMAINS` maps email domains to your IdP. It deliberately never looks the account up, so the login page cannot be used to discover which usernames exist. Unset means no routing: every identifier is offered password + SSO, exactly as before.
+- The routing answer is a UI hint, never a gate: password sign-in still works for any account, and `/login?method=password` skips routing entirely as a break-glass path. The identifier is forwarded to the IdP as `login_hint` so SSO users don't retype it.
+- PAI-743: identifier-first login with config-driven home realm discovery (#72)
+
 ## [5.6.4] — 2026-08-07
 
 ### Fixed — SSO users are no longer nagged about local 2FA (PAI-742)
