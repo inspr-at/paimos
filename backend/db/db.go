@@ -5571,6 +5571,14 @@ func migrate(db *sql.DB) error {
 		// seeded account, and only when the instance has no super-admin
 		// at all (instances that already have one are left untouched).
 		{138, []string{PromoteSeededAdminSQL}},
+
+		// M139 / PAI-742: record whether a session was minted by the OIDC
+		// callback. The dashboard's local-2FA nag reads it — for SSO
+		// sessions the second factor is the IdP's policy, not local TOTP,
+		// so nagging trains users to ignore security banners.
+		{139, []string{
+			`ALTER TABLE sessions ADD COLUMN via_oidc INTEGER NOT NULL DEFAULT 0`,
+		}},
 	}
 
 	for _, m := range migrations {

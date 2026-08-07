@@ -49,7 +49,10 @@ initKeyboardShortcuts()
 
 // ── Local state ──────────────────────────────────────────────────────────────
 const isAdmin = computed(() => auth.isAdmin)
-const show2FAWarning = computed(() => auth.checked && !!auth.user && auth.totpChecked && !auth.totpEnabled && !auth.suppressSecurityNags)
+// PAI-742: SSO-minted sessions never see the local-2FA nag — their
+// second factor is the IdP's policy, and a wrong nag trains users to
+// ignore security banners.
+const show2FAWarning = computed(() => auth.checked && !!auth.user && auth.totpChecked && !auth.totpEnabled && !auth.suppressSecurityNags && !auth.ssoSession)
 
 function isActive(path: string) {
   if (path === '/') return route.path === '/'

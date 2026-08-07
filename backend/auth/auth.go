@@ -129,6 +129,25 @@ func IsViaDevLogin(ctx context.Context) bool {
 	return v
 }
 
+// oidcKey is the context flag set by Middleware when the request's
+// session was minted by the OIDC callback (PAI-742). TOTPStatus reads
+// it so the local-2FA nag stays quiet for SSO sessions.
+type oidcKeyType struct{}
+
+var oidcKey = oidcKeyType{}
+
+func withOIDCFlag(ctx context.Context, v bool) context.Context {
+	return context.WithValue(ctx, oidcKey, v)
+}
+
+// IsViaOIDC reports whether the current request rides an SSO-minted
+// session. False for API-key auth, password sessions, dev-login, or
+// unauthenticated requests.
+func IsViaOIDC(ctx context.Context) bool {
+	v, _ := ctx.Value(oidcKey).(bool)
+	return v
+}
+
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 1. Try API key: Authorization: Bearer <BRAND_API_KEY_PREFIX>...
@@ -251,6 +270,7 @@ func Middleware(next http.Handler) http.Handler {
 		ctx = WithAccessCache(ctx)
 		ctx = withSessionAuth(ctx, rec.csrfTok)
 		ctx = withDevLoginFlag(ctx, rec.viaDevLogin)
+		ctx = withOIDCFlag(ctx, rec.viaOIDC)
 		ctx = withSessionID(ctx, rec.sessionID)
 		ctx = withImpersonation(ctx, rec.actor, rec.user, rec.impersonating)
 		// PAI-379: browser sessions are never narrowed; attach the
@@ -334,6 +354,7 @@ type sessionRecord struct {
 	sessionID        string
 	csrfTok          string
 	viaDevLogin      bool
+	viaOIDC          bool
 	impersonating    bool
 	expiresAt        time.Time
 	createdAt        time.Time
@@ -348,17 +369,18 @@ func loadSession(sessionID string) (*sessionRecord, error) {
 	rec := &sessionRecord{user: &models.User{}, actor: &models.User{}, sessionID: sessionID}
 	var csrfTok string
 	var viaDevLoginInt int
+	var viaOIDCInt int
 	var impersonatingInt int
 	var expiresStr, createdStr string
 	var epoch int64
 	dests := append(
-		[]any{&csrfTok, &viaDevLoginInt, &expiresStr, &createdStr, &epoch, &impersonatingInt},
+		[]any{&csrfTok, &viaDevLoginInt, &viaOIDCInt, &expiresStr, &createdStr, &epoch, &impersonatingInt},
 		userScanDests(rec.user)...,
 	)
 	dests = append(dests, userScanDests(rec.actor)...)
 	// #nosec G202 -- userSelectCols / userSelectColsFor are fixed column lists; the session id binds as a placeholder.
 	row := db.DB.QueryRow(`
-		SELECT s.csrf_token, s.via_dev_login, s.expires_at, s.created_at,
+		SELECT s.csrf_token, s.via_dev_login, s.via_oidc, s.expires_at, s.created_at,
 		       u.permissions_epoch,
 		       CASE WHEN s.acting_as_user_id IS NOT NULL THEN 1 ELSE 0 END,
 		       `+userSelectCols+`, `+userSelectColsFor("actor")+`
@@ -392,6 +414,7 @@ func loadSession(sessionID string) (*sessionRecord, error) {
 	}
 	rec.csrfTok = csrfTok
 	rec.viaDevLogin = viaDevLoginInt != 0
+	rec.viaOIDC = viaOIDCInt != 0
 	// SQLite stores timestamps as "YYYY-MM-DD HH:MM:SS" (UTC). Parse
 	// errors leave the times zero, which the cap/slide logic tolerates.
 	if t, err := time.Parse("2006-01-02 15:04:05", expiresStr); err == nil {
