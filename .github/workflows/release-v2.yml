@@ -208,8 +208,18 @@ jobs:
           # only lists certs that have a private key, and we then select by
           # SHA-1 rather than by name. Matching on the name alone can pick
           # a stale same-named certificate that codesign would never use.
+          # `-v` lists only VALID identities, which is what we want when the
+          # certificate is healthy — but it also hides an expired one, and
+          # an expired certificate is precisely the case this step exists to
+          # report. So fall back to the unfiltered list, which still carries
+          # expired identities, rather than going quiet exactly when it
+          # matters.
           hash=$(security find-identity -v -p codesigning 2>/dev/null \
                  | awk '/Developer ID Application/ { print $2; exit }')
+          if [ -z "$hash" ]; then
+            hash=$(security find-identity -p codesigning 2>/dev/null \
+                   | awk '/Developer ID Application/ { print $2; exit }')
+          fi
           if [ -z "$hash" ]; then
             echo "::warning::No Developer ID Application signing identity found; skipping the expiry check (codesign remains the gate)."
             exit 0
@@ -237,10 +247,14 @@ jobs:
               ;;
           esac
 
-          days_left=$(( (end_epoch - $(date +%s)) / 86400 ))
+          # Decide on the raw epoch, not on days: integer division truncates,
+          # so a certificate with 12 hours left yields days_left=0 and would
+          # be failed as "expired" while codesign would still happily use it.
+          now_epoch=$(date +%s)
+          days_left=$(( (end_epoch - now_epoch) / 86400 ))
           echo "signing identity $hash expires: $not_after (${days_left} days)"
 
-          if [ "$days_left" -le 0 ]; then
+          if [ "$now_epoch" -ge "$end_epoch" ]; then
             echo "::error::Developer ID signing certificate EXPIRED on $not_after — notarization cannot succeed. Re-issue it from the Apple Developer account and re-provision APPLE_CERTIFICATE (scripts/release/README.md)."
             exit 1
           elif [ "$days_left" -lt "$WARN_DAYS" ]; then
