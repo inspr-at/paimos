@@ -602,10 +602,14 @@ func seedRichACME(tx *sql.Tx, pid int64) error {
 		default:
 			sprintID = sprintIDs[2]
 		}
+		// PAI-753: source is the CONTAINER, target the member — the same
+		// direction the `parent` edge uses and the only one
+		// ListIssuesByRelation reads (`WHERE ir.source_id = <sprint>`).
+		// Seeded backwards, every sprint board renders empty.
 		if _, err := tx.Exec(`
 			INSERT OR IGNORE INTO issue_relations (source_id, target_id, type)
 			VALUES (?, ?, 'sprint')
-		`, id, sprintID); err != nil {
+		`, sprintID, id); err != nil {
 			return fmt.Errorf("link ACME ticket=%d sprint=%d: %w", id, sprintID, err)
 		}
 
