@@ -97,6 +97,7 @@ permissions remain local authorization.
 | `OIDC_SCOPES` | `openid email profile` | Space-separated. |
 | `OIDC_BUTTON_LABEL` | `Sign in with SSO` | Shown on the login page. |
 | `OIDC_POST_LOGIN_REDIRECT` | `/` | SPA path to land on after a successful SSO login. |
+| `OIDC_SSO_DOMAINS` | *(unset)* | PAI-743 home realm discovery: comma-separated email domains served by this IdP (`agm.ng, example.com`; a leading `@` is tolerated). On the identifier-first login, an address in one of these domains is offered SSO **only** — the password field is hidden. Unset means no routing: every identifier is offered password + SSO, exactly as before. |
 | `OIDC_PROVISION_MODE` | `invite-only` | `invite-only` matches only existing active users by verified email. `auto-create` creates missing users. |
 | `OIDC_AUTO_CREATE_ROLE` | `member` | Used only when `OIDC_PROVISION_MODE=auto-create`. Allowed: `member`, `external`. |
 

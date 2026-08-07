@@ -262,6 +262,13 @@ func OIDCLogin(w http.ResponseWriter, r *http.Request) {
 	q.Set("nonce", nonce)
 	q.Set("code_challenge", challenge)
 	q.Set("code_challenge_method", "S256")
+	// PAI-743: the identifier-first login already asked who the user
+	// is — forward it so the IdP can skip its own username prompt.
+	// Advisory per OIDC core §3.1.2.1: the IdP may ignore it, and it
+	// never substitutes for authentication.
+	if hint := strings.TrimSpace(r.URL.Query().Get("login_hint")); hint != "" && len(hint) <= 320 {
+		q.Set("login_hint", hint)
+	}
 
 	target := cfg.AuthorizationEndpoint + "?" + q.Encode()
 	http.Redirect(w, r, target, http.StatusFound)
