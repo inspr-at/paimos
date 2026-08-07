@@ -5,6 +5,13 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.6.4] — 2026-08-07
+
+### Fixed — SSO users are no longer nagged about local 2FA (PAI-742)
+
+- The "Two-factor authentication is not enabled" banner no longer shows for OIDC-authenticated sessions — their second factor is the identity provider's policy, not Paimos-local TOTP. Password sessions keep the nag; hybrid accounts can still enable TOTP in Settings.
+- PAI-742: suppress the local-2FA nag for SSO sessions (#71)
+
 ## [5.6.3] — 2026-08-06
 
 ### Fixed — Fresh installs can finally have a super-admin (PAI-739)
