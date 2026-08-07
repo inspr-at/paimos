@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.7.1] — 2026-08-07
+
+### Fixed — Branded instances show their own name (PAI-736)
+
+- The sidebar rendered the literal "Project Management" next to a correctly-branded logo, so every white-labelled instance advertised the wrong name on every page. It now shows the configured brand name.
+- Related: `name` and `product` are one identity derived from `BRAND_PRODUCT_NAME`, but a hand-written `branding.json` usually declares only one of them and the other silently fell back to "PAIMOS" — visible on the login page title too. The two now agree with whatever the branding document declares.
+- PAI-736: sidebar brand name comes from branding, not a literal (#73)
+
 ## [5.7.0] — 2026-08-07
 
 ### Added — Identifier-first login (PAI-743)
