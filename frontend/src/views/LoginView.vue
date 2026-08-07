@@ -30,6 +30,57 @@ onMounted(async () => {
   }
 })
 
+// PAI-743: identifier-first. Step 1 collects the identifier alone so a
+// password manager has nothing to autofill-and-submit before the user
+// can choose SSO; step 2 shows only the method(s) the server's home
+// realm discovery says apply. `?method=password` skips routing outright
+// — the break-glass path for a local admin on an SSO-routed domain.
+const forcePassword = computed(() => {
+  const m = route.query.method
+  return (Array.isArray(m) ? m[0] : m) === 'password'
+})
+const identifierSubmitted = ref(false)
+const methodPassword = ref(true)
+const methodSSO = ref(false)
+
+/** SSO entry point, carrying the identifier so the IdP can skip its own prompt. */
+const ssoHref = computed(() => {
+  const id = username.value.trim()
+  return id
+    ? `/api/auth/oidc/login?login_hint=${encodeURIComponent(id)}`
+    : '/api/auth/oidc/login'
+})
+
+async function submitIdentifier() {
+  if (!username.value.trim()) return
+  error.value = ''
+  loading.value = true
+  try {
+    const r = await api.post<{ password: boolean; sso: boolean; sso_label?: string }>(
+      '/auth/login/methods',
+      { identifier: username.value.trim() },
+    )
+    methodPassword.value = r.password || forcePassword.value
+    methodSSO.value = r.sso
+    if (r.sso_label) ssoLabel.value = r.sso_label
+  } catch {
+    // Routing is a convenience, never a gate: if the probe fails, fall
+    // back to the pre-PAI-743 surface rather than stranding the user.
+    methodPassword.value = true
+    methodSSO.value = ssoEnabled.value
+  } finally {
+    loading.value = false
+    identifierSubmitted.value = true
+  }
+}
+
+/** Back to step 1 — clears the password so it never rides along. */
+function editIdentifier() {
+  identifierSubmitted.value = false
+  password.value = ''
+  error.value = ''
+}
+
 const ssoError = computed(() => {
   const e = route.query.sso_error
   if (!e) return ''
@@ -129,6 +180,8 @@ function backToLogin() {
   totpToken.value    = ''
   otpCode.value      = ''
   error.value        = ''
+  identifierSubmitted.value = false
+  password.value     = ''
 }
 </script>
 
@@ -144,20 +197,59 @@ function backToLogin() {
         <p class="login-sub">{{ branding.company }} {{ branding.tagline }}</p>
       </div>
 
-      <!-- Step 1: username + password -->
-      <form v-if="!totpRequired" @submit.prevent="submit" class="login-form">
+      <!-- Step 1: identifier only (PAI-743). No password field here, so
+           a password manager has nothing to autofill-and-submit before
+           the user gets to choose SSO. -->
+      <form
+        v-if="!totpRequired && !identifierSubmitted"
+        @submit.prevent="submitIdentifier"
+        class="login-form"
+      >
         <div class="field">
-          <label for="username">Username</label>
+          <label for="username">Username or email</label>
           <input
             id="username"
             v-model="username"
             type="text"
             autocomplete="username"
-            placeholder="your username"
+            placeholder="you@example.com"
+            autofocus
             required
           />
         </div>
-        <div class="field">
+        <div v-if="error" class="login-error">{{ error }}</div>
+        <div v-else-if="ssoError" class="login-error">{{ ssoError }}</div>
+        <button type="submit" class="btn btn-primary login-btn" :disabled="loading">
+          {{ loading ? 'Checking…' : 'Continue' }}
+        </button>
+        <RouterLink to="/forgot" class="login-forgot-link">Forgot password?</RouterLink>
+      </form>
+
+      <!-- Step 2: the method(s) that apply to this identifier. -->
+      <form
+        v-else-if="!totpRequired"
+        @submit.prevent="submit"
+        class="login-form"
+      >
+        <!-- The identifier stays in the DOM (hidden, still
+             autocomplete="username") so password managers can associate
+             the credential with the right account and save it correctly
+             — the documented requirement for two-step sign-in forms. -->
+        <input
+          v-model="username"
+          type="text"
+          autocomplete="username"
+          class="visually-hidden"
+          tabindex="-1"
+          aria-hidden="true"
+          readonly
+        />
+        <button type="button" class="login-identity" @click="editIdentifier">
+          <span class="login-identity-name">{{ username }}</span>
+          <span class="login-identity-change">Change</span>
+        </button>
+
+        <div v-if="methodPassword" class="field">
           <label for="password">Password</label>
           <input
             id="password"
@@ -165,15 +257,30 @@ function backToLogin() {
             type="password"
             autocomplete="current-password"
             placeholder="••••••••"
+            autofocus
             required
           />
         </div>
+        <p v-else class="login-sso-hint">
+          This address signs in through your identity provider.
+        </p>
+
         <div v-if="error" class="login-error">{{ error }}</div>
         <div v-else-if="ssoError" class="login-error">{{ ssoError }}</div>
-        <button type="submit" class="btn btn-primary login-btn" :disabled="loading">
+
+        <button
+          v-if="methodPassword"
+          type="submit"
+          class="btn btn-primary login-btn"
+          :disabled="loading"
+        >
           {{ loading ? 'Signing in…' : 'Sign in' }}
         </button>
-        <a v-if="ssoEnabled" href="/api/auth/oidc/login" class="btn btn-ghost login-btn login-sso-btn">
+        <a
+          v-if="methodSSO"
+          :href="ssoHref"
+          :class="['btn login-btn login-sso-btn', methodPassword ? 'btn-ghost' : 'btn-primary']"
+        >
           {{ ssoLabel }}
         </a>
         <RouterLink to="/forgot" class="login-forgot-link">Forgot password?</RouterLink>
@@ -285,6 +392,61 @@ function backToLogin() {
   border-radius: var(--radius);
   padding: .5rem .75rem;
   font-size: 13px;
+}
+
+/* PAI-743: the step-2 username field must stay RENDERED for password
+   managers to associate the credential — clip it, never display:none. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Step-2 identity chip: who you're signing in as, and a way back. */
+.login-identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  width: 100%;
+  padding: .5rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.login-identity:hover,
+.login-identity:focus-visible {
+  border-color: var(--brand-blue);
+  outline: none;
+}
+.login-identity-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.login-identity-change {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand-blue);
+}
+.login-sso-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 
 .login-btn { width: 100%; justify-content: center; padding: .65rem; font-size: 14px; margin-top: .25rem; }

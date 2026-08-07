@@ -355,6 +355,10 @@ func mountAPI(r chi.Router) {
 
 	// Auth (public — no session possible yet)
 	r.Post("/auth/login", auth.LoginHandler)
+	// PAI-743: identifier-first home realm discovery. Config-derived
+	// only — see INV-AUTH-HRD in auth/login_methods.go for why this
+	// must never look the identifier up.
+	r.Post("/auth/login/methods", auth.LoginMethods)
 	r.Post("/auth/totp/verify", auth.TOTPVerify)
 	// PAI-267: dev-login route — only mounted when the dev_login
 	// build tag is active. Production binaries do not contain

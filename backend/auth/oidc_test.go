@@ -192,6 +192,45 @@ func TestOIDCLoginBuildsPKCERedirect(t *testing.T) {
 	if len(rec.Result().Cookies()) < 3 {
 		t.Fatalf("expected OIDC state/verifier/nonce cookies")
 	}
+	// PAI-743: no hint supplied → the parameter must be absent, not empty.
+	if _, present := q["login_hint"]; present {
+		t.Fatalf("login_hint sent without a caller-supplied hint: %s", loc.RawQuery)
+	}
+}
+
+// TestOIDCLoginForwardsLoginHint: the identifier-first login already
+// asked who the user is (PAI-743), so the IdP shouldn't ask again.
+func TestOIDCLoginForwardsLoginHint(t *testing.T) {
+	issuer := newOIDCMockIssuer(t, map[string]any{"sub": "sub-1", "email": "person@example.test", "email_verified": true})
+	setupOIDCTest(t, issuer)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/login?login_hint=person%40example.test", nil)
+	rec := httptest.NewRecorder()
+	OIDCLogin(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("login status = %d, want 302", rec.Code)
+	}
+	loc, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if got := loc.Query().Get("login_hint"); got != "person@example.test" {
+		t.Fatalf("login_hint = %q, want the supplied identifier", got)
+	}
+
+	// An oversized hint is dropped rather than forwarded — the authorize
+	// URL is attacker-influenced input and stays bounded.
+	long := strings.Repeat("a", 400) + "@example.test"
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/oidc/login?login_hint="+url.QueryEscape(long), nil)
+	rec = httptest.NewRecorder()
+	OIDCLogin(rec, req)
+	loc, err = url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if _, present := loc.Query()["login_hint"]; present {
+		t.Fatalf("oversized login_hint was forwarded: %s", loc.RawQuery)
+	}
 }
 
 func TestOIDCCallbackInviteOnlyExistingUserCreatesSession(t *testing.T) {
