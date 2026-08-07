@@ -40,10 +40,14 @@ just wait-release-ci <tag>               # wait for tag workflows before verific
 
 The standard sequence after a feature lands on `main` is **release →
 verify-release → deploy → doc-sync**. The first three cut, verify, and roll
-out the new build; `doc-sync` files or reuses a single PAIMOS ticket with a
-four-item checklist (README, `docs/`, the `../paimos-site` repo,
-brand/screenshots) so the user-facing surfaces don't drift out of sync with
-the code. `release.sh` waits for the tag workflows (`ci` + `release`) before
+out the new build; `doc-sync` maintains a **single rolling PAIMOS ticket**,
+appending a per-release section with a four-item checklist (README, `docs/`,
+the `../paimos-site` repo, brand/screenshots) so the user-facing surfaces
+don't drift out of sync with the code. It finds that ticket by the stable
+`Doc/site sync follow-up` title prefix, is a no-op if the release is already
+covered, and only files a new ticket when no open one exists. (Before
+PAI-751 the lookup matched the full title, which embeds the tag — so reuse
+was unreachable and every release filed a fresh ticket.) `release.sh` waits for the tag workflows (`ci` + `release`) before
 printing the `verify-release` and `doc-sync` reminders as part of its "Next:"
 output, so "image tag exists" is never confused with "release evidence is
 complete."

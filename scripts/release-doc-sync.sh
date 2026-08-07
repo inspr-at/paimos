@@ -86,7 +86,18 @@ if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "error: tag $TAG is not a semver release tag (expected vX.Y.Z)" >&2
   exit 1
 fi
-TITLE="Doc/site sync follow-up — $TAG"
+# PAI-751: the lookup must match on a STABLE prefix, not on the full
+# title. The title embeds the tag, so an exact-title search could only
+# ever find a re-run of the *same* release — never the previous
+# release's open ticket. The documented "files or reuses a single
+# ticket" behaviour was therefore unreachable, and ten tickets
+# accumulated for one product line.
+TITLE_PREFIX="Doc/site sync follow-up"
+TITLE="$TITLE_PREFIX — $TAG"
+# Marker line that identifies this release's section inside a rolling
+# ticket. Used both when creating and when appending, so re-running
+# doc-sync for the same tag is a no-op either way.
+SECTION_MARKER="## $TITLE_PREFIX — $TAG"
 
 find_existing_ticket() {
   command -v jq >/dev/null 2>&1 || return 0
@@ -95,22 +106,14 @@ find_existing_ticket() {
     json=$(paimos --json issue list -p PAI --status "$status" --limit 100 2>/dev/null || true)
     [[ -n "$json" ]] || continue
     key=$(printf '%s' "$json" \
-      | jq -r --arg title "$TITLE" 'first(.issues[]? | select(.title == $title) | .issue_key) // empty' 2>/dev/null || true)
+      | jq -r --arg p "$TITLE_PREFIX" \
+          'first(.issues[]? | select(.title | startswith($p)) | .issue_key) // empty' 2>/dev/null || true)
     if [[ -n "$key" && "$key" != "null" ]]; then
       printf '%s\n' "$key"
       return 0
     fi
   done
 }
-
-if [[ $DRY_RUN -eq 0 ]]; then
-  EXISTING=$(find_existing_ticket)
-  if [[ -n "${EXISTING:-}" ]]; then
-    echo "Existing open doc-sync ticket: $EXISTING — $TITLE"
-    echo "Reusing it; no duplicate created."
-    exit 0
-  fi
-fi
 
 # Previous release tag — the line right after $TAG in chronological order,
 # ignoring operational/bookmark tags such as pai-open-start-*.
@@ -158,7 +161,7 @@ TMP=$(mktemp -t doc-sync-XXXXXX)
 trap 'rm -f "$TMP"' EXIT
 
 cat > "$TMP" <<MARKDOWN
-## Doc/site sync follow-up — $TAG
+$SECTION_MARKER
 
 After every release we sync four surfaces. Tick each off as confirmed
 or updated; close the ticket once all four are settled.
@@ -203,10 +206,20 @@ MARKDOWN
 
 echo
 echo "Drafted ticket body to $TMP"
+
+# Reuse an open doc-sync ticket when one exists: append this release's
+# section rather than filing yet another ticket (PAI-751).
+EXISTING=$(find_existing_ticket)
+
 if [[ $DRY_RUN -eq 1 ]]; then
-  echo "--- dry-run ticket title"
-  echo "$TITLE"
-  echo "--- dry-run ticket body"
+  if [[ -n "${EXISTING:-}" ]]; then
+    echo "--- dry-run: would APPEND this section to $EXISTING"
+  else
+    echo "--- dry-run: would CREATE a new ticket"
+    echo "--- dry-run ticket title"
+    echo "$TITLE"
+  fi
+  echo "--- dry-run section body"
   cat "$TMP"
   exit 0
 fi
@@ -233,20 +246,61 @@ else
   echo "Filing without confirmation (--yes)."
 fi
 
-RESPONSE=$(paimos --json issue create \
-  -p PAI \
-  --type ticket \
-  --priority medium \
-  --title "$TITLE" \
-  --description-file "$TMP")
+if [[ -n "${EXISTING:-}" ]]; then
+  # ── Append to the rolling ticket ────────────────────────────────────
+  CURRENT=$(paimos --json issue get "$EXISTING" 2>/dev/null \
+            | jq -r '.description // ""' 2>/dev/null || true)
+  if [[ -z "$CURRENT" ]]; then
+    echo "error: could not read the description of $EXISTING — refusing to overwrite it." >&2
+    echo "       Section body kept at $TMP" >&2
+    trap - EXIT
+    exit 1
+  fi
 
-# Extract issue_key from the JSON response. paimos CLI returns the
-# created issue as a single object — pull the key out with sed.
-KEY=$(printf '%s' "$RESPONSE" | sed -nE 's/.*"issue_key"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
+  # Idempotent: re-running doc-sync for a tag already covered is a no-op.
+  if printf '%s' "$CURRENT" | grep -Fqx "$SECTION_MARKER"; then
+    echo "✔ $EXISTING already covers $TAG — nothing to append."
+    exit 0
+  fi
 
-if [[ -n "$KEY" ]]; then
-  echo "✔ Filed $KEY — $TITLE"
+  MERGED=$(mktemp -t doc-sync-merged-XXXXXX)
+  # Newest release first: the top of the ticket is the release you are
+  # most likely still syncing.
+  { cat "$TMP"; printf '\n---\n\n'; printf '%s\n' "$CURRENT"; } > "$MERGED"
+
+  # Only advance "latest" when this tag really is newer. doc-sync is
+  # normally run right after a release, but a backfill or an out-of-order
+  # run must not make the title claim an older release is the latest.
+  CUR_TITLE=$(paimos --json issue get "$EXISTING" 2>/dev/null | jq -r '.title // ""' 2>/dev/null || true)
+  CUR_LATEST=$(printf '%s' "$CUR_TITLE" | sed -nE 's/.*latest (v[0-9]+\.[0-9]+\.[0-9]+).*/\1/p')
+  NEW_TITLE="$TITLE_PREFIX (rolling — latest $TAG)"
+  if [[ -n "$CUR_LATEST" ]]; then
+    NEWEST=$(printf '%s\n%s\n' "${CUR_LATEST#v}" "${TAG#v}" | sort -V | tail -1)
+    [[ "$NEWEST" == "${CUR_LATEST#v}" ]] && NEW_TITLE="$CUR_TITLE"
+  fi
+
+  paimos issue update "$EXISTING" \
+    --title "$NEW_TITLE" \
+    --description-file "$MERGED" >/dev/null
+  rm -f "$MERGED"
+  echo "✔ Appended $TAG to $EXISTING (rolling doc-sync ticket) — title: $NEW_TITLE"
 else
-  echo "✔ Created (raw response, could not parse issue_key):"
-  echo "$RESPONSE"
+  # ── No open ticket: file a fresh one ────────────────────────────────
+  RESPONSE=$(paimos --json issue create \
+    -p PAI \
+    --type ticket \
+    --priority medium \
+    --title "$TITLE" \
+    --description-file "$TMP")
+
+  # Extract issue_key from the JSON response. paimos CLI returns the
+  # created issue as a single object — pull the key out with sed.
+  KEY=$(printf '%s' "$RESPONSE" | sed -nE 's/.*"issue_key"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -1)
+
+  if [[ -n "$KEY" ]]; then
+    echo "✔ Filed $KEY — $TITLE"
+  else
+    echo "✔ Created (raw response, could not parse issue_key):"
+    echo "$RESPONSE"
+  fi
 fi
