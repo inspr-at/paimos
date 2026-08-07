@@ -185,6 +185,50 @@ jobs:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
+      # PAI-688: the signing certificate has a hard expiry (currently
+      # 2031-05-12). A Developer ID cert cannot be auto-renewed — it is
+      # re-issued by hand from the Apple Developer account — so the only
+      # thing standing between us and a silently-unsignable release is a
+      # reminder. Fire it here, where a human is already watching a
+      # release, with enough lead time to actually do the renewal.
+      - name: Check signing certificate expiry
+        # No `set -e`: this step must never be able to fail a release it
+        # is only observing. If the expiry cannot be determined we say so
+        # and move on — codesign itself is the real gate, and it fails
+        # loudly on an expired identity anyway.
+        run: |
+          WARN_DAYS=120
+
+          # Read notAfter from the identity the import step just installed
+          # — this step never handles the secret itself.
+          cert_pem=$(security find-certificate -c "Developer ID Application" -p 2>/dev/null)
+          not_after=$(printf '%s' "$cert_pem" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2-)
+
+          if [ -z "$not_after" ]; then
+            echo "::warning::Could not read the signing certificate's expiry; skipping the check. Verify manually per scripts/release/README.md."
+            exit 0
+          fi
+
+          # openssl pads single-digit days ("Sep  7 …"); squeeze before parsing.
+          norm=$(printf '%s' "$not_after" | tr -s ' ')
+          end_epoch=$(date -j -f "%b %d %T %Y %Z" "$norm" +%s 2>/dev/null \
+                      || date -d "$not_after" +%s 2>/dev/null)
+
+          if [ -z "$end_epoch" ]; then
+            echo "::warning::Could not parse certificate expiry '$not_after'; skipping the check."
+            exit 0
+          fi
+
+          days_left=$(( (end_epoch - $(date +%s)) / 86400 ))
+          echo "signing certificate expires: $not_after (${days_left} days)"
+
+          if [ "$days_left" -le 0 ]; then
+            echo "::error::Developer ID signing certificate EXPIRED on $not_after — notarization will fail. Re-issue it from the Apple Developer account and re-provision APPLE_CERTIFICATE (scripts/release/README.md)."
+            exit 1
+          elif [ "$days_left" -lt "$WARN_DAYS" ]; then
+            echo "::warning::Developer ID signing certificate expires in ${days_left} days ($not_after). Re-issue from the Apple Developer account and re-provision APPLE_CERTIFICATE before it lapses — scripts/release/README.md."
+          fi
+
       - name: Codesign + notarize each darwin universal binary
         env:
           VER: ${{ steps.ver.outputs.version }}
