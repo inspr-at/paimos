@@ -99,7 +99,9 @@ watch(() => route.path, (p) => {
 })
 
 const { bgColor, patternColor } = useSidebarColors()
-const { branding } = useBranding()
+// PAI-736: brandName is what this instance calls itself — the sidebar
+// used to hardcode "Project Management" and ignore branding entirely.
+const { branding, brandName } = useBranding()
 
 // ── Instance info (staging banner + feature flags) ───────────────────────────
 // Shared module state — see `src/api/instance.ts`. `attachmentsEnabled` is
@@ -203,7 +205,7 @@ onBeforeUnmount(() => {
         <!-- Brand: logo always, text only when expanded -->
         <RouterLink to="/" class="brand" :title="isExpanded ? '' : 'Home'">
           <img :src="branding.logo" :alt="branding.company" class="brand-logo" />
-          <span class="sl brand-name">Project Management</span>
+          <span class="sl brand-name">{{ brandName }}</span>
         </RouterLink>
 
         <!-- New Issue button — very top, above nav -->

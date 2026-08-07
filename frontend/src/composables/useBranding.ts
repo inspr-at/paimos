@@ -25,7 +25,7 @@
  * Singleton: all consumers share the same reactive state.
  */
 
-import { ref, readonly } from 'vue'
+import { ref, readonly, computed } from 'vue'
 import {
   LS_BRANDING_FILE,
   LS_TYPE_COLOR_EPIC,
@@ -161,7 +161,19 @@ async function fetchAndApply(): Promise<void> {
     const resp = await fetch(url, { cache: 'no-store' })
     if (resp.ok) {
       const data = await resp.json()
-      branding.value = { ...defaults, ...data, colors: { ...defaults.colors, ...data.colors } }
+      const merged = { ...defaults, ...data, colors: { ...defaults.colors, ...data.colors } }
+      // PAI-736: `name` and `product` are one identity that the server
+      // derives from a single BRAND_PRODUCT_NAME. A hand-written
+      // branding.json often sets only one of them, and the shallow
+      // merge above would then fill the other from `defaults` — so a
+      // PMA instance specifying just `product` still rendered "PAIMOS"
+      // wherever the other field is read (sidebar brand, login title).
+      // Reconcile the pair to whatever the document actually declared.
+      const declaredName = typeof data.name === 'string' ? data.name.trim() : ''
+      const declaredProduct = typeof data.product === 'string' ? data.product.trim() : ''
+      if (declaredName && !declaredProduct) merged.product = declaredName
+      if (declaredProduct && !declaredName) merged.name = declaredProduct
+      branding.value = merged
     }
   } catch { /* use defaults */ }
   applyToDOM(branding.value)
@@ -182,9 +194,22 @@ async function refresh(): Promise<void> {
   await fetchAndApply()
 }
 
+// PAI-736: what this instance calls itself, for chrome that needs a
+// short label (the sidebar brand). The sidebar used to hardcode
+// "Project Management", so every white-labelled instance advertised the
+// wrong name on every page. `name` is the branding document's own
+// identity and the field operators set; `product` covers documents
+// carrying only BRAND_PRODUCT_NAME. The server derives both from
+// BRAND_PRODUCT_NAME, so the order matters only for partially-specified
+// branding.json files, where a stale default must never win.
+const brandName = computed(
+  () => branding.value.name?.trim() || branding.value.product?.trim() || defaults.name,
+)
+
 export function useBranding() {
   return {
     branding: readonly(branding),
+    brandName,
     loaded: readonly(loaded),
     init,
     refresh,
