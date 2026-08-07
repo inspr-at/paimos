@@ -82,9 +82,26 @@ This document does **not** name secret locations or list credentials. That infor
 
 What an emergency handover **does** find in this repo:
 
-- The list of *kinds* of secret that exist (registry tokens, OIDC client secrets, SMTP credentials, OpenRouter API key, deploy SSH keys). See `docs/CONFIGURATION.md` for the env-var inventory.
+- The list of *kinds* of secret that exist (registry tokens, OIDC client secrets, SMTP credentials, OpenRouter API key, deploy SSH keys, **Apple Developer release-signing credentials**). See `docs/CONFIGURATION.md` for the env-var inventory.
 - The rotation procedure for each (each operator rotates their own; the maintainer does not hold any operator's secrets).
 - The DNS / domain registrar relationship description (not the credentials).
+
+**Release signing is the one kind that is not simply rotatable** (PAI-688).
+Everything else on that list can be re-created by whoever inherits the
+account it belongs to. The macOS release signature, which
+`docs/INSTALL.md` promises publicly, chains to a **personal Apple
+Developer account** — so the recoverable asset is that account (Apple ID
+plus its 2FA recovery), not the certificate. Given the account, the certificate is normally re-issued and the five
+GitHub secrets re-provisioned quickly (`scripts/release/README.md`) —
+though Apple caps concurrent Developer ID certificates and will not
+revoke one from the portal, so a worst-case recovery goes through Apple
+Support rather than self-service. Without the account, a successor
+cannot publish a notarized build under the documented identity at all
+and must establish a new signing identity, which changes what users
+verify.
+The certificate in use expires **2031-05-12**; the release workflow warns
+120 days out and fails once lapsed, so an unattended expiry cannot
+silently break the published install path.
 
 A would-be successor inheriting administrative duties needs to:
 
