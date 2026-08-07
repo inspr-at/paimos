@@ -345,8 +345,10 @@ func OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	expiresAt := now.Add(sessionDuration)
+	// via_oidc marks the session as SSO-minted (PAI-742): the local-2FA
+	// nag stays quiet because the second factor is the IdP's policy.
 	if _, err := db.DB.Exec(
-		"INSERT INTO sessions(id,user_id,expires_at,created_at) VALUES(?,?,?,?)",
+		"INSERT INTO sessions(id,user_id,expires_at,created_at,via_oidc) VALUES(?,?,?,?,1)",
 		sid, user.ID,
 		expiresAt.UTC().Format("2006-01-02 15:04:05"),
 		now.UTC().Format("2006-01-02 15:04:05"),

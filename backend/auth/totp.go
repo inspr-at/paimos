@@ -200,7 +200,9 @@ func TOTPStatus(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "failed to query TOTP status", http.StatusInternalServerError)
 		return
 	}
-	jsonOKMap(w, map[string]bool{"enabled": enabled == 1})
+	// sso_session (PAI-742): the SPA's local-2FA nag stays quiet for
+	// SSO-minted sessions — the second factor is the IdP's policy there.
+	jsonOKMap(w, map[string]bool{"enabled": enabled == 1, "sso_session": IsViaOIDC(r.Context())})
 }
 
 // ── Login step 2: verify OTP code ─────────────────────────────────────────────

@@ -108,6 +108,9 @@ export const useAuthStore = defineStore('auth', () => {
   const checked = ref(false)
   const totpEnabled = ref(false)
   const totpChecked = ref(false)
+  // PAI-742: true when the current session was minted by the OIDC
+  // callback — the local-2FA nag stays quiet (MFA is the IdP's policy).
+  const ssoSession = ref(false)
 
   // accessibleProjects maps project ID (number) → access level. Admins
   // get an empty map and `allProjects=true` — the helpers below handle
@@ -190,6 +193,7 @@ export const useAuthStore = defineStore('auth', () => {
       impersonation.value = null
       totpEnabled.value = false
       totpChecked.value = false
+      ssoSession.value = false
       setDisplayLocale(undefined)
     } finally {
       checked.value = true
@@ -217,15 +221,21 @@ export const useAuthStore = defineStore('auth', () => {
     if (!user.value) {
       totpEnabled.value = false
       totpChecked.value = false
+      ssoSession.value = false
       return false
     }
     if (totpChecked.value && !force) return totpEnabled.value
     try {
-      totpEnabled.value = (await api.get<{ enabled: boolean }>('/auth/totp/status')).enabled
+      const status = await api.get<{ enabled: boolean; sso_session?: boolean }>(
+        '/auth/totp/status',
+      )
+      totpEnabled.value = status.enabled
+      ssoSession.value = status.sso_session === true
       totpChecked.value = true
     } catch {
       totpEnabled.value = false
       totpChecked.value = false
+      ssoSession.value = false
     }
     return totpEnabled.value
   }
@@ -245,6 +255,7 @@ export const useAuthStore = defineStore('auth', () => {
     impersonation.value = null
     totpEnabled.value = false
     totpChecked.value = false
+    ssoSession.value = false
     checked.value = true
     resetEpochBaseline() // PAI-320
     // PAI-242: search query persists across users via localStorage; reset
@@ -312,6 +323,7 @@ export const useAuthStore = defineStore('auth', () => {
     checked,
     totpEnabled,
     totpChecked,
+    ssoSession,
     accessibleProjects,
     allProjects,
     viaDevLogin,
