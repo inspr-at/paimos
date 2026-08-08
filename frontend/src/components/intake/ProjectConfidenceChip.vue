@@ -10,7 +10,7 @@
 // detection) → pinned (manual override; better matches surface as a badge
 // but never displace the pin). Switching is non-destructive — it only
 // re-targets downstream stages, never the spec or the timeline.
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import type { IntakeSession } from "@/api/intake";
 import type { IntakeProjectMatch } from "@/composables/useIntakeSession";
@@ -27,6 +27,72 @@ const emit = defineEmits<{
 
 const popoverOpen = ref(false);
 const switchedFlash = ref<string | null>(null);
+
+// PAI-735 moved this chip into the app header via Teleport, and the header
+// is deliberately hard chrome: `height: 52px; overflow: hidden`, with
+// `.ah-left` adding its own overflow clip plus a mask-image. An absolutely
+// positioned popover opens *below* that 52px row, so it was painted and
+// then clipped away — the button toggled, nothing appeared, and the chip
+// read as dead. Teleport to body and position from the trigger's rect, the
+// same escape hatch MetaSelect uses for table-cell dropdowns.
+const chipRef = ref<HTMLButtonElement | null>(null);
+const popRef = ref<HTMLElement | null>(null);
+const popPos = ref({ top: "0px", left: "0px", minWidth: "320px" });
+
+const POP_MAX_WIDTH = 420;
+
+function positionPopover() {
+  const el = chipRef.value;
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const margin = 8;
+  popPos.value = {
+    top: `${r.bottom + 6}px`,
+    // Keep the panel on screen when the chip sits near the right edge.
+    left: `${Math.max(margin, Math.min(r.left, window.innerWidth - POP_MAX_WIDTH - margin))}px`,
+    minWidth: `${Math.max(r.width, 320)}px`,
+  };
+}
+
+function togglePopover() {
+  popoverOpen.value = !popoverOpen.value;
+  if (popoverOpen.value) void nextTick(positionPopover);
+}
+
+function closePopover() {
+  popoverOpen.value = false;
+}
+
+function onDocumentMouseDown(e: MouseEvent) {
+  if (!popoverOpen.value) return;
+  const t = e.target as Node;
+  // The popover is teleported, so it is not a DOM descendant of the chip.
+  if (chipRef.value?.contains(t) || popRef.value?.contains(t)) return;
+  closePopover();
+}
+
+function onDocumentKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape" && popoverOpen.value) {
+    closePopover();
+    chipRef.value?.focus();
+  }
+}
+
+function onViewportChange() {
+  if (popoverOpen.value) positionPopover();
+}
+
+onMounted(() => {
+  document.addEventListener("mousedown", onDocumentMouseDown);
+  document.addEventListener("keydown", onDocumentKeydown);
+  window.addEventListener("resize", onViewportChange);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("mousedown", onDocumentMouseDown);
+  document.removeEventListener("keydown", onDocumentKeydown);
+  window.removeEventListener("resize", onViewportChange);
+});
 
 const pinned = computed(() => props.session?.pinned_project_id != null);
 const threshold = computed(() => props.match?.threshold ?? 90);
@@ -100,11 +166,14 @@ watch(
 <template>
   <div class="vi-chip-wrap">
     <button
+      ref="chipRef"
       class="vi-chip"
       :class="confClass"
       type="button"
       :disabled="!session"
-      @click="popoverOpen = !popoverOpen"
+      aria-haspopup="menu"
+      :aria-expanded="popoverOpen"
+      @click="togglePopover"
     >
       <span v-if="state === 'idle'">No session</span>
       <span v-else-if="state === 'searching'" class="vi-chip-searching">Detecting project…</span>
@@ -147,30 +216,46 @@ watch(
       AI suggests: {{ pinnedSuggestion.key }} · {{ pinnedSuggestion.score }}%
     </button>
 
-    <div v-if="popoverOpen && match?.matches?.length" class="vi-chip-pop">
-      <p class="vi-chip-pop-title">Candidate projects</p>
-      <button
-        v-for="c in match.matches"
-        :key="c.project_id"
-        class="vi-chip-cand"
-        type="button"
-        @click="
-          emit('pin', c.project_id);
-          popoverOpen = false;
-        "
+    <!-- Teleported to body so the app header's overflow clip cannot eat it.
+         Positioned from the chip's rect, so it still tracks the trigger. -->
+    <Teleport to="body">
+      <div
+        v-if="popoverOpen"
+        ref="popRef"
+        class="vi-chip-pop"
+        role="menu"
+        :style="popPos"
       >
-        <span class="vi-cand-head">
-          <strong>{{ c.key }}</strong> — {{ c.name }}
-          <span class="ar-conf" :class="`ar-conf--${c.confidence === 'med' ? 'medium' : c.confidence}`">
-            {{ c.score }}%
+        <p class="vi-chip-pop-title">Candidate projects</p>
+        <button
+          v-for="c in match?.matches ?? []"
+          :key="c.project_id"
+          class="vi-chip-cand"
+          type="button"
+          role="menuitem"
+          @click="
+            emit('pin', c.project_id);
+            closePopover();
+          "
+        >
+          <span class="vi-cand-head">
+            <strong>{{ c.key }}</strong> — {{ c.name }}
+            <span class="ar-conf" :class="`ar-conf--${c.confidence === 'med' ? 'medium' : c.confidence}`">
+              {{ c.score }}%
+            </span>
           </span>
-        </span>
-        <span v-if="c.rationale" class="vi-cand-rationale">{{ c.rationale }}</span>
-      </button>
-      <button v-if="pinned" class="vi-chip-unpin" type="button" @click="emit('unpin'); popoverOpen = false">
-        Unpin — resume auto-switch
-      </button>
-    </div>
+          <span v-if="c.rationale" class="vi-cand-rationale">{{ c.rationale }}</span>
+        </button>
+        <!-- Detection returns at most intakeMatchMaxCandidates (5). Say so
+             rather than rendering an empty panel that reads as broken. -->
+        <p v-if="!match?.matches?.length" class="vi-chip-pop-empty">
+          No candidates yet — keep talking, or pick a project once detection has something to go on.
+        </p>
+        <button v-if="pinned" class="vi-chip-unpin" type="button" @click="emit('unpin'); closePopover()">
+          Unpin — resume auto-switch
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -293,11 +378,14 @@ watch(
   font-size: 12px;
   cursor: pointer;
 }
+/* Teleported to body: fixed to the viewport, with top/left supplied
+   inline from the chip's bounding rect. Scoped styles still reach it —
+   the data-v attribute travels with the teleported node. */
 .vi-chip-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 30;
+  position: fixed;
+  /* Same layer as MetaSelect's teleported dropdowns — both are panels
+     anchored to a trigger, and both must clear modals at 1000. */
+  z-index: 9000;
   min-width: 320px;
   max-width: 420px;
   padding: 10px;
@@ -314,6 +402,12 @@ watch(
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.vi-chip-pop-empty {
+  margin: 0;
+  padding: 6px 2px;
+  font-size: 12.5px;
   color: var(--text-muted);
 }
 .vi-chip-cand {
