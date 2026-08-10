@@ -11,12 +11,15 @@
 const { chromium } = require('playwright');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 const API = 'http://localhost:8888';
 const APP = 'http://localhost:5173';
-const DB = '/Users/markus/Code/paimos/data/paimos.db';
+const DB = process.env.PAIMOS_DB || path.resolve(__dirname, '../../data/paimos.db');
 const OUT = process.env.OUT_DIR || '/tmp/pai746';
 const TOKEN = process.env.PAIMOS_DEV_LOGIN_TOKEN || '';
+
+if (!TOKEN) throw new Error('PAIMOS_DEV_LOGIN_TOKEN is required');
 
 const HIDE_CHROME = `
   .dev-login-banner, .totp-warning, [class*="dev-login"] { display: none !important; }

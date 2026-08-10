@@ -41,6 +41,17 @@ if ! grep -qF ')/inspr-at"' scripts/release-doc-sync.sh; then
   fail=1
 fi
 
+if ! grep -qF 'just marketing-captures' scripts/release-doc-sync.sh || \
+   ! grep -qF 'marketing-captures site=' Justfile; then
+  echo "release hygiene: doc-sync does not expose the one-command capture refresh" >&2
+  fail=1
+fi
+
+if grep -R -qF '/Users/' scripts/marketing; then
+  echo "release hygiene: marketing capture tooling contains a workstation-specific path" >&2
+  fail=1
+fi
+
 if grep -qF 'Claim (paimos.com' docs/claim-matrix.md; then
   echo "release hygiene: claim matrix still names the retired public-site surface" >&2
   fail=1

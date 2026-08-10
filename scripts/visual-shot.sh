@@ -33,4 +33,8 @@ fi
 # Ensure the chromium binary is present (fast no-op once in the global cache).
 ( cd "$TOOL" && npx playwright install chromium >/dev/null 2>&1 ) || true
 
+if [[ "${1:-}" == "--bootstrap-only" ]]; then
+  exit 0
+fi
+
 exec env NODE_PATH="$TOOL/node_modules" node "$ROOT/scripts/visual-shot.cjs" "$@"

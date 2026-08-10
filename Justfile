@@ -73,6 +73,11 @@ doc-sync tag="":
 dev-up:
     @./scripts/dev-up.sh
 
+# Regenerate every paimos.inspr.at product capture from the booted seeded
+# demo stack, verify framing/hotspots, and publish into the canonical site.
+marketing-captures site="../inspr-at":
+    @./scripts/marketing/refresh-captures.sh "{{site}}"
+
 # Screenshot a route of the local dev UI to a PNG (needs `just dev-up` running).
 # Bootstraps headless Chromium on first run. See docs/VISUAL_VERIFY.md.
 shot route="" out="/tmp/paimos-shot.png":
