@@ -5,6 +5,13 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.6] — 2026-08-10
+
+### Fixed — Voice Intake reconnects preserve newer events (PAI-729)
+
+- Reconnect healing now buffers persisted SSE replay until its snapshot arrives, installs that snapshot first, and reapplies only newer events in sequence order.
+- Superseded or disconnected hydration requests cannot overwrite newer session state, and replayed events still apply if the healing request fails.
+
 ## [5.8.5] — 2026-08-10
 
 ### Security — Voice credentials stay on approved ElevenLabs endpoints (PAI-730)
