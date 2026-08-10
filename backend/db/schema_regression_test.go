@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const latestSchemaVersion = 139
+const latestSchemaVersion = 140
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -81,6 +81,15 @@ func TestSchemaAgentRunsClaimedByColumn(t *testing.T) {
 	db := openTestDB(t)
 	if !columnExists(t, db, "agent_runs", "claimed_by") {
 		t.Fatal("expected agent_runs.claimed_by to exist (PAI-624 / M128)")
+	}
+}
+
+func TestSchemaAgentRunsCommitEvidenceColumns(t *testing.T) {
+	db := openTestDB(t)
+	for _, col := range []string{"repo_url", "branch_name", "commit_base_sha", "commit_sha"} {
+		if !columnExists(t, db, "agent_runs", col) {
+			t.Fatalf("expected agent_runs.%s to exist (PAI-702 / M140)", col)
+		}
 	}
 }
 

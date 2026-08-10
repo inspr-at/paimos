@@ -889,6 +889,23 @@
           "deploy_target": {
             "type": "string"
           },
+          "repo_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Runner-declared repository URL for the checkout that produced the run"
+          },
+          "branch_name": {
+            "type": "string",
+            "description": "Runner-declared branch observed after execution"
+          },
+          "commit_base_sha": {
+            "type": "string",
+            "description": "Full Git object ID observed before execution; the produced range is (base, commit_sha]"
+          },
+          "commit_sha": {
+            "type": "string",
+            "description": "Full Git object ID observed after execution; equal to commit_base_sha when no commit was produced"
+          },
           "log_attachment_id": {
             "type": "integer",
             "format": "int64",
@@ -2727,6 +2744,23 @@
                   },
                   "deploy_target": {
                     "type": "string"
+                  },
+                  "repo_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "runner-declared repository URL"
+                  },
+                  "branch_name": {
+                    "type": "string",
+                    "description": "runner-declared branch after execution"
+                  },
+                  "commit_base_sha": {
+                    "type": "string",
+                    "description": "full Git object ID before execution"
+                  },
+                  "commit_sha": {
+                    "type": "string",
+                    "description": "full Git object ID after execution"
                   },
                   "log_attachment_id": {
                     "type": "integer",

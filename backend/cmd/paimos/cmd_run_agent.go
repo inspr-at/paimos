@@ -390,6 +390,12 @@ type agentRunPromptContext struct {
 	ArtifactRaw      []byte
 }
 
+type agentRunGitEvidence struct {
+	RepoURL   string
+	Branch    string
+	CommitSHA string
+}
+
 type agentRunArtifact struct {
 	Project struct {
 		ID   int64  `json:"id"`
@@ -492,9 +498,15 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 		}
 		return fmt.Errorf("claim run %d: %w", runID, err)
 	}
+	baseGit := inspectAgentRunGitEvidence(a.repoRoot)
+	repoURL := a.resolveAgentRunRepoURL(detail.ProjectID, baseGit.RepoURL)
+	finish := func(logFile *os.File, fields map[string]any) {
+		addAgentRunGitEvidence(fields, repoURL, baseGit, inspectAgentRunGitEvidence(a.repoRoot))
+		a.finishRun(runID, detail.IssueID, logFile, fields)
+	}
 	runCtx, ctxErr := a.fetchRunPromptContext(detail)
 	if ctxErr != nil {
-		a.finishRun(runID, detail.IssueID, nil, map[string]any{"status": "failed", "error": "agent context: " + ctxErr.Error()})
+		finish(nil, map[string]any{"status": "failed", "error": "agent context: " + ctxErr.Error()})
 		return fmt.Errorf("run %d agent context failed: %w", runID, ctxErr)
 	}
 	agentNote := ""
@@ -519,7 +531,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	if len(runCtx.ArtifactRaw) > 0 {
 		artifactPath, cleanupArtifact, artifactErr := writeAgentArtifactFile(runID, runCtx.ArtifactRaw)
 		if artifactErr != nil {
-			a.finishRun(runID, detail.IssueID, nil, map[string]any{"status": "failed", "error": "agent artifact: " + artifactErr.Error()})
+			finish(nil, map[string]any{"status": "failed", "error": "agent artifact: " + artifactErr.Error()})
 			return fmt.Errorf("run %d artifact failed: %w", runID, artifactErr)
 		}
 		defer cleanupArtifact()
@@ -528,7 +540,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	promptPath, cleanupPrompt, promptErr := writeAgentPromptFile(runID, buildAgentPrompt(issueCtx, runID, a.repoRoot, a.testExec, detail.DeployTarget, runCtx))
 	if promptErr != nil {
 		closeLog(logFile)
-		a.finishRun(runID, detail.IssueID, logFile, map[string]any{"status": "failed", "error": "prompt: " + promptErr.Error()})
+		finish(logFile, map[string]any{"status": "failed", "error": "prompt: " + promptErr.Error()})
 		return fmt.Errorf("run %d prompt failed: %w", runID, promptErr)
 	}
 	defer cleanupPrompt()
@@ -547,7 +559,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 
 	if spawnErr := a.spawn(ctx, a.repoRoot, a.execCmd, env, logSink); spawnErr != nil {
 		closeLog(logFile)
-		a.finishRun(runID, detail.IssueID, logFile, map[string]any{"status": "failed", "error": spawnErr.Error()})
+		finish(logFile, map[string]any{"status": "failed", "error": spawnErr.Error()})
 		return fmt.Errorf("run %d failed: %w", runID, spawnErr)
 	}
 
@@ -563,7 +575,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			closeLog(logFile)
 			resultFields["status"] = "tests_failed"
 			resultFields["error"] = "tests: " + testErr.Error()
-			a.finishRun(runID, detail.IssueID, logFile, resultFields)
+			finish(logFile, resultFields)
 			fmt.Fprintf(stdout, "run %d tests failed\n", runID)
 			return nil
 		}
@@ -576,20 +588,20 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			fmt.Fprintf(stdout, "run %d: deploy declined — reporting tests_passed\n", runID)
 			closeLog(logFile)
 			resultFields["status"] = "tests_passed"
-			a.finishRun(runID, detail.IssueID, logFile, resultFields)
+			finish(logFile, resultFields)
 			return nil
 		}
 		fmt.Fprintf(stdout, "run %d: deploying to %s via %q\n", runID, detail.DeployTarget, a.deployExec)
 		if depErr := a.spawn(ctx, a.repoRoot, a.deployExec, env, logSink); depErr != nil {
 			closeLog(logFile)
-			a.finishRun(runID, detail.IssueID, logFile, map[string]any{"status": "failed", "error": "deploy: " + depErr.Error()})
+			finish(logFile, map[string]any{"status": "failed", "error": "deploy: " + depErr.Error()})
 			return fmt.Errorf("run %d deploy failed: %w", runID, depErr)
 		}
 		closeLog(logFile)
 		resultFields["status"] = "deployed"
 		resultFields["version"] = readVersionFile(a.repoRoot)
 		resultFields["deploy_target"] = detail.DeployTarget
-		a.finishRun(runID, detail.IssueID, logFile, resultFields)
+		finish(logFile, resultFields)
 		fmt.Fprintf(stdout, "run %d deployed to %s\n", runID, detail.DeployTarget)
 		return nil
 	}
@@ -598,7 +610,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	// the agent already advanced the run, this is a harmless 409, not a clobber).
 	closeLog(logFile)
 	resultFields["status"] = "tests_passed"
-	a.finishRun(runID, detail.IssueID, logFile, resultFields)
+	finish(logFile, resultFields)
 	fmt.Fprintf(stdout, "run %d complete\n", runID)
 	return nil
 }
@@ -1094,6 +1106,89 @@ func readVersionFile(repoRoot string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+func inspectAgentRunGitEvidence(repoRoot string) agentRunGitEvidence {
+	_, commit, remote := detectRepoIdentity(repoRoot)
+	branch, _ := gitOutput(repoRoot, "branch", "--show-current")
+	return agentRunGitEvidence{
+		RepoURL:   strings.TrimSpace(remote),
+		Branch:    strings.TrimSpace(branch),
+		CommitSHA: strings.ToLower(strings.TrimSpace(commit)),
+	}
+}
+
+func (a *agentRunner) resolveAgentRunRepoURL(projectID *int64, remote string) string {
+	localName := repoNameFromURL(remote)
+	if projectID != nil && *projectID > 0 && localName != "" {
+		if repos, err := loadProjectRepos(a.client, *projectID); err == nil {
+			matches := make([]string, 0, 1)
+			for _, repo := range repos {
+				if repoNameFromURL(repo.URL) == localName {
+					if safe := browserRepoURL(repo.URL); safe != "" {
+						matches = append(matches, safe)
+					}
+				}
+			}
+			if len(matches) == 1 {
+				return matches[0]
+			}
+		}
+	}
+	return browserRepoURL(remote)
+}
+
+func repoNameFromURL(raw string) string {
+	s := strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(raw), "/"), ".git")
+	if i := strings.LastIndexAny(s, "/:"); i >= 0 {
+		s = s[i+1:]
+	}
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func browserRepoURL(raw string) string {
+	s := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") {
+		u, err := url.Parse(s)
+		if err != nil || u.Host == "" {
+			return ""
+		}
+		u.User = nil
+		u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), ".git")
+		u.RawQuery = ""
+		u.Fragment = ""
+		return strings.TrimRight(u.String(), "/")
+	}
+	s = strings.TrimSuffix(s, ".git")
+	if strings.HasPrefix(s, "ssh://git@github.com/") {
+		return "https://github.com/" + strings.TrimPrefix(s, "ssh://git@github.com/")
+	}
+	if strings.HasPrefix(s, "git@github.com:") {
+		return "https://github.com/" + strings.TrimPrefix(s, "git@github.com:")
+	}
+	return ""
+}
+
+func addAgentRunGitEvidence(fields map[string]any, repoURL string, base, head agentRunGitEvidence) {
+	if repoURL == "" {
+		repoURL = browserRepoURL(head.RepoURL)
+	}
+	if repoURL != "" && len(repoURL) <= 2048 {
+		fields["repo_url"] = repoURL
+	}
+	branch := head.Branch
+	if branch == "" {
+		branch = base.Branch
+	}
+	if branch != "" && len(branch) <= 255 && !strings.ContainsAny(branch, "\r\n\x00") {
+		fields["branch_name"] = branch
+	}
+	if base.CommitSHA != "" {
+		fields["commit_base_sha"] = base.CommitSHA
+	}
+	if head.CommitSHA != "" {
+		fields["commit_sha"] = head.CommitSHA
+	}
 }
 
 func defaultSpawn(ctx context.Context, repoRoot, execCmd string, env []string, logSink io.Writer) error {

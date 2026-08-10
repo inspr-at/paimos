@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -59,6 +61,10 @@ type AgentRun struct {
 	Version            string  `json:"version"`
 	TestsSummary       *string `json:"tests_summary"`
 	DeployTarget       string  `json:"deploy_target"`
+	RepoURL            string  `json:"repo_url"`
+	BranchName         string  `json:"branch_name"`
+	CommitBaseSHA      string  `json:"commit_base_sha"`
+	CommitSHA          string  `json:"commit_sha"`
 	LogAttachmentID    *int64  `json:"log_attachment_id"`
 	Error              string  `json:"error"`
 	CreatedAt          string  `json:"created_at"`
@@ -105,7 +111,7 @@ const agentRunCols = `id, issue_id, project_id, device_id, requested_by, claimed
 	`action_key, provider_kind, provider_id, provider_label, model, run_mode, ` +
 	`profile_id, effort, prompt_preset_ref, context_pack, context_truncated, context_sources_json, prompt_tokens, completion_tokens, finish_reason, ` +
 	`agent_name, session_id, ` +
-	`status, version, tests_summary, deploy_target, log_attachment_id, error, created_at, started_at, finished_at, ` +
+	`status, version, tests_summary, deploy_target, repo_url, branch_name, commit_base_sha, commit_sha, log_attachment_id, error, created_at, started_at, finished_at, ` +
 	`source_draft_run_id, followup_run_id`
 
 func scanAgentRun(row interface{ Scan(...any) error }) (*AgentRun, error) {
@@ -118,7 +124,8 @@ func scanAgentRun(row interface{ Scan(...any) error }) (*AgentRun, error) {
 		&ar.Model, &ar.RunMode, &ar.ProfileID, &ar.Effort, &ar.PromptPresetRef,
 		&ar.ContextPack, &contextTruncated, &ar.ContextSourcesJSON, &ar.PromptTokens,
 		&ar.CompletionTokens, &ar.FinishReason, &ar.AgentName, &ar.SessionID, &ar.Status, &ar.Version, &tests,
-		&ar.DeployTarget, &logAtt, &ar.Error, &ar.CreatedAt, &startedAt, &finishedAt,
+		&ar.DeployTarget, &ar.RepoURL, &ar.BranchName, &ar.CommitBaseSHA, &ar.CommitSHA,
+		&logAtt, &ar.Error, &ar.CreatedAt, &startedAt, &finishedAt,
 		&sourceDraftRunID, &followupRunID); err != nil {
 		return nil, err
 	}
@@ -1216,6 +1223,10 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		Version         *string `json:"version"`
 		TestsSummary    *string `json:"tests_summary"`
 		DeployTarget    *string `json:"deploy_target"`
+		RepoURL         *string `json:"repo_url"`
+		BranchName      *string `json:"branch_name"`
+		CommitBaseSHA   *string `json:"commit_base_sha"`
+		CommitSHA       *string `json:"commit_sha"`
 		LogAttachmentID *int64  `json:"log_attachment_id"`
 		Error           *string `json:"error"`
 	}
@@ -1329,6 +1340,42 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		sets = append(sets, "deploy_target=?")
 		args = append(args, strings.TrimSpace(*body.DeployTarget))
 	}
+	if body.RepoURL != nil {
+		v := strings.TrimSpace(*body.RepoURL)
+		if v != "" && !validAgentRunRepoURL(v) {
+			jsonError(w, "invalid repo_url", http.StatusBadRequest)
+			return
+		}
+		sets = append(sets, "repo_url=?")
+		args = append(args, v)
+	}
+	if body.BranchName != nil {
+		v := strings.TrimSpace(*body.BranchName)
+		if len(v) > 255 || strings.ContainsAny(v, "\r\n\x00") {
+			jsonError(w, "invalid branch_name", http.StatusBadRequest)
+			return
+		}
+		sets = append(sets, "branch_name=?")
+		args = append(args, v)
+	}
+	for _, ref := range []struct {
+		name  string
+		value *string
+	}{
+		{"commit_base_sha", body.CommitBaseSHA},
+		{"commit_sha", body.CommitSHA},
+	} {
+		if ref.value == nil {
+			continue
+		}
+		v := strings.ToLower(strings.TrimSpace(*ref.value))
+		if v != "" && !agentRunCommitPattern.MatchString(v) {
+			jsonError(w, "invalid "+ref.name, http.StatusBadRequest)
+			return
+		}
+		sets = append(sets, ref.name+"=?")
+		args = append(args, v)
+	}
 	if body.LogAttachmentID != nil {
 		// Audit: only an attachment that belongs to this run's issue may be linked,
 		// so a run can't carry a cross-issue attachment reference.
@@ -1438,6 +1485,7 @@ func agentRunReportBody(run *AgentRun) string {
 	if run.TestsSummary != nil && strings.TrimSpace(*run.TestsSummary) != "" {
 		tests = " Tests: " + *run.TestsSummary + "."
 	}
+	code := agentRunCodeEvidenceSummary(run)
 	switch run.Status {
 	case "deployed":
 		ver := ""
@@ -1448,19 +1496,51 @@ func agentRunReportBody(run *AgentRun) string {
 		if run.DeployTarget != "" {
 			target = ", deployed to " + run.DeployTarget
 		}
-		return fmt.Sprintf("🤖 Implemented%s%s%s.%s (run #%d on %s)", ver, at, target, tests, run.ID, on)
+		return fmt.Sprintf("🤖 Implemented%s%s%s.%s%s (run #%d on %s)", ver, at, target, tests, code, run.ID, on)
 	case "tests_passed":
 		ver := ""
 		if run.Version != "" {
 			ver = " (v" + run.Version + ")"
 		}
-		return fmt.Sprintf("🤖 Implemented%s%s.%s (run #%d on %s)", at, ver, tests, run.ID, on)
+		return fmt.Sprintf("🤖 Implemented%s%s.%s%s (run #%d on %s)", at, ver, tests, code, run.ID, on)
 	case "tests_failed", "failed":
 		reason := run.Error
 		if strings.TrimSpace(reason) == "" {
 			reason = "no detail provided"
 		}
-		return fmt.Sprintf("🤖 Run #%d %s%s: %s (on %s)", run.ID, run.Status, at, reason, on)
+		return fmt.Sprintf("🤖 Run #%d %s%s: %s.%s (on %s)", run.ID, run.Status, at, reason, code, on)
 	}
 	return ""
+}
+
+var agentRunCommitPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+
+func validAgentRunRepoURL(raw string) bool {
+	if len(raw) > 2048 {
+		return false
+	}
+	u, err := url.ParseRequestURI(raw)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" &&
+		u.User == nil && u.RawQuery == "" && u.Fragment == ""
+}
+
+func agentRunCodeEvidenceSummary(run *AgentRun) string {
+	base := strings.TrimSpace(run.CommitBaseSHA)
+	head := strings.TrimSpace(run.CommitSHA)
+	if base == "" && head == "" {
+		return " Commit evidence unavailable."
+	}
+	if base != "" && head == base {
+		return " No commit produced."
+	}
+	short := func(s string) string {
+		if len(s) > 12 {
+			return s[:12]
+		}
+		return s
+	}
+	if base != "" && head != "" {
+		return fmt.Sprintf(" Code: `%s..%s`.", short(base), short(head))
+	}
+	return fmt.Sprintf(" Code: `%s`.", short(head))
 }

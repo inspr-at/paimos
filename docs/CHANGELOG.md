@@ -5,6 +5,13 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.0] — 2026-08-10
+
+### Added — Agent runs carry inspectable code evidence (PAI-702)
+
+- Local Implement-this runners now report the repository, branch, and full before/after Git object IDs with their terminal result. The issue run panel links directly to the resulting commit and distinguishes a changed range, an intentional no-commit result, and unavailable evidence.
+- The backend validates the declared reference shapes without fetching repositories or holding forge credentials; `(base, head]` preserves multi-commit runs, while equal object IDs explicitly mean that no commit was produced.
+
 ## [5.7.1] — 2026-08-07
 
 ### Fixed — Branded instances show their own name (PAI-736)
