@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.7] — 2026-08-10
+
+### Fixed — Voice Intake speech cannot reactivate its own microphone (PAI-731)
+
+- A pending microphone permission request now counts as active capture, and cancellation stops any stream that arrives late instead of reopening the mic during speech playback.
+- Replacement speech keeps capture suspended across clips, ignores superseded audio responses, and revokes every blob URL on completion, failure, replacement, or teardown.
+- The report-only content security policy now explicitly permits same-origin blob audio, preserving speech playback when the policy moves to enforcement.
+
 ## [5.8.6] — 2026-08-10
 
 ### Fixed — Voice Intake reconnects preserve newer events (PAI-729)
