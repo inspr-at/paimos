@@ -53,6 +53,10 @@ interface AgentRun {
   agent_name: string
   deploy_target: string
   tests_summary: string | null
+  repo_url?: string
+  branch_name?: string
+  commit_base_sha?: string
+  commit_sha?: string
   error: string
   created_at: string
   started_at: string | null
@@ -493,6 +497,39 @@ function isFinished(run: AgentRun): boolean {
   return ['tests_passed', 'tests_failed', 'deployed', 'drafted', 'failed', 'cancelled'].includes(
     run.status,
   )
+}
+
+function shortCommit(value?: string): string {
+  return value ? value.slice(0, 12) : ''
+}
+
+function commitEvidenceLabel(run: AgentRun): string {
+  if (!run.commit_sha) return ''
+  if (run.commit_base_sha && run.commit_base_sha !== run.commit_sha) {
+    return `${shortCommit(run.commit_base_sha)}..${shortCommit(run.commit_sha)}`
+  }
+  return shortCommit(run.commit_sha)
+}
+
+function commitEvidenceHref(run: AgentRun): string {
+  if (!run.repo_url || !run.commit_sha || run.commit_base_sha === run.commit_sha) return ''
+  try {
+    const url = new URL(run.repo_url)
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return ''
+    url.pathname = `${url.pathname.replace(/\/$/, '')}/commit/${run.commit_sha}`
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return ''
+  }
+}
+
+function commitEvidenceState(run: AgentRun): 'commit' | 'none' | 'unavailable' | '' {
+  if (run.run_mode === 'draft' || !isFinished(run)) return ''
+  if (run.commit_base_sha && run.commit_sha && run.commit_base_sha === run.commit_sha) return 'none'
+  if (run.commit_sha) return 'commit'
+  return 'unavailable'
 }
 
 function runStages(run: AgentRun): RunStage[] {
@@ -1034,6 +1071,21 @@ onUnmounted(() => {
         <span v-if="run.source_draft_run_id" class="arp-tests">
           From draft #{{ run.source_draft_run_id }}
         </span>
+        <div v-if="commitEvidenceState(run)" class="arp-code-evidence">
+          <span class="arp-code-label">Code</span>
+          <a
+            v-if="commitEvidenceState(run) === 'commit' && commitEvidenceHref(run)"
+            :href="commitEvidenceHref(run)"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {{ commitEvidenceLabel(run) }}
+          </a>
+          <code v-else-if="commitEvidenceState(run) === 'commit'">{{ commitEvidenceLabel(run) }}</code>
+          <span v-else-if="commitEvidenceState(run) === 'none'">No commit produced</span>
+          <span v-else>Commit evidence unavailable</span>
+          <span v-if="run.branch_name" class="arp-code-branch">on {{ run.branch_name }}</span>
+        </div>
         <span v-if="run.tests_summary" class="arp-tests">{{ run.tests_summary }}</span>
         <span v-if="run.error" class="arp-run-err">{{ run.error }}</span>
       </li>
@@ -1297,6 +1349,28 @@ onUnmounted(() => {
 .arp-run:first-child {
   border-top: 0;
   padding-top: 0;
+}
+.arp-code-evidence {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+}
+.arp-code-label {
+  font-weight: 700;
+  color: var(--text);
+}
+.arp-code-evidence a,
+.arp-code-evidence code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+.arp-code-evidence a {
+  color: var(--brand-blue);
+}
+.arp-code-branch {
+  font-size: 11px;
 }
 .arp-run-main {
   display: flex;

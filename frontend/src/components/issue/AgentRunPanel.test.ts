@@ -76,6 +76,10 @@ describe('AgentRunPanel — PAI-610', () => {
               version: '4.6.0',
               deploy_target: 'ppm',
               tests_summary: 'npm test passed: 2 passed',
+              repo_url: 'https://github.com/inspr-at/paimos',
+              branch_name: 'pai-702-run-commit-evidence',
+              commit_base_sha: '1111111111111111111111111111111111111111',
+              commit_sha: '2222222222222222222222222222222222222222',
               finished_at: '2026-06-29 10:05:00',
             }),
           ],
@@ -95,6 +99,11 @@ describe('AgentRunPanel — PAI-610', () => {
     expect(el.textContent).toContain('#1')
     expect(el.textContent).toContain('Claimed')
     expect(el.textContent).toContain('Tests passed')
+    expect(el.textContent).toContain('111111111111..222222222222')
+    expect(el.textContent).toContain('on pai-702-run-commit-evidence')
+    expect(el.querySelector<HTMLAnchorElement>('.arp-code-evidence a')?.href).toBe(
+      'https://github.com/inspr-at/paimos/commit/2222222222222222222222222222222222222222',
+    )
     expect(el.querySelector('.arp-device')).toBeNull() // 1 runner → no picker
 
     const btn = el.querySelector<HTMLButtonElement>('.btn-primary')
@@ -105,6 +114,35 @@ describe('AgentRunPanel — PAI-610', () => {
       device_id: 'laptop',
       action_key: 'claude_cli.implement',
     })
+    unmount()
+  })
+
+  it('distinguishes a finished run that produced no commit from missing evidence', async () => {
+    const same = '1111111111111111111111111111111111111111'
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/issues/5/runs')
+        return {
+          runs: [
+            run('tests_passed', {
+              id: 2,
+              branch_name: 'main',
+              commit_base_sha: same,
+              commit_sha: same,
+              finished_at: '2026-06-29 10:05:00',
+            }),
+            run('failed', { id: 1, finished_at: '2026-06-29 10:04:00' }),
+          ],
+        }
+      if (path === '/projects/9/runners') return { runners: [] }
+      return {}
+    })
+
+    const { el, unmount } = mountPanel()
+    await settle()
+
+    expect(el.textContent).toContain('No commit produced')
+    expect(el.textContent).toContain('Commit evidence unavailable')
+    expect(el.querySelectorAll('.arp-code-evidence a')).toHaveLength(0)
     unmount()
   })
 

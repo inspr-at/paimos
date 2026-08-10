@@ -355,7 +355,10 @@ curl -H "Authorization: Bearer $KEY" "$BASE/api/issues/PAI-265/runs"
 curl -H "Authorization: Bearer $KEY" "$BASE/api/runs/42"
 curl -X PATCH -H "Authorization: Bearer $KEY" \
   -d '{"status":"deployed","version":"4.6.0","deploy_target":"ppm",
-       "tests_summary":"42 passed"}' \
+       "tests_summary":"42 passed",
+       "repo_url":"https://github.com/example/app","branch_name":"pai-702",
+       "commit_base_sha":"1111111111111111111111111111111111111111",
+       "commit_sha":"2222222222222222222222222222222222222222"}' \
   "$BASE/api/runs/42"
 
 # Online, implement-capable runners for a project (the device picker).
@@ -384,6 +387,15 @@ Draft actions reject `device_id` and `deploy_target`. They accept the same
 `options` object as AI actions: `profile_id`, `effort`, `prompt_preset_ref`, and
 `context_pack`. The run stores the resolved model/profile/effort/prompt/context
 metadata, token counts when reported, and safe context-source provenance.
+
+Local runners also report declared Git evidence: `repo_url`, `branch_name`,
+`commit_base_sha`, and `commit_sha`. The produced range is `(base, head]`, so
+multiple commits remain representable; equal base/head values explicitly mean
+that the run produced no commit. PAIMOS validates URL and object-ID shape but
+does not fetch or validate the references against a forge. That boundary is
+deliberate: the local runner observes the checkout, while the backend performs
+no Git operations and holds no push credentials. Pull-request references and
+automatic anchor creation are not part of this contract.
 
 A reviewed draft can be handed to a trusted local runner by creating a follow-up
 run with a local CLI `action_key` and `source_draft_run_id`. The source run must

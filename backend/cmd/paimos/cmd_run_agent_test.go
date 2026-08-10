@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -148,6 +149,95 @@ func TestAgentRunnerSuccess(t *testing.T) {
 		(*patches)[0]["action_key"] != "claude_cli.implement" ||
 		(*patches)[1]["status"] != "tests_passed" {
 		t.Fatalf("patches=%+v, want claim(running,if_status=queued,device_id=dev-1,action_key=claude_cli.implement) then tests_passed", *patches)
+	}
+}
+
+func TestAgentRunnerReportsDeclaredCommitRange(t *testing.T) {
+	srv, patches := newRunServer(t, `{"issue_id":5,"device_id":"","status":"queued"}`, http.StatusOK)
+	root := t.TempDir()
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init", "-b", "main")
+	runGit("config", "user.name", "PAIMOS Test")
+	runGit("config", "user.email", "test@example.invalid")
+	runGit("remote", "add", "origin", "https://github.com/example/app.git")
+	if err := os.WriteFile(filepath.Join(root, "result.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "result.txt")
+	runGit("commit", "-m", "base")
+	base := runGit("rev-parse", "HEAD")
+
+	a := &agentRunner{
+		client: newClientForTest(srv.URL), deviceID: "dev-1", repoRoot: root,
+		autoConfirm: true,
+		spawn: func(_ context.Context, _, _ string, _ []string, _ io.Writer) error {
+			if err := os.WriteFile(filepath.Join(root, "result.txt"), []byte("implemented\n"), 0o600); err != nil {
+				return err
+			}
+			runGit("add", "result.txt")
+			runGit("commit", "-m", "implement")
+			return nil
+		},
+	}
+	if err := a.handleRun(context.Background(), aJob()); err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+	head := runGit("rev-parse", "HEAD")
+	last := (*patches)[len(*patches)-1]
+	if last["repo_url"] != "https://github.com/example/app" || last["branch_name"] != "main" ||
+		last["commit_base_sha"] != base || last["commit_sha"] != head || base == head {
+		t.Fatalf("commit evidence=%+v, want declared %s..%s on main", last, base, head)
+	}
+}
+
+func TestAgentRunnerReportsEqualSHAsWhenNoCommitWasProduced(t *testing.T) {
+	srv, patches := newRunServer(t, `{"issue_id":5,"device_id":"","status":"queued"}`, http.StatusOK)
+	root := t.TempDir()
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init", "-b", "main")
+	runGit("config", "user.name", "PAIMOS Test")
+	runGit("config", "user.email", "test@example.invalid")
+	if err := os.WriteFile(filepath.Join(root, "result.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "result.txt")
+	runGit("commit", "-m", "base")
+	base := runGit("rev-parse", "HEAD")
+
+	a := &agentRunner{
+		client: newClientForTest(srv.URL), deviceID: "dev-1", repoRoot: root,
+		autoConfirm: true,
+		spawn:       func(_ context.Context, _, _ string, _ []string, _ io.Writer) error { return nil },
+	}
+	if err := a.handleRun(context.Background(), aJob()); err != nil {
+		t.Fatalf("handleRun: %v", err)
+	}
+	last := (*patches)[len(*patches)-1]
+	if last["commit_base_sha"] != base || last["commit_sha"] != base {
+		t.Fatalf("commit evidence=%+v, want equal base/head %s", last, base)
+	}
+}
+
+func TestBrowserRepoURLNeverCarriesRemoteCredentials(t *testing.T) {
+	got := browserRepoURL("https://user:token@github.com/example/app.git?credential=secret#fragment")
+	if got != "https://github.com/example/app" {
+		t.Fatalf("browserRepoURL=%q, want credential-free canonical URL", got)
 	}
 }
 

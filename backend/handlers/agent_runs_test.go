@@ -78,10 +78,14 @@ func TestAgentRunsLifecycle(t *testing.T) {
 
 	// PATCH → deployed records the report and stamps finished_at.
 	resp = ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
-		"status":        "deployed",
-		"version":       "4.6.0",
-		"deploy_target": "ppm",
-		"tests_summary": `{"passed":42,"failed":0}`,
+		"status":          "deployed",
+		"version":         "4.6.0",
+		"deploy_target":   "ppm",
+		"tests_summary":   `{"passed":42,"failed":0}`,
+		"repo_url":        "https://github.com/inspr-at/paimos",
+		"branch_name":     "pai-702-run-commit-evidence",
+		"commit_base_sha": "1111111111111111111111111111111111111111",
+		"commit_sha":      "2222222222222222222222222222222222222222",
 	})
 	assertStatus(t, resp, http.StatusOK)
 	decode(t, resp, &run)
@@ -93,6 +97,12 @@ func TestAgentRunsLifecycle(t *testing.T) {
 	}
 	if run["tests_summary"] != `{"passed":42,"failed":0}` {
 		t.Errorf("tests_summary=%v", run["tests_summary"])
+	}
+	if run["repo_url"] != "https://github.com/inspr-at/paimos" ||
+		run["branch_name"] != "pai-702-run-commit-evidence" ||
+		run["commit_base_sha"] != "1111111111111111111111111111111111111111" ||
+		run["commit_sha"] != "2222222222222222222222222222222222222222" {
+		t.Errorf("commit evidence=%+v", run)
 	}
 	if run["finished_at"] == nil {
 		t.Errorf("finished_at should be stamped on a terminal status")
@@ -115,6 +125,39 @@ func TestAgentRunsLifecycle(t *testing.T) {
 	// The requester (admin here) can fetch the single run.
 	resp = ts.get(t, "/api/runs/"+itoa(runID), ts.adminCookie)
 	assertStatus(t, resp, http.StatusOK)
+}
+
+func TestAgentRunRejectsMalformedCommitEvidence(t *testing.T) {
+	ts := newTestServer(t)
+	projID := seedBatchProject(t, "PAI", "PAI")
+	_, runID := seedRunForIssue(t, ts, projID, 1)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+		map[string]any{"status": "running"}), http.StatusOK)
+
+	for _, body := range []map[string]any{
+		{"repo_url": "javascript:alert(1)"},
+		{"repo_url": "https://token@github.com/inspr-at/paimos"},
+		{"repo_url": "https://github.com/inspr-at/paimos?token=secret"},
+		{"branch_name": "feature\nforged"},
+		{"commit_base_sha": "abc123"},
+		{"commit_sha": strings.Repeat("z", 40)},
+	} {
+		assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, body), http.StatusBadRequest)
+	}
+
+	resp := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+		"status":          "tests_passed",
+		"repo_url":        "https://github.com/inspr-at/paimos",
+		"branch_name":     "main",
+		"commit_base_sha": strings.Repeat("a", 64),
+		"commit_sha":      strings.Repeat("B", 64),
+	})
+	assertStatus(t, resp, http.StatusOK)
+	var run map[string]any
+	decode(t, resp, &run)
+	if run["commit_sha"] != strings.Repeat("b", 64) {
+		t.Fatalf("commit_sha=%v, want normalized lowercase sha256 object id", run["commit_sha"])
+	}
 }
 
 // TestAgentRunReportComment covers PAI-609: a terminal transition auto-posts a
@@ -146,12 +189,13 @@ func TestAgentRunReportComment(t *testing.T) {
 	// deployed → one report comment.
 	ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
 		"status": "deployed", "version": "4.6.0", "deploy_target": "ppm",
+		"commit_base_sha": strings.Repeat("1", 40), "commit_sha": strings.Repeat("2", 40),
 	})
 	body, n := firstComment(t, issueID)
 	if n != 1 {
 		t.Fatalf("comments after deployed = %d, want 1", n)
 	}
-	for _, want := range []string{"Implemented", "v4.6.0", "ppm", "laptop-1"} {
+	for _, want := range []string{"Implemented", "v4.6.0", "ppm", "laptop-1", "111111111111..222222222222"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("report comment %q missing %q", body, want)
 		}

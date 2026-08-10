@@ -5579,6 +5579,18 @@ func migrate(db *sql.DB) error {
 		{139, []string{
 			`ALTER TABLE sessions ADD COLUMN via_oidc INTEGER NOT NULL DEFAULT 0`,
 		}},
+
+		// M140 / PAI-702: bind an Implement-this run to the code the local
+		// runner observed before and after execution. These are declared
+		// references, not server-validated Git objects: the backend remains free
+		// of repository credentials and Git execution. Equal base/head values
+		// explicitly mean the run produced no commit.
+		{140, []string{
+			`ALTER TABLE agent_runs ADD COLUMN repo_url TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE agent_runs ADD COLUMN branch_name TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE agent_runs ADD COLUMN commit_base_sha TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE agent_runs ADD COLUMN commit_sha TEXT NOT NULL DEFAULT ''`,
+		}},
 	}
 
 	for _, m := range migrations {

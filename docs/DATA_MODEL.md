@@ -553,6 +553,9 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M135 | `users.intake_confidence_threshold` | Per-user override for the voice-intake auto-switch confidence threshold; NULL = instance default (PAI-706). |
 | M136 | `ai_settings.voice_*` | Speech-to-text provider settings (ElevenLabs) for voice intake: provider, encrypted key, base URL (EU residency host support), model (PAI-710). |
 | M137 | `ai_settings.tts_voice_id/tts_model` | Text-to-speech settings for the intake understanding check (PAI-714). |
+| M138 | seeded admin promotion | Promote the seeded `admin` only when no super-admin exists, restoring a path to privileged administration (PAI-739). |
+| M139 | `sessions.via_oidc` | Record OIDC-authenticated sessions so local-TOTP guidance does not misrepresent the IdP boundary (PAI-742). |
+| M140 | `agent_runs.repo_url/branch_name/commit_base_sha/commit_sha` | Runner-declared base→head Git evidence; equal SHAs explicitly mean no commit was produced (PAI-702). |
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 
