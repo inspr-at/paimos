@@ -69,7 +69,7 @@ project work
 This is useful without AI as a focused project system. With agents, the same
 model becomes the context and accountability layer around their work.
 
-## What ships in 5.6
+## What ships in 5.8
 
 | Area                | Current capability                                                                                                                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -78,7 +78,7 @@ model becomes the context and accountability layer around their work.
 | Project context     | Linked repositories, typed knowledge, canonical project-agent artifacts, issue-to-file anchors, entity graph and blast-radius reads, and mixed-context retrieval.                                            |
 | Agent interfaces    | A typed `paimos` CLI, `paimos-mcp`, REST, curated OpenAPI, self-describing schema, JSON output, file-first multiline input, dry runs, idempotent transitions, and declarative bulk apply.                    |
 | Assisted work       | Thirteen in-app AI actions with operator-managed prompts, usage limits, cost records, execution profiles, context packs, and metadata-only audit records.                                                    |
-| Implementation runs | Explicit Claude Code and Codex local-runner actions, plus OpenRouter and OpenAI-compatible local-model draft providers. Draft providers cannot claim repository mutation, tests, shell, or deploy authority. |
+| Implementation runs | Explicit Claude Code and Codex local-runner actions, plus OpenRouter and OpenAI-compatible local-model draft providers. Trusted runners report repository, branch, and before/after commit evidence; draft providers cannot claim repository mutation, tests, shell, or deploy authority. |
 | Collaboration       | Internal roles and project grants, an external customer portal, acceptance workflows, customer-facing summaries, and JSON/PDF project reports.                                                               |
 | Integrations        | Generic OIDC, Jira, Mite, CSV import/export, HubSpot, and an HMAC-signed HTTP CRM sidecar contract. Optional integrations do not become core runtime dependencies.                                           |
 | Operations          | Docker deployment, tracked startup migrations, SQLite WAL, optional S3-compatible attachments and SMTP, health/schema endpoints, configurable branding, retention controls, and backup/restore runbooks.     |
@@ -102,6 +102,13 @@ shipped code and documented verification.
   update (5.6.1).
 - CLI credential hygiene (5.6.2): no API keys via process arguments;
   legacy plaintext keys always migrate into the OS keyring.
+- Identifier-first login (5.7.0) discovers the configured home realm before
+  starting OIDC, while branded instances render their configured name instead
+  of a hard-coded product label (5.7.1).
+- Completed agent runs now carry runner-declared repository, branch, and
+  `(base, head]` commit evidence beside their outcome (5.8.0). The 5.8.1
+  patch keeps the live knowledge freshness gate aligned with the canonical API
+  schema and compatible with macOS Bash 3.2.
 - From 4.8: generic OIDC with PKCE (Zitadel-validated), shared
   provider/profile/effort/prompt metadata across AI actions and
   implementation runs, and Claude Code / Codex as distinct local

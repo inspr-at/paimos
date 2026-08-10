@@ -12,7 +12,7 @@ This document is the **maintained mental model** of what must always remain true
 
 It is **not**:
 
-- A penetration-test report. PAIMOS hasn't had a formal external pen-test yet — that's tracked under [`PAI-139`](https://github.com/inspr-at/paimos/issues/139) and named explicitly in `paimos.com/trust.html` § limits.
+- A penetration-test report. PAIMOS hasn't had a formal external pen-test yet — that's tracked under [`PAI-139`](https://github.com/inspr-at/paimos/issues/139) and named explicitly at [`paimos.inspr.at/#limits`](https://paimos.inspr.at/#limits).
 - A compliance attestation. PAIMOS aims for NIS2 / GDPR alignment (per `claim-matrix.md`) but does not claim audited certification.
 - An exhaustive enumeration of every conceivable attack. The threats below are the ones the project deliberately defends against; less-likely / out-of-scope threats are named in §5.
 
@@ -404,7 +404,7 @@ These are honest gaps in the regression layer, not unenforced invariants. The co
 - **[`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md)** — architecture overview, repo layout, contribution patterns. §4a (access model) is the developer-facing companion to §2.5.
 - **[`claim-matrix.md`](claim-matrix.md)** — claim ↔ shipped-evidence registry; checked at release time.
 - **[`2.0_AUDIT.md`](2.0_AUDIT.md)** — programme-scope audit + decisions log; D-001 through D-005 frame the architectural constraints this threat model is built on.
-- **[`paimos.com/trust.html`](https://paimos.com/trust.html)** — public outward-facing trust posture; §05 limits aligns with this document's §5 out-of-scope.
+- **[`paimos.inspr.at/#trust`](https://paimos.inspr.at/#trust)** — public outward-facing trust posture; the [limits register](https://paimos.inspr.at/#limits) aligns with this document's §5 out-of-scope.
 - **[`HARDENING.md`](HARDENING.md)** — operator-facing companion to this document. Where this threat model says *what must be true*, the hardening guide says *how to make it true* in a deployment, with explicit verification commands per checklist item.
 - **[`SECURITY_REVIEW.md`](SECURITY_REVIEW.md)** — agreed scanner posture (gitleaks, npm audit, gosec, govulncheck) + the security-sensitive code-review rules per invariant group. The review-rule §4 there mirrors the §4 invariant groups here 1:1.
 - **[`REFERENCE_DEPLOYMENTS.md`](REFERENCE_DEPLOYMENTS.md)** — production-validation register; the §3 findings table is where this threat model's invariants get tested in earnest, against real workloads.

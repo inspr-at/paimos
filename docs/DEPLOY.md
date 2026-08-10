@@ -42,7 +42,8 @@ The standard sequence after a feature lands on `main` is **release →
 verify-release → deploy → doc-sync**. The first three cut, verify, and roll
 out the new build; `doc-sync` maintains a **single rolling PAIMOS ticket**,
 appending a per-release section with a four-item checklist (README, `docs/`,
-the `../paimos-site` repo, brand/screenshots) so the user-facing surfaces
+the canonical `../inspr-at` checkout for `inspr-at/inspr-site`, and
+brand/screenshots) so the user-facing surfaces
 don't drift out of sync with the code. It finds that ticket by the stable
 `Doc/site sync follow-up` title prefix, is a no-op if the release is already
 covered, and only files a new ticket when no open one exists. (Before

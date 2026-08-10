@@ -61,7 +61,7 @@ deploy-ppm-current:
     @./scripts/deploy.sh ppm current
 
 # File a "doc/site sync follow-up" ticket in PAIMOS for a tag (default
-# = latest). Run after `just release` so README, docs/, paimos-site,
+# = latest). Run after `just release` so README, docs/, inspr-site,
 # and screenshots don't drift out of sync with the new code.
 doc-sync tag="":
     @./scripts/release-doc-sync.sh {{tag}}

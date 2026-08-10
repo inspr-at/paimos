@@ -38,7 +38,7 @@ Each row is a thing the project commits to do on a cadence. The owner column nam
 | **API key audit** — review every PAIMOS-issued API key (`paimos_…`); revoke unused | every 6 months | maintainer (or admin per deployment) | per-instance via UI: `Settings → Users → <user> → API keys` (`last_used_at` is the signal) |
 | **Provider credential rotation** — rotate `OIDC_CLIENT_SECRET`, `MINIO_SECRET_KEY`, `SMTP_PASS`, OpenRouter API key | every 3 months | operator (per-deployment) | [`HARDENING.md`](HARDENING.md) §3.6 |
 | **Claim-matrix audit** — re-walk every public claim and verify shipped evidence still holds | at every release | release script ([`scripts/check-claims.sh`](../scripts/check-claims.sh) — automated) | [`docs/claim-matrix.md`](claim-matrix.md) |
-| **Doc-sync after release** — README / docs/ / paimos-site / brand assets reviewed for drift | at every release | maintainer | [`scripts/release-doc-sync.sh`](../scripts/release-doc-sync.sh) auto-files the follow-up ticket |
+| **Doc-sync after release** — README / docs / canonical inspr-site copy / brand assets reviewed for drift | at every release | maintainer | [`scripts/release-doc-sync.sh`](../scripts/release-doc-sync.sh) auto-files the follow-up ticket |
 | **gosec baseline review** — keep `.gosec-baseline.txt` empty (PAI-223 burned it down to zero, 2026-06-11); review `#nosec` annotations for staleness; any baseline addition requires explicit review | every 6 months | maintainer | [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md) §2.3 |
 | **Reference-deployment register update** — append new findings; status of each reference deployment validated | every 6 months + per finding | maintainer + (per deployment) operator | [`REFERENCE_DEPLOYMENTS.md`](REFERENCE_DEPLOYMENTS.md) §3 |
 | **Brand framework review** — phase posture, claim matrix, public copy alignment | annually + per phase transition | maintainer | [`docs/brand/BRAND.md`](brand/BRAND.md) phasing plan |
@@ -265,6 +265,6 @@ workstation. Reviewed and documented under the structural-change trigger (§3.5)
 - **[`2.0_AUDIT.md`](2.0_AUDIT.md)** — programme-scope decisions log.
 - **[`claim-matrix.md`](claim-matrix.md)** — claim ↔ shipped-evidence registry.
 - **[`brand/BRAND.md`](brand/BRAND.md)** — brand framework + phasing plan.
-- **[`paimos.com/trust.html`](https://paimos.com/trust.html)** — public outward trust posture.
+- **[`paimos.inspr.at/#trust`](https://paimos.inspr.at/#trust)** — public outward trust posture.
 - **[`scripts/check-claims.sh`](../scripts/check-claims.sh)** — release-time gate.
 - **[`scripts/release-doc-sync.sh`](../scripts/release-doc-sync.sh)** — release-time doc-sync.
