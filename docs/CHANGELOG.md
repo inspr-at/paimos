@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.8] — 2026-08-10
+
+### Fixed — Voice Intake history stays on the selected revision (PAI-726)
+
+- History-slider input is debounced so rapid scrubbing fetches only the latest selected revision, while returning to live remains immediate.
+- Late history responses cannot replace a newer selection or re-enter history after session lifecycle transitions.
+- Transcript time travel now replays chunks and restores in one ordered query, reuses persistent snapshots for nested restores, and rejects restore ancestry beyond 64 levels before committing it.
+
 ## [5.8.7] — 2026-08-10
 
 ### Fixed — Voice Intake speech cannot reactivate its own microphone (PAI-731)
