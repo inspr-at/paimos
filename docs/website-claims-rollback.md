@@ -1,5 +1,11 @@
 # PAI-122 — Local AI claim: wording rollback
 
+> **Historical record.** PAI-122 is complete. Current public copy lives in
+> `inspr-at/inspr-site` (local checkout `~/Code/inspr-at`) and the shipped
+> local-model claim is maintained in [`claim-matrix.md`](claim-matrix.md).
+> The instructions below describe the 2026-04-24 rollback and are not a
+> current deployment procedure.
+
 The 2026-04-24 security audit (`audit.md`) flagged the website's
 "Local AI-ready integrates with Ollama, LM Studio, vLLM, llama.cpp"
 copy as not yet supportable from the audited codebase. The audit gave

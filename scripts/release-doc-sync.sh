@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Files a single PAIMOS ticket — "Doc/site sync follow-up — vX.Y.Z" —
 # with a four-item checklist, a diff summary since the previous tag,
-# and a snapshot of the ../paimos-site sibling repo's state. Run after
+# and a snapshot of the ../inspr-at sibling repo's state. Run after
 # `just release` so README / docs / website / screenshots don't drift.
 #
 # Usage:
@@ -124,14 +124,15 @@ if [[ -z "$PREV" ]]; then
 fi
 echo "Diff range: $PREV..$TAG"
 
-# Sibling repo (../paimos-site).
-SITE_DIR="$(cd "$ROOT/.." && pwd)/paimos-site"
+# Canonical public-site repo (the local directory remains ../inspr-at; its
+# GitHub repository is inspr-at/inspr-site).
+SITE_DIR="$(cd "$ROOT/.." && pwd)/inspr-at"
 if [[ -d "$SITE_DIR/.git" ]]; then
   SITE_STATUS=$(git -C "$SITE_DIR" status -s 2>&1 | head -20)
   [[ -z "$SITE_STATUS" ]] && SITE_STATUS="(clean — no uncommitted changes)"
   SITE_RECENT=$(git -C "$SITE_DIR" log --oneline -5 2>&1 || echo "(unknown)")
 else
-  SITE_STATUS="(paimos-site not found at $SITE_DIR — skipped)"
+  SITE_STATUS="(inspr-site checkout not found at $SITE_DIR — skipped)"
   SITE_RECENT="(n/a)"
 fi
 
@@ -168,7 +169,7 @@ or updated; close the ticket once all four are settled.
 
 - [ ] **README.md** — update if this release adds/removes a top-level feature, changes quickstart, or invalidates screenshots.
 - [ ] **docs/** — \`CHANGELOG.md\` is already updated by the release flow. Cross-check \`CONFIGURATION.md\`, \`DEVELOPER_GUIDE.md\`, \`AGENT_INTERFACE.md\`, \`AGENT_INTEGRATION.md\`, \`api-minimal.md\`, \`DATA_MODEL.md\`, \`REFERENCE_DEPLOYMENTS.md\` for stale references and runtime rows.
-- [ ] **paimos-site** (\`../paimos-site\`) — public marketing copy at paimos.com. See "Sibling repo state" below.
+- [ ] **inspr-site** (\`../inspr-at\`) — canonical public copy at paimos.inspr.at. See "Sibling repo state" below.
 - [ ] **Brand / screenshots** — \`docs/brand/\` and any in-repo screenshots if UI changed materially.
 
 ### Diff since $PREV
@@ -185,7 +186,7 @@ Touched files, grouped:
 $GROUPED
 \`\`\`
 
-### Sibling repo state — paimos-site
+### Sibling repo state — inspr-site
 
 Working tree:
 

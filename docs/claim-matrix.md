@@ -1,7 +1,7 @@
 # PAIMOS — Claim / Evidence Matrix
 
 This file is the source of truth that ties every claim made on
-`paimos.com` (especially under `/03 / specs`) back to the shipped
+[`paimos.inspr.at`](https://paimos.inspr.at/) back to the shipped
 implementation in this repo. PAI-123 introduced it as a release gate:
 the file is checked at release time (`scripts/check-claims.sh`) and a
 release will refuse to cut if any claim is stuck on `aspirational`
@@ -18,7 +18,7 @@ without an open follow-on ticket.
 
 ## Matrix
 
-| Claim (paimos.com / 03-specs) | Status | Evidence | Open tickets |
+| Claim (`paimos.inspr.at`) | Status | Evidence | Open tickets |
 |---|---|---|---|
 | NIS2 ready audit trails, access control, incident logging | shipped | session audit default-on (PAI-116), access control via `project_members`, incident_log table + admin CRUD + JSON/CSV export | — |
 | GDPR-compliant data minimization, export + deletion primitives, EU-hostable | shipped | retention sweeper + `/api/users/{id}/gdpr-export` + `/api/users/{id}/gdpr-erase` (PAI-117); EU hosting is operator-controlled | — |
@@ -29,7 +29,7 @@ without an open follow-on ticket.
 | SBOM · CycloneDX manifest of every dependency, published with each release | shipped | CI tag-push generates `backend.sbom.json` + `frontend.sbom.json`, signs the image keylessly via cosign + GitHub OIDC, attaches each SBOM as a cosign attestation (PAI-121); `just sbom` for local generation | — |
 | Code-aware agents · structured project facts agents can read (linked repos, knowledge, canonical agent artifacts, issue-to-file anchors, mixed-context retrieval) | shipped | `/api/projects/{id}/{repos,knowledge,anchors,graph,retrieve}` + `/api/projects/{id}/agents/{name}.json` + `/api/issues/{id}/anchors` documented in `docs/AGENT_INTEGRATION.md` §1a and `docs/api-minimal.md` § Agent Context (PAI-29 / PAI-30, contract-promoted in v2.0.0; manifest retired in PAI-358); selected project agents are carried into Implement-this run creation and runner prompt context (PAI-654/655) | — |
 | Built-in AI assist · in-app prose optimize, translate, spec-out, suggest-enhancement, sub-task generation, customer-facing report summaries; admin-tunable, audit-clean | shipped | 13 actions registered via `POST /api/ai/action` dispatcher (adds `customer_rewrite` + `exec_summary` in v3.5.0 / PAI-418); admin-tunable prompts via `/api/ai/prompts` CRUD; profile/effort defaults, PPM knowledge prompt presets, context packs, and safe provenance metadata across AI actions (PAI-649 → PAI-653); daily token cap (`PAIMOS_AI_DAILY_CAP_TOKENS`); audit invariant — bodies never logged (see `docs/CONFIGURATION.md` § AI assist) | — |
-| Implement-this AI control plane · explicit Claude/Codex local runners plus hosted/local draft providers with safe provenance | shipped | `claude_cli.implement`, `codex_cli.implement`, `openrouter_draft.implement`, and `local_model_draft.implement` capability/action keys; draft providers cannot claim local shell, tests, repo mutation, or deploy; `agent_runs` records provider/model/profile/effort/prompt/context/agent/runner/status metadata; issue activity merges AI actions and runs (PAI-654 → PAI-659; see `docs/AGENT_INTEGRATION.md` and `docs/IMPLEMENT_THIS_PROVIDERS.md`) | — |
+| Implement-this AI control plane · explicit Claude/Codex local runners plus hosted/local draft providers with safe provenance | shipped | `claude_cli.implement`, `codex_cli.implement`, `openrouter_draft.implement`, and `local_model_draft.implement` capability/action keys; draft providers cannot claim local shell, tests, repo mutation, or deploy; `agent_runs` records provider/model/profile/effort/prompt/context/agent/runner/status metadata; local runners can also report repository, branch, and runner-declared `(base, head]` commit evidence without giving the backend Git credentials or execution authority (PAI-654 → PAI-659, PAI-702; see `docs/AGENT_INTEGRATION.md` and `docs/IMPLEMENT_THIS_PROVIDERS.md`) | — |
 | Voice intake · speak a change and get a reviewable specification, its impact on existing work, and a draft ticket | shipped | Voice Intake epic PAI-703 shipped end-to-end across v5.1.0–v5.4.0: ElevenLabs Scribe speech capture (PAI-710) with resilient session lifecycle (PAI-719), live spec orchestration + project detection (PAI-705/706), impact analysis (PAI-708), ELI5/10/15 understanding check with spoken playback (PAI-709/714), per-language cached artifacts (PAI-734), and one-click issue creation. Endpoints under `/api/intake/sessions/*`; paid provider calls are rate-limited, budgeted and cost-metered (PAI-724, see `docs/CONFIGURATION.md` § Voice cost gates). Voice is optional — the workbench accepts typed input and the core runs with no AI configured. | — |
 | Local AI assistance · OpenAI-compatible local model endpoints can draft plans/review notes, without repo mutation authority | shipped | `ai_settings.provider=local_model` with safe `base_url` label; `local_model_draft.implement` uses an OpenAI-compatible `/chat/completions` endpoint and optional API key, stores draft provenance, and keeps local-shell edit/test/deploy authority separate from model inference (PAI-658) | — |
 

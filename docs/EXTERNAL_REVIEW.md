@@ -1,7 +1,7 @@
 # PAIMOS — External Technical Review Programme
 
 **Owner:** the maintainer (single-person operation as of v2.0).
-**Companion docs:** [`SECURITY_GOVERNANCE.md`](SECURITY_GOVERNANCE.md) (the operating loop this fits into), [`THREAT_MODEL.md`](THREAT_MODEL.md), [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md), [`paimos.com/trust.html`](https://paimos.com/trust.html) (§05 limits aligns with §1 here).
+**Companion docs:** [`SECURITY_GOVERNANCE.md`](SECURITY_GOVERNANCE.md) (the operating loop this fits into), [`THREAT_MODEL.md`](THREAT_MODEL.md), [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md), and the public [trust posture](https://paimos.inspr.at/#trust) whose [limits register](https://paimos.inspr.at/#limits) aligns with §1 here.
 **Status:** v1 — review every six months. Next: **2026-10-26**.
 
 ---
@@ -31,7 +31,7 @@ PAIMOS has **never had a paid external technical review** as of v2.0 (2026-04-26
 
 Two things follow from that honestly:
 
-1. **The trust posture has limits.** Internal review catches what the maintainer is competent to look for; external review catches what they're not. [`paimos.com/trust.html` § 05 limits](https://paimos.com/trust.html) names this explicitly: *"No third-party security review yet."*
+1. **The trust posture has limits.** Internal review catches what the maintainer is competent to look for; external review catches what they're not. The public [limits register](https://paimos.inspr.at/#limits) names this explicitly: *"No third-party security review yet."*
 2. **The trust posture is not nothing.** The 32 invariants in [`THREAT_MODEL.md`](THREAT_MODEL.md), the 45 hardening checks in [`HARDENING.md`](HARDENING.md), the four-scanner pipeline in [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md), the captured drills in [`BACKUP_RESTORE.md`](BACKUP_RESTORE.md) and [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md), the production validation in [`REFERENCE_DEPLOYMENTS.md`](REFERENCE_DEPLOYMENTS.md) — these are real, documented, evidence-grounded artefacts. They're what an external reviewer would *use as input*, not what they'd replace.
 
 The framework below is what we'd hand a reviewer when one becomes feasible.
@@ -111,7 +111,7 @@ The trust-doc set was assembled without external review. The substitutes that ge
 | **Community review via GitHub** | every PR merged is visible; every commit is greppable; every release is signed; the project's bug-tracking is public on PAIMOS itself | informal; depends on people choosing to look |
 | **Public CycloneDX SBOMs + cosign signatures** | every release is independently verifiable to the source; supply-chain provenance is a real artefact | provides verifiability, doesn't itself find defects |
 
-These substitutes are real and named in [`paimos.com/trust.html`](https://paimos.com/trust.html). They're not a replacement for external review; they're the trust-floor while external review is out of reach.
+These substitutes are real and named in the public [trust posture](https://paimos.inspr.at/#trust). They're not a replacement for external review; they're the trust-floor while external review is out of reach.
 
 ---
 
@@ -137,7 +137,7 @@ each finding triaged into one of:
 findings + remediation summary appended to:
    · this document's §6 maintenance log
    · SECURITY_GOVERNANCE.md §6 maintenance log (next 6-month entry)
-   · paimos.com/trust.html §05 limits (update from "No third-party
+   · paimos.inspr.at/#limits (update from "No third-party
      security review yet" to "First third-party review on <date>;
      findings summary at …" and link)
    ↓
@@ -169,7 +169,7 @@ Append-only. Each entry is either an external review event (started / completed)
 
 ### 2026-04-26 — initial entry, no external review yet
 
-The trust-doc set was assembled internally. No external review has occurred. The §4 lightweight alternatives are the substrate. **The honest framing on [`paimos.com/trust.html`](https://paimos.com/trust.html) §05 limits** ("No third-party security review yet") is current and correct.
+The trust-doc set was assembled internally. No external review has occurred. The §4 lightweight alternatives are the substrate. **The honest framing in the public [limits register](https://paimos.inspr.at/#limits)** ("No third-party security review yet") is current and correct.
 
 Next review: **2026-10-26** (per [`SECURITY_GOVERNANCE.md`](SECURITY_GOVERNANCE.md) unified calendar).
 
@@ -183,6 +183,6 @@ Next review: **2026-10-26** (per [`SECURITY_GOVERNANCE.md`](SECURITY_GOVERNANCE.
 - **[`HARDENING.md`](HARDENING.md)** — operator-side hardening checklist; one of the artefacts a reviewer would use as input.
 - **[`BACKUP_RESTORE.md`](BACKUP_RESTORE.md)** + **[`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md)** + **[`REFERENCE_DEPLOYMENTS.md`](REFERENCE_DEPLOYMENTS.md)** — captured drills + tabletops + production findings the reviewer would consume.
 - **[`SECURITY.md`](../SECURITY.md)** — disclosure policy; the inbound path for findings even when no formal review is in flight.
-- **[`paimos.com/trust.html`](https://paimos.com/trust.html)** §05 limits — the public statement aligned with §1 here.
+- **[`paimos.inspr.at/#limits`](https://paimos.inspr.at/#limits)** — the public statement aligned with §1 here.
 - **[`brand/BRAND.md`](brand/BRAND.md)** — phasing plan; Phase 3 transition is one of the §3 triggers.
 - **[`PAI-139`](https://github.com/inspr-at/paimos/issues/139)** — this ticket; the framework lands; the engagement awaits the right window.

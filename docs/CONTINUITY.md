@@ -26,7 +26,8 @@ The single best fact about a solo-maintained FOSS project is that **most of the 
 
 | Artefact | Where it lives | Survives loss of maintainer? |
 |---|---|---|
-| Source code | GitHub `inspr-at/paimos` + `inspr-at/paimos-site` (and every clone, fork, and CI runner cache) | ✓ AGPL-3.0-only; cannot be retracted. |
+| Product source code | GitHub `inspr-at/paimos` (and every clone, fork, and CI runner cache) | ✓ AGPL-3.0-only; cannot be retracted. |
+| Public-site source | Private GitHub repository `inspr-at/inspr-site`, locally checked out as `~/Code/inspr-at` | Requires repository-account recovery; the deployed static release remains independently readable. |
 | Release artefacts | `ghcr.io/inspr-at/paimos:<x.y.z>` (immutable per tag) + GitHub Releases page (SBOMs, signatures) | ✓ Immutable on registry; survives indefinitely unless the registry itself goes dark. See §3.6. |
 | User data | Each operator's own `$DATA_DIR/paimos.db` + their MinIO/S3 bucket if attachments | ✓ Always — self-hosted; the maintainer never had a copy. |
 | Documentation | In the same repo as the code, including this document. | ✓ Travels with the code. |
@@ -50,11 +51,11 @@ The information below has to be findable from this document, this repo, or the m
 | Asset | Canonical location |
 |---|---|
 | App code | `https://github.com/inspr-at/paimos` |
-| Site code | `https://github.com/inspr-at/paimos-site` |
+| Site code | private `https://github.com/inspr-at/inspr-site` (local checkout `~/Code/inspr-at`) |
 | Release images | `ghcr.io/inspr-at/paimos:<tag>` |
 | Reference deployment | `pm.barta.cm` (ppm), runs the maintainer's primary instance |
 | Secondary reference deployment | retired second-operator instance — decommissioned June 2026 (see [REFERENCE_DEPLOYMENTS.md](REFERENCE_DEPLOYMENTS.md) §2.2) |
-| Public website | `paimos.com` (Caddy server on `cs1.barta.cm`, rsync deploys per [paimos-site/README.md](https://github.com/inspr-at/paimos-site/blob/main/README.md)) |
+| Public website | `paimos.inspr.at` (immutable static releases on csb1, deployed per the `inspr-site` README); `paimos.com` is a permanent redirect |
 | Disclosure inbox | `security@paimos.com` |
 | Security advisories | `https://github.com/inspr-at/paimos/security/advisories` |
 | GitHub Org access list | `https://github.com/orgs/markus-barta/people` (admin-only view) |
@@ -67,7 +68,7 @@ Cross-references — every routine operation has a runbook in the repo. Do not r
 |---|---|
 | Cut a release | [`DEPLOY.md` § The five commands](DEPLOY.md#the-five-commands) — `just release patch\|minor\|major` |
 | Verify a release before deploy | [`DEPLOY.md` § `just verify-release <tag>`](DEPLOY.md#just-verify-release-tag) — `just verify-release v<x.y.z>` |
-| Deploy a tag to ppm | `just deploy-ppm <tag>` |
+| Deploy a tag to ppm | [`DEPLOY.md` § Deploying ppm](DEPLOY.md#deploying-ppm-composestack-since-ops-116) — signed image pin through nixcfg + NixOS composeStack |
 | Doc-sync follow-up after release | `just doc-sync` |
 | Restore a deployment from backup | [`DEPLOY.md` § Rollback](DEPLOY.md#rollback-if-a-deploy-goes-sideways) |
 | Verify a release artefact (signature + SBOM) | [`RELEASE.md` § How to verify](RELEASE.md#how-to-verify-a-release) |
@@ -118,7 +119,7 @@ If `paimos.com` lapses:
 - The site goes dark within the registrar's grace window (typically 30-60 days; varies by TLD policy).
 - Existing operators' deployments **are not affected** — they pull images from `ghcr.io` and serve from their own domains.
 - The disclosure inbox `security@paimos.com` stops resolving. Reports route to a backup alias (documented in the maintainer's vault, not here).
-- The trust page (`paimos.com/trust.html`) goes dark, but the same content exists in this repo as [`docs/2.0_AUDIT.md`](2.0_AUDIT.md), [`docs/INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md), [`SECURITY.md`](../SECURITY.md), [`docs/claim-matrix.md`](claim-matrix.md), and this document.
+- The public trust posture at `paimos.inspr.at/#trust` goes dark, but the same evidence exists in this repo as [`docs/2.0_AUDIT.md`](2.0_AUDIT.md), [`docs/INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md), [`SECURITY.md`](../SECURITY.md), [`docs/claim-matrix.md`](claim-matrix.md), and this document.
 
 ---
 
@@ -287,7 +288,7 @@ Operators can do a lot for themselves. The reference deployment going dark does 
 
 **For prospective operators evaluating PAIMOS during an extended absence:**
 
-- Read [`paimos.com/trust.html`](https://paimos.com/trust.html). It documents the project's posture honestly, including the limits.
+- Read the public [trust posture](https://paimos.inspr.at/#trust) and [limits register](https://paimos.inspr.at/#limits).
 - Read this document. If §3.2 has been triggered and the trust page reflects dormancy, factor that into your adoption decision.
 - Build from source if you can't reach the registry. The Dockerfile + the `just` recipes are designed to work offline-from-source.
 
@@ -349,5 +350,5 @@ The plan held. The recovery contact-driven flow is workable in 6-12 week absence
 - [`RELEASE.md`](RELEASE.md) — what each tag publishes, how to verify it.
 - [`2.0_AUDIT.md`](2.0_AUDIT.md) — programme-scope audit + decisions log.
 - [`brand/BRAND.md`](brand/BRAND.md) — name, mark, voice, phasing plan.
-- [`paimos.com/trust.html`](https://paimos.com/trust.html) — public trust posture (mirrors content from this doc + claim-matrix.md + 2.0_AUDIT.md).
+- [`paimos.inspr.at/#trust`](https://paimos.inspr.at/#trust) — public trust posture (derived from this doc + claim-matrix.md + 2.0_AUDIT.md).
 - [`THREAT_MODEL.md`](THREAT_MODEL.md) — threat actors, trust boundaries, named security invariants per domain. This continuity plan handles the maintainer being out; the threat model handles the system being under attack.

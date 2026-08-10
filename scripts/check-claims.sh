@@ -32,9 +32,9 @@ fi
 # external deps.
 fail=0
 while IFS= read -r line; do
-  # Skip header (contains "Claim (paimos.com") and separator (--- only).
+  # Skip the matrix header and separator (--- only).
   case "$line" in
-    *"Claim (paimos.com"*) continue ;;
+    *"| Claim ("*) continue ;;
     *---*) continue ;;
   esac
   status=$(echo "$line" | awk -F'|' '{ gsub(/^ +| +$/, "", $3); print $3 }')
