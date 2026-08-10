@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.10] — 2026-08-10
+
+### Fixed — Voice Intake chooses projects by purpose, not backlog size (PAI-756)
+
+- Project matching now considers every accessible active project and supplies each project description to the semantic ranking stage, while keeping the visible suggestion list bounded to five.
+- Generated specification titles and summaries carry more weight than transcript-tail chatter; rarity weighting and per-project normalization prevent large generic backlogs from winning by repetition.
+- The existing no-evidence confidence clamp and access boundary remain intact, with a JANUS regression fixture covering the original secrets-tool failure.
+
 ## [5.8.9] — 2026-08-10
 
 ### Fixed — Voice Intake impact analysis stays bounded and stable (PAI-727)
