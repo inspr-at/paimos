@@ -102,6 +102,7 @@ func csp() string {
 		"style-src 'self' 'unsafe-inline'; " +
 		"font-src 'self' data:; " +
 		"img-src 'self' data: blob:; " +
+		"media-src 'self' blob:; " +
 		"connect-src 'self'; " +
 		"frame-ancestors 'self'; " +
 		"base-uri 'self'; " +

@@ -391,6 +391,9 @@ func TestRegression_Hdr_003_CSPReportOnly(t *testing.T) {
 	if !strings.Contains(csp, "report-uri /api/csp-report") {
 		t.Errorf("INV-HDR-003 violated: report-uri not pointing at /api/csp-report: %q", csp)
 	}
+	if !strings.Contains(csp, "media-src 'self' blob:") {
+		t.Errorf("INV-HDR-003 violated: same-origin blob audio is not allowed: %q", csp)
+	}
 	for _, banned := range []string{"googleapis.com", "gstatic.com", "cdn.jsdelivr", "unpkg.com"} {
 		if strings.Contains(csp, banned) {
 			t.Errorf("INV-HDR-003 violated: third-party host %q in CSP: %q", banned, csp)

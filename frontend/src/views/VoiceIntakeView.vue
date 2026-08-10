@@ -21,6 +21,7 @@ import { useIntakeSession } from "@/composables/useIntakeSession";
 import { useMarkdown } from "@/composables/useMarkdown";
 import IntakeCard from "@/components/intake/IntakeCard.vue";
 import { useIssuePreview } from "@/composables/useIssuePreview";
+import { createIntakeTtsPlayback } from "@/composables/useIntakeTtsPlayback";
 import { useMicPermission } from "@/composables/useMicPermission";
 import { useMicTranscript } from "@/composables/useMicTranscript";
 import { postIntakeAudio, voiceAvailable } from "@/api/intake";
@@ -210,7 +211,7 @@ watch(mic.state, (st) => {
 });
 
 async function onStartTalking() {
-  stopSpeaking(); // barge-in: the user's voice always wins
+  stopSpeaking(false); // barge-in: this explicit start owns mic resumption
   // PAI-719: a completed/abandoned session cannot take input — Start
   // Talking begins a fresh one, carrying the project target forward.
   if (session.value && session.value.status !== "active") {
@@ -332,19 +333,15 @@ watch(displayedTranscript, async () => {
 const ttsMuted = ref(localStorage.getItem(LS_INTAKE_TTS_MUTED) !== "0");
 watch(ttsMuted, (m) => localStorage.setItem(LS_INTAKE_TTS_MUTED, m ? "1" : "0"));
 let lastSpokenText = "";
-let ttsAudio: HTMLAudioElement | null = null;
-let ttsResumeMic = false;
+const ttsPlayback = createIntakeTtsPlayback({
+  micActive: mic.isActive,
+  stopMic: mic.stop,
+  canResumeMic: () => talking.value && !textMode.value,
+  resumeMic: () => void startMicCapture(),
+});
 
-function stopSpeaking() {
-  if (ttsAudio) {
-    ttsAudio.pause();
-    ttsAudio.src = "";
-    ttsAudio = null;
-  }
-  if (ttsResumeMic) {
-    ttsResumeMic = false;
-    if (talking.value && !textMode.value) void startMicCapture();
-  }
+function stopSpeaking(resumeMic = true) {
+  ttsPlayback.cancel(resumeMic);
 }
 
 async function speakSelectedEli() {
@@ -352,13 +349,7 @@ async function speakSelectedEli() {
   const text = summaries.value?.[eliLevel.value]?.trim() ?? "";
   if (!s || ttsMuted.value || !voiceReady.value || text === "" || text === lastSpokenText) return;
   lastSpokenText = text;
-  stopSpeaking();
-  // Interlock: suspend the mic while the workbench talks.
-  if (mic.isActive.value) {
-    ttsResumeMic = true;
-    mic.stop();
-  }
-  try {
+  await ttsPlayback.play(async () => {
     const res = await fetch(`/api/intake/sessions/${s.id}/tts`, {
       method: "POST",
       credentials: "include",
@@ -370,15 +361,8 @@ async function speakSelectedEli() {
       body: JSON.stringify({ level: eliLevel.value }),
     });
     if (!res.ok) throw new Error(`tts ${res.status}`);
-    const blob = await res.blob();
-    const audio = new Audio(URL.createObjectURL(blob));
-    ttsAudio = audio;
-    audio.onended = stopSpeaking;
-    audio.onerror = stopSpeaking;
-    await audio.play();
-  } catch {
-    stopSpeaking(); // degrade silently — speech is a bonus, never a blocker
-  }
+    return res.blob();
+  }); // failures degrade silently — speech is a bonus, never a blocker
 }
 
 watch([summaries, eliLevel, ttsMuted], () => {
@@ -475,8 +459,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   talking.value = false;
-  ttsResumeMic = false;
-  stopSpeaking();
+  stopSpeaking(false);
   mic.stop();
   disconnect();
 });
