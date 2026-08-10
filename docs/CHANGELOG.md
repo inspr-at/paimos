@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.4] — 2026-08-10
+
+### Fixed — Voice Intake relations stay inside their analyzed project (PAI-728)
+
+- Voice Intake impact artifacts now record the exact project they analyzed, so re-pinning a session cannot file stale relations into a different project.
+- Issue creation re-resolves every impact target inside its transaction and accepts only live issues whose current project matches the authorized create target. Moved, deleted, cross-project, and legacy unbound targets fail closed.
+- Valid same-project relations remain atomic with issue creation and continue to mirror into the entity graph.
+
 ## [5.8.3] — 2026-08-10
 
 ### Changed — Marketing captures are reproducible release evidence (PAI-695)
