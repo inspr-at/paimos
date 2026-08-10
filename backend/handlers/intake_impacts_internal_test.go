@@ -45,12 +45,12 @@ func TestIntakeImpacts_HeuristicAndLLMCategories(t *testing.T) {
 		sessionID).Scan(&payload); err != nil {
 		t.Fatalf("impacts event missing (degraded mode): %v", err)
 	}
-	var out struct {
-		Impacted []intakeImpactEntry `json:"impacted"`
-		Related  []intakeImpactEntry `json:"related"`
-	}
+	var out intakeImpactsArtifact
 	if err := json.Unmarshal([]byte(payload), &out); err != nil {
 		t.Fatal(err)
+	}
+	if out.ProjectID != alphaID {
+		t.Fatalf("impacts project_id = %d, want %d", out.ProjectID, alphaID)
 	}
 	if len(out.Related) == 0 || out.Related[0].IssueKey != "ALPH-1" {
 		t.Fatalf("degraded impacts: related = %+v", out.Related)

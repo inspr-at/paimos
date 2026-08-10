@@ -50,6 +50,13 @@ type intakeImpactEntry struct {
 	Via            string  `json:"via"` // "retrieval" | "graph"
 }
 
+type intakeImpactsArtifact struct {
+	ProjectID int64               `json:"project_id"`
+	Impacted  []intakeImpactEntry `json:"impacted"`
+	Related   []intakeImpactEntry `json:"related"`
+	GraphHits []intakeGraphHit    `json:"graph_hits"`
+}
+
 type intakeGraphHit struct {
 	EntityType string `json:"entity_type"`
 	Title      string `json:"title"`
@@ -162,10 +169,11 @@ func runIntakeImpactsStage(ctx context.Context, s *intakeSession, query string, 
 		addEntry(key, intakeIssueTitleByKey(ctx, key), 0, "graph")
 	}
 
-	payload, _ := json.Marshal(map[string]any{
-		"impacted":   impacted,
-		"related":    related,
-		"graph_hits": graphHits,
+	payload, _ := json.Marshal(intakeImpactsArtifact{
+		ProjectID: *target,
+		Impacted:  impacted,
+		Related:   related,
+		GraphHits: graphHits,
 	})
 	count, err := intakeEventCount(ctx, db.DB, s.ID)
 	if err != nil || count >= intakeMaxEventsPerSess {

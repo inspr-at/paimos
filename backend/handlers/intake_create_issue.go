@@ -27,7 +27,10 @@
 package handlers
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -167,22 +170,39 @@ func CreateIntakeIssue(w http.ResponseWriter, r *http.Request) {
 	filedRelations := [][2]int64{} // {targetID, ...} with type index below
 	filedTypes := []string{}
 	if raw, ok := state.Artifacts["impacts"]; ok {
-		var impacts struct {
-			Impacted []intakeImpactEntry `json:"impacted"`
-		}
-		if json.Unmarshal(raw, &impacts) == nil {
+		var impacts intakeImpactsArtifact
+		if json.Unmarshal(raw, &impacts) == nil && impacts.ProjectID == projectID {
 			for _, e := range impacts.Impacted {
 				relType := intakeCategoryRelation[e.Category]
 				if relType == "" {
 					continue
 				}
-				targetID, ok := auth.ResolveIssueRef(e.IssueKey)
-				if !ok {
+				targetID, targetProjectID, found, err := resolveIntakeImpactTargetTx(
+					r.Context(), tx, e.IssueKey,
+				)
+				if err != nil {
+					if handleDBError(w, err, "impact relation target") {
+						return
+					}
+					return
+				}
+				// The route already authorized edit access to projectID. Requiring
+				// the target's current project to be identical applies that same
+				// authorization to every relation without opening a cross-project
+				// side channel.
+				if !found || targetProjectID != projectID {
 					continue
 				}
-				if _, err := tx.ExecContext(r.Context(),
+				result, err := tx.ExecContext(r.Context(),
 					`INSERT OR IGNORE INTO issue_relations(source_id, target_id, type) VALUES(?,?,?)`,
-					issueID, targetID, relType); err == nil {
+					issueID, targetID, relType)
+				if err != nil {
+					if handleDBError(w, err, "impact relation") {
+						return
+					}
+					return
+				}
+				if inserted, _ := result.RowsAffected(); inserted == 1 {
 					filedRelations = append(filedRelations, [2]int64{issueID, targetID})
 					filedTypes = append(filedTypes, relType)
 				}
@@ -226,6 +246,55 @@ func CreateIntakeIssue(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	jsonOK(w, issue)
+}
+
+// resolveIntakeImpactTargetTx re-resolves an artifact's issue key against the
+// current database state inside the issue-creation transaction. Live keys win
+// over move aliases, matching the public resolver, while deleted issues and
+// deleted projects fail closed.
+func resolveIntakeImpactTargetTx(ctx context.Context, tx *sql.Tx, ref string) (int64, int64, bool, error) {
+	if !auth.IsIssueKey(ref) {
+		return 0, 0, false, nil
+	}
+	dash := strings.LastIndex(ref, "-")
+	projectKey := ref[:dash]
+	issueNumber, err := strconv.Atoi(ref[dash+1:])
+	if err != nil {
+		return 0, 0, false, nil
+	}
+
+	var issueID, projectID int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT i.id, i.project_id
+		FROM issues i
+		JOIN projects p ON p.id=i.project_id
+		WHERE p.key=? AND i.issue_number=?
+		  AND i.deleted_at IS NULL AND p.status!='deleted'`,
+		projectKey, issueNumber,
+	).Scan(&issueID, &projectID)
+	if err == nil {
+		return issueID, projectID, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, false, err
+	}
+
+	err = tx.QueryRowContext(ctx, `
+		SELECT i.id, i.project_id
+		FROM issue_key_aliases a
+		JOIN issues i ON i.id=a.issue_id
+		JOIN projects p ON p.id=i.project_id
+		WHERE a.project_key=? AND a.issue_number=?
+		  AND i.deleted_at IS NULL AND p.status!='deleted'`,
+		projectKey, issueNumber,
+	).Scan(&issueID, &projectID)
+	if err == nil {
+		return issueID, projectID, true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, false, nil
+	}
+	return 0, 0, false, err
 }
 
 func appendIntakeStatusEvent(r *http.Request, sessionID int64, payload string) error {
