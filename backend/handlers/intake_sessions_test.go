@@ -162,6 +162,59 @@ func TestIntakeSession_LifecycleAndTimeTravel(t *testing.T) {
 	}
 }
 
+func TestIntakeSession_RestoreOfRestoreTranscript(t *testing.T) {
+	ts := newTestServer(t)
+	s := createIntakeSession(t, ts, ts.memberCookie)
+
+	first := postChunk(t, ts, ts.memberCookie, s.ID, "first")
+	postChunk(t, ts, ts.memberCookie, s.ID, "discarded before first restore")
+	resp := ts.post(t, "/api/intake/sessions/"+itoa(s.ID)+"/restore", ts.memberCookie,
+		map[string]any{"seq": int64(first["seq"].(float64))})
+	assertStatus(t, resp, http.StatusOK)
+	var restored intakeHeadResp
+	decode(t, resp, &restored)
+
+	kept := postChunk(t, ts, ts.memberCookie, s.ID, "kept between restores")
+	postChunk(t, ts, ts.memberCookie, s.ID, "discarded before second restore")
+	resp = ts.post(t, "/api/intake/sessions/"+itoa(s.ID)+"/restore", ts.memberCookie,
+		map[string]any{"seq": int64(kept["seq"].(float64))})
+	assertStatus(t, resp, http.StatusOK)
+	decode(t, resp, &restored)
+	postChunk(t, ts, ts.memberCookie, s.ID, "tail")
+
+	resp = ts.get(t, "/api/intake/sessions/"+itoa(s.ID), ts.memberCookie)
+	assertStatus(t, resp, http.StatusOK)
+	var head intakeHeadResp
+	decode(t, resp, &head)
+	if got, want := head.State.Transcript, "first\nkept between restores\ntail"; got != want {
+		t.Fatalf("nested restore transcript = %q, want %q", got, want)
+	}
+}
+
+func TestIntakeSession_RestoreDepthIsBounded(t *testing.T) {
+	ts := newTestServer(t)
+	s := createIntakeSession(t, ts, ts.memberCookie)
+	postChunk(t, ts, ts.memberCookie, s.ID, "base")
+
+	for depth := 1; depth <= 64; depth++ {
+		resp := ts.post(t, "/api/intake/sessions/"+itoa(s.ID)+"/restore", ts.memberCookie,
+			map[string]any{"seq": int64(depth)})
+		assertStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	resp := ts.post(t, "/api/intake/sessions/"+itoa(s.ID)+"/restore", ts.memberCookie,
+		map[string]any{"seq": int64(65)})
+	assertStatus(t, resp, http.StatusConflict)
+
+	resp = ts.get(t, "/api/intake/sessions/"+itoa(s.ID), ts.memberCookie)
+	assertStatus(t, resp, http.StatusOK)
+	var head intakeHeadResp
+	decode(t, resp, &head)
+	if head.Session.Rev != 65 {
+		t.Fatalf("rejected restore changed rev to %d, want 65", head.Session.Rev)
+	}
+}
+
 // TestIntakeSession_AuthzMatrix enforces INV-INTAKE-01: non-owner access
 // answers 404 on every session route; admins pass; externals are blocked
 // upstream by the internal route group.

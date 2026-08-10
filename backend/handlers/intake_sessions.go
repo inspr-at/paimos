@@ -38,6 +38,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -54,6 +55,7 @@ const (
 	intakeSpecMaxBytes       = 48 * 1024
 	intakeMaxEventsPerSess   = 2000
 	intakeCheckpointMaxLabel = 120
+	intakeMaxRestoreDepth    = 64
 )
 
 // Artifact kinds whose latest snapshot at a given seq defines the session
@@ -88,8 +90,8 @@ type intakeSession struct {
 	CreatedIssueID    *int64  `json:"created_issue_id"`
 	TranscriptBytes   int     `json:"transcript_bytes"`
 	Rev               int64   `json:"rev"`
-	SessionPromptTokens     int `json:"session_prompt_tokens"`
-	SessionCompletionTokens int `json:"session_completion_tokens"`
+	SessionPromptTokens     int     `json:"session_prompt_tokens"`
+	SessionCompletionTokens int     `json:"session_completion_tokens"`
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
 	CompletedAt       *string `json:"completed_at"`
@@ -111,9 +113,10 @@ type intakeCheckpoint struct {
 }
 
 type intakeState struct {
-	AtSeq      int64                      `json:"at_seq"`
-	Transcript string                     `json:"transcript"`
-	Artifacts  map[string]json.RawMessage `json:"artifacts"`
+	AtSeq        int64                      `json:"at_seq"`
+	Transcript   string                     `json:"transcript"`
+	Artifacts    map[string]json.RawMessage `json:"artifacts"`
+	restoreDepth int
 }
 
 const intakeSessionCols = `id, user_id, status, language, detected_project_id, detected_score,
@@ -712,6 +715,10 @@ func RestoreIntakeSession(w http.ResponseWriter, r *http.Request) {
 	if handleDBError(w, err, "intake restore") {
 		return
 	}
+	if state.restoreDepth >= intakeMaxRestoreDepth {
+		jsonError(w, "restore chain depth limit reached", http.StatusConflict)
+		return
+	}
 
 	tx, err := db.DB.BeginTx(ctx, nil)
 	if handleDBError(w, err, "intake restore") {
@@ -797,11 +804,12 @@ func intakeStateAt(ctx context.Context, sessionID, atSeq int64) (*intakeState, e
 			state.Artifacts[kind] = json.RawMessage(payload)
 		}
 	}
-	transcript, err := intakeTranscriptAt(ctx, sessionID, atSeq)
+	transcript, restoreDepth, err := intakeTranscriptAt(ctx, sessionID, atSeq)
 	if err != nil {
 		return nil, err
 	}
 	state.Transcript = transcript
+	state.restoreDepth = restoreDepth
 	return state, nil
 }
 
@@ -845,64 +853,86 @@ func intakeLanguageAt(ctx context.Context, sessionID, atSeq int64) string {
 	return ""
 }
 
-// intakeTranscriptAt rebuilds the transcript as of atSeq. Restore markers
-// re-base the effective chunk window: the transcript at any point is the
-// chunks visible at the most recent restore target, plus chunks appended
-// after that restore.
-func intakeTranscriptAt(ctx context.Context, sessionID, atSeq int64) (string, error) {
-	var markerSeq, toSeq sql.NullInt64
-	var payload sql.NullString
-	err := db.DB.QueryRowContext(ctx,
-		`SELECT seq, payload_json, json_extract(payload_json, '$.to_seq')
-		 FROM intake_events
-		 WHERE session_id = ? AND kind = 'restore' AND seq <= ?
-		 ORDER BY seq DESC LIMIT 1`, sessionID, atSeq).Scan(&markerSeq, &payload, &toSeq)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
+// intakeTranscriptAt rebuilds the transcript as of atSeq from one ordered
+// event query. Persistent chunk nodes let each restore reuse its target
+// snapshot without copying prior transcript text; restore ancestry is bounded.
+type intakeTranscriptNode struct {
+	previous *intakeTranscriptNode
+	text     string
+}
 
-	var base string
-	lower := int64(0)
-	if markerSeq.Valid && toSeq.Valid {
-		b, err := intakeTranscriptAt(ctx, sessionID, toSeq.Int64)
-		if err != nil {
-			return "", err
-		}
-		base = b
-		lower = markerSeq.Int64
-	}
+type intakeTranscriptSnapshot struct {
+	seq          int64
+	tail         *intakeTranscriptNode
+	restoreDepth int
+}
 
+func intakeTranscriptAt(ctx context.Context, sessionID, atSeq int64) (string, int, error) {
 	rows, err := db.DB.QueryContext(ctx,
-		`SELECT payload_json FROM intake_events
-		 WHERE session_id = ? AND kind = 'transcript_chunk' AND seq > ? AND seq <= ?
-		 ORDER BY seq ASC`, sessionID, lower, atSeq)
+		`SELECT seq, kind, payload_json FROM intake_events
+		 WHERE session_id = ? AND kind IN ('transcript_chunk', 'restore') AND seq <= ?
+		 ORDER BY seq ASC`, sessionID, atSeq)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer rows.Close()
-	parts := []string{}
-	if base != "" {
-		parts = append(parts, base)
-	}
+
+	var tail *intakeTranscriptNode
+	restoreDepth := 0
+	snapshots := make([]intakeTranscriptSnapshot, 0)
 	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return "", err
+		var seq int64
+		var kind, raw string
+		if err := rows.Scan(&seq, &kind, &raw); err != nil {
+			return "", 0, err
 		}
-		var chunk struct {
-			Text string `json:"text"`
+		switch kind {
+		case "transcript_chunk":
+			var chunk struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal([]byte(raw), &chunk) == nil && chunk.Text != "" {
+				tail = &intakeTranscriptNode{previous: tail, text: chunk.Text}
+			}
+		case "restore":
+			var marker struct {
+				ToSeq int64 `json:"to_seq"`
+			}
+			if json.Unmarshal([]byte(raw), &marker) != nil {
+				break
+			}
+			if marker.ToSeq >= seq {
+				return "", 0, errors.New("intake restore target must precede marker")
+			}
+			idx := sort.Search(len(snapshots), func(i int) bool {
+				return snapshots[i].seq > marker.ToSeq
+			}) - 1
+			tail = nil
+			restoreDepth = 1
+			if idx >= 0 {
+				tail = snapshots[idx].tail
+				restoreDepth = snapshots[idx].restoreDepth + 1
+			}
+			if restoreDepth > intakeMaxRestoreDepth {
+				return "", 0, errors.New("intake restore chain depth limit reached")
+			}
 		}
-		if err := json.Unmarshal([]byte(raw), &chunk); err != nil {
-			continue
-		}
-		if chunk.Text != "" {
-			parts = append(parts, chunk.Text)
-		}
+		snapshots = append(snapshots, intakeTranscriptSnapshot{
+			seq: seq, tail: tail, restoreDepth: restoreDepth,
+		})
 	}
 	if err := rows.Err(); err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return strings.Join(parts, "\n"), nil
+
+	parts := make([]string, 0)
+	for node := tail; node != nil; node = node.previous {
+		parts = append(parts, node.text)
+	}
+	for left, right := 0, len(parts)-1; left < right; left, right = left+1, right-1 {
+		parts[left], parts[right] = parts[right], parts[left]
+	}
+	return strings.Join(parts, "\n"), restoreDepth, nil
 }
 
 func listIntakeCheckpoints(ctx context.Context, sessionID int64) ([]intakeCheckpoint, error) {

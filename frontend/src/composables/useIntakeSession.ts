@@ -43,6 +43,7 @@ import {
   type IntakeLanguage,
   type IntakeSession,
   type IntakeSpecPayload,
+  type IntakeState,
   type IntakeStreamEvent,
 } from "@/api/intake";
 import { api, errMsg } from "@/api/client";
@@ -135,6 +136,9 @@ let source: EventSource | null = null;
 let lastSeq = 0;
 let clientSeqCounter = 0;
 let hydrationGeneration = 0;
+let scrubGeneration = 0;
+let scrubTimer: ReturnType<typeof setTimeout> | null = null;
+const intakeScrubDebounceMs = 150;
 interface ReconnectHydration {
   generation: number;
   sessionID: number;
@@ -420,6 +424,7 @@ function connect(id: number) {
 }
 
 function disconnect() {
+  invalidateScrub();
   hydrationGeneration += 1;
   reconnectHydration = null;
   source?.close();
@@ -428,6 +433,7 @@ function disconnect() {
 }
 
 async function start(language?: IntakeLanguage) {
+  invalidateScrub();
   error.value = null;
   try {
     const s = await createIntakeSession(language);
@@ -453,6 +459,7 @@ async function start(language?: IntakeLanguage) {
 }
 
 async function resume(id: number) {
+  invalidateScrub();
   error.value = null;
   await hydrate(id);
   connect(id);
@@ -551,8 +558,18 @@ async function saveCheckpoint(label: string) {
   }
 }
 
-/** Scrub to a seq (read-only preview); null returns to live. */
+function invalidateScrub() {
+  scrubGeneration += 1;
+  if (scrubTimer !== null) {
+    clearTimeout(scrubTimer);
+    scrubTimer = null;
+  }
+}
+
+/** Scrub to a seq immediately (read-only preview); null returns to live. */
 async function scrub(seq: number | null) {
+  invalidateScrub();
+  const generation = scrubGeneration;
   const s = session.value;
   if (!s) return;
   if (seq === null || seq >= headRev()) {
@@ -560,7 +577,14 @@ async function scrub(seq: number | null) {
     viewState.value = null;
     return;
   }
-  const state = await getIntakeState(s.id, seq);
+  let state: IntakeState;
+  try {
+    state = await getIntakeState(s.id, seq);
+  } catch (cause) {
+    if (generation !== scrubGeneration || session.value?.id !== s.id) return;
+    throw cause;
+  }
+  if (generation !== scrubGeneration || session.value?.id !== s.id) return;
   viewSeq.value = seq;
   viewState.value = {
     transcript: state.transcript,
@@ -568,7 +592,24 @@ async function scrub(seq: number | null) {
   };
 }
 
+/** Coalesce range-input events; returning to HEAD remains immediate. */
+function scheduleScrub(seq: number | null) {
+  invalidateScrub();
+  if (!session.value) return;
+  if (seq === null || seq >= headRev()) {
+    void scrub(null);
+    return;
+  }
+  scrubTimer = setTimeout(() => {
+    scrubTimer = null;
+    void scrub(seq).catch((e) => {
+      error.value = errMsg(e, "Could not load intake history");
+    });
+  }, intakeScrubDebounceMs);
+}
+
 async function restore(seq: number) {
+  invalidateScrub();
   const s = session.value;
   if (!s) return;
   try {
@@ -655,6 +696,7 @@ export function useIntakeSession() {
     setLanguage,
     saveCheckpoint,
     scrub,
+    scheduleScrub,
     restore,
     abandon,
     reset,
