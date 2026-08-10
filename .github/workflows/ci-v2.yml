@@ -72,6 +72,9 @@ jobs:
       - name: Release hygiene
         run: ./scripts/check-release-hygiene.sh
 
+      - name: Knowledge freshness — live contract
+        run: ./scripts/test-knowledge-freshness.sh
+
       - name: Deploy scripts — target resolution
         run: ./scripts/test-deploy-target.sh
 
