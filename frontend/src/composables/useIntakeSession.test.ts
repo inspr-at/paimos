@@ -73,7 +73,7 @@ class FakeEventSource {
 
 vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
 
-import { getIntakeSession, type IntakeHead } from "@/api/intake";
+import { getIntakeSession, getIntakeState, type IntakeHead, type IntakeState } from "@/api/intake";
 import { useIntakeSession } from "./useIntakeSession";
 
 function lastSource(): FakeEventSource {
@@ -116,6 +116,7 @@ function deferred<T>() {
 
 describe("useIntakeSession", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     FakeEventSource.instances = [];
     useIntakeSession().reset();
   });
@@ -281,6 +282,103 @@ describe("useIntakeSession", () => {
     expect(s.isViewingHistory.value).toBe(false);
     expect(s.session.value?.rev).toBe(5);
     expect(s.spec.value?.markdown).toBe("# v1");
+  });
+
+  it("debounces history scrubs and fetches only the latest revision", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = useIntakeSession();
+      await s.start();
+      const src = lastSource();
+      src.emit("transcript_chunk", { seq: 1, kind: "transcript_chunk", payload: { text: "a" } });
+      src.emit("transcript_chunk", { seq: 2, kind: "transcript_chunk", payload: { text: "b" } });
+      src.emit("transcript_chunk", { seq: 3, kind: "transcript_chunk", payload: { text: "c" } });
+
+      s.scheduleScrub(1);
+      s.scheduleScrub(2);
+      expect(getIntakeState).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(149);
+      expect(getIntakeState).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(getIntakeState).toHaveBeenCalledTimes(1);
+      expect(getIntakeState).toHaveBeenCalledWith(1, 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the newest scrub when responses finish out of order", async () => {
+    const older = deferred<IntakeState>();
+    const newer = deferred<IntakeState>();
+    vi.mocked(getIntakeState)
+      .mockImplementationOnce(() => older.promise)
+      .mockImplementationOnce(() => newer.promise);
+
+    const s = useIntakeSession();
+    await s.start();
+    const src = lastSource();
+    src.emit("transcript_chunk", { seq: 1, kind: "transcript_chunk", payload: { text: "a" } });
+    src.emit("transcript_chunk", { seq: 2, kind: "transcript_chunk", payload: { text: "b" } });
+    src.emit("transcript_chunk", { seq: 3, kind: "transcript_chunk", payload: { text: "c" } });
+
+    const olderRequest = s.scrub(1);
+    const newerRequest = s.scrub(2);
+    newer.resolve({ at_seq: 2, transcript: "newer", artifacts: {} });
+    await newerRequest;
+    expect(s.viewSeq.value).toBe(2);
+    expect(s.viewState.value?.transcript).toBe("newer");
+
+    older.resolve({ at_seq: 1, transcript: "older", artifacts: {} });
+    await olderRequest;
+    expect(s.viewSeq.value).toBe(2);
+    expect(s.viewState.value?.transcript).toBe("newer");
+  });
+
+  it("invalidates an in-flight response as soon as a newer scrub is scheduled", async () => {
+    vi.useFakeTimers();
+    try {
+      const older = deferred<IntakeState>();
+      vi.mocked(getIntakeState).mockImplementationOnce(() => older.promise);
+
+      const s = useIntakeSession();
+      await s.start();
+      const src = lastSource();
+      src.emit("transcript_chunk", { seq: 1, kind: "transcript_chunk", payload: { text: "a" } });
+      src.emit("transcript_chunk", { seq: 2, kind: "transcript_chunk", payload: { text: "b" } });
+      src.emit("transcript_chunk", { seq: 3, kind: "transcript_chunk", payload: { text: "c" } });
+
+      const olderRequest = s.scrub(1);
+      s.scheduleScrub(2);
+      older.resolve({ at_seq: 1, transcript: "older", artifacts: {} });
+      await olderRequest;
+
+      expect(s.viewSeq.value).toBeNull();
+      expect(s.viewState.value).toBeNull();
+      await vi.advanceTimersByTimeAsync(150);
+      expect(s.viewSeq.value).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not reinstall history after returning to live", async () => {
+    const pending = deferred<IntakeState>();
+    vi.mocked(getIntakeState).mockImplementationOnce(() => pending.promise);
+
+    const s = useIntakeSession();
+    await s.start();
+    const src = lastSource();
+    src.emit("transcript_chunk", { seq: 1, kind: "transcript_chunk", payload: { text: "a" } });
+    src.emit("transcript_chunk", { seq: 2, kind: "transcript_chunk", payload: { text: "b" } });
+
+    const request = s.scrub(1);
+    await s.scrub(null);
+    pending.resolve({ at_seq: 1, transcript: "stale", artifacts: {} });
+    await request;
+
+    expect(s.isViewingHistory.value).toBe(false);
+    expect(s.viewState.value).toBeNull();
   });
 
   it("reset closes the stream and clears state", async () => {

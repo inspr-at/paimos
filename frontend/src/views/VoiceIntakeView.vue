@@ -54,7 +54,7 @@ const {
   saveSpec,
   setLanguage,
   saveCheckpoint,
-  scrub,
+  scheduleScrub,
   restore,
   reset,
   disconnect,
@@ -288,9 +288,9 @@ async function onSaveCheckpoint() {
   showCheckpointInput.value = false;
 }
 
-watch(scrubPos, async (pos) => {
+watch(scrubPos, (pos) => {
   if (!session.value) return;
-  await scrub(pos >= headRev.value ? null : pos);
+  scheduleScrub(pos >= headRev.value ? null : pos);
 });
 
 watch(headRev, (rev) => {
