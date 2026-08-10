@@ -5,6 +5,13 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.1] — 2026-08-10
+
+### Fixed — Live knowledge freshness checks follow the API schema (PAI-687)
+
+- The ppm-only live freshness check now derives its expected public API schema from the backend `SchemaVersion` source of truth instead of retaining a stale `1.5.0` literal after the API moved to `2.0.0`.
+- Clean worktrees no longer fail under macOS Bash 3.2 when the optional PAIMOS knowledge cache is absent, and required CI now exercises the live health/schema contract through a hermetic endpoint simulation.
+
 ## [5.8.0] — 2026-08-10
 
 ### Added — Agent runs carry inspectable code evidence (PAI-702)
