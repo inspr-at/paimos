@@ -73,12 +73,45 @@ class FakeEventSource {
 
 vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
 
+import { getIntakeSession, type IntakeHead } from "@/api/intake";
 import { useIntakeSession } from "./useIntakeSession";
 
 function lastSource(): FakeEventSource {
   const src = FakeEventSource.instances[FakeEventSource.instances.length - 1];
   if (!src) throw new Error("no EventSource opened");
   return src;
+}
+
+function intakeHead(rev: number, transcript: string): IntakeHead {
+  return {
+    session: {
+      id: 1,
+      user_id: 1,
+      status: "active",
+      language: "en",
+      detected_project_id: null,
+      detected_score: 0,
+      pinned_project_id: null,
+      created_issue_id: null,
+      transcript_bytes: transcript.length,
+      rev,
+      created_at: "",
+      updated_at: "",
+      completed_at: null,
+    },
+    state: { at_seq: rev, transcript, artifacts: {} },
+    checkpoints: [],
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("useIntakeSession", () => {
@@ -118,6 +151,109 @@ describe("useIntakeSession", () => {
     expect(s.transcript.value).toBe("one");
     expect(s.spec.value).toBeNull();
     expect(s.revIndex.value.length).toBe(1);
+  });
+
+  it("replays persisted events above a reconnect snapshot after hydration", async () => {
+    const pending = deferred<IntakeHead>();
+    vi.mocked(getIntakeSession).mockImplementationOnce(() => pending.promise);
+
+    const s = useIntakeSession();
+    await s.start();
+    const src = lastSource();
+    src.onopen?.();
+    src.onopen?.(); // reconnect starts the deferred hydration
+
+    src.emit("transcript_chunk", {
+      seq: 3,
+      kind: "transcript_chunk",
+      payload: { text: "third" },
+    });
+    src.emit("transcript_chunk", {
+      seq: 2,
+      kind: "transcript_chunk",
+      payload: { text: "second" },
+    });
+    src.emit("transcript_chunk", {
+      seq: 2,
+      kind: "transcript_chunk",
+      payload: { text: "duplicate second" },
+    });
+    pending.resolve(intakeHead(1, "snapshot"));
+
+    await vi.waitFor(() => {
+      expect(s.transcript.value).toBe("snapshot\nsecond\nthird");
+    });
+    expect(s.session.value?.rev).toBe(3);
+    expect(s.revIndex.value.map((event) => event.seq)).toEqual([2, 3]);
+  });
+
+  it("ignores a stale reconnect hydration after a newer one finishes", async () => {
+    const older = deferred<IntakeHead>();
+    const newer = deferred<IntakeHead>();
+    vi.mocked(getIntakeSession)
+      .mockImplementationOnce(() => older.promise)
+      .mockImplementationOnce(() => newer.promise);
+
+    const s = useIntakeSession();
+    await s.start();
+    const src = lastSource();
+    src.onopen?.();
+    src.onopen?.(); // older hydration
+    src.onopen?.(); // newer hydration supersedes it
+
+    newer.resolve(intakeHead(4, "new head"));
+    await vi.waitFor(() => expect(s.transcript.value).toBe("new head"));
+
+    older.resolve(intakeHead(1, "stale head"));
+    await Promise.resolve();
+    expect(s.transcript.value).toBe("new head");
+    expect(s.session.value?.rev).toBe(4);
+  });
+
+  it("does not install reconnect hydration after reset", async () => {
+    const pending = deferred<IntakeHead>();
+    vi.mocked(getIntakeSession).mockImplementationOnce(() => pending.promise);
+
+    const s = useIntakeSession();
+    await s.start();
+    const src = lastSource();
+    src.onopen?.();
+    src.onopen?.();
+    src.emit("transcript_chunk", {
+      seq: 2,
+      kind: "transcript_chunk",
+      payload: { text: "buffered" },
+    });
+
+    s.reset();
+    pending.resolve(intakeHead(1, "stale head"));
+    await Promise.resolve();
+
+    expect(s.session.value).toBeNull();
+    expect(s.transcript.value).toBe("");
+    expect(s.revIndex.value).toEqual([]);
+  });
+
+  it("keeps replayed events when reconnect hydration fails", async () => {
+    const pending = deferred<IntakeHead>();
+    vi.mocked(getIntakeSession).mockImplementationOnce(() => pending.promise);
+
+    const s = useIntakeSession();
+    await s.start();
+    const src = lastSource();
+    src.onopen?.();
+    src.onopen?.();
+    src.emit("transcript_chunk", {
+      seq: 2,
+      kind: "transcript_chunk",
+      payload: { text: "replayed despite failed snapshot" },
+    });
+
+    pending.reject(new Error("snapshot unavailable"));
+    await vi.waitFor(() => {
+      expect(s.transcript.value).toBe("replayed despite failed snapshot");
+    });
+    expect(s.session.value?.rev).toBe(2);
   });
 
   it("collects checkpoints from events", async () => {
