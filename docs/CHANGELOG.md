@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.2] — 2026-08-10
+
+### Changed — Public evidence follows the canonical shipped surface (PAI-689)
+
+- Public release claims now point to the canonical `paimos.inspr.at` site and include the repository, branch, and before/after commit evidence shipped in 5.8.0.
+- Release hygiene and documentation sync now target the reviewed `inspr-site` repository, while trust links resolve to stable anchors instead of the retired `paimos.com` trust page.
+- Deployment and continuity guidance now match the current ppm compose-stack and immutable site-release workflows.
+
 ## [5.8.1] — 2026-08-10
 
 ### Fixed — Live knowledge freshness checks follow the API schema (PAI-687)
