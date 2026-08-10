@@ -27,11 +27,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 
-	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 )
+
+const intakeImpactIssueLimit = 20
 
 // intakeCategoryRelation maps analysis categories to filed relation types.
 var intakeCategoryRelation = map[string]string{
@@ -60,6 +62,17 @@ type intakeImpactsArtifact struct {
 type intakeGraphHit struct {
 	EntityType string `json:"entity_type"`
 	Title      string `json:"title"`
+}
+
+type intakeImpactCandidate struct {
+	IssueKey string
+	Score    float64
+	Via      string
+}
+
+type intakeImpactIssue struct {
+	IssueID int64
+	Title   string
 }
 
 // intakeCandidateIssues returns the top retrieval issue hits for the
@@ -132,26 +145,31 @@ func runIntakeImpactsStage(ctx context.Context, s *intakeSession, query string, 
 		collectBlastIssueKeys(blast, reached)
 	}
 
+	candidates := boundedIntakeImpactCandidates(issueHits, reached, intakeImpactIssueLimit)
+	resolved, err := resolveIntakeImpactIssues(ctx, *target, candidates)
+	if err != nil {
+		publishIntakeStage(s.ID, "impacts", "error", "resolve")
+		return
+	}
+
 	impacted := []intakeImpactEntry{}
 	related := []intakeImpactEntry{}
-	seen := map[string]bool{}
-	addEntry := func(key, title string, score float64, via string) {
-		if key == "" || seen[key] {
-			return
+	for _, candidate := range candidates {
+		issue, ok := resolved[candidate.IssueKey]
+		if !ok {
+			continue
 		}
-		seen[key] = true
-		issueID, _ := auth.ResolveIssueRef(key)
-		category := specRelations[key]
+		category := specRelations[candidate.IssueKey]
 		if category == "" {
-			if reached[key] {
+			if reached[candidate.IssueKey] {
 				category = "touches"
 			} else {
 				category = "related"
 			}
 		}
 		e := intakeImpactEntry{
-			IssueID: issueID, IssueKey: key, Title: title, Category: category,
-			MappedRelation: intakeCategoryRelation[category], Score: score, Via: via,
+			IssueID: issue.IssueID, IssueKey: candidate.IssueKey, Title: issue.Title, Category: category,
+			MappedRelation: intakeCategoryRelation[category], Score: candidate.Score, Via: candidate.Via,
 		}
 		if category == "related" {
 			related = append(related, e)
@@ -159,22 +177,15 @@ func runIntakeImpactsStage(ctx context.Context, s *intakeSession, query string, 
 			impacted = append(impacted, e)
 		}
 	}
-	for _, h := range issueHits {
-		key, _ := h["issue_key"].(string)
-		title, _ := h["title"].(string)
-		score, _ := h["score"].(float64)
-		addEntry(key, title, score, "retrieval")
-	}
-	for key := range reached {
-		addEntry(key, intakeIssueTitleByKey(ctx, key), 0, "graph")
-	}
 
-	payload, _ := json.Marshal(intakeImpactsArtifact{
+	artifact := intakeImpactsArtifact{
 		ProjectID: *target,
 		Impacted:  impacted,
 		Related:   related,
 		GraphHits: graphHits,
-	})
+	}
+	sortIntakeImpactsArtifact(&artifact)
+	payload, _ := json.Marshal(artifact)
 	count, err := intakeEventCount(ctx, db.DB, s.ID)
 	if err != nil || count >= intakeMaxEventsPerSess {
 		return
@@ -189,6 +200,89 @@ func runIntakeImpactsStage(ctx context.Context, s *intakeSession, query string, 
 		publishIntakeEvent(ctx, s.ID, seq)
 		publishIntakeStage(s.ID, "impacts", "ok", "")
 	}
+}
+
+func boundedIntakeImpactCandidates(issueHits []map[string]any, reached map[string]bool, limit int) []intakeImpactCandidate {
+	if limit <= 0 {
+		return nil
+	}
+	candidates := make([]intakeImpactCandidate, 0, limit)
+	seen := make(map[string]bool, limit)
+	add := func(candidate intakeImpactCandidate) {
+		if candidate.IssueKey == "" || seen[candidate.IssueKey] || len(candidates) >= limit {
+			return
+		}
+		seen[candidate.IssueKey] = true
+		candidates = append(candidates, candidate)
+	}
+	for _, hit := range issueHits {
+		key, _ := hit["issue_key"].(string)
+		score, _ := hit["score"].(float64)
+		add(intakeImpactCandidate{IssueKey: key, Score: score, Via: "retrieval"})
+	}
+
+	graphKeys := make([]string, 0, len(reached))
+	for key, isReached := range reached {
+		if isReached && !seen[key] {
+			graphKeys = append(graphKeys, key)
+		}
+	}
+	sort.Strings(graphKeys)
+	for _, key := range graphKeys {
+		add(intakeImpactCandidate{IssueKey: key, Via: "graph"})
+	}
+	return candidates
+}
+
+func resolveIntakeImpactIssues(ctx context.Context, projectID int64, candidates []intakeImpactCandidate) (map[string]intakeImpactIssue, error) {
+	resolved := make(map[string]intakeImpactIssue, len(candidates))
+	if len(candidates) == 0 {
+		return resolved, nil
+	}
+	args := make([]any, 0, len(candidates)+1)
+	args = append(args, projectID)
+	for _, candidate := range candidates {
+		args = append(args, candidate.IssueKey)
+	}
+	// #nosec G202 G701 -- buildPlaceholders emits only '?' tokens; all project and issue values are bound.
+	rows, err := db.DB.QueryContext(ctx, `
+		SELECT i.id, p.key || '-' || i.issue_number, i.title
+		FROM issues i
+		JOIN projects p ON p.id = i.project_id
+		WHERE i.project_id = ? AND i.deleted_at IS NULL
+		  AND (p.key || '-' || i.issue_number) IN (`+buildPlaceholders(len(candidates))+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var issueID int64
+		var issueKey, title string
+		if err := rows.Scan(&issueID, &issueKey, &title); err != nil {
+			return nil, err
+		}
+		resolved[issueKey] = intakeImpactIssue{IssueID: issueID, Title: title}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return resolved, nil
+}
+
+func sortIntakeImpactsArtifact(artifact *intakeImpactsArtifact) {
+	byIssueKey := func(entries []intakeImpactEntry) {
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].IssueKey < entries[j].IssueKey
+		})
+	}
+	byIssueKey(artifact.Impacted)
+	byIssueKey(artifact.Related)
+	sort.Slice(artifact.GraphHits, func(i, j int) bool {
+		if artifact.GraphHits[i].EntityType != artifact.GraphHits[j].EntityType {
+			return artifact.GraphHits[i].EntityType < artifact.GraphHits[j].EntityType
+		}
+		return artifact.GraphHits[i].Title < artifact.GraphHits[j].Title
+	})
 }
 
 func entityIDAsInt64(v any) int64 {
@@ -228,18 +322,4 @@ func collectBlastIssueKeys(blast map[string]any, into map[string]bool) {
 			into[key] = true
 		}
 	}
-}
-
-func intakeIssueTitleByKey(ctx context.Context, key string) string {
-	parts := strings.SplitN(key, "-", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-	var title string
-	_ = db.DB.QueryRowContext(ctx, `
-		SELECT i.title FROM issues i
-		JOIN projects p ON p.id = i.project_id
-		WHERE p.key = ? AND i.issue_number = ? AND i.deleted_at IS NULL`,
-		parts[0], parts[1]).Scan(&title)
-	return title
 }
