@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.11] — 2026-08-10
+
+### Added — Voice Intake can recover from an incorrect project guess (PAI-757)
+
+- Opening the project chip now loads the caller's complete accessible active-project set, with AI candidates kept first alongside their confidence scores and rationales.
+- A focused search covers project keys, names, and descriptions, and selecting any result uses the existing non-destructive pin flow without changing auto-switch behavior.
+- Stale AI candidates are filtered through the fresh access-scoped project response and fail closed when that response cannot be loaded.
+
 ## [5.8.10] — 2026-08-10
 
 ### Fixed — Voice Intake chooses projects by purpose, not backlog size (PAI-756)
