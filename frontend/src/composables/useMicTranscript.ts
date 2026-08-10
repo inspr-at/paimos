@@ -171,22 +171,34 @@ function armRecorder() {
 
 /** Start continuous listening; utterances flow to `handleUtterance`. */
 async function start(handleUtterance: (blob: Blob) => Promise<void>): Promise<boolean> {
-  if (state.value === "listening" || state.value === "transcribing") {
+  if (
+    state.value === "starting" ||
+    state.value === "listening" ||
+    state.value === "transcribing"
+  ) {
     onUtterance = handleUtterance; // idempotent restart: refresh the sink
     return true;
   }
   errorMessage.value = null;
   state.value = "starting";
   onUtterance = handleUtterance;
+  const myGeneration = generation;
+  let acquiredStream: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
+    acquiredStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
   } catch {
+    if (myGeneration !== generation) return false;
     state.value = "error";
     errorMessage.value = "Microphone unavailable or permission denied — you can type instead.";
     return false;
   }
+  if (myGeneration !== generation) {
+    acquiredStream.getTracks().forEach((track) => track.stop());
+    return false;
+  }
+  stream = acquiredStream;
   audioCtx = new AudioContext();
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 512;
@@ -202,7 +214,10 @@ function stop() {
   state.value = "idle";
 }
 
-const isActive = computed(() => state.value === "listening" || state.value === "transcribing");
+const isActive = computed(
+  () =>
+    state.value === "starting" || state.value === "listening" || state.value === "transcribing",
+);
 
 export function useMicTranscript() {
   return { state, level, errorMessage, isActive, start, stop, micSupported };
