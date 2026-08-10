@@ -39,6 +39,7 @@ import {
   restoreIntakeSession,
   type IntakeCheckpoint,
   type IntakeEventMeta,
+  type IntakeHead,
   type IntakeLanguage,
   type IntakeSession,
   type IntakeSpecPayload,
@@ -133,6 +134,13 @@ const lastError = error; // alias matching the useAiAction naming convention
 let source: EventSource | null = null;
 let lastSeq = 0;
 let clientSeqCounter = 0;
+let hydrationGeneration = 0;
+interface ReconnectHydration {
+  generation: number;
+  sessionID: number;
+  events: IntakeStreamEvent[];
+}
+let reconnectHydration: ReconnectHydration | null = null;
 
 // PAI-734: per-language artifact caches. The displayed spec/summaries/
 // ticket refs always point at the active language's cache (falling back
@@ -262,8 +270,7 @@ function applyPersistedEvent(ev: IntakeStreamEvent) {
   }
 }
 
-async function hydrate(id: number) {
-  const head = await getIntakeSession(id);
+function installHydratedHead(head: IntakeHead) {
   session.value = head.session;
   transcript.value = head.state.transcript;
   // State artifacts arrive language-preferred (server-side PAI-734
@@ -279,6 +286,43 @@ async function hydrate(id: number) {
   // The metadata timeline is rebuilt lazily; SSE replay from 0 would
   // duplicate hydration, so the stream resumes from the hydrated rev.
   revIndex.value = [];
+}
+
+function applyOrBufferPersistedEvent(id: number, ev: IntakeStreamEvent) {
+  const pending = reconnectHydration;
+  if (pending && pending.generation === hydrationGeneration && pending.sessionID === id) {
+    pending.events.push(ev);
+    return;
+  }
+  applyPersistedEvent(ev);
+}
+
+function applyBufferedEvents(pending: ReconnectHydration) {
+  pending.events.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)).forEach(applyPersistedEvent);
+}
+
+async function hydrate(id: number, bufferReplay = false) {
+  const generation = ++hydrationGeneration;
+  const pending: ReconnectHydration | null = bufferReplay
+    ? { generation, sessionID: id, events: [] }
+    : null;
+  reconnectHydration = pending;
+  try {
+    const head = await getIntakeSession(id);
+    if (generation !== hydrationGeneration) return;
+
+    installHydratedHead(head);
+    if (reconnectHydration?.generation === generation) reconnectHydration = null;
+    if (pending) applyBufferedEvents(pending);
+  } catch (cause) {
+    if (generation === hydrationGeneration && pending) {
+      if (reconnectHydration?.generation === generation) reconnectHydration = null;
+      applyBufferedEvents(pending);
+    }
+    throw cause;
+  } finally {
+    if (reconnectHydration?.generation === generation) reconnectHydration = null;
+  }
 }
 
 function seedArtifactCaches(
@@ -315,8 +359,9 @@ function connect(id: number) {
     connection.value = "open";
     if (!firstOpen) {
       // Native EventSource reconnected: re-hydrate to heal any dropped
-      // (buffer-full) events, then continue streaming from the new head.
-      void hydrate(id).catch(() => {});
+      // (buffer-full) events. Persisted replay is buffered until the
+      // snapshot lands so a late response cannot erase newer events.
+      void hydrate(id, true).catch(() => {});
     }
   };
   es.onmessage = () => {}; // events arrive with explicit types below
@@ -341,7 +386,7 @@ function connect(id: number) {
         return;
       }
       ev.kind = ev.kind || kind;
-      applyPersistedEvent(ev);
+      applyOrBufferPersistedEvent(id, ev);
     });
   }
   es.addEventListener("stage", (event) => {
@@ -375,6 +420,8 @@ function connect(id: number) {
 }
 
 function disconnect() {
+  hydrationGeneration += 1;
+  reconnectHydration = null;
   source?.close();
   source = null;
   connection.value = "disconnected";
