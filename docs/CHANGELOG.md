@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.3] — 2026-08-10
+
+### Changed — Marketing captures are reproducible release evidence (PAI-695)
+
+- `just marketing-captures` now regenerates all six public product captures from a seeded local workspace whose backend and frontend exactly match a shipped tag; it refuses live services and unshipped source.
+- The canonical site records image hashes, release commit provenance, viewport framing, and DOM landmarks in a capture manifest. Its production build fails if dimensions, hashes, TASKS framing, or the three annotated hotspots drift.
+- Release documentation now carries the one-command workflow, replacing workstation-specific paths and the manual screenshot checklist.
+
 ## [5.8.2] — 2026-08-10
 
 ### Changed — Public evidence follows the canonical shipped surface (PAI-689)
