@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.5] — 2026-08-10
+
+### Security — Voice credentials stay on approved ElevenLabs endpoints (PAI-730)
+
+- Voice Intake accepts only the standard and EU-residency ElevenLabs HTTPS roots; plaintext HTTP, arbitrary hosts, credentials, ports, paths, queries, and fragments are rejected without changing settings.
+- Existing invalid stored endpoints fail closed before the provider key is decrypted, preventing legacy configuration from forwarding credentials or audio elsewhere.
+- Operator documentation now records the exact endpoint allowlist and canonical forms.
+
 ## [5.8.4] — 2026-08-10
 
 ### Fixed — Voice Intake relations stay inside their analyzed project (PAI-728)
