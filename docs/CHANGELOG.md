@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.9] — 2026-08-10
+
+### Fixed — Voice Intake impact analysis stays bounded and stable (PAI-727)
+
+- Combined impacted and related issue lists are capped at 20, preserving retrieval hits before graph-only candidates fill the remaining budget in deterministic key order.
+- Candidate IDs and titles resolve in one live, project-scoped query instead of per-key title and reference lookups.
+- Impacted, related, and graph-hit arrays are sorted before storage so equivalent analyses no longer churn event and SSE payloads.
+
 ## [5.8.8] — 2026-08-10
 
 ### Fixed — Voice Intake history stays on the selected revision (PAI-726)
