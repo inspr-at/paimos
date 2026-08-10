@@ -8,11 +8,31 @@
 package handlers_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
 	"github.com/inspr-at/paimos/backend/db"
 )
+
+func appendIntakeImpactsArtifact(t *testing.T, sessionID int64, payload map[string]any) {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seq int64
+	if err := db.DB.QueryRow(
+		`UPDATE intake_sessions SET rev=rev+1 WHERE id=? RETURNING rev`, sessionID,
+	).Scan(&seq); err != nil {
+		t.Fatalf("bump intake revision: %v", err)
+	}
+	if _, err := db.DB.Exec(`
+		INSERT INTO intake_events(session_id, seq, kind, source, payload_json)
+		VALUES(?, ?, 'impacts', 'ai', ?)`, sessionID, seq, string(raw)); err != nil {
+		t.Fatalf("append impacts artifact: %v", err)
+	}
+}
 
 // seedIntakeForCreate builds a session with a manual spec targeting a
 // pinned project, ready for one-click creation.
@@ -115,4 +135,146 @@ func TestIntakeCreateIssue_Guards(t *testing.T) {
 	resp = ts.post(t, "/api/projects/"+itoa(projectID)+"/intake-sessions/"+itoa(sessionID)+"/issue",
 		otherCookie, map[string]any{})
 	assertStatus(t, resp, http.StatusNotFound)
+}
+
+func TestIntakeCreateIssue_ImpactRelationsStayInAnalyzedProject(t *testing.T) {
+	t.Run("files a valid same-project relation", func(t *testing.T) {
+		ts := newTestServer(t)
+		projectID, sessionID := seedIntakeForCreate(t, ts)
+		targetID := seedListV2Issue(t, projectID, 50, "Conflicting export path", "backlog")
+		appendIntakeImpactsArtifact(t, sessionID, map[string]any{
+			"project_id": projectID,
+			"impacted": []map[string]any{{
+				"issue_key": "ITGT-50", "category": "conflicts",
+			}},
+		})
+
+		resp := ts.post(t, "/api/projects/"+itoa(projectID)+"/intake-sessions/"+itoa(sessionID)+"/issue",
+			ts.memberCookie, map[string]any{})
+		assertStatus(t, resp, http.StatusCreated)
+		var created struct {
+			ID int64 `json:"id"`
+		}
+		decode(t, resp, &created)
+
+		var count int
+		if err := db.DB.QueryRow(`
+			SELECT COUNT(*) FROM issue_relations
+			WHERE source_id=? AND target_id=? AND type='impacts'`, created.ID, targetID,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("same-project impacts relations = %d, want 1", count)
+		}
+		if err := db.DB.QueryRow(`
+			SELECT COUNT(*) FROM entity_relations
+			WHERE project_id=? AND source_type='issue' AND source_id=?
+			  AND target_type='issue' AND target_id=? AND edge_type='impacts'`,
+			projectID, created.ID, targetID,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("same-project entity relations = %d, want 1", count)
+		}
+	})
+
+	t.Run("does not file an artifact after the session is repinned", func(t *testing.T) {
+		ts := newTestServer(t)
+		analyzedProjectID, sessionID := seedIntakeForCreate(t, ts)
+		targetID := seedListV2Issue(t, analyzedProjectID, 50, "Stale analyzed issue", "backlog")
+		appendIntakeImpactsArtifact(t, sessionID, map[string]any{
+			"project_id": analyzedProjectID,
+			"impacted": []map[string]any{{
+				"issue_key": "ITGT-50", "category": "conflicts",
+			}},
+		})
+
+		createProjectID := seedBatchProject(t, "Repinned Target", "RPIN")
+		resp := ts.patch(t, "/api/intake/sessions/"+itoa(sessionID), ts.memberCookie,
+			map[string]any{"pinned_project_id": createProjectID})
+		assertStatus(t, resp, http.StatusOK)
+		resp = ts.post(t, "/api/projects/"+itoa(createProjectID)+"/intake-sessions/"+itoa(sessionID)+"/issue",
+			ts.memberCookie, map[string]any{})
+		assertStatus(t, resp, http.StatusCreated)
+		var created struct {
+			ID int64 `json:"id"`
+		}
+		decode(t, resp, &created)
+
+		var count int
+		if err := db.DB.QueryRow(`
+			SELECT COUNT(*) FROM issue_relations WHERE source_id=? AND target_id=?`, created.ID, targetID,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("stale impacts relations = %d, want 0", count)
+		}
+	})
+
+	t.Run("does not file a cross-project target from a matching artifact", func(t *testing.T) {
+		ts := newTestServer(t)
+		projectID, sessionID := seedIntakeForCreate(t, ts)
+		otherProjectID := seedBatchProject(t, "Unrelated Project", "OTHR")
+		targetID := seedListV2Issue(t, otherProjectID, 1, "Unrelated private issue", "backlog")
+		appendIntakeImpactsArtifact(t, sessionID, map[string]any{
+			"project_id": projectID,
+			"impacted": []map[string]any{{
+				"issue_key": "OTHR-1", "category": "conflicts",
+			}},
+		})
+
+		resp := ts.post(t, "/api/projects/"+itoa(projectID)+"/intake-sessions/"+itoa(sessionID)+"/issue",
+			ts.memberCookie, map[string]any{})
+		assertStatus(t, resp, http.StatusCreated)
+		var created struct {
+			ID int64 `json:"id"`
+		}
+		decode(t, resp, &created)
+
+		var count int
+		if err := db.DB.QueryRow(`
+			SELECT COUNT(*) FROM issue_relations WHERE source_id=? AND target_id=?`, created.ID, targetID,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("cross-project impacts relations = %d, want 0", count)
+		}
+	})
+
+	t.Run("does not file a deleted target", func(t *testing.T) {
+		ts := newTestServer(t)
+		projectID, sessionID := seedIntakeForCreate(t, ts)
+		targetID := seedListV2Issue(t, projectID, 50, "Deleted analyzed issue", "backlog")
+		if _, err := db.DB.Exec(`UPDATE issues SET deleted_at=datetime('now') WHERE id=?`, targetID); err != nil {
+			t.Fatal(err)
+		}
+		appendIntakeImpactsArtifact(t, sessionID, map[string]any{
+			"project_id": projectID,
+			"impacted": []map[string]any{{
+				"issue_key": "ITGT-50", "category": "conflicts",
+			}},
+		})
+
+		resp := ts.post(t, "/api/projects/"+itoa(projectID)+"/intake-sessions/"+itoa(sessionID)+"/issue",
+			ts.memberCookie, map[string]any{})
+		assertStatus(t, resp, http.StatusCreated)
+		var created struct {
+			ID int64 `json:"id"`
+		}
+		decode(t, resp, &created)
+
+		var count int
+		if err := db.DB.QueryRow(`
+			SELECT COUNT(*) FROM issue_relations WHERE source_id=? AND target_id=?`, created.ID, targetID,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("deleted-target impacts relations = %d, want 0", count)
+		}
+	})
 }

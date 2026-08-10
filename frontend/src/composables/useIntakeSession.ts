@@ -105,6 +105,7 @@ export interface IntakeSummaries {
 }
 
 export interface IntakeImpacts {
+  project_id: number;
   impacted: IntakeImpactEntry[];
   related: IntakeImpactEntry[];
   graph_hits: { entity_type: string; title: string }[];
