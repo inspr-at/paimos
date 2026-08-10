@@ -9,6 +9,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/backend/db"
@@ -48,6 +49,67 @@ func seedMatchProjects(t *testing.T) (alphaID, betaID int64) {
 	return alphaID, betaID
 }
 
+// TestIntakeProjectCandidates_CharterBeatsBacklogVolume reproduces PAI-756:
+// a small project whose charter fits the generated specification must not be
+// hidden by a large project with many vaguely matching tickets.
+func TestIntakeProjectCandidates_CharterBeatsBacklogVolume(t *testing.T) {
+	openIntakeTestDB(t)
+	insertProject := func(name, key, description string) int64 {
+		res, err := db.DB.Exec(
+			`INSERT INTO projects(name, key, description, status) VALUES(?,?,?,'active')`,
+			name, key, description)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := res.LastInsertId()
+		return id
+	}
+	janusID := insertProject("JANUS", "JANUS", "Vaultwarden credential vault for encrypted team secrets and passwords")
+	largeID := insertProject("Platform Program", "PLAT", "General product platform and delivery backlog")
+	for n := 1; n <= 20; n++ {
+		res, err := db.DB.Exec(
+			`INSERT INTO issues(project_id, issue_number, type, title, status) VALUES(?,?,?,'Add secure tool integration', 'new')`,
+			largeID, n, "ticket")
+		if err != nil {
+			t.Fatal(err)
+		}
+		iid, _ := res.LastInsertId()
+		if _, err := db.DB.Exec(
+			`INSERT INTO search_index(entity_type, entity_id, content) VALUES('issue', ?, 'secure tool integration')`, iid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for n := 0; n < 5; n++ {
+		insertProject("Filler Project", "FILL"+string(rune('A'+n)), "Unrelated planning workspace")
+	}
+
+	input := intakeMatchInput{
+		SpecTitle:    "Encrypted secrets tool",
+		SpecSummary:  "Add a secure tool for storing team credentials and passwords.",
+		SpecMarkdown: "The tool keeps shared secrets encrypted and retrievable by the team.",
+		Transcript:   "we need this tool integrated",
+	}
+	candidates, err := intakeProjectCandidates(context.Background(), input, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 7 {
+		t.Fatalf("Stage B candidate universe has %d projects, want all 7: %+v", len(candidates), candidates)
+	}
+	if candidates[0].ProjectID != janusID {
+		t.Fatalf("charter-fit project did not beat backlog volume: %+v", candidates)
+	}
+
+	prompt := intakeProjectMatchUserPrompt(input, candidates)
+	if !strings.Contains(prompt, `name="JANUS"`) || !strings.Contains(prompt, "Vaultwarden credential vault") {
+		t.Fatalf("Stage B prompt omitted JANUS charter: %s", prompt)
+	}
+	if !strings.Contains(prompt, "SPECIFICATION TITLE:\nEncrypted secrets tool") ||
+		!strings.Contains(prompt, "SPECIFICATION SUMMARY:\nAdd a secure tool") {
+		t.Fatalf("Stage B prompt omitted weighted specification fields: %s", prompt)
+	}
+}
+
 // TestIntakeProjectCandidates_RestrictedUniverse enforces INV-INTAKE-03:
 // projects outside the accessible set never appear as candidates, even
 // when the transcript matches their content exactly.
@@ -56,9 +118,10 @@ func TestIntakeProjectCandidates_RestrictedUniverse(t *testing.T) {
 	alphaID, betaID := seedMatchProjects(t)
 
 	transcript := "the garden watering schedule needs soil sensors and the rocket telemetry pipeline"
+	input := intakeMatchInput{Transcript: transcript}
 
 	// Unrestricted (admin, nil): both projects surface.
-	all, err := intakeProjectCandidates(context.Background(), transcript, nil, nil)
+	all, err := intakeProjectCandidates(context.Background(), input, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +134,7 @@ func TestIntakeProjectCandidates_RestrictedUniverse(t *testing.T) {
 	}
 
 	// Restricted to alpha only: beta must never appear.
-	restricted, err := intakeProjectCandidates(context.Background(), transcript, []int64{alphaID}, nil)
+	restricted, err := intakeProjectCandidates(context.Background(), input, []int64{alphaID}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +148,7 @@ func TestIntakeProjectCandidates_RestrictedUniverse(t *testing.T) {
 	}
 
 	// Empty accessible set: zero candidates.
-	none, err := intakeProjectCandidates(context.Background(), transcript, []int64{}, nil)
+	none, err := intakeProjectCandidates(context.Background(), input, []int64{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
