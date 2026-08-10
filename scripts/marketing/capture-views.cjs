@@ -9,6 +9,8 @@ const APP = 'http://localhost:5173';
 const OUT = process.env.OUT_DIR || '/tmp/pai746';
 const TOKEN = process.env.PAIMOS_DEV_LOGIN_TOKEN || '';
 
+if (!TOKEN) throw new Error('PAIMOS_DEV_LOGIN_TOKEN is required');
+
 // Anything that screams "developer laptop" rather than "product".
 const HIDE_CHROME = `
   .dev-login-banner, .totp-warning, .app-dev-banner,
@@ -37,6 +39,16 @@ async function shoot(page, name, { path: route, prepare, clip, full = false } = 
   console.log(`  ✓ ${name}.png  ${(size / 1024).toFixed(0)} KB`);
 }
 
+function normalizedBox(box) {
+  if (!box) throw new Error('required capture landmark is not visible');
+  return {
+    x: Number((box.x / 1600).toFixed(4)),
+    y: Number((box.y / 1000).toFixed(4)),
+    width: Number((box.width / 1600).toFixed(4)),
+    height: Number((box.height / 1000).toFixed(4)),
+  };
+}
+
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch();
@@ -54,6 +66,40 @@ async function shoot(page, name, { path: route, prepare, clip, full = false } = 
   if (!res.ok()) throw new Error(`dev-login failed: ${res.status()}`);
 
   const page = await ctx.newPage();
+
+  await shoot(page, 'product-surface', {
+    path: '/issues/PAI-1',
+    prepare: async (p) => {
+      await p.locator('#ai-workbench').waitFor({ state: 'visible' });
+      await p.locator('.am-section').waitFor({ state: 'visible' });
+      const tasks = p.getByText(/^Tasks$/i).first();
+      if (!(await tasks.count())) throw new Error('TASKS framing anchor is missing');
+      await tasks.evaluate((element) => {
+        const scroller = element.closest('.main-content');
+        if (!scroller) throw new Error('main content scroller is missing');
+        const targetTop = scroller.getBoundingClientRect().top + 6;
+        scroller.scrollTop += element.getBoundingClientRect().top - targetTop;
+      });
+      await p.waitForTimeout(400);
+
+      const implement = p.getByRole('button', { name: /^Implement (this|\+ deploy)$/ }).first();
+      const taskBox = await tasks.boundingBox();
+      const metadata = {
+        schemaVersion: 1,
+        viewport: { width: 1600, height: 1000, deviceScaleFactor: 2 },
+        framing: {
+          anchor: 'TASKS',
+          tasksTop: Number((((taskBox && taskBox.y) || 0) / 1000).toFixed(4)),
+        },
+        landmarks: {
+          issueContext: normalizedBox(await p.locator('.iw-context').boundingBox()),
+          executionControl: normalizedBox(await implement.boundingBox()),
+          applicableMemories: normalizedBox(await p.locator('.am-section').boundingBox()),
+        },
+      };
+      fs.writeFileSync(`${OUT}/capture-surface.json`, `${JSON.stringify(metadata, null, 2)}\n`);
+    },
+  });
 
   await shoot(page, 'ui-dashboard', { path: '/' });
 
@@ -83,19 +129,6 @@ async function shoot(page, name, { path: route, prepare, clip, full = false } = 
       await input.click();
       await input.type('voice intake', { delay: 45 });
       await p.waitForTimeout(1200);
-    },
-  });
-
-  // The 5.x story the current site never shows.
-  await shoot(page, 'ui-voice-intake', {
-    path: '/intake',
-    prepare: async (p) => {
-      // Expand the right-hand cards so the seeded artifacts are visible.
-      for (const name of ['Impact Analysis', 'Understanding Check', 'Ticket Preview']) {
-        const h = p.locator(`text=${name}`).first();
-        if (await h.count()) { await h.click().catch(() => {}); await p.waitForTimeout(250); }
-      }
-      await p.waitForTimeout(600);
     },
   });
 

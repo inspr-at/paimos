@@ -170,7 +170,7 @@ or updated; close the ticket once all four are settled.
 - [ ] **README.md** — update if this release adds/removes a top-level feature, changes quickstart, or invalidates screenshots.
 - [ ] **docs/** — \`CHANGELOG.md\` is already updated by the release flow. Cross-check \`CONFIGURATION.md\`, \`DEVELOPER_GUIDE.md\`, \`AGENT_INTERFACE.md\`, \`AGENT_INTEGRATION.md\`, \`api-minimal.md\`, \`DATA_MODEL.md\`, \`REFERENCE_DEPLOYMENTS.md\` for stale references and runtime rows.
 - [ ] **inspr-site** (\`../inspr-at\`) — canonical public copy at paimos.inspr.at. See "Sibling repo state" below.
-- [ ] **Brand / screenshots** — \`docs/brand/\` and any in-repo screenshots if UI changed materially.
+- [ ] **Brand / screenshots** — if UI changed materially, run \`just marketing-captures\` against the seeded shipped build and confirm the inspr-site capture manifest, hotspot framing, and provenance version.
 
 ### Diff since $PREV
 

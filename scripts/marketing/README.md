@@ -1,8 +1,8 @@
 # scripts/marketing/
 
-Reproducible marketing captures for the public sites (PAI-746; automation
-was tracked as PAI-695). Replaces the hand-driven steps in the ppm runbook
-`refresh-site-marketing-captures` (#3594).
+Reproducible marketing captures for the public sites (seeded in PAI-746,
+orchestrated end-to-end by PAI-695). Replaces the hand-driven steps in the
+ppm runbook `refresh-site-marketing-captures` (#3594).
 
 ## Rules these scripts enforce
 
@@ -14,24 +14,27 @@ was tracked as PAI-695). Replaces the hand-driven steps in the ppm runbook
   vX.Y.Z"*. The scripts do not write captions — that lives with the site —
   but the version in them must match the build you captured.
 
-## Use
+## One-command use
 
 ```sh
-just dev-up                      # backend :8888, vite :5173, fixtures seeded
-source ~/Secrets/dev/PAIMOS_DEV_LOGIN_TOKEN.env
-
-sqlite3 data/paimos.db < scripts/marketing/demo-polish.sql
-sqlite3 data/paimos.db < scripts/marketing/demo-intake-events.sql
-
-OUT_DIR=/tmp/captures \
-NODE_PATH=scripts/.visual-tooling/node_modules \
-  node scripts/marketing/capture-views.cjs      # dashboard, issues, board, search
-OUT_DIR=/tmp/captures \
-NODE_PATH=scripts/.visual-tooling/node_modules \
-  node scripts/marketing/capture-intake.cjs     # the voice-intake workbench
+just dev-up                    # terminal 1: backend :8888 + Vite :5173
+just marketing-captures       # terminal 2: regenerate + verify + publish
 ```
 
-`scripts/.visual-tooling/` is bootstrapped by `just shot` on first use.
+The second command bootstraps Playwright, sources the same local dev-login
+token as `dev-up` without printing it, polishes the gitignored fixture DB,
+captures all six current site images, and publishes them into `../inspr-at`.
+Pass a different reviewed site worktree when needed:
+
+```sh
+just marketing-captures ../inspr-at-pai-695
+```
+
+The command refuses a live/non-local instance, an app version that does not
+match `VERSION`, or backend/frontend code that differs from the corresponding
+shipped tag. The site-side publisher checks 3200×2000 output, hashes every
+asset, records the release commit, and verifies the three annotated hotspots
+against DOM landmarks captured from `/issues/PAI-1`.
 
 ## Why the demo data needs polishing first
 
