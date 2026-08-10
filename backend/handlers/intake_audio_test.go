@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -46,11 +47,40 @@ func fakeScribe(t *testing.T, text string, wantKey string) *httptest.Server {
 	}))
 }
 
+type voiceRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f voiceRoundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func routeVoiceUpstreamForTest(t *testing.T, baseURL string) {
+	t.Helper()
+	target, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := http.DefaultTransport
+	http.DefaultTransport = voiceRoundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.EqualFold(r.URL.Hostname(), "api.elevenlabs.io") {
+			clone := r.Clone(r.Context())
+			rewritten := *r.URL
+			rewritten.Scheme = target.Scheme
+			rewritten.Host = target.Host
+			clone.URL = &rewritten
+			return previous.RoundTrip(clone)
+		}
+		return previous.RoundTrip(r)
+	})
+	t.Cleanup(func() { http.DefaultTransport = previous })
+}
+
 func configureVoice(t *testing.T, ts *testServer, baseURL string) {
 	t.Helper()
+	routeVoiceUpstreamForTest(t, baseURL)
 	key := "test-elevenlabs-key"
 	resp := ts.put(t, "/api/ai/voice-settings", ts.adminCookie, map[string]any{
-		"provider": "elevenlabs", "api_key": key, "base_url": baseURL, "stt_model": "scribe_v1",
+		"provider": "elevenlabs", "api_key": key,
+		"base_url": "https://api.elevenlabs.io", "stt_model": "scribe_v1",
 	})
 	assertStatus(t, resp, http.StatusOK)
 	var body map[string]any
@@ -160,10 +190,7 @@ func TestIntakeAudio_Guards(t *testing.T) {
 	// Upstream 401 (wrong key on the upstream side) → 502 to the client.
 	badUpstream := fakeScribe(t, "x", "a-different-key")
 	defer badUpstream.Close()
-	respPut := ts.put(t, "/api/ai/voice-settings", ts.adminCookie, map[string]any{
-		"provider": "elevenlabs", "base_url": badUpstream.URL, "stt_model": "scribe_v1",
-	})
-	assertStatus(t, respPut, http.StatusOK) // key kept (nil), base_url swapped
+	routeVoiceUpstreamForTest(t, badUpstream.URL)
 	resp = postAudio(t, ts, s.ID, "audio/webm", []byte("x"))
 	assertStatus(t, resp, http.StatusBadGateway)
 

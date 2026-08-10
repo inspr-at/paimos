@@ -32,8 +32,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/inspr-at/paimos/backend/db"
@@ -50,6 +52,42 @@ const (
 	voiceDefaultTTSVoice = "21m00Tcm4TlvDq8ikWAM"
 	voiceDefaultTTSModel = "eleven_multilingual_v2"
 )
+
+func normalizeVoiceBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Opaque != "" {
+		return "", errors.New("base_url must be an absolute HTTPS URL")
+	}
+	if parsed.Scheme != "https" {
+		return "", errors.New("base_url must use HTTPS")
+	}
+	if parsed.User != nil {
+		return "", errors.New("base_url must not include credentials")
+	}
+	if parsed.Fragment != "" {
+		return "", errors.New("base_url must not include a fragment")
+	}
+	if parsed.RawQuery != "" || parsed.ForceQuery {
+		return "", errors.New("base_url must not include a query")
+	}
+	if path := parsed.EscapedPath(); path != "" && path != "/" {
+		return "", errors.New("base_url must be an API root without a path")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if parsed.Port() != "" || !strings.EqualFold(parsed.Host, host) {
+		return "", errors.New("base_url must not include a custom port")
+	}
+	switch host {
+	case "api.elevenlabs.io", "api.eu.residency.elevenlabs.io":
+		return "https://" + host, nil
+	default:
+		return "", errors.New("base_url must use an approved ElevenLabs host")
+	}
+}
 
 // VoiceSettings is the resolved shape. APIKey never leaves the process.
 type VoiceSettings struct {
@@ -78,6 +116,13 @@ func LoadVoiceSettings() (VoiceSettings, error) {
 	if err != nil {
 		return VoiceSettings{}, err
 	}
+	s.BaseURL, err = normalizeVoiceBaseURL(s.BaseURL)
+	if err != nil {
+		return VoiceSettings{}, fmt.Errorf("invalid stored voice base_url: %w", err)
+	}
+	if s.BaseURL == "" {
+		s.BaseURL = voiceDefaultBaseURL
+	}
 	if len(encrypted) > 0 {
 		plain, derr := secretvault.Decrypt(voiceSecretDomain, encrypted)
 		if derr != nil {
@@ -85,9 +130,6 @@ func LoadVoiceSettings() (VoiceSettings, error) {
 		}
 		s.APIKey = string(plain)
 		s.HasKey = true
-	}
-	if s.BaseURL == "" {
-		s.BaseURL = voiceDefaultBaseURL
 	}
 	if s.STTModel == "" {
 		s.STTModel = voiceDefaultSTTModel
@@ -139,6 +181,11 @@ func PutVoiceSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "unsupported voice provider", http.StatusBadRequest)
 		return
 	}
+	baseURL, err := normalizeVoiceBaseURL(p.BaseURL)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if p.APIKey == nil {
 		if _, err := db.DB.Exec(
 			`UPDATE ai_settings
@@ -146,7 +193,7 @@ func PutVoiceSettings(w http.ResponseWriter, r *http.Request) {
 			     tts_voice_id = ?, tts_model = ?,
 			     updated_at = datetime('now')
 			 WHERE id = 1`,
-			p.Provider, strings.TrimSpace(p.BaseURL), strings.TrimSpace(p.STTModel),
+			p.Provider, baseURL, strings.TrimSpace(p.STTModel),
 			strings.TrimSpace(p.TTSVoiceID), strings.TrimSpace(p.TTSModel),
 		); err != nil {
 			log.Printf("voice_settings update: %v", err)
@@ -171,7 +218,7 @@ func PutVoiceSettings(w http.ResponseWriter, r *http.Request) {
 			     tts_voice_id = ?, tts_model = ?,
 			     updated_at = datetime('now')
 			 WHERE id = 1`,
-			p.Provider, encrypted, strings.TrimSpace(p.BaseURL), strings.TrimSpace(p.STTModel),
+			p.Provider, encrypted, baseURL, strings.TrimSpace(p.STTModel),
 			strings.TrimSpace(p.TTSVoiceID), strings.TrimSpace(p.TTSModel),
 		); err != nil {
 			log.Printf("voice_settings update: %v", err)

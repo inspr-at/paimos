@@ -352,10 +352,12 @@ table.
 Voice input/output for the intake workbench is configured at
 Settings → Integrations → AI (admin; `PUT /api/ai/voice-settings`):
 `provider` (`""` = off, `elevenlabs`), `api_key` (write-only — reads
-report `has_api_key` only), `base_url` (e.g. the EU residency host),
-`stt_model`, `tts_model`, and `tts_voice_id`. Audio is transcribed and
-dropped — never stored (INV-INTAKE-06); TTS returns bytes with
-`Cache-Control: no-store`.
+report `has_api_key` only), `base_url`, `stt_model`, `tts_model`, and
+`tts_voice_id`. The base URL may be blank (standard endpoint) or the HTTPS
+root of `api.elevenlabs.io` / `api.eu.residency.elevenlabs.io`; credentials,
+ports, paths, queries, fragments, and other hosts are rejected before the
+key is stored or loaded. Audio is transcribed and dropped — never stored
+(INV-INTAKE-06); TTS returns bytes with `Cache-Control: no-store`.
 
 Each intake session also has an LLM token budget so a runaway dictation
 can't spend unbounded: `app_settings` key
