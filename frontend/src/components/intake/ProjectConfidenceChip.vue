@@ -12,8 +12,10 @@
 // re-targets downstream stages, never the spec or the timeline.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
+import { api } from "@/api/client";
 import type { IntakeSession } from "@/api/intake";
 import type { IntakeProjectMatch } from "@/composables/useIntakeSession";
+import type { Project } from "@/types";
 
 const props = defineProps<{
   session: IntakeSession | null;
@@ -27,6 +29,13 @@ const emit = defineEmits<{
 
 const popoverOpen = ref(false);
 const switchedFlash = ref<string | null>(null);
+const projectSearch = ref("");
+const accessibleProjects = ref<Project[]>([]);
+const projectsLoading = ref(false);
+const projectsLoaded = ref(false);
+const projectsError = ref<string | null>(null);
+const projectSearchRef = ref<HTMLInputElement | null>(null);
+let projectLoadGeneration = 0;
 
 // PAI-735 moved this chip into the app header via Teleport, and the header
 // is deliberately hard chrome: `height: 52px; overflow: hidden`, with
@@ -56,11 +65,48 @@ function positionPopover() {
 
 function togglePopover() {
   popoverOpen.value = !popoverOpen.value;
-  if (popoverOpen.value) void nextTick(positionPopover);
+  if (popoverOpen.value) {
+    void nextTick(positionPopover);
+    void loadAccessibleProjects();
+  }
 }
 
 function closePopover() {
   popoverOpen.value = false;
+}
+
+async function loadAccessibleProjects() {
+  const generation = ++projectLoadGeneration;
+  projectSearch.value = "";
+  accessibleProjects.value = [];
+  projectsLoading.value = true;
+  projectsLoaded.value = false;
+  projectsError.value = null;
+  void nextTick(() => projectSearchRef.value?.focus());
+
+  try {
+    const projects = await api.get<Project[]>("/projects?status=active");
+    if (generation !== projectLoadGeneration) return;
+    // The server applies the caller's project visibility filter. Keep the
+    // client-side status guard too so the picker fails closed on stale data.
+    accessibleProjects.value = projects.filter((project) => project.status === "active");
+    projectsLoaded.value = true;
+  } catch {
+    if (generation !== projectLoadGeneration) return;
+    projectsError.value = "Projects could not be loaded. Close and try again.";
+  } finally {
+    if (generation === projectLoadGeneration) projectsLoading.value = false;
+  }
+}
+
+function selectProject(projectId: number) {
+  emit("pin", projectId);
+  closePopover();
+}
+
+function unpinAndClose() {
+  emit("unpin");
+  closePopover();
 }
 
 function onDocumentMouseDown(e: MouseEvent) {
@@ -89,6 +135,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  projectLoadGeneration += 1;
   document.removeEventListener("mousedown", onDocumentMouseDown);
   document.removeEventListener("keydown", onDocumentKeydown);
   window.removeEventListener("resize", onViewportChange);
@@ -97,13 +144,44 @@ onBeforeUnmount(() => {
 const pinned = computed(() => props.session?.pinned_project_id != null);
 const threshold = computed(() => props.match?.threshold ?? 90);
 const top = computed(() => props.match?.matches?.[0] ?? null);
+const normalizedSearch = computed(() => projectSearch.value.trim().toLocaleLowerCase());
+
+function projectMatchesSearch(project: { key: string; name: string; description?: string }) {
+  const query = normalizedSearch.value;
+  if (!query) return true;
+  return [project.key, project.name, project.description ?? ""].some((value) =>
+    value.toLocaleLowerCase().includes(query),
+  );
+}
+
+const accessibleProjectIDs = computed(() => new Set(accessibleProjects.value.map((project) => project.id)));
+const accessibleCandidateIDs = computed(
+  () => new Set((props.match?.matches ?? []).filter((candidate) => accessibleProjectIDs.value.has(candidate.project_id)).map((candidate) => candidate.project_id)),
+);
+const visibleCandidates = computed(() => {
+  if (!projectsLoaded.value) return [];
+  return (props.match?.matches ?? []).filter(
+    (candidate) => accessibleCandidateIDs.value.has(candidate.project_id) && projectMatchesSearch(candidate),
+  );
+});
+const visibleProjects = computed(() => {
+  if (!projectsLoaded.value) return [];
+  return accessibleProjects.value
+    .filter((project) => !accessibleCandidateIDs.value.has(project.id) && projectMatchesSearch(project))
+    .sort((a, b) => a.key.localeCompare(b.key));
+});
+const noProjectResults = computed(
+  () => projectsLoaded.value && visibleCandidates.value.length === 0 && visibleProjects.value.length === 0,
+);
 
 const activeProject = computed(() => {
   const m = props.match?.matches ?? [];
   const pinId = props.session?.pinned_project_id;
   if (pinId != null) {
     const c = m.find((x) => x.project_id === pinId);
-    return c ? { label: `${c.key} — ${c.name}`, score: null as number | null } : { label: `Pinned project #${pinId}`, score: null };
+    if (c) return { label: `${c.key} — ${c.name}`, score: null as number | null };
+    const project = accessibleProjects.value.find((candidate) => candidate.id === pinId);
+    return project ? { label: `${project.key} — ${project.name}`, score: null } : { label: `Pinned project #${pinId}`, score: null };
   }
   const detId = props.session?.detected_project_id;
   if (detId != null) {
@@ -171,7 +249,7 @@ watch(
       :class="confClass"
       type="button"
       :disabled="!session"
-      aria-haspopup="menu"
+      aria-haspopup="dialog"
       :aria-expanded="popoverOpen"
       @click="togglePopover"
     >
@@ -223,35 +301,59 @@ watch(
         v-if="popoverOpen"
         ref="popRef"
         class="vi-chip-pop"
-        role="menu"
+        role="dialog"
+        aria-label="Choose project"
         :style="popPos"
       >
-        <p class="vi-chip-pop-title">Candidate projects</p>
-        <button
-          v-for="c in match?.matches ?? []"
-          :key="c.project_id"
-          class="vi-chip-cand"
-          type="button"
-          role="menuitem"
-          @click="
-            emit('pin', c.project_id);
-            closePopover();
-          "
-        >
-          <span class="vi-cand-head">
-            <strong>{{ c.key }}</strong> — {{ c.name }}
-            <span class="ar-conf" :class="`ar-conf--${c.confidence === 'med' ? 'medium' : c.confidence}`">
-              {{ c.score }}%
-            </span>
-          </span>
-          <span v-if="c.rationale" class="vi-cand-rationale">{{ c.rationale }}</span>
-        </button>
-        <!-- Detection returns at most intakeMatchMaxCandidates (5). Say so
-             rather than rendering an empty panel that reads as broken. -->
-        <p v-if="!match?.matches?.length" class="vi-chip-pop-empty">
-          No candidates yet — keep talking, or pick a project once detection has something to go on.
-        </p>
-        <button v-if="pinned" class="vi-chip-unpin" type="button" @click="emit('unpin'); closePopover()">
+        <label class="vi-chip-search-label" for="vi-project-search">Search accessible projects</label>
+        <input
+          id="vi-project-search"
+          ref="projectSearchRef"
+          v-model="projectSearch"
+          class="vi-chip-project-search"
+          type="search"
+          placeholder="Key, name, or description"
+          autocomplete="off"
+        />
+        <p v-if="projectsLoading" class="vi-chip-pop-empty">Loading projects…</p>
+        <p v-else-if="projectsError" class="vi-chip-pop-error" role="alert">{{ projectsError }}</p>
+        <div v-else class="vi-chip-results">
+          <template v-if="visibleCandidates.length">
+            <p class="vi-chip-pop-title">Candidate projects</p>
+            <button
+              v-for="c in visibleCandidates"
+              :key="c.project_id"
+              class="vi-chip-cand"
+              type="button"
+              @click="selectProject(c.project_id)"
+            >
+              <span class="vi-cand-head">
+                <strong>{{ c.key }}</strong> — {{ c.name }}
+                <span class="ar-conf" :class="`ar-conf--${c.confidence === 'med' ? 'medium' : c.confidence}`">
+                  {{ c.score }}%
+                </span>
+              </span>
+              <span v-if="c.rationale" class="vi-cand-rationale">{{ c.rationale }}</span>
+            </button>
+          </template>
+          <template v-if="visibleProjects.length">
+            <p class="vi-chip-pop-title" :class="{ 'vi-chip-pop-title--spaced': visibleCandidates.length }">All projects</p>
+            <button
+              v-for="project in visibleProjects"
+              :key="project.id"
+              class="vi-chip-project"
+              type="button"
+              @click="selectProject(project.id)"
+            >
+              <span><strong>{{ project.key }}</strong> — {{ project.name }}</span>
+              <span v-if="project.description" class="vi-project-description">{{ project.description }}</span>
+            </button>
+          </template>
+          <p v-if="noProjectResults" class="vi-chip-pop-empty">
+            {{ projectSearch ? "No accessible projects match that search." : "No accessible active projects." }}
+          </p>
+        </div>
+        <button v-if="pinned" class="vi-chip-unpin" type="button" @click="unpinAndClose">
           Unpin — resume auto-switch
         </button>
       </div>
@@ -397,12 +499,47 @@ watch(
   flex-direction: column;
   gap: 6px;
 }
+.vi-chip-search-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.vi-chip-project-search {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.vi-chip-project-search:focus {
+  outline: 2px solid var(--brand-blue-pale, #dbeafe);
+  border-color: var(--brand-blue);
+}
+.vi-chip-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(420px, calc(100vh - 180px));
+  overflow-y: auto;
+}
 .vi-chip-pop-title {
   margin: 0 0 2px;
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
+}
+.vi-chip-pop-title--spaced {
+  margin-top: 6px;
+}
+.vi-chip-pop-error {
+  margin: 0;
+  padding: 6px 2px;
+  font-size: 12.5px;
+  color: #b91c1c;
 }
 .vi-chip-pop-empty {
   margin: 0;
@@ -422,6 +559,26 @@ watch(
 }
 .vi-chip-cand:hover {
   border-color: var(--brand-blue);
+}
+.vi-chip-project {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.vi-chip-project:hover {
+  border-color: var(--brand-blue);
+}
+.vi-project-description {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 .vi-cand-head {
   display: flex;
