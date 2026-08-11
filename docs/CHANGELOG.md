@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.16] — 2026-08-11
+
+### Security — Secrets can stay in runtime files (PAI-759)
+
+- `ADMIN_PASSWORD`, `PAIMOS_SECRET_KEY`, `SMTP_PASS`, and `OIDC_CLIENT_SECRET` accept conventional `_FILE` companions so secret values no longer need to enter the process environment.
+- File input wins over the compatibility environment form, removes exactly one LF or CRLF ending, and fails startup without exposing the configured path when the file is empty, unreadable, or oversized.
+- Configuration, Compose pass-through, threat-model guidance, and value-free hardening checks now document the runtime-file deployment contract shared with secret managers, systemd credentials, and Janus managed-service slots.
+
 ## [5.8.15] — 2026-08-11
 
 ### Security — Frontend development tools resolve patched versions (PAI-758)
