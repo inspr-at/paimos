@@ -10,7 +10,7 @@ import type { PreflightResult, CollisionStrategy } from '@/components/ImportColl
 import { api, csrfHeaders, errMsg } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import TagChip from '@/components/TagChip.vue'
-import type { Tag } from '@/types'
+import type { ProjectStatus, Tag } from '@/types'
 // PAI-146 expansion: AI optimize on the new-project description.
 import AiActionMenu from '@/components/ai/AiActionMenu.vue'
 import AiSurfaceFeedback from '@/components/ai/AiSurfaceFeedback.vue'
@@ -28,7 +28,7 @@ export interface Project {
   name: string
   key: string
   description: string
-  status: 'active' | 'archived' | 'deleted'
+  status: ProjectStatus
   product_owner: number | null
   customer_label: string
   customer_id: number | null
@@ -47,7 +47,7 @@ export interface Project {
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.isAdmin)
 
-const statusFilter = ref<'active' | 'archived' | 'deleted'>('active')
+const statusFilter = ref<ProjectStatus>('active')
 const projects = ref<Project[]>([])
 const loading = ref(true)
 
@@ -442,6 +442,7 @@ onMounted(() => {
       </select>
       <div class="segmented">
         <button :class="['seg-btn', { active: statusFilter === 'active' }]" @click="statusFilter='active'; load()">Active</button>
+        <button :class="['seg-btn', { active: statusFilter === 'frozen' }]" @click="statusFilter='frozen'; load()">Frozen</button>
         <button :class="['seg-btn', { active: statusFilter === 'archived' }]" @click="statusFilter='archived'; load()">Archived</button>
         <button v-if="isAdmin" :class="['seg-btn', { active: statusFilter === 'deleted' }]" @click="statusFilter='deleted'; load()">Deleted</button>
       </div>

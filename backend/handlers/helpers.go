@@ -127,6 +127,13 @@ func handleDBError(w http.ResponseWriter, err error, entity string) bool {
 		jsonError(w, entity+" already exists", http.StatusConflict)
 		return true
 	}
+	for _, status := range []string{"frozen", "archived", "deleted"} {
+		msg := "project is " + status + "; new issues are disabled"
+		if strings.Contains(err.Error(), msg) {
+			jsonError(w, msg, http.StatusConflict)
+			return true
+		}
+	}
 	log.Printf("%s DB error: %v", entity, err)
 	jsonError(w, "internal error", http.StatusInternalServerError)
 	return true

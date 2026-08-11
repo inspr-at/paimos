@@ -16,6 +16,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -32,18 +33,71 @@ import (
 	"github.com/inspr-at/paimos/backend/models"
 )
 
+const (
+	projectStatusActive   = "active"
+	projectStatusFrozen   = "frozen"
+	projectStatusArchived = "archived"
+	projectStatusDeleted  = "deleted"
+)
+
+var projectStatuses = []string{
+	projectStatusActive,
+	projectStatusFrozen,
+	projectStatusArchived,
+	projectStatusDeleted,
+}
+
+func validProjectStatus(status string) bool {
+	for _, allowed := range projectStatuses {
+		if status == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// requireProjectAcceptsNewIssues is the lifecycle gate shared by every
+// project-scoped issue creation path. Frozen projects keep their existing
+// work editable; archived/deleted projects remain readable through their
+// explicit list/detail surfaces, but none of the three accepts new work.
+func requireProjectAcceptsNewIssues(w http.ResponseWriter, projectID int64) bool {
+	var status string
+	err := db.DB.QueryRow("SELECT status FROM projects WHERE id=?", projectID).Scan(&status)
+	if err == sql.ErrNoRows {
+		jsonError(w, "project not found", http.StatusNotFound)
+		return false
+	}
+	if err != nil {
+		jsonError(w, "project lifecycle check failed", http.StatusInternalServerError)
+		return false
+	}
+	if status != projectStatusActive {
+		jsonError(w, fmt.Sprintf("project is %s; new issues are disabled", status), http.StatusConflict)
+		return false
+	}
+	return true
+}
+
 func ListProjects(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	if status == "" {
-		status = "active"
+		status = projectStatusActive
 	}
-	// Never leak deleted projects through normal listing; require explicit opt-in
-	if status != "active" && status != "archived" && status != "deleted" {
-		status = "active"
+
+	statusClause := "p.status = ?"
+	statusArgs := []any{status}
+	if status == "all" {
+		// Deleted projects remain an explicit trash view; --all means every
+		// normal lifecycle state, not soft-deleted rows.
+		statusClause = "p.status IN (?, ?, ?)"
+		statusArgs = []any{projectStatusActive, projectStatusFrozen, projectStatusArchived}
+	} else if !validProjectStatus(status) {
+		jsonError(w, "status must be active, frozen, archived, deleted, or all", http.StatusBadRequest)
+		return
 	}
 
 	filter, filterArgs := projectIDFilter(r, "p.id", false)
-	args := append([]any{status}, filterArgs...)
+	args := append(statusArgs, filterArgs...)
 
 	// #nosec G202 G701 -- projectIDFilter returns a fixed SQL fragment plus placeholder args; status is allowlisted above.
 	rows, err := db.DB.Query(`
@@ -72,7 +126,7 @@ func ListProjects(w http.ResponseWriter, r *http.Request) {
 		FROM projects p
 		LEFT JOIN issues i    ON i.project_id = p.id AND i.deleted_at IS NULL
 		LEFT JOIN customers c ON c.id = p.customer_id
-		WHERE p.status = ?`+filter+`
+		WHERE `+statusClause+filter+`
 		GROUP BY p.id
 		ORDER BY last_activity DESC, p.updated_at DESC
 	`, args...)
@@ -428,6 +482,14 @@ func UpdateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body.Key = &k
+	}
+	if body.Status != nil {
+		status := strings.ToLower(strings.TrimSpace(*body.Status))
+		if !validProjectStatus(status) {
+			jsonError(w, "status must be active, frozen, archived, or deleted", http.StatusBadRequest)
+			return
+		}
+		body.Status = &status
 	}
 	aiDefaultsJSON := ""
 	aiPolicyJSON := ""

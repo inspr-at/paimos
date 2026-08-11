@@ -40,6 +40,9 @@ func CreateIssue(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
 		return
 	}
+	if !requireProjectAcceptsNewIssues(w, projectID) {
+		return
+	}
 
 	var body struct {
 		Title              string   `json:"title"`
@@ -201,6 +204,14 @@ func CloneIssue(w http.ResponseWriter, r *http.Request) {
 	sourceID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		jsonError(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var projectID int64
+	if err := db.DB.QueryRow("SELECT project_id FROM issues WHERE id=? AND deleted_at IS NULL", sourceID).Scan(&projectID); err != nil {
+		jsonError(w, "source issue not found", http.StatusNotFound)
+		return
+	}
+	if !requireProjectAcceptsNewIssues(w, projectID) {
 		return
 	}
 

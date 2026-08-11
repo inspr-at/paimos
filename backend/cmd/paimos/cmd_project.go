@@ -29,6 +29,66 @@ func projectCmd() *cobra.Command {
 	c.AddCommand(projectAnchorsCmd())
 	c.AddCommand(projectTagsCmd())
 	c.AddCommand(projectCreateCmd())
+	c.AddCommand(projectUpdateCmd())
+	return c
+}
+
+func projectUpdateCmd() *cobra.Command {
+	var (
+		status string
+		dryRun bool
+	)
+	c := &cobra.Command{
+		Use:   "update <key|id>",
+		Short: "Update a project's lifecycle state",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			status = strings.ToLower(strings.TrimSpace(status))
+			switch status {
+			case "active", "frozen", "archived", "deleted":
+			case "":
+				return &usageError{msg: "--status is required"}
+			default:
+				return &usageError{msg: "--status must be active, frozen, archived, or deleted"}
+			}
+
+			client, err := instanceClient()
+			if err != nil {
+				return err
+			}
+			projectID, err := resolveProjectRefToID(client, args[0])
+			if err != nil {
+				return reportError(err)
+			}
+			path := fmt.Sprintf("/api/projects/%d", projectID)
+			body := map[string]any{"status": status}
+			if dryRun {
+				return emitJSON(map[string]any{
+					"dry_run": true,
+					"method":  "PUT",
+					"path":    path,
+					"body":    body,
+				})
+			}
+
+			raw, err := client.do("PUT", path, body)
+			if err != nil {
+				return reportError(err)
+			}
+			if flagJSON {
+				fmt.Fprintln(stdout, strings.TrimSpace(string(raw)))
+				return nil
+			}
+			var project map[string]any
+			if err := json.Unmarshal(raw, &project); err != nil {
+				return fmt.Errorf("decode project: %w", err)
+			}
+			fmt.Fprintf(stdout, "✓ %v is now %v\n", project["key"], project["status"])
+			return nil
+		},
+	}
+	c.Flags().StringVar(&status, "status", "", "lifecycle state: active, frozen, archived, or deleted")
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the request without sending")
 	return c
 }
 
@@ -113,7 +173,11 @@ Use --dry-run to print the payload without hitting the API.`,
 }
 
 func projectListCmd() *cobra.Command {
-	var includeArchived bool
+	var (
+		includeArchived bool
+		includeAll      bool
+		status          string
+	)
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List projects on the current instance",
@@ -122,9 +186,21 @@ func projectListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path := "/api/projects"
+			selectedStatus := strings.ToLower(strings.TrimSpace(status))
 			if includeArchived {
-				path += "?status=archived"
+				selectedStatus = "archived"
+			}
+			if includeAll {
+				selectedStatus = "all"
+			}
+			switch selectedStatus {
+			case "", "active", "frozen", "archived", "deleted", "all":
+			default:
+				return &usageError{msg: "--status must be active, frozen, archived, deleted, or all"}
+			}
+			path := "/api/projects"
+			if selectedStatus != "" && selectedStatus != "active" {
+				path += "?status=" + url.QueryEscape(selectedStatus)
 			}
 			body, err := client.do("GET", path, nil)
 			if err != nil {
@@ -144,16 +220,21 @@ func projectListCmd() *cobra.Command {
 				fmt.Fprintln(stdout, "(no projects)")
 				return nil
 			}
-			fmt.Fprintln(stdout, "KEY           NAME")
+			fmt.Fprintln(stdout, "KEY           STATUS     NAME")
 			for _, p := range projects {
 				key, _ := p["key"].(string)
 				name, _ := p["name"].(string)
-				fmt.Fprintf(stdout, "%-13s %s\n", key, name)
+				projectStatus, _ := p["status"].(string)
+				fmt.Fprintf(stdout, "%-13s %-10s %s\n", key, projectStatus, name)
 			}
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&includeArchived, "archived", false, "include archived projects")
+	c.Flags().BoolVar(&includeArchived, "archived", false, "list archived projects (deprecated: use --status archived)")
+	c.Flags().BoolVar(&includeAll, "all", false, "list active, frozen, and archived projects")
+	c.Flags().StringVar(&status, "status", "", "filter by active, frozen, archived, deleted, or all")
+	_ = c.Flags().MarkDeprecated("archived", "use --status archived")
+	c.MarkFlagsMutuallyExclusive("archived", "all", "status")
 	return c
 }
 

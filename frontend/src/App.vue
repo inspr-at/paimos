@@ -275,7 +275,7 @@ textarea:focus {
   text-decoration-thickness: 1px;
 }
 
-/* Project status badges (active/archived) — still pill-shaped, used on project cards */
+/* Project lifecycle badges — still pill-shaped, used on project cards */
 .badge {
   display: inline-block;
   padding: 0.15rem 0.55rem;
@@ -288,6 +288,10 @@ textarea:focus {
 .badge-active {
   background: #d4edda;
   color: #155724;
+}
+.badge-frozen {
+  background: #fff3cd;
+  color: #7a5600;
 }
 .badge-archived {
   background: #e9ecef;
@@ -484,6 +488,11 @@ textarea:focus {
 .ah-right-slot .badge-active {
   color: #15803d;
   border-color: #bbf7d0;
+  background: transparent;
+}
+.ah-right-slot .badge-frozen {
+  color: #a16207;
+  border-color: #fde68a;
   background: transparent;
 }
 .ah-right-slot .badge-archived {

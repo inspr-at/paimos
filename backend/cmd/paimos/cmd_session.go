@@ -129,7 +129,7 @@ func resolveProjectRefToID(c *Client, ref string) (int64, error) {
 	if trimmed == "" {
 		return 0, &usageError{msg: "--project is required"}
 	}
-	body, err := c.do("GET", "/api/projects", nil)
+	body, err := c.do("GET", "/api/projects?status=all", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -411,7 +411,7 @@ func resolveCacheRoot(flag string) (string, error) {
 // take the canonical key for the cache directory name without re-
 // implementing the lookup.
 func resolveProjectKeyFromID(c *Client, projectID int64) (string, error) {
-	body, err := c.do("GET", "/api/projects", nil)
+	body, err := c.do("GET", "/api/projects?status=all", nil)
 	if err != nil {
 		return "", err
 	}
@@ -547,4 +547,3 @@ local-only env reset.`,
 	c.Flags().BoolVar(&jsonFlag, "json", false, "emit a JSON record")
 	return c
 }
-

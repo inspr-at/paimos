@@ -35,6 +35,8 @@ import (
 //
 // The version doubles as cache key: clients refetch when the value changes.
 //
+// 2.1.0 (PAI-754): added the project_status enum, bound project.status to it,
+// and documented the active/frozen/archived/deleted lifecycle contract.
 // 2.0.0 (PAI-599 599-B, BREAKING): the issue payload now returns `cost_unit`
 // and `release` as objects ({id, label}) or null, sourced from their container
 // edges — not free-text strings. The string columns were dropped. Create/update
@@ -75,7 +77,7 @@ import (
 // discover which api-key scopes unlock which endpoints. The scope list
 // is populated at init() from auth.ScopeCatalog() — a single source of
 // truth shared with the runtime check.
-const SchemaVersion = "2.0.0"
+const SchemaVersion = "2.1.0"
 
 // SchemaPayload is the shape returned by GET /api/schema. See PAI-87.
 type SchemaPayload struct {
@@ -142,6 +144,7 @@ var Schema = SchemaPayload{
 	Version: SchemaVersion,
 	Enums: map[string][]string{
 		"status":           append([]string(nil), contracts.IssueStatuses...),
+		"project_status":   append([]string(nil), projectStatuses...),
 		"knowledge_status": append([]string(nil), contracts.KnowledgeStatuses...),
 		"priority":         append([]string(nil), contracts.IssuePriorities...),
 		"type":             append([]string(nil), contracts.IssueTypes...),
@@ -183,7 +186,7 @@ var Schema = SchemaPayload{
 		},
 		"project": {
 			Required: []string{"name", "key"},
-			Optional: []string{"description"},
+			Optional: []string{"description", "status"},
 		},
 		"repo": {
 			Required: []string{"url"},
@@ -221,6 +224,7 @@ var Schema = SchemaPayload{
 		"issue.type":       "type",
 		"issue.status":     "status",
 		"issue.priority":   "priority",
+		"project.status":   "project_status",
 		"relation.type":    "relation",
 		"tag.color":        "tag_colors",
 		"knowledge.type":   "knowledge_types",
@@ -231,6 +235,7 @@ var Schema = SchemaPayload{
 		"enum_values":            "Enum values are canonical lowercase wire values. Display surfaces may render proper-case labels, but requests must submit the schema value.",
 		"idempotency_key":        "Create-style writes may accept `Idempotency-Key: <uuid-or-ulid>`; clients should reuse the same key only when retrying the same logical request.",
 		"issue_key":              "{PROJECT_KEY}-{N}, case-sensitive (e.g. PAI-83). `/issues/{id}` accepts either the numeric id or the key since v1.2.5.",
+		"project_lifecycle":      "active accepts new work; frozen keeps existing work editable but rejects new issues; archived is retired and rejects new issues; deleted is the soft-delete trash state. GET /projects defaults to active; status=all returns active, frozen, and archived.",
 		"agent_name":             "lowercase slug ^[a-z][a-z0-9_-]*$, max 32 chars, 'web-ui' reserved",
 		"multiline_inputs":       "description, acceptance_criteria and notes are markdown — prefer file inputs over shell-quoted strings (see paimos CLI).",
 		"transitions_permissive": "status transitions are recommendations, not enforced; the backend accepts any→any to keep fix-by-hand flexible. Clients should surface the recommended list but allow override.",

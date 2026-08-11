@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const latestSchemaVersion = 140
+const latestSchemaVersion = 141
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -89,6 +89,28 @@ func TestSchemaAgentRunsCommitEvidenceColumns(t *testing.T) {
 	for _, col := range []string{"repo_url", "branch_name", "commit_base_sha", "commit_sha"} {
 		if !columnExists(t, db, "agent_runs", col) {
 			t.Fatalf("expected agent_runs.%s to exist (PAI-702 / M140)", col)
+		}
+	}
+}
+
+func TestProjectLifecycleTriggersRejectNewIssues(t *testing.T) {
+	db := openTestDB(t)
+	res, err := db.Exec(`INSERT INTO projects(name, key, status) VALUES('Lifecycle', 'LIFE', 'active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO issues(project_id, issue_number, type, title) VALUES(?, 1, 'ticket', 'active is writable')`, projectID); err != nil {
+		t.Fatalf("active project insert: %v", err)
+	}
+
+	for number, status := range []string{"frozen", "archived", "deleted"} {
+		if _, err := db.Exec(`UPDATE projects SET status=? WHERE id=?`, status, projectID); err != nil {
+			t.Fatal(err)
+		}
+		_, err := db.Exec(`INSERT INTO issues(project_id, issue_number, type, title) VALUES(?, ?, 'ticket', 'blocked')`, projectID, number+2)
+		if err == nil || !strings.Contains(err.Error(), "project is "+status+"; new issues are disabled") {
+			t.Fatalf("status %s insert error = %v", status, err)
 		}
 	}
 }

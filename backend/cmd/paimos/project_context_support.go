@@ -45,7 +45,7 @@ func resolveProjectID(client *Client, ref string) (int64, error) {
 	if n, err := strconv.ParseInt(ref, 10, 64); err == nil && n > 0 {
 		return n, nil
 	}
-	body, err := client.do("GET", "/api/projects", nil)
+	body, err := client.do("GET", "/api/projects?status=all", nil)
 	if err != nil {
 		return 0, err
 	}

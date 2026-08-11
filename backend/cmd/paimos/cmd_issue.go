@@ -181,7 +181,7 @@ func issueChildrenCmd() *cobra.Command {
 // listing projects. Cached within a single CLI invocation would be
 // nicer but isn't worth the complexity for v1 — one extra GET.
 func resolveProjectKeyToID(c *Client, key string) (int64, error) {
-	body, err := c.do("GET", "/api/projects", nil)
+	body, err := c.do("GET", "/api/projects?status=all", nil)
 	if err != nil {
 		return 0, err
 	}
