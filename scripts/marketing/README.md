@@ -8,8 +8,8 @@ ppm runbook `refresh-site-marketing-captures` (#3594).
 
 - Captures come **only** from the local seeded demo workspace. Never from
   `pm.barta.cm`, `paimos.agm.ng`, or any instance holding real data.
-- Viewport 1600×1000 @2x, dev-login banner and 2FA nag hidden, animations
-  and carets frozen so re-shoots are stable.
+- Still viewport 1600×1000 @2x and video viewport 1280×800, with the dev-login
+  banner and 2FA nag hidden and distracting animations/carets frozen.
 - Every published caption states provenance: *"Demo workspace, Paimos
   vX.Y.Z"*. The scripts do not write captions — that lives with the site —
   but the version in them must match the build you captured.
@@ -23,7 +23,9 @@ just marketing-captures       # terminal 2: regenerate + verify + publish
 
 The second command bootstraps Playwright, sources the same local dev-login
 token as `dev-up` without printing it, polishes the gitignored fixture DB,
-captures all six current site images, and publishes them into `../inspr-at`.
+captures all six current site images plus two short product flows, transcodes
+the flows to Safari-compatible fast-start H.264, and publishes everything into
+`../inspr-at`.
 Pass a different reviewed site worktree when needed:
 
 ```sh
@@ -34,7 +36,9 @@ The command refuses a live/non-local instance, an app version that does not
 match `VERSION`, or backend/frontend code that differs from the corresponding
 shipped tag. The site-side publisher checks 3200×2000 output, hashes every
 asset, records the release commit, and verifies the three annotated hotspots
-against DOM landmarks captured from `/issues/PAI-1`.
+against DOM landmarks captured from `/issues/PAI-1`. It also rejects video
+drift outside the 1280×800, 24 fps, 5–15 second, no-audio H.264 contract or the
+3 MiB combined page-weight budget.
 
 ## Why the demo data needs polishing first
 
