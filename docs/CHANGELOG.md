@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.15] — 2026-08-11
+
+### Security — Frontend development tools resolve patched versions (PAI-758)
+
+- The lockfile now resolves Vite 6.4.3, Vitest 3.2.7, and patched brace-expansion releases, clearing one critical and two high development-dependency advisories.
+- `npm audit` reports zero vulnerabilities including development dependencies, without changing declared package ranges or crossing a major version.
+- The upgraded toolchain passes the complete unit, typecheck, production-build, hosted E2E, and security suites, and the Vite development server still serves its HMR client.
+
 ## [5.8.14] — 2026-08-11
 
 ### Fixed — Knowledge list type typos fail instead of lying (PAI-760)
