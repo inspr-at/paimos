@@ -240,7 +240,7 @@ function nextPage() {
   cursor: pointer;
 }
 .aipt-row:hover {
-  background: rgba(46, 109, 164, .04);
+  background: rgba(82, 82, 91, .04);
 }
 .aipt-action,
 .aipt-subkey,
@@ -255,7 +255,7 @@ function nextPage() {
   padding: .9rem 1rem;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(220, 233, 244, .4), rgba(255,255,255,.95));
+  background: linear-gradient(180deg, rgba(244, 244, 245, .4), rgba(255,255,255,.95));
 }
 .aipt-detail__head {
   display: flex;

@@ -153,7 +153,7 @@ function openPillPicker() {
 }
 .tag-input:focus {
   border-color: var(--brand-blue);
-  box-shadow: 0 0 0 3px rgba(46,109,164,.12);
+  box-shadow: 0 0 0 3px rgba(82, 82, 91,.12);
 }
 
 .tag-add-pill {

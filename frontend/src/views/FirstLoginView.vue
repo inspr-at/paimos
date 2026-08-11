@@ -210,7 +210,7 @@ async function signOut() {
   justify-content: center;
   padding: 2rem 1rem;
   background:
-    radial-gradient(ellipse at top, rgba(46, 109, 164, 0.08), transparent 60%),
+    radial-gradient(ellipse at top, rgba(82, 82, 91, 0.08), transparent 60%),
     var(--bg);
 }
 
@@ -230,8 +230,8 @@ async function signOut() {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: var(--brand-blue-pale, #dce9f4);
-  color: var(--brand-blue-dark, #1f4d75);
+  background: var(--brand-blue-pale, #f4f4f5);
+  color: var(--brand-blue-dark, #3f3f46);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -334,8 +334,8 @@ async function signOut() {
   font-size: 14px;
   font-weight: 600;
   color: #fff;
-  background: var(--brand-blue, #2e6da4);
-  border: 1px solid var(--brand-blue-dark, #1f4d75);
+  background: var(--brand-blue, #52525b);
+  border: 1px solid var(--brand-blue-dark, #3f3f46);
   border-radius: 8px;
   cursor: pointer;
   transition:
@@ -345,7 +345,7 @@ async function signOut() {
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
 }
 .fl-primary:hover:not(:disabled) {
-  background: var(--brand-blue-dark, #1f4d75);
+  background: var(--brand-blue-dark, #3f3f46);
 }
 .fl-primary:active:not(:disabled) {
   transform: translateY(1px);
@@ -356,7 +356,7 @@ async function signOut() {
 }
 .fl-primary:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(46, 109, 164, 0.35);
+  box-shadow: 0 0 0 3px rgba(82, 82, 91, 0.35);
 }
 
 .fl-aside {

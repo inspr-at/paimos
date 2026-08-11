@@ -352,7 +352,7 @@ onMounted(() => {
 .issue-ai__badge {
   padding: 0.12rem 0.38rem;
   border-radius: 999px;
-  background: rgba(46, 109, 164, 0.1);
+  background: rgba(82, 82, 91, 0.1);
   color: var(--brand-blue-dark);
 }
 .issue-ai__hint,
@@ -398,13 +398,13 @@ onMounted(() => {
   background: var(--bg);
 }
 .issue-ai__item--undo {
-  border-color: rgba(46, 109, 164, 0.18);
+  border-color: rgba(82, 82, 91, 0.18);
 }
 .issue-ai__item--redo {
   border-color: rgba(22, 163, 74, 0.18);
 }
 .issue-ai__item--ai {
-  border-color: rgba(46, 109, 164, 0.2);
+  border-color: rgba(82, 82, 91, 0.2);
   background: color-mix(in srgb, var(--brand-blue, #2563eb) 4%, var(--bg));
 }
 .issue-ai__undo {

@@ -252,7 +252,7 @@ textarea {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  background: rgba(46, 109, 164, 0.08);
+  background: rgba(82, 82, 91, 0.08);
   border: 2px dashed var(--brand-blue);
   border-radius: var(--radius);
   color: var(--brand-blue);
@@ -302,11 +302,11 @@ textarea {
   }
 }
 .upload-chip--pending {
-  border-color: rgba(46, 109, 164, 0.28);
+  border-color: rgba(82, 82, 91, 0.28);
   background: linear-gradient(
     180deg,
-    rgba(46, 109, 164, 0.05),
-    rgba(46, 109, 164, 0.02)
+    rgba(82, 82, 91, 0.05),
+    rgba(82, 82, 91, 0.02)
   );
 }
 .upload-chip--done {
@@ -345,7 +345,7 @@ textarea {
   min-width: 60px;
   max-width: 220px;
   height: 4px;
-  background: rgba(46, 109, 164, 0.12);
+  background: rgba(82, 82, 91, 0.12);
   border-radius: 999px;
   overflow: hidden;
   position: relative;
@@ -355,7 +355,7 @@ textarea {
   top: 0;
   bottom: 0;
   left: 0;
-  background: var(--brand-blue, #2e6da4);
+  background: var(--brand-blue, #52525b);
   border-radius: 999px;
   width: 0;
   transition: width 140ms linear;

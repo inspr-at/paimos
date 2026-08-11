@@ -248,7 +248,7 @@ watch(
 .cl-rail:focus-visible {
   /* Inset focus ring — the rail is the keyboard handler, so it should
      be visibly focusable without breaking the layout. */
-  box-shadow: inset 0 0 0 2px rgba(46, 109, 164, .35);
+  box-shadow: inset 0 0 0 2px rgba(82, 82, 91, .35);
 }
 @media (max-width: 720px) {
   .cl-rail {
@@ -282,7 +282,7 @@ watch(
   /* No height: row is content-tall (~26 px); dense by design. */
   transition: background .1s, border-color .1s;
 }
-.cl-row:hover { background: rgba(46, 109, 164, .06); }
+.cl-row:hover { background: rgba(82, 82, 91, .06); }
 .cl-row--active {
   background: var(--brand-blue-pale);
   border-left-color: var(--brand-blue);

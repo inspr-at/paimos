@@ -74,7 +74,7 @@ const sprintById = computed(() => {
   gap: .3rem;
   background: #e0eeff;
   color: #1e4a8a;
-  border: 1px solid color-mix(in srgb, #2e6da4 25%, transparent);
+  border: 1px solid color-mix(in srgb, #52525b 25%, transparent);
   border-radius: 20px;
   font-size: 12px;
   font-weight: 600;

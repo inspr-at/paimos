@@ -337,7 +337,7 @@ onBeforeUnmount(() => {
 
 /* ── Sidebar shell ────────────────────────────────────────────────────────── */
 .sidebar {
-  color: var(--sidebar-text, #c8d5e2);
+  color: var(--sidebar-text, #e4e4e7);
   display: flex;
   flex-direction: column;
   justify-content: space-between;

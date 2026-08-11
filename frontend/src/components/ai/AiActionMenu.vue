@@ -543,14 +543,14 @@ export { iconFor }
   transition: background .12s, color .12s, border-color .12s;
 }
 .ai-menu-chip:hover:not(.ai-menu-chip--disabled) {
-  background: var(--brand-blue-pale, #dce9f4);
-  color: var(--brand-blue-dark, #1f4d75);
-  border-color: var(--brand-blue-light, #4a8fc2);
+  background: var(--brand-blue-pale, #f4f4f5);
+  color: var(--brand-blue-dark, #3f3f46);
+  border-color: var(--brand-blue-light, #a1a1aa);
 }
 .ai-menu-chip--busy {
-  color: var(--brand-blue-dark, #1f4d75);
-  background: var(--brand-blue-pale, #dce9f4);
-  border-color: var(--brand-blue-light, #4a8fc2);
+  color: var(--brand-blue-dark, #3f3f46);
+  background: var(--brand-blue-pale, #f4f4f5);
+  border-color: var(--brand-blue-light, #a1a1aa);
 }
 .ai-menu-chip--disabled { opacity: .55; }
 
@@ -575,7 +575,7 @@ export { iconFor }
 }
 .ai-menu-chip:hover .ai-menu-chip-chev,
 .ai-menu-chip--busy .ai-menu-chip-chev {
-  border-left-color: rgba(46, 109, 164, .25);
+  border-left-color: rgba(82, 82, 91, .25);
 }
 
 .spin { animation: ai-action-spin 1s linear infinite; }

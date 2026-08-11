@@ -381,8 +381,8 @@ const imageUrl = computed(() =>
   color: #fff;
 }
 .lb-pop-btn--active {
-  background: rgba(46,109,164,.25);
-  border-color: rgba(46,109,164,.6);
+  background: rgba(82, 82, 91,.25);
+  border-color: rgba(82, 82, 91,.6);
   color: #fff;
 }
 .lb-pop-btn--size {
@@ -391,8 +391,8 @@ const imageUrl = computed(() =>
 }
 .lb-copy-btn {
   margin-top: .3rem;
-  background: var(--brand-blue, #2e6da4);
-  border: 1px solid var(--brand-blue, #2e6da4);
+  background: var(--brand-blue, #52525b);
+  border: 1px solid var(--brand-blue, #52525b);
   color: #fff;
   padding: .45rem .7rem;
   border-radius: 4px;

@@ -262,7 +262,7 @@ onBeforeUnmount(()   => document.removeEventListener('mousedown', onDocClick))
   display: inline-flex; line-height: 0;
   transition: background .12s;
 }
-.iss-chip-x:hover { background: rgba(46, 109, 164, .15); }
+.iss-chip-x:hover { background: rgba(82, 82, 91, .15); }
 
 /* ── search state (input shell) ───────────────────────────────── */
 .iss-search {

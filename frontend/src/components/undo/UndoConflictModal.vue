@@ -184,15 +184,15 @@ function apply() {
   background:
     radial-gradient(
       circle at top right,
-      rgba(46, 109, 164, 0.18),
+      rgba(82, 82, 91, 0.18),
       transparent 46%
     ),
     linear-gradient(
       180deg,
-      rgba(220, 233, 244, 0.72),
+      rgba(244, 244, 245, 0.72),
       rgba(255, 255, 255, 0.96)
     );
-  border: 1px solid rgba(46, 109, 164, 0.15);
+  border: 1px solid rgba(82, 82, 91, 0.15);
 }
 .undo-modal__eyebrow,
 .undo-card__field,
@@ -272,7 +272,7 @@ function apply() {
 }
 .undo-choice:has(input:checked) {
   border-color: var(--brand-blue);
-  box-shadow: 0 0 0 3px rgba(46, 109, 164, 0.08);
+  box-shadow: 0 0 0 3px rgba(82, 82, 91, 0.08);
 }
 .undo-choice input {
   width: auto;

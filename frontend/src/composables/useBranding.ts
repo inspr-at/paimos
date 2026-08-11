@@ -72,6 +72,9 @@ export interface BrandingConfig {
 
 const LS_KEY = LS_BRANDING_FILE
 
+// PAI-737: defaults are deliberately achromatic. Operators can still replace
+// every color through branding.json; the fallback itself carries no legacy
+// product identity.
 const defaults: BrandingConfig = {
   name: 'PAIMOS',
   company: 'PAIMOS',
@@ -81,17 +84,17 @@ const defaults: BrandingConfig = {
   logo: '/logo.png',
   favicon: '/favicon.png',
   colors: {
-    primary: '#2e6da4',
-    primaryDark: '#1f4d75',
-    primaryLight: '#4a8fc2',
-    primaryPale: '#dce9f4',
+    primary: '#52525b',
+    primaryDark: '#3f3f46',
+    primaryLight: '#a1a1aa',
+    primaryPale: '#f4f4f5',
     accent: '#16a34a',
-    sidebarBg: '#1a2d42',
-    sidebarText: '#c8d5e2',
-    loginBg: '#1a2d42',
-    loginPattern: '#243650',
+    sidebarBg: '#18181b',
+    sidebarText: '#e4e4e7',
+    loginBg: '#18181b',
+    loginPattern: '#27272a',
     typeEpic: '#5e35b1',
-    typeTicket: '#1f4d75',
+    typeTicket: '#3f3f46',
     typeTask: '#2e7d32',
     tableRowBorder: '#e8eaed',
     tableRowAlt: '#f8f9fa',

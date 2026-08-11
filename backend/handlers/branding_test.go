@@ -31,6 +31,32 @@ import (
 	"testing"
 )
 
+func Test_GetBranding_DefaultPaletteIsNeutral(t *testing.T) {
+	ts := newTestServer(t)
+	resp := ts.get(t, "/api/branding", "")
+	assertStatus(t, resp, http.StatusOK)
+
+	var got struct {
+		Colors map[string]string `json:"colors"`
+	}
+	decode(t, resp, &got)
+	want := map[string]string{
+		"primary":      "#52525b",
+		"primaryDark":  "#3f3f46",
+		"primaryLight": "#a1a1aa",
+		"primaryPale":  "#f4f4f5",
+		"sidebarBg":    "#18181b",
+		"sidebarText":  "#e4e4e7",
+		"loginBg":      "#18181b",
+		"loginPattern": "#27272a",
+	}
+	for key, expected := range want {
+		if got.Colors[key] != expected {
+			t.Errorf("default colors[%q] = %q, want %q", key, got.Colors[key], expected)
+		}
+	}
+}
+
 // ── PUT /api/branding ──────────────────────────────────────────────
 
 func Test_PutBranding_Admin(t *testing.T) {

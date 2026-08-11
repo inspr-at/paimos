@@ -105,3 +105,33 @@ describe("branding identity reconciliation (PAI-736)", () => {
     expect(branding.value.product).toBe("Acme");
   });
 });
+
+describe("neutral default palette (PAI-737)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("uses neutral gray defaults when the branding endpoint is unavailable", async () => {
+    const { branding } = await withBrandingDoc(null);
+    expect(branding.value.colors).toMatchObject({
+      primary: "#52525b",
+      primaryDark: "#3f3f46",
+      primaryLight: "#a1a1aa",
+      primaryPale: "#f4f4f5",
+      sidebarBg: "#18181b",
+      sidebarText: "#e4e4e7",
+      loginBg: "#18181b",
+      loginPattern: "#27272a",
+    });
+  });
+
+  it("keeps instance-specific color overrides", async () => {
+    const { branding } = await withBrandingDoc({
+      colors: { primary: "#ff0066", sidebarBg: "#123456" },
+    });
+    expect(branding.value.colors.primary).toBe("#ff0066");
+    expect(branding.value.colors.sidebarBg).toBe("#123456");
+    expect(branding.value.colors.primaryDark).toBe("#3f3f46");
+  });
+});

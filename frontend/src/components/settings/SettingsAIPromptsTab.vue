@@ -1123,11 +1123,11 @@ function clearDryRun() {
   background: var(--brand-blue);
   border-color: var(--brand-blue);
   color: white;
-  box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 4px 10px rgba(46, 109, 164, .18);
+  box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 4px 10px rgba(82, 82, 91, .18);
 }
 .ape-btn--primary:hover:not(:disabled) {
-  background: var(--brand-blue-dark, #1f4d75);
-  border-color: var(--brand-blue-dark, #1f4d75);
+  background: var(--brand-blue-dark, #3f3f46);
+  border-color: var(--brand-blue-dark, #3f3f46);
 }
 
 /* Spinner — namespaced so it doesn't collide with any global .spin. */

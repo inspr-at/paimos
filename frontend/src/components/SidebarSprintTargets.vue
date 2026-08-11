@@ -51,7 +51,7 @@ const {
 }
 .sprint-targets-label {
   font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .08em; color: rgba(200,213,226,.4);
+  letter-spacing: .08em; color: rgba(228, 228, 231,.4);
   padding: 0 .65rem; margin-bottom: .2rem;
 }
 .sprint-target {
@@ -62,10 +62,10 @@ const {
   font-size: 12px; color: #8fa7be;
   overflow: hidden;
 }
-.sprint-target:hover { background: color-mix(in srgb, var(--brand-blue) 12%, transparent); color: var(--sidebar-text, #c8d5e2); }
+.sprint-target:hover { background: color-mix(in srgb, var(--brand-blue) 12%, transparent); color: var(--sidebar-text, #e4e4e7); }
 .sprint-target--active { background: color-mix(in srgb, var(--brand-blue) 18%, transparent); color: #fff; border-color: color-mix(in srgb, var(--brand-blue) 35%, transparent); }
 .sprint-target--collapsed { justify-content: center; padding-left: 0; padding-right: 0; gap: 0; }
-.sprint-target--current { color: var(--sidebar-text, #c8d5e2); }
+.sprint-target--current { color: var(--sidebar-text, #e4e4e7); }
 .sprint-target--dragover {
   background: color-mix(in srgb, var(--brand-blue) 22%, transparent);
   border-color: color-mix(in srgb, var(--brand-blue) 50%, transparent);
@@ -74,11 +74,11 @@ const {
 .sprint-target--assigning { background: rgba(5,150,105,.18); border-color: rgba(5,150,105,.4); }
 .sprint-target-dot {
   width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-  background: rgba(200,213,226,.3);
+  background: rgba(228, 228, 231,.3);
 }
 .sprint-target-dot--current {
-  background: #4a8fc2;
-  box-shadow: 0 0 0 2px rgba(74,143,194,.3);
+  background: #a1a1aa;
+  box-shadow: 0 0 0 2px rgba(161, 161, 170,.3);
 }
 .sprint-target-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .sprint-state-badge {
@@ -86,9 +86,9 @@ const {
   border-radius: 3px; padding: 0 .3rem; flex-shrink: 0;
 }
 .sprint-state--active   { background: rgba(217,119,6,.25); color: #fbbf24; }
-.sprint-state--planned  { background: rgba(200,213,226,.15); color: #8fa7be; }
+.sprint-state--planned  { background: rgba(228, 228, 231,.15); color: #8fa7be; }
 .sprint-state--complete { background: rgba(5,150,105,.2); color: #34d399; }
-.sprint-state--archived { background: rgba(200,213,226,.12); color: #6b7280; }
+.sprint-state--archived { background: rgba(228, 228, 231,.12); color: #6b7280; }
 .sprint-assigning-tick {
   font-size: 12px; color: #34d399; flex-shrink: 0;
 }

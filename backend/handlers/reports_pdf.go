@@ -317,12 +317,12 @@ func setFillRGB(pdf *fpdf.Fpdf, c rgbColor) { pdf.SetFillColor(c.r, c.g, c.b) }
 
 func resolveLBPDFPalette() lbPDFPalette {
 	colors := map[string]string{
-		"primary":        "#2e6da4",
-		"primaryDark":    "#1f4d75",
-		"primaryPale":    "#dce9f4",
+		"primary":        "#52525b",
+		"primaryDark":    "#3f3f46",
+		"primaryPale":    "#f4f4f5",
 		"tableRowBorder": "#e8eaed",
 		"tableRowAlt":    "#f8f9fa",
-		"typeTicket":     "#1f4d75",
+		"typeTicket":     "#3f3f46",
 		"typeTask":       "#2e7d32",
 	}
 	if data, err := os.ReadFile(filepath.Join(brandingDir(), "branding.json")); err == nil {
