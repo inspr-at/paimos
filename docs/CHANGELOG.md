@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.12] — 2026-08-11
+
+### Fixed — Unbranded instances start from a neutral palette (PAI-737)
+
+- Fresh installations and missing branding values now use achromatic gray accents instead of the retired blue identity, including UI effects and report fallbacks.
+- Existing per-instance color overrides continue to win over defaults, so custom branding remains unchanged.
+- Release hygiene now rejects the retired palette in hex or RGB notation and the retired product name across tracked product, asset, and documentation text.
+
 ## [5.8.11] — 2026-08-10
 
 ### Added — Voice Intake can recover from an incorrect project guess (PAI-757)
