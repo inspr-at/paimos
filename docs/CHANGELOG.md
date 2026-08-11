@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.14] — 2026-08-11
+
+### Fixed — Knowledge list type typos fail instead of lying (PAI-760)
+
+- `paimos knowledge list <type>` no longer silently ignores the positional-looking type and returns an unfiltered inventory.
+- The CLI exits with a usage error that directs callers to the supported `--type <type>` filter before project resolution or any network request.
+- Existing filtered `--type` calls and intentional cross-type lists remain unchanged.
+
 ## [5.8.13] — 2026-08-11
 
 ### Added — Admin-selectable shared background patterns (PAI-738)
