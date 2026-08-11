@@ -184,7 +184,7 @@ func TestDecrypt_MalformedShort(t *testing.T) {
 		nil,
 		{},
 		{0x01},
-		make([]byte, 10),                // too short to be a v0 nonce
+		make([]byte, 10), // too short to be a v0 nonce
 		append([]byte{0x01}, make([]byte, 11)...), // v1 prefix + short nonce, no tag
 	} {
 		if _, err := secretvault.Decrypt("ai:openrouter", blob); err == nil {
@@ -246,6 +246,36 @@ func TestRootKey_EnvOverridesDisk(t *testing.T) {
 	}
 }
 
+func TestRootKey_FileOverridesEnvironmentAndDisk(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DATA_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, ".secret-key"), make([]byte, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fileKey := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, fileKey); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "paimos-secret-key")
+	encoded := base64.StdEncoding.EncodeToString(fileKey)
+	if err := os.WriteFile(path, []byte(encoded+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("PAIMOS_SECRET_KEY_FILE", path)
+
+	secretvault.ResetForTest()
+	t.Cleanup(secretvault.ResetForTest)
+	got, err := secretvault.RootKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(fileKey) {
+		t.Fatal("root key did not come from PAIMOS_SECRET_KEY_FILE")
+	}
+}
+
 // TestRootKey_DiskFallback — without env, the disk file is read
 // (and auto-generated on first call if missing).
 func TestRootKey_DiskFallback(t *testing.T) {
@@ -303,8 +333,8 @@ func TestRootKey_InvalidEnv(t *testing.T) {
 func TestEncryptJSON_RoundTrip(t *testing.T) {
 	setEnvKey(t)
 	type creds struct {
-		Token   string `json:"token"`
-		Portal  string `json:"portal"`
+		Token  string `json:"token"`
+		Portal string `json:"portal"`
 	}
 	in := creds{Token: "pat-na1-FAKE", Portal: "12345678"}
 

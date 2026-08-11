@@ -71,6 +71,7 @@ import (
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/brand"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/secretinput"
 )
 
 const (
@@ -137,7 +138,10 @@ func sendResetEmail(toEmail, link string) error {
 		from = "noreply@" + hostFromURL(brand.Default.WebsiteURL)
 	}
 	user := os.Getenv("SMTP_USER")
-	pass := os.Getenv("SMTP_PASS")
+	pass, err := secretinput.Optional("SMTP_PASS")
+	if err != nil {
+		return fmt.Errorf("SMTP configuration: %w", err)
+	}
 
 	subject := brand.Default.ProductName + " password reset"
 	body := fmt.Sprintf(

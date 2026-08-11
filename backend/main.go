@@ -36,6 +36,7 @@ import (
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/handlers/crm"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
+	"github.com/inspr-at/paimos/backend/secretinput"
 	"github.com/inspr-at/paimos/backend/storage"
 
 	// CRM provider plugins. Blank-import each provider so its init()
@@ -77,6 +78,15 @@ func main() {
 		return
 	}
 
+	if err := secretinput.Validate(
+		"ADMIN_PASSWORD",
+		"PAIMOS_SECRET_KEY",
+		"SMTP_PASS",
+		"OIDC_CLIENT_SECRET",
+	); err != nil {
+		log.Fatalf("configuration: %v", err)
+	}
+
 	// PAI-267: validate dev-login config at boot. No-op on production
 	// builds (prod stub returns immediately). On dev builds, panics if
 	// PAIMOS_ENV=production OR if PAIMOS_DEV_LOGIN_TOKEN is set but
@@ -86,7 +96,9 @@ func main() {
 	if err := db.Open(); err != nil {
 		log.Fatalf("db: %v", err)
 	}
-	seedAdmin()
+	if err := seedAdmin(); err != nil {
+		log.Fatalf("seed: %v", err)
+	}
 	handlers.EnsureAtRiskTag()
 
 	if err := storage.Init(); err != nil {
@@ -260,24 +272,27 @@ func serveAvatarHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join(getDataDir(), "avatars", filename))
 }
 
-func seedAdmin() {
+func seedAdmin() error {
 	var count int
 	if err := db.DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
 		log.Printf("seed: failed to query user count: %v", err)
-		return
+		return nil
 	}
 	if count > 0 {
-		return
+		return nil
 	}
-	password := os.Getenv("ADMIN_PASSWORD")
+	password, err := secretinput.Optional("ADMIN_PASSWORD")
+	if err != nil {
+		return err
+	}
 	if password == "" {
 		log.Println("seed: ADMIN_PASSWORD missing; refusing to create default admin user")
-		return
+		return nil
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
 		log.Printf("seed: hash error: %v", err)
-		return
+		return nil
 	}
 	// PAI-739: the bootstrap user must be super_admin — granting
 	// super_admin requires being one, so an admin-only seed made the
@@ -290,9 +305,10 @@ func seedAdmin() {
 	)
 	if err != nil {
 		log.Printf("seed: insert error: %v", err)
-		return
+		return nil
 	}
 	log.Println("seed: created super-admin bootstrap user (username: admin)")
+	return nil
 }
 
 func getPort() string {

@@ -3,6 +3,23 @@
 Every environment variable PAIMOS reads, grouped by concern. Defaults
 shown in parentheses. Unless noted, all vars are optional.
 
+## Runtime secret files
+
+The secret-bearing variables `ADMIN_PASSWORD`, `PAIMOS_SECRET_KEY`,
+`SMTP_PASS`, and `OIDC_CLIENT_SECRET` each accept a `_FILE` companion. For
+example, setting `SMTP_PASS_FILE=/run/secrets/smtp-pass` makes PAIMOS read the
+password from that file instead of `SMTP_PASS`. `_FILE` wins when both forms
+are set, and the direct variable remains supported for compatibility.
+
+PAIMOS removes exactly one trailing LF or CRLF line ending from file input and
+preserves every other byte. A configured `_FILE` that is empty or unreadable
+fails startup with an error naming the configuration variable; PAIMOS does not
+fall back to the direct variable and does not include the path or secret in the
+error. Mount runtime files read-only with the narrowest ownership and mode your
+container or service manager supports. This keeps the secret value out of the
+process environment and composes directly with Docker secrets, systemd
+credentials, and secret-manager runtime files.
+
 ## Core server
 
 | Var | Default | Notes |
@@ -10,7 +27,7 @@ shown in parentheses. Unless noted, all vars are optional.
 | `PORT` | `8888` | Listen port |
 | `STATIC_DIR` | `/app/static` | Path to the built Vue SPA |
 | `DATA_DIR` | `/app/data` | Path for SQLite DB, branding JSON, logos, avatars |
-| `ADMIN_PASSWORD` | *(empty)* | **First-run only.** Seeds the `admin` user on a fresh DB. No effect once `admin` exists. |
+| `ADMIN_PASSWORD` | *(empty)* | **First-run only.** Seeds the `admin` user on a fresh DB. No effect once `admin` exists. Supports `ADMIN_PASSWORD_FILE`. |
 | `COOKIE_SECURE` | *(unset)* | Set to `true` on HTTPS deployments to add `Secure` to session cookies |
 | `INSTANCE_LABEL` | *(empty)* | Shows a banner in the sidebar (e.g. `STAGING`) — useful on non-prod instances |
 
@@ -22,7 +39,7 @@ root key from a secret manager rather than store it beside the database.
 
 | Var | Default | Notes |
 |---|---|---|
-| `PAIMOS_SECRET_KEY` | auto-generated as `$DATA_DIR/.secret-key` when first needed | Base64 encoding of exactly 32 bytes. The environment value takes precedence over the file and allows the active key to remain outside `$DATA_DIR` backups. Do not replace an existing key directly; use `paimos secrets rotate` so stored ciphertext is re-encrypted atomically. |
+| `PAIMOS_SECRET_KEY` | auto-generated as `$DATA_DIR/.secret-key` when first needed | Base64 encoding of exactly 32 bytes. `PAIMOS_SECRET_KEY_FILE` takes precedence over the direct value and the generated `$DATA_DIR/.secret-key`. Do not replace an existing key directly; use `paimos secrets rotate` so stored ciphertext is re-encrypted atomically. |
 
 ## Branding
 
@@ -77,7 +94,7 @@ reset and anyone with log access can use it (PAI-115).
 | `SMTP_HOST` | *(unset)* | Unset = no email sent. Set to enable real sending. |
 | `SMTP_PORT` | `587` | STARTTLS submission port |
 | `SMTP_USER` | *(empty)* | Leave blank for unauthenticated relay |
-| `SMTP_PASS` | *(empty)* | Pair with `SMTP_USER` |
+| `SMTP_PASS` | *(empty)* | Pair with `SMTP_USER`. Supports `SMTP_PASS_FILE`. |
 | `PAIMOS_DEV_MODE` | *(unset)* | When `true` AND `SMTP_HOST` unset, log reset links to stdout. Local dev only. |
 
 ## Single Sign-On (OpenID Connect — PAI-120 / PAI-680)
@@ -92,7 +109,7 @@ permissions remain local authorization.
 |---|---|---|
 | `OIDC_ISSUER_URL` | *(unset)* | Required. e.g. `https://login.example.com` (no trailing slash). The discovery doc must be reachable at `${OIDC_ISSUER_URL}/.well-known/openid-configuration`. |
 | `OIDC_CLIENT_ID` | *(unset)* | Required. |
-| `OIDC_CLIENT_SECRET` | *(unset)* | Optional for public clients (PKCE-only); required for confidential clients. |
+| `OIDC_CLIENT_SECRET` | *(unset)* | Optional for public clients (PKCE-only); required for confidential clients. Supports `OIDC_CLIENT_SECRET_FILE`. |
 | `OIDC_REDIRECT_URL` | *(unset)* | Required. Must exactly match the IdP-registered redirect (e.g. `https://paimos.example.com/api/auth/oidc/callback`). |
 | `OIDC_SCOPES` | `openid email profile` | Space-separated. |
 | `OIDC_BUTTON_LABEL` | `Sign in with SSO` | Shown on the login page. |
@@ -518,14 +535,19 @@ for installations that don't need file uploads.
 
 ## Example minimal `.env` (prod)
 
+The `/run/secrets/...` examples below assume the deployment mounts those files
+at the same paths inside the PAIMOS container. The repository Compose file
+forwards the four supported `_FILE` variables; production deployments must
+also provide the read-only mounts.
+
 ```env
 # Core
 PORT=8888
 DATA_DIR=/app/data
 COOKIE_SECURE=true
 
-# Secret encryption — inject from a secret manager
-PAIMOS_SECRET_KEY=<base64-of-exactly-32-random-bytes>
+# Secret encryption — mount from a secret manager
+PAIMOS_SECRET_KEY_FILE=/run/secrets/paimos-secret-key
 
 # Branding
 BRAND_PRODUCT_NAME=ACME PM
@@ -538,7 +560,7 @@ BRAND_EMAIL_FROM=noreply@acme.example
 SMTP_HOST=smtp.postmarkapp.com
 SMTP_PORT=587
 SMTP_USER=<postmark-token>
-SMTP_PASS=<postmark-token>
+SMTP_PASS_FILE=/run/secrets/smtp-pass
 
 # Attachments
 MINIO_ENDPOINT=minio.internal:9000
@@ -550,11 +572,11 @@ MINIO_USE_SSL=false
 Bootstrap on first run:
 
 ```bash
-ADMIN_PASSWORD='<temp-password>' docker compose up -d
+ADMIN_PASSWORD_FILE=/run/secrets/paimos-admin-password docker compose up -d
 ```
 
-Rotate that temp password via the UI, remove `ADMIN_PASSWORD` from the
-env, and restart.
+Rotate that temp password via the UI, remove `ADMIN_PASSWORD_FILE` (or
+`ADMIN_PASSWORD` when using the compatibility form), and restart.
 
 ## Runtime branding
 

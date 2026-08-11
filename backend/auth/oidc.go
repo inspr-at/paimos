@@ -56,6 +56,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
+	"github.com/inspr-at/paimos/backend/secretinput"
 )
 
 // oidcConfig captures the env-driven configuration for the OIDC flow.
@@ -94,11 +95,15 @@ const (
 func loadOIDCConfig(ctx context.Context) (oidcConfig, error) {
 	oidcCfgOnce.Lock()
 	defer oidcCfgOnce.Unlock()
+	clientSecret, err := secretinput.Optional("OIDC_CLIENT_SECRET")
+	if err != nil {
+		return oidcConfig{}, err
+	}
 
 	cfg := oidcConfig{
 		IssuerURL:      strings.TrimRight(os.Getenv("OIDC_ISSUER_URL"), "/"),
 		ClientID:       strings.TrimSpace(os.Getenv("OIDC_CLIENT_ID")),
-		ClientSecret:   os.Getenv("OIDC_CLIENT_SECRET"),
+		ClientSecret:   clientSecret,
 		RedirectURL:    strings.TrimSpace(os.Getenv("OIDC_REDIRECT_URL")),
 		Scopes:         envDefault("OIDC_SCOPES", "openid email profile"),
 		ProvisionMode:  strings.ToLower(strings.TrimSpace(envDefault("OIDC_PROVISION_MODE", oidcProvisionInviteOnly))),
