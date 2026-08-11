@@ -51,13 +51,13 @@ func TestRun_Idempotency(t *testing.T) {
 		t.Errorf("first run: projects count = %d, want 4", projects1)
 	}
 	// PAI-269: phase-1 + phase-2 totals.
-	//   PAI   =   5  (phase-1 only — no rich seed)
+	//   PAI   =   7  (phase-1's 5 + hero cost-unit/release containers)
 	//   ACME  =  33  (phase-1's 5 + 3 sprints + 25 rich tickets)
 	//   BUGZ  = 100  (phase-2 fills to 100 regardless of phase-1 floor)
 	//   LOGS  =  10  (phase-2 fills to 10)
-	const wantIssues = 148
+	const wantIssues = 150
 	if issues1 != wantIssues {
-		t.Errorf("first run: issues count = %d, want %d (PAI 5 + ACME 33 + BUGZ 100 + LOGS 10)", issues1, wantIssues)
+		t.Errorf("first run: issues count = %d, want %d (PAI 7 + ACME 33 + BUGZ 100 + LOGS 10)", issues1, wantIssues)
 	}
 
 	// Second seed — must be a no-op
@@ -96,6 +96,92 @@ func TestRun_RenamesLegacyPAITFixtureProject(t *testing.T) {
 	}
 	if got := count(t, "SELECT COUNT(*) FROM projects WHERE key='PAI'"); got != 1 {
 		t.Fatalf("PAI projects = %d, want 1", got)
+	}
+}
+
+func TestRun_PAIHeroFixture(t *testing.T) {
+	openDevseedTestDB(t)
+	if err := devseed.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var issueID int64
+	var title, description, acceptance, notes, reportSummary, jiraID string
+	var estimateHours, estimateLP, arHours, arLP float64
+	if err := db.DB.QueryRow(`
+		SELECT id, title, description, acceptance_criteria, notes,
+		       report_summary, estimate_hours, estimate_lp, ar_hours, ar_lp, jira_id
+		FROM issues
+		WHERE project_id=(SELECT id FROM projects WHERE key='PAI')
+		  AND issue_number=1
+	`).Scan(
+		&issueID, &title, &description, &acceptance, &notes,
+		&reportSummary, &estimateHours, &estimateLP, &arHours, &arLP, &jiraID,
+	); err != nil {
+		t.Fatalf("query PAI-1: %v", err)
+	}
+
+	if title != "Dogfood a complete issue-to-agent walkthrough" {
+		t.Errorf("PAI-1 title = %q", title)
+	}
+	for name, value := range map[string]string{
+		"description": description,
+		"acceptance":  acceptance,
+		"notes":       notes,
+		"report":      reportSummary,
+	} {
+		if strings.TrimSpace(value) == "" {
+			t.Errorf("PAI-1 %s is blank", name)
+		}
+	}
+	if estimateHours != 6 || estimateLP != 5 {
+		t.Errorf("PAI-1 estimates = %.2fh / %.2f LP, want 6h / 5 LP", estimateHours, estimateLP)
+	}
+	if arHours != 3 || arLP != 3 {
+		t.Errorf("PAI-1 AR = %.2fh / %.2f LP, want 3h / 3 LP", arHours, arLP)
+	}
+	if jiraID != "PAI-DEMO-1" {
+		t.Errorf("PAI-1 Jira ID = %q, want PAI-DEMO-1", jiraID)
+	}
+	for dimension, want := range map[string]string{
+		"cost_unit": "Paimos product",
+		"release":   "Demo walkthrough",
+	} {
+		var got string
+		if err := db.DB.QueryRow(`
+			SELECT container.title
+			FROM issue_relations edge
+			JOIN issues container ON container.id=edge.source_id
+			WHERE edge.target_id=? AND edge.type=?
+		`, issueID, dimension).Scan(&got); err != nil {
+			t.Errorf("query PAI-1 %s: %v", dimension, err)
+		} else if got != want {
+			t.Errorf("PAI-1 %s = %q, want %q", dimension, got, want)
+		}
+	}
+	if got := count(t, "SELECT COUNT(*) FROM time_entries WHERE issue_id=?", issueID); got != 2 {
+		t.Errorf("PAI-1 time entries = %d, want 2", got)
+	}
+	if got := count(t, "SELECT COUNT(*) FROM time_entries WHERE issue_id=? AND stopped_at IS NOT NULL AND comment != ''", issueID); got != 2 {
+		t.Errorf("PAI-1 complete time entries = %d, want 2", got)
+	}
+
+	const localDescription = "Local fixture edit that must survive a seed re-run."
+	if _, err := db.DB.Exec("UPDATE issues SET description=? WHERE id=?", localDescription, issueID); err != nil {
+		t.Fatalf("customize PAI-1: %v", err)
+	}
+	if err := devseed.Run(); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	var gotDescription string
+	if err := db.DB.QueryRow("SELECT description FROM issues WHERE id=?", issueID).Scan(&gotDescription); err != nil {
+		t.Fatalf("query customized PAI-1: %v", err)
+	}
+	if gotDescription != localDescription {
+		t.Errorf("second Run replaced local description: got %q", gotDescription)
+	}
+	if got := count(t, "SELECT COUNT(*) FROM time_entries WHERE issue_id=?", issueID); got != 2 {
+		t.Errorf("second Run grew PAI-1 time entries to %d, want 2", got)
 	}
 }
 
@@ -276,10 +362,10 @@ func TestRun_DebugAccountsSeededFromEnv(t *testing.T) {
 	assertNoMembership(t, "debug-customer", "EXTR")
 }
 
-func count(t *testing.T, query string) int {
+func count(t *testing.T, query string, args ...any) int {
 	t.Helper()
 	var n int
-	if err := db.DB.QueryRow(query).Scan(&n); err != nil {
+	if err := db.DB.QueryRow(query, args...).Scan(&n); err != nil {
 		t.Fatalf("count %q: %v", query, err)
 	}
 	return n

@@ -17,7 +17,9 @@
 //   3. Memberships — the per-user × per-project access matrix.
 //   4. Phase-1 issues — 5 issues per project covering the status enum;
 //      enough to exercise list filters before the rich seed lands.
-//   5. Phase-2 (PAI-269) — rich per-project content: ACME gets sprints
+//   5. PAI-696 — a complete PAI-1 flagship issue for walkthroughs and
+//      capture rehearsal, including prose, estimates, and time entries.
+//   6. Phase-2 (PAI-269) — rich per-project content: ACME gets sprints
 //      and time entries, BUGZ gets ~100 issues with relations and
 //      soft-deletes, LOGS gets long markdown bodies with comment
 //      threads. Attachments are deferred (need a working MinIO bucket
@@ -50,6 +52,21 @@ import (
 const (
 	debugAccountsFlagEnv = "PAIMOS_DEBUG_ACCOUNTS"
 	debugPasswordMinLen  = 40
+	paiHeroLegacyTitle   = "PAI smoke #1: backlog ticket — high priority"
+	paiHeroPAITTitle     = "PAIT smoke #1: backlog ticket — high priority"
+	paiHeroTitle         = "Dogfood a complete issue-to-agent walkthrough"
+	paiHeroDescription   = `A new contributor should be able to open this seeded issue and understand how Paimos carries intent into agent-ready execution without writing setup data first.
+
+This ticket dogfoods that path. It keeps the problem, acceptance boundary, delivery note, estimate, and booked work together so issue detail, search, reporting, and the AI Workbench all have meaningful synthetic evidence to render.`
+	paiHeroAcceptance = `- [x] The issue explains the outcome and why it matters.
+- [x] Description, acceptance criteria, notes, and report summary contain realistic synthetic content.
+- [x] Hour and LP estimates are present with two completed time entries.
+- [ ] Refresh public captures only after the seeded screen has been reviewed.`
+	paiHeroNotes         = `Demo fixture only — no production or customer data. Use PAI-1 for local walkthroughs and capture rehearsal; reset or edit it freely.`
+	paiHeroReportSummary = `The seeded workspace demonstrates a complete work item from intent and acceptance criteria through estimates, tracked effort, and the agent execution boundary.`
+	paiHeroCostUnit      = "Paimos product"
+	paiHeroRelease       = "Demo walkthrough"
+	paiHeroJiraID        = "PAI-DEMO-1"
 )
 
 // devUser is one row in the user matrix. ID is pinned so the
@@ -140,6 +157,9 @@ func Run() error {
 	if err := seedIssues(tx, projectIDs); err != nil {
 		return fmt.Errorf("seed issues: %w", err)
 	}
+	if err := seedRichPAIHero(tx, projectIDs["PAI"]); err != nil {
+		return fmt.Errorf("seed rich PAI hero: %w", err)
+	}
 	// PAI-269: rich per-project content. Each helper has its own
 	// gate-on-count check, so re-running is safe and partially-seeded
 	// DBs converge to the target shape without duplicating rows.
@@ -156,7 +176,7 @@ func Run() error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
-	log.Printf("dev-seed: %d users, %d projects, memberships + phase-1 floor + phase-2 rich content — re-run-safe",
+	log.Printf("dev-seed: %d users, %d projects, memberships + phase-1 floor + rich content — re-run-safe",
 		len(devUsers), len(devProjects))
 	return nil
 }
@@ -423,6 +443,184 @@ func seedIssues(tx *sql.Tx, projectIDs map[string]int64) error {
 		}
 	}
 	return nil
+}
+
+// seedRichPAIHero upgrades only the known synthetic PAI-1 fixture into a
+// complete issue walkthrough. Blank fields converge on re-run, while local
+// edits survive because populated fields are never overwritten. The two time
+// entries use stable comments as their idempotency keys.
+func seedRichPAIHero(tx *sql.Tx, pid int64) error {
+	if pid == 0 {
+		return nil
+	}
+
+	var issueID int64
+	err := tx.QueryRow(`
+		SELECT id
+		FROM issues
+		WHERE project_id=? AND issue_number=1
+		  AND title IN (?, ?, ?)
+	`, pid, paiHeroLegacyTitle, paiHeroPAITTitle, paiHeroTitle).Scan(&issueID)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("resolve PAI-1 hero fixture: %w", err)
+	}
+
+	result, err := tx.Exec(`
+		UPDATE issues
+		SET title = CASE WHEN title IN (?, ?) THEN ? ELSE title END,
+		    description = CASE WHEN TRIM(description) = '' THEN ? ELSE description END,
+		    acceptance_criteria = CASE WHEN TRIM(acceptance_criteria) = '' THEN ? ELSE acceptance_criteria END,
+		    notes = CASE WHEN TRIM(notes) = '' THEN ? ELSE notes END,
+		    report_summary = CASE WHEN TRIM(report_summary) = '' THEN ? ELSE report_summary END,
+		    estimate_hours = COALESCE(estimate_hours, 6.0),
+		    estimate_lp = COALESCE(estimate_lp, 5.0),
+		    ar_hours = COALESCE(ar_hours, 3.0),
+		    ar_lp = COALESCE(ar_lp, 3.0),
+		    jira_id = CASE WHEN TRIM(jira_id) = '' THEN ? ELSE jira_id END
+		WHERE id=? AND (
+			title IN (?, ?) OR
+			TRIM(description) = '' OR
+			TRIM(acceptance_criteria) = '' OR
+			TRIM(notes) = '' OR
+			TRIM(report_summary) = '' OR
+			estimate_hours IS NULL OR
+			estimate_lp IS NULL OR
+			ar_hours IS NULL OR
+			ar_lp IS NULL OR
+			TRIM(jira_id) = ''
+		)
+	`,
+		paiHeroLegacyTitle, paiHeroPAITTitle, paiHeroTitle,
+		paiHeroDescription, paiHeroAcceptance, paiHeroNotes, paiHeroReportSummary,
+		paiHeroJiraID, issueID, paiHeroLegacyTitle, paiHeroPAITTitle,
+	)
+	if err != nil {
+		return fmt.Errorf("enrich PAI-1 hero fixture: %w", err)
+	}
+	updated, _ := result.RowsAffected()
+
+	labelsInserted := 0
+	for _, label := range []struct {
+		dimension string
+		title     string
+	}{
+		{"cost_unit", paiHeroCostUnit},
+		{"release", paiHeroRelease},
+	} {
+		inserted, err := seedPAIHeroLabel(tx, pid, issueID, label.dimension, label.title)
+		if err != nil {
+			return err
+		}
+		labelsInserted += inserted
+	}
+
+	type timeEntrySpec struct {
+		daysAgo  int
+		duration time.Duration
+		comment  string
+	}
+	entries := []timeEntrySpec{
+		{5, 75 * time.Minute, "Mapped the seeded issue anatomy and capture boundary"},
+		{3, 105 * time.Minute, "Validated the issue detail and AI Workbench walkthrough"},
+	}
+	inserted := 0
+	for _, entry := range entries {
+		started := time.Now().UTC().Add(-time.Duration(entry.daysAgo) * 24 * time.Hour).Truncate(time.Second)
+		stopped := started.Add(entry.duration)
+		res, err := tx.Exec(`
+			INSERT INTO time_entries (issue_id, user_id, started_at, stopped_at, comment)
+			SELECT ?, ?, ?, ?, ?
+			WHERE NOT EXISTS (
+				SELECT 1 FROM time_entries WHERE issue_id=? AND comment=?
+			)
+		`, issueID, devUserByName("dev_admin").ID,
+			started.Format("2006-01-02 15:04:05"), stopped.Format("2006-01-02 15:04:05"), entry.comment,
+			issueID, entry.comment)
+		if err != nil {
+			return fmt.Errorf("insert PAI-1 time entry %q: %w", entry.comment, err)
+		}
+		rows, _ := res.RowsAffected()
+		inserted += int(rows)
+	}
+
+	if updated > 0 || labelsInserted > 0 || inserted > 0 {
+		log.Printf("dev-seed/PAI: enriched PAI-1 hero fixture + %d labels + %d time entries", labelsInserted, inserted)
+	}
+	return nil
+}
+
+// seedPAIHeroLabel gives the synthetic hero one active cost-unit/release edge
+// without replacing a label already chosen in a local dev database. A fresh
+// seed creates a real container issue because those relations are the current
+// source of truth; a re-run resolves the same container and remains a no-op.
+func seedPAIHeroLabel(tx *sql.Tx, projectID, issueID int64, dimension, title string) (int, error) {
+	var existing int
+	err := tx.QueryRow(`
+		SELECT 1
+		FROM issue_relations edge
+		JOIN issues container ON container.id=edge.source_id
+		WHERE edge.target_id=? AND edge.type=? AND container.deleted_at IS NULL
+		LIMIT 1
+	`, issueID, dimension).Scan(&existing)
+	if err == nil {
+		return 0, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, fmt.Errorf("resolve PAI-1 %s edge: %w", dimension, err)
+	}
+
+	// A deleted container does not render a label, but its edge still occupies
+	// the one-per-dimension unique slot. Remove only that unusable edge.
+	if _, err := tx.Exec(`DELETE FROM issue_relations WHERE target_id=? AND type=?`, issueID, dimension); err != nil {
+		return 0, fmt.Errorf("clear inactive PAI-1 %s edge: %w", dimension, err)
+	}
+
+	var containerID int64
+	err = tx.QueryRow(`
+		SELECT id FROM issues
+		WHERE project_id=? AND type=? AND title=? AND deleted_at IS NULL
+		ORDER BY id LIMIT 1
+	`, projectID, dimension, title).Scan(&containerID)
+	created := 0
+	if err == sql.ErrNoRows {
+		number, numberErr := nextIssueNumber(tx, projectID)
+		if numberErr != nil {
+			return 0, fmt.Errorf("number PAI-1 %s container: %w", dimension, numberErr)
+		}
+		result, insertErr := tx.Exec(`
+			INSERT INTO issues (project_id, issue_number, type, title, status, priority)
+			VALUES (?, ?, ?, ?, 'backlog', 'medium')
+		`, projectID, number, dimension, title)
+		if insertErr != nil {
+			return 0, fmt.Errorf("insert PAI-1 %s container: %w", dimension, insertErr)
+		}
+		containerID, _ = result.LastInsertId()
+		created = 1
+	} else if err != nil {
+		return 0, fmt.Errorf("resolve PAI-1 %s container: %w", dimension, err)
+	}
+
+	if _, err := tx.Exec(`
+		INSERT OR IGNORE INTO issue_relations (source_id, target_id, type)
+		VALUES (?, ?, ?)
+	`, containerID, issueID, dimension); err != nil {
+		return 0, fmt.Errorf("link PAI-1 %s container: %w", dimension, err)
+	}
+
+	// Direct fixture inserts bypass the runtime allocator, so keep its counter
+	// beyond the new maximum before a developer creates the next real issue.
+	if _, err := tx.Exec(`
+		INSERT INTO project_issue_counters(project_id, next_number)
+		VALUES (?, (SELECT COALESCE(MAX(issue_number), 0) + 1 FROM issues WHERE project_id=?))
+		ON CONFLICT(project_id) DO UPDATE SET
+			next_number = MAX(project_issue_counters.next_number, excluded.next_number)
+	`, projectID, projectID); err != nil {
+		return 0, fmt.Errorf("sync PAI issue counter: %w", err)
+	}
+	return created, nil
 }
 
 func devUserByName(name string) devUser {
