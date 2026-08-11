@@ -5,6 +5,15 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.17] — 2026-08-11
+
+### Added — Project lifecycle states enforce where new work may begin (PAI-754)
+
+- Projects can be active, frozen, archived, or deleted; frozen projects retain editable existing issues while rejecting new issue rows, and archived projects remain readable but retired.
+- Project lists now default to active work, with explicit CLI and UI filters for the complete lifecycle plus `paimos project update --status` for controlled transitions.
+- API guards and database triggers enforce the same creation boundary across direct, batch, clone, intake, and move paths, returning a named conflict instead of silently accepting work.
+- The discoverable schema, generated frontend types, agent documentation, migration coverage, and lifecycle integration tests now describe and verify the contract.
+
 ## [5.8.16] — 2026-08-11
 
 ### Security — Secrets can stay in runtime files (PAI-759)
