@@ -41,7 +41,7 @@ use the CLI, MCP facade, or JSON API. Both work against the same project state,
 permissions, knowledge, and history.
 
 > [!NOTE]
-> Paimos 4.8 is production-used and actively developed. Its current deployment
+> Paimos 5.8 is production-used and actively developed. Its current deployment
 > model is deliberately compact: one Go process and one SQLite database. It is
 > not a multi-node high-availability service. See
 > [Current maturity and limits](#current-maturity-and-limits) before a production
@@ -73,7 +73,7 @@ model becomes the context and accountability layer around their work.
 
 | Area                | Current capability                                                                                                                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Project work        | Hierarchical issues, relations, sprints, releases, priorities, tags, saved views, bulk changes, time tracking, budgets, comments, attachments, and full-text search.                                         |
+| Project work        | Hierarchical issues, relations, sprints, releases, priorities, tags, saved views, bulk changes, time tracking, budgets, comments, attachments, full-text search, and active/frozen/archived project lifecycle controls. |
 | Voice intake        | A spec workbench that turns continuous speech (or typed input) into a live, editable specification with project detection, impact analysis, ELI5/10/15 understanding checks with spoken playback, per-language (EN/DE) cached artifacts, time-travel history, and one-click issue creation. Voice endpoints are rate-limited, budgeted, and cost-metered. |
 | Project context     | Linked repositories, typed knowledge, canonical project-agent artifacts, issue-to-file anchors, entity graph and blast-radius reads, and mixed-context retrieval.                                            |
 | Agent interfaces    | A typed `paimos` CLI, `paimos-mcp`, REST, curated OpenAPI, self-describing schema, JSON output, file-first multiline input, dry runs, idempotent transitions, and declarative bulk apply.                    |
@@ -108,7 +108,9 @@ shipped code and documented verification.
 - Completed agent runs now carry runner-declared repository, branch, and
   `(base, head]` commit evidence beside their outcome (5.8.0). The 5.8.1
   patch keeps the live knowledge freshness gate aligned with the canonical API
-  schema and compatible with macOS Bash 3.2.
+  schema and compatible with macOS Bash 3.2. Project lifecycle controls in
+  5.8.17 keep active work visible by default and stop frozen or archived
+  projects from silently accepting new issues.
 - From 4.8: generic OIDC with PKCE (Zitadel-validated), shared
   provider/profile/effort/prompt metadata across AI actions and
   implementation runs, and Claude Code / Codex as distinct local
