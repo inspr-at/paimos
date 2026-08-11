@@ -55,13 +55,13 @@
 // -------------------
 // Same model as the legacy CRM helper:
 //
-//  1. PAIMOS_SECRET_KEY env (base64 of 32 bytes) — operators that
-//     manage the key out-of-band (k8s secret, sops, vault, …).
+//  1. PAIMOS_SECRET_KEY_FILE, or PAIMOS_SECRET_KEY for compatibility
+//     (base64 of 32 bytes) — operators that manage the key out-of-band.
 //  2. $DATA_DIR/.secret-key — auto-generated on first boot, mode 0600.
 //     Stable across restarts; backing up the data dir backs it up too.
 //
-// Env wins; the disk path is the fallback. See HARDENING.md §3.6 for
-// the operator-facing T1/T2 framing of these two modes.
+// Runtime input wins; the data-directory path is the fallback. See
+// HARDENING.md §3.6 for the operator-facing T1/T2 framing of these modes.
 package secretvault
 
 import (
@@ -78,6 +78,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/inspr-at/paimos/backend/secretinput"
 )
 
 // versionV1 is the leading byte that identifies a v1 envelope. Anything
@@ -125,7 +127,12 @@ func RootKey() ([]byte, error) {
 // loadRootKey is the once-body. Extracted so it can be re-invoked from
 // ResetForTest without fighting sync.Once.
 func loadRootKey() {
-	if envKey := os.Getenv("PAIMOS_SECRET_KEY"); envKey != "" {
+	envKey, err := secretinput.Optional("PAIMOS_SECRET_KEY")
+	if err != nil {
+		rootKeyErr = err
+		return
+	}
+	if envKey != "" {
 		k, err := base64.StdEncoding.DecodeString(envKey)
 		if err != nil || len(k) != rootKeyBytes {
 			rootKeyErr = ErrInvalidKey

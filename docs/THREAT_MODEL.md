@@ -100,8 +100,8 @@ Each optional integration adds an outbound trust assumption. PAIMOS does not —
 | Provider | Credential | Failure mode |
 |---|---|---|
 | MinIO/S3 | `MINIO_ACCESS_KEY` + `MINIO_SECRET_KEY` (env) | Attachments unavailable; UI hides drop zones; download endpoints return 503 |
-| SMTP | `SMTP_USER` + `SMTP_PASS` (env) | Password-reset endpoint refuses-with-warning; no link sent |
-| OIDC | `OIDC_CLIENT_SECRET` (env) | SSO button hidden from login page when unconfigured |
+| SMTP | `SMTP_USER` + `SMTP_PASS_FILE` (or compatibility env) | Password-reset endpoint refuses-with-warning; no link sent |
+| OIDC | `OIDC_CLIENT_SECRET_FILE` (or compatibility env) | SSO button hidden from login page when unconfigured |
 | OpenRouter | `ai_settings.api_key_encrypted` (DB, secretvault) | AI feature surface disabled; UI falls back to "AI not configured" |
 
 A compromised upstream provider can in theory exfiltrate data PAIMOS sent — see [`INCIDENT_RESPONSE.md` § 3.5](INCIDENT_RESPONSE.md) for the response runbook. PAIMOS-side defences:

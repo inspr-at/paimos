@@ -8,8 +8,11 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 )
 
@@ -36,7 +39,9 @@ func TestSeedAdmin_CreatesSuperAdmin(t *testing.T) {
 	openSeedTestDB(t)
 	t.Setenv("ADMIN_PASSWORD", "bootstrap-pass-123")
 
-	seedAdmin()
+	if err := seedAdmin(); err != nil {
+		t.Fatal(err)
+	}
 
 	var role, roleKey string
 	var isSuper int
@@ -53,6 +58,30 @@ func TestSeedAdmin_CreatesSuperAdmin(t *testing.T) {
 	}
 }
 
+func TestSeedAdmin_CreatesSuperAdminFromFile(t *testing.T) {
+	openSeedTestDB(t)
+	path := filepath.Join(t.TempDir(), "admin-password")
+	if err := os.WriteFile(path, []byte("bootstrap-pass-123\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ADMIN_PASSWORD", "ignored-direct-password")
+	t.Setenv("ADMIN_PASSWORD_FILE", path)
+
+	if err := seedAdmin(); err != nil {
+		t.Fatal(err)
+	}
+
+	var passwordHash string
+	if err := db.DB.QueryRow(
+		`SELECT password FROM users WHERE username='admin'`,
+	).Scan(&passwordHash); err != nil {
+		t.Fatalf("seeded user missing: %v", err)
+	}
+	if !auth.CheckPassword(passwordHash, "bootstrap-pass-123") {
+		t.Fatal("seeded password did not come from ADMIN_PASSWORD_FILE")
+	}
+}
+
 func TestSeedAdmin_NoopWhenUsersExist(t *testing.T) {
 	openSeedTestDB(t)
 	t.Setenv("ADMIN_PASSWORD", "bootstrap-pass-123")
@@ -61,7 +90,9 @@ func TestSeedAdmin_NoopWhenUsersExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	seedAdmin()
+	if err := seedAdmin(); err != nil {
+		t.Fatal(err)
+	}
 
 	var count int
 	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE username='admin'`).Scan(&count); err != nil {

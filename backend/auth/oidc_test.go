@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -166,6 +168,28 @@ func TestOIDCStatusReflectsConfiguration(t *testing.T) {
 	}
 	if !got.Enabled || got.Label != "Sign in with Test SSO" {
 		t.Fatalf("status = %+v, want enabled with configured label", got)
+	}
+}
+
+func TestOIDCConfigReadsClientSecretFromFile(t *testing.T) {
+	issuer := newOIDCMockIssuer(t, map[string]any{
+		"sub":            "sub-1",
+		"email":          "person@example.test",
+		"email_verified": true,
+	})
+	setupOIDCTest(t, issuer)
+	path := filepath.Join(t.TempDir(), "oidc-client-secret")
+	if err := os.WriteFile(path, []byte("file-client-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OIDC_CLIENT_SECRET_FILE", path)
+
+	cfg, err := loadOIDCConfig(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ClientSecret != "file-client-secret" {
+		t.Fatal("OIDC client secret did not come from OIDC_CLIENT_SECRET_FILE")
 	}
 }
 
