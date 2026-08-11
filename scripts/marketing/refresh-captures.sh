@@ -35,6 +35,8 @@ die() {
 [[ -f "$SITE_ROOT/web/scripts/sync-paimos-captures.mjs" ]] || \
   die "site capture publisher is missing at $SITE_ROOT/web/scripts/sync-paimos-captures.mjs"
 command -v curl >/dev/null 2>&1 || die "curl is required"
+command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg is required"
+command -v ffprobe >/dev/null 2>&1 || die "ffprobe is required"
 command -v node >/dev/null 2>&1 || die "node is required"
 command -v sqlite3 >/dev/null 2>&1 || die "sqlite3 is required"
 
@@ -80,6 +82,21 @@ OUT_DIR="$CAPTURE_DIR" NODE_PATH="$TOOL/node_modules" \
   node "$ROOT/scripts/marketing/capture-views.cjs"
 OUT_DIR="$CAPTURE_DIR" NODE_PATH="$TOOL/node_modules" PAIMOS_DB="$ROOT/data/paimos.db" \
   node "$ROOT/scripts/marketing/capture-intake.cjs"
+OUT_DIR="$CAPTURE_DIR" NODE_PATH="$TOOL/node_modules" \
+  node "$ROOT/scripts/marketing/capture-loops.cjs"
+
+echo "→ transcoding product loops to fast-start H.264"
+for loop in loop-issue-workbench loop-search-navigate; do
+  trim_start=$(node -e \
+    'const fs=require("fs");const [path,name]=process.argv.slice(1);const data=JSON.parse(fs.readFileSync(path));process.stdout.write(String(data.recordings[name].trimStartSeconds));' \
+    "$CAPTURE_DIR/capture-loops.json" "$loop")
+  ffmpeg -hide_banner -loglevel error -y \
+    -ss "$trim_start" -i "$CAPTURE_DIR/$loop.webm" \
+    -vf 'fps=24,scale=1280:800:flags=lanczos,format=yuv420p' \
+    -an -c:v libx264 -preset slow -crf 26 -profile:v main -level 4.0 \
+    -movflags +faststart "$CAPTURE_DIR/$loop.mp4"
+  echo "  ✓ $loop.mp4"
+done
 
 echo "→ publishing captures into $SITE_ROOT"
 node "$SITE_ROOT/web/scripts/sync-paimos-captures.mjs" \
