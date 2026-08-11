@@ -361,7 +361,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
 }
 .ai-overlay-field-chip {
-  background: var(--brand-blue-pale, #dce9f4); color: var(--brand-blue-dark, #1f4d75);
+  background: var(--brand-blue-pale, #f4f4f5); color: var(--brand-blue-dark, #3f3f46);
   padding: .1rem .55rem; border-radius: 999px;
   font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
   font-family: 'DM Sans', sans-serif;
@@ -512,12 +512,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .ai-hunk-choice:hover,
 .ai-hunk-choice:focus-visible {
   background: color-mix(in srgb, var(--brand-blue, #2b6cb0) 7%, #fff);
-  color: var(--brand-blue-dark, #1f4d75);
+  color: var(--brand-blue-dark, #3f3f46);
   outline: none;
 }
 .ai-hunk-choice--active {
   background: color-mix(in srgb, var(--brand-blue, #2b6cb0) 14%, #fff);
-  color: var(--brand-blue-dark, #1f4d75);
+  color: var(--brand-blue-dark, #3f3f46);
 }
 .ai-hunks-keyboard {
   margin: .45rem 0 0;

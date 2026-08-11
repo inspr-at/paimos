@@ -174,12 +174,12 @@ onMounted(() => {
 }
 .system-tab__hero {
   padding: 1.1rem 1.2rem;
-  border: 1px solid rgba(46, 109, 164, 0.14);
+  border: 1px solid rgba(82, 82, 91, 0.14);
   border-radius: 18px;
   background:
     radial-gradient(
       circle at top right,
-      rgba(46, 109, 164, 0.14),
+      rgba(82, 82, 91, 0.14),
       transparent 38%
     ),
     linear-gradient(

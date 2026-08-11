@@ -91,7 +91,7 @@ const { t } = useI18n()
   gap: .55rem;
   padding: .8rem .9rem;
   border-radius: 10px;
-  border: 1px solid rgba(46, 109, 164, .18);
+  border: 1px solid rgba(82, 82, 91, .18);
   background: rgba(255,255,255,.94);
   box-shadow: 0 10px 24px rgba(30, 50, 80, .06);
 }

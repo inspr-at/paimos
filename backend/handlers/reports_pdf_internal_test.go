@@ -68,7 +68,7 @@ func TestResolveBrandingLogoForPDF_SVG(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "branding-assets"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	svg := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1f4d75"/></svg>`
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#3f3f46"/></svg>`
 	if err := os.WriteFile(filepath.Join(dir, "branding-assets", "logo.svg"), []byte(svg), 0o644); err != nil {
 		t.Fatalf("write svg: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestDrawLBTypeSVGIcons(t *testing.T) {
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.AddPage()
 	palette := lbPDFPalette{
-		TypeTicket: mustRGB("#1f4d75"),
+		TypeTicket: mustRGB("#3f3f46"),
 		TypeTask:   mustRGB("#2e7d32"),
 	}
 	drawLBTypeSVGIcon(pdf, "ticket", palette, 10, 10, 4)

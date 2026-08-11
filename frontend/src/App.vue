@@ -125,11 +125,11 @@ onBeforeUnmount(() => {
 }
 
 :root {
-  --brand-blue: #2e6da4;
+  --brand-blue: #52525b;
   --brand-green: #16a34a;
-  --brand-blue-dark: #1f4d75;
-  --brand-blue-light: #4a8fc2;
-  --brand-blue-pale: #dce9f4;
+  --brand-blue-dark: #3f3f46;
+  --brand-blue-light: #a1a1aa;
+  --brand-blue-pale: #f4f4f5;
   --bg: #f2f5f8;
   --bg-card: #ffffff;
   --text: #1a2636;
@@ -200,7 +200,7 @@ input:where(:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([
 select:focus,
 textarea:focus {
   border-color: var(--brand-blue);
-  box-shadow: 0 0 0 3px rgba(46, 109, 164, 0.15);
+  box-shadow: 0 0 0 3px rgba(82, 82, 91, 0.15);
 }
 
 /* PAI-396: unified placeholder treatment. Empty-state hint text reads

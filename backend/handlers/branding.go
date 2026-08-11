@@ -32,7 +32,8 @@ import (
 
 // defaultBrandingJSON is served when no branding.json file is found in DATA_DIR.
 // Values derive from brand.Default so operators get a sensible branding
-// document even without writing their own JSON.
+// document even without writing their own JSON. PAI-737 keeps the fallback
+// palette achromatic so a fresh installation never inherits another brand.
 func defaultBrandingJSON() []byte {
 	b := brand.Default
 	return []byte(fmt.Sprintf(`{
@@ -44,15 +45,15 @@ func defaultBrandingJSON() []byte {
   "logo": "/logo.svg",
   "favicon": "/favicon.svg",
   "colors": {
-    "primary": "#2e6da4",
-    "primaryDark": "#1f4d75",
-    "primaryLight": "#4a8fc2",
-    "primaryPale": "#dce9f4",
+    "primary": "#52525b",
+    "primaryDark": "#3f3f46",
+    "primaryLight": "#a1a1aa",
+    "primaryPale": "#f4f4f5",
     "accent": "#16a34a",
-    "sidebarBg": "#1a2d42",
-    "sidebarText": "#c8d5e2",
-    "loginBg": "#1a2d42",
-    "loginPattern": "#243650"
+    "sidebarBg": "#18181b",
+    "sidebarText": "#e4e4e7",
+    "loginBg": "#18181b",
+    "loginPattern": "#27272a"
   },
   "pageTitle": %q
 }`, b.ProductName, b.CompanyName, b.ProductName, b.WebsiteURL, b.PageTitle))

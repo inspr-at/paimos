@@ -132,7 +132,7 @@ func AcceptanceReport(w http.ResponseWriter, r *http.Request) {
 		table { width: 100%; border-collapse: collapse; font-size: 13px; }
 		th { text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #637383; padding: .4rem .6rem; border-bottom: 1px solid #d1dce8; }
 		td { padding: .5rem .6rem; border-bottom: 1px solid #eee; }
-		.key { font-weight: 600; color: #2e6da4; white-space: nowrap; }
+		.key { font-weight: 600; color: #52525b; white-space: nowrap; }
 		.summary { margin-top: 2rem; padding: 1rem; background: #f2f5f8; border-radius: 6px; font-size: 13px; }
 		.empty { color: #637383; font-style: italic; }
 		@media print { body { max-width: 100%; } }

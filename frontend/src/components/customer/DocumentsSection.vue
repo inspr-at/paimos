@@ -284,7 +284,7 @@ function fmtDate(s: string | null | undefined): string {
 }
 .docs-section--drag {
   border-color: var(--brand-blue);
-  box-shadow: 0 0 0 4px rgba(46,109,164,.10);
+  box-shadow: 0 0 0 4px rgba(82, 82, 91,.10);
 }
 .docs-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
 .docs-title { font-size: 14px; font-weight: 700; color: var(--text); margin: 0 0 .15rem; letter-spacing: -.01em; }
@@ -385,7 +385,7 @@ function fmtDate(s: string | null | undefined): string {
 .docs-drop-overlay {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem;
-  background: rgba(46,109,164,.06);
+  background: rgba(82, 82, 91,.06);
   border-radius: 10px;
   color: var(--brand-blue-dark);
   font-weight: 600;

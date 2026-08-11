@@ -39,7 +39,7 @@ const { recentProjects } = useRecentProjects()
 }
 .recent-projects-label {
   font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .08em; color: rgba(200,213,226,.4);
+  letter-spacing: .08em; color: rgba(228, 228, 231,.4);
   padding: 0 .65rem; margin-bottom: .2rem;
 }
 .recent-project-item {
@@ -48,7 +48,7 @@ const { recentProjects } = useRecentProjects()
   cursor: pointer; transition: background .12s, color .12s;
   font-size: 12px; color: #8fa7be; overflow: hidden;
 }
-.recent-project-item:hover { background: color-mix(in srgb, var(--brand-blue) 12%, transparent); color: var(--sidebar-text, #c8d5e2); }
+.recent-project-item:hover { background: color-mix(in srgb, var(--brand-blue) 12%, transparent); color: var(--sidebar-text, #e4e4e7); }
 .recent-project-item--active { background: color-mix(in srgb, var(--brand-blue) 18%, transparent); color: #fff; }
 .recent-project-item--collapsed { justify-content: center; padding-left: 0; padding-right: 0; gap: 0; }
 .rp-name {

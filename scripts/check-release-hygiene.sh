@@ -31,6 +31,10 @@ if ! "$ROOT/scripts/check-knowledge-freshness.sh"; then
   fail=1
 fi
 
+if ! "$ROOT/scripts/check-branding-hygiene.sh"; then
+  fail=1
+fi
+
 if grep -qF "paimos-site" scripts/release-doc-sync.sh docs/DEPLOY.md Justfile; then
   echo "release hygiene: doc-sync still points at the retired paimos-site repo" >&2
   fail=1

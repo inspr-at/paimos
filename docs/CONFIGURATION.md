@@ -593,15 +593,15 @@ edit under the brand you want to change.
   "logo": "/logo.svg",
   "favicon": "/favicon.svg",
   "colors": {
-    "primary": "#2e6da4",
-    "primaryDark": "#1f4d75",
-    "primaryLight": "#4a8fc2",
-    "primaryPale": "#dce9f4",
+    "primary": "#52525b",
+    "primaryDark": "#3f3f46",
+    "primaryLight": "#a1a1aa",
+    "primaryPale": "#f4f4f5",
     "accent": "#16a34a",
-    "sidebarBg": "#1a2d42",
-    "sidebarText": "#c8d5e2",
-    "loginBg": "#1a2d42",
-    "loginPattern": "#243650"
+    "sidebarBg": "#18181b",
+    "sidebarText": "#e4e4e7",
+    "loginBg": "#18181b",
+    "loginPattern": "#27272a"
   },
   "pageTitle": "PAIMOS",
   "contractor": [

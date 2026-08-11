@@ -1001,7 +1001,7 @@ function relTime(iso: string): string {
      deliberately tiny — anything bigger would read as decorative
      noise and clash with the rest of the admin surface. */
   background:
-    radial-gradient(circle at 1px 1px, rgba(46, 109, 164, .14) 1px, transparent 1.4px),
+    radial-gradient(circle at 1px 1px, rgba(82, 82, 91, .14) 1px, transparent 1.4px),
     linear-gradient(135deg, var(--brand-blue-pale) 0%, transparent 70%),
     var(--bg-card);
   background-size: 14px 14px, 100% 100%, 100% 100%;
@@ -1016,7 +1016,7 @@ function relTime(iso: string): string {
   border: 1px solid var(--border);
   border-radius: 12px;
   color: var(--brand-blue-dark);
-  filter: drop-shadow(0 4px 10px rgba(46, 109, 164, .14));
+  filter: drop-shadow(0 4px 10px rgba(82, 82, 91, .14));
 }
 .ai-hero-iconwrap :deep(svg) { animation: ai-sparkle-pulse 3.6s ease-in-out infinite; }
 @keyframes ai-sparkle-pulse {
@@ -1360,12 +1360,12 @@ function relTime(iso: string): string {
 .ai-preset:hover {
   border-color: var(--brand-blue-light);
   transform: translateY(-1px);
-  box-shadow: 0 4px 10px rgba(46, 109, 164, .07);
+  box-shadow: 0 4px 10px rgba(82, 82, 91, .07);
 }
 .ai-preset--active {
   border-color: var(--brand-blue) !important;
   background: var(--brand-blue-pale) !important;
-  box-shadow: 0 4px 12px rgba(46, 109, 164, .14) !important;
+  box-shadow: 0 4px 12px rgba(82, 82, 91, .14) !important;
 }
 .ai-preset-row {
   display: flex; align-items: center; justify-content: space-between;

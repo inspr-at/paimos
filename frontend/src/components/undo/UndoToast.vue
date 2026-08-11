@@ -53,11 +53,11 @@ const toast = computed(() => undo.toast);
   width: min(420px, calc(100vw - 32px));
   padding: 0.95rem 1rem;
   border-radius: 18px;
-  border: 1px solid rgba(46, 109, 164, 0.15);
+  border: 1px solid rgba(82, 82, 91, 0.15);
   background:
     radial-gradient(
       circle at top right,
-      rgba(46, 109, 164, 0.16),
+      rgba(82, 82, 91, 0.16),
       transparent 38%
     ),
     linear-gradient(

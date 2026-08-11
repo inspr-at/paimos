@@ -62,10 +62,10 @@ const iconName = computed(() => (failed.value ? 'alert-circle' : phase.value ===
   align-items: flex-start;
   gap: .65rem;
   padding: .7rem .85rem;
-  border: 1px solid rgba(46, 109, 164, .22);
+  border: 1px solid rgba(82, 82, 91, .22);
   border-radius: 10px;
   background:
-    linear-gradient(180deg, rgba(220, 233, 244, .65), rgba(255,255,255,.95)),
+    linear-gradient(180deg, rgba(244, 244, 245, .65), rgba(255,255,255,.95)),
     var(--bg-card);
   box-shadow: 0 8px 24px rgba(30, 50, 80, .08);
 }
@@ -103,14 +103,14 @@ const iconName = computed(() => (failed.value ? 'alert-circle' : phase.value ===
 .aux-act-phase {
   padding: .12rem .35rem;
   border-radius: 999px;
-  background: rgba(46, 109, 164, .1);
+  background: rgba(82, 82, 91, .1);
   color: var(--brand-blue-dark);
 }
 .aux-act-sweep {
   height: 2px;
   margin-top: .5rem;
   border-radius: 999px;
-  background: linear-gradient(90deg, transparent, rgba(46, 109, 164, .65), transparent);
+  background: linear-gradient(90deg, transparent, rgba(82, 82, 91, .65), transparent);
   background-size: 140px 2px;
   animation: aux-act-sweep 1.4s cubic-bezier(.2, .7, .1, 1) infinite;
 }

@@ -442,7 +442,7 @@ function fmtRate(v: number | null | undefined): string {
 }
 .cv-search:focus-within {
   border-color: var(--brand-blue);
-  box-shadow: 0 0 0 3px rgba(46,109,164,.15);
+  box-shadow: 0 0 0 3px rgba(82, 82, 91,.15);
 }
 .cv-search input {
   flex: 1; border: none; outline: none; background: transparent;

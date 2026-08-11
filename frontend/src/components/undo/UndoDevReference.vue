@@ -254,7 +254,7 @@ const scenarios: Array<{
   background:
     radial-gradient(
       circle at top left,
-      rgba(46, 109, 164, 0.12),
+      rgba(82, 82, 91, 0.12),
       transparent 32%
     ),
     linear-gradient(180deg, #f5f8fb, #eef3f8);
@@ -289,7 +289,7 @@ const scenarios: Array<{
   text-align: left;
   padding: 1.15rem;
   border-radius: 18px;
-  border: 1px solid rgba(46, 109, 164, 0.14);
+  border: 1px solid rgba(82, 82, 91, 0.14);
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 18px 44px rgba(30, 50, 80, 0.08);
 }

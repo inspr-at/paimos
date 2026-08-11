@@ -125,7 +125,7 @@ function isActive(path: string) {
 }
 .logout-btn svg { width: 14px; height: 14px; }
 .logout-label { font-size: 11px; font-weight: 500; letter-spacing: .02em; }
-.logout-btn:hover { color: var(--sidebar-text, #c8d5e2); background: rgba(255,255,255,.06); }
+.logout-btn:hover { color: var(--sidebar-text, #e4e4e7); background: rgba(255,255,255,.06); }
 
 /* ── Footer ──────────────────────────────────────────────────────────────── */
 .sidebar-footer {

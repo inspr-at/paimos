@@ -17,10 +17,10 @@ acronym.
 
 ### Origin
 
-The name evolved from **PMO** ("Project Management Online") — the working
-title that originally described the project. PAIMOS extends PMO by the
-element that now defines the tool: **AI** as an integral part rather than
-an add-on. The `O` stays consistent: it's still the "Online" from PMO.
+The name evolved from an early working title that described the product as
+online project management. PAIMOS adds the element that now defines the tool:
+**AI** as an integral part rather than an add-on. The `O` continues to stand
+for "Online".
 
 ### What PAIMOS is not
 
@@ -485,8 +485,8 @@ and stay deferred until they're earned in their own right.
 
 ## References
 
-- Origin of the name: conversation from April 2026, evolved from PMO
-  through PAIMO to PAIMOS
+- Origin of the name: conversation from April 2026, evolved through PAIMO
+  to PAIMOS
 - Visual concept: triple-P monogram, derived from the acronym resolution
 - Phonetic model: Greek `-os` ending (Kairos, Kosmos, Pathos)
 - Positioning references: Linear (dev focus), Notion (personal/pro
