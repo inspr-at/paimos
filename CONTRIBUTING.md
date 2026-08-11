@@ -111,7 +111,8 @@ deletion are blocked. Zero approving reviews are required because PAIMOS is
 currently maintained by one person; the pull request and hosted gates provide
 the durable review trail without pretending that an author can independently
 approve their own change. Enable auto-merge and let the gates complete instead
-of merging around pending jobs.
+of merging around pending jobs. The live policy is publicly inspectable as
+[ruleset 20708526](https://github.com/inspr-at/paimos/rules/20708526).
 
 Repository administrators have a **pull-request-only** bypass for break-glass
 recovery. It is reserved for an incident or a broken required-check mechanism,
