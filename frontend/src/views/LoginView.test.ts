@@ -48,7 +48,7 @@ vi.mock("@/composables/useBranding", () => ({
 }));
 
 vi.mock("@/composables/useSidebarColors", () => ({
-  useSidebarColors: () => ({ bgColor: { value: "#fff" }, patternColor: { value: "#000" } }),
+  useSidebarColors: () => ({ bgColor: { value: "#fff" }, patternImage: { value: "none" } }),
 }));
 
 vi.mock("@/components/AppIcon.vue", () => ({

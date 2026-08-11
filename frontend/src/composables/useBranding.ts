@@ -39,6 +39,10 @@ import {
 } from '@/constants/storage'
 import { applyTypeColorsToDOM } from './useTypeColors'
 import { applyTableAppearanceToDOM } from './useTableAppearance'
+import {
+  isBackgroundPattern,
+  type BackgroundPattern,
+} from './backgroundPattern'
 
 export interface BrandingConfig {
   name: string
@@ -48,6 +52,7 @@ export interface BrandingConfig {
   website: string
   logo: string
   favicon: string
+  backgroundPattern: BackgroundPattern
   colors: {
     primary: string
     primaryDark: string
@@ -83,6 +88,7 @@ const defaults: BrandingConfig = {
   website: 'https://paimos.com',
   logo: '/logo.png',
   favicon: '/favicon.png',
+  backgroundPattern: 'triangle',
   colors: {
     primary: '#52525b',
     primaryDark: '#3f3f46',
@@ -165,6 +171,9 @@ async function fetchAndApply(): Promise<void> {
     if (resp.ok) {
       const data = await resp.json()
       const merged = { ...defaults, ...data, colors: { ...defaults.colors, ...data.colors } }
+      merged.backgroundPattern = isBackgroundPattern(data.backgroundPattern)
+        ? data.backgroundPattern
+        : defaults.backgroundPattern
       // PAI-736: `name` and `product` are one identity that the server
       // derives from a single BRAND_PRODUCT_NAME. A hand-written
       // branding.json often sets only one of them, and the shallow

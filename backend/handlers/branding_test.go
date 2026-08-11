@@ -37,9 +37,13 @@ func Test_GetBranding_DefaultPaletteIsNeutral(t *testing.T) {
 	assertStatus(t, resp, http.StatusOK)
 
 	var got struct {
-		Colors map[string]string `json:"colors"`
+		Colors            map[string]string `json:"colors"`
+		BackgroundPattern string            `json:"backgroundPattern"`
 	}
 	decode(t, resp, &got)
+	if got.BackgroundPattern != "triangle" {
+		t.Errorf("default backgroundPattern = %q, want triangle", got.BackgroundPattern)
+	}
 	want := map[string]string{
 		"primary":      "#52525b",
 		"primaryDark":  "#3f3f46",
@@ -118,6 +122,31 @@ func Test_PutBranding_BadWebsite(t *testing.T) {
 	ts := newTestServer(t)
 	resp := ts.put(t, "/api/branding", ts.adminCookie, map[string]any{
 		"website": "ftp://acme.example",
+	})
+	assertStatus(t, resp, http.StatusBadRequest)
+}
+
+func Test_PutBranding_BackgroundPattern(t *testing.T) {
+	ts := newTestServer(t)
+	resp := ts.put(t, "/api/branding", ts.adminCookie, map[string]any{
+		"name":              "Pattern Test",
+		"backgroundPattern": "lines",
+	})
+	assertStatus(t, resp, http.StatusOK)
+
+	resp = ts.get(t, "/api/branding", "")
+	assertStatus(t, resp, http.StatusOK)
+	var got map[string]any
+	decode(t, resp, &got)
+	if got["backgroundPattern"] != "lines" {
+		t.Errorf("backgroundPattern = %v, want lines", got["backgroundPattern"])
+	}
+}
+
+func Test_PutBranding_BadBackgroundPattern(t *testing.T) {
+	ts := newTestServer(t)
+	resp := ts.put(t, "/api/branding", ts.adminCookie, map[string]any{
+		"backgroundPattern": "circles",
 	})
 	assertStatus(t, resp, http.StatusBadRequest)
 }

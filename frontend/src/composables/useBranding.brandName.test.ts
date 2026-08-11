@@ -135,3 +135,25 @@ describe("neutral default palette (PAI-737)", () => {
     expect(branding.value.colors.primaryDark).toBe("#3f3f46");
   });
 });
+
+describe("background pattern branding (PAI-738)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("uses triangle for a new or older branding document", async () => {
+    const { branding } = await withBrandingDoc({ name: "PMA" });
+    expect(branding.value.backgroundPattern).toBe("triangle");
+  });
+
+  it("keeps a configured supported pattern", async () => {
+    const { branding } = await withBrandingDoc({ backgroundPattern: "lines" });
+    expect(branding.value.backgroundPattern).toBe("lines");
+  });
+
+  it("falls back safely when a hand-edited document has an unknown pattern", async () => {
+    const { branding } = await withBrandingDoc({ backgroundPattern: "circles" });
+    expect(branding.value.backgroundPattern).toBe("triangle");
+  });
+});

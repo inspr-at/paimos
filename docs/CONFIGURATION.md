@@ -592,6 +592,7 @@ edit under the brand you want to change.
   "website": "https://paimos.com",
   "logo": "/logo.svg",
   "favicon": "/favicon.svg",
+  "backgroundPattern": "triangle",
   "colors": {
     "primary": "#52525b",
     "primaryDark": "#3f3f46",
@@ -612,6 +613,10 @@ edit under the brand you want to change.
   ]
 }
 ```
+
+`backgroundPattern` controls the shared login and sidebar texture. Supported
+values are `triangle` (the default), `square`, `hex`, `lines`, and `none`.
+Admins can preview and change it under **Settings → Branding**.
 
 `contractor` (PAI-686) is the legal-identity block printed as the
 "Auftragnehmer" party on report PDFs, one line per array entry (max 10).

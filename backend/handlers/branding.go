@@ -44,6 +44,7 @@ func defaultBrandingJSON() []byte {
   "website": %q,
   "logo": "/logo.svg",
   "favicon": "/favicon.svg",
+  "backgroundPattern": "triangle",
   "colors": {
     "primary": "#52525b",
     "primaryDark": "#3f3f46",
@@ -168,15 +169,16 @@ func ListBrandings(w http.ResponseWriter, r *http.Request) {
 // missing fields are filled from the defaults. Colors is a map rather than a
 // fixed struct so operators can add new palette keys without a backend bump.
 type brandingPayload struct {
-	Name      string            `json:"name"`
-	Company   string            `json:"company"`
-	Product   string            `json:"product"`
-	Tagline   string            `json:"tagline"`
-	Website   string            `json:"website"`
-	Logo      string            `json:"logo"`
-	Favicon   string            `json:"favicon"`
-	Colors    map[string]string `json:"colors"`
-	PageTitle string            `json:"pageTitle"`
+	Name              string            `json:"name"`
+	Company           string            `json:"company"`
+	Product           string            `json:"product"`
+	Tagline           string            `json:"tagline"`
+	Website           string            `json:"website"`
+	Logo              string            `json:"logo"`
+	Favicon           string            `json:"favicon"`
+	BackgroundPattern string            `json:"backgroundPattern,omitempty"`
+	Colors            map[string]string `json:"colors"`
+	PageTitle         string            `json:"pageTitle"`
 	// Contractor is the operator's legal-identity block printed as the
 	// "Auftragnehmer" party on report PDFs, one line per entry (PAI-686).
 	// Served publicly via GET /api/branding — imprint-grade data only.
@@ -185,10 +187,21 @@ type brandingPayload struct {
 
 var hexColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
+var validBackgroundPatterns = map[string]bool{
+	"triangle": true,
+	"square":   true,
+	"hex":      true,
+	"lines":    true,
+	"none":     true,
+}
+
 // validateBrandingPayload returns a non-empty error message if the payload
 // has obviously bad values. Keeps validation light — the UI is admin-only,
 // so we're guarding against typos, not attackers.
 func validateBrandingPayload(p *brandingPayload) string {
+	if p.BackgroundPattern != "" && !validBackgroundPatterns[p.BackgroundPattern] {
+		return "backgroundPattern: must be triangle, square, hex, lines, or none"
+	}
 	for k, v := range p.Colors {
 		if v == "" {
 			continue
@@ -275,15 +288,15 @@ var logoMimeTypes = map[string]string{
 }
 
 var faviconMimeTypes = map[string]string{
-	"image/svg+xml":      "svg",
-	"image/png":          "png",
-	"image/x-icon":       "ico",
+	"image/svg+xml":            "svg",
+	"image/png":                "png",
+	"image/x-icon":             "ico",
 	"image/vnd.microsoft.icon": "ico",
 }
 
 const (
-	logoMaxBytes    = 1 << 20       // 1 MiB
-	faviconMaxBytes = 256 * 1024    // 256 KiB
+	logoMaxBytes    = 1 << 20    // 1 MiB
+	faviconMaxBytes = 256 * 1024 // 256 KiB
 )
 
 // uploadBrandingAsset is the shared body of the logo + favicon upload
