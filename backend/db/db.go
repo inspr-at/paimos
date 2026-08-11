@@ -431,7 +431,7 @@ func migrate(db *sql.DB) error {
 		// projects: the existing status column has CHECK(status IN ('active','archived')).
 		// SQLite does not support ALTER TABLE ... MODIFY COLUMN, so we recreate the
 		// table without the restrictive CHECK and migrate all data. Application logic
-		// enforces valid values (active / archived / deleted).
+		// enforces valid values (active / frozen / archived / deleted).
 		//
 		// IMPORTANT: We MUST disable foreign_keys before dropping projects_old,
 		// otherwise the ON DELETE CASCADE on issues.project_id would wipe all issues.
@@ -1308,7 +1308,7 @@ func migrate(db *sql.DB) error {
 			// SQLite doesn't support ALTER TABLE ADD CONSTRAINT.
 			// Instead we enforce via app logic (already done) — document the expected
 			// values here via comments in this migration for future reference.
-			// projects.status: active | archived | deleted
+			// projects.status: active | frozen | archived | deleted
 			// users.status:    active | inactive | deleted
 			// (Full table recreation not worth it — no data enforcement gap in practice)
 
@@ -5590,6 +5590,29 @@ func migrate(db *sql.DB) error {
 			`ALTER TABLE agent_runs ADD COLUMN branch_name TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE agent_runs ADD COLUMN commit_base_sha TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE agent_runs ADD COLUMN commit_sha TEXT NOT NULL DEFAULT ''`,
+		}},
+
+		// M141 / PAI-754: make the project lifecycle creation gate a storage
+		// invariant as well as a handler check. The handler provides the normal
+		// clear 409 response; these triggers close the race where a project is
+		// frozen/archived/deleted between that check and the INSERT, and protect
+		// less common issue-producing paths from bypassing lifecycle policy.
+		{141, []string{
+			`CREATE TRIGGER IF NOT EXISTS trg_issues_reject_frozen_project
+				BEFORE INSERT ON issues
+				WHEN NEW.project_id IS NOT NULL
+				 AND (SELECT status FROM projects WHERE id=NEW.project_id) = 'frozen'
+				BEGIN SELECT RAISE(ABORT, 'project is frozen; new issues are disabled'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_issues_reject_archived_project
+				BEFORE INSERT ON issues
+				WHEN NEW.project_id IS NOT NULL
+				 AND (SELECT status FROM projects WHERE id=NEW.project_id) = 'archived'
+				BEGIN SELECT RAISE(ABORT, 'project is archived; new issues are disabled'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_issues_reject_deleted_project
+				BEFORE INSERT ON issues
+				WHEN NEW.project_id IS NOT NULL
+				 AND (SELECT status FROM projects WHERE id=NEW.project_id) = 'deleted'
+				BEGIN SELECT RAISE(ABORT, 'project is deleted; new issues are disabled'); END`,
 		}},
 	}
 

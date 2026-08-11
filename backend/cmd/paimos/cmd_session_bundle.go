@@ -784,7 +784,7 @@ func upstreamClientFor(c *Client, upstreamURL string) (*Client, error) {
 // keyed by key instead of id — the cross-instance pull path knows
 // the key from related_projects[] but not the upstream's id.
 func resolveProjectKeyToIDOnInstance(c *Client, key string) (int64, error) {
-	body, err := c.do("GET", "/api/projects", nil)
+	body, err := c.do("GET", "/api/projects?status=all", nil)
 	if err != nil {
 		return 0, err
 	}

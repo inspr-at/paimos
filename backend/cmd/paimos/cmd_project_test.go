@@ -8,12 +8,85 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestProjectListLifecycleFilters(t *testing.T) {
+	var queries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":6,"key":"PAI","name":"PAIMOS","status":"frozen"}]`))
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	out, _, err := executeCLIForTest(t, "project", "list", "--all")
+	if err != nil {
+		t.Fatalf("project list --all: %v", err)
+	}
+	if len(queries) != 1 || queries[0] != "status=all" {
+		t.Fatalf("queries = %v, want status=all", queries)
+	}
+	if !strings.Contains(out, "STATUS") || !strings.Contains(out, "frozen") {
+		t.Fatalf("lifecycle output missing status: %s", out)
+	}
+}
+
+func TestProjectUpdateLifecycleByKey(t *testing.T) {
+	var gotStatus string
+	var handlerErr string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
+			if r.URL.Query().Get("status") != "all" {
+				handlerErr = "project resolution did not include non-active states"
+			}
+			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI","name":"PAIMOS","status":"active"}]`))
+		case r.Method == http.MethodPut && r.URL.Path == "/api/projects/6":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				handlerErr = err.Error()
+			}
+			gotStatus = body["status"]
+			_, _ = w.Write([]byte(`{"id":6,"key":"PAI","name":"PAIMOS","status":"frozen"}`))
+		default:
+			handlerErr = fmt.Sprintf("unexpected request %s %s", r.Method, r.URL.String())
+			http.Error(w, `{"error":"unexpected request"}`, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	out, _, err := executeCLIForTest(t, "project", "update", "PAI", "--status", "FROZEN")
+	if err != nil {
+		t.Fatalf("project update: %v", err)
+	}
+	if handlerErr != "" {
+		t.Fatal(handlerErr)
+	}
+	if gotStatus != "frozen" {
+		t.Fatalf("status = %q, want frozen", gotStatus)
+	}
+	if !strings.Contains(out, "PAI is now frozen") {
+		t.Fatalf("pretty output = %q", out)
+	}
+}
+
+func TestProjectUpdateRejectsUnknownLifecycle(t *testing.T) {
+	_, _, err := executeCLIForTest(t, "project", "update", "PAI", "--status", "paused")
+	if err == nil || !strings.Contains(err.Error(), "active, frozen, archived, or deleted") {
+		t.Fatalf("error = %v", err)
+	}
+}
 
 func TestProjectShowResolvesKeyAndNumericID(t *testing.T) {
 	for _, projectRef := range []string{"PAI", "6"} {

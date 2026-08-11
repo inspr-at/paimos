@@ -50,6 +50,9 @@ func CreateIntakeIssue(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
 		return
 	}
+	if !requireProjectAcceptsNewIssues(w, projectID) {
+		return
+	}
 	user := auth.GetUser(r)
 	if user == nil {
 		jsonError(w, "unauthenticated", http.StatusUnauthorized)

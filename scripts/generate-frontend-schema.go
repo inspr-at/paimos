@@ -31,6 +31,8 @@ func main() {
 
 	writeConst(&b, "ISSUE_STATUSES", handlers.Schema.Enums["status"])
 	fmt.Fprintln(&b, "export type IssueStatus = typeof ISSUE_STATUSES[number]\n")
+	writeConst(&b, "PROJECT_STATUSES", handlers.Schema.Enums["project_status"])
+	fmt.Fprintln(&b, "export type ProjectStatus = typeof PROJECT_STATUSES[number]\n")
 	writeConst(&b, "ISSUE_PRIORITIES", handlers.Schema.Enums["priority"])
 	fmt.Fprintln(&b, "export type IssuePriority = typeof ISSUE_PRIORITIES[number]\n")
 	writeConst(&b, "ISSUE_TYPES", handlers.Schema.Enums["type"])

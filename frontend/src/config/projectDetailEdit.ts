@@ -1,11 +1,11 @@
 import { formatCurrency } from '@/composables/useNumberFormat'
-import type { Customer, Project, ProjectAIDefaults, ProjectAIDefaultSet } from '@/types'
+import type { Customer, Project, ProjectAIDefaults, ProjectAIDefaultSet, ProjectStatus } from '@/types'
 
 export interface ProjectEditForm {
   name: string
   key: string
   description: string
-  status: 'active' | 'archived' | 'deleted'
+  status: ProjectStatus
   product_owner: number | null
   customer_label: string
   customer_id: number | null

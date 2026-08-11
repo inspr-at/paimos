@@ -490,7 +490,7 @@ func selectResources(reg *sync.Registry, kind string) ([]sync.Resource, error) {
 // already has resolveProjectID for the inverse direction; this small
 // helper rounds out the pair.
 func resolveProjectKey(client *Client, projectID int64) (string, error) {
-	body, err := client.do("GET", "/api/projects", nil)
+	body, err := client.do("GET", "/api/projects?status=all", nil)
 	if err != nil {
 		return "", err
 	}

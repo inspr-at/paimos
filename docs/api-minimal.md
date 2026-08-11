@@ -38,10 +38,10 @@ until they POST a new password.
 ## Projects
 
 ```
-GET    /projects                    ?status=active|archived
+GET    /projects                    ?status=active|frozen|archived|deleted|all (default active; all excludes deleted)
 POST   /projects                    {name, key, description}
 GET    /projects/:id
-PUT    /projects/:id                partial update
+PUT    /projects/:id                partial update; status=active|frozen|archived|deleted
 DELETE /projects/:id                admin only
 GET    /projects/:id/repos
 POST   /projects/:id/repos          {url, default_branch, label, sort_order}
@@ -53,6 +53,20 @@ POST   /projects/:id/anchors        {repo_id, schema_version, repo_revision, gen
 GET    /projects/:id/graph          ?root=issue:42&depth=2
 GET    /projects/:id/graph/blast-radius ?issue=PAI-79&depth=3
 POST   /projects/:id/retrieve       {q, k}
+```
+
+Project lifecycle is operational, not decorative: only `active` projects
+accept new issues (including clones, batch creates, intake filing, and issue
+moves into the project). `frozen` preserves reads and edits to existing work;
+`archived` is the retired state; `deleted` is the existing trash state.
+
+CLI equivalents:
+
+```
+paimos project list                         # active only
+paimos project list --all                   # active + frozen + archived
+paimos project list --status frozen
+paimos project update PAI --status frozen
 ```
 
 ## Issues

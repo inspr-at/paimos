@@ -283,6 +283,9 @@ func MoveIssue(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "no edit access to the target project", http.StatusForbidden)
 		return
 	}
+	if !requireProjectAcceptsNewIssues(w, targetProjectID) {
+		return
+	}
 
 	result, status, err := runMove(r, id, targetProjectID)
 	if err != nil {
@@ -317,6 +320,9 @@ func MoveIssuesBulk(w http.ResponseWriter, r *http.Request) {
 	}
 	if !authorizeMoveTarget(r, body.ProjectID) {
 		jsonError(w, "no edit access to the target project", http.StatusForbidden)
+		return
+	}
+	if !requireProjectAcceptsNewIssues(w, body.ProjectID) {
 		return
 	}
 

@@ -190,7 +190,7 @@ export function saveProjectDetail(projectId: number, payload: Record<string, unk
   return api.put<Project>(`/projects/${projectId}`, payload)
 }
 
-export function setProjectStatus(projectId: number, status: 'active' | 'archived'): Promise<Project> {
+export function setProjectStatus(projectId: number, status: 'active' | 'frozen' | 'archived'): Promise<Project> {
   return api.put<Project>(`/projects/${projectId}`, { status })
 }
 

@@ -153,6 +153,9 @@ func CreateIssuesBatch(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "unknown project", http.StatusNotFound)
 		return
 	}
+	if !requireProjectAcceptsNewIssues(w, projectID) {
+		return
+	}
 
 	var items []BatchCreateItem
 	if err := json.NewDecoder(r.Body).Decode(&items); err != nil {

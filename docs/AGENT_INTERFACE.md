@@ -597,8 +597,9 @@ The server publishes a single source of truth at `GET /api/schema`. The CLI cach
 ```sh
 $ paimos schema
 instance: ppm (https://pm.barta.cm)
-version:  2.0.0
+version:  2.1.0
 enum priority: low, medium, high
+enum project_status: active, frozen, archived, deleted
 enum relation: parent, cost_unit, release, groups, sprint, depends_on, impacts, follows_from, blocks, related, applies_to_memory
 enum status:   new, backlog, in-progress, qa, done, delivered, accepted, invoiced, cancelled
 enum type:     epic, cost_unit, release, sprint, ticket, task
@@ -643,6 +644,25 @@ paimos project create --name "My new project" --key MYP
 
 The narrowed key cannot do anything else — it can't create issues, list
 private boards, etc. It is exactly "create projects, and only that".
+
+### Project lifecycle (PAI-754)
+
+Project selection defaults to live work: `GET /api/projects` and
+`paimos project list` return `active` projects only. Explicit project
+references still resolve frozen and archived projects so existing work remains
+reachable.
+
+```sh
+paimos project list --all
+paimos project update GSC26 --status archived
+paimos project update AGM --status frozen
+```
+
+`active` accepts new issues. `frozen` keeps existing issues editable but
+rejects direct, batch, clone, intake, and move-in creation with `409` and a
+message naming the state. `archived` is retired and rejects new issues;
+`deleted` remains the soft-delete trash state. Agents must not work around the
+gate by writing directly to storage or choosing another project.
 
 ---
 

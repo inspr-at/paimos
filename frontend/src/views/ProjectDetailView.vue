@@ -81,6 +81,7 @@ import { fmtRelative } from '@/utils/formatTime'
 const { confirm } = useConfirm()
 const PROJECT_STATUS_OPTIONS: MetaOption[] = [
   { value: 'active', label: 'Active' },
+  { value: 'frozen', label: 'Frozen — existing work only' },
   { value: 'archived', label: 'Archived' },
   { value: 'deleted', label: 'Deleted' },
 ]

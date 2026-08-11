@@ -20,6 +20,7 @@ import type {
   IssueStatus,
   IssueType,
   KnowledgeStatus,
+  ProjectStatus,
   RelationType,
 } from './types/generated/schema'
 
@@ -30,6 +31,7 @@ export {
   ISSUE_TYPES,
   KNOWLEDGE_STATUSES,
   KNOWLEDGE_TYPES,
+  PROJECT_STATUSES,
   RELATION_TYPES,
   TAG_COLORS,
 } from './types/generated/schema'
@@ -38,6 +40,7 @@ export type {
   IssueStatus,
   IssueType,
   KnowledgeStatus,
+  ProjectStatus,
   KnowledgeType,
   RelationType,
   TagColor,
@@ -272,7 +275,7 @@ export interface Project {
   name: string
   key: string
   description: string
-  status: 'active' | 'archived' | 'deleted'
+  status: ProjectStatus
   product_owner: number | null
   // PAI-54: customer_label is the freeform legacy text; customer_id is
   // the FK into the customers table (PAI-53). Both nullable.
