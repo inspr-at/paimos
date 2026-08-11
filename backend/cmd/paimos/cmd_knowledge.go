@@ -123,6 +123,12 @@ func knowledgeListCmd() *cobra.Command {
 ordered by (type, slug). With --type, narrows to one kind. Without,
 returns the cross-type view — useful for an at-a-glance "what does
 this project know" enumeration.`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return &usageError{msg: "knowledge list accepts no positional arguments; use --type <type> to filter"}
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectRef = strings.TrimSpace(projectRef)
 			if projectRef == "" {

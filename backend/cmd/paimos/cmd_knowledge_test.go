@@ -137,6 +137,34 @@ func TestKnowledgeList_BuildsFilteredURL(t *testing.T) {
 	}
 }
 
+// TestKnowledgeList_RejectsPositionalType guards the original PAI-760
+// failure mode: a positional-looking type must not be silently ignored and
+// turned into an unfiltered inventory. The supported filter is --type.
+func TestKnowledgeList_RejectsPositionalType(t *testing.T) {
+	_, mu, reqs := startKnowledgeFakeAPI(t)
+
+	_, _, err := executeCLIForTest(t,
+		"knowledge", "list", "runbook",
+		"--project", "KNW",
+		"--json",
+	)
+	if err == nil {
+		t.Fatal("expected positional type to fail, got nil")
+	}
+	if _, ok := err.(*usageError); !ok {
+		t.Fatalf("err type=%T, want *usageError (%v)", err, err)
+	}
+	if !strings.Contains(err.Error(), "use --type") {
+		t.Errorf("error = %q, want --type guidance", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*reqs) != 0 {
+		t.Errorf("network was hit before positional-argument rejection: %+v", *reqs)
+	}
+}
+
 // TestKnowledgeCreate_BuildsCreateURL asserts the POST lands at
 // /api/projects/{id}/knowledge?type=<seg> with the body shape
 // (slug, title, body, optional status). The fallback path
