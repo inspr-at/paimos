@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.18] — 2026-08-11
+
+### Added — Reproducible seeded product walkthroughs (PAI-696)
+
+- Fresh development workspaces now turn PAI-1 into a complete issue-to-agent example with realistic description, acceptance criteria, notes, report copy, estimates, actuals, Jira reference, relation-backed cost unit and release, and two completed time entries.
+- Re-seeding fills only missing synthetic fields, preserves local fixture edits and existing labels, avoids duplicate time entries or containers, and keeps project issue-number allocation ahead of the added containers.
+- The deterministic capture workflow and responsive visual baseline now verify that the seeded issue detail renders without empty body, metadata, or time placeholders.
+
 ## [5.8.17] — 2026-08-11
 
 ### Added — Project lifecycle states enforce where new work may begin (PAI-754)
