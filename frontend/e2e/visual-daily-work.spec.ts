@@ -186,6 +186,10 @@ for (const viewport of VIEWPORTS) {
       const issueRef = issue.issue_key ?? issue.key ?? String(issue.id)
 
       await gotoAndSettle(page, `/projects/${pai.id}/issues/${issueRef}`)
+      await expect(page.locator('.body-section .body-empty')).toHaveCount(0)
+      await expect(page.locator('.meta-grid')).not.toContainText('—')
+      await expect(page.locator('.te-bar-empty')).toHaveCount(0)
+      await expect(page.locator('.te-total')).toHaveText('3h')
       const workbench = page.locator('#ai-workbench')
       await expect(workbench).toBeVisible()
       await workbench.scrollIntoViewIfNeeded()
