@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.8.13] — 2026-08-11
+
+### Added — Admin-selectable shared background patterns (PAI-738)
+
+- Branding settings now offer triangle, square, hex, lines, or no texture, with triangle as the neutral default for new and older branding documents.
+- One renderer supplies the selected texture to login, password-recovery, sidebar, and appearance-preview surfaces, removing the duplicated legacy hex definitions.
+- The backend validates and persists the selection in `branding.json`, with unit, integration, and responsive visual coverage for the full choice set.
+
 ## [5.8.12] — 2026-08-11
 
 ### Fixed — Unbranded instances start from a neutral palette (PAI-737)
