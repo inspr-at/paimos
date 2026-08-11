@@ -24,6 +24,18 @@ permissions:
   attestations: write
 
 jobs:
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The DCO gate validates every commit introduced by the PR.
+          fetch-depth: 0
+
+      - name: Every PR commit carries its author's DCO sign-off
+        run: ./scripts/check-dco.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+
   test:
     # PAI-365: skip on tag pushes — the tag commit was already gated
     # by the main-branch run (release.sh always pushes main first,

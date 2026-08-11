@@ -103,6 +103,28 @@ git config core.hooksPath .githooks
 5. Push and open a PR. Describe **what changed and why** in the body;
    link the issue.
 
+### Protected `main` and break glass
+
+The active GitHub ruleset for `main` requires a pull request and successful
+`dco`, `test`, `e2e`, and `security-scan` checks. Force pushes and branch
+deletion are blocked. Zero approving reviews are required because PAIMOS is
+currently maintained by one person; the pull request and hosted gates provide
+the durable review trail without pretending that an author can independently
+approve their own change. Enable auto-merge and let the gates complete instead
+of merging around pending jobs.
+
+Repository administrators have a **pull-request-only** bypass for break-glass
+recovery. It is reserved for an incident or a broken required-check mechanism,
+not ordinary delivery. The administrator must still open a PR, explicitly
+choose GitHub's bypass action, record the reason in that PR and the relevant
+PAI issue, and repair or restore the normal gate in the same incident. Direct
+pushes to `main` are not a break-glass path.
+
+The `dco` job checks every commit introduced by a PR against its author's exact
+`Signed-off-by` trailer. GitHub web commits are configured to add sign-offs,
+and the repository's squash setting retains individual commit messages, so
+squash merging remains compatible with the DCO requirement.
+
 ## What makes a PR easier to review
 
 - Small and focused. A 50-line PR gets reviewed same-day; a 5,000-line
