@@ -6,6 +6,7 @@
   "website": "https://paimos.com",
   "logo": "/logo.svg",
   "favicon": "/favicon.svg",
+  "backgroundPattern": "triangle",
   "colors": {
     "primary": "#52525b",
     "primaryDark": "#3f3f46",

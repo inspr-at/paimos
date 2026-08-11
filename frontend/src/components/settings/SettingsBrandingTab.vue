@@ -12,6 +12,11 @@
 import { ref, reactive, computed, onMounted, type DeepReadonly } from 'vue'
 import { api, errMsg } from '@/api/client'
 import { useBranding, type BrandingConfig } from '@/composables/useBranding'
+import {
+  BACKGROUND_PATTERN_OPTIONS,
+  backgroundPatternImage,
+  type BackgroundPattern,
+} from '@/composables/backgroundPattern'
 
 const { branding, refresh } = useBranding()
 
@@ -125,6 +130,13 @@ const logoPreviewURL = computed(() =>
 const faviconPreviewURL = computed(() =>
   form.favicon ? `${form.favicon}${form.favicon.includes('?') ? '&' : '?'}v=${Date.now()}` : '',
 )
+
+function patternPreviewStyle(pattern: BackgroundPattern) {
+  return {
+    backgroundColor: form.colors.sidebarBg,
+    backgroundImage: backgroundPatternImage(pattern, form.colors.loginPattern),
+  }
+}
 </script>
 
 <template>
@@ -169,6 +181,30 @@ const faviconPreviewURL = computed(() =>
           Legal-identity block printed on report PDFs, one line per row. Empty = company name only.
           Served publicly via <code class="icode">/api/branding</code> — imprint-grade data only.
         </span>
+      </label>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <h2 class="section-title">Background pattern</h2>
+      <p class="section-desc">One shared texture for the login page and sidebar. Triangle is the neutral default.</p>
+    </div>
+    <div class="card pattern-grid" role="radiogroup" aria-label="Background pattern">
+      <label
+        v-for="option in BACKGROUND_PATTERN_OPTIONS"
+        :key="option.value"
+        class="pattern-option"
+        :class="{ 'pattern-option--selected': form.backgroundPattern === option.value }"
+      >
+        <input
+          v-model="form.backgroundPattern"
+          type="radio"
+          name="background-pattern"
+          :value="option.value"
+        />
+        <span class="pattern-preview" :style="patternPreviewStyle(option.value)" aria-hidden="true"></span>
+        <span class="pattern-label">{{ option.label }}</span>
       </label>
     </div>
   </div>
@@ -294,6 +330,41 @@ const faviconPreviewURL = computed(() =>
 .asset-controls { flex: 1; display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
 .url-input { padding: .35rem .55rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); color: var(--text); font-size: 12px; font-family: 'DM Mono', monospace; }
 .muted { font-size: 12px; color: var(--text-muted); }
+
+.pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: .75rem;
+}
+.pattern-option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  padding: .45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color .12s, box-shadow .12s;
+}
+.pattern-option:hover { border-color: var(--brand-blue-light); }
+.pattern-option--selected {
+  border-color: var(--brand-blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-blue) 18%, transparent);
+}
+.pattern-option input {
+  position: absolute;
+  top: .65rem;
+  right: .65rem;
+  accent-color: var(--brand-blue);
+}
+.pattern-preview {
+  display: block;
+  height: 76px;
+  border-radius: calc(var(--radius) - 2px);
+}
+.pattern-label { font-size: 12px; font-weight: 600; color: var(--text); }
 
 .palette-grid {
   display: grid;

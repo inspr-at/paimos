@@ -15,8 +15,9 @@
  * License along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useBranding } from './useBranding'
+import { backgroundPatternImage } from './backgroundPattern'
 import {
   LS_SIDEBAR_BG_COLOR      as LS_BG,
   LS_SIDEBAR_PATTERN_COLOR as LS_PAT,
@@ -57,5 +58,11 @@ export function resetSidebarToDefaults() {
 }
 
 export function useSidebarColors() {
-  return { bgColor, patternColor }
+  const { branding } = useBranding()
+  const backgroundPattern = computed(() => branding.value.backgroundPattern)
+  const patternImage = computed(() => backgroundPatternImage(
+    backgroundPattern.value,
+    patternColor.value,
+  ))
+  return { bgColor, patternColor, backgroundPattern, patternImage }
 }

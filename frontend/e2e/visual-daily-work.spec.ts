@@ -202,6 +202,19 @@ for (const viewport of VIEWPORTS) {
       await capture(page, `settings-users-${viewport.name}`)
     })
 
+    test(`settings branding patterns (${viewport.name})`, async ({ page, context }) => {
+      await devLogin(context.request)
+
+      await gotoAndSettle(page, '/settings?tab=appearance&section=branding')
+      const patternHeading = page.getByRole('heading', { name: 'Background pattern' })
+      const patternGrid = page.locator('.pattern-grid')
+      await expect(patternHeading).toBeVisible()
+      await expect(patternGrid.locator('.pattern-option')).toHaveCount(5)
+      await patternGrid.evaluate((element) => element.scrollIntoView({ block: 'center' }))
+      await page.waitForTimeout(250)
+      await capture(page, `settings-branding-patterns-${viewport.name}`)
+    })
+
     test(`customer detail (${viewport.name})`, async ({ page, context }) => {
       await devLogin(context.request)
       const customer = await firstCustomer(context)
