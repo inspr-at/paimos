@@ -5,6 +5,14 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.9.2] — 2026-08-17
+
+### Added — Safe CLI issue tag assignment (PAI-791)
+
+- `paimos issue create --tags` now assigns comma-separated or repeated existing catalog tags after preflighting the complete, deduplicated name set before issue creation.
+- `paimos issue update --add-tag` / `--remove-tag` apply idempotent association changes without replacing the issue's full tag set, reject contradictory intent before network access, and can accompany ordinary field updates.
+- Manual system-tag restrictions, network-free tag dry-runs, machine-readable contextual failures, retry-safe partial-operation reporting, CLI help, and operator examples now share one documented contract.
+
 ## [5.9.1] — 2026-08-17
 
 ### Fixed — Protected-main release automation (PAI-790)
