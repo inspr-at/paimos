@@ -83,20 +83,20 @@ assert_release_files_at() {
     fail "$commit does not carry VERSION=$version"
 
   content=$(git show "$commit:README.md")
-  printf '%s\n' "$content" | grep -qF "<code>v$version</code>" ||
+  grep -qF "<code>v$version</code>" <<<"$content" ||
     fail "$commit does not carry the v$version README badge"
 
   content=$(git show "$commit:docs/CHANGELOG.md")
-  printf '%s\n' "$content" | grep -qE "^## \[$version\] " ||
+  grep -qF "## [$version] — " <<<"$content" ||
     fail "$commit does not carry the $version changelog entry"
-  if printf '%s\n' "$content" | grep -qF 'TODO fill in before committing'; then
+  if grep -qF 'TODO fill in before committing' <<<"$content"; then
     fail "$commit still contains the unreviewed changelog placeholder"
   fi
 
   content=$(git show "$commit:docs/INSTALL.md")
-  [[ $(printf '%s\n' "$content" | grep -cF "VER=$version") -ge 2 ]] ||
+  [[ $(grep -cF "VER=$version" <<<"$content") -ge 2 ]] ||
     fail "$commit does not carry both pinned install examples for $version"
-  printf '%s\n' "$content" | grep -qE "paimos --version[[:space:]]+# $version" ||
+  grep -qE "paimos --version[[:space:]]+# $version" <<<"$content" ||
     fail "$commit does not carry the $version CLI smoke example"
 }
 
