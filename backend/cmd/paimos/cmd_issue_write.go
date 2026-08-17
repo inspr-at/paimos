@@ -216,7 +216,7 @@ Use --dry-run to print the request payload without hitting the API.`,
 	c.Flags().StringVar(&typ, "type", "", "epic|cost_unit|release|sprint|ticket|task (default ticket)")
 	c.Flags().StringVar(&status, "status", "", "initial status (default new)")
 	c.Flags().StringVar(&priority, "priority", "", "low|medium|high")
-	c.Flags().StringVar(&parent, "parent", "", "parent issue ref (key or id)")
+	c.Flags().StringVar(&parent, "parent", "", "parent issue ref (key or explicit id:<n>)")
 	c.Flags().StringVar(&assignee, "assignee", "", "assignee user id")
 	c.Flags().StringVar(&costUnit, "cost-unit", "", "cost unit name")
 	c.Flags().StringVar(&release, "release", "", "release name")
@@ -269,7 +269,7 @@ func issueUpdateCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "update <ref>",
 		Short: "Partial-update an issue",
-		Long: `Updates an issue by key or numeric id. Only the flags you pass
+		Long: `Updates an issue by key or explicit id:<n>. Only the flags you pass
 are written; everything else is left alone.
 
 When --status moves to a terminal state (done / delivered / accepted /
@@ -292,6 +292,10 @@ exits without creating anything.
 Use --dry-run to print the payload without sending.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			serverRef, err := normalizeCLIRequiredIssueRef(args[0])
+			if err != nil {
+				return err
+			}
 			client, err := instanceClient()
 			if err != nil {
 				return err
@@ -407,7 +411,7 @@ Use --dry-run to print the payload without sending.`,
 				out := map[string]any{
 					"dry_run": true,
 					"method":  "PUT",
-					"path":    "/api/issues/" + ref,
+					"path":    "/api/issues/" + serverRef,
 					"body":    body,
 				}
 				if closeNoteVal != "" {
@@ -416,7 +420,7 @@ Use --dry-run to print the payload without sending.`,
 				return emitJSON(out)
 			}
 
-			writeRef := ref
+			writeRef := serverRef
 			if closeNoteVal != "" {
 				issueID, err := resolveIssueRefToID(client, ref)
 				if err != nil {
@@ -479,7 +483,7 @@ Use --dry-run to print the payload without sending.`,
 	c.Flags().StringVar(&typ, "type", "", "new type")
 	c.Flags().StringVar(&status, "status", "", "new status")
 	c.Flags().StringVar(&priority, "priority", "", "new priority")
-	c.Flags().StringVar(&parent, "parent", "", "new parent (ref or id; detach is not supported server-side)")
+	c.Flags().StringVar(&parent, "parent", "", "new parent (key or explicit id:<n>; detach is not supported server-side)")
 	c.Flags().StringVar(&assignee, "assignee", "", "new assignee user id")
 	c.Flags().StringVar(&costUnit, "cost-unit", "", "new cost unit")
 	c.Flags().StringVar(&release, "release", "", "new release")
@@ -526,7 +530,11 @@ func issueEnsureStatusCmd() *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref, want := args[0], args[1]
-			var err error
+			serverRef, err := normalizeCLIRequiredIssueRef(ref)
+			if err != nil {
+				return err
+			}
+
 			want, err = normalizeEnumValue("issue.status", want)
 			if err != nil {
 				return err
@@ -536,7 +544,7 @@ func issueEnsureStatusCmd() *cobra.Command {
 				return err
 			}
 			// Get current state.
-			raw, err := client.do("GET", "/api/issues/"+url.PathEscape(ref), nil)
+			raw, err := client.do("GET", "/api/issues/"+url.PathEscape(serverRef), nil)
 			if err != nil {
 				return reportError(err)
 			}
@@ -550,7 +558,7 @@ func issueEnsureStatusCmd() *cobra.Command {
 				fmt.Fprintf(stdout, "✓ %s already %s\n", ref, want)
 				return nil
 			}
-			if _, err := client.do("PUT", "/api/issues/"+url.PathEscape(ref),
+			if _, err := client.do("PUT", "/api/issues/"+url.PathEscape(serverRef),
 				map[string]any{"status": want}); err != nil {
 				return reportError(err)
 			}
@@ -578,11 +586,15 @@ func issueCommentCmd() *cobra.Command {
 			if !set || strings.TrimSpace(text) == "" {
 				return &usageError{msg: "--body or --body-file required (non-empty)"}
 			}
+			ref, err := normalizeCLIRequiredIssueRef(args[0])
+			if err != nil {
+				return err
+			}
 			client, err := instanceClient()
 			if err != nil {
 				return err
 			}
-			raw, err := client.do("POST", "/api/issues/"+url.PathEscape(args[0])+"/comments",
+			raw, err := client.do("POST", "/api/issues/"+url.PathEscape(ref)+"/comments",
 				map[string]any{"body": text})
 			if err != nil {
 				return reportError(err)
@@ -625,7 +637,14 @@ func relationAddCmd() *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			src, typ, tgt := args[0], args[1], args[2]
-			var err error
+			serverSrc, err := normalizeCLIRequiredIssueRef(src)
+			if err != nil {
+				return err
+			}
+			if _, err := normalizeCLIRequiredIssueRef(tgt); err != nil {
+				return err
+			}
+
 			typ, err = normalizeEnumValue("relation.type", typ)
 			if err != nil {
 				return err
@@ -639,7 +658,7 @@ func relationAddCmd() *cobra.Command {
 				return reportError(err)
 			}
 			raw, err := client.do("POST",
-				"/api/issues/"+url.PathEscape(src)+"/relations",
+				"/api/issues/"+url.PathEscape(serverSrc)+"/relations",
 				map[string]any{"target_id": targetID, "type": typ},
 			)
 			if err != nil {
@@ -655,13 +674,17 @@ func relationAddCmd() *cobra.Command {
 	}
 }
 
-// resolveIssueRefToID converts a ref (key or numeric) to a numeric ID
-// by GETting the issue once. The server's /issues/{id} endpoint accepts
-// both forms since PAI-86; this lets us always pass numeric IDs on
+// resolveIssueRefToID converts a CLI ref (key or explicit id:<n>) to a numeric
+// ID by GETting the issue once. The server's /issues/{id} endpoint still
+// accepts both raw forms since PAI-86; this lets us always pass numeric IDs on
 // endpoints that don't (e.g. the relation target_id field is int64 in
 // the API body). Used by the CLI's create + relation-add flows.
 func resolveIssueRefToID(client *Client, ref string) (int64, error) {
-	body, err := client.do("GET", "/api/issues/"+url.PathEscape(ref), nil)
+	serverRef, err := normalizeCLIRequiredIssueRef(ref)
+	if err != nil {
+		return 0, err
+	}
+	body, err := client.do("GET", "/api/issues/"+url.PathEscape(serverRef), nil)
 	if err != nil {
 		return 0, err
 	}
@@ -714,7 +737,7 @@ Idempotent: re-running with an already-attached tag is a no-op.
 
 Examples:
   paimos issue tag add CON26-2445 --tag dev
-  paimos issue tag add 2445       --tag-id 99 --instance prod`,
+  paimos issue tag add id:2445    --tag-id 99 --instance prod`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runIssueTagMutate(args[0], tagKey, tagID, true)
@@ -741,7 +764,7 @@ Idempotent: re-running on an already-detached tag is a no-op.
 
 Examples:
   paimos issue tag rm CON26-2445 --tag dev
-  paimos issue tag rm 2445       --tag-id 99 --instance prod`,
+  paimos issue tag rm id:2445    --tag-id 99 --instance prod`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runIssueTagMutate(args[0], tagKey, tagID, false)

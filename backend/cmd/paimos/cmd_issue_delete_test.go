@@ -58,7 +58,7 @@ func TestDeleteIssueByRef_PurgeAlreadyTrashedNumericRef(t *testing.T) {
 		"GET /api/issues/1234/attachments": `[]`,
 		"DELETE /api/issues/1234/purge":    ``,
 	})
-	_, summary, err := deleteIssueByRef(newClientForTest(srv.URL), "1234", true)
+	_, summary, err := deleteIssueByRef(newClientForTest(srv.URL), "id:1234", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestIssueDeleteCLI_PurgeAlreadyTrashedNumericRef(t *testing.T) {
 	t.Setenv(envURL, srv.URL)
 	t.Setenv(envAPIKey, "test_key")
 
-	out, _, err := executeCLIForTest(t, "issue", "delete", "1234", "--yes", "--purge")
+	out, _, err := executeCLIForTest(t, "issue", "delete", "id:1234", "--yes", "--purge")
 	if err != nil {
 		t.Fatalf("executeCLIForTest: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestDeleteIssueByRef_PurgeAlreadyTrashedNumericRefStillGuarded(t *testing.T
 	srv := startFakeAPI(t, map[string]string{
 		"GET /api/issues/1234/comments": `[{"id":1,"body":"keep me"}]`,
 	})
-	_, _, err := deleteIssueByRef(newClientForTest(srv.URL), "1234", true)
+	_, _, err := deleteIssueByRef(newClientForTest(srv.URL), "id:1234", true)
 	if err == nil {
 		t.Fatal("expected a refusal error, got nil")
 	}

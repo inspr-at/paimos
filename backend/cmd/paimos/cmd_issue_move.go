@@ -33,6 +33,14 @@ func runIssueMove(client *Client, refs []string, targetRef string, dryRun bool) 
 	if len(refs) == 0 {
 		return &usageError{msg: "no issue refs given"}
 	}
+	// Validate every user-supplied issue ref before resolving the target
+	// project. This keeps an ambiguous bare number from causing even a
+	// read request, and guarantees bulk moves fail before any write.
+	for _, ref := range refs {
+		if _, err := normalizeCLIRequiredIssueRef(ref); err != nil {
+			return err
+		}
+	}
 	targetID, err := resolveProjectRefToID(client, targetRef)
 	if err != nil {
 		return reportError(err)

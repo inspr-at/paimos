@@ -91,7 +91,9 @@ func rootCmd() *cobra.Command {
 		Short: "Agent-facing CLI for PAIMOS (Professional & Personal AI Project OS)",
 		Long: `paimos — thin CLI wrapper over the PAIMOS HTTP API.
 
-Commands accept issue keys (PAI-83) or numeric ids interchangeably.
+CLI issue references use keys (PAI-83) by default. To intentionally address
+an internal database ID, use the explicit form id:462; bare numbers are
+rejected because they are indistinguishable from a pasted issue-key suffix.
 Every mutation accepts file inputs for multiline fields (--description-file,
 --ac-file) so there's no shell-quoted-JSON foot-gun. Pass --json on any
 command to emit machine-readable output.

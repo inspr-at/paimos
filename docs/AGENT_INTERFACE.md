@@ -183,13 +183,19 @@ After `paimos schema` runs once per instance, flag values like `--status done` g
 
 ## 2. Core patterns
 
-### Issue refs accept **either** key or numeric id
+### CLI issue refs use keys or explicit `id:<n>`
 
-Every CLI command and every `/api/issues/{id}/*` REST endpoint accepts `PAI-83` or `462` (PAI-86). Prefer keys — they're stable across instance re-imports and human-readable in logs.
+Use full issue keys in CLI commands: they are stable across instance re-imports
+and human-readable in logs. When an internal database ID is genuinely needed,
+make that intent explicit with `id:<n>`. Bare numbers are rejected because a
+human who means the issue-key suffix `76` and the database row with ID `76`
+otherwise produce the same command. The REST and MCP contracts remain
+unchanged and continue to accept bare numeric IDs/references (PAI-86).
 
 ```sh
-paimos issue get PAI-85          # key
-paimos issue get 465             # numeric — equivalent
+paimos issue get PAI-85          # preferred key
+paimos issue get id:465          # intentional internal database ID
+# paimos issue get 465           # usage error: ambiguous bare number
 ```
 
 ### Multi-line fields are file-first
@@ -292,8 +298,9 @@ payload, including projects, users, tags, and `has_more`.
 
 ### Track time
 
-Use `paimos time ...` for ticket-level time tracking. Issue arguments
-accept either keys or numeric ids.
+Use `paimos time ...` for ticket-level time tracking. Issue arguments use
+keys or explicit `id:<n>` references. Time-entry IDs remain bare numbers
+because `time stop|set|get <id>` names that resource unambiguously.
 
 ```sh
 paimos time start PAI-83 --note "debugging failing deploy"

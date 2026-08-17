@@ -58,7 +58,7 @@ agent/automation contexts).
 
 Examples:
   paimos issue delete PAI-481 --yes
-  paimos issue delete 1234 --yes --purge`,
+  paimos issue delete id:1234 --yes --purge`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if !yes {
@@ -148,7 +148,11 @@ func guardIssuePurge(client *Client, id int64, ref string) error {
 }
 
 func numericIssueRef(ref string) (int64, bool) {
-	id, err := strconv.ParseInt(strings.TrimSpace(ref), 10, 64)
+	trimmed := strings.TrimSpace(ref)
+	if !strings.HasPrefix(trimmed, "id:") {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "id:")), 10, 64)
 	return id, err == nil && id > 0
 }
 

@@ -48,13 +48,11 @@ need strict all-or-nothing, keep the file under 100 items.`,
 			if path == "" {
 				return &usageError{msg: "--from-file is required"}
 			}
-			client, err := instanceClient()
-			if err != nil {
-				return err
-			}
 
-			// Stream the JSONL rather than slurp the whole file — a
-			// 10k-line plan shouldn't need the whole thing in memory.
+			// Preflight the complete stream before making any API request. A bad
+			// ref on row 101 must not be discovered after row 1-100 already
+			// committed as the first chunk. Spooling keeps this all-or-nothing
+			// validation property without holding an unbounded JSONL file in RAM.
 			var src io.Reader
 			if path == "-" {
 				src = os.Stdin
@@ -66,11 +64,60 @@ need strict all-or-nothing, keep the file under 100 items.`,
 				defer f.Close()
 				src = f
 			}
+			spool, err := os.CreateTemp("", "paimos-batch-update-*.jsonl")
+			if err != nil {
+				return fmt.Errorf("create validation spool: %w", err)
+			}
+			spoolPath := spool.Name()
+			defer func() {
+				_ = spool.Close()
+				_ = os.Remove(spoolPath)
+			}()
 
 			scanner := bufio.NewScanner(src)
-			// Grow the buffer — JSONL rows can be long (stack traces in notes).
 			scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+			lineNum := 0
+			encoder := json.NewEncoder(spool)
+			for scanner.Scan() {
+				lineNum++
+				line := strings.TrimSpace(scanner.Text())
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue // blank and comment lines allowed
+				}
+				var item map[string]any
+				if err := json.Unmarshal([]byte(line), &item); err != nil {
+					return fmt.Errorf("line %d: invalid JSON: %w", lineNum, err)
+				}
+				if _, ok := item["ref"]; !ok {
+					return fmt.Errorf("line %d: missing \"ref\" field", lineNum)
+				}
+				rawRef, ok := item["ref"].(string)
+				if !ok {
+					return fmt.Errorf("line %d: \"ref\" must be a string", lineNum)
+				}
+				serverRef, err := normalizeCLIRequiredIssueRef(rawRef)
+				if err != nil {
+					return &usageError{msg: fmt.Sprintf("line %d: %v", lineNum, err)}
+				}
+				item["ref"] = serverRef
+				if _, ok := item["fields"]; !ok {
+					return fmt.Errorf("line %d: missing \"fields\" field", lineNum)
+				}
+				if err := encoder.Encode(item); err != nil {
+					return fmt.Errorf("spool line %d: %w", lineNum, err)
+				}
+			}
+			if err := scanner.Err(); err != nil {
+				return fmt.Errorf("read input: %w", err)
+			}
+			if _, err := spool.Seek(0, io.SeekStart); err != nil {
+				return fmt.Errorf("rewind validation spool: %w", err)
+			}
 
+			client, err := instanceClient()
+			if err != nil {
+				return err
+			}
 			var chunk []map[string]any
 			chunkNum := 0
 			var totalOK, totalFail int
@@ -90,7 +137,6 @@ need strict all-or-nothing, keep the file under 100 items.`,
 				}
 				raw, err := client.do("PATCH", "/api/issues", chunk)
 				if err != nil {
-					// Server returns per-item errors on 400.
 					totalFail += len(chunk)
 					if flagJSON {
 						fmt.Fprintln(stderr, strings.TrimSpace(string(raw)))
@@ -107,22 +153,12 @@ need strict all-or-nothing, keep the file under 100 items.`,
 				return nil
 			}
 
-			lineNum := 0
+			scanner = bufio.NewScanner(spool)
+			scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 			for scanner.Scan() {
-				lineNum++
-				line := strings.TrimSpace(scanner.Text())
-				if line == "" || strings.HasPrefix(line, "#") {
-					continue // blank and comment lines allowed
-				}
 				var item map[string]any
-				if err := json.Unmarshal([]byte(line), &item); err != nil {
-					return fmt.Errorf("line %d: invalid JSON: %w", lineNum, err)
-				}
-				if _, ok := item["ref"]; !ok {
-					return fmt.Errorf("line %d: missing \"ref\" field", lineNum)
-				}
-				if _, ok := item["fields"]; !ok {
-					return fmt.Errorf("line %d: missing \"fields\" field", lineNum)
+				if err := json.Unmarshal(scanner.Bytes(), &item); err != nil {
+					return fmt.Errorf("decode validation spool: %w", err)
 				}
 				chunk = append(chunk, item)
 				if len(chunk) >= maxBatch {
@@ -132,7 +168,7 @@ need strict all-or-nothing, keep the file under 100 items.`,
 				}
 			}
 			if err := scanner.Err(); err != nil {
-				return fmt.Errorf("read input: %w", err)
+				return fmt.Errorf("read validation spool: %w", err)
 			}
 			if err := flush(); err != nil {
 				return err
@@ -211,6 +247,40 @@ type ApplyRelation struct {
 	Target string `yaml:"target"`
 }
 
+func validateApplyPlanIssueRefs(plan ApplyPlan) error {
+	localNames := make(map[string]bool, len(plan.Create))
+	for _, item := range plan.Create {
+		if item.Name != "" {
+			localNames[item.Name] = true
+		}
+	}
+	for _, item := range plan.Create {
+		if item.Parent != "" && !localNames[item.Parent] {
+			if _, err := normalizeCLIRequiredIssueRef(item.Parent); err != nil {
+				return &usageError{msg: fmt.Sprintf("create parent %q: %v", item.Parent, err)}
+			}
+		}
+	}
+	for _, item := range plan.Update {
+		if _, err := normalizeCLIRequiredIssueRef(item.Ref); err != nil {
+			return &usageError{msg: fmt.Sprintf("update ref %q: %v", item.Ref, err)}
+		}
+	}
+	for _, item := range plan.Relations {
+		if !localNames[item.Source] {
+			if _, err := normalizeCLIRequiredIssueRef(item.Source); err != nil {
+				return &usageError{msg: fmt.Sprintf("relation source %q: %v", item.Source, err)}
+			}
+		}
+		if !localNames[item.Target] {
+			if _, err := normalizeCLIRequiredIssueRef(item.Target); err != nil {
+				return &usageError{msg: fmt.Sprintf("relation target %q: %v", item.Target, err)}
+			}
+		}
+	}
+	return nil
+}
+
 // applyCmd: top-level `paimos apply`.
 func applyCmd() *cobra.Command {
 	var (
@@ -250,6 +320,9 @@ epic+children once, then use ` + "`issue ensure-status`" + ` or
 			var plan ApplyPlan
 			if err := yaml.Unmarshal(data, &plan); err != nil {
 				return fmt.Errorf("parse %s: %w", path, err)
+			}
+			if err := validateApplyPlanIssueRefs(plan); err != nil {
+				return err
 			}
 
 			if dryRun {
@@ -351,8 +424,12 @@ epic+children once, then use ` + "`issue ensure-status`" + ` or
 			if len(plan.Update) > 0 {
 				items := make([]map[string]any, 0, len(plan.Update))
 				for _, u := range plan.Update {
+					serverRef, err := normalizeCLIRequiredIssueRef(u.Ref)
+					if err != nil {
+						return err
+					}
 					items = append(items, map[string]any{
-						"ref":    u.Ref,
+						"ref":    serverRef,
 						"fields": u.Fields,
 					})
 				}
@@ -369,14 +446,22 @@ epic+children once, then use ` + "`issue ensure-status`" + ` or
 				srcRef := rel.Source
 				if id, ok := nameToID[rel.Source]; ok {
 					srcRef = fmt.Sprintf("%d", id)
+				} else {
+					var err error
+					srcRef, err = normalizeCLIRequiredIssueRef(srcRef)
+					if err != nil {
+						return err
+					}
 				}
-				targetRef := rel.Target
+				var targetID int64
 				if id, ok := nameToID[rel.Target]; ok {
-					targetRef = fmt.Sprintf("%d", id)
-				}
-				targetID, err := resolveIssueRefToID(client, targetRef)
-				if err != nil {
-					return reportError(fmt.Errorf("resolve target %q: %w", rel.Target, err))
+					targetID = id
+				} else {
+					var err error
+					targetID, err = resolveIssueRefToID(client, rel.Target)
+					if err != nil {
+						return reportError(fmt.Errorf("resolve target %q: %w", rel.Target, err))
+					}
 				}
 				if _, err := client.do("POST",
 					"/api/issues/"+url.PathEscape(srcRef)+"/relations",
