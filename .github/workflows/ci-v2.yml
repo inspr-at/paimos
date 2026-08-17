@@ -48,7 +48,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.25.12'
+          go-version: '1.26.6'
           # Keep CI, release, container and go.mod on one audited patch.
           # Bump deliberately when govulncheck flags the standard library.
           cache-dependency-path: backend/go.sum
@@ -156,7 +156,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.25.12'
+          go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
       - uses: actions/setup-node@v5
@@ -224,7 +224,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.25.12'
+          go-version: '1.26.6'
           # Keep CI, release, container and go.mod on one audited patch.
           # Bump deliberately when govulncheck flags the standard library.
           cache-dependency-path: backend/go.sum
