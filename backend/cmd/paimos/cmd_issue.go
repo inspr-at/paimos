@@ -11,10 +11,44 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+// normalizeCLIRequiredIssueRef makes numeric issue-ID intent explicit at the
+// CLI boundary. A bare number is ambiguous: people commonly paste the numeric
+// suffix of an issue key, while the REST API interprets that same value as an
+// internal database ID. Keep the REST contract unchanged, but require CLI
+// callers to spell internal IDs as id:<n> so a typo cannot silently target a
+// different issue.
+func normalizeCLIRequiredIssueRef(raw string) (string, error) {
+	ref := strings.TrimSpace(raw)
+	if ref == "" {
+		return "", &usageError{msg: "issue reference is required"}
+	}
+	if strings.HasPrefix(ref, "id:") {
+		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(ref, "id:")), 10, 64)
+		if err != nil || id <= 0 {
+			return "", &usageError{msg: "id:<n> must contain a positive numeric issue id"}
+		}
+		return strconv.FormatInt(id, 10), nil
+	}
+	bareDigits := true
+	for _, r := range ref {
+		if r < '0' || r > '9' {
+			bareDigits = false
+			break
+		}
+	}
+	if bareDigits {
+		return "", &usageError{msg: fmt.Sprintf(
+			"ambiguous bare issue number %q; pass the full issue key (PROJECT-%s) or explicit internal id:%s",
+			ref, ref, ref)}
+	}
+	return ref, nil
+}
 
 func issueCmd() *cobra.Command {
 	c := &cobra.Command{
@@ -38,18 +72,22 @@ func issueCmd() *cobra.Command {
 	return c
 }
 
-// issueGetCmd: `paimos issue get PAI-83` (or numeric id).
+// issueGetCmd: `paimos issue get PAI-83` (or explicit `id:462`).
 func issueGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <ref>",
-		Short: "Fetch a single issue by key or numeric id",
+		Short: "Fetch a single issue by key or explicit id:<n>",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ref, err := normalizeCLIRequiredIssueRef(args[0])
+			if err != nil {
+				return err
+			}
 			client, err := instanceClient()
 			if err != nil {
 				return err
 			}
-			body, err := client.do("GET", "/api/issues/"+url.PathEscape(args[0]), nil)
+			body, err := client.do("GET", "/api/issues/"+url.PathEscape(ref), nil)
 			if err != nil {
 				return reportError(err)
 			}
@@ -155,11 +193,15 @@ func issueChildrenCmd() *cobra.Command {
 		Short: "List direct children of an issue",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ref, err := normalizeCLIRequiredIssueRef(args[0])
+			if err != nil {
+				return err
+			}
 			client, err := instanceClient()
 			if err != nil {
 				return err
 			}
-			body, err := client.do("GET", "/api/issues/"+url.PathEscape(args[0])+"/children", nil)
+			body, err := client.do("GET", "/api/issues/"+url.PathEscape(ref)+"/children", nil)
 			if err != nil {
 				return reportError(err)
 			}

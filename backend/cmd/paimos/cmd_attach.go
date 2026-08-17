@@ -137,7 +137,7 @@ func attachListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&issueRef, "issue", "", "issue key or id")
+	c.Flags().StringVar(&issueRef, "issue", "", "issue key or explicit id:<n>")
 	return c
 }
 

@@ -462,6 +462,12 @@ references return 400; key-shaped refs with no matching row return 404.
 Soft-deleted issues still resolve so `POST /issues/:id/restore` and
 `DELETE /issues/:id/purge` work with keys.
 
+The CLI adds a safety boundary on top of this REST contract: pass issue keys by
+default, or `id:462` when intentionally addressing the internal ID. It rejects
+bare `462` because that is indistinguishable from a pasted issue-key suffix.
+Commands whose argument is explicitly another resource ID, plus
+`paimos issue restore <id>`, keep ordinary bare numeric syntax.
+
 ---
 
 ## Create backlog item

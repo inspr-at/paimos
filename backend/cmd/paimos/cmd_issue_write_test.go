@@ -353,15 +353,18 @@ func TestIssueUpdateCloseNoteResolvesKeyBeforeWrites(t *testing.T) {
 }
 
 func TestIssueCreateParentRefSendsNumericID(t *testing.T) {
-	for _, parentRef := range []string{"PAI-1", "101"} {
-		parentRef := parentRef
-		t.Run(parentRef, func(t *testing.T) {
+	for _, tc := range []struct {
+		parentRef string
+		serverRef string
+	}{{"PAI-1", "PAI-1"}, {"id:101", "101"}} {
+		tc := tc
+		t.Run(tc.parentRef, func(t *testing.T) {
 			var received map[string]any
 			var handlerErr string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
-				case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+parentRef:
+				case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+tc.serverRef:
 					_, _ = w.Write([]byte(`{"id":101,"issue_key":"PAI-1"}`))
 				case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
 					_, _ = w.Write([]byte(`[{"id":6,"key":"PAI"}]`))
@@ -385,7 +388,7 @@ func TestIssueCreateParentRefSendsNumericID(t *testing.T) {
 				"issue", "create",
 				"--project", "PAI",
 				"--title", "Child",
-				"--parent", parentRef,
+				"--parent", tc.parentRef,
 			); err != nil {
 				t.Fatalf("executeCLIForTest: %v", err)
 			}

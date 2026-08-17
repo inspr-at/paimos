@@ -189,7 +189,7 @@ func timeListCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&running, "running", false, "list running timers")
 	c.Flags().BoolVar(&recent, "recent", false, "list recently stopped timers")
-	c.Flags().StringVar(&issueRef, "issue", "", "issue key or id")
+	c.Flags().StringVar(&issueRef, "issue", "", "issue key or explicit id:<n>")
 	c.Flags().IntVar(&limit, "limit", 0, "client-side maximum rows")
 	return c
 }
