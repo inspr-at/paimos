@@ -91,6 +91,7 @@ func issueCreateCmd() *cobra.Command {
 		acFile     string
 		notes      string
 		notesFile  string
+		tags       []string
 		dryRun     bool
 	)
 	c := &cobra.Command{
@@ -102,6 +103,11 @@ Multi-line fields accept either --foo "inline" or --foo-file path (or -
 for stdin). Inline+file together is an error — agents frequently hit
 this when concatenating arguments.
 
+--tags accepts comma-separated or repeated existing tag names. The full
+set is resolved before issue creation, then attached through idempotent
+tag endpoints. If a later attach fails, the error names the issue that
+was created; re-running the tag operation is safe.
+
 Use --dry-run to print the request payload without hitting the API.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if projectKey == "" {
@@ -109,6 +115,10 @@ Use --dry-run to print the request payload without hitting the API.`,
 			}
 			if title == "" {
 				return &usageError{msg: "--title is required"}
+			}
+			tagNames, err := normalizeTagNames("tags", tags)
+			if err != nil {
+				return err
 			}
 			client, err := instanceClient()
 			if err != nil {
@@ -183,12 +193,24 @@ Use --dry-run to print the request payload without hitting the API.`,
 			}
 
 			if dryRun {
-				return emitJSON(map[string]any{
+				out := map[string]any{
 					"dry_run": true,
 					"method":  "POST",
 					"path":    "/api/projects/" + projectKey + "/issues",
 					"body":    body,
-				})
+				}
+				if len(tagNames) > 0 {
+					out["tag_changes"] = map[string]any{"add": tagNames}
+				}
+				return emitJSON(out)
+			}
+
+			// Tags are a separate REST resource. Resolve the complete set before
+			// creating the issue so an unknown or manually forbidden tag cannot
+			// leave behind an avoidable untagged issue.
+			resolvedTags, err := resolveManualTagNames(client, tagNames)
+			if err != nil {
+				return reportError(err)
 			}
 
 			// Resolve project key → id (CreateIssue takes :id).
@@ -201,13 +223,37 @@ Use --dry-run to print the request payload without hitting the API.`,
 			if err != nil {
 				return reportError(err)
 			}
+			var iss struct {
+				ID       int64  `json:"id"`
+				IssueKey string `json:"issue_key"`
+				Title    string `json:"title"`
+			}
+			if err := json.Unmarshal(raw, &iss); err != nil {
+				return fmt.Errorf("decode created issue: %w", err)
+			}
+			if len(resolvedTags) > 0 {
+				if iss.ID <= 0 || iss.IssueKey == "" {
+					return fmt.Errorf("created issue response is missing id or issue_key; cannot attach requested tags safely")
+				}
+				if err := applyIssueTagMutations(client, iss.ID, resolvedTags, nil); err != nil {
+					return reportError(fmt.Errorf("created %s (id %d), but %w", iss.IssueKey, iss.ID, err))
+				}
+			}
 			if flagJSON {
+				if len(resolvedTags) > 0 {
+					raw, err = client.do("GET", fmt.Sprintf("/api/issues/%d", iss.ID), nil)
+					if err != nil {
+						return reportError(fmt.Errorf("created %s and attached tags, but refresh failed: %w", iss.IssueKey, err))
+					}
+				}
 				fmt.Fprintln(stdout, strings.TrimSpace(string(raw)))
 				return nil
 			}
-			var iss map[string]any
-			_ = json.Unmarshal(raw, &iss)
-			fmt.Fprintf(stdout, "✓ created %v — %v\n", iss["issue_key"], iss["title"])
+			fmt.Fprintf(stdout, "✓ created %s — %s", iss.IssueKey, iss.Title)
+			if len(resolvedTags) > 0 {
+				fmt.Fprintf(stdout, " (tags: %s)", strings.Join(tagNames, ", "))
+			}
+			fmt.Fprintln(stdout)
 			return nil
 		},
 	}
@@ -226,6 +272,7 @@ Use --dry-run to print the request payload without hitting the API.`,
 	c.Flags().StringVar(&acFile, "ac-file", "", "path to markdown acceptance-criteria file")
 	c.Flags().StringVar(&notes, "notes", "", "inline notes (multi-line ok; use --notes-file for long markdown)")
 	c.Flags().StringVar(&notesFile, "notes-file", "", "path to markdown notes file")
+	c.Flags().StringSliceVar(&tags, "tags", nil, "existing tag names to assign (comma-separated or repeated)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the payload without sending")
 	registerEnumCompletions(c, "status", "type", "priority")
 	return c
@@ -251,6 +298,8 @@ func issueUpdateCmd() *cobra.Command {
 		closeNote     string
 		closeNoteFile string
 		projectMove   string
+		addTags       []string
+		removeTags    []string
 		dryRun        bool
 		// PAI-343 — opt-in lesson-capture flags. When --draft-memory
 		// is set on a terminal-status transition, the CLI will create
@@ -289,6 +338,12 @@ the same way the UI does. If the trigger detection endpoint says
 the ticket doesn't qualify, the CLI just prints a one-line hint and
 exits without creating anything.
 
+Tag changes are non-destructive: --add-tag and --remove-tag accept
+comma-separated or repeated existing tag names and never replace the
+issue's full tag set. All names are preflighted before the first write.
+Field and tag writes use separate REST endpoints, so a later failure is
+reported as partial and the idempotent tag changes are safe to retry.
+
 Use --dry-run to print the payload without sending.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -296,6 +351,18 @@ Use --dry-run to print the payload without sending.`,
 			if err != nil {
 				return err
 			}
+			addTagNames, err := normalizeTagNames("add-tag", addTags)
+			if err != nil {
+				return err
+			}
+			removeTagNames, err := normalizeTagNames("remove-tag", removeTags)
+			if err != nil {
+				return err
+			}
+			if err := rejectConflictingTagChanges(addTagNames, removeTagNames); err != nil {
+				return err
+			}
+			hasTagChanges := len(addTagNames) > 0 || len(removeTagNames) > 0
 			client, err := instanceClient()
 			if err != nil {
 				return err
@@ -309,7 +376,7 @@ Use --dry-run to print the payload without sending.`,
 					parent != "" || assignee != "" || costUnit != "" || release != "" ||
 					desc != "" || descFile != "" || ac != "" || acFile != "" ||
 					notes != "" || notesFile != "" || closeNote != "" || closeNoteFile != "" ||
-					draftMemory {
+					draftMemory || hasTagChanges {
 					return &usageError{msg: "--project moves the issue and can't be combined with other update flags; move first, then update"}
 				}
 				return runIssueMove(client, []string{args[0]}, projectMove, dryRun)
@@ -402,7 +469,7 @@ Use --dry-run to print the payload without sending.`,
 				}
 				body["assignee_id"] = aid
 			}
-			if len(body) == 0 && closeNoteVal == "" {
+			if len(body) == 0 && closeNoteVal == "" && !hasTagChanges {
 				return &usageError{msg: "nothing to update — pass at least one field"}
 			}
 
@@ -410,23 +477,44 @@ Use --dry-run to print the payload without sending.`,
 			if dryRun {
 				out := map[string]any{
 					"dry_run": true,
-					"method":  "PUT",
-					"path":    "/api/issues/" + serverRef,
-					"body":    body,
+					"ref":     ref,
+				}
+				if len(body) > 0 {
+					out["method"] = "PUT"
+					out["path"] = "/api/issues/" + serverRef
+					out["body"] = body
 				}
 				if closeNoteVal != "" {
 					out["close_note_will_comment"] = closeNoteVal
+				}
+				if hasTagChanges {
+					tagChanges := map[string]any{}
+					if len(addTagNames) > 0 {
+						tagChanges["add"] = addTagNames
+					}
+					if len(removeTagNames) > 0 {
+						tagChanges["remove"] = removeTagNames
+					}
+					out["tag_changes"] = tagChanges
 				}
 				return emitJSON(out)
 			}
 
 			writeRef := serverRef
-			if closeNoteVal != "" {
-				issueID, err := resolveIssueRefToID(client, ref)
+			var issueID int64
+			if closeNoteVal != "" || hasTagChanges {
+				issueID, err = resolveIssueRefToID(client, ref)
 				if err != nil {
-					return reportError(fmt.Errorf("resolve issue for close-note: %w", err))
+					return reportError(fmt.Errorf("resolve issue for update: %w", err))
 				}
 				writeRef = strconv.FormatInt(issueID, 10)
+			}
+			var resolvedAdds, resolvedRemoves []resolvedTag
+			if hasTagChanges {
+				resolvedAdds, resolvedRemoves, err = resolveManualTagChanges(client, addTagNames, removeTagNames)
+				if err != nil {
+					return reportError(err)
+				}
 			}
 
 			// Execute update.
@@ -435,7 +523,7 @@ Use --dry-run to print the payload without sending.`,
 				if err != nil {
 					return reportError(err)
 				}
-				if !flagJSON && closeNoteVal == "" {
+				if !flagJSON && closeNoteVal == "" && !hasTagChanges {
 					var iss map[string]any
 					_ = json.Unmarshal(raw, &iss)
 					fmt.Fprintf(stdout, "✓ updated %v\n", iss["issue_key"])
@@ -473,8 +561,36 @@ Use --dry-run to print the payload without sending.`,
 				}
 			}
 
+			if hasTagChanges {
+				if err := applyIssueTagMutations(client, issueID, resolvedAdds, resolvedRemoves); err != nil {
+					if len(body) > 0 || closeNoteVal != "" {
+						return reportError(fmt.Errorf("issue fields were updated, but %w", err))
+					}
+					return reportError(err)
+				}
+				if !flagJSON {
+					fmt.Fprintf(stdout, "✓ updated %s tags", ref)
+					if len(addTagNames) > 0 {
+						fmt.Fprintf(stdout, " (+%s)", strings.Join(addTagNames, ",+"))
+					}
+					if len(removeTagNames) > 0 {
+						fmt.Fprintf(stdout, " (-%s)", strings.Join(removeTagNames, ",-"))
+					}
+					fmt.Fprintln(stdout)
+				}
+			}
+
 			if flagJSON {
-				return emitJSON(map[string]any{"ok": true, "ref": ref})
+				out := map[string]any{"ok": true, "ref": ref}
+				if hasTagChanges {
+					if len(addTagNames) > 0 {
+						out["tags_added"] = addTagNames
+					}
+					if len(removeTagNames) > 0 {
+						out["tags_removed"] = removeTagNames
+					}
+				}
+				return emitJSON(out)
 			}
 			return nil
 		},
@@ -496,6 +612,8 @@ Use --dry-run to print the payload without sending.`,
 	c.Flags().StringVar(&closeNote, "close-note", "", "single-line close-note (requires --status terminal)")
 	c.Flags().StringVar(&closeNoteFile, "close-note-file", "", "path to close-note file (requires --status terminal)")
 	c.Flags().StringVar(&projectMove, "project", "", "move the issue to this project (key or id); re-keys + aliases the old key")
+	c.Flags().StringSliceVar(&addTags, "add-tag", nil, "existing tag names to add (comma-separated or repeated)")
+	c.Flags().StringSliceVar(&removeTags, "remove-tag", nil, "existing tag names to remove (comma-separated or repeated)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the payload without sending")
 	// PAI-343 — lesson-capture flags. All optional unless --draft-memory
 	// is passed, in which case --memory-rule is required (the rule is
@@ -834,10 +952,128 @@ func requireTagSelector(tagKey string, tagID int64) error {
 	return nil
 }
 
-// resolvedTag is the slice of /api/tags we care about — id + name only.
+// normalizeTagNames validates the comma-split values produced by Cobra's
+// StringSlice flags, trims surrounding whitespace, and deduplicates names while
+// preserving the user's order. Empty entries are almost always an accidental
+// trailing/doubled comma, so reject them instead of silently changing intent.
+func normalizeTagNames(flagName string, raw []string) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(raw))
+	names := make([]string, 0, len(raw))
+	for _, value := range raw {
+		name := strings.TrimSpace(value)
+		if name == "" {
+			return nil, &usageError{msg: fmt.Sprintf("--%s contains an empty tag name", flagName)}
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func rejectConflictingTagChanges(add, remove []string) error {
+	removals := make(map[string]struct{}, len(remove))
+	for _, name := range remove {
+		removals[name] = struct{}{}
+	}
+	for _, name := range add {
+		if _, ok := removals[name]; ok {
+			return &usageError{msg: fmt.Sprintf("tag %q cannot be both added and removed", name)}
+		}
+	}
+	return nil
+}
+
+// resolvedTag is the slice of /api/tags needed for manual assignment.
 type resolvedTag struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	System bool   `json:"system"`
+}
+
+const portalVisibilityTagName = "CUSTOMERPORTAL"
+
+func loadTagCatalog(client *Client) ([]resolvedTag, error) {
+	body, err := client.do("GET", "/api/tags", nil)
+	if err != nil {
+		return nil, err
+	}
+	var tags []resolvedTag
+	if err := json.Unmarshal(body, &tags); err != nil {
+		return nil, fmt.Errorf("decode tags: %w", err)
+	}
+	return tags, nil
+}
+
+func resolveManualTagNames(client *Client, names []string) ([]resolvedTag, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	catalog, err := loadTagCatalog(client)
+	if err != nil {
+		return nil, err
+	}
+	return resolveManualTagNamesFromCatalog(catalog, names)
+}
+
+func resolveManualTagChanges(client *Client, add, remove []string) ([]resolvedTag, []resolvedTag, error) {
+	catalog, err := loadTagCatalog(client)
+	if err != nil {
+		return nil, nil, err
+	}
+	resolvedAdds, err := resolveManualTagNamesFromCatalog(catalog, add)
+	if err != nil {
+		return nil, nil, err
+	}
+	resolvedRemoves, err := resolveManualTagNamesFromCatalog(catalog, remove)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resolvedAdds, resolvedRemoves, nil
+}
+
+func resolveManualTagNamesFromCatalog(catalog []resolvedTag, names []string) ([]resolvedTag, error) {
+	byName := make(map[string]resolvedTag, len(catalog))
+	for _, tag := range catalog {
+		byName[tag.Name] = tag
+	}
+	resolved := make([]resolvedTag, 0, len(names))
+	for _, name := range names {
+		tag, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("tag %q not found in /api/tags", name)
+		}
+		if tag.System && tag.Name != portalVisibilityTagName {
+			return nil, fmt.Errorf("system tag %q cannot be modified manually", name)
+		}
+		resolved = append(resolved, tag)
+	}
+	return resolved, nil
+}
+
+// applyIssueTagMutations uses the existing idempotent association endpoints.
+// Removals run before additions so an update that changes lanes has a stable,
+// deterministic request order. Cross-tag atomicity is not claimed by the REST
+// API; callers wrap failures with the completed issue step for safe retries.
+func applyIssueTagMutations(client *Client, issueID int64, add, remove []resolvedTag) error {
+	for _, tag := range remove {
+		if _, err := client.do("DELETE",
+			fmt.Sprintf("/api/issues/%d/tags/%d", issueID, tag.ID), nil); err != nil {
+			return fmt.Errorf("remove tag %q failed; requested tag changes may be partially applied and are safe to retry: %w", tag.Name, err)
+		}
+	}
+	for _, tag := range add {
+		if _, err := client.do("POST",
+			fmt.Sprintf("/api/issues/%d/tags", issueID), map[string]any{"tag_id": tag.ID}); err != nil {
+			return fmt.Errorf("add tag %q failed; requested tag changes may be partially applied and are safe to retry: %w", tag.Name, err)
+		}
+	}
+	return nil
 }
 
 // resolveTagSelector returns the (id, name) tuple to use for the
@@ -847,13 +1083,9 @@ type resolvedTag struct {
 // idempotent endpoints (DELETE on a non-existent tag_id is otherwise
 // indistinguishable from "tag wasn't attached").
 func resolveTagSelector(client *Client, tagKey string, tagID int64) (resolvedTag, error) {
-	body, err := client.do("GET", "/api/tags", nil)
+	tags, err := loadTagCatalog(client)
 	if err != nil {
 		return resolvedTag{}, err
-	}
-	var tags []resolvedTag
-	if err := json.Unmarshal(body, &tags); err != nil {
-		return resolvedTag{}, fmt.Errorf("decode tags: %w", err)
 	}
 	if tagID != 0 {
 		for _, t := range tags {

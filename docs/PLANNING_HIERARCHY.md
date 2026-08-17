@@ -84,8 +84,8 @@ Use the existing `tags` system to mark programme membership. A tag named `progra
 Rationale:
 
 1. **The awkwardness is real but small.** PAI-189 / PAI-200 / PAI-209 are the three largest umbrella efforts in PAIMOS history; all three fit the current model with only programme-level visibility loss. The cost of B is permanent; the gain is marginal at current scale.
-2. **Tags already exist and are first-class.** The `tags` table, the per-issue M:N tag attachment, the SPA tag filter, the CLI `--tag` flag, the `system_tags` rule engine for auto-tagging — all of this is shipped and stable. Putting `programme:<name>` into the tag namespace requires no engineering, just convention.
-3. **Convention failures are recoverable.** If the tag convention frays — for example, two contributors disagree on what counts as "in the v2.0 programme" — the cost is an audit-time `paimos issue list --tag programme:2.0` review, not a schema rollback.
+2. **Tags already exist and are first-class.** The `tags` table, the per-issue M:N tag attachment, the SPA tag filter, the CLI additive tag flags, and the `system_tags` rule engine for auto-tagging are all shipped and stable. Putting `programme:<name>` into the tag namespace requires no new data model, just convention.
+3. **Convention failures are recoverable.** If the tag convention frays — for example, two contributors disagree on what counts as "in the v2.0 programme" — the cost is a review of the saved `programme:2.0` tag view, not a schema rollback.
 4. **Reconsider when forced to.** The trigger to revisit this is unambiguous: when an actual customer or contributor asks for programme-level *reporting* or *cross-programme rollups* and the tag convention can't cleanly answer. At that point, B becomes justified by demand, not by speculation.
 5. **C is the wrong shape.** Multi-level epic chains complicate the rendering layer for ambiguous benefit. If we're going to invest, B (a clean, explicit entity) is the right destination — not C.
 
@@ -97,21 +97,19 @@ For programmes that want cross-cutting visibility today, use the `programme:<slu
 
 ```bash
 # Apply the tag to every issue in a programme
-paimos issue update PAI-189 --tag programme:2.0
-paimos issue update PAI-200 --tag programme:2.0
-paimos issue update PAI-209 --tag programme:2.0
+paimos issue update PAI-189 --add-tag programme:2.0
+paimos issue update PAI-200 --add-tag programme:2.0
+paimos issue update PAI-209 --add-tag programme:2.0
 # … and to each child ticket as it lands
 
-# Query the programme set
-paimos issue list --tag programme:2.0 --status backlog,in-progress
+# Query the programme set through the saved programme:2.0 tag filter in the UI.
 ```
 
 For programme-end:
 
 ```bash
-# Remove the tag from every issue in the programme
-paimos issue list --tag programme:2.0 --json | jq -r '.issues[].issue_key' | \
-  xargs -I{} paimos issue update {} --tag-remove programme:2.0
+# For each key from the saved programme:2.0 view:
+paimos issue update PAI-189 --remove-tag programme:2.0
 ```
 
 The convention is opt-in per programme; small and short-lived efforts don't need it.

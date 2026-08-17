@@ -360,7 +360,8 @@ release labels, code anchors, and project taxonomy tags.
 There are two separate tag flows:
 
 - **Manage the catalog** with `paimos tag ...`
-- **Assign an existing tag to an issue** with `paimos issue tag ...`
+- **Assign existing tags** during `issue create` / `issue update`, or one at a
+  time with `paimos issue tag ...`
 
 ```sh
 # Global catalog
@@ -373,10 +374,32 @@ paimos tag delete 42 --yes
 paimos tag list --project PAI
 paimos tag create --project PAI --name qa --color teal
 
-# Issue assignment; resolves --tag against /api/tags.
+# Initial assignment; --tags is comma-separated or repeatable.
+paimos issue create --project PAI --title "Investigate hsb9" \
+  --tags "host:hsb9,home-assistant"
+
+# Non-destructive update; these may be combined with ordinary field flags.
+paimos issue update PAI-123 --add-tag "host:hsb9,home-assistant"
+paimos issue update PAI-123 --remove-tag home-assistant
+
+# Equivalent single-tag verbs; resolve --tag against /api/tags.
 paimos issue tag add PAI-123 --tag qa
 paimos issue tag rm  PAI-123 --tag qa
 ```
+
+Tag names are exact and case-sensitive. These commands assign only tags that
+already exist in the global catalog; they never create catalog entries.
+`issue update` deliberately has no replace-all flag: `--add-tag` and
+`--remove-tag` call the server's idempotent association endpoints, so existing
+and concurrently managed tags are not clobbered. The CLI trims, deduplicates,
+and resolves the complete requested set with one `/api/tags` read before its
+first issue write, and rejects the same name appearing in both operations.
+
+Issue fields and tag associations remain separate REST resources. A combined
+create/update can therefore complete its issue write before a later tag request
+fails. The error names that boundary and the failed tag; retrying the tag flags
+is safe. `--dry-run` performs no catalog lookup and reports names as an
+unresolved `tag_changes` plan.
 
 Valid colors are: `gray`, `slate`, `blue`, `indigo`, `purple`,
 `pink`, `red`, `orange`, `yellow`, `green`, `teal`, `cyan`.

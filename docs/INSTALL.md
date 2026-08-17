@@ -134,7 +134,8 @@ If those work, the CLI is wired up correctly.
 paimos issue create --project PAI --type ticket \
   --title "Refactor auth middleware" \
   --description-file /tmp/desc.md \
-  --ac-file /tmp/ac.md
+  --ac-file /tmp/ac.md \
+  --tags "backend,auth"
 
 # Idempotent status transitions — safe to re-run
 paimos issue ensure-status PAI-83 done
@@ -146,7 +147,7 @@ paimos issue update PAI-83 --status done \
 # Search, then tag the issue you found
 paimos search "flaky session" --project PAI --limit 5
 paimos tag list
-paimos issue tag add PAI-83 --tag backend
+paimos issue update PAI-83 --add-tag backend
 
 # Track work without leaving the terminal
 paimos time start PAI-83 --note "Investigating session expiry"
