@@ -370,6 +370,10 @@ test_local_pre_push_interruption_resumes() {
   repo=$(setup_repo local-resume)
   state="$TMP_ROOT/local-resume/gh-state"
   origin=$(git -C "$repo" remote get-url origin)
+  awk 'BEGIN {for (i = 1; i <= 6000; i++) print "- Historical release note " i}' >> "$repo/docs/CHANGELOG.md"
+  git -C "$repo" add docs/CHANGELOG.md
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'add production-scale changelog history'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
   prepend_release_notes "$repo"
 
   if RELEASE_TEST_FAILPOINT=before-branch-push run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
