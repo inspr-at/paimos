@@ -15,7 +15,8 @@ status:
       echo "--- runtime-relevant only (backend/ frontend/src/)"; \
       git log "$last..origin/main" --oneline -- backend/ frontend/src/
 
-# Cut a release: bump VERSION + CHANGELOG, tag, push, wait for CI.
+# Cut a release: prepare/reuse a protected PR, auto-merge, tag its exact
+# main commit, and wait for release CI. Never pushes directly to main.
 # Mode: patch | minor | major | <x.y.z>. Omit for AI-assist (commit log dump).
 release mode="":
     @./scripts/release.sh {{mode}}
