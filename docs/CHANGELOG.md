@@ -5,6 +5,23 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.9.0] — 2026-08-17
+
+### Changed — Explicit numeric issue references (PAI-792)
+
+- User-facing CLI issue commands now require full issue keys by default and reserve `id:<n>` for intentional internal database IDs, eliminating collisions between bare issue numbers and internal IDs.
+- Direct commands, moves, relations, tags, time entries, attachments, parents, apply plans, and batch updates share the same validation contract while REST, MCP, and the documented `issue restore <id>` recovery command remain unchanged.
+- Apply and batch-update inputs are fully validated before any issue request is sent; batch input is securely spooled and then replayed in bounded chunks so a late ambiguous reference cannot leave an earlier partial write.
+
+### Security — Patched Go toolchain and dependencies (PAI-794)
+
+- The build now uses Go 1.25.7 with patched `x/crypto`, `x/net`, and `quic-go` releases, clearing the applicable standard-library and HTTP/3 advisories.
+- CI now runs a dedicated vulnerability scan on main and pull requests, and the production binary is verified against the patched toolchain and dependency graph.
+
+### Documentation
+
+- The public INSPR doctrine is vendored for offline agent use and linked from the project guidance without changing runtime behavior.
+
 ## [5.8.18] — 2026-08-11
 
 ### Added — Reproducible seeded product walkthroughs (PAI-696)
