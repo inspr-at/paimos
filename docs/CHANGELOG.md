@@ -5,6 +5,15 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.9.1] — 2026-08-17
+
+### Fixed — Protected-main release automation (PAI-790)
+
+- Release preparation now uses a deterministic `release/vX.Y.Z` branch, an author-DCO-signed commit, one protected pull request, and squash auto-merge instead of pushing directly to `main`.
+- The release tag is created only at the exact validated PR merge commit after pinning and byte-validating the PR head, proving squash provenance and tree identity, and rerunning claims and hygiene gates against that head.
+- Interrupted open, merged-but-untagged, already-tagged, behind-main, and pre-push states resume safely, while branch, file, PR, merge-method, tree, tag, signing-configuration, and cleanup drift fail closed.
+- Hermetic adversarial tests cover the protected lifecycle, DCO without a local GPG key, late head mutation, same-file and EOF-byte drift, stale checkouts, direct-main push rejection, exact branch cleanup, and production-scale changelog validation.
+
 ## [5.9.0] — 2026-08-17
 
 ### Changed — Explicit numeric issue references (PAI-792)
