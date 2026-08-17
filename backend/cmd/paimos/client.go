@@ -10,6 +10,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -317,11 +318,16 @@ func formatProblemMessage(detail, fallback, field, code string, valid []string) 
 // reportError writes a failure to stderr in the caller-chosen format.
 // Returns an apiError so main() can suppress Cobra's own Error: prefix.
 func reportError(err error) error {
-	if he, ok := err.(*httpError); ok {
+	var he *httpError
+	if errors.As(err, &he) {
 		if flagJSON {
 			problem := he.problem()
+			message := he.friendlyMessage()
+			if _, direct := err.(*httpError); !direct {
+				message = err.Error()
+			}
 			out := map[string]any{
-				"error": he.friendlyMessage(),
+				"error": message,
 				"code":  he.Code,
 			}
 			if problem.Code != "" {
@@ -339,12 +345,17 @@ func reportError(err error) error {
 			b, _ := json.Marshal(out)
 			fmt.Fprintln(stderr, string(b))
 		} else {
-			fmt.Fprintln(stderr, "paimos: "+he.Error())
+			fmt.Fprintln(stderr, "paimos: "+err.Error())
 		}
 		return &apiError{inner: err}
 	}
-	// Non-HTTP error (config issue, I/O, marshaling …). Let main()
-	// print it uniformly.
+	// Keep --json machine-readable for contextual validation/decode errors too.
+	// Human mode lets main() apply its normal generic-error prefix.
+	if flagJSON {
+		b, _ := json.Marshal(map[string]any{"error": err.Error()})
+		fmt.Fprintln(stderr, string(b))
+		return &apiError{inner: err}
+	}
 	return err
 }
 

@@ -556,3 +556,426 @@ func TestResolveTagSelector(t *testing.T) {
 		})
 	}
 }
+
+// ── PAI-791: safe create/update tag flags ───────────────────────────
+
+func TestNormalizeTagNames(t *testing.T) {
+	got, err := normalizeTagNames("tags", []string{" host:hsb9 ", "home-assistant", "host:hsb9"})
+	if err != nil {
+		t.Fatalf("normalizeTagNames: %v", err)
+	}
+	if strings.Join(got, "|") != "host:hsb9|home-assistant" {
+		t.Fatalf("names=%v, want trimmed order-preserving dedupe", got)
+	}
+	for _, raw := range [][]string{{""}, {"ops", "  "}} {
+		if _, err := normalizeTagNames("tags", raw); err == nil {
+			t.Fatalf("normalizeTagNames(%q) succeeded, want empty-name error", raw)
+		}
+	}
+}
+
+func TestResolveManualTagNamesSystemRules(t *testing.T) {
+	catalog := []resolvedTag{
+		{ID: 1, Name: "CUSTOMERPORTAL", System: true},
+		{ID: 2, Name: "AT_RISK", System: true},
+	}
+	got, err := resolveManualTagNamesFromCatalog(catalog, []string{"CUSTOMERPORTAL"})
+	if err != nil || len(got) != 1 || got[0].ID != 1 {
+		t.Fatalf("portal visibility tag: got=%v err=%v, want allowed system-tag exception", got, err)
+	}
+	if _, err := resolveManualTagNamesFromCatalog(catalog, []string{"AT_RISK"}); err == nil {
+		t.Fatal("ordinary system tag was accepted for manual mutation")
+	}
+}
+
+func TestIssueCreateWithTagsPreflightsAndAttaches(t *testing.T) {
+	var paths []string
+	var attached []int64
+	var createBody map[string]any
+	var handlerErr string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tags":
+			_, _ = w.Write([]byte(`[
+				{"id":41,"name":"host:hsb9","system":false},
+				{"id":42,"name":"home-assistant","system":false}
+			]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
+			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/6/issues":
+			if err := json.NewDecoder(r.Body).Decode(&createBody); err != nil {
+				handlerErr = fmt.Sprintf("decode create: %v", err)
+				http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":202,"issue_key":"PAI-2","title":"Tagged issue"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/202/tags":
+			var body struct {
+				TagID int64 `json:"tag_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				handlerErr = fmt.Sprintf("decode tag: %v", err)
+				http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+				return
+			}
+			attached = append(attached, body.TagID)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			handlerErr = fmt.Sprintf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.Error(w, `{"error":"unexpected request"}`, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	out, _, err := executeCLIForTest(t,
+		"issue", "create", "--project", "PAI", "--title", "Tagged issue",
+		"--tags", " host:hsb9,home-assistant,host:hsb9 ",
+	)
+	if err != nil {
+		t.Fatalf("issue create: %v", err)
+	}
+	if handlerErr != "" {
+		t.Fatal(handlerErr)
+	}
+	wantPaths := []string{
+		"GET /api/tags",
+		"GET /api/projects",
+		"POST /api/projects/6/issues",
+		"POST /api/issues/202/tags",
+		"POST /api/issues/202/tags",
+	}
+	if strings.Join(paths, "\n") != strings.Join(wantPaths, "\n") {
+		t.Fatalf("paths:\n%s\nwant:\n%s", strings.Join(paths, "\n"), strings.Join(wantPaths, "\n"))
+	}
+	if fmt.Sprint(attached) != "[41 42]" {
+		t.Fatalf("attached=%v, want [41 42]", attached)
+	}
+	if _, exists := createBody["tags"]; exists {
+		t.Fatalf("create body unexpectedly contains tags: %v", createBody)
+	}
+	if !strings.Contains(out, "tags: host:hsb9, home-assistant") {
+		t.Fatalf("output=%q, want applied tags", out)
+	}
+}
+
+func TestIssueCreateTagsPreflightFailureDoesNotCreate(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		catalog string
+		tag     string
+		wantErr string
+	}{
+		{name: "unknown", catalog: `[{"id":41,"name":"known","system":false}]`, tag: "missing", wantErr: "not found"},
+		{name: "forbidden system", catalog: `[{"id":41,"name":"AT_RISK","system":true}]`, tag: "AT_RISK", wantErr: "cannot be modified manually"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests, writes := 0, 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.Method != http.MethodGet {
+					writes++
+				}
+				if r.Method == http.MethodGet && r.URL.Path == "/api/tags" {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(tc.catalog))
+					return
+				}
+				http.Error(w, `{"error":"unexpected request"}`, http.StatusInternalServerError)
+			}))
+			t.Cleanup(srv.Close)
+			t.Setenv(envURL, srv.URL)
+			t.Setenv(envAPIKey, "test_key")
+
+			_, _, err := executeCLIForTest(t,
+				"issue", "create", "--project", "PAI", "--title", "No partial create", "--tags", tc.tag,
+			)
+			if err == nil || !containsFold(err.Error(), tc.wantErr) {
+				t.Fatalf("err=%v, want %q", err, tc.wantErr)
+			}
+			if requests != 1 || writes != 0 {
+				t.Fatalf("requests=%d writes=%d, want one catalog read and zero writes", requests, writes)
+			}
+		})
+	}
+}
+
+func TestIssueCreateTagFailureNamesCreatedIssue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tags":
+			_, _ = w.Write([]byte(`[{"id":41,"name":"ops","system":false}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
+			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/6/issues":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":202,"issue_key":"PAI-2","title":"Created first"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/202/tags":
+			http.Error(w, `{"error":"attach failed"}`, http.StatusInternalServerError)
+		default:
+			http.Error(w, `{"error":"unexpected"}`, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	_, errOut, err := executeCLIForTest(t,
+		"--json", "issue", "create", "--project", "PAI", "--title", "Created first", "--tags", "ops",
+	)
+	if err == nil || !strings.Contains(err.Error(), "created PAI-2 (id 202), but add tag \"ops\" failed") {
+		t.Fatalf("err=%v, want explicit partial-create boundary", err)
+	}
+	if _, ok := err.(*apiError); !ok {
+		t.Fatalf("err type=%T, want *apiError for already-reported JSON failure", err)
+	}
+	var problem map[string]any
+	if json.Unmarshal([]byte(errOut), &problem) != nil || !strings.Contains(fmt.Sprint(problem["error"]), "created PAI-2") {
+		t.Fatalf("stderr=%q, want machine-readable partial-create boundary", errOut)
+	}
+}
+
+func TestIssueUpdateTagChangesPreflightAndApply(t *testing.T) {
+	var paths []string
+	var putBody map[string]any
+	var addBody map[string]any
+	var handlerErr string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/PAI-2":
+			_, _ = w.Write([]byte(`{"id":202,"issue_key":"PAI-2"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tags":
+			_, _ = w.Write([]byte(`[
+				{"id":41,"name":"old","system":false},
+				{"id":42,"name":"new","system":false}
+			]`))
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/202":
+			if err := json.NewDecoder(r.Body).Decode(&putBody); err != nil {
+				handlerErr = fmt.Sprintf("decode put: %v", err)
+			}
+			_, _ = w.Write([]byte(`{"id":202,"issue_key":"PAI-2","title":"Changed"}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/issues/202/tags/41":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/202/tags":
+			if err := json.NewDecoder(r.Body).Decode(&addBody); err != nil {
+				handlerErr = fmt.Sprintf("decode add: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			handlerErr = fmt.Sprintf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.Error(w, `{"error":"unexpected request"}`, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	out, _, err := executeCLIForTest(t,
+		"--json", "issue", "update", "PAI-2", "--title", "Changed",
+		"--add-tag", "new,new", "--remove-tag", "old",
+	)
+	if err != nil {
+		t.Fatalf("issue update: %v", err)
+	}
+	if handlerErr != "" {
+		t.Fatal(handlerErr)
+	}
+	wantPaths := []string{
+		"GET /api/issues/PAI-2",
+		"GET /api/tags",
+		"PUT /api/issues/202",
+		"DELETE /api/issues/202/tags/41",
+		"POST /api/issues/202/tags",
+	}
+	if strings.Join(paths, "\n") != strings.Join(wantPaths, "\n") {
+		t.Fatalf("paths:\n%s\nwant:\n%s", strings.Join(paths, "\n"), strings.Join(wantPaths, "\n"))
+	}
+	if putBody["title"] != "Changed" || len(putBody) != 1 {
+		t.Fatalf("putBody=%v, want field-only update", putBody)
+	}
+	if addBody["tag_id"] != float64(42) {
+		t.Fatalf("addBody=%v, want tag_id 42", addBody)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out)
+	}
+	if fmt.Sprint(result["tags_added"]) != "[new]" || fmt.Sprint(result["tags_removed"]) != "[old]" {
+		t.Fatalf("result=%v, want applied tag names", result)
+	}
+}
+
+func TestIssueUpdateTagOnlySkipsFieldUpdate(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/PAI-2":
+			_, _ = w.Write([]byte(`{"id":202,"issue_key":"PAI-2"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/tags":
+			_, _ = w.Write([]byte(`[{"id":42,"name":"ops","system":false}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/202/tags":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"error":"unexpected request"}`, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	out, _, err := executeCLIForTest(t, "issue", "update", "PAI-2", "--add-tag", "ops")
+	if err != nil {
+		t.Fatalf("tag-only update: %v", err)
+	}
+	wantPaths := []string{"GET /api/issues/PAI-2", "GET /api/tags", "POST /api/issues/202/tags"}
+	if strings.Join(paths, "\n") != strings.Join(wantPaths, "\n") {
+		t.Fatalf("paths=%v, want %v (no PUT)", paths, wantPaths)
+	}
+	if !strings.Contains(out, "updated PAI-2 tags (+ops)") {
+		t.Fatalf("output=%q, want tag-only success", out)
+	}
+}
+
+func TestIssueUpdateTagValidationBeforeWrites(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		args      []string
+		wantErr   string
+		wantReads int
+		catalog   string
+	}{
+		{
+			name: "same tag in add and remove", args: []string{"--add-tag", "ops", "--remove-tag", "ops"},
+			wantErr: "both added and removed", wantReads: 0,
+		},
+		{
+			name: "empty tag name", args: []string{"--add-tag", "ops,,home"},
+			wantErr: "empty tag name", wantReads: 0,
+		},
+		{
+			name: "unknown tag before field update", args: []string{"--title", "Changed", "--add-tag", "missing"},
+			wantErr: "not found", wantReads: 2, catalog: `[{"id":41,"name":"known","system":false}]`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reads, writes := 0, 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					reads++
+				} else {
+					writes++
+				}
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/issues/PAI-2":
+					_, _ = w.Write([]byte(`{"id":202,"issue_key":"PAI-2"}`))
+				case "/api/tags":
+					_, _ = w.Write([]byte(tc.catalog))
+				default:
+					http.Error(w, `{"error":"unexpected write"}`, http.StatusInternalServerError)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			t.Setenv(envURL, srv.URL)
+			t.Setenv(envAPIKey, "test_key")
+
+			args := append([]string{"issue", "update", "PAI-2"}, tc.args...)
+			_, _, err := executeCLIForTest(t, args...)
+			if err == nil || !containsFold(err.Error(), tc.wantErr) {
+				t.Fatalf("err=%v, want %q", err, tc.wantErr)
+			}
+			if reads != tc.wantReads || writes != 0 {
+				t.Fatalf("reads=%d writes=%d, want reads=%d writes=0", reads, writes, tc.wantReads)
+			}
+		})
+	}
+}
+
+func TestIssueTagFlagsDryRunIsNetworkFree(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.Error(w, `{"error":"must not be called"}`, http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	out, _, err := executeCLIForTest(t,
+		"--json", "issue", "update", "PAI-2", "--add-tag", "ops,host:hsb9", "--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests=%d, want 0", requests)
+	}
+	var result struct {
+		Method     string `json:"method"`
+		TagChanges struct {
+			Add []string `json:"add"`
+		} `json:"tag_changes"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out)
+	}
+	if strings.Join(result.TagChanges.Add, ",") != "ops,host:hsb9" {
+		t.Fatalf("tag_changes.add=%v", result.TagChanges.Add)
+	}
+	if result.Method != "" {
+		t.Fatalf("method=%q, want no phantom field-update request for tag-only dry-run", result.Method)
+	}
+}
+
+func TestIssueCreateTagsDryRunIsNetworkFree(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.Error(w, `{"error":"must not be called"}`, http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	out, _, err := executeCLIForTest(t,
+		"--json", "issue", "create", "--project", "PAI", "--title", "Dry", "--tags", "ops,host:hsb9", "--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests=%d, want 0", requests)
+	}
+	var result struct {
+		Method     string `json:"method"`
+		TagChanges struct {
+			Add []string `json:"add"`
+		} `json:"tag_changes"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out)
+	}
+	if result.Method != "POST" || strings.Join(result.TagChanges.Add, ",") != "ops,host:hsb9" {
+		t.Fatalf("result=%+v, want create plus unresolved tag plan", result)
+	}
+}
+
+func TestIssueUpdateMoveRejectsTagChanges(t *testing.T) {
+	t.Setenv(envURL, "https://example.test")
+	t.Setenv(envAPIKey, "test_key")
+	_, _, err := executeCLIForTest(t,
+		"issue", "update", "PAI-2", "--project", "OPS", "--add-tag", "ops",
+	)
+	if err == nil || !containsFold(err.Error(), "can't be combined") {
+		t.Fatalf("err=%v, want move/tag incompatibility", err)
+	}
+}
