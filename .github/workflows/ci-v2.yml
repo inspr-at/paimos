@@ -38,9 +38,9 @@ jobs:
 
   test:
     # PAI-365: skip on tag pushes — the tag commit was already gated
-    # by the main-branch run (release.sh always pushes main first,
-    # then the tag). Saves ~5 min per release. PRs and main-branch
-    # pushes still run the full pipeline.
+    # by the protected release PR and resulting main-branch run before
+    # release.sh tags that exact merge commit. Saves ~5 min per release.
+    # PRs and main-branch pushes still run the full pipeline.
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -89,6 +89,9 @@ jobs:
 
       - name: Deploy scripts — target resolution
         run: ./scripts/test-deploy-target.sh
+
+      - name: Release scripts — protected-main flow and recovery
+        run: ./scripts/test-release.sh
 
       # PAI-270: prove the dev-login route does NOT ship in production
       # binaries. Build the production binary the same way the

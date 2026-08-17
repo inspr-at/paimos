@@ -25,7 +25,7 @@ CI source of truth: [`.github/workflows/ci-v2.yml`](../.github/workflows/ci-v2.y
 ## The four steps
 
 ```
-just release [patch|minor|major|x.y.z]   # cut a release (VERSION + README + CHANGELOG + tag + push)
+just release [patch|minor|major|x.y.z]   # protected release PR → merge-commit tag → published evidence
 just verify-release <tag>                # verify signature + SBOM attestations + provenance before deploy
 # deploy ppm via the composeStack path — see "Deploying ppm" below
 just doc-sync [tag]                      # file a "doc/site sync follow-up" ticket in PAIMOS
@@ -63,7 +63,7 @@ by design. The image pin lives in the **nixcfg** repo at
 caught a would-be downgrade from a floating reconcile). The proven
 sequence (v5.1.0 → v5.6.2):
 
-1. `just release <level>` → wait for tag CI → `just verify-release vX.Y.Z`.
+1. `just release <level>` → protected release PR/merge → wait for tag CI → `just verify-release vX.Y.Z`.
 2. **Volume backup on csb1** — throwaway alpine tars `csb1_ppm_data` to
    `/home/mba/paimos-backups/ppm/<utc-ts>/data.tar.gz`, plus a
    `manifest.yaml` naming pre- and target images.
@@ -86,26 +86,38 @@ runbook `ppm-deploy-composestack` (#4278).
 
 ## `just release`
 
-1. Refuses to run if working tree dirty, not on `main`, or not in sync with
-   `origin/main`.
+1. Starts from current `main` (or the matching release branch when resuming).
+   The only permitted initial dirty state is a reviewed, uncommitted
+   `docs/CHANGELOG.md` entry for a non-interactive release.
 2. If no argument: dumps commits since the last release tag (all + runtime-only) and
    exits. Look at the output, decide patch/minor/major, re-run.
 3. Computes the new version from the last SemVer release tag (`vX.Y.Z`, not
    operational/bookmark tags and not `VERSION` — that's why `VERSION` can never
    drift again).
-4. Updates `VERSION`, refreshes the README version badge, prepends a draft
-   entry to `docs/CHANGELOG.md` pre-seeded from commit subjects, opens
-   `$EDITOR` so you can clean it up before committing. If an entry for that
-   version already exists, just its date is refreshed (needed once, for the
-   1.2.2–1.5.1 drift catch-up).
+4. Creates deterministic `release/vX.Y.Z`, updates `VERSION`, refreshes the
+   README badge and pinned install examples, and prepends a draft CHANGELOG
+   entry pre-seeded from commit subjects. Interactive runs open `$EDITOR`;
+   non-interactive runs require the reviewed entry before invocation.
 5. Runs `scripts/check-release-hygiene.sh`: README badge must match `VERSION`,
    README's health example must stay generic (`<VERSION>`), and
    `docs/CHANGELOG.md` must not contain the auto-generated TODO stub.
-6. Commits (`release: vX.Y.Z`), tags `vX.Y.Z`, pushes both.
-7. Polls ghcr for up to 10 minutes until the new image tag is visible, then
+6. Commits with DCO sign-off (`release: vX.Y.Z`), pushes only the release
+   branch, and opens or reuses one PR against protected `main`.
+7. Enables squash auto-merge, waits for the required hosted checks, and tags
+   the exact PR merge commit after proving it is on `origin/main` and changes
+   only the four release files. There is no direct-main push or ruleset bypass.
+8. Polls ghcr for up to 10 minutes until the new image tag is visible, then
    waits for the tag-push GitHub Actions workflows (`ci` + `release`) to
    succeed before printing the next-step deploy commands. If a workflow fails,
    release exits non-zero and points at the failed run; do not deploy that tag.
+
+Retries are explicit checkpoints, not a second release: the same version
+reuses a matching open PR, finishes a merged-but-untagged PR, or accepts an
+existing tag only when it resolves to that PR's merge commit. Any release-file,
+branch, PR target, merge-commit, or tag drift is rejected. A behind branch is
+merged with current `origin/main` locally using a merge commit carrying the
+author's DCO sign-off, so the required checks can rerun without an unsigned
+GitHub-generated update.
 
 **Picking the level (what the AI looks at):** if `git log vLAST..HEAD` contains
 commits that touch files under `backend/` or `frontend/src/`, lean **minor**.
@@ -261,8 +273,9 @@ staring at a schema it doesn't understand. Always restore the DB too.
   (OPS-116). The script remains valid for compose-based instances.
 - Ad-hoc `ssh csb1 'docker compose pull && up -d'`: impossible on the
   composeStack host and replaced by the reconcile.
-- Manual `VERSION` + README badge + `CHANGELOG` edits: replaced by
-  `just release`, which does them atomically with the tag.
+- Manual `VERSION` + README badge + install-example edits: replaced by
+  `just release`, which carries the reviewed CHANGELOG entry through a
+  protected release PR and tags only its exact merge commit.
 
 ## What this deliberately leaves out
 

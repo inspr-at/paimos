@@ -120,22 +120,41 @@ or when a downstream auditor asks for a snapshot.
 
 ## Cutting a release
 
-Pick patch / minor / major; the script handles VERSION bump, README
-badge, CHANGELOG date, commit, tag, and the wait for `ghcr.io/.../<ver>`
-to appear:
+Pick patch / minor / major; the script handles the VERSION bump, README
+badge, CHANGELOG date, release commit with DCO sign-off, protected PR, auto-merge,
+exact merge-commit tag, and the wait for `ghcr.io/.../<ver>` to appear:
 
     just release patch
     just release minor
     just release <x.y.z>      # explicit override (e.g., for post-rc cuts)
 
-For agent / non-TTY runs, the CHANGELOG entry for the new version must
-already exist (the script refuses to auto-generate the stub when
-`$EDITOR` is missing). Add the `## [<x.y.z>]` section to
-[`docs/CHANGELOG.md`](CHANGELOG.md) first, then:
+The script never pushes `main` or uses a ruleset bypass. It creates or reuses
+`release/v<x.y.z>`, opens one PR against `main`, enables protected squash
+auto-merge, and tags the merge commit returned for that PR. If another change
+lands on `main` later, it is not accidentally included in the release tag.
+
+For agent / non-TTY runs, the reviewed CHANGELOG entry for the new version
+must already exist (the script refuses to commit its generated TODO stub).
+Starting from clean, current `main`, add only the `## [<x.y.z>]` section to
+[`docs/CHANGELOG.md`](CHANGELOG.md), leave that one file uncommitted, then run:
 
     ./scripts/release.sh patch --no-edit
     # or the explicit form, e.g. when the latest tag is an -rc pre-release:
     ./scripts/release.sh <x.y.z> --no-edit
+
+That reviewed working-tree change moves onto the release branch before the
+other deterministic release files are updated. Interactive runs start clean,
+create the release branch first, and open `$EDITOR` on the generated draft.
+
+Rerunning the same explicit version is safe: a matching open PR, a merged but
+untagged PR, and an already-correct tag resume from their last checkpoint.
+Branch/file/PR/tag drift fails closed. If `main` advances while checks run,
+the script merges it into the release branch with a DCO sign-off and lets the
+required checks rerun; it does not ask GitHub to synthesize an unsigned update.
+The accepted PR-head OID is pinned throughout that wait, its four file changes
+are checked against the deterministic transformations, and the final squash
+tree must match it exactly. Local commit/tag signing configuration is disabled
+for these DCO commits and the annotated tag; CI signs the published artifacts.
 
 After the tag is pushed, both workflows run in parallel — total
 wall-clock is typically 8–15 minutes (Apple's notarytool dominates the
