@@ -83,6 +83,7 @@ func setupOIDCTest(t *testing.T, issuer *oidcMockIssuer) {
 	t.Setenv("OIDC_CLIENT_ID", "paimos-test-client")
 	t.Setenv("OIDC_CLIENT_SECRET", "test-client-secret")
 	t.Setenv("OIDC_REDIRECT_URL", "https://paimos.example.test/api/auth/oidc/callback")
+	t.Setenv("OIDC_PROMPT", "")
 	t.Setenv("OIDC_BUTTON_LABEL", "Sign in with Test SSO")
 	t.Setenv("OIDC_POST_LOGIN_REDIRECT", "/after-sso")
 
@@ -152,6 +153,7 @@ func TestOIDCStatusReflectsConfiguration(t *testing.T) {
 		"email_verified": true,
 	})
 	setupOIDCTest(t, issuer)
+	t.Setenv("OIDC_PROMPT", "select_account")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/status", nil)
 	rec := httptest.NewRecorder()
@@ -168,6 +170,13 @@ func TestOIDCStatusReflectsConfiguration(t *testing.T) {
 	}
 	if !got.Enabled || got.Label != "Sign in with Test SSO" {
 		t.Fatalf("status = %+v, want enabled with configured label", got)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw status: %v", err)
+	}
+	if _, present := raw["prompt"]; present {
+		t.Fatal("public OIDC status exposed the operator prompt setting")
 	}
 }
 
@@ -219,6 +228,51 @@ func TestOIDCLoginBuildsPKCERedirect(t *testing.T) {
 	// PAI-743: no hint supplied → the parameter must be absent, not empty.
 	if _, present := q["login_hint"]; present {
 		t.Fatalf("login_hint sent without a caller-supplied hint: %s", loc.RawQuery)
+	}
+	if _, present := q["prompt"]; present {
+		t.Fatalf("prompt sent without OIDC_PROMPT: %s", loc.RawQuery)
+	}
+}
+
+func TestOIDCLoginForwardsConfiguredPromptAfterCacheWarmup(t *testing.T) {
+	issuer := newOIDCMockIssuer(t, map[string]any{"sub": "sub-1", "email": "person@example.test", "email_verified": true})
+	setupOIDCTest(t, issuer)
+
+	// Warm the lazy config cache with the default, which must omit prompt.
+	_, initialLoc := startOIDCLogin(t)
+	if _, present := initialLoc.Query()["prompt"]; present {
+		t.Fatalf("prompt sent with unset OIDC_PROMPT: %s", initialLoc.RawQuery)
+	}
+
+	// Changing only OIDC_PROMPT must invalidate the input cache. Outer
+	// whitespace is configuration noise; interior spaces are valid OIDC
+	// prompt separators and must survive URL encoding.
+	t.Setenv("OIDC_PROMPT", "  select_account consent  ")
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/login?login_hint=person%40example.test", nil)
+	rec := httptest.NewRecorder()
+	OIDCLogin(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("login status = %d, want 302", rec.Code)
+	}
+	loc, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if got := loc.Query().Get("prompt"); got != "select_account consent" {
+		t.Fatalf("prompt = %q, want trimmed configured value", got)
+	}
+	if got := loc.Query().Get("login_hint"); got != "person@example.test" {
+		t.Fatalf("login_hint = %q, want configured hint alongside prompt", got)
+	}
+	if !strings.Contains(loc.RawQuery, "prompt=select_account+consent") {
+		t.Fatalf("prompt was not safely URL-encoded: %s", loc.RawQuery)
+	}
+
+	// Whitespace-only configuration returns to the compatible default.
+	t.Setenv("OIDC_PROMPT", " \t ")
+	_, blankLoc := startOIDCLogin(t)
+	if _, present := blankLoc.Query()["prompt"]; present {
+		t.Fatalf("prompt sent for whitespace-only OIDC_PROMPT: %s", blankLoc.RawQuery)
 	}
 }
 

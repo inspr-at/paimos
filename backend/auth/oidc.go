@@ -68,6 +68,7 @@ type oidcConfig struct {
 	ClientSecret   string
 	RedirectURL    string
 	Scopes         string
+	Prompt         string
 	ProvisionMode  string
 	AutoCreateRole string
 
@@ -106,6 +107,7 @@ func loadOIDCConfig(ctx context.Context) (oidcConfig, error) {
 		ClientSecret:   clientSecret,
 		RedirectURL:    strings.TrimSpace(os.Getenv("OIDC_REDIRECT_URL")),
 		Scopes:         envDefault("OIDC_SCOPES", "openid email profile"),
+		Prompt:         strings.TrimSpace(os.Getenv("OIDC_PROMPT")),
 		ProvisionMode:  strings.ToLower(strings.TrimSpace(envDefault("OIDC_PROVISION_MODE", oidcProvisionInviteOnly))),
 		AutoCreateRole: strings.ToLower(strings.TrimSpace(envDefault("OIDC_AUTO_CREATE_ROLE", "member"))),
 	}
@@ -140,6 +142,7 @@ func (c oidcConfig) sameConfigInput(other oidcConfig) bool {
 		c.ClientSecret == other.ClientSecret &&
 		c.RedirectURL == other.RedirectURL &&
 		c.Scopes == other.Scopes &&
+		c.Prompt == other.Prompt &&
 		c.ProvisionMode == other.ProvisionMode &&
 		c.AutoCreateRole == other.AutoCreateRole
 }
@@ -263,6 +266,9 @@ func OIDCLogin(w http.ResponseWriter, r *http.Request) {
 	q.Set("client_id", cfg.ClientID)
 	q.Set("redirect_uri", cfg.RedirectURL)
 	q.Set("scope", cfg.Scopes)
+	if cfg.Prompt != "" {
+		q.Set("prompt", cfg.Prompt)
+	}
 	q.Set("state", state)
 	q.Set("nonce", nonce)
 	q.Set("code_challenge", challenge)
