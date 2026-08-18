@@ -45,8 +45,9 @@ drift outside the 1280×800, 24 fps, 5–15 second, no-audio H.264 contract or t
 The raw dev fixtures are built for exercising filters, not for being
 photographed. `demo-polish.sql` fixes what reads as broken on camera:
 
-- fixture users are named `dev_admin` / `debug-admin`, which show up in the
-  greeting, the sidebar, avatars and every reporter column;
+- fixture databases created before PAI-697 may still show `dev_admin` in the
+  greeting and sidebar; the polish step converges them to the canonical
+  synthetic Mara Ellis identity used by current seeds;
 - seven ACME issues share the title "Reporting CSV export", so Recent
   Issues looks like a seeding bug.
 

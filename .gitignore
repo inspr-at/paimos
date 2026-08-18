@@ -48,6 +48,8 @@ data/*.sqlite
 data/*.sqlite3
 data/*.db-shm
 data/*.db-wal
+# Dev-seeded and locally uploaded profile images are runtime data.
+/data/avatars/
 # Local dev DB accumulates in backend/data/ when running `go run .` from
 # the backend dir — pattern above is anchored to repo root, this catches it.
 backend/data/

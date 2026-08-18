@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { userDisplayName, userInitials } from '@/utils/userDisplay'
 
 const props = withDefaults(defineProps<{
   user: { username: string; avatar_path?: string; first_name?: string; last_name?: string; email?: string; nickname?: string } | null | undefined
@@ -16,16 +17,11 @@ const tooltipVisible = ref(false)
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 
 const initials = computed(() => {
-  if (!props.user) return '?'
-  const src = props.user.nickname?.trim() || props.user.username
-  return src.slice(0, 3).toUpperCase()
+  return userInitials(props.user)
 })
 
 const displayName = computed(() => {
-  if (!props.user) return ''
-  const fn = props.user.first_name?.trim()
-  const ln = props.user.last_name?.trim()
-  return props.user.nickname?.trim() || [fn, ln].filter(Boolean).join(' ') || props.user.username
+  return userDisplayName(props.user)
 })
 
 const hasAvatar = computed(() => !!props.user?.avatar_path && !imgError.value)

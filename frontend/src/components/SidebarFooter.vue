@@ -6,6 +6,7 @@ import { useBranding } from '@/composables/useBranding'
 import { formatDisplayVersion } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
 import AppChangelogModal from '@/components/AppChangelogModal.vue'
+import { userInitials } from '@/utils/userDisplay'
 
 defineProps<{
   isExpanded: boolean
@@ -35,7 +36,7 @@ function isActive(path: string) {
     <RouterLink to="/settings?tab=account" class="user-profile-link" :title="isExpanded ? 'Profile settings' : (auth.user?.nickname || auth.user?.first_name || auth.user?.username || '')">
       <div class="user-avatar">
         <img v-if="auth.user?.avatar_path" :src="auth.user.avatar_path" class="user-avatar-img" :alt="auth.user.username" />
-        <span v-else>{{ (auth.user?.nickname || auth.user?.username || '?').slice(0, 3).toUpperCase() }}</span>
+        <span v-else>{{ userInitials(auth.user) }}</span>
       </div>
       <div class="user-info sl">
         <span class="user-name">{{ auth.user?.nickname || auth.user?.first_name || auth.user?.username }}</span>
