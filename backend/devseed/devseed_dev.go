@@ -38,10 +38,12 @@ package devseed
 
 import (
 	"database/sql"
+	_ "embed"
 	"fmt"
 	"log"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -67,15 +69,22 @@ This ticket dogfoods that path. It keeps the problem, acceptance boundary, deliv
 	paiHeroCostUnit      = "Paimos product"
 	paiHeroRelease       = "Demo walkthrough"
 	paiHeroJiraID        = "PAI-DEMO-1"
+	devAdminAvatarFile   = "9001.jpg"
 )
+
+//go:embed assets/dev-admin-avatar.jpg
+var devAdminAvatar []byte
 
 // devUser is one row in the user matrix. ID is pinned so the
 // frontend's playwright selectors can refer to fixture users
 // stably across machines.
 type devUser struct {
-	ID       int64
-	Username string
-	Role     string // admin | member | external
+	ID        int64
+	Username  string
+	Role      string // admin | member | external
+	FirstName string
+	LastName  string
+	Nickname  string
 }
 
 // devProject is one fixture project.
@@ -110,7 +119,7 @@ type debugUser struct {
 
 var (
 	devUsers = []devUser{
-		{ID: 9001, Username: "dev_admin", Role: "admin"},
+		{ID: 9001, Username: "dev_admin", Role: "admin", FirstName: "Mara", LastName: "Ellis", Nickname: "Mara Ellis"},
 		{ID: 9002, Username: "dev_editor", Role: "member"},
 		{ID: 9003, Username: "dev_viewer", Role: "member"},
 		{ID: 9004, Username: "dev_outsider", Role: "external"},
@@ -190,15 +199,66 @@ func seedUsers(tx *sql.Tx) error {
 		if u.Role == auth.RoleSuperAdmin {
 			superAdminFlag = 1
 		}
+		firstName := u.FirstName
+		if firstName == "" {
+			firstName = u.Username
+		}
+		lastName := u.LastName
+		if lastName == "" {
+			lastName = "Dev"
+		}
 		_, err := tx.Exec(`
 			INSERT OR IGNORE INTO users (
-				id, username, password, role, role_key, is_super_admin, status, first_name, last_name, must_change_password
+				id, username, password, role, role_key, is_super_admin, status,
+				first_name, last_name, nickname, must_change_password
 			)
-			VALUES (?, ?, '', ?, ?, ?, 'active', ?, 'Dev', 0)
-		`, u.ID, u.Username, auth.LegacyRoleForPublicRole(u.Role), u.Role, superAdminFlag, u.Username)
+			VALUES (?, ?, '', ?, ?, ?, 'active', ?, ?, ?, 0)
+		`, u.ID, u.Username, auth.LegacyRoleForPublicRole(u.Role), u.Role, superAdminFlag, firstName, lastName, u.Nickname)
 		if err != nil {
 			return fmt.Errorf("insert user %s: %w", u.Username, err)
 		}
+	}
+
+	// PAI-746 established Mara Ellis as the public synthetic fixture after
+	// this ticket's older name suggestion. Converge only the exact legacy
+	// seed identity, never a developer's locally edited profile.
+	if _, err := tx.Exec(`
+		UPDATE users
+		SET first_name='Mara', last_name='Ellis', nickname='Mara Ellis'
+		WHERE username='dev_admin'
+		  AND first_name='dev_admin' AND last_name='Dev' AND nickname=''
+	`); err != nil {
+		return fmt.Errorf("converge dev_admin identity: %w", err)
+	}
+
+	return seedDevAdminAvatar(tx)
+}
+
+func seedDevAdminAvatar(tx *sql.Tx) error {
+	var avatarPath string
+	if err := tx.QueryRow(`SELECT avatar_path FROM users WHERE username='dev_admin'`).Scan(&avatarPath); err != nil {
+		return fmt.Errorf("read dev_admin avatar: %w", err)
+	}
+	if avatarPath != "" {
+		return nil
+	}
+
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "/app/data"
+	}
+	avatarsDir := filepath.Join(dataDir, "avatars")
+	if err := os.MkdirAll(avatarsDir, 0o750); err != nil {
+		return fmt.Errorf("create fixture avatar directory: %w", err)
+	}
+	destination := filepath.Join(avatarsDir, devAdminAvatarFile)
+	if err := os.WriteFile(destination, devAdminAvatar, 0o600); err != nil {
+		return fmt.Errorf("write dev_admin fixture avatar: %w", err)
+	}
+	if _, err := tx.Exec(`
+		UPDATE users SET avatar_path=? WHERE username='dev_admin' AND avatar_path=''
+	`, "/api/avatars/"+devAdminAvatarFile); err != nil {
+		return fmt.Errorf("set dev_admin fixture avatar: %w", err)
 	}
 	return nil
 }

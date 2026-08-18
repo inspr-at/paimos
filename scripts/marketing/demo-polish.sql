@@ -2,8 +2,9 @@
 -- Runs against the gitignored data/paimos.db only. Nothing here is
 -- committed, and nothing is copied from a live instance.
 
--- 1. Give the demo operator a human identity. The dashboard greeting
---    uses first_name; the sidebar falls back through nickname.
+-- 1. Converge fixture databases created before PAI-697. New dev seeds already
+--    carry this synthetic identity; keeping the update here makes old local
+--    capture workspaces deterministic too.
 UPDATE users
    SET first_name = 'Mara', last_name = 'Ellis', nickname = 'Mara Ellis'
  WHERE username = 'dev_admin';

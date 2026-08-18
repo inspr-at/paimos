@@ -3,6 +3,7 @@ import { ref, computed, nextTick, onBeforeUnmount, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, csrfHeaders, errMsg } from '@/api/client'
 import { MAX_IMAGE_SIZE } from '@/utils/constants'
+import { userInitials } from '@/utils/userDisplay'
 import { useAuthStore } from '@/stores/auth'
 import { useConfirm } from '@/composables/useConfirm'
 import {
@@ -474,7 +475,7 @@ init()
             <img :src="auth.user.avatar_path" class="profile-avatar-img" alt="Avatar" />
           </div>
           <div v-else class="profile-avatar-placeholder">
-            {{ (auth.user?.nickname || auth.user?.username || '?').slice(0, 3).toUpperCase() }}
+            {{ userInitials(auth.user) }}
           </div>
         </div>
         <div class="profile-avatar-actions">

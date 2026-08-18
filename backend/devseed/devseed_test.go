@@ -10,6 +10,9 @@
 package devseed_test
 
 import (
+	"image/jpeg"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +20,71 @@ import (
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/devseed"
 )
+
+func TestRun_SeedsSyntheticDevAdminIdentityAndAvatar(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	t.Setenv("PAIMOS_TEST_MODE", "1")
+	if err := db.Open(); err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() {
+		if db.DB != nil {
+			db.DB.Close()
+			db.DB = nil
+		}
+	})
+
+	if err := devseed.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var firstName, lastName, nickname, avatarPath string
+	if err := db.DB.QueryRow(`
+		SELECT first_name, last_name, nickname, avatar_path
+		FROM users WHERE username='dev_admin'
+	`).Scan(&firstName, &lastName, &nickname, &avatarPath); err != nil {
+		t.Fatalf("read dev_admin: %v", err)
+	}
+	if firstName != "Mara" || lastName != "Ellis" || nickname != "Mara Ellis" {
+		t.Fatalf("dev_admin identity = %q %q / %q, want Mara Ellis", firstName, lastName, nickname)
+	}
+	if avatarPath != "/api/avatars/9001.jpg" {
+		t.Fatalf("avatar_path = %q, want /api/avatars/9001.jpg", avatarPath)
+	}
+
+	avatar, err := os.Open(filepath.Join(dataDir, "avatars", "9001.jpg"))
+	if err != nil {
+		t.Fatalf("open seeded avatar: %v", err)
+	}
+	defer avatar.Close()
+	config, err := jpeg.DecodeConfig(avatar)
+	if err != nil {
+		t.Fatalf("decode seeded avatar: %v", err)
+	}
+	if config.Width != 256 || config.Height != 256 {
+		t.Fatalf("seeded avatar = %dx%d, want 256x256", config.Width, config.Height)
+	}
+
+	if _, err := db.DB.Exec(`
+		UPDATE users
+		SET first_name='Local', last_name='Operator', nickname='LO', avatar_path='/api/avatars/custom.jpg'
+		WHERE username='dev_admin'
+	`); err != nil {
+		t.Fatalf("customize dev_admin: %v", err)
+	}
+	if err := devseed.Run(); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if err := db.DB.QueryRow(`
+		SELECT first_name, last_name, nickname, avatar_path
+		FROM users WHERE username='dev_admin'
+	`).Scan(&firstName, &lastName, &nickname, &avatarPath); err != nil {
+		t.Fatalf("read customized dev_admin: %v", err)
+	}
+	if firstName != "Local" || lastName != "Operator" || nickname != "LO" || avatarPath != "/api/avatars/custom.jpg" {
+		t.Fatalf("re-seed replaced local profile: %q %q / %q / %q", firstName, lastName, nickname, avatarPath)
+	}
+}
 
 // TestRun_Idempotency pins the PAI-267 contract: re-running dev-seed
 // is safe and never grows the row counts past the initial set. This
