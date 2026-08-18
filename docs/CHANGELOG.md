@@ -5,6 +5,18 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.10.1] — 2026-08-18
+
+### Added — Synthetic human demo identity (PAI-697)
+
+- Development fixtures now seed the canonical Mara Ellis demo operator with a bundled, wholly synthetic portrait, while preserving locally customized profile names and avatars on later seed runs.
+- The fixture image follows the authenticated avatar storage path, and its generation provenance is documented alongside the dev-only asset.
+
+### Fixed — Two-letter avatar fallbacks
+
+- Shared avatar initials now derive natural two-word or segmented-handle initials and never exceed two characters across reusable avatars, the sidebar, and account settings.
+- Local avatar runtime data is ignored so `just dev-up` leaves the worktree clean.
+
 ## [5.10.0] — 2026-08-18
 
 ### Added — Operator-controlled OIDC account selection (PAI-740)
