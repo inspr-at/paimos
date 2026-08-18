@@ -5,6 +5,18 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.10.0] — 2026-08-18
+
+### Added — Operator-controlled OIDC account selection (PAI-740)
+
+- `OIDC_PROMPT` optionally forwards space-delimited prompt values to the identity provider authorization endpoint; unset or blank preserves existing session reuse, while `select_account` asks compatible providers for account choice.
+- Prompt-only runtime configuration changes invalidate the lazy OIDC cache; values are trimmed and encoded, coexist with PKCE and `login_hint`, and remain absent from public OIDC status.
+- OIDC configuration documentation and the example environment now describe the operator contract.
+
+### Fixed — Locale-consistent agent run timestamps
+
+- Agent run timestamps now use the shared display-locale and timezone formatter, restoring the repository formatting gate without changing timestamp semantics.
+
 ## [5.9.2] — 2026-08-17
 
 ### Added — Safe CLI issue tag assignment (PAI-791)
