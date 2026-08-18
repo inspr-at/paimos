@@ -58,7 +58,7 @@ The register contains two validated deployment histories. As of 2026-06-30, ppm 
 | AI assist | OpenRouter (configured), `anthropic/claude-sonnet-4.5` model |
 | OIDC | configured against Zitadel (`auth.inspr.at`) via generic OIDC + PKCE; local password + TOTP remain available |
 | Active since | v1.x (continuously upgraded; no fresh-install in current era) |
-| Last verified runtime | 2026-08-06: `5.6.2` (`/api/health`, `paimos --instance ppm doctor` incl. auth + schema `2.0.0`) |
+| Last verified runtime | 2026-08-18: `5.10.1` (`/api/health`, `paimos --instance ppm doctor` incl. auth + schema `2.1.0`) |
 | Backup pattern | per-deploy volume tar + manifest under `/home/mba/paimos-backups/ppm/<ts>/` (composeStack path, see [`DEPLOY.md`](DEPLOY.md)); backups on the same host (acknowledged limitation tracked under [§3 Findings](#3--structured-findings) F-08) |
 | Audience | the maintainer + a small group; current production canary |
 
