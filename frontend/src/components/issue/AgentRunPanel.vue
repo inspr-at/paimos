@@ -23,6 +23,7 @@ import type {
   AiKnowledgeSuggestion,
   AiSelectorDefault,
 } from '@/composables/useAiAction'
+import { formatDateTimeWithLocale } from '@/composables/useDateFormat'
 
 const props = withDefaults(defineProps<{
   issueId: number
@@ -480,7 +481,15 @@ function isoAttr(ts: string): string {
   return toDate(ts)?.toISOString() ?? ts
 }
 function localTime(ts: string): string {
-  return toDate(ts)?.toLocaleString() ?? ts
+  const formatted = formatDateTimeWithLocale(ts, undefined, {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  })
+  return formatted === '—' ? ts : formatted
 }
 function runTimestamp(run: AgentRun): string {
   return run.finished_at || run.started_at || run.created_at

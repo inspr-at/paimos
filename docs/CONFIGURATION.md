@@ -112,6 +112,7 @@ permissions remain local authorization.
 | `OIDC_CLIENT_SECRET` | *(unset)* | Optional for public clients (PKCE-only); required for confidential clients. Supports `OIDC_CLIENT_SECRET_FILE`. |
 | `OIDC_REDIRECT_URL` | *(unset)* | Required. Must exactly match the IdP-registered redirect (e.g. `https://paimos.example.com/api/auth/oidc/callback`). |
 | `OIDC_SCOPES` | `openid email profile` | Space-separated. |
+| `OIDC_PROMPT` | *(unset)* | Optional space-separated OIDC prompt values forwarded to the authorization endpoint. Unset preserves the IdP's normal session-reuse behavior; `select_account` asks compatible providers to show an account chooser. Provider extensions are allowed. |
 | `OIDC_BUTTON_LABEL` | `Sign in with SSO` | Shown on the login page. |
 | `OIDC_POST_LOGIN_REDIRECT` | `/` | SPA path to land on after a successful SSO login. |
 | `OIDC_SSO_DOMAINS` | *(unset)* | PAI-743 home realm discovery: comma-separated email domains served by this IdP (`agm.ng, example.com`; a leading `@` is tolerated). On the identifier-first login, an address in one of these domains is offered SSO **only** — the password field is hidden. Unset means no routing: every identifier is offered password + SSO, exactly as before. |
