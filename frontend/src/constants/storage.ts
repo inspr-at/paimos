@@ -112,3 +112,7 @@ export const LS_INTAKE_CARDS = 'paimos:intake:cards'
 
 /** PAI-714: Voice Intake — ELI speak-back muted state ("1" = muted). Default muted. */
 export const LS_INTAKE_TTS_MUTED = 'paimos:intake:tts-muted'
+
+/** PAI-805: Agent Mode — last selected delivery per user (stable delivery id). */
+export const lsAgentModeSelectedKey = (userId: number | undefined) =>
+  `paimos:agent-mode:selected:${userId ?? 0}`

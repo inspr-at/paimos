@@ -232,6 +232,9 @@ onBeforeUnmount(() => {
           <RouterLink v-if="voiceIntakeEnabled" to="/intake" :class="['nav-item', { active: isActive('/intake') }]" :title="isExpanded ? '' : 'Voice Intake'">
             <AppIcon name="mic" /><span class="sl">Voice Intake</span>
           </RouterLink>
+          <RouterLink to="/agent-mode" :class="['nav-item', { active: isActive('/agent-mode') }]" :title="isExpanded ? '' : 'Agent Mode'">
+            <AppIcon name="activity" /><span class="sl">Agent Mode</span>
+          </RouterLink>
           <RouterLink v-if="sidebarSprints.length" to="/sprint-board" :class="['nav-item', { active: isActive('/sprint-board') }]" :title="isExpanded ? '' : 'Sprint Board'">
             <AppIcon name="layout-grid" /><span class="sl">Sprint Board</span>
           </RouterLink>

@@ -168,11 +168,28 @@ const router = createRouter({
       component: () => import("@/views/VoiceIntakeView.vue"),
       meta: { headerSearchHidden: true },
     },
+    {
+      // PAI-805: Agent Mode — voice-first supervision cockpit (detail 10
+      // ships here; detail 1 / 100 render through their seams). The view
+      // owns its header chrome (title, detail lever, live chip) and its
+      // internal scroll, so the search field yields its header spot.
+      path: "/agent-mode",
+      component: () => import("@/views/AgentModeView.vue"),
+      meta: { headerSearchHidden: true, scrollMode: "self" },
+    },
     ...(import.meta.env.DEV
       ? [
           {
             path: "/dev/ai-ux",
             component: () => import("@/components/ai/AiUxDevReference.vue"),
+          },
+          {
+            // PAI-805: fixture-backed Agent Mode reference (1/10/100
+            // deliveries + every load state) for visual QA without the
+            // PAI-804 backend. DEV builds only; never reachable in prod.
+            path: "/dev/agent-mode",
+            component: () => import("@/components/agent-mode/AgentModeDevReference.vue"),
+            meta: { headerSearchHidden: true, scrollMode: "self" as const },
           },
           {
             path: "/dev/undo",

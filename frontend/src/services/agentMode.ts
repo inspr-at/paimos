@@ -1,0 +1,176 @@
+/*
+ * PAIMOS — Your Professional & Personal AI Project OS
+ * Copyright (C) 2026 Markus Barta <markus@barta.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, version 3.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public
+ * License along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+// PAI-805 — Agent Mode domain model + data service.
+//
+// The domain types below are what every Agent Mode component consumes.
+// They are deliberately decoupled from the wire payload (see
+// `agentModeTransport.ts`) so the PAI-804 integration owner can adapt
+// the transport without touching cards, lanes, selection, or trust logic.
+//
+// There is NO demo fallback here. If the API is unreachable the service
+// throws a classified `AgentModeLoadError` and the UI renders an honest
+// offline / forbidden / not-found / error state. Deterministic fixtures
+// for tests and the DEV-only reference route live in
+// `agentModeFixtures.ts` and are never imported by production code paths.
+
+import { api, ApiError, isSessionExpiredError } from '@/api/client'
+import {
+  buildSnapshotPath,
+  normalizeWireSnapshot,
+  type AgentModeSnapshotQuery,
+  type WireSnapshot,
+} from './agentModeTransport'
+
+export type DeliveryHealth = 'healthy' | 'attention' | 'at_risk' | 'blocked' | 'unknown'
+export type ActivityKind =
+  | 'working'
+  | 'testing'
+  | 'deploying'
+  | 'verifying'
+  | 'waiting'
+  | 'blocked'
+  | 'idle'
+  | 'unknown'
+export type StageKey = 'specification' | 'implementation' | 'qa' | 'deployment' | 'verification' | 'unknown'
+export type FreshnessState = 'fresh' | 'aging' | 'stale' | 'unknown'
+/** 0 = none, 1 = watch, 2 = needs input, 3 = blocked / urgent. */
+export type AttentionLevel = 0 | 1 | 2 | 3
+export type EstimateConfidence = 'high' | 'medium' | 'low' | 'none'
+
+export interface DeliveryActor {
+  /** Stable machine name (agent name, reporter id). */
+  name: string
+  /** Human label shown on the card. */
+  label: string
+  kind: 'agent' | 'system' | 'human' | 'unknown'
+}
+
+export interface DeliveryLane {
+  /** Stable lane key: `project:<id>/epic:<id>` or `project:<id>/ungrouped`. */
+  key: string
+  projectId: number
+  projectKey: string
+  projectName: string
+  epicId: number | null
+  epicKey: string | null
+  epicTitle: string | null
+}
+
+export interface DeliveryProgress {
+  percent: number | null
+  /** Server-side trust verdict (PAI-803). Never show a percent unless true. */
+  trusted: boolean
+  confidence: EstimateConfidence
+  source: string | null
+  basis: string | null
+  revision: number | null
+}
+
+export interface DeliveryEta {
+  landingAt: string | null
+  optimisticAt: string | null
+  pessimisticAt: string | null
+  /** Server-side trust verdict (PAI-803). Never show a landing time unless true. */
+  trusted: boolean
+  confidence: EstimateConfidence
+  basis: string | null
+  calculatedAt: string | null
+}
+
+export interface Delivery {
+  /** Stable delivery identity across snapshots (selection key). */
+  id: string
+  issueId: number
+  issueKey: string
+  title: string
+  lane: DeliveryLane
+  /** Supplemental only — never used for lane structure. */
+  tags: string[]
+  actor: DeliveryActor | null
+  activity: { kind: ActivityKind; text: string | null; since: string | null }
+  stage: { key: StageKey; label: string | null; index: number | null; total: number | null }
+  health: DeliveryHealth
+  attention: { level: AttentionLevel; reason: string | null; since: string | null }
+  freshness: { state: FreshnessState; lastReportAt: string | null }
+  blockers: Array<{ kind: string; text: string }>
+  progress: DeliveryProgress | null
+  eta: DeliveryEta | null
+  statusText: string | null
+  updatedAt: string | null
+}
+
+export interface AgentModeSnapshot {
+  /** Server clock at calculation time (ISO). Null when the API omits it. */
+  serverTime: string | null
+  /** Stable revision / sequence for reconnect + replay (PAI-804). */
+  revision: string | null
+  deliveries: Delivery[]
+  /** Browser clock when the payload was received — paired with serverTime for skew. */
+  receivedAt: number
+}
+
+export type AgentModeLoadErrorKind = 'offline' | 'forbidden' | 'not-found' | 'error'
+
+export class AgentModeLoadError extends Error {
+  constructor(
+    public readonly kind: AgentModeLoadErrorKind,
+    message: string,
+    public readonly status: number | null = null,
+    public readonly cause?: unknown,
+  ) {
+    super(message)
+    this.name = 'AgentModeLoadError'
+  }
+}
+
+/** Maps transport failures to the honest UI states. Session expiry is
+ * re-thrown untouched so the global SessionExpiredModal stays the single
+ * surface for that condition. */
+export function classifyLoadError(e: unknown): AgentModeLoadError {
+  if (e instanceof AgentModeLoadError) return e
+  if (e instanceof ApiError) {
+    if (e.status === 403) return new AgentModeLoadError('forbidden', e.message, 403, e)
+    if (e.status === 404) return new AgentModeLoadError('not-found', e.message, 404, e)
+    if (e.status === 0 || e.status === 502 || e.status === 503 || e.status === 504) {
+      return new AgentModeLoadError('offline', e.message, e.status, e)
+    }
+    return new AgentModeLoadError('error', e.message, e.status, e)
+  }
+  if (e instanceof TypeError) {
+    // fetch() rejects with TypeError on network failure / DNS / CORS.
+    return new AgentModeLoadError('offline', e.message, 0, e)
+  }
+  const message = e instanceof Error ? e.message : 'request failed'
+  return new AgentModeLoadError('error', message, null, e)
+}
+
+export type AgentModeSnapshotLoader = (
+  query: AgentModeSnapshotQuery,
+  opts?: { signal?: AbortSignal },
+) => Promise<AgentModeSnapshot>
+
+/** Production loader: one ACL-filtered request, normalized at the edge. */
+export const fetchAgentModeSnapshot: AgentModeSnapshotLoader = async (query, opts) => {
+  try {
+    const wire = await api.get<WireSnapshot>(buildSnapshotPath(query), { signal: opts?.signal })
+    return normalizeWireSnapshot(wire, Date.now())
+  } catch (e) {
+    if (isSessionExpiredError(e)) throw e
+    throw classifyLoadError(e)
+  }
+}
