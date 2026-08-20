@@ -454,6 +454,12 @@ command output, environment values, secrets, source contents, and provider
 payloads are outside this contract. Obvious secret-bearing values in the two
 allowlisted one-line text fields are rejected.
 
+Runs created after schema M144 carry `delivery_instrumentation_version: 1` and
+are atomically linked to the issue's internal delivery audit model. Existing
+version-0 run responses remain compatible. PAI-802 adds no public delivery
+list/snapshot or stream route; those authorization and cursor surfaces belong
+to PAI-804.
+
 ## Project metadata
 
 ```

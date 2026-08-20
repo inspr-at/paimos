@@ -751,6 +751,27 @@ into a terminal status the
 server auto-posts a summary comment on the ticket — attributed to the reporting
 user — so the human-readable trail always matches the structured run record.
 
+Post-M144 runs are also linked into the issue-rooted delivery audit model in the
+same transaction as creation. An authenticated Implement/follow-up click records
+approval of the server-canonical issue-spec digest, then opens an implementation
+execution with explicit predecessor lineage. Draft mode opens a specification
+execution only; `drafted` is an incomplete `draft_ready` fact and never approves
+the specification. A run is linked to exactly one stage execution.
+
+Accepted terminal PATCH transitions are normalized atomically into that linked
+execution. `completed`, `tests_passed`, and `deployed` can satisfy only the
+implementation stage and only with an allowlisted commit or same-issue
+attachment; they never imply canonical QA, deployment, or verification.
+Failures/cancellation record bounded semantic outcomes without copying provider
+errors. Telemetry remains in the PAI-799 tables: M144 appends only a safe
+delivery invalidation identity in the same transaction, and freshness continues
+to use the separate server-received heartbeat pointer.
+Every terminal status, including `cancelled`, receives an immutable
+`finished_at`. If a retry, specification edit, handoff, or project move already
+superseded the linked execution, the closure is retained as one exact-once
+`run_lifecycle_observed` attempt-history event while current delivery truth stays
+unchanged.
+
 ---
 
 ## Best practices for agent implementors

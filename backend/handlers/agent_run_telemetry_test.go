@@ -282,11 +282,13 @@ func TestAgentRunTelemetryHeartbeatPreservesSemanticAndEstimateSnapshot(t *testi
 	if snapshot["liveness"] != "live" {
 		t.Fatalf("heartbeat snapshot=%+v", snapshot)
 	}
-	for _, field := range []string{"latest_semantic", "latest_estimate"} {
-		fact, ok := snapshot[field].(map[string]any)
-		if !ok || fact["sequence"] != float64(1) || fact["progress_percent"] != float64(25) {
-			t.Fatalf("%s was erased by heartbeat: %+v", field, snapshot[field])
-		}
+	semantic, ok := snapshot["latest_semantic"].(map[string]any)
+	if !ok || semantic["sequence"] != float64(2) || semantic["phase"] != "implementing" {
+		t.Fatalf("heartbeat semantic pointer=%+v", snapshot["latest_semantic"])
+	}
+	estimateFact, ok := snapshot["latest_estimate"].(map[string]any)
+	if !ok || estimateFact["sequence"] != float64(1) || estimateFact["progress_percent"] != float64(25) {
+		t.Fatalf("estimate was erased by heartbeat: %+v", snapshot["latest_estimate"])
 	}
 	if event := snapshot["latest_event"].(map[string]any); event["sequence"] != float64(2) || event["kind"] != "heartbeat" {
 		t.Fatalf("latest_event=%+v", event)

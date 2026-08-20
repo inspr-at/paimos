@@ -560,6 +560,7 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M141 | project lifecycle issue-insert triggers | Reject issue creation in `frozen`, `archived`, or `deleted` projects at the storage boundary (PAI-754). |
 | M142 | `agent_run_telemetry`, `agent_run_telemetry_latest` | Append-only provider-neutral run facts plus an indexed latest projection (PAI-799). |
 | M143 | rebuilt `agent_runs`; expanded telemetry latest projection | Add truthful terminal `completed`, durable `expects_supervisor_telemetry`, and separate latest event/heartbeat/semantic/estimate pointers (PAI-801). |
+| M144 | `deliveries` and immutable delivery fact tables; `delivery_change_log`; `agent_runs.delivery_instrumentation_version` | Issue-rooted end-to-end delivery attempts, stage lineage/evidence, duration history, and deletion-safe invalidation identity (PAI-802). |
 
 `agent_runs.status=completed` means implementation finished without a configured
 test command; it never implies tests passed. `tests_passed` and `tests_failed`
@@ -577,6 +578,54 @@ persisted sequence/body replays remain idempotent after
 any result status, while conflicting or new facts are rejected. Telemetry treats
 `tests_passed` and `tests_failed` as stream-closing results even though the run
 lifecycle still permits the explicit deploy/fail transitions that follow them.
+
+### Delivery supervision model (M144 — PAI-802)
+
+A delivery has the stable identity `issue:<issue_id>`. Existing issues are not
+backfilled: a read with no `deliveries` row returns an uninstrumented `unknown`
+projection, augmented only by active version-0 legacy runs. The first explicit
+post-M144 write creates the container. Every new run creation path stamps
+`agent_runs.delivery_instrumentation_version=1` and creates its immutable
+`delivery_agent_run_links` row in the same transaction.
+
+Each `delivery_attempts` row is an immutable plan revision with exactly five
+policy facts in canonical order: specification, implementation, QA,
+deployment, verification. Default weights are 10/45/20/15/10. A project-policy
+change starts another attempt; a routine retry starts another stage execution
+inside the same attempt. Execution starts record the exact eligible predecessor
+event, so retrying an upstream stage makes old downstream evidence ineligible
+without deleting it. Handoffs advance authority epochs and late reports from an
+old attempt, execution, reporter, or epoch fail closed.
+
+`delivery_events` owns bounded idempotency keys, canonical payload hashes, and
+contiguous per-delivery revisions. Typed `delivery_stage_events`, blockers, and
+evidence are append-only; `delivery_stage_latest` contains rebuildable pointers
+for authority, semantic state, heartbeat, and estimate separately. Required
+stage success needs a current succeeded semantic report, no current blocker,
+passed allowlisted evidence, and current prerequisite lineage. Deployment
+success remains independently visible as `deployed_unverified` until required
+verification succeeds, even when verification is failed, waiting, or stale.
+The internal transaction-aware bulk reducer reads 1–1,000 already-authorized
+roots in one fixed SQL round trip and captures one calculation timestamp.
+When a linked run closes after its attempt, execution, or authority was
+superseded, M144 appends one idempotent `run_lifecycle_observed` envelope. That
+event advances the delivery revision/change stream and appears by identity in
+bounded attempt history, but cannot reopen or rewrite current stage truth.
+
+One immutable `delivery_stage_durations` sample is written for each eligible
+successful execution. Server RFC3339 timestamps are parsed, intervals are
+unioned and clipped, human wait takes precedence over other blocking, and the
+remaining lead time is active. The samples retain project-at-completion and are
+never removed by a later retry.
+
+`delivery_change_log` has no root foreign key. It retains a safe tombstone when
+an issue is hard-deleted and gives each delivery a contiguous change sequence;
+the opaque global id is internal only. Rows cannot be updated or directly
+deleted. A separate retention-floor operation is the sole prefix-deletion path.
+The encompassing SQL transaction writes facts and the durable change row;
+observer callbacks are dispatched only after commit. PAI-804 will seal its own
+authorized cursors around this internal high-water rather than expose database
+ids or tokens.
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 

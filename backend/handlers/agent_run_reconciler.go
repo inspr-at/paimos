@@ -6,12 +6,14 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/sse"
 )
 
@@ -79,10 +81,13 @@ func StartAgentRunReconciler() {
 }
 
 type staleAgentRunCandidate struct {
-	id        int64
-	projectID sql.NullInt64
-	kind      string
-	errorText string
+	id                     int64
+	projectID              sql.NullInt64
+	kind                   string
+	errorText              string
+	instrumentationVersion int
+	authorityActivationAt  sql.NullString
+	authorityCutoff        sql.NullInt64
 }
 
 // ReconcileStaleAgentRuns applies race-safe compare-and-set failure updates.
@@ -94,21 +99,31 @@ func ReconcileStaleAgentRuns(ctx context.Context, now time.Time, cfg AgentRunRec
 	firstCutoff := now.Add(-cfg.FirstHeartbeatTimeout).UTC().Format(time.RFC3339Nano)
 	heartbeatCutoff := now.Add(-cfg.HeartbeatTimeout).UTC().Format(time.RFC3339Nano)
 	legacyCutoff := now.Add(-cfg.LegacyFallbackTimeout).UTC().Format(time.RFC3339Nano)
-	rows, err := db.DB.QueryContext(ctx, `
-		SELECT ar.id, ar.project_id,
-		 CASE
-		  WHEN ar.status='queued' THEN 'queued'
-		  WHEN ar.expects_supervisor_telemetry=1 AND l.last_heartbeat_at IS NULL THEN 'first_heartbeat'
-		  WHEN ar.expects_supervisor_telemetry=1 THEN 'heartbeat'
-		  ELSE 'legacy'
-		 END
+	rows, err := db.DB.QueryContext(ctx, `WITH supervised AS (
+		SELECT ar.*,act.created_at AS authority_activation_at,act.telemetry_sequence_cutoff AS authority_cutoff,
+		 CASE WHEN act.agent_run_id IS NOT NULL THEN (SELECT MAX(t.server_received_at) FROM agent_run_telemetry t
+		  WHERE t.run_id=ar.id AND t.heartbeat=1 AND t.sequence>act.telemetry_sequence_cutoff)
+		 ELSE l.last_heartbeat_at END AS effective_heartbeat_at
 		FROM agent_runs ar
 		LEFT JOIN agent_run_telemetry_latest l ON l.run_id=ar.id
+		LEFT JOIN delivery_agent_run_activations act ON act.agent_run_id=ar.id AND EXISTS (
+		 SELECT 1 FROM delivery_stage_latest current WHERE current.attempt_id=act.attempt_id
+		  AND current.stage_key=act.stage_key AND current.execution_number=act.execution_number
+		  AND current.authority_epoch=act.authority_epoch AND current.current_reporter_id=act.reporter_id)
+	)
+		SELECT ar.id, ar.project_id, ar.delivery_instrumentation_version,
+		 CASE
+		  WHEN ar.status='queued' THEN 'queued'
+		  WHEN ar.expects_supervisor_telemetry=1 AND ar.effective_heartbeat_at IS NULL THEN 'first_heartbeat'
+		  WHEN ar.expects_supervisor_telemetry=1 THEN 'heartbeat'
+		  ELSE 'legacy'
+		 END,ar.authority_activation_at,ar.authority_cutoff
+		FROM supervised ar
 		WHERE (ar.status='queued' AND julianday(ar.created_at) <= julianday(?))
-		   OR (ar.status='running' AND ar.expects_supervisor_telemetry=1 AND l.last_heartbeat_at IS NULL
-		       AND julianday(COALESCE(NULLIF(ar.started_at,''), ar.created_at)) <= julianday(?))
-		   OR (ar.status='running' AND ar.expects_supervisor_telemetry=1 AND l.last_heartbeat_at IS NOT NULL
-		       AND julianday(l.last_heartbeat_at) <= julianday(?))
+		   OR (ar.status='running' AND ar.expects_supervisor_telemetry=1 AND ar.effective_heartbeat_at IS NULL
+		       AND julianday(COALESCE(ar.authority_activation_at,NULLIF(ar.started_at,''), ar.created_at)) <= julianday(?))
+		   OR (ar.status='running' AND ar.expects_supervisor_telemetry=1 AND ar.effective_heartbeat_at IS NOT NULL
+		       AND julianday(ar.effective_heartbeat_at) <= julianday(?))
 		   OR (ar.status='running' AND ar.expects_supervisor_telemetry=0
 		       AND julianday(COALESCE(NULLIF(ar.started_at,''), ar.created_at)) <= julianday(?))
 		ORDER BY ar.id`, queuedCutoff, firstCutoff, heartbeatCutoff, legacyCutoff)
@@ -118,7 +133,8 @@ func ReconcileStaleAgentRuns(ctx context.Context, now time.Time, cfg AgentRunRec
 	var candidates []staleAgentRunCandidate
 	for rows.Next() {
 		var c staleAgentRunCandidate
-		if err := rows.Scan(&c.id, &c.projectID, &c.kind); err != nil {
+		if err := rows.Scan(&c.id, &c.projectID, &c.instrumentationVersion, &c.kind,
+			&c.authorityActivationAt, &c.authorityCutoff); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -148,30 +164,83 @@ func ReconcileStaleAgentRuns(ctx context.Context, now time.Time, cfg AgentRunRec
 			 WHERE id=? AND status='queued' AND julianday(created_at) <= julianday(?)`
 			args = []any{c.errorText, c.id, queuedCutoff}
 		case "first_heartbeat":
-			query = `UPDATE agent_runs SET status='failed', error=?, finished_at=datetime('now')
-			 WHERE id=? AND status='running' AND expects_supervisor_telemetry=1
-			 AND julianday(COALESCE(NULLIF(started_at,''), created_at)) <= julianday(?)
-			 AND NOT EXISTS (SELECT 1 FROM agent_run_telemetry_latest l WHERE l.run_id=agent_runs.id AND l.last_heartbeat_at IS NOT NULL)`
-			args = []any{c.errorText, c.id, firstCutoff}
+			if c.authorityActivationAt.Valid && c.authorityCutoff.Valid {
+				query = `UPDATE agent_runs SET status='failed', error=?, finished_at=datetime('now')
+				 WHERE id=? AND status='running' AND expects_supervisor_telemetry=1
+				 AND EXISTS(SELECT 1 FROM delivery_agent_run_activations act JOIN delivery_stage_latest current
+				  ON current.attempt_id=act.attempt_id AND current.stage_key=act.stage_key
+				  AND current.execution_number=act.execution_number AND current.authority_epoch=act.authority_epoch
+				  AND current.current_reporter_id=act.reporter_id WHERE act.agent_run_id=agent_runs.id
+				  AND act.created_at=? AND act.telemetry_sequence_cutoff=?)
+				 AND julianday(?) <= julianday(?)
+				 AND NOT EXISTS(SELECT 1 FROM agent_run_telemetry t WHERE t.run_id=agent_runs.id
+				  AND t.heartbeat=1 AND t.sequence>?)`
+				args = []any{c.errorText, c.id, c.authorityActivationAt.String, c.authorityCutoff.Int64,
+					c.authorityActivationAt.String, firstCutoff, c.authorityCutoff.Int64}
+			} else {
+				query = `UPDATE agent_runs SET status='failed', error=?, finished_at=datetime('now')
+				 WHERE id=? AND status='running' AND expects_supervisor_telemetry=1
+				 AND julianday(COALESCE(NULLIF(started_at,''), created_at)) <= julianday(?)
+				 AND NOT EXISTS (SELECT 1 FROM agent_run_telemetry_latest l WHERE l.run_id=agent_runs.id AND l.last_heartbeat_at IS NOT NULL)`
+				args = []any{c.errorText, c.id, firstCutoff}
+			}
 		case "heartbeat":
-			query = `UPDATE agent_runs SET status='failed', error=?, finished_at=datetime('now')
-			 WHERE id=? AND status='running' AND expects_supervisor_telemetry=1
-			 AND EXISTS (SELECT 1 FROM agent_run_telemetry_latest l WHERE l.run_id=agent_runs.id
-			             AND l.last_heartbeat_at IS NOT NULL AND julianday(l.last_heartbeat_at) <= julianday(?))`
-			args = []any{c.errorText, c.id, heartbeatCutoff}
+			if c.authorityActivationAt.Valid && c.authorityCutoff.Valid {
+				query = `UPDATE agent_runs SET status='failed', error=?, finished_at=datetime('now')
+				 WHERE id=? AND status='running' AND expects_supervisor_telemetry=1
+				 AND EXISTS(SELECT 1 FROM delivery_agent_run_activations act JOIN delivery_stage_latest current
+				  ON current.attempt_id=act.attempt_id AND current.stage_key=act.stage_key
+				  AND current.execution_number=act.execution_number AND current.authority_epoch=act.authority_epoch
+				  AND current.current_reporter_id=act.reporter_id WHERE act.agent_run_id=agent_runs.id
+				  AND act.created_at=? AND act.telemetry_sequence_cutoff=?)
+				 AND EXISTS(SELECT 1 FROM agent_run_telemetry t WHERE t.id=(SELECT hb.id FROM agent_run_telemetry hb
+				  WHERE hb.run_id=agent_runs.id AND hb.heartbeat=1 AND hb.sequence>? ORDER BY hb.sequence DESC LIMIT 1)
+				  AND julianday(t.server_received_at)<=julianday(?))`
+				args = []any{c.errorText, c.id, c.authorityActivationAt.String, c.authorityCutoff.Int64,
+					c.authorityCutoff.Int64, heartbeatCutoff}
+			} else {
+				query = `UPDATE agent_runs SET status='failed', error=?, finished_at=datetime('now')
+				 WHERE id=? AND status='running' AND expects_supervisor_telemetry=1
+				 AND EXISTS (SELECT 1 FROM agent_run_telemetry_latest l WHERE l.run_id=agent_runs.id
+				             AND l.last_heartbeat_at IS NOT NULL AND julianday(l.last_heartbeat_at) <= julianday(?))`
+				args = []any{c.errorText, c.id, heartbeatCutoff}
+			}
 		default:
 			query = `UPDATE agent_runs SET status='failed', error=?, finished_at=datetime('now')
 			 WHERE id=? AND status='running' AND expects_supervisor_telemetry=0
 			 AND julianday(COALESCE(NULLIF(started_at,''), created_at)) <= julianday(?)`
 			args = []any{c.errorText, c.id, legacyCutoff}
 		}
-		res, err := db.DB.ExecContext(ctx, query, args...)
+		tx, err := db.DB.BeginTx(ctx, nil)
 		if err != nil {
 			return updated, err
 		}
+		res, err := tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			tx.Rollback()
+			return updated, err
+		}
 		if n, _ := res.RowsAffected(); n != 1 {
+			tx.Rollback()
 			continue
 		}
+		store := delivery.NewStore(db.DB, delivery.Options{Freshness: delivery.FreshnessPolicy{
+			FirstSignalTimeout: cfg.FirstHeartbeatTimeout,
+			HeartbeatTimeout:   cfg.HeartbeatTimeout,
+			EstimateTimeout:    cfg.HeartbeatTimeout,
+		}})
+		effects := store.NewEffects()
+		if c.instrumentationVersion == 1 {
+			if err := store.NormalizeRunTx(ctx, tx, effects, delivery.RunNormalization{RunID: c.id, Status: "failed",
+				IdempotencyKey: fmt.Sprintf("run:%d:failed", c.id)}); err != nil {
+				tx.Rollback()
+				return updated, err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return updated, err
+		}
+		effects.Dispatch(ctx)
 		updated++
 		if run, err := getAgentRunByID(c.id); err == nil {
 			postAgentRunReport(run.IssueID, nil, run)

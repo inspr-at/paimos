@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/sse"
 )
 
@@ -337,10 +338,23 @@ func IngestAgentRunTelemetry(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "telemetry snapshot failed", http.StatusInternalServerError)
 		return
 	}
+	store := deliveryStoreForRequest(r)
+	effects := store.NewEffects()
+	if run.DeliveryInstrumentationVersion == 1 {
+		if err := store.RecordRunTelemetryChangeTx(r.Context(), tx, effects, run.ID, event.Sequence); err != nil {
+			if errors.Is(err, delivery.ErrUnauthorized) {
+				jsonError(w, "run not found", http.StatusNotFound)
+				return
+			}
+			jsonError(w, "telemetry delivery hint failed", http.StatusInternalServerError)
+			return
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		jsonError(w, "telemetry append failed", http.StatusConflict)
 		return
 	}
+	effects.Dispatch(r.Context())
 
 	if run.ProjectID != nil {
 		// This is only an invalidation hint. Consumers must refetch the REST
@@ -703,8 +717,11 @@ func validateTelemetryText(field, value string, max int) error {
 }
 
 func isSemanticTelemetry(event *AgentRunTelemetry) bool {
-	return event != nil && (event.Kind != "heartbeat" || event.Activity != "" ||
-		event.NeedsInput || event.BlockerState != "none")
+	if event == nil {
+		return false
+	}
+	explicitKind := event.Kind == "phase" || event.Kind == "needs_input" || event.Kind == "blocker"
+	return explicitKind || event.Phase != "unknown" || event.Activity != "" || event.NeedsInput || event.BlockerState != "none"
 }
 
 func decorateTelemetryClock(event *AgentRunTelemetry) {

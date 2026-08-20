@@ -19,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/sse"
 )
 
@@ -53,6 +54,19 @@ func TestAgentRunsLifecycle(t *testing.T) {
 		t.Errorf("clocks should be nil on a queued run: started=%v finished=%v", run["started_at"], run["finished_at"])
 	}
 	runID := int64(run["id"].(float64))
+	var instrumentation int
+	var linkedStage string
+	var approvalCount int
+	if err := db.DB.QueryRow(`SELECT ar.delivery_instrumentation_version,link.stage_key,
+		(SELECT COUNT(*) FROM delivery_evidence e JOIN delivery_stage_events se ON se.id=e.stage_event_id
+		 WHERE se.delivery_id=link.delivery_id AND e.evidence_type='approval' AND e.outcome='passed')
+		FROM agent_runs ar JOIN delivery_agent_run_links link ON link.agent_run_id=ar.id WHERE ar.id=?`, runID).
+		Scan(&instrumentation, &linkedStage, &approvalCount); err != nil {
+		t.Fatalf("delivery link: %v", err)
+	}
+	if instrumentation != 1 || linkedStage != "implementation" || approvalCount != 1 {
+		t.Fatalf("delivery cutover marker=%d stage=%q approvals=%d", instrumentation, linkedStage, approvalCount)
+	}
 
 	// GET /issues/{id}/runs → the run shows up (newest first).
 	resp = ts.get(t, "/api/issues/"+itoa(issueID)+"/runs", ts.adminCookie)
@@ -107,6 +121,19 @@ func TestAgentRunsLifecycle(t *testing.T) {
 	if run["finished_at"] == nil {
 		t.Errorf("finished_at should be stamped on a terminal status")
 	}
+	var implementationEvidence, collapsedStages int
+	if err := db.DB.QueryRow(`SELECT
+		(SELECT COUNT(*) FROM delivery_evidence e JOIN delivery_stage_events se ON se.id=e.stage_event_id
+		 JOIN delivery_agent_run_links link ON link.attempt_id=se.attempt_id AND link.stage_key=se.stage_key
+		 WHERE link.agent_run_id=? AND e.evidence_type='implementation_result' AND e.outcome='passed'),
+		(SELECT COUNT(*) FROM delivery_stage_latest l JOIN delivery_agent_run_links link ON link.attempt_id=l.attempt_id
+		 WHERE link.agent_run_id=? AND l.stage_key IN ('qa','deployment'))`, runID, runID).
+		Scan(&implementationEvidence, &collapsedStages); err != nil {
+		t.Fatal(err)
+	}
+	if implementationEvidence != 1 || collapsedStages != 0 {
+		t.Fatalf("implementation evidence=%d collapsed canonical stages=%d", implementationEvidence, collapsedStages)
+	}
 
 	// An unknown status is rejected.
 	resp = ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "bogus"})
@@ -125,6 +152,135 @@ func TestAgentRunsLifecycle(t *testing.T) {
 	// The requester (admin here) can fetch the single run.
 	resp = ts.get(t, "/api/runs/"+itoa(runID), ts.adminCookie)
 	assertStatus(t, resp, http.StatusOK)
+}
+
+func TestCancelledAgentRunStampsFinishedAtAndNormalizesExactlyOnce(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "CXL", "Cancel lifecycle")
+	result, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status)
+		VALUES(?,1,'ticket','Cancel instrumented run','backlog')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := result.LastInsertId()
+	resp := ts.post(t, "/api/issues/"+itoa(issueID)+"/implement", ts.adminCookie, map[string]any{})
+	assertStatus(t, resp, http.StatusCreated)
+	var run map[string]any
+	decode(t, resp, &run)
+	runID := int64(run["id"].(float64))
+	resp = ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "running"})
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "cancelled"})
+	assertStatus(t, resp, http.StatusOK)
+	decode(t, resp, &run)
+	if run["status"] != "cancelled" || run["finished_at"] == nil {
+		t.Fatalf("cancelled run did not retain terminal time: %+v", run)
+	}
+	var lifecycleEventID, revision, sequence int64
+	if err := db.DB.QueryRow(`SELECT e.id,e.delivery_revision,d.change_sequence_high_water
+		FROM delivery_agent_run_links link JOIN delivery_events e ON e.delivery_id=link.delivery_id
+		JOIN deliveries d ON d.id=link.delivery_id
+		WHERE link.agent_run_id=? AND e.kind='run_normalized' ORDER BY e.delivery_revision DESC LIMIT 1`, runID).
+		Scan(&lifecycleEventID, &revision, &sequence); err != nil {
+		t.Fatal(err)
+	}
+	history, err := delivery.NewStore(db.DB, delivery.Options{}).AttemptHistory(t.Context(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, attempt := range history {
+		for _, linked := range attempt.LinkedRuns {
+			if linked.RunID == runID && linked.Status == "cancelled" && linked.FinishedAt != nil &&
+				linked.LifecycleEventID != nil && *linked.LifecycleEventID == lifecycleEventID {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("cancelled lifecycle outcome/event missing from attempt history: %+v", history)
+	}
+
+	resp = ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "cancelled"})
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	var replayRevision, replaySequence, eventCount int64
+	if err := db.DB.QueryRow(`SELECT COALESCE(MAX(e.delivery_revision),0),d.change_sequence_high_water,
+		(SELECT COUNT(*) FROM delivery_events observed WHERE observed.delivery_id=d.id
+		 AND observed.kind IN ('run_normalized','run_lifecycle_observed') AND observed.reporter_id=link.reporter_id)
+		FROM delivery_agent_run_links link JOIN deliveries d ON d.id=link.delivery_id
+		LEFT JOIN delivery_events e ON e.delivery_id=d.id WHERE link.agent_run_id=? GROUP BY d.id`, runID).
+		Scan(&replayRevision, &replaySequence, &eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if replayRevision != revision || replaySequence != sequence || eventCount != 1 {
+		t.Fatalf("cancel replay mutated audit revision=%d/%d sequence=%d/%d events=%d",
+			replayRevision, revision, replaySequence, sequence, eventCount)
+	}
+}
+
+func TestInstrumentedRunWritesReauthorizeAgainstCurrentRootProject(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "PAI", "PAI")
+	memberID := userID(t, "member")
+	if _, err := db.DB.Exec(`INSERT INTO project_members(user_id,project_id,access_level) VALUES(?,?,'editor')`,
+		memberID, projectID); err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status) VALUES(?,?,?,?,?)`,
+		projectID, 1, "ticket", "Authority cutover", "backlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := res.LastInsertId()
+
+	resp := ts.post(t, "/api/issues/"+itoa(issueID)+"/implement", ts.memberCookie,
+		map[string]any{"device_id": "external-runner"})
+	assertStatus(t, resp, http.StatusCreated)
+	var run map[string]any
+	decode(t, resp, &run)
+	runID := int64(run["id"].(float64))
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.memberCookie,
+		map[string]any{"status": "running"}), http.StatusOK)
+
+	var changeCount int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE root_issue_id=?`, issueID).Scan(&changeCount); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`UPDATE project_members SET access_level='none' WHERE user_id=? AND project_id=?`,
+		memberID, projectID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Requester ownership is deliberately insufficient after project access is
+	// revoked. The run row and delivery history must roll back together.
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.memberCookie,
+		map[string]any{"status": "failed"}), http.StatusForbidden)
+	var status string
+	var afterChanges int
+	if err := db.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, runID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE root_issue_id=?`, issueID).Scan(&afterChanges); err != nil {
+		t.Fatal(err)
+	}
+	if status != "running" || afterChanges != changeCount {
+		t.Fatalf("denied lifecycle write leaked: status=%q changes=%d, want running/%d", status, afterChanges, changeCount)
+	}
+
+	telemetry := map[string]any{
+		"sequence": 1, "correlation_id": "authority-cutover", "provider": "codex", "adapter": "cli",
+		"agent_reported_at": "2026-08-20T12:00:00Z", "kind": "heartbeat", "heartbeat": true,
+	}
+	assertStatus(t, ts.post(t, "/api/runs/"+itoa(runID)+"/telemetry", ts.memberCookie, telemetry), http.StatusNotFound)
+	var telemetryCount int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_run_telemetry WHERE run_id=?`, runID).Scan(&telemetryCount); err != nil {
+		t.Fatal(err)
+	}
+	if telemetryCount != 0 {
+		t.Fatalf("denied telemetry write committed %d rows", telemetryCount)
+	}
 }
 
 func TestAgentRunRejectsMalformedCommitEvidence(t *testing.T) {
@@ -407,6 +563,17 @@ func TestImplementOpenRouterDraftCreatesDraftRunAndComment(t *testing.T) {
 		t.Fatalf("tests_summary=%v, want no local tests provenance", got)
 	}
 	runID := int64(run["id"].(float64))
+	var draftStage string
+	var draftApprovals int
+	if err := db.DB.QueryRow(`SELECT link.stage_key,
+		(SELECT COUNT(*) FROM delivery_evidence e JOIN delivery_stage_events se ON se.id=e.stage_event_id
+		 WHERE se.delivery_id=link.delivery_id AND e.evidence_type='approval')
+		FROM delivery_agent_run_links link WHERE link.agent_run_id=?`, runID).Scan(&draftStage, &draftApprovals); err != nil {
+		t.Fatalf("draft delivery link: %v", err)
+	}
+	if draftStage != "specification" || draftApprovals != 0 {
+		t.Fatalf("draft stage=%q approvals=%d", draftStage, draftApprovals)
+	}
 
 	body, n := firstComment(t, issueID)
 	if n != 1 {

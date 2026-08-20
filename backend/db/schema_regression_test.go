@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 143
+const latestSchemaVersion = 144
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -271,7 +271,7 @@ func TestMigration143UpgradesPopulatedM142WithoutLosingGraphOrTelemetry(t *testi
 		 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('tests_passed','tests_failed','deployed','failed','cancelled','drafted')
 		 BEGIN SELECT RAISE(ABORT, 'terminal run telemetry is immutable'); END`,
 		`UPDATE sqlite_sequence SET seq=50 WHERE name='agent_runs'`,
-		`DELETE FROM schema_versions WHERE version=143`,
+		`DELETE FROM schema_versions WHERE version IN (143,144)`,
 	}
 	for _, step := range steps {
 		if _, err := tx.ExecContext(context.Background(), step); err != nil {
@@ -310,19 +310,19 @@ func TestMigration143UpgradesPopulatedM142WithoutLosingGraphOrTelemetry(t *testi
 	}
 	DB = nil
 	if err := Open(); err != nil {
-		t.Fatalf("restart applying M143: %v", err)
+		t.Fatalf("restart applying M143→M144: %v", err)
 	}
 	database = DB
 
-	wantColumns := append(append([]string(nil), m142Columns...), "expects_supervisor_telemetry")
+	wantColumns := append(append([]string(nil), m142Columns...), "expects_supervisor_telemetry", "delivery_instrumentation_version")
 	sort.Strings(wantColumns)
 	if got := schemaNames(t, database, `SELECT name FROM pragma_table_info('agent_runs')`); strings.Join(got, "\x00") != strings.Join(wantColumns, "\x00") {
-		t.Fatalf("M143 columns=%v want M142+intentional=%v", got, wantColumns)
+		t.Fatalf("M143→M144 columns=%v want M142+intentional=%v", got, wantColumns)
 	}
-	wantIndexes := append(append([]string(nil), m142Indexes...), "idx_agent_runs_supervisor_active")
+	wantIndexes := append(append([]string(nil), m142Indexes...), "idx_agent_runs_supervisor_active", "idx_agent_runs_id_issue", "idx_agent_runs_delivery_legacy_active")
 	sort.Strings(wantIndexes)
 	if got := schemaNames(t, database, `SELECT name FROM pragma_index_list('agent_runs') WHERE origin='c'`); strings.Join(got, "\x00") != strings.Join(wantIndexes, "\x00") {
-		t.Fatalf("M143 indexes=%v want M142+intentional=%v", got, wantIndexes)
+		t.Fatalf("M143→M144 indexes=%v want M142+intentional=%v", got, wantIndexes)
 	}
 	var gotFollowup, gotSource sql.NullInt64
 	var contextJSON, repoURL, branch, baseSHA, headSHA string
@@ -338,7 +338,7 @@ func TestMigration143UpgradesPopulatedM142WithoutLosingGraphOrTelemetry(t *testi
 	}
 	var childRun, latestTelemetry, heartbeatTelemetry, semanticTelemetry, estimateTelemetry int64
 	if err := database.QueryRow(`SELECT t.run_id,l.telemetry_id,l.heartbeat_telemetry_id,l.semantic_telemetry_id,l.estimate_telemetry_id FROM agent_run_telemetry t JOIN agent_run_telemetry_latest l ON l.run_id=t.run_id WHERE t.id=?`, telemetryID).
-		Scan(&childRun, &latestTelemetry, &heartbeatTelemetry, &semanticTelemetry, &estimateTelemetry); err != nil || childRun != followupID || latestTelemetry != latestHeartbeatID || heartbeatTelemetry != latestHeartbeatID || semanticTelemetry != estimateID || estimateTelemetry != estimateID {
+		Scan(&childRun, &latestTelemetry, &heartbeatTelemetry, &semanticTelemetry, &estimateTelemetry); err != nil || childRun != followupID || latestTelemetry != latestHeartbeatID || heartbeatTelemetry != latestHeartbeatID || semanticTelemetry != latestHeartbeatID || estimateTelemetry != estimateID {
 		t.Fatalf("rebuilt telemetry pointers run=%d latest=%d heartbeat=%d semantic=%d estimate=%d err=%v (seed semantic=%d)", childRun, latestTelemetry, heartbeatTelemetry, semanticTelemetry, estimateTelemetry, err, semanticID)
 	}
 	var fkTable string
@@ -578,7 +578,8 @@ func TestRebuildAgentRunTelemetryLatestMatchesIncrementalProjection(t *testing.T
 			if event.heartbeat {
 				heartbeatAt, heartbeatID = receivedAt, eventID
 			}
-			if event.kind != "heartbeat" || event.activity != "" {
+			if event.kind == "phase" || event.kind == "needs_input" || event.kind == "blocker" ||
+				event.phase != "unknown" || event.activity != "" {
 				semanticID, semanticAt = eventID, receivedAt
 			}
 			if event.estimateRevision != nil {
