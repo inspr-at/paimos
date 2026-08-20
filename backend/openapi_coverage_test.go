@@ -316,6 +316,67 @@ func TestAgentModeOpenAPIErrorAndStreamSemanticsArePinned(t *testing.T) {
 	}
 }
 
+func TestAgentModeVoiceOpenAPIIsClosedTemplateOnlyAndNonCacheable(t *testing.T) {
+	doc := documentedAPIDocument(t)
+	components, _ := doc.raw["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	speak, _ := schemas["AgentModeVoiceSpeakRequest"].(map[string]any)
+	transcript, _ := schemas["AgentModeVoiceTranscript"].(map[string]any)
+	if speak == nil || transcript == nil || speak["additionalProperties"] != false || transcript["additionalProperties"] != false {
+		t.Fatalf("voice schemas must be present and closed: speak=%v transcript=%v", speak, transcript)
+	}
+	required, _ := speak["required"].([]any)
+	if fmt.Sprint(required) != "[template delivery_id delivery_revision candidate_ids locale]" {
+		t.Fatalf("speak required=%v", required)
+	}
+	properties, _ := speak["properties"].(map[string]any)
+	template, _ := properties["template"].(map[string]any)
+	if got := fmt.Sprint(template["enum"]); got != "[status note_ready clarification]" {
+		t.Fatalf("template enum=%s", got)
+	}
+	candidates, _ := properties["candidate_ids"].(map[string]any)
+	if candidates["maxItems"] != float64(3) || candidates["uniqueItems"] != true {
+		t.Fatalf("candidate_ids=%v", candidates)
+	}
+	transcriptProperties, _ := transcript["properties"].(map[string]any)
+	final, _ := transcriptProperties["final"].(map[string]any)
+	if final["const"] != true {
+		t.Fatalf("transcript final=%v", final)
+	}
+
+	for _, path := range []string{"/api/agent-mode/voice/transcribe", "/api/agent-mode/voice/speak"} {
+		operationRaw := doc.Paths[path]["post"]
+		var operation struct {
+			Description string `json:"description"`
+			Responses   map[string]struct {
+				Headers map[string]struct {
+					Schema struct {
+						Const string `json:"const"`
+					} `json:"schema"`
+				} `json:"headers"`
+			} `json:"responses"`
+		}
+		if err := json.Unmarshal(operationRaw, &operation); err != nil {
+			t.Fatal(err)
+		}
+		statuses := []string{"200", "400", "401", "403", "404", "429", "500", "502", "503"}
+		if path == "/api/agent-mode/voice/transcribe" {
+			statuses = append(statuses, "413", "415", "422")
+		} else {
+			statuses = append(statuses, "409")
+		}
+		for _, status := range statuses {
+			response, exists := operation.Responses[status]
+			if !exists || response.Headers["Cache-Control"].Schema.Const != "private, no-store" {
+				t.Fatalf("%s response %s is not private/no-store: %+v", path, status, response)
+			}
+		}
+		if path == "/api/agent-mode/voice/speak" && !strings.Contains(operation.Description, "Never accepts caller text") {
+			t.Fatalf("speak description does not pin template-only input: %q", operation.Description)
+		}
+	}
+}
+
 func TestAgentModeOpenAPITrustVocabularyMatchesDeliveryTrust(t *testing.T) {
 	doc := documentedAPIDocument(t)
 	components, ok := doc.raw["components"].(map[string]any)

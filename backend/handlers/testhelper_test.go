@@ -35,6 +35,7 @@ import (
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
+	"github.com/inspr-at/paimos/backend/httpcontract"
 
 	_ "modernc.org/sqlite"
 )
@@ -167,15 +168,20 @@ func buildRouter() http.Handler {
 			r.Get("/runs/{id}/telemetry/latest", handlers.GetLatestAgentRunTelemetry)
 		})
 
-		r.Group(func(r chi.Router) {
-			r.Use(auth.Middleware)
+		r.Route("/agent-mode", func(r chi.Router) {
 			r.Use(auth.AgentModePrivateNoStore)
+			r.Use(auth.Middleware)
 			r.Use(auth.RequireAgentModeInternal)
+			r.Use(auth.CSRFMiddleware)
 			r.Use(auth.MustChangePasswordGate)
-			r.Get("/agent-mode/deliveries/events", handlers.AgentModeEvents)
-			r.Get("/agent-mode/deliveries", handlers.AgentModeDeliveries)
-			r.Get("/agent-mode/projects/{projectID}/deliveries", handlers.AgentModeProjectDeliveries)
-			r.Get("/agent-mode/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
+			r.NotFound(httpcontract.WriteAgentModeNotFound)
+			r.MethodNotAllowed(httpcontract.WriteAgentModeNotFound)
+			r.Get("/deliveries/events", handlers.AgentModeEvents)
+			r.Get("/deliveries", handlers.AgentModeDeliveries)
+			r.Get("/projects/{projectID}/deliveries", handlers.AgentModeProjectDeliveries)
+			r.Get("/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
+			r.Post("/voice/transcribe", handlers.TranscribeAgentModeVoice)
+			r.Post("/voice/speak", handlers.SpeakAgentModeVoice)
 		})
 
 		// Portal (external + admin)
@@ -333,7 +339,7 @@ func buildRouter() http.Handler {
 			r.Delete("/projects/{id}/tags/{tag_id}", handlers.RemoveTagFromProject)
 
 			r.With(auth.RequireIssueAccess).Get("/issues/{id}/comments", handlers.ListComments)
-			r.With(auth.RequireIssueEdit, handlers.IdempotencyMiddleware).Post("/issues/{id}/comments", handlers.CreateComment)
+			r.With(auth.RequireIssueEdit, handlers.CommentIdempotencyMiddleware).Post("/issues/{id}/comments", handlers.CreateComment)
 			r.With(auth.RequireCommentEdit).Patch("/comments/{id}", handlers.UpdateCommentVisibility)
 			r.With(auth.RequireCommentAccess).Delete("/comments/{id}", handlers.DeleteComment)
 

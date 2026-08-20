@@ -241,6 +241,14 @@ curl -s -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/js
   -d '{"body":"## Build Report\n\nAll tests pass\n- Backend: 42 tests, 0 failures\n- Frontend: typecheck clean"}'
 ```
 
+For retry-safe internal notes, add `visibility:"internal"` and a bounded
+`client_request_id` (`A-Z`, `a-z`, digits, `.`, `_`, `:`, `-`; at most 128
+bytes). The identity is scoped to the authenticated author. An exact retry
+returns the original comment; reuse for another issue or body returns `409`.
+Keyed notes bypass the generic response cache, so it never duplicates the
+confirmed note response in `idempotency_keys`. A keyed comment can never be
+external.
+
 ### 4. Time tracking
 
 Agents should log time against the issues they work on so humans can
@@ -808,6 +816,23 @@ The complete field and enum contract is the served OpenAPI document at
 `GET /api/openapi.json`. Frontend transport adaptation is intentionally a
 separate integration step; generic change-stream envelopes are not aliases for
 these Agent Mode events.
+
+Agent Mode voice uses the same internal-only, canonical-404, CSRF, and
+`private, no-store` boundary:
+
+- `POST /api/agent-mode/voice/transcribe?language=en|de` accepts one raw,
+  allowlisted browser audio/video blob (12 MiB maximum) and returns exactly
+  `{utterance_id,text,final:true}`. Audio and transcript are ephemeral.
+- `POST /api/agent-mode/voice/speak` accepts exactly
+  `{template,delivery_id,delivery_revision,candidate_ids,locale}`. Templates
+  are `status`, `note_ready`, or `clarification`; there is no caller-text
+  field. The server authorizes the primary and up to three active candidates
+  in one coherent snapshot, rechecks the revision/capability, and narrates
+  only closed structured facts.
+
+Voice audit rows contain action/surface/provider/model/unit/outcome metadata
+only. Intake and Agent Mode share the same per-user STT and TTS admission and
+daily-budget pools.
 
 ---
 

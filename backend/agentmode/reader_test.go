@@ -676,6 +676,16 @@ func TestReaderScopesDetailBeforeCandidateLimitAndRejectsOversizeSnapshots(t *te
 			}
 		})
 	}
+	firstKey, lastKey := fmt.Sprintf("issue:%d", firstIssueID), fmt.Sprintf("issue:%d", lastIssueID)
+	multi, err := reader.Read(context.Background(), Request{UserID: adminID,
+		DetailDeliveryKeys: []string{firstKey, lastKey},
+		Filters:            Filters{Attention: "all", Health: "all", SelectedDelivery: lastKey}})
+	if err != nil {
+		t.Fatalf("bounded multi-detail beyond global limit: %v", err)
+	}
+	if len(multi.Rows) != 2 || multi.SelectedDelivery != lastKey {
+		t.Fatalf("multi-detail rows=%d selected=%q", len(multi.Rows), multi.SelectedDelivery)
+	}
 
 	requests := map[string]Request{
 		"global":  {UserID: adminID, Filters: Filters{Attention: "all", Health: "all"}},

@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -104,14 +105,14 @@ func SpeakIntakeSummary(w http.ResponseWriter, r *http.Request) {
 	// before any provider spend. Units are the characters synthesized —
 	// what ElevenLabs bills by.
 	chars := int64(len([]rune(text)))
-	release, admitted := voiceAdmit(w, r, user, "intake_tts", chars)
+	release, admitted := voiceAdmit(w, r, user, voiceActionIntakeTTS, chars)
 	if !admitted {
 		return
 	}
 	defer release()
 
 	started := time.Now()
-	audio, ttsErr := synthesizeWithElevenLabs(r.Context(), vs, text, summaries.Language)
+	audio, ttsErr := synthesizeVoice(r.Context(), vs, text, summaries.Language)
 	latency := time.Since(started)
 	outcome, errorClass := "ok", ""
 	if ttsErr != nil {
@@ -121,8 +122,8 @@ func SpeakIntakeSummary(w http.ResponseWriter, r *http.Request) {
 	if ttsErr == nil {
 		billedChars = chars
 	}
-	recordAICall(r.Context(), aiCallArgs{
-		RequestID: newAIRequestID(), UserID: &user.ID, ActionKey: "intake_tts",
+	recordVoiceAICall(r.Context(), aiCallArgs{
+		RequestID: newAIRequestID(), UserID: &user.ID, ActionKey: voiceActionIntakeTTS,
 		SubAction: body.Level, Surface: "intake", ProjectID: s.activeProjectID(),
 		Provider: vs.Provider, Model: vs.TTSModel,
 		PromptTokens: int(billedChars), CostMicroUSD: billedChars * voiceTTSMicroUSDPerChar,
@@ -171,9 +172,17 @@ func synthesizeWithElevenLabs(ctx context.Context, vs VoiceSettings, text, langu
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("tts upstream status %d", resp.StatusCode)
 	}
-	audio, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	contentType, _, contentTypeErr := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if contentTypeErr != nil || !strings.HasPrefix(strings.ToLower(contentType), "audio/") {
+		return nil, fmt.Errorf("tts upstream returned non-audio content")
+	}
+	const maxTTSAudioBytes = 8 << 20
+	audio, err := io.ReadAll(io.LimitReader(resp.Body, maxTTSAudioBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(audio) > maxTTSAudioBytes {
+		return nil, fmt.Errorf("tts upstream audio exceeds 8 MiB")
 	}
 	if len(audio) == 0 {
 		return nil, fmt.Errorf("tts upstream returned no audio")

@@ -562,6 +562,7 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M143 | rebuilt `agent_runs`; expanded telemetry latest projection | Add truthful terminal `completed`, durable `expects_supervisor_telemetry`, and separate latest event/heartbeat/semantic/estimate pointers (PAI-801). |
 | M144 | `deliveries` and immutable delivery fact tables; `delivery_change_log`; `agent_runs.delivery_instrumentation_version` | Issue-rooted end-to-end delivery attempts, stage lineage/evidence, duration history, and deletion-safe invalidation identity (PAI-802). |
 | M145 | Agent Mode change audiences, legacy roots, and privacy guards | Revoked-project replay, live-only version-0 synthetic provenance, recursive metadata invalidation, and upgraded secret-like text backstops (PAI-804). |
+| M146 | `comments.client_request_id`, `idx_comments_author_client_request` | Per-author exact-once identity for confirmed internal notes. The partial unique index is the atomic backstop; a CHECK requires an authenticated author, internal visibility, ASCII-safe syntax, and a 128-byte maximum (PAI-808). |
 
 `agent_runs.status=completed` means implementation finished without a configured
 test command; it never implies tests passed. `tests_passed` and `tests_failed`
@@ -669,6 +670,18 @@ updates, delivery facts, and their change rows share the same transaction.
 Process-local wakeups run only after commit and are an optimization over the
 durable log and polling, so rollback, restart, or a lost/coalesced wake cannot
 publish uncommitted truth or strand a stream.
+
+### Exact-once internal comments (M146 — PAI-808)
+
+`comments.client_request_id` is nullable, so ordinary and pre-M146 comments
+retain their previous behavior. When present, it is unique with `author_id`
+and structurally restricted to internal comments. Creation inserts first and
+uses the unique collision as the only replay decision: the handler returns the
+original row only when issue, body, author, and internal visibility match;
+otherwise it returns `409`. Mutation history is emitted only by the transaction
+that inserted the row, and undo/redo preserves the identity. Keyed comments
+cannot be flipped external. They bypass `idempotency_keys`, preventing a second
+stored copy of a confirmed private note response.
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 

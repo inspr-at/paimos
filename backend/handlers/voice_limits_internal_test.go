@@ -74,6 +74,21 @@ func TestVoiceRateWindow(t *testing.T) {
 	}
 }
 
+func TestVoiceActionClassesShareSurfacePools(t *testing.T) {
+	tests := map[string]string{
+		voiceActionIntakeSTT: voiceClassSTT, voiceActionAgentModeSTT: voiceClassSTT,
+		voiceActionIntakeTTS: voiceClassTTS, voiceActionAgentModeTTS: voiceClassTTS,
+	}
+	for action, wantClass := range tests {
+		if got := voiceClassForAction(action); got != wantClass {
+			t.Fatalf("voiceClassForAction(%q)=%q want %q", action, got, wantClass)
+		}
+	}
+	if got := voiceClassForAction("unclassified"); got != "" {
+		t.Fatalf("unknown action class=%q", got)
+	}
+}
+
 func TestTimeToUTCMidnight(t *testing.T) {
 	d := timeToUTCMidnight()
 	if d <= 0 || d > 24*time.Hour {

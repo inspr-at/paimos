@@ -7927,6 +7927,22 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			     AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
 			 END`,
 		}},
+
+		// M146 / PAI-808: transactionally exact-once internal comments.
+		// The client request identity is unique per authenticated author, not
+		// per issue/body: reusing one identity for a different target or body
+		// must collide so the handler can return an explicit conflict. NULL
+		// keeps every pre-M146 and ordinary non-idempotent comment unchanged.
+		{146, []string{
+			`ALTER TABLE comments ADD COLUMN client_request_id TEXT
+			 CHECK(client_request_id IS NULL OR
+			  (author_id IS NOT NULL AND visibility='internal' AND
+			   length(CAST(client_request_id AS BLOB)) BETWEEN 1 AND 128 AND
+			   client_request_id NOT GLOB '*[^A-Za-z0-9._:-]*'))`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_comments_author_client_request
+			 ON comments(author_id,client_request_id)
+			 WHERE client_request_id IS NOT NULL`,
+		}},
 	}
 
 	for _, m := range migrations {

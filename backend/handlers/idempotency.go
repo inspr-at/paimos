@@ -22,6 +22,39 @@ type capturedResponse struct {
 	status int
 }
 
+// CommentIdempotencyMiddleware preserves the legacy Idempotency-Key behavior
+// for ordinary comments, but deliberately bypasses the response cache when a
+// PAI-808 client_request_id is present. The database uniqueness seam is the
+// authority for those requests; caching the response would persist a second
+// copy of the confirmed internal note body in idempotency_keys.
+func CommentIdempotencyMiddleware(next http.Handler) http.Handler {
+	legacy := IdempotencyMiddleware(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.TrimSpace(r.Header.Get(idempotencyHeader)) == "" || !isIdempotencyMethod(r.Method) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		raw, err := readAndRestoreBody(r)
+		if err != nil {
+			jsonError(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		// Use the same typed decoding semantics as CreateComment, including
+		// encoding/json's case-insensitive field matching. Probe only the first
+		// value so a keyed first object followed by trailing JSON is still sent
+		// to the handler (which rejects it) without ever entering the cache.
+		var probe struct {
+			ClientRequestID *string `json:"client_request_id"`
+		}
+		if json.NewDecoder(bytes.NewReader(raw)).Decode(&probe) == nil &&
+			probe.ClientRequestID != nil && *probe.ClientRequestID != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		legacy.ServeHTTP(w, r)
+	})
+}
+
 func (c *capturedResponse) Header() http.Header {
 	return c.header
 }

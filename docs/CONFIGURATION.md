@@ -405,17 +405,19 @@ soft block but get an `X-AI-Over-Cap: true` response header for UI
 warning. Settings → AI surfaces the org-wide totals + per-user
 table.
 
-### Voice provider + session budget (PAI-703 … PAI-714)
+### Voice provider + session budget (PAI-703 … PAI-808)
 
-Voice input/output for the intake workbench is configured at
+Voice input/output for the intake workbench and Agent Mode is configured at
 Settings → Integrations → AI (admin; `PUT /api/ai/voice-settings`):
 `provider` (`""` = off, `elevenlabs`), `api_key` (write-only — reads
 report `has_api_key` only), `base_url`, `stt_model`, `tts_model`, and
 `tts_voice_id`. The base URL may be blank (standard endpoint) or the HTTPS
 root of `api.elevenlabs.io` / `api.eu.residency.elevenlabs.io`; credentials,
 ports, paths, queries, fragments, and other hosts are rejected before the
-key is stored or loaded. Audio is transcribed and dropped — never stored
-(INV-INTAKE-06); TTS returns bytes with `Cache-Control: no-store`.
+key is stored or loaded. Intake audio is transcribed and dropped; Agent Mode
+audio and transcripts are wholly ephemeral. TTS returns bytes with
+`Cache-Control: no-store`, and Agent Mode TTS accepts server-owned templates
+only—never arbitrary caller text.
 
 Each intake session also has an LLM token budget so a runaway dictation
 can't spend unbounded: `app_settings` key
@@ -425,13 +427,17 @@ spec freezes with an explanatory stage message.
 
 ### Voice cost gates (PAI-724)
 
-The intake voice endpoints (`.../audio` STT, `.../tts`) call paid
-provider APIs and run their own gates before every provider call:
+The Intake voice endpoints (`.../audio` STT, `.../tts`) and Agent Mode voice
+endpoints (`.../voice/transcribe`, `.../voice/speak`) call paid provider APIs
+and run shared modality gates before every provider call:
 per-user concurrency (2 in flight), per-minute burst caps (20 STT /
 10 TTS), the PAI-161 usage cap above, and per-user daily unit
 budgets, all answering `429` + `Retry-After` when exceeded. The daily
-budgets are soft caps (admins pass) summed from today's `ai_calls`
-rows — STT in estimated audio seconds, TTS in characters:
+budgets are soft caps (admins pass) summed from today's `ai_calls` rows across
+both surfaces—`intake_stt` + `agent_mode_stt` in estimated audio seconds and
+`intake_tts` + `agent_mode_tts` in characters. Concurrent admitted calls hold
+pending-unit reservations until their metadata row is recorded, so alternating
+or racing the two surfaces cannot double-spend the same allowance:
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
@@ -441,7 +447,10 @@ rows — STT in estimated audio seconds, TTS in characters:
 Successful voice calls record their units in `prompt_tokens` and an
 estimated `cost_micro_usd` on the paper trail (Scribe ≈ $0.40/audio-
 hour, multilingual TTS ≈ $0.10/1k chars), so voice spend shows up in
-the cost totals instead of as zero.
+the cost totals instead of as zero. Provider attempts are recorded with a
+short cancellation-independent context after the provider returns; request
+disconnects cannot erase billed metadata. No audio, transcript, template
+text, note body, or candidate identity is copied into `ai_calls`.
 
 ### Paper trail (`PAI-207` / `PAI-208`)
 

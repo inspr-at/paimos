@@ -120,6 +120,9 @@ func (r *Reader) StreamState(ctx context.Context, request Request) (StreamState,
 	if r == nil || r.db == nil || request.UserID <= 0 {
 		return StreamState{}, ErrInvalid
 	}
+	if _, err := normalizedDetailKeys(request); err != nil {
+		return StreamState{}, err
+	}
 	conn, err := r.db.Conn(ctx)
 	if err != nil {
 		return StreamState{}, err
@@ -162,8 +165,9 @@ func (r *Reader) Read(ctx context.Context, request Request) (Snapshot, error) {
 	if request.RouteProjectID != nil && *request.RouteProjectID <= 0 {
 		return Snapshot{}, ErrInvalid
 	}
-	if request.DetailDeliveryKey != "" && !deliveryKeyPattern.MatchString(request.DetailDeliveryKey) {
-		return Snapshot{}, ErrInvalid
+	detailKeys, err := normalizedDetailKeys(request)
+	if err != nil {
+		return Snapshot{}, err
 	}
 	conn, err := r.db.Conn(ctx)
 	if err != nil {
@@ -199,7 +203,7 @@ func (r *Reader) Read(ctx context.Context, request Request) (Snapshot, error) {
 	if len(catalog.Entries) > MaxCandidateRoots {
 		return Snapshot{}, fmt.Errorf("%w: candidate root limit exceeded", ErrInvalid)
 	}
-	if request.DetailDeliveryKey != "" && len(catalog.Entries) == 0 {
+	if len(detailKeys) > 0 && len(catalog.Entries) == 0 {
 		return Snapshot{}, ErrNotFound
 	}
 	if request.Filters.SelectedDelivery != "" && !catalogContainsDelivery(catalog.Entries, request.Filters.SelectedDelivery) {
@@ -278,6 +282,27 @@ func (r *Reader) Read(ctx context.Context, request Request) (Snapshot, error) {
 	return response, nil
 }
 
+func normalizedDetailKeys(request Request) ([]string, error) {
+	if request.DetailDeliveryKey != "" && len(request.DetailDeliveryKeys) > 0 {
+		return nil, fmt.Errorf("%w: singular and multi detail scopes cannot be combined", ErrInvalid)
+	}
+	keys := append([]string(nil), request.DetailDeliveryKeys...)
+	if request.DetailDeliveryKey != "" {
+		keys = []string{request.DetailDeliveryKey}
+	}
+	if len(keys) > 4 {
+		return nil, fmt.Errorf("%w: at most four detail deliveries", ErrInvalid)
+	}
+	seen := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		if !deliveryKeyPattern.MatchString(key) || seen[key] {
+			return nil, fmt.Errorf("%w: invalid or duplicate detail delivery", ErrInvalid)
+		}
+		seen[key] = true
+	}
+	return keys, nil
+}
+
 func catalogContainsDelivery(entries []catalogEntry, key string) bool {
 	for _, entry := range entries {
 		if entry.DeliveryKey == key {
@@ -334,6 +359,17 @@ func (r *Reader) loadCatalog(ctx context.Context, conn delivery.DBTX, request Re
 		// authorized live issue in the installation.
 		rootScope = "roots.project_id=?"
 	}
+	detailKeys, err := normalizedDetailKeys(request)
+	if err != nil {
+		return readCatalog{}, err
+	}
+	detailPredicate := func(alias string) string {
+		if len(detailKeys) == 0 {
+			return "1=1"
+		}
+		return fmt.Sprintf("COALESCE(%s.delivery_key,'issue:'||roots.issue_id) IN (%s)", alias,
+			strings.TrimRight(strings.Repeat("?,", len(detailKeys)), ","))
+	}
 	query := auth.AgentModeAuthorizationCTE + fmt.Sprintf(`,
 unlinked_v1 AS (
  SELECT 1
@@ -341,7 +377,7 @@ unlinked_v1 AS (
  JOIN agent_runs run ON run.issue_id=roots.issue_id
  LEFT JOIN deliveries delivery ON delivery.issue_id=roots.issue_id
  WHERE %s
-  AND (?='' OR COALESCE(delivery.delivery_key,'issue:'||roots.issue_id)=?)
+  AND %s
   AND run.delivery_instrumentation_version=1
   AND NOT EXISTS(SELECT 1 FROM delivery_agent_run_links link
    WHERE link.agent_run_id=run.id AND link.root_issue_id=run.issue_id)
@@ -351,7 +387,7 @@ raw_candidates AS (
  SELECT roots.issue_id,roots.project_id,roots.access_level
  FROM agent_mode_roots roots LEFT JOIN deliveries root_delivery ON root_delivery.issue_id=roots.issue_id
  WHERE %s
- AND (?='' OR COALESCE(root_delivery.delivery_key,'issue:'||roots.issue_id)=?)
+ AND %s
  AND (
   root_delivery.id IS NOT NULL OR
   EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=roots.issue_id
@@ -403,16 +439,22 @@ SELECT requester.user_id,requester.role,requester.permissions_epoch,
  candidate_rows.issue_status,candidate_rows.updated_at,candidate_rows.project_id,candidate_rows.project_key,
  candidate_rows.project_name,candidate_rows.access_level,candidate_rows.delivery_id,candidate_rows.delivery_key,
  candidate_rows.epic_id,candidate_rows.epic_key,candidate_rows.epic_title,candidate_rows.tags_json
- FROM requester LEFT JOIN candidate_rows ON 1=1 ORDER BY candidate_rows.issue_id`, rootScope, rootScope)
+ FROM requester LEFT JOIN candidate_rows ON 1=1 ORDER BY candidate_rows.issue_id`, rootScope,
+		detailPredicate("delivery"), rootScope, detailPredicate("root_delivery"))
 	args := []any{request.UserID}
 	if request.RouteProjectID != nil {
 		args = append(args, routeID)
 	}
-	args = append(args, request.DetailDeliveryKey, request.DetailDeliveryKey)
+	for _, key := range detailKeys {
+		args = append(args, key)
+	}
 	if request.RouteProjectID != nil {
 		args = append(args, routeID)
 	}
-	args = append(args, request.DetailDeliveryKey, request.DetailDeliveryKey, routeID, routeID)
+	for _, key := range detailKeys {
+		args = append(args, key)
+	}
+	args = append(args, routeID, routeID)
 	rows, err := conn.QueryContext(ctx, query, args...)
 	if err != nil {
 		return readCatalog{}, err

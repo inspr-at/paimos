@@ -251,6 +251,21 @@
           }
         }
       },
+      "CommentCreateRequest": {
+        "type": "object",
+        "required": ["body"],
+        "properties": {
+          "body": {"type": "string", "minLength": 1},
+          "visibility": {"type": "string", "enum": ["internal", "external"], "default": "internal"},
+          "client_request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "description": "Accepted only when visibility is internal. The database identity, rather than the generic response cache, is authoritative."
+          }
+        }
+      },
       "User": {
         "type": "object",
         "required": [
@@ -607,6 +622,18 @@
           },
           "body": {
             "type": "string"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": ["internal", "external"]
+          },
+          "client_request_id": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "description": "Optional exact-once identity scoped to the authenticated author. Legal only for internal comments; an exact replay returns the original comment and different issue/body reuse returns 409."
           },
           "created_at": {
             "type": "string",
@@ -1095,6 +1122,34 @@
           "valid_values": {"type": "array", "items": {"type": "string"}},
           "request_id": {"type": "string"},
           "error": {"type": "string"}
+        }
+      },
+      "AgentModeVoiceTranscript": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["utterance_id", "text", "final"],
+        "properties": {
+          "utterance_id": {"type": "string", "pattern": "^utt_[0-9a-f]{32}$"},
+          "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+          "final": {"type": "boolean", "const": true}
+        }
+      },
+      "AgentModeVoiceSpeakRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["template", "delivery_id", "delivery_revision", "candidate_ids", "locale"],
+        "properties": {
+          "template": {"type": "string", "enum": ["status", "note_ready", "clarification"]},
+          "delivery_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"},
+          "delivery_revision": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[!-~]+$"},
+          "candidate_ids": {
+            "type": "array",
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"},
+            "description": "Empty for status/note_ready; one to three active authorized delivery IDs for clarification."
+          },
+          "locale": {"type": "string", "enum": ["en", "de"]}
         }
       },
       "AgentModeSnapshot": {
@@ -2355,9 +2410,25 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommentCreateRequest"}}}
+        },
         "responses": {
+          "200": {
+            "description": "Exact replay of an existing client_request_id",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Comment"}}}
+          },
           "201": {
-            "description": "Created"
+            "description": "Created",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Comment"}}}
+          },
+          "400": {
+            "description": "Invalid body, visibility, or client_request_id"
+          },
+          "409": {
+            "description": "client_request_id was already used by this author for a different issue or body",
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
           }
         }
       }
@@ -3586,6 +3657,77 @@
             "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
             "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
           }
+        }
+      }
+    },
+    "/api/agent-mode/voice/transcribe": {
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Ephemerally transcribe one final Agent Mode utterance",
+        "description": "Accepts one bounded raw audio blob and returns one final transcript. Audio and transcript are never persisted, cached, or copied into the generic idempotency cache; the AI papertrail stores metadata and billed units only. Intake and Agent Mode share STT concurrency, burst, and daily budgets.",
+        "parameters": [
+          {"name": "language", "in": "query", "required": true, "schema": {"type": "string", "enum": ["en", "de"]}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "audio/webm": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "video/webm": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "audio/mp4": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "video/mp4": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "audio/mpeg": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "audio/wav": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "audio/x-wav": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "audio/ogg": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Final ephemeral transcript",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentModeVoiceTranscript"}}}
+          },
+          "400": {"description": "Malformed or duplicate language query", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "401": {"description": "Authentication required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "Internal cookie caller failed CSRF or must change password", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Canonical external-account concealment", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}},
+          "413": {"description": "Audio exceeds 12 MiB", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "415": {"description": "Content-Type is not an allowlisted browser audio/video type", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "422": {"description": "Audio is empty or no speech was detected", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "429": {"description": "Shared voice concurrency, burst, AI-cap, or daily-unit budget rejected the call", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Private configuration/storage failure", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "502": {"description": "Transcription provider failed", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "503": {"description": "Voice input is not configured", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/agent-mode/voice/speak": {
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Speak a reauthorized server-owned Agent Mode template",
+        "description": "Never accepts caller text. The server coherently reloads and authorizes the primary plus up to three active candidates, verifies the current delivery revision and required capability, then renders only closed structured facts. Intake and Agent Mode share TTS concurrency, burst, and daily budgets; audio and template text are not persisted.",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentModeVoiceSpeakRequest"}}}
+        },
+        "responses": {
+          "200": {
+            "description": "Ephemeral synthesized audio",
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}},
+              "Content-Language": {"schema": {"type": "string", "enum": ["en", "de"]}}
+            },
+            "content": {"audio/mpeg": {"schema": {"type": "string", "format": "binary"}}}
+          },
+          "400": {"description": "Malformed, missing, extra, or inconsistent template fields", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "401": {"description": "Authentication required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "Internal cookie caller failed CSRF or must change password", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Canonical concealment for external, missing, inaccessible, revoked-capability, or inactive candidate targets", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}},
+          "409": {"description": "delivery_revision is no longer current", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}},
+          "429": {"description": "Shared voice concurrency, burst, AI-cap, or daily-unit budget rejected the call", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Private storage-invariant failure", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "502": {"description": "Synthesis provider failed or returned invalid/non-audio/oversized output", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "503": {"description": "Voice output is not configured", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
         }
       }
     },

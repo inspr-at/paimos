@@ -16,11 +16,14 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -36,7 +39,11 @@ type Comment struct {
 	AvatarPath *string `json:"avatar_path"`
 	Body       string  `json:"body"`
 	Visibility string  `json:"visibility"`
-	CreatedAt  string  `json:"created_at"`
+	// ClientRequestID is the optional PAI-808 exact-once identity. It is
+	// intentionally absent from ordinary comments and is accepted only for
+	// internal comments.
+	ClientRequestID *string `json:"client_request_id,omitempty"`
+	CreatedAt       string  `json:"created_at"`
 }
 
 // Visibility levels accepted by the comments API (PAI-475). 'internal' is the
@@ -59,7 +66,8 @@ func ListComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := db.DB.Query(`
-		SELECT c.id, c.issue_id, c.author_id, COALESCE(NULLIF(u.nickname,''), u.username), u.avatar_path, c.body, c.visibility, c.created_at
+		SELECT c.id, c.issue_id, c.author_id, COALESCE(NULLIF(u.nickname,''), u.username), u.avatar_path,
+		       c.body, c.visibility, c.client_request_id, c.created_at
 		FROM comments c
 		LEFT JOIN users u ON u.id = c.author_id
 		WHERE c.issue_id = ?
@@ -74,7 +82,8 @@ func ListComments(w http.ResponseWriter, r *http.Request) {
 	comments := []Comment{}
 	for rows.Next() {
 		var c Comment
-		if err := rows.Scan(&c.ID, &c.IssueID, &c.AuthorID, &c.Author, &c.AvatarPath, &c.Body, &c.Visibility, &c.CreatedAt); err == nil {
+		if err := rows.Scan(&c.ID, &c.IssueID, &c.AuthorID, &c.Author, &c.AvatarPath, &c.Body, &c.Visibility,
+			&c.ClientRequestID, &c.CreatedAt); err == nil {
 			comments = append(comments, c)
 		}
 	}
@@ -89,11 +98,18 @@ func CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Body       string `json:"body"`
-		Visibility string `json:"visibility"`
+		Body            string  `json:"body"`
+		Visibility      string  `json:"visibility"`
+		ClientRequestID *string `json:"client_request_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Body == "" {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&body); err != nil || body.Body == "" {
 		jsonError(w, "body required", http.StatusBadRequest)
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		jsonError(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 	// PAI-475: default to internal — explicit opt-in is required for the
@@ -106,11 +122,25 @@ func CreateComment(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid visibility", http.StatusBadRequest)
 		return
 	}
+	if body.ClientRequestID != nil {
+		if !validCommentClientRequestID(*body.ClientRequestID) {
+			jsonError(w, "invalid client_request_id", http.StatusBadRequest)
+			return
+		}
+		if body.Visibility != CommentVisibilityInternal {
+			jsonError(w, "client_request_id is allowed only for internal comments", http.StatusBadRequest)
+			return
+		}
+	}
 
 	user := auth.GetUser(r)
 	var authorID *int64
 	if user != nil {
 		authorID = &user.ID
+	}
+	if body.ClientRequestID != nil && authorID == nil {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
 	}
 
 	tx, err := db.DB.BeginTx(r.Context(), nil)
@@ -127,9 +157,33 @@ func CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := tx.ExecContext(r.Context(), `
-		INSERT INTO comments(issue_id, author_id, body, visibility) VALUES(?, ?, ?, ?)
-	`, issueID, authorID, body.Body, body.Visibility)
+		INSERT INTO comments(issue_id, author_id, body, visibility, client_request_id)
+		VALUES(?, ?, ?, ?, ?)
+	`, issueID, authorID, body.Body, body.Visibility, body.ClientRequestID)
 	if err != nil {
+		if body.ClientRequestID != nil && isCommentClientRequestConflict(err) {
+			prior, lookupErr := commentByClientRequestIDTx(tx, *authorID, *body.ClientRequestID)
+			if lookupErr != nil {
+				log.Printf("CreateComment: exact-once lookup author_id=%d: %v", *authorID, lookupErr)
+				jsonError(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			if prior.IssueID != issueID || prior.Body != body.Body || prior.Visibility != CommentVisibilityInternal {
+				problemJSON(w, r, ProblemDetails{
+					Status: http.StatusConflict, Code: "client_request_id_conflict",
+					Detail: "client_request_id was reused with a different issue, body, or visibility",
+				})
+				return
+			}
+			if err := tx.Commit(); err != nil {
+				log.Printf("CreateComment: exact-once replay commit: %v", err)
+				jsonError(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("X-PAIMOS-Idempotency-Replay", "true")
+			writeComment(w, http.StatusOK, prior)
+			return
+		}
 		log.Printf("CreateComment: issue_id=%d author_id=%v err=%v", issueID, authorID, err)
 		jsonError(w, "insert failed", http.StatusInternalServerError)
 		return
@@ -165,22 +219,71 @@ func CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	c, err := commentByIDTx(tx, id)
+	if err != nil {
+		log.Printf("CreateComment: response id=%d: %v", id, err)
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		log.Printf("CreateComment: commit: %v", err)
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
+	writeComment(w, http.StatusCreated, c)
+}
+
+func validCommentClientRequestID(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > 128 {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		char := value[index]
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || strings.ContainsRune("._:-", rune(char)) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isCommentClientRequestConflict(err error) bool {
+	return err != nil && strings.Contains(err.Error(),
+		"UNIQUE constraint failed: comments.author_id, comments.client_request_id")
+}
+
+func commentByClientRequestIDTx(tx *sql.Tx, authorID int64, clientRequestID string) (Comment, error) {
+	var id int64
+	err := tx.QueryRow(`SELECT id FROM comments WHERE author_id=? AND client_request_id=?`,
+		authorID, clientRequestID).Scan(&id)
+	if err != nil {
+		return Comment{}, err
+	}
+	return commentByIDTx(tx, id)
+}
+
+func commentByIDTx(tx *sql.Tx, id int64) (Comment, error) {
 	var c Comment
-	db.DB.QueryRow(`
-		SELECT c.id, c.issue_id, c.author_id, COALESCE(NULLIF(u.nickname,''), u.username), u.avatar_path, c.body, c.visibility, c.created_at
+	err := tx.QueryRow(`
+		SELECT c.id, c.issue_id, c.author_id, COALESCE(NULLIF(u.nickname,''), u.username), u.avatar_path,
+		       c.body, c.visibility, c.client_request_id, c.created_at
 		FROM comments c LEFT JOIN users u ON u.id = c.author_id
 		WHERE c.id = ?
-	`, id).Scan(&c.ID, &c.IssueID, &c.AuthorID, &c.Author, &c.AvatarPath, &c.Body, &c.Visibility, &c.CreatedAt)
+	`, id).Scan(&c.ID, &c.IssueID, &c.AuthorID, &c.Author, &c.AvatarPath, &c.Body, &c.Visibility,
+		&c.ClientRequestID, &c.CreatedAt)
+	if err != nil {
+		return Comment{}, err
+	}
+	return c, nil
+}
 
+func writeComment(w http.ResponseWriter, status int, comment Comment) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(c)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(comment)
 }
 
 // PATCH /api/comments/{id}  { "visibility": "internal" | "external" }
@@ -238,6 +341,10 @@ func UpdateCommentVisibility(w http.ResponseWriter, r *http.Request) {
 	isOwner := before.AuthorID != nil && *before.AuthorID == user.ID
 	if !isOwner && !auth.IsAdmin(user) {
 		jsonError(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if before.ClientRequestID != nil && body.Visibility != CommentVisibilityInternal {
+		jsonError(w, "client-request comments must remain internal", http.StatusBadRequest)
 		return
 	}
 

@@ -33,7 +33,11 @@ type Request struct {
 	UserID            int64
 	RouteProjectID    *int64
 	DetailDeliveryKey string
-	Filters           Filters
+	// DetailDeliveryKeys is an internal bounded multi-target lookup used by
+	// privacy-sensitive consumers that must authorize a small target set in
+	// one coherent Reader snapshot. HTTP detail routes use the singular field.
+	DetailDeliveryKeys []string
+	Filters            Filters
 }
 
 type Snapshot struct {

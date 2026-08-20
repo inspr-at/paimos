@@ -36,6 +36,7 @@ import (
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/handlers/crm"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
+	"github.com/inspr-at/paimos/backend/httpcontract"
 	"github.com/inspr-at/paimos/backend/secretinput"
 	"github.com/inspr-at/paimos/backend/storage"
 
@@ -467,18 +468,22 @@ func mountAPI(r chi.Router) {
 	// receive the same 404 as an inaccessible resource. Keep this separate
 	// from BlockExternal, whose 403 contract is correct for the older internal
 	// API but would disclose that this supervision surface exists.
-	r.Group(func(r chi.Router) {
-		r.Use(auth.Middleware)
-		r.Use(auth.CSRFMiddleware)
+	r.Route("/agent-mode", func(r chi.Router) {
 		r.Use(auth.AgentModePrivateNoStore)
+		r.Use(auth.Middleware)
 		r.Use(auth.RequireAgentModeInternal)
+		r.Use(auth.CSRFMiddleware)
 		r.Use(auth.MustChangePasswordGate)
+		r.NotFound(httpcontract.WriteAgentModeNotFound)
+		r.MethodNotAllowed(httpcontract.WriteAgentModeNotFound)
 
 		// Literal events must precede the delivery-key wildcard.
-		r.Get("/agent-mode/deliveries/events", handlers.AgentModeEvents)
-		r.Get("/agent-mode/deliveries", handlers.AgentModeDeliveries)
-		r.Get("/agent-mode/projects/{projectID}/deliveries", handlers.AgentModeProjectDeliveries)
-		r.Get("/agent-mode/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
+		r.Get("/deliveries/events", handlers.AgentModeEvents)
+		r.Get("/deliveries", handlers.AgentModeDeliveries)
+		r.Get("/projects/{projectID}/deliveries", handlers.AgentModeProjectDeliveries)
+		r.Get("/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
+		r.Post("/voice/transcribe", handlers.TranscribeAgentModeVoice)
+		r.Post("/voice/speak", handlers.SpeakAgentModeVoice)
 	})
 
 	// Portal (external + admin)
@@ -867,7 +872,7 @@ func mountAPI(r chi.Router) {
 
 		// Comments
 		r.With(auth.RequireIssueAccess).Get("/issues/{id}/comments", handlers.ListComments)
-		r.With(auth.RequireIssueEdit, handlers.IdempotencyMiddleware).Post("/issues/{id}/comments", handlers.CreateComment)
+		r.With(auth.RequireIssueEdit, handlers.CommentIdempotencyMiddleware).Post("/issues/{id}/comments", handlers.CreateComment)
 		r.With(auth.RequireCommentEdit).Patch("/comments/{id}", handlers.UpdateCommentVisibility)
 		r.With(auth.RequireCommentAccess).Delete("/comments/{id}", handlers.DeleteComment)
 
