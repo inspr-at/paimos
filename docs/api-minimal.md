@@ -262,7 +262,21 @@ GET    /projects/:id/agents/:name.json canonical agent artifact (inlines repos +
 GET    /projects/:id/agents/:name.md   markdown rendering for CLI / skill render
 GET    /projects/:id/agents/:name.rev  plain-text rev hash for cheap-poll fallback
 GET    /projects/:id/agents/events     SSE stream — auto-watch sync (PAI-331)
+POST   /issues/:id/implement           create a queued local/provider run
+GET    /issues/:id/runs                issue run history
+GET    /projects/:id/runs              project run history
+GET    /projects/:id/runners           live runner capabilities
+GET    /runs/:id                       run detail
+PATCH  /runs/:id                       lifecycle/report compare-and-set
 ```
+
+PAI-800 runner liveness/progress uses the PAI-799 integration seam on
+`PATCH /runs/:id`: `status=running`, `if_status=running`, plus only
+`supervisor_event`, `supervisor_phase`, `supervisor_summary`, and optional
+`supervisor_outcome`. The supervisor never sends provider prompt, source, tool
+arguments, command output, environment values, or raw errors. PAI-799 owns the
+final persistence/endpoint mapping and acceptance of the truthful `completed`
+result used when no configured test command ran.
 
 Project inventories — small CRUD trios shared by every agent in the project:
 

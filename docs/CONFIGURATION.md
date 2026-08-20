@@ -69,6 +69,26 @@ or undo snapshots.
 | `PAIMOS_LIVE_UPDATES_ENABLED` | `false` | Set to `true` to enable `GET /api/changes?since=<seq>`. When disabled, the endpoint returns 404 and clients keep using conditional polling. |
 | `PAIMOS_LIVE_UPDATES_MAX_CONNECTIONS` | `100` | Process-local cap for concurrent SSE clients. |
 
+## Local agent runner flags
+
+`paimos run-agent watch` is configured with CLI flags rather than server
+environment variables. The safety-relevant defaults are:
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--execution-timeout` | `2h` | Hard lifetime for the owned provider process tree. |
+| `--heartbeat-timeout` | `5m` | Maximum child stdout/stderr silence before termination. |
+| `--heartbeat-interval` | `15s` | Supervisor-owned liveness cadence; independent of provider callbacks. |
+| `--exec` | `claude` | Built-in Claude structured-stream mode with repository read/edit tools only. Any custom value is an explicit raw shell-command fallback. |
+| `--test-exec` | *(empty)* | The only runner-owned test evidence source. Empty means successful implementation reports `completed`, not `tests_passed`. |
+| `--attach-logs` | `false` | Opt-in bounded raw log capture; output can contain secrets. |
+| `--allow-deploy` | `false` | Still requires `--deploy-exec`, a run `deploy_target`, and separate consent unless `--yes-deploy`. |
+
+The built-in Claude action does not enable Bash, MCP, browser tools, or
+permission bypass. A custom `--exec` can broaden permissions, but that is an
+operator-authored arbitrary shell command and its stream is not parsed into
+telemetry.
+
 ### Set-once (changing after data exists has consequences)
 
 | Var | Default | Caveat |

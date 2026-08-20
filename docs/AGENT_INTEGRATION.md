@@ -313,17 +313,19 @@ auto-deploy.** Deploy stays a manual step until the deploy-gating phase.
 ### Run lifecycle
 
 ```
-queued → running → tests_passed | tests_failed → deployed
-                                                ↘ failed | cancelled
+queued → running → completed | tests_passed | tests_failed → deployed
+                                                            ↘ failed | cancelled
 running → drafted
 ```
 
-The runner itself sets `running` / `tests_passed` / `failed` / `deployed`;
+The runner itself sets `running` / `completed` / `tests_passed` / `tests_failed`
+/ `failed` / `deployed`;
 `cancelled` is the decline-the-prompt off-ramp before `running`, and
-`tests_failed` is only ever set by the spawned agent reporting its own result.
+`tests_failed` is set only when the configured `--test-exec` actually runs and
+exits non-zero.
 Draft providers move their server-created run from `running` to `drafted` after
-posting the draft comment. Terminal statuses (`drafted` / `deployed` / `failed`
-/ `cancelled`) are enforced
+posting the draft comment. Terminal statuses (`completed` / `drafted` /
+`deployed` / `failed` / `cancelled`) are enforced
 server-side — a run can't be moved back out of one.
 
 ### Endpoints
@@ -432,8 +434,8 @@ paimos run-agent watch --project PAI --repo-root .
 #   subscribes advertising implement-capability (?implement=1), and on an
 #   implement_requested event: claims matching-action runs, generates an
 #   issue-context prompt, spawns Claude Code (override with --exec) in --repo-root,
-#   optionally runs --test-exec, then reports
-#   tests_passed / tests_failed / failed.
+#   optionally runs --test-exec, then reports completed (no test command),
+#   tests_passed / tests_failed (test command ran), or failed.
 #   It reconnects on a dropped stream, processes one job at a time, and
 #   periodically catches up on queued runs it missed; prompts before each run
 #   unless --yes. Two runners never double-execute the same run (atomic claim).
@@ -448,9 +450,14 @@ the inference when a wrapper command name would be ambiguous:
 paimos run-agent watch --project PAI --repo-root . --exec "codex exec" --action-key codex_cli.implement
 ```
 
-The default `--exec "claude"` is normalized to Claude Code print mode and fed
-the generated issue prompt, so the runner does not open an interactive TUI for a
-queued web run. The spawned command sees `PAIMOS_RUN_ID`, `PAIMOS_ISSUE_KEY`,
+The default `--exec "claude"` is normalized to Claude Code print mode with
+`--output-format stream-json`, a non-interactive permission mode, and an
+allowlist of repository read/edit tools (`Read,Glob,Grep,Edit,Write`). It does
+not enable Bash, MCP, browser, or permission bypass by default. Operators who
+need a broader Claude invocation must opt into it explicitly through `--exec`;
+that custom-command path is treated as a raw stream. The generated issue prompt
+is fed on stdin, so a queued run never opens an interactive TUI. The spawned
+command sees `PAIMOS_RUN_ID`, `PAIMOS_ISSUE_KEY`,
 `PAIMOS_ISSUE_TITLE`, `PAIMOS_CONTEXT_PACK`, `PAIMOS_CONTEXT_PACK_LABEL`, and
 `PAIMOS_PROMPT_FILE`; custom provider commands can read the prompt file
 themselves.
@@ -464,11 +471,37 @@ also receives:
 - `PAIMOS_AGENT_ARTIFACT_FILE` — a temporary redacted copy of the canonical
   artifact for harnesses that prefer structured input.
 
-`--exec` runs through a shell (`sh -c`), so quoting, pipes, and chaining work for
-custom commands, e.g. `--exec 'codex exec "$(cat "$PAIMOS_PROMPT_FILE")"'`.
+`--exec` is the explicit provider-neutral/raw fallback. It runs through a shell
+(`sh -c`), so quoting, pipes, and chaining work for custom commands, e.g.
+`--exec 'codex exec "$(cat "$PAIMOS_PROMPT_FILE")"'`. Raw output is not parsed
+or persisted as telemetry.
 
-`--test-exec` is the preferred way to prove tests in the run record. It runs
-after the agent command, captures a bounded summary into `tests_summary`, reports
+The supervisor parses only bounded Claude JSON-line envelopes. It translates
+an allowlist of event type/tool-name classes into generic phases such as
+`inspecting`, `implementing`, and `working`; prompt text, assistant text, tool
+arguments, command output, source text, environment values, and provider error
+bodies never enter telemetry. Oversized events, aggregate stream floods, and
+malformed/unknown events fail closed. Terminal outcomes distinguish spawn
+failure, malformed stream, silent child, execution timeout, cancellation,
+provider failure, runner disappearance, report failure, and normal exit.
+
+While a child is alive, the supervisor emits its own liveness heartbeat; this
+does not depend on model callbacks. `--execution-timeout` (default `2h`),
+`--heartbeat-timeout` (default `5m` of child stdout/stderr silence), and
+`--heartbeat-interval` (default `15s`) are configurable. Timeout/cancellation
+terminate the process group owned by the runner before any terminal report is
+chosen, preventing a late successful exit from overwriting the failure.
+
+PAI-799 integration hook: `runnerReportTransport.Report` currently uses a
+compare-and-set `PATCH /api/runs/:id` with only `status`, `if_status`, and the
+four allowlisted `supervisor_event`, `supervisor_phase`, `supervisor_summary`,
+and `supervisor_outcome` fields. PAI-799 owns accepting/persisting those fields
+and the `completed` lifecycle value; keep that wire mapping inside
+`httpRunnerReportTransport` if its final endpoint shape changes.
+
+`--test-exec` is the only runner-owned way to prove tests in the run record. It runs
+after the agent command, records only `configured test command passed|failed`
+in `tests_summary` (never command text or output), reports
 `tests_failed` if the command exits non-zero, and skips deploy on test failure:
 
 ```bash
@@ -479,11 +512,18 @@ paimos run-agent watch --project PAI --repo-root . --yes \
 `--attach-logs` (OFF by default) captures the job's combined output and attaches
 it to the ticket as a log, stamping `log_attachment_id`. It is opt-in because
 agent output can contain secrets, and a ticket attachment is visible to every
-project member — only enable it for repos/tickets where that's acceptable.
+project member — only enable it for repos/tickets where that's acceptable. The
+capture is capped; the cap does not turn raw output into telemetry.
 
-The run lifecycle is enforced server-side: status changes must follow a legal
+A normal provider exit without `--test-exec` reports `completed`, never
+`tests_passed`. Deployment and smoke verification remain separate facts; the
+runner reports neither unless the corresponding configured command actually
+ran successfully.
+
+After the PAI-799 lifecycle hook is integrated, the run lifecycle is enforced
+server-side: status changes must follow a legal
 edge (e.g. a run can't jump straight to `deployed`), and a terminal run
-(`drafted`/`deployed`/`failed`/`cancelled`) is immutable. For non-requester project-editor
+(`completed`/`drafted`/`deployed`/`failed`/`cancelled`) is immutable. For non-requester project-editor
 claims, the server requires the caller's user, device, and requested `action_key`
 to match a live implement-capable runner connection; after the first
 `queued -> running` claim, later writes are limited to the requester, admin, or
@@ -611,8 +651,11 @@ For the PAI-629/PAI-630 path from one generic action to explicit Claude, Codex,
 local-model, and OpenRouter actions, see
 [`IMPLEMENT_THIS_PROVIDERS.md`](IMPLEMENT_THIS_PROVIDERS.md).
 
-The spawned command can read the generated prompt or selected-agent artifact,
-and report bounded progress through `paimos run report`. On any transition into a terminal status the
+The spawned command can read the generated prompt or selected-agent artifact
+and report bounded progress through `paimos run report`. `needs_input` is a safe
+blocker telemetry signal only: this one-shot runner stops the child and cannot
+advertise pause/resume, accept an answer, or resume a session. On any transition
+into a terminal status the
 server auto-posts a summary comment on the ticket — attributed to the reporting
 user — so the human-readable trail always matches the structured run record.
 

@@ -20,7 +20,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // newRunServer serves a canned run detail for GET /api/runs/{id} and records
@@ -141,14 +143,15 @@ func TestAgentRunnerSuccess(t *testing.T) {
 	if !spawned {
 		t.Error("spawn was not called")
 	}
-	// claim (running, stamping the actual device) then report (tests_passed).
+	// Claim (running, stamping the actual device) then report completed. No
+	// configured test command ran, so tests_passed would be fabricated evidence.
 	if len(*patches) != 2 ||
 		(*patches)[0]["status"] != "running" ||
 		(*patches)[0]["if_status"] != "queued" ||
 		(*patches)[0]["device_id"] != "dev-1" ||
 		(*patches)[0]["action_key"] != "claude_cli.implement" ||
-		(*patches)[1]["status"] != "tests_passed" {
-		t.Fatalf("patches=%+v, want claim(running,if_status=queued,device_id=dev-1,action_key=claude_cli.implement) then tests_passed", *patches)
+		(*patches)[1]["status"] != "completed" {
+		t.Fatalf("patches=%+v, want claim(running,if_status=queued,device_id=dev-1,action_key=claude_cli.implement) then completed", *patches)
 	}
 }
 
@@ -307,8 +310,8 @@ func TestAgentRunnerSelectedAgentContextPromptAndEnv(t *testing.T) {
 	if !spawned {
 		t.Error("spawn was not called")
 	}
-	if len(*patches) != 2 || (*patches)[0]["status"] != "running" || (*patches)[1]["status"] != "tests_passed" {
-		t.Fatalf("patches=%+v, want running then tests_passed", *patches)
+	if len(*patches) != 2 || (*patches)[0]["status"] != "running" || (*patches)[1]["status"] != "completed" {
+		t.Fatalf("patches=%+v, want running then completed", *patches)
 	}
 }
 
@@ -326,6 +329,15 @@ func TestResolveRunnerActionInfersCodexFromExec(t *testing.T) {
 	}
 	if key != "claude_cli.implement" || label != "Claude Code" {
 		t.Fatalf("action=%s label=%s, want Claude Code", key, label)
+	}
+}
+
+func TestRunnerDoesNotAdvertiseUnsupportedMidRunControls(t *testing.T) {
+	path := appendRunnerActionQuery("/api/projects/7/agents/events?implement=1", "claude_cli.implement", true, true)
+	for _, unsupported := range []string{"pause", "resume", "answer", "cancel"} {
+		if strings.Contains(path, unsupported) {
+			t.Fatalf("runner advertised unsupported %q control in %q", unsupported, path)
+		}
 	}
 }
 
@@ -385,11 +397,20 @@ func TestAgentRunnerTestExecReportsVersionAndSummary(t *testing.T) {
 		t.Fatalf("final patch = %+v, want tests_passed v0.2.0", last)
 	}
 	summary, _ := last["tests_summary"].(string)
-	if !strings.Contains(summary, "npm test passed") || !strings.Contains(summary, "2 passed") {
-		t.Fatalf("tests_summary=%q, want command and output evidence", summary)
+	if summary != "configured test command passed" {
+		t.Fatalf("tests_summary=%q, want allowlisted test evidence", summary)
 	}
 	if last["log_attachment_id"] != nil {
 		t.Fatalf("test summary must not imply log attachment by default, got %+v", last)
+	}
+}
+
+func TestCompletedRunStatusRequiresTestEvidence(t *testing.T) {
+	if got := completedRunStatus(false); got != "completed" {
+		t.Fatalf("without test evidence status=%q, want completed", got)
+	}
+	if got := completedRunStatus(true); got != "tests_passed" {
+		t.Fatalf("with successful configured test status=%q, want tests_passed", got)
 	}
 }
 
@@ -419,12 +440,12 @@ func TestAgentRunnerTestExecFailureReportsTestsFailed(t *testing.T) {
 	if last["status"] != "tests_failed" {
 		t.Fatalf("final patch = %+v, want tests_failed", last)
 	}
-	if !strings.Contains(fmt.Sprint(last["error"]), "tests: exit status 1") {
-		t.Fatalf("error = %v, want test failure detail", last["error"])
+	if last["error"] != "configured test command failed" {
+		t.Fatalf("error = %v, want safe test failure", last["error"])
 	}
 	summary, _ := last["tests_summary"].(string)
-	if !strings.Contains(summary, "npm test failed") || !strings.Contains(summary, "expected true") {
-		t.Fatalf("tests_summary=%q, want failed test evidence", summary)
+	if summary != "configured test command failed" {
+		t.Fatalf("tests_summary=%q, want allowlisted failed test evidence", summary)
 	}
 }
 
@@ -446,8 +467,8 @@ func TestAgentRunnerAttachesLog(t *testing.T) {
 		t.Fatalf("handleRun: %v", err)
 	}
 	last := (*patches)[len(*patches)-1]
-	if last["status"] != "tests_passed" {
-		t.Fatalf("final patch = %+v, want tests_passed", last)
+	if last["status"] != "completed" {
+		t.Fatalf("final patch = %+v, want completed", last)
 	}
 	if last["log_attachment_id"] == nil {
 		t.Fatalf("expected log_attachment_id to be set after upload, got %+v", last)
@@ -468,7 +489,7 @@ func TestDefaultSpawnTeesOutput(t *testing.T) {
 }
 
 func TestClaudeDefaultIsNonInteractivePromptMode(t *testing.T) {
-	if got := effectiveAgentExec("claude"); got != "claude -p --permission-mode acceptEdits" {
+	if got := effectiveAgentExec("claude"); got != `claude -p --verbose --output-format stream-json --permission-mode dontAsk --allowedTools "Read,Glob,Grep,Edit,Write"` {
 		t.Fatalf("effectiveAgentExec(claude)=%q", got)
 	}
 	if !commandReadsPromptOnStdin(effectiveAgentExec("claude")) {
@@ -657,14 +678,15 @@ func TestAgentRunnerDeployCarriesTestSummary(t *testing.T) {
 	if last["status"] != "deployed" || last["version"] != "1.2.3" || last["deploy_target"] != "local-dev" {
 		t.Fatalf("final patch = %+v, want deployed v1.2.3 local-dev", last)
 	}
-	if !strings.Contains(fmt.Sprint(last["tests_summary"]), "all demo tests passed") {
-		t.Fatalf("tests_summary=%v, want deploy report to carry test evidence", last["tests_summary"])
+	if fmt.Sprint(last["tests_summary"]) != "configured test command passed" {
+		t.Fatalf("tests_summary=%v, want allowlisted deploy test evidence", last["tests_summary"])
 	}
 }
 
 func TestAgentRunnerDeployNeedsItsOwnConsent(t *testing.T) {
 	// --allow-deploy + --deploy-exec + deploy_target, but the deploy confirm is
-	// declined (and --yes-deploy not set) → no deploy, report tests_passed.
+	// declined (and --yes-deploy not set) → no deploy, report completed because
+	// no test command ran.
 	srv, patches := newRunServer(t, `{"issue_id":5,"device_id":"","deploy_target":"ppm","status":"queued"}`, http.StatusOK)
 	var calls []string
 	a := &agentRunner{
@@ -683,8 +705,8 @@ func TestAgentRunnerDeployNeedsItsOwnConsent(t *testing.T) {
 	if len(calls) != 1 || calls[0] != "claude" {
 		t.Fatalf("spawn calls = %v, want just [claude] (deploy declined)", calls)
 	}
-	if last := (*patches)[len(*patches)-1]; last["status"] != "tests_passed" {
-		t.Fatalf("final patch = %+v, want tests_passed (deploy declined)", last)
+	if last := (*patches)[len(*patches)-1]; last["status"] != "completed" {
+		t.Fatalf("final patch = %+v, want completed (deploy declined)", last)
 	}
 }
 
@@ -706,8 +728,8 @@ func TestAgentRunnerDeployStaysGatedOff(t *testing.T) {
 	if len(calls) != 1 || calls[0] != "claude" {
 		t.Fatalf("spawn calls = %v, want just [claude] (deploy gated off)", calls)
 	}
-	if last := (*patches)[len(*patches)-1]; last["status"] != "tests_passed" {
-		t.Fatalf("final patch = %+v, want tests_passed (no deploy)", last)
+	if last := (*patches)[len(*patches)-1]; last["status"] != "completed" {
+		t.Fatalf("final patch = %+v, want completed (no deploy)", last)
 	}
 }
 
@@ -760,5 +782,223 @@ func TestAgentRunnerQueuedRunIDsDedupesPollErrors(t *testing.T) {
 	_ = a.queuedRunIDs(context.Background(), 7)
 	if got := strings.Count(errOut.String(), "catch-up poll failed"); got != 2 {
 		t.Fatalf("distinct catch-up error logged %d times, want 2; stderr=%q", got, errOut.String())
+	}
+}
+
+type recordingRunnerReporter struct {
+	mu      sync.Mutex
+	reports []supervisorReport
+	err     error
+}
+
+func (r *recordingRunnerReporter) Report(_ context.Context, _ int64, report supervisorReport) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reports = append(r.reports, report)
+	return r.err
+}
+
+func (r *recordingRunnerReporter) snapshot() []supervisorReport {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]supervisorReport(nil), r.reports...)
+}
+
+func supervisorFixture(command string) supervisorRequest {
+	return supervisorRequest{
+		RunID:             7,
+		RepoRoot:          os.TempDir(),
+		ExecCmd:           command,
+		ExecutionTimeout:  2 * time.Second,
+		SilenceTimeout:    time.Second,
+		HeartbeatInterval: 20 * time.Millisecond,
+	}
+}
+
+func TestSupervisorOutcomes(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*supervisorRequest) context.Context
+		command string
+		want    supervisorOutcome
+	}{
+		{name: "normal raw exit", command: "printf ok", want: outcomeNormalExit},
+		{name: "missing provider command", command: "paimos-command-that-does-not-exist", want: outcomeSpawnFailure},
+		{name: "provider failure", command: "exit 7", want: outcomeProviderFailure},
+		{name: "malformed stream", command: "printf 'not-json\\n'", want: outcomeMalformedStream, mutate: func(r *supervisorRequest) context.Context {
+			r.StructuredClaude = true
+			return context.Background()
+		}},
+		{name: "provider-declared failure", command: `printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true}'`, want: outcomeProviderFailure, mutate: func(r *supervisorRequest) context.Context {
+			r.StructuredClaude = true
+			return context.Background()
+		}},
+		{name: "silent child", command: "sleep 2", want: outcomeSilentChild, mutate: func(r *supervisorRequest) context.Context {
+			r.SilenceTimeout = 40 * time.Millisecond
+			return context.Background()
+		}},
+		{name: "execution timeout", command: "while true; do printf .; sleep 0.01; done", want: outcomeTimeout, mutate: func(r *supervisorRequest) context.Context {
+			r.ExecutionTimeout = 60 * time.Millisecond
+			r.SilenceTimeout = time.Second
+			return context.Background()
+		}},
+		{name: "cancellation", command: "while true; do printf .; sleep 0.01; done", want: outcomeCancellation, mutate: func(r *supervisorRequest) context.Context {
+			ctx, cancel := context.WithCancel(context.Background())
+			time.AfterFunc(40*time.Millisecond, cancel)
+			return ctx
+		}},
+		{name: "cancelled context cannot race into success", command: "true", want: outcomeCancellation, mutate: func(r *supervisorRequest) context.Context {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := supervisorFixture(tt.command)
+			ctx := context.Background()
+			if tt.mutate != nil {
+				ctx = tt.mutate(&req)
+			}
+			got := superviseAgentProcess(ctx, req)
+			if got.Outcome != tt.want {
+				t.Fatalf("outcome=%s summary=%q, want %s", got.Outcome, got.Summary, tt.want)
+			}
+		})
+	}
+}
+
+func TestSupervisorSpawnFailure(t *testing.T) {
+	req := supervisorFixture("printf ok")
+	req.RepoRoot = filepath.Join(t.TempDir(), "missing")
+	got := superviseAgentProcess(context.Background(), req)
+	if got.Outcome != outcomeSpawnFailure {
+		t.Fatalf("outcome=%s summary=%q, want spawn_failure", got.Outcome, got.Summary)
+	}
+}
+
+func TestSupervisorHeartbeatDoesNotDependOnProviderCallbacks(t *testing.T) {
+	reporter := &recordingRunnerReporter{}
+	req := supervisorFixture("sleep 0.12")
+	req.Reporter = reporter
+	req.SilenceTimeout = time.Second
+	got := superviseAgentProcess(context.Background(), req)
+	if got.Outcome != outcomeNormalExit {
+		t.Fatalf("outcome=%s summary=%q", got.Outcome, got.Summary)
+	}
+	heartbeats := 0
+	for _, report := range reporter.snapshot() {
+		if report.Event == "heartbeat" {
+			heartbeats++
+		}
+	}
+	if heartbeats == 0 {
+		t.Fatalf("reports=%+v, want an independent heartbeat", reporter.snapshot())
+	}
+}
+
+func TestSupervisorDistinguishesRunnerDisappearanceAndReportFailure(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		err  error
+		want supervisorOutcome
+	}{
+		{name: "runner disappearance", err: errRunnerDisappeared, want: outcomeRunnerDisappearance},
+		{name: "remote cancellation", err: errRunCancelled, want: outcomeCancellation},
+		{name: "report failure", err: errors.New("temporary report outage"), want: outcomeReportFailure},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := supervisorFixture("sleep 1")
+			req.Reporter = &recordingRunnerReporter{err: tt.err}
+			got := superviseAgentProcess(context.Background(), req)
+			if got.Outcome != tt.want {
+				t.Fatalf("outcome=%s summary=%q, want %s", got.Outcome, got.Summary, tt.want)
+			}
+		})
+	}
+}
+
+func TestClaudeStreamAdapterOnlyEmitsAllowlistedSummaries(t *testing.T) {
+	adapter := &claudeStreamAdapter{}
+	line := []byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo sensitive-provider-content"}},{"type":"text","text":"source text sensitive-provider-content"}]}}`)
+	progress, err := adapter.Consume(line)
+	if err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	if progress == nil || progress.phase != "working" || progress.summary != "provider is working" {
+		t.Fatalf("progress=%+v, want generic allowlisted progress", progress)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", progress), "sensitive-provider-content") {
+		t.Fatalf("progress leaked provider content: %+v", progress)
+	}
+}
+
+func TestClaudeStreamAdapterNeedsInputIsTelemetryOnly(t *testing.T) {
+	adapter := &claudeStreamAdapter{}
+	progress, err := adapter.Consume([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"question":"sensitive prompt content"}}]}}`))
+	if err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	if progress == nil || progress.phase != "needs_input" || strings.Contains(progress.summary, "sensitive prompt content") {
+		t.Fatalf("progress=%+v, want safe needs_input telemetry", progress)
+	}
+}
+
+func TestStructuredProviderEventAndOutputBudgetsAreBounded(t *testing.T) {
+	activity := make(chan struct{}, 1)
+	progress := make(chan safeProviderProgress, 1)
+	failures := make(chan error, 1)
+	oversized := strings.Repeat("x", maxProviderEventBytes+1) + "\n"
+	consumeProviderStdout(strings.NewReader(oversized), &claudeStreamAdapter{}, io.Discard, io.Discard, activity, progress, failures)
+	select {
+	case err := <-failures:
+		if !strings.Contains(safeStreamErrorSummary(err), "bounded size") {
+			t.Fatalf("error=%v, want bounded-size failure", err)
+		}
+	default:
+		t.Fatal("oversized provider event was accepted")
+	}
+
+	var dst bytes.Buffer
+	w := newOutputBudgetWriter(&dst, 8)
+	if n, err := w.Write([]byte("0123456789abcdef")); err != nil || n != 16 {
+		t.Fatalf("bounded writer n=%d err=%v", n, err)
+	}
+	if dst.String() != "01234567" || !w.truncated {
+		t.Fatalf("bounded output=%q truncated=%v", dst.String(), w.truncated)
+	}
+}
+
+func TestHTTPRunnerReportTransportUsesExpectedAllowlistedPatch(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/api/runs/77" {
+			http.Error(w, "unexpected request", http.StatusNotFound)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	transport := &httpRunnerReportTransport{client: newClientForTest(srv.URL)}
+	err := transport.Report(context.Background(), 77, supervisorReport{
+		Event: "progress", Phase: "implementing", Summary: "provider is editing the repository",
+	})
+	if err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	wantKeys := map[string]bool{
+		"status": true, "if_status": true, "supervisor_event": true,
+		"supervisor_phase": true, "supervisor_summary": true,
+	}
+	for key := range got {
+		if !wantKeys[key] {
+			t.Fatalf("unexpected report field %q in %+v", key, got)
+		}
+	}
+	if got["status"] != "running" || got["if_status"] != "running" || got["supervisor_phase"] != "implementing" {
+		t.Fatalf("report=%+v, want running CAS and implementing phase", got)
 	}
 }

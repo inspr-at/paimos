@@ -186,10 +186,18 @@ Defences:
   (default `claude`), never anything the server supplies.
 - **One job at a time.** A busy runner refuses new jobs rather than spawning
   concurrent agents in the same checkout.
+- **Bounded provider supervision.** Built-in Claude runs use bounded structured
+  JSON-line parsing and generic allowlisted progress. Prompts, source, tool
+  arguments, command output, environment values, and provider error bodies are
+  never forwarded as telemetry. Custom `--exec` streams remain raw.
+- **Independent liveness and owned termination.** Supervisor heartbeats are
+  timer-driven rather than model-driven. Silence, execution timeout, and
+  cancellation terminate the owned process group before the outcome is chosen,
+  so a descendant cannot outlive the run or race into success.
 - **Report-back only by default; deploy is triple-gated.** The runner never
   deploys unless the operator passed BOTH `--allow-deploy` and a `--deploy-exec`
   command AND the run carries a `deploy_target`. Absent any of the three it can
-  only move a run to `tests_passed` / `failed`.
+  only report `completed`, a test-evidenced result, or `failed`.
 - **Authorized + audited.** `POST /implement` is project-editor gated; run reads
   and updates are requester, project-editor, or admin only. Every request is
   recorded in the HTTP-level session audit (`session_activity`, §4.4). Note: the
@@ -326,6 +334,9 @@ PAI-110 shipped the **INV-FILES-03** application-layer fix end-to-end. Uploads n
 | **INV-RUNNER-03** | Deploy is off by default — it requires `--allow-deploy` AND `--deploy-exec` AND a run-level `deploy_target`. | `cmd_run_agent.go:agentRunner.handle` | `cmd_run_agent_test.go` |
 | **INV-RUNNER-04** | `POST /implement` is project-editor gated; run reads/updates are requester or admin only. | `handlers/agent_runs.go:canManageAgentRun` + `main.go` routes | `agent_runs_test.go` |
 | **INV-RUNNER-05** | Draft Implement-this providers cannot use local runner, repo mutation, test, or deploy paths, and local endpoint labels do not display credentials. | `handlers/agent_runs.go:implementDraftIssue`, `handlers/ai_execution_options.go:safeEndpointLabel` | `agent_runs_test.go` |
+| **INV-RUNNER-06** | Structured provider streams are size/count bounded and translate only generic allowlisted phases; raw prompt/tool/output/environment data never enters runner telemetry. | `cmd/paimos/runner_supervisor.go:claudeStreamAdapter` | `cmd_run_agent_test.go` |
+| **INV-RUNNER-07** | Liveness is supervisor-owned, and timeout/cancellation terminate the owned process group before reporting one typed outcome. | `cmd/paimos/runner_supervisor.go:superviseAgentProcess` | `cmd_run_agent_test.go` |
+| **INV-RUNNER-08** | `tests_passed` requires a successful configured `--test-exec`; a normal coding exit without it reports `completed`. | `cmd/paimos/cmd_run_agent.go:completedRunStatus` | `cmd_run_agent_test.go` |
 
 ### 4.9 · Voice-intake workbench (PAI-703)
 
