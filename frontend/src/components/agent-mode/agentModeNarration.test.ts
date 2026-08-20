@@ -25,14 +25,16 @@ import type { Delivery } from '@/services/agentMode'
 import {
   NARRATION_I18N_KEYS,
   NARRATION_SPEECH_TEMPLATES,
+  NARRATION_SPEECH_WIRE_FIELDS,
+  NARRATION_VISUAL_ONLY_NOTICES,
   buildClarificationSpeech,
   buildDeliveryNarration,
-  buildNoteSpeech,
-  buildNoticeSpeech,
-  buildPortfolioSpeech,
+  buildNoteReadySpeech,
+  buildStatusSpeech,
   factsExcludeProse,
   isSafeSpeechRequest,
   narrationProseFields,
+  toSpeechWire,
   type NarrationFact,
   type NarrationSpeechRequest,
 } from './agentModeNarration'
@@ -121,18 +123,30 @@ describe('agentModeNarration — trusted structured facts', () => {
   it('emits a speech request that carries identities and no text at all', () => {
     const delivery = d({ ...healthy, progress: trustedProgress, eta: trustedEta })
     const { speech } = narrate(delivery)
+    // Asserted whole: the request has exactly these fields, so a trust
+    // revision cannot reappear on the way to TTS.
     expect(speech).toEqual({
-      template: 'delivery_status',
+      template: 'status',
       locale: 'en',
       deliveryId: delivery.id,
       deliveryRevision: delivery.deliveryRevision,
-      trustRevision: delivery.trustRevision,
       candidateIds: [],
     })
+    expect(Object.keys(speech!).sort()).toEqual([
+      'candidateIds', 'deliveryId', 'deliveryRevision', 'locale', 'template',
+    ])
     expect(isSafeSpeechRequest(speech!)).toBe(true)
     const serialized = JSON.stringify(speech)
     expect(serialized).not.toContain(delivery.title)
     expect(serialized).not.toContain('Writing membership checks')
+    expect(serialized).not.toContain(delivery.trustRevision!)
+  })
+
+  it('stays silent when the delivery carries no read-model revision', () => {
+    // Without a revision the server cannot reauthorize what it is about to
+    // speak, so there is nothing safe to say.
+    expect(narrate(d({ ...healthy, deliveryRevision: null })).speech).toBeNull()
+    expect(narrate(d({ ...healthy, deliveryRevision: '' })).speech).toBeNull()
   })
 })
 
@@ -300,76 +314,249 @@ describe('agentModeNarration — no prose, no reassurance', () => {
   })
 })
 
-describe('agentModeNarration — speech requests', () => {
+describe('agentModeNarration — the frozen speech contract', () => {
+  const subject = { id: 'dlv-812', deliveryRevision: 'delivery:812:1' }
+
+  it('offers exactly three templates and nothing else', () => {
+    expect([...NARRATION_SPEECH_TEMPLATES]).toEqual(['status', 'note_ready', 'clarification'])
+  })
+
+  it('keeps every other notice visual — none of them has a template', () => {
+    const templates = new Set<string>(NARRATION_SPEECH_TEMPLATES)
+    for (const notice of NARRATION_VISUAL_ONLY_NOTICES) expect(templates.has(notice)).toBe(false)
+  })
+
+  it('anchors status and note_ready on the current delivery and its revision', () => {
+    expect(buildStatusSpeech(subject, 'de')).toEqual({
+      template: 'status',
+      locale: 'de',
+      deliveryId: 'dlv-812',
+      deliveryRevision: 'delivery:812:1',
+      candidateIds: [],
+    })
+    expect(buildNoteReadySpeech(subject, 'en')?.template).toBe('note_ready')
+    // No delivery revision → no speech, for either template.
+    expect(buildStatusSpeech({ id: 'dlv-812', deliveryRevision: null }, 'en')).toBeNull()
+    expect(buildNoteReadySpeech({ id: 'dlv-812', deliveryRevision: null }, 'en')).toBeNull()
+    expect(buildNoteReadySpeech({ id: '', deliveryRevision: 'delivery:812:1' }, 'en')).toBeNull()
+  })
+
   it('speaks a note by identity only — never the dictated body', () => {
-    const note = {
-      deliveryId: 'dlv-812',
-      body: 'the production credentials are in the old vault',
-      clientRequestId: 'amv1-0123456789abcdef',
-    }
-    const request = buildNoteSpeech('ready', note, 'de')
-    expect(request).toEqual({
-      template: 'note_ready',
-      locale: 'de',
-      deliveryId: 'dlv-812',
-      deliveryRevision: null,
-      trustRevision: null,
-      candidateIds: [],
-    })
+    const request = buildNoteReadySpeech(subject, 'de')
     expect(JSON.stringify(request)).not.toContain('vault')
-    expect(JSON.stringify(request)).not.toContain('credentials')
+    expect(JSON.stringify({
+      note: 'the production credentials are in the old vault',
+      request,
+    })).toContain('vault')
+    expect(Object.keys(request!)).not.toContain('body')
+    expect(Object.keys(request!)).not.toContain('text')
   })
 
-  it.each<[string, string]>([
-    ['ready', 'note_ready'],
-    ['saved', 'note_saved'],
-    ['cancelled', 'note_cancelled'],
-    ['offline_hold', 'note_offline_hold'],
-  ])('maps the %s note event to its own template', (event, template) => {
-    expect(buildNoteSpeech(event as 'ready', { deliveryId: 'dlv-812' }, 'en')?.template).toBe(template)
-  })
-
-  it('caps a clarification read-back at three identities and speaks no titles', () => {
-    const candidates = ['dlv-1', 'dlv-2', 'dlv-3', 'dlv-4'].map((deliveryId) => ({ deliveryId, title: 'secret title' }))
-    const request = buildClarificationSpeech(candidates, 'en')
-    expect(request?.candidateIds).toEqual(['dlv-1', 'dlv-2', 'dlv-3'])
-    expect(JSON.stringify(request)).not.toContain('secret title')
-    expect(buildClarificationSpeech([], 'en')).toBeNull()
-  })
-
-  it('builds portfolio and notice requests without any delivery identity', () => {
-    expect(buildPortfolioSpeech('de')).toEqual({
-      template: 'portfolio_status',
-      locale: 'de',
-      deliveryId: null,
-      deliveryRevision: null,
-      trustRevision: null,
-      candidateIds: [],
+  it('carries one to three current candidate ids on a clarification, and speaks no titles', () => {
+    const candidates = ['dlv-1', 'dlv-2', 'dlv-3'].map((deliveryId) => ({ deliveryId, title: 'secret title' }))
+    expect(buildClarificationSpeech(subject, candidates, 'en')).toEqual({
+      template: 'clarification',
+      locale: 'en',
+      deliveryId: 'dlv-812',
+      deliveryRevision: 'delivery:812:1',
+      candidateIds: ['dlv-1', 'dlv-2', 'dlv-3'],
     })
-    expect(buildNoticeSpeech('unsupported', 'en')?.template).toBe('command_unsupported')
-    expect(buildNoticeSpeech('not_understood', 'en')?.template).toBe('command_not_understood')
-    expect(buildNoticeSpeech('no_match', 'de')?.template).toBe('no_match')
+    expect(JSON.stringify(buildClarificationSpeech(subject, candidates, 'en'))).not.toContain('secret title')
+    // Nothing to choose between, and more than the operator was shown, both
+    // fail closed rather than speaking a silently truncated list.
+    expect(buildClarificationSpeech(subject, [], 'en')).toBeNull()
+    expect(buildClarificationSpeech(subject, [...candidates, { deliveryId: 'dlv-4' }], 'en')).toBeNull()
+    // A clarification still needs the current delivery it is anchored on.
+    expect(buildClarificationSpeech({ id: 'dlv-812', deliveryRevision: null }, candidates, 'en')).toBeNull()
   })
 
   it('rejects any request that is not an enum template plus opaque identities', () => {
     const ok: NarrationSpeechRequest = {
-      template: 'delivery_status',
+      template: 'status',
       locale: 'en',
       deliveryId: 'dlv-812',
       deliveryRevision: 'delivery:812:1',
-      trustRevision: 'tr1_0000000000000000000000000000000000000000000000000000000000000001',
-      candidateIds: ['dlv-813'],
+      candidateIds: [],
     }
     expect(isSafeSpeechRequest(ok)).toBe(true)
     expect(isSafeSpeechRequest({ ...ok, deliveryId: 'the note says: rotate the key' })).toBe(false)
-    expect(isSafeSpeechRequest({ ...ok, template: 'freeform' as never })).toBe(false)
+    expect(isSafeSpeechRequest({ ...ok, deliveryId: '' })).toBe(false)
+    expect(isSafeSpeechRequest({ ...ok, deliveryRevision: '' })).toBe(false)
+    expect(isSafeSpeechRequest({ ...ok, deliveryId: 'x'.repeat(129) })).toBe(false)
+    // The revision has its own, longer bound — see the parity suite.
+    expect(isSafeSpeechRequest({ ...ok, deliveryRevision: 'x'.repeat(257) })).toBe(false)
+    expect(isSafeSpeechRequest({ ...ok, template: 'delivery_status' as never })).toBe(false)
+    expect(isSafeSpeechRequest({ ...ok, template: 'portfolio_status' as never })).toBe(false)
     expect(isSafeSpeechRequest({ ...ok, locale: 'fr' as never })).toBe(false)
-    expect(isSafeSpeechRequest({ ...ok, candidateIds: ['a', 'b', 'c', 'd'] })).toBe(false)
-    expect(isSafeSpeechRequest({ ...ok, trustRevision: 'x'.repeat(129) })).toBe(false)
+    // Candidates belong to the clarification template and only there.
+    expect(isSafeSpeechRequest({ ...ok, candidateIds: ['dlv-813'] })).toBe(false)
+    const clarify: NarrationSpeechRequest = { ...ok, template: 'clarification', candidateIds: ['dlv-813'] }
+    expect(isSafeSpeechRequest(clarify)).toBe(true)
+    expect(isSafeSpeechRequest({ ...clarify, candidateIds: [] })).toBe(false)
+    expect(isSafeSpeechRequest({ ...clarify, candidateIds: ['a', 'b', 'c', 'd'] })).toBe(false)
+    expect(isSafeSpeechRequest({ ...clarify, candidateIds: ['dlv 813 — read this aloud'] })).toBe(false)
   })
 
   it('returns null rather than an unsafe request when an identity is not opaque', () => {
     const { speech } = narrate(d({ ...healthy, id: 'dlv 812 — please read this note aloud' }))
     expect(speech).toBeNull()
+  })
+})
+
+describe('agentModeNarration — backend identity and revision parity', () => {
+  const request: NarrationSpeechRequest = {
+    template: 'status',
+    locale: 'en',
+    deliveryId: 'dlv-812',
+    deliveryRevision: 'delivery:812:1',
+    candidateIds: [],
+  }
+
+  // `^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$` — deliveryKeyPattern in
+  // backend/agentmode/filters.go, safeOpaqueKey in backend/delivery/store.go,
+  // and the delivery_key CHECK constraint in backend/db/db.go.
+  const ACCEPTED_IDS: Array<[string, string]> = [
+    ['a single alphanumeric', 'a'],
+    ['the production shape', 'dlv-812'],
+    ['a slash, which a lane-shaped key needs', 'project:6/epic:4655'],
+    ['every allowed punctuation after an alphanumeric first character', 'a0._:/-'],
+    ['exactly 128 characters', `d${'x'.repeat(127)}`],
+  ]
+  const REJECTED_IDS: Array<[string, string]> = [
+    ['empty', ''],
+    ['a leading hyphen', '-dlv-812'],
+    ['a leading dot', '.dlv-812'],
+    ['a leading underscore', '_dlv-812'],
+    ['a leading colon', ':dlv-812'],
+    ['an at sign', 'dlv@812'],
+    ['a pipe', 'dlv|812'],
+    ['a tilde', 'dlv~812'],
+    ['a plus', 'dlv+812'],
+    ['a space', 'dlv 812'],
+    ['129 characters', `d${'x'.repeat(128)}`],
+  ]
+
+  it.each(ACCEPTED_IDS)('accepts a delivery id with %s', (_label, deliveryId) => {
+    expect(isSafeSpeechRequest({ ...request, deliveryId })).toBe(true)
+  })
+
+  it.each(REJECTED_IDS)('rejects a delivery id with %s', (_label, deliveryId) => {
+    expect(isSafeSpeechRequest({ ...request, deliveryId })).toBe(false)
+  })
+
+  it.each(ACCEPTED_IDS)('accepts a candidate id with %s', (_label, candidateId) => {
+    expect(isSafeSpeechRequest({ ...request, template: 'clarification', candidateIds: [candidateId] })).toBe(true)
+  })
+
+  it.each(REJECTED_IDS)('rejects a candidate id with %s', (_label, candidateId) => {
+    expect(isSafeSpeechRequest({ ...request, template: 'clarification', candidateIds: [candidateId] })).toBe(false)
+  })
+
+  // A revision is not an id: printable ASCII, 1..256, built by
+  // deliveryRevision() in backend/agentmode/trust.go as
+  // `delivery:<identity>:<revision>:<sequence>`.
+  it.each<[string, string]>([
+    ['the production shape', 'delivery:812:1'],
+    ['a revision over a long delivery key', `delivery:${'k'.repeat(128)}:12:34`],
+    ['the lowest printable ASCII character', '!'],
+    ['the highest printable ASCII character', '~'],
+    ['punctuation an id may not carry', 'delivery:a@b|c+d=e:12:34'],
+    ['exactly 256 characters', '!'.repeat(256)],
+  ])('accepts a delivery revision with %s', (_label, deliveryRevision) => {
+    expect(isSafeSpeechRequest({ ...request, deliveryRevision })).toBe(true)
+  })
+
+  it.each<[string, string]>([
+    ['nothing at all', ''],
+    ['257 characters', '!'.repeat(257)],
+    ['a space', 'delivery:812 1'],
+    ['a tab', 'delivery:812\t1'],
+    ['a newline', 'delivery:812\n1'],
+    ['a non-ASCII character', 'delivery:812:é'],
+  ])('rejects a delivery revision with %s', (_label, deliveryRevision) => {
+    expect(isSafeSpeechRequest({ ...request, deliveryRevision })).toBe(false)
+  })
+
+  it('validates ids and revisions with separate rules, not one shared guard', () => {
+    // A 200-character revision is legitimate; a 200-character id is not.
+    const long = `delivery:${'k'.repeat(150)}:12:34`
+    expect(long.length).toBeGreaterThan(128)
+    expect(isSafeSpeechRequest({ ...request, deliveryRevision: long })).toBe(true)
+    expect(isSafeSpeechRequest({ ...request, deliveryId: long })).toBe(false)
+    // …and the id rule is the stricter one on shape, not just on length.
+    expect(isSafeSpeechRequest({ ...request, deliveryId: '@dlv' })).toBe(false)
+    expect(isSafeSpeechRequest({ ...request, deliveryRevision: '@dlv' })).toBe(true)
+  })
+
+  it('carries the real fixture identities all the way to the wire', () => {
+    const { speech } = narrate(d({ ...healthy }))
+    expect(speech).not.toBeNull()
+    expect(toSpeechWire(speech!)).toEqual({
+      template: 'status',
+      locale: 'en',
+      delivery_id: base.id,
+      delivery_revision: base.deliveryRevision,
+      candidate_ids: [],
+    })
+  })
+})
+
+describe('agentModeNarration — the /voice/speak wire', () => {
+  const request: NarrationSpeechRequest = {
+    template: 'clarification',
+    locale: 'de',
+    deliveryId: 'dlv-812',
+    deliveryRevision: 'delivery:812:1',
+    candidateIds: ['dlv-813', 'dlv-815'],
+  }
+
+  it('maps exactly the five wire fields, in snake_case', () => {
+    const wire = toSpeechWire(request)
+    expect(wire).toEqual({
+      template: 'clarification',
+      locale: 'de',
+      delivery_id: 'dlv-812',
+      delivery_revision: 'delivery:812:1',
+      candidate_ids: ['dlv-813', 'dlv-815'],
+    })
+    expect(Object.keys(wire!).sort()).toEqual([...NARRATION_SPEECH_WIRE_FIELDS].sort())
+  })
+
+  it('copies field by field, so nothing on the request object can ride along', () => {
+    // A spread would carry every one of these to the server.
+    const polluted = {
+      ...request,
+      trustRevision: 'tr1_dead',
+      trust_revision: 'tr1_dead',
+      text: 'the production credentials are in the old vault',
+      body: 'the production credentials are in the old vault',
+      transcript: 'note that the fixture fails',
+    } as unknown as NarrationSpeechRequest
+    const wire = toSpeechWire(polluted)
+    expect(Object.keys(wire!).sort()).toEqual([...NARRATION_SPEECH_WIRE_FIELDS].sort())
+    const serialized = JSON.stringify(wire)
+    expect(serialized).not.toContain('tr1_dead')
+    expect(serialized).not.toContain('vault')
+    expect(serialized).not.toContain('fixture fails')
+  })
+
+  it('never carries a trust revision under any name', () => {
+    const wire = toSpeechWire(request)!
+    expect('trustRevision' in wire).toBe(false)
+    expect('trust_revision' in wire).toBe(false)
+    expect(JSON.stringify(wire)).not.toContain('trust')
+  })
+
+  it('produces no body at all for a request the guard rejects', () => {
+    expect(toSpeechWire({ ...request, candidateIds: [] })).toBeNull()
+    expect(toSpeechWire({ ...request, deliveryRevision: '' })).toBeNull()
+    expect(toSpeechWire({ ...request, template: 'note_saved' as never })).toBeNull()
+  })
+
+  it('detaches the candidate array from the caller', () => {
+    const candidateIds = ['dlv-813']
+    const wire = toSpeechWire({ ...request, candidateIds })!
+    candidateIds.push('dlv-999')
+    expect(wire.candidate_ids).toEqual(['dlv-813'])
   })
 })

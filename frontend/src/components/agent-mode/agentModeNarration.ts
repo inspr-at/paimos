@@ -27,12 +27,17 @@
 //  already withholds every exact value while the snapshot is degraded and
 //  reduces low confidence to a range.
 //
-//  SPEECH — what may be SPOKEN. A speech request carries an enum template
-//  plus opaque identities (delivery, delivery revision, trust revision,
-//  candidate ids) and NOTHING else. The server reauthorizes those ids and
+//  SPEECH — what may be SPOKEN. Exactly three templates: `status`,
+//  `note_ready`, `clarification`. A request carries the enum template plus
+//  opaque identities (the CURRENT delivery id and its delivery revision, and
+//  for `clarification` one to three current candidate ids) and NOTHING else.
+//  No trust revision, no text field. The server reauthorizes those ids and
 //  reloads the facts itself, so no caller-authored text — and in particular
 //  no dictated note body and no free-text activity prose — can ever reach
 //  TTS. There is no template that claims "on track" or promises completion.
+//  Everything else the operator should learn about (unsupported control, no
+//  match, command not understood, note saved, note cancelled, offline hold,
+//  portfolio roll-up) is a VISUAL notice with no template at all.
 //
 // Free-text server prose (activity text, status text, blocker text, evidence
 // summaries, ticket titles) is NEVER a narration parameter. `factsExcludeProse`
@@ -69,14 +74,19 @@ export interface NarrationFact {
   params: Readonly<Record<string, string | number>>
 }
 
-/** The complete set of TTS templates. Each one is a server-authored,
- * fact-loading message; none of them can express reassurance, an "on track"
- * claim, or a completion promise. */
-export const NARRATION_SPEECH_TEMPLATES = [
-  'delivery_status',
+/** The complete set of TTS templates, frozen for this release. Each one is a
+ * server-authored, fact-loading message anchored on one current delivery;
+ * none can express reassurance, an "on track" claim, or a completion
+ * promise. */
+export const NARRATION_SPEECH_TEMPLATES = ['status', 'note_ready', 'clarification'] as const
+
+export type NarrationSpeechTemplate = (typeof NARRATION_SPEECH_TEMPLATES)[number]
+
+/** Conditions that are deliberately NOT speakable. They have no template, so
+ * the UI can only ever show them; this list exists so a regression that adds
+ * one back as a template is a failing test rather than a surprise. */
+export const NARRATION_VISUAL_ONLY_NOTICES = [
   'portfolio_status',
-  'clarify_candidates',
-  'note_ready',
   'note_saved',
   'note_cancelled',
   'note_offline_hold',
@@ -85,16 +95,24 @@ export const NARRATION_SPEECH_TEMPLATES = [
   'no_match',
 ] as const
 
-export type NarrationSpeechTemplate = (typeof NARRATION_SPEECH_TEMPLATES)[number]
-
 export interface NarrationSpeechRequest {
   template: NarrationSpeechTemplate
   locale: NarrationLocale
-  /** Opaque authorized identities only — never text. */
-  deliveryId: string | null
-  deliveryRevision: string | null
-  trustRevision: string | null
+  /** The current authorized delivery. Never empty — every template speaks
+   * about exactly one delivery the server can reauthorize. */
+  deliveryId: string
+  /** Read-model lineage of that same delivery. Never empty. */
+  deliveryRevision: string
+  /** One to three current candidate ids for `clarification`; empty for every
+   * other template. */
   candidateIds: readonly string[]
+}
+
+/** The minimum a caller must hold to ask for speech: an authorized delivery
+ * identity and its read-model lineage. */
+export interface NarrationSpeechSubject {
+  id: string
+  deliveryRevision: string | null
 }
 
 export interface DeliveryNarration {
@@ -123,7 +141,26 @@ const SAFE_PARAM = /^[\p{L}\p{N} _.,:%()+\-–—−<>/·']{1,64}$/u
 const SAFE_CODE = /^[a-z][a-z0-9_]{0,31}$/
 
 const MAX_SPEECH_CANDIDATES = 3
-const SAFE_IDENTITY = /^[A-Za-z0-9._:@|~_-]{1,128}$/
+
+/**
+ * Opaque delivery / candidate identity, byte-for-byte the backend's own
+ * delivery-key rule — `deliveryKeyPattern` in `backend/agentmode/filters.go`,
+ * `safeOpaqueKey` in `backend/delivery/store.go`, and the `delivery_key`
+ * CHECK constraint in `backend/db/db.go`. It must START alphanumeric, may
+ * then carry `. _ : / -`, and is at most 128 characters, so `/` in a lane-ish
+ * key is accepted while a leading `-` or an `@` is not.
+ */
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/
+
+/**
+ * A delivery revision is NOT an id and gets its own rule: printable ASCII,
+ * 1 to 256 characters. The server composes it as
+ * `delivery:<identity>:<revision>:<sequence>` (`deliveryRevision` in
+ * `backend/agentmode/trust.go`), so it is longer than the identity it
+ * embeds — reusing the 128-character id guard would reject a legitimate
+ * revision built on a long delivery key.
+ */
+const SAFE_REVISION = /^[!-~]{1,256}$/
 
 function paramsAreSafe(params: Readonly<Record<string, string | number>>): boolean {
   return Object.values(params).every((value) => {
@@ -164,13 +201,25 @@ export function factsExcludeProse(facts: readonly NarrationFact[], d: Delivery):
   return facts.every((fact) => !containsProse(fact.params, prose))
 }
 
-/** Structural guard for anything about to be sent to `/voice/speak`. */
+/**
+ * Structural guard for anything about to be sent to `/voice/speak`.
+ *
+ * Fails closed on every axis of the frozen contract: an unknown template, an
+ * unsupported locale, a missing delivery id or delivery revision, a
+ * clarification without one to three candidates, candidates on a template
+ * that does not take them, an identity that is not a backend-shaped delivery
+ * key, or a revision that is not printable ASCII.
+ */
 export function isSafeSpeechRequest(request: NarrationSpeechRequest): boolean {
   if (!(NARRATION_SPEECH_TEMPLATES as readonly string[]).includes(request.template)) return false
   if (request.locale !== 'en' && request.locale !== 'de') return false
-  if (request.candidateIds.length > MAX_SPEECH_CANDIDATES) return false
-  const identities = [request.deliveryId, request.deliveryRevision, request.trustRevision, ...request.candidateIds]
-  return identities.every((value) => value === null || SAFE_IDENTITY.test(value))
+  const candidates = request.candidateIds.length
+  if (request.template === 'clarification') {
+    if (candidates < 1 || candidates > MAX_SPEECH_CANDIDATES) return false
+  } else if (candidates !== 0) return false
+  if (typeof request.deliveryRevision !== 'string' || !SAFE_REVISION.test(request.deliveryRevision)) return false
+  const ids = [request.deliveryId, ...request.candidateIds]
+  return ids.every((value) => typeof value === 'string' && SAFE_ID.test(value))
 }
 
 // ── Known enum vocabularies ────────────────────────────────────────────
@@ -330,85 +379,111 @@ export function buildDeliveryNarration(d: Delivery, opts: NarrationOptions): Del
 
   // A degraded snapshot is never spoken: the server would voice current
   // facts that this client cannot vouch for.
-  const speech = degraded
-    ? null
-    : {
-      template: 'delivery_status' as const,
-      locale: opts.locale,
-      deliveryId: d.id,
-      deliveryRevision: d.deliveryRevision,
-      trustRevision: d.trustRevision ?? d.trust.trustRevision,
-      candidateIds: [],
-    }
-  return { facts: safe, speech: speech && isSafeSpeechRequest(speech) ? speech : null }
+  return { facts: safe, speech: degraded ? null : buildStatusSpeech(d, opts.locale) }
 }
 
 // ── Speech requests ────────────────────────────────────────────────────
 
-function speech(
+/**
+ * The one place a speech request is constructed. Every field is written by
+ * name from a value this module chose — the delivery is never spread — so a
+ * field added to `Delivery` upstream cannot arrive at TTS by accident.
+ * Returns null rather than a partial request whenever the frozen contract is
+ * not fully satisfied.
+ */
+function speechRequest(
   template: NarrationSpeechTemplate,
   locale: NarrationLocale,
-  parts: Partial<Omit<NarrationSpeechRequest, 'template' | 'locale'>> = {},
+  subject: NarrationSpeechSubject,
+  candidateIds: readonly string[],
 ): NarrationSpeechRequest | null {
+  const deliveryRevision = subject.deliveryRevision
+  if (deliveryRevision == null) return null
   const request: NarrationSpeechRequest = {
     template,
     locale,
-    deliveryId: parts.deliveryId ?? null,
-    deliveryRevision: parts.deliveryRevision ?? null,
-    trustRevision: parts.trustRevision ?? null,
-    candidateIds: parts.candidateIds ?? [],
+    deliveryId: subject.id,
+    deliveryRevision,
+    candidateIds: candidateIds.map((id) => id),
   }
   return isSafeSpeechRequest(request) ? request : null
 }
 
-export function buildPortfolioSpeech(locale: NarrationLocale): NarrationSpeechRequest | null {
-  return speech('portfolio_status', locale)
-}
-
-/**
- * Clarification read-back. Only the candidate IDENTITIES travel; the server
- * loads the keys it speaks. Titles stay in the visual numbered list.
- */
-export function buildClarificationSpeech(
-  candidates: readonly { deliveryId: string }[],
+/** Status read-back for one current delivery. */
+export function buildStatusSpeech(
+  subject: NarrationSpeechSubject,
   locale: NarrationLocale,
 ): NarrationSpeechRequest | null {
-  if (candidates.length === 0) return null
-  return speech('clarify_candidates', locale, {
-    candidateIds: candidates.slice(0, MAX_SPEECH_CANDIDATES).map((c) => c.deliveryId),
-  })
-}
-
-export type NoteSpeechEvent = 'ready' | 'saved' | 'cancelled' | 'offline_hold'
-
-const NOTE_TEMPLATES: Record<NoteSpeechEvent, NarrationSpeechTemplate> = {
-  ready: 'note_ready',
-  saved: 'note_saved',
-  cancelled: 'note_cancelled',
-  offline_hold: 'note_offline_hold',
+  return speechRequest('status', locale, subject, [])
 }
 
 /**
  * Note read-back — "Internal note ready for PAI-808; confirm or cancel" is
  * assembled by the SERVER from the delivery id. The dictated body is not a
- * parameter here and cannot become one: the request has no text field.
+ * parameter here and cannot become one: the request has no text field. There
+ * is deliberately no saved / cancelled / offline counterpart; those are
+ * visual notices.
  */
-export function buildNoteSpeech(
-  event: NoteSpeechEvent,
-  note: { deliveryId: string },
+export function buildNoteReadySpeech(
+  subject: NarrationSpeechSubject,
   locale: NarrationLocale,
 ): NarrationSpeechRequest | null {
-  return speech(NOTE_TEMPLATES[event], locale, { deliveryId: note.deliveryId })
+  return speechRequest('note_ready', locale, subject, [])
 }
 
-export type NarrationNotice = 'unsupported' | 'not_understood' | 'no_match'
-
-const NOTICE_TEMPLATES: Record<NarrationNotice, NarrationSpeechTemplate> = {
-  unsupported: 'command_unsupported',
-  not_understood: 'command_not_understood',
-  no_match: 'no_match',
+/**
+ * Clarification read-back, anchored on the current delivery. Only the
+ * candidate IDENTITIES travel; the server loads the keys it speaks, and the
+ * titles stay in the visual numbered list. A caller that offers none, or
+ * more than the three the operator can be shown, gets null rather than a
+ * silently truncated read-back.
+ */
+export function buildClarificationSpeech(
+  subject: NarrationSpeechSubject,
+  candidates: readonly { deliveryId: string }[],
+  locale: NarrationLocale,
+): NarrationSpeechRequest | null {
+  if (candidates.length < 1 || candidates.length > MAX_SPEECH_CANDIDATES) return null
+  return speechRequest('clarification', locale, subject, candidates.map((c) => c.deliveryId))
 }
 
-export function buildNoticeSpeech(notice: NarrationNotice, locale: NarrationLocale): NarrationSpeechRequest | null {
-  return speech(NOTICE_TEMPLATES[notice], locale)
+// ── HTTP wire ──────────────────────────────────────────────────────────
+
+/** The exact body `/voice/speak` accepts. There is no trust revision and no
+ * text field of any kind on this wire. */
+export interface NarrationSpeechWire {
+  template: NarrationSpeechTemplate
+  locale: NarrationLocale
+  delivery_id: string
+  delivery_revision: string
+  candidate_ids: string[]
+}
+
+/** The complete wire field set — asserted by the suite so a widened payload
+ * cannot ship unnoticed. */
+export const NARRATION_SPEECH_WIRE_FIELDS: readonly string[] = [
+  'template',
+  'locale',
+  'delivery_id',
+  'delivery_revision',
+  'candidate_ids',
+]
+
+/**
+ * Serializes a request for `/voice/speak`.
+ *
+ * Every field is copied BY NAME. The request object is never spread, so an
+ * extra property on it — a trust revision, a transcript, a dictated body —
+ * cannot ride along to the server. Re-validates before serializing, so an
+ * unsafe request produces no body at all rather than a rejected one.
+ */
+export function toSpeechWire(request: NarrationSpeechRequest): NarrationSpeechWire | null {
+  if (!isSafeSpeechRequest(request)) return null
+  return {
+    template: request.template,
+    locale: request.locale,
+    delivery_id: request.deliveryId,
+    delivery_revision: request.deliveryRevision,
+    candidate_ids: request.candidateIds.map((id) => id),
+  }
 }

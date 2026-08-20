@@ -17,9 +17,12 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { readFileSync } from 'node:fs'
+
 import { makeFixtureSnapshot } from '@/services/agentModeFixtures'
 import { normalizeWireSnapshot } from '@/services/agentModeTransport'
 import type { Delivery } from '@/services/agentMode'
+import type { VoiceProjectRef } from './agentModeVoiceIntent'
 import {
   VOICE_UTTERANCE_LRU_LIMIT,
   buildNoteRequestId,
@@ -30,18 +33,34 @@ import {
   type VoiceMachineState,
 } from './agentModeVoiceMachine'
 
-const fixtures = normalizeWireSnapshot(makeFixtureSnapshot(10), 0).deliveries
+const snapshot = normalizeWireSnapshot(makeFixtureSnapshot(10), 0)
+const fixtures = snapshot.deliveries
 const selected = fixtures[0] // dlv-812 / PAI-812
 const other = fixtures[3] // dlv-815 / PAI-815
 
+/** Authorized project catalog, straight from the aggregate boundary. */
+const CATALOG: VoiceProjectRef[] = (snapshot.aggregates?.projects ?? []).map((project) => ({
+  projectId: project.projectId,
+  projectKey: project.projectKey,
+  projectName: project.projectName,
+}))
+
 function d(patch: Partial<Delivery>): Delivery {
   return { ...selected, ...patch }
+}
+
+/** The selection with a patched capability set, in row order. */
+function withSelectedCapability(comment: boolean | null): Delivery[] {
+  return fixtures.map((row) => (
+    row.id === selected.id ? { ...row, capabilities: { ...row.capabilities, comment } } : row
+  ))
 }
 
 /** Machine primed with an authorized snapshot and a selection. */
 function primed(overrides: Partial<VoiceMachineState> = {}): VoiceMachineState {
   return voiceReducer(initialVoiceState(overrides), {
     type: 'context',
+    projectCatalog: CATALOG,
     deliveries: fixtures,
     selectedId: selected.id,
     selectionEpoch: 'epoch-1',
@@ -207,6 +226,7 @@ describe('agentModeVoiceMachine — clarification', () => {
     const asked = run(primed(), [say('select agent codex')])
     const reset = voiceReducer(asked.state, {
       type: 'context',
+      projectCatalog: CATALOG,
       deliveries: fixtures,
       selectedId: selected.id,
       selectionEpoch: 'epoch-2',
@@ -223,6 +243,7 @@ describe('agentModeVoiceMachine — clarification', () => {
     const surviving = asked.state.candidates.slice(1)
     const acl = voiceReducer(asked.state, {
       type: 'context',
+      projectCatalog: CATALOG,
       deliveries: fixtures.filter((x) => x.id !== removed),
       selectedId: selected.id,
       selectionEpoch: 'epoch-1',
@@ -240,6 +261,7 @@ describe('agentModeVoiceMachine — clarification', () => {
     const removed = asked.state.candidates[0].deliveryId
     const acl = voiceReducer(asked.state, {
       type: 'context',
+      projectCatalog: CATALOG,
       deliveries: fixtures.filter((x) => x.id !== removed),
       selectedId: selected.id,
       selectionEpoch: 'epoch-1',
@@ -336,6 +358,22 @@ describe('agentModeVoiceMachine — note binding', () => {
     expect(drafted.last).toEqual([{ type: 'notice', code: 'note_target_not_selected' }])
     expect(drafted.state.note).toBeNull()
   })
+
+  it.each<[string, boolean | null]>([
+    ['withheld', false],
+    ['unclaimed', null],
+  ])('refuses to draft a note while the comment capability is %s', (_label, comment) => {
+    const state = voiceReducer(initialVoiceState(), {
+      type: 'context',
+      deliveries: withSelectedCapability(comment),
+      projectCatalog: CATALOG,
+      selectedId: selected.id,
+      selectionEpoch: 'epoch-1',
+    }).state
+    const drafted = dictate(state)
+    expect(drafted.last).toEqual([{ type: 'notice', code: 'note_not_permitted' }])
+    expect(drafted.state.note).toBeNull()
+  })
 })
 
 describe('agentModeVoiceMachine — confirm is exactly once', () => {
@@ -414,6 +452,38 @@ describe('agentModeVoiceMachine — confirm is exactly once', () => {
     ])
     expect(confirmed.state.note).toBeNull()
   })
+
+  it.each<[string, (rows: readonly Delivery[]) => Delivery[], string]>([
+    [
+      'the comment capability was withdrawn',
+      () => withSelectedCapability(false),
+      'capability_revoked',
+    ],
+    [
+      'the row now reports a different issue',
+      (rows) => rows.map((r) => (r.id === selected.id ? { ...r, issueId: r.issueId + 1 } : r)),
+      'issue_changed',
+    ],
+    [
+      'the row rolled over to a new attempt',
+      (rows) => rows.map((r) => (
+        r.id === selected.id ? { ...r, attempt: { ...r.attempt, id: 'attempt-812-2', number: 2 } } : r
+      )),
+      'attempt_changed',
+    ],
+  ])('refuses the confirm when %s at the same id and epoch', (_label, mutate, reason) => {
+    const drafted = dictate(primed())
+    // Same delivery id, same authority epoch, same selection: only the exact
+    // bound fact moved, and it still cannot be confirmed.
+    const moved: VoiceMachineState = { ...drafted.state, deliveries: mutate(fixtures) }
+    const confirmed = voiceReducer(moved, say('confirm', 'u2'))
+    expect(confirmed.effects).toEqual([
+      { type: 'note_discarded', reason },
+      { type: 'notice', code: 'no_match' },
+    ])
+    expect(confirmed.state.note).toBeNull()
+    expect(JSON.stringify(confirmed.effects)).not.toContain('submit_note')
+  })
 })
 
 describe('agentModeVoiceMachine — selection, authority, and refresh', () => {
@@ -421,6 +491,7 @@ describe('agentModeVoiceMachine — selection, authority, and refresh', () => {
     const drafted = dictate(primed())
     const refreshed = voiceReducer(drafted.state, {
       type: 'context',
+      projectCatalog: CATALOG,
       deliveries: fixtures.map((x) => d({ ...x, updatedAt: '2026-08-20T14:00:00Z' })),
       selectedId: selected.id,
       selectionEpoch: 'epoch-1',
@@ -437,12 +508,70 @@ describe('agentModeVoiceMachine — selection, authority, and refresh', () => {
     const drafted = dictate(primed())
     const next = voiceReducer(drafted.state, {
       type: 'context',
+      projectCatalog: CATALOG,
       deliveries: patch.drop ? fixtures.filter((x) => x.id !== selected.id) : fixtures,
       selectedId: patch.drop ? null : patch.selectedId ?? selected.id,
       selectionEpoch: patch.epoch ?? 'epoch-1',
     })
     expect(next.effects).toEqual([{ type: 'note_discarded', reason }])
     expect(next.state.note).toBeNull()
+  })
+
+  it.each<[string, (rows: readonly Delivery[]) => Delivery[], string]>([
+    ['comment is withdrawn', () => withSelectedCapability(false), 'capability_revoked'],
+    ['comment becomes unclaimed', () => withSelectedCapability(null), 'capability_revoked'],
+    [
+      'the issue rotates under the same row',
+      (rows) => rows.map((r) => (r.id === selected.id ? { ...r, issueId: r.issueId + 1 } : r)),
+      'issue_changed',
+    ],
+    [
+      'the attempt rotates under the same row',
+      (rows) => rows.map((r) => (
+        r.id === selected.id ? { ...r, attempt: { ...r.attempt, id: 'attempt-812-2', number: 2 } } : r
+      )),
+      'attempt_changed',
+    ],
+  ])('discards the note when %s in a same-epoch refresh', (_label, mutate, reason) => {
+    const drafted = dictate(primed())
+    const next = voiceReducer(drafted.state, {
+      type: 'context',
+      projectCatalog: CATALOG,
+      deliveries: mutate(fixtures),
+      selectedId: selected.id,
+      selectionEpoch: 'epoch-1',
+    })
+    expect(next.effects).toEqual([{ type: 'note_discarded', reason }])
+    expect(next.state.note).toBeNull()
+  })
+
+  it('resolves a project filter against the catalog, not the visible rows', () => {
+    // Only project PAI rows are on screen; "project Agent runtime" still
+    // resolves, and it clears the lane exactly as the filter bar does.
+    const narrowed = voiceReducer(initialVoiceState(), {
+      type: 'context',
+      deliveries: fixtures.filter((x) => x.lane.projectId === 6),
+      projectCatalog: CATALOG,
+      selectedId: selected.id,
+      selectionEpoch: 'epoch-1',
+    }).state
+    expect(narrowed.deliveries.some((x) => x.lane.projectId === 9)).toBe(false)
+    expect(run(narrowed, [say('filter project Agent runtime')]).last).toEqual([{
+      type: 'execute',
+      command: { type: 'set_filters', patch: { projectId: 9, laneKey: null } },
+    }])
+  })
+
+  it('has no project oracle at all when the snapshot carries no catalog', () => {
+    const uncatalogued = voiceReducer(initialVoiceState(), {
+      type: 'context',
+      deliveries: fixtures,
+      projectCatalog: [],
+      selectedId: selected.id,
+      selectionEpoch: 'epoch-1',
+    }).state
+    expect(run(uncatalogued, [say('filter project Agent runtime')]).last)
+      .toEqual([{ type: 'notice', code: 'no_project_catalog' }])
   })
 })
 
@@ -485,6 +614,7 @@ describe('agentModeVoiceMachine — offline hold and reconnect', () => {
     // silently, because the operator must confirm again themselves.
     const revalidated = voiceReducer(back.state, {
       type: 'context',
+      projectCatalog: CATALOG,
       deliveries: fixtures,
       selectedId: selected.id,
       selectionEpoch: 'epoch-1',
@@ -496,11 +626,39 @@ describe('agentModeVoiceMachine — offline hold and reconnect', () => {
     expect(confirmed.effects).toEqual([{ type: 'submit_note', binding: revalidated.state.note!.binding }])
   })
 
+  it.each<[string, (rows: readonly Delivery[]) => Delivery[], string]>([
+    ['the comment capability is gone', () => withSelectedCapability(false), 'capability_revoked'],
+    [
+      'the attempt rotated while offline',
+      (rows) => rows.map((r) => (
+        r.id === selected.id ? { ...r, attempt: { ...r.attempt, id: 'attempt-812-2', number: 2 } } : r
+      )),
+      'attempt_changed',
+    ],
+  ])('refuses to revalidate on reconnect when %s', (_label, mutate, reason) => {
+    const held = offlineHeld()
+    const back = voiceReducer(held.state, { type: 'connectivity', online: true })
+    expect(back.state.note?.status).toBe('awaiting_revalidation')
+    const revalidated = voiceReducer(back.state, {
+      type: 'context',
+      deliveries: mutate(fixtures),
+      projectCatalog: CATALOG,
+      selectedId: selected.id,
+      selectionEpoch: 'epoch-1',
+    })
+    expect(revalidated.effects).toEqual([{ type: 'note_discarded', reason }])
+    expect(revalidated.state.note).toBeNull()
+    // And a later confirm has nothing left to submit.
+    expect(voiceReducer(revalidated.state, say('confirm', 'u9')).effects)
+      .toEqual([{ type: 'notice', code: 'nothing_to_confirm' }])
+  })
+
   it('discards a held note when reconnect brings a different authority', () => {
     const held = offlineHeld()
     const back = voiceReducer(held.state, { type: 'connectivity', online: true })
     const changed = voiceReducer(back.state, {
       type: 'context',
+      projectCatalog: CATALOG,
       deliveries: fixtures,
       selectedId: selected.id,
       selectionEpoch: 'epoch-2',
@@ -512,6 +670,41 @@ describe('agentModeVoiceMachine — offline hold and reconnect', () => {
   it('ignores a repeated connectivity event of the same value', () => {
     const held = offlineHeld()
     expect(voiceReducer(held.state, { type: 'connectivity', online: false }).effects).toEqual([])
+  })
+})
+
+describe('PAI-808 owned sources — hygiene', () => {
+  const OWNED = [
+    '../../composables/agent-mode/agentModeVoiceIntent.ts',
+    '../../composables/agent-mode/agentModeVoiceIntent.test.ts',
+    '../../composables/agent-mode/agentModeVoiceMachine.ts',
+    '../../composables/agent-mode/agentModeVoiceMachine.test.ts',
+    '../../components/agent-mode/agentModeNarration.ts',
+    '../../components/agent-mode/agentModeNarration.test.ts',
+  ]
+
+  function sourceOf(relative: string): Buffer {
+    return readFileSync(new URL(relative, import.meta.url))
+  }
+
+  it.each(OWNED)('keeps %s plain reviewable UTF-8 text', (relative) => {
+    const bytes = sourceOf(relative)
+    // A single NUL anywhere makes git classify the blob as binary: no diff,
+    // no review. It is what bb39414 had to undo.
+    expect(bytes.includes(0)).toBe(false)
+    // Round-trips through UTF-8 unchanged, so no lone surrogate or invalid
+    // sequence is hiding in there either.
+    expect(Buffer.from(bytes.toString('utf8'), 'utf8').equals(bytes)).toBe(true)
+    // No stray C0 control characters beyond tab / newline / carriage return.
+    expect(/[\u0001-\u0008\u000b\u000c\u000e-\u001f]/.test(bytes.toString('utf8'))).toBe(false)
+  })
+
+  it('writes the request-id separator as an escape, not as a raw byte', () => {
+    const source = sourceOf('../../composables/agent-mode/agentModeVoiceMachine.ts').toString('utf8')
+    expect(source).toContain(String.raw`join('\u0000')`)
+    // The runtime string is still a real NUL, so every derived request id is
+    // byte-for-byte what it was before the escape.
+    expect(['a', 'b'].join('\u0000').charCodeAt(1)).toBe(0)
   })
 })
 

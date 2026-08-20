@@ -649,12 +649,28 @@ export function parseVoiceCommand(raw: string, opts: ParseVoiceOptions = {}): Vo
 
 // ── Resolver ───────────────────────────────────────────────────────────
 
+/**
+ * One project from the authorized PAI-804 aggregate catalog — the same list
+ * the filter bar's project selector renders. It is deliberately selector-
+ * INDEPENDENT: it names every project the operator may filter to, including
+ * projects with no row in the currently filtered result set.
+ */
+export interface VoiceProjectRef {
+  projectId: number
+  projectKey: string
+  projectName: string
+}
+
 export interface VoiceResolutionContext {
   /** The current authorized, selectable deliveries. Nothing outside this
    * list can be selected, narrated, noted, or offered as a candidate. */
   deliveries: readonly Delivery[]
   /** The current persistent authorized selection. */
   selectedId: string | null
+  /** The ONLY oracle for a spoken project name. Delivery rows are never
+   * consulted for one, so the project vocabulary cannot shrink to whatever
+   * the previous filter happened to leave visible. */
+  projectCatalog: readonly VoiceProjectRef[]
 }
 
 export interface VoiceCandidate {
@@ -668,6 +684,10 @@ export interface VoiceCandidate {
 
 export interface VoiceFilterPatch {
   projectId?: number | null
+  /** Cleared alongside every project change, exactly as AgentModeFilterBar
+   * does — a lane from the previous project must never survive as a hidden
+   * second filter. */
+  laneKey?: string | null
   health?: HealthFilter
   query?: string
 }
@@ -690,7 +710,12 @@ export type VoiceRejection =
   | 'empty_note'
   /** A note named an authorized delivery that is not the current selection. */
   | 'note_target_not_selected'
+  /** The server does not grant `comment` on the current selection. */
+  | 'note_not_permitted'
   | 'ambiguous_project'
+  /** This snapshot carries no authorized project catalog, so there is
+   * nothing to resolve a spoken project name against. */
+  | 'no_project_catalog'
   | 'unknown_command'
 
 export type VoiceResolution =
@@ -776,22 +801,37 @@ function resolveNamed(field: VoiceSelectField, text: string, ctx: VoiceResolutio
   return { kind: 'rejected', reason: 'no_match' }
 }
 
+/**
+ * Resolves a spoken project against the AUTHORIZED CATALOG only.
+ *
+ * Filtering to a project whose rows are not currently on screen is the whole
+ * point of the command, so reading candidate names out of `ctx.deliveries`
+ * would make the vocabulary depend on the filter already in force. There is
+ * no row-derived fallback: no catalog means no answer, never a guess.
+ */
 function resolveProjectFilter(text: string, ctx: VoiceResolutionContext): VoiceResolution {
   const query = foldVoiceText(text)
   if (query === '') return { kind: 'rejected', reason: 'no_match' }
+  if (ctx.projectCatalog.length === 0) return { kind: 'rejected', reason: 'no_project_catalog' }
   const exact = new Set<number>()
   const partial = new Set<number>()
-  for (const d of ctx.deliveries) {
-    const key = foldVoiceText(d.lane.projectKey)
-    const name = foldVoiceText(d.lane.projectName)
-    if (key === query || name === query) exact.add(d.lane.projectId)
-    else if (padded(name).includes(padded(query)) || padded(key).includes(padded(query))) partial.add(d.lane.projectId)
+  for (const project of ctx.projectCatalog) {
+    const key = foldVoiceText(project.projectKey)
+    const name = foldVoiceText(project.projectName)
+    if (key === query || name === query) exact.add(project.projectId)
+    else if (padded(name).includes(padded(query)) || padded(key).includes(padded(query))) {
+      partial.add(project.projectId)
+    }
   }
   const chosen = exact.size > 0 ? exact : partial
   if (chosen.size === 0) return { kind: 'rejected', reason: 'no_match' }
   // A filter must never guess between projects — and never touches selection.
   if (chosen.size > 1) return { kind: 'rejected', reason: 'ambiguous_project' }
-  return { kind: 'command', command: { type: 'set_filters', patch: { projectId: [...chosen][0] } } }
+  // projectId + laneKey travel together, mirroring AgentModeFilterBar.
+  return {
+    kind: 'command',
+    command: { type: 'set_filters', patch: { projectId: [...chosen][0], laneKey: null } },
+  }
 }
 
 /**
@@ -875,6 +915,10 @@ export function resolveVoiceIntent(intent: VoiceIntent, ctx: VoiceResolutionCont
         if (!named) return { kind: 'rejected', reason: 'no_match' }
         if (named.id !== current.id) return { kind: 'rejected', reason: 'note_target_not_selected' }
       }
+      // Dictating is the one thing voice can do that the operator cannot undo
+      // by looking away, so it needs an explicit server grant. A null or
+      // missing capability is never read as permission.
+      if (current.capabilities.comment !== true) return { kind: 'rejected', reason: 'note_not_permitted' }
       if (body === '') return { kind: 'rejected', reason: 'empty_note' }
       return { kind: 'command', command: { type: 'draft_note', deliveryId: current.id, body } }
     }

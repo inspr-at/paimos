@@ -33,8 +33,11 @@
 //    a monotonic sequence high-water mark, so LRU eviction can never
 //    resurrect a stale utterance.
 //  - A note preview binds delivery, issue, attempt, selection epoch, body,
-//    and a stable client request id. Selection change, authority revocation,
-//    or an epoch change DISCARDS it; a background refresh does not.
+//    and a stable client request id, and may only ever be raised against the
+//    CURRENT selection while the server grants `comment` on it. Any drift in
+//    that exact tuple — epoch, authorization, selection, issue rotation,
+//    attempt rotation, capability revocation — DISCARDS the preview; a
+//    background refresh of the same generation does not.
 //  - Offline PRESERVES the note but refuses confirmation. Reconnect does not
 //    submit anything: the binding must be reauthorized against a fresh
 //    snapshot AND the operator must confirm again explicitly.
@@ -48,6 +51,7 @@ import {
   type UnsupportedVoiceControl,
   type VoiceCandidate,
   type VoiceCommand,
+  type VoiceProjectRef,
   type VoiceRejection,
   type VoiceResolutionContext,
 } from './agentModeVoiceIntent'
@@ -94,6 +98,12 @@ export type VoiceNoteDiscardReason =
   | 'selection_changed'
   | 'authority_revoked'
   | 'epoch_changed'
+  /** The bound row now reports a different issue. */
+  | 'issue_changed'
+  /** The bound row rolled over to a different attempt. */
+  | 'attempt_changed'
+  /** The server withdrew `comment` on the bound row. */
+  | 'capability_revoked'
   | 'reset'
 
 // ── Effects ────────────────────────────────────────────────────────────
@@ -134,13 +144,22 @@ export interface VoiceMachineState {
   note: VoiceNoteState | null
   online: boolean
   deliveries: readonly Delivery[]
+  /** Authorized project catalog for THIS snapshot — selector-independent,
+   * so a project filter can name a project with no visible row. */
+  projectCatalog: readonly VoiceProjectRef[]
   selectedId: string | null
   selectionEpoch: string
 }
 
 export type VoiceEvent =
   /** A new authorized snapshot / selection / ACL epoch. */
-  | { type: 'context'; deliveries: readonly Delivery[]; selectedId: string | null; selectionEpoch: string }
+  | {
+    type: 'context'
+    deliveries: readonly Delivery[]
+    projectCatalog: readonly VoiceProjectRef[]
+    selectedId: string | null
+    selectionEpoch: string
+  }
   | { type: 'partial'; utteranceId: string; text: string }
   | { type: 'final'; utteranceId: string; text: string; sequence?: number }
   /** Typed fallback — identical path, same de-duplication. */
@@ -167,6 +186,7 @@ export function initialVoiceState(overrides: Partial<VoiceMachineState> = {}): V
     note: null,
     online: true,
     deliveries: [],
+    projectCatalog: [],
     selectedId: null,
     selectionEpoch: '',
     ...overrides,
@@ -228,7 +248,11 @@ function clearedCandidates(state: VoiceMachineState): VoiceMachineState {
 }
 
 function contextOf(state: VoiceMachineState): VoiceResolutionContext {
-  return { deliveries: state.deliveries, selectedId: state.selectedId }
+  return {
+    deliveries: state.deliveries,
+    selectedId: state.selectedId,
+    projectCatalog: state.projectCatalog,
+  }
 }
 
 function findDelivery(state: VoiceMachineState, deliveryId: string): Delivery | null {
@@ -239,6 +263,32 @@ function notice(state: VoiceMachineState, code: VoiceNoticeCode): VoiceReducerRe
   return { state, effects: [{ type: 'notice', code }] }
 }
 
+/**
+ * The single exact-authority check for a note binding.
+ *
+ * A preview is confirmable only while ALL SIX facts it was raised under still
+ * hold: the authority epoch, the row's authorization, the persistent
+ * selection, the row's issue, the row's attempt, and the server-granted
+ * `comment` capability. Confirm and every incoming snapshot run the same
+ * check, so an operator can never confirm something a refresh would have
+ * thrown away. The order is fixed so the reported reason is deterministic.
+ */
+function bindingMismatch(
+  binding: VoiceNoteBinding,
+  deliveries: readonly Delivery[],
+  selectedId: string | null,
+  selectionEpoch: string,
+): VoiceNoteDiscardReason | null {
+  if (binding.selectionEpoch !== selectionEpoch) return 'epoch_changed'
+  const delivery = deliveries.find((d) => d.id === binding.deliveryId) ?? null
+  if (!delivery) return 'authority_revoked'
+  if (selectedId !== binding.deliveryId) return 'selection_changed'
+  if (delivery.issueId !== binding.issueId) return 'issue_changed'
+  if (delivery.attempt.id !== binding.attemptId) return 'attempt_changed'
+  if (delivery.capabilities.comment !== true) return 'capability_revoked'
+  return null
+}
+
 // ── Command handling ───────────────────────────────────────────────────
 
 function draftNote(
@@ -247,8 +297,12 @@ function draftNote(
   deliveryId: string,
   body: string,
 ): VoiceReducerResult {
+  // A draft_note command only ever names the CURRENT selection, and only for
+  // a delivery the server grants `comment` on: `resolveVoiceIntent` refuses
+  // anything else outright, and `bindingMismatch` re-checks that exact tuple
+  // at confirm and on every snapshot. This lookup is the null guard for the
+  // row those two agree on.
   const delivery = findDelivery(state, deliveryId)
-  // Only the current authorized snapshot may be noted against.
   if (!delivery) return notice(clearedCandidates(state), 'no_match')
 
   const binding: VoiceNoteBinding = {
@@ -286,16 +340,9 @@ function confirmNote(state: VoiceMachineState): VoiceReducerResult {
       effects: [{ type: 'notice', code: 'offline_hold' }],
     }
   }
-  // Defensive re-check of the exact binding: selection or authority may have
-  // moved without a context event having reached us yet.
-  const delivery = findDelivery(state, note.binding.deliveryId)
-  const mismatch: VoiceNoteDiscardReason | null = !delivery
-    ? 'authority_revoked'
-    : note.binding.selectionEpoch !== state.selectionEpoch
-      ? 'epoch_changed'
-      : state.selectedId !== note.binding.deliveryId
-        ? 'selection_changed'
-        : null
+  // Defensive re-check of the exact binding: selection, authority, attempt,
+  // or capability may have moved without a context event having reached us.
+  const mismatch = bindingMismatch(note.binding, state.deliveries, state.selectedId, state.selectionEpoch)
   if (mismatch) {
     return {
       state: { ...state, note: null },
@@ -385,6 +432,7 @@ function interpret(state: VoiceMachineState, utteranceId: string, text: string):
 function handleContext(
   state: VoiceMachineState,
   deliveries: readonly Delivery[],
+  projectCatalog: readonly VoiceProjectRef[],
   selectedId: string | null,
   selectionEpoch: string,
 ): VoiceReducerResult {
@@ -399,11 +447,7 @@ function handleContext(
 
   let note = state.note
   if (note) {
-    const binding = note.binding
-    let discard: VoiceNoteDiscardReason | null = null
-    if (binding.selectionEpoch !== selectionEpoch) discard = 'epoch_changed'
-    else if (!authorized.has(binding.deliveryId)) discard = 'authority_revoked'
-    else if (selectedId !== binding.deliveryId) discard = 'selection_changed'
+    const discard = bindingMismatch(note.binding, deliveries, selectedId, selectionEpoch)
     if (discard) {
       note = null
       effects.push({ type: 'note_discarded', reason: discard })
@@ -417,6 +461,7 @@ function handleContext(
     state: {
       ...state,
       deliveries,
+      projectCatalog,
       selectedId,
       selectionEpoch,
       candidates,
@@ -481,7 +526,13 @@ function handleFinal(
 export function voiceReducer(state: VoiceMachineState, event: VoiceEvent): VoiceReducerResult {
   switch (event.type) {
     case 'context':
-      return handleContext(state, event.deliveries, event.selectedId, event.selectionEpoch)
+      return handleContext(
+        state,
+        event.deliveries,
+        event.projectCatalog,
+        event.selectedId,
+        event.selectionEpoch,
+      )
 
     case 'partial': {
       // Visible draft only — a partial can never execute anything, and a

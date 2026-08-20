@@ -29,18 +29,28 @@ import {
   resolveVoiceIntent,
   tokenizeVoice,
   type VoiceIntent,
+  type VoiceProjectRef,
   type VoiceResolutionContext,
 } from './agentModeVoiceIntent'
 
-const fixtures = normalizeWireSnapshot(makeFixtureSnapshot(10), 0).deliveries
+const snapshot = normalizeWireSnapshot(makeFixtureSnapshot(10), 0)
+const fixtures = snapshot.deliveries
 const base = fixtures[0]
+
+/** The authorized catalog exactly as the production aggregate boundary
+ * projects it — the same list AgentModeFilterBar renders. */
+const CATALOG: VoiceProjectRef[] = (snapshot.aggregates?.projects ?? []).map((project) => ({
+  projectId: project.projectId,
+  projectKey: project.projectKey,
+  projectName: project.projectName,
+}))
 
 function d(patch: Partial<Delivery>): Delivery {
   return { ...base, ...patch }
 }
 
 function ctx(overrides: Partial<VoiceResolutionContext> = {}): VoiceResolutionContext {
-  return { deliveries: fixtures, selectedId: null, ...overrides }
+  return { deliveries: fixtures, selectedId: null, projectCatalog: CATALOG, ...overrides }
 }
 
 function parse(text: string, candidateCount = 0): VoiceIntent {
@@ -423,19 +433,51 @@ describe('agentModeVoiceIntent — resolver', () => {
     }
   })
 
-  it('resolves a project filter to an id, and refuses to guess between projects', () => {
+  it('resolves a project filter by key or name and always clears the lane with it', () => {
+    // The patch is asserted whole: projectId and laneKey travel together,
+    // exactly as AgentModeFilterBar's own project change does.
     expect(resolveVoiceIntent({ kind: 'filter', filter: { type: 'project', text: 'RUN' } }, ctx()))
-      .toEqual({ kind: 'command', command: { type: 'set_filters', patch: { projectId: 9 } } })
+      .toEqual({ kind: 'command', command: { type: 'set_filters', patch: { projectId: 9, laneKey: null } } })
     expect(resolveVoiceIntent({ kind: 'filter', filter: { type: 'project', text: 'Agent runtime' } }, ctx()))
-      .toEqual({ kind: 'command', command: { type: 'set_filters', patch: { projectId: 9 } } })
-    const ambiguous = [
-      d({ id: 'dlv-1', lane: { ...base.lane, projectId: 1, projectKey: 'AAA', projectName: 'Platform core' } }),
-      d({ id: 'dlv-2', lane: { ...base.lane, projectId: 2, projectKey: 'BBB', projectName: 'Platform edge' } }),
-    ]
-    expect(resolveVoiceIntent({ kind: 'filter', filter: { type: 'project', text: 'platform' } }, ctx({ deliveries: ambiguous })))
-      .toEqual({ kind: 'rejected', reason: 'ambiguous_project' })
+      .toEqual({ kind: 'command', command: { type: 'set_filters', patch: { projectId: 9, laneKey: null } } })
     expect(resolveVoiceIntent({ kind: 'filter', filter: { type: 'project', text: 'nope' } }, ctx()))
       .toEqual({ kind: 'rejected', reason: 'no_match' })
+  })
+
+  it('resolves an authorized project that has no row in the current result set', () => {
+    // Filtering to a project you cannot currently see is the whole point of
+    // the command, so the catalog — not the visible rows — is the oracle.
+    const onlyProjectPai = fixtures.filter((x) => x.lane.projectId === 6)
+    expect(onlyProjectPai.every((x) => x.lane.projectId !== 9)).toBe(true)
+    expect(resolveVoiceIntent(
+      { kind: 'filter', filter: { type: 'project', text: 'Agent runtime' } },
+      ctx({ deliveries: onlyProjectPai }),
+    )).toEqual({ kind: 'command', command: { type: 'set_filters', patch: { projectId: 9, laneKey: null } } })
+  })
+
+  it('never falls back to the visible rows when the catalog is empty', () => {
+    // Every visible row names project RUN, and it still does not resolve:
+    // there is no second, hidden project oracle.
+    expect(resolveVoiceIntent(
+      { kind: 'filter', filter: { type: 'project', text: 'Agent runtime' } },
+      ctx({ deliveries: fixtures.filter((x) => x.lane.projectId === 9), projectCatalog: [] }),
+    )).toEqual({ kind: 'rejected', reason: 'no_project_catalog' })
+  })
+
+  it('refuses to guess between two catalog projects that share a word', () => {
+    const ambiguous: VoiceProjectRef[] = [
+      { projectId: 1, projectKey: 'AAA', projectName: 'Platform core' },
+      { projectId: 2, projectKey: 'BBB', projectName: 'Platform edge' },
+    ]
+    expect(resolveVoiceIntent(
+      { kind: 'filter', filter: { type: 'project', text: 'platform' } },
+      ctx({ projectCatalog: ambiguous }),
+    )).toEqual({ kind: 'rejected', reason: 'ambiguous_project' })
+    // An exact key still wins outright over the shared partial.
+    expect(resolveVoiceIntent(
+      { kind: 'filter', filter: { type: 'project', text: 'BBB' } },
+      ctx({ projectCatalog: ambiguous }),
+    )).toEqual({ kind: 'command', command: { type: 'set_filters', patch: { projectId: 2, laneKey: null } } })
   })
 
   it('passes health and query filters through unchanged', () => {
@@ -477,6 +519,31 @@ describe('agentModeVoiceIntent — resolver', () => {
       { kind: 'note', target: { kind: 'issue', issueKey: 'ZZZ-1' }, body: 'x' },
       ctx({ selectedId: 'dlv-812' }),
     )).toEqual({ kind: 'rejected', reason: 'no_match' })
+  })
+
+  it.each<[string, boolean | null]>([
+    ['withheld', false],
+    ['unclaimed', null],
+  ])('refuses to draft a note when the comment capability is %s', (_label, comment) => {
+    const list = [d({ capabilities: { ...base.capabilities, comment } }), ...fixtures.slice(1)]
+    expect(resolveVoiceIntent(
+      { kind: 'note', target: { kind: 'current' }, body: 'the fixture is flaky' },
+      ctx({ deliveries: list, selectedId: base.id }),
+    )).toEqual({ kind: 'rejected', reason: 'note_not_permitted' })
+  })
+
+  it('checks the comment capability of the SELECTION, not of the named target', () => {
+    // PAI-812 is selected and may not be commented on; naming the delivery
+    // that may be does not launder the refusal.
+    const list = [d({ capabilities: { ...base.capabilities, comment: false } }), ...fixtures.slice(1)]
+    expect(resolveVoiceIntent(
+      { kind: 'note', target: { kind: 'issue', issueKey: 'PAI-815' }, body: 'x' },
+      ctx({ deliveries: list, selectedId: base.id }),
+    )).toEqual({ kind: 'rejected', reason: 'note_target_not_selected' })
+    expect(resolveVoiceIntent(
+      { kind: 'note', target: { kind: 'issue', issueKey: base.issueKey }, body: 'x' },
+      ctx({ deliveries: list, selectedId: base.id }),
+    )).toEqual({ kind: 'rejected', reason: 'note_not_permitted' })
   })
 
   it('is pure — resolving never mutates the snapshot or the selection', () => {
