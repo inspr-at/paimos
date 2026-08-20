@@ -199,25 +199,32 @@ func postRunTelemetryBody(ctx context.Context, client *Client, runID int64, body
 }
 
 func fetchRunStatusContext(ctx context.Context, client *Client, runID int64) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		client.baseURL+fmt.Sprintf("/api/runs/%d", runID), nil)
-	if err != nil {
-		return "", fmt.Errorf("build run status request: %w", err)
-	}
-	client.prepareRequest(req, false, "", "application/json")
-	raw, err := client.doRequest(req)
+	run, err := fetchRunContext(ctx, client, runID)
 	if err != nil {
 		return "", err
 	}
-	var run struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(raw, &run); err != nil {
-		return "", fmt.Errorf("decode run status: %w", err)
-	}
-	status := strings.TrimSpace(run.Status)
+	status, _ := run["status"].(string)
+	status = strings.TrimSpace(status)
 	if status == "" {
 		return "", errors.New("run status response omitted status")
 	}
 	return status, nil
+}
+
+func fetchRunContext(ctx context.Context, client *Client, runID int64) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		client.baseURL+fmt.Sprintf("/api/runs/%d", runID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build run status request: %w", err)
+	}
+	client.prepareRequest(req, false, "", "application/json")
+	raw, err := client.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	var run map[string]any
+	if err := json.Unmarshal(raw, &run); err != nil {
+		return nil, fmt.Errorf("decode run status: %w", err)
+	}
+	return run, nil
 }

@@ -305,7 +305,8 @@ func TestAgentRunTelemetryNewSemanticEventCannotHideStaleHeartbeat(t *testing.T)
 		"needs_input": false, "blocker_state": "none",
 	}
 	assertStatus(t, ts.post(t, path, ts.adminCookie, heartbeat), http.StatusCreated)
-	if _, err := db.DB.Exec(`UPDATE agent_run_telemetry_latest SET last_heartbeat_at=datetime('now','-10 minutes') WHERE run_id=?`, runID); err != nil {
+	staleHeartbeat := time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339Nano)
+	if _, err := db.DB.Exec(`UPDATE agent_run_telemetry_latest SET last_heartbeat_at=? WHERE run_id=?`, staleHeartbeat, runID); err != nil {
 		t.Fatal(err)
 	}
 	semantic := map[string]any{

@@ -591,6 +591,20 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 			}
 		case waitErr := <-waited:
 			<-stdoutDone
+			// The process can exit at the same instant its final structured line
+			// asks for input. The scanner gives that fact priority over ordinary
+			// progress; drain it here before classifying the exit so the blocker
+			// cannot disappear in the wait/progress select race.
+			select {
+			case p := <-progress:
+				if p.needsInput {
+					if err := report(supervisorReport{Event: "needs_input", Phase: p.phase, Summary: p.summary, NeedsInput: true, BlockerState: p.blockerState}); err != nil {
+						return reportErrorResult(err)
+					}
+					return finishSupervisorResult(req, supervisorResult{Outcome: outcomeProviderFailure, Summary: "provider requested input; this runner is one-shot"})
+				}
+			default:
+			}
 			if ctx.Err() != nil {
 				return finishSupervisorResult(req, supervisorResult{Outcome: outcomeCancellation, Summary: "runner cancelled the child process"})
 			}
@@ -645,7 +659,7 @@ func finishSupervisorResult(req supervisorRequest, result supervisorResult) supe
 	return result
 }
 
-func consumeProviderStdout(src io.Reader, adapter providerStreamAdapter, visible, log io.Writer, activity chan<- struct{}, progress chan<- safeProviderProgress, failures chan<- error) {
+func consumeProviderStdout(src io.Reader, adapter providerStreamAdapter, visible, log io.Writer, activity chan<- struct{}, progress chan safeProviderProgress, failures chan<- error) {
 	if adapter == nil {
 		consumeRawProviderOutput(src, io.MultiWriter(visible, log), activity, failures)
 		return
@@ -670,14 +684,40 @@ func consumeProviderStdout(src io.Reader, adapter providerStreamAdapter, visible
 			return
 		}
 		if p != nil {
-			select {
-			case progress <- *p:
-			default:
+			enqueueProviderProgress(progress, *p)
+			if p.needsInput {
+				// A one-shot runner cannot continue past a human/permission prompt.
+				// Stop consuming after publishing the lossless priority fact; the
+				// supervisor will terminate and reap the owned process tree.
+				return
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) && !strings.Contains(err.Error(), "file already closed") {
 		notifyFailure(failures, errors.New("provider event exceeded its bounded size"))
+	}
+}
+
+// enqueueProviderProgress keeps ordinary high-volume phase chatter lossy, but
+// makes the safety-critical needs-input fact lossless. It evicts queued
+// ordinary progress before inserting that single priority fact, so a provider
+// burst cannot hide a human/permission blocker or deadlock its stdout pipe.
+func enqueueProviderProgress(progress chan safeProviderProgress, p safeProviderProgress) {
+	if !p.needsInput {
+		select {
+		case progress <- p:
+		default:
+		}
+		return
+	}
+	for {
+		select {
+		case <-progress:
+			continue
+		default:
+			progress <- p
+			return
+		}
 	}
 }
 

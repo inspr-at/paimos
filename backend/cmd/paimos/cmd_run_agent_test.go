@@ -857,6 +857,25 @@ func TestAgentRunnerFinalConflictRefetchesAuthoritativeLifecycle(t *testing.T) {
 	}
 }
 
+func TestAgentRunnerFinalConflictRejectsSameStatusWithDifferentEvidence(t *testing.T) {
+	client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		status := http.StatusConflict
+		body := `{"error":"terminal conflict"}`
+		if r.Method == http.MethodGet {
+			status = http.StatusOK
+			body = `{"status":"tests_passed","tests_summary":"different evidence","version":"1.0.0"}`
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}}
+	runner := &agentRunner{client: client}
+	err := runner.report(42, map[string]any{
+		"status": "tests_passed", "tests_summary": "configured test command passed", "version": "1.0.0",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not equivalent") {
+		t.Fatalf("same-status evidence conflict error=%v", err)
+	}
+}
+
 func TestAgentRunnerDoesNotPrintSuccessWhenReaperWonFinalConflict(t *testing.T) {
 	patches := 0
 	respond := func(r *http.Request, status int, body string) (*http.Response, error) {
@@ -1096,6 +1115,56 @@ func TestClaudeStreamAdapterNeedsInputIsTelemetryOnly(t *testing.T) {
 	}
 }
 
+func TestStructuredProviderNeedsInputSupersedesSaturatedProgress(t *testing.T) {
+	progress := make(chan safeProviderProgress, 16)
+	for i := 0; i < cap(progress); i++ {
+		progress <- safeProviderProgress{phase: "implementing", summary: "ordinary progress"}
+	}
+	failures := make(chan error, 1)
+	consumeProviderStdout(
+		strings.NewReader("{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"AskUserQuestion\"}]}}\n"),
+		&claudeStreamAdapter{}, io.Discard, io.Discard, make(chan struct{}, 1), progress, failures,
+	)
+	select {
+	case err := <-failures:
+		t.Fatalf("needs-input stream failed: %v", err)
+	default:
+	}
+	if len(progress) != 1 {
+		t.Fatalf("priority queue length=%d, want exactly the critical fact", len(progress))
+	}
+	got := <-progress
+	if !got.needsInput || got.phase != "waiting" || got.blockerState != "input" {
+		t.Fatalf("priority progress=%+v", got)
+	}
+}
+
+func TestSupervisorNeedsInputSurvivesProgressFloodAndImmediateExit(t *testing.T) {
+	var script strings.Builder
+	for i := 0; i < 64; i++ {
+		script.WriteString("printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Read\"}]}}'; ")
+	}
+	script.WriteString("printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"AskUserQuestion\"}]}}'")
+	reporter := &recordingRunnerReporter{}
+	req := supervisorFixture("structured fixture")
+	req.ExecArgv = []string{"sh", "-c", script.String()}
+	req.StructuredClaude = true
+	req.Reporter = reporter
+	got := superviseAgentProcess(context.Background(), req)
+	if got.Outcome != outcomeProviderFailure || !strings.Contains(got.Summary, "requested input") {
+		t.Fatalf("outcome=%s summary=%q", got.Outcome, got.Summary)
+	}
+	found := false
+	for _, report := range reporter.snapshot() {
+		if report.Event == "needs_input" && report.NeedsInput && report.BlockerState == "input" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("lossless needs-input report missing: %+v", reporter.snapshot())
+	}
+}
+
 func TestStructuredProviderEventAndOutputBudgetsAreBounded(t *testing.T) {
 	activity := make(chan struct{}, 1)
 	progress := make(chan safeProviderProgress, 1)
@@ -1217,9 +1286,6 @@ func TestHTTPRunnerReportTransportTruncatesUTF8AtServerByteBoundary(t *testing.T
 }
 
 func TestRunnerTelemetryIdentityComesFromExecutionMode(t *testing.T) {
-	if key, label, err := resolveRunnerAction("custom_cli.implement", "aider"); err != nil || key != "custom_cli.implement" || label != "Custom runner" {
-		t.Fatalf("custom action was unreachable: key=%q label=%q err=%v", key, label, err)
-	}
 	for _, tt := range []struct {
 		command, provider, adapter string
 	}{
@@ -1547,5 +1613,63 @@ func TestAgentRunnerSupervisesLongTestAndDeployPhases(t *testing.T) {
 	}
 	if !seenReviewing || !seenTestingHeartbeat || !seenDeployingHeartbeat {
 		t.Fatalf("reviewing=%v testing heartbeat=%v deploying heartbeat=%v telemetry=%+v", seenReviewing, seenTestingHeartbeat, seenDeployingHeartbeat, telemetry)
+	}
+}
+
+func TestAgentRunnerDeployFailurePreservesPassedTestEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		outcome    supervisorOutcome
+		wantStatus string
+	}{
+		{name: "failed", outcome: outcomeProviderFailure, wantStatus: "failed"},
+		{name: "cancelled", outcome: outcomeCancellation, wantStatus: "cancelled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var patches []map[string]any
+			respond := func(r *http.Request, status int, body string) (*http.Response, error) {
+				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+			}
+			client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/runs/1":
+					return respond(r, http.StatusOK, `{"issue_id":5,"project_id":9,"device_id":"","deploy_target":"staging","status":"queued"}`)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/issues/PAI-5":
+					return respond(r, http.StatusOK, `{"id":5,"issue_key":"PAI-5","type":"ticket","title":"Deploy evidence","status":"in-progress","priority":"medium"}`)
+				case r.Method == http.MethodPatch && r.URL.Path == "/api/runs/1":
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						return nil, err
+					}
+					patches = append(patches, body)
+					return respond(r, http.StatusOK, `{}`)
+				default:
+					return respond(r, http.StatusNotFound, `{"error":"unexpected route"}`)
+				}
+			})}}
+			runner := newAgentRunner(client, "device-deploy-evidence", t.TempDir(), "provider",
+				"claude_cli.implement", "tests", true, true, "deploy", true, false)
+			runner.reporter = &recordingRunnerReporter{}
+			runner.supervise = func(_ context.Context, req supervisorRequest) supervisorResult {
+				if req.InitialPhase == "deploying" {
+					return supervisorResult{Outcome: tc.outcome, Summary: "configured deploy did not complete"}
+				}
+				return supervisorResult{Outcome: outcomeNormalExit, Summary: "configured command passed"}
+			}
+			err := runner.handleRun(context.Background(), aJob())
+			if err == nil || !strings.Contains(err.Error(), "deploy failed") {
+				t.Fatalf("handleRun error=%v", err)
+			}
+			if len(patches) < 2 {
+				t.Fatalf("patches=%+v", patches)
+			}
+			final := patches[len(patches)-1]
+			if final["status"] != tc.wantStatus || final["tests_summary"] != "configured test command passed" || final["deploy_target"] != "staging" {
+				t.Fatalf("final patch=%+v", final)
+			}
+			if _, ok := final["version"]; !ok {
+				t.Fatalf("final patch lost version evidence: %+v", final)
+			}
+		})
 	}
 }

@@ -525,6 +525,10 @@ Heartbeat reports use `kind=heartbeat`, `heartbeat=true`, and no activity text;
 semantic phase/needs-input/blocker reports use `heartbeat=false`. Therefore a
 stream of model activity cannot keep the supervisor watchdog alive. Claiming a
 run atomically persists `expects_supervisor_telemetry=true` before launch.
+Ordinary high-volume phase chatter may be coalesced when its bounded channel is
+full, but `needs_input` is a priority safety fact: it evicts queued ordinary
+progress, is delivered exactly once, and stops the one-shot runner. A burst of
+provider output therefore cannot hide a human or permission blocker.
 
 `--test-exec` is the only runner-owned way to prove tests in the run record. It runs
 after the agent command through the same process-group, heartbeat, silence, and
@@ -550,7 +554,9 @@ exit itself emits `reviewing`, never telemetry `completed`, because tests and
 deploy have not yet finished. Configured deploy commands also use the same
 supervisor/watchdog path with `deploying` heartbeats. Deployment and smoke verification remain separate facts; the
 runner reports neither unless the corresponding configured command actually
-ran successfully.
+ran successfully. If deploy fails or is cancelled after tests passed, the final
+failed/cancelled record retains the bounded test summary, version, and attempted
+`deploy_target`; a downstream failure never erases earlier verification facts.
 
 The run lifecycle is enforced server-side: status changes must follow a legal
 edge (e.g. a run can't jump straight to `deployed`), and a terminal run

@@ -36,6 +36,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -172,8 +173,6 @@ func resolveRunnerAction(explicit, execCmd string) (string, string, error) {
 		return key, "Claude Code", nil
 	case "codex_cli.implement":
 		return key, "Codex CLI", nil
-	case "custom_cli.implement":
-		return key, "Custom runner", nil
 	default:
 		return "", "", &usageError{msg: "unsupported --action-key " + key}
 	}
@@ -751,11 +750,16 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 		deployResult := a.runSupervisedCommand(ctx, runID, a.deployExec, "deploying", "Configured deploy command started", env, logSink)
 		if deployResult.Outcome != outcomeNormalExit {
 			closeLog(logFile)
-			status := "failed"
+			resultFields["status"] = "failed"
 			if deployResult.Outcome == outcomeCancellation {
-				status = "cancelled"
+				resultFields["status"] = "cancelled"
 			}
-			if reportErr := finish(logFile, map[string]any{"status": status, "error": string(deployResult.Outcome) + ": " + deployResult.Summary}); reportErr != nil {
+			// A failed deployment does not erase the successful test evidence or
+			// the artifact/target that was actually being deployed. Those facts
+			// remain necessary to understand the end-to-end outcome.
+			resultFields["deploy_target"] = detail.DeployTarget
+			resultFields["error"] = string(deployResult.Outcome) + ": " + deployResult.Summary
+			if reportErr := finish(logFile, resultFields); reportErr != nil {
 				return fmt.Errorf("run %d report failure: %w", runID, reportErr)
 			}
 			return fmt.Errorf("run %d deploy failed", runID)
@@ -1225,18 +1229,40 @@ func (a *agentRunner) report(runID int64, fields map[string]any) error {
 		return nil
 	}
 	if isConflict(err) {
-		wanted, _ := fields["status"].(string)
-		authoritative, fetchErr := fetchRunStatusContext(context.Background(), a.client, runID)
+		refetchCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		authoritative, fetchErr := fetchRunContext(refetchCtx, a.client, runID)
+		cancel()
 		if fetchErr != nil {
 			err = fmt.Errorf("refetch authoritative run after terminal conflict: %w", fetchErr)
-		} else if wanted == authoritative && agentRunStatusIsTerminal(authoritative) {
+		} else if status, _ := authoritative["status"].(string); agentRunStatusIsTerminal(status) && lifecycleReportEquivalent(fields, authoritative) {
 			return nil
 		} else {
-			err = fmt.Errorf("terminal outcome conflict: attempted %q but server reports %q", wanted, authoritative)
+			err = fmt.Errorf("terminal outcome conflict: attempted report is not equivalent to authoritative run")
 		}
 	}
 	fmt.Fprintf(stderr, "run %d: reporting %v failed: %v\n", runID, fields["status"], err)
 	return err
+}
+
+// lifecycleReportEquivalent compares every field the runner attempted to
+// persist, not merely status. A same-status write that lost test evidence,
+// deploy target, version, or error context is not an idempotent success.
+func lifecycleReportEquivalent(fields, authoritative map[string]any) bool {
+	b, err := json.Marshal(fields)
+	if err != nil {
+		return false
+	}
+	var normalized map[string]any
+	if err := json.Unmarshal(b, &normalized); err != nil {
+		return false
+	}
+	for key, expected := range normalized {
+		actual, ok := authoritative[key]
+		if !ok || !reflect.DeepEqual(expected, actual) {
+			return false
+		}
+	}
+	return true
 }
 
 func agentRunStatusIsTerminal(status string) bool {
