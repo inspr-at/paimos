@@ -32,9 +32,9 @@ var (
 	safeReference  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,191}$`)
 	hexDigest      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	secretPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}`),
-		regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password|credential)\s*[:=]`),
-		regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password|credential)[:/_-][A-Za-z0-9._~+/=-]{8,}`),
+		regexp.MustCompile(`(?i)\bbearer[ \t\f\v\r\n\x{00A0}\x{2003}\x{202F}\x{200B}]+(?:[A-Za-z0-9._~+/=-][ \t\f\v\r\n\x{00A0}\x{2003}\x{202F}\x{200B}]*){8,}`),
+		regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password|credential)[ \t\f\v\r\n\x{00A0}\x{2003}\x{202F}\x{200B}]*[:=]`),
+		regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password|credential)[ \t\f\v\r\n\x{00A0}\x{2003}\x{202F}\x{200B}]*[:/_-](?:[A-Za-z0-9._~+/=-][ \t\f\v\r\n\x{00A0}\x{2003}\x{202F}\x{200B}]*){8,}`),
 		regexp.MustCompile(`(?i)\bsk[-_](?:live|test|proj)[-_][A-Za-z0-9_-]{8,}`),
 		regexp.MustCompile(`(?i)\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})`),
 		regexp.MustCompile(`(?i)\bxox[baprs]-[A-Za-z0-9-]{10,}`),
@@ -217,9 +217,12 @@ type envelopeResult struct {
 // lookupEnvelopeDuplicate is intentionally usable before currentness and
 // source-sequence checks. Exact transport retries therefore return the
 // original durable result even after the targeted execution was superseded.
-func lookupEnvelopeDuplicate(ctx context.Context, q DBTX, d deliveryRow, idempotencyKey string, payload any) (envelopeResult, error) {
+func lookupEnvelopeDuplicate(ctx context.Context, q DBTX, d deliveryRow, reporterID int64, kind, idempotencyKey string, payload any) (envelopeResult, error) {
 	if validatePersistedKey(idempotencyKey, safeOpaqueKey, 128) != nil {
 		return envelopeResult{}, fmt.Errorf("%w: invalid idempotency key", ErrInvalid)
+	}
+	if reporterID <= 0 || kind == "" {
+		return envelopeResult{}, fmt.Errorf("%w: invalid idempotency namespace", ErrInvalid)
 	}
 	hash, err := canonicalHash(payload)
 	if err != nil {
@@ -227,7 +230,8 @@ func lookupEnvelopeDuplicate(ctx context.Context, q DBTX, d deliveryRow, idempot
 	}
 	var prior envelopeResult
 	var priorHash []byte
-	err = q.QueryRowContext(ctx, `SELECT id,delivery_revision,payload_hash FROM delivery_events WHERE delivery_id=? AND idempotency_key=?`, d.ID, idempotencyKey).
+	err = q.QueryRowContext(ctx, `SELECT id,delivery_revision,payload_hash FROM delivery_events
+		WHERE delivery_id=? AND reporter_id=? AND kind=? AND idempotency_key=?`, d.ID, reporterID, kind, idempotencyKey).
 		Scan(&prior.ID, &prior.Revision, &priorHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return envelopeResult{}, nil
@@ -240,6 +244,25 @@ func lookupEnvelopeDuplicate(ctx context.Context, q DBTX, d deliveryRow, idempot
 	}
 	prior.Duplicate = true
 	return prior, nil
+}
+
+func lookupEnvelopeDuplicateForActor(ctx context.Context, q DBTX, d deliveryRow, actor Actor, kind, idempotencyKey string, payload any) (envelopeResult, error) {
+	if err := validateActor(actor); err != nil {
+		return envelopeResult{}, err
+	}
+	if validatePersistedKey(idempotencyKey, safeOpaqueKey, 128) != nil {
+		return envelopeResult{}, fmt.Errorf("%w: invalid idempotency key", ErrInvalid)
+	}
+	var reporterID int64
+	err := q.QueryRowContext(ctx, `SELECT id FROM delivery_reporters
+		WHERE delivery_id=? AND reporter_type=? AND opaque_key=?`, d.ID, actor.Type, actor.OpaqueKey).Scan(&reporterID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return envelopeResult{}, nil
+	}
+	if err != nil {
+		return envelopeResult{}, err
+	}
+	return lookupEnvelopeDuplicate(ctx, q, d, reporterID, kind, idempotencyKey, payload)
 }
 
 func canonicalHash(v any) ([]byte, error) {
@@ -276,7 +299,7 @@ func (s *Store) appendEnvelopeTx(
 	if err != nil {
 		return envelopeResult{}, err
 	}
-	if prior, err := lookupEnvelopeDuplicate(ctx, tx, d, idempotencyKey, payload); err != nil || prior.Duplicate {
+	if prior, err := lookupEnvelopeDuplicate(ctx, tx, d, reporterID, kind, idempotencyKey, payload); err != nil || prior.Duplicate {
 		return prior, err
 	}
 	var revision int64

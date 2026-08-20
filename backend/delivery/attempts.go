@@ -82,7 +82,7 @@ func (s *Store) StartAttemptTx(ctx context.Context, tx *sql.Tx, effects *Effects
 		ReasonCode string   `json:"reason_code"`
 		ReasonText string   `json:"reason_text"`
 	}{req.Actor.Type, req.Actor.OpaqueKey, req.Policies, req.ReasonCode, req.ReasonText}
-	if prior, err := lookupEnvelopeDuplicate(ctx, tx, d, req.IdempotencyKey, payload); err != nil {
+	if prior, err := lookupEnvelopeDuplicateForActor(ctx, tx, d, req.Actor, "attempt_started", req.IdempotencyKey, payload); err != nil {
 		return Attempt{}, err
 	} else if prior.Duplicate {
 		return loadAttemptByStartEvent(ctx, tx, d.ID, prior.ID)
@@ -98,7 +98,9 @@ func (s *Store) StartAttemptTx(ctx context.Context, tx *sql.Tx, effects *Effects
 		Scan(&nextNumber, &nextPlan); err != nil {
 		return Attempt{}, err
 	}
-	_ = tx.QueryRowContext(ctx, `SELECT id FROM delivery_attempts WHERE delivery_id=? ORDER BY attempt_number DESC LIMIT 1`, d.ID).Scan(&previous)
+	_ = tx.QueryRowContext(ctx, `SELECT a.id FROM delivery_attempts a JOIN delivery_attempt_policy_seals seal
+		ON seal.delivery_id=a.delivery_id AND seal.attempt_id=a.id
+		WHERE a.delivery_id=? ORDER BY a.attempt_number DESC LIMIT 1`, d.ID).Scan(&previous)
 	event, err := s.appendEnvelopeTx(ctx, tx, effects, d, reporterID, "attempt_started", req.IdempotencyKey,
 		payload, req.ReasonCode, req.ReasonText, "attempt", "delivery_event", nil, nil, now)
 	if err != nil {
@@ -126,6 +128,10 @@ func (s *Store) StartAttemptTx(ctx context.Context, tx *sql.Tx, effects *Effects
 			return Attempt{}, err
 		}
 	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO delivery_attempt_policy_seals(delivery_id,attempt_id,sealed_at)
+		VALUES(?,?,?)`, d.ID, attemptID, now); err != nil {
+		return Attempt{}, err
+	}
 	return Attempt{ID: attemptID, DeliveryID: d.ID, AttemptNumber: nextNumber, PlanRevision: nextPlan,
 		PreviousAttemptID: nullInt64Ptr(previous), ProjectIDAtStart: currentProject, ReasonCode: req.ReasonCode,
 		ReasonText: req.ReasonText, CreatedAt: now, Policies: append([]Policy(nil), req.Policies...)}, nil
@@ -148,9 +154,10 @@ func (s *Store) EnsureCurrentAttemptTx(ctx context.Context, tx *sql.Tx, effects 
 func loadCurrentAttempt(ctx context.Context, q DBTX, deliveryID int64) (Attempt, error) {
 	var a Attempt
 	var previous, project sql.NullInt64
-	err := q.QueryRowContext(ctx, `SELECT id,delivery_id,attempt_number,plan_revision,previous_attempt_id,
-		project_id_at_start,reason_code,reason_text,created_at FROM delivery_attempts
-		WHERE delivery_id=? ORDER BY attempt_number DESC LIMIT 1`, deliveryID).
+	err := q.QueryRowContext(ctx, `SELECT a.id,a.delivery_id,a.attempt_number,a.plan_revision,a.previous_attempt_id,
+		a.project_id_at_start,a.reason_code,a.reason_text,a.created_at FROM delivery_attempts a
+		JOIN delivery_attempt_policy_seals seal ON seal.delivery_id=a.delivery_id AND seal.attempt_id=a.id
+		WHERE a.delivery_id=? ORDER BY a.attempt_number DESC LIMIT 1`, deliveryID).
 		Scan(&a.ID, &a.DeliveryID, &a.AttemptNumber, &a.PlanRevision, &previous, &project,
 			&a.ReasonCode, &a.ReasonText, &a.CreatedAt)
 	if err != nil {
@@ -165,9 +172,10 @@ func loadCurrentAttempt(ctx context.Context, q DBTX, deliveryID int64) (Attempt,
 func loadAttemptByStartEvent(ctx context.Context, q DBTX, deliveryID, eventID int64) (Attempt, error) {
 	var a Attempt
 	var previous, project sql.NullInt64
-	err := q.QueryRowContext(ctx, `SELECT id,delivery_id,attempt_number,plan_revision,previous_attempt_id,
-		project_id_at_start,reason_code,reason_text,created_at FROM delivery_attempts
-		WHERE delivery_id=? AND start_delivery_event_id=?`, deliveryID, eventID).
+	err := q.QueryRowContext(ctx, `SELECT a.id,a.delivery_id,a.attempt_number,a.plan_revision,a.previous_attempt_id,
+		a.project_id_at_start,a.reason_code,a.reason_text,a.created_at FROM delivery_attempts a
+		JOIN delivery_attempt_policy_seals seal ON seal.delivery_id=a.delivery_id AND seal.attempt_id=a.id
+		WHERE a.delivery_id=? AND a.start_delivery_event_id=?`, deliveryID, eventID).
 		Scan(&a.ID, &a.DeliveryID, &a.AttemptNumber, &a.PlanRevision, &previous, &project,
 			&a.ReasonCode, &a.ReasonText, &a.CreatedAt)
 	if err != nil {

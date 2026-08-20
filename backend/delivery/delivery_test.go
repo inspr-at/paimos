@@ -237,13 +237,59 @@ func TestRunBootstrapCompletionGatesLineageDuplicateAndDurations(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, _ = store.SnapshotByIssue(context.Background(), issueID)
-	if snapshot.State != "deployed_unverified" {
-		t.Fatalf("verification failure erased deployed truth: %s", snapshot.State)
+	if snapshot.State != "failed_needs_retry" || !snapshot.Deployed || !snapshot.Unverified ||
+		!snapshot.Failed || !snapshot.FailedNeedsRetry || snapshot.Verified || snapshot.PrimaryAttention != "unverified" {
+		t.Fatalf("verification failure axes/precedence=%+v", snapshot)
 	}
 	verification, err = store.StartStageRetry(context.Background(), StageStartRequest{IssueID: issueID, AttemptNumber: attempt,
 		StageKey: StageVerification, Reporter: Actor{Type: "external", OpaqueKey: "verify:trusted"}, ReasonCode: "verify_retry", IdempotencyKey: "verify-retry"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	snapshot, _ = store.SnapshotByIssue(context.Background(), issueID)
+	if snapshot.State != "deployed_unverified" || snapshot.Failed || snapshot.FailedNeedsRetry ||
+		!snapshot.Deployed || !snapshot.Unverified {
+		t.Fatalf("verification retry did not clear current failure truth: %+v", snapshot)
+	}
+	now = now.Add(time.Second)
+	if _, err := store.ReportStage(context.Background(), StageReport{IssueID: issueID, AttemptNumber: attempt,
+		StageKey: StageVerification, ExecutionNumber: verification.ExecutionNumber, AuthorityEpoch: verification.AuthorityEpoch,
+		Reporter: Actor{Type: "external", OpaqueKey: "verify:trusted"}, IdempotencyKey: "verify-cancel", SourceSequence: int64ptr(1),
+		Kind: "semantic", State: "cancelled"}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ = store.SnapshotByIssue(context.Background(), issueID)
+	if snapshot.State != "cancelled" || !snapshot.Cancelled || snapshot.Failed || snapshot.FailedNeedsRetry ||
+		!snapshot.Deployed || !snapshot.Unverified || snapshot.Verified {
+		t.Fatalf("verification cancellation axes/precedence=%+v", snapshot)
+	}
+	if err := store.RebuildLatest(context.Background(), issueID); err != nil {
+		t.Fatal(err)
+	}
+	rebuiltCancellation, err := store.SnapshotByIssue(context.Background(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bulkCancellation, err := store.BulkSnapshots(context.Background(), []int64{issueID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bulkCancellation) != 1 || bulkCancellation[0].State != rebuiltCancellation.State ||
+		bulkCancellation[0].Cancelled != rebuiltCancellation.Cancelled ||
+		bulkCancellation[0].Deployed != rebuiltCancellation.Deployed ||
+		bulkCancellation[0].Unverified != rebuiltCancellation.Unverified {
+		t.Fatalf("verification cancellation single/bulk/rebuild mismatch: single=%+v bulk=%+v",
+			rebuiltCancellation, bulkCancellation)
+	}
+	verification, err = store.StartStageRetry(context.Background(), StageStartRequest{IssueID: issueID, AttemptNumber: attempt,
+		StageKey: StageVerification, Reporter: Actor{Type: "external", OpaqueKey: "verify:trusted"}, ReasonCode: "verify_retry", IdempotencyKey: "verify-retry-after-cancel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ = store.SnapshotByIssue(context.Background(), issueID)
+	if snapshot.State != "deployed_unverified" || snapshot.Cancelled || snapshot.Failed ||
+		!snapshot.Deployed || !snapshot.Unverified {
+		t.Fatalf("verification retry did not clear current cancellation truth: %+v", snapshot)
 	}
 	now = now.Add(time.Second)
 	if _, err := store.ReportStage(context.Background(), StageReport{IssueID: issueID, AttemptNumber: attempt,
@@ -596,7 +642,7 @@ func TestRunNormalizationProjectMoveAndDeletionSafeRetention(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log`).Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("retention remaining=%d err=%v", remaining, err)
 	}
-	if err := database.QueryRow(`SELECT floor_id FROM delivery_change_retention WHERE singleton=1`).Scan(&floor); err != nil || floor != maxID {
+	if err := database.QueryRow(`SELECT MAX(floor_id) FROM delivery_change_retention`).Scan(&floor); err != nil || floor != maxID {
 		t.Fatalf("retention floor=%d err=%v", floor, err)
 	}
 }

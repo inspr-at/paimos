@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/handlers"
 )
 
@@ -266,5 +267,130 @@ func TestAgentRunReconcilerHeartbeatRaceHasNoContradictoryWinner(t *testing.T) {
 		}
 	} else {
 		t.Fatalf("heartbeat status=%d final=%q reconciled=%d", statusCode, status, result.n)
+	}
+}
+
+func TestAgentRunReconcilerMalformedInstrumentedCandidateDoesNotStarveLaterRun(t *testing.T) {
+	_ = newDirectTelemetryServer(t)
+	projectID := seedBatchProject(t, "RNS", "Reaper non-starvation")
+	adminID := userID(t, "admin")
+	now := time.Now().UTC()
+	seed := func(number, instrumentation, supervised int) int64 {
+		t.Helper()
+		result, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status)
+			VALUES(?,?,'ticket','Reconciler candidate','in-progress')`, projectID, number)
+		if err != nil {
+			t.Fatal(err)
+		}
+		issueID, _ := result.LastInsertId()
+		result, err = db.DB.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,
+			expects_supervisor_telemetry,delivery_instrumentation_version,created_at,started_at)
+			VALUES(?,?,?,'running',?,?,?,?)`, issueID, projectID, adminID, supervised, instrumentation,
+			now.Add(-3*time.Hour).Format(time.RFC3339Nano), now.Add(-3*time.Hour).Format(time.RFC3339Nano))
+		if err != nil {
+			t.Fatal(err)
+		}
+		runID, _ := result.LastInsertId()
+		return runID
+	}
+	malformed := seed(1, 1, 1) // Post-M144 marker without its mandatory link.
+	healthyLegacy := seed(2, 0, 0)
+	updated, err := handlers.ReconcileStaleAgentRuns(context.Background(), now, handlers.AgentRunReconcilerConfig{
+		Interval: time.Second, QueuedTimeout: time.Minute, FirstHeartbeatTimeout: time.Minute,
+		HeartbeatTimeout: time.Minute, LegacyFallbackTimeout: time.Minute,
+	})
+	if err != nil || updated != 1 {
+		t.Fatalf("reconcile updated=%d err=%v, want one healthy later candidate", updated, err)
+	}
+	for runID, want := range map[int64]string{malformed: "running", healthyLegacy: "failed"} {
+		var got string
+		if err := db.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, runID).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("run %d status=%q want %q", runID, got, want)
+		}
+	}
+}
+
+func TestAgentRunFirstSignalAnchorUsesLaterClaimTime(t *testing.T) {
+	ts := newDirectTelemetryServer(t)
+	projectID := seedBatchProject(t, "RFA", "Run first-signal anchor")
+	adminID := userID(t, "admin")
+	result, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status)
+		VALUES(?,1,'ticket','Queue before claim','in-progress')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := result.LastInsertId()
+	activationAt := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Second)
+	result, err = db.DB.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,
+		delivery_instrumentation_version,created_at) VALUES(?,?,?,'queued',1,?)`, issueID, projectID,
+		adminID, activationAt.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, _ := result.LastInsertId()
+	bootstrapStore := delivery.NewStore(db.DB, delivery.Options{Clock: delivery.ClockFunc(func() time.Time { return activationAt })})
+	tx, err := db.DB.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effects := bootstrapStore.NewEffects()
+	if _, err := bootstrapStore.BootstrapRunTx(t.Context(), tx, effects, delivery.RunBootstrap{IssueID: issueID,
+		RunID: runID, Mode: "implementation", Actor: delivery.Actor{Type: "user", OpaqueKey: "user:" + itoa(adminID)},
+		IdempotencyKey: "claim-anchor-bootstrap"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	effects.Dispatch(t.Context())
+
+	resp := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+		"status": "running", "if_status": "queued", "expects_supervisor_telemetry": true,
+	})
+	assertStatus(t, resp, 200)
+	resp.Body.Close()
+	var startedRaw string
+	if err := db.DB.QueryRow(`SELECT strftime('%Y-%m-%dT%H:%M:%fZ',started_at) FROM agent_runs WHERE id=?`, runID).
+		Scan(&startedRaw); err != nil {
+		t.Fatal(err)
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, startedRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := handlers.AgentRunReconcilerConfig{Interval: time.Second, QueuedTimeout: 15 * time.Minute,
+		FirstHeartbeatTimeout: time.Minute, HeartbeatTimeout: 90 * time.Second, LegacyFallbackTimeout: 2 * time.Hour}
+	justBefore := startedAt.Add(time.Minute - time.Millisecond)
+	if updated, err := handlers.ReconcileStaleAgentRuns(t.Context(), justBefore, cfg); err != nil || updated != 0 {
+		t.Fatalf("freshly claimed old queued run reconciled early: updated=%d err=%v", updated, err)
+	}
+	readStore := delivery.NewStore(db.DB, delivery.Options{Clock: delivery.ClockFunc(func() time.Time { return justBefore }),
+		Freshness: delivery.FreshnessPolicy{FirstSignalTimeout: time.Minute, HeartbeatTimeout: 90 * time.Second, EstimateTimeout: 90 * time.Second}})
+	snapshot, err := readStore.SnapshotByIssue(t.Context(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var implementation delivery.StageSnapshot
+	for _, stage := range snapshot.Stages {
+		if stage.StageKey == delivery.StageImplementation {
+			implementation = stage
+			break
+		}
+	}
+	if implementation.SignalState != "awaiting_first_signal" || implementation.Stale || implementation.NeverSignaled {
+		t.Fatalf("fresh claim anchored to queued time instead of started_at: %+v", implementation)
+	}
+	if updated, err := handlers.ReconcileStaleAgentRuns(t.Context(), startedAt.Add(time.Minute), cfg); err != nil || updated != 1 {
+		t.Fatalf("exact first-signal boundary updated=%d err=%v, want one", updated, err)
+	}
+	var status string
+	if err := db.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, runID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" {
+		t.Fatalf("run status=%q at exact first-signal boundary", status)
 	}
 }

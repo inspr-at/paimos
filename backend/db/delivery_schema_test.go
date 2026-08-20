@@ -58,10 +58,15 @@ func seedDeliverySchemaGraph(t *testing.T, database *sql.DB) (deliveryID, attemp
 			t.Fatal(err)
 		}
 	}
+	if _, err := database.Exec(`INSERT INTO delivery_attempt_policy_seals(delivery_id,attempt_id,sealed_at)
+		VALUES(?,?,'2026-08-20T10:00:00Z')`, deliveryID, attemptID); err != nil {
+		t.Fatal(err)
+	}
 	startEvent := event(2, "start", "stage_execution_started")
 	result, err = database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,
-		event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,semantic_state,server_received_at)
-		VALUES(?,?,'specification',1,1,1,?,'execution_started',?,'active','2026-08-20T10:00:00Z')`,
+		event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,semantic_state,
+		authority_source_sequence_cutoff,server_received_at)
+		VALUES(?,?,'specification',1,1,1,?,'execution_started',?,'active',0,'2026-08-20T10:00:00Z')`,
 		deliveryID, attemptID, startEvent, reporterID)
 	if err != nil {
 		t.Fatal(err)
@@ -134,6 +139,47 @@ func TestM144TypedStageUnionRejectsCrossKindSmuggling(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("required typed fields cannot exploit NULL checks", func(t *testing.T) {
+		newKindEnvelope := func(key, kind string) int64 {
+			t.Helper()
+			revision++
+			result, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+				payload_hash,kind,reporter_id,server_received_at)
+				VALUES(?,?,?,zeroblob(32),?,?,'2026-08-20T10:02:00Z')`, deliveryID, revision, key, kind, reporterID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, _ := result.LastInsertId()
+			return id
+		}
+		for _, tc := range []struct {
+			name          string
+			semanticState any
+			cutoff        any
+		}{
+			{name: "execution semantic state", semanticState: nil, cutoff: int64(0)},
+			{name: "execution authority cutoff", semanticState: "active", cutoff: nil},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				eventID := newKindEnvelope("null-"+strings.ReplaceAll(tc.name, " ", "-"), "stage_execution_started")
+				if _, err := database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,
+					execution_number,event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,
+					semantic_state,authority_source_sequence_cutoff,server_received_at)
+					VALUES(?,?,'implementation',1,1,1,?,'execution_started',?,?,?,'2026-08-20T10:02:00Z')`,
+					deliveryID, attemptID, eventID, reporterID, tc.semanticState, tc.cutoff); err == nil {
+					t.Fatalf("execution_started accepted NULL %s", tc.name)
+				}
+			})
+		}
+		if _, err := database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,
+			execution_number,event_sequence,authority_epoch,event_type,reporter_id,execution_start_stage_event_id,
+			source_idempotency_key,source_payload_hash,heartbeat,server_received_at)
+			VALUES(?,?,'specification',1,99,1,'heartbeat',?,?,'null-heartbeat-sequence',zeroblob(32),1,
+			'2026-08-20T10:02:00Z')`, deliveryID, attemptID, reporterID, startID); err == nil {
+			t.Fatal("heartbeat accepted a NULL source sequence")
+		}
+	})
 }
 
 func TestM144DeliveryIndexesAndForeignKeys(t *testing.T) {
@@ -326,13 +372,39 @@ func TestM144SecretAndStableIdentityGuardsRejectDirectCorruption(t *testing.T) {
 func TestM144PrivacyBackstopCoversEveryPersistedExternalSurface(t *testing.T) {
 	database := openTestDB(t)
 	deliveryID, attemptID, reporterID, startID := seedDeliverySchemaGraph(t, database)
+	var patternCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_forbidden_value_patterns`).Scan(&patternCount); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO delivery_forbidden_value_patterns(pattern) VALUES('*')`); err == nil {
+		t.Fatal("post-migration insert could poison the forbidden-value rules")
+	}
+	if _, err := database.Exec(`UPDATE delivery_forbidden_value_patterns SET pattern='*' WHERE pattern LIKE '*token%'`); err == nil {
+		t.Fatal("forbidden-value rules were mutable")
+	}
+	if _, err := database.Exec(`DELETE FROM delivery_forbidden_value_patterns WHERE pattern LIKE '*token%'`); err == nil {
+		t.Fatal("forbidden-value rules were deletable")
+	}
+	if _, err := database.Exec(`INSERT OR IGNORE INTO delivery_forbidden_value_patterns(
+		pattern,normalize_horizontal_whitespace,case_sensitive,boundary_needle,require_bearer_whitespace)
+		SELECT pattern,normalize_horizontal_whitespace,case_sensitive,boundary_needle,require_bearer_whitespace
+		FROM delivery_forbidden_value_patterns ORDER BY pattern LIMIT 1`); err != nil {
+		t.Fatalf("idempotent migration seed replay failed: %v", err)
+	}
+	var replayPatternCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_forbidden_value_patterns`).Scan(&replayPatternCount); err != nil || replayPatternCount != patternCount {
+		t.Fatalf("rule seed replay count=%d/%d err=%v", replayPatternCount, patternCount, err)
+	}
 	assertForbidden := func(surface string, err error) {
 		t.Helper()
 		if err == nil || !strings.Contains(err.Error(), "forbidden delivery "+surface+" value") {
 			t.Fatalf("%s surface did not reject via its privacy backstop: %v", surface, err)
 		}
 	}
-	const forbidden = "token/abcdefghijklmnop"
+	// Exercise the original bounce directly on every persisted surface. The
+	// table-driven Store/DB corpus separately covers tabs, form-feed, Unicode
+	// spacing, slash/underscore/dash separators, and exact token thresholds.
+	const forbidden = "ToKeN \t= abcdefghijklmnop"
 	_, err := database.Exec(`INSERT INTO delivery_reporters(delivery_id,reporter_type,opaque_key,created_at)
 		VALUES(?,'external',?,'2026-08-20T10:02:00Z')`, deliveryID, forbidden)
 	assertForbidden("reporter", err)
@@ -411,5 +483,391 @@ func TestM144PrivacyBackstopCoversEveryPersistedExternalSurface(t *testing.T) {
 			SELECT ?,issue_id,?,0,'spec_acceptance','unknown','external_ref',?,'2026-08-20T10:02:00Z'
 			FROM deliveries WHERE id=?`, deliveryID, childrenStageID, unsafeReference, deliveryID)
 		assertForbidden("evidence", err)
+	}
+}
+
+func TestM144ExternalTextBoundsUseUTF8BytesAndStoreSyntax(t *testing.T) {
+	database := openTestDB(t)
+	deliveryID, _, reporterID, _ := seedDeliverySchemaGraph(t, database)
+	checks := map[string][]string{
+		"deliveries":                    {"length(CAST(delivery_key AS BLOB)) BETWEEN 7 AND 80"},
+		"delivery_reporters":            {"length(CAST(opaque_key AS BLOB)) BETWEEN 1 AND 128"},
+		"delivery_events":               {"length(CAST(idempotency_key AS BLOB)) BETWEEN 1 AND 128", "length(CAST(reason_code AS BLOB)) <= 64", "length(CAST(reason_text AS BLOB)) <= 280"},
+		"delivery_attempts":             {"length(CAST(reason_code AS BLOB)) BETWEEN 1 AND 64", "length(CAST(reason_text AS BLOB)) <= 280"},
+		"delivery_attempt_stage_policy": {"length(CAST(policy_reference AS BLOB)) <= 160", "length(CAST(reason_code AS BLOB)) <= 64", "length(CAST(reason_text AS BLOB)) <= 280"},
+		"delivery_stage_events":         {"length(CAST(source_idempotency_key AS BLOB)) BETWEEN 1 AND 128", "length(CAST(activity AS BLOB)) <= 280", "length(CAST(estimate_basis AS BLOB)) <= 240", "length(CAST(reason_text AS BLOB)) <= 280"},
+		"delivery_stage_blockers":       {"length(CAST(blocker_key AS BLOB)) BETWEEN 1 AND 96", "length(CAST(summary AS BLOB)) <= 280"},
+		"delivery_evidence":             {"length(CAST(reference_value AS BLOB)) <= 192"},
+	}
+	for table, fragments := range checks {
+		var ddl string
+		if err := database.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&ddl); err != nil {
+			t.Fatal(err)
+		}
+		for _, fragment := range fragments {
+			if !strings.Contains(ddl, fragment) {
+				t.Fatalf("%s lacks byte bound %q", table, fragment)
+			}
+		}
+	}
+
+	insertEvent := func(revision int, key, text string) error {
+		_, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+			payload_hash,kind,reporter_id,reason_text,server_received_at)
+			VALUES(?,?,?,zeroblob(32),'stage_reported',?,?,'2026-08-20T10:03:00Z')`,
+			deliveryID, revision, key, reporterID, text)
+		return err
+	}
+	if err := insertEvent(3, "ascii-max", strings.Repeat("a", 280)); err != nil {
+		t.Fatalf("280-byte ASCII text rejected: %v", err)
+	}
+	if err := insertEvent(4, "ascii-over", strings.Repeat("a", 281)); err == nil {
+		t.Fatal("281-byte ASCII text accepted")
+	}
+	if err := insertEvent(4, "utf8-max", strings.Repeat("é", 140)); err != nil {
+		t.Fatalf("280-byte UTF-8 text rejected: %v", err)
+	}
+	if err := insertEvent(5, "utf8-over", strings.Repeat("é", 141)); err == nil {
+		t.Fatal("282-byte UTF-8 text accepted")
+	}
+	if err := insertEvent(5, "safe-question", "Why is this bounded note safe?"); err != nil {
+		t.Fatalf("ordinary bounded free text was over-rejected: %v", err)
+	}
+	if _, err := database.Exec(`INSERT INTO delivery_reporters(delivery_id,reporter_type,opaque_key,created_at)
+		VALUES(?,'external',?,'2026-08-20T10:03:00Z')`, deliveryID, strings.Repeat("a", 128)); err != nil {
+		t.Fatalf("128-byte opaque key rejected: %v", err)
+	}
+	for _, invalid := range []string{strings.Repeat("a", 129), "has space", "emoji🙂", "_bad-first"} {
+		if _, err := database.Exec(`INSERT INTO delivery_reporters(delivery_id,reporter_type,opaque_key,created_at)
+			VALUES(?,'external',?,'2026-08-20T10:03:00Z')`, deliveryID, invalid); err == nil {
+			t.Fatalf("invalid Store-incompatible opaque key accepted: %q", invalid)
+		}
+	}
+}
+
+func TestM144AttemptPolicySealRejectsPartialAndNonCanonicalPoison(t *testing.T) {
+	database := openTestDB(t)
+	deliveryID, _, reporterID, _ := seedDeliverySchemaGraph(t, database)
+	revision, attemptNumber := 3, int64(2)
+	newAttempt := func() int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+			payload_hash,kind,reporter_id,server_received_at)
+			VALUES(?,?,?,zeroblob(32),'attempt_started',?,'2026-08-20T10:04:00Z')`,
+			deliveryID, revision, "policy-attempt:"+itoa(attemptNumber), reporterID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		eventID, _ := result.LastInsertId()
+		result, err = database.Exec(`INSERT INTO delivery_attempts(delivery_id,attempt_number,plan_revision,
+			start_delivery_event_id,reason_code,created_at) VALUES(?,?,?,?, 'test','2026-08-20T10:04:00Z')`,
+			deliveryID, attemptNumber, attemptNumber, eventID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attemptID, _ := result.LastInsertId()
+		revision++
+		attemptNumber++
+		return attemptID
+	}
+	insertPolicy := func(attemptID int64, stage string, order, weight int, applicability string) error {
+		policyRef, reasonCode, reasonText := "", "", ""
+		var authorized any
+		if applicability == "not_applicable" {
+			policyRef, reasonCode, reasonText, authorized = "policy:waiver", "waived", "Explicit policy waiver", reporterID
+		}
+		_, err := database.Exec(`INSERT INTO delivery_attempt_stage_policy(delivery_id,attempt_id,stage_key,
+			sort_order,applicability,weight,policy_reference,reason_code,reason_text,authorized_by_reporter_id,created_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?, '2026-08-20T10:04:00Z')`, deliveryID, attemptID, stage, order,
+			applicability, weight, policyRef, reasonCode, reasonText, authorized)
+		return err
+	}
+	seal := func(attemptID int64) error {
+		_, err := database.Exec(`INSERT INTO delivery_attempt_policy_seals(delivery_id,attempt_id,sealed_at)
+			VALUES(?,?,'2026-08-20T10:04:00Z')`, deliveryID, attemptID)
+		return err
+	}
+
+	empty := newAttempt()
+	if err := seal(empty); err == nil {
+		t.Fatal("zero-policy attempt was sealed")
+	}
+	partial := newAttempt()
+	for i, stage := range []string{"specification", "implementation", "qa", "deployment"} {
+		if err := insertPolicy(partial, stage, i+1, []int{10, 45, 20, 15}[i], "required"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := seal(partial); err == nil {
+		t.Fatal("four-policy attempt was sealed")
+	}
+	misordered := newAttempt()
+	if err := insertPolicy(misordered, "specification", 2, 100, "required"); err == nil {
+		t.Fatal("misordered canonical stage was accepted")
+	}
+	wrongTotal := newAttempt()
+	for i, stage := range []string{"specification", "implementation", "qa", "deployment", "verification"} {
+		if err := insertPolicy(wrongTotal, stage, i+1, []int{10, 44, 20, 15, 10}[i], "required"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := seal(wrongTotal); err == nil {
+		t.Fatal("99-weight policy was sealed")
+	}
+	allNA := newAttempt()
+	for i, stage := range []string{"specification", "implementation", "qa", "deployment", "verification"} {
+		if err := insertPolicy(allNA, stage, i+1, []int{10, 45, 20, 15, 10}[i], "not_applicable"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := seal(allNA); err == nil {
+		t.Fatal("all-N/A policy was sealed")
+	}
+	valid := newAttempt()
+	for i, stage := range []string{"specification", "implementation", "qa", "deployment", "verification"} {
+		if err := insertPolicy(valid, stage, i+1, []int{5, 50, 20, 15, 10}[i], "required"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := seal(valid); err != nil {
+		t.Fatalf("valid custom 100-weight policy did not seal: %v", err)
+	}
+}
+
+func TestM144InapplicableExecutionAndNeedsInputWitnessGuards(t *testing.T) {
+	database := openTestDB(t)
+	deliveryID, attemptID, reporterID, startID := seedDeliverySchemaGraph(t, database)
+	var projectID int64
+	if err := database.QueryRow(`SELECT project_id_hint FROM deliveries WHERE id=?`, deliveryID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+		payload_hash,kind,reporter_id,server_received_at)
+		VALUES(?,3,'na-attempt',zeroblob(32),'attempt_started',?,'2026-08-20T10:04:00Z')`, deliveryID, reporterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attemptEventID, _ := result.LastInsertId()
+	result, err = database.Exec(`INSERT INTO delivery_attempts(delivery_id,attempt_number,plan_revision,
+		previous_attempt_id,start_delivery_event_id,project_id_at_start,reason_code,created_at)
+		VALUES(?,2,2,?,?,?,'policy_change','2026-08-20T10:04:00Z')`, deliveryID, attemptID, attemptEventID, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	naAttemptID, _ := result.LastInsertId()
+	stages := []string{"specification", "implementation", "qa", "deployment", "verification"}
+	weights := []int{10, 45, 20, 15, 10}
+	for i, stage := range stages {
+		applicability, policyRef, reasonCode, reasonText := "required", "", "", ""
+		var authorized any
+		if stage == "qa" {
+			applicability, policyRef, reasonCode, reasonText, authorized = "not_applicable", "policy:qa-waiver", "waived", "QA covered elsewhere", reporterID
+		}
+		if _, err := database.Exec(`INSERT INTO delivery_attempt_stage_policy(delivery_id,attempt_id,stage_key,
+			sort_order,applicability,weight,policy_reference,reason_code,reason_text,authorized_by_reporter_id,created_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?, '2026-08-20T10:04:00Z')`, deliveryID, naAttemptID, stage, i+1,
+			applicability, weights[i], policyRef, reasonCode, reasonText, authorized); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := database.Exec(`INSERT INTO delivery_attempt_policy_seals(delivery_id,attempt_id,sealed_at)
+		VALUES(?,?,'2026-08-20T10:04:00Z')`, deliveryID, naAttemptID); err != nil {
+		t.Fatal(err)
+	}
+	result, err = database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+		payload_hash,kind,reporter_id,server_received_at)
+		VALUES(?,4,'na-execution',zeroblob(32),'stage_execution_started',?,'2026-08-20T10:04:00Z')`, deliveryID, reporterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	naExecutionEventID, _ := result.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,
+		execution_number,event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,semantic_state,
+		authority_source_sequence_cutoff,server_received_at)
+		VALUES(?,?,'qa',1,1,1,?,'execution_started',?,'active',0,'2026-08-20T10:04:00Z')`,
+		deliveryID, naAttemptID, naExecutionEventID, reporterID); err == nil {
+		t.Fatal("execution_started was accepted for a sealed not_applicable stage")
+	}
+
+	if _, err := database.Exec(`INSERT INTO delivery_stage_latest(delivery_id,attempt_id,stage_key,
+		execution_number,authority_epoch,current_reporter_id,execution_start_stage_event_id,
+		authority_stage_event_id,updated_at)
+		VALUES(?,?,'specification',1,1,?,?,?,'2026-08-20T10:00:00Z')`,
+		deliveryID, attemptID, reporterID, startID, startID); err != nil {
+		t.Fatal(err)
+	}
+	newSemantic := func(revision int, key string, sequence, blockerCount int) int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+			payload_hash,kind,reporter_id,server_received_at)
+			VALUES(?,?,?,zeroblob(32),'stage_reported',?,'2026-08-20T10:05:00Z')`, deliveryID, revision, key, reporterID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		envelopeID, _ := result.LastInsertId()
+		result, err = database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,
+			execution_number,event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,
+			execution_start_stage_event_id,semantic_state,needs_input,declared_blocker_count,current_blocker_count,
+			spec_revision,server_received_at)
+			VALUES(?,?,'specification',1,?,1,?,'semantic_report',?,?,'waiting',1,?,?,1,'2026-08-20T10:05:00Z')`,
+			deliveryID, attemptID, sequence, envelopeID, reporterID, startID, blockerCount, blockerCount)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	missingWitnessID := newSemantic(5, "missing-human-witness", 2, 0)
+	if _, err := database.Exec(`UPDATE delivery_stage_latest SET semantic_stage_event_id=?,updated_at='2026-08-20T10:05:00Z'
+		WHERE delivery_id=? AND attempt_id=? AND stage_key='specification'`, missingWitnessID, deliveryID, attemptID); err == nil {
+		t.Fatal("needs_input semantic fact became authoritative without a current human_wait blocker")
+	}
+	validWitnessID := newSemantic(6, "valid-human-witness", 3, 1)
+	if _, err := database.Exec(`INSERT INTO delivery_stage_blockers(delivery_id,stage_event_id,ordinal,
+		blocker_key,blocker_class,summary,is_current,is_human_wait,interval_started_at,interval_ended_at)
+		VALUES(?,?,0,'approval','input','Awaiting reviewer',1,1,'2026-08-20T10:05:00Z','2026-08-20T10:05:00Z')`,
+		deliveryID, validWitnessID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE delivery_stage_latest SET semantic_stage_event_id=?,updated_at='2026-08-20T10:05:00Z'
+		WHERE delivery_id=? AND attempt_id=? AND stage_key='specification'`, validWitnessID, deliveryID, attemptID); err != nil {
+		t.Fatalf("valid needs_input semantic fact with human_wait witness was rejected: %v", err)
+	}
+}
+
+func TestM144EnvelopeRetentionProvenanceAndCascadeGuards(t *testing.T) {
+	database := openTestDB(t)
+	deliveryID, attemptID, reporterID, startID := seedDeliverySchemaGraph(t, database)
+	var issueID, projectID int64
+	var deliveryKey string
+	if err := database.QueryRow(`SELECT d.issue_id,i.project_id,d.delivery_key FROM deliveries d
+		JOIN issues i ON i.id=d.issue_id WHERE d.id=?`, deliveryID).Scan(&issueID, &projectID, &deliveryKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+		payload_hash,kind,reporter_id,server_received_at)
+		VALUES(?,3,'null-reporter',zeroblob(32),'stage_reported',NULL,'2026-08-20T10:05:00Z')`, deliveryID); err == nil {
+		t.Fatal("unauthored delivery envelope was accepted")
+	}
+	result, err := database.Exec(`INSERT INTO delivery_reporters(delivery_id,reporter_type,opaque_key,created_at)
+		VALUES(?,'external','other:reporter','2026-08-20T10:05:00Z')`, deliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherReporter, _ := result.LastInsertId()
+	result, err = database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+		payload_hash,kind,reporter_id,server_received_at)
+		VALUES(?,3,'wrong-attempt-kind',zeroblob(32),'stage_reported',?,'2026-08-20T10:05:00Z')`, deliveryID, reporterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongAttemptEvent, _ := result.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO delivery_attempts(delivery_id,attempt_number,plan_revision,
+		start_delivery_event_id,reason_code,created_at) VALUES(?,2,2,?,'test','2026-08-20T10:05:00Z')`,
+		deliveryID, wrongAttemptEvent); err == nil {
+		t.Fatal("attempt bound to wrong envelope kind")
+	}
+	result, err = database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+		payload_hash,kind,reporter_id,server_received_at)
+		VALUES(?,4,'reporter-mismatch',zeroblob(32),'stage_reported',?,'2026-08-20T10:05:00Z')`, deliveryID, reporterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatchEvent, _ := result.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,
+		event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,execution_start_stage_event_id,
+		semantic_state,spec_revision,server_received_at)
+		VALUES(?,?,'specification',1,2,1,?,'semantic_report',?,?,'active',1,'2026-08-20T10:05:00Z')`,
+		deliveryID, attemptID, mismatchEvent, otherReporter, startID); err == nil {
+		t.Fatal("stage fact consumed another reporter's envelope")
+	}
+	result, err = database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+		payload_hash,kind,reporter_id,server_received_at)
+		VALUES(?,5,'wrong-stage-kind',zeroblob(32),'attempt_started',?,'2026-08-20T10:05:00Z')`, deliveryID, reporterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongStageEvent, _ := result.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,
+		event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,execution_start_stage_event_id,
+		semantic_state,spec_revision,server_received_at)
+		VALUES(?,?,'specification',1,2,1,?,'semantic_report',?,?,'active',1,'2026-08-20T10:05:00Z')`,
+		deliveryID, attemptID, wrongStageEvent, reporterID, startID); err == nil {
+		t.Fatal("stage fact consumed wrong envelope kind")
+	}
+	result, err = database.Exec(`INSERT INTO agent_runs(issue_id,project_id,status,delivery_instrumentation_version)
+		VALUES(?,?,'failed',1)`, issueID, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, _ := result.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO delivery_agent_run_links(agent_run_id,root_issue_id,delivery_id,
+		attempt_id,stage_key,execution_number,execution_start_stage_event_id,reporter_id,link_delivery_event_id,created_at)
+		VALUES(?,?,?,?,'specification',1,?,?,?,'2026-08-20T10:05:00Z')`, runID, issueID, deliveryID,
+		attemptID, startID, reporterID, wrongStageEvent); err == nil {
+		t.Fatal("run link consumed wrong envelope kind")
+	}
+	result, err = database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+		payload_hash,kind,reporter_id,server_received_at)
+		VALUES(?,6,'link-reporter-mismatch',zeroblob(32),'run_linked',?,'2026-08-20T10:05:00Z')`, deliveryID, reporterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runLinkEvent, _ := result.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO delivery_agent_run_links(agent_run_id,root_issue_id,delivery_id,
+		attempt_id,stage_key,execution_number,execution_start_stage_event_id,reporter_id,link_delivery_event_id,created_at)
+		VALUES(?,?,?,?,'specification',1,?,?,?,'2026-08-20T10:05:00Z')`, runID, issueID, deliveryID,
+		attemptID, startID, otherReporter, runLinkEvent); err == nil {
+		t.Fatal("run link consumed another reporter's envelope")
+	}
+
+	if _, err := database.Exec(`DELETE FROM delivery_change_retention`); err == nil {
+		t.Fatal("retention root was deletable")
+	}
+	if _, err := database.Exec(`UPDATE delivery_change_retention SET floor_id=99`); err == nil {
+		t.Fatal("retention history was mutable")
+	}
+	for name, args := range map[string][]any{
+		"wrong-root":    {deliveryID, issueID + 999, deliveryKey, projectID},
+		"wrong-key":     {deliveryID, issueID, "issue:wrong", projectID},
+		"wrong-project": {deliveryID, issueID, deliveryKey, projectID + 999},
+	} {
+		if _, err := database.Exec(`INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,
+			delivery_key,project_id_hint,change_sequence,delivery_revision,kind,source_kind,server_received_at)
+			VALUES(lower(hex(randomblob(16))),?,?,?,?,1,0,'issue','issue','2026-08-20T10:05:00Z')`,
+			args...); err == nil {
+			t.Fatalf("change log accepted %s provenance", name)
+		}
+	}
+	if _, err := database.Exec(`DELETE FROM delivery_stage_events WHERE id=?`, startID); err == nil {
+		t.Fatal("append-only child was directly deletable")
+	}
+	if _, err := database.Exec(`DELETE FROM deliveries WHERE id=?`, deliveryID); err == nil {
+		t.Fatal("live delivery was directly deletable")
+	}
+	var deleteContext int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='delivery_root_delete_context'`).Scan(&deleteContext); err != nil || deleteContext != 0 {
+		t.Fatalf("forgeable delete context still exists: count=%d err=%v", deleteContext, err)
+	}
+	if _, err := database.Exec(`DELETE FROM issues WHERE id=?`, issueID); err != nil {
+		t.Fatalf("legitimate root cascade failed: %v", err)
+	}
+	var tombstones int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE delivery_id=? AND kind='root_deleted'`, deliveryID).Scan(&tombstones); err != nil || tombstones != 1 {
+		t.Fatalf("cascade tombstone count=%d err=%v", tombstones, err)
+	}
+	if _, err := database.Exec(`INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,
+		delivery_key,project_id_hint,change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+		VALUES(lower(hex(randomblob(16))),?,?,?,?,999,0,'root_deleted','issue',?,'2026-08-20T10:06:00Z')`,
+		deliveryID, issueID, deliveryKey, projectID, issueID); err == nil {
+		t.Fatal("post-delete writer appended a second tombstone")
+	}
+	rows, err := database.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Fatal("foreign_key_check returned a violation after guarded cascade")
 	}
 }

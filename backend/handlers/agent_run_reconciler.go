@@ -88,6 +88,7 @@ type staleAgentRunCandidate struct {
 	instrumentationVersion int
 	authorityActivationAt  sql.NullString
 	authorityCutoff        sql.NullInt64
+	firstSignalAnchorAt    sql.NullString
 }
 
 // ReconcileStaleAgentRuns applies race-safe compare-and-set failure updates.
@@ -101,6 +102,9 @@ func ReconcileStaleAgentRuns(ctx context.Context, now time.Time, cfg AgentRunRec
 	legacyCutoff := now.Add(-cfg.LegacyFallbackTimeout).UTC().Format(time.RFC3339Nano)
 	rows, err := db.DB.QueryContext(ctx, `WITH supervised AS (
 		SELECT ar.*,act.created_at AS authority_activation_at,act.telemetry_sequence_cutoff AS authority_cutoff,
+		 CASE WHEN act.created_at IS NULL THEN COALESCE(NULLIF(ar.started_at,''),ar.created_at)
+		  WHEN julianday(COALESCE(NULLIF(ar.started_at,''),ar.created_at))>julianday(act.created_at)
+		   THEN COALESCE(NULLIF(ar.started_at,''),ar.created_at) ELSE act.created_at END AS first_signal_anchor_at,
 		 CASE WHEN act.agent_run_id IS NOT NULL THEN (SELECT MAX(t.server_received_at) FROM agent_run_telemetry t
 		  WHERE t.run_id=ar.id AND t.heartbeat=1 AND t.sequence>act.telemetry_sequence_cutoff)
 		 ELSE l.last_heartbeat_at END AS effective_heartbeat_at
@@ -117,11 +121,11 @@ func ReconcileStaleAgentRuns(ctx context.Context, now time.Time, cfg AgentRunRec
 		  WHEN ar.expects_supervisor_telemetry=1 AND ar.effective_heartbeat_at IS NULL THEN 'first_heartbeat'
 		  WHEN ar.expects_supervisor_telemetry=1 THEN 'heartbeat'
 		  ELSE 'legacy'
-		 END,ar.authority_activation_at,ar.authority_cutoff
+		 END,ar.authority_activation_at,ar.authority_cutoff,ar.first_signal_anchor_at
 		FROM supervised ar
 		WHERE (ar.status='queued' AND julianday(ar.created_at) <= julianday(?))
 		   OR (ar.status='running' AND ar.expects_supervisor_telemetry=1 AND ar.effective_heartbeat_at IS NULL
-		       AND julianday(COALESCE(ar.authority_activation_at,NULLIF(ar.started_at,''), ar.created_at)) <= julianday(?))
+		       AND julianday(ar.first_signal_anchor_at) <= julianday(?))
 		   OR (ar.status='running' AND ar.expects_supervisor_telemetry=1 AND ar.effective_heartbeat_at IS NOT NULL
 		       AND julianday(ar.effective_heartbeat_at) <= julianday(?))
 		   OR (ar.status='running' AND ar.expects_supervisor_telemetry=0
@@ -134,7 +138,7 @@ func ReconcileStaleAgentRuns(ctx context.Context, now time.Time, cfg AgentRunRec
 	for rows.Next() {
 		var c staleAgentRunCandidate
 		if err := rows.Scan(&c.id, &c.projectID, &c.instrumentationVersion, &c.kind,
-			&c.authorityActivationAt, &c.authorityCutoff); err != nil {
+			&c.authorityActivationAt, &c.authorityCutoff, &c.firstSignalAnchorAt); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -172,11 +176,13 @@ func ReconcileStaleAgentRuns(ctx context.Context, now time.Time, cfg AgentRunRec
 				  AND current.execution_number=act.execution_number AND current.authority_epoch=act.authority_epoch
 				  AND current.current_reporter_id=act.reporter_id WHERE act.agent_run_id=agent_runs.id
 				  AND act.created_at=? AND act.telemetry_sequence_cutoff=?)
-				 AND julianday(?) <= julianday(?)
+				 AND julianday(CASE
+				  WHEN julianday(COALESCE(NULLIF(started_at,''),created_at))>julianday(?)
+				   THEN COALESCE(NULLIF(started_at,''),created_at) ELSE ? END) <= julianday(?)
 				 AND NOT EXISTS(SELECT 1 FROM agent_run_telemetry t WHERE t.run_id=agent_runs.id
 				  AND t.heartbeat=1 AND t.sequence>?)`
 				args = []any{c.errorText, c.id, c.authorityActivationAt.String, c.authorityCutoff.Int64,
-					c.authorityActivationAt.String, firstCutoff, c.authorityCutoff.Int64}
+					c.authorityActivationAt.String, c.authorityActivationAt.String, firstCutoff, c.authorityCutoff.Int64}
 			} else {
 				query = `UPDATE agent_runs SET status='failed', error=?, finished_at=datetime('now')
 				 WHERE id=? AND status='running' AND expects_supervisor_telemetry=1
@@ -234,7 +240,11 @@ func ReconcileStaleAgentRuns(ctx context.Context, now time.Time, cfg AgentRunRec
 			if err := store.NormalizeRunTx(ctx, tx, effects, delivery.RunNormalization{RunID: c.id, Status: "failed",
 				IdempotencyKey: fmt.Sprintf("run:%d:failed", c.id)}); err != nil {
 				tx.Rollback()
-				return updated, err
+				// A corrupt or concurrently trashed candidate is isolated to its own
+				// transaction. Continue so one bad row cannot starve later healthy
+				// candidates on every watchdog pass.
+				log.Printf("agent-run reconciler: skip run %d after delivery normalization error: %v", c.id, err)
+				continue
 			}
 		}
 		if err := tx.Commit(); err != nil {

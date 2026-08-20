@@ -62,7 +62,7 @@ func (s *Store) reportStageTx(ctx context.Context, tx *sql.Tx, effects *Effects,
 			return loadStageRefByStageEvent(ctx, tx, prior)
 		}
 	} else {
-		if prior, err := lookupEnvelopeDuplicate(ctx, tx, d, report.IdempotencyKey, payload); err != nil {
+		if prior, err := lookupEnvelopeDuplicateForActor(ctx, tx, d, report.Reporter, envelopeKind, report.IdempotencyKey, payload); err != nil {
 			return StageRef{}, err
 		} else if prior.Duplicate {
 			return loadStageRefByDeliveryEvent(ctx, tx, prior.ID)
@@ -664,10 +664,10 @@ func materializeDurationIfEligible(ctx context.Context, tx *sql.Tx, d deliveryRo
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_stage_durations(
-		stage_execution_id,delivery_id,root_issue_id,attempt_id,stage_key,execution_number,
+		stage_execution_id,terminal_stage_event_id,delivery_id,root_issue_id,attempt_id,stage_key,execution_number,
 		project_id_at_completion,estimator_policy_version,full_lead_seconds,active_seconds,
-		blocked_seconds,human_wait_seconds,completed_at) VALUES(?,?,?,?,?,?,?,1,?,?,?,?,?)`,
-		current.ExecutionStartEventID, d.ID, d.IssueID, attempt.ID, current.StageKey, current.ExecutionNumber,
+		blocked_seconds,human_wait_seconds,completed_at) VALUES(?,?,?,?,?,?,?,?,1,?,?,?,?,?)`,
+		current.ExecutionStartEventID, semanticID, d.ID, d.IssueID, attempt.ID, current.StageKey, current.ExecutionNumber,
 		projectAtCompletion, full, active, blocked, human, completedAt)
 	return err
 }

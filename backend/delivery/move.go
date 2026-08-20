@@ -40,7 +40,7 @@ func (s *Store) ProjectMoveTx(ctx context.Context, tx *sql.Tx, effects *Effects,
 		ActorType       string `json:"actor_type"`
 		ActorKey        string `json:"actor_key"`
 	}{sourceProjectID, targetProjectID, actor.Type, actor.OpaqueKey}
-	if prior, err := lookupEnvelopeDuplicate(ctx, tx, d, idempotencyKey, payload); err != nil {
+	if prior, err := lookupEnvelopeDuplicateForActor(ctx, tx, d, actor, "project_moved", idempotencyKey, payload); err != nil {
 		return err
 	} else if prior.Duplicate {
 		return nil

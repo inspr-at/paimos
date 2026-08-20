@@ -662,6 +662,14 @@ func TestDeliveryPrivacyBackstopMatchesStoreValidation(t *testing.T) {
 		"xoxr-12345678901234567890", "xoxs-12345678901234567890",
 		"eyJabcdefgh.abcdefgh.abcdefgh",
 		"-----BEGIN PRIVATE KEY-----",
+		"token /abcd efgh", "Bearer abcd efgh",
+	}
+	for _, separator := range []string{" ", "\t", "\f", "\v", "\r", "\n", "\u00a0", "\u2003", "\u202f", "\u200b"} {
+		values = append(values,
+			"ToKeN"+separator+"=redacted",
+			"api_key"+separator+":"+separator+"redacted",
+			"password"+separator+"=🔐",
+			"Bearer"+separator+"abcdefgh")
 	}
 	for index, value := range values {
 		_, err := store.StartAttempt(context.Background(), AttemptRequest{IssueID: issueID,
@@ -687,9 +695,23 @@ func TestDeliveryPrivacyBackstopMatchesStoreValidation(t *testing.T) {
 			t.Fatalf("reference validator accepted unsafe URL %q: %v", reference, err)
 		}
 	}
+	allowedNearThresholds := []string{
+		"token/abcdefg", "sk-live-abcdefg", "ghp_1234567890123456789", "xoxb-123456789",
+		"AIza1234567890123456789", "eyJabcdefg.abcdefg.abcdefg", "AKIA1234567890ABCDEFG",
+		"aiza12345678901234567890",
+	}
+	for index, value := range allowedNearThresholds {
+		if err := rejectSecretLike(value); err != nil {
+			t.Fatalf("Store over-rejected near-threshold value %q: %v", value, err)
+		}
+		if _, err := database.Exec(`INSERT INTO delivery_reporters(delivery_id,reporter_type,opaque_key,created_at)
+			VALUES(?,'external',?,'2026-08-20T16:01:00Z')`, attempt.DeliveryID, value); err != nil {
+			t.Fatalf("direct SQL over-rejected near-threshold value %d %q: %v", index, value, err)
+		}
+	}
 }
 
-func TestActorBoundIdempotencyDoesNotCreateOrphanReporter(t *testing.T) {
+func TestReporterScopedIdempotencyNamespacesDoNotCollide(t *testing.T) {
 	database := openDeliveryTestDB(t)
 	issueID, sourceProjectID, _ := seedDeliveryIssue(t, database)
 	wakes := 0
@@ -700,17 +722,12 @@ func TestActorBoundIdempotencyDoesNotCreateOrphanReporter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var reportersBefore int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_reporters`).Scan(&reportersBefore); err != nil {
-		t.Fatal(err)
-	}
-	before := snapshotChangeSequence(t, database, issueID)
-	wakesBefore := wakes
 	request.Actor.OpaqueKey = "user:2"
-	if _, err := store.StartAttempt(context.Background(), request); !errors.Is(err, ErrConflict) {
-		t.Fatalf("cross-actor attempt idempotency error=%v", err)
+	secondAttempt, err := store.StartAttempt(context.Background(), request)
+	if err != nil || secondAttempt.AttemptNumber != attempt.AttemptNumber+1 {
+		t.Fatalf("cross-reporter idempotency namespace collided: attempt=%+v err=%v", secondAttempt, err)
 	}
-	assertNoActorReplayMutation(t, database, issueID, reportersBefore, before, wakesBefore, wakes)
+	attempt = secondAttempt
 
 	reporter := Actor{Type: "external", OpaqueKey: "reset:owner"}
 	stage, err := store.StartStageRetry(context.Background(), StageStartRequest{IssueID: issueID,
@@ -726,15 +743,10 @@ func TestActorBoundIdempotencyDoesNotCreateOrphanReporter(t *testing.T) {
 	if _, err := store.AuthorizeProgressReset(context.Background(), reset); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_reporters`).Scan(&reportersBefore); err != nil {
-		t.Fatal(err)
-	}
-	before, wakesBefore = snapshotChangeSequence(t, database, issueID), wakes
 	reset.Actor.OpaqueKey = "user:2"
-	if _, err := store.AuthorizeProgressReset(context.Background(), reset); !errors.Is(err, ErrConflict) {
-		t.Fatalf("cross-actor reset idempotency error=%v", err)
+	if _, err := store.AuthorizeProgressReset(context.Background(), reset); err != nil {
+		t.Fatalf("cross-reporter reset namespace collided: %v", err)
 	}
-	assertNoActorReplayMutation(t, database, issueID, reportersBefore, before, wakesBefore, wakes)
 
 	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Actor move target','AMT')`)
 	if err != nil {
@@ -757,10 +769,6 @@ func TestActorBoundIdempotencyDoesNotCreateOrphanReporter(t *testing.T) {
 		t.Fatal(err)
 	}
 	effects.Dispatch(context.Background())
-	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_reporters`).Scan(&reportersBefore); err != nil {
-		t.Fatal(err)
-	}
-	before, wakesBefore = snapshotChangeSequence(t, database, issueID), wakes
 	tx, err = database.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -768,15 +776,464 @@ func TestActorBoundIdempotencyDoesNotCreateOrphanReporter(t *testing.T) {
 	effects = store.NewEffects()
 	err = store.ProjectMoveTx(context.Background(), tx, effects, issueID, sourceProjectID, targetProjectID,
 		Actor{Type: "user", OpaqueKey: "user:2"}, "actor-bound-move")
-	if !errors.Is(err, ErrConflict) {
-		t.Fatalf("cross-actor project-move idempotency error=%v", err)
+	if err != nil {
+		t.Fatalf("cross-reporter project-move namespace collided: %v", err)
 	}
-	_ = tx.Rollback()
-	assertNoActorReplayMutation(t, database, issueID, reportersBefore, before, wakesBefore, wakes)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	effects.Dispatch(context.Background())
+}
+
+func TestLinkAgentRunTxReauthorizesFreshAndExactReplay(t *testing.T) {
+	database := openDeliveryTestDB(t)
+	issueID, projectID, userID := seedDeliveryIssue(t, database)
+	allowed := true
+	store := NewStore(database, Options{Authorizer: AuthorizerFunc(func(_ context.Context, req AuthorizationRequest) error {
+		if !allowed {
+			return fmt.Errorf("project edit access revoked for %s", req.Action)
+		}
+		return nil
+	})})
+	result, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,
+		delivery_instrumentation_version) VALUES(?,?,?,'queued',1)`, issueID, projectID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, _ := result.LastInsertId()
+	tx, err := database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effects := store.NewEffects()
+	stage, err := store.BootstrapRunTx(context.Background(), tx, effects, RunBootstrap{IssueID: issueID,
+		RunID: runID, Mode: "implementation", Actor: Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)},
+		IdempotencyKey: "link-authorization"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	effects.Dispatch(context.Background())
+	var eventsBefore, changesBefore, reportersBefore int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_events`).Scan(&eventsBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log`).Scan(&changesBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_reporters`).Scan(&reportersBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	allowed = false
+	tx, err = database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effects = store.NewEffects()
+	if err := store.LinkAgentRunTx(context.Background(), tx, effects, issueID, runID, stage,
+		"link-authorization:link"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("exact link replay after authorization revocation error=%v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err = database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,
+		delivery_instrumentation_version) VALUES(?,?,?,'failed',1)`, issueID, projectID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshRunID, _ := result.LastInsertId()
+	tx, err = database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effects = store.NewEffects()
+	if err := store.LinkAgentRunTx(context.Background(), tx, effects, issueID, freshRunID, stage,
+		"fresh-link-after-revocation"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("fresh link after authorization revocation error=%v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	var eventsAfter, changesAfter, reportersAfter, freshReporter int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_events`).Scan(&eventsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log`).Scan(&changesAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_reporters`).Scan(&reportersAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_reporters WHERE opaque_key=?`,
+		fmt.Sprintf("run:%d", freshRunID)).Scan(&freshReporter); err != nil {
+		t.Fatal(err)
+	}
+	if eventsAfter != eventsBefore || changesAfter != changesBefore || reportersAfter != reportersBefore || freshReporter != 0 {
+		t.Fatalf("denied link leaked mutation events=%d/%d changes=%d/%d reporters=%d/%d fresh=%d",
+			eventsAfter, eventsBefore, changesAfter, changesBefore, reportersAfter, reportersBefore, freshReporter)
+	}
+}
+
+func TestServerIdempotencyKeysCannotBePreemptedAcrossReporterNamespace(t *testing.T) {
+	database := openDeliveryTestDB(t)
+	issueID, sourceProjectID, userID := seedDeliveryIssue(t, database)
+	store := NewStore(database, Options{})
+	attempt, err := store.StartAttempt(context.Background(), AttemptRequest{IssueID: issueID,
+		Actor: Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)}, ReasonCode: "instrumentation",
+		IdempotencyKey: "namespace-attempt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := database.Exec(`INSERT INTO delivery_reporters(delivery_id,reporter_type,opaque_key,created_at)
+		VALUES(?,'external','external:preemptor','2026-08-20T17:00:00Z')`, attempt.DeliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preemptorID, _ := result.LastInsertId()
+	preempt := func(kind, key string) {
+		t.Helper()
+		var revision int64
+		if err := database.QueryRow(`SELECT COALESCE(MAX(delivery_revision),0)+1 FROM delivery_events
+			WHERE delivery_id=?`, attempt.DeliveryID).Scan(&revision); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+			payload_hash,kind,reporter_id,server_received_at) VALUES(?,?,?,zeroblob(32),?,?,
+			'2026-08-20T17:00:00Z')`, attempt.DeliveryID, revision, key, kind, preemptorID); err != nil {
+			t.Fatalf("seed external preemption %s/%s: %v", kind, key, err)
+		}
+	}
+
+	preempt("attempt_started", "spec-revision:2")
+	if _, err := database.Exec(`UPDATE issues SET description='Revised specification namespace' WHERE id=?`, issueID); err != nil {
+		t.Fatalf("external reporter preempted system specification event: %v", err)
+	}
+	preempt("project_moved", "server-move")
+	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Namespace target','NST')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetProjectID, _ := project.LastInsertId()
+	tx, err := database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`UPDATE issues SET project_id=? WHERE id=?`, targetProjectID, issueID); err != nil {
+		t.Fatal(err)
+	}
+	effects := store.NewEffects()
+	if err := store.ProjectMoveTx(context.Background(), tx, effects, issueID, sourceProjectID, targetProjectID,
+		Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)}, "server-move"); err != nil {
+		t.Fatalf("external reporter preempted project move: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	effects.Dispatch(context.Background())
+
+	preempt("run_linked", "server-run:link")
+	result, err = database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,
+		delivery_instrumentation_version) VALUES(?,?,?,'queued',1)`, issueID, targetProjectID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, _ := result.LastInsertId()
+	tx, err = database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effects = store.NewEffects()
+	linked, err := store.BootstrapRunTx(context.Background(), tx, effects, RunBootstrap{IssueID: issueID,
+		RunID: runID, Mode: "implementation", Actor: Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)},
+		IdempotencyKey: "server-run"})
+	if err != nil {
+		t.Fatalf("external reporter preempted run bootstrap/link: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	effects.Dispatch(context.Background())
+
+	lifecycleKey := fmt.Sprintf("run-lifecycle:%d:failed", runID)
+	preempt("run_lifecycle_observed", lifecycleKey)
+	if _, err := store.StartStageRetry(context.Background(), StageStartRequest{IssueID: issueID,
+		AttemptNumber: linked.AttemptNumber, StageKey: StageImplementation,
+		Reporter:   Actor{Type: "external", OpaqueKey: "replacement:implementation"},
+		ReasonCode: "implementation_retry", IdempotencyKey: "namespace-supersede"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE agent_runs SET status='failed',finished_at='2026-08-20T17:01:00Z'
+		WHERE id=?`, runID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err = database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effects = store.NewEffects()
+	if err := store.NormalizeRunTx(context.Background(), tx, effects, RunNormalization{RunID: runID,
+		Status: "failed", IdempotencyKey: "namespace-late-normalize"}); err != nil {
+		t.Fatalf("external reporter preempted run lifecycle observation: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	effects.Dispatch(context.Background())
+
+	for _, identity := range []struct{ kind, key string }{
+		{"attempt_started", "spec-revision:2"}, {"project_moved", "server-move"},
+		{"run_linked", "server-run:link"}, {"run_lifecycle_observed", lifecycleKey},
+	} {
+		var reporters int
+		if err := database.QueryRow(`SELECT COUNT(DISTINCT reporter_id) FROM delivery_events
+			WHERE delivery_id=? AND kind=? AND idempotency_key=?`, attempt.DeliveryID, identity.kind, identity.key).
+			Scan(&reporters); err != nil {
+			t.Fatal(err)
+		}
+		if reporters != 2 {
+			t.Fatalf("%s/%s reporters=%d, expected external preemptor plus canonical actor",
+				identity.kind, identity.key, reporters)
+		}
+	}
+}
+
+func TestUnsealedPartialAttemptCannotBecomeCurrentTruth(t *testing.T) {
+	database := openDeliveryTestDB(t)
+	issueID, _, _ := seedDeliveryIssue(t, database)
+	store := NewStore(database, Options{})
+	sealed, err := store.StartAttempt(context.Background(), AttemptRequest{IssueID: issueID,
+		Actor: Actor{Type: "user", OpaqueKey: "user:1"}, ReasonCode: "instrumentation",
+		IdempotencyKey: "sealed-attempt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reporterID, revision int64
+	if err := database.QueryRow(`SELECT id FROM delivery_reporters WHERE delivery_id=? AND reporter_type='user'
+		AND opaque_key='user:1'`, sealed.DeliveryID).Scan(&reporterID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COALESCE(MAX(delivery_revision),0)+1 FROM delivery_events
+		WHERE delivery_id=?`, sealed.DeliveryID).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	result, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+		payload_hash,kind,reporter_id,server_received_at) VALUES(?,?,'partial-attempt',zeroblob(32),
+		'attempt_started',?,'2026-08-20T17:30:00Z')`, sealed.DeliveryID, revision, reporterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventID, _ := result.LastInsertId()
+	result, err = database.Exec(`INSERT INTO delivery_attempts(delivery_id,attempt_number,plan_revision,
+		previous_attempt_id,start_delivery_event_id,reason_code,created_at)
+		VALUES(?,2,2,?,?,'policy_change','2026-08-20T17:30:00Z')`, sealed.DeliveryID, sealed.ID, eventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partialID, _ := result.LastInsertId()
+	for index, stage := range CanonicalStages[:4] {
+		if _, err := database.Exec(`INSERT INTO delivery_attempt_stage_policy(delivery_id,attempt_id,stage_key,
+			sort_order,applicability,weight,created_at) VALUES(?,?,?,?,'required',?,'2026-08-20T17:30:00Z')`,
+			sealed.DeliveryID, partialID, stage, index+1, DefaultWeights[stage]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := store.SnapshotByIssue(context.Background(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.AttemptNumber != sealed.AttemptNumber {
+		t.Fatalf("unsealed partial attempt became current: %+v", before)
+	}
+	history, err := store.AttemptHistory(context.Background(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].ID != sealed.ID {
+		t.Fatalf("unsealed partial attempt leaked into history: %+v", history)
+	}
+	if err := store.RebuildLatest(context.Background(), issueID); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewStore(database, Options{}).SnapshotByIssue(context.Background(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, restarted) {
+		t.Fatalf("partial attempt changed rebuild/restart truth:\nbefore=%+v\nafter=%+v", before, restarted)
+	}
+}
+
+func TestDirectSQLMonotonicResetAndDurationGuards(t *testing.T) {
+	database := openDeliveryTestDB(t)
+	issueID, projectID, _ := seedDeliveryIssue(t, database)
+	now := time.Date(2026, 8, 20, 18, 0, 0, 0, time.UTC)
+	store := NewStore(database, Options{Clock: ClockFunc(func() time.Time { return now })})
+	attempt, err := store.StartAttempt(context.Background(), AttemptRequest{IssueID: issueID,
+		Actor: Actor{Type: "user", OpaqueKey: "user:1"}, ReasonCode: "instrumentation", IdempotencyKey: "guard-attempt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter := Actor{Type: "external", OpaqueKey: "guard:owner"}
+	stage, err := store.StartStageRetry(context.Background(), StageStartRequest{IssueID: issueID,
+		AttemptNumber: attempt.AttemptNumber, StageKey: StageSpecification, Reporter: reporter,
+		ReasonCode: "specification_start", IdempotencyKey: "guard-start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	baseEstimate := EstimateEvidence{Revision: int64ptr(2), Progress: testFloat64Ptr(25), Source: "external",
+		Confidence: testFloat64Ptr(.8), Basis: "bounded observation"}
+	if _, err := store.ReportStage(context.Background(), StageReport{IssueID: issueID,
+		AttemptNumber: attempt.AttemptNumber, StageKey: StageSpecification, ExecutionNumber: stage.ExecutionNumber,
+		AuthorityEpoch: stage.AuthorityEpoch, Reporter: reporter, IdempotencyKey: "guard-estimate-10",
+		SourceSequence: int64ptr(10), Kind: "estimate", Estimate: baseEstimate}); err != nil {
+		t.Fatal(err)
+	}
+	appendEnvelope := func(key, kind string, reporterID int64) int64 {
+		t.Helper()
+		var revision int64
+		if err := database.QueryRow(`SELECT COALESCE(MAX(delivery_revision),0)+1 FROM delivery_events
+			WHERE delivery_id=?`, stage.DeliveryID).Scan(&revision); err != nil {
+			t.Fatal(err)
+		}
+		result, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+			payload_hash,kind,reporter_id,server_received_at) VALUES(?,?,?,zeroblob(32),?,?,'2026-08-20T18:00:02Z')`,
+			stage.DeliveryID, revision, key, kind, reporterID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	insertEstimate := func(key string, sequence, revision int64, progress float64, basis string) error {
+		eventID := appendEnvelope(key, "stage_reported", stage.ReporterID)
+		var eventSequence int64
+		if err := database.QueryRow(`SELECT COALESCE(MAX(event_sequence),0)+1 FROM delivery_stage_events
+			WHERE attempt_id=? AND stage_key=? AND execution_number=?`, stage.AttemptID, stage.StageKey,
+			stage.ExecutionNumber).Scan(&eventSequence); err != nil {
+			t.Fatal(err)
+		}
+		_, err := database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,
+			event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,execution_start_stage_event_id,
+			source_sequence,estimate_revision,progress_percent,estimate_source,estimate_confidence,estimate_basis,
+			server_received_at) VALUES(?,?,?,?,?,?,?,'estimate',?,?,?,?,?,'external',.8,?,'2026-08-20T18:00:02Z')`,
+			stage.DeliveryID, stage.AttemptID, stage.StageKey, stage.ExecutionNumber, eventSequence,
+			stage.AuthorityEpoch, eventID, stage.ReporterID, stage.ExecutionStartEventID, sequence, revision, progress, basis)
+		return err
+	}
+	if err := insertEstimate("guard-seq-regress", 9, 3, 25, "bounded observation"); err == nil {
+		t.Fatal("external source sequence regressed from 10 to 9")
+	}
+	if err := insertEstimate("guard-rev-regress", 11, 1, 25, "bounded observation"); err == nil {
+		t.Fatal("estimate revision regressed from 2 to 1")
+	}
+	if err := insertEstimate("guard-rev-changed", 11, 2, 26, "bounded observation"); err == nil {
+		t.Fatal("changed same-revision estimate was accepted")
+	}
+	if err := insertEstimate("guard-rev-refresh", 11, 2, 25, "bounded observation"); err != nil {
+		t.Fatalf("field-exact same-revision refresh rejected: %v", err)
+	}
+
+	now = now.Add(time.Second)
+	reset, err := store.AuthorizeProgressReset(context.Background(), ProgressResetRequest{IssueID: issueID,
+		AttemptNumber: attempt.AttemptNumber, StageKey: StageSpecification, ExecutionNumber: stage.ExecutionNumber,
+		AuthorityEpoch: stage.AuthorityEpoch, Actor: Actor{Type: "user", OpaqueKey: "user:1"},
+		ReasonCode: "guard_reset", ReasonText: "Reset guarded progress", IdempotencyKey: "guard-reset"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resetID, authorityID, actorID int64
+	if err := database.QueryRow(`SELECT authority_stage_event_id FROM delivery_stage_latest
+		WHERE attempt_id=? AND stage_key=?`, stage.AttemptID, stage.StageKey).Scan(&resetID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT id FROM delivery_stage_events WHERE attempt_id=? AND stage_key=?
+		AND execution_number=? AND event_type='execution_started'`, stage.AttemptID, stage.StageKey,
+		stage.ExecutionNumber).Scan(&authorityID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT id FROM delivery_reporters WHERE delivery_id=? AND reporter_type='user'
+		AND opaque_key='user:1'`, stage.DeliveryID).Scan(&actorID); err != nil {
+		t.Fatal(err)
+	}
+	insertReset := func(key string, epoch, cutoff int64) error {
+		eventID := appendEnvelope(key, "progress_reset_authorized", actorID)
+		var eventSequence int64
+		if err := database.QueryRow(`SELECT COALESCE(MAX(event_sequence),0)+1 FROM delivery_stage_events
+			WHERE attempt_id=? AND stage_key=? AND execution_number=?`, stage.AttemptID, stage.StageKey,
+			stage.ExecutionNumber).Scan(&eventSequence); err != nil {
+			t.Fatal(err)
+		}
+		_, err := database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,
+			event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,execution_start_stage_event_id,
+			previous_stage_event_id,reset_epoch,reset_source_cutoff,reset_source_kind,
+			reset_authority_anchor_stage_event_id,reset_owner_reporter_id,reason_code,reason_text,server_received_at)
+			VALUES(?,?,?,?,?,?,?,'progress_reset_authorized',?,?,?,?,?,'stage_events',?,?,
+			'guard_reset','Reset guarded progress','2026-08-20T18:00:03Z')`, stage.DeliveryID, stage.AttemptID,
+			stage.StageKey, stage.ExecutionNumber, eventSequence, stage.AuthorityEpoch, eventID, actorID,
+			stage.ExecutionStartEventID, resetID, epoch, cutoff, authorityID, stage.ReporterID)
+		return err
+	}
+	if err := insertReset("guard-reset-low", 2, 10); err == nil {
+		t.Fatal("reset below exact source high-water was accepted")
+	}
+	if err := insertReset("guard-reset-epoch", 3, 11); err == nil {
+		t.Fatal("non-monotone reset epoch was accepted")
+	}
+	if err := insertReset("guard-reset-valid", 2, 11); err != nil {
+		t.Fatalf("exact reset boundary rejected: %v (first reset=%+v)", err, reset)
+	}
+
+	now = now.Add(time.Second)
+	retry, err := store.StartStageRetry(context.Background(), StageStartRequest{IssueID: issueID,
+		AttemptNumber: attempt.AttemptNumber, StageKey: StageSpecification, Reporter: reporter,
+		ReasonCode: "specification_retry", IdempotencyKey: "guard-retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO delivery_stage_durations(stage_execution_id,terminal_stage_event_id,
+		delivery_id,root_issue_id,attempt_id,stage_key,execution_number,project_id_at_completion,
+		estimator_policy_version,full_lead_seconds,active_seconds,blocked_seconds,human_wait_seconds,completed_at)
+		VALUES(?,?,?,?,?,? ,?,?,1,0,0,0,0,'2026-08-20T18:00:04Z')`, retry.ExecutionStartEventID,
+		retry.ExecutionStartEventID, retry.DeliveryID, issueID, retry.AttemptID, retry.StageKey,
+		retry.ExecutionNumber, projectID); err == nil {
+		t.Fatal("pending execution produced a duration sample")
+	}
+	digest, err := canonicalIssueSpecDigest(context.Background(), database, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	if _, err := store.ReportStage(context.Background(), StageReport{IssueID: issueID,
+		AttemptNumber: attempt.AttemptNumber, StageKey: StageSpecification, ExecutionNumber: retry.ExecutionNumber,
+		AuthorityEpoch: retry.AuthorityEpoch, Reporter: reporter, IdempotencyKey: "guard-success", SourceSequence: int64ptr(12),
+		Kind: "semantic", State: "succeeded", Evidence: []Evidence{{Type: "approval", Outcome: "passed",
+			ReferenceKind: "digest", DigestSHA256: digest}}}); err != nil {
+		t.Fatal(err)
+	}
+	var durations int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_stage_durations WHERE stage_execution_id=?
+		AND terminal_stage_event_id<>stage_execution_id`, retry.ExecutionStartEventID).Scan(&durations); err != nil || durations != 1 {
+		t.Fatalf("valid exact duration count=%d err=%v", durations, err)
+	}
+	if _, err := database.Exec(`INSERT INTO delivery_stage_durations(stage_execution_id,terminal_stage_event_id,
+		delivery_id,root_issue_id,attempt_id,stage_key,execution_number,project_id_at_completion,
+		estimator_policy_version,full_lead_seconds,active_seconds,blocked_seconds,human_wait_seconds,completed_at)
+		SELECT stage_execution_id,terminal_stage_event_id,delivery_id,root_issue_id,attempt_id,stage_key,
+		execution_number,project_id_at_completion,estimator_policy_version,full_lead_seconds,active_seconds,
+		blocked_seconds,human_wait_seconds,completed_at FROM delivery_stage_durations
+		WHERE stage_execution_id=?`, retry.ExecutionStartEventID); err == nil {
+		t.Fatal("successful execution accepted a second duration sample")
+	}
 }
 
 func TestLateSupersededRunOutcomeIsHistoryOnly(t *testing.T) {
-	for _, supersession := range []string{"retry", "spec_edit", "project_move"} {
+	for _, supersession := range []string{"retry", "upstream_retry", "spec_edit", "project_move"} {
 		for _, outcome := range []string{"tests_passed", "failed", "cancelled"} {
 			t.Run(supersession+"_"+outcome, func(t *testing.T) {
 				database := openDeliveryTestDB(t)
@@ -809,6 +1266,13 @@ func TestLateSupersededRunOutcomeIsHistoryOnly(t *testing.T) {
 						AttemptNumber: linkedStage.AttemptNumber, StageKey: StageImplementation,
 						Reporter: Actor{Type: "external", OpaqueKey: "replacement:owner"}, ReasonCode: "implementation_retry",
 						IdempotencyKey: "late-retry"}); err != nil {
+						t.Fatal(err)
+					}
+				case "upstream_retry":
+					if _, err := store.StartStageRetry(context.Background(), StageStartRequest{IssueID: issueID,
+						AttemptNumber: linkedStage.AttemptNumber, StageKey: StageSpecification,
+						Reporter: Actor{Type: "external", OpaqueKey: "replacement:specification"}, ReasonCode: "specification_retry",
+						IdempotencyKey: "late-upstream-retry"}); err != nil {
 						t.Fatal(err)
 					}
 				case "spec_edit":

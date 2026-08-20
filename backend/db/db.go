@@ -5854,31 +5854,55 @@ func migrate(db *sql.DB) error {
 			 ON agent_run_telemetry(run_id, estimate_revision DESC, sequence DESC)
 			 WHERE estimate_revision IS NOT NULL`,
 
-			`CREATE TABLE IF NOT EXISTS delivery_root_delete_context (
-				singleton INTEGER PRIMARY KEY CHECK(singleton=1),
-				issue_id  INTEGER
-			)`,
-			`INSERT OR IGNORE INTO delivery_root_delete_context(singleton, issue_id) VALUES(1, NULL)`,
 			`CREATE TABLE IF NOT EXISTS delivery_forbidden_value_patterns (
-				pattern TEXT PRIMARY KEY
+				pattern TEXT PRIMARY KEY,
+				normalize_horizontal_whitespace INTEGER NOT NULL DEFAULT 0 CHECK(normalize_horizontal_whitespace IN (0,1)),
+				case_sensitive INTEGER NOT NULL DEFAULT 0 CHECK(case_sensitive IN (0,1)),
+				boundary_needle TEXT NOT NULL DEFAULT '',
+				require_bearer_whitespace INTEGER NOT NULL DEFAULT 0 CHECK(require_bearer_whitespace IN (0,1))
 			) WITHOUT ROWID`,
-			`INSERT OR IGNORE INTO delivery_forbidden_value_patterns(pattern) VALUES
-				('*api_key[=:/_-][0-9a-z._~+/=-]*'),('*api-key[=:/_-][0-9a-z._~+/=-]*'),
-				('*apikey[=:/_-][0-9a-z._~+/=-]*'),('*token[=:/_-][0-9a-z._~+/=-]*'),
-				('*secret[=:/_-][0-9a-z._~+/=-]*'),('*password[=:/_-][0-9a-z._~+/=-]*'),
-				('*credential[=:/_-][0-9a-z._~+/=-]*'),('*bearer *'),
-				('*sk-live-*'),('*sk_live_*'),('*sk-test-*'),('*sk_test_*'),('*sk-proj-*'),('*sk_proj_*'),
-				('*ghp_[0-9a-z]*'),('*gho_[0-9a-z]*'),('*ghu_[0-9a-z]*'),('*ghs_[0-9a-z]*'),
-				('*ghr_[0-9a-z]*'),('*github_pat_[0-9a-z_]*'),
-				('*xoxb-[0-9a-z]*'),('*xoxa-[0-9a-z]*'),('*xoxp-[0-9a-z]*'),
-				('*xoxr-[0-9a-z]*'),('*xoxs-[0-9a-z]*'),
-				('*akia[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*'),
-				('*aiza[0-9a-z_-]*'),('*eyj*.*.*'),('*-----begin *private key-----*')`,
+			`INSERT OR IGNORE INTO delivery_forbidden_value_patterns(
+			 pattern,normalize_horizontal_whitespace,case_sensitive,boundary_needle,require_bearer_whitespace) VALUES
+				('*api_key[=:]*',1,0,'api_key',0),('*api-key[=:]*',1,0,'api-key',0),
+				('*apikey[=:]*',1,0,'apikey',0),('*token[=:]*',1,0,'token',0),
+				('*secret[=:]*',1,0,'secret',0),('*password[=:]*',1,0,'password',0),
+				('*credential[=:]*',1,0,'credential',0),
+				('*api_key[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'api_key',0),
+				('*api-key[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'api-key',0),
+				('*apikey[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'apikey',0),
+				('*token[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'token',0),
+				('*secret[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'secret',0),
+				('*password[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'password',0),
+				('*credential[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'credential',0),
+				('*bearer[0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'bearer',1),
+				('*sk-live-[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*sk_live_[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*sk-test-[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*sk_test_[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*sk-proj-[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*sk_proj_[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*ghp_[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*',0,0,'ghp_',0),
+				('*gho_[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*',0,0,'gho_',0),
+				('*ghu_[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*',0,0,'ghu_',0),
+				('*ghs_[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*',0,0,'ghs_',0),
+				('*ghr_[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*',0,0,'ghr_',0),
+				('*github_pat_[0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_]*',0,0,'github_pat_',0),
+				('*xoxb-[0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-]*',0,0,'xoxb-',0),
+				('*xoxa-[0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-]*',0,0,'xoxa-',0),
+				('*xoxp-[0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-]*',0,0,'xoxp-',0),
+				('*xoxr-[0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-]*',0,0,'xoxr-',0),
+				('*xoxs-[0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-]*',0,0,'xoxs-',0),
+				('*AKIA[0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z]',0,1,'AKIA',0),
+				('*AKIA[0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][^0-9A-Za-z_]*',0,1,'AKIA',0),
+				('*AIza[0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-]*',0,1,'AIza',0),
+				('*eyJ[0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-].[0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-].[0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-]*',0,1,'eyJ',0),
+				('*-----BEGIN *PRIVATE KEY-----*',0,1,'',0)`,
 
 			`CREATE TABLE IF NOT EXISTS deliveries (
 				id                 INTEGER PRIMARY KEY AUTOINCREMENT,
 				issue_id           INTEGER NOT NULL UNIQUE REFERENCES issues(id) ON DELETE CASCADE,
-				delivery_key       TEXT NOT NULL UNIQUE CHECK(length(delivery_key) BETWEEN 7 AND 80),
+				delivery_key       TEXT NOT NULL UNIQUE CHECK(length(CAST(delivery_key AS BLOB)) BETWEEN 7 AND 80)
+				 CHECK(delivery_key GLOB '[A-Za-z0-9]*' AND delivery_key NOT GLOB '*[^A-Za-z0-9._:/-]*'),
 				project_id_hint    INTEGER REFERENCES projects(id) ON DELETE SET NULL,
 				spec_revision      INTEGER NOT NULL DEFAULT 1 CHECK(spec_revision > 0),
 				change_sequence_high_water INTEGER NOT NULL DEFAULT 0 CHECK(change_sequence_high_water >= 0),
@@ -5892,7 +5916,8 @@ func migrate(db *sql.DB) error {
 				id             INTEGER PRIMARY KEY AUTOINCREMENT,
 				delivery_id    INTEGER NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
 				reporter_type  TEXT NOT NULL CHECK(reporter_type IN ('user','agent_run','external','system')),
-				opaque_key     TEXT NOT NULL CHECK(length(opaque_key) BETWEEN 1 AND 128),
+				opaque_key     TEXT NOT NULL CHECK(length(CAST(opaque_key AS BLOB)) BETWEEN 1 AND 128)
+				 CHECK(opaque_key GLOB '[A-Za-z0-9]*' AND opaque_key NOT GLOB '*[^A-Za-z0-9._:/-]*'),
 				created_at     TEXT NOT NULL,
 				UNIQUE(delivery_id, reporter_type, opaque_key),
 				UNIQUE(delivery_id, id)
@@ -5902,20 +5927,23 @@ func migrate(db *sql.DB) error {
 				id                 INTEGER PRIMARY KEY AUTOINCREMENT,
 				delivery_id        INTEGER NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
 				delivery_revision  INTEGER NOT NULL CHECK(delivery_revision > 0),
-				idempotency_key    TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 128),
+				idempotency_key    TEXT NOT NULL CHECK(length(CAST(idempotency_key AS BLOB)) BETWEEN 1 AND 128)
+				 CHECK(idempotency_key GLOB '[A-Za-z0-9]*' AND idempotency_key NOT GLOB '*[^A-Za-z0-9._:/-]*'),
 				payload_hash       BLOB NOT NULL CHECK(length(payload_hash)=32),
 				kind               TEXT NOT NULL CHECK(kind IN (
 					'delivery_created','attempt_started','stage_execution_started','stage_reported',
 					'handoff','progress_reset_authorized','run_linked','run_normalized',
 					'run_lifecycle_observed','project_moved'
 				)),
-				reporter_id        INTEGER,
-				reason_code        TEXT NOT NULL DEFAULT '' CHECK(length(reason_code) <= 64),
+				reporter_id        INTEGER NOT NULL,
+				reason_code        TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_code AS BLOB)) <= 64)
+				 CHECK(reason_code='' OR (reason_code GLOB '[a-z]*' AND reason_code NOT GLOB '*[^a-z0-9_]*')),
 				reason_text        TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_text AS BLOB)) <= 280),
 				server_received_at TEXT NOT NULL,
 				UNIQUE(delivery_id, delivery_revision),
-				UNIQUE(delivery_id, idempotency_key),
+				UNIQUE(delivery_id, reporter_id, kind, idempotency_key),
 				UNIQUE(delivery_id, id),
+				UNIQUE(delivery_id, id, reporter_id),
 				FOREIGN KEY(delivery_id, reporter_id)
 				 REFERENCES delivery_reporters(delivery_id, id) DEFERRABLE INITIALLY DEFERRED
 			)`,
@@ -5929,7 +5957,8 @@ func migrate(db *sql.DB) error {
 				previous_attempt_id   INTEGER,
 				start_delivery_event_id INTEGER NOT NULL,
 				project_id_at_start   INTEGER,
-				reason_code           TEXT NOT NULL CHECK(length(reason_code) BETWEEN 1 AND 64),
+				reason_code           TEXT NOT NULL CHECK(length(CAST(reason_code AS BLOB)) BETWEEN 1 AND 64)
+				 CHECK(reason_code GLOB '[a-z]*' AND reason_code NOT GLOB '*[^a-z0-9_]*'),
 				reason_text           TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_text AS BLOB)) <= 280),
 				created_at            TEXT NOT NULL,
 				UNIQUE(delivery_id, attempt_number),
@@ -5949,8 +5978,10 @@ func migrate(db *sql.DB) error {
 				sort_order        INTEGER NOT NULL CHECK(sort_order BETWEEN 1 AND 5),
 				applicability     TEXT NOT NULL CHECK(applicability IN ('required','not_applicable')),
 				weight            INTEGER NOT NULL CHECK(weight BETWEEN 0 AND 100),
-				policy_reference  TEXT NOT NULL DEFAULT '' CHECK(length(policy_reference) <= 160),
-				reason_code       TEXT NOT NULL DEFAULT '' CHECK(length(reason_code) <= 64),
+				policy_reference  TEXT NOT NULL DEFAULT '' CHECK(length(CAST(policy_reference AS BLOB)) <= 160)
+				 CHECK(policy_reference='' OR (policy_reference GLOB '[A-Za-z0-9]*' AND policy_reference NOT GLOB '*[^A-Za-z0-9._:/@+-]*')),
+				reason_code       TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_code AS BLOB)) <= 64)
+				 CHECK(reason_code='' OR (reason_code GLOB '[a-z]*' AND reason_code NOT GLOB '*[^a-z0-9_]*')),
 				reason_text       TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_text AS BLOB)) <= 280),
 				authorized_by_reporter_id INTEGER,
 				created_at        TEXT NOT NULL,
@@ -5962,6 +5993,14 @@ func migrate(db *sql.DB) error {
 				 REFERENCES delivery_reporters(delivery_id, id) DEFERRABLE INITIALLY DEFERRED,
 				CHECK(applicability='required' OR
 				      (policy_reference<>'' AND reason_code<>'' AND authorized_by_reporter_id IS NOT NULL))
+			)`,
+			`CREATE TABLE IF NOT EXISTS delivery_attempt_policy_seals (
+				delivery_id INTEGER NOT NULL,
+				attempt_id  INTEGER PRIMARY KEY,
+				sealed_at   TEXT NOT NULL,
+				UNIQUE(delivery_id, attempt_id),
+				FOREIGN KEY(delivery_id, attempt_id)
+				 REFERENCES delivery_attempts(delivery_id, id) ON DELETE CASCADE
 			)`,
 
 			`CREATE TABLE IF NOT EXISTS delivery_stage_events (
@@ -5984,7 +6023,9 @@ func migrate(db *sql.DB) error {
 				retry_of_stage_event_id  INTEGER,
 				handoff_from_reporter_id INTEGER,
 				source_sequence          INTEGER CHECK(source_sequence > 0),
-				source_idempotency_key   TEXT CHECK(source_idempotency_key IS NULL OR length(source_idempotency_key) BETWEEN 1 AND 128),
+				source_idempotency_key   TEXT CHECK(source_idempotency_key IS NULL OR
+				 (length(CAST(source_idempotency_key AS BLOB)) BETWEEN 1 AND 128 AND
+				  source_idempotency_key GLOB '[A-Za-z0-9]*' AND source_idempotency_key NOT GLOB '*[^A-Za-z0-9._:/-]*')),
 				source_payload_hash      BLOB CHECK(source_payload_hash IS NULL OR length(source_payload_hash)=32),
 				authority_source_sequence_cutoff INTEGER CHECK(authority_source_sequence_cutoff >= 0),
 				semantic_state           TEXT CHECK(semantic_state IN ('pending','active','waiting','succeeded','failed','cancelled','draft_ready','unknown')),
@@ -6010,7 +6051,8 @@ func migrate(db *sql.DB) error {
 				reset_telemetry_sequence_cutoff INTEGER CHECK(reset_telemetry_sequence_cutoff >= 0),
 				reset_authority_anchor_stage_event_id INTEGER,
 				reset_owner_reporter_id  INTEGER,
-				reason_code              TEXT NOT NULL DEFAULT '' CHECK(length(reason_code) <= 64),
+				reason_code              TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_code AS BLOB)) <= 64)
+				 CHECK(reason_code='' OR (reason_code GLOB '[a-z]*' AND reason_code NOT GLOB '*[^a-z0-9_]*')),
 				reason_text              TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_text AS BLOB)) <= 280),
 				server_received_at       TEXT NOT NULL,
 				ended_at                 TEXT,
@@ -6022,8 +6064,8 @@ func migrate(db *sql.DB) error {
 				UNIQUE(attempt_id, stage_key, execution_number, event_sequence),
 				FOREIGN KEY(delivery_id, attempt_id)
 				 REFERENCES delivery_attempts(delivery_id, id) ON DELETE CASCADE,
-				FOREIGN KEY(delivery_id, delivery_event_id)
-				 REFERENCES delivery_events(delivery_id, id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, delivery_event_id, reporter_id)
+				 REFERENCES delivery_events(delivery_id, id, reporter_id) ON DELETE CASCADE,
 				FOREIGN KEY(delivery_id, reporter_id)
 				 REFERENCES delivery_reporters(delivery_id, id),
 				FOREIGN KEY(delivery_id, previous_stage_event_id)
@@ -6041,8 +6083,9 @@ func migrate(db *sql.DB) error {
 				 reset_authority_anchor_stage_event_id)
 				 REFERENCES delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,authority_epoch,reporter_id,id)
 				 DEFERRABLE INITIALLY DEFERRED,
-				CHECK((event_type='execution_started' AND delivery_event_id IS NOT NULL AND source_idempotency_key IS NULL AND source_payload_hash IS NULL AND semantic_state='active' AND
-				       execution_start_stage_event_id IS NULL AND source_sequence IS NULL AND authority_source_sequence_cutoff=0 AND handoff_from_reporter_id IS NULL AND
+				CHECK((event_type='execution_started' AND delivery_event_id IS NOT NULL AND source_idempotency_key IS NULL AND source_payload_hash IS NULL AND
+				       semantic_state IS NOT NULL AND semantic_state='active' AND execution_start_stage_event_id IS NULL AND source_sequence IS NULL AND
+				       authority_source_sequence_cutoff IS NOT NULL AND authority_source_sequence_cutoff=0 AND handoff_from_reporter_id IS NULL AND
 				       activity='' AND needs_input=0 AND declared_blocker_count=0 AND current_blocker_count=0 AND declared_evidence_count=0 AND
 				       heartbeat=0 AND estimate_revision IS NULL AND progress_percent IS NULL AND eta_seconds IS NULL AND
 				       eta_min_seconds IS NULL AND eta_max_seconds IS NULL AND estimate_source='' AND estimate_confidence IS NULL AND
@@ -6062,7 +6105,8 @@ func migrate(db *sql.DB) error {
 				        declared_blocker_count=0 AND current_blocker_count=0)) AND
 				       ((semantic_state IN ('succeeded','failed','cancelled','draft_ready') AND ended_at IS NOT NULL) OR
 				        (semantic_state IN ('pending','active','waiting','unknown') AND ended_at IS NULL))) OR
-				      (event_type='heartbeat' AND delivery_event_id IS NULL AND source_idempotency_key IS NOT NULL AND source_payload_hash IS NOT NULL AND heartbeat=1 AND execution_start_stage_event_id IS NOT NULL AND semantic_state IS NULL AND
+				      (event_type='heartbeat' AND delivery_event_id IS NULL AND source_idempotency_key IS NOT NULL AND source_payload_hash IS NOT NULL AND
+				       source_sequence IS NOT NULL AND heartbeat=1 AND execution_start_stage_event_id IS NOT NULL AND semantic_state IS NULL AND
 				       based_on_stage_event_id IS NULL AND retry_of_stage_event_id IS NULL AND handoff_from_reporter_id IS NULL AND authority_source_sequence_cutoff IS NULL AND
 				       activity='' AND needs_input=0 AND declared_blocker_count=0 AND current_blocker_count=0 AND declared_evidence_count=0 AND
 				       estimate_revision IS NULL AND progress_percent IS NULL AND eta_seconds IS NULL AND eta_min_seconds IS NULL AND
@@ -6115,7 +6159,8 @@ func migrate(db *sql.DB) error {
 				delivery_id       INTEGER NOT NULL,
 				stage_event_id    INTEGER NOT NULL,
 				ordinal           INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 15),
-				blocker_key       TEXT NOT NULL CHECK(length(blocker_key) BETWEEN 1 AND 96),
+				blocker_key       TEXT NOT NULL CHECK(length(CAST(blocker_key AS BLOB)) BETWEEN 1 AND 96)
+				 CHECK(blocker_key GLOB '[A-Za-z0-9]*' AND blocker_key NOT GLOB '*[^A-Za-z0-9._:/-]*'),
 				blocker_class     TEXT NOT NULL CHECK(blocker_class IN ('input','dependency','permission','environment','external','unknown')),
 				summary           TEXT NOT NULL DEFAULT '' CHECK(length(CAST(summary AS BLOB)) <= 280),
 				is_current        INTEGER NOT NULL CHECK(is_current IN (0,1)),
@@ -6139,8 +6184,9 @@ func migrate(db *sql.DB) error {
 				)),
 				outcome           TEXT NOT NULL CHECK(outcome IN ('passed','failed','unknown')),
 				reference_kind    TEXT NOT NULL CHECK(reference_kind IN ('digest','commit','attachment','external_ref','none')),
-				reference_value   TEXT NOT NULL DEFAULT '' CHECK(length(reference_value) <= 192),
-				digest_sha256     TEXT NOT NULL DEFAULT '' CHECK(digest_sha256='' OR (length(digest_sha256)=64 AND digest_sha256 NOT GLOB '*[^0-9a-f]*')),
+				reference_value   TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reference_value AS BLOB)) <= 192)
+				 CHECK(reference_value='' OR (reference_value GLOB '[A-Za-z0-9]*' AND reference_value NOT GLOB '*[^A-Za-z0-9._:/@+-]*')),
+				digest_sha256     TEXT NOT NULL DEFAULT '' CHECK(digest_sha256='' OR (length(CAST(digest_sha256 AS BLOB))=64 AND digest_sha256 NOT GLOB '*[^0-9a-f]*')),
 				attachment_id     INTEGER,
 				created_at        TEXT NOT NULL,
 				PRIMARY KEY(stage_event_id, ordinal),
@@ -6178,8 +6224,8 @@ func migrate(db *sql.DB) error {
 				 REFERENCES delivery_stage_events(delivery_id, attempt_id, stage_key, execution_number, id),
 				FOREIGN KEY(delivery_id, reporter_id)
 				 REFERENCES delivery_reporters(delivery_id, id),
-				FOREIGN KEY(delivery_id, link_delivery_event_id)
-				 REFERENCES delivery_events(delivery_id, id)
+				FOREIGN KEY(delivery_id, link_delivery_event_id, reporter_id)
+				 REFERENCES delivery_events(delivery_id, id, reporter_id)
 			)`,
 			`CREATE INDEX IF NOT EXISTS idx_delivery_agent_run_execution
 				 ON delivery_agent_run_links(attempt_id, stage_key, execution_number, agent_run_id)`,
@@ -6240,6 +6286,7 @@ func migrate(db *sql.DB) error {
 
 			`CREATE TABLE IF NOT EXISTS delivery_stage_durations (
 				stage_execution_id       INTEGER PRIMARY KEY,
+				terminal_stage_event_id  INTEGER NOT NULL,
 				delivery_id              INTEGER NOT NULL,
 				root_issue_id            INTEGER NOT NULL,
 				attempt_id               INTEGER NOT NULL,
@@ -6252,11 +6299,14 @@ func migrate(db *sql.DB) error {
 				blocked_seconds          INTEGER NOT NULL CHECK(blocked_seconds >= 0),
 				human_wait_seconds       INTEGER NOT NULL CHECK(human_wait_seconds >= 0),
 				completed_at             TEXT NOT NULL,
+				UNIQUE(delivery_id, attempt_id, stage_key, execution_number),
 				FOREIGN KEY(delivery_id, root_issue_id)
 				 REFERENCES deliveries(id, issue_id) ON DELETE CASCADE,
 				FOREIGN KEY(delivery_id, attempt_id)
 				 REFERENCES delivery_attempts(delivery_id, id) ON DELETE CASCADE,
 				FOREIGN KEY(delivery_id, attempt_id, stage_key, execution_number, stage_execution_id)
+				 REFERENCES delivery_stage_events(delivery_id, attempt_id, stage_key, execution_number, id),
+				FOREIGN KEY(delivery_id, attempt_id, stage_key, execution_number, terminal_stage_event_id)
 				 REFERENCES delivery_stage_events(delivery_id, attempt_id, stage_key, execution_number, id),
 				CHECK(full_lead_seconds=active_seconds+blocked_seconds+human_wait_seconds)
 			)`,
@@ -6264,17 +6314,16 @@ func migrate(db *sql.DB) error {
 			 ON delivery_stage_durations(project_id_at_completion, stage_key, estimator_policy_version, completed_at DESC, stage_execution_id DESC)`,
 
 			`CREATE TABLE IF NOT EXISTS delivery_change_retention (
-				singleton       INTEGER PRIMARY KEY CHECK(singleton=1),
-				floor_id        INTEGER NOT NULL DEFAULT 0 CHECK(floor_id >= 0),
+				floor_id        INTEGER PRIMARY KEY CHECK(floor_id >= 0),
 				advanced_at     TEXT
 			)`,
-			`INSERT OR IGNORE INTO delivery_change_retention(singleton, floor_id) VALUES(1, 0)`,
+			`INSERT OR IGNORE INTO delivery_change_retention(floor_id) VALUES(0)`,
 			`CREATE TABLE IF NOT EXISTS delivery_change_log (
 				id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-				cursor_token       TEXT NOT NULL UNIQUE CHECK(length(cursor_token)=32 AND cursor_token NOT GLOB '*[^0-9a-f]*'),
+				cursor_token       TEXT NOT NULL UNIQUE CHECK(length(CAST(cursor_token AS BLOB))=32 AND cursor_token NOT GLOB '*[^0-9a-f]*'),
 				delivery_id        INTEGER NOT NULL,
 				root_issue_id      INTEGER NOT NULL,
-				delivery_key       TEXT NOT NULL CHECK(length(delivery_key) BETWEEN 7 AND 80),
+				delivery_key       TEXT NOT NULL CHECK(length(CAST(delivery_key AS BLOB)) BETWEEN 7 AND 80),
 				project_id_hint    INTEGER,
 				change_sequence    INTEGER NOT NULL CHECK(change_sequence > 0),
 				delivery_revision  INTEGER NOT NULL CHECK(delivery_revision >= 0),
@@ -6301,6 +6350,16 @@ func migrate(db *sql.DB) error {
 				 WHEN NEW.change_sequence <> COALESCE((SELECT change_sequence_high_water+1 FROM deliveries WHERE id=NEW.delivery_id),
 					COALESCE((SELECT MAX(change_sequence)+1 FROM delivery_change_log WHERE delivery_id=NEW.delivery_id),1))
 				 BEGIN SELECT RAISE(ABORT, 'delivery change sequence is not contiguous'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_provenance_guard
+				 BEFORE INSERT ON delivery_change_log WHEN
+				  NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.id=NEW.delivery_id
+				   AND d.issue_id=NEW.root_issue_id AND d.delivery_key=NEW.delivery_key
+				   AND d.project_id_hint IS NEW.project_id_hint) OR
+				  (NEW.kind='root_deleted' AND (EXISTS(SELECT 1 FROM issues i WHERE i.id=NEW.root_issue_id)
+				   OR EXISTS(SELECT 1 FROM delivery_change_log prior WHERE prior.delivery_id=NEW.delivery_id
+				    AND prior.kind='root_deleted'))) OR
+				  (NEW.kind<>'root_deleted' AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.id=NEW.root_issue_id))
+				 BEGIN SELECT RAISE(ABORT, 'delivery change provenance does not match its live root'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_advance_high_water
 				 AFTER INSERT ON delivery_change_log
 				 WHEN EXISTS(SELECT 1 FROM deliveries WHERE id=NEW.delivery_id)
@@ -6321,6 +6380,9 @@ func migrate(db *sql.DB) error {
 				 (SELECT COUNT(*) FROM delivery_stage_blockers WHERE stage_event_id=NEW.semantic_stage_event_id AND is_current=1) OR
 				(SELECT declared_evidence_count FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id) <>
 				 (SELECT COUNT(*) FROM delivery_evidence WHERE stage_event_id=NEW.semantic_stage_event_id) OR
+				((SELECT needs_input FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)=1 AND
+				 NOT EXISTS(SELECT 1 FROM delivery_stage_blockers WHERE stage_event_id=NEW.semantic_stage_event_id
+				  AND is_current=1 AND is_human_wait=1)) OR
 				((SELECT semantic_state FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)='succeeded' AND
 				 NOT EXISTS(SELECT 1 FROM delivery_evidence WHERE stage_event_id=NEW.semantic_stage_event_id AND outcome='passed')) OR
 				((SELECT semantic_state FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)<>'succeeded' AND
@@ -6335,6 +6397,9 @@ func migrate(db *sql.DB) error {
 				 (SELECT COUNT(*) FROM delivery_stage_blockers WHERE stage_event_id=NEW.semantic_stage_event_id AND is_current=1) OR
 				(SELECT declared_evidence_count FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id) <>
 				 (SELECT COUNT(*) FROM delivery_evidence WHERE stage_event_id=NEW.semantic_stage_event_id) OR
+				((SELECT needs_input FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)=1 AND
+				 NOT EXISTS(SELECT 1 FROM delivery_stage_blockers WHERE stage_event_id=NEW.semantic_stage_event_id
+				  AND is_current=1 AND is_human_wait=1)) OR
 				((SELECT semantic_state FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)='succeeded' AND
 				 NOT EXISTS(SELECT 1 FROM delivery_evidence WHERE stage_event_id=NEW.semantic_stage_event_id AND outcome='passed')) OR
 				((SELECT semantic_state FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)<>'succeeded' AND
@@ -6435,7 +6500,7 @@ func migrate(db *sql.DB) error {
 				 BEFORE INSERT ON delivery_evidence WHEN NEW.outcome='passed' AND (
 					NEW.reference_kind='none' OR
 					(NEW.reference_kind='external_ref' AND NEW.reference_value='') OR
-					(NEW.reference_kind='commit' AND (length(NEW.reference_value) NOT IN (40,64)
+					(NEW.reference_kind='commit' AND (length(CAST(NEW.reference_value AS BLOB)) NOT IN (40,64)
 					 OR NEW.reference_value GLOB '*[^0-9a-f]*')) OR
 					(NEW.reference_kind='digest' AND NEW.digest_sha256='')
 				 ) BEGIN SELECT RAISE(ABORT, 'delivery passed evidence is not proof-bearing'); END`,
@@ -6445,13 +6510,37 @@ func migrate(db *sql.DB) error {
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_forbidden_patterns_no_delete
 				 BEFORE DELETE ON delivery_forbidden_value_patterns
 				 BEGIN SELECT RAISE(ABORT, 'delivery forbidden patterns are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_forbidden_patterns_no_insert
+				 BEFORE INSERT ON delivery_forbidden_value_patterns WHEN NOT EXISTS(
+				  SELECT 1 FROM delivery_forbidden_value_patterns existing WHERE existing.pattern=NEW.pattern
+				   AND existing.normalize_horizontal_whitespace=NEW.normalize_horizontal_whitespace
+				   AND existing.case_sensitive=NEW.case_sensitive AND existing.boundary_needle=NEW.boundary_needle
+				   AND existing.require_bearer_whitespace=NEW.require_bearer_whitespace)
+				 BEGIN SELECT RAISE(ABORT, 'delivery forbidden patterns are migration-owned'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reporter_secret_guard
 				 BEFORE INSERT ON delivery_reporters WHEN EXISTS (
 				  SELECT 1 FROM json_each(json_array(NEW.opaque_key)) value
 				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
 				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
 				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
-				    WHERE lower(CAST(value.value AS TEXT)) GLOB forbidden.pattern)
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
 				   OR instr(CAST(value.value AS TEXT),'?')>0
 				   OR (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)
 				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery reporter value'); END`,
@@ -6461,7 +6550,24 @@ func migrate(db *sql.DB) error {
 				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
 				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
 				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
-				    WHERE lower(CAST(value.value AS TEXT)) GLOB forbidden.pattern)
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
 				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery event value'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_attempt_secret_guard
 				 BEFORE INSERT ON delivery_attempts WHEN EXISTS (
@@ -6469,7 +6575,24 @@ func migrate(db *sql.DB) error {
 				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
 				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
 				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
-				    WHERE lower(CAST(value.value AS TEXT)) GLOB forbidden.pattern)
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
 				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery attempt value'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_secret_guard
 				 BEFORE INSERT ON delivery_attempt_stage_policy WHEN EXISTS (
@@ -6477,7 +6600,24 @@ func migrate(db *sql.DB) error {
 				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
 				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
 				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
-				    WHERE lower(CAST(value.value AS TEXT)) GLOB forbidden.pattern)
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
 				   OR (value.value=NEW.policy_reference AND (instr(CAST(value.value AS TEXT),'?')>0 OR
 				    (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)))
 				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery policy value'); END`,
@@ -6488,7 +6628,24 @@ func migrate(db *sql.DB) error {
 				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
 				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
 				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
-				    WHERE lower(CAST(value.value AS TEXT)) GLOB forbidden.pattern)
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
 				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery stage value'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_blocker_secret_guard
 				 BEFORE INSERT ON delivery_stage_blockers WHEN EXISTS (
@@ -6496,7 +6653,24 @@ func migrate(db *sql.DB) error {
 				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
 				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
 				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
-				    WHERE lower(CAST(value.value AS TEXT)) GLOB forbidden.pattern)
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
 				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery blocker value'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_secret_guard
 				 BEFORE INSERT ON delivery_evidence WHEN EXISTS (
@@ -6504,16 +6678,80 @@ func migrate(db *sql.DB) error {
 				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
 				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
 				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
-				    WHERE lower(CAST(value.value AS TEXT)) GLOB forbidden.pattern)
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
 				   OR instr(CAST(value.value AS TEXT),'?')>0
 				   OR (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)
 				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery evidence value'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_policy_complete
 			 BEFORE INSERT ON delivery_stage_events
 			 WHEN NEW.event_type='execution_started' AND (
-				(SELECT COUNT(*) FROM delivery_attempt_stage_policy WHERE attempt_id=NEW.attempt_id)<>5 OR
-				(SELECT COUNT(*) FROM delivery_attempt_stage_policy WHERE attempt_id=NEW.attempt_id AND applicability='required')=0
+				NOT EXISTS(SELECT 1 FROM delivery_attempt_policy_seals seal
+				 WHERE seal.delivery_id=NEW.delivery_id AND seal.attempt_id=NEW.attempt_id)
 				 ) BEGIN SELECT RAISE(ABORT, 'delivery attempt policy is incomplete'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_policy_applicable
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='execution_started'
+				  AND COALESCE((SELECT policy.applicability FROM delivery_attempt_stage_policy policy
+				   WHERE policy.delivery_id=NEW.delivery_id AND policy.attempt_id=NEW.attempt_id
+				    AND policy.stage_key=NEW.stage_key),'')<>'required'
+				 BEGIN SELECT RAISE(ABORT, 'delivery execution cannot start for an inapplicable stage'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_attempt_envelope_kind
+				 BEFORE INSERT ON delivery_attempts WHEN COALESCE((SELECT event.kind FROM delivery_events event
+				  WHERE event.delivery_id=NEW.delivery_id AND event.id=NEW.start_delivery_event_id),'')<>'attempt_started'
+				 BEGIN SELECT RAISE(ABORT, 'delivery attempt start envelope kind is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_envelope_kind
+				 BEFORE INSERT ON delivery_stage_events WHEN
+				  (NEW.event_type='heartbeat' AND NEW.delivery_event_id IS NOT NULL) OR
+				  (NEW.event_type<>'heartbeat' AND COALESCE((SELECT event.kind FROM delivery_events event
+				   WHERE event.delivery_id=NEW.delivery_id AND event.id=NEW.delivery_event_id),'')<>
+				   CASE NEW.event_type
+				    WHEN 'execution_started' THEN 'stage_execution_started'
+				    WHEN 'semantic_report' THEN 'stage_reported'
+				    WHEN 'estimate' THEN 'stage_reported'
+				    WHEN 'handoff' THEN 'handoff'
+				    WHEN 'progress_reset_authorized' THEN 'progress_reset_authorized'
+				    WHEN 'lifecycle_normalized' THEN 'run_normalized'
+				   END)
+				 BEGIN SELECT RAISE(ABORT, 'delivery stage envelope kind is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_link_envelope_kind
+				 BEFORE INSERT ON delivery_agent_run_links WHEN COALESCE((SELECT event.kind FROM delivery_events event
+				  WHERE event.delivery_id=NEW.delivery_id AND event.id=NEW.link_delivery_event_id),'')<>'run_linked'
+				 BEGIN SELECT RAISE(ABORT, 'delivery run link envelope kind is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_stage_order
+			 BEFORE INSERT ON delivery_attempt_stage_policy WHEN NEW.sort_order<>CASE NEW.stage_key
+			  WHEN 'specification' THEN 1 WHEN 'implementation' THEN 2 WHEN 'qa' THEN 3
+			  WHEN 'deployment' THEN 4 WHEN 'verification' THEN 5 END
+			 BEGIN SELECT RAISE(ABORT, 'delivery policy stage order is not canonical'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_attempt_policy_seal_valid
+			 BEFORE INSERT ON delivery_attempt_policy_seals WHEN
+			  (SELECT COUNT(*) FROM delivery_attempt_stage_policy p
+			   WHERE p.delivery_id=NEW.delivery_id AND p.attempt_id=NEW.attempt_id)<>5 OR
+			  (SELECT COUNT(*) FROM delivery_attempt_stage_policy p
+			   WHERE p.delivery_id=NEW.delivery_id AND p.attempt_id=NEW.attempt_id
+			    AND p.applicability='required')=0 OR
+			  (SELECT COALESCE(SUM(p.weight),0) FROM delivery_attempt_stage_policy p
+			   WHERE p.delivery_id=NEW.delivery_id AND p.attempt_id=NEW.attempt_id)<>100 OR
+			  EXISTS(SELECT 1 FROM delivery_attempt_stage_policy p
+			   WHERE p.delivery_id=NEW.delivery_id AND p.attempt_id=NEW.attempt_id
+			    AND p.sort_order<>CASE p.stage_key WHEN 'specification' THEN 1 WHEN 'implementation' THEN 2
+			     WHEN 'qa' THEN 3 WHEN 'deployment' THEN 4 WHEN 'verification' THEN 5 END)
+			 BEGIN SELECT RAISE(ABORT, 'delivery attempt policy cannot be sealed'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_external_stage_source_sequence
 				 BEFORE INSERT ON delivery_stage_events
 				 WHEN NEW.event_type IN ('semantic_report','heartbeat','estimate')
@@ -6521,6 +6759,34 @@ func migrate(db *sql.DB) error {
 				  AND EXISTS(SELECT 1 FROM delivery_reporters r WHERE r.id=NEW.reporter_id
 				   AND r.delivery_id=NEW.delivery_id AND r.reporter_type='external')
 				 BEGIN SELECT RAISE(ABORT, 'external stage fact requires source sequence'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_external_stage_source_monotone
+				 BEFORE INSERT ON delivery_stage_events
+				 WHEN NEW.event_type IN ('semantic_report','heartbeat','estimate')
+				  AND EXISTS(SELECT 1 FROM delivery_reporters r WHERE r.id=NEW.reporter_id
+				   AND r.delivery_id=NEW.delivery_id AND r.reporter_type='external')
+				  AND (NEW.source_sequence IS NULL OR NEW.source_sequence<=COALESCE((SELECT MAX(prior.source_sequence)
+				   FROM delivery_stage_events prior WHERE prior.attempt_id=NEW.attempt_id
+				    AND prior.stage_key=NEW.stage_key AND prior.execution_number=NEW.execution_number
+				    AND prior.authority_epoch=NEW.authority_epoch AND prior.reporter_id=NEW.reporter_id),0))
+				 BEGIN SELECT RAISE(ABORT, 'external stage source sequence is not increasing'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_estimate_revision_monotone
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='estimate' AND (
+				  NEW.estimate_revision IS NULL OR NEW.estimate_revision<COALESCE((SELECT MAX(prior.estimate_revision)
+				   FROM delivery_stage_events prior WHERE prior.attempt_id=NEW.attempt_id
+				    AND prior.stage_key=NEW.stage_key AND prior.execution_number=NEW.execution_number
+				    AND prior.authority_epoch=NEW.authority_epoch AND prior.reporter_id=NEW.reporter_id
+				    AND prior.event_type='estimate'),0) OR
+				  EXISTS(SELECT 1 FROM delivery_stage_events prior WHERE prior.id=(SELECT latest.id
+				   FROM delivery_stage_events latest WHERE latest.attempt_id=NEW.attempt_id
+				    AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
+				    AND latest.authority_epoch=NEW.authority_epoch AND latest.reporter_id=NEW.reporter_id
+				    AND latest.event_type='estimate' AND latest.estimate_revision=NEW.estimate_revision
+				   ORDER BY latest.event_sequence DESC LIMIT 1)
+				   AND (prior.progress_percent IS NOT NEW.progress_percent OR prior.eta_seconds IS NOT NEW.eta_seconds
+				    OR prior.eta_min_seconds IS NOT NEW.eta_min_seconds OR prior.eta_max_seconds IS NOT NEW.eta_max_seconds
+				    OR prior.estimate_source<>NEW.estimate_source OR prior.estimate_confidence IS NOT NEW.estimate_confidence
+				    OR prior.estimate_basis<>NEW.estimate_basis))
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery estimate revision is stale or changed'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_external_source_activation_cutoff
 				 BEFORE INSERT ON delivery_stage_events
 				 WHEN NEW.source_sequence IS NOT NULL
@@ -6546,7 +6812,8 @@ func migrate(db *sql.DB) error {
 				 BEGIN SELECT RAISE(ABORT, 'delivery run activation authority is invalid'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_activation_exact_cutoff
 				 BEFORE INSERT ON delivery_agent_run_activations
-				 WHEN NEW.telemetry_sequence_cutoff<>COALESCE((SELECT MAX(t.sequence)
+				 WHEN NEW.telemetry_sequence_cutoff IS NULL OR
+				  NEW.telemetry_sequence_cutoff<>COALESCE((SELECT MAX(t.sequence)
 				  FROM agent_run_telemetry t WHERE t.run_id=NEW.agent_run_id),0)
 				 BEGIN SELECT RAISE(ABORT, 'delivery run activation cutoff is not the ledger high-water'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_external_activation_exact_cutoff
@@ -6554,10 +6821,11 @@ func migrate(db *sql.DB) error {
 				 WHEN NEW.event_type IN ('execution_started','handoff')
 				  AND EXISTS(SELECT 1 FROM delivery_reporters r WHERE r.id=NEW.reporter_id
 				   AND r.delivery_id=NEW.delivery_id AND r.reporter_type='external')
-				  AND NEW.authority_source_sequence_cutoff<>COALESCE((SELECT MAX(prior.source_sequence)
+				  AND (NEW.authority_source_sequence_cutoff IS NULL OR
+				   NEW.authority_source_sequence_cutoff<>COALESCE((SELECT MAX(prior.source_sequence)
 				   FROM delivery_stage_events prior WHERE prior.attempt_id=NEW.attempt_id
 				    AND prior.stage_key=NEW.stage_key AND prior.execution_number=NEW.execution_number
-				    AND prior.reporter_id=NEW.reporter_id),0)
+				    AND prior.reporter_id=NEW.reporter_id),0))
 				 BEGIN SELECT RAISE(ABORT, 'external authority activation cutoff is not the ledger high-water'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_execution_terminal_seal
 				 BEFORE INSERT ON delivery_stage_events
@@ -6573,10 +6841,119 @@ func migrate(db *sql.DB) error {
 				  AND COALESCE((SELECT event_type FROM delivery_stage_events
 				   WHERE id=NEW.reset_authority_anchor_stage_event_id),'') NOT IN ('execution_started','handoff')
 				 BEGIN SELECT RAISE(ABORT, 'delivery reset authority anchor is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_current_authority
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND NOT EXISTS(SELECT 1 FROM delivery_stage_latest latest
+				   WHERE latest.delivery_id=NEW.delivery_id AND latest.attempt_id=NEW.attempt_id
+				    AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
+				    AND latest.authority_epoch=NEW.authority_epoch
+				    AND latest.current_reporter_id=NEW.reset_owner_reporter_id
+				    AND latest.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+				    AND latest.authority_stage_event_id=NEW.previous_stage_event_id)
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset does not target current authority'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_exact_epoch
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND (NEW.reset_epoch IS NULL OR NEW.reset_epoch<>COALESCE((SELECT MAX(prior.reset_epoch)+1
+				   FROM delivery_stage_events prior WHERE prior.attempt_id=NEW.attempt_id
+				    AND prior.stage_key=NEW.stage_key AND prior.execution_number=NEW.execution_number),1))
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset epoch is not the next execution epoch'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_exact_stage_cutoff
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND (NEW.reset_source_cutoff IS NULL OR NEW.reset_source_cutoff<>COALESCE((SELECT MAX(prior.source_sequence)
+				   FROM delivery_stage_events prior WHERE prior.attempt_id=NEW.attempt_id
+				    AND prior.stage_key=NEW.stage_key AND prior.execution_number=NEW.execution_number
+				    AND prior.authority_epoch=NEW.authority_epoch AND prior.reporter_id=NEW.reset_owner_reporter_id),0))
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset stage cutoff is not the ledger high-water'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_source_kind
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND ((EXISTS(SELECT 1 FROM delivery_reporters owner WHERE owner.delivery_id=NEW.delivery_id
+				    AND owner.id=NEW.reset_owner_reporter_id AND owner.reporter_type='agent_run')
+				   AND NEW.reset_source_kind<>'stage_and_agent_run_telemetry') OR
+				   (EXISTS(SELECT 1 FROM delivery_reporters owner WHERE owner.delivery_id=NEW.delivery_id
+				    AND owner.id=NEW.reset_owner_reporter_id AND owner.reporter_type<>'agent_run')
+				   AND NEW.reset_source_kind<>'stage_events'))
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset source kind does not match current owner'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_exact_telemetry_cutoff
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND NEW.reset_source_kind='stage_and_agent_run_telemetry'
+				  AND (NEW.reset_telemetry_run_id IS NULL OR NEW.reset_telemetry_sequence_cutoff IS NULL OR
+				   NOT EXISTS(SELECT 1 FROM delivery_agent_run_activations activation
+				    WHERE activation.delivery_id=NEW.delivery_id AND activation.attempt_id=NEW.attempt_id
+				     AND activation.stage_key=NEW.stage_key AND activation.execution_number=NEW.execution_number
+				     AND activation.authority_epoch=NEW.authority_epoch
+				     AND activation.agent_run_id=NEW.reset_telemetry_run_id
+				     AND activation.reporter_id=NEW.reset_owner_reporter_id
+				     AND activation.authority_stage_event_id=NEW.reset_authority_anchor_stage_event_id) OR
+				   NEW.reset_telemetry_sequence_cutoff<>COALESCE((SELECT MAX(t.sequence) FROM agent_run_telemetry t
+				    WHERE t.run_id=NEW.reset_telemetry_run_id),0))
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset telemetry cutoff is not the ledger high-water'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_duration_exact_success
+				 BEFORE INSERT ON delivery_stage_durations WHEN NOT EXISTS(
+				  SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id
+				  JOIN delivery_attempt_policy_seals seal ON seal.delivery_id=d.id AND seal.attempt_id=NEW.attempt_id
+				  JOIN delivery_attempt_stage_policy policy ON policy.delivery_id=d.id
+				   AND policy.attempt_id=NEW.attempt_id AND policy.stage_key=NEW.stage_key
+				  JOIN delivery_stage_latest latest ON latest.delivery_id=d.id AND latest.attempt_id=NEW.attempt_id
+				   AND latest.stage_key=NEW.stage_key
+				  JOIN delivery_stage_events start ON start.id=NEW.stage_execution_id
+				  JOIN delivery_stage_events terminal ON terminal.id=NEW.terminal_stage_event_id
+				  WHERE d.id=NEW.delivery_id AND d.issue_id=NEW.root_issue_id
+				   AND i.project_id IS NEW.project_id_at_completion AND policy.applicability='required'
+				   AND latest.execution_number=NEW.execution_number
+				   AND latest.execution_start_stage_event_id=NEW.stage_execution_id
+				   AND latest.semantic_stage_event_id=NEW.terminal_stage_event_id
+				   AND start.delivery_id=NEW.delivery_id AND start.attempt_id=NEW.attempt_id
+				   AND start.stage_key=NEW.stage_key AND start.execution_number=NEW.execution_number
+				   AND start.event_type='execution_started'
+				   AND terminal.delivery_id=NEW.delivery_id AND terminal.attempt_id=NEW.attempt_id
+				   AND terminal.stage_key=NEW.stage_key AND terminal.execution_number=NEW.execution_number
+				   AND terminal.event_type IN ('semantic_report','lifecycle_normalized')
+				   AND terminal.semantic_state='succeeded' AND terminal.current_blocker_count=0
+				   AND terminal.needs_input=0 AND terminal.authority_epoch=latest.authority_epoch
+				   AND terminal.reporter_id=latest.current_reporter_id
+				   AND terminal.ended_at=NEW.completed_at AND terminal.server_received_at=NEW.completed_at
+				   AND (NEW.stage_key<>'specification' OR terminal.spec_revision=d.spec_revision)
+				   AND EXISTS(SELECT 1 FROM delivery_evidence evidence
+				    WHERE evidence.stage_event_id=terminal.id AND evidence.outcome='passed')
+				   AND NOT EXISTS(SELECT 1 FROM delivery_evidence evidence
+				    WHERE evidence.stage_event_id=terminal.id AND evidence.outcome='failed')
+				   AND NOT EXISTS(
+				    SELECT 1 FROM delivery_attempt_stage_policy chain_policy
+				    WHERE chain_policy.attempt_id=NEW.attempt_id AND chain_policy.applicability='required'
+				     AND chain_policy.sort_order<=policy.sort_order AND NOT EXISTS(
+				      SELECT 1 FROM delivery_stage_latest chain_latest
+				      JOIN delivery_stage_events chain_start ON chain_start.id=chain_latest.execution_start_stage_event_id
+				      JOIN delivery_stage_events chain_terminal ON chain_terminal.id=chain_latest.semantic_stage_event_id
+				      WHERE chain_latest.delivery_id=NEW.delivery_id AND chain_latest.attempt_id=NEW.attempt_id
+				       AND chain_latest.stage_key=chain_policy.stage_key
+				       AND chain_terminal.semantic_state='succeeded' AND chain_terminal.current_blocker_count=0
+				       AND chain_terminal.needs_input=0
+				       AND chain_terminal.authority_epoch=chain_latest.authority_epoch
+				       AND chain_terminal.reporter_id=chain_latest.current_reporter_id
+				       AND (chain_policy.stage_key<>'specification' OR chain_terminal.spec_revision=d.spec_revision)
+				       AND chain_start.based_on_stage_event_id IS (
+				        SELECT predecessor_terminal.id FROM delivery_attempt_stage_policy predecessor_policy
+				        JOIN delivery_stage_latest predecessor_latest ON predecessor_latest.attempt_id=predecessor_policy.attempt_id
+				         AND predecessor_latest.stage_key=predecessor_policy.stage_key
+				        JOIN delivery_stage_events predecessor_terminal ON predecessor_terminal.id=predecessor_latest.semantic_stage_event_id
+				        WHERE predecessor_policy.attempt_id=chain_policy.attempt_id
+				         AND predecessor_policy.applicability='required'
+				         AND predecessor_policy.sort_order<chain_policy.sort_order
+				        ORDER BY predecessor_policy.sort_order DESC LIMIT 1)
+				       AND EXISTS(SELECT 1 FROM delivery_evidence evidence
+				        WHERE evidence.stage_event_id=chain_terminal.id AND evidence.outcome='passed')
+				       AND NOT EXISTS(SELECT 1 FROM delivery_evidence evidence
+				        WHERE evidence.stage_event_id=chain_terminal.id AND evidence.outcome='failed')
+				     )
+				   )
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery duration lacks exact eligible terminal lineage'); END`,
 
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_issue_update_change
 				 AFTER UPDATE ON issues WHEN EXISTS(SELECT 1 FROM deliveries WHERE issue_id=NEW.id)
 				 BEGIN
+				UPDATE deliveries SET project_id_hint=NEW.project_id,
+				 updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				 WHERE issue_id=NEW.id AND NEW.project_id IS NOT OLD.project_id;
 				UPDATE deliveries SET spec_revision=spec_revision+1,
 				 updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 				 WHERE issue_id=NEW.id AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
@@ -6595,7 +6972,9 @@ func migrate(db *sql.DB) error {
 				 start_delivery_event_id,project_id_at_start,reason_code,reason_text,created_at)
 				SELECT d.id,COALESCE((SELECT MAX(attempt_number)+1 FROM delivery_attempts WHERE delivery_id=d.id),1),
 				 COALESCE((SELECT MAX(plan_revision)+1 FROM delivery_attempts WHERE delivery_id=d.id),1),
-				 (SELECT id FROM delivery_attempts WHERE delivery_id=d.id ORDER BY attempt_number DESC LIMIT 1),
+					 (SELECT a.id FROM delivery_attempts a JOIN delivery_attempt_policy_seals seal
+					   ON seal.delivery_id=a.delivery_id AND seal.attempt_id=a.id
+					  WHERE a.delivery_id=d.id ORDER BY a.attempt_number DESC LIMIT 1),
 				 (SELECT id FROM delivery_events WHERE delivery_id=d.id ORDER BY delivery_revision DESC LIMIT 1),
 				 NEW.project_id,'spec_changed','Canonical issue specification changed',strftime('%Y-%m-%dT%H:%M:%fZ','now')
 				FROM deliveries d WHERE d.issue_id=NEW.id
@@ -6606,7 +6985,14 @@ func migrate(db *sql.DB) error {
 				SELECT next.delivery_id,next.id,p.stage_key,p.sort_order,p.applicability,p.weight,p.policy_reference,
 				 p.reason_code,p.reason_text,p.authorized_by_reporter_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
 				FROM delivery_attempts next JOIN delivery_attempt_stage_policy p ON p.attempt_id=next.previous_attempt_id
-				WHERE next.delivery_id=(SELECT id FROM deliveries WHERE issue_id=NEW.id)
+				 WHERE next.delivery_id=(SELECT id FROM deliveries WHERE issue_id=NEW.id)
+					 AND next.attempt_number=(SELECT MAX(attempt_number) FROM delivery_attempts
+					  WHERE delivery_id=next.delivery_id)
+					 AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+					  OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+				INSERT INTO delivery_attempt_policy_seals(delivery_id,attempt_id,sealed_at)
+				SELECT next.delivery_id,next.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				FROM delivery_attempts next WHERE next.delivery_id=(SELECT id FROM deliveries WHERE issue_id=NEW.id)
 				 AND next.attempt_number=(SELECT MAX(attempt_number) FROM delivery_attempts
 				  WHERE delivery_id=next.delivery_id)
 				 AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
@@ -6642,15 +7028,9 @@ func migrate(db *sql.DB) error {
 				FROM deliveries d WHERE d.issue_id IN (OLD.source_id,OLD.target_id);
 			 END`,
 
-			`CREATE TRIGGER IF NOT EXISTS trg_delivery_issue_delete_context_before
-			 BEFORE DELETE ON issues WHEN EXISTS(SELECT 1 FROM deliveries WHERE issue_id=OLD.id)
-			 BEGIN UPDATE delivery_root_delete_context SET issue_id=OLD.id WHERE singleton=1; END`,
-			`CREATE TRIGGER IF NOT EXISTS trg_delivery_issue_delete_context_after
-			 AFTER DELETE ON issues
-			 BEGIN UPDATE delivery_root_delete_context SET issue_id=NULL WHERE singleton=1 AND issue_id=OLD.id; END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_deliveries_delete_tombstone
 			 BEFORE DELETE ON deliveries
-			 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1)=OLD.issue_id
+			 WHEN NOT EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id)
 			 BEGIN
 				INSERT INTO delivery_change_log(
 				 cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
@@ -6669,6 +7049,7 @@ func migrate(db *sql.DB) error {
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_events_no_update BEFORE UPDATE ON delivery_events BEGIN SELECT RAISE(ABORT,'delivery events are immutable'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_attempts_no_update BEFORE UPDATE ON delivery_attempts BEGIN SELECT RAISE(ABORT,'delivery attempts are immutable'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_no_update BEFORE UPDATE ON delivery_attempt_stage_policy BEGIN SELECT RAISE(ABORT,'delivery attempt policy is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_seals_no_update BEFORE UPDATE ON delivery_attempt_policy_seals BEGIN SELECT RAISE(ABORT,'delivery attempt policy seal is immutable'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_events_no_update BEFORE UPDATE ON delivery_stage_events BEGIN SELECT RAISE(ABORT,'delivery stage events are immutable'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_blockers_no_update BEFORE UPDATE ON delivery_stage_blockers BEGIN SELECT RAISE(ABORT,'delivery blockers are immutable'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_no_update BEFORE UPDATE ON delivery_evidence BEGIN SELECT RAISE(ABORT,'delivery evidence is immutable'); END`,
@@ -6676,41 +7057,52 @@ func migrate(db *sql.DB) error {
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_activations_no_update BEFORE UPDATE ON delivery_agent_run_activations BEGIN SELECT RAISE(ABORT,'delivery run activations are immutable'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_durations_no_update BEFORE UPDATE ON delivery_stage_durations BEGIN SELECT RAISE(ABORT,'delivery durations are immutable'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_no_update BEFORE UPDATE ON delivery_change_log BEGIN SELECT RAISE(ABORT,'delivery change log is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_retention_no_update BEFORE UPDATE ON delivery_change_retention BEGIN SELECT RAISE(ABORT,'delivery retention history is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_retention_no_delete BEFORE DELETE ON delivery_change_retention BEGIN SELECT RAISE(ABORT,'delivery retention history is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_retention_monotone_insert
+				 BEFORE INSERT ON delivery_change_retention WHEN
+				  NOT EXISTS(SELECT 1 FROM delivery_change_retention existing WHERE existing.floor_id=NEW.floor_id)
+				  AND (NEW.floor_id<=COALESCE((SELECT MAX(floor_id) FROM delivery_change_retention),-1) OR
+				   NEW.floor_id>COALESCE((SELECT MAX(id) FROM delivery_change_log),0))
+				 BEGIN SELECT RAISE(ABORT,'delivery retention floor is not a valid monotone prefix'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_deliveries_no_direct_delete BEFORE DELETE ON deliveries
-			 WHEN COALESCE((SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1),-1)<>OLD.issue_id
+			 WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id)
 			 BEGIN SELECT RAISE(ABORT,'deliveries cannot be deleted directly'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reporters_no_direct_delete BEFORE DELETE ON delivery_reporters
-			 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1) IS NULL
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
 			 BEGIN SELECT RAISE(ABORT,'delivery reporters are append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_events_no_direct_delete BEFORE DELETE ON delivery_events
-			 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1) IS NULL
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
 			 BEGIN SELECT RAISE(ABORT,'delivery events are append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_attempts_no_direct_delete BEFORE DELETE ON delivery_attempts
-			 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1) IS NULL
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
 			 BEGIN SELECT RAISE(ABORT,'delivery attempts are append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_no_direct_delete BEFORE DELETE ON delivery_attempt_stage_policy
-			 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1) IS NULL
-			 BEGIN SELECT RAISE(ABORT,'delivery attempt policy is append-only'); END`,
+				 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+				 BEGIN SELECT RAISE(ABORT,'delivery attempt policy is append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_seals_no_direct_delete BEFORE DELETE ON delivery_attempt_policy_seals
+				 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+				 BEGIN SELECT RAISE(ABORT,'delivery attempt policy seals are append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_events_no_direct_delete BEFORE DELETE ON delivery_stage_events
-			 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1) IS NULL
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
 			 BEGIN SELECT RAISE(ABORT,'delivery stage events are append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_blockers_no_direct_delete BEFORE DELETE ON delivery_stage_blockers
-			 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1) IS NULL
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
 			 BEGIN SELECT RAISE(ABORT,'delivery blockers are append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_no_direct_delete BEFORE DELETE ON delivery_evidence
-			 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1) IS NULL
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
 			 BEGIN SELECT RAISE(ABORT,'delivery evidence is append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_links_no_direct_delete BEFORE DELETE ON delivery_agent_run_links
-				 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1) IS NULL
+				 WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.root_issue_id)
 				 BEGIN SELECT RAISE(ABORT,'delivery run links are append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_activations_no_direct_delete BEFORE DELETE ON delivery_agent_run_activations
-				 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1) IS NULL
+				 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
 				 BEGIN SELECT RAISE(ABORT,'delivery run activations are append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_durations_no_direct_delete BEFORE DELETE ON delivery_stage_durations
-			 WHEN (SELECT issue_id FROM delivery_root_delete_context WHERE singleton=1) IS NULL
+			 WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.root_issue_id)
 			 BEGIN SELECT RAISE(ABORT,'delivery durations are append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_delete_guard BEFORE DELETE ON delivery_change_log
-			 WHEN OLD.id > (SELECT floor_id FROM delivery_change_retention WHERE singleton=1)
+			 WHEN OLD.id > COALESCE((SELECT MAX(floor_id) FROM delivery_change_retention),-1)
 			 BEGIN SELECT RAISE(ABORT,'delivery change retention floor has not advanced'); END`,
 		}},
 	}

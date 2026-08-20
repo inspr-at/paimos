@@ -77,7 +77,7 @@ func (s *Store) startStageRetryTx(ctx context.Context, tx *sql.Tx, effects *Effe
 		ReasonCode    string `json:"reason_code"`
 		ReasonText    string `json:"reason_text"`
 	}{req.AttemptNumber, req.StageKey, req.Reporter.Type, req.Reporter.OpaqueKey, req.ReasonCode, req.ReasonText}
-	if prior, err := lookupEnvelopeDuplicate(ctx, tx, d, req.IdempotencyKey, payload); err != nil {
+	if prior, err := lookupEnvelopeDuplicateForActor(ctx, tx, d, req.Reporter, "stage_execution_started", req.IdempotencyKey, payload); err != nil {
 		return StageRef{}, err
 	} else if prior.Duplicate {
 		return loadStageRefByDeliveryEvent(ctx, tx, prior.ID)
@@ -230,7 +230,7 @@ func (s *Store) RecordHandoffTx(ctx context.Context, tx *sql.Tx, effects *Effect
 		Stage, FromType, FromKey, ToType, ToKey, ReasonCode, ReasonText string
 	}{req.AttemptNumber, req.ExecutionNumber, req.AuthorityEpoch, req.StageKey, req.From.Type, req.From.OpaqueKey,
 		req.To.Type, req.To.OpaqueKey, req.ReasonCode, req.ReasonText}
-	if prior, err := lookupEnvelopeDuplicate(ctx, tx, d, req.IdempotencyKey, payload); err != nil {
+	if prior, err := lookupEnvelopeDuplicateForActor(ctx, tx, d, req.To, "handoff", req.IdempotencyKey, payload); err != nil {
 		return StageRef{}, err
 	} else if prior.Duplicate {
 		return loadStageRefByDeliveryEvent(ctx, tx, prior.ID)
@@ -350,7 +350,7 @@ func (s *Store) AuthorizeProgressResetTx(ctx context.Context, tx *sql.Tx, effect
 		Stage, ActorType, ActorKey, ReasonCode, ReasonText string
 	}{req.AttemptNumber, req.ExecutionNumber, req.AuthorityEpoch, req.StageKey, req.Actor.Type, req.Actor.OpaqueKey,
 		req.ReasonCode, req.ReasonText}
-	if prior, err := lookupEnvelopeDuplicate(ctx, tx, d, req.IdempotencyKey, payload); err != nil {
+	if prior, err := lookupEnvelopeDuplicateForActor(ctx, tx, d, req.Actor, "progress_reset_authorized", req.IdempotencyKey, payload); err != nil {
 		return StageRef{}, err
 	} else if prior.Duplicate {
 		return loadProgressResetRefByDeliveryEvent(ctx, tx, prior.ID)
@@ -379,9 +379,12 @@ func (s *Store) AuthorizeProgressResetTx(ctx context.Context, tx *sql.Tx, effect
 		return StageRef{}, fmt.Errorf("%w: stage execution is terminal; start a retry", ErrConflict)
 	}
 	var cutoff, resetEpoch int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(source_sequence),0),COALESCE(MAX(reset_epoch),0)+1
-		FROM delivery_stage_events WHERE attempt_id=? AND stage_key=? AND execution_number=? AND authority_epoch=?`,
-		current.AttemptID, req.StageKey, req.ExecutionNumber, req.AuthorityEpoch).Scan(&cutoff, &resetEpoch); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT
+		COALESCE(MAX(CASE WHEN authority_epoch=? AND reporter_id=? THEN source_sequence END),0),
+		COALESCE(MAX(reset_epoch),0)+1
+		FROM delivery_stage_events WHERE attempt_id=? AND stage_key=? AND execution_number=?`,
+		req.AuthorityEpoch, current.ReporterID, current.AttemptID, req.StageKey, req.ExecutionNumber).
+		Scan(&cutoff, &resetEpoch); err != nil {
 		return StageRef{}, err
 	}
 	resetSourceKind := "stage_events"
@@ -523,6 +526,56 @@ func nearestRequiredPredecessor(ctx context.Context, q DBTX, attempt Attempt, st
 		return &id, nil
 	}
 	return nil, nil
+}
+
+// stageExecutionCurrentLineage verifies the complete required-stage chain, not
+// merely the target's numeric execution/owner. This keeps a downstream linked
+// run historical after any upstream retry invalidates its based-on fact.
+func stageExecutionCurrentLineage(ctx context.Context, q DBTX, attempt Attempt, stage string, executionStartID int64) (bool, error) {
+	var predecessor int64
+	for _, policy := range attempt.Policies {
+		if policy.Applicability != "required" {
+			if policy.StageKey == stage {
+				return false, nil
+			}
+			continue
+		}
+		if policy.StageKey == stage {
+			var based sql.NullInt64
+			if err := q.QueryRowContext(ctx, `SELECT based_on_stage_event_id FROM delivery_stage_events
+				WHERE id=? AND attempt_id=? AND stage_key=? AND event_type='execution_started'`,
+				executionStartID, attempt.ID, stage).Scan(&based); err != nil {
+				return false, err
+			}
+			return nullableInt64Equal(based, predecessor), nil
+		}
+		semanticID, eligible, err := eligibleSuccessEventID(ctx, q, attempt, policy.StageKey)
+		if err != nil {
+			return false, err
+		}
+		if !eligible {
+			return false, nil
+		}
+		var based sql.NullInt64
+		if err := q.QueryRowContext(ctx, `SELECT start.based_on_stage_event_id
+			FROM delivery_stage_latest latest JOIN delivery_stage_events start
+			 ON start.id=latest.execution_start_stage_event_id
+			WHERE latest.attempt_id=? AND latest.stage_key=?`, attempt.ID, policy.StageKey).Scan(&based); err != nil {
+			return false, err
+		}
+		if !nullableInt64Equal(based, predecessor) {
+			return false, nil
+		}
+		predecessor = semanticID
+	}
+	return false, nil
+}
+
+func nullableInt64Equal(value sql.NullInt64, expected int64) bool {
+	if expected == 0 {
+		return !value.Valid
+	}
+	return value.Valid && value.Int64 == expected
 }
 
 func eligibleSuccessEventID(ctx context.Context, q DBTX, attempt Attempt, stage string) (int64, bool, error) {

@@ -286,11 +286,15 @@ func (s *Store) LinkAgentRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 	if runIssue != issueID || instrumentation != 1 || stage.DeliveryID != d.ID {
 		return fmt.Errorf("%w: cross-root or uninstrumented run link", ErrInvariant)
 	}
+	runActor := Actor{Type: "agent_run", OpaqueKey: fmt.Sprintf("run:%d", runID)}
+	if _, err := s.authorize(ctx, tx, issueID, runActor, "delivery.run.link", nil); err != nil {
+		return err
+	}
 	payload := struct {
 		RunID, AttemptNumber, ExecutionNumber int64
 		StageKey                              string
 	}{runID, stage.AttemptNumber, stage.ExecutionNumber, stage.StageKey}
-	if prior, duplicateErr := lookupEnvelopeDuplicate(ctx, tx, d, idempotencyKey, payload); duplicateErr != nil {
+	if prior, duplicateErr := lookupEnvelopeDuplicateForActor(ctx, tx, d, runActor, "run_linked", idempotencyKey, payload); duplicateErr != nil {
 		return duplicateErr
 	} else if prior.Duplicate {
 		var linked int64
@@ -315,7 +319,6 @@ func (s *Store) LinkAgentRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 	if err != nil {
 		return err
 	}
-	runActor := Actor{Type: "agent_run", OpaqueKey: fmt.Sprintf("run:%d", runID)}
 	now := formatTime(s.now())
 	reporterID, err := ensureReporterTx(ctx, tx, d.ID, runActor, now)
 	if err != nil {
@@ -352,19 +355,23 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 	if normalization.RunID <= 0 || validatePersistedKey(normalization.IdempotencyKey, safeOpaqueKey, 128) != nil {
 		return fmt.Errorf("%w: invalid run normalization", ErrInvalid)
 	}
-	var issueID, attemptID, currentAttemptID, attemptNumber, execution, currentExecution, epoch, reporterID, currentReporterID int64
+	var issueID, deliveryID, attemptID, currentAttemptID, attemptNumber, execution, currentExecution, epoch, reporterID, currentReporterID, executionStartID int64
 	var stage, reporterType, reporterKey, runStatus, commitSHA, commitBase string
 	var attachment sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT link.root_issue_id,link.attempt_id,a.attempt_number,link.stage_key,
+	err := tx.QueryRowContext(ctx, `SELECT link.root_issue_id,link.delivery_id,link.attempt_id,a.attempt_number,link.stage_key,
 		link.execution_number,l.execution_number,l.authority_epoch,link.reporter_id,l.current_reporter_id,
-		(SELECT id FROM delivery_attempts ca WHERE ca.delivery_id=link.delivery_id ORDER BY ca.attempt_number DESC LIMIT 1),
+		link.execution_start_stage_event_id,
+		(SELECT ca.id FROM delivery_attempts ca JOIN delivery_attempt_policy_seals seal
+		 ON seal.delivery_id=ca.delivery_id AND seal.attempt_id=ca.id
+		 WHERE ca.delivery_id=link.delivery_id ORDER BY ca.attempt_number DESC LIMIT 1),
 		r.reporter_type,r.opaque_key,
 		ar.status,ar.commit_sha,ar.commit_base_sha,ar.log_attachment_id
 		FROM delivery_agent_run_links link JOIN delivery_attempts a ON a.id=link.attempt_id
 		JOIN delivery_stage_latest l ON l.attempt_id=link.attempt_id AND l.stage_key=link.stage_key
 		JOIN delivery_reporters r ON r.id=link.reporter_id
 		JOIN agent_runs ar ON ar.id=link.agent_run_id WHERE link.agent_run_id=?`, normalization.RunID).
-		Scan(&issueID, &attemptID, &attemptNumber, &stage, &execution, &currentExecution, &epoch, &reporterID, &currentReporterID, &currentAttemptID,
+		Scan(&issueID, &deliveryID, &attemptID, &attemptNumber, &stage, &execution, &currentExecution, &epoch, &reporterID, &currentReporterID,
+			&executionStartID, &currentAttemptID,
 			&reporterType, &reporterKey, &runStatus, &commitSHA, &commitBase, &attachment)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: instrumented run is unlinked", ErrInvariant)
@@ -382,7 +389,18 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 	// A late old run may close after a retry, handoff, or project-move attempt
 	// superseded its authority. Its legal lifecycle must still commit, but it
 	// can only invalidate the delivery read—not alter current stage truth.
-	if attemptID != currentAttemptID || execution != currentExecution || reporterID != currentReporterID {
+	currentLineage := attemptID == currentAttemptID && execution == currentExecution && reporterID == currentReporterID
+	if currentLineage {
+		attempt, loadErr := loadAttemptByNumber(ctx, tx, deliveryID, attemptNumber)
+		if loadErr != nil {
+			return loadErr
+		}
+		currentLineage, loadErr = stageExecutionCurrentLineage(ctx, tx, attempt, stage, executionStartID)
+		if loadErr != nil {
+			return loadErr
+		}
+	}
+	if !currentLineage {
 		return s.recordRunLifecycleObservedTx(ctx, tx, effects, normalization.RunID, runStatus)
 	}
 	state, activity := "", ""
@@ -427,7 +445,8 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 		if loadErr != nil {
 			return loadErr
 		}
-		prior, duplicateErr := lookupEnvelopeDuplicate(ctx, tx, d, normalization.IdempotencyKey, canonicalStageReportPayload(report))
+		prior, duplicateErr := lookupEnvelopeDuplicateForActor(ctx, tx, d, actor, "run_normalized",
+			normalization.IdempotencyKey, canonicalStageReportPayload(report))
 		if duplicateErr != nil {
 			return duplicateErr
 		}
@@ -443,8 +462,10 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 func loadAttemptByNumber(ctx context.Context, q DBTX, deliveryID, number int64) (Attempt, error) {
 	var a Attempt
 	var previous, project sql.NullInt64
-	err := q.QueryRowContext(ctx, `SELECT id,delivery_id,attempt_number,plan_revision,previous_attempt_id,
-		project_id_at_start,reason_code,reason_text,created_at FROM delivery_attempts WHERE delivery_id=? AND attempt_number=?`,
+	err := q.QueryRowContext(ctx, `SELECT a.id,a.delivery_id,a.attempt_number,a.plan_revision,a.previous_attempt_id,
+		a.project_id_at_start,a.reason_code,a.reason_text,a.created_at FROM delivery_attempts a
+		JOIN delivery_attempt_policy_seals seal ON seal.delivery_id=a.delivery_id AND seal.attempt_id=a.id
+		WHERE a.delivery_id=? AND a.attempt_number=?`,
 		deliveryID, number).Scan(&a.ID, &a.DeliveryID, &a.AttemptNumber, &a.PlanRevision, &previous, &project,
 		&a.ReasonCode, &a.ReasonText, &a.CreatedAt)
 	if err != nil {

@@ -149,7 +149,9 @@ func (s *Store) BulkSnapshotsTx(ctx context.Context, q DBTX, issueIDs []int64) (
 		   WHERE active_link.agent_run_id=active_run.id AND active_link.root_issue_id=i.id))
 	FROM issues i
 	LEFT JOIN deliveries d ON d.issue_id=i.id
-	LEFT JOIN delivery_attempts a ON a.id=(SELECT id FROM delivery_attempts ca WHERE ca.delivery_id=d.id ORDER BY attempt_number DESC LIMIT 1)
+	LEFT JOIN delivery_attempts a ON a.id=(SELECT ca.id FROM delivery_attempts ca
+	 JOIN delivery_attempt_policy_seals seal ON seal.delivery_id=ca.delivery_id AND seal.attempt_id=ca.id
+	 WHERE ca.delivery_id=d.id ORDER BY ca.attempt_number DESC LIMIT 1)
 	WHERE i.deleted_at IS NULL AND i.id IN (` + placeholders + `) ORDER BY i.id`
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -419,17 +421,23 @@ func (s *Store) assembleBulkSnapshot(issueID int64, title, description, criteria
 	snapshot.Deployed, snapshot.Verified = deployment.Performed, verification.Performed
 	snapshot.DeploymentPolicySatisfied, snapshot.VerificationPolicySatisfied = deployment.PolicySatisfied, verification.PolicySatisfied
 	snapshot.Unverified = snapshot.Deployed && !snapshot.VerificationPolicySatisfied
+	if snapshot.Unverified {
+		flags["unverified"] = true
+	}
 	snapshot.Failed, snapshot.FailedNeedsRetry, snapshot.Cancelled = anyFailed, retryFailed, anyCancelled
+	if anyFailed && anyCancelled {
+		return Snapshot{}, fmt.Errorf("%w: current lineage cannot be both failed and cancelled", ErrInvariant)
+	}
 	if allRequired {
 		snapshot.State = "completed"
-	} else if snapshot.Unverified {
-		snapshot.State, flags["unverified"] = "deployed_unverified", true
 	} else if anyCancelled {
 		snapshot.State = "cancelled"
 	} else if anyFailed {
 		// Every sealed current-lineage failure requires a new execution; retry
 		// status is independent of deployment, verification, and N/A axes.
 		snapshot.State = "failed_needs_retry"
+	} else if snapshot.Unverified {
+		snapshot.State = "deployed_unverified"
 	} else if anyExecution {
 		snapshot.State = "active"
 	}
@@ -557,13 +565,25 @@ func applyStageSourceTruth(s *Store, raw bulkStage, stage *StageSnapshot, calcul
 		case "queued":
 			stage.SignalState = "queued"
 		case "running":
-			classifyHeartbeat(stage, raw.Run.ActivationAt, heartbeatAt, calculatedAt, s.freshness)
+			classifyHeartbeat(stage, laterFreshnessAnchor(raw.Run.ActivationAt, raw.Run.StartedAt), heartbeatAt, calculatedAt, s.freshness)
 		default:
 			stage.SignalState = "ended"
 		}
 	} else if externalActive {
 		classifyHeartbeat(stage, raw.AuthorityActivatedAt, raw.HeartbeatAt, calculatedAt, s.freshness)
 	}
+}
+
+func laterFreshnessAnchor(activationAt, startedAt string) string {
+	activation, activationErr := parseStoredTime(activationAt)
+	started, startedErr := parseStoredTime(startedAt)
+	if activationErr != nil {
+		return startedAt
+	}
+	if startedErr != nil || !started.After(activation) {
+		return activationAt
+	}
+	return startedAt
 }
 
 func classifyHeartbeat(stage *StageSnapshot, startAt, heartbeatAt string, now time.Time, policy FreshnessPolicy) {
@@ -709,6 +729,7 @@ func (s *Store) AttemptHistoryTx(ctx context.Context, q DBTX, issueID int64) ([]
 		 FROM delivery_agent_run_links link
 		 JOIN agent_runs run ON run.id=link.agent_run_id WHERE link.attempt_id=a.id ORDER BY link.agent_run_id) ordered),'[]')
 		FROM deliveries d JOIN delivery_attempts a ON a.delivery_id=d.id
+		JOIN delivery_attempt_policy_seals seal ON seal.delivery_id=a.delivery_id AND seal.attempt_id=a.id
 		JOIN delivery_attempt_stage_policy p ON p.attempt_id=a.id
 		WHERE d.issue_id=? ORDER BY a.attempt_number,p.sort_order`, issueID)
 	if err != nil {
@@ -916,7 +937,7 @@ func (s *Store) RetainChangesThrough(ctx context.Context, floorID int64) error {
 	}
 	defer tx.Rollback()
 	var current, maxID int64
-	if err := tx.QueryRowContext(ctx, `SELECT floor_id FROM delivery_change_retention WHERE singleton=1`).Scan(&current); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(floor_id),0) FROM delivery_change_retention`).Scan(&current); err != nil {
 		return err
 	}
 	if floorID == current {
@@ -931,7 +952,7 @@ func (s *Store) RetainChangesThrough(ctx context.Context, floorID int64) error {
 		return fmt.Errorf("%w: invalid retention floor", ErrConflict)
 	}
 	now := formatTime(s.now())
-	if _, err := tx.ExecContext(ctx, `UPDATE delivery_change_retention SET floor_id=?,advanced_at=? WHERE singleton=1`, floorID, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO delivery_change_retention(floor_id,advanced_at) VALUES(?,?)`, floorID, now); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM delivery_change_log WHERE id<=?`, floorID); err != nil {

@@ -588,23 +588,28 @@ post-M144 write creates the container. Every new run creation path stamps
 `agent_runs.delivery_instrumentation_version=1` and creates its immutable
 `delivery_agent_run_links` row in the same transaction.
 
-Each `delivery_attempts` row is an immutable plan revision with exactly five
-policy facts in canonical order: specification, implementation, QA,
-deployment, verification. Default weights are 10/45/20/15/10. A project-policy
+Each authoritative `delivery_attempts` row is an immutable, atomically sealed
+plan revision with exactly five policy facts in canonical order: specification,
+implementation, QA, deployment, verification. Default weights are
+10/45/20/15/10. A project-policy
 change starts another attempt; a routine retry starts another stage execution
 inside the same attempt. Execution starts record the exact eligible predecessor
 event, so retrying an upstream stage makes old downstream evidence ineligible
 without deleting it. Handoffs advance authority epochs and late reports from an
 old attempt, execution, reporter, or epoch fail closed.
 
-`delivery_events` owns bounded idempotency keys, canonical payload hashes, and
-contiguous per-delivery revisions. Typed `delivery_stage_events`, blockers, and
-evidence are append-only; `delivery_stage_latest` contains rebuildable pointers
+`delivery_events` owns reporter-and-kind-scoped bounded idempotency keys,
+canonical payload hashes, and contiguous per-delivery revisions. Typed
+`delivery_stage_events`, blockers, and evidence are append-only;
+`delivery_stage_latest` contains rebuildable pointers
 for authority, semantic state, heartbeat, and estimate separately. Required
 stage success needs a current succeeded semantic report, no current blocker,
 passed allowlisted evidence, and current prerequisite lineage. Deployment
-success remains independently visible as `deployed_unverified` until required
-verification succeeds, even when verification is failed, waiting, or stale.
+success remains independently visible through the `Deployed` and `Unverified`
+axes until required verification succeeds. While verification is pending the
+display state is `deployed_unverified`; a current verification failure or
+cancellation takes display/suppression precedence as `failed_needs_retry` or
+`cancelled` without erasing either independent deployment axis.
 The internal transaction-aware bulk reducer reads 1–1,000 already-authorized
 roots in one fixed SQL round trip and captures one calculation timestamp.
 When a linked run closes after its attempt, execution, or authority was
@@ -613,7 +618,9 @@ event advances the delivery revision/change stream and appears by identity in
 bounded attempt history, but cannot reopen or rewrite current stage truth.
 
 One immutable `delivery_stage_durations` sample is written for each eligible
-successful execution. Server RFC3339 timestamps are parsed, intervals are
+successful execution, bound to its exact execution-start and terminal-success
+facts, current prerequisite lineage, completion project, and completion time.
+Server RFC3339 timestamps are parsed, intervals are
 unioned and clipped, human wait takes precedence over other blocking, and the
 remaining lead time is active. The samples retain project-at-completion and are
 never removed by a later retry.
@@ -621,7 +628,8 @@ never removed by a later retry.
 `delivery_change_log` has no root foreign key. It retains a safe tombstone when
 an issue is hard-deleted and gives each delivery a contiguous change sequence;
 the opaque global id is internal only. Rows cannot be updated or directly
-deleted. A separate retention-floor operation is the sole prefix-deletion path.
+deleted. An append-only monotone retention ledger is the sole prefix-deletion
+path, and its guards fail closed if retention state is missing or malformed.
 The encompassing SQL transaction writes facts and the durable change row;
 observer callbacks are dispatched only after commit. PAI-804 will seal its own
 authorized cursors around this internal high-water rather than expose database

@@ -220,6 +220,131 @@ func TestCancelledAgentRunStampsFinishedAtAndNormalizesExactlyOnce(t *testing.T)
 	}
 }
 
+func TestTrashAtomicallyCancelsInstrumentedRunAndRestoreKeepsTerminalTruth(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "TRN", "Trash run normalization")
+	result, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status)
+		VALUES(?,1,'ticket','Trash active instrumented run','in-progress')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := result.LastInsertId()
+	resp := ts.post(t, "/api/issues/"+itoa(issueID)+"/implement", ts.adminCookie, map[string]any{})
+	assertStatus(t, resp, http.StatusCreated)
+	var run map[string]any
+	decode(t, resp, &run)
+	runID := int64(run["id"].(float64))
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+		map[string]any{"status": "running"}), http.StatusOK)
+
+	resp = ts.del(t, "/api/issues/"+itoa(issueID), ts.adminCookie)
+	assertStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	var status string
+	var finished sql.NullString
+	if err := db.DB.QueryRow(`SELECT status,finished_at FROM agent_runs WHERE id=?`, runID).Scan(&status, &finished); err != nil {
+		t.Fatal(err)
+	}
+	if status != "cancelled" || !finished.Valid || finished.String == "" {
+		t.Fatalf("trashed run status=%q finished=%+v", status, finished)
+	}
+	var lifecycleEvents int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM delivery_events event
+		JOIN delivery_agent_run_links link ON link.delivery_id=event.delivery_id
+		WHERE link.agent_run_id=? AND event.kind IN ('run_normalized','run_lifecycle_observed')`, runID).
+		Scan(&lifecycleEvents); err != nil {
+		t.Fatal(err)
+	}
+	if lifecycleEvents != 1 {
+		t.Fatalf("trash created %d lifecycle events, want one", lifecycleEvents)
+	}
+
+	resp = ts.post(t, "/api/issues/"+itoa(issueID)+"/restore", ts.adminCookie, nil)
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	snapshot, err := delivery.NewStore(db.DB, delivery.Options{}).SnapshotByIssue(t.Context(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State != "cancelled" || !snapshot.Cancelled || snapshot.Failed {
+		t.Fatalf("restored issue silently resumed cancelled delivery: %+v", snapshot)
+	}
+	resp = ts.del(t, "/api/issues/"+itoa(issueID), ts.adminCookie)
+	assertStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	var replayEvents int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM delivery_events event
+		JOIN delivery_agent_run_links link ON link.delivery_id=event.delivery_id
+		WHERE link.agent_run_id=? AND event.kind IN ('run_normalized','run_lifecycle_observed')`, runID).
+		Scan(&replayEvents); err != nil {
+		t.Fatal(err)
+	}
+	if replayEvents != lifecycleEvents {
+		t.Fatalf("second trash duplicated lifecycle events: %d -> %d", lifecycleEvents, replayEvents)
+	}
+}
+
+func TestTrashAndTerminalPatchRaceProduceOneTerminalDeliveryFact(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "TRR", "Trash terminal race")
+	for i := 1; i <= 6; i++ {
+		result, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status)
+			VALUES(?,?,'ticket','Trash terminal race','in-progress')`, projectID, i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		issueID, _ := result.LastInsertId()
+		resp := ts.post(t, "/api/issues/"+itoa(issueID)+"/implement", ts.adminCookie, map[string]any{})
+		assertStatus(t, resp, http.StatusCreated)
+		var run map[string]any
+		decode(t, resp, &run)
+		runID := int64(run["id"].(float64))
+		resp = ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "running"})
+		assertStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+
+		start := make(chan struct{})
+		patchStatus, deleteStatus := make(chan int, 1), make(chan int, 1)
+		go func() {
+			<-start
+			response := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "failed"})
+			patchStatus <- response.StatusCode
+			response.Body.Close()
+		}()
+		go func() {
+			<-start
+			response := ts.del(t, "/api/issues/"+itoa(issueID), ts.adminCookie)
+			deleteStatus <- response.StatusCode
+			response.Body.Close()
+		}()
+		close(start)
+		gotPatch, gotDelete := <-patchStatus, <-deleteStatus
+		if gotDelete != http.StatusNoContent || (gotPatch != http.StatusOK && gotPatch != http.StatusConflict) {
+			t.Fatalf("race %d patch=%d delete=%d", i, gotPatch, gotDelete)
+		}
+		var status string
+		var finished sql.NullString
+		if err := db.DB.QueryRow(`SELECT status,finished_at FROM agent_runs WHERE id=?`, runID).Scan(&status, &finished); err != nil {
+			t.Fatal(err)
+		}
+		if (status != "failed" && status != "cancelled") || !finished.Valid || finished.String == "" {
+			t.Fatalf("race %d left nonterminal run status=%q finished=%+v", i, status, finished)
+		}
+		var envelopes, facts int
+		if err := db.DB.QueryRow(`SELECT
+			(SELECT COUNT(*) FROM delivery_events event WHERE event.delivery_id=link.delivery_id AND event.kind='run_normalized'),
+			(SELECT COUNT(*) FROM delivery_stage_events fact WHERE fact.delivery_id=link.delivery_id
+			 AND fact.attempt_id=link.attempt_id AND fact.stage_key=link.stage_key
+			 AND fact.execution_number=link.execution_number AND fact.event_type='lifecycle_normalized')
+			FROM delivery_agent_run_links link WHERE link.agent_run_id=?`, runID).Scan(&envelopes, &facts); err != nil {
+			t.Fatal(err)
+		}
+		if envelopes != 1 || facts != 1 {
+			t.Fatalf("race %d produced envelopes=%d facts=%d", i, envelopes, facts)
+		}
+	}
+}
+
 func TestInstrumentedRunWritesReauthorizeAgainstCurrentRootProject(t *testing.T) {
 	ts := newTestServer(t)
 	projectID := seedBatchProject(t, "PAI", "PAI")
