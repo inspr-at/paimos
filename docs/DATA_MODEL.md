@@ -558,6 +558,8 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M139 | `sessions.via_oidc` | Record OIDC-authenticated sessions so local-TOTP guidance does not misrepresent the IdP boundary (PAI-742). |
 | M140 | `agent_runs.repo_url/branch_name/commit_base_sha/commit_sha` | Runner-declared base→head Git evidence; equal SHAs explicitly mean no commit was produced (PAI-702). |
 | M141 | project lifecycle issue-insert triggers | Reject issue creation in `frozen`, `archived`, or `deleted` projects at the storage boundary (PAI-754). |
+| M142 | `agent_run_telemetry`, `agent_run_telemetry_latest` | Append-only provider-neutral run facts plus an indexed latest projection (PAI-799). |
+| M143 | rebuilt `agent_runs`; expanded telemetry latest projection | Add truthful terminal `completed`, durable `expects_supervisor_telemetry`, and separate latest event/heartbeat/semantic/estimate pointers (PAI-801). |
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 

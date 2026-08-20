@@ -518,6 +518,7 @@
             "enum": [
               "queued",
               "running",
+              "completed",
               "tests_passed",
               "tests_failed",
               "deployed",
@@ -873,11 +874,13 @@
             "enum": [
               "queued",
               "running",
+              "completed",
               "tests_passed",
               "tests_failed",
               "deployed",
               "failed",
-              "cancelled"
+              "cancelled",
+              "drafted"
             ]
           },
           "version": {
@@ -925,6 +928,10 @@
           "finished_at": {
             "type": "string",
             "nullable": true
+          },
+          "expects_supervisor_telemetry": {
+            "type": "boolean",
+            "description": "Durable claim marker for the server heartbeat watchdog; legacy rows remain false"
           }
         }
       },
@@ -992,19 +999,27 @@
       },
       "AgentRunTelemetrySnapshot": {
         "type": "object",
-        "required": ["run_id", "instrumented", "liveness", "latest"],
+        "required": ["run_id", "instrumented", "liveness", "latest", "latest_event", "latest_heartbeat", "latest_semantic", "latest_estimate"],
         "properties": {
           "run_id": {"type": "integer", "format": "int64"},
           "instrumented": {"type": "boolean"},
           "liveness": {"type": "string", "enum": ["unknown", "live", "stale", "ended"]},
           "freshness_seconds": {"type": "integer", "format": "int64"},
+          "event_freshness_seconds": {"type": "integer", "format": "int64", "description": "Age of the newest event by server receipt time"},
+          "heartbeat_freshness_seconds": {"type": "integer", "format": "int64", "description": "Age of the newest supervisor heartbeat; the only active-run watchdog clock"},
+          "semantic_freshness_seconds": {"type": "integer", "format": "int64"},
+          "estimate_freshness_seconds": {"type": "integer", "format": "int64"},
           "last_heartbeat_at": {"type": "string", "format": "date-time"},
           "latest": {
             "oneOf": [
               {"$ref": "#/components/schemas/AgentRunTelemetry"},
               {"type": "null"}
             ]
-          }
+          },
+          "latest_event": {"oneOf": [{"$ref": "#/components/schemas/AgentRunTelemetry"}, {"type": "null"}]},
+          "latest_heartbeat": {"oneOf": [{"$ref": "#/components/schemas/AgentRunTelemetry"}, {"type": "null"}]},
+          "latest_semantic": {"oneOf": [{"$ref": "#/components/schemas/AgentRunTelemetry"}, {"type": "null"}]},
+          "latest_estimate": {"oneOf": [{"$ref": "#/components/schemas/AgentRunTelemetry"}, {"type": "null"}]}
         }
       },
       "AgentActionCapability": {
@@ -2802,10 +2817,12 @@
                 "type": "object",
                 "properties": {
                   "status": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": ["queued", "running", "completed", "tests_passed", "tests_failed", "deployed", "failed", "cancelled", "drafted"]
                   },
                   "if_status": {
                     "type": "string",
+                    "enum": ["queued", "running", "completed", "tests_passed", "tests_failed", "deployed", "failed", "cancelled", "drafted"],
                     "description": "optimistic claim guard — apply only if the run is still in this status"
                   },
                   "device_id": {
@@ -2820,7 +2837,8 @@
                     "type": "string"
                   },
                   "tests_summary": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "bounded runner-owned result evidence; tests_passed requires the configured-test success evidence value"
                   },
                   "deploy_target": {
                     "type": "string"
@@ -2848,6 +2866,11 @@
                   },
                   "error": {
                     "type": "string"
+                  },
+                  "expects_supervisor_telemetry": {
+                    "type": "boolean",
+                    "enum": [true],
+                    "description": "may be enabled only in the queued-to-running claim; distinguishes new supervised runs from legacy uninstrumented runners"
                   }
                 }
               }
@@ -2890,6 +2913,14 @@
           "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentRunTelemetryInput"}}}
         },
         "responses": {
+          "200": {
+            "description": "Exact idempotent replay; the original persisted telemetry fact is returned with duplicate=true",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {
+              "accepted": {"type": "boolean"},
+              "duplicate": {"type": "boolean", "enum": [true]},
+              "telemetry": {"$ref": "#/components/schemas/AgentRunTelemetry"}
+            }}}}
+          },
           "201": {
             "description": "Telemetry appended",
             "content": {"application/json": {"schema": {"type": "object", "properties": {

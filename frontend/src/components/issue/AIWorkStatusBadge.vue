@@ -13,6 +13,7 @@ const emit = defineEmits<{
 const LABELS: Record<string, string> = {
   queued: "Queued",
   running: "Running",
+  completed: "Implemented",
   drafted: "Draft ready",
   tests_passed: "Tests ok",
   tests_failed: "Tests failed",
@@ -24,6 +25,7 @@ const LABELS: Record<string, string> = {
 const PHRASES: Record<string, string> = {
   queued: "AI queued",
   running: "AI running",
+  completed: "AI implemented",
   drafted: "AI draft ready",
   tests_passed: "AI tests ok",
   tests_failed: "AI tests failed",
@@ -112,6 +114,10 @@ const title = computed(() => {
 .ai-work-badge--drafted {
   color: #6d28d9;
   background: color-mix(in srgb, #8b5cf6 18%, transparent);
+}
+.ai-work-badge--completed {
+  color: #1e8449;
+  background: color-mix(in srgb, #2ecc71 16%, transparent);
 }
 .ai-work-badge--tests_passed,
 .ai-work-badge--deployed {

@@ -36,6 +36,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,13 @@ import (
 	"github.com/inspr-at/paimos/backend/cmd/paimos/sync"
 	"github.com/spf13/cobra"
 )
+
+const (
+	defaultClaudePermissionMode = "dontAsk"
+	defaultClaudeAllowedTools   = "Read,Glob,Grep,Edit,Write"
+)
+
+var claudeToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.*:-]+$`)
 
 func runAgentCmd() *cobra.Command {
 	c := &cobra.Command{
@@ -55,19 +63,21 @@ func runAgentCmd() *cobra.Command {
 
 func runAgentWatchCmd() *cobra.Command {
 	var (
-		projectRef  string
-		repoRoot    string
-		execCmd     string
-		actionKey   string
-		testExec    string
-		yes         bool
-		allowDeploy bool
-		deployExec  string
-		yesDeploy   bool
-		attachLogs  bool
-		execTimeout time.Duration
-		heartbeatTO time.Duration
-		heartbeatIn time.Duration
+		projectRef           string
+		repoRoot             string
+		execCmd              string
+		actionKey            string
+		testExec             string
+		yes                  bool
+		allowDeploy          bool
+		deployExec           string
+		yesDeploy            bool
+		attachLogs           bool
+		execTimeout          time.Duration
+		heartbeatTO          time.Duration
+		heartbeatIn          time.Duration
+		claudePermissionMode string
+		claudeAllowedTools   string
 	)
 	c := &cobra.Command{
 		Use:   "watch",
@@ -107,6 +117,7 @@ Examples:
 				yes: yes, allowDeploy: allowDeploy, deployExec: deployExec, yesDeploy: yesDeploy,
 				attachLogs: attachLogs, executionTimeout: execTimeout,
 				heartbeatTimeout: heartbeatTO, heartbeatInterval: heartbeatIn,
+				claudePermissionMode: claudePermissionMode, claudeAllowedTools: claudeAllowedTools,
 			})
 		},
 	}
@@ -123,23 +134,27 @@ Examples:
 	c.Flags().DurationVar(&execTimeout, "execution-timeout", 2*time.Hour, "maximum lifetime of an agent child process")
 	c.Flags().DurationVar(&heartbeatTO, "heartbeat-timeout", 5*time.Minute, "terminate a child that produces no stdout/stderr activity for this long")
 	c.Flags().DurationVar(&heartbeatIn, "heartbeat-interval", 15*time.Second, "supervisor liveness report interval while the child is alive")
+	c.Flags().StringVar(&claudePermissionMode, "claude-permission-mode", defaultClaudePermissionMode, "Claude permission mode for the built-in claude command")
+	c.Flags().StringVar(&claudeAllowedTools, "claude-allowed-tools", defaultClaudeAllowedTools, "comma-separated Claude tool allowlist for the built-in claude command")
 	return c
 }
 
 type runAgentOpts struct {
-	projectRef        string
-	repoRoot          string
-	execCmd           string
-	actionKey         string
-	testExec          string
-	yes               bool
-	allowDeploy       bool
-	deployExec        string
-	yesDeploy         bool
-	attachLogs        bool
-	executionTimeout  time.Duration
-	heartbeatTimeout  time.Duration
-	heartbeatInterval time.Duration
+	projectRef           string
+	repoRoot             string
+	execCmd              string
+	actionKey            string
+	testExec             string
+	yes                  bool
+	allowDeploy          bool
+	deployExec           string
+	yesDeploy            bool
+	attachLogs           bool
+	executionTimeout     time.Duration
+	heartbeatTimeout     time.Duration
+	heartbeatInterval    time.Duration
+	claudePermissionMode string
+	claudeAllowedTools   string
 }
 
 func resolveRunnerAction(explicit, execCmd string) (string, string, error) {
@@ -200,6 +215,11 @@ func runAgentWatch(o runAgentOpts) error {
 	if o.executionTimeout <= 0 || o.heartbeatTimeout <= 0 || o.heartbeatInterval <= 0 {
 		return &usageError{msg: "execution and heartbeat durations must be positive"}
 	}
+	if strings.TrimSpace(o.execCmd) == "claude" {
+		if err := validateClaudeRunnerConfig(o.claudePermissionMode, o.claudeAllowedTools); err != nil {
+			return err
+		}
+	}
 	client, err := instanceClient()
 	if err != nil {
 		return err
@@ -233,6 +253,8 @@ func runAgentWatch(o runAgentOpts) error {
 	runner.executionTimeout = o.executionTimeout
 	runner.heartbeatTimeout = o.heartbeatTimeout
 	runner.heartbeatInterval = o.heartbeatInterval
+	runner.claudePermissionMode = o.claudePermissionMode
+	runner.claudeAllowedTools = o.claudeAllowedTools
 	deployNote := "report-back only, no auto-deploy"
 	if runner.allowDeploy && runner.deployExec != "" {
 		deployNote = "deploy ENABLED via " + runner.deployExec + " (runs with a deploy_target only)"
@@ -335,52 +357,68 @@ func runAgentWatch(o runAgentOpts) error {
 // agentRunner executes implement jobs. spawn/confirm/confirmDeploy are fields so
 // tests can inject fakes without touching the SSE/exec machinery.
 type agentRunner struct {
-	client            *Client
-	deviceID          string
-	repoRoot          string
-	execCmd           string
-	actionKey         string
-	testExec          string
-	autoConfirm       bool
-	allowDeploy       bool
-	deployExec        string
-	autoConfirmDep    bool
-	attachLogs        bool
-	executionTimeout  time.Duration
-	heartbeatTimeout  time.Duration
-	heartbeatInterval time.Duration
-	lastQueuedErr     string // dedupes catch-up error logging (single goroutine)
-	spawn             func(ctx context.Context, repoRoot, execCmd string, env []string, logSink io.Writer) error
-	supervise         func(context.Context, supervisorRequest) supervisorResult
-	reporter          runnerReportTransport
-	confirm           func(issueKey string, runID int64, repoRoot string) bool
-	confirmDeploy     func(issueKey string, runID int64, target string) bool
+	client               *Client
+	deviceID             string
+	repoRoot             string
+	execCmd              string
+	actionKey            string
+	testExec             string
+	autoConfirm          bool
+	allowDeploy          bool
+	deployExec           string
+	autoConfirmDep       bool
+	attachLogs           bool
+	executionTimeout     time.Duration
+	heartbeatTimeout     time.Duration
+	heartbeatInterval    time.Duration
+	claudePermissionMode string
+	claudeAllowedTools   string
+	lastQueuedErr        string // dedupes catch-up error logging (single goroutine)
+	spawn                func(ctx context.Context, repoRoot, execCmd string, env []string, logSink io.Writer) error
+	supervise            func(context.Context, supervisorRequest) supervisorResult
+	reporter             runnerReportTransport
+	confirm              func(issueKey string, runID int64, repoRoot string) bool
+	confirmDeploy        func(issueKey string, runID int64, target string) bool
 }
 
 func newAgentRunner(client *Client, deviceID, repoRoot, execCmd, actionKey, testExec string, autoConfirm, allowDeploy bool, deployExec string, autoConfirmDeploy, attachLogs bool) *agentRunner {
 	if actionKey == "" {
 		actionKey, _, _ = resolveRunnerAction("", execCmd)
 	}
+	provider, adapter := runnerTelemetryIdentityForAction(actionKey)
 	return &agentRunner{
-		client:            client,
-		deviceID:          deviceID,
-		repoRoot:          repoRoot,
-		execCmd:           execCmd,
-		actionKey:         actionKey,
-		testExec:          testExec,
-		autoConfirm:       autoConfirm,
-		allowDeploy:       allowDeploy,
-		deployExec:        deployExec,
-		autoConfirmDep:    autoConfirmDeploy,
-		attachLogs:        attachLogs,
-		executionTimeout:  2 * time.Hour,
-		heartbeatTimeout:  5 * time.Minute,
-		heartbeatInterval: 15 * time.Second,
-		spawn:             defaultSpawn,
-		supervise:         superviseAgentProcess,
-		reporter:          &httpRunnerReportTransport{client: client},
-		confirm:           defaultConfirm,
-		confirmDeploy:     defaultDeployConfirm,
+		client:               client,
+		deviceID:             deviceID,
+		repoRoot:             repoRoot,
+		execCmd:              execCmd,
+		actionKey:            actionKey,
+		testExec:             testExec,
+		autoConfirm:          autoConfirm,
+		allowDeploy:          allowDeploy,
+		deployExec:           deployExec,
+		autoConfirmDep:       autoConfirmDeploy,
+		attachLogs:           attachLogs,
+		executionTimeout:     2 * time.Hour,
+		heartbeatTimeout:     5 * time.Minute,
+		heartbeatInterval:    15 * time.Second,
+		claudePermissionMode: defaultClaudePermissionMode,
+		claudeAllowedTools:   defaultClaudeAllowedTools,
+		spawn:                defaultSpawn,
+		supervise:            superviseAgentProcess,
+		reporter:             &httpRunnerReportTransport{client: client, provider: provider, adapter: adapter},
+		confirm:              defaultConfirm,
+		confirmDeploy:        defaultDeployConfirm,
+	}
+}
+
+func runnerTelemetryIdentityForAction(actionKey string) (string, string) {
+	switch actionKey {
+	case "codex_cli.implement":
+		return "openai", "codex-cli"
+	case "claude_cli.implement":
+		return "anthropic", "claude-code"
+	default:
+		return "paimos", "run-agent"
 	}
 }
 
@@ -516,7 +554,11 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	}
 	// Atomic claim: queued -> running. A second runner that re-reads the run
 	// loses here (the if_status guard) and skips — no double-spawn.
-	if err := a.patch(runID, map[string]any{"status": "running", "if_status": "queued", "device_id": a.deviceID, "action_key": actionKey}); err != nil {
+	claim := map[string]any{"status": "running", "if_status": "queued", "device_id": a.deviceID, "action_key": actionKey}
+	if a.supervise != nil {
+		claim["expects_supervisor_telemetry"] = true
+	}
+	if err := a.patch(runID, claim); err != nil {
 		if isConflict(err) {
 			fmt.Fprintf(stdout, "run %d already claimed by another runner — skipping\n", runID)
 			return nil
@@ -543,8 +585,18 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	fmt.Fprintf(stdout, "%s implementing %s%s (run %d) in %s\n",
 		time.Now().Format(time.RFC3339), issueKey, agentNote, runID, a.repoRoot)
 
+	provider, adapter := runnerTelemetryIdentityForAction(actionKey)
+	correlationID := fmt.Sprintf("run-%d", runID)
+	if identity, ok := a.reporter.(interface {
+		Identity(int64) (string, string, string)
+	}); ok {
+		correlationID, provider, adapter = identity.Identity(runID)
+	}
 	env := []string{
 		"PAIMOS_RUN_ID=" + strconv.FormatInt(runID, 10),
+		"PAIMOS_RUN_CORRELATION_ID=" + correlationID,
+		"PAIMOS_RUN_PROVIDER=" + provider,
+		"PAIMOS_RUN_ADAPTER=" + adapter,
 		"PAIMOS_ISSUE_KEY=" + issueKey,
 		"PAIMOS_ISSUE_TITLE=" + issueCtx.Title,
 		"PAIMOS_CONTEXT_PACK=" + runCtx.ContextPack,
@@ -591,7 +643,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	var runResult supervisorResult
 	if a.supervise != nil {
 		runResult = a.supervise(ctx, supervisorRequest{
-			RunID: runID, RepoRoot: a.repoRoot, ExecCmd: effectiveAgentExec(a.execCmd), Env: env,
+			RunID: runID, RepoRoot: a.repoRoot, ExecCmd: effectiveAgentExec(a.execCmd, a.claudePermissionMode, a.claudeAllowedTools), Env: env,
 			StructuredClaude: strings.TrimSpace(a.execCmd) == "claude",
 			ExecutionTimeout: a.executionTimeout, SilenceTimeout: a.heartbeatTimeout,
 			HeartbeatInterval: a.heartbeatInterval, LogSink: logSink, Reporter: a.reporter,
@@ -1240,12 +1292,43 @@ func defaultSpawn(ctx context.Context, repoRoot, execCmd string, env []string, l
 	return cmd.Run()
 }
 
-func effectiveAgentExec(execCmd string) string {
+func effectiveAgentExec(execCmd string, claudeConfig ...string) string {
 	trimmed := strings.TrimSpace(execCmd)
 	if trimmed == "claude" {
-		return `claude -p --verbose --output-format stream-json --permission-mode dontAsk --allowedTools "Read,Glob,Grep,Edit,Write"`
+		permissionMode := defaultClaudePermissionMode
+		allowedTools := defaultClaudeAllowedTools
+		if len(claudeConfig) > 0 && strings.TrimSpace(claudeConfig[0]) != "" {
+			permissionMode = strings.TrimSpace(claudeConfig[0])
+		}
+		if len(claudeConfig) > 1 && strings.TrimSpace(claudeConfig[1]) != "" {
+			allowedTools = strings.TrimSpace(claudeConfig[1])
+		}
+		return fmt.Sprintf("claude -p --verbose --output-format stream-json --permission-mode %s --allowedTools %s",
+			permissionMode, strconv.Quote(allowedTools))
 	}
 	return execCmd
+}
+
+func validateClaudeRunnerConfig(permissionMode, allowedTools string) error {
+	permissionMode = strings.TrimSpace(permissionMode)
+	validModes := map[string]bool{
+		"default": true, "acceptEdits": true, "plan": true,
+		"dontAsk": true, "bypassPermissions": true,
+	}
+	if !validModes[permissionMode] {
+		return &usageError{msg: "invalid --claude-permission-mode"}
+	}
+	parts := strings.Split(strings.TrimSpace(allowedTools), ",")
+	if len(parts) == 0 || len(parts) > 64 {
+		return &usageError{msg: "--claude-allowed-tools must contain 1-64 tool names"}
+	}
+	for _, tool := range parts {
+		tool = strings.TrimSpace(tool)
+		if tool == "" || !claudeToolNamePattern.MatchString(tool) {
+			return &usageError{msg: "invalid --claude-allowed-tools value"}
+		}
+	}
+	return nil
 }
 
 func promptForCommand(execCmd string, env []string) (string, error) {

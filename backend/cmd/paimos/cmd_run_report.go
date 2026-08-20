@@ -8,6 +8,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -161,4 +163,19 @@ func firstRunReportValue(flagValue, envName string) string {
 
 func reportRunTelemetry(client *Client, runID int64, report runTelemetryReport) ([]byte, error) {
 	return client.do(http.MethodPost, fmt.Sprintf("/api/runs/%d/telemetry", runID), report)
+}
+
+func reportRunTelemetryContext(ctx context.Context, client *Client, runID int64, report runTelemetryReport) error {
+	body, err := json.Marshal(report)
+	if err != nil {
+		return fmt.Errorf("encode telemetry: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		client.baseURL+fmt.Sprintf("/api/runs/%d/telemetry", runID), bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build telemetry request: %w", err)
+	}
+	client.prepareRequest(req, true, "application/json", "application/json")
+	_, err = client.doRequest(req)
+	return err
 }

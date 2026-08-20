@@ -110,6 +110,10 @@ func main() {
 	// PAI-117: GDPR retention sweeper. Idempotent — first sweep runs
 	// after a 30-second warm-up so a cold start stays quiet.
 	handlers.StartRetentionSweeper()
+	// PAI-801: reconcile queued and running agent runs from durable,
+	// server-received supervisor heartbeat evidence. This is process-owned and
+	// does not depend on an issue page or another Implement click.
+	handlers.StartAgentRunReconciler()
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)

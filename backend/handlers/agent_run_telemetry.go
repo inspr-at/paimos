@@ -8,6 +8,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -30,11 +31,22 @@ import (
 const (
 	telemetryActivityMaxBytes = 280
 	telemetryBasisMaxBytes    = 240
-	telemetryStaleAfter       = 2 * time.Minute
 	telemetryClockSkewAfter   = 5 * time.Minute
 )
 
 var telemetryIdentityPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
+
+var telemetrySecretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bauthorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]{8,}`),
+	regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}`),
+	regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password|passwd|credential)\s*[:=]\s*['"]?[A-Za-z0-9._~+/=-]{8,}`),
+	regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),
+	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}\b`),
+	regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`),
+	regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{10,}\b`),
+	regexp.MustCompile(`(?i)https?://[^\s/:@]+:[^\s/@]{8,}@`),
+	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
+}
 
 var telemetryKinds = map[string]bool{
 	"heartbeat": true, "progress": true, "phase": true,
@@ -109,12 +121,20 @@ type agentRunTelemetryInput struct {
 }
 
 type agentRunTelemetrySnapshot struct {
-	RunID            int64              `json:"run_id"`
-	Instrumented     bool               `json:"instrumented"`
-	Liveness         string             `json:"liveness"`
-	FreshnessSeconds *int64             `json:"freshness_seconds,omitempty"`
-	LastHeartbeatAt  *string            `json:"last_heartbeat_at,omitempty"`
-	Latest           *AgentRunTelemetry `json:"latest"`
+	RunID                     int64              `json:"run_id"`
+	Instrumented              bool               `json:"instrumented"`
+	Liveness                  string             `json:"liveness"`
+	FreshnessSeconds          *int64             `json:"freshness_seconds,omitempty"` // backward-compatible latest-event freshness
+	EventFreshnessSeconds     *int64             `json:"event_freshness_seconds,omitempty"`
+	HeartbeatFreshnessSeconds *int64             `json:"heartbeat_freshness_seconds,omitempty"`
+	SemanticFreshnessSeconds  *int64             `json:"semantic_freshness_seconds,omitempty"`
+	EstimateFreshnessSeconds  *int64             `json:"estimate_freshness_seconds,omitempty"`
+	LastHeartbeatAt           *string            `json:"last_heartbeat_at,omitempty"`
+	Latest                    *AgentRunTelemetry `json:"latest"` // backward-compatible latest event
+	LatestEvent               *AgentRunTelemetry `json:"latest_event"`
+	LatestHeartbeat           *AgentRunTelemetry `json:"latest_heartbeat"`
+	LatestSemantic            *AgentRunTelemetry `json:"latest_semantic"`
+	LatestEstimate            *AgentRunTelemetry `json:"latest_estimate"`
 }
 
 func canReportAgentRunTelemetry(r *http.Request, run *AgentRun) bool {
@@ -264,18 +284,37 @@ func IngestAgentRunTelemetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	event.ID, _ = res.LastInsertId()
-	var heartbeatAt any
+	var heartbeatAt, heartbeatID, semanticID, semanticAt, estimateID, estimateAt any
 	if event.Heartbeat {
 		heartbeatAt = event.ServerReceivedAt
+		heartbeatID = event.ID
 	}
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO agent_run_telemetry_latest(run_id, telemetry_id, sequence, last_heartbeat_at)
-		VALUES(?,?,?,?)
+	if isSemanticTelemetry(event) {
+		semanticID = event.ID
+		semanticAt = event.ServerReceivedAt
+	}
+	if event.EstimateRevision != nil {
+		estimateID = event.ID
+		estimateAt = event.ServerReceivedAt
+	}
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO agent_run_telemetry_latest(
+		run_id, telemetry_id, sequence, last_heartbeat_at, heartbeat_telemetry_id,
+		semantic_telemetry_id, estimate_telemetry_id, latest_event_at,
+		latest_semantic_at, latest_estimate_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(run_id) DO UPDATE SET
 		 telemetry_id=excluded.telemetry_id,
 		 sequence=excluded.sequence,
-		 last_heartbeat_at=COALESCE(excluded.last_heartbeat_at, agent_run_telemetry_latest.last_heartbeat_at)
+		 last_heartbeat_at=COALESCE(excluded.last_heartbeat_at, agent_run_telemetry_latest.last_heartbeat_at),
+		 heartbeat_telemetry_id=COALESCE(excluded.heartbeat_telemetry_id, agent_run_telemetry_latest.heartbeat_telemetry_id),
+		 semantic_telemetry_id=COALESCE(excluded.semantic_telemetry_id, agent_run_telemetry_latest.semantic_telemetry_id),
+		 estimate_telemetry_id=COALESCE(excluded.estimate_telemetry_id, agent_run_telemetry_latest.estimate_telemetry_id),
+		 latest_event_at=excluded.latest_event_at,
+		 latest_semantic_at=COALESCE(excluded.latest_semantic_at, agent_run_telemetry_latest.latest_semantic_at),
+		 latest_estimate_at=COALESCE(excluded.latest_estimate_at, agent_run_telemetry_latest.latest_estimate_at)
 		WHERE excluded.sequence > agent_run_telemetry_latest.sequence`,
-		run.ID, event.ID, event.Sequence, heartbeatAt); err != nil {
+		run.ID, event.ID, event.Sequence, heartbeatAt, heartbeatID, semanticID,
+		estimateID, event.ServerReceivedAt, semanticAt, estimateAt); err != nil {
 		jsonError(w, "telemetry snapshot failed", http.StatusInternalServerError)
 		return
 	}
@@ -342,39 +381,102 @@ func GetLatestAgentRunTelemetry(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "run not found", http.StatusNotFound)
 		return
 	}
+	var latestID int64
 	var heartbeat sql.NullString
-	row := db.DB.QueryRowContext(r.Context(), `SELECT `+prefixedAgentRunTelemetryCols("t")+`, l.last_heartbeat_at
-		FROM agent_run_telemetry_latest l
-		JOIN agent_run_telemetry t ON t.id=l.telemetry_id
-		WHERE l.run_id=?`, run.ID)
-	event, err := scanAgentRunTelemetryWithHeartbeat(row, &heartbeat)
+	var heartbeatID, semanticID, estimateID sql.NullInt64
+	var eventAt, semanticAt, estimateAt sql.NullString
+	err := db.DB.QueryRowContext(r.Context(), `SELECT telemetry_id, last_heartbeat_at,
+		heartbeat_telemetry_id, semantic_telemetry_id, estimate_telemetry_id,
+		latest_event_at, latest_semantic_at, latest_estimate_at
+		FROM agent_run_telemetry_latest WHERE run_id=?`, run.ID).Scan(
+		&latestID, &heartbeat, &heartbeatID, &semanticID, &estimateID,
+		&eventAt, &semanticAt, &estimateAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		jsonOK(w, agentRunTelemetrySnapshot{RunID: run.ID, Instrumented: false, Liveness: "unknown", Latest: nil})
+		jsonOK(w, agentRunTelemetrySnapshot{
+			RunID: run.ID, Instrumented: false, Liveness: "unknown",
+			Latest: nil, LatestEvent: nil, LatestHeartbeat: nil,
+			LatestSemantic: nil, LatestEstimate: nil,
+		})
 		return
 	}
 	if err != nil {
 		jsonError(w, "telemetry unavailable", http.StatusInternalServerError)
 		return
 	}
-	received, _ := time.Parse(time.RFC3339Nano, event.ServerReceivedAt)
-	freshness := int64(time.Since(received).Seconds())
-	if freshness < 0 {
-		freshness = 0
+	event, err := getAgentRunTelemetryByID(r.Context(), latestID)
+	if err != nil {
+		jsonError(w, "telemetry unavailable", http.StatusInternalServerError)
+		return
 	}
-	liveness := "live"
+	heartbeatEvent, err := optionalAgentRunTelemetryByID(r.Context(), heartbeatID)
+	if err != nil {
+		jsonError(w, "telemetry unavailable", http.StatusInternalServerError)
+		return
+	}
+	semanticEvent, err := optionalAgentRunTelemetryByID(r.Context(), semanticID)
+	if err != nil {
+		jsonError(w, "telemetry unavailable", http.StatusInternalServerError)
+		return
+	}
+	estimateEvent, err := optionalAgentRunTelemetryByID(r.Context(), estimateID)
+	if err != nil {
+		jsonError(w, "telemetry unavailable", http.StatusInternalServerError)
+		return
+	}
+	now := time.Now().UTC()
+	eventFreshness := telemetryFreshness(now, eventAt)
+	heartbeatFreshness := telemetryFreshness(now, heartbeat)
+	semanticFreshness := telemetryFreshness(now, semanticAt)
+	estimateFreshness := telemetryFreshness(now, estimateAt)
+	liveness := "unknown"
 	if agentRunIsTerminal(run.Status) {
 		liveness = "ended"
-	} else if time.Since(received) > telemetryStaleAfter {
-		liveness = "stale"
+	} else if heartbeatFreshness != nil {
+		liveness = "live"
+		heartbeatAt, parseErr := time.Parse(time.RFC3339Nano, heartbeat.String)
+		if parseErr == nil && now.Sub(heartbeatAt) >= AgentRunReconcilerConfigFromEnv().HeartbeatTimeout {
+			liveness = "stale"
+		}
 	}
 	snapshot := agentRunTelemetrySnapshot{
 		RunID: run.ID, Instrumented: true, Liveness: liveness,
-		FreshnessSeconds: &freshness, Latest: event,
+		FreshnessSeconds: eventFreshness, EventFreshnessSeconds: eventFreshness,
+		HeartbeatFreshnessSeconds: heartbeatFreshness,
+		SemanticFreshnessSeconds:  semanticFreshness,
+		EstimateFreshnessSeconds:  estimateFreshness,
+		Latest:                    event, LatestEvent: event, LatestHeartbeat: heartbeatEvent,
+		LatestSemantic: semanticEvent, LatestEstimate: estimateEvent,
 	}
 	if heartbeat.Valid {
 		snapshot.LastHeartbeatAt = &heartbeat.String
 	}
 	jsonOK(w, snapshot)
+}
+
+func getAgentRunTelemetryByID(ctx context.Context, id int64) (*AgentRunTelemetry, error) {
+	return scanAgentRunTelemetry(db.DB.QueryRowContext(ctx, `SELECT `+agentRunTelemetryCols+` FROM agent_run_telemetry WHERE id=?`, id))
+}
+
+func optionalAgentRunTelemetryByID(ctx context.Context, id sql.NullInt64) (*AgentRunTelemetry, error) {
+	if !id.Valid {
+		return nil, nil
+	}
+	return getAgentRunTelemetryByID(ctx, id.Int64)
+}
+
+func telemetryFreshness(now time.Time, value sql.NullString) *int64 {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return nil
+	}
+	when, err := time.Parse(time.RFC3339Nano, value.String)
+	if err != nil {
+		return nil
+	}
+	seconds := int64(now.Sub(when).Seconds())
+	if seconds < 0 {
+		seconds = 0
+	}
+	return &seconds
 }
 
 const agentRunTelemetryCols = `id, run_id, sequence, correlation_id, provider, adapter, agent_reported_at, server_received_at, kind, heartbeat, phase, activity, needs_input, blocker_state, estimate_revision, progress_percent, eta_seconds, eta_min_seconds, eta_max_seconds, estimate_source, estimate_confidence, estimate_basis`
@@ -565,7 +667,17 @@ func validateTelemetryText(field, value string, max int) error {
 			return fmt.Errorf("%s contains control characters", field)
 		}
 	}
+	for _, pattern := range telemetrySecretPatterns {
+		if pattern.MatchString(value) {
+			return fmt.Errorf("%s contains an obvious secret-bearing value", field)
+		}
+	}
 	return nil
+}
+
+func isSemanticTelemetry(event *AgentRunTelemetry) bool {
+	return event != nil && (event.Kind != "heartbeat" || event.Activity != "" ||
+		event.NeedsInput || event.BlockerState != "none")
 }
 
 func decorateTelemetryClock(event *AgentRunTelemetry) {

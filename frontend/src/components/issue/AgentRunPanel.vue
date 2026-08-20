@@ -109,6 +109,7 @@ let alive = true
 const STATUS_LABEL: Record<string, string> = {
   queued: 'Queued',
   running: 'Running',
+  completed: 'Implemented',
   tests_passed: 'Tests passed',
   tests_failed: 'Tests failed',
   deployed: 'Deployed',
@@ -503,7 +504,7 @@ interface RunStage {
 }
 
 function isFinished(run: AgentRun): boolean {
-  return ['tests_passed', 'tests_failed', 'deployed', 'drafted', 'failed', 'cancelled'].includes(
+  return ['completed', 'tests_passed', 'tests_failed', 'deployed', 'drafted', 'failed', 'cancelled'].includes(
     run.status,
   )
 }
@@ -563,12 +564,13 @@ function runStages(run: AgentRun): RunStage[] {
   }
   const isQueued = run.status === 'queued'
   const isRunning = run.status === 'running'
+  const isCompleted = run.status === 'completed'
   const isDeployed = run.status === 'deployed'
   const isTestsPassed = run.status === 'tests_passed' || isDeployed
   const isTestsFailed = run.status === 'tests_failed'
   const isFailed = run.status === 'failed' || run.status === 'cancelled'
   const started = !!run.started_at || isRunning || isFinished(run)
-  const hasDeploy = !!run.deploy_target
+  const hasDeploy = !!run.deploy_target && !isCompleted
 
   return [
     { key: 'queued', label: 'Queued', state: isQueued ? 'active' : 'complete' },
@@ -580,12 +582,18 @@ function runStages(run: AgentRun): RunStage[] {
     },
     {
       key: 'tests',
-      label: isTestsPassed ? 'Tests passed' : isTestsFailed ? 'Tests failed' : 'Tests',
+      label: isTestsPassed
+        ? 'Tests passed'
+        : isTestsFailed
+          ? 'Tests failed'
+          : isCompleted
+            ? 'Tests not verified'
+            : 'Tests',
       state: isTestsPassed
         ? 'complete'
         : isTestsFailed
           ? 'failed'
-          : started && !isFailed
+          : started && !isFailed && !isCompleted
             ? 'active'
             : 'pending',
     },
@@ -600,7 +608,7 @@ function runStages(run: AgentRun): RunStage[] {
             : isTestsPassed
               ? 'active'
               : 'pending'
-        : isTestsPassed
+        : isCompleted || isTestsPassed
           ? 'complete'
           : isTestsFailed || isFailed
             ? 'failed'
@@ -1400,6 +1408,10 @@ onUnmounted(() => {
 .arp-pill--running {
   background: color-mix(in srgb, var(--brand-blue) 20%, transparent);
   color: var(--brand-blue);
+}
+.arp-pill--completed {
+  background: color-mix(in srgb, #2ecc71 18%, transparent);
+  color: #1e8449;
 }
 .arp-pill--tests_passed {
   background: color-mix(in srgb, #1aa179 24%, transparent);

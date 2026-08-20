@@ -194,6 +194,9 @@ Defences:
   timer-driven rather than model-driven. Silence, execution timeout, and
   cancellation terminate the owned process group before the outcome is chosen,
   so a descendant cannot outlive the run or race into success.
+  Unix-family runners enforce this with a process group. Other Go targets have
+  only direct-child termination and must use wrappers that do not detach
+  descendants.
 - **Report-back only by default; deploy is triple-gated.** The runner never
   deploys unless the operator passed BOTH `--allow-deploy` and a `--deploy-exec`
   command AND the run carries a `deploy_target`. Absent any of the three it can

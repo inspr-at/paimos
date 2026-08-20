@@ -147,6 +147,7 @@ func TestAgentRunRejectsMalformedCommitEvidence(t *testing.T) {
 
 	resp := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
 		"status":          "tests_passed",
+		"tests_summary":   "configured test command passed",
 		"repo_url":        "https://github.com/inspr-at/paimos",
 		"branch_name":     "main",
 		"commit_base_sha": strings.Repeat("a", 64),
@@ -840,7 +841,9 @@ func TestAgentRunTestsPassedStampsFinishedAtButCanDeploy(t *testing.T) {
 	_, runID := seedRunForIssue(t, ts, projID, 1)
 	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "running"}), http.StatusOK)
 
-	resp := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "tests_passed"})
+	resp := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+		"status": "tests_passed", "tests_summary": "configured test command passed",
+	})
 	assertStatus(t, resp, http.StatusOK)
 	var run map[string]any
 	decode(t, resp, &run)

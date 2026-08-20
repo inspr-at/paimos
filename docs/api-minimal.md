@@ -270,13 +270,14 @@ GET    /runs/:id                       run detail
 PATCH  /runs/:id                       lifecycle/report compare-and-set
 ```
 
-PAI-800 runner liveness/progress uses the PAI-799 integration seam on
-`PATCH /runs/:id`: `status=running`, `if_status=running`, plus only
-`supervisor_event`, `supervisor_phase`, `supervisor_summary`, and optional
-`supervisor_outcome`. The supervisor never sends provider prompt, source, tool
-arguments, command output, environment values, or raw errors. PAI-799 owns the
-final persistence/endpoint mapping and acceptance of the truthful `completed`
-result used when no configured test command ran.
+PAI-800 runner liveness/progress uses the PAI-799 integration seam directly:
+`POST /runs/:id/telemetry`. The supervisor owns stable correlation plus
+monotonic sequence and estimate revision, and sends only the documented
+heartbeat, phase, activity, needs-input, blocker, progress, and ETA fields.
+Provider prompts, source, tool arguments, command output, environment values,
+raw errors, and arbitrary provider payloads never cross this seam. Lifecycle
+remains on `PATCH /runs/:id`; a successful code run without configured test
+execution reports the truthful terminal status `completed`.
 
 Project inventories — small CRUD trios shared by every agent in the project:
 
@@ -439,16 +440,19 @@ GET    /reports/accruals                         admin only — per-user time ro
 ```
 POST   /runs/:id/telemetry          append one allowlisted fact; requester/claimer/admin
 GET    /runs/:id/telemetry          append-only history; ?after_sequence=0&limit=100
-GET    /runs/:id/telemetry/latest   indexed snapshot; uninstrumented => unknown/null
+GET    /runs/:id/telemetry/latest   indexed event/heartbeat/semantic/estimate snapshot
 ```
 
 Sequence is strictly increasing per run. Exact duplicate replay is idempotent;
 conflicting duplicate/out-of-order and post-terminal reports return 409.
-Freshness uses server receipt time, never the agent clock. Percentage and ETA
+Event freshness and supervisor-heartbeat liveness are separate and both use
+server receipt time, never the agent clock. Heartbeat-only reports preserve the
+latest semantic activity/blocker and estimate facts. Percentage and ETA
 are optional evidence-backed declarations and are never derived from elapsed
 wall time. Unknown JSON fields are rejected; raw prompts, tool arguments,
 command output, environment values, secrets, source contents, and provider
-payloads are outside this contract.
+payloads are outside this contract. Obvious secret-bearing values in the two
+allowlisted one-line text fields are rejected.
 
 ## Project metadata
 

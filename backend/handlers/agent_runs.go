@@ -34,54 +34,55 @@ import (
 
 // AgentRun is the lifecycle record for one "Implement this" run.
 type AgentRun struct {
-	ID                 int64   `json:"id"`
-	IssueID            int64   `json:"issue_id"`
-	ProjectID          *int64  `json:"project_id"`
-	DeviceID           string  `json:"device_id"`
-	RequestedBy        *int64  `json:"requested_by"`
-	ClaimedBy          *int64  `json:"claimed_by"`
-	ActionKey          string  `json:"action_key"`
-	ProviderKind       string  `json:"provider_kind"`
-	ProviderID         string  `json:"provider_id"`
-	ProviderLabel      string  `json:"provider_label"`
-	Model              string  `json:"model"`
-	RunMode            string  `json:"run_mode"`
-	ProfileID          string  `json:"profile_id"`
-	Effort             string  `json:"effort"`
-	PromptPresetRef    string  `json:"prompt_preset_ref"`
-	ContextPack        string  `json:"context_pack"`
-	ContextTruncated   bool    `json:"context_truncated,omitempty"`
-	ContextSourcesJSON string  `json:"context_sources_json,omitempty"`
-	PromptTokens       int     `json:"prompt_tokens,omitempty"`
-	CompletionTokens   int     `json:"completion_tokens,omitempty"`
-	FinishReason       string  `json:"finish_reason,omitempty"`
-	AgentName          string  `json:"agent_name"`
-	SessionID          string  `json:"session_id"`
-	Status             string  `json:"status"`
-	Version            string  `json:"version"`
-	TestsSummary       *string `json:"tests_summary"`
-	DeployTarget       string  `json:"deploy_target"`
-	RepoURL            string  `json:"repo_url"`
-	BranchName         string  `json:"branch_name"`
-	CommitBaseSHA      string  `json:"commit_base_sha"`
-	CommitSHA          string  `json:"commit_sha"`
-	LogAttachmentID    *int64  `json:"log_attachment_id"`
-	Error              string  `json:"error"`
-	CreatedAt          string  `json:"created_at"`
-	StartedAt          *string `json:"started_at"`
-	FinishedAt         *string `json:"finished_at"`
-	SourceDraftRunID   *int64  `json:"source_draft_run_id,omitempty"`
-	FollowupRunID      *int64  `json:"followup_run_id,omitempty"`
+	ID                         int64   `json:"id"`
+	IssueID                    int64   `json:"issue_id"`
+	ProjectID                  *int64  `json:"project_id"`
+	DeviceID                   string  `json:"device_id"`
+	RequestedBy                *int64  `json:"requested_by"`
+	ClaimedBy                  *int64  `json:"claimed_by"`
+	ActionKey                  string  `json:"action_key"`
+	ProviderKind               string  `json:"provider_kind"`
+	ProviderID                 string  `json:"provider_id"`
+	ProviderLabel              string  `json:"provider_label"`
+	Model                      string  `json:"model"`
+	RunMode                    string  `json:"run_mode"`
+	ProfileID                  string  `json:"profile_id"`
+	Effort                     string  `json:"effort"`
+	PromptPresetRef            string  `json:"prompt_preset_ref"`
+	ContextPack                string  `json:"context_pack"`
+	ContextTruncated           bool    `json:"context_truncated,omitempty"`
+	ContextSourcesJSON         string  `json:"context_sources_json,omitempty"`
+	PromptTokens               int     `json:"prompt_tokens,omitempty"`
+	CompletionTokens           int     `json:"completion_tokens,omitempty"`
+	FinishReason               string  `json:"finish_reason,omitempty"`
+	AgentName                  string  `json:"agent_name"`
+	SessionID                  string  `json:"session_id"`
+	Status                     string  `json:"status"`
+	Version                    string  `json:"version"`
+	TestsSummary               *string `json:"tests_summary"`
+	DeployTarget               string  `json:"deploy_target"`
+	RepoURL                    string  `json:"repo_url"`
+	BranchName                 string  `json:"branch_name"`
+	CommitBaseSHA              string  `json:"commit_base_sha"`
+	CommitSHA                  string  `json:"commit_sha"`
+	LogAttachmentID            *int64  `json:"log_attachment_id"`
+	Error                      string  `json:"error"`
+	CreatedAt                  string  `json:"created_at"`
+	StartedAt                  *string `json:"started_at"`
+	FinishedAt                 *string `json:"finished_at"`
+	SourceDraftRunID           *int64  `json:"source_draft_run_id,omitempty"`
+	FollowupRunID              *int64  `json:"followup_run_id,omitempty"`
+	ExpectsSupervisorTelemetry bool    `json:"expects_supervisor_telemetry"`
 }
 
 // agentRunStatuses is the allowed lifecycle set (mirrors the DB CHECK).
 var agentRunStatuses = map[string]bool{
-	"queued": true, "running": true, "tests_passed": true, "tests_failed": true,
+	"queued": true, "running": true, "completed": true, "tests_passed": true, "tests_failed": true,
 	"deployed": true, "failed": true, "cancelled": true, "drafted": true,
 }
 
 func agentRunIsTerminal(s string) bool {
-	return s == "deployed" || s == "failed" || s == "cancelled" || s == "drafted"
+	return s == "completed" || s == "deployed" || s == "failed" || s == "cancelled" || s == "drafted"
 }
 
 // legalRunTransitions is the run lifecycle as a directed graph. Terminal states
@@ -89,7 +90,7 @@ func agentRunIsTerminal(s string) bool {
 // terminal-immutability guard. A same-status PATCH is a no-op (not a transition).
 var legalRunTransitions = map[string]map[string]bool{
 	"queued":       {"running": true, "cancelled": true},
-	"running":      {"tests_passed": true, "tests_failed": true, "deployed": true, "failed": true, "cancelled": true, "drafted": true},
+	"running":      {"completed": true, "tests_passed": true, "tests_failed": true, "deployed": true, "failed": true, "cancelled": true, "drafted": true},
 	"tests_passed": {"deployed": true, "failed": true},
 	"tests_failed": {"failed": true},
 }
@@ -112,13 +113,13 @@ const agentRunCols = `id, issue_id, project_id, device_id, requested_by, claimed
 	`profile_id, effort, prompt_preset_ref, context_pack, context_truncated, context_sources_json, prompt_tokens, completion_tokens, finish_reason, ` +
 	`agent_name, session_id, ` +
 	`status, version, tests_summary, deploy_target, repo_url, branch_name, commit_base_sha, commit_sha, log_attachment_id, error, created_at, started_at, finished_at, ` +
-	`source_draft_run_id, followup_run_id`
+	`source_draft_run_id, followup_run_id, expects_supervisor_telemetry`
 
 func scanAgentRun(row interface{ Scan(...any) error }) (*AgentRun, error) {
 	var ar AgentRun
 	var projectID, requestedBy, claimedBy, logAtt, sourceDraftRunID, followupRunID sql.NullInt64
 	var tests, startedAt, finishedAt sql.NullString
-	var contextTruncated int
+	var contextTruncated, expectsSupervisorTelemetry int
 	if err := row.Scan(&ar.ID, &ar.IssueID, &projectID, &ar.DeviceID, &requestedBy,
 		&claimedBy, &ar.ActionKey, &ar.ProviderKind, &ar.ProviderID, &ar.ProviderLabel,
 		&ar.Model, &ar.RunMode, &ar.ProfileID, &ar.Effort, &ar.PromptPresetRef,
@@ -126,10 +127,11 @@ func scanAgentRun(row interface{ Scan(...any) error }) (*AgentRun, error) {
 		&ar.CompletionTokens, &ar.FinishReason, &ar.AgentName, &ar.SessionID, &ar.Status, &ar.Version, &tests,
 		&ar.DeployTarget, &ar.RepoURL, &ar.BranchName, &ar.CommitBaseSHA, &ar.CommitSHA,
 		&logAtt, &ar.Error, &ar.CreatedAt, &startedAt, &finishedAt,
-		&sourceDraftRunID, &followupRunID); err != nil {
+		&sourceDraftRunID, &followupRunID, &expectsSupervisorTelemetry); err != nil {
 		return nil, err
 	}
 	ar.ContextTruncated = contextTruncated == 1
+	ar.ExpectsSupervisorTelemetry = expectsSupervisorTelemetry == 1
 	if projectID.Valid {
 		ar.ProjectID = &projectID.Int64
 	}
@@ -298,25 +300,13 @@ func ImplementIssue(w http.ResponseWriter, r *http.Request) {
 		sourceDraftRunID = body.SourceDraftRunID
 	}
 
-	// Idempotency + stale-orphan reaping (PAI-605 M7 + audit). The DB enforces
-	// at most one active run per issue (idx_agent_runs_active_issue, migration
-	// 127), so the INSERT below is the real authority; this pre-check just returns
-	// the existing active run on the common (non-racing) path, and reaps a run a
-	// crashed runner left wedged in 'running' so the pipeline can recover.
-	var activeID int64
-	var activeStatus string
-	var activeStarted sql.NullString
-	if err := db.DB.QueryRow(
-		`SELECT id, status, COALESCE(NULLIF(started_at, ''), created_at) FROM agent_runs WHERE issue_id=? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1`,
-		issueID).Scan(&activeID, &activeStatus, &activeStarted); err == nil && activeID > 0 {
-		if activeStatus == "running" && agentRunStartedBefore(activeStarted, 2*time.Hour) {
-			_, _ = db.DB.Exec(
-				`UPDATE agent_runs SET status='failed', error='abandoned (runner did not finish)', finished_at=datetime('now') WHERE id=? AND status='running'`,
-				activeID)
-		} else if run, rerr := getAgentRunByID(activeID); rerr == nil {
-			jsonOK(w, run) // 200 (not 201): an existing active run is returned
-			return
-		}
+	// The background reconciler is authoritative for stale runs. Running one
+	// idempotent pass here preserves the historic immediate-retry behaviour, but
+	// recovery no longer depends on a user clicking Implement again.
+	_, _ = ReconcileStaleAgentRuns(r.Context(), time.Now().UTC(), AgentRunReconcilerConfigFromEnv())
+	if active := activeRunForIssue(issueID); active != nil {
+		jsonOK(w, active) // 200 (not 201): an existing active run is returned
+		return
 	}
 	deviceID := strings.TrimSpace(body.DeviceID)
 	if explicitAction && projectID.Valid && deviceID != "" && !deviceSupportsAgentAction(projectID.Int64, deviceID, action.ActionKey) {
@@ -392,20 +382,10 @@ func implementDraftIssue(
 
 	// Keep the same active-run guard as shell-backed implement runs: a draft
 	// should not run concurrently with a queued/running local implementation.
-	var activeID int64
-	var activeStatus string
-	var activeStarted sql.NullString
-	if err := db.DB.QueryRow(
-		`SELECT id, status, COALESCE(NULLIF(started_at, ''), created_at) FROM agent_runs WHERE issue_id=? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1`,
-		issueID).Scan(&activeID, &activeStatus, &activeStarted); err == nil && activeID > 0 {
-		if activeStatus == "running" && agentRunStartedBefore(activeStarted, 2*time.Hour) {
-			_, _ = db.DB.Exec(
-				`UPDATE agent_runs SET status='failed', error='abandoned (runner did not finish)', finished_at=datetime('now') WHERE id=? AND status='running'`,
-				activeID)
-		} else if run, rerr := getAgentRunByID(activeID); rerr == nil {
-			jsonOK(w, run)
-			return
-		}
+	_, _ = ReconcileStaleAgentRuns(r.Context(), time.Now().UTC(), AgentRunReconcilerConfigFromEnv())
+	if active := activeRunForIssue(issueID); active != nil {
+		jsonOK(w, active)
+		return
 	}
 
 	requestID := newAIRequestID()
@@ -1009,19 +989,6 @@ func markdownInline(s string) string {
 	return s
 }
 
-// agentRunStartedBefore reports whether started_at (SQLite UTC "YYYY-MM-DD
-// HH:MM:SS") is older than d ago. A null/blank/unparseable value is "not old".
-func agentRunStartedBefore(started sql.NullString, d time.Duration) bool {
-	if !started.Valid || strings.TrimSpace(started.String) == "" {
-		return false
-	}
-	t, err := time.Parse("2006-01-02 15:04:05", started.String)
-	if err != nil {
-		return false
-	}
-	return time.Since(t) > d
-}
-
 // activeRunForIssue returns the issue's current active (queued/running) run, or
 // nil if there is none.
 func activeRunForIssue(issueID int64) *AgentRun {
@@ -1219,19 +1186,20 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Status          *string `json:"status"`
-		IfStatus        *string `json:"if_status"` // optimistic claim guard (PAI-605 H3)
-		DeviceID        *string `json:"device_id"`
-		ActionKey       *string `json:"action_key"`
-		Version         *string `json:"version"`
-		TestsSummary    *string `json:"tests_summary"`
-		DeployTarget    *string `json:"deploy_target"`
-		RepoURL         *string `json:"repo_url"`
-		BranchName      *string `json:"branch_name"`
-		CommitBaseSHA   *string `json:"commit_base_sha"`
-		CommitSHA       *string `json:"commit_sha"`
-		LogAttachmentID *int64  `json:"log_attachment_id"`
-		Error           *string `json:"error"`
+		Status                     *string `json:"status"`
+		IfStatus                   *string `json:"if_status"` // optimistic claim guard (PAI-605 H3)
+		DeviceID                   *string `json:"device_id"`
+		ActionKey                  *string `json:"action_key"`
+		Version                    *string `json:"version"`
+		TestsSummary               *string `json:"tests_summary"`
+		DeployTarget               *string `json:"deploy_target"`
+		RepoURL                    *string `json:"repo_url"`
+		BranchName                 *string `json:"branch_name"`
+		CommitBaseSHA              *string `json:"commit_base_sha"`
+		CommitSHA                  *string `json:"commit_sha"`
+		LogAttachmentID            *int64  `json:"log_attachment_id"`
+		Error                      *string `json:"error"`
+		ExpectsSupervisorTelemetry *bool   `json:"expects_supervisor_telemetry"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid body", http.StatusBadRequest)
@@ -1270,6 +1238,10 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if !canPatchAgentRun(r, existing, claimAttempt, claimDeviceID) {
 		jsonError(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if body.ExpectsSupervisorTelemetry != nil && (!claimAttempt || !*body.ExpectsSupervisorTelemetry) {
+		jsonError(w, "expects_supervisor_telemetry can only be enabled when claiming a queued run", http.StatusConflict)
 		return
 	}
 	// Audit: a terminal run is immutable — reject ANY update (a status move out of
@@ -1312,6 +1284,12 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		}
 		if agentRunIsReportable(s) {
 			sets = append(sets, "finished_at=datetime('now')")
+		}
+	}
+	if newStatus == "tests_passed" {
+		if body.TestsSummary == nil || strings.TrimSpace(*body.TestsSummary) != "configured test command passed" {
+			jsonError(w, "tests_passed requires configured test execution evidence", http.StatusConflict)
+			return
 		}
 	}
 	if body.Version != nil {
@@ -1393,6 +1371,9 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		sets = append(sets, "error=?")
 		args = append(args, *body.Error)
 	}
+	if body.ExpectsSupervisorTelemetry != nil {
+		sets = append(sets, "expects_supervisor_telemetry=1")
+	}
 	// Stamp the attributing agent/session if the runner forwarded them. A
 	// selected project agent is already stored on creation and must not be
 	// overwritten by the reporter's generic CLI attribution.
@@ -1458,7 +1439,7 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 // agentRunIsReportable reports whether a terminal status warrants a summary
 // comment (cancelled/declined runs are intentionally silent).
 func agentRunIsReportable(s string) bool {
-	return s == "deployed" || s == "tests_passed" || s == "tests_failed" || s == "failed"
+	return s == "completed" || s == "deployed" || s == "tests_passed" || s == "tests_failed" || s == "failed"
 }
 
 // postAgentRunReport writes an internal issue comment summarizing a finished
@@ -1500,7 +1481,7 @@ func agentRunReportBody(run *AgentRun) string {
 			target = ", deployed to " + run.DeployTarget
 		}
 		return fmt.Sprintf("🤖 Implemented%s%s%s.%s%s (run #%d on %s)", ver, at, target, tests, code, run.ID, on)
-	case "tests_passed":
+	case "completed", "tests_passed":
 		ver := ""
 		if run.Version != "" {
 			ver = " (v" + run.Version + ")"

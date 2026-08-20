@@ -69,6 +69,20 @@ or undo snapshots.
 | `PAIMOS_LIVE_UPDATES_ENABLED` | `false` | Set to `true` to enable `GET /api/changes?since=<seq>`. When disabled, the endpoint returns 404 and clients keep using conditional polling. |
 | `PAIMOS_LIVE_UPDATES_MAX_CONNECTIONS` | `100` | Process-local cap for concurrent SSE clients. |
 
+## Agent run reconciliation
+
+The server reconciles active Implement-this runs at boot and on a timer. All
+durations use Go duration syntax (`45s`, `15m`, `2h`). Invalid or non-positive
+values fall back to the documented default.
+
+| Var | Default | Notes |
+|---|---|---|
+| `PAIMOS_RUN_RECONCILE_INTERVAL` | `30s` | Active-run watchdog cadence. |
+| `PAIMOS_RUN_QUEUED_TIMEOUT` | `15m` | Fail a run that no runner claimed. |
+| `PAIMOS_RUN_FIRST_HEARTBEAT_TIMEOUT` | `1m` | Fail a newly supervised claim whose first server-received heartbeat never arrives. |
+| `PAIMOS_RUN_HEARTBEAT_TIMEOUT` | `90s` | Fail a supervised run after its latest server-received heartbeat becomes stale. Semantic events do not reset this clock. |
+| `PAIMOS_RUN_LEGACY_TIMEOUT` | `2h` | Longer fallback for old/uninstrumented running rows without the durable supervised-claim marker. |
+
 ## Local agent runner flags
 
 `paimos run-agent watch` is configured with CLI flags rather than server
@@ -80,6 +94,8 @@ environment variables. The safety-relevant defaults are:
 | `--heartbeat-timeout` | `5m` | Maximum child stdout/stderr silence before termination. |
 | `--heartbeat-interval` | `15s` | Supervisor-owned liveness cadence; independent of provider callbacks. |
 | `--exec` | `claude` | Built-in Claude structured-stream mode with repository read/edit tools only. Any custom value is an explicit raw shell-command fallback. |
+| `--claude-permission-mode` | `dontAsk` | Permission mode passed to the built-in Claude command. Explicitly configurable; shell metacharacters and unknown modes are rejected. |
+| `--claude-allowed-tools` | `Read,Glob,Grep,Edit,Write` | Comma-separated tool allowlist for built-in Claude mode. Bash, MCP, browser, and bypass tools are absent by default. |
 | `--test-exec` | *(empty)* | The only runner-owned test evidence source. Empty means successful implementation reports `completed`, not `tests_passed`. |
 | `--attach-logs` | `false` | Opt-in bounded raw log capture; output can contain secrets. |
 | `--allow-deploy` | `false` | Still requires `--deploy-exec`, a run `deploy_target`, and separate consent unless `--yes-deploy`. |

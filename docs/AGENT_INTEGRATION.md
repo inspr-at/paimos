@@ -313,9 +313,10 @@ auto-deploy.** Deploy stays a manual step until the deploy-gating phase.
 ### Run lifecycle
 
 ```
-queued → running → completed | tests_passed | tests_failed → deployed
-                                                            ↘ failed | cancelled
-running → drafted
+queued → running → completed
+                 → tests_passed → deployed | failed
+                 → tests_failed → failed
+                 → deployed | failed | cancelled | drafted
 ```
 
 The runner itself sets `running` / `completed` / `tests_passed` / `tests_failed`
@@ -453,14 +454,16 @@ paimos run-agent watch --project PAI --repo-root . --exec "codex exec" --action-
 The default `--exec "claude"` is normalized to Claude Code print mode with
 `--output-format stream-json`, a non-interactive permission mode, and an
 allowlist of repository read/edit tools (`Read,Glob,Grep,Edit,Write`). It does
-not enable Bash, MCP, browser, or permission bypass by default. Operators who
-need a broader Claude invocation must opt into it explicitly through `--exec`;
-that custom-command path is treated as a raw stream. The generated issue prompt
+not enable Bash, MCP, browser, or permission bypass by default. Operators can
+explicitly set `--claude-permission-mode` and `--claude-allowed-tools`; both are
+validated before launch. A custom `--exec` remains the raw-stream escape hatch.
+The generated issue prompt
 is fed on stdin, so a queued run never opens an interactive TUI. The spawned
 command sees `PAIMOS_RUN_ID`, `PAIMOS_ISSUE_KEY`,
 `PAIMOS_ISSUE_TITLE`, `PAIMOS_CONTEXT_PACK`, `PAIMOS_CONTEXT_PACK_LABEL`, and
-`PAIMOS_PROMPT_FILE`; custom provider commands can read the prompt file
-themselves.
+`PAIMOS_PROMPT_FILE`. The supervisor also sets `PAIMOS_RUN_CORRELATION_ID`,
+`PAIMOS_RUN_PROVIDER`, and `PAIMOS_RUN_ADAPTER` to its exact telemetry identity;
+custom provider commands can read the prompt file themselves.
 
 When the run carries `agent_name`, the watcher fetches the canonical
 `/api/projects/:id/agents/:name.json` artifact before spawning the command. The
@@ -477,8 +480,8 @@ also receives:
 or persisted as telemetry.
 
 The supervisor parses only bounded Claude JSON-line envelopes. It translates
-an allowlist of event type/tool-name classes into generic phases such as
-`inspecting`, `implementing`, and `working`; prompt text, assistant text, tool
+an allowlist of event type/tool-name classes into the wire phases `starting`,
+`planning`, `implementing`, `testing`, `waiting`, and `completed`; prompt text, assistant text, tool
 arguments, command output, source text, environment values, and provider error
 bodies never enter telemetry. Oversized events, aggregate stream floods, and
 malformed/unknown events fail closed. Terminal outcomes distinguish spawn
@@ -491,13 +494,18 @@ does not depend on model callbacks. `--execution-timeout` (default `2h`),
 `--heartbeat-interval` (default `15s`) are configurable. Timeout/cancellation
 terminate the process group owned by the runner before any terminal report is
 chosen, preventing a late successful exit from overwriting the failure.
+On Unix-family platforms this kills the complete owned process group and is
+covered by a descendant-death fixture. On other Go targets the portable fallback
+can kill only the direct child; wrappers on those platforms must not detach
+descendants, and this limitation is explicit rather than claiming tree-level
+enforcement.
 
-PAI-799 integration hook: `runnerReportTransport.Report` currently uses a
-compare-and-set `PATCH /api/runs/:id` with only `status`, `if_status`, and the
-four allowlisted `supervisor_event`, `supervisor_phase`, `supervisor_summary`,
-and `supervisor_outcome` fields. PAI-799 owns accepting/persisting those fields
-and the `completed` lifecycle value; keep that wire mapping inside
-`httpRunnerReportTransport` if its final endpoint shape changes.
+The supervisor sends these facts directly to `POST /api/runs/:id/telemetry`.
+It owns one stable correlation id and strictly increasing sequence per run.
+Heartbeat reports use `kind=heartbeat`, `heartbeat=true`, and no activity text;
+semantic phase/needs-input/blocker reports use `heartbeat=false`. Therefore a
+stream of model activity cannot keep the supervisor watchdog alive. Claiming a
+run atomically persists `expects_supervisor_telemetry=true` before launch.
 
 `--test-exec` is the only runner-owned way to prove tests in the run record. It runs
 after the agent command, records only `configured test command passed|failed`
@@ -520,8 +528,7 @@ A normal provider exit without `--test-exec` reports `completed`, never
 runner reports neither unless the corresponding configured command actually
 ran successfully.
 
-After the PAI-799 lifecycle hook is integrated, the run lifecycle is enforced
-server-side: status changes must follow a legal
+The run lifecycle is enforced server-side: status changes must follow a legal
 edge (e.g. a run can't jump straight to `deployed`), and a terminal run
 (`completed`/`drafted`/`deployed`/`failed`/`cancelled`) is immutable. For non-requester project-editor
 claims, the server requires the caller's user, device, and requested `action_key`
@@ -543,7 +550,7 @@ GET  /api/runs/799/telemetry/latest
 
 The POST is limited to the run requester, stamped claimer, or an admin. Missing
 and unauthorized runs both return 404. Reads use normal run visibility. A
-terminal run (`drafted`, `deployed`, `failed`, or `cancelled`) rejects all late
+terminal run (`completed`, `drafted`, `deployed`, `failed`, or `cancelled`) rejects all late
 telemetry with 409, including exact duplicate retries, so telemetry can never
 mutate or qualify a terminal result.
 
@@ -578,22 +585,30 @@ Example report:
 409. `correlation_id`, `provider`, and `adapter` become immutable after the
 first accepted report. Delayed reports are accepted when their sequence is
 newer. `agent_reported_at` is retained as agent evidence, but freshness,
-liveness, and clock-skew detection always use `server_received_at`. Thus a bad
-workstation clock cannot make a run look fresh or stale.
+clock-skew detection use `server_received_at`. Active liveness uses only the
+server-received timestamp of a report explicitly marked `heartbeat=true`;
+latest-event freshness remains separate. Thus a bad workstation clock or a
+stream of non-heartbeat semantic events cannot reset the supervisor watchdog.
 
 Progress and ETA are optional. When supplied they require a monotonic
 `estimate_revision`, `estimate_source`, confidence from 0 through 1, and a
 short evidence basis; ETA always requires a complete, ordered range. PAIMOS never
 creates a percentage from elapsed wall-clock time. A run with no reports is
 returned by `/latest` as `instrumented: false`, `liveness: "unknown"`, and
-`latest: null`—never as 0%. The latest pointer is indexed; history remains the
-append-only authority. SSE publishes only `{type: "run_telemetry", name:
+`latest: null`—never as 0%. The indexed snapshot exposes `latest_event`,
+`latest_heartbeat`, `latest_semantic`, and `latest_estimate` plus separate
+freshness ages. A later heartbeat-only report does not erase activity,
+needs-input/blocker, progress, or ETA evidence. History remains the append-only
+authority. SSE publishes only `{type: "run_telemetry", name:
 run_id, rev: sequence}` as an invalidation hint, and consumers refetch REST.
 
 The body uses a strict field allowlist and small one-line limits. Never send raw
 prompts, tool arguments, command output, environment values, secrets, source
 contents, or arbitrary provider payloads in `activity` or `estimate_basis`.
 Those data classes have no telemetry field and unknown JSON keys are rejected.
+The server also rejects obvious bearer tokens, credential assignments, cloud
+keys, and private-key headers in `activity` or `estimate_basis`; adapters remain
+responsible for never constructing those fields from raw provider data.
 
 The provider-neutral CLI seam is:
 
@@ -614,6 +629,12 @@ paimos run report "$PAIMOS_RUN_ID" \
 the exact request. MCP clients use `paimos_report_progress`, which maps to the
 same POST and forwards only the allowlisted fields.
 
+The built-in supervisor serializes heartbeat and structured callbacks through
+that same POST. It owns delivery order and estimate revisions; an adapter may
+provide progress/ETA only with source, confidence, and a bounded evidence
+basis. Without that evidence, progress and ETA stay absent rather than becoming
+a fabricated percentage.
+
 Claude Code is a proof adapter, not a server special case:
 
 | Claude Code signal | Provider-neutral report |
@@ -624,11 +645,37 @@ Claude Code is a proof adapter, not a server special case:
 | named checkpoint completion | `kind=progress`; optional evidence-backed estimate revision |
 | quiet active session | `kind=heartbeat`; no fabricated percentage |
 
+Codex CLI uses the same contract explicitly:
+
+| Codex signal | Provider-neutral report |
+|---|---|
+| process start / supervisor tick | `provider=openai`, `adapter=codex-cli`, `kind=heartbeat` |
+| repository analysis | `kind=phase`, `phase=planning` |
+| patch application | `kind=phase`, `phase=implementing` |
+| test command class | `kind=phase`, `phase=testing` |
+| normal exit | `kind=phase`, `phase=completed` before lifecycle `completed` or test-evidenced status |
+
+Aider is the third-harness mapping (for adapters that opt into this endpoint):
+
+| Aider signal | Provider-neutral report |
+|---|---|
+| adapter-owned tick | `provider=<selected-model-provider>`, `adapter=aider`, `kind=heartbeat` |
+| repository map/read phase | `kind=phase`, `phase=planning` |
+| edit commit/application | `kind=phase`, `phase=implementing` |
+| operator question | `kind=needs_input`, `phase=waiting`, `blocker_state=input` |
+| adapter failure | `kind=blocker`, `phase=unknown`; no raw error body |
+
 The adapter summarizes only the allowlisted state. Claude hook payloads, tool
-inputs/results, prompts, and transcript text are never copied. Other providers
-map to the same fields without changes to server or domain code. This surface
-does not aggregate delivery progress, calculate a weighted overall ETA, render
-Agent Mode cards, or supervise runner processes; those belong to PAI-800–804.
+inputs/results, prompts, and transcript text are never copied. Provider adapters
+map to the same fields without changes to server or domain code.
+
+The server watchdog runs at boot and on a configurable interval. It separately
+fails an unclaimed queued run, a supervised run that never delivered its first
+heartbeat, and a supervised run whose latest heartbeat is stale. A durable
+claim marker preserves the longer legacy fallback for old uninstrumented
+runners. Every failure update repeats its status/freshness predicate, so a
+heartbeat or terminal write that wins the database race suppresses the stale
+write; late success after timeout/cancellation receives 409.
 
 Enabling deploy is **triple-gated** and off by default — it runs only when all
 three hold: `--allow-deploy` AND `--deploy-exec "<cmd>"` AND the run carries a

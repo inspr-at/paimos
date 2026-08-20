@@ -636,6 +636,27 @@ describe('AgentRunPanel — polling lifecycle (H2)', () => {
 
     unmount()
   })
+
+  it('stops polling completed code and shows that tests were not verified', async () => {
+    let runsCalls = 0
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/issues/5/runs') {
+        runsCalls += 1
+        return { runs: [run('completed', { started_at: '2026-06-29 10:00:01' })] }
+      }
+      if (path === '/projects/9/runners') return { runners: [] }
+      return {}
+    })
+
+    const { el, unmount } = mountPanel()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(el.textContent).toContain('Implemented')
+    expect(el.textContent).toContain('Tests not verified')
+    const callsAfterLoad = runsCalls
+    await vi.advanceTimersByTimeAsync(12000)
+    expect(runsCalls).toBe(callsAfterLoad)
+    unmount()
+  })
 })
 
 describe('AgentRunPanel — visibility + leak (H1/H2)', () => {

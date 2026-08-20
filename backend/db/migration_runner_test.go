@@ -84,8 +84,11 @@ func TestApplyMigrationAtomicRollsBackStepsAndVersionOnFailure(t *testing.T) {
 	}
 }
 
-func TestApplyMigrationForeignKeyPragmaExceptionIsNotRecordedOnFailure(t *testing.T) {
+func TestApplyMigrationForeignKeyRebuildRollsBackAndRestoresPragma(t *testing.T) {
 	db := openMigrationRunnerTestDB(t)
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		t.Fatal(err)
+	}
 	conn, err := db.Conn(context.Background())
 	if err != nil {
 		t.Fatalf("conn: %v", err)
@@ -102,9 +105,13 @@ func TestApplyMigrationForeignKeyPragmaExceptionIsNotRecordedOnFailure(t *testin
 		t.Fatal("expected migration failure")
 	}
 	if migrationRecorded(t, db, 3) {
-		t.Fatal("failed non-atomic migration should not record schema version")
+		t.Fatal("failed rebuild migration should not record schema version")
 	}
-	if !tableExists(t, db, "non_atomic_probe") {
-		t.Fatal("expected explicit non-atomic exception path to expose partial DDL")
+	if tableExists(t, db, "non_atomic_probe") {
+		t.Fatal("failed rebuild migration left partial DDL behind")
+	}
+	var foreignKeys int
+	if err := conn.QueryRowContext(context.Background(), `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil || foreignKeys != 1 {
+		t.Fatalf("foreign_keys=%d err=%v, want restored", foreignKeys, err)
 	}
 }

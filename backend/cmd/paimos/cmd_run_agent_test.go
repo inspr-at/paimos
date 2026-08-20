@@ -511,6 +511,26 @@ func TestClaudeDefaultIsNonInteractivePromptMode(t *testing.T) {
 	}
 }
 
+func TestClaudePermissionModeAndAllowedToolsAreConfigurable(t *testing.T) {
+	if defaultClaudePermissionMode != "dontAsk" || defaultClaudeAllowedTools != "Read,Glob,Grep,Edit,Write" {
+		t.Fatalf("least-privilege defaults drifted: mode=%q tools=%q", defaultClaudePermissionMode, defaultClaudeAllowedTools)
+	}
+	if err := validateClaudeRunnerConfig("acceptEdits", "Read,Grep,Bash"); err != nil {
+		t.Fatalf("valid config: %v", err)
+	}
+	got := effectiveAgentExec("claude", "acceptEdits", "Read,Grep,Bash")
+	if !strings.Contains(got, `--permission-mode acceptEdits`) || !strings.Contains(got, `--allowedTools "Read,Grep,Bash"`) {
+		t.Fatalf("configured command=%q", got)
+	}
+	for _, tc := range []struct{ mode, tools string }{
+		{"unknown", "Read"}, {"dontAsk", ""}, {"dontAsk", "Read,$(unsafe)"},
+	} {
+		if err := validateClaudeRunnerConfig(tc.mode, tc.tools); err == nil {
+			t.Fatalf("accepted unsafe config mode=%q tools=%q", tc.mode, tc.tools)
+		}
+	}
+}
+
 // TestAgentRunnerDefaultDoesNotAttachLog: without --attach-logs the runner must
 // not capture or upload the job output (audit MED-2 — logs can carry secrets).
 func TestAgentRunnerDefaultDoesNotAttachLog(t *testing.T) {
@@ -925,7 +945,7 @@ func TestClaudeStreamAdapterOnlyEmitsAllowlistedSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("consume: %v", err)
 	}
-	if progress == nil || progress.phase != "working" || progress.summary != "provider is working" {
+	if progress == nil || progress.phase != "testing" || progress.summary != "Provider is running an allowlisted command step" {
 		t.Fatalf("progress=%+v, want generic allowlisted progress", progress)
 	}
 	if strings.Contains(fmt.Sprintf("%+v", progress), "sensitive-provider-content") {
@@ -939,7 +959,7 @@ func TestClaudeStreamAdapterNeedsInputIsTelemetryOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("consume: %v", err)
 	}
-	if progress == nil || progress.phase != "needs_input" || strings.Contains(progress.summary, "sensitive prompt content") {
+	if progress == nil || progress.phase != "waiting" || !progress.needsInput || progress.blockerState != "input" || strings.Contains(progress.summary, "sensitive prompt content") {
 		t.Fatalf("progress=%+v, want safe needs_input telemetry", progress)
 	}
 }
@@ -967,38 +987,188 @@ func TestStructuredProviderEventAndOutputBudgetsAreBounded(t *testing.T) {
 	if dst.String() != "01234567" || !w.truncated {
 		t.Fatalf("bounded output=%q truncated=%v", dst.String(), w.truncated)
 	}
+
+	var flood strings.Builder
+	for i := 0; i <= maxProviderEvents; i++ {
+		flood.WriteString("{\"type\":\"user\"}\n")
+	}
+	failures = make(chan error, 1)
+	consumeProviderStdout(strings.NewReader(flood.String()), &claudeStreamAdapter{}, io.Discard, io.Discard,
+		make(chan struct{}, 1), make(chan safeProviderProgress, 1), failures)
+	select {
+	case err := <-failures:
+		if !strings.Contains(safeStreamErrorSummary(err), "bounded budget") {
+			t.Fatalf("aggregate flood error=%v", err)
+		}
+	default:
+		t.Fatal("aggregate provider stream flood was accepted")
+	}
 }
 
-func TestHTTPRunnerReportTransportUsesExpectedAllowlistedPatch(t *testing.T) {
+type runnerRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f runnerRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestHTTPRunnerReportTransportUsesTelemetryRESTContract(t *testing.T) {
 	var got map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPatch || r.URL.Path != "/api/runs/77" {
-			http.Error(w, "unexpected request", http.StatusNotFound)
-			return
+	client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/runs/77/telemetry" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Errorf("decode body: %v", err)
+			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	t.Cleanup(srv.Close)
-	transport := &httpRunnerReportTransport{client: newClientForTest(srv.URL)}
+		return &http.Response{StatusCode: http.StatusCreated, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"accepted":true}`)), Request: r}, nil
+	})}}
+	transport := &httpRunnerReportTransport{client: client, provider: "anthropic", adapter: "claude-code"}
 	err := transport.Report(context.Background(), 77, supervisorReport{
-		Event: "progress", Phase: "implementing", Summary: "provider is editing the repository",
+		Event: "progress", Phase: "implementing", Summary: "Provider is editing the repository",
 	})
 	if err != nil {
 		t.Fatalf("report: %v", err)
 	}
 	wantKeys := map[string]bool{
-		"status": true, "if_status": true, "supervisor_event": true,
-		"supervisor_phase": true, "supervisor_summary": true,
+		"sequence": true, "correlation_id": true, "provider": true, "adapter": true,
+		"agent_reported_at": true, "kind": true, "heartbeat": true, "phase": true,
+		"activity": true, "needs_input": true, "blocker_state": true,
 	}
 	for key := range got {
 		if !wantKeys[key] {
 			t.Fatalf("unexpected report field %q in %+v", key, got)
 		}
 	}
-	if got["status"] != "running" || got["if_status"] != "running" || got["supervisor_phase"] != "implementing" {
-		t.Fatalf("report=%+v, want running CAS and implementing phase", got)
+	if got["kind"] != "phase" || got["phase"] != "implementing" || got["provider"] != "anthropic" || got["adapter"] != "claude-code" || got["sequence"] != float64(1) {
+		t.Fatalf("report=%+v", got)
+	}
+	progress := 50.0
+	eta, etaMin, etaMax := int64(300), int64(240), int64(420)
+	confidence := 0.8
+	got = nil
+	err = transport.Report(context.Background(), 77, supervisorReport{
+		Event: "progress", Phase: "testing", Summary: "Reached a named verification checkpoint",
+		ProgressPercent: &progress, ETASeconds: &eta, ETAMinSeconds: &etaMin, ETAMaxSeconds: &etaMax,
+		EstimateSource: "adapter", EstimateConfidence: &confidence,
+		EstimateBasis: "Two of four named verification checkpoints completed",
+	})
+	if err != nil {
+		t.Fatalf("estimate report: %v", err)
+	}
+	if got["kind"] != "progress" || got["sequence"] != float64(2) || got["estimate_revision"] != float64(1) ||
+		got["progress_percent"] != float64(50) || got["eta_seconds"] != float64(300) || got["estimate_source"] != "adapter" {
+		t.Fatalf("estimate report=%+v", got)
+	}
+}
+
+func TestRunnerTelemetryIdentityDoesNotMislabelCustomHarnesses(t *testing.T) {
+	for _, tt := range []struct {
+		action, provider, adapter string
+	}{
+		{"claude_cli.implement", "anthropic", "claude-code"},
+		{"codex_cli.implement", "openai", "codex-cli"},
+		{"custom_cli.implement", "paimos", "run-agent"},
+	} {
+		provider, adapter := runnerTelemetryIdentityForAction(tt.action)
+		if provider != tt.provider || adapter != tt.adapter {
+			t.Fatalf("identity(%q)=(%q,%q), want (%q,%q)", tt.action, provider, adapter, tt.provider, tt.adapter)
+		}
+	}
+}
+
+func TestHTTPRunnerReportTransportSerializesConcurrentSequence(t *testing.T) {
+	var mu sync.Mutex
+	var sequences []int
+	client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		mu.Lock()
+		sequences = append(sequences, int(body["sequence"].(float64)))
+		mu.Unlock()
+		return &http.Response{StatusCode: http.StatusCreated, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"accepted":true}`)), Request: r}, nil
+	})}}
+	transport := &httpRunnerReportTransport{client: client, provider: "openai", adapter: "codex-cli"}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := transport.Report(context.Background(), 88, supervisorReport{Event: "heartbeat", Phase: "implementing"}); err != nil {
+				t.Errorf("report: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if len(sequences) != 20 {
+		t.Fatalf("arrival sequences=%v, want 20 reports", sequences)
+	}
+	for i, sequence := range sequences {
+		if sequence != i+1 {
+			t.Fatalf("arrival sequences=%v", sequences)
+		}
+	}
+}
+
+func TestAgentRunnerEndToEndSupervisorTelemetryREST(t *testing.T) {
+	var mu sync.Mutex
+	var telemetry []map[string]any
+	var patches []map[string]any
+	respond := func(r *http.Request, status int, body string) (*http.Response, error) {
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	}
+	client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/runs/1":
+			return respond(r, http.StatusOK, `{"issue_id":5,"device_id":"","status":"queued"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/PAI-5":
+			return respond(r, http.StatusOK, `{"id":5,"issue_key":"PAI-5","type":"ticket","title":"Telemetry E2E","status":"in-progress","priority":"medium"}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/runs/1":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			mu.Lock()
+			patches = append(patches, body)
+			mu.Unlock()
+			return respond(r, http.StatusOK, `{}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/runs/1/telemetry":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			mu.Lock()
+			telemetry = append(telemetry, body)
+			mu.Unlock()
+			return respond(r, http.StatusCreated, `{"accepted":true,"duplicate":false}`)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return respond(r, http.StatusNotFound, `{}`)
+		}
+	})}}
+	runner := newAgentRunner(client, "device-e2e", t.TempDir(), "printf ok", "claude_cli.implement", "", true, false, "", false, false)
+	runner.heartbeatInterval = 5 * time.Millisecond
+	runner.heartbeatTimeout = time.Second
+	runner.executionTimeout = time.Second
+	if err := runner.handleRun(context.Background(), aJob()); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(patches) < 2 || patches[0]["expects_supervisor_telemetry"] != true || patches[len(patches)-1]["status"] != "completed" {
+		t.Fatalf("patches=%+v", patches)
+	}
+	if len(telemetry) < 2 {
+		t.Fatalf("telemetry=%+v", telemetry)
+	}
+	correlation := telemetry[0]["correlation_id"]
+	for i, fact := range telemetry {
+		if fact["sequence"] != float64(i+1) || fact["correlation_id"] != correlation || fact["provider"] != "anthropic" || fact["adapter"] != "claude-code" {
+			t.Fatalf("fact %d=%+v", i, fact)
+		}
+		for _, forbidden := range []string{"prompt", "provider_payload", "command_output", "tool_arguments", "source", "environment"} {
+			if _, ok := fact[forbidden]; ok {
+				t.Fatalf("fact leaked %q: %+v", forbidden, fact)
+			}
+		}
 	}
 }

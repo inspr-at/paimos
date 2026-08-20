@@ -9,7 +9,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,10 +45,19 @@ const (
 )
 
 type supervisorReport struct {
-	Event   string
-	Phase   string
-	Outcome supervisorOutcome
-	Summary string
+	Event              string
+	Phase              string
+	Outcome            supervisorOutcome
+	Summary            string
+	NeedsInput         bool
+	BlockerState       string
+	ProgressPercent    *float64
+	ETASeconds         *int64
+	ETAMinSeconds      *int64
+	ETAMaxSeconds      *int64
+	EstimateSource     string
+	EstimateConfidence *float64
+	EstimateBasis      string
 }
 
 type runnerReportTransport interface {
@@ -61,47 +69,149 @@ var (
 	errRunCancelled      = errors.New("run cancelled")
 )
 
-// httpRunnerReportTransport is deliberately small because PAI-799 owns the
-// persistence shape. The current compatibility hook is PATCH /api/runs/:id;
-// PAI-799 can translate the four allowlisted supervisor_* fields without any
-// provider payload crossing this boundary.
+type runnerTelemetryState struct {
+	sequence         int64
+	estimateRevision int64
+	correlationID    string
+}
+
+// httpRunnerReportTransport maps supervisor facts directly onto the PAI-799
+// append-only wire contract. It owns correlation and sequence so provider
+// callbacks never control ordering or inject arbitrary payloads.
 type httpRunnerReportTransport struct {
-	client *Client
+	client   *Client
+	provider string
+	adapter  string
+	mu       sync.Mutex
+	states   map[int64]*runnerTelemetryState
 }
 
 func (h *httpRunnerReportTransport) Report(ctx context.Context, runID int64, report supervisorReport) error {
-	fields := map[string]any{
-		"status":             "running",
-		"if_status":          "running",
-		"supervisor_event":   safeReportValue(report.Event, 32),
-		"supervisor_phase":   safeReportValue(report.Phase, 32),
-		"supervisor_summary": safeReportValue(report.Summary, 160),
+	hasEstimate := supervisorReportHasEstimate(report)
+	if hasEstimate && (report.EstimateConfidence == nil || strings.TrimSpace(report.EstimateBasis) == "" || strings.TrimSpace(report.EstimateSource) == "") {
+		return errors.New("supervisor estimate lacks source, confidence, or basis")
 	}
-	if report.Outcome != "" {
-		fields["supervisor_outcome"] = string(report.Outcome)
+	// Heartbeats and structured callbacks can originate in different goroutines.
+	// Serialize allocation and delivery so the server observes sequence order.
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	state := h.stateLocked(runID)
+	state.sequence++
+	fact := runTelemetryReport{
+		Sequence: state.sequence, CorrelationID: state.correlationID, Provider: h.resolvedProvider(),
+		Adapter: h.resolvedAdapter(), AgentReportedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Kind: "phase", Phase: allowedSupervisorPhase(report.Phase),
+		Activity:   safeReportValue(report.Summary, 160),
+		NeedsInput: report.NeedsInput, BlockerState: report.BlockerState,
 	}
-	body, err := json.Marshal(fields)
+	if fact.BlockerState == "" {
+		fact.BlockerState = "none"
+	}
+	switch report.Event {
+	case "liveness", "heartbeat":
+		fact.Kind = "heartbeat"
+		fact.Heartbeat = true
+		fact.Activity = ""
+	case "needs_input":
+		fact.Kind = "needs_input"
+		fact.Phase = "waiting"
+		fact.NeedsInput = true
+		fact.BlockerState = "input"
+	case "result":
+		if report.Outcome == outcomeNormalExit {
+			fact.Kind = "phase"
+			fact.Phase = "completed"
+			fact.Activity = "Provider process exited normally"
+		} else {
+			fact.Kind = "blocker"
+			fact.Phase = "unknown"
+			fact.BlockerState = supervisorOutcomeBlocker(report.Outcome)
+		}
+	}
+	if hasEstimate {
+		state.estimateRevision++
+		fact.Kind = "progress"
+		fact.EstimateRevision = &state.estimateRevision
+		fact.ProgressPercent = report.ProgressPercent
+		fact.ETASeconds = report.ETASeconds
+		fact.ETAMinSeconds = report.ETAMinSeconds
+		fact.ETAMaxSeconds = report.ETAMaxSeconds
+		fact.EstimateSource = report.EstimateSource
+		fact.EstimateConfidence = report.EstimateConfidence
+		fact.EstimateBasis = safeReportValue(report.EstimateBasis, 240)
+	}
+	err := reportRunTelemetryContext(ctx, h.client, runID, fact)
 	if err != nil {
-		return errors.New("encode supervisor report")
+		var httpErr *httpError
+		if errors.As(err, &httpErr) && httpErr.Code == http.StatusConflict {
+			return fmt.Errorf("%w: run status changed", errRunCancelled)
+		}
+		if errors.As(err, &httpErr) && (httpErr.Code == http.StatusNotFound || httpErr.Code == http.StatusGone) {
+			return fmt.Errorf("%w: run no longer owned", errRunnerDisappeared)
+		}
+		return err
 	}
-	path := fmt.Sprintf("/api/runs/%d", runID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, h.client.baseURL+path, bytes.NewReader(body))
-	if err != nil {
-		return errors.New("build supervisor report")
+	return nil
+}
+
+func (h *httpRunnerReportTransport) Identity(runID int64) (string, string, string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	state := h.stateLocked(runID)
+	return state.correlationID, h.resolvedProvider(), h.resolvedAdapter()
+}
+
+func (h *httpRunnerReportTransport) stateLocked(runID int64) *runnerTelemetryState {
+	if h.states == nil {
+		h.states = map[int64]*runnerTelemetryState{}
 	}
-	h.client.prepareRequest(req, true, "application/json", "application/json")
-	_, err = h.client.doRequest(req)
-	if err == nil {
-		return nil
+	state := h.states[runID]
+	if state == nil {
+		state = &runnerTelemetryState{correlationID: fmt.Sprintf("run-%d-%d", runID, time.Now().UTC().UnixNano())}
+		h.states[runID] = state
 	}
-	var httpErr *httpError
-	if errors.As(err, &httpErr) && httpErr.Code == http.StatusConflict {
-		return fmt.Errorf("%w: run status changed", errRunCancelled)
+	return state
+}
+
+func supervisorReportHasEstimate(report supervisorReport) bool {
+	return report.ProgressPercent != nil || report.ETASeconds != nil ||
+		report.ETAMinSeconds != nil || report.ETAMaxSeconds != nil
+}
+
+func (h *httpRunnerReportTransport) resolvedProvider() string {
+	if strings.TrimSpace(h.provider) == "" {
+		return "paimos"
 	}
-	if errors.As(err, &httpErr) && (httpErr.Code == http.StatusNotFound || httpErr.Code == http.StatusGone) {
-		return fmt.Errorf("%w: run no longer owned", errRunnerDisappeared)
+	return h.provider
+}
+
+func (h *httpRunnerReportTransport) resolvedAdapter() string {
+	if strings.TrimSpace(h.adapter) == "" {
+		return "run-agent"
 	}
-	return err
+	return h.adapter
+}
+
+func allowedSupervisorPhase(phase string) string {
+	switch phase {
+	case "starting", "planning", "implementing", "testing", "reviewing", "deploying", "waiting", "completed":
+		return phase
+	default:
+		return "unknown"
+	}
+}
+
+func supervisorOutcomeBlocker(outcome supervisorOutcome) string {
+	switch outcome {
+	case outcomeCancellation:
+		return "external"
+	case outcomeRunnerDisappearance, outcomeReportFailure:
+		return "external"
+	case outcomeSpawnFailure, outcomeSilentChild, outcomeTimeout:
+		return "environment"
+	default:
+		return "unknown"
+	}
 }
 
 func safeReportValue(value string, max int) string {
@@ -131,8 +241,10 @@ type supervisorResult struct {
 }
 
 type safeProviderProgress struct {
-	phase   string
-	summary string
+	phase        string
+	summary      string
+	needsInput   bool
+	blockerState string
 }
 
 type providerStreamAdapter interface {
@@ -174,22 +286,24 @@ func (a *claudeStreamAdapter) Consume(line []byte) (*safeProviderProgress, error
 			}
 			switch block.Name {
 			case "Read", "Glob", "Grep":
-				return &safeProviderProgress{phase: "inspecting", summary: "provider is inspecting the repository"}, nil
+				return &safeProviderProgress{phase: "planning", summary: "Provider is inspecting the repository"}, nil
 			case "Edit", "Write", "NotebookEdit":
-				return &safeProviderProgress{phase: "implementing", summary: "provider is editing the repository"}, nil
+				return &safeProviderProgress{phase: "implementing", summary: "Provider is editing the repository"}, nil
+			case "Bash":
+				return &safeProviderProgress{phase: "testing", summary: "Provider is running an allowlisted command step"}, nil
 			case "AskUserQuestion", "SendUserMessage":
-				return &safeProviderProgress{phase: "needs_input", summary: "provider requested operator input"}, nil
+				return &safeProviderProgress{phase: "waiting", summary: "Provider requested operator input", needsInput: true, blockerState: "input"}, nil
 			default:
-				return &safeProviderProgress{phase: "working", summary: "provider is working"}, nil
+				return &safeProviderProgress{phase: "implementing", summary: "Provider is working"}, nil
 			}
 		}
 	case "result":
 		a.seenResult = true
 		a.resultFailed = event.IsError || (event.Subtype != "" && event.Subtype != "success")
 		if a.resultFailed {
-			return &safeProviderProgress{phase: "provider_failed", summary: "provider reported failure"}, nil
+			return &safeProviderProgress{phase: "unknown", summary: "Provider reported failure", blockerState: "unknown"}, nil
 		}
-		return &safeProviderProgress{phase: "completed", summary: "provider completed normally"}, nil
+		return &safeProviderProgress{phase: "completed", summary: "Provider completed normally"}, nil
 	case "user", "stream_event", "rate_limit_event", "tool_progress", "tool_use_summary", "auth_status", "prompt_suggestion":
 		// These event bodies can contain prompts, tool arguments, command output,
 		// source text, or provider details. Activity is observed, but no body is
@@ -279,17 +393,15 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 	go func() { waited <- cmd.Wait() }()
 
 	currentPhase := "starting"
-	report := func(event, phase, summary string, outcome supervisorOutcome) error {
+	report := func(fact supervisorReport) error {
 		if req.Reporter == nil {
 			return nil
 		}
 		reportCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		return req.Reporter.Report(reportCtx, req.RunID, supervisorReport{
-			Event: event, Phase: phase, Summary: summary, Outcome: outcome,
-		})
+		return req.Reporter.Report(reportCtx, req.RunID, fact)
 	}
-	if err := report("liveness", currentPhase, "supervisor started child process", ""); err != nil {
+	if err := report(supervisorReport{Event: "liveness", Phase: currentPhase}); err != nil {
 		terminateOwnedProcess(cmd)
 		<-waited
 		return reportErrorResult(err)
@@ -320,12 +432,16 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 			resetTimer(silenceTimer, req.SilenceTimeout)
 		case p := <-progress:
 			currentPhase = p.phase
-			if err := report("progress", p.phase, p.summary, ""); err != nil {
+			event := "progress"
+			if p.needsInput {
+				event = "needs_input"
+			}
+			if err := report(supervisorReport{Event: event, Phase: p.phase, Summary: p.summary, NeedsInput: p.needsInput, BlockerState: p.blockerState}); err != nil {
 				terminateOwnedProcess(cmd)
 				<-waited
 				return reportErrorResult(err)
 			}
-			if p.phase == "needs_input" {
+			if p.needsInput {
 				terminateOwnedProcess(cmd)
 				<-waited
 				return finishSupervisorResult(req, supervisorResult{Outcome: outcomeProviderFailure, Summary: "provider requested input; this runner is one-shot"})
@@ -335,7 +451,7 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 			<-waited
 			return finishSupervisorResult(req, supervisorResult{Outcome: outcomeMalformedStream, Summary: safeStreamErrorSummary(err)})
 		case <-heartbeat.C:
-			if err := report("heartbeat", currentPhase, "supervisor child process is alive", ""); err != nil {
+			if err := report(supervisorReport{Event: "heartbeat", Phase: currentPhase}); err != nil {
 				terminateOwnedProcess(cmd)
 				<-waited
 				return reportErrorResult(err)
@@ -388,7 +504,7 @@ func finishSupervisorResult(req supervisorRequest, result supervisorResult) supe
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := req.Reporter.Report(ctx, req.RunID, supervisorReport{
-		Event: "result", Phase: "finished", Outcome: result.Outcome, Summary: result.Summary,
+		Event: "result", Phase: map[bool]string{true: "completed", false: "unknown"}[result.Outcome == outcomeNormalExit], Outcome: result.Outcome, Summary: result.Summary,
 	})
 	if err != nil {
 		return reportErrorResult(err)

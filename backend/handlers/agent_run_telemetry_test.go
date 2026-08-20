@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/sse"
 )
 
 type directTelemetryServer struct {
@@ -215,6 +217,11 @@ func TestAgentRunTelemetryValidationPrivacyAndStableIdentity(t *testing.T) {
 		{"sequence": 1, "correlation_id": "ok", "provider": "anthropic", "adapter": "claude-code", "agent_reported_at": now, "kind": "heartbeat"},
 		{"sequence": 1, "correlation_id": "ok", "provider": "anthropic", "adapter": "claude-code", "agent_reported_at": now, "kind": "heartbeat", "activity": "raw\ncommand output"},
 		{"sequence": 1, "correlation_id": "ok", "provider": "anthropic", "adapter": "claude-code", "agent_reported_at": now, "kind": "heartbeat", "provider_payload": map[string]any{"prompt": "must never persist"}},
+		{"sequence": 1, "correlation_id": "ok", "provider": "anthropic", "adapter": "claude-code", "agent_reported_at": now, "kind": "phase", "phase": "implementing", "activity": "Authorization: Bearer obvioussecretvalue123"},
+		{"sequence": 1, "correlation_id": "ok", "provider": "anthropic", "adapter": "claude-code", "agent_reported_at": now, "kind": "progress", "phase": "implementing", "progress_percent": 20, "estimate_revision": 1, "estimate_source": "agent", "estimate_confidence": .5, "estimate_basis": "token=obvioussecretvalue123"},
+		{"sequence": 1, "correlation_id": "ok", "provider": "anthropic", "adapter": "claude-code", "agent_reported_at": now, "kind": "phase", "phase": "implementing", "activity": "credential ghp_abcdefghijklmnopqrstuvwxyz123456"},
+		{"sequence": 1, "correlation_id": "ok", "provider": "anthropic", "adapter": "claude-code", "agent_reported_at": now, "kind": "phase", "phase": "implementing", "activity": "fetch https://runner:password123@example.test/repo"},
+		{"sequence": 1, "correlation_id": "ok", "provider": "anthropic", "adapter": "claude-code", "agent_reported_at": now, "kind": "phase", "phase": "implementing", "activity": strings.Repeat("a", 17<<10)},
 	}
 	for i, body := range bad {
 		resp := ts.post(t, path, ts.adminCookie, body)
@@ -236,6 +243,71 @@ func TestAgentRunTelemetryValidationPrivacyAndStableIdentity(t *testing.T) {
 	var count int
 	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_run_telemetry WHERE run_id=?`, runID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("persisted events=%d err=%v, want only valid event", count, err)
+	}
+}
+
+func TestAgentRunTelemetryHeartbeatPreservesSemanticAndEstimateSnapshot(t *testing.T) {
+	ts := newDirectTelemetryServer(t)
+	_, runID := seedTelemetryRun(t, ts, ts.adminCookie)
+	path := "/api/runs/" + itoa(runID) + "/telemetry"
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	estimate := telemetryReport(1, now)
+	estimate["heartbeat"] = false
+	assertStatus(t, ts.post(t, path, ts.adminCookie, estimate), http.StatusCreated)
+
+	// A semantic event alone is fresh activity, but is deliberately not
+	// supervisor liveness evidence.
+	resp := ts.get(t, path+"/latest", ts.adminCookie)
+	assertStatus(t, resp, http.StatusOK)
+	var before map[string]any
+	decode(t, resp, &before)
+	if before["liveness"] != "unknown" || before["latest_heartbeat"] != nil {
+		t.Fatalf("semantic-only snapshot=%+v", before)
+	}
+
+	heartbeat := map[string]any{
+		"sequence": 2, "correlation_id": "claude-session-01",
+		"provider": "anthropic", "adapter": "claude-code",
+		"agent_reported_at": now, "kind": "heartbeat", "heartbeat": true,
+		"phase": "implementing", "needs_input": false, "blocker_state": "none",
+	}
+	assertStatus(t, ts.post(t, path, ts.adminCookie, heartbeat), http.StatusCreated)
+	resp = ts.get(t, path+"/latest", ts.adminCookie)
+	assertStatus(t, resp, http.StatusOK)
+	var snapshot map[string]any
+	decode(t, resp, &snapshot)
+	if snapshot["liveness"] != "live" {
+		t.Fatalf("heartbeat snapshot=%+v", snapshot)
+	}
+	for _, field := range []string{"latest_semantic", "latest_estimate"} {
+		fact, ok := snapshot[field].(map[string]any)
+		if !ok || fact["sequence"] != float64(1) || fact["progress_percent"] != float64(25) {
+			t.Fatalf("%s was erased by heartbeat: %+v", field, snapshot[field])
+		}
+	}
+	if event := snapshot["latest_event"].(map[string]any); event["sequence"] != float64(2) || event["kind"] != "heartbeat" {
+		t.Fatalf("latest_event=%+v", event)
+	}
+}
+
+func TestAgentRunTelemetryPublishesSSEInvalidationHintOnly(t *testing.T) {
+	ts := newDirectTelemetryServer(t)
+	_, runID := seedTelemetryRun(t, ts, ts.adminCookie)
+	var projectID int64
+	if err := db.DB.QueryRow(`SELECT project_id FROM agent_runs WHERE id=?`, runID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	sub := sse.GlobalBroker().Subscribe(999, "telemetry-test", projectID, false)
+	t.Cleanup(func() { sse.GlobalBroker().Close(sub) })
+	assertStatus(t, ts.post(t, "/api/runs/"+itoa(runID)+"/telemetry", ts.adminCookie,
+		telemetryReport(1, time.Now().UTC().Format(time.RFC3339Nano))), http.StatusCreated)
+	select {
+	case event := <-sub.Events():
+		if event.Type != "run_telemetry" || event.Name != itoa(runID) || event.Rev != "1" {
+			t.Fatalf("hint=%+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing run_telemetry invalidation hint")
 	}
 }
 
@@ -285,4 +357,90 @@ func TestAgentRunTelemetryAuthorizationAndTerminalImmutability(t *testing.T) {
 	requestedRunID, _ := res.LastInsertId()
 	requesterReport := telemetryReport(1, time.Now().UTC().Format(time.RFC3339Nano))
 	assertStatus(t, ts.post(t, "/api/runs/"+itoa(requestedRunID)+"/telemetry", ts.memberCookie, requesterReport), http.StatusCreated)
+}
+
+func TestAgentRunCompletedLifecycleAndTestEvidence(t *testing.T) {
+	ts := newDirectTelemetryServer(t)
+	_, completedID := seedTelemetryRun(t, ts, ts.adminCookie)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(completedID), ts.adminCookie, map[string]any{
+		"status": "running", "if_status": "queued", "device_id": "runner-1",
+		"expects_supervisor_telemetry": true,
+	}), http.StatusOK)
+	resp := ts.patch(t, "/api/runs/"+itoa(completedID), ts.adminCookie, map[string]any{"status": "completed"})
+	assertStatus(t, resp, http.StatusOK)
+	var completed map[string]any
+	decode(t, resp, &completed)
+	if completed["status"] != "completed" || completed["finished_at"] == nil || completed["expects_supervisor_telemetry"] != true {
+		t.Fatalf("completed=%+v", completed)
+	}
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(completedID), ts.adminCookie, map[string]any{"status": "running"}), http.StatusConflict)
+	assertStatus(t, ts.post(t, "/api/runs/"+itoa(completedID)+"/telemetry", ts.adminCookie,
+		telemetryReport(1, time.Now().UTC().Format(time.RFC3339Nano))), http.StatusConflict)
+
+	var projectID int64
+	if err := db.DB.QueryRow(`SELECT project_id FROM agent_runs WHERE id=?`, completedID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.DB.Exec(`INSERT INTO issues(project_id, issue_number, type, title, status) VALUES(?,2,'ticket','Test evidence','in-progress')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := res.LastInsertId()
+	resp = ts.post(t, "/api/issues/"+itoa(issueID)+"/implement", ts.adminCookie, map[string]any{})
+	assertStatus(t, resp, http.StatusCreated)
+	var tested map[string]any
+	decode(t, resp, &tested)
+	testedID := int64(tested["id"].(float64))
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(testedID), ts.adminCookie, map[string]any{"status": "running"}), http.StatusOK)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(testedID), ts.adminCookie, map[string]any{"status": "tests_passed"}), http.StatusConflict)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(testedID), ts.adminCookie, map[string]any{
+		"status": "tests_passed", "tests_summary": "configured test command passed",
+	}), http.StatusOK)
+}
+
+func TestAgentRunTelemetryTerminalHandlerRaceHasOneConsistentWinner(t *testing.T) {
+	ts := newDirectTelemetryServer(t)
+	_, runID := seedTelemetryRun(t, ts, ts.adminCookie)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+		"status": "running", "if_status": "queued", "device_id": "runner-race",
+	}), http.StatusOK)
+	start := make(chan struct{})
+	statuses := make(chan int, 2)
+	go func() {
+		<-start
+		resp := ts.post(t, "/api/runs/"+itoa(runID)+"/telemetry", ts.adminCookie,
+			telemetryReport(1, time.Now().UTC().Format(time.RFC3339Nano)))
+		statuses <- resp.StatusCode
+		_ = resp.Body.Close()
+	}()
+	go func() {
+		<-start
+		resp := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "completed"})
+		statuses <- resp.StatusCode
+		_ = resp.Body.Close()
+	}()
+	close(start)
+	got := []int{<-statuses, <-statuses}
+	terminalOK := 0
+	telemetryOK := 0
+	for _, status := range got {
+		if status == http.StatusOK {
+			terminalOK++
+		}
+		if status == http.StatusCreated {
+			telemetryOK++
+		}
+		if status != http.StatusOK && status != http.StatusCreated && status != http.StatusConflict {
+			t.Fatalf("race statuses=%v", got)
+		}
+	}
+	if terminalOK != 1 || telemetryOK > 1 {
+		t.Fatalf("race statuses=%v", got)
+	}
+	var status string
+	if err := db.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, runID).Scan(&status); err != nil || status != "completed" {
+		t.Fatalf("final status=%q err=%v", status, err)
+	}
+	assertStatus(t, ts.post(t, "/api/runs/"+itoa(runID)+"/telemetry", ts.adminCookie,
+		telemetryReport(2, time.Now().UTC().Format(time.RFC3339Nano))), http.StatusConflict)
 }

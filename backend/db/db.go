@@ -5669,6 +5669,111 @@ func migrate(db *sql.DB) error {
 			 WHEN NEW.sequence <= COALESCE((SELECT MAX(sequence) FROM agent_run_telemetry WHERE run_id=NEW.run_id), 0)
 			 BEGIN SELECT RAISE(ABORT, 'agent run telemetry sequence is not monotonic'); END`,
 		}},
+
+		// M143 / PAI-801: integrate the supervised runner with the telemetry
+		// contract. SQLite cannot alter a CHECK constraint, so rebuild agent_runs
+		// to add the truthful `completed` terminal status and the durable marker
+		// used to distinguish new supervised claims from legacy runners. Preserve
+		// every M131/M132/M140 column and recreate every index.
+		//
+		// The latest telemetry row is an event pointer, not a state snapshot. Add
+		// separately indexed heartbeat/semantic/estimate pointers so a heartbeat
+		// cannot erase the last useful activity or ETA fact.
+		{143, []string{
+			`PRAGMA foreign_keys=OFF`,
+			`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_terminal_guard`,
+			`CREATE TABLE agent_runs_m143 (
+				id                           INTEGER PRIMARY KEY AUTOINCREMENT,
+				issue_id                     INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+				project_id                   INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+				device_id                    TEXT NOT NULL DEFAULT '',
+				requested_by                 INTEGER REFERENCES users(id) ON DELETE SET NULL,
+				agent_name                   TEXT NOT NULL DEFAULT '',
+				session_id                   TEXT NOT NULL DEFAULT '',
+				status                       TEXT NOT NULL DEFAULT 'queued'
+					CHECK(status IN ('queued','running','completed','tests_passed','tests_failed','deployed','failed','cancelled','drafted')),
+				version                      TEXT NOT NULL DEFAULT '',
+				tests_summary                TEXT,
+				deploy_target                TEXT NOT NULL DEFAULT '',
+				log_attachment_id            INTEGER,
+				error                        TEXT NOT NULL DEFAULT '',
+				created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
+				started_at                   TEXT,
+				finished_at                  TEXT,
+				claimed_by                   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+				action_key                   TEXT NOT NULL DEFAULT 'claude_cli.implement',
+				provider_kind                TEXT NOT NULL DEFAULT 'local_cli',
+				provider_id                  TEXT NOT NULL DEFAULT 'claude_cli',
+				provider_label               TEXT NOT NULL DEFAULT 'Claude Code',
+				model                        TEXT NOT NULL DEFAULT '',
+				run_mode                     TEXT NOT NULL DEFAULT 'edit',
+				profile_id                   TEXT NOT NULL DEFAULT '',
+				effort                       TEXT NOT NULL DEFAULT '',
+				prompt_preset_ref            TEXT NOT NULL DEFAULT '',
+				context_pack                 TEXT NOT NULL DEFAULT '',
+				context_truncated            INTEGER NOT NULL DEFAULT 0,
+				context_sources_json         TEXT NOT NULL DEFAULT '',
+				prompt_tokens                INTEGER NOT NULL DEFAULT 0,
+				completion_tokens            INTEGER NOT NULL DEFAULT 0,
+				finish_reason                TEXT NOT NULL DEFAULT '',
+				source_draft_run_id          INTEGER REFERENCES agent_runs(id) ON DELETE SET NULL,
+				followup_run_id              INTEGER REFERENCES agent_runs(id) ON DELETE SET NULL,
+				repo_url                     TEXT NOT NULL DEFAULT '',
+				branch_name                  TEXT NOT NULL DEFAULT '',
+				commit_base_sha              TEXT NOT NULL DEFAULT '',
+				commit_sha                   TEXT NOT NULL DEFAULT '',
+				expects_supervisor_telemetry INTEGER NOT NULL DEFAULT 0 CHECK(expects_supervisor_telemetry IN (0,1))
+			)`,
+			`INSERT INTO agent_runs_m143(
+				id, issue_id, project_id, device_id, requested_by, agent_name, session_id,
+				status, version, tests_summary, deploy_target, log_attachment_id, error,
+				created_at, started_at, finished_at, claimed_by, action_key, provider_kind,
+				provider_id, provider_label, model, run_mode, profile_id, effort,
+				prompt_preset_ref, context_pack, context_truncated, context_sources_json,
+				prompt_tokens, completion_tokens, finish_reason, source_draft_run_id,
+				followup_run_id, repo_url, branch_name, commit_base_sha, commit_sha
+			 )
+			 SELECT id, issue_id, project_id, device_id, requested_by, agent_name, session_id,
+				status, version, tests_summary, deploy_target, log_attachment_id, error,
+				created_at, started_at, finished_at, claimed_by, action_key, provider_kind,
+				provider_id, provider_label, model, run_mode, profile_id, effort,
+				prompt_preset_ref, context_pack, context_truncated, context_sources_json,
+				prompt_tokens, completion_tokens, finish_reason, source_draft_run_id,
+				followup_run_id, repo_url, branch_name, commit_base_sha, commit_sha
+			   FROM agent_runs`,
+			`DROP TABLE agent_runs`,
+			`ALTER TABLE agent_runs_m143 RENAME TO agent_runs`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_issue ON agent_runs(issue_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_active_issue ON agent_runs(issue_id) WHERE status IN ('queued','running')`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_claimed_by ON agent_runs(claimed_by)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_action_key ON agent_runs(action_key)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_run_mode ON agent_runs(run_mode)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_provider_id ON agent_runs(provider_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_source_draft ON agent_runs(source_draft_run_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_followup ON agent_runs(followup_run_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_supervisor_active ON agent_runs(status, expects_supervisor_telemetry, started_at) WHERE status IN ('queued','running')`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN heartbeat_telemetry_id INTEGER REFERENCES agent_run_telemetry(id) ON DELETE SET NULL`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN semantic_telemetry_id INTEGER REFERENCES agent_run_telemetry(id) ON DELETE SET NULL`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN estimate_telemetry_id INTEGER REFERENCES agent_run_telemetry(id) ON DELETE SET NULL`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN latest_event_at TEXT`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN latest_semantic_at TEXT`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN latest_estimate_at TEXT`,
+			`UPDATE agent_run_telemetry_latest SET
+				heartbeat_telemetry_id=(SELECT id FROM agent_run_telemetry WHERE run_id=agent_run_telemetry_latest.run_id AND heartbeat=1 ORDER BY sequence DESC LIMIT 1),
+				semantic_telemetry_id=(SELECT id FROM agent_run_telemetry WHERE run_id=agent_run_telemetry_latest.run_id AND (kind<>'heartbeat' OR activity<>'' OR needs_input=1 OR blocker_state<>'none') ORDER BY sequence DESC LIMIT 1),
+				estimate_telemetry_id=(SELECT id FROM agent_run_telemetry WHERE run_id=agent_run_telemetry_latest.run_id AND estimate_revision IS NOT NULL ORDER BY sequence DESC LIMIT 1),
+				latest_event_at=(SELECT server_received_at FROM agent_run_telemetry WHERE id=agent_run_telemetry_latest.telemetry_id),
+				latest_semantic_at=(SELECT server_received_at FROM agent_run_telemetry WHERE id=(SELECT id FROM agent_run_telemetry WHERE run_id=agent_run_telemetry_latest.run_id AND (kind<>'heartbeat' OR activity<>'' OR needs_input=1 OR blocker_state<>'none') ORDER BY sequence DESC LIMIT 1)),
+				latest_estimate_at=(SELECT server_received_at FROM agent_run_telemetry WHERE id=(SELECT id FROM agent_run_telemetry WHERE run_id=agent_run_telemetry_latest.run_id AND estimate_revision IS NOT NULL ORDER BY sequence DESC LIMIT 1))`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_run_telemetry_latest_heartbeat ON agent_run_telemetry_latest(last_heartbeat_at)`,
+			`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_terminal_guard`,
+			`CREATE TRIGGER trg_agent_run_telemetry_terminal_guard
+			 BEFORE INSERT ON agent_run_telemetry
+			 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('completed','deployed','failed','cancelled','drafted')
+			 BEGIN SELECT RAISE(ABORT, 'terminal run telemetry is immutable'); END`,
+			`PRAGMA foreign_keys=ON`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -5701,7 +5806,7 @@ func migrate(db *sql.DB) error {
 
 func applyMigration(ctx context.Context, conn *sql.Conn, m migration) error {
 	if migrationUsesForeignKeyPragma(m) {
-		return applyMigrationNonAtomic(ctx, conn, m)
+		return applyForeignKeyRebuildMigration(ctx, conn, m)
 	}
 	return applyMigrationAtomic(ctx, conn, m)
 }
@@ -5727,17 +5832,45 @@ func applyMigrationAtomic(ctx context.Context, conn *sql.Conn, m migration) erro
 	return nil
 }
 
-func applyMigrationNonAtomic(ctx context.Context, conn *sql.Conn, m migration) error {
-	// SQLite ignores PRAGMA foreign_keys=OFF/ON inside an open transaction, so
-	// table-rebuild migrations that toggle that pragma must stay connection-
-	// pinned but non-transactional. These are the explicit exception path.
+func applyForeignKeyRebuildMigration(ctx context.Context, conn *sql.Conn, m migration) error {
+	// SQLite ignores PRAGMA foreign_keys=OFF inside an open transaction. Disable
+	// it first on this pinned connection, then transact the complete rebuild and
+	// schema-version write. A failed or interrupted rebuild therefore rolls back
+	// as one unit instead of leaving a half-renamed table behind.
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+		return fmt.Errorf("migration %d: disable foreign keys: %w", m.version, err)
+	}
+	restoreForeignKeys := func() error {
+		_, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=ON")
+		return err
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		_ = restoreForeignKeys()
+		return fmt.Errorf("migration %d: begin rebuild tx: %w", m.version, err)
+	}
 	for _, step := range m.steps {
-		if _, err := conn.ExecContext(ctx, step); err != nil {
+		normalized := strings.ToUpper(strings.Join(strings.Fields(step), " "))
+		if normalized == "PRAGMA FOREIGN_KEYS=OFF" || normalized == "PRAGMA FOREIGN_KEYS=ON" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, step); err != nil {
+			_ = tx.Rollback()
+			_ = restoreForeignKeys()
 			return migrationStepError(m.version, step, err)
 		}
 	}
-	if _, err := conn.ExecContext(ctx, "INSERT INTO schema_versions(version) VALUES(?)", m.version); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_versions(version) VALUES(?)", m.version); err != nil {
+		_ = tx.Rollback()
+		_ = restoreForeignKeys()
 		return fmt.Errorf("record migration %d: %w", m.version, err)
+	}
+	if err := tx.Commit(); err != nil {
+		_ = restoreForeignKeys()
+		return fmt.Errorf("migration %d: commit rebuild: %w", m.version, err)
+	}
+	if err := restoreForeignKeys(); err != nil {
+		return fmt.Errorf("migration %d: restore foreign keys: %w", m.version, err)
 	}
 	return nil
 }

@@ -154,7 +154,7 @@ const liveIssuesWhere = `i.deleted_at IS NULL`
 const costUnitLabelExpr = `COALESCE((SELECT lc.title FROM issue_relations lr JOIN issues lc ON lc.id=lr.source_id WHERE lr.target_id=i.id AND lr.type='cost_unit' AND lc.deleted_at IS NULL),'')`
 const releaseLabelExpr = `COALESCE((SELECT lc.title FROM issue_relations lr JOIN issues lc ON lc.id=lr.source_id WHERE lr.target_id=i.id AND lr.type='release' AND lc.deleted_at IS NULL),'')`
 const latestAgentRunStatusExpr = `COALESCE((SELECT ar.status FROM agent_runs ar WHERE ar.issue_id=i.id ORDER BY ar.id DESC LIMIT 1),'')`
-const aiWorkStatusSortExpr = `CASE ` + latestAgentRunStatusExpr + ` WHEN '' THEN 0 WHEN 'queued' THEN 1 WHEN 'running' THEN 2 WHEN 'drafted' THEN 3 WHEN 'tests_passed' THEN 4 WHEN 'tests_failed' THEN 5 WHEN 'deployed' THEN 6 WHEN 'failed' THEN 7 WHEN 'cancelled' THEN 8 ELSE 9 END`
+const aiWorkStatusSortExpr = `CASE ` + latestAgentRunStatusExpr + ` WHEN '' THEN 0 WHEN 'queued' THEN 1 WHEN 'running' THEN 2 WHEN 'completed' THEN 3 WHEN 'drafted' THEN 4 WHEN 'tests_passed' THEN 5 WHEN 'tests_failed' THEN 6 WHEN 'deployed' THEN 7 WHEN 'failed' THEN 8 WHEN 'cancelled' THEN 9 ELSE 10 END`
 
 func scanIssue(rows interface {
 	Scan(...any) error
