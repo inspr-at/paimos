@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { makeFixtureSnapshot } from './agentModeFixtures'
+import { makeFixtureDelivery, makeFixtureSnapshot } from './agentModeFixtures'
 import { buildSnapshotPath, laneKeyFor, normalizeWireDelivery, normalizeWireSnapshot } from './agentModeTransport'
 
 describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
@@ -33,9 +33,56 @@ describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
       expect(snap.deliveries).toHaveLength(n)
       expect(snap.serverTime).toBe('2026-08-20T13:48:00Z')
       expect(snap.revision).toBe(`fx-${n}-1`)
+      expect(snap.cursor).toBeNull()
+      expect(snap.selectedOutsideResults).toBeNull()
       expect(snap.receivedAt).toBe(1_000)
       expect(new Set(snap.deliveries.map((d) => d.id)).size).toBe(n)
     }
+  })
+
+  it('sends the persistent selected identity and keeps an outside result out of active rows', () => {
+    expect(buildSnapshotPath({ projectId: 6, selectedDelivery: ' dlv-terminal ' }))
+      .toBe('/agent-mode/deliveries?project_id=6&selected_delivery=dlv-terminal')
+    const active = makeFixtureDelivery(0)
+    const outside = makeFixtureDelivery(1)
+    const snap = normalizeWireSnapshot({
+      revision: 'delivery:7|trust:9',
+      stream_cursor: 'cursor:42',
+      selected_delivery: outside.delivery_id,
+      deliveries: [active],
+      selected_outside_results: outside,
+    }, 123)
+    expect(snap.deliveries.map((d) => d.id)).toEqual([active.delivery_id])
+    expect(snap.selectedOutsideResults?.id).toBe(outside.delivery_id)
+    expect(snap.selectedDeliveryId).toBe(outside.delivery_id)
+    expect(snap.cursor).toBe('cursor:42')
+  })
+
+  it('rejects an outside-result object whose identity does not match the selected delivery', () => {
+    const outside = makeFixtureDelivery(1)
+    const snap = normalizeWireSnapshot({
+      selected_delivery: 'dlv-requested',
+      selected_outside_results: outside,
+      deliveries: [],
+    }, 123)
+    expect(snap.selectedDeliveryId).toBe('dlv-requested')
+    expect(snap.selectedOutsideResults).toBeNull()
+  })
+
+  it('preserves opaque delivery, attempt, trust, suppression, stage, evidence, handoff and capability facts', () => {
+    const wire = makeFixtureDelivery(3)
+    wire.estimate_suppression_codes = ['source_disagreement']
+    wire.estimate_disagreement_codes = ['runner_vs_plan']
+    const d = normalizeWireSnapshot({ deliveries: [wire] }, 123).deliveries[0]
+    expect(d.attempt).toMatchObject({ id: 'attempt-815-1', number: 1, planRevision: 'plan:815:1' })
+    expect(d.deliveryRevision).toBe('delivery:815:1')
+    expect(d.trustRevision).toBe('trust:815:1')
+    expect(d.suppressionCodes).toEqual(['source_disagreement'])
+    expect(d.disagreementCodes).toEqual(['runner_vs_plan'])
+    expect(d.stages).toHaveLength(5)
+    expect(d.evidence.length).toBeGreaterThan(0)
+    expect(d.handoffs[0]).toMatchObject({ status: 'accepted' })
+    expect(d.capabilities).toMatchObject({ viewIssue: true, editIssue: true, attach: true, liveNote: false })
   })
 
   it('maps unknown or missing fields to explicit unknown / untrusted, never to fabricated values', () => {

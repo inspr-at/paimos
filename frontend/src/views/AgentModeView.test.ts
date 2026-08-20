@@ -23,10 +23,12 @@ import { RouterView, createMemoryHistory, createRouter, type Router } from 'vue-
 import i18n from '@/i18n'
 import { COMPACT_CONVERSATION_QUERY } from '@/components/agent-mode/agentModePresentation'
 import { TOMBSTONE_TTL_MS } from '@/composables/agent-mode/agentModeOrdering'
+import { useConfirm } from '@/composables/useConfirm'
 import { AgentModeLoadError, type AgentModeSnapshot, type AgentModeSnapshotLoader } from '@/services/agentMode'
-import { makeFixtureSnapshot } from '@/services/agentModeFixtures'
+import { makeFixtureDelivery, makeFixtureSnapshot } from '@/services/agentModeFixtures'
 import { normalizeWireSnapshot, type WireSnapshot } from '@/services/agentModeTransport'
 import { useChangesStore } from '@/stores/changes'
+import { useAuthStore } from '@/stores/auth'
 import { lsAgentModeSelectedKey } from '@/constants/storage'
 import AgentModeView from './AgentModeView.vue'
 
@@ -60,6 +62,7 @@ async function mountView(loaderImpl: AgentModeSnapshotLoader, path = '/agent-mod
   document.body.innerHTML = '<div id="app-header-left"></div><div id="app-header-right"></div><div id="root"></div>'
   const pinia = createPinia()
   setActivePinia(pinia)
+  useAuthStore().hydrateAccess({ all_projects: true, levels: {} })
   const loader = vi.fn(loaderImpl)
   const router = createRouter({
     history: createMemoryHistory(),
@@ -100,6 +103,48 @@ function stubMatchMedia(matching: (query: string) => boolean) {
   }))
   vi.stubGlobal('matchMedia', stub)
   return stub
+}
+
+function stubIssueFetch() {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const raw = input instanceof Request ? input.url : String(input)
+    const path = new URL(raw, 'http://paimos.test').pathname
+    const match = path.match(/^\/api\/issues\/(\d+)$/)
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (match) {
+      const id = Number(match[1])
+      return json({
+        id,
+        project_id: 6,
+        issue_key: `PAI-${id}`,
+        type: 'ticket',
+        title: `Ticket ${id}`,
+        description: '',
+        acceptance_criteria: '',
+        notes: '',
+        report_summary: '',
+        status: 'in-progress',
+        priority: 'medium',
+        assignee_id: null,
+        assignee: null,
+        tags: [],
+        sprint_ids: [],
+        children: [],
+        created_at: '2026-08-20 10:00:00',
+        updated_at: '2026-08-20 12:00:00',
+      })
+    }
+    if (/\/api\/issues\/\d+\/activity$/.test(path)) {
+      return json({ undo_rows: [], redo_rows: [], history_rows: [], stack_depth: 0 })
+    }
+    if (/\/api\/issues\/\d+\/ai-activity$/.test(path)) return json({ rows: [], count: 0, last_week_count: 0 })
+    if (/\/api\/issues\/\d+\/(attachments|comments|time-entries)$/.test(path)) return json([])
+    if (path === '/api/time-entries/today-summary') return json({ total_hours: 0, count: 0 })
+    return json([])
+  }))
 }
 
 function selectedCards(root: HTMLElement) {
@@ -229,10 +274,16 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(focus.getAttribute('aria-label')).toBe('Focused delivery')
     expect(focus.textContent).toContain('Focused delivery')
     expect(focus.querySelector('.am-card.is-selected')?.getAttribute('data-delivery-id')).toBe(target)
-    // Real data, no unavailable editor / action / voice controls, no promises.
+    // Real delivery detail. The ticket surface remains closed until the
+    // separate Open ticket action is explicitly activated.
     expect(focus.querySelector('.am-card-title')!.textContent).not.toBe('')
     expect(focus.querySelector('.am-card-drill')).toBeNull()
     expect(focus.querySelectorAll('input, textarea').length).toBe(0)
+    expect(root.querySelector('.side-panel')).toBeNull()
+    expect(focus.querySelector('.am-focus-open-ticket')?.getAttribute('aria-expanded')).toBe('false')
+    expect(focus.querySelectorAll('.am-stage-chain .am-stage')).toHaveLength(5)
+    expect(focus.dataset.deliveryId).toBe(target)
+    expect(focus.dataset.attemptId).toBe(`attempt-${target.replace('dlv-', '')}-1`)
     expect(document.body.textContent).not.toMatch(FUTURE_TICKET_COPY)
 
     // Escape from the focused card returns to the lanes.
@@ -255,6 +306,100 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     const active = rows.reduce((n, r) => n + Number(r.querySelectorAll('td')[0].textContent), 0)
     expect(active).toBe(10)
     expect(document.body.textContent).not.toMatch(FUTURE_TICKET_COPY)
+  })
+
+  it('opens the reused ticket panel only from Open ticket, then closes with selection intact and focus restored', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'fixture has no issue API' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?detail=1&delivery=dlv-812')
+    const { root, router } = harness
+    const open = root.querySelector<HTMLButtonElement>('.am-focus-open-ticket')!
+    expect(root.querySelector('.side-panel')).toBeNull()
+    open.click()
+    await flush()
+
+    const panel = root.querySelector<HTMLElement>('.side-panel--embedded')!
+    expect(panel).not.toBeNull()
+    expect(panel.id).toBe('agent-mode-ticket-panel')
+    expect(open.getAttribute('aria-expanded')).toBe('true')
+    expect(router.currentRoute.value.query.detail).toBe('1')
+    expect(selectedId(root)).toBe('dlv-812')
+    expect(root.querySelectorAll('[data-selected="true"]')).toHaveLength(1)
+
+    panel.querySelector<HTMLButtonElement>('[aria-label="Close ticket"]')!.click()
+    await flush()
+    expect(root.querySelector('.side-panel')).toBeNull()
+    expect(selectedId(root)).toBe('dlv-812')
+    expect(document.activeElement).toBe(open)
+    expect(open.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('fails closed when the snapshot does not authorize ticket viewing', async () => {
+    const wire = makeFixtureSnapshot(10)
+    wire.deliveries![0].capabilities = { ...wire.deliveries![0].capabilities, view_issue: false }
+    harness = await mountView(async () => snapshot(wire), '/agent-mode?detail=1&delivery=dlv-812')
+    const open = harness.root.querySelector<HTMLButtonElement>('.am-focus-open-ticket')!
+    expect(open.disabled).toBe(true)
+    open.click()
+    await flush()
+    expect(harness.root.querySelector('.side-panel')).toBeNull()
+  })
+
+  it('keeps dirty ticket state bound to its delivery when selection is rejected', async () => {
+    stubIssueFetch()
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?detail=1&delivery=dlv-812')
+    const { root } = harness
+    root.querySelector<HTMLButtonElement>('.am-focus-open-ticket')!.click()
+    await flush()
+    root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    const title = root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!
+    title.value = 'Unsaved selection-bound edit'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    const selectedBefore = selectedId(root)
+    root.querySelectorAll<HTMLButtonElement>('.am-focus-nav button')[1].click()
+    await flush()
+    expect(useConfirm().visible.value).toBe(true)
+    useConfirm().resolve(false)
+    await flush()
+    expect(selectedId(root)).toBe(selectedBefore)
+    expect(root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')?.value).toBe('Unsaved selection-bound edit')
+  })
+
+  it('passes a deep-linked persistent identity as selected_delivery without inventing a second transport', async () => {
+    const wire = makeFixtureSnapshot(10)
+    const delivery = wire.deliveries!.find((row) => row.delivery_id === 'dlv-820')!
+    delivery.estimate_suppression_codes = ['source_disagreement']
+    delivery.estimate_disagreement_codes = ['runner_vs_plan']
+    harness = await mountView(async () => snapshot(wire), '/agent-mode?detail=1&delivery=dlv-820')
+    expect(harness.loader.mock.calls[0]?.[0]).toEqual({ selectedDelivery: 'dlv-820' })
+    const focus = harness.root.querySelector<HTMLElement>('.am-focus')!
+    expect(focus.dataset.deliveryId).toBe('dlv-820')
+    expect(focus.dataset.laneKey).toBe('project:12/ungrouped')
+    expect(focus.dataset.stageKey).toBe('deployment')
+    expect(focus.dataset.planRevision).toBe('plan:820:1')
+    expect(focus.dataset.trustRevision).toBe('trust:820:1')
+    expect(focus.querySelectorAll('.am-stage-chain .am-stage')).toHaveLength(5)
+    expect(focus.textContent).toContain('Smoke-testing the production release')
+    expect(focus.textContent).toContain('Accepted deployment ownership')
+    expect(focus.textContent).toContain('specification evidence')
+    expect(focus.textContent).toContain('source_disagreement')
+    expect(focus.textContent).toContain('runner_vs_plan')
+  })
+
+  it('keeps an authorized persistent selection outside active results without adding it to delivery counts', async () => {
+    const wire = makeFixtureSnapshot(10)
+    const outside = makeFixtureDelivery(20)
+    wire.selected_delivery = outside.delivery_id
+    wire.selected_outside_results = outside
+    harness = await mountView(async () => snapshot(wire), `/agent-mode?detail=1&delivery=${outside.delivery_id}`)
+    expect(harness.root.querySelector<HTMLElement>('.am-focus')?.dataset.deliveryId).toBe(outside.delivery_id)
+    expect(harness.root.querySelectorAll('[data-selected="true"]')).toHaveLength(1)
+    expect(document.getElementById('app-header-left')!.textContent).toContain('10 deliveries in motion')
   })
 
   it('arrow keys move the selection along the visual order and carry DOM focus; Enter opens the focused delivery', async () => {
@@ -717,9 +862,10 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     const conv = root.querySelector<HTMLElement>('.am-conv')!
     expect(conv.dataset.compact).toBe('true')
     expect(conv.classList.contains('am-conv--compact')).toBe(true)
-    // Only the most recent line + the keyboard dock survive (no column head).
-    expect(conv.querySelectorAll('.am-conv-line')).toHaveLength(1)
+    // At most three recent lines + listening state survive (no column head).
+    expect(conv.querySelectorAll('.am-conv-line')).toHaveLength(3)
     expect(conv.querySelector('.am-conv-dock')).not.toBeNull()
+    expect(conv.querySelector('.am-conv-compact-live')?.textContent).toContain('Listening')
     expect(conv.querySelector('.am-conv-head')).toBeNull()
     // The lane canvas is not starved: all cards still render.
     expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(9)

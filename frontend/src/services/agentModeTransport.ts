@@ -40,6 +40,7 @@ import type {
   Delivery,
   DeliveryActor,
   DeliveryHealth,
+  DeliveryStageStatus,
   EstimateConfidence,
   FreshnessState,
   StageKey,
@@ -51,6 +52,9 @@ export const AGENT_MODE_SNAPSHOT_PATH = '/agent-mode/deliveries'
 export interface AgentModeSnapshotQuery {
   projectId?: number | null
   epicId?: number | null
+  /** Persistent identity hint. PAI-804 returns an authorized terminal or
+   * filtered selection separately as selected_outside_results. */
+  selectedDelivery?: string | null
 }
 
 /** Builds the snapshot request path. Filters are optional server hints;
@@ -62,6 +66,9 @@ export function buildSnapshotPath(query: AgentModeSnapshotQuery = {}): string {
   }
   if (query.epicId != null && Number.isFinite(query.epicId)) {
     params.set('epic_id', String(query.epicId))
+  }
+  if (typeof query.selectedDelivery === 'string' && query.selectedDelivery.trim() !== '') {
+    params.set('selected_delivery', query.selectedDelivery.trim())
   }
   const qs = params.toString()
   return qs ? `${AGENT_MODE_SNAPSHOT_PATH}?${qs}` : AGENT_MODE_SNAPSHOT_PATH
@@ -110,7 +117,48 @@ export interface WireProgress {
   confidence?: string | null
   source?: string | null
   basis?: string | null
-  revision?: number | null
+  revision?: string | number | null
+}
+
+export interface WireEvidence {
+  evidence_id?: string | number | null
+  kind?: string | null
+  label?: string | null
+  summary?: string | null
+  status?: string | null
+  reported_at?: string | null
+  reporter?: WireActor | null
+}
+
+export interface WireDeliveryStage {
+  key?: string | null
+  label?: string | null
+  status?: string | null
+  required?: boolean | null
+  owner?: WireActor | null
+  activity?: string | null
+  blockers?: WireBlocker[] | null
+  evidence?: WireEvidence[] | null
+  started_at?: string | null
+  completed_at?: string | null
+}
+
+export interface WireHandoff {
+  handoff_id?: string | number | null
+  from?: WireActor | null
+  to?: WireActor | null
+  status?: string | null
+  summary?: string | null
+  reported_at?: string | null
+}
+
+export interface WireCapabilities {
+  view_issue?: boolean | null
+  edit_issue?: boolean | null
+  comment?: boolean | null
+  attach?: boolean | null
+  live_note?: boolean | null
+  one_shot_run_active?: boolean | null
 }
 
 export interface WireEta {
@@ -135,10 +183,22 @@ export interface WireDelivery {
   epic_key?: string | null
   epic_title?: string | null
   lane_key?: string | null
+  attempt_id?: string | number | null
+  attempt_number?: number | null
+  attempt_status?: string | null
+  plan_revision?: string | number | null
+  delivery_revision?: string | number | null
+  trust_revision?: string | number | null
+  estimate_suppression_codes?: string[] | null
+  estimate_disagreement_codes?: string[] | null
   tags?: string[] | null
   actor?: WireActor | null
   activity?: WireActivity | null
   stage?: WireStage | null
+  stages?: WireDeliveryStage[] | null
+  evidence?: WireEvidence[] | null
+  handoffs?: WireHandoff[] | null
+  capabilities?: WireCapabilities | null
   health?: string | null
   attention?: WireAttention | null
   freshness?: WireFreshness | null
@@ -152,6 +212,9 @@ export interface WireDelivery {
 export interface WireSnapshot {
   server_time?: string | null
   revision?: string | number | null
+  stream_cursor?: string | number | null
+  selected_delivery?: string | number | null
+  selected_outside_results?: WireDelivery | null
   deliveries?: WireDelivery[] | null
 }
 
@@ -166,6 +229,9 @@ const STAGES: ReadonlySet<StageKey> = new Set([
 ])
 const FRESHNESS: ReadonlySet<FreshnessState> = new Set(['fresh', 'aging', 'stale', 'unknown'])
 const CONFIDENCES: ReadonlySet<EstimateConfidence> = new Set(['high', 'medium', 'low', 'none'])
+const STAGE_STATUSES: ReadonlySet<DeliveryStageStatus> = new Set([
+  'pending', 'active', 'waiting', 'blocked', 'failed', 'succeeded', 'not_applicable', 'unknown',
+])
 const ACTOR_KINDS = new Set(['agent', 'system', 'human', 'unknown'])
 
 function pickEnum<T extends string>(value: unknown, allowed: ReadonlySet<T>, fallback: T): T {
@@ -180,6 +246,35 @@ function str(value: unknown): string | null {
 
 function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function opaque(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return str(value)
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map(str).filter((v): v is string => v !== null)
+}
+
+function evidence(wire: WireEvidence | null | undefined) {
+  if (!wire || typeof wire !== 'object') return null
+  return {
+    id: opaque(wire.evidence_id),
+    kind: str(wire.kind) ?? 'unknown',
+    label: str(wire.label),
+    summary: str(wire.summary),
+    status: str(wire.status),
+    reportedAt: str(wire.reported_at),
+    reporter: actor(wire.reporter),
+  }
+}
+
+function evidenceList(value: WireEvidence[] | null | undefined) {
+  return Array.isArray(value)
+    ? value.map(evidence).filter((v): v is NonNullable<ReturnType<typeof evidence>> => v !== null)
+    : []
 }
 
 function clampPercent(value: number | null): number | null {
@@ -244,6 +339,16 @@ export function normalizeWireDelivery(wire: WireDelivery): Delivery | null {
       epicKey: epicId == null ? null : str(wire.epic_key),
       epicTitle: epicId == null ? null : str(wire.epic_title),
     },
+    attempt: {
+      id: opaque(wire.attempt_id),
+      number: num(wire.attempt_number),
+      planRevision: opaque(wire.plan_revision),
+      status: str(wire.attempt_status),
+    },
+    deliveryRevision: opaque(wire.delivery_revision),
+    trustRevision: opaque(wire.trust_revision),
+    suppressionCodes: stringList(wire.estimate_suppression_codes),
+    disagreementCodes: stringList(wire.estimate_disagreement_codes),
     tags: Array.isArray(wire.tags) ? wire.tags.filter((t): t is string => typeof t === 'string' && t !== '') : [],
     actor: actor(wire.actor),
     activity: {
@@ -256,6 +361,43 @@ export function normalizeWireDelivery(wire: WireDelivery): Delivery | null {
       label: str(wire.stage?.label),
       index: num(wire.stage?.index),
       total: num(wire.stage?.total),
+    },
+    stages: Array.isArray(wire.stages)
+      ? wire.stages.map((s) => ({
+          key: pickEnum(s?.key, STAGES, 'unknown'),
+          label: str(s?.label),
+          status: pickEnum(s?.status, STAGE_STATUSES, 'unknown'),
+          required: typeof s?.required === 'boolean' ? s.required : null,
+          owner: actor(s?.owner),
+          activity: str(s?.activity),
+          blockers: Array.isArray(s?.blockers)
+            ? s.blockers.map((b) => ({ kind: str(b?.kind) ?? 'unknown', text: str(b?.text) ?? '' })).filter((b) => b.text !== '')
+            : [],
+          evidence: evidenceList(s?.evidence),
+          startedAt: str(s?.started_at),
+          completedAt: str(s?.completed_at),
+        }))
+      : [],
+    evidence: evidenceList(wire.evidence),
+    handoffs: Array.isArray(wire.handoffs)
+      ? wire.handoffs.map((h) => ({
+          id: opaque(h?.handoff_id),
+          from: actor(h?.from),
+          to: actor(h?.to),
+          status: str(h?.status),
+          summary: str(h?.summary),
+          reportedAt: str(h?.reported_at),
+        }))
+      : [],
+    capabilities: {
+      viewIssue: typeof wire.capabilities?.view_issue === 'boolean' ? wire.capabilities.view_issue : null,
+      editIssue: typeof wire.capabilities?.edit_issue === 'boolean' ? wire.capabilities.edit_issue : null,
+      comment: typeof wire.capabilities?.comment === 'boolean' ? wire.capabilities.comment : null,
+      attach: typeof wire.capabilities?.attach === 'boolean' ? wire.capabilities.attach : null,
+      liveNote: typeof wire.capabilities?.live_note === 'boolean' ? wire.capabilities.live_note : null,
+      oneShotRunActive: typeof wire.capabilities?.one_shot_run_active === 'boolean'
+        ? wire.capabilities.one_shot_run_active
+        : null,
     },
     health: pickEnum(wire.health, HEALTHS, 'unknown'),
     attention: {
@@ -279,7 +421,9 @@ export function normalizeWireDelivery(wire: WireDelivery): Delivery | null {
           confidence: pickEnum(progressWire.confidence, CONFIDENCES, 'none'),
           source: str(progressWire.source),
           basis: str(progressWire.basis),
-          revision: num(progressWire.revision),
+          revision: typeof progressWire.revision === 'number' && Number.isFinite(progressWire.revision)
+            ? progressWire.revision
+            : str(progressWire.revision),
         }
       : null,
     eta: etaWire
@@ -311,5 +455,13 @@ export function normalizeWireSnapshot(wire: WireSnapshot | null | undefined, rec
   }
   const serverTime = str(wire?.server_time)
   const revision = wire?.revision == null ? null : String(wire.revision)
-  return { serverTime, revision, deliveries, receivedAt }
+  const outside = normalizeWireDelivery(wire?.selected_outside_results ?? {})
+  const selectedDeliveryId = opaque(wire?.selected_delivery) ?? outside?.id ?? null
+  const selectedOutsideResults = outside
+    && !seen.has(outside.id)
+    && outside.id === selectedDeliveryId
+    ? outside
+    : null
+  const cursor = opaque(wire?.stream_cursor)
+  return { serverTime, revision, cursor, deliveries, selectedOutsideResults, selectedDeliveryId, receivedAt }
 }

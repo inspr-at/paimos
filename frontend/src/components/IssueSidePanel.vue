@@ -18,8 +18,9 @@ import TagSelector from "@/components/TagSelector.vue";
 import TagChip from "@/components/TagChip.vue";
 import SprintChips from "@/components/issue/SprintChips.vue";
 import AttachmentSidebar from "@/components/issue/AttachmentSidebar.vue";
+import IssueComments from "@/components/issue/IssueComments.vue";
 import IssueAiActivity from "@/components/issue/IssueAiActivity.vue";
-import { api, errMsg } from "@/api/client";
+import { ApiError, api, errMsg, isSessionExpiredError } from "@/api/client";
 import { attachmentsEnabled } from "@/api/instance";
 import type { Issue, User, Tag, Sprint, TimeEntry, Attachment } from "@/types";
 import { useAuthStore } from "@/stores/auth";
@@ -60,6 +61,7 @@ import {
 import { undoMutationByRequestId } from "@/services/aiPaperTrail";
 import { useUndoStore } from "@/stores/undo";
 import { addIssueRelation } from "@/services/issueRelations";
+import { issueIfMatch, saveIssueDetail } from "@/services/issueDetail";
 
 const ctx = useIssueContext(true);
 
@@ -74,6 +76,15 @@ const props = defineProps<{
   startInEdit?: boolean;
   pinned?: boolean;
   readonly?: boolean; // no edit controls, fields rendered as text/markdown (portal mode)
+  /** Embedded in Agent Mode's layout instead of painting over the app. */
+  embedded?: boolean;
+  /** Fail-closed attachment capability supplied by the embedding. */
+  allowAttachments?: boolean;
+  allowComments?: boolean;
+  /** Force the comment composer to create internal notes only. */
+  internalCommentsOnly?: boolean;
+  /** Truthful warning for active one-shot runs without live-note support. */
+  noteAffectsNextRun?: boolean;
 }>();
 
 // Prefer context, fall back to props for backward compatibility
@@ -99,6 +110,7 @@ const emit = defineEmits<{
   deleted: [id: number];
   navigate: [id: number];
   "update:pinned": [pinned: boolean];
+  "guard-state": [state: { dirty: boolean; inFlight: boolean }];
 }>();
 
 const router = useRouter();
@@ -121,6 +133,9 @@ const loading = ref(false);
 const editing = ref(false);
 const saving = ref(false);
 const saveError = ref("");
+const panelGuardError = ref("");
+const commentDirty = ref(false);
+const savedSnapshot = ref("");
 const mdMode = ref(authStore.user?.markdown_default ?? false);
 
 // Full edit form
@@ -154,18 +169,29 @@ const attachments = useAttachmentUploads({
   endpoint: () =>
     issue.value ? `/issues/${issue.value.id}/attachments` : "/attachments",
 });
+const attachmentsAllowed = computed(() =>
+  !props.readonly &&
+  attachmentsEnabled.value &&
+  (props.embedded ? props.allowAttachments === true : props.allowAttachments !== false),
+);
+const commentsAllowed = computed(() =>
+  !props.readonly && (props.embedded ? props.allowComments === true : props.allowComments !== false),
+);
 
-async function loadAttachments() {
-  if (!issue.value) {
+async function loadAttachments(forIssue: Issue | null = issue.value) {
+  if (!forIssue) {
     attachments.reset();
     return;
   }
+  const expectedId = forIssue.id;
   try {
     const list = await api.get<Attachment[]>(
-      `/issues/${issue.value.id}/attachments`,
+      `/issues/${expectedId}/attachments`,
     );
+    if (issue.value?.id !== expectedId) return;
     attachments.seedExisting(list);
   } catch {
+    if (issue.value?.id !== expectedId) return;
     attachments.reset();
   }
 }
@@ -360,13 +386,13 @@ const canPrev = computed(() => currentIdx.value > 0);
 const canNext = computed(() =>
   props.issueIds ? currentIdx.value < props.issueIds.length - 1 : false,
 );
-function goPrev() {
-  if (canPrev.value && props.issueIds)
-    guardAction(() => emit("navigate", props.issueIds![currentIdx.value - 1]));
+async function goPrev() {
+  if (canPrev.value && props.issueIds && await requestLeave())
+    emit("navigate", props.issueIds[currentIdx.value - 1]);
 }
-function goNext() {
-  if (canNext.value && props.issueIds)
-    guardAction(() => emit("navigate", props.issueIds![currentIdx.value + 1]));
+async function goNext() {
+  if (canNext.value && props.issueIds && await requestLeave())
+    emit("navigate", props.issueIds[currentIdx.value + 1]);
 }
 
 // Tag management
@@ -396,41 +422,79 @@ async function quickUpdateIssueField(
     field === "assignee_id"
       ? { assignee_id: value ? Number(value) : null }
       : { status: value };
+  const loaded = issue.value;
   quickSavingField.value = field;
   quickError.value = "";
   try {
-    const updated = await api.put<Issue>(`/issues/${issue.value.id}`, payload);
+    const updated = await saveIssueDetail(
+      loaded.id,
+      payload,
+      issueIfMatch(loaded.id, loaded.updated_at),
+    );
+    if (props.issueId !== loaded.id) return;
     issue.value = updated;
     resetForm();
     emit("updated", updated);
   } catch (e: unknown) {
-    quickError.value = errMsg(e, "Update failed.");
+    if (props.issueId !== loaded.id) return;
+    if (e instanceof ApiError && e.status === 412) {
+      const reloaded = await loadIssue(props.issueId);
+      quickError.value = reloaded
+        ? "This ticket changed elsewhere. Latest values were reloaded; review and try again."
+        : "This ticket changed elsewhere and the latest values could not be reloaded. Reopen the ticket and try again.";
+    } else if (!isSessionExpiredError(e)) {
+      quickError.value = errMsg(e, "Update failed.");
+    }
   } finally {
     quickSavingField.value = "";
   }
 }
 
+let issueLoadSequence = 0;
+async function loadIssue(id: number | null): Promise<boolean> {
+  const sequence = ++issueLoadSequence;
+  if (!id) {
+    issue.value = null;
+    editing.value = false;
+    commentDirty.value = false;
+    savedSnapshot.value = "";
+    attachments.reset();
+    loading.value = false;
+    return false;
+  }
+  // Never retain the previous ticket while a new selection is loading.
+  issue.value = null;
+  editing.value = false;
+  commentDirty.value = false;
+  savedSnapshot.value = "";
+  quickError.value = "";
+  saveError.value = "";
+  panelGuardError.value = "";
+  attachments.reset();
+  loading.value = true;
+  try {
+    const loaded = await api.get<Issue>(`/issues/${id}`);
+    if (sequence !== issueLoadSequence || props.issueId !== id) return false;
+    issue.value = loaded;
+    resetForm();
+    savedSnapshot.value = "";
+    editing.value = !props.readonly && !!props.startInEdit;
+    if (editing.value) savedSnapshot.value = JSON.stringify(form.value);
+    commentDirty.value = false;
+    void loadAttachments(loaded);
+    return true;
+  } catch (e: unknown) {
+    if (sequence !== issueLoadSequence || props.issueId !== id) return false;
+    if (!isSessionExpiredError(e)) issue.value = null;
+    return false;
+  } finally {
+    if (sequence === issueLoadSequence) loading.value = false;
+  }
+}
+
 watch(
   () => props.issueId,
-  async (id) => {
-    if (!id) {
-      issue.value = null;
-      editing.value = false;
-      attachments.reset();
-      return;
-    }
-    loading.value = true;
-    try {
-      issue.value = await api.get<Issue>(`/issues/${id}`);
-      resetForm();
-      editing.value = !props.readonly && !!props.startInEdit;
-      loadAttachments();
-    } catch {
-      issue.value = null;
-    } finally {
-      loading.value = false;
-    }
-  },
+  (id) => void loadIssue(id),
   { immediate: true },
 );
 
@@ -458,7 +522,6 @@ function resetForm() {
   };
 }
 
-const savedSnapshot = ref("");
 function startEdit() {
   resetForm();
   savedSnapshot.value = JSON.stringify(form.value);
@@ -476,12 +539,74 @@ const currentSnapshot = computed(() =>
 );
 const {
   isDirty,
-  guardAction,
   reset: resetDirty,
 } = useDirtyGuard(currentSnapshot, savedSnapshot);
+const hasUnsavedChanges = computed(() => isDirty.value || commentDirty.value);
+
+watch(
+  [hasUnsavedChanges, attachments.hasInFlight],
+  ([dirty, inFlight]) => emit("guard-state", { dirty, inFlight }),
+  { immediate: true },
+);
+
+/** Shared handshake for parent selection changes, close, and panel-local
+ * navigation. Uploads cannot be reassigned mid-flight; dirty text requires
+ * explicit discard. */
+async function requestLeave(): Promise<boolean> {
+  panelGuardError.value = "";
+  if (attachments.hasInFlight.value) {
+    panelGuardError.value = "An attachment upload is still in progress. Wait for it to finish or remove it before leaving this ticket.";
+    return false;
+  }
+  if (!hasUnsavedChanges.value) return true;
+  const allowed = await confirm({
+    message: "You have unsaved ticket edits or an unposted note. Discard and continue?",
+    confirmLabel: "Discard",
+    danger: true,
+  });
+  return allowed;
+}
+
+async function requestClose() {
+  if (await requestLeave()) emit("close");
+}
+
+function onPanelKeydown(event: KeyboardEvent) {
+  if (event.key !== "Escape") return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("input, textarea, select, button, a, [contenteditable='true']")) return;
+  event.preventDefault();
+  void requestClose();
+}
+
+function onPanelPaste(event: ClipboardEvent) {
+  if (!attachmentsAllowed.value) return;
+  const files = Array.from(event.clipboardData?.files ?? []);
+  if (files.length === 0) return; // ordinary text paste keeps native behaviour
+  event.preventDefault();
+  attachments.addFiles(files);
+}
+
+function onPanelDragover(event: DragEvent) {
+  if (!attachmentsAllowed.value) return;
+  if (Array.from(event.dataTransfer?.types ?? []).includes("Files")) event.preventDefault();
+}
+
+function onPanelDrop(event: DragEvent) {
+  // The existing AttachmentSidebar drop zone handles its own event first.
+  // Avoid adding those files twice when that event bubbles to the panel.
+  if (event.defaultPrevented || !attachmentsAllowed.value) return;
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  if (files.length === 0) return;
+  event.preventDefault();
+  attachments.addFiles(files);
+}
+
+defineExpose({ requestLeave, hasUnsavedChanges, hasInFlight: attachments.hasInFlight });
 
 async function save() {
   if (!issue.value) return;
+  const loaded = issue.value;
   saving.value = true;
   saveError.value = "";
   try {
@@ -492,26 +617,38 @@ async function save() {
         : null,
       parent_id: form.value.parent_id ? Number(form.value.parent_id) : null,
     };
-    const updated = await api.put<Issue>(`/issues/${issue.value.id}`, payload);
+    const updated = await saveIssueDetail(
+      loaded.id,
+      payload,
+      issueIfMatch(loaded.id, loaded.updated_at),
+    );
+    if (props.issueId !== loaded.id) return;
     issue.value = updated;
     editing.value = false;
     savedSnapshot.value = ""; // reset dirty guard
     emit("updated", updated);
   } catch (e: unknown) {
-    saveError.value = errMsg(e, "Save failed.");
+    if (props.issueId !== loaded.id) return;
+    if (e instanceof ApiError && e.status === 412) {
+      const reloaded = await loadIssue(props.issueId);
+      saveError.value = reloaded
+        ? "This ticket changed elsewhere. Latest values were reloaded; review and re-apply your edit."
+        : "This ticket changed elsewhere and the latest values could not be reloaded. Reopen the ticket and try again.";
+    } else if (!isSessionExpiredError(e)) {
+      saveError.value = errMsg(e, "Save failed.");
+    }
   } finally {
     saving.value = false;
   }
 }
 
-function openFull() {
+async function openFull() {
   if (!issue.value) return;
   const editParam = editing.value ? "?edit=1" : "";
-  guardAction(() => {
-    router.push(
-      `/projects/${issue.value!.project_id}/issues/${issue.value!.id}${editParam}`,
-    );
-  });
+  if (!await requestLeave()) return;
+  router.push(
+    `/projects/${issue.value.project_id}/issues/${issue.value.id}${editParam}`,
+  );
 }
 
 const cloning = ref(false);
@@ -623,6 +760,7 @@ function resetWidth() {
 // ── Time entries (view mode) ────────────────────────────────────────────────
 const timeEntries = ref<TimeEntry[]>([]);
 const showTimeEntries = ref(false);
+let timeEntryLoadSequence = 0;
 
 const isTimerIssue = computed(
   () => issue.value != null && timerStore.isRunning(issue.value.id),
@@ -636,17 +774,21 @@ const totalHours = computed(() =>
 
 watch(
   () => props.issueId,
-  async () => {
+  async (id) => {
+    const sequence = ++timeEntryLoadSequence;
     timeEntries.value = [];
-    if (props.issueId) {
+    if (id) {
       try {
-        timeEntries.value = await api.get<TimeEntry[]>(
-          `/issues/${props.issueId}/time-entries`,
+        const loaded = await api.get<TimeEntry[]>(
+          `/issues/${id}/time-entries`,
         );
+        if (sequence !== timeEntryLoadSequence || props.issueId !== id) return;
+        timeEntries.value = loaded;
       } catch {
         /* ignore */
       }
     }
+    if (sequence !== timeEntryLoadSequence) return;
     // Auto-expand if there are entries or a running timer; collapse if empty
     showTimeEntries.value =
       timeEntries.value.length > 0 ||
@@ -741,17 +883,26 @@ async function deleteTimeEntry(entry: TimeEntry) {
       v-if="issueId || pinned"
       :class="[
         'side-panel',
-        { 'side-panel--pinned': pinned, 'side-panel--resizing': resizing },
+        {
+          'side-panel--pinned': pinned && !embedded,
+          'side-panel--embedded': embedded,
+          'side-panel--resizing': resizing,
+        },
       ]"
-      :style="{ width: draftWidth + 'px' }"
+      :style="embedded ? { width: '100%' } : { width: draftWidth + 'px' }"
+      @keydown="onPanelKeydown"
+      @paste="onPanelPaste"
+      @dragover="onPanelDragover"
+      @drop="onPanelDrop"
     >
       <div
-        v-if="!pinned"
+        v-if="!pinned && !embedded"
         class="sp-backdrop"
-        @click="guardAction(() => $emit('close'))"
+        @click="requestClose"
         @wheel.passive="onBackdropWheel"
       />
       <div
+        v-if="!embedded"
         class="sp-resize-handle"
         @mousedown="onResizeStart"
         @dblclick="resetWidth"
@@ -761,6 +912,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
         <!-- Header -->
         <div class="sp-header">
           <button
+            v-if="!embedded"
             class="sp-pin"
             :class="{ 'sp-pin--active': pinned }"
             @click="togglePin"
@@ -846,8 +998,9 @@ async function deleteTimeEntry(entry: TimeEntry) {
           </button>
           <button
             class="sp-action-btn"
-            @click="guardAction(() => $emit('close'))"
+            @click="requestClose"
             title="Close"
+            aria-label="Close ticket"
           >
             <AppIcon name="x" :size="15" />
           </button>
@@ -859,12 +1012,13 @@ async function deleteTimeEntry(entry: TimeEntry) {
           :apply="applyAiPanelResult"
         />
 
+        <div v-if="panelGuardError" class="sp-guard-error" role="alert">{{ panelGuardError }}</div>
         <LoadingText v-if="loading" class="sp-loading" label="Loading…" />
 
         <!-- View mode -->
         <template v-else-if="issue && !editing">
           <h2 class="sp-title">{{ issue.title }}</h2>
-          <div v-if="allTags && !readonly" class="sp-tags sp-tags--interactive">
+          <div v-if="allTags && !readonly && !embedded" class="sp-tags sp-tags--interactive">
             <TagSelector
               :all-tags="allTags"
               :selected-ids="issueTagIds"
@@ -1136,6 +1290,18 @@ async function deleteTimeEntry(entry: TimeEntry) {
             :jobs="attachments.jobs.value"
             readonly
           />
+
+          <IssueComments
+            v-if="issue"
+            :issue-id="issue.id"
+            :md-mode="mdMode"
+            :is-monospace="authStore.user?.monospace_fields ?? false"
+            :can-edit="commentsAllowed"
+            :internal-only="internalCommentsOnly"
+            :compact="embedded"
+            :composer-notice="noteAffectsNextRun ? t('agentMode.detail.nextRunNote') : null"
+            @dirty-change="commentDirty = $event"
+          />
         </template>
 
         <!-- Edit mode -->
@@ -1189,7 +1355,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
               </div>
             </div>
             <!-- Sprint assignment -->
-            <div v-if="sprints?.length" class="field">
+            <div v-if="sprints?.length && !embedded" class="field">
               <label>Sprints</label>
               <div class="sp-sprint-edit">
                 <SprintChips
@@ -1421,7 +1587,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
             </div>
             <!-- Attachments (edit mode — drop, upload, remove) -->
             <AttachmentSidebar
-              v-if="attachmentsEnabled"
+              v-if="attachmentsAllowed"
               class="sp-attach-sidebar sp-attach-sidebar--edit"
               title="Attachments"
               :jobs="attachments.jobs.value"
@@ -1484,6 +1650,20 @@ async function deleteTimeEntry(entry: TimeEntry) {
   right: 0;
   bottom: 0;
   z-index: 200;
+}
+.side-panel--embedded {
+  position: relative;
+  inset: auto;
+  z-index: 1;
+  min-width: 0;
+  min-height: 0;
+  align-self: stretch;
+}
+.side-panel--embedded .sp-content {
+  max-width: none;
+  box-shadow: none;
+  border-left: 1px solid var(--border);
+  padding: 1rem;
 }
 .sp-backdrop {
   position: fixed;
@@ -1670,6 +1850,14 @@ async function deleteTimeEntry(entry: TimeEntry) {
   margin-top: -0.25rem;
 }
 .sp-quick-error {
+  color: #b91c1c;
+  font-size: 12px;
+}
+.sp-guard-error {
+  padding: .5rem .6rem;
+  border: 1px solid color-mix(in srgb, #b91c1c 35%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, #b91c1c 6%, var(--bg-card));
   color: #b91c1c;
   font-size: 12px;
 }

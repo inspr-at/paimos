@@ -107,7 +107,7 @@ export function issueIfMatch(id: number, updatedAt: string): string {
 
 export function saveIssueDetail(
   issueId: number,
-  payload: IssueDetailForm,
+  payload: Partial<IssueDetailForm>,
   ifMatch?: string,
 ): Promise<Issue> {
   return api.put<Issue>(

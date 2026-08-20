@@ -26,6 +26,17 @@ const user = {
   timezone: 'auto',
 }
 const me = { user, access: { all_projects: true, levels: {} }, via_dev_login: false, suppress_security_nags: true }
+const visualIssue = {
+  id: 5008, project_id: 12, issue_number: 820, issue_key: 'REL-820', type: 'ticket', parent_id: null,
+  title: 'Release 5.11.0 smoke suite', description: 'Verify the production release.', acceptance_criteria: '- [ ] Smoke tests pass',
+  notes: '', report_summary: '', status: 'in-progress', priority: 'high', cost_unit: null, release: null,
+  billing_type: null, total_budget: null, rate_hourly: null, rate_lp: null, estimate_hours: 2, estimate_lp: 3,
+  ar_hours: null, ar_lp: null, time_override: null, start_date: null, end_date: null, group_state: null,
+  sprint_state: null, jira_id: null, jira_version: null, jira_text: null, color: null, sprint_ids: [], archived: false,
+  assignee_id: null, assignee: null, tags: [], created_at: '2026-08-20 10:00:00', updated_at: '2026-08-20 12:00:00',
+  created_by: 7, created_by_name: 'mba', last_changed_by_name: 'mba', booked_hours: 0, time_logged: 0,
+  time_rollup: 0, time_total: 0, accepted_at: null, accepted_by: null, invoiced_at: null, invoice_number: '',
+}
 
 async function installApiFixtures(page: Page) {
   await page.route('**/api/**', async (route) => {
@@ -43,6 +54,12 @@ async function installApiFixtures(page: Page) {
       }
       return route.fulfill({ json: makeFixtureSnapshot(10, new Date().toISOString()) })
     }
+    if (path === '/api/issues/5008') return route.fulfill({ json: visualIssue })
+    if (path === '/api/issues/5008/activity') {
+      return route.fulfill({ json: { undo_rows: [], redo_rows: [], history_rows: [], stack_depth: 0 } })
+    }
+    if (path === '/api/issues/5008/ai-activity') return route.fulfill({ json: { rows: [], count: 0, last_week_count: 0 } })
+    if (/^\/api\/issues\/5008\/(attachments|comments|time-entries)$/.test(path)) return route.fulfill({ json: [] })
     if (path === '/api/time-entries/today-summary') return route.fulfill({ json: { total_hours: 0, count: 0 } })
     if (path === '/api/dev/test-reports/summary') return route.fulfill({ json: { failures: 0 } })
     return route.fulfill({ json: [] })
@@ -190,4 +207,38 @@ test('Agent Mode keeps the light app palette under dark OS and reduced motion', 
   expect(colors.background).toBe('rgb(242, 245, 248)')
   expect(colors.ink).toBe('rgb(30, 41, 59)')
   await page.screenshot({ path: `${SHOT_DIR}/desktop-10-reduced-dark-os.png` })
+})
+
+test('PAI-806 Detail 1 ticket panel geometry at 390 / 736 / 1024', async ({ page }) => {
+  await installStaticHost(page)
+  await installApiFixtures(page)
+  for (const [width, height] of [[390, 844], [736, 900], [1024, 900]] as const) {
+    await page.setViewportSize({ width, height })
+    await page.goto(`${APP_ORIGIN}/agent-mode?delivery=dlv-820&detail=1`, { waitUntil: 'networkidle' })
+    await page.getByRole('button', { name: 'Open ticket' }).click()
+    await expect(page.locator('.side-panel--embedded')).toBeVisible()
+    const layout = await page.evaluate(() => {
+      const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect()
+      const intersects = (a: DOMRect, b: DOMRect) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+      const canvas = rect('.am-canvas')
+      const panel = rect('.side-panel--embedded')
+      const dock = rect('.am-conv--compact')
+      const stage = rect('.am-stage-chain')
+      const estimate = rect('.am-focus-detail-grid')
+      return {
+        canvasPanel: intersects(canvas, panel),
+        dockPanel: intersects(dock, panel),
+        dockStage: intersects(dock, stage),
+        dockEstimate: intersects(dock, estimate),
+        horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      }
+    })
+    expect(layout).toEqual({
+      canvasPanel: false,
+      dockPanel: false,
+      dockStage: false,
+      dockEstimate: false,
+      horizontalOverflow: false,
+    })
+  }
 })

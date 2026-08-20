@@ -29,9 +29,10 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
+import IssueSidePanel from '@/components/IssueSidePanel.vue'
 import AgentModeAttentionStrip from '@/components/agent-mode/AgentModeAttentionStrip.vue'
 import AgentModeConversation, { type NarrationLine } from '@/components/agent-mode/AgentModeConversation.vue'
 import AgentModeDeliveryCard from '@/components/agent-mode/AgentModeDeliveryCard.vue'
@@ -41,7 +42,7 @@ import AgentModeLanes from '@/components/agent-mode/AgentModeLanes.vue'
 import AgentModeSelectionAnchor from '@/components/agent-mode/AgentModeSelectionAnchor.vue'
 import AgentModeSelectedFocus from '@/components/agent-mode/AgentModeSelectedFocus.vue'
 import AgentModeStateNotice from '@/components/agent-mode/AgentModeStateNotice.vue'
-import { COMPACT_CONVERSATION_QUERY, estimateView } from '@/components/agent-mode/agentModePresentation'
+import { COMPACT_CONVERSATION_QUERY, TIGHT_EDITOR_QUERY, estimateView } from '@/components/agent-mode/agentModePresentation'
 import {
   applyFilters,
   exclusionReason,
@@ -63,6 +64,7 @@ import { useInteractionHold } from '@/composables/agent-mode/useInteractionHold'
 import { formatRelativeTimeWithLocale, formatTimeWithLocale, useDateFormat } from '@/composables/useDateFormat'
 import { lsAgentModeSelectedKey } from '@/constants/storage'
 import type { AgentModeSnapshotLoader, Delivery } from '@/services/agentMode'
+import type { AgentModeSnapshotQuery } from '@/services/agentModeTransport'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
@@ -80,7 +82,21 @@ const { t } = useI18n()
 const { locale } = useDateFormat()
 
 const injectedLoader = inject(AGENT_MODE_LOADER_KEY, null)
-const data = useAgentModeDeliveries({ loader: props.loader ?? injectedLoader ?? undefined })
+function initialSelectedQuery(): string | null {
+  if (typeof route.query.delivery === 'string' && route.query.delivery.trim()) return route.query.delivery
+  try {
+    return localStorage.getItem(lsAgentModeSelectedKey(auth.user?.id))
+  } catch {
+    return null
+  }
+}
+const selectedQueryId = ref<string | null>(initialSelectedQuery())
+const snapshotQuery = computed<AgentModeSnapshotQuery>(() => ({ selectedDelivery: selectedQueryId.value }))
+const data = useAgentModeDeliveries({
+  loader: props.loader ?? injectedLoader ?? undefined,
+  query: snapshotQuery,
+  reloadOnQueryChange: false,
+})
 
 // ── Clock: server-aligned "now" (PAI-803 clock-skew rule) ───────────────
 const nowMs = ref(Date.now())
@@ -100,10 +116,15 @@ watch(data.retryAt, (at) => {
 })
 
 // ── Constrained widths: conversation collapses to a compact dock ────────
-const compactConversation = ref(false)
+const viewportCompact = ref(false)
+const editorTight = ref(false)
+const ticketOpen = ref(false)
 let compactMq: MediaQueryList | null = null
+let editorMq: MediaQueryList | null = null
+const compactConversation = computed(() => viewportCompact.value || (ticketOpen.value && editorTight.value))
 function syncCompact() {
-  compactConversation.value = !!compactMq?.matches
+  viewportCompact.value = !!compactMq?.matches
+  editorTight.value = !!editorMq?.matches
 }
 
 onMounted(() => {
@@ -112,8 +133,10 @@ onMounted(() => {
   }, 15_000)
   if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
     compactMq = window.matchMedia(COMPACT_CONVERSATION_QUERY)
+    editorMq = window.matchMedia(TIGHT_EDITOR_QUERY)
     syncCompact()
     compactMq.addEventListener?.('change', syncCompact)
+    editorMq.addEventListener?.('change', syncCompact)
   }
 })
 onBeforeUnmount(() => {
@@ -121,7 +144,9 @@ onBeforeUnmount(() => {
   if (retryTimer !== null) clearInterval(retryTimer)
   if (tombstoneTimer !== null) clearTimeout(tombstoneTimer)
   compactMq?.removeEventListener?.('change', syncCompact)
+  editorMq?.removeEventListener?.('change', syncCompact)
   compactMq = null
+  editorMq = null
 })
 
 // ── Detail level + filters live in the URL (shareable, restorable) ──────
@@ -171,7 +196,12 @@ function replaceQuery(patch: Record<string, string | undefined>): Promise<void> 
   return navChain as Promise<void>
 }
 
-function setDetail(level: DetailLevel) {
+async function setDetail(level: DetailLevel) {
+  if (level !== 1 && ticketOpen.value) {
+    const allowed = await ticketPanelRef.value?.requestLeave()
+    if (allowed === false) return
+    ticketOpen.value = false
+  }
   void replaceQuery({ detail: level === 10 ? undefined : String(level) })
 }
 
@@ -268,19 +298,32 @@ const travelOrder = computed<string[]>(() => {
   return ids
 })
 const selection = useAgentModeSelection({
-  deliveries: data.deliveries,
+  deliveries: data.selectableDeliveries,
   order: travelOrder,
   storageKey,
   preferredId,
 })
 const selectedDelivery = selection.selectedDelivery
+const canOpenTicket = computed(() => {
+  const delivery = selectedDelivery.value
+  return !!delivery
+    && delivery.capabilities.viewIssue === true
+    && auth.canView(delivery.lane.projectId)
+})
 const selectedExcludedBy = computed(() => {
   const d = selectedDelivery.value
   return d ? exclusionReason(d, filters.value) : null
 })
 const canvasRef = ref<HTMLElement | null>(null)
 
-watch(selection.selectedId, (id) => {
+watch(selection.selectedId, (id, previous) => {
+  // A server-driven removal/revocation outranks local dirty state: close the
+  // old ticket surface immediately so omitted data is never retained under a
+  // newly selected delivery. User-driven changes are guarded before commit.
+  if (ticketOpen.value && previous && previous !== id && selection.lastChange.value?.source === 'system') {
+    ticketOpen.value = false
+  }
+  selectedQueryId.value = id
   void replaceQuery({ delivery: id ?? undefined })
 })
 watch([selection.selectedId, selectedExcludedBy], ([id, excluded]) => {
@@ -312,24 +355,71 @@ function selectDelivery(id: string) {
   selection.select(id)
 }
 
-function drill(id: string) {
+async function drill(id: string) {
   hold.markInteraction()
-  if (selection.selectedId.value !== id) selection.select(id)
-  setDetail(1)
+  if (selection.selectedId.value !== id) {
+    if (!await mayChangeSelection()) return
+    selection.select(id)
+  }
+  await setDetail(1)
 }
 
 function zoomOut() {
-  if (detailLevel.value === 1) setDetail(10)
-  else if (detailLevel.value === 10) setDetail(100)
+  if (detailLevel.value === 1) void setDetail(10)
+  else if (detailLevel.value === 10) void setDetail(100)
 }
 
-function moveSelection(how: 'next' | 'prev' | 'first' | 'last') {
+interface TicketPanelHandle {
+  requestLeave: () => Promise<boolean>
+}
+const ticketPanelRef = ref<TicketPanelHandle | null>(null)
+
+async function openTicket() {
+  if (!canOpenTicket.value || detailLevel.value !== 1) return
+  ticketOpen.value = true
+}
+
+async function closeTicket() {
+  ticketOpen.value = false
+  await nextTick()
+  const button = canvasRef.value?.querySelector<HTMLElement>('.am-focus-open-ticket')
+  button?.focus()
+}
+
+async function mayChangeSelection(): Promise<boolean> {
+  if (!ticketOpen.value) return true
+  return (await ticketPanelRef.value?.requestLeave()) !== false
+}
+
+async function moveSelection(how: 'next' | 'prev' | 'first' | 'last') {
+  if (!await mayChangeSelection()) return
   hold.markInteraction()
   if (how === 'next') selection.step(1)
   else if (how === 'prev') selection.step(-1)
   else selection.selectEdge(how)
   void focusSelectedCard()
 }
+
+/** Deterministic entry seam for card activation now and voice intent later.
+ * It changes semantic zoom only; opening the mouse editor remains explicit. */
+defineExpose({ showDetails: drill })
+
+// Browser back/forward and other route-driven zoom changes use the same
+// editor handshake as the in-canvas lever. This keeps a dirty ticket bound
+// to its delivery instead of silently hiding the editor underneath Detail 10.
+onBeforeRouteUpdate(async (to, from) => {
+  if (!ticketOpen.value || parseDetail(from.query.detail) !== 1 || parseDetail(to.query.detail) === 1) return true
+  if (!await mayChangeSelection()) return false
+  ticketOpen.value = false
+  return true
+})
+
+// Capability or project-access revocation immediately removes the issue
+// surface. The selected delivery may remain visible only if the refreshed
+// snapshot still authorizes it; the ticket payload is never retained.
+watch(canOpenTicket, (allowed) => {
+  if (!allowed) ticketOpen.value = false
+})
 
 /** Interactive descendants keep their own keyboard behaviour. */
 const INTERACTIVE_SELECTOR = [
@@ -360,20 +450,20 @@ function onCanvasKeydown(event: KeyboardEvent) {
     case 'ArrowRight':
     case 'ArrowDown':
       event.preventDefault()
-      moveSelection('next')
+      void moveSelection('next')
       break
     case 'ArrowLeft':
     case 'ArrowUp':
       event.preventDefault()
-      moveSelection('prev')
+      void moveSelection('prev')
       break
     case 'Home':
       event.preventDefault()
-      moveSelection('first')
+      void moveSelection('first')
       break
     case 'End':
       event.preventDefault()
-      moveSelection('last')
+      void moveSelection('last')
       break
     case 'Escape':
       event.preventDefault()
@@ -545,7 +635,7 @@ const selectedPosition = computed(() => {
 </script>
 
 <template>
-  <div class="am-root" :class="{ 'am-root--compact': compactConversation }">
+  <div class="am-root" :class="{ 'am-root--compact': compactConversation, 'am-root--ticket': ticketOpen }">
     <Teleport defer to="#app-header-left">
       <span class="ah-title">{{ t('agentMode.title') }}</span>
       <span v-if="data.hasData.value" class="ah-subtitle">{{ t('agentMode.subtitle', { n: counts.total }, counts.total) }}</span>
@@ -613,9 +703,12 @@ const selectedPosition = computed(() => {
           :server-now-ms="serverNowMs"
           :locale="locale"
           :degraded="data.degraded.value"
+          :ticket-open="ticketOpen"
+          :ticket-available="canOpenTicket"
           @prev="moveSelection('prev')"
           @next="moveSelection('next')"
           @zoom-out="setDetail(10)"
+          @open-ticket="openTicket"
           @interact="hold.markInteraction"
         />
 
@@ -697,6 +790,22 @@ const selectedPosition = computed(() => {
         </template>
       </template>
     </main>
+
+    <IssueSidePanel
+      v-if="ticketOpen && selectedDelivery && canOpenTicket"
+      id="agent-mode-ticket-panel"
+      ref="ticketPanelRef"
+      class="am-ticket-panel"
+      :issue-id="selectedDelivery.issueId"
+      :readonly="!auth.canEdit(selectedDelivery.lane.projectId) || selectedDelivery.capabilities.editIssue !== true"
+      :allow-attachments="auth.canEdit(selectedDelivery.lane.projectId) && selectedDelivery.capabilities.attach === true"
+      :allow-comments="auth.canEdit(selectedDelivery.lane.projectId) && selectedDelivery.capabilities.comment === true"
+      :internal-comments-only="true"
+      :note-affects-next-run="selectedDelivery.capabilities.oneShotRunActive === true && selectedDelivery.capabilities.liveNote !== true"
+      embedded
+      @close="closeTicket"
+      @updated="data.retryNow"
+    />
   </div>
 </template>
 
@@ -752,6 +861,30 @@ const selectedPosition = computed(() => {
 }
 .am-root--compact :deep(.am-conv) { grid-column: 1; grid-row: 2; }
 .am-root--compact .am-canvas { grid-column: 1; grid-row: 1; }
+.am-root--ticket:not(.am-root--compact) {
+  grid-template-columns: 232px minmax(420px, 1fr) minmax(360px, 420px);
+}
+.am-root--ticket:not(.am-root--compact) :deep(.am-conv) { grid-column: 1; grid-row: 1; }
+.am-root--ticket:not(.am-root--compact) .am-canvas { grid-column: 2; grid-row: 1; }
+.am-root--ticket:not(.am-root--compact) :deep(.am-ticket-panel) { grid-column: 3; grid-row: 1; }
+.am-root--ticket.am-root--compact {
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 42vw);
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.am-root--ticket.am-root--compact .am-canvas { grid-column: 1; grid-row: 1; }
+.am-root--ticket.am-root--compact :deep(.am-conv) { grid-column: 1; grid-row: 2; }
+.am-root--ticket.am-root--compact :deep(.am-ticket-panel) { grid-column: 2; grid-row: 1 / span 2; }
+
+@media (max-width: 736px) {
+  .am-root--ticket.am-root--compact {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(320px, 1fr) minmax(340px, 52vh) auto;
+    overflow: auto;
+  }
+  .am-root--ticket.am-root--compact .am-canvas { grid-column: 1; grid-row: 1; min-height: 320px; }
+  .am-root--ticket.am-root--compact :deep(.am-ticket-panel) { grid-column: 1; grid-row: 2; min-height: 340px; }
+  .am-root--ticket.am-root--compact :deep(.am-conv) { grid-column: 1; grid-row: 3; }
+}
 
 .am-header-tools { display: inline-flex; align-items: center; gap: 12px; }
 .am-live-chip {

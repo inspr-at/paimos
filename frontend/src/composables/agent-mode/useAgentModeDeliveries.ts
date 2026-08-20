@@ -56,6 +56,9 @@ export const AGENT_MODE_LOADER_KEY: InjectionKey<AgentModeSnapshotLoader> = Symb
 export interface UseAgentModeDeliveriesOptions {
   loader?: AgentModeSnapshotLoader
   query?: Ref<AgentModeSnapshotQuery>
+  /** Set false when query identity should apply to the next scheduled/hinted
+   * refresh without creating a duplicate request immediately. */
+  reloadOnQueryChange?: boolean
   enabled?: Ref<boolean>
   /** Poll interval while the tab is visible. 0 disables polling. */
   pollMs?: number
@@ -90,9 +93,18 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
   const lastHintAt = ref<number | null>(null)
 
   const deliveries = computed<Delivery[]>(() => snapshot.value?.deliveries ?? [])
+  /** Active rows plus the one server-authorized persistent selection outside
+   * active filters. The latter is selection-only and never enters counts or
+   * lane aggregates. */
+  const selectableDeliveries = computed<Delivery[]>(() => {
+    const active = deliveries.value
+    const outside = snapshot.value?.selectedOutsideResults ?? null
+    if (!outside || active.some((d) => d.id === outside.id)) return active
+    return [...active, outside]
+  })
   const deliveriesById = computed(() => {
     const m = new Map<string, Delivery>()
-    for (const d of deliveries.value) m.set(d.id, d)
+    for (const d of selectableDeliveries.value) m.set(d.id, d)
     return m
   })
   /** Browser→server clock offset (ms). 0 when the API omits server time. */
@@ -168,7 +180,7 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
       attempt.value = 0
       retryAt.value = null
       lastLoadedAt.value = now()
-      status.value = next.deliveries.length === 0 ? 'empty' : 'ready'
+      status.value = next.deliveries.length === 0 && !next.selectedOutsideResults ? 'empty' : 'ready'
       schedulePoll()
     } catch (e) {
       if (mySeq !== seq || !alive) return
@@ -237,7 +249,7 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
     unsubscribeHints = null
   }
 
-  watch(query, () => void load(), { deep: true })
+  if (opts.reloadOnQueryChange !== false) watch(query, () => void load(), { deep: true })
 
   if (getCurrentInstance()) {
     onMounted(() => {
@@ -251,6 +263,7 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
     status,
     snapshot,
     deliveries,
+    selectableDeliveries,
     deliveriesById,
     error,
     refreshing,

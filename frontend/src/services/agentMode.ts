@@ -51,6 +51,15 @@ export type FreshnessState = 'fresh' | 'aging' | 'stale' | 'unknown'
 /** 0 = none, 1 = watch, 2 = needs input, 3 = blocked / urgent. */
 export type AttentionLevel = 0 | 1 | 2 | 3
 export type EstimateConfidence = 'high' | 'medium' | 'low' | 'none'
+export type DeliveryStageStatus =
+  | 'pending'
+  | 'active'
+  | 'waiting'
+  | 'blocked'
+  | 'failed'
+  | 'succeeded'
+  | 'not_applicable'
+  | 'unknown'
 
 export interface DeliveryActor {
   /** Stable machine name (agent name, reporter id). */
@@ -78,7 +87,8 @@ export interface DeliveryProgress {
   confidence: EstimateConfidence
   source: string | null
   basis: string | null
-  revision: number | null
+  /** Opaque estimate lineage. PAI-803 may use a composite revision. */
+  revision: string | number | null
 }
 
 export interface DeliveryEta {
@@ -92,6 +102,49 @@ export interface DeliveryEta {
   calculatedAt: string | null
 }
 
+export interface DeliveryEvidence {
+  id: string | null
+  kind: string
+  label: string | null
+  summary: string | null
+  status: string | null
+  reportedAt: string | null
+  reporter: DeliveryActor | null
+}
+
+export interface DeliveryStage {
+  key: StageKey
+  label: string | null
+  status: DeliveryStageStatus
+  required: boolean | null
+  owner: DeliveryActor | null
+  activity: string | null
+  blockers: Array<{ kind: string; text: string }>
+  evidence: DeliveryEvidence[]
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export interface DeliveryHandoff {
+  id: string | null
+  from: DeliveryActor | null
+  to: DeliveryActor | null
+  status: string | null
+  summary: string | null
+  reportedAt: string | null
+}
+
+/** Server-authoritative capability summary. Null means the backend did not
+ * make the claim; callers must not treat it as allowed. */
+export interface DeliveryCapabilities {
+  viewIssue: boolean | null
+  editIssue: boolean | null
+  comment: boolean | null
+  attach: boolean | null
+  liveNote: boolean | null
+  oneShotRunActive: boolean | null
+}
+
 export interface Delivery {
   /** Stable delivery identity across snapshots (selection key). */
   id: string
@@ -99,11 +152,26 @@ export interface Delivery {
   issueKey: string
   title: string
   lane: DeliveryLane
+  attempt: {
+    id: string | null
+    number: number | null
+    planRevision: string | null
+    status: string | null
+  }
+  /** Opaque read-model and trust lineages retained across semantic zoom. */
+  deliveryRevision: string | null
+  trustRevision: string | null
+  suppressionCodes: string[]
+  disagreementCodes: string[]
   /** Supplemental only — never used for lane structure. */
   tags: string[]
   actor: DeliveryActor | null
   activity: { kind: ActivityKind; text: string | null; since: string | null }
   stage: { key: StageKey; label: string | null; index: number | null; total: number | null }
+  stages: DeliveryStage[]
+  evidence: DeliveryEvidence[]
+  handoffs: DeliveryHandoff[]
+  capabilities: DeliveryCapabilities
   health: DeliveryHealth
   attention: { level: AttentionLevel; reason: string | null; since: string | null }
   freshness: { state: FreshnessState; lastReportAt: string | null }
@@ -119,7 +187,12 @@ export interface AgentModeSnapshot {
   serverTime: string | null
   /** Stable revision / sequence for reconnect + replay (PAI-804). */
   revision: string | null
+  /** Opaque SSE/reconnect cursor from PAI-804. */
+  cursor: string | null
   deliveries: Delivery[]
+  /** Authorized persistent selection returned outside active filters/counts. */
+  selectedOutsideResults: Delivery | null
+  selectedDeliveryId: string | null
   /** Browser clock when the payload was received — paired with serverTime for skew. */
   receivedAt: number
 }

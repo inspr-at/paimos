@@ -124,6 +124,16 @@ export function makeFixtureDelivery(index: number): WireDelivery {
   const variant = VARIANTS[index % VARIANTS.length]
   const stageIndex = index % STAGES.length
   const issueNumber = 812 + index
+  const stageRows = STAGES.map((key, i) => ({
+    key,
+    status: i < stageIndex ? 'succeeded' : i === stageIndex ? variant.activityKind === 'blocked' ? 'blocked' : 'active' : 'pending',
+    required: true,
+    owner: { ...ACTORS[(index + i) % ACTORS.length] },
+    activity: i === stageIndex ? variant.activity : null,
+    evidence: i < stageIndex
+      ? [{ evidence_id: `ev-${issueNumber}-${i + 1}`, kind: 'stage_result', label: `${key} evidence`, status: 'accepted', reported_at: iso(-30 + i) }]
+      : [],
+  }))
   return {
     delivery_id: `dlv-${issueNumber}`,
     issue_id: 5000 + index,
@@ -135,6 +145,12 @@ export function makeFixtureDelivery(index: number): WireDelivery {
     epic_id: epic?.id ?? null,
     epic_key: epic?.key ?? null,
     epic_title: epic?.title ?? null,
+    attempt_id: `attempt-${issueNumber}-1`,
+    attempt_number: 1,
+    attempt_status: variant.activityKind === 'blocked' ? 'blocked' : 'active',
+    plan_revision: `plan:${issueNumber}:1`,
+    delivery_revision: `delivery:${issueNumber}:1`,
+    trust_revision: `trust:${issueNumber}:1`,
     tags: index % 4 === 0 ? ['security'] : [],
     actor: { ...actor },
     activity: {
@@ -143,6 +159,26 @@ export function makeFixtureDelivery(index: number): WireDelivery {
       since: iso(-15 - (index % 7) * 4),
     },
     stage: { key: STAGES[stageIndex], index: stageIndex + 1, total: STAGES.length },
+    stages: stageRows,
+    evidence: stageRows.flatMap((stage) => stage.evidence),
+    handoffs: stageIndex > 0
+      ? [{
+          handoff_id: `handoff-${issueNumber}-${stageIndex}`,
+          from: { ...ACTORS[(index + stageIndex - 1) % ACTORS.length] },
+          to: { ...ACTORS[(index + stageIndex) % ACTORS.length] },
+          status: 'accepted',
+          summary: `Accepted ${STAGES[stageIndex]} ownership`,
+          reported_at: iso(-20),
+        }]
+      : [],
+    capabilities: {
+      view_issue: true,
+      edit_issue: true,
+      comment: true,
+      attach: true,
+      live_note: false,
+      one_shot_run_active: index % 3 === 0,
+    },
     health: variant.health,
     attention: { level: variant.attention, reason: variant.attentionReason, since: variant.attention ? iso(-12) : null },
     freshness: { state: variant.freshness, last_report_at: iso(variant.lastReportMin) },

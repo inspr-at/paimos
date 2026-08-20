@@ -29,6 +29,9 @@ export const MAX_VISIBLE_TAGS = 3
 /** Below this viewport width the conversation column collapses into the
  * compact lower-left dock so the lane canvas keeps its width. */
 export const COMPACT_CONVERSATION_QUERY = '(max-width: 980px)'
+/** With the right ticket panel open, collapse narration sooner so detail and
+ * editor retain professional working widths. */
+export const TIGHT_EDITOR_QUERY = '(max-width: 1280px)'
 
 export function actorInitials(d: Delivery): string {
   const label = d.actor?.label ?? ''

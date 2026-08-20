@@ -26,9 +26,18 @@ const props = withDefaults(defineProps<{
   mdMode: boolean
   isMonospace: boolean
   canEdit?: boolean
+  /** Embeddings such as Agent Mode may only create internal notes. */
+  internalOnly?: boolean
+  compact?: boolean
+  composerNotice?: string | null
 }>(), {
   canEdit: true,
+  internalOnly: false,
+  compact: false,
+  composerNotice: null,
 })
+
+const emit = defineEmits<{ 'dirty-change': [dirty: boolean] }>()
 
 const authStore = useAuthStore()
 const { confirm } = useConfirm()
@@ -44,13 +53,27 @@ const commentError  = ref('')
 // next comment doesn't accidentally inherit the previous selection.
 const commentVisibility = ref<CommentVisibility>('internal')
 
+watch(commentBody, (body) => emit('dirty-change', body.trim() !== ''))
+
+let loadSequence = 0
 async function load() {
-  try { comments.value = await loadIssueComments(props.issueId) } catch {}
+  const sequence = ++loadSequence
+  const issueId = props.issueId
+  try {
+    const loaded = await loadIssueComments(issueId)
+    if (sequence === loadSequence && props.issueId === issueId) comments.value = loaded
+  } catch {}
 }
 
 defineExpose({ load })
 
-watch(() => props.issueId, () => load())
+watch(() => props.issueId, () => {
+  comments.value = []
+  commentBody.value = ''
+  commentVisibility.value = 'internal'
+  emit('dirty-change', false)
+  void load()
+}, { immediate: true })
 
 function escapeHtmlBr(s: string): string {
   return escapeHtml(s, true)
@@ -70,7 +93,7 @@ async function submitComment() {
     const c = await createIssueComment(
       props.issueId,
       commentBody.value.trim(),
-      commentVisibility.value,
+      props.internalOnly ? 'internal' : commentVisibility.value,
     )
     comments.value.push(c)
     commentBody.value = ''
@@ -96,7 +119,7 @@ async function deleteComment(comment: Comment) {
 // somebody composed an internal answer and then realised the customer
 // should see it (or vice versa).
 function canFlipVisibility(comment: Comment): boolean {
-  if (props.canEdit === false) return false
+  if (props.canEdit === false || props.internalOnly) return false
   if (!authStore.user) return false
   return comment.author_id === authStore.user.id || authStore.isAdmin
 }
@@ -123,7 +146,7 @@ async function flipVisibility(comment: Comment) {
 </script>
 
 <template>
-  <div class="comments-section">
+  <div class="comments-section" :class="{ 'comments-section--compact': compact }">
     <h3 class="comments-title">Comments <span class="comments-count" v-if="comments.length">{{ formatInteger(comments.length) }}</span></h3>
 
     <div v-if="comments.length" class="comments-list">
@@ -186,7 +209,12 @@ async function flipVisibility(comment: Comment) {
              external chips behave like a radio group; the helper line
              swaps copy + color when external is selected so the author
              cannot accidentally publish to the customer portal. -->
-        <div class="comment-vis-row" role="radiogroup" :aria-label="t('comments.visibility.toggleAriaLabel')">
+        <p v-if="composerNotice" class="comment-composer-notice">{{ composerNotice }}</p>
+        <div v-if="internalOnly" class="comment-vis-row comment-vis-row--locked">
+          <span class="comment-vis-pill comment-vis-pill--active">{{ t('comments.visibility.badgeInternal') }}</span>
+          <span class="comment-vis-hint">{{ t('comments.visibility.composerHint') }}</span>
+        </div>
+        <div v-else class="comment-vis-row" role="radiogroup" :aria-label="t('comments.visibility.toggleAriaLabel')">
           <button
             type="button"
             role="radio"
@@ -233,6 +261,11 @@ async function flipVisibility(comment: Comment) {
   margin-top: 1.75rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--border);
+}
+.comments-section--compact { margin-top: .9rem; padding-top: .9rem; }
+.comment-composer-notice {
+  margin: 0; padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text-muted); font-size: 11px; line-height: 1.4;
 }
 .comments-title {
   font-size: 13px; font-weight: 700; text-transform: uppercase;

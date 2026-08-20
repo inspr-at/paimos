@@ -39,7 +39,7 @@ export function provideIssueContext(ctx: IssueContext) {
  * throwing — useful for components that can live outside the provider tree.
  */
 export function useIssueContext(optional?: boolean): IssueContext {
-  const ctx = inject(ISSUE_CTX_KEY)
+  const ctx = inject(ISSUE_CTX_KEY, null)
   if (!ctx) {
     if (optional) {
       return {
