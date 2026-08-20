@@ -23,6 +23,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // newRunServer serves a canned run detail for GET /api/runs/{id} and records
@@ -483,17 +484,19 @@ func TestDefaultSpawnTeesOutput(t *testing.T) {
 }
 
 func TestClaudeDefaultIsNonInteractivePromptMode(t *testing.T) {
-	if got := effectiveAgentExec("claude"); got != `claude -p --verbose --output-format stream-json --permission-mode dontAsk --allowedTools "Read,Glob,Grep,Edit,Write"` {
-		t.Fatalf("effectiveAgentExec(claude)=%q", got)
+	argv, err := claudeRunnerArgv(defaultClaudePermissionMode, defaultClaudeAllowedTools, false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !commandReadsPromptOnStdin(effectiveAgentExec("claude")) {
+	command := strings.Join(argv, " ")
+	if !commandReadsPromptOnStdin(command) {
 		t.Fatal("normalized claude command should read prompt from stdin")
 	}
 	promptFile := filepath.Join(t.TempDir(), "prompt.md")
 	if err := os.WriteFile(promptFile, []byte("implement PAI-5"), 0o600); err != nil {
 		t.Fatalf("seed prompt: %v", err)
 	}
-	prompt, err := promptForCommand(effectiveAgentExec("claude"), []string{"PAIMOS_PROMPT_FILE=" + promptFile})
+	prompt, err := promptForCommand(command, []string{"PAIMOS_PROMPT_FILE=" + promptFile})
 	if err != nil {
 		t.Fatalf("promptForCommand: %v", err)
 	}
@@ -509,15 +512,29 @@ func TestClaudePermissionModeAndAllowedToolsAreConfigurable(t *testing.T) {
 	if defaultClaudePermissionMode != "dontAsk" || defaultClaudeAllowedTools != "Read,Glob,Grep,Edit,Write" {
 		t.Fatalf("least-privilege defaults drifted: mode=%q tools=%q", defaultClaudePermissionMode, defaultClaudeAllowedTools)
 	}
-	if err := validateClaudeRunnerConfig("acceptEdits", "Read,Grep,Bash"); err != nil {
-		t.Fatalf("valid config: %v", err)
-	}
-	got := effectiveAgentExec("claude", "acceptEdits", "Read,Grep,Bash")
-	if !strings.Contains(got, `--permission-mode acceptEdits`) || !strings.Contains(got, `--allowedTools "Read,Grep,Bash"`) {
-		t.Fatalf("configured command=%q", got)
+	validModes := []string{"acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"}
+	for _, mode := range validModes {
+		unsafe := mode == "bypassPermissions"
+		argv, err := claudeRunnerArgv(mode, "Read,Grep,Bash", unsafe)
+		if err != nil {
+			t.Fatalf("valid mode %q: %v", mode, err)
+		}
+		got := " " + strings.Join(argv, " ") + " "
+		for _, required := range []string{" --safe-mode ", " --permission-mode " + mode + " ", " --tools Read,Grep,Bash ", " --allowedTools Read,Grep,Bash "} {
+			if !strings.Contains(got, required) {
+				t.Fatalf("mode %q argv=%v missing %q", mode, argv, required)
+			}
+		}
+		if strings.Contains(got, "--dangerously-skip-permissions") {
+			t.Fatalf("argv enabled unconditional dangerous bypass: %v", argv)
+		}
+		if unsafe != strings.Contains(got, " --allow-dangerously-skip-permissions ") {
+			t.Fatalf("mode %q dangerous acknowledgement mismatch: %v", mode, argv)
+		}
 	}
 	for _, tc := range []struct{ mode, tools string }{
-		{"unknown", "Read"}, {"dontAsk", ""}, {"dontAsk", "Read,$(unsafe)"},
+		{"unknown", "Read"}, {"default", "Read"}, {"dontAsk", ""},
+		{"dontAsk", "Read,$(unsafe)"}, {"dontAsk", "Read;touch"}, {"dontAsk", "Read\nWrite"},
 	} {
 		if err := validateClaudeRunnerConfig(tc.mode, tc.tools); err == nil {
 			t.Fatalf("accepted unsafe config mode=%q tools=%q", tc.mode, tc.tools)
@@ -802,6 +819,82 @@ func TestAgentRunnerQueuedRunIDsDedupesPollErrors(t *testing.T) {
 	_ = a.queuedRunIDs(context.Background(), 7)
 	if got := strings.Count(errOut.String(), "catch-up poll failed"); got != 2 {
 		t.Fatalf("distinct catch-up error logged %d times, want 2; stderr=%q", got, errOut.String())
+	}
+}
+
+func TestAgentRunnerFinalConflictRefetchesAuthoritativeLifecycle(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		wanted    string
+		getStatus int
+		authority string
+		wantErr   bool
+	}{
+		{name: "equivalent replay", wanted: "completed", getStatus: http.StatusOK, authority: "completed"},
+		{name: "reaper won", wanted: "completed", getStatus: http.StatusOK, authority: "failed", wantErr: true},
+		{name: "cancelled won", wanted: "tests_passed", getStatus: http.StatusOK, authority: "cancelled", wantErr: true},
+		{name: "missing", wanted: "completed", getStatus: http.StatusNotFound, wantErr: true},
+		{name: "refetch failure", wanted: "deployed", getStatus: http.StatusServiceUnavailable, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				status := tc.getStatus
+				body := `{"error":"unavailable"}`
+				if r.Method == http.MethodPatch {
+					status = http.StatusConflict
+					body = `{"error":"terminal conflict"}`
+				} else if tc.getStatus == http.StatusOK {
+					body = fmt.Sprintf(`{"status":%q}`, tc.authority)
+				}
+				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+			})}}
+			runner := &agentRunner{client: client}
+			err := runner.report(42, map[string]any{"status": tc.wanted})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("report error=%v wantErr=%v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestAgentRunnerDoesNotPrintSuccessWhenReaperWonFinalConflict(t *testing.T) {
+	patches := 0
+	respond := func(r *http.Request, status int, body string) (*http.Response, error) {
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	}
+	client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/runs/1" && patches < 2:
+			return respond(r, http.StatusOK, `{"issue_id":5,"device_id":"","status":"queued"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/runs/1":
+			return respond(r, http.StatusOK, `{"status":"failed"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/PAI-5":
+			return respond(r, http.StatusOK, `{"id":5,"issue_key":"PAI-5","type":"ticket","title":"Lifecycle race","status":"in-progress","priority":"medium"}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/runs/1":
+			patches++
+			if patches == 1 {
+				return respond(r, http.StatusOK, `{}`)
+			}
+			return respond(r, http.StatusConflict, `{"error":"terminal conflict"}`)
+		default:
+			return respond(r, http.StatusNotFound, `{"error":"unexpected route"}`)
+		}
+	})}}
+	runner := newAgentRunner(client, "race-device", t.TempDir(), "printf ok", "claude_cli.implement", "", true, false, "", false, false)
+	runner.reporter = &recordingRunnerReporter{}
+	runner.supervise = func(context.Context, supervisorRequest) supervisorResult {
+		return supervisorResult{Outcome: outcomeNormalExit, Summary: "provider exited normally"}
+	}
+	oldStdout := stdout
+	var output bytes.Buffer
+	stdout = &output
+	t.Cleanup(func() { stdout = oldStdout })
+	err := runner.handleRun(context.Background(), aJob())
+	if err == nil || !strings.Contains(err.Error(), "report failure") {
+		t.Fatalf("handleRun error=%v", err)
+	}
+	if strings.Contains(output.String(), "run 1 complete") || strings.Contains(output.String(), "deployed to") {
+		t.Fatalf("printed local success after reaper won: %q", output.String())
 	}
 }
 
@@ -1098,18 +1191,97 @@ func TestHTTPRunnerReportTransportUsesTelemetryRESTContract(t *testing.T) {
 	}
 }
 
-func TestRunnerTelemetryIdentityDoesNotMislabelCustomHarnesses(t *testing.T) {
-	for _, tt := range []struct {
-		action, provider, adapter string
-	}{
-		{"claude_cli.implement", "anthropic", "claude-code"},
-		{"codex_cli.implement", "openai", "codex-cli"},
-		{"custom_cli.implement", "paimos", "run-agent"},
-	} {
-		provider, adapter := runnerTelemetryIdentityForAction(tt.action)
-		if provider != tt.provider || adapter != tt.adapter {
-			t.Fatalf("identity(%q)=(%q,%q), want (%q,%q)", tt.action, provider, adapter, tt.provider, tt.adapter)
+func TestHTTPRunnerReportTransportTruncatesUTF8AtServerByteBoundary(t *testing.T) {
+	var activity string
+	client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var body runTelemetryReport
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			return nil, err
 		}
+		activity = body.Activity
+		if !utf8.ValidString(activity) || len(activity) > maxTelemetryActivityBytes {
+			return &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"invalid byte bound"}`)), Request: r}, nil
+		}
+		return &http.Response{StatusCode: http.StatusCreated, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"accepted":true}`)), Request: r}, nil
+	})}}
+	transport := &httpRunnerReportTransport{client: client, provider: "paimos", adapter: "custom-runner"}
+	// 277 ASCII bytes followed by two multibyte runes forces truncation exactly
+	// where a byte slice could split UTF-8. The ASCII ellipsis fills byte 280.
+	summary := strings.Repeat("a", 277) + "éé"
+	if err := transport.Report(context.Background(), 78, supervisorReport{Event: "progress", Phase: "implementing", Summary: summary}); err != nil {
+		t.Fatalf("multibyte telemetry was rejected: %v", err)
+	}
+	if len(activity) != maxTelemetryActivityBytes || !utf8.ValidString(activity) || !strings.HasSuffix(activity, "...") {
+		t.Fatalf("activity bytes=%d valid=%v suffix=%q", len(activity), utf8.ValidString(activity), activity[len(activity)-3:])
+	}
+}
+
+func TestRunnerTelemetryIdentityComesFromExecutionMode(t *testing.T) {
+	if key, label, err := resolveRunnerAction("custom_cli.implement", "aider"); err != nil || key != "custom_cli.implement" || label != "Custom runner" {
+		t.Fatalf("custom action was unreachable: key=%q label=%q err=%v", key, label, err)
+	}
+	for _, tt := range []struct {
+		command, provider, adapter string
+	}{
+		{"claude", "anthropic", "claude-code"},
+		{"codex exec --full-auto", "openai", "codex-cli"},
+		{"aider --yes", "paimos", "custom-runner"},
+		{"opencode run", "paimos", "custom-runner"},
+		{"codex-wrapper run", "paimos", "custom-runner"},
+		{"codex exec | tee runner.log", "paimos", "custom-runner"},
+	} {
+		provider, adapter := runnerTelemetryIdentityForExecution(tt.command)
+		if provider != tt.provider || adapter != tt.adapter {
+			t.Fatalf("identity(%q)=(%q,%q), want (%q,%q)", tt.command, provider, adapter, tt.provider, tt.adapter)
+		}
+	}
+}
+
+func TestAgentRunnerRawCommandsEmitNeutralTelemetryEndToEnd(t *testing.T) {
+	for _, command := range []string{"aider --yes", "opencode run", "./arbitrary-wrapper --job PAI-5"} {
+		t.Run(strings.Fields(command)[0], func(t *testing.T) {
+			var telemetry map[string]any
+			respond := func(r *http.Request, status int, body string) (*http.Response, error) {
+				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+			}
+			client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/runs/1":
+					return respond(r, http.StatusOK, `{"issue_id":5,"project_id":9,"device_id":"","action_key":"claude_cli.implement","status":"queued"}`)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/issues/PAI-5":
+					return respond(r, http.StatusOK, `{"id":5,"issue_key":"PAI-5","type":"ticket","title":"Raw identity","status":"in-progress","priority":"medium"}`)
+				case r.Method == http.MethodPatch && r.URL.Path == "/api/runs/1":
+					return respond(r, http.StatusOK, `{}`)
+				case r.Method == http.MethodPost && r.URL.Path == "/api/runs/1/telemetry":
+					if err := json.NewDecoder(r.Body).Decode(&telemetry); err != nil {
+						return nil, err
+					}
+					return respond(r, http.StatusCreated, `{"accepted":true,"duplicate":false}`)
+				default:
+					return respond(r, http.StatusNotFound, `{"error":"unexpected route"}`)
+				}
+			})}}
+
+			runner := newAgentRunner(client, "raw-device", t.TempDir(), command,
+				"claude_cli.implement", "", true, false, "", false, false)
+			var childEnv map[string]string
+			runner.supervise = func(ctx context.Context, req supervisorRequest) supervisorResult {
+				childEnv = envMap(req.Env)
+				if err := req.Reporter.Report(ctx, req.RunID, supervisorReport{Event: "liveness", Phase: "starting"}); err != nil {
+					return supervisorResult{Outcome: outcomeReportFailure, Summary: err.Error()}
+				}
+				return supervisorResult{Outcome: outcomeNormalExit, Summary: "raw command exited normally"}
+			}
+			if err := runner.handleRun(context.Background(), aJob()); err != nil {
+				t.Fatal(err)
+			}
+			if telemetry["provider"] != "paimos" || telemetry["adapter"] != "custom-runner" {
+				t.Fatalf("command %q telemetry=%+v", command, telemetry)
+			}
+			if childEnv["PAIMOS_RUN_PROVIDER"] != "paimos" || childEnv["PAIMOS_RUN_ADAPTER"] != "custom-runner" {
+				t.Fatalf("command %q env=%+v", command, childEnv)
+			}
+		})
 	}
 }
 
@@ -1287,7 +1459,7 @@ func TestAgentRunnerEndToEndSupervisorTelemetryREST(t *testing.T) {
 	}
 	correlation := telemetry[0]["correlation_id"]
 	for i, fact := range telemetry {
-		if fact["sequence"] != float64(i+1) || fact["correlation_id"] != correlation || fact["provider"] != "anthropic" || fact["adapter"] != "claude-code" {
+		if fact["sequence"] != float64(i+1) || fact["correlation_id"] != correlation || fact["provider"] != "paimos" || fact["adapter"] != "custom-runner" {
 			t.Fatalf("fact %d=%+v", i, fact)
 		}
 		for _, forbidden := range []string{"prompt", "provider_payload", "command_output", "tool_arguments", "source", "environment"} {

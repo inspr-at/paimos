@@ -566,7 +566,12 @@ test command; it never implies tests passed. `tests_passed` and `tests_failed`
 require a non-empty `tests_summary` of at most 4096 bytes, supplied by the same
 transition or already persisted. Telemetry history is append-only. Its latest
 projection keeps independent event, heartbeat, semantic, and estimate pointers;
-only the server-received heartbeat timestamp is liveness evidence.
+only the server-received heartbeat timestamp is liveness evidence. Telemetry
+`activity` and `estimate_basis` are valid single-line UTF-8 bounded to 280 and
+240 bytes respectively; adapters truncate on code-point boundaries to those
+same byte limits. Exact persisted sequence/body replays remain idempotent after
+terminal lifecycle completion, while conflicting or new terminal facts are
+rejected.
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 

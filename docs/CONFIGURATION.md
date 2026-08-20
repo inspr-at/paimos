@@ -93,10 +93,10 @@ environment variables. The safety-relevant defaults are:
 | `--execution-timeout` | `2h` | Hard lifetime for the owned provider process tree. |
 | `--heartbeat-timeout` | `5m` | Maximum child stdout/stderr silence before termination. |
 | `--heartbeat-interval` | `15s` | Supervisor-owned liveness cadence; independent of provider callbacks. |
-| `--exec` | `claude` | Built-in Claude structured-stream mode with repository read/edit tools only. Any custom value is an explicit raw shell-command fallback. |
-| `--claude-permission-mode` | `dontAsk` | Permission mode passed to the built-in Claude command. Explicitly configurable; shell metacharacters and unknown modes are rejected. |
-| `--claude-allowed-tools` | `Read,Glob,Grep,Edit,Write` | Comma-separated tool allowlist for built-in Claude mode. Bash, MCP, browser, and bypass tools are absent by default. |
-| `--unsafe-allow-bypass-permissions` | `false` | Separate unsafe opt-in required when `--claude-permission-mode=bypassPermissions`; choosing the mode alone is rejected. |
+| `--exec` | `claude` | Built-in Claude structured-stream mode with validated direct argv, `--safe-mode`, and repository read/edit tools only. Any custom value is an explicit raw shell-command fallback with neutral `paimos/custom-runner` telemetry identity. |
+| `--claude-permission-mode` | `dontAsk` | One of the installed modes `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, or `plan`; stale/unknown values and shell controls are rejected. |
+| `--claude-allowed-tools` | `Read,Glob,Grep,Edit,Write` | Passed to `--tools` as the hard built-in availability boundary and to `--allowedTools` for approval. Bash, browser, MCP, and inherited customizations are absent by default. |
+| `--unsafe-allow-bypass-permissions` | `false` | Separate unsafe opt-in required for `bypassPermissions`; only the dual opt-in generates Claude's dangerous-skip acknowledgement argument. |
 | `--test-exec` | *(empty)* | The only runner-owned test evidence source. Empty means successful implementation reports `completed`, not `tests_passed`. |
 | `--attach-logs` | `false` | Opt-in bounded raw log capture; output can contain secrets. |
 | `--allow-deploy` | `false` | Still requires `--deploy-exec`, a run `deploy_target`, and separate consent unless `--yes-deploy`. |

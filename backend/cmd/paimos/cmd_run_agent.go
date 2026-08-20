@@ -137,8 +137,8 @@ Examples:
 	c.Flags().DurationVar(&execTimeout, "execution-timeout", 2*time.Hour, "maximum lifetime of an agent child process")
 	c.Flags().DurationVar(&heartbeatTO, "heartbeat-timeout", 5*time.Minute, "terminate a child that produces no stdout/stderr activity for this long")
 	c.Flags().DurationVar(&heartbeatIn, "heartbeat-interval", 15*time.Second, "supervisor liveness report interval while the child is alive")
-	c.Flags().StringVar(&claudePermissionMode, "claude-permission-mode", defaultClaudePermissionMode, "Claude permission mode for the built-in claude command")
-	c.Flags().StringVar(&claudeAllowedTools, "claude-allowed-tools", defaultClaudeAllowedTools, "comma-separated Claude tool allowlist for the built-in claude command")
+	c.Flags().StringVar(&claudePermissionMode, "claude-permission-mode", defaultClaudePermissionMode, "Claude permission mode: acceptEdits|auto|bypassPermissions|manual|dontAsk|plan")
+	c.Flags().StringVar(&claudeAllowedTools, "claude-allowed-tools", defaultClaudeAllowedTools, "comma-separated hard availability and auto-approval tool allowlist for built-in Claude")
 	c.Flags().BoolVar(&unsafeClaudeBypass, "unsafe-allow-bypass-permissions", false, "allow built-in Claude bypassPermissions mode (unsafe; separate explicit opt-in)")
 	return c
 }
@@ -172,6 +172,8 @@ func resolveRunnerAction(explicit, execCmd string) (string, string, error) {
 		return key, "Claude Code", nil
 	case "codex_cli.implement":
 		return key, "Codex CLI", nil
+	case "custom_cli.implement":
+		return key, "Custom runner", nil
 	default:
 		return "", "", &usageError{msg: "unsupported --action-key " + key}
 	}
@@ -392,7 +394,7 @@ func newAgentRunner(client *Client, deviceID, repoRoot, execCmd, actionKey, test
 	if actionKey == "" {
 		actionKey, _, _ = resolveRunnerAction("", execCmd)
 	}
-	provider, adapter := runnerTelemetryIdentityForAction(actionKey)
+	provider, adapter := runnerTelemetryIdentityForExecution(execCmd)
 	return &agentRunner{
 		client:               client,
 		deviceID:             deviceID,
@@ -418,15 +420,16 @@ func newAgentRunner(client *Client, deviceID, repoRoot, execCmd, actionKey, test
 	}
 }
 
-func runnerTelemetryIdentityForAction(actionKey string) (string, string) {
-	switch actionKey {
-	case "codex_cli.implement":
-		return "openai", "codex-cli"
-	case "claude_cli.implement":
+func runnerTelemetryIdentityForExecution(execCmd string) (string, string) {
+	trimmed := strings.TrimSpace(execCmd)
+	if trimmed == "claude" {
 		return "anthropic", "claude-code"
-	default:
-		return "paimos", "run-agent"
 	}
+	fields := strings.Fields(trimmed)
+	if len(fields) > 0 && !strings.ContainsAny(trimmed, "|;&<>`$\r\n") && strings.EqualFold(filepath.Base(fields[0]), "codex") {
+		return "openai", "codex-cli"
+	}
+	return "paimos", "custom-runner"
 }
 
 type agentRunDetail struct {
@@ -522,6 +525,8 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 		if err := validateClaudeRunnerConfig(permissionMode, allowedTools, a.unsafeClaudeBypass); err != nil {
 			return err
 		}
+		a.claudePermissionMode = permissionMode
+		a.claudeAllowedTools = allowedTools
 	}
 	detail, err := a.fetchRun(runID)
 	if err != nil {
@@ -605,7 +610,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	fmt.Fprintf(stdout, "%s implementing %s%s (run %d) in %s\n",
 		time.Now().Format(time.RFC3339), issueKey, agentNote, runID, a.repoRoot)
 
-	provider, adapter := runnerTelemetryIdentityForAction(actionKey)
+	provider, adapter := runnerTelemetryIdentityForExecution(a.execCmd)
 	var correlationID string
 	var correlationErr error
 	if identity, ok := a.reporter.(interface {
@@ -676,8 +681,18 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 
 	var runResult supervisorResult
 	if a.supervise != nil {
+		effectiveCmd := a.execCmd
+		var effectiveArgv []string
+		if strings.TrimSpace(a.execCmd) == "claude" {
+			var argvErr error
+			effectiveArgv, argvErr = claudeRunnerArgv(a.claudePermissionMode, a.claudeAllowedTools, a.unsafeClaudeBypass)
+			if argvErr != nil {
+				return argvErr
+			}
+			effectiveCmd = strings.Join(effectiveArgv, " ")
+		}
 		runResult = a.supervise(ctx, supervisorRequest{
-			RunID: runID, RepoRoot: a.repoRoot, ExecCmd: effectiveAgentExec(a.execCmd, a.claudePermissionMode, a.claudeAllowedTools), Env: env,
+			RunID: runID, RepoRoot: a.repoRoot, ExecCmd: effectiveCmd, ExecArgv: effectiveArgv, Env: env,
 			StructuredClaude: strings.TrimSpace(a.execCmd) == "claude",
 			ExecutionTimeout: a.executionTimeout, SilenceTimeout: a.heartbeatTimeout,
 			HeartbeatInterval: a.heartbeatInterval, LogSink: logSink, Reporter: a.reporter,
@@ -1201,15 +1216,36 @@ func (a *agentRunner) patch(runID int64, fields map[string]any) error {
 	return err
 }
 
-// report PATCHes the run's final state and LOGS (rather than swallows) a
-// failure, so a network blip on the report doesn't silently lose the outcome. A
-// 409 just means the run already reached a terminal status — not worth shouting.
+// report PATCHes the run's final state. A 409 is authoritative only after a
+// refetch proves that the same terminal outcome was already applied; a reaper,
+// canceller, disappearance, or different writer remains a visible failure.
 func (a *agentRunner) report(runID int64, fields map[string]any) error {
-	if err := a.patch(runID, fields); err != nil && !isConflict(err) {
-		fmt.Fprintf(stderr, "run %d: reporting %v failed: %v\n", runID, fields["status"], err)
-		return err
+	err := a.patch(runID, fields)
+	if err == nil {
+		return nil
 	}
-	return nil
+	if isConflict(err) {
+		wanted, _ := fields["status"].(string)
+		authoritative, fetchErr := fetchRunStatusContext(context.Background(), a.client, runID)
+		if fetchErr != nil {
+			err = fmt.Errorf("refetch authoritative run after terminal conflict: %w", fetchErr)
+		} else if wanted == authoritative && agentRunStatusIsTerminal(authoritative) {
+			return nil
+		} else {
+			err = fmt.Errorf("terminal outcome conflict: attempted %q but server reports %q", wanted, authoritative)
+		}
+	}
+	fmt.Fprintf(stderr, "run %d: reporting %v failed: %v\n", runID, fields["status"], err)
+	return err
+}
+
+func agentRunStatusIsTerminal(status string) bool {
+	switch status {
+	case "completed", "tests_passed", "tests_failed", "deployed", "failed", "cancelled", "drafted":
+		return true
+	default:
+		return false
+	}
 }
 
 // isConflict reports whether err is an HTTP 409 from the API (a lost claim or a
@@ -1318,11 +1354,16 @@ func defaultSpawn(ctx context.Context, repoRoot, execCmd string, env []string, l
 	if strings.TrimSpace(execCmd) == "" {
 		return fmt.Errorf("empty --exec command")
 	}
-	effectiveCmd := effectiveAgentExec(execCmd)
-	// Run through a shell so the operator's --exec can use quotes, pipes, and
-	// chaining (PAI-619). execCmd is the operator's own --exec flag, run in their
-	// own repo — that is the entire purpose of the runner.
-	cmd := exec.CommandContext(ctx, "sh", "-c", effectiveCmd) // #nosec G204 -- operator's own --exec flag
+	promptCommand := execCmd
+	var cmd *exec.Cmd
+	if strings.TrimSpace(execCmd) == "claude" {
+		argv, _ := claudeRunnerArgv(defaultClaudePermissionMode, defaultClaudeAllowedTools, false)
+		cmd = exec.CommandContext(ctx, argv[0], argv[1:]...) // #nosec G204 -- validated built-in argv
+		promptCommand = strings.Join(argv, " ")
+	} else {
+		// Raw --exec is the operator's deliberate shell-command escape hatch.
+		cmd = exec.CommandContext(ctx, "sh", "-c", execCmd) // #nosec G204 -- operator's own --exec flag
+	}
 	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(), env...)
 	// Tee output to the run log (PAI-617) when a sink is provided.
@@ -1336,7 +1377,7 @@ func defaultSpawn(ctx context.Context, repoRoot, execCmd string, env []string, l
 	}
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	if prompt, err := promptForCommand(effectiveCmd, env); err != nil {
+	if prompt, err := promptForCommand(promptCommand, env); err != nil {
 		return err
 	} else if prompt != "" {
 		cmd.Stdin = strings.NewReader(prompt)
@@ -1346,28 +1387,11 @@ func defaultSpawn(ctx context.Context, repoRoot, execCmd string, env []string, l
 	return cmd.Run()
 }
 
-func effectiveAgentExec(execCmd string, claudeConfig ...string) string {
-	trimmed := strings.TrimSpace(execCmd)
-	if trimmed == "claude" {
-		permissionMode := defaultClaudePermissionMode
-		allowedTools := defaultClaudeAllowedTools
-		if len(claudeConfig) > 0 && strings.TrimSpace(claudeConfig[0]) != "" {
-			permissionMode = strings.TrimSpace(claudeConfig[0])
-		}
-		if len(claudeConfig) > 1 && strings.TrimSpace(claudeConfig[1]) != "" {
-			allowedTools = strings.TrimSpace(claudeConfig[1])
-		}
-		return fmt.Sprintf("claude -p --verbose --output-format stream-json --permission-mode %s --allowedTools %s",
-			permissionMode, strconv.Quote(allowedTools))
-	}
-	return execCmd
-}
-
 func validateClaudeRunnerConfig(permissionMode, allowedTools string, unsafeAllowBypass ...bool) error {
 	permissionMode = strings.TrimSpace(permissionMode)
 	validModes := map[string]bool{
-		"default": true, "acceptEdits": true, "plan": true,
-		"dontAsk": true, "bypassPermissions": true,
+		"acceptEdits": true, "auto": true, "bypassPermissions": true,
+		"manual": true, "dontAsk": true, "plan": true,
 	}
 	if !validModes[permissionMode] {
 		return &usageError{msg: "invalid --claude-permission-mode"}
@@ -1386,6 +1410,27 @@ func validateClaudeRunnerConfig(permissionMode, allowedTools string, unsafeAllow
 		}
 	}
 	return nil
+}
+
+func claudeRunnerArgv(permissionMode, allowedTools string, unsafeAllowBypass bool) ([]string, error) {
+	if err := validateClaudeRunnerConfig(permissionMode, allowedTools, unsafeAllowBypass); err != nil {
+		return nil, err
+	}
+	permissionMode = strings.TrimSpace(permissionMode)
+	allowedTools = strings.TrimSpace(allowedTools)
+	argv := []string{
+		"claude", "-p", "--verbose", "--output-format", "stream-json",
+		"--safe-mode",
+		"--permission-mode", permissionMode,
+		// --tools is the hard built-in availability boundary. --allowedTools
+		// additionally controls which of those tools can run without approval.
+		"--tools", allowedTools,
+		"--allowedTools", allowedTools,
+	}
+	if permissionMode == "bypassPermissions" {
+		argv = append(argv, "--allow-dangerously-skip-permissions")
+	}
+	return argv, nil
 }
 
 func promptForCommand(execCmd string, env []string) (string, error) {

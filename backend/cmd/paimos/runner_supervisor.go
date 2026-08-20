@@ -20,16 +20,19 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
 
 const (
-	maxProviderEventBytes  = 256 << 10
-	maxProviderStreamBytes = 32 << 20
-	maxProviderEvents      = 100_000
-	maxVisibleOutputBytes  = 1 << 20
-	maxCapturedLogBytes    = 8 << 20
+	maxProviderEventBytes     = 256 << 10
+	maxProviderStreamBytes    = 32 << 20
+	maxProviderEvents         = 100_000
+	maxVisibleOutputBytes     = 1 << 20
+	maxCapturedLogBytes       = 8 << 20
+	maxTelemetryActivityBytes = 280
+	maxTelemetryBasisBytes    = 240
 )
 
 type supervisorOutcome string
@@ -122,7 +125,7 @@ func (h *httpRunnerReportTransport) Report(ctx context.Context, runID int64, rep
 		Sequence: nextSequence, CorrelationID: state.correlationID, Provider: h.resolvedProvider(),
 		Adapter: h.resolvedAdapter(), AgentReportedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Kind: "phase", Phase: allowedSupervisorPhase(report.Phase),
-		Activity:   safeReportValue(report.Summary, 160),
+		Activity:   safeReportValue(report.Summary, maxTelemetryActivityBytes),
 		NeedsInput: report.NeedsInput, BlockerState: report.BlockerState,
 	}
 	if fact.BlockerState == "" {
@@ -142,7 +145,7 @@ func (h *httpRunnerReportTransport) Report(ctx context.Context, runID int64, rep
 		if report.Outcome == outcomeNormalExit {
 			fact.Kind = "phase"
 			fact.Phase = "reviewing"
-			fact.Activity = safeReportValue(report.Summary, 160)
+			fact.Activity = safeReportValue(report.Summary, maxTelemetryActivityBytes)
 		} else {
 			fact.Kind = "blocker"
 			fact.Phase = "unknown"
@@ -159,7 +162,7 @@ func (h *httpRunnerReportTransport) Report(ctx context.Context, runID int64, rep
 		fact.ETAMaxSeconds = report.ETAMaxSeconds
 		fact.EstimateSource = report.EstimateSource
 		fact.EstimateConfidence = report.EstimateConfidence
-		fact.EstimateBasis = safeReportValue(report.EstimateBasis, 240)
+		fact.EstimateBasis = safeReportValue(report.EstimateBasis, maxTelemetryBasisBytes)
 	}
 	body, err := json.Marshal(fact)
 	if err != nil {
@@ -296,17 +299,40 @@ func supervisorOutcomeBlocker(outcome supervisorOutcome) string {
 }
 
 func safeReportValue(value string, max int) string {
-	value = strings.TrimSpace(value)
+	value = strings.TrimSpace(strings.ToValidUTF8(value, ""))
 	if value == "" {
 		return ""
 	}
-	return truncateRunes(value, max)
+	return truncateUTF8Bytes(value, max)
+}
+
+func truncateUTF8Bytes(value string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	if len(value) <= max {
+		return value
+	}
+	const suffix = "..."
+	if max <= len(suffix) {
+		cut := max
+		for cut > 0 && !utf8.RuneStart(value[cut]) {
+			cut--
+		}
+		return value[:cut]
+	}
+	cut := max - len(suffix)
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	return value[:cut] + suffix
 }
 
 type supervisorRequest struct {
 	RunID             int64
 	RepoRoot          string
 	ExecCmd           string
+	ExecArgv          []string
 	Env               []string
 	StructuredClaude  bool
 	ExecutionTimeout  time.Duration
@@ -432,10 +458,20 @@ func (w *outputBudgetWriter) Write(p []byte) (int, error) {
 }
 
 func superviseAgentProcess(ctx context.Context, req supervisorRequest) supervisorResult {
-	if strings.TrimSpace(req.ExecCmd) == "" {
+	if strings.TrimSpace(req.ExecCmd) == "" && len(req.ExecArgv) == 0 {
 		return supervisorResult{Outcome: outcomeSpawnFailure, Summary: "provider command is empty"}
 	}
-	cmd := exec.Command("sh", "-c", req.ExecCmd) // #nosec G204 -- operator-owned command
+	var cmd *exec.Cmd
+	if len(req.ExecArgv) > 0 {
+		if strings.TrimSpace(req.ExecArgv[0]) == "" {
+			return supervisorResult{Outcome: outcomeSpawnFailure, Summary: "provider command is empty"}
+		}
+		// Built-in adapters execute their validated argv directly. Only the
+		// deliberate raw --exec escape hatch is interpreted by a shell.
+		cmd = exec.Command(req.ExecArgv[0], req.ExecArgv[1:]...) // #nosec G204 -- validated built-in argv
+	} else {
+		cmd = exec.Command("sh", "-c", req.ExecCmd) // #nosec G204 -- operator-owned raw command
+	}
 	cmd.Dir = req.RepoRoot
 	cmd.Env = append(os.Environ(), req.Env...)
 	configureProcessGroup(cmd)
@@ -447,7 +483,11 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 	if err != nil {
 		return supervisorResult{Outcome: outcomeSpawnFailure, Summary: "provider stderr could not be opened"}
 	}
-	if prompt, promptErr := promptForCommand(req.ExecCmd, req.Env); promptErr != nil {
+	promptCommand := req.ExecCmd
+	if len(req.ExecArgv) > 0 {
+		promptCommand = strings.Join(req.ExecArgv, " ")
+	}
+	if prompt, promptErr := promptForCommand(promptCommand, req.Env); promptErr != nil {
 		return supervisorResult{Outcome: outcomeSpawnFailure, Summary: "provider prompt could not be read"}
 	} else if prompt != "" {
 		cmd.Stdin = strings.NewReader(prompt)

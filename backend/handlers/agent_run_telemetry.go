@@ -167,11 +167,6 @@ func IngestAgentRunTelemetry(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "run not found", http.StatusNotFound)
 		return
 	}
-	if agentRunIsTerminal(run.Status) {
-		jsonError(w, "terminal run telemetry is immutable", http.StatusConflict)
-		return
-	}
-
 	var input agentRunTelemetryInput
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	dec := json.NewDecoder(r.Body)
@@ -198,14 +193,10 @@ func IngestAgentRunTelemetry(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Recheck status inside the write transaction. M142's INSERT trigger is the
-	// final race-proof guard if lifecycle and telemetry writes overlap.
-	var status string
-	if err := tx.QueryRowContext(r.Context(), `SELECT status FROM agent_runs WHERE id=?`, run.ID).Scan(&status); err != nil || agentRunIsTerminal(status) {
-		jsonError(w, "terminal run telemetry is immutable", http.StatusConflict)
-		return
-	}
-
+	// Exact persisted replays are reads, not terminal writes. Resolve them before
+	// the lifecycle guard so a response-lost append can still be acknowledged
+	// after another transaction finishes the run. Authorization and existence
+	// hiding already happened before the body was decoded.
 	if prior, err := getAgentRunTelemetryTx(tx, run.ID, event.Sequence); err == nil {
 		if telemetryEventsEqual(prior, event) {
 			jsonOK(w, map[string]any{"accepted": true, "duplicate": true, "telemetry": prior})
@@ -215,6 +206,19 @@ func IngestAgentRunTelemetry(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		jsonError(w, "telemetry unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	// Recheck status inside the write transaction after ruling out an exact
+	// replay. M142's INSERT trigger remains the final race-proof guard if a
+	// lifecycle write overlaps a genuinely new telemetry append.
+	var status string
+	if err := tx.QueryRowContext(r.Context(), `SELECT status FROM agent_runs WHERE id=?`, run.ID).Scan(&status); err != nil {
+		jsonError(w, "telemetry unavailable", http.StatusInternalServerError)
+		return
+	}
+	if agentRunIsTerminal(status) {
+		jsonError(w, "terminal run telemetry is immutable", http.StatusConflict)
 		return
 	}
 
@@ -433,7 +437,7 @@ func GetLatestAgentRunTelemetry(w http.ResponseWriter, r *http.Request) {
 		liveness = "ended"
 	} else if heartbeatFreshness != nil {
 		liveness = "live"
-		heartbeatAt, parseErr := time.Parse(time.RFC3339Nano, heartbeat.String)
+		heartbeatAt, parseErr := parseTelemetryTimestamp(heartbeat.String)
 		if parseErr == nil && now.Sub(heartbeatAt) >= AgentRunReconcilerConfigFromEnv().HeartbeatTimeout {
 			liveness = "stale"
 		}
@@ -468,7 +472,7 @@ func telemetryFreshness(now time.Time, value sql.NullString) *int64 {
 	if !value.Valid || strings.TrimSpace(value.String) == "" {
 		return nil
 	}
-	when, err := time.Parse(time.RFC3339Nano, value.String)
+	when, err := parseTelemetryTimestamp(value.String)
 	if err != nil {
 		return nil
 	}
@@ -477,6 +481,14 @@ func telemetryFreshness(now time.Time, value sql.NullString) *int64 {
 		seconds = 0
 	}
 	return &seconds
+}
+
+func parseTelemetryTimestamp(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed, nil
+	}
+	return time.Parse(time.DateTime, value)
 }
 
 const agentRunTelemetryCols = `id, run_id, sequence, correlation_id, provider, adapter, agent_reported_at, server_received_at, kind, heartbeat, phase, activity, needs_input, blocker_state, estimate_revision, progress_percent, eta_seconds, eta_min_seconds, eta_max_seconds, estimate_source, estimate_confidence, estimate_basis`

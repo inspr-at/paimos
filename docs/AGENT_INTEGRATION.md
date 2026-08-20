@@ -453,12 +453,20 @@ paimos run-agent watch --project PAI --repo-root . --exec "codex exec" --action-
 
 The default `--exec "claude"` is normalized to Claude Code print mode with
 `--output-format stream-json`, a non-interactive permission mode, and an
-allowlist of repository read/edit tools (`Read,Glob,Grep,Edit,Write`). It does
-not enable Bash, MCP, browser, or permission bypass by default. Operators can
+allowlist of repository read/edit tools (`Read,Glob,Grep,Edit,Write`). The
+validated argv passes that list to `--tools` as the hard built-in availability
+boundary and to `--allowedTools` as the additional approval policy. It also
+uses `--safe-mode`, disabling inherited CLAUDE.md, skills, plugins, hooks, MCP,
+custom commands/agents, and other user/project customizations. It does not
+enable Bash, browser, or permission bypass by default. Operators can
 explicitly set `--claude-permission-mode` and `--claude-allowed-tools`; both are
-validated before launch. Selecting `bypassPermissions` is rejected unless the
-separate `--unsafe-allow-bypass-permissions` flag is also present; merely typing
-the mode never opts into bypass. A custom `--exec` remains the deliberate raw-command escape hatch.
+validated before launch. The supported installed modes are exactly
+`acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, and `plan`.
+Selecting `bypassPermissions` is rejected unless the separate
+`--unsafe-allow-bypass-permissions` flag is also present, and the generated argv
+then includes Claude's `--allow-dangerously-skip-permissions` acknowledgement;
+merely typing the mode never opts into bypass. A custom `--exec` remains the
+deliberate raw-command escape hatch.
 The generated issue prompt
 is fed on stdin, so a queued run never opens an interactive TUI. The spawned
 command sees `PAIMOS_RUN_ID`, `PAIMOS_PROJECT_ID`, `PAIMOS_ISSUE_KEY`,
@@ -479,7 +487,10 @@ also receives:
 `--exec` is the explicit provider-neutral/raw fallback. It runs through a shell
 (`sh -c`), so quoting, pipes, and chaining work for custom commands, e.g.
 `--exec 'codex exec "$(cat "$PAIMOS_PROMPT_FILE")"'`. Raw output is not parsed
-or persisted as telemetry.
+or persisted as telemetry. Telemetry identity follows the actual execution
+mode, not the queue action: exact built-in Claude is `anthropic/claude-code`, a
+direct Codex CLI command is `openai/codex-cli`, and raw Aider, OpenCode,
+wrappers, or shell pipelines are the neutral `paimos/custom-runner`.
 
 The supervisor parses only bounded Claude JSON-line envelopes. It translates
 an allowlist of event type/tool-name classes into the wire phases `starting`,
@@ -563,9 +574,10 @@ GET  /api/runs/799/telemetry/latest
 
 The POST is limited to the run requester, stamped claimer, or an admin. Missing
 and unauthorized runs both return 404. Reads use normal run visibility. A
-terminal run (`completed`, `drafted`, `deployed`, `failed`, or `cancelled`) rejects all late
-telemetry with 409, including exact duplicate retries, so telemetry can never
-mutate or qualify a terminal result.
+terminal run (`completed`, `tests_passed`, `tests_failed`, `drafted`, `deployed`,
+`failed`, or `cancelled`) rejects every new fact and conflicting replay with
+409. An exact already-persisted same-sequence replay remains a read-only 200
+duplicate acknowledgement and does not mutate history or the latest projection.
 
 Example report:
 
@@ -594,8 +606,9 @@ Example report:
 ```
 
 `sequence` must increase; exact same-sequence/same-body replay returns 200 with
-`duplicate: true`, while conflicting duplicates and out-of-order reports return
-409; a newly appended fact returns 201. `correlation_id`, `provider`, and `adapter` become immutable after the
+`duplicate: true`, including after the run becomes terminal, while conflicting
+duplicates, out-of-order reports, and every new post-terminal fact return 409;
+a newly appended fact returns 201. `correlation_id`, `provider`, and `adapter` become immutable after the
 first accepted report. Delayed reports are accepted when their sequence is
 newer. `agent_reported_at` is retained as agent evidence, but freshness,
 clock-skew detection use `server_received_at`. Active liveness uses only the
@@ -669,7 +682,8 @@ Codex CLI uses the same contract explicitly:
 | test command class | `kind=phase`, `phase=testing` |
 | normal exit | `kind=phase`, `phase=reviewing`; lifecycle later records `completed` or a test-evidenced status |
 
-Aider is the third-harness mapping (for adapters that opt into this endpoint):
+Aider is the third-harness mapping for an explicit Aider adapter that opts into
+this endpoint. Merely using raw `--exec aider` stays `paimos/custom-runner`:
 
 | Aider signal | Provider-neutral report |
 |---|---|

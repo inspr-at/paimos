@@ -17,6 +17,8 @@ import (
 	"github.com/inspr-at/paimos/backend/sse"
 )
 
+const telemetryActivityBoundaryBytes = 280
+
 type directTelemetryServer struct {
 	handler        http.Handler
 	adminCookie    string
@@ -232,6 +234,7 @@ func TestAgentRunTelemetryValidationPrivacyAndStableIdentity(t *testing.T) {
 	}
 
 	good := telemetryReport(1, now)
+	good["activity"] = strings.Repeat("a", telemetryActivityBoundaryBytes-2) + "é"
 	assertStatus(t, ts.post(t, path, ts.adminCookie, good), http.StatusCreated)
 	changedIdentity := telemetryReport(2, now)
 	changedIdentity["provider"] = "another-provider"
@@ -365,6 +368,18 @@ func TestAgentRunTelemetryAuthorizationAndTerminalImmutability(t *testing.T) {
 	assertStatus(t, ts.post(t, path, ts.memberCookie, report), http.StatusCreated)
 
 	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "failed"}), http.StatusOK)
+	// A response-lost append remains idempotently replayable after lifecycle
+	// completion. It must not update the immutable history or latest pointer.
+	resp := ts.post(t, path, ts.adminCookie, report)
+	assertStatus(t, resp, http.StatusOK)
+	var duplicate map[string]any
+	decode(t, resp, &duplicate)
+	if duplicate["duplicate"] != true || duplicate["telemetry"].(map[string]any)["sequence"] != float64(1) {
+		t.Fatalf("terminal exact duplicate=%+v", duplicate)
+	}
+	terminalConflict := telemetryReport(1, time.Now().UTC().Format(time.RFC3339Nano))
+	terminalConflict["activity"] = "Conflicting terminal replay"
+	assertStatus(t, ts.post(t, path, ts.adminCookie, terminalConflict), http.StatusConflict)
 	late := telemetryReport(2, time.Now().UTC().Format(time.RFC3339Nano))
 	late["estimate_revision"] = 2
 	assertStatus(t, ts.post(t, path, ts.adminCookie, late), http.StatusConflict)
@@ -373,7 +388,7 @@ func TestAgentRunTelemetryAuthorizationAndTerminalImmutability(t *testing.T) {
 	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_run_telemetry WHERE run_id=?`, runID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("post-terminal telemetry changed history: count=%d err=%v", count, err)
 	}
-	resp := ts.get(t, path+"/latest", ts.adminCookie)
+	resp = ts.get(t, path+"/latest", ts.adminCookie)
 	assertStatus(t, resp, http.StatusOK)
 	var snapshot map[string]any
 	decode(t, resp, &snapshot)
