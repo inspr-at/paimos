@@ -1499,11 +1499,11 @@
     },
     "headers": {
       "PermissionsEpoch": {
-        "description": "PAI-320 per-user permissions epoch. The auth middleware sets it on every authenticated response, for session-cookie and `paimos_*` API-key callers alike, so it is always present on a success. The value is the canonical base-10 rendering of a non-negative int64 counter: no sign, no leading zeros, no surrounding whitespace. Clients compare it verbatim against the last value they saw and re-fetch `/auth/me` on any change, so a non-canonical rendering would silently invalidate that comparison.",
+        "description": "PAI-320 per-user permissions epoch. The auth middleware sets it on every authenticated response, for session-cookie and `paimos_*` API-key callers alike, so it is always present on a success. The value is the canonical base-10 rendering of a non-negative int64 counter: no sign, no leading zeros, no surrounding whitespace. Clients compare it verbatim against the last value they saw and re-fetch `/auth/me` on any change, so a non-canonical rendering would silently invalidate that comparison. The pattern is exact on both ends: the counter is a signed int64 column rendered by `strconv.FormatInt`, so 9223372036854775807 is the largest value that can ever appear. The 19-digit alternatives encode that ceiling — one branch per prefix of the maximum whose next digit is lowered, plus the maximum itself — because JSON Schema has no numeric bound for a string-typed header.",
         "required": true,
         "schema": {
           "type": "string",
-          "pattern": "^(0|[1-9][0-9]*)$"
+          "pattern": "^(0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[01][0-9]{17}|92[01][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[01][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7])$"
         }
       },
       "SessionExpiresAt": {
@@ -3516,7 +3516,11 @@
         "responses": {
           "200": {
             "description": "Authorized Agent Mode snapshot",
-            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}},
+              "X-Permissions-Epoch": {"$ref": "#/components/headers/PermissionsEpoch"},
+              "X-Session-Expires-At": {"$ref": "#/components/headers/SessionExpiresAt"}
+            },
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentModeSnapshot"}}}
           },
           "400": {

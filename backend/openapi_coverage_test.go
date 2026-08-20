@@ -392,24 +392,23 @@ func TestAgentModeVoiceOpenAPIIsClosedTemplateOnlyAndNonCacheable(t *testing.T) 
 	}
 }
 
-// PAI-808: the voice client treats X-Permissions-Epoch as a hard precondition
-// on a 2xx — the SPA's local access cache is only invalidatable if every
-// success carries a comparable epoch — and consumes X-Session-Expires-At
-// opportunistically. auth.Middleware already guarantees both (epoch on every
-// authenticated response, expiry only on the session-cookie branch), so the
-// published contract has to say so on exactly the success responses the
-// client depends on: STT, TTS, and the selector-independent project list.
+// PAI-808: the Agent Mode client treats X-Permissions-Epoch as a hard
+// precondition on a 2xx — the SPA's local access cache is only invalidatable
+// if every success carries a comparable epoch — and consumes
+// X-Session-Expires-At opportunistically. auth.Middleware already guarantees
+// both (epoch on every authenticated response, expiry only on the
+// session-cookie branch), so the published contract has to say so on exactly
+// the success responses the client depends on: STT, TTS, the
+// selector-independent project list, and the delivery snapshot the production
+// Agent Mode loader fetches through the same epoch-tracking api client.
 const (
 	openAPIPermissionsEpochHeader = "X-Permissions-Epoch"
 	openAPISessionExpiresHeader   = "X-Session-Expires-At"
 	openAPIPermissionsEpochRef    = "#/components/headers/PermissionsEpoch"
 	openAPISessionExpiresRef      = "#/components/headers/SessionExpiresAt"
-	// Canonical base-10 int64: no sign, no leading zeros — exactly what
-	// strconv.FormatInt emits for the non-negative permissions_epoch counter.
-	openAPIPermissionsEpochPattern = `^(0|[1-9][0-9]*)$`
 )
 
-func TestOpenAPIAuthContextHeadersArePinnedOnVoiceAndProjectsSuccess(t *testing.T) {
+func TestOpenAPIAuthContextHeadersArePinnedOnAuthenticatedSuccess(t *testing.T) {
 	doc := documentedAPIDocument(t)
 	want := map[string]string{
 		openAPIPermissionsEpochHeader: openAPIPermissionsEpochRef,
@@ -419,6 +418,7 @@ func TestOpenAPIAuthContextHeadersArePinnedOnVoiceAndProjectsSuccess(t *testing.
 		{"post", "/api/agent-mode/voice/transcribe"},
 		{"post", "/api/agent-mode/voice/speak"},
 		{"get", "/api/projects"},
+		{"get", "/api/agent-mode/deliveries"},
 	} {
 		operation := strings.ToUpper(target.method) + " " + target.path
 		raw, ok := doc.Paths[target.path][target.method]
@@ -452,6 +452,55 @@ func TestOpenAPIAuthContextHeadersArePinnedOnVoiceAndProjectsSuccess(t *testing.
 			}
 		}
 	}
+}
+
+// isCanonicalNonNegativeInt64 is the oracle the documented epoch pattern has
+// to agree with: exactly the strings strconv.FormatInt emits for a
+// non-negative int64. auth.Middleware renders the permissions_epoch column
+// that way, so nothing else can ever appear on the wire.
+func isCanonicalNonNegativeInt64(value string) bool {
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return false
+	}
+	return strconv.FormatInt(parsed, 10) == value
+}
+
+// permissionsEpochProbes are the inputs that discriminate the epoch pattern:
+// ordinary counters, the non-canonical renderings a looser regex waves
+// through, the neighbourhood of the int64 ceiling, digit-length sweeps either
+// side of MaxInt64's 19 digits, and every single-digit perturbation of
+// MaxInt64 — each of which straddles one alternative's boundary.
+func permissionsEpochProbes() []string {
+	const maxInt64 = "9223372036854775807"
+	probes := []string{
+		"", " ", "01", "007", "+1", "-1", "1.0", "1e3", " 1", "1 ", "abc", "0x1", "1\n2",
+		"9223372036854775808",  // MaxInt64+1: what the open-ended pattern used to accept
+		"9223372036854775810",  // just past the ceiling in the last-digit branch
+		"9999999999999999999",  // 19 digits, far past the ceiling
+		"18446744073709551615", // MaxUint64: the column's width, not its type
+	}
+	for _, value := range []int64{0, 1, 9, 10, 42, 1234567890, math.MaxInt64 - 1, math.MaxInt64} {
+		probes = append(probes, strconv.FormatInt(value, 10))
+	}
+	for i := range maxInt64 {
+		for digit := '0'; digit <= '9'; digit++ {
+			head := maxInt64[:i] + string(digit)
+			tail := len(maxInt64) - i - 1
+			// Keep MaxInt64's own tail, then saturate that tail low and high:
+			// a free-digit run in the pattern is only exercised by probes that
+			// put both a 0 and a 9 in every one of its positions.
+			probes = append(probes,
+				head+maxInt64[i+1:],
+				head+strings.Repeat("0", tail),
+				head+strings.Repeat("9", tail),
+			)
+		}
+	}
+	for length := 1; length <= 21; length++ {
+		probes = append(probes, strings.Repeat("9", length), "1"+strings.Repeat("0", length-1))
+	}
+	return probes
 }
 
 func sortedHeaderNames[V any](headers map[string]V) []string {
@@ -488,26 +537,32 @@ func TestOpenAPIAuthContextHeaderComponentsFreezeCanonicalShape(t *testing.T) {
 			epochSchema)
 	}
 	pattern, _ := epochSchema["pattern"].(string)
-	if pattern != openAPIPermissionsEpochPattern {
-		t.Fatalf("PermissionsEpoch pattern=%q, want %q", pattern, openAPIPermissionsEpochPattern)
+	if !strings.HasPrefix(pattern, "^") || !strings.HasSuffix(pattern, "$") {
+		t.Fatalf("PermissionsEpoch pattern=%q must be anchored — JSON Schema `pattern` is a substring "+
+			"match, so an unanchored pattern accepts any header that merely contains a number", pattern)
 	}
-	// Freezing the literal is only worth anything if the literal discriminates:
-	// the pattern must accept every strconv.FormatInt rendering of the
-	// non-negative counter and reject the near-misses a looser regex waves
-	// through.
 	epochRE, err := regexp.Compile(pattern)
 	if err != nil {
 		t.Fatalf("PermissionsEpoch pattern does not compile: %v", err)
 	}
-	for _, value := range []int64{0, 1, 9, 10, 42, 1234567890, math.MaxInt64} {
-		if rendered := strconv.FormatInt(value, 10); !epochRE.MatchString(rendered) {
-			t.Errorf("PermissionsEpoch pattern rejects canonical epoch %q", rendered)
-		}
-	}
-	for _, drifted := range []string{"", " ", "01", "007", "+1", "-1", "1.0", "1e3", " 1", "1 ", "abc", "0x1", "1\n2"} {
-		if epochRE.MatchString(drifted) {
-			t.Errorf("PermissionsEpoch pattern accepts non-canonical epoch %q — clients compare the raw "+
-				"header verbatim, so a loosened pattern breaks change detection", drifted)
+	// The pattern spells the int64 ceiling out digit by digit, so freezing the
+	// literal here would only make it unreadable. What the contract actually
+	// promises is exact agreement with strconv: the header matches iff it is a
+	// canonical strconv.FormatInt rendering of a non-negative int64, which is
+	// precisely what auth.Middleware writes. Check that against the strconv
+	// oracle over inputs chosen to sit on the pattern's boundaries — every
+	// single-digit perturbation of MaxInt64 lands on a different alternative,
+	// so widening or narrowing any one character class fails here.
+	for _, probe := range permissionsEpochProbes() {
+		want := isCanonicalNonNegativeInt64(probe)
+		if got := epochRE.MatchString(probe); got != want {
+			verb := "accepts"
+			why := "clients compare the raw header verbatim, and the counter is a signed int64 " +
+				"column, so anything strconv cannot round-trip is unreachable at runtime"
+			if want {
+				verb, why = "rejects", "auth.Middleware can emit this exact rendering"
+			}
+			t.Errorf("PermissionsEpoch pattern %s epoch %q — %s", verb, probe, why)
 		}
 	}
 	if description := fmt.Sprint(epoch["description"]); !strings.Contains(description, "every authenticated response") {
