@@ -167,6 +167,17 @@ func buildRouter() http.Handler {
 			r.Get("/runs/{id}/telemetry/latest", handlers.GetLatestAgentRunTelemetry)
 		})
 
+		r.Group(func(r chi.Router) {
+			r.Use(auth.Middleware)
+			r.Use(auth.AgentModePrivateNoStore)
+			r.Use(auth.RequireAgentModeInternal)
+			r.Use(auth.MustChangePasswordGate)
+			r.Get("/agent-mode/deliveries/events", handlers.AgentModeEvents)
+			r.Get("/agent-mode/deliveries", handlers.AgentModeDeliveries)
+			r.Get("/agent-mode/projects/{projectID}/deliveries", handlers.AgentModeProjectDeliveries)
+			r.Get("/agent-mode/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
+		})
+
 		// Portal (external + admin)
 		r.Group(func(r chi.Router) {
 			r.Use(auth.Middleware)

@@ -53,12 +53,69 @@ func (s *Store) ProjectMoveTx(ctx context.Context, tx *sql.Tx, effects *Effects,
 		return err
 	}
 	d.ProjectID = &targetProjectID
-	if _, err := s.appendEnvelopeTx(ctx, tx, effects, d, reporterID, "project_moved", idempotencyKey,
-		payload, "project_move", "", "project_move", "issue", &issueID, nil, now); err != nil {
+	d.RevokedProjectID = &sourceProjectID
+	moveHint, err := loadIssueMoveHint(ctx, tx, d.ID, issueID, sourceProjectID, targetProjectID)
+	if err != nil {
 		return err
 	}
+	if _, err := appendEnvelopeWithoutChangeTx(ctx, tx, d, reporterID, "project_moved", idempotencyKey,
+		payload, "project_move", "", now); err != nil {
+		return err
+	}
+	effects.add(moveHint)
 	_, err = s.StartAttemptTx(ctx, tx, effects, AttemptRequest{IssueID: issueID, Actor: actor,
 		Policies: DefaultPolicy(), ReasonCode: "project_move", ReasonText: "Delivery authority reset after project move",
 		IdempotencyKey: idempotencyKey + ":attempt"})
 	return err
+}
+
+func loadIssueMoveHint(ctx context.Context, tx DBTX, deliveryID, issueID, sourceProjectID, targetProjectID int64) (ChangeHint, error) {
+	var hint ChangeHint
+	var projectID, revokedProjectID, sourceID, sourceSequence sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT change.id,change.cursor_token,change.delivery_id,change.root_issue_id,
+		change.delivery_key,change.project_id_hint,change.revoked_project_id,change.change_sequence,
+		change.delivery_revision,change.kind,change.source_kind,change.source_id,change.source_sequence,
+		change.server_received_at
+		FROM delivery_change_log change JOIN deliveries delivery ON delivery.id=change.delivery_id
+		WHERE change.delivery_id=? AND change.root_issue_id=? AND change.kind='project_move'
+		 AND change.project_id_hint=? AND change.revoked_project_id=?
+		 AND change.change_sequence=(SELECT MAX(candidate.change_sequence) FROM delivery_change_log candidate
+		  WHERE candidate.delivery_id=delivery.id AND candidate.kind='project_move')
+		ORDER BY change.change_sequence DESC LIMIT 1`, deliveryID, issueID, targetProjectID, sourceProjectID).
+		Scan(&hint.InternalID, &hint.CursorToken, &hint.DeliveryID, &hint.RootIssueID, &hint.DeliveryKey,
+			&projectID, &revokedProjectID, &hint.ChangeSequence, &hint.DeliveryRevision, &hint.Kind,
+			&hint.SourceKind, &sourceID, &sourceSequence, &hint.ServerReceivedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ChangeHint{}, fmt.Errorf("%w: project move lacks the atomic issue change", ErrInvariant)
+	}
+	if err != nil {
+		return ChangeHint{}, err
+	}
+	hint.ProjectIDHint = nullInt64Ptr(projectID)
+	hint.RevokedProjectID = nullInt64Ptr(revokedProjectID)
+	hint.SourceID = nullInt64Ptr(sourceID)
+	hint.SourceSequence = nullInt64Ptr(sourceSequence)
+	return hint, nil
+}
+
+func appendEnvelopeWithoutChangeTx(ctx context.Context, tx DBTX, d deliveryRow, reporterID int64, kind,
+	idempotencyKey string, payload any, reasonCode, reasonText, now string,
+) (envelopeResult, error) {
+	hash, err := canonicalHash(payload)
+	if err != nil {
+		return envelopeResult{}, err
+	}
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(delivery_revision),0)+1
+		FROM delivery_events WHERE delivery_id=?`, d.ID).Scan(&revision); err != nil {
+		return envelopeResult{}, err
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO delivery_events(
+		delivery_id,delivery_revision,idempotency_key,payload_hash,kind,reporter_id,reason_code,reason_text,server_received_at)
+		VALUES(?,?,?,?,?,?,?,?,?)`, d.ID, revision, idempotencyKey, hash, kind, reporterID, reasonCode, reasonText, now)
+	if err != nil {
+		return envelopeResult{}, err
+	}
+	id, _ := result.LastInsertId()
+	return envelopeResult{ID: id, Revision: revision}, nil
 }

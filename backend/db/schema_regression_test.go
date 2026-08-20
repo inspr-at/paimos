@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 144
+const latestSchemaVersion = 145
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -229,6 +229,18 @@ func TestMigration143UpgradesPopulatedM142WithoutLosingGraphOrTelemetry(t *testi
 	tx, err := conn.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The fixture rewinds only the agent-run tables. Drop every later trigger
+	// whose SQL references agent_runs before the table rebuild; otherwise an
+	// M145 cross-table guard makes SQLite validate a deliberately absent column
+	// midway through the exact M142 reconstruction.
+	for _, trigger := range schemaNames(t, database, `SELECT name FROM sqlite_master
+		WHERE type='trigger' AND sql LIKE '%agent_runs%'`) {
+		quoted := strings.ReplaceAll(trigger, `"`, `""`)
+		if _, err := tx.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS "`+quoted+`"`); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("drop post-M142 trigger %q: %v", trigger, err)
+		}
 	}
 	steps := []string{
 		`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_terminal_guard`,

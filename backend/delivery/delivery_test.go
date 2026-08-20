@@ -483,11 +483,40 @@ func TestExternalFreshnessAttentionAndTerminalStatePrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.State != "active" || len(snapshot.AttentionFlags) != 3 ||
-		snapshot.AttentionFlags[0] != "waiting_on_human" || snapshot.AttentionFlags[1] != "blocked" ||
-		snapshot.AttentionFlags[2] != "stale" || snapshot.Stages[0].SemanticState != "waiting" ||
+	if snapshot.State != "active" || len(snapshot.AttentionFlags) != 2 ||
+		snapshot.AttentionFlags[0] != "waiting_on_human" || snapshot.AttentionFlags[1] != "stale" ||
+		snapshot.Stages[0].SemanticState != "waiting" ||
 		snapshot.Stages[0].LastHeartbeatAt == nil || *snapshot.Stages[0].LastHeartbeatAt != heartbeatAt {
 		t.Fatalf("freshness/overlapping attention projection=%+v", snapshot)
+	}
+	humanWaitSince := snapshot.Stages[0].HumanWaitSince
+	dependencySince := formatTime(now)
+	if _, err := store.ReportStage(context.Background(), StageReport{IssueID: issueID,
+		AttemptNumber: attempt.AttemptNumber, StageKey: StageSpecification, ExecutionNumber: stage.ExecutionNumber,
+		AuthorityEpoch: stage.AuthorityEpoch, Reporter: reporter, IdempotencyKey: "freshness-mixed-blockers",
+		SourceSequence: int64ptr(4), Kind: "semantic", State: "waiting", NeedsInput: true,
+		Blockers: []Blocker{{Key: "approval", Class: "input", HumanWait: true},
+			{Key: "dependency", Class: "dependency", HumanWait: false}}}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ = store.SnapshotByIssue(context.Background(), issueID)
+	if len(snapshot.AttentionFlags) != 3 || snapshot.AttentionFlags[0] != "waiting_on_human" ||
+		snapshot.AttentionFlags[1] != "blocked" || snapshot.AttentionFlags[2] != "stale" ||
+		snapshot.Stages[0].HumanWaitSince == nil || humanWaitSince == nil ||
+		*snapshot.Stages[0].HumanWaitSince != *humanWaitSince || snapshot.Stages[0].BlockedSince == nil ||
+		*snapshot.Stages[0].BlockedSince != dependencySince {
+		t.Fatalf("mixed blocker attention=%v", snapshot.AttentionFlags)
+	}
+	if _, err := store.ReportStage(context.Background(), StageReport{IssueID: issueID,
+		AttemptNumber: attempt.AttemptNumber, StageKey: StageSpecification, ExecutionNumber: stage.ExecutionNumber,
+		AuthorityEpoch: stage.AuthorityEpoch, Reporter: reporter, IdempotencyKey: "freshness-dependency-blocker",
+		SourceSequence: int64ptr(5), Kind: "semantic", State: "waiting",
+		Blockers: []Blocker{{Key: "dependency", Class: "dependency", HumanWait: false}}}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ = store.SnapshotByIssue(context.Background(), issueID)
+	if len(snapshot.AttentionFlags) != 2 || snapshot.AttentionFlags[0] != "blocked" || snapshot.AttentionFlags[1] != "stale" {
+		t.Fatalf("dependency blocker attention=%v", snapshot.AttentionFlags)
 	}
 
 	retry, err := store.StartStageRetry(context.Background(), StageStartRequest{IssueID: issueID,
@@ -609,6 +638,14 @@ func TestRunNormalizationProjectMoveAndDeletionSafeRetention(t *testing.T) {
 	if snapshot.AttemptNumber != 2 || snapshot.State != "pending" {
 		t.Fatalf("project move did not cut authority: %+v", snapshot)
 	}
+	var moveTarget, moveRevoked int64
+	if err := database.QueryRow(`SELECT project_id_hint,revoked_project_id FROM delivery_change_log
+		WHERE root_issue_id=? AND kind='project_move' ORDER BY id DESC LIMIT 1`, issueID).Scan(&moveTarget, &moveRevoked); err != nil {
+		t.Fatal(err)
+	}
+	if moveTarget != targetProject || moveRevoked != projectID {
+		t.Fatalf("project move audience target=%d revoked=%d, want %d/%d", moveTarget, moveRevoked, targetProject, projectID)
+	}
 	history, err := store.AttemptHistory(context.Background(), issueID)
 	if err != nil || len(history) != 2 || history[1].ReasonCode != "project_move" {
 		t.Fatalf("move history=%+v err=%v", history, err)
@@ -627,9 +664,10 @@ func TestRunNormalizationProjectMoveAndDeletionSafeRetention(t *testing.T) {
 	if _, err := database.Exec(`DELETE FROM issues WHERE id=?`, issueID); err != nil {
 		t.Fatalf("hard delete instrumented issue: %v", err)
 	}
-	var tombstones int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE delivery_id=? AND root_issue_id=? AND kind='root_deleted'`, deliveryID, issueID).Scan(&tombstones); err != nil || tombstones != 1 {
-		t.Fatalf("retained tombstones=%d err=%v", tombstones, err)
+	var removals int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE delivery_id=? AND root_issue_id=?
+		AND kind='issue' AND source_kind='issue' AND source_id=?`, deliveryID, issueID, issueID).Scan(&removals); err != nil || removals < 1 {
+		t.Fatalf("retained removals=%d err=%v", removals, err)
 	}
 	var maxID int64
 	if err := database.QueryRow(`SELECT MAX(id) FROM delivery_change_log`).Scan(&maxID); err != nil {
@@ -645,6 +683,173 @@ func TestRunNormalizationProjectMoveAndDeletionSafeRetention(t *testing.T) {
 	if err := database.QueryRow(`SELECT MAX(floor_id) FROM delivery_change_retention`).Scan(&floor); err != nil || floor != maxID {
 		t.Fatalf("retention floor=%d err=%v", floor, err)
 	}
+}
+
+func TestHiddenRunLifecyclePersistsWithoutAudienceInvalidation(t *testing.T) {
+	for _, superseded := range []bool{false, true} {
+		name := "current"
+		if superseded {
+			name = "superseded"
+		}
+		t.Run("v1_"+name, func(t *testing.T) {
+			database := openDeliveryTestDB(t)
+			issueID, projectID, userID := seedDeliveryIssue(t, database)
+			now := time.Date(2026, 8, 20, 19, 0, 0, 0, time.UTC)
+			wakes := 0
+			store := NewStore(database, Options{Clock: ClockFunc(func() time.Time { return now }),
+				Observer: func(context.Context, ChangeHint) { wakes++ }})
+			result, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,started_at,
+				delivery_instrumentation_version) VALUES(?,?,?,'running',?,1)`, issueID, projectID, userID, formatTime(now))
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID, _ := result.LastInsertId()
+			tx, _ := database.BeginTx(context.Background(), nil)
+			effects := store.NewEffects()
+			stage, err := store.BootstrapRunTx(context.Background(), tx, effects, RunBootstrap{IssueID: issueID,
+				RunID: runID, Mode: "implementation", Actor: Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)},
+				IdempotencyKey: "hidden-bootstrap"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			effects.Dispatch(context.Background())
+			if superseded {
+				if _, err := store.StartStageRetry(context.Background(), StageStartRequest{IssueID: issueID,
+					AttemptNumber: stage.AttemptNumber, StageKey: StageImplementation,
+					Reporter:   Actor{Type: "external", OpaqueKey: "replacement:hidden"},
+					ReasonCode: "implementation_retry", IdempotencyKey: "hidden-supersede"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := database.Exec(`UPDATE issues SET deleted_at=? WHERE id=?`, formatTime(now), issueID); err != nil {
+				t.Fatal(err)
+			}
+			var hiddenChanges, eventsBefore int
+			if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE root_issue_id=?`, issueID).Scan(&hiddenChanges); err != nil {
+				t.Fatal(err)
+			}
+			if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_events d JOIN deliveries root ON root.id=d.delivery_id
+				WHERE root.issue_id=?`, issueID).Scan(&eventsBefore); err != nil {
+				t.Fatal(err)
+			}
+			wakes = 0
+			now = now.Add(time.Second)
+			appendRunTelemetryFact(t, database, store, runID, runTelemetryFact{sequence: 1, receivedAt: now,
+				kind: "phase", phase: "testing", activity: "Hidden lifecycle telemetry"})
+			var telemetryRows, afterTelemetryChanges int
+			if err := database.QueryRow(`SELECT COUNT(*) FROM agent_run_telemetry WHERE run_id=?`, runID).Scan(&telemetryRows); err != nil {
+				t.Fatal(err)
+			}
+			if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE root_issue_id=?`, issueID).Scan(&afterTelemetryChanges); err != nil {
+				t.Fatal(err)
+			}
+			if telemetryRows != 1 || afterTelemetryChanges != hiddenChanges || wakes != 0 {
+				t.Fatalf("hidden telemetry rows=%d changes=%d/%d wakes=%d", telemetryRows, hiddenChanges, afterTelemetryChanges, wakes)
+			}
+
+			tx, _ = database.BeginTx(context.Background(), nil)
+			if _, err := tx.Exec(`UPDATE agent_runs SET status='failed',finished_at=? WHERE id=?`, formatTime(now), runID); err != nil {
+				t.Fatal(err)
+			}
+			effects = store.NewEffects()
+			if err := store.NormalizeRunTx(context.Background(), tx, effects, RunNormalization{RunID: runID,
+				Status: "failed", IdempotencyKey: "hidden-terminal"}); err != nil {
+				t.Fatal(err)
+			}
+			if len(effects.Hints()) != 0 {
+				t.Fatalf("hidden normalization queued effects: %+v", effects.Hints())
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			effects.Dispatch(context.Background())
+			var afterNormalizeChanges, eventsAfter int
+			if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE root_issue_id=?`, issueID).Scan(&afterNormalizeChanges); err != nil {
+				t.Fatal(err)
+			}
+			if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_events d JOIN deliveries root ON root.id=d.delivery_id
+				WHERE root.issue_id=?`, issueID).Scan(&eventsAfter); err != nil {
+				t.Fatal(err)
+			}
+			if afterNormalizeChanges != hiddenChanges || eventsAfter != eventsBefore+1 || wakes != 0 {
+				t.Fatalf("hidden normalization changes=%d/%d events=%d/%d wakes=%d",
+					hiddenChanges, afterNormalizeChanges, eventsBefore, eventsAfter, wakes)
+			}
+			wantKind := "run_normalized"
+			if superseded {
+				wantKind = "run_lifecycle_observed"
+			}
+			var kind string
+			if err := database.QueryRow(`SELECT kind FROM delivery_events d JOIN deliveries root ON root.id=d.delivery_id
+				WHERE root.issue_id=? ORDER BY d.id DESC LIMIT 1`, issueID).Scan(&kind); err != nil || kind != wantKind {
+				t.Fatalf("hidden lifecycle kind=%q want=%q err=%v", kind, wantKind, err)
+			}
+			if !superseded {
+				var state string
+				if err := database.QueryRow(`SELECT semantic_state FROM delivery_stage_latest latest
+					JOIN delivery_stage_events event ON event.id=latest.semantic_stage_event_id
+					WHERE latest.attempt_id=? AND latest.stage_key=?`, stage.AttemptID, StageImplementation).Scan(&state); err != nil || state != "failed" {
+					t.Fatalf("hidden current lifecycle state=%q err=%v", state, err)
+				}
+			}
+			if _, err := database.Exec(`UPDATE issues SET deleted_at=NULL WHERE id=?`, issueID); err != nil {
+				t.Fatal(err)
+			}
+			var restoredChanges int
+			if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE root_issue_id=?`, issueID).Scan(&restoredChanges); err != nil {
+				t.Fatal(err)
+			}
+			if restoredChanges != hiddenChanges+1 {
+				t.Fatalf("restore changes=%d want=%d", restoredChanges, hiddenChanges+1)
+			}
+		})
+	}
+
+	t.Run("v0", func(t *testing.T) {
+		database := openDeliveryTestDB(t)
+		issueID, projectID, userID := seedDeliveryIssue(t, database)
+		store := NewStore(database, Options{})
+		result, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,
+			delivery_instrumentation_version) VALUES(?,?,?,'running',0)`, issueID, projectID, userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runID, _ := result.LastInsertId()
+		if _, err := database.Exec(`UPDATE issues SET deleted_at='2026-08-20T19:00:00Z' WHERE id=?`, issueID); err != nil {
+			t.Fatal(err)
+		}
+		var before int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE root_issue_id=?`, issueID).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		tx, _ := database.BeginTx(context.Background(), nil)
+		if _, err := tx.Exec(`UPDATE agent_runs SET status='failed' WHERE id=?`, runID); err != nil {
+			t.Fatal(err)
+		}
+		effects := store.NewEffects()
+		if err := store.RecordRunMutationChangeTx(context.Background(), tx, effects, runID); err != nil {
+			t.Fatal(err)
+		}
+		if len(effects.Hints()) != 0 {
+			t.Fatalf("hidden v0 mutation queued effects: %+v", effects.Hints())
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`UPDATE issues SET deleted_at=NULL WHERE id=?`, issueID); err != nil {
+			t.Fatal(err)
+		}
+		var after int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE root_issue_id=?`, issueID).Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if after != before {
+			t.Fatalf("terminal hidden v0 reappeared: changes=%d/%d", before, after)
+		}
+	})
 }
 
 func TestDurationCapturesProjectAtCompletionAfterAuthorityMove(t *testing.T) {

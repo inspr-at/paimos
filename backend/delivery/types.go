@@ -89,6 +89,7 @@ type ChangeHint struct {
 	RootIssueID      int64
 	DeliveryKey      string
 	ProjectIDHint    *int64
+	RevokedProjectID *int64
 	ChangeSequence   int64
 	DeliveryRevision int64
 	Kind             string
@@ -362,6 +363,9 @@ type StageSnapshot struct {
 	HeartbeatStale            bool
 	EstimateStale             bool
 	Stale                     bool
+	StaleSince                *string
+	BlockedSince              *string
+	HumanWaitSince            *string
 	NextFreshnessTransitionAt *string
 }
 

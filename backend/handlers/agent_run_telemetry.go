@@ -37,18 +37,6 @@ const (
 
 var telemetryIdentityPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 
-var telemetrySecretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\bauthorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]{8,}`),
-	regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}`),
-	regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password|passwd|credential)\s*[:=]\s*['"]?[A-Za-z0-9._~+/=-]{8,}`),
-	regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),
-	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}\b`),
-	regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`),
-	regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{10,}\b`),
-	regexp.MustCompile(`(?i)https?://[^\s/:@]+:[^\s/@]{8,}@`),
-	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
-}
-
 var telemetryKinds = map[string]bool{
 	"heartbeat": true, "progress": true, "phase": true,
 	"needs_input": true, "blocker": true, "estimate": true,
@@ -708,10 +696,8 @@ func validateTelemetryText(field, value string, max int) error {
 			return fmt.Errorf("%s contains control characters", field)
 		}
 	}
-	for _, pattern := range telemetrySecretPatterns {
-		if pattern.MatchString(value) {
-			return fmt.Errorf("%s contains an obvious secret-bearing value", field)
-		}
+	if delivery.ContainsSecretLike(value) {
+		return fmt.Errorf("%s contains an obvious secret-bearing value", field)
 	}
 	return nil
 }

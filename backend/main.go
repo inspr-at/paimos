@@ -463,6 +463,24 @@ func mountAPI(r chi.Router) {
 		r.Get("/runs/{id}/telemetry/latest", handlers.GetLatestAgentRunTelemetry)
 	})
 
+	// Agent Mode has an existence-hiding guard of its own: external users
+	// receive the same 404 as an inaccessible resource. Keep this separate
+	// from BlockExternal, whose 403 contract is correct for the older internal
+	// API but would disclose that this supervision surface exists.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.Middleware)
+		r.Use(auth.CSRFMiddleware)
+		r.Use(auth.AgentModePrivateNoStore)
+		r.Use(auth.RequireAgentModeInternal)
+		r.Use(auth.MustChangePasswordGate)
+
+		// Literal events must precede the delivery-key wildcard.
+		r.Get("/agent-mode/deliveries/events", handlers.AgentModeEvents)
+		r.Get("/agent-mode/deliveries", handlers.AgentModeDeliveries)
+		r.Get("/agent-mode/projects/{projectID}/deliveries", handlers.AgentModeProjectDeliveries)
+		r.Get("/agent-mode/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
+	})
+
 	// Portal (external + admin)
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware)

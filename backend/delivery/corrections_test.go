@@ -653,7 +653,9 @@ func TestDeliveryPrivacyBackstopMatchesStoreValidation(t *testing.T) {
 		"nul\x00value", "carriage\rreturn", "line\nfeed",
 		"https://user@example.com/proof", "https://example.com/proof?token=redacted",
 		"api_key=abcdefghijklmnop", "token:abcdefghijklmnop", "secret/abcdefghijklmnop",
-		"password_abcdefghijklmnop", "credential-abcdefghijklmnop", "AKIA1234567890ABCDEF",
+		"password_abcdefghijklmnop", "passwd=abcdefghijklmnop", "credential-abcdefghijklmnop",
+		"DB_PASSWORD=abcdefghijklmnop", "GITHUB_TOKEN=abcdefghijklmnop", "OPENAI_API_KEY=abcdefghijklmnop",
+		"sk_abcdefghijklmnopqrst", "sk-ant-abcdefghijklmnopqrst", "AKIA1234567890ABCDEF",
 		"AIza123456789012345678901234", "ghp_123456789012345678901234567890",
 		"gho_123456789012345678901234567890", "ghu_123456789012345678901234567890",
 		"ghs_123456789012345678901234567890", "ghr_123456789012345678901234567890",
@@ -696,7 +698,8 @@ func TestDeliveryPrivacyBackstopMatchesStoreValidation(t *testing.T) {
 		}
 	}
 	allowedNearThresholds := []string{
-		"token/abcdefg", "sk-live-abcdefg", "ghp_1234567890123456789", "xoxb-123456789",
+		"token/abcdefg", "sk-live-abcdefg", "sk_abcdefghijklmnopqrs", "sketch-abcdefghijklmnopqrst",
+		"passwordless", "token-budget", "ghp_1234567890123456789", "xoxb-123456789",
 		"AIza1234567890123456789", "eyJabcdefg.abcdefg.abcdefg", "AKIA1234567890ABCDEFG",
 		"aiza12345678901234567890",
 	}
@@ -1468,12 +1471,26 @@ func TestAgentRunActivationTelemetryDurationHeartbeatAndRetention(t *testing.T) 
 	now = now.Add(10 * time.Second)
 	appendRunTelemetryFact(t, database, store, runID, runTelemetryFact{sequence: 1, receivedAt: now,
 		kind: "needs_input", phase: "waiting", activity: "Awaiting approval", needsInput: true, blocker: "input"})
+	waitingSnapshot, err := store.SnapshotByIssue(context.Background(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(waitingSnapshot.AttentionFlags) != 1 || waitingSnapshot.AttentionFlags[0] != "waiting_on_human" {
+		t.Fatalf("agent input-only attention=%v", waitingSnapshot.AttentionFlags)
+	}
 	now = now.Add(20 * time.Second)
 	appendRunTelemetryFact(t, database, store, runID, runTelemetryFact{sequence: 2, receivedAt: now,
 		kind: "phase", phase: "implementing", activity: "Implementing"})
 	now = now.Add(10 * time.Second)
 	appendRunTelemetryFact(t, database, store, runID, runTelemetryFact{sequence: 3, receivedAt: now,
 		kind: "blocker", phase: "waiting", activity: "Dependency", blocker: "dependency"})
+	blockedSnapshot, err := store.SnapshotByIssue(context.Background(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blockedSnapshot.AttentionFlags) != 1 || blockedSnapshot.AttentionFlags[0] != "blocked" {
+		t.Fatalf("agent dependency attention=%v", blockedSnapshot.AttentionFlags)
+	}
 	now = now.Add(10 * time.Second)
 	appendRunTelemetryFact(t, database, store, runID, runTelemetryFact{sequence: 4, receivedAt: now,
 		kind: "phase", phase: "testing", activity: "Testing"})

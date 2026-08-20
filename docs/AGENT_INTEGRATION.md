@@ -772,6 +772,43 @@ superseded the linked execution, the closure is retained as one exact-once
 `run_lifecycle_observed` attempt-history event while current delivery truth stays
 unchanged.
 
+### Agent Mode delivery snapshots and invalidations (schema v1)
+
+The internal Agent Mode read surface projects delivery truth without exposing
+reporter IDs, run IDs, provider/adapter metadata, evidence references, prompts,
+or output. It is available to authenticated internal users at:
+
+- `GET /api/agent-mode/deliveries`
+- `GET /api/agent-mode/projects/{projectID}/deliveries`
+- `GET /api/agent-mode/deliveries/{deliveryKey}`
+- `GET /api/agent-mode/deliveries/events`
+
+Snapshot responses are `private, no-store` schema-v1 JSON. The top-level
+`cursor` is opaque and bound to the authenticated user, permission epoch,
+route audience, and result filters. Project query filtering is not an
+authorization boundary; the project path is. A detail path is a selection
+lookup and deliberately shares the global event scope. `selected_delivery` is
+not cursor-bound and the response has only one outside-selection shape:
+`selected_outside: {reason, row}`. Rows, root/project/lane count sets, and the
+maximum-12 attention list all come from the same pinned database snapshot and
+calculation instant.
+
+The events endpoint is an SSE invalidation stream, not a second source of row
+truth. Resume with `Last-Event-ID` (authoritative when present) or `cursor=`.
+`refetch` and `checkpoint` events carry their replacement opaque cursor in the
+SSE `id`; refetch data contains only currently authorized delivery hints, while
+checkpoint data has no hints. Any invalid, expired, revoked, wrong-scope,
+below-retention, or ahead-of-tail resume returns one identity-free `reset` with
+`{"schema_version":1,"reason":"resync_required"}` and closes. Clients then
+reload a snapshot. SSE responses use `private, no-store, no-transform`; malformed
+non-cursor filters remain canonical problem+json `400`, and missing versus
+inaccessible resources remain indistinguishable canonical `404`s.
+
+The complete field and enum contract is the served OpenAPI document at
+`GET /api/openapi.json`. Frontend transport adaptation is intentionally a
+separate integration step; generic change-stream envelopes are not aliases for
+these Agent Mode events.
+
 ---
 
 ## Best practices for agent implementors

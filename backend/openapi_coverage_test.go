@@ -23,14 +23,17 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/inspr-at/paimos/backend/deliverytrust"
 	"github.com/inspr-at/paimos/backend/handlers"
 )
 
@@ -180,6 +183,199 @@ func TestOpenAPIContractMethodsExist(t *testing.T) {
 	for _, op := range stale {
 		t.Errorf("PAI-624: openapi.json documents %q but no matching route method is registered", op)
 	}
+}
+
+func TestAgentModeOpenAPIRouteCoverageIsBidirectional(t *testing.T) {
+	registered := registeredAPIOperations(t)
+	documented := documentedAPIOperations(t)
+	wantRegistered := map[string]bool{}
+	wantDocumented := map[string]bool{}
+	for path, methods := range registered {
+		if !strings.Contains(path, "/agent-mode/") && path != "/api/agent-mode" {
+			continue
+		}
+		for method := range methods {
+			wantRegistered[strings.ToUpper(method)+" "+path] = true
+		}
+	}
+	for path, methods := range documented {
+		if !strings.Contains(path, "/agent-mode/") && path != "/api/agent-mode" {
+			continue
+		}
+		for method := range methods {
+			wantDocumented[strings.ToUpper(method)+" "+path] = true
+		}
+	}
+	if len(wantRegistered) != len(wantDocumented) {
+		t.Fatalf("Agent Mode route coverage registered=%v documented=%v", wantRegistered, wantDocumented)
+	}
+	for operation := range wantRegistered {
+		if !wantDocumented[operation] {
+			t.Errorf("mounted Agent Mode operation is undocumented: %s", operation)
+		}
+	}
+	for operation := range wantDocumented {
+		if !wantRegistered[operation] {
+			t.Errorf("documented Agent Mode operation is not mounted: %s", operation)
+		}
+	}
+}
+
+func TestAgentModeOpenAPIErrorAndStreamSemanticsArePinned(t *testing.T) {
+	type response struct {
+		Description string `json:"description"`
+		Headers     map[string]struct {
+			Schema struct {
+				Const string `json:"const"`
+			} `json:"schema"`
+		} `json:"headers"`
+		Content map[string]json.RawMessage `json:"content"`
+	}
+	type operation struct {
+		Description string              `json:"description"`
+		Responses   map[string]response `json:"responses"`
+		SSEEvents   map[string]struct {
+			ID any `json:"id"`
+		} `json:"x-sse-events"`
+	}
+	doc := documentedAPIDocument(t)
+	components, ok := doc.raw["components"].(map[string]any)
+	if !ok {
+		t.Fatal("OpenAPI components are missing")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatal("OpenAPI schemas are missing")
+	}
+	snapshotSchema, ok := schemas["AgentModeSnapshot"].(map[string]any)
+	if !ok {
+		t.Fatal("AgentModeSnapshot schema is missing")
+	}
+	required, _ := snapshotSchema["required"].([]any)
+	selectedRequired := false
+	for _, field := range required {
+		selectedRequired = selectedRequired || field == "selected_delivery"
+	}
+	properties, _ := snapshotSchema["properties"].(map[string]any)
+	selectedProperty, _ := properties["selected_delivery"].(map[string]any)
+	if !selectedRequired || !strings.Contains(fmt.Sprint(selectedProperty["description"]), "empty string") {
+		t.Fatalf("selected_delivery must be required with empty-history semantics: required=%v property=%v",
+			required, selectedProperty)
+	}
+	paths := []string{
+		"/api/agent-mode/deliveries",
+		"/api/agent-mode/projects/{projectID}/deliveries",
+		"/api/agent-mode/deliveries/{deliveryKey}",
+		"/api/agent-mode/deliveries/events",
+	}
+	operations := make(map[string]operation, len(paths))
+	for _, path := range paths {
+		raw := doc.Paths[path]["get"]
+		var op operation
+		if err := json.Unmarshal(raw, &op); err != nil {
+			t.Fatalf("%s operation: %v", path, err)
+		}
+		operations[path] = op
+		for _, status := range []string{"403", "500"} {
+			response, ok := op.Responses[status]
+			if !ok || response.Headers["Cache-Control"].Schema.Const != "private, no-store" ||
+				response.Content["application/problem+json"] == nil {
+				t.Errorf("%s %s must be private/no-store problem+json: %+v", path, status, response)
+			}
+		}
+	}
+	events := operations["/api/agent-mode/deliveries/events"]
+	stream := events.Responses["200"]
+	if stream.Headers["Cache-Control"].Schema.Const != "private, no-store, no-transform" ||
+		stream.Content["text/event-stream"] == nil || events.SSEEvents["reset"].ID != nil {
+		t.Fatalf("events 200/reset contract is not pinned: response=%+v events=%+v", stream, events.SSEEvents)
+	}
+	for _, phrase := range []string{
+		"storage invariant discovered before response headers is a private 500 problem",
+		"already-established session emits one identity-free reset and closes",
+		"fresh stream whose authorized scope exceeds 1,000 candidates returns a private 400",
+		"resumed stream normalizes that changed scope to the same generic reset",
+	} {
+		if !strings.Contains(events.Description, phrase) {
+			t.Errorf("events description lacks %q", phrase)
+		}
+	}
+	for _, path := range []string{
+		"/api/agent-mode/deliveries",
+		"/api/agent-mode/projects/{projectID}/deliveries",
+	} {
+		if !strings.Contains(operations[path].Description, "1,000 authorized candidate roots") ||
+			!strings.Contains(operations[path].Responses["400"].Description, "1,000") {
+			t.Errorf("%s does not pin the explicit candidate ceiling", path)
+		}
+	}
+	if !strings.Contains(operations["/api/agent-mode/deliveries/{deliveryKey}"].Description,
+		"before the 1,000-candidate portfolio ceiling") ||
+		!strings.Contains(events.Responses["400"].Description, "fresh authorized scope exceeding 1,000 candidates") {
+		t.Error("detail/events candidate-ceiling semantics are not pinned")
+	}
+}
+
+func TestAgentModeOpenAPITrustVocabularyMatchesDeliveryTrust(t *testing.T) {
+	doc := documentedAPIDocument(t)
+	components, ok := doc.raw["components"].(map[string]any)
+	if !ok {
+		t.Fatal("OpenAPI components are missing")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatal("OpenAPI schemas are missing")
+	}
+	trust, ok := schemas["AgentModeTrust"].(map[string]any)
+	if !ok {
+		t.Fatal("AgentModeTrust schema is missing")
+	}
+	properties, ok := trust["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("AgentModeTrust properties are missing")
+	}
+	suppression, _ := properties["suppression"].(map[string]any)
+	flags, _ := properties["flags"].(map[string]any)
+	flagItems, _ := flags["items"].(map[string]any)
+
+	wantSuppressions := []string{
+		string(deliverytrust.SuppressTerminalComplete), string(deliverytrust.SuppressCancelled),
+		string(deliverytrust.SuppressTerminalFailed), string(deliverytrust.SuppressWaitingOnHuman),
+		string(deliverytrust.SuppressBlocked), string(deliverytrust.SuppressStale),
+		string(deliverytrust.SuppressUnknownReporter), string(deliverytrust.SuppressNoSignal),
+		string(deliverytrust.SuppressEstimateExpired), string(deliverytrust.SuppressOutlierHeavy),
+		string(deliverytrust.SuppressInsufficientBasis), string(deliverytrust.SuppressMissingContributor),
+	}
+	wantFlags := []string{
+		string(deliverytrust.FlagSourceBackslideIgnored), string(deliverytrust.FlagAgentHistoryDisagreement),
+		string(deliverytrust.FlagHistoryQualityDowngraded), string(deliverytrust.FlagHistoryOutlierHeavy),
+		string(deliverytrust.FlagHistoryInsufficientBasis), string(deliverytrust.FlagOwnerEstimateInvalid),
+		string(deliverytrust.FlagOwnerEstimateExpired), string(deliverytrust.FlagDeployedUnverified),
+		string(deliverytrust.FlagFailedNeedsRetry),
+	}
+	if got := openAPIStringEnum(t, suppression["enum"]); !reflect.DeepEqual(got, wantSuppressions) {
+		t.Fatalf("AgentModeTrust suppression enum=%v, want deliverytrust vocabulary %v", got, wantSuppressions)
+	}
+	if got := openAPIStringEnum(t, flagItems["enum"]); !reflect.DeepEqual(got, wantFlags) {
+		t.Fatalf("AgentModeTrust flags enum=%v, want deliverytrust vocabulary %v", got, wantFlags)
+	}
+}
+
+func openAPIStringEnum(t *testing.T, raw any) []string {
+	t.Helper()
+	values, ok := raw.([]any)
+	if !ok {
+		t.Fatalf("OpenAPI enum is missing or not an array: %T", raw)
+	}
+	out := make([]string, len(values))
+	for index, value := range values {
+		text, ok := value.(string)
+		if !ok {
+			t.Fatalf("OpenAPI enum item %d is %T, want string", index, value)
+		}
+		out[index] = text
+	}
+	return out
 }
 
 func staleOpenAPIMethods(registered map[string]map[string]bool, documented map[string]map[string]json.RawMessage) []string {

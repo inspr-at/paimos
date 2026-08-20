@@ -34,7 +34,8 @@ func (s *Store) RecordRunTelemetryChangeTx(ctx context.Context, tx *sql.Tx, effe
 		return ErrInvalid
 	}
 	var instrumentation int
-	if err := tx.QueryRowContext(ctx, `SELECT delivery_instrumentation_version FROM agent_runs WHERE id=?`, runID).Scan(&instrumentation); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT delivery_instrumentation_version FROM agent_runs WHERE id=?`, runID).
+		Scan(&instrumentation); err != nil {
 		return err
 	}
 	if instrumentation == 0 {
@@ -52,6 +53,16 @@ func (s *Store) RecordRunTelemetryChangeTx(ctx context.Context, tx *sql.Tx, effe
 		return err
 	}
 	d.ProjectID = nullInt64Ptr(project)
+	var deletedAt sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT deleted_at FROM issues WHERE id=?`, d.IssueID).Scan(&deletedAt); err != nil {
+		return err
+	}
+	// Telemetry remains durable in its run-local ledger while the root is
+	// hidden. It must not create an audience signal or require live-project
+	// authorization until the issue is restored.
+	if deletedAt.Valid {
+		return nil
+	}
 	actor := Actor{Type: "agent_run", OpaqueKey: fmt.Sprintf("run:%d", runID)}
 	if _, err := s.authorize(ctx, tx, d.IssueID, actor, "delivery.run.telemetry", nil); err != nil {
 		return err
@@ -124,16 +135,52 @@ func (s *Store) RecordRunTelemetryChangeTx(ctx context.Context, tx *sql.Tx, effe
 	return nil
 }
 
+func (s *Store) recordLegacyRunMutationChangeTx(ctx context.Context, tx *sql.Tx, effects *Effects, runID int64) error {
+	var status string
+	var issueDeleted sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT ar.status,i.deleted_at FROM agent_runs ar
+		JOIN issues i ON i.id=ar.issue_id WHERE ar.id=?`, runID).Scan(&status, &issueDeleted); err != nil {
+		return err
+	}
+	// Hidden synthetic membership is derived directly from the run status. Its
+	// lifecycle must remain writable, but it cannot create or wake an Agent Mode
+	// audience. In particular an M145-seeded root has no prior run hint to find.
+	if issueDeleted.Valid {
+		return nil
+	}
+	if status == "queued" || status == "running" {
+		// Active-to-active updates do not change the synthetic row. Initial and
+		// inactive-to-active membership are covered by M145 insert/update guards.
+		return nil
+	}
+	var hint ChangeHint
+	var project, revoked, sourceID, sourceSequence sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT id,cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+		revoked_project_id,change_sequence,delivery_revision,kind,source_kind,source_id,source_sequence,server_received_at
+		FROM delivery_change_log WHERE kind='run' AND source_kind='agent_run' AND source_id=?
+		ORDER BY id DESC LIMIT 1`, runID).Scan(&hint.InternalID, &hint.CursorToken, &hint.DeliveryID,
+		&hint.RootIssueID, &hint.DeliveryKey, &project, &revoked, &hint.ChangeSequence,
+		&hint.DeliveryRevision, &hint.Kind, &hint.SourceKind, &sourceID, &sourceSequence, &hint.ServerReceivedAt)
+	if err != nil {
+		return fmt.Errorf("%w: legacy run membership change is missing", ErrInvariant)
+	}
+	hint.ProjectIDHint, hint.RevokedProjectID = nullInt64Ptr(project), nullInt64Ptr(revoked)
+	hint.SourceID, hint.SourceSequence = nullInt64Ptr(sourceID), nullInt64Ptr(sourceSequence)
+	effects.add(hint)
+	return nil
+}
+
 func (s *Store) RecordRunMutationChangeTx(ctx context.Context, tx *sql.Tx, effects *Effects, runID int64) error {
 	if runID <= 0 {
 		return ErrInvalid
 	}
 	var instrumentation int
-	if err := tx.QueryRowContext(ctx, `SELECT delivery_instrumentation_version FROM agent_runs WHERE id=?`, runID).Scan(&instrumentation); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT delivery_instrumentation_version FROM agent_runs WHERE id=?`, runID).
+		Scan(&instrumentation); err != nil {
 		return err
 	}
 	if instrumentation == 0 {
-		return nil
+		return s.recordLegacyRunMutationChangeTx(ctx, tx, effects, runID)
 	}
 	var d deliveryRow
 	var project sql.NullInt64
@@ -168,7 +215,7 @@ func (s *Store) RecordRunMutationChangeTx(ctx context.Context, tx *sql.Tx, effec
 // lifecycle outcome without reopening canonical stage truth. The envelope key
 // is derived from immutable run identity plus observed status, so transport or
 // reconciler replay produces neither another audit event nor another wakeup.
-func (s *Store) recordRunLifecycleObservedTx(ctx context.Context, tx *sql.Tx, effects *Effects, runID int64, status string) error {
+func (s *Store) recordRunLifecycleObservedTx(ctx context.Context, tx *sql.Tx, effects *Effects, runID int64, status string, hidden bool) error {
 	if runID <= 0 {
 		return ErrInvalid
 	}
@@ -196,16 +243,18 @@ func (s *Store) recordRunLifecycleObservedTx(ctx context.Context, tx *sql.Tx, ef
 	}
 	d.ProjectID = nullInt64Ptr(project)
 	actor := Actor{Type: "agent_run", OpaqueKey: fmt.Sprintf("run:%d", runID)}
-	if _, err := s.authorize(ctx, tx, d.IssueID, actor, "delivery.run.normalize", nil); err != nil {
-		return err
+	if !hidden {
+		if _, err := s.authorize(ctx, tx, d.IssueID, actor, "delivery.run.normalize", nil); err != nil {
+			return err
+		}
 	}
 	payload := struct {
 		RunID  int64  `json:"run_id"`
 		Status string `json:"status"`
 	}{RunID: runID, Status: status}
 	idempotencyKey := fmt.Sprintf("run-lifecycle:%d:%s", runID, status)
-	_, err = s.appendEnvelopeTx(ctx, tx, effects, d, reporterID, "run_lifecycle_observed", idempotencyKey,
-		payload, "run_lifecycle", "", "run", "agent_run", &runID, nil, formatTime(s.now()))
+	_, err = s.appendEnvelopeTxMode(ctx, tx, effects, d, reporterID, "run_lifecycle_observed", idempotencyKey,
+		payload, "run_lifecycle", "", "run", "agent_run", &runID, nil, formatTime(s.now()), !hidden)
 	return err
 }
 
@@ -358,6 +407,9 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 	var issueID, deliveryID, attemptID, currentAttemptID, attemptNumber, execution, currentExecution, epoch, reporterID, currentReporterID, executionStartID int64
 	var stage, reporterType, reporterKey, runStatus, commitSHA, commitBase string
 	var attachment sql.NullInt64
+	var deletedAt sql.NullString
+	var runIssueID int64
+	var instrumentation int
 	err := tx.QueryRowContext(ctx, `SELECT link.root_issue_id,link.delivery_id,link.attempt_id,a.attempt_number,link.stage_key,
 		link.execution_number,l.execution_number,l.authority_epoch,link.reporter_id,l.current_reporter_id,
 		link.execution_start_stage_event_id,
@@ -365,14 +417,17 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 		 ON seal.delivery_id=ca.delivery_id AND seal.attempt_id=ca.id
 		 WHERE ca.delivery_id=link.delivery_id ORDER BY ca.attempt_number DESC LIMIT 1),
 		r.reporter_type,r.opaque_key,
-		ar.status,ar.commit_sha,ar.commit_base_sha,ar.log_attachment_id
+		ar.status,ar.commit_sha,ar.commit_base_sha,ar.log_attachment_id,
+		ar.issue_id,ar.delivery_instrumentation_version,i.deleted_at
 		FROM delivery_agent_run_links link JOIN delivery_attempts a ON a.id=link.attempt_id
 		JOIN delivery_stage_latest l ON l.attempt_id=link.attempt_id AND l.stage_key=link.stage_key
 		JOIN delivery_reporters r ON r.id=link.reporter_id
-		JOIN agent_runs ar ON ar.id=link.agent_run_id WHERE link.agent_run_id=?`, normalization.RunID).
+		JOIN agent_runs ar ON ar.id=link.agent_run_id
+		JOIN issues i ON i.id=link.root_issue_id WHERE link.agent_run_id=?`, normalization.RunID).
 		Scan(&issueID, &deliveryID, &attemptID, &attemptNumber, &stage, &execution, &currentExecution, &epoch, &reporterID, &currentReporterID,
 			&executionStartID, &currentAttemptID,
-			&reporterType, &reporterKey, &runStatus, &commitSHA, &commitBase, &attachment)
+			&reporterType, &reporterKey, &runStatus, &commitSHA, &commitBase, &attachment,
+			&runIssueID, &instrumentation, &deletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: instrumented run is unlinked", ErrInvariant)
 	}
@@ -382,9 +437,15 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 	if normalization.Status != "" && normalization.Status != runStatus {
 		return fmt.Errorf("%w: lifecycle status mismatch", ErrConflict)
 	}
+	if runIssueID != issueID || instrumentation != 1 {
+		return fmt.Errorf("%w: run normalization lineage mismatch", ErrInvariant)
+	}
+	hidden := deletedAt.Valid
 	actor := Actor{Type: reporterType, OpaqueKey: reporterKey}
-	if _, err := s.authorize(ctx, tx, issueID, actor, "delivery.run.normalize", nil); err != nil {
-		return err
+	if !hidden {
+		if _, err := s.authorize(ctx, tx, issueID, actor, "delivery.run.normalize", nil); err != nil {
+			return err
+		}
 	}
 	// A late old run may close after a retry, handoff, or project-move attempt
 	// superseded its authority. Its legal lifecycle must still commit, but it
@@ -393,15 +454,18 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 	if currentLineage {
 		attempt, loadErr := loadAttemptByNumber(ctx, tx, deliveryID, attemptNumber)
 		if loadErr != nil {
-			return loadErr
+			return fmt.Errorf("load run attempt: %w", loadErr)
 		}
-		currentLineage, loadErr = stageExecutionCurrentLineage(ctx, tx, attempt, stage, executionStartID)
+		currentLineage, loadErr = stageExecutionCurrentLineageMode(ctx, tx, attempt, stage, executionStartID, hidden)
 		if loadErr != nil {
-			return loadErr
+			return fmt.Errorf("validate run stage lineage: %w", loadErr)
 		}
 	}
 	if !currentLineage {
-		return s.recordRunLifecycleObservedTx(ctx, tx, effects, normalization.RunID, runStatus)
+		if err := s.recordRunLifecycleObservedTx(ctx, tx, effects, normalization.RunID, runStatus, hidden); err != nil {
+			return fmt.Errorf("record superseded run lifecycle: %w", err)
+		}
+		return nil
 	}
 	state, activity := "", ""
 	var evidence []Evidence
@@ -453,10 +517,16 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 		if prior.Duplicate {
 			return nil
 		}
-		return s.recordRunLifecycleObservedTx(ctx, tx, effects, normalization.RunID, runStatus)
+		if err := s.recordRunLifecycleObservedTx(ctx, tx, effects, normalization.RunID, runStatus, hidden); err != nil {
+			return fmt.Errorf("record sealed run lifecycle: %w", err)
+		}
+		return nil
 	}
-	_, err = s.reportStageTx(ctx, tx, effects, report, "lifecycle_normalized", "run_normalized", "run", "agent_run", &id, false)
-	return err
+	_, err = s.reportStageTxMode(ctx, tx, effects, report, "lifecycle_normalized", "run_normalized", "run", "agent_run", &id, false, hidden)
+	if err != nil {
+		return fmt.Errorf("normalize run stage: %w", err)
+	}
+	return nil
 }
 
 func loadAttemptByNumber(ctx context.Context, q DBTX, deliveryID, number int64) (Attempt, error) {
@@ -500,6 +570,15 @@ func currentPassedEvidence(ctx context.Context, q DBTX, attemptID int64, stage s
 func canonicalIssueSpecDigest(ctx context.Context, q DBTX, issueID int64) (string, error) {
 	var title, description, criteria string
 	if err := q.QueryRowContext(ctx, `SELECT title,description,acceptance_criteria FROM issues WHERE id=? AND deleted_at IS NULL`, issueID).
+		Scan(&title, &description, &criteria); err != nil {
+		return "", err
+	}
+	return canonicalIssueSpecDigestValues(title, description, criteria), nil
+}
+
+func canonicalStoredIssueSpecDigest(ctx context.Context, q DBTX, issueID int64) (string, error) {
+	var title, description, criteria string
+	if err := q.QueryRowContext(ctx, `SELECT title,description,acceptance_criteria FROM issues WHERE id=?`, issueID).
 		Scan(&title, &description, &criteria); err != nil {
 		return "", err
 	}

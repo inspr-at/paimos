@@ -561,6 +561,7 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M142 | `agent_run_telemetry`, `agent_run_telemetry_latest` | Append-only provider-neutral run facts plus an indexed latest projection (PAI-799). |
 | M143 | rebuilt `agent_runs`; expanded telemetry latest projection | Add truthful terminal `completed`, durable `expects_supervisor_telemetry`, and separate latest event/heartbeat/semantic/estimate pointers (PAI-801). |
 | M144 | `deliveries` and immutable delivery fact tables; `delivery_change_log`; `agent_runs.delivery_instrumentation_version` | Issue-rooted end-to-end delivery attempts, stage lineage/evidence, duration history, and deletion-safe invalidation identity (PAI-802). |
+| M145 | Agent Mode change audiences, legacy roots, and privacy guards | Revoked-project replay, live-only version-0 synthetic provenance, recursive metadata invalidation, and upgraded secret-like text backstops (PAI-804). |
 
 `agent_runs.status=completed` means implementation finished without a configured
 test command; it never implies tests passed. `tests_passed` and `tests_failed`
@@ -625,15 +626,49 @@ unioned and clipped, human wait takes precedence over other blocking, and the
 remaining lead time is active. The samples retain project-at-completion and are
 never removed by a later retry.
 
-`delivery_change_log` has no root foreign key. It retains a safe tombstone when
-an issue is hard-deleted and gives each delivery a contiguous change sequence;
+`delivery_change_log` has no root foreign key. It retains a safe removal fact
+when a visible issue is deleted and gives each delivery a contiguous change sequence;
 the opaque global id is internal only. Rows cannot be updated or directly
 deleted. An append-only monotone retention ledger is the sole prefix-deletion
 path, and its guards fail closed if retention state is missing or malformed.
 The encompassing SQL transaction writes facts and the durable change row;
-observer callbacks are dispatched only after commit. PAI-804 will seal its own
+observer callbacks are dispatched only after commit. Agent Mode seals its
 authorized cursors around this internal high-water rather than expose database
 ids or tokens.
+
+### Agent Mode invalidation provenance (M145 — PAI-804)
+
+M145 extends `delivery_change_log` with a nullable `revoked_project_id` and adds
+one-shot pending move provenance to canonical and legacy roots. A visible
+project move writes the new current project and the exact old project in one
+transaction. The target audience receives a refetch; a source-only audience
+receives an identity-free reset. Direct inserts cannot forge a different old
+project, reuse move provenance, skip a per-root sequence, or append facts for a
+hidden root. The effective current high-water is `max(log tail, retention
+floor)`, so pruning the complete retained prefix cannot make a fresh cursor
+start below the floor.
+
+`agent_mode_legacy_roots` is bounded provenance for active instrumentation-v0
+runs that have no canonical `deliveries` row. Its negative synthetic ID and
+`issue:<id>` key are database-derived and immutable; caller-supplied identities
+are rejected. A root is visible only while its issue is live, at least one v0
+run is active, and no canonical delivery exists. Retained terminal provenance
+is not candidate authority and does not participate in later metadata fanout.
+The table deliberately has no cascading issue foreign key: visible issue/run
+removals append before leaving membership, then cleanup can retain or remove
+provenance without inventing a tombstone audience.
+
+Each committed issue, tag, lane, recursive-parent, or project trigger appends
+exactly one durable invalidation per affected currently visible canonical or
+legacy root. A reparent implemented as a delete plus insert can therefore
+append consecutive lane facts; replay coalesces them to the latest authorized
+hint for that root.
+Hidden moves still synchronize project hints for a later restore but emit no
+observable change; restore emits one current-project refetch. Run lifecycle
+updates, delivery facts, and their change rows share the same transaction.
+Process-local wakeups run only after commit and are an optimization over the
+durable log and polling, so rollback, restart, or a lost/coalesced wake cannot
+publish uncommitted truth or strand a stream.
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 

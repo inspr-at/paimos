@@ -249,6 +249,52 @@ func TestAgentRunTelemetryValidationPrivacyAndStableIdentity(t *testing.T) {
 	}
 }
 
+func TestAgentRunTelemetryRejectsCompleteDeliverySecretCorpus(t *testing.T) {
+	ts := newDirectTelemetryServer(t)
+	_, runID := seedTelemetryRun(t, ts, ts.adminCookie)
+	path := "/api/runs/" + itoa(runID) + "/telemetry"
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	canaries := []string{
+		"Bearer abcdefgh", "api_key=abcdefgh", "token/abcdefgh", "secret_abcdefgh",
+		"password-abcdefgh", "passwd=abcdefgh", "credential:abcdefgh",
+		"DB_PASSWORD=abcdefgh", "GITHUB_TOKEN=abcdefgh", "OPENAI_API_KEY=abcdefgh",
+		"sk_abcdefghijklmnopqrst", "sk-ant-abcdefghijklmnopqrst", "sk_live_12345678", "sk_test_12345678",
+		"sk_proj_12345678", "ghp_12345678901234567890", "gho_12345678901234567890",
+		"ghu_12345678901234567890", "ghs_12345678901234567890", "ghr_12345678901234567890",
+		"github_pat_12345678901234567890", "xoxb-1234567890", "xoxa-1234567890",
+		"xoxp-1234567890", "xoxr-1234567890", "xoxs-1234567890", "AIza12345678901234567890",
+		"eyJabcdefgh.abcdefgh.abcdefgh", "AKIA1234567890ABCDEF", "-----BEGIN PRIVATE KEY-----",
+		"https://runner:p@example.test/repo",
+	}
+	for _, canary := range canaries {
+		for _, field := range []string{"activity", "estimate_basis"} {
+			body := map[string]any{"sequence": 1, "correlation_id": "privacy", "provider": "anthropic",
+				"adapter": "claude-code", "agent_reported_at": now, "kind": "phase", "phase": "implementing"}
+			if field == "activity" {
+				body[field] = "working " + canary
+			} else {
+				body["kind"] = "progress"
+				body["progress_percent"] = 20
+				body["estimate_revision"] = 1
+				body["estimate_source"] = "agent"
+				body["estimate_confidence"] = .5
+				body[field] = "based on " + canary
+			}
+			response := ts.post(t, path, ts.adminCookie, body)
+			if response.StatusCode != http.StatusBadRequest {
+				_ = response.Body.Close()
+				t.Fatalf("%s accepted %q: status=%d", field, canary, response.StatusCode)
+			}
+			_ = response.Body.Close()
+		}
+	}
+
+	safe := telemetryReport(1, now)
+	safe["activity"] = "fetch https://runner@example.test/repo with passwordless auth; sketch approved"
+	safe["estimate_basis"] = "token budget and credential rotation; sk_abcdefghijklmnopqrs is a 19-character fixture"
+	assertStatus(t, ts.post(t, path, ts.adminCookie, safe), http.StatusCreated)
+}
+
 func TestAgentRunTelemetryHeartbeatPreservesSemanticAndEstimateSnapshot(t *testing.T) {
 	ts := newDirectTelemetryServer(t)
 	_, runID := seedTelemetryRun(t, ts, ts.adminCookie)

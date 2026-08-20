@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/inspr-at/paimos/backend/agentmode"
 	"github.com/inspr-at/paimos/backend/ai"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
@@ -179,7 +180,7 @@ func getAgentRunByID(id int64) (*AgentRun, error) {
 // not trust the run's requester/claimer or its historical project_id.
 // Projectless issues retain the existing RequireIssueEdit orphan semantics.
 func deliveryStoreForRequest(r *http.Request) *delivery.Store {
-	return delivery.NewStore(db.DB, delivery.Options{Freshness: deliveryFreshnessPolicy(), Authorizer: delivery.AuthorizerFunc(
+	return delivery.NewStore(db.DB, delivery.Options{Freshness: deliveryFreshnessPolicy(), Observer: agentmode.NotifyChange, Authorizer: delivery.AuthorizerFunc(
 		func(_ context.Context, req delivery.AuthorizationRequest) error {
 			user := auth.GetUser(r)
 			if user == nil || user.Status != "active" {
@@ -1617,7 +1618,7 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "delivery normalization failed", http.StatusInternalServerError)
 			return
 		}
-	} else if existing.DeliveryInstrumentationVersion == 1 {
+	} else {
 		if err := store.RecordRunMutationChangeTx(r.Context(), tx, effects, id); err != nil {
 			log.Printf("agent run delivery mutation hint: run=%d: %v", id, err)
 			if errors.Is(err, delivery.ErrUnauthorized) {

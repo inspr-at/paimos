@@ -38,12 +38,30 @@ func (s *Store) ReportStageTx(ctx context.Context, tx *sql.Tx, effects *Effects,
 }
 
 func (s *Store) reportStageTx(ctx context.Context, tx *sql.Tx, effects *Effects, report StageReport, semanticEventType, envelopeKind, changeKind, sourceKind string, sourceID *int64, requireCurrentAttempt bool) (StageRef, error) {
+	return s.reportStageTxMode(ctx, tx, effects, report, semanticEventType, envelopeKind, changeKind,
+		sourceKind, sourceID, requireCurrentAttempt, false)
+}
+
+func (s *Store) reportStageTxMode(ctx context.Context, tx *sql.Tx, effects *Effects, report StageReport, semanticEventType, envelopeKind, changeKind, sourceKind string, sourceID *int64, requireCurrentAttempt, hidden bool) (StageRef, error) {
 	if err := validateStageReport(report); err != nil {
 		return StageRef{}, err
 	}
-	projectAtCompletion, err := s.authorize(ctx, tx, report.IssueID, report.Reporter, "delivery.stage.report", nil)
-	if err != nil {
-		return StageRef{}, err
+	var projectAtCompletion *int64
+	if hidden {
+		var project sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE id=? AND deleted_at IS NOT NULL`, report.IssueID).Scan(&project); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return StageRef{}, ErrNotFound
+			}
+			return StageRef{}, err
+		}
+		projectAtCompletion = nullInt64Ptr(project)
+	} else {
+		var err error
+		projectAtCompletion, err = s.authorize(ctx, tx, report.IssueID, report.Reporter, "delivery.stage.report", nil)
+		if err != nil {
+			return StageRef{}, err
+		}
 	}
 	d, err := loadDeliveryByIssue(ctx, tx, report.IssueID)
 	if err != nil {
@@ -172,8 +190,8 @@ func (s *Store) reportStageTx(ctx context.Context, tx *sql.Tx, effects *Effects,
 			return StageRef{}, err
 		}
 	} else {
-		event, err = s.appendEnvelopeTx(ctx, tx, effects, d, reporterID, envelopeKind, report.IdempotencyKey,
-			payload, reasonCode, report.ReasonText, changeKind, sourceKind, sourceID, report.SourceSequence, now)
+		event, err = s.appendEnvelopeTxMode(ctx, tx, effects, d, reporterID, envelopeKind, report.IdempotencyKey,
+			payload, reasonCode, report.ReasonText, changeKind, sourceKind, sourceID, report.SourceSequence, now, !hidden)
 		if err != nil {
 			return StageRef{}, err
 		}
@@ -208,7 +226,7 @@ func (s *Store) reportStageTx(ctx context.Context, tx *sql.Tx, effects *Effects,
 		return StageRef{}, err
 	}
 	stageEventID, _ := res.LastInsertId()
-	if report.Kind == "heartbeat" && heartbeatChange {
+	if report.Kind == "heartbeat" && heartbeatChange && !hidden {
 		hint, err := appendChangeTx(ctx, tx, d, event.Revision, changeKind, sourceKind, &stageEventID, report.SourceSequence, now)
 		if err != nil {
 			return StageRef{}, err

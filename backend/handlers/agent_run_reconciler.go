@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/backend/agentmode"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/sse"
@@ -230,7 +231,7 @@ func ReconcileStaleAgentRuns(ctx context.Context, now time.Time, cfg AgentRunRec
 			tx.Rollback()
 			continue
 		}
-		store := delivery.NewStore(db.DB, delivery.Options{Freshness: delivery.FreshnessPolicy{
+		store := delivery.NewStore(db.DB, delivery.Options{Observer: agentmode.NotifyChange, Freshness: delivery.FreshnessPolicy{
 			FirstSignalTimeout: cfg.FirstHeartbeatTimeout,
 			HeartbeatTimeout:   cfg.HeartbeatTimeout,
 			EstimateTimeout:    cfg.HeartbeatTimeout,
@@ -246,6 +247,10 @@ func ReconcileStaleAgentRuns(ctx context.Context, now time.Time, cfg AgentRunRec
 				log.Printf("agent-run reconciler: skip run %d after delivery normalization error: %v", c.id, err)
 				continue
 			}
+		} else if err := store.RecordRunMutationChangeTx(ctx, tx, effects, c.id); err != nil {
+			tx.Rollback()
+			log.Printf("agent-run reconciler: skip legacy run %d after invalidation error: %v", c.id, err)
+			continue
 		}
 		if err := tx.Commit(); err != nil {
 			return updated, err

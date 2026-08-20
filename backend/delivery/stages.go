@@ -511,12 +511,16 @@ func policyForStage(policies []Policy, stage string) *Policy {
 }
 
 func nearestRequiredPredecessor(ctx context.Context, q DBTX, attempt Attempt, stage string) (*int64, error) {
+	return nearestRequiredPredecessorMode(ctx, q, attempt, stage, false)
+}
+
+func nearestRequiredPredecessorMode(ctx context.Context, q DBTX, attempt Attempt, stage string, includeHidden bool) (*int64, error) {
 	idx := stageOrder(stage) - 1
 	for i := idx - 1; i >= 0; i-- {
 		if attempt.Policies[i].Applicability != "required" {
 			continue
 		}
-		id, ok, err := eligibleSuccessEventID(ctx, q, attempt, attempt.Policies[i].StageKey)
+		id, ok, err := eligibleSuccessEventIDMode(ctx, q, attempt, attempt.Policies[i].StageKey, includeHidden)
 		if err != nil {
 			return nil, err
 		}
@@ -532,6 +536,10 @@ func nearestRequiredPredecessor(ctx context.Context, q DBTX, attempt Attempt, st
 // merely the target's numeric execution/owner. This keeps a downstream linked
 // run historical after any upstream retry invalidates its based-on fact.
 func stageExecutionCurrentLineage(ctx context.Context, q DBTX, attempt Attempt, stage string, executionStartID int64) (bool, error) {
+	return stageExecutionCurrentLineageMode(ctx, q, attempt, stage, executionStartID, false)
+}
+
+func stageExecutionCurrentLineageMode(ctx context.Context, q DBTX, attempt Attempt, stage string, executionStartID int64, includeHidden bool) (bool, error) {
 	var predecessor int64
 	for _, policy := range attempt.Policies {
 		if policy.Applicability != "required" {
@@ -545,13 +553,13 @@ func stageExecutionCurrentLineage(ctx context.Context, q DBTX, attempt Attempt, 
 			if err := q.QueryRowContext(ctx, `SELECT based_on_stage_event_id FROM delivery_stage_events
 				WHERE id=? AND attempt_id=? AND stage_key=? AND event_type='execution_started'`,
 				executionStartID, attempt.ID, stage).Scan(&based); err != nil {
-				return false, err
+				return false, fmt.Errorf("load %s execution start lineage: %w", stage, err)
 			}
 			return nullableInt64Equal(based, predecessor), nil
 		}
-		semanticID, eligible, err := eligibleSuccessEventID(ctx, q, attempt, policy.StageKey)
+		semanticID, eligible, err := eligibleSuccessEventIDMode(ctx, q, attempt, policy.StageKey, includeHidden)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("check %s predecessor eligibility: %w", policy.StageKey, err)
 		}
 		if !eligible {
 			return false, nil
@@ -561,7 +569,7 @@ func stageExecutionCurrentLineage(ctx context.Context, q DBTX, attempt Attempt, 
 			FROM delivery_stage_latest latest JOIN delivery_stage_events start
 			 ON start.id=latest.execution_start_stage_event_id
 			WHERE latest.attempt_id=? AND latest.stage_key=?`, attempt.ID, policy.StageKey).Scan(&based); err != nil {
-			return false, err
+			return false, fmt.Errorf("load %s predecessor lineage: %w", policy.StageKey, err)
 		}
 		if !nullableInt64Equal(based, predecessor) {
 			return false, nil
@@ -579,6 +587,10 @@ func nullableInt64Equal(value sql.NullInt64, expected int64) bool {
 }
 
 func eligibleSuccessEventID(ctx context.Context, q DBTX, attempt Attempt, stage string) (int64, bool, error) {
+	return eligibleSuccessEventIDMode(ctx, q, attempt, stage, false)
+}
+
+func eligibleSuccessEventIDMode(ctx context.Context, q DBTX, attempt Attempt, stage string, includeHidden bool) (int64, bool, error) {
 	policy := policyForStage(attempt.Policies, stage)
 	if policy == nil || policy.Applicability != "required" {
 		return 0, false, nil
@@ -627,7 +639,13 @@ func eligibleSuccessEventID(ctx context.Context, q DBTX, attempt Attempt, stage 
 		if err := q.QueryRowContext(ctx, `SELECT issue_id FROM deliveries WHERE id=?`, attempt.DeliveryID).Scan(&issueID); err != nil {
 			return 0, false, err
 		}
-		digest, err := canonicalIssueSpecDigest(ctx, q, issueID)
+		var digest string
+		var err error
+		if includeHidden {
+			digest, err = canonicalStoredIssueSpecDigest(ctx, q, issueID)
+		} else {
+			digest, err = canonicalIssueSpecDigest(ctx, q, issueID)
+		}
 		if err != nil {
 			return 0, false, err
 		}
@@ -640,7 +658,7 @@ func eligibleSuccessEventID(ctx context.Context, q DBTX, attempt Attempt, stage 
 	if passed == 0 {
 		return semanticID, false, nil
 	}
-	expected, err := nearestRequiredPredecessor(ctx, q, attempt, stage)
+	expected, err := nearestRequiredPredecessorMode(ctx, q, attempt, stage, includeHidden)
 	if err != nil {
 		return semanticID, false, nil
 	}

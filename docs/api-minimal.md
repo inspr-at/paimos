@@ -456,9 +456,44 @@ allowlisted one-line text fields are rejected.
 
 Runs created after schema M144 carry `delivery_instrumentation_version: 1` and
 are atomically linked to the issue's internal delivery audit model. Existing
-version-0 run responses remain compatible. PAI-802 adds no public delivery
-list/snapshot or stream route; those authorization and cursor surfaces belong
-to PAI-804.
+version-0 run responses remain compatible.
+
+## Agent Mode delivery snapshots and events
+
+```
+GET    /agent-mode/deliveries                         internal snapshot
+GET    /agent-mode/projects/:projectID/deliveries     project-audience snapshot
+GET    /agent-mode/deliveries/:deliveryKey            detail/selection snapshot
+GET    /agent-mode/deliveries/events                  SSE invalidation stream
+```
+
+Snapshots are schema-v1 `application/json` with `Cache-Control: private,
+no-store`. The fixed top-level shape is `schema_version`, `server_time`, opaque
+211-character `cursor`, `rows`, `selected_delivery` (empty string only for
+genuinely empty authorized history), optional `selected_outside: {reason,row}`,
+and `aggregates`. The sole outside-selection reasons are `filter_excluded`,
+`active_fallback`, `terminal_fallback`, and `terminal`. A request may use
+allowlisted project/state/attention/health/lane/query filters and a selection;
+the project query is a result filter, while the project path is an authorization
+audience. More than 1,000 authorized candidate roots is an explicit private
+`400`, never a truncated snapshot; an exact detail lookup scopes before that
+portfolio ceiling.
+
+The events response is `text/event-stream` with `Cache-Control: private,
+no-store, no-transform`. Resume uses `Last-Event-ID` when the header is present,
+otherwise `cursor=`. `refetch` carries only currently authorized bounded hints;
+`checkpoint` advances across hidden facts without hints. Their SSE `id` is the
+replacement cursor. `reset` has no event id and only
+`{"schema_version":1,"reason":"resync_required"}`, then closes. Invalid,
+expired, revoked, wrong-scope, below-retention, or ahead-of-tail resumes all use
+that same reset. A storage invariant found before stream headers is a private
+problem+json `500`; after the stream is established it becomes the generic
+reset-and-close recovery.
+
+Agent Mode is unavailable to external-role users even if they have an explicit
+project grant. Missing and inaccessible project/detail/selection resources are
+the same canonical private `404`. The complete schema, enums, filters, response
+headers, and SSE envelopes are defined by `GET /openapi.json`.
 
 ## Project metadata
 

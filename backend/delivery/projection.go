@@ -65,7 +65,8 @@ func (s *Store) BulkSnapshotsTx(ctx context.Context, q DBTX, issueIDs []int64) (
 	// constant whether the caller asks for one delivery or one thousand.
 	query := `SELECT i.id,i.title,i.description,i.acceptance_criteria,d.id,d.delivery_key,d.spec_revision,a.id,a.attempt_number,a.plan_revision,
 		COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
-		COALESCE(d.change_sequence_high_water,0),
+		COALESCE(d.change_sequence_high_water,
+		 (SELECT legacy.change_sequence_high_water FROM agent_mode_legacy_roots legacy WHERE legacy.issue_id=i.id),0),
 		COALESCE((SELECT json_group_array(json_object(
 		 'stage_key',p.stage_key,'sort_order',p.sort_order,'applicability',p.applicability,'weight',p.weight,
 		 'execution_number',COALESCE(l.execution_number,0),'authority_epoch',COALESCE(l.authority_epoch,0),
@@ -83,7 +84,8 @@ func (s *Store) BulkSnapshotsTx(ctx context.Context, q DBTX, issueIDs []int64) (
 		   ORDER BY owner.event_sequence DESC LIMIT 1),''),
 		 'start_id',COALESCE(l.execution_start_stage_event_id,0),'based_on_id',COALESCE(start.based_on_stage_event_id,0),
 		 'start_at',COALESCE(start.server_received_at,''),'semantic_id',COALESCE(l.semantic_stage_event_id,0),
-		 'semantic_state',COALESCE(sem.semantic_state,'pending'),'activity',COALESCE(sem.activity,''),
+		 'semantic_state',COALESCE(sem.semantic_state,'pending'),'semantic_at',COALESCE(sem.server_received_at,''),
+		 'activity',COALESCE(sem.activity,''),
 		 'needs_input',COALESCE(sem.needs_input,0),'semantic_authority',COALESCE(sem.authority_epoch,0),
 		 'semantic_reporter_id',COALESCE(sem.reporter_id,0),'semantic_spec_revision',COALESCE(sem.spec_revision,0),
 		 'heartbeat_at',COALESCE(hb.server_received_at,''),
@@ -110,7 +112,7 @@ func (s *Store) BulkSnapshotsTx(ctx context.Context, q DBTX, issueIDs []int64) (
 		   'stage_cutoff',COALESCE(reset.reset_source_cutoff,0),'source_kind',COALESCE(reset.reset_source_kind,''),
 		   'run_id',reset.reset_telemetry_run_id,'telemetry_cutoff',reset.reset_telemetry_sequence_cutoff),
 		 'blockers_json',COALESCE((SELECT json_group_array(json_object('key',ob.blocker_key,'class',ob.blocker_class,
-		   'summary',ob.summary,'human_wait',ob.is_human_wait)) FROM (SELECT * FROM delivery_stage_blockers
+		   'summary',ob.summary,'human_wait',ob.is_human_wait,'started_at',ob.interval_started_at)) FROM (SELECT * FROM delivery_stage_blockers
 		   WHERE stage_event_id=l.semantic_stage_event_id AND is_current=1 ORDER BY ordinal) ob),'[]'),
 		 'evidence_json',COALESCE((SELECT json_group_array(json_object('type',oe.evidence_type,'outcome',oe.outcome,
 		   'reference_kind',oe.reference_kind,'reference_value',oe.reference_value,'digest',oe.digest_sha256,
@@ -172,7 +174,7 @@ func (s *Store) BulkSnapshotsTx(ctx context.Context, q DBTX, issueIDs []int64) (
 			return nil, err
 		}
 		if unlinkedActiveRuns != 0 {
-			return nil, fmt.Errorf("%w: active instrumented run lacks a delivery link", ErrInvariant)
+			return nil, fmt.Errorf("%w: instrumentation-v1 run lacks a delivery link", ErrInvariant)
 		}
 		snapshot, err := s.assembleBulkSnapshot(issueID, title, description, criteria, deliveryID, deliveryKey, specRevision, attemptID, attemptNumber,
 			planRevision, revision, changeSequence, stagesJSON, legacyJSON, calculatedAt)
@@ -200,6 +202,7 @@ type bulkBlocker struct {
 	Class     string `json:"class"`
 	Summary   string `json:"summary"`
 	HumanWait int    `json:"human_wait"`
+	StartedAt string `json:"started_at"`
 }
 
 type bulkEvidence struct {
@@ -270,6 +273,7 @@ type bulkStage struct {
 	StartAt               string          `json:"start_at"`
 	SemanticID            int64           `json:"semantic_id"`
 	SemanticState         string          `json:"semantic_state"`
+	SemanticAt            string          `json:"semantic_at"`
 	Activity              string          `json:"activity"`
 	NeedsInput            int             `json:"needs_input"`
 	SemanticAuthority     int64           `json:"semantic_authority"`
@@ -327,7 +331,7 @@ func (s *Store) assembleBulkSnapshot(issueID int64, title, description, criteria
 		stage := StageSnapshot{StageKey: raw.StageKey, SortOrder: raw.SortOrder, Applicability: raw.Applicability,
 			Weight: raw.Weight, ExecutionNumber: raw.ExecutionNumber, AuthorityEpoch: raw.AuthorityEpoch,
 			ReporterType: raw.ReporterType, SemanticState: raw.SemanticState, Activity: raw.Activity,
-			NeedsInput: raw.NeedsInput == 1}
+			NeedsInput: raw.NeedsInput == 1, LastSemanticAt: stringPtr(raw.SemanticAt)}
 		weightTotal += raw.Weight
 		if raw.Applicability == "required" {
 			requiredCount++
@@ -358,6 +362,11 @@ func (s *Store) assembleBulkSnapshot(issueID int64, title, description, criteria
 		for _, blocker := range blockers {
 			stage.CurrentBlockers = append(stage.CurrentBlockers, Blocker{Key: blocker.Key, Class: blocker.Class,
 				Summary: blocker.Summary, HumanWait: blocker.HumanWait == 1})
+			if blocker.HumanWait == 1 {
+				setEarlierStoredTime(&stage.HumanWaitSince, blocker.StartedAt)
+			} else {
+				setEarlierStoredTime(&stage.BlockedSince, blocker.StartedAt)
+			}
 		}
 		var evidence []bulkEvidence
 		if err := unmarshalNested(raw.EvidenceJSON, &evidence); err != nil {
@@ -395,8 +404,11 @@ func (s *Store) assembleBulkSnapshot(issueID int64, title, description, criteria
 				flags["waiting_on_human"] = true
 			}
 			for _, blocker := range stage.CurrentBlockers {
-				flags["blocked"] = true
-				flags["waiting_on_human"] = flags["waiting_on_human"] || blocker.HumanWait
+				if blocker.HumanWait {
+					flags["waiting_on_human"] = true
+				} else {
+					flags["blocked"] = true
+				}
 			}
 			if semanticCurrent {
 				if stage.SemanticState == "failed" {
@@ -479,13 +491,16 @@ func suppressInvalidLineageTruth(stage *StageSnapshot) {
 	stage.HeartbeatStale = false
 	stage.EstimateStale = false
 	stage.Stale = false
+	stage.StaleSince = nil
+	stage.BlockedSince = nil
+	stage.HumanWaitSince = nil
 	stage.NextFreshnessTransitionAt = nil
 }
 
 func applyRunSemantic(raw bulkStage, stage *StageSnapshot) {
 	if raw.SemanticID > 0 || raw.Run.RunID == 0 || raw.Run.SemanticID == 0 ||
 		raw.Run.SemanticSequence <= raw.Run.ActivationCutoff ||
-		(raw.Run.Status != "queued" && raw.Run.Status != "running") {
+		(raw.Run.Status != "queued" && raw.Run.Status != "running") || ContainsSecretLike(raw.Run.Activity) {
 		return
 	}
 	stage.Phase = raw.Run.Phase
@@ -501,8 +516,14 @@ func applyRunSemantic(raw bulkStage, stage *StageSnapshot) {
 	if raw.Run.BlockerState != "" && raw.Run.BlockerState != "none" {
 		stage.CurrentBlockers = append(stage.CurrentBlockers, Blocker{Key: "agent-run-blocker", Class: raw.Run.BlockerState,
 			HumanWait: stage.NeedsInput || raw.Run.BlockerState == "input"})
+		if stage.NeedsInput || raw.Run.BlockerState == "input" {
+			setEarlierStoredTime(&stage.HumanWaitSince, raw.Run.SemanticAt)
+		} else {
+			setEarlierStoredTime(&stage.BlockedSince, raw.Run.SemanticAt)
+		}
 	} else if stage.NeedsInput {
 		stage.CurrentBlockers = append(stage.CurrentBlockers, Blocker{Key: "agent-run-needs-input", Class: "input", HumanWait: true})
+		setEarlierStoredTime(&stage.HumanWaitSince, raw.Run.SemanticAt)
 	}
 }
 
@@ -536,6 +557,9 @@ func applyStageSourceTruth(s *Store, raw bulkStage, stage *StageSnapshot, calcul
 	if estimate.ID > 0 && estimate.Confidence <= 0 {
 		estimate = bulkEstimate{}
 	}
+	if estimate.ID > 0 && ContainsSecretLike(estimate.Basis) {
+		estimate = bulkEstimate{}
+	}
 	terminalExternal := raw.SemanticID > 0 && raw.SemanticAuthority == raw.AuthorityEpoch &&
 		raw.SemanticReporterID == raw.CurrentReporterID &&
 		(raw.SemanticState == "succeeded" || raw.SemanticState == "failed" || raw.SemanticState == "cancelled" || raw.SemanticState == "draft_ready")
@@ -552,6 +576,9 @@ func applyStageSourceTruth(s *Store, raw bulkStage, stage *StageSnapshot, calcul
 			Source: estimate.Source, Confidence: estimate.Confidence, Basis: estimate.Basis, ServerReceivedAt: estimate.ReceivedAt}
 		stage.LatestEstimateAt = stringPtr(estimate.ReceivedAt)
 		stage.EstimateStale = activeOwner && isOlderThan(estimate.ReceivedAt, calculatedAt, s.freshness.EstimateTimeout)
+		if stage.EstimateStale {
+			setStaleSince(stage, estimate.ReceivedAt, s.freshness.EstimateTimeout)
+		}
 		if activeOwner && !stage.EstimateStale {
 			setNextFreshnessTransition(stage, estimate.ReceivedAt, s.freshness.EstimateTimeout, calculatedAt)
 		}
@@ -590,6 +617,7 @@ func classifyHeartbeat(stage *StageSnapshot, startAt, heartbeatAt string, now ti
 	if heartbeatAt == "" {
 		if isOlderThan(startAt, now, policy.FirstSignalTimeout) {
 			stage.SignalState, stage.NeverSignaled, stage.Stale = "no_signal", true, true
+			setStaleSince(stage, startAt, policy.FirstSignalTimeout)
 		} else {
 			stage.SignalState = "awaiting_first_signal"
 			setNextFreshnessTransition(stage, startAt, policy.FirstSignalTimeout, now)
@@ -599,9 +627,32 @@ func classifyHeartbeat(stage *StageSnapshot, startAt, heartbeatAt string, now ti
 	stage.LastHeartbeatAt = stringPtr(heartbeatAt)
 	if isOlderThan(heartbeatAt, now, policy.HeartbeatTimeout) {
 		stage.SignalState, stage.HeartbeatStale, stage.Stale = "stale", true, true
+		setStaleSince(stage, heartbeatAt, policy.HeartbeatTimeout)
 	} else {
 		stage.SignalState = "live"
 		setNextFreshnessTransition(stage, heartbeatAt, policy.HeartbeatTimeout, now)
+	}
+}
+
+func setStaleSince(stage *StageSnapshot, raw string, threshold time.Duration) {
+	stamp, err := parseStoredTime(raw)
+	if err != nil {
+		return
+	}
+	formatted := formatTime(stamp.Add(threshold))
+	if stage.StaleSince == nil || formatted < *stage.StaleSince {
+		stage.StaleSince = &formatted
+	}
+}
+
+func setEarlierStoredTime(target **string, raw string) {
+	stamp, err := parseStoredTime(raw)
+	if err != nil {
+		return
+	}
+	formatted := formatTime(stamp)
+	if *target == nil || formatted < **target {
+		*target = &formatted
 	}
 }
 

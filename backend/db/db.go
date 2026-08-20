@@ -29,6 +29,7 @@ import (
 	"modernc.org/sqlite"
 
 	"github.com/inspr-at/paimos/backend/brand"
+	"github.com/inspr-at/paimos/backend/safetext"
 )
 
 var perConnectionPragmas = []string{
@@ -38,6 +39,7 @@ var perConnectionPragmas = []string{
 
 func init() {
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_cosine", 2, paimosCosineSQL)
+	sqlite.MustRegisterDeterministicScalarFunction("paimos_contains_secret_like", 1, paimosContainsSecretLikeSQL)
 
 	// RegisterConnectionHook fires on every new connection in the pool —
 	// the right place for genuinely per-connection pragmas. NOT the right
@@ -57,6 +59,25 @@ func init() {
 		}
 		return nil
 	})
+}
+
+func paimosContainsSecretLikeSQL(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+	if len(args) != 1 || args[0] == nil {
+		return int64(0), nil
+	}
+	var value string
+	switch typed := args[0].(type) {
+	case string:
+		value = typed
+	case []byte:
+		value = string(typed)
+	default:
+		return int64(1), nil
+	}
+	if safetext.ContainsSecretLike(value) {
+		return int64(1), nil
+	}
+	return int64(0), nil
 }
 
 func paimosCosineSQL(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
@@ -106,6 +127,22 @@ type migration struct {
 	steps   []string
 }
 
+// deliverySecretGuardSQL rebuilds the M144 privacy triggers during M145 so a
+// populated database receives the same corpus as a fresh install. The scalar
+// owns the shared secret detector, while the SQL-native predicates deliberately
+// remain here: SQLite TEXT arguments can be truncated at NUL before reaching a
+// scalar, and reporter/policy/evidence references have stricter URL/query
+// policies than ordinary display text.
+func deliverySecretGuardSQL(trigger, table, values, extra, message string) string {
+	return fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON %s WHEN EXISTS (
+		 SELECT 1 FROM json_each(json_array(%s)) value
+		 WHERE instr(CAST(value.value AS TEXT),char(0))>0
+		  OR instr(CAST(value.value AS TEXT),char(10))>0
+		  OR instr(CAST(value.value AS TEXT),char(13))>0
+		  OR paimos_contains_secret_like(CAST(value.value AS BLOB))=1%s
+		) BEGIN SELECT RAISE(ABORT,'%s'); END`, trigger, table, values, extra, message)
+}
+
 // The append-only history is authoritative; this pair reconstructs every
 // latest pointer without trusting the existing projection. M143 uses the same
 // operation when upgrading populated databases, and the regression suite uses
@@ -140,6 +177,71 @@ const rebuildAgentRunTelemetryLatestSQL = `INSERT INTO agent_run_telemetry_lates
 	   ORDER BY e.sequence DESC LIMIT 1)
 	FROM agent_run_telemetry newest
 	WHERE newest.sequence=(SELECT MAX(candidate.sequence) FROM agent_run_telemetry candidate WHERE candidate.run_id=newest.run_id)`
+
+// M145 recreates the M144 issue projection trigger with a live-boundary gate:
+// the first soft delete and a later restore each invalidate once, while edits
+// to an already hidden root cannot create an observable stream oracle.
+const agentModeDeliveryIssueUpdateTriggerSQL = `CREATE TRIGGER trg_delivery_issue_update_change
+	AFTER UPDATE ON issues WHEN EXISTS(SELECT 1 FROM deliveries WHERE issue_id=NEW.id)
+	BEGIN
+	 UPDATE deliveries SET project_id_hint=NEW.project_id,
+	  updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	  WHERE issue_id=NEW.id AND NEW.project_id IS NOT OLD.project_id;
+	 UPDATE deliveries SET spec_revision=spec_revision+1,
+	  updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	  WHERE issue_id=NEW.id AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+	   OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+	 INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,payload_hash,kind,
+	  reporter_id,reason_code,reason_text,server_received_at)
+	 SELECT d.id,COALESCE((SELECT MAX(delivery_revision)+1 FROM delivery_events WHERE delivery_id=d.id),1),
+	  'spec-revision:'||d.spec_revision,X'44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a',
+	  'attempt_started',r.id,'spec_changed','Canonical issue specification changed',
+	  strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 FROM deliveries d JOIN delivery_reporters r ON r.delivery_id=d.id
+	  AND r.reporter_type='system' AND r.opaque_key='paimos'
+	 WHERE d.issue_id=NEW.id AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+	  OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+	 INSERT INTO delivery_attempts(delivery_id,attempt_number,plan_revision,previous_attempt_id,
+	  start_delivery_event_id,project_id_at_start,reason_code,reason_text,created_at)
+	 SELECT d.id,COALESCE((SELECT MAX(attempt_number)+1 FROM delivery_attempts WHERE delivery_id=d.id),1),
+	  COALESCE((SELECT MAX(plan_revision)+1 FROM delivery_attempts WHERE delivery_id=d.id),1),
+	   (SELECT a.id FROM delivery_attempts a JOIN delivery_attempt_policy_seals seal
+	     ON seal.delivery_id=a.delivery_id AND seal.attempt_id=a.id
+	    WHERE a.delivery_id=d.id ORDER BY a.attempt_number DESC LIMIT 1),
+	  (SELECT id FROM delivery_events WHERE delivery_id=d.id ORDER BY delivery_revision DESC LIMIT 1),
+	  NEW.project_id,'spec_changed','Canonical issue specification changed',strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 FROM deliveries d WHERE d.issue_id=NEW.id
+	  AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+	   OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+	 INSERT INTO delivery_attempt_stage_policy(delivery_id,attempt_id,stage_key,sort_order,applicability,
+	  weight,policy_reference,reason_code,reason_text,authorized_by_reporter_id,created_at)
+	 SELECT next.delivery_id,next.id,p.stage_key,p.sort_order,p.applicability,p.weight,p.policy_reference,
+	  p.reason_code,p.reason_text,p.authorized_by_reporter_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 FROM delivery_attempts next JOIN delivery_attempt_stage_policy p ON p.attempt_id=next.previous_attempt_id
+	 WHERE next.delivery_id=(SELECT id FROM deliveries WHERE issue_id=NEW.id)
+	  AND next.attempt_number=(SELECT MAX(attempt_number) FROM delivery_attempts
+	   WHERE delivery_id=next.delivery_id)
+	  AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+	   OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+	 INSERT INTO delivery_attempt_policy_seals(delivery_id,attempt_id,sealed_at)
+	 SELECT next.delivery_id,next.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 FROM delivery_attempts next WHERE next.delivery_id=(SELECT id FROM deliveries WHERE issue_id=NEW.id)
+	  AND next.attempt_number=(SELECT MAX(attempt_number) FROM delivery_attempts
+	   WHERE delivery_id=next.delivery_id)
+	  AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+	   OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+	 INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+	  change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+	 SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,NEW.project_id,
+	  d.change_sequence_high_water+1,
+	  COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+	  'issue','issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 FROM deliveries d WHERE d.issue_id=NEW.id AND NEW.deleted_at IS NULL
+	  AND NOT (NEW.project_id IS NOT OLD.project_id AND OLD.deleted_at IS NULL)
+	  AND (NEW.deleted_at IS NOT OLD.deleted_at OR NEW.issue_number IS NOT OLD.issue_number OR
+	   NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description OR
+	   NEW.acceptance_criteria IS NOT OLD.acceptance_criteria OR NEW.updated_at IS NOT OLD.updated_at);
+	END`
 
 func rebuildAgentRunTelemetryLatest(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, clearAgentRunTelemetryLatestSQL); err != nil {
@@ -223,6 +325,13 @@ const PromoteSeededAdminSQL = `UPDATE users
 	  )`
 
 func migrate(db *sql.DB) error {
+	return migrateThrough(db, math.MaxInt)
+}
+
+// migrateThrough is the migration engine with an upper bound used by
+// populated-upgrade regression fixtures. Production always calls migrate and
+// therefore applies every registered migration.
+func migrateThrough(db *sql.DB, maxVersion int) error {
 	// In test mode, skip fsync and keep the journal in memory so the ~70
 	// migration statements don't each pay a disk-sync cost. Applied here
 	// (not after Open) because migrations run inside Open().
@@ -7105,9 +7214,725 @@ func migrate(db *sql.DB) error {
 			 WHEN OLD.id > COALESCE((SELECT MAX(floor_id) FROM delivery_change_retention),-1)
 			 BEGIN SELECT RAISE(ABORT,'delivery change retention floor has not advanced'); END`,
 		}},
+
+		// M145 / PAI-804: delivery-stream audience and complete lane metadata
+		// invalidation. The nullable prior project is intentionally not an FK:
+		// move-away and deletion reset rows must survive project retention. No
+		// historical source audience is guessed; every pre-M145 row remains NULL.
+		{145, []string{
+			`ALTER TABLE delivery_change_log ADD COLUMN revoked_project_id INTEGER
+				 CHECK(revoked_project_id IS NULL OR revoked_project_id > 0)`,
+			`ALTER TABLE deliveries ADD COLUMN pending_revoked_project_id INTEGER
+				 CHECK(pending_revoked_project_id IS NULL OR pending_revoked_project_id > 0)`,
+			`DROP TRIGGER IF EXISTS trg_delivery_forbidden_patterns_no_insert`,
+			`INSERT OR IGNORE INTO delivery_forbidden_value_patterns(
+			 pattern,normalize_horizontal_whitespace,case_sensitive,boundary_needle,require_bearer_whitespace) VALUES
+			 ('*passwd[=:]*',1,0,'passwd',0),
+			 ('*passwd[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'passwd',0),
+			 ('*sk-[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+			 ('*sk_[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0)`,
+			`CREATE TRIGGER trg_delivery_forbidden_patterns_no_insert
+			 BEFORE INSERT ON delivery_forbidden_value_patterns WHEN NOT EXISTS(
+			  SELECT 1 FROM delivery_forbidden_value_patterns existing WHERE existing.pattern=NEW.pattern
+			   AND existing.normalize_horizontal_whitespace=NEW.normalize_horizontal_whitespace
+			   AND existing.case_sensitive=NEW.case_sensitive AND existing.boundary_needle=NEW.boundary_needle
+			   AND existing.require_bearer_whitespace=NEW.require_bearer_whitespace)
+			 BEGIN SELECT RAISE(ABORT, 'delivery forbidden patterns are migration-owned'); END`,
+			`DROP TRIGGER IF EXISTS trg_delivery_reporter_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_reporter_secret_guard", "delivery_reporters",
+				"NEW.opaque_key", `
+		  OR instr(CAST(value.value AS TEXT),'?')>0
+		  OR (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)`,
+				"forbidden delivery reporter value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_event_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_event_secret_guard", "delivery_events",
+				"NEW.idempotency_key,NEW.reason_code,NEW.reason_text", "", "forbidden delivery event value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_attempt_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_attempt_secret_guard", "delivery_attempts",
+				"NEW.reason_code,NEW.reason_text", "", "forbidden delivery attempt value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_policy_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_policy_secret_guard", "delivery_attempt_stage_policy",
+				"NEW.policy_reference,NEW.reason_code,NEW.reason_text", `
+		  OR (value.value=NEW.policy_reference AND (instr(CAST(value.value AS TEXT),'?')>0 OR
+		   (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)))`,
+				"forbidden delivery policy value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_stage_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_stage_secret_guard", "delivery_stage_events",
+				"COALESCE(NEW.source_idempotency_key,''),NEW.activity,NEW.estimate_basis,NEW.reason_code,NEW.reason_text",
+				"", "forbidden delivery stage value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_blocker_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_blocker_secret_guard", "delivery_stage_blockers",
+				"NEW.blocker_key,NEW.summary", "", "forbidden delivery blocker value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_evidence_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_evidence_secret_guard", "delivery_evidence",
+				"NEW.reference_value", `
+		  OR instr(CAST(value.value AS TEXT),'?')>0
+		  OR (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)`,
+				"forbidden delivery evidence value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_issue_update_change`,
+			agentModeDeliveryIssueUpdateTriggerSQL,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_delivery_issue_delete
+				 BEFORE DELETE ON issues WHEN OLD.deleted_at IS NULL
+				  AND EXISTS(SELECT 1 FROM deliveries WHERE issue_id=OLD.id)
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,OLD.project_id,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',OLD.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM deliveries d WHERE d.issue_id=OLD.id;
+				 END`,
+			`DROP TRIGGER IF EXISTS trg_deliveries_delete_tombstone`,
+			`CREATE TABLE IF NOT EXISTS agent_mode_legacy_roots (
+				 issue_id                   INTEGER PRIMARY KEY,
+				 synthetic_delivery_id      INTEGER NOT NULL UNIQUE CHECK(synthetic_delivery_id=-issue_id),
+				 delivery_key               TEXT NOT NULL UNIQUE CHECK(delivery_key=('issue:'||issue_id)),
+				 project_id_hint            INTEGER NOT NULL CHECK(project_id_hint > 0),
+				 pending_revoked_project_id INTEGER CHECK(pending_revoked_project_id IS NULL OR pending_revoked_project_id > 0),
+				 change_sequence_high_water INTEGER NOT NULL DEFAULT 0 CHECK(change_sequence_high_water >= 0),
+				 created_at                 TEXT NOT NULL
+			 ) WITHOUT ROWID`,
+			`INSERT OR IGNORE INTO agent_mode_legacy_roots(
+				 issue_id,synthetic_delivery_id,delivery_key,project_id_hint,created_at)
+			 SELECT i.id,-i.id,'issue:'||i.id,i.project_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 FROM issues i WHERE i.deleted_at IS NULL
+			  AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=i.id)
+			  AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=i.id
+			   AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))
+			  AND NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=i.id
+			   AND ar.delivery_instrumentation_version=1)`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_insert_guard
+				 BEFORE INSERT ON agent_mode_legacy_roots WHEN NEW.issue_id<=0 OR
+				  NEW.synthetic_delivery_id<>-NEW.issue_id OR NEW.delivery_key<>('issue:'||NEW.issue_id) OR
+				  NEW.pending_revoked_project_id IS NOT NULL OR NEW.change_sequence_high_water<>0 OR
+				  julianday(NEW.created_at) IS NULL OR
+				  NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ',NEW.created_at) OR
+				  NOT EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.issue_id
+				   AND issue.deleted_at IS NULL AND issue.project_id=NEW.project_id_hint) OR
+				  EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=NEW.issue_id) OR
+				  NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.issue_id
+				   AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running')) OR
+				  EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.issue_id
+				   AND ar.delivery_instrumentation_version=1)
+				 BEGIN SELECT RAISE(ABORT,'agent mode legacy root provenance is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_identity_guard
+				 BEFORE UPDATE ON agent_mode_legacy_roots WHEN
+				  NEW.issue_id IS NOT OLD.issue_id OR NEW.synthetic_delivery_id IS NOT OLD.synthetic_delivery_id OR
+				  NEW.delivery_key IS NOT OLD.delivery_key OR NEW.created_at IS NOT OLD.created_at
+				 BEGIN SELECT RAISE(ABORT,'agent mode legacy root identity is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_project_guard
+				 BEFORE UPDATE OF project_id_hint,pending_revoked_project_id ON agent_mode_legacy_roots
+				 WHEN NOT (
+				  (NEW.project_id_hint IS OLD.project_id_hint AND NEW.pending_revoked_project_id IS OLD.pending_revoked_project_id) OR
+				  (OLD.pending_revoked_project_id IS NULL AND NEW.project_id_hint<>OLD.project_id_hint AND
+				   NEW.project_id_hint=COALESCE((SELECT project_id FROM issues WHERE id=OLD.issue_id),0) AND
+				   NEW.pending_revoked_project_id=OLD.project_id_hint) OR
+				  (OLD.pending_revoked_project_id IS NULL AND NEW.project_id_hint<>OLD.project_id_hint AND
+				   NEW.project_id_hint=COALESCE((SELECT project_id FROM issues WHERE id=OLD.issue_id),0) AND
+				   NEW.pending_revoked_project_id IS NULL AND (EXISTS(
+				    SELECT 1 FROM issues issue WHERE issue.id=OLD.issue_id AND issue.deleted_at IS NOT NULL) OR
+				    NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=OLD.issue_id
+				     AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running')) OR
+				    EXISTS(SELECT 1 FROM delivery_change_log change
+				     WHERE change.delivery_id=OLD.synthetic_delivery_id
+				      AND change.change_sequence=OLD.change_sequence_high_water
+				      AND change.kind IN ('issue','project_move')))) OR
+				  (NEW.project_id_hint=OLD.project_id_hint AND OLD.pending_revoked_project_id IS NOT NULL AND
+				   NEW.pending_revoked_project_id IS NULL AND
+				   NEW.change_sequence_high_water=OLD.change_sequence_high_water+1 AND EXISTS(
+				    SELECT 1 FROM delivery_change_log change
+				    WHERE change.delivery_id=OLD.synthetic_delivery_id
+				     AND change.change_sequence=NEW.change_sequence_high_water
+				     AND change.kind='project_move'
+				     AND change.revoked_project_id=OLD.pending_revoked_project_id))
+				 )
+				 BEGIN SELECT RAISE(ABORT,'agent mode legacy root project is not current'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_no_direct_delete
+				 BEFORE DELETE ON agent_mode_legacy_roots WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id)
+				  AND NOT EXISTS(SELECT 1 FROM deliveries WHERE issue_id=OLD.issue_id)
+				 BEGIN SELECT RAISE(ABORT,'agent mode legacy roots cannot be deleted directly'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_retire_on_delivery
+				 AFTER INSERT ON deliveries
+				 BEGIN DELETE FROM agent_mode_legacy_roots WHERE issue_id=NEW.issue_id; END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_issue_hide_change
+				 BEFORE UPDATE OF deleted_at ON issues
+				 WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,OLD.project_id,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',OLD.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM deliveries d WHERE d.issue_id=OLD.id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   OLD.project_id,legacy.change_sequence_high_water+1,0,'issue','issue',OLD.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM agent_mode_legacy_roots legacy
+				  WHERE legacy.issue_id=OLD.id
+				   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=OLD.id)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=OLD.id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_project_move_capture
+				 BEFORE UPDATE OF project_id ON issues WHEN NEW.project_id IS NOT OLD.project_id
+				  AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL
+				 BEGIN
+				  UPDATE deliveries SET pending_revoked_project_id=OLD.project_id WHERE issue_id=OLD.id;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_deliveries_project_pending_guard
+				 BEFORE UPDATE OF pending_revoked_project_id ON deliveries
+				 WHEN NEW.pending_revoked_project_id IS NOT OLD.pending_revoked_project_id AND NOT (
+				  (OLD.pending_revoked_project_id IS NULL AND NEW.pending_revoked_project_id=OLD.project_id_hint AND
+				   EXISTS(SELECT 1 FROM issues issue WHERE issue.id=OLD.issue_id
+				    AND issue.project_id=OLD.project_id_hint)) OR
+				  (OLD.pending_revoked_project_id IS NOT NULL AND NEW.pending_revoked_project_id IS NULL AND
+				   NEW.change_sequence_high_water=OLD.change_sequence_high_water+1 AND EXISTS(
+				    SELECT 1 FROM delivery_change_log change WHERE change.delivery_id=OLD.id
+				     AND change.change_sequence=NEW.change_sequence_high_water
+				     AND change.kind='project_move'
+				     AND change.revoked_project_id=OLD.pending_revoked_project_id))
+				 )
+				 BEGIN SELECT RAISE(ABORT,'delivery project move provenance is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_deliveries_project_hint_guard
+				 BEFORE UPDATE OF project_id_hint ON deliveries
+				 WHEN NEW.project_id_hint<>OLD.project_id_hint AND NOT EXISTS(
+				  SELECT 1 FROM issues issue WHERE issue.id=OLD.issue_id
+				   AND issue.project_id=NEW.project_id_hint)
+				 BEGIN SELECT RAISE(ABORT,'delivery project hint is not current'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_issue_project_move_change
+				 AFTER UPDATE OF project_id ON issues WHEN NEW.project_id IS NOT OLD.project_id
+				 BEGIN
+				  UPDATE deliveries SET project_id_hint=NEW.project_id WHERE issue_id=NEW.id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   revoked_project_id,change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,NEW.project_id,OLD.project_id,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'project_move','issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM deliveries d WHERE d.issue_id=NEW.id
+				   AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL;
+				 END`,
+			`DROP TRIGGER IF EXISTS trg_delivery_change_sequence_guard`,
+			`CREATE TRIGGER trg_delivery_change_sequence_guard
+				 BEFORE INSERT ON delivery_change_log
+				 WHEN NEW.change_sequence <> CASE WHEN NEW.delivery_id>0 THEN
+				  COALESCE((SELECT change_sequence_high_water+1 FROM deliveries WHERE id=NEW.delivery_id),-1)
+				 ELSE COALESCE((SELECT change_sequence_high_water+1 FROM agent_mode_legacy_roots
+				  WHERE synthetic_delivery_id=NEW.delivery_id),-1) END
+				 BEGIN SELECT RAISE(ABORT,'delivery change sequence is not contiguous'); END`,
+			`DROP TRIGGER IF EXISTS trg_delivery_change_provenance_guard`,
+			`CREATE TRIGGER trg_delivery_change_provenance_guard
+				 BEFORE INSERT ON delivery_change_log WHEN
+				  ((NEW.delivery_id>0)<>(EXISTS(SELECT 1 FROM deliveries d WHERE d.id=NEW.delivery_id
+				    AND d.issue_id=NEW.root_issue_id AND d.delivery_key=NEW.delivery_key
+				    AND d.project_id_hint IS NEW.project_id_hint))) OR
+				  ((NEW.delivery_id<0)<>(EXISTS(SELECT 1 FROM agent_mode_legacy_roots legacy
+				    WHERE legacy.synthetic_delivery_id=NEW.delivery_id AND legacy.issue_id=NEW.root_issue_id
+				     AND legacy.delivery_key=NEW.delivery_key AND legacy.project_id_hint IS NEW.project_id_hint
+				     AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)))) OR
+				  NEW.delivery_id=0 OR
+				  (NEW.delivery_id>0 AND NEW.kind='project_move' AND NEW.revoked_project_id IS NOT (
+				   SELECT pending_revoked_project_id FROM deliveries WHERE id=NEW.delivery_id)) OR
+				  (NEW.delivery_id<0 AND (NEW.delivery_revision<>0 OR NEW.source_sequence IS NOT NULL OR
+				   NEW.source_id IS NULL OR
+				   NOT EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.root_issue_id
+				    AND issue.deleted_at IS NULL
+				    AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=issue.id)
+				    AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=issue.id
+				     AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))) OR
+				   (NEW.kind='project_move' AND NEW.revoked_project_id IS NOT (
+				    SELECT pending_revoked_project_id FROM agent_mode_legacy_roots
+				    WHERE synthetic_delivery_id=NEW.delivery_id)) OR NOT (
+				   (NEW.kind='run' AND NEW.source_kind='agent_run' AND EXISTS(
+				    SELECT 1 FROM agent_runs ar WHERE ar.id=NEW.source_id AND ar.issue_id=NEW.root_issue_id
+				     AND ar.delivery_instrumentation_version=0)) OR
+				   (NEW.kind IN ('issue','project_move') AND NEW.source_kind='issue'
+				    AND NEW.source_id=NEW.root_issue_id) OR
+				   (NEW.kind='lane' AND NEW.source_kind='relation' AND NEW.source_id>0) OR
+				   (NEW.kind='lane' AND NEW.source_kind='issue' AND NEW.source_id>0) OR
+				   (NEW.kind='root_deleted' AND NEW.source_kind='issue' AND NEW.source_id=NEW.root_issue_id)
+				  ))) OR
+				  (NEW.kind='root_deleted' AND (EXISTS(SELECT 1 FROM issues i WHERE i.id=NEW.root_issue_id)
+				   OR EXISTS(SELECT 1 FROM delivery_change_log prior WHERE prior.delivery_id=NEW.delivery_id
+				    AND prior.kind='root_deleted'))) OR
+				  (NEW.kind<>'root_deleted' AND NOT EXISTS(SELECT 1 FROM issues i
+				   WHERE i.id=NEW.root_issue_id AND i.deleted_at IS NULL))
+				 BEGIN SELECT RAISE(ABORT,'delivery change provenance does not match its live root'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_advance_legacy_high_water
+				 AFTER INSERT ON delivery_change_log WHEN NEW.delivery_id<0
+				 BEGIN UPDATE agent_mode_legacy_roots SET change_sequence_high_water=NEW.change_sequence,
+				  pending_revoked_project_id=CASE WHEN NEW.kind='project_move' THEN NULL
+				   ELSE pending_revoked_project_id END
+				  WHERE synthetic_delivery_id=NEW.delivery_id; END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_high_water_guard
+				 BEFORE UPDATE OF change_sequence_high_water ON agent_mode_legacy_roots
+				 WHEN NEW.change_sequence_high_water<>OLD.change_sequence_high_water AND NOT (
+				  NEW.change_sequence_high_water=OLD.change_sequence_high_water+1 AND EXISTS(
+				   SELECT 1 FROM delivery_change_log change WHERE change.delivery_id=OLD.synthetic_delivery_id
+				    AND change.change_sequence=NEW.change_sequence_high_water))
+				 BEGIN SELECT RAISE(ABORT,'agent mode legacy high-water is log-owned'); END`,
+			`DROP TRIGGER IF EXISTS trg_delivery_change_advance_high_water`,
+			`CREATE TRIGGER trg_delivery_change_advance_high_water
+				 AFTER INSERT ON delivery_change_log WHEN NEW.delivery_id>0
+				 BEGIN UPDATE deliveries SET change_sequence_high_water=NEW.change_sequence,
+				  pending_revoked_project_id=CASE WHEN NEW.kind='project_move' THEN NULL
+				   ELSE pending_revoked_project_id END WHERE id=NEW.delivery_id; END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_runs_creation_lineage_immutable
+				 BEFORE UPDATE OF id,issue_id ON agent_runs
+				 WHEN NEW.id IS NOT OLD.id OR NEW.issue_id IS NOT OLD.issue_id
+				 BEGIN SELECT RAISE(ABORT,'agent run creation lineage is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_run_insert
+				 AFTER INSERT ON agent_runs WHEN NEW.delivery_instrumentation_version=0
+				  AND NEW.status IN ('queued','running')
+				 BEGIN
+				  INSERT OR IGNORE INTO agent_mode_legacy_roots(
+				   issue_id,synthetic_delivery_id,delivery_key,project_id_hint,created_at)
+				  SELECT issue.id,-issue.id,'issue:'||issue.id,issue.project_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM issues issue WHERE issue.id=NEW.issue_id
+				   AND issue.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=issue.id)
+				   AND NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=issue.id
+				    AND ar.delivery_instrumentation_version=1);
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),root.delivery_id,NEW.issue_id,root.delivery_key,root.project_id_hint,
+				   root.change_sequence+1,root.delivery_revision,'run','agent_run',NEW.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM (
+				    SELECT d.id AS delivery_id,d.delivery_key,d.project_id_hint,d.change_sequence_high_water AS change_sequence,
+				     COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0) AS delivery_revision
+				    FROM deliveries d WHERE d.issue_id=NEW.issue_id
+				     AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.issue_id AND issue.deleted_at IS NULL)
+				    UNION ALL
+				    SELECT legacy.synthetic_delivery_id,legacy.delivery_key,legacy.project_id_hint,
+				     legacy.change_sequence_high_water,0 FROM agent_mode_legacy_roots legacy
+				    WHERE legacy.issue_id=NEW.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=NEW.issue_id)
+				     AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.issue_id AND issue.deleted_at IS NULL)
+				   ) root;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_run_deactivate
+				 BEFORE UPDATE OF status ON agent_runs WHEN OLD.delivery_instrumentation_version=0
+				  AND OLD.status IN ('queued','running') AND NEW.status NOT IN ('queued','running')
+				  AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=OLD.issue_id AND issue.deleted_at IS NULL)
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),root.delivery_id,OLD.issue_id,root.delivery_key,root.project_id_hint,
+				   root.change_sequence+1,root.delivery_revision,'run','agent_run',OLD.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM (
+				    SELECT d.id AS delivery_id,d.delivery_key,d.project_id_hint,d.change_sequence_high_water AS change_sequence,
+				     COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0) AS delivery_revision
+				    FROM deliveries d WHERE d.issue_id=OLD.issue_id
+				    UNION ALL
+				    SELECT legacy.synthetic_delivery_id,legacy.delivery_key,legacy.project_id_hint,
+				     legacy.change_sequence_high_water,0 FROM agent_mode_legacy_roots legacy
+				    WHERE legacy.issue_id=OLD.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=OLD.issue_id)
+				   ) root;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_run_update
+				 AFTER UPDATE OF status ON agent_runs WHEN NEW.delivery_instrumentation_version=0
+				  AND OLD.status NOT IN ('queued','running') AND NEW.status IN ('queued','running')
+				 BEGIN
+				  INSERT OR IGNORE INTO agent_mode_legacy_roots(
+				   issue_id,synthetic_delivery_id,delivery_key,project_id_hint,created_at)
+				  SELECT issue.id,-issue.id,'issue:'||issue.id,issue.project_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM issues issue WHERE issue.id=NEW.issue_id
+				   AND NEW.status IN ('queued','running') AND issue.deleted_at IS NULL
+				   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=issue.id)
+				   AND NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=issue.id
+				    AND ar.delivery_instrumentation_version=1);
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),root.delivery_id,NEW.issue_id,root.delivery_key,root.project_id_hint,
+				   root.change_sequence+1,root.delivery_revision,'run','agent_run',NEW.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM (
+				    SELECT d.id AS delivery_id,d.delivery_key,d.project_id_hint,d.change_sequence_high_water AS change_sequence,
+				     COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0) AS delivery_revision
+				    FROM deliveries d WHERE d.issue_id=NEW.issue_id
+				     AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.issue_id AND issue.deleted_at IS NULL)
+				    UNION ALL
+				    SELECT legacy.synthetic_delivery_id,legacy.delivery_key,legacy.project_id_hint,
+				     legacy.change_sequence_high_water,0 FROM agent_mode_legacy_roots legacy
+				    WHERE legacy.issue_id=NEW.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=NEW.issue_id)
+				     AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.issue_id AND issue.deleted_at IS NULL)
+				   ) root;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_run_delete
+				 BEFORE DELETE ON agent_runs WHEN OLD.delivery_instrumentation_version=0
+				  AND OLD.status IN ('queued','running')
+				  AND EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id AND deleted_at IS NULL)
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),root.delivery_id,OLD.issue_id,root.delivery_key,root.project_id_hint,
+				   root.change_sequence+1,root.delivery_revision,'run','agent_run',OLD.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM (
+				    SELECT d.id AS delivery_id,d.delivery_key,d.project_id_hint,d.change_sequence_high_water AS change_sequence,
+				     COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0) AS delivery_revision
+				    FROM deliveries d WHERE d.issue_id=OLD.issue_id
+				    UNION ALL
+				    SELECT legacy.synthetic_delivery_id,legacy.delivery_key,legacy.project_id_hint,
+				     legacy.change_sequence_high_water,0 FROM agent_mode_legacy_roots legacy
+				    WHERE legacy.issue_id=OLD.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=OLD.issue_id)
+				   ) root;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_issue_change
+				 AFTER UPDATE OF project_id,issue_number,type,title,status,updated_at,deleted_at ON issues
+				 WHEN EXISTS(SELECT 1 FROM agent_mode_legacy_roots WHERE issue_id=NEW.id) OR
+				  (OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL
+				   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=NEW.id)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running')))
+				 BEGIN
+				  INSERT OR IGNORE INTO agent_mode_legacy_roots(
+				   issue_id,synthetic_delivery_id,delivery_key,project_id_hint,created_at)
+				  SELECT NEW.id,-NEW.id,'issue:'||NEW.id,NEW.project_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  WHERE OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL
+				   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=NEW.id)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))
+				   AND NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.id
+				    AND ar.delivery_instrumentation_version=1);
+				  UPDATE agent_mode_legacy_roots SET pending_revoked_project_id=CASE WHEN EXISTS(
+				    SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.id
+				     AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))
+				    AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL
+				   THEN project_id_hint END,
+				   project_id_hint=NEW.project_id WHERE issue_id=NEW.id
+				   AND NEW.project_id IS NOT OLD.project_id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   revoked_project_id,change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   legacy.project_id_hint,CASE WHEN NEW.project_id IS NOT OLD.project_id
+				    AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL THEN OLD.project_id END,
+				   legacy.change_sequence_high_water+1,0,
+				   CASE WHEN NEW.project_id IS NOT OLD.project_id
+				    AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL
+				    THEN 'project_move' ELSE 'issue' END,
+				   'issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM agent_mode_legacy_roots legacy WHERE legacy.issue_id=NEW.id
+				   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))
+				   AND NEW.deleted_at IS NULL;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_issue_tombstone
+				 BEFORE DELETE ON issues WHEN OLD.deleted_at IS NULL
+				  AND NOT EXISTS(SELECT 1 FROM deliveries WHERE issue_id=OLD.id)
+				  AND EXISTS(SELECT 1 FROM agent_mode_legacy_roots WHERE issue_id=OLD.id)
+				  AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=OLD.id
+				   AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   OLD.project_id,legacy.change_sequence_high_water+1,0,'issue','issue',OLD.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM agent_mode_legacy_roots legacy
+				  WHERE legacy.issue_id=OLD.id;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_issue_delete
+				 AFTER DELETE ON issues WHEN EXISTS(SELECT 1 FROM agent_mode_legacy_roots WHERE issue_id=OLD.id)
+				 BEGIN DELETE FROM agent_mode_legacy_roots WHERE issue_id=OLD.id; END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_issue_tag_insert_change
+				 AFTER INSERT ON issue_tags WHEN EXISTS(SELECT 1 FROM issues WHERE id=NEW.issue_id)
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',d.issue_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM deliveries d JOIN issues issue ON issue.id=d.issue_id AND issue.deleted_at IS NULL
+				  WHERE d.issue_id=NEW.issue_id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'issue','issue',legacy.issue_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM agent_mode_legacy_roots legacy
+				  WHERE legacy.issue_id=NEW.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+				   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_issue_tag_delete_change
+				 AFTER DELETE ON issue_tags WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id)
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',d.issue_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM deliveries d JOIN issues issue ON issue.id=d.issue_id AND issue.deleted_at IS NULL
+				  WHERE d.issue_id=OLD.issue_id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'issue','issue',legacy.issue_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM agent_mode_legacy_roots legacy
+				  WHERE legacy.issue_id=OLD.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+				   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_issue_tag_update_change
+				 AFTER UPDATE OF issue_id,tag_id ON issue_tags
+				 WHEN NEW.issue_id IS NOT OLD.issue_id OR NEW.tag_id IS NOT OLD.tag_id
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',d.issue_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM (SELECT OLD.issue_id AS issue_id UNION SELECT NEW.issue_id) changed
+				  JOIN deliveries d ON d.issue_id=changed.issue_id
+				  JOIN issues issue ON issue.id=d.issue_id AND issue.deleted_at IS NULL;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'issue','issue',legacy.issue_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM (
+				    SELECT OLD.issue_id AS issue_id UNION SELECT NEW.issue_id
+				   ) changed JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=changed.issue_id
+				  WHERE NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+				   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_tag_name_change
+				 AFTER UPDATE OF name ON tags WHEN NEW.name IS NOT OLD.name
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',d.issue_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM issue_tags assignment JOIN deliveries d ON d.issue_id=assignment.issue_id
+				  JOIN issues issue ON issue.id=d.issue_id AND issue.deleted_at IS NULL
+				  WHERE assignment.tag_id=NEW.id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'issue','issue',legacy.issue_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM issue_tags assignment
+				   JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=assignment.issue_id
+				  WHERE assignment.tag_id=NEW.id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+				   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+				 END`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_change_revoked_project_tail
+				 ON delivery_change_log(revoked_project_id,id) WHERE revoked_project_id IS NOT NULL`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_revoked_audience_guard
+				 BEFORE INSERT ON delivery_change_log WHEN
+				  (NEW.kind='project_move' AND NEW.revoked_project_id IS NULL) OR
+				  (NEW.revoked_project_id IS NOT NULL AND (NEW.kind<>'project_move' OR
+				   NEW.project_id_hint IS NULL OR NEW.revoked_project_id=NEW.project_id_hint))
+				 BEGIN SELECT RAISE(ABORT,'delivery revoked audience is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_run_telemetry_delivery_secret_guard
+			 BEFORE INSERT ON agent_run_telemetry
+			 WHEN instr(CAST(NEW.activity AS TEXT),char(0))>0 OR instr(CAST(NEW.activity AS TEXT),char(10))>0
+			  OR instr(CAST(NEW.activity AS TEXT),char(13))>0
+			  OR instr(CAST(NEW.estimate_basis AS TEXT),char(0))>0 OR instr(CAST(NEW.estimate_basis AS TEXT),char(10))>0
+			  OR instr(CAST(NEW.estimate_basis AS TEXT),char(13))>0
+			  OR paimos_contains_secret_like(CAST(NEW.activity AS BLOB))=1
+			  OR paimos_contains_secret_like(CAST(NEW.estimate_basis AS BLOB))=1
+			 BEGIN SELECT RAISE(ABORT,'forbidden agent run telemetry value'); END`,
+
+			// M144 invalidated only the two relation endpoints. Canonical lanes are
+			// inherited through arbitrary parent depth, so a parent edit starts at
+			// the child and invalidates every delivery-bearing descendant. UNION is
+			// deliberately distinct and therefore cycle-safe without a depth cap.
+			`DROP TRIGGER IF EXISTS trg_delivery_relation_insert_change`,
+			`DROP TRIGGER IF EXISTS trg_delivery_relation_delete_change`,
+			`DROP TRIGGER IF EXISTS trg_delivery_relation_update_change`,
+			`CREATE TRIGGER trg_delivery_relation_insert_change
+			 AFTER INSERT ON issue_relations WHEN NEW.type='parent'
+			 BEGIN
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT NEW.target_id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id
+			    WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+			   d.change_sequence_high_water+1,
+			   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+			   'lane','relation',NEW.source_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			  FROM descendants JOIN deliveries d ON d.issue_id=descendants.issue_id
+			   JOIN issues live ON live.id=d.issue_id AND live.deleted_at IS NULL;
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT NEW.target_id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+			   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'lane','relation',NEW.source_id,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM descendants
+			   JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=descendants.issue_id
+			  WHERE NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+			   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+			   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+			    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+			 END`,
+			`CREATE TRIGGER trg_delivery_relation_delete_change
+			 AFTER DELETE ON issue_relations WHEN OLD.type='parent'
+			 BEGIN
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT OLD.target_id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id
+			    WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+			   d.change_sequence_high_water+1,
+			   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+			   'lane','relation',OLD.source_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			  FROM descendants JOIN deliveries d ON d.issue_id=descendants.issue_id
+			   JOIN issues live ON live.id=d.issue_id AND live.deleted_at IS NULL;
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT OLD.target_id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+			   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'lane','relation',OLD.source_id,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM descendants
+			   JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=descendants.issue_id
+			  WHERE NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+			   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+			   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+			    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+			 END`,
+			`CREATE TRIGGER trg_delivery_relation_update_change
+			 AFTER UPDATE OF source_id,target_id,type ON issue_relations
+			 WHEN NEW.source_id IS NOT OLD.source_id OR NEW.target_id IS NOT OLD.target_id OR NEW.type IS NOT OLD.type
+			 BEGIN
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT OLD.target_id WHERE OLD.type='parent'
+			   UNION SELECT NEW.target_id WHERE NEW.type='parent'
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+			   d.change_sequence_high_water+1,
+			   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+			   'lane','relation',CASE WHEN NEW.type='parent' THEN NEW.source_id ELSE OLD.source_id END,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			  FROM descendants JOIN deliveries d ON d.issue_id=descendants.issue_id
+			   JOIN issues live ON live.id=d.issue_id AND live.deleted_at IS NULL;
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT OLD.target_id WHERE OLD.type='parent'
+			   UNION SELECT NEW.target_id WHERE NEW.type='parent'
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+			   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'lane','relation',
+			   CASE WHEN NEW.type='parent' THEN NEW.source_id ELSE OLD.source_id END,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM descendants
+			   JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=descendants.issue_id
+			  WHERE NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+			   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+			   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+			    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+			 END`,
+
+			// A mutable ancestor label/type/project/deletion state changes the lane
+			// projection of every descendant even when the edge itself is stable.
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_ancestor_issue_change
+			 AFTER UPDATE OF type,title,issue_number,deleted_at,project_id ON issues
+			 WHEN NEW.type IS NOT OLD.type OR NEW.title IS NOT OLD.title OR
+			  NEW.issue_number IS NOT OLD.issue_number OR NEW.deleted_at IS NOT OLD.deleted_at OR
+			  NEW.project_id IS NOT OLD.project_id
+			 BEGIN
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT relation.target_id FROM issue_relations relation
+			    WHERE relation.type='parent' AND relation.source_id=NEW.id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id
+			    WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+			   d.change_sequence_high_water+1,
+			   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+			   'lane','issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			  FROM descendants JOIN deliveries d ON d.issue_id=descendants.issue_id
+			   JOIN issues live ON live.id=d.issue_id AND live.deleted_at IS NULL
+			  WHERE descendants.issue_id<>NEW.id;
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT relation.target_id FROM issue_relations relation
+			    WHERE relation.type='parent' AND relation.source_id=NEW.id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+			   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'lane','issue',NEW.id,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM descendants
+			   JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=descendants.issue_id
+			  WHERE descendants.issue_id<>NEW.id
+			   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+			   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+			   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+			    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+			 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_project_metadata_change
+			 AFTER UPDATE OF key,name,status ON projects
+			 WHEN NEW.key IS NOT OLD.key OR NEW.name IS NOT OLD.name OR NEW.status IS NOT OLD.status
+			 BEGIN
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+			   d.change_sequence_high_water+1,
+			   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+			   'lane','issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			  FROM deliveries d JOIN issues i ON i.id=d.issue_id
+			  WHERE i.project_id=NEW.id AND i.deleted_at IS NULL;
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+			   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'lane','issue',NEW.id,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM agent_mode_legacy_roots legacy
+			   JOIN issues issue ON issue.id=legacy.issue_id WHERE issue.project_id=NEW.id
+			    AND issue.deleted_at IS NULL
+			    AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+			    AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+			     AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+			 END`,
+		}},
 	}
 
 	for _, m := range migrations {
+		if m.version > maxVersion {
+			continue
+		}
 		var count int
 		if err := db.QueryRow("SELECT COUNT(*) FROM schema_versions WHERE version=?", m.version).Scan(&count); err != nil {
 			return fmt.Errorf("check migration %d: %w", m.version, err)

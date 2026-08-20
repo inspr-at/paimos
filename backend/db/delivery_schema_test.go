@@ -853,8 +853,16 @@ func TestM144EnvelopeRetentionProvenanceAndCascadeGuards(t *testing.T) {
 		t.Fatalf("legitimate root cascade failed: %v", err)
 	}
 	var tombstones int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE delivery_id=? AND kind='root_deleted'`, deliveryID).Scan(&tombstones); err != nil || tombstones != 1 {
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE delivery_id=? AND kind='root_deleted'`, deliveryID).Scan(&tombstones); err != nil || tombstones != 0 {
 		t.Fatalf("cascade tombstone count=%d err=%v", tombstones, err)
+	}
+	var removalKind, removalSourceKind string
+	var removalSourceID int64
+	if err := database.QueryRow(`SELECT kind,source_kind,source_id FROM delivery_change_log
+		WHERE delivery_id=? ORDER BY change_sequence DESC LIMIT 1`, deliveryID).
+		Scan(&removalKind, &removalSourceKind, &removalSourceID); err != nil ||
+		removalKind != "issue" || removalSourceKind != "issue" || removalSourceID != issueID {
+		t.Fatalf("retained cascade removal=(%q,%q,%d) err=%v", removalKind, removalSourceKind, removalSourceID, err)
 	}
 	if _, err := database.Exec(`INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,
 		delivery_key,project_id_hint,change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/inspr-at/paimos/backend/safetext"
 )
 
 const (
@@ -31,18 +33,6 @@ var (
 	safeReasonCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	safeReference  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,191}$`)
 	hexDigest      = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	secretPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\bbearer[ \t\f\v\r\n\x{00A0}\x{2003}\x{202F}\x{200B}]+(?:[A-Za-z0-9._~+/=-][ \t\f\v\r\n\x{00A0}\x{2003}\x{202F}\x{200B}]*){8,}`),
-		regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password|credential)[ \t\f\v\r\n\x{00A0}\x{2003}\x{202F}\x{200B}]*[:=]`),
-		regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password|credential)[ \t\f\v\r\n\x{00A0}\x{2003}\x{202F}\x{200B}]*[:/_-](?:[A-Za-z0-9._~+/=-][ \t\f\v\r\n\x{00A0}\x{2003}\x{202F}\x{200B}]*){8,}`),
-		regexp.MustCompile(`(?i)\bsk[-_](?:live|test|proj)[-_][A-Za-z0-9_-]{8,}`),
-		regexp.MustCompile(`(?i)\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})`),
-		regexp.MustCompile(`(?i)\bxox[baprs]-[A-Za-z0-9-]{10,}`),
-		regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{20,}`),
-		regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`),
-		regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),
-		regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
-	}
 )
 
 type Store struct {
@@ -113,11 +103,16 @@ func (s *Store) authorize(ctx context.Context, q DBTX, issueID int64, actor Acto
 }
 
 type deliveryRow struct {
-	ID           int64
-	IssueID      int64
-	Key          string
-	ProjectID    *int64
-	SpecRevision int64
+	ID        int64
+	IssueID   int64
+	Key       string
+	ProjectID *int64
+	// RevokedProjectID is populated only for the atomic project-move
+	// envelope. It is deliberately transient: persisted deliveries always
+	// describe the current root, while the append-only change row retains the
+	// bounded prior audience needed to tell an old-scope stream to refetch.
+	RevokedProjectID *int64
+	SpecRevision     int64
 }
 
 func loadDeliveryByIssue(ctx context.Context, q DBTX, issueID int64) (deliveryRow, error) {
@@ -286,6 +281,28 @@ func (s *Store) appendEnvelopeTx(
 	sourceID, sourceSequence *int64,
 	now string,
 ) (envelopeResult, error) {
+	return s.appendEnvelopeTxMode(ctx, tx, effects, d, reporterID, kind, idempotencyKey, payload,
+		reasonCode, reasonText, changeKind, sourceKind, sourceID, sourceSequence, now, true)
+}
+
+// appendEnvelopeTxMode is used only when a linked run must advance canonical
+// delivery truth while its issue is hidden. The immutable audit envelope is
+// still recorded, but no audience-visible invalidation may be emitted until
+// the issue is restored. The restore boundary then publishes one issue change
+// carrying the latest delivery revision.
+func (s *Store) appendEnvelopeTxMode(
+	ctx context.Context,
+	tx DBTX,
+	effects *Effects,
+	d deliveryRow,
+	reporterID int64,
+	kind, idempotencyKey string,
+	payload any,
+	reasonCode, reasonText, changeKind, sourceKind string,
+	sourceID, sourceSequence *int64,
+	now string,
+	emitChange bool,
+) (envelopeResult, error) {
 	if validatePersistedKey(idempotencyKey, safeOpaqueKey, 128) != nil {
 		return envelopeResult{}, fmt.Errorf("%w: invalid idempotency key", ErrInvalid)
 	}
@@ -313,6 +330,9 @@ func (s *Store) appendEnvelopeTx(
 		return envelopeResult{}, err
 	}
 	id, _ := res.LastInsertId()
+	if !emitChange {
+		return envelopeResult{ID: id, Revision: revision}, nil
+	}
 	hint, err := appendChangeTx(ctx, tx, d, revision, changeKind, sourceKind, sourceID, sourceSequence, now)
 	if err != nil {
 		return envelopeResult{}, err
@@ -332,15 +352,17 @@ func appendChangeTx(ctx context.Context, tx DBTX, d deliveryRow, revision int64,
 	}
 	token := hex.EncodeToString(tokenBytes[:])
 	res, err := tx.ExecContext(ctx, `INSERT INTO delivery_change_log(
-		cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,change_sequence,
+		cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,revoked_project_id,change_sequence,
 		delivery_revision,kind,source_kind,source_id,source_sequence,server_received_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, token, d.ID, d.IssueID, d.Key, d.ProjectID, sequence, revision, kind, sourceKind, sourceID, sourceSequence, now)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, token, d.ID, d.IssueID, d.Key, d.ProjectID, d.RevokedProjectID,
+		sequence, revision, kind, sourceKind, sourceID, sourceSequence, now)
 	if err != nil {
 		return ChangeHint{}, err
 	}
 	id, _ := res.LastInsertId()
 	return ChangeHint{InternalID: id, CursorToken: token, DeliveryID: d.ID, RootIssueID: d.IssueID,
-		DeliveryKey: d.Key, ProjectIDHint: d.ProjectID, ChangeSequence: sequence, DeliveryRevision: revision,
+		DeliveryKey: d.Key, ProjectIDHint: d.ProjectID, RevokedProjectID: d.RevokedProjectID,
+		ChangeSequence: sequence, DeliveryRevision: revision,
 		Kind: kind, SourceKind: sourceKind, SourceID: sourceID, SourceSequence: sourceSequence, ServerReceivedAt: now}, nil
 }
 
@@ -372,12 +394,18 @@ func validateReferenceValue(v string, maxBytes int) error {
 }
 
 func rejectSecretLike(v string) error {
-	for _, re := range secretPatterns {
-		if re.MatchString(v) {
-			return fmt.Errorf("%w: secret-like value is forbidden", ErrInvalid)
-		}
+	if ContainsSecretLike(v) {
+		return fmt.Errorf("%w: secret-like value is forbidden", ErrInvalid)
 	}
 	return nil
+}
+
+// ContainsSecretLike is the shared privacy boundary for text that can reach a
+// delivery-facing projection. Telemetry ingestion and read-model backstops use
+// this exact corpus so a value rejected at one boundary cannot be exposed by
+// another.
+func ContainsSecretLike(v string) bool {
+	return safetext.ContainsSecretLike(v)
 }
 
 func validatePolicy(policies []Policy) error {
