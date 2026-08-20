@@ -45,27 +45,42 @@ import type {
   FreshnessState,
   StageKey,
 } from './agentMode'
+import { parseAgentModeAggregates } from './agentModeAggregateSchema'
 
 /** Cross-project, ACL-filtered snapshot of all authorized active deliveries. */
 export const AGENT_MODE_SNAPSHOT_PATH = '/agent-mode/deliveries'
 
 export interface AgentModeSnapshotQuery {
   projectId?: number | null
-  epicId?: number | null
+  /** Exact immutable lane identity; mutable epic labels never enter filters. */
+  laneKey?: string | null
+  /** Canonical repeatable server state filter (values are owned by PAI-804). */
+  states?: readonly string[]
+  attention?: 'all' | 'required' | null
+  health?: 'all' | 'attention' | 'blocked' | 'stale' | null
+  q?: string | null
   /** Persistent identity hint. PAI-804 returns an authorized terminal or
-   * filtered selection separately as selected_outside_results. */
+   * filtered selection separately as selected_outside. */
   selectedDelivery?: string | null
 }
 
-/** Builds the snapshot request path. Filters are optional server hints;
- * the client still applies its own filters so selection pinning works. */
+/** Builds the canonical PAI-804 snapshot query. `selected_delivery` is a
+ * lookup hint only and never changes aggregate/filter identity. */
 export function buildSnapshotPath(query: AgentModeSnapshotQuery = {}): string {
   const params = new URLSearchParams()
-  if (query.projectId != null && Number.isFinite(query.projectId)) {
+  if (query.projectId != null && Number.isSafeInteger(query.projectId) && query.projectId > 0) {
     params.set('project_id', String(query.projectId))
   }
-  if (query.epicId != null && Number.isFinite(query.epicId)) {
-    params.set('epic_id', String(query.epicId))
+  if (typeof query.laneKey === 'string' && query.laneKey.trim() !== '') {
+    params.set('lane_key', query.laneKey.trim().slice(0, 200))
+  }
+  for (const state of query.states ?? []) {
+    if (typeof state === 'string' && state.trim() !== '') params.append('state', state.trim().slice(0, 64))
+  }
+  if (query.attention === 'required') params.set('attention', 'required')
+  if (query.health && query.health !== 'all') params.set('health', query.health)
+  if (typeof query.q === 'string' && query.q.trim() !== '') {
+    params.set('q', query.q.trim().slice(0, 200))
   }
   if (typeof query.selectedDelivery === 'string' && query.selectedDelivery.trim() !== '') {
     params.set('selected_delivery', query.selectedDelivery.trim())
@@ -210,12 +225,16 @@ export interface WireDelivery {
 }
 
 export interface WireSnapshot {
+  schema_version?: number | null
   server_time?: string | null
-  revision?: string | number | null
-  stream_cursor?: string | number | null
+  cursor?: string | number | null
+  rows?: WireDelivery[] | null
+  selected_outside?: {
+    reason?: string | null
+    row?: WireDelivery | null
+  } | null
+  aggregates?: unknown
   selected_delivery?: string | number | null
-  selected_outside_results?: WireDelivery | null
-  deliveries?: WireDelivery[] | null
 }
 
 // ── Normalization ───────────────────────────────────────────────────────
@@ -233,6 +252,7 @@ const STAGE_STATUSES: ReadonlySet<DeliveryStageStatus> = new Set([
   'pending', 'active', 'waiting', 'blocked', 'failed', 'succeeded', 'not_applicable', 'unknown',
 ])
 const ACTOR_KINDS = new Set(['agent', 'system', 'human', 'unknown'])
+const SELECTED_OUTSIDE_REASONS = new Set(['filter_excluded', 'terminal', 'active_fallback', 'terminal_fallback'])
 
 function pickEnum<T extends string>(value: unknown, allowed: ReadonlySet<T>, fallback: T): T {
   return typeof value === 'string' && allowed.has(value as T) ? (value as T) : fallback
@@ -443,25 +463,72 @@ export function normalizeWireDelivery(wire: WireDelivery): Delivery | null {
 }
 
 export function normalizeWireSnapshot(wire: WireSnapshot | null | undefined, receivedAt: number): AgentModeSnapshot {
-  const list = Array.isArray(wire?.deliveries) ? wire!.deliveries! : []
+  const list = Array.isArray(wire?.rows) ? wire!.rows! : []
   const deliveries: Delivery[] = []
   const seen = new Set<string>()
+  let aggregateRowInputInvalid = !Array.isArray(wire?.rows)
   for (const item of list) {
-    if (!item || typeof item !== 'object') continue
+    if (!item || typeof item !== 'object') {
+      aggregateRowInputInvalid = true
+      continue
+    }
     const normalized = normalizeWireDelivery(item)
-    if (!normalized || seen.has(normalized.id)) continue
+    if (!normalized || seen.has(normalized.id)) {
+      aggregateRowInputInvalid = true
+      continue
+    }
     seen.add(normalized.id)
     deliveries.push(normalized)
   }
   const serverTime = str(wire?.server_time)
-  const revision = wire?.revision == null ? null : String(wire.revision)
-  const outside = normalizeWireDelivery(wire?.selected_outside_results ?? {})
+  const revision = null
+  // Runtime JS may still hand this adapter an old PAI-805 object. The old
+  // selected_outside_results field is never accepted, and a both-shape
+  // payload cannot smuggle an ambiguous row through the canonical field.
+  const hasUnsupportedOutsideAlias = !!wire
+    && Object.prototype.hasOwnProperty.call(wire as object, 'selected_outside_results')
+  const rawOutside = wire?.selected_outside
+  const outsideKeys = rawOutside && typeof rawOutside === 'object' && !Array.isArray(rawOutside)
+    ? Object.keys(rawOutside).sort()
+    : []
+  const canonicalOutside = !hasUnsupportedOutsideAlias
+    && outsideKeys.length === 2
+    && outsideKeys[0] === 'reason'
+    && outsideKeys[1] === 'row'
+    && typeof rawOutside?.reason === 'string'
+    && SELECTED_OUTSIDE_REASONS.has(rawOutside.reason)
+    && rawOutside.row != null
+    && typeof rawOutside.row === 'object'
+    ? rawOutside
+    : null
+  const outside = normalizeWireDelivery(canonicalOutside?.row ?? {})
   const selectedDeliveryId = opaque(wire?.selected_delivery) ?? outside?.id ?? null
   const selectedOutsideResults = outside
     && !seen.has(outside.id)
     && outside.id === selectedDeliveryId
     ? outside
     : null
-  const cursor = opaque(wire?.stream_cursor)
-  return { serverTime, revision, cursor, deliveries, selectedOutsideResults, selectedDeliveryId, receivedAt }
+  const selectedOutsideReason = selectedOutsideResults && typeof canonicalOutside?.reason === 'string'
+    ? canonicalOutside.reason as AgentModeSnapshot['selectedOutsideReason']
+    : null
+  const cursor = opaque(wire?.cursor)
+  const aggregateResult = wire?.schema_version !== 1
+    ? { ok: false as const, reason: 'unsupported-schema' as const }
+    : aggregateRowInputInvalid && wire.aggregates != null
+      ? { ok: false as const, reason: 'malformed' as const }
+      : parseAgentModeAggregates(wire?.aggregates, new Set(deliveries.map((delivery) => delivery.id)))
+  const aggregates = aggregateResult.ok ? aggregateResult.value : null
+  const aggregateUnavailableReason = aggregateResult.ok ? null : aggregateResult.reason
+  return {
+    serverTime,
+    revision,
+    cursor,
+    deliveries,
+    selectedOutsideResults,
+    selectedOutsideReason,
+    selectedDeliveryId,
+    aggregates,
+    aggregateUnavailableReason,
+    receivedAt,
+  }
 }

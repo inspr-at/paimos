@@ -35,6 +35,7 @@ import {
   type AgentModeSnapshotQuery,
   type WireSnapshot,
 } from './agentModeTransport'
+import type { AgentModeAggregates, AgentModeAggregateUnavailableReason } from './agentModeAggregateSchema'
 
 export type DeliveryHealth = 'healthy' | 'attention' | 'at_risk' | 'blocked' | 'unknown'
 export type ActivityKind =
@@ -192,7 +193,13 @@ export interface AgentModeSnapshot {
   deliveries: Delivery[]
   /** Authorized persistent selection returned outside active filters/counts. */
   selectedOutsideResults: Delivery | null
+  /** Why the separately returned selection is outside active rows/counts. */
+  selectedOutsideReason: 'filter_excluded' | 'terminal' | 'active_fallback' | 'terminal_fallback' | null
   selectedDeliveryId: string | null
+  /** Strictly parsed PAI-804 aggregate schema v1. Null is never interpreted
+   * as an all-zero portfolio; Detail 100 renders `aggregateUnavailableReason`. */
+  aggregates: AgentModeAggregates | null
+  aggregateUnavailableReason: AgentModeAggregateUnavailableReason | null
   /** Browser clock when the payload was received — paired with serverTime for skew. */
   receivedAt: number
 }

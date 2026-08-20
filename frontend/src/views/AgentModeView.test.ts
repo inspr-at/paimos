@@ -25,7 +25,7 @@ import { COMPACT_CONVERSATION_QUERY } from '@/components/agent-mode/agentModePre
 import { TOMBSTONE_TTL_MS } from '@/composables/agent-mode/agentModeOrdering'
 import { useConfirm } from '@/composables/useConfirm'
 import { AgentModeLoadError, type AgentModeSnapshot, type AgentModeSnapshotLoader } from '@/services/agentMode'
-import { makeFixtureDelivery, makeFixtureSnapshot } from '@/services/agentModeFixtures'
+import { makeFixtureAggregateSnapshot, makeFixtureDelivery, makeFixtureSnapshot } from '@/services/agentModeFixtures'
 import { normalizeWireSnapshot, type WireSnapshot } from '@/services/agentModeTransport'
 import { useChangesStore } from '@/stores/changes'
 import { useAuthStore } from '@/stores/auth'
@@ -39,8 +39,8 @@ function snapshot(wire: WireSnapshot): AgentModeSnapshot {
 /** Fixture snapshot without the given delivery ids. */
 function snapshotWithout(ids: string[], revision = 'fx-10-2'): AgentModeSnapshot {
   const wire = makeFixtureSnapshot(10)
-  wire.deliveries = wire.deliveries!.filter((d) => !ids.includes(String(d.delivery_id)))
-  wire.revision = revision
+  wire.rows = wire.rows!.filter((d) => !ids.includes(String(d.delivery_id)))
+  wire.cursor = revision
   return snapshot(wire)
 }
 
@@ -264,7 +264,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
 
   it('lifts a final-lane selection into exactly one data-backed target before Attention', async () => {
     const wire = makeFixtureSnapshot(10)
-    const richSelection = wire.deliveries!.find((delivery) => delivery.delivery_id === 'dlv-820')!
+    const richSelection = wire.rows!.find((delivery) => delivery.delivery_id === 'dlv-820')!
     richSelection.status_text = 'Verification remains inside the release window'
     harness = await mountView(async () => snapshot(wire), '/agent-mode?delivery=dlv-820')
     const { root } = harness
@@ -289,7 +289,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   })
 
   it('click selects; activating the selected card opens the data-backed Focused delivery; Escape opens the Portfolio overview', async () => {
-    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
+    harness = await mountView(async () => snapshot(makeFixtureAggregateSnapshot(10)))
     const { root, router } = harness
     const order = cardOrder(root)
     const target = order.find((id) => id !== selectedId(root))!
@@ -325,19 +325,105 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(root.querySelector('.am-lanes')).not.toBeNull()
     expect(selectedId(root)).toBe(target)
 
-    // Escape from detail 10 opens the data-backed Portfolio overview with
-    // the selection pinned and real lane counts.
+    // Escape from detail 10 opens the schema-v1 Portfolio overview with
+    // the selection pinned and server-owned lane counts.
     key(root, 'Escape', hit(root, target))
     await flush()
     expect(router.currentRoute.value.query.detail).toBe('100')
     const streams = root.querySelector<HTMLElement>('.am-streams')!
     expect(streams.getAttribute('aria-label')).toBe('Portfolio overview')
     expect(streams.querySelector('.am-card.is-selected')?.getAttribute('data-delivery-id')).toBe(target)
-    const rows = [...streams.querySelectorAll('tbody tr')]
-    expect(rows.length).toBeGreaterThan(0)
-    const active = rows.reduce((n, r) => n + Number(r.querySelectorAll('td')[0].textContent), 0)
-    expect(active).toBe(10)
+    expect(streams.querySelector('.am-aggregate-root-total strong')?.textContent).toBe('10')
+    expect(streams.querySelectorAll('.am-aggregate-project-control').length).toBeGreaterThan(0)
+    expect(streams.querySelectorAll('.am-aggregate-lane-control').length).toBeGreaterThan(0)
     expect(document.body.textContent).not.toMatch(FUTURE_TICKET_COPY)
+  })
+
+  it('fails closed at Detail 100 when aggregates are missing or malformed and never derives lane totals from 100 cards', async () => {
+    for (const malformed of [false, true]) {
+      const wire = malformed ? makeFixtureAggregateSnapshot(100) : makeFixtureSnapshot(100)
+      if (malformed) {
+        const aggregate = wire.aggregates as { root: { active_total: number } }
+        aggregate.root.active_total += 1
+      }
+      harness = await mountView(async () => snapshot(wire), '/agent-mode?detail=100')
+      const { root } = harness
+      expect(root.querySelector('.am-streams-unavailable')).not.toBeNull()
+      expect(root.querySelector('.am-aggregate-root')).toBeNull()
+      expect(root.querySelectorAll('.am-aggregate-project-control')).toHaveLength(0)
+      expect(root.querySelectorAll('.am-card')).toHaveLength(1)
+      expect(root.querySelector('.am-lanes')).toBeNull()
+      expect(root.textContent).toContain('never used to fabricate portfolio totals')
+      harness.unmount()
+      harness = null
+      document.body.innerHTML = ''
+    }
+  })
+
+  it('keeps Detail 100 bounded for 100 rows: one full card, at most 12 attention rows, and aggregate-only drill targets', async () => {
+    harness = await mountView(async () => snapshot(makeFixtureAggregateSnapshot(100)), '/agent-mode?detail=100')
+    const { root } = harness
+    expect(harness.loader).toHaveBeenCalledTimes(1)
+    expect(root.querySelectorAll('.am-card')).toHaveLength(1)
+    expect(root.querySelectorAll('.am-attention-item').length).toBeLessThanOrEqual(12)
+    expect(root.querySelectorAll('.am-lanes, .am-lane .am-card')).toHaveLength(0)
+    expect(root.querySelector('.am-aggregate-root-total strong')?.textContent).toBe('100')
+    expect(root.querySelectorAll('.am-aggregate-project-control')).toHaveLength(3)
+    expect(root.querySelectorAll('.am-aggregate-lane-control').length).toBeGreaterThan(3)
+    expect(selectedCards(root)).toHaveLength(1)
+    expect(root.textContent).toContain('Range only')
+    expect(root.textContent).toContain('Suppressed or unknown')
+  })
+
+  it('uses selector-independent attention order, removes the pinned duplicate, adjusts hidden count, and selects only on activation', async () => {
+    const wire = makeFixtureAggregateSnapshot(100)
+    const aggregate = wire.aggregates as {
+      attention: { total: number; items: Array<{ delivery_id: string }> }
+    }
+    const pinned = aggregate.attention.items[0].delivery_id
+    wire.selected_delivery = pinned
+    harness = await mountView(async () => snapshot(wire), '/agent-mode?detail=100')
+    const { root, router } = harness
+    expect(selectedId(root)).toBe(pinned)
+    expect(root.querySelector(`[data-attention-id="${pinned}"]`)).toBeNull()
+    expect(root.querySelectorAll('.am-attention-item')).toHaveLength(11)
+    const expectedHidden = aggregate.attention.total - 12
+    expect(root.querySelector('.am-attention-more')?.textContent).toContain(String(expectedHidden))
+
+    const offer = root.querySelector<HTMLButtonElement>('.am-attention-select')!
+    const offeredId = offer.closest<HTMLElement>('.am-attention-item')!.dataset.attentionId!
+    expect(selectedId(root)).toBe(pinned)
+    offer.click()
+    await flush()
+    expect(selectedId(root)).toBe(offeredId)
+    expect(router.currentRoute.value.query.detail).toBe('100')
+    expect(selectedCards(root)).toHaveLength(1)
+  })
+
+  it('drills aggregate controls through immutable server filters, retains delivery, and restores focus to the pinned selection', async () => {
+    harness = await mountView(async () => snapshot(makeFixtureAggregateSnapshot(100)), '/agent-mode?detail=100')
+    const { root, router } = harness
+    const selected = selectedId(root)!
+    const lane = root.querySelector<HTMLButtonElement>('.am-aggregate-lane-control')!
+    const laneKey = lane.dataset.laneKey!
+    const projectId = Number(lane.closest<HTMLElement>('.am-aggregate-project')!.dataset.projectId)
+    lane.focus()
+    lane.click()
+    await flush()
+
+    expect(router.currentRoute.value.query.detail).toBeUndefined()
+    expect(router.currentRoute.value.query.project).toBe(String(projectId))
+    expect(router.currentRoute.value.query.lane).toBe(laneKey)
+    expect(router.currentRoute.value.query.delivery).toBe(selected)
+    expect(harness.loader).toHaveBeenCalledTimes(2)
+    expect(harness.loader.mock.calls[harness.loader.mock.calls.length - 1]?.[0]).toMatchObject({
+      projectId,
+      laneKey,
+      selectedDelivery: selected,
+    })
+    expect(selectedId(root)).toBe(selected)
+    expect(root.querySelectorAll('[data-selected="true"]')).toHaveLength(1)
+    expect((document.activeElement as HTMLElement | null)?.dataset.cardHit).toBe(selected)
   })
 
   it('opens the reused ticket panel only from Open ticket, then closes with selection intact and focus restored', async () => {
@@ -370,7 +456,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
 
   it('fails closed when the snapshot does not authorize ticket viewing', async () => {
     const wire = makeFixtureSnapshot(10)
-    wire.deliveries![0].capabilities = { ...wire.deliveries![0].capabilities, view_issue: false }
+    wire.rows![0].capabilities = { ...wire.rows![0].capabilities, view_issue: false }
     harness = await mountView(async () => snapshot(wire), '/agent-mode?detail=1&delivery=dlv-812')
     const open = harness.root.querySelector<HTMLButtonElement>('.am-focus-open-ticket')!
     expect(open.disabled).toBe(true)
@@ -428,11 +514,17 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
 
   it('passes a deep-linked persistent identity as selected_delivery without inventing a second transport', async () => {
     const wire = makeFixtureSnapshot(10)
-    const delivery = wire.deliveries!.find((row) => row.delivery_id === 'dlv-820')!
+    const delivery = wire.rows!.find((row) => row.delivery_id === 'dlv-820')!
     delivery.estimate_suppression_codes = ['source_disagreement']
     delivery.estimate_disagreement_codes = ['runner_vs_plan']
     harness = await mountView(async () => snapshot(wire), '/agent-mode?detail=1&delivery=dlv-820')
-    expect(harness.loader.mock.calls[0]?.[0]).toEqual({ selectedDelivery: 'dlv-820' })
+    expect(harness.loader.mock.calls[0]?.[0]).toEqual({
+      projectId: null,
+      laneKey: null,
+      health: 'all',
+      q: '',
+      selectedDelivery: 'dlv-820',
+    })
     const focus = harness.root.querySelector<HTMLElement>('.am-focus')!
     expect(focus.dataset.deliveryId).toBe('dlv-820')
     expect(focus.dataset.laneKey).toBe('project:12/ungrouped')
@@ -451,10 +543,11 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     const wire = makeFixtureSnapshot(10)
     const outside = makeFixtureDelivery(20)
     wire.selected_delivery = outside.delivery_id
-    wire.selected_outside_results = outside
+    wire.selected_outside = { reason: 'terminal', row: outside }
     harness = await mountView(async () => snapshot(wire), `/agent-mode?detail=1&delivery=${outside.delivery_id}`)
     expect(harness.root.querySelector<HTMLElement>('.am-focus')?.dataset.deliveryId).toBe(outside.delivery_id)
     expect(harness.root.querySelectorAll('[data-selected="true"]')).toHaveLength(1)
+    expect(harness.root.querySelector('[data-selected-outside-reason="terminal"]')?.textContent).toContain('terminal delivery')
     expect(document.getElementById('app-header-left')!.textContent).toContain('10 deliveries in motion')
   })
 
@@ -570,11 +663,11 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
       if (phase === 1) {
         // Give the last card in the first lane top attention: canonically it
         // would jump to the front of its lane.
-        const sorted = [...wire.deliveries!]
+        const sorted = [...wire.rows!]
         sorted[0] = { ...sorted[0], attention: { level: 3, reason: 'now urgent', since: null } }
         sorted[9] = { ...sorted[9], attention: { level: 0, reason: null, since: null } }
-        wire.deliveries = sorted
-        wire.revision = 'fx-10-2'
+        wire.rows = sorted
+        wire.cursor = 'fx-10-2'
       }
       return snapshot(wire)
     })
@@ -610,7 +703,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     harness = await mountView(async () => {
       const wire = makeFixtureSnapshot(10)
       if (moved) {
-        wire.deliveries = wire.deliveries!
+        wire.rows = wire.rows!
           .filter((d) => !['dlv-817', 'dlv-820'].includes(String(d.delivery_id)))
           .map((d) => d.delivery_id === 'dlv-814'
             ? {
@@ -623,7 +716,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
                 epic_title: 'Agent Mode',
               }
             : d)
-        wire.revision = 'fx-project-move'
+        wire.cursor = 'fx-project-move'
       }
       return snapshot(wire)
     })
@@ -652,10 +745,10 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     harness = await mountView(async () => {
       const wire = makeFixtureSnapshot(10)
       if (moved) {
-        wire.deliveries = wire.deliveries!.map((d) => d.delivery_id === 'dlv-812'
+        wire.rows = wire.rows!.map((d) => d.delivery_id === 'dlv-812'
           ? { ...d, epic_id: 9999, epic_key: 'PAI-999', epic_title: 'Current authorization lane' }
           : d)
-        wire.revision = 'fx-epic-move'
+        wire.cursor = 'fx-epic-move'
       }
       return snapshot(wire)
     })
@@ -970,7 +1063,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     harness = await mountView(() => new Promise<AgentModeSnapshot>((resolve) => { gate = resolve }))
     expect(harness.root.querySelector('.am-state--loading')).not.toBeNull()
     expect(harness.root.querySelectorAll('.am-card')).toHaveLength(0)
-    gate(snapshot({ server_time: '2026-08-20T13:48:00Z', deliveries: [] }))
+    gate(snapshot({ schema_version: 1, server_time: '2026-08-20T13:48:00Z', rows: [] }))
     await flush()
     expect(harness.root.querySelector('.am-state--empty')!.textContent).toContain('Nothing in motion')
     harness.unmount()

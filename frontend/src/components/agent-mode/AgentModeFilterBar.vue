@@ -59,7 +59,7 @@ function update(patch: Partial<AgentModeFilters>) {
 
 function onProject(event: Event) {
   const raw = (event.target as HTMLSelectElement).value
-  update({ projectId: raw === '' ? null : Number(raw) })
+  update({ projectId: raw === '' ? null : Number(raw), laneKey: null })
 }
 
 function onQuery(event: Event) {
@@ -67,7 +67,7 @@ function onQuery(event: Event) {
 }
 
 function clear() {
-  update({ projectId: null, health: 'all', query: '' })
+  update({ projectId: null, laneKey: null, health: 'all', query: '' })
 }
 
 function onHealthKeydown(event: KeyboardEvent) {
@@ -87,6 +87,10 @@ function onHealthKeydown(event: KeyboardEvent) {
 
 <template>
   <div class="am-filters" role="group" :aria-label="t('agentMode.filters.label')">
+    <span v-if="filters.laneKey" class="am-filter-lane" :title="filters.laneKey">
+      <AppIcon name="git-branch" :size="11" aria-hidden="true" />
+      {{ t('agentMode.filters.laneActive') }}
+    </span>
     <label class="am-filter-project">
       <span class="am-sr-only">{{ t('agentMode.filters.project') }}</span>
       <AppIcon name="folder" :size="12" aria-hidden="true" />
@@ -149,7 +153,8 @@ function onHealthKeydown(event: KeyboardEvent) {
   gap: 8px;
 }
 .am-filter-project,
-.am-filter-query {
+.am-filter-query,
+.am-filter-lane {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -160,6 +165,7 @@ function onHealthKeydown(event: KeyboardEvent) {
   background: var(--am-surface);
   color: var(--am-muted);
 }
+.am-filter-lane { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .am-filter-project select,
 .am-filter-query input {
   height: 100%;

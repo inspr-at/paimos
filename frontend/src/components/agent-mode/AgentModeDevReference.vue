@@ -42,7 +42,7 @@ const loader = computed<AgentModeSnapshotLoader>(() => async () => {
   await new Promise((r) => setTimeout(r, 250))
   switch (state.value) {
     case 'empty':
-      return normalizeWireSnapshot({ server_time: new Date().toISOString(), revision: 'fx-empty', deliveries: [] }, Date.now())
+      return normalizeWireSnapshot({ schema_version: 1, server_time: new Date().toISOString(), rows: [] }, Date.now())
     case 'offline':
       throw new AgentModeLoadError('offline', 'fixture: network unreachable', 0)
     case 'forbidden':

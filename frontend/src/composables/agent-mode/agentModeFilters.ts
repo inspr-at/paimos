@@ -25,16 +25,17 @@ export type HealthFilter = 'all' | 'attention' | 'blocked' | 'stale'
 
 export interface AgentModeFilters {
   projectId: number | null
+  laneKey: string | null
   health: HealthFilter
   query: string
 }
 
-export type FilterExclusion = 'project' | 'health' | 'query'
+export type FilterExclusion = 'project' | 'lane' | 'health' | 'query'
 
-export const EMPTY_FILTERS: AgentModeFilters = { projectId: null, health: 'all', query: '' }
+export const EMPTY_FILTERS: AgentModeFilters = { projectId: null, laneKey: null, health: 'all', query: '' }
 
 export function filtersActive(f: AgentModeFilters): boolean {
-  return f.projectId != null || f.health !== 'all' || f.query.trim() !== ''
+  return f.projectId != null || f.laneKey != null || f.health !== 'all' || f.query.trim() !== ''
 }
 
 function matchesHealth(d: Delivery, health: HealthFilter): boolean {
@@ -74,6 +75,7 @@ function matchesQuery(d: Delivery, query: string): boolean {
 /** First reason a delivery is excluded, or null when it passes. */
 export function exclusionReason(d: Delivery, f: AgentModeFilters): FilterExclusion | null {
   if (f.projectId != null && d.lane.projectId !== f.projectId) return 'project'
+  if (f.laneKey != null && d.lane.key !== f.laneKey) return 'lane'
   if (!matchesHealth(d, f.health)) return 'health'
   if (!matchesQuery(d, f.query)) return 'query'
   return null

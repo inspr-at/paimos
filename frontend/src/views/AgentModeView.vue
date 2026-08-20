@@ -35,10 +35,10 @@ import AppIcon from '@/components/AppIcon.vue'
 import IssueSidePanel from '@/components/IssueSidePanel.vue'
 import AgentModeAttentionStrip from '@/components/agent-mode/AgentModeAttentionStrip.vue'
 import AgentModeConversation, { type NarrationLine } from '@/components/agent-mode/AgentModeConversation.vue'
-import AgentModeDeliveryCard from '@/components/agent-mode/AgentModeDeliveryCard.vue'
 import AgentModeDetailLever, { type DetailLevel } from '@/components/agent-mode/AgentModeDetailLever.vue'
 import AgentModeFilterBar from '@/components/agent-mode/AgentModeFilterBar.vue'
 import AgentModeLanes from '@/components/agent-mode/AgentModeLanes.vue'
+import AgentModePortfolioOverview from '@/components/agent-mode/AgentModePortfolioOverview.vue'
 import AgentModeSelectionAnchor from '@/components/agent-mode/AgentModeSelectionAnchor.vue'
 import AgentModeSelectedFocus from '@/components/agent-mode/AgentModeSelectedFocus.vue'
 import AgentModeStateNotice from '@/components/agent-mode/AgentModeStateNotice.vue'
@@ -58,12 +58,14 @@ import {
   reconcileFrozenGroups,
   type AgentModeProjectGroup,
 } from '@/composables/agent-mode/agentModeOrdering'
+import { reconcileAggregateOrder } from '@/composables/agent-mode/agentModeAggregateOrdering'
 import { AGENT_MODE_LOADER_KEY, useAgentModeDeliveries } from '@/composables/agent-mode/useAgentModeDeliveries'
 import { useAgentModeSelection } from '@/composables/agent-mode/useAgentModeSelection'
 import { useInteractionHold } from '@/composables/agent-mode/useInteractionHold'
 import { formatRelativeTimeWithLocale, formatTimeWithLocale, useDateFormat } from '@/composables/useDateFormat'
 import { lsAgentModeSelectedKey } from '@/constants/storage'
 import type { AgentModeSnapshotLoader, Delivery } from '@/services/agentMode'
+import type { AgentModeAggregates } from '@/services/agentModeAggregateSchema'
 import type { AgentModeSnapshotQuery } from '@/services/agentModeTransport'
 import { useAuthStore } from '@/stores/auth'
 
@@ -91,7 +93,16 @@ function initialSelectedQuery(): string | null {
   }
 }
 const selectedQueryId = ref<string | null>(initialSelectedQuery())
-const snapshotQuery = computed<AgentModeSnapshotQuery>(() => ({ selectedDelivery: selectedQueryId.value }))
+const snapshotQuery = computed<AgentModeSnapshotQuery>(() => {
+  const activeFilters = parseFilters()
+  return {
+    projectId: activeFilters.projectId,
+    laneKey: activeFilters.laneKey,
+    health: activeFilters.health,
+    q: activeFilters.query,
+    selectedDelivery: selectedQueryId.value,
+  }
+})
 function clearRejectedSelectedDelivery(deliveryId: string) {
   if (selectedQueryId.value === deliveryId) selectedQueryId.value = null
   try {
@@ -114,6 +125,7 @@ const nowMs = ref(Date.now())
 const serverNowMs = computed(() => nowMs.value + data.serverOffsetMs.value)
 let clockTimer: ReturnType<typeof setInterval> | null = null
 let retryTimer: ReturnType<typeof setInterval> | null = null
+let aggregateRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const retryInSeconds = ref<number | null>(null)
 function tickRetry() {
   const at = data.retryAt.value
@@ -153,6 +165,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (clockTimer !== null) clearInterval(clockTimer)
   if (retryTimer !== null) clearInterval(retryTimer)
+  if (aggregateRefreshTimer !== null) clearTimeout(aggregateRefreshTimer)
   if (tombstoneTimer !== null) clearTimeout(tombstoneTimer)
   compactMq?.removeEventListener?.('change', syncCompact)
   editorMq?.removeEventListener?.('change', syncCompact)
@@ -171,13 +184,42 @@ const HEALTH_FILTERS: HealthFilter[] = ['all', 'attention', 'blocked', 'stale']
 function parseFilters(): AgentModeFilters {
   const projectRaw = Number(route.query.project)
   const healthRaw = String(route.query.health ?? 'all') as HealthFilter
+  const laneRaw = typeof route.query.lane === 'string' ? route.query.lane.trim() : ''
   return {
     projectId: Number.isFinite(projectRaw) && projectRaw > 0 ? projectRaw : null,
+    laneKey: laneRaw === '' ? null : laneRaw,
     health: HEALTH_FILTERS.includes(healthRaw) ? healthRaw : 'all',
-    query: typeof route.query.q === 'string' ? route.query.q : '',
+    query: typeof route.query.q === 'string' ? route.query.q.slice(0, 200) : '',
   }
 }
 const filters = computed<AgentModeFilters>(parseFilters)
+
+// Selection is deliberately excluded: changing the pinned item never changes
+// aggregate/query identity. Filters are authoritative request state and stale
+// responses are rejected by useAgentModeDeliveries' request sequence.
+const serverFilterKey = computed(() => JSON.stringify({
+  projectId: filters.value.projectId,
+  laneKey: filters.value.laneKey,
+  health: filters.value.health,
+  q: filters.value.query.trim(),
+}))
+watch(serverFilterKey, () => void data.load({ background: data.hasData.value }))
+
+watch(
+  () => data.snapshot.value?.aggregates?.nextRefreshAt ?? null,
+  (nextRefreshAt) => {
+    if (aggregateRefreshTimer !== null) clearTimeout(aggregateRefreshTimer)
+    aggregateRefreshTimer = null
+    if (!nextRefreshAt) return
+    const boundary = Date.parse(nextRefreshAt)
+    if (!Number.isFinite(boundary)) return
+    const wait = Math.max(0, boundary - serverNowMs.value)
+    aggregateRefreshTimer = setTimeout(() => {
+      aggregateRefreshTimer = null
+      void data.load({ background: data.hasData.value })
+    }, wait)
+  },
+)
 
 // Query patches are coalesced per tick and serialized: two patches issued
 // in the same turn (e.g. selection + detail) become ONE navigation, and
@@ -219,6 +261,7 @@ async function setDetail(level: DetailLevel) {
 async function setFilters(next: AgentModeFilters) {
   await replaceQuery({
     project: next.projectId == null ? undefined : String(next.projectId),
+    lane: next.laneKey ?? undefined,
     health: next.health === 'all' ? undefined : next.health,
     q: next.query.trim() === '' ? undefined : next.query,
   })
@@ -233,6 +276,22 @@ const filtered = computed(() => applyFilters(data.deliveries.value, filters.valu
 const canonicalGroups = computed(() => buildProjectGroups(filtered.value))
 const layoutGroups = shallowRef<AgentModeProjectGroup[]>([])
 const canonicalLayoutIds = computed(() => new Set(flattenOrder(canonicalGroups.value)))
+
+const canonicalAggregates = computed(() => data.snapshot.value?.aggregates ?? null)
+const aggregateLayout = shallowRef<AgentModeAggregates | null>(null)
+watch(
+  [canonicalAggregates, hold.held],
+  ([fresh, held]) => {
+    // Aggregate omission/revocation is immediate even under hold. Surviving
+    // targets retain position only; all labels/counts come from `fresh`.
+    aggregateLayout.value = fresh
+      ? held
+        ? reconcileAggregateOrder(aggregateLayout.value, fresh)
+        : fresh
+      : null
+  },
+  { immediate: true },
+)
 
 function isLive(id: string): boolean {
   return data.deliveriesById.value.has(id)
@@ -294,6 +353,7 @@ watch(tombstoneIds, (ids) => {
 // ── Selection ───────────────────────────────────────────────────────────
 const storageKey = computed(() => lsAgentModeSelectedKey(auth.user?.id))
 const preferredId = ref<string | null>(typeof route.query.delivery === 'string' ? route.query.delivery : null)
+const serverFallbackId = computed(() => data.snapshot.value?.selectedDeliveryId ?? null)
 /** The pinned (filtered-out) delivery the user travelled from. It stays at
  * the head of the travel order while the filter still excludes it, so arrow
  * travel is reversible: into the results and back to the pinned card. */
@@ -313,8 +373,15 @@ const selection = useAgentModeSelection({
   order: travelOrder,
   storageKey,
   preferredId,
+  fallbackId: serverFallbackId,
 })
 const selectedDelivery = selection.selectedDelivery
+const selectedOutsideReason = computed(() => {
+  const snapshot = data.snapshot.value
+  return snapshot?.selectedOutsideResults?.id === selection.selectedId.value
+    ? snapshot.selectedOutsideReason
+    : null
+})
 const canOpenTicket = computed(() => {
   const delivery = selectedDelivery.value
   return !!delivery
@@ -342,7 +409,7 @@ watch([selection.selectedId, selectedExcludedBy], ([id, excluded]) => {
 })
 // Reset the anchor only when the filter VALUES change (the selection also
 // writes to the URL, which must not disturb the travel head).
-const filtersKey = computed(() => `${filters.value.projectId}|${filters.value.health}|${filters.value.query}`)
+const filtersKey = computed(() => `${filters.value.projectId}|${filters.value.laneKey}|${filters.value.health}|${filters.value.query}`)
 watch(filtersKey, () => {
   pinnedAnchorId.value = selectedExcludedBy.value ? selection.selectedId.value : null
 })
@@ -366,6 +433,11 @@ function selectDelivery(id: string) {
   selection.select(id)
 }
 
+async function selectAttention(id: string) {
+  selectDelivery(id)
+  await focusSelectedCard()
+}
+
 async function drill(id: string) {
   hold.markInteraction()
   if (selection.selectedId.value !== id) {
@@ -373,6 +445,18 @@ async function drill(id: string) {
     selection.select(id)
   }
   await setDetail(1)
+}
+
+async function drillAggregate(projectId: number, laneKey: string | null) {
+  hold.markInteraction()
+  await replaceQuery({
+    detail: undefined,
+    project: String(projectId),
+    lane: laneKey ?? undefined,
+  })
+  // The retained selection is the deterministic focus-restoration target. If
+  // the server returns it outside the drill filter it remains pinned above.
+  await focusSelectedCard()
 }
 
 function zoomOut() {
@@ -487,6 +571,17 @@ function onCanvasKeydown(event: KeyboardEvent) {
 
 // ── Derived copy: headline, live chip, narration, announcements ─────────
 const counts = computed(() => {
+  if (detailLevel.value === 100 && aggregateLayout.value) {
+    const root = aggregateLayout.value.root
+    return {
+      total: root.activeTotal,
+      healthy: 0,
+      attention: root.flags.attention,
+      blocked: root.flags.blocked,
+      stale: root.flags.stale_no_signal,
+      unknown: root.flags.unknown_reporter,
+    }
+  }
   const list = data.deliveries.value
   return {
     total: list.length,
@@ -499,6 +594,7 @@ const counts = computed(() => {
 })
 
 const headline = computed(() => {
+  if (detailLevel.value === 100 && !aggregateLayout.value) return t('agentMode.aggregate.unavailable')
   const n = counts.value.total
   if (n === 0) return t('agentMode.headline.none')
   if (n === 1) return t('agentMode.headline.one')
@@ -507,7 +603,7 @@ const headline = computed(() => {
 const breakdown = computed(() => {
   const c = counts.value
   const parts: string[] = []
-  if (c.healthy) parts.push(t('agentMode.narration.partHealthy', { n: c.healthy }))
+  if (detailLevel.value !== 100 && c.healthy) parts.push(t('agentMode.narration.partHealthy', { n: c.healthy }))
   if (c.attention) parts.push(t('agentMode.narration.partAttention', { n: c.attention }, c.attention))
   if (c.blocked) parts.push(t('agentMode.narration.partBlocked', { n: c.blocked }))
   if (c.stale) parts.push(t('agentMode.narration.partStale', { n: c.stale }))
@@ -569,6 +665,12 @@ const narrationLines = computed<NarrationLine[]>(() => {
     lines.push({ id: `state:${status}`, role: 'system', text })
     return lines
   }
+  if (detailLevel.value === 100 && !aggregateLayout.value) {
+    lines.push({ id: 'aggregate-unavailable', role: 'system', text: t('agentMode.aggregate.unavailableNarration') })
+    const selected = selectedDelivery.value
+    if (selected) lines.push({ id: `selection:${selected.id}`, role: 'system', text: selectionSentence(selected) })
+    return lines
+  }
   const n = counts.value.total
   const summary = t('agentMode.narration.summary', { n }, n)
   lines.push({ id: 'summary', role: 'system', text: breakdown.value ? `${summary} ${breakdown.value}.` : summary })
@@ -614,23 +716,6 @@ watch(selection.lastChange, (change) => {
   announcement.value = t('agentMode.a11y.selectionChanged', { key: d.issueKey, title: d.title })
 })
 
-// ── Portfolio overview: per-lane counts (same vocabulary as the cards) ──
-const streamRows = computed(() =>
-  buildProjectGroups(data.deliveries.value).flatMap((g) =>
-    g.lanes.map((lane) => {
-      const items = lane.deliveryIds.map((id) => data.deliveriesById.value.get(id)).filter((d): d is Delivery => !!d)
-      return {
-        key: lane.key,
-        label: `${g.projectKey} / ${lane.ungrouped ? t('agentMode.lanes.ungrouped') : [lane.epicKey, lane.epicTitle].filter(Boolean).join(' · ')}`,
-        active: items.length,
-        attention: items.filter((d) => d.attention.level > 0).length,
-        blocked: items.filter((d) => d.health === 'blocked').length,
-        stale: items.filter((d) => d.freshness.state === 'stale' || d.freshness.state === 'unknown').length,
-      }
-    }),
-  ),
-)
-
 const showNotice = computed(() => {
   const s = data.status.value
   if (s === 'empty') return true
@@ -649,7 +734,7 @@ const selectedPosition = computed(() => {
   <div class="am-root" :class="{ 'am-root--compact': compactConversation, 'am-root--ticket': ticketOpen }">
     <Teleport defer to="#app-header-left">
       <span class="ah-title">{{ t('agentMode.title') }}</span>
-      <span v-if="data.hasData.value" class="ah-subtitle">{{ t('agentMode.subtitle', { n: counts.total }, counts.total) }}</span>
+      <span v-if="data.hasData.value && (detailLevel !== 100 || aggregateLayout)" class="ah-subtitle">{{ t('agentMode.subtitle', { n: counts.total }, counts.total) }}</span>
     </Teleport>
     <Teleport defer to="#app-header-right">
       <div class="am-header-tools">
@@ -705,6 +790,16 @@ const selectedPosition = computed(() => {
           <button type="button" class="am-banner-retry" @click="data.retryNow">{{ t('agentMode.state.retry') }}</button>
         </div>
 
+        <div
+          v-if="selectedOutsideReason"
+          class="am-selection-outside-status"
+          :data-selected-outside-reason="selectedOutsideReason"
+          role="status"
+        >
+          <AppIcon name="pin" :size="12" aria-hidden="true" />
+          {{ t(`agentMode.selection.outsideReason.${selectedOutsideReason}`) }}
+        </div>
+
         <!-- Focused delivery -->
         <AgentModeSelectedFocus
           v-if="detailLevel === 1 && selectedDelivery"
@@ -723,42 +818,22 @@ const selectedPosition = computed(() => {
           @interact="hold.markInteraction"
         />
 
-        <!-- Portfolio overview: pinned selection + lane counts -->
-        <section v-else-if="detailLevel === 100" class="am-streams" :aria-label="t('agentMode.streams.title')">
-          <h2 class="am-streams-title">{{ t('agentMode.streams.title') }}</h2>
-          <AgentModeDeliveryCard
-            v-if="selectedDelivery"
-            :delivery="selectedDelivery"
-            :selected="true"
-            :tabbable="true"
-            :degraded="data.degraded.value"
-            :server-now-ms="serverNowMs"
-            :locale="locale"
-            @activate="drill"
-            @interact="hold.markInteraction"
-          />
-          <h3 class="am-streams-subtitle">{{ t('agentMode.streams.lanesTitle') }}</h3>
-          <table class="am-streams-table">
-            <thead>
-              <tr>
-                <th scope="col">{{ t('agentMode.streams.lane') }}</th>
-                <th scope="col">{{ t('agentMode.streams.active') }}</th>
-                <th scope="col">{{ t('agentMode.streams.attention') }}</th>
-                <th scope="col">{{ t('agentMode.streams.blocked') }}</th>
-                <th scope="col">{{ t('agentMode.streams.stale') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in streamRows" :key="row.key">
-                <th scope="row">{{ row.label }}</th>
-                <td>{{ row.active }}</td>
-                <td :class="{ 'is-warn': row.attention }">{{ row.attention }}</td>
-                <td :class="{ 'is-risk': row.blocked }">{{ row.blocked }}</td>
-                <td :class="{ 'is-warn': row.stale }">{{ row.stale }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
+        <!-- Portfolio overview: one pinned card + authoritative aggregates -->
+        <AgentModePortfolioOverview
+          v-else-if="detailLevel === 100"
+          :aggregates="aggregateLayout"
+          :unavailable-reason="data.snapshot.value?.aggregateUnavailableReason ?? null"
+          :deliveries="data.deliveries.value"
+          :selected-delivery="selectedDelivery"
+          :selected-id="selection.selectedId.value"
+          :server-now-ms="serverNowMs"
+          :locale="locale"
+          :degraded="data.degraded.value"
+          @drill-selection="drill"
+          @drill-aggregate="drillAggregate"
+          @select-attention="selectAttention"
+          @interact="hold.markInteraction"
+        />
 
         <!-- Detail 10 -->
         <template v-else>
@@ -778,6 +853,7 @@ const selectedPosition = computed(() => {
             :selected-id="selection.selectedId.value"
             :server-now-ms="serverNowMs"
             :locale="locale"
+            :authoritative="canonicalAggregates?.attention"
             @select="selectDelivery"
           />
 
@@ -962,18 +1038,20 @@ const selectedPosition = computed(() => {
   font-size: 11px;
   font-weight: 600;
 }
+.am-selection-outside-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--am-select) 32%, var(--am-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--am-select) 6%, var(--am-surface));
+  color: var(--am-select);
+  font-size: 10.5px;
+  font-weight: 600;
+}
 
 .am-nomatch { margin: 0; color: var(--am-muted); font-size: 13px; }
 
-.am-streams { display: grid; gap: 14px; max-width: 860px; }
-.am-streams-title { margin: 0; font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif; font-size: 17px; font-weight: 600; }
-.am-streams-subtitle { margin: 6px 0 0; font-size: 13px; font-weight: 600; color: var(--am-muted); }
-.am-streams-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.am-streams-table th,
-.am-streams-table td { padding: 7px 10px; border-bottom: 1px solid var(--am-line); text-align: left; }
-.am-streams-table thead th { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--am-muted); }
-.am-streams-table tbody th { font-weight: 500; }
-.am-streams-table td { font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
-.am-streams-table td.is-warn { color: var(--am-amber); font-weight: 600; }
-.am-streams-table td.is-risk { color: var(--am-red); font-weight: 600; }
 </style>

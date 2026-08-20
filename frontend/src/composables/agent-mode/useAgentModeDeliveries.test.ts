@@ -25,7 +25,7 @@ import { normalizeWireSnapshot, type AgentModeSnapshotQuery } from '@/services/a
 import { useAgentModeDeliveries } from './useAgentModeDeliveries'
 
 function snap(n: 1 | 10 | 100 | 0): AgentModeSnapshot {
-  return normalizeWireSnapshot(n === 0 ? { server_time: '2026-08-20T13:48:00Z', deliveries: [] } : makeFixtureSnapshot(n), Date.now())
+  return normalizeWireSnapshot(n === 0 ? { schema_version: 1, server_time: '2026-08-20T13:48:00Z', rows: [] } : makeFixtureSnapshot(n), Date.now())
 }
 
 async function flush() {

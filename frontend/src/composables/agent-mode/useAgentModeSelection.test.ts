@@ -96,6 +96,30 @@ describe('useAgentModeSelection (PAI-805)', () => {
     expect(sel.selectedId.value).toBeNull()
   })
 
+  it('adopts the server fallback only while selection is absent and never lets refresh steal an extant selection', async () => {
+    const deliveries = ref<readonly Delivery[]>(ten)
+    const fallbackId = ref<string | null>(ten[2].id)
+    const sel = useAgentModeSelection({
+      deliveries,
+      order: ref(ten.map((delivery) => delivery.id)),
+      storageKey: ref('k'),
+      storage: memoryStorage(),
+      fallbackId,
+    })
+    expect(sel.selectedId.value).toBe(ten[2].id)
+
+    const explicit = ten[5].id
+    sel.select(explicit)
+    fallbackId.value = ten[8].id
+    await nextTick()
+    expect(sel.selectedId.value).toBe(explicit)
+
+    deliveries.value = ten.filter((delivery) => delivery.id !== explicit)
+    await nextTick()
+    expect(sel.selectedId.value).toBe(ten[8].id)
+    expect(sel.lastChange.value?.source).toBe('system')
+  })
+
   it('rejects unknown ids and steps along the provided order', () => {
     const order = ref([ten[2].id, ten[0].id, ten[1].id])
     const sel = useAgentModeSelection({ deliveries: ref(ten), order, storageKey: ref('k'), storage: memoryStorage() })

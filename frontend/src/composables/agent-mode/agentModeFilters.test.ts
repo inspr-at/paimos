@@ -32,12 +32,12 @@ describe('agentModeFilters (PAI-805)', () => {
 
   it('reports the first reason a delivery is excluded (project → health → query)', () => {
     const other = ten.find((d) => d.lane.projectId !== ten[0].lane.projectId)!
-    const f = { projectId: ten[0].lane.projectId, health: 'blocked' as const, query: 'zzz' }
+    const f = { projectId: ten[0].lane.projectId, laneKey: null, health: 'blocked' as const, query: 'zzz' }
     expect(exclusionReason(other, f)).toBe('project')
     const sameProjectHealthy = ten.find((d) => d.lane.projectId === ten[0].lane.projectId && d.health === 'healthy')!
     expect(exclusionReason(sameProjectHealthy, f)).toBe('health')
     const blockedInProject = ten.find((d) => d.health === 'blocked')!
-    expect(exclusionReason(blockedInProject, { projectId: blockedInProject.lane.projectId, health: 'blocked', query: 'nope-nope' })).toBe('query')
+    expect(exclusionReason(blockedInProject, { projectId: blockedInProject.lane.projectId, laneKey: null, health: 'blocked', query: 'nope-nope' })).toBe('query')
   })
 
   it('matches queries against key, title, agent, lane and tags case-insensitively', () => {
@@ -45,6 +45,15 @@ describe('agentModeFilters (PAI-805)', () => {
     expect(applyFilters(ten, { ...EMPTY_FILTERS, query: d.issueKey.toLowerCase() }).map((x) => x.id)).toContain(d.id)
     expect(applyFilters(ten, { ...EMPTY_FILTERS, query: 'codex' }).every((x) => x.actor?.label === 'Codex')).toBe(true)
     expect(applyFilters(ten, { ...EMPTY_FILTERS, query: 'security' }).every((x) => x.tags.includes('security'))).toBe(true)
+  })
+
+  it('uses the immutable lane key for aggregate drill filtering', () => {
+    const laneKey = ten[0].lane.key
+    const filtered = applyFilters(ten, { ...EMPTY_FILTERS, projectId: ten[0].lane.projectId, laneKey })
+    expect(filtersActive({ ...EMPTY_FILTERS, laneKey })).toBe(true)
+    expect(filtered.length).toBeGreaterThan(0)
+    expect(filtered.every((delivery) => delivery.lane.key === laneKey)).toBe(true)
+    expect(exclusionReason(ten.find((delivery) => delivery.lane.key !== laneKey)!, { ...EMPTY_FILTERS, laneKey })).toBe('lane')
   })
 
   it('narrows by health vocabulary (attention / blocked / stale)', () => {

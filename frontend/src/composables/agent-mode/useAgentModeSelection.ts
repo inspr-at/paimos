@@ -45,6 +45,10 @@ export interface UseAgentModeSelectionOptions {
   storageKey: Ref<string | null>
   /** One-shot preferred id (e.g. `?delivery=` deep link) consulted before memory. */
   preferredId?: Ref<string | null>
+  /** Server-owned deterministic fallback. It is considered only while the
+   * current selection is null or no longer authorized, so refreshes cannot
+   * steal an extant selection. */
+  fallbackId?: Ref<string | null>
   storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
   now?: () => number
 }
@@ -95,11 +99,17 @@ export function useAgentModeSelection(opts: UseAgentModeSelectionOptions) {
   /** Re-resolves against the current deliveries (call after each snapshot). */
   function reconcile() {
     const list = opts.deliveries.value
+    if (selectedId.value && list.some((delivery) => delivery.id === selectedId.value)) return
     let remembered = readRemembered(storage, opts.storageKey.value)
     if (!preferredConsumed && opts.preferredId?.value) {
       // A deep link wins over memory exactly once, and only when authorized.
       if (list.some((d) => d.id === opts.preferredId!.value)) remembered = opts.preferredId.value
       preferredConsumed = list.length > 0
+    }
+    const fallback = opts.fallbackId?.value
+    if (fallback && list.some((delivery) => delivery.id === fallback)) {
+      commit(fallback, 'default', 'system')
+      return
     }
     const choice = resolveSelection(list, selectedId.value, remembered)
     if (choice.origin === 'kept') return
@@ -136,6 +146,7 @@ export function useAgentModeSelection(opts: UseAgentModeSelectionOptions) {
   }
 
   watch(opts.deliveries, reconcile, { immediate: true })
+  if (opts.fallbackId) watch(opts.fallbackId, reconcile)
   watch(opts.storageKey, reconcile)
 
   const selectedIndex = computed(() => {

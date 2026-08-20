@@ -17,14 +17,21 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { makeFixtureDelivery, makeFixtureSnapshot } from './agentModeFixtures'
+import { makeFixtureAggregateSnapshot, makeFixtureDelivery, makeFixtureSnapshot } from './agentModeFixtures'
 import { buildSnapshotPath, laneKeyFor, normalizeWireDelivery, normalizeWireSnapshot } from './agentModeTransport'
 
 describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
   it('builds the snapshot path with optional server hints', () => {
     expect(buildSnapshotPath()).toBe('/agent-mode/deliveries')
     expect(buildSnapshotPath({ projectId: 6 })).toBe('/agent-mode/deliveries?project_id=6')
-    expect(buildSnapshotPath({ projectId: 6, epicId: 4655 })).toBe('/agent-mode/deliveries?project_id=6&epic_id=4655')
+    expect(buildSnapshotPath({
+      projectId: 6,
+      laneKey: 'project:6/epic:4655',
+      states: ['active', 'waiting'],
+      attention: 'required',
+      health: 'blocked',
+      q: ' release ',
+    })).toBe('/agent-mode/deliveries?project_id=6&lane_key=project%3A6%2Fepic%3A4655&state=active&state=waiting&attention=required&health=blocked&q=release')
   })
 
   it('normalizes the 1 / 10 / 100 fixtures without dropping or inventing anything', () => {
@@ -32,9 +39,11 @@ describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
       const snap = normalizeWireSnapshot(makeFixtureSnapshot(n), 1_000)
       expect(snap.deliveries).toHaveLength(n)
       expect(snap.serverTime).toBe('2026-08-20T13:48:00Z')
-      expect(snap.revision).toBe(`fx-${n}-1`)
-      expect(snap.cursor).toBeNull()
+      expect(snap.revision).toBeNull()
+      expect(snap.cursor).toBe(`fixture-cursor-${n}`)
       expect(snap.selectedOutsideResults).toBeNull()
+      expect(snap.aggregates).toBeNull()
+      expect(snap.aggregateUnavailableReason).toBe('missing')
       expect(snap.receivedAt).toBe(1_000)
       expect(new Set(snap.deliveries.map((d) => d.id)).size).toBe(n)
     }
@@ -46,24 +55,26 @@ describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
     const active = makeFixtureDelivery(0)
     const outside = makeFixtureDelivery(1)
     const snap = normalizeWireSnapshot({
-      revision: 'delivery:7|trust:9',
-      stream_cursor: 'cursor:42',
+      schema_version: 1,
+      cursor: 'cursor:42',
       selected_delivery: outside.delivery_id,
-      deliveries: [active],
-      selected_outside_results: outside,
+      rows: [active],
+      selected_outside: { reason: 'terminal', row: outside },
     }, 123)
     expect(snap.deliveries.map((d) => d.id)).toEqual([active.delivery_id])
     expect(snap.selectedOutsideResults?.id).toBe(outside.delivery_id)
     expect(snap.selectedDeliveryId).toBe(outside.delivery_id)
+    expect(snap.selectedOutsideReason).toBe('terminal')
     expect(snap.cursor).toBe('cursor:42')
   })
 
   it('rejects an outside-result object whose identity does not match the selected delivery', () => {
     const outside = makeFixtureDelivery(1)
     const snap = normalizeWireSnapshot({
+      schema_version: 1,
       selected_delivery: 'dlv-requested',
-      selected_outside_results: outside,
-      deliveries: [],
+      selected_outside: { reason: 'terminal', row: outside },
+      rows: [],
     }, 123)
     expect(snap.selectedDeliveryId).toBe('dlv-requested')
     expect(snap.selectedOutsideResults).toBeNull()
@@ -73,7 +84,7 @@ describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
     const wire = makeFixtureDelivery(3)
     wire.estimate_suppression_codes = ['source_disagreement']
     wire.estimate_disagreement_codes = ['runner_vs_plan']
-    const d = normalizeWireSnapshot({ deliveries: [wire] }, 123).deliveries[0]
+    const d = normalizeWireSnapshot({ schema_version: 1, rows: [wire] }, 123).deliveries[0]
     expect(d.attempt).toMatchObject({ id: 'attempt-815-1', number: 1, planRevision: 'plan:815:1' })
     expect(d.deliveryRevision).toBe('delivery:815:1')
     expect(d.trustRevision).toBe('trust:815:1')
@@ -113,7 +124,8 @@ describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
   it('drops deliveries without identity or project instead of inventing a lane, and dedupes ids', () => {
     const snap = normalizeWireSnapshot(
       {
-        deliveries: [
+        schema_version: 1,
+        rows: [
           { issue_id: 1, project_id: 2, delivery_id: 'a' },
           { issue_id: 2, project_id: 2, delivery_id: 'a' },
           { issue_id: 3 },
@@ -126,6 +138,39 @@ describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
     expect(snap.deliveries.map((d) => d.id)).toEqual(['a'])
     expect(snap.serverTime).toBeNull()
     expect(snap.revision).toBeNull()
+  })
+
+  it('fails closed on the removed selected_outside_results alias and both-shape ambiguity', () => {
+    const outside = makeFixtureDelivery(1)
+    const legacy = normalizeWireSnapshot({
+      schema_version: 1,
+      selected_delivery: outside.delivery_id,
+      rows: [],
+      selected_outside_results: outside,
+    } as unknown as import('./agentModeTransport').WireSnapshot, 0)
+    expect(legacy.selectedOutsideResults).toBeNull()
+
+    const ambiguous = normalizeWireSnapshot({
+      schema_version: 1,
+      selected_delivery: outside.delivery_id,
+      rows: [],
+      selected_outside: { reason: 'terminal', row: outside },
+      selected_outside_results: outside,
+    } as unknown as import('./agentModeTransport').WireSnapshot, 0)
+    expect(ambiguous.selectedOutsideResults).toBeNull()
+  })
+
+  it('fails aggregate parsing closed on an unsupported top-level schema or malformed/duplicate rows', () => {
+    const unsupported = makeFixtureAggregateSnapshot(1)
+    unsupported.schema_version = 2
+    expect(normalizeWireSnapshot(unsupported, 0).aggregateUnavailableReason).toBe('unsupported-schema')
+
+    const duplicate = makeFixtureAggregateSnapshot(1)
+    duplicate.rows!.push(structuredClone(duplicate.rows![0]))
+    const normalized = normalizeWireSnapshot(duplicate, 0)
+    expect(normalized.deliveries).toHaveLength(1)
+    expect(normalized.aggregates).toBeNull()
+    expect(normalized.aggregateUnavailableReason).toBe('malformed')
   })
 
   it('falls back to issue-rooted identity and the explicit ungrouped lane', () => {

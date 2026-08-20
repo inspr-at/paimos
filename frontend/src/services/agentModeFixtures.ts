@@ -22,7 +22,7 @@
 // falls back to fabricated deliveries. Everything here is derived from a
 // fixed base clock so snapshots and ordering are reproducible.
 
-import type { WireDelivery, WireSnapshot } from './agentModeTransport'
+import { laneKeyFor, type WireDelivery, type WireSnapshot } from './agentModeTransport'
 
 export const FIXTURE_BASE_TIME = '2026-08-20T13:48:00Z'
 const BASE_MS = Date.parse(FIXTURE_BASE_TIME)
@@ -204,8 +204,179 @@ export function makeFixtureDelivery(index: number): WireDelivery {
 
 export function makeFixtureSnapshot(count: 1 | 10 | 100 | number, serverTime = FIXTURE_BASE_TIME): WireSnapshot {
   return {
+    schema_version: 1,
     server_time: serverTime,
-    revision: `fx-${count}-1`,
-    deliveries: Array.from({ length: count }, (_, i) => makeFixtureDelivery(i)),
+    cursor: `fixture-cursor-${count}`,
+    rows: Array.from({ length: count }, (_, i) => makeFixtureDelivery(i)),
   }
+}
+
+type WireCountSet = {
+  active_total: number
+  current_stage: Record<string, number>
+  flags: Record<string, number>
+  landing: Record<string, number>
+}
+
+const AGGREGATE_STAGES = ['specification', 'implementation', 'qa', 'deployment', 'verification', 'unknown'] as const
+const AGGREGATE_FLAGS = [
+  'attention', 'waiting_needs_input', 'blocked', 'stale_no_signal', 'failed_needs_retry',
+  'deployed_unverified', 'unverified', 'unknown_reporter',
+] as const
+const AGGREGATE_LANDING = ['within_4h', 'within_24h', 'within_3d', 'later', 'range_only', 'suppressed_or_unknown'] as const
+const ATTENTION_REASONS = [
+  'blocked', 'waiting_needs_input', 'failed_needs_retry', 'stale_no_signal',
+  'unknown_reporter', 'deployed_unverified', 'unverified', 'other',
+] as const
+
+function emptyCountSet(): WireCountSet {
+  return {
+    active_total: 0,
+    current_stage: Object.fromEntries(AGGREGATE_STAGES.map((key) => [key, 0])),
+    flags: Object.fromEntries(AGGREGATE_FLAGS.map((key) => [key, 0])),
+    landing: Object.fromEntries(AGGREGATE_LANDING.map((key) => [key, 0])),
+  }
+}
+
+function aggregateReasonFlags(row: WireDelivery): Array<(typeof ATTENTION_REASONS)[number]> {
+  const flags: Array<(typeof ATTENTION_REASONS)[number]> = []
+  if (row.health === 'blocked' || row.activity?.kind === 'blocked' || (row.blockers?.length ?? 0) > 0) flags.push('blocked')
+  if (row.activity?.kind === 'waiting') flags.push('waiting_needs_input')
+  if (row.attempt_status === 'failed') flags.push('failed_needs_retry')
+  if (row.freshness?.state === 'stale' || row.freshness?.state === 'unknown') flags.push('stale_no_signal')
+  if (!row.actor?.name) flags.push('unknown_reporter')
+  if (row.stage?.key === 'deployment') flags.push('deployed_unverified')
+  if (row.stage?.key === 'deployment' || row.stage?.key === 'verification') flags.push('unverified')
+  if ((row.attention?.level ?? 0) > 0 && !flags.some((flag) => flag !== 'unverified')) flags.push('other')
+  return flags
+}
+
+function addRow(counts: WireCountSet, row: WireDelivery, calculatedMs: number) {
+  counts.active_total += 1
+  const stage = AGGREGATE_STAGES.includes(row.stage?.key as (typeof AGGREGATE_STAGES)[number])
+    ? row.stage!.key!
+    : 'unknown'
+  counts.current_stage[stage] += 1
+
+  const reasons = aggregateReasonFlags(row)
+  if ((row.attention?.level ?? 0) > 0) counts.flags.attention += 1
+  if (reasons.includes('waiting_needs_input')) counts.flags.waiting_needs_input += 1
+  if (reasons.includes('blocked')) counts.flags.blocked += 1
+  if (reasons.includes('stale_no_signal')) counts.flags.stale_no_signal += 1
+  if (reasons.includes('failed_needs_retry')) counts.flags.failed_needs_retry += 1
+  if (reasons.includes('deployed_unverified')) counts.flags.deployed_unverified += 1
+  if (reasons.includes('unverified')) counts.flags.unverified += 1
+  if (reasons.includes('unknown_reporter')) counts.flags.unknown_reporter += 1
+
+  const eta = row.eta
+  if (!eta || eta.trusted !== true || !eta.landing_at) {
+    counts.landing.suppressed_or_unknown += 1
+  } else if (eta.confidence === 'low') {
+    counts.landing.range_only += 1
+  } else {
+    const remaining = Date.parse(eta.landing_at) - calculatedMs
+    if (remaining <= 4 * 60 * 60_000) counts.landing.within_4h += 1
+    else if (remaining <= 24 * 60 * 60_000) counts.landing.within_24h += 1
+    else if (remaining <= 3 * 24 * 60 * 60_000) counts.landing.within_3d += 1
+    else counts.landing.later += 1
+  }
+}
+
+function addCountSet(target: WireCountSet, source: WireCountSet) {
+  target.active_total += source.active_total
+  for (const key of AGGREGATE_STAGES) target.current_stage[key] += source.current_stage[key]
+  for (const key of AGGREGATE_FLAGS) target.flags[key] += source.flags[key]
+  for (const key of AGGREGATE_LANDING) target.landing[key] += source.landing[key]
+}
+
+/** Deterministic strict schema-v1 fixture. Aggregate calculation lives only
+ * in this test/DEV module; production never imports or reconstructs it. */
+export function makeFixtureAggregateSnapshot(count: 1 | 10 | 100 | number, serverTime = FIXTURE_BASE_TIME): WireSnapshot {
+  const snapshot = makeFixtureSnapshot(count, serverTime)
+  const rows = snapshot.rows ?? []
+  const calculatedMs = Date.parse(serverTime)
+  const grouped = new Map<number, { key: string; name: string; lanes: Map<string, WireDelivery[]> }>()
+  for (const row of rows) {
+    const projectId = row.project_id!
+    const project = grouped.get(projectId) ?? {
+      key: row.project_key!,
+      name: row.project_name!,
+      lanes: new Map<string, WireDelivery[]>(),
+    }
+    const laneKey = laneKeyFor(projectId, row.epic_id ?? null)
+    project.lanes.set(laneKey, [...(project.lanes.get(laneKey) ?? []), row])
+    grouped.set(projectId, project)
+  }
+
+  const root = emptyCountSet()
+  const projects = [...grouped.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([projectId, project]) => {
+      const projectCounts = emptyCountSet()
+      const lanes = [...project.lanes.entries()]
+        .sort(([, leftRows], [, rightRows]) => {
+          const leftEpic = leftRows[0].epic_id ?? null
+          const rightEpic = rightRows[0].epic_id ?? null
+          if (leftEpic == null && rightEpic != null) return 1
+          if (leftEpic != null && rightEpic == null) return -1
+          if (leftEpic != null && rightEpic != null && leftEpic !== rightEpic) return leftEpic - rightEpic
+          return laneKeyFor(projectId, leftEpic) < laneKeyFor(projectId, rightEpic) ? -1 : 1
+        })
+        .map(([laneKey, laneRows]) => {
+          const counts = emptyCountSet()
+          for (const row of laneRows) addRow(counts, row, calculatedMs)
+          addCountSet(projectCounts, counts)
+          const first = laneRows[0]
+          return {
+            lane_key: laneKey,
+            epic_id: first.epic_id ?? null,
+            epic_key: first.epic_id == null ? null : first.epic_key ?? null,
+            epic_title: first.epic_id == null ? null : first.epic_title ?? null,
+            counts,
+          }
+        })
+      addCountSet(root, projectCounts)
+      return {
+        project_id: projectId,
+        project_key: project.key,
+        project_name: project.name,
+        counts: projectCounts,
+        lanes,
+      }
+    })
+
+  const attentionItems = rows
+    .filter((row) => (row.attention?.level ?? 0) > 0)
+    .map((row) => {
+      const flags = aggregateReasonFlags(row)
+      return {
+        delivery_id: String(row.delivery_id),
+        level: row.attention!.level,
+        primary_reason: flags[0],
+        flags,
+        since: row.attention?.since ?? null,
+      }
+    })
+    .sort((left, right) => {
+      if (left.level !== right.level) return Number(right.level) - Number(left.level)
+      const reason = ATTENTION_REASONS.indexOf(left.primary_reason) - ATTENTION_REASONS.indexOf(right.primary_reason)
+      if (reason !== 0) return reason
+      const leftSince = left.since ? Date.parse(left.since) : Number.POSITIVE_INFINITY
+      const rightSince = right.since ? Date.parse(right.since) : Number.POSITIVE_INFINITY
+      if (leftSince !== rightSince) return leftSince - rightSince
+      return left.delivery_id.localeCompare(right.delivery_id)
+    })
+
+  snapshot.selected_delivery = rows[0]?.delivery_id ?? null
+  snapshot.aggregates = {
+    schema_version: 1,
+    structural_revision: `fixture-structural-${count}`,
+    classification_revision: `fixture-classification-${count}`,
+    calculated_at: serverTime,
+    next_refresh_at: new Date(calculatedMs + 10 * 60_000).toISOString(),
+    root,
+    projects,
+    attention: { total: attentionItems.length, items: attentionItems.slice(0, 12) },
+  }
+  return snapshot
 }
