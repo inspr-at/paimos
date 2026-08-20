@@ -449,6 +449,14 @@ func mountAPI(r chi.Router) {
 		r.Post("/projektberichte/accept/{code}", handlers.AcceptProjectReport)
 		r.Put("/projektberichte/accept/{code}/signed", handlers.LinkProjectReportSignedArtifact)
 		r.Get("/projektberichte/{code}/pdf", handlers.GetProjectReportPDF)
+
+		// PAI-799 telemetry performs its own requester/claimer/admin and
+		// run-visibility checks so unauthorized run ids return the same 404 as
+		// missing ids. Keep it outside BlockExternal, which would turn that
+		// existence-hiding response into an early 403.
+		r.Post("/runs/{id}/telemetry", handlers.IngestAgentRunTelemetry)
+		r.Get("/runs/{id}/telemetry", handlers.ListAgentRunTelemetry)
+		r.Get("/runs/{id}/telemetry/latest", handlers.GetLatestAgentRunTelemetry)
 	})
 
 	// Portal (external + admin)

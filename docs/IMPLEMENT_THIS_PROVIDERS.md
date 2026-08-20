@@ -106,6 +106,13 @@ valid:
 `agent_name` remains executor attribution. It should answer "who reported this
 run?", not "which provider did the requester choose?"
 
+Provider-specific adapters report live facts through the PAI-799
+`POST /api/runs/{id}/telemetry` contract. The backend stores only the stable
+provider and adapter identifiers plus typed, bounded run facts; it has no
+Claude/Codex/provider branches and accepts no raw provider payload. History is
+append-only, `/telemetry/latest` is the efficient snapshot, and runs without
+reports remain explicitly uninstrumented/unknown.
+
 `POST /api/issues/{id}/implement` should accept an action key:
 
 ```json

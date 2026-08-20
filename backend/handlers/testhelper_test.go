@@ -162,6 +162,9 @@ func buildRouter() http.Handler {
 			r.Get("/avatars/{filename}", func(w http.ResponseWriter, req *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			})
+			r.Post("/runs/{id}/telemetry", handlers.IngestAgentRunTelemetry)
+			r.Get("/runs/{id}/telemetry", handlers.ListAgentRunTelemetry)
+			r.Get("/runs/{id}/telemetry/latest", handlers.GetLatestAgentRunTelemetry)
 		})
 
 		// Portal (external + admin)

@@ -5614,6 +5614,61 @@ func migrate(db *sql.DB) error {
 				 AND (SELECT status FROM projects WHERE id=NEW.project_id) = 'deleted'
 				BEGIN SELECT RAISE(ABORT, 'project is deleted; new issues are disabled'); END`,
 		}},
+
+		// M142 / PAI-799: provider-neutral, append-only telemetry for one
+		// Implement-this run. The event table is the immutable history; the
+		// one-row-per-run latest table is only an efficient pointer/snapshot aid.
+		// Payloads are deliberately columnar and allowlisted: no provider blobs,
+		// prompts, tool arguments, command output, source, or environment data.
+		{142, []string{
+			`CREATE TABLE IF NOT EXISTS agent_run_telemetry (
+				id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+				run_id              INTEGER NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+				sequence            INTEGER NOT NULL CHECK(sequence > 0 AND sequence <= 2147483647),
+				correlation_id      TEXT NOT NULL CHECK(length(correlation_id) BETWEEN 1 AND 128),
+				provider            TEXT NOT NULL CHECK(length(provider) BETWEEN 1 AND 64),
+				adapter             TEXT NOT NULL CHECK(length(adapter) BETWEEN 1 AND 64),
+				agent_reported_at   TEXT NOT NULL,
+				server_received_at  TEXT NOT NULL,
+				kind                TEXT NOT NULL CHECK(kind IN ('heartbeat','progress','phase','needs_input','blocker','estimate')),
+				heartbeat           INTEGER NOT NULL DEFAULT 0 CHECK(heartbeat IN (0,1)),
+				phase               TEXT NOT NULL DEFAULT 'unknown'
+				                    CHECK(phase IN ('unknown','starting','planning','implementing','testing','reviewing','deploying','waiting','completed')),
+				activity            TEXT NOT NULL DEFAULT '' CHECK(length(activity) <= 280),
+				needs_input         INTEGER NOT NULL DEFAULT 0 CHECK(needs_input IN (0,1)),
+				blocker_state       TEXT NOT NULL DEFAULT 'none'
+				                    CHECK(blocker_state IN ('none','input','dependency','permission','environment','external','unknown')),
+				estimate_revision   INTEGER CHECK(estimate_revision BETWEEN 1 AND 2147483647),
+				progress_percent    REAL CHECK(progress_percent BETWEEN 0 AND 100),
+				eta_seconds         INTEGER CHECK(eta_seconds BETWEEN 0 AND 31536000),
+				eta_min_seconds     INTEGER CHECK(eta_min_seconds BETWEEN 0 AND 31536000),
+				eta_max_seconds     INTEGER CHECK(eta_max_seconds BETWEEN 0 AND 31536000),
+				estimate_source     TEXT NOT NULL DEFAULT ''
+				                    CHECK(estimate_source IN ('','agent','adapter','provider','tool')),
+				estimate_confidence REAL CHECK(estimate_confidence BETWEEN 0 AND 1),
+				estimate_basis      TEXT NOT NULL DEFAULT '' CHECK(length(estimate_basis) <= 240),
+				UNIQUE(run_id, sequence)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_run_telemetry_history
+			 ON agent_run_telemetry(run_id, sequence DESC)`,
+			`CREATE TABLE IF NOT EXISTS agent_run_telemetry_latest (
+				run_id             INTEGER PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
+				telemetry_id       INTEGER NOT NULL UNIQUE REFERENCES agent_run_telemetry(id) ON DELETE CASCADE,
+				sequence           INTEGER NOT NULL,
+				last_heartbeat_at  TEXT
+			)`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_run_telemetry_no_update
+			 BEFORE UPDATE ON agent_run_telemetry
+			 BEGIN SELECT RAISE(ABORT, 'agent run telemetry is append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_run_telemetry_terminal_guard
+			 BEFORE INSERT ON agent_run_telemetry
+			 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('deployed','failed','cancelled','drafted')
+			 BEGIN SELECT RAISE(ABORT, 'terminal run telemetry is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_run_telemetry_sequence_guard
+			 BEFORE INSERT ON agent_run_telemetry
+			 WHEN NEW.sequence <= COALESCE((SELECT MAX(sequence) FROM agent_run_telemetry WHERE run_id=NEW.run_id), 0)
+			 BEGIN SELECT RAISE(ABORT, 'agent run telemetry sequence is not monotonic'); END`,
+		}},
 	}
 
 	for _, m := range migrations {

@@ -489,6 +489,107 @@ to match a live implement-capable runner connection; after the first
 `queued -> running` claim, later writes are limited to the requester, admin, or
 the stamped `claimed_by` executor.
 
+### Single-run telemetry (PAI-799)
+
+Run lifecycle status and run telemetry are separate contracts. Lifecycle
+`PATCH /api/runs/{id}` remains the authority for state transitions. Telemetry
+adds append-only facts about that one run:
+
+```http
+POST /api/runs/799/telemetry
+GET  /api/runs/799/telemetry?after_sequence=0&limit=100
+GET  /api/runs/799/telemetry/latest
+```
+
+The POST is limited to the run requester, stamped claimer, or an admin. Missing
+and unauthorized runs both return 404. Reads use normal run visibility. A
+terminal run (`drafted`, `deployed`, `failed`, or `cancelled`) rejects all late
+telemetry with 409, including exact duplicate retries, so telemetry can never
+mutate or qualify a terminal result.
+
+Example report:
+
+```json
+{
+  "sequence": 3,
+  "correlation_id": "claude-session-abc",
+  "provider": "anthropic",
+  "adapter": "claude-code",
+  "agent_reported_at": "2026-08-20T10:00:00Z",
+  "kind": "progress",
+  "heartbeat": true,
+  "phase": "testing",
+  "activity": "Running the documented backend test gate",
+  "needs_input": false,
+  "blocker_state": "none",
+  "estimate_revision": 2,
+  "progress_percent": 75,
+  "eta_seconds": 300,
+  "eta_min_seconds": 180,
+  "eta_max_seconds": 480,
+  "estimate_source": "adapter",
+  "estimate_confidence": 0.8,
+  "estimate_basis": "Three of four named verification checkpoints completed"
+}
+```
+
+`sequence` must increase; exact same-sequence/same-body replay returns 200 with
+`duplicate: true`, while conflicting duplicates and out-of-order reports return
+409. `correlation_id`, `provider`, and `adapter` become immutable after the
+first accepted report. Delayed reports are accepted when their sequence is
+newer. `agent_reported_at` is retained as agent evidence, but freshness,
+liveness, and clock-skew detection always use `server_received_at`. Thus a bad
+workstation clock cannot make a run look fresh or stale.
+
+Progress and ETA are optional. When supplied they require a monotonic
+`estimate_revision`, `estimate_source`, confidence from 0 through 1, and a
+short evidence basis; ETA always requires a complete, ordered range. PAIMOS never
+creates a percentage from elapsed wall-clock time. A run with no reports is
+returned by `/latest` as `instrumented: false`, `liveness: "unknown"`, and
+`latest: null`—never as 0%. The latest pointer is indexed; history remains the
+append-only authority. SSE publishes only `{type: "run_telemetry", name:
+run_id, rev: sequence}` as an invalidation hint, and consumers refetch REST.
+
+The body uses a strict field allowlist and small one-line limits. Never send raw
+prompts, tool arguments, command output, environment values, secrets, source
+contents, or arbitrary provider payloads in `activity` or `estimate_basis`.
+Those data classes have no telemetry field and unknown JSON keys are rejected.
+
+The provider-neutral CLI seam is:
+
+```bash
+paimos run report "$PAIMOS_RUN_ID" \
+  --sequence 3 --correlation-id claude-session-abc \
+  --provider anthropic --adapter claude-code \
+  --kind progress --heartbeat --phase testing \
+  --activity "Running the documented backend test gate" \
+  --estimate-revision 2 --progress-percent 75 \
+  --eta-seconds 300 --eta-min-seconds 180 --eta-max-seconds 480 \
+  --estimate-source adapter --confidence 0.8 \
+  --basis "Three of four named verification checkpoints completed"
+```
+
+`PAIMOS_RUN_ID`, `PAIMOS_RUN_CORRELATION_ID`, `PAIMOS_RUN_PROVIDER`, and
+`PAIMOS_RUN_ADAPTER` can supply the stable runner context. `--dry-run` prints
+the exact request. MCP clients use `paimos_report_progress`, which maps to the
+same POST and forwards only the allowlisted fields.
+
+Claude Code is a proof adapter, not a server special case:
+
+| Claude Code signal | Provider-neutral report |
+|---|---|
+| session/run start | `kind=heartbeat`, `phase=starting`, stable correlation id |
+| bounded adapter phase change | `kind=phase`, one of the phase enum values |
+| permission or human question | `kind=needs_input`, `needs_input=true`, `blocker_state=input` |
+| named checkpoint completion | `kind=progress`; optional evidence-backed estimate revision |
+| quiet active session | `kind=heartbeat`; no fabricated percentage |
+
+The adapter summarizes only the allowlisted state. Claude hook payloads, tool
+inputs/results, prompts, and transcript text are never copied. Other providers
+map to the same fields without changes to server or domain code. This surface
+does not aggregate delivery progress, calculate a weighted overall ETA, render
+Agent Mode cards, or supervise runner processes; those belong to PAI-800–804.
+
 Enabling deploy is **triple-gated** and off by default — it runs only when all
 three hold: `--allow-deploy` AND `--deploy-exec "<cmd>"` AND the run carries a
 `deploy_target`. Even then it asks for a separate deploy confirmation unless
@@ -510,8 +611,8 @@ For the PAI-629/PAI-630 path from one generic action to explicit Claude, Codex,
 local-model, and OpenRouter actions, see
 [`IMPLEMENT_THIS_PROVIDERS.md`](IMPLEMENT_THIS_PROVIDERS.md).
 
-The spawned command can read the generated prompt, selected-agent artifact, or
-PATCH richer progress itself. On any transition into a terminal status the
+The spawned command can read the generated prompt or selected-agent artifact,
+and report bounded progress through `paimos run report`. On any transition into a terminal status the
 server auto-posts a summary comment on the ticket — attributed to the reporting
 user — so the human-readable trail always matches the structured run record.
 

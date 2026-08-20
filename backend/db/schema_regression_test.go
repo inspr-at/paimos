@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const latestSchemaVersion = 141
+const latestSchemaVersion = 142
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -90,6 +90,61 @@ func TestSchemaAgentRunsCommitEvidenceColumns(t *testing.T) {
 		if !columnExists(t, db, "agent_runs", col) {
 			t.Fatalf("expected agent_runs.%s to exist (PAI-702 / M140)", col)
 		}
+	}
+}
+
+func TestSchemaAgentRunTelemetryTables(t *testing.T) {
+	database := openTestDB(t)
+	for _, table := range []string{"agent_run_telemetry", "agent_run_telemetry_latest"} {
+		if !tableExists(t, database, table) {
+			t.Fatalf("expected %s to exist (PAI-799 / M142)", table)
+		}
+	}
+	for _, col := range []string{"sequence", "correlation_id", "provider", "adapter", "server_received_at", "progress_percent", "estimate_confidence"} {
+		if !columnExists(t, database, "agent_run_telemetry", col) {
+			t.Fatalf("expected agent_run_telemetry.%s to exist (PAI-799 / M142)", col)
+		}
+	}
+}
+
+func TestSchemaAgentRunTelemetryAppendOnlyAndTerminalGuards(t *testing.T) {
+	database := openTestDB(t)
+	project, err := database.Exec(`INSERT INTO projects(name, key) VALUES('Telemetry', 'TEL')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	issue, err := database.Exec(`INSERT INTO issues(project_id, issue_number, type, title) VALUES(?, 1, 'ticket', 'Telemetry')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := issue.LastInsertId()
+	run, err := database.Exec(`INSERT INTO agent_runs(issue_id, project_id, status) VALUES(?, ?, 'running')`, issueID, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, _ := run.LastInsertId()
+	_, err = database.Exec(`INSERT INTO agent_run_telemetry(
+		run_id, sequence, correlation_id, provider, adapter, agent_reported_at, server_received_at, kind, heartbeat)
+		VALUES(?, 1, 'run-1', 'anthropic', 'claude-code', '2026-08-20T10:00:00Z', '2026-08-20T10:00:01Z', 'heartbeat', 1)`, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE agent_run_telemetry SET phase='testing' WHERE run_id=?`, runID); err == nil || !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("append-only update error=%v", err)
+	}
+	if _, err := database.Exec(`INSERT INTO agent_run_telemetry(
+		run_id, sequence, correlation_id, provider, adapter, agent_reported_at, server_received_at, kind)
+		VALUES(?, 1, 'run-1', 'anthropic', 'claude-code', '2026-08-20T10:00:02Z', '2026-08-20T10:00:02Z', 'progress')`, runID); err == nil || !strings.Contains(err.Error(), "sequence is not monotonic") {
+		t.Fatalf("monotonic insert error=%v", err)
+	}
+	if _, err := database.Exec(`UPDATE agent_runs SET status='failed' WHERE id=?`, runID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO agent_run_telemetry(
+		run_id, sequence, correlation_id, provider, adapter, agent_reported_at, server_received_at, kind)
+		VALUES(?, 2, 'run-1', 'anthropic', 'claude-code', '2026-08-20T10:00:03Z', '2026-08-20T10:00:03Z', 'progress')`, runID); err == nil || !strings.Contains(err.Error(), "terminal run telemetry") {
+		t.Fatalf("terminal insert error=%v", err)
 	}
 }
 

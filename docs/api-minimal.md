@@ -420,6 +420,22 @@ GET    /projektberichte/:code/pdf                snapshot-by-code PDF (portal de
 GET    /reports/accruals                         admin only — per-user time rollup
 ```
 
+## Agent run telemetry
+
+```
+POST   /runs/:id/telemetry          append one allowlisted fact; requester/claimer/admin
+GET    /runs/:id/telemetry          append-only history; ?after_sequence=0&limit=100
+GET    /runs/:id/telemetry/latest   indexed snapshot; uninstrumented => unknown/null
+```
+
+Sequence is strictly increasing per run. Exact duplicate replay is idempotent;
+conflicting duplicate/out-of-order and post-terminal reports return 409.
+Freshness uses server receipt time, never the agent clock. Percentage and ETA
+are optional evidence-backed declarations and are never derived from elapsed
+wall time. Unknown JSON fields are rejected; raw prompts, tool arguments,
+command output, environment values, secrets, source contents, and provider
+payloads are outside this contract.
+
 ## Project metadata
 
 ```

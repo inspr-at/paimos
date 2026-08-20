@@ -729,8 +729,15 @@ Tools available in the current allowlist:
 | `paimos_relation_add` | all 7 types |
 | `paimos_project_list` | list projects on the active instance |
 | `paimos_project_create` | name + key required; api-key needs `projects:write` scope on an admin account |
+| `paimos_report_progress` | append allowlisted facts about one existing run; requester/claimer/admin |
 
 **Deliberately not exposed**: `batch-update`, `apply`. MCP context grows fast; agents that need bulk should shell out to the `paimos` CLI instead.
+
+For shell agents, `paimos run report [run-id]` is the equivalent first-class
+CLI verb. It accepts stable correlation/provider/adapter identity, monotonic
+sequence, heartbeat, phase, bounded activity, needs-input/blocker state, and
+optional evidence-backed progress/ETA. See [Agent integration](AGENT_INTEGRATION.md#single-run-telemetry-pai-799)
+for the exact contract and privacy boundary.
 
 ### Local repo broker
 

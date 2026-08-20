@@ -178,6 +178,9 @@ func canReadAgentRun(r *http.Request, run *AgentRun) bool {
 	if run.RequestedBy != nil && *run.RequestedBy == u.ID {
 		return true
 	}
+	if run.ClaimedBy != nil && *run.ClaimedBy == u.ID {
+		return true
+	}
 	return run.ProjectID != nil && auth.CanEditProject(r, *run.ProjectID)
 }
 
