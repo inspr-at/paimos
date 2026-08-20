@@ -561,6 +561,13 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M142 | `agent_run_telemetry`, `agent_run_telemetry_latest` | Append-only provider-neutral run facts plus an indexed latest projection (PAI-799). |
 | M143 | rebuilt `agent_runs`; expanded telemetry latest projection | Add truthful terminal `completed`, durable `expects_supervisor_telemetry`, and separate latest event/heartbeat/semantic/estimate pointers (PAI-801). |
 
+`agent_runs.status=completed` means implementation finished without a configured
+test command; it never implies tests passed. `tests_passed` and `tests_failed`
+require a non-empty `tests_summary` of at most 4096 bytes, supplied by the same
+transition or already persisted. Telemetry history is append-only. Its latest
+projection keeps independent event, heartbeat, semantic, and estimate pointers;
+only the server-received heartbeat timestamp is liveness evidence.
+
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 
 ---

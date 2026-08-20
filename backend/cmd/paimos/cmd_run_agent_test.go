@@ -370,22 +370,17 @@ func TestAgentRunnerTestExecReportsVersionAndSummary(t *testing.T) {
 		t.Fatalf("seed VERSION: %v", err)
 	}
 	var calls []string
-	a := &agentRunner{
+	a := withSpawnSupervisor(&agentRunner{
 		client: newClientForTest(srv.URL), deviceID: "dev-1", repoRoot: root,
 		execCmd: "claude", testExec: "npm test", autoConfirm: true,
 		spawn: func(_ context.Context, _, cmd string, _ []string, logSink io.Writer) error {
 			calls = append(calls, cmd)
-			if cmd == "npm test" {
-				if logSink == nil {
-					t.Fatal("test command should receive a summary sink")
-				}
-				_, _ = logSink.Write([]byte("PASS test.mjs\n2 passed\n"))
-			} else if logSink != nil {
+			if cmd != "npm test" && logSink != nil {
 				t.Fatalf("agent command should not capture logs by default")
 			}
 			return nil
 		},
-	}
+	})
 	if err := a.handleRun(context.Background(), aJob()); err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -417,19 +412,18 @@ func TestCompletedRunStatusRequiresTestEvidence(t *testing.T) {
 func TestAgentRunnerTestExecFailureReportsTestsFailed(t *testing.T) {
 	srv, patches := newRunServer(t, `{"issue_id":5,"device_id":"","deploy_target":"ppm","status":"queued"}`, http.StatusOK)
 	var calls []string
-	a := &agentRunner{
+	a := withSpawnSupervisor(&agentRunner{
 		client: newClientForTest(srv.URL), deviceID: "dev-1", repoRoot: t.TempDir(),
 		execCmd: "claude", testExec: "npm test", autoConfirm: true,
 		allowDeploy: true, deployExec: "just deploy-ppm", autoConfirmDep: true,
 		spawn: func(_ context.Context, _, cmd string, _ []string, logSink io.Writer) error {
 			calls = append(calls, cmd)
 			if cmd == "npm test" {
-				_, _ = logSink.Write([]byte("FAIL test.mjs\nexpected true\n"))
 				return errors.New("exit status 1")
 			}
 			return nil
 		},
-	}
+	})
 	if err := a.handleRun(context.Background(), aJob()); err != nil {
 		t.Fatalf("test failure is a reported result, not a runner error: %v", err)
 	}
@@ -440,11 +434,11 @@ func TestAgentRunnerTestExecFailureReportsTestsFailed(t *testing.T) {
 	if last["status"] != "tests_failed" {
 		t.Fatalf("final patch = %+v, want tests_failed", last)
 	}
-	if last["error"] != "configured test command failed" {
+	if last["error"] != "provider_failure: configured command exited unsuccessfully" {
 		t.Fatalf("error = %v, want safe test failure", last["error"])
 	}
 	summary, _ := last["tests_summary"].(string)
-	if summary != "configured test command failed" {
+	if summary != "configured test command failed: provider_failure" {
 		t.Fatalf("tests_summary=%q, want allowlisted failed test evidence", summary)
 	}
 }
@@ -528,6 +522,12 @@ func TestClaudePermissionModeAndAllowedToolsAreConfigurable(t *testing.T) {
 		if err := validateClaudeRunnerConfig(tc.mode, tc.tools); err == nil {
 			t.Fatalf("accepted unsafe config mode=%q tools=%q", tc.mode, tc.tools)
 		}
+	}
+	if err := validateClaudeRunnerConfig("bypassPermissions", "Read"); err == nil {
+		t.Fatal("bypassPermissions was accepted without the separate unsafe opt-in")
+	}
+	if err := validateClaudeRunnerConfig("bypassPermissions", "Read", true); err != nil {
+		t.Fatalf("explicit unsafe bypass opt-in rejected: %v", err)
 	}
 }
 
@@ -648,7 +648,7 @@ func TestAgentRunnerDeployGated(t *testing.T) {
 		t.Fatalf("seed VERSION: %v", err)
 	}
 	var calls []string
-	a := &agentRunner{
+	a := withSpawnSupervisor(&agentRunner{
 		client: newClientForTest(srv.URL), deviceID: "dev-1", repoRoot: root,
 		execCmd: "claude", autoConfirm: true,
 		allowDeploy: true, deployExec: "just deploy-ppm", autoConfirmDep: true,
@@ -656,7 +656,7 @@ func TestAgentRunnerDeployGated(t *testing.T) {
 			calls = append(calls, cmd)
 			return nil
 		},
-	}
+	})
 	if err := a.handleRun(context.Background(), aJob()); err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -676,18 +676,18 @@ func TestAgentRunnerDeployCarriesTestSummary(t *testing.T) {
 		t.Fatalf("seed VERSION: %v", err)
 	}
 	var calls []string
-	a := &agentRunner{
+	a := withSpawnSupervisor(&agentRunner{
 		client: newClientForTest(srv.URL), deviceID: "dev-1", repoRoot: root,
 		execCmd: "claude", testExec: "npm test", autoConfirm: true,
 		allowDeploy: true, deployExec: "npm run deploy:local", autoConfirmDep: true,
 		spawn: func(_ context.Context, _, cmd string, _ []string, logSink io.Writer) error {
 			calls = append(calls, cmd)
-			if cmd == "npm test" {
+			if cmd == "npm test" && logSink != nil {
 				_, _ = logSink.Write([]byte("all demo tests passed\n"))
 			}
 			return nil
 		},
-	}
+	})
 	if err := a.handleRun(context.Background(), aJob()); err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -709,7 +709,7 @@ func TestAgentRunnerDeployNeedsItsOwnConsent(t *testing.T) {
 	// no test command ran.
 	srv, patches := newRunServer(t, `{"issue_id":5,"device_id":"","deploy_target":"ppm","status":"queued"}`, http.StatusOK)
 	var calls []string
-	a := &agentRunner{
+	a := withSpawnSupervisor(&agentRunner{
 		client: newClientForTest(srv.URL), deviceID: "dev-1", repoRoot: t.TempDir(),
 		execCmd: "claude", autoConfirm: true,
 		allowDeploy: true, deployExec: "just deploy-ppm", autoConfirmDep: false,
@@ -718,7 +718,7 @@ func TestAgentRunnerDeployNeedsItsOwnConsent(t *testing.T) {
 			calls = append(calls, cmd)
 			return nil
 		},
-	}
+	})
 	if err := a.handleRun(context.Background(), aJob()); err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -733,7 +733,7 @@ func TestAgentRunnerDeployNeedsItsOwnConsent(t *testing.T) {
 func TestAgentRunnerDeployStaysGatedOff(t *testing.T) {
 	srv, patches := newRunServer(t, `{"issue_id":5,"device_id":"","deploy_target":"ppm","status":"queued"}`, http.StatusOK)
 	var calls []string
-	a := &agentRunner{
+	a := withSpawnSupervisor(&agentRunner{
 		client: newClientForTest(srv.URL), deviceID: "dev-1", repoRoot: "/tmp",
 		execCmd: "claude", autoConfirm: true,
 		allowDeploy: false, deployExec: "just deploy-ppm",
@@ -741,7 +741,7 @@ func TestAgentRunnerDeployStaysGatedOff(t *testing.T) {
 			calls = append(calls, cmd)
 			return nil
 		},
-	}
+	})
 	if err := a.handleRun(context.Background(), aJob()); err != nil {
 		t.Fatalf("handleRun: %v", err)
 	}
@@ -809,6 +809,20 @@ type recordingRunnerReporter struct {
 	mu      sync.Mutex
 	reports []supervisorReport
 	err     error
+}
+
+func withSpawnSupervisor(a *agentRunner) *agentRunner {
+	a.supervise = func(ctx context.Context, req supervisorRequest) supervisorResult {
+		command := req.ExecCmd
+		if req.InitialPhase == "" {
+			command = a.execCmd
+		}
+		if err := a.spawn(ctx, req.RepoRoot, command, req.Env, req.LogSink); err != nil {
+			return supervisorResult{Outcome: outcomeProviderFailure, Summary: "configured command exited unsuccessfully"}
+		}
+		return supervisorResult{Outcome: outcomeNormalExit, Summary: "configured command exited normally"}
+	}
+	return a
 }
 
 func (r *recordingRunnerReporter) Report(_ context.Context, _ int64, report supervisorReport) error {
@@ -914,6 +928,31 @@ func TestSupervisorHeartbeatDoesNotDependOnProviderCallbacks(t *testing.T) {
 	}
 	if heartbeats == 0 {
 		t.Fatalf("reports=%+v, want an independent heartbeat", reporter.snapshot())
+	}
+}
+
+func TestSupervisorProviderSuccessReviewsBeforeLifecycleCompletion(t *testing.T) {
+	reporter := &recordingRunnerReporter{}
+	req := supervisorFixture("printf ok")
+	req.Reporter = reporter
+	got := superviseAgentProcess(context.Background(), req)
+	if got.Outcome != outcomeNormalExit {
+		t.Fatalf("outcome=%s summary=%q", got.Outcome, got.Summary)
+	}
+	seenReviewing := false
+	for _, report := range reporter.snapshot() {
+		if report.Phase == "completed" {
+			t.Fatalf("provider success claimed completed before lifecycle verification: %+v", report)
+		}
+		if report.Event == "result" && report.Phase == "reviewing" {
+			seenReviewing = true
+		}
+		if report.Event == "heartbeat" && report.Summary != "" {
+			t.Fatalf("timer heartbeat carried semantic activity: %+v", report)
+		}
+	}
+	if !seenReviewing {
+		t.Fatalf("reports=%+v", reporter.snapshot())
 	}
 }
 
@@ -1109,6 +1148,92 @@ func TestHTTPRunnerReportTransportSerializesConcurrentSequence(t *testing.T) {
 	}
 }
 
+func TestHTTPRunnerReportTransportRetriesExactAmbiguousBodyBeforeAdvancing(t *testing.T) {
+	var bodies [][]byte
+	attempt := 0
+	client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		bodies = append(bodies, append([]byte(nil), body...))
+		attempt++
+		status := http.StatusOK
+		response := `{"accepted":true,"duplicate":true}`
+		if attempt == 1 {
+			status = http.StatusInternalServerError
+			response = `{"error":"ambiguous upstream failure"}`
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response)), Request: r}, nil
+	})}}
+	transport := &httpRunnerReportTransport{client: client, provider: "openai", adapter: "codex-cli"}
+	if err := transport.Report(context.Background(), 91, supervisorReport{Event: "heartbeat", Phase: "testing"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 || !bytes.Equal(bodies[0], bodies[1]) {
+		t.Fatalf("retry bodies differ: %q / %q", bodies[0], bodies[1])
+	}
+	var fact runTelemetryReport
+	if err := json.Unmarshal(bodies[0], &fact); err != nil || fact.Sequence != 1 {
+		t.Fatalf("retry fact=%+v err=%v", fact, err)
+	}
+	if err := transport.Report(context.Background(), 91, supervisorReport{Event: "heartbeat", Phase: "reviewing"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(bodies[2], &fact); err != nil || fact.Sequence != 2 {
+		t.Fatalf("post-acceptance fact=%+v err=%v", fact, err)
+	}
+}
+
+func TestHTTPRunnerReportTransportClassifiesConflictFromRunTruth(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		getStatus int
+		runStatus string
+		want      error
+	}{
+		{name: "cancelled", getStatus: http.StatusOK, runStatus: "cancelled", want: errRunCancelled},
+		{name: "reaped", getStatus: http.StatusOK, runStatus: "failed", want: errRunStatusLost},
+		{name: "completed", getStatus: http.StatusOK, runStatus: "completed", want: errRunStatusLost},
+		{name: "missing", getStatus: http.StatusNotFound, want: errRunnerDisappeared},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				status, body := http.StatusConflict, `{"error":"conflict"}`
+				if r.Method == http.MethodGet {
+					status = tc.getStatus
+					body = fmt.Sprintf(`{"status":%q}`, tc.runStatus)
+				}
+				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+			})}}
+			transport := &httpRunnerReportTransport{client: client}
+			err := transport.Report(context.Background(), 92, supervisorReport{Event: "heartbeat", Phase: "implementing"})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error=%v want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunnerCorrelationIdentityIsRandomStableAndDistinct(t *testing.T) {
+	transport := &httpRunnerReportTransport{}
+	first, _, _, err := transport.Identity(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, _, _, err := transport.Identity(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, _, err := transport.Identity(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != again || first == second || strings.HasPrefix(first, "run-") {
+		t.Fatalf("correlations first=%q again=%q second=%q", first, again, second)
+	}
+}
+
 func TestAgentRunnerEndToEndSupervisorTelemetryREST(t *testing.T) {
 	var mu sync.Mutex
 	var telemetry []map[string]any
@@ -1170,5 +1295,85 @@ func TestAgentRunnerEndToEndSupervisorTelemetryREST(t *testing.T) {
 				t.Fatalf("fact leaked %q: %+v", forbidden, fact)
 			}
 		}
+	}
+}
+
+func TestAgentRunnerSupervisesLongTestAndDeployPhases(t *testing.T) {
+	var mu sync.Mutex
+	var telemetry []map[string]any
+	var patches []map[string]any
+	respond := func(r *http.Request, status int, body string) (*http.Response, error) {
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	}
+	client := &Client{baseURL: "http://paimos.test", http: &http.Client{Transport: runnerRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/runs/1":
+			return respond(r, http.StatusOK, `{"issue_id":5,"project_id":9,"device_id":"","deploy_target":"staging","status":"queued"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/PAI-5":
+			return respond(r, http.StatusOK, `{"id":5,"issue_key":"PAI-5","type":"ticket","title":"Supervised phases","status":"in-progress","priority":"medium"}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/runs/1":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				return nil, err
+			}
+			mu.Lock()
+			patches = append(patches, body)
+			mu.Unlock()
+			return respond(r, http.StatusOK, `{}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/runs/1/telemetry":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				return nil, err
+			}
+			mu.Lock()
+			telemetry = append(telemetry, body)
+			mu.Unlock()
+			return respond(r, http.StatusCreated, `{"accepted":true,"duplicate":false}`)
+		default:
+			return respond(r, http.StatusNotFound, `{}`)
+		}
+	})}}
+	runner := newAgentRunner(client, "device-phases", t.TempDir(),
+		`test "$PAIMOS_PROJECT_ID" = 9 && test -n "$PAIMOS_RUN_CORRELATION_ID" && printf provider`,
+		"claude_cli.implement", `printf test-start; sleep 0.08; printf test-end`, true, true,
+		`printf deploy-start; sleep 0.08; printf deploy-end`, true, false)
+	runner.heartbeatInterval = 10 * time.Millisecond
+	runner.heartbeatTimeout = time.Second
+	runner.executionTimeout = time.Second
+	if err := runner.handleRun(context.Background(), aJob()); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(patches) < 2 || patches[len(patches)-1]["status"] != "deployed" || patches[len(patches)-1]["tests_summary"] != "configured test command passed" {
+		t.Fatalf("patches=%+v", patches)
+	}
+	seenReviewing, seenTestingHeartbeat, seenDeployingHeartbeat := false, false, false
+	var correlation any
+	for i, fact := range telemetry {
+		if fact["sequence"] != float64(i+1) {
+			t.Fatalf("telemetry sequence %d=%+v", i, fact)
+		}
+		if i == 0 {
+			correlation = fact["correlation_id"]
+		} else if fact["correlation_id"] != correlation {
+			t.Fatalf("correlation changed: %+v", telemetry)
+		}
+		phase, _ := fact["phase"].(string)
+		if phase == "completed" {
+			t.Fatalf("pre-lifecycle telemetry claimed completion: %+v", fact)
+		}
+		if phase == "reviewing" {
+			seenReviewing = true
+		}
+		if fact["kind"] == "heartbeat" && phase == "testing" {
+			seenTestingHeartbeat = true
+		}
+		if fact["kind"] == "heartbeat" && phase == "deploying" {
+			seenDeployingHeartbeat = true
+		}
+	}
+	if !seenReviewing || !seenTestingHeartbeat || !seenDeployingHeartbeat {
+		t.Fatalf("reviewing=%v testing heartbeat=%v deploying heartbeat=%v telemetry=%+v", seenReviewing, seenTestingHeartbeat, seenDeployingHeartbeat, telemetry)
 	}
 }

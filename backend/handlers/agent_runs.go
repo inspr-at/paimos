@@ -32,6 +32,8 @@ import (
 	"github.com/inspr-at/paimos/backend/sse"
 )
 
+const agentRunTestsSummaryMaxBytes = 4096
+
 // AgentRun is the lifecycle record for one "Implement this" run.
 type AgentRun struct {
 	ID                         int64   `json:"id"`
@@ -1286,9 +1288,27 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 			sets = append(sets, "finished_at=datetime('now')")
 		}
 	}
-	if newStatus == "tests_passed" {
-		if body.TestsSummary == nil || strings.TrimSpace(*body.TestsSummary) != "configured test command passed" {
-			jsonError(w, "tests_passed requires configured test execution evidence", http.StatusConflict)
+	if body.TestsSummary != nil && len(*body.TestsSummary) > agentRunTestsSummaryMaxBytes {
+		jsonError(w, fmt.Sprintf("tests_summary must be at most %d bytes", agentRunTestsSummaryMaxBytes), http.StatusBadRequest)
+		return
+	}
+	if newStatus == "tests_passed" || newStatus == "tests_failed" {
+		evidence := existing.TestsSummary
+		if body.TestsSummary != nil {
+			evidence = body.TestsSummary
+		}
+		if evidence == nil || strings.TrimSpace(*evidence) == "" || len(*evidence) > agentRunTestsSummaryMaxBytes {
+			jsonError(w, newStatus+" requires non-empty bounded tests_summary evidence", http.StatusConflict)
+			return
+		}
+	}
+	if newStatus == "completed" {
+		evidence := existing.TestsSummary
+		if body.TestsSummary != nil {
+			evidence = body.TestsSummary
+		}
+		if evidence != nil && strings.TrimSpace(*evidence) != "" {
+			jsonError(w, "completed means tests were not run and cannot carry tests_summary", http.StatusConflict)
 			return
 		}
 	}
@@ -1481,7 +1501,13 @@ func agentRunReportBody(run *AgentRun) string {
 			target = ", deployed to " + run.DeployTarget
 		}
 		return fmt.Sprintf("🤖 Implemented%s%s%s.%s%s (run #%d on %s)", ver, at, target, tests, code, run.ID, on)
-	case "completed", "tests_passed":
+	case "completed":
+		ver := ""
+		if run.Version != "" {
+			ver = " (v" + run.Version + ")"
+		}
+		return fmt.Sprintf("🤖 Implemented%s%s. Tests were not run.%s (run #%d on %s)", at, ver, code, run.ID, on)
+	case "tests_passed":
 		ver := ""
 		if run.Version != "" {
 			ver = " (v" + run.Version + ")"

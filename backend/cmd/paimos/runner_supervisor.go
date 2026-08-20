@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -67,12 +69,19 @@ type runnerReportTransport interface {
 var (
 	errRunnerDisappeared = errors.New("runner disappeared")
 	errRunCancelled      = errors.New("run cancelled")
+	errRunStatusLost     = errors.New("run ownership or status lost")
 )
 
 type runnerTelemetryState struct {
 	sequence         int64
 	estimateRevision int64
 	correlationID    string
+	pending          *runnerPendingTelemetry
+}
+
+type runnerPendingTelemetry struct {
+	fact runTelemetryReport
+	body []byte
 }
 
 // httpRunnerReportTransport maps supervisor facts directly onto the PAI-799
@@ -95,10 +104,22 @@ func (h *httpRunnerReportTransport) Report(ctx context.Context, runID int64, rep
 	// Serialize allocation and delivery so the server observes sequence order.
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	state := h.stateLocked(runID)
-	state.sequence++
+	state, err := h.stateLocked(runID)
+	if err != nil {
+		return err
+	}
+	// A prior call may have timed out after the server accepted its request but
+	// before the response arrived. Flush that exact body first; never reuse its
+	// sequence for a different semantic fact.
+	if state.pending != nil {
+		if err := h.deliverPendingLocked(ctx, runID, state); err != nil {
+			return err
+		}
+	}
+	nextSequence := state.sequence + 1
+	nextEstimateRevision := state.estimateRevision
 	fact := runTelemetryReport{
-		Sequence: state.sequence, CorrelationID: state.correlationID, Provider: h.resolvedProvider(),
+		Sequence: nextSequence, CorrelationID: state.correlationID, Provider: h.resolvedProvider(),
 		Adapter: h.resolvedAdapter(), AgentReportedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Kind: "phase", Phase: allowedSupervisorPhase(report.Phase),
 		Activity:   safeReportValue(report.Summary, 160),
@@ -120,8 +141,8 @@ func (h *httpRunnerReportTransport) Report(ctx context.Context, runID int64, rep
 	case "result":
 		if report.Outcome == outcomeNormalExit {
 			fact.Kind = "phase"
-			fact.Phase = "completed"
-			fact.Activity = "Provider process exited normally"
+			fact.Phase = "reviewing"
+			fact.Activity = safeReportValue(report.Summary, 160)
 		} else {
 			fact.Kind = "blocker"
 			fact.Phase = "unknown"
@@ -129,9 +150,9 @@ func (h *httpRunnerReportTransport) Report(ctx context.Context, runID int64, rep
 		}
 	}
 	if hasEstimate {
-		state.estimateRevision++
+		nextEstimateRevision++
 		fact.Kind = "progress"
-		fact.EstimateRevision = &state.estimateRevision
+		fact.EstimateRevision = &nextEstimateRevision
 		fact.ProgressPercent = report.ProgressPercent
 		fact.ETASeconds = report.ETASeconds
 		fact.ETAMinSeconds = report.ETAMinSeconds
@@ -140,37 +161,97 @@ func (h *httpRunnerReportTransport) Report(ctx context.Context, runID int64, rep
 		fact.EstimateConfidence = report.EstimateConfidence
 		fact.EstimateBasis = safeReportValue(report.EstimateBasis, 240)
 	}
-	err := reportRunTelemetryContext(ctx, h.client, runID, fact)
+	body, err := json.Marshal(fact)
 	if err != nil {
-		var httpErr *httpError
-		if errors.As(err, &httpErr) && httpErr.Code == http.StatusConflict {
-			return fmt.Errorf("%w: run status changed", errRunCancelled)
-		}
-		if errors.As(err, &httpErr) && (httpErr.Code == http.StatusNotFound || httpErr.Code == http.StatusGone) {
-			return fmt.Errorf("%w: run no longer owned", errRunnerDisappeared)
-		}
-		return err
+		return fmt.Errorf("encode telemetry: %w", err)
 	}
-	return nil
+	state.pending = &runnerPendingTelemetry{fact: fact, body: body}
+	return h.deliverPendingLocked(ctx, runID, state)
 }
 
-func (h *httpRunnerReportTransport) Identity(runID int64) (string, string, string) {
+func (h *httpRunnerReportTransport) Identity(runID int64) (string, string, string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	state := h.stateLocked(runID)
-	return state.correlationID, h.resolvedProvider(), h.resolvedAdapter()
+	state, err := h.stateLocked(runID)
+	if err != nil {
+		return "", "", "", err
+	}
+	return state.correlationID, h.resolvedProvider(), h.resolvedAdapter(), nil
 }
 
-func (h *httpRunnerReportTransport) stateLocked(runID int64) *runnerTelemetryState {
+func (h *httpRunnerReportTransport) stateLocked(runID int64) (*runnerTelemetryState, error) {
 	if h.states == nil {
 		h.states = map[int64]*runnerTelemetryState{}
 	}
 	state := h.states[runID]
 	if state == nil {
-		state = &runnerTelemetryState{correlationID: fmt.Sprintf("run-%d-%d", runID, time.Now().UTC().UnixNano())}
+		correlationID, err := newRunCorrelationID()
+		if err != nil {
+			return nil, err
+		}
+		state = &runnerTelemetryState{correlationID: correlationID}
 		h.states[runID] = state
 	}
-	return state
+	return state, nil
+}
+
+func newRunCorrelationID() (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", fmt.Errorf("generate run correlation id: %w", err)
+	}
+	return id.String(), nil
+}
+
+func (h *httpRunnerReportTransport) deliverPendingLocked(ctx context.Context, runID int64, state *runnerTelemetryState) error {
+	for state.pending != nil {
+		err := postRunTelemetryBody(ctx, h.client, runID, state.pending.body)
+		if err == nil {
+			state.sequence = state.pending.fact.Sequence
+			if state.pending.fact.EstimateRevision != nil {
+				state.estimateRevision = *state.pending.fact.EstimateRevision
+			}
+			state.pending = nil
+			return nil
+		}
+		var httpErr *httpError
+		if errors.As(err, &httpErr) {
+			switch {
+			case httpErr.Code == http.StatusConflict:
+				return h.classifyConflict(ctx, runID)
+			case httpErr.Code == http.StatusNotFound || httpErr.Code == http.StatusGone:
+				return fmt.Errorf("%w: run no longer exists", errRunnerDisappeared)
+			case httpErr.Code < 500:
+				return err
+			}
+		}
+		// Network errors, unreadable responses, and 5xx responses are ambiguous:
+		// the server may have appended the fact. Retry the immutable body until
+		// acceptance/duplicate confirmation or the caller's deadline.
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("telemetry delivery remained ambiguous: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+	return nil
+}
+
+func (h *httpRunnerReportTransport) classifyConflict(ctx context.Context, runID int64) error {
+	status, err := fetchRunStatusContext(ctx, h.client, runID)
+	if err != nil {
+		var httpErr *httpError
+		if errors.As(err, &httpErr) && (httpErr.Code == http.StatusNotFound || httpErr.Code == http.StatusGone) {
+			return fmt.Errorf("%w: run disappeared after telemetry conflict", errRunnerDisappeared)
+		}
+		return fmt.Errorf("refetch run after telemetry conflict: %w", err)
+	}
+	if status == "cancelled" {
+		return fmt.Errorf("%w: server reports cancelled", errRunCancelled)
+	}
+	return fmt.Errorf("%w: server reports %s", errRunStatusLost, status)
 }
 
 func supervisorReportHasEstimate(report supervisorReport) bool {
@@ -233,6 +314,8 @@ type supervisorRequest struct {
 	HeartbeatInterval time.Duration
 	LogSink           io.Writer
 	Reporter          runnerReportTransport
+	InitialPhase      string
+	StartSummary      string
 }
 
 type supervisorResult struct {
@@ -303,7 +386,7 @@ func (a *claudeStreamAdapter) Consume(line []byte) (*safeProviderProgress, error
 		if a.resultFailed {
 			return &safeProviderProgress{phase: "unknown", summary: "Provider reported failure", blockerState: "unknown"}, nil
 		}
-		return &safeProviderProgress{phase: "completed", summary: "Provider completed normally"}, nil
+		return &safeProviderProgress{phase: "reviewing", summary: "Provider exited normally; verification is pending"}, nil
 	case "user", "stream_event", "rate_limit_event", "tool_progress", "tool_use_summary", "auth_status", "prompt_suggestion":
 		// These event bodies can contain prompts, tool arguments, command output,
 		// source text, or provider details. Activity is observed, but no body is
@@ -392,7 +475,10 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 	go consumeProviderStderr(stderrPipe, visibleStderr, logWriter, activity, streamErrors)
 	go func() { waited <- cmd.Wait() }()
 
-	currentPhase := "starting"
+	currentPhase := allowedSupervisorPhase(req.InitialPhase)
+	if currentPhase == "unknown" {
+		currentPhase = "starting"
+	}
 	report := func(fact supervisorReport) error {
 		if req.Reporter == nil {
 			return nil
@@ -400,6 +486,13 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 		reportCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		return req.Reporter.Report(reportCtx, req.RunID, fact)
+	}
+	if strings.TrimSpace(req.StartSummary) != "" {
+		if err := report(supervisorReport{Event: "progress", Phase: currentPhase, Summary: req.StartSummary}); err != nil {
+			terminateOwnedProcess(cmd)
+			<-waited
+			return reportErrorResult(err)
+		}
 	}
 	if err := report(supervisorReport{Event: "liveness", Phase: currentPhase}); err != nil {
 		terminateOwnedProcess(cmd)
@@ -504,7 +597,7 @@ func finishSupervisorResult(req supervisorRequest, result supervisorResult) supe
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := req.Reporter.Report(ctx, req.RunID, supervisorReport{
-		Event: "result", Phase: map[bool]string{true: "completed", false: "unknown"}[result.Outcome == outcomeNormalExit], Outcome: result.Outcome, Summary: result.Summary,
+		Event: "result", Phase: map[bool]string{true: "reviewing", false: "unknown"}[result.Outcome == outcomeNormalExit], Outcome: result.Outcome, Summary: result.Summary,
 	})
 	if err != nil {
 		return reportErrorResult(err)
@@ -609,6 +702,9 @@ func reportErrorResult(err error) supervisorResult {
 	}
 	if errors.Is(err, errRunnerDisappeared) {
 		return supervisorResult{Outcome: outcomeRunnerDisappearance, Summary: "run disappeared while child process was alive"}
+	}
+	if errors.Is(err, errRunStatusLost) {
+		return supervisorResult{Outcome: outcomeRunnerDisappearance, Summary: "run ownership or status changed while child process was alive"}
 	}
 	return supervisorResult{Outcome: outcomeReportFailure, Summary: "supervisor could not report liveness"}
 }

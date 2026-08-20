@@ -587,7 +587,7 @@ function runStages(run: AgentRun): RunStage[] {
         : isTestsFailed
           ? 'Tests failed'
           : isCompleted
-            ? 'Tests not verified'
+            ? 'Tests not run'
             : 'Tests',
       state: isTestsPassed
         ? 'complete'

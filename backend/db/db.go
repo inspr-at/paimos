@@ -5675,6 +5675,9 @@ func migrate(db *sql.DB) error {
 		// to add the truthful `completed` terminal status and the durable marker
 		// used to distinguish new supervised claims from legacy runners. Preserve
 		// every M131/M132/M140 column and recreate every index.
+		// Snapshot sqlite_sequence before dropping the old AUTOINCREMENT table;
+		// explicit-id copying alone would otherwise lower the next id when rows
+		// had previously been deleted.
 		//
 		// The latest telemetry row is an event pointer, not a state snapshot. Add
 		// separately indexed heartbeat/semantic/estimate pointers so a heartbeat
@@ -5682,6 +5685,9 @@ func migrate(db *sql.DB) error {
 		{143, []string{
 			`PRAGMA foreign_keys=OFF`,
 			`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_terminal_guard`,
+			`CREATE TEMP TABLE agent_runs_m143_sequence (seq INTEGER NOT NULL)`,
+			`INSERT INTO agent_runs_m143_sequence(seq)
+			 SELECT MAX(COALESCE((SELECT seq FROM sqlite_sequence WHERE name='agent_runs'),0), COALESCE((SELECT MAX(id) FROM agent_runs),0))`,
 			`CREATE TABLE agent_runs_m143 (
 				id                           INTEGER PRIMARY KEY AUTOINCREMENT,
 				issue_id                     INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
@@ -5743,6 +5749,13 @@ func migrate(db *sql.DB) error {
 			   FROM agent_runs`,
 			`DROP TABLE agent_runs`,
 			`ALTER TABLE agent_runs_m143 RENAME TO agent_runs`,
+			`INSERT INTO sqlite_sequence(name,seq)
+			 SELECT 'agent_runs',seq FROM agent_runs_m143_sequence
+			 WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='agent_runs')`,
+			`UPDATE sqlite_sequence
+			 SET seq=MAX(seq,(SELECT seq FROM agent_runs_m143_sequence))
+			 WHERE name='agent_runs'`,
+			`DROP TABLE agent_runs_m143_sequence`,
 			`CREATE INDEX IF NOT EXISTS idx_agent_runs_issue ON agent_runs(issue_id)`,
 			`CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status)`,
 			`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_active_issue ON agent_runs(issue_id) WHERE status IN ('queued','running')`,

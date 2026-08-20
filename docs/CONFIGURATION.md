@@ -96,9 +96,13 @@ environment variables. The safety-relevant defaults are:
 | `--exec` | `claude` | Built-in Claude structured-stream mode with repository read/edit tools only. Any custom value is an explicit raw shell-command fallback. |
 | `--claude-permission-mode` | `dontAsk` | Permission mode passed to the built-in Claude command. Explicitly configurable; shell metacharacters and unknown modes are rejected. |
 | `--claude-allowed-tools` | `Read,Glob,Grep,Edit,Write` | Comma-separated tool allowlist for built-in Claude mode. Bash, MCP, browser, and bypass tools are absent by default. |
+| `--unsafe-allow-bypass-permissions` | `false` | Separate unsafe opt-in required when `--claude-permission-mode=bypassPermissions`; choosing the mode alone is rejected. |
 | `--test-exec` | *(empty)* | The only runner-owned test evidence source. Empty means successful implementation reports `completed`, not `tests_passed`. |
 | `--attach-logs` | `false` | Opt-in bounded raw log capture; output can contain secrets. |
 | `--allow-deploy` | `false` | Still requires `--deploy-exec`, a run `deploy_target`, and separate consent unless `--yes-deploy`. |
+
+Provider, test, and enabled deploy commands all run through the same
+process-group supervisor, execution/silence watchdogs, and heartbeat cadence.
 
 The built-in Claude action does not enable Bash, MCP, browser tools, or
 permission bypass. A custom `--exec` can broaden permissions, but that is an

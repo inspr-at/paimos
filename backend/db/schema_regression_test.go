@@ -1,13 +1,34 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 )
+
+func schemaNames(t *testing.T, database *sql.DB, query string) []string {
+	t.Helper()
+	rows, err := database.Query(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
 
 const latestSchemaVersion = 143
 
@@ -130,6 +151,194 @@ func TestSchemaAgentRunTelemetryTables(t *testing.T) {
 	var fkTable string
 	if err := database.QueryRow(`SELECT "table" FROM pragma_foreign_key_check LIMIT 1`).Scan(&fkTable); err != sql.ErrNoRows {
 		t.Fatalf("M143 foreign-key check found table=%q err=%v", fkTable, err)
+	}
+}
+
+func TestMigration143UpgradesPopulatedM142WithoutLosingGraphOrTelemetry(t *testing.T) {
+	database := openTestDB(t)
+	admin, err := database.Exec(`INSERT INTO users(username,password,role,status) VALUES('m143-admin','hash','admin','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminID, _ := admin.LastInsertId()
+	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('M143 fixture','MFX')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	issue, err := database.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status) VALUES(?,1,'ticket','upgrade fixture','in-progress')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := issue.LastInsertId()
+	draft, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,claimed_by,status,agent_name,session_id,version,tests_summary,deploy_target,error,action_key,provider_kind,provider_id,provider_label,model,run_mode,profile_id,effort,prompt_preset_ref,context_pack,context_truncated,context_sources_json,prompt_tokens,completion_tokens,finish_reason,repo_url,branch_name,commit_base_sha,commit_sha)
+		VALUES(?,?,?,?, 'drafted','planner','session-draft','1.2.3','draft only','','','openrouter.draft','hosted','openrouter','OpenRouter','model-a','draft','profile-a','high','preset-a','full',1,'[{"source":"issue"}]',11,22,'stop','https://example.test/repo','draft-branch',?,?)`,
+		issueID, projectID, adminID, adminID, strings.Repeat("a", 40), strings.Repeat("b", 40))
+	if err != nil {
+		t.Fatal(err)
+	}
+	draftID, _ := draft.LastInsertId()
+	followup, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,claimed_by,status,agent_name,session_id,action_key,provider_kind,provider_id,provider_label,run_mode,source_draft_run_id,repo_url,branch_name,commit_base_sha,commit_sha)
+		VALUES(?,?,?,?,'running','implementer','session-run','claude_cli.implement','local_cli','claude_cli','Claude Code','edit',?,'https://example.test/repo','feature/m143',?,?)`,
+		issueID, projectID, adminID, adminID, draftID, strings.Repeat("b", 40), strings.Repeat("c", 40))
+	if err != nil {
+		t.Fatal(err)
+	}
+	followupID, _ := followup.LastInsertId()
+	if _, err := database.Exec(`UPDATE agent_runs SET followup_run_id=? WHERE id=?`, followupID, draftID); err != nil {
+		t.Fatal(err)
+	}
+	telemetry, err := database.Exec(`INSERT INTO agent_run_telemetry(run_id,sequence,correlation_id,provider,adapter,agent_reported_at,server_received_at,kind,heartbeat,phase)
+		VALUES(?,1,'fixture-correlation','anthropic','claude-code','2026-08-20T10:00:00Z','2026-08-20T10:00:01Z','heartbeat',1,'implementing')`, followupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	telemetryID, _ := telemetry.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO agent_run_telemetry_latest(run_id,telemetry_id,sequence,last_heartbeat_at,heartbeat_telemetry_id,latest_event_at)
+		VALUES(?,?,1,'2026-08-20T10:00:01Z',?,'2026-08-20T10:00:01Z')`, followupID, telemetryID, telemetryID); err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := database.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(context.Background(), `PRAGMA foreign_keys=OFF`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := conn.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := []string{
+		`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_terminal_guard`,
+		`DROP INDEX IF EXISTS idx_agent_runs_supervisor_active`,
+		`DROP INDEX IF EXISTS idx_agent_run_telemetry_latest_heartbeat`,
+		`ALTER TABLE agent_run_telemetry_latest DROP COLUMN latest_estimate_at`,
+		`ALTER TABLE agent_run_telemetry_latest DROP COLUMN latest_semantic_at`,
+		`ALTER TABLE agent_run_telemetry_latest DROP COLUMN latest_event_at`,
+		`ALTER TABLE agent_run_telemetry_latest DROP COLUMN estimate_telemetry_id`,
+		`ALTER TABLE agent_run_telemetry_latest DROP COLUMN semantic_telemetry_id`,
+		`ALTER TABLE agent_run_telemetry_latest DROP COLUMN heartbeat_telemetry_id`,
+		`CREATE TABLE agent_runs_m142_fixture (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+			project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL, device_id TEXT NOT NULL DEFAULT '',
+			requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL, agent_name TEXT NOT NULL DEFAULT '', session_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','tests_passed','tests_failed','deployed','failed','cancelled','drafted')),
+			version TEXT NOT NULL DEFAULT '', tests_summary TEXT, deploy_target TEXT NOT NULL DEFAULT '', log_attachment_id INTEGER,
+			error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT,
+			claimed_by INTEGER REFERENCES users(id) ON DELETE SET NULL, action_key TEXT NOT NULL DEFAULT 'claude_cli.implement',
+			provider_kind TEXT NOT NULL DEFAULT 'local_cli', provider_id TEXT NOT NULL DEFAULT 'claude_cli', provider_label TEXT NOT NULL DEFAULT 'Claude Code',
+			model TEXT NOT NULL DEFAULT '', run_mode TEXT NOT NULL DEFAULT 'edit', profile_id TEXT NOT NULL DEFAULT '', effort TEXT NOT NULL DEFAULT '',
+			prompt_preset_ref TEXT NOT NULL DEFAULT '', context_pack TEXT NOT NULL DEFAULT '', context_truncated INTEGER NOT NULL DEFAULT 0,
+			context_sources_json TEXT NOT NULL DEFAULT '', prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0,
+			finish_reason TEXT NOT NULL DEFAULT '', source_draft_run_id INTEGER REFERENCES agent_runs_m142_fixture(id) ON DELETE SET NULL,
+			followup_run_id INTEGER REFERENCES agent_runs_m142_fixture(id) ON DELETE SET NULL, repo_url TEXT NOT NULL DEFAULT '', branch_name TEXT NOT NULL DEFAULT '',
+			commit_base_sha TEXT NOT NULL DEFAULT '', commit_sha TEXT NOT NULL DEFAULT '')`,
+		`INSERT INTO agent_runs_m142_fixture SELECT id,issue_id,project_id,device_id,requested_by,agent_name,session_id,status,version,tests_summary,deploy_target,log_attachment_id,error,created_at,started_at,finished_at,claimed_by,action_key,provider_kind,provider_id,provider_label,model,run_mode,profile_id,effort,prompt_preset_ref,context_pack,context_truncated,context_sources_json,prompt_tokens,completion_tokens,finish_reason,source_draft_run_id,followup_run_id,repo_url,branch_name,commit_base_sha,commit_sha FROM agent_runs`,
+		`DROP TABLE agent_runs`,
+		`ALTER TABLE agent_runs_m142_fixture RENAME TO agent_runs`,
+		`CREATE INDEX idx_agent_runs_issue ON agent_runs(issue_id)`,
+		`CREATE INDEX idx_agent_runs_status ON agent_runs(status)`,
+		`CREATE UNIQUE INDEX idx_agent_runs_active_issue ON agent_runs(issue_id) WHERE status IN ('queued','running')`,
+		`CREATE INDEX idx_agent_runs_claimed_by ON agent_runs(claimed_by)`,
+		`CREATE INDEX idx_agent_runs_action_key ON agent_runs(action_key)`,
+		`CREATE INDEX idx_agent_runs_run_mode ON agent_runs(run_mode)`,
+		`CREATE INDEX idx_agent_runs_provider_id ON agent_runs(provider_id)`,
+		`CREATE INDEX idx_agent_runs_source_draft ON agent_runs(source_draft_run_id)`,
+		`CREATE INDEX idx_agent_runs_followup ON agent_runs(followup_run_id)`,
+		`CREATE TRIGGER trg_agent_run_telemetry_terminal_guard BEFORE INSERT ON agent_run_telemetry
+		 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('deployed','failed','cancelled','drafted')
+		 BEGIN SELECT RAISE(ABORT, 'terminal run telemetry is immutable'); END`,
+		`UPDATE sqlite_sequence SET seq=50 WHERE name='agent_runs'`,
+		`DELETE FROM schema_versions WHERE version=143`,
+	}
+	for _, step := range steps {
+		if _, err := tx.ExecContext(context.Background(), step); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("prepare M142 fixture step %q: %v", step, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	m142Columns := schemaNames(t, database, `SELECT name FROM pragma_table_info('agent_runs')`)
+	m142Indexes := schemaNames(t, database, `SELECT name FROM pragma_index_list('agent_runs') WHERE origin='c'`)
+	exactM142Columns := []string{
+		"id", "issue_id", "project_id", "device_id", "requested_by", "agent_name", "session_id", "status", "version", "tests_summary",
+		"deploy_target", "log_attachment_id", "error", "created_at", "started_at", "finished_at", "claimed_by", "action_key", "provider_kind",
+		"provider_id", "provider_label", "model", "run_mode", "profile_id", "effort", "prompt_preset_ref", "context_pack", "context_truncated",
+		"context_sources_json", "prompt_tokens", "completion_tokens", "finish_reason", "source_draft_run_id", "followup_run_id", "repo_url",
+		"branch_name", "commit_base_sha", "commit_sha",
+	}
+	exactM142Indexes := []string{
+		"idx_agent_runs_issue", "idx_agent_runs_status", "idx_agent_runs_active_issue", "idx_agent_runs_claimed_by", "idx_agent_runs_action_key",
+		"idx_agent_runs_run_mode", "idx_agent_runs_provider_id", "idx_agent_runs_source_draft", "idx_agent_runs_followup",
+	}
+	sort.Strings(exactM142Columns)
+	sort.Strings(exactM142Indexes)
+	if strings.Join(m142Columns, "\x00") != strings.Join(exactM142Columns, "\x00") || strings.Join(m142Indexes, "\x00") != strings.Join(exactM142Indexes, "\x00") {
+		t.Fatalf("fixture is not exact M142 schema: columns=%v indexes=%v", m142Columns, m142Indexes)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	DB = nil
+	if err := Open(); err != nil {
+		t.Fatalf("restart applying M143: %v", err)
+	}
+	database = DB
+
+	wantColumns := append(append([]string(nil), m142Columns...), "expects_supervisor_telemetry")
+	sort.Strings(wantColumns)
+	if got := schemaNames(t, database, `SELECT name FROM pragma_table_info('agent_runs')`); strings.Join(got, "\x00") != strings.Join(wantColumns, "\x00") {
+		t.Fatalf("M143 columns=%v want M142+intentional=%v", got, wantColumns)
+	}
+	wantIndexes := append(append([]string(nil), m142Indexes...), "idx_agent_runs_supervisor_active")
+	sort.Strings(wantIndexes)
+	if got := schemaNames(t, database, `SELECT name FROM pragma_index_list('agent_runs') WHERE origin='c'`); strings.Join(got, "\x00") != strings.Join(wantIndexes, "\x00") {
+		t.Fatalf("M143 indexes=%v want M142+intentional=%v", got, wantIndexes)
+	}
+	var gotFollowup, gotSource sql.NullInt64
+	var contextJSON, repoURL, branch, baseSHA, headSHA string
+	if err := database.QueryRow(`SELECT followup_run_id,context_sources_json,repo_url,branch_name,commit_base_sha,commit_sha FROM agent_runs WHERE id=?`, draftID).
+		Scan(&gotFollowup, &contextJSON, &repoURL, &branch, &baseSHA, &headSHA); err != nil {
+		t.Fatal(err)
+	}
+	if !gotFollowup.Valid || gotFollowup.Int64 != followupID || contextJSON != `[{"source":"issue"}]` || repoURL != "https://example.test/repo" || branch != "draft-branch" || baseSHA != strings.Repeat("a", 40) || headSHA != strings.Repeat("b", 40) {
+		t.Fatalf("draft row not preserved: followup=%v context=%q repo=%q branch=%q base=%q head=%q", gotFollowup, contextJSON, repoURL, branch, baseSHA, headSHA)
+	}
+	if err := database.QueryRow(`SELECT source_draft_run_id FROM agent_runs WHERE id=?`, followupID).Scan(&gotSource); err != nil || !gotSource.Valid || gotSource.Int64 != draftID {
+		t.Fatalf("followup source=%v err=%v", gotSource, err)
+	}
+	var childRun, latestTelemetry, heartbeatTelemetry int64
+	if err := database.QueryRow(`SELECT t.run_id,l.telemetry_id,l.heartbeat_telemetry_id FROM agent_run_telemetry t JOIN agent_run_telemetry_latest l ON l.run_id=t.run_id WHERE t.id=?`, telemetryID).
+		Scan(&childRun, &latestTelemetry, &heartbeatTelemetry); err != nil || childRun != followupID || latestTelemetry != telemetryID || heartbeatTelemetry != telemetryID {
+		t.Fatalf("telemetry pointers run=%d latest=%d heartbeat=%d err=%v", childRun, latestTelemetry, heartbeatTelemetry, err)
+	}
+	var fkTable string
+	if err := database.QueryRow(`SELECT "table" FROM pragma_foreign_key_check LIMIT 1`).Scan(&fkTable); err != sql.ErrNoRows {
+		t.Fatalf("foreign_key_check table=%q err=%v", fkTable, err)
+	}
+	newRun, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,status) VALUES(?,?,'completed')`, issueID, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newID, _ := newRun.LastInsertId()
+	if newID <= 50 {
+		t.Fatalf("sqlite_sequence regressed: next id=%d", newID)
+	}
+	if _, err := database.Exec(`UPDATE agent_runs SET status='completed' WHERE id=?`, followupID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO agent_run_telemetry(run_id,sequence,correlation_id,provider,adapter,agent_reported_at,server_received_at,kind)
+		VALUES(?,2,'fixture-correlation','anthropic','claude-code','2026-08-20T10:00:02Z','2026-08-20T10:00:02Z','phase')`, followupID); err == nil || !strings.Contains(err.Error(), "terminal run telemetry") {
+		t.Fatalf("M143 terminal guard error=%v", err)
 	}
 }
 

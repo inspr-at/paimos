@@ -559,7 +559,9 @@
           },
           "tests_summary": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "maxLength": 4096,
+            "description": "Bounded test evidence; completed means tests were not run and carries no test evidence"
           },
           "error": {
             "type": "string"
@@ -888,7 +890,9 @@
           },
           "tests_summary": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "maxLength": 4096,
+            "description": "Non-empty evidence required by tests_passed/tests_failed; completed means tests were not run"
           },
           "deploy_target": {
             "type": "string"
@@ -2838,7 +2842,8 @@
                   },
                   "tests_summary": {
                     "type": "string",
-                    "description": "bounded runner-owned result evidence; tests_passed requires the configured-test success evidence value"
+                    "maxLength": 4096,
+                    "description": "bounded runner-owned result evidence; tests_passed and tests_failed require a non-empty value in this request or already persisted, while completed rejects test evidence"
                   },
                   "deploy_target": {
                     "type": "string"

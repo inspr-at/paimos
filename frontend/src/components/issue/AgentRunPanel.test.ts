@@ -651,7 +651,7 @@ describe('AgentRunPanel — polling lifecycle (H2)', () => {
     const { el, unmount } = mountPanel()
     await vi.advanceTimersByTimeAsync(0)
     expect(el.textContent).toContain('Implemented')
-    expect(el.textContent).toContain('Tests not verified')
+    expect(el.textContent).toContain('Tests not run')
     const callsAfterLoad = runsCalls
     await vi.advanceTimersByTimeAsync(12000)
     expect(runsCalls).toBe(callsAfterLoad)

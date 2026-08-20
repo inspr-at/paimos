@@ -114,4 +114,19 @@ func TestApplyMigrationForeignKeyRebuildRollsBackAndRestoresPragma(t *testing.T)
 	if err := conn.QueryRowContext(context.Background(), `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil || foreignKeys != 1 {
 		t.Fatalf("foreign_keys=%d err=%v, want restored", foreignKeys, err)
 	}
+
+	// A process restart sees the version still pending and must be able to retry
+	// from the original schema. This pins the recovery expectation for rebuilds
+	// whose FK-off toggle necessarily lives outside the DDL transaction.
+	retry := migration{version: 3, steps: []string{
+		`PRAGMA foreign_keys=OFF`,
+		`CREATE TABLE non_atomic_probe (id INTEGER PRIMARY KEY)`,
+		`PRAGMA foreign_keys=ON`,
+	}}
+	if err := applyMigration(context.Background(), conn, retry); err != nil {
+		t.Fatalf("restart retry: %v", err)
+	}
+	if !migrationRecorded(t, db, 3) || !tableExists(t, db, "non_atomic_probe") {
+		t.Fatal("successful restart retry did not commit schema and version together")
+	}
 }

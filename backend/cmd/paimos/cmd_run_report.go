@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -64,7 +65,10 @@ func runReportCmd() *cobra.Command {
 
 Reports are immutable and sequence numbers must increase. Percentage and ETA
 are optional evidence-backed declarations; PAIMOS never derives them from
-elapsed wall-clock time. If run-id is omitted, PAIMOS_RUN_ID is used.`,
+elapsed wall-clock time. The built-in supervisor owns its sequence space;
+external adapters must serialize reports and reuse the exact body/sequence when
+retrying an ambiguous result. A new append returns 201 and an exact duplicate
+returns 200. If run-id is omitted, PAIMOS_RUN_ID is used.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runIDRaw := strings.TrimSpace(os.Getenv("PAIMOS_RUN_ID"))
@@ -170,12 +174,50 @@ func reportRunTelemetryContext(ctx context.Context, client *Client, runID int64,
 	if err != nil {
 		return fmt.Errorf("encode telemetry: %w", err)
 	}
+	return postRunTelemetryBody(ctx, client, runID, body)
+}
+
+func postRunTelemetryBody(ctx context.Context, client *Client, runID int64, body []byte) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		client.baseURL+fmt.Sprintf("/api/runs/%d/telemetry", runID), bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build telemetry request: %w", err)
 	}
 	client.prepareRequest(req, true, "application/json", "application/json")
-	_, err = client.doRequest(req)
-	return err
+	raw, err := client.doRequest(req)
+	if err != nil {
+		return err
+	}
+	var accepted struct {
+		Accepted  bool `json:"accepted"`
+		Duplicate bool `json:"duplicate"`
+	}
+	if err := json.Unmarshal(raw, &accepted); err != nil || !accepted.Accepted {
+		return errors.New("telemetry response did not authoritatively confirm acceptance")
+	}
+	return nil
+}
+
+func fetchRunStatusContext(ctx context.Context, client *Client, runID int64) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		client.baseURL+fmt.Sprintf("/api/runs/%d", runID), nil)
+	if err != nil {
+		return "", fmt.Errorf("build run status request: %w", err)
+	}
+	client.prepareRequest(req, false, "", "application/json")
+	raw, err := client.doRequest(req)
+	if err != nil {
+		return "", err
+	}
+	var run struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &run); err != nil {
+		return "", fmt.Errorf("decode run status: %w", err)
+	}
+	status := strings.TrimSpace(run.Status)
+	if status == "" {
+		return "", errors.New("run status response omitted status")
+	}
+	return status, nil
 }

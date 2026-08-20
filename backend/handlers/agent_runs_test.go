@@ -831,6 +831,55 @@ func TestAgentRunIllegalTransition(t *testing.T) {
 	assertStatus(t, resp, http.StatusOK)
 }
 
+func TestAgentRunTestStatusesRequireBoundedEvidence(t *testing.T) {
+	ts := newTestServer(t)
+	projID := seedBatchProject(t, "EVB", "Evidence")
+	newRunning := func(number int) int64 {
+		t.Helper()
+		_, runID := seedRunForIssue(t, ts, projID, number)
+		assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "running"}), http.StatusOK)
+		return runID
+	}
+
+	for i, status := range []string{"tests_passed", "tests_failed"} {
+		runID := newRunning(i + 1)
+		assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+			map[string]any{"status": status, "tests_summary": "  \n\t"}), http.StatusConflict)
+	}
+
+	passedID := newRunning(3)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(passedID), ts.adminCookie,
+		map[string]any{"status": "tests_passed", "tests_summary": "go test ./...: 248 packages passed"}), http.StatusOK)
+	failedID := newRunning(4)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(failedID), ts.adminCookie,
+		map[string]any{"status": "tests_failed", "tests_summary": "frontend suite: 1 failed, 127 passed"}), http.StatusOK)
+
+	persistedID := newRunning(5)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(persistedID), ts.adminCookie,
+		map[string]any{"tests_summary": "integration suite failed at case 9"}), http.StatusOK)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(persistedID), ts.adminCookie,
+		map[string]any{"status": "tests_failed"}), http.StatusOK)
+
+	oversizedID := newRunning(6)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(oversizedID), ts.adminCookie,
+		map[string]any{"status": "tests_passed", "tests_summary": strings.Repeat("x", 4097)}), http.StatusBadRequest)
+	completedID := newRunning(7)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(completedID), ts.adminCookie,
+		map[string]any{"status": "completed", "tests_summary": "tests passed"}), http.StatusConflict)
+}
+
+func TestAgentRunCompletedCommentSaysTestsWereNotRun(t *testing.T) {
+	ts := newTestServer(t)
+	projID := seedBatchProject(t, "NTR", "No tests")
+	issueID, runID := seedRunForIssue(t, ts, projID, 1)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "running"}), http.StatusOK)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{"status": "completed"}), http.StatusOK)
+	body, count := firstComment(t, issueID)
+	if count != 1 || !strings.Contains(body, "Tests were not run") || strings.Contains(strings.ToLower(body), "tests passed") {
+		t.Fatalf("completed report comment=%q count=%d", body, count)
+	}
+}
+
 // TestAgentRunTestsPassedStampsFinishedAtButCanDeploy pins the result-state
 // semantics used by report-back-only runners: tests_passed is a completed
 // result with a timestamp, but it remains non-terminal so a later deploy report

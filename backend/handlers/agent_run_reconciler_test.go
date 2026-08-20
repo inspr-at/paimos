@@ -63,7 +63,9 @@ func TestAgentRunReconcilerDistinguishesQueuedSupervisorAndLegacy(t *testing.T) 
 	firstHeartbeat := seed(2, "running", true, "-2 minutes")
 	staleHeartbeat := seed(3, "running", true, "-10 minutes")
 	legacy := seed(4, "running", false, "-3 hours")
-	fresh := seed(5, "running", true, "-10 seconds")
+	// This run is older than the legacy two-hour fallback, but its fresh
+	// server-received heartbeat must keep it alive.
+	fresh := seed(5, "running", true, "-3 hours")
 
 	// Seed a real heartbeat snapshot, then age only its server-owned receipt
 	// timestamp. Semantic activity is irrelevant to the watchdog.
@@ -107,6 +109,71 @@ func TestAgentRunReconcilerDistinguishesQueuedSupervisorAndLegacy(t *testing.T) 
 	if err := db.DB.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, fresh).Scan(&freshStatus); err != nil || freshStatus != "running" {
 		t.Fatalf("fresh status=%q err=%v", freshStatus, err)
 	}
+}
+
+func TestAgentRunReconcilerIgnoresEveryNonActiveStatus(t *testing.T) {
+	_ = newDirectTelemetryServer(t)
+	projectID := seedBatchProject(t, "RAT", "Reaper terminal matrix")
+	statuses := []string{"completed", "tests_passed", "tests_failed", "deployed", "failed", "cancelled", "drafted"}
+	for i, status := range statuses {
+		res, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status) VALUES(?,?,'ticket',?,'in-progress')`, projectID, i+1, status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		issueID, _ := res.LastInsertId()
+		if _, err := db.DB.Exec(`INSERT INTO agent_runs(issue_id,project_id,status,expects_supervisor_telemetry,created_at,started_at,finished_at)
+			VALUES(?,?,?,1,datetime('now','-1 day'),datetime('now','-1 day'),datetime('now','-23 hours'))`, issueID, projectID, status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	updated, err := handlers.ReconcileStaleAgentRuns(context.Background(), time.Now().UTC(), handlers.AgentRunReconcilerConfig{
+		Interval: time.Second, QueuedTimeout: time.Second, FirstHeartbeatTimeout: time.Second,
+		HeartbeatTimeout: time.Second, LegacyFallbackTimeout: time.Second,
+	})
+	if err != nil || updated != 0 {
+		t.Fatalf("updated=%d err=%v", updated, err)
+	}
+	for _, status := range statuses {
+		var count int
+		if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_runs WHERE status=?`, status).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("status %q count=%d err=%v", status, count, err)
+		}
+	}
+}
+
+func TestAgentRunReconcilerDeterministicHeartbeatRaceOrders(t *testing.T) {
+	ts := newDirectTelemetryServer(t)
+	projectID := seedBatchProject(t, "RRO", "Reaper ordered races")
+	seed := func(number int) int64 {
+		res, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status) VALUES(?,?,'ticket','ordered race','in-progress')`, projectID, number)
+		if err != nil {
+			t.Fatal(err)
+		}
+		issueID, _ := res.LastInsertId()
+		res, err = db.DB.Exec(`INSERT INTO agent_runs(issue_id,project_id,status,expects_supervisor_telemetry,created_at,started_at)
+			VALUES(?,?,'running',1,datetime('now','-5 minutes'),datetime('now','-5 minutes'))`, issueID, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := res.LastInsertId()
+		return id
+	}
+	cfg := handlers.AgentRunReconcilerConfig{Interval: time.Second, QueuedTimeout: time.Minute, FirstHeartbeatTimeout: time.Second, HeartbeatTimeout: time.Minute, LegacyFallbackTimeout: time.Hour}
+	now := time.Now().UTC()
+
+	heartbeatFirst := seed(1)
+	assertStatus(t, ts.post(t, "/api/runs/"+itoa(heartbeatFirst)+"/telemetry", ts.adminCookie,
+		telemetryReport(1, now.Format(time.RFC3339Nano))), 201)
+	if n, err := handlers.ReconcileStaleAgentRuns(context.Background(), now, cfg); err != nil || n != 0 {
+		t.Fatalf("heartbeat-first reconciled=%d err=%v", n, err)
+	}
+
+	reaperFirst := seed(2)
+	if n, err := handlers.ReconcileStaleAgentRuns(context.Background(), now, cfg); err != nil || n != 1 {
+		t.Fatalf("reaper-first reconciled=%d err=%v", n, err)
+	}
+	assertStatus(t, ts.post(t, "/api/runs/"+itoa(reaperFirst)+"/telemetry", ts.adminCookie,
+		telemetryReport(1, now.Format(time.RFC3339Nano))), 409)
 }
 
 func TestAgentRunReconcilerDoesNotOverwriteTerminalWinner(t *testing.T) {

@@ -456,10 +456,12 @@ The default `--exec "claude"` is normalized to Claude Code print mode with
 allowlist of repository read/edit tools (`Read,Glob,Grep,Edit,Write`). It does
 not enable Bash, MCP, browser, or permission bypass by default. Operators can
 explicitly set `--claude-permission-mode` and `--claude-allowed-tools`; both are
-validated before launch. A custom `--exec` remains the raw-stream escape hatch.
+validated before launch. Selecting `bypassPermissions` is rejected unless the
+separate `--unsafe-allow-bypass-permissions` flag is also present; merely typing
+the mode never opts into bypass. A custom `--exec` remains the deliberate raw-command escape hatch.
 The generated issue prompt
 is fed on stdin, so a queued run never opens an interactive TUI. The spawned
-command sees `PAIMOS_RUN_ID`, `PAIMOS_ISSUE_KEY`,
+command sees `PAIMOS_RUN_ID`, `PAIMOS_PROJECT_ID`, `PAIMOS_ISSUE_KEY`,
 `PAIMOS_ISSUE_TITLE`, `PAIMOS_CONTEXT_PACK`, `PAIMOS_CONTEXT_PACK_LABEL`, and
 `PAIMOS_PROMPT_FILE`. The supervisor also sets `PAIMOS_RUN_CORRELATION_ID`,
 `PAIMOS_RUN_PROVIDER`, and `PAIMOS_RUN_ADAPTER` to its exact telemetry identity;
@@ -481,7 +483,7 @@ or persisted as telemetry.
 
 The supervisor parses only bounded Claude JSON-line envelopes. It translates
 an allowlist of event type/tool-name classes into the wire phases `starting`,
-`planning`, `implementing`, `testing`, `waiting`, and `completed`; prompt text, assistant text, tool
+`planning`, `implementing`, `testing`, `waiting`, and `reviewing`; prompt text, assistant text, tool
 arguments, command output, source text, environment values, and provider error
 bodies never enter telemetry. Oversized events, aggregate stream floods, and
 malformed/unknown events fail closed. Terminal outcomes distinguish spawn
@@ -502,14 +504,22 @@ enforcement.
 
 The supervisor sends these facts directly to `POST /api/runs/:id/telemetry`.
 It owns one stable correlation id and strictly increasing sequence per run.
+The correlation is a cryptographically random UUID created once after the
+claim and reused in every fact and child environment value. Heartbeat and
+semantic callbacks are serialized per run. Ambiguous network/5xx results retry
+the exact request body and sequence; allocation advances only after append 201
+or authoritative duplicate 200 acceptance. A 409 triggers a run refetch so
+cancellation, another terminal/reaped status, and disappearance stay distinct.
 Heartbeat reports use `kind=heartbeat`, `heartbeat=true`, and no activity text;
 semantic phase/needs-input/blocker reports use `heartbeat=false`. Therefore a
 stream of model activity cannot keep the supervisor watchdog alive. Claiming a
 run atomically persists `expects_supervisor_telemetry=true` before launch.
 
 `--test-exec` is the only runner-owned way to prove tests in the run record. It runs
-after the agent command, records only `configured test command passed|failed`
-in `tests_summary` (never command text or output), reports
+after the agent command through the same process-group, heartbeat, silence, and
+execution watchdog as the provider and records a bounded result summary in
+`tests_summary` (never command text or output). The server accepts any non-empty
+bounded test evidence rather than one runner-specific sentence, and reports
 `tests_failed` if the command exits non-zero, and skips deploy on test failure:
 
 ```bash
@@ -524,7 +534,10 @@ project member — only enable it for repos/tickets where that's acceptable. The
 capture is capped; the cap does not turn raw output into telemetry.
 
 A normal provider exit without `--test-exec` reports `completed`, never
-`tests_passed`. Deployment and smoke verification remain separate facts; the
+`tests_passed`; its issue comment explicitly says tests were not run. Provider
+exit itself emits `reviewing`, never telemetry `completed`, because tests and
+deploy have not yet finished. Configured deploy commands also use the same
+supervisor/watchdog path with `deploying` heartbeats. Deployment and smoke verification remain separate facts; the
 runner reports neither unless the corresponding configured command actually
 ran successfully.
 
@@ -582,7 +595,7 @@ Example report:
 
 `sequence` must increase; exact same-sequence/same-body replay returns 200 with
 `duplicate: true`, while conflicting duplicates and out-of-order reports return
-409. `correlation_id`, `provider`, and `adapter` become immutable after the
+409; a newly appended fact returns 201. `correlation_id`, `provider`, and `adapter` become immutable after the
 first accepted report. Delayed reports are accepted when their sequence is
 newer. `agent_reported_at` is retained as agent evidence, but freshness,
 clock-skew detection use `server_received_at`. Active liveness uses only the
@@ -624,7 +637,7 @@ paimos run report "$PAIMOS_RUN_ID" \
   --basis "Three of four named verification checkpoints completed"
 ```
 
-`PAIMOS_RUN_ID`, `PAIMOS_RUN_CORRELATION_ID`, `PAIMOS_RUN_PROVIDER`, and
+`PAIMOS_RUN_ID`, `PAIMOS_PROJECT_ID`, `PAIMOS_RUN_CORRELATION_ID`, `PAIMOS_RUN_PROVIDER`, and
 `PAIMOS_RUN_ADAPTER` can supply the stable runner context. `--dry-run` prints
 the exact request. MCP clients use `paimos_report_progress`, which maps to the
 same POST and forwards only the allowlisted fields.
@@ -644,6 +657,7 @@ Claude Code is a proof adapter, not a server special case:
 | permission or human question | `kind=needs_input`, `needs_input=true`, `blocker_state=input` |
 | named checkpoint completion | `kind=progress`; optional evidence-backed estimate revision |
 | quiet active session | `kind=heartbeat`; no fabricated percentage |
+| normal exit | `kind=phase`, `phase=reviewing`; lifecycle verification remains pending |
 
 Codex CLI uses the same contract explicitly:
 
@@ -653,7 +667,7 @@ Codex CLI uses the same contract explicitly:
 | repository analysis | `kind=phase`, `phase=planning` |
 | patch application | `kind=phase`, `phase=implementing` |
 | test command class | `kind=phase`, `phase=testing` |
-| normal exit | `kind=phase`, `phase=completed` before lifecycle `completed` or test-evidenced status |
+| normal exit | `kind=phase`, `phase=reviewing`; lifecycle later records `completed` or a test-evidenced status |
 
 Aider is the third-harness mapping (for adapters that opt into this endpoint):
 
@@ -664,6 +678,7 @@ Aider is the third-harness mapping (for adapters that opt into this endpoint):
 | edit commit/application | `kind=phase`, `phase=implementing` |
 | operator question | `kind=needs_input`, `phase=waiting`, `blocker_state=input` |
 | adapter failure | `kind=blocker`, `phase=unknown`; no raw error body |
+| normal exit | `kind=phase`, `phase=reviewing`; never pre-claims test/deploy completion |
 
 The adapter summarizes only the allowlisted state. Claude hook payloads, tool
 inputs/results, prompts, and transcript text are never copied. Provider adapters

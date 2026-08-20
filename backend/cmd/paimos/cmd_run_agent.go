@@ -78,6 +78,7 @@ func runAgentWatchCmd() *cobra.Command {
 		heartbeatIn          time.Duration
 		claudePermissionMode string
 		claudeAllowedTools   string
+		unsafeClaudeBypass   bool
 	)
 	c := &cobra.Command{
 		Use:   "watch",
@@ -96,8 +97,9 @@ spawning (unless --yes), and does NOT deploy — deploy is triple-gated (it need
 --allow-deploy AND --deploy-exec AND a run deploy_target) and additionally
 prompts for a separate deploy confirmation unless --yes-deploy is set.
 
-The spawned command sees PAIMOS_RUN_ID and PAIMOS_ISSUE_KEY in its environment
-plus PAIMOS_PROMPT_FILE with the generated issue-context prompt. The default
+The spawned command sees PAIMOS_RUN_ID, PAIMOS_PROJECT_ID, PAIMOS_ISSUE_KEY,
+and the supervisor-owned correlation/provider/adapter identity in its
+environment, plus PAIMOS_PROMPT_FILE with the generated issue-context prompt. The default
 "claude" command is run in structured Claude Code print mode with a least-
 privilege tool allowlist, so it cannot silently open an interactive TUI for a
 queued run. A custom --exec is an explicit raw-command fallback and can read the
@@ -118,6 +120,7 @@ Examples:
 				attachLogs: attachLogs, executionTimeout: execTimeout,
 				heartbeatTimeout: heartbeatTO, heartbeatInterval: heartbeatIn,
 				claudePermissionMode: claudePermissionMode, claudeAllowedTools: claudeAllowedTools,
+				unsafeClaudeBypass: unsafeClaudeBypass,
 			})
 		},
 	}
@@ -136,6 +139,7 @@ Examples:
 	c.Flags().DurationVar(&heartbeatIn, "heartbeat-interval", 15*time.Second, "supervisor liveness report interval while the child is alive")
 	c.Flags().StringVar(&claudePermissionMode, "claude-permission-mode", defaultClaudePermissionMode, "Claude permission mode for the built-in claude command")
 	c.Flags().StringVar(&claudeAllowedTools, "claude-allowed-tools", defaultClaudeAllowedTools, "comma-separated Claude tool allowlist for the built-in claude command")
+	c.Flags().BoolVar(&unsafeClaudeBypass, "unsafe-allow-bypass-permissions", false, "allow built-in Claude bypassPermissions mode (unsafe; separate explicit opt-in)")
 	return c
 }
 
@@ -155,6 +159,7 @@ type runAgentOpts struct {
 	heartbeatInterval    time.Duration
 	claudePermissionMode string
 	claudeAllowedTools   string
+	unsafeClaudeBypass   bool
 }
 
 func resolveRunnerAction(explicit, execCmd string) (string, string, error) {
@@ -216,7 +221,7 @@ func runAgentWatch(o runAgentOpts) error {
 		return &usageError{msg: "execution and heartbeat durations must be positive"}
 	}
 	if strings.TrimSpace(o.execCmd) == "claude" {
-		if err := validateClaudeRunnerConfig(o.claudePermissionMode, o.claudeAllowedTools); err != nil {
+		if err := validateClaudeRunnerConfig(o.claudePermissionMode, o.claudeAllowedTools, o.unsafeClaudeBypass); err != nil {
 			return err
 		}
 	}
@@ -255,6 +260,7 @@ func runAgentWatch(o runAgentOpts) error {
 	runner.heartbeatInterval = o.heartbeatInterval
 	runner.claudePermissionMode = o.claudePermissionMode
 	runner.claudeAllowedTools = o.claudeAllowedTools
+	runner.unsafeClaudeBypass = o.unsafeClaudeBypass
 	deployNote := "report-back only, no auto-deploy"
 	if runner.allowDeploy && runner.deployExec != "" {
 		deployNote = "deploy ENABLED via " + runner.deployExec + " (runs with a deploy_target only)"
@@ -373,6 +379,7 @@ type agentRunner struct {
 	heartbeatInterval    time.Duration
 	claudePermissionMode string
 	claudeAllowedTools   string
+	unsafeClaudeBypass   bool
 	lastQueuedErr        string // dedupes catch-up error logging (single goroutine)
 	spawn                func(ctx context.Context, repoRoot, execCmd string, env []string, logSink io.Writer) error
 	supervise            func(context.Context, supervisorRequest) supervisorResult
@@ -503,6 +510,19 @@ type agentRunArtifact struct {
 
 func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	runID := j.runID
+	if strings.TrimSpace(a.execCmd) == "claude" {
+		permissionMode := a.claudePermissionMode
+		if strings.TrimSpace(permissionMode) == "" {
+			permissionMode = defaultClaudePermissionMode
+		}
+		allowedTools := a.claudeAllowedTools
+		if strings.TrimSpace(allowedTools) == "" {
+			allowedTools = defaultClaudeAllowedTools
+		}
+		if err := validateClaudeRunnerConfig(permissionMode, allowedTools, a.unsafeClaudeBypass); err != nil {
+			return err
+		}
+	}
 	detail, err := a.fetchRun(runID)
 	if err != nil {
 		return err
@@ -586,14 +606,28 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 		time.Now().Format(time.RFC3339), issueKey, agentNote, runID, a.repoRoot)
 
 	provider, adapter := runnerTelemetryIdentityForAction(actionKey)
-	correlationID := fmt.Sprintf("run-%d", runID)
+	var correlationID string
+	var correlationErr error
 	if identity, ok := a.reporter.(interface {
-		Identity(int64) (string, string, string)
+		Identity(int64) (string, string, string, error)
 	}); ok {
-		correlationID, provider, adapter = identity.Identity(runID)
+		correlationID, provider, adapter, correlationErr = identity.Identity(runID)
+	} else {
+		correlationID, correlationErr = newRunCorrelationID()
+	}
+	if correlationErr != nil {
+		if reportErr := finish(nil, map[string]any{"status": "failed", "error": "run correlation identity unavailable"}); reportErr != nil {
+			return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+		}
+		return fmt.Errorf("run %d correlation identity: %w", runID, correlationErr)
+	}
+	projectID := ""
+	if detail.ProjectID != nil && *detail.ProjectID > 0 {
+		projectID = strconv.FormatInt(*detail.ProjectID, 10)
 	}
 	env := []string{
 		"PAIMOS_RUN_ID=" + strconv.FormatInt(runID, 10),
+		"PAIMOS_PROJECT_ID=" + projectID,
 		"PAIMOS_RUN_CORRELATION_ID=" + correlationID,
 		"PAIMOS_RUN_PROVIDER=" + provider,
 		"PAIMOS_RUN_ADAPTER=" + adapter,
@@ -670,14 +704,17 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	}
 	testsRan := strings.TrimSpace(a.testExec) != ""
 	if testsRan {
-		summary, testErr := a.runTests(ctx, env, logSink)
+		summary, testResult := a.runTests(ctx, runID, env, logSink)
 		if summary != "" {
 			resultFields["tests_summary"] = summary
 		}
-		if testErr != nil {
+		if testResult.Outcome != outcomeNormalExit {
 			closeLog(logFile)
 			resultFields["status"] = "tests_failed"
-			resultFields["error"] = "configured test command failed"
+			if testResult.Outcome == outcomeCancellation {
+				resultFields["status"] = "cancelled"
+			}
+			resultFields["error"] = string(testResult.Outcome) + ": " + testResult.Summary
 			if reportErr := finish(logFile, resultFields); reportErr != nil {
 				return fmt.Errorf("run %d report failure: %w", runID, reportErr)
 			}
@@ -696,9 +733,14 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			return finish(logFile, resultFields)
 		}
 		fmt.Fprintf(stdout, "run %d: deploying to %s via %q\n", runID, detail.DeployTarget, a.deployExec)
-		if depErr := a.spawn(ctx, a.repoRoot, a.deployExec, env, logSink); depErr != nil {
+		deployResult := a.runSupervisedCommand(ctx, runID, a.deployExec, "deploying", "Configured deploy command started", env, logSink)
+		if deployResult.Outcome != outcomeNormalExit {
 			closeLog(logFile)
-			if reportErr := finish(logFile, map[string]any{"status": "failed", "error": "configured deploy command failed"}); reportErr != nil {
+			status := "failed"
+			if deployResult.Outcome == outcomeCancellation {
+				status = "cancelled"
+			}
+			if reportErr := finish(logFile, map[string]any{"status": status, "error": string(deployResult.Outcome) + ": " + deployResult.Summary}); reportErr != nil {
 				return fmt.Errorf("run %d report failure: %w", runID, reportErr)
 			}
 			return fmt.Errorf("run %d deploy failed", runID)
@@ -738,13 +780,25 @@ func closeLog(f *os.File) {
 	}
 }
 
-func (a *agentRunner) runTests(ctx context.Context, env []string, logSink io.Writer) (string, error) {
-	sink := io.Writer(io.Discard)
-	if logSink != nil {
-		sink = logSink
+func (a *agentRunner) runTests(ctx context.Context, runID int64, env []string, logSink io.Writer) (string, supervisorResult) {
+	result := a.runSupervisedCommand(ctx, runID, a.testExec, "testing", "Configured test command started", env, logSink)
+	if result.Outcome == outcomeNormalExit {
+		return commandResultSummary(nil), result
 	}
-	err := a.spawn(ctx, a.repoRoot, a.testExec, env, sink)
-	return commandResultSummary(err), err
+	return "configured test command failed: " + string(result.Outcome), result
+}
+
+func (a *agentRunner) runSupervisedCommand(ctx context.Context, runID int64, command, phase, startSummary string, env []string, logSink io.Writer) supervisorResult {
+	supervise := a.supervise
+	if supervise == nil {
+		supervise = superviseAgentProcess
+	}
+	return supervise(ctx, supervisorRequest{
+		RunID: runID, RepoRoot: a.repoRoot, ExecCmd: command, Env: env,
+		ExecutionTimeout: a.executionTimeout, SilenceTimeout: a.heartbeatTimeout,
+		HeartbeatInterval: a.heartbeatInterval, LogSink: logSink, Reporter: a.reporter,
+		InitialPhase: phase, StartSummary: startSummary,
+	})
 }
 
 func commandResultSummary(err error) string {
@@ -1309,7 +1363,7 @@ func effectiveAgentExec(execCmd string, claudeConfig ...string) string {
 	return execCmd
 }
 
-func validateClaudeRunnerConfig(permissionMode, allowedTools string) error {
+func validateClaudeRunnerConfig(permissionMode, allowedTools string, unsafeAllowBypass ...bool) error {
 	permissionMode = strings.TrimSpace(permissionMode)
 	validModes := map[string]bool{
 		"default": true, "acceptEdits": true, "plan": true,
@@ -1317,6 +1371,9 @@ func validateClaudeRunnerConfig(permissionMode, allowedTools string) error {
 	}
 	if !validModes[permissionMode] {
 		return &usageError{msg: "invalid --claude-permission-mode"}
+	}
+	if permissionMode == "bypassPermissions" && (len(unsafeAllowBypass) == 0 || !unsafeAllowBypass[0]) {
+		return &usageError{msg: "bypassPermissions requires --unsafe-allow-bypass-permissions"}
 	}
 	parts := strings.Split(strings.TrimSpace(allowedTools), ",")
 	if len(parts) == 0 || len(parts) > 64 {

@@ -290,6 +290,38 @@ func TestAgentRunTelemetryHeartbeatPreservesSemanticAndEstimateSnapshot(t *testi
 	}
 }
 
+func TestAgentRunTelemetryNewSemanticEventCannotHideStaleHeartbeat(t *testing.T) {
+	ts := newDirectTelemetryServer(t)
+	_, runID := seedTelemetryRun(t, ts, ts.adminCookie)
+	path := "/api/runs/" + itoa(runID) + "/telemetry"
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	heartbeat := map[string]any{
+		"sequence": 1, "correlation_id": "stale-heartbeat-session",
+		"provider": "openai", "adapter": "codex-cli", "agent_reported_at": now,
+		"kind": "heartbeat", "heartbeat": true, "phase": "implementing",
+		"needs_input": false, "blocker_state": "none",
+	}
+	assertStatus(t, ts.post(t, path, ts.adminCookie, heartbeat), http.StatusCreated)
+	if _, err := db.DB.Exec(`UPDATE agent_run_telemetry_latest SET last_heartbeat_at=datetime('now','-10 minutes') WHERE run_id=?`, runID); err != nil {
+		t.Fatal(err)
+	}
+	semantic := map[string]any{
+		"sequence": 2, "correlation_id": "stale-heartbeat-session",
+		"provider": "openai", "adapter": "codex-cli", "agent_reported_at": now,
+		"kind": "phase", "phase": "reviewing", "activity": "Reviewing implementation",
+		"needs_input": false, "blocker_state": "none",
+	}
+	assertStatus(t, ts.post(t, path, ts.adminCookie, semantic), http.StatusCreated)
+	resp := ts.get(t, path+"/latest", ts.adminCookie)
+	assertStatus(t, resp, http.StatusOK)
+	var snapshot map[string]any
+	decode(t, resp, &snapshot)
+	if snapshot["liveness"] != "stale" || snapshot["latest_event"].(map[string]any)["sequence"] != float64(2) ||
+		snapshot["latest_heartbeat"].(map[string]any)["sequence"] != float64(1) {
+		t.Fatalf("snapshot=%+v", snapshot)
+	}
+}
+
 func TestAgentRunTelemetryPublishesSSEInvalidationHintOnly(t *testing.T) {
 	ts := newDirectTelemetryServer(t)
 	_, runID := seedTelemetryRun(t, ts, ts.adminCookie)
