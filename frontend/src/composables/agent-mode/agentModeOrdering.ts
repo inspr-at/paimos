@@ -163,8 +163,11 @@ function membershipKey(projectId: number, laneKey: string): string {
   return `${projectId}:${laneKey}`
 }
 
-function tombstoneId(id: string, projectId: number, laneKey: string): string {
-  return `${TOMBSTONE_PREFIX}:${projectId}:${laneKey}:${id}`
+function tombstoneId(groupIndex: number, laneIndex: number, slotIndex: number): string {
+  // The token is scoped only to the already-visible frozen slot. It must not
+  // retain the delivery id or stale project/lane identifiers: omission from an
+  // authorized refresh can mean access revocation, not ordinary deletion.
+  return `${TOMBSTONE_PREFIX}:${groupIndex}:${laneIndex}:${slotIndex}`
 }
 
 /**
@@ -186,16 +189,16 @@ export function reconcileFrozenGroups(
     }
   }
 
-  const result: AgentModeProjectGroup[] = frozen.map((g) => ({
+  const result: AgentModeProjectGroup[] = frozen.map((g, groupIndex) => ({
     ...g,
-    lanes: g.lanes.map((l) => ({
+    lanes: g.lanes.map((l, laneIndex) => ({
       ...l,
-      deliveryIds: l.deliveryIds.map((id) => {
+      deliveryIds: l.deliveryIds.map((id, slotIndex) => {
         if (id.startsWith(TOMBSTONE_PREFIX)) return id
         const currentMembership = freshMembership.get(id)
         return currentMembership === membershipKey(g.projectId, l.key)
           ? id
-          : tombstoneId(id, g.projectId, l.key)
+          : tombstoneId(groupIndex, laneIndex, slotIndex)
       }),
     })),
   }))

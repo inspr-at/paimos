@@ -95,7 +95,10 @@ describe('agentModeOrdering (PAI-805)', () => {
     const beforeSet = new Set(before)
     expect(after.filter((id) => beforeSet.has(id))).toEqual(before.filter((id) => id !== before[2]))
     expect(after).not.toContain(before[2])
-    expect(after.some((id) => id.startsWith('__am_tombstone__'))).toBe(true)
+    const tombstone = after.find((id) => id.startsWith('__am_tombstone__'))
+    expect(tombstone).toBeDefined()
+    expect(tombstone).not.toContain(before[2])
+    expect(tombstone).not.toContain(list.find((d) => d.id === before[2])!.lane.key)
     // … and the newcomer is appended at the end of its own lane.
     expect(after).toContain('dlv-new')
     const newLane = reconciled.flatMap((g) => g.lanes).find((l) => l.deliveryIds.includes('dlv-new'))!
