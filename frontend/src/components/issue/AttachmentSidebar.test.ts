@@ -18,6 +18,7 @@ function job(
   const file = new File(['contents'], `${id}.png`, { type: 'image/png' })
   return {
     id,
+    origin: 'current-session',
     file,
     filename: file.name,
     size: file.size,
@@ -30,7 +31,11 @@ function job(
   }
 }
 
-function mount(jobs: AttachmentJob[], readonly = false) {
+function mount(
+  jobs: AttachmentJob[],
+  readonly = false,
+  manageJob?: (job: AttachmentJob) => boolean,
+) {
   const root = document.createElement('div')
   document.body.appendChild(root)
   const retry = vi.fn()
@@ -40,6 +45,7 @@ function mount(jobs: AttachmentJob[], readonly = false) {
     render: () => h(AttachmentSidebar, {
       jobs,
       readonly,
+      manageJob,
       onRetry: retry,
       onRemove: remove,
       onAddFiles: addFiles,
@@ -95,6 +101,24 @@ describe('AttachmentSidebar accessibility', () => {
     const harness = mount([], true)
     expect(harness.root.querySelector('.att-drop')).toBeNull()
     expect(harness.root.querySelector('input[type="file"]')).toBeNull()
+    harness.unmount()
+  })
+
+  it('can manage only explicitly-authorized session jobs in a read-only host', () => {
+    const seeded = { ...job('seeded', 'done', 100), origin: 'seeded' as const }
+    const failed = job('failed-session', 'failed', 0, 'failed')
+    const done = { ...job('done-session', 'done', 100), attachmentId: 45 }
+    const harness = mount(
+      [seeded, failed, done],
+      true,
+      (candidate) => candidate.origin === 'current-session',
+    )
+
+    expect(harness.root.querySelector('[title="Remove seeded.png"]')).toBeNull()
+    expect(harness.root.querySelector('[title="Retry upload of failed-session.png"]')).not.toBeNull()
+    expect(harness.root.querySelector('[title="Remove failed-session.png"]')).not.toBeNull()
+    expect(harness.root.querySelector('[title="Remove done-session.png"]')).not.toBeNull()
+    expect(harness.root.querySelector('.att-drop')).toBeNull()
     harness.unmount()
   })
 })

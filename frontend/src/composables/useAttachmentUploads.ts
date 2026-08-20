@@ -29,10 +29,14 @@ import type { Attachment } from '@/types'
 import { api, errMsg } from '@/api/client'
 
 export type UploadStatus = 'pending' | 'done' | 'failed'
+export type AttachmentJobOrigin = 'current-session' | 'seeded'
 
 export interface AttachmentJob {
   /** Client-side unique id. Stable across retries. */
   id: string
+  /** Distinguishes newly-added jobs from server attachments loaded into an
+   * existing issue. Embeddings may expose controls only for the former. */
+  origin: AttachmentJobOrigin
   file: File
   filename: string
   size: number
@@ -117,6 +121,7 @@ export function useAttachmentUploads(opts: UseAttachmentUploadsOptions): UseAtta
     const isImage = file.type.startsWith('image/')
     return {
       id: `job-${++seq}`,
+      origin: 'current-session',
       file,
       filename: file.name,
       size: file.size,
@@ -185,6 +190,7 @@ export function useAttachmentUploads(opts: UseAttachmentUploadsOptions): UseAtta
     }
     jobs.value = attachments.map(a => ({
       id: `existing-${a.id}`,
+      origin: 'seeded',
       // No File reference for existing attachments — retry would not work,
       // but they're already uploaded so retry is never relevant.
       file: new File([], a.filename, { type: a.content_type }),

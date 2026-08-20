@@ -20,6 +20,9 @@ const props = defineProps<{
   emptyHint?: string
   /** If true, the drop zone is hidden (read-only view). */
   readonly?: boolean
+  /** Optional per-job action policy. This lets a read-only host keep seeded
+   * server attachments view-only while managing jobs added in this session. */
+  manageJob?: (job: AttachmentJob) => boolean
 }>()
 
 const emit = defineEmits<{
@@ -82,6 +85,10 @@ function onPick(e: Event) {
 
 function openFilePicker() {
   fileInput.value?.click()
+}
+
+function canManageJob(job: AttachmentJob): boolean {
+  return props.manageJob ? props.manageJob(job) : !props.readonly
 }
 
 function openUrlForJob(job: AttachmentJob): string | null {
@@ -154,7 +161,7 @@ function openUrlForJob(job: AttachmentJob): string | null {
         </div>
 
         <button
-          v-if="job.status === 'failed'"
+          v-if="job.status === 'failed' && canManageJob(job)"
           type="button"
           class="att-btn"
           :title="`Retry upload of ${job.filename}`"
@@ -163,7 +170,7 @@ function openUrlForJob(job: AttachmentJob): string | null {
           <AppIcon name="refresh-cw" :size="12" />
         </button>
         <button
-          v-if="!readonly"
+          v-if="canManageJob(job)"
           type="button"
           class="att-btn att-btn--remove"
           :title="`Remove ${job.filename}`"

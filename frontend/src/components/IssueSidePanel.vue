@@ -248,7 +248,14 @@ async function loadEmbeddedEditorMetadata(forIssue: Issue) {
   }
 }
 
+let attachmentLoadSequence = 0;
+
+function invalidateAttachmentLoads() {
+  attachmentLoadSequence += 1;
+}
+
 async function loadAttachments(forIssue: Issue | null = issue.value) {
+  const sequence = ++attachmentLoadSequence;
   if (!forIssue) {
     attachments.reset();
     return;
@@ -258,10 +265,18 @@ async function loadAttachments(forIssue: Issue | null = issue.value) {
     const list = await api.get<Attachment[]>(
       `/issues/${expectedId}/attachments`,
     );
-    if (issue.value?.id !== expectedId) return;
+    if (
+      sequence !== attachmentLoadSequence ||
+      issue.value?.id !== expectedId ||
+      props.issueId !== expectedId
+    ) return;
     attachments.seedExisting(list);
   } catch {
-    if (issue.value?.id !== expectedId) return;
+    if (
+      sequence !== attachmentLoadSequence ||
+      issue.value?.id !== expectedId ||
+      props.issueId !== expectedId
+    ) return;
     attachments.reset();
   }
 }
@@ -272,10 +287,18 @@ async function loadAttachments(forIssue: Issue | null = issue.value) {
 // switching issues never shows stale candidates from the previous project.
 const parentCandidates = ref<Issue[]>([]);
 const parentCandidatesForIssueId = ref<number | null>(null);
+let parentCandidateSequence = 0;
 const relationCandidates = ref<Issue[]>([]);
 const relationCandidatesForProjectId = ref<number | null>(null);
+
+function clearParentCandidateCache() {
+  parentCandidateSequence += 1;
+  parentCandidates.value = [];
+  parentCandidatesForIssueId.value = null;
+}
+
 async function loadParentCandidates() {
-  if (!issue.value) return;
+  if (!issue.value || !issueMutationAllowed.value || !editing.value) return;
   if (parentCandidatesForIssueId.value === issue.value.id) return;
   const t = issue.value.type;
   if (t !== "ticket" && t !== "task") {
@@ -285,16 +308,34 @@ async function loadParentCandidates() {
   }
   const parentType = t === "ticket" ? "epic" : "ticket";
   const fetchingForId = issue.value.id;
+  const fetchingForProjectId = issue.value.project_id;
+  const sequence = ++parentCandidateSequence;
+  const authorityEpoch = issueMutationAuthorityEpoch;
   try {
     const list = await api.get<Issue[]>(
-      `/projects/${issue.value.project_id}/issues?type=${parentType}`,
+      `/projects/${fetchingForProjectId}/issues?type=${parentType}`,
     );
-    // Guard against races: ignore the result if the user has since switched issues.
-    if (issue.value?.id !== fetchingForId) return;
+    if (
+      sequence !== parentCandidateSequence ||
+      authorityEpoch !== issueMutationAuthorityEpoch ||
+      !issueMutationAllowed.value ||
+      !editing.value ||
+      issue.value?.id !== fetchingForId ||
+      issue.value.project_id !== fetchingForProjectId ||
+      props.issueId !== fetchingForId
+    ) return;
     parentCandidates.value = list;
     parentCandidatesForIssueId.value = fetchingForId;
   } catch {
-    if (issue.value?.id !== fetchingForId) return;
+    if (
+      sequence !== parentCandidateSequence ||
+      authorityEpoch !== issueMutationAuthorityEpoch ||
+      !issueMutationAllowed.value ||
+      !editing.value ||
+      issue.value?.id !== fetchingForId ||
+      issue.value.project_id !== fetchingForProjectId ||
+      props.issueId !== fetchingForId
+    ) return;
     parentCandidates.value = [];
     parentCandidatesForIssueId.value = fetchingForId;
   }
@@ -487,7 +528,12 @@ async function quickUpdateIssueField(
   field: "status" | "assignee_id",
   value: string,
 ) {
-  if (!issue.value || !issueMutationAllowed.value || quickSavingField.value) return;
+  if (
+    !issue.value ||
+    !issueMutationAllowed.value ||
+    saving.value ||
+    quickSavingField.value
+  ) return;
   const payload =
     field === "assignee_id"
       ? { assignee_id: value ? Number(value) : null }
@@ -507,6 +553,7 @@ async function quickUpdateIssueField(
       props.issueId !== loaded.id ||
       issue.value?.id !== loaded.id ||
       !issueMutationAllowed.value ||
+      operation !== issueMutationOperationSequence ||
       authorityEpoch !== issueMutationAuthorityEpoch
     ) return;
     issue.value = updated;
@@ -516,6 +563,7 @@ async function quickUpdateIssueField(
     if (
       props.issueId !== loaded.id ||
       !issueMutationAllowed.value ||
+      operation !== issueMutationOperationSequence ||
       authorityEpoch !== issueMutationAuthorityEpoch
     ) return;
     if (e instanceof ApiError && e.status === 412) {
@@ -550,6 +598,7 @@ async function loadIssue(id: number | null): Promise<boolean> {
   saving.value = false;
   quickSavingField.value = "";
   clearEditorMetadata();
+  clearParentCandidateCache();
   if (!id) {
     issue.value = null;
     editing.value = false;
@@ -637,6 +686,7 @@ watch(issueMutationAllowed, (allowed) => {
     panelGuardError.value = "";
     resetForm();
     clearEditorMetadata();
+    clearParentCandidateCache();
     attachments.reset();
     if (issue.value) void loadAttachments(issue.value);
     return;
@@ -654,9 +704,16 @@ watch(attachmentsAllowed, (allowed, wasAllowed) => {
 });
 
 function startEdit() {
-  if (!issueMutationAllowed.value || commentInFlight.value) {
+  if (
+    !issueMutationAllowed.value ||
+    commentInFlight.value ||
+    saving.value ||
+    quickSavingField.value !== ""
+  ) {
     if (commentInFlight.value) {
       panelGuardError.value = "An internal note is still posting. Wait for it to finish before editing this ticket.";
+    } else if (saving.value || quickSavingField.value !== "") {
+      panelGuardError.value = "A ticket update is still saving. Wait for it to finish before editing this ticket.";
     }
     return;
   }
@@ -666,6 +723,10 @@ function startEdit() {
   loadParentCandidates();
 }
 function cancelEdit() {
+  if (saving.value || quickSavingField.value !== "") {
+    panelGuardError.value = "A ticket update is still saving. Wait for it to finish before cancelling this edit.";
+    return;
+  }
   editing.value = false;
   resetForm();
   resetDirty();
@@ -729,6 +790,7 @@ function onPanelPaste(event: ClipboardEvent) {
   const files = Array.from(event.clipboardData?.files ?? []);
   if (files.length === 0) return; // ordinary text paste keeps native behaviour
   event.preventDefault();
+  invalidateAttachmentLoads();
   attachments.addFiles(files);
 }
 
@@ -744,28 +806,42 @@ function onPanelDrop(event: DragEvent) {
   const files = Array.from(event.dataTransfer?.files ?? []);
   if (files.length === 0) return;
   event.preventDefault();
+  invalidateAttachmentLoads();
   attachments.addFiles(files);
 }
 
 function addAttachmentFiles(files: FileList) {
   if (!attachmentsAllowed.value) return;
+  invalidateAttachmentLoads();
   attachments.addFiles(files);
 }
 
 async function removeAttachment(job: AttachmentJob) {
   if (!attachmentsAllowed.value) return;
+  invalidateAttachmentLoads();
   await attachments.removeJob(job);
 }
 
 function retryAttachment(job: AttachmentJob) {
   if (!attachmentsAllowed.value) return;
+  invalidateAttachmentLoads();
   attachments.retryJob(job);
+}
+
+function canManageViewAttachment(job: AttachmentJob) {
+  return attachmentsAllowed.value && job.origin === "current-session";
 }
 
 defineExpose({ requestLeave, hasUnsavedChanges, hasInFlight });
 
 async function save() {
-  if (!issue.value || !issueMutationAllowed.value || !editing.value) return;
+  if (
+    !issue.value ||
+    !issueMutationAllowed.value ||
+    !editing.value ||
+    saving.value ||
+    quickSavingField.value !== ""
+  ) return;
   const loaded = issue.value;
   const authorityEpoch = issueMutationAuthorityEpoch;
   const operation = ++issueMutationOperationSequence;
@@ -788,6 +864,7 @@ async function save() {
       props.issueId !== loaded.id ||
       issue.value?.id !== loaded.id ||
       !issueMutationAllowed.value ||
+      operation !== issueMutationOperationSequence ||
       authorityEpoch !== issueMutationAuthorityEpoch
     ) return;
     issue.value = updated;
@@ -798,6 +875,7 @@ async function save() {
     if (
       props.issueId !== loaded.id ||
       !issueMutationAllowed.value ||
+      operation !== issueMutationOperationSequence ||
       authorityEpoch !== issueMutationAuthorityEpoch
     ) return;
     if (e instanceof ApiError && e.status === 412) {
@@ -1162,7 +1240,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
             v-if="issue && !readonly"
             class="sp-action-btn"
             :class="{ 'sp-action-btn--disabled': editing }"
-            :disabled="editing || commentInFlight"
+            :disabled="editing || commentInFlight || saving || quickSavingField !== ''"
             @click="startEdit"
             title="Quick Edit"
           >
@@ -1463,13 +1541,17 @@ async function deleteTimeEntry(entry: TimeEntry) {
 
           <IssueAiActivity v-if="issue && !embedded" :issue-id="issue.id" />
 
-          <!-- Attachments (view mode — read-only chip list, clickable thumbnails) -->
+          <!-- Seeded server attachments stay view-only here. Jobs added in
+               this open session keep their progress / retry / remove actions. -->
           <AttachmentSidebar
             v-if="attachments.jobs.value.length"
             class="sp-attach-sidebar"
             title="Attachments"
             :jobs="attachments.jobs.value"
             readonly
+            :manage-job="canManageViewAttachment"
+            @remove="removeAttachment"
+            @retry="retryAttachment"
           />
 
           <IssueComments
@@ -1786,12 +1868,16 @@ async function deleteTimeEntry(entry: TimeEntry) {
               @retry="retryAttachment"
             />
             <div class="sp-form-actions">
-              <button class="btn btn-ghost btn-sm" @click="cancelEdit">
+              <button
+                class="btn btn-ghost btn-sm"
+                :disabled="saving || quickSavingField !== ''"
+                @click="cancelEdit"
+              >
                 Cancel
               </button>
               <button
                 class="btn btn-primary btn-sm"
-                :disabled="!issueMutationAllowed || saving || attachments.hasInFlight.value || commentInFlight"
+                :disabled="!issueMutationAllowed || saving || quickSavingField !== '' || attachments.hasInFlight.value || commentInFlight"
                 @click="save"
               >
                 {{

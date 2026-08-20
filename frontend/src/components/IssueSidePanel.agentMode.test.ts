@@ -24,7 +24,7 @@ vi.mock('@/components/issue/IssueAiActivity.vue', () => ({
 import { ApiError, api } from '@/api/client'
 import i18n from '@/i18n'
 import { useConfirm } from '@/composables/useConfirm'
-import type { Issue } from '@/types'
+import type { Attachment, Issue } from '@/types'
 import IssueSidePanel from './IssueSidePanel.vue'
 
 function issue(id: number, updatedAt = `2026-08-20 12:0${id}:00`): Issue {
@@ -39,6 +39,20 @@ function issue(id: number, updatedAt = `2026-08-20 12:0${id}:00`): Issue {
     updated_at: updatedAt, created_by: 1, created_by_name: 'mba', last_changed_by_name: 'mba', booked_hours: 0,
     time_logged: 0, time_rollup: 0, time_total: 0, accepted_at: null, accepted_by: null, invoiced_at: null,
     invoice_number: '',
+  }
+}
+
+function attachment(id: number, filename: string): Attachment {
+  return {
+    id,
+    issue_id: 1,
+    object_key: `issues/1/${filename}`,
+    filename,
+    content_type: 'text/plain',
+    size_bytes: 12,
+    uploaded_by: 1,
+    uploader: 'mba',
+    created_at: '2026-08-20 12:00:00',
   }
 }
 
@@ -58,6 +72,7 @@ interface Harness {
   root: HTMLElement
   issueId: ReturnType<typeof ref<number | null>>
   readonly: ReturnType<typeof ref<boolean>>
+  allowAttachments: ReturnType<typeof ref<boolean>>
   panel: PanelHandle
   unmount: () => void
 }
@@ -77,8 +92,10 @@ async function mountPanel(extra: Record<string, unknown> = {}): Promise<Harness>
   document.body.appendChild(root)
   const issueId = ref<number | null>(1)
   const readonly = ref(extra.readonly === true)
+  const allowAttachments = ref(extra.allowAttachments !== false)
   const extraProps = { ...extra }
   delete extraProps.readonly
+  delete extraProps.allowAttachments
   const panel = ref<PanelHandle | null>(null)
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -91,7 +108,7 @@ async function mountPanel(extra: Record<string, unknown> = {}): Promise<Harness>
       embedded: true,
       internalCommentsOnly: true,
       allowComments: true,
-      allowAttachments: true,
+      allowAttachments: allowAttachments.value,
       noteAffectsNextRun: true,
       ...extraProps,
       readonly: readonly.value,
@@ -102,7 +119,14 @@ async function mountPanel(extra: Record<string, unknown> = {}): Promise<Harness>
   app.use(i18n)
   app.mount(root)
   await flush()
-  return { root, issueId, readonly, panel: panel.value!, unmount: () => { app.unmount(); root.remove() } }
+  return {
+    root,
+    issueId,
+    readonly,
+    allowAttachments,
+    panel: panel.value!,
+    unmount: () => { app.unmount(); root.remove() },
+  }
 }
 
 function option(text: string): HTMLButtonElement {
@@ -286,6 +310,44 @@ describe('IssueSidePanel Agent Mode integration (PAI-806)', () => {
     expect(harness.root.textContent).not.toContain('Stale unauthorized response')
   })
 
+  it('prevents same-ticket Save, Cancel and Quick Edit overlap while a save is pending', async () => {
+    const pendingSave = deferred<Issue>()
+    vi.mocked(api.put).mockImplementationOnce(() => pendingSave.promise as never)
+    harness = await mountPanel()
+    harness.root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    const title = harness.root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!
+    title.value = 'Single submitted mutation'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    const quickEdit = harness.root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!
+    const cancel = harness.root.querySelector<HTMLButtonElement>('.sp-form-actions .btn-ghost')!
+    const save = harness.root.querySelector<HTMLButtonElement>('.sp-form-actions .btn-primary')!
+    save.click()
+    await flush()
+    expect(cancel.disabled).toBe(true)
+    expect(quickEdit.disabled).toBe(true)
+    expect(save.disabled).toBe(true)
+
+    // dispatchEvent exercises the component guards even if a test or stale
+    // DOM reference bypasses native disabled-button click suppression.
+    cancel.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    quickEdit.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    save.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    expect(api.put).toHaveBeenCalledTimes(1)
+    expect(harness.root.querySelector('.sp-form')).not.toBeNull()
+    expect(harness.root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')?.value)
+      .toBe('Single submitted mutation')
+
+    pendingSave.resolve({
+      ...issue(1, '2026-08-20 14:00:00'),
+      title: 'Single submitted mutation',
+    })
+    await flush()
+    expect(harness.root.querySelector('.sp-form')).toBeNull()
+    expect(harness.root.textContent).toContain('Single submitted mutation')
+  })
+
   it('ignores an in-flight quick update after authority revocation', async () => {
     const staleUpdate = deferred<Issue>()
     vi.mocked(api.put).mockImplementationOnce(() => staleUpdate.promise as never)
@@ -318,6 +380,55 @@ describe('IssueSidePanel Agent Mode integration (PAI-806)', () => {
     await flush()
     expect(harness.root.querySelector('.sp-key')?.textContent).toContain('PAI-802')
     expect(harness.root.textContent).not.toContain('Ticket 1')
+  })
+
+  it('fences and clears parent candidates across authority changes', async () => {
+    const staleParents = deferred<Issue[]>()
+    const currentParents = deferred<Issue[]>()
+    let parentLoads = 0
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/issues/1') return Promise.resolve(issue(1)) as never
+      if (path === '/projects/6/issues?type=epic') {
+        parentLoads += 1
+        return (parentLoads === 1 ? staleParents.promise : currentParents.promise) as never
+      }
+      return Promise.resolve([]) as never
+    })
+    harness = await mountPanel()
+    harness.root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    expect(parentLoads).toBe(1)
+
+    harness.readonly.value = true
+    await flush()
+    harness.readonly.value = false
+    await flush()
+    harness.root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    expect(parentLoads).toBe(2)
+
+    currentParents.resolve([{
+      ...issue(91),
+      type: 'epic',
+      issue_key: 'PAI-91',
+      title: 'Current authorized parent',
+    }])
+    await flush()
+    staleParents.resolve([{
+      ...issue(90),
+      type: 'epic',
+      issue_key: 'PAI-90',
+      title: 'Stale revoked parent',
+    }])
+    await flush()
+
+    const parentField = [...harness.root.querySelectorAll<HTMLElement>('.field')]
+      .find((field) => field.querySelector('label')?.textContent?.trim() === 'Parent')!
+    parentField.querySelector<HTMLButtonElement>('.meta-select-trigger')!.click()
+    await flush()
+    const parentOptions = document.querySelector('.meta-select-dropdown--teleported')?.textContent ?? ''
+    expect(parentOptions).toContain('Current authorized parent')
+    expect(parentOptions).not.toContain('Stale revoked parent')
   })
 
   it('locks notes to internal, shows next-run truth, and treats the draft as dirty', async () => {
@@ -354,6 +465,133 @@ describe('IssueSidePanel Agent Mode integration (PAI-806)', () => {
     expect(harness.root.querySelector('[title="Clone issue"]')).toBeNull()
     expect(harness.root.querySelector('.sp-time-section')).toBeNull()
     expect(harness.root.querySelector('.issue-ai-stub')).toBeNull()
+  })
+
+  it('manages current-session uploads from view mode while seeded attachments stay view-only', async () => {
+    const firstUpload = deferred<Attachment>()
+    const retryUpload = deferred<Attachment>()
+    const progress: Array<(pct: number) => void> = []
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/issues/1') return issue(1) as never
+      if (path === '/issues/1/attachments') return [attachment(40, 'seeded.txt')] as never
+      return [] as never
+    })
+    vi.mocked(api.upload)
+      .mockImplementationOnce((_path, _body, onProgress) => {
+        if (onProgress) progress.push(onProgress)
+        return firstUpload.promise as never
+      })
+      .mockImplementationOnce((_path, _body, onProgress) => {
+        if (onProgress) progress.push(onProgress)
+        return retryUpload.promise as never
+      })
+    harness = await mountPanel()
+    expect(harness.root.querySelector('.sp-form')).toBeNull()
+    expect(harness.root.querySelector('[title="Open seeded.txt"]')).not.toBeNull()
+    expect(harness.root.querySelector('[title="Remove seeded.txt"]')).toBeNull()
+
+    const file = new File(['screen'], 'screen.png', { type: 'image/png' })
+    harness.root.querySelector('.side-panel')!.dispatchEvent(Object.assign(
+      new Event('paste', { bubbles: true, cancelable: true }),
+      { clipboardData: { files: [file] } },
+    ))
+    await flush()
+    expect(api.upload).toHaveBeenCalledTimes(1)
+    expect(harness.root.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('0')
+    progress[0](37)
+    await flush()
+    expect(harness.root.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('37')
+
+    firstUpload.reject(new Error('network unavailable'))
+    await flush()
+    const retry = harness.root.querySelector<HTMLButtonElement>('[title="Retry upload of screen.png"]')!
+    expect(retry).not.toBeNull()
+    expect(harness.root.querySelector('[role="alert"]')?.textContent).toContain('network unavailable')
+    retry.click()
+    await flush()
+    expect(api.upload).toHaveBeenCalledTimes(2)
+
+    retryUpload.resolve({ ...attachment(44, 'screen.png'), content_type: 'image/png' })
+    await flush()
+    const remove = harness.root.querySelector<HTMLButtonElement>('[title="Remove screen.png"]')!
+    expect(remove).not.toBeNull()
+    remove.click()
+    await flush()
+    expect(api.delete).toHaveBeenCalledWith('/attachments/44')
+    expect(harness.root.textContent).not.toContain('screen.png')
+    expect(harness.root.textContent).toContain('seeded.txt')
+  })
+
+  it('clears pending and failed jobs on capability revoke and detached controls no-op', async () => {
+    const pendingUpload = deferred<Attachment>()
+    vi.mocked(api.upload)
+      .mockImplementationOnce(() => pendingUpload.promise as never)
+      .mockRejectedValueOnce(new Error('upload failed'))
+    harness = await mountPanel()
+    const panel = harness.root.querySelector('.side-panel')!
+
+    panel.dispatchEvent(Object.assign(
+      new Event('paste', { bubbles: true, cancelable: true }),
+      { clipboardData: { files: [new File(['x'], 'pending.png', { type: 'image/png' })] } },
+    ))
+    await flush()
+    const pendingRemove = harness.root.querySelector<HTMLButtonElement>('[title="Remove pending.png"]')!
+    expect(pendingRemove).not.toBeNull()
+    harness.allowAttachments.value = false
+    await flush()
+    expect(harness.root.textContent).not.toContain('pending.png')
+    const revokeCallsAfterPending = vi.mocked(URL.revokeObjectURL).mock.calls.length
+    pendingRemove.click()
+    await flush()
+    expect(api.upload).toHaveBeenCalledTimes(1)
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(revokeCallsAfterPending)
+
+    harness.allowAttachments.value = true
+    await flush()
+    panel.dispatchEvent(Object.assign(
+      new Event('drop', { bubbles: true, cancelable: true }),
+      { dataTransfer: { files: [new File(['x'], 'failed.png', { type: 'image/png' })], types: ['Files'] } },
+    ))
+    await flush()
+    const failedRetry = harness.root.querySelector<HTMLButtonElement>('[title="Retry upload of failed.png"]')!
+    const failedRemove = harness.root.querySelector<HTMLButtonElement>('[title="Remove failed.png"]')!
+    expect(failedRetry).not.toBeNull()
+    expect(failedRemove).not.toBeNull()
+    harness.allowAttachments.value = false
+    await flush()
+    expect(harness.root.textContent).not.toContain('failed.png')
+    const revokeCallsAfterFailure = vi.mocked(URL.revokeObjectURL).mock.calls.length
+    failedRetry.click()
+    failedRemove.click()
+    await flush()
+    expect(api.upload).toHaveBeenCalledTimes(2)
+    expect(api.delete).not.toHaveBeenCalled()
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(revokeCallsAfterFailure)
+  })
+
+  it('keeps only the newest same-issue attachment load', async () => {
+    const older = deferred<Attachment[]>()
+    const newer = deferred<Attachment[]>()
+    let attachmentLoads = 0
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/issues/1') return Promise.resolve(issue(1)) as never
+      if (path === '/issues/1/attachments') {
+        attachmentLoads += 1
+        return (attachmentLoads === 1 ? older.promise : newer.promise) as never
+      }
+      return Promise.resolve([]) as never
+    })
+    harness = await mountPanel()
+    harness.allowAttachments.value = false
+    await flush()
+    expect(attachmentLoads).toBe(2)
+
+    newer.resolve([attachment(42, 'newest.txt')])
+    await flush()
+    older.resolve([attachment(41, 'stale.txt')])
+    await flush()
+    expect(harness.root.textContent).toContain('newest.txt')
+    expect(harness.root.textContent).not.toContain('stale.txt')
   })
 
   it('gates file paste and drop fail-closed, ignores ordinary text, and blocks leave while upload is in flight', async () => {
