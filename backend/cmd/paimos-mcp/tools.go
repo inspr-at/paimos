@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/backend/handlers"
 )
@@ -140,7 +141,7 @@ func (s *Server) tools() []Tool {
 					"kind":                map[string]any{"type": "string", "enum": []string{"heartbeat", "progress", "phase", "needs_input", "blocker", "estimate"}},
 					"heartbeat":           map[string]any{"type": "boolean"},
 					"phase":               map[string]any{"type": "string", "enum": []string{"unknown", "starting", "planning", "implementing", "testing", "reviewing", "deploying", "waiting", "completed"}},
-					"activity":            map[string]any{"type": "string", "maxLength": 280},
+					"activity":            map[string]any{"type": "string", "maxLength": 280, "description": "At most 280 UTF-8 bytes; the handler enforces the byte bound because JSON Schema maxLength counts code points."},
 					"needs_input":         map[string]any{"type": "boolean"},
 					"blocker_state":       map[string]any{"type": "string", "enum": []string{"none", "input", "dependency", "permission", "environment", "external", "unknown"}},
 					"estimate_revision":   map[string]any{"type": "integer", "minimum": 1, "maximum": 2147483647},
@@ -150,7 +151,7 @@ func (s *Server) tools() []Tool {
 					"eta_max_seconds":     map[string]any{"type": "integer", "minimum": 0, "maximum": 31536000},
 					"estimate_source":     map[string]any{"type": "string", "enum": []string{"agent", "adapter", "provider", "tool"}},
 					"estimate_confidence": map[string]any{"type": "number", "minimum": 0, "maximum": 1},
-					"estimate_basis":      map[string]any{"type": "string", "minLength": 1, "maxLength": 240},
+					"estimate_basis":      map[string]any{"type": "string", "minLength": 1, "maxLength": 240, "description": "At most 240 UTF-8 bytes; the handler enforces the byte bound because JSON Schema maxLength counts code points."},
 				},
 				"required": []string{"run_id", "sequence", "correlation_id", "provider", "adapter", "agent_reported_at", "kind"},
 			},
@@ -442,6 +443,24 @@ func (s *Server) toolReportProgress(args map[string]any) (string, error) {
 	for _, field := range []string{"correlation_id", "provider", "adapter", "agent_reported_at", "kind"} {
 		if value, _ := args[field].(string); strings.TrimSpace(value) == "" {
 			return "", fmt.Errorf("%s is required", field)
+		}
+	}
+	for _, field := range []struct {
+		name string
+		max  int
+	}{{"activity", 280}, {"estimate_basis", 240}} {
+		if value, ok := args[field.name]; ok {
+			text, ok := value.(string)
+			if !ok {
+				return "", fmt.Errorf("%s must be a string", field.name)
+			}
+			text = strings.TrimSpace(text)
+			if !utf8.ValidString(text) {
+				return "", fmt.Errorf("%s must be valid UTF-8", field.name)
+			}
+			if len(text) > field.max {
+				return "", fmt.Errorf("%s must be at most %d UTF-8 bytes", field.name, field.max)
+			}
 		}
 	}
 	body := map[string]any{}

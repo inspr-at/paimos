@@ -566,12 +566,17 @@ test command; it never implies tests passed. `tests_passed` and `tests_failed`
 require a non-empty `tests_summary` of at most 4096 bytes, supplied by the same
 transition or already persisted. Telemetry history is append-only. Its latest
 projection keeps independent event, heartbeat, semantic, and estimate pointers;
-only the server-received heartbeat timestamp is liveness evidence. Telemetry
+only the server-received heartbeat timestamp is liveness evidence. M143
+reconstructs the complete projection from append-only history, including
+missing or stale pointer rows. Telemetry
 `activity` and `estimate_basis` are valid single-line UTF-8 bounded to 280 and
 240 bytes respectively; adapters truncate on code-point boundaries to those
-same byte limits. Exact persisted sequence/body replays remain idempotent after
-terminal lifecycle completion, while conflicting or new terminal facts are
-rejected.
+same byte limits, CLI/MCP reject oversized values locally, and SQLite measures
+`CAST(... AS BLOB)` so storage cannot reinterpret bytes as code points. Exact
+persisted sequence/body replays remain idempotent after
+any result status, while conflicting or new facts are rejected. Telemetry treats
+`tests_passed` and `tests_failed` as stream-closing results even though the run
+lifecycle still permits the explicit deploy/fail transitions that follow them.
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 

@@ -99,7 +99,8 @@ func TestToolReportProgressForwardsOnlyAllowlistedRunFacts(t *testing.T) {
 		"agent_reported_at": "2026-08-20T10:00:00Z", "kind": "progress",
 		"phase": "testing", "progress_percent": 80.0, "estimate_revision": float64(3),
 		"estimate_source": "adapter", "estimate_confidence": .8,
-		"estimate_basis": "Four of five named checks complete",
+		"activity":       strings.Repeat("é", 140),
+		"estimate_basis": strings.Repeat("é", 120),
 	}
 	withPayload := make(map[string]any, len(args)+1)
 	for key, value := range args {
@@ -108,6 +109,23 @@ func TestToolReportProgressForwardsOnlyAllowlistedRunFacts(t *testing.T) {
 	withPayload["provider_payload"] = map[string]any{"prompt": "must not pass through"}
 	if _, err := srv.toolReportProgress(withPayload); err == nil || !strings.Contains(err.Error(), "unknown telemetry field") {
 		t.Fatalf("unknown provider payload error=%v", err)
+	}
+	for _, tt := range []struct {
+		field string
+		value string
+		want  string
+	}{
+		{field: "activity", value: strings.Repeat("é", 141), want: "280 UTF-8 bytes"},
+		{field: "estimate_basis", value: strings.Repeat("é", 121), want: "240 UTF-8 bytes"},
+	} {
+		over := make(map[string]any, len(args))
+		for key, value := range args {
+			over[key] = value
+		}
+		over[tt.field] = tt.value
+		if _, err := srv.toolReportProgress(over); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("%s over-bound error=%v, want %q", tt.field, err, tt.want)
+		}
 	}
 
 	text, err := srv.toolReportProgress(args)

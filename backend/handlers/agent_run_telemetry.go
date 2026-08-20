@@ -137,6 +137,21 @@ type agentRunTelemetrySnapshot struct {
 	LatestEstimate            *AgentRunTelemetry `json:"latest_estimate"`
 }
 
+// agentRunTelemetryIsTerminal is intentionally stricter than the run
+// lifecycle predicate. A test result may still have a legal lifecycle edge to
+// deployment/failure, but it closes the runner's fact stream: subsequent
+// lifecycle evidence belongs on the authoritative run PATCH, not as telemetry
+// appended after the test result. Exact persisted replays are resolved before
+// this predicate and remain idempotent.
+func agentRunTelemetryIsTerminal(status string) bool {
+	switch status {
+	case "completed", "tests_passed", "tests_failed", "deployed", "failed", "cancelled", "drafted":
+		return true
+	default:
+		return false
+	}
+}
+
 func canReportAgentRunTelemetry(r *http.Request, run *AgentRun) bool {
 	u := auth.GetUser(r)
 	if u == nil {
@@ -217,7 +232,7 @@ func IngestAgentRunTelemetry(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "telemetry unavailable", http.StatusInternalServerError)
 		return
 	}
-	if agentRunIsTerminal(status) {
+	if agentRunTelemetryIsTerminal(status) {
 		jsonError(w, "terminal run telemetry is immutable", http.StatusConflict)
 		return
 	}
@@ -433,7 +448,7 @@ func GetLatestAgentRunTelemetry(w http.ResponseWriter, r *http.Request) {
 	semanticFreshness := telemetryFreshness(now, semanticAt)
 	estimateFreshness := telemetryFreshness(now, estimateAt)
 	liveness := "unknown"
-	if agentRunIsTerminal(run.Status) {
+	if agentRunTelemetryIsTerminal(run.Status) {
 		liveness = "ended"
 	} else if heartbeatFreshness != nil {
 		liveness = "live"

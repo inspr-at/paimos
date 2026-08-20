@@ -407,6 +407,48 @@ func TestAgentRunTelemetryAuthorizationAndTerminalImmutability(t *testing.T) {
 	assertStatus(t, ts.post(t, "/api/runs/"+itoa(requestedRunID)+"/telemetry", ts.memberCookie, requesterReport), http.StatusCreated)
 }
 
+func TestAgentRunTelemetryAllResultStatusesSealNewFactsButAllowExactReplay(t *testing.T) {
+	statuses := []string{"completed", "tests_passed", "tests_failed", "deployed", "failed", "cancelled", "drafted"}
+	for _, status := range statuses {
+		t.Run(status, func(t *testing.T) {
+			ts := newDirectTelemetryServer(t)
+			_, runID := seedTelemetryRun(t, ts, ts.adminCookie)
+			path := "/api/runs/" + itoa(runID) + "/telemetry"
+			report := telemetryReport(1, "2026-08-20T10:00:00Z")
+			assertStatus(t, ts.post(t, path, ts.adminCookie, report), http.StatusCreated)
+
+			if _, err := db.DB.Exec(`UPDATE agent_runs SET status=?,finished_at=datetime('now') WHERE id=?`, status, runID); err != nil {
+				t.Fatal(err)
+			}
+
+			// Duplicate detection precedes the closed-stream guard so a response-lost
+			// append is acknowledged after every result status.
+			resp := ts.post(t, path, ts.adminCookie, report)
+			assertStatus(t, resp, http.StatusOK)
+			var duplicate map[string]any
+			decode(t, resp, &duplicate)
+			if duplicate["duplicate"] != true {
+				t.Fatalf("status %s replay=%+v", status, duplicate)
+			}
+
+			conflict := telemetryReport(1, "2026-08-20T10:00:00Z")
+			conflict["activity"] = "different terminal replay"
+			assertStatus(t, ts.post(t, path, ts.adminCookie, conflict), http.StatusConflict)
+			late := telemetryReport(2, "2026-08-20T10:00:01Z")
+			late["estimate_revision"] = 2
+			assertStatus(t, ts.post(t, path, ts.adminCookie, late), http.StatusConflict)
+
+			resp = ts.get(t, path+"/latest", ts.adminCookie)
+			assertStatus(t, resp, http.StatusOK)
+			var snapshot map[string]any
+			decode(t, resp, &snapshot)
+			if snapshot["liveness"] != "ended" {
+				t.Fatalf("status %s snapshot=%+v", status, snapshot)
+			}
+		})
+	}
+}
+
 func TestAgentRunCompletedLifecycleAndTestEvidence(t *testing.T) {
 	ts := newDirectTelemetryServer(t)
 	_, completedID := seedTelemetryRun(t, ts, ts.adminCookie)

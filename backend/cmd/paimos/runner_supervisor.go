@@ -501,6 +501,7 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 	streamErrors := make(chan error, 2)
 	waited := make(chan error, 1)
 	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
 	visibleStdout := newOutputBudgetWriter(stdout, maxVisibleOutputBytes)
 	visibleStderr := newOutputBudgetWriter(stderr, maxVisibleOutputBytes)
 	logWriter := newOutputBudgetWriter(req.LogSink, maxCapturedLogBytes)
@@ -512,8 +513,21 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 		consumeProviderStdout(stdoutPipe, adapter, visibleStdout, logWriter, activity, progress, streamErrors)
 		close(stdoutDone)
 	}()
-	go consumeProviderStderr(stderrPipe, visibleStderr, logWriter, activity, streamErrors)
-	go func() { waited <- cmd.Wait() }()
+	go func() {
+		consumeProviderStderr(stderrPipe, visibleStderr, logWriter, activity, streamErrors)
+		close(stderrDone)
+	}()
+	go func() {
+		// StdoutPipe and StderrPipe require every read to finish before Wait:
+		// Wait closes both descriptors after observing process exit. Starting it
+		// concurrently with the scanners can therefore discard the child's final
+		// structured line. Pipe EOF is delivered by the kernel when the process
+		// exits, so waiting for both consumers first has no polling or sleep and
+		// leaves exactly one goroutine responsible for reaping the child.
+		<-stdoutDone
+		<-stderrDone
+		waited <- cmd.Wait()
+	}()
 
 	currentPhase := allowedSupervisorPhase(req.InitialPhase)
 	if currentPhase == "unknown" {
@@ -590,11 +604,10 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 				return reportErrorResult(err)
 			}
 		case waitErr := <-waited:
-			<-stdoutDone
-			// The process can exit at the same instant its final structured line
-			// asks for input. The scanner gives that fact priority over ordinary
-			// progress; drain it here before classifying the exit so the blocker
-			// cannot disappear in the wait/progress select race.
+			// Both stream consumers have reached EOF before Wait is allowed to run.
+			// The scanner gives a final needs-input fact priority over ordinary
+			// progress; drain it before classifying the exit so the blocker cannot
+			// disappear in the wait/progress select race.
 			select {
 			case p := <-progress:
 				if p.needsInput {

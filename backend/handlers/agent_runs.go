@@ -83,6 +83,9 @@ var agentRunStatuses = map[string]bool{
 	"deployed": true, "failed": true, "cancelled": true, "drafted": true,
 }
 
+// agentRunIsTerminal means lifecycle-immutable. Test result statuses retain
+// explicit deploy/fail edges, even though they close the separate telemetry
+// stream (see agentRunTelemetryIsTerminal).
 func agentRunIsTerminal(s string) bool {
 	return s == "completed" || s == "deployed" || s == "failed" || s == "cancelled" || s == "drafted"
 }

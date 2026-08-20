@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -194,6 +196,24 @@ func TestMigration143UpgradesPopulatedM142WithoutLosingGraphOrTelemetry(t *testi
 		t.Fatal(err)
 	}
 	telemetryID, _ := telemetry.LastInsertId()
+	semantic, err := database.Exec(`INSERT INTO agent_run_telemetry(run_id,sequence,correlation_id,provider,adapter,agent_reported_at,server_received_at,kind,phase,activity)
+		VALUES(?,2,'fixture-correlation','anthropic','claude-code','2026-08-20T10:00:02Z','2026-08-20T10:00:02Z','phase','implementing','editing')`, followupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	semanticID, _ := semantic.LastInsertId()
+	estimate, err := database.Exec(`INSERT INTO agent_run_telemetry(run_id,sequence,correlation_id,provider,adapter,agent_reported_at,server_received_at,kind,phase,activity,estimate_revision,progress_percent,eta_seconds,eta_min_seconds,eta_max_seconds,estimate_source,estimate_confidence,estimate_basis)
+		VALUES(?,3,'fixture-correlation','anthropic','claude-code','2026-08-20T10:00:03Z','2026-08-20T10:00:03Z','progress','testing','testing',1,50,300,240,360,'adapter',0.8,'half the checks passed')`, followupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	estimateID, _ := estimate.LastInsertId()
+	latestHeartbeat, err := database.Exec(`INSERT INTO agent_run_telemetry(run_id,sequence,correlation_id,provider,adapter,agent_reported_at,server_received_at,kind,heartbeat,phase)
+		VALUES(?,4,'fixture-correlation','anthropic','claude-code','2026-08-20T10:00:04Z','2026-08-20T10:00:04Z','heartbeat',1,'testing')`, followupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latestHeartbeatID, _ := latestHeartbeat.LastInsertId()
 	if _, err := database.Exec(`INSERT INTO agent_run_telemetry_latest(run_id,telemetry_id,sequence,last_heartbeat_at,heartbeat_telemetry_id,latest_event_at)
 		VALUES(?,?,1,'2026-08-20T10:00:01Z',?,'2026-08-20T10:00:01Z')`, followupID, telemetryID, telemetryID); err != nil {
 		t.Fatal(err)
@@ -248,7 +268,7 @@ func TestMigration143UpgradesPopulatedM142WithoutLosingGraphOrTelemetry(t *testi
 		`CREATE INDEX idx_agent_runs_source_draft ON agent_runs(source_draft_run_id)`,
 		`CREATE INDEX idx_agent_runs_followup ON agent_runs(followup_run_id)`,
 		`CREATE TRIGGER trg_agent_run_telemetry_terminal_guard BEFORE INSERT ON agent_run_telemetry
-		 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('deployed','failed','cancelled','drafted')
+		 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('tests_passed','tests_failed','deployed','failed','cancelled','drafted')
 		 BEGIN SELECT RAISE(ABORT, 'terminal run telemetry is immutable'); END`,
 		`UPDATE sqlite_sequence SET seq=50 WHERE name='agent_runs'`,
 		`DELETE FROM schema_versions WHERE version=143`,
@@ -316,10 +336,10 @@ func TestMigration143UpgradesPopulatedM142WithoutLosingGraphOrTelemetry(t *testi
 	if err := database.QueryRow(`SELECT source_draft_run_id FROM agent_runs WHERE id=?`, followupID).Scan(&gotSource); err != nil || !gotSource.Valid || gotSource.Int64 != draftID {
 		t.Fatalf("followup source=%v err=%v", gotSource, err)
 	}
-	var childRun, latestTelemetry, heartbeatTelemetry int64
-	if err := database.QueryRow(`SELECT t.run_id,l.telemetry_id,l.heartbeat_telemetry_id FROM agent_run_telemetry t JOIN agent_run_telemetry_latest l ON l.run_id=t.run_id WHERE t.id=?`, telemetryID).
-		Scan(&childRun, &latestTelemetry, &heartbeatTelemetry); err != nil || childRun != followupID || latestTelemetry != telemetryID || heartbeatTelemetry != telemetryID {
-		t.Fatalf("telemetry pointers run=%d latest=%d heartbeat=%d err=%v", childRun, latestTelemetry, heartbeatTelemetry, err)
+	var childRun, latestTelemetry, heartbeatTelemetry, semanticTelemetry, estimateTelemetry int64
+	if err := database.QueryRow(`SELECT t.run_id,l.telemetry_id,l.heartbeat_telemetry_id,l.semantic_telemetry_id,l.estimate_telemetry_id FROM agent_run_telemetry t JOIN agent_run_telemetry_latest l ON l.run_id=t.run_id WHERE t.id=?`, telemetryID).
+		Scan(&childRun, &latestTelemetry, &heartbeatTelemetry, &semanticTelemetry, &estimateTelemetry); err != nil || childRun != followupID || latestTelemetry != latestHeartbeatID || heartbeatTelemetry != latestHeartbeatID || semanticTelemetry != estimateID || estimateTelemetry != estimateID {
+		t.Fatalf("rebuilt telemetry pointers run=%d latest=%d heartbeat=%d semantic=%d estimate=%d err=%v (seed semantic=%d)", childRun, latestTelemetry, heartbeatTelemetry, semanticTelemetry, estimateTelemetry, err, semanticID)
 	}
 	var fkTable string
 	if err := database.QueryRow(`SELECT "table" FROM pragma_foreign_key_check LIMIT 1`).Scan(&fkTable); err != sql.ErrNoRows {
@@ -333,7 +353,7 @@ func TestMigration143UpgradesPopulatedM142WithoutLosingGraphOrTelemetry(t *testi
 	if newID <= 50 {
 		t.Fatalf("sqlite_sequence regressed: next id=%d", newID)
 	}
-	if _, err := database.Exec(`UPDATE agent_runs SET status='completed' WHERE id=?`, followupID); err != nil {
+	if _, err := database.Exec(`UPDATE agent_runs SET status='tests_passed',tests_summary='fixture tests passed' WHERE id=?`, followupID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`INSERT INTO agent_run_telemetry(run_id,sequence,correlation_id,provider,adapter,agent_reported_at,server_received_at,kind)
@@ -373,14 +393,258 @@ func TestSchemaAgentRunTelemetryAppendOnlyAndTerminalGuards(t *testing.T) {
 		VALUES(?, 1, 'run-1', 'anthropic', 'claude-code', '2026-08-20T10:00:02Z', '2026-08-20T10:00:02Z', 'progress')`, runID); err == nil || !strings.Contains(err.Error(), "sequence is not monotonic") {
 		t.Fatalf("monotonic insert error=%v", err)
 	}
-	if _, err := database.Exec(`UPDATE agent_runs SET status='failed' WHERE id=?`, runID); err != nil {
+	terminalStatuses := []string{"completed", "tests_passed", "tests_failed", "deployed", "failed", "cancelled", "drafted"}
+	for i, status := range terminalStatuses {
+		terminalRunID := runID
+		if i > 0 {
+			issue, err := database.Exec(`INSERT INTO issues(project_id, issue_number, type, title) VALUES(?, ?, 'ticket', ?)`, projectID, i+1, "Telemetry "+status)
+			if err != nil {
+				t.Fatal(err)
+			}
+			terminalIssueID, _ := issue.LastInsertId()
+			run, err := database.Exec(`INSERT INTO agent_runs(issue_id, project_id, status) VALUES(?, ?, 'running')`, terminalIssueID, projectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			terminalRunID, _ = run.LastInsertId()
+			if _, err := database.Exec(`INSERT INTO agent_run_telemetry(
+				run_id, sequence, correlation_id, provider, adapter, agent_reported_at, server_received_at, kind, heartbeat)
+				VALUES(?, 1, 'run-1', 'anthropic', 'claude-code', '2026-08-20T10:00:00Z', '2026-08-20T10:00:01Z', 'heartbeat', 1)`, terminalRunID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := database.Exec(`UPDATE agent_runs SET status=? WHERE id=?`, status, terminalRunID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(`INSERT INTO agent_run_telemetry(
+			run_id, sequence, correlation_id, provider, adapter, agent_reported_at, server_received_at, kind)
+			VALUES(?, 2, 'run-1', 'anthropic', 'claude-code', '2026-08-20T10:00:03Z', '2026-08-20T10:00:03Z', 'progress')`, terminalRunID); err == nil || !strings.Contains(err.Error(), "terminal run telemetry") {
+			t.Fatalf("status %s terminal insert error=%v", status, err)
+		}
+	}
+}
+
+func TestSchemaAgentRunTelemetryUTF8ByteBounds(t *testing.T) {
+	database := openTestDB(t)
+	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Telemetry bytes','TBY')`)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO agent_run_telemetry(
-		run_id, sequence, correlation_id, provider, adapter, agent_reported_at, server_received_at, kind)
-		VALUES(?, 2, 'run-1', 'anthropic', 'claude-code', '2026-08-20T10:00:03Z', '2026-08-20T10:00:03Z', 'progress')`, runID); err == nil || !strings.Contains(err.Error(), "terminal run telemetry") {
-		t.Fatalf("terminal insert error=%v", err)
+	projectID, _ := project.LastInsertId()
+	issue, err := database.Exec(`INSERT INTO issues(project_id,issue_number,type,title) VALUES(?,1,'ticket','UTF-8 bounds')`, projectID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	issueID, _ := issue.LastInsertId()
+	run, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,status) VALUES(?,?,'running')`, issueID, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, _ := run.LastInsertId()
+	insert := func(sequence int, activity, basis string) error {
+		_, err := database.Exec(`INSERT INTO agent_run_telemetry(
+			run_id,sequence,correlation_id,provider,adapter,agent_reported_at,server_received_at,kind,phase,activity,
+			estimate_revision,progress_percent,eta_seconds,eta_min_seconds,eta_max_seconds,estimate_source,estimate_confidence,estimate_basis)
+			VALUES(?,?,'bytes-1','paimos','test','2026-08-20T10:00:00Z','2026-08-20T10:00:00Z','progress','testing',?, ?,50,300,240,360,'adapter',0.8,?)`,
+			runID, sequence, activity, sequence, basis)
+		return err
+	}
+	if err := insert(1, strings.Repeat("é", 140), strings.Repeat("é", 120)); err != nil {
+		t.Fatalf("exact UTF-8 byte bounds rejected: %v", err)
+	}
+	if err := insert(2, strings.Repeat("é", 141), "valid basis"); err == nil {
+		t.Fatal("281-byte activity passed the storage boundary")
+	}
+	if err := insert(2, "valid activity", strings.Repeat("é", 121)); err == nil {
+		t.Fatal("242-byte estimate basis passed the storage boundary")
+	}
+	var tableSQL, triggerSQL string
+	if err := database.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_run_telemetry'`).Scan(&tableSQL); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name='trg_agent_run_telemetry_byte_bounds'`).Scan(&triggerSQL); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(tableSQL, "length(CAST(activity AS BLOB))") || !strings.Contains(tableSQL, "length(CAST(estimate_basis AS BLOB))") || !strings.Contains(triggerSQL, "CAST(NEW.activity AS BLOB)") {
+		t.Fatalf("byte-bound schema missing: table=%q trigger=%q", tableSQL, triggerSQL)
+	}
+}
+
+func TestMigration143PreconditionRejectsLegacyCodePointBoundRows(t *testing.T) {
+	legacy, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacy.Close()
+	legacy.SetMaxOpenConns(1)
+	if _, err := legacy.Exec(`CREATE TABLE agent_run_telemetry(
+		id INTEGER PRIMARY KEY, activity TEXT NOT NULL CHECK(length(activity)<=280),
+		estimate_basis TEXT NOT NULL CHECK(length(estimate_basis)<=240))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`INSERT INTO agent_run_telemetry(id,activity,estimate_basis) VALUES(1,?,'')`, strings.Repeat("é", 141)); err != nil {
+		t.Fatalf("legacy code-point constraint should admit the fixture: %v", err)
+	}
+	conn, err := legacy.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := checkAgentRunTelemetryByteBounds(context.Background(), conn); err == nil || !strings.Contains(err.Error(), "activity_bytes=282") {
+		t.Fatalf("M143 precondition error=%v", err)
+	}
+}
+
+func TestRebuildAgentRunTelemetryLatestMatchesIncrementalProjection(t *testing.T) {
+	database := openTestDB(t)
+	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Projection rebuild','PRB')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	type projectionRow struct {
+		runID, telemetryID, sequence               int64
+		lastHeartbeatAt                            sql.NullString
+		heartbeatID, semanticID, estimateID        sql.NullInt64
+		latestEventAt, latestSemanticAt, latestETA sql.NullString
+	}
+	readProjection := func() []projectionRow {
+		rows, err := database.Query(`SELECT run_id,telemetry_id,sequence,last_heartbeat_at,heartbeat_telemetry_id,
+			semantic_telemetry_id,estimate_telemetry_id,latest_event_at,latest_semantic_at,latest_estimate_at
+			FROM agent_run_telemetry_latest ORDER BY run_id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var result []projectionRow
+		for rows.Next() {
+			var row projectionRow
+			if err := rows.Scan(&row.runID, &row.telemetryID, &row.sequence, &row.lastHeartbeatAt,
+				&row.heartbeatID, &row.semanticID, &row.estimateID, &row.latestEventAt,
+				&row.latestSemanticAt, &row.latestETA); err != nil {
+				t.Fatal(err)
+			}
+			result = append(result, row)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	type eventSpec struct {
+		sequence         int64
+		kind, phase      string
+		heartbeat        bool
+		activity         string
+		estimateRevision *int64
+	}
+	var runIDs []int64
+	estimateRevision := int64(1)
+	for issueNumber, events := range [][]eventSpec{
+		{
+			{sequence: 1, kind: "heartbeat", phase: "starting", heartbeat: true},
+			{sequence: 2, kind: "phase", phase: "implementing", activity: "editing"},
+			{sequence: 3, kind: "progress", phase: "testing", activity: "testing", estimateRevision: &estimateRevision},
+			{sequence: 4, kind: "heartbeat", phase: "testing", heartbeat: true},
+		},
+		{{sequence: 1, kind: "phase", phase: "planning", activity: "planning"}},
+	} {
+		issue, err := database.Exec(`INSERT INTO issues(project_id,issue_number,type,title) VALUES(?,?,'ticket','Projection')`, projectID, issueNumber+1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		issueID, _ := issue.LastInsertId()
+		run, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,status) VALUES(?,?,'running')`, issueID, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runID, _ := run.LastInsertId()
+		runIDs = append(runIDs, runID)
+		for _, event := range events {
+			receivedAt := "2026-08-20T10:00:0" + strconv.FormatInt(event.sequence, 10) + "Z"
+			res, err := database.Exec(`INSERT INTO agent_run_telemetry(
+				run_id,sequence,correlation_id,provider,adapter,agent_reported_at,server_received_at,kind,heartbeat,phase,activity,
+				estimate_revision,progress_percent,eta_seconds,eta_min_seconds,eta_max_seconds,estimate_source,estimate_confidence,estimate_basis)
+				VALUES(?,?,'projection-1','paimos','test',?,?,?, ?,?,?, ?,?,?,?,?,?,?,?)`,
+				runID, event.sequence, receivedAt, receivedAt, event.kind, event.heartbeat, event.phase, event.activity,
+				event.estimateRevision, nullableEstimateFloat(event.estimateRevision, 50), nullableEstimateInt(event.estimateRevision, 300),
+				nullableEstimateInt(event.estimateRevision, 240), nullableEstimateInt(event.estimateRevision, 360),
+				nullableEstimateString(event.estimateRevision, "adapter"), nullableEstimateFloat(event.estimateRevision, .8), nullableEstimateString(event.estimateRevision, "half"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			eventID, _ := res.LastInsertId()
+			var heartbeatAt, heartbeatID, semanticID, semanticAt, estimateID, estimateAt any
+			if event.heartbeat {
+				heartbeatAt, heartbeatID = receivedAt, eventID
+			}
+			if event.kind != "heartbeat" || event.activity != "" {
+				semanticID, semanticAt = eventID, receivedAt
+			}
+			if event.estimateRevision != nil {
+				estimateID, estimateAt = eventID, receivedAt
+			}
+			if _, err := database.Exec(`INSERT INTO agent_run_telemetry_latest(
+				run_id,telemetry_id,sequence,last_heartbeat_at,heartbeat_telemetry_id,semantic_telemetry_id,estimate_telemetry_id,
+				latest_event_at,latest_semantic_at,latest_estimate_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+				ON CONFLICT(run_id) DO UPDATE SET telemetry_id=excluded.telemetry_id,sequence=excluded.sequence,
+				last_heartbeat_at=COALESCE(excluded.last_heartbeat_at,agent_run_telemetry_latest.last_heartbeat_at),
+				heartbeat_telemetry_id=COALESCE(excluded.heartbeat_telemetry_id,agent_run_telemetry_latest.heartbeat_telemetry_id),
+				semantic_telemetry_id=COALESCE(excluded.semantic_telemetry_id,agent_run_telemetry_latest.semantic_telemetry_id),
+				estimate_telemetry_id=COALESCE(excluded.estimate_telemetry_id,agent_run_telemetry_latest.estimate_telemetry_id),
+				latest_event_at=excluded.latest_event_at,
+				latest_semantic_at=COALESCE(excluded.latest_semantic_at,agent_run_telemetry_latest.latest_semantic_at),
+				latest_estimate_at=COALESCE(excluded.latest_estimate_at,agent_run_telemetry_latest.latest_estimate_at)`,
+				runID, eventID, event.sequence, heartbeatAt, heartbeatID, semanticID, estimateID, receivedAt, semanticAt, estimateAt); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	want := readProjection()
+	if _, err := database.Exec(`DELETE FROM agent_run_telemetry_latest WHERE run_id=?`, runIDs[1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE agent_run_telemetry_latest SET
+		telemetry_id=(SELECT MIN(id) FROM agent_run_telemetry WHERE run_id=?),sequence=1,
+		last_heartbeat_at=NULL,heartbeat_telemetry_id=NULL,semantic_telemetry_id=NULL,estimate_telemetry_id=NULL,
+		latest_event_at='stale',latest_semantic_at=NULL,latest_estimate_at=NULL WHERE run_id=?`, runIDs[0], runIDs[0]); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rebuildAgentRunTelemetryLatest(context.Background(), tx); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readProjection(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rebuilt projection=%+v want incremental=%+v", got, want)
+	}
+}
+
+func nullableEstimateInt(revision *int64, value int64) any {
+	if revision == nil {
+		return nil
+	}
+	return value
+}
+
+func nullableEstimateFloat(revision *int64, value float64) any {
+	if revision == nil {
+		return nil
+	}
+	return value
+}
+
+func nullableEstimateString(revision *int64, value string) any {
+	if revision == nil {
+		return ""
+	}
+	return value
 }
 
 func TestSchemaAgentRunTelemetryTerminalWriteRace(t *testing.T) {

@@ -959,7 +959,7 @@
           "kind": {"type": "string", "enum": ["heartbeat", "progress", "phase", "needs_input", "blocker", "estimate"]},
           "heartbeat": {"type": "boolean"},
           "phase": {"type": "string", "enum": ["unknown", "starting", "planning", "implementing", "testing", "reviewing", "deploying", "waiting", "completed"]},
-          "activity": {"type": "string", "maxLength": 280},
+          "activity": {"type": "string", "maxLength": 280, "description": "At most 280 UTF-8 bytes; byte enforcement is authoritative"},
           "needs_input": {"type": "boolean"},
           "blocker_state": {"type": "string", "enum": ["none", "input", "dependency", "permission", "environment", "external", "unknown"]},
           "estimate_revision": {"type": "integer", "minimum": 1, "maximum": 2147483647},
@@ -969,7 +969,7 @@
           "eta_max_seconds": {"type": "integer", "minimum": 0, "maximum": 31536000},
           "estimate_source": {"type": "string", "enum": ["agent", "adapter", "provider", "tool"]},
           "estimate_confidence": {"type": "number", "minimum": 0, "maximum": 1},
-          "estimate_basis": {"type": "string", "minLength": 1, "maxLength": 240},
+          "estimate_basis": {"type": "string", "minLength": 1, "maxLength": 240, "description": "At most 240 UTF-8 bytes; byte enforcement is authoritative"},
           "clock_skew_seconds": {"type": "integer", "format": "int64"},
           "clock_skewed": {"type": "boolean"}
         }
@@ -988,7 +988,7 @@
           "kind": {"type": "string", "enum": ["heartbeat", "progress", "phase", "needs_input", "blocker", "estimate"]},
           "heartbeat": {"type": "boolean"},
           "phase": {"type": "string", "enum": ["unknown", "starting", "planning", "implementing", "testing", "reviewing", "deploying", "waiting", "completed"]},
-          "activity": {"type": "string", "maxLength": 280},
+          "activity": {"type": "string", "maxLength": 280, "description": "At most 280 UTF-8 bytes; byte enforcement is authoritative"},
           "needs_input": {"type": "boolean"},
           "blocker_state": {"type": "string", "enum": ["none", "input", "dependency", "permission", "environment", "external", "unknown"]},
           "estimate_revision": {"type": "integer", "minimum": 1, "maximum": 2147483647},
@@ -998,7 +998,7 @@
           "eta_max_seconds": {"type": "integer", "minimum": 0, "maximum": 31536000},
           "estimate_source": {"type": "string", "enum": ["agent", "adapter", "provider", "tool"]},
           "estimate_confidence": {"type": "number", "minimum": 0, "maximum": 1},
-          "estimate_basis": {"type": "string", "minLength": 1, "maxLength": 240}
+          "estimate_basis": {"type": "string", "minLength": 1, "maxLength": 240, "description": "At most 240 UTF-8 bytes; byte enforcement is authoritative"}
         }
       },
       "AgentRunTelemetrySnapshot": {
@@ -1007,7 +1007,7 @@
         "properties": {
           "run_id": {"type": "integer", "format": "int64"},
           "instrumented": {"type": "boolean"},
-          "liveness": {"type": "string", "enum": ["unknown", "live", "stale", "ended"]},
+          "liveness": {"type": "string", "enum": ["unknown", "live", "stale", "ended"], "description": "ended for every stream-closing result: completed, tests_passed, tests_failed, deployed, failed, cancelled, or drafted"},
           "freshness_seconds": {"type": "integer", "format": "int64"},
           "event_freshness_seconds": {"type": "integer", "format": "int64", "description": "Age of the newest event by server receipt time"},
           "heartbeat_freshness_seconds": {"type": "integer", "format": "int64", "description": "Age of the newest supervisor heartbeat; the only active-run watchdog clock"},
@@ -2909,7 +2909,7 @@
     "/api/runs/{id}/telemetry": {
       "post": {
         "tags": ["agent-runs"],
-        "summary": "Append one immutable telemetry fact. Requester, claimer, or admin; unauthorized runs are existence-hidden.",
+        "summary": "Append one immutable telemetry fact. Requester, claimer, or admin; unauthorized runs are existence-hidden. Every result status closes the fact stream.",
         "parameters": [
           {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}
         ],
@@ -2936,7 +2936,7 @@
           },
           "400": {"description": "Invalid allowlisted field, timestamp, range, confidence, or revision"},
           "404": {"description": "Run missing or caller is not requester/claimer/admin"},
-          "409": {"description": "Sequence/identity conflict, stale estimate revision, or terminal run"}
+          "409": {"description": "Sequence/identity conflict, stale estimate revision, or a new/conflicting fact after completed, tests_passed, tests_failed, deployed, failed, cancelled, or drafted; an exact persisted replay remains a 200 duplicate"}
         }
       },
       "get": {

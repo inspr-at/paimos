@@ -106,6 +106,49 @@ type migration struct {
 	steps   []string
 }
 
+// The append-only history is authoritative; this pair reconstructs every
+// latest pointer without trusting the existing projection. M143 uses the same
+// operation when upgrading populated databases, and the regression suite uses
+// rebuildAgentRunTelemetryLatest to prove equivalence with incremental writes.
+const clearAgentRunTelemetryLatestSQL = `DELETE FROM agent_run_telemetry_latest`
+
+const rebuildAgentRunTelemetryLatestSQL = `INSERT INTO agent_run_telemetry_latest(
+	run_id, telemetry_id, sequence, last_heartbeat_at, heartbeat_telemetry_id,
+	semantic_telemetry_id, estimate_telemetry_id, latest_event_at,
+	latest_semantic_at, latest_estimate_at)
+	SELECT newest.run_id, newest.id, newest.sequence,
+	 (SELECT h.server_received_at FROM agent_run_telemetry h
+	   WHERE h.run_id=newest.run_id AND h.heartbeat=1 ORDER BY h.sequence DESC LIMIT 1),
+	 (SELECT h.id FROM agent_run_telemetry h
+	   WHERE h.run_id=newest.run_id AND h.heartbeat=1 ORDER BY h.sequence DESC LIMIT 1),
+	 (SELECT s.id FROM agent_run_telemetry s
+	   WHERE s.run_id=newest.run_id
+	     AND (s.kind<>'heartbeat' OR s.activity<>'' OR s.needs_input=1 OR s.blocker_state<>'none')
+	   ORDER BY s.sequence DESC LIMIT 1),
+	 (SELECT e.id FROM agent_run_telemetry e
+	   WHERE e.run_id=newest.run_id AND e.estimate_revision IS NOT NULL
+	   ORDER BY e.sequence DESC LIMIT 1),
+	 newest.server_received_at,
+	 (SELECT s.server_received_at FROM agent_run_telemetry s
+	   WHERE s.run_id=newest.run_id
+	     AND (s.kind<>'heartbeat' OR s.activity<>'' OR s.needs_input=1 OR s.blocker_state<>'none')
+	   ORDER BY s.sequence DESC LIMIT 1),
+	 (SELECT e.server_received_at FROM agent_run_telemetry e
+	   WHERE e.run_id=newest.run_id AND e.estimate_revision IS NOT NULL
+	   ORDER BY e.sequence DESC LIMIT 1)
+	FROM agent_run_telemetry newest
+	WHERE newest.sequence=(SELECT MAX(candidate.sequence) FROM agent_run_telemetry candidate WHERE candidate.run_id=newest.run_id)`
+
+func rebuildAgentRunTelemetryLatest(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, clearAgentRunTelemetryLatestSQL); err != nil {
+		return fmt.Errorf("clear agent-run telemetry projection: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, rebuildAgentRunTelemetryLatestSQL); err != nil {
+		return fmt.Errorf("rebuild agent-run telemetry projection: %w", err)
+	}
+	return nil
+}
+
 func Open() error {
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
@@ -5634,7 +5677,7 @@ func migrate(db *sql.DB) error {
 				heartbeat           INTEGER NOT NULL DEFAULT 0 CHECK(heartbeat IN (0,1)),
 				phase               TEXT NOT NULL DEFAULT 'unknown'
 				                    CHECK(phase IN ('unknown','starting','planning','implementing','testing','reviewing','deploying','waiting','completed')),
-				activity            TEXT NOT NULL DEFAULT '' CHECK(length(activity) <= 280),
+				activity            TEXT NOT NULL DEFAULT '' CHECK(length(CAST(activity AS BLOB)) <= 280),
 				needs_input         INTEGER NOT NULL DEFAULT 0 CHECK(needs_input IN (0,1)),
 				blocker_state       TEXT NOT NULL DEFAULT 'none'
 				                    CHECK(blocker_state IN ('none','input','dependency','permission','environment','external','unknown')),
@@ -5646,7 +5689,7 @@ func migrate(db *sql.DB) error {
 				estimate_source     TEXT NOT NULL DEFAULT ''
 				                    CHECK(estimate_source IN ('','agent','adapter','provider','tool')),
 				estimate_confidence REAL CHECK(estimate_confidence BETWEEN 0 AND 1),
-				estimate_basis      TEXT NOT NULL DEFAULT '' CHECK(length(estimate_basis) <= 240),
+				estimate_basis      TEXT NOT NULL DEFAULT '' CHECK(length(CAST(estimate_basis AS BLOB)) <= 240),
 				UNIQUE(run_id, sequence)
 			)`,
 			`CREATE INDEX IF NOT EXISTS idx_agent_run_telemetry_history
@@ -5662,7 +5705,7 @@ func migrate(db *sql.DB) error {
 			 BEGIN SELECT RAISE(ABORT, 'agent run telemetry is append-only'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_agent_run_telemetry_terminal_guard
 			 BEFORE INSERT ON agent_run_telemetry
-			 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('deployed','failed','cancelled','drafted')
+			 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('tests_passed','tests_failed','deployed','failed','cancelled','drafted')
 			 BEGIN SELECT RAISE(ABORT, 'terminal run telemetry is immutable'); END`,
 			`CREATE TRIGGER IF NOT EXISTS trg_agent_run_telemetry_sequence_guard
 			 BEFORE INSERT ON agent_run_telemetry
@@ -5681,7 +5724,10 @@ func migrate(db *sql.DB) error {
 		//
 		// The latest telemetry row is an event pointer, not a state snapshot. Add
 		// separately indexed heartbeat/semantic/estimate pointers so a heartbeat
-		// cannot erase the last useful activity or ETA fact.
+		// cannot erase the last useful activity or ETA fact. Rebuild every pointer
+		// from authoritative history, including projection rows that were missing
+		// or stale, and add a byte-count trigger for M142 databases whose original
+		// SQLite length() checks counted Unicode code points.
 		{143, []string{
 			`PRAGMA foreign_keys=OFF`,
 			`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_terminal_guard`,
@@ -5772,19 +5818,20 @@ func migrate(db *sql.DB) error {
 			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN latest_event_at TEXT`,
 			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN latest_semantic_at TEXT`,
 			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN latest_estimate_at TEXT`,
-			`UPDATE agent_run_telemetry_latest SET
-				heartbeat_telemetry_id=(SELECT id FROM agent_run_telemetry WHERE run_id=agent_run_telemetry_latest.run_id AND heartbeat=1 ORDER BY sequence DESC LIMIT 1),
-				semantic_telemetry_id=(SELECT id FROM agent_run_telemetry WHERE run_id=agent_run_telemetry_latest.run_id AND (kind<>'heartbeat' OR activity<>'' OR needs_input=1 OR blocker_state<>'none') ORDER BY sequence DESC LIMIT 1),
-				estimate_telemetry_id=(SELECT id FROM agent_run_telemetry WHERE run_id=agent_run_telemetry_latest.run_id AND estimate_revision IS NOT NULL ORDER BY sequence DESC LIMIT 1),
-				latest_event_at=(SELECT server_received_at FROM agent_run_telemetry WHERE id=agent_run_telemetry_latest.telemetry_id),
-				latest_semantic_at=(SELECT server_received_at FROM agent_run_telemetry WHERE id=(SELECT id FROM agent_run_telemetry WHERE run_id=agent_run_telemetry_latest.run_id AND (kind<>'heartbeat' OR activity<>'' OR needs_input=1 OR blocker_state<>'none') ORDER BY sequence DESC LIMIT 1)),
-				latest_estimate_at=(SELECT server_received_at FROM agent_run_telemetry WHERE id=(SELECT id FROM agent_run_telemetry WHERE run_id=agent_run_telemetry_latest.run_id AND estimate_revision IS NOT NULL ORDER BY sequence DESC LIMIT 1))`,
+			clearAgentRunTelemetryLatestSQL,
+			rebuildAgentRunTelemetryLatestSQL,
 			`CREATE INDEX IF NOT EXISTS idx_agent_run_telemetry_latest_heartbeat ON agent_run_telemetry_latest(last_heartbeat_at)`,
 			`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_terminal_guard`,
 			`CREATE TRIGGER trg_agent_run_telemetry_terminal_guard
 			 BEFORE INSERT ON agent_run_telemetry
-			 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('completed','deployed','failed','cancelled','drafted')
+			 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('completed','tests_passed','tests_failed','deployed','failed','cancelled','drafted')
 			 BEGIN SELECT RAISE(ABORT, 'terminal run telemetry is immutable'); END`,
+			`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_byte_bounds`,
+			`CREATE TRIGGER trg_agent_run_telemetry_byte_bounds
+			 BEFORE INSERT ON agent_run_telemetry
+			 WHEN length(CAST(NEW.activity AS BLOB)) > 280
+			   OR length(CAST(NEW.estimate_basis AS BLOB)) > 240
+			 BEGIN SELECT RAISE(ABORT, 'telemetry text exceeds UTF-8 byte bound'); END`,
 			`PRAGMA foreign_keys=ON`,
 		}},
 	}
@@ -5909,6 +5956,37 @@ func migrationUsesForeignKeyPragma(m migration) bool {
 var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	// PAI-576: migration 113 adds a UNIQUE index on (project_id, issue_number).
 	113: checkNoDuplicateIssueNumbers,
+	// PAI-799/801: M142's original SQLite length() checks counted Unicode
+	// code points. HTTP already enforced bytes, but refuse to carry any row
+	// written by a direct legacy DB client across the byte-bound correction.
+	143: checkAgentRunTelemetryByteBounds,
+}
+
+func checkAgentRunTelemetryByteBounds(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `SELECT id,length(CAST(activity AS BLOB)),length(CAST(estimate_basis AS BLOB))
+		FROM agent_run_telemetry
+		WHERE length(CAST(activity AS BLOB))>280 OR length(CAST(estimate_basis AS BLOB))>240
+		ORDER BY id LIMIT 10`)
+	if err != nil {
+		return fmt.Errorf("scan telemetry UTF-8 byte bounds: %w", err)
+	}
+	defer rows.Close()
+	var violations []string
+	for rows.Next() {
+		var id int64
+		var activityBytes, basisBytes int
+		if err := rows.Scan(&id, &activityBytes, &basisBytes); err != nil {
+			return fmt.Errorf("scan telemetry UTF-8 byte-bound row: %w", err)
+		}
+		violations = append(violations, fmt.Sprintf("id=%d activity_bytes=%d estimate_basis_bytes=%d", id, activityBytes, basisBytes))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate telemetry UTF-8 byte-bound rows: %w", err)
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf("legacy telemetry exceeds the M143 UTF-8 byte bounds; repair the listed rows before upgrading: %s", strings.Join(violations, ", "))
+	}
+	return nil
 }
 
 // checkNoDuplicateIssueNumbers refuses migration 113 if the issues table holds

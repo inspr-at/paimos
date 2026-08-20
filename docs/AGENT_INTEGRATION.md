@@ -584,6 +584,9 @@ terminal run (`completed`, `tests_passed`, `tests_failed`, `drafted`, `deployed`
 `failed`, or `cancelled`) rejects every new fact and conflicting replay with
 409. An exact already-persisted same-sequence replay remains a read-only 200
 duplicate acknowledgement and does not mutate history or the latest projection.
+For telemetry, `tests_passed` and `tests_failed` close the fact stream even
+though the lifecycle still permits their explicit deployment/failure edges;
+those later outcomes are authoritative run PATCHes, not post-result telemetry.
 
 Example report:
 
@@ -631,13 +634,20 @@ returned by `/latest` as `instrumented: false`, `liveness: "unknown"`, and
 `latest_heartbeat`, `latest_semantic`, and `latest_estimate` plus separate
 freshness ages. A later heartbeat-only report does not erase activity,
 needs-input/blocker, progress, or ETA evidence. History remains the append-only
-authority. SSE publishes only `{type: "run_telemetry", name:
+authority. The projection is fully reconstructible from ordered history; the
+M143 upgrade performs that rebuild rather than trusting existing pointer rows,
+and an equivalence regression compares rebuilt output with incremental writes.
+SSE publishes only `{type: "run_telemetry", name:
 run_id, rev: sequence}` as an invalidation hint, and consumers refetch REST.
 
 The body uses a strict field allowlist and small one-line limits. Never send raw
 prompts, tool arguments, command output, environment values, secrets, source
 contents, or arbitrary provider payloads in `activity` or `estimate_basis`.
 Those data classes have no telemetry field and unknown JSON keys are rejected.
+The 280-byte activity and 240-byte estimate-basis limits are UTF-8 byte limits,
+not character counts. HTTP, CLI, MCP, adapters, and SQLite enforce the same
+boundary; MCP validates bytes locally because JSON Schema `maxLength` counts
+code points.
 The server also rejects obvious bearer tokens, credential assignments, cloud
 keys, and private-key headers in `activity` or `estimate_basis`; adapters remain
 responsible for never constructing those fields from raw provider data.

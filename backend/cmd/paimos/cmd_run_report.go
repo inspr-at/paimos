@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 )
@@ -109,6 +110,9 @@ returns 200. If run-id is omitted, PAIMOS_RUN_ID is used.`,
 			if cmd.Flags().Changed("confidence") {
 				report.EstimateConfidence = &estimateConfidence
 			}
+			if err := validateRunReportTextBytes(report); err != nil {
+				return &usageError{msg: err.Error()}
+			}
 			if dryRun {
 				return emitJSON(map[string]any{
 					"method": http.MethodPost,
@@ -156,6 +160,26 @@ returns 200. If run-id is omitted, PAIMOS_RUN_ID is used.`,
 	c.Flags().StringVar(&report.EstimateBasis, "basis", "", "one-line evidence basis (max 240 bytes)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved request without sending it")
 	return c
+}
+
+func validateRunReportTextBytes(report runTelemetryReport) error {
+	for _, field := range []struct {
+		name  string
+		value string
+		max   int
+	}{
+		{name: "activity", value: report.Activity, max: maxTelemetryActivityBytes},
+		{name: "basis", value: report.EstimateBasis, max: maxTelemetryBasisBytes},
+	} {
+		value := strings.TrimSpace(field.value)
+		if !utf8.ValidString(value) {
+			return fmt.Errorf("--%s must be valid UTF-8", field.name)
+		}
+		if len(value) > field.max {
+			return fmt.Errorf("--%s must be at most %d UTF-8 bytes", field.name, field.max)
+		}
+	}
+	return nil
 }
 
 func firstRunReportValue(flagValue, envName string) string {
