@@ -165,7 +165,10 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     const sel = root.querySelector<HTMLElement>('.am-selection-anchor')!
     expect(sel.textContent).toContain('Blocked')
     expect(sel.textContent).toContain('Selected delivery')
-    expect(sel.classList.contains('is-attention')).toBe(true)
+    expect(sel.querySelector('.am-card.is-attention')).not.toBeNull()
+    expect(sel.querySelector('.am-card-flag--attention')?.textContent).toContain('Needs you')
+    expect(sel.querySelector('.am-card-facts')?.textContent).toContain('Pharos · system')
+    expect(sel.querySelector('.am-card-blocker')?.textContent).toContain('permissions fixture fails on case 84')
     // No copy promises future tickets.
     expect(document.body.textContent).not.toMatch(FUTURE_TICKET_COPY)
   })
@@ -183,7 +186,10 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   })
 
   it('lifts a final-lane selection into exactly one data-backed target before Attention', async () => {
-    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?delivery=dlv-820')
+    const wire = makeFixtureSnapshot(10)
+    const richSelection = wire.deliveries!.find((delivery) => delivery.delivery_id === 'dlv-820')!
+    richSelection.status_text = 'Verification remains inside the release window'
+    harness = await mountView(async () => snapshot(wire), '/agent-mode?delivery=dlv-820')
     const { root } = harness
     const anchor = root.querySelector<HTMLElement>('.am-selection-anchor')!
     const attention = root.querySelector<HTMLElement>('.am-attention')!
@@ -194,6 +200,13 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(anchor.textContent).toContain('REL · Release operations / Ungrouped')
     expect(anchor.textContent).toContain('REL-820')
     expect(anchor.textContent).toContain('Release 5.11.0 smoke suite')
+    // The lifted target is the canonical full card, not a lossy summary.
+    expect(anchor.querySelector('.am-card-facts')?.textContent).toContain('Codex · agent')
+    expect(anchor.querySelector('.am-card-tag')?.textContent).toContain('#security')
+    expect(anchor.querySelector('.am-card-percent')?.textContent).toContain('96 % complete')
+    expect(anchor.querySelector('.am-card-flag--attention')?.textContent).toContain('Needs you')
+    expect(anchor.querySelector('.am-card-reason')?.textContent).toContain('Latency threshold exceeded during verification')
+    expect(anchor.querySelector('.am-card-status')?.textContent).toContain('Verification remains inside the release window')
     expect(root.querySelector('.am-lanes [data-delivery-id="dlv-820"]')).toBeNull()
     expect(root.querySelector('.am-lanes [data-layout-id="dlv-820"]')?.textContent).toContain('Selected above')
   })
@@ -288,12 +301,12 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     // … while the selection survives, pinned with its reason.
     expect(selectedId(root)).toBe(selected)
     const pinned = root.querySelector<HTMLElement>('.am-selection-anchor')!
-    expect(pinned.dataset.deliveryId).toBe(selected)
+    expect(pinned.querySelector<HTMLElement>('.am-card')?.dataset.deliveryId).toBe(selected)
     expect(pinned.textContent).toContain('hidden by the project filter')
     // Clearing restores the full layout and keeps the selection.
     root.querySelector<HTMLButtonElement>('.am-filter-clear')!.click()
     await flush()
-    expect(root.querySelector('.am-selection-anchor__excluded')).toBeNull()
+    expect(root.querySelector('.am-selection-anchor .am-card-pinned-note')).toBeNull()
     expect(selectedId(root)).toBe(selected)
     expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(9)
   })
@@ -308,7 +321,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     projectSelect.value = otherOption.value
     projectSelect.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
-    expect(root.querySelector('.am-selection-anchor__excluded')).not.toBeNull()
+    expect(root.querySelector('.am-selection-anchor .am-card-pinned-note')).not.toBeNull()
     hit(root, pinnedId).focus()
 
     // Into the results: the first lane card is selected AND focused.
@@ -316,7 +329,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     await flush()
     const firstResult = cardOrder(root)[0]
     expect(selectedId(root)).toBe(firstResult)
-    expect(root.querySelector('.am-selection-anchor__excluded')).toBeNull()
+    expect(root.querySelector('.am-selection-anchor .am-card-pinned-note')).toBeNull()
     expect((document.activeElement as HTMLElement | null)?.dataset.cardHit).toBe(firstResult)
     expect(document.activeElement!.closest('.am-selection-anchor')).not.toBeNull()
 
@@ -324,7 +337,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     key(root, 'ArrowLeft', hit(root, firstResult))
     await flush()
     expect(selectedId(root)).toBe(pinnedId)
-    expect(root.querySelector('.am-selection-anchor__excluded')).not.toBeNull()
+    expect(root.querySelector('.am-selection-anchor .am-card-pinned-note')).not.toBeNull()
     expect((document.activeElement as HTMLElement | null)?.dataset.cardHit).toBe(pinnedId)
     expect(document.activeElement!.closest('.am-selection-anchor')).not.toBeNull()
   })
@@ -487,7 +500,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
       // Even under interaction hold nothing may survive a revocation.
       canvas.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false }))
       await flush()
-      expect(root.querySelectorAll('.am-card')).toHaveLength(9)
+      expect(root.querySelectorAll('.am-card')).toHaveLength(10)
       expect(root.querySelectorAll('.am-selection-anchor')).toHaveLength(1)
       const seenTitle = root.querySelector('.am-card-title')!.textContent!
 
@@ -681,15 +694,15 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     await refetchViaHint()
     // Data is retained — visibly qualified.
     expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(9)
-    expect(root.querySelectorAll('.am-card.is-degraded')).toHaveLength(9)
-    expect(root.querySelector('.am-selection-anchor.is-degraded')).not.toBeNull()
-    expect(root.querySelectorAll('.am-card-retained').length).toBe(9)
+    expect(root.querySelectorAll('.am-card.is-degraded')).toHaveLength(10)
+    expect(root.querySelector('.am-selection-anchor .am-card.is-degraded')).not.toBeNull()
+    expect(root.querySelectorAll('.am-card-retained').length).toBe(10)
     expect(root.querySelector('.am-banner')!.textContent).toContain('Last known state')
     // … and no false precision: no percent, no landing time, reason named.
     expect(root.querySelectorAll('.am-card-percent')).toHaveLength(0)
     expect(root.querySelectorAll('.am-card-progress')).toHaveLength(0)
     expect([...root.querySelectorAll('.am-card-eta')].some((el) => el.textContent?.includes('Lands ~'))).toBe(false)
-    expect(root.querySelectorAll('.am-card-eta--withheld').length).toBe(9)
+    expect(root.querySelectorAll('.am-card-eta--withheld').length).toBe(10)
     expect(root.textContent).toContain('No estimate — feed offline')
     expect(root.querySelector('.am-conv')!.textContent).toContain('feed offline')
     expect(root.querySelector('.am-conv')!.textContent).not.toContain('Lands about')

@@ -503,6 +503,10 @@ const narrationLines = computed<NarrationLine[]>(() => {
 
 const announcement = ref('')
 watch(selection.lastChange, (change) => {
+  // Selection identity is authorized snapshot data too. A full ACL
+  // revocation/404 reconciles to a null selection; clear the live-region
+  // payload instead of retaining the previously announced key/title.
+  announcement.value = ''
   if (!change?.id) return
   const d = data.deliveriesById.value.get(change.id)
   if (!d) return
