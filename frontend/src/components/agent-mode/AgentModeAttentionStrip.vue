@@ -57,14 +57,32 @@ const items = computed<DisplayItem[]>(() => {
     .slice(0, props.max ?? 3)
     .map((delivery) => ({ delivery, aggregate: null }))
 })
+
+// The authoritative total covers every attentive delivery in the active,
+// filtered result, while `items` is only its bounded top slice. A pinned
+// selection can therefore belong to that total without appearing in the
+// slice. Rows returned separately as selected_outside are intentionally not
+// present in `deliveries`, so terminal/filter-excluded selections are never
+// subtracted from the active total.
+const selectedIsActiveAttention = computed(() => props.selectedId != null
+  && props.deliveries.some((delivery) => (
+    delivery.id === props.selectedId && delivery.attention.level > 0
+  )))
+
 const hiddenCount = computed(() => {
   if (props.authoritative) {
-    const selectedWasCandidate = props.authoritative.items.some((item) => item.deliveryId === props.selectedId)
-    return Math.max(0, props.authoritative.total - (selectedWasCandidate ? 1 : 0) - items.value.length)
+    return Math.max(0, props.authoritative.total - (selectedIsActiveAttention.value ? 1 : 0) - items.value.length)
   }
   const total = props.deliveries.filter((d) => d.attention.level > 0 && d.id !== props.selectedId).length
   return Math.max(0, total - items.value.length)
 })
+
+// A valid aggregate may intentionally omit its optional bounded sample, and
+// a held refresh can briefly make a sampled identity unavailable locally.
+// Keep the authoritative total discoverable without fabricating item rows.
+const showStrip = computed(() => props.authoritative
+  ? props.authoritative.total > 0 || hiddenCount.value > 0
+  : items.value.length > 0)
 
 function since(item: DisplayItem): string | null {
   const value = item.aggregate?.since ?? item.delivery.attention.since
@@ -86,13 +104,13 @@ function reasonLabel(reason: AttentionReasonKey): string {
 </script>
 
 <template>
-  <section v-if="items.length" class="am-attention" :aria-label="t('agentMode.attention.title')">
+  <section v-if="showStrip" class="am-attention" :aria-label="t('agentMode.attention.title')">
     <div class="am-attention-head">
       <AppIcon name="hourglass" :size="13" aria-hidden="true" />
       <strong>{{ t('agentMode.attention.title') }}</strong>
       <span class="am-attention-hint">{{ t('agentMode.attention.offerHint') }}</span>
     </div>
-    <ul class="am-attention-list">
+    <ul v-if="items.length" class="am-attention-list">
       <li
         v-for="item in items"
         :key="item.delivery.id"
