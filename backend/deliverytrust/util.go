@@ -146,7 +146,14 @@ func nonnegativeSecondsBetween(start, end time.Time) int64 {
 	if a < 0 && b > math.MaxInt64+a {
 		return math.MaxInt64
 	}
-	return b - a
+	seconds := b - a
+	if end.Nanosecond() < start.Nanosecond() {
+		seconds--
+	}
+	if seconds < 0 {
+		return 0
+	}
+	return seconds
 }
 
 func addSeconds(base time.Time, seconds int64) (time.Time, bool) {

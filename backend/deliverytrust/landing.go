@@ -22,6 +22,7 @@ import (
 
 type landingAnalysis struct {
 	contributors   []Contributor
+	diagnostics    []StageDiagnostic
 	minimumSeconds int64
 	maximumSeconds int64
 	pointSeconds   *int64
@@ -42,6 +43,7 @@ func analyzeLanding(
 	histories := make([]HistoryResult, len(input.Stages))
 	allPoints := true
 	hasContributor := false
+	confidenceSet := false
 	disagreement := false
 
 	for i := currentIndex; i < len(input.Stages); i++ {
@@ -72,6 +74,14 @@ func analyzeLanding(
 			result.transitions = append(result.transitions, estimates[i].nextTransitions...)
 		}
 		contributor, mergedDisagreement := mergeContributor(stage.Stage, i == currentIndex, owner, history)
+		diagnostic := StageDiagnostic{
+			Stage: stage.Stage, CurrentStage: i == currentIndex,
+			Covered:             contributor != nil,
+			RawSampleCount:      history.RawSampleCount,
+			InlierSampleCount:   history.InlierSampleCount,
+			RejectedSampleCount: history.RejectedSampleCount,
+			Flags:               append([]Flag{}, history.Flags...),
+		}
 		if contributor == nil {
 			for _, flag := range history.Flags {
 				result.flags = appendUniqueFlag(result.flags, flag)
@@ -86,9 +96,15 @@ func analyzeLanding(
 			if cause == "" {
 				cause = SuppressMissingContributor
 			}
+			diagnostic.Failure = cause
+			result.diagnostics = append(result.diagnostics, diagnostic)
 			result.failure = preferredSuppression(result.failure, cause)
 			continue
 		}
+		for _, flag := range contributor.Flags {
+			diagnostic.Flags = appendUniqueFlag(diagnostic.Flags, flag)
+		}
+		result.diagnostics = append(result.diagnostics, diagnostic)
 
 		hasContributor = true
 		disagreement = disagreement || mergedDisagreement
@@ -117,9 +133,10 @@ func analyzeLanding(
 			return landingAnalysis{}, nil, fmt.Errorf("%w: point bound overflow", ErrInvalidInput)
 		}
 
-		if result.label == ConfidenceUnknown {
+		if !confidenceSet {
 			result.confidence = contributor.Confidence
 			result.label = contributor.ConfidenceLabel
+			confidenceSet = true
 		} else {
 			result.confidence, result.label = weakerConfidence(
 				result.confidence, result.label,
@@ -186,7 +203,7 @@ func mergeContributor(
 			owner.Confidence, owner.ConfidenceLabel,
 			history.Confidence, history.ConfidenceLabel,
 		)
-		merged.Confidence, merged.ConfidenceLabel = downgradeConfidence(merged.ConfidenceLabel)
+		merged.Confidence, merged.ConfidenceLabel = downgradeConfidence(merged.Confidence, merged.ConfidenceLabel)
 		merged.Flags = appendUniqueFlag(merged.Flags, FlagAgentHistoryDisagreement)
 		return &merged, true
 	}

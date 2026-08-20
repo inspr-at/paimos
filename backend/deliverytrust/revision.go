@@ -116,6 +116,7 @@ func trustRevision(
 
 		if i < len(estimates) {
 			writeEstimate(w, "latest", estimates[i].latest)
+			writeEstimate(w, "latest_progress", estimates[i].latestProgressFact)
 			writeEstimate(w, "max_progress", estimates[i].maxProgressFact)
 		}
 		if i < len(histories) {

@@ -49,6 +49,15 @@ func TestEvaluateWeightedProgressAndEndToEndLanding(t *testing.T) {
 	if got, want := len(output.Contributors), 4; got != want {
 		t.Fatalf("contributors = %d, want %d", got, want)
 	}
+	if got, want := len(output.StageDiagnostics), 4; got != want {
+		t.Fatalf("stage diagnostics = %d, want %d", got, want)
+	}
+	for i, stage := range canonicalStages[1:] {
+		diagnostic := output.StageDiagnostics[i]
+		if diagnostic.Stage != stage || diagnostic.CurrentStage != (i == 0) || !diagnostic.Covered || diagnostic.Failure != "" {
+			t.Fatalf("diagnostic[%d]=%+v", i, diagnostic)
+		}
+	}
 	if output.Contributors[0].Kind != ContributorAgentHistory {
 		t.Fatalf("current contributor = %s, want merged", output.Contributors[0].Kind)
 	}
@@ -75,6 +84,14 @@ func TestEvaluateNAWeightRenormalization(t *testing.T) {
 	assertInt64Pointer(t, output.RemainingMaximumSeconds, 3_100)
 	if len(output.Contributors) != 3 {
 		t.Fatalf("contributors = %d, want 3", len(output.Contributors))
+	}
+	if len(output.StageDiagnostics) != 3 {
+		t.Fatalf("diagnostics = %d, want 3 required remaining stages", len(output.StageDiagnostics))
+	}
+	for _, diagnostic := range output.StageDiagnostics {
+		if diagnostic.Stage == StageQA {
+			t.Fatalf("N/A stage leaked into diagnostics: %+v", diagnostic)
+		}
 	}
 }
 
@@ -122,6 +139,22 @@ func TestEveryStageAndNACombinationIsDeterministic(t *testing.T) {
 				assertIntPointer(t, output.ProgressPercent, expected)
 				if output.Completed != completed {
 					t.Fatalf("completed=%v, want %v", output.Completed, completed)
+				}
+				expectedDiagnostics := make([]StageKey, 0, len(canonicalStages))
+				if !completed {
+					for i := range input.Stages {
+						if input.Policy[i].Required && !input.Stages[i].Completion.Eligible {
+							expectedDiagnostics = append(expectedDiagnostics, input.Stages[i].Stage)
+						}
+					}
+				}
+				if len(output.StageDiagnostics) != len(expectedDiagnostics) {
+					t.Fatalf("diagnostics=%+v, want stages=%v", output.StageDiagnostics, expectedDiagnostics)
+				}
+				for i, stage := range expectedDiagnostics {
+					if output.StageDiagnostics[i].Stage != stage {
+						t.Fatalf("diagnostic[%d]=%+v, want stage=%s", i, output.StageDiagnostics[i], stage)
+					}
 				}
 			})
 		}
@@ -328,6 +361,48 @@ func TestEstimatePermutationCannotChangeSelectionOrRevision(t *testing.T) {
 	}
 }
 
+func TestTrustRevisionIncludesDistinctLatestProgressDeterminant(t *testing.T) {
+	build := func(latestProgress float64) Input {
+		input := fixtureInput(1)
+		eighty := 80.0
+		input.Stages[1].Estimates[0].ProgressPercent = &eighty
+		input.Stages[1].Estimates = append(input.Stages[1].Estimates,
+			EstimateFact{
+				Identity: "estimate-progress-2", Reporter: ReporterAgentRun,
+				Scope: input.Stages[1].Scope, Revision: 2, Sequence: 2,
+				Source: SourceAgent, ServerReceivedAt: fixtureNow,
+				Confidence: 0.9, Basis: "lower progress", ProgressPercent: &latestProgress,
+			},
+			EstimateFact{
+				Identity: "estimate-eta-3", Reporter: ReporterAgentRun,
+				Scope: input.Stages[1].Scope, Revision: 3, Sequence: 3,
+				Source: SourceAgent, ServerReceivedAt: fixtureNow,
+				Confidence: 0.9, Basis: "ETA only", ETA: etaRange(900, 1_100, 1_000),
+			},
+		)
+		return input
+	}
+
+	firstInput := build(20)
+	first := mustEvaluate(t, firstInput)
+	second := mustEvaluate(t, build(30))
+	assertIntPointer(t, first.ProgressPercent, 46)
+	assertIntPointer(t, second.ProgressPercent, 46)
+	if first.OwnerSource == nil || first.OwnerSource.Identity != "estimate-eta-3" ||
+		first.ProgressSource == nil || first.ProgressSource.Identity != "estimate-implementation-1" ||
+		!slices.Contains(first.Flags, FlagSourceBackslideIgnored) {
+		t.Fatalf("80→20→ETA-only determinants incorrect: %+v", first)
+	}
+	if first.TrustRevision == second.TrustRevision {
+		t.Fatal("latest eligible progress fact was omitted from trust revision")
+	}
+	slices.Reverse(firstInput.Stages[1].Estimates)
+	permuted := mustEvaluate(t, firstInput)
+	if first.TrustRevision != permuted.TrustRevision {
+		t.Fatalf("estimate permutation changed three-determinant hash: %s != %s", first.TrustRevision, permuted.TrustRevision)
+	}
+}
+
 func TestTypedScopeResetMayLowerProgress(t *testing.T) {
 	input := fixtureInput(1)
 	eighty := 80.0
@@ -376,8 +451,6 @@ func TestEveryAuthorityScopeIdentityFencesPriorProgress(t *testing.T) {
 		{"execution", func(input *Input) { input.Stages[1].Scope.ExecutionID = "execution-implementation-2" }},
 		{"authority", func(input *Input) { input.Stages[1].Scope.AuthorityID = "authority-implementation-2" }},
 		{"typed reset", func(input *Input) { input.Stages[1].Scope.ResetID = "reset-implementation-2" }},
-		{"reporter", func(input *Input) { input.Stages[1].Scope.ReporterID = "reporter-implementation-2" }},
-		{"run link", func(input *Input) { input.Stages[1].Scope.RunLinkID = "run-link-implementation-2" }},
 	}
 	for _, mutation := range mutations {
 		t.Run(mutation.name, func(t *testing.T) {
@@ -398,6 +471,34 @@ func TestEveryAuthorityScopeIdentityFencesPriorProgress(t *testing.T) {
 			if output.ProgressSource == nil || output.ProgressSource.Identity != "estimate-new-scope" ||
 				slices.Contains(output.Flags, FlagSourceBackslideIgnored) {
 				t.Fatalf("stale scope contributed: %+v", output)
+			}
+		})
+	}
+}
+
+func TestReporterMetadataChangeRequiresNewAuthorityEpoch(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*StageInput)
+	}{
+		{"reporter kind", func(stage *StageInput) {
+			stage.Reporter = ReporterExternal
+			stage.Scope.ReporterID = "external-reporter"
+			stage.Scope.RunLinkID = ""
+		}},
+		{"reporter identity", func(stage *StageInput) { stage.Scope.ReporterID = "reporter-implementation-2" }},
+		{"run link", func(stage *StageInput) { stage.Scope.RunLinkID = "run-link-implementation-2" }},
+		{"typed reset cannot disguise reporter identity change", func(stage *StageInput) {
+			stage.Scope.ResetID = "reset-implementation-2"
+			stage.Scope.ReporterID = "reporter-implementation-2"
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := fixtureInput(1)
+			test.mutate(&input.Stages[1])
+			if _, err := Evaluate(input); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("metadata-only handoff error=%v", err)
 			}
 		})
 	}
@@ -506,6 +607,22 @@ func TestCurrentOwnerCoversSparseCurrentHistoryButNotFutureHistory(t *testing.T)
 	if !slices.Contains(output.Contributors[0].Flags, FlagHistoryInsufficientBasis) {
 		t.Fatalf("optional history diagnostics missing: %v", output.Contributors[0].Flags)
 	}
+	diagnostic := requireStageDiagnostic(t, output, StageImplementation)
+	if !diagnostic.CurrentStage || !diagnostic.Covered || diagnostic.Failure != "" ||
+		diagnostic.RawSampleCount != 0 || diagnostic.InlierSampleCount != 0 || diagnostic.RejectedSampleCount != 0 ||
+		!slices.Contains(diagnostic.Flags, FlagHistoryInsufficientBasis) {
+		t.Fatalf("covered sparse-current diagnostic=%+v", diagnostic)
+	}
+
+	input = fixtureInput(1)
+	input.Stages[1].History = historySamples(StageImplementation, 4, 1_000)
+	output = mustEvaluate(t, input)
+	diagnostic = requireStageDiagnostic(t, output, StageImplementation)
+	if output.Suppression != "" || !diagnostic.Covered || diagnostic.Failure != "" ||
+		diagnostic.RawSampleCount != 4 || diagnostic.InlierSampleCount != 0 || diagnostic.RejectedSampleCount != 0 ||
+		!slices.Contains(diagnostic.Flags, FlagHistoryInsufficientBasis) {
+		t.Fatalf("covered four-row current diagnostic=%+v output_suppression=%s", diagnostic, output.Suppression)
+	}
 
 	input = fixtureInput(1)
 	input.Stages[2].History = nil
@@ -513,12 +630,23 @@ func TestCurrentOwnerCoversSparseCurrentHistoryButNotFutureHistory(t *testing.T)
 	if output.Suppression != SuppressMissingContributor || output.OptimisticLandingAt != nil {
 		t.Fatalf("future missing history not suppressed: %+v", output)
 	}
+	diagnostic = requireStageDiagnostic(t, output, StageQA)
+	if diagnostic.CurrentStage || diagnostic.Covered || diagnostic.Failure != SuppressMissingContributor ||
+		diagnostic.RawSampleCount != 0 || diagnostic.InlierSampleCount != 0 || diagnostic.RejectedSampleCount != 0 {
+		t.Fatalf("uncovered missing-future diagnostic=%+v", diagnostic)
+	}
 
 	input = fixtureInput(1)
 	input.Stages[2].History = historySamples(StageQA, 1, 1_000)
 	output = mustEvaluate(t, input)
 	if output.Suppression != SuppressInsufficientBasis || output.OptimisticLandingAt != nil {
 		t.Fatalf("future low-basis history not suppressed: %+v", output)
+	}
+	diagnostic = requireStageDiagnostic(t, output, StageQA)
+	if diagnostic.Covered || diagnostic.Failure != SuppressInsufficientBasis ||
+		diagnostic.RawSampleCount != 1 || diagnostic.InlierSampleCount != 0 || diagnostic.RejectedSampleCount != 0 ||
+		!slices.Contains(diagnostic.Flags, FlagHistoryInsufficientBasis) {
+		t.Fatalf("uncovered sparse-future diagnostic=%+v", diagnostic)
 	}
 }
 
@@ -530,11 +658,20 @@ func TestMissingCurrentContributorIsDistinctFromLowBasis(t *testing.T) {
 	if output.Suppression != SuppressMissingContributor {
 		t.Fatalf("zero-row current contributor suppression=%s", output.Suppression)
 	}
+	diagnostic := requireStageDiagnostic(t, output, StageImplementation)
+	if diagnostic.Covered || diagnostic.Failure != SuppressMissingContributor || diagnostic.RawSampleCount != 0 {
+		t.Fatalf("zero-row current diagnostic=%+v", diagnostic)
+	}
 
 	input.Stages[1].History = historySamples(StageImplementation, 4, 1_000)
 	output = mustEvaluate(t, input)
 	if output.Suppression != SuppressInsufficientBasis {
 		t.Fatalf("four-row current contributor suppression=%s", output.Suppression)
+	}
+	diagnostic = requireStageDiagnostic(t, output, StageImplementation)
+	if diagnostic.Covered || diagnostic.Failure != SuppressInsufficientBasis ||
+		diagnostic.RawSampleCount != 4 || diagnostic.InlierSampleCount != 0 {
+		t.Fatalf("four-row current diagnostic=%+v", diagnostic)
 	}
 }
 
@@ -560,6 +697,36 @@ func TestOutlierHeavyFutureStageSuppressesWholeLanding(t *testing.T) {
 		!slices.Contains(output.Flags, FlagHistoryOutlierHeavy) {
 		t.Fatalf("outlier-heavy future stage output=%+v", output)
 	}
+	diagnostic := requireStageDiagnostic(t, output, StageQA)
+	if diagnostic.Covered || diagnostic.Failure != SuppressOutlierHeavy ||
+		diagnostic.RawSampleCount != 20 || diagnostic.InlierSampleCount != 11 || diagnostic.RejectedSampleCount != 9 ||
+		!slices.Contains(diagnostic.Flags, FlagHistoryOutlierHeavy) {
+		t.Fatalf("outlier-heavy future diagnostic=%+v", diagnostic)
+	}
+}
+
+func TestOptionalOutlierHeavyCurrentHistoryRemainsCoveredDiagnostic(t *testing.T) {
+	input := fixtureInput(1)
+	// Current-stage residuals subtract the fixture's exact 100 elapsed seconds;
+	// these full-lead values therefore preserve the 0/100/1,000 outlier shape.
+	values := append(repeatValue(4, 100), repeatValue(11, 200)...)
+	values = append(values, repeatValue(5, 1_100)...)
+	input.Stages[1].History = samplesWithValues(StageImplementation, values)
+	output := mustEvaluate(t, input)
+	if output.Suppression != "" || len(output.Contributors) == 0 || output.Contributors[0].Kind != ContributorAgent {
+		t.Fatalf("optional bad current history suppressed valid owner: %+v", output)
+	}
+	diagnostic := requireStageDiagnostic(t, output, StageImplementation)
+	if !diagnostic.CurrentStage || !diagnostic.Covered || diagnostic.Failure != "" ||
+		diagnostic.RawSampleCount != 20 || diagnostic.InlierSampleCount != 11 || diagnostic.RejectedSampleCount != 9 ||
+		!slices.Contains(diagnostic.Flags, FlagHistoryOutlierHeavy) {
+		t.Fatalf("covered outlier-heavy current diagnostic=%+v", diagnostic)
+	}
+	for _, contributor := range output.Contributors {
+		if contributor.Stage == StageImplementation && contributor.Kind == ContributorHistory {
+			t.Fatalf("ineligible history emitted as contributor: %+v", contributor)
+		}
+	}
 }
 
 func TestAuthorityHandoffRejectsReusedRunTelemetry(t *testing.T) {
@@ -567,6 +734,7 @@ func TestAuthorityHandoffRejectsReusedRunTelemetry(t *testing.T) {
 	stage := &input.Stages[1]
 	staleAgent := stage.Estimates[0]
 	stage.Reporter = ReporterExternal
+	stage.Scope.AuthorityID = "authority-implementation-2"
 	stage.Scope.ReporterID = "external-reporter"
 	stage.Scope.RunLinkID = ""
 	externalProgress := 30.0
@@ -580,6 +748,10 @@ func TestAuthorityHandoffRejectsReusedRunTelemetry(t *testing.T) {
 	assertIntPointer(t, output.ProgressPercent, 23)
 	if output.ProgressSource == nil || output.ProgressSource.Identity != "external-estimate" {
 		t.Fatalf("reused run telemetry contributed: %+v", output.ProgressSource)
+	}
+	if output.OwnerSource == nil || output.OwnerSource.ReporterKind != ReporterExternal ||
+		output.Contributors[0].Source == nil || output.Contributors[0].Source.ReporterKind != ReporterExternal {
+		t.Fatalf("exact current external ETA lost eligibility: owner=%+v contributor=%+v", output.OwnerSource, output.Contributors[0])
 	}
 }
 
@@ -627,12 +799,71 @@ func TestEstimateFactRequiresAValueButAllowsETAOnly(t *testing.T) {
 	}
 }
 
+func TestDuplicateEstimateIdentityAndOrderKeysAreRejected(t *testing.T) {
+	t.Run("exact duplicate", func(t *testing.T) {
+		input := fixtureInput(1)
+		input.Stages[1].Estimates = append(input.Stages[1].Estimates, input.Stages[1].Estimates[0])
+		if _, err := Evaluate(input); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("exact duplicate error=%v", err)
+		}
+	})
+
+	t.Run("identity duplicate across authority scopes", func(t *testing.T) {
+		input := fixtureInput(1)
+		old := input.Stages[1].Estimates[0]
+		input.Stages[1].Scope.AuthorityID = "authority-implementation-2"
+		conflict := old
+		conflict.Scope = input.Stages[1].Scope
+		conflict.Revision, conflict.Sequence = 2, 2
+		input.Stages[1].Estimates = append(input.Stages[1].Estimates, conflict)
+		if _, err := Evaluate(input); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("cross-scope duplicate identity error=%v", err)
+		}
+	})
+
+	t.Run("conflicting duplicate order key", func(t *testing.T) {
+		input := fixtureInput(1)
+		conflict := input.Stages[1].Estimates[0]
+		conflict.Identity = "conflicting-same-order"
+		progress := 99.0
+		conflict.ProgressPercent = &progress
+		input.Stages[1].Estimates = append(input.Stages[1].Estimates, conflict)
+		if _, err := Evaluate(input); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("conflicting order key error=%v", err)
+		}
+		slices.Reverse(input.Stages[1].Estimates)
+		if _, err := Evaluate(input); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("permuted conflicting order key error=%v", err)
+		}
+	})
+
+	t.Run("same order in a new authority is valid and deterministic", func(t *testing.T) {
+		input := fixtureInput(1)
+		input.Stages[1].Scope.AuthorityID = "authority-implementation-2"
+		progress := 20.0
+		input.Stages[1].Estimates = append(input.Stages[1].Estimates, EstimateFact{
+			Identity: "new-authority-same-order", Reporter: ReporterAgentRun,
+			Scope: input.Stages[1].Scope, Revision: 1, Sequence: 1,
+			Source: SourceAgent, ServerReceivedAt: fixtureNow,
+			Confidence: 0.9, Basis: "new authority", ProgressPercent: &progress,
+			ETA: etaRange(900, 1_100, 1_000),
+		})
+		first := mustEvaluate(t, input)
+		slices.Reverse(input.Stages[1].Estimates)
+		second := mustEvaluate(t, input)
+		if first.TrustRevision != second.TrustRevision || *first.ProgressPercent != *second.ProgressPercent {
+			t.Fatalf("cross-authority order/permutation changed output: first=%+v second=%+v", first, second)
+		}
+	})
+}
+
 func TestIneligibleOwnerIsUnknownNotZeroOrOptimistic(t *testing.T) {
 	input := fixtureInput(1)
 	stage := &input.Stages[1]
 	stage.Reporter = ReporterUser
 	stage.Scope.ReporterID = "user-owner"
 	stage.Scope.RunLinkID = ""
+	stage.Estimates = nil
 	output := mustEvaluate(t, input)
 	if output.Suppression != SuppressUnknownReporter {
 		t.Fatalf("suppression=%s, want unknown_reporter", output.Suppression)
@@ -712,6 +943,17 @@ func TestLowConfidenceAndMissingPointAreRangeOnlyWithoutMidpoint(t *testing.T) {
 	output = mustEvaluate(t, input)
 	if !output.RangeOnly || output.LandingAt != nil || output.RemainingSeconds != nil {
 		t.Fatalf("missing point synthesized a midpoint: %+v", output)
+	}
+
+	input = fixtureInput(1)
+	input.Stages[1].History = historySamples(StageImplementation, 5, 200)
+	output = mustEvaluate(t, input)
+	if output.Suppression != "" || !output.RangeOnly || output.LandingAt != nil ||
+		output.Confidence == nil || *output.Confidence != 0 || output.ConfidenceLabel != ConfidenceUnknown ||
+		len(output.Contributors) == 0 ||
+		output.Contributors[0].Confidence != 0 || output.Contributors[0].ConfidenceLabel != ConfidenceUnknown ||
+		!slices.Contains(output.Contributors[0].Flags, FlagAgentHistoryDisagreement) {
+		t.Fatalf("low-history disjoint downgrade was strengthened by later contributors: %+v", output)
 	}
 }
 
@@ -814,6 +1056,54 @@ func TestClockSkewCannotEnterEvaluation(t *testing.T) {
 		if got := output.ServerTime.Add(time.Duration(*output.RemainingSeconds) * time.Second); !got.Equal(*output.LandingAt) {
 			t.Fatalf("viewer skew affected landing: %v", got)
 		}
+	}
+}
+
+func TestElapsedSecondsAndOwnerRangeFloorSubsecondsConservatively(t *testing.T) {
+	tests := []struct {
+		name  string
+		start time.Time
+		end   time.Time
+		want  int64
+	}{
+		{"negative", fixtureNow, fixtureNow.Add(-time.Nanosecond), 0},
+		{"zero", fixtureNow, fixtureNow, 0},
+		{"two hundred milliseconds", fixtureNow.Add(-200 * time.Millisecond), fixtureNow, 0},
+		{"just below one second", fixtureNow.Add(-time.Second + time.Nanosecond), fixtureNow, 0},
+		{"exactly one second", fixtureNow.Add(-time.Second), fixtureNow, 1},
+		{"one point two seconds", fixtureNow.Add(-time.Second - 200*time.Millisecond), fixtureNow, 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := nonnegativeSecondsBetween(test.start, test.end); got != test.want {
+				t.Fatalf("seconds(%s,%s)=%d, want %d", test.start, test.end, got, test.want)
+			}
+		})
+	}
+
+	base := fixtureInput(1).Stages[1].Estimates[0]
+	base.ETA = etaRange(1, 2, 2)
+
+	base.ServerReceivedAt = fixtureNow.Add(-200 * time.Millisecond)
+	rangeValue, _, _, pointAt, valid, expired := anchoredRange(base, fixtureNow)
+	if !valid || expired || rangeValue.MinimumSeconds != 1 || rangeValue.MaximumSeconds != 2 ||
+		rangeValue.PointSeconds == nil || *rangeValue.PointSeconds != 2 || pointAt == nil {
+		t.Fatalf("subsecond owner range=%+v point_at=%v valid=%v expired=%v", rangeValue, pointAt, valid, expired)
+	}
+
+	base.ServerReceivedAt = fixtureNow.Add(-2*time.Second + time.Nanosecond)
+	rangeValue, _, pessimistic, pointAt, valid, expired := anchoredRange(base, fixtureNow)
+	if !valid || expired || !pessimistic.Equal(fixtureNow.Add(time.Nanosecond)) ||
+		rangeValue.MinimumSeconds != 0 || rangeValue.MaximumSeconds != 1 ||
+		rangeValue.PointSeconds == nil || *rangeValue.PointSeconds != 1 || pointAt == nil {
+		t.Fatalf("pre-expiry owner range=%+v pessimistic=%v point_at=%v valid=%v expired=%v",
+			rangeValue, pessimistic, pointAt, valid, expired)
+	}
+
+	base.ServerReceivedAt = fixtureNow.Add(-2 * time.Second)
+	_, _, pessimistic, pointAt, valid, expired = anchoredRange(base, fixtureNow)
+	if !valid || !expired || !pessimistic.Equal(fixtureNow) || pointAt != nil {
+		t.Fatalf("exact-expiry pessimistic=%v point_at=%v valid=%v expired=%v", pessimistic, pointAt, valid, expired)
 	}
 }
 
@@ -1029,4 +1319,18 @@ func assertInt64Pointer(t *testing.T, actual *int64, expected int64) {
 	if actual == nil || *actual != expected {
 		t.Fatalf("value=%v, want %d", actual, expected)
 	}
+}
+
+func requireStageDiagnostic(t *testing.T, output Output, stage StageKey) StageDiagnostic {
+	t.Helper()
+	var matches []StageDiagnostic
+	for _, diagnostic := range output.StageDiagnostics {
+		if diagnostic.Stage == stage {
+			matches = append(matches, diagnostic)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("diagnostic count for %s=%d, want exactly one; all=%+v", stage, len(matches), output.StageDiagnostics)
+	}
+	return matches[0]
 }

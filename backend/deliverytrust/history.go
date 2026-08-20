@@ -162,7 +162,7 @@ func analyzeHistory(samples []DurationSample, options HistoryOptions) (HistoryRe
 	spread := result.P90Seconds - result.P10Seconds
 	qualityDowngrade := result.RejectedSampleCount*5 >= result.RawSampleCount || spread > result.MedianSeconds
 	if qualityDowngrade {
-		result.Confidence, result.ConfidenceLabel = downgradeConfidence(result.ConfidenceLabel)
+		result.Confidence, result.ConfidenceLabel = downgradeConfidence(result.Confidence, result.ConfidenceLabel)
 		result.Flags = append(result.Flags, FlagHistoryQualityDowngraded)
 	}
 	result.Components = componentMedians(inliers)

@@ -53,11 +53,15 @@ func Evaluate(input Input) (Output, error) {
 		RangeOnly:              true,
 		Flags:                  []Flag{},
 		Contributors:           []Contributor{},
+		StageDiagnostics:       []StageDiagnostic{},
 	}
 	if !input.Instrumented {
 		base.Suppression = SuppressUnknownReporter
 		base.TrustRevision = trustRevision(input, nil, nil)
 		return base, nil
+	}
+	if err := validateEstimateUniqueness(input.Stages); err != nil {
+		return Output{}, err
 	}
 
 	estimates := make([]estimateAnalysis, len(input.Stages))
@@ -114,11 +118,12 @@ func Evaluate(input Input) (Output, error) {
 		return Output{}, err
 	}
 	base.Contributors = landing.contributors
+	base.StageDiagnostics = landing.diagnostics
 	for _, flag := range landing.flags {
 		base.Flags = appendUniqueFlag(base.Flags, flag)
 	}
 	base.Suppression = chooseSuppression(current, landing.failure)
-	if landing.label != ConfidenceUnknown && landing.failure == "" {
+	if landing.failure == "" {
 		confidence := landing.confidence
 		base.Confidence = &confidence
 		base.ConfidenceLabel = landing.label

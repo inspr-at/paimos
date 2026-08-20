@@ -300,6 +300,21 @@ type Contributor struct {
 	Flags                   []Flag             `json:"flags"`
 }
 
+// StageDiagnostic is the bounded explanation row emitted exactly once for
+// every remaining required stage. Failure is populated only when no eligible
+// contributor covers the stage; optional bad current history stays diagnostic
+// without falsely uncovering a valid current-owner range.
+type StageDiagnostic struct {
+	Stage               StageKey        `json:"stage"`
+	CurrentStage        bool            `json:"current_stage"`
+	Covered             bool            `json:"covered"`
+	Failure             SuppressionCode `json:"failure,omitempty"`
+	RawSampleCount      int             `json:"raw_sample_count"`
+	InlierSampleCount   int             `json:"inlier_sample_count"`
+	RejectedSampleCount int             `json:"rejected_sample_count"`
+	Flags               []Flag          `json:"flags"`
+}
+
 type Output struct {
 	SchemaVersion           int                `json:"schema_version"`
 	EstimatorPolicyVersion  int                `json:"estimator_policy_version"`
@@ -333,4 +348,5 @@ type Output struct {
 	Suppression             SuppressionCode    `json:"suppression,omitempty"`
 	Flags                   []Flag             `json:"flags"`
 	Contributors            []Contributor      `json:"contributors"`
+	StageDiagnostics        []StageDiagnostic  `json:"stage_diagnostics"`
 }

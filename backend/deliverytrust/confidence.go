@@ -44,12 +44,14 @@ func historyConfidence(inliers int) (float64, ConfidenceLabel) {
 	}
 }
 
-func downgradeConfidence(label ConfidenceLabel) (float64, ConfidenceLabel) {
+func downgradeConfidence(value float64, label ConfidenceLabel) (float64, ConfidenceLabel) {
 	switch label {
 	case ConfidenceHigh:
-		return 0.65, ConfidenceMedium
-	case ConfidenceMedium, ConfidenceLow:
-		return 0.25, ConfidenceLow
+		return math.Min(value, 0.65), ConfidenceMedium
+	case ConfidenceMedium:
+		return math.Min(value, 0.25), ConfidenceLow
+	case ConfidenceLow:
+		return 0, ConfidenceUnknown
 	default:
 		return 0, ConfidenceUnknown
 	}

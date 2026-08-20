@@ -133,6 +133,15 @@ func TestHistoryOutlierAndQualityBoundaries(t *testing.T) {
 		}
 	})
 
+	t.Run("low confidence dispersion downgrades to unknown zero", func(t *testing.T) {
+		result := mustAnalyzeHistory(t, samplesWithValues(StageQA, []int64{0, 1, 2, 3, 4}), StageQA, nil)
+		if !result.Eligible || result.MedianSeconds != 2 || result.P90Seconds-result.P10Seconds <= result.MedianSeconds ||
+			result.Confidence != 0 || result.ConfidenceLabel != ConfidenceUnknown ||
+			countFlag(result.Flags, FlagHistoryQualityDowngraded) != 1 {
+			t.Fatalf("low-quality result=%+v", result)
+		}
+	})
+
 	t.Run("median zero with spread downgrades", func(t *testing.T) {
 		result := mustAnalyzeHistory(t, samplesWithValues(StageQA, []int64{0, 0, 0, 0, 0, 0, 1, 1, 1, 1}), StageQA, nil)
 		if result.MedianSeconds != 0 || result.P90Seconds-result.P10Seconds == 0 ||
@@ -147,6 +156,57 @@ func TestHistoryOutlierAndQualityBoundaries(t *testing.T) {
 			t.Fatalf("all-equal result=%+v", result)
 		}
 	})
+}
+
+func TestConfidenceDowngradeNeverRaisesNumericValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     float64
+		label     ConfidenceLabel
+		wantValue float64
+		wantLabel ConfidenceLabel
+	}{
+		{"high canonical", 0.90, ConfidenceHigh, 0.65, ConfidenceMedium},
+		{"high below medium cap", 0.60, ConfidenceHigh, 0.60, ConfidenceMedium},
+		{"medium canonical", 0.65, ConfidenceMedium, 0.25, ConfidenceLow},
+		{"medium below low cap", 0.20, ConfidenceMedium, 0.20, ConfidenceLow},
+		{"low canonical", 0.25, ConfidenceLow, 0, ConfidenceUnknown},
+		{"low below canonical", 0.10, ConfidenceLow, 0, ConfidenceUnknown},
+		{"unknown stays zero", 0.99, ConfidenceUnknown, 0, ConfidenceUnknown},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			value, label := downgradeConfidence(test.value, test.label)
+			if value != test.wantValue || label != test.wantLabel || value > test.value {
+				t.Fatalf("downgrade(%v,%s)=(%v,%s), want (%v,%s)",
+					test.value, test.label, value, label, test.wantValue, test.wantLabel)
+			}
+		})
+	}
+}
+
+func TestHistoryResidualFloorsSubsecondElapsedTime(t *testing.T) {
+	tests := []struct {
+		name        string
+		elapsed     time.Duration
+		wantSeconds int64
+	}{
+		{"two hundred milliseconds", 200 * time.Millisecond, 1},
+		{"just below one second", time.Second - time.Nanosecond, 1},
+		{"exactly one second", time.Second, 0},
+		{"one point two seconds", time.Second + 200*time.Millisecond, 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			started := fixtureNow.Add(-test.elapsed)
+			result := mustAnalyzeHistory(t, historySamples(StageQA, 5, 1), StageQA, &started)
+			if result.MinimumSeconds != test.wantSeconds || result.MaximumSeconds != test.wantSeconds ||
+				result.PointSeconds != test.wantSeconds {
+				t.Fatalf("elapsed=%s history range=[%d,%d] point=%d, want %d",
+					test.elapsed, result.MinimumSeconds, result.MaximumSeconds, result.PointSeconds, test.wantSeconds)
+			}
+		})
+	}
 }
 
 func TestHistoryProjectPolicyIsolationAndUniqueness(t *testing.T) {
@@ -257,6 +317,15 @@ func TestAgentHistoryMergeRules(t *testing.T) {
 	historyOnly, disagreement := mergeContributor(StageImplementation, true, nil, history)
 	if disagreement || historyOnly.Kind != ContributorHistory {
 		t.Fatalf("history-only merge=%+v", historyOnly)
+	}
+
+	lowHistory := history
+	lowHistory.Confidence = 0.25
+	lowHistory.ConfidenceLabel = ConfidenceLow
+	merged, disagreement = mergeContributor(StageImplementation, true, owner, lowHistory)
+	if !disagreement || merged.Confidence != 0 || merged.ConfidenceLabel != ConfidenceUnknown ||
+		merged.PointRemainingSeconds != nil {
+		t.Fatalf("low-confidence disjoint merge=%+v disagreement=%v", merged, disagreement)
 	}
 }
 

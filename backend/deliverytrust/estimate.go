@@ -24,6 +24,7 @@ import (
 
 type estimateAnalysis struct {
 	latest              *EstimateFact
+	latestProgressFact  *EstimateFact
 	latestAttribution   *SourceAttribution
 	maxProgress         *float64
 	maxProgressFact     *EstimateFact
@@ -38,10 +39,23 @@ type estimateAnalysis struct {
 func analyzeEstimates(stage StageInput, calculatedAt time.Time) (estimateAnalysis, error) {
 	var analysis estimateAnalysis
 	current := make([]EstimateFact, 0, len(stage.Estimates))
+	authorityMetadata := map[authorityEpochKey]reporterMetadata{
+		authorityKey(stage.Scope): {
+			Reporter: stage.Reporter, ReporterID: stage.Scope.ReporterID, RunLinkID: stage.Scope.RunLinkID,
+		},
+	}
 	for _, fact := range stage.Estimates {
 		if err := validateEstimateFact(fact); err != nil {
 			return estimateAnalysis{}, err
 		}
+		key := authorityKey(fact.Scope)
+		metadata := reporterMetadata{
+			Reporter: fact.Reporter, ReporterID: fact.Scope.ReporterID, RunLinkID: fact.Scope.RunLinkID,
+		}
+		if existing, ok := authorityMetadata[key]; ok && existing != metadata {
+			return estimateAnalysis{}, fmt.Errorf("%w: reporter metadata changed without a new authority epoch", ErrInvalidInput)
+		}
+		authorityMetadata[key] = metadata
 		if fact.ServerReceivedAt.After(calculatedAt) {
 			return estimateAnalysis{}, fmt.Errorf("%w: estimate arrives after calculation", ErrInvalidInput)
 		}
@@ -93,6 +107,10 @@ func analyzeEstimates(stage StageInput, calculatedAt time.Time) (estimateAnalysi
 	if latestProgress != nil && analysis.maxProgress != nil && *latestProgress.ProgressPercent < *analysis.maxProgress {
 		analysis.backslide = true
 	}
+	if latestProgress != nil {
+		copy := *latestProgress
+		analysis.latestProgressFact = &copy
+	}
 	if analysis.maxProgressFact != nil {
 		analysis.progressAttribution = attribution(stage.Reporter, *analysis.maxProgressFact)
 	}
@@ -131,6 +149,55 @@ func analyzeEstimates(stage StageInput, calculatedAt time.Time) (estimateAnalysi
 	}
 	analysis.rangeContributor = &contributor
 	return analysis, nil
+}
+
+func validateEstimateUniqueness(stages []StageInput) error {
+	seenIdentities := make(map[string]bool)
+	seenOrderKeys := make(map[estimateOrderKey]bool)
+	for _, stage := range stages {
+		for _, fact := range stage.Estimates {
+			if seenIdentities[fact.Identity] {
+				return fmt.Errorf("%w: duplicate estimate identity", ErrInvalidInput)
+			}
+			seenIdentities[fact.Identity] = true
+			key := estimateOrderKey{
+				Reporter: fact.Reporter, Scope: fact.Scope,
+				Revision: fact.Revision, Sequence: fact.Sequence,
+			}
+			if seenOrderKeys[key] {
+				return fmt.Errorf("%w: duplicate estimate order key", ErrInvalidInput)
+			}
+			seenOrderKeys[key] = true
+		}
+	}
+	return nil
+}
+
+type estimateOrderKey struct {
+	Reporter ReporterKind
+	Scope    Scope
+	Revision uint64
+	Sequence uint64
+}
+
+type authorityEpochKey struct {
+	AttemptID   string
+	PlanID      string
+	ExecutionID string
+	AuthorityID string
+}
+
+type reporterMetadata struct {
+	Reporter   ReporterKind
+	ReporterID string
+	RunLinkID  string
+}
+
+func authorityKey(scope Scope) authorityEpochKey {
+	return authorityEpochKey{
+		AttemptID: scope.AttemptID, PlanID: scope.PlanID,
+		ExecutionID: scope.ExecutionID, AuthorityID: scope.AuthorityID,
+	}
 }
 
 func validateEstimateFact(fact EstimateFact) error {
