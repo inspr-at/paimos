@@ -398,9 +398,18 @@ func TestAgentModeVoiceOpenAPIIsClosedTemplateOnlyAndNonCacheable(t *testing.T) 
 // X-Session-Expires-At opportunistically. auth.Middleware already guarantees
 // both (epoch on every authenticated response, expiry only on the
 // session-cookie branch), so the published contract has to say so on exactly
-// the success responses the client depends on: STT, TTS, the
-// selector-independent project list, and the delivery snapshot the production
-// Agent Mode loader fetches through the same epoch-tracking api client.
+// the success responses the client depends on: the /auth/me refresh the epoch
+// change itself triggers, STT, TTS, the selector-independent project list, and
+// the delivery snapshot the production Agent Mode loader fetches through the
+// same epoch-tracking api client.
+//
+// The list is exact in both directions. /auth/me is the hinge: the client
+// re-fetches it precisely when the epoch it compares has moved, so a success
+// there that carried no response-local epoch would leave the refresh unable to
+// confirm it had caught up. Sitting behind auth.Middleware is what makes the
+// headers guaranteed, so the unauthenticated half of the auth surface —
+// /auth/login, which runs *before* any middleware can know the caller — must
+// never claim them.
 const (
 	openAPIPermissionsEpochHeader = "X-Permissions-Epoch"
 	openAPISessionExpiresHeader   = "X-Session-Expires-At"
@@ -414,12 +423,14 @@ func TestOpenAPIAuthContextHeadersArePinnedOnAuthenticatedSuccess(t *testing.T) 
 		openAPIPermissionsEpochHeader: openAPIPermissionsEpochRef,
 		openAPISessionExpiresHeader:   openAPISessionExpiresRef,
 	}
-	for _, target := range []struct{ method, path string }{
+	targets := []struct{ method, path string }{
+		{"get", "/api/auth/me"},
 		{"post", "/api/agent-mode/voice/transcribe"},
 		{"post", "/api/agent-mode/voice/speak"},
 		{"get", "/api/projects"},
 		{"get", "/api/agent-mode/deliveries"},
-	} {
+	}
+	for _, target := range targets {
 		operation := strings.ToUpper(target.method) + " " + target.path
 		raw, ok := doc.Paths[target.path][target.method]
 		if !ok {
@@ -443,7 +454,7 @@ func TestOpenAPIAuthContextHeadersArePinnedOnAuthenticatedSuccess(t *testing.T) 
 			got, exists := success.Headers[header]
 			if !exists {
 				t.Errorf("%s 200 does not document %s; documented headers: %v",
-					operation, header, sortedHeaderNames(success.Headers))
+					operation, header, sortedKeys(success.Headers))
 				continue
 			}
 			if got.Ref != ref {
@@ -452,6 +463,72 @@ func TestOpenAPIAuthContextHeadersArePinnedOnAuthenticatedSuccess(t *testing.T) 
 			}
 		}
 	}
+
+	// The other direction: nothing outside that list may claim the headers.
+	// auth.Middleware is what guarantees them, so a response reachable without
+	// it — the /auth/login success that establishes the session in the first
+	// place, or any error status the middleware short-circuits — would be
+	// promising a header no code path writes.
+	allowed := map[string]bool{}
+	for _, target := range targets {
+		allowed[strings.ToUpper(target.method)+" "+target.path+" 200"] = true
+	}
+	for _, claim := range responsesClaimingAuthContextHeaders(t, doc) {
+		if !allowed[claim] {
+			t.Errorf("%s documents an auth-context header, but it is not one of the authenticated successes "+
+				"auth.Middleware covers — only %v may claim the epoch/expiry contract",
+				claim, sortedKeys(allowed))
+		}
+	}
+}
+
+// responsesClaimingAuthContextHeaders walks every documented response and
+// returns "METHOD /path status" for each one that names either auth-context
+// header, however it spells the reference.
+func responsesClaimingAuthContextHeaders(t *testing.T, doc openAPIDocument) []string {
+	t.Helper()
+	paths, ok := doc.raw["paths"].(map[string]any)
+	if !ok {
+		t.Fatal("OpenAPI paths are missing")
+	}
+	claims := []string{}
+	for path, rawMethods := range paths {
+		methods, ok := rawMethods.(map[string]any)
+		if !ok {
+			continue
+		}
+		for method, rawOperation := range methods {
+			if !openAPIMethods[strings.ToLower(method)] {
+				continue
+			}
+			operation, ok := rawOperation.(map[string]any)
+			if !ok {
+				continue
+			}
+			responses, ok := operation["responses"].(map[string]any)
+			if !ok {
+				continue
+			}
+			for status, rawResponse := range responses {
+				response, ok := rawResponse.(map[string]any)
+				if !ok {
+					continue
+				}
+				headers, ok := response["headers"].(map[string]any)
+				if !ok {
+					continue
+				}
+				for _, header := range []string{openAPIPermissionsEpochHeader, openAPISessionExpiresHeader} {
+					if _, claimed := headers[header]; claimed {
+						claims = append(claims, strings.ToUpper(method)+" "+path+" "+status)
+						break
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(claims)
+	return claims
 }
 
 // isCanonicalNonNegativeInt64 is the oracle the documented epoch pattern has
@@ -503,13 +580,13 @@ func permissionsEpochProbes() []string {
 	return probes
 }
 
-func sortedHeaderNames[V any](headers map[string]V) []string {
-	names := make([]string, 0, len(headers))
-	for name := range headers {
-		names = append(names, name)
+func sortedKeys[V any](set map[string]V) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
 	}
-	sort.Strings(names)
-	return names
+	sort.Strings(keys)
+	return keys
 }
 
 func TestOpenAPIAuthContextHeaderComponentsFreezeCanonicalShape(t *testing.T) {
@@ -591,6 +668,103 @@ func TestOpenAPIAuthContextHeaderComponentsFreezeCanonicalShape(t *testing.T) {
 		if !strings.Contains(description, phrase) {
 			t.Errorf("SessionExpiresAt description lacks %q: %q", phrase, description)
 		}
+	}
+}
+
+// PAI-808: production agent-side clients ask for the full working set with a
+// literal GET /api/projects?status=all, but the operation documented no query
+// parameters at all — so by the published contract that request was an
+// undocumented extension, and a caller reading only the spec would fetch the
+// active-only default and silently miss every frozen and archived project.
+//
+// Pin the filter exactly as ListProjects implements it. The concrete states
+// come from the same vocabulary the /api/schema response publishes, so
+// a new lifecycle status can never be added to the runtime without this
+// failing. `all` is the one value that is not a status: it is a handler-level
+// alias for the normal lifecycle states, and it deliberately stops short of
+// `deleted`, which stays behind the explicit trash view. Getting that wrong in
+// either direction is silent — an over-broad `all` leaks soft-deleted projects
+// into ordinary listings, an under-broad one hides live work — so the
+// documented semantics are asserted, not just the enum.
+func TestOpenAPIProjectListStatusFilterMatchesRuntime(t *testing.T) {
+	doc := documentedAPIDocument(t)
+	raw, ok := doc.Paths["/api/projects"]["get"]
+	if !ok {
+		t.Fatal("GET /api/projects is undocumented")
+	}
+	type openAPIParameter struct {
+		Name        string `json:"name"`
+		In          string `json:"in"`
+		Required    *bool  `json:"required"`
+		Description string `json:"description"`
+		Schema      struct {
+			Type    string   `json:"type"`
+			Enum    []string `json:"enum"`
+			Default *string  `json:"default"`
+		} `json:"schema"`
+	}
+	var operation struct {
+		Parameters []openAPIParameter `json:"parameters"`
+	}
+	if err := json.Unmarshal(raw, &operation); err != nil {
+		t.Fatalf("GET /api/projects operation: %v", err)
+	}
+
+	var status *openAPIParameter
+	documented := make([]string, 0, len(operation.Parameters))
+	for i, parameter := range operation.Parameters {
+		documented = append(documented, parameter.In+":"+parameter.Name)
+		if parameter.Name == "status" && parameter.In == "query" {
+			status = &operation.Parameters[i]
+		}
+	}
+	if status == nil {
+		t.Fatalf("GET /api/projects documents no status query parameter; documented parameters: %v — "+
+			"ListProjects reads it from r.URL.Query(), and agent-side callers send ?status=all", documented)
+	}
+	if status.Required != nil && *status.Required {
+		t.Errorf("status required=%v, want false or absent — omitting it is legal and means active",
+			*status.Required)
+	}
+	if status.Schema.Type != "string" {
+		t.Errorf("status schema type=%q, want string — it arrives as a raw query value and is compared "+
+			"verbatim against the lifecycle vocabulary", status.Schema.Type)
+	}
+
+	// The concrete states are the runtime's own vocabulary, in its own order;
+	// `all` is the handler-level alias appended to it.
+	runtimeStates := handlers.Schema.Enums["project_status"]
+	if len(runtimeStates) == 0 {
+		t.Fatal("handlers.Schema.Enums[\"project_status\"] is empty — the oracle this test compares against is gone")
+	}
+	wantEnum := append(append([]string(nil), runtimeStates...), "all")
+	if !reflect.DeepEqual(status.Schema.Enum, wantEnum) {
+		t.Errorf("status enum = %v, want %v — the concrete values are handlers.Schema.Enums[\"project_status\"], "+
+			"which is what validProjectStatus allowlists, plus the `all` alias", status.Schema.Enum, wantEnum)
+	}
+	if status.Schema.Default == nil || *status.Schema.Default != "active" {
+		t.Errorf("status default = %v, want \"active\" — ListProjects substitutes active for an empty status, "+
+			"so a caller that omits the parameter never sees frozen or archived projects",
+			status.Schema.Default)
+	}
+
+	// `all` is the whole reason agent-side callers pass the parameter, and its
+	// boundary is the part a reader cannot infer from the enum: it covers the
+	// normal lifecycle states and stops at deleted.
+	description := status.Description
+	if !strings.Contains(description, "`all`") {
+		t.Fatalf("status description does not explain the `all` alias: %q", description)
+	}
+	for _, state := range []string{"active", "frozen", "archived"} {
+		if !strings.Contains(description, "`"+state+"`") {
+			t.Errorf("status description does not name `%s` among the states `all` returns: %q",
+				state, description)
+		}
+	}
+	if !strings.Contains(description, "excludes `deleted`") {
+		t.Errorf("status description does not pin that `all` excludes `deleted`: %q — soft-deleted projects "+
+			"are an explicit trash view, so `all` returning them would be a privacy-relevant contract change",
+			description)
 	}
 }
 

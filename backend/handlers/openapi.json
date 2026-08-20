@@ -1764,6 +1764,14 @@
         "responses": {
           "200": {
             "description": "Current user",
+            "headers": {
+              "X-Permissions-Epoch": {
+                "$ref": "#/components/headers/PermissionsEpoch"
+              },
+              "X-Session-Expires-At": {
+                "$ref": "#/components/headers/SessionExpiresAt"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1983,6 +1991,25 @@
           "projects"
         ],
         "summary": "List projects",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Project lifecycle filter. Omitting it is the same as `active`. A concrete status returns exactly that state. `all` is not a wildcard: it returns the normal lifecycle states — `active`, `frozen` and `archived` — and deliberately excludes `deleted`, which stays reachable only through the explicit `status=deleted` trash view.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "frozen",
+                "archived",
+                "deleted",
+                "all"
+              ],
+              "default": "active"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Projects",
