@@ -24,11 +24,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -386,6 +388,153 @@ func TestAgentModeVoiceOpenAPIIsClosedTemplateOnlyAndNonCacheable(t *testing.T) 
 		}
 		if path == "/api/agent-mode/voice/speak" && !strings.Contains(operation.Description, "Never accepts caller text") {
 			t.Fatalf("speak description does not pin template-only input: %q", operation.Description)
+		}
+	}
+}
+
+// PAI-808: the voice client treats X-Permissions-Epoch as a hard precondition
+// on a 2xx — the SPA's local access cache is only invalidatable if every
+// success carries a comparable epoch — and consumes X-Session-Expires-At
+// opportunistically. auth.Middleware already guarantees both (epoch on every
+// authenticated response, expiry only on the session-cookie branch), so the
+// published contract has to say so on exactly the success responses the
+// client depends on: STT, TTS, and the selector-independent project list.
+const (
+	openAPIPermissionsEpochHeader = "X-Permissions-Epoch"
+	openAPISessionExpiresHeader   = "X-Session-Expires-At"
+	openAPIPermissionsEpochRef    = "#/components/headers/PermissionsEpoch"
+	openAPISessionExpiresRef      = "#/components/headers/SessionExpiresAt"
+	// Canonical base-10 int64: no sign, no leading zeros — exactly what
+	// strconv.FormatInt emits for the non-negative permissions_epoch counter.
+	openAPIPermissionsEpochPattern = `^(0|[1-9][0-9]*)$`
+)
+
+func TestOpenAPIAuthContextHeadersArePinnedOnVoiceAndProjectsSuccess(t *testing.T) {
+	doc := documentedAPIDocument(t)
+	want := map[string]string{
+		openAPIPermissionsEpochHeader: openAPIPermissionsEpochRef,
+		openAPISessionExpiresHeader:   openAPISessionExpiresRef,
+	}
+	for _, target := range []struct{ method, path string }{
+		{"post", "/api/agent-mode/voice/transcribe"},
+		{"post", "/api/agent-mode/voice/speak"},
+		{"get", "/api/projects"},
+	} {
+		operation := strings.ToUpper(target.method) + " " + target.path
+		raw, ok := doc.Paths[target.path][target.method]
+		if !ok {
+			t.Fatalf("%s is undocumented", operation)
+		}
+		var parsed struct {
+			Responses map[string]struct {
+				Headers map[string]struct {
+					Ref string `json:"$ref"`
+				} `json:"headers"`
+			} `json:"responses"`
+		}
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			t.Fatalf("%s operation: %v", operation, err)
+		}
+		success, ok := parsed.Responses["200"]
+		if !ok {
+			t.Fatalf("%s documents no 200 response", operation)
+		}
+		for header, ref := range want {
+			got, exists := success.Headers[header]
+			if !exists {
+				t.Errorf("%s 200 does not document %s; documented headers: %v",
+					operation, header, sortedHeaderNames(success.Headers))
+				continue
+			}
+			if got.Ref != ref {
+				t.Errorf("%s 200 header %s = {\"$ref\": %q}, want %q — the reusable component is the single "+
+					"point of truth for the epoch/expiry contract", operation, header, got.Ref, ref)
+			}
+		}
+	}
+}
+
+func sortedHeaderNames[V any](headers map[string]V) []string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func TestOpenAPIAuthContextHeaderComponentsFreezeCanonicalShape(t *testing.T) {
+	doc := documentedAPIDocument(t)
+	components, ok := doc.raw["components"].(map[string]any)
+	if !ok {
+		t.Fatal("OpenAPI components are missing")
+	}
+	headers, ok := components["headers"].(map[string]any)
+	if !ok {
+		t.Fatal("components.headers is missing — the epoch/expiry contract has no reusable definition")
+	}
+
+	epoch, ok := headers["PermissionsEpoch"].(map[string]any)
+	if !ok {
+		t.Fatal("PermissionsEpoch header component is missing")
+	}
+	if epoch["required"] != true {
+		t.Errorf("PermissionsEpoch required=%v, want true — auth.Middleware sets the header on every "+
+			"authenticated response, API-key and session alike", epoch["required"])
+	}
+	epochSchema, _ := epoch["schema"].(map[string]any)
+	if epochSchema["type"] != "string" {
+		t.Fatalf("PermissionsEpoch schema=%v, want a string (HTTP headers are strings; the client parses it itself)",
+			epochSchema)
+	}
+	pattern, _ := epochSchema["pattern"].(string)
+	if pattern != openAPIPermissionsEpochPattern {
+		t.Fatalf("PermissionsEpoch pattern=%q, want %q", pattern, openAPIPermissionsEpochPattern)
+	}
+	// Freezing the literal is only worth anything if the literal discriminates:
+	// the pattern must accept every strconv.FormatInt rendering of the
+	// non-negative counter and reject the near-misses a looser regex waves
+	// through.
+	epochRE, err := regexp.Compile(pattern)
+	if err != nil {
+		t.Fatalf("PermissionsEpoch pattern does not compile: %v", err)
+	}
+	for _, value := range []int64{0, 1, 9, 10, 42, 1234567890, math.MaxInt64} {
+		if rendered := strconv.FormatInt(value, 10); !epochRE.MatchString(rendered) {
+			t.Errorf("PermissionsEpoch pattern rejects canonical epoch %q", rendered)
+		}
+	}
+	for _, drifted := range []string{"", " ", "01", "007", "+1", "-1", "1.0", "1e3", " 1", "1 ", "abc", "0x1", "1\n2"} {
+		if epochRE.MatchString(drifted) {
+			t.Errorf("PermissionsEpoch pattern accepts non-canonical epoch %q — clients compare the raw "+
+				"header verbatim, so a loosened pattern breaks change detection", drifted)
+		}
+	}
+	if description := fmt.Sprint(epoch["description"]); !strings.Contains(description, "every authenticated response") {
+		t.Errorf("PermissionsEpoch description does not pin the always-present guarantee: %q", description)
+	}
+
+	session, ok := headers["SessionExpiresAt"].(map[string]any)
+	if !ok {
+		t.Fatal("SessionExpiresAt header component is missing")
+	}
+	if required, present := session["required"]; present && required != false {
+		t.Errorf("SessionExpiresAt required=%v, want false or absent — auth.Middleware only sets the header on "+
+			"the session-cookie branch, never for API-key callers", required)
+	}
+	sessionSchema, _ := session["schema"].(map[string]any)
+	if sessionSchema["type"] != "string" || sessionSchema["format"] != "date-time" {
+		t.Fatalf("SessionExpiresAt schema=%v, want {\"type\": \"string\", \"format\": \"date-time\"} — the "+
+			"middleware emits time.RFC3339", sessionSchema)
+	}
+	if _, over := sessionSchema["pattern"]; over {
+		t.Errorf("SessionExpiresAt is pinned by format alone; a second pattern constraint can only drift: %v",
+			sessionSchema)
+	}
+	description := fmt.Sprint(session["description"])
+	for _, phrase := range []string{"session cookie", "optional", "RFC 3339"} {
+		if !strings.Contains(description, phrase) {
+			t.Errorf("SessionExpiresAt description lacks %q: %q", phrase, description)
 		}
 	}
 }

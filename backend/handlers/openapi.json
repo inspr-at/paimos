@@ -1497,6 +1497,24 @@
         }
       }
     },
+    "headers": {
+      "PermissionsEpoch": {
+        "description": "PAI-320 per-user permissions epoch. The auth middleware sets it on every authenticated response, for session-cookie and `paimos_*` API-key callers alike, so it is always present on a success. The value is the canonical base-10 rendering of a non-negative int64 counter: no sign, no leading zeros, no surrounding whitespace. Clients compare it verbatim against the last value they saw and re-fetch `/auth/me` on any change, so a non-canonical rendering would silently invalidate that comparison.",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        }
+      },
+      "SessionExpiresAt": {
+        "description": "PAI-322 session expiry. Present only when the request authenticated with a session cookie; absent for `paimos_*` API-key callers, so clients must treat it as optional. The value is the session's current expiry in UTC as an RFC 3339 date-time.",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
     "parameters": {
       "AgentModeProjectFilter": {
         "name": "project_id", "in": "query", "required": false,
@@ -1968,6 +1986,14 @@
         "responses": {
           "200": {
             "description": "Projects",
+            "headers": {
+              "X-Permissions-Epoch": {
+                "$ref": "#/components/headers/PermissionsEpoch"
+              },
+              "X-Session-Expires-At": {
+                "$ref": "#/components/headers/SessionExpiresAt"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -3689,7 +3715,11 @@
         "responses": {
           "200": {
             "description": "Final ephemeral transcript",
-            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}},
+              "X-Permissions-Epoch": {"$ref": "#/components/headers/PermissionsEpoch"},
+              "X-Session-Expires-At": {"$ref": "#/components/headers/SessionExpiresAt"}
+            },
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentModeVoiceTranscript"}}}
           },
           "400": {"description": "Malformed or duplicate language query", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
@@ -3720,7 +3750,9 @@
             "description": "Ephemeral synthesized audio",
             "headers": {
               "Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}},
-              "Content-Language": {"schema": {"type": "string", "enum": ["en", "de"]}}
+              "Content-Language": {"schema": {"type": "string", "enum": ["en", "de"]}},
+              "X-Permissions-Epoch": {"$ref": "#/components/headers/PermissionsEpoch"},
+              "X-Session-Expires-At": {"$ref": "#/components/headers/SessionExpiresAt"}
             },
             "content": {"audio/mpeg": {"schema": {"type": "string", "format": "binary"}}}
           },
