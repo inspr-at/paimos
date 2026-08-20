@@ -22,6 +22,14 @@ import type { Delivery } from '@/services/agentMode'
 import { formatRelativeTimeWithLocale, formatTimeWithLocale, formatShortDateTimeWithLocale } from '@/composables/useDateFormat'
 import { estimatePresentation, remainingMs, type EstimatePresentation } from '@/composables/agent-mode/agentModeTrust'
 
+/** Tags are supplemental (never a lane): at most this many render inline
+ * on a card; the rest collapse into an accessible "+N" overflow summary. */
+export const MAX_VISIBLE_TAGS = 3
+
+/** Below this viewport width the conversation column collapses into the
+ * compact lower-left dock so the lane canvas keeps its width. */
+export const COMPACT_CONVERSATION_QUERY = '(max-width: 980px)'
+
 export function actorInitials(d: Delivery): string {
   const label = d.actor?.label ?? ''
   if (!label) return '?'

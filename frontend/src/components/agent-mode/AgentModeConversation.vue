@@ -5,10 +5,16 @@
 
   PAI-805 — conversation / narration surface (restrained).
   Lines are TEMPLATED from structured state by the view — no LLM, no
-  invented reassurance. PAI-808 owns voice: it plugs in through the
-  `listening` prop and the `#dock` slot without changing this contract.
+  invented reassurance. This is the Agent Mode conversation surface, not
+  global navigation: it never carries app chrome.
+
+  `compact` (constrained widths, or later when a side editor opens):
+  the column collapses into a small lower-left dock showing only the most
+  recent line plus the keyboard hint. It is pointer-transparent so it
+  never occludes or steals clicks from the lane canvas.
 -->
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 export interface NarrationLine {
@@ -17,38 +23,43 @@ export interface NarrationLine {
   text: string
 }
 
-defineProps<{
-  lines: readonly NarrationLine[]
-  /** Voice seam (PAI-808): when true a listening dock is shown. */
-  listening?: boolean
-  live: boolean
-  liveLabel: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    lines: readonly NarrationLine[]
+    live: boolean
+    liveLabel: string
+    compact?: boolean
+  }>(),
+  { compact: false },
+)
 
 const { t } = useI18n()
+const visibleLines = computed(() => (props.compact ? props.lines.slice(-1) : props.lines))
 </script>
 
 <template>
-  <aside class="am-conv" :aria-label="t('agentMode.a11y.conversation')">
-    <div class="am-conv-head">
+  <aside
+    class="am-conv"
+    :class="{ 'am-conv--compact': compact }"
+    :aria-label="t('agentMode.a11y.conversation')"
+    :data-compact="compact ? 'true' : 'false'"
+  >
+    <div v-if="!compact" class="am-conv-head">
       <span class="am-eyebrow">{{ t('agentMode.narration.eyebrow') }}</span>
       <span class="am-conv-live" :class="{ 'is-live': live }">
         <i aria-hidden="true"></i>{{ liveLabel }}
       </span>
     </div>
-    <ol class="am-conv-lines" :aria-label="t('agentMode.narration.eyebrow')">
-      <li v-for="line in lines" :key="line.id" class="am-conv-line" :class="`am-conv-line--${line.role}`">
+    <ol class="am-conv-lines" :aria-label="compact ? t('agentMode.narration.latest') : t('agentMode.narration.eyebrow')">
+      <li v-for="line in visibleLines" :key="line.id" class="am-conv-line" :class="`am-conv-line--${line.role}`">
         <span class="am-conv-role">{{ line.role === 'user' ? t('agentMode.narration.you') : 'Paimos' }}</span>
         <span class="am-conv-text">{{ line.text }}</span>
       </li>
     </ol>
-    <slot name="dock">
-      <div class="am-conv-dock" :class="{ 'is-listening': listening }">
-        <strong>{{ listening ? t('agentMode.narration.listening') : t('agentMode.narration.keysTitle') }}</strong>
-        <small>{{ listening ? t('agentMode.narration.listeningHint') : t('agentMode.narration.keysHint') }}</small>
-        <small v-if="!listening" class="am-conv-seam">{{ t('agentMode.narration.voiceSeam') }}</small>
-      </div>
-    </slot>
+    <div class="am-conv-dock">
+      <strong>{{ t('agentMode.narration.keysTitle') }}</strong>
+      <small>{{ t('agentMode.narration.keysHint') }}</small>
+    </div>
   </aside>
 </template>
 
@@ -110,6 +121,27 @@ const { t } = useI18n()
 }
 .am-conv-dock strong { font-size: 12px; font-weight: 600; }
 .am-conv-dock small { font-size: 11px; color: var(--am-muted); line-height: 1.4; }
-.am-conv-seam { margin-top: 4px; }
-.am-conv-dock.is-listening { border-color: var(--am-green); }
+
+/* ── Compact dock: lower-left, recent bubble + keys, never occluding ── */
+.am-conv--compact {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 3;
+  width: min(245px, 42%);
+  padding: 0;
+  border-right: 0;
+  background: transparent;
+  pointer-events: none;
+}
+.am-conv--compact .am-conv-lines { flex: 0 0 auto; padding: 0 0 8px; overflow: visible; }
+.am-conv--compact .am-conv-line { max-width: 100%; box-shadow: 0 8px 28px color-mix(in srgb, var(--am-ink) 14%, transparent); }
+.am-conv--compact .am-conv-dock { box-shadow: 0 8px 28px color-mix(in srgb, var(--am-ink) 12%, transparent); }
+/* Touch-size screens: keyboard guidance is irrelevant; keep only the
+   recent bubble so the dock stays small. */
+@media (max-width: 640px) {
+  .am-conv--compact { width: min(220px, 60%); }
+  .am-conv--compact .am-conv-dock { display: none; }
+  .am-conv--compact .am-conv-lines { padding-bottom: 0; }
+}
 </style>

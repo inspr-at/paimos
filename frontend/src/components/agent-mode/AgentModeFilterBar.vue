@@ -5,15 +5,21 @@
 
   PAI-805 — filter bar. Filters narrow the lanes; they never touch the
   selection (the view pins an excluded selected delivery).
+
+  The health filter is a real radiogroup (WAI-ARIA APG): one tab stop,
+  Arrow keys move the checked option and focus (wrapping), Home / End
+  jump to the ends. Key events are consumed here so the delivery-
+  navigation handler of the view never sees them.
 -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import AppIcon from '@/components/AppIcon.vue'
 import type { Delivery } from '@/services/agentMode'
 import {
   filtersActive,
+  nextRadioIndex,
   type AgentModeFilters,
   type HealthFilter,
 } from '@/composables/agent-mode/agentModeFilters'
@@ -36,7 +42,8 @@ const projects = computed(() => {
   return [...m.values()].sort((a, b) => a.name.localeCompare(b.name))
 })
 
-const healthOptions: Array<{ value: HealthFilter; count: (list: readonly Delivery[]) => number }> = [
+type HealthOption = { value: HealthFilter; count: (list: readonly Delivery[]) => number }
+const healthOptions: HealthOption[] = [
   { value: 'all', count: (l) => l.length },
   { value: 'attention', count: (l) => l.filter((d) => d.attention.level > 0 || d.health === 'attention' || d.health === 'at_risk').length },
   { value: 'blocked', count: (l) => l.filter((d) => d.health === 'blocked' || d.activity.kind === 'blocked' || d.blockers.length > 0).length },
@@ -44,6 +51,7 @@ const healthOptions: Array<{ value: HealthFilter; count: (list: readonly Deliver
 ]
 
 const active = computed(() => filtersActive(props.filters))
+const healthGroup = ref<HTMLElement | null>(null)
 
 function update(patch: Partial<AgentModeFilters>) {
   emit('update:filters', { ...props.filters, ...patch })
@@ -61,6 +69,20 @@ function onQuery(event: Event) {
 function clear() {
   update({ projectId: null, health: 'all', query: '' })
 }
+
+function onHealthKeydown(event: KeyboardEvent) {
+  const current = healthOptions.findIndex((o) => o.value === props.filters.health)
+  const next = nextRadioIndex(current < 0 ? 0 : current, event.key, healthOptions.length)
+  if (next == null) return
+  event.preventDefault()
+  // The group owns these keys; the view's delivery navigation must not
+  // also react to them.
+  event.stopPropagation()
+  const option = healthOptions[next]
+  update({ health: option.value })
+  const el = healthGroup.value?.querySelector<HTMLElement>(`[data-health="${option.value}"]`)
+  el?.focus()
+}
 </script>
 
 <template>
@@ -74,12 +96,21 @@ function clear() {
       </select>
     </label>
 
-    <div class="am-filter-health" role="group" :aria-label="t('agentMode.filters.healthLabel')">
+    <div
+      ref="healthGroup"
+      class="am-filter-health"
+      role="radiogroup"
+      :aria-label="t('agentMode.filters.healthLabel')"
+      @keydown="onHealthKeydown"
+    >
       <button
         v-for="opt in healthOptions"
         :key="opt.value"
         type="button"
-        :aria-pressed="filters.health === opt.value ? 'true' : 'false'"
+        role="radio"
+        :aria-checked="filters.health === opt.value ? 'true' : 'false'"
+        :tabindex="filters.health === opt.value ? 0 : -1"
+        :data-health="opt.value"
         class="am-filter-chip"
         :class="{ 'is-active': filters.health === opt.value }"
         @click="update({ health: opt.value })"

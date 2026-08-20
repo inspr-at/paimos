@@ -113,14 +113,22 @@ export function useAgentModeSelection(opts: UseAgentModeSelectionOptions) {
     return true
   }
 
+  /** Travel order restricted to ids that exist in the current snapshot.
+   * A frozen layout may still list ids that left the authorized set;
+   * keyboard travel must never land on one of those. */
+  function liveOrder(): string[] {
+    const live = new Set(opts.deliveries.value.map((d) => d.id))
+    return opts.order.value.filter((id) => live.has(id))
+  }
+
   function step(delta: number) {
-    const next = stepSelection(opts.order.value, selectedId.value, delta)
+    const next = stepSelection(liveOrder(), selectedId.value, delta)
     if (next && next !== selectedId.value) commit(next, 'user', 'user')
     return next
   }
 
   function selectEdge(edge: 'first' | 'last') {
-    const order = opts.order.value
+    const order = liveOrder()
     if (order.length === 0) return null
     const next = edge === 'first' ? order[0] : order[order.length - 1]
     if (next !== selectedId.value) commit(next, 'user', 'user')

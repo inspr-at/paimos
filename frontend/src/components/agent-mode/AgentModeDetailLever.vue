@@ -3,8 +3,8 @@
   Copyright (C) 2026 Markus Barta <markus@barta.com>
   AGPL-3.0-only — see LICENSE.
 
-  PAI-805 — detail lever (semantic zoom 1 / 10 / 100). Detail 10 ships
-  here; 1 (PAI-806) and 100 (PAI-807) render through their seams.
+  PAI-805 — detail lever (semantic zoom 1 / 10 / 100): focused delivery,
+  lanes and cards, portfolio overview — all rendered from the same data.
 -->
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'

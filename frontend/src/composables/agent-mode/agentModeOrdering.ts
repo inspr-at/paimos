@@ -197,3 +197,45 @@ export function reconcileFrozenGroups(
   for (const g of result) g.count = g.lanes.reduce((n, l) => n + l.deliveryIds.length, 0)
   return result
 }
+
+/** How long a neutral tombstone may keep its slot under interaction hold
+ * before it collapses anyway (security / honesty outrank stability). */
+export const TOMBSTONE_TTL_MS = 5_000
+
+/**
+ * Drops the given ids from a layout. Lanes and project groups that end up
+ * empty are removed as well. Used to expire tombstones.
+ */
+export function pruneIds(groups: readonly AgentModeProjectGroup[], ids: ReadonlySet<string>): AgentModeProjectGroup[] {
+  if (ids.size === 0) return [...groups]
+  const out: AgentModeProjectGroup[] = []
+  for (const g of groups) {
+    const lanes = g.lanes
+      .map((l) => ({ ...l, deliveryIds: l.deliveryIds.filter((id) => !ids.has(id)) }))
+      .filter((l) => l.deliveryIds.length > 0)
+    if (lanes.length === 0) continue
+    out.push({ ...g, lanes, count: lanes.reduce((n, l) => n + l.deliveryIds.length, 0) })
+  }
+  return out
+}
+
+/**
+ * Security rule for frozen layouts (PAI-805): a lane or project group whose
+ * deliveries ALL left the authorized snapshot must disappear immediately —
+ * even under interaction hold — because its header (project name, epic
+ * key / title) is grouping metadata of deliveries the user may no longer
+ * see. Lanes that still contain at least one live delivery keep their
+ * slots; the caller renders the gone ids as neutral tombstones.
+ */
+export function pruneDeadLanes(
+  groups: readonly AgentModeProjectGroup[],
+  isLive: (id: string) => boolean,
+): AgentModeProjectGroup[] {
+  const out: AgentModeProjectGroup[] = []
+  for (const g of groups) {
+    const lanes = g.lanes.filter((l) => l.deliveryIds.some(isLive))
+    if (lanes.length === 0) continue
+    out.push({ ...g, lanes, count: lanes.reduce((n, l) => n + l.deliveryIds.length, 0) })
+  }
+  return out
+}

@@ -3,13 +3,12 @@
   Copyright (C) 2026 Markus Barta <markus@barta.com>
   AGPL-3.0-only — see LICENSE.
 
-  PAI-805 — detail-1 SEAM. Shows the persistent selected delivery with the
-  same card semantics as detail 10 (identity, lane, stage, activity,
-  health, freshness, estimate truth) plus previous/next and zoom-out.
-  PAI-806 replaces the body with the full detail-1 canvas (stage chain,
-  evidence, Open ticket → IssueSidePanel) while keeping this contract:
-    props   → delivery, position/total, serverNowMs, locale
-    emits   → prev, next, zoom-out, open-ticket (no-op here)
+  PAI-805 — "Focused delivery" (the fine-grained detail level).
+  Data-backed: renders the persistent selected delivery with the same
+  card semantics as the lanes (identity, lane, stage, activity, health,
+  freshness, estimate truth) plus previous / next and back to the lanes.
+  Nothing here promises controls that do not exist yet: no editor, no
+  ticket actions, no voice.
 -->
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
@@ -24,13 +23,14 @@ defineProps<{
   total: number
   serverNowMs: number
   locale: string
+  /** Last-known data shown while the feed is unreachable. */
+  degraded?: boolean
 }>()
 
 const emit = defineEmits<{
   prev: []
   next: []
   'zoom-out': []
-  'open-ticket': [issueId: number]
   interact: []
 }>()
 
@@ -56,15 +56,13 @@ const { t } = useI18n()
       </div>
     </div>
 
+    <h2 class="am-focus-title">{{ t('agentMode.detail.focusTitle') }}</h2>
+
     <div class="am-focus-lane">
       <span class="am-focus-lane-key">{{ delivery.lane.projectKey }}</span>
       {{ delivery.lane.projectName }}
       <span class="am-focus-lane-sep">/</span>
       {{ delivery.lane.epicKey ? `${delivery.lane.epicKey} · ${delivery.lane.epicTitle ?? ''}` : t('agentMode.lanes.ungrouped') }}
-      <template v-if="delivery.tags.length">
-        <span class="am-focus-lane-sep">·</span>
-        <span class="am-focus-tags">{{ delivery.tags.join(', ') }}</span>
-      </template>
     </div>
 
     <AgentModeDeliveryCard
@@ -72,19 +70,18 @@ const { t } = useI18n()
       :delivery="delivery"
       :selected="true"
       :tabbable="true"
+      :activatable="false"
+      :degraded="degraded"
       size="lg"
       :server-now-ms="serverNowMs"
       :locale="locale"
-      @activate="emit('open-ticket', delivery.issueId)"
       @interact="emit('interact')"
     />
-
-    <p class="am-focus-seam">{{ t('agentMode.detail.seamOne') }}</p>
   </section>
 </template>
 
 <style scoped>
-.am-focus { display: grid; gap: 14px; max-width: 720px; margin: 0 auto; }
+.am-focus { display: grid; gap: 12px; max-width: 720px; margin: 0 auto; }
 .am-focus-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .am-focus-btn {
   display: inline-flex;
@@ -109,6 +106,7 @@ const { t } = useI18n()
 }
 .am-focus-pos { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--am-muted); }
 .am-focus-nav { display: inline-flex; gap: 6px; }
+.am-focus-title { margin: 4px 0 0; font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif; font-size: 15px; font-weight: 600; }
 .am-focus-lane { font-size: 12px; color: var(--am-muted); }
 .am-focus-lane-key {
   margin-right: 6px;
@@ -121,7 +119,5 @@ const { t } = useI18n()
   color: var(--am-ink);
 }
 .am-focus-lane-sep { margin: 0 6px; }
-.am-focus-tags { font-style: italic; }
 .am-focus-card { margin-top: 6px; }
-.am-focus-seam { margin: 4px 0 0; font-size: 11px; color: var(--am-muted); }
 </style>

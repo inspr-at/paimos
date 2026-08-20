@@ -6,16 +6,26 @@
   PAI-805 — delivery card (detail 10).
 
   Conveys without animation: identity, responsible agent/system, current
-  activity, lifecycle stage, health, freshness, blockers, and progress/ETA
-  only when the trust policy authorizes it. Visual states are distinct:
-    selected  → accent border + "Selected" label + aria-current
+  activity, lifecycle stage, health, freshness, blockers, supplemental
+  tags, and progress/ETA only when the trust policy authorizes it.
+  Visual states are distinct and can stack:
+    selected  → accent border + ring + "Selected" label + aria-current
+                (the strongest persistent anchor)
+    attention → amber rail + "Needs you" label — shown TOGETHER with
+                "Selected" when both apply
     focus     → ink focus ring (offset) on the hit area
     hover     → raised surface
-    attention → amber rail + "Needs you" label
     health    → icon + word (color-independent)
     freshness → clock line; stale = dashed border + muted
-  One pointer click selects; clicking the selected card (or Enter/Space on
-  it) activates (drill to detail 1).
+    degraded  → last-known data while the feed is unreachable: dashed,
+                qualified, exact estimates withheld
+  One pointer click selects; clicking the selected card (or Enter/Space
+  on it) activates (drill to the focused delivery) when `activatable`.
+
+  Accessible name: the hit area is a <button> whose name is its visible
+  text, prefixed once (sr-only) by the state flags that are rendered
+  outside the button. Those visible flags and the progress bar are
+  aria-hidden so nothing is announced twice.
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
@@ -26,6 +36,7 @@ import type { Delivery } from '@/services/agentMode'
 import type { FilterExclusion } from '@/composables/agent-mode/agentModeFilters'
 import AgentModeActivityGlyph from './AgentModeActivityGlyph.vue'
 import {
+  MAX_VISIBLE_TAGS,
   actorInitials,
   activityKey,
   estimateView,
@@ -48,12 +59,15 @@ const props = withDefaults(
     locale: string
     /** Pinned above results because a filter excludes it. */
     pinnedReason?: FilterExclusion | null
-    /** Retained from a frozen layout; no longer in the latest snapshot. */
-    gone?: boolean
-    /** Larger rendering for the detail-1 seam. */
+    /** Larger rendering for the focused-delivery level. */
     size?: 'md' | 'lg'
+    /** Whether activating the selected card drills further (false in the
+     * focused-delivery level, where the card already is the focus). */
+    activatable?: boolean
+    /** Last-known data shown while the feed is unreachable. */
+    degraded?: boolean
   }>(),
-  { tabbable: false, pinnedReason: null, gone: false, size: 'md' },
+  { tabbable: false, pinnedReason: null, size: 'md', activatable: true, degraded: false },
 )
 
 const emit = defineEmits<{
@@ -77,7 +91,12 @@ const stage = computed(() => {
 })
 const reported = computed(() => relativeReported(d.value, props.locale, props.serverNowMs))
 const estimate = computed(() => estimateView(d.value, props.locale, props.serverNowMs))
+/** Exact percent / landing time are shown only when trusted AND the data
+ * is current. Retained offline data must not keep false precision. */
+const showPercent = computed(() => !props.degraded && estimate.value.presentation.showPercent)
+const showEta = computed(() => !props.degraded && estimate.value.presentation.showEta)
 const withheldReason = computed(() => {
+  if (props.degraded) return 'offline'
   const p = estimate.value.presentation
   if (p.showEta || p.showPercent) return null
   // Prefer the ETA reason: it is what the user asks for first.
@@ -90,8 +109,14 @@ const actorLabel = computed(() => {
   const kind = t(`agentMode.actorKind.${d.value.actor.kind}`)
   return `${d.value.actor.label} · ${kind}`
 })
+const visibleTags = computed(() => d.value.tags.slice(0, MAX_VISIBLE_TAGS))
+const hiddenTagCount = computed(() => Math.max(0, d.value.tags.length - MAX_VISIBLE_TAGS))
+const pinnedReasonLabel = computed(() =>
+  props.pinnedReason ? t('agentMode.card.pinned', { filter: t(`agentMode.card.pinnedReason.${props.pinnedReason}`) }) : '',
+)
 // Screen readers get the visible card text as the button name; only the
-// state flags (rendered outside the button) are repeated, concisely.
+// state flags (rendered outside the button, aria-hidden there) are
+// repeated — exactly once, concisely, first.
 const srPrefix = computed(() => {
   const parts = [
     props.selected ? t('agentMode.card.selected') : '',
@@ -100,22 +125,17 @@ const srPrefix = computed(() => {
   ].filter(Boolean)
   return parts.length ? `${parts.join('. ')}. ` : ''
 })
-const pinnedReasonLabel = computed(() =>
-  props.pinnedReason ? t('agentMode.card.pinned', { filter: t(`agentMode.card.pinnedReason.${props.pinnedReason}`) }) : '',
-)
 
-function onClick() {
+function activateOrSelect() {
   emit('interact')
-  if (props.selected) emit('activate', d.value.id)
-  else emit('select', d.value.id)
+  if (!props.selected) emit('select', d.value.id)
+  else if (props.activatable) emit('activate', d.value.id)
 }
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
-    emit('interact')
-    if (props.selected) emit('activate', d.value.id)
-    else emit('select', d.value.id)
+    activateOrSelect()
   }
 }
 </script>
@@ -130,18 +150,20 @@ function onKeydown(event: KeyboardEvent) {
         'is-selected': selected,
         'is-attention': attention,
         'is-stale': stale,
-        'is-gone': gone,
+        'is-degraded': degraded,
         'is-pinned': !!pinnedReason,
       },
     ]"
     :data-delivery-id="d.id"
     :data-selected="selected ? 'true' : 'false'"
   >
-    <span v-if="selected" class="am-card-flag am-card-flag--selected">
-      <i aria-hidden="true"></i>{{ t('agentMode.card.selected') }}
-    </span>
-    <span v-else-if="attention" class="am-card-flag am-card-flag--attention">
-      {{ t('agentMode.card.attention') }}
+    <span v-if="selected || attention" class="am-card-flags" aria-hidden="true">
+      <span v-if="selected" class="am-card-flag am-card-flag--selected">
+        <i></i>{{ t('agentMode.card.selected') }}
+      </span>
+      <span v-if="attention" class="am-card-flag am-card-flag--attention">
+        {{ t('agentMode.card.attention') }}
+      </span>
     </span>
 
     <button
@@ -150,7 +172,7 @@ function onKeydown(event: KeyboardEvent) {
       :tabindex="tabbable ? 0 : -1"
       :aria-current="selected ? 'true' : undefined"
       :data-card-hit="d.id"
-      @click="onClick"
+      @click="activateOrSelect"
       @keydown="onKeydown"
       @pointerdown="emit('interact')"
     >
@@ -192,6 +214,19 @@ function onKeydown(event: KeyboardEvent) {
         </div>
       </dl>
 
+      <p v-if="degraded" class="am-card-retained">
+        <AppIcon name="wifi-off" :size="11" aria-hidden="true" />
+        <span>{{ t('agentMode.card.retained') }}</span>
+      </p>
+
+      <p v-if="d.tags.length" class="am-card-tags">
+        <span class="am-sr-only">{{ t('agentMode.card.tagsSummary', { list: d.tags.join(', ') }) }}</span>
+        <span aria-hidden="true" class="am-card-tags-visible">
+          <span v-for="tag in visibleTags" :key="tag" class="am-card-tag">#{{ tag }}</span>
+          <span v-if="hiddenTagCount" class="am-card-tag am-card-tag--more">{{ t('agentMode.card.tagsMore', { n: hiddenTagCount }) }}</span>
+        </span>
+      </p>
+
       <p v-if="blocker" class="am-card-blocker">
         <AppIcon name="octagon-alert" :size="12" aria-hidden="true" />
         <span><b>{{ t('agentMode.card.blocked') }}:</b> {{ blocker }}</span>
@@ -199,18 +234,17 @@ function onKeydown(event: KeyboardEvent) {
       <p v-else-if="attention && d.attention.reason" class="am-card-reason">{{ d.attention.reason }}</p>
 
       <div class="am-card-estimate">
-        <template v-if="estimate.presentation.showPercent || estimate.presentation.showEta">
+        <template v-if="showPercent || showEta">
           <div
-            v-if="estimate.presentation.showPercent"
+            v-if="showPercent"
             class="am-card-progress"
-            role="img"
-            :aria-label="t('agentMode.estimate.percent', { n: estimate.presentation.percent })"
+            aria-hidden="true"
           >
             <span :style="{ width: `${estimate.presentation.percent}%` }"></span>
           </div>
           <div class="am-card-estimate-row">
-            <span v-if="estimate.presentation.showPercent" class="am-card-percent">{{ estimate.presentation.percent }} %</span>
-            <span v-if="estimate.landingLabel" class="am-card-eta">
+            <span v-if="showPercent" class="am-card-percent">{{ t('agentMode.estimate.percent', { n: estimate.presentation.percent }) }}</span>
+            <span v-if="showEta && estimate.landingLabel" class="am-card-eta">
               {{ t('agentMode.estimate.lands', { time: estimate.landingLabel }) }}
               <small v-if="estimate.remainingLabel">· {{ estimate.remainingLabel }}</small>
             </span>
@@ -229,10 +263,9 @@ function onKeydown(event: KeyboardEvent) {
       <AppIcon name="pin" :size="11" aria-hidden="true" />
       {{ pinnedReasonLabel }}
     </div>
-    <div v-if="gone" class="am-card-gone-note">{{ t('agentMode.card.gone') }}</div>
 
     <button
-      v-if="selected && !gone"
+      v-if="selected && activatable"
       type="button"
       class="am-card-drill"
       :tabindex="-1"
@@ -281,24 +314,32 @@ function onKeydown(event: KeyboardEvent) {
   background: var(--am-amber);
 }
 
-/* selection: accent border + label — independent from hover & focus */
+/* selection: accent border + ring + label — the strongest persistent
+   anchor, independent from hover & focus; attention stays visible on top */
 .am-card.is-selected {
   border-color: var(--am-select);
   box-shadow: 0 0 0 1px var(--am-select), 0 0 0 5px color-mix(in srgb, var(--am-select) 14%, transparent);
   background: color-mix(in srgb, var(--am-select) 4%, var(--am-surface));
 }
 .am-card.is-selected:hover { border-color: var(--am-select); }
+.am-card.is-selected.is-attention::before { left: 0; border-radius: 3px; }
 
-.am-card.is-stale { border-style: dashed; }
+.am-card.is-stale,
+.am-card.is-degraded { border-style: dashed; }
 .am-card.is-stale .am-card-title,
-.am-card.is-stale .am-card-now-text { color: var(--am-muted); }
-.am-card.is-gone { opacity: 0.62; }
+.am-card.is-stale .am-card-now-text,
+.am-card.is-degraded .am-card-title,
+.am-card.is-degraded .am-card-now-text { color: var(--am-muted); }
 
-.am-card-flag {
+.am-card-flags {
   position: absolute;
   top: -9px;
   left: 12px;
   z-index: 1;
+  display: inline-flex;
+  gap: 6px;
+}
+.am-card-flag {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -430,6 +471,21 @@ function onKeydown(event: KeyboardEvent) {
 .am-card-fresh--unknown dd { color: var(--am-amber); }
 .am-card-fresh-state { font-weight: 600; }
 
+.am-card-retained {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--am-amber);
+}
+
+/* supplemental tags: muted mono text, capped, never a lane */
+.am-card-tags { margin: 8px 0 0; font-size: 11px; line-height: 1.4; }
+.am-card-tags-visible { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; }
+.am-card-tag { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--am-muted); }
+.am-card-tag--more { font-weight: 600; }
+
 .am-card-blocker,
 .am-card-reason,
 .am-card-status {
@@ -463,8 +519,7 @@ function onKeydown(event: KeyboardEvent) {
 .am-card-eta small { color: var(--am-muted); font-size: 11px; }
 .am-card-eta--withheld { font-family: 'DM Sans', system-ui, sans-serif; color: var(--am-muted); font-style: italic; }
 
-.am-card-pinned-note,
-.am-card-gone-note {
+.am-card-pinned-note {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -475,7 +530,6 @@ function onKeydown(event: KeyboardEvent) {
   background: color-mix(in srgb, var(--am-select) 9%, var(--am-surface));
   color: var(--am-select);
 }
-.am-card-gone-note { background: color-mix(in srgb, var(--am-muted) 12%, var(--am-surface)); color: var(--am-muted); }
 
 .am-card-drill {
   position: absolute;

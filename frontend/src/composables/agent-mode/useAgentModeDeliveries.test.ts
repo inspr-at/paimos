@@ -151,3 +151,60 @@ describe('useAgentModeDeliveries (PAI-805 honest states)', () => {
     expect(calls).toBe(2)
   })
 })
+
+describe('useAgentModeDeliveries — never retain unauthorized data (PAI-805 corrections)', () => {
+  it('drops the previous snapshot immediately on a fresh 403 or 404', async () => {
+    for (const [kind, status] of [['forbidden', 403], ['not-found', 404]] as const) {
+      let revoke = false
+      const data = useAgentModeDeliveries({
+        loader: async () => {
+          if (revoke) throw new AgentModeLoadError(kind, 'revoked', status)
+          return snap(10)
+        },
+        hints: false,
+        pollMs: 0,
+      })
+      await data.load()
+      expect(data.deliveries.value).toHaveLength(10)
+      revoke = true
+      await data.load({ background: true })
+      expect(data.status.value).toBe(kind)
+      expect(data.hasData.value).toBe(false)
+      expect(data.snapshot.value).toBeNull()
+      expect(data.deliveries.value).toEqual([])
+      expect(data.deliveriesById.value.size).toBe(0)
+      expect(data.degraded.value).toBe(false)
+      data.dispose()
+    }
+  })
+
+  it('keeps last-known data while offline / errored but flags it as degraded', async () => {
+    let mode: 'ok' | 'offline' | 'error' = 'ok'
+    const data = useAgentModeDeliveries({
+      loader: async () => {
+        if (mode === 'offline') throw new AgentModeLoadError('offline', 'down', 0)
+        if (mode === 'error') throw new AgentModeLoadError('error', 'boom', 500)
+        return snap(10)
+      },
+      hints: false,
+      pollMs: 0,
+    })
+    await data.load()
+    expect(data.degraded.value).toBe(false)
+    mode = 'offline'
+    await data.load({ background: true })
+    expect(data.hasData.value).toBe(true)
+    expect(data.degraded.value).toBe(true)
+    mode = 'error'
+    data.retryNow()
+    await flush()
+    expect(data.status.value).toBe('error')
+    expect(data.degraded.value).toBe(true)
+    mode = 'ok'
+    data.retryNow()
+    await flush()
+    expect(data.status.value).toBe('ready')
+    expect(data.degraded.value).toBe(false)
+    data.dispose()
+  })
+})

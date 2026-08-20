@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 
 import { makeFixtureSnapshot } from '@/services/agentModeFixtures'
 import { normalizeWireSnapshot } from '@/services/agentModeTransport'
-import { EMPTY_FILTERS, applyFilters, exclusionReason, filtersActive } from './agentModeFilters'
+import { EMPTY_FILTERS, applyFilters, exclusionReason, filtersActive, nextRadioIndex } from './agentModeFilters'
 
 const ten = normalizeWireSnapshot(makeFixtureSnapshot(10), 0).deliveries
 
@@ -51,5 +51,20 @@ describe('agentModeFilters (PAI-805)', () => {
     expect(applyFilters(ten, { ...EMPTY_FILTERS, health: 'blocked' }).every((x) => x.health === 'blocked' || x.blockers.length > 0)).toBe(true)
     expect(applyFilters(ten, { ...EMPTY_FILTERS, health: 'stale' }).every((x) => x.freshness.state === 'stale' || x.freshness.state === 'unknown')).toBe(true)
     expect(applyFilters(ten, { ...EMPTY_FILTERS, health: 'attention' }).every((x) => x.attention.level > 0 || x.health === 'attention' || x.health === 'at_risk')).toBe(true)
+  })
+})
+
+describe('nextRadioIndex (health radiogroup keyboard contract)', () => {
+  it('wraps with arrows and jumps with Home / End; ignores other keys', () => {
+    expect(nextRadioIndex(0, 'ArrowRight', 4)).toBe(1)
+    expect(nextRadioIndex(3, 'ArrowRight', 4)).toBe(0)
+    expect(nextRadioIndex(0, 'ArrowDown', 4)).toBe(1)
+    expect(nextRadioIndex(0, 'ArrowLeft', 4)).toBe(3)
+    expect(nextRadioIndex(2, 'ArrowUp', 4)).toBe(1)
+    expect(nextRadioIndex(2, 'Home', 4)).toBe(0)
+    expect(nextRadioIndex(1, 'End', 4)).toBe(3)
+    expect(nextRadioIndex(1, 'Enter', 4)).toBeNull()
+    expect(nextRadioIndex(1, 'Escape', 4)).toBeNull()
+    expect(nextRadioIndex(0, 'ArrowRight', 0)).toBeNull()
   })
 })

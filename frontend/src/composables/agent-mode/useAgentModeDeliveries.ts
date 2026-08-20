@@ -103,6 +103,11 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
     return Number.isFinite(serverMs) ? serverMs - s.receivedAt : 0
   })
   const hasData = computed(() => snapshot.value !== null)
+  /** Last-known data is being shown while the feed is unreachable. The
+   * view must qualify it as stale and withhold exact estimates. */
+  const degraded = computed(
+    () => snapshot.value !== null && (status.value === 'offline' || status.value === 'error'),
+  )
 
   let seq = 0
   let alive = true
@@ -179,6 +184,12 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
         status.value = 'offline'
         scheduleRetry()
       } else {
+        if (classified.kind === 'forbidden' || classified.kind === 'not-found') {
+          // Authorization changed (or the feed vanished): the previous
+          // snapshot is no longer something this user may see. Drop it
+          // immediately so nothing downstream can keep rendering it.
+          snapshot.value = null
+        }
         status.value = classified.kind
         // Non-transient failures are not retried automatically; the user
         // can retry and the poll loop stays parked.
@@ -249,6 +260,7 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
     lastHintAt,
     serverOffsetMs,
     hasData,
+    degraded,
     load,
     retryNow,
     dispose,

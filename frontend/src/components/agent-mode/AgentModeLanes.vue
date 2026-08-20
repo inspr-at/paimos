@@ -6,26 +6,30 @@
   PAI-805 — project → epic lanes with an explicit Ungrouped lane.
   Receives an already-ordered layout (frozen while interaction is held)
   and never reorders on its own. Roving tabindex: only the selected card
-  is tabbable; arrow travel is handled by the view.
+  is tabbable; arrow travel and DOM focus are handled by the view.
+
+  Ids that left the latest authorized snapshot are rendered as neutral
+  TOMBSTONES only (no key, title, actor, activity, blocker, status or
+  tags): a slot that keeps the layout still under the pointer without
+  re-rendering data the user may no longer see.
 -->
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { Delivery } from '@/services/agentMode'
 import type { AgentModeProjectGroup } from '@/composables/agent-mode/agentModeOrdering'
 import AgentModeDeliveryCard from './AgentModeDeliveryCard.vue'
 
-const props = defineProps<{
+defineProps<{
   groups: readonly AgentModeProjectGroup[]
   deliveriesById: ReadonlyMap<string, Delivery>
-  /** Last-known state for ids retained in a frozen layout. */
-  retainedById: ReadonlyMap<string, Delivery>
+  /** Ids kept in a frozen layout that are no longer in the snapshot. */
+  tombstoneIds: ReadonlySet<string>
   selectedId: string | null
   serverNowMs: number
   locale: string
-  /** Increment to move DOM focus onto the selected card. */
-  focusToken: number
+  /** Last-known data shown while the feed is unreachable. */
+  degraded?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -35,46 +39,19 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const root = ref<HTMLElement | null>(null)
-
-function cssEscape(value: string): string {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(value)
-  return value.replace(/["\\]/g, '\\$&')
-}
-
-function deliveryFor(id: string): Delivery | null {
-  return props.deliveriesById.get(id) ?? props.retainedById.get(id) ?? null
-}
-
-function isGone(id: string): boolean {
-  return !props.deliveriesById.has(id) && props.retainedById.has(id)
-}
 
 function laneLabel(lane: AgentModeProjectGroup['lanes'][number]): string {
   if (lane.ungrouped) return t('agentMode.lanes.ungrouped')
   return [lane.epicKey, lane.epicTitle].filter(Boolean).join(' · ') || t('agentMode.lanes.ungrouped')
 }
 
-watch(
-  () => props.focusToken,
-  async () => {
-    await nextTick()
-    if (!props.selectedId || !root.value) return
-    const el = root.value.querySelector<HTMLElement>(`[data-card-hit="${cssEscape(props.selectedId)}"]`)
-    el?.focus({ preventScroll: false })
-  },
-)
-
-defineExpose({
-  focusSelected() {
-    if (!props.selectedId || !root.value) return
-    root.value.querySelector<HTMLElement>(`[data-card-hit="${cssEscape(props.selectedId)}"]`)?.focus()
-  },
-})
+function laneDomId(key: string): string {
+  return `am-lane-${key.replace(/[^a-z0-9]/gi, '-')}`
+}
 </script>
 
 <template>
-  <div ref="root" class="am-lanes">
+  <div class="am-lanes">
     <section
       v-for="group in groups"
       :key="group.projectId"
@@ -92,27 +69,30 @@ defineExpose({
         class="am-lane"
         :class="{ 'am-lane--ungrouped': lane.ungrouped }"
         role="group"
-        :aria-labelledby="`am-lane-${lane.key.replace(/[^a-z0-9]/gi, '-')}`"
+        :aria-labelledby="laneDomId(lane.key)"
         :data-lane-key="lane.key"
       >
         <div class="am-lane-label">
-          <h3 :id="`am-lane-${lane.key.replace(/[^a-z0-9]/gi, '-')}`">{{ laneLabel(lane) }}</h3>
+          <h3 :id="laneDomId(lane.key)">{{ laneLabel(lane) }}</h3>
           <small>{{ t('agentMode.lanes.count', { n: lane.deliveryIds.length }, lane.deliveryIds.length) }}</small>
         </div>
         <div class="am-lane-cards">
           <template v-for="id in lane.deliveryIds" :key="id">
             <AgentModeDeliveryCard
-              v-if="deliveryFor(id)"
-              :delivery="deliveryFor(id)!"
+              v-if="deliveriesById.has(id)"
+              :delivery="deliveriesById.get(id)!"
               :selected="id === selectedId"
               :tabbable="id === selectedId"
               :server-now-ms="serverNowMs"
               :locale="locale"
-              :gone="isGone(id)"
+              :degraded="degraded"
               @select="emit('select', $event)"
               @activate="emit('activate', $event)"
               @interact="emit('interact')"
             />
+            <div v-else-if="tombstoneIds.has(id)" class="am-tombstone" role="note" data-tombstone="true">
+              <span>{{ t('agentMode.card.gone') }}</span>
+            </div>
           </template>
         </div>
       </div>
@@ -164,6 +144,18 @@ defineExpose({
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 14px 12px;
   padding-top: 10px;
+}
+
+.am-tombstone {
+  display: grid;
+  min-height: 148px;
+  place-items: center;
+  padding: 16px 14px;
+  border: 1px dashed var(--am-line-strong);
+  border-radius: 14px;
+  color: var(--am-muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 @media (max-width: 760px) {

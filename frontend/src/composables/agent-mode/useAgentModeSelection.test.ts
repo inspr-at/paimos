@@ -108,3 +108,25 @@ describe('useAgentModeSelection (PAI-805)', () => {
     expect(sel.selectedIndex.value).toBe(0)
   })
 })
+
+describe('useAgentModeSelection — live-only keyboard travel (PAI-805 corrections)', () => {
+  it('steps and jumps only across ids that exist in the current snapshot', () => {
+    // A frozen layout may still list ids that left the authorized set.
+    const gone = 'dlv-gone'
+    const order = ref([ten[0].id, gone, ten[1].id, ten[2].id, 'dlv-gone-2'])
+    const deliveries = ref<readonly Delivery[]>(ten)
+    const sel = useAgentModeSelection({ deliveries, order, storageKey: ref('k'), storage: memoryStorage() })
+    sel.select(ten[0].id)
+    expect(sel.step(1)).toBe(ten[1].id)
+    expect(sel.selectedDelivery.value?.id).toBe(ten[1].id)
+    expect(sel.step(-1)).toBe(ten[0].id)
+    expect(sel.selectEdge('last')).toBe(ten[2].id)
+    expect(sel.selectedDelivery.value).not.toBeNull()
+    expect(sel.selectEdge('first')).toBe(ten[0].id)
+    // The selection never lands on a gone id, so selectedDelivery is never null while deliveries exist.
+    for (let i = 0; i < 10; i += 1) {
+      sel.step(1)
+      expect(sel.selectedDelivery.value).not.toBeNull()
+    }
+  })
+})

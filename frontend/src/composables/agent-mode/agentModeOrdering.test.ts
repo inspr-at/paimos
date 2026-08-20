@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest'
 import { makeFixtureSnapshot } from '@/services/agentModeFixtures'
 import { normalizeWireSnapshot } from '@/services/agentModeTransport'
 import type { Delivery } from '@/services/agentMode'
-import { buildProjectGroups, compareDeliveries, flattenOrder, reconcileFrozenGroups } from './agentModeOrdering'
+import { buildProjectGroups, compareDeliveries, flattenOrder, pruneDeadLanes, pruneIds, reconcileFrozenGroups } from './agentModeOrdering'
 
 function load(n: 1 | 10 | 100): Delivery[] {
   return normalizeWireSnapshot(makeFixtureSnapshot(n), 0).deliveries
@@ -102,5 +102,47 @@ describe('agentModeOrdering (PAI-805)', () => {
     expect(newLane.deliveryIds[newLane.deliveryIds.length - 1]).toBe('dlv-new')
     // Canonical order, applied once the hold releases, differs.
     expect(flattenOrder(fresh)).not.toEqual(after)
+  })
+})
+
+describe('agentModeOrdering — tombstone pruning and tag neutrality (PAI-805 corrections)', () => {
+  it('pruneIds drops ids and collapses lanes / groups that become empty', () => {
+    const list = normalizeWireSnapshot(makeFixtureSnapshot(10), 0).deliveries
+    const groups = buildProjectGroups(list)
+    const rel = groups.find((g) => g.projectKey === 'REL')!
+    const pruned = pruneIds(groups, new Set([...rel.lanes[0].deliveryIds, 'dlv-813']))
+    expect(pruned.find((g) => g.projectKey === 'REL')).toBeUndefined()
+    expect(flattenOrder(pruned)).not.toContain('dlv-813')
+    expect(flattenOrder(pruned)).toHaveLength(10 - rel.count - 1)
+    expect(pruned.reduce((n, g) => n + g.count, 0)).toBe(10 - rel.count - 1)
+    // Relative order of survivors is untouched.
+    const before = flattenOrder(groups)
+    const after = flattenOrder(pruned)
+    expect(before.filter((id) => after.includes(id))).toEqual(after)
+    // No-op when nothing matches.
+    expect(flattenOrder(pruneIds(groups, new Set(['nope'])))).toEqual(before)
+  })
+
+  it('pruneDeadLanes removes lanes / projects with no live delivery but keeps lanes that still have one', () => {
+    const list = normalizeWireSnapshot(makeFixtureSnapshot(10), 0).deliveries
+    const frozen = buildProjectGroups(list)
+    const rel = frozen.find((g) => g.projectKey === 'REL')!
+    const live = new Set(list.map((d) => d.id))
+    for (const id of rel.lanes[0].deliveryIds) live.delete(id) // whole project revoked
+    live.delete('dlv-813') // one of two in RUN / RUN-40
+    const pruned = pruneDeadLanes(frozen, (id) => live.has(id))
+    expect(pruned.find((g) => g.projectKey === 'REL')).toBeUndefined()
+    const runLane = pruned.flatMap((g) => g.lanes).find((l) => l.deliveryIds.includes('dlv-816'))!
+    expect(runLane.deliveryIds).toContain('dlv-813') // tombstone slot survives next to a live card
+    expect(pruned.flatMap((g) => g.lanes).every((l) => l.deliveryIds.some((id) => live.has(id)))).toBe(true)
+  })
+
+  it('tags never define lanes or order', () => {
+    const list = normalizeWireSnapshot(makeFixtureSnapshot(10), 0).deliveries
+    const base = flattenOrder(buildProjectGroups(list))
+    const baseLanes = buildProjectGroups(list).flatMap((g) => g.lanes.map((l) => l.key))
+    const retagged = list.map((d, i) => ({ ...d, tags: i % 2 ? ['zzz', 'security'] : [] }))
+    expect(flattenOrder(buildProjectGroups(retagged))).toEqual(base)
+    expect(buildProjectGroups(retagged).flatMap((g) => g.lanes.map((l) => l.key))).toEqual(baseLanes)
   })
 })

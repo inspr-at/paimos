@@ -15,11 +15,12 @@
  * License along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { createRouter, createWebHistory } from "vue-router";
+import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useUndoStore } from "@/stores/undo";
 import { safePostLoginRedirect } from "@/router/redirects";
 import { mustChangePassword } from "@/api/client";
+import type { AppShell } from "@/router/shell";
 
 // Route meta shape. `projectIdParam` names the URL param that holds the
 // project ID — the beforeEach guard uses it to enforce per-project view
@@ -39,12 +40,22 @@ declare module "vue-router" {
     // correct for tall, page-scroll views like Settings and
     // IssueDetail. See AppLayout.vue.
     scrollMode?: "page" | "self";
+    // PAI-735: focused-tool routes hide the header search field (the
+    // capability stays reachable via / and ⌘K).
+    headerSearchHidden?: boolean;
+    // PAI-805: reduced application shell. `agent` swaps the standard
+    // sidebar/header chrome for AgentModeLayout (logo rail, logout,
+    // settings, auth/session banners only). Resolved by
+    // `resolveLayout()` in ./shell.ts; absent = standard AppLayout.
+    shell?: AppShell;
   }
 }
 
-const router = createRouter({
-  history: createWebHistory(),
-  routes: [
+// PAI-805: routes are built by a function so the production contract
+// (no /dev/* reference routes, agent-mode shell meta) is testable without
+// depending on import.meta.env at test time.
+export function buildRoutes(includeDev: boolean): RouteRecordRaw[] {
+  return [
     {
       path: "/login",
       component: () => import("@/views/LoginView.vue"),
@@ -169,15 +180,16 @@ const router = createRouter({
       meta: { headerSearchHidden: true },
     },
     {
-      // PAI-805: Agent Mode — voice-first supervision cockpit (detail 10
-      // ships here; detail 1 / 100 render through their seams). The view
-      // owns its header chrome (title, detail lever, live chip) and its
-      // internal scroll, so the search field yields its header spot.
+      // PAI-805: Agent Mode — supervision cockpit (detail 10 ships here;
+      // the focused-delivery and portfolio-overview levels render from the
+      // same data). Renders in the reduced Agent Mode shell (see
+      // ./shell.ts): logo rail, logout, settings, security banners — no
+      // ordinary project / issue / timer / undo chrome.
       path: "/agent-mode",
       component: () => import("@/views/AgentModeView.vue"),
-      meta: { headerSearchHidden: true, scrollMode: "self" },
+      meta: { shell: "agent" },
     },
-    ...(import.meta.env.DEV
+    ...(includeDev
       ? [
           {
             path: "/dev/ai-ux",
@@ -189,7 +201,7 @@ const router = createRouter({
             // PAI-804 backend. DEV builds only; never reachable in prod.
             path: "/dev/agent-mode",
             component: () => import("@/components/agent-mode/AgentModeDevReference.vue"),
-            meta: { headerSearchHidden: true, scrollMode: "self" as const },
+            meta: { shell: "agent" as const },
           },
           {
             path: "/dev/undo",
@@ -198,7 +210,12 @@ const router = createRouter({
         ]
       : []),
     { path: "/:pathMatch(.*)*", redirect: "/" },
-  ],
+  ];
+}
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: buildRoutes(import.meta.env.DEV),
 });
 
 router.beforeEach(async (to) => {
