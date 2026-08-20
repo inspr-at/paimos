@@ -16,8 +16,10 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
-import { resolveLayout } from './shell'
+import { layoutSupportsUndoChrome, resolveLayout } from './shell'
 
 describe('resolveLayout (PAI-805 route → shell contract)', () => {
   it('keeps the standard AppLayout for every route that does not opt in', () => {
@@ -37,5 +39,18 @@ describe('resolveLayout (PAI-805 route → shell contract)', () => {
   it('never lets the agent shell override portal / public precedence', () => {
     expect(resolveLayout({ portal: true, shell: 'agent' })).toBe('portal')
     expect(resolveLayout({ public: true, shell: 'agent' })).toBe('public')
+  })
+
+  it('keeps every undo surface on the standard shell and none in Agent Mode', () => {
+    expect(layoutSupportsUndoChrome('standard')).toBe(true)
+    for (const layout of ['agent', 'portal', 'public'] as const) {
+      expect(layoutSupportsUndoChrome(layout), `${layout} must have no undo chrome`).toBe(false)
+    }
+    const app = readFileSync(resolve(process.cwd(), 'src/App.vue'), 'utf8')
+    for (const component of ['UndoToast', 'UndoActivityPanel', 'UndoConflictModal']) {
+      expect(app, `${component} must use the shared undo chrome gate`).toMatch(
+        new RegExp(`<${component}[\\s\\S]*?v-if="undoChromeEnabled"`),
+      )
+    }
   })
 })

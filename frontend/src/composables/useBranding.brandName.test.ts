@@ -114,6 +114,7 @@ describe("neutral default palette (PAI-737)", () => {
 
   it("uses neutral gray defaults when the branding endpoint is unavailable", async () => {
     const { branding } = await withBrandingDoc(null);
+    expect(branding.value.logo).toBe("/logo.svg");
     expect(branding.value.colors).toMatchObject({
       primary: "#52525b",
       primaryDark: "#3f3f46",

@@ -13,7 +13,7 @@ import { useAuthStore } from "@/stores/auth";
 import { announceSessionExpired } from "@/api/client";
 import { useUndoStore } from "@/stores/undo";
 import { useChangesStream } from "@/composables/useChangesStream";
-import { resolveLayout } from "@/router/shell";
+import { layoutSupportsUndoChrome, resolveLayout } from "@/router/shell";
 
 const auth = useAuthStore();
 const undo = useUndoStore();
@@ -26,7 +26,7 @@ useChangesStream(internalChromeEnabled);
 // Mode shell keeps the change stream (it feeds refetch hints) but drops
 // the ordinary undo chrome along with the rest of AppLayout.
 const layoutKind = computed(() => resolveLayout(route.meta));
-const undoChromeEnabled = computed(() => internalChromeEnabled.value && layoutKind.value !== "agent");
+const undoChromeEnabled = computed(() => internalChromeEnabled.value && layoutSupportsUndoChrome(layoutKind.value));
 
 // ── Session-death heartbeat (PAI-322) ────────────────────────
 // Two complementary triggers:
@@ -101,7 +101,7 @@ onBeforeUnmount(() => {
   <UndoToast v-if="undoChromeEnabled" />
   <UndoActivityPanel v-if="undoChromeEnabled" />
   <UndoConflictModal
-    v-if="internalChromeEnabled"
+    v-if="undoChromeEnabled"
     :conflict="undo.conflict"
     :loading="undo.resolving"
     @cancel="undo.clearConflict()"

@@ -157,23 +157,52 @@ export function flattenOrder(groups: readonly AgentModeProjectGroup[]): string[]
   return out
 }
 
+const TOMBSTONE_PREFIX = '__am_tombstone__'
+
+function membershipKey(projectId: number, laneKey: string): string {
+  return `${projectId}:${laneKey}`
+}
+
+function tombstoneId(id: string, projectId: number, laneKey: string): string {
+  return `${TOMBSTONE_PREFIX}:${projectId}:${laneKey}:${id}`
+}
+
 /**
  * Reconciles a frozen layout with fresh data while interaction is held:
  * existing cards keep their slot, new deliveries are appended at the end
  * of their lane, and lanes/projects that are new appear at the end. No
- * existing target ever moves. Deliveries that left the snapshot stay in
- * place (callers render them from their last known state) until the hold
- * releases and the canonical order is applied.
+ * existing target ever moves. A delivery that left the current layout or
+ * changed project/lane leaves only an opaque tombstone in its old slot; its
+ * live identity is appended exactly once in the current authorized lane.
  */
 export function reconcileFrozenGroups(
   frozen: readonly AgentModeProjectGroup[],
   fresh: readonly AgentModeProjectGroup[],
 ): AgentModeProjectGroup[] {
+  const freshMembership = new Map<string, string>()
+  for (const group of fresh) {
+    for (const lane of group.lanes) {
+      for (const id of lane.deliveryIds) freshMembership.set(id, membershipKey(group.projectId, lane.key))
+    }
+  }
+
   const result: AgentModeProjectGroup[] = frozen.map((g) => ({
     ...g,
-    lanes: g.lanes.map((l) => ({ ...l, deliveryIds: [...l.deliveryIds] })),
+    lanes: g.lanes.map((l) => ({
+      ...l,
+      deliveryIds: l.deliveryIds.map((id) => {
+        if (id.startsWith(TOMBSTONE_PREFIX)) return id
+        const currentMembership = freshMembership.get(id)
+        return currentMembership === membershipKey(g.projectId, l.key)
+          ? id
+          : tombstoneId(id, g.projectId, l.key)
+      }),
+    })),
   }))
-  const knownIds = new Set(flattenOrder(frozen))
+  // Only a live id in its CURRENT project+lane owns that identity. A moved
+  // delivery's old slot is now an opaque tombstone, so the live identity can
+  // be appended once to its current authorized lane.
+  const knownIds = new Set(flattenOrder(result).filter((id) => !id.startsWith(TOMBSTONE_PREFIX)))
   for (const freshGroup of fresh) {
     let group = result.find((g) => g.projectId === freshGroup.projectId)
     if (!group) {

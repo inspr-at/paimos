@@ -523,6 +523,11 @@ export default {
     lanes: {
       ungrouped: 'Ungrouped',
       count: 'no deliveries | {n} delivery | {n} deliveries',
+      selectedAbove: 'Selected above',
+    },
+    selection: {
+      label: 'Selected delivery',
+      outsideResults: 'Outside results · hidden by the {filter} filter',
     },
     pinned: { title: 'Selected delivery (outside the current filter)' },
     attention: {

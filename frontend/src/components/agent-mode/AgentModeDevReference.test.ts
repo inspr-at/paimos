@@ -53,8 +53,9 @@ describe('AgentModeDevReference (DEV-only fixture route)', () => {
     app.mount(document.getElementById('root')!)
     await settle()
     const root = document.getElementById('root')!
-    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(10)
-    expect(root.querySelectorAll('.am-card.is-selected')).toHaveLength(1)
+    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(9)
+    expect(root.querySelectorAll('.am-selected-above')).toHaveLength(1)
+    expect(root.querySelectorAll('[data-selected="true"]')).toHaveLength(1)
     expect(document.getElementById('app-header-right')!.textContent).toContain('Fixture data')
     app.unmount()
   })

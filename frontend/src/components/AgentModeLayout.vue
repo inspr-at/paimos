@@ -23,6 +23,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 import AppIcon from '@/components/AppIcon.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import AppDevLoginBanner from '@/components/AppDevLoginBanner.vue'
 import AppImpersonationBanner from '@/components/AppImpersonationBanner.vue'
 import SessionExpiredModal from '@/components/SessionExpiredModal.vue'
@@ -70,7 +71,7 @@ function logout() {
         <div class="aml-rail-top">
           <div v-if="instanceLabel" class="aml-instance">{{ instanceLabel }}</div>
           <RouterLink to="/" class="aml-brand" :title="t('agentMode.shell.home')">
-            <img :src="branding.logo" :alt="branding.company" class="aml-brand-logo" />
+            <BrandLogo :src="branding.logo" :alt="branding.company" class="aml-brand-logo" />
           </RouterLink>
           <RouterLink to="/" class="aml-rail-btn aml-exit" :title="t('agentMode.shell.backToApp')">
             <AppIcon name="arrow-left" :size="15" aria-hidden="true" />

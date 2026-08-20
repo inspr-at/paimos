@@ -90,11 +90,12 @@ describe('agentModeOrdering (PAI-805)', () => {
     ])
     const reconciled = reconcileFrozenGroups(frozen, fresh)
     const after = flattenOrder(reconciled)
-    // Every previously laid-out id keeps its relative position (the one
-    // that left the snapshot stays in place until the hold releases) …
+    // Every live previously laid-out id keeps its relative position. The one
+    // that left becomes an opaque tombstone rather than retaining identity …
     const beforeSet = new Set(before)
-    expect(after.filter((id) => beforeSet.has(id))).toEqual(before)
-    expect(after).toContain(before[2])
+    expect(after.filter((id) => beforeSet.has(id))).toEqual(before.filter((id) => id !== before[2]))
+    expect(after).not.toContain(before[2])
+    expect(after.some((id) => id.startsWith('__am_tombstone__'))).toBe(true)
     // … and the newcomer is appended at the end of its own lane.
     expect(after).toContain('dlv-new')
     const newLane = reconciled.flatMap((g) => g.lanes).find((l) => l.deliveryIds.includes('dlv-new'))!

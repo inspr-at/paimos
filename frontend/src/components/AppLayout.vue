@@ -18,6 +18,7 @@ import { useTotpNag } from '@/composables/useTotpNag'
 import { api } from '@/api/client'
 import { instanceLabel, loadInstance } from '@/api/instance'
 import AppIcon from '@/components/AppIcon.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import { useSidePanelPinned } from '@/composables/useSidePanelPinned'
 import { useSidePanelWidth } from '@/composables/useSidePanelWidth'
@@ -200,7 +201,7 @@ onBeforeUnmount(() => {
 
         <!-- Brand: logo always, text only when expanded -->
         <RouterLink to="/" class="brand" :title="isExpanded ? '' : 'Home'">
-          <img :src="branding.logo" :alt="branding.company" class="brand-logo" />
+          <BrandLogo :src="branding.logo" :alt="branding.company" class="brand-logo" />
           <span class="sl brand-name">{{ brandName }}</span>
         </RouterLink>
 

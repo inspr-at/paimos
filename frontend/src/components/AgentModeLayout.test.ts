@@ -93,7 +93,7 @@ describe('AgentModeLayout (PAI-805 reduced shell)', () => {
     const top = rail.querySelector<HTMLElement>('.aml-rail-top')!
     const brand = top.querySelector<HTMLAnchorElement>('a.aml-brand')!
     expect(brand.getAttribute('href')).toBe('/')
-    expect(brand.querySelector('img')).not.toBeNull()
+    expect(brand.querySelector('img')?.getAttribute('src')).toBe('/logo.svg')
     const exit = top.querySelector<HTMLAnchorElement>('a.aml-exit')!
     expect(exit.getAttribute('href')).toBe('/')
     expect(exit.textContent).toContain('Exit')

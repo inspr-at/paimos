@@ -26,6 +26,9 @@ defineProps<{
   /** Ids kept in a frozen layout that are no longer in the snapshot. */
   tombstoneIds: ReadonlySet<string>
   selectedId: string | null
+  /** Detail 10 renders this identity once in the focus anchor above the
+   * lanes. Its natural slot remains an honest, non-interactive marker. */
+  liftedSelectedId?: string | null
   serverNowMs: number
   locale: string
   /** Last-known data shown while the feed is unreachable. */
@@ -78,8 +81,18 @@ function laneDomId(key: string): string {
         </div>
         <div class="am-lane-cards">
           <template v-for="id in lane.deliveryIds" :key="id">
+            <div
+              v-if="id === liftedSelectedId"
+              class="am-selected-above"
+              role="note"
+              data-selected-above="true"
+              :data-layout-id="id"
+            >
+              <span aria-hidden="true">↟</span>
+              <span>{{ t('agentMode.lanes.selectedAbove') }}</span>
+            </div>
             <AgentModeDeliveryCard
-              v-if="deliveriesById.has(id)"
+              v-else-if="deliveriesById.has(id)"
               :delivery="deliveriesById.get(id)!"
               :selected="id === selectedId"
               :tabbable="id === selectedId"
@@ -157,6 +170,21 @@ function laneDomId(key: string): string {
   font-size: 12px;
   text-align: center;
 }
+
+.am-selected-above {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px dashed color-mix(in srgb, var(--am-select) 45%, var(--am-line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--am-select) 3%, transparent);
+  color: var(--am-muted);
+  font-size: 11px;
+}
+.am-selected-above > span:first-child { color: var(--am-select); font-size: 15px; }
 
 @media (max-width: 760px) {
   .am-lane { grid-template-columns: 1fr; gap: 6px; }

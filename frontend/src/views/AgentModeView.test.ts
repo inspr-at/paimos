@@ -103,7 +103,7 @@ function stubMatchMedia(matching: (query: string) => boolean) {
 }
 
 function selectedCards(root: HTMLElement) {
-  return [...root.querySelectorAll<HTMLElement>('.am-card.is-selected')]
+  return [...root.querySelectorAll<HTMLElement>('[data-selected="true"]')]
 }
 
 function selectedId(root: HTMLElement): string | null {
@@ -112,7 +112,8 @@ function selectedId(root: HTMLElement): string | null {
 }
 
 function cardOrder(root: HTMLElement): string[] {
-  return [...root.querySelectorAll<HTMLElement>('.am-lanes .am-card')].map((el) => el.dataset.deliveryId!)
+  return [...root.querySelectorAll<HTMLElement>('.am-lanes :is(.am-card, .am-selected-above)')]
+    .map((el) => el.dataset.deliveryId ?? el.dataset.layoutId!)
 }
 
 function key(root: HTMLElement, k: string, target?: Element | null) {
@@ -143,7 +144,8 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   it('renders truthful lanes with exactly one selected card and the header chrome', async () => {
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
     const { root } = harness
-    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(10)
+    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(9)
+    expect(root.querySelectorAll('.am-selected-above')).toHaveLength(1)
     expect(selectedCards(root)).toHaveLength(1)
     // Project headings and the explicit Ungrouped lane.
     const headings = [...root.querySelectorAll('.am-project-head')].map((h) => h.textContent)
@@ -160,10 +162,9 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(conv.querySelectorAll('.am-conv-line').length).toBeGreaterThan(1)
     // Default pick is the highest-attention delivery (the blocked one) —
     // selected AND needing attention: both meanings stay visible.
-    const sel = root.querySelector<HTMLElement>('.am-card.is-selected')!
+    const sel = root.querySelector<HTMLElement>('.am-selection-anchor')!
     expect(sel.textContent).toContain('Blocked')
-    expect(sel.querySelector('.am-card-flag--selected')).not.toBeNull()
-    expect(sel.querySelector('.am-card-flag--attention')).not.toBeNull()
+    expect(sel.textContent).toContain('Selected delivery')
     expect(sel.classList.contains('is-attention')).toBe(true)
     // No copy promises future tickets.
     expect(document.body.textContent).not.toMatch(FUTURE_TICKET_COPY)
@@ -179,6 +180,22 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?delivery=dlv-820')
     expect(selectedId(harness.root)).toBe('dlv-820')
     expect(harness.router.currentRoute.value.query.delivery).toBe('dlv-820')
+  })
+
+  it('lifts a final-lane selection into exactly one data-backed target before Attention', async () => {
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?delivery=dlv-820')
+    const { root } = harness
+    const anchor = root.querySelector<HTMLElement>('.am-selection-anchor')!
+    const attention = root.querySelector<HTMLElement>('.am-attention')!
+    expect(anchor.compareDocumentPosition(attention) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(root.querySelectorAll('[data-selected="true"]')).toHaveLength(1)
+    expect(root.querySelectorAll('[aria-current="true"]')).toHaveLength(1)
+    expect(anchor.querySelector('[aria-current="true"]')).not.toBeNull()
+    expect(anchor.textContent).toContain('REL · Release operations / Ungrouped')
+    expect(anchor.textContent).toContain('REL-820')
+    expect(anchor.textContent).toContain('Release 5.11.0 smoke suite')
+    expect(root.querySelector('.am-lanes [data-delivery-id="dlv-820"]')).toBeNull()
+    expect(root.querySelector('.am-lanes [data-layout-id="dlv-820"]')?.textContent).toContain('Selected above')
   })
 
   it('click selects; activating the selected card opens the data-backed Focused delivery; Escape opens the Portfolio overview', async () => {
@@ -259,7 +276,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
     const { root, router } = harness
     const selected = selectedId(root)!
-    const selectedProject = root.querySelector<HTMLElement>(`.am-card.is-selected`)!.closest('.am-project')!
+    const selectedProject = root.querySelector<HTMLElement>('.am-selected-above')!.closest('.am-project')!
     const projectSelect = root.querySelector<HTMLSelectElement>('.am-filter-project select')!
     const otherOption = [...projectSelect.options].find((o) => o.value !== '' && !selectedProject.querySelector(`#am-project-${o.value}`))!
     projectSelect.value = otherOption.value
@@ -270,28 +287,28 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(root.querySelectorAll('.am-lanes .am-project')).toHaveLength(1)
     // … while the selection survives, pinned with its reason.
     expect(selectedId(root)).toBe(selected)
-    const pinned = root.querySelector<HTMLElement>('.am-pinned .am-card.is-selected')!
+    const pinned = root.querySelector<HTMLElement>('.am-selection-anchor')!
     expect(pinned.dataset.deliveryId).toBe(selected)
     expect(pinned.textContent).toContain('hidden by the project filter')
     // Clearing restores the full layout and keeps the selection.
     root.querySelector<HTMLButtonElement>('.am-filter-clear')!.click()
     await flush()
-    expect(root.querySelector('.am-pinned')).toBeNull()
+    expect(root.querySelector('.am-selection-anchor__excluded')).toBeNull()
     expect(selectedId(root)).toBe(selected)
-    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(10)
+    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(9)
   })
 
   it('keyboard travel from a pinned (filtered-out) selection into the results and back moves DOM focus with the selection', async () => {
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
     const { root } = harness
     const pinnedId = selectedId(root)!
-    const selectedProject = root.querySelector<HTMLElement>('.am-card.is-selected')!.closest('.am-project')!
+    const selectedProject = root.querySelector<HTMLElement>('.am-selected-above')!.closest('.am-project')!
     const projectSelect = root.querySelector<HTMLSelectElement>('.am-filter-project select')!
     const otherOption = [...projectSelect.options].find((o) => o.value !== '' && !selectedProject.querySelector(`#am-project-${o.value}`))!
     projectSelect.value = otherOption.value
     projectSelect.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
-    expect(root.querySelector('.am-pinned .am-card.is-selected')).not.toBeNull()
+    expect(root.querySelector('.am-selection-anchor__excluded')).not.toBeNull()
     hit(root, pinnedId).focus()
 
     // Into the results: the first lane card is selected AND focused.
@@ -299,17 +316,17 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     await flush()
     const firstResult = cardOrder(root)[0]
     expect(selectedId(root)).toBe(firstResult)
-    expect(root.querySelector('.am-pinned')).toBeNull()
+    expect(root.querySelector('.am-selection-anchor__excluded')).toBeNull()
     expect((document.activeElement as HTMLElement | null)?.dataset.cardHit).toBe(firstResult)
-    expect(document.activeElement!.closest('.am-lanes')).not.toBeNull()
+    expect(document.activeElement!.closest('.am-selection-anchor')).not.toBeNull()
 
     // Back: the pinned card is selected again AND focused.
     key(root, 'ArrowLeft', hit(root, firstResult))
     await flush()
     expect(selectedId(root)).toBe(pinnedId)
-    expect(root.querySelector('.am-pinned .am-card.is-selected')).not.toBeNull()
+    expect(root.querySelector('.am-selection-anchor__excluded')).not.toBeNull()
     expect((document.activeElement as HTMLElement | null)?.dataset.cardHit).toBe(pinnedId)
-    expect(document.activeElement!.closest('.am-pinned')).not.toBeNull()
+    expect(document.activeElement!.closest('.am-selection-anchor')).not.toBeNull()
   })
 
   it('attention offers but never steals selection; selecting requires an explicit click', async () => {
@@ -373,6 +390,87 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(after.indexOf('dlv-812')).toBeLessThan(after.indexOf('dlv-818'))
   })
 
+  it('moves a live delivery to its current project during hold without a stale project or duplicate card', async () => {
+    vi.useFakeTimers()
+    let moved = false
+    harness = await mountView(async () => {
+      const wire = makeFixtureSnapshot(10)
+      if (moved) {
+        wire.deliveries = wire.deliveries!
+          .filter((d) => !['dlv-817', 'dlv-820'].includes(String(d.delivery_id)))
+          .map((d) => d.delivery_id === 'dlv-814'
+            ? {
+                ...d,
+                project_id: 6,
+                project_key: 'PAI',
+                project_name: 'PAIMOS Core platform',
+                epic_id: 4655,
+                epic_key: 'PAI-801',
+                epic_title: 'Agent Mode',
+              }
+            : d)
+        wire.revision = 'fx-project-move'
+      }
+      return snapshot(wire)
+    })
+    const { root } = harness
+    const canvas = root.querySelector<HTMLElement>('.am-canvas')!
+    canvas.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false }))
+    moved = true
+    await refetchViaHint()
+
+    expect(root.textContent).not.toContain('Release operations')
+    const live = root.querySelectorAll<HTMLElement>('[data-delivery-id="dlv-814"]')
+    expect(live).toHaveLength(1)
+    expect(live[0].closest('.am-project')?.textContent).toContain('PAIMOS Core platform')
+    expect(root.querySelectorAll('.am-tombstone')).toHaveLength(0)
+
+    canvas.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false }))
+    await vi.advanceTimersByTimeAsync(600)
+    await flush()
+    expect(root.querySelectorAll('[data-delivery-id="dlv-814"]')).toHaveLength(1)
+    expect(root.textContent).not.toContain('Release operations')
+  })
+
+  it('moves a live delivery to its current epic, leaves only an opaque old-slot tombstone, then converges on TTL/release', async () => {
+    vi.useFakeTimers()
+    let moved = false
+    harness = await mountView(async () => {
+      const wire = makeFixtureSnapshot(10)
+      if (moved) {
+        wire.deliveries = wire.deliveries!.map((d) => d.delivery_id === 'dlv-812'
+          ? { ...d, epic_id: 9999, epic_key: 'PAI-999', epic_title: 'Current authorization lane' }
+          : d)
+        wire.revision = 'fx-epic-move'
+      }
+      return snapshot(wire)
+    })
+    const { root } = harness
+    const canvas = root.querySelector<HTMLElement>('.am-canvas')!
+    canvas.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false }))
+    moved = true
+    await refetchViaHint()
+
+    const live = root.querySelectorAll<HTMLElement>('[data-delivery-id="dlv-812"]')
+    expect(live).toHaveLength(1)
+    expect(live[0].closest('.am-lane')?.textContent).toContain('PAI-999 · Current authorization lane')
+    const tombstone = root.querySelector<HTMLElement>('.am-tombstone')!
+    expect(tombstone).not.toBeNull()
+    expect(tombstone.textContent).toBe('No longer in your active set')
+    expect(tombstone.textContent).not.toMatch(/PAI-812|Workspace-level access controls|PAI-801/)
+
+    await vi.advanceTimersByTimeAsync(TOMBSTONE_TTL_MS + 50)
+    await flush()
+    expect(root.querySelector('.am-tombstone')).toBeNull()
+    expect(root.querySelectorAll('[data-delivery-id="dlv-812"]')).toHaveLength(1)
+
+    canvas.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false }))
+    await vi.advanceTimersByTimeAsync(600)
+    await flush()
+    expect(root.querySelectorAll('[data-delivery-id="dlv-812"]')).toHaveLength(1)
+    expect(root.querySelector('.am-tombstone')).toBeNull()
+  })
+
   it('clears the snapshot immediately when a refresh returns 403 or 404 after a success', async () => {
     for (const [kind, status, title] of [
       ['forbidden', 403, 'No access'],
@@ -389,7 +487,8 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
       // Even under interaction hold nothing may survive a revocation.
       canvas.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false }))
       await flush()
-      expect(root.querySelectorAll('.am-card')).toHaveLength(10)
+      expect(root.querySelectorAll('.am-card')).toHaveLength(9)
+      expect(root.querySelectorAll('.am-selection-anchor')).toHaveLength(1)
       const seenTitle = root.querySelector('.am-card-title')!.textContent!
 
       revoke = true
@@ -444,7 +543,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     // … while the project whose deliveries ALL left vanishes immediately,
     // header included, despite the hold.
     expect(root.textContent).not.toContain('Release operations')
-    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(6)
+    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(5)
     // Live cards did not move.
     const live = cardOrder(root)
     expect(live).toEqual(before.filter((id) => live.includes(id)))
@@ -460,7 +559,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     await vi.advanceTimersByTimeAsync(600)
     await flush()
     expect(root.querySelectorAll('.am-tombstone')).toHaveLength(0)
-    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(6)
+    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(5)
   })
 
   it('keeps exactly one live delivery selected: arrow travel skips ids removed during pointer and keyboard holds', async () => {
@@ -581,15 +680,16 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     offline = true
     await refetchViaHint()
     // Data is retained — visibly qualified.
-    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(10)
-    expect(root.querySelectorAll('.am-card.is-degraded')).toHaveLength(10)
-    expect(root.querySelectorAll('.am-card-retained').length).toBe(10)
+    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(9)
+    expect(root.querySelectorAll('.am-card.is-degraded')).toHaveLength(9)
+    expect(root.querySelector('.am-selection-anchor.is-degraded')).not.toBeNull()
+    expect(root.querySelectorAll('.am-card-retained').length).toBe(9)
     expect(root.querySelector('.am-banner')!.textContent).toContain('Last known state')
     // … and no false precision: no percent, no landing time, reason named.
     expect(root.querySelectorAll('.am-card-percent')).toHaveLength(0)
     expect(root.querySelectorAll('.am-card-progress')).toHaveLength(0)
     expect([...root.querySelectorAll('.am-card-eta')].some((el) => el.textContent?.includes('Lands ~'))).toBe(false)
-    expect(root.querySelectorAll('.am-card-eta--withheld').length).toBe(10)
+    expect(root.querySelectorAll('.am-card-eta--withheld').length).toBe(9)
     expect(root.textContent).toContain('No estimate — feed offline')
     expect(root.querySelector('.am-conv')!.textContent).toContain('feed offline')
     expect(root.querySelector('.am-conv')!.textContent).not.toContain('Lands about')
@@ -609,7 +709,8 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(conv.querySelector('.am-conv-dock')).not.toBeNull()
     expect(conv.querySelector('.am-conv-head')).toBeNull()
     // The lane canvas is not starved: all cards still render.
-    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(10)
+    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(9)
+    expect(root.querySelectorAll('.am-selected-above')).toHaveLength(1)
     expect(selectedCards(root)).toHaveLength(1)
     // The conversation is a surface, not navigation: no links or app chrome.
     expect(conv.querySelectorAll('a, nav').length).toBe(0)
@@ -647,9 +748,9 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   it('scales to 100 deliveries with one selection and consistent lane totals', async () => {
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(100)))
     const { root } = harness
-    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(100)
+    expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(99)
     expect(selectedCards(root)).toHaveLength(1)
-    const laneCounts = [...root.querySelectorAll('.am-lane')].map((lane) => lane.querySelectorAll('.am-card').length)
+    const laneCounts = [...root.querySelectorAll('.am-lane')].map((lane) => lane.querySelectorAll('.am-card, .am-selected-above').length)
     expect(laneCounts.reduce((a, b) => a + b, 0)).toBe(100)
     expect(document.getElementById('app-header-left')!.textContent).toContain('100 deliveries in motion')
   })

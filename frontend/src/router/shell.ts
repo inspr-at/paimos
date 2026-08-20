@@ -43,3 +43,8 @@ export function resolveLayout(meta: ShellMeta | null | undefined): AppLayoutKind
   if (meta.shell === 'agent') return 'agent'
   return 'standard'
 }
+
+/** Undo toast, activity panel and conflict modal are one chrome family. */
+export function layoutSupportsUndoChrome(layout: AppLayoutKind): boolean {
+  return layout === 'standard'
+}

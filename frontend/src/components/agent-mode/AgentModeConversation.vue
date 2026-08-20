@@ -10,8 +10,8 @@
 
   `compact` (constrained widths, or later when a side editor opens):
   the column collapses into a small lower-left dock showing only the most
-  recent line plus the keyboard hint. It is pointer-transparent so it
-  never occludes or steals clicks from the lane canvas.
+  recent line plus the keyboard hint. The parent reserves a grid row for it,
+  so its rectangle never intersects the scrolling delivery canvas.
 -->
 <script setup lang="ts">
 import { computed } from 'vue'
@@ -122,17 +122,13 @@ const visibleLines = computed(() => (props.compact ? props.lines.slice(-1) : pro
 .am-conv-dock strong { font-size: 12px; font-weight: 600; }
 .am-conv-dock small { font-size: 11px; color: var(--am-muted); line-height: 1.4; }
 
-/* ── Compact dock: lower-left, recent bubble + keys, never occluding ── */
+/* ── Compact dock: lower-left in a reserved parent-grid row ── */
 .am-conv--compact {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  z-index: 3;
-  width: min(245px, 42%);
+  width: min(300px, calc(100% - 28px));
+  margin: 0 0 14px 14px;
   padding: 0;
   border-right: 0;
   background: transparent;
-  pointer-events: none;
 }
 .am-conv--compact .am-conv-lines { flex: 0 0 auto; padding: 0 0 8px; overflow: visible; }
 .am-conv--compact .am-conv-line { max-width: 100%; box-shadow: 0 8px 28px color-mix(in srgb, var(--am-ink) 14%, transparent); }
@@ -140,7 +136,7 @@ const visibleLines = computed(() => (props.compact ? props.lines.slice(-1) : pro
 /* Touch-size screens: keyboard guidance is irrelevant; keep only the
    recent bubble so the dock stays small. */
 @media (max-width: 640px) {
-  .am-conv--compact { width: min(220px, 60%); }
+  .am-conv--compact { width: min(220px, calc(100% - 28px)); }
   .am-conv--compact .am-conv-dock { display: none; }
   .am-conv--compact .am-conv-lines { padding-bottom: 0; }
 }

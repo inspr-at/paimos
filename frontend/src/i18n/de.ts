@@ -514,6 +514,11 @@ export default {
     lanes: {
       ungrouped: 'Ohne Epic',
       count: 'keine Lieferungen | {n} Lieferung | {n} Lieferungen',
+      selectedAbove: 'Oben ausgewählt',
+    },
+    selection: {
+      label: 'Ausgewählte Lieferung',
+      outsideResults: 'Außerhalb der Ergebnisse · vom Filter „{filter}“ ausgeblendet',
     },
     pinned: { title: 'Ausgewählte Lieferung (außerhalb des aktuellen Filters)' },
     attention: {

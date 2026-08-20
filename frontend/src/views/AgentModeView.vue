@@ -38,6 +38,7 @@ import AgentModeDeliveryCard from '@/components/agent-mode/AgentModeDeliveryCard
 import AgentModeDetailLever, { type DetailLevel } from '@/components/agent-mode/AgentModeDetailLever.vue'
 import AgentModeFilterBar from '@/components/agent-mode/AgentModeFilterBar.vue'
 import AgentModeLanes from '@/components/agent-mode/AgentModeLanes.vue'
+import AgentModeSelectionAnchor from '@/components/agent-mode/AgentModeSelectionAnchor.vue'
 import AgentModeSelectedFocus from '@/components/agent-mode/AgentModeSelectedFocus.vue'
 import AgentModeStateNotice from '@/components/agent-mode/AgentModeStateNotice.vue'
 import { COMPACT_CONVERSATION_QUERY, estimateView } from '@/components/agent-mode/agentModePresentation'
@@ -190,9 +191,14 @@ const hold = useInteractionHold()
 const filtered = computed(() => applyFilters(data.deliveries.value, filters.value))
 const canonicalGroups = computed(() => buildProjectGroups(filtered.value))
 const layoutGroups = shallowRef<AgentModeProjectGroup[]>([])
+const canonicalLayoutIds = computed(() => new Set(flattenOrder(canonicalGroups.value)))
 
 function isLive(id: string): boolean {
   return data.deliveriesById.value.has(id)
+}
+
+function isLiveInLayout(id: string): boolean {
+  return canonicalLayoutIds.value.has(id)
 }
 
 watch(
@@ -202,7 +208,7 @@ watch(
     // and drop at once any lane / project whose deliveries ALL left the
     // authorized snapshot (their headers are grouping metadata). Ids that
     // left but share a lane with live cards stay as neutral tombstones.
-    layoutGroups.value = held ? pruneDeadLanes(reconcileFrozenGroups(layoutGroups.value, next), isLive) : next
+    layoutGroups.value = held ? pruneDeadLanes(reconcileFrozenGroups(layoutGroups.value, next), isLiveInLayout) : next
   },
   { immediate: true },
 )
@@ -210,7 +216,7 @@ watch(
 /** Ids kept in the frozen layout that are no longer in the snapshot. */
 const tombstoneIds = computed(() => {
   const s = new Set<string>()
-  for (const id of flattenOrder(layoutGroups.value)) if (!isLive(id)) s.add(id)
+  for (const id of flattenOrder(layoutGroups.value)) if (!isLiveInLayout(id)) s.add(id)
   return s
 })
 
@@ -648,6 +654,17 @@ const selectedPosition = computed(() => {
 
         <!-- Detail 10 -->
         <template v-else>
+          <AgentModeSelectionAnchor
+            v-if="selectedDelivery"
+            :delivery="selectedDelivery"
+            :server-now-ms="serverNowMs"
+            :locale="locale"
+            :excluded-by="selectedExcludedBy"
+            :degraded="data.degraded.value"
+            @activate="drill"
+            @interact="hold.markInteraction"
+          />
+
           <AgentModeAttentionStrip
             :deliveries="data.deliveries.value"
             :selected-id="selection.selectedId.value"
@@ -658,24 +675,6 @@ const selectedPosition = computed(() => {
 
           <AgentModeFilterBar :filters="filters" :deliveries="data.deliveries.value" @update:filters="setFilters" />
 
-          <section
-            v-if="selectedDelivery && selectedExcludedBy"
-            class="am-pinned"
-            :aria-label="t('agentMode.pinned.title')"
-          >
-            <AgentModeDeliveryCard
-              :delivery="selectedDelivery"
-              :selected="true"
-              :tabbable="true"
-              :pinned-reason="selectedExcludedBy"
-              :degraded="data.degraded.value"
-              :server-now-ms="serverNowMs"
-              :locale="locale"
-              @activate="drill"
-              @interact="hold.markInteraction"
-            />
-          </section>
-
           <p v-if="layoutGroups.length === 0" class="am-nomatch">{{ t('agentMode.filters.noMatch') }}</p>
 
           <AgentModeLanes
@@ -683,6 +682,7 @@ const selectedPosition = computed(() => {
             :deliveries-by-id="data.deliveriesById.value"
             :tombstone-ids="tombstoneIds"
             :selected-id="selection.selectedId.value"
+            :lifted-selected-id="selection.selectedId.value"
             :server-now-ms="serverNowMs"
             :locale="locale"
             :degraded="data.degraded.value"
@@ -742,7 +742,12 @@ const selectedPosition = computed(() => {
   background: var(--am-shell);
   color: var(--am-ink);
 }
-.am-root--compact { grid-template-columns: minmax(0, 1fr); }
+.am-root--compact {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.am-root--compact :deep(.am-conv) { grid-column: 1; grid-row: 2; }
+.am-root--compact .am-canvas { grid-column: 1; grid-row: 1; }
 
 .am-header-tools { display: inline-flex; align-items: center; gap: 12px; }
 .am-live-chip {
@@ -769,9 +774,7 @@ const selectedPosition = computed(() => {
     radial-gradient(circle at 78% 0%, color-mix(in srgb, var(--am-green) 7%, transparent), transparent 34%),
     var(--am-shell);
 }
-/* Leave room under the last row so the compact dock never covers a card
-   the user is reaching for. */
-.am-root--compact .am-canvas { padding: 22px 18px 160px; }
+.am-root--compact .am-canvas { padding: 22px 18px 32px; }
 .am-canvas > * + * { margin-top: 18px; }
 
 .am-eyebrow {
@@ -812,12 +815,6 @@ const selectedPosition = computed(() => {
   font-weight: 600;
 }
 
-.am-pinned {
-  padding: 16px 12px 12px;
-  border: 1px dashed color-mix(in srgb, var(--am-select) 45%, var(--am-line));
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--am-select) 4%, transparent);
-}
 .am-nomatch { margin: 0; color: var(--am-muted); font-size: 13px; }
 
 .am-streams { display: grid; gap: 14px; max-width: 860px; }
