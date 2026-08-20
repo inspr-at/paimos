@@ -343,6 +343,19 @@ func TestAgentModeVoiceOpenAPIIsClosedTemplateOnlyAndNonCacheable(t *testing.T) 
 	if final["const"] != true {
 		t.Fatalf("transcript final=%v", final)
 	}
+	// PAI-808: the handler truncates to 8192 UTF-8 bytes. maxLength counts code
+	// points, so the number alone under-specifies the contract — the description
+	// must name the authoritative byte bound too.
+	text, _ := transcriptProperties["text"].(map[string]any)
+	if text["maxLength"] != float64(8192) {
+		t.Fatalf("transcript text maxLength=%v, want 8192", text["maxLength"])
+	}
+	description := fmt.Sprint(text["description"])
+	for _, phrase := range []string{"8192 UTF-8 bytes", "code points"} {
+		if !strings.Contains(description, phrase) {
+			t.Fatalf("transcript text description lacks %q: %q", phrase, description)
+		}
+	}
 
 	for _, path := range []string{"/api/agent-mode/voice/transcribe", "/api/agent-mode/voice/speak"} {
 		operationRaw := doc.Paths[path]["post"]

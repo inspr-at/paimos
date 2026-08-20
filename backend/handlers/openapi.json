@@ -1130,7 +1130,12 @@
         "required": ["utterance_id", "text", "final"],
         "properties": {
           "utterance_id": {"type": "string", "pattern": "^utt_[0-9a-f]{32}$"},
-          "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "description": "The authoritative producer bound is 8192 UTF-8 bytes: the server truncates the transcript to at most 8192 bytes on a code-point boundary, so the value is always valid UTF-8. JSON Schema maxLength counts characters (code points) rather than bytes, so this 8192 maxLength is only a loose upper bound that multibyte transcripts never reach; validate the byte length against 8192 when the byte bound matters."
+          },
           "final": {"type": "boolean", "const": true}
         }
       },

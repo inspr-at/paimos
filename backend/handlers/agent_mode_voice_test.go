@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/backend/agentmode"
 	"github.com/inspr-at/paimos/backend/db"
@@ -146,6 +147,46 @@ func TestAgentModeVoiceSTTIsEphemeralClosedAndMetadataOnly(t *testing.T) {
 		instr(surface,?)>0 OR instr(provider,?)>0 OR instr(model,?)>0`, transcript, transcript, transcript, transcript, transcript).Scan(&metadataLeaks)
 	if intakeRows != 0 || comments != 0 || cacheRows != 0 || metadataLeaks != 0 {
 		t.Fatalf("persisted intake/comments/cache/leak=%d/%d/%d/%d", intakeRows, comments, cacheRows, metadataLeaks)
+	}
+}
+
+// PAI-808: the wire contract bounds transcript text at 8192 UTF-8 *bytes*, and
+// the handler is the authoritative producer of that bound. An upstream provider
+// can return arbitrarily long ASCII or multibyte text, so this pins both halves:
+// nothing above 8192 bytes escapes, and truncation never splits a code point.
+func TestAgentModeVoiceSTTTextStaysValidUTF8Within8192Bytes(t *testing.T) {
+	const maxBytes = 8192
+	tests := []struct {
+		name     string
+		upstream string
+		want     string
+	}{
+		// 8192 is not a multiple of 3, so the euro sign forces a mid-code-point
+		// cut that must back off to 8190 bytes rather than emit a broken rune.
+		{"oversized multibyte", strings.Repeat("€", 4000), strings.Repeat("€", maxBytes/3)},
+		{"oversized ascii", strings.Repeat("a", maxBytes+1000), strings.Repeat("a", maxBytes)},
+		{"at bound preserved", strings.Repeat("b", maxBytes), strings.Repeat("b", maxBytes)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ts := newTestServer(t)
+			upstream := fakeScribe(t, test.upstream, "test-elevenlabs-key")
+			defer upstream.Close()
+			configureVoice(t, ts, upstream.URL)
+
+			response := postAgentVoice(t, ts, "/api/agent-mode/voice/transcribe?language=en", ts.memberCookie,
+				"audio/webm", []byte("audio"), csrfTokenForSessionCookie(t, ts.memberCookie))
+			assertStatus(t, response, http.StatusOK)
+			var transcript struct {
+				Text string `json:"text"`
+			}
+			decode(t, response, &transcript)
+			if len(transcript.Text) > maxBytes || !utf8.ValidString(transcript.Text) ||
+				!strings.HasPrefix(test.upstream, transcript.Text) || transcript.Text != test.want {
+				t.Fatalf("text bytes=%d valid=%t prefix=%t want bytes=%d", len(transcript.Text),
+					utf8.ValidString(transcript.Text), strings.HasPrefix(test.upstream, transcript.Text), len(test.want))
+			}
+		})
 	}
 }
 
