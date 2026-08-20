@@ -106,6 +106,22 @@ export interface AgentModeAggregates {
   attention: AgentModeAttentionAggregate
 }
 
+/** Normalized row facts used only to validate aggregate hierarchy membership.
+ * Stage, flag and landing counts remain wholly server-authoritative and are
+ * deliberately absent so this boundary cannot reconstruct them from cards. */
+export interface AgentModeAggregateStructuralRow {
+  id: string
+  lane: {
+    key: string
+    projectId: number
+    projectKey: string
+    projectName: string
+    epicId: number | null
+    epicKey: string | null
+    epicTitle: string | null
+  }
+}
+
 export type AgentModeAggregateUnavailableReason = 'missing' | 'unsupported-schema' | 'malformed'
 
 export type AgentModeAggregateParseResult =
@@ -160,15 +176,37 @@ function nullableNonEmptyString(value: unknown): string | null | undefined {
   return parsed ?? undefined
 }
 
-function isoInstant(value: unknown): string | null {
+/** Strict ISO instant parser for schema-v1 clocks. Date.parse alone is not
+ * sufficient because engines normalize impossible calendar dates such as
+ * February 31 instead of rejecting them. */
+export function parseIsoInstant(value: unknown): string | null {
   const parsed = nonEmptyString(value)
-  if (!parsed || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(parsed)) return null
+  if (!parsed) return null
+  const match = parsed.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/)
+  if (!match) return null
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, offsetHourRaw, offsetMinuteRaw] = match
+  const year = Number(yearRaw)
+  const month = Number(monthRaw)
+  const day = Number(dayRaw)
+  const hour = Number(hourRaw)
+  const minute = Number(minuteRaw)
+  const second = Number(secondRaw)
+  const offsetHour = offsetHourRaw == null ? 0 : Number(offsetHourRaw)
+  const offsetMinute = offsetMinuteRaw == null ? 0 : Number(offsetMinuteRaw)
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  if (
+    month < 1 || month > 12
+    || day < 1 || day > daysInMonth[month - 1]
+    || hour > 23 || minute > 59 || second > 59
+    || offsetHour > 23 || offsetMinute > 59
+  ) return null
   return Number.isFinite(Date.parse(parsed)) ? parsed : null
 }
 
 function nullableIsoInstant(value: unknown): string | null | undefined {
   if (value === null) return null
-  return isoInstant(value) ?? undefined
+  return parseIsoInstant(value) ?? undefined
 }
 
 function partition<K extends string>(value: unknown, keys: readonly K[]): AggregatePartition<K> | null {
@@ -261,7 +299,7 @@ function parseLane(value: unknown, projectId: number): AgentModeLaneAggregate | 
   const epicKey = nullableNonEmptyString(source.epic_key)
   const epicTitle = nullableNonEmptyString(source.epic_title)
   const counts = parseCountSet(source.counts)
-  if (!laneKey || epicId === undefined || epicKey === undefined || epicTitle === undefined || !counts) return null
+  if (!laneKey || epicId === undefined || epicKey === undefined || epicTitle === undefined || !counts || counts.activeTotal <= 0) return null
   const expectedLaneKey = epicId == null
     ? `project:${projectId}/ungrouped`
     : `project:${projectId}/epic:${epicId}`
@@ -284,7 +322,12 @@ function parseProject(value: unknown): AgentModeProjectAggregate | null {
   const projectKey = nonEmptyString(source.project_key)
   const projectName = nonEmptyString(source.project_name)
   const counts = parseCountSet(source.counts)
-  if (projectId == null || !projectKey || !projectName || !counts) return null
+  if (
+    projectId == null || !projectKey || !projectName || !counts
+    || counts.activeTotal <= 0
+    || source.lanes.length === 0
+    || source.lanes.length > counts.activeTotal
+  ) return null
   const lanes: AgentModeLaneAggregate[] = []
   const seen = new Set<string>()
   for (const raw of source.lanes) {
@@ -364,7 +407,7 @@ function parseAttention(value: unknown, deliveryIds: ReadonlySet<string>): Agent
  */
 export function parseAgentModeAggregates(
   value: unknown,
-  deliveryIds: ReadonlySet<string>,
+  activeRows: readonly AgentModeAggregateStructuralRow[],
 ): AgentModeAggregateParseResult {
   if (value == null) return { ok: false, reason: 'missing' }
   const source = record(value)
@@ -378,7 +421,7 @@ export function parseAgentModeAggregates(
 
   const structuralRevision = nonEmptyString(source.structural_revision)
   const classificationRevision = nonEmptyString(source.classification_revision)
-  const calculatedAt = isoInstant(source.calculated_at)
+  const calculatedAt = parseIsoInstant(source.calculated_at)
   const nextRefreshAt = nullableIsoInstant(source.next_refresh_at)
   const root = parseCountSet(source.root)
   if (!structuralRevision || !classificationRevision || !calculatedAt || nextRefreshAt === undefined || !root) {
@@ -387,11 +430,19 @@ export function parseAgentModeAggregates(
   if (nextRefreshAt != null && Date.parse(nextRefreshAt) <= Date.parse(calculatedAt)) {
     return { ok: false, reason: 'malformed' }
   }
+  if (source.projects.length > root.activeTotal) return { ok: false, reason: 'malformed' }
 
   const projects: AgentModeProjectAggregate[] = []
   const seenProjects = new Set<number>()
   const seenLanes = new Set<string>()
+  let laneCardinality = 0
   for (const raw of source.projects) {
+    const rawProject = record(raw)
+    if (!rawProject || !Array.isArray(rawProject.lanes)) return { ok: false, reason: 'malformed' }
+    laneCardinality += rawProject.lanes.length
+    if (!Number.isSafeInteger(laneCardinality) || laneCardinality > root.activeTotal) {
+      return { ok: false, reason: 'malformed' }
+    }
     const project = parseProject(raw)
     if (!project || seenProjects.has(project.projectId)) return { ok: false, reason: 'malformed' }
     if (projects.length > 0 && projects[projects.length - 1].projectId >= project.projectId) {
@@ -405,9 +456,37 @@ export function parseAgentModeAggregates(
     projects.push(project)
   }
   const projectSum = sumCountSets(projects.map((project) => project.counts))
-  if (!projectSum || !equalCountSet(root, projectSum) || root.activeTotal !== deliveryIds.size) {
+  if (!projectSum || !equalCountSet(root, projectSum) || root.activeTotal !== activeRows.length) {
     return { ok: false, reason: 'malformed' }
   }
+  const rowsByLane = new Map<string, AgentModeAggregateStructuralRow[]>()
+  const deliveryIds = new Set<string>()
+  for (const row of activeRows) {
+    if (deliveryIds.has(row.id)) return { ok: false, reason: 'malformed' }
+    deliveryIds.add(row.id)
+    rowsByLane.set(row.lane.key, [...(rowsByLane.get(row.lane.key) ?? []), row])
+  }
+  for (const project of projects) {
+    let projectRowCount = 0
+    for (const lane of project.lanes) {
+      const laneRows = rowsByLane.get(lane.laneKey) ?? []
+      if (laneRows.length !== lane.counts.activeTotal) return { ok: false, reason: 'malformed' }
+      projectRowCount += laneRows.length
+      for (const row of laneRows) {
+        if (
+          row.lane.projectId !== project.projectId
+          || row.lane.projectKey !== project.projectKey
+          || row.lane.projectName !== project.projectName
+          || row.lane.epicId !== lane.epicId
+          || row.lane.epicKey !== lane.epicKey
+          || row.lane.epicTitle !== lane.epicTitle
+        ) return { ok: false, reason: 'malformed' }
+      }
+      rowsByLane.delete(lane.laneKey)
+    }
+    if (projectRowCount !== project.counts.activeTotal) return { ok: false, reason: 'malformed' }
+  }
+  if (rowsByLane.size !== 0) return { ok: false, reason: 'malformed' }
   const attention = parseAttention(source.attention, deliveryIds)
   if (!attention || attention.total !== root.flags.attention) return { ok: false, reason: 'malformed' }
   const visibleReasonCounts: Partial<Record<AggregateFlagKey, number>> = {}

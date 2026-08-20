@@ -153,8 +153,15 @@ const attemptLabel = computed(() => {
         <h3>{{ t('agentMode.detail.estimateTruth') }}</h3>
         <dl class="am-detail-list">
           <div><dt>{{ t('agentMode.detail.progress') }}</dt><dd>{{ estimate.presentation.showPercent ? `${estimate.presentation.percent} %` : t(`agentMode.estimate.withheld.${estimate.presentation.percentReason}`) }}</dd></div>
-          <div><dt>{{ t('agentMode.detail.landing') }}</dt><dd>{{ estimate.landingLabel ?? t(`agentMode.estimate.withheld.${estimate.presentation.etaReason}`) }}</dd></div>
-          <div v-if="estimate.rangeLabel"><dt>{{ t('agentMode.detail.range') }}</dt><dd>{{ estimate.rangeLabel }}</dd></div>
+          <div>
+            <dt>{{ t('agentMode.detail.landing') }}</dt>
+            <dd>
+              {{ estimate.presentation.rangeOnly && estimate.rangeLabel
+                ? t('agentMode.estimate.range', { range: estimate.rangeLabel })
+                : estimate.landingLabel ?? t(`agentMode.estimate.withheld.${estimate.presentation.etaReason}`) }}
+            </dd>
+          </div>
+          <div v-if="estimate.rangeLabel && !estimate.presentation.rangeOnly"><dt>{{ t('agentMode.detail.range') }}</dt><dd>{{ estimate.rangeLabel }}</dd></div>
           <div v-if="estimateBasis"><dt>{{ t('agentMode.detail.basis') }}</dt><dd>{{ estimateBasis }}</dd></div>
           <div v-if="delivery.trustRevision"><dt>{{ t('agentMode.detail.trustRevision') }}</dt><dd>{{ delivery.trustRevision }}</dd></div>
           <div v-if="delivery.suppressionCodes.length"><dt>{{ t('agentMode.detail.suppressed') }}</dt><dd>{{ delivery.suppressionCodes.join(' · ') }}</dd></div>

@@ -244,7 +244,10 @@ function onKeydown(event: KeyboardEvent) {
           </div>
           <div class="am-card-estimate-row">
             <span v-if="showPercent" class="am-card-percent">{{ t('agentMode.estimate.percent', { n: estimate.presentation.percent }) }}</span>
-            <span v-if="showEta && estimate.landingLabel" class="am-card-eta">
+            <span v-if="showEta && estimate.presentation.rangeOnly && estimate.rangeLabel" class="am-card-eta am-card-eta--range">
+              {{ t('agentMode.estimate.range', { range: estimate.rangeLabel }) }}
+            </span>
+            <span v-else-if="showEta && estimate.landingLabel" class="am-card-eta">
               {{ t('agentMode.estimate.lands', { time: estimate.landingLabel }) }}
               <small v-if="estimate.remainingLabel">· {{ estimate.remainingLabel }}</small>
             </span>
@@ -516,6 +519,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 .am-card-percent { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 600; font-variant-numeric: tabular-nums; }
 .am-card-eta { font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.am-card-eta--range { color: var(--am-ink); }
 .am-card-eta small { color: var(--am-muted); font-size: 11px; }
 .am-card-eta--withheld { font-family: 'DM Sans', system-ui, sans-serif; color: var(--am-muted); font-style: italic; }
 

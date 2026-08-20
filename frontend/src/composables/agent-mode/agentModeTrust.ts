@@ -20,12 +20,14 @@
 // The server decides `trusted`; the client only narrows further. Percent
 // and landing time are shown ONLY when:
 //   - the server marked the estimate trusted,
-//   - confidence is high or medium,
+//   - confidence is high or medium for a point estimate, or low with an
+//     explicit valid optimistic/pessimistic range,
 //   - the delivery is not blocked / waiting,
 //   - the report is not stale / unknown-fresh.
 // Otherwise the UI shows an explicit "no estimate" with the reason.
 
 import type { Delivery } from '@/services/agentMode'
+import { parseIsoInstant } from '@/services/agentModeAggregateSchema'
 
 export type EstimateSuppression =
   | 'ok'
@@ -33,6 +35,8 @@ export type EstimateSuppression =
   | 'waiting'
   | 'stale'
   | 'low_confidence'
+  | 'suppressed'
+  | 'invalid'
   | 'untrusted'
   | 'none'
 
@@ -42,6 +46,9 @@ export interface EstimatePresentation {
   percent: number | null
   /** Whether an approximate landing time may be shown at all. */
   showEta: boolean
+  /** Low-confidence ETA is eligible only as explicit bounds; it never
+   * exposes the point landing or a derived midpoint/remaining duration. */
+  rangeOnly: boolean
   landingAt: string | null
   optimisticAt: string | null
   pessimisticAt: string | null
@@ -55,7 +62,17 @@ function structuralSuppression(d: Delivery): EstimateSuppression | null {
   if (d.health === 'blocked' || d.activity.kind === 'blocked') return 'blocked'
   if (d.activity.kind === 'waiting') return 'waiting'
   if (d.freshness.state === 'stale' || d.freshness.state === 'unknown') return 'stale'
+  if (d.suppressionCodes.length > 0) return 'suppressed'
   return null
+}
+
+function validInstant(value: string | null): boolean {
+  return parseIsoInstant(value) != null
+}
+
+function validRange(optimisticAt: string | null, pessimisticAt: string | null): boolean {
+  if (!validInstant(optimisticAt) || !validInstant(pessimisticAt)) return false
+  return Date.parse(optimisticAt!) < Date.parse(pessimisticAt!)
 }
 
 export function estimatePresentation(d: Delivery): EstimatePresentation {
@@ -69,17 +86,28 @@ export function estimatePresentation(d: Delivery): EstimatePresentation {
   else percentReason = 'ok'
 
   let etaReason: EstimateSuppression
-  if (!d.eta || !d.eta.landingAt) etaReason = 'none'
+  let rangeOnly = false
+  if (!d.eta) etaReason = 'none'
   else if (structural) etaReason = structural
   else if (!d.eta.trusted) etaReason = 'untrusted'
-  else if (d.eta.confidence === 'low' || d.eta.confidence === 'none') etaReason = 'low_confidence'
+  else if (d.eta.confidence === 'low') {
+    if (validRange(d.eta.optimisticAt, d.eta.pessimisticAt)) {
+      etaReason = 'ok'
+      rangeOnly = true
+    } else {
+      etaReason = d.eta.optimisticAt || d.eta.pessimisticAt ? 'invalid' : 'low_confidence'
+    }
+  } else if (d.eta.confidence === 'none') etaReason = 'low_confidence'
+  else if (!d.eta.landingAt) etaReason = 'none'
+  else if (!validInstant(d.eta.landingAt)) etaReason = 'invalid'
   else etaReason = 'ok'
 
   return {
     showPercent: percentReason === 'ok',
     percent: percentReason === 'ok' ? d.progress!.percent : null,
     showEta: etaReason === 'ok',
-    landingAt: etaReason === 'ok' ? d.eta!.landingAt : null,
+    rangeOnly,
+    landingAt: etaReason === 'ok' && !rangeOnly ? d.eta!.landingAt : null,
     optimisticAt: etaReason === 'ok' ? d.eta!.optimisticAt : null,
     pessimisticAt: etaReason === 'ok' ? d.eta!.pessimisticAt : null,
     percentReason,

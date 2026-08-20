@@ -150,6 +150,35 @@ describe('useAgentModeDeliveries (PAI-805 honest states)', () => {
     await vi.advanceTimersByTimeAsync(20_000)
     expect(calls).toBe(2)
   })
+
+  it('keeps query/response parity when an older server-filter response resolves last', async () => {
+    const query = ref<AgentModeSnapshotQuery>({ projectId: 6, laneKey: 'project:6/ungrouped' })
+    const pending: Array<(value: AgentModeSnapshot) => void> = []
+    const loader = vi.fn((_query: AgentModeSnapshotQuery) => new Promise<AgentModeSnapshot>((resolve) => pending.push(resolve)))
+    const data = useAgentModeDeliveries({ loader, query, reloadOnQueryChange: false, hints: false, pollMs: 0 })
+
+    const olderLoad = data.load()
+    query.value = { projectId: 9, laneKey: 'project:9/epic:9001' }
+    const newerLoad = data.load()
+    const newer = snap(10)
+    newer.cursor = 'newer-filter-response'
+    pending[1](newer)
+    await newerLoad
+    expect(data.snapshot.value?.cursor).toBe('newer-filter-response')
+    expect(data.deliveries.value).toHaveLength(10)
+
+    const older = snap(1)
+    older.cursor = 'stale-filter-response'
+    pending[0](older)
+    await olderLoad
+    expect(loader.mock.calls.map(([requested]) => requested)).toEqual([
+      { projectId: 6, laneKey: 'project:6/ungrouped' },
+      { projectId: 9, laneKey: 'project:9/epic:9001' },
+    ])
+    expect(data.snapshot.value?.cursor).toBe('newer-filter-response')
+    expect(data.deliveries.value).toHaveLength(10)
+    data.dispose()
+  })
 })
 
 describe('useAgentModeDeliveries — never retain unauthorized data (PAI-805 corrections)', () => {

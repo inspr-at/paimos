@@ -8,7 +8,11 @@ import { describe, expect, it } from 'vitest'
 
 import { makeFixtureAggregateSnapshot } from '@/services/agentModeFixtures'
 import { normalizeWireSnapshot } from '@/services/agentModeTransport'
-import { reconcileAggregateOrder } from './agentModeAggregateOrdering'
+import {
+  aggregateFocusOrder,
+  nearestSurvivingAggregateFocusKey,
+  reconcileAggregateOrder,
+} from './agentModeAggregateOrdering'
 
 function aggregates() {
   return normalizeWireSnapshot(makeFixtureAggregateSnapshot(100), 0).aggregates!
@@ -43,5 +47,25 @@ describe('Detail-100 aggregate interaction hold ordering', () => {
     const held = reconcileAggregateOrder(previous, fresh)
     expect(held.projects.some((project) => project.projectId === removed.projectId)).toBe(false)
     expect(held.projects[held.projects.length - 1]?.projectId).toBe(99)
+  })
+
+  it('recovers omitted focus by previous identity distance, preferring the successor on ties', () => {
+    const previous = aggregates()
+    const order = aggregateFocusOrder(previous)
+    const focused = order[2]
+    const fresh = structuredClone(previous)
+    for (const project of fresh.projects) {
+      project.lanes = project.lanes.filter((lane) => !focused.endsWith(`:${lane.laneKey}`))
+    }
+    const survivors = new Set(aggregateFocusOrder(fresh))
+    const focusedIndex = order.indexOf(focused)
+    const expected = order.slice(focusedIndex + 1).find((key) => survivors.has(key))
+      ?? [...order.slice(0, focusedIndex)].reverse().find((key) => survivors.has(key))
+      ?? null
+
+    expect(nearestSurvivingAggregateFocusKey(previous, fresh, focused)).toBe(expected)
+    const surviving = aggregateFocusOrder(fresh)[1]
+    expect(nearestSurvivingAggregateFocusKey(previous, fresh, surviving)).toBe(surviving)
+    expect(nearestSurvivingAggregateFocusKey(previous, null, focused)).toBeNull()
   })
 })

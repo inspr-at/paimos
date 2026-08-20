@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest'
 import { makeFixtureSnapshot } from '@/services/agentModeFixtures'
 import { normalizeWireSnapshot } from '@/services/agentModeTransport'
 import type { Delivery } from '@/services/agentMode'
+import { estimateView } from '@/components/agent-mode/agentModePresentation'
 import { estimatePresentation, remainingMs } from './agentModeTrust'
 
 const base = normalizeWireSnapshot(makeFixtureSnapshot(10), 0).deliveries[0]
@@ -38,6 +39,8 @@ describe('agentModeTrust (client side of PAI-803)', () => {
     expect(p.percent).toBe(64)
     expect(p.showEta).toBe(true)
     expect(p.landingAt).toBe(trustedEta.landingAt)
+    expect(p.optimisticAt).toBe(trustedEta.optimisticAt)
+    expect(p.pessimisticAt).toBe(trustedEta.pessimisticAt)
     expect(p.percentReason).toBe('ok')
     expect(p.etaReason).toBe('ok')
   })
@@ -58,7 +61,7 @@ describe('agentModeTrust (client side of PAI-803)', () => {
     expect(p.etaReason).toBe(reason)
   })
 
-  it('withholds untrusted or low-confidence estimates per field', () => {
+  it('withholds untrusted fields but presents eligible low-confidence ETA only as explicit bounds', () => {
     const healthy = { health: 'healthy' as const, activity: { kind: 'working' as const, text: 'x', since: null }, freshness: { state: 'fresh' as const, lastReportAt: null } }
     const untrusted = estimatePresentation(d({ ...healthy, progress: { ...trustedProgress, trusted: false }, eta: { ...trustedEta, trusted: false } }))
     expect(untrusted.showPercent).toBe(false)
@@ -69,12 +72,68 @@ describe('agentModeTrust (client side of PAI-803)', () => {
     const low = estimatePresentation(d({ ...healthy, progress: { ...trustedProgress, confidence: 'low' }, eta: { ...trustedEta, confidence: 'low' } }))
     expect(low.showPercent).toBe(false)
     expect(low.percentReason).toBe('low_confidence')
-    expect(low.showEta).toBe(false)
-    expect(low.etaReason).toBe('low_confidence')
+    expect(low.showEta).toBe(true)
+    expect(low.rangeOnly).toBe(true)
+    expect(low.etaReason).toBe('ok')
+    expect(low.landingAt).toBeNull()
+    expect(low.optimisticAt).toBe(trustedEta.optimisticAt)
+    expect(low.pessimisticAt).toBe(trustedEta.pessimisticAt)
 
     const mixed = estimatePresentation(d({ ...healthy, progress: trustedProgress, eta: { ...trustedEta, confidence: 'low' } }))
     expect(mixed.showPercent).toBe(true)
-    expect(mixed.showEta).toBe(false)
+    expect(mixed.showEta).toBe(true)
+    expect(mixed.rangeOnly).toBe(true)
+  })
+
+  it('withholds suppressed, missing and invalid ETA ranges without deriving a point or midpoint', () => {
+    const healthy = { health: 'healthy' as const, activity: { kind: 'working' as const, text: 'x', since: null }, freshness: { state: 'fresh' as const, lastReportAt: null } }
+    const suppressed = estimatePresentation(d({ ...healthy, suppressionCodes: ['source_disagreement'], eta: { ...trustedEta, confidence: 'low' } }))
+    expect(suppressed.showEta).toBe(false)
+    expect(suppressed.etaReason).toBe('suppressed')
+
+    const missingBounds = estimatePresentation(d({ ...healthy, eta: { ...trustedEta, confidence: 'low', optimisticAt: null, pessimisticAt: null } }))
+    expect(missingBounds.showEta).toBe(false)
+    expect(missingBounds.etaReason).toBe('low_confidence')
+
+    for (const eta of [
+      { ...trustedEta, confidence: 'low' as const, optimisticAt: 'invalid' },
+      { ...trustedEta, confidence: 'low' as const, optimisticAt: trustedEta.pessimisticAt, pessimisticAt: trustedEta.optimisticAt },
+      { ...trustedEta, confidence: 'high' as const, landingAt: '2026-02-31T12:00:00Z' },
+    ]) {
+      const invalid = estimatePresentation(d({ ...healthy, eta }))
+      expect(invalid.showEta).toBe(false)
+      expect(invalid.rangeOnly).toBe(false)
+      expect(invalid.landingAt).toBeNull()
+      expect(invalid.etaReason).toBe('invalid')
+    }
+  })
+
+  it('shares range-only presentation without a point landing or remaining duration', () => {
+    const ranged = d({
+      health: 'healthy',
+      activity: { kind: 'working', text: 'x', since: null },
+      freshness: { state: 'fresh', lastReportAt: null },
+      eta: { ...trustedEta, confidence: 'low' },
+    })
+    const view = estimateView(ranged, 'en-US', Date.parse('2026-08-20T16:00:00Z'))
+    expect(view.presentation.rangeOnly).toBe(true)
+    expect(view.rangeLabel).toContain('–')
+    expect(view.landingLabel).toBeNull()
+    expect(view.remainingLabel).toBeNull()
+  })
+
+  it('preserves authoritative bounds alongside a confident point estimate', () => {
+    const point = d({
+      health: 'healthy',
+      activity: { kind: 'working', text: 'x', since: null },
+      freshness: { state: 'fresh', lastReportAt: null },
+      eta: trustedEta,
+    })
+    const view = estimateView(point, 'en-US', Date.parse('2026-08-20T16:00:00Z'))
+    expect(view.presentation.rangeOnly).toBe(false)
+    expect(view.landingLabel).not.toBeNull()
+    expect(view.remainingLabel).not.toBeNull()
+    expect(view.rangeLabel).toContain('–')
   })
 
   it('reports "none" when the API carries no estimate at all', () => {

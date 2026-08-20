@@ -103,4 +103,11 @@ describe('Agent Mode theme contract (PAI-805)', () => {
       expect(contrast(hex, hostCard), `${hex} on ${hostCard}`).toBeGreaterThanOrEqual(4.5)
     }
   })
+
+  it('keeps the complete project CountSet bounded and reflows it at both responsive breakpoints', () => {
+    const overview = read('./AgentModePortfolioOverview.vue')
+    expect(overview).toMatch(/\.am-aggregate-project-countset\s*\{[^}]*display:\s*grid/)
+    expect(overview).toMatch(/@media\s*\(max-width:\s*860px\)[\s\S]*?\.am-aggregate-project-countset\s*\{[^}]*grid-template-columns:\s*1fr/)
+    expect(overview).toMatch(/@media\s*\(max-width:\s*620px\)[\s\S]*?\.am-aggregate-project-countset\s*\{[^}]*overflow-x:\s*auto/)
+  })
 })

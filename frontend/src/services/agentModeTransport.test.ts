@@ -18,7 +18,15 @@
 import { describe, expect, it } from 'vitest'
 
 import { makeFixtureAggregateSnapshot, makeFixtureDelivery, makeFixtureSnapshot } from './agentModeFixtures'
-import { buildSnapshotPath, laneKeyFor, normalizeWireDelivery, normalizeWireSnapshot } from './agentModeTransport'
+import {
+  AGENT_MODE_LANE_KEY_MAX_LENGTH,
+  buildSnapshotPath,
+  laneKeyFor,
+  normalizeWireDelivery,
+  normalizeWireSnapshot,
+  parseAgentModeLaneFilter,
+  parseAgentModeProjectFilter,
+} from './agentModeTransport'
 
 describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
   it('builds the snapshot path with optional server hints', () => {
@@ -32,6 +40,30 @@ describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
       health: 'blocked',
       q: ' release ',
     })).toBe('/agent-mode/deliveries?project_id=6&lane_key=project%3A6%2Fepic%3A4655&state=active&state=waiting&attention=required&health=blocked&q=release')
+  })
+
+  it('accepts only canonical project/lane filters and never trims or truncates immutable identity', () => {
+    expect(parseAgentModeProjectFilter('6')).toBe(6)
+    expect(parseAgentModeProjectFilter(6)).toBe(6)
+    for (const invalid of ['6.5', '06', '0', '-1', String(Number.MAX_SAFE_INTEGER + 1), Number.MAX_SAFE_INTEGER + 1]) {
+      expect(parseAgentModeProjectFilter(invalid)).toBeNull()
+    }
+
+    const lane = 'project:6/epic:4655'
+    expect(parseAgentModeLaneFilter(lane)).toBe(lane)
+    expect(parseAgentModeLaneFilter('project:6/ungrouped')).toBe('project:6/ungrouped')
+    for (const invalid of [
+      ` ${lane}`,
+      `${lane} `,
+      'arbitrary-lane',
+      'project:6.5/ungrouped',
+      'project:6/epic:0',
+      `project:6/epic:${Number.MAX_SAFE_INTEGER + 1}`,
+      `project:6/epic:${'1'.repeat(AGENT_MODE_LANE_KEY_MAX_LENGTH)}`,
+    ]) expect(parseAgentModeLaneFilter(invalid)).toBeNull()
+
+    expect(buildSnapshotPath({ projectId: 6.5, laneKey: ` ${lane}` })).toBe('/agent-mode/deliveries')
+    expect(buildSnapshotPath({ projectId: Number.MAX_SAFE_INTEGER + 1, laneKey: 'arbitrary-lane' })).toBe('/agent-mode/deliveries')
   })
 
   it('normalizes the 1 / 10 / 100 fixtures without dropping or inventing anything', () => {
@@ -171,6 +203,39 @@ describe('agentModeTransport (PAI-805 / PAI-804 seam)', () => {
     expect(normalized.deliveries).toHaveLength(1)
     expect(normalized.aggregates).toBeNull()
     expect(normalized.aggregateUnavailableReason).toBe('malformed')
+  })
+
+  it('requires aggregate server_time to be valid and equal to calculated_at by instant while retaining active rows', () => {
+    const missing = makeFixtureAggregateSnapshot(1)
+    delete missing.server_time
+    const missingResult = normalizeWireSnapshot(missing, 0)
+    expect(missingResult.deliveries).toHaveLength(1)
+    expect(missingResult.aggregates).toBeNull()
+    expect(missingResult.aggregateUnavailableReason).toBe('malformed')
+
+    for (const invalidServerTime of ['not-an-instant', '2026-02-31T12:00:00Z', ' 2026-08-20T13:48:00Z ']) {
+      const invalid = makeFixtureAggregateSnapshot(1)
+      invalid.server_time = invalidServerTime
+      const result = normalizeWireSnapshot(invalid, 0)
+      expect(result.deliveries).toHaveLength(1)
+      expect(result.aggregates).toBeNull()
+      expect(result.aggregateUnavailableReason).toBe('malformed')
+    }
+
+    const equivalentOffset = makeFixtureAggregateSnapshot(1)
+    equivalentOffset.server_time = '2026-08-20T15:48:00+02:00'
+    expect(normalizeWireSnapshot(equivalentOffset, 0).aggregates).not.toBeNull()
+
+    const divergent = makeFixtureAggregateSnapshot(1)
+    divergent.server_time = '2026-08-20T13:48:01Z'
+    const divergentResult = normalizeWireSnapshot(divergent, 0)
+    expect(divergentResult.deliveries).toHaveLength(1)
+    expect(divergentResult.aggregates).toBeNull()
+    expect(divergentResult.aggregateUnavailableReason).toBe('malformed')
+
+    const legacy = normalizeWireSnapshot({ schema_version: 1, rows: [makeFixtureDelivery(0)] }, 0)
+    expect(legacy.deliveries).toHaveLength(1)
+    expect(legacy.aggregateUnavailableReason).toBe('missing')
   })
 
   it('falls back to issue-rooted identity and the explicit ungrouped lane', () => {

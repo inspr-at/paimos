@@ -58,7 +58,11 @@ import {
   reconcileFrozenGroups,
   type AgentModeProjectGroup,
 } from '@/composables/agent-mode/agentModeOrdering'
-import { reconcileAggregateOrder } from '@/composables/agent-mode/agentModeAggregateOrdering'
+import {
+  aggregateFocusOrder,
+  nearestSurvivingAggregateFocusKey,
+  reconcileAggregateOrder,
+} from '@/composables/agent-mode/agentModeAggregateOrdering'
 import { AGENT_MODE_LOADER_KEY, useAgentModeDeliveries } from '@/composables/agent-mode/useAgentModeDeliveries'
 import { useAgentModeSelection } from '@/composables/agent-mode/useAgentModeSelection'
 import { useInteractionHold } from '@/composables/agent-mode/useInteractionHold'
@@ -66,7 +70,11 @@ import { formatRelativeTimeWithLocale, formatTimeWithLocale, useDateFormat } fro
 import { lsAgentModeSelectedKey } from '@/constants/storage'
 import type { AgentModeSnapshotLoader, Delivery } from '@/services/agentMode'
 import type { AgentModeAggregates } from '@/services/agentModeAggregateSchema'
-import type { AgentModeSnapshotQuery } from '@/services/agentModeTransport'
+import {
+  parseAgentModeLaneFilter,
+  parseAgentModeProjectFilter,
+  type AgentModeSnapshotQuery,
+} from '@/services/agentModeTransport'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
@@ -93,8 +101,11 @@ function initialSelectedQuery(): string | null {
   }
 }
 const selectedQueryId = ref<string | null>(initialSelectedQuery())
+// One canonical URL boundary feeds both transport identity and presentation;
+// downstream code never reparses or repairs project/lane values differently.
+const canonicalRouteFilters = computed<AgentModeFilters>(() => parseFilters())
 const snapshotQuery = computed<AgentModeSnapshotQuery>(() => {
-  const activeFilters = parseFilters()
+  const activeFilters = canonicalRouteFilters.value
   return {
     projectId: activeFilters.projectId,
     laneKey: activeFilters.laneKey,
@@ -182,17 +193,15 @@ const detailLevel = computed<DetailLevel>(() => parseDetail(route.query.detail))
 
 const HEALTH_FILTERS: HealthFilter[] = ['all', 'attention', 'blocked', 'stale']
 function parseFilters(): AgentModeFilters {
-  const projectRaw = Number(route.query.project)
   const healthRaw = String(route.query.health ?? 'all') as HealthFilter
-  const laneRaw = typeof route.query.lane === 'string' ? route.query.lane.trim() : ''
   return {
-    projectId: Number.isFinite(projectRaw) && projectRaw > 0 ? projectRaw : null,
-    laneKey: laneRaw === '' ? null : laneRaw,
+    projectId: parseAgentModeProjectFilter(route.query.project),
+    laneKey: parseAgentModeLaneFilter(route.query.lane),
     health: HEALTH_FILTERS.includes(healthRaw) ? healthRaw : 'all',
     query: typeof route.query.q === 'string' ? route.query.q.slice(0, 200) : '',
   }
 }
-const filters = computed<AgentModeFilters>(parseFilters)
+const filters = canonicalRouteFilters
 
 // Selection is deliberately excluded: changing the pinned item never changes
 // aggregate/query identity. Filters are authoritative request state and stale
@@ -279,16 +288,50 @@ const canonicalLayoutIds = computed(() => new Set(flattenOrder(canonicalGroups.v
 
 const canonicalAggregates = computed(() => data.snapshot.value?.aggregates ?? null)
 const aggregateLayout = shallowRef<AgentModeAggregates | null>(null)
+const canvasRef = ref<HTMLElement | null>(null)
+let aggregateFocusRecoverySeq = 0
+
+function focusedAggregateKey(): string | null {
+  const active = document.activeElement as HTMLElement | null
+  if (!active?.isConnected || !canvasRef.value?.contains(active)) return null
+  return active.closest<HTMLElement>('[data-aggregate-focus-key]')?.dataset.aggregateFocusKey ?? null
+}
+
+async function recoverOmittedAggregateFocus(recoveryKey: string | null, sequence: number) {
+  await nextTick()
+  if (sequence !== aggregateFocusRecoverySeq || !canvasRef.value) return
+  const active = document.activeElement as HTMLElement | null
+  if (active?.isConnected && active !== document.body && active !== document.documentElement) return
+  const pinned = canvasRef.value.querySelector<HTMLElement>('.am-streams-selection [data-card-hit]')
+  if (pinned) {
+    pinned.focus()
+    return
+  }
+  if (!recoveryKey) return
+  canvasRef.value
+    .querySelector<HTMLElement>(`[data-aggregate-focus-key="${cssEscape(recoveryKey)}"]`)
+    ?.focus()
+}
+
 watch(
   [canonicalAggregates, hold.held],
   ([fresh, held]) => {
+    const previous = aggregateLayout.value
+    const focusedKey = focusedAggregateKey()
     // Aggregate omission/revocation is immediate even under hold. Surviving
     // targets retain position only; all labels/counts come from `fresh`.
-    aggregateLayout.value = fresh
+    const next = fresh
       ? held
-        ? reconcileAggregateOrder(aggregateLayout.value, fresh)
+        ? reconcileAggregateOrder(previous, fresh)
         : fresh
       : null
+    aggregateLayout.value = next
+    const targetSurvives = focusedKey != null && aggregateFocusOrder(next).includes(focusedKey)
+    aggregateFocusRecoverySeq += 1
+    if (focusedKey && !targetSurvives) {
+      const recoveryKey = nearestSurvivingAggregateFocusKey(previous, next, focusedKey)
+      void recoverOmittedAggregateFocus(recoveryKey, aggregateFocusRecoverySeq)
+    }
   },
   { immediate: true },
 )
@@ -392,8 +435,6 @@ const selectedExcludedBy = computed(() => {
   const d = selectedDelivery.value
   return d ? exclusionReason(d, filters.value) : null
 })
-const canvasRef = ref<HTMLElement | null>(null)
-
 watch(selection.selectedId, (id, previous) => {
   // A server-driven removal/revocation outranks local dirty state: close the
   // old ticket surface immediately so omitted data is never retained under a
@@ -571,16 +612,18 @@ function onCanvasKeydown(event: KeyboardEvent) {
 
 // ── Derived copy: headline, live chip, narration, announcements ─────────
 const counts = computed(() => {
-  if (detailLevel.value === 100 && aggregateLayout.value) {
-    const root = aggregateLayout.value.root
-    return {
-      total: root.activeTotal,
-      healthy: 0,
-      attention: root.flags.attention,
-      blocked: root.flags.blocked,
-      stale: root.flags.stale_no_signal,
-      unknown: root.flags.unknown_reporter,
-    }
+  if (detailLevel.value === 100) {
+    const root = aggregateLayout.value?.root
+    return root
+      ? {
+          total: root.activeTotal,
+          healthy: 0,
+          attention: root.flags.attention,
+          blocked: root.flags.blocked,
+          stale: root.flags.stale_no_signal,
+          unknown: root.flags.unknown_reporter,
+        }
+      : null
   }
   const list = data.deliveries.value
   return {
@@ -594,14 +637,16 @@ const counts = computed(() => {
 })
 
 const headline = computed(() => {
-  if (detailLevel.value === 100 && !aggregateLayout.value) return t('agentMode.aggregate.unavailable')
-  const n = counts.value.total
+  const c = counts.value
+  if (!c) return t('agentMode.aggregate.unavailable')
+  const n = c.total
   if (n === 0) return t('agentMode.headline.none')
   if (n === 1) return t('agentMode.headline.one')
   return t('agentMode.headline.many', { n })
 })
 const breakdown = computed(() => {
   const c = counts.value
+  if (!c) return ''
   const parts: string[] = []
   if (detailLevel.value !== 100 && c.healthy) parts.push(t('agentMode.narration.partHealthy', { n: c.healthy }))
   if (c.attention) parts.push(t('agentMode.narration.partAttention', { n: c.attention }, c.attention))
@@ -643,7 +688,9 @@ function selectionSentence(d: Delivery): string {
   const activity = d.activity.text ?? t(`agentMode.activity.${d.activity.kind}`)
   const est = estimateView(d, locale.value, serverNowMs.value)
   let text = t('agentMode.narration.selection', { key: d.issueKey, actor, activity })
-  if (est.landingLabel && !data.degraded.value) {
+  if (est.presentation.rangeOnly && est.rangeLabel && !data.degraded.value) {
+    text += ' ' + t('agentMode.narration.selectionRange', { range: est.rangeLabel })
+  } else if (est.landingLabel && !data.degraded.value) {
     text += ' ' + t('agentMode.narration.selectionEta', { time: est.landingLabel, remaining: est.remainingLabel ?? '—' })
   } else {
     const reason = data.degraded.value
@@ -671,14 +718,16 @@ const narrationLines = computed<NarrationLine[]>(() => {
     if (selected) lines.push({ id: `selection:${selected.id}`, role: 'system', text: selectionSentence(selected) })
     return lines
   }
-  const n = counts.value.total
+  const c = counts.value
+  if (!c) return lines
+  const n = c.total
   const summary = t('agentMode.narration.summary', { n }, n)
   lines.push({ id: 'summary', role: 'system', text: breakdown.value ? `${summary} ${breakdown.value}.` : summary })
-  if (counts.value.attention > 0) {
+  if (c.attention > 0) {
     lines.push({
       id: 'attention',
       role: 'system',
-      text: t('agentMode.narration.attentionOffer', { n: counts.value.attention }, counts.value.attention),
+      text: t('agentMode.narration.attentionOffer', { n: c.attention }, c.attention),
     })
   }
   const change = selection.lastChange.value
@@ -734,7 +783,7 @@ const selectedPosition = computed(() => {
   <div class="am-root" :class="{ 'am-root--compact': compactConversation, 'am-root--ticket': ticketOpen }">
     <Teleport defer to="#app-header-left">
       <span class="ah-title">{{ t('agentMode.title') }}</span>
-      <span v-if="data.hasData.value && (detailLevel !== 100 || aggregateLayout)" class="ah-subtitle">{{ t('agentMode.subtitle', { n: counts.total }, counts.total) }}</span>
+      <span v-if="data.hasData.value && counts" class="ah-subtitle">{{ t('agentMode.subtitle', { n: counts.total }, counts.total) }}</span>
     </Teleport>
     <Teleport defer to="#app-header-right">
       <div class="am-header-tools">

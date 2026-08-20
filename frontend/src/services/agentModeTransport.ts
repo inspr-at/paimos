@@ -45,7 +45,7 @@ import type {
   FreshnessState,
   StageKey,
 } from './agentMode'
-import { parseAgentModeAggregates } from './agentModeAggregateSchema'
+import { parseAgentModeAggregates, parseIsoInstant } from './agentModeAggregateSchema'
 
 /** Cross-project, ACL-filtered snapshot of all authorized active deliveries. */
 export const AGENT_MODE_SNAPSHOT_PATH = '/agent-mode/deliveries'
@@ -64,16 +64,37 @@ export interface AgentModeSnapshotQuery {
   selectedDelivery?: string | null
 }
 
+export const AGENT_MODE_LANE_KEY_MAX_LENGTH = 200
+
+/** Canonical positive safe integer accepted from URL/request boundaries. */
+export function parseAgentModeProjectFilter(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : null
+  }
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+/** Immutable lane identities are accepted exactly; trimming or truncating a
+ * key would silently address a different server-owned group. */
+export function parseAgentModeLaneFilter(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0 || value.length > AGENT_MODE_LANE_KEY_MAX_LENGTH) return null
+  const match = value.match(/^project:([1-9]\d*)\/(?:ungrouped|epic:([1-9]\d*))$/)
+  if (!match) return null
+  if (parseAgentModeProjectFilter(match[1]) == null) return null
+  if (match[2] != null && parseAgentModeProjectFilter(match[2]) == null) return null
+  return value
+}
+
 /** Builds the canonical PAI-804 snapshot query. `selected_delivery` is a
  * lookup hint only and never changes aggregate/filter identity. */
 export function buildSnapshotPath(query: AgentModeSnapshotQuery = {}): string {
   const params = new URLSearchParams()
-  if (query.projectId != null && Number.isSafeInteger(query.projectId) && query.projectId > 0) {
-    params.set('project_id', String(query.projectId))
-  }
-  if (typeof query.laneKey === 'string' && query.laneKey.trim() !== '') {
-    params.set('lane_key', query.laneKey.trim().slice(0, 200))
-  }
+  const projectId = parseAgentModeProjectFilter(query.projectId)
+  if (projectId != null) params.set('project_id', String(projectId))
+  const laneKey = parseAgentModeLaneFilter(query.laneKey)
+  if (laneKey != null) params.set('lane_key', laneKey)
   for (const state of query.states ?? []) {
     if (typeof state === 'string' && state.trim() !== '') params.append('state', state.trim().slice(0, 64))
   }
@@ -512,11 +533,24 @@ export function normalizeWireSnapshot(wire: WireSnapshot | null | undefined, rec
     ? canonicalOutside.reason as AgentModeSnapshot['selectedOutsideReason']
     : null
   const cursor = opaque(wire?.cursor)
-  const aggregateResult = wire?.schema_version !== 1
+  const parsedAggregateResult = wire?.schema_version !== 1
     ? { ok: false as const, reason: 'unsupported-schema' as const }
     : aggregateRowInputInvalid && wire.aggregates != null
       ? { ok: false as const, reason: 'malformed' as const }
-      : parseAgentModeAggregates(wire?.aggregates, new Set(deliveries.map((delivery) => delivery.id)))
+      : parseAgentModeAggregates(wire?.aggregates, deliveries)
+  // Aggregate scheduling and all relative times share one authoritative
+  // snapshot clock. Legacy row-only snapshots remain compatible, but a
+  // claimed aggregate cannot run against a missing, invalid or divergent
+  // top-level server_time.
+  const aggregateResult = parsedAggregateResult.ok && wire?.aggregates != null
+    ? (() => {
+        const strictServerTime = parseIsoInstant(wire?.server_time)
+        return strictServerTime != null
+          && Date.parse(strictServerTime) === Date.parse(parsedAggregateResult.value.calculatedAt)
+          ? parsedAggregateResult
+          : { ok: false as const, reason: 'malformed' as const }
+      })()
+    : parsedAggregateResult
   const aggregates = aggregateResult.ok ? aggregateResult.value : null
   const aggregateUnavailableReason = aggregateResult.ok ? null : aggregateResult.reason
   return {

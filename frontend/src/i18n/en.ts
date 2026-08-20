@@ -494,12 +494,15 @@ export default {
     },
     estimate: {
       lands: 'Lands ~{time}',
+      range: 'Landing range {range}',
       percent: '{n} % complete',
       withheld: {
         blocked: 'No estimate — blocked',
         waiting: 'No estimate — waiting for input',
         stale: 'No estimate — report is stale',
         low_confidence: 'No estimate — confidence too low',
+        suppressed: 'No estimate — suppressed by source policy',
+        invalid: 'No estimate — invalid estimate data',
         untrusted: 'No estimate — not trusted yet',
         none: 'No estimate available',
         offline: 'No estimate — feed offline, last known state',
@@ -678,6 +681,7 @@ export default {
       partUnknown: '{n} unknown',
       selection: '{key} is selected — {actor}: {activity}.',
       selectionEta: 'Lands about {time} ({remaining} left).',
+      selectionRange: 'Landing range {range}.',
       selectionNoEta: '{reason}.',
       restored: 'Restored your last selection, {key}.',
       defaulted: 'Selected {key} ({why}).',

@@ -25,8 +25,9 @@ import { COMPACT_CONVERSATION_QUERY } from '@/components/agent-mode/agentModePre
 import { TOMBSTONE_TTL_MS } from '@/composables/agent-mode/agentModeOrdering'
 import { useConfirm } from '@/composables/useConfirm'
 import { AgentModeLoadError, type AgentModeSnapshot, type AgentModeSnapshotLoader } from '@/services/agentMode'
+import { AGGREGATE_FLAG_KEYS, AGGREGATE_LANDING_KEYS, AGGREGATE_STAGE_KEYS } from '@/services/agentModeAggregateSchema'
 import { makeFixtureAggregateSnapshot, makeFixtureDelivery, makeFixtureSnapshot } from '@/services/agentModeFixtures'
-import { normalizeWireSnapshot, type WireSnapshot } from '@/services/agentModeTransport'
+import { laneKeyFor, normalizeWireSnapshot, type WireSnapshot } from '@/services/agentModeTransport'
 import { useChangesStore } from '@/stores/changes'
 import { useAuthStore } from '@/stores/auth'
 import { lsAgentModeSelectedKey } from '@/constants/storage'
@@ -42,6 +43,94 @@ function snapshotWithout(ids: string[], revision = 'fx-10-2'): AgentModeSnapshot
   wire.rows = wire.rows!.filter((d) => !ids.includes(String(d.delivery_id)))
   wire.cursor = revision
   return snapshot(wire)
+}
+
+interface MutableWireCountSet {
+  active_total: number
+  current_stage: Record<string, number>
+  flags: Record<string, number>
+  landing: Record<string, number>
+}
+
+interface MutableWireAggregates {
+  structural_revision: string
+  root: MutableWireCountSet
+  projects: Array<{
+    project_id: number
+    project_key: string
+    project_name: string
+    counts: MutableWireCountSet
+    lanes: Array<{
+      lane_key: string
+      epic_id: number | null
+      epic_title: string | null
+      counts: MutableWireCountSet
+    }>
+  }>
+  attention: { total: number; items: Array<{ delivery_id: string }> }
+}
+
+function mutableAggregates(wire: WireSnapshot): MutableWireAggregates {
+  return wire.aggregates as MutableWireAggregates
+}
+
+function subtractCounts(target: MutableWireCountSet, removed: MutableWireCountSet) {
+  target.active_total -= removed.active_total
+  for (const key of AGGREGATE_STAGE_KEYS) target.current_stage[key] -= removed.current_stage[key]
+  for (const key of AGGREGATE_FLAG_KEYS) target.flags[key] -= removed.flags[key]
+  for (const key of AGGREGATE_LANDING_KEYS) target.landing[key] -= removed.landing[key]
+}
+
+function retainAttentionReferences(wire: WireSnapshot) {
+  const aggregate = mutableAggregates(wire)
+  const ids = new Set((wire.rows ?? []).map((row) => String(row.delivery_id)))
+  aggregate.attention.total = aggregate.root.flags.attention
+  aggregate.attention.items = aggregate.attention.items.filter((item) => ids.has(item.delivery_id))
+}
+
+function omitAggregateProject(source: WireSnapshot, projectId: number): WireSnapshot {
+  const wire = structuredClone(source)
+  const aggregate = mutableAggregates(wire)
+  const removed = aggregate.projects.find((project) => project.project_id === projectId)!
+  subtractCounts(aggregate.root, removed.counts)
+  aggregate.projects = aggregate.projects.filter((project) => project.project_id !== projectId)
+  wire.rows = (wire.rows ?? []).filter((row) => row.project_id !== projectId)
+  aggregate.structural_revision = `${aggregate.structural_revision}:without-project-${projectId}`
+  retainAttentionReferences(wire)
+  return wire
+}
+
+function omitAggregateLane(source: WireSnapshot, projectId: number, laneKey: string): WireSnapshot {
+  const wire = structuredClone(source)
+  const aggregate = mutableAggregates(wire)
+  const project = aggregate.projects.find((candidate) => candidate.project_id === projectId)!
+  const removed = project.lanes.find((lane) => lane.lane_key === laneKey)!
+  subtractCounts(project.counts, removed.counts)
+  subtractCounts(aggregate.root, removed.counts)
+  project.lanes = project.lanes.filter((lane) => lane.lane_key !== laneKey)
+  wire.rows = (wire.rows ?? []).filter((row) => laneKeyFor(row.project_id!, row.epic_id ?? null) !== laneKey)
+  if (project.lanes.length === 0) aggregate.projects = aggregate.projects.filter((candidate) => candidate !== project)
+  aggregate.structural_revision = `${aggregate.structural_revision}:without-lane-${laneKey}`
+  retainAttentionReferences(wire)
+  return wire
+}
+
+function makeEligibleRangeSnapshot(aggregated: boolean): WireSnapshot {
+  const wire = aggregated ? makeFixtureAggregateSnapshot(10) : makeFixtureSnapshot(10)
+  const row = wire.rows![0]
+  row.eta = { ...row.eta!, confidence: 'low' }
+  wire.selected_delivery = row.delivery_id
+  if (aggregated) {
+    const aggregate = mutableAggregates(wire)
+    const project = aggregate.projects.find((candidate) => candidate.project_id === row.project_id)!
+    const laneKey = laneKeyFor(row.project_id!, row.epic_id ?? null)
+    const lane = project.lanes.find((candidate) => candidate.lane_key === laneKey)!
+    for (const counts of [aggregate.root, project.counts, lane.counts]) {
+      counts.landing.within_4h -= 1
+      counts.landing.range_only += 1
+    }
+  }
+  return wire
 }
 
 async function flush(times = 64) {
@@ -353,6 +442,9 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
       expect(root.querySelectorAll('.am-aggregate-project-control')).toHaveLength(0)
       expect(root.querySelectorAll('.am-card')).toHaveLength(1)
       expect(root.querySelector('.am-lanes')).toBeNull()
+      expect(root.querySelector('.am-subline')).toBeNull()
+      expect(root.textContent).not.toContain('Nothing in motion')
+      expect(document.getElementById('app-header-left')?.textContent).not.toContain('nothing in motion')
       expect(root.textContent).toContain('never used to fabricate portfolio totals')
       harness.unmount()
       harness = null
@@ -373,6 +465,157 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(selectedCards(root)).toHaveLength(1)
     expect(root.textContent).toContain('Range only')
     expect(root.textContent).toContain('Suppressed or unknown')
+  })
+
+  it('presents every project/lane CountSet axis visibly and through stable accessible descriptions on native drill buttons', async () => {
+    const wire = makeFixtureAggregateSnapshot(100)
+    harness = await mountView(async () => snapshot(wire), '/agent-mode?detail=100')
+    const { root, router } = harness
+    const project = root.querySelector<HTMLButtonElement>('.am-aggregate-project-control')!
+    const projectId = Number(project.closest<HTMLElement>('.am-aggregate-project')!.dataset.projectId)
+    const projectWire = mutableAggregates(wire).projects.find((candidate) => candidate.project_id === projectId)!
+    const projectDescription = document.getElementById(project.getAttribute('aria-describedby')!)!
+
+    expect(project.tagName).toBe('BUTTON')
+    expect(project.type).toBe('button')
+    expect(project.getAttribute('role')).toBeNull()
+    expect(project.tabIndex).toBe(0)
+    expect(project.querySelectorAll('.am-aggregate-project-stages > span')).toHaveLength(6)
+    expect(project.querySelectorAll('.am-aggregate-project-flags > span')).toHaveLength(8)
+    expect(project.querySelectorAll('.am-aggregate-project-landing > span')).toHaveLength(6)
+    for (const key of AGGREGATE_STAGE_KEYS) {
+      expect(projectDescription.textContent).toContain(`${i18n.global.t(`agentMode.stage.${key}`)} ${projectWire.counts.current_stage[key]}`)
+    }
+    for (const key of AGGREGATE_FLAG_KEYS) {
+      expect(projectDescription.textContent).toContain(`${i18n.global.t(`agentMode.aggregate.flag.${key}`)} ${projectWire.counts.flags[key]}`)
+    }
+    for (const key of AGGREGATE_LANDING_KEYS) {
+      expect(projectDescription.textContent).toContain(`${i18n.global.t(`agentMode.aggregate.landing.${key}`)} ${projectWire.counts.landing[key]}`)
+    }
+
+    const lane = root.querySelector<HTMLButtonElement>('.am-aggregate-lane-control')!
+    const laneWire = projectWire.lanes.find((candidate) => candidate.lane_key === lane.dataset.laneKey)!
+    const laneDescription = document.getElementById(lane.getAttribute('aria-describedby')!)!
+    expect(lane.tagName).toBe('BUTTON')
+    expect(lane.type).toBe('button')
+    expect(laneDescription.textContent).toContain(`${laneWire.counts.active_total} active`)
+    for (const key of AGGREGATE_STAGE_KEYS) {
+      expect(laneDescription.textContent).toContain(`${i18n.global.t(`agentMode.stage.${key}`)} ${laneWire.counts.current_stage[key]}`)
+    }
+    for (const key of AGGREGATE_FLAG_KEYS) {
+      expect(laneDescription.textContent).toContain(`${i18n.global.t(`agentMode.aggregate.flag.${key}`)} ${laneWire.counts.flags[key]}`)
+    }
+    for (const key of AGGREGATE_LANDING_KEYS) {
+      expect(laneDescription.textContent).toContain(`${i18n.global.t(`agentMode.aggregate.landing.${key}`)} ${laneWire.counts.landing[key]}`)
+    }
+
+    // Native button activation is the only drill path; keyboard agents get
+    // the platform Enter/Space contract without a custom role or key trap.
+    project.focus()
+    expect(document.activeElement).toBe(project)
+    project.click()
+    await flush()
+    expect(router.currentRoute.value.query.detail).toBeUndefined()
+    expect(router.currentRoute.value.query.project).toBe(String(projectId))
+  })
+
+  it('schedules next_refresh_at from the coherent server clock offset, not the browser wall clock', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-20T09:00:00Z'))
+    const wire = makeFixtureAggregateSnapshot(100)
+    const aggregate = wire.aggregates as { next_refresh_at: string }
+    aggregate.next_refresh_at = '2026-08-20T13:48:05Z'
+    harness = await mountView(async () => snapshot(wire), '/agent-mode?detail=100')
+
+    expect(harness.loader).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(4_999)
+    await flush()
+    expect(harness.loader).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    await flush()
+    expect(harness.loader).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the same eligible low-confidence range-only selected card at Detail 1, 10 and 100', async () => {
+    for (const detail of [1, 10, 100] as const) {
+      const wire = makeEligibleRangeSnapshot(detail === 100)
+      const selected = String(wire.selected_delivery)
+      const detailQuery = detail === 10 ? '' : `&detail=${detail}`
+      harness = await mountView(async () => snapshot(wire), `/agent-mode?delivery=${selected}${detailQuery}`)
+      const card = harness.root.querySelector<HTMLElement>(`[data-delivery-id="${selected}"]`)!
+      expect(card).not.toBeNull()
+      expect(card.querySelector('.am-card-eta--range')?.textContent).toContain('Landing range')
+      expect(card.textContent).not.toContain('Lands ~')
+      expect(card.querySelector('.am-card-eta small')).toBeNull()
+      expect(card.textContent).not.toContain('confidence too low')
+      expect(harness.root.querySelector('.am-conv')?.textContent).toContain('Landing range')
+      expect(harness.root.querySelector('.am-conv')?.textContent).not.toContain('No estimate')
+      if (detail === 1) expect(harness.root.querySelector('.am-detail-list')?.textContent).toContain('Landing range')
+      expect(selectedCards(harness.root)).toHaveLength(1)
+      harness.unmount()
+      harness = null
+      document.body.innerHTML = ''
+    }
+  })
+
+  it('recovers focus from revoked project/lane identities immediately under hold and leaves surviving focus untouched', async () => {
+    vi.useFakeTimers()
+    const source = makeFixtureAggregateSnapshot(100)
+    const aggregate = mutableAggregates(source)
+    const removableProject = aggregate.projects.find((project) => project.project_id !== source.rows![0].project_id)!
+    const multiLaneProject = aggregate.projects.find((project) => project.lanes.length > 1 && project.project_id !== source.rows![0].project_id)!
+    const removableLane = multiLaneProject.lanes[0]
+    const cases = [
+      {
+        selector: `[data-aggregate-focus-key="project:${removableProject.project_id}"]`,
+        staleLabel: removableProject.project_name,
+        fresh: omitAggregateProject(source, removableProject.project_id),
+      },
+      {
+        selector: `[data-lane-key="${removableLane.lane_key}"]`,
+        staleLabel: removableLane.epic_title!,
+        fresh: omitAggregateLane(source, multiLaneProject.project_id, removableLane.lane_key),
+      },
+    ]
+
+    for (const testCase of cases) {
+      let fresh = false
+      harness = await mountView(async () => snapshot(fresh ? testCase.fresh : source), '/agent-mode?detail=100')
+      const target = harness.root.querySelector<HTMLButtonElement>(testCase.selector)!
+      const selected = selectedId(harness.root)!
+      target.focus()
+      await flush()
+      expect(document.activeElement).toBe(target)
+      expect(harness.root.querySelector('.am-canvas')?.getAttribute('data-held')).toBe('true')
+
+      fresh = true
+      await refetchViaHint()
+      expect(harness.root.querySelector(testCase.selector)).toBeNull()
+      expect(harness.root.textContent).not.toContain(testCase.staleLabel)
+      expect((document.activeElement as HTMLElement | null)?.dataset.cardHit).toBe(selected)
+      harness.unmount()
+      harness = null
+      document.body.innerHTML = ''
+    }
+
+    const surviving = structuredClone(source)
+    const survivingAggregate = mutableAggregates(surviving)
+    const survivor = survivingAggregate.projects[0]
+    const originalName = survivor.project_name
+    survivor.project_name = 'Fresh authorized project label'
+    for (const row of surviving.rows ?? []) {
+      if (row.project_id === survivor.project_id) row.project_name = survivor.project_name
+    }
+    let refreshed = false
+    harness = await mountView(async () => snapshot(refreshed ? surviving : source), '/agent-mode?detail=100')
+    const survivorSelector = `[data-aggregate-focus-key="project:${survivor.project_id}"]`
+    const survivorButton = harness.root.querySelector<HTMLButtonElement>(survivorSelector)!
+    survivorButton.focus()
+    refreshed = true
+    await refetchViaHint()
+    expect(harness.root.textContent).not.toContain(originalName)
+    expect(harness.root.querySelector(survivorSelector)?.textContent).toContain('Fresh authorized project label')
+    expect((document.activeElement as HTMLElement | null)?.dataset.aggregateFocusKey).toBe(`project:${survivor.project_id}`)
   })
 
   it('uses selector-independent attention order, removes the pinned duplicate, adjusts hidden count, and selects only on activation', async () => {
@@ -951,6 +1194,23 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     await flush()
     const lastLive = cardOrder(root)[cardOrder(root).length - 1]
     expect(selectedId(root)).toBe(lastLive)
+  })
+
+  it('canonicalizes invalid URL project/lane filters to null without mutating an identity into a request', async () => {
+    const invalidPaths = [
+      '/agent-mode?project=6.5',
+      `/agent-mode?project=${Number.MAX_SAFE_INTEGER + 1}`,
+      '/agent-mode?lane=arbitrary-lane',
+      `/agent-mode?lane=${encodeURIComponent(`project:6/epic:${'1'.repeat(220)}`)}`,
+    ]
+    for (const path of invalidPaths) {
+      harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), path)
+      expect(harness.loader.mock.calls[0]?.[0]).toMatchObject({ projectId: null, laneKey: null })
+      expect(harness.root.querySelectorAll('.am-card')).toHaveLength(10)
+      harness.unmount()
+      harness = null
+      document.body.innerHTML = ''
+    }
   })
 
   it('scopes delivery keys to the canvas and cards: the health radiogroup and other controls keep their own behaviour', async () => {

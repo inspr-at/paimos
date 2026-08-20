@@ -14,6 +14,10 @@ import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import type { Delivery } from '@/services/agentMode'
 import {
+  laneAggregateFocusKey,
+  projectAggregateFocusKey,
+} from '@/composables/agent-mode/agentModeAggregateOrdering'
+import {
   AGGREGATE_FLAG_KEYS,
   AGGREGATE_LANDING_KEYS,
   AGGREGATE_STAGE_KEYS,
@@ -91,6 +95,26 @@ function laneAria(project: AgentModeProjectAggregate, lane: AgentModeLaneAggrega
     lane: laneLabel(lane),
     count: lane.counts.activeTotal,
   })
+}
+
+function countSetDescription(counts: AgentModeCountSet): string {
+  const stages = AGGREGATE_STAGE_KEYS.map((key) => `${stageLabel(key)} ${counts.currentStage[key]}`).join(', ')
+  const flags = AGGREGATE_FLAG_KEYS.map((key) => `${flagLabel(key)} ${counts.flags[key]}`).join(', ')
+  const landing = AGGREGATE_LANDING_KEYS.map((key) => `${landingLabel(key)} ${counts.landing[key]}`).join(', ')
+  return [
+    countLabel(counts),
+    `${t('agentMode.aggregate.currentStage')}: ${stages}`,
+    `${t('agentMode.aggregate.overlappingFlags')}: ${flags}`,
+    `${t('agentMode.aggregate.landingTitle')}: ${landing}`,
+  ].join('. ')
+}
+
+function projectDescriptionId(projectId: number): string {
+  return `am-project-counts-${projectId}`
+}
+
+function laneDescriptionId(projectId: number, lane: AgentModeLaneAggregate): string {
+  return `am-lane-counts-${projectId}-${lane.epicId ?? 'ungrouped'}`
 }
 
 function unavailableLabel(reason: AgentModeAggregateUnavailableReason | null): string {
@@ -196,53 +220,82 @@ function unavailableLabel(reason: AgentModeAggregateUnavailableReason | null): s
           class="am-aggregate-project"
           :data-project-id="project.projectId"
         >
+          <span :id="projectDescriptionId(project.projectId)" class="am-sr-only">
+            {{ countSetDescription(project.counts) }}
+          </span>
           <button
             type="button"
             class="am-aggregate-project-control"
             :aria-label="projectAria(project)"
+            :aria-describedby="projectDescriptionId(project.projectId)"
+            :data-aggregate-focus-key="projectAggregateFocusKey(project.projectId)"
             @click="emit('drill-aggregate', project.projectId, null)"
           >
-            <span class="am-aggregate-project-identity">
-              <span>{{ project.projectKey }}</span>
-              <strong>{{ project.projectName }}</strong>
+            <span class="am-aggregate-project-main">
+              <span class="am-aggregate-project-identity">
+                <span>{{ project.projectKey }}</span>
+                <strong>{{ project.projectName }}</strong>
+              </span>
+              <span class="am-aggregate-total">{{ countLabel(project.counts) }}</span>
+              <AppIcon name="zoom-in" :size="14" aria-hidden="true" />
             </span>
-            <span class="am-aggregate-total">{{ countLabel(project.counts) }}</span>
-            <AppIcon name="zoom-in" :size="14" aria-hidden="true" />
+            <span class="am-aggregate-project-countset" aria-hidden="true">
+              <span class="am-aggregate-project-stages">
+                <span v-for="key in AGGREGATE_STAGE_KEYS" :key="key">
+                  <small>{{ stageLabel(key) }}</small><strong>{{ project.counts.currentStage[key] }}</strong>
+                </span>
+              </span>
+              <span class="am-aggregate-project-flags">
+                <span v-for="key in AGGREGATE_FLAG_KEYS" :key="key">
+                  {{ flagLabel(key) }} <strong>{{ project.counts.flags[key] }}</strong>
+                </span>
+              </span>
+              <span class="am-aggregate-project-landing">
+                <span v-for="key in AGGREGATE_LANDING_KEYS" :key="key">
+                  {{ landingLabel(key) }} <strong>{{ project.counts.landing[key] }}</strong>
+                </span>
+              </span>
+            </span>
           </button>
 
           <div class="am-aggregate-lanes">
-            <button
-              v-for="lane in project.lanes"
-              :key="lane.laneKey"
-              type="button"
-              class="am-aggregate-lane-control"
-              :aria-label="laneAria(project, lane)"
-              :data-lane-key="lane.laneKey"
-              @click="emit('drill-aggregate', project.projectId, lane.laneKey)"
-            >
-              <span class="am-aggregate-lane-main">
-                <strong>{{ laneLabel(lane) }}</strong>
-                <span>{{ countLabel(lane.counts) }}</span>
+            <template v-for="lane in project.lanes" :key="lane.laneKey">
+              <span :id="laneDescriptionId(project.projectId, lane)" class="am-sr-only">
+                {{ countSetDescription(lane.counts) }}
               </span>
-              <span class="am-aggregate-lane-stages" :aria-label="t('agentMode.aggregate.currentStage')">
-                <span v-for="key in AGGREGATE_STAGE_KEYS" :key="key">
-                  <small>{{ stageLabel(key) }}</small><strong>{{ lane.counts.currentStage[key] }}</strong>
+              <button
+                type="button"
+                class="am-aggregate-lane-control"
+                :aria-label="laneAria(project, lane)"
+                :aria-describedby="laneDescriptionId(project.projectId, lane)"
+                :data-lane-key="lane.laneKey"
+                :data-aggregate-focus-key="laneAggregateFocusKey(project.projectId, lane.laneKey)"
+                @click="emit('drill-aggregate', project.projectId, lane.laneKey)"
+              >
+                <span class="am-aggregate-lane-main">
+                  <strong>{{ laneLabel(lane) }}</strong>
+                  <span>{{ countLabel(lane.counts) }}</span>
                 </span>
-              </span>
-              <span class="am-aggregate-lane-health" :aria-label="t('agentMode.aggregate.overlappingFlags')">
-                <span v-for="key in AGGREGATE_FLAG_KEYS.filter((flag) => lane.counts.flags[flag] > 0)" :key="key">
-                  {{ flagLabel(key) }} {{ lane.counts.flags[key] }}
+                <span class="am-aggregate-lane-stages" aria-hidden="true">
+                  <span v-for="key in AGGREGATE_STAGE_KEYS" :key="key">
+                    <small>{{ stageLabel(key) }}</small><strong>{{ lane.counts.currentStage[key] }}</strong>
+                  </span>
                 </span>
-                <span v-if="!AGGREGATE_FLAG_KEYS.some((flag) => lane.counts.flags[flag] > 0)">
-                  {{ t('agentMode.aggregate.noFlags') }}
+                <span class="am-aggregate-lane-health" aria-hidden="true">
+                  <span v-for="key in AGGREGATE_FLAG_KEYS.filter((flag) => lane.counts.flags[flag] > 0)" :key="key">
+                    {{ flagLabel(key) }} {{ lane.counts.flags[key] }}
+                  </span>
+                  <span v-if="!AGGREGATE_FLAG_KEYS.some((flag) => lane.counts.flags[flag] > 0)">
+                    {{ t('agentMode.aggregate.noFlags') }}
+                  </span>
                 </span>
-              </span>
-              <span class="am-aggregate-lane-landing" :aria-label="t('agentMode.aggregate.landingTitle')">
-                <span v-for="key in AGGREGATE_LANDING_KEYS" :key="key">
-                  {{ landingLabel(key) }} <strong>{{ lane.counts.landing[key] }}</strong>
+                <span class="am-aggregate-lane-landing" aria-hidden="true">
+                  <span v-for="key in AGGREGATE_LANDING_KEYS" :key="key">
+                    {{ landingLabel(key) }} <strong>{{ lane.counts.landing[key] }}</strong>
+                  </span>
                 </span>
-              </span>
-            </button>
+              </button>
+            </template>
           </div>
         </article>
       </section>
@@ -310,18 +363,28 @@ function unavailableLabel(reason: AgentModeAggregateUnavailableReason | null): s
 .am-aggregate-project { overflow: hidden; border: 1px solid var(--am-line); border-radius: 14px; background: var(--am-surface); }
 .am-aggregate-project-control,
 .am-aggregate-lane-control { width: 100%; border: 0; background: transparent; color: var(--am-ink); text-align: left; }
-.am-aggregate-project-control { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; min-height: calc(var(--am-d100-unit) * 7); padding: 10px 14px; border-bottom: 1px solid var(--am-line); }
+.am-aggregate-project-control { display: grid; gap: 9px; min-height: calc(var(--am-d100-unit) * 11); padding: 10px 14px; border-bottom: 1px solid var(--am-line); }
 .am-aggregate-project-control:hover,
 .am-aggregate-lane-control:hover { background: color-mix(in srgb, var(--am-blue) 5%, var(--am-surface)); }
 .am-aggregate-project-control:focus-visible,
 .am-aggregate-lane-control:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--am-focus); outline-offset: -3px; }
+.am-aggregate-project-main { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; }
 .am-aggregate-project-identity { min-width: 0; display: flex; align-items: baseline; gap: 9px; }
 .am-aggregate-project-identity > span { color: var(--am-blue); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; }
 .am-aggregate-project-identity > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .am-aggregate-total { color: var(--am-muted); font-size: 11px; }
+.am-aggregate-project-countset { display: grid; grid-template-columns: minmax(240px, 1.4fr) minmax(190px, 1fr); grid-template-areas: 'stages flags' 'landing landing'; gap: 6px 14px; }
+.am-aggregate-project-stages { grid-area: stages; display: grid; grid-template-columns: repeat(6, minmax(30px, 1fr)); gap: 4px; }
+.am-aggregate-project-stages > span { display: grid; gap: 1px; padding: 2px 4px; border-radius: 5px; background: color-mix(in srgb, var(--am-blue) 6%, var(--am-surface)); text-align: center; }
+.am-aggregate-project-stages small { overflow: hidden; color: var(--am-muted); font-size: 8.25px; text-overflow: ellipsis; white-space: nowrap; }
+.am-aggregate-project-stages strong,
+.am-aggregate-project-flags strong,
+.am-aggregate-project-landing strong { color: var(--am-ink); font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.am-aggregate-project-flags { grid-area: flags; display: flex; flex-wrap: wrap; gap: 3px 8px; color: var(--am-muted); font-size: 8.5px; }
+.am-aggregate-project-landing { grid-area: landing; display: flex; flex-wrap: wrap; gap: 3px 10px; color: var(--am-muted); font-size: 8.5px; }
 .am-aggregate-lanes { display: grid; }
 .am-aggregate-lane-control { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(250px, 2fr) minmax(170px, 1.3fr); grid-template-areas: 'main stages health' 'main landing landing'; gap: 7px 16px; min-height: calc(var(--am-d100-unit) * 9); padding: 10px 14px; border-top: 1px solid var(--am-line); }
-.am-aggregate-lane-control:first-child { border-top: 0; }
+.am-aggregate-lane-control:first-of-type { border-top: 0; }
 .am-aggregate-lane-main { grid-area: main; align-self: center; min-width: 0; display: grid; gap: 3px; }
 .am-aggregate-lane-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .am-aggregate-lane-main > span { color: var(--am-muted); font-size: 10.5px; }
@@ -339,6 +402,7 @@ function unavailableLabel(reason: AgentModeAggregateUnavailableReason | null): s
   .am-aggregate-root { grid-template-columns: 90px minmax(0, 1fr); }
   .am-aggregate-root .am-aggregate-partition:last-of-type { grid-column: 1 / -1; padding-top: 10px; border-top: 1px solid var(--am-line); }
   .am-aggregate-lane-control { grid-template-columns: minmax(130px, 0.8fr) minmax(220px, 1.6fr); grid-template-areas: 'main stages' 'health health' 'landing landing'; }
+  .am-aggregate-project-countset { grid-template-columns: 1fr; grid-template-areas: 'stages' 'flags' 'landing'; }
 }
 
 @media (max-width: 620px) {
@@ -347,10 +411,23 @@ function unavailableLabel(reason: AgentModeAggregateUnavailableReason | null): s
   .am-aggregate-root-total { border-right: 0; border-bottom: 1px solid var(--am-line); }
   .am-aggregate-root .am-aggregate-partition:last-of-type,
   .am-aggregate-flags { grid-column: 1; }
-  .am-aggregate-project-control { grid-template-columns: minmax(0, 1fr) auto; }
-  .am-aggregate-project-control > svg { display: none; }
+  .am-aggregate-project-main { grid-template-columns: minmax(0, 1fr) auto; }
+  .am-aggregate-project-main > svg { display: none; }
+  .am-aggregate-project-countset { overflow-x: auto; }
   .am-aggregate-lane-control { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'main' 'stages' 'health' 'landing'; }
   .am-aggregate-lane-stages { overflow-x: auto; }
+}
+
+.am-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

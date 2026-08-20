@@ -15,6 +15,46 @@ import type {
   AgentModeProjectAggregate,
 } from '@/services/agentModeAggregateSchema'
 
+export function projectAggregateFocusKey(projectId: number): string {
+  return `project:${projectId}`
+}
+
+export function laneAggregateFocusKey(projectId: number, laneKey: string): string {
+  return `lane:${projectId}:${laneKey}`
+}
+
+export function aggregateFocusOrder(aggregates: AgentModeAggregates | null): string[] {
+  if (!aggregates) return []
+  return aggregates.projects.flatMap((project) => [
+    projectAggregateFocusKey(project.projectId),
+    ...project.lanes.map((lane) => laneAggregateFocusKey(project.projectId, lane.laneKey)),
+  ])
+}
+
+/** Deterministic focus fallback after an aggregate identity is revoked:
+ * nearest in the previous flattened order, preferring the next target on a
+ * distance tie, then the first fresh newcomer if no old identity survives. */
+export function nearestSurvivingAggregateFocusKey(
+  previous: AgentModeAggregates | null,
+  fresh: AgentModeAggregates | null,
+  focusedKey: string,
+): string | null {
+  const before = aggregateFocusOrder(previous)
+  const after = aggregateFocusOrder(fresh)
+  const surviving = new Set(after)
+  if (surviving.has(focusedKey)) return focusedKey
+  const index = before.indexOf(focusedKey)
+  if (index >= 0) {
+    for (let distance = 1; distance < before.length; distance += 1) {
+      const successor = before[index + distance]
+      if (successor && surviving.has(successor)) return successor
+      const predecessor = before[index - distance]
+      if (predecessor && surviving.has(predecessor)) return predecessor
+    }
+  }
+  return after[0] ?? null
+}
+
 function reconcileLanes(
   previous: readonly AgentModeLaneAggregate[],
   fresh: readonly AgentModeLaneAggregate[],

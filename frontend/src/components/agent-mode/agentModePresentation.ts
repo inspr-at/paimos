@@ -102,7 +102,21 @@ export function estimateView(d: Delivery, locale: string, serverNowMs: number): 
   let landingLabel: string | null = null
   let remainingLabel: string | null = null
   let rangeLabel: string | null = null
-  if (presentation.showEta && presentation.landingAt) {
+  if (presentation.showEta && presentation.rangeOnly && presentation.optimisticAt && presentation.pessimisticAt) {
+    const optimisticMs = Date.parse(presentation.optimisticAt)
+    const pessimisticMs = Date.parse(presentation.pessimisticAt)
+    const useTimeOnly = Number.isFinite(optimisticMs)
+      && Number.isFinite(pessimisticMs)
+      && sameLocalDay(optimisticMs, pessimisticMs)
+      && sameLocalDay(optimisticMs, serverNowMs)
+    const optimistic = useTimeOnly
+      ? formatTimeWithLocale(presentation.optimisticAt, locale)
+      : formatShortDateTimeWithLocale(presentation.optimisticAt, locale)
+    const pessimistic = useTimeOnly
+      ? formatTimeWithLocale(presentation.pessimisticAt, locale)
+      : formatShortDateTimeWithLocale(presentation.pessimisticAt, locale)
+    rangeLabel = `${optimistic}–${pessimistic}`
+  } else if (presentation.showEta && presentation.landingAt) {
     const landingMs = Date.parse(presentation.landingAt)
     landingLabel = Number.isFinite(landingMs) && sameLocalDay(landingMs, serverNowMs)
       ? formatTimeWithLocale(presentation.landingAt, locale)

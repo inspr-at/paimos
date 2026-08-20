@@ -485,12 +485,15 @@ export default {
     },
     estimate: {
       lands: 'Landet ~{time}',
+      range: 'Landefenster {range}',
       percent: '{n} % erledigt',
       withheld: {
         blocked: 'Keine Schätzung — blockiert',
         waiting: 'Keine Schätzung — wartet auf Input',
         stale: 'Keine Schätzung — Bericht veraltet',
         low_confidence: 'Keine Schätzung — Konfidenz zu niedrig',
+        suppressed: 'Keine Schätzung — durch Quellenrichtlinie unterdrückt',
+        invalid: 'Keine Schätzung — ungültige Schätzungsdaten',
         untrusted: 'Keine Schätzung — noch nicht vertrauenswürdig',
         none: 'Keine Schätzung verfügbar',
         offline: 'Keine Schätzung — Feed offline, letzter bekannter Stand',
@@ -669,6 +672,7 @@ export default {
       partUnknown: '{n} unbekannt',
       selection: '{key} ist ausgewählt — {actor}: {activity}.',
       selectionEta: 'Landet etwa {time} (noch {remaining}).',
+      selectionRange: 'Landefenster {range}.',
       selectionNoEta: '{reason}.',
       restored: 'Letzte Auswahl wiederhergestellt: {key}.',
       defaulted: '{key} ausgewählt ({why}).',
