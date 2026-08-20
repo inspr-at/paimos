@@ -33,11 +33,10 @@ import {
   buildSnapshotPath,
   normalizeWireSnapshot,
   type AgentModeSnapshotQuery,
-  type WireSnapshot,
 } from './agentModeTransport'
 import type { AgentModeAggregates, AgentModeAggregateUnavailableReason } from './agentModeAggregateSchema'
 
-export type DeliveryHealth = 'healthy' | 'attention' | 'at_risk' | 'blocked' | 'unknown'
+export type DeliveryHealth = 'healthy' | 'attention' | 'at_risk' | 'blocked' | 'stale' | 'unknown'
 export type ActivityKind =
   | 'working'
   | 'testing'
@@ -58,6 +57,8 @@ export type DeliveryStageStatus =
   | 'waiting'
   | 'blocked'
   | 'failed'
+  | 'cancelled'
+  | 'draft_ready'
   | 'succeeded'
   | 'not_applicable'
   | 'unknown'
@@ -67,7 +68,34 @@ export interface DeliveryActor {
   name: string
   /** Human label shown on the card. */
   label: string
-  kind: 'agent' | 'system' | 'human' | 'unknown'
+  kind: 'agent' | 'external' | 'system' | 'human' | 'unknown'
+}
+
+/** Privacy-reviewed schema-v1 trust projection. These are the only lineage
+ * identities the backend intentionally exposes; reporter/run-link/provider
+ * identities and evidence payloads have no domain field. */
+export interface DeliveryTrust {
+  schemaVersion: 1
+  trustRevision: string
+  progressKnown: boolean
+  progressPercent: number | null
+  confidence: EstimateConfidence
+  reporterKind: 'agent_run' | 'external' | 'user' | 'system' | 'unknown'
+  sourceKind: 'owner_estimate' | 'stage_evidence' | 'history'
+  basis: string | null
+  optimisticLandingAt: string | null
+  pessimisticLandingAt: string | null
+  landingAt: string | null
+  rangeOnly: boolean
+  suppression: string | null
+  scope: {
+    attemptId: string
+    planId: string
+    executionId: string
+    authorityId: string
+    resetId: string
+  } | null
+  flags: string[]
 }
 
 export interface DeliveryLane {
@@ -162,6 +190,9 @@ export interface Delivery {
   /** Opaque read-model and trust lineages retained across semantic zoom. */
   deliveryRevision: string | null
   trustRevision: string | null
+  /** Authoritative safe trust projection. In particular, `suppression`
+   * gates precision even though a known progress fact is marked trusted. */
+  trust: DeliveryTrust
   suppressionCodes: string[]
   disagreementCodes: string[]
   /** Supplemental only — never used for lane structure. */
@@ -247,7 +278,7 @@ export type AgentModeSnapshotLoader = (
 /** Production loader: one ACL-filtered request, normalized at the edge. */
 export const fetchAgentModeSnapshot: AgentModeSnapshotLoader = async (query, opts) => {
   try {
-    const wire = await api.get<WireSnapshot>(buildSnapshotPath(query), { signal: opts?.signal })
+    const wire = await api.get<unknown>(buildSnapshotPath(query), { signal: opts?.signal })
     return normalizeWireSnapshot(wire, Date.now())
   } catch (e) {
     if (isSessionExpiredError(e)) throw e

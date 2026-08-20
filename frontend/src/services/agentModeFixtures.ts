@@ -76,7 +76,7 @@ interface Variant {
   activity: string
   health: string
   attention: number
-  attentionReason: string | null
+  attentionReason: 'blocked' | 'waiting_needs_input' | 'failed_needs_retry' | 'stale_no_signal' | 'unknown_reporter' | 'deployed_unverified' | null
   freshness: string
   lastReportMin: number
   progress: { percent: number; trusted: boolean; confidence: string } | null
@@ -89,13 +89,13 @@ interface Variant {
 const VARIANTS: Variant[] = [
   { activityKind: 'working', activity: 'Writing membership checks', health: 'healthy', attention: 0, attentionReason: null, freshness: 'fresh', lastReportMin: -1, progress: { percent: 64, trusted: true, confidence: 'high' }, eta: { landMin: 52, trusted: true, confidence: 'high' } },
   { activityKind: 'testing', activity: 'Scoring 240 retrieval fixtures', health: 'healthy', attention: 0, attentionReason: null, freshness: 'fresh', lastReportMin: -2, progress: { percent: 82, trusted: true, confidence: 'medium' }, eta: { landMin: 30, trusted: true, confidence: 'medium' } },
-  { activityKind: 'waiting', activity: 'Waiting for retention decision', health: 'attention', attention: 2, attentionReason: 'Needs the retention period before the specification can close', freshness: 'fresh', lastReportMin: -12, progress: { percent: 19, trusted: true, confidence: 'high' }, eta: { landMin: 1112, trusted: true, confidence: 'low' }, statusText: 'Decision requested 12 min ago' },
-  { activityKind: 'blocked', activity: 'Investigating 3 failed assertions', health: 'blocked', attention: 3, attentionReason: 'Permissions fixture failure blocks this delivery', freshness: 'fresh', lastReportMin: -3, progress: { percent: 69, trusted: true, confidence: 'high' }, eta: { landMin: 67, trusted: true, confidence: 'high' }, blockers: ['permissions fixture fails on case 84'] },
+  { activityKind: 'waiting', activity: 'Waiting for retention decision', health: 'attention', attention: 2, attentionReason: 'waiting_needs_input', freshness: 'fresh', lastReportMin: -12, progress: { percent: 19, trusted: true, confidence: 'low' }, eta: { landMin: 1112, trusted: true, confidence: 'low' }, statusText: 'Decision requested 12 min ago' },
+  { activityKind: 'blocked', activity: 'Investigating 3 failed assertions', health: 'blocked', attention: 3, attentionReason: 'blocked', freshness: 'fresh', lastReportMin: -3, progress: { percent: 69, trusted: true, confidence: 'high' }, eta: { landMin: 67, trusted: true, confidence: 'high' }, blockers: ['permissions fixture fails on case 84'] },
   { activityKind: 'deploying', activity: 'Deploying region 3 of 5', health: 'healthy', attention: 0, attentionReason: null, freshness: 'fresh', lastReportMin: 0, progress: { percent: 91, trusted: true, confidence: 'high' }, eta: { landMin: 14, trusted: true, confidence: 'high' } },
-  { activityKind: 'working', activity: 'Profiling onboarding trace', health: 'healthy', attention: 0, attentionReason: null, freshness: 'aging', lastReportMin: -9, progress: { percent: 58, trusted: false, confidence: 'low' }, eta: { landMin: 78, trusted: false, confidence: 'low' } },
+  { activityKind: 'working', activity: 'Profiling onboarding trace', health: 'healthy', attention: 0, attentionReason: null, freshness: 'aging', lastReportMin: -9, progress: { percent: 58, trusted: true, confidence: 'low' }, eta: { landMin: 78, trusted: true, confidence: 'low' } },
   { activityKind: 'testing', activity: 'Running case 84 of 112', health: 'healthy', attention: 0, attentionReason: null, freshness: 'fresh', lastReportMin: -1, progress: { percent: 94, trusted: true, confidence: 'high' }, eta: { landMin: 10, trusted: true, confidence: 'high' } },
-  { activityKind: 'unknown', activity: '', health: 'unknown', attention: 1, attentionReason: 'No report for 41 minutes', freshness: 'stale', lastReportMin: -41, progress: { percent: 47, trusted: true, confidence: 'high' }, eta: { landMin: 97, trusted: true, confidence: 'high' } },
-  { activityKind: 'verifying', activity: 'Smoke-testing the production release', health: 'at_risk', attention: 1, attentionReason: 'Latency threshold exceeded during verification', freshness: 'fresh', lastReportMin: -1, progress: { percent: 96, trusted: true, confidence: 'medium' }, eta: { landMin: 37, trusted: true, confidence: 'medium' } },
+  { activityKind: 'unknown', activity: '', health: 'unknown', attention: 1, attentionReason: 'stale_no_signal', freshness: 'stale', lastReportMin: -41, progress: { percent: 47, trusted: true, confidence: 'high' }, eta: { landMin: 97, trusted: true, confidence: 'high' } },
+  { activityKind: 'verifying', activity: 'Smoke-testing the production release', health: 'attention', attention: 1, attentionReason: 'deployed_unverified', freshness: 'fresh', lastReportMin: -1, progress: { percent: 96, trusted: true, confidence: 'medium' }, eta: { landMin: 37, trusted: true, confidence: 'medium' } },
   { activityKind: 'working', activity: 'Reproducing reconnect drop', health: 'healthy', attention: 0, attentionReason: null, freshness: 'fresh', lastReportMin: -4, progress: null, eta: null },
 ]
 
@@ -124,16 +124,28 @@ export function makeFixtureDelivery(index: number): WireDelivery {
   const variant = VARIANTS[index % VARIANTS.length]
   const stageIndex = index % STAGES.length
   const issueNumber = 812 + index
+  const trustRevision = `tr1_${(index + 1).toString(16).padStart(64, '0')}`
   const stageRows = STAGES.map((key, i) => ({
     key,
+    label: key[0].toUpperCase() + key.slice(1),
     status: i < stageIndex ? 'succeeded' : i === stageIndex ? variant.activityKind === 'blocked' ? 'blocked' : 'active' : 'pending',
     required: true,
     owner: { ...ACTORS[(index + i) % ACTORS.length] },
-    activity: i === stageIndex ? variant.activity : null,
-    evidence: i < stageIndex
-      ? [{ evidence_id: `ev-${issueNumber}-${i + 1}`, kind: 'stage_result', label: `${key} evidence`, status: 'accepted', reported_at: iso(-30 + i) }]
+    ...(i === stageIndex && variant.activity ? { activity: variant.activity } : {}),
+    blockers: i === stageIndex
+      ? (variant.blockers ?? []).map((text) => ({ kind: 'dependency', text }))
       : [],
+    evidence: i < stageIndex
+      ? [{ kind: 'stage_result', status: 'passed', reported_at: iso(-30 + i) }]
+      : [],
+    started_at: i <= stageIndex ? iso(-60 + i * 5) : null,
+    completed_at: i < stageIndex ? iso(-50 + i * 5) : null,
   }))
+  const confidence = variant.progress?.confidence ?? variant.eta?.confidence ?? 'unknown'
+  const rangeOnly = confidence === 'low' && variant.eta != null
+  const optimisticAt = variant.eta ? iso(Math.max(1, variant.eta.landMin - 8)) : null
+  const pessimisticAt = variant.eta ? iso(variant.eta.landMin + 15) : null
+  const landingAt = variant.eta && !rangeOnly ? iso(variant.eta.landMin) : null
   return {
     delivery_id: `dlv-${issueNumber}`,
     issue_id: 5000 + index,
@@ -145,32 +157,23 @@ export function makeFixtureDelivery(index: number): WireDelivery {
     epic_id: epic?.id ?? null,
     epic_key: epic?.key ?? null,
     epic_title: epic?.title ?? null,
+    lane_key: laneKeyFor(project.id, epic?.id ?? null),
     attempt_id: `attempt-${issueNumber}-1`,
     attempt_number: 1,
-    attempt_status: variant.activityKind === 'blocked' ? 'blocked' : 'active',
+    attempt_status: 'active',
     plan_revision: `plan:${issueNumber}:1`,
     delivery_revision: `delivery:${issueNumber}:1`,
-    trust_revision: `trust:${issueNumber}:1`,
+    trust_revision: trustRevision,
     tags: index % 4 === 0 ? ['security'] : [],
     actor: { ...actor },
     activity: {
       kind: variant.activityKind,
-      text: variant.activity || null,
+      ...(variant.activity ? { text: variant.activity } : {}),
       since: iso(-15 - (index % 7) * 4),
     },
-    stage: { key: STAGES[stageIndex], index: stageIndex + 1, total: STAGES.length },
+    stage: { key: STAGES[stageIndex], label: STAGES[stageIndex][0].toUpperCase() + STAGES[stageIndex].slice(1), index: stageIndex + 1, total: STAGES.length },
     stages: stageRows,
     evidence: stageRows.flatMap((stage) => stage.evidence),
-    handoffs: stageIndex > 0
-      ? [{
-          handoff_id: `handoff-${issueNumber}-${stageIndex}`,
-          from: { ...ACTORS[(index + stageIndex - 1) % ACTORS.length] },
-          to: { ...ACTORS[(index + stageIndex) % ACTORS.length] },
-          status: 'accepted',
-          summary: `Accepted ${STAGES[stageIndex]} ownership`,
-          reported_at: iso(-20),
-        }]
-      : [],
     capabilities: {
       view_issue: true,
       edit_issue: true,
@@ -180,35 +183,69 @@ export function makeFixtureDelivery(index: number): WireDelivery {
       one_shot_run_active: index % 3 === 0,
     },
     health: variant.health,
-    attention: { level: variant.attention, reason: variant.attentionReason, since: variant.attention ? iso(-12) : null },
+    attention: {
+      level: variant.attention,
+      ...(variant.attentionReason ? { reason: variant.attentionReason } : {}),
+      since: variant.attention ? iso(-12) : null,
+    },
     freshness: { state: variant.freshness, last_report_at: iso(variant.lastReportMin) },
     blockers: (variant.blockers ?? []).map((text) => ({ kind: 'dependency', text })),
     progress: variant.progress
-      ? { percent: variant.progress.percent, trusted: variant.progress.trusted, confidence: variant.progress.confidence, source: 'stage_weights', basis: 'stage evidence', revision: 1 }
+      ? { percent: variant.progress.percent, trusted: true, confidence: variant.progress.confidence, source: 'owner_estimate', basis: 'stage evidence', revision: trustRevision }
       : null,
     eta: variant.eta
       ? {
-          landing_at: iso(variant.eta.landMin),
-          optimistic_at: iso(Math.max(1, variant.eta.landMin - 8)),
-          pessimistic_at: iso(variant.eta.landMin + 15),
-          trusted: variant.eta.trusted,
+          landing_at: landingAt,
+          optimistic_at: optimisticAt,
+          pessimistic_at: pessimisticAt,
+          trusted: true,
           confidence: variant.eta.confidence,
           basis: 'history n=14',
           calculated_at: iso(0),
         }
       : null,
-    status_text: variant.statusText ?? null,
+    trust: {
+      schema_version: 1,
+      trust_revision: trustRevision,
+      progress_known: variant.progress != null,
+      progress_percent: variant.progress?.percent ?? null,
+      confidence_label: confidence,
+      reporter_kind: 'external',
+      source_kind: variant.progress ? 'owner_estimate' : variant.eta ? 'history' : 'stage_evidence',
+      basis: variant.progress ? 'stage evidence' : 'historical stage durations',
+      optimistic_landing_at: optimisticAt,
+      pessimistic_landing_at: pessimisticAt,
+      landing_at: landingAt,
+      range_only: rangeOnly,
+      scope: {
+        attempt_id: `attempt-${issueNumber}-1`,
+        plan_id: `plan:${issueNumber}:1`,
+        execution_id: `execution:${issueNumber}:1`,
+        authority_id: `authority:${issueNumber}:1`,
+        reset_id: `reset:${issueNumber}:0`,
+      },
+      flags: [],
+    },
+    ...(variant.statusText ? { status_text: variant.statusText } : {}),
     updated_at: iso(variant.lastReportMin),
   }
 }
 
-export function makeFixtureSnapshot(count: 1 | 10 | 100 | number, serverTime = FIXTURE_BASE_TIME): WireSnapshot {
+function makeFixtureRowsSnapshot(count: 1 | 10 | 100 | number, serverTime = FIXTURE_BASE_TIME): WireSnapshot {
+  const rows = Array.from({ length: count }, (_, i) => makeFixtureDelivery(i))
   return {
     schema_version: 1,
     server_time: serverTime,
-    cursor: `fixture-cursor-${count}`,
-    rows: Array.from({ length: count }, (_, i) => makeFixtureDelivery(i)),
+    cursor: `${String.fromCharCode(65 + (count % 26)).repeat(210)}A`,
+    rows,
   }
+}
+
+/** Production-shaped DEV/test fixture. The frozen API always emits the
+ * server-owned aggregate projection, so callers should not accidentally
+ * exercise an obsolete row-derived compatibility path. */
+export function makeFixtureSnapshot(count: 1 | 10 | 100 | number, serverTime = FIXTURE_BASE_TIME): WireSnapshot {
+  return makeFixtureAggregateSnapshot(count, serverTime)
 }
 
 type WireCountSet = {
@@ -226,7 +263,7 @@ const AGGREGATE_FLAGS = [
 const AGGREGATE_LANDING = ['within_4h', 'within_24h', 'within_3d', 'later', 'range_only', 'suppressed_or_unknown'] as const
 const ATTENTION_REASONS = [
   'blocked', 'waiting_needs_input', 'failed_needs_retry', 'stale_no_signal',
-  'unknown_reporter', 'deployed_unverified', 'unverified', 'other',
+  'unknown_reporter', 'deployed_unverified', 'unverified',
 ] as const
 
 function emptyCountSet(): WireCountSet {
@@ -247,7 +284,6 @@ function aggregateReasonFlags(row: WireDelivery): Array<(typeof ATTENTION_REASON
   if (!row.actor?.name) flags.push('unknown_reporter')
   if (row.stage?.key === 'deployment') flags.push('deployed_unverified')
   if (row.stage?.key === 'deployment' || row.stage?.key === 'verification') flags.push('unverified')
-  if ((row.attention?.level ?? 0) > 0 && !flags.some((flag) => flag !== 'unverified')) flags.push('other')
   return flags
 }
 
@@ -268,13 +304,19 @@ function addRow(counts: WireCountSet, row: WireDelivery, calculatedMs: number) {
   if (reasons.includes('unverified')) counts.flags.unverified += 1
   if (reasons.includes('unknown_reporter')) counts.flags.unknown_reporter += 1
 
-  const eta = row.eta
-  if (!eta || eta.trusted !== true || !eta.landing_at) {
+  const trust = row.trust as {
+    suppression?: string
+    landing_at?: string | null
+    range_only?: boolean
+  } | null
+  if (!trust || trust.suppression) {
     counts.landing.suppressed_or_unknown += 1
-  } else if (eta.confidence === 'low') {
+  } else if (trust.range_only) {
     counts.landing.range_only += 1
+  } else if (!trust.landing_at) {
+    counts.landing.suppressed_or_unknown += 1
   } else {
-    const remaining = Date.parse(eta.landing_at) - calculatedMs
+    const remaining = Date.parse(trust.landing_at) - calculatedMs
     if (remaining <= 4 * 60 * 60_000) counts.landing.within_4h += 1
     else if (remaining <= 24 * 60 * 60_000) counts.landing.within_24h += 1
     else if (remaining <= 3 * 24 * 60 * 60_000) counts.landing.within_3d += 1
@@ -292,8 +334,15 @@ function addCountSet(target: WireCountSet, source: WireCountSet) {
 /** Deterministic strict schema-v1 fixture. Aggregate calculation lives only
  * in this test/DEV module; production never imports or reconstructs it. */
 export function makeFixtureAggregateSnapshot(count: 1 | 10 | 100 | number, serverTime = FIXTURE_BASE_TIME): WireSnapshot {
-  const snapshot = makeFixtureSnapshot(count, serverTime)
+  return rebuildFixtureAggregates(makeFixtureRowsSnapshot(count, serverTime))
+}
+
+/** Rebuilds the strict aggregate projection after a test/DEV fixture mutates
+ * row membership or classification. Production code must never call this. */
+export function rebuildFixtureAggregates(snapshot: WireSnapshot): WireSnapshot {
   const rows = snapshot.rows ?? []
+  const count = rows.length
+  const serverTime = snapshot.server_time ?? FIXTURE_BASE_TIME
   const calculatedMs = Date.parse(serverTime)
   const grouped = new Map<number, { key: string; name: string; lanes: Map<string, WireDelivery[]> }>()
   for (const row of rows) {
@@ -367,13 +416,17 @@ export function makeFixtureAggregateSnapshot(count: 1 | 10 | 100 | number, serve
       return left.delivery_id.localeCompare(right.delivery_id)
     })
 
-  snapshot.selected_delivery = rows[0]?.delivery_id ?? null
+  if (typeof snapshot.selected_delivery !== 'string') {
+    snapshot.selected_delivery = attentionItems[0]?.delivery_id ?? rows[0]?.delivery_id ?? ''
+  }
   snapshot.aggregates = {
     schema_version: 1,
-    structural_revision: `fixture-structural-${count}`,
-    classification_revision: `fixture-classification-${count}`,
+    structural_revision: `am_s1_${count.toString(16).padStart(64, '0')}`,
+    classification_revision: `am_c1_${(count + 1).toString(16).padStart(64, '0')}`,
     calculated_at: serverTime,
-    next_refresh_at: new Date(calculatedMs + 10 * 60_000).toISOString(),
+    // Structural fixtures must not acquire an immediate wall-clock refresh as
+    // their checked-in date ages. Timer-specific tests opt in explicitly.
+    next_refresh_at: null,
     root,
     projects,
     attention: { total: attentionItems.length, items: attentionItems.slice(0, 12) },

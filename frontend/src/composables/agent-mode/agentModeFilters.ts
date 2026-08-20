@@ -20,6 +20,10 @@
 // filter is pinned above the results with the reason.
 
 import type { Delivery } from '@/services/agentMode'
+import {
+  trimAgentModeSpace,
+  type AgentModeDeliveryState,
+} from '@/services/agentModeTransport'
 
 export type HealthFilter = 'all' | 'attention' | 'blocked' | 'stale'
 
@@ -28,14 +32,24 @@ export interface AgentModeFilters {
   laneKey: string | null
   health: HealthFilter
   query: string
+  states?: readonly AgentModeDeliveryState[]
+  attention?: 'all' | 'required'
 }
 
-export type FilterExclusion = 'project' | 'lane' | 'health' | 'query'
+export type FilterExclusion = 'project' | 'lane' | 'health' | 'query' | 'server'
 
-export const EMPTY_FILTERS: AgentModeFilters = { projectId: null, laneKey: null, health: 'all', query: '' }
+export const EMPTY_FILTERS: AgentModeFilters = {
+  projectId: null,
+  laneKey: null,
+  health: 'all',
+  query: '',
+  states: [],
+  attention: 'all',
+}
 
 export function filtersActive(f: AgentModeFilters): boolean {
-  return f.projectId != null || f.laneKey != null || f.health !== 'all' || f.query.trim() !== ''
+  return f.projectId != null || f.laneKey != null || f.health !== 'all' || trimAgentModeSpace(f.query) !== ''
+    || (f.states?.length ?? 0) > 0 || f.attention === 'required'
 }
 
 function matchesHealth(d: Delivery, health: HealthFilter): boolean {
@@ -54,7 +68,7 @@ function matchesHealth(d: Delivery, health: HealthFilter): boolean {
 }
 
 function matchesQuery(d: Delivery, query: string): boolean {
-  const q = query.trim().toLowerCase()
+  const q = trimAgentModeSpace(query).toLowerCase()
   if (q === '') return true
   const hay = [
     d.issueKey,

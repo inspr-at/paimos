@@ -122,6 +122,29 @@ describe('agentModeTrust (client side of PAI-803)', () => {
     expect(view.remainingLabel).toBeNull()
   })
 
+  it.each([
+    ['equal bounds', '2026-08-20T16:30:00.000000001Z', '2026-08-20T16:30:00.000000001Z', true],
+    ['one-nanosecond increase', '2026-08-20T16:30:00.000000001Z', '2026-08-20T16:30:00.000000002Z', true],
+    ['one-nanosecond reversal', '2026-08-20T16:30:00.000000002Z', '2026-08-20T16:30:00.000000001Z', false],
+  ] as const)('compares low-confidence %s with RFC3339Nano precision', (_label, optimisticAt, pessimisticAt, eligible) => {
+    const ranged = d({
+      health: 'healthy',
+      activity: { kind: 'working', text: 'x', since: null },
+      freshness: { state: 'fresh', lastReportAt: null },
+      eta: { ...trustedEta, confidence: 'low', landingAt: null, optimisticAt, pessimisticAt },
+    })
+    const presentation = estimatePresentation(ranged)
+    expect(presentation.showEta).toBe(eligible)
+    expect(presentation.rangeOnly).toBe(eligible)
+    expect(presentation.etaReason).toBe(eligible ? 'ok' : 'invalid')
+    if (eligible) {
+      const view = estimateView(ranged, 'en-US', Date.parse('2026-08-20T16:00:00Z'))
+      expect(view.rangeLabel).toContain('–')
+      expect(view.landingLabel).toBeNull()
+      expect(view.remainingLabel).toBeNull()
+    }
+  })
+
   it('preserves authoritative bounds alongside a confident point estimate', () => {
     const point = d({
       health: 'healthy',

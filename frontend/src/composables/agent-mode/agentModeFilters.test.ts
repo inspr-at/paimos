@@ -30,6 +30,13 @@ describe('agentModeFilters (PAI-805)', () => {
     expect(exclusionReason(ten[0], EMPTY_FILTERS)).toBeNull()
   })
 
+  it('uses Go TrimSpace semantics when deciding whether query is active', () => {
+    expect(filtersActive({ ...EMPTY_FILTERS, query: '\u0085' })).toBe(false)
+    expect(filtersActive({ ...EMPTY_FILTERS, query: '\uFEFF' })).toBe(true)
+    expect(applyFilters(ten, { ...EMPTY_FILTERS, query: '\u0085' })).toEqual(ten)
+    expect(applyFilters(ten, { ...EMPTY_FILTERS, query: '\uFEFF' })).toEqual([])
+  })
+
   it('reports the first reason a delivery is excluded (project → health → query)', () => {
     const other = ten.find((d) => d.lane.projectId !== ten[0].lane.projectId)!
     const f = { projectId: ten[0].lane.projectId, laneKey: null, health: 'blocked' as const, query: 'zzz' }

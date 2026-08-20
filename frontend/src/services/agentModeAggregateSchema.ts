@@ -52,10 +52,10 @@ export const ATTENTION_REASON_KEYS = [
   'stale_no_signal',
   'unknown_reporter',
   'deployed_unverified',
-  'unverified',
-  'other',
 ] as const
 export type AttentionReasonKey = (typeof ATTENTION_REASON_KEYS)[number]
+export const ATTENTION_FLAG_KEYS = [...ATTENTION_REASON_KEYS, 'unverified'] as const
+export type AttentionFlagKey = (typeof ATTENTION_FLAG_KEYS)[number]
 
 export type AggregatePartition<T extends string> = Record<T, number>
 
@@ -86,7 +86,7 @@ export interface AgentModeAttentionAggregateItem {
   deliveryId: string
   level: 1 | 2 | 3
   primaryReason: AttentionReasonKey
-  flags: AttentionReasonKey[]
+  flags: AttentionFlagKey[]
   since: string | null
 }
 
@@ -120,6 +120,11 @@ export interface AgentModeAggregateStructuralRow {
     epicKey: string | null
     epicTitle: string | null
   }
+  attention: {
+    level: 0 | 1 | 2 | 3
+    reason: string | null
+    since: string | null
+  }
 }
 
 export type AgentModeAggregateUnavailableReason = 'missing' | 'unsupported-schema' | 'malformed'
@@ -145,6 +150,8 @@ const PROJECT_KEYS = ['project_id', 'project_key', 'project_name', 'counts', 'la
 const LANE_KEYS = ['lane_key', 'epic_id', 'epic_key', 'epic_title', 'counts'] as const
 const ATTENTION_KEYS = ['total', 'items'] as const
 const ATTENTION_ITEM_KEYS = ['delivery_id', 'level', 'primary_reason', 'flags', 'since'] as const
+const STRUCTURAL_REVISION = /^am_s1_[0-9a-f]{64}$/
+const CLASSIFICATION_REVISION = /^am_c1_[0-9a-f]{64}$/
 
 function record(value: unknown): UnknownRecord | null {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) return null
@@ -170,10 +177,8 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' && value === value.trim() ? value : null
 }
 
-function nullableNonEmptyString(value: unknown): string | null | undefined {
-  if (value === null) return null
-  const parsed = nonEmptyString(value)
-  return parsed ?? undefined
+function nullableString(value: unknown): string | null | undefined {
+  return value === null ? null : typeof value === 'string' ? value : undefined
 }
 
 /** Strict ISO instant parser for schema-v1 clocks. Date.parse alone is not
@@ -182,7 +187,7 @@ function nullableNonEmptyString(value: unknown): string | null | undefined {
 export function parseIsoInstant(value: unknown): string | null {
   const parsed = nonEmptyString(value)
   if (!parsed) return null
-  const match = parsed.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/)
+  const match = parsed.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/)
   if (!match) return null
   const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, offsetHourRaw, offsetMinuteRaw] = match
   const year = Number(yearRaw)
@@ -202,6 +207,24 @@ export function parseIsoInstant(value: unknown): string | null {
     || offsetHour > 23 || offsetMinute > 59
   ) return null
   return Number.isFinite(Date.parse(parsed)) ? parsed : null
+}
+
+/** Exact instant comparison retaining RFC3339 fractional precision beyond
+ * JavaScript Date's milliseconds. */
+export function compareIsoInstants(left: string, right: string): number | null {
+  if (!parseIsoInstant(left) || !parseIsoInstant(right)) return null
+  const nanos = (value: string): bigint | null => {
+    const match = value.match(/^(.*:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/)
+    if (!match) return null
+    const wholeMs = Date.parse(`${match[1]}${match[3]}`)
+    if (!Number.isFinite(wholeMs)) return null
+    const fraction = (match[2] ?? '').padEnd(9, '0').slice(0, 9)
+    return BigInt(wholeMs) * 1_000_000n + BigInt(fraction || '0')
+  }
+  const leftNanos = nanos(left)
+  const rightNanos = nanos(right)
+  if (leftNanos == null || rightNanos == null) return null
+  return leftNanos < rightNanos ? -1 : leftNanos > rightNanos ? 1 : 0
 }
 
 function nullableIsoInstant(value: unknown): string | null | undefined {
@@ -296,8 +319,8 @@ function parseLane(value: unknown, projectId: number): AgentModeLaneAggregate | 
     if (parsed == null) return null
     epicId = parsed
   }
-  const epicKey = nullableNonEmptyString(source.epic_key)
-  const epicTitle = nullableNonEmptyString(source.epic_title)
+  const epicKey = nullableString(source.epic_key)
+  const epicTitle = nullableString(source.epic_title)
   const counts = parseCountSet(source.counts)
   if (!laneKey || epicId === undefined || epicKey === undefined || epicTitle === undefined || !counts || counts.activeTotal <= 0) return null
   const expectedLaneKey = epicId == null
@@ -319,11 +342,11 @@ function parseProject(value: unknown): AgentModeProjectAggregate | null {
   const source = record(value)
   if (!source || !exactKeys(source, PROJECT_KEYS) || !Array.isArray(source.lanes)) return null
   const projectId = positiveSafeInteger(source.project_id)
-  const projectKey = nonEmptyString(source.project_key)
-  const projectName = nonEmptyString(source.project_name)
+  const projectKey = typeof source.project_key === 'string' ? source.project_key : null
+  const projectName = typeof source.project_name === 'string' ? source.project_name : null
   const counts = parseCountSet(source.counts)
   if (
-    projectId == null || !projectKey || !projectName || !counts
+    projectId == null || projectKey === null || projectName === null || !counts
     || counts.activeTotal <= 0
     || source.lanes.length === 0
     || source.lanes.length > counts.activeTotal
@@ -342,14 +365,17 @@ function parseProject(value: unknown): AgentModeProjectAggregate | null {
   return { projectId, projectKey, projectName, counts, lanes }
 }
 
-function expectedAttentionLevel(flags: readonly AttentionReasonKey[]): 1 | 2 | 3 | null {
+function expectedAttentionLevel(flags: readonly AttentionFlagKey[]): 1 | 2 | 3 | null {
   if (flags.includes('blocked')) return 3
   if (flags.includes('waiting_needs_input') || flags.includes('failed_needs_retry')) return 2
   if (flags.some((flag) => flag !== 'unverified')) return 1
   return null
 }
 
-function parseAttentionItem(value: unknown, deliveryIds: ReadonlySet<string>): AgentModeAttentionAggregateItem | null {
+function parseAttentionItem(
+  value: unknown,
+  rowsById: ReadonlyMap<string, AgentModeAggregateStructuralRow>,
+): AgentModeAttentionAggregateItem | null {
   const source = record(value)
   if (!source || !exactKeys(source, ATTENTION_ITEM_KEYS) || !Array.isArray(source.flags)) return null
   const deliveryId = nonEmptyString(source.delivery_id)
@@ -358,22 +384,27 @@ function parseAttentionItem(value: unknown, deliveryIds: ReadonlySet<string>): A
     ? source.primary_reason as AttentionReasonKey
     : null
   const since = nullableIsoInstant(source.since)
-  if (!deliveryId || !deliveryIds.has(deliveryId) || (level !== 1 && level !== 2 && level !== 3) || !primaryReason || since === undefined) return null
+  const row = deliveryId ? rowsById.get(deliveryId) : null
+  if (!deliveryId || !row || (level !== 1 && level !== 2 && level !== 3) || !primaryReason || since === undefined) return null
 
-  const flags: AttentionReasonKey[] = []
+  const flags: AttentionFlagKey[] = []
   let previousIndex = -1
   for (const raw of source.flags) {
     if (typeof raw !== 'string') return null
-    const index = ATTENTION_REASON_KEYS.indexOf(raw as AttentionReasonKey)
+    const index = ATTENTION_FLAG_KEYS.indexOf(raw as AttentionFlagKey)
     if (index < 0 || index <= previousIndex) return null
     previousIndex = index
-    flags.push(raw as AttentionReasonKey)
+    flags.push(raw as AttentionFlagKey)
   }
   if (flags.length === 0 || flags[0] !== primaryReason || expectedAttentionLevel(flags) !== level) return null
+  if (row.attention.level !== level || row.attention.reason !== primaryReason || row.attention.since !== since) return null
   return { deliveryId, level, primaryReason, flags, since }
 }
 
-function parseAttention(value: unknown, deliveryIds: ReadonlySet<string>): AgentModeAttentionAggregate | null {
+function parseAttention(
+  value: unknown,
+  rowsById: ReadonlyMap<string, AgentModeAggregateStructuralRow>,
+): AgentModeAttentionAggregate | null {
   const source = record(value)
   if (!source || !exactKeys(source, ATTENTION_KEYS) || !Array.isArray(source.items)) return null
   const total = safeCount(source.total)
@@ -381,7 +412,7 @@ function parseAttention(value: unknown, deliveryIds: ReadonlySet<string>): Agent
   const items: AgentModeAttentionAggregateItem[] = []
   const seen = new Set<string>()
   for (const raw of source.items) {
-    const item = parseAttentionItem(raw, deliveryIds)
+    const item = parseAttentionItem(raw, rowsById)
     if (!item || seen.has(item.deliveryId)) return null
     const previous = items[items.length - 1]
     if (previous) {
@@ -390,7 +421,7 @@ function parseAttention(value: unknown, deliveryIds: ReadonlySet<string>): Agent
         : ATTENTION_REASON_KEYS.indexOf(previous.primaryReason) !== ATTENTION_REASON_KEYS.indexOf(item.primaryReason)
           ? ATTENTION_REASON_KEYS.indexOf(previous.primaryReason) - ATTENTION_REASON_KEYS.indexOf(item.primaryReason)
           : previous.since !== item.since
-            ? (previous.since == null ? 1 : item.since == null ? -1 : Date.parse(previous.since) - Date.parse(item.since))
+            ? (previous.since == null ? 1 : item.since == null ? -1 : bytewise(previous.since, item.since))
             : bytewise(previous.deliveryId, item.deliveryId)
       if (order >= 0) return null
     }
@@ -409,7 +440,7 @@ export function parseAgentModeAggregates(
   value: unknown,
   activeRows: readonly AgentModeAggregateStructuralRow[],
 ): AgentModeAggregateParseResult {
-  if (value == null) return { ok: false, reason: 'missing' }
+  if (value === undefined) return { ok: false, reason: 'missing' }
   const source = record(value)
   if (!source) return { ok: false, reason: 'malformed' }
   if (source.schema_version !== AGENT_MODE_AGGREGATE_SCHEMA_VERSION) {
@@ -424,10 +455,14 @@ export function parseAgentModeAggregates(
   const calculatedAt = parseIsoInstant(source.calculated_at)
   const nextRefreshAt = nullableIsoInstant(source.next_refresh_at)
   const root = parseCountSet(source.root)
-  if (!structuralRevision || !classificationRevision || !calculatedAt || nextRefreshAt === undefined || !root) {
+  if (
+    !structuralRevision || !STRUCTURAL_REVISION.test(structuralRevision)
+    || !classificationRevision || !CLASSIFICATION_REVISION.test(classificationRevision)
+    || !calculatedAt || nextRefreshAt === undefined || !root
+  ) {
     return { ok: false, reason: 'malformed' }
   }
-  if (nextRefreshAt != null && Date.parse(nextRefreshAt) <= Date.parse(calculatedAt)) {
+  if (nextRefreshAt != null && compareIsoInstants(nextRefreshAt, calculatedAt)! <= 0) {
     return { ok: false, reason: 'malformed' }
   }
   if (source.projects.length > root.activeTotal) return { ok: false, reason: 'malformed' }
@@ -461,9 +496,11 @@ export function parseAgentModeAggregates(
   }
   const rowsByLane = new Map<string, AgentModeAggregateStructuralRow[]>()
   const deliveryIds = new Set<string>()
+  const rowsById = new Map<string, AgentModeAggregateStructuralRow>()
   for (const row of activeRows) {
     if (deliveryIds.has(row.id)) return { ok: false, reason: 'malformed' }
     deliveryIds.add(row.id)
+    rowsById.set(row.id, row)
     rowsByLane.set(row.lane.key, [...(rowsByLane.get(row.lane.key) ?? []), row])
   }
   for (const project of projects) {
@@ -487,12 +524,14 @@ export function parseAgentModeAggregates(
     if (projectRowCount !== project.counts.activeTotal) return { ok: false, reason: 'malformed' }
   }
   if (rowsByLane.size !== 0) return { ok: false, reason: 'malformed' }
-  const attention = parseAttention(source.attention, deliveryIds)
-  if (!attention || attention.total !== root.flags.attention) return { ok: false, reason: 'malformed' }
+  const attention = parseAttention(source.attention, rowsById)
+  const attentiveRows = activeRows.filter((row) => row.attention.level > 0).length
+  if (!attention || attention.total !== root.flags.attention || attention.total !== attentiveRows) {
+    return { ok: false, reason: 'malformed' }
+  }
   const visibleReasonCounts: Partial<Record<AggregateFlagKey, number>> = {}
   for (const item of attention.items) {
     for (const reason of item.flags) {
-      if (reason === 'other') continue
       visibleReasonCounts[reason] = (visibleReasonCounts[reason] ?? 0) + 1
     }
   }

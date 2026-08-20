@@ -17,9 +17,8 @@ import type { Delivery } from '@/services/agentMode'
 import type {
   AgentModeAttentionAggregate,
   AgentModeAttentionAggregateItem,
-  AttentionReasonKey,
+  AttentionFlagKey,
 } from '@/services/agentModeAggregateSchema'
-import { compareDeliveries } from '@/composables/agent-mode/agentModeOrdering'
 import { formatRelativeTimeWithLocale } from '@/composables/useDateFormat'
 import AgentModeActivityGlyph from './AgentModeActivityGlyph.vue'
 
@@ -51,11 +50,7 @@ const items = computed<DisplayItem[]>(() => {
       })
       .slice(0, props.max ?? 3)
   }
-  return props.deliveries
-    .filter((delivery) => delivery.attention.level > 0 && delivery.id !== props.selectedId)
-    .sort(compareDeliveries)
-    .slice(0, props.max ?? 3)
-    .map((delivery) => ({ delivery, aggregate: null }))
+  return []
 })
 
 // The authoritative total covers every attentive delivery in the active,
@@ -73,8 +68,7 @@ const hiddenCount = computed(() => {
   if (props.authoritative) {
     return Math.max(0, props.authoritative.total - (selectedIsActiveAttention.value ? 1 : 0) - items.value.length)
   }
-  const total = props.deliveries.filter((d) => d.attention.level > 0 && d.id !== props.selectedId).length
-  return Math.max(0, total - items.value.length)
+  return 0
 })
 
 // A valid aggregate may intentionally omit its optional bounded sample, and
@@ -82,7 +76,7 @@ const hiddenCount = computed(() => {
 // Keep the authoritative total discoverable without fabricating item rows.
 const showStrip = computed(() => props.authoritative
   ? props.authoritative.total > 0 || hiddenCount.value > 0
-  : items.value.length > 0)
+  : false)
 
 function since(item: DisplayItem): string | null {
   const value = item.aggregate?.since ?? item.delivery.attention.since
@@ -98,7 +92,7 @@ function primary(item: DisplayItem): string {
   return item.delivery.attention.reason ?? item.delivery.activity.text ?? t(`agentMode.health.${item.delivery.health}`)
 }
 
-function reasonLabel(reason: AttentionReasonKey): string {
+function reasonLabel(reason: AttentionFlagKey): string {
   return t(`agentMode.aggregate.reason.${reason}`)
 }
 </script>

@@ -49,6 +49,9 @@ export interface UseAgentModeSelectionOptions {
    * current selection is null or no longer authorized, so refreshes cannot
    * steal an extant selection. */
   fallbackId?: Ref<string | null>
+  /** Keep the user's identity while a changed server scope has no replacement
+   * snapshot yet. Authorization/not-found states leave this false and clear. */
+  retainOnEmpty?: Ref<boolean>
   storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
   now?: () => number
 }
@@ -99,6 +102,7 @@ export function useAgentModeSelection(opts: UseAgentModeSelectionOptions) {
   /** Re-resolves against the current deliveries (call after each snapshot). */
   function reconcile() {
     const list = opts.deliveries.value
+    if (list.length === 0 && opts.retainOnEmpty?.value) return
     if (selectedId.value && list.some((delivery) => delivery.id === selectedId.value)) return
     let remembered = readRemembered(storage, opts.storageKey.value)
     if (!preferredConsumed && opts.preferredId?.value) {
@@ -106,12 +110,16 @@ export function useAgentModeSelection(opts: UseAgentModeSelectionOptions) {
       if (list.some((d) => d.id === opts.preferredId!.value)) remembered = opts.preferredId.value
       preferredConsumed = list.length > 0
     }
+    if (remembered && list.some((delivery) => delivery.id === remembered)) {
+      commit(remembered, 'restored', 'system')
+      return
+    }
     const fallback = opts.fallbackId?.value
     if (fallback && list.some((delivery) => delivery.id === fallback)) {
       commit(fallback, 'default', 'system')
       return
     }
-    const choice = resolveSelection(list, selectedId.value, remembered)
+    const choice = resolveSelection(list, selectedId.value, null)
     if (choice.origin === 'kept') return
     commit(choice.id, choice.origin, 'system')
   }
@@ -147,6 +155,7 @@ export function useAgentModeSelection(opts: UseAgentModeSelectionOptions) {
 
   watch(opts.deliveries, reconcile, { immediate: true })
   if (opts.fallbackId) watch(opts.fallbackId, reconcile)
+  if (opts.retainOnEmpty) watch(opts.retainOnEmpty, (retain) => { if (!retain) reconcile() })
   watch(opts.storageKey, reconcile)
 
   const selectedIndex = computed(() => {

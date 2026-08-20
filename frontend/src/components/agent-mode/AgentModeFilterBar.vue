@@ -16,7 +16,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import AppIcon from '@/components/AppIcon.vue'
-import type { Delivery } from '@/services/agentMode'
+import type { AgentModeAggregates, AgentModeCountSet } from '@/services/agentModeAggregateSchema'
 import {
   filtersActive,
   nextRadioIndex,
@@ -26,35 +26,34 @@ import {
 
 const props = defineProps<{
   filters: AgentModeFilters
-  deliveries: readonly Delivery[]
+  aggregates: AgentModeAggregates | null
 }>()
 
-const emit = defineEmits<{ 'update:filters': [value: AgentModeFilters] }>()
+const emit = defineEmits<{ 'update:filters': [patch: Partial<AgentModeFilters>] }>()
 const { t } = useI18n()
 
 const projects = computed(() => {
-  const m = new Map<number, { id: number; key: string; name: string; count: number }>()
-  for (const d of props.deliveries) {
-    const p = m.get(d.lane.projectId)
-    if (p) p.count += 1
-    else m.set(d.lane.projectId, { id: d.lane.projectId, key: d.lane.projectKey, name: d.lane.projectName, count: 1 })
-  }
-  return [...m.values()].sort((a, b) => a.name.localeCompare(b.name))
+  return (props.aggregates?.projects ?? []).map((project) => ({
+    id: project.projectId,
+    key: project.projectKey,
+    name: project.projectName,
+    count: project.counts.activeTotal,
+  }))
 })
 
-type HealthOption = { value: HealthFilter; count: (list: readonly Delivery[]) => number }
+type HealthOption = { value: HealthFilter; count: (root: AgentModeCountSet) => number }
 const healthOptions: HealthOption[] = [
-  { value: 'all', count: (l) => l.length },
-  { value: 'attention', count: (l) => l.filter((d) => d.attention.level > 0 || d.health === 'attention' || d.health === 'at_risk').length },
-  { value: 'blocked', count: (l) => l.filter((d) => d.health === 'blocked' || d.activity.kind === 'blocked' || d.blockers.length > 0).length },
-  { value: 'stale', count: (l) => l.filter((d) => d.freshness.state === 'stale' || d.freshness.state === 'unknown').length },
+  { value: 'all', count: (root) => root.activeTotal },
+  { value: 'attention', count: (root) => root.flags.attention },
+  { value: 'blocked', count: (root) => root.flags.blocked },
+  { value: 'stale', count: (root) => root.flags.stale_no_signal },
 ]
 
 const active = computed(() => filtersActive(props.filters))
 const healthGroup = ref<HTMLElement | null>(null)
 
 function update(patch: Partial<AgentModeFilters>) {
-  emit('update:filters', { ...props.filters, ...patch })
+  emit('update:filters', patch)
 }
 
 function onProject(event: Event) {
@@ -67,7 +66,7 @@ function onQuery(event: Event) {
 }
 
 function clear() {
-  update({ projectId: null, laneKey: null, health: 'all', query: '' })
+  update({ projectId: null, laneKey: null, health: 'all', query: '', states: [], attention: 'all' })
 }
 
 function onHealthKeydown(event: KeyboardEvent) {
@@ -120,7 +119,7 @@ function onHealthKeydown(event: KeyboardEvent) {
         @click="update({ health: opt.value })"
       >
         {{ t(`agentMode.filters.health.${opt.value}`) }}
-        <span class="am-filter-count">{{ opt.count(deliveries) }}</span>
+        <span v-if="aggregates" class="am-filter-count">{{ opt.count(aggregates.root) }}</span>
       </button>
     </div>
 

@@ -29,7 +29,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteUpdate, useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 
 import AppIcon from '@/components/AppIcon.vue'
 import IssueSidePanel from '@/components/IssueSidePanel.vue'
@@ -44,8 +44,6 @@ import AgentModeSelectedFocus from '@/components/agent-mode/AgentModeSelectedFoc
 import AgentModeStateNotice from '@/components/agent-mode/AgentModeStateNotice.vue'
 import { COMPACT_CONVERSATION_QUERY, TIGHT_EDITOR_QUERY, estimateView } from '@/components/agent-mode/agentModePresentation'
 import {
-  applyFilters,
-  exclusionReason,
   type AgentModeFilters,
   type HealthFilter,
 } from '@/composables/agent-mode/agentModeFilters'
@@ -70,9 +68,14 @@ import { formatRelativeTimeWithLocale, formatTimeWithLocale, useDateFormat } fro
 import { lsAgentModeSelectedKey } from '@/constants/storage'
 import type { AgentModeSnapshotLoader, Delivery } from '@/services/agentMode'
 import type { AgentModeAggregates } from '@/services/agentModeAggregateSchema'
+import type { AgentModeEventSourceFactory } from '@/services/agentModeEvents'
 import {
+  AGENT_MODE_DELIVERY_STATES,
+  parseAgentModeDeliveryKey,
   parseAgentModeLaneFilter,
   parseAgentModeProjectFilter,
+  trimAgentModeSpace,
+  type AgentModeDeliveryState,
   type AgentModeSnapshotQuery,
 } from '@/services/agentModeTransport'
 import { useAuthStore } from '@/stores/auth'
@@ -81,8 +84,14 @@ const props = defineProps<{
   /** Override the snapshot loader (tests / DEV reference). Production
    * resolves to the real API when neither prop nor injection is set. */
   loader?: AgentModeSnapshotLoader
+  /** Deterministic stream seam for component tests. Supplying one explicitly
+   * opts a custom loader into the production dedicated-stream lifecycle. */
+  eventSourceFactory?: AgentModeEventSourceFactory
   /** Shown in the live chip when the data is known to be fixture-backed. */
   sourceLabel?: string
+  /** DEV reference owns `n`/`state` as fixture controls rather than snapshot
+   * filters. Production routes never set this escape hatch. */
+  devReference?: boolean
 }>()
 
 const route = useRoute()
@@ -92,29 +101,34 @@ const { t } = useI18n()
 const { locale } = useDateFormat()
 
 const injectedLoader = inject(AGENT_MODE_LOADER_KEY, null)
-function initialSelectedQuery(): string | null {
-  if (typeof route.query.delivery === 'string' && route.query.delivery.trim()) return route.query.delivery
+function initialSelectedQuery(): unknown {
+  if (route.query.delivery !== undefined) return route.query.delivery ?? ''
   try {
-    return localStorage.getItem(lsAgentModeSelectedKey(auth.user?.id))
+    const key = lsAgentModeSelectedKey(auth.user?.id)
+    const stored = localStorage.getItem(key)
+    if (stored == null) return null
+    const canonical = parseAgentModeDeliveryKey(stored)
+    if (canonical) return canonical
+    localStorage.removeItem(key)
+    return null
   } catch {
     return null
   }
 }
-const selectedQueryId = ref<string | null>(initialSelectedQuery())
+const initialSelectionInput = initialSelectedQuery()
+const selectedQueryId = ref<unknown>(initialSelectionInput)
+const initialPreferredId = parseAgentModeDeliveryKey(initialSelectionInput)
 // One canonical URL boundary feeds both transport identity and presentation;
 // downstream code never reparses or repairs project/lane values differently.
-const canonicalRouteFilters = computed<AgentModeFilters>(() => parseFilters())
+const canonicalRouteBoundary = computed(() => parseFilters())
+const canonicalRouteFilters = computed<AgentModeFilters>(() => canonicalRouteBoundary.value.filters)
 const snapshotQuery = computed<AgentModeSnapshotQuery>(() => {
-  const activeFilters = canonicalRouteFilters.value
   return {
-    projectId: activeFilters.projectId,
-    laneKey: activeFilters.laneKey,
-    health: activeFilters.health,
-    q: activeFilters.query,
-    selectedDelivery: selectedQueryId.value,
+    ...canonicalRouteBoundary.value.query,
+    selectedDelivery: selectedQueryId.value as string | null,
   }
 })
-function clearRejectedSelectedDelivery(deliveryId: string) {
+async function clearRejectedSelectedDelivery(deliveryId: string) {
   if (selectedQueryId.value === deliveryId) selectedQueryId.value = null
   try {
     const key = lsAgentModeSelectedKey(auth.user?.id)
@@ -122,13 +136,14 @@ function clearRejectedSelectedDelivery(deliveryId: string) {
   } catch {
     /* storage may be unavailable; the in-memory/query identity is still cleared */
   }
-  void replaceQuery({ delivery: undefined })
+  await replaceQuery({ delivery: undefined })
 }
 const data = useAgentModeDeliveries({
   loader: props.loader ?? injectedLoader ?? undefined,
   query: snapshotQuery,
   reloadOnQueryChange: false,
   onSelectedDeliveryRejected: clearRejectedSelectedDelivery,
+  eventSourceFactory: props.eventSourceFactory,
 })
 
 // ── Clock: server-aligned "now" (PAI-803 clock-skew rule) ───────────────
@@ -136,7 +151,6 @@ const nowMs = ref(Date.now())
 const serverNowMs = computed(() => nowMs.value + data.serverOffsetMs.value)
 let clockTimer: ReturnType<typeof setInterval> | null = null
 let retryTimer: ReturnType<typeof setInterval> | null = null
-let aggregateRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const retryInSeconds = ref<number | null>(null)
 function tickRetry() {
   const at = data.retryAt.value
@@ -176,7 +190,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (clockTimer !== null) clearInterval(clockTimer)
   if (retryTimer !== null) clearInterval(retryTimer)
-  if (aggregateRefreshTimer !== null) clearTimeout(aggregateRefreshTimer)
   if (tombstoneTimer !== null) clearTimeout(tombstoneTimer)
   compactMq?.removeEventListener?.('change', syncCompact)
   editorMq?.removeEventListener?.('change', syncCompact)
@@ -192,67 +205,114 @@ function parseDetail(raw: unknown): DetailLevel {
 const detailLevel = computed<DetailLevel>(() => parseDetail(route.query.detail))
 
 const HEALTH_FILTERS: HealthFilter[] = ['all', 'attention', 'blocked', 'stale']
-function parseFilters(): AgentModeFilters {
-  const healthRaw = String(route.query.health ?? 'all') as HealthFilter
+const DELIVERY_STATES = new Set<string>(AGENT_MODE_DELIVERY_STATES)
+const AGENT_MODE_ROUTE_QUERY_KEYS = new Set([
+  'project', 'lane', 'state', 'attention', 'health', 'q', 'delivery', 'detail',
+])
+function routeContractViolationToken(): string | null {
+  const unknown = Object.keys(route.query).filter((key) => (
+    !AGENT_MODE_ROUTE_QUERY_KEYS.has(key) && !(props.devReference && key === 'n')
+  )).sort()
+  if (unknown.length > 0) return JSON.stringify(unknown.map((key) => [key, route.query[key]]))
+  // Vue Router represents the bare `?state` form as an explicit null. It is
+  // not equivalent to an absent state parameter at the backend boundary.
+  if (!props.devReference && Object.prototype.hasOwnProperty.call(route.query, 'state') && route.query.state === null) {
+    return JSON.stringify(['state', null])
+  }
+  const detail = route.query.detail
+  return detail === undefined || (typeof detail === 'string' && ['1', '10', '100'].includes(detail))
+    ? null
+    : JSON.stringify(['detail', detail])
+}
+function parseFilters(): { filters: AgentModeFilters; query: AgentModeSnapshotQuery } {
+  const contractViolation = routeContractViolationToken() !== null
+  const projectRaw = route.query.project
+  const projectId = projectRaw == null || projectRaw === '' ? null : parseAgentModeProjectFilter(projectRaw)
+  const laneRaw = route.query.lane
+  const laneKey = laneRaw == null || laneRaw === '' ? null : parseAgentModeLaneFilter(laneRaw)
+  const healthRaw = route.query.health
+  const health = healthRaw == null || healthRaw === ''
+    ? 'all'
+    : typeof healthRaw === 'string' && HEALTH_FILTERS.includes(healthRaw as HealthFilter)
+      ? healthRaw as HealthFilter
+      : 'all'
+  const qRaw = route.query.q
+  const queryText = typeof qRaw === 'string' ? qRaw : ''
+  const stateRaw = props.devReference ? undefined : route.query.state
+  const stateValues = stateRaw === undefined ? [] : Array.isArray(stateRaw) ? stateRaw : [stateRaw]
+  const validStates = stateValues.every((state): state is AgentModeDeliveryState => (
+    typeof state === 'string' && DELIVERY_STATES.has(state)
+  ))
+  const states = validStates ? [...new Set(stateValues)].sort() : []
+  const attentionRaw = route.query.attention
+  const attention = attentionRaw == null || attentionRaw === ''
+    ? 'all'
+    : attentionRaw === 'required' || attentionRaw === 'all'
+      ? attentionRaw
+      : 'all'
   return {
-    projectId: parseAgentModeProjectFilter(route.query.project),
-    laneKey: parseAgentModeLaneFilter(route.query.lane),
-    health: HEALTH_FILTERS.includes(healthRaw) ? healthRaw : 'all',
-    query: typeof route.query.q === 'string' ? route.query.q.slice(0, 200) : '',
+    filters: { projectId, laneKey, health, query: queryText, states, attention },
+    query: {
+      // NaN is a deliberate internal invalid sentinel. It reaches the one
+      // transport validator and cannot serialize into a broader request.
+      projectId: contractViolation
+        ? Number.NaN
+        : (projectRaw == null || projectRaw === '' ? null : projectId ?? projectRaw) as number | null,
+      laneKey: (laneRaw == null || laneRaw === '' ? null : laneKey ?? laneRaw) as string | null,
+      states: (validStates ? states : stateValues) as readonly AgentModeDeliveryState[],
+      attention: (attentionRaw == null || attentionRaw === '' ? 'all' : attentionRaw) as 'all' | 'required',
+      health: (healthRaw == null || healthRaw === '' ? 'all' : healthRaw) as HealthFilter,
+      q: (qRaw == null ? '' : qRaw) as string,
+    },
   }
 }
 const filters = canonicalRouteFilters
 
-// Selection is deliberately excluded: changing the pinned item never changes
-// aggregate/query identity. Filters are authoritative request state and stale
-// responses are rejected by useAgentModeDeliveries' request sequence.
-const serverFilterKey = computed(() => JSON.stringify({
-  projectId: filters.value.projectId,
-  laneKey: filters.value.laneKey,
-  health: filters.value.health,
-  q: filters.value.query.trim(),
-}))
-watch(serverFilterKey, () => void data.load({ background: data.hasData.value }))
-
-watch(
-  () => data.snapshot.value?.aggregates?.nextRefreshAt ?? null,
-  (nextRefreshAt) => {
-    if (aggregateRefreshTimer !== null) clearTimeout(aggregateRefreshTimer)
-    aggregateRefreshTimer = null
-    if (!nextRefreshAt) return
-    const boundary = Date.parse(nextRefreshAt)
-    if (!Number.isFinite(boundary)) return
-    const wait = Math.max(0, boundary - serverNowMs.value)
-    aggregateRefreshTimer = setTimeout(() => {
-      aggregateRefreshTimer = null
-      void data.load({ background: data.hasData.value })
-    }, wait)
-  },
-)
+// Filter identity is a privacy boundary and is therefore loaded explicitly.
+// Selection has a different lifecycle below: user/deep-link changes refetch,
+// while a server-owned default already describes the snapshot just received
+// and must not create a duplicate initial request.
+const routeFilterIdentity = computed(() => JSON.stringify([
+  route.query.project,
+  route.query.lane,
+  props.devReference ? undefined : route.query.state,
+  route.query.attention,
+  route.query.health,
+  route.query.q,
+  routeContractViolationToken(),
+]))
+watch(routeFilterIdentity, () => {
+  void data.load({ background: data.hasData.value })
+}, { flush: 'sync' })
 
 // Query patches are coalesced per tick and serialized: two patches issued
 // in the same turn (e.g. selection + detail) become ONE navigation, and
 // a later patch never clobbers an earlier in-flight one.
-let queuedPatch: Record<string, string | undefined> | null = null
+type QueryPatch = Record<string, string | string[] | undefined>
+let queuedPatch: QueryPatch | null = null
 let navChain: Promise<unknown> = Promise.resolve()
-function replaceQuery(patch: Record<string, string | undefined>): Promise<void> {
+let internalRouteWriteDepth = 0
+function replaceQuery(patch: QueryPatch): Promise<void> {
   queuedPatch = { ...(queuedPatch ?? {}), ...patch }
   navChain = navChain.then(async () => {
     const pending = queuedPatch
     queuedPatch = null
     if (!pending) return
-    const next: Record<string, string> = {}
-    for (const [k, v] of Object.entries(route.query)) {
-      if (typeof v === 'string') next[k] = v
-    }
+    // Preserve every untouched raw query value, including explicit nulls,
+    // mixed arrays, and unknown keys. An unrelated detail/selection write must
+    // never silently repair an invalid boundary into a broader request.
+    const next: LocationQueryRaw = { ...route.query }
     for (const [k, v] of Object.entries(pending)) {
       if (v === undefined || v === '') delete next[k]
       else next[k] = v
     }
     try {
+      internalRouteWriteDepth += 1
       await router.replace({ query: next })
     } catch {
       /* navigation failures (e.g. during unmount) are not user-facing */
+    } finally {
+      internalRouteWriteDepth -= 1
     }
   })
   return navChain as Promise<void>
@@ -267,13 +327,25 @@ async function setDetail(level: DetailLevel) {
   void replaceQuery({ detail: level === 10 ? undefined : String(level) })
 }
 
-async function setFilters(next: AgentModeFilters) {
-  await replaceQuery({
-    project: next.projectId == null ? undefined : String(next.projectId),
-    lane: next.laneKey ?? undefined,
-    health: next.health === 'all' ? undefined : next.health,
-    q: next.query.trim() === '' ? undefined : next.query,
-  })
+async function setFilters(next: Partial<AgentModeFilters>) {
+  const patch: QueryPatch = {}
+  if (Object.prototype.hasOwnProperty.call(next, 'projectId')) {
+    patch.project = next.projectId == null ? undefined : String(next.projectId)
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'laneKey')) patch.lane = next.laneKey ?? undefined
+  if (Object.prototype.hasOwnProperty.call(next, 'health')) {
+    patch.health = next.health === 'all' ? undefined : next.health
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'query')) {
+    patch.q = trimAgentModeSpace(next.query ?? '') === '' ? undefined : next.query
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'states')) {
+    patch.state = next.states?.length ? [...next.states] : undefined
+  }
+  if (Object.prototype.hasOwnProperty.call(next, 'attention')) {
+    patch.attention = next.attention === 'required' ? 'required' : undefined
+  }
+  await replaceQuery(patch)
   // A filter change is the user's own action: apply the new layout now,
   // even inside the interaction hold.
   layoutGroups.value = canonicalGroups.value
@@ -281,12 +353,25 @@ async function setFilters(next: AgentModeFilters) {
 
 // ── Layout: lanes from filtered deliveries, frozen while interacting ────
 const hold = useInteractionHold()
-const filtered = computed(() => applyFilters(data.deliveries.value, filters.value))
-const canonicalGroups = computed(() => buildProjectGroups(filtered.value))
+const canonicalGroups = computed(() => buildProjectGroups(data.deliveries.value))
 const layoutGroups = shallowRef<AgentModeProjectGroup[]>([])
 const canonicalLayoutIds = computed(() => new Set(flattenOrder(canonicalGroups.value)))
 
 const canonicalAggregates = computed(() => data.snapshot.value?.aggregates ?? null)
+const projectActiveTotals = computed<ReadonlyMap<number, number> | null>(() => {
+  const aggregate = canonicalAggregates.value
+  return aggregate
+    ? new Map(aggregate.projects.map((project) => [project.projectId, project.counts.activeTotal]))
+    : null
+})
+const laneActiveTotals = computed<ReadonlyMap<string, number> | null>(() => {
+  const aggregate = canonicalAggregates.value
+  return aggregate
+    ? new Map(aggregate.projects.flatMap((project) => (
+      project.lanes.map((lane) => [lane.laneKey, lane.counts.activeTotal] as const)
+    )))
+    : null
+})
 const aggregateLayout = shallowRef<AgentModeAggregates | null>(null)
 const canvasRef = ref<HTMLElement | null>(null)
 let aggregateFocusRecoverySeq = 0
@@ -395,7 +480,7 @@ watch(tombstoneIds, (ids) => {
 
 // ── Selection ───────────────────────────────────────────────────────────
 const storageKey = computed(() => lsAgentModeSelectedKey(auth.user?.id))
-const preferredId = ref<string | null>(typeof route.query.delivery === 'string' ? route.query.delivery : null)
+const preferredId = ref<string | null>(initialPreferredId)
 const serverFallbackId = computed(() => data.snapshot.value?.selectedDeliveryId ?? null)
 /** The pinned (filtered-out) delivery the user travelled from. It stays at
  * the head of the travel order while the filter still excludes it, so arrow
@@ -417,6 +502,36 @@ const selection = useAgentModeSelection({
   storageKey,
   preferredId,
   fallbackId: serverFallbackId,
+  retainOnEmpty: computed(() => !data.hasData.value
+    && ['loading', 'offline', 'error'].includes(data.status.value)),
+})
+const pendingRouteSelection = ref<string | null>(null)
+watch(
+  () => route.query.delivery,
+  (raw) => {
+    // Selection/default/rejection URL synchronization echoes an identity this
+    // component already owns. In particular, a selected-404 transaction may
+    // serialize "remove stale" and "publish fallback" writes; neither is a
+    // fresh external selection request.
+    if (internalRouteWriteDepth > 0) return
+    const input = raw === undefined ? null : raw ?? ''
+    const changed = JSON.stringify(input) !== JSON.stringify(selectedQueryId.value)
+    selectedQueryId.value = input
+    const canonical = parseAgentModeDeliveryKey(input)
+    preferredId.value = canonical
+    pendingRouteSelection.value = canonical && canonical !== selection.selectedId.value ? canonical : null
+    // Browser back/forward and a pasted deep link are real selected-only
+    // request changes. A route write initiated by the selection watcher has
+    // already updated selectedQueryId and already started the request.
+    if (changed) void data.load({ background: data.hasData.value })
+  },
+  { flush: 'sync' },
+)
+watch(data.snapshot, () => {
+  const requested = pendingRouteSelection.value
+  if (!requested || !data.selectableDeliveries.value.some((delivery) => delivery.id === requested)) return
+  selection.select(requested)
+  pendingRouteSelection.value = null
 })
 const selectedDelivery = selection.selectedDelivery
 const selectedOutsideReason = computed(() => {
@@ -432,8 +547,7 @@ const canOpenTicket = computed(() => {
     && auth.canView(delivery.lane.projectId)
 })
 const selectedExcludedBy = computed(() => {
-  const d = selectedDelivery.value
-  return d ? exclusionReason(d, filters.value) : null
+  return selectedOutsideReason.value === 'filter_excluded' ? 'server' as const : null
 })
 watch(selection.selectedId, (id, previous) => {
   // A server-driven removal/revocation outranks local dirty state: close the
@@ -443,6 +557,15 @@ watch(selection.selectedId, (id, previous) => {
     ticketOpen.value = false
   }
   selectedQueryId.value = id
+  // Server reconciliation/defaulting describes the authoritative response
+  // already in hand. Only a user choice not represented by that response
+  // starts the selected-only superseding request.
+  if (
+    selection.lastChange.value?.source === 'user'
+    && data.snapshot.value?.selectedDeliveryId !== id
+  ) {
+    void data.load({ background: data.hasData.value })
+  }
   void replaceQuery({ delivery: id ?? undefined })
 })
 watch([selection.selectedId, selectedExcludedBy], ([id, excluded]) => {
@@ -450,7 +573,7 @@ watch([selection.selectedId, selectedExcludedBy], ([id, excluded]) => {
 })
 // Reset the anchor only when the filter VALUES change (the selection also
 // writes to the URL, which must not disturb the travel head).
-const filtersKey = computed(() => `${filters.value.projectId}|${filters.value.laneKey}|${filters.value.health}|${filters.value.query}`)
+const filtersKey = computed(() => `${filters.value.projectId}|${filters.value.laneKey}|${filters.value.health}|${filters.value.query}|${filters.value.states?.join(',')}|${filters.value.attention}`)
 watch(filtersKey, () => {
   pinnedAnchorId.value = selectedExcludedBy.value ? selection.selectedId.value : null
 })
@@ -612,28 +735,17 @@ function onCanvasKeydown(event: KeyboardEvent) {
 
 // ── Derived copy: headline, live chip, narration, announcements ─────────
 const counts = computed(() => {
-  if (detailLevel.value === 100) {
-    const root = aggregateLayout.value?.root
-    return root
-      ? {
-          total: root.activeTotal,
-          healthy: 0,
-          attention: root.flags.attention,
-          blocked: root.flags.blocked,
-          stale: root.flags.stale_no_signal,
-          unknown: root.flags.unknown_reporter,
-        }
-      : null
-  }
-  const list = data.deliveries.value
-  return {
-    total: list.length,
-    healthy: list.filter((d) => d.health === 'healthy').length,
-    attention: list.filter((d) => d.attention.level > 0).length,
-    blocked: list.filter((d) => d.health === 'blocked').length,
-    stale: list.filter((d) => d.freshness.state === 'stale' || d.freshness.state === 'unknown').length,
-    unknown: list.filter((d) => d.health === 'unknown').length,
-  }
+  const root = aggregateLayout.value?.root
+  return root
+    ? {
+        total: root.activeTotal,
+        healthy: 0,
+        attention: root.flags.attention,
+        blocked: root.flags.blocked,
+        stale: root.flags.stale_no_signal,
+        unknown: root.flags.unknown_reporter,
+      }
+    : null
 })
 
 const headline = computed(() => {
@@ -648,7 +760,6 @@ const breakdown = computed(() => {
   const c = counts.value
   if (!c) return ''
   const parts: string[] = []
-  if (detailLevel.value !== 100 && c.healthy) parts.push(t('agentMode.narration.partHealthy', { n: c.healthy }))
   if (c.attention) parts.push(t('agentMode.narration.partAttention', { n: c.attention }, c.attention))
   if (c.blocked) parts.push(t('agentMode.narration.partBlocked', { n: c.blocked }))
   if (c.stale) parts.push(t('agentMode.narration.partStale', { n: c.stale }))
@@ -760,6 +871,10 @@ watch(selection.lastChange, (change) => {
   if (!d) return
   announcement.value = t('agentMode.a11y.selectionChanged', { key: d.issueKey, title: d.title })
 })
+watch(data.snapshot, (current) => {
+  const id = selection.selectedId.value
+  if (!current || !id || !data.deliveriesById.value.has(id)) announcement.value = ''
+}, { flush: 'sync' })
 
 const showNotice = computed(() => {
   const s = data.status.value
@@ -807,6 +922,16 @@ const selectedPosition = computed(() => {
       @focusout="hold.onFocusOut"
       @keydown="onCanvasKeydown"
     >
+      <!-- Keep one stable filter instance mounted across loading/invalid/error
+           transitions so the user can finish typing or repair the URL without
+           losing focus or draft text. -->
+      <AgentModeFilterBar
+        v-if="detailLevel === 10"
+        :filters="filters"
+        :aggregates="canonicalAggregates"
+        @update:filters="setFilters"
+      />
+
       <AgentModeStateNotice
         v-if="showNotice"
         :status="data.status.value"
@@ -902,13 +1027,13 @@ const selectedPosition = computed(() => {
             @select="selectDelivery"
           />
 
-          <AgentModeFilterBar :filters="filters" :deliveries="data.deliveries.value" @update:filters="setFilters" />
-
           <p v-if="layoutGroups.length === 0" class="am-nomatch">{{ t('agentMode.filters.noMatch') }}</p>
 
           <AgentModeLanes
             :groups="layoutGroups"
             :deliveries-by-id="data.deliveriesById.value"
+            :project-active-totals="projectActiveTotals"
+            :lane-active-totals="laneActiveTotals"
             :tombstone-ids="tombstoneIds"
             :selected-id="selection.selectedId.value"
             :lifted-selected-id="selection.selectedId.value"

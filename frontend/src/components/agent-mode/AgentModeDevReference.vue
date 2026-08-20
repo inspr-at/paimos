@@ -42,7 +42,7 @@ const loader = computed<AgentModeSnapshotLoader>(() => async () => {
   await new Promise((r) => setTimeout(r, 250))
   switch (state.value) {
     case 'empty':
-      return normalizeWireSnapshot({ schema_version: 1, server_time: new Date().toISOString(), rows: [] }, Date.now())
+      return normalizeWireSnapshot(rebase(makeFixtureSnapshot(0), Date.now()), Date.now())
     case 'offline':
       throw new AgentModeLoadError('offline', 'fixture: network unreachable', 0)
     case 'forbidden':
@@ -58,5 +58,5 @@ const loader = computed<AgentModeSnapshotLoader>(() => async () => {
 </script>
 
 <template>
-  <AgentModeView :key="`${count}-${state}`" :loader="loader" source-label="Fixture data" />
+  <AgentModeView :key="`${count}-${state}`" :loader="loader" source-label="Fixture data" dev-reference />
 </template>

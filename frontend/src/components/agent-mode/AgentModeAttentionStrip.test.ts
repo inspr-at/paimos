@@ -47,8 +47,8 @@ function aggregate(total = 20): AgentModeAttentionAggregate {
     items: activeDeliveries.slice(0, 12).map((delivery) => ({
       deliveryId: delivery.id,
       level: 1,
-      primaryReason: 'other',
-      flags: ['other'],
+      primaryReason: 'stale_no_signal',
+      flags: ['stale_no_signal'],
       since: FIXTURE_BASE_TIME,
     })),
   }

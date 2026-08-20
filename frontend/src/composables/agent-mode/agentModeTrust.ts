@@ -27,7 +27,7 @@
 // Otherwise the UI shows an explicit "no estimate" with the reason.
 
 import type { Delivery } from '@/services/agentMode'
-import { parseIsoInstant } from '@/services/agentModeAggregateSchema'
+import { compareIsoInstants, parseIsoInstant } from '@/services/agentModeAggregateSchema'
 
 export type EstimateSuppression =
   | 'ok'
@@ -73,7 +73,7 @@ function validInstant(value: string | null): boolean {
 
 function validRange(optimisticAt: string | null, pessimisticAt: string | null): boolean {
   if (!validInstant(optimisticAt) || !validInstant(pessimisticAt)) return false
-  return Date.parse(optimisticAt!) < Date.parse(pessimisticAt!)
+  return compareIsoInstants(optimisticAt!, pessimisticAt!)! <= 0
 }
 
 export function estimatePresentation(d: Delivery): EstimatePresentation {

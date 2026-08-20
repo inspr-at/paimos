@@ -77,6 +77,10 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const attentionReason = computed(() => {
+  const reason = props.delivery.attention.reason
+  return reason ? t(`agentMode.aggregate.reason.${reason}`) : ''
+})
 
 const d = computed(() => props.delivery)
 const attention = computed(() => d.value.attention.level > 0)
@@ -228,7 +232,7 @@ function onKeydown(event: KeyboardEvent) {
         <AppIcon name="octagon-alert" :size="12" aria-hidden="true" />
         <span><b>{{ t('agentMode.card.blocked') }}:</b> {{ blocker }}</span>
       </p>
-      <p v-else-if="attention && d.attention.reason" class="am-card-reason">{{ d.attention.reason }}</p>
+      <p v-else-if="attention && d.attention.reason" class="am-card-reason">{{ attentionReason }}</p>
 
       <div class="am-card-estimate">
         <template v-if="showPercent || showEta">

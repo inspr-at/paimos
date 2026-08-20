@@ -25,6 +25,7 @@
 // time), so a re-render without new data can never reshuffle cards.
 
 import type { Delivery } from '@/services/agentMode'
+import { compareIsoInstants } from '@/services/agentModeAggregateSchema'
 
 export interface AgentModeLane {
   key: string
@@ -45,44 +46,42 @@ export interface AgentModeProjectGroup {
   count: number
 }
 
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
-
 export function compareKeys(a: string | null | undefined, b: string | null | undefined): number {
   if (a == null && b == null) return 0
   if (a == null) return 1
   if (b == null) return -1
-  return collator.compare(a, b)
+  return a < b ? -1 : a > b ? 1 : 0
 }
 
-function trustedLandingMs(d: Delivery): number | null {
+function trustedLanding(d: Delivery): string | null {
   if (!d.eta || !d.eta.trusted || !d.eta.landingAt) return null
-  const ms = Date.parse(d.eta.landingAt)
-  return Number.isFinite(ms) ? ms : null
+  return d.eta.landingAt
 }
 
 /**
  * Canonical in-lane order: highest attention first, then soonest trusted
- * landing (untrusted / unknown last), then issue key (natural), then id.
+ * landing (untrusted / unknown last), then stable delivery id bytewise.
  * The final id comparison makes the order total, so two snapshots with
  * the same data always produce the same order.
  */
 export function compareDeliveries(a: Delivery, b: Delivery): number {
   if (a.attention.level !== b.attention.level) return b.attention.level - a.attention.level
-  const la = trustedLandingMs(a)
-  const lb = trustedLandingMs(b)
+  const la = trustedLanding(a)
+  const lb = trustedLanding(b)
   if (la != null || lb != null) {
     if (la == null) return 1
     if (lb == null) return -1
-    if (la !== lb) return la - lb
+    const landingOrder = compareIsoInstants(la, lb)
+    if (landingOrder != null && landingOrder !== 0) return landingOrder
   }
-  const byKey = compareKeys(a.issueKey, b.issueKey)
-  if (byKey !== 0) return byKey
   return compareKeys(a.id, b.id)
 }
 
 /**
  * Groups deliveries into project groups → epic lanes (+ Ungrouped last).
- * Projects sort by name then key; epics by key; Ungrouped always trails.
+ * Projects sort by numeric id. Grouped lanes sort by numeric epic id then
+ * immutable lane key; Ungrouped always trails. Mutable labels never move a
+ * supervision target.
  */
 export function buildProjectGroups(deliveries: readonly Delivery[]): AgentModeProjectGroup[] {
   const projects = new Map<number, AgentModeProjectGroup & { laneMap: Map<string, AgentModeLane & { items: Delivery[] }> }>()
@@ -117,19 +116,12 @@ export function buildProjectGroups(deliveries: readonly Delivery[]): AgentModePr
     group.count += 1
   }
 
-  const groups = [...projects.values()].sort((a, b) => {
-    const byName = compareKeys(a.projectName, b.projectName)
-    if (byName !== 0) return byName
-    const byKey = compareKeys(a.projectKey, b.projectKey)
-    if (byKey !== 0) return byKey
-    return a.projectId - b.projectId
-  })
+  const groups = [...projects.values()].sort((a, b) => a.projectId - b.projectId)
 
   return groups.map((group) => {
     const lanes = [...group.laneMap.values()].sort((a, b) => {
       if (a.ungrouped !== b.ungrouped) return a.ungrouped ? 1 : -1
-      const byKey = compareKeys(a.epicKey, b.epicKey)
-      if (byKey !== 0) return byKey
+      if (a.epicId !== b.epicId) return (a.epicId ?? Number.MAX_SAFE_INTEGER) - (b.epicId ?? Number.MAX_SAFE_INTEGER)
       return compareKeys(a.key, b.key)
     })
     return {
@@ -189,19 +181,33 @@ export function reconcileFrozenGroups(
     }
   }
 
-  const result: AgentModeProjectGroup[] = frozen.map((g, groupIndex) => ({
-    ...g,
-    lanes: g.lanes.map((l, laneIndex) => ({
-      ...l,
-      deliveryIds: l.deliveryIds.map((id, slotIndex) => {
+  const result: AgentModeProjectGroup[] = frozen.map((g, groupIndex) => {
+    const freshGroup = fresh.find((candidate) => candidate.projectId === g.projectId)
+    return {
+      ...g,
+      ...(freshGroup ? { projectKey: freshGroup.projectKey, projectName: freshGroup.projectName } : {}),
+      lanes: g.lanes.map((l, laneIndex) => {
+        const freshLane = freshGroup?.lanes.find((candidate) => candidate.key === l.key)
+        return {
+          ...l,
+          ...(freshLane ? {
+            projectId: freshLane.projectId,
+            epicId: freshLane.epicId,
+            epicKey: freshLane.epicKey,
+            epicTitle: freshLane.epicTitle,
+            ungrouped: freshLane.ungrouped,
+          } : {}),
+          deliveryIds: l.deliveryIds.map((id, slotIndex) => {
         if (id.startsWith(TOMBSTONE_PREFIX)) return id
         const currentMembership = freshMembership.get(id)
         return currentMembership === membershipKey(g.projectId, l.key)
           ? id
           : tombstoneId(groupIndex, laneIndex, slotIndex)
+          }),
+        }
       }),
-    })),
-  }))
+    }
+  })
   // Only a live id in its CURRENT project+lane owns that identity. A moved
   // delivery's old slot is now an opaque tombstone, so the live identity can
   // be appended once to its current authorized lane.

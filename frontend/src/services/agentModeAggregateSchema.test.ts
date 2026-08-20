@@ -4,13 +4,14 @@
  * AGPL-3.0-only — see LICENSE.
  */
 
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
-import oneGolden from './__fixtures__/agent-mode-aggregates-v1-1.json'
-import { makeFixtureAggregateSnapshot } from './agentModeFixtures'
 import type { Delivery } from './agentMode'
-import { parseAgentModeAggregates, parseIsoInstant } from './agentModeAggregateSchema'
-import { normalizeWireDelivery, normalizeWireSnapshot } from './agentModeTransport'
+import { compareIsoInstants, parseAgentModeAggregates, parseIsoInstant } from './agentModeAggregateSchema'
+import { normalizeWireSnapshot } from './agentModeTransport'
 
 interface MutableCountSet {
   active_total: number
@@ -51,11 +52,24 @@ interface MutableAggregate {
   }
 }
 
-function fixture(count: 1 | 10 | 100): { raw: MutableAggregate; rows: Delivery[] } {
-  const wire = makeFixtureAggregateSnapshot(count)
+interface MutableSnapshot extends Record<string, unknown> {
+  rows: Array<Record<string, unknown>>
+  aggregates: MutableAggregate
+}
+
+const FIXTURE_ROOT = resolve(process.cwd(), '../backend/contracts/fixtures/agent-mode')
+
+function wireFixture(count: 1 | 10 | 100): MutableSnapshot {
+  return JSON.parse(readFileSync(resolve(FIXTURE_ROOT, `snapshot-v1-${count}.json`), 'utf8')) as MutableSnapshot
+}
+
+function fixture(count: 1 | 10 | 100): { raw: MutableAggregate; rows: Delivery[]; wire: MutableSnapshot } {
+  const wire = wireFixture(count)
+  const normalized = normalizeWireSnapshot(wire, 123)
   return {
-    raw: structuredClone(wire.aggregates) as MutableAggregate,
-    rows: (wire.rows ?? []).map(normalizeWireDelivery).filter((row): row is Delivery => row != null),
+    raw: structuredClone(wire.aggregates),
+    rows: normalized.deliveries,
+    wire,
   }
 }
 
@@ -69,20 +83,20 @@ function zeroCountSet(): MutableCountSet {
 }
 
 describe('PAI-804 aggregate schema-v1 golden contract (PAI-807)', () => {
-  it('matches the checked-in one-delivery wire golden exactly', () => {
-    expect(makeFixtureAggregateSnapshot(1).aggregates).toEqual(oneGolden)
-    const parsed = parseAgentModeAggregates(oneGolden, fixture(1).rows)
+  it('parses the backend-owned one-delivery aggregate exactly', () => {
+    const { raw, rows } = fixture(1)
+    const parsed = parseAgentModeAggregates(raw, rows)
     expect(parsed.ok).toBe(true)
     if (parsed.ok) {
       expect(parsed.value.root.activeTotal).toBe(1)
-      expect(parsed.value.root.currentStage.specification).toBe(1)
-      expect(parsed.value.root.landing.within_4h).toBe(1)
+      expect(Object.values(parsed.value.root.currentStage).reduce((sum, value) => sum + value, 0)).toBe(1)
+      expect(Object.values(parsed.value.root.landing).reduce((sum, value) => sum + value, 0)).toBe(1)
     }
   })
 
   it('accepts deterministic 1 / 10 / 100 goldens with exact independent partitions', () => {
     for (const count of [1, 10, 100] as const) {
-      const normalized = normalizeWireSnapshot(makeFixtureAggregateSnapshot(count), 123)
+      const normalized = normalizeWireSnapshot(wireFixture(count), 123)
       expect(normalized.aggregateUnavailableReason).toBeNull()
       expect(normalized.aggregates?.root.activeTotal).toBe(count)
       expect(Object.values(normalized.aggregates!.root.currentStage).reduce((sum, value) => sum + value, 0)).toBe(count)
@@ -94,6 +108,7 @@ describe('PAI-804 aggregate schema-v1 golden contract (PAI-807)', () => {
 
   it('classifies missing and unsupported aggregates without fabricating zero', () => {
     expect(parseAgentModeAggregates(undefined, [])).toEqual({ ok: false, reason: 'missing' })
+    expect(parseAgentModeAggregates(null, [])).toEqual({ ok: false, reason: 'malformed' })
     expect(parseAgentModeAggregates({ schema_version: 2 }, [])).toEqual({ ok: false, reason: 'unsupported-schema' })
   })
 
@@ -107,11 +122,11 @@ describe('PAI-804 aggregate schema-v1 golden contract (PAI-807)', () => {
       (raw) => { raw.root.landing.later += 1 },
       (raw) => { raw.root.flags.deployed_unverified = raw.root.flags.unverified + 1 },
       (raw) => { raw.calculated_at = '2026-08-20' },
+      (raw) => { raw.structural_revision = 'x' },
+      (raw) => { raw.classification_revision = 'y' },
       (raw) => { raw.next_refresh_at = '2026-02-31T12:00:00Z' },
       (raw) => { raw.attention.items[0].since = '2025-02-29T12:00:00Z' },
       (raw) => { raw.projects[0].counts.active_total += 1 },
-      (raw) => { raw.projects.reverse() },
-      (raw) => { raw.projects[0].lanes.reverse() },
       (raw) => {
         const ungrouped = raw.projects.flatMap((project) => project.lanes).find((lane) => lane.epic_id === null)!
         ungrouped.epic_id = 0
@@ -132,6 +147,7 @@ describe('PAI-804 aggregate schema-v1 golden contract (PAI-807)', () => {
       (raw) => { raw.attention.items[0].delivery_id = 'hidden-or-revoked' },
       (raw) => { raw.attention.items[0].flags.reverse() },
       (raw) => { raw.attention.items[0].primary_reason = 'other' },
+      (raw) => { raw.attention.items[0].flags = ['other'] },
       (raw) => { raw.attention.items[0].level = 1 },
       (raw) => { raw.attention.total += 1 },
       (raw) => { raw.attention.items.push(structuredClone(raw.attention.items[0])) },
@@ -145,7 +161,7 @@ describe('PAI-804 aggregate schema-v1 golden contract (PAI-807)', () => {
       },
     ]
     for (const mutate of mutations) {
-      const { raw, rows } = fixture(100)
+      const { raw, rows } = fixture(10)
       mutate(raw)
       expect(parseAgentModeAggregates(raw, rows)).toEqual({ ok: false, reason: 'malformed' })
     }
@@ -154,6 +170,10 @@ describe('PAI-804 aggregate schema-v1 golden contract (PAI-807)', () => {
   it('validates real calendar instants while accepting leap days and equivalent offsets', () => {
     expect(parseIsoInstant('2024-02-29T23:59:59.123+05:30')).toBe('2024-02-29T23:59:59.123+05:30')
     expect(parseIsoInstant('2026-08-20T15:48:00+02:00')).toBe('2026-08-20T15:48:00+02:00')
+    expect(compareIsoInstants(
+      '2026-08-20T12:00:00.000000001Z',
+      '2026-08-20T12:00:00.000000002Z',
+    )).toBe(-1)
     for (const invalid of [
       '2026-02-31T12:00:00Z',
       '2025-02-29T12:00:00Z',
@@ -161,6 +181,7 @@ describe('PAI-804 aggregate schema-v1 golden contract (PAI-807)', () => {
       '2026-08-20T24:00:00Z',
       '2026-08-20T12:00:60Z',
       '2026-08-20T12:00:00+24:00',
+      '2026-08-20T12:00:00.0000000001Z',
     ]) expect(parseIsoInstant(invalid)).toBeNull()
 
     const { raw, rows } = fixture(1)
@@ -216,13 +237,9 @@ describe('PAI-804 aggregate schema-v1 golden contract (PAI-807)', () => {
       (rows: Delivery[]) => { rows[0].lane.projectName = 'Unrelated project label' },
       (rows: Delivery[]) => { rows[0].lane.projectId = 999 },
       (rows: Delivery[]) => { rows[0].lane.key = 'project:999/ungrouped' },
-      (rows: Delivery[]) => {
-        const other = rows.find((row) => row.lane.key !== rows[0].lane.key)!
-        const swap = rows[0].lane.key
-        rows[0].lane.key = other.lane.key
-        other.lane.key = swap
-      },
       (rows: Delivery[]) => { rows[0].lane.epicTitle = 'Revoked epic label' },
+      (rows: Delivery[]) => { rows.find((row) => row.attention.level > 0)!.attention.reason = 'different' },
+      (rows: Delivery[]) => { rows.find((row) => row.attention.level > 0)!.attention.since = '2026-08-20T00:00:00Z' },
     ]) {
       const { raw, rows } = fixture(10)
       mutate(rows)
@@ -231,9 +248,10 @@ describe('PAI-804 aggregate schema-v1 golden contract (PAI-807)', () => {
   })
 
   it('keeps aggregates and revisions selector-independent', () => {
-    const left = makeFixtureAggregateSnapshot(100)
+    const left = wireFixture(100)
     const right = structuredClone(left)
-    right.selected_delivery = right.rows?.[55]?.delivery_id ?? null
+    right.selected_delivery = right.rows[55].delivery_id
+    delete right.selected_outside
     expect(normalizeWireSnapshot(left, 1).aggregates).toEqual(normalizeWireSnapshot(right, 2).aggregates)
   })
 })

@@ -46,16 +46,32 @@ import type {
   StageKey,
 } from './agentMode'
 import { parseAgentModeAggregates, parseIsoInstant } from './agentModeAggregateSchema'
+import {
+  normalizeStrictWireDelivery,
+  normalizeStrictWireSnapshot,
+} from './agentModeSnapshotSchema'
+import { isCanonicalAgentModeCursor } from './agentModeCursor'
 
 /** Cross-project, ACL-filtered snapshot of all authorized active deliveries. */
 export const AGENT_MODE_SNAPSHOT_PATH = '/agent-mode/deliveries'
+
+export const AGENT_MODE_DELIVERY_STATES = [
+  'pending',
+  'active',
+  'completed',
+  'failed_needs_retry',
+  'deployed_unverified',
+  'cancelled',
+  'unknown',
+] as const
+export type AgentModeDeliveryState = (typeof AGENT_MODE_DELIVERY_STATES)[number]
 
 export interface AgentModeSnapshotQuery {
   projectId?: number | null
   /** Exact immutable lane identity; mutable epic labels never enter filters. */
   laneKey?: string | null
   /** Canonical repeatable server state filter (values are owned by PAI-804). */
-  states?: readonly string[]
+  states?: readonly AgentModeDeliveryState[]
   attention?: 'all' | 'required' | null
   health?: 'all' | 'attention' | 'blocked' | 'stale' | null
   q?: string | null
@@ -65,6 +81,29 @@ export interface AgentModeSnapshotQuery {
 }
 
 export const AGENT_MODE_LANE_KEY_MAX_LENGTH = 200
+export const AGENT_MODE_SEARCH_MAX_BYTES = 160
+export const AGENT_MODE_CURSOR_LENGTH = 211
+const DELIVERY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/
+const STATE_SET = new Set<string>(AGENT_MODE_DELIVERY_STATES)
+const SNAPSHOT_QUERY_KEYS = new Set([
+  'projectId', 'laneKey', 'states', 'attention', 'health', 'q', 'selectedDelivery',
+])
+
+export class AgentModeQueryContractError extends Error {
+  constructor() {
+    super('invalid Agent Mode query')
+    this.name = 'AgentModeQueryContractError'
+  }
+}
+
+// Exact Unicode White_Space set used by Go strings.TrimSpace. JavaScript's
+// String.trim() differs in two contract-relevant places: it removes U+FEFF
+// (Go does not) and retains U+0085 (Go removes it).
+const GO_TRIM_SPACE = /^[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/gu
+
+export function trimAgentModeSpace(value: string): string {
+  return value.replace(GO_TRIM_SPACE, '')
+}
 
 /** Canonical positive safe integer accepted from URL/request boundaries. */
 export function parseAgentModeProjectFilter(value: unknown): number | null {
@@ -87,25 +126,78 @@ export function parseAgentModeLaneFilter(value: unknown): string | null {
   return value
 }
 
+export function parseAgentModeSearchFilter(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const parsed = trimAgentModeSpace(value)
+  if (parsed === '' || /[\u0000-\u001f\u007f-\u009f]/u.test(parsed)) return null
+  return new TextEncoder().encode(parsed).byteLength <= AGENT_MODE_SEARCH_MAX_BYTES ? parsed : null
+}
+
+export function parseAgentModeDeliveryKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const parsed = trimAgentModeSpace(value)
+  return DELIVERY_KEY_PATTERN.test(parsed) ? parsed : null
+}
+
+/** Exact server-wire identity predicate. Unlike query input, payload values
+ * are already canonical and must never be repaired by whitespace trimming. */
+export function isExactAgentModeDeliveryKey(value: unknown): value is string {
+  return typeof value === 'string' && DELIVERY_KEY_PATTERN.test(value)
+}
+
+export function isAgentModeCursor(value: unknown): value is string {
+  return isCanonicalAgentModeCursor(value)
+}
+
+/** Canonical result-shaping query shared by snapshot and EventSource URLs.
+ * State order is stable and duplicate-free. Selection is deliberately opt-in
+ * because it is lookup-only and must never bind the stream. */
+export function buildAgentModeFilterParams(
+  query: AgentModeSnapshotQuery = {},
+  includeSelection = true,
+): URLSearchParams {
+  if (Object.keys(query).some((key) => !SNAPSHOT_QUERY_KEYS.has(key))) {
+    throw new AgentModeQueryContractError()
+  }
+  const params = new URLSearchParams()
+  const projectId = parseAgentModeProjectFilter(query.projectId)
+  if (query.projectId != null && projectId == null) throw new AgentModeQueryContractError()
+  if (projectId != null) params.set('project_id', String(projectId))
+  const laneKey = parseAgentModeLaneFilter(query.laneKey)
+  if (query.laneKey != null && query.laneKey !== '' && laneKey == null) throw new AgentModeQueryContractError()
+  if (laneKey != null) params.set('lane_key', laneKey)
+  if ((query.states ?? []).some((state) => !STATE_SET.has(state))) throw new AgentModeQueryContractError()
+  const states = [...new Set(query.states ?? [])].sort()
+  for (const state of states) params.append('state', state)
+  if (query.attention != null && query.attention !== 'all' && query.attention !== 'required') {
+    throw new AgentModeQueryContractError()
+  }
+  if (query.attention === 'required') params.set('attention', 'required')
+  if (query.health != null && !['all', 'attention', 'blocked', 'stale'].includes(query.health)) {
+    throw new AgentModeQueryContractError()
+  }
+  if (query.health && query.health !== 'all') params.set('health', query.health)
+  const search = parseAgentModeSearchFilter(query.q)
+  if (query.q != null && (typeof query.q !== 'string' || trimAgentModeSpace(query.q) !== '') && search == null) {
+    throw new AgentModeQueryContractError()
+  }
+  if (search != null) params.set('q', search)
+  if (includeSelection) {
+    const selected = parseAgentModeDeliveryKey(query.selectedDelivery)
+    if (
+      query.selectedDelivery != null
+      && (typeof query.selectedDelivery !== 'string' || trimAgentModeSpace(query.selectedDelivery) !== '')
+      && selected == null
+    ) throw new AgentModeQueryContractError()
+    if (selected != null) params.set('selected_delivery', selected)
+  }
+  return params
+}
+
 /** Builds the canonical PAI-804 snapshot query. `selected_delivery` is a
  * lookup hint only and never changes aggregate/filter identity. */
 export function buildSnapshotPath(query: AgentModeSnapshotQuery = {}): string {
-  const params = new URLSearchParams()
-  const projectId = parseAgentModeProjectFilter(query.projectId)
-  if (projectId != null) params.set('project_id', String(projectId))
-  const laneKey = parseAgentModeLaneFilter(query.laneKey)
-  if (laneKey != null) params.set('lane_key', laneKey)
-  for (const state of query.states ?? []) {
-    if (typeof state === 'string' && state.trim() !== '') params.append('state', state.trim().slice(0, 64))
-  }
-  if (query.attention === 'required') params.set('attention', 'required')
-  if (query.health && query.health !== 'all') params.set('health', query.health)
-  if (typeof query.q === 'string' && query.q.trim() !== '') {
-    params.set('q', query.q.trim().slice(0, 200))
-  }
-  if (typeof query.selectedDelivery === 'string' && query.selectedDelivery.trim() !== '') {
-    params.set('selected_delivery', query.selectedDelivery.trim())
-  }
+  const params = buildAgentModeFilterParams(query, true)
   const qs = params.toString()
   return qs ? `${AGENT_MODE_SNAPSHOT_PATH}?${qs}` : AGENT_MODE_SNAPSHOT_PATH
 }
@@ -241,6 +333,7 @@ export interface WireDelivery {
   blockers?: WireBlocker[] | null
   progress?: WireProgress | null
   eta?: WireEta | null
+  trust?: unknown
   status_text?: string | null
   updated_at?: string | null
 }
@@ -346,7 +439,7 @@ export function laneKeyFor(projectId: number, epicId: number | null): string {
   return epicId == null ? `project:${projectId}/ungrouped` : `project:${projectId}/epic:${epicId}`
 }
 
-export function normalizeWireDelivery(wire: WireDelivery): Delivery | null {
+function normalizeLegacyWireDelivery(wire: WireDelivery): Delivery | null {
   const issueId = num(wire.issue_id)
   const projectId = num(wire.project_id)
   const rawId = wire.delivery_id
@@ -388,6 +481,23 @@ export function normalizeWireDelivery(wire: WireDelivery): Delivery | null {
     },
     deliveryRevision: opaque(wire.delivery_revision),
     trustRevision: opaque(wire.trust_revision),
+    trust: {
+      schemaVersion: 1,
+      trustRevision: opaque(wire.trust_revision) ?? '',
+      progressKnown: false,
+      progressPercent: null,
+      confidence: 'none',
+      reporterKind: 'unknown',
+      sourceKind: 'stage_evidence',
+      basis: null,
+      optimisticLandingAt: null,
+      pessimisticLandingAt: null,
+      landingAt: null,
+      rangeOnly: false,
+      suppression: null,
+      scope: null,
+      flags: [],
+    },
     suppressionCodes: stringList(wire.estimate_suppression_codes),
     disagreementCodes: stringList(wire.estimate_disagreement_codes),
     tags: Array.isArray(wire.tags) ? wire.tags.filter((t): t is string => typeof t === 'string' && t !== '') : [],
@@ -483,7 +593,7 @@ export function normalizeWireDelivery(wire: WireDelivery): Delivery | null {
   }
 }
 
-export function normalizeWireSnapshot(wire: WireSnapshot | null | undefined, receivedAt: number): AgentModeSnapshot {
+function normalizeLegacyWireSnapshot(wire: WireSnapshot | null | undefined, receivedAt: number): AgentModeSnapshot {
   const list = Array.isArray(wire?.rows) ? wire!.rows! : []
   const deliveries: Delivery[] = []
   const seen = new Set<string>()
@@ -493,7 +603,7 @@ export function normalizeWireSnapshot(wire: WireSnapshot | null | undefined, rec
       aggregateRowInputInvalid = true
       continue
     }
-    const normalized = normalizeWireDelivery(item)
+    const normalized = normalizeLegacyWireDelivery(item)
     if (!normalized || seen.has(normalized.id)) {
       aggregateRowInputInvalid = true
       continue
@@ -522,7 +632,7 @@ export function normalizeWireSnapshot(wire: WireSnapshot | null | undefined, rec
     && typeof rawOutside.row === 'object'
     ? rawOutside
     : null
-  const outside = normalizeWireDelivery(canonicalOutside?.row ?? {})
+  const outside = normalizeLegacyWireDelivery(canonicalOutside?.row ?? {})
   const selectedDeliveryId = opaque(wire?.selected_delivery) ?? outside?.id ?? null
   const selectedOutsideResults = outside
     && !seen.has(outside.id)
@@ -566,3 +676,20 @@ export function normalizeWireSnapshot(wire: WireSnapshot | null | undefined, rec
     receivedAt,
   }
 }
+
+/** Strict production row adapter. Invalid or legacy-shaped rows are rejected,
+ * never repaired into a different delivery identity. */
+export function normalizeWireDelivery(wire: unknown): Delivery | null {
+  return normalizeStrictWireDelivery(wire)
+}
+
+/** Strict production snapshot adapter. Only malformed aggregate truth degrades
+ * to the explicit aggregate-unavailable state; a malformed snapshot shell,
+ * row, selection, cursor, or unsafe extra field fails the whole load. */
+export function normalizeWireSnapshot(wire: unknown, receivedAt: number): AgentModeSnapshot {
+  return normalizeStrictWireSnapshot(wire, receivedAt)
+}
+
+// Keep the legacy implementation tree-shakeable while the accepted fixture
+// helpers are migrated in the same change. It is intentionally not exported.
+void normalizeLegacyWireSnapshot

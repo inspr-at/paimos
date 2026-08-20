@@ -24,11 +24,11 @@ import { makeFixtureSnapshot } from '@/services/agentModeFixtures'
 import { normalizeWireSnapshot } from '@/services/agentModeTransport'
 import AgentModeFilterBar from './AgentModeFilterBar.vue'
 
-const ten = normalizeWireSnapshot(makeFixtureSnapshot(10), 0).deliveries
+const fixture = normalizeWireSnapshot(makeFixtureSnapshot(10), 0)
 
 async function bar(filters: AgentModeFilters, onUpdate = vi.fn()) {
   setActivePinia(createPinia())
-  const m = await mountComponent(AgentModeFilterBar, { filters, deliveries: ten, 'onUpdate:filters': onUpdate })
+  const m = await mountComponent(AgentModeFilterBar, { filters, aggregates: fixture.aggregates, 'onUpdate:filters': onUpdate })
   return { ...m, onUpdate }
 }
 
@@ -61,23 +61,23 @@ describe('AgentModeFilterBar (PAI-805) — health radiogroup', () => {
     const radios = [...m.el.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
 
     let e = press(radios[0], 'ArrowRight')
-    expect(m.onUpdate).toHaveBeenLastCalledWith({ ...EMPTY_FILTERS, health: 'attention' })
+    expect(m.onUpdate).toHaveBeenLastCalledWith({ health: 'attention' })
     expect(e.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(radios[1])
 
     // Wraps from the first backwards to the last …
     e = press(radios[0], 'ArrowLeft')
-    expect(m.onUpdate).toHaveBeenLastCalledWith({ ...EMPTY_FILTERS, health: 'stale' })
+    expect(m.onUpdate).toHaveBeenLastCalledWith({ health: 'stale' })
     expect(document.activeElement).toBe(radios[3])
     // … and Down / Up behave like Right / Left.
     press(radios[0], 'ArrowDown')
-    expect(m.onUpdate).toHaveBeenLastCalledWith({ ...EMPTY_FILTERS, health: 'attention' })
+    expect(m.onUpdate).toHaveBeenLastCalledWith({ health: 'attention' })
     press(radios[0], 'ArrowUp')
-    expect(m.onUpdate).toHaveBeenLastCalledWith({ ...EMPTY_FILTERS, health: 'stale' })
+    expect(m.onUpdate).toHaveBeenLastCalledWith({ health: 'stale' })
     press(radios[0], 'End')
-    expect(m.onUpdate).toHaveBeenLastCalledWith({ ...EMPTY_FILTERS, health: 'stale' })
+    expect(m.onUpdate).toHaveBeenLastCalledWith({ health: 'stale' })
     press(radios[0], 'Home')
-    expect(m.onUpdate).toHaveBeenLastCalledWith({ ...EMPTY_FILTERS, health: 'all' })
+    expect(m.onUpdate).toHaveBeenLastCalledWith({ health: 'all' })
 
     // The group owns these keys: nothing above it (e.g. the delivery
     // navigation handler) sees them …
@@ -94,7 +94,7 @@ describe('AgentModeFilterBar (PAI-805) — health radiogroup', () => {
     const m = await bar({ ...EMPTY_FILTERS, health: 'stale' })
     const radios = [...m.el.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
     press(radios[3], 'ArrowRight')
-    expect(m.onUpdate).toHaveBeenLastCalledWith({ ...EMPTY_FILTERS, health: 'all' })
+    expect(m.onUpdate).toHaveBeenLastCalledWith({ health: 'all' })
     expect(document.activeElement).toBe(radios[0])
     await m.unmount()
   })
@@ -102,7 +102,17 @@ describe('AgentModeFilterBar (PAI-805) — health radiogroup', () => {
   it('click still selects an option and filters never touch anything but the filter model', async () => {
     const m = await bar(EMPTY_FILTERS)
     m.el.querySelector<HTMLButtonElement>('[data-health="blocked"]')!.click()
-    expect(m.onUpdate).toHaveBeenLastCalledWith({ ...EMPTY_FILTERS, health: 'blocked' })
+    expect(m.onUpdate).toHaveBeenLastCalledWith({ health: 'blocked' })
     await m.unmount()
+  })
+
+  it('shows Clear only when the canonical server query is active', async () => {
+    const empty = await bar({ ...EMPTY_FILTERS, query: '\u0085' })
+    expect(empty.el.querySelector('.am-filter-clear')).toBeNull()
+    await empty.unmount()
+
+    const active = await bar({ ...EMPTY_FILTERS, query: '\uFEFF' })
+    expect(active.el.querySelector('.am-filter-clear')).not.toBeNull()
+    await active.unmount()
   })
 })

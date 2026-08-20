@@ -488,6 +488,7 @@ export default {
     },
     actorKind: {
       agent: 'agent',
+      external: 'external reporter',
       system: 'system',
       human: 'human',
       unknown: 'reporter',
@@ -520,7 +521,7 @@ export default {
       reported: 'Reported',
       blocked: 'Blocked',
       pinned: 'Pinned · hidden by the {filter} filter',
-      pinnedReason: { project: 'project', lane: 'lane', health: 'health', query: 'search' },
+      pinnedReason: { project: 'project', lane: 'lane', health: 'health', query: 'search', server: 'current filters' },
       gone: 'No longer in your active set',
       tags: 'Tags',
       tagsMore: '+{n}',

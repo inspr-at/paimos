@@ -18,14 +18,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 
-import { ApiError } from '@/api/client'
+import { ApiError, sessionExpired } from '@/api/client'
 import { AgentModeLoadError, classifyLoadError, type AgentModeSnapshot } from '@/services/agentMode'
 import { makeFixtureSnapshot } from '@/services/agentModeFixtures'
 import { normalizeWireSnapshot, type AgentModeSnapshotQuery } from '@/services/agentModeTransport'
+import type { AgentModeEventSourceLike, AgentModeMessageEvent } from '@/services/agentModeEvents'
 import { useAgentModeDeliveries } from './useAgentModeDeliveries'
 
 function snap(n: 1 | 10 | 100 | 0): AgentModeSnapshot {
-  return normalizeWireSnapshot(n === 0 ? { schema_version: 1, server_time: '2026-08-20T13:48:00Z', rows: [] } : makeFixtureSnapshot(n), Date.now())
+  return normalizeWireSnapshot(makeFixtureSnapshot(n), Date.now())
+}
+
+class FakeEventSource implements AgentModeEventSourceLike {
+  readonly listeners = new Map<string, Array<(event: AgentModeMessageEvent) => void>>()
+  onerror: ((event: unknown) => void) | null = null
+  readyState = 0
+  close = vi.fn()
+
+  addEventListener(type: string, listener: (event: AgentModeMessageEvent) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener])
+  }
+
+  emit(type: string, event: AgentModeMessageEvent) {
+    for (const listener of this.listeners.get(type) ?? []) listener(event)
+  }
 }
 
 async function flush() {
@@ -38,8 +54,10 @@ async function flush() {
 describe('useAgentModeDeliveries (PAI-805 honest states)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    sessionExpired.value = false
   })
   afterEach(() => {
+    sessionExpired.value = false
     vi.useRealTimers()
   })
 
@@ -177,6 +195,499 @@ describe('useAgentModeDeliveries (PAI-805 honest states)', () => {
     ])
     expect(data.snapshot.value?.cursor).toBe('newer-filter-response')
     expect(data.deliveries.value).toHaveLength(10)
+    data.dispose()
+  })
+
+  it('supersedes a selected-delivery-only request without replacing the stream', async () => {
+    const query = ref<AgentModeSnapshotQuery>({ projectId: 6, selectedDelivery: 'dlv-A' })
+    const pending = new Map<string, (value: AgentModeSnapshot) => void>()
+    const loader = vi.fn((requested: AgentModeSnapshotQuery) => new Promise<AgentModeSnapshot>((resolve) => {
+      pending.set(requested.selectedDelivery ?? '', resolve)
+    }))
+    const sources: FakeEventSource[] = []
+    const eventSourceFactory = vi.fn(() => {
+      const source = new FakeEventSource()
+      sources.push(source)
+      return source
+    })
+    const data = useAgentModeDeliveries({
+      loader,
+      query,
+      reloadOnQueryChange: false,
+      eventSourceFactory,
+      pollMs: 0,
+    })
+
+    const initial = data.load()
+    const initialSnapshot = snap(1)
+    initialSnapshot.selectedDeliveryId = 'dlv-A'
+    pending.get('dlv-A')!(initialSnapshot)
+    await initial
+    expect(sources).toHaveLength(1)
+
+    query.value = { projectId: 6, selectedDelivery: 'dlv-B' }
+    const selectedB = data.load()
+    query.value = { projectId: 6, selectedDelivery: 'dlv-C' }
+    const selectedC = data.load()
+
+    const current = snap(10)
+    current.selectedDeliveryId = 'dlv-C'
+    pending.get('dlv-C')!(current)
+    await selectedC
+    expect(data.snapshot.value?.selectedDeliveryId).toBe('dlv-C')
+
+    const stale = snap(1)
+    stale.selectedDeliveryId = 'dlv-B'
+    pending.get('dlv-B')!(stale)
+    await selectedB
+
+    expect(loader.mock.calls.map(([requested]) => requested.selectedDelivery)).toEqual(['dlv-A', 'dlv-B', 'dlv-C'])
+    expect(data.snapshot.value?.selectedDeliveryId).toBe('dlv-C')
+    expect(sources).toHaveLength(1)
+    expect(sources[0].close).not.toHaveBeenCalled()
+    data.dispose()
+  })
+
+  it('closes immediately on global session loss and reopens once from a fresh snapshot', async () => {
+    const loader = vi.fn(async () => snap(1))
+    const sources: FakeEventSource[] = []
+    const eventSourceFactory = vi.fn(() => {
+      const source = new FakeEventSource()
+      sources.push(source)
+      return source
+    })
+    const data = useAgentModeDeliveries({ loader, eventSourceFactory, pollMs: 0 })
+    await data.load()
+    expect(loader).toHaveBeenCalledOnce()
+    expect(sources).toHaveLength(1)
+    expect(data.hasData.value).toBe(true)
+
+    sessionExpired.value = true
+    expect(sources[0].close).toHaveBeenCalledOnce()
+    expect(data.hasData.value).toBe(false)
+
+    sources[0].emit('refetch', {
+      data: JSON.stringify({ schema_version: 1 }),
+      lastEventId: 'Z'.repeat(211),
+    })
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flush()
+    expect(loader).toHaveBeenCalledOnce()
+
+    sessionExpired.value = false
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(sources).toHaveLength(2)
+    expect(sources[1].close).not.toHaveBeenCalled()
+    data.dispose()
+  })
+
+  it('keeps CONNECTING native reconnect single-source and lets retry own an outage episode', async () => {
+    let online = true
+    const loader = vi.fn(async () => {
+      if (!online) throw new AgentModeLoadError('offline', 'down', 0)
+      return snap(1)
+    })
+    const sources: FakeEventSource[] = []
+    const data = useAgentModeDeliveries({
+      loader,
+      eventSourceFactory: () => {
+        const source = new FakeEventSource()
+        sources.push(source)
+        return source
+      },
+      pollMs: 0,
+      retryBaseMs: 1_000,
+      retryMaxMs: 8_000,
+    })
+    await data.load()
+    online = false
+    for (let index = 0; index < 100; index += 1) sources[0].onerror?.(new Error('reconnect'))
+    await vi.advanceTimersByTimeAsync(750)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(sources).toHaveLength(1)
+    expect(sources[0].close).not.toHaveBeenCalled()
+    expect(data.status.value).toBe('offline')
+
+    // Further transport errors cannot bypass the authoritative backoff.
+    for (let index = 0; index < 100; index += 1) sources[0].onerror?.(new Error('still reconnecting'))
+    await vi.advanceTimersByTimeAsync(999)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(3)
+
+    online = true
+    await vi.advanceTimersByTimeAsync(2_000)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(4)
+    expect(data.status.value).toBe('ready')
+    expect(sources).toHaveLength(1)
+
+    // A successful authoritative recovery starts a new error episode.
+    sources[0].emit('open', { data: '', lastEventId: '' })
+    sources[0].onerror?.(new Error('later episode'))
+    await vi.advanceTimersByTimeAsync(750)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(5)
+    data.dispose()
+  })
+
+  it('lets exponential retry exclusively own an outage after a signal queued behind a pending probe', async () => {
+    let call = 0
+    let rejectProbe!: (cause: unknown) => void
+    const loader = vi.fn(async () => {
+      call += 1
+      if (call === 2) {
+        return await new Promise<AgentModeSnapshot>((_resolve, reject) => { rejectProbe = reject })
+      }
+      return snap(1)
+    })
+    const sources: FakeEventSource[] = []
+    const data = useAgentModeDeliveries({
+      loader,
+      eventSourceFactory: () => {
+        const source = new FakeEventSource()
+        sources.push(source)
+        return source
+      },
+      pollMs: 0,
+      retryBaseMs: 2_000,
+      retryMaxMs: 8_000,
+    })
+    await data.load()
+    const probe = data.load({ background: true, force: true })
+    sources[0].emit('refetch', {
+      data: JSON.stringify({ schema_version: 1 }),
+      lastEventId: `${'A'.repeat(210)}A`,
+    })
+    await vi.advanceTimersByTimeAsync(750)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(2)
+
+    rejectProbe(new AgentModeLoadError('offline', 'down', 0))
+    await probe
+    expect(data.status.value).toBe('offline')
+    expect(data.retryAt.value).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(1_999)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(3)
+    expect(data.status.value).toBe('ready')
+    data.dispose()
+  })
+
+  it('does not let later refetch hints bypass offline backoff or a parked server error', async () => {
+    let mode: 'ok' | 'offline' | 'error' = 'ok'
+    const loader = vi.fn(async () => {
+      if (mode === 'offline') throw new AgentModeLoadError('offline', 'down', 0)
+      if (mode === 'error') throw new AgentModeLoadError('error', 'boom', 500)
+      return snap(1)
+    })
+    const sources: FakeEventSource[] = []
+    const data = useAgentModeDeliveries({
+      loader,
+      eventSourceFactory: () => {
+        const source = new FakeEventSource()
+        sources.push(source)
+        return source
+      },
+      pollMs: 0,
+      retryBaseMs: 2_000,
+      retryMaxMs: 8_000,
+    })
+    await data.load()
+
+    mode = 'offline'
+    await data.load({ background: true, force: true })
+    expect(data.status.value).toBe('offline')
+    expect(data.retryAt.value).not.toBeNull()
+    for (let index = 0; index < 100; index += 1) {
+      sources[0].emit('refetch', {
+        data: JSON.stringify({ schema_version: 1 }),
+        lastEventId: `${'A'.repeat(210)}A`,
+      })
+      sources[0].onerror?.(new Error('still reconnecting'))
+    }
+    await vi.advanceTimersByTimeAsync(1_999)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(2)
+
+    mode = 'ok'
+    await vi.advanceTimersByTimeAsync(1)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(3)
+    expect(data.status.value).toBe('ready')
+
+    mode = 'error'
+    await data.load({ background: true, force: true })
+    expect(data.status.value).toBe('error')
+    for (let index = 0; index < 100; index += 1) {
+      sources[0].emit('refetch', {
+        data: JSON.stringify({ schema_version: 1 }),
+        lastEventId: `${'A'.repeat(210)}A`,
+      })
+      sources[0].onerror?.(new Error('parked reconnect'))
+    }
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(4)
+
+    // A reset remains a fail-closed force path even though hint probes are
+    // parked. It clears the old source and resynchronizes immediately.
+    mode = 'ok'
+    sources[0].emit('reset', {
+      data: JSON.stringify({ schema_version: 1, reason: 'resync_required' }),
+      lastEventId: `${'A'.repeat(210)}A`,
+    })
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(5)
+    expect(data.status.value).toBe('ready')
+    expect(sources).toHaveLength(2)
+    data.dispose()
+  })
+
+  it('retires CLOSED EventSource and reopens only after an authoritative success', async () => {
+    const loader = vi.fn(async () => snap(1))
+    const sources: FakeEventSource[] = []
+    const data = useAgentModeDeliveries({
+      loader,
+      eventSourceFactory: () => {
+        const source = new FakeEventSource()
+        sources.push(source)
+        return source
+      },
+      pollMs: 0,
+    })
+    await data.load()
+    sources[0].readyState = 2
+    sources[0].onerror?.(new Error('closed'))
+    expect(sources[0].close).toHaveBeenCalledOnce()
+    expect(sources).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(749)
+    expect(loader).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(1)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(sources).toHaveLength(2)
+    data.dispose()
+  })
+
+  it('replaces a source that becomes CLOSED after its CONNECTING probe already succeeded', async () => {
+    const loader = vi.fn(async () => snap(1))
+    const sources: FakeEventSource[] = []
+    const data = useAgentModeDeliveries({
+      loader,
+      eventSourceFactory: () => {
+        const source = new FakeEventSource()
+        sources.push(source)
+        return source
+      },
+      pollMs: 0,
+    })
+    await data.load()
+    sources[0].onerror?.(new Error('connecting'))
+    await vi.advanceTimersByTimeAsync(750)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(sources).toHaveLength(1)
+
+    // No open event occurred; the same transport now becomes terminal.
+    sources[0].readyState = 2
+    sources[0].onerror?.(new Error('closed'))
+    expect(sources[0].close).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(750)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(3)
+    expect(sources).toHaveLength(2)
+    data.dispose()
+  })
+
+  it('makes the newest reset token authoritative across session loss while late old work stays inert', async () => {
+    const query = ref<AgentModeSnapshotQuery>({ projectId: 6 })
+    let resolveOldReset!: (value: AgentModeSnapshot) => void
+    let resolveNewReset!: (value: AgentModeSnapshot) => void
+    let call = 0
+    const loader = vi.fn(async () => {
+      call += 1
+      if (call === 2) return await new Promise<AgentModeSnapshot>((resolve) => { resolveOldReset = resolve })
+      if (call === 4) return await new Promise<AgentModeSnapshot>((resolve) => { resolveNewReset = resolve })
+      return snap(1)
+    })
+    const sources: FakeEventSource[] = []
+    const data = useAgentModeDeliveries({
+      loader,
+      query,
+      eventSourceFactory: () => {
+        const source = new FakeEventSource()
+        sources.push(source)
+        return source
+      },
+      pollMs: 0,
+    })
+    await data.load()
+    sources[0].emit('refetch', {
+      data: JSON.stringify({ schema_version: 1 }),
+      lastEventId: `${'A'.repeat(210)}A`,
+    })
+    sources[0].emit('reset', {
+      data: JSON.stringify({ schema_version: 1, reason: 'resync_required' }),
+      lastEventId: `${'A'.repeat(210)}A`,
+    })
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(data.hasData.value).toBe(false)
+
+    sessionExpired.value = true
+    sessionExpired.value = false
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(3)
+    expect(sources).toHaveLength(2)
+
+    // Seed another queued signal, then supersede it with the new reset.
+    sources[1].emit('refetch', {
+      data: JSON.stringify({ schema_version: 1 }),
+      lastEventId: `${'A'.repeat(210)}A`,
+    })
+    sources[1].emit('reset', {
+      data: JSON.stringify({ schema_version: 1, reason: 'resync_required' }),
+      lastEventId: `${'A'.repeat(210)}A`,
+    })
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(4)
+    const newest = snap(10)
+    resolveNewReset(newest)
+    await flush()
+    expect(data.snapshot.value).toBe(newest)
+    expect(sources).toHaveLength(3)
+
+    const stale = snap(1)
+    resolveOldReset(stale)
+    await flush()
+    await vi.advanceTimersByTimeAsync(2_000)
+    await flush()
+    expect(data.snapshot.value).toBe(newest)
+    expect(loader).toHaveBeenCalledTimes(4)
+    expect(sources).toHaveLength(3)
+    expect(sources[2].close).not.toHaveBeenCalled()
+    data.dispose()
+  })
+
+  it('clears an old binding synchronously and never restores it after a narrowed load fails', async () => {
+    const query = ref<AgentModeSnapshotQuery>({})
+    let rejectNarrow!: (cause: unknown) => void
+    const loader = vi.fn(async (requested: AgentModeSnapshotQuery) => {
+      if (requested.q === 'private-scope') {
+        return await new Promise<AgentModeSnapshot>((_resolve, reject) => { rejectNarrow = reject })
+      }
+      return snap(10)
+    })
+    const sources: FakeEventSource[] = []
+    const data = useAgentModeDeliveries({
+      loader,
+      query,
+      reloadOnQueryChange: false,
+      eventSourceFactory: () => {
+        const source = new FakeEventSource()
+        sources.push(source)
+        return source
+      },
+      pollMs: 0,
+    })
+    await data.load()
+    expect(data.deliveries.value).toHaveLength(10)
+    query.value = { q: 'private-scope' }
+    const narrowed = data.load({ background: true })
+    expect(data.snapshot.value).toBeNull()
+    expect(data.deliveries.value).toEqual([])
+    expect(sources[0].close).toHaveBeenCalledOnce()
+    rejectNarrow(new AgentModeLoadError('offline', 'down', 0))
+    await narrowed
+    expect(data.status.value).toBe('offline')
+    expect(data.snapshot.value).toBeNull()
+    sources[0].emit('refetch', {
+      data: JSON.stringify({ schema_version: 1 }),
+      lastEventId: `${'A'.repeat(210)}A`,
+    })
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(loader).toHaveBeenCalledTimes(2)
+    data.dispose()
+  })
+
+  it('fences invalid query state and starts a fresh same-identity request after correction', async () => {
+    const query = ref<AgentModeSnapshotQuery>({ projectId: 6 })
+    const pending: Array<(value: AgentModeSnapshot) => void> = []
+    const loader = vi.fn(async () => await new Promise<AgentModeSnapshot>((resolve) => pending.push(resolve)))
+    const data = useAgentModeDeliveries({ loader, query, reloadOnQueryChange: false, hints: false, pollMs: 0 })
+    const first = data.load()
+    query.value = { projectId: '06' as never }
+    await data.load()
+    expect(data.snapshot.value).toBeNull()
+    expect(data.status.value).toBe('error')
+    query.value = { projectId: 6 }
+    const corrected = data.load()
+    expect(loader).toHaveBeenCalledTimes(2)
+    const fresh = snap(10)
+    pending[1](fresh)
+    await corrected
+    expect(data.snapshot.value).toBe(fresh)
+    const stale = snap(1)
+    pending[0](stale)
+    await first
+    expect(data.snapshot.value).toBe(fresh)
+    data.dispose()
+  })
+
+  it('drops a queued stream refresh when selected B is rejected before its one selector-free fallback', async () => {
+    const query = ref<AgentModeSnapshotQuery>({ selectedDelivery: 'dlv-A' })
+    let rejectB!: (cause: unknown) => void
+    const loader = vi.fn(async (requested: AgentModeSnapshotQuery) => {
+      if (requested.selectedDelivery === 'dlv-B') {
+        return await new Promise<AgentModeSnapshot>((_resolve, reject) => { rejectB = reject })
+      }
+      return snap(10)
+    })
+    const sources: FakeEventSource[] = []
+    const data = useAgentModeDeliveries({
+      loader,
+      query,
+      reloadOnQueryChange: false,
+      onSelectedDeliveryRejected: async () => {
+        query.value = { selectedDelivery: null }
+        await Promise.resolve()
+      },
+      eventSourceFactory: () => {
+        const source = new FakeEventSource()
+        sources.push(source)
+        return source
+      },
+      pollMs: 0,
+    })
+
+    await data.load()
+    query.value = { selectedDelivery: 'dlv-B' }
+    const selectedB = data.load({ background: true })
+    sources[0].emit('refetch', {
+      data: JSON.stringify({ schema_version: 1 }),
+      lastEventId: `${'A'.repeat(210)}A`,
+    })
+    await vi.advanceTimersByTimeAsync(750)
+    await flush()
+    expect(loader.mock.calls.map(([requested]) => requested.selectedDelivery)).toEqual(['dlv-A', 'dlv-B'])
+
+    rejectB(new AgentModeLoadError('not-found', 'selection revoked', 404))
+    await selectedB
+    await flush()
+    expect(loader.mock.calls.map(([requested]) => requested.selectedDelivery)).toEqual(['dlv-A', 'dlv-B', null])
+    expect(sources).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(3)
     data.dispose()
   })
 })

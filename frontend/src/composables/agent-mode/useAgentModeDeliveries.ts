@@ -1,34 +1,17 @@
 /*
  * PAIMOS — Your Professional & Personal AI Project OS
  * Copyright (C) 2026 Markus Barta <markus@barta.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, version 3.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public
- * License along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * AGPL-3.0-only — see LICENSE.
  */
 
-// PAI-805 — Agent Mode data composable.
-//
-// Owns the snapshot lifecycle: initial load, visibility-aware polling,
-// change-stream hints (refetch authoritative state, never patch from
-// hints — PAI-804), offline retry with backoff, and the honest state
-// machine the view renders. No demo fallback exists: when the loader
-// fails the state says so.
+// PAI-804 — one authoritative snapshot lifecycle plus one dedicated SSE
+// invalidation stream. SSE data is never applied as truth: registered events,
+// polling and server-clock boundaries all converge through this one scheduler.
 
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
-import { getActivePinia } from 'pinia'
 import type { InjectionKey } from 'vue'
 
-import { isSessionExpiredError } from '@/api/client'
-import { useChangesStore } from '@/stores/changes'
+import { isSessionExpiredError, sessionExpired } from '@/api/client'
 import {
   classifyLoadError,
   fetchAgentModeSnapshot,
@@ -37,7 +20,17 @@ import {
   type AgentModeSnapshotLoader,
   type Delivery,
 } from '@/services/agentMode'
-import type { AgentModeSnapshotQuery } from '@/services/agentModeTransport'
+import {
+  agentModeStreamBindingKey,
+  openAgentModeEventStream,
+  type AgentModeEventSourceFactory,
+  type AgentModeEventStream,
+} from '@/services/agentModeEvents'
+import {
+  buildSnapshotPath,
+  parseAgentModeDeliveryKey,
+  type AgentModeSnapshotQuery,
+} from '@/services/agentModeTransport'
 
 export type AgentModeStatus =
   | 'idle'
@@ -56,20 +49,19 @@ export const AGENT_MODE_LOADER_KEY: InjectionKey<AgentModeSnapshotLoader> = Symb
 export interface UseAgentModeDeliveriesOptions {
   loader?: AgentModeSnapshotLoader
   query?: Ref<AgentModeSnapshotQuery>
-  /** Set false when query identity should apply to the next scheduled/hinted
-   * refresh without creating a duplicate request immediately. */
   reloadOnQueryChange?: boolean
-  /** Called when a 404 applies to a request that actually carried a selected
-   * delivery. The composable clears data and retries exactly once without
-   * that hint; the owner clears URL/persistence state. */
-  onSelectedDeliveryRejected?: (deliveryId: string) => void
+  onSelectedDeliveryRejected?: (deliveryId: string) => void | Promise<void>
   enabled?: Ref<boolean>
-  /** Poll interval while the tab is visible. 0 disables polling. */
+  /** Authoritative convergence fallback. The production default is 30 s. */
   pollMs?: number
-  /** Offline retry backoff (ms). */
   retryBaseMs?: number
   retryMaxMs?: number
-  /** Subscribe to the mutation change stream as a refetch hint. */
+  /** Explicitly enable/disable the dedicated stream. A custom loader disables
+   * streaming unless this or an injected factory explicitly opts back in. */
+  stream?: boolean
+  eventSourceFactory?: AgentModeEventSourceFactory
+  /** Deprecated PAI-805 option retained only as a source-compatible alias for
+   * `stream`; no generic `/api/changes` subscription remains. */
   hints?: boolean
   now?: () => number
 }
@@ -77,7 +69,16 @@ export interface UseAgentModeDeliveriesOptions {
 const DEFAULT_POLL_MS = 30_000
 const DEFAULT_RETRY_BASE_MS = 2_000
 const DEFAULT_RETRY_MAX_MS = 30_000
-const HINT_DEBOUNCE_MS = 750
+const REFRESH_DEBOUNCE_MS = 750
+
+interface LoadOptions {
+  background?: boolean
+  queryOverride?: AgentModeSnapshotQuery
+  selectionFallback?: boolean
+  force?: boolean
+  queueIfBusy?: boolean
+  resyncToken?: number
+}
 
 export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {}) {
   const loader = opts.loader ?? fetchAgentModeSnapshot
@@ -86,6 +87,8 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
   const retryBaseMs = opts.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
   const retryMaxMs = opts.retryMaxMs ?? DEFAULT_RETRY_MAX_MS
   const query = opts.query ?? ref<AgentModeSnapshotQuery>({})
+  const explicitStream = opts.stream ?? opts.hints
+  const streamEnabled = explicitStream ?? (loader === fetchAgentModeSnapshot || opts.eventSourceFactory != null)
 
   const status = ref<AgentModeStatus>('idle')
   const snapshot = shallowRef<AgentModeSnapshot | null>(null)
@@ -95,128 +98,282 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
   const retryAt = ref<number | null>(null)
   const lastLoadedAt = ref<number | null>(null)
   const lastHintAt = ref<number | null>(null)
+  const streamConnected = ref(false)
 
   const deliveries = computed<Delivery[]>(() => snapshot.value?.deliveries ?? [])
-  /** Active rows plus the one server-authorized persistent selection outside
-   * active filters. The latter is selection-only and never enters counts or
-   * lane aggregates. */
   const selectableDeliveries = computed<Delivery[]>(() => {
     const active = deliveries.value
     const outside = snapshot.value?.selectedOutsideResults ?? null
-    if (!outside || active.some((d) => d.id === outside.id)) return active
+    if (!outside || active.some((delivery) => delivery.id === outside.id)) return active
     return [...active, outside]
   })
   const deliveriesById = computed(() => {
-    const m = new Map<string, Delivery>()
-    for (const d of selectableDeliveries.value) m.set(d.id, d)
-    return m
+    const result = new Map<string, Delivery>()
+    for (const delivery of selectableDeliveries.value) result.set(delivery.id, delivery)
+    return result
   })
-  /** Browser→server clock offset (ms). 0 when the API omits server time. */
   const serverOffsetMs = computed(() => {
-    const s = snapshot.value
-    if (!s?.serverTime) return 0
-    const serverMs = Date.parse(s.serverTime)
-    return Number.isFinite(serverMs) ? serverMs - s.receivedAt : 0
+    const current = snapshot.value
+    if (!current?.serverTime) return 0
+    const serverMs = Date.parse(current.serverTime)
+    return Number.isFinite(serverMs) ? serverMs - current.receivedAt : 0
   })
   const hasData = computed(() => snapshot.value !== null)
-  /** Last-known data is being shown while the feed is unreachable. The
-   * view must qualify it as stale and withhold exact estimates. */
   const degraded = computed(
     () => snapshot.value !== null && (status.value === 'offline' || status.value === 'error'),
   )
 
-  let seq = 0
+  let requestSequence = 0
   let alive = true
-  let pollTimer: ReturnType<typeof setTimeout> | null = null
-  let retryTimer: ReturnType<typeof setTimeout> | null = null
-  let hintTimer: ReturnType<typeof setTimeout> | null = null
   let controller: AbortController | null = null
-  let unsubscribeHints: (() => void) | null = null
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null
+  let refreshDue: number | null = null
+  let refreshVisibilityAware = false
+  let activePromise: Promise<void> | null = null
+  let activeRequestIdentity: string | null = null
+  let queuedRefresh = false
+  let activeBinding: string | null = null
+  let eventStream: AgentModeEventStream | null = null
+  let eventStreamGeneration = 0
+  let activeResyncToken: number | null = null
+  let resyncSequence = 0
+  let signalSequence = 0
+  let streamErrorProbeLatched = false
 
-  function clearTimers() {
-    if (pollTimer !== null) clearTimeout(pollTimer)
+  function isEnabled(): boolean {
+    return !sessionExpired.value && (opts.enabled ? opts.enabled.value : true)
+  }
+
+  function clearRetry() {
     if (retryTimer !== null) clearTimeout(retryTimer)
-    if (hintTimer !== null) clearTimeout(hintTimer)
-    pollTimer = retryTimer = hintTimer = null
+    retryTimer = null
+    retryAt.value = null
   }
 
-  function enabled(): boolean {
-    return opts.enabled ? opts.enabled.value : true
+  function clearRefresh() {
+    if (refreshTimer !== null) clearTimeout(refreshTimer)
+    refreshTimer = null
+    refreshDue = null
+    refreshVisibilityAware = false
   }
 
-  function schedulePoll() {
-    if (pollTimer !== null) clearTimeout(pollTimer)
-    pollTimer = null
-    if (pollMs <= 0 || !alive) return
-    pollTimer = setTimeout(() => {
-      pollTimer = null
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-        schedulePoll()
+  function closeStream() {
+    eventStreamGeneration += 1
+    eventStream?.close()
+    eventStream = null
+    streamConnected.value = false
+  }
+
+  function invalidateResync() {
+    resyncSequence += 1
+    activeResyncToken = null
+  }
+
+  function scheduleRefresh(delay: number, visibilityAware = false) {
+    if (!alive || !isEnabled()) return
+    // Once an authoritative request establishes an outage or parked error,
+    // its retry/manual-recovery policy is the sole scheduler owner. Later SSE
+    // hints must not replace exponential backoff with the 750 ms debounce or
+    // turn a parked server error into an implicit retry loop. Reset bypasses
+    // this scheduler and still forces a fail-closed resync directly.
+    if (
+      status.value === 'offline'
+      || status.value === 'error'
+      || status.value === 'forbidden'
+      || status.value === 'not-found'
+    ) return
+    const safeDelay = Math.max(0, Number.isFinite(delay) ? delay : 0)
+    const due = now() + safeDelay
+    if (refreshTimer !== null && refreshDue !== null) {
+      if (refreshDue < due || (refreshDue === due && !refreshVisibilityAware)) return
+      clearRefresh()
+    }
+    refreshDue = due
+    refreshVisibilityAware = visibilityAware
+    refreshTimer = setTimeout(() => {
+      const needsVisibility = refreshVisibilityAware
+      refreshTimer = null
+      refreshDue = null
+      refreshVisibilityAware = false
+      if (needsVisibility && typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        scheduleBaselineRefresh()
         return
       }
-      void load({ background: true })
-    }, pollMs)
+      void load({ background: hasData.value, queueIfBusy: true })
+    }, safeDelay)
+  }
+
+  function scheduleBaselineRefresh() {
+    clearRefresh()
+    const waits: Array<{ delay: number; visibilityAware: boolean }> = []
+    if (pollMs > 0) waits.push({ delay: pollMs, visibilityAware: true })
+    const current = snapshot.value
+    const nextRefreshAt = current?.aggregates?.nextRefreshAt ?? null
+    if (current?.serverTime && nextRefreshAt) {
+      const boundary = Date.parse(nextRefreshAt)
+      const serverNow = now() + serverOffsetMs.value
+      if (Number.isFinite(boundary)) waits.push({ delay: Math.max(0, boundary - serverNow), visibilityAware: false })
+    }
+    waits.sort((left, right) => left.delay - right.delay)
+    const earliest = waits[0]
+    if (earliest) scheduleRefresh(earliest.delay, earliest.visibilityAware)
   }
 
   function scheduleRetry() {
-    if (retryTimer !== null) clearTimeout(retryTimer)
+    clearRetry()
     const wait = Math.min(retryMaxMs, retryBaseMs * 2 ** Math.max(0, attempt.value - 1))
     retryAt.value = now() + wait
     retryTimer = setTimeout(() => {
       retryTimer = null
       retryAt.value = null
-      void load({ background: hasData.value })
+      void load({ background: hasData.value, force: true })
     }, wait)
   }
 
-  async function load(options: {
-    background?: boolean
-    queryOverride?: AgentModeSnapshotQuery
-    selectionFallback?: boolean
-  } = {}): Promise<void> {
-    if (!alive || !enabled()) return
-    const mySeq = ++seq
+  function ensureStream(requestedQuery: AgentModeSnapshotQuery, binding: string, cursor: string | null) {
+    if (!streamEnabled || !alive || !isEnabled() || !cursor || eventStream) return
+    const generation = ++eventStreamGeneration
+    streamErrorProbeLatched = false
+    try {
+      eventStream = openAgentModeEventStream(requestedQuery, cursor, {
+        onOpen() {
+          if (generation !== eventStreamGeneration) return
+          streamErrorProbeLatched = false
+          streamConnected.value = true
+        },
+        onRefetch() {
+          if (generation !== eventStreamGeneration) return
+          lastHintAt.value = now()
+          signalSequence += 1
+          scheduleRefresh(REFRESH_DEBOUNCE_MS)
+        },
+        onCheckpoint() {
+          // Native EventSource owns the Last-Event-ID update. No snapshot call.
+        },
+        onReset() {
+          if (generation === eventStreamGeneration) void failClosedResync()
+        },
+        onInvalid() {
+          if (generation === eventStreamGeneration) void failClosedResync()
+        },
+        onError(readyState) {
+          if (generation !== eventStreamGeneration) return
+          // CONNECTING is native reconnect and retains the sole source.
+          // CLOSED cannot reconnect: retire it, then let the authoritative
+          // probe reopen exactly one replacement after a successful snapshot.
+          if (readyState === 2) {
+            closeStream()
+            // CLOSED ends the native reconnect episode. Even when an earlier
+            // CONNECTING error already consumed its one probe, replacement of
+            // the now-retired source needs one new authoritative probe.
+            streamErrorProbeLatched = false
+          }
+          // One probe per stream/error episode. If that probe establishes an
+          // outage, exponential retry remains the single scheduler owner;
+          // repeated native errors cannot bypass it.
+          if (streamErrorProbeLatched) return
+          streamErrorProbeLatched = true
+          signalSequence += 1
+          scheduleRefresh(REFRESH_DEBOUNCE_MS)
+        },
+      }, opts.eventSourceFactory)
+      activeBinding = binding
+      streamConnected.value = true
+    } catch {
+      eventStream = null
+      streamConnected.value = false
+      scheduleBaselineRefresh()
+    }
+  }
+
+  async function failClosedResync() {
+    if (activeResyncToken !== null || !alive || !isEnabled()) return
+    const token = ++resyncSequence
+    activeResyncToken = token
+    closeStream()
+    clearRefresh()
+    clearRetry()
+    queuedRefresh = false
     controller?.abort()
+    // Reset may mean audience revocation. Clear before the replacement fetch;
+    // do not retain an identity that the new authorization may omit.
+    snapshot.value = null
+    error.value = null
+    status.value = 'loading'
+    try {
+      await load({ background: false, force: true, resyncToken: token })
+    } finally {
+      if (activeResyncToken === token) activeResyncToken = null
+    }
+  }
+
+  async function performLoad(options: LoadOptions, requestedQuery: AgentModeSnapshotQuery, binding: string): Promise<void> {
+    if (!alive || !isEnabled()) return
+    if (options.resyncToken == null && activeResyncToken !== null) invalidateResync()
+    const mySequence = ++requestSequence
+    const observedSignal = signalSequence
+    if (activeBinding !== null && activeBinding !== binding) {
+      invalidateResync()
+      closeStream()
+      clearRefresh()
+      queuedRefresh = false
+      snapshot.value = null
+      error.value = null
+      refreshing.value = false
+    }
+    controller?.abort()
+    clearRetry()
     controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-    const requestedQuery = options.queryOverride ?? query.value
     if (options.background && hasData.value) refreshing.value = true
     else status.value = 'loading'
     try {
       const next = await loader(requestedQuery, { signal: controller?.signal })
-      if (mySeq !== seq || !alive) return
+      if (mySequence !== requestSequence || !alive) return
       snapshot.value = next
       error.value = null
       attempt.value = 0
-      retryAt.value = null
+      clearRetry()
       lastLoadedAt.value = now()
       status.value = next.deliveries.length === 0 && !next.selectedOutsideResults ? 'empty' : 'ready'
-      schedulePoll()
-    } catch (e) {
-      if (mySeq !== seq || !alive) return
-      if (isSessionExpiredError(e)) {
-        // The global modal owns this condition; keep the last known data.
+      activeBinding = binding
+      scheduleBaselineRefresh()
+      ensureStream(requestedQuery, binding, next.cursor)
+      if (signalSequence > observedSignal) scheduleRefresh(REFRESH_DEBOUNCE_MS)
+    } catch (cause) {
+      if (mySequence !== requestSequence || !alive) return
+      clearRefresh()
+      // A failed authoritative request establishes the only next owner
+      // (retry backoff or a terminal state). Signals queued behind the failed
+      // identity must not schedule a competing 750 ms bypass in the finalizer.
+      queuedRefresh = false
+      if (isSessionExpiredError(cause)) {
+        closeStream()
+        clearRetry()
         status.value = hasData.value ? status.value : 'error'
         return
       }
-      const classified = classifyLoadError(e)
-      const requestedSelection = typeof requestedQuery.selectedDelivery === 'string'
-        ? requestedQuery.selectedDelivery.trim()
-        : ''
+      const classified = classifyLoadError(cause)
+      const requestedSelection = parseAgentModeDeliveryKey(requestedQuery.selectedDelivery) ?? ''
       if (
-        classified.kind === 'not-found' &&
-        requestedSelection !== '' &&
-        options.selectionFallback !== true
+        classified.kind === 'not-found'
+        && requestedSelection !== ''
+        && options.selectionFallback !== true
       ) {
-        // A canonical selected-delivery miss is recoverable without retaining
-        // the rejected identity. Clear first (security), notify the URL/storage
-        // owner, then retry exactly once without the hint. A second 404 parks.
+        // Work queued against a rejected selected-only identity cannot survive
+        // and replay after the one selector-free fallback succeeds.
+        queuedRefresh = false
+        clearRefresh()
+        clearRetry()
         snapshot.value = null
         error.value = null
-        opts.onSelectedDeliveryRejected?.(requestedSelection)
+        await opts.onSelectedDeliveryRejected?.(requestedSelection)
         await load({
           background: false,
           queryOverride: { ...requestedQuery, selectedDelivery: null },
           selectionFallback: true,
+          force: true,
+          resyncToken: options.resyncToken,
         })
         return
       }
@@ -227,65 +384,117 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
         scheduleRetry()
       } else {
         if (classified.kind === 'forbidden' || classified.kind === 'not-found') {
-          // Authorization changed (or the feed vanished): the previous
-          // snapshot is no longer something this user may see. Drop it
-          // immediately so nothing downstream can keep rendering it.
           snapshot.value = null
+          closeStream()
+          clearRetry()
         }
         status.value = classified.kind
-        // Non-transient failures are not retried automatically; the user
-        // can retry and the poll loop stays parked.
       }
     } finally {
-      if (mySeq === seq) refreshing.value = false
+      if (mySequence === requestSequence) refreshing.value = false
     }
   }
 
+  function load(options: LoadOptions = {}): Promise<void> {
+    if (!alive || !isEnabled()) return Promise.resolve()
+    const requestedQuery = options.queryOverride ?? query.value
+    let binding: string
+    let requestIdentity: string
+    try {
+      binding = agentModeStreamBindingKey(requestedQuery)
+      requestIdentity = buildSnapshotPath(requestedQuery)
+    } catch (cause) {
+      requestSequence += 1
+      invalidateResync()
+      controller?.abort()
+      clearRetry()
+      clearRefresh()
+      closeStream()
+      queuedRefresh = false
+      activePromise = null
+      activeRequestIdentity = null
+      snapshot.value = null
+      refreshing.value = false
+      const classified = classifyLoadError(cause)
+      error.value = classified
+      status.value = classified.kind
+      return Promise.resolve()
+    }
+    if (!options.force && activePromise && activeRequestIdentity === requestIdentity) {
+      if (options.queueIfBusy) queuedRefresh = true
+      return activePromise
+    }
+    const promise = performLoad(options, requestedQuery, binding)
+    activePromise = promise
+    activeRequestIdentity = requestIdentity
+    void promise.finally(() => {
+      if (activePromise !== promise) return
+      activePromise = null
+      activeRequestIdentity = null
+      if (queuedRefresh) {
+        queuedRefresh = false
+        scheduleRefresh(REFRESH_DEBOUNCE_MS)
+      }
+    })
+    return promise
+  }
+
   function retryNow() {
-    if (retryTimer !== null) clearTimeout(retryTimer)
-    retryTimer = null
-    retryAt.value = null
-    void load({ background: hasData.value })
-  }
-
-  function onHint() {
-    lastHintAt.value = now()
-    if (hintTimer !== null) clearTimeout(hintTimer)
-    hintTimer = setTimeout(() => {
-      hintTimer = null
-      if (status.value === 'forbidden' || status.value === 'not-found') return
-      void load({ background: true })
-    }, HINT_DEBOUNCE_MS)
-  }
-
-  function subscribeHints() {
-    if (opts.hints === false || !getActivePinia()) return
-    const changes = useChangesStore()
-    unsubscribeHints = changes.subscribe(
-      (event) =>
-        event.subject_type === 'agent_run' ||
-        event.subject_type === 'delivery' ||
-        event.subject_type === 'issue' ||
-        event.subject_type === 'run',
-      () => onHint(),
-    )
+    clearRetry()
+    void load({ background: hasData.value, force: true })
   }
 
   function dispose() {
+    if (!alive) return
     alive = false
-    clearTimers()
+    invalidateResync()
+    requestSequence += 1
+    clearRetry()
+    clearRefresh()
+    queuedRefresh = false
     controller?.abort()
-    unsubscribeHints?.()
-    unsubscribeHints = null
+    closeStream()
   }
 
-  if (opts.reloadOnQueryChange !== false) watch(query, () => void load(), { deep: true })
+  if (opts.reloadOnQueryChange !== false) {
+    watch(query, () => void load(), { deep: true })
+  }
+  if (opts.enabled) {
+    watch(opts.enabled, (enabled) => {
+      if (!enabled) {
+        requestSequence += 1
+        invalidateResync()
+        controller?.abort()
+        clearRetry()
+        clearRefresh()
+        queuedRefresh = false
+        closeStream()
+      } else {
+        void load({ background: hasData.value, force: true })
+      }
+    })
+  }
+  watch(sessionExpired, (expired) => {
+    if (expired) {
+      requestSequence += 1
+      invalidateResync()
+      controller?.abort()
+      clearRetry()
+      clearRefresh()
+      queuedRefresh = false
+      closeStream()
+      snapshot.value = null
+      error.value = null
+      refreshing.value = false
+      status.value = 'idle'
+      return
+    }
+    if (!alive || (opts.enabled && !opts.enabled.value)) return
+    void load({ background: false, force: true })
+  }, { flush: 'sync' })
 
   if (getCurrentInstance()) {
-    onMounted(() => {
-      subscribeHints()
-      void load()
-    })
+    onMounted(() => void load())
     onBeforeUnmount(dispose)
   }
 
@@ -304,6 +513,7 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
     serverOffsetMs,
     hasData,
     degraded,
+    streamConnected,
     load,
     retryNow,
     dispose,

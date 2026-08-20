@@ -33,8 +33,7 @@ function withPatch(d: Delivery, patch: Partial<Delivery>): Delivery {
 describe('agentModeOrdering (PAI-805)', () => {
   it('derives project → epic lanes with an explicit Ungrouped lane last', () => {
     const groups = buildProjectGroups(load(10))
-    // Projects sort by name: Agent runtime, PAIMOS Core platform, Release operations.
-    expect(groups.map((g) => g.projectKey)).toEqual(['RUN', 'PAI', 'REL'])
+    expect(groups.map((g) => g.projectKey)).toEqual(['PAI', 'RUN', 'REL'])
     const pai = groups.find((g) => g.projectKey === 'PAI')!
     expect(pai.lanes.map((l) => l.epicKey ?? 'ungrouped')).toEqual(['PAI-760', 'PAI-801', 'ungrouped'])
     expect(pai.lanes[pai.lanes.length - 1].ungrouped).toBe(true)
@@ -53,7 +52,7 @@ describe('agentModeOrdering (PAI-805)', () => {
     }
   })
 
-  it('orders within a lane by attention, then soonest trusted landing, then issue key', () => {
+  it('orders within a lane by attention, then soonest trusted landing, then bytewise delivery id', () => {
     const [a, b, c, d] = load(10).slice(0, 4)
     const base = { ...a, lane: a.lane }
     const quiet = withPatch(base, { id: 'q', issueKey: 'PAI-900', attention: { level: 0, reason: null, since: null }, eta: { landingAt: '2026-08-20T16:00:00Z', optimisticAt: null, pessimisticAt: null, trusted: true, confidence: 'high', basis: null, calculatedAt: null } })
@@ -62,9 +61,60 @@ describe('agentModeOrdering (PAI-805)', () => {
     const urgent = withPatch(base, { id: 'x', issueKey: 'PAI-999', attention: { level: 3, reason: 'blocked', since: null }, eta: null })
     const sorted = [quiet, sooner, untrusted, urgent].sort(compareDeliveries).map((x) => x.id)
     expect(sorted).toEqual(['x', 's', 'q', 'u'])
+
+    // Backend time.Time ordering retains nanoseconds. Reversed ids make this
+    // fail if the frontend truncates both instants to JavaScript milliseconds.
+    const nanoSooner = withPatch(base, {
+      id: 'z-nano-sooner',
+      attention: { level: 0, reason: null, since: null },
+      eta: { ...quiet.eta!, landingAt: '2026-08-20T15:00:00.000000001Z' },
+    })
+    const nanoLater = withPatch(base, {
+      id: 'a-nano-later',
+      attention: { level: 0, reason: null, since: null },
+      eta: { ...quiet.eta!, landingAt: '2026-08-20T15:00:00.000000002Z' },
+    })
+    expect([nanoLater, nanoSooner].sort(compareDeliveries).map((row) => row.id))
+      .toEqual(['z-nano-sooner', 'a-nano-later'])
+
+    const offsetEquivalent = withPatch(base, {
+      id: 'a-offset',
+      attention: { level: 0, reason: null, since: null },
+      eta: { ...quiet.eta!, landingAt: '2026-08-20T17:00:00+02:00' },
+    })
+    expect([nanoSooner, offsetEquivalent].sort(compareDeliveries).map((row) => row.id))
+      .toEqual(['a-offset', 'z-nano-sooner'])
     void b
     void c
     void d
+  })
+
+  it('does not let mutable labels, issue keys, or locale move canonical targets', () => {
+    const list = load(10)
+    const base = list[0]
+    const projectTwo = withPatch(base, {
+      id: 'delivery-z',
+      issueKey: 'ZZZ-999',
+      lane: { ...base.lane, projectId: 2, projectKey: 'ZZZ', projectName: 'Zulu', key: 'project:2/epic:10', epicId: 10, epicKey: 'E-1' },
+    })
+    const projectTen = withPatch(base, {
+      id: 'delivery-a',
+      issueKey: 'AAA-1',
+      lane: { ...base.lane, projectId: 10, projectKey: 'AAA', projectName: 'Alpha', key: 'project:10/epic:2', epicId: 2, epicKey: 'E-99' },
+    })
+    expect(buildProjectGroups([projectTen, projectTwo]).map((group) => group.projectId)).toEqual([2, 10])
+
+    const epicTen = withPatch(projectTwo, { id: 'delivery-b' })
+    const epicTwo = withPatch(projectTwo, {
+      id: 'delivery-a',
+      lane: { ...projectTwo.lane, key: 'project:2/epic:2', epicId: 2, epicKey: 'E-99' },
+    })
+    expect(buildProjectGroups([epicTen, epicTwo])[0].lanes.map((lane) => lane.epicId)).toEqual([2, 10])
+
+    const sameFactsA = withPatch(base, { id: 'delivery-a', issueKey: 'ZZZ-999' })
+    const sameFactsB = withPatch(base, { id: 'delivery-b', issueKey: 'AAA-1' })
+    expect([sameFactsB, sameFactsA].sort(compareDeliveries).map((row) => row.id))
+      .toEqual(['delivery-a', 'delivery-b'])
   })
 
   it('is deterministic: the same data always yields the same order', () => {
@@ -106,6 +156,28 @@ describe('agentModeOrdering (PAI-805)', () => {
     expect(newLane.deliveryIds[newLane.deliveryIds.length - 1]).toBe('dlv-new')
     // Canonical order, applied once the hold releases, differs.
     expect(flattenOrder(fresh)).not.toEqual(after)
+  })
+
+  it('refreshes surviving group and lane labels while preserving held slots', () => {
+    const list = load(10)
+    const frozen = buildProjectGroups(list)
+    const mutated = list.map((row) => ({
+      ...row,
+      lane: {
+        ...row.lane,
+        projectKey: `${row.lane.projectKey}-NEW`,
+        projectName: `${row.lane.projectName} renamed`,
+        epicKey: row.lane.epicKey ? `${row.lane.epicKey}-NEW` : null,
+        epicTitle: row.lane.epicTitle ? `${row.lane.epicTitle} renamed` : null,
+      },
+    }))
+    const fresh = buildProjectGroups(mutated)
+    const reconciled = reconcileFrozenGroups(frozen, fresh)
+    expect(flattenOrder(reconciled)).toEqual(flattenOrder(frozen))
+    expect(reconciled[0].projectName).toBe(fresh[0].projectName)
+    expect(reconciled[0].projectKey).toBe(fresh[0].projectKey)
+    expect(reconciled[0].lanes[0].epicTitle).toBe(fresh[0].lanes[0].epicTitle)
+    expect(reconciled[0].lanes[0].epicKey).toBe(fresh[0].lanes[0].epicKey)
   })
 })
 

@@ -23,6 +23,10 @@ import AgentModeDeliveryCard from './AgentModeDeliveryCard.vue'
 defineProps<{
   groups: readonly AgentModeProjectGroup[]
   deliveriesById: ReadonlyMap<string, Delivery>
+  /** Fresh server-owned active totals. Null means the aggregate contract is
+   * unavailable, so no count is rendered or reconstructed from card slots. */
+  projectActiveTotals: ReadonlyMap<number, number> | null
+  laneActiveTotals: ReadonlyMap<string, number> | null
   /** Ids kept in a frozen layout that are no longer in the snapshot. */
   tombstoneIds: ReadonlySet<string>
   selectedId: string | null
@@ -64,7 +68,13 @@ function laneDomId(key: string): string {
       <h2 :id="`am-project-${group.projectId}`" class="am-project-head">
         <span class="am-project-key">{{ group.projectKey }}</span>
         <span class="am-project-name">{{ group.projectName }}</span>
-        <span class="am-project-count">{{ t('agentMode.lanes.count', { n: group.count }, group.count) }}</span>
+        <span
+          v-if="projectActiveTotals?.has(group.projectId)"
+          class="am-project-count"
+          :data-active-total="projectActiveTotals.get(group.projectId)!"
+        >
+          {{ t('agentMode.lanes.count', { n: projectActiveTotals.get(group.projectId)! }, projectActiveTotals.get(group.projectId)!) }}
+        </span>
       </h2>
       <div
         v-for="lane in group.lanes"
@@ -77,7 +87,12 @@ function laneDomId(key: string): string {
       >
         <div class="am-lane-label">
           <h3 :id="laneDomId(lane.key)">{{ laneLabel(lane) }}</h3>
-          <small>{{ t('agentMode.lanes.count', { n: lane.deliveryIds.length }, lane.deliveryIds.length) }}</small>
+          <small
+            v-if="laneActiveTotals?.has(lane.key)"
+            :data-active-total="laneActiveTotals.get(lane.key)!"
+          >
+            {{ t('agentMode.lanes.count', { n: laneActiveTotals.get(lane.key)! }, laneActiveTotals.get(lane.key)!) }}
+          </small>
         </div>
         <div class="am-lane-cards">
           <template v-for="id in lane.deliveryIds" :key="id">

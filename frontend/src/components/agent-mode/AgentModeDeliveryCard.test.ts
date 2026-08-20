@@ -105,7 +105,11 @@ describe('AgentModeDeliveryCard (PAI-805)', () => {
     expect(m3.el.textContent).toContain('permissions fixture fails')
     await m3.unmount()
 
-    const untrusted = ten[5]
+    const untrusted: Delivery = {
+      ...ten[0],
+      progress: { ...ten[0].progress!, trusted: false },
+      eta: { ...ten[0].eta!, trusted: false },
+    }
     const m4 = await card(untrusted)
     expect(m4.el.querySelector('.am-card-percent')).toBeNull()
     expect(m4.el.textContent).toContain('No estimate — not trusted yet')

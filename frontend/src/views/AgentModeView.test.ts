@@ -26,9 +26,19 @@ import { TOMBSTONE_TTL_MS } from '@/composables/agent-mode/agentModeOrdering'
 import { useConfirm } from '@/composables/useConfirm'
 import { AgentModeLoadError, type AgentModeSnapshot, type AgentModeSnapshotLoader } from '@/services/agentMode'
 import { AGGREGATE_FLAG_KEYS, AGGREGATE_LANDING_KEYS, AGGREGATE_STAGE_KEYS } from '@/services/agentModeAggregateSchema'
-import { makeFixtureAggregateSnapshot, makeFixtureDelivery, makeFixtureSnapshot } from '@/services/agentModeFixtures'
-import { laneKeyFor, normalizeWireSnapshot, type WireSnapshot } from '@/services/agentModeTransport'
-import { useChangesStore } from '@/stores/changes'
+import type { AgentModeEventSourceLike, AgentModeMessageEvent } from '@/services/agentModeEvents'
+import {
+  makeFixtureAggregateSnapshot,
+  makeFixtureDelivery,
+  makeFixtureSnapshot,
+  rebuildFixtureAggregates,
+} from '@/services/agentModeFixtures'
+import {
+  laneKeyFor,
+  normalizeWireSnapshot,
+  type AgentModeSnapshotQuery,
+  type WireSnapshot,
+} from '@/services/agentModeTransport'
 import { useAuthStore } from '@/stores/auth'
 import { lsAgentModeSelectedKey } from '@/constants/storage'
 import AgentModeView from './AgentModeView.vue'
@@ -37,11 +47,48 @@ function snapshot(wire: WireSnapshot): AgentModeSnapshot {
   return normalizeWireSnapshot(wire, Date.now())
 }
 
+function testCursor(seed: string): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+  const checksum = [...seed].reduce((sum, character) => sum + character.charCodeAt(0), 0)
+  return `${alphabet[checksum % alphabet.length].repeat(210)}A`
+}
+
 /** Fixture snapshot without the given delivery ids. */
 function snapshotWithout(ids: string[], revision = 'fx-10-2'): AgentModeSnapshot {
   const wire = makeFixtureSnapshot(10)
   wire.rows = wire.rows!.filter((d) => !ids.includes(String(d.delivery_id)))
-  wire.cursor = revision
+  wire.cursor = testCursor(revision)
+  if (typeof wire.selected_delivery === 'string' && ids.includes(wire.selected_delivery)) {
+    delete wire.selected_delivery
+    delete wire.selected_outside
+  }
+  rebuildFixtureAggregates(wire)
+  return snapshot(wire)
+}
+
+/** Minimal authoritative server simulation for mounted filter tests. The view
+ * never filters rows locally; an explicit selected row excluded by a shaping
+ * filter is returned only through selected_outside. */
+function filteredFixtureSnapshot(
+  query: AgentModeSnapshotQuery,
+  mutate?: (wire: WireSnapshot) => void,
+): AgentModeSnapshot {
+  const wire = makeFixtureSnapshot(10)
+  const allRows = wire.rows ?? []
+  let rows = allRows
+  if (typeof query.projectId === 'number') rows = rows.filter((row) => row.project_id === query.projectId)
+  if (typeof query.laneKey === 'string') rows = rows.filter((row) => row.lane_key === query.laneKey)
+  const requested = typeof query.selectedDelivery === 'string' ? query.selectedDelivery : null
+  if (requested) {
+    wire.selected_delivery = requested
+    const outside = allRows.find((row) => row.delivery_id === requested && !rows.includes(row))
+    if (outside) wire.selected_outside = { reason: 'filter_excluded', row: outside }
+    else delete wire.selected_outside
+  }
+  wire.rows = rows
+  wire.cursor = testCursor(JSON.stringify([query.projectId, query.laneKey, requested]))
+  mutate?.(wire)
+  rebuildFixtureAggregates(wire)
   return snapshot(wire)
 }
 
@@ -118,18 +165,14 @@ function omitAggregateLane(source: WireSnapshot, projectId: number, laneKey: str
 function makeEligibleRangeSnapshot(aggregated: boolean): WireSnapshot {
   const wire = aggregated ? makeFixtureAggregateSnapshot(10) : makeFixtureSnapshot(10)
   const row = wire.rows![0]
-  row.eta = { ...row.eta!, confidence: 'low' }
+  const trust = row.trust as Record<string, unknown>
+  trust.confidence_label = 'low'
+  trust.landing_at = null
+  trust.range_only = true
+  row.progress = { ...row.progress!, confidence: 'low' }
+  row.eta = { ...row.eta!, landing_at: null, confidence: 'low' }
   wire.selected_delivery = row.delivery_id
-  if (aggregated) {
-    const aggregate = mutableAggregates(wire)
-    const project = aggregate.projects.find((candidate) => candidate.project_id === row.project_id)!
-    const laneKey = laneKeyFor(row.project_id!, row.epic_id ?? null)
-    const lane = project.lanes.find((candidate) => candidate.lane_key === laneKey)!
-    for (const counts of [aggregate.root, project.counts, lane.counts]) {
-      counts.landing.within_4h -= 1
-      counts.landing.range_only += 1
-    }
-  }
+  rebuildFixtureAggregates(wire)
   return wire
 }
 
@@ -145,7 +188,25 @@ interface Harness {
   root: HTMLElement
   unmount: () => void
   loader: ReturnType<typeof vi.fn>
+  sources: FakeEventSource[]
 }
+
+class FakeEventSource implements AgentModeEventSourceLike {
+  readonly listeners = new Map<string, Array<(event: AgentModeMessageEvent) => void>>()
+  onerror: ((event: unknown) => void) | null = null
+  readyState = 0
+  close = vi.fn()
+
+  addEventListener(type: string, listener: (event: AgentModeMessageEvent) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener])
+  }
+
+  emit(type: string, event: AgentModeMessageEvent) {
+    for (const listener of this.listeners.get(type) ?? []) listener(event)
+  }
+}
+
+let activeViewSources: FakeEventSource[] = []
 
 async function mountView(loaderImpl: AgentModeSnapshotLoader, path = '/agent-mode'): Promise<Harness> {
   document.body.innerHTML = '<div id="app-header-left"></div><div id="app-header-right"></div><div id="root"></div>'
@@ -153,11 +214,20 @@ async function mountView(loaderImpl: AgentModeSnapshotLoader, path = '/agent-mod
   setActivePinia(pinia)
   useAuthStore().hydrateAccess({ all_projects: true, levels: {} })
   const loader = vi.fn(loaderImpl)
+  const sources: FakeEventSource[] = []
+  const eventSourceFactory = vi.fn(() => {
+    const source = new FakeEventSource()
+    sources.push(source)
+    return source
+  })
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: '/', component: { render: () => h('div') } },
-      { path: '/agent-mode', component: { render: () => h(AgentModeView, { loader: loader as unknown as AgentModeSnapshotLoader }) } },
+      { path: '/agent-mode', component: { render: () => h(AgentModeView, {
+        loader: loader as unknown as AgentModeSnapshotLoader,
+        eventSourceFactory,
+      }) } },
     ],
   })
   await router.push(path)
@@ -169,12 +239,18 @@ async function mountView(loaderImpl: AgentModeSnapshotLoader, path = '/agent-mod
   const root = document.getElementById('root')!
   app.mount(root)
   await flush()
-  return { router, root, loader, unmount: () => app.unmount() }
+  activeViewSources = sources
+  return { router, root, loader, sources, unmount: () => app.unmount() }
 }
 
 /** Publishes a change-stream hint so the view refetches (debounced 750 ms). */
 async function refetchViaHint() {
-  useChangesStore().publish({ id: 1, mutation_type: 'update', subject_type: 'agent_run', subject_id: 1, project_id: 6, user_id: null, created_at: 'now' })
+  const source = activeViewSources[activeViewSources.length - 1]
+  if (!source) throw new Error('missing Agent Mode EventSource')
+  source.emit('refetch', {
+    data: JSON.stringify({ schema_version: 1 }),
+    lastEventId: `${'A'.repeat(210)}A`,
+  })
   await vi.advanceTimersByTimeAsync(1_000)
   await flush()
 }
@@ -351,6 +427,63 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     }
   })
 
+  it('lets user-selected B supersede a deferred A refresh without replacing its stream or reloading for valid detail changes', async () => {
+    vi.useFakeTimers()
+    const initial = 'dlv-815'
+    let call = 0
+    let resolvePendingA!: (value: AgentModeSnapshot) => void
+    let resolveB!: (value: AgentModeSnapshot) => void
+    harness = await mountView(async (query) => {
+      call += 1
+      if (call === 1) return filteredFixtureSnapshot(query)
+      return await new Promise<AgentModeSnapshot>((resolve) => {
+        if (query.selectedDelivery === initial) resolvePendingA = resolve
+        else resolveB = resolve
+      })
+    }, `/agent-mode?delivery=${initial}`)
+    const target = cardOrder(harness.root).find((id) => id !== initial)!
+
+    harness.sources[0].emit('refetch', {
+      data: JSON.stringify({ schema_version: 1 }),
+      lastEventId: `${'A'.repeat(210)}A`,
+    })
+    await vi.advanceTimersByTimeAsync(750)
+    await flush()
+    expect(harness.loader.mock.calls.map(([query]) => query.selectedDelivery)).toEqual([initial, initial])
+
+    hit(harness.root, target).click()
+    await flush()
+    expect(harness.loader.mock.calls.map(([query]) => query.selectedDelivery)).toEqual([initial, initial, target])
+    resolveB(filteredFixtureSnapshot(harness.loader.mock.calls[2]![0], (wire) => {
+      const row = wire.rows?.find((candidate) => candidate.delivery_id === target)
+      if (row) row.status_text = 'B authoritative winner'
+    }))
+    await flush()
+
+    expect(selectedId(harness.root)).toBe(target)
+    expect(harness.root.textContent).toContain('B authoritative winner')
+    expect(harness.root.textContent).not.toContain('stale A must stay inert')
+    expect(harness.sources).toHaveLength(1)
+    expect(harness.sources[0].close).not.toHaveBeenCalled()
+
+    resolvePendingA(filteredFixtureSnapshot(harness.loader.mock.calls[1]![0], (wire) => {
+      const row = wire.rows?.find((candidate) => candidate.delivery_id === target)
+      if (row) row.status_text = 'stale A must stay inert'
+    }))
+    await flush()
+    expect(selectedId(harness.root)).toBe(target)
+    expect(harness.router.currentRoute.value.query.delivery).toBe(target)
+    expect(harness.root.textContent).toContain('B authoritative winner')
+    expect(harness.root.textContent).not.toContain('stale A must stay inert')
+
+    for (const detail of ['1', '100', undefined] as const) {
+      await harness.router.replace({ query: { ...harness.router.currentRoute.value.query, detail } })
+      await flush()
+    }
+    expect(harness.loader).toHaveBeenCalledTimes(3)
+    expect(harness.sources).toHaveLength(1)
+  })
+
   it('lifts a final-lane selection into exactly one data-backed target before Attention', async () => {
     const wire = makeFixtureSnapshot(10)
     const richSelection = wire.rows!.find((delivery) => delivery.delivery_id === 'dlv-820')!
@@ -371,7 +504,8 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(anchor.querySelector('.am-card-tag')?.textContent).toContain('#security')
     expect(anchor.querySelector('.am-card-percent')?.textContent).toContain('96 % complete')
     expect(anchor.querySelector('.am-card-flag--attention')?.textContent).toContain('Needs you')
-    expect(anchor.querySelector('.am-card-reason')?.textContent).toContain('Latency threshold exceeded during verification')
+    expect(anchor.querySelector('.am-card-reason')?.textContent).toContain('Deployed — verification needed')
+    expect(anchor.textContent).not.toContain('deployed_unverified')
     expect(anchor.querySelector('.am-card-status')?.textContent).toContain('Verification remains inside the release window')
     expect(root.querySelector('.am-lanes [data-delivery-id="dlv-820"]')).toBeNull()
     expect(root.querySelector('.am-lanes [data-layout-id="dlv-820"]')?.textContent).toContain('Selected above')
@@ -430,10 +564,12 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
 
   it('fails closed at Detail 100 when aggregates are missing or malformed and never derives lane totals from 100 cards', async () => {
     for (const malformed of [false, true]) {
-      const wire = malformed ? makeFixtureAggregateSnapshot(100) : makeFixtureSnapshot(100)
+      const wire = makeFixtureAggregateSnapshot(100)
       if (malformed) {
         const aggregate = wire.aggregates as { root: { active_total: number } }
         aggregate.root.active_total += 1
+      } else {
+        delete wire.aggregates
       }
       harness = await mountView(async () => snapshot(wire), '/agent-mode?detail=100')
       const { root } = harness
@@ -450,6 +586,16 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
       harness = null
       document.body.innerHTML = ''
     }
+  })
+
+  it('hides Detail-10 project and lane counts when authoritative aggregates are unavailable', async () => {
+    const wire = makeFixtureSnapshot(10)
+    delete wire.aggregates
+    harness = await mountView(async () => snapshot(wire))
+    expect(harness.root.querySelector('.am-lanes')).not.toBeNull()
+    expect(harness.root.querySelectorAll('.am-project-count')).toHaveLength(0)
+    expect(harness.root.querySelectorAll('.am-lane-label small')).toHaveLength(0)
+    expect(harness.root.querySelectorAll('.am-card')).toHaveLength(10)
   })
 
   it('keeps Detail 100 bounded for 100 rows: one full card, at most 12 attention rows, and aggregate-only drill targets', async () => {
@@ -547,7 +693,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
       expect(card.querySelector('.am-card-eta--range')?.textContent).toContain('Landing range')
       expect(card.textContent).not.toContain('Lands ~')
       expect(card.querySelector('.am-card-eta small')).toBeNull()
-      expect(card.textContent).not.toContain('confidence too low')
+      expect(card.querySelector('.am-card-percent')).toBeNull()
       expect(harness.root.querySelector('.am-conv')?.textContent).toContain('Landing range')
       expect(harness.root.querySelector('.am-conv')?.textContent).not.toContain('No estimate')
       if (detail === 1) expect(harness.root.querySelector('.am-detail-list')?.textContent).toContain('Landing range')
@@ -758,12 +904,16 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   it('passes a deep-linked persistent identity as selected_delivery without inventing a second transport', async () => {
     const wire = makeFixtureSnapshot(10)
     const delivery = wire.rows!.find((row) => row.delivery_id === 'dlv-820')!
-    delivery.estimate_suppression_codes = ['source_disagreement']
-    delivery.estimate_disagreement_codes = ['runner_vs_plan']
+    const trust = delivery.trust as Record<string, unknown>
+    trust.suppression = 'insufficient_basis'
+    trust.flags = ['agent_history_disagreement']
+    if (delivery.eta) delivery.eta.trusted = false
     harness = await mountView(async () => snapshot(wire), '/agent-mode?detail=1&delivery=dlv-820')
     expect(harness.loader.mock.calls[0]?.[0]).toEqual({
       projectId: null,
       laneKey: null,
+      states: [],
+      attention: 'all',
       health: 'all',
       q: '',
       selectedDelivery: 'dlv-820',
@@ -773,13 +923,14 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(focus.dataset.laneKey).toBe('project:12/ungrouped')
     expect(focus.dataset.stageKey).toBe('deployment')
     expect(focus.dataset.planRevision).toBe('plan:820:1')
-    expect(focus.dataset.trustRevision).toBe('trust:820:1')
+    expect(focus.dataset.trustRevision).toBe(delivery.trust_revision)
     expect(focus.querySelectorAll('.am-stage-chain .am-stage')).toHaveLength(5)
     expect(focus.textContent).toContain('Smoke-testing the production release')
-    expect(focus.textContent).toContain('Accepted deployment ownership')
-    expect(focus.textContent).toContain('specification evidence')
-    expect(focus.textContent).toContain('source_disagreement')
-    expect(focus.textContent).toContain('runner_vs_plan')
+    expect(focus.querySelectorAll('.am-detail-items li')).not.toHaveLength(0)
+    expect(focus.textContent).toContain('stage_result')
+    expect(focus.textContent).toContain('passed')
+    expect(focus.textContent).toContain('insufficient_basis')
+    expect(focus.textContent).toContain('agent_history_disagreement')
   })
 
   it('keeps an authorized persistent selection outside active results without adding it to delivery counts', async () => {
@@ -795,7 +946,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   })
 
   it('arrow keys move the selection along the visual order and carry DOM focus; Enter opens the focused delivery', async () => {
-    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
+    harness = await mountView(async (query) => filteredFixtureSnapshot(query))
     const { root, router } = harness
     const order = cardOrder(root)
     const start = selectedId(root)!
@@ -823,7 +974,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   })
 
   it('filters pin an excluded selection above the results and never clear it', async () => {
-    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
+    harness = await mountView(async (query) => filteredFixtureSnapshot(query))
     const { root, router } = harness
     const selected = selectedId(root)!
     const selectedProject = root.querySelector<HTMLElement>('.am-selected-above')!.closest('.am-project')!
@@ -839,7 +990,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(selectedId(root)).toBe(selected)
     const pinned = root.querySelector<HTMLElement>('.am-selection-anchor')!
     expect(pinned.querySelector<HTMLElement>('.am-card')?.dataset.deliveryId).toBe(selected)
-    expect(pinned.textContent).toContain('hidden by the project filter')
+    expect(pinned.textContent).toContain('hidden by the current filters')
     // Clearing restores the full layout and keeps the selection.
     root.querySelector<HTMLButtonElement>('.am-filter-clear')!.click()
     await flush()
@@ -849,7 +1000,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   })
 
   it('keyboard travel from a pinned (filtered-out) selection into the results and back moves DOM focus with the selection', async () => {
-    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
+    harness = await mountView(async (query) => filteredFixtureSnapshot(query))
     const { root } = harness
     const pinnedId = selectedId(root)!
     const selectedProject = root.querySelector<HTMLElement>('.am-selected-above')!.closest('.am-project')!
@@ -870,12 +1021,14 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect((document.activeElement as HTMLElement | null)?.dataset.cardHit).toBe(firstResult)
     expect(document.activeElement!.closest('.am-selection-anchor')).not.toBeNull()
 
-    // Back: the pinned card is selected again AND focused.
+    // Back cannot resurrect the previously excluded row after the server has
+    // authorized only the filtered result set for the new selection.
     key(root, 'ArrowLeft', hit(root, firstResult))
     await flush()
-    expect(selectedId(root)).toBe(pinnedId)
-    expect(root.querySelector('.am-selection-anchor .am-card-pinned-note')).not.toBeNull()
-    expect((document.activeElement as HTMLElement | null)?.dataset.cardHit).toBe(pinnedId)
+    expect(selectedId(root)).toBe(firstResult)
+    expect(root.querySelector(`[data-delivery-id="${pinnedId}"]`)).toBeNull()
+    expect(root.querySelector('.am-selection-anchor .am-card-pinned-note')).toBeNull()
+    expect((document.activeElement as HTMLElement | null)?.dataset.cardHit).toBe(firstResult)
     expect(document.activeElement!.closest('.am-selection-anchor')).not.toBeNull()
   })
 
@@ -907,10 +1060,15 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
         // Give the last card in the first lane top attention: canonically it
         // would jump to the front of its lane.
         const sorted = [...wire.rows!]
-        sorted[0] = { ...sorted[0], attention: { level: 3, reason: 'now urgent', since: null } }
-        sorted[9] = { ...sorted[9], attention: { level: 0, reason: null, since: null } }
+        sorted[0] = {
+          ...sorted[0],
+          health: 'blocked',
+          activity: { ...sorted[0].activity!, kind: 'blocked', text: 'now urgent' },
+          attention: { level: 3, reason: 'blocked', since: wire.server_time },
+        }
         wire.rows = sorted
-        wire.cursor = 'fx-10-2'
+        wire.cursor = testCursor('fx-10-2')
+        rebuildFixtureAggregates(wire)
       }
       return snapshot(wire)
     })
@@ -957,9 +1115,11 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
                 epic_id: 4655,
                 epic_key: 'PAI-801',
                 epic_title: 'Agent Mode',
+                lane_key: 'project:6/epic:4655',
               }
             : d)
-        wire.cursor = 'fx-project-move'
+        wire.cursor = testCursor('fx-project-move')
+        rebuildFixtureAggregates(wire)
       }
       return snapshot(wire)
     })
@@ -989,9 +1149,16 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
       const wire = makeFixtureSnapshot(10)
       if (moved) {
         wire.rows = wire.rows!.map((d) => d.delivery_id === 'dlv-812'
-          ? { ...d, epic_id: 9999, epic_key: 'PAI-999', epic_title: 'Current authorization lane' }
+          ? {
+              ...d,
+              epic_id: 9999,
+              epic_key: 'PAI-999',
+              epic_title: 'Current authorization lane',
+              lane_key: 'project:6/epic:9999',
+            }
           : d)
-        wire.cursor = 'fx-epic-move'
+        wire.cursor = testCursor('fx-epic-move')
+        rebuildFixtureAggregates(wire)
       }
       return snapshot(wire)
     })
@@ -1124,6 +1291,17 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(tombstones[0].closest<HTMLElement>('.am-lane')!.dataset.laneKey).toBe(goneLane)
     expect(tombstones[0].textContent).toContain('No longer in your active set')
     expect(tombstones[0].textContent).not.toMatch(/PAI-|RUN-|REL-/)
+    // Frozen slots include the opaque tombstone, but the visible badges use
+    // the fresh server aggregate active totals, never slot/card cardinality.
+    const tombstoneLane = tombstones[0].closest<HTMLElement>('.am-lane')!
+    const activeLaneRows = tombstoneLane.querySelectorAll('.am-card, .am-selected-above').length
+    expect(tombstoneLane.querySelector<HTMLElement>('.am-lane-label small')?.dataset.activeTotal)
+      .toBe(String(activeLaneRows))
+    expect(tombstoneLane.querySelectorAll('.am-card, .am-selected-above, .am-tombstone')).toHaveLength(activeLaneRows + 1)
+    const tombstoneProject = tombstoneLane.closest<HTMLElement>('.am-project')!
+    const activeProjectRows = tombstoneProject.querySelectorAll('.am-card, .am-selected-above').length
+    expect(tombstoneProject.querySelector<HTMLElement>('.am-project-count')?.dataset.activeTotal)
+      .toBe(String(activeProjectRows))
     // … while the project whose deliveries ALL left vanishes immediately,
     // header included, despite the hold.
     expect(root.textContent).not.toContain('Release operations')
@@ -1196,7 +1374,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(selectedId(root)).toBe(lastLive)
   })
 
-  it('canonicalizes invalid URL project/lane filters to null without mutating an identity into a request', async () => {
+  it('fails closed on invalid URL project/lane filters without issuing a broader request', async () => {
     const invalidPaths = [
       '/agent-mode?project=6.5',
       `/agent-mode?project=${Number.MAX_SAFE_INTEGER + 1}`,
@@ -1205,12 +1383,147 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     ]
     for (const path of invalidPaths) {
       harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), path)
-      expect(harness.loader.mock.calls[0]?.[0]).toMatchObject({ projectId: null, laneKey: null })
-      expect(harness.root.querySelectorAll('.am-card')).toHaveLength(10)
+      expect(harness.loader).not.toHaveBeenCalled()
+      expect(harness.root.querySelectorAll('.am-card')).toHaveLength(0)
+      expect(harness.root.querySelector('.am-state--error')).not.toBeNull()
       harness.unmount()
       harness = null
       document.body.innerHTML = ''
     }
+  })
+
+  it('keeps bare-state and mixed URL boundaries fenced across unrelated controls until the offending value is explicitly repaired', async () => {
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?state')
+    expect(harness.router.currentRoute.value.query.state).toBeNull()
+    expect(harness.loader).not.toHaveBeenCalled()
+    expect(harness.root.querySelector('.am-state--error')).not.toBeNull()
+    expect(harness.root.querySelector('.am-filters')).not.toBeNull()
+
+    harness.root.querySelector<HTMLButtonElement>('[data-health="blocked"]')!.click()
+    await flush()
+    expect(harness.router.currentRoute.value.query.state).toBeNull()
+    expect(harness.router.currentRoute.value.query.health).toBe('blocked')
+    expect(harness.loader).not.toHaveBeenCalled()
+
+    const detailOne = [...document.querySelectorAll<HTMLButtonElement>('.am-lever-btn')]
+      .find((button) => button.textContent?.trim() === '1')!
+    detailOne.click()
+    await flush()
+    expect(harness.router.currentRoute.value.query.state).toBeNull()
+    expect(harness.router.currentRoute.value.query.detail).toBe('1')
+    expect(harness.loader).not.toHaveBeenCalled()
+
+    await harness.router.replace({
+      query: { ...harness.router.currentRoute.value.query, state: 'active' },
+    })
+    await flush()
+    expect(harness.loader).toHaveBeenCalledOnce()
+    expect(harness.loader.mock.calls[0]?.[0]).toMatchObject({ states: ['active'], health: 'blocked' })
+    expect(harness.sources).toHaveLength(1)
+
+    harness.unmount()
+    document.body.innerHTML = ''
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?project=6&project')
+    expect(harness.router.currentRoute.value.query.project).toEqual(['6', null])
+    expect(harness.loader).not.toHaveBeenCalled()
+    harness.root.querySelector<HTMLInputElement>('.am-filter-query input')!.value = 'scope'
+    harness.root.querySelector<HTMLInputElement>('.am-filter-query input')!
+      .dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    expect(harness.router.currentRoute.value.query.project).toEqual(['6', null])
+    expect(harness.router.currentRoute.value.query.q).toBe('scope')
+    expect(harness.loader).not.toHaveBeenCalled()
+  })
+
+  it('hard-fences unknown and invalid-detail route mutations, recovers once, and treats valid detail as presentation-only', async () => {
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
+    const oldTitle = harness.root.querySelector<HTMLElement>('.am-selection-anchor .am-card-title')!.textContent!
+    expect(harness.loader).toHaveBeenCalledOnce()
+    expect(harness.sources).toHaveLength(1)
+
+    for (const detail of ['1', '100', undefined] as const) {
+      await harness.router.replace({ query: { ...harness.router.currentRoute.value.query, detail } })
+      await flush()
+    }
+    expect(harness.loader).toHaveBeenCalledOnce()
+    expect(harness.sources).toHaveLength(1)
+
+    await harness.router.replace({
+      query: { ...harness.router.currentRoute.value.query, detail: ['1', '100'] },
+    })
+    await flush()
+    expect(harness.loader).toHaveBeenCalledOnce()
+    expect(harness.sources[0].close).toHaveBeenCalledOnce()
+    expect(harness.root.querySelectorAll('.am-card')).toHaveLength(0)
+    expect(harness.root.textContent).not.toContain(oldTitle)
+    expect(harness.root.querySelector('.am-root > .am-sr-only[role="status"]')?.textContent).toBe('')
+    expect(harness.root.querySelector('.am-state--error')).not.toBeNull()
+
+    await harness.router.replace({
+      query: { ...harness.router.currentRoute.value.query, detail: '10' },
+    })
+    await flush()
+    expect(harness.loader).toHaveBeenCalledTimes(2)
+    expect(harness.sources).toHaveLength(2)
+
+    await harness.router.replace({
+      query: { ...harness.router.currentRoute.value.query, project_id: '6' },
+    })
+    await flush()
+    expect(harness.loader).toHaveBeenCalledTimes(2)
+    expect(harness.sources[1].close).toHaveBeenCalledOnce()
+    expect(harness.root.querySelectorAll('.am-card')).toHaveLength(0)
+    expect(harness.root.textContent).not.toContain(oldTitle)
+    expect(harness.root.querySelector('.am-root > .am-sr-only[role="status"]')?.textContent).toBe('')
+
+    const { project_id: _unknown, ...repaired } = harness.router.currentRoute.value.query
+    await harness.router.replace({ query: repaired })
+    await flush()
+    expect(harness.loader).toHaveBeenCalledTimes(3)
+    expect(harness.sources).toHaveLength(3)
+  })
+
+  it('keeps the query input mounted and focused while privacy-bound requests supersede and stale responses stay inert', async () => {
+    const pending = new Map<string, {
+      resolve: (value: AgentModeSnapshot) => void
+      reject: (cause: unknown) => void
+    }>()
+    harness = await mountView(async (query) => {
+      if (!query.q) return snapshot(makeFixtureSnapshot(10))
+      return await new Promise<AgentModeSnapshot>((resolve, reject) => {
+        pending.set(query.q!, { resolve, reject })
+      })
+    })
+    const oldTitle = harness.root.querySelector<HTMLElement>('.am-selection-anchor .am-card-title')!.textContent!
+    const input = harness.root.querySelector<HTMLInputElement>('.am-filter-query input')!
+    input.focus()
+    input.value = 'p'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    expect(harness.loader).toHaveBeenCalledTimes(2)
+    expect(harness.root.querySelector('.am-filter-query input')).toBe(input)
+    expect(document.activeElement).toBe(input)
+    expect(input.value).toBe('p')
+    expect(harness.root.textContent).not.toContain(oldTitle)
+    expect(harness.sources[0].close).toHaveBeenCalledOnce()
+
+    input.value = 'pr'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    expect(harness.loader).toHaveBeenCalledTimes(3)
+    expect(harness.root.querySelector('.am-filter-query input')).toBe(input)
+    expect(document.activeElement).toBe(input)
+    expect(input.value).toBe('pr')
+
+    pending.get('p')!.resolve(snapshot(makeFixtureSnapshot(10)))
+    await flush()
+    expect(harness.root.textContent).not.toContain(oldTitle)
+    pending.get('pr')!.reject(new AgentModeLoadError('offline', 'down', 0))
+    await flush()
+    expect(harness.root.querySelector('.am-state--offline')).not.toBeNull()
+    expect(harness.root.textContent).not.toContain(oldTitle)
+    expect(harness.root.querySelector('.am-filter-query input')).toBe(input)
+    expect(document.activeElement).toBe(input)
   })
 
   it('scopes delivery keys to the canvas and cards: the health radiogroup and other controls keep their own behaviour', async () => {
@@ -1305,15 +1618,26 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     const wire = makeFixtureSnapshot(10)
     const row = wire.rows![0]
     const basis = `retained-${confidence}-precision-basis`
+    const lowConfidence = confidence === 'low'
+    const trust = row.trust as Record<string, unknown>
+    Object.assign(trust, {
+      progress_known: true,
+      progress_percent: 73,
+      confidence_label: confidence,
+      optimistic_landing_at: '2026-08-20T14:30:00Z',
+      pessimistic_landing_at: '2026-08-20T15:05:00Z',
+      landing_at: lowConfidence ? null : '2026-08-20T14:40:00Z',
+      range_only: lowConfidence,
+    })
     row.progress = {
       ...row.progress,
       percent: 73,
       trusted: true,
-      confidence: 'high',
+      confidence,
       basis,
     }
     row.eta = {
-      landing_at: '2026-08-20T14:40:00Z',
+      landing_at: lowConfidence ? null : '2026-08-20T14:40:00Z',
       optimistic_at: '2026-08-20T14:30:00Z',
       pessimistic_at: '2026-08-20T15:05:00Z',
       trusted: true,
@@ -1322,6 +1646,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
       calculated_at: wire.server_time,
     }
     wire.selected_delivery = row.delivery_id
+    rebuildFixtureAggregates(wire)
     let offline = false
     harness = await mountView(async () => {
       if (offline) throw new AgentModeLoadError('offline', 'down', 0)
@@ -1331,10 +1656,12 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     const initialDetail = harness.root.querySelector<HTMLElement>('.am-detail-list')!
     const initialCard = harness.root.querySelector<HTMLElement>('.am-focus-card')!
     const initialNarration = harness.root.querySelector<HTMLElement>('.am-conv')!
-    expect(initialDetail.textContent).toContain('73 %')
+    if (confidence === 'high') expect(initialDetail.textContent).toContain('73 %')
+    else expect(initialDetail.textContent).not.toContain('73 %')
     expect(initialDetail.textContent).toContain(basis)
     expect([...initialDetail.querySelectorAll('dt')].some((term) => term.textContent === 'Basis')).toBe(true)
-    expect(initialCard.querySelector('.am-card-percent')?.textContent).toContain('73 %')
+    if (confidence === 'high') expect(initialCard.querySelector('.am-card-percent')?.textContent).toContain('73 %')
+    else expect(initialCard.querySelector('.am-card-percent')).toBeNull()
     if (confidence === 'high') {
       expect(initialDetail.textContent).toContain('04:40 PM')
       expect(initialCard.textContent).toContain('Lands ~04:40 PM')
@@ -1396,7 +1723,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     harness = await mountView(() => new Promise<AgentModeSnapshot>((resolve) => { gate = resolve }))
     expect(harness.root.querySelector('.am-state--loading')).not.toBeNull()
     expect(harness.root.querySelectorAll('.am-card')).toHaveLength(0)
-    gate(snapshot({ schema_version: 1, server_time: '2026-08-20T13:48:00Z', rows: [] }))
+    gate(snapshot(makeFixtureSnapshot(0)))
     await flush()
     expect(harness.root.querySelector('.am-state--empty')!.textContent).toContain('Nothing in motion')
     harness.unmount()
