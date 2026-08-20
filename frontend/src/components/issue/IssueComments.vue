@@ -37,7 +37,10 @@ const props = withDefaults(defineProps<{
   composerNotice: null,
 })
 
-const emit = defineEmits<{ 'dirty-change': [dirty: boolean] }>()
+const emit = defineEmits<{
+  'dirty-change': [dirty: boolean]
+  'in-flight-change': [inFlight: boolean]
+}>()
 
 const authStore = useAuthStore()
 const { confirm } = useConfirm()
@@ -54,8 +57,11 @@ const commentError  = ref('')
 const commentVisibility = ref<CommentVisibility>('internal')
 
 watch(commentBody, (body) => emit('dirty-change', body.trim() !== ''))
+watch(commentSaving, (saving) => emit('in-flight-change', saving), { immediate: true })
 
 let loadSequence = 0
+let contextGeneration = 0
+let activeSubmission = 0
 async function load() {
   const sequence = ++loadSequence
   const issueId = props.issueId
@@ -68,12 +74,33 @@ async function load() {
 defineExpose({ load })
 
 watch(() => props.issueId, () => {
+  contextGeneration += 1
+  activeSubmission += 1
+  commentSaving.value = false
   comments.value = []
   commentBody.value = ''
   commentVisibility.value = 'internal'
+  commentError.value = ''
   emit('dirty-change', false)
   void load()
 }, { immediate: true })
+
+watch(() => props.canEdit, (allowed) => {
+  contextGeneration += 1
+  if (allowed === false) {
+    activeSubmission += 1
+    commentSaving.value = false
+    commentBody.value = ''
+    commentVisibility.value = 'internal'
+    commentError.value = ''
+  }
+})
+
+function canApplyMutation(issueId: number, generation: number): boolean {
+  return props.canEdit !== false
+    && props.issueId === issueId
+    && contextGeneration === generation
+}
 
 function escapeHtmlBr(s: string): string {
   return escapeHtml(s, true)
@@ -85,33 +112,49 @@ function sanitiseComment(s: string): string {
 }
 
 async function submitComment() {
-  if (props.canEdit === false) return
+  if (props.canEdit === false || commentSaving.value) return
   commentError.value = ''
-  if (!commentBody.value.trim()) return
+  const body = commentBody.value.trim()
+  if (!body) return
+  const issueId = props.issueId
+  const generation = contextGeneration
+  const submission = ++activeSubmission
   commentSaving.value = true
   try {
     const c = await createIssueComment(
-      props.issueId,
-      commentBody.value.trim(),
+      issueId,
+      body,
       props.internalOnly ? 'internal' : commentVisibility.value,
     )
+    if (!canApplyMutation(issueId, generation)) return
     comments.value.push(c)
-    commentBody.value = ''
+    // Preserve anything typed after the submitted body while the request was
+    // pending. In Agent Mode selection is blocked during the post, but this
+    // also protects forced identity changes and normal shared-component use.
+    if (commentBody.value.trim() === body) commentBody.value = ''
     // Reset to internal: the safe default for the next comment, even
     // if the previous one was customer-visible.
     commentVisibility.value = 'internal'
-  } catch (e: unknown) { commentError.value = errMsg(e, 'Failed to post comment.') }
-  finally { commentSaving.value = false }
+  } catch (e: unknown) {
+    if (canApplyMutation(issueId, generation)) commentError.value = errMsg(e, 'Failed to post comment.')
+  }
+  finally {
+    if (submission === activeSubmission) commentSaving.value = false
+  }
 }
 
 async function deleteComment(comment: Comment) {
-  if (props.canEdit === false) return
+  if (props.canEdit === false || props.internalOnly) return
+  const issueId = props.issueId
+  const generation = contextGeneration
   const isOther = comment.author_id !== authStore.user?.id
   const msg = isOther
     ? `Delete ${comment.author ?? 'another user'}'s comment? You can undo this from Recent activity.`
     : 'Delete this comment? You can undo this from Recent activity.'
   if (!await confirm({ message: msg, confirmLabel: 'Delete', danger: true })) return
+  if (!canApplyMutation(issueId, generation)) return
   await deleteIssueComment(comment.id)
+  if (!canApplyMutation(issueId, generation)) return
   comments.value = comments.value.filter(c => c.id !== comment.id)
 }
 
@@ -125,6 +168,8 @@ function canFlipVisibility(comment: Comment): boolean {
 }
 
 async function flipVisibility(comment: Comment) {
+  const issueId = props.issueId
+  const generation = contextGeneration
   const next: CommentVisibility =
     comment.visibility === 'external' ? 'internal' : 'external'
   // For internal → external, take a moment to confirm — pushing a
@@ -136,11 +181,15 @@ async function flipVisibility(comment: Comment) {
     })
     if (!ok) return
   }
+  if (!canApplyMutation(issueId, generation)) return
   try {
     await updateIssueCommentVisibility(comment.id, next)
+    if (!canApplyMutation(issueId, generation)) return
     comment.visibility = next
   } catch (e: unknown) {
-    commentError.value = errMsg(e, 'Failed to update visibility.')
+    if (canApplyMutation(issueId, generation)) {
+      commentError.value = errMsg(e, 'Failed to update visibility.')
+    }
   }
 }
 </script>
@@ -178,7 +227,7 @@ async function flipVisibility(comment: Comment) {
                 : t('comments.visibility.badgeInternal') }}
             </button>
             <button
-              v-if="canEdit !== false && authStore.user && (c.author_id === authStore.user.id || authStore.isAdmin)"
+              v-if="canEdit !== false && !internalOnly && authStore.user && (c.author_id === authStore.user.id || authStore.isAdmin)"
               class="comment-delete" @click="deleteComment(c)" title="Delete comment"
             ><AppIcon name="x" :size="11" /></button>
           </div>

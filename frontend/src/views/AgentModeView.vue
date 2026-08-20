@@ -92,10 +92,21 @@ function initialSelectedQuery(): string | null {
 }
 const selectedQueryId = ref<string | null>(initialSelectedQuery())
 const snapshotQuery = computed<AgentModeSnapshotQuery>(() => ({ selectedDelivery: selectedQueryId.value }))
+function clearRejectedSelectedDelivery(deliveryId: string) {
+  if (selectedQueryId.value === deliveryId) selectedQueryId.value = null
+  try {
+    const key = lsAgentModeSelectedKey(auth.user?.id)
+    if (localStorage.getItem(key) === deliveryId) localStorage.removeItem(key)
+  } catch {
+    /* storage may be unavailable; the in-memory/query identity is still cleared */
+  }
+  void replaceQuery({ delivery: undefined })
+}
 const data = useAgentModeDeliveries({
   loader: props.loader ?? injectedLoader ?? undefined,
   query: snapshotQuery,
   reloadOnQueryChange: false,
+  onSelectedDeliveryRejected: clearRejectedSelectedDelivery,
 })
 
 // ── Clock: server-aligned "now" (PAI-803 clock-skew rule) ───────────────

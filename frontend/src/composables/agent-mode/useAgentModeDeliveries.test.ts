@@ -16,12 +16,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { nextTick } from 'vue'
+import { nextTick, ref } from 'vue'
 
 import { ApiError } from '@/api/client'
 import { AgentModeLoadError, classifyLoadError, type AgentModeSnapshot } from '@/services/agentMode'
 import { makeFixtureSnapshot } from '@/services/agentModeFixtures'
-import { normalizeWireSnapshot } from '@/services/agentModeTransport'
+import { normalizeWireSnapshot, type AgentModeSnapshotQuery } from '@/services/agentModeTransport'
 import { useAgentModeDeliveries } from './useAgentModeDeliveries'
 
 function snap(n: 1 | 10 | 100 | 0): AgentModeSnapshot {
@@ -153,6 +153,65 @@ describe('useAgentModeDeliveries (PAI-805 honest states)', () => {
 })
 
 describe('useAgentModeDeliveries — never retain unauthorized data (PAI-805 corrections)', () => {
+  it('retries a rejected selected delivery exactly once without retaining its identity', async () => {
+    const query = ref<AgentModeSnapshotQuery>({ selectedDelivery: 'gone-delivery' })
+    const rejected = vi.fn()
+    const loader = vi.fn(async (requested: AgentModeSnapshotQuery) => {
+      if (requested.selectedDelivery) {
+        throw new AgentModeLoadError('not-found', 'selection revoked', 404)
+      }
+      return snap(10)
+    })
+    const data = useAgentModeDeliveries({
+      loader,
+      query,
+      reloadOnQueryChange: false,
+      onSelectedDeliveryRejected: rejected,
+      hints: false,
+      pollMs: 0,
+    })
+
+    await data.load()
+
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(loader.mock.calls.map(([requested]) => requested.selectedDelivery)).toEqual([
+      'gone-delivery',
+      null,
+    ])
+    expect(rejected).toHaveBeenCalledOnce()
+    expect(rejected).toHaveBeenCalledWith('gone-delivery')
+    expect(data.status.value).toBe('ready')
+    expect(data.deliveries.value).toHaveLength(10)
+    data.dispose()
+  })
+
+  it('parks a general 404 and a failed selection fallback without retry loops', async () => {
+    const generalLoader = vi.fn(async () => {
+      throw new AgentModeLoadError('not-found', 'endpoint missing', 404)
+    })
+    const general = useAgentModeDeliveries({ loader: generalLoader, hints: false, pollMs: 0 })
+    await general.load()
+    expect(generalLoader).toHaveBeenCalledOnce()
+    expect(general.status.value).toBe('not-found')
+    general.dispose()
+
+    const selectedLoader = vi.fn(async () => {
+      throw new AgentModeLoadError('not-found', 'still missing', 404)
+    })
+    const selected = useAgentModeDeliveries({
+      loader: selectedLoader,
+      query: ref<AgentModeSnapshotQuery>({ selectedDelivery: 'revoked' }),
+      reloadOnQueryChange: false,
+      hints: false,
+      pollMs: 0,
+    })
+    await selected.load()
+    expect(selectedLoader).toHaveBeenCalledTimes(2)
+    expect(selected.status.value).toBe('not-found')
+    expect(selected.snapshot.value).toBeNull()
+    selected.dispose()
+  })
+
   it('drops the previous snapshot immediately on a fresh 403 or 404', async () => {
     for (const [kind, status] of [['forbidden', 403], ['not-found', 404]] as const) {
       let revoke = false

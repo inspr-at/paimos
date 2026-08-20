@@ -106,7 +106,7 @@ function stubMatchMedia(matching: (query: string) => boolean) {
 }
 
 function stubIssueFetch() {
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const raw = input instanceof Request ? input.url : String(input)
     const path = new URL(raw, 'http://paimos.test').pathname
     const match = path.match(/^\/api\/issues\/(\d+)$/)
@@ -142,9 +142,16 @@ function stubIssueFetch() {
     }
     if (/\/api\/issues\/\d+\/ai-activity$/.test(path)) return json({ rows: [], count: 0, last_week_count: 0 })
     if (/\/api\/issues\/\d+\/(attachments|comments|time-entries)$/.test(path)) return json([])
+    if (path === '/api/users') return json([{ id: 7, username: 'ada', role: 'member', status: 'active' }])
+    if (path === '/api/projects/6/cost-units') return json(['OPS'])
+    if (path === '/api/projects/6/releases') return json(['R1'])
+    if (path === '/api/tags') return json([])
+    if (path === '/api/sprints') return json([])
     if (path === '/api/time-entries/today-summary') return json({ total_hours: 0, count: 0 })
     return json([])
-  }))
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }
 
 function selectedCards(root: HTMLElement) {
@@ -228,6 +235,31 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?delivery=dlv-820')
     expect(selectedId(harness.root)).toBe('dlv-820')
     expect(harness.router.currentRoute.value.query.delivery).toBe('dlv-820')
+  })
+
+  it('recovers stale deep-link and remembered selections with one unselected retry', async () => {
+    for (const source of ['deep-link', 'remembered'] as const) {
+      const stale = `stale-${source}`
+      if (source === 'remembered') localStorage.setItem(lsAgentModeSelectedKey(undefined), stale)
+      harness = await mountView(async (query) => {
+        if (query.selectedDelivery === stale) {
+          throw new AgentModeLoadError('not-found', 'selection revoked', 404)
+        }
+        return snapshot(makeFixtureSnapshot(10))
+      }, source === 'deep-link' ? `/agent-mode?delivery=${stale}` : '/agent-mode')
+
+      expect(harness.loader).toHaveBeenCalledTimes(2)
+      expect(harness.loader.mock.calls.map(([query]) => query.selectedDelivery)).toEqual([stale, null])
+      expect(harness.root.querySelectorAll('.am-card')).toHaveLength(10)
+      expect(selectedCards(harness.root)).toHaveLength(1)
+      expect(harness.router.currentRoute.value.query.delivery).not.toBe(stale)
+      expect(localStorage.getItem(lsAgentModeSelectedKey(undefined))).not.toBe(stale)
+
+      harness.unmount()
+      harness = null
+      document.body.innerHTML = ''
+      localStorage.clear()
+    }
   })
 
   it('lifts a final-lane selection into exactly one data-backed target before Attention', async () => {
@@ -368,6 +400,30 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     await flush()
     expect(selectedId(root)).toBe(selectedBefore)
     expect(root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')?.value).toBe('Unsaved selection-bound edit')
+  })
+
+  it('loads scoped editor metadata on panel open so assignee quick-edit works in the real view', async () => {
+    const fetchMock = stubIssueFetch()
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?detail=1&delivery=dlv-812')
+    const { root } = harness
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/users'))).toBe(false)
+    root.querySelector<HTMLButtonElement>('.am-focus-open-ticket')!.click()
+    await flush()
+
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/users'))).toBe(true)
+    const triggers = root.querySelectorAll<HTMLButtonElement>('.sp-meta .meta-select-trigger')
+    expect(triggers).toHaveLength(2)
+    triggers[1].click()
+    await flush()
+    const ada = [...document.querySelectorAll<HTMLButtonElement>('.ms-option')]
+      .find((candidate) => candidate.textContent?.includes('ada'))
+    expect(ada).not.toBeUndefined()
+    ada!.click()
+    await flush()
+    const assigneePut = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(String(assigneePut?.[0])).toContain('/api/issues/5000')
+    expect(assigneePut?.[1]?.headers).toMatchObject({ 'If-Match': '"issue-5000-2026-08-20T12:00:00"' })
+    expect(JSON.parse(String(assigneePut?.[1]?.body))).toEqual({ assignee_id: 7 })
   })
 
   it('passes a deep-linked persistent identity as selected_delivery without inventing a second transport', async () => {
@@ -651,7 +707,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
 
       revoke = true
       await refetchViaHint()
-      expect(harness.loader).toHaveBeenCalledTimes(2)
+      expect(harness.loader).toHaveBeenCalledTimes(status === 404 ? 3 : 2)
       expect(root.querySelectorAll('.am-card')).toHaveLength(0)
       expect(root.querySelectorAll('.am-tombstone')).toHaveLength(0)
       expect(root.querySelector(`.am-state--${kind}`)!.textContent).toContain(title)
@@ -666,6 +722,40 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
       document.body.innerHTML = ''
       vi.useRealTimers()
     }
+  })
+
+  it('recovers a selected delivery revoked during refresh without parking or retrying in a loop', async () => {
+    vi.useFakeTimers()
+    let revoked = false
+    harness = await mountView(async (query) => {
+      if (revoked && query.selectedDelivery === 'dlv-812') {
+        throw new AgentModeLoadError('not-found', 'selection revoked', 404)
+      }
+      return revoked
+        ? snapshotWithout(['dlv-812'], 'fx-selection-revoked')
+        : snapshot(makeFixtureSnapshot(10))
+    }, '/agent-mode?delivery=dlv-812')
+    expect(selectedId(harness.root)).toBe('dlv-812')
+
+    revoked = true
+    await refetchViaHint()
+
+    expect(harness.loader).toHaveBeenCalledTimes(3)
+    expect(harness.loader.mock.calls.map(([query]) => query.selectedDelivery)).toEqual([
+      'dlv-812',
+      'dlv-812',
+      null,
+    ])
+    expect(harness.root.querySelector('.am-state--not-found')).toBeNull()
+    expect(harness.root.querySelectorAll('.am-card')).toHaveLength(9)
+    expect(selectedCards(harness.root)).toHaveLength(1)
+    expect(selectedId(harness.root)).not.toBe('dlv-812')
+    expect(harness.router.currentRoute.value.query.delivery).not.toBe('dlv-812')
+    expect(localStorage.getItem(lsAgentModeSelectedKey(undefined))).not.toBe('dlv-812')
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    await flush()
+    expect(harness.loader).toHaveBeenCalledTimes(3)
   })
 
   it('renders a delivery that left a successful snapshot as a neutral tombstone only, drops dead lanes at once, and expires the tombstone', async () => {

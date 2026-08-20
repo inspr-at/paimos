@@ -57,14 +57,28 @@ interface PanelHandle {
 interface Harness {
   root: HTMLElement
   issueId: ReturnType<typeof ref<number | null>>
+  readonly: ReturnType<typeof ref<boolean>>
   panel: PanelHandle
   unmount: () => void
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 async function mountPanel(extra: Record<string, unknown> = {}): Promise<Harness> {
   const root = document.createElement('div')
   document.body.appendChild(root)
   const issueId = ref<number | null>(1)
+  const readonly = ref(extra.readonly === true)
+  const extraProps = { ...extra }
+  delete extraProps.readonly
   const panel = ref<PanelHandle | null>(null)
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -75,12 +89,12 @@ async function mountPanel(extra: Record<string, unknown> = {}): Promise<Harness>
       ref: panel,
       issueId: issueId.value,
       embedded: true,
-      readonly: false,
       internalCommentsOnly: true,
       allowComments: true,
       allowAttachments: true,
       noteAffectsNextRun: true,
-      ...extra,
+      ...extraProps,
+      readonly: readonly.value,
     }),
   })
   app.use(pinia)
@@ -88,7 +102,7 @@ async function mountPanel(extra: Record<string, unknown> = {}): Promise<Harness>
   app.use(i18n)
   app.mount(root)
   await flush()
-  return { root, issueId, panel: panel.value!, unmount: () => { app.unmount(); root.remove() } }
+  return { root, issueId, readonly, panel: panel.value!, unmount: () => { app.unmount(); root.remove() } }
 }
 
 function option(text: string): HTMLButtonElement {
@@ -173,6 +187,123 @@ describe('IssueSidePanel Agent Mode integration (PAI-806)', () => {
     expect(vi.mocked(api.get).mock.calls.filter(([path]) => path === '/issues/1')).toHaveLength(2)
   })
 
+  it('keeps an assignee 412 reload failure visible outside the quick field', async () => {
+    harness = await mountPanel({ users: [{ id: 7, username: 'ada', role: 'member', status: 'active' }] })
+    vi.mocked(api.put).mockRejectedValueOnce(new ApiError(412, 'conflict'))
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/issues/1') throw new Error('reload failed')
+      return [] as never
+    })
+    harness.root.querySelectorAll<HTMLButtonElement>('.sp-meta .meta-select-trigger')[1].click()
+    await flush()
+    const ada = [...document.querySelectorAll<HTMLButtonElement>('.ms-option')]
+      .find((candidate) => candidate.textContent?.includes('ada'))!
+    expect(ada).not.toBeUndefined()
+    ada.click()
+    await flush()
+    expect(harness.root.querySelector('[role="alert"]')?.textContent).toContain('could not be reloaded')
+  })
+
+  it('keeps full-form 412 truth visible after reload success and failure', async () => {
+    harness = await mountPanel()
+    vi.mocked(api.put).mockRejectedValueOnce(new ApiError(412, 'conflict'))
+    harness.root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    harness.root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!.value = 'Conflicting edit'
+    harness.root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!
+      .dispatchEvent(new Event('input', { bubbles: true }))
+    harness.root.querySelector<HTMLButtonElement>('.sp-form-actions .btn-primary')!.click()
+    await flush()
+    expect(harness.root.querySelector('.sp-form')).toBeNull()
+    expect(harness.root.querySelector('[role="alert"]')?.textContent).toContain('Latest values were reloaded')
+
+    harness.unmount()
+    harness = await mountPanel()
+    vi.mocked(api.put).mockRejectedValueOnce(new ApiError(412, 'conflict'))
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/issues/1') throw new Error('reload failed')
+      return [] as never
+    })
+    harness.root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    const title = harness.root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!
+    title.value = 'Another conflict'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    harness.root.querySelector<HTMLButtonElement>('.sp-form-actions .btn-primary')!.click()
+    await flush()
+    expect(harness.root.querySelector('.sp-form')).toBeNull()
+    expect(harness.root.querySelector('[role="alert"]')?.textContent).toContain('could not be reloaded')
+  })
+
+  it('fails closed when edit authority is revoked before submit', async () => {
+    harness = await mountPanel()
+    vi.mocked(api.put).mockClear()
+    harness.root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    const title = harness.root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!
+    const detachedSave = harness.root.querySelector<HTMLButtonElement>('.sp-form-actions .btn-primary')!
+    title.value = 'Must not save'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    harness.readonly.value = true
+    await flush()
+    expect(harness.root.querySelector('.sp-form')).toBeNull()
+    expect(harness.root.querySelector('.comment-textarea')).toBeNull()
+    detachedSave.click()
+    await flush()
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
+  it('fences an in-flight save across revoke, restore and a newer save', async () => {
+    const staleSave = deferred<Issue>()
+    vi.mocked(api.put).mockImplementationOnce(() => staleSave.promise as never)
+    harness = await mountPanel()
+    harness.root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    let title = harness.root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!
+    title.value = 'Stale unauthorized response'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    harness.root.querySelector<HTMLButtonElement>('.sp-form-actions .btn-primary')!.click()
+    await flush()
+    expect(await harness.panel.requestLeave()).toBe(false)
+    expect(harness.root.textContent).toContain('still saving')
+
+    harness.readonly.value = true
+    await flush()
+    harness.readonly.value = false
+    await flush()
+    harness.root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    title = harness.root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!
+    title.value = 'Authorized newer save'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    harness.root.querySelector<HTMLButtonElement>('.sp-form-actions .btn-primary')!.click()
+    await flush()
+    expect(harness.root.textContent).toContain('Authorized newer save')
+
+    staleSave.resolve({ ...issue(1, '2026-08-20 14:00:00'), title: 'Stale unauthorized response' })
+    await flush()
+    expect(harness.root.textContent).toContain('Authorized newer save')
+    expect(harness.root.textContent).not.toContain('Stale unauthorized response')
+  })
+
+  it('ignores an in-flight quick update after authority revocation', async () => {
+    const staleUpdate = deferred<Issue>()
+    vi.mocked(api.put).mockImplementationOnce(() => staleUpdate.promise as never)
+    harness = await mountPanel()
+    harness.root.querySelector<HTMLButtonElement>('.sp-meta .meta-select-trigger')!.click()
+    await flush()
+    option('QA').click()
+    await flush()
+    expect(await harness.panel.requestLeave()).toBe(false)
+
+    harness.readonly.value = true
+    await flush()
+    staleUpdate.resolve({ ...issue(1, '2026-08-20 14:00:00'), status: 'qa' })
+    await flush()
+    expect(harness.root.textContent).toContain('In Progress')
+    expect(harness.root.textContent).not.toContain('QA')
+  })
+
   it('drops stale load results when selection changes', async () => {
     let resolveOne!: (value: Issue) => void
     vi.mocked(api.get).mockImplementation((path: string) => {
@@ -201,6 +332,28 @@ describe('IssueSidePanel Agent Mode integration (PAI-806)', () => {
     harness.root.querySelector<HTMLButtonElement>('.comment-form-actions .btn-primary')!.click()
     await flush()
     expect(api.post).toHaveBeenCalledWith('/issues/1/comments', { body: 'Reviewer note', visibility: 'internal' })
+  })
+
+  it('blocks selection/close handoff while an internal note is posting', async () => {
+    const pending = deferred<never>()
+    vi.mocked(api.post).mockImplementationOnce(() => pending.promise)
+    harness = await mountPanel()
+    const textarea = harness.root.querySelector<HTMLTextAreaElement>('.comment-textarea')!
+    textarea.value = 'Pending note'
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    harness.root.querySelector<HTMLButtonElement>('.comment-form-actions .btn-primary')!.click()
+    await flush()
+    expect(await harness.panel.requestLeave()).toBe(false)
+    expect(harness.root.textContent).toContain('still posting')
+  })
+
+  it('hides unsupported non-revision-safe issue mutations in Agent Mode', async () => {
+    harness = await mountPanel()
+    expect(harness.root.querySelector('[title="Delete issue"]')).toBeNull()
+    expect(harness.root.querySelector('[title="Clone issue"]')).toBeNull()
+    expect(harness.root.querySelector('.sp-time-section')).toBeNull()
+    expect(harness.root.querySelector('.issue-ai-stub')).toBeNull()
   })
 
   it('gates file paste and drop fail-closed, ignores ordinary text, and blocks leave while upload is in flight', async () => {

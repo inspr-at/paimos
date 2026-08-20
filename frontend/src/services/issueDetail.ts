@@ -30,6 +30,14 @@ export interface IssueDetailData {
   releases: string[]
 }
 
+export interface IssueEditorMetadata {
+  users: User[]
+  allTags: Tag[]
+  allSprints: Sprint[]
+  costUnits: string[]
+  releases: string[]
+}
+
 function issuePath(issueRef: IssueRef): string {
   return `/issues/${encodeURIComponent(String(issueRef))}`
 }
@@ -43,6 +51,29 @@ function effectiveProjectId(
     : issue.project_id
 }
 
+/** Existing issue-editor lookups, scoped to a server-authorized project.
+ * Consumers must still identity/authority-fence the response because access
+ * can change while these independent requests are in flight. */
+export async function loadIssueEditorMetadata(
+  projectId: number | null | undefined,
+): Promise<IssueEditorMetadata> {
+  const pid = projectId && Number.isFinite(projectId) && projectId > 0
+    ? projectId
+    : null
+  const [users, costUnits, releases, allTags, allSprints] = await Promise.all([
+    api.get<User[]>('/users'),
+    pid
+      ? api.get<string[]>(`/projects/${pid}/cost-units`).catch(() => [])
+      : Promise.resolve([]),
+    pid
+      ? api.get<string[]>(`/projects/${pid}/releases`).catch(() => [])
+      : Promise.resolve([]),
+    api.get<Tag[]>('/tags'),
+    api.get<Sprint[]>('/sprints').catch(() => []),
+  ])
+  return { users, costUnits, releases, allTags, allSprints }
+}
+
 export async function loadIssueDetailData(
   issueRef: IssueRef,
   projectId?: number | null,
@@ -52,31 +83,19 @@ export async function loadIssueDetailData(
   const pid = effectiveProjectId(issue, projectId)
 
   const [
-    users,
-    costUnits,
-    releases,
+    metadata,
     children,
-    allTags,
     projectIssues,
     project,
-    allSprints,
   ] = await Promise.all([
-    api.get<User[]>('/users'),
-    pid
-      ? api.get<string[]>(`/projects/${pid}/cost-units`).catch(() => [])
-      : Promise.resolve([]),
-    pid
-      ? api.get<string[]>(`/projects/${pid}/releases`).catch(() => [])
-      : Promise.resolve([]),
+    loadIssueEditorMetadata(pid),
     api.get<Issue[]>(`/issues/${issueId}/children`).catch(() => []),
-    api.get<Tag[]>('/tags'),
     pid
       ? api.get<Issue[]>(`/projects/${pid}/issues?fields=list`).catch(() => [])
       : Promise.resolve([]),
     pid
       ? api.get<Project>(`/projects/${pid}`).catch(() => null)
       : Promise.resolve(null),
-    api.get<Sprint[]>('/sprints').catch(() => []),
   ])
 
   const parentIssue = issue.parent_id
@@ -89,11 +108,7 @@ export async function loadIssueDetailData(
     parentIssue,
     children,
     projectIssues,
-    users,
-    allTags,
-    allSprints,
-    costUnits,
-    releases,
+    ...metadata,
   }
 }
 

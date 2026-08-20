@@ -59,6 +59,10 @@ export interface UseAgentModeDeliveriesOptions {
   /** Set false when query identity should apply to the next scheduled/hinted
    * refresh without creating a duplicate request immediately. */
   reloadOnQueryChange?: boolean
+  /** Called when a 404 applies to a request that actually carried a selected
+   * delivery. The composable clears data and retries exactly once without
+   * that hint; the owner clears URL/persistence state. */
+  onSelectedDeliveryRejected?: (deliveryId: string) => void
   enabled?: Ref<boolean>
   /** Poll interval while the tab is visible. 0 disables polling. */
   pollMs?: number
@@ -165,15 +169,20 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
     }, wait)
   }
 
-  async function load(options: { background?: boolean } = {}): Promise<void> {
+  async function load(options: {
+    background?: boolean
+    queryOverride?: AgentModeSnapshotQuery
+    selectionFallback?: boolean
+  } = {}): Promise<void> {
     if (!alive || !enabled()) return
     const mySeq = ++seq
     controller?.abort()
     controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+    const requestedQuery = options.queryOverride ?? query.value
     if (options.background && hasData.value) refreshing.value = true
     else status.value = 'loading'
     try {
-      const next = await loader(query.value, { signal: controller?.signal })
+      const next = await loader(requestedQuery, { signal: controller?.signal })
       if (mySeq !== seq || !alive) return
       snapshot.value = next
       error.value = null
@@ -190,6 +199,27 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
         return
       }
       const classified = classifyLoadError(e)
+      const requestedSelection = typeof requestedQuery.selectedDelivery === 'string'
+        ? requestedQuery.selectedDelivery.trim()
+        : ''
+      if (
+        classified.kind === 'not-found' &&
+        requestedSelection !== '' &&
+        options.selectionFallback !== true
+      ) {
+        // A canonical selected-delivery miss is recoverable without retaining
+        // the rejected identity. Clear first (security), notify the URL/storage
+        // owner, then retry exactly once without the hint. A second 404 parks.
+        snapshot.value = null
+        error.value = null
+        opts.onSelectedDeliveryRejected?.(requestedSelection)
+        await load({
+          background: false,
+          queryOverride: { ...requestedQuery, selectedDelivery: null },
+          selectionFallback: true,
+        })
+        return
+      }
       error.value = classified
       if (classified.kind === 'offline') {
         attempt.value += 1

@@ -40,7 +40,10 @@ import { highlightDom } from "@/composables/useHighlight";
 import { formatDuration } from "@/composables/useDurationInput";
 import { useConfirm } from "@/composables/useConfirm";
 import { useIssueContext } from "@/composables/useIssueContext";
-import { useAttachmentUploads } from "@/composables/useAttachmentUploads";
+import {
+  useAttachmentUploads,
+  type AttachmentJob,
+} from "@/composables/useAttachmentUploads";
 import {
   useSidePanelWidth,
   resetSidePanelWidth,
@@ -61,7 +64,11 @@ import {
 import { undoMutationByRequestId } from "@/services/aiPaperTrail";
 import { useUndoStore } from "@/stores/undo";
 import { addIssueRelation } from "@/services/issueRelations";
-import { issueIfMatch, saveIssueDetail } from "@/services/issueDetail";
+import {
+  issueIfMatch,
+  loadIssueEditorMetadata,
+  saveIssueDetail,
+} from "@/services/issueDetail";
 
 const ctx = useIssueContext(true);
 
@@ -87,21 +94,27 @@ const props = defineProps<{
   noteAffectsNextRun?: boolean;
 }>();
 
+const loadedUsers = ref<User[]>([]);
+const loadedTags = ref<Tag[]>([]);
+const loadedCostUnits = ref<string[]>([]);
+const loadedReleases = ref<string[]>([]);
+const loadedSprints = ref<Sprint[]>([]);
+
 // Prefer context, fall back to props for backward compatibility
 const users = computed(() =>
-  props.users?.length ? props.users : ctx.users.value,
+  props.users?.length ? props.users : ctx.users.value.length ? ctx.users.value : loadedUsers.value,
 );
 const allTags = computed(() =>
-  props.allTags?.length ? props.allTags : ctx.allTags.value,
+  props.allTags?.length ? props.allTags : ctx.allTags.value.length ? ctx.allTags.value : loadedTags.value,
 );
 const costUnits = computed(() =>
-  props.costUnits?.length ? props.costUnits : ctx.costUnits.value,
+  props.costUnits?.length ? props.costUnits : ctx.costUnits.value.length ? ctx.costUnits.value : loadedCostUnits.value,
 );
 const releases = computed(() =>
-  props.releases?.length ? props.releases : ctx.releases.value,
+  props.releases?.length ? props.releases : ctx.releases.value.length ? ctx.releases.value : loadedReleases.value,
 );
 const sprints = computed(() =>
-  props.sprints?.length ? props.sprints : ctx.sprints.value,
+  props.sprints?.length ? props.sprints : ctx.sprints.value.length ? ctx.sprints.value : loadedSprints.value,
 );
 
 const emit = defineEmits<{
@@ -135,8 +148,14 @@ const saving = ref(false);
 const saveError = ref("");
 const panelGuardError = ref("");
 const commentDirty = ref(false);
+const commentInFlight = ref(false);
 const savedSnapshot = ref("");
+const editorMetadataError = ref("");
 const mdMode = ref(authStore.user?.markdown_default ?? false);
+const issueMutationAllowed = computed(() => !props.readonly);
+let issueMutationAuthorityEpoch = 0;
+let issueMutationOperationSequence = 0;
+let editorMetadataSequence = 0;
 
 // Full edit form
 const form = ref({
@@ -177,6 +196,57 @@ const attachmentsAllowed = computed(() =>
 const commentsAllowed = computed(() =>
   !props.readonly && (props.embedded ? props.allowComments === true : props.allowComments !== false),
 );
+const hasInFlight = computed(() =>
+  attachments.hasInFlight.value ||
+  commentInFlight.value ||
+  saving.value ||
+  quickSavingField.value !== "",
+);
+
+function clearEditorMetadata() {
+  editorMetadataSequence += 1;
+  loadedUsers.value = [];
+  loadedTags.value = [];
+  loadedCostUnits.value = [];
+  loadedReleases.value = [];
+  loadedSprints.value = [];
+  editorMetadataError.value = "";
+}
+
+async function loadEmbeddedEditorMetadata(forIssue: Issue) {
+  if (!props.embedded || !issueMutationAllowed.value) return;
+  const sequence = ++editorMetadataSequence;
+  const authorityEpoch = issueMutationAuthorityEpoch;
+  const expectedIssueId = forIssue.id;
+  const expectedProjectId = forIssue.project_id;
+  editorMetadataError.value = "";
+  try {
+    const metadata = await loadIssueEditorMetadata(expectedProjectId);
+    if (
+      sequence !== editorMetadataSequence ||
+      authorityEpoch !== issueMutationAuthorityEpoch ||
+      !issueMutationAllowed.value ||
+      issue.value?.id !== expectedIssueId ||
+      issue.value.project_id !== expectedProjectId ||
+      props.issueId !== expectedIssueId
+    ) return;
+    loadedUsers.value = metadata.users;
+    loadedTags.value = metadata.allTags;
+    loadedCostUnits.value = metadata.costUnits;
+    loadedReleases.value = metadata.releases;
+    loadedSprints.value = metadata.allSprints;
+  } catch (e: unknown) {
+    if (
+      sequence !== editorMetadataSequence ||
+      authorityEpoch !== issueMutationAuthorityEpoch ||
+      !issueMutationAllowed.value ||
+      issue.value?.id !== expectedIssueId
+    ) return;
+    if (!isSessionExpiredError(e)) {
+      editorMetadataError.value = "Editor options could not be loaded. Reopen the ticket or retry after access is restored.";
+    }
+  }
+}
 
 async function loadAttachments(forIssue: Issue | null = issue.value) {
   if (!forIssue) {
@@ -277,7 +347,7 @@ function onAiAccept(
   };
 }
 async function applyAiPanelResult(info: AiApplyInfo) {
-  if (!issue.value) return;
+  if (!issue.value || props.embedded || !issueMutationAllowed.value) return;
   if (info.action === "estimate_effort") {
     const prevHours = form.value.estimate_hours;
     const prevLp = form.value.estimate_lp;
@@ -398,13 +468,13 @@ async function goNext() {
 // Tag management
 const issueTagIds = computed(() => issue.value?.tags?.map((t) => t.id) ?? []);
 async function addTag(tagId: number) {
-  if (!issue.value) return;
+  if (!issue.value || props.embedded) return;
   await api.post(`/issues/${issue.value.id}/tags`, { tag_id: tagId });
   issue.value = await api.get<Issue>(`/issues/${issue.value.id}`);
   emit("updated", issue.value);
 }
 async function removeTag(tagId: number) {
-  if (!issue.value) return;
+  if (!issue.value || props.embedded) return;
   await api.delete(`/issues/${issue.value.id}/tags/${tagId}`);
   issue.value = await api.get<Issue>(`/issues/${issue.value.id}`);
   emit("updated", issue.value);
@@ -417,12 +487,14 @@ async function quickUpdateIssueField(
   field: "status" | "assignee_id",
   value: string,
 ) {
-  if (!issue.value || props.readonly || quickSavingField.value) return;
+  if (!issue.value || !issueMutationAllowed.value || quickSavingField.value) return;
   const payload =
     field === "assignee_id"
       ? { assignee_id: value ? Number(value) : null }
       : { status: value };
   const loaded = issue.value;
+  const authorityEpoch = issueMutationAuthorityEpoch;
+  const operation = ++issueMutationOperationSequence;
   quickSavingField.value = field;
   quickError.value = "";
   try {
@@ -431,14 +503,31 @@ async function quickUpdateIssueField(
       payload,
       issueIfMatch(loaded.id, loaded.updated_at),
     );
-    if (props.issueId !== loaded.id) return;
+    if (
+      props.issueId !== loaded.id ||
+      issue.value?.id !== loaded.id ||
+      !issueMutationAllowed.value ||
+      authorityEpoch !== issueMutationAuthorityEpoch
+    ) return;
     issue.value = updated;
     resetForm();
     emit("updated", updated);
   } catch (e: unknown) {
-    if (props.issueId !== loaded.id) return;
+    if (
+      props.issueId !== loaded.id ||
+      !issueMutationAllowed.value ||
+      authorityEpoch !== issueMutationAuthorityEpoch
+    ) return;
     if (e instanceof ApiError && e.status === 412) {
+      const expectedLoadSequence = issueLoadSequence + 1;
+      const expectedAuthorityEpoch = issueMutationAuthorityEpoch + 1;
       const reloaded = await loadIssue(props.issueId);
+      if (
+        props.issueId !== loaded.id ||
+        !issueMutationAllowed.value ||
+        issueLoadSequence !== expectedLoadSequence ||
+        issueMutationAuthorityEpoch !== expectedAuthorityEpoch
+      ) return;
       quickError.value = reloaded
         ? "This ticket changed elsewhere. Latest values were reloaded; review and try again."
         : "This ticket changed elsewhere and the latest values could not be reloaded. Reopen the ticket and try again.";
@@ -446,13 +535,21 @@ async function quickUpdateIssueField(
       quickError.value = errMsg(e, "Update failed.");
     }
   } finally {
-    quickSavingField.value = "";
+    if (operation === issueMutationOperationSequence) quickSavingField.value = "";
   }
 }
 
 let issueLoadSequence = 0;
 async function loadIssue(id: number | null): Promise<boolean> {
   const sequence = ++issueLoadSequence;
+  issueMutationAuthorityEpoch += 1;
+  issueMutationOperationSequence += 1;
+  // This identity/reload now owns the editor state. A mutation invalidated by
+  // the generation bumps above must not leave its busy state attached here
+  // when that older promise eventually settles.
+  saving.value = false;
+  quickSavingField.value = "";
+  clearEditorMetadata();
   if (!id) {
     issue.value = null;
     editing.value = false;
@@ -482,6 +579,7 @@ async function loadIssue(id: number | null): Promise<boolean> {
     if (editing.value) savedSnapshot.value = JSON.stringify(form.value);
     commentDirty.value = false;
     void loadAttachments(loaded);
+    void loadEmbeddedEditorMetadata(loaded);
     return true;
   } catch (e: unknown) {
     if (sequence !== issueLoadSequence || props.issueId !== id) return false;
@@ -522,7 +620,46 @@ function resetForm() {
   };
 }
 
+watch(issueMutationAllowed, (allowed) => {
+  issueMutationAuthorityEpoch += 1;
+  if (!allowed) {
+    // Security outranks preserving a local draft: once edit authority is
+    // revoked, remove the writable surface and invalidate every response
+    // that started under the previous authority epoch.
+    editing.value = false;
+    saving.value = false;
+    quickSavingField.value = "";
+    issueMutationOperationSequence += 1;
+    commentDirty.value = false;
+    savedSnapshot.value = "";
+    quickError.value = "";
+    saveError.value = "";
+    panelGuardError.value = "";
+    resetForm();
+    clearEditorMetadata();
+    attachments.reset();
+    if (issue.value) void loadAttachments(issue.value);
+    return;
+  }
+  if (issue.value) void loadEmbeddedEditorMetadata(issue.value);
+});
+
+watch(attachmentsAllowed, (allowed, wasAllowed) => {
+  if (allowed || !wasAllowed) return;
+  // A revoked attachment capability must remove pending/failed upload jobs.
+  // Existing attachments are reloaded read-only under the still-authorized
+  // issue identity; late upload callbacks mutate only detached job objects.
+  attachments.reset();
+  if (issue.value) void loadAttachments(issue.value);
+});
+
 function startEdit() {
+  if (!issueMutationAllowed.value || commentInFlight.value) {
+    if (commentInFlight.value) {
+      panelGuardError.value = "An internal note is still posting. Wait for it to finish before editing this ticket.";
+    }
+    return;
+  }
   resetForm();
   savedSnapshot.value = JSON.stringify(form.value);
   editing.value = true;
@@ -544,7 +681,7 @@ const {
 const hasUnsavedChanges = computed(() => isDirty.value || commentDirty.value);
 
 watch(
-  [hasUnsavedChanges, attachments.hasInFlight],
+  [hasUnsavedChanges, hasInFlight],
   ([dirty, inFlight]) => emit("guard-state", { dirty, inFlight }),
   { immediate: true },
 );
@@ -554,6 +691,14 @@ watch(
  * explicit discard. */
 async function requestLeave(): Promise<boolean> {
   panelGuardError.value = "";
+  if (commentInFlight.value) {
+    panelGuardError.value = "An internal note is still posting. Wait for it to finish before leaving this ticket.";
+    return false;
+  }
+  if (saving.value || quickSavingField.value !== "") {
+    panelGuardError.value = "A ticket update is still saving. Wait for it to finish before leaving this ticket.";
+    return false;
+  }
   if (attachments.hasInFlight.value) {
     panelGuardError.value = "An attachment upload is still in progress. Wait for it to finish or remove it before leaving this ticket.";
     return false;
@@ -602,11 +747,28 @@ function onPanelDrop(event: DragEvent) {
   attachments.addFiles(files);
 }
 
-defineExpose({ requestLeave, hasUnsavedChanges, hasInFlight: attachments.hasInFlight });
+function addAttachmentFiles(files: FileList) {
+  if (!attachmentsAllowed.value) return;
+  attachments.addFiles(files);
+}
+
+async function removeAttachment(job: AttachmentJob) {
+  if (!attachmentsAllowed.value) return;
+  await attachments.removeJob(job);
+}
+
+function retryAttachment(job: AttachmentJob) {
+  if (!attachmentsAllowed.value) return;
+  attachments.retryJob(job);
+}
+
+defineExpose({ requestLeave, hasUnsavedChanges, hasInFlight });
 
 async function save() {
-  if (!issue.value) return;
+  if (!issue.value || !issueMutationAllowed.value || !editing.value) return;
   const loaded = issue.value;
+  const authorityEpoch = issueMutationAuthorityEpoch;
+  const operation = ++issueMutationOperationSequence;
   saving.value = true;
   saveError.value = "";
   try {
@@ -622,15 +784,32 @@ async function save() {
       payload,
       issueIfMatch(loaded.id, loaded.updated_at),
     );
-    if (props.issueId !== loaded.id) return;
+    if (
+      props.issueId !== loaded.id ||
+      issue.value?.id !== loaded.id ||
+      !issueMutationAllowed.value ||
+      authorityEpoch !== issueMutationAuthorityEpoch
+    ) return;
     issue.value = updated;
     editing.value = false;
     savedSnapshot.value = ""; // reset dirty guard
     emit("updated", updated);
   } catch (e: unknown) {
-    if (props.issueId !== loaded.id) return;
+    if (
+      props.issueId !== loaded.id ||
+      !issueMutationAllowed.value ||
+      authorityEpoch !== issueMutationAuthorityEpoch
+    ) return;
     if (e instanceof ApiError && e.status === 412) {
+      const expectedLoadSequence = issueLoadSequence + 1;
+      const expectedAuthorityEpoch = issueMutationAuthorityEpoch + 1;
       const reloaded = await loadIssue(props.issueId);
+      if (
+        props.issueId !== loaded.id ||
+        !issueMutationAllowed.value ||
+        issueLoadSequence !== expectedLoadSequence ||
+        issueMutationAuthorityEpoch !== expectedAuthorityEpoch
+      ) return;
       saveError.value = reloaded
         ? "This ticket changed elsewhere. Latest values were reloaded; review and re-apply your edit."
         : "This ticket changed elsewhere and the latest values could not be reloaded. Reopen the ticket and try again.";
@@ -638,7 +817,7 @@ async function save() {
       saveError.value = errMsg(e, "Save failed.");
     }
   } finally {
-    saving.value = false;
+    if (operation === issueMutationOperationSequence) saving.value = false;
   }
 }
 
@@ -653,7 +832,7 @@ async function openFull() {
 
 const cloning = ref(false);
 async function cloneIssue() {
-  if (!issue.value || cloning.value) return;
+  if (!issue.value || props.embedded || cloning.value) return;
   cloning.value = true;
   try {
     const clone = await api.post<Issue>(`/issues/${issue.value.id}/clone`, {});
@@ -777,7 +956,7 @@ watch(
   async (id) => {
     const sequence = ++timeEntryLoadSequence;
     timeEntries.value = [];
-    if (id) {
+    if (id && !props.embedded) {
       try {
         const loaded = await api.get<TimeEntry[]>(
           `/issues/${id}/time-entries`,
@@ -797,7 +976,7 @@ watch(
 );
 
 async function toggleTimer() {
-  if (!issue.value) return;
+  if (!issue.value || props.embedded) return;
   if (isTimerIssue.value) {
     const entry = timerStore.getRunningEntry(issue.value.id);
     if (entry) await timerStore.stop(entry.id);
@@ -818,7 +997,7 @@ async function toggleTimer() {
 
 // Move to trash (soft-delete — recoverable from Settings → Trash)
 async function deleteIssue() {
-  if (!issue.value) return;
+  if (!issue.value || props.embedded) return;
   if (
     !(await confirm({
       message: `Move ${issue.value.issue_key} "${issue.value.title}" to Trash? Any child tasks will be moved too. You can restore from Settings → Trash.`,
@@ -840,7 +1019,7 @@ async function deleteIssue() {
 const sprintDropOpen = ref(false);
 
 async function addSprint(sprintId: number) {
-  if (!issue.value) return;
+  if (!issue.value || props.embedded) return;
   await api.post(`/issues/${issue.value.id}/relations`, {
     target_id: sprintId,
     type: "sprint",
@@ -853,7 +1032,7 @@ async function addSprint(sprintId: number) {
   sprintDropOpen.value = false;
 }
 async function removeSprint(sprintId: number) {
-  if (!issue.value) return;
+  if (!issue.value || props.embedded) return;
   await api.delete(`/issues/${issue.value.id}/relations`, {
     target_id: sprintId,
     type: "sprint",
@@ -866,6 +1045,7 @@ async function removeSprint(sprintId: number) {
 }
 
 async function deleteTimeEntry(entry: TimeEntry) {
+  if (props.embedded) return;
   const isOther = entry.user_id !== authStore.user?.id;
   const msg = isOther
     ? `You are deleting ${entry.username}'s time entry. You can undo this from Recent activity.`
@@ -929,7 +1109,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
                sub-tasks, estimate, detect duplicates). Only mounts
                when an issue is loaded. -->
           <AiActionMenu
-            v-if="issue && !readonly"
+            v-if="issue && !readonly && !embedded"
             surface="issue"
             placement="issue"
             :host-key="`issue-side:${issue.id}:record`"
@@ -962,7 +1142,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
             <AppIcon name="chevron-down" :size="15" />
           </button>
           <button
-            v-if="issue && !readonly && authStore.isAdmin"
+            v-if="issue && !readonly && !embedded && authStore.isAdmin"
             class="sp-action-btn sp-action-btn--danger"
             @click="deleteIssue"
             title="Delete issue"
@@ -970,7 +1150,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
             <AppIcon name="trash-2" :size="15" />
           </button>
           <button
-            v-if="issue && !readonly"
+            v-if="issue && !readonly && !embedded"
             class="sp-action-btn"
             @click="cloneIssue"
             :disabled="cloning"
@@ -982,7 +1162,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
             v-if="issue && !readonly"
             class="sp-action-btn"
             :class="{ 'sp-action-btn--disabled': editing }"
-            :disabled="editing"
+            :disabled="editing || commentInFlight"
             @click="startEdit"
             title="Quick Edit"
           >
@@ -1007,12 +1187,15 @@ async function deleteTimeEntry(entry: TimeEntry) {
         </div>
 
         <AiSurfaceFeedback
-          v-if="issue"
+          v-if="issue && !embedded"
           :host-key="`issue-side:${issue.id}:record`"
           :apply="applyAiPanelResult"
         />
 
         <div v-if="panelGuardError" class="sp-guard-error" role="alert">{{ panelGuardError }}</div>
+        <div v-if="quickError" class="sp-quick-error" role="alert">{{ quickError }}</div>
+        <div v-if="saveError" class="sp-quick-error" role="alert">{{ saveError }}</div>
+        <div v-if="editorMetadataError" class="sp-quick-error" role="alert">{{ editorMetadataError }}</div>
         <LoadingText v-if="loading" class="sp-loading" label="Loading…" />
 
         <!-- View mode -->
@@ -1076,8 +1259,6 @@ async function deleteTimeEntry(entry: TimeEntry) {
               issue.release?.label
             }}</span>
           </div>
-          <div v-if="quickError" class="sp-quick-error">{{ quickError }}</div>
-
           <!-- Sprints (click to edit) -->
           <div
             v-if="sprints?.length && !readonly"
@@ -1134,7 +1315,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
           </div>
 
           <!-- Time tracking (view mode, ticket/task only) — before description -->
-          <div v-if="!readonly" class="sp-time-section">
+          <div v-if="!readonly && !embedded" class="sp-time-section">
             <div
               class="sp-time-header"
               @click="showTimeEntries = !showTimeEntries"
@@ -1280,7 +1461,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
 
           <MarkdownToolbar v-model="mdMode" :subtle="true" />
 
-          <IssueAiActivity v-if="issue" :issue-id="issue.id" />
+          <IssueAiActivity v-if="issue && !embedded" :issue-id="issue.id" />
 
           <!-- Attachments (view mode — read-only chip list, clickable thumbnails) -->
           <AttachmentSidebar
@@ -1301,6 +1482,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
             :compact="embedded"
             :composer-notice="noteAffectsNextRun ? t('agentMode.detail.nextRunNote') : null"
             @dirty-change="commentDirty = $event"
+            @in-flight-change="commentInFlight = $event"
           />
         </template>
 
@@ -1427,7 +1609,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
               </div>
             </div>
             <!-- Time tracking in edit mode -->
-            <div v-if="!readonly" class="sp-time-section sp-time-section--edit">
+            <div v-if="!readonly && !embedded" class="sp-time-section sp-time-section--edit">
               <div
                 class="sp-time-header"
                 @click="showTimeEntries = !showTimeEntries"
@@ -1506,6 +1688,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
               <div class="field-label-row">
                 <label>Description</label>
                 <AiActionMenu
+                  v-if="!embedded"
                   surface="issue"
                   :host-key="`issue-side:${issue?.id ?? 0}:description`"
                   field="description"
@@ -1517,6 +1700,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
               </div>
               <textarea v-model="form.description" rows="5" />
               <AiSurfaceFeedback
+                v-if="!embedded"
                 :host-key="`issue-side:${issue?.id ?? 0}:description`"
                 :apply="applyAiPanelResult"
               />
@@ -1525,6 +1709,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
               <div class="field-label-row">
                 <label>Acceptance Criteria</label>
                 <AiActionMenu
+                  v-if="!embedded"
                   surface="issue"
                   :host-key="`issue-side:${issue?.id ?? 0}:acceptance_criteria`"
                   field="acceptance_criteria"
@@ -1536,6 +1721,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
               </div>
               <textarea v-model="form.acceptance_criteria" rows="4" />
               <AiSurfaceFeedback
+                v-if="!embedded"
                 :host-key="`issue-side:${issue?.id ?? 0}:acceptance_criteria`"
                 :apply="applyAiPanelResult"
               />
@@ -1544,6 +1730,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
               <div class="field-label-row">
                 <label>Notes</label>
                 <AiActionMenu
+                  v-if="!embedded"
                   surface="issue"
                   :host-key="`issue-side:${issue?.id ?? 0}:notes`"
                   field="notes"
@@ -1555,6 +1742,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
               </div>
               <textarea v-model="form.notes" rows="3" />
               <AiSurfaceFeedback
+                v-if="!embedded"
                 :host-key="`issue-side:${issue?.id ?? 0}:notes`"
                 :apply="applyAiPanelResult"
               />
@@ -1566,6 +1754,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
               <div class="field-label-row">
                 <label>{{ t('reportSummary.label') }}</label>
                 <AiActionMenu
+                  v-if="!embedded"
                   surface="customer"
                   :host-key="`issue-side:${issue?.id ?? 0}:report_summary`"
                   field="report_summary"
@@ -1581,6 +1770,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
                 :placeholder="t('reportSummary.placeholder')"
               />
               <AiSurfaceFeedback
+                v-if="!embedded"
                 :host-key="`issue-side:${issue?.id ?? 0}:report_summary`"
                 :apply="applyAiPanelResult"
               />
@@ -1591,18 +1781,17 @@ async function deleteTimeEntry(entry: TimeEntry) {
               class="sp-attach-sidebar sp-attach-sidebar--edit"
               title="Attachments"
               :jobs="attachments.jobs.value"
-              @add-files="(files) => attachments.addFiles(files)"
-              @remove="(job) => attachments.removeJob(job)"
-              @retry="(job) => attachments.retryJob(job)"
+              @add-files="addAttachmentFiles"
+              @remove="removeAttachment"
+              @retry="retryAttachment"
             />
-            <div v-if="saveError" class="form-error">{{ saveError }}</div>
             <div class="sp-form-actions">
               <button class="btn btn-ghost btn-sm" @click="cancelEdit">
                 Cancel
               </button>
               <button
                 class="btn btn-primary btn-sm"
-                :disabled="saving || attachments.hasInFlight.value"
+                :disabled="!issueMutationAllowed || saving || attachments.hasInFlight.value || commentInFlight"
                 @click="save"
               >
                 {{
@@ -1615,7 +1804,7 @@ async function deleteTimeEntry(entry: TimeEntry) {
               </button>
             </div>
 
-            <IssueAiActivity v-if="issue" :issue-id="issue.id" />
+            <IssueAiActivity v-if="issue && !embedded" :issue-id="issue.id" />
           </div>
         </template>
         <div v-else class="sp-empty-state">
