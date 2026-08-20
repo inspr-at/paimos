@@ -686,18 +686,14 @@ const liveLabel = computed(() => {
 function selectionSentence(d: Delivery): string {
   const actor = d.actor?.label ?? t('agentMode.card.noActor')
   const activity = d.activity.text ?? t(`agentMode.activity.${d.activity.kind}`)
-  const est = estimateView(d, locale.value, serverNowMs.value)
+  const est = estimateView(d, locale.value, serverNowMs.value, data.degraded.value)
   let text = t('agentMode.narration.selection', { key: d.issueKey, actor, activity })
-  if (est.presentation.rangeOnly && est.rangeLabel && !data.degraded.value) {
+  if (est.presentation.rangeOnly && est.rangeLabel) {
     text += ' ' + t('agentMode.narration.selectionRange', { range: est.rangeLabel })
-  } else if (est.landingLabel && !data.degraded.value) {
+  } else if (est.landingLabel) {
     text += ' ' + t('agentMode.narration.selectionEta', { time: est.landingLabel, remaining: est.remainingLabel ?? '—' })
   } else {
-    const reason = data.degraded.value
-      ? 'offline'
-      : est.presentation.etaReason === 'ok'
-        ? 'none'
-        : est.presentation.etaReason
+    const reason = est.presentation.etaReason === 'ok' ? 'none' : est.presentation.etaReason
     text += ' ' + t('agentMode.narration.selectionNoEta', { reason: t(`agentMode.estimate.withheld.${reason}`) })
   }
   return text

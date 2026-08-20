@@ -75,6 +75,9 @@ export interface EstimateView {
   /** Human remaining duration ("52 min", "1 h 20 min", "overdue"). */
   remainingLabel: string | null
   rangeLabel: string | null
+  /** Safe server-authored basis, withheld with all other estimate precision
+   * whenever the snapshot is retained rather than current. */
+  basis: string | null
 }
 
 export function formatDuration(ms: number): string {
@@ -97,8 +100,26 @@ function sameLocalDay(aMs: number, bMs: number): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 
-export function estimateView(d: Delivery, locale: string, serverNowMs: number): EstimateView {
+function currentnessAwarePresentation(d: Delivery, degraded: boolean): EstimatePresentation {
   const presentation = estimatePresentation(d)
+  if (!degraded) return presentation
+  return {
+    showPercent: false,
+    percent: null,
+    showEta: false,
+    rangeOnly: false,
+    landingAt: null,
+    optimisticAt: null,
+    pessimisticAt: null,
+    percentReason: 'offline',
+    etaReason: 'offline',
+  }
+}
+
+/** One currentness-aware estimate seam shared by cards, Detail 1, and
+ * narration. Retained snapshots expose neither numeric precision nor basis. */
+export function estimateView(d: Delivery, locale: string, serverNowMs: number, degraded = false): EstimateView {
+  const presentation = currentnessAwarePresentation(d, degraded)
   let landingLabel: string | null = null
   let remainingLabel: string | null = null
   let rangeLabel: string | null = null
@@ -127,7 +148,8 @@ export function estimateView(d: Delivery, locale: string, serverNowMs: number): 
       rangeLabel = `${formatTimeWithLocale(presentation.optimisticAt, locale)}–${formatTimeWithLocale(presentation.pessimisticAt, locale)}`
     }
   }
-  return { presentation, landingLabel, remainingLabel, rangeLabel }
+  const basis = degraded ? null : d.eta?.basis ?? d.progress?.basis ?? null
+  return { presentation, landingLabel, remainingLabel, rangeLabel, basis }
 }
 
 /** Health classes are color-independent: each health also carries an icon + word. */

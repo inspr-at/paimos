@@ -90,13 +90,10 @@ const stage = computed(() => {
   return pos ? `${label} · ${pos}` : label
 })
 const reported = computed(() => relativeReported(d.value, props.locale, props.serverNowMs))
-const estimate = computed(() => estimateView(d.value, props.locale, props.serverNowMs))
-/** Exact percent / landing time are shown only when trusted AND the data
- * is current. Retained offline data must not keep false precision. */
-const showPercent = computed(() => !props.degraded && estimate.value.presentation.showPercent)
-const showEta = computed(() => !props.degraded && estimate.value.presentation.showEta)
+const estimate = computed(() => estimateView(d.value, props.locale, props.serverNowMs, props.degraded))
+const showPercent = computed(() => estimate.value.presentation.showPercent)
+const showEta = computed(() => estimate.value.presentation.showEta)
 const withheldReason = computed(() => {
-  if (props.degraded) return 'offline'
   const p = estimate.value.presentation
   if (p.showEta || p.showPercent) return null
   // Prefer the ETA reason: it is what the user asks for first.

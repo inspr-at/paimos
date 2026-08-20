@@ -41,8 +41,7 @@ const stages = computed<Array<{ key: StageKey; fact: DeliveryStage | null }>>(()
   const byKey = new Map(props.delivery.stages.map((stage) => [stage.key, stage]))
   return STAGE_CHAIN.map((key) => ({ key, fact: byKey.get(key) ?? null }))
 })
-const estimate = computed(() => estimateView(props.delivery, props.locale, props.serverNowMs))
-const estimateBasis = computed(() => props.delivery.eta?.basis ?? props.delivery.progress?.basis ?? null)
+const estimate = computed(() => estimateView(props.delivery, props.locale, props.serverNowMs, props.degraded === true))
 const attemptLabel = computed(() => {
   const attempt = props.delivery.attempt
   if (attempt.number != null) return t('agentMode.detail.attemptNumber', { n: attempt.number })
@@ -162,7 +161,7 @@ const attemptLabel = computed(() => {
             </dd>
           </div>
           <div v-if="estimate.rangeLabel && !estimate.presentation.rangeOnly"><dt>{{ t('agentMode.detail.range') }}</dt><dd>{{ estimate.rangeLabel }}</dd></div>
-          <div v-if="estimateBasis"><dt>{{ t('agentMode.detail.basis') }}</dt><dd>{{ estimateBasis }}</dd></div>
+          <div v-if="estimate.basis"><dt>{{ t('agentMode.detail.basis') }}</dt><dd>{{ estimate.basis }}</dd></div>
           <div v-if="delivery.trustRevision"><dt>{{ t('agentMode.detail.trustRevision') }}</dt><dd>{{ delivery.trustRevision }}</dd></div>
           <div v-if="delivery.suppressionCodes.length"><dt>{{ t('agentMode.detail.suppressed') }}</dt><dd>{{ delivery.suppressionCodes.join(' · ') }}</dd></div>
           <div v-if="delivery.disagreementCodes.length"><dt>{{ t('agentMode.detail.disagreement') }}</dt><dd>{{ delivery.disagreementCodes.join(' · ') }}</dd></div>

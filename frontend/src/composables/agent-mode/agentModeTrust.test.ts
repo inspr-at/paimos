@@ -136,6 +136,32 @@ describe('agentModeTrust (client side of PAI-803)', () => {
     expect(view.rangeLabel).toContain('–')
   })
 
+  it('withholds every precision field and basis through the shared retained-snapshot policy', () => {
+    const point = d({
+      health: 'healthy',
+      activity: { kind: 'working', text: 'x', since: null },
+      freshness: { state: 'fresh', lastReportAt: null },
+      progress: { ...trustedProgress, basis: 'private point basis' },
+      eta: { ...trustedEta, basis: 'private range basis' },
+    })
+    const retained = estimateView(point, 'en-US', Date.parse('2026-08-20T16:00:00Z'), true)
+    expect(retained.presentation).toMatchObject({
+      showPercent: false,
+      percent: null,
+      showEta: false,
+      rangeOnly: false,
+      landingAt: null,
+      optimisticAt: null,
+      pessimisticAt: null,
+      percentReason: 'offline',
+      etaReason: 'offline',
+    })
+    expect(retained.landingLabel).toBeNull()
+    expect(retained.remainingLabel).toBeNull()
+    expect(retained.rangeLabel).toBeNull()
+    expect(retained.basis).toBeNull()
+  })
+
   it('reports "none" when the API carries no estimate at all', () => {
     const p = estimatePresentation(d({ progress: null, eta: null }))
     expect(p.percentReason).toBe('none')

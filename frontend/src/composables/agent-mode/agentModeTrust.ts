@@ -31,6 +31,7 @@ import { parseIsoInstant } from '@/services/agentModeAggregateSchema'
 
 export type EstimateSuppression =
   | 'ok'
+  | 'offline'
   | 'blocked'
   | 'waiting'
   | 'stale'

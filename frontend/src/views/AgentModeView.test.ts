@@ -1297,6 +1297,79 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(document.getElementById('app-header-right')!.textContent).toContain('Offline')
   })
 
+  it.each([
+    ['confident point', 'high'],
+    ['eligible low-confidence range', 'low'],
+  ] as const)('withholds Detail-1 %s precision and basis everywhere after an offline refresh', async (_label, confidence) => {
+    vi.useFakeTimers()
+    const wire = makeFixtureSnapshot(10)
+    const row = wire.rows![0]
+    const basis = `retained-${confidence}-precision-basis`
+    row.progress = {
+      ...row.progress,
+      percent: 73,
+      trusted: true,
+      confidence: 'high',
+      basis,
+    }
+    row.eta = {
+      landing_at: '2026-08-20T14:40:00Z',
+      optimistic_at: '2026-08-20T14:30:00Z',
+      pessimistic_at: '2026-08-20T15:05:00Z',
+      trusted: true,
+      confidence,
+      basis,
+      calculated_at: wire.server_time,
+    }
+    wire.selected_delivery = row.delivery_id
+    let offline = false
+    harness = await mountView(async () => {
+      if (offline) throw new AgentModeLoadError('offline', 'down', 0)
+      return snapshot(wire)
+    }, `/agent-mode?detail=1&delivery=${row.delivery_id}`)
+
+    const initialDetail = harness.root.querySelector<HTMLElement>('.am-detail-list')!
+    const initialCard = harness.root.querySelector<HTMLElement>('.am-focus-card')!
+    const initialNarration = harness.root.querySelector<HTMLElement>('.am-conv')!
+    expect(initialDetail.textContent).toContain('73 %')
+    expect(initialDetail.textContent).toContain(basis)
+    expect([...initialDetail.querySelectorAll('dt')].some((term) => term.textContent === 'Basis')).toBe(true)
+    expect(initialCard.querySelector('.am-card-percent')?.textContent).toContain('73 %')
+    if (confidence === 'high') {
+      expect(initialDetail.textContent).toContain('04:40 PM')
+      expect(initialCard.textContent).toContain('Lands ~04:40 PM')
+      expect(initialNarration.textContent).toContain('Lands about 04:40 PM')
+    } else {
+      expect(initialDetail.textContent).toContain('Landing range 04:30 PM–05:05 PM')
+      expect(initialCard.textContent).toContain('Landing range 04:30 PM–05:05 PM')
+      expect(initialNarration.textContent).toContain('Landing range 04:30 PM–05:05 PM')
+    }
+
+    offline = true
+    await refetchViaHint()
+
+    const detail = harness.root.querySelector<HTMLElement>('.am-detail-list')!
+    const card = harness.root.querySelector<HTMLElement>('.am-focus-card')!
+    const narration = harness.root.querySelector<HTMLElement>('.am-conv')!
+    expect(detail.textContent).toContain('No estimate — feed offline')
+    expect(card.querySelector('.am-card-eta--withheld')?.textContent).toContain('No estimate — feed offline')
+    expect(narration.textContent).toContain('feed offline')
+    expect(detail.querySelector('.am-card-percent')).toBeNull()
+    expect(card.querySelector('.am-card-percent')).toBeNull()
+    expect(card.querySelector('.am-card-progress')).toBeNull()
+    expect(card.querySelector('.am-card-eta--range')).toBeNull()
+    expect([...detail.querySelectorAll('dt')].some((term) => term.textContent === 'Basis')).toBe(false)
+    for (const precision of ['73 %', '04:40 PM', '04:30 PM', '05:05 PM', '52 min', basis]) {
+      expect(detail.textContent).not.toContain(precision)
+      expect(card.textContent).not.toContain(precision)
+      expect(narration.textContent).not.toContain(precision)
+    }
+    expect(detail.textContent).not.toContain('Landing range')
+    expect(card.textContent).not.toContain('Lands ~')
+    expect(narration.textContent).not.toContain('Lands about')
+    expect(narration.textContent).not.toContain('Landing range')
+  })
+
   it('collapses the conversation into a compact, non-occluding lower-left dock at constrained widths', async () => {
     stubMatchMedia((q) => q === COMPACT_CONVERSATION_QUERY)
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
