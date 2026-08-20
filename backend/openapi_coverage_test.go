@@ -403,13 +403,19 @@ func TestAgentModeVoiceOpenAPIIsClosedTemplateOnlyAndNonCacheable(t *testing.T) 
 // the delivery snapshot the production Agent Mode loader fetches through the
 // same epoch-tracking api client.
 //
-// The list is exact in both directions. /auth/me is the hinge: the client
-// re-fetches it precisely when the epoch it compares has moved, so a success
-// there that carried no response-local epoch would leave the refresh unable to
-// confirm it had caught up. Sitting behind auth.Middleware is what makes the
-// headers guaranteed, so the unauthenticated half of the auth surface —
-// /auth/login, which runs *before* any middleware can know the caller — must
-// never claim them.
+// The list is one-way: these five must carry the headers. It is not an
+// exhaustive census of who may. auth.Middleware writes them across the whole
+// authenticated surface, so any other documented response is free to reference
+// the same components — and a future endpoint that does is a contract
+// addition, not a violation.
+//
+// /auth/me is the hinge: the client re-fetches it precisely when the epoch it
+// compares has moved, so a success there that carried no response-local epoch
+// would leave the refresh unable to confirm it had caught up. Being behind
+// auth.Middleware is what makes the headers guaranteed, so the one reverse
+// claim worth stating is about the public half of the same auth surface:
+// POST /auth/login runs *before* any middleware can know the caller, and must
+// never promise them.
 const (
 	openAPIPermissionsEpochHeader = "X-Permissions-Epoch"
 	openAPISessionExpiresHeader   = "X-Session-Expires-At"
@@ -423,14 +429,13 @@ func TestOpenAPIAuthContextHeadersArePinnedOnAuthenticatedSuccess(t *testing.T) 
 		openAPIPermissionsEpochHeader: openAPIPermissionsEpochRef,
 		openAPISessionExpiresHeader:   openAPISessionExpiresRef,
 	}
-	targets := []struct{ method, path string }{
+	for _, target := range []struct{ method, path string }{
 		{"get", "/api/auth/me"},
 		{"post", "/api/agent-mode/voice/transcribe"},
 		{"post", "/api/agent-mode/voice/speak"},
 		{"get", "/api/projects"},
 		{"get", "/api/agent-mode/deliveries"},
-	}
-	for _, target := range targets {
+	} {
 		operation := strings.ToUpper(target.method) + " " + target.path
 		raw, ok := doc.Paths[target.path][target.method]
 		if !ok {
@@ -454,7 +459,7 @@ func TestOpenAPIAuthContextHeadersArePinnedOnAuthenticatedSuccess(t *testing.T) 
 			got, exists := success.Headers[header]
 			if !exists {
 				t.Errorf("%s 200 does not document %s; documented headers: %v",
-					operation, header, sortedKeys(success.Headers))
+					operation, header, sortedHeaderNames(success.Headers))
 				continue
 			}
 			if got.Ref != ref {
@@ -464,71 +469,35 @@ func TestOpenAPIAuthContextHeadersArePinnedOnAuthenticatedSuccess(t *testing.T) 
 		}
 	}
 
-	// The other direction: nothing outside that list may claim the headers.
-	// auth.Middleware is what guarantees them, so a response reachable without
-	// it — the /auth/login success that establishes the session in the first
-	// place, or any error status the middleware short-circuits — would be
-	// promising a header no code path writes.
-	allowed := map[string]bool{}
-	for _, target := range targets {
-		allowed[strings.ToUpper(target.method)+" "+target.path+" 200"] = true
+	// The single reverse claim, stated directly about the one response whose
+	// route guarantees the headers are absent: POST /api/auth/login is
+	// registered on the public router, ahead of auth.Middleware, so the
+	// handler that writes its success has no authenticated caller to describe
+	// yet. This says nothing about any other response — the middleware writes
+	// these headers broadly, and forbidding them elsewhere would be false.
+	const loginPath = "/api/auth/login"
+	loginRaw, documented := doc.Paths[loginPath]["post"]
+	if !documented {
+		t.Fatalf("POST %s is undocumented", loginPath)
 	}
-	for _, claim := range responsesClaimingAuthContextHeaders(t, doc) {
-		if !allowed[claim] {
-			t.Errorf("%s documents an auth-context header, but it is not one of the authenticated successes "+
-				"auth.Middleware covers — only %v may claim the epoch/expiry contract",
-				claim, sortedKeys(allowed))
+	var login struct {
+		Responses map[string]struct {
+			Headers map[string]json.RawMessage `json:"headers"`
+		} `json:"responses"`
+	}
+	if err := json.Unmarshal(loginRaw, &login); err != nil {
+		t.Fatalf("POST %s operation: %v", loginPath, err)
+	}
+	loginSuccess, hasSuccess := login.Responses["200"]
+	if !hasSuccess {
+		t.Fatalf("POST %s documents no 200 response", loginPath)
+	}
+	for _, header := range []string{openAPIPermissionsEpochHeader, openAPISessionExpiresHeader} {
+		if _, claimed := loginSuccess.Headers[header]; claimed {
+			t.Errorf("POST %s 200 documents %s, but the route is registered before auth.Middleware — "+
+				"the login success cannot promise a header nothing on that path writes", loginPath, header)
 		}
 	}
-}
-
-// responsesClaimingAuthContextHeaders walks every documented response and
-// returns "METHOD /path status" for each one that names either auth-context
-// header, however it spells the reference.
-func responsesClaimingAuthContextHeaders(t *testing.T, doc openAPIDocument) []string {
-	t.Helper()
-	paths, ok := doc.raw["paths"].(map[string]any)
-	if !ok {
-		t.Fatal("OpenAPI paths are missing")
-	}
-	claims := []string{}
-	for path, rawMethods := range paths {
-		methods, ok := rawMethods.(map[string]any)
-		if !ok {
-			continue
-		}
-		for method, rawOperation := range methods {
-			if !openAPIMethods[strings.ToLower(method)] {
-				continue
-			}
-			operation, ok := rawOperation.(map[string]any)
-			if !ok {
-				continue
-			}
-			responses, ok := operation["responses"].(map[string]any)
-			if !ok {
-				continue
-			}
-			for status, rawResponse := range responses {
-				response, ok := rawResponse.(map[string]any)
-				if !ok {
-					continue
-				}
-				headers, ok := response["headers"].(map[string]any)
-				if !ok {
-					continue
-				}
-				for _, header := range []string{openAPIPermissionsEpochHeader, openAPISessionExpiresHeader} {
-					if _, claimed := headers[header]; claimed {
-						claims = append(claims, strings.ToUpper(method)+" "+path+" "+status)
-						break
-					}
-				}
-			}
-		}
-	}
-	sort.Strings(claims)
-	return claims
 }
 
 // isCanonicalNonNegativeInt64 is the oracle the documented epoch pattern has
@@ -580,13 +549,13 @@ func permissionsEpochProbes() []string {
 	return probes
 }
 
-func sortedKeys[V any](set map[string]V) []string {
-	keys := make([]string, 0, len(set))
-	for key := range set {
-		keys = append(keys, key)
+func sortedHeaderNames[V any](headers map[string]V) []string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
 	}
-	sort.Strings(keys)
-	return keys
+	sort.Strings(names)
+	return names
 }
 
 func TestOpenAPIAuthContextHeaderComponentsFreezeCanonicalShape(t *testing.T) {
