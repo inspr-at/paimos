@@ -16,8 +16,17 @@
  */
 
 import { defineStore } from 'pinia'
-import { computed, ref, watch } from 'vue'
-import { api, announceSessionRestored, permissionsEpoch } from '@/api/client'
+import { computed, onScopeDispose, ref, watch } from 'vue'
+import {
+  ApiError,
+  api,
+  announceSessionRestored,
+  comparePermissionsEpoch,
+  permissionsEpoch,
+  permissionsEpochGeneration,
+  resetPermissionsEpoch,
+  sessionExpired,
+} from '@/api/client'
 import router from '@/router'
 import i18n from '@/i18n'
 import { setDisplayTimezone } from '@/utils/formatTime'
@@ -125,28 +134,62 @@ export const useAuthStore = defineStore('auth', () => {
   const viaDevLogin = ref(false)
   const suppressSecurityNags = ref(false)
   const impersonation = ref<ImpersonationState | null>(null)
+  let lastSyncedEpoch: string | null = null
+  let lastSyncedEpochGeneration: number | null = null
+  let authorityExpected = false
+  let suppressGenerationRefresh = false
+  let observedPermissionsEpochGeneration = permissionsEpochGeneration.value
+  let queuedAuthorityTarget: { generation: number; epoch: string | null } | null = null
+  let currentAuthorityTarget: { generation: number; epoch: string | null } | null = null
+  let authorityHydrationController: AbortController | null = null
+  let authorityHydrationPromise: Promise<void> | null = null
+  let authorityHydrationRunGeneration = 0
+  let queuedAuthorityForce = false
+  let authorityRetryTimer: ReturnType<typeof setTimeout> | null = null
+  let authorityRetryAttempt = 0
 
-  function hydrateSession(resp: MeResponse) {
+  const AUTHORITY_HYDRATION_TIMEOUT_MS = 30_000
+
+  function hydrateSession(
+    resp: MeResponse,
+    responseEpoch: string | null = null,
+    responseEpochGeneration: number | null = null,
+  ) {
     user.value = resp.user
     hydrateAccess(resp.access)
     viaDevLogin.value = !!resp.via_dev_login
     suppressSecurityNags.value = !!resp.suppress_security_nags
     impersonation.value = resp.impersonation?.active ? resp.impersonation : null
+    // Header observation precedes body hydration. Binding the baseline here
+    // means the first real post-hydration bump cannot be mistaken for the
+    // pristine session's first observation.
+    authorityExpected = true
+    if (responseEpoch != null && responseEpochGeneration != null) {
+      lastSyncedEpoch = responseEpoch
+      lastSyncedEpochGeneration = responseEpochGeneration
+    }
     setDisplayLocale(user.value?.locale)
     if (user.value?.locale) i18n.global.locale.value = user.value.locale as 'en' | 'de'
     setDisplayTimezone(user.value?.timezone)
   }
 
-  function completeLogin(resp: MeResponse) {
-    hydrateSession(resp)
-    checked.value = true
-    // PAI-320: a fresh login means the next epoch we see is the new
-    // baseline — don't let a leftover from before logout retrigger
-    // refreshMe.
-    resetEpochBaseline()
+  async function completeLogin(_resp: MeResponse) {
     // PAI-322: broadcast session-restored so sibling tabs dismiss their
-    // session-expired modals. Local ref clear is included in the helper.
+    // session-expired modals. The login envelope itself is intentionally not
+    // installed as authorization: only a response-local current /auth/me proof
+    // may expose the new principal's role and project map.
+    authorityExpected = true
     announceSessionRestored()
+    checked.value = false
+    try {
+      await queueAuthorityHydration({
+        generation: permissionsEpochGeneration.value,
+        epoch: permissionsEpoch.value,
+      }, true)
+      if (!user.value) throw new Error('login authority could not be verified')
+    } finally {
+      checked.value = true
+    }
   }
 
   function hydrateAccess(access: AccessResponse | undefined | null) {
@@ -162,12 +205,14 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function canView(projectId: number | null | undefined): boolean {
+    if (!user.value) return false
     if (projectId == null) return true // orphan / no project — show
     if (allProjects.value) return true
     return accessibleProjects.value.has(projectId)
   }
 
   function canEdit(projectId: number | null | undefined): boolean {
+    if (!user.value) return false
     if (projectId == null) return true
     if (allProjects.value) return true
     return accessibleProjects.value.get(projectId) === 'editor'
@@ -179,22 +224,182 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => user.value?.role === 'admin' || user.value?.role === 'super_admin')
   const isSuperAdmin = computed(() => user.value?.role === 'super_admin' || !!user.value?.is_super_admin)
 
+  function clearPrincipalProjection() {
+    user.value = null
+    allProjects.value = false
+    accessibleProjects.value = new Map()
+    viaDevLogin.value = false
+    suppressSecurityNags.value = false
+    impersonation.value = null
+    totpEnabled.value = false
+    totpChecked.value = false
+    ssoSession.value = false
+    setDisplayLocale(undefined)
+    setDisplayTimezone(undefined)
+  }
+
+  function targetKey(target: { generation: number; epoch: string | null }): string {
+    return `${target.generation}:${target.epoch ?? 'baseline'}`
+  }
+
+  function targetIsHydrated(target: { generation: number; epoch: string | null }): boolean {
+    if (lastSyncedEpochGeneration !== target.generation || lastSyncedEpoch == null) return false
+    return target.epoch == null || lastSyncedEpoch === target.epoch
+  }
+
+  async function hydrateMeWithAuthority(signal?: AbortSignal): Promise<void> {
+    const response = await api.getWithMeta<MeResponse>('/auth/me', { signal })
+    if (
+      response.permissionsEpoch == null
+      || response.permissionsEpochGeneration !== permissionsEpochGeneration.value
+      || response.permissionsEpoch !== permissionsEpoch.value
+    ) throw new Error('authentication authority changed during hydration')
+    // Check and commit share one synchronous continuation: no unrelated
+    // response can advance ambient authority between them.
+    hydrateSession(response.data, response.permissionsEpoch, response.permissionsEpochGeneration)
+  }
+
+  function invalidateAuthorityHydration() {
+    authorityHydrationRunGeneration += 1
+    authorityHydrationController?.abort()
+    authorityHydrationController = null
+    currentAuthorityTarget = null
+    queuedAuthorityTarget = null
+    queuedAuthorityForce = false
+    if (authorityRetryTimer !== null) clearTimeout(authorityRetryTimer)
+    authorityRetryTimer = null
+    authorityRetryAttempt = 0
+    // Detach from abort-ignoring work owned by an older auth identity. Its
+    // response-local generation check prevents commit if it ever resolves.
+    authorityHydrationPromise = null
+  }
+
+  function scheduleAuthorityRetry() {
+    if (
+      authorityRetryTimer !== null
+      || !authorityExpected
+      || sessionExpired.value
+      || !queuedAuthorityTarget
+    ) return
+    const wait = Math.min(30_000, 2_000 * 2 ** authorityRetryAttempt)
+    authorityRetryAttempt += 1
+    authorityRetryTimer = setTimeout(() => {
+      authorityRetryTimer = null
+      const target = queuedAuthorityTarget
+      if (target) void queueAuthorityHydration(target)
+    }, wait)
+  }
+
+  function queueAuthorityHydration(
+    target: { generation: number; epoch: string | null },
+    force = false,
+  ): Promise<void> {
+    if (target.generation !== permissionsEpochGeneration.value) return Promise.resolve()
+    if (targetIsHydrated(target) && !force) return authorityHydrationPromise ?? Promise.resolve()
+    if (!queuedAuthorityTarget || targetKey(queuedAuthorityTarget) !== targetKey(target)) {
+      authorityRetryAttempt = 0
+    }
+    queuedAuthorityTarget = target
+    queuedAuthorityForce = queuedAuthorityForce || force
+    if (authorityRetryTimer !== null) clearTimeout(authorityRetryTimer)
+    authorityRetryTimer = null
+
+    if (currentAuthorityTarget) {
+      const generationChanged = currentAuthorityTarget.generation !== target.generation
+      const newerEpoch = currentAuthorityTarget.epoch != null
+        && target.epoch != null
+        && comparePermissionsEpoch(target.epoch, currentAuthorityTarget.epoch) > 0
+      if (generationChanged || newerEpoch) authorityHydrationController?.abort()
+    }
+    if (authorityHydrationPromise) return authorityHydrationPromise
+
+    const runGeneration = authorityHydrationRunGeneration
+    // Start after the promise sentinel is assigned. A fast response publishes
+    // its epoch through a flush-sync watcher before body commit; without this
+    // microtask boundary that watcher could re-enter and launch a second run.
+    const promise = Promise.resolve().then(async () => {
+      let lastAttemptedKey = ''
+      let attemptsForTarget = 0
+      while (runGeneration === authorityHydrationRunGeneration && queuedAuthorityTarget) {
+        const next = queuedAuthorityTarget
+        if (next.generation !== permissionsEpochGeneration.value) {
+          queuedAuthorityTarget = null
+          return
+        }
+        const forceCurrentTarget = queuedAuthorityForce
+        queuedAuthorityForce = false
+        if (targetIsHydrated(next) && !forceCurrentTarget) {
+          queuedAuthorityTarget = null
+          return
+        }
+
+        const key = targetKey(next)
+        if (key !== lastAttemptedKey) {
+          lastAttemptedKey = key
+          attemptsForTarget = 0
+        }
+        attemptsForTarget += 1
+        currentAuthorityTarget = next
+        const controller = new AbortController()
+        authorityHydrationController = controller
+        const timeout = setTimeout(() => controller.abort(), AUTHORITY_HYDRATION_TIMEOUT_MS)
+        let terminalUnauthenticated = false
+        try {
+          await hydrateMeWithAuthority(controller.signal)
+        } catch (cause) {
+          terminalUnauthenticated = cause instanceof ApiError && cause.status === 401
+          // Keep authorization invalid. A newer queued target is drained below;
+          // the current target gets one bounded retry and never a hot loop.
+        } finally {
+          clearTimeout(timeout)
+          if (authorityHydrationController === controller) authorityHydrationController = null
+          if (currentAuthorityTarget === next) currentAuthorityTarget = null
+        }
+
+        if (runGeneration !== authorityHydrationRunGeneration) return
+        if (terminalUnauthenticated) {
+          authorityExpected = false
+          queuedAuthorityTarget = null
+          clearPrincipalProjection()
+          return
+        }
+
+        if (targetIsHydrated(next)) {
+          authorityRetryAttempt = 0
+          if (queuedAuthorityTarget && targetKey(queuedAuthorityTarget) === key) {
+            queuedAuthorityTarget = null
+          }
+          continue
+        }
+        const latest = queuedAuthorityTarget
+        if (latest && targetKey(latest) !== key) continue
+        if (attemptsForTarget < 2) continue
+        scheduleAuthorityRetry()
+        return
+      }
+    }).finally(() => {
+      if (runGeneration !== authorityHydrationRunGeneration || authorityHydrationPromise !== promise) return
+      authorityHydrationPromise = null
+      currentAuthorityTarget = null
+      authorityHydrationController = null
+    })
+    authorityHydrationPromise = promise
+    return promise
+  }
+
   async function fetchMe() {
     try {
-      const resp = await api.get<MeResponse>('/auth/me')
-      hydrateSession(resp)
+      authorityExpected = true
+      await queueAuthorityHydration({
+        generation: permissionsEpochGeneration.value,
+        epoch: permissionsEpoch.value,
+      }, true)
+      if (!user.value) throw new Error('authentication authority is unavailable')
       await fetchTOTPStatus()
     } catch {
-      user.value = null
-      allProjects.value = false
-      accessibleProjects.value = new Map()
-      viaDevLogin.value = false
-      suppressSecurityNags.value = false
-      impersonation.value = null
-      totpEnabled.value = false
-      totpChecked.value = false
-      ssoSession.value = false
-      setDisplayLocale(undefined)
+      authorityExpected = false
+      invalidateAuthorityHydration()
+      clearPrincipalProjection()
     } finally {
       checked.value = true
     }
@@ -202,7 +407,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(username: string, password: string) {
     const resp = await api.post<MeResponse>('/auth/login', { username, password })
-    completeLogin(resp)
+    await completeLogin(resp)
     await fetchTOTPStatus()
   }
 
@@ -210,11 +415,18 @@ export const useAuthStore = defineStore('auth', () => {
   // valid again; clear the banner flag here so both password and TOTP
   // login paths (which converge on setUser) recover from a stale 401.
   // PAI-322: also broadcast across tabs.
-  function setUser(u: User) {
-    user.value = u
-    impersonation.value = null
-    checked.value = true
+  async function setUser(_u: User) {
+    authorityExpected = true
     announceSessionRestored()
+    checked.value = false
+    try {
+      await queueAuthorityHydration({
+        generation: permissionsEpochGeneration.value,
+        epoch: permissionsEpoch.value,
+      }, true)
+    } finally {
+      checked.value = true
+    }
   }
 
   async function fetchTOTPStatus(force = false) {
@@ -247,17 +459,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     try { await api.post('/auth/logout', {}) } catch { /* ignore */ }
-    user.value = null
-    allProjects.value = false
-    accessibleProjects.value = new Map()
-    viaDevLogin.value = false
-    suppressSecurityNags.value = false
-    impersonation.value = null
-    totpEnabled.value = false
-    totpChecked.value = false
-    ssoSession.value = false
+    authorityExpected = false
+    clearPrincipalProjection()
     checked.value = true
     resetEpochBaseline() // PAI-320
+    suppressGenerationRefresh = true
+    resetPermissionsEpoch()
+    suppressGenerationRefresh = false
     // PAI-242: search query persists across users via localStorage; reset
     // it on logout so the next login doesn't pre-fill the prior session's
     // sidebar search input.
@@ -270,20 +478,42 @@ export const useAuthStore = defineStore('auth', () => {
   // immediately without a page reload.
   async function refreshMe() {
     try {
-      const resp = await api.get<MeResponse>('/auth/me')
-      hydrateSession(resp)
+      await queueAuthorityHydration({
+        generation: permissionsEpochGeneration.value,
+        epoch: permissionsEpoch.value,
+      }, true)
     } catch { /* ignore */ }
   }
 
   async function startImpersonation(userId: number) {
     await api.post('/auth/impersonation/start', { user_id: userId })
-    await refreshMe()
+    resetEpochBaseline()
+    suppressGenerationRefresh = true
+    resetPermissionsEpoch()
+    suppressGenerationRefresh = false
+    clearPrincipalProjection()
+    authorityExpected = true
+    await queueAuthorityHydration({
+      generation: permissionsEpochGeneration.value,
+      epoch: permissionsEpoch.value,
+    }, true)
+    if (!user.value) throw new Error('impersonation authority could not be verified')
     await fetchTOTPStatus(true)
   }
 
   async function stopImpersonation() {
     await api.post('/auth/impersonation/end', {})
-    await refreshMe()
+    resetEpochBaseline()
+    suppressGenerationRefresh = true
+    resetPermissionsEpoch()
+    suppressGenerationRefresh = false
+    clearPrincipalProjection()
+    authorityExpected = true
+    await queueAuthorityHydration({
+      generation: permissionsEpochGeneration.value,
+      epoch: permissionsEpoch.value,
+    }, true)
+    if (!user.value) throw new Error('impersonation authority could not be verified')
     await fetchTOTPStatus(true)
   }
 
@@ -297,26 +527,51 @@ export const useAuthStore = defineStore('auth', () => {
   // We compare against `lastSyncedEpoch` rather than the previous
   // ref value because the very first observation just sets the
   // baseline — there's no "previous" hydration to invalidate yet.
-  let lastSyncedEpoch: number | null = null
   watch(permissionsEpoch, (n) => {
-    if (n < 0) return // sentinel: not yet observed
-    if (!user.value) return // not logged in here — login flow will hydrate
-    if (lastSyncedEpoch === null) {
-      // First sighting after login / page load — record and don't refetch.
-      lastSyncedEpoch = n
-      return
-    }
-    if (n !== lastSyncedEpoch) {
-      lastSyncedEpoch = n
-      void refreshMe()
-    }
-  })
+    if (n == null) return // sentinel: not yet observed
+    if (!authorityExpected && !user.value) return
+    if (
+      lastSyncedEpochGeneration === permissionsEpochGeneration.value
+      && lastSyncedEpoch === n
+    ) return
+    // A strict same-principal bump may revoke the old role, status, or project
+    // map. Remove every principal-bound gate before awaiting /auth/me.
+    authorityExpected = true
+    clearPrincipalProjection()
+    void queueAuthorityHydration({ generation: permissionsEpochGeneration.value, epoch: n })
+  }, { flush: 'sync' })
 
-  // Reset the epoch baseline on auth transitions so a fresh login
-  // doesn't immediately retrigger refreshMe based on a stale sentinel.
+  watch(permissionsEpochGeneration, (generation) => {
+    if (generation === observedPermissionsEpochGeneration) return
+    observedPermissionsEpochGeneration = generation
+    // A restored sibling tab may have a valid new shared cookie even when this
+    // tab was already scrubbed to user=null. Explicit logout/impersonation own
+    // their reset with suppression; every other live-session generation must
+    // prove the current principal through /auth/me.
+    const shouldRehydrate = !suppressGenerationRefresh
+    invalidateAuthorityHydration()
+    lastSyncedEpoch = null
+    lastSyncedEpochGeneration = null
+    clearPrincipalProjection()
+    if (!shouldRehydrate) return
+    void Promise.resolve().then(() => {
+      if (
+        generation !== permissionsEpochGeneration.value
+        || sessionExpired.value
+        || suppressGenerationRefresh
+      ) return
+      void queueAuthorityHydration({ generation, epoch: permissionsEpoch.value })
+    })
+  }, { flush: 'sync' })
+
+  // Reset the response-bound baseline and detach all older auth work.
   function resetEpochBaseline() {
     lastSyncedEpoch = null
+    lastSyncedEpochGeneration = null
+    invalidateAuthorityHydration()
   }
+
+  onScopeDispose(() => invalidateAuthorityHydration())
 
   return {
     user,

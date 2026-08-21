@@ -10,6 +10,17 @@ export function safePostLoginRedirect(raw: unknown): string | null {
   ) {
     return null
   }
+  // Agent Mode query values include principal-authorized project, lane and
+  // delivery identities. A session-expiry redirect can be completed by a
+  // different user while the old View is unmounted, so no live watcher can
+  // scrub that URL. Return to the bare surface and let the new principal's
+  // first response establish its own selection/filter vocabulary.
+  try {
+    const parsed = new URL(value, 'http://paimos.invalid')
+    if (parsed.pathname === '/agent-mode') return '/agent-mode'
+  } catch {
+    return null
+  }
   return value
 }
 

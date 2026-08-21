@@ -123,8 +123,10 @@ export type VoiceEffect =
   /** Call the existing Agent Mode action for this command. */
   | { type: 'execute'; command: VoiceCommand }
   | { type: 'clarify'; candidates: readonly VoiceCandidate[]; matchCount: number; truncated: boolean }
-  | { type: 'note_preview'; binding: VoiceNoteBinding }
-  | { type: 'submit_note'; binding: VoiceNoteBinding }
+  /** Queue payloads stay opaque so a blocked effect chain cannot retain raw
+   * note text after the reducer state is scrubbed. */
+  | { type: 'note_preview'; clientRequestId: string }
+  | { type: 'submit_note'; clientRequestId: string }
   | { type: 'note_discarded'; reason: VoiceNoteDiscardReason }
   /** A machine-readable code — never prose, never transcript text. */
   | { type: 'notice'; code: VoiceNoticeCode }
@@ -161,6 +163,10 @@ export type VoiceEvent =
     selectionEpoch: string
   }
   | { type: 'partial'; utteranceId: string; text: string }
+  /** The authorized resolver vocabulary changed while selection/note
+   * authority may still be valid. Interim text and numbered candidates are
+   * context-relative, so discard only those ephemeral resolver fields. */
+  | { type: 'resolver_context_changed' }
   | { type: 'final'; utteranceId: string; text: string; sequence?: number }
   /** Typed fallback — identical path, same de-duplication. */
   | { type: 'typed'; utteranceId: string; text: string }
@@ -324,8 +330,14 @@ function draftNote(
   // A second dictation replaces the first: the operator only ever confirms
   // the preview they can currently see.
   if (state.note && state.note.status !== 'submitting') effects.push({ type: 'note_discarded', reason: 'replaced' })
-  effects.push({ type: 'note_preview', binding })
-  return { state: { ...clearedCandidates(state), note: { binding, status: 'preview' } }, effects }
+  effects.push({ type: 'note_preview', clientRequestId: binding.clientRequestId })
+  return {
+    state: {
+      ...clearedCandidates(state),
+      note: { binding, status: state.online ? 'preview' : 'held_offline' },
+    },
+    effects,
+  }
 }
 
 function confirmNote(state: VoiceMachineState): VoiceReducerResult {
@@ -354,7 +366,7 @@ function confirmNote(state: VoiceMachineState): VoiceReducerResult {
   }
   return {
     state: { ...state, note: { ...note, status: 'submitting' } },
-    effects: [{ type: 'submit_note', binding: note.binding }],
+    effects: [{ type: 'submit_note', clientRequestId: note.binding.clientRequestId }],
   }
 }
 
@@ -464,6 +476,10 @@ function handleContext(
       projectCatalog,
       selectedId,
       selectionEpoch,
+      // Interim text is target-relative. A selection/authority epoch change
+      // must never let a partial note or command begun under A appear under B.
+      draft: epochChanged ? '' : state.draft,
+      draftUtteranceId: epochChanged ? null : state.draftUtteranceId,
       candidates,
       candidateMatchCount: candidates.length === 0 ? 0 : state.candidateMatchCount,
       candidateTruncated: candidates.length === 0 ? false : state.candidateTruncated,
@@ -540,6 +556,16 @@ export function voiceReducer(state: VoiceMachineState, event: VoiceEvent): Voice
       if (state.executed.includes(event.utteranceId)) return { state, effects: [] }
       return { state: { ...state, draft: event.text, draftUtteranceId: event.utteranceId }, effects: [] }
     }
+
+    case 'resolver_context_changed':
+      return {
+        state: {
+          ...clearedCandidates(state),
+          draft: '',
+          draftUtteranceId: null,
+        },
+        effects: [],
+      }
 
     case 'final':
       return handleFinal(state, event.utteranceId, event.text, event.sequence)

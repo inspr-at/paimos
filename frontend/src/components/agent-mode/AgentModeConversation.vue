@@ -56,10 +56,13 @@ const visibleLines = computed(() => (props.compact ? props.lines.slice(-3) : pro
         <span class="am-conv-text">{{ line.text }}</span>
       </li>
     </ol>
+    <div class="am-conv-controls">
+      <slot name="controls" />
+    </div>
     <div class="am-conv-dock">
       <span class="am-conv-compact-live" :class="{ 'is-live': live }">
         <i aria-hidden="true"></i>
-        <strong>{{ t('agentMode.narration.listening') }}</strong>
+        <strong>{{ t('agentMode.narration.feed') }}</strong>
         <small>{{ liveLabel }}</small>
       </span>
       <span class="am-conv-key-help">
@@ -127,6 +130,8 @@ const visibleLines = computed(() => (props.compact ? props.lines.slice(-3) : pro
   border-radius: 12px;
   background: var(--am-surface);
 }
+.am-conv-controls:empty { display: none; }
+.am-conv-controls { margin-bottom: 10px; }
 .am-conv-dock strong { font-size: 11px; font-weight: 600; }
 .am-conv-dock small { font-size: 10px; color: var(--am-muted); line-height: 1.4; }
 .am-conv-key-help,
@@ -145,6 +150,7 @@ const visibleLines = computed(() => (props.compact ? props.lines.slice(-3) : pro
   background: transparent;
 }
 .am-conv--compact .am-conv-lines { flex: 0 0 auto; padding: 0 0 8px; overflow: visible; }
+.am-conv--compact .am-conv-controls { margin-bottom: 8px; }
 .am-conv--compact .am-conv-line { max-width: 100%; box-shadow: 0 8px 28px color-mix(in srgb, var(--am-ink) 14%, transparent); }
 .am-conv--compact .am-conv-dock { box-shadow: 0 8px 28px color-mix(in srgb, var(--am-ink) 12%, transparent); }
 /* Touch-size screens: keyboard guidance is irrelevant; keep only the

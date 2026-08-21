@@ -11,7 +11,14 @@
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import type { InjectionKey } from 'vue'
 
-import { isSessionExpiredError, sessionExpired } from '@/api/client'
+import {
+  comparePermissionsEpoch,
+  permissionsEpoch,
+  permissionsEpochGeneration,
+  isSessionExpiredError,
+  isStalePermissionsEpochError,
+  sessionExpired,
+} from '@/api/client'
 import {
   classifyLoadError,
   fetchAgentModeSnapshot,
@@ -99,6 +106,11 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
   const lastLoadedAt = ref<number | null>(null)
   const lastHintAt = ref<number | null>(null)
   const streamConnected = ref(false)
+  /** Monotonic proof that a current, generation-fenced canonical snapshot was
+   * committed. Consumers must not infer authority from a deliveries change. */
+  const authorityVersion = ref(0)
+  /** Response-local epoch of the last committed canonical snapshot. */
+  const authorityEpoch = ref<string | null>(null)
 
   const deliveries = computed<Delivery[]>(() => snapshot.value?.deliveries ?? [])
   const selectableDeliveries = computed<Delivery[]>(() => {
@@ -133,6 +145,13 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
   let activePromise: Promise<void> | null = null
   let activeRequestIdentity: string | null = null
   let queuedRefresh = false
+  let queuedAuthorityReload = false
+  // Logical owner, not a count of physical promises. A superseded loader may
+  // ignore AbortSignal forever; it must never block an epoch replacement once
+  // the current owner settles.
+  let currentLoadSequence: number | null = null
+  let requiredPermissionsEpoch = permissionsEpoch.value
+  let requiredPermissionsEpochGeneration = permissionsEpochGeneration.value
   let activeBinding: string | null = null
   let eventStream: AgentModeEventStream | null = null
   let eventStreamGeneration = 0
@@ -312,6 +331,7 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
     if (!alive || !isEnabled()) return
     if (options.resyncToken == null && activeResyncToken !== null) invalidateResync()
     const mySequence = ++requestSequence
+    currentLoadSequence = mySequence
     const observedSignal = signalSequence
     if (activeBinding !== null && activeBinding !== binding) {
       invalidateResync()
@@ -328,9 +348,39 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
     if (options.background && hasData.value) refreshing.value = true
     else status.value = 'loading'
     try {
-      const next = await loader(requestedQuery, { signal: controller?.signal })
+      let responsePermissionsEpoch: string | null = null
+      let responsePermissionsEpochGeneration: number | null = null
+      let responseMetaObserved = false
+      const next = await loader(requestedQuery, {
+        signal: controller?.signal,
+        onResponseMeta(meta) {
+          responseMetaObserved = true
+          responsePermissionsEpoch = meta.permissionsEpoch
+          responsePermissionsEpochGeneration = meta.permissionsEpochGeneration
+        },
+      })
       if (mySequence !== requestSequence || !alive) return
+      if (
+        responseMetaObserved
+        && (
+          responsePermissionsEpochGeneration !== requiredPermissionsEpochGeneration
+          || (requiredPermissionsEpoch != null && (
+            responsePermissionsEpoch == null
+            || comparePermissionsEpoch(responsePermissionsEpoch, requiredPermissionsEpoch) < 0
+          ))
+        )
+      ) {
+        // The payload belongs to an older principal/ACL epoch. Never commit it
+        // or advance authorityVersion; the finalizer starts one replacement.
+        queuedAuthorityReload = true
+        return
+      }
+      queuedAuthorityReload = false
       snapshot.value = next
+      authorityEpoch.value = responseMetaObserved
+        ? responsePermissionsEpoch
+        : requiredPermissionsEpoch
+      authorityVersion.value += 1
       error.value = null
       attempt.value = 0
       clearRetry()
@@ -342,6 +392,10 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
       if (signalSequence > observedSignal) scheduleRefresh(REFRESH_DEBOUNCE_MS)
     } catch (cause) {
       if (mySequence !== requestSequence || !alive) return
+      if (isStalePermissionsEpochError(cause)) {
+        queuedAuthorityReload = true
+        return
+      }
       clearRefresh()
       // A failed authoritative request establishes the only next owner
       // (retry backoff or a terminal state). Signals queued behind the failed
@@ -391,6 +445,7 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
         status.value = classified.kind
       }
     } finally {
+      if (currentLoadSequence === mySequence) currentLoadSequence = null
       if (mySequence === requestSequence) refreshing.value = false
     }
   }
@@ -431,6 +486,11 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
       if (activePromise !== promise) return
       activePromise = null
       activeRequestIdentity = null
+      if (queuedAuthorityReload) {
+        queuedAuthorityReload = false
+        void load({ background: hasData.value, force: true })
+        return
+      }
       if (queuedRefresh) {
         queuedRefresh = false
         scheduleRefresh(REFRESH_DEBOUNCE_MS)
@@ -452,6 +512,7 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
     clearRetry()
     clearRefresh()
     queuedRefresh = false
+    queuedAuthorityReload = false
     controller?.abort()
     closeStream()
   }
@@ -459,6 +520,82 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
   if (opts.reloadOnQueryChange !== false) {
     watch(query, () => void load(), { deep: true })
   }
+  watch(permissionsEpochGeneration, (generation) => {
+    if (!alive || generation === requiredPermissionsEpochGeneration) return
+    requiredPermissionsEpochGeneration = generation
+    requiredPermissionsEpoch = null
+    requestSequence += 1
+    invalidateResync()
+    controller?.abort()
+    clearRetry()
+    clearRefresh()
+    queuedRefresh = false
+    queuedAuthorityReload = false
+    closeStream()
+    snapshot.value = null
+    authorityEpoch.value = null
+    error.value = null
+    refreshing.value = false
+    status.value = 'idle'
+    // Let every flush-sync owner clear principal-bound query state before the
+    // replacement captures `query.value`. In Agent Mode this prevents an old
+    // user's selected delivery/filter vocabulary from entering the new
+    // principal's first request.
+    const replacementSequence = requestSequence
+    void Promise.resolve().then(() => {
+      if (
+        !alive
+        || !isEnabled()
+        || replacementSequence !== requestSequence
+        || generation !== requiredPermissionsEpochGeneration
+      ) return
+      void load({ background: false, force: true })
+    })
+  }, { flush: 'sync' })
+  watch(permissionsEpoch, (epoch) => {
+    if (!alive || epoch == null) return
+    if (
+      requiredPermissionsEpoch != null
+      && comparePermissionsEpoch(epoch, requiredPermissionsEpoch) <= 0
+    ) return
+    const previousRequired = requiredPermissionsEpoch
+    requiredPermissionsEpoch = epoch
+    // Null → baseline is the first authority observation. A strict increase
+    // can represent revocation, so retained facts disappear synchronously;
+    // the active response remains only a candidate until its local meta is
+    // checked against this required epoch.
+    if (previousRequired != null) {
+      // Do not wait behind a response body that has already delivered stale
+      // headers and may ignore AbortSignal forever. Supersede the logical
+      // owner immediately, scrub synchronously, then start exactly one latest-
+      // epoch replacement in a microtask (which also avoids re-entrant async
+      // loader setup overwriting the new activePromise).
+      requestSequence += 1
+      controller?.abort()
+      queuedAuthorityReload = false
+      invalidateResync()
+      clearRetry()
+      clearRefresh()
+      queuedRefresh = false
+      closeStream()
+      snapshot.value = null
+      authorityEpoch.value = null
+      error.value = null
+      refreshing.value = false
+      status.value = 'loading'
+      const replacementSequence = requestSequence
+      void Promise.resolve().then(() => {
+        if (
+          !alive
+          || !isEnabled()
+          || replacementSequence !== requestSequence
+        ) return
+        void load({ background: false, force: true })
+      })
+      return
+    }
+    if (currentLoadSequence === null && isEnabled()) void load({ background: hasData.value, force: true })
+  }, { flush: 'sync' })
   if (opts.enabled) {
     watch(opts.enabled, (enabled) => {
       if (!enabled) {
@@ -514,6 +651,8 @@ export function useAgentModeDeliveries(opts: UseAgentModeDeliveriesOptions = {})
     hasData,
     degraded,
     streamConnected,
+    authorityVersion,
+    authorityEpoch,
     load,
     retryNow,
     dispose,

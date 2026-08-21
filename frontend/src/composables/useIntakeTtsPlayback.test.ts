@@ -32,12 +32,14 @@ function fixture() {
   });
   const revoked: string[] = [];
   const audios: FakeAudio[] = [];
+  const activeChanges: boolean[] = [];
   let nextURL = 0;
   const playback = createIntakeTtsPlayback({
     micActive,
     stopMic,
     canResumeMic: () => true,
     resumeMic,
+    onActiveChange: (active) => activeChanges.push(active),
     createObjectURL: () => `blob:voice-${++nextURL}`,
     revokeObjectURL: (url) => revoked.push(url),
     createAudio: (url) => {
@@ -46,7 +48,7 @@ function fixture() {
       return audio;
     },
   });
-  return { audios, micActive, playback, resumeMic, revoked, stopMic };
+  return { activeChanges, audios, micActive, playback, resumeMic, revoked, stopMic };
 }
 
 describe("createIntakeTtsPlayback", () => {
@@ -54,11 +56,13 @@ describe("createIntakeTtsPlayback", () => {
     const f = fixture();
 
     await expect(f.playback.play(async () => new Blob(["first"]))).resolves.toBe(true);
+    expect(f.activeChanges).toEqual([true]);
     expect(f.stopMic).toHaveBeenCalledOnce();
     expect(f.resumeMic).not.toHaveBeenCalled();
 
     const staleEnd = f.audios[0].onended;
     await expect(f.playback.play(async () => new Blob(["second"]))).resolves.toBe(true);
+    expect(f.activeChanges).toEqual([true]);
     expect(f.audios[0].pause).toHaveBeenCalledOnce();
     expect(f.revoked).toEqual(["blob:voice-1"]);
     expect(f.resumeMic).not.toHaveBeenCalled();
@@ -67,6 +71,7 @@ describe("createIntakeTtsPlayback", () => {
     expect(f.resumeMic).not.toHaveBeenCalled();
 
     f.audios[1].onended?.(new Event("ended"));
+    expect(f.activeChanges).toEqual([true, false]);
     expect(f.revoked).toEqual(["blob:voice-1", "blob:voice-2"]);
     expect(f.resumeMic).toHaveBeenCalledOnce();
   });
@@ -80,6 +85,7 @@ describe("createIntakeTtsPlayback", () => {
     onerror?.(new Event("error"));
 
     expect(f.revoked).toEqual(["blob:voice-1"]);
+    expect(f.activeChanges).toEqual([true, false]);
     expect(f.resumeMic).toHaveBeenCalledOnce();
   });
 
@@ -90,6 +96,7 @@ describe("createIntakeTtsPlayback", () => {
     f.playback.cancel(false);
 
     expect(f.revoked).toEqual(["blob:voice-1"]);
+    expect(f.activeChanges).toEqual([true, false]);
     expect(f.resumeMic).not.toHaveBeenCalled();
   });
 
@@ -108,5 +115,24 @@ describe("createIntakeTtsPlayback", () => {
     await expect(first).resolves.toBe(false);
     expect(f.audios).toHaveLength(1);
     expect(f.audios[0].src).toBe("blob:voice-1");
+    expect(f.activeChanges).toEqual([true]);
+  });
+
+  it("is active through a pending paid load and settles once when cancelled", async () => {
+    const f = fixture();
+    let resolveBlob!: (blob: Blob) => void;
+    const blob = new Promise<Blob>((resolve) => { resolveBlob = resolve; });
+
+    const pending = f.playback.play(() => blob);
+    expect(f.activeChanges).toEqual([true]);
+    expect(f.audios).toEqual([]);
+
+    f.playback.cancel(false);
+    f.playback.cancel(false);
+    resolveBlob(new Blob(["late"]));
+    await expect(pending).resolves.toBe(false);
+    expect(f.activeChanges).toEqual([true, false]);
+    expect(f.audios).toEqual([]);
+    expect(f.resumeMic).not.toHaveBeenCalled();
   });
 });

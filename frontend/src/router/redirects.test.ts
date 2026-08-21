@@ -32,4 +32,11 @@ describe('post-login redirects', () => {
     )
     expect(postLoginRedirectOrFallback('/login', '/portal')).toBe('/portal')
   })
+
+  it('drops principal-bound Agent Mode state from a post-login return path', () => {
+    expect(postLoginRedirectOrFallback(
+      '/agent-mode?delivery=SECRET_A&project=6&lane=project%3A6%2Fepic%3A1&q=PRIVATE&state=active&attention=required&health=blocked&detail=1',
+    )).toBe('/agent-mode')
+    expect(postLoginRedirectOrFallback('/agent-mode?unknown=PRIVATE_CANARY#old')).toBe('/agent-mode')
+  })
 })

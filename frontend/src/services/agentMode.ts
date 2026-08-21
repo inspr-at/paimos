@@ -28,7 +28,13 @@
 // for tests and the DEV-only reference route live in
 // `agentModeFixtures.ts` and are never imported by production code paths.
 
-import { api, ApiError, isSessionExpiredError } from '@/api/client'
+import {
+  api,
+  ApiError,
+  isSessionExpiredError,
+  isStalePermissionsEpochError,
+  parsePermissionsEpochHeader,
+} from '@/api/client'
 import {
   buildSnapshotPath,
   normalizeWireSnapshot,
@@ -272,16 +278,33 @@ export function classifyLoadError(e: unknown): AgentModeLoadError {
 
 export type AgentModeSnapshotLoader = (
   query: AgentModeSnapshotQuery,
-  opts?: { signal?: AbortSignal },
+  opts?: {
+    signal?: AbortSignal
+    /** Response-local authority proof. Production always supplies it before
+     * the snapshot can be committed; deterministic fixture loaders may omit. */
+    onResponseMeta?: (meta: { permissionsEpoch: string; permissionsEpochGeneration: number }) => void
+  },
 ) => Promise<AgentModeSnapshot>
 
 /** Production loader: one ACL-filtered request, normalized at the edge. */
 export const fetchAgentModeSnapshot: AgentModeSnapshotLoader = async (query, opts) => {
   try {
-    const wire = await api.get<unknown>(buildSnapshotPath(query), { signal: opts?.signal })
-    return normalizeWireSnapshot(wire, Date.now())
+    const response = await api.getWithMeta<unknown>(buildSnapshotPath(query), { signal: opts?.signal })
+    if (
+      response.permissionsEpoch == null
+      || parsePermissionsEpochHeader(response.permissionsEpoch) !== response.permissionsEpoch
+      || !Number.isSafeInteger(response.permissionsEpochGeneration)
+      || response.permissionsEpochGeneration < 0
+    ) {
+      throw new ApiError(response.status, 'Agent Mode snapshot is missing its authority epoch')
+    }
+    opts?.onResponseMeta?.({
+      permissionsEpoch: response.permissionsEpoch,
+      permissionsEpochGeneration: response.permissionsEpochGeneration,
+    })
+    return normalizeWireSnapshot(response.data, Date.now())
   } catch (e) {
-    if (isSessionExpiredError(e)) throw e
+    if (isSessionExpiredError(e) || isStalePermissionsEpochError(e)) throw e
     throw classifyLoadError(e)
   }
 }

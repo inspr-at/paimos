@@ -16,13 +16,28 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp, h, nextTick } from 'vue'
+import { computed, createApp, h, nextTick, ref, type Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { RouterView, createMemoryHistory, createRouter, type Router } from 'vue-router'
 
 import i18n from '@/i18n'
+import {
+  api,
+  permissionsEpoch,
+  permissionsEpochGeneration,
+  resetPermissionsEpoch,
+  sessionExpired,
+} from '@/api/client'
 import { COMPACT_CONVERSATION_QUERY } from '@/components/agent-mode/agentModePresentation'
-import { TOMBSTONE_TTL_MS } from '@/composables/agent-mode/agentModeOrdering'
+import {
+  TOMBSTONE_TTL_MS,
+  buildProjectGroups,
+  flattenOrder,
+} from '@/composables/agent-mode/agentModeOrdering'
+import {
+  AGENT_MODE_VOICE_DEPENDENCIES_KEY,
+  type AgentModeVoiceDependencies,
+} from '@/composables/agent-mode/useAgentModeVoice'
 import { useConfirm } from '@/composables/useConfirm'
 import { AgentModeLoadError, type AgentModeSnapshot, type AgentModeSnapshotLoader } from '@/services/agentMode'
 import { AGGREGATE_FLAG_KEYS, AGGREGATE_LANDING_KEYS, AGGREGATE_STAGE_KEYS } from '@/services/agentModeAggregateSchema'
@@ -39,12 +54,22 @@ import {
   type AgentModeSnapshotQuery,
   type WireSnapshot,
 } from '@/services/agentModeTransport'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore, type User } from '@/stores/auth'
 import { lsAgentModeSelectedKey } from '@/constants/storage'
 import AgentModeView from './AgentModeView.vue'
 
 function snapshot(wire: WireSnapshot): AgentModeSnapshot {
   return normalizeWireSnapshot(wire, Date.now())
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done
+    reject = fail
+  })
+  return { promise, reject, resolve }
 }
 
 function testCursor(seed: string): string {
@@ -189,6 +214,7 @@ interface Harness {
   unmount: () => void
   loader: ReturnType<typeof vi.fn>
   sources: FakeEventSource[]
+  voiceDependencies: AgentModeVoiceDependencies
 }
 
 class FakeEventSource implements AgentModeEventSourceLike {
@@ -208,13 +234,94 @@ class FakeEventSource implements AgentModeEventSourceLike {
 
 let activeViewSources: FakeEventSource[] = []
 
-async function mountView(loaderImpl: AgentModeSnapshotLoader, path = '/agent-mode'): Promise<Harness> {
+function makeVoiceDependencies(): AgentModeVoiceDependencies {
+  const state = ref<'idle' | 'starting' | 'listening' | 'transcribing' | 'error'>('idle')
+  const level = ref(0)
+  const errorMessage = ref<string | null>(null)
+  const permission = ref<'granted' | 'denied' | 'prompt' | 'unknown'>('granted')
+  return {
+    mic: {
+      state,
+      level,
+      errorMessage,
+      isActive: computed(() => state.value !== 'idle' && state.value !== 'error'),
+      start: vi.fn(async () => { state.value = 'listening'; return true }),
+      stop: vi.fn(() => { state.value = 'idle' }),
+      micSupported: () => true,
+    },
+    permission: {
+      permission,
+      init: vi.fn(async () => {}),
+      requestAccess: vi.fn(async () => permission.value),
+      recheck: vi.fn(async () => permission.value),
+    },
+    createPlayback: vi.fn((options) => ({
+      cancel: vi.fn(() => false),
+      play: vi.fn(async (load: () => Promise<Blob>) => {
+        options.onActiveChange?.(true)
+        await load()
+        options.onActiveChange?.(false)
+        return true
+      }),
+    })),
+    transcribe: vi.fn(async () => ({
+      utteranceId: 'utt_view0000000000000000000000000000',
+      text: 'next',
+      final: true as const,
+    })),
+    speak: vi.fn(async () => new Blob(['mp3'], { type: 'audio/mpeg' })),
+    postNote: vi.fn(async () => ({ id: 1 } as never)),
+    loadProjectCatalog: vi.fn(async () => [
+      { projectId: 6, projectKey: 'PAI', projectName: 'PAIMOS Core platform' },
+      { projectId: 99, projectKey: 'OPS', projectName: 'Operations archive' },
+    ]),
+    sessionNonce: 'viewtest',
+  }
+}
+
+interface MountViewOptions {
+  devReference?: boolean | Readonly<Ref<boolean>>
+  voiceDependencies?: AgentModeVoiceDependencies
+  authUser?: User | Readonly<Ref<User>>
+}
+
+async function mountView(
+  loaderImpl: AgentModeSnapshotLoader,
+  path = '/agent-mode',
+  options: MountViewOptions = {},
+): Promise<Harness> {
   document.body.innerHTML = '<div id="app-header-left"></div><div id="app-header-right"></div><div id="root"></div>'
   const pinia = createPinia()
   setActivePinia(pinia)
-  useAuthStore().hydrateAccess({ all_projects: true, levels: {} })
+  const auth = useAuthStore()
+  const defaultUser = {
+    id: 1,
+    username: 'agent-mode-test-admin',
+    role: 'admin',
+    status: 'active',
+    is_super_admin: false,
+  } as User
+  const currentTestUser = () => options.authUser && typeof options.authUser === 'object' && 'value' in options.authUser
+    ? options.authUser.value
+    : options.authUser ?? defaultUser
+  const originalGetWithMeta = api.getWithMeta.bind(api)
+  const authMetaSpy = vi.spyOn(api, 'getWithMeta').mockImplementation(async (requestedPath, requestOptions) => {
+    if (requestedPath !== '/auth/me') return await originalGetWithMeta(requestedPath, requestOptions)
+    const epoch = permissionsEpoch.value ?? '0'
+    if (permissionsEpoch.value == null) permissionsEpoch.value = epoch
+    return {
+      data: { user: currentTestUser(), access: { all_projects: true, levels: {} } },
+      etag: null,
+      lastModified: null,
+      permissionsEpoch: epoch,
+      permissionsEpochGeneration: permissionsEpochGeneration.value,
+      status: 200,
+    } as never
+  })
+  await auth.completeLogin({ user: currentTestUser(), access: { all_projects: true, levels: {} } })
   const loader = vi.fn(loaderImpl)
   const sources: FakeEventSource[] = []
+  const voiceDependencies = options.voiceDependencies ?? makeVoiceDependencies()
   const eventSourceFactory = vi.fn(() => {
     const source = new FakeEventSource()
     sources.push(source)
@@ -227,6 +334,9 @@ async function mountView(loaderImpl: AgentModeSnapshotLoader, path = '/agent-mod
       { path: '/agent-mode', component: { render: () => h(AgentModeView, {
         loader: loader as unknown as AgentModeSnapshotLoader,
         eventSourceFactory,
+        devReference: typeof options.devReference === 'boolean'
+          ? options.devReference
+          : options.devReference?.value,
       }) } },
     ],
   })
@@ -236,11 +346,23 @@ async function mountView(loaderImpl: AgentModeSnapshotLoader, path = '/agent-mod
   app.use(pinia)
   app.use(router)
   app.use(i18n)
+  app.provide(AGENT_MODE_VOICE_DEPENDENCIES_KEY, voiceDependencies)
   const root = document.getElementById('root')!
   app.mount(root)
   await flush()
   activeViewSources = sources
-  return { router, root, loader, sources, unmount: () => app.unmount() }
+  return {
+    router,
+    root,
+    loader,
+    sources,
+    voiceDependencies,
+    unmount: () => {
+      app.unmount()
+      auth.$dispose()
+      authMetaSpy.mockRestore()
+    },
+  }
 }
 
 /** Publishes a change-stream hint so the view refetches (debounced 750 ms). */
@@ -341,6 +463,19 @@ function hit(root: HTMLElement, id: string): HTMLButtonElement {
   return root.querySelector<HTMLButtonElement>(`[data-card-hit="${id}"]`)!
 }
 
+function typeVoice(root: HTMLElement, text: string): HTMLInputElement {
+  const input = root.querySelector<HTMLInputElement>('#am-voice-command')!
+  input.value = text
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  return input
+}
+
+async function submitVoice(root: HTMLElement, text: string) {
+  const input = typeVoice(root, text)
+  input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+  await flush()
+}
+
 const FUTURE_TICKET_COPY = /PAI-80[678]/
 
 describe('AgentModeView (PAI-805 detail 10)', () => {
@@ -348,6 +483,8 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
 
   beforeEach(() => {
     localStorage.clear()
+    permissionsEpoch.value = null
+    sessionExpired.value = false
   })
 
   afterEach(() => {
@@ -391,7 +528,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   })
 
   it('restores the remembered selection and the deep-linked one', async () => {
-    localStorage.setItem(lsAgentModeSelectedKey(undefined), 'dlv-817')
+    localStorage.setItem(lsAgentModeSelectedKey(1), 'dlv-817')
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
     expect(selectedId(harness.root)).toBe('dlv-817')
     expect(harness.root.querySelector('.am-conv')!.textContent).toContain('Restored your last selection')
@@ -405,7 +542,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   it('recovers stale deep-link and remembered selections with one unselected retry', async () => {
     for (const source of ['deep-link', 'remembered'] as const) {
       const stale = `stale-${source}`
-      if (source === 'remembered') localStorage.setItem(lsAgentModeSelectedKey(undefined), stale)
+      if (source === 'remembered') localStorage.setItem(lsAgentModeSelectedKey(1), stale)
       harness = await mountView(async (query) => {
         if (query.selectedDelivery === stale) {
           throw new AgentModeLoadError('not-found', 'selection revoked', 404)
@@ -418,7 +555,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
       expect(harness.root.querySelectorAll('.am-card')).toHaveLength(10)
       expect(selectedCards(harness.root)).toHaveLength(1)
       expect(harness.router.currentRoute.value.query.delivery).not.toBe(stale)
-      expect(localStorage.getItem(lsAgentModeSelectedKey(undefined))).not.toBe(stale)
+      expect(localStorage.getItem(lsAgentModeSelectedKey(1))).not.toBe(stale)
 
       harness.unmount()
       harness = null
@@ -877,6 +1014,489 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')?.value).toBe('Unsaved selection-bound edit')
   })
 
+  it('routes typed voice through exact selection, canonical query, and zoom-only details', async () => {
+    harness = await mountView(async (query) => filteredFixtureSnapshot(query))
+    const { root, router, loader } = harness
+    const initial = selectedId(root)!
+    const visualOrder = cardOrder(root).filter((id) => id.startsWith('dlv-'))
+    const expectedNext = visualOrder[visualOrder.indexOf(initial) + 1]
+
+    await submitVoice(root, 'next')
+    expect(selectedId(root)).toBe(expectedNext)
+    expect(router.currentRoute.value.query.delivery).toBe(expectedNext)
+
+    await submitVoice(root, 'project Operations archive')
+    expect(router.currentRoute.value.query.project).toBe('99')
+    expect(loader.mock.calls[loader.mock.calls.length - 1]?.[0]).toMatchObject({ projectId: 99 })
+
+    await submitVoice(root, 'my password PRIVATE_CANARY; search for reconnect')
+    expect(router.currentRoute.value.query.q).toBe('reconnect')
+    expect(router.currentRoute.value.fullPath).not.toContain('PRIVATE_CANARY')
+    expect(router.currentRoute.value.fullPath).not.toContain('password')
+    expect(root.querySelector<HTMLInputElement>('#am-voice-command')?.value).toBe('')
+    expect(root.querySelector('.am-conv-lines')?.textContent).not.toContain('PRIVATE_CANARY')
+    expect(root.querySelector('.am-voice-status')?.textContent).not.toContain('PRIVATE_CANARY')
+
+    await submitVoice(root, 'show details')
+    expect(router.currentRoute.value.query.detail).toBe('1')
+    expect(root.querySelector('.side-panel')).toBeNull()
+  })
+
+  it('wires compact mic, reply, confirm, and cancel controls through the production View seam', async () => {
+    stubMatchMedia((query) => query === COMPACT_CONVERSATION_QUERY)
+    const voiceDependencies = makeVoiceDependencies()
+    harness = await mountView(
+      async () => snapshot(makeFixtureSnapshot(10)),
+      '/agent-mode',
+      { voiceDependencies },
+    )
+    const { root } = harness
+    const mic = root.querySelector<HTMLButtonElement>('.am-voice-mic')!
+    const replies = root.querySelector<HTMLButtonElement>('.am-voice-replies')!
+
+    mic.click()
+    replies.click()
+    await flush()
+    expect(voiceDependencies.permission!.init).toHaveBeenCalledOnce()
+    expect(voiceDependencies.mic!.start).toHaveBeenCalledOnce()
+    expect(replies.getAttribute('aria-pressed')).toBe('true')
+
+    await submitVoice(root, 'note that FIRST_MOUNTED_NOTE')
+    let noteButtons = root.querySelectorAll<HTMLButtonElement>('.am-voice-note-actions button')
+    expect(noteButtons).toHaveLength(2)
+    noteButtons[0].click()
+    await flush()
+    expect(voiceDependencies.postNote).toHaveBeenCalledOnce()
+    expect(voiceDependencies.postNote).toHaveBeenCalledWith(
+      expect.objectContaining({ body: 'FIRST_MOUNTED_NOTE' }),
+      expect.any(AbortSignal),
+    )
+
+    await submitVoice(root, 'note that SECOND_MOUNTED_NOTE')
+    noteButtons = root.querySelectorAll<HTMLButtonElement>('.am-voice-note-actions button')
+    expect(noteButtons).toHaveLength(2)
+    noteButtons[1].click()
+    await flush()
+    expect(root.textContent).not.toContain('SECOND_MOUNTED_NOTE')
+    expect(voiceDependencies.postNote).toHaveBeenCalledOnce()
+  })
+
+  it('hides voice for fixtures and before authority, then initializes only after a proven snapshot', async () => {
+    const devDependencies = makeVoiceDependencies()
+    harness = await mountView(
+      async () => snapshot(makeFixtureSnapshot(10)),
+      '/agent-mode',
+      { devReference: true, voiceDependencies: devDependencies },
+    )
+    expect(harness.root.querySelector('.am-voice')).toBeNull()
+    expect(devDependencies.loadProjectCatalog).not.toHaveBeenCalled()
+    harness.unmount()
+    harness = null
+    document.body.innerHTML = ''
+
+    const gate = deferred<AgentModeSnapshot>()
+    const dependencies = makeVoiceDependencies()
+    harness = await mountView(() => gate.promise, '/agent-mode', { voiceDependencies: dependencies })
+    expect(harness.root.querySelector('.am-voice')).toBeNull()
+    expect(dependencies.loadProjectCatalog).not.toHaveBeenCalled()
+    gate.resolve(snapshot(makeFixtureSnapshot(10)))
+    await flush()
+    expect(harness.root.querySelector('.am-voice')).not.toBeNull()
+    expect(dependencies.loadProjectCatalog).toHaveBeenCalledOnce()
+  })
+
+  it('keeps retained-offline typed selection local, blocks paid/filter paths, and holds a new note', async () => {
+    vi.useFakeTimers()
+    let offline = false
+    harness = await mountView(async (query) => {
+      if (offline) throw new AgentModeLoadError('offline', 'down', 0)
+      return filteredFixtureSnapshot(query)
+    })
+    const { root, loader } = harness
+    offline = true
+    await refetchViaHint()
+    const callsAfterOffline = loader.mock.calls.length
+    const before = selectedId(root)
+
+    const mic = root.querySelector<HTMLButtonElement>('.am-voice-mic')!
+    const replies = root.querySelector<HTMLButtonElement>('.am-voice-replies')!
+    expect(mic.disabled).toBe(true)
+    expect(replies.disabled).toBe(true)
+    expect(mic.textContent).toContain('offline')
+
+    await submitVoice(root, 'next')
+    const moved = selectedId(root)
+    expect(moved).not.toBe(before)
+    expect(loader).toHaveBeenCalledTimes(callsAfterOffline)
+
+    await submitVoice(root, 'show details')
+    expect(harness.router.currentRoute.value.query.detail).toBe('1')
+    expect(root.querySelector('.side-panel')).toBeNull()
+    expect(loader).toHaveBeenCalledTimes(callsAfterOffline)
+
+    await submitVoice(root, 'search for PRIVATE_OFFLINE_CANARY')
+    expect(harness.router.currentRoute.value.query.q).toBeUndefined()
+    expect(root.querySelector('.am-voice-status')?.textContent).toContain('Selection unchanged')
+
+    const body = 'PRIVATE_OFFLINE_NOTE_CANARY'
+    await submitVoice(root, `note that ${body}`)
+    const note = root.querySelector<HTMLElement>('.am-voice-note')!
+    const noteButtons = note.querySelectorAll<HTMLButtonElement>('.am-voice-note-actions button')
+    expect(note.textContent).toContain(body)
+    expect(note.textContent).toContain('Held offline')
+    expect(noteButtons[0].disabled).toBe(true)
+    expect(noteButtons[1].disabled).toBe(false)
+    expect(root.querySelector('.am-voice-status')?.textContent).not.toContain(body)
+    expect(root.querySelector('.am-conv-lines')?.textContent).not.toContain(body)
+
+    offline = false
+    await vi.advanceTimersByTimeAsync(2_100)
+    await flush()
+    expect(loader.mock.calls[loader.mock.calls.length - 1]?.[0]).toMatchObject({ selectedDelivery: moved })
+    expect(selectedId(root)).toBe(moved)
+  })
+
+  it('scrubs and disables local voice input synchronously during an authority fence', async () => {
+    permissionsEpoch.value = '10'
+    const authorityGate = deferred<AgentModeSnapshot>()
+    const revokedWire = makeFixtureSnapshot(10)
+    revokedWire.rows!.find((row) => row.delivery_id === 'dlv-815')!.title = 'SECRET_AUTH_CARD_CANARY'
+    const currentWire = makeFixtureSnapshot(10)
+    currentWire.rows!.find((row) => row.delivery_id === 'dlv-815')!.title = 'CURRENT_AUTH_CARD'
+    let loads = 0
+    harness = await mountView(async () => {
+      loads += 1
+      if (loads === 1) return snapshot(revokedWire)
+      return authorityGate.promise
+    })
+    const { root } = harness
+    expect(root.textContent).toContain('SECRET_AUTH_CARD_CANARY')
+    const input = typeVoice(root, 'note that PRIVATE_FENCE_CANARY')
+    expect(input.value).toContain('PRIVATE_FENCE_CANARY')
+
+    permissionsEpoch.value = '11'
+    await flush()
+    expect(input.value).toBe('')
+    expect(input.disabled).toBe(true)
+    expect(root.querySelector<HTMLButtonElement>('.am-voice-mic')?.disabled).toBe(true)
+    expect(root.querySelector<HTMLButtonElement>('.am-voice-replies')?.disabled).toBe(true)
+    expect(root.querySelector('.am-voice-mic')?.textContent).toContain('revalidating')
+    expect(root.textContent).not.toContain('PRIVATE_FENCE_CANARY')
+    expect(root.textContent).not.toContain('SECRET_AUTH_CARD_CANARY')
+    expect(root.querySelectorAll('.am-card, .am-focus-card, .am-selected-above')).toHaveLength(0)
+    expect(root.querySelector('.am-conv')?.textContent).not.toContain('SECRET_AUTH_CARD_CANARY')
+    expect(root.querySelector('[aria-live="polite"]')?.textContent).not.toContain('SECRET_AUTH_CARD_CANARY')
+
+    authorityGate.resolve(snapshot(currentWire))
+    await flush()
+    expect(input.disabled).toBe(false)
+    expect(root.textContent).toContain('CURRENT_AUTH_CARD')
+    expect(root.textContent).not.toContain('SECRET_AUTH_CARD_CANARY')
+  })
+
+  it('scrubs principal-bound route and selection state before a new identity generation loads', async () => {
+    permissionsEpoch.value = '10'
+    const alice = ref<User>({
+      id: 1,
+      username: 'alice',
+      role: 'admin',
+      status: 'active',
+      is_super_admin: false,
+    } as User)
+    const bob = {
+      id: 2,
+      username: 'bob',
+      role: 'member',
+      status: 'active',
+      is_super_admin: false,
+    } as User
+    const bobSnapshot = deferred<AgentModeSnapshot>()
+    let calls = 0
+    harness = await mountView(
+      async () => {
+        calls += 1
+        if (calls === 1) return snapshot(makeFixtureSnapshot(10))
+        return bobSnapshot.promise
+      },
+      '/agent-mode?detail=1&delivery=dlv-815&project=6&lane=project%3A6%2Fungrouped&q=SECRET_QUERY&state=active&attention=required&health=blocked',
+      { authUser: alice },
+    )
+    const { root, router, loader } = harness
+    expect(selectedId(root)).toBe('dlv-815')
+    expect(localStorage.getItem(lsAgentModeSelectedKey(1))).toBe('dlv-815')
+    localStorage.setItem(lsAgentModeSelectedKey(2), 'dlv-820')
+
+    alice.value = bob
+    resetPermissionsEpoch()
+    expect(loader).toHaveBeenCalledOnce()
+    expect(root.textContent).not.toContain('SECRET_QUERY')
+    await flush()
+
+    const replacementQuery = loader.mock.calls.slice(1).map(([query]) => query)
+      .find((query) => query.selectedDelivery == null)
+    expect(replacementQuery).toMatchObject({
+      projectId: null,
+      laneKey: null,
+      states: [],
+      attention: 'all',
+      health: 'all',
+      q: '',
+      selectedDelivery: null,
+    })
+    expect(loader).toHaveBeenCalledTimes(2)
+    for (const key of ['delivery', 'project', 'lane', 'q', 'state', 'attention', 'health']) {
+      expect(router.currentRoute.value.query[key]).toBeUndefined()
+    }
+    expect(router.currentRoute.value.query.detail).toBe('1')
+    expect(localStorage.getItem(lsAgentModeSelectedKey(1))).toBe('dlv-815')
+
+    bobSnapshot.resolve(snapshot(makeFixtureSnapshot(10)))
+    await flush()
+    expect(selectedId(root)).toBe('dlv-820')
+    expect(router.currentRoute.value.query.delivery).toBe('dlv-820')
+    expect(localStorage.getItem(lsAgentModeSelectedKey(2))).toBe('dlv-820')
+  })
+
+  it('finishes a clean-route identity reset and keeps invalid unknown routes fail-closed', async () => {
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(0)))
+    const cleanLoader = harness.loader
+    expect(harness.router.currentRoute.value.query).toEqual({})
+    const cleanReplace = vi.spyOn(harness.router, 'replace')
+    resetPermissionsEpoch()
+    await flush()
+    expect(cleanLoader).toHaveBeenCalledTimes(2)
+    expect(cleanReplace).not.toHaveBeenCalled()
+    expect(harness.root.querySelector<HTMLInputElement>('#am-voice-command')?.disabled).toBe(false)
+    await submitVoice(harness.root, 'search for reconnect')
+    expect(harness.router.currentRoute.value.query.q).toBe('reconnect')
+    harness.unmount()
+    harness = null
+    document.body.innerHTML = ''
+
+    harness = await mountView(
+      async () => snapshot(makeFixtureSnapshot(10)),
+      '/agent-mode?unknown=PRIVATE_INVALID_BOUNDARY',
+    )
+    expect(harness.loader).not.toHaveBeenCalled()
+    resetPermissionsEpoch()
+    await flush()
+    expect(harness.loader).not.toHaveBeenCalled()
+    expect(harness.router.currentRoute.value.fullPath).toBe('/')
+    expect(harness.router.currentRoute.value.fullPath).not.toContain('PRIVATE_INVALID_BOUNDARY')
+    expect(harness.root.textContent).not.toContain('PRIVATE_INVALID_BOUNDARY')
+    harness.unmount()
+    harness = null
+    document.body.innerHTML = ''
+
+    harness = await mountView(
+      async () => snapshot(makeFixtureSnapshot(10)),
+      '/agent-mode?state',
+    )
+    expect(harness.loader).not.toHaveBeenCalled()
+    resetPermissionsEpoch()
+    await flush()
+    expect(harness.loader).not.toHaveBeenCalled()
+    expect(harness.router.currentRoute.value.fullPath).toBe('/')
+    harness.unmount()
+    harness = null
+    document.body.innerHTML = ''
+
+    harness = await mountView(
+      async () => snapshot(makeFixtureSnapshot(10)),
+      '/agent-mode?project=06&project=7&lane=not-a-canonical-lane',
+    )
+    expect(harness.loader).not.toHaveBeenCalled()
+    resetPermissionsEpoch()
+    await flush()
+    expect(harness.loader).not.toHaveBeenCalled()
+    expect(harness.router.currentRoute.value.fullPath).toBe('/')
+  })
+
+  it('drops dirty-editor voice actions when rejected or fenced, then accepts a fresh guarded action', async () => {
+    permissionsEpoch.value = '20'
+    stubIssueFetch()
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?detail=1&delivery=dlv-812')
+    const { root } = harness
+    root.querySelector<HTMLButtonElement>('.am-focus-open-ticket')!.click()
+    await flush()
+    root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    const title = root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!
+    title.value = 'Unsaved voice guard edit'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    const original = selectedId(root)
+
+    await submitVoice(root, 'next')
+    expect(useConfirm().visible.value).toBe(true)
+    useConfirm().resolve(false)
+    await flush()
+    expect(selectedId(root)).toBe(original)
+
+    await submitVoice(root, 'next')
+    expect(useConfirm().visible.value).toBe(true)
+    permissionsEpoch.value = '21'
+    await flush()
+    useConfirm().resolve(true)
+    await flush()
+    expect(selectedId(root)).toBe(original)
+
+    await submitVoice(root, 'next')
+    await flush()
+    // The epoch hard-clear closes the old editor with its revoked snapshot;
+    // after the proven replacement, the fresh command no longer inherits the
+    // old dirty prompt and can move normally.
+    expect(useConfirm().visible.value).toBe(false)
+    expect(selectedId(root)).not.toBe(original)
+  })
+
+  it('drops a dirty voice action across an operational-only disable and re-enable with equal context fields', async () => {
+    vi.useFakeTimers()
+    const devReference = ref(false)
+    stubIssueFetch()
+    harness = await mountView(
+      async () => snapshot(makeFixtureSnapshot(10)),
+      '/agent-mode?detail=1&delivery=dlv-818',
+      { devReference },
+    )
+    const { root } = harness
+    root.querySelector<HTMLButtonElement>('.am-focus-open-ticket')!.click()
+    await flush()
+    root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    const title = root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!
+    title.value = 'Unsaved equal-field authority guard'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    const original = selectedId(root)
+
+    await submitVoice(root, 'next')
+    expect(useConfirm().visible.value).toBe(true)
+    devReference.value = true
+    await flush()
+    expect(root.querySelector('.am-voice')).toBeNull()
+    devReference.value = false
+    await flush()
+    const revalidatingInput = root.querySelector<HTMLInputElement>('#am-voice-command')!
+    expect(revalidatingInput.disabled).toBe(true)
+
+    useConfirm().resolve(true)
+    await flush()
+    expect(selectedId(root)).toBe(original)
+
+    await refetchViaHint()
+    expect(revalidatingInput.disabled).toBe(false)
+    await submitVoice(root, 'next')
+    expect(useConfirm().visible.value).toBe(true)
+    useConfirm().resolve(true)
+    await flush()
+    expect(selectedId(root)).not.toBe(original)
+  })
+
+  it('never recomputes a dirty-editor voice step after the exact travel order changes', async () => {
+    vi.useFakeTimers()
+    let reordered = false
+    const originalWire = makeFixtureSnapshot(10)
+    const reorderedWire = structuredClone(originalWire)
+    stubIssueFetch()
+    harness = await mountView(
+      async () => snapshot(reordered ? reorderedWire : originalWire),
+      '/agent-mode?detail=1&delivery=dlv-818',
+    )
+    const { root } = harness
+    const original = selectedId(root)!
+    const oldOrder = flattenOrder(buildProjectGroups(snapshot(originalWire).deliveries))
+    const oldNext = oldOrder[oldOrder.indexOf(original) + 1]
+    expect(original).toBe('dlv-818')
+    expect(oldNext).toBe('dlv-812')
+    const promoted = reorderedWire.rows!.find((row) => row.delivery_id === 'dlv-812')!
+    promoted.attention = {
+      level: 3,
+      reason: 'blocked',
+      since: '2026-08-20T11:45:00Z',
+    }
+    reorderedWire.cursor = testCursor('voice-dirty-reordered')
+    rebuildFixtureAggregates(reorderedWire)
+
+    root.querySelector<HTMLButtonElement>('.am-focus-open-ticket')!.click()
+    await flush()
+    root.querySelector<HTMLButtonElement>('[title="Quick Edit"]')!.click()
+    await flush()
+    const title = root.querySelector<HTMLInputElement>('.sp-form input[type="text"]')!
+    title.value = 'Unsaved order-bound edit'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    await vi.advanceTimersByTimeAsync(600)
+
+    await submitVoice(root, 'next')
+    expect(useConfirm().visible.value).toBe(true)
+    reordered = true
+    await refetchViaHint()
+    const newOrder = flattenOrder(buildProjectGroups(snapshot(reorderedWire).deliveries))
+    const recomputedNext = newOrder[newOrder.indexOf(original) + 1]
+    expect(recomputedNext).not.toBe(oldNext)
+
+    useConfirm().resolve(true)
+    await flush()
+    expect(selectedId(root)).toBe(original)
+    expect(selectedId(root)).not.toBe(oldNext)
+    expect(selectedId(root)).not.toBe(recomputedNext)
+  })
+
+  it('drops a guarded voice route mutation queued behind navigation when authority changes', async () => {
+    permissionsEpoch.value = '30'
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
+    const { root, router } = harness
+    const navGate = deferred<void>()
+    let guardedNavigationEntered = false
+    const removeGuard = router.beforeEach(async (to) => {
+      if (to.query.q !== 'reconnect') return true
+      guardedNavigationEntered = true
+      await navGate.promise
+      return true
+    })
+    await submitVoice(root, 'my password QUEUED_CANARY; search for reconnect')
+    expect(guardedNavigationEntered).toBe(true)
+    expect(router.currentRoute.value.query.q).toBeUndefined()
+    permissionsEpoch.value = '31'
+    await flush()
+    navGate.resolve()
+    await flush()
+    removeGuard()
+
+    expect(router.currentRoute.value.query.q).toBeUndefined()
+    expect(router.currentRoute.value.fullPath).not.toContain('QUEUED_CANARY')
+    expect(harness.loader.mock.calls.some(([query]) => query.q === 'reconnect')).toBe(false)
+  })
+
+  it('drops an ordinary filter navigation at router commit when authority changes', async () => {
+    permissionsEpoch.value = '40'
+    harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
+    const { root, router, loader } = harness
+    const navGate = deferred<void>()
+    let guardedNavigationEntered = false
+    const removeGuard = router.beforeEach(async (to) => {
+      if (to.query.q !== 'STALE_FILTER_CANARY') return true
+      guardedNavigationEntered = true
+      await navGate.promise
+      return true
+    })
+    const query = root.querySelector<HTMLInputElement>('.am-filter-query input')!
+    query.value = 'STALE_FILTER_CANARY'
+    query.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    expect(guardedNavigationEntered).toBe(true)
+
+    permissionsEpoch.value = '41'
+    await flush()
+    navGate.resolve()
+    await flush()
+    removeGuard()
+
+    expect(router.currentRoute.value.query.q).toBeUndefined()
+    expect(loader.mock.calls.some(([request]) => request.q === 'STALE_FILTER_CANARY')).toBe(false)
+  })
+
   it('loads scoped editor metadata on panel open so assignee quick-edit works in the real view', async () => {
     const fetchMock = stubIssueFetch()
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)), '/agent-mode?detail=1&delivery=dlv-812')
@@ -1033,7 +1653,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   })
 
   it('attention offers but never steals selection; selecting requires an explicit click', async () => {
-    localStorage.setItem(lsAgentModeSelectedKey(undefined), 'dlv-812')
+    localStorage.setItem(lsAgentModeSelectedKey(1), 'dlv-812')
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(10)))
     const { root } = harness
     expect(selectedId(root)).toBe('dlv-812')
@@ -1254,7 +1874,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(selectedCards(harness.root)).toHaveLength(1)
     expect(selectedId(harness.root)).not.toBe('dlv-812')
     expect(harness.router.currentRoute.value.query.delivery).not.toBe('dlv-812')
-    expect(localStorage.getItem(lsAgentModeSelectedKey(undefined))).not.toBe('dlv-812')
+    expect(localStorage.getItem(lsAgentModeSelectedKey(1))).not.toBe('dlv-812')
 
     await vi.advanceTimersByTimeAsync(5_000)
     await flush()
@@ -1708,7 +2328,7 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     // At most three recent lines + listening state survive (no column head).
     expect(conv.querySelectorAll('.am-conv-line')).toHaveLength(3)
     expect(conv.querySelector('.am-conv-dock')).not.toBeNull()
-    expect(conv.querySelector('.am-conv-compact-live')?.textContent).toContain('Listening')
+    expect(conv.querySelector('.am-conv-compact-live')?.textContent).toContain('Delivery feed')
     expect(conv.querySelector('.am-conv-head')).toBeNull()
     // The lane canvas is not starved: all cards still render.
     expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(9)

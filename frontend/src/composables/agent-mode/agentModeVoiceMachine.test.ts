@@ -296,24 +296,27 @@ describe('agentModeVoiceMachine — clarification', () => {
 describe('agentModeVoiceMachine — note binding', () => {
   it('binds delivery, issue, attempt, epoch, body, and a stable request id', () => {
     const result = dictate(primed())
+    const clientRequestId = buildNoteRequestId({
+      utteranceId: 'note-1',
+      deliveryId: selected.id,
+      selectionEpoch: 'epoch-1',
+      body: 'fixture 84 fails',
+    })
     expect(result.last).toEqual([{
       type: 'note_preview',
-      binding: {
-        deliveryId: selected.id,
-        issueId: selected.issueId,
-        issueKey: selected.issueKey,
-        attemptId: selected.attempt.id,
-        selectionEpoch: 'epoch-1',
-        body: 'fixture 84 fails',
-        clientRequestId: buildNoteRequestId({
-          utteranceId: 'note-1',
-          deliveryId: selected.id,
-          selectionEpoch: 'epoch-1',
-          body: 'fixture 84 fails',
-        }),
-        utteranceId: 'note-1',
-      },
+      clientRequestId,
     }])
+    expect(result.state.note?.binding).toEqual({
+      deliveryId: selected.id,
+      issueId: selected.issueId,
+      issueKey: selected.issueKey,
+      attemptId: selected.attempt.id,
+      selectionEpoch: 'epoch-1',
+      body: 'fixture 84 fails',
+      clientRequestId,
+      utteranceId: 'note-1',
+    })
+    expect(JSON.stringify(result.last)).not.toContain('fixture 84 fails')
     expect(result.state.note?.status).toBe('preview')
   })
 
@@ -380,7 +383,10 @@ describe('agentModeVoiceMachine — confirm is exactly once', () => {
   it('submits once and ignores a double confirm while in flight', () => {
     const drafted = dictate(primed())
     const first = voiceReducer(drafted.state, say('confirm', 'u2'))
-    expect(first.effects).toEqual([{ type: 'submit_note', binding: drafted.state.note!.binding }])
+    expect(first.effects).toEqual([{
+      type: 'submit_note', clientRequestId: drafted.state.note!.binding.clientRequestId,
+    }])
+    expect(JSON.stringify(first.effects)).not.toContain(drafted.state.note!.binding.body)
     expect(first.state.note?.status).toBe('submitting')
 
     // A second confirm — different utterance id, so de-duplication cannot
@@ -411,7 +417,9 @@ describe('agentModeVoiceMachine — confirm is exactly once', () => {
     expect(failed.state.note?.status).toBe('failed')
 
     const retry = voiceReducer(failed.state, say('confirm', 'u3'))
-    expect(retry.effects).toEqual([{ type: 'submit_note', binding: failed.state.note!.binding }])
+    expect(retry.effects).toEqual([{
+      type: 'submit_note', clientRequestId: failed.state.note!.binding.clientRequestId,
+    }])
     expect(retry.state.note!.binding.clientRequestId).toBe(requestId)
   })
 
@@ -487,6 +495,48 @@ describe('agentModeVoiceMachine — confirm is exactly once', () => {
 })
 
 describe('agentModeVoiceMachine — selection, authority, and refresh', () => {
+  it('clears only resolver-relative draft and candidates on a semantic context change', () => {
+    const noted = dictate(primed()).state
+    const partial = voiceReducer({
+      ...noted,
+      candidates: [{ index: 1, deliveryId: other.id, issueKey: other.issueKey, title: other.title }],
+      candidateMatchCount: 2,
+      candidateTruncated: true,
+    }, {
+      type: 'partial', utteranceId: 'partial-private', text: 'note that PRIVATE_CANARY',
+    }).state
+
+    const changed = voiceReducer(partial, { type: 'resolver_context_changed' })
+    expect(changed.effects).toEqual([])
+    expect(changed.state.draft).toBe('')
+    expect(changed.state.draftUtteranceId).toBeNull()
+    expect(changed.state.candidates).toEqual([])
+    expect(changed.state.candidateMatchCount).toBe(0)
+    expect(changed.state.candidateTruncated).toBe(false)
+    expect(changed.state.note).toEqual(noted.note)
+    expect(changed.state.executed).toEqual(noted.executed)
+    expect(changed.state.selectionEpoch).toBe(noted.selectionEpoch)
+  })
+
+  it('scrubs partial text on a selection epoch change but preserves it on an ordinary refresh', () => {
+    const partial = voiceReducer(primed(), {
+      type: 'partial', utteranceId: 'partial-private', text: 'note that PRIVATE_CANARY',
+    }).state
+    const same = voiceReducer(partial, {
+      type: 'context', projectCatalog: CATALOG, deliveries: fixtures,
+      selectedId: selected.id, selectionEpoch: 'epoch-1',
+    }).state
+    expect(same.draft).toBe('note that PRIVATE_CANARY')
+    expect(same.draftUtteranceId).toBe('partial-private')
+
+    const changed = voiceReducer(same, {
+      type: 'context', projectCatalog: CATALOG, deliveries: fixtures,
+      selectedId: other.id, selectionEpoch: 'epoch-2',
+    }).state
+    expect(changed.draft).toBe('')
+    expect(changed.draftUtteranceId).toBeNull()
+  })
+
   it('keeps the note through a background refresh of the same generation', () => {
     const drafted = dictate(primed())
     const refreshed = voiceReducer(drafted.state, {
@@ -600,6 +650,19 @@ describe('agentModeVoiceMachine — offline hold and reconnect', () => {
     expect(confirmed.state.note?.status).toBe('held_offline')
   })
 
+  it('creates a newly typed offline note as held and never confirm-ready', () => {
+    const offline = { ...primed(), online: false }
+    const drafted = dictate(offline)
+    expect(drafted.state.note?.status).toBe('held_offline')
+    expect(drafted.last).toEqual([{
+      type: 'note_preview',
+      clientRequestId: drafted.state.note!.binding.clientRequestId,
+    }])
+    const confirmed = voiceReducer(drafted.state, say('confirm', 'offline-confirm'))
+    expect(confirmed.effects).toEqual([{ type: 'notice', code: 'offline_hold' }])
+    expect(JSON.stringify(confirmed.effects)).not.toContain('submit_note')
+  })
+
   it('never auto-submits on reconnect: it reauthorizes and waits for a fresh confirm', () => {
     const held = offlineHeld()
     const back = voiceReducer(held.state, { type: 'connectivity', online: true })
@@ -623,7 +686,9 @@ describe('agentModeVoiceMachine — offline hold and reconnect', () => {
     expect(revalidated.state.note?.status).toBe('preview')
 
     const confirmed = voiceReducer(revalidated.state, say('confirm', 'u3'))
-    expect(confirmed.effects).toEqual([{ type: 'submit_note', binding: revalidated.state.note!.binding }])
+    expect(confirmed.effects).toEqual([{
+      type: 'submit_note', clientRequestId: revalidated.state.note!.binding.clientRequestId,
+    }])
   })
 
   it.each<[string, (rows: readonly Delivery[]) => Delivery[], string]>([

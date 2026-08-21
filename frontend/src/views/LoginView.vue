@@ -134,7 +134,7 @@ async function submit() {
       totpRequired.value = true
     } else {
       // Successful login envelope: { user, access, ...session flags }.
-      auth.completeLogin(result)
+      await auth.completeLogin(result)
       await auth.fetchTOTPStatus()
       finishLogin()
     }
@@ -154,7 +154,7 @@ async function submitOTP() {
       totp_token: totpToken.value,
       code: otpCode.value,
     })
-    auth.completeLogin(result)
+    await auth.completeLogin(result)
     await auth.fetchTOTPStatus()
     finishLogin()
   } catch (e) {

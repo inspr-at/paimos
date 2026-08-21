@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/api/client', () => ({
+  ApiError: class ApiError extends Error {
+    constructor(public status: number, message: string) { super(message) }
+  },
   api: { get: vi.fn(), post: vi.fn(), delete: vi.fn(), patch: vi.fn() },
 }))
 
@@ -38,6 +41,27 @@ describe('issueComments service', () => {
       body: 'visible to customer',
       visibility: 'external',
     })
+  })
+
+  it('adds the exact-once key only when explicitly requested', async () => {
+    vi.mocked(api.post).mockResolvedValue({ id: 3 } as never)
+    const signal = new AbortController().signal
+    await createIssueComment(9, 'private voice note', 'internal', {
+      clientRequestId: 'amv1-0123456789abcdef',
+      signal,
+    })
+    expect(api.post).toHaveBeenCalledWith('/issues/9/comments', {
+      body: 'private voice note',
+      visibility: 'internal',
+      client_request_id: 'amv1-0123456789abcdef',
+    }, { signal })
+  })
+
+  it('rejects an exact-once key on an external comment before transport', () => {
+    expect(() => createIssueComment(9, 'must stay private', 'external', {
+      clientRequestId: 'amv1-0123456789abcdef',
+    })).toThrow('only valid for internal')
+    expect(api.post).not.toHaveBeenCalled()
   })
 
   it('flips visibility via PATCH', async () => {

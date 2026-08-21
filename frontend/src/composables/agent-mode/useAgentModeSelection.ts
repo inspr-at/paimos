@@ -153,6 +153,24 @@ export function useAgentModeSelection(opts: UseAgentModeSelectionOptions) {
     return next
   }
 
+  /** Principal/session authority changed. Drop only the active in-memory
+   * identity; do not erase the former principal's per-user remembered value.
+   * A later current snapshot may independently restore the new principal's
+   * own key. */
+  function clearForAuthorityReset() {
+    const previous = selectedId.value
+    preferredConsumed = false
+    if (previous == null) return
+    selectedId.value = null
+    lastChange.value = {
+      id: null,
+      previous,
+      origin: 'none',
+      source: 'system',
+      at: now(),
+    }
+  }
+
   watch(opts.deliveries, reconcile, { immediate: true })
   if (opts.fallbackId) watch(opts.fallbackId, reconcile)
   if (opts.retainOnEmpty) watch(opts.retainOnEmpty, (retain) => { if (!retain) reconcile() })
@@ -171,6 +189,7 @@ export function useAgentModeSelection(opts: UseAgentModeSelectionOptions) {
     select,
     step,
     selectEdge,
+    clearForAuthorityReset,
     reconcile,
   }
 }

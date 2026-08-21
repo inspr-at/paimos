@@ -29,12 +29,25 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { onBeforeRouteUpdate, useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
+import {
+  isNavigationFailure,
+  onBeforeRouteUpdate,
+  useRoute,
+  useRouter,
+  type LocationQueryRaw,
+} from 'vue-router'
 
+import {
+  comparePermissionsEpoch,
+  permissionsEpoch,
+  permissionsEpochGeneration,
+  sessionExpired,
+} from '@/api/client'
 import AppIcon from '@/components/AppIcon.vue'
 import IssueSidePanel from '@/components/IssueSidePanel.vue'
 import AgentModeAttentionStrip from '@/components/agent-mode/AgentModeAttentionStrip.vue'
 import AgentModeConversation, { type NarrationLine } from '@/components/agent-mode/AgentModeConversation.vue'
+import AgentModeVoiceConsole from '@/components/agent-mode/AgentModeVoiceConsole.vue'
 import AgentModeDetailLever, { type DetailLevel } from '@/components/agent-mode/AgentModeDetailLever.vue'
 import AgentModeFilterBar from '@/components/agent-mode/AgentModeFilterBar.vue'
 import AgentModeLanes from '@/components/agent-mode/AgentModeLanes.vue'
@@ -44,6 +57,7 @@ import AgentModeSelectedFocus from '@/components/agent-mode/AgentModeSelectedFoc
 import AgentModeStateNotice from '@/components/agent-mode/AgentModeStateNotice.vue'
 import { COMPACT_CONVERSATION_QUERY, TIGHT_EDITOR_QUERY, estimateView } from '@/components/agent-mode/agentModePresentation'
 import {
+  EMPTY_FILTERS,
   type AgentModeFilters,
   type HealthFilter,
 } from '@/composables/agent-mode/agentModeFilters'
@@ -63,6 +77,10 @@ import {
 } from '@/composables/agent-mode/agentModeAggregateOrdering'
 import { AGENT_MODE_LOADER_KEY, useAgentModeDeliveries } from '@/composables/agent-mode/useAgentModeDeliveries'
 import { useAgentModeSelection } from '@/composables/agent-mode/useAgentModeSelection'
+import {
+  AGENT_MODE_VOICE_DEPENDENCIES_KEY,
+  useAgentModeVoice,
+} from '@/composables/agent-mode/useAgentModeVoice'
 import { useInteractionHold } from '@/composables/agent-mode/useInteractionHold'
 import { formatRelativeTimeWithLocale, formatTimeWithLocale, useDateFormat } from '@/composables/useDateFormat'
 import { lsAgentModeSelectedKey } from '@/constants/storage'
@@ -71,6 +89,7 @@ import type { AgentModeAggregates } from '@/services/agentModeAggregateSchema'
 import type { AgentModeEventSourceFactory } from '@/services/agentModeEvents'
 import {
   AGENT_MODE_DELIVERY_STATES,
+  buildSnapshotPath,
   parseAgentModeDeliveryKey,
   parseAgentModeLaneFilter,
   parseAgentModeProjectFilter,
@@ -118,9 +137,30 @@ function initialSelectedQuery(): unknown {
 const initialSelectionInput = initialSelectedQuery()
 const selectedQueryId = ref<unknown>(initialSelectionInput)
 const initialPreferredId = parseAgentModeDeliveryKey(initialSelectionInput)
+// A principal generation reset clears the URL asynchronously. Until that
+// navigation commits, this synchronous override ensures the replacement
+// request cannot capture any former principal's route vocabulary.
+const authorityRouteResetPending = ref(false)
 // One canonical URL boundary feeds both transport identity and presentation;
 // downstream code never reparses or repairs project/lane values differently.
-const canonicalRouteBoundary = computed(() => parseFilters())
+const canonicalRouteBoundary = computed(() => authorityRouteResetPending.value
+  ? {
+      filters: { ...EMPTY_FILTERS, states: [] },
+      query: {
+        // Do not issue any replacement until the old principal's known route
+        // keys have actually been removed. The NaN sentinel is rejected by
+        // the one transport validator without touching the network, and also
+        // preserves the established fail-closed behavior for unknown/invalid
+        // URL boundaries that the reset intentionally leaves untouched.
+        projectId: Number.NaN,
+        laneKey: null,
+        states: [] as readonly AgentModeDeliveryState[],
+        attention: 'all' as const,
+        health: 'all' as const,
+        q: '',
+      },
+    }
+  : parseFilters())
 const canonicalRouteFilters = computed<AgentModeFilters>(() => canonicalRouteBoundary.value.filters)
 const snapshotQuery = computed<AgentModeSnapshotQuery>(() => {
   return {
@@ -209,6 +249,9 @@ const DELIVERY_STATES = new Set<string>(AGENT_MODE_DELIVERY_STATES)
 const AGENT_MODE_ROUTE_QUERY_KEYS = new Set([
   'project', 'lane', 'state', 'attention', 'health', 'q', 'delivery', 'detail',
 ])
+const PRINCIPAL_BOUND_AGENT_MODE_QUERY_KEYS = [
+  'delivery', 'project', 'lane', 'q', 'state', 'health', 'attention',
+] as const
 function routeContractViolationToken(): string | null {
   const unknown = Object.keys(route.query).filter((key) => (
     !AGENT_MODE_ROUTE_QUERY_KEYS.has(key) && !(props.devReference && key === 'n')
@@ -290,44 +333,95 @@ watch(routeFilterIdentity, () => {
 // a later patch never clobbers an earlier in-flight one.
 type QueryPatch = Record<string, string | string[] | undefined>
 let queuedPatch: QueryPatch | null = null
+let queuedPatchAuthorityToken: number | null = null
 let navChain: Promise<unknown> = Promise.resolve()
 let internalRouteWriteDepth = 0
-function replaceQuery(patch: QueryPatch): Promise<void> {
+let routeAuthorityToken = 0
+function invalidateInternalRouteWrites() {
+  routeAuthorityToken += 1
+  queuedPatch = null
+  queuedPatchAuthorityToken = null
+}
+async function applyQueryPatch(pending: QueryPatch, stillCurrent?: () => boolean): Promise<boolean> {
+  if (stillCurrent && !stillCurrent()) return false
+  // Preserve every untouched raw query value, including explicit nulls,
+  // mixed arrays, and unknown keys. An unrelated detail/selection write must
+  // never silently repair an invalid boundary into a broader request.
+  const next: LocationQueryRaw = { ...route.query }
+  for (const [k, v] of Object.entries(pending)) {
+    if (v === undefined || v === '') delete next[k]
+    else next[k] = v
+  }
+  if (stillCurrent && !stillCurrent()) return false
+  const intendedPath = router.resolve({ query: next }).fullPath
+  // Re-check guarded writes at Vue Router's final pre-commit boundary. A
+  // dirty-editor/global guard may await while ACL/session authority changes;
+  // checking only before router.replace would let that stale navigation land.
+  // Scope the temporary guard to this exact target so a newer navigation is
+  // never cancelled by an older action's predicate.
+  const removeCommitGuard = stillCurrent
+    ? router.beforeResolve((to) => to.fullPath !== intendedPath || stillCurrent())
+    : null
+  try {
+    internalRouteWriteDepth += 1
+    const failure = await router.replace({ query: next })
+    if (isNavigationFailure(failure)) return false
+    return !stillCurrent || stillCurrent()
+  } catch {
+    /* navigation failures (e.g. during unmount) are not user-facing */
+    return false
+  } finally {
+    internalRouteWriteDepth -= 1
+    removeCommitGuard?.()
+  }
+}
+
+function replaceQuery(patch: QueryPatch, stillCurrent?: () => boolean): Promise<boolean> {
+  const authorityToken = routeAuthorityToken
+  const current = () => authorityToken === routeAuthorityToken && (!stillCurrent || stillCurrent())
+  // A guarded voice mutation keeps its own predicate until the exact point
+  // the serialized router write runs. Coalescing it with an unrelated UI
+  // patch could otherwise let a stale guard suppress or authorize both.
+  if (stillCurrent) {
+    navChain = navChain.then(() => applyQueryPatch(patch, current))
+    return navChain as Promise<boolean>
+  }
   queuedPatch = { ...(queuedPatch ?? {}), ...patch }
+  queuedPatchAuthorityToken = authorityToken
   navChain = navChain.then(async () => {
     const pending = queuedPatch
+    const pendingAuthorityToken = queuedPatchAuthorityToken
     queuedPatch = null
-    if (!pending) return
-    // Preserve every untouched raw query value, including explicit nulls,
-    // mixed arrays, and unknown keys. An unrelated detail/selection write must
-    // never silently repair an invalid boundary into a broader request.
-    const next: LocationQueryRaw = { ...route.query }
-    for (const [k, v] of Object.entries(pending)) {
-      if (v === undefined || v === '') delete next[k]
-      else next[k] = v
-    }
-    try {
-      internalRouteWriteDepth += 1
-      await router.replace({ query: next })
-    } catch {
-      /* navigation failures (e.g. during unmount) are not user-facing */
-    } finally {
-      internalRouteWriteDepth -= 1
-    }
+    queuedPatchAuthorityToken = null
+    if (!pending || pendingAuthorityToken !== routeAuthorityToken) return false
+    return applyQueryPatch(pending, () => pendingAuthorityToken === routeAuthorityToken)
   })
-  return navChain as Promise<void>
+  return navChain as Promise<boolean>
 }
 
-async function setDetail(level: DetailLevel) {
+watch(permissionsEpoch, (epoch, previous) => {
+  if (
+    epoch != null
+    && previous != null
+    && comparePermissionsEpoch(epoch, previous) > 0
+  ) invalidateInternalRouteWrites()
+}, { flush: 'sync' })
+watch(sessionExpired, (expired) => {
+  if (expired) invalidateInternalRouteWrites()
+}, { flush: 'sync' })
+
+async function setDetail(level: DetailLevel, stillCurrent?: () => boolean): Promise<boolean> {
   if (level !== 1 && ticketOpen.value) {
     const allowed = await ticketPanelRef.value?.requestLeave()
-    if (allowed === false) return
+    if (allowed === false) return false
+    if (stillCurrent && !stillCurrent()) return false
     ticketOpen.value = false
   }
-  void replaceQuery({ detail: level === 10 ? undefined : String(level) })
+  if (stillCurrent && !stillCurrent()) return false
+  return replaceQuery({ detail: level === 10 ? undefined : String(level) }, stillCurrent)
 }
 
-async function setFilters(next: Partial<AgentModeFilters>) {
+async function setFilters(next: Partial<AgentModeFilters>, stillCurrent?: () => boolean): Promise<boolean> {
   const patch: QueryPatch = {}
   if (Object.prototype.hasOwnProperty.call(next, 'projectId')) {
     patch.project = next.projectId == null ? undefined : String(next.projectId)
@@ -345,10 +439,11 @@ async function setFilters(next: Partial<AgentModeFilters>) {
   if (Object.prototype.hasOwnProperty.call(next, 'attention')) {
     patch.attention = next.attention === 'required' ? 'required' : undefined
   }
-  await replaceQuery(patch)
+  const applied = await replaceQuery(patch, stillCurrent)
   // A filter change is the user's own action: apply the new layout now,
   // even inside the interaction hold.
-  layoutGroups.value = canonicalGroups.value
+  if (applied) layoutGroups.value = canonicalGroups.value
+  return applied
 }
 
 // ── Layout: lanes from filtered deliveries, frozen while interacting ────
@@ -486,6 +581,7 @@ const serverFallbackId = computed(() => data.snapshot.value?.selectedDeliveryId 
  * the head of the travel order while the filter still excludes it, so arrow
  * travel is reversible: into the results and back to the pinned card. */
 const pinnedAnchorId = ref<string | null>(null)
+let skipAuthorityClearedSelection = false
 /** Visual travel order restricted to LIVE ids; a pinned (filtered-out)
  * selection — or the pinned origin — travels first. */
 const travelOrder = computed<string[]>(() => {
@@ -557,11 +653,16 @@ watch(selection.selectedId, (id, previous) => {
     ticketOpen.value = false
   }
   selectedQueryId.value = id
+  if (skipAuthorityClearedSelection) {
+    skipAuthorityClearedSelection = false
+    if (id == null) return
+  }
   // Server reconciliation/defaulting describes the authoritative response
   // already in hand. Only a user choice not represented by that response
   // starts the selected-only superseding request.
   if (
     selection.lastChange.value?.source === 'user'
+    && !data.degraded.value
     && data.snapshot.value?.selectedDeliveryId !== id
   ) {
     void data.load({ background: data.hasData.value })
@@ -577,6 +678,64 @@ const filtersKey = computed(() => `${filters.value.projectId}|${filters.value.la
 watch(filtersKey, () => {
   pinnedAnchorId.value = selectedExcludedBy.value ? selection.selectedId.value : null
 })
+
+watch(permissionsEpochGeneration, () => {
+  // Identity generations are a stronger boundary than an ACL refresh. Clear
+  // the active route/selection vocabulary synchronously so the former
+  // principal's opaque ids and filters cannot enter the replacement query.
+  invalidateInternalRouteWrites()
+  let validBoundary = true
+  try {
+    buildSnapshotPath(snapshotQuery.value)
+  } catch {
+    validBoundary = false
+  }
+  authorityRouteResetPending.value = true
+  selectedQueryId.value = null
+  preferredId.value = null
+  pendingRouteSelection.value = null
+  pinnedAnchorId.value = null
+  ticketOpen.value = false
+  skipAuthorityClearedSelection = true
+  selection.clearForAuthorityReset()
+
+  const resetToken = routeAuthorityToken
+  if (!validBoundary) {
+    // Never repair an invalid Agent Mode boundary into a broad request for a
+    // different principal. Replace the entire stale surface with a safe app
+    // route while the NaN latch guarantees zero Agent Mode transport.
+    internalRouteWriteDepth += 1
+    void router.replace('/')
+      .catch(() => {})
+      .finally(() => { internalRouteWriteDepth -= 1 })
+    return
+  }
+  const next: LocationQueryRaw = { ...route.query }
+  const hadPrincipalQuery = PRINCIPAL_BOUND_AGENT_MODE_QUERY_KEYS.some((key) => (
+    Object.prototype.hasOwnProperty.call(next, key)
+  ))
+  for (const key of PRINCIPAL_BOUND_AGENT_MODE_QUERY_KEYS) delete next[key]
+  if (!hadPrincipalQuery) {
+    authorityRouteResetPending.value = false
+    // The deliveries owner already queued this generation's single current
+    // replacement. With no route scrub to await, let that owner proceed.
+    return
+  }
+  internalRouteWriteDepth += 1
+  void router.replace({ query: next })
+    .then((failure) => {
+      if (resetToken !== routeAuthorityToken || isNavigationFailure(failure)) return
+      authorityRouteResetPending.value = false
+      void data.load({ background: false, force: true })
+    })
+    .catch(() => {
+      // Keep the empty query override active. A failed navigation must not
+      // re-authorize the old principal's route values.
+    })
+    .finally(() => {
+      internalRouteWriteDepth -= 1
+    })
+}, { flush: 'sync' })
 
 function cssEscape(value: string): string {
   if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(value)
@@ -602,13 +761,13 @@ async function selectAttention(id: string) {
   await focusSelectedCard()
 }
 
-async function drill(id: string) {
+async function drill(id: string): Promise<boolean> {
   hold.markInteraction()
   if (selection.selectedId.value !== id) {
-    if (!await mayChangeSelection()) return
-    selection.select(id)
+    if (!await mayChangeSelection()) return false
+    if (!selection.select(id)) return false
   }
-  await setDetail(1)
+  return setDetail(1)
 }
 
 async function drillAggregate(projectId: number, laneKey: string | null) {
@@ -650,14 +809,115 @@ async function mayChangeSelection(): Promise<boolean> {
   return (await ticketPanelRef.value?.requestLeave()) !== false
 }
 
-async function moveSelection(how: 'next' | 'prev' | 'first' | 'last') {
-  if (!await mayChangeSelection()) return
+async function moveSelection(how: 'next' | 'prev' | 'first' | 'last'): Promise<boolean> {
+  if (!await mayChangeSelection()) return false
   hold.markInteraction()
-  if (how === 'next') selection.step(1)
-  else if (how === 'prev') selection.step(-1)
-  else selection.selectEdge(how)
-  void focusSelectedCard()
+  const before = selection.selectedId.value
+  const next = how === 'next'
+    ? selection.step(1)
+    : how === 'prev'
+      ? selection.step(-1)
+      : selection.selectEdge(how)
+  if (!next || next === before) return false
+  await focusSelectedCard()
+  return true
 }
+
+const voiceEnabled = computed(() => !props.devReference)
+const voiceSurfaceVisible = computed(() => voiceEnabled.value && (
+  data.hasData.value
+  || (data.authorityVersion.value > 0 && data.status.value === 'loading' && !sessionExpired.value)
+))
+const voiceOnline = computed(() => !data.degraded.value)
+const voiceDependencies = inject(AGENT_MODE_VOICE_DEPENDENCIES_KEY, undefined)
+const voiceOneShotWarning = computed(() => selectedDelivery.value?.capabilities.oneShotRunActive === true
+  && selectedDelivery.value.capabilities.liveNote !== true)
+
+interface VoiceActionContext {
+  selectedId: string | null
+  travelOrder: string
+  authorityVersion: number
+  permissionsEpoch: string | null
+  permissionsEpochGeneration: number
+}
+
+function captureVoiceActionContext(): VoiceActionContext {
+  return {
+    selectedId: selection.selectedId.value,
+    travelOrder: travelOrder.value.join('\u0000'),
+    authorityVersion: data.authorityVersion.value,
+    permissionsEpoch: permissionsEpoch.value,
+    permissionsEpochGeneration: permissionsEpochGeneration.value,
+  }
+}
+
+function voiceActionContextIsCurrent(context: VoiceActionContext): boolean {
+  return voiceEnabled.value
+    && voice.operational.value
+    && data.hasData.value
+    && !sessionExpired.value
+    && selection.selectedId.value === context.selectedId
+    && travelOrder.value.join('\u0000') === context.travelOrder
+    && data.authorityVersion.value === context.authorityVersion
+    && permissionsEpoch.value === context.permissionsEpoch
+    && permissionsEpochGeneration.value === context.permissionsEpochGeneration
+}
+
+async function voiceSelectDelivery(id: string): Promise<boolean> {
+  if (selection.selectedId.value === id) return true
+  const actionContext = captureVoiceActionContext()
+  if (!await mayChangeSelection()) return false
+  if (!voiceActionContextIsCurrent(actionContext)) return false
+  hold.markInteraction()
+  if (!selection.select(id)) return false
+  await focusSelectedCard()
+  return true
+}
+
+function voiceSetDetail(level: DetailLevel): Promise<boolean> {
+  const actionContext = captureVoiceActionContext()
+  return setDetail(level, () => voiceActionContextIsCurrent(actionContext))
+}
+
+async function voiceSetFilters(next: Partial<AgentModeFilters>): Promise<boolean> {
+  if (data.degraded.value) return false
+  const actionContext = captureVoiceActionContext()
+  return setFilters(next, () => voiceActionContextIsCurrent(actionContext))
+}
+
+async function voiceShowDetails(id: string): Promise<boolean> {
+  let actionContext = captureVoiceActionContext()
+  if (selection.selectedId.value !== id) {
+    if (!await mayChangeSelection()) return false
+    if (!voiceActionContextIsCurrent(actionContext)) return false
+    if (!selection.select(id)) return false
+    actionContext = captureVoiceActionContext()
+  }
+  return setDetail(1, () => voiceActionContextIsCurrent(actionContext))
+}
+
+const voice = useAgentModeVoice({
+  deliveries: data.selectableDeliveries,
+  travelOrder,
+  selectedId: selection.selectedId,
+  online: voiceOnline,
+  degraded: data.degraded,
+  locale,
+  authorityAvailable: data.hasData,
+  authorityVersion: data.authorityVersion,
+  authorityEpoch: data.authorityEpoch,
+  enabled: voiceEnabled,
+  dependencies: voiceDependencies,
+  actions: {
+    selectDelivery: voiceSelectDelivery,
+    setFilters: voiceSetFilters,
+    clearFilters: () => voiceSetFilters({ ...EMPTY_FILTERS }),
+    setDetail: voiceSetDetail,
+    showDetails: voiceShowDetails,
+    notePosted: () => data.retryNow(),
+    authorityChanged: () => data.load({ background: false, force: true }),
+  },
+})
 
 /** Deterministic entry seam for card activation now and voice intent later.
  * It changes semantic zoom only; opening the mouse editor remains explicit. */
@@ -909,7 +1169,44 @@ const selectedPosition = computed(() => {
 
     <span class="am-sr-only" role="status" aria-live="polite">{{ announcement }}</span>
 
-    <AgentModeConversation :lines="narrationLines" :live="feedLive" :live-label="liveLabel" :compact="compactConversation" />
+    <AgentModeConversation :lines="narrationLines" :live="feedLive" :live-label="liveLabel" :compact="compactConversation">
+      <template #controls>
+        <AgentModeVoiceConsole
+          v-if="voiceSurfaceVisible"
+          :mic-state="voice.micState.value"
+          :mic-level="voice.micLevel.value"
+          :mic-supported="voice.micSupported()"
+          :permission="voice.permission.value"
+          :wants-listening="voice.wantsListening.value"
+          :mic-start-pending="voice.micStartPending.value"
+          :speech-active="voice.speechActive.value"
+          :authorized="voice.operational.value"
+          :audio-available="voice.audioAvailable.value"
+          :voice-replies-enabled="voice.voiceRepliesEnabled.value"
+          :reply-state="voice.replyState.value"
+          :draft="voice.draft.value"
+          :candidates="voice.candidates.value"
+          :candidate-match-count="voice.candidateMatchCount.value"
+          :candidate-truncated="voice.candidateTruncated.value"
+          :note="voice.note.value"
+          :note-target="voice.noteTarget.value"
+          :notice="voice.notice.value"
+          :unsupported-control="voice.unsupportedControl.value"
+          :error="voice.error.value"
+          :busy="voice.commandBusy.value"
+          :note-focus-token="voice.noteFocusToken.value"
+          :input-reset-token="voice.inputResetToken.value"
+          :one-shot-warning="voiceOneShotWarning"
+          :compact="compactConversation"
+          @toggle-mic="voice.toggleListening"
+          @set-replies="voice.setVoiceReplies"
+          @submit="voice.submitTyped"
+          @choose="voice.chooseCandidate"
+          @confirm-note="voice.confirmNote"
+          @cancel-note="voice.cancelNote"
+        />
+      </template>
+    </AgentModeConversation>
 
     <main
       ref="canvasRef"

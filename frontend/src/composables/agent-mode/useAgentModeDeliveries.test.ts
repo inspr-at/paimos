@@ -18,7 +18,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 
-import { ApiError, sessionExpired } from '@/api/client'
+import {
+  ApiError,
+  capturePermissionsEpochGeneration,
+  observePermissionsEpochHeader,
+  resetPermissionsEpoch,
+  sessionExpired,
+} from '@/api/client'
 import { AgentModeLoadError, classifyLoadError, type AgentModeSnapshot } from '@/services/agentMode'
 import { makeFixtureSnapshot } from '@/services/agentModeFixtures'
 import { normalizeWireSnapshot, type AgentModeSnapshotQuery } from '@/services/agentModeTransport'
@@ -27,6 +33,12 @@ import { useAgentModeDeliveries } from './useAgentModeDeliveries'
 
 function snap(n: 1 | 10 | 100 | 0): AgentModeSnapshot {
   return normalizeWireSnapshot(makeFixtureSnapshot(n), Date.now())
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
 }
 
 class FakeEventSource implements AgentModeEventSourceLike {
@@ -54,6 +66,7 @@ async function flush() {
 describe('useAgentModeDeliveries (PAI-805 honest states)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    resetPermissionsEpoch()
     sessionExpired.value = false
   })
   afterEach(() => {
@@ -195,6 +208,319 @@ describe('useAgentModeDeliveries (PAI-805 honest states)', () => {
     ])
     expect(data.snapshot.value?.cursor).toBe('newer-filter-response')
     expect(data.deliveries.value).toHaveLength(10)
+    data.dispose()
+  })
+
+  it('scrubs and closes the stream across a 10 to 11 to 12 burst, then commits only the epoch-12 replacement', async () => {
+    const stale = deferred<AgentModeSnapshot>()
+    const current = deferred<AgentModeSnapshot>()
+    let calls = 0
+    const loader = vi.fn(async (_query, options) => {
+      calls += 1
+      if (calls === 1) {
+        observePermissionsEpochHeader('10')
+        options?.onResponseMeta?.({
+          permissionsEpoch: '10',
+          permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+        })
+        return snap(10)
+      }
+      if (calls === 2) {
+        const value = await stale.promise
+        options?.onResponseMeta?.({
+          permissionsEpoch: '10',
+          permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+        })
+        return value
+      }
+      const value = await current.promise
+      options?.onResponseMeta?.({
+        permissionsEpoch: '12',
+        permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+      })
+      return value
+    })
+    const sources: FakeEventSource[] = []
+    const data = useAgentModeDeliveries({
+      loader,
+      eventSourceFactory: () => {
+        const source = new FakeEventSource()
+        sources.push(source)
+        return source
+      },
+      pollMs: 0,
+    })
+    await data.load()
+    expect(data.authorityVersion.value).toBe(1)
+    expect(data.authorityEpoch.value).toBe('10')
+    expect(sources).toHaveLength(1)
+
+    const oldLoad = data.load({ background: true, force: true })
+    observePermissionsEpochHeader('11')
+    expect(data.snapshot.value).toBeNull()
+    expect(data.deliveries.value).toEqual([])
+    expect(data.authorityEpoch.value).toBeNull()
+    expect(data.status.value).toBe('loading')
+    expect(sources[0]!.close).toHaveBeenCalledOnce()
+
+    // A newer revocation arrives only after the epoch-10 candidate is already
+    // in flight. The queued replacement must target the newest required epoch,
+    // never reopen on the intermediate epoch, and never start two replacements.
+    observePermissionsEpochHeader('12')
+    expect(data.authorityEpoch.value).toBeNull()
+    expect(loader).toHaveBeenCalledTimes(2)
+
+    stale.resolve(snap(10))
+    await oldLoad
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(3)
+    expect(data.authorityVersion.value).toBe(1)
+    expect(data.retryAt.value).toBeNull()
+    expect(data.snapshot.value).toBeNull()
+
+    current.resolve(snap(1))
+    await flush()
+    expect(data.authorityVersion.value).toBe(2)
+    expect(data.authorityEpoch.value).toBe('12')
+    expect(data.deliveries.value).toHaveLength(1)
+    expect(loader).toHaveBeenCalledTimes(3)
+    expect(sources).toHaveLength(2)
+    data.dispose()
+  })
+
+  it('accepts a lower epoch only after reset and never commits an old-generation response that resolves later', async () => {
+    const oldResponse = deferred<AgentModeSnapshot>()
+    let calls = 0
+    let oldGeneration = -1
+    const loader = vi.fn(async (_query, options) => {
+      calls += 1
+      if (calls === 1) {
+        observePermissionsEpochHeader('10')
+        options?.onResponseMeta?.({
+          permissionsEpoch: '10',
+          permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+        })
+        return snap(10)
+      }
+      if (calls === 2) {
+        oldGeneration = capturePermissionsEpochGeneration()
+        const value = await oldResponse.promise
+        options?.onResponseMeta?.({ permissionsEpoch: '10', permissionsEpochGeneration: oldGeneration })
+        return value
+      }
+      observePermissionsEpochHeader('5')
+      options?.onResponseMeta?.({
+        permissionsEpoch: '5',
+        permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+      })
+      return snap(1)
+    })
+    const data = useAgentModeDeliveries({ loader, hints: false, pollMs: 0 })
+    await data.load()
+    expect(data.authorityEpoch.value).toBe('10')
+    expect(data.authorityVersion.value).toBe(1)
+
+    const pendingOldLoad = data.load({ background: true, force: true })
+    expect(loader).toHaveBeenCalledTimes(2)
+
+    resetPermissionsEpoch()
+    expect(data.snapshot.value).toBeNull()
+    expect(data.authorityEpoch.value).toBeNull()
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(3)
+    expect(data.authorityEpoch.value).toBe('5')
+    expect(data.deliveries.value).toHaveLength(1)
+    expect(data.authorityVersion.value).toBe(2)
+
+    oldResponse.resolve(snap(100))
+    await pendingOldLoad
+    await flush()
+    expect(data.authorityEpoch.value).toBe('5')
+    expect(data.deliveries.value).toHaveLength(1)
+    expect(data.authorityVersion.value).toBe(2)
+    expect(loader).toHaveBeenCalledTimes(3)
+    data.dispose()
+  })
+
+  it('supersedes a current response that raises the epoch and commits its one safe replacement', async () => {
+    const raised = deferred<AgentModeSnapshot>()
+    let calls = 0
+    const loader = vi.fn(async (_query, options) => {
+      calls += 1
+      if (calls === 1) {
+        observePermissionsEpochHeader('10')
+        options?.onResponseMeta?.({
+          permissionsEpoch: '10',
+          permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+        })
+        return snap(10)
+      }
+      const value = await raised.promise
+      observePermissionsEpochHeader('11')
+      options?.onResponseMeta?.({
+        permissionsEpoch: '11',
+        permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+      })
+      return value
+    })
+    const sources: FakeEventSource[] = []
+    const data = useAgentModeDeliveries({
+      loader,
+      eventSourceFactory: () => {
+        const source = new FakeEventSource()
+        sources.push(source)
+        return source
+      },
+      pollMs: 0,
+    })
+    await data.load()
+    expect(sources).toHaveLength(1)
+
+    const currentLoad = data.load({ background: true, force: true })
+    raised.resolve(snap(1))
+    await currentLoad
+    await flush()
+
+    expect(sources[0]!.close).toHaveBeenCalledOnce()
+    expect(loader).toHaveBeenCalledTimes(3)
+    expect(data.authorityEpoch.value).toBe('11')
+    expect(data.authorityVersion.value).toBe(2)
+    expect(data.deliveries.value).toHaveLength(1)
+    data.dispose()
+  })
+
+  it('does not let a superseded abort-ignoring request block the next epoch replacement', async () => {
+    const superseded = deferred<AgentModeSnapshot>()
+    const current = deferred<AgentModeSnapshot>()
+    const replacement = deferred<AgentModeSnapshot>()
+    let calls = 0
+    const loader = vi.fn(async (_query, options) => {
+      calls += 1
+      const call = calls
+      if (call === 1) {
+        observePermissionsEpochHeader('10')
+        options?.onResponseMeta?.({
+          permissionsEpoch: '10',
+          permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+        })
+        return snap(10)
+      }
+      const value = await (call === 2
+        ? superseded.promise
+        : call === 3
+          ? current.promise
+          : replacement.promise)
+      options?.onResponseMeta?.({
+        permissionsEpoch: call === 4 ? '11' : '10',
+        permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+      })
+      return value
+    })
+    const data = useAgentModeDeliveries({ loader, hints: false, pollMs: 0 })
+    await data.load()
+
+    const oldLoad = data.load({ background: true, force: true })
+    const currentLoad = data.load({ background: true, force: true })
+    current.resolve(snap(1))
+    await currentLoad
+    await flush()
+    expect(data.authorityVersion.value).toBe(2)
+    expect(loader).toHaveBeenCalledTimes(3)
+
+    observePermissionsEpochHeader('11')
+    expect(data.snapshot.value).toBeNull()
+    expect(data.authorityEpoch.value).toBeNull()
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(4)
+
+    replacement.resolve(snap(1))
+    await flush()
+    expect(data.authorityEpoch.value).toBe('11')
+    expect(data.authorityVersion.value).toBe(3)
+
+    superseded.resolve(snap(100))
+    await oldLoad
+    await flush()
+    expect(data.deliveries.value).toHaveLength(1)
+    expect(data.authorityEpoch.value).toBe('11')
+    expect(data.authorityVersion.value).toBe(3)
+    data.dispose()
+  })
+
+  it('aborts a body-hung current snapshot and starts the higher-epoch replacement before it settles', async () => {
+    const replacement = deferred<AgentModeSnapshot>()
+    const signals: AbortSignal[] = []
+    let calls = 0
+    const loader = vi.fn(async (_query, options) => {
+      calls += 1
+      const call = calls
+      if (options?.signal) signals.push(options.signal)
+      if (call === 1) {
+        observePermissionsEpochHeader('10')
+        options?.onResponseMeta?.({
+          permissionsEpoch: '10',
+          permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+        })
+        return snap(10)
+      }
+      if (call === 2) return await new Promise<AgentModeSnapshot>(() => {})
+      const value = await replacement.promise
+      options?.onResponseMeta?.({
+        permissionsEpoch: '11',
+        permissionsEpochGeneration: capturePermissionsEpochGeneration(),
+      })
+      return value
+    })
+    const data = useAgentModeDeliveries({ loader, hints: false, pollMs: 0 })
+    await data.load()
+    void data.load({ background: true, force: true })
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(2)
+
+    observePermissionsEpochHeader('11')
+    expect(signals[1]!.aborted).toBe(true)
+    expect(data.snapshot.value).toBeNull()
+    expect(data.authorityEpoch.value).toBeNull()
+    await flush()
+    expect(loader).toHaveBeenCalledTimes(3)
+
+    replacement.resolve(snap(1))
+    await flush()
+    expect(data.authorityEpoch.value).toBe('11')
+    expect(data.authorityVersion.value).toBe(2)
+    expect(data.deliveries.value).toHaveLength(1)
+    data.dispose()
+  })
+
+  it('advances authorityVersion only for a current successful snapshot commit', async () => {
+    const pending: Array<{
+      resolve: (value: AgentModeSnapshot) => void
+      reject: (cause: unknown) => void
+    }> = []
+    const loader = vi.fn(() => new Promise<AgentModeSnapshot>((resolve, reject) => {
+      pending.push({ resolve, reject })
+    }))
+    const data = useAgentModeDeliveries({ loader, hints: false, pollMs: 0 })
+    expect(data.authorityVersion.value).toBe(0)
+
+    const staleLoad = data.load({ force: true })
+    const currentLoad = data.load({ force: true })
+    pending[1].resolve(snap(10))
+    await currentLoad
+    expect(data.authorityVersion.value).toBe(1)
+
+    pending[0].resolve(snap(1))
+    await staleLoad
+    expect(data.authorityVersion.value).toBe(1)
+
+    const failedLoad = data.load({ force: true })
+    pending[2].reject(new AgentModeLoadError('error', 'failed', 500))
+    await failedLoad
+    expect(data.authorityVersion.value).toBe(1)
+
+    sessionExpired.value = true
+    expect(data.snapshot.value).toBeNull()
+    expect(data.authorityVersion.value).toBe(1)
     data.dispose()
   })
 

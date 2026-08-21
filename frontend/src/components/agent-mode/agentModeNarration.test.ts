@@ -393,6 +393,7 @@ describe('agentModeNarration — the frozen speech contract', () => {
     const clarify: NarrationSpeechRequest = { ...ok, template: 'clarification', candidateIds: ['dlv-813'] }
     expect(isSafeSpeechRequest(clarify)).toBe(true)
     expect(isSafeSpeechRequest({ ...clarify, candidateIds: [] })).toBe(false)
+    expect(isSafeSpeechRequest({ ...clarify, candidateIds: ['dlv-813', 'dlv-813'] })).toBe(false)
     expect(isSafeSpeechRequest({ ...clarify, candidateIds: ['a', 'b', 'c', 'd'] })).toBe(false)
     expect(isSafeSpeechRequest({ ...clarify, candidateIds: ['dlv 813 — read this aloud'] })).toBe(false)
   })

@@ -17,6 +17,9 @@ interface IntakeTtsPlaybackOptions {
   stopMic: () => void;
   canResumeMic: () => boolean;
   resumeMic: () => void;
+  /** True from before the speech request starts until audio settles or is
+   * cancelled, so permission-gated mic starts can interlock with TTS. */
+  onActiveChange?: (active: boolean) => void;
   createObjectURL?: (blob: Blob) => string;
   revokeObjectURL?: (url: string) => void;
   createAudio?: (url: string) => IntakePlaybackAudio;
@@ -32,6 +35,13 @@ export function createIntakeTtsPlayback(options: IntakeTtsPlaybackOptions) {
   let objectURL: string | null = null;
   let resumeMicAfterPlayback = false;
   let generation = 0;
+  let active = false;
+
+  function setActive(next: boolean) {
+    if (active === next) return;
+    active = next;
+    options.onActiveChange?.(next);
+  }
 
   function releaseAudio() {
     if (audio) {
@@ -53,27 +63,34 @@ export function createIntakeTtsPlayback(options: IntakeTtsPlaybackOptions) {
     const shouldResumeMic = resumeMicAfterPlayback;
     resumeMicAfterPlayback = false;
     releaseAudio();
+    setActive(false);
     if (shouldResumeMic && options.canResumeMic()) options.resumeMic();
   }
 
-  /** Cancel current/pending speech. Returns whether its mic-resume intent was preserved. */
-  function cancel(shouldResumeMic = true): boolean {
+  function cancelCurrent(shouldResumeMic: boolean, replacement: boolean): boolean {
     generation += 1;
     const inheritedResume = resumeMicAfterPlayback;
     resumeMicAfterPlayback = false;
     releaseAudio();
+    if (!replacement) setActive(false);
     if (shouldResumeMic && inheritedResume && options.canResumeMic()) options.resumeMic();
     return inheritedResume;
+  }
+
+  /** Cancel current/pending speech. Returns whether its mic-resume intent was preserved. */
+  function cancel(shouldResumeMic = true): boolean {
+    return cancelCurrent(shouldResumeMic, false);
   }
 
   async function play(loadBlob: () => Promise<Blob>): Promise<boolean> {
     // Replacement inherits the old clip's resume intent but never restarts
     // capture between clips, where the new audio could transcribe itself.
-    const inheritedResume = cancel(false);
+    const inheritedResume = cancelCurrent(false, true);
     const wasMicActive = options.micActive.value;
     if (wasMicActive) options.stopMic();
     resumeMicAfterPlayback = inheritedResume || wasMicActive;
     const myGeneration = generation;
+    setActive(true);
 
     try {
       const blob = await loadBlob();

@@ -216,6 +216,7 @@ export function isSafeSpeechRequest(request: NarrationSpeechRequest): boolean {
   const candidates = request.candidateIds.length
   if (request.template === 'clarification') {
     if (candidates < 1 || candidates > MAX_SPEECH_CANDIDATES) return false
+    if (new Set(request.candidateIds).size !== candidates) return false
   } else if (candidates !== 0) return false
   if (typeof request.deliveryRevision !== 'string' || !SAFE_REVISION.test(request.deliveryRevision)) return false
   const ids = [request.deliveryId, ...request.candidateIds]

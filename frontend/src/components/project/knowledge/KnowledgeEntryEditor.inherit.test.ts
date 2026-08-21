@@ -24,18 +24,36 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
-vi.mock('@/api/client', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+vi.mock('@/api/client', () => {
+  const permissionsEpoch = ref<string | null>(null)
+  const permissionsEpochGeneration = ref(0)
+  const sessionExpired = ref(false)
+  return {
+  api: { get: vi.fn(), getWithMeta: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  ApiError: class ApiError extends Error { status = 0 },
   // The auth store imports these at module load and watches them; use
   // real refs so the watch source is valid (otherwise Vue warns).
-  permissionsEpoch: ref(0),
-  sessionExpired: ref(false),
+  permissionsEpoch,
+  permissionsEpochGeneration,
+  sessionExpired,
   sessionExpiresAt: ref<Date | null>(null),
   sessionReturnPath: ref<string | null>(null),
-  announceSessionRestored: vi.fn(),
+  comparePermissionsEpoch: (left: string, right: string) => left.length === right.length
+    ? (left === right ? 0 : left < right ? -1 : 1)
+    : left.length < right.length ? -1 : 1,
+  resetPermissionsEpoch: () => {
+    permissionsEpoch.value = null
+    permissionsEpochGeneration.value += 1
+  },
+  announceSessionRestored: vi.fn(() => {
+    permissionsEpoch.value = null
+    permissionsEpochGeneration.value += 1
+    sessionExpired.value = false
+  }),
   announceSessionExpired: vi.fn(),
   isSessionExpiredError: () => false,
-}))
+  }
+})
 
 vi.mock('@/services/issueRelations', () => ({
   loadIssueRelations: vi.fn().mockResolvedValue([]),
