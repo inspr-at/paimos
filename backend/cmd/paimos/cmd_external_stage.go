@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/backend/contracts"
 	"github.com/inspr-at/paimos/backend/externalstage"
 	"github.com/spf13/cobra"
 )
@@ -42,6 +43,7 @@ var (
 	externalStageVersionPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`)
 	externalStageDigestPattern    = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	externalStageCommitPattern    = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+	externalStageUUIDPattern      = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 	externalStageSyncDirectory    = syncExternalStageOutputDirectory
 	externalStageNewCopyBuffer    = func() []byte { return make([]byte, externalstage.OneTimeSecretBytes) }
 )
@@ -49,6 +51,10 @@ var (
 type externalStageSecretInput struct {
 	file  string
 	stdin bool
+}
+
+type externalStageMutationOptions struct {
+	idempotencyKey string
 }
 
 type externalStageRegistrationRequest struct {
@@ -128,6 +134,7 @@ X-PAIMOS-Handoff-Secret request header.`,
 
 func externalStageCreateCmd() *cobra.Command {
 	var request externalstage.CreateHandoffRequest
+	var mutation externalStageMutationOptions
 	var dryRun bool
 	c := &cobra.Command{
 		Use:   "create <delivery-key>",
@@ -141,16 +148,19 @@ func externalStageCreateCmd() *cobra.Command {
 			if err := validateExternalStageCreate(request); err != nil {
 				return err
 			}
+			if err := mutation.validate(); err != nil {
+				return err
+			}
 			path := strings.Replace(externalstage.InternalCreatePath, "{deliveryKey}", url.PathEscape(deliveryKey), 1)
 			if dryRun {
-				return emitJSON(map[string]any{"method": http.MethodPost, "path": path, "body": request})
+				return emitJSON(externalStageDryRunPlan(http.MethodPost, path, request, mutation))
 			}
 			client, err := instanceClient()
 			if err != nil {
 				return err
 			}
 			var metadata externalstage.HandoffMetadata
-			if err := externalStageJSONRoundTrip(client, http.MethodPost, path, request, nil, &metadata); err != nil {
+			if err := externalStageJSONRoundTrip(client, http.MethodPost, path, request, nil, mutation.idempotencyKey, &metadata); err != nil {
 				return reportError(err)
 			}
 			return emitExternalStageResult(metadata,
@@ -163,6 +173,7 @@ func externalStageCreateCmd() *cobra.Command {
 	c.Flags().Int64Var(&request.ExpectedAuthorityEpoch, "authority-epoch", 0, "expected current delivery authority epoch")
 	c.Flags().Int64Var(&request.ReporterRegistrationID, "reporter-registration-id", 0, "server-owned reporter registration id")
 	c.Flags().StringVar(&request.ExpiresAt, "expires-at", "", "handoff expiry in RFC3339 form")
+	addExternalStageReusableIdempotencyFlag(c, &mutation)
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the safe request without sending it")
 	return c
 }
@@ -194,7 +205,7 @@ func externalStageRegistrationsListCmd() *cobra.Command {
 			}
 			path := externalStageDeliveryAdminPath(externalStageRegistrationsPath, deliveryKey)
 			var response externalStageRegistrationList
-			if err := externalStageAdminJSONRoundTrip(client, http.MethodGet, path, nil, &response); err != nil {
+			if err := externalStageAdminJSONRoundTrip(client, http.MethodGet, path, nil, "", &response); err != nil {
 				return reportError(err)
 			}
 			return emitExternalStageResult(response,
@@ -205,6 +216,7 @@ func externalStageRegistrationsListCmd() *cobra.Command {
 
 func externalStageRegistrationsCreateCmd() *cobra.Command {
 	var request externalStageRegistrationRequest
+	var mutation externalStageMutationOptions
 	var dryRun bool
 	c := &cobra.Command{
 		Use:   "create <delivery-key>",
@@ -218,16 +230,19 @@ func externalStageRegistrationsCreateCmd() *cobra.Command {
 			if err := validateExternalStageRegistration(request); err != nil {
 				return err
 			}
+			if err := mutation.validate(); err != nil {
+				return err
+			}
 			path := externalStageDeliveryAdminPath(externalStageRegistrationsPath, deliveryKey)
 			if dryRun {
-				return emitJSON(map[string]any{"method": http.MethodPost, "path": path, "body": request})
+				return emitJSON(externalStageDryRunPlan(http.MethodPost, path, request, mutation))
 			}
 			client, err := instanceClient()
 			if err != nil {
 				return err
 			}
 			var response externalStageRegistration
-			if err := externalStageAdminJSONRoundTrip(client, http.MethodPost, path, request, &response); err != nil {
+			if err := externalStageAdminJSONRoundTrip(client, http.MethodPost, path, request, mutation.idempotencyKey, &response); err != nil {
 				return reportError(err)
 			}
 			return emitExternalStageResult(response,
@@ -240,11 +255,13 @@ func externalStageRegistrationsCreateCmd() *cobra.Command {
 	c.Flags().StringVar(&request.DependencyKey, "dependency", "", "Janus dependency key")
 	c.Flags().StringVar(&request.Workflow, "workflow", "", "Pharos workflow symbol")
 	c.Flags().StringVar(&request.Environment, "environment", "", "Pharos environment symbol")
+	addExternalStageReusableIdempotencyFlag(c, &mutation)
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the safe request without sending it")
 	return c
 }
 
 func externalStageRegistrationsRevokeCmd() *cobra.Command {
+	var mutation externalStageMutationOptions
 	var dryRun bool
 	c := &cobra.Command{
 		Use:   "revoke <delivery-key> <registration-id>",
@@ -259,24 +276,28 @@ func externalStageRegistrationsRevokeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := mutation.validate(); err != nil {
+				return err
+			}
 			path := externalStageDeliveryAdminPath(externalStageRegistrationRevokePath, deliveryKey)
 			path = strings.Replace(path, "{registrationID}", strconv.FormatInt(registrationID, 10), 1)
 			request := struct{}{}
 			if dryRun {
-				return emitJSON(map[string]any{"method": http.MethodPost, "path": path, "body": request})
+				return emitJSON(externalStageDryRunPlan(http.MethodPost, path, request, mutation))
 			}
 			client, err := instanceClient()
 			if err != nil {
 				return err
 			}
 			var response externalStageRegistration
-			if err := externalStageAdminJSONRoundTrip(client, http.MethodPost, path, request, &response); err != nil {
+			if err := externalStageAdminJSONRoundTrip(client, http.MethodPost, path, request, mutation.idempotencyKey, &response); err != nil {
 				return reportError(err)
 			}
 			return emitExternalStageResult(response,
 				fmt.Sprintf("revoked external reporter registration %d for %s", response.RegistrationID, deliveryKey))
 		},
 	}
+	addExternalStageReusableIdempotencyFlag(c, &mutation)
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the safe request without sending it")
 	return c
 }
@@ -293,6 +314,7 @@ func externalStagePrerequisitesCmd() *cobra.Command {
 func externalStagePrerequisitesSealCmd() *cobra.Command {
 	var request externalStagePrerequisiteSetRequest
 	var rawPrerequisites []string
+	var mutation externalStageMutationOptions
 	var dryRun bool
 	c := &cobra.Command{
 		Use:   "seal <delivery-key>",
@@ -310,16 +332,19 @@ func externalStagePrerequisitesSealCmd() *cobra.Command {
 			if err := validateExternalStagePrerequisiteSet(request); err != nil {
 				return err
 			}
+			if err := mutation.validate(); err != nil {
+				return err
+			}
 			path := externalStageDeliveryAdminPath(externalStagePrerequisiteSetsPath, deliveryKey)
 			if dryRun {
-				return emitJSON(map[string]any{"method": http.MethodPost, "path": path, "body": request})
+				return emitJSON(externalStageDryRunPlan(http.MethodPost, path, request, mutation))
 			}
 			client, err := instanceClient()
 			if err != nil {
 				return err
 			}
 			var response externalStagePrerequisiteSet
-			if err := externalStageAdminJSONRoundTrip(client, http.MethodPost, path, request, &response); err != nil {
+			if err := externalStageAdminJSONRoundTrip(client, http.MethodPost, path, request, mutation.idempotencyKey, &response); err != nil {
 				return reportError(err)
 			}
 			return emitExternalStageResult(response,
@@ -331,6 +356,7 @@ func externalStagePrerequisitesSealCmd() *cobra.Command {
 	c.Flags().Int64Var(&request.ExpectedPlanRevision, "plan-revision", 0, "expected immutable attempt plan revision")
 	c.Flags().Int64Var(&request.ExpectedAuthorityEpoch, "authority-epoch", 0, "expected current delivery authority epoch")
 	c.Flags().StringArrayVar(&rawPrerequisites, "prerequisite", nil, "dependency=registration-id binding (repeat 1–16 times)")
+	addExternalStageReusableIdempotencyFlag(c, &mutation)
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the safe request without sending it")
 	return c
 }
@@ -411,6 +437,7 @@ the credential must be rotated before use.`,
 
 func externalStageRevokeCmd() *cobra.Command {
 	var expectedEpoch int64
+	var mutation externalStageMutationOptions
 	var dryRun bool
 	c := &cobra.Command{
 		Use:   "revoke <handoff-id>",
@@ -424,23 +451,27 @@ func externalStageRevokeCmd() *cobra.Command {
 			if expectedEpoch < 1 {
 				return &usageError{msg: "--expected-credential-epoch must be a positive integer"}
 			}
+			if err := mutation.validate(); err != nil {
+				return err
+			}
 			path := strings.Replace(externalstage.InternalRevokePath, "{handoffID}", handoffID, 1)
 			request := externalstage.RevokeHandoffRequest{ExpectedCredentialEpoch: expectedEpoch}
 			if dryRun {
-				return emitJSON(map[string]any{"method": http.MethodPost, "path": path, "body": request})
+				return emitJSON(externalStageDryRunPlan(http.MethodPost, path, request, mutation))
 			}
 			client, err := instanceClient()
 			if err != nil {
 				return err
 			}
 			var metadata externalstage.HandoffMetadata
-			if err := externalStageJSONRoundTrip(client, http.MethodPost, path, request, nil, &metadata); err != nil {
+			if err := externalStageJSONRoundTrip(client, http.MethodPost, path, request, nil, mutation.idempotencyKey, &metadata); err != nil {
 				return reportError(err)
 			}
 			return emitExternalStageResult(metadata, fmt.Sprintf("revoked external-stage handoff %s", metadata.HandoffID))
 		},
 	}
 	c.Flags().Int64Var(&expectedEpoch, "expected-credential-epoch", 0, "current credential epoch")
+	addExternalStageReusableIdempotencyFlag(c, &mutation)
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the safe request without sending it")
 	return c
 }
@@ -467,7 +498,10 @@ func externalStagePullCmd() *cobra.Command {
 			}
 			path := strings.Replace(externalstage.ExternalPullPath, "{handoffID}", handoffID, 1)
 			var response externalstage.PullResponse
-			if err := externalStageJSONRoundTrip(client, http.MethodGet, path, nil, rawSecret, &response); err != nil {
+			if err := externalStageJSONRoundTrip(client, http.MethodGet, path, nil, rawSecret, "", &response); err != nil {
+				return reportError(err)
+			}
+			if err := validateExternalStagePullResponse(handoffID, response, rawSecret); err != nil {
 				return reportError(err)
 			}
 			return emitExternalStageResult(response,
@@ -480,6 +514,7 @@ func externalStagePullCmd() *cobra.Command {
 
 func externalStageAcceptCmd() *cobra.Command {
 	var secret externalStageSecretInput
+	var mutation externalStageMutationOptions
 	var observedAt string
 	c := &cobra.Command{
 		Use:   "accept <handoff-id>",
@@ -488,6 +523,9 @@ func externalStageAcceptCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			handoffID, err := validateExternalStageHandoffID(args[0])
 			if err != nil {
+				return err
+			}
+			if err := mutation.validate(); err != nil {
 				return err
 			}
 			observedAt, err = externalStageTimestamp("--observed-at", observedAt)
@@ -506,7 +544,10 @@ func externalStageAcceptCmd() *cobra.Command {
 			path := strings.Replace(externalstage.ExternalAcceptPath, "{handoffID}", handoffID, 1)
 			request := externalstage.AcceptRequest{Sequence: 1, ObservedAt: observedAt}
 			var receipt externalstage.ReportReceipt
-			if err := externalStageJSONRoundTrip(client, http.MethodPost, path, request, rawSecret, &receipt); err != nil {
+			if err := externalStageJSONRoundTrip(client, http.MethodPost, path, request, rawSecret, mutation.idempotencyKey, &receipt); err != nil {
+				return reportError(err)
+			}
+			if err := validateExternalStageReportReceipt(handoffID, request.Sequence, externalstage.HandoffStateAccepted, receipt, rawSecret); err != nil {
 				return reportError(err)
 			}
 			return emitExternalStageResult(receipt,
@@ -514,12 +555,14 @@ func externalStageAcceptCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&observedAt, "observed-at", "", "reporter observation time in RFC3339 form (default now)")
+	addExternalStageReusableIdempotencyFlag(c, &mutation)
 	addExternalStageSecretInputFlags(c, &secret)
 	return c
 }
 
 func externalStageReportCmd() *cobra.Command {
 	var secret externalStageSecretInput
+	var mutation externalStageMutationOptions
 	var reportFile string
 	c := &cobra.Command{
 		Use:   "report <handoff-id>",
@@ -532,6 +575,9 @@ stream cannot carry both the report and the independent credential.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			handoffID, err := validateExternalStageHandoffID(args[0])
 			if err != nil {
+				return err
+			}
+			if err := mutation.validate(); err != nil {
 				return err
 			}
 			if strings.TrimSpace(reportFile) == "" {
@@ -555,7 +601,10 @@ stream cannot carry both the report and the independent credential.`,
 			}
 			path := strings.Replace(externalstage.ExternalReportPath, "{handoffID}", handoffID, 1)
 			var receipt externalstage.ReportReceipt
-			if err := externalStageJSONRoundTrip(client, http.MethodPost, path, request, rawSecret, &receipt); err != nil {
+			if err := externalStageJSONRoundTrip(client, http.MethodPost, path, request, rawSecret, mutation.idempotencyKey, &receipt); err != nil {
+				return reportError(err)
+			}
+			if err := validateExternalStageReportReceipt(handoffID, request.Sequence, request.State, receipt, rawSecret); err != nil {
 				return reportError(err)
 			}
 			return emitExternalStageResult(receipt,
@@ -563,6 +612,7 @@ stream cannot carry both the report and the independent credential.`,
 		},
 	}
 	c.Flags().StringVar(&reportFile, "report-file", "", "strict ExternalStageReportRequest JSON file, or - for stdin")
+	addExternalStageReusableIdempotencyFlag(c, &mutation)
 	addExternalStageSecretInputFlags(c, &secret)
 	return c
 }
@@ -570,6 +620,32 @@ stream cannot carry both the report and the independent credential.`,
 func addExternalStageSecretInputFlags(c *cobra.Command, input *externalStageSecretInput) {
 	c.Flags().StringVar(&input.file, "secret-file", "", "owner-only file containing exactly 32 raw credential bytes")
 	c.Flags().BoolVar(&input.stdin, "secret-stdin", false, "read exactly 32 raw credential bytes from stdin")
+}
+
+func addExternalStageReusableIdempotencyFlag(c *cobra.Command, options *externalStageMutationOptions) {
+	c.Flags().StringVar(&options.idempotencyKey, "idempotency-key", "",
+		"canonical lowercase UUID or uppercase ULID to reuse only for an exact retry (never printed)")
+}
+
+func (options externalStageMutationOptions) validate() error {
+	if options.idempotencyKey == "" {
+		return nil
+	}
+	if !externalStageUUIDPattern.MatchString(options.idempotencyKey) &&
+		!(externalStageHandoffIDPattern.MatchString(options.idempotencyKey) && options.idempotencyKey[0] <= '7') {
+		return &usageError{msg: "--idempotency-key must be a canonical lowercase UUID or uppercase ULID"}
+	}
+	return nil
+}
+
+func externalStageDryRunPlan(method, path string, body any, options externalStageMutationOptions) map[string]any {
+	source := "automatic"
+	if options.idempotencyKey != "" {
+		source = "operator-supplied"
+	}
+	return map[string]any{
+		"method": method, "path": path, "body": body, "idempotency_key_source": source,
+	}
 }
 
 func readExternalStageSecret(input externalStageSecretInput) ([]byte, error) {
@@ -650,7 +726,7 @@ func readExternalStageReport(path string) (externalstage.ReportRequest, error) {
 	return report, nil
 }
 
-func externalStageJSONRoundTrip(client *Client, method, path string, body any, rawSecret []byte, target any) error {
+func externalStageJSONRoundTrip(client *Client, method, path string, body any, rawSecret []byte, idempotencyKey string, target any) error {
 	var requestBody io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -664,12 +740,18 @@ func externalStageJSONRoundTrip(client *Client, method, path string, body any, r
 		return fmt.Errorf("build external-stage request: %w", err)
 	}
 	client.prepareRequest(req, body != nil, externalstage.MediaTypeV1, externalstage.MediaTypeV1)
+	if idempotencyKey != "" {
+		req.Header.Set(idempotencyHeader, idempotencyKey)
+	}
 	if len(rawSecret) > 0 {
 		req.Header.Set(externalstage.HandoffSecretHeader, base64.RawURLEncoding.EncodeToString(rawSecret))
 		defer req.Header.Del(externalstage.HandoffSecretHeader)
 	}
 	resp, err := externalStageHTTPDo(client, req, len(rawSecret) > 0)
 	if err != nil {
+		if idempotencyKey != "" && strings.Contains(err.Error(), idempotencyKey) {
+			return errors.New("external-stage request failed")
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -680,12 +762,18 @@ func externalStageJSONRoundTrip(client *Client, method, path string, body any, r
 		if len(rawSecret) > 0 {
 			return errors.New("external-stage response violated the pinned v1 JSON schema")
 		}
+		if idempotencyKey != "" && strings.Contains(err.Error(), idempotencyKey) {
+			return errors.New("external-stage response violated the pinned v1 JSON schema")
+		}
 		return fmt.Errorf("decode external-stage response: %w", err)
+	}
+	if externalStageResponseContainsIdempotencyKey(target, idempotencyKey) {
+		return errors.New("external-stage response violated the pinned v1 JSON schema")
 	}
 	return nil
 }
 
-func externalStageAdminJSONRoundTrip(client *Client, method, path string, body, target any) error {
+func externalStageAdminJSONRoundTrip(client *Client, method, path string, body any, idempotencyKey string, target any) error {
 	var requestBody io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -699,8 +787,14 @@ func externalStageAdminJSONRoundTrip(client *Client, method, path string, body, 
 		return fmt.Errorf("build external-stage admin request: %w", err)
 	}
 	client.prepareRequest(req, body != nil, externalStageAdminMediaType, externalStageAdminMediaType)
+	if idempotencyKey != "" {
+		req.Header.Set(idempotencyHeader, idempotencyKey)
+	}
 	resp, err := externalStageHTTPDo(client, req, false)
 	if err != nil {
+		if idempotencyKey != "" && strings.Contains(err.Error(), idempotencyKey) {
+			return errors.New("external-stage admin request failed")
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -708,7 +802,13 @@ func externalStageAdminJSONRoundTrip(client *Client, method, path string, body, 
 		return errors.New("external-stage admin response did not use application/json")
 	}
 	if err := decodeExternalStageJSON(io.LimitReader(resp.Body, externalStageMaxJSONBytes+1), target); err != nil {
+		if idempotencyKey != "" && strings.Contains(err.Error(), idempotencyKey) {
+			return errors.New("external-stage admin response violated its JSON schema")
+		}
 		return fmt.Errorf("decode external-stage admin response: %w", err)
+	}
+	if externalStageResponseContainsIdempotencyKey(target, idempotencyKey) {
+		return errors.New("external-stage admin response violated its JSON schema")
 	}
 	return nil
 }
@@ -806,6 +906,120 @@ func decodeExternalStageJSON(reader io.Reader, target any) error {
 		return err
 	}
 	return nil
+}
+
+func validateExternalStagePullResponse(expectedHandoffID string, response externalstage.PullResponse, rawSecret []byte) error {
+	stringsToCheck := []string{
+		response.HandoffID, response.FixtureDigest, response.ExpiresAt, string(response.State),
+		string(response.ReporterClass), string(response.ReporterRole), response.DependencyKey,
+		response.StageKey, response.PlanDigest, response.PredecessorDigest, response.ContextDigest,
+	}
+	for _, kind := range response.EvidenceCeiling {
+		stringsToCheck = append(stringsToCheck, string(kind))
+	}
+	if externalStageResponseReflectsSecret(rawSecret, stringsToCheck...) {
+		return errors.New("external-stage response violated the pinned v1 JSON schema")
+	}
+	if response.HandoffID != expectedHandoffID || response.ContractMajor != externalstage.ContractMajor ||
+		response.FixtureDigest != "sha256:"+contracts.ExternalStageV1FixtureDigestHex || response.CredentialEpoch < 1 ||
+		response.ExecutionNumber < 1 || response.AuthorityEpoch < 1 || !validExternalStageState(response.State) ||
+		!validExternalStageStage(response.StageKey) || !externalStageDigestPattern.MatchString(response.PlanDigest) ||
+		!externalStageDigestPattern.MatchString(response.PredecessorDigest) || !externalStageDigestPattern.MatchString(response.ContextDigest) {
+		return errors.New("external-stage response violated the pinned v1 JSON schema")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, response.ExpiresAt); err != nil {
+		return errors.New("external-stage response violated the pinned v1 JSON schema")
+	}
+	if !validExternalStageReporterProjection(response) {
+		return errors.New("external-stage response violated the pinned v1 JSON schema")
+	}
+	return nil
+}
+
+func validExternalStageReporterProjection(response externalstage.PullResponse) bool {
+	if len(response.EvidenceCeiling) < 1 || len(response.EvidenceCeiling) > 2 {
+		return false
+	}
+	seen := make(map[externalstage.EvidenceKind]bool, len(response.EvidenceCeiling))
+	for _, kind := range response.EvidenceCeiling {
+		if seen[kind] {
+			return false
+		}
+		seen[kind] = true
+		switch response.ReporterClass {
+		case externalstage.ReporterClassPharos:
+			if kind != externalstage.EvidenceKindDeployment && kind != externalstage.EvidenceKindVerification {
+				return false
+			}
+		case externalstage.ReporterClassJanus:
+			if kind != externalstage.EvidenceKindAuthorization && kind != externalstage.EvidenceKindCredentialHandoff {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	switch response.ReporterClass {
+	case externalstage.ReporterClassPharos:
+		return response.ReporterRole == externalstage.ReporterRoleOwner && response.DependencyKey == ""
+	case externalstage.ReporterClassJanus:
+		return response.ReporterRole == externalstage.ReporterRoleDependency &&
+			externalStageSymbolPattern.MatchString(response.DependencyKey)
+	default:
+		return false
+	}
+}
+
+func validateExternalStageReportReceipt(expectedHandoffID string, expectedSequence int64,
+	expectedState externalstage.HandoffState, receipt externalstage.ReportReceipt, rawSecret []byte,
+) error {
+	if externalStageResponseReflectsSecret(rawSecret, receipt.HandoffID, string(receipt.State), receipt.ServerReceivedAt) ||
+		receipt.HandoffID != expectedHandoffID || receipt.Sequence != expectedSequence || receipt.Sequence < 1 ||
+		receipt.State != expectedState || !validExternalStageState(receipt.State) || receipt.CredentialEpoch < 1 {
+		return errors.New("external-stage response violated the pinned v1 JSON schema")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, receipt.ServerReceivedAt); err != nil {
+		return errors.New("external-stage response violated the pinned v1 JSON schema")
+	}
+	return nil
+}
+
+func externalStageResponseReflectsSecret(rawSecret []byte, values ...string) bool {
+	if len(rawSecret) == 0 {
+		return false
+	}
+	candidates := []string{
+		string(rawSecret),
+		base64.RawURLEncoding.EncodeToString(rawSecret),
+		base64.URLEncoding.EncodeToString(rawSecret),
+	}
+	for _, value := range values {
+		for _, candidate := range candidates {
+			if candidate != "" && strings.Contains(value, candidate) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func externalStageResponseContainsIdempotencyKey(value any, idempotencyKey string) bool {
+	if idempotencyKey == "" {
+		return false
+	}
+	raw, err := json.Marshal(value)
+	return err == nil && bytes.Contains(raw, []byte(idempotencyKey))
+}
+
+func validExternalStageState(state externalstage.HandoffState) bool {
+	switch state {
+	case externalstage.HandoffStateIssued, externalstage.HandoffStateAccepted, externalstage.HandoffStateActive,
+		externalstage.HandoffStateWaiting, externalstage.HandoffStateBlocked,
+		externalstage.HandoffStateSucceeded, externalstage.HandoffStateFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func validateExternalStageDeliveryKey(raw string) (string, error) {

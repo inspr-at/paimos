@@ -19,10 +19,14 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/inspr-at/paimos/backend/contracts"
 	"github.com/inspr-at/paimos/backend/externalstage"
+	"github.com/spf13/cobra"
 )
 
 const externalStageTestHandoffID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+const externalStageTestIdempotencyKey = "9f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f"
 
 var externalStageTestSecret = []byte("0123456789abcdefghijklmnopqrstuv")
 
@@ -48,6 +52,213 @@ func TestExternalStageCreateDryRunUsesFrozenRouteAndDTO(t *testing.T) {
 		got.Body.StageKey != "deployment" || got.Body.ExecutionNumber != 2 || got.Body.ExpectedPlanRevision != 4 ||
 		got.Body.ExpectedAuthorityEpoch != 3 || got.Body.ReporterRegistrationID != 9 {
 		t.Fatalf("dry-run contract=%+v", got)
+	}
+}
+
+func TestExternalStageReusableIdempotencyKeyAcceptsOnlyCanonicalForms(t *testing.T) {
+	for _, key := range []string{"", externalStageTestIdempotencyKey, externalStageTestHandoffID, "00000000000000000000000000", "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"} {
+		if err := (externalStageMutationOptions{idempotencyKey: key}).validate(); err != nil {
+			t.Fatalf("canonical key %q rejected: %v", key, err)
+		}
+	}
+	for _, key := range []string{
+		"9F1C2D3E-4A5B-4C6D-8E7F-0A1B2C3D4E5F",
+		"9f1c2d3e4a5b4c6d8e7f0a1b2c3d4e5f",
+		"9f1c2d3e-4a5b-0c6d-8e7f-0a1b2c3d4e5f",
+		"9f1c2d3e-4a5b-4c6d-7e7f-0a1b2c3d4e5f",
+		"01arz3ndektsv4rrffq69g5fav",
+		"8ZZZZZZZZZZZZZZZZZZZZZZZZZ",
+		" " + externalStageTestIdempotencyKey,
+		externalStageTestIdempotencyKey + "," + externalStageTestHandoffID,
+	} {
+		if err := (externalStageMutationOptions{idempotencyKey: key}).validate(); err == nil {
+			t.Fatalf("non-canonical key %q accepted", key)
+		} else if strings.Contains(err.Error(), key) {
+			t.Fatal("invalid key was reflected into its validation error")
+		}
+	}
+}
+
+func TestExternalStageReusableIdempotencyFlagIsLimitedToExactReplayJSONOperations(t *testing.T) {
+	replayable := []*cobra.Command{
+		externalStageCreateCmd(), externalStageRevokeCmd(), externalStageAcceptCmd(), externalStageReportCmd(),
+		externalStageRegistrationsCreateCmd(), externalStageRegistrationsRevokeCmd(), externalStagePrerequisitesSealCmd(),
+	}
+	for _, command := range replayable {
+		if command.Flags().Lookup("idempotency-key") == nil {
+			t.Fatalf("%s lacks reusable idempotency", command.CommandPath())
+		}
+	}
+	for _, command := range []*cobra.Command{
+		externalStagePullCmd(), externalStageRegistrationsListCmd(), externalStageMintCmd(false), externalStageMintCmd(true),
+	} {
+		if command.Flags().Lookup("idempotency-key") != nil {
+			t.Fatalf("%s incorrectly exposes reusable idempotency", command.CommandPath())
+		}
+	}
+	for _, command := range []*cobra.Command{externalStageMintCmd(false), externalStageMintCmd(true)} {
+		if !strings.Contains(command.Long, "credential must be rotated before use") {
+			t.Fatalf("%s does not explain raw-once lost-response recovery", command.Name())
+		}
+	}
+}
+
+func TestExternalStageReusableIdempotencyDryRunShowsSourceWithoutPrintingKey(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "handoff-create", args: []string{"external-stage", "create", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--reporter-registration-id", "9", "--expires-at", "2026-08-21T12:00:00Z"}},
+		{name: "handoff-revoke", args: []string{"external-stage", "revoke", externalStageTestHandoffID, "--expected-credential-epoch", "1"}},
+		{name: "registration-create", args: []string{"external-stage", "registrations", "create", "issue:4664", "--api-key-id", "5", "--class", "pharos", "--role", "owner", "--workflow", "deploy-production", "--environment", "production-eu1"}},
+		{name: "registration-revoke", args: []string{"external-stage", "registrations", "revoke", "issue:4664", "9"}},
+		{name: "prerequisite-seal", args: []string{"external-stage", "prerequisites", "seal", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--prerequisite", "authorization=11"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"--json"}, test.args...)
+			args = append(args, "--idempotency-key", externalStageTestIdempotencyKey, "--dry-run")
+			out, errOut, err := executeCLIForTest(t, args...)
+			if err != nil {
+				t.Fatalf("dry-run: %v stderr=%s", err, errOut)
+			}
+			if strings.Contains(out, externalStageTestIdempotencyKey) || strings.Contains(errOut, externalStageTestIdempotencyKey) {
+				t.Fatal("dry-run printed the raw idempotency key")
+			}
+			var plan map[string]any
+			if err := json.Unmarshal([]byte(out), &plan); err != nil {
+				t.Fatal(err)
+			}
+			if plan["idempotency_key_source"] != "operator-supplied" {
+				t.Fatalf("dry-run idempotency source=%v", plan["idempotency_key_source"])
+			}
+		})
+	}
+}
+
+func TestExternalStageReusableIdempotencyKeyOverridesAutoUUIDAcrossExactRetries(t *testing.T) {
+	tests := []struct {
+		name string
+		args func(string, string) []string
+	}{
+		{name: "handoff-create", args: func(_, _ string) []string {
+			return []string{"external-stage", "create", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--reporter-registration-id", "9", "--expires-at", "2026-08-21T12:00:00Z"}
+		}},
+		{name: "handoff-revoke", args: func(_, _ string) []string {
+			return []string{"external-stage", "revoke", externalStageTestHandoffID, "--expected-credential-epoch", "1"}
+		}},
+		{name: "accept", args: func(secretPath, _ string) []string {
+			return []string{"external-stage", "accept", externalStageTestHandoffID, "--observed-at", "2026-08-20T10:00:00Z", "--secret-file", secretPath}
+		}},
+		{name: "report", args: func(secretPath, reportPath string) []string {
+			return []string{"external-stage", "report", externalStageTestHandoffID, "--report-file", reportPath, "--secret-file", secretPath}
+		}},
+		{name: "registration-create", args: func(_, _ string) []string {
+			return []string{"external-stage", "registrations", "create", "issue:4664", "--api-key-id", "5", "--class", "pharos", "--role", "owner", "--workflow", "deploy-production", "--environment", "production-eu1"}
+		}},
+		{name: "registration-revoke", args: func(_, _ string) []string {
+			return []string{"external-stage", "registrations", "revoke", "issue:4664", "9"}
+		}},
+		{name: "prerequisite-seal", args: func(_, _ string) []string {
+			return []string{"external-stage", "prerequisites", "seal", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--prerequisite", "authorization=11"}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var receivedKeys []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				values := r.Header.Values(idempotencyHeader)
+				if len(values) != 1 {
+					t.Errorf("idempotency header cardinality=%d", len(values))
+				}
+				receivedKeys = append(receivedKeys, r.Header.Get(idempotencyHeader))
+				if strings.Contains(r.URL.Path, "external-reporter-registrations") || strings.Contains(r.URL.Path, "external-prerequisite-sets") {
+					w.Header().Set("Content-Type", externalStageAdminMediaType)
+					_, _ = w.Write([]byte(`{}`))
+					return
+				}
+				w.Header().Set("Content-Type", externalstage.MediaTypeV1)
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/accept"):
+					_ = json.NewEncoder(w).Encode(externalStageReceiptFixture(1, externalstage.HandoffStateAccepted))
+				case strings.HasSuffix(r.URL.Path, "/reports"):
+					_ = json.NewEncoder(w).Encode(externalStageReceiptFixture(2, externalstage.HandoffStateSucceeded))
+				default:
+					_, _ = w.Write([]byte(`{}`))
+				}
+			}))
+			defer server.Close()
+			setExternalStageTestInstance(t, server.URL)
+			secretPath := writeExternalStageSecretFile(t, externalStageTestSecret, 0o600)
+			reportPath := writeExternalStageReportFile(t)
+			for attempt := 0; attempt < 2; attempt++ {
+				args := append(test.args(secretPath, reportPath), "--idempotency-key", externalStageTestIdempotencyKey)
+				out, errOut, err := executeCLIForTest(t, args...)
+				if err != nil {
+					t.Fatalf("attempt %d: %v stderr=%s", attempt+1, err, errOut)
+				}
+				for _, output := range []string{out, errOut} {
+					if strings.Contains(output, externalStageTestIdempotencyKey) {
+						t.Fatal("raw idempotency key entered CLI output")
+					}
+				}
+			}
+			if len(receivedKeys) != 2 || receivedKeys[0] != externalStageTestIdempotencyKey || receivedKeys[1] != externalStageTestIdempotencyKey {
+				t.Fatalf("retry headers=%v", receivedKeys)
+			}
+		})
+	}
+}
+
+func TestExternalStageReusableIdempotencyKeyNeverEntersReflectedSuccessOrErrorOutput(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		status      int
+		body        any
+		args        []string
+	}{
+		{
+			name: "vendor-success", contentType: externalstage.MediaTypeV1, status: http.StatusOK,
+			body: externalstage.HandoffMetadata{HandoffID: externalStageTestHandoffID, DeliveryKey: externalStageTestIdempotencyKey},
+			args: []string{"external-stage", "create", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--reporter-registration-id", "9", "--expires-at", "2026-08-21T12:00:00Z"},
+		},
+		{
+			name: "admin-success", contentType: externalStageAdminMediaType, status: http.StatusOK,
+			body: externalStageRegistration{RegistrationID: 9, Workflow: externalStageTestIdempotencyKey},
+			args: []string{"external-stage", "registrations", "create", "issue:4664", "--api-key-id", "5", "--class", "pharos", "--role", "owner", "--workflow", "deploy-production", "--environment", "production-eu1"},
+		},
+		{
+			name: "vendor-error", contentType: externalstage.MediaTypeV1, status: http.StatusConflict,
+			body: map[string]string{"error": externalStageTestIdempotencyKey},
+			args: []string{"external-stage", "revoke", externalStageTestHandoffID, "--expected-credential-epoch", "1"},
+		},
+		{
+			name: "admin-error", contentType: externalStageAdminMediaType, status: http.StatusConflict,
+			body: map[string]string{"error": externalStageTestIdempotencyKey},
+			args: []string{"external-stage", "registrations", "revoke", "issue:4664", "9"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", test.contentType)
+				w.WriteHeader(test.status)
+				_ = json.NewEncoder(w).Encode(test.body)
+			}))
+			defer server.Close()
+			setExternalStageTestInstance(t, server.URL)
+			args := append(test.args, "--idempotency-key", externalStageTestIdempotencyKey)
+			out, errOut, err := executeCLIForTest(t, args...)
+			if err == nil {
+				t.Fatal("reflected idempotency key response was accepted")
+			}
+			for _, output := range []string{out, errOut, err.Error()} {
+				if strings.Contains(output, externalStageTestIdempotencyKey) {
+					t.Fatal("raw idempotency key entered CLI output")
+				}
+			}
+		})
 	}
 }
 
@@ -249,6 +460,9 @@ func TestExternalStageMintStreamsExactRawBytesToNew0600File(t *testing.T) {
 		}
 		if got := r.Header.Get(externalstage.HandoffSecretHeader); got != "" {
 			t.Errorf("mint unexpectedly sent handoff credential header")
+		}
+		if r.Header.Get(idempotencyHeader) == "" {
+			t.Error("mint omitted its mandatory one-shot idempotency header")
 		}
 		body, _ := io.ReadAll(r.Body)
 		if string(body) != `{"expected_credential_epoch":0}` {
@@ -596,6 +810,168 @@ func TestExternalStageSecretBearingSuccessSchemaErrorConcealsReflectedCredential
 	assertExternalStageOutputHasNoSecret(t, out, errOut, err)
 }
 
+func TestExternalStagePullResponseValidatesEveryKnownStringFieldAndCorrelation(t *testing.T) {
+	valid := externalStagePullFixture()
+	if err := validateExternalStagePullResponse(externalStageTestHandoffID, valid, nil); err != nil {
+		t.Fatalf("valid pull response rejected: %v", err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*externalstage.PullResponse)
+	}{
+		{name: "handoff_id", mutate: func(r *externalstage.PullResponse) { r.HandoffID = "01ARZ3NDEKTSV4RRFFQ69G5FA0" }},
+		{name: "fixture_digest", mutate: func(r *externalstage.PullResponse) { r.FixtureDigest = "sha256:" + strings.Repeat("0", 64) }},
+		{name: "expires_at", mutate: func(r *externalstage.PullResponse) { r.ExpiresAt = "not-a-time" }},
+		{name: "state", mutate: func(r *externalstage.PullResponse) { r.State = externalstage.HandoffState("custom") }},
+		{name: "reporter_class", mutate: func(r *externalstage.PullResponse) { r.ReporterClass = externalstage.ReporterClassPharos }},
+		{name: "reporter_role", mutate: func(r *externalstage.PullResponse) { r.ReporterRole = externalstage.ReporterRoleOwner }},
+		{name: "dependency_key", mutate: func(r *externalstage.PullResponse) { r.DependencyKey = "" }},
+		{name: "evidence_ceiling", mutate: func(r *externalstage.PullResponse) {
+			r.EvidenceCeiling = []externalstage.EvidenceKind{externalstage.EvidenceKindDeployment}
+		}},
+		{name: "stage_key", mutate: func(r *externalstage.PullResponse) { r.StageKey = "custom" }},
+		{name: "plan_digest", mutate: func(r *externalstage.PullResponse) { r.PlanDigest = "sha256:" + strings.Repeat("A", 64) }},
+		{name: "predecessor_digest", mutate: func(r *externalstage.PullResponse) { r.PredecessorDigest = "invalid" }},
+		{name: "context_digest", mutate: func(r *externalstage.PullResponse) { r.ContextDigest = "invalid" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := valid
+			response.EvidenceCeiling = append([]externalstage.EvidenceKind(nil), valid.EvidenceCeiling...)
+			test.mutate(&response)
+			if err := validateExternalStagePullResponse(externalStageTestHandoffID, response, nil); err == nil {
+				t.Fatal("semantic mutation was accepted")
+			}
+		})
+	}
+}
+
+func TestExternalStageReportReceiptValidatesEveryKnownStringFieldAndRequestBinding(t *testing.T) {
+	valid := externalStageReceiptFixture(2, externalstage.HandoffStateSucceeded)
+	if err := validateExternalStageReportReceipt(externalStageTestHandoffID, 2, externalstage.HandoffStateSucceeded, valid, nil); err != nil {
+		t.Fatalf("valid receipt rejected: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*externalstage.ReportReceipt)
+	}{
+		{name: "handoff_id", mutate: func(r *externalstage.ReportReceipt) { r.HandoffID = "01ARZ3NDEKTSV4RRFFQ69G5FA0" }},
+		{name: "state", mutate: func(r *externalstage.ReportReceipt) { r.State = externalstage.HandoffStateActive }},
+		{name: "server_received_at", mutate: func(r *externalstage.ReportReceipt) { r.ServerReceivedAt = "not-a-time" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			receipt := valid
+			test.mutate(&receipt)
+			if err := validateExternalStageReportReceipt(externalStageTestHandoffID, 2, externalstage.HandoffStateSucceeded, receipt, nil); err == nil {
+				t.Fatal("semantic mutation was accepted")
+			}
+		})
+	}
+}
+
+func TestExternalStagePullRejectsRawAndBase64SecretReflectionFromEveryStringField(t *testing.T) {
+	fields := []struct {
+		name   string
+		mutate func(*externalstage.PullResponse, string)
+	}{
+		{name: "handoff_id", mutate: func(r *externalstage.PullResponse, v string) { r.HandoffID = v }},
+		{name: "fixture_digest", mutate: func(r *externalstage.PullResponse, v string) { r.FixtureDigest = v }},
+		{name: "expires_at", mutate: func(r *externalstage.PullResponse, v string) { r.ExpiresAt = v }},
+		{name: "state", mutate: func(r *externalstage.PullResponse, v string) { r.State = externalstage.HandoffState(v) }},
+		{name: "reporter_class", mutate: func(r *externalstage.PullResponse, v string) { r.ReporterClass = externalstage.ReporterClass(v) }},
+		{name: "reporter_role", mutate: func(r *externalstage.PullResponse, v string) { r.ReporterRole = externalstage.ReporterRole(v) }},
+		{name: "dependency_key", mutate: func(r *externalstage.PullResponse, v string) { r.DependencyKey = v }},
+		{name: "evidence_ceiling", mutate: func(r *externalstage.PullResponse, v string) {
+			r.EvidenceCeiling = []externalstage.EvidenceKind{externalstage.EvidenceKind(v)}
+		}},
+		{name: "stage_key", mutate: func(r *externalstage.PullResponse, v string) { r.StageKey = v }},
+		{name: "plan_digest", mutate: func(r *externalstage.PullResponse, v string) { r.PlanDigest = v }},
+		{name: "predecessor_digest", mutate: func(r *externalstage.PullResponse, v string) { r.PredecessorDigest = v }},
+		{name: "context_digest", mutate: func(r *externalstage.PullResponse, v string) { r.ContextDigest = v }},
+	}
+	representations := []struct {
+		name  string
+		value string
+	}{
+		{name: "raw", value: string(externalStageTestSecret)},
+		{name: "base64url", value: base64.RawURLEncoding.EncodeToString(externalStageTestSecret)},
+	}
+	for _, field := range fields {
+		for _, representation := range representations {
+			t.Run(field.name+"/"+representation.name, func(t *testing.T) {
+				response := externalStagePullFixture()
+				field.mutate(&response, representation.value)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", externalstage.MediaTypeV1)
+					_ = json.NewEncoder(w).Encode(response)
+				}))
+				defer server.Close()
+				setExternalStageTestInstance(t, server.URL)
+				secretPath := writeExternalStageSecretFile(t, externalStageTestSecret, 0o600)
+				out, errOut, err := executeCLIForTest(t, "--json", "external-stage", "pull", externalStageTestHandoffID, "--secret-file", secretPath)
+				if err == nil {
+					t.Fatal("reflected credential was accepted")
+				}
+				assertExternalStageOutputHasNoSecret(t, out, errOut, err)
+			})
+		}
+	}
+}
+
+func TestExternalStageAcceptAndReportRejectSecretReflectionFromEveryReceiptStringField(t *testing.T) {
+	fields := []struct {
+		name   string
+		mutate func(*externalstage.ReportReceipt, string)
+	}{
+		{name: "handoff_id", mutate: func(r *externalstage.ReportReceipt, v string) { r.HandoffID = v }},
+		{name: "state", mutate: func(r *externalstage.ReportReceipt, v string) { r.State = externalstage.HandoffState(v) }},
+		{name: "server_received_at", mutate: func(r *externalstage.ReportReceipt, v string) { r.ServerReceivedAt = v }},
+	}
+	representations := []struct {
+		name  string
+		value string
+	}{
+		{name: "raw", value: string(externalStageTestSecret)},
+		{name: "base64url", value: base64.RawURLEncoding.EncodeToString(externalStageTestSecret)},
+	}
+	commands := []struct {
+		name  string
+		state externalstage.HandoffState
+		seq   int64
+		args  func(string, string) []string
+	}{
+		{name: "accept", state: externalstage.HandoffStateAccepted, seq: 1, args: func(secretPath, _ string) []string {
+			return []string{"--json", "external-stage", "accept", externalStageTestHandoffID, "--observed-at", "2026-08-20T10:00:00Z", "--secret-file", secretPath}
+		}},
+		{name: "report", state: externalstage.HandoffStateSucceeded, seq: 2, args: func(secretPath, reportPath string) []string {
+			return []string{"--json", "external-stage", "report", externalStageTestHandoffID, "--report-file", reportPath, "--secret-file", secretPath}
+		}},
+	}
+	for _, command := range commands {
+		for _, field := range fields {
+			for _, representation := range representations {
+				t.Run(command.name+"/"+field.name+"/"+representation.name, func(t *testing.T) {
+					receipt := externalStageReceiptFixture(command.seq, command.state)
+					field.mutate(&receipt, representation.value)
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						w.Header().Set("Content-Type", externalstage.MediaTypeV1)
+						_ = json.NewEncoder(w).Encode(receipt)
+					}))
+					defer server.Close()
+					setExternalStageTestInstance(t, server.URL)
+					secretPath := writeExternalStageSecretFile(t, externalStageTestSecret, 0o600)
+					reportPath := writeExternalStageReportFile(t)
+					out, errOut, err := executeCLIForTest(t, command.args(secretPath, reportPath)...)
+					if err == nil {
+						t.Fatal("reflected credential was accepted")
+					}
+					assertExternalStageOutputHasNoSecret(t, out, errOut, err)
+				})
+			}
+		}
+	}
+}
+
 func TestExternalStageReportRejectsUnknownJSONBeforeSecretOrNetwork(t *testing.T) {
 	reportPath := filepath.Join(t.TempDir(), "report.json")
 	if err := os.WriteFile(reportPath, []byte(`{"sequence":2,"state":"active","observed_at":"2026-08-20T10:00:00Z","heartbeat":true,"unknown":"x"}`), 0o600); err != nil {
@@ -769,7 +1145,7 @@ func assertExternalStageOutputHasNoSecret(t *testing.T, out, errOut string, err 
 func externalStagePullFixture() externalstage.PullResponse {
 	return externalstage.PullResponse{
 		HandoffID: externalStageTestHandoffID, ContractMajor: externalstage.ContractMajor,
-		FixtureDigest: "sha256:" + strings.Repeat("1", 64), CredentialEpoch: 1,
+		FixtureDigest: "sha256:" + contracts.ExternalStageV1FixtureDigestHex, CredentialEpoch: 1,
 		ExpiresAt: "2026-08-21T12:00:00Z", State: externalstage.HandoffStateIssued,
 		ReporterClass: externalstage.ReporterClassJanus, ReporterRole: externalstage.ReporterRoleDependency,
 		DependencyKey: "privileged-handoff", EvidenceCeiling: []externalstage.EvidenceKind{externalstage.EvidenceKindAuthorization},
@@ -777,6 +1153,26 @@ func externalStagePullFixture() externalstage.PullResponse {
 		PlanDigest: "sha256:" + strings.Repeat("2", 64), PredecessorDigest: "sha256:" + strings.Repeat("3", 64),
 		AuthorityEpoch: 1, ContextDigest: "sha256:" + strings.Repeat("4", 64),
 	}
+}
+
+func externalStageReceiptFixture(sequence int64, state externalstage.HandoffState) externalstage.ReportReceipt {
+	return externalstage.ReportReceipt{
+		HandoffID: externalStageTestHandoffID, Sequence: sequence, State: state,
+		CredentialEpoch: 1, ServerReceivedAt: "2026-08-20T10:01:01Z",
+	}
+}
+
+func writeExternalStageReportFile(t *testing.T) string {
+	t.Helper()
+	reportPath := filepath.Join(t.TempDir(), "report.json")
+	raw, err := json.Marshal(validExternalStagePharosReport(strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(reportPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return reportPath
 }
 
 func validExternalStagePharosReport(commitDigest string) externalstage.ReportRequest {
