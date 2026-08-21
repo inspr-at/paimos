@@ -64,8 +64,15 @@ func openRunnerControlJournal(dir string) (*runnerControlJournal, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create runner control state: %w", err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("secure runner control state: %w", err)
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return nil, fmt.Errorf("inspect runner control state: %w", err)
+	}
+	// MkdirAll applies 0700 to every directory it creates. Refuse an
+	// existing broad or redirected directory instead of following a symlink
+	// or silently changing permissions on a path we do not own.
+	if !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return nil, errors.New("runner control state directory has unsafe mode or type")
 	}
 	j := &runnerControlJournal{dir: dir, journalPath: filepath.Join(dir, "control.journal"),
 		checkpointPath: filepath.Join(dir, "control.checkpoint.json"), records: map[string]runnerControlJournalRecord{}}

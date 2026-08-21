@@ -171,6 +171,7 @@ type agentModeSpeakInput struct {
 // caller-text field by design. The request identifies a closed template and
 // current authorized facts; the server constructs every spoken byte.
 func SpeakAgentModeVoice(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	input, ok := decodeAgentModeSpeakInput(w, r)
 	if !ok {
 		return
@@ -239,10 +240,8 @@ func SpeakAgentModeVoice(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "voice synthesis failed", http.StatusBadGateway)
 		return
 	}
-	w.Header().Set("Content-Type", "audio/mpeg")
 	w.Header().Set("Content-Language", input.Locale)
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(audio)))
-	_, _ = w.Write(audio)
+	_ = writeVoiceMPEGResponse(w, audio)
 }
 
 func decodeAgentModeSpeakInput(w http.ResponseWriter, r *http.Request) (agentModeSpeakInput, bool) {

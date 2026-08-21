@@ -47,7 +47,7 @@ func TestIntakeVoice_STTMetersUnitsAndCost(t *testing.T) {
 // estimated cost land on the papertrail row.
 func TestIntakeVoice_TTSMetersUnitsAndCost(t *testing.T) {
 	ts := newTestServer(t)
-	upstream := fakeTTS(t, "test-elevenlabs-key", []byte("mp3"))
+	upstream := fakeTTS(t, "test-elevenlabs-key", fakeMPEGAudio())
 	defer upstream.Close()
 	configureVoice(t, ts, upstream.URL)
 	s := createIntakeSession(t, ts, ts.memberCookie)
@@ -91,7 +91,7 @@ func TestIntakeVoice_STTBurstLimit(t *testing.T) {
 // TestIntakeVoice_TTSBurstLimit: same for TTS at its lower per-minute cap.
 func TestIntakeVoice_TTSBurstLimit(t *testing.T) {
 	ts := newTestServer(t)
-	upstream := fakeTTS(t, "test-elevenlabs-key", []byte("mp3"))
+	upstream := fakeTTS(t, "test-elevenlabs-key", fakeMPEGAudio())
 	defer upstream.Close()
 	configureVoice(t, ts, upstream.URL)
 	s := createIntakeSession(t, ts, ts.memberCookie)
@@ -150,7 +150,7 @@ func TestIntakeVoice_STTDailyBudget(t *testing.T) {
 func TestIntakeVoice_TTSDailyBudget(t *testing.T) {
 	t.Setenv("PAIMOS_VOICE_TTS_DAILY_CHARS", "40")
 	ts := newTestServer(t)
-	upstream := fakeTTS(t, "test-elevenlabs-key", []byte("mp3"))
+	upstream := fakeTTS(t, "test-elevenlabs-key", fakeMPEGAudio())
 	defer upstream.Close()
 	configureVoice(t, ts, upstream.URL)
 	s := createIntakeSession(t, ts, ts.memberCookie)

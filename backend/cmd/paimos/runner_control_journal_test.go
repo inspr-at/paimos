@@ -64,8 +64,82 @@ func TestRunnerControlJournalIsDurableBoundedAndPrivate(t *testing.T) {
 	}
 }
 
+func TestRunnerControlJournalRejectsBroadOrRedirectedState(t *testing.T) {
+	validCheckpoint := []byte(`{"version":1,"records":[]}`)
+	for _, test := range []struct {
+		name  string
+		setup func(t *testing.T, dir string)
+	}{
+		{
+			name: "broad directory",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(dir, 0o750); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "broad checkpoint",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(dir, "control.checkpoint.json")
+				if err := os.WriteFile(path, validCheckpoint, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(path, 0o640); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "broad journal",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(dir, "control.journal")
+				if err := os.WriteFile(path, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(path, 0o604); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "symlinked directory",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				target := filepath.Join(filepath.Dir(dir), "target")
+				if err := os.Mkdir(target, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, dir); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "runner-state")
+			test.setup(t, dir)
+			if _, err := openRunnerControlJournal(dir); err == nil {
+				t.Fatal("unsafe runner control state was accepted")
+			}
+		})
+	}
+}
+
 func TestRunnerControlJournalFailsClosedOnCorruptionAndVersion(t *testing.T) {
-	journal, err := openRunnerControlJournal(t.TempDir())
+	journal, err := openRunnerControlJournal(filepath.Join(t.TempDir(), "runner-state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +171,7 @@ func TestRunnerControlJournalFailsClosedOnCorruptionAndVersion(t *testing.T) {
 }
 
 func TestRunnerControlJournalSerializesPumpAndResultWriters(t *testing.T) {
-	journal, err := openRunnerControlJournal(t.TempDir())
+	journal, err := openRunnerControlJournal(filepath.Join(t.TempDir(), "runner-state"))
 	if err != nil {
 		t.Fatal(err)
 	}

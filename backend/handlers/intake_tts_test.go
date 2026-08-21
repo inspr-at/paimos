@@ -43,6 +43,15 @@ func fakeTTS(t *testing.T, wantKey string, audio []byte) *httptest.Server {
 	}))
 }
 
+func fakeMPEGAudio() []byte {
+	// MPEG-1 Layer III, 128 kbps, 44.1 kHz: the frame header declares a
+	// 417-byte frame. The payload is intentionally synthetic; provider-boundary
+	// tests need structurally valid MPEG without committing a binary fixture.
+	audio := make([]byte, 417)
+	copy(audio, []byte{0xff, 0xfb, 0x90, 0x64})
+	return audio
+}
+
 func seedSummaries(t *testing.T, sessionID int64) {
 	t.Helper()
 	payload := `{"eli5":"The game counts beaten monsters.","eli10":"Kill events increment a counter.","eli15":"A combat hook emits kill events consumed by progression.","language":"en"}`
@@ -66,7 +75,7 @@ func seedSummaries(t *testing.T, sessionID int64) {
 // no-store, and records a metadata-only paper-trail row.
 func TestIntakeTTS_SpeaksSessionSummary(t *testing.T) {
 	ts := newTestServer(t)
-	audioBytes := []byte("ID3fake-mp3-bytes")
+	audioBytes := fakeMPEGAudio()
 	upstream := fakeTTS(t, "test-elevenlabs-key", audioBytes)
 	defer upstream.Close()
 	configureVoice(t, ts, upstream.URL)
@@ -118,7 +127,7 @@ func TestIntakeTTS_Guards(t *testing.T) {
 		map[string]any{"level": "eli5"})
 	assertStatus(t, resp, http.StatusServiceUnavailable)
 
-	upstream := fakeTTS(t, "test-elevenlabs-key", []byte("x"))
+	upstream := fakeTTS(t, "test-elevenlabs-key", fakeMPEGAudio())
 	defer upstream.Close()
 	configureVoice(t, ts, upstream.URL)
 

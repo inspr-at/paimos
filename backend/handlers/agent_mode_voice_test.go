@@ -353,7 +353,7 @@ func TestAgentModeVoiceTTSUsesReauthorizedServerTemplateOnly(t *testing.T) {
 	ts := newTestServer(t)
 	projectID, issueID, row := seedAgentVoiceFixture(t, ts, "VTS", "TOP SECRET title must never be narrated")
 	_, _, candidate := seedAgentVoiceFixture(t, ts, "VTC", "SECOND SECRET title must never be narrated")
-	audio := []byte("ID3-agent-mode-audio")
+	audio := fakeMPEGAudio()
 	var mu sync.Mutex
 	var spoken string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -423,6 +423,43 @@ func TestAgentModeVoiceTTSUsesReauthorizedServerTemplateOnly(t *testing.T) {
 	if !strings.Contains(clarificationNarration, candidate.IssueKey) ||
 		strings.Contains(clarificationNarration, "TOP SECRET") || strings.Contains(clarificationNarration, "SECOND SECRET") {
 		t.Fatalf("unsafe clarification narration=%q", clarificationNarration)
+	}
+}
+
+func TestAgentModeVoiceTTSRejectsHostileProviderBody(t *testing.T) {
+	ts := newTestServer(t)
+	_, _, row := seedAgentVoiceFixture(t, ts, "VXSS", "Provider payload boundary")
+	hostile := []byte(`<html><script>globalThis.pwned=true</script></html>`)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// A hostile or compromised provider may lie about its media type. The
+		// server must validate the MPEG structure rather than reflect this body.
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write(hostile)
+	}))
+	defer upstream.Close()
+	configureVoice(t, ts, upstream.URL)
+
+	response := postAgentVoiceJSON(t, ts, ts.memberCookie, map[string]any{
+		"template": "status", "delivery_id": row.DeliveryID, "delivery_revision": row.DeliveryRevision,
+		"candidate_ids": []string{}, "locale": "en",
+	})
+	assertStatus(t, response, http.StatusBadGateway)
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Header.Get("Content-Type") != "application/problem+json" ||
+		response.Header.Get("X-Content-Type-Options") != "nosniff" || bytes.Contains(body, hostile) ||
+		strings.Contains(string(body), "script") {
+		t.Fatalf("unsafe provider response headers=%v body=%q", response.Header, body)
+	}
+	var outcome, errorClass string
+	if err := db.DB.QueryRow(`SELECT outcome,error_class FROM ai_calls WHERE action_key='agent_mode_tts'`).Scan(&outcome, &errorClass); err != nil {
+		t.Fatal(err)
+	}
+	if outcome != "fail_upstream" || errorClass != "upstream" {
+		t.Fatalf("audit outcome/class=%q/%q", outcome, errorClass)
 	}
 }
 

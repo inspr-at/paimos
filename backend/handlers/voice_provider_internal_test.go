@@ -89,7 +89,9 @@ func TestSynthesizeWithElevenLabsRejectsNonAudioAndOversizedBodies(t *testing.T)
 		body        string
 		wantError   string
 	}{
-		{"html-success", "text/html; charset=utf-8", "<html>provider error</html>", "non-audio"},
+		{"html-success", "text/html; charset=utf-8", "<html>provider error</html>", "non-MPEG"},
+		{"html-disguised-as-audio", "audio/mpeg", "<script>alert(1)</script>", "invalid MPEG"},
+		{"truncated-mpeg-frame", "audio/mpeg", string([]byte{0xff, 0xfb, 0x90, 0x64}), "invalid MPEG"},
 		{"oversized-audio", "audio/mpeg", strings.Repeat("x", (8<<20)+1), "exceeds 8 MiB"},
 	}
 	for _, test := range tests {
@@ -105,5 +107,20 @@ func TestSynthesizeWithElevenLabsRejectsNonAudioAndOversizedBodies(t *testing.T)
 				t.Fatalf("error=%v want substring %q", err, test.wantError)
 			}
 		})
+	}
+}
+
+func TestVoiceMPEGAudioRequiresCompleteFrame(t *testing.T) {
+	payload := make([]byte, 417)
+	copy(payload, []byte{0xff, 0xfb, 0x90, 0x64})
+	audio, err := newVoiceMPEGAudio(payload)
+	if err != nil || len(audio.payload) != len(payload) {
+		t.Fatalf("valid frame audio=%d err=%v", len(audio.payload), err)
+	}
+	withID3 := make([]byte, 10+len(payload))
+	copy(withID3, []byte{'I', 'D', '3', 4, 0, 0, 0, 0, 0, 0})
+	copy(withID3[10:], payload)
+	if _, err := newVoiceMPEGAudio(withID3); err != nil {
+		t.Fatalf("valid ID3-prefixed frame: %v", err)
 	}
 }

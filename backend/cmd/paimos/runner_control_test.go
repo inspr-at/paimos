@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -406,7 +407,7 @@ func TestRunnerControlRestartReplaysOnlyCompletedExactClaim(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	journal, err := openRunnerControlJournal(t.TempDir())
+	journal, err := openRunnerControlJournal(filepath.Join(t.TempDir(), "runner-state"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -135,15 +135,13 @@ func SpeakIntakeSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "audio/mpeg")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(audio)))
-	_, _ = w.Write(audio)
+	_ = writeVoiceMPEGResponse(w, audio)
 }
 
 // synthesizeWithElevenLabs calls the batch TTS endpoint; language maps to
 // ISO 639-1 for the multilingual model (de/en pass through).
-func synthesizeWithElevenLabs(ctx context.Context, vs VoiceSettings, text, language string) ([]byte, error) {
+func synthesizeWithElevenLabs(ctx context.Context, vs VoiceSettings, text, language string) (voiceMPEGAudio, error) {
 	payload := map[string]any{
 		"text":     text,
 		"model_id": vs.TTSModel,
@@ -153,39 +151,36 @@ func synthesizeWithElevenLabs(ctx context.Context, vs VoiceSettings, text, langu
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return nil, err
+		return voiceMPEGAudio{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(vs.BaseURL, "/")+"/v1/text-to-speech/"+vs.TTSVoiceID,
 		strings.NewReader(string(raw)))
 	if err != nil {
-		return nil, err
+		return voiceMPEGAudio{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("xi-api-key", vs.APIKey)
 
 	resp, err := intakeTTSHTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return voiceMPEGAudio{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("tts upstream status %d", resp.StatusCode)
+		return voiceMPEGAudio{}, fmt.Errorf("tts upstream status %d", resp.StatusCode)
 	}
 	contentType, _, contentTypeErr := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if contentTypeErr != nil || !strings.HasPrefix(strings.ToLower(contentType), "audio/") {
-		return nil, fmt.Errorf("tts upstream returned non-audio content")
+	if contentTypeErr != nil || !strings.EqualFold(contentType, "audio/mpeg") {
+		return voiceMPEGAudio{}, fmt.Errorf("tts upstream returned non-MPEG content")
 	}
 	const maxTTSAudioBytes = 8 << 20
 	audio, err := io.ReadAll(io.LimitReader(resp.Body, maxTTSAudioBytes+1))
 	if err != nil {
-		return nil, err
+		return voiceMPEGAudio{}, err
 	}
 	if len(audio) > maxTTSAudioBytes {
-		return nil, fmt.Errorf("tts upstream audio exceeds 8 MiB")
+		return voiceMPEGAudio{}, fmt.Errorf("tts upstream audio exceeds 8 MiB")
 	}
-	if len(audio) == 0 {
-		return nil, fmt.Errorf("tts upstream returned no audio")
-	}
-	return audio, nil
+	return newVoiceMPEGAudio(audio)
 }
