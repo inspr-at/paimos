@@ -375,7 +375,8 @@
         "required": [
           "id",
           "name",
-          "key"
+          "key",
+          "status"
         ],
         "properties": {
           "id": {
@@ -396,7 +397,9 @@
             "type": "string",
             "enum": [
               "active",
-              "archived"
+              "frozen",
+              "archived",
+              "deleted"
             ]
           },
           "customer_id": {

@@ -737,6 +737,175 @@ func TestOpenAPIProjectListStatusFilterMatchesRuntime(t *testing.T) {
 	}
 }
 
+// PAI-808: Project.status is the field authority-relevant clients read off a
+// project — the generated frontend ProjectStatus vocabulary, the `paimos
+// project` views, and agent-side callers deciding whether a project is still
+// open for work. models.Project.Status carries no omitempty and ListProjects
+// scans p.status into it on every row, so the field is present in every
+// response the shared Project schema describes; publishing it as optional told
+// generated clients to model it as nullable and defend against an absence the
+// server cannot produce.
+//
+// The enum was worse than incomplete. It listed only active|archived, so an
+// ordinary frozen project — the state GET /api/projects?status=all exists to
+// surface — was a schema violation by the published contract, and a validating
+// client would reject a correct response.
+//
+// Pin the response vocabulary against the same runtime oracle the query filter
+// and the generated frontend types are built from, and pin the single way the
+// two enums may differ: `all` is a filter alias, never a state a project is in.
+// Copying one enum onto the other is the obvious wrong fix, and it is exactly
+// what this test refuses.
+func TestOpenAPIProjectSchemaStatusMatchesRuntimeLifecycle(t *testing.T) {
+	doc := documentedAPIDocument(t)
+	components, ok := doc.raw["components"].(map[string]any)
+	if !ok {
+		t.Fatal("OpenAPI components are missing")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatal("OpenAPI schemas are missing")
+	}
+	project, ok := schemas["Project"].(map[string]any)
+	if !ok {
+		t.Fatal("components.schemas.Project is missing — it is the shared project response shape")
+	}
+
+	rawRequired, ok := project["required"]
+	if !ok {
+		t.Fatal("components.schemas.Project publishes no required list, so every field reads as optional")
+	}
+	required := openAPIStringEnum(t, rawRequired)
+	requiredSet := make(map[string]bool, len(required))
+	for _, name := range required {
+		requiredSet[name] = true
+	}
+	if !requiredSet["status"] {
+		t.Errorf("Project.required = %v, want it to contain \"status\" — models.Project.Status has no "+
+			"omitempty and ListProjects scans p.status on every row, so the field is always emitted; "+
+			"publishing it optional makes generated clients handle an absence the server cannot produce",
+			required)
+	}
+	// A pin that could be satisfied by gutting the rest of the list is not a
+	// pin: the identity fields callers key on stay required alongside it.
+	for _, name := range []string{"id", "name", "key"} {
+		if !requiredSet[name] {
+			t.Errorf("Project.required lost %q (= %v) — status was added to this list, not substituted for it",
+				name, required)
+		}
+	}
+
+	properties, ok := project["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("components.schemas.Project has no properties")
+	}
+	statusProperty, ok := properties["status"].(map[string]any)
+	if !ok {
+		t.Fatal("components.schemas.Project.properties.status is missing")
+	}
+	if got := fmt.Sprint(statusProperty["type"]); got != "string" {
+		t.Errorf("Project.status type = %q, want string — it is a plain lifecycle token", got)
+	}
+
+	runtimeStates := handlers.Schema.Enums["project_status"]
+	if len(runtimeStates) == 0 {
+		t.Fatal("handlers.Schema.Enums[\"project_status\"] is empty — the oracle this test compares against is gone")
+	}
+	responseEnum := openAPIStringEnum(t, statusProperty["enum"])
+	if !reflect.DeepEqual(responseEnum, runtimeStates) {
+		t.Errorf("Project.status enum = %v, want %v — the response vocabulary is exactly "+
+			"handlers.Schema.Enums[\"project_status\"], the same oracle validProjectStatus allowlists and the "+
+			"generated frontend ProjectStatus is rendered from, so a frozen or deleted project is an ordinary "+
+			"response the contract must admit", responseEnum, runtimeStates)
+	}
+	for _, value := range responseEnum {
+		if value == "all" {
+			t.Errorf("Project.status enum contains \"all\" (= %v) — `all` is a query filter alias, not a state "+
+				"a project can be in: ListProjects expands it into status IN (active, frozen, archived) and "+
+				"never stores it on a row", responseEnum)
+		}
+	}
+
+	// The pin only means something while the operations that can emit a frozen
+	// or deleted project really share this schema; an inline forked copy for
+	// one of them would silently escape every assertion above.
+	for _, site := range []struct {
+		path   string
+		method string
+	}{
+		{"/api/projects", "get"},
+		{"/api/projects/{id}", "get"},
+	} {
+		operationRaw, ok := doc.Paths[site.path][site.method]
+		if !ok {
+			t.Errorf("%s %s is undocumented", strings.ToUpper(site.method), site.path)
+			continue
+		}
+		var operation struct {
+			Responses map[string]json.RawMessage `json:"responses"`
+		}
+		if err := json.Unmarshal(operationRaw, &operation); err != nil {
+			t.Fatalf("%s %s responses: %v", strings.ToUpper(site.method), site.path, err)
+		}
+		success, ok := operation.Responses["200"]
+		if !ok {
+			t.Errorf("%s %s documents no 200 response", strings.ToUpper(site.method), site.path)
+			continue
+		}
+		if !strings.Contains(string(success), `"#/components/schemas/Project"`) {
+			t.Errorf("%s %s 200 no longer references #/components/schemas/Project: %s — an inline copy of the "+
+				"project shape would escape the status pins in this test",
+				strings.ToUpper(site.method), site.path, success)
+		}
+	}
+
+	// Finally the exact relationship to the filter enum, so neither side can be
+	// "fixed" by copying the other: the query vocabulary is the response
+	// vocabulary plus the alias, in that order.
+	listRaw, ok := doc.Paths["/api/projects"]["get"]
+	if !ok {
+		t.Fatal("GET /api/projects is undocumented")
+	}
+	var list struct {
+		Parameters []struct {
+			Name        string `json:"name"`
+			In          string `json:"in"`
+			Description string `json:"description"`
+			Schema      struct {
+				Enum    []string `json:"enum"`
+				Default *string  `json:"default"`
+			} `json:"schema"`
+		} `json:"parameters"`
+	}
+	if err := json.Unmarshal(listRaw, &list); err != nil {
+		t.Fatalf("GET /api/projects operation: %v", err)
+	}
+	queryIndex := -1
+	for index, parameter := range list.Parameters {
+		if parameter.Name == "status" && parameter.In == "query" {
+			queryIndex = index
+		}
+	}
+	if queryIndex < 0 {
+		t.Fatal("GET /api/projects documents no status query parameter to distinguish the response enum from")
+	}
+	query := list.Parameters[queryIndex]
+	wantQueryEnum := append(append([]string(nil), responseEnum...), "all")
+	if !reflect.DeepEqual(query.Schema.Enum, wantQueryEnum) {
+		t.Errorf("status query enum = %v, want %v — the filter vocabulary is the response vocabulary plus the "+
+			"`all` alias; if the two ever differ by anything else, one of them is wrong",
+			query.Schema.Enum, wantQueryEnum)
+	}
+	if query.Schema.Default == nil || *query.Schema.Default != "active" {
+		t.Errorf("status query default = %v, want \"active\" — an omitted filter lists active projects only",
+			query.Schema.Default)
+	}
+	if !strings.Contains(query.Description, "excludes `deleted`") {
+		t.Errorf("status query description no longer pins that `all` excludes `deleted`: %q — that boundary is "+
+			"why `deleted` is a legal response status yet not part of what `all` returns", query.Description)
+	}
+}
+
 func TestAgentModeOpenAPITrustVocabularyMatchesDeliveryTrust(t *testing.T) {
 	doc := documentedAPIDocument(t)
 	components, ok := doc.raw["components"].(map[string]any)
