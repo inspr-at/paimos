@@ -17,7 +17,7 @@ export function safePostLoginRedirect(raw: unknown): string | null {
   // first response establish its own selection/filter vocabulary.
   try {
     const parsed = new URL(value, 'http://paimos.invalid')
-    if (parsed.pathname === '/agent-mode') return '/agent-mode'
+    if (/^\/agent-mode\/?$/i.test(parsed.pathname)) return '/agent-mode'
   } catch {
     return null
   }
