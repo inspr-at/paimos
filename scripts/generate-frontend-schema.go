@@ -45,6 +45,22 @@ func main() {
 	fmt.Fprintln(&b, "export type KnowledgeType = typeof KNOWLEDGE_TYPES[number]\n")
 	writeConst(&b, "KNOWLEDGE_STATUSES", handlers.Schema.Enums["knowledge_status"])
 	fmt.Fprintln(&b, "export type KnowledgeStatus = typeof KNOWLEDGE_STATUSES[number]\n")
+	writeConst(&b, "EXTERNAL_STAGE_HANDOFF_STATES", handlers.Schema.Enums["external_stage_handoff_state"])
+	fmt.Fprintln(&b, "export type ExternalStageHandoffState = typeof EXTERNAL_STAGE_HANDOFF_STATES[number]\n")
+	writeConst(&b, "EXTERNAL_STAGE_REPORTER_CLASSES", handlers.Schema.Enums["external_stage_reporter_class"])
+	fmt.Fprintln(&b, "export type ExternalStageReporterClass = typeof EXTERNAL_STAGE_REPORTER_CLASSES[number]\n")
+	writeConst(&b, "EXTERNAL_STAGE_REPORTER_ROLES", handlers.Schema.Enums["external_stage_reporter_role"])
+	fmt.Fprintln(&b, "export type ExternalStageReporterRole = typeof EXTERNAL_STAGE_REPORTER_ROLES[number]\n")
+	writeConst(&b, "EXTERNAL_STAGE_EVIDENCE_KINDS", handlers.Schema.Enums["external_stage_evidence_kind"])
+	fmt.Fprintln(&b, "export type ExternalStageEvidenceKind = typeof EXTERNAL_STAGE_EVIDENCE_KINDS[number]\n")
+
+	if external := handlers.Schema.ExternalStage; external != nil {
+		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_CONTRACT_MAJOR = %d as const\n", external.ContractMajor)
+		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_MEDIA_TYPE = %q as const\n", external.MediaType)
+		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_SECRET_MEDIA_TYPE = %q as const\n", external.SecretMediaType)
+		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_HANDOFF_SECRET_HEADER = %q as const\n", external.HandoffSecretHeader)
+		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_ONE_TIME_SECRET_BYTES = %d as const\n\n", external.OneTimeSecretBytes)
+	}
 
 	keys := make([]string, 0, len(handlers.Schema.EnumFields))
 	for k := range handlers.Schema.EnumFields {

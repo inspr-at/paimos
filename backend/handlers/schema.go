@@ -24,6 +24,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/contracts"
+	"github.com/inspr-at/paimos/backend/externalstage"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
 )
 
@@ -35,6 +36,8 @@ import (
 //
 // The version doubles as cache key: clients refetch when the value changes.
 //
+// 2.3.0 (PAI-810): froze the external-stage v1 routes, media/header contract,
+// and the separate handoff/reporter/evidence enum families.
 // 2.2.0 (PAI-809): added the agent-controls:write and agent-controls:runner
 // scopes for the supervised Agent Mode control surface.
 // 2.1.0 (PAI-754): added the project_status enum, bound project.status to it,
@@ -79,19 +82,20 @@ import (
 // discover which api-key scopes unlock which endpoints. The scope list
 // is populated at init() from auth.ScopeCatalog() — a single source of
 // truth shared with the runtime check.
-const SchemaVersion = "2.2.0"
+const SchemaVersion = "2.3.0"
 
 // SchemaPayload is the shape returned by GET /api/schema. See PAI-87.
 type SchemaPayload struct {
-	Version     string                         `json:"version"`
-	Enums       map[string][]string            `json:"enums"`
-	Transitions map[string]map[string][]string `json:"transitions"`
-	Entities    map[string]SchemaEntity        `json:"entities"`
-	EnumFields  map[string]string              `json:"enum_fields"`
-	Conventions map[string]string              `json:"conventions"`
-	Scopes      []auth.ScopeDef                `json:"scopes"`
-	Knowledge   *SchemaKnowledge               `json:"knowledge,omitempty"`
-	Agent       *SchemaAgent                   `json:"agent,omitempty"`
+	Version       string                         `json:"version"`
+	Enums         map[string][]string            `json:"enums"`
+	Transitions   map[string]map[string][]string `json:"transitions"`
+	Entities      map[string]SchemaEntity        `json:"entities"`
+	EnumFields    map[string]string              `json:"enum_fields"`
+	Conventions   map[string]string              `json:"conventions"`
+	Scopes        []auth.ScopeDef                `json:"scopes"`
+	Knowledge     *SchemaKnowledge               `json:"knowledge,omitempty"`
+	Agent         *SchemaAgent                   `json:"agent,omitempty"`
+	ExternalStage *SchemaExternalStage           `json:"external_stage,omitempty"`
 }
 
 // SchemaEntity describes the create/update shape for a given entity type.
@@ -138,6 +142,18 @@ type SchemaAgent struct {
 	Routes     map[string]string `json:"routes"`
 }
 
+// SchemaExternalStage makes the pinned adapter contract discoverable without
+// widening the pre-existing delivery stage enums. Detailed closed DTO shapes
+// remain authoritative in /api/openapi.json.
+type SchemaExternalStage struct {
+	ContractMajor       int               `json:"contract_major"`
+	MediaType           string            `json:"media_type"`
+	SecretMediaType     string            `json:"secret_media_type"`
+	HandoffSecretHeader string            `json:"handoff_secret_header"`
+	OneTimeSecretBytes  int               `json:"one_time_secret_bytes"`
+	Routes              map[string]string `json:"routes"`
+}
+
 // Schema is the compile-time-constant API schema. Backend enum changes
 // (CHECK constraints in migrations, new relation types, new statuses)
 // must be reflected here AND mirrored in frontend constants — the
@@ -145,12 +161,16 @@ type SchemaAgent struct {
 var Schema = SchemaPayload{
 	Version: SchemaVersion,
 	Enums: map[string][]string{
-		"status":           append([]string(nil), contracts.IssueStatuses...),
-		"project_status":   append([]string(nil), projectStatuses...),
-		"knowledge_status": append([]string(nil), contracts.KnowledgeStatuses...),
-		"priority":         append([]string(nil), contracts.IssuePriorities...),
-		"type":             append([]string(nil), contracts.IssueTypes...),
-		"relation":         append([]string(nil), contracts.RelationTypes...),
+		"status":                        append([]string(nil), contracts.IssueStatuses...),
+		"project_status":                append([]string(nil), projectStatuses...),
+		"knowledge_status":              append([]string(nil), contracts.KnowledgeStatuses...),
+		"priority":                      append([]string(nil), contracts.IssuePriorities...),
+		"type":                          append([]string(nil), contracts.IssueTypes...),
+		"relation":                      append([]string(nil), contracts.RelationTypes...),
+		"external_stage_handoff_state":  append([]string(nil), externalstage.HandoffStates...),
+		"external_stage_reporter_class": append([]string(nil), externalstage.ReporterClasses...),
+		"external_stage_reporter_role":  append([]string(nil), externalstage.ReporterRoles...),
+		"external_stage_evidence_kind":  append([]string(nil), externalstage.EvidenceKinds...),
 		// tag_colors is populated in init() from handlers.TagColorPalette
 		// so the schema can never drift from the server-side validator.
 		"tag_colors": nil,
@@ -223,14 +243,18 @@ var Schema = SchemaPayload{
 		},
 	},
 	EnumFields: map[string]string{
-		"issue.type":       "type",
-		"issue.status":     "status",
-		"issue.priority":   "priority",
-		"project.status":   "project_status",
-		"relation.type":    "relation",
-		"tag.color":        "tag_colors",
-		"knowledge.type":   "knowledge_types",
-		"knowledge.status": "knowledge_status",
+		"issue.type":                            "type",
+		"issue.status":                          "status",
+		"issue.priority":                        "priority",
+		"project.status":                        "project_status",
+		"relation.type":                         "relation",
+		"tag.color":                             "tag_colors",
+		"knowledge.type":                        "knowledge_types",
+		"knowledge.status":                      "knowledge_status",
+		"external_stage_handoff.state":          "external_stage_handoff_state",
+		"external_stage_handoff.reporter_class": "external_stage_reporter_class",
+		"external_stage_handoff.reporter_role":  "external_stage_reporter_role",
+		"external_stage_evidence.kind":          "external_stage_evidence_kind",
 	},
 	Conventions: map[string]string{
 		"acceptance_criteria":    "markdown checkbox list: `- [ ] ...` / `- [x] ...`",
@@ -325,6 +349,22 @@ func init() {
 			"create": "POST /api/projects/{id}/agents",
 			"update": "PUT /api/projects/{id}/agents/{name}",
 			"delete": "DELETE /api/projects/{id}/agents/{name}",
+		},
+	}
+	Schema.ExternalStage = &SchemaExternalStage{
+		ContractMajor:       externalstage.ContractMajor,
+		MediaType:           externalstage.MediaTypeV1,
+		SecretMediaType:     externalstage.SecretMediaTypeV1,
+		HandoffSecretHeader: externalstage.HandoffSecretHeader,
+		OneTimeSecretBytes:  externalstage.OneTimeSecretBytes,
+		Routes: map[string]string{
+			"create": externalstage.Routes[0].Method + " " + externalstage.InternalCreatePath,
+			"mint":   externalstage.Routes[1].Method + " " + externalstage.InternalMintPath,
+			"rotate": externalstage.Routes[2].Method + " " + externalstage.InternalRotatePath,
+			"revoke": externalstage.Routes[3].Method + " " + externalstage.InternalRevokePath,
+			"pull":   externalstage.Routes[4].Method + " " + externalstage.ExternalPullPath,
+			"accept": externalstage.Routes[5].Method + " " + externalstage.ExternalAcceptPath,
+			"report": externalstage.Routes[6].Method + " " + externalstage.ExternalReportPath,
 		},
 	}
 	b, err := json.MarshalIndent(&Schema, "", "  ")

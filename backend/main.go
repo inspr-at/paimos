@@ -497,6 +497,7 @@ func mountAPI(r chi.Router) {
 		r.Post("/voice/transcribe", handlers.TranscribeAgentModeVoice)
 		r.Post("/voice/speak", handlers.SpeakAgentModeVoice)
 		handlers.MountAgentModeControlRoutes(r)
+		handlers.MountInternalExternalStageContractRoutes(r)
 	})
 
 	// Runner control is API-key only and intentionally lives outside the
@@ -508,6 +509,17 @@ func mountAPI(r chi.Router) {
 		r.Use(auth.CSRFMiddleware)
 		r.Use(auth.MustChangePasswordGate)
 		handlers.MountRunnerControlRoutes(r)
+	})
+
+	// PAI-810 contract freeze: external stage adapters are API-key callers.
+	// The exact key/reporter/project/handoff binding is transactionally checked
+	// by the service; the contract-only handlers conceal every request until
+	// M148 and that service land.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.Middleware)
+		r.Use(auth.CSRFMiddleware)
+		r.Use(auth.MustChangePasswordGate)
+		handlers.MountExternalStageContractRoutes(r)
 	})
 
 	// Portal (external + admin)
