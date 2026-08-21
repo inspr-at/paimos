@@ -196,6 +196,7 @@ setup_repo() {
   local base="$TMP_ROOT/$name"
   local origin="$base/origin.git"
   local repo="$base/repo"
+  local pin_commit
 
   mkdir -p "$base"
   git init -q --bare "$origin"
@@ -204,14 +205,25 @@ setup_repo() {
   git -C "$repo" config user.email 'release-author@example.test'
   mkdir -p "$repo/docs"
   mkdir -p "$repo/backend/contracts/fixtures/external-stage"
+  mkdir -p "$repo/backend/externalstage"
   printf '1.0.0\n' > "$repo/VERSION"
   printf '<code>v1.0.0</code>\n' > "$repo/README.md"
   printf '# Changelog\n\n## [1.0.0] — 2026-01-01\n\n- Initial.\n' > "$repo/docs/CHANGELOG.md"
   printf 'VER=1.0.0\nVER=1.0.0\npaimos --version    # 1.0.0\n' > "$repo/docs/INSTALL.md"
-  printf '%s\n' '{"paimos_release":"v1.0.1"}' > "$repo/backend/contracts/fixtures/external-stage/manifest-v1.json"
+  printf '%s\n' '{"fixture":"dependency-janus-v1"}' > \
+    "$repo/backend/contracts/fixtures/external-stage/dependency-janus-v1.json"
+  printf '%s\n' '{"fixture":"owner-pharos-v1"}' > \
+    "$repo/backend/contracts/fixtures/external-stage/owner-pharos-v1.json"
+  printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/contract.go"
   write_stub_scripts "$repo"
   git -C "$repo" add .
-  git -C "$repo" commit -q --signoff -m 'initial release'
+  git -C "$repo" commit -q --signoff -m 'add external-stage v1 contract bytes'
+  pin_commit=$(git -C "$repo" rev-parse HEAD)
+  printf '%s\n' \
+    "{\"paimos_commit\":\"$pin_commit\",\"paimos_release\":\"v1.0.1\"}" > \
+    "$repo/backend/contracts/fixtures/external-stage/manifest-v1.json"
+  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
+  git -C "$repo" commit -q --signoff -m 'pin external-stage v1 release'
   git -C "$repo" tag -a v1.0.0 -m 'release 1.0.0'
   git -C "$repo" remote add origin "$origin"
   git -C "$repo" push -q -u origin main --tags
@@ -230,6 +242,16 @@ HOOK
   git -C "$repo" config tag.gpgSign true
   git -C "$repo" config user.signingkey unusable-test-key
   printf '%s\n' "$repo"
+}
+
+set_external_stage_manifest_field() {
+  local repo="$1" field="$2" value="$3"
+  local manifest="$repo/backend/contracts/fixtures/external-stage/manifest-v1.json"
+  local next="$manifest.next"
+
+  jq --arg field "$field" --arg value "$value" '.[$field] = $value' \
+    "$manifest" > "$next"
+  mv "$next" "$manifest"
 }
 
 prepend_release_notes() {
@@ -539,8 +561,7 @@ test_pending_external_stage_release_pin_is_rejected() {
   local repo state
   repo=$(setup_repo pending-external-stage-pin)
   state="$TMP_ROOT/pending-external-stage-pin/gh-state"
-  printf '%s\n' '{"paimos_release":"PENDING_RELEASE_TAG"}' > \
-    "$repo/backend/contracts/fixtures/external-stage/manifest-v1.json"
+  set_external_stage_manifest_field "$repo" paimos_release PENDING_RELEASE_TAG
   git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
   git -C "$repo" commit -q --no-gpg-sign --signoff -m 'leave external-stage release pending'
   FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
@@ -555,8 +576,7 @@ test_unavailable_external_stage_release_pin_is_rejected() {
   local repo state
   repo=$(setup_repo unavailable-external-stage-pin)
   state="$TMP_ROOT/unavailable-external-stage-pin/gh-state"
-  printf '%s\n' '{"paimos_release":"v9.9.9"}' > \
-    "$repo/backend/contracts/fixtures/external-stage/manifest-v1.json"
+  set_external_stage_manifest_field "$repo" paimos_release v9.9.9
   git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
   git -C "$repo" commit -q --no-gpg-sign --signoff -m 'pin an unavailable external-stage release'
   FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
@@ -564,6 +584,84 @@ test_unavailable_external_stage_release_pin_is_rejected() {
 
   if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
     fail 'release accepted an unavailable external-stage tag unrelated to the prepared release'
+  fi
+}
+
+test_invalid_external_stage_commit_pin_is_rejected() {
+  local repo state
+  repo=$(setup_repo invalid-external-stage-commit-pin)
+  state="$TMP_ROOT/invalid-external-stage-commit-pin/gh-state"
+  set_external_stage_manifest_field "$repo" paimos_commit AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'pin an invalid external-stage commit'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+  prepend_release_notes "$repo"
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release accepted a noncanonical external-stage commit pin'
+  fi
+}
+
+test_unavailable_external_stage_commit_pin_is_rejected() {
+  local repo state
+  repo=$(setup_repo unavailable-external-stage-commit-pin)
+  state="$TMP_ROOT/unavailable-external-stage-commit-pin/gh-state"
+  set_external_stage_manifest_field "$repo" paimos_commit ffffffffffffffffffffffffffffffffffffffff
+  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'pin an unavailable external-stage commit'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+  prepend_release_notes "$repo"
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release accepted an unavailable external-stage commit pin'
+  fi
+}
+
+test_nonancestor_external_stage_commit_pin_is_rejected() {
+  local repo state tree nonancestor
+  repo=$(setup_repo nonancestor-external-stage-commit-pin)
+  state="$TMP_ROOT/nonancestor-external-stage-commit-pin/gh-state"
+  tree=$(git -C "$repo" rev-parse 'HEAD^{tree}')
+  nonancestor=$(printf 'unrelated external-stage pin\n' | git -C "$repo" commit-tree "$tree")
+  set_external_stage_manifest_field "$repo" paimos_commit "$nonancestor"
+  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'pin an unrelated external-stage commit'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+  prepend_release_notes "$repo"
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release accepted a non-ancestor external-stage commit pin'
+  fi
+}
+
+test_external_stage_pinned_byte_drift_is_rejected() {
+  local repo state
+  repo=$(setup_repo external-stage-byte-drift)
+  state="$TMP_ROOT/external-stage-byte-drift/gh-state"
+  printf '%s\n' '{"fixture":"owner-pharos-v1","drifted":true}' > \
+    "$repo/backend/contracts/fixtures/external-stage/owner-pharos-v1.json"
+  git -C "$repo" add backend/contracts/fixtures/external-stage/owner-pharos-v1.json
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'drift external-stage v1 fixture bytes'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+  prepend_release_notes "$repo"
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release accepted drifted external-stage v1 bytes'
+  fi
+}
+
+test_existing_tag_external_stage_manifest_drift_is_rejected() {
+  local repo state
+  repo=$(setup_repo external-stage-manifest-drift)
+  state="$TMP_ROOT/external-stage-manifest-drift/gh-state"
+  set_external_stage_manifest_field "$repo" paimos_release v1.0.0
+  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'rewrite external-stage v1 manifest metadata'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+  prepend_release_notes "$repo"
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release accepted external-stage manifest drift from an existing pinned tag'
   fi
 }
 
@@ -581,5 +679,10 @@ test_remote_branch_drift_is_rejected
 test_tag_drift_is_rejected
 test_pending_external_stage_release_pin_is_rejected
 test_unavailable_external_stage_release_pin_is_rejected
+test_invalid_external_stage_commit_pin_is_rejected
+test_unavailable_external_stage_commit_pin_is_rejected
+test_nonancestor_external_stage_commit_pin_is_rejected
+test_external_stage_pinned_byte_drift_is_rejected
+test_existing_tag_external_stage_manifest_drift_is_rejected
 
 echo 'test-release: ok'

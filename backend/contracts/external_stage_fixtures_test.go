@@ -25,9 +25,9 @@ import (
 )
 
 const (
-	externalStageFixtureDomain  = "paimos.external-stage.fixtures.v1\x00"
-	externalStageFreezeCommit   = "580c0bf50768582bcedaf09faceb5fcd56df1f46"
-	externalStagePendingRelease = "PENDING_RELEASE_TAG"
+	externalStageFixtureDomain = "paimos.external-stage.fixtures.v1\x00"
+	externalStagePinnedCommit  = "e5f4c86bc061775c853d5847e8fb8bb7e3a31c34"
+	externalStagePinnedRelease = "v5.11.0"
 )
 
 type externalStageFixtureManifest struct {
@@ -383,7 +383,7 @@ func expectedExternalStageManifest(t *testing.T, fixtures map[string][]byte) ext
 	return externalStageFixtureManifest{
 		SchemaMajor: externalstage.ContractMajor, Contract: "paimos.external-stage.v1",
 		MediaType: externalstage.MediaTypeV1, Encoding: "utf-8-json-lf",
-		PaimosCommit: externalStageFreezeCommit, PaimosRelease: externalStagePendingRelease,
+		PaimosCommit: externalStagePinnedCommit, PaimosRelease: externalStagePinnedRelease,
 		FixtureDigest: "sha256:" + hex.EncodeToString(setDigest[:]), Fixtures: entries,
 	}
 }

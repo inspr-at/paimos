@@ -3,7 +3,7 @@
 PAIMOS external-stage handoffs let registered machine reporters contribute
 deployment or dependency evidence without transferring delivery ownership.
 The v1 wire contract is frozen at Paimos commit
-`580c0bf50768582bcedaf09faceb5fcd56df1f46` and is published through
+`e5f4c86bc061775c853d5847e8fb8bb7e3a31c34` and is published through
 `GET /api/openapi.json` and `GET /api/schema`.
 
 ## Fixed wire surface
@@ -179,14 +179,15 @@ filename order by `filename + \0 + exact fixture bytes + \0`. The manifest is
 excluded so release metadata can be finalized without changing fixture
 identity. Fixture files are compact UTF-8 JSON with exactly one trailing LF.
 
-`paimos_release` intentionally remains `PENDING_RELEASE_TAG` during development
-and must be replaced with the immutable release tag before any release is cut;
-do not pin a guessed or provisional tag now. Pharos and Janus adapters must
-refuse a pending pin and embed the complete
-tuple: schema major, fixture-set digest, certified Paimos contract commit, and
-the immutable release tag. CI must compare the embedded files byte-for-byte,
-recompute every digest, and confirm the tag resolves to the reviewed Paimos
-release before the adapter can build or publish.
+External-stage v1 is immutably pinned to Paimos commit
+`e5f4c86bc061775c853d5847e8fb8bb7e3a31c34` and its planned first release,
+`v5.11.0`. Pharos and Janus adapters must embed the complete tuple: schema
+major, fixture-set digest, certified Paimos contract commit, and immutable
+release tag. Release CI requires the pinned commit to be an ancestor of the
+release ref and compares both canonical fixture files plus
+`backend/externalstage/contract.go` byte-for-byte with that commit. It also
+recomputes every fixture digest and requires the release tag to resolve before
+any later release can be published; the first release may establish that tag.
 
 Changing route spelling, media types, DTO fields, enums, fixture bytes, digest
 algorithm, or evidence semantics requires a new contract major and new fixture
