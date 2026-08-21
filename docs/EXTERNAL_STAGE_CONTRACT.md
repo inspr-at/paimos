@@ -136,8 +136,11 @@ locally before the credential is read or a request is sent.
   URL, path, ID, digest, ciphertext, callback, or command field and can never
   complete canonical stage state.
 - Prerequisite `required|optional` is server-owned Agent Mode setup policy, not
-  an external adapter report field. Only required current bindings gate owner
-  completion; optional dependency evidence never completes canonical state.
+  an external adapter report field. A required binding gates owner completion
+  until it commits terminal satisfied evidence. That immutable satisfaction
+  survives later credential expiry or registration revocation; an unsatisfied
+  revoked binding still blocks. Optional dependency evidence never completes
+  canonical state.
 - Reporter class, role, dependency key, evidence ceiling, key binding, and
   authority are server-owned. JSON never grants them. Owner and dependency
   sequences and latest projections are independent.
@@ -145,7 +148,11 @@ locally before the credential is read or a request is sent.
 Exact same-sequence/same-body replay returns the prior safe receipt without a
 write or wake. Conflicting replay, a gap/regression, stale authority, a late
 new report, or invalid evidence fails closed. Server receipt time—not reporter
-clock time—controls freshness and liveness.
+clock time—controls freshness and liveness. While a reporter is nonterminal,
+the server rejects semantic progress after the active liveness window expires;
+a currently authorized heartbeat revives that window using its server receipt,
+even when its reporter timestamp is old. Terminal satisfied dependencies do not
+become stale merely with age.
 
 ## Canonical fixtures and adapter pins
 

@@ -1131,3 +1131,309 @@ func TestConcurrentCreateCommitsOneHandoffAndOneReplay(t *testing.T) {
 		t.Fatalf("concurrent create persisted handoffs=%d operations=%d", handoffs, operations)
 	}
 }
+
+func createAcceptedServiceHandoff(t *testing.T, f *serviceFixture, registrationID int64, reporter Principal, key string, expiresAt time.Time) (CreateHandoffResult, []byte) {
+	t.Helper()
+	handoff, err := f.service.CreateHandoff(t.Context(), f.operator, f.deliveryKey, "create-"+key,
+		CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+			ExpectedAuthorityEpoch: 1, ReporterRegistrationID: registrationID,
+			ExpiresAt: expiresAt.UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := f.service.Mint(t.Context(), f.operator, handoff.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Accept(t.Context(), reporter, handoff.HandoffID, "accept-"+key, secret,
+		AcceptRequest{Sequence: 1, ObservedAt: f.now.Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	return handoff, secret
+}
+
+func registerRequiredServiceDependency(t *testing.T, f *serviceFixture, dependencyKey, idempotency string) ReporterRegistration {
+	t.Helper()
+	registration, err := f.service.RegisterReporter(t.Context(), f.operator, f.deliveryKey, "register-"+idempotency,
+		RegisterReporterRequest{APIKeyID: f.reporter.APIKeyID, ReporterClass: ReporterClassJanus,
+			ReporterRole: ReporterRoleDependency, DependencyKey: dependencyKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.SealPrerequisites(t.Context(), f.operator, f.deliveryKey, "seal-"+idempotency,
+		SealPrerequisitesRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+			ExpectedAuthorityEpoch: 1, Prerequisites: []Prerequisite{{DependencyKey: dependencyKey,
+				ReporterRegistrationID: registration.RegistrationID, Requirement: PrerequisiteRequired}}}); err != nil {
+		t.Fatal(err)
+	}
+	return registration
+}
+
+func TestInternalAPIKeyOperatorLifecycleAndReplayAuditsExactPrincipal(t *testing.T) {
+	f := setupServiceFixture(t)
+	f.sealEmpty(t)
+	var projectID int64
+	if err := f.database.QueryRow(`SELECT project_id FROM issues WHERE id=?`, f.issueID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.database.Exec(`INSERT INTO users(username,password,role,status) VALUES('external-stage-api-operator','x','member','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operatorID, _ := result.LastInsertId()
+	if _, err := f.database.Exec(`INSERT INTO project_members(project_id,user_id,access_level) VALUES(?,?,'editor')`, projectID, operatorID); err != nil {
+		t.Fatal(err)
+	}
+	result, err = f.database.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes)
+		VALUES(?,'external-stage-api-operator',?,'paimos_external_operator','agent-controls:write')`, operatorID, fmt.Sprintf("%064d", 819))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiKeyID, _ := result.LastInsertId()
+	operator := Principal{UserID: operatorID, Kind: "api_key", APIKeyID: apiKeyID}
+	request := CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+		ExpectedAuthorityEpoch: 1, ReporterRegistrationID: f.registrationID,
+		ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)}
+	handoff, err := f.service.CreateHandoff(t.Context(), operator, f.deliveryKey, "api-operator-create", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := f.service.CreateHandoff(t.Context(), operator, f.deliveryKey, "api-operator-create", request)
+	if err != nil || !replay.Duplicate || replay.HandoffID != handoff.HandoffID {
+		t.Fatalf("create replay=%+v err=%v", replay, err)
+	}
+	if _, err := f.service.Mint(t.Context(), operator, handoff.HandoffID, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Mint(t.Context(), operator, handoff.HandoffID, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	revoked, err := f.service.Revoke(t.Context(), operator, handoff.HandoffID, "api-operator-revoke", 2)
+	if err != nil || revoked.RevokedAt == "" {
+		t.Fatalf("revoke=%+v err=%v", revoked, err)
+	}
+	revokedReplay, err := f.service.Revoke(t.Context(), operator, handoff.HandoffID, "api-operator-revoke", 2)
+	if err != nil || revokedReplay.RevokedAt != revoked.RevokedAt {
+		t.Fatalf("revoke replay=%+v err=%v", revokedReplay, err)
+	}
+	var exactAudits int
+	if err := f.database.QueryRow(`SELECT COUNT(*) FROM external_stage_operation_events operation
+		JOIN external_stage_audit_events audit ON audit.operation_event_id=operation.id
+		WHERE operation.handoff_row_id=(SELECT id FROM external_stage_handoffs WHERE handoff_id=?)
+		 AND operation.operation_kind IN ('created','secret_minted','secret_rotated','revoked')
+		 AND operation.actor_principal_kind='api_key' AND operation.actor_api_key_id=? AND audit.api_key_id=?`,
+		handoff.HandoffID, apiKeyID, apiKeyID).Scan(&exactAudits); err != nil {
+		t.Fatal(err)
+	}
+	if exactAudits != 4 {
+		t.Fatalf("exact API-key operation audits=%d", exactAudits)
+	}
+}
+
+func TestReplacementHandoffsResetWireSequenceButAdvanceStreams(t *testing.T) {
+	t.Run("owner", func(t *testing.T) {
+		f := setupServiceFixture(t)
+		f.sealEmpty(t)
+		old, oldSecret := createAcceptedServiceHandoff(t, f, f.registrationID, f.reporter, "old-owner", f.now.Add(time.Hour))
+		if _, err := f.service.Report(t.Context(), f.reporter, old.HandoffID, "old-owner-active", oldSecret,
+			ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: f.now.Format(time.RFC3339Nano)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Revoke(t.Context(), f.operator, old.HandoffID, "revoke-old-owner", 1); err != nil {
+			t.Fatal(err)
+		}
+		replacement, secret := createAcceptedServiceHandoff(t, f, f.registrationID, f.reporter, "replacement-owner", f.now.Add(time.Hour))
+		receipt, err := f.service.Report(t.Context(), f.reporter, replacement.HandoffID, "replacement-owner-waiting", secret,
+			ReportRequest{Sequence: 2, State: HandoffStateWaiting, ObservedAt: f.now.Format(time.RFC3339Nano)})
+		if err != nil || receipt.Sequence != 2 {
+			t.Fatalf("replacement owner report=%+v err=%v", receipt, err)
+		}
+		var wireMin, wireMax, streamMin, streamMax, canonicalMin, canonicalMax int64
+		if err := f.database.QueryRow(`SELECT MIN(sequence),MAX(sequence),MIN(stream_sequence),MAX(stream_sequence)
+			FROM external_stage_owner_events WHERE attempt_id=? AND stage_key='deployment'`, f.attemptID).
+			Scan(&wireMin, &wireMax, &streamMin, &streamMax); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.database.QueryRow(`SELECT MIN(source_sequence),MAX(source_sequence) FROM delivery_stage_events
+			WHERE attempt_id=? AND stage_key='deployment' AND event_type='semantic_report'`, f.attemptID).
+			Scan(&canonicalMin, &canonicalMax); err != nil {
+			t.Fatal(err)
+		}
+		if wireMin != 2 || wireMax != 2 || streamMin != 1 || streamMax != 2 || canonicalMin != 1 || canonicalMax != 2 {
+			t.Fatalf("owner wire=%d..%d stream=%d..%d canonical=%d..%d", wireMin, wireMax, streamMin, streamMax, canonicalMin, canonicalMax)
+		}
+	})
+
+	t.Run("dependency", func(t *testing.T) {
+		f := setupServiceFixture(t)
+		registration := registerRequiredServiceDependency(t, f, "security.approval", "replacement-dependency")
+		old, oldSecret := createAcceptedServiceHandoff(t, f, registration.RegistrationID, f.reporter, "old-dependency", f.now.Add(time.Hour))
+		if _, err := f.service.Report(t.Context(), f.reporter, old.HandoffID, "old-dependency-active", oldSecret,
+			ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: f.now.Format(time.RFC3339Nano)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Revoke(t.Context(), f.operator, old.HandoffID, "revoke-old-dependency", 1); err != nil {
+			t.Fatal(err)
+		}
+		replacement, secret := createAcceptedServiceHandoff(t, f, registration.RegistrationID, f.reporter, "replacement-dependency", f.now.Add(time.Hour))
+		if _, err := f.service.Report(t.Context(), f.reporter, replacement.HandoffID, "replacement-dependency-active", secret,
+			ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: f.now.Format(time.RFC3339Nano)}); err != nil {
+			t.Fatal(err)
+		}
+		ready := true
+		f.now = f.now.Add(time.Second)
+		terminal := ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano),
+			JanusEvidence: &JanusEvidence{Kind: EvidenceKindCredentialHandoff, Result: EvidenceResultSatisfied,
+				CredentialReady: &ready, ObservedAt: f.now.Format(time.RFC3339Nano)}}
+		if _, err := f.service.Report(t.Context(), f.reporter, replacement.HandoffID, "replacement-dependency-succeeded", secret, terminal); err != nil {
+			t.Fatal(err)
+		}
+		var wire, stream int64
+		if err := f.database.QueryRow(`SELECT sequence,stream_sequence FROM external_stage_dependency_latest
+			WHERE attempt_id=? AND stage_key='deployment' AND dependency_key='security.approval'`, f.attemptID).Scan(&wire, &stream); err != nil {
+			t.Fatal(err)
+		}
+		if wire != 3 || stream != 3 {
+			t.Fatalf("dependency latest wire=%d stream=%d", wire, stream)
+		}
+	})
+}
+
+func TestRequiredDependencySuccessRemainsSatisfiedAfterBindingCloses(t *testing.T) {
+	test := func(t *testing.T, closeBinding func(*serviceFixture, ReporterRegistration, CreateHandoffResult)) {
+		f := setupServiceFixture(t)
+		registration := registerRequiredServiceDependency(t, f, "release.approval", t.Name())
+		owner, ownerSecret := createAcceptedServiceHandoff(t, f, f.registrationID, f.reporter, t.Name()+"-owner", f.now.Add(time.Hour))
+		dependency, dependencySecret := createAcceptedServiceHandoff(t, f, registration.RegistrationID, f.reporter,
+			t.Name()+"-dependency", f.now.Add(time.Minute))
+		observed := f.now.Format(time.RFC3339Nano)
+		if _, err := f.service.Report(t.Context(), f.reporter, owner.HandoffID, t.Name()+"-owner-active", ownerSecret,
+			ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: observed}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Report(t.Context(), f.reporter, dependency.HandoffID, t.Name()+"-dependency-active", dependencySecret,
+			ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: observed}); err != nil {
+			t.Fatal(err)
+		}
+		f.now = f.now.Add(time.Second)
+		authorized := true
+		if _, err := f.service.Report(t.Context(), f.reporter, dependency.HandoffID, t.Name()+"-dependency-succeeded", dependencySecret,
+			ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano),
+				JanusEvidence: &JanusEvidence{Kind: EvidenceKindAuthorization, Result: EvidenceResultSatisfied,
+					Authorized: &authorized, ObservedAt: f.now.Format(time.RFC3339Nano)}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.CreateHandoff(t.Context(), f.operator, f.deliveryKey, t.Name()+"-replace-satisfied",
+			CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+				ExpectedAuthorityEpoch: 1, ReporterRegistrationID: registration.RegistrationID,
+				ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)}); !errors.Is(err, ErrConflict) {
+			t.Fatalf("replaced absorbing succeeded dependency: %v", err)
+		}
+		closeBinding(f, registration, dependency)
+		ownerEvidence := &PharosEvidence{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+			Artifact: ArtifactEvidence{Version: "v4.0.0", Digest: "sha256:" + fmt.Sprintf("%064x", 820), CommitDigest: fmt.Sprintf("%040x", 820)},
+			Result:   EvidenceResultSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano)}
+		receipt, err := f.service.Report(t.Context(), f.reporter, owner.HandoffID, t.Name()+"-owner-succeeded", ownerSecret,
+			ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano), PharosEvidence: ownerEvidence})
+		if err != nil || receipt.State != HandoffStateSucceeded {
+			t.Fatalf("owner after immutable dependency success=%+v err=%v", receipt, err)
+		}
+	}
+
+	t.Run("expired_handoff", func(t *testing.T) {
+		test(t, func(f *serviceFixture, _ ReporterRegistration, dependency CreateHandoffResult) {
+			f.now = f.now.Add(2 * time.Minute)
+			expires, err := time.Parse(time.RFC3339Nano, dependency.ExpiresAt)
+			if err != nil || !expires.Before(f.now) {
+				t.Fatalf("dependency did not expire under service clock: expires=%s now=%s err=%v", dependency.ExpiresAt, f.now, err)
+			}
+		})
+	})
+
+	t.Run("revoked_registration", func(t *testing.T) {
+		test(t, func(f *serviceFixture, registration ReporterRegistration, dependency CreateHandoffResult) {
+			revoked, err := f.service.RevokeReporter(t.Context(), f.operator, f.deliveryKey,
+				"revoke-satisfied-registration", registration.RegistrationID)
+			if err != nil || revoked.RevokedAt == "" {
+				t.Fatalf("revoke satisfied registration=%+v err=%v", revoked, err)
+			}
+			if _, err := f.service.CreateHandoff(t.Context(), f.operator, f.deliveryKey, "replace-satisfied-dependency",
+				CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+					ExpectedAuthorityEpoch: 1, ReporterRegistrationID: registration.RegistrationID,
+					ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)}); err == nil {
+				t.Fatalf("replaced absorbing succeeded dependency %s", dependency.HandoffID)
+			}
+		})
+	})
+}
+
+func TestRevokedUnsatisfiedRequiredDependencyStillBlocksOwner(t *testing.T) {
+	f := setupServiceFixture(t)
+	registration := registerRequiredServiceDependency(t, f, "release.approval", "revoked-unsatisfied")
+	owner, secret := createAcceptedServiceHandoff(t, f, f.registrationID, f.reporter, "revoked-unsatisfied-owner", f.now.Add(time.Hour))
+	if _, err := f.service.Report(t.Context(), f.reporter, owner.HandoffID, "revoked-unsatisfied-owner-active", secret,
+		ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: f.now.Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.RevokeReporter(t.Context(), f.operator, f.deliveryKey, "revoke-unsatisfied-registration", registration.RegistrationID); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Second)
+	evidence := &PharosEvidence{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+		Artifact: ArtifactEvidence{Version: "v4.1.0", Digest: "sha256:" + fmt.Sprintf("%064x", 821), CommitDigest: fmt.Sprintf("%040x", 821)},
+		Result:   EvidenceResultSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano)}
+	if _, err := f.service.Report(t.Context(), f.reporter, owner.HandoffID, "owner-with-revoked-unsatisfied", secret,
+		ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano), PharosEvidence: evidence}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("owner passed revoked unsatisfied dependency: %v", err)
+	}
+}
+
+func TestExternalEffectiveRoleCannotRegisterOrUseReporterBinding(t *testing.T) {
+	f := setupServiceFixture(t)
+	var projectID int64
+	if err := f.database.QueryRow(`SELECT project_id FROM issues WHERE id=?`, f.issueID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.database.Exec(`INSERT INTO users(username,password,role,role_key,status)
+		VALUES('portal-external-reporter','x','member','external','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalUserID, _ := result.LastInsertId()
+	if _, err := f.database.Exec(`INSERT INTO project_members(project_id,user_id,access_level) VALUES(?,?,'editor')`, projectID, externalUserID); err != nil {
+		t.Fatal(err)
+	}
+	result, err = f.database.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes)
+		VALUES(?,'portal-external-reporter',?,'paimos_portal_external','*')`, externalUserID, fmt.Sprintf("%064d", 822))
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalKeyID, _ := result.LastInsertId()
+	if _, err := f.service.RegisterReporter(t.Context(), f.operator, f.deliveryKey, "register-portal-external",
+		RegisterReporterRequest{APIKeyID: externalKeyID, ReporterClass: ReporterClassJanus,
+			ReporterRole: ReporterRoleDependency, DependencyKey: "portal.external"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("registered effective external reporter: %v", err)
+	}
+	f.sealEmpty(t)
+	handoff, err := f.service.CreateHandoff(t.Context(), f.operator, f.deliveryKey, "create-before-role-drift",
+		CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+			ExpectedAuthorityEpoch: 1, ReporterRegistrationID: f.registrationID,
+			ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := f.service.Mint(t.Context(), f.operator, handoff.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.Exec(`UPDATE users SET role_key='external' WHERE id=?`, f.reporter.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Pull(t.Context(), f.reporter, handoff.HandoffID, secret); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("external role pulled handoff: %v", err)
+	}
+	if _, err := f.service.Accept(t.Context(), f.reporter, handoff.HandoffID, "accept-after-role-drift", secret,
+		AcceptRequest{Sequence: 1, ObservedAt: f.now.Format(time.RFC3339Nano)}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("external role accepted handoff: %v", err)
+	}
+}

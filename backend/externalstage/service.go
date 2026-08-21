@@ -344,7 +344,7 @@ func (s *Service) CreateHandoff(ctx context.Context, principal Principal, delive
 	if err != nil {
 		return CreateHandoffResult{}, mapConflict(err)
 	}
-	if err := insertOperationAudit(ctx, tx, h, op, "created", 0, nil, nil, received); err != nil {
+	if err := insertOperationAudit(ctx, tx, h, op, "created", 0, nil, key, received); err != nil {
 		return CreateHandoffResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -489,7 +489,7 @@ func (s *Service) Mint(ctx context.Context, p Principal, handoffID string, expec
 	if err != nil {
 		return nil, mapConflict(err)
 	}
-	if err := insertOperationAudit(ctx, tx, h, op, opKind, next, nil, nil, received); err != nil {
+	if err := insertOperationAudit(ctx, tx, h, op, opKind, next, nil, key, received); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE external_stage_handoffs SET credential_epoch=?,secret_digest=? WHERE id=?`, next, digest[:], h.rowID); err != nil {
@@ -543,7 +543,7 @@ func (s *Service) Revoke(ctx context.Context, p Principal, handoffID, idempotenc
 	if err != nil {
 		return HandoffMetadata{}, mapConflict(err)
 	}
-	if err := insertOperationAudit(ctx, tx, h, op, "revoked", expected, nil, nil, received); err != nil {
+	if err := insertOperationAudit(ctx, tx, h, op, "revoked", expected, nil, key, received); err != nil {
 		return HandoffMetadata{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE external_stage_handoffs SET revoked_at=? WHERE id=?`, received, h.rowID); err != nil {
@@ -578,7 +578,8 @@ func (s *Service) authenticateExternalTx(ctx context.Context, tx *sql.Tx, h hand
 		 AND latest.stage_key=handoff.stage_key AND latest.execution_number=handoff.execution_number
 		 AND latest.execution_start_stage_event_id=handoff.execution_start_stage_event_id
 		 AND latest.authority_epoch=handoff.authority_epoch AND latest.authority_stage_event_id=handoff.authority_stage_event_id
-		WHERE handoff.id=? AND handoff.api_key_id=? AND (reporter_user.effective_role IN ('admin','super_admin') OR
+		WHERE handoff.id=? AND handoff.api_key_id=? AND reporter_user.effective_role<>'external' AND
+		 (reporter_user.effective_role IN ('admin','super_admin') OR
 		 EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=reporter_user.id AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
 		 (reporter_user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=reporter_user.id AND membership.project_id=handoff.project_id)))
 		AND ((handoff.reporter_role='owner' AND latest.current_reporter_id=handoff.reporter_id) OR
@@ -783,26 +784,31 @@ func (s *Service) Report(ctx context.Context, p Principal, handoffID, idempotenc
 	effects := delivery.NewEffects(s.observer)
 	var dependencyHint *delivery.ChangeHint
 	if h.role == string(ReporterRoleOwner) {
+		streamSequence, err := nextOwnerStreamSequence(ctx, tx, h)
+		if err != nil {
+			return ReportReceipt{}, err
+		}
 		ownerEvent, err := tx.ExecContext(ctx, `INSERT INTO external_stage_owner_events(delivery_id,attempt_id,stage_key,
-			execution_number,authority_epoch,handoff_row_id,report_event_id,sequence,lifecycle_state,server_received_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?)`, h.deliveryID, h.attemptID, h.stageKey, h.executionNumber, h.authorityEpoch, h.rowID, reportID, req.Sequence, req.State, received)
+			execution_number,authority_epoch,handoff_row_id,report_event_id,sequence,stream_sequence,lifecycle_state,server_received_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, h.deliveryID, h.attemptID, h.stageKey, h.executionNumber, h.authorityEpoch, h.rowID, reportID, req.Sequence, streamSequence, req.State, received)
 		if err != nil {
 			return ReportReceipt{}, err
 		}
 		ownerID, _ := ownerEvent.LastInsertId()
 		if _, err := tx.ExecContext(ctx, `INSERT INTO external_stage_owner_latest(delivery_id,attempt_id,stage_key,execution_number,
-			authority_epoch,owner_event_id,handoff_row_id,report_event_id,sequence,lifecycle_state,updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(attempt_id,stage_key,execution_number,authority_epoch) DO UPDATE SET
+			authority_epoch,owner_event_id,handoff_row_id,report_event_id,sequence,stream_sequence,lifecycle_state,updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(attempt_id,stage_key,execution_number,authority_epoch) DO UPDATE SET
 			owner_event_id=excluded.owner_event_id,handoff_row_id=excluded.handoff_row_id,report_event_id=excluded.report_event_id,
-			sequence=excluded.sequence,lifecycle_state=excluded.lifecycle_state,updated_at=excluded.updated_at`, h.deliveryID, h.attemptID,
-			h.stageKey, h.executionNumber, h.authorityEpoch, ownerID, h.rowID, reportID, req.Sequence, req.State, received); err != nil {
+			sequence=excluded.sequence,stream_sequence=excluded.stream_sequence,lifecycle_state=excluded.lifecycle_state,
+			updated_at=excluded.updated_at`, h.deliveryID, h.attemptID, h.stageKey, h.executionNumber, h.authorityEpoch,
+			ownerID, h.rowID, reportID, req.Sequence, streamSequence, req.State, received); err != nil {
 			return ReportReceipt{}, err
 		}
 		var opaque string
 		if err := tx.QueryRowContext(ctx, `SELECT opaque_key FROM delivery_reporters WHERE delivery_id=? AND id=?`, h.deliveryID, h.reporterID).Scan(&opaque); err != nil {
 			return ReportReceipt{}, err
 		}
-		canonical, err := canonicalStageReport(h, opaque, idempotencyKey, req)
+		canonical, err := canonicalStageReport(h, opaque, idempotencyKey, streamSequence, req)
 		if err != nil {
 			return ReportReceipt{}, err
 		}
@@ -813,25 +819,31 @@ func (s *Service) Report(ctx context.Context, p Principal, handoffID, idempotenc
 			return ReportReceipt{}, fmt.Errorf("external stage owner report produced %d canonical change hints", len(effects.Hints()))
 		}
 	} else {
+		streamSequence, err := nextDependencyStreamSequence(ctx, tx, h)
+		if err != nil {
+			return ReportReceipt{}, err
+		}
 		dependencyEvent, err := tx.ExecContext(ctx, `INSERT INTO external_stage_dependency_events(delivery_id,attempt_id,stage_key,
 			execution_number,authority_epoch,dependency_key,registration_id,handoff_row_id,report_event_id,credential_epoch,
-			sequence,lifecycle_state,server_received_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, h.deliveryID, h.attemptID, h.stageKey,
-			h.executionNumber, h.authorityEpoch, h.dependency, h.registrationID, h.rowID, reportID, h.credentialEpoch, req.Sequence, req.State, received)
+			sequence,stream_sequence,lifecycle_state,server_received_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, h.deliveryID, h.attemptID, h.stageKey,
+			h.executionNumber, h.authorityEpoch, h.dependency, h.registrationID, h.rowID, reportID, h.credentialEpoch,
+			req.Sequence, streamSequence, req.State, received)
 		if err != nil {
 			return ReportReceipt{}, err
 		}
 		dependencyID, _ := dependencyEvent.LastInsertId()
 		if _, err := tx.ExecContext(ctx, `INSERT INTO external_stage_dependency_latest(delivery_id,attempt_id,stage_key,execution_number,
 			authority_epoch,dependency_key,registration_id,credential_epoch,dependency_event_id,handoff_row_id,report_event_id,
-			sequence,lifecycle_state,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id,credential_epoch)
+			sequence,stream_sequence,lifecycle_state,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id)
 			DO UPDATE SET dependency_event_id=excluded.dependency_event_id,handoff_row_id=excluded.handoff_row_id,
-			report_event_id=excluded.report_event_id,sequence=excluded.sequence,lifecycle_state=excluded.lifecycle_state,
+			report_event_id=excluded.report_event_id,credential_epoch=excluded.credential_epoch,sequence=excluded.sequence,
+			stream_sequence=excluded.stream_sequence,lifecycle_state=excluded.lifecycle_state,
 			updated_at=excluded.updated_at`, h.deliveryID, h.attemptID, h.stageKey, h.executionNumber, h.authorityEpoch, h.dependency,
-			h.registrationID, h.credentialEpoch, dependencyID, h.rowID, reportID, req.Sequence, req.State, received); err != nil {
+			h.registrationID, h.credentialEpoch, dependencyID, h.rowID, reportID, req.Sequence, streamSequence, req.State, received); err != nil {
 			return ReportReceipt{}, err
 		}
-		hint, err := deliveryStore.RecordExternalDependencyChangeTx(ctx, tx, h.issueID, req.Sequence)
+		hint, err := deliveryStore.RecordExternalDependencyChangeTx(ctx, tx, h.issueID, streamSequence)
 		if err != nil {
 			return ReportReceipt{}, err
 		}
@@ -1104,7 +1116,28 @@ func mapInvalid(err error) error {
 	return err
 }
 
-func canonicalStageReport(h handoffRow, opaque, idempotency string, req ReportRequest) (delivery.StageReport, error) {
+func nextOwnerStreamSequence(ctx context.Context, tx *sql.Tx, h handoffRow) (int64, error) {
+	var sequence int64
+	err := tx.QueryRowContext(ctx, `SELECT 1+MAX(
+		COALESCE((SELECT authority_source_sequence_cutoff FROM delivery_stage_events WHERE id=?),0),
+		COALESCE((SELECT MAX(source_sequence) FROM delivery_stage_events WHERE attempt_id=? AND stage_key=?
+		 AND execution_number=? AND authority_epoch=?),0),
+		COALESCE((SELECT MAX(stream_sequence) FROM external_stage_owner_events WHERE attempt_id=? AND stage_key=?
+		 AND execution_number=? AND authority_epoch=?),0))`, h.authorityEventID, h.attemptID, h.stageKey,
+		h.executionNumber, h.authorityEpoch, h.attemptID, h.stageKey, h.executionNumber, h.authorityEpoch).Scan(&sequence)
+	return sequence, err
+}
+
+func nextDependencyStreamSequence(ctx context.Context, tx *sql.Tx, h handoffRow) (int64, error) {
+	var sequence int64
+	err := tx.QueryRowContext(ctx, `SELECT 1+COALESCE(MAX(stream_sequence),0) FROM external_stage_dependency_events
+		WHERE attempt_id=? AND stage_key=? AND execution_number=? AND authority_epoch=?
+		 AND dependency_key=? AND registration_id=?`, h.attemptID, h.stageKey, h.executionNumber,
+		h.authorityEpoch, h.dependency, h.registrationID).Scan(&sequence)
+	return sequence, err
+}
+
+func canonicalStageReport(h handoffRow, opaque, idempotency string, streamSequence int64, req ReportRequest) (delivery.StageReport, error) {
 	state := string(req.State)
 	if req.State == HandoffStateBlocked {
 		state = "waiting"
@@ -1128,8 +1161,7 @@ func canonicalStageReport(h handoffRow, opaque, idempotency string, req ReportRe
 		digest, _ := decodeWireDigest(e.Artifact.Digest)
 		evidence = append(evidence, delivery.Evidence{Type: h.stageKey + "_result", Outcome: outcome, ReferenceKind: "digest", DigestSHA256: hex.EncodeToString(digest)})
 	}
-	sequence := req.Sequence
-	return delivery.StageReport{IssueID: h.issueID, AttemptNumber: h.attemptNumber, StageKey: h.stageKey, ExecutionNumber: h.executionNumber, AuthorityEpoch: h.authorityEpoch, Reporter: delivery.Actor{Type: "external", OpaqueKey: opaque}, IdempotencyKey: "external-stage:" + h.handoffID + ":" + fmt.Sprint(req.Sequence), SourceSequence: &sequence, Kind: "semantic", State: state, Blockers: blockers, Evidence: evidence, ReasonCode: "external_stage_report"}, nil
+	return delivery.StageReport{IssueID: h.issueID, AttemptNumber: h.attemptNumber, StageKey: h.stageKey, ExecutionNumber: h.executionNumber, AuthorityEpoch: h.authorityEpoch, Reporter: delivery.Actor{Type: "external", OpaqueKey: opaque}, IdempotencyKey: "external-stage:" + h.handoffID + ":" + fmt.Sprint(req.Sequence), SourceSequence: &streamSequence, Kind: "semantic", State: state, Blockers: blockers, Evidence: evidence, ReasonCode: "external_stage_report"}, nil
 }
 
 func mapDeliveryError(err error) error {

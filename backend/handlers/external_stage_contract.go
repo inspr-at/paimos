@@ -40,18 +40,27 @@ import (
 const externalStageMaxBody = 64 << 10
 
 var (
-	errExternalStageContentType = errors.New("external stage content type")
-	errExternalStageAccept      = errors.New("external stage accept")
-	errExternalStageTooLarge    = errors.New("external stage body too large")
+	errExternalStageContentType     = errors.New("external stage content type")
+	errExternalStageAccept          = errors.New("external stage accept")
+	errExternalStageTooLarge        = errors.New("external stage body too large")
+	errExternalStageResponseWritten = errors.New("external stage response already written")
 )
 
 func externalStageMountPath(path, prefix string) string { return strings.TrimPrefix(path, prefix) }
 
-func externalStageService() *externalstage.Service {
-	service, _ := externalstage.NewService(db.DB, externalstage.Options{
+func externalStageService() (*externalstage.Service, error) {
+	return externalstage.NewService(db.DB, externalstage.Options{
 		FixtureDigest: contracts.ExternalStageV1FixtureDigest(), Observer: agentmode.NotifyChange,
 	})
-	return service
+}
+
+func externalStageServiceForRequest(w http.ResponseWriter, r *http.Request) (*externalstage.Service, bool) {
+	service, err := externalStageService()
+	if err != nil {
+		writeExternalStageStatus(w, r, http.StatusInternalServerError)
+		return nil, false
+	}
+	return service, true
 }
 
 func externalStagePrincipal(r *http.Request) (externalstage.Principal, bool) {
@@ -335,7 +344,11 @@ func createExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 		writeControlNotFound(w, r)
 		return
 	}
-	out, err := externalStageService().CreateHandoff(r.Context(), p, chi.URLParam(r, "deliveryKey"), idem, body)
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	out, err := service.CreateHandoff(r.Context(), p, chi.URLParam(r, "deliveryKey"), idem, body)
 	if err != nil {
 		writeExternalStageServiceError(w, r, err)
 		return
@@ -368,7 +381,11 @@ func credentialExternalStageHandoff(w http.ResponseWriter, r *http.Request, rota
 		writeControlNotFound(w, r)
 		return
 	}
-	secret, err := externalStageService().Mint(r.Context(), p, chi.URLParam(r, "handoffID"), body.ExpectedCredentialEpoch, rotate)
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	secret, err := service.Mint(r.Context(), p, chi.URLParam(r, "handoffID"), body.ExpectedCredentialEpoch, rotate)
 	if err != nil {
 		writeExternalStageServiceError(w, r, err)
 		return
@@ -398,7 +415,11 @@ func revokeExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 		writeControlNotFound(w, r)
 		return
 	}
-	out, err := externalStageService().Revoke(r.Context(), p, chi.URLParam(r, "handoffID"), idem, body.ExpectedCredentialEpoch)
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	out, err := service.Revoke(r.Context(), p, chi.URLParam(r, "handoffID"), idem, body.ExpectedCredentialEpoch)
 	if err != nil {
 		writeExternalStageServiceError(w, r, err)
 		return
@@ -427,7 +448,11 @@ func pullExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 		writeControlNotFound(w, r)
 		return
 	}
-	out, err := externalStageService().Pull(r.Context(), p, chi.URLParam(r, "handoffID"), secret)
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	out, err := service.Pull(r.Context(), p, chi.URLParam(r, "handoffID"), secret)
 	if err != nil {
 		writeExternalStageServiceError(w, r, err)
 		return
@@ -447,7 +472,11 @@ func acceptExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	externalStageMutation(w, r, func(p externalstage.Principal, secret []byte) (externalstage.ReportReceipt, error) {
-		return externalStageService().Accept(r.Context(), p, chi.URLParam(r, "handoffID"), idem, secret, body)
+		service, ok := externalStageServiceForRequest(w, r)
+		if !ok {
+			return externalstage.ReportReceipt{}, errExternalStageResponseWritten
+		}
+		return service.Accept(r.Context(), p, chi.URLParam(r, "handoffID"), idem, secret, body)
 	})
 }
 func reportExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
@@ -462,7 +491,11 @@ func reportExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	externalStageMutation(w, r, func(p externalstage.Principal, secret []byte) (externalstage.ReportReceipt, error) {
-		return externalStageService().Report(r.Context(), p, chi.URLParam(r, "handoffID"), idem, secret, body)
+		service, ok := externalStageServiceForRequest(w, r)
+		if !ok {
+			return externalstage.ReportReceipt{}, errExternalStageResponseWritten
+		}
+		return service.Report(r.Context(), p, chi.URLParam(r, "handoffID"), idem, secret, body)
 	})
 }
 func externalStageMutation(w http.ResponseWriter, r *http.Request, fn func(externalstage.Principal, []byte) (externalstage.ReportReceipt, error)) {
@@ -479,6 +512,9 @@ func externalStageMutation(w http.ResponseWriter, r *http.Request, fn func(exter
 	}
 	out, err := fn(p, secret)
 	if err != nil {
+		if errors.Is(err, errExternalStageResponseWritten) {
+			return
+		}
 		writeExternalStageServiceError(w, r, err)
 		return
 	}
@@ -509,7 +545,11 @@ func registerExternalStageReporter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, _ := externalStagePrincipal(r)
-	out, err := externalStageService().RegisterReporter(r.Context(), p, chi.URLParam(r, "deliveryKey"), idem, body)
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	out, err := service.RegisterReporter(r.Context(), p, chi.URLParam(r, "deliveryKey"), idem, body)
 	if err != nil {
 		writeExternalStageServiceError(w, r, err)
 		return
@@ -518,7 +558,11 @@ func registerExternalStageReporter(w http.ResponseWriter, r *http.Request) {
 }
 func listExternalStageRegistrations(w http.ResponseWriter, r *http.Request) {
 	p, _ := externalStagePrincipal(r)
-	out, err := externalStageService().ListReporters(r.Context(), p, chi.URLParam(r, "deliveryKey"))
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	out, err := service.ListReporters(r.Context(), p, chi.URLParam(r, "deliveryKey"))
 	if err != nil {
 		writeExternalStageServiceError(w, r, err)
 		return
@@ -542,7 +586,11 @@ func revokeExternalStageReporter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, _ := externalStagePrincipal(r)
-	out, err := externalStageService().RevokeReporter(r.Context(), p, chi.URLParam(r, "deliveryKey"), idem, id)
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	out, err := service.RevokeReporter(r.Context(), p, chi.URLParam(r, "deliveryKey"), idem, id)
 	if err != nil {
 		writeExternalStageServiceError(w, r, err)
 		return
@@ -561,7 +609,11 @@ func sealExternalStagePrerequisites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, _ := externalStagePrincipal(r)
-	out, err := externalStageService().SealPrerequisites(r.Context(), p, chi.URLParam(r, "deliveryKey"), idem, body)
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	out, err := service.SealPrerequisites(r.Context(), p, chi.URLParam(r, "deliveryKey"), idem, body)
 	if err != nil {
 		writeExternalStageServiceError(w, r, err)
 		return

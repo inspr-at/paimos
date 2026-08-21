@@ -226,7 +226,10 @@ func setupExternalStageTransportFixture(t *testing.T) externalStageTransportFixt
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := externalStageService()
+	service, err := externalStageService()
+	if err != nil {
+		t.Fatal(err)
+	}
 	registration, err := service.RegisterReporter(t.Context(), externalstage.Principal{
 		UserID: operatorID, Kind: string(auth.PrincipalSession), SessionCredentialID: sessionCredential,
 	}, deliveryKey, "81000000-0000-4000-8000-000000000812", externalstage.RegisterReporterRequest{
@@ -703,5 +706,20 @@ func TestExternalStageTransportPinsSuccessAndReplayStatuses(t *testing.T) {
 	}
 	if !bytes.Equal(normalizedExternalStageProblem(t, oldEpoch), normalizedExternalStageProblem(t, wrongKey)) {
 		t.Fatalf("old epoch and wrong-key refusals diverged: old=%s wrong=%s", oldEpoch.Body.String(), wrongKey.Body.String())
+	}
+}
+
+func TestExternalStageServiceConstructionFailureIsPrivate500(t *testing.T) {
+	prior := db.DB
+	db.DB = nil
+	t.Cleanup(func() { db.DB = prior })
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/external-stage/handoffs/01ARZ3NDEKTSV4RRFFQ69G5FAV", nil)
+	service, ok := externalStageServiceForRequest(recorder, request)
+	if ok || service != nil || recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("constructor failure service=%v ok=%v status=%d body=%q", service, ok, recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "database") || strings.Contains(recorder.Body.String(), "invalid") {
+		t.Fatalf("constructor detail leaked: %q", recorder.Body.String())
 	}
 }

@@ -197,7 +197,16 @@ func (s *Service) RegisterReporter(ctx context.Context, p Principal, deliveryKey
 		return scanRegistration(tx.QueryRowContext(ctx, registrationSelect+`WHERE id=?`, id))
 	}
 	var userID int64
-	err = tx.QueryRowContext(ctx, `SELECT user_id FROM api_keys WHERE id=?`, req.APIKeyID).Scan(&userID)
+	err = tx.QueryRowContext(ctx, `SELECT api_key.user_id FROM api_keys api_key
+		JOIN external_stage_user_roles reporter_user ON reporter_user.id=api_key.user_id
+		 AND reporter_user.status='active' AND reporter_user.effective_role<>'external'
+		WHERE api_key.id=? AND api_key.disabled_at IS NULL
+		 AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
+		 AND (reporter_user.effective_role IN ('admin','super_admin') OR
+		  EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=reporter_user.id
+		   AND membership.project_id=? AND membership.access_level IN ('viewer','editor')) OR
+		  (reporter_user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+		   WHERE membership.user_id=reporter_user.id AND membership.project_id=?)))`, req.APIKeyID, projectID, projectID).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ReporterRegistration{}, ErrNotFound
 	}
@@ -255,6 +264,7 @@ func (s *Service) ListReporters(ctx context.Context, p Principal, deliveryKey st
 		 ON reporter_user.id=api_key.user_id AND reporter_user.status='active' WHERE api_key.id=registration.api_key_id
 		 AND api_key.user_id=registration.user_id AND api_key.disabled_at IS NULL
 		 AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
+		 AND reporter_user.effective_role<>'external'
 		 AND (reporter_user.effective_role IN ('admin','super_admin') OR EXISTS(SELECT 1 FROM project_members membership
 		  WHERE membership.user_id=reporter_user.id AND membership.project_id=registration.project_id AND membership.access_level IN ('viewer','editor')) OR
 		  (reporter_user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership

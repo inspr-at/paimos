@@ -10167,6 +10167,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   WHERE delivery.id=NEW.delivery_id AND issue.project_id=NEW.project_id
 			    AND reporter.reporter_type='external' AND api_key.disabled_at IS NULL
 			    AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
+			    AND user.effective_role<>'external'
 			    AND (user.effective_role IN ('admin','super_admin') OR
 			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
 			          AND membership.project_id=NEW.project_id AND membership.access_level IN ('viewer','editor')) OR
@@ -10390,6 +10391,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			     CAST(NEW.authority_epoch AS TEXT),CAST(NEW.reporter_registration_id AS TEXT))
 			    AND NOT EXISTS(SELECT 1 FROM delivery_stage_events terminal WHERE terminal.id=latest.semantic_stage_event_id
 			     AND terminal.semantic_state IN ('succeeded','failed','cancelled','draft_ready'))
+			    AND reporter_user.effective_role<>'external'
 			    AND (reporter_user.effective_role IN ('admin','super_admin') OR
 			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=reporter_user.id
 			          AND membership.project_id=NEW.project_id AND membership.access_level IN ('viewer','editor')) OR
@@ -10405,7 +10407,13 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			          WHERE prerequisite.attempt_id=NEW.attempt_id AND prerequisite.stage_key=NEW.stage_key
 			           AND prerequisite.execution_number=NEW.execution_number AND prerequisite.authority_epoch=NEW.authority_epoch
 			           AND prerequisite.dependency_key=NEW.dependency_key
-			           AND prerequisite.registration_id=NEW.reporter_registration_id)))
+			           AND prerequisite.registration_id=NEW.reporter_registration_id)
+			          AND NOT EXISTS(SELECT 1 FROM external_stage_dependency_latest satisfied
+			           WHERE satisfied.attempt_id=NEW.attempt_id AND satisfied.stage_key=NEW.stage_key
+			            AND satisfied.execution_number=NEW.execution_number AND satisfied.authority_epoch=NEW.authority_epoch
+			            AND satisfied.dependency_key=NEW.dependency_key
+			            AND satisfied.registration_id=NEW.reporter_registration_id
+			            AND satisfied.lifecycle_state='succeeded')))
 			  )
 			 BEGIN SELECT RAISE(ABORT,'external stage handoff binding is stale'); END`,
 			`CREATE TRIGGER trg_external_stage_handoff_binding_guard
@@ -10555,6 +10563,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND handoff.lifecycle_state=NEW.lifecycle_state AND NEW.last_sequence=handoff.last_sequence+1
 			    AND NEW.window_number=COALESCE((SELECT MAX(prior.window_number)+1 FROM external_stage_heartbeat_windows prior
 			     WHERE prior.handoff_row_id=handoff.id AND prior.credential_epoch=handoff.credential_epoch),1)
+			    AND user.effective_role<>'external'
 			    AND (user.effective_role IN ('admin','super_admin') OR
 			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
 			          AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
@@ -10617,6 +10626,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND julianday(handoff.expires_at)>julianday('now')
 			    AND ((handoff.reporter_role='owner' AND latest.current_reporter_id=handoff.reporter_id) OR
 			         handoff.reporter_role='dependency')
+			    AND user.effective_role<>'external'
 			    AND (user.effective_role IN ('admin','super_admin') OR
 			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
 			          AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
@@ -10687,9 +10697,10 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 handoff_row_id   INTEGER NOT NULL,
 			 report_event_id  INTEGER NOT NULL UNIQUE,
 			 sequence         INTEGER NOT NULL CHECK(sequence>0),
+			 stream_sequence  INTEGER NOT NULL CHECK(stream_sequence>0),
 			 lifecycle_state  TEXT NOT NULL CHECK(lifecycle_state IN ('active','waiting','blocked','succeeded','failed')),
 			 server_received_at TEXT NOT NULL,
-			 UNIQUE(attempt_id,stage_key,execution_number,authority_epoch,sequence),
+			 UNIQUE(attempt_id,stage_key,execution_number,authority_epoch,stream_sequence),
 			 FOREIGN KEY(delivery_id,handoff_row_id) REFERENCES external_stage_handoffs(delivery_id,id),
 			 FOREIGN KEY(report_event_id) REFERENCES external_stage_report_events(id)
 			)`,
@@ -10703,6 +10714,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 handoff_row_id   INTEGER NOT NULL,
 			 report_event_id  INTEGER NOT NULL,
 			 sequence         INTEGER NOT NULL CHECK(sequence>0),
+			 stream_sequence  INTEGER NOT NULL CHECK(stream_sequence>0),
 			 lifecycle_state  TEXT NOT NULL CHECK(lifecycle_state IN ('active','waiting','blocked','succeeded','failed')),
 			 updated_at       TEXT NOT NULL,
 			 PRIMARY KEY(attempt_id,stage_key,execution_number,authority_epoch),
@@ -10722,9 +10734,10 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 report_event_id   INTEGER NOT NULL UNIQUE,
 			 credential_epoch  INTEGER NOT NULL CHECK(credential_epoch>0),
 			 sequence          INTEGER NOT NULL CHECK(sequence>0),
+			 stream_sequence   INTEGER NOT NULL CHECK(stream_sequence>0),
 			 lifecycle_state   TEXT NOT NULL CHECK(lifecycle_state IN ('active','waiting','blocked','succeeded','failed')),
 			 server_received_at TEXT NOT NULL,
-			 UNIQUE(attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id,credential_epoch,sequence),
+			 UNIQUE(attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id,stream_sequence),
 			 FOREIGN KEY(delivery_id,handoff_row_id) REFERENCES external_stage_handoffs(delivery_id,id),
 			 FOREIGN KEY(delivery_id,registration_id) REFERENCES external_stage_reporter_registrations(delivery_id,id),
 			 FOREIGN KEY(report_event_id) REFERENCES external_stage_report_events(id)
@@ -10742,9 +10755,10 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 handoff_row_id     INTEGER NOT NULL,
 			 report_event_id    INTEGER NOT NULL,
 			 sequence           INTEGER NOT NULL CHECK(sequence>0),
+			 stream_sequence    INTEGER NOT NULL CHECK(stream_sequence>0),
 			 lifecycle_state    TEXT NOT NULL CHECK(lifecycle_state IN ('active','waiting','blocked','succeeded','failed')),
 			 updated_at         TEXT NOT NULL,
-			 PRIMARY KEY(attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id,credential_epoch),
+			 PRIMARY KEY(attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id),
 			 FOREIGN KEY(delivery_id,handoff_row_id) REFERENCES external_stage_handoffs(delivery_id,id),
 			 FOREIGN KEY(delivery_id,registration_id) REFERENCES external_stage_reporter_registrations(delivery_id,id),
 			 FOREIGN KEY(report_event_id) REFERENCES external_stage_report_events(id)
@@ -10756,7 +10770,16 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   AND handoff.stage_key=NEW.stage_key AND handoff.execution_number=NEW.execution_number
 			   AND handoff.authority_epoch=NEW.authority_epoch AND handoff.reporter_role='owner'
 			   AND report.sequence=NEW.sequence AND report.lifecycle_state=NEW.lifecycle_state
-			   AND report.server_received_at=NEW.server_received_at)
+			   AND report.server_received_at=NEW.server_received_at
+			   AND NEW.stream_sequence=1+MAX(
+			    COALESCE((SELECT authority.authority_source_sequence_cutoff FROM delivery_stage_events authority
+			     WHERE authority.id=handoff.authority_stage_event_id),0),
+			    COALESCE((SELECT MAX(canonical.source_sequence) FROM delivery_stage_events canonical
+			     WHERE canonical.attempt_id=handoff.attempt_id AND canonical.stage_key=handoff.stage_key
+			      AND canonical.execution_number=handoff.execution_number AND canonical.authority_epoch=handoff.authority_epoch),0),
+			    COALESCE((SELECT MAX(prior.stream_sequence) FROM external_stage_owner_events prior
+			     WHERE prior.attempt_id=handoff.attempt_id AND prior.stage_key=handoff.stage_key
+			      AND prior.execution_number=handoff.execution_number AND prior.authority_epoch=handoff.authority_epoch),0)))
 			 BEGIN SELECT RAISE(ABORT,'owner event lacks exact owner report'); END`,
 			`CREATE TRIGGER trg_external_stage_dependency_event_guard BEFORE INSERT ON external_stage_dependency_events
 			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_handoffs handoff
@@ -10770,7 +10793,12 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   AND handoff.authority_epoch=NEW.authority_epoch AND handoff.reporter_role='dependency'
 			   AND handoff.dependency_key=NEW.dependency_key AND handoff.reporter_registration_id=NEW.registration_id
 			   AND report.credential_epoch=NEW.credential_epoch AND report.sequence=NEW.sequence
-			   AND report.lifecycle_state=NEW.lifecycle_state AND report.server_received_at=NEW.server_received_at)
+			   AND report.lifecycle_state=NEW.lifecycle_state AND report.server_received_at=NEW.server_received_at
+			   AND NEW.stream_sequence=1+COALESCE((SELECT MAX(prior.stream_sequence)
+			    FROM external_stage_dependency_events prior WHERE prior.attempt_id=handoff.attempt_id
+			     AND prior.stage_key=handoff.stage_key AND prior.execution_number=handoff.execution_number
+			     AND prior.authority_epoch=handoff.authority_epoch AND prior.dependency_key=handoff.dependency_key
+			     AND prior.registration_id=handoff.reporter_registration_id),0))
 			 BEGIN SELECT RAISE(ABORT,'dependency event lacks exact declared dependency report'); END`,
 			`CREATE TRIGGER trg_external_stage_owner_events_no_update BEFORE UPDATE ON external_stage_owner_events
 			 BEGIN SELECT RAISE(ABORT,'external stage owner events are append-only'); END`,
@@ -10932,6 +10960,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			       NEW.actor_api_key_id=handoff.api_key_id AND NEW.credential_epoch=handoff.credential_epoch AND
 			       handoff.credential_epoch>0 AND handoff.secret_digest IS NOT NULL AND handoff.lifecycle_state='issued' AND
 			       handoff.revoked_at IS NULL AND julianday(handoff.expires_at)>julianday('now') AND
+			       actor.effective_role<>'external' AND
 			       (actor.effective_role IN ('admin','super_admin') OR
 			        EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=actor.id
 			         AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
@@ -10981,6 +11010,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			        WHERE report.handoff_row_id=handoff.id
 			       UNION ALL SELECT heartbeat.last_received_at FROM external_stage_heartbeat_windows heartbeat
 			        WHERE heartbeat.handoff_row_id=handoff.id)))<=120.0/86400.0)
+			    AND user.effective_role<>'external'
 			    AND (user.effective_role IN ('admin','super_admin') OR
 			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
 			          AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
@@ -11010,49 +11040,41 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			              AND prerequisite.execution_number=handoff.execution_number
 			              AND prerequisite.authority_epoch=handoff.authority_epoch))
 			          AND NOT EXISTS(SELECT 1 FROM external_stage_prerequisites prerequisite
-			           LEFT JOIN external_stage_reporter_registrations dependency_registration
-			            ON dependency_registration.id=prerequisite.registration_id
-			            AND dependency_registration.delivery_id=prerequisite.delivery_id
-			            AND dependency_registration.reporter_role='dependency'
-			            AND dependency_registration.dependency_key=prerequisite.dependency_key
-			            AND dependency_registration.revoked_at IS NULL
-			           LEFT JOIN api_keys dependency_key ON dependency_key.id=dependency_registration.api_key_id
-			            AND dependency_key.user_id=dependency_registration.user_id AND dependency_key.disabled_at IS NULL
-			            AND (dependency_key.expires_at IS NULL OR julianday(dependency_key.expires_at)>julianday('now'))
-			           LEFT JOIN external_stage_user_roles dependency_user ON dependency_user.id=dependency_registration.user_id
-			            AND dependency_user.status='active'
-			           LEFT JOIN external_stage_handoffs dependency_handoff
-			            ON dependency_handoff.attempt_id=prerequisite.attempt_id
-			            AND dependency_handoff.stage_key=prerequisite.stage_key
-			            AND dependency_handoff.execution_number=prerequisite.execution_number
-			            AND dependency_handoff.authority_epoch=prerequisite.authority_epoch
-			            AND dependency_handoff.reporter_registration_id=prerequisite.registration_id
-			            AND dependency_handoff.dependency_key=prerequisite.dependency_key
-			            AND dependency_handoff.revoked_at IS NULL
-			           LEFT JOIN external_stage_dependency_latest dependency_latest
-			            ON dependency_latest.attempt_id=prerequisite.attempt_id
-			            AND dependency_latest.stage_key=prerequisite.stage_key
-			            AND dependency_latest.execution_number=prerequisite.execution_number
-			            AND dependency_latest.authority_epoch=prerequisite.authority_epoch
-			            AND dependency_latest.registration_id=prerequisite.registration_id
-			            AND dependency_latest.dependency_key=prerequisite.dependency_key
-			            AND dependency_latest.handoff_row_id=dependency_handoff.id
-			            AND dependency_latest.credential_epoch=dependency_handoff.credential_epoch
-			            AND dependency_latest.lifecycle_state='succeeded'
 			           WHERE prerequisite.attempt_id=handoff.attempt_id AND prerequisite.stage_key=handoff.stage_key
 			            AND prerequisite.execution_number=handoff.execution_number
 			            AND prerequisite.authority_epoch=handoff.authority_epoch
-			            AND prerequisite.requirement='required'
-			            AND (dependency_registration.id IS NULL OR dependency_key.id IS NULL OR dependency_user.id IS NULL OR
-			             NOT (dependency_user.effective_role IN ('admin','super_admin') OR
-			              EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=dependency_user.id
-			               AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
-			              (dependency_user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
-			               WHERE membership.user_id=dependency_user.id AND membership.project_id=handoff.project_id))) OR
-			             dependency_handoff.id IS NULL OR dependency_handoff.credential_epoch<=0 OR
-			             dependency_handoff.secret_digest IS NULL OR dependency_handoff.lifecycle_state<>'succeeded' OR
-			             dependency_handoff.terminal_at IS NULL OR julianday(dependency_handoff.expires_at)<=julianday('now') OR
-			             dependency_latest.handoff_row_id IS NULL))))
+			            AND prerequisite.requirement='required' AND NOT EXISTS(
+			             SELECT 1 FROM external_stage_dependency_latest dependency_latest
+			             JOIN external_stage_dependency_events dependency_event
+			              ON dependency_event.id=dependency_latest.dependency_event_id
+			              AND dependency_event.report_event_id=dependency_latest.report_event_id
+			              AND dependency_event.handoff_row_id=dependency_latest.handoff_row_id
+			              AND dependency_event.stream_sequence=dependency_latest.stream_sequence
+			             JOIN external_stage_report_events dependency_report
+			              ON dependency_report.id=dependency_event.report_event_id
+			              AND dependency_report.sequence=dependency_event.sequence
+			              AND dependency_report.lifecycle_state='succeeded'
+			             JOIN external_stage_handoffs dependency_handoff
+			              ON dependency_handoff.id=dependency_event.handoff_row_id
+			              AND dependency_handoff.delivery_id=prerequisite.delivery_id
+			              AND dependency_handoff.reporter_registration_id=prerequisite.registration_id
+			              AND dependency_handoff.dependency_key=prerequisite.dependency_key
+			              AND dependency_handoff.reporter_class='janus' AND dependency_handoff.reporter_role='dependency'
+			              AND dependency_handoff.lifecycle_state='succeeded' AND dependency_handoff.terminal_at IS NOT NULL
+			             JOIN external_stage_audit_events dependency_audit
+			              ON dependency_audit.report_event_id=dependency_report.id
+			              AND dependency_audit.event_kind='reported' AND dependency_audit.outcome='committed'
+			             JOIN external_stage_janus_evidence dependency_evidence
+			              ON dependency_evidence.report_event_id=dependency_report.id
+			              AND dependency_evidence.result='satisfied'
+			              AND COALESCE(dependency_evidence.authorized,dependency_evidence.credential_ready)=1
+			             WHERE dependency_latest.attempt_id=prerequisite.attempt_id
+			              AND dependency_latest.stage_key=prerequisite.stage_key
+			              AND dependency_latest.execution_number=prerequisite.execution_number
+			              AND dependency_latest.authority_epoch=prerequisite.authority_epoch
+			              AND dependency_latest.dependency_key=prerequisite.dependency_key
+			              AND dependency_latest.registration_id=prerequisite.registration_id
+			              AND dependency_latest.lifecycle_state='succeeded'))))
 			    AND ((NEW.evidence_kind IS NULL) OR
 			         (handoff.reporter_class='pharos' AND handoff.reporter_role='owner' AND
 			          ((NEW.evidence_kind='deployment' AND handoff.stage_key='deployment' AND handoff.allow_deployment=1) OR
@@ -11101,7 +11123,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND deployment_terminal.execution_number=deployment_handoff.execution_number
 			    AND deployment_terminal.authority_epoch=deployment_handoff.authority_epoch
 			    AND deployment_terminal.reporter_id=deployment_handoff.reporter_id
-			    AND deployment_terminal.source_sequence=deployment_report.sequence
+			    AND deployment_terminal.source_sequence=deployment_owner.stream_sequence
 			    AND deployment_terminal.semantic_state='succeeded'
 			   JOIN external_stage_report_events verification_report ON verification_report.id=NEW.report_event_id
 			   JOIN external_stage_handoffs verification_handoff ON verification_handoff.id=verification_report.handoff_row_id
@@ -11178,21 +11200,23 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   AND owner_event.attempt_id=NEW.attempt_id AND owner_event.stage_key=NEW.stage_key
 			   AND owner_event.execution_number=NEW.execution_number AND owner_event.authority_epoch=NEW.authority_epoch
 			   AND owner_event.handoff_row_id=NEW.handoff_row_id AND owner_event.report_event_id=NEW.report_event_id
-			   AND owner_event.sequence=NEW.sequence AND owner_event.lifecycle_state=NEW.lifecycle_state
+			   AND owner_event.sequence=NEW.sequence AND owner_event.stream_sequence=NEW.stream_sequence
+			   AND owner_event.lifecycle_state=NEW.lifecycle_state
 			   AND owner_event.server_received_at=NEW.updated_at)
 			 BEGIN SELECT RAISE(ABORT,'owner latest lacks exact owner event'); END`,
 			`CREATE TRIGGER trg_external_stage_owner_latest_update_guard
 			 BEFORE UPDATE ON external_stage_owner_latest
 			 WHEN NEW.delivery_id<>OLD.delivery_id OR NEW.attempt_id<>OLD.attempt_id OR NEW.stage_key<>OLD.stage_key OR
 			  NEW.execution_number<>OLD.execution_number OR NEW.authority_epoch<>OLD.authority_epoch OR
-			  NEW.sequence<=OLD.sequence OR NOT EXISTS(SELECT 1 FROM external_stage_owner_events owner_event
+			  NEW.stream_sequence<=OLD.stream_sequence OR NOT EXISTS(SELECT 1 FROM external_stage_owner_events owner_event
 			   JOIN external_stage_handoffs handoff ON handoff.id=owner_event.handoff_row_id AND handoff.reporter_role='owner'
 			   JOIN external_stage_audit_events audit ON audit.report_event_id=owner_event.report_event_id AND audit.event_kind='reported'
 			   WHERE owner_event.id=NEW.owner_event_id AND owner_event.delivery_id=NEW.delivery_id
 			    AND owner_event.attempt_id=NEW.attempt_id AND owner_event.stage_key=NEW.stage_key
 			    AND owner_event.execution_number=NEW.execution_number AND owner_event.authority_epoch=NEW.authority_epoch
 			    AND owner_event.handoff_row_id=NEW.handoff_row_id AND owner_event.report_event_id=NEW.report_event_id
-			    AND owner_event.sequence=NEW.sequence AND owner_event.lifecycle_state=NEW.lifecycle_state
+			    AND owner_event.sequence=NEW.sequence AND owner_event.stream_sequence=NEW.stream_sequence
+			    AND owner_event.lifecycle_state=NEW.lifecycle_state
 			    AND owner_event.server_received_at=NEW.updated_at)
 			 BEGIN SELECT RAISE(ABORT,'invalid owner latest advance'); END`,
 			`CREATE TRIGGER trg_external_stage_owner_latest_no_delete BEFORE DELETE ON external_stage_owner_latest
@@ -11208,6 +11232,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   AND dependency_event.dependency_key=NEW.dependency_key AND dependency_event.registration_id=NEW.registration_id
 			   AND dependency_event.credential_epoch=NEW.credential_epoch AND dependency_event.handoff_row_id=NEW.handoff_row_id
 			   AND dependency_event.report_event_id=NEW.report_event_id AND dependency_event.sequence=NEW.sequence
+			   AND dependency_event.stream_sequence=NEW.stream_sequence
 			   AND dependency_event.lifecycle_state=NEW.lifecycle_state AND dependency_event.server_received_at=NEW.updated_at)
 			 BEGIN SELECT RAISE(ABORT,'dependency latest lacks exact dependency event'); END`,
 			`CREATE TRIGGER trg_external_stage_dependency_latest_update_guard
@@ -11215,7 +11240,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 WHEN NEW.delivery_id<>OLD.delivery_id OR NEW.attempt_id<>OLD.attempt_id OR NEW.stage_key<>OLD.stage_key OR
 			  NEW.execution_number<>OLD.execution_number OR NEW.authority_epoch<>OLD.authority_epoch OR
 			  NEW.dependency_key<>OLD.dependency_key OR NEW.registration_id<>OLD.registration_id OR
-			  NEW.credential_epoch<>OLD.credential_epoch OR NEW.sequence<=OLD.sequence OR
+			  OLD.lifecycle_state='succeeded' OR NEW.stream_sequence<=OLD.stream_sequence OR
 			  NOT EXISTS(SELECT 1 FROM external_stage_dependency_events dependency_event
 			   JOIN external_stage_handoffs handoff ON handoff.id=dependency_event.handoff_row_id AND handoff.reporter_role='dependency'
 			   JOIN external_stage_audit_events audit ON audit.report_event_id=dependency_event.report_event_id AND audit.event_kind='reported'
@@ -11225,6 +11250,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND dependency_event.dependency_key=NEW.dependency_key AND dependency_event.registration_id=NEW.registration_id
 			    AND dependency_event.credential_epoch=NEW.credential_epoch AND dependency_event.handoff_row_id=NEW.handoff_row_id
 			    AND dependency_event.report_event_id=NEW.report_event_id AND dependency_event.sequence=NEW.sequence
+			    AND dependency_event.stream_sequence=NEW.stream_sequence
 			    AND dependency_event.lifecycle_state=NEW.lifecycle_state AND dependency_event.server_received_at=NEW.updated_at)
 			 BEGIN SELECT RAISE(ABORT,'invalid dependency latest advance'); END`,
 			`CREATE TRIGGER trg_external_stage_dependency_latest_no_delete BEFORE DELETE ON external_stage_dependency_latest
