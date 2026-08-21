@@ -47,6 +47,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import IssueSidePanel from '@/components/IssueSidePanel.vue'
 import AgentModeAttentionStrip from '@/components/agent-mode/AgentModeAttentionStrip.vue'
 import AgentModeConversation, { type NarrationLine } from '@/components/agent-mode/AgentModeConversation.vue'
+import AgentModeControlsCard from '@/components/agent-mode/AgentModeControlsCard.vue'
 import AgentModeVoiceConsole from '@/components/agent-mode/AgentModeVoiceConsole.vue'
 import AgentModeDetailLever, { type DetailLevel } from '@/components/agent-mode/AgentModeDetailLever.vue'
 import AgentModeFilterBar from '@/components/agent-mode/AgentModeFilterBar.vue'
@@ -78,9 +79,14 @@ import {
 import { AGENT_MODE_LOADER_KEY, useAgentModeDeliveries } from '@/composables/agent-mode/useAgentModeDeliveries'
 import { useAgentModeSelection } from '@/composables/agent-mode/useAgentModeSelection'
 import {
+  AGENT_MODE_CONTROLS_DEPENDENCIES_KEY,
+  useAgentModeControls,
+} from '@/composables/agent-mode/useAgentModeControls'
+import {
   AGENT_MODE_VOICE_DEPENDENCIES_KEY,
   useAgentModeVoice,
 } from '@/composables/agent-mode/useAgentModeVoice'
+import { buildControlVoicePhrase } from '@/composables/agent-mode/agentModeVoiceIntent'
 import { useInteractionHold } from '@/composables/agent-mode/useInteractionHold'
 import { formatRelativeTimeWithLocale, formatTimeWithLocale, useDateFormat } from '@/composables/useDateFormat'
 import { lsAgentModeSelectedKey } from '@/constants/storage'
@@ -829,6 +835,41 @@ const voiceSurfaceVisible = computed(() => voiceEnabled.value && (
   || (data.authorityVersion.value > 0 && data.status.value === 'loading' && !sessionExpired.value)
 ))
 const voiceOnline = computed(() => !data.degraded.value)
+const controlsDependencies = inject(AGENT_MODE_CONTROLS_DEPENDENCIES_KEY, undefined)
+const controls = useAgentModeControls({
+  delivery: selectedDelivery,
+  userId: computed(() => auth.user?.id ?? null),
+  online: voiceOnline,
+  degraded: data.degraded,
+  authorityAvailable: data.hasData,
+  authorityVersion: data.authorityVersion,
+  enabled: voiceEnabled,
+  dependencies: controlsDependencies,
+})
+const controlVoicePhrase = computed(() => {
+  const binding = controls.boundCommand.value
+  if (!binding || binding.command.status !== 'pending_confirmation') return ''
+  return buildControlVoicePhrase(binding.command, locale.value)
+})
+const voiceControlChallenge = computed(() => {
+  const binding = controls.boundCommand.value
+  const phrase = controlVoicePhrase.value
+  if (!binding || binding.command.status !== 'pending_confirmation' || phrase === '') return null
+  return { command: binding.command, issueKey: binding.command.display.issueKey, phrase }
+})
+
+// The compact controls row is authorized asynchronously after the selected
+// card was positioned. Keep that target inside the now-smaller scrollport
+// without moving focus away from either the canvas or a control the operator
+// is already using.
+watch([controls.state, controls.targets], async () => {
+  if (!compactConversation.value) return
+  await nextTick()
+  const id = selection.selectedId.value
+  if (!id || !canvasRef.value) return
+  canvasRef.value.querySelector<HTMLElement>(`[data-card-hit="${cssEscape(id)}"]`)
+    ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+}, { flush: 'post' })
 const voiceDependencies = inject(AGENT_MODE_VOICE_DEPENDENCIES_KEY, undefined)
 const voiceOneShotWarning = computed(() => selectedDelivery.value?.capabilities.oneShotRunActive === true
   && selectedDelivery.value.capabilities.liveNote !== true)
@@ -906,6 +947,8 @@ const voice = useAgentModeVoice({
   authorityAvailable: data.hasData,
   authorityVersion: data.authorityVersion,
   authorityEpoch: data.authorityEpoch,
+  controlTargets: controls.targets,
+  controlChallenge: voiceControlChallenge,
   enabled: voiceEnabled,
   dependencies: voiceDependencies,
   actions: {
@@ -914,6 +957,8 @@ const voice = useAgentModeVoice({
     clearFilters: () => voiceSetFilters({ ...EMPTY_FILTERS }),
     setDetail: voiceSetDetail,
     showDetails: voiceShowDetails,
+    requestControl: controls.activate,
+    confirmControl: controls.confirmExact,
     notePosted: () => data.retryNow(),
     authorityChanged: () => data.load({ background: false, force: true }),
   },
@@ -1171,6 +1216,24 @@ const selectedPosition = computed(() => {
 
     <AgentModeConversation :lines="narrationLines" :live="feedLive" :live-label="liveLabel" :compact="compactConversation">
       <template #controls>
+        <AgentModeControlsCard
+          v-if="voiceSurfaceVisible && selectedDelivery"
+          :state="controls.state.value"
+          :targets="controls.targets.value"
+          :command="controls.boundCommand.value"
+          :busy="controls.busy.value"
+          :available="controls.controlAvailable.value"
+          :transition-available="controls.transitionAvailable.value"
+          :selected-issue-key="selectedDelivery.issueKey"
+          :voice-phrase="controlVoicePhrase"
+          :focus-token="controls.focusToken.value"
+          :focus-return-token="controls.focusReturnToken.value"
+          @activate="controls.activate"
+          @confirm="controls.confirm"
+          @withdraw="controls.withdraw"
+          @retry="controls.initialize"
+          @dismiss="controls.dismissTerminal"
+        />
         <AgentModeVoiceConsole
           v-if="voiceSurfaceVisible"
           :mic-state="voice.micState.value"
@@ -1415,6 +1478,14 @@ const selectedPosition = computed(() => {
 }
 .am-root--compact :deep(.am-conv) { grid-column: 1; grid-row: 2; }
 .am-root--compact .am-canvas { grid-column: 1; grid-row: 1; }
+.am-root--compact :deep(.am-conv-controls) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 8px;
+}
+.am-root:not(.am-root--compact) :deep(.am-controls) { margin-bottom: 8px; }
+.am-root--compact :deep(.am-controls-live:empty) { display: none; }
 .am-root--ticket:not(.am-root--compact) {
   grid-template-columns: 232px minmax(420px, 1fr) minmax(360px, 420px);
 }

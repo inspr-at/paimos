@@ -45,6 +45,7 @@
 //    client request id so a retry can only ever create one comment.
 
 import type { Delivery } from '@/services/agentMode'
+import type { ControlCommand, ControlTarget } from '@/services/agentModeControls'
 import {
   parseVoiceCommand,
   resolveVoiceIntent,
@@ -149,6 +150,10 @@ export interface VoiceMachineState {
   /** Authorized project catalog for THIS snapshot — selector-independent,
    * so a project filter can name a project with no visible row. */
   projectCatalog: readonly VoiceProjectRef[]
+  /** Current ephemeral server target set. Every grant response replaces it. */
+  controlTargets: readonly ControlTarget[]
+  /** Visible persisted challenge bound to its original safe issue label. */
+  controlChallenge: { command: ControlCommand; issueKey: string; phrase: string } | null
   selectedId: string | null
   selectionEpoch: string
 }
@@ -159,6 +164,8 @@ export type VoiceEvent =
     type: 'context'
     deliveries: readonly Delivery[]
     projectCatalog: readonly VoiceProjectRef[]
+    controlTargets?: readonly ControlTarget[]
+    controlChallenge?: { command: ControlCommand; issueKey: string; phrase: string } | null
     selectedId: string | null
     selectionEpoch: string
   }
@@ -193,6 +200,8 @@ export function initialVoiceState(overrides: Partial<VoiceMachineState> = {}): V
     online: true,
     deliveries: [],
     projectCatalog: [],
+    controlTargets: [],
+    controlChallenge: null,
     selectedId: null,
     selectionEpoch: '',
     ...overrides,
@@ -258,6 +267,8 @@ function contextOf(state: VoiceMachineState): VoiceResolutionContext {
     deliveries: state.deliveries,
     selectedId: state.selectedId,
     projectCatalog: state.projectCatalog,
+    controlTargets: state.controlTargets,
+    controlChallenge: state.controlChallenge,
   }
 }
 
@@ -445,6 +456,8 @@ function handleContext(
   state: VoiceMachineState,
   deliveries: readonly Delivery[],
   projectCatalog: readonly VoiceProjectRef[],
+  controlTargets: readonly ControlTarget[],
+  controlChallenge: { command: ControlCommand; issueKey: string; phrase: string } | null,
   selectedId: string | null,
   selectionEpoch: string,
 ): VoiceReducerResult {
@@ -474,6 +487,8 @@ function handleContext(
       ...state,
       deliveries,
       projectCatalog,
+      controlTargets,
+      controlChallenge,
       selectedId,
       selectionEpoch,
       // Interim text is target-relative. A selection/authority epoch change
@@ -546,6 +561,8 @@ export function voiceReducer(state: VoiceMachineState, event: VoiceEvent): Voice
         state,
         event.deliveries,
         event.projectCatalog,
+        event.controlTargets ?? state.controlTargets,
+        event.controlChallenge === undefined ? state.controlChallenge : event.controlChallenge,
         event.selectedId,
         event.selectionEpoch,
       )

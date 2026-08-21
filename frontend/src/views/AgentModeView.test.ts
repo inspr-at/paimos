@@ -38,6 +38,10 @@ import {
   AGENT_MODE_VOICE_DEPENDENCIES_KEY,
   type AgentModeVoiceDependencies,
 } from '@/composables/agent-mode/useAgentModeVoice'
+import {
+  AGENT_MODE_CONTROLS_DEPENDENCIES_KEY,
+  type AgentModeControlsDependencies,
+} from '@/composables/agent-mode/useAgentModeControls'
 import { useConfirm } from '@/composables/useConfirm'
 import { AgentModeLoadError, type AgentModeSnapshot, type AgentModeSnapshotLoader } from '@/services/agentMode'
 import { AGGREGATE_FLAG_KEYS, AGGREGATE_LANDING_KEYS, AGGREGATE_STAGE_KEYS } from '@/services/agentModeAggregateSchema'
@@ -322,6 +326,23 @@ async function mountView(
   const loader = vi.fn(loaderImpl)
   const sources: FakeEventSource[] = []
   const voiceDependencies = options.voiceDependencies ?? makeVoiceDependencies()
+  const controlValues = new Map<string, string>()
+  const controlsDependencies: AgentModeControlsDependencies = {
+    storage: {
+      getItem: (key) => controlValues.get(key) ?? null,
+      setItem: (key, value) => { controlValues.set(key, value) },
+      removeItem: (key) => { controlValues.delete(key) },
+    },
+    issueGrant: vi.fn(async (deliveryKey) => ({
+      grantId: '11111111-1111-4111-8111-111111111111',
+      revision: 1,
+      deliveryKey,
+      issueKey: deliveryKey.replace(/^dlv-/, 'PAI-'),
+      actions: [],
+      targets: [],
+      expiresAt: '2027-01-02T03:04:05Z',
+    })),
+  }
   const eventSourceFactory = vi.fn(() => {
     const source = new FakeEventSource()
     sources.push(source)
@@ -347,6 +368,7 @@ async function mountView(
   app.use(router)
   app.use(i18n)
   app.provide(AGENT_MODE_VOICE_DEPENDENCIES_KEY, voiceDependencies)
+  app.provide(AGENT_MODE_CONTROLS_DEPENDENCIES_KEY, controlsDependencies)
   const root = document.getElementById('root')!
   app.mount(root)
   await flush()

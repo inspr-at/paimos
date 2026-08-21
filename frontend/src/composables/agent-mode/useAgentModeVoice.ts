@@ -39,6 +39,7 @@ import {
 import type {
   DetailLevelIntent,
   UnsupportedVoiceControl,
+  VoiceControlActivation,
   VoiceFilterPatch,
   VoiceProjectRef,
 } from '@/composables/agent-mode/agentModeVoiceIntent'
@@ -53,6 +54,7 @@ import {
   sessionExpired,
 } from '@/api/client'
 import type { Delivery } from '@/services/agentMode'
+import type { ControlCommand, ControlTarget } from '@/services/agentModeControls'
 import { parseAgentModeSearchFilter } from '@/services/agentModeTransport'
 import {
   loadAgentModeVoiceProjectCatalog,
@@ -75,6 +77,9 @@ export type AgentModeVoiceActionNotice =
   | 'note_cancelled'
   | 'note_discarded'
   | 'command_unsupported'
+  | 'control_requested'
+  | 'control_confirmed'
+  | 'control_blocked'
 
 export type AgentModeVoiceNotice = VoiceNoticeCode | AgentModeVoiceActionNotice
 export type AgentModeVoiceError = 'microphone' | 'transcription' | 'speech' | 'note'
@@ -93,6 +98,10 @@ export interface AgentModeVoiceActions {
   clearFilters: () => boolean | Promise<boolean>
   setDetail: (level: DetailLevelIntent) => boolean | Promise<boolean>
   showDetails: (deliveryId: string) => boolean | Promise<boolean>
+  /** First utterance creates only the visible two-phase challenge. */
+  requestControl?: (activation: VoiceControlActivation) => boolean | Promise<boolean>
+  /** Second utterance must still match this exact persisted id + revision. */
+  confirmControl?: (commandId: string, statusRevision: number) => boolean | Promise<boolean>
   notePosted?: () => void | Promise<void>
   /** Force one canonical Agent Mode snapshot after an authority epoch change.
    * The separately observed authorityVersion is the success proof. */
@@ -132,9 +141,17 @@ export interface UseAgentModeVoiceOptions {
   authorityVersion: Readonly<Ref<number>>
   /** Exact response epoch of that committed canonical snapshot. */
   authorityEpoch: Readonly<Ref<string | null>>
+  controlTargets?: Readonly<Ref<readonly ControlTarget[]>>
+  controlChallenge?: Readonly<Ref<AgentModeVoiceControlChallenge | null>>
   enabled?: Readonly<Ref<boolean>>
   actions: AgentModeVoiceActions
   dependencies?: AgentModeVoiceDependencies
+}
+
+export interface AgentModeVoiceControlChallenge {
+  command: ControlCommand
+  issueKey: string
+  phrase: string
 }
 
 function randomSessionNonce(): string {
@@ -178,6 +195,8 @@ function resolverContextSignature(
   projectCatalog: readonly VoiceProjectRef[],
   selectedId: string | null,
   travelOrder: readonly string[],
+  controlTargets: readonly ControlTarget[],
+  controlChallenge: AgentModeVoiceControlChallenge | null,
 ): string {
   return JSON.stringify([
     selectedId,
@@ -202,6 +221,16 @@ function resolverContextSignature(
       project.projectKey,
       project.projectName,
     ]),
+    controlTargets,
+    controlChallenge == null ? null : [
+      controlChallenge.command.commandId,
+      controlChallenge.command.statusRevision,
+      controlChallenge.command.status,
+      controlChallenge.command.challengeTemplate,
+      controlChallenge.command.display,
+      controlChallenge.issueKey,
+      controlChallenge.phrase,
+    ],
   ])
 }
 
@@ -286,6 +315,8 @@ export function useAgentModeVoice(options: UseAgentModeVoiceOptions) {
       type: 'context',
       deliveries: canOperate() ? options.deliveries.value : [],
       projectCatalog: canOperate() ? projectCatalog.value : [],
+      controlTargets: canOperate() ? options.controlTargets?.value ?? [] : [],
+      controlChallenge: canOperate() ? options.controlChallenge?.value ?? null : null,
       selectedId: canOperate() ? options.selectedId.value : null,
       selectionEpoch: selectionEpoch(),
     }
@@ -298,8 +329,10 @@ export function useAgentModeVoice(options: UseAgentModeVoiceOptions) {
           projectCatalog.value,
           options.selectedId.value,
           options.travelOrder.value,
+          options.controlTargets?.value ?? [],
+          options.controlChallenge?.value ?? null,
         )
-      : resolverContextSignature([], [], null, [])
+      : resolverContextSignature([], [], null, [], [], null)
   }
 
   function reduceNow(event: VoiceEvent): VoiceEffect[] {
@@ -527,6 +560,21 @@ export function useAgentModeVoice(options: UseAgentModeVoiceOptions) {
       case 'cancel_note':
         // These are consumed by the pure machine before an execute effect.
         break
+      case 'request_control': {
+        const created = await options.actions.requestControl?.(command.activation) ?? false
+        if (!alive || generation !== operationGeneration) return
+        setNotice(created ? 'control_requested' : 'control_blocked')
+        break
+      }
+      case 'confirm_control': {
+        const confirmed = await options.actions.confirmControl?.(
+          command.commandId,
+          command.statusRevision,
+        ) ?? false
+        if (!alive || generation !== operationGeneration) return
+        setNotice(confirmed ? 'control_confirmed' : 'control_blocked')
+        break
+      }
     }
   }
 
@@ -865,7 +913,7 @@ export function useAgentModeVoice(options: UseAgentModeVoiceOptions) {
   function resetEphemeralState() {
     operationGeneration += 1
     utteranceContextGeneration += 1
-    lastResolverContextSignature = resolverContextSignature([], [], null, [])
+    lastResolverContextSignature = resolverContextSignature([], [], null, [], [], null)
     lastTypedTargetSignature = typedTargetSignature(null)
     effectChain = Promise.resolve()
     pendingEffectBatches.clear()
@@ -941,6 +989,8 @@ export function useAgentModeVoice(options: UseAgentModeVoiceOptions) {
     online: options.online.value,
     deliveries: canOperate() ? options.deliveries.value : [],
     projectCatalog: [],
+    controlTargets: canOperate() ? options.controlTargets?.value ?? [] : [],
+    controlChallenge: canOperate() ? options.controlChallenge?.value ?? null : null,
     selectedId: canOperate() ? options.selectedId.value : null,
     selectionEpoch: selectionEpoch(),
   })
@@ -958,6 +1008,8 @@ export function useAgentModeVoice(options: UseAgentModeVoiceOptions) {
   }, { flush: 'sync' })
   watch(options.deliveries, syncContext, { flush: 'sync' })
   watch(options.travelOrder, syncContext, { flush: 'sync' })
+  if (options.controlTargets) watch(options.controlTargets, syncContext, { flush: 'sync' })
+  if (options.controlChallenge) watch(options.controlChallenge, syncContext, { flush: 'sync' })
   watch(options.online, (online) => {
     if (!alive) return
     if (!online) {

@@ -25,10 +25,9 @@
 // Three hard contracts live here:
 //
 //  1. SUPPORTED INTENTS ONLY. Selection, travel, filters, semantic zoom,
-//     status read-back, and the internal-note lifecycle. Supervisory verbs
-//     (approve / pause / resume / cancel-job / priority) are recognized only
-//     so they can be REFUSED — they never become a command and never reach
-//     the PAI-809 control surface.
+//     status read-back, the internal-note lifecycle, and the deliberately
+//     narrow PAI-809 two-utterance control grammar. Unscoped supervisory
+//     verbs are still recognized only so they can be refused.
 //  2. PRONOUNS ARE EXACT. "this" / "das" resolve to the current persistent
 //     authorized selection or to nothing at all. They never guess.
 //  3. AMBIGUITY IS BOUNDED AND ORDERED. At most MAX_VOICE_CANDIDATES
@@ -41,6 +40,7 @@
 // nothing inside it can turn into a command.
 
 import type { Delivery } from '@/services/agentMode'
+import type { ControlCommand, ControlPriority, ControlTarget } from '@/services/agentModeControls'
 import { compareDeliveries } from './agentModeOrdering'
 import type { HealthFilter } from './agentModeFilters'
 
@@ -156,6 +156,50 @@ export type DetailLevelIntent = 1 | 10 | 100
  * silently doing nothing — and never forwarded anywhere. */
 export type UnsupportedVoiceControl = 'approve' | 'pause' | 'resume' | 'cancel_job' | 'priority'
 
+export type ScopedVoiceControlRequest =
+  | { action: 'issue.priority.set'; issueKey: string; priority: ControlPriority; raw: string }
+  | { action: 'run.cancel.queued' | 'run.cancel.running'; issueKey: string; raw: string }
+  | { action: 'input.respond'; issueKey: string; response: 'approve' | 'reject'; raw: string }
+  | { action: 'input.respond'; issueKey: string; response: 'choice'; choiceOrdinal: number; raw: string }
+  | { action: 'run.pause' | 'run.resume'; issueKey: string; raw: string }
+
+export type VoiceControlActivation =
+  | { target: Extract<ControlTarget, { action: 'issue.priority.set' }>; priority: ControlPriority }
+  | { target: Extract<ControlTarget, { action: 'run.cancel.queued' | 'run.cancel.running' }> }
+  | { target: Extract<ControlTarget, { action: 'input.respond'; inputKind: 'approval' }>; response: 'approve' | 'reject' }
+  | { target: Extract<ControlTarget, { action: 'input.respond'; inputKind: 'choice' }>; response: 'choice'; choiceOrdinal: number }
+  | { target: Extract<ControlTarget, { action: 'run.pause' | 'run.resume' }> }
+
+/** The caption and the only accepted confirming utterance for one persisted
+ * challenge. It is derived solely from the closed server template/display and
+ * the challenge's original issue label, never from caller prose. */
+export function buildControlVoicePhrase(
+  command: ControlCommand,
+  locale: string,
+): string {
+  const de = locale.toLowerCase().startsWith('de')
+  const issueKey = command.display.issueKey
+  switch (command.challengeTemplate) {
+    case 'issue_priority_set': {
+      if (!('priority' in command.display)) return ''
+      const priority = de
+        ? { high: 'Hoch', medium: 'Mittel', low: 'Niedrig' }[command.display.priority]
+        : { high: 'High', medium: 'Medium', low: 'Low' }[command.display.priority]
+      return `${de ? `Priorität auf ${priority} setzen` : `Set priority to ${priority}`} ${issueKey}`
+    }
+    case 'run_cancel_queued': return `${de ? 'Wartenden Lauf abbrechen' : 'Cancel queued run'} ${issueKey}`
+    case 'run_cancel_running': return `${de ? 'Laufenden Lauf abbrechen' : 'Cancel running run'} ${issueKey}`
+    case 'input_approve': return `${de ? 'Anfrage freigeben' : 'Approve request'} ${issueKey}`
+    case 'input_reject': return `${de ? 'Anfrage ablehnen' : 'Reject request'} ${issueKey}`
+    case 'input_choice': {
+      if (!('choiceOrdinal' in command.display)) return ''
+      return `${de ? `Option ${command.display.choiceOrdinal} auswählen` : `Choose option ${command.display.choiceOrdinal}`} ${issueKey}`
+    }
+    case 'run_pause': return `${de ? 'Lauf pausieren' : 'Pause run'} ${issueKey}`
+    case 'run_resume': return `${de ? 'Lauf fortsetzen' : 'Resume run'} ${issueKey}`
+  }
+}
+
 export type VoiceFilterIntent =
   | { type: 'project'; text: string }
   | { type: 'health'; health: Exclude<HealthFilter, 'all'> }
@@ -177,6 +221,7 @@ export type VoiceIntent =
   | { kind: 'confirm_note' }
   | { kind: 'cancel_note' }
   | { kind: 'candidate'; index: number }
+  | { kind: 'control'; request: ScopedVoiceControlRequest }
   | { kind: 'unsupported'; control: UnsupportedVoiceControl }
   | { kind: 'unknown' }
 
@@ -482,6 +527,63 @@ function parseSupervisory(tokens: readonly VoiceToken[]): VoiceIntent | null {
   return null
 }
 
+type ScopedVoiceControlSeed =
+  | { action: 'issue.priority.set'; priority: ControlPriority }
+  | { action: 'run.cancel.queued' | 'run.cancel.running' }
+  | { action: 'input.respond'; response: 'approve' | 'reject' }
+  | { action: 'run.pause' | 'run.resume' }
+
+const SCOPED_CONTROL_PHRASES: Array<{ phrase: string; request: ScopedVoiceControlSeed }> = [
+  { phrase: 'set priority to high', request: { action: 'issue.priority.set', priority: 'high' } },
+  { phrase: 'set priority to medium', request: { action: 'issue.priority.set', priority: 'medium' } },
+  { phrase: 'set priority to low', request: { action: 'issue.priority.set', priority: 'low' } },
+  { phrase: 'prioritat auf hoch setzen', request: { action: 'issue.priority.set', priority: 'high' } },
+  { phrase: 'prioritat auf mittel setzen', request: { action: 'issue.priority.set', priority: 'medium' } },
+  { phrase: 'prioritat auf niedrig setzen', request: { action: 'issue.priority.set', priority: 'low' } },
+  { phrase: 'cancel queued run', request: { action: 'run.cancel.queued' } },
+  { phrase: 'wartenden lauf abbrechen', request: { action: 'run.cancel.queued' } },
+  { phrase: 'cancel running run', request: { action: 'run.cancel.running' } },
+  { phrase: 'laufenden lauf abbrechen', request: { action: 'run.cancel.running' } },
+  { phrase: 'approve request', request: { action: 'input.respond', response: 'approve' } },
+  { phrase: 'anfrage freigeben', request: { action: 'input.respond', response: 'approve' } },
+  { phrase: 'reject request', request: { action: 'input.respond', response: 'reject' } },
+  { phrase: 'anfrage ablehnen', request: { action: 'input.respond', response: 'reject' } },
+  { phrase: 'pause run', request: { action: 'run.pause' } },
+  { phrase: 'lauf pausieren', request: { action: 'run.pause' } },
+  { phrase: 'resume run', request: { action: 'run.resume' } },
+  { phrase: 'lauf fortsetzen', request: { action: 'run.resume' } },
+]
+
+function parseScopedControl(raw: string, tokens: readonly VoiceToken[]): VoiceIntent | null {
+  let key: { key: string; next: number } | null = null
+  let keyIndex = -1
+  for (const index of [tokens.length - 2, tokens.length - 1]) {
+    if (index < 0) continue
+    const candidate = readIssueKey(tokens, index)
+    if (candidate?.next === tokens.length) {
+      key = candidate
+      keyIndex = index
+      break
+    }
+  }
+  if (!key) return null
+  const phrase = tokens.slice(0, keyIndex).map((token) => token.norm).join(' ')
+  const choice = /^(?:choose option|option auswahlen) ([1-8])$/.exec(phrase)
+  if (choice) {
+    return {
+      kind: 'control',
+      request: {
+        action: 'input.respond', issueKey: key.key, response: 'choice',
+        choiceOrdinal: Number(choice[1]), raw,
+      },
+    }
+  }
+  const entry = SCOPED_CONTROL_PHRASES.find((candidate) => folded(candidate.phrase).join(' ') === phrase)
+  return entry
+    ? { kind: 'control', request: { ...entry.request, issueKey: key.key, raw } as ScopedVoiceControlRequest }
+    : null
+}
+
 function parseCandidate(tokens: readonly VoiceToken[], candidateCount: number): VoiceIntent | null {
   for (let i = 0; i < tokens.length; i += 1) {
     if (!CANDIDATE_MARKERS.has(tokens[i].norm)) continue
@@ -601,6 +703,11 @@ export function parseVoiceCommand(raw: string, opts: ParseVoiceOptions = {}): Vo
   const tokens = stripArticles(stripTrailingFillers(stripLeading(all, LEADING_FILLERS)))
   if (tokens.length === 0) return { kind: 'unknown' }
 
+  // Exact, delivery-named control phrases are the only PAI-809 commands that
+  // can cross the old explicit-refusal boundary.
+  const scopedControl = parseScopedControl(raw, tokens)
+  if (scopedControl) return scopedControl
+
   // 2 — supervisory verbs must be refused before "cancel" can mean the note.
   const supervisory = parseSupervisory(tokens)
   if (supervisory) return supervisory
@@ -671,6 +778,11 @@ export interface VoiceResolutionContext {
    * consulted for one, so the project vocabulary cannot shrink to whatever
    * the previous filter happened to leave visible. */
   projectCatalog: readonly VoiceProjectRef[]
+  /** Fresh server-owned target descriptors. Never synthesized from delivery
+   * telemetry or action labels. */
+  controlTargets?: readonly ControlTarget[]
+  /** The visible persisted challenge, if any. */
+  controlChallenge?: { command: ControlCommand; issueKey: string; phrase: string } | null
 }
 
 export interface VoiceCandidate {
@@ -703,6 +815,8 @@ export type VoiceCommand =
   | { type: 'draft_note'; deliveryId: string; body: string }
   | { type: 'confirm_note' }
   | { type: 'cancel_note' }
+  | { type: 'request_control'; activation: VoiceControlActivation }
+  | { type: 'confirm_control'; commandId: string; statusRevision: number }
 
 export type VoiceRejection =
   | 'no_match'
@@ -717,6 +831,8 @@ export type VoiceRejection =
    * nothing to resolve a spoken project name against. */
   | 'no_project_catalog'
   | 'unknown_command'
+  | 'control_unavailable'
+  | 'control_confirmation_mismatch'
 
 export type VoiceResolution =
   | { kind: 'command'; command: VoiceCommand }
@@ -846,6 +962,53 @@ export function resolveVoiceIntent(intent: VoiceIntent, ctx: VoiceResolutionCont
 
     case 'unknown':
       return { kind: 'rejected', reason: 'unknown_command' }
+
+    case 'control': {
+      const current = selectedDelivery(ctx)
+      if (!current || current.issueKey.toUpperCase() !== intent.request.issueKey) {
+        return { kind: 'rejected', reason: 'no_selection' }
+      }
+      const challenge = ctx.controlChallenge
+      if (challenge) {
+        if (
+          challenge.issueKey !== intent.request.issueKey
+          || foldVoiceText(intent.request.raw) !== foldVoiceText(challenge.phrase)
+          || challenge.command.status !== 'pending_confirmation'
+        ) return { kind: 'rejected', reason: 'control_confirmation_mismatch' }
+        return {
+          kind: 'command',
+          command: {
+            type: 'confirm_control',
+            commandId: challenge.command.commandId,
+            statusRevision: challenge.command.statusRevision,
+          },
+        }
+      }
+      const targets = (ctx.controlTargets ?? []).filter((target) => target.action === intent.request.action)
+      if (targets.length !== 1) return { kind: 'rejected', reason: 'control_unavailable' }
+      const target = targets[0]
+      switch (intent.request.action) {
+        case 'issue.priority.set':
+          return { kind: 'command', command: { type: 'request_control', activation: { target: target as Extract<ControlTarget, { action: 'issue.priority.set' }>, priority: intent.request.priority } } }
+        case 'run.cancel.queued':
+        case 'run.cancel.running':
+          return { kind: 'command', command: { type: 'request_control', activation: { target: target as Extract<ControlTarget, { action: 'run.cancel.queued' | 'run.cancel.running' }> } } }
+        case 'run.pause':
+        case 'run.resume':
+          return { kind: 'command', command: { type: 'request_control', activation: { target: target as Extract<ControlTarget, { action: 'run.pause' | 'run.resume' }> } } }
+        case 'input.respond': {
+          const input = target as Extract<ControlTarget, { action: 'input.respond' }>
+          if (intent.request.response === 'choice') {
+            if (input.inputKind !== 'choice' || intent.request.choiceOrdinal > input.optionCodes.length) {
+              return { kind: 'rejected', reason: 'control_unavailable' }
+            }
+            return { kind: 'command', command: { type: 'request_control', activation: { target: input, response: 'choice', choiceOrdinal: intent.request.choiceOrdinal } } }
+          }
+          if (input.inputKind !== 'approval') return { kind: 'rejected', reason: 'control_unavailable' }
+          return { kind: 'command', command: { type: 'request_control', activation: { target: input, response: intent.request.response } } }
+        }
+      }
+    }
 
     case 'step':
       return { kind: 'command', command: { type: 'step', direction: intent.direction } }

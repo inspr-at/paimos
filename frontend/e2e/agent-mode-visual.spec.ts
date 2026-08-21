@@ -83,6 +83,19 @@ async function installApiFixtures(page: Page) {
       }
       return fulfill(makeFixtureSnapshot(10))
     }
+    if (/^\/api\/agent-mode\/deliveries\/dlv-\d+\/control-capability-grants$/.test(path)) {
+      const deliveryKey = path.split('/')[4]
+      const selected = makeFixtureSnapshot(10).rows?.find((delivery) => delivery.delivery_id === deliveryKey)
+      return fulfill({
+        grant_id: '11111111-1111-4111-8111-111111111111',
+        revision: 1,
+        delivery_key: deliveryKey,
+        issue_key: selected?.issue_key ?? deliveryKey.replace(/^dlv-/, 'PAI-'),
+        actions: ['run.cancel.running'],
+        targets: [{ action: 'run.cancel.running', run_id: 42 }],
+        expires_at: '2027-01-02T03:04:05Z',
+      })
+    }
     if (path === '/api/issues/5008') return fulfill(visualIssue)
     if (path === '/api/issues/5008/activity') {
       return fulfill({ undo_rows: [], redo_rows: [], history_rows: [], stack_depth: 0 })
@@ -151,11 +164,41 @@ async function expectDockClear(page: Page) {
       // DOMRects are clipped to the canvas paint box: off-scroll content can
       // geometrically pass behind the overflow boundary but cannot be painted
       // there, which is the visual-occlusion condition under test.
-      cardIntersections: cards.filter((card) => intersects(visibleCardRect(card), dock)).length,
+      cardIntersections: cards.filter((card) => {
+        const painted = visibleCardRect(card)
+        return painted.width > 0 && painted.height > 0 && intersects(painted, dock)
+      }).length,
     }
   })
   expect(result.canvasIntersectsDock).toBe(false)
   expect(result.cardIntersections).toBe(0)
+}
+
+async function expectControlVoiceGeometry(page: Page) {
+  const result = await page.evaluate(() => {
+    const controls = document.querySelector<HTMLElement>('.am-controls')!
+    const voice = document.querySelector<HTMLElement>('.am-voice')!
+    const host = document.querySelector<HTMLElement>('.am-conv-controls')!
+    const controlRect = controls.getBoundingClientRect()
+    const voiceRect = voice.getBoundingClientRect()
+    const hostRect = host.getBoundingClientRect()
+    const intersects = controlRect.left < voiceRect.right && controlRect.right > voiceRect.left
+      && controlRect.top < voiceRect.bottom && controlRect.bottom > voiceRect.top
+    return {
+      ordered: !!(controls.compareDocumentPosition(voice) & Node.DOCUMENT_POSITION_FOLLOWING),
+      intersects,
+      controlsWithinHost: controlRect.left >= hostRect.left && controlRect.right <= hostRect.right,
+      voiceWithinHost: voiceRect.left >= hostRect.left && voiceRect.right <= hostRect.right,
+      horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    }
+  })
+  expect(result).toEqual({
+    ordered: true,
+    intersects: false,
+    controlsWithinHost: true,
+    voiceWithinHost: true,
+    horizontalOverflow: false,
+  })
 }
 
 async function openReady(page: Page, width: number, height: number, extra = '') {
@@ -180,6 +223,7 @@ test('PAI-805 final visual and geometry gate', async ({ page }) => {
 
   await openReady(page, 1440, 1000)
   await expectSelectedAnchorInInitialCanvas(page)
+  await expectControlVoiceGeometry(page)
   const logo = page.locator('.aml-brand-logo')
   await expect(logo).toHaveAttribute('src', '/logo.svg')
   expect(await logo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
@@ -187,6 +231,7 @@ test('PAI-805 final visual and geometry gate', async ({ page }) => {
 
   for (const [width, height] of [[900, 800], [736, 900], [520, 900], [390, 844]] as const) {
     await openReady(page, width, height)
+    await expectControlVoiceGeometry(page)
     await expectDockClear(page)
     await page.locator('.am-canvas').evaluate((canvas) => { canvas.scrollTop = canvas.scrollHeight })
     await expectDockClear(page)

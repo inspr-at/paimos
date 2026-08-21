@@ -22,6 +22,7 @@ import { normalizeWireSnapshot } from '@/services/agentModeTransport'
 import type { Delivery } from '@/services/agentMode'
 import {
   MAX_VOICE_CANDIDATES,
+  buildControlVoicePhrase,
   foldVoiceText,
   foldVoiceToken,
   normalizeIssueKey,
@@ -32,6 +33,7 @@ import {
   type VoiceProjectRef,
   type VoiceResolutionContext,
 } from './agentModeVoiceIntent'
+import type { ControlCommand } from '@/services/agentModeControls'
 
 const snapshot = normalizeWireSnapshot(makeFixtureSnapshot(10), 0)
 const fixtures = snapshot.deliveries
@@ -100,6 +102,76 @@ describe('agentModeVoiceIntent — normalization', () => {
 
   it.each(['808', 'PAI', 'PAI-808 and more', 'not a key', ''])('rejects %s as an issue key', (input) => {
     expect(normalizeIssueKey(input)).toBeNull()
+  })
+})
+
+describe('agentModeVoiceIntent — exact two-utterance controls', () => {
+  const command: ControlCommand = {
+    commandId: '11111111-1111-4111-8111-111111111111',
+    statusRevision: 3,
+    action: 'run.cancel.running',
+    status: 'pending_confirmation',
+    challengeTemplate: 'run_cancel_running',
+    expiresAt: '2026-08-21T20:00:00Z',
+    display: { issueKey: 'PAI-812', deliveryKey: 'dlv-812', runId: 42 },
+    outcome: null,
+    reason: null,
+  }
+
+  it.each([
+    ['en', 'Cancel running run PAI-812'],
+    ['de', 'Laufenden Lauf abbrechen PAI-812'],
+  ])('parses and resolves the scoped %s phrase from a current server target', (locale, phrase) => {
+    expect(buildControlVoicePhrase(command, locale)).toBe(phrase)
+    const intent = parse(phrase)
+    expect(intent.kind).toBe('control')
+    expect(resolveVoiceIntent(intent, ctx({
+      selectedId: base.id,
+      controlTargets: [{ action: 'run.cancel.running', runId: 42 }],
+    }))).toEqual({
+      kind: 'command',
+      command: {
+        type: 'request_control',
+        activation: { target: { action: 'run.cancel.running', runId: 42 } },
+      },
+    })
+  })
+
+  it('confirms only the exact visible phrase and exact persisted revision', () => {
+    const phrase = buildControlVoicePhrase(command, 'en')
+    const context = ctx({
+      selectedId: base.id,
+      controlTargets: [{ action: 'run.cancel.running', runId: 99 }],
+      controlChallenge: { command, issueKey: 'PAI-812', phrase },
+    })
+    expect(resolveVoiceIntent(parse(phrase), context)).toEqual({
+      kind: 'command',
+      command: { type: 'confirm_control', commandId: command.commandId, statusRevision: 3 },
+    })
+    expect(resolveVoiceIntent(parse('Cancel queued run PAI-812'), context))
+      .toEqual({ kind: 'rejected', reason: 'control_confirmation_mismatch' })
+    expect(resolveVoiceIntent(parse('confirm'), context))
+      .toEqual({ kind: 'command', command: { type: 'confirm_note' } })
+    expect(resolveVoiceIntent(parse('yes'), context))
+      .toEqual({ kind: 'rejected', reason: 'unknown_command' })
+  })
+
+  it('invalidates scoped requests on selection drift and ambiguous target replacement', () => {
+    const intent = parse('Approve request PAI-812')
+    expect(resolveVoiceIntent(intent, ctx({
+      selectedId: fixtures[3].id,
+      controlTargets: [{
+        action: 'input.respond', inputRequestId: '22222222-2222-4222-8222-222222222222',
+        inputRequestRevision: 1, inputKind: 'approval',
+      }],
+    }))).toEqual({ kind: 'rejected', reason: 'no_selection' })
+    expect(resolveVoiceIntent(intent, ctx({
+      selectedId: base.id,
+      controlTargets: [
+        { action: 'input.respond', inputRequestId: '22222222-2222-4222-8222-222222222222', inputRequestRevision: 1, inputKind: 'approval' },
+        { action: 'input.respond', inputRequestId: '33333333-3333-4333-8333-333333333333', inputRequestRevision: 1, inputKind: 'approval' },
+      ],
+    }))).toEqual({ kind: 'rejected', reason: 'control_unavailable' })
   })
 })
 

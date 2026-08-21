@@ -738,6 +738,56 @@ describe('agentModeVoiceMachine — offline hold and reconnect', () => {
   })
 })
 
+describe('agentModeVoiceMachine — PAI-809 control binding', () => {
+  const controlCommand = {
+    commandId: '11111111-1111-4111-8111-111111111111',
+    statusRevision: 4,
+    action: 'run.cancel.running' as const,
+    status: 'pending_confirmation' as const,
+    challengeTemplate: 'run_cancel_running' as const,
+    expiresAt: '2026-08-21T20:00:00Z',
+    display: { issueKey: 'PAI-812', deliveryKey: 'dlv-812', runId: 42 },
+    outcome: null,
+    reason: null,
+  }
+
+  it('creates on the first final, confirms only a new final, and dedupes the old utterance', () => {
+    const first = voiceReducer(primed({
+      controlTargets: [{ action: 'run.cancel.running', runId: 42 }],
+    }), say('Cancel running run PAI-812', 'control-1', 1))
+    expect(first.effects).toEqual([{
+      type: 'execute',
+      command: { type: 'request_control', activation: { target: { action: 'run.cancel.running', runId: 42 } } },
+    }])
+
+    const challenged = voiceReducer(first.state, {
+      type: 'context', deliveries: fixtures, projectCatalog: CATALOG,
+      controlTargets: [{ action: 'run.cancel.running', runId: 42 }],
+      controlChallenge: { command: controlCommand, issueKey: 'PAI-812', phrase: 'Cancel running run PAI-812' },
+      selectedId: selected.id, selectionEpoch: 'epoch-1',
+    }).state
+    expect(voiceReducer(challenged, say('Cancel running run PAI-812', 'control-1', 1)).effects).toEqual([])
+    expect(voiceReducer(challenged, say('Cancel running run PAI-812', 'control-2', 2)).effects).toEqual([{
+      type: 'execute',
+      command: { type: 'confirm_control', commandId: controlCommand.commandId, statusRevision: 4 },
+    }])
+  })
+
+  it('drops the visible challenge vocabulary on selection/target replacement', () => {
+    const state = primed({
+      controlTargets: [{ action: 'run.cancel.running', runId: 42 }],
+      controlChallenge: { command: controlCommand, issueKey: 'PAI-812', phrase: 'Cancel running run PAI-812' },
+    })
+    const moved = voiceReducer(state, {
+      type: 'context', deliveries: fixtures, projectCatalog: CATALOG,
+      controlTargets: [], controlChallenge: null,
+      selectedId: other.id, selectionEpoch: 'epoch-2',
+    })
+    expect(voiceReducer(moved.state, say('Cancel running run PAI-812', 'control-3')).effects)
+      .toEqual([{ type: 'notice', code: 'no_selection' }])
+  })
+})
+
 describe('PAI-808 owned sources — hygiene', () => {
   const OWNED = [
     '../../composables/agent-mode/agentModeVoiceIntent.ts',

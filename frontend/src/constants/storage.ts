@@ -116,3 +116,9 @@ export const LS_INTAKE_TTS_MUTED = 'paimos:intake:tts-muted'
 /** PAI-805: Agent Mode — last selected delivery per user (stable delivery id). */
 export const lsAgentModeSelectedKey = (userId: number | undefined) =>
   `paimos:agent-mode:selected:${userId ?? 0}`
+
+/** PAI-809: opaque pending/accepted command id for one effective user and
+ * canonical delivery. This key is sessionStorage-only; callers must not use
+ * it with localStorage. */
+export const ssAgentModeControlCommandKey = (userId: number, deliveryKey: string) =>
+  `paimos:agent-mode:control-command:${userId}:${encodeURIComponent(deliveryKey)}`

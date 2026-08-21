@@ -207,6 +207,8 @@ function fixture(overrides: {
     clearFilters: vi.fn(async () => true),
     setDetail: vi.fn(async () => true),
     showDetails: vi.fn(async () => true),
+    requestControl: vi.fn(async () => true),
+    confirmControl: vi.fn(async () => true),
     notePosted: vi.fn(async () => {}),
     authorityChanged: vi.fn(overrides.authorityChanged ?? (async () => {})),
   }
