@@ -54,6 +54,80 @@ func seedDeliveryIssue(t *testing.T, database *sql.DB) (issueID, projectID, user
 	return
 }
 
+func TestControlPriorityChangeAppendsFreshTransactionalHint(t *testing.T) {
+	database := openDeliveryTestDB(t)
+	issueID, projectID, _ := seedDeliveryIssue(t, database)
+	result, err := database.Exec(`INSERT INTO deliveries(issue_id,delivery_key,project_id_hint,created_at,updated_at)
+		VALUES(?,?,?,'2026-08-20T10:00:00Z','2026-08-20T10:00:00Z')`, issueID, fmt.Sprintf("issue:%d", issueID), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveryID, _ := result.LastInsertId()
+	reporter, err := database.Exec(`INSERT INTO delivery_reporters(delivery_id,reporter_type,opaque_key,created_at)
+		VALUES(?,'system','control-test','2026-08-20T10:00:00Z')`, deliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporterID, _ := reporter.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+		payload_hash,kind,reporter_id,server_received_at)
+		VALUES(?,1,'control-base',zeroblob(32),'attempt_started',?,'2026-08-20T10:00:00Z')`, deliveryID, reporterID); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(database, Options{Clock: ClockFunc(func() time.Time {
+		return time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	})})
+
+	tx, err := database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hint, err := store.RecordControlChangeTx(context.Background(), tx, ControlChangeRequest{
+		IssueID: issueID,
+		Action:  "issue.priority.set",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hint.InternalID <= 0 || hint.RootIssueID != issueID || hint.DeliveryID != deliveryID ||
+		hint.DeliveryRevision != 1 || hint.Kind != "issue" || hint.SourceKind != "issue" ||
+		hint.SourceID == nil || *hint.SourceID != issueID {
+		t.Fatalf("unexpected control hint: %+v", hint)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM delivery_change_log WHERE delivery_id=?`, deliveryID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("rolled-back control hint leaked: count=%d", count)
+	}
+
+	tx, err = database.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hint, err = store.RecordControlChangeTx(context.Background(), tx, ControlChangeRequest{
+		IssueID: issueID,
+		Action:  "issue.priority.set",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var persistedID int64
+	if err := database.QueryRow(`SELECT id FROM delivery_change_log WHERE delivery_id=?`, deliveryID).Scan(&persistedID); err != nil {
+		t.Fatal(err)
+	}
+	if persistedID != hint.InternalID {
+		t.Fatalf("persisted hint id=%d, want %d", persistedID, hint.InternalID)
+	}
+}
+
 func TestStableUninstrumentedSnapshotDoesNotWriteAndShowsLegacyActive(t *testing.T) {
 	database := openDeliveryTestDB(t)
 	issueID, projectID, userID := seedDeliveryIssue(t, database)

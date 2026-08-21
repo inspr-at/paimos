@@ -36,7 +36,6 @@ import (
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/handlers/crm"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
-	"github.com/inspr-at/paimos/backend/httpcontract"
 	"github.com/inspr-at/paimos/backend/secretinput"
 	"github.com/inspr-at/paimos/backend/storage"
 
@@ -359,6 +358,12 @@ func isViteHashed(urlPath string) bool {
 // so the OpenAPI-coverage guard test can walk the route tree without
 // booting the server, which keeps the published public surface auditable.
 func mountAPI(r chi.Router) {
+	// Classified control families retain their fixed privacy envelope even
+	// when chi rejects a missing route or wrong method before a handler runs.
+	// Ordinary API paths keep chi's existing behavior.
+	r.NotFound(handlers.ControlAwareNotFound)
+	r.MethodNotAllowed(handlers.ControlAwareMethodNotAllowed)
+
 	// ── Strictly public endpoints ────────────────────────────────
 	// Everything here is accessible without a session. Keep this
 	// list short and auditable — the only valid reasons for a
@@ -481,8 +486,8 @@ func mountAPI(r chi.Router) {
 		r.Use(auth.RequireAgentModeInternal)
 		r.Use(auth.CSRFMiddleware)
 		r.Use(auth.MustChangePasswordGate)
-		r.NotFound(httpcontract.WriteAgentModeNotFound)
-		r.MethodNotAllowed(httpcontract.WriteAgentModeNotFound)
+		r.NotFound(handlers.AgentModeControlAwareNotFound)
+		r.MethodNotAllowed(handlers.AgentModeControlAwareMethodNotAllowed)
 
 		// Literal events must precede the delivery-key wildcard.
 		r.Get("/deliveries/events", handlers.AgentModeEvents)
@@ -491,6 +496,18 @@ func mountAPI(r chi.Router) {
 		r.Get("/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
 		r.Post("/voice/transcribe", handlers.TranscribeAgentModeVoice)
 		r.Post("/voice/speak", handlers.SpeakAgentModeVoice)
+		handlers.MountAgentModeControlRoutes(r)
+	})
+
+	// Runner control is API-key only and intentionally lives outside the
+	// legacy BlockExternal group. Exact scope and credential/device/run
+	// bindings are enforced again by the transport and supervision service.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.Middleware)
+		r.Use(auth.RequireAgentModeInternal)
+		r.Use(auth.CSRFMiddleware)
+		r.Use(auth.MustChangePasswordGate)
+		handlers.MountRunnerControlRoutes(r)
 	})
 
 	// Portal (external + admin)

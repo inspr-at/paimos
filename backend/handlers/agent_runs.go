@@ -1345,6 +1345,7 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		LogAttachmentID            *int64  `json:"log_attachment_id"`
 		Error                      *string `json:"error"`
 		ExpectsSupervisorTelemetry *bool   `json:"expects_supervisor_telemetry"`
+		CancellationCause          *string `json:"cancellation_cause"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid body", http.StatusBadRequest)
@@ -1364,6 +1365,20 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		actionKey := strings.TrimSpace(*body.ActionKey)
 		if actionKey == "" || actionKey != existing.ActionKey {
 			jsonError(w, "run action cannot be changed", http.StatusConflict)
+			return
+		}
+	}
+	if body.CancellationCause != nil {
+		cause := strings.TrimSpace(*body.CancellationCause)
+		if cause != "execution_timeout" && cause != "silence_timeout" && cause != "runner_shutdown" && cause != "server_cancel" {
+			jsonError(w, "invalid cancellation_cause", http.StatusBadRequest)
+			return
+		}
+		principal, ok := auth.GetPrincipal(r)
+		if !ok || principal.Kind() != auth.PrincipalAPIKey || body.Status == nil ||
+			strings.TrimSpace(*body.Status) != "cancelled" || existing.Status != "running" || body.DeviceID == nil ||
+			!canRecordNonOperatorCancellation(r, existing, strings.TrimSpace(*body.DeviceID)) {
+			jsonError(w, "cancellation_cause is unavailable", http.StatusConflict)
 			return
 		}
 	}
@@ -1398,6 +1413,7 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 	exactLifecycleReplay = exactLifecycleReplay && (body.LogAttachmentID == nil || (existing.LogAttachmentID != nil && *body.LogAttachmentID == *existing.LogAttachmentID))
 	exactLifecycleReplay = exactLifecycleReplay && (body.Error == nil || *body.Error == existing.Error)
 	exactLifecycleReplay = exactLifecycleReplay && (body.ExpectsSupervisorTelemetry == nil || *body.ExpectsSupervisorTelemetry == existing.ExpectsSupervisorTelemetry)
+	exactLifecycleReplay = exactLifecycleReplay && (body.CancellationCause == nil || agentRunCancellationCauseIs(id, strings.TrimSpace(*body.CancellationCause)))
 	if agentRunTelemetryIsTerminal(existing.Status) && exactLifecycleReplay {
 		jsonOK(w, existing)
 		return
@@ -1488,16 +1504,19 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid device_id", http.StatusBadRequest)
 			return
 		}
-		if existing.Status != "queued" || newStatus != "running" {
+		if body.CancellationCause != nil {
+			// Exact runner-device proof only. The device was stamped by the
+			// queued→running claim and is immutable during cancellation.
+		} else if existing.Status != "queued" || newStatus != "running" {
 			jsonError(w, "device_id can only be stamped when claiming a queued run", http.StatusConflict)
 			return
-		}
-		if existing.DeviceID != "" && existing.DeviceID != d {
+		} else if existing.DeviceID != "" && existing.DeviceID != d {
 			jsonError(w, "run is targeted to another device", http.StatusConflict)
 			return
+		} else {
+			sets = append(sets, "device_id=?")
+			args = append(args, d)
 		}
-		sets = append(sets, "device_id=?")
-		args = append(args, d)
 	}
 	if body.DeployTarget != nil {
 		sets = append(sets, "deploy_target=?")
@@ -1589,6 +1608,15 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		guardStatus = strings.TrimSpace(*body.IfStatus)
 	}
 	query += ` AND status=?`
+	// A running run with any supervisory-control lease may only transition to
+	// cancelled through the exact claimed-result transaction. This closes the
+	// generic PATCH side door while preserving legacy cancellation for runs
+	// which have never entered the control protocol.
+	if existing.Status == "running" && newStatus == "cancelled" && body.CancellationCause == nil {
+		query += ` AND NOT EXISTS (
+			SELECT 1 FROM control_capability_leases lease WHERE lease.agent_run_id=agent_runs.id
+		)`
+	}
 	args = append(args, id, guardStatus)
 	tx, err := db.DB.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -1604,6 +1632,12 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 	if n, _ := res.RowsAffected(); n == 0 {
 		jsonError(w, "run changed concurrently (claim lost)", http.StatusConflict)
 		return
+	}
+	if body.CancellationCause != nil {
+		if err := recordNonOperatorCancellationTx(r.Context(), tx, id, strings.TrimSpace(*body.CancellationCause)); err != nil {
+			jsonError(w, "cancellation fact failed", http.StatusInternalServerError)
+			return
+		}
 	}
 	store := deliveryStoreForRequest(r)
 	effects := store.NewEffects()

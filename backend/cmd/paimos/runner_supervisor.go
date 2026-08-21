@@ -38,15 +38,18 @@ const (
 type supervisorOutcome string
 
 const (
-	outcomeNormalExit          supervisorOutcome = "normal_exit"
-	outcomeSpawnFailure        supervisorOutcome = "spawn_failure"
-	outcomeMalformedStream     supervisorOutcome = "malformed_stream"
-	outcomeSilentChild         supervisorOutcome = "silent_child"
-	outcomeTimeout             supervisorOutcome = "timeout"
-	outcomeCancellation        supervisorOutcome = "cancellation"
-	outcomeProviderFailure     supervisorOutcome = "provider_failure"
-	outcomeRunnerDisappearance supervisorOutcome = "runner_disappearance"
-	outcomeReportFailure       supervisorOutcome = "report_failure"
+	outcomeNormalExit           supervisorOutcome = "normal_exit"
+	outcomeSpawnFailure         supervisorOutcome = "spawn_failure"
+	outcomeMalformedStream      supervisorOutcome = "malformed_stream"
+	outcomeSilentChild          supervisorOutcome = "silent_child"
+	outcomeTimeout              supervisorOutcome = "timeout"
+	outcomeCancellation         supervisorOutcome = "cancellation"
+	outcomeServerCancellation   supervisorOutcome = "server_cancellation"
+	outcomeOperatorCancellation supervisorOutcome = "operator_cancellation"
+	outcomeProviderFailure      supervisorOutcome = "provider_failure"
+	outcomeRunnerDisappearance  supervisorOutcome = "runner_disappearance"
+	outcomeReportFailure        supervisorOutcome = "report_failure"
+	outcomeTerminationFailure   supervisorOutcome = "termination_failure"
 )
 
 type supervisorReport struct {
@@ -287,7 +290,7 @@ func allowedSupervisorPhase(phase string) string {
 
 func supervisorOutcomeBlocker(outcome supervisorOutcome) string {
 	switch outcome {
-	case outcomeCancellation:
+	case outcomeCancellation, outcomeServerCancellation, outcomeOperatorCancellation:
 		return "external"
 	case outcomeRunnerDisappearance, outcomeReportFailure:
 		return "external"
@@ -342,6 +345,12 @@ type supervisorRequest struct {
 	Reporter          runnerReportTransport
 	InitialPhase      string
 	StartSummary      string
+	// OwnedProcessStarted runs only after Start and an exact process-group
+	// ownership proof. The bool is false on unsupported platforms, where the
+	// production runner must advertise no executor action and issue no lease.
+	OwnedProcessStarted func(context.Context, bool) error
+	ControlRequests     <-chan runnerClaimedCancellation
+	ControlResult       func(context.Context, runnerClaimedCancellation, string, string) error
 }
 
 type supervisorResult struct {
@@ -474,7 +483,7 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 	}
 	cmd.Dir = req.RepoRoot
 	cmd.Env = append(os.Environ(), req.Env...)
-	configureProcessGroup(cmd)
+	groupConfigured := configureProcessGroup(cmd)
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return supervisorResult{Outcome: outcomeSpawnFailure, Summary: "provider stdout could not be opened"}
@@ -528,6 +537,23 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 		<-stderrDone
 		waited <- cmd.Wait()
 	}()
+	owned := verifyOwnedProcess(cmd, groupConfigured) == nil
+	if groupConfigured && !owned {
+		_ = signalOwnedProcess(cmd, true)
+		<-waited
+		return supervisorResult{Outcome: outcomeSpawnFailure, Summary: "provider process ownership could not be verified"}
+	}
+	if req.OwnedProcessStarted != nil {
+		startCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		startErr := req.OwnedProcessStarted(startCtx, owned)
+		cancel()
+		if startErr != nil {
+			if stopErr := terminateSupervisedProcess(cmd, waited); stopErr != nil {
+				return supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"}
+			}
+			return supervisorResult{Outcome: outcomeReportFailure, Summary: "runner control could not start"}
+		}
+	}
 
 	currentPhase := allowedSupervisorPhase(req.InitialPhase)
 	if currentPhase == "unknown" {
@@ -543,14 +569,16 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 	}
 	if strings.TrimSpace(req.StartSummary) != "" {
 		if err := report(supervisorReport{Event: "progress", Phase: currentPhase, Summary: req.StartSummary}); err != nil {
-			terminateOwnedProcess(cmd)
-			<-waited
+			if stopErr := terminateSupervisedProcess(cmd, waited); stopErr != nil {
+				return supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"}
+			}
 			return reportErrorResult(err)
 		}
 	}
 	if err := report(supervisorReport{Event: "liveness", Phase: currentPhase}); err != nil {
-		terminateOwnedProcess(cmd)
-		<-waited
+		if stopErr := terminateSupervisedProcess(cmd, waited); stopErr != nil {
+			return supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"}
+		}
 		return reportErrorResult(err)
 	}
 
@@ -563,17 +591,43 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 
 	for {
 		select {
+		case cancellation := <-req.ControlRequests:
+			stopErr := terminateSupervisedProcess(cmd, waited)
+			resultCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			if stopErr != nil {
+				resultErr := error(nil)
+				if req.ControlResult != nil {
+					resultErr = req.ControlResult(resultCtx, cancellation, "rejected", "process_termination_failed")
+				}
+				cancel()
+				if resultErr != nil {
+					return supervisorResult{Outcome: outcomeReportFailure, Summary: "runner control result could not be recorded"}
+				}
+				return supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"}
+			}
+			resultErr := error(nil)
+			if req.ControlResult != nil {
+				resultErr = req.ControlResult(resultCtx, cancellation, "applied", "")
+			}
+			cancel()
+			if resultErr != nil {
+				return supervisorResult{Outcome: outcomeReportFailure, Summary: "runner control result could not be recorded"}
+			}
+			return finishSupervisorResult(req, supervisorResult{Outcome: outcomeOperatorCancellation, Summary: "operator cancelled the running process"})
 		case <-ctx.Done():
-			terminateOwnedProcess(cmd)
-			<-waited
+			if err := terminateSupervisedProcess(cmd, waited); err != nil {
+				return finishSupervisorResult(req, supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"})
+			}
 			return finishSupervisorResult(req, supervisorResult{Outcome: outcomeCancellation, Summary: "runner cancelled the child process"})
 		case <-executionTimer.C:
-			terminateOwnedProcess(cmd)
-			<-waited
+			if err := terminateSupervisedProcess(cmd, waited); err != nil {
+				return finishSupervisorResult(req, supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"})
+			}
 			return finishSupervisorResult(req, supervisorResult{Outcome: outcomeTimeout, Summary: "provider exceeded the execution timeout"})
 		case <-silenceTimer.C:
-			terminateOwnedProcess(cmd)
-			<-waited
+			if err := terminateSupervisedProcess(cmd, waited); err != nil {
+				return finishSupervisorResult(req, supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"})
+			}
 			return finishSupervisorResult(req, supervisorResult{Outcome: outcomeSilentChild, Summary: "provider produced no activity before the heartbeat timeout"})
 		case <-activity:
 			resetTimer(silenceTimer, req.SilenceTimeout)
@@ -584,23 +638,27 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 				event = "needs_input"
 			}
 			if err := report(supervisorReport{Event: event, Phase: p.phase, Summary: p.summary, NeedsInput: p.needsInput, BlockerState: p.blockerState}); err != nil {
-				terminateOwnedProcess(cmd)
-				<-waited
+				if stopErr := terminateSupervisedProcess(cmd, waited); stopErr != nil {
+					return supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"}
+				}
 				return reportErrorResult(err)
 			}
 			if p.needsInput {
-				terminateOwnedProcess(cmd)
-				<-waited
+				if err := terminateSupervisedProcess(cmd, waited); err != nil {
+					return finishSupervisorResult(req, supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"})
+				}
 				return finishSupervisorResult(req, supervisorResult{Outcome: outcomeProviderFailure, Summary: "provider requested input; this runner is one-shot"})
 			}
 		case err := <-streamErrors:
-			terminateOwnedProcess(cmd)
-			<-waited
+			if stopErr := terminateSupervisedProcess(cmd, waited); stopErr != nil {
+				return finishSupervisorResult(req, supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"})
+			}
 			return finishSupervisorResult(req, supervisorResult{Outcome: outcomeMalformedStream, Summary: safeStreamErrorSummary(err)})
 		case <-heartbeat.C:
 			if err := report(supervisorReport{Event: "heartbeat", Phase: currentPhase}); err != nil {
-				terminateOwnedProcess(cmd)
-				<-waited
+				if stopErr := terminateSupervisedProcess(cmd, waited); stopErr != nil {
+					return supervisorResult{Outcome: outcomeTerminationFailure, Summary: "provider process could not be terminated"}
+				}
 				return reportErrorResult(err)
 			}
 		case waitErr := <-waited:
@@ -654,6 +712,45 @@ func superviseAgentProcess(ctx context.Context, req supervisorRequest) superviso
 			}
 			return finishSupervisorResult(req, supervisorResult{Outcome: outcomeNormalExit, Summary: "provider process exited normally"})
 		}
+	}
+}
+
+const (
+	processGracefulStopTimeout = 2 * time.Second
+	processForcedStopTimeout   = 5 * time.Second
+)
+
+// terminateSupervisedProcess accounts for every signal and always waits for
+// the process-tree owner to be reaped. It has no unconditional sleep: an early
+// TERM exit wins immediately, otherwise the bounded grace period advances to
+// KILL and a second bounded wait.
+func terminateSupervisedProcess(cmd *exec.Cmd, waited <-chan error) error {
+	select {
+	case <-waited:
+		return nil
+	default:
+	}
+	termErr := signalOwnedProcess(cmd, false)
+	grace := time.NewTimer(processGracefulStopTimeout)
+	defer grace.Stop()
+	select {
+	case <-waited:
+		return nil
+	case <-grace.C:
+	}
+	if err := signalOwnedProcess(cmd, true); err != nil {
+		if termErr != nil {
+			return errors.Join(termErr, err)
+		}
+		return err
+	}
+	forced := time.NewTimer(processForcedStopTimeout)
+	defer forced.Stop()
+	select {
+	case <-waited:
+		return nil
+	case <-forced.C:
+		return errors.New("owned process did not exit after forced termination")
 	}
 }
 
@@ -791,7 +888,7 @@ func safeStreamErrorSummary(err error) string {
 
 func reportErrorResult(err error) supervisorResult {
 	if errors.Is(err, errRunCancelled) {
-		return supervisorResult{Outcome: outcomeCancellation, Summary: "run was cancelled while child process was alive"}
+		return supervisorResult{Outcome: outcomeServerCancellation, Summary: "server cancelled the run while child process was alive"}
 	}
 	if errors.Is(err, errRunnerDisappeared) {
 		return supervisorResult{Outcome: outcomeRunnerDisappearance, Summary: "run disappeared while child process was alive"}

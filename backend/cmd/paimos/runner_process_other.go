@@ -2,12 +2,24 @@
 
 package main
 
-import "os/exec"
+import (
+	"errors"
+	"os"
+	"os/exec"
+)
 
-func configureProcessGroup(_ *exec.Cmd) {}
+func configureProcessGroup(_ *exec.Cmd) bool { return false }
 
-func terminateOwnedProcess(cmd *exec.Cmd) {
-	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Kill()
+func verifyOwnedProcess(_ *exec.Cmd, _ bool) error {
+	return errors.New("owned process groups are unsupported")
+}
+
+func signalOwnedProcess(cmd *exec.Cmd, force bool) error {
+	if cmd == nil || cmd.Process == nil {
+		return errors.New("owned process is unavailable")
 	}
+	if force {
+		return cmd.Process.Kill()
+	}
+	return cmd.Process.Signal(os.Interrupt)
 }

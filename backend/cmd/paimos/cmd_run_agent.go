@@ -40,6 +40,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"github.com/inspr-at/paimos/backend/cmd/paimos/sync"
@@ -253,7 +254,11 @@ func runAgentWatch(o runAgentOpts) error {
 
 	syncer := &httpSyncClient{client: client}
 	ctx, cancel := signalContext()
-	defer cancel()
+	var workers stdsync.WaitGroup
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
 
 	runner := newAgentRunner(client, deviceID, root, o.execCmd, actionKey, o.testExec, o.yes, o.allowDeploy, o.deployExec, o.yesDeploy, o.attachLogs)
 	runner.executionTimeout = o.executionTimeout
@@ -262,6 +267,14 @@ func runAgentWatch(o runAgentOpts) error {
 	runner.claudePermissionMode = o.claudePermissionMode
 	runner.claudeAllowedTools = o.claudeAllowedTools
 	runner.unsafeClaudeBypass = o.unsafeClaudeBypass
+	controlStateDir, err := runnerControlStateDir(deviceID)
+	if err != nil {
+		return err
+	}
+	runner.controlJournal, err = openRunnerControlJournal(controlStateDir)
+	if err != nil {
+		return fmt.Errorf("open runner control journal: %w", err)
+	}
 	deployNote := "report-back only, no auto-deploy"
 	if runner.allowDeploy && runner.deployExec != "" {
 		deployNote = "deploy ENABLED via " + runner.deployExec + " (runs with a deploy_target only)"
@@ -272,12 +285,20 @@ func runAgentWatch(o runAgentOpts) error {
 	// One worker → one job at a time. Each handleRun atomically claims its run,
 	// so a job enqueued twice (SSE + catch-up) is harmless (the second claim 409s).
 	jobs := make(chan runJob, 64)
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		for {
+			if ctx.Err() != nil {
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return
 			case j := <-jobs:
+				if ctx.Err() != nil {
+					return
+				}
 				if err := runner.handleRun(ctx, j); err != nil {
 					fmt.Fprintf(stderr, "run %d: %v\n", j.runID, err)
 				}
@@ -288,7 +309,9 @@ func runAgentWatch(o runAgentOpts) error {
 	// Periodic catch-up: enqueue still-queued runs (covers runner-offline-at-
 	// publish, busy-drop, and server-restart orphans). Claimed/terminal runs are
 	// no longer 'queued', so re-enqueuing is cheap and self-limiting.
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		enqueue := func() {
 			for _, id := range runner.queuedRunIDs(ctx, projectID) {
 				select {
@@ -385,6 +408,7 @@ type agentRunner struct {
 	spawn                func(ctx context.Context, repoRoot, execCmd string, env []string, logSink io.Writer) error
 	supervise            func(context.Context, supervisorRequest) supervisorResult
 	reporter             runnerReportTransport
+	controlJournal       *runnerControlJournal
 	confirm              func(issueKey string, runID int64, repoRoot string) bool
 	confirmDeploy        func(issueKey string, runID int64, target string) bool
 }
@@ -589,11 +613,33 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 		}
 		return fmt.Errorf("claim run %d: %w", runID, err)
 	}
+	var control *runControlArbiter
+	if a.controlJournal != nil {
+		control = newRunControlArbiter(a.client, runID, a.deviceID, a.controlJournal)
+		defer func() {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer stopCancel()
+			control.stop(stopCtx)
+		}()
+	}
 	baseGit := inspectAgentRunGitEvidence(a.repoRoot)
 	repoURL := a.resolveAgentRunRepoURL(detail.ProjectID, baseGit.RepoURL)
 	finish := func(logFile *os.File, fields map[string]any) error {
+		if control != nil {
+			quiesceCtx, quiesceCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			control.quiesce(quiesceCtx)
+			quiesceCancel()
+		}
 		addAgentRunGitEvidence(fields, repoURL, baseGit, inspectAgentRunGitEvidence(a.repoRoot))
-		return a.finishRun(runID, detail.IssueID, logFile, fields)
+		if err := a.finishRun(runID, detail.IssueID, logFile, fields); err != nil {
+			return err
+		}
+		if control != nil && fields["status"] != "cancelled" {
+			naturalCtx, naturalCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer naturalCancel()
+			return control.rejectNaturalExit(naturalCtx)
+		}
+		return nil
 	}
 	runCtx, ctxErr := a.fetchRunPromptContext(detail)
 	if ctxErr != nil {
@@ -695,6 +741,8 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			StructuredClaude: strings.TrimSpace(a.execCmd) == "claude",
 			ExecutionTimeout: a.executionTimeout, SilenceTimeout: a.heartbeatTimeout,
 			HeartbeatInterval: a.heartbeatInterval, LogSink: logSink, Reporter: a.reporter,
+			OwnedProcessStarted: controlStart(control), ControlRequests: controlRequests(control),
+			ControlResult: controlResult(control),
 		})
 	} else if spawnErr := a.spawn(ctx, a.repoRoot, a.execCmd, env, logSink); spawnErr != nil {
 		runResult = supervisorResult{Outcome: outcomeProviderFailure, Summary: "provider process exited unsuccessfully"}
@@ -703,11 +751,14 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	}
 	if runResult.Outcome != outcomeNormalExit {
 		closeLog(logFile)
-		status := "failed"
-		if runResult.Outcome == outcomeCancellation {
-			status = "cancelled"
+		if runResult.Outcome == outcomeOperatorCancellation {
+			return nil
 		}
-		if reportErr := finish(logFile, map[string]any{"status": status, "error": string(runResult.Outcome) + ": " + runResult.Summary}); reportErr != nil {
+		fields := supervisorFailureFields(runResult)
+		if _, cancelled := fields["cancellation_cause"]; cancelled {
+			fields["device_id"] = a.deviceID
+		}
+		if reportErr := finish(logFile, fields); reportErr != nil {
 			return fmt.Errorf("run %d report failure: %w", runID, reportErr)
 		}
 		return fmt.Errorf("run %d %s: %s", runID, runResult.Outcome, runResult.Summary)
@@ -718,17 +769,24 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	}
 	testsRan := strings.TrimSpace(a.testExec) != ""
 	if testsRan {
-		summary, testResult := a.runTests(ctx, runID, env, logSink)
+		summary, testResult := a.runTests(ctx, runID, env, logSink, control)
 		if summary != "" {
 			resultFields["tests_summary"] = summary
 		}
 		if testResult.Outcome != outcomeNormalExit {
 			closeLog(logFile)
-			resultFields["status"] = "tests_failed"
-			if testResult.Outcome == outcomeCancellation {
-				resultFields["status"] = "cancelled"
+			if testResult.Outcome == outcomeOperatorCancellation {
+				return nil
 			}
-			resultFields["error"] = string(testResult.Outcome) + ": " + testResult.Summary
+			for key, value := range supervisorFailureFields(testResult) {
+				resultFields[key] = value
+			}
+			if _, cancelled := resultFields["cancellation_cause"]; cancelled {
+				resultFields["device_id"] = a.deviceID
+			}
+			if resultFields["status"] == "failed" {
+				resultFields["status"] = "tests_failed"
+			}
 			if reportErr := finish(logFile, resultFields); reportErr != nil {
 				return fmt.Errorf("run %d report failure: %w", runID, reportErr)
 			}
@@ -747,18 +805,22 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			return finish(logFile, resultFields)
 		}
 		fmt.Fprintf(stdout, "run %d: deploying to %s via %q\n", runID, detail.DeployTarget, a.deployExec)
-		deployResult := a.runSupervisedCommand(ctx, runID, a.deployExec, "deploying", "Configured deploy command started", env, logSink)
+		deployResult := a.runSupervisedCommand(ctx, runID, a.deployExec, "deploying", "Configured deploy command started", env, logSink, control)
 		if deployResult.Outcome != outcomeNormalExit {
 			closeLog(logFile)
-			resultFields["status"] = "failed"
-			if deployResult.Outcome == outcomeCancellation {
-				resultFields["status"] = "cancelled"
+			if deployResult.Outcome == outcomeOperatorCancellation {
+				return nil
+			}
+			for key, value := range supervisorFailureFields(deployResult) {
+				resultFields[key] = value
+			}
+			if _, cancelled := resultFields["cancellation_cause"]; cancelled {
+				resultFields["device_id"] = a.deviceID
 			}
 			// A failed deployment does not erase the successful test evidence or
 			// the artifact/target that was actually being deployed. Those facts
 			// remain necessary to understand the end-to-end outcome.
 			resultFields["deploy_target"] = detail.DeployTarget
-			resultFields["error"] = string(deployResult.Outcome) + ": " + deployResult.Summary
 			if reportErr := finish(logFile, resultFields); reportErr != nil {
 				return fmt.Errorf("run %d report failure: %w", runID, reportErr)
 			}
@@ -793,21 +855,40 @@ func completedRunStatus(testsRan bool) string {
 	return "completed"
 }
 
+func supervisorFailureFields(result supervisorResult) map[string]any {
+	fields := map[string]any{"status": "failed", "error": string(result.Outcome) + ": " + result.Summary}
+	switch result.Outcome {
+	case outcomeCancellation:
+		fields["status"] = "cancelled"
+		fields["cancellation_cause"] = "runner_shutdown"
+	case outcomeServerCancellation:
+		fields["status"] = "cancelled"
+		fields["cancellation_cause"] = "server_cancel"
+	case outcomeTimeout:
+		fields["status"] = "cancelled"
+		fields["cancellation_cause"] = "execution_timeout"
+	case outcomeSilentChild:
+		fields["status"] = "cancelled"
+		fields["cancellation_cause"] = "silence_timeout"
+	}
+	return fields
+}
+
 func closeLog(f *os.File) {
 	if f != nil {
 		_ = f.Close()
 	}
 }
 
-func (a *agentRunner) runTests(ctx context.Context, runID int64, env []string, logSink io.Writer) (string, supervisorResult) {
-	result := a.runSupervisedCommand(ctx, runID, a.testExec, "testing", "Configured test command started", env, logSink)
+func (a *agentRunner) runTests(ctx context.Context, runID int64, env []string, logSink io.Writer, control *runControlArbiter) (string, supervisorResult) {
+	result := a.runSupervisedCommand(ctx, runID, a.testExec, "testing", "Configured test command started", env, logSink, control)
 	if result.Outcome == outcomeNormalExit {
 		return commandResultSummary(nil), result
 	}
 	return "configured test command failed: " + string(result.Outcome), result
 }
 
-func (a *agentRunner) runSupervisedCommand(ctx context.Context, runID int64, command, phase, startSummary string, env []string, logSink io.Writer) supervisorResult {
+func (a *agentRunner) runSupervisedCommand(ctx context.Context, runID int64, command, phase, startSummary string, env []string, logSink io.Writer, control *runControlArbiter) supervisorResult {
 	supervise := a.supervise
 	if supervise == nil {
 		supervise = superviseAgentProcess
@@ -816,8 +897,30 @@ func (a *agentRunner) runSupervisedCommand(ctx context.Context, runID int64, com
 		RunID: runID, RepoRoot: a.repoRoot, ExecCmd: command, Env: env,
 		ExecutionTimeout: a.executionTimeout, SilenceTimeout: a.heartbeatTimeout,
 		HeartbeatInterval: a.heartbeatInterval, LogSink: logSink, Reporter: a.reporter,
-		InitialPhase: phase, StartSummary: startSummary,
+		InitialPhase: phase, StartSummary: startSummary, OwnedProcessStarted: controlStart(control),
+		ControlRequests: controlRequests(control), ControlResult: controlResult(control),
 	})
+}
+
+func controlStart(control *runControlArbiter) func(context.Context, bool) error {
+	if control == nil {
+		return nil
+	}
+	return control.start
+}
+
+func controlRequests(control *runControlArbiter) <-chan runnerClaimedCancellation {
+	if control == nil {
+		return nil
+	}
+	return control.requests
+}
+
+func controlResult(control *runControlArbiter) func(context.Context, runnerClaimedCancellation, string, string) error {
+	if control == nil {
+		return nil
+	}
+	return control.recordResult
 }
 
 func commandResultSummary(err error) string {

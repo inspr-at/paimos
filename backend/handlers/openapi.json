@@ -3725,6 +3725,56 @@
         }
       }
     },
+    "/api/agent-mode/deliveries/{deliveryKey}/control-capability-grants": {
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Issue or replay the current operator control grant",
+        "description": "Accepts strict empty JSON. Returns only the immutable action union plus replace-only live safe target descriptors. Every response is private and no-store.",
+        "parameters": [{"name":"deliveryKey","in":"path","required":true,"schema":{"type":"string"}}],
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false}}}},
+        "responses": {"200":{"description":"Safe current grant"},"400":{"description":"Malformed closed request"},"404":{"description":"Canonical concealment"},"409":{"description":"Stale or idempotency conflict"},"503":{"description":"Dependency unavailable"}}
+      }
+    },
+    "/api/agent-mode/control-capability-grants/{id}": {
+      "get": {
+        "tags": ["agent-mode"],
+        "summary": "Read the current operator control grant",
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],
+        "responses": {"200":{"description":"Safe current grant"},"404":{"description":"Canonical concealment"},"503":{"description":"Dependency unavailable"}}
+      },
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Revoke the exact operator control grant revision",
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["operation","revision"],"properties":{"operation":{"const":"revoke"},"revision":{"type":"integer","minimum":1}}}}}},
+        "responses": {"200":{"description":"Revoked safe grant"},"400":{"description":"Malformed closed request"},"404":{"description":"Canonical concealment"},"409":{"description":"Stale or idempotency conflict"}}
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/control-commands": {
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Create one exact two-phase operator command",
+        "description": "The request submits one descriptor the operator reviewed from the current grant. The server transactionally re-resolves it and returns a safe server-owned challenge; creation never confirms.",
+        "parameters": [{"name":"deliveryKey","in":"path","required":true,"schema":{"type":"string"}}],
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false}}}},
+        "responses": {"200":{"description":"Safe pending command challenge"},"400":{"description":"Malformed closed request"},"404":{"description":"Canonical concealment"},"409":{"description":"Stale target or idempotency conflict"},"503":{"description":"Dependency unavailable"}}
+      }
+    },
+    "/api/agent-mode/control-commands/{id}": {
+      "get": {
+        "tags": ["agent-mode"],
+        "summary": "Reload a safe operator command without confirming it",
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],
+        "responses": {"200":{"description":"Safe command projection"},"404":{"description":"Canonical concealment"},"503":{"description":"Dependency unavailable"}}
+      },
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Confirm or withdraw the exact command revision",
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["operation","status_revision"],"properties":{"operation":{"type":"string","enum":["confirm","withdraw"]},"status_revision":{"type":"integer","minimum":1}}}}}},
+        "responses": {"200":{"description":"Safe current command projection"},"400":{"description":"Malformed closed request"},"404":{"description":"Canonical concealment"},"409":{"description":"Stale or semantic conflict"},"503":{"description":"Dependency unavailable"}}
+      }
+    },
     "/api/agent-mode/voice/transcribe": {
       "post": {
         "tags": ["agent-mode"],

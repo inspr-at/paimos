@@ -1075,7 +1075,7 @@ func TestSupervisorDistinguishesRunnerDisappearanceAndReportFailure(t *testing.T
 		want supervisorOutcome
 	}{
 		{name: "runner disappearance", err: errRunnerDisappeared, want: outcomeRunnerDisappearance},
-		{name: "remote cancellation", err: errRunCancelled, want: outcomeCancellation},
+		{name: "remote cancellation", err: errRunCancelled, want: outcomeServerCancellation},
 		{name: "report failure", err: errors.New("temporary report outage"), want: outcomeReportFailure},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
