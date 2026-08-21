@@ -248,6 +248,11 @@ func TOTPVerify(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "user not found", http.StatusUnauthorized)
 		return
 	}
+	if totpUser.Status != "active" {
+		recordAuthFailure("totp-verify", r, body.TOTPToken)
+		jsonErr(w, "invalid or expired token — please log in again", http.StatusUnauthorized)
+		return
+	}
 
 	if !totp.Validate(body.Code, secret) {
 		recordAuthFailure("totp-verify", r, body.TOTPToken)
@@ -262,16 +267,10 @@ func TOTPVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create real session
-	sid, err := newSessionID()
+	now := time.Now()
+	expiresAt := now.Add(sessionDuration)
+	sid, err := createSession(r.Context(), userID, now, expiresAt, false, false)
 	if err != nil {
-		jsonErr(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	expiresAt := time.Now().Add(sessionDuration)
-	if _, err := db.DB.Exec(
-		"INSERT INTO sessions(id,user_id,expires_at) VALUES(?,?,?)",
-		sid, userID, expiresAt.UTC().Format("2006-01-02 15:04:05"),
-	); err != nil {
 		jsonErr(w, "internal error", http.StatusInternalServerError)
 		return
 	}

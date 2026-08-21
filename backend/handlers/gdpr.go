@@ -210,11 +210,12 @@ func ExportSubject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := map[string]any{
-		"export_format":    "paimos-gdpr-v1",
-		"exported_at":      time.Now().UTC().Format(time.RFC3339),
-		"subject_user_id":  id,
-		"user":             user,
-		"sessions":         gdprRows(`SELECT id, expires_at FROM sessions WHERE user_id=?`, id),
+		"export_format":   "paimos-gdpr-v1",
+		"exported_at":     time.Now().UTC().Format(time.RFC3339),
+		"subject_user_id": id,
+		"user":            user,
+		"sessions": gdprRows(`SELECT credential_id,user_id,actor_user_id,acting_as_user_id,expires_at,created_at
+			FROM sessions WHERE user_id=? OR actor_user_id=? OR acting_as_user_id=?`, id, id, id),
 		"api_keys":         gdprRows(`SELECT id, name, key_prefix, created_at, last_used_at FROM api_keys WHERE user_id=?`, id),
 		"comments":         gdprRows(`SELECT id, issue_id, body, created_at FROM comments WHERE author_id=?`, id),
 		"time_entries":     gdprRows(`SELECT id, issue_id, started_at, stopped_at, comment FROM time_entries WHERE user_id=?`, id),
@@ -230,6 +231,42 @@ func ExportSubject(w http.ResponseWriter, r *http.Request) {
 		// transcript + event payloads belong to the subject.
 		"intake_sessions": gdprRows(`SELECT id, status, language, detected_project_id, pinned_project_id, created_issue_id, transcript, created_at, updated_at, completed_at FROM intake_sessions WHERE user_id=?`, id),
 		"intake_events":   gdprRows(`SELECT e.id, e.session_id, e.seq, e.kind, e.source, e.label, e.payload_json, e.created_at FROM intake_events e JOIN intake_sessions s ON s.id = e.session_id WHERE s.user_id=?`, id),
+		"control_operation_keys": gdprRows(`SELECT id, actor_user_id, user_id, principal_kind,
+			actor_session_credential_id, actor_api_key_id, operation_kind, operation_key_digest,
+			request_digest, result_digest, grant_id, lease_id, input_request_id, command_id, created_at
+			FROM control_operation_keys WHERE actor_user_id=? OR user_id=?`, id, id),
+		"control_capability_grants": gdprRows(`SELECT grant_id, revision, actor_user_id, user_id,
+			principal_kind, actor_session_credential_id, actor_api_key_id, delivery_id, delivery_key,
+			delivery_revision, project_id, root_issue_id, issue_revision, expires_at, revoked_at, created_at, updated_at
+			FROM control_capability_grants WHERE actor_user_id=? OR user_id=?`, id, id),
+		"control_capability_leases": gdprRows(`SELECT lease_id, revision, actor_user_id, user_id,
+			principal_kind, actor_session_credential_id, actor_api_key_id, device_id, delivery_id,
+			delivery_key, delivery_revision, project_id, root_issue_id, issue_revision, attempt_id,
+			attempt_number, plan_revision, stage_key, execution_number, authority_epoch, reporter_id,
+			agent_run_id, expires_at, revoked_at, created_at, updated_at
+			FROM control_capability_leases WHERE actor_user_id=? OR user_id=?`, id, id),
+		"control_commands": gdprRows(`SELECT command_id, status_revision, actor_user_id, user_id,
+			principal_kind, actor_session_credential_id, actor_api_key_id, action, status, outcome,
+			safe_reason, challenge_template, delivery_id, delivery_key, delivery_revision, project_id,
+			root_issue_id, issue_revision, attempt_id, stage_key, execution_number, agent_run_id,
+			expires_at, accepted_at, terminal_at, created_at, updated_at
+			FROM control_commands WHERE actor_user_id=? OR user_id=?`, id, id),
+		"control_outbox_claims": gdprRows(`SELECT id, command_id, lease_id, lease_revision,
+			delivery_state, claim_sequence, claim_user_id, claim_principal_kind,
+			claim_session_credential_id, claim_api_key_id, claim_device_id, claimed_at, result_sequence,
+			result_outcome, safe_reason, acknowledged_at, created_at, updated_at
+			FROM control_outbox WHERE claim_user_id=?`, id),
+		"control_events": gdprRows(`SELECT id, sequence, event_kind, grant_id, grant_revision,
+			lease_id, lease_revision, input_request_id, input_request_revision, command_id,
+			command_status_revision, cancellation_run_id, cancellation_command_id,
+			actor_user_id, user_id, principal_kind,
+			actor_session_credential_id, actor_api_key_id, executor_user_id,
+			executor_principal_kind, executor_session_credential_id, executor_api_key_id,
+			device_id, delivery_id, root_issue_id, issue_revision, attempt_id, stage_key,
+			execution_number, authority_epoch, reporter_id, agent_run_id, action, command_status,
+			runtime_state, runtime_revision, outcome, safe_reason, cancellation_cause,
+			subject_expires_at, subject_updated_at, correlation_id, server_recorded_at
+			FROM control_events WHERE actor_user_id=? OR user_id=? OR executor_user_id=?`, id, id, id),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -286,11 +323,15 @@ func EraseSubject(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "erase failed", http.StatusInternalServerError)
 		return
 	}
-	if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id=?`, id); err != nil {
+	if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id=? OR actor_user_id=? OR acting_as_user_id=?`, id, id, id); err != nil {
 		log.Printf("EraseSubject: delete sessions: %v", err)
+		jsonError(w, "erase failed", http.StatusInternalServerError)
+		return
 	}
 	if _, err := tx.Exec(`DELETE FROM api_keys WHERE user_id=?`, id); err != nil {
 		log.Printf("EraseSubject: delete api_keys: %v", err)
+		jsonError(w, "erase failed", http.StatusInternalServerError)
+		return
 	}
 	if _, err := tx.Exec(`DELETE FROM password_reset_tokens WHERE user_id=?`, id); err != nil {
 		log.Printf("EraseSubject: delete reset tokens: %v", err)

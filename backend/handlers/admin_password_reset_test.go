@@ -58,8 +58,8 @@ func TestAdminPasswordReset_TakesEffect_KillsSessions_ForcesChange(t *testing.T)
 	otherSID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	now := time.Now().UTC()
 	if _, err := db.DB.Exec(
-		`INSERT INTO sessions(id, user_id, expires_at, csrf_token, via_dev_login, created_at)
-		 VALUES (?, ?, ?, '', 0, ?)`,
+		`INSERT INTO sessions(id, user_id, expires_at, csrf_token, via_dev_login, created_at, credential_id)
+		 VALUES (?, ?, ?, '', 0, ?, '22222222-2222-4222-8222-222222222222')`,
 		otherSID, memberID,
 		now.Add(7*24*time.Hour).Format("2006-01-02 15:04:05"),
 		now.Format("2006-01-02 15:04:05"),

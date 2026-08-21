@@ -45,10 +45,14 @@ func ssoNagTestSetup(t *testing.T) (userID int64) {
 
 func plantSession(t *testing.T, id string, userID int64, viaOIDC int) {
 	t.Helper()
+	credentialID := "11111111-1111-4111-8111-111111111111"
+	if viaOIDC != 0 {
+		credentialID = "11111111-1111-4111-8111-111111111112"
+	}
 	if _, err := db.DB.Exec(
-		`INSERT INTO sessions(id, user_id, expires_at, created_at, csrf_token, via_oidc)
-		 VALUES(?, ?, datetime('now', '+1 hour'), datetime('now'), 'tok', ?)`,
-		id, userID, viaOIDC); err != nil {
+		`INSERT INTO sessions(id, user_id, expires_at, created_at, csrf_token, via_oidc, credential_id)
+		 VALUES(?, ?, datetime('now', '+1 hour'), datetime('now'), 'tok', ?, ?)`,
+		id, userID, viaOIDC, credentialID); err != nil {
 		t.Fatalf("plant session: %v", err)
 	}
 }

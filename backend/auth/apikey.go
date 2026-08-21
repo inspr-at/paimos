@@ -17,9 +17,11 @@ package auth
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
@@ -31,30 +33,58 @@ import (
 // here so the auth middleware can stash a ScopeSet on the request context
 // without a second query.
 func ResolveAPIKey(rawKey string) (*models.User, ScopeSet, error) {
+	user, principal, err := ResolveAPIKeyPrincipal(rawKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	return user, principal.Scopes(), nil
+}
+
+// ResolveAPIKeyPrincipal preserves the safe immutable API-key row identity for
+// request attribution. Disabled, expired, deleted, and disabled-owner keys are
+// rejected before a principal is created.
+func ResolveAPIKeyPrincipal(rawKey string) (*models.User, Principal, error) {
+	return resolveAPIKeyPrincipalAt(rawKey, time.Now().UTC())
+}
+
+func resolveAPIKeyPrincipalAt(rawKey string, now time.Time) (*models.User, Principal, error) {
 	sum := sha256.Sum256([]byte(rawKey))
 	hash := hex.EncodeToString(sum[:])
 
 	var keyID int64
 	var scopesCSV string
+	var disabledAt, expiresAt sql.NullString
 	u := &models.User{}
 	// Scan order: key id + scopes column + the user-cols list.
-	dests := append([]any{&keyID, &scopesCSV}, userScanDests(u)...)
+	dests := append([]any{&keyID, &scopesCSV, &disabledAt, &expiresAt}, userScanDests(u)...)
 	err := db.DB.QueryRow(`
-		SELECT ak.id, ak.scopes, `+userSelectCols+`
+		SELECT ak.id,ak.scopes,ak.disabled_at,ak.expires_at,`+userSelectCols+`
 		FROM api_keys ak JOIN users u ON u.id = ak.user_id
 		WHERE ak.key_hash = ?
 	`, hash).Scan(dests...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid api key")
+		return nil, Principal{}, fmt.Errorf("invalid api key")
 	}
-	if u.Status == "inactive" || u.Status == "deleted" {
-		return nil, nil, fmt.Errorf("account disabled")
+	if u.Status != "active" || disabledAt.Valid {
+		return nil, Principal{}, fmt.Errorf("account disabled")
+	}
+	if expiresAt.Valid {
+		expires, parseErr := parseCredentialTimestamp(expiresAt.String)
+		if parseErr != nil || !expires.After(now) {
+			return nil, Principal{}, fmt.Errorf("invalid api key")
+		}
 	}
 
-	// Best-effort last_used_at update
-	if _, err := db.DB.Exec("UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?", keyID); err != nil {
+	// Best-effort, write-throttled usage stamp. The prior per-request UPDATE
+	// serialized otherwise independent API-key calls on SQLite's write lock.
+	if _, err := db.DB.Exec(`UPDATE api_keys SET last_used_at=datetime('now')
+		WHERE id=? AND (last_used_at IS NULL OR last_used_at<datetime('now','-1 hour'))`, keyID); err != nil {
 		log.Printf("ResolveAPIKey: update last_used_at key_id=%d: %v", keyID, err)
 	}
 
-	return u, ParseScopes(scopesCSV), nil
+	principal, err := principalForAPIKey(keyID, u.ID, ParseScopes(scopesCSV))
+	if err != nil {
+		return nil, Principal{}, fmt.Errorf("invalid api key")
+	}
+	return u, principal, nil
 }

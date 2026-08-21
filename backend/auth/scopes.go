@@ -111,13 +111,14 @@ func (s ScopeSet) Has(scope string) bool {
 }
 
 // ParseScopes turns the CSV form stored in api_keys.scopes into a
-// ScopeSet. Whitespace around entries is tolerated. An empty input
-// returns a set containing only ScopeAll (the migration default), not
-// an empty set — defensive against pre-M104 rows or hand-edited DBs.
+// ScopeSet. Whitespace around entries is tolerated. An empty value denies
+// every scoped operation: M104 backfilled legacy keys to the explicit "*"
+// sentinel, so treating later empty/corrupt rows as broad authority would
+// turn scope removal into privilege escalation.
 func ParseScopes(csv string) ScopeSet {
 	csv = strings.TrimSpace(csv)
 	if csv == "" {
-		return ScopeSet{ScopeAll: {}}
+		return ScopeSet{}
 	}
 	out := ScopeSet{}
 	for raw := range strings.SplitSeq(csv, ",") {
@@ -128,7 +129,7 @@ func ParseScopes(csv string) ScopeSet {
 		out[t] = struct{}{}
 	}
 	if len(out) == 0 {
-		return ScopeSet{ScopeAll: {}}
+		return ScopeSet{}
 	}
 	return out
 }

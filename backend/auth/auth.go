@@ -18,9 +18,12 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -37,6 +40,12 @@ import (
 // cookieSecure mirrors the COOKIE_SECURE env var.
 // Set COOKIE_SECURE=true on live (HTTPS); leave unset for staging/local (HTTP).
 var cookieSecure = os.Getenv("COOKIE_SECURE") == "true"
+
+// sessionRandomReader is a narrow fail-closed seam for session identity
+// creation tests. Production always uses the operating system CSPRNG.
+var sessionRandomReader io.Reader = rand.Reader
+
+var errInvalidSession = errors.New("invalid session")
 
 const totpPendingTTLAuth = 5 * time.Minute
 
@@ -99,10 +108,60 @@ func CurrentSessionID(r *http.Request) string {
 
 func newSessionID() (string, error) {
 	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := io.ReadFull(sessionRandomReader, b); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+func newCredentialID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := io.ReadFull(sessionRandomReader, b); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // UUID version 4.
+	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant.
+	encoded := hex.EncodeToString(b)
+	return encoded[0:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" +
+		encoded[16:20] + "-" + encoded[20:32], nil
+}
+
+// createSession is the only production path that mints a browser session.
+// The bearer id and the safe durable credential id are independent random
+// values; callers receive only the bearer id for the cookie.
+func createSession(ctx context.Context, userID int64, createdAt, expiresAt time.Time, viaDevLogin, viaOIDC bool) (string, error) {
+	sessionID, err := newSessionID()
+	if err != nil {
+		return "", err
+	}
+	credentialID, err := newCredentialID()
+	if err != nil {
+		return "", err
+	}
+	result, err := db.DB.ExecContext(ctx, `
+		INSERT INTO sessions(
+		 id,user_id,expires_at,created_at,via_dev_login,via_oidc,credential_id
+		)
+		SELECT ?,u.id,?,?,?,?,? FROM users u WHERE u.id=? AND u.status='active'
+	`, sessionID,
+		expiresAt.UTC().Format("2006-01-02 15:04:05"),
+		createdAt.UTC().Format("2006-01-02 15:04:05"),
+		boolToInt(viaDevLogin), boolToInt(viaOIDC), credentialID, userID)
+	if err != nil {
+		return "", err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		return "", fmt.Errorf("session principal is unavailable")
+	}
+	return sessionID, nil
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 // Middleware — attaches *models.User to context if session valid.
@@ -153,7 +212,7 @@ func Middleware(next http.Handler) http.Handler {
 		// 1. Try API key: Authorization: Bearer <BRAND_API_KEY_PREFIX>...
 		if hdr := r.Header.Get("Authorization"); strings.HasPrefix(hdr, "Bearer "+brand.Default.APIKeyPrefix) {
 			rawKey := strings.TrimPrefix(hdr, "Bearer ")
-			user, scopes, err := ResolveAPIKey(rawKey)
+			user, principal, err := ResolveAPIKeyPrincipal(rawKey)
 			if err != nil {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
@@ -168,7 +227,8 @@ func Middleware(next http.Handler) http.Handler {
 			// RequireScope can narrow specific routes without a second
 			// DB query. Pre-M104 keys backfill to `*` (= ScopeAll) so
 			// existing callers behave unchanged.
-			ctx = WithScopes(ctx, scopes)
+			ctx = WithScopes(ctx, principal.Scopes())
+			ctx = WithPrincipal(ctx, principal)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -181,6 +241,9 @@ func Middleware(next http.Handler) http.Handler {
 		}
 		rec, err := loadSession(cookie.Value)
 		if err != nil {
+			if errors.Is(err, errInvalidSession) {
+				clearSessionCookie(w)
+			}
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
@@ -190,9 +253,10 @@ func Middleware(next http.Handler) http.Handler {
 		// edge cases (the migration UPDATEs existing rows, but a zero
 		// value is still defensive); skip the cap check in that case
 		// rather than fail a legitimate session.
-		if !rec.createdAt.IsZero() && time.Since(rec.createdAt) > sessionAbsoluteLifetime {
+		now := time.Now().UTC()
+		if !rec.createdAt.IsZero() && (now.Before(rec.createdAt) || !now.Before(rec.createdAt.Add(sessionAbsoluteLifetime))) {
 			if _, derr := db.DB.Exec("DELETE FROM sessions WHERE id=?", cookie.Value); derr != nil {
-				log.Printf("Middleware: delete capped session %s: %v", cookie.Value, derr)
+				log.Printf("Middleware: delete capped session credential_id=%s: %v", rec.credentialID, derr)
 			}
 			clearSessionCookie(w)
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
@@ -220,7 +284,7 @@ func Middleware(next http.Handler) http.Handler {
 			); uerr != nil {
 				// A renewal failure is recoverable — log it and let the
 				// request proceed; the next request retries the slide.
-				log.Printf("Middleware: slide renewal for %s: %v", cookie.Value, uerr)
+				log.Printf("Middleware: slide renewal credential_id=%s: %v", rec.credentialID, uerr)
 			} else {
 				rec.expiresAt = newExpiry
 				// #nosec G124 -- HttpOnly + SameSite=Lax are set; Secure mirrors COOKIE_SECURE (true on HTTPS deployments).
@@ -276,7 +340,14 @@ func Middleware(next http.Handler) http.Handler {
 		// PAI-379: browser sessions are never narrowed; attach the
 		// all-scopes set so RequireScope is a uniform downstream check
 		// regardless of auth method.
-		ctx = WithScopes(ctx, ScopeSet{ScopeAll: {}})
+		sessionScopes := ScopeSet{ScopeAll: {}}
+		ctx = WithScopes(ctx, sessionScopes)
+		principal, err := NewSessionPrincipal(rec.credentialID, rec.actor.ID, rec.user.ID, rec.impersonating)
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		ctx = WithPrincipal(ctx, principal)
 		req := r.WithContext(ctx)
 		if rec.impersonating {
 			rw := &impersonationAuditResponseWriter{ResponseWriter: w}
@@ -320,9 +391,9 @@ func userScanDests(u *models.User) []any {
 		&u.RecentTimersLimit, &u.Timezone, &u.PreviewHoverDelay,
 		&u.IssueAutoRefreshEnabled, &u.IssueAutoRefreshIntervalSeconds, &u.LastLoginAt,
 		&u.AccrualsStatsEnabled, &u.AccrualsExtraStatuses,
-		&u.IsSuperAdmin,               // PAI-335
-		&u.SearchScopeShortcut,        // PAI-368 / M103
-		&u.IntakeConfidenceThreshold,  // PAI-706 / M135
+		&u.IsSuperAdmin,              // PAI-335
+		&u.SearchScopeShortcut,       // PAI-368 / M103
+		&u.IntakeConfidenceThreshold, // PAI-706 / M135
 	}
 }
 
@@ -352,6 +423,7 @@ type sessionRecord struct {
 	user             *models.User
 	actor            *models.User
 	sessionID        string
+	credentialID     string
 	csrfTok          string
 	viaDevLogin      bool
 	viaOIDC          bool
@@ -366,6 +438,10 @@ type sessionRecord struct {
 // session is invisible to the rest of the code) and disables the
 // session inline if the user has been deactivated.
 func loadSession(sessionID string) (*sessionRecord, error) {
+	return loadSessionAt(sessionID, time.Now().UTC())
+}
+
+func loadSessionAt(sessionID string, now time.Time) (*sessionRecord, error) {
 	rec := &sessionRecord{user: &models.User{}, actor: &models.User{}, sessionID: sessionID}
 	var csrfTok string
 	var viaDevLoginInt int
@@ -373,14 +449,16 @@ func loadSession(sessionID string) (*sessionRecord, error) {
 	var impersonatingInt int
 	var expiresStr, createdStr string
 	var epoch int64
+	var credentialID string
 	dests := append(
-		[]any{&csrfTok, &viaDevLoginInt, &viaOIDCInt, &expiresStr, &createdStr, &epoch, &impersonatingInt},
+		[]any{&csrfTok, &viaDevLoginInt, &viaOIDCInt, &expiresStr, &createdStr, &credentialID, &epoch, &impersonatingInt},
 		userScanDests(rec.user)...,
 	)
 	dests = append(dests, userScanDests(rec.actor)...)
 	// #nosec G202 -- userSelectCols / userSelectColsFor are fixed column lists; the session id binds as a placeholder.
 	row := db.DB.QueryRow(`
 		SELECT s.csrf_token, s.via_dev_login, s.via_oidc, s.expires_at, s.created_at,
+		       s.credential_id,
 		       u.permissions_epoch,
 		       CASE WHEN s.acting_as_user_id IS NOT NULL THEN 1 ELSE 0 END,
 		       `+userSelectCols+`, `+userSelectColsFor("actor")+`
@@ -390,42 +468,60 @@ func loadSession(sessionID string) (*sessionRecord, error) {
 		WHERE s.id = ? AND s.expires_at > datetime('now')
 	`, sessionID)
 	if err := row.Scan(dests...); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// No durable row was resolved, so there is nothing to clean up.
+			// Avoid turning arbitrary garbage cookies into serialized writes;
+			// Middleware still clears the client cookie for this typed error.
+			return nil, fmt.Errorf("%w: missing_or_expired", errInvalidSession)
+		}
 		return nil, err
 	}
 	rec.permissionsEpoch = epoch
+	rec.credentialID = credentialID
+	if rec.credentialID == sessionID {
+		return nil, rejectSessionRow(sessionID, "", "credential_alias")
+	}
 	rec.impersonating = impersonatingInt != 0
-	if rec.actor.Status == "inactive" || rec.actor.Status == "deleted" {
-		if _, err := db.DB.Exec("DELETE FROM sessions WHERE id=?", sessionID); err != nil {
-			log.Printf("loadSession: delete session %s: %v", sessionID, err)
-		}
-		return nil, fmt.Errorf("account disabled")
+	if rec.actor.Status != "active" {
+		return nil, rejectSessionRow(sessionID, rec.credentialID, "actor_inactive")
 	}
 	if rec.impersonating && !IsSuperAdmin(rec.actor) {
-		if _, err := db.DB.Exec("DELETE FROM sessions WHERE id=?", sessionID); err != nil {
-			log.Printf("loadSession: delete demoted impersonation session %s: %v", sessionID, err)
-		}
-		return nil, fmt.Errorf("actor lacks super-admin role")
+		return nil, rejectSessionRow(sessionID, rec.credentialID, "actor_demoted")
 	}
-	if rec.user.Status == "inactive" || rec.user.Status == "deleted" {
-		if _, err := db.DB.Exec("DELETE FROM sessions WHERE id=?", sessionID); err != nil {
-			log.Printf("loadSession: delete session %s: %v", sessionID, err)
-		}
-		return nil, fmt.Errorf("account disabled")
+	if rec.user.Status != "active" {
+		return nil, rejectSessionRow(sessionID, rec.credentialID, "effective_user_inactive")
 	}
 	rec.csrfTok = csrfTok
 	rec.viaDevLogin = viaDevLoginInt != 0
 	rec.viaOIDC = viaOIDCInt != 0
-	// SQLite stores timestamps as "YYYY-MM-DD HH:MM:SS" (UTC). Parse
-	// errors leave the times zero, which the cap/slide logic tolerates.
-	if t, err := time.Parse("2006-01-02 15:04:05", expiresStr); err == nil {
-		rec.expiresAt = t.UTC()
+	// Credential times are authorization inputs. M89 populated created_at for
+	// every legacy row, so an empty or malformed value is corruption rather
+	// than a compatibility case and must not bypass the absolute cap or be
+	// renewed into a valid session.
+	expiresAt, err := parseCredentialTimestamp(expiresStr)
+	if err != nil || !expiresAt.After(now) {
+		return nil, rejectSessionRow(sessionID, rec.credentialID, "invalid_expiry")
 	}
-	if createdStr != "" {
-		if t, err := time.Parse("2006-01-02 15:04:05", createdStr); err == nil {
-			rec.createdAt = t.UTC()
-		}
+	createdAt, err := parseCredentialTimestamp(createdStr)
+	if err != nil || now.Before(createdAt) || now.Sub(createdAt) >= sessionAbsoluteLifetime {
+		return nil, rejectSessionRow(sessionID, rec.credentialID, "invalid_creation_time")
 	}
+	rec.expiresAt = expiresAt
+	rec.createdAt = createdAt
 	return rec, nil
+}
+
+// rejectSessionRow centralizes invalid-credential cleanup and log redaction.
+// The raw bearer is used only as a bound DELETE parameter and is never logged.
+func rejectSessionRow(sessionID, credentialID, reason string) error {
+	safeCredentialID := "unavailable"
+	if credentialID != sessionID && validSessionCredentialID(credentialID) {
+		safeCredentialID = credentialID
+	}
+	if _, err := db.DB.Exec("DELETE FROM sessions WHERE id=?", sessionID); err != nil {
+		log.Printf("loadSession: delete rejected session reason=%s credential_id=%s: %v", reason, safeCredentialID, err)
+	}
+	return fmt.Errorf("%w: %s", errInvalidSession, reason)
 }
 
 // Login handler
@@ -458,7 +554,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
 		return
 	}
-	if loginUser.Status == "inactive" || loginUser.Status == "deleted" {
+	if loginUser.Status != "active" {
 		log.Printf("audit: login_blocked username=%q ip=%s reason=account_disabled", body.Username, clientIP(r))
 		http.Error(w, `{"error":"account disabled"}`, http.StatusForbidden)
 		return
@@ -487,23 +583,14 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sid, err := newSessionID()
-	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		return
-	}
 	now := time.Now()
 	expiresAt := now.Add(sessionDuration)
 	// PAI-322: created_at is the anchor for the absolute cap. We write
 	// it explicitly here (rather than relying on a SQL default) so the
 	// row is unambiguously stamped with the login moment in app-time,
 	// matching whatever the server clock says when expires_at is read.
-	if _, err := db.DB.Exec(
-		"INSERT INTO sessions(id,user_id,expires_at,created_at) VALUES(?,?,?,?)",
-		sid, loginUser.ID,
-		expiresAt.UTC().Format("2006-01-02 15:04:05"),
-		now.UTC().Format("2006-01-02 15:04:05"),
-	); err != nil {
+	sid, err := createSession(r.Context(), loginUser.ID, now, expiresAt, false, false)
+	if err != nil {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}

@@ -123,6 +123,27 @@ func TestDevLogin_UnknownUser(t *testing.T) {
 	}
 }
 
+func TestDevLogin_NonActiveUser(t *testing.T) {
+	devLoginTestSetup(t, "this-is-a-test-token-of-exactly-32+chars-long")
+	if _, err := db.DB.Exec(`UPDATE users SET status='suspended' WHERE username='dev_admin'`); err != nil {
+		t.Fatal(err)
+	}
+	rec := devLoginPost(t, map[string]string{
+		"username": "dev_admin",
+		"token":    "this-is-a-test-token-of-exactly-32+chars-long",
+	})
+	if rec.Code != http.StatusUnauthorized || len(rec.Result().Cookies()) != 0 {
+		t.Fatalf("non-active dev login status=%d cookies=%v", rec.Code, rec.Result().Cookies())
+	}
+	var count int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("non-active dev login minted %d sessions", count)
+	}
+}
+
 func TestDevLogin_NoTokenConfigured(t *testing.T) {
 	// Setup with empty token → ValidateDevLoginConfig leaves devLoginToken
 	// empty → handler returns 503.
