@@ -101,6 +101,21 @@ describe("AIWorkStatusBadge", () => {
     unmount();
   });
 
+  it("labels completed code honestly without implying test evidence", async () => {
+    const { el, unmount } = mountBadge({
+      status: "completed",
+      tests_summary: "",
+      deploy_target: "",
+    });
+    await settle();
+    const badge = el.querySelector<HTMLButtonElement>(".ai-work-badge");
+    expect(badge?.textContent).toContain("Claude Code implemented");
+    const title = badge?.getAttribute("title") ?? "";
+    expect(title).toContain("Claude Code implemented");
+    expect(title).not.toContain("tests passed");
+    unmount();
+  });
+
   it("opens run history when clicked", async () => {
     let opened = 0;
     const { el, unmount } = mountBadge({}, () => {

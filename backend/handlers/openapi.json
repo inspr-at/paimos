@@ -71,6 +71,10 @@
     {
       "name": "agent-runs",
       "description": "\"Implement this\" agent runs (PAI-605)"
+    },
+    {
+      "name": "agent-mode",
+      "description": "Privacy-safe Agent Mode delivery snapshots and resumable invalidation stream (schema v1)"
     }
   ],
   "components": {
@@ -247,6 +251,21 @@
           }
         }
       },
+      "CommentCreateRequest": {
+        "type": "object",
+        "required": ["body"],
+        "properties": {
+          "body": {"type": "string", "minLength": 1},
+          "visibility": {"type": "string", "enum": ["internal", "external"], "default": "internal"},
+          "client_request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "description": "Accepted only when visibility is internal. The database identity, rather than the generic response cache, is authoritative."
+          }
+        }
+      },
       "User": {
         "type": "object",
         "required": [
@@ -356,7 +375,8 @@
         "required": [
           "id",
           "name",
-          "key"
+          "key",
+          "status"
         ],
         "properties": {
           "id": {
@@ -377,7 +397,9 @@
             "type": "string",
             "enum": [
               "active",
-              "archived"
+              "frozen",
+              "archived",
+              "deleted"
             ]
           },
           "customer_id": {
@@ -518,11 +540,13 @@
             "enum": [
               "queued",
               "running",
+              "completed",
               "tests_passed",
               "tests_failed",
               "deployed",
               "failed",
-              "cancelled"
+              "cancelled",
+              "drafted"
             ]
           },
           "agent_name": {
@@ -557,7 +581,9 @@
           },
           "tests_summary": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "maxLength": 4096,
+            "description": "Bounded test evidence; completed means tests were not run and carries no test evidence"
           },
           "error": {
             "type": "string"
@@ -599,6 +625,18 @@
           },
           "body": {
             "type": "string"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": ["internal", "external"]
+          },
+          "client_request_id": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "description": "Optional exact-once identity scoped to the authenticated author. Legal only for internal comments; an exact replay returns the original comment and different issue/body reuse returns 409."
           },
           "created_at": {
             "type": "string",
@@ -872,11 +910,13 @@
             "enum": [
               "queued",
               "running",
+              "completed",
               "tests_passed",
               "tests_failed",
               "deployed",
               "failed",
-              "cancelled"
+              "cancelled",
+              "drafted"
             ]
           },
           "version": {
@@ -884,7 +924,9 @@
           },
           "tests_summary": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "maxLength": 4096,
+            "description": "Non-empty evidence required by tests_passed/tests_failed; completed means tests were not run"
           },
           "deploy_target": {
             "type": "string"
@@ -924,7 +966,98 @@
           "finished_at": {
             "type": "string",
             "nullable": true
+          },
+          "expects_supervisor_telemetry": {
+            "type": "boolean",
+            "description": "Durable claim marker for the server heartbeat watchdog; legacy rows remain false"
           }
+        }
+      },
+      "AgentRunTelemetry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "run_id", "sequence", "correlation_id", "provider", "adapter",
+          "agent_reported_at", "server_received_at", "kind", "heartbeat", "phase",
+          "needs_input", "blocker_state", "clock_skew_seconds", "clock_skewed"
+        ],
+        "properties": {
+          "id": {"type": "integer", "format": "int64"},
+          "run_id": {"type": "integer", "format": "int64"},
+          "sequence": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+          "correlation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "provider": {"type": "string", "minLength": 1, "maxLength": 64},
+          "adapter": {"type": "string", "minLength": 1, "maxLength": 64},
+          "agent_reported_at": {"type": "string", "format": "date-time"},
+          "server_received_at": {"type": "string", "format": "date-time", "description": "Authoritative freshness clock"},
+          "kind": {"type": "string", "enum": ["heartbeat", "progress", "phase", "needs_input", "blocker", "estimate"]},
+          "heartbeat": {"type": "boolean"},
+          "phase": {"type": "string", "enum": ["unknown", "starting", "planning", "implementing", "testing", "reviewing", "deploying", "waiting", "completed"]},
+          "activity": {"type": "string", "maxLength": 280, "description": "At most 280 UTF-8 bytes; byte enforcement is authoritative"},
+          "needs_input": {"type": "boolean"},
+          "blocker_state": {"type": "string", "enum": ["none", "input", "dependency", "permission", "environment", "external", "unknown"]},
+          "estimate_revision": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+          "progress_percent": {"type": "number", "minimum": 0, "maximum": 100, "description": "Optional evidence-backed declaration; never server-derived from elapsed time"},
+          "eta_seconds": {"type": "integer", "minimum": 0, "maximum": 31536000},
+          "eta_min_seconds": {"type": "integer", "minimum": 0, "maximum": 31536000},
+          "eta_max_seconds": {"type": "integer", "minimum": 0, "maximum": 31536000},
+          "estimate_source": {"type": "string", "enum": ["agent", "adapter", "provider", "tool"]},
+          "estimate_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "estimate_basis": {"type": "string", "minLength": 1, "maxLength": 240, "description": "At most 240 UTF-8 bytes; byte enforcement is authoritative"},
+          "clock_skew_seconds": {"type": "integer", "format": "int64"},
+          "clock_skewed": {"type": "boolean"}
+        }
+      },
+      "AgentRunTelemetryInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "correlation_id", "provider", "adapter", "agent_reported_at", "kind"],
+        "description": "Unknown properties are rejected. Progress/ETA require revision, source, confidence, and basis.",
+        "properties": {
+          "sequence": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+          "correlation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "provider": {"type": "string", "minLength": 1, "maxLength": 64},
+          "adapter": {"type": "string", "minLength": 1, "maxLength": 64},
+          "agent_reported_at": {"type": "string", "format": "date-time"},
+          "kind": {"type": "string", "enum": ["heartbeat", "progress", "phase", "needs_input", "blocker", "estimate"]},
+          "heartbeat": {"type": "boolean"},
+          "phase": {"type": "string", "enum": ["unknown", "starting", "planning", "implementing", "testing", "reviewing", "deploying", "waiting", "completed"]},
+          "activity": {"type": "string", "maxLength": 280, "description": "At most 280 UTF-8 bytes; byte enforcement is authoritative"},
+          "needs_input": {"type": "boolean"},
+          "blocker_state": {"type": "string", "enum": ["none", "input", "dependency", "permission", "environment", "external", "unknown"]},
+          "estimate_revision": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+          "progress_percent": {"type": "number", "minimum": 0, "maximum": 100},
+          "eta_seconds": {"type": "integer", "minimum": 0, "maximum": 31536000},
+          "eta_min_seconds": {"type": "integer", "minimum": 0, "maximum": 31536000},
+          "eta_max_seconds": {"type": "integer", "minimum": 0, "maximum": 31536000},
+          "estimate_source": {"type": "string", "enum": ["agent", "adapter", "provider", "tool"]},
+          "estimate_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "estimate_basis": {"type": "string", "minLength": 1, "maxLength": 240, "description": "At most 240 UTF-8 bytes; byte enforcement is authoritative"}
+        }
+      },
+      "AgentRunTelemetrySnapshot": {
+        "type": "object",
+        "required": ["run_id", "instrumented", "liveness", "latest", "latest_event", "latest_heartbeat", "latest_semantic", "latest_estimate"],
+        "properties": {
+          "run_id": {"type": "integer", "format": "int64"},
+          "instrumented": {"type": "boolean"},
+          "liveness": {"type": "string", "enum": ["unknown", "live", "stale", "ended"], "description": "ended for every stream-closing result: completed, tests_passed, tests_failed, deployed, failed, cancelled, or drafted"},
+          "freshness_seconds": {"type": "integer", "format": "int64"},
+          "event_freshness_seconds": {"type": "integer", "format": "int64", "description": "Age of the newest event by server receipt time"},
+          "heartbeat_freshness_seconds": {"type": "integer", "format": "int64", "description": "Age of the newest supervisor heartbeat; the only active-run watchdog clock"},
+          "semantic_freshness_seconds": {"type": "integer", "format": "int64"},
+          "estimate_freshness_seconds": {"type": "integer", "format": "int64"},
+          "last_heartbeat_at": {"type": "string", "format": "date-time"},
+          "latest": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/AgentRunTelemetry"},
+              {"type": "null"}
+            ]
+          },
+          "latest_event": {"oneOf": [{"$ref": "#/components/schemas/AgentRunTelemetry"}, {"type": "null"}]},
+          "latest_heartbeat": {"oneOf": [{"$ref": "#/components/schemas/AgentRunTelemetry"}, {"type": "null"}]},
+          "latest_semantic": {"oneOf": [{"$ref": "#/components/schemas/AgentRunTelemetry"}, {"type": "null"}]},
+          "latest_estimate": {"oneOf": [{"$ref": "#/components/schemas/AgentRunTelemetry"}, {"type": "null"}]}
         }
       },
       "AgentActionCapability": {
@@ -976,6 +1109,363 @@
             }
           }
         }
+      },
+      "AgentModeProblem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "title", "status", "detail", "code", "error"],
+        "properties": {
+          "type": {"type": "string", "format": "uri"},
+          "title": {"type": "string"},
+          "status": {"type": "integer"},
+          "detail": {"type": "string"},
+          "instance": {"type": "string"},
+          "code": {"type": "string"},
+          "field": {"type": "string"},
+          "valid_values": {"type": "array", "items": {"type": "string"}},
+          "request_id": {"type": "string"},
+          "error": {"type": "string"}
+        }
+      },
+      "AgentModeVoiceTranscript": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["utterance_id", "text", "final"],
+        "properties": {
+          "utterance_id": {"type": "string", "pattern": "^utt_[0-9a-f]{32}$"},
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "description": "The authoritative producer bound is 8192 UTF-8 bytes: the server truncates the transcript to at most 8192 bytes on a code-point boundary, so the value is always valid UTF-8. JSON Schema maxLength counts characters (code points) rather than bytes, so this 8192 maxLength is only a loose upper bound that multibyte transcripts never reach; validate the byte length against 8192 when the byte bound matters."
+          },
+          "final": {"type": "boolean", "const": true}
+        }
+      },
+      "AgentModeVoiceSpeakRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["template", "delivery_id", "delivery_revision", "candidate_ids", "locale"],
+        "properties": {
+          "template": {"type": "string", "enum": ["status", "note_ready", "clarification"]},
+          "delivery_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"},
+          "delivery_revision": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[!-~]+$"},
+          "candidate_ids": {
+            "type": "array",
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"},
+            "description": "Empty for status/note_ready; one to three active authorized delivery IDs for clarification."
+          },
+          "locale": {"type": "string", "enum": ["en", "de"]}
+        }
+      },
+      "AgentModeSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema_version", "server_time", "cursor", "rows", "selected_delivery", "aggregates"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "server_time": {"type": "string", "format": "date-time"},
+          "cursor": {"type": "string", "minLength": 211, "maxLength": 211, "description": "Opaque, user/scope/filter-bound resume cursor."},
+          "rows": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/components/schemas/AgentModeDelivery"}},
+          "selected_delivery": {"type": "string", "description": "Selected delivery key, or the empty string when the authorized history is genuinely empty."},
+          "selected_outside": {"$ref": "#/components/schemas/AgentModeSelectedOutside"},
+          "aggregates": {"$ref": "#/components/schemas/AgentModeAggregates"}
+        }
+      },
+      "AgentModeSelectedOutside": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason", "row"],
+        "properties": {
+          "reason": {"type": "string", "enum": ["filter_excluded", "terminal", "active_fallback", "terminal_fallback"]},
+          "row": {"$ref": "#/components/schemas/AgentModeDelivery"}
+        }
+      },
+      "AgentModeDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["delivery_id", "issue_id", "issue_key", "title", "project_id", "project_key", "project_name", "epic_id", "epic_key", "epic_title", "lane_key", "attempt_id", "attempt_number", "attempt_status", "plan_revision", "delivery_revision", "trust_revision", "tags", "actor", "activity", "stage", "stages", "evidence", "capabilities", "health", "attention", "freshness", "blockers", "progress", "eta", "trust"],
+        "properties": {
+          "delivery_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"},
+          "issue_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "issue_key": {"type": "string"},
+          "title": {"type": "string"},
+          "project_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "project_key": {"type": "string"},
+          "project_name": {"type": "string"},
+          "epic_id": {"oneOf": [{"type": "integer", "format": "int64"}, {"type": "null"}]},
+          "epic_key": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "epic_title": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "lane_key": {"type": "string", "pattern": "^project:[1-9][0-9]*/(epic:[1-9][0-9]*|ungrouped)$"},
+          "attempt_id": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "attempt_number": {"oneOf": [{"type": "integer", "format": "int64", "minimum": 1}, {"type": "null"}]},
+          "attempt_status": {"type": "string", "enum": ["pending", "active", "completed", "failed_needs_retry", "deployed_unverified", "cancelled", "unknown"]},
+          "plan_revision": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "delivery_revision": {"type": "string"},
+          "trust_revision": {"type": "string", "pattern": "^tr1_[0-9a-f]{64}$"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "actor": {"oneOf": [{"$ref": "#/components/schemas/AgentModeActor"}, {"type": "null"}]},
+          "activity": {"$ref": "#/components/schemas/AgentModeActivity"},
+          "stage": {"$ref": "#/components/schemas/AgentModeStageSummary"},
+          "stages": {"type": "array", "items": {"$ref": "#/components/schemas/AgentModeStage"}},
+          "evidence": {"type": "array", "items": {"$ref": "#/components/schemas/AgentModeEvidence"}},
+          "capabilities": {"$ref": "#/components/schemas/AgentModeCapabilities"},
+          "health": {"type": "string", "enum": ["healthy", "attention", "blocked", "stale", "unknown"]},
+          "attention": {"$ref": "#/components/schemas/AgentModeAttention"},
+          "freshness": {"$ref": "#/components/schemas/AgentModeFreshness"},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/AgentModeBlocker"}},
+          "progress": {"oneOf": [{"$ref": "#/components/schemas/AgentModeProgress"}, {"type": "null"}]},
+          "eta": {"oneOf": [{"$ref": "#/components/schemas/AgentModeETA"}, {"type": "null"}]},
+          "trust": {"$ref": "#/components/schemas/AgentModeTrust"},
+          "status_text": {"type": "string"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "AgentModeActor": {
+        "type": "object", "additionalProperties": false, "required": ["name", "label", "kind"],
+        "properties": {
+          "name": {"type": "string"}, "label": {"type": "string"},
+          "kind": {"type": "string", "enum": ["agent", "external", "human", "system", "unknown"]}
+        }
+      },
+      "AgentModeActivity": {
+        "type": "object", "additionalProperties": false, "required": ["kind", "since"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["working", "blocked", "waiting", "idle", "testing", "deploying", "verifying", "unknown"]},
+          "text": {"type": "string"},
+          "since": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+        }
+      },
+      "AgentModeStageSummary": {
+        "type": "object", "additionalProperties": false, "required": ["key", "label", "index", "total"],
+        "properties": {
+          "key": {"type": "string", "enum": ["specification", "implementation", "qa", "deployment", "verification", "unknown"]},
+          "label": {"type": "string"},
+          "index": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+          "total": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]}
+        }
+      },
+      "AgentModeStage": {
+        "type": "object", "additionalProperties": false,
+        "required": ["key", "label", "status", "required", "owner", "blockers", "evidence", "started_at", "completed_at"],
+        "properties": {
+          "key": {"type": "string", "enum": ["specification", "implementation", "qa", "deployment", "verification"]},
+          "label": {"type": "string"},
+          "status": {"type": "string", "enum": ["pending", "active", "waiting", "blocked", "succeeded", "failed", "cancelled", "draft_ready", "unknown", "not_applicable"]},
+          "required": {"type": "boolean"},
+          "owner": {"oneOf": [{"$ref": "#/components/schemas/AgentModeActor"}, {"type": "null"}]},
+          "activity": {"type": "string"},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/AgentModeBlocker"}},
+          "evidence": {"type": "array", "items": {"$ref": "#/components/schemas/AgentModeEvidence"}},
+          "started_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+          "completed_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+        }
+      },
+      "AgentModeEvidence": {
+        "type": "object", "additionalProperties": false, "required": ["kind", "status", "reported_at"],
+        "properties": {
+          "kind": {"type": "string"},
+          "status": {"type": "string", "enum": ["passed", "failed", "unknown"]},
+          "reported_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+        }
+      },
+      "AgentModeBlocker": {
+        "type": "object", "additionalProperties": false, "required": ["kind"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["input", "dependency", "permission", "environment", "external", "unknown", "blocked"]},
+          "text": {"type": "string"}
+        }
+      },
+      "AgentModeCapabilities": {
+        "type": "object", "additionalProperties": false,
+        "required": ["view_issue", "edit_issue", "comment", "attach", "live_note", "one_shot_run_active"],
+        "properties": {
+          "view_issue": {"type": "boolean"}, "edit_issue": {"type": "boolean"},
+          "comment": {"type": "boolean"}, "attach": {"type": "boolean"},
+          "live_note": {"type": "boolean"}, "one_shot_run_active": {"type": "boolean"}
+        }
+      },
+      "AgentModeAttention": {
+        "type": "object", "additionalProperties": false, "required": ["level", "since"],
+        "properties": {
+          "level": {"type": "integer", "minimum": 0, "maximum": 3},
+          "reason": {"type": "string", "enum": ["blocked", "waiting_needs_input", "failed_needs_retry", "stale_no_signal", "unknown_reporter", "deployed_unverified"]},
+          "since": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+        }
+      },
+      "AgentModeFreshness": {
+        "type": "object", "additionalProperties": false, "required": ["state", "last_report_at"],
+        "properties": {
+          "state": {"type": "string", "enum": ["fresh", "aging", "stale", "unknown"]},
+          "last_report_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+        }
+      },
+      "AgentModeProgress": {
+        "type": "object", "additionalProperties": false,
+        "required": ["percent", "trusted", "confidence", "source", "basis", "revision"],
+        "properties": {
+          "percent": {"oneOf": [{"type": "integer", "minimum": 0, "maximum": 100}, {"type": "null"}]},
+          "trusted": {"type": "boolean"},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low", "unknown"]},
+          "source": {"oneOf": [{"type": "string", "enum": ["stage_evidence", "owner_estimate"]}, {"type": "null"}]},
+          "basis": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "revision": {"type": "string", "pattern": "^tr1_[0-9a-f]{64}$"}
+        }
+      },
+      "AgentModeETA": {
+        "type": "object", "additionalProperties": false,
+        "required": ["landing_at", "optimistic_at", "pessimistic_at", "trusted", "confidence", "basis", "calculated_at"],
+        "properties": {
+          "landing_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+          "optimistic_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+          "pessimistic_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+          "trusted": {"type": "boolean"},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low", "unknown"]},
+          "basis": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "calculated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "AgentModeTrustScope": {
+        "type": "object", "additionalProperties": false,
+        "required": ["attempt_id", "plan_id", "execution_id", "authority_id", "reset_id"],
+        "properties": {
+          "attempt_id": {"type": "string"}, "plan_id": {"type": "string"},
+          "execution_id": {"type": "string"}, "authority_id": {"type": "string"}, "reset_id": {"type": "string"}
+        }
+      },
+      "AgentModeTrust": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "trust_revision", "progress_known", "progress_percent", "confidence_label", "reporter_kind", "source_kind", "optimistic_landing_at", "pessimistic_landing_at", "landing_at", "range_only", "scope", "flags"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "trust_revision": {"type": "string", "pattern": "^tr1_[0-9a-f]{64}$"},
+          "progress_known": {"type": "boolean"},
+          "progress_percent": {"oneOf": [{"type": "integer", "minimum": 0, "maximum": 100}, {"type": "null"}]},
+          "confidence_label": {"type": "string", "enum": ["high", "medium", "low", "unknown"]},
+          "reporter_kind": {"type": "string", "enum": ["agent_run", "external", "user", "system", "unknown"]},
+          "source_kind": {"type": "string", "enum": ["owner_estimate", "stage_evidence", "history"]},
+          "basis": {"type": "string"},
+          "optimistic_landing_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+          "pessimistic_landing_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+          "landing_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+          "range_only": {"type": "boolean"},
+          "suppression": {"type": "string", "enum": ["terminal_complete", "cancelled", "terminal_failed", "waiting_on_human", "blocked", "stale", "unknown_reporter", "no_signal", "estimate_expired", "outlier_heavy", "insufficient_basis", "missing_contributor"]},
+          "scope": {"oneOf": [{"$ref": "#/components/schemas/AgentModeTrustScope"}, {"type": "null"}]},
+          "flags": {"type": "array", "items": {"type": "string", "enum": ["source_backslide_ignored", "agent_history_disagreement", "history_quality_downgraded", "history_outlier_heavy", "history_insufficient_basis", "owner_estimate_invalid", "owner_estimate_expired", "deployed_unverified", "failed_needs_retry"]}}
+        }
+      },
+      "AgentModeStageCounts": {
+        "type": "object", "additionalProperties": false,
+        "required": ["specification", "implementation", "qa", "deployment", "verification", "unknown"],
+        "properties": {
+          "specification": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "implementation": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+          "qa": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "deployment": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+          "verification": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "unknown": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+        }
+      },
+      "AgentModeLandingCounts": {
+        "type": "object", "additionalProperties": false,
+        "required": ["within_4h", "within_24h", "within_3d", "later", "range_only", "suppressed_or_unknown"],
+        "properties": {
+          "within_4h": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "within_24h": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+          "within_3d": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "later": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+          "range_only": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "suppressed_or_unknown": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+        }
+      },
+      "AgentModeCountFlags": {
+        "type": "object", "additionalProperties": false,
+        "required": ["attention", "waiting_needs_input", "blocked", "stale_no_signal", "failed_needs_retry", "deployed_unverified", "unverified", "unknown_reporter"],
+        "properties": {
+          "attention": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "waiting_needs_input": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+          "blocked": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "stale_no_signal": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+          "failed_needs_retry": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "deployed_unverified": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+          "unverified": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "unknown_reporter": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+        }
+      },
+      "AgentModeCountSet": {
+        "type": "object", "additionalProperties": false, "required": ["active_total", "current_stage", "landing", "flags"],
+        "properties": {
+          "active_total": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+          "current_stage": {"$ref": "#/components/schemas/AgentModeStageCounts"},
+          "landing": {"$ref": "#/components/schemas/AgentModeLandingCounts"},
+          "flags": {"$ref": "#/components/schemas/AgentModeCountFlags"}
+        }
+      },
+      "AgentModeLaneAggregate": {
+        "type": "object", "additionalProperties": false,
+        "required": ["lane_key", "epic_id", "epic_key", "epic_title", "counts"],
+        "properties": {
+          "lane_key": {"type": "string"},
+          "epic_id": {"oneOf": [{"type": "integer", "format": "int64"}, {"type": "null"}]},
+          "epic_key": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "epic_title": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "counts": {"$ref": "#/components/schemas/AgentModeCountSet"}
+        }
+      },
+      "AgentModeProjectAggregate": {
+        "type": "object", "additionalProperties": false,
+        "required": ["project_id", "project_key", "project_name", "counts", "lanes"],
+        "properties": {
+          "project_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "project_key": {"type": "string"}, "project_name": {"type": "string"},
+          "counts": {"$ref": "#/components/schemas/AgentModeCountSet"},
+          "lanes": {"type": "array", "items": {"$ref": "#/components/schemas/AgentModeLaneAggregate"}}
+        }
+      },
+      "AgentModeAttentionItem": {
+        "type": "object", "additionalProperties": false,
+        "required": ["delivery_id", "level", "primary_reason", "flags", "since"],
+        "properties": {
+          "delivery_id": {"type": "string"}, "level": {"type": "integer", "minimum": 1, "maximum": 3},
+          "primary_reason": {"type": "string", "enum": ["blocked", "waiting_needs_input", "failed_needs_retry", "stale_no_signal", "unknown_reporter", "deployed_unverified"]},
+          "flags": {"type": "array", "items": {"type": "string", "enum": ["blocked", "waiting_needs_input", "failed_needs_retry", "stale_no_signal", "unknown_reporter", "deployed_unverified", "unverified"]}},
+          "since": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+        }
+      },
+      "AgentModeAggregates": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "structural_revision", "classification_revision", "calculated_at", "next_refresh_at", "root", "projects", "attention"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "structural_revision": {"type": "string", "pattern": "^am_s1_[0-9a-f]{64}$"},
+          "classification_revision": {"type": "string", "pattern": "^am_c1_[0-9a-f]{64}$"},
+          "calculated_at": {"type": "string", "format": "date-time"},
+          "next_refresh_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+          "root": {"$ref": "#/components/schemas/AgentModeCountSet"},
+          "projects": {"type": "array", "items": {"$ref": "#/components/schemas/AgentModeProjectAggregate"}},
+          "attention": {
+            "type": "object", "additionalProperties": false, "required": ["total", "items"],
+            "properties": {
+              "total": {"type": "integer", "minimum": 0},
+              "items": {"type": "array", "maxItems": 12, "items": {"$ref": "#/components/schemas/AgentModeAttentionItem"}}
+            }
+          }
+        }
+      },
+      "AgentModeStreamHint": {
+        "type": "object", "additionalProperties": false,
+        "required": ["delivery_id", "delivery_revision", "change_sequence"],
+        "properties": {
+          "delivery_id": {"type": "string"},
+          "delivery_revision": {"type": "integer", "format": "int64", "minimum": 0},
+          "change_sequence": {"type": "integer", "format": "int64", "minimum": 1}
+        }
+      },
+      "AgentModeStreamBatch": {
+        "type": "object", "additionalProperties": false, "required": ["schema_version"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "hints": {"type": "array", "maxItems": 512, "items": {"$ref": "#/components/schemas/AgentModeStreamHint"}}
+        }
+      },
+      "AgentModeStreamReset": {
+        "type": "object", "additionalProperties": false, "required": ["schema_version", "reason"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "reason": {"type": "string", "const": "resync_required"}
+        }
       }
     },
     "responses": {
@@ -1008,6 +1498,77 @@
             }
           }
         }
+      }
+    },
+    "headers": {
+      "PermissionsEpoch": {
+        "description": "PAI-320 per-user permissions epoch. The auth middleware sets it on every authenticated response, for session-cookie and `paimos_*` API-key callers alike, so it is always present on a success. The value is the canonical base-10 rendering of a non-negative int64 counter: no sign, no leading zeros, no surrounding whitespace. Clients compare it verbatim against the last value they saw and re-fetch `/auth/me` on any change, so a non-canonical rendering would silently invalidate that comparison. The pattern is exact on both ends: the counter is a signed int64 column rendered by `strconv.FormatInt`, so 9223372036854775807 is the largest value that can ever appear. The 19-digit alternatives encode that ceiling — one branch per prefix of the maximum whose next digit is lowered, plus the maximum itself — because JSON Schema has no numeric bound for a string-typed header.",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[01][0-9]{17}|92[01][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[01][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7])$"
+        }
+      },
+      "SessionExpiresAt": {
+        "description": "PAI-322 session expiry. Present only when the request authenticated with a session cookie; absent for `paimos_*` API-key callers, so clients must treat it as optional. The value is the session's current expiry in UTC as an RFC 3339 date-time.",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "parameters": {
+      "AgentModeProjectFilter": {
+        "name": "project_id", "in": "query", "required": false,
+        "description": "Result filter, not an authorization boundary.",
+        "schema": {"type": "integer", "format": "int64", "minimum": 1}
+      },
+      "AgentModeLaneFilter": {
+        "name": "lane_key", "in": "query", "required": false,
+        "schema": {"type": "string", "pattern": "^project:[1-9][0-9]*/(epic:[1-9][0-9]*|ungrouped)$"}
+      },
+      "AgentModeStateFilter": {
+        "name": "state", "in": "query", "required": false,
+        "description": "Repeat to select multiple states.",
+        "schema": {"type": "array", "items": {"type": "string", "enum": ["pending", "active", "completed", "failed_needs_retry", "deployed_unverified", "cancelled", "unknown"]}},
+        "style": "form", "explode": true
+      },
+      "AgentModeAttentionFilter": {
+        "name": "attention", "in": "query", "required": false,
+        "schema": {"type": "string", "enum": ["all", "required"], "default": "all"}
+      },
+      "AgentModeHealthFilter": {
+        "name": "health", "in": "query", "required": false,
+        "schema": {"type": "string", "enum": ["all", "attention", "blocked", "stale"], "default": "all"}
+      },
+      "AgentModeSearchFilter": {
+        "name": "q", "in": "query", "required": false,
+        "schema": {"type": "string", "maxLength": 160},
+        "description": "Bounded UTF-8 allowlist search; the server enforces 160 bytes."
+      },
+      "AgentModeSelection": {
+        "name": "selected_delivery", "in": "query", "required": false,
+        "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"},
+        "description": "Lookup/selection hint excluded from cursor membership binding."
+      },
+      "AgentModeCursor": {
+        "name": "cursor", "in": "query", "required": false,
+        "schema": {"type": "string", "minLength": 211, "maxLength": 211},
+        "description": "Opaque snapshot/event resume cursor. Ignored when Last-Event-ID is present."
+      },
+      "AgentModeLastEventID": {
+        "name": "Last-Event-ID", "in": "header", "required": false,
+        "schema": {"type": "string", "minLength": 211, "maxLength": 211},
+        "description": "Authoritative resume cursor. Invalid, empty, or duplicate values produce one generic reset event and close."
+      },
+      "AgentModeProjectPath": {
+        "name": "projectID", "in": "path", "required": true,
+        "schema": {"type": "integer", "format": "int64", "minimum": 1}
+      },
+      "AgentModeDeliveryPath": {
+        "name": "deliveryKey", "in": "path", "required": true,
+        "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}
       }
     }
   },
@@ -1206,6 +1767,14 @@
         "responses": {
           "200": {
             "description": "Current user",
+            "headers": {
+              "X-Permissions-Epoch": {
+                "$ref": "#/components/headers/PermissionsEpoch"
+              },
+              "X-Session-Expires-At": {
+                "$ref": "#/components/headers/SessionExpiresAt"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1425,9 +1994,36 @@
           "projects"
         ],
         "summary": "List projects",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Project lifecycle filter. Omitting it is the same as `active`. A concrete status returns exactly that state. `all` is not a wildcard: it returns the normal lifecycle states — `active`, `frozen` and `archived` — and deliberately excludes `deleted`, which stays reachable only through the explicit `status=deleted` trash view.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "frozen",
+                "archived",
+                "deleted",
+                "all"
+              ],
+              "default": "active"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Projects",
+            "headers": {
+              "X-Permissions-Epoch": {
+                "$ref": "#/components/headers/PermissionsEpoch"
+              },
+              "X-Session-Expires-At": {
+                "$ref": "#/components/headers/SessionExpiresAt"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1875,9 +2471,25 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommentCreateRequest"}}}
+        },
         "responses": {
+          "200": {
+            "description": "Exact replay of an existing client_request_id",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Comment"}}}
+          },
           "201": {
-            "description": "Created"
+            "description": "Created",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Comment"}}}
+          },
+          "400": {
+            "description": "Invalid body, visibility, or client_request_id"
+          },
+          "409": {
+            "description": "client_request_id was already used by this author for a different issue or body",
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
           }
         }
       }
@@ -2722,10 +3334,12 @@
                 "type": "object",
                 "properties": {
                   "status": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": ["queued", "running", "completed", "tests_passed", "tests_failed", "deployed", "failed", "cancelled", "drafted"]
                   },
                   "if_status": {
                     "type": "string",
+                    "enum": ["queued", "running", "completed", "tests_passed", "tests_failed", "deployed", "failed", "cancelled", "drafted"],
                     "description": "optimistic claim guard — apply only if the run is still in this status"
                   },
                   "device_id": {
@@ -2740,7 +3354,9 @@
                     "type": "string"
                   },
                   "tests_summary": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 4096,
+                    "description": "bounded runner-owned result evidence; tests_passed and tests_failed require a non-empty value in this request or already persisted, while completed rejects test evidence"
                   },
                   "deploy_target": {
                     "type": "string"
@@ -2768,6 +3384,11 @@
                   },
                   "error": {
                     "type": "string"
+                  },
+                  "expects_supervisor_telemetry": {
+                    "type": "boolean",
+                    "enum": [true],
+                    "description": "may be enabled only in the queued-to-running claim; distinguishes new supervised runs from legacy uninstrumented runners"
                   }
                 }
               }
@@ -2795,6 +3416,69 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/runs/{id}/telemetry": {
+      "post": {
+        "tags": ["agent-runs"],
+        "summary": "Append one immutable telemetry fact. Requester, claimer, or admin; unauthorized runs are existence-hidden. Every result status closes the fact stream.",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentRunTelemetryInput"}}}
+        },
+        "responses": {
+          "200": {
+            "description": "Exact idempotent replay; the original persisted telemetry fact is returned with duplicate=true",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {
+              "accepted": {"type": "boolean"},
+              "duplicate": {"type": "boolean", "enum": [true]},
+              "telemetry": {"$ref": "#/components/schemas/AgentRunTelemetry"}
+            }}}}
+          },
+          "201": {
+            "description": "Telemetry appended",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {
+              "accepted": {"type": "boolean"},
+              "duplicate": {"type": "boolean"},
+              "telemetry": {"$ref": "#/components/schemas/AgentRunTelemetry"}
+            }}}}
+          },
+          "400": {"description": "Invalid allowlisted field, timestamp, range, confidence, or revision"},
+          "404": {"description": "Run missing or caller is not requester/claimer/admin"},
+          "409": {"description": "Sequence/identity conflict, stale estimate revision, or a new/conflicting fact after completed, tests_passed, tests_failed, deployed, failed, cancelled, or drafted; an exact persisted replay remains a 200 duplicate"}
+        }
+      },
+      "get": {
+        "tags": ["agent-runs"],
+        "summary": "Read append-only telemetry history for one visible run",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+          {"name": "after_sequence", "in": "query", "schema": {"type": "integer", "minimum": 0}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 0, "maximum": 500}}
+        ],
+        "responses": {
+          "200": {"description": "Telemetry history", "content": {"application/json": {"schema": {"type": "object", "properties": {
+            "run_id": {"type": "integer", "format": "int64"},
+            "events": {"type": "array", "items": {"$ref": "#/components/schemas/AgentRunTelemetry"}}
+          }}}}},
+          "404": {"description": "Run missing or not visible"}
+        }
+      }
+    },
+    "/api/runs/{id}/telemetry/latest": {
+      "get": {
+        "tags": ["agent-runs"],
+        "summary": "Fetch the efficient latest telemetry snapshot; uninstrumented runs return liveness unknown and latest null",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}
+        ],
+        "responses": {
+          "200": {"description": "Latest snapshot", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentRunTelemetrySnapshot"}}}},
+          "404": {"description": "Run missing or not visible"}
         }
       }
     },
@@ -2842,6 +3526,329 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/agent-mode/deliveries": {
+      "get": {
+        "tags": ["agent-mode"],
+        "summary": "Read the authorized Agent Mode delivery snapshot",
+        "description": "Returns schema v1 rows, selector-independent aggregates, and an opaque cursor. Query filters shape rows and aggregates but never broaden authorization. `selected_delivery` may produce the sole `selected_outside` object and is excluded from cursor binding. Portfolio snapshots are bounded to 1,000 authorized candidate roots and reject a larger set rather than truncating it.",
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentModeProjectFilter"},
+          {"$ref": "#/components/parameters/AgentModeLaneFilter"},
+          {"$ref": "#/components/parameters/AgentModeStateFilter"},
+          {"$ref": "#/components/parameters/AgentModeAttentionFilter"},
+          {"$ref": "#/components/parameters/AgentModeHealthFilter"},
+          {"$ref": "#/components/parameters/AgentModeSearchFilter"},
+          {"$ref": "#/components/parameters/AgentModeSelection"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized Agent Mode snapshot",
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}},
+              "X-Permissions-Epoch": {"$ref": "#/components/headers/PermissionsEpoch"},
+              "X-Session-Expires-At": {"$ref": "#/components/headers/SessionExpiresAt"}
+            },
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentModeSnapshot"}}}
+          },
+          "400": {
+            "description": "Malformed, duplicate, unsupported, or inconsistent filter, or more than 1,000 authorized candidate roots",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "404": {
+            "description": "Canonical indistinguishable response for external callers and inaccessible roots",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "403": {
+            "description": "Authenticated internal caller must change an administrator-set password",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "500": {
+            "description": "Private storage-invariant failure; no partial snapshot is returned",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          }
+        }
+      }
+    },
+    "/api/agent-mode/projects/{projectID}/deliveries": {
+      "get": {
+        "tags": ["agent-mode"],
+        "summary": "Read a project-scoped Agent Mode delivery snapshot",
+        "description": "The project path is an authorization and stream-audience boundary. Its cursor can resume on the sole events endpoint by supplying the same project_id query value; the sealed cursor selects project-route semantics. Project snapshots are bounded to 1,000 authorized candidate roots and reject a larger set rather than truncating it.",
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentModeProjectPath"},
+          {"$ref": "#/components/parameters/AgentModeLaneFilter"},
+          {"$ref": "#/components/parameters/AgentModeStateFilter"},
+          {"$ref": "#/components/parameters/AgentModeAttentionFilter"},
+          {"$ref": "#/components/parameters/AgentModeHealthFilter"},
+          {"$ref": "#/components/parameters/AgentModeSearchFilter"},
+          {"$ref": "#/components/parameters/AgentModeSelection"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized project-scoped snapshot",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentModeSnapshot"}}}
+          },
+          "400": {
+            "description": "Malformed project identifier or filter, or more than 1,000 authorized candidate roots in the project scope",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "404": {
+            "description": "Missing/inaccessible project or canonical external concealment",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "403": {
+            "description": "Authenticated internal caller must change an administrator-set password",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "500": {
+            "description": "Private storage-invariant failure; no partial snapshot is returned",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          }
+        }
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}": {
+      "get": {
+        "tags": ["agent-mode"],
+        "summary": "Read one authorized Agent Mode delivery selection",
+        "description": "A detail path is a selection/lookup surface, not a separate event scope. Its cursor uses the same effective global filter binding as the portfolio snapshot; the delivery key itself is not cursor-bound. Exact authorized detail membership is applied before the 1,000-candidate portfolio ceiling, so unrelated authorized roots cannot hide a valid detail.",
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentModeDeliveryPath"},
+          {"$ref": "#/components/parameters/AgentModeProjectFilter"},
+          {"$ref": "#/components/parameters/AgentModeLaneFilter"},
+          {"$ref": "#/components/parameters/AgentModeStateFilter"},
+          {"$ref": "#/components/parameters/AgentModeAttentionFilter"},
+          {"$ref": "#/components/parameters/AgentModeHealthFilter"},
+          {"$ref": "#/components/parameters/AgentModeSearchFilter"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Snapshot containing the selected delivery inside rows or selected_outside",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentModeSnapshot"}}}
+          },
+          "400": {
+            "description": "Malformed delivery key or filter",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "404": {
+            "description": "Missing/inaccessible delivery or canonical external concealment",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "403": {
+            "description": "Authenticated internal caller must change an administrator-set password",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "500": {
+            "description": "Private storage-invariant failure; no partial snapshot is returned",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          }
+        }
+      }
+    },
+    "/api/agent-mode/deliveries/events": {
+      "get": {
+        "tags": ["agent-mode"],
+        "summary": "Stream resumable Agent Mode delivery invalidations",
+        "description": "Server-Sent Events stream. `Last-Event-ID` has absolute precedence over `cursor`. A valid resume produces durable `refetch` events with only currently authorized hints or identity-free `refetch` when convergence requires it, and `checkpoint` events when only the opaque high-water advances. Both use the new opaque cursor as the SSE `id`. Any invalid/tampered/expired/wrong-user/wrong-scope/revoked/below-retention/ahead-of-tail resume produces exactly one identity-free `reset` (`{\"schema_version\":1,\"reason\":\"resync_required\"}`) without an event id, then closes. A fresh stream whose authorized scope exceeds 1,000 candidates returns a private 400 before SSE headers; a resumed stream normalizes that changed scope to the same generic reset. A storage invariant discovered before response headers is a private 500 problem because cursor resynchronization cannot repair storage; the same invariant discovered by an already-established session emits one identity-free reset and closes. Heartbeats are SSE comments.",
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentModeLastEventID"},
+          {"$ref": "#/components/parameters/AgentModeCursor"},
+          {"$ref": "#/components/parameters/AgentModeProjectFilter"},
+          {"$ref": "#/components/parameters/AgentModeLaneFilter"},
+          {"$ref": "#/components/parameters/AgentModeStateFilter"},
+          {"$ref": "#/components/parameters/AgentModeAttentionFilter"},
+          {"$ref": "#/components/parameters/AgentModeHealthFilter"},
+          {"$ref": "#/components/parameters/AgentModeSearchFilter"},
+          {"$ref": "#/components/parameters/AgentModeSelection"}
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE `reset`, `refetch`, and `checkpoint` events. Refetch/checkpoint data follows AgentModeStreamBatch; reset data follows AgentModeStreamReset.",
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "private, no-store, no-transform"}},
+              "Connection": {"schema": {"type": "string", "const": "keep-alive"}},
+              "X-Accel-Buffering": {"schema": {"type": "string", "const": "no"}}
+            },
+            "content": {
+              "text/event-stream": {
+                "schema": {"type": "string", "description": "UTF-8 SSE frames. Event data schemas: AgentModeStreamBatch for refetch/checkpoint; AgentModeStreamReset for reset."},
+                "examples": {
+                  "refetch": {"value": "event: refetch\nid: <opaque cursor>\ndata: {\"schema_version\":1,\"hints\":[{\"delivery_id\":\"issue:42\",\"delivery_revision\":7,\"change_sequence\":9}]}\n\n"},
+                  "checkpoint": {"value": "event: checkpoint\nid: <opaque cursor>\ndata: {\"schema_version\":1}\n\n"},
+                  "reset": {"value": "event: reset\ndata: {\"schema_version\":1,\"reason\":\"resync_required\"}\n\n"}
+                }
+              }
+            },
+            "x-sse-events": {
+              "refetch": {"id": "opaque cursor", "data": {"$ref": "#/components/schemas/AgentModeStreamBatch"}},
+              "checkpoint": {"id": "opaque cursor", "data": {"$ref": "#/components/schemas/AgentModeStreamBatch"}},
+              "reset": {"id": null, "data": {"$ref": "#/components/schemas/AgentModeStreamReset"}}
+            }
+          },
+          "400": {
+            "description": "Malformed non-cursor filter or a fresh authorized scope exceeding 1,000 candidates. Invalid cursor material and a resumed scope that no longer satisfies the bound are normalized to a 200 reset event.",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "404": {
+            "description": "Canonical external concealment before a stream is opened",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "403": {
+            "description": "Authenticated internal caller must change an administrator-set password before a stream is opened",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          },
+          "500": {
+            "description": "Private pre-stream storage invariant or unavailable streaming transport; no SSE headers have been committed",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}
+          }
+        }
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/control-capability-grants": {
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Issue or replay the current operator control grant",
+        "description": "Accepts strict empty JSON. Returns only the immutable action union plus replace-only live safe target descriptors. Every response is private and no-store.",
+        "parameters": [{"name":"deliveryKey","in":"path","required":true,"schema":{"type":"string"}}],
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false}}}},
+        "responses": {"200":{"description":"Safe current grant"},"400":{"description":"Malformed closed request"},"404":{"description":"Canonical concealment"},"409":{"description":"Stale or idempotency conflict"},"503":{"description":"Dependency unavailable"}}
+      }
+    },
+    "/api/agent-mode/control-capability-grants/{id}": {
+      "get": {
+        "tags": ["agent-mode"],
+        "summary": "Read the current operator control grant",
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],
+        "responses": {"200":{"description":"Safe current grant"},"404":{"description":"Canonical concealment"},"503":{"description":"Dependency unavailable"}}
+      },
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Revoke the exact operator control grant revision",
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["operation","revision"],"properties":{"operation":{"const":"revoke"},"revision":{"type":"integer","minimum":1}}}}}},
+        "responses": {"200":{"description":"Revoked safe grant"},"400":{"description":"Malformed closed request"},"404":{"description":"Canonical concealment"},"409":{"description":"Stale or idempotency conflict"}}
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/control-commands": {
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Create one exact two-phase operator command",
+        "description": "The request submits one descriptor the operator reviewed from the current grant. The server transactionally re-resolves it and returns a safe server-owned challenge; creation never confirms.",
+        "parameters": [{"name":"deliveryKey","in":"path","required":true,"schema":{"type":"string"}}],
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false}}}},
+        "responses": {"200":{"description":"Safe pending command challenge"},"400":{"description":"Malformed closed request"},"404":{"description":"Canonical concealment"},"409":{"description":"Stale target or idempotency conflict"},"503":{"description":"Dependency unavailable"}}
+      }
+    },
+    "/api/agent-mode/control-commands/{id}": {
+      "get": {
+        "tags": ["agent-mode"],
+        "summary": "Reload a safe operator command without confirming it",
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],
+        "responses": {"200":{"description":"Safe command projection"},"404":{"description":"Canonical concealment"},"503":{"description":"Dependency unavailable"}}
+      },
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Confirm or withdraw the exact command revision",
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["operation","status_revision"],"properties":{"operation":{"type":"string","enum":["confirm","withdraw"]},"status_revision":{"type":"integer","minimum":1}}}}}},
+        "responses": {"200":{"description":"Safe current command projection"},"400":{"description":"Malformed closed request"},"404":{"description":"Canonical concealment"},"409":{"description":"Stale or semantic conflict"},"503":{"description":"Dependency unavailable"}}
+      }
+    },
+    "/api/agent-mode/voice/transcribe": {
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Ephemerally transcribe one final Agent Mode utterance",
+        "description": "Accepts one bounded raw audio blob and returns one final transcript. Audio and transcript are never persisted, cached, or copied into the generic idempotency cache; the AI papertrail stores metadata and billed units only. Intake and Agent Mode share STT concurrency, burst, and daily budgets.",
+        "parameters": [
+          {"name": "language", "in": "query", "required": true, "schema": {"type": "string", "enum": ["en", "de"]}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "audio/webm": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "video/webm": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "audio/mp4": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "video/mp4": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "audio/mpeg": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "audio/wav": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "audio/x-wav": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}},
+            "audio/ogg": {"schema": {"type": "string", "format": "binary", "maxLength": 12582912}}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Final ephemeral transcript",
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}},
+              "X-Permissions-Epoch": {"$ref": "#/components/headers/PermissionsEpoch"},
+              "X-Session-Expires-At": {"$ref": "#/components/headers/SessionExpiresAt"}
+            },
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentModeVoiceTranscript"}}}
+          },
+          "400": {"description": "Malformed or duplicate language query", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "401": {"description": "Authentication required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "Internal cookie caller failed CSRF or must change password", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Canonical external-account concealment", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}},
+          "413": {"description": "Audio exceeds 12 MiB", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "415": {"description": "Content-Type is not an allowlisted browser audio/video type", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "422": {"description": "Audio is empty or no speech was detected", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "429": {"description": "Shared voice concurrency, burst, AI-cap, or daily-unit budget rejected the call", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Private configuration/storage failure", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "502": {"description": "Transcription provider failed", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "503": {"description": "Voice input is not configured", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/agent-mode/voice/speak": {
+      "post": {
+        "tags": ["agent-mode"],
+        "summary": "Speak a reauthorized server-owned Agent Mode template",
+        "description": "Never accepts caller text. The server coherently reloads and authorizes the primary plus up to three active candidates, verifies the current delivery revision and required capability, then renders only closed structured facts. Intake and Agent Mode share TTS concurrency, burst, and daily budgets; audio and template text are not persisted.",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentModeVoiceSpeakRequest"}}}
+        },
+        "responses": {
+          "200": {
+            "description": "Ephemeral synthesized audio",
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}},
+              "Content-Language": {"schema": {"type": "string", "enum": ["en", "de"]}},
+              "X-Permissions-Epoch": {"$ref": "#/components/headers/PermissionsEpoch"},
+              "X-Session-Expires-At": {"$ref": "#/components/headers/SessionExpiresAt"}
+            },
+            "content": {"audio/mpeg": {"schema": {"type": "string", "format": "binary"}}}
+          },
+          "400": {"description": "Malformed, missing, extra, or inconsistent template fields", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "401": {"description": "Authentication required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "Internal cookie caller failed CSRF or must change password", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Canonical concealment for external, missing, inaccessible, revoked-capability, or inactive candidate targets", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}},
+          "409": {"description": "delivery_revision is no longer current", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/problem+json": {"schema": {"$ref": "#/components/schemas/AgentModeProblem"}}}},
+          "429": {"description": "Shared voice concurrency, burst, AI-cap, or daily-unit budget rejected the call", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Private storage-invariant failure", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "502": {"description": "Synthesis provider failed or returned invalid/non-audio/oversized output", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "503": {"description": "Voice output is not configured", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
         }
       }
     },

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/backend/handlers"
 )
@@ -124,6 +125,38 @@ func toolTextResult(text string, isError bool) map[string]any {
 // methods).
 func (s *Server) tools() []Tool {
 	return []Tool{
+		{
+			Name:        "paimos_report_progress",
+			Description: "Append one allowlisted, provider-neutral progress fact to an existing agent run. Never infer percentage from elapsed time and never send prompts, tool arguments, command output, environment values, secrets, source contents, or provider payloads.",
+			InputSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"run_id":              map[string]any{"type": "integer", "minimum": 1},
+					"sequence":            map[string]any{"type": "integer", "minimum": 1, "maximum": 2147483647},
+					"correlation_id":      map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
+					"provider":            map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+					"adapter":             map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+					"agent_reported_at":   map[string]any{"type": "string", "format": "date-time"},
+					"kind":                map[string]any{"type": "string", "enum": []string{"heartbeat", "progress", "phase", "needs_input", "blocker", "estimate"}},
+					"heartbeat":           map[string]any{"type": "boolean"},
+					"phase":               map[string]any{"type": "string", "enum": []string{"unknown", "starting", "planning", "implementing", "testing", "reviewing", "deploying", "waiting", "completed"}},
+					"activity":            map[string]any{"type": "string", "maxLength": 280, "description": "At most 280 UTF-8 bytes; the handler enforces the byte bound because JSON Schema maxLength counts code points."},
+					"needs_input":         map[string]any{"type": "boolean"},
+					"blocker_state":       map[string]any{"type": "string", "enum": []string{"none", "input", "dependency", "permission", "environment", "external", "unknown"}},
+					"estimate_revision":   map[string]any{"type": "integer", "minimum": 1, "maximum": 2147483647},
+					"progress_percent":    map[string]any{"type": "number", "minimum": 0, "maximum": 100},
+					"eta_seconds":         map[string]any{"type": "integer", "minimum": 0, "maximum": 31536000},
+					"eta_min_seconds":     map[string]any{"type": "integer", "minimum": 0, "maximum": 31536000},
+					"eta_max_seconds":     map[string]any{"type": "integer", "minimum": 0, "maximum": 31536000},
+					"estimate_source":     map[string]any{"type": "string", "enum": []string{"agent", "adapter", "provider", "tool"}},
+					"estimate_confidence": map[string]any{"type": "number", "minimum": 0, "maximum": 1},
+					"estimate_basis":      map[string]any{"type": "string", "minLength": 1, "maxLength": 240, "description": "At most 240 UTF-8 bytes; the handler enforces the byte bound because JSON Schema maxLength counts code points."},
+				},
+				"required": []string{"run_id", "sequence", "correlation_id", "provider", "adapter", "agent_reported_at", "kind"},
+			},
+			handler: s.toolReportProgress,
+		},
 		{
 			Name:        "paimos_retrieve",
 			Description: "Retrieve mixed project context hits for one PAIMOS project.",
@@ -381,6 +414,79 @@ func (s *Server) tools() []Tool {
 			handler: s.toolAgentDelete,
 		},
 	}
+}
+
+// toolReportProgress maps 1:1 to the provider-neutral run telemetry ingest
+// route. Copying only named fields is a second allowlist in front of the
+// server's strict JSON decoder.
+func (s *Server) toolReportProgress(args map[string]any) (string, error) {
+	allowed := map[string]bool{
+		"run_id": true, "sequence": true, "correlation_id": true, "provider": true,
+		"adapter": true, "agent_reported_at": true, "kind": true, "heartbeat": true,
+		"phase": true, "activity": true, "needs_input": true, "blocker_state": true,
+		"estimate_revision": true, "progress_percent": true, "eta_seconds": true,
+		"eta_min_seconds": true, "eta_max_seconds": true, "estimate_source": true,
+		"estimate_confidence": true, "estimate_basis": true,
+	}
+	for field := range args {
+		if !allowed[field] {
+			return "", fmt.Errorf("unknown telemetry field %q", field)
+		}
+	}
+	runID, err := requiredMCPInteger(args, "run_id")
+	if err != nil {
+		return "", err
+	}
+	if _, err := requiredMCPInteger(args, "sequence"); err != nil {
+		return "", err
+	}
+	for _, field := range []string{"correlation_id", "provider", "adapter", "agent_reported_at", "kind"} {
+		if value, _ := args[field].(string); strings.TrimSpace(value) == "" {
+			return "", fmt.Errorf("%s is required", field)
+		}
+	}
+	for _, field := range []struct {
+		name string
+		max  int
+	}{{"activity", 280}, {"estimate_basis", 240}} {
+		if value, ok := args[field.name]; ok {
+			text, ok := value.(string)
+			if !ok {
+				return "", fmt.Errorf("%s must be a string", field.name)
+			}
+			text = strings.TrimSpace(text)
+			if !utf8.ValidString(text) {
+				return "", fmt.Errorf("%s must be valid UTF-8", field.name)
+			}
+			if len(text) > field.max {
+				return "", fmt.Errorf("%s must be at most %d UTF-8 bytes", field.name, field.max)
+			}
+		}
+	}
+	body := map[string]any{}
+	for _, field := range []string{
+		"sequence", "correlation_id", "provider", "adapter", "agent_reported_at",
+		"kind", "heartbeat", "phase", "activity", "needs_input", "blocker_state",
+		"estimate_revision", "progress_percent", "eta_seconds", "eta_min_seconds",
+		"eta_max_seconds", "estimate_source", "estimate_confidence", "estimate_basis",
+	} {
+		if value, ok := args[field]; ok {
+			body[field] = value
+		}
+	}
+	raw, err := s.client.Do("POST", fmt.Sprintf("/api/runs/%d/telemetry", runID), body)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func requiredMCPInteger(args map[string]any, field string) (int64, error) {
+	value, ok := args[field].(float64)
+	if !ok || value < 1 || value != float64(int64(value)) {
+		return 0, fmt.Errorf("%s must be a positive integer", field)
+	}
+	return int64(value), nil
 }
 
 // agentBootstrapStepsSchema is the JSON-schema array shape for the

@@ -262,7 +262,22 @@ GET    /projects/:id/agents/:name.json canonical agent artifact (inlines repos +
 GET    /projects/:id/agents/:name.md   markdown rendering for CLI / skill render
 GET    /projects/:id/agents/:name.rev  plain-text rev hash for cheap-poll fallback
 GET    /projects/:id/agents/events     SSE stream — auto-watch sync (PAI-331)
+POST   /issues/:id/implement           create a queued local/provider run
+GET    /issues/:id/runs                issue run history
+GET    /projects/:id/runs              project run history
+GET    /projects/:id/runners           live runner capabilities
+GET    /runs/:id                       run detail
+PATCH  /runs/:id                       lifecycle/report compare-and-set
 ```
+
+PAI-800 runner liveness/progress uses the PAI-799 integration seam directly:
+`POST /runs/:id/telemetry`. The supervisor owns stable correlation plus
+monotonic sequence and estimate revision, and sends only the documented
+heartbeat, phase, activity, needs-input, blocker, progress, and ETA fields.
+Provider prompts, source, tool arguments, command output, environment values,
+raw errors, and arbitrary provider payloads never cross this seam. Lifecycle
+remains on `PATCH /runs/:id`; a successful code run without configured test
+execution reports the truthful terminal status `completed`.
 
 Project inventories — small CRUD trios shared by every agent in the project:
 
@@ -419,6 +434,66 @@ GET    /projects/:id/reports/projektbericht/pdf  alias of lieferbericht/pdf
 GET    /projektberichte/:code/pdf                snapshot-by-code PDF (portal default text_source=report)
 GET    /reports/accruals                         admin only — per-user time rollup
 ```
+
+## Agent run telemetry
+
+```
+POST   /runs/:id/telemetry          append one allowlisted fact; requester/claimer/admin
+GET    /runs/:id/telemetry          append-only history; ?after_sequence=0&limit=100
+GET    /runs/:id/telemetry/latest   indexed event/heartbeat/semantic/estimate snapshot
+```
+
+Sequence is strictly increasing per run. Exact duplicate replay is idempotent;
+conflicting duplicate/out-of-order and post-terminal reports return 409.
+Event freshness and supervisor-heartbeat liveness are separate and both use
+server receipt time, never the agent clock. Heartbeat-only reports preserve the
+latest semantic activity/blocker and estimate facts. Percentage and ETA
+are optional evidence-backed declarations and are never derived from elapsed
+wall time. Unknown JSON fields are rejected; raw prompts, tool arguments,
+command output, environment values, secrets, source contents, and provider
+payloads are outside this contract. Obvious secret-bearing values in the two
+allowlisted one-line text fields are rejected.
+
+Runs created after schema M144 carry `delivery_instrumentation_version: 1` and
+are atomically linked to the issue's internal delivery audit model. Existing
+version-0 run responses remain compatible.
+
+## Agent Mode delivery snapshots and events
+
+```
+GET    /agent-mode/deliveries                         internal snapshot
+GET    /agent-mode/projects/:projectID/deliveries     project-audience snapshot
+GET    /agent-mode/deliveries/:deliveryKey            detail/selection snapshot
+GET    /agent-mode/deliveries/events                  SSE invalidation stream
+```
+
+Snapshots are schema-v1 `application/json` with `Cache-Control: private,
+no-store`. The fixed top-level shape is `schema_version`, `server_time`, opaque
+211-character `cursor`, `rows`, `selected_delivery` (empty string only for
+genuinely empty authorized history), optional `selected_outside: {reason,row}`,
+and `aggregates`. The sole outside-selection reasons are `filter_excluded`,
+`active_fallback`, `terminal_fallback`, and `terminal`. A request may use
+allowlisted project/state/attention/health/lane/query filters and a selection;
+the project query is a result filter, while the project path is an authorization
+audience. More than 1,000 authorized candidate roots is an explicit private
+`400`, never a truncated snapshot; an exact detail lookup scopes before that
+portfolio ceiling.
+
+The events response is `text/event-stream` with `Cache-Control: private,
+no-store, no-transform`. Resume uses `Last-Event-ID` when the header is present,
+otherwise `cursor=`. `refetch` carries only currently authorized bounded hints;
+`checkpoint` advances across hidden facts without hints. Their SSE `id` is the
+replacement cursor. `reset` has no event id and only
+`{"schema_version":1,"reason":"resync_required"}`, then closes. Invalid,
+expired, revoked, wrong-scope, below-retention, or ahead-of-tail resumes all use
+that same reset. A storage invariant found before stream headers is a private
+problem+json `500`; after the stream is established it becomes the generic
+reset-and-close recovery.
+
+Agent Mode is unavailable to external-role users even if they have an explicit
+project grant. Missing and inaccessible project/detail/selection resources are
+the same canonical private `404`. The complete schema, enums, filters, response
+headers, and SSE envelopes are defined by `GET /openapi.json`.
 
 ## Project metadata
 

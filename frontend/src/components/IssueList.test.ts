@@ -8,9 +8,14 @@ import { provideIssueContext } from '@/composables/useIssueContext'
 import type { Issue, SavedView } from '@/types'
 import IssueList from './IssueList.vue'
 
-vi.mock('@/api/client', () => ({
-  api: {
+vi.mock('@/api/client', () => {
+  const permissionsEpoch = ref<string | null>(null)
+  const permissionsEpochGeneration = ref(0)
+  const sessionExpired = ref(false)
+  return {
+    api: {
     get: vi.fn(),
+    getWithMeta: vi.fn(),
     post: vi.fn(),
     put: vi.fn(),
     patch: vi.fn(),
@@ -19,14 +24,28 @@ vi.mock('@/api/client', () => ({
   // Refs touched by the auth store on import — provide stubs so the
   // module loads inside this test's mock without pulling the full
   // client.ts (which would drag in BroadcastChannel, fetch, etc.).
-  permissionsEpoch: ref(-1),
-  sessionExpired: ref(false),
+  ApiError: class ApiError extends Error { status = 0 },
+  permissionsEpoch,
+  permissionsEpochGeneration,
+  sessionExpired,
   sessionExpiresAt: ref(null),
   sessionReturnPath: ref(null),
-  announceSessionRestored: vi.fn(),
+  comparePermissionsEpoch: (left: string, right: string) => left.length === right.length
+    ? (left === right ? 0 : left < right ? -1 : 1)
+    : left.length < right.length ? -1 : 1,
+  resetPermissionsEpoch: () => {
+    permissionsEpoch.value = null
+    permissionsEpochGeneration.value += 1
+  },
+  announceSessionRestored: vi.fn(() => {
+    permissionsEpoch.value = null
+    permissionsEpochGeneration.value += 1
+    sessionExpired.value = false
+  }),
   announceSessionExpired: vi.fn(),
   isSessionExpiredError: () => false,
-}))
+  }
+})
 
 vi.mock('vue-router', () => ({
   createRouter: () => ({

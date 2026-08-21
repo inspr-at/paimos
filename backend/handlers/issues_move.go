@@ -57,12 +57,13 @@ var errMoveProjectless = errors.New("cannot move a project-less issue")
 // dependencies across projects are meaningful and are preserved.
 
 type moveResult struct {
-	IssueID   int64    `json:"issue_id"`
-	OldKey    string   `json:"old_key"`
-	NewKey    string   `json:"new_key"`
-	ProjectID int64    `json:"project_id"`
-	Detached  []string `json:"detached"`        // structural edges dropped by the move
-	Notes     []string `json:"notes,omitempty"` // non-blocking follow-ups (e.g. anchor re-scope)
+	IssueID         int64    `json:"issue_id"`
+	OldKey          string   `json:"old_key"`
+	NewKey          string   `json:"new_key"`
+	ProjectID       int64    `json:"project_id"`
+	Detached        []string `json:"detached"`        // structural edges dropped by the move
+	Notes           []string `json:"notes,omitempty"` // non-blocking follow-ups (e.g. anchor re-scope)
+	SourceProjectID int64    `json:"-"`
 }
 
 // moveIssueTx performs the whole move inside tx: re-key, alias the old key,
@@ -132,11 +133,12 @@ func moveIssueTx(ctx context.Context, tx *sql.Tx, issueID, targetProjectID int64
 	}
 
 	res := &moveResult{
-		IssueID:   issueID,
-		OldKey:    fmt.Sprintf("%s-%d", srcKey, srcNumber),
-		NewKey:    fmt.Sprintf("%s-%d", targetKey, newNum),
-		ProjectID: targetProjectID,
-		Detached:  detached,
+		IssueID:         issueID,
+		OldKey:          fmt.Sprintf("%s-%d", srcKey, srcNumber),
+		NewKey:          fmt.Sprintf("%s-%d", targetKey, newNum),
+		ProjectID:       targetProjectID,
+		Detached:        detached,
+		SourceProjectID: srcProjectID.Int64,
 	}
 	if anchorNote != "" {
 		res.Notes = append(res.Notes, anchorNote)
@@ -389,9 +391,18 @@ func runMove(r *http.Request, issueID, targetProjectID int64) (*moveResult, int,
 			return nil, http.StatusInternalServerError, fmt.Errorf("internal error")
 		}
 	}
+	store := deliveryStoreForRequest(r)
+	effects := store.NewEffects()
+	if result.SourceProjectID > 0 {
+		if err := store.ProjectMoveTx(r.Context(), tx, effects, issueID, result.SourceProjectID, targetProjectID,
+			deliveryUserActor(r), fmt.Sprintf("issue-move:%d:%d:%d", issueID, result.SourceProjectID, targetProjectID)); err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("delivery move failed")
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("internal error")
 	}
+	effects.Dispatch(r.Context())
 
 	// Post-commit: record the new state in history (attribution) and refresh
 	// derived surfaces. Best-effort — the move itself already committed.

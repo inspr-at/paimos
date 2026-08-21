@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import router from './index'
 import { postLoginRedirectOrFallback, safePostLoginRedirect } from './redirects'
 
 describe('post-login redirects', () => {
@@ -31,5 +32,22 @@ describe('post-login redirects', () => {
       '/issues/1',
     )
     expect(postLoginRedirectOrFallback('/login', '/portal')).toBe('/portal')
+  })
+
+  it('drops principal-bound Agent Mode state from a post-login return path', () => {
+    expect(postLoginRedirectOrFallback(
+      '/agent-mode?delivery=SECRET_A&project=6&lane=project%3A6%2Fepic%3A1&q=PRIVATE&state=active&attention=required&health=blocked&detail=1',
+    )).toBe('/agent-mode')
+    expect(postLoginRedirectOrFallback('/agent-mode?unknown=PRIVATE_CANARY#old')).toBe('/agent-mode')
+    expect(postLoginRedirectOrFallback('/agent-mode/?delivery=SECRET_SLASH')).toBe('/agent-mode')
+    expect(postLoginRedirectOrFallback('/Agent-Mode/?q=PRIVATE_MIXED_CASE')).toBe('/agent-mode')
+  })
+
+  it.each([
+    '/agent-mode/?delivery=PRIVATE_SLASH',
+    '/Agent-Mode/?q=PRIVATE_MIXED_CASE#old',
+  ])('canonicalizes router-equivalent Agent Mode target %s', (target) => {
+    expect(router.resolve(target).matched.some((record) => record.path === '/agent-mode')).toBe(true)
+    expect(safePostLoginRedirect(target)).toBe('/agent-mode')
   })
 })

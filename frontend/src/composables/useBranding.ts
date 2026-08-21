@@ -43,6 +43,9 @@ import {
   isBackgroundPattern,
   type BackgroundPattern,
 } from './backgroundPattern'
+import { DEFAULT_BRAND_LOGO } from './brandingAssets'
+
+export { DEFAULT_BRAND_LOGO } from './brandingAssets'
 
 export interface BrandingConfig {
   name: string
@@ -86,7 +89,7 @@ const defaults: BrandingConfig = {
   product: 'PAIMOS',
   tagline: 'Project Management Online',
   website: 'https://paimos.com',
-  logo: '/logo.png',
+  logo: DEFAULT_BRAND_LOGO,
   favicon: '/favicon.png',
   backgroundPattern: 'triangle',
   colors: {

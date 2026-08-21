@@ -55,6 +55,13 @@ import (
 )
 
 const (
+	voiceActionIntakeSTT    = "intake_stt"
+	voiceActionIntakeTTS    = "intake_tts"
+	voiceActionAgentModeSTT = "agent_mode_stt"
+	voiceActionAgentModeTTS = "agent_mode_tts"
+	voiceClassSTT           = "stt"
+	voiceClassTTS           = "tts"
+
 	// A browser records one utterance at a time; 2 tolerates an upload
 	// still in flight when the next utterance closes.
 	voiceMaxInflightPerUser = 2
@@ -97,6 +104,16 @@ var voiceInflight = struct {
 	mu     sync.Mutex
 	byUser map[int64]int
 }{byUser: map[int64]int{}}
+
+// voiceBudgetReservations closes the gap between the durable daily-total
+// lookup and the ai_calls insert performed after a provider attempt. Without
+// an in-memory reservation, two concurrent Intake/Agent Mode calls can both
+// observe the same durable total and jointly overspend the shared modality
+// budget. The reservation remains held until metadata accounting completes.
+var voiceBudgetReservations = struct {
+	mu    sync.Mutex
+	units map[string]int64
+}{units: map[string]int64{}}
 
 func voiceAcquireInflight(userID int64) bool {
 	voiceInflight.mu.Lock()
@@ -155,10 +172,28 @@ func (s *voiceRateStore) checkAndRecord(key string, now time.Time, limit int) ti
 // than disabling the budget (same foot-gun guard as the propose
 // limiter).
 func voiceDailyBudget(actionKey string) int64 {
-	if actionKey == "intake_tts" {
+	if voiceClassForAction(actionKey) == voiceClassTTS {
 		return envInt64Or(envVoiceTTSDailyChars, voiceTTSDailyCharsDefault)
 	}
 	return envInt64Or(envVoiceSTTDailySeconds, voiceSTTDailySecondsDefault)
+}
+
+func voiceClassForAction(actionKey string) string {
+	switch actionKey {
+	case voiceActionIntakeSTT, voiceActionAgentModeSTT:
+		return voiceClassSTT
+	case voiceActionIntakeTTS, voiceActionAgentModeTTS:
+		return voiceClassTTS
+	default:
+		return ""
+	}
+}
+
+func voiceActionsForClass(class string) (string, string) {
+	if class == voiceClassTTS {
+		return voiceActionIntakeTTS, voiceActionAgentModeTTS
+	}
+	return voiceActionIntakeSTT, voiceActionAgentModeSTT
 }
 
 func envInt64Or(name string, def int64) int64 {
@@ -177,11 +212,13 @@ func envInt64Or(name string, def int64) int64 {
 // endpoint from the papertrail — durable across restarts. No outcome
 // filter: failed calls record zero units and don't move the sum.
 func voiceUnitsUsedToday(ctx context.Context, userID int64, actionKey string) (int64, error) {
+	class := voiceClassForAction(actionKey)
+	firstAction, secondAction := voiceActionsForClass(class)
 	var n sql.NullInt64
 	err := db.DB.QueryRowContext(ctx,
 		`SELECT SUM(prompt_tokens) FROM ai_calls
-		  WHERE user_id = ? AND action_key = ?
-		    AND created_at >= date('now')`, userID, actionKey).Scan(&n)
+		  WHERE user_id = ? AND action_key IN (?,?)
+		    AND created_at >= date('now')`, userID, firstAction, secondAction).Scan(&n)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
@@ -194,24 +231,71 @@ func timeToUTCMidnight() time.Duration {
 	return next.Sub(now)
 }
 
+func voiceReserveDailyBudget(ctx context.Context, userID int64, actionKey string, requestUnits int64) (int64, func(), error) {
+	class := voiceClassForAction(actionKey)
+	key := class + ":" + strconv.FormatInt(userID, 10)
+	voiceBudgetReservations.mu.Lock()
+	defer voiceBudgetReservations.mu.Unlock()
+
+	used, err := voiceUnitsUsedToday(ctx, userID, actionKey)
+	if err != nil {
+		return 0, func() {}, err
+	}
+	pending := voiceBudgetReservations.units[key]
+	budget := voiceDailyBudget(actionKey)
+	if used+pending+requestUnits > budget {
+		return used + pending, nil, nil
+	}
+	voiceBudgetReservations.units[key] = pending + requestUnits
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			voiceBudgetReservations.mu.Lock()
+			defer voiceBudgetReservations.mu.Unlock()
+			if remaining := voiceBudgetReservations.units[key] - requestUnits; remaining <= 0 {
+				delete(voiceBudgetReservations.units, key)
+			} else {
+				voiceBudgetReservations.units[key] = remaining
+			}
+		})
+	}
+	return used + pending, release, nil
+}
+
 // voiceAdmit runs the PAI-724 gates for one paid voice call. When
 // admitted it returns (release, true) and the caller MUST defer
 // release(). On rejection the HTTP response is already written.
 func voiceAdmit(w http.ResponseWriter, r *http.Request, user *models.User, actionKey string, requestUnits int64) (func(), bool) {
 	isAdmin := auth.IsAdmin(user)
+	class := voiceClassForAction(actionKey)
+	if class == "" {
+		log.Printf("voice limits: unclassified action key")
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return nil, false
+	}
 
 	if !voiceAcquireInflight(user.ID) {
 		auth.SetRetryAfter(w, 2*time.Second)
 		jsonError(w, "too many concurrent voice requests — retry in a moment", http.StatusTooManyRequests)
 		return nil, false
 	}
-	release := func() { voiceReleaseInflight(user.ID) }
+	var releaseBudget = func() {}
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			releaseBudget()
+			voiceReleaseInflight(user.ID)
+		})
+	}
 
 	limit := voiceSTTPerMinute
-	if actionKey == "intake_tts" {
+	if class == voiceClassTTS {
 		limit = voiceTTSPerMinute
 	}
-	key := actionKey + ":" + strconv.FormatInt(user.ID, 10)
+	// Intake and Agent Mode share one modality pool. A caller cannot double
+	// the allowance by alternating surfaces while spending the same provider
+	// resource.
+	key := class + ":" + strconv.FormatInt(user.ID, 10)
 	if retryAfter := voiceRates.checkAndRecord(key, time.Now(), limit); retryAfter > 0 {
 		release()
 		auth.SetRetryAfter(w, retryAfter)
@@ -231,17 +315,18 @@ func voiceAdmit(w http.ResponseWriter, r *http.Request, user *models.User, actio
 	// Daily voice budget. Soft cap: admins pass (PAI-161 doctrine);
 	// a DB hiccup fails open, same as CheckUsageCap.
 	if !isAdmin {
-		used, err := voiceUnitsUsedToday(r.Context(), user.ID, actionKey)
+		used, budgetRelease, err := voiceReserveDailyBudget(r.Context(), user.ID, actionKey, requestUnits)
 		if err != nil {
 			log.Printf("voice limits: units used today: %v", err)
 			return release, true
 		}
-		if budget := voiceDailyBudget(actionKey); used+requestUnits > budget {
+		if budgetRelease == nil {
 			release()
 			auth.SetRetryAfter(w, timeToUTCMidnight())
-			jsonError(w, fmt.Sprintf("daily voice budget reached (%d of %d units) — try again tomorrow or ask an admin to raise it", used, budget), http.StatusTooManyRequests)
+			jsonError(w, fmt.Sprintf("daily voice budget reached (%d of %d units) — try again tomorrow or ask an admin to raise it", used, voiceDailyBudget(actionKey)), http.StatusTooManyRequests)
 			return nil, false
 		}
+		releaseBudget = budgetRelease
 	}
 	return release, true
 }
@@ -253,6 +338,9 @@ func resetVoiceLimitsForTest() {
 	voiceRates.mu.Lock()
 	voiceRates.entries = map[string][]time.Time{}
 	voiceRates.mu.Unlock()
+	voiceBudgetReservations.mu.Lock()
+	voiceBudgetReservations.units = map[string]int64{}
+	voiceBudgetReservations.mu.Unlock()
 }
 
 // ResetVoiceLimitsForTest empties the in-memory limiter state so test

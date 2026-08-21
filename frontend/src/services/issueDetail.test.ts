@@ -17,6 +17,7 @@ import {
   deleteIssueDetail,
   loadIssueAggregation,
   loadIssueDetailData,
+  loadIssueEditorMetadata,
   loadIssueParent,
   removeIssueSprint,
   removeIssueTag,
@@ -34,11 +35,11 @@ describe('issueDetail service', () => {
       .mockResolvedValueOnce([{ id: 1 }] as never)
       .mockResolvedValueOnce(['OPS'] as never)
       .mockResolvedValueOnce(['R1'] as never)
-      .mockResolvedValueOnce([{ id: 11 }] as never)
       .mockResolvedValueOnce([{ id: 2 }] as never)
+      .mockResolvedValueOnce([{ id: 3 }] as never)
+      .mockResolvedValueOnce([{ id: 11 }] as never)
       .mockResolvedValueOnce([{ id: 12 }] as never)
       .mockResolvedValueOnce({ id: 7 } as never)
-      .mockResolvedValueOnce([{ id: 3 }] as never)
       .mockResolvedValueOnce({ id: 4 } as never)
 
     const data = await loadIssueDetailData(9, 7)
@@ -56,11 +57,11 @@ describe('issueDetail service', () => {
       .mockResolvedValueOnce([{ id: 1 }] as never)
       .mockResolvedValueOnce(['OPS'] as never)
       .mockResolvedValueOnce(['R1'] as never)
-      .mockResolvedValueOnce([{ id: 11 }] as never)
       .mockResolvedValueOnce([{ id: 2 }] as never)
+      .mockResolvedValueOnce([{ id: 3 }] as never)
+      .mockResolvedValueOnce([{ id: 11 }] as never)
       .mockResolvedValueOnce([{ id: 12 }] as never)
       .mockResolvedValueOnce({ id: 6 } as never)
-      .mockResolvedValueOnce([{ id: 3 }] as never)
 
     const data = await loadIssueDetailData('PAI-265')
 
@@ -81,13 +82,39 @@ describe('issueDetail service', () => {
       .mockResolvedValueOnce([] as never)
       .mockResolvedValueOnce([] as never)
       .mockResolvedValueOnce([] as never)
-      .mockResolvedValueOnce(null as never)
       .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce(null as never)
 
     const data = await loadIssueDetailData(9, 7)
 
     expect(data.parentIssue).toBeNull()
     expect(vi.mocked(api.get).mock.calls.some(([url]) => url === '/issues/null')).toBe(false)
+  })
+
+  it('loads the existing issue editor metadata through one scoped seam', async () => {
+    vi.mocked(api.get)
+      .mockResolvedValueOnce([{ id: 1 }] as never)
+      .mockResolvedValueOnce(['OPS'] as never)
+      .mockResolvedValueOnce(['R1'] as never)
+      .mockResolvedValueOnce([{ id: 2 }] as never)
+      .mockResolvedValueOnce([{ id: 3 }] as never)
+
+    const metadata = await loadIssueEditorMetadata(7)
+
+    expect(metadata).toEqual({
+      users: [{ id: 1 }],
+      costUnits: ['OPS'],
+      releases: ['R1'],
+      allTags: [{ id: 2 }],
+      allSprints: [{ id: 3 }],
+    })
+    expect(vi.mocked(api.get).mock.calls.map(([url]) => url)).toEqual([
+      '/users',
+      '/projects/7/cost-units',
+      '/projects/7/releases',
+      '/tags',
+      '/sprints',
+    ])
   })
 
   it('avoids project-scoped dependency calls when no project is available', async () => {
@@ -105,9 +132,9 @@ describe('issueDetail service', () => {
     expect(vi.mocked(api.get).mock.calls.map(([url]) => url)).toEqual([
       '/issues/9',
       '/users',
-      '/issues/9/children',
       '/tags',
       '/sprints',
+      '/issues/9/children',
     ])
     expect(
       vi.mocked(api.get).mock.calls.some(([url]) => String(url).startsWith('/projects/')),

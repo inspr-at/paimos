@@ -16,12 +16,14 @@
 package handlers_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/delivery"
 )
 
 type moveResp struct {
@@ -62,6 +64,12 @@ func TestMoveIssue_HappyPath(t *testing.T) {
 	if epic == 0 || ticket == 0 {
 		t.Fatalf("seed failed: epic=%d ticket=%d", epic, ticket)
 	}
+	store := delivery.NewStore(db.DB, delivery.Options{})
+	if _, err := store.StartAttempt(context.Background(), delivery.AttemptRequest{IssueID: ticket,
+		Actor: delivery.Actor{Type: "user", OpaqueKey: "user:1"}, ReasonCode: "instrumentation",
+		IdempotencyKey: "move-test-attempt"}); err != nil {
+		t.Fatalf("instrument delivery: %v", err)
+	}
 	// A comment so we can prove issue_id-keyed children survive the move.
 	assertStatus(t, ts.post(t, fmt.Sprintf("/api/issues/%d/comments", ticket), ts.adminCookie,
 		map[string]string{"body": "keep me"}), http.StatusCreated)
@@ -83,6 +91,11 @@ func TestMoveIssue_HappyPath(t *testing.T) {
 	}
 	if got.ProjectID != opsID {
 		t.Errorf("project_id = %d, want %d", got.ProjectID, opsID)
+	}
+	history, err := store.AttemptHistory(context.Background(), ticket)
+	if err != nil || len(history) != 2 || history[1].ReasonCode != "project_move" ||
+		history[1].ProjectIDAtStart == nil || *history[1].ProjectIDAtStart != opsID {
+		t.Fatalf("delivery authority cutover history=%+v err=%v", history, err)
 	}
 
 	// The row moved projects and was re-numbered.

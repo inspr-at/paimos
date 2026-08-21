@@ -441,21 +441,26 @@ func TestRegression_Session_001_SlidingRenewalBumpsExpiry(t *testing.T) {
 // even when sliding would otherwise extend it.
 func TestRegression_Session_002_AbsoluteCapForcesLogout(t *testing.T) {
 	ts := newTestServer(t)
-	sid := strings.TrimPrefix(ts.memberCookie, "session=")
+	memberSID := strings.TrimPrefix(ts.memberCookie, "session=")
+	var userID int64
+	if err := db.DB.QueryRow("SELECT user_id FROM sessions WHERE id=?", memberSID).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	sid := "absolute-cap-session-bearer"
+	credentialID := "89898989-8989-4989-8989-898989898989"
 
-	// Backdate created_at to 100 days ago (past the 90-day cap), and
-	// keep expires_at far in the future so the SQL filter doesn't
-	// eject the session before our cap check sees it.
+	// Insert the historical identity with its immutable creation time;
+	// expiry remains live so the absolute-cap check is the rejecting rule.
 	created := time.Now().UTC().Add(-100 * 24 * time.Hour).Format("2006-01-02 15:04:05")
 	expires := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02 15:04:05")
 	if _, err := db.DB.Exec(
-		"UPDATE sessions SET created_at=?, expires_at=? WHERE id=?",
-		created, expires, sid,
+		"INSERT INTO sessions(id,user_id,expires_at,created_at,credential_id) VALUES(?,?,?,?,?)",
+		sid, userID, expires, created, credentialID,
 	); err != nil {
 		t.Fatal(err)
 	}
 
-	resp := ts.get(t, "/api/auth/me", ts.memberCookie)
+	resp := ts.get(t, "/api/auth/me", "session="+sid)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("INV-SESSION-002 violated: capped session returned %d, want 401", resp.StatusCode)
@@ -680,8 +685,8 @@ func TestRegression_Session_004_PasswordChangeKillsOtherSessions(t *testing.T) {
 	otherSID := "ffffffffffffffffffffffffffffffff"
 	now := time.Now().UTC()
 	if _, err := db.DB.Exec(
-		`INSERT INTO sessions(id, user_id, expires_at, csrf_token, via_dev_login, created_at)
-		 VALUES (?, ?, ?, '', 0, ?)`,
+		`INSERT INTO sessions(id, user_id, expires_at, csrf_token, via_dev_login, created_at, credential_id)
+		 VALUES (?, ?, ?, '', 0, ?, '33333333-3333-4333-8333-333333333333')`,
 		otherSID, memberID,
 		now.Add(7*24*time.Hour).Format("2006-01-02 15:04:05"),
 		now.Format("2006-01-02 15:04:05"),

@@ -126,22 +126,16 @@ func DevLoginHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid dev-login credentials"}`, http.StatusUnauthorized)
 		return
 	}
-	if loginUser.Status == "inactive" || loginUser.Status == "deleted" {
+	if loginUser.Status != "active" {
 		log.Printf("audit: dev_login_failed username=%q ip=%s reason=account_disabled", body.Username, clientIP(r))
 		http.Error(w, `{"error":"invalid dev-login credentials"}`, http.StatusUnauthorized)
 		return
 	}
 
-	sid, err := newSessionID()
+	now := time.Now()
+	expiresAt := now.Add(devLoginSessionTTL)
+	sid, err := createSession(r.Context(), loginUser.ID, now, expiresAt, true, false)
 	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		return
-	}
-	expiresAt := time.Now().Add(devLoginSessionTTL)
-	if _, err := db.DB.Exec(
-		"INSERT INTO sessions(id, user_id, expires_at, via_dev_login) VALUES(?, ?, ?, 1)",
-		sid, loginUser.ID, expiresAt.UTC().Format("2006-01-02 15:04:05"),
-	); err != nil {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
@@ -165,9 +159,9 @@ func DevLoginHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("audit: dev_login_ok username=%q user_id=%d ip=%s", body.Username, loginUser.ID, clientIP(r))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"ok":             true,
-		"user":           loginUser,
-		"via_dev_login":  true,
-		"expires_at":     expiresAt.UTC().Format(time.RFC3339),
+		"ok":            true,
+		"user":          loginUser,
+		"via_dev_login": true,
+		"expires_at":    expiresAt.UTC().Format(time.RFC3339),
 	})
 }

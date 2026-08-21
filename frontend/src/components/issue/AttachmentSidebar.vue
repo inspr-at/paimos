@@ -7,7 +7,7 @@
  * bottom that forwards File drops via the `add-files` event. Pure presentation
  * — all state lives in the `useAttachmentUploads` composable on the parent.
  */
-import { computed, ref } from 'vue'
+import { computed, ref, useId } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import type { AttachmentJob } from '@/composables/useAttachmentUploads'
 import { useAttachmentLightbox } from '@/composables/useAttachmentLightbox'
@@ -20,6 +20,9 @@ const props = defineProps<{
   emptyHint?: string
   /** If true, the drop zone is hidden (read-only view). */
   readonly?: boolean
+  /** Optional per-job action policy. This lets a read-only host keep seeded
+   * server attachments view-only while managing jobs added in this session. */
+  manageJob?: (job: AttachmentJob) => boolean
 }>()
 
 const emit = defineEmits<{
@@ -63,6 +66,7 @@ function openInLightbox(job: AttachmentJob, e: Event) {
 
 const dragOver = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+const fileInputId = useId()
 
 function formatBytes(n: number): string {
   return formatFileSize(n)
@@ -77,6 +81,14 @@ function onPick(e: Event) {
   const input = e.target as HTMLInputElement
   if (input.files?.length) emit('add-files', input.files)
   input.value = ''
+}
+
+function openFilePicker() {
+  fileInput.value?.click()
+}
+
+function canManageJob(job: AttachmentJob): boolean {
+  return props.manageJob ? props.manageJob(job) : !props.readonly
 }
 
 function openUrlForJob(job: AttachmentJob): string | null {
@@ -126,18 +138,30 @@ function openUrlForJob(job: AttachmentJob): string | null {
 
         <div class="att-body">
           <div class="att-name" :title="job.filename">{{ job.filename }}</div>
-          <div class="att-meta">
+          <div
+            class="att-meta"
+            :role="job.status === 'failed' ? 'alert' : job.status === 'pending' ? 'status' : undefined"
+            :aria-live="job.status === 'failed' || job.status === 'pending' ? 'polite' : undefined"
+          >
             <span>{{ formatBytes(job.size) }}</span>
             <span v-if="job.status === 'pending'">· {{ job.progress }}%</span>
             <span v-else-if="job.status === 'failed'" class="att-err">· {{ job.error }}</span>
           </div>
-          <div v-if="job.status === 'pending'" class="att-bar">
+          <div
+            v-if="job.status === 'pending'"
+            class="att-bar"
+            role="progressbar"
+            :aria-label="`Uploading ${job.filename}`"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-valuenow="job.progress"
+          >
             <div class="att-bar-fill" :style="{ width: job.progress + '%' }" />
           </div>
         </div>
 
         <button
-          v-if="job.status === 'failed'"
+          v-if="job.status === 'failed' && canManageJob(job)"
           type="button"
           class="att-btn"
           :title="`Retry upload of ${job.filename}`"
@@ -146,7 +170,7 @@ function openUrlForJob(job: AttachmentJob): string | null {
           <AppIcon name="refresh-cw" :size="12" />
         </button>
         <button
-          v-if="!readonly"
+          v-if="canManageJob(job)"
           type="button"
           class="att-btn att-btn--remove"
           :title="`Remove ${job.filename}`"
@@ -157,18 +181,32 @@ function openUrlForJob(job: AttachmentJob): string | null {
       </li>
     </ul>
 
-    <div
+    <label
       v-if="!readonly"
       :class="['att-drop', { 'att-drop--over': dragOver }]"
+      :for="fileInputId"
+      role="button"
+      tabindex="0"
+      aria-label="Add attachments: drop files or browse"
       @dragover.prevent="dragOver = true"
       @dragleave.prevent="dragOver = false"
       @drop.prevent="onDrop"
-      @click="fileInput?.click()"
+      @keydown.enter.prevent="openFilePicker"
+      @keydown.space.prevent="openFilePicker"
     >
       <AppIcon name="upload" :size="14" />
       <span>Drop files or click to browse</span>
-      <input ref="fileInput" type="file" multiple hidden @change="onPick" />
-    </div>
+    </label>
+    <input
+      v-if="!readonly"
+      :id="fileInputId"
+      ref="fileInput"
+      class="att-file-input"
+      type="file"
+      multiple
+      tabindex="-1"
+      @change="onPick"
+    />
   </aside>
 </template>
 
@@ -362,5 +400,20 @@ button.att-thumb--link {
   border-color: var(--brand-blue, #52525b);
   background: rgba(82, 82, 91,.05);
   color: var(--brand-blue, #52525b);
+}
+.att-drop:focus-visible {
+  outline: 2px solid var(--brand-blue, #52525b);
+  outline-offset: 2px;
+}
+.att-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>

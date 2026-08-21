@@ -593,6 +593,34 @@ func Test_APIKeys(t *testing.T) {
 
 	var keyID int64
 
+	t.Run("explicit blank scope is rejected", func(t *testing.T) {
+		var before int
+		if err := db.DB.QueryRow(`SELECT COUNT(*) FROM api_keys`).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		for _, test := range []struct {
+			cookie string
+			scopes []string
+		}{
+			{cookie: ts.memberCookie, scopes: []string{""}},
+			{cookie: ts.memberCookie, scopes: []string{" \t"}},
+			{cookie: ts.adminCookie, scopes: []string{"projects:write", ""}},
+		} {
+			resp := ts.post(t, "/api/auth/api-keys", test.cookie, map[string]any{
+				"name":   "blank-scope",
+				"scopes": test.scopes,
+			})
+			assertStatus(t, resp, http.StatusBadRequest)
+		}
+		var after int
+		if err := db.DB.QueryRow(`SELECT COUNT(*) FROM api_keys`).Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if after != before {
+			t.Fatalf("blank scopes persisted API keys: before=%d after=%d", before, after)
+		}
+	})
+
 	t.Run("member creates API key", func(t *testing.T) {
 		resp := ts.post(t, "/api/auth/api-keys", ts.memberCookie, map[string]string{
 			"name": "test-key",

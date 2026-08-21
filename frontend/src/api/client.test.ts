@@ -16,7 +16,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { ApiError, api, errMsg, mustChangePassword, sessionExpired } from './client'
+import {
+  ApiError,
+  StalePermissionsEpochError,
+  api,
+  errMsg,
+  mustChangePassword,
+  permissionsEpoch,
+  resetPermissionsEpoch,
+  sessionExpired,
+} from './client'
 
 /**
  * ACME-1 regression guards for the 401 → sessionExpired interceptor.
@@ -46,17 +55,60 @@ function makeResponse(status: number, body: unknown = { error: 'unauthorized' })
   })
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
+function epochResponse(epoch: string, body: unknown = { ok: true }): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Permissions-Epoch': epoch,
+    },
+  })
+}
+
+class FakeXMLHttpRequest {
+  static instances: FakeXMLHttpRequest[] = []
+  readonly upload = { addEventListener: vi.fn() }
+  readonly requestHeaders = new Map<string, string>()
+  readonly responseHeaders = new Map<string, string>()
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+  status = 200
+  responseText = '{}'
+  withCredentials = false
+
+  constructor() {
+    FakeXMLHttpRequest.instances.push(this)
+  }
+
+  open = vi.fn()
+  send = vi.fn()
+  setRequestHeader(name: string, value: string) {
+    this.requestHeaders.set(name.toLowerCase(), value)
+  }
+  getResponseHeader(name: string) {
+    return this.responseHeaders.get(name.toLowerCase()) ?? null
+  }
+}
+
 describe('api client 401 interceptor', () => {
   let originalFetch: typeof fetch
 
   beforeEach(() => {
     originalFetch = globalThis.fetch
+    resetPermissionsEpoch()
     sessionExpired.value = false
     mustChangePassword.value = false
   })
 
   afterEach(() => {
     globalThis.fetch = originalFetch
+    vi.unstubAllGlobals()
   })
 
   it('flips sessionExpired on 401 from a data endpoint', async () => {
@@ -190,5 +242,111 @@ describe('api client 401 interceptor', () => {
     }
     expect(mustChangePassword.value).toBe(true)
     expect(errMsg(caught)).toBe('')
+  })
+
+  it('keeps the full int64 epoch range exact and rejects lower or malformed present headers', async () => {
+    for (const epoch of ['9007199254740992', '9007199254740993', '9223372036854775807']) {
+      stubFetch(async () => epochResponse(epoch))
+      await expect(api.get('/projects')).resolves.toEqual({ ok: true })
+      expect(permissionsEpoch.value).toBe(epoch)
+    }
+
+    for (const epoch of ['9007199254740992', '01', '9223372036854775808']) {
+      stubFetch(async () => epochResponse(epoch))
+      await expect(api.get('/projects')).rejects.toBeInstanceOf(
+        epoch === '9007199254740992' ? StalePermissionsEpochError : ApiError,
+      )
+      expect(permissionsEpoch.value).toBe('9223372036854775807')
+    }
+  })
+
+  it('rejects a response whose older body finishes after a newer epoch committed', async () => {
+    const oldBody = deferred<string>()
+    const oldResponse = epochResponse('10')
+    Object.defineProperty(oldResponse, 'text', {
+      value: vi.fn(async () => await oldBody.promise),
+    })
+    let call = 0
+    stubFetch(async () => {
+      call += 1
+      return call === 1 ? oldResponse : epochResponse('11', { newest: true })
+    })
+
+    const oldRequest = api.get('/auth/me')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(permissionsEpoch.value).toBe('10')
+    await expect(api.get('/projects')).resolves.toEqual({ newest: true })
+    expect(permissionsEpoch.value).toBe('11')
+
+    oldBody.resolve(JSON.stringify({ stale: true }))
+    await expect(oldRequest).rejects.toBeInstanceOf(StalePermissionsEpochError)
+  })
+
+  it('rejects an old-session body after an identity reset while accepting the new lower baseline', async () => {
+    const oldBody = deferred<string>()
+    const oldResponse = epochResponse('10')
+    Object.defineProperty(oldResponse, 'text', {
+      value: vi.fn(async () => await oldBody.promise),
+    })
+    let call = 0
+    stubFetch(async () => {
+      call += 1
+      return call === 1 ? oldResponse : epochResponse('5', { principal: 'new' })
+    })
+
+    const oldRequest = api.get('/auth/me')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(permissionsEpoch.value).toBe('10')
+    resetPermissionsEpoch()
+    await expect(api.get('/auth/me')).resolves.toEqual({ principal: 'new' })
+    expect(permissionsEpoch.value).toBe('5')
+
+    oldBody.resolve(JSON.stringify({ principal: 'old' }))
+    await expect(oldRequest).rejects.toMatchObject({
+      message: 'request superseded by an authentication change',
+    })
+    expect(permissionsEpoch.value).toBe('5')
+  })
+
+  it('makes XHR uploads reject lower, malformed, and old-generation authority headers', async () => {
+    FakeXMLHttpRequest.instances = []
+    vi.stubGlobal('XMLHttpRequest', FakeXMLHttpRequest as unknown as typeof XMLHttpRequest)
+    permissionsEpoch.value = '11'
+
+    const lower = api.upload('/attachments', new FormData())
+    const lowerXHR = FakeXMLHttpRequest.instances[0]!
+    lowerXHR.responseHeaders.set('x-permissions-epoch', '10')
+    lowerXHR.responseText = JSON.stringify({ id: 1 })
+    lowerXHR.onload?.()
+    await expect(lower).rejects.toBeInstanceOf(StalePermissionsEpochError)
+
+    const malformed = api.upload('/attachments', new FormData())
+    const malformedXHR = FakeXMLHttpRequest.instances[1]!
+    malformedXHR.responseHeaders.set('x-permissions-epoch', '01')
+    malformedXHR.responseText = JSON.stringify({ id: 2 })
+    malformedXHR.onload?.()
+    await expect(malformed).rejects.toMatchObject({
+      message: 'response carried an invalid permissions epoch',
+    })
+
+    const oldGeneration = api.upload('/attachments', new FormData())
+    const oldXHR = FakeXMLHttpRequest.instances[2]!
+    resetPermissionsEpoch()
+    oldXHR.responseHeaders.set('x-permissions-epoch', '11')
+    oldXHR.responseText = JSON.stringify({ id: 3 })
+    oldXHR.onload?.()
+    await expect(oldGeneration).rejects.toMatchObject({
+      message: 'request superseded by an authentication change',
+    })
+
+    const current = api.upload<{ id: number }>('/attachments', new FormData())
+    const currentXHR = FakeXMLHttpRequest.instances[3]!
+    currentXHR.responseHeaders.set('x-permissions-epoch', '5')
+    currentXHR.responseText = JSON.stringify({ id: 4 })
+    currentXHR.onload?.()
+    await expect(current).resolves.toEqual({ id: 4 })
+    expect(permissionsEpoch.value).toBe('5')
   })
 })

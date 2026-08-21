@@ -46,6 +46,14 @@ if [[ -z "${DATA_DIR:-}" ]]; then
   CLEAN_DATA_DIR=1
 fi
 
+# Agent Mode's geometry suite is an exact-build gate. Build the same `dist`
+# artifact shipped by the Docker image and let that spec self-host it through
+# Playwright routing; the remaining smoke specs still exercise the real Vite
+# and Go stack below.
+echo "→ building exact frontend artifact for visual gates"
+(cd "$ROOT/frontend" && npm run build)
+export PAI805_SELF_HOST_DIST=1
+
 # Boot the stack (backend :8888 + vite :5173) in the background.
 echo "→ booting dev stack (log: $ROOT/.e2e-devup.log)"
 bash "$ROOT/scripts/dev-up.sh" >"$ROOT/.e2e-devup.log" 2>&1 &

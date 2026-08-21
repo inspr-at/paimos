@@ -26,7 +26,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,13 +36,23 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"github.com/inspr-at/paimos/backend/cmd/paimos/sync"
 	"github.com/spf13/cobra"
 )
+
+const (
+	defaultClaudePermissionMode = "dontAsk"
+	defaultClaudeAllowedTools   = "Read,Glob,Grep,Edit,Write"
+)
+
+var claudeToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.*:-]+$`)
 
 func runAgentCmd() *cobra.Command {
 	c := &cobra.Command{
@@ -56,16 +65,22 @@ func runAgentCmd() *cobra.Command {
 
 func runAgentWatchCmd() *cobra.Command {
 	var (
-		projectRef  string
-		repoRoot    string
-		execCmd     string
-		actionKey   string
-		testExec    string
-		yes         bool
-		allowDeploy bool
-		deployExec  string
-		yesDeploy   bool
-		attachLogs  bool
+		projectRef           string
+		repoRoot             string
+		execCmd              string
+		actionKey            string
+		testExec             string
+		yes                  bool
+		allowDeploy          bool
+		deployExec           string
+		yesDeploy            bool
+		attachLogs           bool
+		execTimeout          time.Duration
+		heartbeatTO          time.Duration
+		heartbeatIn          time.Duration
+		claudePermissionMode string
+		claudeAllowedTools   string
+		unsafeClaudeBypass   bool
 	)
 	c := &cobra.Command{
 		Use:   "watch",
@@ -84,16 +99,18 @@ spawning (unless --yes), and does NOT deploy — deploy is triple-gated (it need
 --allow-deploy AND --deploy-exec AND a run deploy_target) and additionally
 prompts for a separate deploy confirmation unless --yes-deploy is set.
 
-The spawned command sees PAIMOS_RUN_ID and PAIMOS_ISSUE_KEY in its environment
-plus PAIMOS_PROMPT_FILE with the generated issue-context prompt. The default
-"claude" command is run as Claude Code print mode with that prompt, so it cannot
-silently open an interactive TUI for a queued run. Custom commands can read the
-prompt file themselves and may report richer progress via the paimos CLI; the
-runner won't clobber a terminal status it set.
+The spawned command sees PAIMOS_RUN_ID, PAIMOS_PROJECT_ID, PAIMOS_ISSUE_KEY,
+and the supervisor-owned correlation/provider/adapter identity in its
+environment, plus PAIMOS_PROMPT_FILE with the generated issue-context prompt. The default
+"claude" command is run in structured Claude Code print mode with a least-
+privilege tool allowlist, so it cannot silently open an interactive TUI for a
+queued run. A custom --exec is an explicit raw-command fallback and can read the
+prompt file itself; raw output is not persisted as progress telemetry.
 
-Use --test-exec to run a known test command after the agent command. Its bounded
-output is reported as tests_summary; a failure reports tests_failed and skips
-deploy.
+Use --test-exec to run a known test command after the agent command. Only its
+pass/fail result is reported as tests_summary; a failure reports tests_failed
+and skips deploy. Without it, normal completion reports completed, never
+tests_passed.
 
 Examples:
   paimos run-agent watch --project PAI --repo-root .
@@ -102,7 +119,10 @@ Examples:
 			return runAgentWatch(runAgentOpts{
 				projectRef: projectRef, repoRoot: repoRoot, execCmd: execCmd, actionKey: actionKey, testExec: testExec,
 				yes: yes, allowDeploy: allowDeploy, deployExec: deployExec, yesDeploy: yesDeploy,
-				attachLogs: attachLogs,
+				attachLogs: attachLogs, executionTimeout: execTimeout,
+				heartbeatTimeout: heartbeatTO, heartbeatInterval: heartbeatIn,
+				claudePermissionMode: claudePermissionMode, claudeAllowedTools: claudeAllowedTools,
+				unsafeClaudeBypass: unsafeClaudeBypass,
 			})
 		},
 	}
@@ -116,20 +136,32 @@ Examples:
 	c.Flags().StringVar(&deployExec, "deploy-exec", "", `deploy command when --allow-deploy and the run has a deploy_target (e.g. "just deploy-ppm")`)
 	c.Flags().BoolVar(&yesDeploy, "yes-deploy", false, "skip the separate deploy confirmation (still requires --allow-deploy + --deploy-exec)")
 	c.Flags().BoolVar(&attachLogs, "attach-logs", false, "capture the job's output and attach it to the ticket (off by default — logs may contain secrets)")
+	c.Flags().DurationVar(&execTimeout, "execution-timeout", 2*time.Hour, "maximum lifetime of an agent child process")
+	c.Flags().DurationVar(&heartbeatTO, "heartbeat-timeout", 5*time.Minute, "terminate a child that produces no stdout/stderr activity for this long")
+	c.Flags().DurationVar(&heartbeatIn, "heartbeat-interval", 15*time.Second, "supervisor liveness report interval while the child is alive")
+	c.Flags().StringVar(&claudePermissionMode, "claude-permission-mode", defaultClaudePermissionMode, "Claude permission mode: acceptEdits|auto|bypassPermissions|manual|dontAsk|plan")
+	c.Flags().StringVar(&claudeAllowedTools, "claude-allowed-tools", defaultClaudeAllowedTools, "comma-separated hard availability and auto-approval tool allowlist for built-in Claude")
+	c.Flags().BoolVar(&unsafeClaudeBypass, "unsafe-allow-bypass-permissions", false, "allow built-in Claude bypassPermissions mode (unsafe; separate explicit opt-in)")
 	return c
 }
 
 type runAgentOpts struct {
-	projectRef  string
-	repoRoot    string
-	execCmd     string
-	actionKey   string
-	testExec    string
-	yes         bool
-	allowDeploy bool
-	deployExec  string
-	yesDeploy   bool
-	attachLogs  bool
+	projectRef           string
+	repoRoot             string
+	execCmd              string
+	actionKey            string
+	testExec             string
+	yes                  bool
+	allowDeploy          bool
+	deployExec           string
+	yesDeploy            bool
+	attachLogs           bool
+	executionTimeout     time.Duration
+	heartbeatTimeout     time.Duration
+	heartbeatInterval    time.Duration
+	claudePermissionMode string
+	claudeAllowedTools   string
+	unsafeClaudeBypass   bool
 }
 
 func resolveRunnerAction(explicit, execCmd string) (string, string, error) {
@@ -187,6 +219,14 @@ func runAgentWatch(o runAgentOpts) error {
 	if strings.TrimSpace(o.projectRef) == "" {
 		return &usageError{msg: "--project is required"}
 	}
+	if o.executionTimeout <= 0 || o.heartbeatTimeout <= 0 || o.heartbeatInterval <= 0 {
+		return &usageError{msg: "execution and heartbeat durations must be positive"}
+	}
+	if strings.TrimSpace(o.execCmd) == "claude" {
+		if err := validateClaudeRunnerConfig(o.claudePermissionMode, o.claudeAllowedTools, o.unsafeClaudeBypass); err != nil {
+			return err
+		}
+	}
 	client, err := instanceClient()
 	if err != nil {
 		return err
@@ -214,9 +254,27 @@ func runAgentWatch(o runAgentOpts) error {
 
 	syncer := &httpSyncClient{client: client}
 	ctx, cancel := signalContext()
-	defer cancel()
+	var workers stdsync.WaitGroup
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
 
 	runner := newAgentRunner(client, deviceID, root, o.execCmd, actionKey, o.testExec, o.yes, o.allowDeploy, o.deployExec, o.yesDeploy, o.attachLogs)
+	runner.executionTimeout = o.executionTimeout
+	runner.heartbeatTimeout = o.heartbeatTimeout
+	runner.heartbeatInterval = o.heartbeatInterval
+	runner.claudePermissionMode = o.claudePermissionMode
+	runner.claudeAllowedTools = o.claudeAllowedTools
+	runner.unsafeClaudeBypass = o.unsafeClaudeBypass
+	controlStateDir, err := runnerControlStateDir(deviceID)
+	if err != nil {
+		return err
+	}
+	runner.controlJournal, err = openRunnerControlJournal(controlStateDir)
+	if err != nil {
+		return fmt.Errorf("open runner control journal: %w", err)
+	}
 	deployNote := "report-back only, no auto-deploy"
 	if runner.allowDeploy && runner.deployExec != "" {
 		deployNote = "deploy ENABLED via " + runner.deployExec + " (runs with a deploy_target only)"
@@ -227,12 +285,20 @@ func runAgentWatch(o runAgentOpts) error {
 	// One worker → one job at a time. Each handleRun atomically claims its run,
 	// so a job enqueued twice (SSE + catch-up) is harmless (the second claim 409s).
 	jobs := make(chan runJob, 64)
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		for {
+			if ctx.Err() != nil {
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return
 			case j := <-jobs:
+				if ctx.Err() != nil {
+					return
+				}
 				if err := runner.handleRun(ctx, j); err != nil {
 					fmt.Fprintf(stderr, "run %d: %v\n", j.runID, err)
 				}
@@ -243,7 +309,9 @@ func runAgentWatch(o runAgentOpts) error {
 	// Periodic catch-up: enqueue still-queued runs (covers runner-offline-at-
 	// publish, busy-drop, and server-restart orphans). Claimed/terminal runs are
 	// no longer 'queued', so re-enqueuing is cheap and self-limiting.
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		enqueue := func() {
 			for _, id := range runner.queuedRunIDs(ctx, projectID) {
 				select {
@@ -319,43 +387,72 @@ func runAgentWatch(o runAgentOpts) error {
 // agentRunner executes implement jobs. spawn/confirm/confirmDeploy are fields so
 // tests can inject fakes without touching the SSE/exec machinery.
 type agentRunner struct {
-	client         *Client
-	deviceID       string
-	repoRoot       string
-	execCmd        string
-	actionKey      string
-	testExec       string
-	autoConfirm    bool
-	allowDeploy    bool
-	deployExec     string
-	autoConfirmDep bool
-	attachLogs     bool
-	lastQueuedErr  string // dedupes catch-up error logging (single goroutine)
-	spawn          func(ctx context.Context, repoRoot, execCmd string, env []string, logSink io.Writer) error
-	confirm        func(issueKey string, runID int64, repoRoot string) bool
-	confirmDeploy  func(issueKey string, runID int64, target string) bool
+	client               *Client
+	deviceID             string
+	repoRoot             string
+	execCmd              string
+	actionKey            string
+	testExec             string
+	autoConfirm          bool
+	allowDeploy          bool
+	deployExec           string
+	autoConfirmDep       bool
+	attachLogs           bool
+	executionTimeout     time.Duration
+	heartbeatTimeout     time.Duration
+	heartbeatInterval    time.Duration
+	claudePermissionMode string
+	claudeAllowedTools   string
+	unsafeClaudeBypass   bool
+	lastQueuedErr        string // dedupes catch-up error logging (single goroutine)
+	spawn                func(ctx context.Context, repoRoot, execCmd string, env []string, logSink io.Writer) error
+	supervise            func(context.Context, supervisorRequest) supervisorResult
+	reporter             runnerReportTransport
+	controlJournal       *runnerControlJournal
+	confirm              func(issueKey string, runID int64, repoRoot string) bool
+	confirmDeploy        func(issueKey string, runID int64, target string) bool
 }
 
 func newAgentRunner(client *Client, deviceID, repoRoot, execCmd, actionKey, testExec string, autoConfirm, allowDeploy bool, deployExec string, autoConfirmDeploy, attachLogs bool) *agentRunner {
 	if actionKey == "" {
 		actionKey, _, _ = resolveRunnerAction("", execCmd)
 	}
+	provider, adapter := runnerTelemetryIdentityForExecution(execCmd)
 	return &agentRunner{
-		client:         client,
-		deviceID:       deviceID,
-		repoRoot:       repoRoot,
-		execCmd:        execCmd,
-		actionKey:      actionKey,
-		testExec:       testExec,
-		autoConfirm:    autoConfirm,
-		allowDeploy:    allowDeploy,
-		deployExec:     deployExec,
-		autoConfirmDep: autoConfirmDeploy,
-		attachLogs:     attachLogs,
-		spawn:          defaultSpawn,
-		confirm:        defaultConfirm,
-		confirmDeploy:  defaultDeployConfirm,
+		client:               client,
+		deviceID:             deviceID,
+		repoRoot:             repoRoot,
+		execCmd:              execCmd,
+		actionKey:            actionKey,
+		testExec:             testExec,
+		autoConfirm:          autoConfirm,
+		allowDeploy:          allowDeploy,
+		deployExec:           deployExec,
+		autoConfirmDep:       autoConfirmDeploy,
+		attachLogs:           attachLogs,
+		executionTimeout:     2 * time.Hour,
+		heartbeatTimeout:     5 * time.Minute,
+		heartbeatInterval:    15 * time.Second,
+		claudePermissionMode: defaultClaudePermissionMode,
+		claudeAllowedTools:   defaultClaudeAllowedTools,
+		spawn:                defaultSpawn,
+		supervise:            superviseAgentProcess,
+		reporter:             &httpRunnerReportTransport{client: client, provider: provider, adapter: adapter},
+		confirm:              defaultConfirm,
+		confirmDeploy:        defaultDeployConfirm,
 	}
+}
+
+func runnerTelemetryIdentityForExecution(execCmd string) (string, string) {
+	trimmed := strings.TrimSpace(execCmd)
+	if trimmed == "claude" {
+		return "anthropic", "claude-code"
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) > 0 && !strings.ContainsAny(trimmed, "|;&<>`$\r\n") && strings.EqualFold(filepath.Base(fields[0]), "codex") {
+		return "openai", "codex-cli"
+	}
+	return "paimos", "custom-runner"
 }
 
 type agentRunDetail struct {
@@ -439,6 +536,21 @@ type agentRunArtifact struct {
 
 func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	runID := j.runID
+	if strings.TrimSpace(a.execCmd) == "claude" {
+		permissionMode := a.claudePermissionMode
+		if strings.TrimSpace(permissionMode) == "" {
+			permissionMode = defaultClaudePermissionMode
+		}
+		allowedTools := a.claudeAllowedTools
+		if strings.TrimSpace(allowedTools) == "" {
+			allowedTools = defaultClaudeAllowedTools
+		}
+		if err := validateClaudeRunnerConfig(permissionMode, allowedTools, a.unsafeClaudeBypass); err != nil {
+			return err
+		}
+		a.claudePermissionMode = permissionMode
+		a.claudeAllowedTools = allowedTools
+	}
 	detail, err := a.fetchRun(runID)
 	if err != nil {
 		return err
@@ -486,27 +598,54 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	}
 	if !a.autoConfirm && !a.confirm(issueKey, runID, a.repoRoot) {
 		fmt.Fprintf(stdout, "run %d declined\n", runID)
-		a.report(runID, map[string]any{"status": "cancelled", "if_status": "queued"})
-		return nil
+		return a.report(runID, map[string]any{"status": "cancelled", "if_status": "queued"})
 	}
 	// Atomic claim: queued -> running. A second runner that re-reads the run
 	// loses here (the if_status guard) and skips — no double-spawn.
-	if err := a.patch(runID, map[string]any{"status": "running", "if_status": "queued", "device_id": a.deviceID, "action_key": actionKey}); err != nil {
+	claim := map[string]any{"status": "running", "if_status": "queued", "device_id": a.deviceID, "action_key": actionKey}
+	if a.supervise != nil {
+		claim["expects_supervisor_telemetry"] = true
+	}
+	if err := a.patch(runID, claim); err != nil {
 		if isConflict(err) {
 			fmt.Fprintf(stdout, "run %d already claimed by another runner — skipping\n", runID)
 			return nil
 		}
 		return fmt.Errorf("claim run %d: %w", runID, err)
 	}
+	var control *runControlArbiter
+	if a.controlJournal != nil {
+		control = newRunControlArbiter(a.client, runID, a.deviceID, a.controlJournal)
+		defer func() {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer stopCancel()
+			control.stop(stopCtx)
+		}()
+	}
 	baseGit := inspectAgentRunGitEvidence(a.repoRoot)
 	repoURL := a.resolveAgentRunRepoURL(detail.ProjectID, baseGit.RepoURL)
-	finish := func(logFile *os.File, fields map[string]any) {
+	finish := func(logFile *os.File, fields map[string]any) error {
+		if control != nil {
+			quiesceCtx, quiesceCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			control.quiesce(quiesceCtx)
+			quiesceCancel()
+		}
 		addAgentRunGitEvidence(fields, repoURL, baseGit, inspectAgentRunGitEvidence(a.repoRoot))
-		a.finishRun(runID, detail.IssueID, logFile, fields)
+		if err := a.finishRun(runID, detail.IssueID, logFile, fields); err != nil {
+			return err
+		}
+		if control != nil && fields["status"] != "cancelled" {
+			naturalCtx, naturalCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer naturalCancel()
+			return control.rejectNaturalExit(naturalCtx)
+		}
+		return nil
 	}
 	runCtx, ctxErr := a.fetchRunPromptContext(detail)
 	if ctxErr != nil {
-		finish(nil, map[string]any{"status": "failed", "error": "agent context: " + ctxErr.Error()})
+		if reportErr := finish(nil, map[string]any{"status": "failed", "error": "agent context unavailable"}); reportErr != nil {
+			return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+		}
 		return fmt.Errorf("run %d agent context failed: %w", runID, ctxErr)
 	}
 	agentNote := ""
@@ -516,8 +655,32 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	fmt.Fprintf(stdout, "%s implementing %s%s (run %d) in %s\n",
 		time.Now().Format(time.RFC3339), issueKey, agentNote, runID, a.repoRoot)
 
+	provider, adapter := runnerTelemetryIdentityForExecution(a.execCmd)
+	var correlationID string
+	var correlationErr error
+	if identity, ok := a.reporter.(interface {
+		Identity(int64) (string, string, string, error)
+	}); ok {
+		correlationID, provider, adapter, correlationErr = identity.Identity(runID)
+	} else {
+		correlationID, correlationErr = newRunCorrelationID()
+	}
+	if correlationErr != nil {
+		if reportErr := finish(nil, map[string]any{"status": "failed", "error": "run correlation identity unavailable"}); reportErr != nil {
+			return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+		}
+		return fmt.Errorf("run %d correlation identity: %w", runID, correlationErr)
+	}
+	projectID := ""
+	if detail.ProjectID != nil && *detail.ProjectID > 0 {
+		projectID = strconv.FormatInt(*detail.ProjectID, 10)
+	}
 	env := []string{
 		"PAIMOS_RUN_ID=" + strconv.FormatInt(runID, 10),
+		"PAIMOS_PROJECT_ID=" + projectID,
+		"PAIMOS_RUN_CORRELATION_ID=" + correlationID,
+		"PAIMOS_RUN_PROVIDER=" + provider,
+		"PAIMOS_RUN_ADAPTER=" + adapter,
 		"PAIMOS_ISSUE_KEY=" + issueKey,
 		"PAIMOS_ISSUE_TITLE=" + issueCtx.Title,
 		"PAIMOS_CONTEXT_PACK=" + runCtx.ContextPack,
@@ -531,7 +694,9 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	if len(runCtx.ArtifactRaw) > 0 {
 		artifactPath, cleanupArtifact, artifactErr := writeAgentArtifactFile(runID, runCtx.ArtifactRaw)
 		if artifactErr != nil {
-			finish(nil, map[string]any{"status": "failed", "error": "agent artifact: " + artifactErr.Error()})
+			if reportErr := finish(nil, map[string]any{"status": "failed", "error": "agent artifact could not be prepared"}); reportErr != nil {
+				return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+			}
 			return fmt.Errorf("run %d artifact failed: %w", runID, artifactErr)
 		}
 		defer cleanupArtifact()
@@ -540,7 +705,9 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	promptPath, cleanupPrompt, promptErr := writeAgentPromptFile(runID, buildAgentPrompt(issueCtx, runID, a.repoRoot, a.testExec, detail.DeployTarget, runCtx))
 	if promptErr != nil {
 		closeLog(logFile)
-		finish(logFile, map[string]any{"status": "failed", "error": "prompt: " + promptErr.Error()})
+		if reportErr := finish(logFile, map[string]any{"status": "failed", "error": "agent prompt could not be prepared"}); reportErr != nil {
+			return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+		}
 		return fmt.Errorf("run %d prompt failed: %w", runID, promptErr)
 	}
 	defer cleanupPrompt()
@@ -552,30 +719,77 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	if a.attachLogs {
 		if f, logErr := os.CreateTemp("", fmt.Sprintf("paimos-run-%d-*.log", runID)); logErr == nil {
 			logFile = f
-			logSink = f
+			logSink = newOutputBudgetWriter(f, maxCapturedLogBytes)
 			defer func() { _ = os.Remove(f.Name()) }()
 		}
 	}
 
-	if spawnErr := a.spawn(ctx, a.repoRoot, a.execCmd, env, logSink); spawnErr != nil {
+	var runResult supervisorResult
+	if a.supervise != nil {
+		effectiveCmd := a.execCmd
+		var effectiveArgv []string
+		if strings.TrimSpace(a.execCmd) == "claude" {
+			var argvErr error
+			effectiveArgv, argvErr = claudeRunnerArgv(a.claudePermissionMode, a.claudeAllowedTools, a.unsafeClaudeBypass)
+			if argvErr != nil {
+				return argvErr
+			}
+			effectiveCmd = strings.Join(effectiveArgv, " ")
+		}
+		runResult = a.supervise(ctx, supervisorRequest{
+			RunID: runID, RepoRoot: a.repoRoot, ExecCmd: effectiveCmd, ExecArgv: effectiveArgv, Env: env,
+			StructuredClaude: strings.TrimSpace(a.execCmd) == "claude",
+			ExecutionTimeout: a.executionTimeout, SilenceTimeout: a.heartbeatTimeout,
+			HeartbeatInterval: a.heartbeatInterval, LogSink: logSink, Reporter: a.reporter,
+			OwnedProcessStarted: controlStart(control), ControlRequests: controlRequests(control),
+			ControlResult: controlResult(control),
+		})
+	} else if spawnErr := a.spawn(ctx, a.repoRoot, a.execCmd, env, logSink); spawnErr != nil {
+		runResult = supervisorResult{Outcome: outcomeProviderFailure, Summary: "provider process exited unsuccessfully"}
+	} else {
+		runResult = supervisorResult{Outcome: outcomeNormalExit, Summary: "provider process exited normally"}
+	}
+	if runResult.Outcome != outcomeNormalExit {
 		closeLog(logFile)
-		finish(logFile, map[string]any{"status": "failed", "error": spawnErr.Error()})
-		return fmt.Errorf("run %d failed: %w", runID, spawnErr)
+		if runResult.Outcome == outcomeOperatorCancellation {
+			return nil
+		}
+		fields := supervisorFailureFields(runResult)
+		if _, cancelled := fields["cancellation_cause"]; cancelled {
+			fields["device_id"] = a.deviceID
+		}
+		if reportErr := finish(logFile, fields); reportErr != nil {
+			return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+		}
+		return fmt.Errorf("run %d %s: %s", runID, runResult.Outcome, runResult.Summary)
 	}
 
 	resultFields := map[string]any{
 		"version": readVersionFile(a.repoRoot),
 	}
-	if strings.TrimSpace(a.testExec) != "" {
-		summary, testErr := a.runTests(ctx, env, logSink)
+	testsRan := strings.TrimSpace(a.testExec) != ""
+	if testsRan {
+		summary, testResult := a.runTests(ctx, runID, env, logSink, control)
 		if summary != "" {
 			resultFields["tests_summary"] = summary
 		}
-		if testErr != nil {
+		if testResult.Outcome != outcomeNormalExit {
 			closeLog(logFile)
-			resultFields["status"] = "tests_failed"
-			resultFields["error"] = "tests: " + testErr.Error()
-			finish(logFile, resultFields)
+			if testResult.Outcome == outcomeOperatorCancellation {
+				return nil
+			}
+			for key, value := range supervisorFailureFields(testResult) {
+				resultFields[key] = value
+			}
+			if _, cancelled := resultFields["cancellation_cause"]; cancelled {
+				resultFields["device_id"] = a.deviceID
+			}
+			if resultFields["status"] == "failed" {
+				resultFields["status"] = "tests_failed"
+			}
+			if reportErr := finish(logFile, resultFields); reportErr != nil {
+				return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+			}
 			fmt.Fprintf(stdout, "run %d tests failed\n", runID)
 			return nil
 		}
@@ -585,23 +799,40 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	// --yes, the deploy step prompts unless --yes-deploy was passed.
 	if a.allowDeploy && a.deployExec != "" && detail.DeployTarget != "" {
 		if !a.autoConfirmDep && !a.confirmDeploy(issueKey, runID, detail.DeployTarget) {
-			fmt.Fprintf(stdout, "run %d: deploy declined — reporting tests_passed\n", runID)
+			fmt.Fprintf(stdout, "run %d: deploy declined\n", runID)
 			closeLog(logFile)
-			resultFields["status"] = "tests_passed"
-			finish(logFile, resultFields)
-			return nil
+			resultFields["status"] = completedRunStatus(testsRan)
+			return finish(logFile, resultFields)
 		}
 		fmt.Fprintf(stdout, "run %d: deploying to %s via %q\n", runID, detail.DeployTarget, a.deployExec)
-		if depErr := a.spawn(ctx, a.repoRoot, a.deployExec, env, logSink); depErr != nil {
+		deployResult := a.runSupervisedCommand(ctx, runID, a.deployExec, "deploying", "Configured deploy command started", env, logSink, control)
+		if deployResult.Outcome != outcomeNormalExit {
 			closeLog(logFile)
-			finish(logFile, map[string]any{"status": "failed", "error": "deploy: " + depErr.Error()})
-			return fmt.Errorf("run %d deploy failed: %w", runID, depErr)
+			if deployResult.Outcome == outcomeOperatorCancellation {
+				return nil
+			}
+			for key, value := range supervisorFailureFields(deployResult) {
+				resultFields[key] = value
+			}
+			if _, cancelled := resultFields["cancellation_cause"]; cancelled {
+				resultFields["device_id"] = a.deviceID
+			}
+			// A failed deployment does not erase the successful test evidence or
+			// the artifact/target that was actually being deployed. Those facts
+			// remain necessary to understand the end-to-end outcome.
+			resultFields["deploy_target"] = detail.DeployTarget
+			if reportErr := finish(logFile, resultFields); reportErr != nil {
+				return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+			}
+			return fmt.Errorf("run %d deploy failed", runID)
 		}
 		closeLog(logFile)
 		resultFields["status"] = "deployed"
 		resultFields["version"] = readVersionFile(a.repoRoot)
 		resultFields["deploy_target"] = detail.DeployTarget
-		finish(logFile, resultFields)
+		if reportErr := finish(logFile, resultFields); reportErr != nil {
+			return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+		}
 		fmt.Fprintf(stdout, "run %d deployed to %s\n", runID, detail.DeployTarget)
 		return nil
 	}
@@ -609,10 +840,38 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	// Report-back only. The server rejects clobbering a terminal status (so if
 	// the agent already advanced the run, this is a harmless 409, not a clobber).
 	closeLog(logFile)
-	resultFields["status"] = "tests_passed"
-	finish(logFile, resultFields)
+	resultFields["status"] = completedRunStatus(testsRan)
+	if reportErr := finish(logFile, resultFields); reportErr != nil {
+		return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+	}
 	fmt.Fprintf(stdout, "run %d complete\n", runID)
 	return nil
+}
+
+func completedRunStatus(testsRan bool) string {
+	if testsRan {
+		return "tests_passed"
+	}
+	return "completed"
+}
+
+func supervisorFailureFields(result supervisorResult) map[string]any {
+	fields := map[string]any{"status": "failed", "error": string(result.Outcome) + ": " + result.Summary}
+	switch result.Outcome {
+	case outcomeCancellation:
+		fields["status"] = "cancelled"
+		fields["cancellation_cause"] = "runner_shutdown"
+	case outcomeServerCancellation:
+		fields["status"] = "cancelled"
+		fields["cancellation_cause"] = "server_cancel"
+	case outcomeTimeout:
+		fields["status"] = "cancelled"
+		fields["cancellation_cause"] = "execution_timeout"
+	case outcomeSilentChild:
+		fields["status"] = "cancelled"
+		fields["cancellation_cause"] = "silence_timeout"
+	}
+	return fields
 }
 
 func closeLog(f *os.File) {
@@ -621,71 +880,55 @@ func closeLog(f *os.File) {
 	}
 }
 
-func (a *agentRunner) runTests(ctx context.Context, env []string, logSink io.Writer) (string, error) {
-	var out bytes.Buffer
-	sink := io.Writer(&out)
-	if logSink != nil {
-		sink = io.MultiWriter(logSink, &out)
+func (a *agentRunner) runTests(ctx context.Context, runID int64, env []string, logSink io.Writer, control *runControlArbiter) (string, supervisorResult) {
+	result := a.runSupervisedCommand(ctx, runID, a.testExec, "testing", "Configured test command started", env, logSink, control)
+	if result.Outcome == outcomeNormalExit {
+		return commandResultSummary(nil), result
 	}
-	err := a.spawn(ctx, a.repoRoot, a.testExec, env, sink)
-	return commandResultSummary(a.testExec, out.String(), err), err
+	return "configured test command failed: " + string(result.Outcome), result
 }
 
-func commandResultSummary(cmd, output string, err error) string {
-	name := truncateRunes(strings.TrimSpace(cmd), 80)
-	if name == "" {
-		name = "tests"
+func (a *agentRunner) runSupervisedCommand(ctx context.Context, runID int64, command, phase, startSummary string, env []string, logSink io.Writer, control *runControlArbiter) supervisorResult {
+	supervise := a.supervise
+	if supervise == nil {
+		supervise = superviseAgentProcess
 	}
+	return supervise(ctx, supervisorRequest{
+		RunID: runID, RepoRoot: a.repoRoot, ExecCmd: command, Env: env,
+		ExecutionTimeout: a.executionTimeout, SilenceTimeout: a.heartbeatTimeout,
+		HeartbeatInterval: a.heartbeatInterval, LogSink: logSink, Reporter: a.reporter,
+		InitialPhase: phase, StartSummary: startSummary, OwnedProcessStarted: controlStart(control),
+		ControlRequests: controlRequests(control), ControlResult: controlResult(control),
+	})
+}
+
+func controlStart(control *runControlArbiter) func(context.Context, bool) error {
+	if control == nil {
+		return nil
+	}
+	return control.start
+}
+
+func controlRequests(control *runControlArbiter) <-chan runnerClaimedCancellation {
+	if control == nil {
+		return nil
+	}
+	return control.requests
+}
+
+func controlResult(control *runControlArbiter) func(context.Context, runnerClaimedCancellation, string, string) error {
+	if control == nil {
+		return nil
+	}
+	return control.recordResult
+}
+
+func commandResultSummary(err error) string {
 	state := "passed"
 	if err != nil {
 		state = "failed"
 	}
-	detail := compactCommandOutput(output)
-	if detail == "" && err != nil {
-		detail = err.Error()
-	}
-	summary := name + " " + state
-	if detail != "" {
-		summary += ": " + detail
-	}
-	return truncateRunes(summary, 500)
-}
-
-func compactCommandOutput(output string) string {
-	output = strings.ReplaceAll(output, "\r", "\n")
-	lines := strings.Split(output, "\n")
-	compact := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.Join(strings.Fields(stripANSI(line)), " ")
-		if line != "" {
-			compact = append(compact, line)
-		}
-	}
-	const keepLines = 4
-	if len(compact) > keepLines {
-		compact = compact[len(compact)-keepLines:]
-	}
-	return strings.Join(compact, " | ")
-}
-
-func stripANSI(s string) string {
-	var b strings.Builder
-	skipping := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == 0x1b {
-			skipping = true
-			continue
-		}
-		if skipping {
-			if c >= '@' && c <= '~' {
-				skipping = false
-			}
-			continue
-		}
-		b.WriteByte(c)
-	}
-	return b.String()
+	return "configured test command " + state
 }
 
 func truncateRunes(s string, max int) string {
@@ -929,13 +1172,13 @@ func appendPromptSection(b *strings.Builder, label, value string) {
 
 // finishRun uploads the captured log (best-effort), stamps log_attachment_id
 // when the upload succeeds, then reports the terminal state (PAI-617).
-func (a *agentRunner) finishRun(runID, issueID int64, logFile *os.File, fields map[string]any) {
+func (a *agentRunner) finishRun(runID, issueID int64, logFile *os.File, fields map[string]any) error {
 	if logFile != nil {
 		if id := a.uploadLog(issueID, runID, logFile.Name()); id > 0 {
 			fields["log_attachment_id"] = id
 		}
 	}
-	a.report(runID, fields)
+	return a.report(runID, fields)
 }
 
 // uploadLog uploads the run log as an attachment and links it to the issue,
@@ -1080,12 +1323,57 @@ func (a *agentRunner) patch(runID int64, fields map[string]any) error {
 	return err
 }
 
-// report PATCHes the run's final state and LOGS (rather than swallows) a
-// failure, so a network blip on the report doesn't silently lose the outcome. A
-// 409 just means the run already reached a terminal status — not worth shouting.
-func (a *agentRunner) report(runID int64, fields map[string]any) {
-	if err := a.patch(runID, fields); err != nil && !isConflict(err) {
-		fmt.Fprintf(stderr, "run %d: reporting %v failed: %v\n", runID, fields["status"], err)
+// report PATCHes the run's final state. A 409 is authoritative only after a
+// refetch proves that the same terminal outcome was already applied; a reaper,
+// canceller, disappearance, or different writer remains a visible failure.
+func (a *agentRunner) report(runID int64, fields map[string]any) error {
+	err := a.patch(runID, fields)
+	if err == nil {
+		return nil
+	}
+	if isConflict(err) {
+		refetchCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		authoritative, fetchErr := fetchRunContext(refetchCtx, a.client, runID)
+		cancel()
+		if fetchErr != nil {
+			err = fmt.Errorf("refetch authoritative run after terminal conflict: %w", fetchErr)
+		} else if status, _ := authoritative["status"].(string); agentRunStatusIsTerminal(status) && lifecycleReportEquivalent(fields, authoritative) {
+			return nil
+		} else {
+			err = fmt.Errorf("terminal outcome conflict: attempted report is not equivalent to authoritative run")
+		}
+	}
+	fmt.Fprintf(stderr, "run %d: reporting %v failed: %v\n", runID, fields["status"], err)
+	return err
+}
+
+// lifecycleReportEquivalent compares every field the runner attempted to
+// persist, not merely status. A same-status write that lost test evidence,
+// deploy target, version, or error context is not an idempotent success.
+func lifecycleReportEquivalent(fields, authoritative map[string]any) bool {
+	b, err := json.Marshal(fields)
+	if err != nil {
+		return false
+	}
+	var normalized map[string]any
+	if err := json.Unmarshal(b, &normalized); err != nil {
+		return false
+	}
+	for key, expected := range normalized {
+		actual, ok := authoritative[key]
+		if !ok || !reflect.DeepEqual(expected, actual) {
+			return false
+		}
+	}
+	return true
+}
+
+func agentRunStatusIsTerminal(status string) bool {
+	switch status {
+	case "completed", "tests_passed", "tests_failed", "deployed", "failed", "cancelled", "drafted":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1195,22 +1483,30 @@ func defaultSpawn(ctx context.Context, repoRoot, execCmd string, env []string, l
 	if strings.TrimSpace(execCmd) == "" {
 		return fmt.Errorf("empty --exec command")
 	}
-	effectiveCmd := effectiveAgentExec(execCmd)
-	// Run through a shell so the operator's --exec can use quotes, pipes, and
-	// chaining (PAI-619). execCmd is the operator's own --exec flag, run in their
-	// own repo — that is the entire purpose of the runner.
-	cmd := exec.CommandContext(ctx, "sh", "-c", effectiveCmd) // #nosec G204 -- operator's own --exec flag
+	promptCommand := execCmd
+	var cmd *exec.Cmd
+	if strings.TrimSpace(execCmd) == "claude" {
+		argv, _ := claudeRunnerArgv(defaultClaudePermissionMode, defaultClaudeAllowedTools, false)
+		cmd = exec.CommandContext(ctx, argv[0], argv[1:]...) // #nosec G204 -- validated built-in argv
+		promptCommand = strings.Join(argv, " ")
+	} else {
+		// Raw --exec is the operator's deliberate shell-command escape hatch.
+		cmd = exec.CommandContext(ctx, "sh", "-c", execCmd) // #nosec G204 -- operator's own --exec flag
+	}
 	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(), env...)
 	// Tee output to the run log (PAI-617) when a sink is provided.
-	out, errOut := io.Writer(stdout), io.Writer(stderr)
+	visibleOut := newOutputBudgetWriter(stdout, maxVisibleOutputBytes)
+	visibleErr := newOutputBudgetWriter(stderr, maxVisibleOutputBytes)
+	out := io.Writer(visibleOut)
+	errOut := io.Writer(visibleErr)
 	if logSink != nil {
-		out = io.MultiWriter(stdout, logSink)
-		errOut = io.MultiWriter(stderr, logSink)
+		out = io.MultiWriter(visibleOut, logSink)
+		errOut = io.MultiWriter(visibleErr, logSink)
 	}
 	cmd.Stdout = out
 	cmd.Stderr = errOut
-	if prompt, err := promptForCommand(effectiveCmd, env); err != nil {
+	if prompt, err := promptForCommand(promptCommand, env); err != nil {
 		return err
 	} else if prompt != "" {
 		cmd.Stdin = strings.NewReader(prompt)
@@ -1220,12 +1516,50 @@ func defaultSpawn(ctx context.Context, repoRoot, execCmd string, env []string, l
 	return cmd.Run()
 }
 
-func effectiveAgentExec(execCmd string) string {
-	trimmed := strings.TrimSpace(execCmd)
-	if trimmed == "claude" {
-		return "claude -p --permission-mode acceptEdits"
+func validateClaudeRunnerConfig(permissionMode, allowedTools string, unsafeAllowBypass ...bool) error {
+	permissionMode = strings.TrimSpace(permissionMode)
+	validModes := map[string]bool{
+		"acceptEdits": true, "auto": true, "bypassPermissions": true,
+		"manual": true, "dontAsk": true, "plan": true,
 	}
-	return execCmd
+	if !validModes[permissionMode] {
+		return &usageError{msg: "invalid --claude-permission-mode"}
+	}
+	if permissionMode == "bypassPermissions" && (len(unsafeAllowBypass) == 0 || !unsafeAllowBypass[0]) {
+		return &usageError{msg: "bypassPermissions requires --unsafe-allow-bypass-permissions"}
+	}
+	parts := strings.Split(strings.TrimSpace(allowedTools), ",")
+	if len(parts) == 0 || len(parts) > 64 {
+		return &usageError{msg: "--claude-allowed-tools must contain 1-64 tool names"}
+	}
+	for _, tool := range parts {
+		tool = strings.TrimSpace(tool)
+		if tool == "" || !claudeToolNamePattern.MatchString(tool) {
+			return &usageError{msg: "invalid --claude-allowed-tools value"}
+		}
+	}
+	return nil
+}
+
+func claudeRunnerArgv(permissionMode, allowedTools string, unsafeAllowBypass bool) ([]string, error) {
+	if err := validateClaudeRunnerConfig(permissionMode, allowedTools, unsafeAllowBypass); err != nil {
+		return nil, err
+	}
+	permissionMode = strings.TrimSpace(permissionMode)
+	allowedTools = strings.TrimSpace(allowedTools)
+	argv := []string{
+		"claude", "-p", "--verbose", "--output-format", "stream-json",
+		"--safe-mode",
+		"--permission-mode", permissionMode,
+		// --tools is the hard built-in availability boundary. --allowedTools
+		// additionally controls which of those tools can run without approval.
+		"--tools", allowedTools,
+		"--allowedTools", allowedTools,
+	}
+	if permissionMode == "bypassPermissions" {
+		argv = append(argv, "--allow-dangerously-skip-permissions")
+	}
+	return argv, nil
 }
 
 func promptForCommand(execCmd string, env []string) (string, error) {

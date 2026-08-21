@@ -3,6 +3,7 @@ import LoadingText from "@/components/LoadingText.vue";
 import { computed, onMounted, onBeforeUnmount } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import AppLayout from "@/components/AppLayout.vue";
+import AgentModeLayout from "@/components/AgentModeLayout.vue";
 import PortalLayout from "@/components/PortalLayout.vue";
 import AppConfirmDialog from "@/components/AppConfirmDialog.vue";
 import UndoToast from "@/components/undo/UndoToast.vue";
@@ -12,6 +13,7 @@ import { useAuthStore } from "@/stores/auth";
 import { announceSessionExpired } from "@/api/client";
 import { useUndoStore } from "@/stores/undo";
 import { useChangesStream } from "@/composables/useChangesStream";
+import { layoutSupportsUndoChrome, resolveLayout } from "@/router/shell";
 
 const auth = useAuthStore();
 const undo = useUndoStore();
@@ -20,6 +22,11 @@ const internalChromeEnabled = computed(
   () => auth.checked && !!auth.user && auth.user.role !== "external" && !route.meta.portal && !route.meta.public,
 );
 useChangesStream(internalChromeEnabled);
+// PAI-805: the route decides its shell (see router/shell.ts). The Agent
+// Mode shell keeps the change stream (it feeds refetch hints) but drops
+// the ordinary undo chrome along with the rest of AppLayout.
+const layoutKind = computed(() => resolveLayout(route.meta));
+const undoChromeEnabled = computed(() => internalChromeEnabled.value && layoutSupportsUndoChrome(layoutKind.value));
 
 // ── Session-death heartbeat (PAI-322) ────────────────────────
 // Two complementary triggers:
@@ -91,10 +98,10 @@ onBeforeUnmount(() => {
 
 <template>
   <AppConfirmDialog />
-  <UndoToast v-if="internalChromeEnabled" />
-  <UndoActivityPanel v-if="internalChromeEnabled" />
+  <UndoToast v-if="undoChromeEnabled" />
+  <UndoActivityPanel v-if="undoChromeEnabled" />
   <UndoConflictModal
-    v-if="internalChromeEnabled"
+    v-if="undoChromeEnabled"
     :conflict="undo.conflict"
     :loading="undo.resolving"
     @cancel="undo.clearConflict()"
@@ -102,14 +109,17 @@ onBeforeUnmount(() => {
   />
   <!-- Gate on auth.checked to prevent layout flash (sidebar visible before redirect) -->
   <LoadingText v-if="!auth.checked" class="app-loading" label="Loading…" />
-  <RouterView v-else v-slot="{ Component, route }">
-    <PortalLayout v-if="route.meta.portal">
+  <RouterView v-else v-slot="{ Component }">
+    <PortalLayout v-if="layoutKind === 'portal'">
       <component :is="Component" />
     </PortalLayout>
-    <AppLayout v-else-if="!route.meta.public">
+    <component v-else-if="layoutKind === 'public'" :is="Component" />
+    <AgentModeLayout v-else-if="layoutKind === 'agent'">
+      <component :is="Component" />
+    </AgentModeLayout>
+    <AppLayout v-else>
       <component :is="Component" />
     </AppLayout>
-    <component v-else :is="Component" />
   </RouterView>
 </template>
 

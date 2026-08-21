@@ -110,10 +110,21 @@ func main() {
 	// PAI-117: GDPR retention sweeper. Idempotent — first sweep runs
 	// after a 30-second warm-up so a cold start stays quiet.
 	handlers.StartRetentionSweeper()
+	// PAI-801: reconcile queued and running agent runs from durable,
+	// server-received supervisor heartbeat evidence. This is process-owned and
+	// does not depend on an issue page or another Implement click.
+	handlers.StartAgentRunReconciler()
 
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	// PAI-809: first and unconditional for every structurally classified
+	// control request, including auth/parser failures, 404/405, and panic
+	// recovery. Near-miss routes retain their ordinary cache semantics.
+	r.Use(handlers.ClassifiedControlCachePolicyMiddleware)
+	// PAI-809: chi's Logger for ordinary traffic, a five-field private
+	// line for supervisory control. Outermost, so no earlier middleware
+	// can record a control request under the ordinary format.
+	r.Use(handlers.ControlAwareRequestLogger)
+	r.Use(handlers.ControlAwareRecoverer)
 	r.Use(middleware.Compress(5))
 	// PAI-114: baseline security headers on every response. Non-breaking
 	// (X-Frame-Options=SAMEORIGIN keeps the in-app PDF preview iframes
@@ -347,6 +358,12 @@ func isViteHashed(urlPath string) bool {
 // so the OpenAPI-coverage guard test can walk the route tree without
 // booting the server, which keeps the published public surface auditable.
 func mountAPI(r chi.Router) {
+	// Classified control families retain their fixed privacy envelope even
+	// when chi rejects a missing route or wrong method before a handler runs.
+	// Ordinary API paths keep chi's existing behavior.
+	r.NotFound(handlers.ControlAwareNotFound)
+	r.MethodNotAllowed(handlers.ControlAwareMethodNotAllowed)
+
 	// ── Strictly public endpoints ────────────────────────────────
 	// Everything here is accessible without a session. Keep this
 	// list short and auditable — the only valid reasons for a
@@ -449,6 +466,48 @@ func mountAPI(r chi.Router) {
 		r.Post("/projektberichte/accept/{code}", handlers.AcceptProjectReport)
 		r.Put("/projektberichte/accept/{code}/signed", handlers.LinkProjectReportSignedArtifact)
 		r.Get("/projektberichte/{code}/pdf", handlers.GetProjectReportPDF)
+
+		// PAI-799 telemetry performs its own requester/claimer/admin and
+		// run-visibility checks so unauthorized run ids return the same 404 as
+		// missing ids. Keep it outside BlockExternal, which would turn that
+		// existence-hiding response into an early 403.
+		r.Post("/runs/{id}/telemetry", handlers.IngestAgentRunTelemetry)
+		r.Get("/runs/{id}/telemetry", handlers.ListAgentRunTelemetry)
+		r.Get("/runs/{id}/telemetry/latest", handlers.GetLatestAgentRunTelemetry)
+	})
+
+	// Agent Mode has an existence-hiding guard of its own: external users
+	// receive the same 404 as an inaccessible resource. Keep this separate
+	// from BlockExternal, whose 403 contract is correct for the older internal
+	// API but would disclose that this supervision surface exists.
+	r.Route("/agent-mode", func(r chi.Router) {
+		r.Use(auth.AgentModePrivateNoStore)
+		r.Use(auth.Middleware)
+		r.Use(auth.RequireAgentModeInternal)
+		r.Use(auth.CSRFMiddleware)
+		r.Use(auth.MustChangePasswordGate)
+		r.NotFound(handlers.AgentModeControlAwareNotFound)
+		r.MethodNotAllowed(handlers.AgentModeControlAwareMethodNotAllowed)
+
+		// Literal events must precede the delivery-key wildcard.
+		r.Get("/deliveries/events", handlers.AgentModeEvents)
+		r.Get("/deliveries", handlers.AgentModeDeliveries)
+		r.Get("/projects/{projectID}/deliveries", handlers.AgentModeProjectDeliveries)
+		r.Get("/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
+		r.Post("/voice/transcribe", handlers.TranscribeAgentModeVoice)
+		r.Post("/voice/speak", handlers.SpeakAgentModeVoice)
+		handlers.MountAgentModeControlRoutes(r)
+	})
+
+	// Runner control is API-key only and intentionally lives outside the
+	// legacy BlockExternal group. Exact scope and credential/device/run
+	// bindings are enforced again by the transport and supervision service.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.Middleware)
+		r.Use(auth.RequireAgentModeInternal)
+		r.Use(auth.CSRFMiddleware)
+		r.Use(auth.MustChangePasswordGate)
+		handlers.MountRunnerControlRoutes(r)
 	})
 
 	// Portal (external + admin)
@@ -837,7 +896,7 @@ func mountAPI(r chi.Router) {
 
 		// Comments
 		r.With(auth.RequireIssueAccess).Get("/issues/{id}/comments", handlers.ListComments)
-		r.With(auth.RequireIssueEdit, handlers.IdempotencyMiddleware).Post("/issues/{id}/comments", handlers.CreateComment)
+		r.With(auth.RequireIssueEdit, handlers.CommentIdempotencyMiddleware).Post("/issues/{id}/comments", handlers.CreateComment)
 		r.With(auth.RequireCommentEdit).Patch("/comments/{id}", handlers.UpdateCommentVisibility)
 		r.With(auth.RequireCommentAccess).Delete("/comments/{id}", handlers.DeleteComment)
 

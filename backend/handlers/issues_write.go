@@ -31,6 +31,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/models"
 )
 
@@ -1000,8 +1001,75 @@ func DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	if user != nil {
 		deletedBy = &user.ID
 	}
+	tx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		jsonError(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Cancel linked instrumented work while the roots are still visible and
+	// authorized. Run status, canonical/historical delivery truth, and the trash
+	// stamp then share one SQLite commit.
+	rows, err := tx.QueryContext(r.Context(), `
+		WITH RECURSIVE descendants(id) AS (
+			SELECT id FROM issues WHERE id=? AND deleted_at IS NULL
+			UNION ALL
+			SELECT i.id FROM issues i
+			JOIN issue_relations pr ON pr.target_id=i.id AND pr.type='parent'
+			JOIN descendants d ON d.id=pr.source_id
+			WHERE i.deleted_at IS NULL
+		)
+		SELECT ar.id,ar.delivery_instrumentation_version,
+		 EXISTS(SELECT 1 FROM delivery_agent_run_links link WHERE link.agent_run_id=ar.id)
+		FROM agent_runs ar WHERE ar.issue_id IN (SELECT id FROM descendants)
+		 AND ar.status IN ('queued','running') ORDER BY ar.id`, id)
+	if err != nil {
+		jsonError(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	type trashRun struct {
+		id      int64
+		version int
+		linked  bool
+	}
+	var runs []trashRun
+	for rows.Next() {
+		var run trashRun
+		if err := rows.Scan(&run.id, &run.version, &run.linked); err != nil {
+			rows.Close()
+			jsonError(w, "delete failed", http.StatusInternalServerError)
+			return
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Close(); err != nil {
+		jsonError(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	store := deliveryStoreForRequest(r)
+	effects := store.NewEffects()
+	for _, run := range runs {
+		res, err := tx.ExecContext(r.Context(), `UPDATE agent_runs SET status='cancelled',
+			error='issue moved to trash',finished_at=datetime('now')
+			WHERE id=? AND status IN ('queued','running')`, run.id)
+		if err != nil {
+			jsonError(w, "delete failed", http.StatusInternalServerError)
+			return
+		}
+		changed, _ := res.RowsAffected()
+		if changed == 1 && run.version == 1 && run.linked {
+			if err := store.NormalizeRunTx(r.Context(), tx, effects, delivery.RunNormalization{
+				RunID: run.id, Status: "cancelled", IdempotencyKey: fmt.Sprintf("trash-run:%d:cancelled", run.id),
+			}); err != nil {
+				jsonError(w, "delete failed", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
 	// PAI-584 P6: walk descendants via the `parent` edge, not parent_id.
-	res, err := db.DB.Exec(`
+	res, err := tx.ExecContext(r.Context(), `
 		WITH RECURSIVE descendants(id) AS (
 			SELECT id FROM issues WHERE id = ? AND deleted_at IS NULL
 			UNION ALL
@@ -1025,6 +1093,11 @@ func DeleteIssue(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
+	if err := tx.Commit(); err != nil {
+		jsonError(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	effects.Dispatch(r.Context())
 	// History snapshot on the targeted issue only — cascaded tasks are
 	// reconstructible from the ticket snapshot + parent_id chain.
 	if snap := getIssueByID(id); snap != nil {

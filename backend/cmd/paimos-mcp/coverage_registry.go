@@ -28,6 +28,7 @@ type routeCoverage struct {
 // retrieve/schema/context tools, while broad bulk mutations stay out of
 // the default MCP surface.
 var routeCoverageRegistry = []routeCoverage{
+	{Method: "POST", Path: "/api/runs/{id}/telemetry", Classification: coverageMCPTool, Tool: "paimos_report_progress", Reason: "bounded single-run telemetry append"},
 	{Method: "GET", Path: "/api/schema", Classification: coverageMCPTool, Tool: "paimos_schema", Reason: "schema discovery is a direct agent primitive"},
 	{Method: "GET", Path: "/api/projects", Classification: coverageMCPTool, Tool: "paimos_project_list", Reason: "project lookup and key resolution"},
 	{Method: "POST", Path: "/api/projects", Classification: coverageMCPTool, Tool: "paimos_project_create", Reason: "explicitly scoped bootstrap write"},

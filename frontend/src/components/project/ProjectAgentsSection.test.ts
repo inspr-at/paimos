@@ -166,6 +166,21 @@ describe('ProjectAgentsSection launchpad', () => {
     unmount()
   })
 
+  it('labels a completed implementation distinctly from verified tests', async () => {
+    vi.mocked(listProjectAgents).mockResolvedValue([agent()])
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/projects/9/runners') return { runners: [] }
+      if (path === '/projects/9/runs') return { runs: [run({ status: 'completed', error: '' })] }
+      return {}
+    })
+
+    const { el, unmount } = mountSection()
+    await settle()
+    expect(el.textContent).toContain('Implemented')
+    expect(el.textContent).not.toContain('Tests passed')
+    unmount()
+  })
+
   it('uses the empty state to tell users what is missing before launch commands work', async () => {
     vi.mocked(listProjectAgents).mockResolvedValue([])
     vi.mocked(api.get).mockImplementation(async (path: string) => {

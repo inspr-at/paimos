@@ -558,6 +558,130 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M139 | `sessions.via_oidc` | Record OIDC-authenticated sessions so local-TOTP guidance does not misrepresent the IdP boundary (PAI-742). |
 | M140 | `agent_runs.repo_url/branch_name/commit_base_sha/commit_sha` | Runner-declared base→head Git evidence; equal SHAs explicitly mean no commit was produced (PAI-702). |
 | M141 | project lifecycle issue-insert triggers | Reject issue creation in `frozen`, `archived`, or `deleted` projects at the storage boundary (PAI-754). |
+| M142 | `agent_run_telemetry`, `agent_run_telemetry_latest` | Append-only provider-neutral run facts plus an indexed latest projection (PAI-799). |
+| M143 | rebuilt `agent_runs`; expanded telemetry latest projection | Add truthful terminal `completed`, durable `expects_supervisor_telemetry`, and separate latest event/heartbeat/semantic/estimate pointers (PAI-801). |
+| M144 | `deliveries` and immutable delivery fact tables; `delivery_change_log`; `agent_runs.delivery_instrumentation_version` | Issue-rooted end-to-end delivery attempts, stage lineage/evidence, duration history, and deletion-safe invalidation identity (PAI-802). |
+| M145 | Agent Mode change audiences, legacy roots, and privacy guards | Revoked-project replay, live-only version-0 synthetic provenance, recursive metadata invalidation, and upgraded secret-like text backstops (PAI-804). |
+| M146 | `comments.client_request_id`, `idx_comments_author_client_request` | Per-author exact-once identity for confirmed internal notes. The partial unique index is the atomic backstop; a CHECK requires an authenticated author, internal visibility, ASCII-safe syntax, and a 128-byte maximum (PAI-808). |
+
+`agent_runs.status=completed` means implementation finished without a configured
+test command; it never implies tests passed. `tests_passed` and `tests_failed`
+require a non-empty `tests_summary` of at most 4096 bytes, supplied by the same
+transition or already persisted. Telemetry history is append-only. Its latest
+projection keeps independent event, heartbeat, semantic, and estimate pointers;
+only the server-received heartbeat timestamp is liveness evidence. M143
+reconstructs the complete projection from append-only history, including
+missing or stale pointer rows. Telemetry
+`activity` and `estimate_basis` are valid single-line UTF-8 bounded to 280 and
+240 bytes respectively; adapters truncate on code-point boundaries to those
+same byte limits, CLI/MCP reject oversized values locally, and SQLite measures
+`CAST(... AS BLOB)` so storage cannot reinterpret bytes as code points. Exact
+persisted sequence/body replays remain idempotent after
+any result status, while conflicting or new facts are rejected. Telemetry treats
+`tests_passed` and `tests_failed` as stream-closing results even though the run
+lifecycle still permits the explicit deploy/fail transitions that follow them.
+
+### Delivery supervision model (M144 — PAI-802)
+
+A delivery has the stable identity `issue:<issue_id>`. Existing issues are not
+backfilled: a read with no `deliveries` row returns an uninstrumented `unknown`
+projection, augmented only by active version-0 legacy runs. The first explicit
+post-M144 write creates the container. Every new run creation path stamps
+`agent_runs.delivery_instrumentation_version=1` and creates its immutable
+`delivery_agent_run_links` row in the same transaction.
+
+Each authoritative `delivery_attempts` row is an immutable, atomically sealed
+plan revision with exactly five policy facts in canonical order: specification,
+implementation, QA, deployment, verification. Default weights are
+10/45/20/15/10. A project-policy
+change starts another attempt; a routine retry starts another stage execution
+inside the same attempt. Execution starts record the exact eligible predecessor
+event, so retrying an upstream stage makes old downstream evidence ineligible
+without deleting it. Handoffs advance authority epochs and late reports from an
+old attempt, execution, reporter, or epoch fail closed.
+
+`delivery_events` owns reporter-and-kind-scoped bounded idempotency keys,
+canonical payload hashes, and contiguous per-delivery revisions. Typed
+`delivery_stage_events`, blockers, and evidence are append-only;
+`delivery_stage_latest` contains rebuildable pointers
+for authority, semantic state, heartbeat, and estimate separately. Required
+stage success needs a current succeeded semantic report, no current blocker,
+passed allowlisted evidence, and current prerequisite lineage. Deployment
+success remains independently visible through the `Deployed` and `Unverified`
+axes until required verification succeeds. While verification is pending the
+display state is `deployed_unverified`; a current verification failure or
+cancellation takes display/suppression precedence as `failed_needs_retry` or
+`cancelled` without erasing either independent deployment axis.
+The internal transaction-aware bulk reducer reads 1–1,000 already-authorized
+roots in one fixed SQL round trip and captures one calculation timestamp.
+When a linked run closes after its attempt, execution, or authority was
+superseded, M144 appends one idempotent `run_lifecycle_observed` envelope. That
+event advances the delivery revision/change stream and appears by identity in
+bounded attempt history, but cannot reopen or rewrite current stage truth.
+
+One immutable `delivery_stage_durations` sample is written for each eligible
+successful execution, bound to its exact execution-start and terminal-success
+facts, current prerequisite lineage, completion project, and completion time.
+Server RFC3339 timestamps are parsed, intervals are
+unioned and clipped, human wait takes precedence over other blocking, and the
+remaining lead time is active. The samples retain project-at-completion and are
+never removed by a later retry.
+
+`delivery_change_log` has no root foreign key. It retains a safe removal fact
+when a visible issue is deleted and gives each delivery a contiguous change sequence;
+the opaque global id is internal only. Rows cannot be updated or directly
+deleted. An append-only monotone retention ledger is the sole prefix-deletion
+path, and its guards fail closed if retention state is missing or malformed.
+The encompassing SQL transaction writes facts and the durable change row;
+observer callbacks are dispatched only after commit. Agent Mode seals its
+authorized cursors around this internal high-water rather than expose database
+ids or tokens.
+
+### Agent Mode invalidation provenance (M145 — PAI-804)
+
+M145 extends `delivery_change_log` with a nullable `revoked_project_id` and adds
+one-shot pending move provenance to canonical and legacy roots. A visible
+project move writes the new current project and the exact old project in one
+transaction. The target audience receives a refetch; a source-only audience
+receives an identity-free reset. Direct inserts cannot forge a different old
+project, reuse move provenance, skip a per-root sequence, or append facts for a
+hidden root. The effective current high-water is `max(log tail, retention
+floor)`, so pruning the complete retained prefix cannot make a fresh cursor
+start below the floor.
+
+`agent_mode_legacy_roots` is bounded provenance for active instrumentation-v0
+runs that have no canonical `deliveries` row. Its negative synthetic ID and
+`issue:<id>` key are database-derived and immutable; caller-supplied identities
+are rejected. A root is visible only while its issue is live, at least one v0
+run is active, and no canonical delivery exists. Retained terminal provenance
+is not candidate authority and does not participate in later metadata fanout.
+The table deliberately has no cascading issue foreign key: visible issue/run
+removals append before leaving membership, then cleanup can retain or remove
+provenance without inventing a tombstone audience.
+
+Each committed issue, tag, lane, recursive-parent, or project trigger appends
+exactly one durable invalidation per affected currently visible canonical or
+legacy root. A reparent implemented as a delete plus insert can therefore
+append consecutive lane facts; replay coalesces them to the latest authorized
+hint for that root.
+Hidden moves still synchronize project hints for a later restore but emit no
+observable change; restore emits one current-project refetch. Run lifecycle
+updates, delivery facts, and their change rows share the same transaction.
+Process-local wakeups run only after commit and are an optimization over the
+durable log and polling, so rollback, restart, or a lost/coalesced wake cannot
+publish uncommitted truth or strand a stream.
+
+### Exact-once internal comments (M146 — PAI-808)
+
+`comments.client_request_id` is nullable, so ordinary and pre-M146 comments
+retain their previous behavior. When present, it is unique with `author_id`
+and structurally restricted to internal comments. Creation inserts first and
+uses the unique collision as the only replay decision: the handler returns the
+original row only when issue, body, author, and internal visibility match;
+otherwise it returns `409`. Mutation history is emitted only by the transaction
+that inserted the row, and undo/redo preserves the identity. Keyed comments
+cannot be flipped external. They bypass `idempotency_keys`, preventing a second
+stored copy of a confirmed private note response.
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 

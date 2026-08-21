@@ -102,14 +102,14 @@ func TranscribeIntakeAudio(w http.ResponseWriter, r *http.Request) {
 	// PAI-724: paid-call gates (concurrency, burst, daily budgets)
 	// before any provider spend.
 	estSeconds := voiceEstimateSeconds(len(audio))
-	release, admitted := voiceAdmit(w, r, user, "intake_stt", estSeconds)
+	release, admitted := voiceAdmit(w, r, user, voiceActionIntakeSTT, estSeconds)
 	if !admitted {
 		return
 	}
 	defer release()
 
 	started := time.Now()
-	text, sttErr := transcribeWithElevenLabs(r.Context(), vs, contentType, audio, s.Language)
+	text, sttErr := transcribeVoice(r.Context(), vs, contentType, audio, s.Language)
 	latency := time.Since(started)
 	// Paper-trail parity with every other provider call (INV-INTAKE-04):
 	// metadata only — never audio, never the transcript text. Units are
@@ -125,8 +125,8 @@ func TranscribeIntakeAudio(w http.ResponseWriter, r *http.Request) {
 	if sttErr == nil {
 		billedSeconds = estSeconds
 	}
-	recordAICall(r.Context(), aiCallArgs{
-		RequestID: newAIRequestID(), UserID: &user.ID, ActionKey: "intake_stt",
+	recordVoiceAICall(r.Context(), aiCallArgs{
+		RequestID: newAIRequestID(), UserID: &user.ID, ActionKey: voiceActionIntakeSTT,
 		Surface: "intake", ProjectID: s.activeProjectID(),
 		Provider: vs.Provider, Model: vs.STTModel,
 		PromptTokens: int(billedSeconds), CostMicroUSD: billedSeconds * voiceSTTMicroUSDPerSecond,
@@ -143,7 +143,7 @@ func TranscribeIntakeAudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(text) > intakeChunkMaxBytes {
-		text = text[:intakeChunkMaxBytes]
+		text = truncateVoiceUTF8(text, intakeChunkMaxBytes)
 	}
 
 	// Append through the same event path as typed chunks.

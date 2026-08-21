@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/backend/httpcontract"
 )
 
 const (
@@ -123,13 +125,14 @@ type issueTagMutationSnapshot struct {
 }
 
 type commentMutationSnapshot struct {
-	ID         int64  `json:"id"`
-	IssueID    int64  `json:"issue_id,omitempty"`
-	AuthorID   *int64 `json:"author_id"`
-	Body       string `json:"body,omitempty"`
-	Visibility string `json:"visibility,omitempty"`
-	CreatedAt  string `json:"created_at,omitempty"`
-	Exists     bool   `json:"exists"`
+	ID              int64   `json:"id"`
+	IssueID         int64   `json:"issue_id,omitempty"`
+	AuthorID        *int64  `json:"author_id"`
+	Body            string  `json:"body,omitempty"`
+	Visibility      string  `json:"visibility,omitempty"`
+	ClientRequestID *string `json:"client_request_id,omitempty"`
+	CreatedAt       string  `json:"created_at,omitempty"`
+	Exists          bool    `json:"exists"`
 }
 
 type timeEntryMutationSnapshot struct {
@@ -161,12 +164,22 @@ func (e *undoLockedError) Error() string { return e.Message }
 
 func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := strings.TrimSpace(r.Header.Get(RequestIDHeader))
-		if requestID == "" {
-			requestID = strings.TrimSpace(r.Header.Get(AIRequestIDHeader))
-		}
-		if requestID == "" {
+		var requestID string
+		if httpcontract.IsControlRequest(r) {
+			// A caller-provided correlation id is still caller-controlled
+			// content. On the control surface it must not be reflected in a
+			// response header, problem body, log line, or durable record, even
+			// when it happens to contain only log-safe characters. Mint the
+			// correlation id server-side instead.
 			requestID = newAIRequestID()
+		} else {
+			requestID = strings.TrimSpace(r.Header.Get(RequestIDHeader))
+			if requestID == "" {
+				requestID = strings.TrimSpace(r.Header.Get(AIRequestIDHeader))
+			}
+			if requestID == "" {
+				requestID = newAIRequestID()
+			}
 		}
 		ctx := context.WithValue(r.Context(), requestIDContextKey{}, requestID)
 		w.Header().Set(RequestIDHeader, requestID)
@@ -554,10 +567,11 @@ func fetchCommentMutationSnapshotTx(tx *sql.Tx, commentID int64) (commentMutatio
 	snap := commentMutationSnapshot{ID: commentID}
 	var authorID sql.NullInt64
 	err := tx.QueryRow(`
-		SELECT id, issue_id, author_id, body, visibility, created_at
+		SELECT id, issue_id, author_id, body, visibility, client_request_id, created_at
 		FROM comments
 		WHERE id = ?
-	`, commentID).Scan(&snap.ID, &snap.IssueID, &authorID, &snap.Body, &snap.Visibility, &snap.CreatedAt)
+	`, commentID).Scan(&snap.ID, &snap.IssueID, &authorID, &snap.Body, &snap.Visibility,
+		&snap.ClientRequestID, &snap.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return snap, nil
@@ -752,15 +766,16 @@ func applyCommentSnapshotTx(tx *sql.Tx, commentID int64, snap commentMutationSna
 		snap.Visibility = "internal"
 	}
 	_, err := tx.Exec(`
-		INSERT INTO comments(id, issue_id, author_id, body, visibility, created_at)
-		VALUES(?, ?, ?, ?, ?, ?)
+		INSERT INTO comments(id, issue_id, author_id, body, visibility, client_request_id, created_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			issue_id = excluded.issue_id,
 			author_id = excluded.author_id,
 			body = excluded.body,
 			visibility = excluded.visibility,
+			client_request_id = excluded.client_request_id,
 			created_at = excluded.created_at
-	`, snap.ID, snap.IssueID, snap.AuthorID, snap.Body, snap.Visibility, snap.CreatedAt)
+	`, snap.ID, snap.IssueID, snap.AuthorID, snap.Body, snap.Visibility, snap.ClientRequestID, snap.CreatedAt)
 	return err
 }
 

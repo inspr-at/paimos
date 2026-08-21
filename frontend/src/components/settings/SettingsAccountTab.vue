@@ -336,6 +336,22 @@ const newKeyScopes   = ref<Record<string, boolean>>({})
 const canPickScopes  = computed(() =>
   auth.isAdmin && scopeCatalog.value.length > 0)
 
+// PAI-809: what the Scopes column is actually claiming.
+//
+// Three states, not two. Missing metadata is a legacy row (pre-M104) and
+// an explicit '*' is the sentinel — both really are full owner-role
+// power, so both keep saying "full". An explicit empty list is the third
+// state: the backend's scope parser fails closed on an empty column, so
+// such a key opens nothing. It used to render as "full", which is the
+// exact opposite of the truth and the one label an operator must be able
+// to trust.
+type ScopeDisplay = 'full' | 'none' | 'named'
+function scopeDisplay(scopes?: string[]): ScopeDisplay {
+  if (!scopes || scopes.includes('*')) return 'full'
+  if (scopes.length === 0) return 'none'
+  return 'named'
+}
+
 async function loadAPIKeys() {
   try { apiKeys.value = await api.get<APIKey[]>('/auth/api-keys') } catch {}
 }
@@ -810,9 +826,13 @@ init()
         </button>
         <button class="btn btn-ghost btn-sm" @click="newKeyResult=null"><AppIcon name="x" :size="13" /></button>
       </div>
-      <div v-if="newKeyResult.scopes && newKeyResult.scopes.length > 0" class="apikey-scope-chips" style="margin-top:.4rem">
+      <div class="apikey-scope-chips" style="margin-top:.4rem">
         <span class="muted">Scopes:</span>
-        <code v-for="s in newKeyResult.scopes" :key="s" class="icode">{{ s }}</code>
+        <span v-if="scopeDisplay(newKeyResult.scopes) === 'full'" class="muted">full</span>
+        <span v-else-if="scopeDisplay(newKeyResult.scopes) === 'none'" class="muted" aria-label="No scoped access">none</span>
+        <template v-else>
+          <code v-for="s in newKeyResult.scopes" :key="s" class="icode">{{ s }}</code>
+        </template>
       </div>
     </div>
     <div v-if="apiKeys.length > 0" class="card" style="padding:0;overflow:hidden;margin-top:.25rem">
@@ -823,7 +843,8 @@ init()
             <td class="fw500">{{ k.name }}</td>
             <td><code class="icode">{{ k.key_prefix }}…</code></td>
             <td>
-              <span v-if="!k.scopes || k.scopes.length === 0 || k.scopes.includes('*')" class="muted">full</span>
+              <span v-if="scopeDisplay(k.scopes) === 'full'" class="muted">full</span>
+              <span v-else-if="scopeDisplay(k.scopes) === 'none'" class="muted" aria-label="No scoped access">none</span>
               <span v-else class="apikey-scope-chips">
                 <code v-for="s in k.scopes" :key="s" class="icode">{{ s }}</code>
               </span>

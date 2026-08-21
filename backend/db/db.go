@@ -29,6 +29,8 @@ import (
 	"modernc.org/sqlite"
 
 	"github.com/inspr-at/paimos/backend/brand"
+	"github.com/inspr-at/paimos/backend/controlcontract"
+	"github.com/inspr-at/paimos/backend/safetext"
 )
 
 var perConnectionPragmas = []string{
@@ -38,6 +40,7 @@ var perConnectionPragmas = []string{
 
 func init() {
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_cosine", 2, paimosCosineSQL)
+	sqlite.MustRegisterDeterministicScalarFunction("paimos_contains_secret_like", 1, paimosContainsSecretLikeSQL)
 
 	// RegisterConnectionHook fires on every new connection in the pool —
 	// the right place for genuinely per-connection pragmas. NOT the right
@@ -57,6 +60,25 @@ func init() {
 		}
 		return nil
 	})
+}
+
+func paimosContainsSecretLikeSQL(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+	if len(args) != 1 || args[0] == nil {
+		return int64(0), nil
+	}
+	var value string
+	switch typed := args[0].(type) {
+	case string:
+		value = typed
+	case []byte:
+		value = string(typed)
+	default:
+		return int64(1), nil
+	}
+	if safetext.ContainsSecretLike(value) {
+		return int64(1), nil
+	}
+	return int64(0), nil
 }
 
 func paimosCosineSQL(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
@@ -104,6 +126,180 @@ var DB *sql.DB
 type migration struct {
 	version int
 	steps   []string
+}
+
+func sqlEnum(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, "'"+strings.ReplaceAll(value, "'", "''")+"'")
+	}
+	return strings.Join(quoted, ",")
+}
+
+func sqlUUIDCheck(column string) string {
+	return `(typeof(` + column + `)='text' AND length(CAST(` + column + ` AS BLOB))=36 AND ` +
+		`length(replace(` + column + `,'-',''))=32 AND ` +
+		column + `=lower(` + column + `) AND substr(` + column + `,9,1)='-' AND ` +
+		`substr(` + column + `,14,1)='-' AND substr(` + column + `,19,1)='-' AND ` +
+		`substr(` + column + `,24,1)='-' AND substr(` + column + `,15,1)='4' AND ` +
+		`substr(` + column + `,20,1) IN ('8','9','a','b') AND ` +
+		`replace(` + column + `,'-','') NOT GLOB '*[^0-9a-f]*')`
+}
+
+func sqlTypedPrincipalCheck(kindColumn, sessionCredentialColumn, apiKeyColumn string) string {
+	return `( (` + kindColumn + `='session' AND ` + sqlUUIDCheck(sessionCredentialColumn) + ` AND ` + apiKeyColumn + ` IS NULL) OR ` +
+		`(` + kindColumn + `='api_key' AND ` + sessionCredentialColumn + ` IS NULL AND typeof(` + apiKeyColumn + `)='integer' AND ` + apiKeyColumn + `>0) )`
+}
+
+func sqlStableKeyCheck(column string, maxBytes int) string {
+	return `(length(CAST(` + column + ` AS BLOB)) BETWEEN 1 AND ` + fmt.Sprint(maxBytes) +
+		` AND ` + column + ` GLOB '[A-Za-z0-9]*' AND ` + column + ` NOT GLOB '*[^A-Za-z0-9._:/-]*')`
+}
+
+// sqlControlTimestampCheck pins supervisory-control instants to one exact
+// UTC representation. The julianday round trip rejects offsets, impossible
+// dates, and alternate fractional precision that would make equality/CAS
+// checks ambiguous.
+func sqlControlTimestampCheck(column string) string {
+	return `(typeof(` + column + `)='text' AND length(` + column + `)=24 AND ` +
+		`julianday(` + column + `) IS NOT NULL AND ` +
+		`COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ',julianday(` + column + `))=` + column + `,0)=1)`
+}
+
+func sqlNullableControlTimestampCheck(column string) string {
+	return `(` + column + ` IS NULL OR ` + sqlControlTimestampCheck(column) + `)`
+}
+
+func sqlSafeDeviceIDCheck(column string) string {
+	return `(` + sqlStableKeyCheck(column, 128) + ` AND instr(` + column + `,char(0))=0 AND ` +
+		`instr(` + column + `,char(10))=0 AND instr(` + column + `,char(13))=0 AND ` +
+		`paimos_contains_secret_like(CAST(` + column + ` AS BLOB))=0)`
+}
+
+// deliverySecretGuardSQL rebuilds the M144 privacy triggers during M145 so a
+// populated database receives the same corpus as a fresh install. The scalar
+// owns the shared secret detector, while the SQL-native predicates deliberately
+// remain here: SQLite TEXT arguments can be truncated at NUL before reaching a
+// scalar, and reporter/policy/evidence references have stricter URL/query
+// policies than ordinary display text.
+func deliverySecretGuardSQL(trigger, table, values, extra, message string) string {
+	return fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON %s WHEN EXISTS (
+		 SELECT 1 FROM json_each(json_array(%s)) value
+		 WHERE instr(CAST(value.value AS TEXT),char(0))>0
+		  OR instr(CAST(value.value AS TEXT),char(10))>0
+		  OR instr(CAST(value.value AS TEXT),char(13))>0
+		  OR paimos_contains_secret_like(CAST(value.value AS BLOB))=1%s
+		) BEGIN SELECT RAISE(ABORT,'%s'); END`, trigger, table, values, extra, message)
+}
+
+// The append-only history is authoritative; this pair reconstructs every
+// latest pointer without trusting the existing projection. M143 uses the same
+// operation when upgrading populated databases, and the regression suite uses
+// rebuildAgentRunTelemetryLatest to prove equivalence with incremental writes.
+const clearAgentRunTelemetryLatestSQL = `DELETE FROM agent_run_telemetry_latest`
+
+const rebuildAgentRunTelemetryLatestSQL = `INSERT INTO agent_run_telemetry_latest(
+	run_id, telemetry_id, sequence, last_heartbeat_at, heartbeat_telemetry_id,
+	semantic_telemetry_id, estimate_telemetry_id, latest_event_at,
+	latest_semantic_at, latest_estimate_at)
+	SELECT newest.run_id, newest.id, newest.sequence,
+	 (SELECT h.server_received_at FROM agent_run_telemetry h
+	   WHERE h.run_id=newest.run_id AND h.heartbeat=1 ORDER BY h.sequence DESC LIMIT 1),
+	 (SELECT h.id FROM agent_run_telemetry h
+	   WHERE h.run_id=newest.run_id AND h.heartbeat=1 ORDER BY h.sequence DESC LIMIT 1),
+	 (SELECT s.id FROM agent_run_telemetry s
+	   WHERE s.run_id=newest.run_id
+	     AND (s.kind IN ('phase','needs_input','blocker') OR s.phase<>'unknown' OR
+	          s.activity<>'' OR s.needs_input=1 OR s.blocker_state<>'none')
+	   ORDER BY s.sequence DESC LIMIT 1),
+	 (SELECT e.id FROM agent_run_telemetry e
+	   WHERE e.run_id=newest.run_id AND e.estimate_revision IS NOT NULL
+	   ORDER BY e.sequence DESC LIMIT 1),
+	 newest.server_received_at,
+	 (SELECT s.server_received_at FROM agent_run_telemetry s
+	   WHERE s.run_id=newest.run_id
+	     AND (s.kind IN ('phase','needs_input','blocker') OR s.phase<>'unknown' OR
+	          s.activity<>'' OR s.needs_input=1 OR s.blocker_state<>'none')
+	   ORDER BY s.sequence DESC LIMIT 1),
+	 (SELECT e.server_received_at FROM agent_run_telemetry e
+	   WHERE e.run_id=newest.run_id AND e.estimate_revision IS NOT NULL
+	   ORDER BY e.sequence DESC LIMIT 1)
+	FROM agent_run_telemetry newest
+	WHERE newest.sequence=(SELECT MAX(candidate.sequence) FROM agent_run_telemetry candidate WHERE candidate.run_id=newest.run_id)`
+
+// M145 recreates the M144 issue projection trigger with a live-boundary gate:
+// the first soft delete and a later restore each invalidate once, while edits
+// to an already hidden root cannot create an observable stream oracle.
+const agentModeDeliveryIssueUpdateTriggerSQL = `CREATE TRIGGER trg_delivery_issue_update_change
+	AFTER UPDATE ON issues WHEN EXISTS(SELECT 1 FROM deliveries WHERE issue_id=NEW.id)
+	BEGIN
+	 UPDATE deliveries SET project_id_hint=NEW.project_id,
+	  updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	  WHERE issue_id=NEW.id AND NEW.project_id IS NOT OLD.project_id;
+	 UPDATE deliveries SET spec_revision=spec_revision+1,
+	  updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	  WHERE issue_id=NEW.id AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+	   OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+	 INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,payload_hash,kind,
+	  reporter_id,reason_code,reason_text,server_received_at)
+	 SELECT d.id,COALESCE((SELECT MAX(delivery_revision)+1 FROM delivery_events WHERE delivery_id=d.id),1),
+	  'spec-revision:'||d.spec_revision,X'44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a',
+	  'attempt_started',r.id,'spec_changed','Canonical issue specification changed',
+	  strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 FROM deliveries d JOIN delivery_reporters r ON r.delivery_id=d.id
+	  AND r.reporter_type='system' AND r.opaque_key='paimos'
+	 WHERE d.issue_id=NEW.id AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+	  OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+	 INSERT INTO delivery_attempts(delivery_id,attempt_number,plan_revision,previous_attempt_id,
+	  start_delivery_event_id,project_id_at_start,reason_code,reason_text,created_at)
+	 SELECT d.id,COALESCE((SELECT MAX(attempt_number)+1 FROM delivery_attempts WHERE delivery_id=d.id),1),
+	  COALESCE((SELECT MAX(plan_revision)+1 FROM delivery_attempts WHERE delivery_id=d.id),1),
+	   (SELECT a.id FROM delivery_attempts a JOIN delivery_attempt_policy_seals seal
+	     ON seal.delivery_id=a.delivery_id AND seal.attempt_id=a.id
+	    WHERE a.delivery_id=d.id ORDER BY a.attempt_number DESC LIMIT 1),
+	  (SELECT id FROM delivery_events WHERE delivery_id=d.id ORDER BY delivery_revision DESC LIMIT 1),
+	  NEW.project_id,'spec_changed','Canonical issue specification changed',strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 FROM deliveries d WHERE d.issue_id=NEW.id
+	  AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+	   OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+	 INSERT INTO delivery_attempt_stage_policy(delivery_id,attempt_id,stage_key,sort_order,applicability,
+	  weight,policy_reference,reason_code,reason_text,authorized_by_reporter_id,created_at)
+	 SELECT next.delivery_id,next.id,p.stage_key,p.sort_order,p.applicability,p.weight,p.policy_reference,
+	  p.reason_code,p.reason_text,p.authorized_by_reporter_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 FROM delivery_attempts next JOIN delivery_attempt_stage_policy p ON p.attempt_id=next.previous_attempt_id
+	 WHERE next.delivery_id=(SELECT id FROM deliveries WHERE issue_id=NEW.id)
+	  AND next.attempt_number=(SELECT MAX(attempt_number) FROM delivery_attempts
+	   WHERE delivery_id=next.delivery_id)
+	  AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+	   OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+	 INSERT INTO delivery_attempt_policy_seals(delivery_id,attempt_id,sealed_at)
+	 SELECT next.delivery_id,next.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 FROM delivery_attempts next WHERE next.delivery_id=(SELECT id FROM deliveries WHERE issue_id=NEW.id)
+	  AND next.attempt_number=(SELECT MAX(attempt_number) FROM delivery_attempts
+	   WHERE delivery_id=next.delivery_id)
+	  AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+	   OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+	 INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+	  change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+	 SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,NEW.project_id,
+	  d.change_sequence_high_water+1,
+	  COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+	  'issue','issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	 FROM deliveries d WHERE d.issue_id=NEW.id AND NEW.deleted_at IS NULL
+	  AND NOT (NEW.project_id IS NOT OLD.project_id AND OLD.deleted_at IS NULL)
+	  AND (NEW.deleted_at IS NOT OLD.deleted_at OR NEW.issue_number IS NOT OLD.issue_number OR
+	   NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description OR
+	   NEW.acceptance_criteria IS NOT OLD.acceptance_criteria OR NEW.updated_at IS NOT OLD.updated_at);
+	END`
+
+func rebuildAgentRunTelemetryLatest(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, clearAgentRunTelemetryLatestSQL); err != nil {
+		return fmt.Errorf("clear agent-run telemetry projection: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, rebuildAgentRunTelemetryLatestSQL); err != nil {
+		return fmt.Errorf("rebuild agent-run telemetry projection: %w", err)
+	}
+	return nil
 }
 
 func Open() error {
@@ -178,6 +374,13 @@ const PromoteSeededAdminSQL = `UPDATE users
 	  )`
 
 func migrate(db *sql.DB) error {
+	return migrateThrough(db, math.MaxInt)
+}
+
+// migrateThrough is the migration engine with an upper bound used by
+// populated-upgrade regression fixtures. Production always calls migrate and
+// therefore applies every registered migration.
+func migrateThrough(db *sql.DB, maxVersion int) error {
 	// In test mode, skip fsync and keep the journal in memory so the ~70
 	// migration statements don't each pay a disk-sync cost. Applied here
 	// (not after Open) because migrations run inside Open().
@@ -5614,9 +5817,4261 @@ func migrate(db *sql.DB) error {
 				 AND (SELECT status FROM projects WHERE id=NEW.project_id) = 'deleted'
 				BEGIN SELECT RAISE(ABORT, 'project is deleted; new issues are disabled'); END`,
 		}},
+
+		// M142 / PAI-799: provider-neutral, append-only telemetry for one
+		// Implement-this run. The event table is the immutable history; the
+		// one-row-per-run latest table is only an efficient pointer/snapshot aid.
+		// Payloads are deliberately columnar and allowlisted: no provider blobs,
+		// prompts, tool arguments, command output, source, or environment data.
+		{142, []string{
+			`CREATE TABLE IF NOT EXISTS agent_run_telemetry (
+				id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+				run_id              INTEGER NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+				sequence            INTEGER NOT NULL CHECK(sequence > 0 AND sequence <= 2147483647),
+				correlation_id      TEXT NOT NULL CHECK(length(correlation_id) BETWEEN 1 AND 128),
+				provider            TEXT NOT NULL CHECK(length(provider) BETWEEN 1 AND 64),
+				adapter             TEXT NOT NULL CHECK(length(adapter) BETWEEN 1 AND 64),
+				agent_reported_at   TEXT NOT NULL,
+				server_received_at  TEXT NOT NULL,
+				kind                TEXT NOT NULL CHECK(kind IN ('heartbeat','progress','phase','needs_input','blocker','estimate')),
+				heartbeat           INTEGER NOT NULL DEFAULT 0 CHECK(heartbeat IN (0,1)),
+				phase               TEXT NOT NULL DEFAULT 'unknown'
+				                    CHECK(phase IN ('unknown','starting','planning','implementing','testing','reviewing','deploying','waiting','completed')),
+				activity            TEXT NOT NULL DEFAULT '' CHECK(length(CAST(activity AS BLOB)) <= 280),
+				needs_input         INTEGER NOT NULL DEFAULT 0 CHECK(needs_input IN (0,1)),
+				blocker_state       TEXT NOT NULL DEFAULT 'none'
+				                    CHECK(blocker_state IN ('none','input','dependency','permission','environment','external','unknown')),
+				estimate_revision   INTEGER CHECK(estimate_revision BETWEEN 1 AND 2147483647),
+				progress_percent    REAL CHECK(progress_percent BETWEEN 0 AND 100),
+				eta_seconds         INTEGER CHECK(eta_seconds BETWEEN 0 AND 31536000),
+				eta_min_seconds     INTEGER CHECK(eta_min_seconds BETWEEN 0 AND 31536000),
+				eta_max_seconds     INTEGER CHECK(eta_max_seconds BETWEEN 0 AND 31536000),
+				estimate_source     TEXT NOT NULL DEFAULT ''
+				                    CHECK(estimate_source IN ('','agent','adapter','provider','tool')),
+				estimate_confidence REAL CHECK(estimate_confidence BETWEEN 0 AND 1),
+				estimate_basis      TEXT NOT NULL DEFAULT '' CHECK(length(CAST(estimate_basis AS BLOB)) <= 240),
+				UNIQUE(run_id, sequence)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_run_telemetry_history
+			 ON agent_run_telemetry(run_id, sequence DESC)`,
+			`CREATE TABLE IF NOT EXISTS agent_run_telemetry_latest (
+				run_id             INTEGER PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
+				telemetry_id       INTEGER NOT NULL UNIQUE REFERENCES agent_run_telemetry(id) ON DELETE CASCADE,
+				sequence           INTEGER NOT NULL,
+				last_heartbeat_at  TEXT
+			)`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_run_telemetry_no_update
+			 BEFORE UPDATE ON agent_run_telemetry
+			 BEGIN SELECT RAISE(ABORT, 'agent run telemetry is append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_run_telemetry_terminal_guard
+			 BEFORE INSERT ON agent_run_telemetry
+			 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('tests_passed','tests_failed','deployed','failed','cancelled','drafted')
+			 BEGIN SELECT RAISE(ABORT, 'terminal run telemetry is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_run_telemetry_sequence_guard
+			 BEFORE INSERT ON agent_run_telemetry
+			 WHEN NEW.sequence <= COALESCE((SELECT MAX(sequence) FROM agent_run_telemetry WHERE run_id=NEW.run_id), 0)
+			 BEGIN SELECT RAISE(ABORT, 'agent run telemetry sequence is not monotonic'); END`,
+		}},
+
+		// M143 / PAI-801: integrate the supervised runner with the telemetry
+		// contract. SQLite cannot alter a CHECK constraint, so rebuild agent_runs
+		// to add the truthful `completed` terminal status and the durable marker
+		// used to distinguish new supervised claims from legacy runners. Preserve
+		// every M131/M132/M140 column and recreate every index.
+		// Snapshot sqlite_sequence before dropping the old AUTOINCREMENT table;
+		// explicit-id copying alone would otherwise lower the next id when rows
+		// had previously been deleted.
+		//
+		// The latest telemetry row is an event pointer, not a state snapshot. Add
+		// separately indexed heartbeat/semantic/estimate pointers so a heartbeat
+		// cannot erase the last useful activity or ETA fact. Rebuild every pointer
+		// from authoritative history, including projection rows that were missing
+		// or stale, and add a byte-count trigger for M142 databases whose original
+		// SQLite length() checks counted Unicode code points.
+		{143, []string{
+			`PRAGMA foreign_keys=OFF`,
+			`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_terminal_guard`,
+			`CREATE TEMP TABLE agent_runs_m143_sequence (seq INTEGER NOT NULL)`,
+			`INSERT INTO agent_runs_m143_sequence(seq)
+			 SELECT MAX(COALESCE((SELECT seq FROM sqlite_sequence WHERE name='agent_runs'),0), COALESCE((SELECT MAX(id) FROM agent_runs),0))`,
+			`CREATE TABLE agent_runs_m143 (
+				id                           INTEGER PRIMARY KEY AUTOINCREMENT,
+				issue_id                     INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+				project_id                   INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+				device_id                    TEXT NOT NULL DEFAULT '',
+				requested_by                 INTEGER REFERENCES users(id) ON DELETE SET NULL,
+				agent_name                   TEXT NOT NULL DEFAULT '',
+				session_id                   TEXT NOT NULL DEFAULT '',
+				status                       TEXT NOT NULL DEFAULT 'queued'
+					CHECK(status IN ('queued','running','completed','tests_passed','tests_failed','deployed','failed','cancelled','drafted')),
+				version                      TEXT NOT NULL DEFAULT '',
+				tests_summary                TEXT,
+				deploy_target                TEXT NOT NULL DEFAULT '',
+				log_attachment_id            INTEGER,
+				error                        TEXT NOT NULL DEFAULT '',
+				created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
+				started_at                   TEXT,
+				finished_at                  TEXT,
+				claimed_by                   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+				action_key                   TEXT NOT NULL DEFAULT 'claude_cli.implement',
+				provider_kind                TEXT NOT NULL DEFAULT 'local_cli',
+				provider_id                  TEXT NOT NULL DEFAULT 'claude_cli',
+				provider_label               TEXT NOT NULL DEFAULT 'Claude Code',
+				model                        TEXT NOT NULL DEFAULT '',
+				run_mode                     TEXT NOT NULL DEFAULT 'edit',
+				profile_id                   TEXT NOT NULL DEFAULT '',
+				effort                       TEXT NOT NULL DEFAULT '',
+				prompt_preset_ref            TEXT NOT NULL DEFAULT '',
+				context_pack                 TEXT NOT NULL DEFAULT '',
+				context_truncated            INTEGER NOT NULL DEFAULT 0,
+				context_sources_json         TEXT NOT NULL DEFAULT '',
+				prompt_tokens                INTEGER NOT NULL DEFAULT 0,
+				completion_tokens            INTEGER NOT NULL DEFAULT 0,
+				finish_reason                TEXT NOT NULL DEFAULT '',
+				source_draft_run_id          INTEGER REFERENCES agent_runs(id) ON DELETE SET NULL,
+				followup_run_id              INTEGER REFERENCES agent_runs(id) ON DELETE SET NULL,
+				repo_url                     TEXT NOT NULL DEFAULT '',
+				branch_name                  TEXT NOT NULL DEFAULT '',
+				commit_base_sha              TEXT NOT NULL DEFAULT '',
+				commit_sha                   TEXT NOT NULL DEFAULT '',
+				expects_supervisor_telemetry INTEGER NOT NULL DEFAULT 0 CHECK(expects_supervisor_telemetry IN (0,1))
+			)`,
+			`INSERT INTO agent_runs_m143(
+				id, issue_id, project_id, device_id, requested_by, agent_name, session_id,
+				status, version, tests_summary, deploy_target, log_attachment_id, error,
+				created_at, started_at, finished_at, claimed_by, action_key, provider_kind,
+				provider_id, provider_label, model, run_mode, profile_id, effort,
+				prompt_preset_ref, context_pack, context_truncated, context_sources_json,
+				prompt_tokens, completion_tokens, finish_reason, source_draft_run_id,
+				followup_run_id, repo_url, branch_name, commit_base_sha, commit_sha
+			 )
+			 SELECT id, issue_id, project_id, device_id, requested_by, agent_name, session_id,
+				status, version, tests_summary, deploy_target, log_attachment_id, error,
+				created_at, started_at, finished_at, claimed_by, action_key, provider_kind,
+				provider_id, provider_label, model, run_mode, profile_id, effort,
+				prompt_preset_ref, context_pack, context_truncated, context_sources_json,
+				prompt_tokens, completion_tokens, finish_reason, source_draft_run_id,
+				followup_run_id, repo_url, branch_name, commit_base_sha, commit_sha
+			   FROM agent_runs`,
+			`DROP TABLE agent_runs`,
+			`ALTER TABLE agent_runs_m143 RENAME TO agent_runs`,
+			`INSERT INTO sqlite_sequence(name,seq)
+			 SELECT 'agent_runs',seq FROM agent_runs_m143_sequence
+			 WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='agent_runs')`,
+			`UPDATE sqlite_sequence
+			 SET seq=MAX(seq,(SELECT seq FROM agent_runs_m143_sequence))
+			 WHERE name='agent_runs'`,
+			`DROP TABLE agent_runs_m143_sequence`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_issue ON agent_runs(issue_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_active_issue ON agent_runs(issue_id) WHERE status IN ('queued','running')`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_claimed_by ON agent_runs(claimed_by)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_action_key ON agent_runs(action_key)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_run_mode ON agent_runs(run_mode)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_provider_id ON agent_runs(provider_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_source_draft ON agent_runs(source_draft_run_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_followup ON agent_runs(followup_run_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_supervisor_active ON agent_runs(status, expects_supervisor_telemetry, started_at) WHERE status IN ('queued','running')`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN heartbeat_telemetry_id INTEGER REFERENCES agent_run_telemetry(id) ON DELETE SET NULL`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN semantic_telemetry_id INTEGER REFERENCES agent_run_telemetry(id) ON DELETE SET NULL`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN estimate_telemetry_id INTEGER REFERENCES agent_run_telemetry(id) ON DELETE SET NULL`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN latest_event_at TEXT`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN latest_semantic_at TEXT`,
+			`ALTER TABLE agent_run_telemetry_latest ADD COLUMN latest_estimate_at TEXT`,
+			clearAgentRunTelemetryLatestSQL,
+			rebuildAgentRunTelemetryLatestSQL,
+			`CREATE INDEX IF NOT EXISTS idx_agent_run_telemetry_latest_heartbeat ON agent_run_telemetry_latest(last_heartbeat_at)`,
+			`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_terminal_guard`,
+			`CREATE TRIGGER trg_agent_run_telemetry_terminal_guard
+			 BEFORE INSERT ON agent_run_telemetry
+			 WHEN (SELECT status FROM agent_runs WHERE id=NEW.run_id) IN ('completed','tests_passed','tests_failed','deployed','failed','cancelled','drafted')
+			 BEGIN SELECT RAISE(ABORT, 'terminal run telemetry is immutable'); END`,
+			`DROP TRIGGER IF EXISTS trg_agent_run_telemetry_byte_bounds`,
+			`CREATE TRIGGER trg_agent_run_telemetry_byte_bounds
+			 BEFORE INSERT ON agent_run_telemetry
+			 WHEN length(CAST(NEW.activity AS BLOB)) > 280
+			   OR length(CAST(NEW.estimate_basis AS BLOB)) > 240
+			 BEGIN SELECT RAISE(ABORT, 'telemetry text exceeds UTF-8 byte bound'); END`,
+			`PRAGMA foreign_keys=ON`,
+		}},
+
+		// M144 / PAI-802: issue-rooted delivery audit/read model. This is an
+		// additive, atomic migration: immutable attempts and stage facts remain
+		// the authority, while delivery_stage_latest is a rebuildable pointer
+		// projection. The committed change log deliberately has no FK back to the
+		// issue graph so a hard-deleted root still leaves a safe resumable
+		// tombstone for PAI-804.
+		{144, []string{
+			`ALTER TABLE agent_runs ADD COLUMN delivery_instrumentation_version INTEGER NOT NULL DEFAULT 0 CHECK(delivery_instrumentation_version IN (0,1))`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs_id_issue ON agent_runs(id, issue_id)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_attachments_id_issue ON attachments(id, issue_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_runs_delivery_legacy_active
+			 ON agent_runs(project_id, id DESC)
+			 WHERE delivery_instrumentation_version=0 AND status IN ('queued','running')`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_run_telemetry_estimate
+			 ON agent_run_telemetry(run_id, estimate_revision DESC, sequence DESC)
+			 WHERE estimate_revision IS NOT NULL`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_forbidden_value_patterns (
+				pattern TEXT PRIMARY KEY,
+				normalize_horizontal_whitespace INTEGER NOT NULL DEFAULT 0 CHECK(normalize_horizontal_whitespace IN (0,1)),
+				case_sensitive INTEGER NOT NULL DEFAULT 0 CHECK(case_sensitive IN (0,1)),
+				boundary_needle TEXT NOT NULL DEFAULT '',
+				require_bearer_whitespace INTEGER NOT NULL DEFAULT 0 CHECK(require_bearer_whitespace IN (0,1))
+			) WITHOUT ROWID`,
+			`INSERT OR IGNORE INTO delivery_forbidden_value_patterns(
+			 pattern,normalize_horizontal_whitespace,case_sensitive,boundary_needle,require_bearer_whitespace) VALUES
+				('*api_key[=:]*',1,0,'api_key',0),('*api-key[=:]*',1,0,'api-key',0),
+				('*apikey[=:]*',1,0,'apikey',0),('*token[=:]*',1,0,'token',0),
+				('*secret[=:]*',1,0,'secret',0),('*password[=:]*',1,0,'password',0),
+				('*credential[=:]*',1,0,'credential',0),
+				('*api_key[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'api_key',0),
+				('*api-key[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'api-key',0),
+				('*apikey[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'apikey',0),
+				('*token[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'token',0),
+				('*secret[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'secret',0),
+				('*password[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'password',0),
+				('*credential[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'credential',0),
+				('*bearer[0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'bearer',1),
+				('*sk-live-[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*sk_live_[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*sk-test-[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*sk_test_[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*sk-proj-[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*sk_proj_[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+				('*ghp_[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*',0,0,'ghp_',0),
+				('*gho_[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*',0,0,'gho_',0),
+				('*ghu_[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*',0,0,'ghu_',0),
+				('*ghs_[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*',0,0,'ghs_',0),
+				('*ghr_[0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z][0-9a-z]*',0,0,'ghr_',0),
+				('*github_pat_[0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_][0-9a-z_]*',0,0,'github_pat_',0),
+				('*xoxb-[0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-]*',0,0,'xoxb-',0),
+				('*xoxa-[0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-]*',0,0,'xoxa-',0),
+				('*xoxp-[0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-]*',0,0,'xoxp-',0),
+				('*xoxr-[0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-]*',0,0,'xoxr-',0),
+				('*xoxs-[0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-][0-9a-z-]*',0,0,'xoxs-',0),
+				('*AKIA[0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z]',0,1,'AKIA',0),
+				('*AKIA[0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][^0-9A-Za-z_]*',0,1,'AKIA',0),
+				('*AIza[0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-]*',0,1,'AIza',0),
+				('*eyJ[0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-].[0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-].[0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-][0-9A-Za-z_-]*',0,1,'eyJ',0),
+				('*-----BEGIN *PRIVATE KEY-----*',0,1,'',0)`,
+
+			`CREATE TABLE IF NOT EXISTS deliveries (
+				id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+				issue_id           INTEGER NOT NULL UNIQUE REFERENCES issues(id) ON DELETE CASCADE,
+				delivery_key       TEXT NOT NULL UNIQUE CHECK(length(CAST(delivery_key AS BLOB)) BETWEEN 7 AND 80)
+				 CHECK(delivery_key GLOB '[A-Za-z0-9]*' AND delivery_key NOT GLOB '*[^A-Za-z0-9._:/-]*'),
+				project_id_hint    INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+				spec_revision      INTEGER NOT NULL DEFAULT 1 CHECK(spec_revision > 0),
+				change_sequence_high_water INTEGER NOT NULL DEFAULT 0 CHECK(change_sequence_high_water >= 0),
+				created_at         TEXT NOT NULL,
+				updated_at         TEXT NOT NULL,
+				UNIQUE(id, issue_id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_deliveries_project_issue ON deliveries(project_id_hint, issue_id)`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_reporters (
+				id             INTEGER PRIMARY KEY AUTOINCREMENT,
+				delivery_id    INTEGER NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+				reporter_type  TEXT NOT NULL CHECK(reporter_type IN ('user','agent_run','external','system')),
+				opaque_key     TEXT NOT NULL CHECK(length(CAST(opaque_key AS BLOB)) BETWEEN 1 AND 128)
+				 CHECK(opaque_key GLOB '[A-Za-z0-9]*' AND opaque_key NOT GLOB '*[^A-Za-z0-9._:/-]*'),
+				created_at     TEXT NOT NULL,
+				UNIQUE(delivery_id, reporter_type, opaque_key),
+				UNIQUE(delivery_id, id)
+			)`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_events (
+				id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+				delivery_id        INTEGER NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+				delivery_revision  INTEGER NOT NULL CHECK(delivery_revision > 0),
+				idempotency_key    TEXT NOT NULL CHECK(length(CAST(idempotency_key AS BLOB)) BETWEEN 1 AND 128)
+				 CHECK(idempotency_key GLOB '[A-Za-z0-9]*' AND idempotency_key NOT GLOB '*[^A-Za-z0-9._:/-]*'),
+				payload_hash       BLOB NOT NULL CHECK(length(payload_hash)=32),
+				kind               TEXT NOT NULL CHECK(kind IN (
+					'delivery_created','attempt_started','stage_execution_started','stage_reported',
+					'handoff','progress_reset_authorized','run_linked','run_normalized',
+					'run_lifecycle_observed','project_moved'
+				)),
+				reporter_id        INTEGER NOT NULL,
+				reason_code        TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_code AS BLOB)) <= 64)
+				 CHECK(reason_code='' OR (reason_code GLOB '[a-z]*' AND reason_code NOT GLOB '*[^a-z0-9_]*')),
+				reason_text        TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_text AS BLOB)) <= 280),
+				server_received_at TEXT NOT NULL,
+				UNIQUE(delivery_id, delivery_revision),
+				UNIQUE(delivery_id, reporter_id, kind, idempotency_key),
+				UNIQUE(delivery_id, id),
+				UNIQUE(delivery_id, id, reporter_id),
+				FOREIGN KEY(delivery_id, reporter_id)
+				 REFERENCES delivery_reporters(delivery_id, id) DEFERRABLE INITIALLY DEFERRED
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_events_history ON delivery_events(delivery_id, id DESC)`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_attempts (
+				id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+				delivery_id           INTEGER NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+				attempt_number        INTEGER NOT NULL CHECK(attempt_number > 0),
+				plan_revision         INTEGER NOT NULL CHECK(plan_revision > 0),
+				previous_attempt_id   INTEGER,
+				start_delivery_event_id INTEGER NOT NULL,
+				project_id_at_start   INTEGER,
+				reason_code           TEXT NOT NULL CHECK(length(CAST(reason_code AS BLOB)) BETWEEN 1 AND 64)
+				 CHECK(reason_code GLOB '[a-z]*' AND reason_code NOT GLOB '*[^a-z0-9_]*'),
+				reason_text           TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_text AS BLOB)) <= 280),
+				created_at            TEXT NOT NULL,
+				UNIQUE(delivery_id, attempt_number),
+				UNIQUE(delivery_id, plan_revision),
+				UNIQUE(delivery_id, id),
+				FOREIGN KEY(delivery_id, previous_attempt_id)
+				 REFERENCES delivery_attempts(delivery_id, id) DEFERRABLE INITIALLY DEFERRED,
+				FOREIGN KEY(delivery_id, start_delivery_event_id)
+				 REFERENCES delivery_events(delivery_id, id) DEFERRABLE INITIALLY DEFERRED
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_attempts_current ON delivery_attempts(delivery_id, attempt_number DESC)`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_attempt_stage_policy (
+				delivery_id       INTEGER NOT NULL,
+				attempt_id        INTEGER NOT NULL,
+				stage_key         TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+				sort_order        INTEGER NOT NULL CHECK(sort_order BETWEEN 1 AND 5),
+				applicability     TEXT NOT NULL CHECK(applicability IN ('required','not_applicable')),
+				weight            INTEGER NOT NULL CHECK(weight BETWEEN 0 AND 100),
+				policy_reference  TEXT NOT NULL DEFAULT '' CHECK(length(CAST(policy_reference AS BLOB)) <= 160)
+				 CHECK(policy_reference='' OR (policy_reference GLOB '[A-Za-z0-9]*' AND policy_reference NOT GLOB '*[^A-Za-z0-9._:/@+-]*')),
+				reason_code       TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_code AS BLOB)) <= 64)
+				 CHECK(reason_code='' OR (reason_code GLOB '[a-z]*' AND reason_code NOT GLOB '*[^a-z0-9_]*')),
+				reason_text       TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_text AS BLOB)) <= 280),
+				authorized_by_reporter_id INTEGER,
+				created_at        TEXT NOT NULL,
+				PRIMARY KEY(attempt_id, stage_key),
+				UNIQUE(attempt_id, sort_order),
+				FOREIGN KEY(delivery_id, attempt_id)
+				 REFERENCES delivery_attempts(delivery_id, id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, authorized_by_reporter_id)
+				 REFERENCES delivery_reporters(delivery_id, id) DEFERRABLE INITIALLY DEFERRED,
+				CHECK(applicability='required' OR
+				      (policy_reference<>'' AND reason_code<>'' AND authorized_by_reporter_id IS NOT NULL))
+			)`,
+			`CREATE TABLE IF NOT EXISTS delivery_attempt_policy_seals (
+				delivery_id INTEGER NOT NULL,
+				attempt_id  INTEGER PRIMARY KEY,
+				sealed_at   TEXT NOT NULL,
+				UNIQUE(delivery_id, attempt_id),
+				FOREIGN KEY(delivery_id, attempt_id)
+				 REFERENCES delivery_attempts(delivery_id, id) ON DELETE CASCADE
+			)`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_stage_events (
+				id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+				delivery_id              INTEGER NOT NULL,
+				attempt_id               INTEGER NOT NULL,
+				stage_key                TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+				execution_number         INTEGER NOT NULL CHECK(execution_number > 0),
+				event_sequence           INTEGER NOT NULL CHECK(event_sequence > 0),
+				authority_epoch          INTEGER NOT NULL CHECK(authority_epoch > 0),
+				delivery_event_id        INTEGER,
+				event_type               TEXT NOT NULL CHECK(event_type IN (
+					'execution_started','semantic_report','heartbeat','estimate','handoff',
+					'progress_reset_authorized','lifecycle_normalized'
+				)),
+				reporter_id              INTEGER NOT NULL,
+				execution_start_stage_event_id INTEGER,
+				previous_stage_event_id  INTEGER,
+				based_on_stage_event_id  INTEGER,
+				retry_of_stage_event_id  INTEGER,
+				handoff_from_reporter_id INTEGER,
+				source_sequence          INTEGER CHECK(source_sequence > 0),
+				source_idempotency_key   TEXT CHECK(source_idempotency_key IS NULL OR
+				 (length(CAST(source_idempotency_key AS BLOB)) BETWEEN 1 AND 128 AND
+				  source_idempotency_key GLOB '[A-Za-z0-9]*' AND source_idempotency_key NOT GLOB '*[^A-Za-z0-9._:/-]*')),
+				source_payload_hash      BLOB CHECK(source_payload_hash IS NULL OR length(source_payload_hash)=32),
+				authority_source_sequence_cutoff INTEGER CHECK(authority_source_sequence_cutoff >= 0),
+				semantic_state           TEXT CHECK(semantic_state IN ('pending','active','waiting','succeeded','failed','cancelled','draft_ready','unknown')),
+				activity                 TEXT NOT NULL DEFAULT '' CHECK(length(CAST(activity AS BLOB)) <= 280),
+				needs_input              INTEGER NOT NULL DEFAULT 0 CHECK(needs_input IN (0,1)),
+				declared_blocker_count   INTEGER NOT NULL DEFAULT 0 CHECK(declared_blocker_count BETWEEN 0 AND 16),
+				current_blocker_count    INTEGER NOT NULL DEFAULT 0 CHECK(current_blocker_count BETWEEN 0 AND declared_blocker_count),
+				declared_evidence_count  INTEGER NOT NULL DEFAULT 0 CHECK(declared_evidence_count BETWEEN 0 AND 16),
+				heartbeat                INTEGER NOT NULL DEFAULT 0 CHECK(heartbeat IN (0,1)),
+				estimate_revision        INTEGER CHECK(estimate_revision > 0),
+				progress_percent         REAL CHECK(progress_percent BETWEEN 0 AND 100),
+				eta_seconds              INTEGER CHECK(eta_seconds BETWEEN 0 AND 31536000),
+				eta_min_seconds          INTEGER CHECK(eta_min_seconds BETWEEN 0 AND 31536000),
+				eta_max_seconds          INTEGER CHECK(eta_max_seconds BETWEEN 0 AND 31536000),
+				estimate_source          TEXT NOT NULL DEFAULT '' CHECK(estimate_source IN ('','agent','adapter','provider','tool','external')),
+				estimate_confidence      REAL CHECK(estimate_confidence BETWEEN 0 AND 1),
+				estimate_basis           TEXT NOT NULL DEFAULT '' CHECK(length(CAST(estimate_basis AS BLOB)) <= 240),
+				spec_revision            INTEGER CHECK(spec_revision > 0),
+				reset_epoch              INTEGER CHECK(reset_epoch > 0),
+				reset_source_cutoff      INTEGER CHECK(reset_source_cutoff >= 0),
+				reset_source_kind        TEXT NOT NULL DEFAULT '' CHECK(reset_source_kind IN ('','stage_events','stage_and_agent_run_telemetry')),
+				reset_telemetry_run_id   INTEGER,
+				reset_telemetry_sequence_cutoff INTEGER CHECK(reset_telemetry_sequence_cutoff >= 0),
+				reset_authority_anchor_stage_event_id INTEGER,
+				reset_owner_reporter_id  INTEGER,
+				reason_code              TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_code AS BLOB)) <= 64)
+				 CHECK(reason_code='' OR (reason_code GLOB '[a-z]*' AND reason_code NOT GLOB '*[^a-z0-9_]*')),
+				reason_text              TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reason_text AS BLOB)) <= 280),
+				server_received_at       TEXT NOT NULL,
+				ended_at                 TEXT,
+				UNIQUE(delivery_event_id),
+				UNIQUE(delivery_id, source_idempotency_key),
+				UNIQUE(delivery_id, id),
+				UNIQUE(delivery_id, attempt_id, stage_key, execution_number, id),
+				UNIQUE(delivery_id, attempt_id, stage_key, execution_number, authority_epoch, reporter_id, id),
+				UNIQUE(attempt_id, stage_key, execution_number, event_sequence),
+				FOREIGN KEY(delivery_id, attempt_id)
+				 REFERENCES delivery_attempts(delivery_id, id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, delivery_event_id, reporter_id)
+				 REFERENCES delivery_events(delivery_id, id, reporter_id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, reporter_id)
+				 REFERENCES delivery_reporters(delivery_id, id),
+				FOREIGN KEY(delivery_id, previous_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, id) DEFERRABLE INITIALLY DEFERRED,
+				FOREIGN KEY(delivery_id, based_on_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, id) DEFERRABLE INITIALLY DEFERRED,
+				FOREIGN KEY(delivery_id, retry_of_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, id) DEFERRABLE INITIALLY DEFERRED,
+				FOREIGN KEY(delivery_id, handoff_from_reporter_id)
+				 REFERENCES delivery_reporters(delivery_id, id) DEFERRABLE INITIALLY DEFERRED,
+				FOREIGN KEY(delivery_id,attempt_id,stage_key,execution_number,reset_telemetry_run_id,reset_owner_reporter_id)
+				 REFERENCES delivery_agent_run_links(delivery_id,attempt_id,stage_key,execution_number,agent_run_id,reporter_id)
+				 DEFERRABLE INITIALLY DEFERRED,
+				FOREIGN KEY(delivery_id,attempt_id,stage_key,execution_number,authority_epoch,reset_owner_reporter_id,
+				 reset_authority_anchor_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,authority_epoch,reporter_id,id)
+				 DEFERRABLE INITIALLY DEFERRED,
+				CHECK((event_type='execution_started' AND delivery_event_id IS NOT NULL AND source_idempotency_key IS NULL AND source_payload_hash IS NULL AND
+				       semantic_state IS NOT NULL AND semantic_state='active' AND execution_start_stage_event_id IS NULL AND source_sequence IS NULL AND
+				       authority_source_sequence_cutoff IS NOT NULL AND authority_source_sequence_cutoff=0 AND handoff_from_reporter_id IS NULL AND
+				       activity='' AND needs_input=0 AND declared_blocker_count=0 AND current_blocker_count=0 AND declared_evidence_count=0 AND
+				       heartbeat=0 AND estimate_revision IS NULL AND progress_percent IS NULL AND eta_seconds IS NULL AND
+				       eta_min_seconds IS NULL AND eta_max_seconds IS NULL AND estimate_source='' AND estimate_confidence IS NULL AND
+				       estimate_basis='' AND spec_revision IS NULL AND reset_epoch IS NULL AND reset_source_cutoff IS NULL AND
+				       reset_source_kind='' AND reset_telemetry_run_id IS NULL AND reset_telemetry_sequence_cutoff IS NULL AND
+				       reset_authority_anchor_stage_event_id IS NULL AND reset_owner_reporter_id IS NULL AND ended_at IS NULL) OR
+				      (event_type IN ('semantic_report','lifecycle_normalized') AND delivery_event_id IS NOT NULL AND source_idempotency_key IS NULL AND source_payload_hash IS NULL AND semantic_state IS NOT NULL AND
+				       execution_start_stage_event_id IS NOT NULL AND based_on_stage_event_id IS NULL AND retry_of_stage_event_id IS NULL AND
+				       handoff_from_reporter_id IS NULL AND authority_source_sequence_cutoff IS NULL AND heartbeat=0 AND estimate_revision IS NULL AND progress_percent IS NULL AND
+				       eta_seconds IS NULL AND eta_min_seconds IS NULL AND eta_max_seconds IS NULL AND estimate_source='' AND
+				       estimate_confidence IS NULL AND estimate_basis='' AND reset_epoch IS NULL AND reset_source_cutoff IS NULL AND
+				       reset_source_kind='' AND reset_telemetry_run_id IS NULL AND reset_telemetry_sequence_cutoff IS NULL AND
+				       reset_authority_anchor_stage_event_id IS NULL AND reset_owner_reporter_id IS NULL AND
+				       ((stage_key='specification' AND spec_revision IS NOT NULL) OR
+				        (stage_key<>'specification' AND spec_revision IS NULL)) AND
+				       (event_type='semantic_report' OR (source_sequence IS NULL AND needs_input=0 AND
+				        declared_blocker_count=0 AND current_blocker_count=0)) AND
+				       ((semantic_state IN ('succeeded','failed','cancelled','draft_ready') AND ended_at IS NOT NULL) OR
+				        (semantic_state IN ('pending','active','waiting','unknown') AND ended_at IS NULL))) OR
+				      (event_type='heartbeat' AND delivery_event_id IS NULL AND source_idempotency_key IS NOT NULL AND source_payload_hash IS NOT NULL AND
+				       source_sequence IS NOT NULL AND heartbeat=1 AND execution_start_stage_event_id IS NOT NULL AND semantic_state IS NULL AND
+				       based_on_stage_event_id IS NULL AND retry_of_stage_event_id IS NULL AND handoff_from_reporter_id IS NULL AND authority_source_sequence_cutoff IS NULL AND
+				       activity='' AND needs_input=0 AND declared_blocker_count=0 AND current_blocker_count=0 AND declared_evidence_count=0 AND
+				       estimate_revision IS NULL AND progress_percent IS NULL AND eta_seconds IS NULL AND eta_min_seconds IS NULL AND
+				       eta_max_seconds IS NULL AND estimate_source='' AND estimate_confidence IS NULL AND estimate_basis='' AND
+				       spec_revision IS NULL AND reset_epoch IS NULL AND reset_source_cutoff IS NULL AND reset_source_kind='' AND
+				       reset_telemetry_run_id IS NULL AND reset_telemetry_sequence_cutoff IS NULL AND
+				       reset_authority_anchor_stage_event_id IS NULL AND reset_owner_reporter_id IS NULL AND ended_at IS NULL) OR
+				      (event_type='estimate' AND delivery_event_id IS NOT NULL AND source_idempotency_key IS NULL AND source_payload_hash IS NULL AND heartbeat=0 AND source_sequence IS NOT NULL AND estimate_revision IS NOT NULL AND estimate_source<>'' AND
+				       execution_start_stage_event_id IS NOT NULL AND semantic_state IS NULL AND based_on_stage_event_id IS NULL AND
+				       retry_of_stage_event_id IS NULL AND handoff_from_reporter_id IS NULL AND authority_source_sequence_cutoff IS NULL AND activity='' AND needs_input=0 AND
+				       declared_blocker_count=0 AND current_blocker_count=0 AND declared_evidence_count=0 AND
+				       estimate_confidence IS NOT NULL AND estimate_confidence>0 AND estimate_basis<>'' AND
+				       (progress_percent IS NOT NULL OR eta_min_seconds IS NOT NULL) AND
+				       ((eta_seconds IS NULL AND eta_min_seconds IS NULL AND eta_max_seconds IS NULL) OR
+				        (eta_min_seconds IS NOT NULL AND eta_max_seconds IS NOT NULL AND eta_min_seconds<=eta_max_seconds AND
+				         (eta_seconds IS NULL OR (eta_seconds>=eta_min_seconds AND eta_seconds<=eta_max_seconds)))) AND
+				       spec_revision IS NULL AND reset_epoch IS NULL AND reset_source_cutoff IS NULL AND reset_source_kind='' AND
+				       reset_telemetry_run_id IS NULL AND reset_telemetry_sequence_cutoff IS NULL AND
+				       reset_authority_anchor_stage_event_id IS NULL AND reset_owner_reporter_id IS NULL AND ended_at IS NULL) OR
+				      (event_type='handoff' AND delivery_event_id IS NOT NULL AND source_idempotency_key IS NULL AND source_payload_hash IS NULL AND handoff_from_reporter_id IS NOT NULL AND execution_start_stage_event_id IS NOT NULL AND
+				       source_sequence IS NULL AND authority_source_sequence_cutoff IS NOT NULL AND semantic_state IS NULL AND based_on_stage_event_id IS NULL AND retry_of_stage_event_id IS NULL AND
+				       activity='' AND needs_input=0 AND declared_blocker_count=0 AND current_blocker_count=0 AND declared_evidence_count=0 AND
+				       heartbeat=0 AND estimate_revision IS NULL AND progress_percent IS NULL AND eta_seconds IS NULL AND
+				       eta_min_seconds IS NULL AND eta_max_seconds IS NULL AND estimate_source='' AND estimate_confidence IS NULL AND
+				       estimate_basis='' AND spec_revision IS NULL AND reset_epoch IS NULL AND reset_source_cutoff IS NULL AND
+				       reset_source_kind='' AND reset_telemetry_run_id IS NULL AND reset_telemetry_sequence_cutoff IS NULL AND
+				       reset_authority_anchor_stage_event_id IS NULL AND reset_owner_reporter_id IS NULL AND reason_code<>'' AND ended_at IS NULL) OR
+				      (event_type='progress_reset_authorized' AND delivery_event_id IS NOT NULL AND source_idempotency_key IS NULL AND source_payload_hash IS NULL AND reset_epoch IS NOT NULL AND reset_source_cutoff IS NOT NULL AND
+				       reset_source_kind<>'' AND reset_authority_anchor_stage_event_id IS NOT NULL AND reset_owner_reporter_id IS NOT NULL AND
+				       ((reset_source_kind='stage_events' AND reset_telemetry_run_id IS NULL AND reset_telemetry_sequence_cutoff IS NULL) OR
+				        (reset_source_kind='stage_and_agent_run_telemetry' AND reset_telemetry_run_id IS NOT NULL AND
+				         reset_telemetry_sequence_cutoff IS NOT NULL)) AND
+				       reason_code<>'' AND execution_start_stage_event_id IS NOT NULL AND source_sequence IS NULL AND authority_source_sequence_cutoff IS NULL AND semantic_state IS NULL AND
+				       based_on_stage_event_id IS NULL AND retry_of_stage_event_id IS NULL AND handoff_from_reporter_id IS NULL AND
+				       activity='' AND needs_input=0 AND declared_blocker_count=0 AND current_blocker_count=0 AND declared_evidence_count=0 AND
+				       heartbeat=0 AND estimate_revision IS NULL AND progress_percent IS NULL AND eta_seconds IS NULL AND
+				       eta_min_seconds IS NULL AND eta_max_seconds IS NULL AND estimate_source='' AND estimate_confidence IS NULL AND
+				       estimate_basis='' AND spec_revision IS NULL AND ended_at IS NULL))
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_stage_events_history
+			 ON delivery_stage_events(attempt_id, stage_key, execution_number DESC, event_sequence DESC)`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_stage_events_source
+			 ON delivery_stage_events(attempt_id, stage_key, execution_number, authority_epoch, source_sequence)
+			 WHERE source_sequence IS NOT NULL`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_delivery_stage_authority_epoch_unique
+			 ON delivery_stage_events(attempt_id,stage_key,execution_number,authority_epoch)
+			 WHERE event_type IN ('execution_started','handoff')`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_stage_blockers (
+				delivery_id       INTEGER NOT NULL,
+				stage_event_id    INTEGER NOT NULL,
+				ordinal           INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 15),
+				blocker_key       TEXT NOT NULL CHECK(length(CAST(blocker_key AS BLOB)) BETWEEN 1 AND 96)
+				 CHECK(blocker_key GLOB '[A-Za-z0-9]*' AND blocker_key NOT GLOB '*[^A-Za-z0-9._:/-]*'),
+				blocker_class     TEXT NOT NULL CHECK(blocker_class IN ('input','dependency','permission','environment','external','unknown')),
+				summary           TEXT NOT NULL DEFAULT '' CHECK(length(CAST(summary AS BLOB)) <= 280),
+				is_current        INTEGER NOT NULL CHECK(is_current IN (0,1)),
+				is_human_wait     INTEGER NOT NULL CHECK(is_human_wait IN (0,1)),
+				interval_started_at TEXT NOT NULL,
+				interval_ended_at TEXT NOT NULL,
+				PRIMARY KEY(stage_event_id, ordinal),
+				UNIQUE(stage_event_id, blocker_key),
+				FOREIGN KEY(delivery_id, stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, id) ON DELETE CASCADE
+			)`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_evidence (
+				delivery_id       INTEGER NOT NULL,
+				root_issue_id     INTEGER NOT NULL,
+				stage_event_id    INTEGER NOT NULL,
+				ordinal           INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 15),
+				evidence_type     TEXT NOT NULL CHECK(evidence_type IN (
+					'spec_acceptance','approval','implementation_result','artifact','test_result',
+					'deployment_result','verification_result'
+				)),
+				outcome           TEXT NOT NULL CHECK(outcome IN ('passed','failed','unknown')),
+				reference_kind    TEXT NOT NULL CHECK(reference_kind IN ('digest','commit','attachment','external_ref','none')),
+				reference_value   TEXT NOT NULL DEFAULT '' CHECK(length(CAST(reference_value AS BLOB)) <= 192)
+				 CHECK(reference_value='' OR (reference_value GLOB '[A-Za-z0-9]*' AND reference_value NOT GLOB '*[^A-Za-z0-9._:/@+-]*')),
+				digest_sha256     TEXT NOT NULL DEFAULT '' CHECK(digest_sha256='' OR (length(CAST(digest_sha256 AS BLOB))=64 AND digest_sha256 NOT GLOB '*[^0-9a-f]*')),
+				attachment_id     INTEGER,
+				created_at        TEXT NOT NULL,
+				PRIMARY KEY(stage_event_id, ordinal),
+				FOREIGN KEY(delivery_id, stage_event_id)
+					 REFERENCES delivery_stage_events(delivery_id, id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, root_issue_id)
+					 REFERENCES deliveries(id, issue_id) ON DELETE CASCADE,
+				FOREIGN KEY(attachment_id, root_issue_id)
+				 REFERENCES attachments(id, issue_id) ON DELETE CASCADE,
+				CHECK((reference_kind='attachment' AND attachment_id IS NOT NULL) OR
+				      (reference_kind<>'attachment' AND attachment_id IS NULL))
+			)`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_agent_run_links (
+				agent_run_id             INTEGER PRIMARY KEY,
+				root_issue_id            INTEGER NOT NULL,
+				delivery_id              INTEGER NOT NULL,
+				attempt_id               INTEGER NOT NULL,
+				stage_key                TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+				execution_number         INTEGER NOT NULL CHECK(execution_number > 0),
+				execution_start_stage_event_id INTEGER NOT NULL,
+				reporter_id              INTEGER NOT NULL,
+				link_delivery_event_id   INTEGER NOT NULL,
+				created_at               TEXT NOT NULL,
+				UNIQUE(delivery_id, agent_run_id),
+				UNIQUE(attempt_id,stage_key,execution_number),
+				UNIQUE(delivery_id,attempt_id,stage_key,execution_number,agent_run_id,reporter_id),
+				FOREIGN KEY(agent_run_id, root_issue_id)
+				 REFERENCES agent_runs(id, issue_id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, root_issue_id)
+				 REFERENCES deliveries(id, issue_id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, attempt_id)
+				 REFERENCES delivery_attempts(delivery_id, id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, attempt_id, stage_key, execution_number, execution_start_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, attempt_id, stage_key, execution_number, id),
+				FOREIGN KEY(delivery_id, reporter_id)
+				 REFERENCES delivery_reporters(delivery_id, id),
+				FOREIGN KEY(delivery_id, link_delivery_event_id, reporter_id)
+				 REFERENCES delivery_events(delivery_id, id, reporter_id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_agent_run_execution
+				 ON delivery_agent_run_links(attempt_id, stage_key, execution_number, agent_run_id)`,
+			`CREATE TABLE IF NOT EXISTS delivery_agent_run_activations (
+				delivery_id              INTEGER NOT NULL,
+				attempt_id               INTEGER NOT NULL,
+				stage_key                TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+				execution_number         INTEGER NOT NULL CHECK(execution_number > 0),
+				authority_epoch          INTEGER NOT NULL CHECK(authority_epoch > 0),
+				agent_run_id             INTEGER NOT NULL,
+				reporter_id              INTEGER NOT NULL,
+				authority_stage_event_id INTEGER NOT NULL,
+				telemetry_sequence_cutoff INTEGER NOT NULL CHECK(telemetry_sequence_cutoff >= 0),
+				created_at               TEXT NOT NULL,
+				PRIMARY KEY(attempt_id,stage_key,execution_number,authority_epoch),
+				FOREIGN KEY(delivery_id,attempt_id,stage_key,execution_number,agent_run_id,reporter_id)
+				 REFERENCES delivery_agent_run_links(delivery_id,attempt_id,stage_key,execution_number,agent_run_id,reporter_id)
+				 ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id,reporter_id)
+				 REFERENCES delivery_reporters(delivery_id,id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id,attempt_id,stage_key,execution_number,authority_epoch,reporter_id,authority_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,authority_epoch,reporter_id,id)
+				 ON DELETE CASCADE
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_run_activations_run
+				 ON delivery_agent_run_activations(agent_run_id,attempt_id,stage_key,execution_number,authority_epoch)`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_stage_latest (
+				delivery_id              INTEGER NOT NULL,
+				attempt_id               INTEGER NOT NULL,
+				stage_key                TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+				execution_number         INTEGER NOT NULL CHECK(execution_number > 0),
+				authority_epoch          INTEGER NOT NULL CHECK(authority_epoch > 0),
+				current_reporter_id      INTEGER NOT NULL,
+				execution_start_stage_event_id INTEGER NOT NULL,
+				authority_stage_event_id INTEGER NOT NULL,
+				semantic_stage_event_id  INTEGER,
+				heartbeat_stage_event_id INTEGER,
+				estimate_stage_event_id  INTEGER,
+				updated_at               TEXT NOT NULL,
+				PRIMARY KEY(attempt_id, stage_key),
+				FOREIGN KEY(delivery_id, attempt_id)
+				 REFERENCES delivery_attempts(delivery_id, id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, current_reporter_id)
+				 REFERENCES delivery_reporters(delivery_id, id),
+				FOREIGN KEY(delivery_id, execution_start_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, id),
+				FOREIGN KEY(delivery_id, authority_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, id),
+				FOREIGN KEY(delivery_id, semantic_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, id),
+				FOREIGN KEY(delivery_id, heartbeat_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, id),
+				FOREIGN KEY(delivery_id, estimate_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_stage_latest_delivery ON delivery_stage_latest(delivery_id, attempt_id, stage_key)`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_stage_durations (
+				stage_execution_id       INTEGER PRIMARY KEY,
+				terminal_stage_event_id  INTEGER NOT NULL,
+				delivery_id              INTEGER NOT NULL,
+				root_issue_id            INTEGER NOT NULL,
+				attempt_id               INTEGER NOT NULL,
+				stage_key                TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+				execution_number         INTEGER NOT NULL CHECK(execution_number > 0),
+				project_id_at_completion INTEGER,
+				estimator_policy_version INTEGER NOT NULL DEFAULT 1 CHECK(estimator_policy_version > 0),
+				full_lead_seconds        INTEGER NOT NULL CHECK(full_lead_seconds >= 0),
+				active_seconds           INTEGER NOT NULL CHECK(active_seconds >= 0),
+				blocked_seconds          INTEGER NOT NULL CHECK(blocked_seconds >= 0),
+				human_wait_seconds       INTEGER NOT NULL CHECK(human_wait_seconds >= 0),
+				completed_at             TEXT NOT NULL,
+				UNIQUE(delivery_id, attempt_id, stage_key, execution_number),
+				FOREIGN KEY(delivery_id, root_issue_id)
+				 REFERENCES deliveries(id, issue_id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, attempt_id)
+				 REFERENCES delivery_attempts(delivery_id, id) ON DELETE CASCADE,
+				FOREIGN KEY(delivery_id, attempt_id, stage_key, execution_number, stage_execution_id)
+				 REFERENCES delivery_stage_events(delivery_id, attempt_id, stage_key, execution_number, id),
+				FOREIGN KEY(delivery_id, attempt_id, stage_key, execution_number, terminal_stage_event_id)
+				 REFERENCES delivery_stage_events(delivery_id, attempt_id, stage_key, execution_number, id),
+				CHECK(full_lead_seconds=active_seconds+blocked_seconds+human_wait_seconds)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_stage_duration_history
+			 ON delivery_stage_durations(project_id_at_completion, stage_key, estimator_policy_version, completed_at DESC, stage_execution_id DESC)`,
+
+			`CREATE TABLE IF NOT EXISTS delivery_change_retention (
+				floor_id        INTEGER PRIMARY KEY CHECK(floor_id >= 0),
+				advanced_at     TEXT
+			)`,
+			`INSERT OR IGNORE INTO delivery_change_retention(floor_id) VALUES(0)`,
+			`CREATE TABLE IF NOT EXISTS delivery_change_log (
+				id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+				cursor_token       TEXT NOT NULL UNIQUE CHECK(length(CAST(cursor_token AS BLOB))=32 AND cursor_token NOT GLOB '*[^0-9a-f]*'),
+				delivery_id        INTEGER NOT NULL,
+				root_issue_id      INTEGER NOT NULL,
+				delivery_key       TEXT NOT NULL CHECK(length(CAST(delivery_key AS BLOB)) BETWEEN 7 AND 80),
+				project_id_hint    INTEGER,
+				change_sequence    INTEGER NOT NULL CHECK(change_sequence > 0),
+				delivery_revision  INTEGER NOT NULL CHECK(delivery_revision >= 0),
+				kind               TEXT NOT NULL CHECK(kind IN ('delivery','attempt','stage','run','telemetry','issue','lane','project_move','root_deleted')),
+				source_kind        TEXT NOT NULL CHECK(source_kind IN ('delivery_event','stage_event','agent_run','telemetry','issue','relation','system')),
+				source_id          INTEGER,
+				source_sequence    INTEGER,
+				server_received_at TEXT NOT NULL,
+				UNIQUE(delivery_id, change_sequence)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_change_delivery ON delivery_change_log(delivery_id, change_sequence DESC)`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_change_project_tail ON delivery_change_log(project_id_hint, id)`,
+
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_events_revision_guard
+			 BEFORE INSERT ON delivery_events
+			 WHEN NEW.delivery_revision <> COALESCE((SELECT MAX(delivery_revision)+1 FROM delivery_events WHERE delivery_id=NEW.delivery_id), 1)
+				 BEGIN SELECT RAISE(ABORT, 'delivery revision is not contiguous'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_runs_delivery_instrumentation_immutable
+				 BEFORE UPDATE OF delivery_instrumentation_version ON agent_runs
+				 WHEN NEW.delivery_instrumentation_version<>OLD.delivery_instrumentation_version
+				 BEGIN SELECT RAISE(ABORT, 'agent run delivery instrumentation marker is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_sequence_guard
+				 BEFORE INSERT ON delivery_change_log
+				 WHEN NEW.change_sequence <> COALESCE((SELECT change_sequence_high_water+1 FROM deliveries WHERE id=NEW.delivery_id),
+					COALESCE((SELECT MAX(change_sequence)+1 FROM delivery_change_log WHERE delivery_id=NEW.delivery_id),1))
+				 BEGIN SELECT RAISE(ABORT, 'delivery change sequence is not contiguous'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_provenance_guard
+				 BEFORE INSERT ON delivery_change_log WHEN
+				  NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.id=NEW.delivery_id
+				   AND d.issue_id=NEW.root_issue_id AND d.delivery_key=NEW.delivery_key
+				   AND d.project_id_hint IS NEW.project_id_hint) OR
+				  (NEW.kind='root_deleted' AND (EXISTS(SELECT 1 FROM issues i WHERE i.id=NEW.root_issue_id)
+				   OR EXISTS(SELECT 1 FROM delivery_change_log prior WHERE prior.delivery_id=NEW.delivery_id
+				    AND prior.kind='root_deleted'))) OR
+				  (NEW.kind<>'root_deleted' AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.id=NEW.root_issue_id))
+				 BEGIN SELECT RAISE(ABORT, 'delivery change provenance does not match its live root'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_advance_high_water
+				 AFTER INSERT ON delivery_change_log
+				 WHEN EXISTS(SELECT 1 FROM deliveries WHERE id=NEW.delivery_id)
+				 BEGIN UPDATE deliveries SET change_sequence_high_water=NEW.change_sequence WHERE id=NEW.delivery_id; END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_deliveries_change_high_water_guard
+				 BEFORE UPDATE OF change_sequence_high_water ON deliveries
+				 WHEN NEW.change_sequence_high_water<>OLD.change_sequence_high_water AND NOT (
+					NEW.change_sequence_high_water=OLD.change_sequence_high_water+1 AND EXISTS(
+					 SELECT 1 FROM delivery_change_log c WHERE c.delivery_id=OLD.id
+					 AND c.change_sequence=NEW.change_sequence_high_water)
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery change high-water is log-owned'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_latest_children_guard_insert
+			 BEFORE INSERT ON delivery_stage_latest
+			 WHEN NEW.semantic_stage_event_id IS NOT NULL AND (
+				(SELECT declared_blocker_count FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id) <>
+				 (SELECT COUNT(*) FROM delivery_stage_blockers WHERE stage_event_id=NEW.semantic_stage_event_id) OR
+				(SELECT current_blocker_count FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id) <>
+				 (SELECT COUNT(*) FROM delivery_stage_blockers WHERE stage_event_id=NEW.semantic_stage_event_id AND is_current=1) OR
+				(SELECT declared_evidence_count FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id) <>
+				 (SELECT COUNT(*) FROM delivery_evidence WHERE stage_event_id=NEW.semantic_stage_event_id) OR
+				((SELECT needs_input FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)=1 AND
+				 NOT EXISTS(SELECT 1 FROM delivery_stage_blockers WHERE stage_event_id=NEW.semantic_stage_event_id
+				  AND is_current=1 AND is_human_wait=1)) OR
+				((SELECT semantic_state FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)='succeeded' AND
+				 NOT EXISTS(SELECT 1 FROM delivery_evidence WHERE stage_event_id=NEW.semantic_stage_event_id AND outcome='passed')) OR
+				((SELECT semantic_state FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)<>'succeeded' AND
+				 EXISTS(SELECT 1 FROM delivery_evidence WHERE stage_event_id=NEW.semantic_stage_event_id AND outcome='passed'))
+			 ) BEGIN SELECT RAISE(ABORT, 'delivery stage children are incomplete'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_latest_children_guard_update
+			 BEFORE UPDATE ON delivery_stage_latest
+			 WHEN NEW.semantic_stage_event_id IS NOT NULL AND (
+				(SELECT declared_blocker_count FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id) <>
+				 (SELECT COUNT(*) FROM delivery_stage_blockers WHERE stage_event_id=NEW.semantic_stage_event_id) OR
+				(SELECT current_blocker_count FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id) <>
+				 (SELECT COUNT(*) FROM delivery_stage_blockers WHERE stage_event_id=NEW.semantic_stage_event_id AND is_current=1) OR
+				(SELECT declared_evidence_count FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id) <>
+				 (SELECT COUNT(*) FROM delivery_evidence WHERE stage_event_id=NEW.semantic_stage_event_id) OR
+				((SELECT needs_input FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)=1 AND
+				 NOT EXISTS(SELECT 1 FROM delivery_stage_blockers WHERE stage_event_id=NEW.semantic_stage_event_id
+				  AND is_current=1 AND is_human_wait=1)) OR
+				((SELECT semantic_state FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)='succeeded' AND
+				 NOT EXISTS(SELECT 1 FROM delivery_evidence WHERE stage_event_id=NEW.semantic_stage_event_id AND outcome='passed')) OR
+				((SELECT semantic_state FROM delivery_stage_events WHERE id=NEW.semantic_stage_event_id)<>'succeeded' AND
+				 EXISTS(SELECT 1 FROM delivery_evidence WHERE stage_event_id=NEW.semantic_stage_event_id AND outcome='passed'))
+			 ) BEGIN SELECT RAISE(ABORT, 'delivery stage children are incomplete'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_latest_pointer_guard_insert
+			 BEFORE INSERT ON delivery_stage_latest
+			 WHEN NOT EXISTS (
+				SELECT 1 FROM delivery_stage_events se
+				WHERE se.id=NEW.execution_start_stage_event_id AND se.delivery_id=NEW.delivery_id
+				  AND se.attempt_id=NEW.attempt_id AND se.stage_key=NEW.stage_key
+				  AND se.execution_number=NEW.execution_number AND se.event_type='execution_started'
+			 ) OR NOT EXISTS (
+				SELECT 1 FROM delivery_stage_events se WHERE se.id=NEW.authority_stage_event_id
+				 AND se.delivery_id=NEW.delivery_id AND se.attempt_id=NEW.attempt_id AND se.stage_key=NEW.stage_key
+				 AND se.execution_number=NEW.execution_number AND se.authority_epoch=NEW.authority_epoch
+				 AND ((se.event_type='progress_reset_authorized' AND se.reset_owner_reporter_id=NEW.current_reporter_id)
+				  OR (se.event_type<>'progress_reset_authorized' AND se.reporter_id=NEW.current_reporter_id))
+				 AND se.event_type IN ('execution_started','handoff','progress_reset_authorized')
+			 ) OR (NEW.semantic_stage_event_id IS NOT NULL AND NOT EXISTS (
+				SELECT 1 FROM delivery_stage_events se WHERE se.id=NEW.semantic_stage_event_id
+				 AND se.delivery_id=NEW.delivery_id AND se.attempt_id=NEW.attempt_id AND se.stage_key=NEW.stage_key
+				 AND se.execution_number=NEW.execution_number AND se.authority_epoch=NEW.authority_epoch
+				 AND se.reporter_id=NEW.current_reporter_id AND se.event_type IN ('semantic_report','lifecycle_normalized')
+			 )) OR (NEW.heartbeat_stage_event_id IS NOT NULL AND NOT EXISTS (
+				SELECT 1 FROM delivery_stage_events se WHERE se.id=NEW.heartbeat_stage_event_id
+				 AND se.delivery_id=NEW.delivery_id AND se.attempt_id=NEW.attempt_id AND se.stage_key=NEW.stage_key
+				 AND se.execution_number=NEW.execution_number AND se.authority_epoch=NEW.authority_epoch
+				 AND se.reporter_id=NEW.current_reporter_id AND se.event_type='heartbeat'
+			 )) OR (NEW.estimate_stage_event_id IS NOT NULL AND NOT EXISTS (
+				SELECT 1 FROM delivery_stage_events se WHERE se.id=NEW.estimate_stage_event_id
+				 AND se.delivery_id=NEW.delivery_id AND se.attempt_id=NEW.attempt_id AND se.stage_key=NEW.stage_key
+				 AND se.execution_number=NEW.execution_number AND se.authority_epoch=NEW.authority_epoch
+				 AND se.reporter_id=NEW.current_reporter_id AND se.event_type='estimate'
+			 )) BEGIN SELECT RAISE(ABORT, 'delivery stage latest has invalid pointer'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_latest_pointer_guard_update
+			 BEFORE UPDATE ON delivery_stage_latest
+			 WHEN NOT EXISTS (
+				SELECT 1 FROM delivery_stage_events se
+				WHERE se.id=NEW.execution_start_stage_event_id AND se.delivery_id=NEW.delivery_id
+				  AND se.attempt_id=NEW.attempt_id AND se.stage_key=NEW.stage_key
+				  AND se.execution_number=NEW.execution_number AND se.event_type='execution_started'
+			 ) OR NOT EXISTS (
+				SELECT 1 FROM delivery_stage_events se WHERE se.id=NEW.authority_stage_event_id
+				 AND se.delivery_id=NEW.delivery_id AND se.attempt_id=NEW.attempt_id AND se.stage_key=NEW.stage_key
+				 AND se.execution_number=NEW.execution_number AND se.authority_epoch=NEW.authority_epoch
+				 AND ((se.event_type='progress_reset_authorized' AND se.reset_owner_reporter_id=NEW.current_reporter_id)
+				  OR (se.event_type<>'progress_reset_authorized' AND se.reporter_id=NEW.current_reporter_id))
+				 AND se.event_type IN ('execution_started','handoff','progress_reset_authorized')
+			 ) OR (NEW.semantic_stage_event_id IS NOT NULL AND NOT EXISTS (
+				SELECT 1 FROM delivery_stage_events se WHERE se.id=NEW.semantic_stage_event_id
+				 AND se.delivery_id=NEW.delivery_id AND se.attempt_id=NEW.attempt_id AND se.stage_key=NEW.stage_key
+				 AND se.execution_number=NEW.execution_number AND se.authority_epoch=NEW.authority_epoch
+				 AND se.reporter_id=NEW.current_reporter_id AND se.event_type IN ('semantic_report','lifecycle_normalized')
+			 )) OR (NEW.heartbeat_stage_event_id IS NOT NULL AND NOT EXISTS (
+				SELECT 1 FROM delivery_stage_events se WHERE se.id=NEW.heartbeat_stage_event_id
+				 AND se.delivery_id=NEW.delivery_id AND se.attempt_id=NEW.attempt_id AND se.stage_key=NEW.stage_key
+				 AND se.execution_number=NEW.execution_number AND se.authority_epoch=NEW.authority_epoch
+				 AND se.reporter_id=NEW.current_reporter_id AND se.event_type='heartbeat'
+			 )) OR (NEW.estimate_stage_event_id IS NOT NULL AND NOT EXISTS (
+				SELECT 1 FROM delivery_stage_events se WHERE se.id=NEW.estimate_stage_event_id
+				 AND se.delivery_id=NEW.delivery_id AND se.attempt_id=NEW.attempt_id AND se.stage_key=NEW.stage_key
+				 AND se.execution_number=NEW.execution_number AND se.authority_epoch=NEW.authority_epoch
+				 AND se.reporter_id=NEW.current_reporter_id AND se.event_type='estimate'
+			 )) BEGIN SELECT RAISE(ABORT, 'delivery stage latest has invalid pointer'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_blocker_declared_ordinal
+			 BEFORE INSERT ON delivery_stage_blockers
+			 WHEN NEW.ordinal >= (SELECT declared_blocker_count FROM delivery_stage_events WHERE id=NEW.stage_event_id)
+			 BEGIN SELECT RAISE(ABORT, 'delivery blocker exceeds declared count'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_declared_ordinal
+				 BEFORE INSERT ON delivery_evidence
+				 WHEN NEW.ordinal >= (SELECT declared_evidence_count FROM delivery_stage_events WHERE id=NEW.stage_event_id)
+				 BEGIN SELECT RAISE(ABORT, 'delivery evidence exceeds declared count'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_no_terminal_conflict
+				 BEFORE INSERT ON delivery_evidence
+				 WHEN NEW.outcome IN ('passed','failed') AND EXISTS (
+					SELECT 1 FROM delivery_evidence e
+					WHERE e.stage_event_id=NEW.stage_event_id
+					  AND e.outcome IN ('passed','failed') AND e.outcome<>NEW.outcome
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery terminal evidence is contradictory'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_terminal_state_coherence
+				 BEFORE INSERT ON delivery_evidence WHEN EXISTS (
+					SELECT 1 FROM delivery_stage_events se WHERE se.id=NEW.stage_event_id AND (
+					 (NEW.outcome='passed' AND se.semantic_state<>'succeeded') OR
+					 (NEW.outcome='failed' AND se.semantic_state='succeeded')
+					)
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery evidence contradicts terminal state'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_stage_matrix
+				 BEFORE INSERT ON delivery_evidence WHEN NOT EXISTS (
+					SELECT 1 FROM delivery_stage_events se WHERE se.id=NEW.stage_event_id AND (
+					 (se.stage_key='specification' AND NEW.evidence_type IN ('spec_acceptance','approval')) OR
+					 (se.stage_key='implementation' AND NEW.evidence_type IN ('implementation_result','artifact')) OR
+					 (se.stage_key='qa' AND NEW.evidence_type='test_result') OR
+					 (se.stage_key='deployment' AND NEW.evidence_type='deployment_result') OR
+					 (se.stage_key='verification' AND NEW.evidence_type='verification_result'))
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery evidence type does not match stage'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_proof_bearing
+				 BEFORE INSERT ON delivery_evidence WHEN NEW.outcome='passed' AND (
+					NEW.reference_kind='none' OR
+					(NEW.reference_kind='external_ref' AND NEW.reference_value='') OR
+					(NEW.reference_kind='commit' AND (length(CAST(NEW.reference_value AS BLOB)) NOT IN (40,64)
+					 OR NEW.reference_value GLOB '*[^0-9a-f]*')) OR
+					(NEW.reference_kind='digest' AND NEW.digest_sha256='')
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery passed evidence is not proof-bearing'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_forbidden_patterns_no_update
+				 BEFORE UPDATE ON delivery_forbidden_value_patterns
+				 BEGIN SELECT RAISE(ABORT, 'delivery forbidden patterns are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_forbidden_patterns_no_delete
+				 BEFORE DELETE ON delivery_forbidden_value_patterns
+				 BEGIN SELECT RAISE(ABORT, 'delivery forbidden patterns are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_forbidden_patterns_no_insert
+				 BEFORE INSERT ON delivery_forbidden_value_patterns WHEN NOT EXISTS(
+				  SELECT 1 FROM delivery_forbidden_value_patterns existing WHERE existing.pattern=NEW.pattern
+				   AND existing.normalize_horizontal_whitespace=NEW.normalize_horizontal_whitespace
+				   AND existing.case_sensitive=NEW.case_sensitive AND existing.boundary_needle=NEW.boundary_needle
+				   AND existing.require_bearer_whitespace=NEW.require_bearer_whitespace)
+				 BEGIN SELECT RAISE(ABORT, 'delivery forbidden patterns are migration-owned'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reporter_secret_guard
+				 BEFORE INSERT ON delivery_reporters WHEN EXISTS (
+				  SELECT 1 FROM json_each(json_array(NEW.opaque_key)) value
+				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
+				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
+				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
+				   OR instr(CAST(value.value AS TEXT),'?')>0
+				   OR (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)
+				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery reporter value'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_event_secret_guard
+				 BEFORE INSERT ON delivery_events WHEN EXISTS (
+				  SELECT 1 FROM json_each(json_array(NEW.idempotency_key,NEW.reason_code,NEW.reason_text)) value
+				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
+				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
+				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
+				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery event value'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_attempt_secret_guard
+				 BEFORE INSERT ON delivery_attempts WHEN EXISTS (
+				  SELECT 1 FROM json_each(json_array(NEW.reason_code,NEW.reason_text)) value
+				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
+				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
+				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
+				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery attempt value'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_secret_guard
+				 BEFORE INSERT ON delivery_attempt_stage_policy WHEN EXISTS (
+				  SELECT 1 FROM json_each(json_array(NEW.policy_reference,NEW.reason_code,NEW.reason_text)) value
+				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
+				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
+				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
+				   OR (value.value=NEW.policy_reference AND (instr(CAST(value.value AS TEXT),'?')>0 OR
+				    (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)))
+				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery policy value'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_secret_guard
+				 BEFORE INSERT ON delivery_stage_events WHEN EXISTS (
+				  SELECT 1 FROM json_each(json_array(COALESCE(NEW.source_idempotency_key,''),NEW.activity,
+				   NEW.estimate_basis,NEW.reason_code,NEW.reason_text)) value
+				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
+				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
+				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
+				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery stage value'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_blocker_secret_guard
+				 BEFORE INSERT ON delivery_stage_blockers WHEN EXISTS (
+				  SELECT 1 FROM json_each(json_array(NEW.blocker_key,NEW.summary)) value
+				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
+				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
+				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
+				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery blocker value'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_secret_guard
+				 BEFORE INSERT ON delivery_evidence WHEN EXISTS (
+				  SELECT 1 FROM json_each(json_array(NEW.reference_value)) value
+				  WHERE instr(CAST(value.value AS TEXT),char(0))>0 OR instr(CAST(value.value AS TEXT),char(10))>0
+				   OR instr(CAST(value.value AS TEXT),char(13))>0 OR EXISTS (
+				    SELECT 1 FROM delivery_forbidden_value_patterns forbidden
+				    WHERE (CASE WHEN forbidden.case_sensitive=1 THEN
+								      CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END
+								     ELSE lower(CASE WHEN forbidden.normalize_horizontal_whitespace=1
+								       THEN replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(CAST(value.value AS TEXT),' ',''),char(9),''),char(12),''),char(11),''),char(10),''),char(13),''),char(160),''),char(8195),''),char(8239),''),char(8203),'')
+								       ELSE CAST(value.value AS TEXT) END) END) GLOB forbidden.pattern
+								     AND (forbidden.boundary_needle='' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB forbidden.boundary_needle||'*' OR
+								      (CASE WHEN forbidden.case_sensitive=1 THEN CAST(value.value AS TEXT)
+								       ELSE lower(CAST(value.value AS TEXT)) END) GLOB
+								       '*[^0-9A-Za-z_]'||forbidden.boundary_needle||'*')
+								     AND (forbidden.require_bearer_whitespace=0 OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       'bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*' OR
+								      lower(CAST(value.value AS TEXT)) GLOB
+								       '*[^0-9a-z_]bearer['||' '||char(9)||char(12)||char(11)||char(10)||char(13)||char(160)||char(8195)||char(8239)||char(8203)||']*'))
+				   OR instr(CAST(value.value AS TEXT),'?')>0
+				   OR (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)
+				 ) BEGIN SELECT RAISE(ABORT, 'forbidden delivery evidence value'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_policy_complete
+			 BEFORE INSERT ON delivery_stage_events
+			 WHEN NEW.event_type='execution_started' AND (
+				NOT EXISTS(SELECT 1 FROM delivery_attempt_policy_seals seal
+				 WHERE seal.delivery_id=NEW.delivery_id AND seal.attempt_id=NEW.attempt_id)
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery attempt policy is incomplete'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_policy_applicable
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='execution_started'
+				  AND COALESCE((SELECT policy.applicability FROM delivery_attempt_stage_policy policy
+				   WHERE policy.delivery_id=NEW.delivery_id AND policy.attempt_id=NEW.attempt_id
+				    AND policy.stage_key=NEW.stage_key),'')<>'required'
+				 BEGIN SELECT RAISE(ABORT, 'delivery execution cannot start for an inapplicable stage'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_attempt_envelope_kind
+				 BEFORE INSERT ON delivery_attempts WHEN COALESCE((SELECT event.kind FROM delivery_events event
+				  WHERE event.delivery_id=NEW.delivery_id AND event.id=NEW.start_delivery_event_id),'')<>'attempt_started'
+				 BEGIN SELECT RAISE(ABORT, 'delivery attempt start envelope kind is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_envelope_kind
+				 BEFORE INSERT ON delivery_stage_events WHEN
+				  (NEW.event_type='heartbeat' AND NEW.delivery_event_id IS NOT NULL) OR
+				  (NEW.event_type<>'heartbeat' AND COALESCE((SELECT event.kind FROM delivery_events event
+				   WHERE event.delivery_id=NEW.delivery_id AND event.id=NEW.delivery_event_id),'')<>
+				   CASE NEW.event_type
+				    WHEN 'execution_started' THEN 'stage_execution_started'
+				    WHEN 'semantic_report' THEN 'stage_reported'
+				    WHEN 'estimate' THEN 'stage_reported'
+				    WHEN 'handoff' THEN 'handoff'
+				    WHEN 'progress_reset_authorized' THEN 'progress_reset_authorized'
+				    WHEN 'lifecycle_normalized' THEN 'run_normalized'
+				   END)
+				 BEGIN SELECT RAISE(ABORT, 'delivery stage envelope kind is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_link_envelope_kind
+				 BEFORE INSERT ON delivery_agent_run_links WHEN COALESCE((SELECT event.kind FROM delivery_events event
+				  WHERE event.delivery_id=NEW.delivery_id AND event.id=NEW.link_delivery_event_id),'')<>'run_linked'
+				 BEGIN SELECT RAISE(ABORT, 'delivery run link envelope kind is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_stage_order
+			 BEFORE INSERT ON delivery_attempt_stage_policy WHEN NEW.sort_order<>CASE NEW.stage_key
+			  WHEN 'specification' THEN 1 WHEN 'implementation' THEN 2 WHEN 'qa' THEN 3
+			  WHEN 'deployment' THEN 4 WHEN 'verification' THEN 5 END
+			 BEGIN SELECT RAISE(ABORT, 'delivery policy stage order is not canonical'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_attempt_policy_seal_valid
+			 BEFORE INSERT ON delivery_attempt_policy_seals WHEN
+			  (SELECT COUNT(*) FROM delivery_attempt_stage_policy p
+			   WHERE p.delivery_id=NEW.delivery_id AND p.attempt_id=NEW.attempt_id)<>5 OR
+			  (SELECT COUNT(*) FROM delivery_attempt_stage_policy p
+			   WHERE p.delivery_id=NEW.delivery_id AND p.attempt_id=NEW.attempt_id
+			    AND p.applicability='required')=0 OR
+			  (SELECT COALESCE(SUM(p.weight),0) FROM delivery_attempt_stage_policy p
+			   WHERE p.delivery_id=NEW.delivery_id AND p.attempt_id=NEW.attempt_id)<>100 OR
+			  EXISTS(SELECT 1 FROM delivery_attempt_stage_policy p
+			   WHERE p.delivery_id=NEW.delivery_id AND p.attempt_id=NEW.attempt_id
+			    AND p.sort_order<>CASE p.stage_key WHEN 'specification' THEN 1 WHEN 'implementation' THEN 2
+			     WHEN 'qa' THEN 3 WHEN 'deployment' THEN 4 WHEN 'verification' THEN 5 END)
+			 BEGIN SELECT RAISE(ABORT, 'delivery attempt policy cannot be sealed'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_external_stage_source_sequence
+				 BEFORE INSERT ON delivery_stage_events
+				 WHEN NEW.event_type IN ('semantic_report','heartbeat','estimate')
+				  AND NEW.source_sequence IS NULL
+				  AND EXISTS(SELECT 1 FROM delivery_reporters r WHERE r.id=NEW.reporter_id
+				   AND r.delivery_id=NEW.delivery_id AND r.reporter_type='external')
+				 BEGIN SELECT RAISE(ABORT, 'external stage fact requires source sequence'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_external_stage_source_monotone
+				 BEFORE INSERT ON delivery_stage_events
+				 WHEN NEW.event_type IN ('semantic_report','heartbeat','estimate')
+				  AND EXISTS(SELECT 1 FROM delivery_reporters r WHERE r.id=NEW.reporter_id
+				   AND r.delivery_id=NEW.delivery_id AND r.reporter_type='external')
+				  AND (NEW.source_sequence IS NULL OR NEW.source_sequence<=COALESCE((SELECT MAX(prior.source_sequence)
+				   FROM delivery_stage_events prior WHERE prior.attempt_id=NEW.attempt_id
+				    AND prior.stage_key=NEW.stage_key AND prior.execution_number=NEW.execution_number
+				    AND prior.authority_epoch=NEW.authority_epoch AND prior.reporter_id=NEW.reporter_id),0))
+				 BEGIN SELECT RAISE(ABORT, 'external stage source sequence is not increasing'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_estimate_revision_monotone
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='estimate' AND (
+				  NEW.estimate_revision IS NULL OR NEW.estimate_revision<COALESCE((SELECT MAX(prior.estimate_revision)
+				   FROM delivery_stage_events prior WHERE prior.attempt_id=NEW.attempt_id
+				    AND prior.stage_key=NEW.stage_key AND prior.execution_number=NEW.execution_number
+				    AND prior.authority_epoch=NEW.authority_epoch AND prior.reporter_id=NEW.reporter_id
+				    AND prior.event_type='estimate'),0) OR
+				  EXISTS(SELECT 1 FROM delivery_stage_events prior WHERE prior.id=(SELECT latest.id
+				   FROM delivery_stage_events latest WHERE latest.attempt_id=NEW.attempt_id
+				    AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
+				    AND latest.authority_epoch=NEW.authority_epoch AND latest.reporter_id=NEW.reporter_id
+				    AND latest.event_type='estimate' AND latest.estimate_revision=NEW.estimate_revision
+				   ORDER BY latest.event_sequence DESC LIMIT 1)
+				   AND (prior.progress_percent IS NOT NEW.progress_percent OR prior.eta_seconds IS NOT NEW.eta_seconds
+				    OR prior.eta_min_seconds IS NOT NEW.eta_min_seconds OR prior.eta_max_seconds IS NOT NEW.eta_max_seconds
+				    OR prior.estimate_source<>NEW.estimate_source OR prior.estimate_confidence IS NOT NEW.estimate_confidence
+				    OR prior.estimate_basis<>NEW.estimate_basis))
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery estimate revision is stale or changed'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_external_source_activation_cutoff
+				 BEFORE INSERT ON delivery_stage_events
+				 WHEN NEW.source_sequence IS NOT NULL
+				  AND EXISTS(SELECT 1 FROM delivery_reporters r WHERE r.id=NEW.reporter_id
+				   AND r.delivery_id=NEW.delivery_id AND r.reporter_type='external')
+				  AND NEW.source_sequence<=COALESCE((SELECT owner.authority_source_sequence_cutoff
+				   FROM delivery_stage_events owner WHERE owner.attempt_id=NEW.attempt_id
+				    AND owner.stage_key=NEW.stage_key AND owner.execution_number=NEW.execution_number
+				    AND owner.authority_epoch=NEW.authority_epoch AND owner.reporter_id=NEW.reporter_id
+				    AND owner.event_type IN ('execution_started','handoff')
+				   ORDER BY owner.event_sequence DESC LIMIT 1),0)
+				 BEGIN SELECT RAISE(ABORT, 'external stage fact predates authority activation'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_succeeded_requires_declared_evidence
+				 BEFORE INSERT ON delivery_stage_events
+				 WHEN NEW.event_type IN ('semantic_report','lifecycle_normalized')
+				  AND NEW.semantic_state='succeeded'
+				  AND (NEW.declared_evidence_count=0 OR NEW.current_blocker_count<>0 OR NEW.needs_input<>0)
+				 BEGIN SELECT RAISE(ABORT, 'successful stage fact requires evidence and no current blocker'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_activation_authority_kind
+				 BEFORE INSERT ON delivery_agent_run_activations
+				 WHEN COALESCE((SELECT event_type FROM delivery_stage_events WHERE id=NEW.authority_stage_event_id),'')
+				  NOT IN ('execution_started','handoff')
+				 BEGIN SELECT RAISE(ABORT, 'delivery run activation authority is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_activation_exact_cutoff
+				 BEFORE INSERT ON delivery_agent_run_activations
+				 WHEN NEW.telemetry_sequence_cutoff IS NULL OR
+				  NEW.telemetry_sequence_cutoff<>COALESCE((SELECT MAX(t.sequence)
+				  FROM agent_run_telemetry t WHERE t.run_id=NEW.agent_run_id),0)
+				 BEGIN SELECT RAISE(ABORT, 'delivery run activation cutoff is not the ledger high-water'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_external_activation_exact_cutoff
+				 BEFORE INSERT ON delivery_stage_events
+				 WHEN NEW.event_type IN ('execution_started','handoff')
+				  AND EXISTS(SELECT 1 FROM delivery_reporters r WHERE r.id=NEW.reporter_id
+				   AND r.delivery_id=NEW.delivery_id AND r.reporter_type='external')
+				  AND (NEW.authority_source_sequence_cutoff IS NULL OR
+				   NEW.authority_source_sequence_cutoff<>COALESCE((SELECT MAX(prior.source_sequence)
+				   FROM delivery_stage_events prior WHERE prior.attempt_id=NEW.attempt_id
+				    AND prior.stage_key=NEW.stage_key AND prior.execution_number=NEW.execution_number
+				    AND prior.reporter_id=NEW.reporter_id),0))
+				 BEGIN SELECT RAISE(ABORT, 'external authority activation cutoff is not the ledger high-water'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_execution_terminal_seal
+				 BEFORE INSERT ON delivery_stage_events
+				 WHEN EXISTS (
+					SELECT 1 FROM delivery_stage_events prior
+					WHERE prior.attempt_id=NEW.attempt_id AND prior.stage_key=NEW.stage_key
+					  AND prior.execution_number=NEW.execution_number
+					  AND prior.event_type IN ('semantic_report','lifecycle_normalized')
+					  AND prior.semantic_state IN ('succeeded','failed','cancelled','draft_ready')
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery stage execution is terminal'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_authority_kind
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND COALESCE((SELECT event_type FROM delivery_stage_events
+				   WHERE id=NEW.reset_authority_anchor_stage_event_id),'') NOT IN ('execution_started','handoff')
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset authority anchor is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_current_authority
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND NOT EXISTS(SELECT 1 FROM delivery_stage_latest latest
+				   WHERE latest.delivery_id=NEW.delivery_id AND latest.attempt_id=NEW.attempt_id
+				    AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
+				    AND latest.authority_epoch=NEW.authority_epoch
+				    AND latest.current_reporter_id=NEW.reset_owner_reporter_id
+				    AND latest.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+				    AND latest.authority_stage_event_id=NEW.previous_stage_event_id)
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset does not target current authority'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_exact_epoch
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND (NEW.reset_epoch IS NULL OR NEW.reset_epoch<>COALESCE((SELECT MAX(prior.reset_epoch)+1
+				   FROM delivery_stage_events prior WHERE prior.attempt_id=NEW.attempt_id
+				    AND prior.stage_key=NEW.stage_key AND prior.execution_number=NEW.execution_number),1))
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset epoch is not the next execution epoch'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_exact_stage_cutoff
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND (NEW.reset_source_cutoff IS NULL OR NEW.reset_source_cutoff<>COALESCE((SELECT MAX(prior.source_sequence)
+				   FROM delivery_stage_events prior WHERE prior.attempt_id=NEW.attempt_id
+				    AND prior.stage_key=NEW.stage_key AND prior.execution_number=NEW.execution_number
+				    AND prior.authority_epoch=NEW.authority_epoch AND prior.reporter_id=NEW.reset_owner_reporter_id),0))
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset stage cutoff is not the ledger high-water'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_source_kind
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND ((EXISTS(SELECT 1 FROM delivery_reporters owner WHERE owner.delivery_id=NEW.delivery_id
+				    AND owner.id=NEW.reset_owner_reporter_id AND owner.reporter_type='agent_run')
+				   AND NEW.reset_source_kind<>'stage_and_agent_run_telemetry') OR
+				   (EXISTS(SELECT 1 FROM delivery_reporters owner WHERE owner.delivery_id=NEW.delivery_id
+				    AND owner.id=NEW.reset_owner_reporter_id AND owner.reporter_type<>'agent_run')
+				   AND NEW.reset_source_kind<>'stage_events'))
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset source kind does not match current owner'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reset_exact_telemetry_cutoff
+				 BEFORE INSERT ON delivery_stage_events WHEN NEW.event_type='progress_reset_authorized'
+				  AND NEW.reset_source_kind='stage_and_agent_run_telemetry'
+				  AND (NEW.reset_telemetry_run_id IS NULL OR NEW.reset_telemetry_sequence_cutoff IS NULL OR
+				   NOT EXISTS(SELECT 1 FROM delivery_agent_run_activations activation
+				    WHERE activation.delivery_id=NEW.delivery_id AND activation.attempt_id=NEW.attempt_id
+				     AND activation.stage_key=NEW.stage_key AND activation.execution_number=NEW.execution_number
+				     AND activation.authority_epoch=NEW.authority_epoch
+				     AND activation.agent_run_id=NEW.reset_telemetry_run_id
+				     AND activation.reporter_id=NEW.reset_owner_reporter_id
+				     AND activation.authority_stage_event_id=NEW.reset_authority_anchor_stage_event_id) OR
+				   NEW.reset_telemetry_sequence_cutoff<>COALESCE((SELECT MAX(t.sequence) FROM agent_run_telemetry t
+				    WHERE t.run_id=NEW.reset_telemetry_run_id),0))
+				 BEGIN SELECT RAISE(ABORT, 'delivery reset telemetry cutoff is not the ledger high-water'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_duration_exact_success
+				 BEFORE INSERT ON delivery_stage_durations WHEN NOT EXISTS(
+				  SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id
+				  JOIN delivery_attempt_policy_seals seal ON seal.delivery_id=d.id AND seal.attempt_id=NEW.attempt_id
+				  JOIN delivery_attempt_stage_policy policy ON policy.delivery_id=d.id
+				   AND policy.attempt_id=NEW.attempt_id AND policy.stage_key=NEW.stage_key
+				  JOIN delivery_stage_latest latest ON latest.delivery_id=d.id AND latest.attempt_id=NEW.attempt_id
+				   AND latest.stage_key=NEW.stage_key
+				  JOIN delivery_stage_events start ON start.id=NEW.stage_execution_id
+				  JOIN delivery_stage_events terminal ON terminal.id=NEW.terminal_stage_event_id
+				  WHERE d.id=NEW.delivery_id AND d.issue_id=NEW.root_issue_id
+				   AND i.project_id IS NEW.project_id_at_completion AND policy.applicability='required'
+				   AND latest.execution_number=NEW.execution_number
+				   AND latest.execution_start_stage_event_id=NEW.stage_execution_id
+				   AND latest.semantic_stage_event_id=NEW.terminal_stage_event_id
+				   AND start.delivery_id=NEW.delivery_id AND start.attempt_id=NEW.attempt_id
+				   AND start.stage_key=NEW.stage_key AND start.execution_number=NEW.execution_number
+				   AND start.event_type='execution_started'
+				   AND terminal.delivery_id=NEW.delivery_id AND terminal.attempt_id=NEW.attempt_id
+				   AND terminal.stage_key=NEW.stage_key AND terminal.execution_number=NEW.execution_number
+				   AND terminal.event_type IN ('semantic_report','lifecycle_normalized')
+				   AND terminal.semantic_state='succeeded' AND terminal.current_blocker_count=0
+				   AND terminal.needs_input=0 AND terminal.authority_epoch=latest.authority_epoch
+				   AND terminal.reporter_id=latest.current_reporter_id
+				   AND terminal.ended_at=NEW.completed_at AND terminal.server_received_at=NEW.completed_at
+				   AND (NEW.stage_key<>'specification' OR terminal.spec_revision=d.spec_revision)
+				   AND EXISTS(SELECT 1 FROM delivery_evidence evidence
+				    WHERE evidence.stage_event_id=terminal.id AND evidence.outcome='passed')
+				   AND NOT EXISTS(SELECT 1 FROM delivery_evidence evidence
+				    WHERE evidence.stage_event_id=terminal.id AND evidence.outcome='failed')
+				   AND NOT EXISTS(
+				    SELECT 1 FROM delivery_attempt_stage_policy chain_policy
+				    WHERE chain_policy.attempt_id=NEW.attempt_id AND chain_policy.applicability='required'
+				     AND chain_policy.sort_order<=policy.sort_order AND NOT EXISTS(
+				      SELECT 1 FROM delivery_stage_latest chain_latest
+				      JOIN delivery_stage_events chain_start ON chain_start.id=chain_latest.execution_start_stage_event_id
+				      JOIN delivery_stage_events chain_terminal ON chain_terminal.id=chain_latest.semantic_stage_event_id
+				      WHERE chain_latest.delivery_id=NEW.delivery_id AND chain_latest.attempt_id=NEW.attempt_id
+				       AND chain_latest.stage_key=chain_policy.stage_key
+				       AND chain_terminal.semantic_state='succeeded' AND chain_terminal.current_blocker_count=0
+				       AND chain_terminal.needs_input=0
+				       AND chain_terminal.authority_epoch=chain_latest.authority_epoch
+				       AND chain_terminal.reporter_id=chain_latest.current_reporter_id
+				       AND (chain_policy.stage_key<>'specification' OR chain_terminal.spec_revision=d.spec_revision)
+				       AND chain_start.based_on_stage_event_id IS (
+				        SELECT predecessor_terminal.id FROM delivery_attempt_stage_policy predecessor_policy
+				        JOIN delivery_stage_latest predecessor_latest ON predecessor_latest.attempt_id=predecessor_policy.attempt_id
+				         AND predecessor_latest.stage_key=predecessor_policy.stage_key
+				        JOIN delivery_stage_events predecessor_terminal ON predecessor_terminal.id=predecessor_latest.semantic_stage_event_id
+				        WHERE predecessor_policy.attempt_id=chain_policy.attempt_id
+				         AND predecessor_policy.applicability='required'
+				         AND predecessor_policy.sort_order<chain_policy.sort_order
+				        ORDER BY predecessor_policy.sort_order DESC LIMIT 1)
+				       AND EXISTS(SELECT 1 FROM delivery_evidence evidence
+				        WHERE evidence.stage_event_id=chain_terminal.id AND evidence.outcome='passed')
+				       AND NOT EXISTS(SELECT 1 FROM delivery_evidence evidence
+				        WHERE evidence.stage_event_id=chain_terminal.id AND evidence.outcome='failed')
+				     )
+				   )
+				 ) BEGIN SELECT RAISE(ABORT, 'delivery duration lacks exact eligible terminal lineage'); END`,
+
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_issue_update_change
+				 AFTER UPDATE ON issues WHEN EXISTS(SELECT 1 FROM deliveries WHERE issue_id=NEW.id)
+				 BEGIN
+				UPDATE deliveries SET project_id_hint=NEW.project_id,
+				 updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				 WHERE issue_id=NEW.id AND NEW.project_id IS NOT OLD.project_id;
+				UPDATE deliveries SET spec_revision=spec_revision+1,
+				 updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				 WHERE issue_id=NEW.id AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+				  OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+				INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,payload_hash,kind,
+				 reporter_id,reason_code,reason_text,server_received_at)
+				SELECT d.id,COALESCE((SELECT MAX(delivery_revision)+1 FROM delivery_events WHERE delivery_id=d.id),1),
+				 'spec-revision:'||d.spec_revision,X'44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a',
+				 'attempt_started',r.id,'spec_changed','Canonical issue specification changed',
+				 strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				FROM deliveries d JOIN delivery_reporters r ON r.delivery_id=d.id
+				 AND r.reporter_type='system' AND r.opaque_key='paimos'
+				WHERE d.issue_id=NEW.id AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+				 OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+				INSERT INTO delivery_attempts(delivery_id,attempt_number,plan_revision,previous_attempt_id,
+				 start_delivery_event_id,project_id_at_start,reason_code,reason_text,created_at)
+				SELECT d.id,COALESCE((SELECT MAX(attempt_number)+1 FROM delivery_attempts WHERE delivery_id=d.id),1),
+				 COALESCE((SELECT MAX(plan_revision)+1 FROM delivery_attempts WHERE delivery_id=d.id),1),
+					 (SELECT a.id FROM delivery_attempts a JOIN delivery_attempt_policy_seals seal
+					   ON seal.delivery_id=a.delivery_id AND seal.attempt_id=a.id
+					  WHERE a.delivery_id=d.id ORDER BY a.attempt_number DESC LIMIT 1),
+				 (SELECT id FROM delivery_events WHERE delivery_id=d.id ORDER BY delivery_revision DESC LIMIT 1),
+				 NEW.project_id,'spec_changed','Canonical issue specification changed',strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				FROM deliveries d WHERE d.issue_id=NEW.id
+				 AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+				  OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+				INSERT INTO delivery_attempt_stage_policy(delivery_id,attempt_id,stage_key,sort_order,applicability,
+				 weight,policy_reference,reason_code,reason_text,authorized_by_reporter_id,created_at)
+				SELECT next.delivery_id,next.id,p.stage_key,p.sort_order,p.applicability,p.weight,p.policy_reference,
+				 p.reason_code,p.reason_text,p.authorized_by_reporter_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				FROM delivery_attempts next JOIN delivery_attempt_stage_policy p ON p.attempt_id=next.previous_attempt_id
+				 WHERE next.delivery_id=(SELECT id FROM deliveries WHERE issue_id=NEW.id)
+					 AND next.attempt_number=(SELECT MAX(attempt_number) FROM delivery_attempts
+					  WHERE delivery_id=next.delivery_id)
+					 AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+					  OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+				INSERT INTO delivery_attempt_policy_seals(delivery_id,attempt_id,sealed_at)
+				SELECT next.delivery_id,next.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				FROM delivery_attempts next WHERE next.delivery_id=(SELECT id FROM deliveries WHERE issue_id=NEW.id)
+				 AND next.attempt_number=(SELECT MAX(attempt_number) FROM delivery_attempts
+				  WHERE delivery_id=next.delivery_id)
+				 AND (NEW.title IS NOT OLD.title OR NEW.description IS NOT OLD.description
+				  OR NEW.acceptance_criteria IS NOT OLD.acceptance_criteria);
+				INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				 change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,NEW.project_id,
+				 d.change_sequence_high_water+1,
+				 COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				 'issue','issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				FROM deliveries d WHERE d.issue_id=NEW.id;
+			 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_relation_insert_change
+			 AFTER INSERT ON issue_relations
+			 BEGIN
+				INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				 change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+				 d.change_sequence_high_water+1,
+				 COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				 'lane','relation',NEW.source_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				FROM deliveries d WHERE d.issue_id IN (NEW.source_id,NEW.target_id);
+			 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_relation_delete_change
+			 AFTER DELETE ON issue_relations
+			 BEGIN
+				INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				 change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+				 d.change_sequence_high_water+1,
+				 COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				 'lane','relation',OLD.source_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				FROM deliveries d WHERE d.issue_id IN (OLD.source_id,OLD.target_id);
+			 END`,
+
+			`CREATE TRIGGER IF NOT EXISTS trg_deliveries_delete_tombstone
+			 BEFORE DELETE ON deliveries
+			 WHEN NOT EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id)
+			 BEGIN
+				INSERT INTO delivery_change_log(
+				 cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				 change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				VALUES(lower(hex(randomblob(16))),OLD.id,OLD.issue_id,OLD.delivery_key,OLD.project_id_hint,
+				 OLD.change_sequence_high_water+1,
+				 COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=OLD.id),0),
+				 'root_deleted','issue',OLD.issue_id,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+			 END`,
+
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reporters_no_update BEFORE UPDATE ON delivery_reporters BEGIN SELECT RAISE(ABORT,'delivery reporters are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_deliveries_identity_no_update BEFORE UPDATE ON deliveries
+				 WHEN NEW.id IS NOT OLD.id OR NEW.issue_id IS NOT OLD.issue_id OR NEW.delivery_key IS NOT OLD.delivery_key
+				  OR NEW.created_at IS NOT OLD.created_at
+				 BEGIN SELECT RAISE(ABORT,'delivery identity is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_events_no_update BEFORE UPDATE ON delivery_events BEGIN SELECT RAISE(ABORT,'delivery events are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_attempts_no_update BEFORE UPDATE ON delivery_attempts BEGIN SELECT RAISE(ABORT,'delivery attempts are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_no_update BEFORE UPDATE ON delivery_attempt_stage_policy BEGIN SELECT RAISE(ABORT,'delivery attempt policy is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_seals_no_update BEFORE UPDATE ON delivery_attempt_policy_seals BEGIN SELECT RAISE(ABORT,'delivery attempt policy seal is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_events_no_update BEFORE UPDATE ON delivery_stage_events BEGIN SELECT RAISE(ABORT,'delivery stage events are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_blockers_no_update BEFORE UPDATE ON delivery_stage_blockers BEGIN SELECT RAISE(ABORT,'delivery blockers are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_no_update BEFORE UPDATE ON delivery_evidence BEGIN SELECT RAISE(ABORT,'delivery evidence is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_links_no_update BEFORE UPDATE ON delivery_agent_run_links BEGIN SELECT RAISE(ABORT,'delivery run links are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_activations_no_update BEFORE UPDATE ON delivery_agent_run_activations BEGIN SELECT RAISE(ABORT,'delivery run activations are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_durations_no_update BEFORE UPDATE ON delivery_stage_durations BEGIN SELECT RAISE(ABORT,'delivery durations are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_no_update BEFORE UPDATE ON delivery_change_log BEGIN SELECT RAISE(ABORT,'delivery change log is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_retention_no_update BEFORE UPDATE ON delivery_change_retention BEGIN SELECT RAISE(ABORT,'delivery retention history is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_retention_no_delete BEFORE DELETE ON delivery_change_retention BEGIN SELECT RAISE(ABORT,'delivery retention history is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_retention_monotone_insert
+				 BEFORE INSERT ON delivery_change_retention WHEN
+				  NOT EXISTS(SELECT 1 FROM delivery_change_retention existing WHERE existing.floor_id=NEW.floor_id)
+				  AND (NEW.floor_id<=COALESCE((SELECT MAX(floor_id) FROM delivery_change_retention),-1) OR
+				   NEW.floor_id>COALESCE((SELECT MAX(id) FROM delivery_change_log),0))
+				 BEGIN SELECT RAISE(ABORT,'delivery retention floor is not a valid monotone prefix'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_deliveries_no_direct_delete BEFORE DELETE ON deliveries
+			 WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id)
+			 BEGIN SELECT RAISE(ABORT,'deliveries cannot be deleted directly'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_reporters_no_direct_delete BEFORE DELETE ON delivery_reporters
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+			 BEGIN SELECT RAISE(ABORT,'delivery reporters are append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_events_no_direct_delete BEFORE DELETE ON delivery_events
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+			 BEGIN SELECT RAISE(ABORT,'delivery events are append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_attempts_no_direct_delete BEFORE DELETE ON delivery_attempts
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+			 BEGIN SELECT RAISE(ABORT,'delivery attempts are append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_no_direct_delete BEFORE DELETE ON delivery_attempt_stage_policy
+				 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+				 BEGIN SELECT RAISE(ABORT,'delivery attempt policy is append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_policy_seals_no_direct_delete BEFORE DELETE ON delivery_attempt_policy_seals
+				 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+				 BEGIN SELECT RAISE(ABORT,'delivery attempt policy seals are append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_stage_events_no_direct_delete BEFORE DELETE ON delivery_stage_events
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+			 BEGIN SELECT RAISE(ABORT,'delivery stage events are append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_blockers_no_direct_delete BEFORE DELETE ON delivery_stage_blockers
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+			 BEGIN SELECT RAISE(ABORT,'delivery blockers are append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_evidence_no_direct_delete BEFORE DELETE ON delivery_evidence
+			 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+			 BEGIN SELECT RAISE(ABORT,'delivery evidence is append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_links_no_direct_delete BEFORE DELETE ON delivery_agent_run_links
+				 WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.root_issue_id)
+				 BEGIN SELECT RAISE(ABORT,'delivery run links are append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_run_activations_no_direct_delete BEFORE DELETE ON delivery_agent_run_activations
+				 WHEN EXISTS(SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id WHERE d.id=OLD.delivery_id)
+				 BEGIN SELECT RAISE(ABORT,'delivery run activations are append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_durations_no_direct_delete BEFORE DELETE ON delivery_stage_durations
+			 WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.root_issue_id)
+			 BEGIN SELECT RAISE(ABORT,'delivery durations are append-only'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_delete_guard BEFORE DELETE ON delivery_change_log
+			 WHEN OLD.id > COALESCE((SELECT MAX(floor_id) FROM delivery_change_retention),-1)
+			 BEGIN SELECT RAISE(ABORT,'delivery change retention floor has not advanced'); END`,
+		}},
+
+		// M145 / PAI-804: delivery-stream audience and complete lane metadata
+		// invalidation. The nullable prior project is intentionally not an FK:
+		// move-away and deletion reset rows must survive project retention. No
+		// historical source audience is guessed; every pre-M145 row remains NULL.
+		{145, []string{
+			`ALTER TABLE delivery_change_log ADD COLUMN revoked_project_id INTEGER
+				 CHECK(revoked_project_id IS NULL OR revoked_project_id > 0)`,
+			`ALTER TABLE deliveries ADD COLUMN pending_revoked_project_id INTEGER
+				 CHECK(pending_revoked_project_id IS NULL OR pending_revoked_project_id > 0)`,
+			`DROP TRIGGER IF EXISTS trg_delivery_forbidden_patterns_no_insert`,
+			`INSERT OR IGNORE INTO delivery_forbidden_value_patterns(
+			 pattern,normalize_horizontal_whitespace,case_sensitive,boundary_needle,require_bearer_whitespace) VALUES
+			 ('*passwd[=:]*',1,0,'passwd',0),
+			 ('*passwd[/_-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-][0-9a-z._~+/=-]*',1,0,'passwd',0),
+			 ('*sk-[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0),
+			 ('*sk_[0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-][0-9a-z_-]*',0,0,'sk',0)`,
+			`CREATE TRIGGER trg_delivery_forbidden_patterns_no_insert
+			 BEFORE INSERT ON delivery_forbidden_value_patterns WHEN NOT EXISTS(
+			  SELECT 1 FROM delivery_forbidden_value_patterns existing WHERE existing.pattern=NEW.pattern
+			   AND existing.normalize_horizontal_whitespace=NEW.normalize_horizontal_whitespace
+			   AND existing.case_sensitive=NEW.case_sensitive AND existing.boundary_needle=NEW.boundary_needle
+			   AND existing.require_bearer_whitespace=NEW.require_bearer_whitespace)
+			 BEGIN SELECT RAISE(ABORT, 'delivery forbidden patterns are migration-owned'); END`,
+			`DROP TRIGGER IF EXISTS trg_delivery_reporter_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_reporter_secret_guard", "delivery_reporters",
+				"NEW.opaque_key", `
+		  OR instr(CAST(value.value AS TEXT),'?')>0
+		  OR (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)`,
+				"forbidden delivery reporter value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_event_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_event_secret_guard", "delivery_events",
+				"NEW.idempotency_key,NEW.reason_code,NEW.reason_text", "", "forbidden delivery event value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_attempt_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_attempt_secret_guard", "delivery_attempts",
+				"NEW.reason_code,NEW.reason_text", "", "forbidden delivery attempt value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_policy_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_policy_secret_guard", "delivery_attempt_stage_policy",
+				"NEW.policy_reference,NEW.reason_code,NEW.reason_text", `
+		  OR (value.value=NEW.policy_reference AND (instr(CAST(value.value AS TEXT),'?')>0 OR
+		   (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)))`,
+				"forbidden delivery policy value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_stage_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_stage_secret_guard", "delivery_stage_events",
+				"COALESCE(NEW.source_idempotency_key,''),NEW.activity,NEW.estimate_basis,NEW.reason_code,NEW.reason_text",
+				"", "forbidden delivery stage value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_blocker_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_blocker_secret_guard", "delivery_stage_blockers",
+				"NEW.blocker_key,NEW.summary", "", "forbidden delivery blocker value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_evidence_secret_guard`,
+			deliverySecretGuardSQL("trg_delivery_evidence_secret_guard", "delivery_evidence",
+				"NEW.reference_value", `
+		  OR instr(CAST(value.value AS TEXT),'?')>0
+		  OR (instr(CAST(value.value AS TEXT),'://')>0 AND instr(CAST(value.value AS TEXT),'@')>0)`,
+				"forbidden delivery evidence value"),
+			`DROP TRIGGER IF EXISTS trg_delivery_issue_update_change`,
+			agentModeDeliveryIssueUpdateTriggerSQL,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_delivery_issue_delete
+				 BEFORE DELETE ON issues WHEN OLD.deleted_at IS NULL
+				  AND EXISTS(SELECT 1 FROM deliveries WHERE issue_id=OLD.id)
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,OLD.project_id,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',OLD.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM deliveries d WHERE d.issue_id=OLD.id;
+				 END`,
+			`DROP TRIGGER IF EXISTS trg_deliveries_delete_tombstone`,
+			`CREATE TABLE IF NOT EXISTS agent_mode_legacy_roots (
+				 issue_id                   INTEGER PRIMARY KEY,
+				 synthetic_delivery_id      INTEGER NOT NULL UNIQUE CHECK(synthetic_delivery_id=-issue_id),
+				 delivery_key               TEXT NOT NULL UNIQUE CHECK(delivery_key=('issue:'||issue_id)),
+				 project_id_hint            INTEGER NOT NULL CHECK(project_id_hint > 0),
+				 pending_revoked_project_id INTEGER CHECK(pending_revoked_project_id IS NULL OR pending_revoked_project_id > 0),
+				 change_sequence_high_water INTEGER NOT NULL DEFAULT 0 CHECK(change_sequence_high_water >= 0),
+				 created_at                 TEXT NOT NULL
+			 ) WITHOUT ROWID`,
+			`INSERT OR IGNORE INTO agent_mode_legacy_roots(
+				 issue_id,synthetic_delivery_id,delivery_key,project_id_hint,created_at)
+			 SELECT i.id,-i.id,'issue:'||i.id,i.project_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 FROM issues i WHERE i.deleted_at IS NULL
+			  AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=i.id)
+			  AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=i.id
+			   AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))
+			  AND NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=i.id
+			   AND ar.delivery_instrumentation_version=1)`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_insert_guard
+				 BEFORE INSERT ON agent_mode_legacy_roots WHEN NEW.issue_id<=0 OR
+				  NEW.synthetic_delivery_id<>-NEW.issue_id OR NEW.delivery_key<>('issue:'||NEW.issue_id) OR
+				  NEW.pending_revoked_project_id IS NOT NULL OR NEW.change_sequence_high_water<>0 OR
+				  julianday(NEW.created_at) IS NULL OR
+				  NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ',NEW.created_at) OR
+				  NOT EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.issue_id
+				   AND issue.deleted_at IS NULL AND issue.project_id=NEW.project_id_hint) OR
+				  EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=NEW.issue_id) OR
+				  NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.issue_id
+				   AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running')) OR
+				  EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.issue_id
+				   AND ar.delivery_instrumentation_version=1)
+				 BEGIN SELECT RAISE(ABORT,'agent mode legacy root provenance is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_identity_guard
+				 BEFORE UPDATE ON agent_mode_legacy_roots WHEN
+				  NEW.issue_id IS NOT OLD.issue_id OR NEW.synthetic_delivery_id IS NOT OLD.synthetic_delivery_id OR
+				  NEW.delivery_key IS NOT OLD.delivery_key OR NEW.created_at IS NOT OLD.created_at
+				 BEGIN SELECT RAISE(ABORT,'agent mode legacy root identity is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_project_guard
+				 BEFORE UPDATE OF project_id_hint,pending_revoked_project_id ON agent_mode_legacy_roots
+				 WHEN NOT (
+				  (NEW.project_id_hint IS OLD.project_id_hint AND NEW.pending_revoked_project_id IS OLD.pending_revoked_project_id) OR
+				  (OLD.pending_revoked_project_id IS NULL AND NEW.project_id_hint<>OLD.project_id_hint AND
+				   NEW.project_id_hint=COALESCE((SELECT project_id FROM issues WHERE id=OLD.issue_id),0) AND
+				   NEW.pending_revoked_project_id=OLD.project_id_hint) OR
+				  (OLD.pending_revoked_project_id IS NULL AND NEW.project_id_hint<>OLD.project_id_hint AND
+				   NEW.project_id_hint=COALESCE((SELECT project_id FROM issues WHERE id=OLD.issue_id),0) AND
+				   NEW.pending_revoked_project_id IS NULL AND (EXISTS(
+				    SELECT 1 FROM issues issue WHERE issue.id=OLD.issue_id AND issue.deleted_at IS NOT NULL) OR
+				    NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=OLD.issue_id
+				     AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running')) OR
+				    EXISTS(SELECT 1 FROM delivery_change_log change
+				     WHERE change.delivery_id=OLD.synthetic_delivery_id
+				      AND change.change_sequence=OLD.change_sequence_high_water
+				      AND change.kind IN ('issue','project_move')))) OR
+				  (NEW.project_id_hint=OLD.project_id_hint AND OLD.pending_revoked_project_id IS NOT NULL AND
+				   NEW.pending_revoked_project_id IS NULL AND
+				   NEW.change_sequence_high_water=OLD.change_sequence_high_water+1 AND EXISTS(
+				    SELECT 1 FROM delivery_change_log change
+				    WHERE change.delivery_id=OLD.synthetic_delivery_id
+				     AND change.change_sequence=NEW.change_sequence_high_water
+				     AND change.kind='project_move'
+				     AND change.revoked_project_id=OLD.pending_revoked_project_id))
+				 )
+				 BEGIN SELECT RAISE(ABORT,'agent mode legacy root project is not current'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_no_direct_delete
+				 BEFORE DELETE ON agent_mode_legacy_roots WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id)
+				  AND NOT EXISTS(SELECT 1 FROM deliveries WHERE issue_id=OLD.issue_id)
+				 BEGIN SELECT RAISE(ABORT,'agent mode legacy roots cannot be deleted directly'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_retire_on_delivery
+				 AFTER INSERT ON deliveries
+				 BEGIN DELETE FROM agent_mode_legacy_roots WHERE issue_id=NEW.issue_id; END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_issue_hide_change
+				 BEFORE UPDATE OF deleted_at ON issues
+				 WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,OLD.project_id,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',OLD.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM deliveries d WHERE d.issue_id=OLD.id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   OLD.project_id,legacy.change_sequence_high_water+1,0,'issue','issue',OLD.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM agent_mode_legacy_roots legacy
+				  WHERE legacy.issue_id=OLD.id
+				   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=OLD.id)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=OLD.id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_project_move_capture
+				 BEFORE UPDATE OF project_id ON issues WHEN NEW.project_id IS NOT OLD.project_id
+				  AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL
+				 BEGIN
+				  UPDATE deliveries SET pending_revoked_project_id=OLD.project_id WHERE issue_id=OLD.id;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_deliveries_project_pending_guard
+				 BEFORE UPDATE OF pending_revoked_project_id ON deliveries
+				 WHEN NEW.pending_revoked_project_id IS NOT OLD.pending_revoked_project_id AND NOT (
+				  (OLD.pending_revoked_project_id IS NULL AND NEW.pending_revoked_project_id=OLD.project_id_hint AND
+				   EXISTS(SELECT 1 FROM issues issue WHERE issue.id=OLD.issue_id
+				    AND issue.project_id=OLD.project_id_hint)) OR
+				  (OLD.pending_revoked_project_id IS NOT NULL AND NEW.pending_revoked_project_id IS NULL AND
+				   NEW.change_sequence_high_water=OLD.change_sequence_high_water+1 AND EXISTS(
+				    SELECT 1 FROM delivery_change_log change WHERE change.delivery_id=OLD.id
+				     AND change.change_sequence=NEW.change_sequence_high_water
+				     AND change.kind='project_move'
+				     AND change.revoked_project_id=OLD.pending_revoked_project_id))
+				 )
+				 BEGIN SELECT RAISE(ABORT,'delivery project move provenance is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_deliveries_project_hint_guard
+				 BEFORE UPDATE OF project_id_hint ON deliveries
+				 WHEN NEW.project_id_hint<>OLD.project_id_hint AND NOT EXISTS(
+				  SELECT 1 FROM issues issue WHERE issue.id=OLD.issue_id
+				   AND issue.project_id=NEW.project_id_hint)
+				 BEGIN SELECT RAISE(ABORT,'delivery project hint is not current'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_issue_project_move_change
+				 AFTER UPDATE OF project_id ON issues WHEN NEW.project_id IS NOT OLD.project_id
+				 BEGIN
+				  UPDATE deliveries SET project_id_hint=NEW.project_id WHERE issue_id=NEW.id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   revoked_project_id,change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,NEW.project_id,OLD.project_id,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'project_move','issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM deliveries d WHERE d.issue_id=NEW.id
+				   AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL;
+				 END`,
+			`DROP TRIGGER IF EXISTS trg_delivery_change_sequence_guard`,
+			`CREATE TRIGGER trg_delivery_change_sequence_guard
+				 BEFORE INSERT ON delivery_change_log
+				 WHEN NEW.change_sequence <> CASE WHEN NEW.delivery_id>0 THEN
+				  COALESCE((SELECT change_sequence_high_water+1 FROM deliveries WHERE id=NEW.delivery_id),-1)
+				 ELSE COALESCE((SELECT change_sequence_high_water+1 FROM agent_mode_legacy_roots
+				  WHERE synthetic_delivery_id=NEW.delivery_id),-1) END
+				 BEGIN SELECT RAISE(ABORT,'delivery change sequence is not contiguous'); END`,
+			`DROP TRIGGER IF EXISTS trg_delivery_change_provenance_guard`,
+			`CREATE TRIGGER trg_delivery_change_provenance_guard
+				 BEFORE INSERT ON delivery_change_log WHEN
+				  ((NEW.delivery_id>0)<>(EXISTS(SELECT 1 FROM deliveries d WHERE d.id=NEW.delivery_id
+				    AND d.issue_id=NEW.root_issue_id AND d.delivery_key=NEW.delivery_key
+				    AND d.project_id_hint IS NEW.project_id_hint))) OR
+				  ((NEW.delivery_id<0)<>(EXISTS(SELECT 1 FROM agent_mode_legacy_roots legacy
+				    WHERE legacy.synthetic_delivery_id=NEW.delivery_id AND legacy.issue_id=NEW.root_issue_id
+				     AND legacy.delivery_key=NEW.delivery_key AND legacy.project_id_hint IS NEW.project_id_hint
+				     AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)))) OR
+				  NEW.delivery_id=0 OR
+				  (NEW.delivery_id>0 AND NEW.kind='project_move' AND NEW.revoked_project_id IS NOT (
+				   SELECT pending_revoked_project_id FROM deliveries WHERE id=NEW.delivery_id)) OR
+				  (NEW.delivery_id<0 AND (NEW.delivery_revision<>0 OR NEW.source_sequence IS NOT NULL OR
+				   NEW.source_id IS NULL OR
+				   NOT EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.root_issue_id
+				    AND issue.deleted_at IS NULL
+				    AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=issue.id)
+				    AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=issue.id
+				     AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))) OR
+				   (NEW.kind='project_move' AND NEW.revoked_project_id IS NOT (
+				    SELECT pending_revoked_project_id FROM agent_mode_legacy_roots
+				    WHERE synthetic_delivery_id=NEW.delivery_id)) OR NOT (
+				   (NEW.kind='run' AND NEW.source_kind='agent_run' AND EXISTS(
+				    SELECT 1 FROM agent_runs ar WHERE ar.id=NEW.source_id AND ar.issue_id=NEW.root_issue_id
+				     AND ar.delivery_instrumentation_version=0)) OR
+				   (NEW.kind IN ('issue','project_move') AND NEW.source_kind='issue'
+				    AND NEW.source_id=NEW.root_issue_id) OR
+				   (NEW.kind='lane' AND NEW.source_kind='relation' AND NEW.source_id>0) OR
+				   (NEW.kind='lane' AND NEW.source_kind='issue' AND NEW.source_id>0) OR
+				   (NEW.kind='root_deleted' AND NEW.source_kind='issue' AND NEW.source_id=NEW.root_issue_id)
+				  ))) OR
+				  (NEW.kind='root_deleted' AND (EXISTS(SELECT 1 FROM issues i WHERE i.id=NEW.root_issue_id)
+				   OR EXISTS(SELECT 1 FROM delivery_change_log prior WHERE prior.delivery_id=NEW.delivery_id
+				    AND prior.kind='root_deleted'))) OR
+				  (NEW.kind<>'root_deleted' AND NOT EXISTS(SELECT 1 FROM issues i
+				   WHERE i.id=NEW.root_issue_id AND i.deleted_at IS NULL))
+				 BEGIN SELECT RAISE(ABORT,'delivery change provenance does not match its live root'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_advance_legacy_high_water
+				 AFTER INSERT ON delivery_change_log WHEN NEW.delivery_id<0
+				 BEGIN UPDATE agent_mode_legacy_roots SET change_sequence_high_water=NEW.change_sequence,
+				  pending_revoked_project_id=CASE WHEN NEW.kind='project_move' THEN NULL
+				   ELSE pending_revoked_project_id END
+				  WHERE synthetic_delivery_id=NEW.delivery_id; END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_root_high_water_guard
+				 BEFORE UPDATE OF change_sequence_high_water ON agent_mode_legacy_roots
+				 WHEN NEW.change_sequence_high_water<>OLD.change_sequence_high_water AND NOT (
+				  NEW.change_sequence_high_water=OLD.change_sequence_high_water+1 AND EXISTS(
+				   SELECT 1 FROM delivery_change_log change WHERE change.delivery_id=OLD.synthetic_delivery_id
+				    AND change.change_sequence=NEW.change_sequence_high_water))
+				 BEGIN SELECT RAISE(ABORT,'agent mode legacy high-water is log-owned'); END`,
+			`DROP TRIGGER IF EXISTS trg_delivery_change_advance_high_water`,
+			`CREATE TRIGGER trg_delivery_change_advance_high_water
+				 AFTER INSERT ON delivery_change_log WHEN NEW.delivery_id>0
+				 BEGIN UPDATE deliveries SET change_sequence_high_water=NEW.change_sequence,
+				  pending_revoked_project_id=CASE WHEN NEW.kind='project_move' THEN NULL
+				   ELSE pending_revoked_project_id END WHERE id=NEW.delivery_id; END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_runs_creation_lineage_immutable
+				 BEFORE UPDATE OF id,issue_id ON agent_runs
+				 WHEN NEW.id IS NOT OLD.id OR NEW.issue_id IS NOT OLD.issue_id
+				 BEGIN SELECT RAISE(ABORT,'agent run creation lineage is immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_run_insert
+				 AFTER INSERT ON agent_runs WHEN NEW.delivery_instrumentation_version=0
+				  AND NEW.status IN ('queued','running')
+				 BEGIN
+				  INSERT OR IGNORE INTO agent_mode_legacy_roots(
+				   issue_id,synthetic_delivery_id,delivery_key,project_id_hint,created_at)
+				  SELECT issue.id,-issue.id,'issue:'||issue.id,issue.project_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM issues issue WHERE issue.id=NEW.issue_id
+				   AND issue.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=issue.id)
+				   AND NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=issue.id
+				    AND ar.delivery_instrumentation_version=1);
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),root.delivery_id,NEW.issue_id,root.delivery_key,root.project_id_hint,
+				   root.change_sequence+1,root.delivery_revision,'run','agent_run',NEW.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM (
+				    SELECT d.id AS delivery_id,d.delivery_key,d.project_id_hint,d.change_sequence_high_water AS change_sequence,
+				     COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0) AS delivery_revision
+				    FROM deliveries d WHERE d.issue_id=NEW.issue_id
+				     AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.issue_id AND issue.deleted_at IS NULL)
+				    UNION ALL
+				    SELECT legacy.synthetic_delivery_id,legacy.delivery_key,legacy.project_id_hint,
+				     legacy.change_sequence_high_water,0 FROM agent_mode_legacy_roots legacy
+				    WHERE legacy.issue_id=NEW.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=NEW.issue_id)
+				     AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.issue_id AND issue.deleted_at IS NULL)
+				   ) root;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_run_deactivate
+				 BEFORE UPDATE OF status ON agent_runs WHEN OLD.delivery_instrumentation_version=0
+				  AND OLD.status IN ('queued','running') AND NEW.status NOT IN ('queued','running')
+				  AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=OLD.issue_id AND issue.deleted_at IS NULL)
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),root.delivery_id,OLD.issue_id,root.delivery_key,root.project_id_hint,
+				   root.change_sequence+1,root.delivery_revision,'run','agent_run',OLD.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM (
+				    SELECT d.id AS delivery_id,d.delivery_key,d.project_id_hint,d.change_sequence_high_water AS change_sequence,
+				     COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0) AS delivery_revision
+				    FROM deliveries d WHERE d.issue_id=OLD.issue_id
+				    UNION ALL
+				    SELECT legacy.synthetic_delivery_id,legacy.delivery_key,legacy.project_id_hint,
+				     legacy.change_sequence_high_water,0 FROM agent_mode_legacy_roots legacy
+				    WHERE legacy.issue_id=OLD.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=OLD.issue_id)
+				   ) root;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_run_update
+				 AFTER UPDATE OF status ON agent_runs WHEN NEW.delivery_instrumentation_version=0
+				  AND OLD.status NOT IN ('queued','running') AND NEW.status IN ('queued','running')
+				 BEGIN
+				  INSERT OR IGNORE INTO agent_mode_legacy_roots(
+				   issue_id,synthetic_delivery_id,delivery_key,project_id_hint,created_at)
+				  SELECT issue.id,-issue.id,'issue:'||issue.id,issue.project_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM issues issue WHERE issue.id=NEW.issue_id
+				   AND NEW.status IN ('queued','running') AND issue.deleted_at IS NULL
+				   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=issue.id)
+				   AND NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=issue.id
+				    AND ar.delivery_instrumentation_version=1);
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),root.delivery_id,NEW.issue_id,root.delivery_key,root.project_id_hint,
+				   root.change_sequence+1,root.delivery_revision,'run','agent_run',NEW.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM (
+				    SELECT d.id AS delivery_id,d.delivery_key,d.project_id_hint,d.change_sequence_high_water AS change_sequence,
+				     COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0) AS delivery_revision
+				    FROM deliveries d WHERE d.issue_id=NEW.issue_id
+				     AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.issue_id AND issue.deleted_at IS NULL)
+				    UNION ALL
+				    SELECT legacy.synthetic_delivery_id,legacy.delivery_key,legacy.project_id_hint,
+				     legacy.change_sequence_high_water,0 FROM agent_mode_legacy_roots legacy
+				    WHERE legacy.issue_id=NEW.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=NEW.issue_id)
+				     AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=NEW.issue_id AND issue.deleted_at IS NULL)
+				   ) root;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_run_delete
+				 BEFORE DELETE ON agent_runs WHEN OLD.delivery_instrumentation_version=0
+				  AND OLD.status IN ('queued','running')
+				  AND EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id AND deleted_at IS NULL)
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),root.delivery_id,OLD.issue_id,root.delivery_key,root.project_id_hint,
+				   root.change_sequence+1,root.delivery_revision,'run','agent_run',OLD.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM (
+				    SELECT d.id AS delivery_id,d.delivery_key,d.project_id_hint,d.change_sequence_high_water AS change_sequence,
+				     COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0) AS delivery_revision
+				    FROM deliveries d WHERE d.issue_id=OLD.issue_id
+				    UNION ALL
+				    SELECT legacy.synthetic_delivery_id,legacy.delivery_key,legacy.project_id_hint,
+				     legacy.change_sequence_high_water,0 FROM agent_mode_legacy_roots legacy
+				    WHERE legacy.issue_id=OLD.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=OLD.issue_id)
+				   ) root;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_issue_change
+				 AFTER UPDATE OF project_id,issue_number,type,title,status,updated_at,deleted_at ON issues
+				 WHEN EXISTS(SELECT 1 FROM agent_mode_legacy_roots WHERE issue_id=NEW.id) OR
+				  (OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL
+				   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=NEW.id)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running')))
+				 BEGIN
+				  INSERT OR IGNORE INTO agent_mode_legacy_roots(
+				   issue_id,synthetic_delivery_id,delivery_key,project_id_hint,created_at)
+				  SELECT NEW.id,-NEW.id,'issue:'||NEW.id,NEW.project_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  WHERE OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL
+				   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=NEW.id)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))
+				   AND NOT EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.id
+				    AND ar.delivery_instrumentation_version=1);
+				  UPDATE agent_mode_legacy_roots SET pending_revoked_project_id=CASE WHEN EXISTS(
+				    SELECT 1 FROM agent_runs ar WHERE ar.issue_id=NEW.id
+				     AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))
+				    AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL
+				   THEN project_id_hint END,
+				   project_id_hint=NEW.project_id WHERE issue_id=NEW.id
+				   AND NEW.project_id IS NOT OLD.project_id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   revoked_project_id,change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   legacy.project_id_hint,CASE WHEN NEW.project_id IS NOT OLD.project_id
+				    AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL THEN OLD.project_id END,
+				   legacy.change_sequence_high_water+1,0,
+				   CASE WHEN NEW.project_id IS NOT OLD.project_id
+				    AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NULL
+				    THEN 'project_move' ELSE 'issue' END,
+				   'issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM agent_mode_legacy_roots legacy WHERE legacy.issue_id=NEW.id
+				   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))
+				   AND NEW.deleted_at IS NULL;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_issue_tombstone
+				 BEFORE DELETE ON issues WHEN OLD.deleted_at IS NULL
+				  AND NOT EXISTS(SELECT 1 FROM deliveries WHERE issue_id=OLD.id)
+				  AND EXISTS(SELECT 1 FROM agent_mode_legacy_roots WHERE issue_id=OLD.id)
+				  AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=OLD.id
+				   AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'))
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   OLD.project_id,legacy.change_sequence_high_water+1,0,'issue','issue',OLD.id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM agent_mode_legacy_roots legacy
+				  WHERE legacy.issue_id=OLD.id;
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_legacy_issue_delete
+				 AFTER DELETE ON issues WHEN EXISTS(SELECT 1 FROM agent_mode_legacy_roots WHERE issue_id=OLD.id)
+				 BEGIN DELETE FROM agent_mode_legacy_roots WHERE issue_id=OLD.id; END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_issue_tag_insert_change
+				 AFTER INSERT ON issue_tags WHEN EXISTS(SELECT 1 FROM issues WHERE id=NEW.issue_id)
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',d.issue_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM deliveries d JOIN issues issue ON issue.id=d.issue_id AND issue.deleted_at IS NULL
+				  WHERE d.issue_id=NEW.issue_id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'issue','issue',legacy.issue_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM agent_mode_legacy_roots legacy
+				  WHERE legacy.issue_id=NEW.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+				   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_issue_tag_delete_change
+				 AFTER DELETE ON issue_tags WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id)
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',d.issue_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM deliveries d JOIN issues issue ON issue.id=d.issue_id AND issue.deleted_at IS NULL
+				  WHERE d.issue_id=OLD.issue_id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'issue','issue',legacy.issue_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM agent_mode_legacy_roots legacy
+				  WHERE legacy.issue_id=OLD.issue_id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+				   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_issue_tag_update_change
+				 AFTER UPDATE OF issue_id,tag_id ON issue_tags
+				 WHEN NEW.issue_id IS NOT OLD.issue_id OR NEW.tag_id IS NOT OLD.tag_id
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',d.issue_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM (SELECT OLD.issue_id AS issue_id UNION SELECT NEW.issue_id) changed
+				  JOIN deliveries d ON d.issue_id=changed.issue_id
+				  JOIN issues issue ON issue.id=d.issue_id AND issue.deleted_at IS NULL;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'issue','issue',legacy.issue_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM (
+				    SELECT OLD.issue_id AS issue_id UNION SELECT NEW.issue_id
+				   ) changed JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=changed.issue_id
+				  WHERE NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+				   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+				 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_mode_tag_name_change
+				 AFTER UPDATE OF name ON tags WHEN NEW.name IS NOT OLD.name
+				 BEGIN
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+				   d.change_sequence_high_water+1,
+				   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+				   'issue','issue',d.issue_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				  FROM issue_tags assignment JOIN deliveries d ON d.issue_id=assignment.issue_id
+				  JOIN issues issue ON issue.id=d.issue_id AND issue.deleted_at IS NULL
+				  WHERE assignment.tag_id=NEW.id;
+				  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+				   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+				  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+				   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'issue','issue',legacy.issue_id,
+				   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM issue_tags assignment
+				   JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=assignment.issue_id
+				  WHERE assignment.tag_id=NEW.id AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+				   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+				   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+				    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+				 END`,
+			`CREATE INDEX IF NOT EXISTS idx_delivery_change_revoked_project_tail
+				 ON delivery_change_log(revoked_project_id,id) WHERE revoked_project_id IS NOT NULL`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_change_revoked_audience_guard
+				 BEFORE INSERT ON delivery_change_log WHEN
+				  (NEW.kind='project_move' AND NEW.revoked_project_id IS NULL) OR
+				  (NEW.revoked_project_id IS NOT NULL AND (NEW.kind<>'project_move' OR
+				   NEW.project_id_hint IS NULL OR NEW.revoked_project_id=NEW.project_id_hint))
+				 BEGIN SELECT RAISE(ABORT,'delivery revoked audience is invalid'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_run_telemetry_delivery_secret_guard
+			 BEFORE INSERT ON agent_run_telemetry
+			 WHEN instr(CAST(NEW.activity AS TEXT),char(0))>0 OR instr(CAST(NEW.activity AS TEXT),char(10))>0
+			  OR instr(CAST(NEW.activity AS TEXT),char(13))>0
+			  OR instr(CAST(NEW.estimate_basis AS TEXT),char(0))>0 OR instr(CAST(NEW.estimate_basis AS TEXT),char(10))>0
+			  OR instr(CAST(NEW.estimate_basis AS TEXT),char(13))>0
+			  OR paimos_contains_secret_like(CAST(NEW.activity AS BLOB))=1
+			  OR paimos_contains_secret_like(CAST(NEW.estimate_basis AS BLOB))=1
+			 BEGIN SELECT RAISE(ABORT,'forbidden agent run telemetry value'); END`,
+
+			// M144 invalidated only the two relation endpoints. Canonical lanes are
+			// inherited through arbitrary parent depth, so a parent edit starts at
+			// the child and invalidates every delivery-bearing descendant. UNION is
+			// deliberately distinct and therefore cycle-safe without a depth cap.
+			`DROP TRIGGER IF EXISTS trg_delivery_relation_insert_change`,
+			`DROP TRIGGER IF EXISTS trg_delivery_relation_delete_change`,
+			`DROP TRIGGER IF EXISTS trg_delivery_relation_update_change`,
+			`CREATE TRIGGER trg_delivery_relation_insert_change
+			 AFTER INSERT ON issue_relations WHEN NEW.type='parent'
+			 BEGIN
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT NEW.target_id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id
+			    WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+			   d.change_sequence_high_water+1,
+			   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+			   'lane','relation',NEW.source_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			  FROM descendants JOIN deliveries d ON d.issue_id=descendants.issue_id
+			   JOIN issues live ON live.id=d.issue_id AND live.deleted_at IS NULL;
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT NEW.target_id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+			   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'lane','relation',NEW.source_id,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM descendants
+			   JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=descendants.issue_id
+			  WHERE NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+			   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+			   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+			    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+			 END`,
+			`CREATE TRIGGER trg_delivery_relation_delete_change
+			 AFTER DELETE ON issue_relations WHEN OLD.type='parent'
+			 BEGIN
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT OLD.target_id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id
+			    WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+			   d.change_sequence_high_water+1,
+			   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+			   'lane','relation',OLD.source_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			  FROM descendants JOIN deliveries d ON d.issue_id=descendants.issue_id
+			   JOIN issues live ON live.id=d.issue_id AND live.deleted_at IS NULL;
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT OLD.target_id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+			   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'lane','relation',OLD.source_id,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM descendants
+			   JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=descendants.issue_id
+			  WHERE NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+			   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+			   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+			    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+			 END`,
+			`CREATE TRIGGER trg_delivery_relation_update_change
+			 AFTER UPDATE OF source_id,target_id,type ON issue_relations
+			 WHEN NEW.source_id IS NOT OLD.source_id OR NEW.target_id IS NOT OLD.target_id OR NEW.type IS NOT OLD.type
+			 BEGIN
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT OLD.target_id WHERE OLD.type='parent'
+			   UNION SELECT NEW.target_id WHERE NEW.type='parent'
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+			   d.change_sequence_high_water+1,
+			   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+			   'lane','relation',CASE WHEN NEW.type='parent' THEN NEW.source_id ELSE OLD.source_id END,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			  FROM descendants JOIN deliveries d ON d.issue_id=descendants.issue_id
+			   JOIN issues live ON live.id=d.issue_id AND live.deleted_at IS NULL;
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT OLD.target_id WHERE OLD.type='parent'
+			   UNION SELECT NEW.target_id WHERE NEW.type='parent'
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+			   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'lane','relation',
+			   CASE WHEN NEW.type='parent' THEN NEW.source_id ELSE OLD.source_id END,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM descendants
+			   JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=descendants.issue_id
+			  WHERE NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+			   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+			   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+			    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+			 END`,
+
+			// A mutable ancestor label/type/project/deletion state changes the lane
+			// projection of every descendant even when the edge itself is stable.
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_ancestor_issue_change
+			 AFTER UPDATE OF type,title,issue_number,deleted_at,project_id ON issues
+			 WHEN NEW.type IS NOT OLD.type OR NEW.title IS NOT OLD.title OR
+			  NEW.issue_number IS NOT OLD.issue_number OR NEW.deleted_at IS NOT OLD.deleted_at OR
+			  NEW.project_id IS NOT OLD.project_id
+			 BEGIN
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT relation.target_id FROM issue_relations relation
+			    WHERE relation.type='parent' AND relation.source_id=NEW.id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id
+			    WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+			   d.change_sequence_high_water+1,
+			   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+			   'lane','issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			  FROM descendants JOIN deliveries d ON d.issue_id=descendants.issue_id
+			   JOIN issues live ON live.id=d.issue_id AND live.deleted_at IS NULL
+			  WHERE descendants.issue_id<>NEW.id;
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  WITH RECURSIVE descendants(issue_id) AS (
+			   SELECT relation.target_id FROM issue_relations relation
+			    WHERE relation.type='parent' AND relation.source_id=NEW.id
+			   UNION
+			   SELECT relation.target_id FROM issue_relations relation
+			    JOIN descendants parent ON relation.source_id=parent.issue_id WHERE relation.type='parent'
+			  )
+			  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+			   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'lane','issue',NEW.id,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM descendants
+			   JOIN agent_mode_legacy_roots legacy ON legacy.issue_id=descendants.issue_id
+			  WHERE descendants.issue_id<>NEW.id
+			   AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+			   AND EXISTS(SELECT 1 FROM issues issue WHERE issue.id=legacy.issue_id AND issue.deleted_at IS NULL)
+			   AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+			    AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+			 END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_delivery_project_metadata_change
+			 AFTER UPDATE OF key,name,status ON projects
+			 WHEN NEW.key IS NOT OLD.key OR NEW.name IS NOT OLD.name OR NEW.status IS NOT OLD.status
+			 BEGIN
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  SELECT lower(hex(randomblob(16))),d.id,d.issue_id,d.delivery_key,d.project_id_hint,
+			   d.change_sequence_high_water+1,
+			   COALESCE((SELECT MAX(delivery_revision) FROM delivery_events WHERE delivery_id=d.id),0),
+			   'lane','issue',NEW.id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			  FROM deliveries d JOIN issues i ON i.id=d.issue_id
+			  WHERE i.project_id=NEW.id AND i.deleted_at IS NULL;
+			  INSERT INTO delivery_change_log(cursor_token,delivery_id,root_issue_id,delivery_key,project_id_hint,
+			   change_sequence,delivery_revision,kind,source_kind,source_id,server_received_at)
+			  SELECT lower(hex(randomblob(16))),legacy.synthetic_delivery_id,legacy.issue_id,legacy.delivery_key,
+			   legacy.project_id_hint,legacy.change_sequence_high_water+1,0,'lane','issue',NEW.id,
+			   strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM agent_mode_legacy_roots legacy
+			   JOIN issues issue ON issue.id=legacy.issue_id WHERE issue.project_id=NEW.id
+			    AND issue.deleted_at IS NULL
+			    AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.issue_id=legacy.issue_id)
+			    AND EXISTS(SELECT 1 FROM agent_runs ar WHERE ar.issue_id=legacy.issue_id
+			     AND ar.delivery_instrumentation_version=0 AND ar.status IN ('queued','running'));
+			 END`,
+		}},
+
+		// M146 / PAI-808: transactionally exact-once internal comments.
+		// The client request identity is unique per authenticated author, not
+		// per issue/body: reusing one identity for a different target or body
+		// must collide so the handler can return an explicit conflict. NULL
+		// keeps every pre-M146 and ordinary non-idempotent comment unchanged.
+		{146, []string{
+			`ALTER TABLE comments ADD COLUMN client_request_id TEXT
+			 CHECK(client_request_id IS NULL OR
+			  (author_id IS NOT NULL AND visibility='internal' AND
+			   length(CAST(client_request_id AS BLOB)) BETWEEN 1 AND 128 AND
+			   client_request_id NOT GLOB '*[^A-Za-z0-9._:-]*'))`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_comments_author_client_request
+			 ON comments(author_id,client_request_id)
+			 WHERE client_request_id IS NOT NULL`,
+		}},
+
+		// M147 / PAI-809 Wave 1A: safe principal identity, monotonic issue
+		// control revisions, and the inert supervisory-control persistence
+		// domain. No route or runner effect is enabled by this migration.
+		{147, []string{
+			// M89 repaired the rows present at migration time, but legacy TOTP
+			// and dev-login insertions continued to inherit its empty default.
+			// Repair those post-M89 rows before created_at becomes immutable.
+			`UPDATE sessions SET created_at=datetime('now') WHERE created_at=''`,
+			`ALTER TABLE sessions ADD COLUMN credential_id TEXT`,
+			`UPDATE sessions SET credential_id=
+			 lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||
+			 substr(lower(hex(randomblob(2))),2,3)||'-'||
+			 substr('89ab',(random() & 3)+1,1)||substr(lower(hex(randomblob(2))),2,3)||'-'||
+			 lower(hex(randomblob(6)))`,
+			// A pre-M147 bearer may itself happen to be a canonical UUID. The
+			// durable credential identity must still be distinct from it.
+			`UPDATE sessions SET credential_id=substr(credential_id,1,35)||
+			 CASE substr(credential_id,36,1) WHEN '0' THEN '1' ELSE '0' END
+			 WHERE credential_id=id`,
+			`CREATE UNIQUE INDEX idx_sessions_credential_id
+			 ON sessions(credential_id) WHERE credential_id IS NOT NULL`,
+			`CREATE TRIGGER trg_sessions_credential_insert_guard
+			 BEFORE INSERT ON sessions
+			 WHEN NEW.credential_id IS NULL OR NEW.credential_id=NEW.id OR NOT ` + sqlUUIDCheck("NEW.credential_id") + `
+			 BEGIN SELECT RAISE(ABORT,'invalid session credential identity'); END`,
+			`CREATE TRIGGER trg_sessions_identity_update_guard
+			 BEFORE UPDATE OF id,credential_id,user_id,created_at,via_dev_login,via_oidc ON sessions
+			 WHEN NEW.id IS NOT OLD.id OR NEW.credential_id IS NOT OLD.credential_id OR
+			  NEW.user_id IS NOT OLD.user_id OR NEW.created_at IS NOT OLD.created_at OR
+			  NEW.via_dev_login IS NOT OLD.via_dev_login OR NEW.via_oidc IS NOT OLD.via_oidc OR
+			  NEW.credential_id IS NULL OR NEW.credential_id=NEW.id OR NOT ` + sqlUUIDCheck("NEW.credential_id") + `
+			 BEGIN SELECT RAISE(ABORT,'session identity is immutable'); END`,
+
+			`ALTER TABLE api_keys ADD COLUMN disabled_at TEXT
+			 CHECK(` + sqlNullableControlTimestampCheck("disabled_at") + `)`,
+			`ALTER TABLE api_keys ADD COLUMN expires_at TEXT
+			 CHECK(` + sqlNullableControlTimestampCheck("expires_at") + `)`,
+			`CREATE INDEX idx_api_keys_enabled_hash ON api_keys(key_hash) WHERE disabled_at IS NULL`,
+			`CREATE INDEX idx_api_keys_expiry ON api_keys(expires_at) WHERE expires_at IS NOT NULL`,
+			`CREATE TRIGGER trg_api_keys_identity_update_guard
+			 BEFORE UPDATE OF id,user_id,key_hash,key_prefix,created_at ON api_keys
+			 WHEN NEW.id IS NOT OLD.id OR NEW.user_id IS NOT OLD.user_id OR
+			  NEW.key_hash IS NOT OLD.key_hash OR NEW.key_prefix IS NOT OLD.key_prefix OR
+			  NEW.created_at IS NOT OLD.created_at
+			 BEGIN SELECT RAISE(ABORT,'api key identity is immutable'); END`,
+			`CREATE TRIGGER trg_api_keys_disabled_terminal
+			 BEFORE UPDATE OF disabled_at ON api_keys
+			 WHEN OLD.disabled_at IS NOT NULL AND NEW.disabled_at IS NOT OLD.disabled_at
+			 BEGIN SELECT RAISE(ABORT,'api key disablement is terminal'); END`,
+
+			`CREATE TABLE issue_control_revisions (
+			 issue_id    INTEGER PRIMARY KEY CHECK(issue_id>0),
+			 revision    INTEGER NOT NULL CHECK(revision>0),
+			 recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("recorded_at") + `),
+			 updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `)
+			)`,
+			`INSERT INTO issue_control_revisions(issue_id,revision)
+			 SELECT id,1 FROM issues`,
+			`CREATE TRIGGER trg_issue_control_revision_on_insert
+			 AFTER INSERT ON issues
+			 BEGIN
+			  INSERT INTO issue_control_revisions(issue_id,revision) VALUES(NEW.id,1);
+			 END`,
+			`CREATE TRIGGER trg_issue_control_revision_on_update
+			 AFTER UPDATE ON issues
+			 BEGIN
+			  UPDATE issue_control_revisions SET revision=revision+1,
+			   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE issue_id=NEW.id;
+			  SELECT CASE WHEN changes()<>1 THEN RAISE(ABORT,'missing issue control revision') END;
+			 END`,
+			`CREATE TRIGGER trg_issue_control_revision_on_delete
+			 AFTER DELETE ON issues
+			 BEGIN DELETE FROM issue_control_revisions WHERE issue_id=OLD.id; END`,
+			`CREATE TRIGGER trg_control_project_status_revisions
+			 AFTER UPDATE OF status ON projects
+			 WHEN NEW.status IS NOT OLD.status
+			 BEGIN
+			  UPDATE issue_control_revisions SET revision=revision+1,
+			   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			   WHERE issue_id IN (SELECT id FROM issues WHERE project_id=NEW.id AND deleted_at IS NULL);
+			 END`,
+			`CREATE TRIGGER trg_issue_control_revision_guard
+			 BEFORE UPDATE ON issue_control_revisions
+			 WHEN NEW.issue_id IS NOT OLD.issue_id OR NEW.recorded_at IS NOT OLD.recorded_at OR
+			      NEW.revision<>OLD.revision+1 OR NEW.updated_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      NEW.updated_at<OLD.updated_at
+			 BEGIN SELECT RAISE(ABORT,'invalid issue control revision'); END`,
+			`CREATE TRIGGER trg_issue_control_revision_no_delete
+			 BEFORE DELETE ON issue_control_revisions
+			 WHEN EXISTS(SELECT 1 FROM issues WHERE id=OLD.issue_id)
+			 BEGIN SELECT RAISE(ABORT,'live issue control revision is required'); END`,
+
+			`CREATE TABLE agent_run_cancellation_facts (
+			 run_id             INTEGER PRIMARY KEY CHECK(run_id>0),
+			 cancellation_cause TEXT NOT NULL CHECK(cancellation_cause IN (` + sqlEnum(controlcontract.CancellationCauses()) + `)),
+			 command_id         TEXT CHECK(command_id IS NULL OR ` + sqlUUIDCheck("command_id") + `),
+			 recorded_at        TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("recorded_at") + `),
+			 CHECK((cancellation_cause='operator_command' AND command_id IS NOT NULL) OR
+			       (cancellation_cause<>'operator_command' AND command_id IS NULL))
+			)`,
+			`CREATE INDEX idx_agent_run_cancellation_cause
+			 ON agent_run_cancellation_facts(cancellation_cause,recorded_at)`,
+			`CREATE TRIGGER trg_agent_run_cancellation_facts_no_update
+			 BEFORE UPDATE ON agent_run_cancellation_facts
+			 BEGIN SELECT RAISE(ABORT,'agent run cancellation facts are immutable'); END`,
+			`CREATE TRIGGER trg_agent_run_cancellation_facts_no_delete
+			 BEFORE DELETE ON agent_run_cancellation_facts
+			 BEGIN SELECT RAISE(ABORT,'agent run cancellation facts are immutable'); END`,
+
+			`CREATE TABLE control_operation_keys (
+			 id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			 actor_user_id     INTEGER NOT NULL CHECK(actor_user_id>0),
+			 user_id           INTEGER NOT NULL CHECK(user_id>0),
+			 principal_kind    TEXT NOT NULL CHECK(principal_kind IN ('session','api_key')),
+			 actor_session_credential_id TEXT,
+			 actor_api_key_id  INTEGER,
+			 operation_kind    TEXT NOT NULL CHECK(operation_kind IN (` + sqlEnum(controlcontract.OperationKinds()) + `)),
+			 operation_key_digest BLOB NOT NULL CHECK(typeof(operation_key_digest)='blob' AND length(operation_key_digest)=32),
+			 request_digest    BLOB NOT NULL CHECK(typeof(request_digest)='blob' AND length(request_digest)=32),
+			 result_digest     BLOB NOT NULL CHECK(typeof(result_digest)='blob' AND length(result_digest)=32),
+			 grant_id          TEXT CHECK(grant_id IS NULL OR ` + sqlUUIDCheck("grant_id") + `),
+			 lease_id          TEXT CHECK(lease_id IS NULL OR ` + sqlUUIDCheck("lease_id") + `),
+			 input_request_id  TEXT CHECK(input_request_id IS NULL OR ` + sqlUUIDCheck("input_request_id") + `),
+			 command_id        TEXT CHECK(command_id IS NULL OR ` + sqlUUIDCheck("command_id") + `),
+			 created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 CHECK(actor_user_id=user_id),
+			 CHECK(` + sqlTypedPrincipalCheck("principal_kind", "actor_session_credential_id", "actor_api_key_id") + `),
+			 CHECK(operation_kind NOT IN ('lease.issue','lease.renew','lease.revoke','input.create','command.claim','command.result') OR principal_kind='api_key'),
+			 CHECK((operation_kind IN ('grant.put','grant.revoke') AND grant_id IS NOT NULL AND lease_id IS NULL AND input_request_id IS NULL AND command_id IS NULL) OR
+			       (operation_kind IN ('lease.issue','lease.renew','lease.revoke') AND grant_id IS NULL AND lease_id IS NOT NULL AND input_request_id IS NULL AND command_id IS NULL) OR
+			       (operation_kind='input.create' AND grant_id IS NULL AND lease_id IS NULL AND input_request_id IS NOT NULL AND command_id IS NULL) OR
+			       (operation_kind IN ('command.create','command.confirm','command.withdraw','command.claim','command.result') AND grant_id IS NULL AND lease_id IS NULL AND input_request_id IS NULL AND command_id IS NOT NULL))
+			)`,
+			`CREATE UNIQUE INDEX idx_control_operation_session_key
+			 ON control_operation_keys(actor_session_credential_id,operation_kind,operation_key_digest)
+			 WHERE principal_kind='session'`,
+			`CREATE UNIQUE INDEX idx_control_operation_api_key
+			 ON control_operation_keys(actor_api_key_id,operation_kind,operation_key_digest)
+			 WHERE principal_kind='api_key'`,
+			`CREATE INDEX idx_control_operation_grant ON control_operation_keys(grant_id) WHERE grant_id IS NOT NULL`,
+			`CREATE INDEX idx_control_operation_lease ON control_operation_keys(lease_id) WHERE lease_id IS NOT NULL`,
+			`CREATE INDEX idx_control_operation_input ON control_operation_keys(input_request_id) WHERE input_request_id IS NOT NULL`,
+			`CREATE INDEX idx_control_operation_command ON control_operation_keys(command_id) WHERE command_id IS NOT NULL`,
+			`CREATE TRIGGER trg_control_operation_keys_clock_guard
+			 BEFORE INSERT ON control_operation_keys
+			 WHEN NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 BEGIN SELECT RAISE(ABORT,'control operation time is server-owned'); END`,
+			`CREATE TRIGGER trg_control_operation_keys_no_update
+			 BEFORE UPDATE ON control_operation_keys
+			 BEGIN SELECT RAISE(ABORT,'control operation keys are append-only'); END`,
+			`CREATE TRIGGER trg_control_operation_keys_no_delete
+			 BEFORE DELETE ON control_operation_keys
+			 BEGIN SELECT RAISE(ABORT,'control operation keys are append-only'); END`,
+
+			`CREATE TABLE control_capability_grants (
+			 grant_id          TEXT NOT NULL CHECK(` + sqlUUIDCheck("grant_id") + `),
+			 revision          INTEGER NOT NULL CHECK(revision>0),
+			 actor_user_id     INTEGER NOT NULL CHECK(actor_user_id>0),
+			 user_id           INTEGER NOT NULL CHECK(user_id>0),
+			 principal_kind    TEXT NOT NULL CHECK(principal_kind IN ('session','api_key')),
+			 actor_session_credential_id TEXT,
+			 actor_api_key_id  INTEGER,
+			 delivery_id       INTEGER NOT NULL CHECK(delivery_id>0),
+			 delivery_key      TEXT NOT NULL CHECK(` + sqlStableKeyCheck("delivery_key", 80) + `),
+			 delivery_revision INTEGER NOT NULL CHECK(delivery_revision>0),
+			 project_id        INTEGER NOT NULL CHECK(project_id>0),
+			 root_issue_id     INTEGER NOT NULL CHECK(root_issue_id>0),
+			 issue_revision    INTEGER NOT NULL CHECK(issue_revision>0),
+			 issue_etag_digest BLOB NOT NULL CHECK(typeof(issue_etag_digest)='blob' AND length(issue_etag_digest)=32),
+			 binding_digest    BLOB NOT NULL CHECK(typeof(binding_digest)='blob' AND length(binding_digest)=32),
+			 action_set_digest BLOB NOT NULL CHECK(typeof(action_set_digest)='blob' AND length(action_set_digest)=32),
+			 action_count      INTEGER NOT NULL CHECK(action_count BETWEEN 1 AND 6),
+			 expires_at        TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("expires_at") + `),
+			 revoked_at        TEXT CHECK(` + sqlNullableControlTimestampCheck("revoked_at") + `),
+			 created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 PRIMARY KEY(grant_id,revision),
+			 CHECK(actor_user_id=user_id),
+			 CHECK(` + sqlTypedPrincipalCheck("principal_kind", "actor_session_credential_id", "actor_api_key_id") + `),
+			 CHECK(expires_at>created_at),
+			 CHECK(revoked_at IS NULL OR revoked_at>=created_at)
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_control_grant_revision_guard
+			 BEFORE INSERT ON control_capability_grants
+			 WHEN (NOT EXISTS(SELECT 1 FROM control_capability_grants WHERE grant_id=NEW.grant_id) AND
+			       (NEW.revision<>1 OR EXISTS(SELECT 1 FROM control_capability_grants prior_subject
+			        WHERE prior_subject.user_id=NEW.user_id AND prior_subject.delivery_id=NEW.delivery_id))) OR
+			      (EXISTS(SELECT 1 FROM control_capability_grants WHERE grant_id=NEW.grant_id) AND
+			       (NEW.revision<>(SELECT MAX(revision)+1 FROM control_capability_grants WHERE grant_id=NEW.grant_id) OR
+			        (SELECT revoked_at FROM control_capability_grants WHERE grant_id=NEW.grant_id ORDER BY revision DESC LIMIT 1) IS NULL OR
+			        (SELECT revoked_at FROM control_capability_grants WHERE grant_id=NEW.grant_id ORDER BY revision DESC LIMIT 1)>NEW.created_at OR
+			        NOT EXISTS(SELECT 1 FROM control_capability_grants lineage WHERE lineage.grant_id=NEW.grant_id
+			         AND lineage.revision=1 AND lineage.user_id=NEW.user_id AND lineage.delivery_id=NEW.delivery_id)))
+			 BEGIN SELECT RAISE(ABORT,'invalid control grant revision'); END`,
+			`CREATE TRIGGER trg_control_grant_current_binding_guard
+			 BEFORE INSERT ON control_capability_grants
+			 WHEN NEW.revoked_at IS NOT NULL OR NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      NEW.updated_at IS NOT NEW.created_at OR NEW.expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      NOT EXISTS(
+			  SELECT 1 FROM deliveries d JOIN issues i ON i.id=d.issue_id
+			  JOIN projects project ON project.id=i.project_id AND project.status IN ('active','frozen','archived')
+			  WHERE d.id=NEW.delivery_id AND d.delivery_key=NEW.delivery_key AND d.issue_id=NEW.root_issue_id
+			   AND i.project_id=NEW.project_id AND i.deleted_at IS NULL AND
+			   (SELECT revision FROM issue_control_revisions WHERE issue_id=i.id)=NEW.issue_revision AND
+			   COALESCE((SELECT MAX(de.delivery_revision) FROM delivery_events de WHERE de.delivery_id=d.id),0)=NEW.delivery_revision)
+			 BEGIN SELECT RAISE(ABORT,'control grant target is stale'); END`,
+			`CREATE INDEX idx_control_grants_subject
+			 ON control_capability_grants(delivery_id,user_id,principal_kind,revision DESC)`,
+			`CREATE INDEX idx_control_grants_expiry
+			 ON control_capability_grants(expires_at) WHERE revoked_at IS NULL`,
+			`CREATE UNIQUE INDEX idx_control_grants_current_subject
+			 ON control_capability_grants(user_id,delivery_id) WHERE revoked_at IS NULL`,
+			`CREATE TABLE control_capability_grant_actions (
+			 grant_id TEXT NOT NULL,
+			 grant_revision INTEGER NOT NULL CHECK(grant_revision>0),
+			 action TEXT NOT NULL CHECK(action IN (` + sqlEnum(controlcontract.Actions()) + `)),
+			 PRIMARY KEY(grant_id,grant_revision,action),
+			 FOREIGN KEY(grant_id,grant_revision)
+			  REFERENCES control_capability_grants(grant_id,revision) ON DELETE CASCADE
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_control_grant_actions_no_update
+			 BEFORE UPDATE ON control_capability_grant_actions
+			 BEGIN SELECT RAISE(ABORT,'control grant actions are immutable'); END`,
+			`CREATE TRIGGER trg_control_grant_actions_no_delete
+			 BEFORE DELETE ON control_capability_grant_actions
+			 BEGIN SELECT RAISE(ABORT,'control grant actions are immutable'); END`,
+			`CREATE TABLE control_capability_grant_seals (
+			 grant_id          TEXT NOT NULL,
+			 grant_revision    INTEGER NOT NULL CHECK(grant_revision>0),
+			 binding_digest    BLOB NOT NULL CHECK(typeof(binding_digest)='blob' AND length(binding_digest)=32),
+			 action_set_digest BLOB NOT NULL CHECK(typeof(action_set_digest)='blob' AND length(action_set_digest)=32),
+			 action_count      INTEGER NOT NULL CHECK(action_count BETWEEN 1 AND 6),
+			 sealed_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("sealed_at") + `),
+			 PRIMARY KEY(grant_id,grant_revision),
+			 FOREIGN KEY(grant_id,grant_revision)
+			  REFERENCES control_capability_grants(grant_id,revision)
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_control_grant_actions_after_seal
+			 BEFORE INSERT ON control_capability_grant_actions
+			 WHEN EXISTS(SELECT 1 FROM control_capability_grant_seals
+			  WHERE grant_id=NEW.grant_id AND grant_revision=NEW.grant_revision)
+			 BEGIN SELECT RAISE(ABORT,'control grant actions are sealed'); END`,
+			`CREATE TRIGGER trg_control_grant_seal_complete
+			 BEFORE INSERT ON control_capability_grant_seals
+			 WHEN NEW.sealed_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      (SELECT COUNT(*) FROM control_capability_grant_actions
+			       WHERE grant_id=NEW.grant_id AND grant_revision=NEW.grant_revision)<>NEW.action_count OR
+			      NOT EXISTS(SELECT 1 FROM control_capability_grants grant_row
+			       WHERE grant_row.grant_id=NEW.grant_id AND grant_row.revision=NEW.grant_revision
+			        AND grant_row.binding_digest=NEW.binding_digest AND grant_row.action_set_digest=NEW.action_set_digest
+			        AND grant_row.action_count=NEW.action_count) OR
+			      NOT EXISTS(
+			       SELECT 1 FROM control_capability_grants grant_row
+			       JOIN issues issue ON issue.id=grant_row.root_issue_id AND issue.deleted_at IS NULL
+			       JOIN projects project ON project.id=grant_row.project_id AND project.id=issue.project_id
+			       WHERE grant_row.grant_id=NEW.grant_id AND grant_row.revision=NEW.grant_revision
+			        AND (project.status IN ('active','frozen') OR
+			             (project.status='archived' AND NOT EXISTS(
+			              SELECT 1 FROM control_capability_grant_actions action
+			              WHERE action.grant_id=grant_row.grant_id AND action.grant_revision=grant_row.revision
+			               AND action.action NOT IN ('run.cancel.queued','run.cancel.running')))))
+			 BEGIN SELECT RAISE(ABORT,'control grant seal is incomplete'); END`,
+			`CREATE TRIGGER trg_control_grant_seals_no_update
+			 BEFORE UPDATE ON control_capability_grant_seals
+			 BEGIN SELECT RAISE(ABORT,'control grant seals are immutable'); END`,
+			`CREATE TRIGGER trg_control_grant_seals_no_delete
+			 BEFORE DELETE ON control_capability_grant_seals
+			 BEGIN SELECT RAISE(ABORT,'control grant seals are immutable'); END`,
+			`CREATE TRIGGER trg_control_grants_binding_guard
+			 BEFORE UPDATE ON control_capability_grants
+			 WHEN NOT EXISTS(SELECT 1 FROM control_capability_grant_seals WHERE grant_id=OLD.grant_id AND grant_revision=OLD.revision) OR
+			  NEW.grant_id IS NOT OLD.grant_id OR NEW.revision IS NOT OLD.revision OR
+			  NEW.actor_user_id IS NOT OLD.actor_user_id OR NEW.user_id IS NOT OLD.user_id OR
+			  NEW.principal_kind IS NOT OLD.principal_kind OR
+			  NEW.actor_session_credential_id IS NOT OLD.actor_session_credential_id OR NEW.actor_api_key_id IS NOT OLD.actor_api_key_id OR
+			  NEW.delivery_id IS NOT OLD.delivery_id OR NEW.delivery_key IS NOT OLD.delivery_key OR
+			  NEW.delivery_revision IS NOT OLD.delivery_revision OR NEW.project_id IS NOT OLD.project_id OR
+			  NEW.root_issue_id IS NOT OLD.root_issue_id OR NEW.issue_revision IS NOT OLD.issue_revision OR
+			  NEW.issue_etag_digest IS NOT OLD.issue_etag_digest OR NEW.binding_digest IS NOT OLD.binding_digest OR
+			  NEW.action_set_digest IS NOT OLD.action_set_digest OR NEW.action_count IS NOT OLD.action_count OR NEW.created_at IS NOT OLD.created_at OR
+			  NEW.expires_at<OLD.expires_at OR NEW.updated_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.updated_at<OLD.updated_at OR
+			  (OLD.revoked_at IS NULL AND NEW.revoked_at IS NULL AND
+			   (NEW.expires_at<=OLD.expires_at OR strftime('%Y-%m-%dT%H:%M:%fZ','now')>=OLD.expires_at)) OR
+			  (OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL AND
+			   (NEW.expires_at IS NOT OLD.expires_at OR NEW.revoked_at IS NOT NEW.updated_at OR NEW.revoked_at<OLD.updated_at)) OR
+			  (OLD.revoked_at IS NOT NULL AND (NEW.revoked_at IS NOT OLD.revoked_at OR NEW.updated_at IS NOT OLD.updated_at)) OR
+			  (OLD.revoked_at IS NOT NULL AND NEW.expires_at IS NOT OLD.expires_at)
+			 BEGIN SELECT RAISE(ABORT,'control grant binding is immutable'); END`,
+			`CREATE TRIGGER trg_control_grants_no_delete
+			 BEFORE DELETE ON control_capability_grants
+			 BEGIN SELECT RAISE(ABORT,'control grants are retained'); END`,
+
+			`CREATE TABLE control_capability_leases (
+			 lease_id           TEXT NOT NULL CHECK(` + sqlUUIDCheck("lease_id") + `),
+			 revision           INTEGER NOT NULL CHECK(revision>0),
+			 actor_user_id      INTEGER NOT NULL CHECK(actor_user_id>0),
+			 user_id            INTEGER NOT NULL CHECK(user_id>0),
+			 principal_kind     TEXT NOT NULL CHECK(principal_kind IN ('session','api_key')),
+			 actor_session_credential_id TEXT,
+			 actor_api_key_id   INTEGER,
+			 device_id          TEXT NOT NULL CHECK(` + sqlSafeDeviceIDCheck("device_id") + `),
+			 delivery_id        INTEGER NOT NULL CHECK(delivery_id>0),
+			 delivery_key       TEXT NOT NULL CHECK(` + sqlStableKeyCheck("delivery_key", 80) + `),
+			 delivery_revision  INTEGER NOT NULL CHECK(delivery_revision>0),
+			 project_id         INTEGER NOT NULL CHECK(project_id>0),
+			 root_issue_id      INTEGER NOT NULL CHECK(root_issue_id>0),
+			 issue_revision     INTEGER NOT NULL CHECK(issue_revision>0),
+			 attempt_id         INTEGER NOT NULL CHECK(attempt_id>0),
+			 attempt_number     INTEGER NOT NULL CHECK(attempt_number>0),
+			 plan_revision      INTEGER NOT NULL CHECK(plan_revision>0),
+			 stage_key          TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number   INTEGER NOT NULL CHECK(execution_number>0),
+			 execution_start_stage_event_id INTEGER NOT NULL CHECK(execution_start_stage_event_id>0),
+			 authority_epoch    INTEGER NOT NULL CHECK(authority_epoch>0),
+			 authority_stage_event_id INTEGER NOT NULL CHECK(authority_stage_event_id>0),
+			 reporter_id        INTEGER NOT NULL CHECK(reporter_id>0),
+			 agent_run_id       INTEGER NOT NULL CHECK(agent_run_id>0),
+			 binding_digest     BLOB NOT NULL CHECK(typeof(binding_digest)='blob' AND length(binding_digest)=32),
+			 action_set_digest  BLOB NOT NULL CHECK(typeof(action_set_digest)='blob' AND length(action_set_digest)=32),
+			 action_count       INTEGER NOT NULL CHECK(action_count BETWEEN 1 AND 4),
+			 expires_at         TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("expires_at") + `),
+			 revoked_at         TEXT CHECK(` + sqlNullableControlTimestampCheck("revoked_at") + `),
+			 created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 PRIMARY KEY(lease_id,revision),
+			 CHECK(actor_user_id=user_id),
+			 CHECK(` + sqlTypedPrincipalCheck("principal_kind", "actor_session_credential_id", "actor_api_key_id") + `),
+			 CHECK(principal_kind='api_key'),
+			 CHECK(expires_at>created_at),
+			 CHECK(revoked_at IS NULL OR revoked_at>=created_at)
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_control_lease_revision_guard
+			 BEFORE INSERT ON control_capability_leases
+			 WHEN (NOT EXISTS(SELECT 1 FROM control_capability_leases WHERE lease_id=NEW.lease_id) AND
+			       (NEW.revision<>1 OR EXISTS(SELECT 1 FROM control_capability_leases prior_subject
+			        WHERE prior_subject.delivery_id=NEW.delivery_id AND prior_subject.attempt_id=NEW.attempt_id
+			         AND prior_subject.stage_key=NEW.stage_key AND prior_subject.execution_number=NEW.execution_number))) OR
+			      (EXISTS(SELECT 1 FROM control_capability_leases WHERE lease_id=NEW.lease_id) AND
+			       (NEW.revision<>(SELECT MAX(revision)+1 FROM control_capability_leases WHERE lease_id=NEW.lease_id) OR
+			        (SELECT revoked_at FROM control_capability_leases WHERE lease_id=NEW.lease_id ORDER BY revision DESC LIMIT 1) IS NULL OR
+			        (SELECT revoked_at FROM control_capability_leases WHERE lease_id=NEW.lease_id ORDER BY revision DESC LIMIT 1)>NEW.created_at OR
+			        NOT EXISTS(SELECT 1 FROM control_capability_leases lineage WHERE lineage.lease_id=NEW.lease_id
+			         AND lineage.revision=1 AND lineage.delivery_id=NEW.delivery_id AND lineage.attempt_id=NEW.attempt_id
+			         AND lineage.stage_key=NEW.stage_key AND lineage.execution_number=NEW.execution_number)))
+			 BEGIN SELECT RAISE(ABORT,'invalid control lease revision'); END`,
+			`CREATE TRIGGER trg_control_lease_current_binding_guard
+			 BEFORE INSERT ON control_capability_leases
+			 WHEN NEW.revoked_at IS NOT NULL OR NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      NEW.updated_at IS NOT NEW.created_at OR NEW.expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      NOT EXISTS(
+			  SELECT 1 FROM deliveries d
+			  JOIN issues i ON i.id=d.issue_id
+			  JOIN projects project ON project.id=i.project_id AND project.status IN ('active','frozen','archived')
+			  JOIN delivery_attempts a ON a.delivery_id=d.id AND a.id=NEW.attempt_id
+			  JOIN delivery_agent_run_links link ON link.delivery_id=d.id AND link.attempt_id=a.id
+			   AND link.stage_key=NEW.stage_key AND link.execution_number=NEW.execution_number
+			   AND link.agent_run_id=NEW.agent_run_id AND link.reporter_id=NEW.reporter_id
+			   AND link.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			  JOIN agent_runs run ON run.id=NEW.agent_run_id AND run.issue_id=d.issue_id AND run.status='running'
+			  JOIN delivery_agent_run_activations activation ON activation.delivery_id=d.id AND activation.attempt_id=a.id
+			   AND activation.stage_key=NEW.stage_key AND activation.execution_number=NEW.execution_number
+			   AND activation.authority_epoch=NEW.authority_epoch AND activation.agent_run_id=NEW.agent_run_id
+			   AND activation.reporter_id=NEW.reporter_id AND activation.authority_stage_event_id=NEW.authority_stage_event_id
+			  JOIN delivery_stage_latest latest ON latest.delivery_id=d.id AND latest.attempt_id=a.id
+			   AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
+			   AND latest.authority_epoch=NEW.authority_epoch AND latest.current_reporter_id=NEW.reporter_id
+			   AND latest.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			   AND latest.authority_stage_event_id=NEW.authority_stage_event_id
+			  WHERE d.id=NEW.delivery_id AND d.delivery_key=NEW.delivery_key AND d.issue_id=NEW.root_issue_id
+			   AND i.project_id=NEW.project_id AND i.deleted_at IS NULL AND a.attempt_number=NEW.attempt_number AND a.plan_revision=NEW.plan_revision
+			   AND (SELECT revision FROM issue_control_revisions WHERE issue_id=i.id)=NEW.issue_revision
+			   AND COALESCE((SELECT MAX(de.delivery_revision) FROM delivery_events de WHERE de.delivery_id=d.id),0)=NEW.delivery_revision)
+			 BEGIN SELECT RAISE(ABORT,'control lease target is stale'); END`,
+			`CREATE INDEX idx_control_leases_run
+			 ON control_capability_leases(agent_run_id,revision DESC)`,
+			`CREATE INDEX idx_control_leases_binding
+			 ON control_capability_leases(delivery_id,attempt_id,stage_key,execution_number,authority_epoch,reporter_id)`,
+			`CREATE INDEX idx_control_leases_expiry
+			 ON control_capability_leases(expires_at) WHERE revoked_at IS NULL`,
+			`CREATE UNIQUE INDEX idx_control_leases_current_activation
+			 ON control_capability_leases(delivery_id,attempt_id,stage_key,execution_number)
+			 WHERE revoked_at IS NULL`,
+			`CREATE TABLE control_capability_lease_actions (
+			 lease_id TEXT NOT NULL,
+			 lease_revision INTEGER NOT NULL CHECK(lease_revision>0),
+			 action TEXT NOT NULL CHECK(action IN (` + sqlEnum(controlcontract.Actions()) + `))
+			  CHECK(action IN ('run.cancel.running','input.respond','run.pause','run.resume')),
+			 PRIMARY KEY(lease_id,lease_revision,action),
+			 FOREIGN KEY(lease_id,lease_revision)
+			  REFERENCES control_capability_leases(lease_id,revision) ON DELETE CASCADE
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_control_lease_actions_no_update
+			 BEFORE UPDATE ON control_capability_lease_actions
+			 BEGIN SELECT RAISE(ABORT,'control lease actions are immutable'); END`,
+			`CREATE TRIGGER trg_control_lease_actions_no_delete
+			 BEFORE DELETE ON control_capability_lease_actions
+			 BEGIN SELECT RAISE(ABORT,'control lease actions are immutable'); END`,
+			`CREATE TABLE control_capability_lease_seals (
+			 lease_id          TEXT NOT NULL,
+			 lease_revision    INTEGER NOT NULL CHECK(lease_revision>0),
+			 binding_digest    BLOB NOT NULL CHECK(typeof(binding_digest)='blob' AND length(binding_digest)=32),
+			 action_set_digest BLOB NOT NULL CHECK(typeof(action_set_digest)='blob' AND length(action_set_digest)=32),
+			 action_count      INTEGER NOT NULL CHECK(action_count BETWEEN 1 AND 4),
+			 sealed_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("sealed_at") + `),
+			 PRIMARY KEY(lease_id,lease_revision),
+			 FOREIGN KEY(lease_id,lease_revision)
+			  REFERENCES control_capability_leases(lease_id,revision)
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_control_lease_actions_after_seal
+			 BEFORE INSERT ON control_capability_lease_actions
+			 WHEN EXISTS(SELECT 1 FROM control_capability_lease_seals
+			  WHERE lease_id=NEW.lease_id AND lease_revision=NEW.lease_revision)
+			 BEGIN SELECT RAISE(ABORT,'control lease actions are sealed'); END`,
+			`CREATE TRIGGER trg_control_lease_seal_complete
+			 BEFORE INSERT ON control_capability_lease_seals
+			 WHEN NEW.sealed_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      (SELECT COUNT(*) FROM control_capability_lease_actions
+			       WHERE lease_id=NEW.lease_id AND lease_revision=NEW.lease_revision)<>NEW.action_count OR
+			      NOT EXISTS(SELECT 1 FROM control_capability_leases lease_row
+			       WHERE lease_row.lease_id=NEW.lease_id AND lease_row.revision=NEW.lease_revision
+			        AND lease_row.binding_digest=NEW.binding_digest AND lease_row.action_set_digest=NEW.action_set_digest
+			        AND lease_row.action_count=NEW.action_count) OR
+			      NOT EXISTS(
+			       SELECT 1 FROM control_capability_leases lease_row
+			       JOIN issues issue ON issue.id=lease_row.root_issue_id AND issue.deleted_at IS NULL
+			       JOIN projects project ON project.id=lease_row.project_id AND project.id=issue.project_id
+			       WHERE lease_row.lease_id=NEW.lease_id AND lease_row.revision=NEW.lease_revision
+			        AND (project.status IN ('active','frozen') OR
+			             (project.status='archived' AND NOT EXISTS(
+			              SELECT 1 FROM control_capability_lease_actions action
+			              WHERE action.lease_id=lease_row.lease_id AND action.lease_revision=lease_row.revision
+			               AND action.action<>'run.cancel.running'))))
+			 BEGIN SELECT RAISE(ABORT,'control lease seal is incomplete'); END`,
+			`CREATE TRIGGER trg_control_lease_seals_no_update
+			 BEFORE UPDATE ON control_capability_lease_seals
+			 BEGIN SELECT RAISE(ABORT,'control lease seals are immutable'); END`,
+			`CREATE TRIGGER trg_control_lease_seals_no_delete
+			 BEFORE DELETE ON control_capability_lease_seals
+			 BEGIN SELECT RAISE(ABORT,'control lease seals are immutable'); END`,
+			`CREATE TRIGGER trg_control_leases_binding_guard
+			 BEFORE UPDATE ON control_capability_leases
+			 WHEN NOT EXISTS(SELECT 1 FROM control_capability_lease_seals WHERE lease_id=OLD.lease_id AND lease_revision=OLD.revision) OR
+			  NEW.lease_id IS NOT OLD.lease_id OR NEW.revision IS NOT OLD.revision OR
+			  NEW.actor_user_id IS NOT OLD.actor_user_id OR NEW.user_id IS NOT OLD.user_id OR
+			  NEW.principal_kind IS NOT OLD.principal_kind OR
+			  NEW.actor_session_credential_id IS NOT OLD.actor_session_credential_id OR NEW.actor_api_key_id IS NOT OLD.actor_api_key_id OR
+			  NEW.device_id IS NOT OLD.device_id OR NEW.delivery_id IS NOT OLD.delivery_id OR
+			  NEW.delivery_key IS NOT OLD.delivery_key OR NEW.delivery_revision IS NOT OLD.delivery_revision OR
+			  NEW.project_id IS NOT OLD.project_id OR NEW.root_issue_id IS NOT OLD.root_issue_id OR NEW.issue_revision IS NOT OLD.issue_revision OR
+			  NEW.attempt_id IS NOT OLD.attempt_id OR NEW.attempt_number IS NOT OLD.attempt_number OR
+			  NEW.plan_revision IS NOT OLD.plan_revision OR NEW.stage_key IS NOT OLD.stage_key OR
+			  NEW.execution_number IS NOT OLD.execution_number OR NEW.execution_start_stage_event_id IS NOT OLD.execution_start_stage_event_id OR NEW.authority_epoch IS NOT OLD.authority_epoch OR
+			  NEW.authority_stage_event_id IS NOT OLD.authority_stage_event_id OR NEW.reporter_id IS NOT OLD.reporter_id OR
+			  NEW.agent_run_id IS NOT OLD.agent_run_id OR NEW.binding_digest IS NOT OLD.binding_digest OR
+			  NEW.action_set_digest IS NOT OLD.action_set_digest OR NEW.action_count IS NOT OLD.action_count OR NEW.created_at IS NOT OLD.created_at OR
+			  NEW.expires_at<OLD.expires_at OR NEW.updated_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.updated_at<OLD.updated_at OR
+			  (OLD.revoked_at IS NULL AND NEW.revoked_at IS NULL AND
+			   (NEW.expires_at<=OLD.expires_at OR strftime('%Y-%m-%dT%H:%M:%fZ','now')>=OLD.expires_at)) OR
+			  (OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL AND
+			   (NEW.expires_at IS NOT OLD.expires_at OR NEW.revoked_at IS NOT NEW.updated_at OR NEW.revoked_at<OLD.updated_at)) OR
+			  (OLD.revoked_at IS NOT NULL AND (NEW.revoked_at IS NOT OLD.revoked_at OR NEW.updated_at IS NOT OLD.updated_at)) OR
+			  (OLD.revoked_at IS NOT NULL AND NEW.expires_at IS NOT OLD.expires_at)
+			 BEGIN SELECT RAISE(ABORT,'control lease binding is immutable'); END`,
+			`CREATE TRIGGER trg_control_leases_no_delete
+			 BEFORE DELETE ON control_capability_leases
+			 BEGIN SELECT RAISE(ABORT,'control leases are retained'); END`,
+
+			`CREATE TABLE control_input_requests (
+			 request_id         TEXT NOT NULL CHECK(` + sqlUUIDCheck("request_id") + `),
+			 revision           INTEGER NOT NULL CHECK(revision>0),
+			 lease_id           TEXT NOT NULL,
+			 lease_revision     INTEGER NOT NULL CHECK(lease_revision>0),
+			 delivery_id        INTEGER NOT NULL CHECK(delivery_id>0),
+			 delivery_key       TEXT NOT NULL CHECK(` + sqlStableKeyCheck("delivery_key", 80) + `),
+			 delivery_revision  INTEGER NOT NULL CHECK(delivery_revision>0),
+			 project_id         INTEGER NOT NULL CHECK(project_id>0),
+			 root_issue_id      INTEGER NOT NULL CHECK(root_issue_id>0),
+			 issue_revision     INTEGER NOT NULL CHECK(issue_revision>0),
+			 attempt_id         INTEGER NOT NULL CHECK(attempt_id>0),
+			 attempt_number     INTEGER NOT NULL CHECK(attempt_number>0),
+			 plan_revision      INTEGER NOT NULL CHECK(plan_revision>0),
+			 stage_key          TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number   INTEGER NOT NULL CHECK(execution_number>0),
+			 execution_start_stage_event_id INTEGER NOT NULL CHECK(execution_start_stage_event_id>0),
+			 authority_epoch    INTEGER NOT NULL CHECK(authority_epoch>0),
+			 authority_stage_event_id INTEGER NOT NULL CHECK(authority_stage_event_id>0),
+			 reporter_id        INTEGER NOT NULL CHECK(reporter_id>0),
+			 agent_run_id       INTEGER NOT NULL CHECK(agent_run_id>0),
+			 request_kind       TEXT NOT NULL CHECK(request_kind IN (` + sqlEnum(controlcontract.InputKinds()) + `)),
+			 prompt_template    TEXT NOT NULL CHECK(prompt_template IN (` + sqlEnum(controlcontract.InputPromptTemplates()) + `)),
+			 option_count       INTEGER NOT NULL CHECK(option_count BETWEEN 0 AND 8),
+			 request_digest     BLOB NOT NULL CHECK(typeof(request_digest)='blob' AND length(request_digest)=32),
+			 expires_at         TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("expires_at") + `),
+			 created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 PRIMARY KEY(request_id,revision),
+			 FOREIGN KEY(lease_id,lease_revision)
+			  REFERENCES control_capability_leases(lease_id,revision),
+			 CHECK((request_kind='approval' AND prompt_template='approval_required' AND option_count=0) OR
+			       (request_kind='choice' AND prompt_template='choice_required' AND option_count BETWEEN 1 AND 8)),
+			 CHECK(expires_at>created_at)
+			) WITHOUT ROWID`,
+			`CREATE INDEX idx_control_inputs_run
+			 ON control_input_requests(agent_run_id,revision DESC)`,
+			`CREATE INDEX idx_control_inputs_expiry ON control_input_requests(expires_at)`,
+			`CREATE TRIGGER trg_control_input_current_binding_guard
+			 BEFORE INSERT ON control_input_requests
+			 WHEN NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      NEW.expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NOT EXISTS(
+			  SELECT 1 FROM control_capability_leases lease
+			  JOIN control_capability_lease_seals seal ON seal.lease_id=lease.lease_id AND seal.lease_revision=lease.revision
+			  JOIN control_capability_lease_actions lease_action ON lease_action.lease_id=lease.lease_id
+			   AND lease_action.lease_revision=lease.revision AND lease_action.action='input.respond'
+			  WHERE lease.lease_id=NEW.lease_id AND lease.revision=NEW.lease_revision AND lease.revoked_at IS NULL
+			   AND lease.created_at<=NEW.created_at AND lease.expires_at>=NEW.expires_at
+			   AND lease.delivery_id=NEW.delivery_id AND lease.delivery_key=NEW.delivery_key
+			   AND lease.delivery_revision=NEW.delivery_revision AND lease.project_id=NEW.project_id
+			   AND lease.root_issue_id=NEW.root_issue_id AND lease.issue_revision=NEW.issue_revision
+			   AND lease.attempt_id=NEW.attempt_id AND lease.attempt_number=NEW.attempt_number AND lease.plan_revision=NEW.plan_revision
+			   AND lease.stage_key=NEW.stage_key AND lease.execution_number=NEW.execution_number
+			   AND lease.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			   AND lease.authority_epoch=NEW.authority_epoch AND lease.authority_stage_event_id=NEW.authority_stage_event_id
+			   AND lease.reporter_id=NEW.reporter_id AND lease.agent_run_id=NEW.agent_run_id)
+			 BEGIN SELECT RAISE(ABORT,'control input binding is stale'); END`,
+			`CREATE TABLE control_input_request_options (
+			 request_id       TEXT NOT NULL,
+			 request_revision INTEGER NOT NULL CHECK(request_revision>0),
+			 ordinal          INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 8),
+			 option_code      TEXT NOT NULL CHECK(option_code IN (` + sqlEnum(controlcontract.InputOptionCodes()) + `)),
+			 PRIMARY KEY(request_id,request_revision,ordinal),
+			 UNIQUE(request_id,request_revision,option_code),
+			 FOREIGN KEY(request_id,request_revision)
+			  REFERENCES control_input_requests(request_id,revision) ON DELETE CASCADE,
+			 CHECK(option_code='choice_'||ordinal)
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_control_input_option_bound
+			 BEFORE INSERT ON control_input_request_options
+			 WHEN NEW.ordinal>(SELECT option_count FROM control_input_requests
+			  WHERE request_id=NEW.request_id AND revision=NEW.request_revision)
+			 BEGIN SELECT RAISE(ABORT,'input option exceeds declared count'); END`,
+			`CREATE TABLE control_input_request_seals (
+			 request_id       TEXT NOT NULL,
+			 request_revision INTEGER NOT NULL CHECK(request_revision>0),
+			 sealed_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("sealed_at") + `),
+			 PRIMARY KEY(request_id,request_revision),
+			 FOREIGN KEY(request_id,request_revision)
+			  REFERENCES control_input_requests(request_id,revision) ON DELETE CASCADE
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_control_input_options_after_seal
+			 BEFORE INSERT ON control_input_request_options
+			 WHEN EXISTS(SELECT 1 FROM control_input_request_seals
+			  WHERE request_id=NEW.request_id AND request_revision=NEW.request_revision)
+			 BEGIN SELECT RAISE(ABORT,'control input options are sealed'); END`,
+			`CREATE TRIGGER trg_control_input_seal_complete
+			 BEFORE INSERT ON control_input_request_seals
+			 WHEN NEW.sealed_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      (SELECT COUNT(*) FROM control_input_request_options
+			       WHERE request_id=NEW.request_id AND request_revision=NEW.request_revision)<>
+			      (SELECT option_count FROM control_input_requests
+			       WHERE request_id=NEW.request_id AND revision=NEW.request_revision)
+			 BEGIN SELECT RAISE(ABORT,'input options are incomplete'); END`,
+			`CREATE TRIGGER trg_control_input_requests_no_update
+			 BEFORE UPDATE ON control_input_requests
+			 BEGIN SELECT RAISE(ABORT,'control input requests are immutable'); END`,
+			`CREATE TRIGGER trg_control_input_requests_no_delete
+			 BEFORE DELETE ON control_input_requests
+			 BEGIN SELECT RAISE(ABORT,'control input requests are immutable'); END`,
+			`CREATE TRIGGER trg_control_input_options_no_update
+			 BEFORE UPDATE ON control_input_request_options
+			 BEGIN SELECT RAISE(ABORT,'control input options are immutable'); END`,
+			`CREATE TRIGGER trg_control_input_options_no_delete
+			 BEFORE DELETE ON control_input_request_options
+			 BEGIN SELECT RAISE(ABORT,'control input options are immutable'); END`,
+			`CREATE TRIGGER trg_control_input_seals_no_update
+			 BEFORE UPDATE ON control_input_request_seals
+			 BEGIN SELECT RAISE(ABORT,'control input seals are immutable'); END`,
+			`CREATE TRIGGER trg_control_input_seals_no_delete
+			 BEFORE DELETE ON control_input_request_seals
+			 BEGIN SELECT RAISE(ABORT,'control input seals are immutable'); END`,
+
+			`CREATE TABLE control_input_resolution_events (
+			 id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			 request_id       TEXT NOT NULL,
+			 request_revision INTEGER NOT NULL CHECK(request_revision>0),
+			 sequence         INTEGER NOT NULL CHECK(sequence>0),
+			 event_kind       TEXT NOT NULL CHECK(event_kind IN (` + sqlEnum(controlcontract.InputTerminalEventKinds()) + `)),
+			 choice_ordinal   INTEGER CHECK(choice_ordinal BETWEEN 1 AND 8),
+			 choice_code      TEXT CHECK(choice_code IS NULL OR choice_code IN (` + sqlEnum(controlcontract.InputOptionCodes()) + `)),
+			 event_digest     BLOB NOT NULL CHECK(typeof(event_digest)='blob' AND length(event_digest)=32),
+			 safe_reason      TEXT CHECK(safe_reason IS NULL OR safe_reason IN (` + sqlEnum(controlcontract.SafeReasons()) + `)),
+			 command_id       TEXT CHECK(command_id IS NULL OR ` + sqlUUIDCheck("command_id") + `),
+			 created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(id,request_id,request_revision),
+			 UNIQUE(request_id,request_revision),
+			 UNIQUE(request_id,sequence),
+			 FOREIGN KEY(request_id,request_revision)
+			  REFERENCES control_input_requests(request_id,revision),
+			 CHECK(COALESCE(((event_kind='choice' AND choice_ordinal IS NOT NULL AND choice_code='choice_'||choice_ordinal) OR
+			       (event_kind<>'choice' AND choice_ordinal IS NULL AND choice_code IS NULL)),0)),
+			 CHECK(COALESCE(((event_kind IN ('approve','reject','choice') AND command_id IS NOT NULL AND safe_reason IS NULL) OR
+			       (event_kind='superseded' AND command_id IS NULL AND safe_reason='input_superseded') OR
+			       (event_kind='expired' AND command_id IS NULL AND safe_reason='input_expired') OR
+			       (event_kind='run_terminal' AND command_id IS NULL AND safe_reason='run_terminal') OR
+			       (event_kind='cancelled' AND command_id IS NULL AND safe_reason='cancelled')),0))
+			)`,
+			`CREATE TRIGGER trg_control_input_resolution_kind_guard
+			 BEFORE INSERT ON control_input_resolution_events
+			 WHEN NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      NOT EXISTS(SELECT 1 FROM control_input_request_seals
+			       WHERE request_id=NEW.request_id AND request_revision=NEW.request_revision) OR
+			      NOT EXISTS(SELECT 1 FROM control_input_request_states state
+			       WHERE state.request_id=NEW.request_id AND state.current_revision=NEW.request_revision
+			        AND state.terminal_event_id IS NULL) OR
+			      NEW.sequence<>NEW.request_revision OR
+			      (NEW.event_kind IN ('approve','reject') AND
+			       (SELECT request_kind FROM control_input_requests WHERE request_id=NEW.request_id AND revision=NEW.request_revision)<>'approval') OR
+			      (NEW.event_kind='choice' AND NOT EXISTS(
+			       SELECT 1 FROM control_input_request_options option
+			       WHERE option.request_id=NEW.request_id AND option.request_revision=NEW.request_revision
+			        AND option.ordinal=NEW.choice_ordinal AND option.option_code=NEW.choice_code)) OR
+			      (NEW.event_kind IN ('approve','reject','choice') AND NOT EXISTS(
+			       SELECT 1 FROM control_commands command
+			       JOIN control_input_requests request ON request.request_id=NEW.request_id AND request.revision=NEW.request_revision
+			       WHERE command.command_id=NEW.command_id AND command.action='input.respond' AND command.status='applied'
+			        AND command.outcome='applied' AND command.result_digest=NEW.event_digest
+			        AND command.input_request_id=request.request_id AND command.input_request_revision=request.revision
+			        AND command.input_request_expires_at=request.expires_at
+			        AND command.input_response_kind=NEW.event_kind
+			        AND command.input_choice_ordinal IS NEW.choice_ordinal AND command.input_choice_code IS NEW.choice_code
+			        AND command.lease_id=request.lease_id AND command.lease_revision=request.lease_revision
+			        AND command.delivery_id=request.delivery_id AND command.delivery_key=request.delivery_key
+			        AND command.delivery_revision=request.delivery_revision AND command.project_id=request.project_id
+			        AND command.root_issue_id=request.root_issue_id AND command.issue_revision=request.issue_revision
+			        AND command.attempt_id=request.attempt_id AND command.attempt_number=request.attempt_number
+			        AND command.plan_revision=request.plan_revision AND command.stage_key=request.stage_key
+			        AND command.execution_number=request.execution_number
+			        AND command.execution_start_stage_event_id=request.execution_start_stage_event_id
+			        AND command.authority_epoch=request.authority_epoch
+			        AND command.authority_stage_event_id=request.authority_stage_event_id
+			        AND command.reporter_id=request.reporter_id AND command.agent_run_id=request.agent_run_id)) OR
+			      (NEW.event_kind='expired' AND NEW.created_at<(
+			       SELECT expires_at FROM control_input_requests WHERE request_id=NEW.request_id AND revision=NEW.request_revision)) OR
+			      (NEW.event_kind='run_terminal' AND NOT EXISTS(
+			       SELECT 1 FROM control_input_requests request JOIN agent_runs run ON run.id=request.agent_run_id
+			       WHERE request.request_id=NEW.request_id AND request.revision=NEW.request_revision
+			        AND run.status NOT IN ('queued','running') AND run.finished_at IS NOT NULL)) OR
+			      (NEW.event_kind='cancelled' AND NOT EXISTS(
+			       SELECT 1 FROM control_input_requests request JOIN agent_run_cancellation_facts fact ON fact.run_id=request.agent_run_id
+			       WHERE request.request_id=NEW.request_id AND request.revision=NEW.request_revision))
+			 BEGIN SELECT RAISE(ABORT,'input resolution does not match request'); END`,
+			`CREATE TRIGGER trg_control_input_resolutions_no_update
+			 BEFORE UPDATE ON control_input_resolution_events
+			 BEGIN SELECT RAISE(ABORT,'control input resolutions are append-only'); END`,
+			`CREATE TRIGGER trg_control_input_resolutions_no_delete
+			 BEFORE DELETE ON control_input_resolution_events
+			 BEGIN SELECT RAISE(ABORT,'control input resolutions are append-only'); END`,
+			`CREATE TABLE control_input_request_states (
+			 request_id        TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("request_id") + `),
+			 current_revision  INTEGER NOT NULL CHECK(current_revision>0),
+			 state_revision    INTEGER NOT NULL CHECK(state_revision>0),
+			 terminal_event_id INTEGER UNIQUE,
+			 updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 FOREIGN KEY(request_id,current_revision)
+			  REFERENCES control_input_requests(request_id,revision),
+			 FOREIGN KEY(terminal_event_id,request_id,current_revision)
+			  REFERENCES control_input_resolution_events(id,request_id,request_revision),
+			 CHECK((state_revision=1 AND current_revision=1 AND terminal_event_id IS NULL) OR state_revision>1)
+			)`,
+			`CREATE TRIGGER trg_control_input_request_revision_guard
+			 BEFORE INSERT ON control_input_requests
+			 WHEN (NOT EXISTS(SELECT 1 FROM control_input_requests WHERE request_id=NEW.request_id) AND NEW.revision<>1) OR
+			      (EXISTS(SELECT 1 FROM control_input_requests WHERE request_id=NEW.request_id) AND
+			       (NEW.revision<>(SELECT MAX(revision)+1 FROM control_input_requests WHERE request_id=NEW.request_id) OR
+			        NOT EXISTS(SELECT 1 FROM control_input_requests lineage
+			         WHERE lineage.request_id=NEW.request_id AND lineage.revision=1
+			          AND lineage.delivery_id=NEW.delivery_id AND lineage.delivery_key=NEW.delivery_key
+			          AND lineage.root_issue_id=NEW.root_issue_id AND lineage.attempt_id=NEW.attempt_id
+			          AND lineage.attempt_number=NEW.attempt_number AND lineage.plan_revision=NEW.plan_revision
+			          AND lineage.stage_key=NEW.stage_key AND lineage.execution_number=NEW.execution_number
+			          AND lineage.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			          AND lineage.agent_run_id=NEW.agent_run_id AND lineage.request_kind=NEW.request_kind
+			          AND lineage.prompt_template=NEW.prompt_template) OR
+			        NOT EXISTS(SELECT 1 FROM control_input_request_seals seal
+			         WHERE seal.request_id=NEW.request_id AND seal.request_revision=(SELECT MAX(revision) FROM control_input_requests WHERE request_id=NEW.request_id)) OR
+			        NOT EXISTS(SELECT 1 FROM control_input_request_states state
+			         JOIN control_input_resolution_events terminal ON terminal.id=state.terminal_event_id
+			          AND terminal.request_id=state.request_id AND terminal.request_revision=state.current_revision
+			         WHERE state.request_id=NEW.request_id AND terminal.event_kind='superseded'
+			          AND state.current_revision=(SELECT MAX(revision) FROM control_input_requests WHERE request_id=NEW.request_id))))
+			 BEGIN SELECT RAISE(ABORT,'invalid control input revision'); END`,
+			`CREATE TRIGGER trg_control_input_state_insert_guard
+			 BEFORE INSERT ON control_input_request_states
+			 WHEN NEW.updated_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      NEW.state_revision<>1 OR NEW.current_revision<>1 OR NEW.terminal_event_id IS NOT NULL OR
+			      NOT EXISTS(SELECT 1 FROM control_input_request_seals WHERE request_id=NEW.request_id AND request_revision=1)
+			 BEGIN SELECT RAISE(ABORT,'invalid control input state'); END`,
+			`CREATE TRIGGER trg_control_input_state_transition_guard
+			 BEFORE UPDATE ON control_input_request_states
+			 WHEN NEW.request_id IS NOT OLD.request_id OR NEW.state_revision<>OLD.state_revision+1 OR
+			      NEW.updated_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.updated_at<OLD.updated_at OR
+			      NOT ((NEW.current_revision=OLD.current_revision AND OLD.terminal_event_id IS NULL AND NEW.terminal_event_id IS NOT NULL) OR
+			           (NEW.current_revision=OLD.current_revision+1 AND OLD.terminal_event_id IS NOT NULL AND NEW.terminal_event_id IS NULL AND
+			            EXISTS(SELECT 1 FROM control_input_resolution_events terminal
+			             WHERE terminal.id=OLD.terminal_event_id AND terminal.request_id=OLD.request_id
+			              AND terminal.request_revision=OLD.current_revision AND terminal.event_kind='superseded') AND
+			            EXISTS(SELECT 1 FROM control_input_request_seals WHERE request_id=NEW.request_id AND request_revision=NEW.current_revision)))
+			 BEGIN SELECT RAISE(ABORT,'invalid control input state transition'); END`,
+			`CREATE TRIGGER trg_control_input_state_no_delete
+			 BEFORE DELETE ON control_input_request_states
+			 BEGIN SELECT RAISE(ABORT,'control input state is retained'); END`,
+
+			`CREATE TABLE control_runtime_states (
+			 agent_run_id       INTEGER PRIMARY KEY CHECK(agent_run_id>0),
+			 delivery_id        INTEGER NOT NULL CHECK(delivery_id>0),
+			 root_issue_id      INTEGER NOT NULL CHECK(root_issue_id>0),
+			 attempt_id         INTEGER NOT NULL CHECK(attempt_id>0),
+			 stage_key          TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number   INTEGER NOT NULL CHECK(execution_number>0),
+			 execution_start_stage_event_id INTEGER NOT NULL CHECK(execution_start_stage_event_id>0),
+			 state              TEXT NOT NULL CHECK(state IN (` + sqlEnum(controlcontract.RuntimeStates()) + `)),
+			 revision           INTEGER NOT NULL CHECK(revision>0),
+			 last_command_id    TEXT CHECK(last_command_id IS NULL OR ` + sqlUUIDCheck("last_command_id") + `),
+			 last_result_digest BLOB CHECK(last_result_digest IS NULL OR
+			  (typeof(last_result_digest)='blob' AND length(last_result_digest)=32)),
+			 created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 CHECK((revision=1 AND state='running' AND last_command_id IS NULL AND last_result_digest IS NULL) OR
+			       (revision>1 AND last_command_id IS NOT NULL AND last_result_digest IS NOT NULL))
+			)`,
+			`CREATE INDEX idx_control_runtime_binding
+			 ON control_runtime_states(delivery_id,attempt_id,stage_key,execution_number,execution_start_stage_event_id)`,
+			`CREATE TRIGGER trg_control_runtime_insert_guard
+			 BEFORE INSERT ON control_runtime_states
+			 WHEN NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.updated_at IS NOT NEW.created_at OR
+			      NEW.revision<>1 OR NEW.state<>'running' OR NEW.last_command_id IS NOT NULL OR NEW.last_result_digest IS NOT NULL OR
+			      NOT EXISTS(
+			       SELECT 1 FROM control_capability_leases lease
+			       JOIN control_capability_lease_seals seal ON seal.lease_id=lease.lease_id AND seal.lease_revision=lease.revision
+			       JOIN agent_runs run ON run.id=lease.agent_run_id AND run.status='running'
+			       WHERE lease.revoked_at IS NULL AND lease.expires_at>NEW.created_at AND lease.agent_run_id=NEW.agent_run_id
+			        AND lease.delivery_id=NEW.delivery_id AND lease.root_issue_id=NEW.root_issue_id
+			        AND lease.attempt_id=NEW.attempt_id AND lease.stage_key=NEW.stage_key
+			        AND lease.execution_number=NEW.execution_number
+			        AND lease.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			        AND EXISTS(SELECT 1 FROM control_capability_lease_actions action
+			         WHERE action.lease_id=lease.lease_id AND action.lease_revision=lease.revision AND action.action='run.pause')
+			        AND EXISTS(SELECT 1 FROM control_capability_lease_actions action
+			         WHERE action.lease_id=lease.lease_id AND action.lease_revision=lease.revision AND action.action='run.resume'))
+			 BEGIN SELECT RAISE(ABORT,'invalid initial runtime control state'); END`,
+			`CREATE TRIGGER trg_control_runtime_transition_guard
+			 BEFORE UPDATE ON control_runtime_states
+			 WHEN NEW.agent_run_id IS NOT OLD.agent_run_id OR NEW.delivery_id IS NOT OLD.delivery_id OR
+			  NEW.root_issue_id IS NOT OLD.root_issue_id OR NEW.attempt_id IS NOT OLD.attempt_id OR
+			  NEW.stage_key IS NOT OLD.stage_key OR NEW.execution_number IS NOT OLD.execution_number OR
+			  NEW.execution_start_stage_event_id IS NOT OLD.execution_start_stage_event_id OR
+			  NEW.created_at IS NOT OLD.created_at OR NEW.updated_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			  NEW.updated_at<OLD.updated_at OR NEW.revision<>OLD.revision+1 OR NEW.state=OLD.state OR
+			  NEW.last_command_id IS NULL OR NEW.last_result_digest IS NULL
+			 BEGIN SELECT RAISE(ABORT,'invalid runtime control transition'); END`,
+			`CREATE TRIGGER trg_control_runtime_no_delete
+			 BEFORE DELETE ON control_runtime_states
+			 BEGIN SELECT RAISE(ABORT,'control runtime state is retained'); END`,
+
+			`CREATE TABLE control_commands (
+			 command_id          TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("command_id") + `),
+			 status_revision     INTEGER NOT NULL DEFAULT 1 CHECK(status_revision>0),
+			 actor_user_id       INTEGER NOT NULL CHECK(actor_user_id>0),
+			 user_id             INTEGER NOT NULL CHECK(user_id>0),
+			 principal_kind      TEXT NOT NULL CHECK(principal_kind IN ('session','api_key')),
+			 actor_session_credential_id TEXT,
+			 actor_api_key_id    INTEGER,
+			 canonical_digest    BLOB NOT NULL CHECK(typeof(canonical_digest)='blob' AND length(canonical_digest)=32),
+			 grant_id            TEXT NOT NULL,
+			 grant_revision      INTEGER NOT NULL CHECK(grant_revision>0),
+			 grant_expires_at    TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("grant_expires_at") + `),
+			 grant_binding_digest BLOB NOT NULL CHECK(typeof(grant_binding_digest)='blob' AND length(grant_binding_digest)=32),
+			 grant_action_digest BLOB NOT NULL CHECK(typeof(grant_action_digest)='blob' AND length(grant_action_digest)=32),
+			 action              TEXT NOT NULL CHECK(action IN (` + sqlEnum(controlcontract.Actions()) + `)),
+			 status              TEXT NOT NULL CHECK(status IN (` + sqlEnum(controlcontract.CommandStatuses()) + `)),
+			 outcome             TEXT CHECK(outcome IS NULL OR outcome IN (` + sqlEnum(controlcontract.SafeOutcomes()) + `)),
+			 safe_reason         TEXT CHECK(safe_reason IS NULL OR safe_reason IN (` + sqlEnum(controlcontract.SafeReasons()) + `)),
+			 result_digest       BLOB CHECK(result_digest IS NULL OR (typeof(result_digest)='blob' AND length(result_digest)=32)),
+			 challenge_template  TEXT NOT NULL CHECK(challenge_template IN (` + sqlEnum(controlcontract.ChallengeTemplates()) + `)),
+			 delivery_id         INTEGER NOT NULL CHECK(delivery_id>0),
+			 delivery_key        TEXT NOT NULL CHECK(` + sqlStableKeyCheck("delivery_key", 80) + `),
+			 delivery_revision   INTEGER NOT NULL CHECK(delivery_revision>0),
+			 project_id          INTEGER NOT NULL CHECK(project_id>0),
+			 root_issue_id       INTEGER NOT NULL CHECK(root_issue_id>0),
+			 issue_revision      INTEGER NOT NULL CHECK(issue_revision>0),
+			 issue_etag_digest   BLOB NOT NULL CHECK(typeof(issue_etag_digest)='blob' AND length(issue_etag_digest)=32),
+			 target_snapshot_digest BLOB NOT NULL CHECK(typeof(target_snapshot_digest)='blob' AND length(target_snapshot_digest)=32),
+			 attempt_id          INTEGER CHECK(attempt_id>0),
+			 attempt_number      INTEGER CHECK(attempt_number>0),
+			 plan_revision       INTEGER CHECK(plan_revision>0),
+			 stage_key           TEXT CHECK(stage_key IS NULL OR stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number    INTEGER CHECK(execution_number>0),
+			 execution_start_stage_event_id INTEGER CHECK(execution_start_stage_event_id>0),
+			 authority_epoch     INTEGER CHECK(authority_epoch>0),
+			 authority_stage_event_id INTEGER CHECK(authority_stage_event_id>0),
+			 reporter_id         INTEGER CHECK(reporter_id>0),
+			 agent_run_id        INTEGER CHECK(agent_run_id>0),
+			 lease_id            TEXT CHECK(lease_id IS NULL OR ` + sqlUUIDCheck("lease_id") + `),
+			 lease_revision      INTEGER CHECK(lease_revision>0),
+			 lease_expires_at    TEXT CHECK(` + sqlNullableControlTimestampCheck("lease_expires_at") + `),
+			 lease_binding_digest BLOB CHECK(lease_binding_digest IS NULL OR
+			  (typeof(lease_binding_digest)='blob' AND length(lease_binding_digest)=32)),
+			 lease_action_digest BLOB CHECK(lease_action_digest IS NULL OR
+			  (typeof(lease_action_digest)='blob' AND length(lease_action_digest)=32)),
+			 input_request_id    TEXT CHECK(input_request_id IS NULL OR ` + sqlUUIDCheck("input_request_id") + `),
+			 input_request_revision INTEGER CHECK(input_request_revision>0),
+			 input_request_expires_at TEXT CHECK(` + sqlNullableControlTimestampCheck("input_request_expires_at") + `),
+			 runtime_revision    INTEGER CHECK(runtime_revision>0),
+			 priority_value      TEXT CHECK(priority_value IS NULL OR priority_value IN ('low','medium','high')),
+			 input_response_kind TEXT CHECK(input_response_kind IS NULL OR input_response_kind IN ('approve','reject','choice')),
+			 input_choice_ordinal INTEGER CHECK(input_choice_ordinal BETWEEN 1 AND 8),
+			 input_choice_code   TEXT CHECK(input_choice_code IS NULL OR input_choice_code IN (` + sqlEnum(controlcontract.InputOptionCodes()) + `)),
+			 parameter_digest    BLOB NOT NULL CHECK(typeof(parameter_digest)='blob' AND length(parameter_digest)=32),
+			 expires_at          TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("expires_at") + ` AND expires_at<=grant_expires_at),
+			 accepted_at         TEXT CHECK(` + sqlNullableControlTimestampCheck("accepted_at") + `),
+			 terminal_at         TEXT CHECK(` + sqlNullableControlTimestampCheck("terminal_at") + `),
+			 created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 FOREIGN KEY(grant_id,grant_revision)
+			  REFERENCES control_capability_grants(grant_id,revision),
+			 CHECK(actor_user_id=user_id),
+			 CHECK(` + sqlTypedPrincipalCheck("principal_kind", "actor_session_credential_id", "actor_api_key_id") + `),
+			 CHECK(expires_at>created_at),
+			 CHECK(lease_expires_at IS NULL OR expires_at<=lease_expires_at),
+			 CHECK(input_request_expires_at IS NULL OR expires_at<=input_request_expires_at),
+			 CHECK(updated_at>=created_at),
+			 CHECK(COALESCE(((status='pending_confirmation' AND status_revision=1 AND outcome IS NULL AND safe_reason IS NULL AND result_digest IS NULL AND accepted_at IS NULL AND terminal_at IS NULL) OR
+			       (status='accepted' AND accepted_at>=created_at AND accepted_at<expires_at AND terminal_at IS NULL AND
+			        result_digest IS NULL AND ((outcome IS NULL AND safe_reason IS NULL) OR (outcome='outcome_unknown' AND safe_reason='runner_lost'))) OR
+			       (status='applied' AND outcome='applied' AND safe_reason IS NULL AND result_digest IS NOT NULL AND accepted_at>=created_at AND accepted_at<expires_at AND terminal_at>=accepted_at) OR
+			       (status='rejected' AND outcome='rejected' AND safe_reason IS NOT NULL
+			        AND safe_reason NOT IN ('withdrawn','confirmation_expired','runner_lost')
+			        AND result_digest IS NOT NULL AND accepted_at>=created_at AND accepted_at<expires_at AND terminal_at>=accepted_at) OR
+			       (status='expired' AND outcome IS NULL AND safe_reason='withdrawn' AND result_digest IS NULL AND accepted_at IS NULL AND terminal_at>=created_at AND terminal_at<expires_at) OR
+			       (status='expired' AND outcome IS NULL AND safe_reason='confirmation_expired' AND result_digest IS NULL AND accepted_at IS NULL AND terminal_at>=expires_at)),0)),
+			 CHECK(COALESCE(((action='issue.priority.set' AND challenge_template='issue_priority_set' AND priority_value IS NOT NULL AND
+			        attempt_id IS NULL AND attempt_number IS NULL AND plan_revision IS NULL AND stage_key IS NULL AND execution_number IS NULL AND
+			        execution_start_stage_event_id IS NULL AND authority_epoch IS NULL AND authority_stage_event_id IS NULL AND reporter_id IS NULL AND agent_run_id IS NULL AND
+			        lease_id IS NULL AND lease_revision IS NULL AND lease_expires_at IS NULL AND lease_binding_digest IS NULL AND lease_action_digest IS NULL AND
+			        input_request_id IS NULL AND input_request_revision IS NULL AND input_request_expires_at IS NULL AND runtime_revision IS NULL AND input_response_kind IS NULL AND input_choice_ordinal IS NULL AND input_choice_code IS NULL) OR
+			       (action='run.cancel.queued' AND challenge_template='run_cancel_queued' AND priority_value IS NULL AND
+			        attempt_id IS NOT NULL AND attempt_number IS NOT NULL AND plan_revision IS NOT NULL AND stage_key IS NOT NULL AND execution_number IS NOT NULL AND
+			        execution_start_stage_event_id IS NOT NULL AND authority_epoch IS NOT NULL AND authority_stage_event_id IS NOT NULL AND reporter_id IS NOT NULL AND agent_run_id IS NOT NULL AND
+			        lease_id IS NULL AND lease_revision IS NULL AND lease_expires_at IS NULL AND lease_binding_digest IS NULL AND lease_action_digest IS NULL AND
+			        input_request_id IS NULL AND input_request_revision IS NULL AND input_request_expires_at IS NULL AND runtime_revision IS NULL AND input_response_kind IS NULL AND input_choice_ordinal IS NULL AND input_choice_code IS NULL) OR
+			       (action='run.cancel.running' AND challenge_template='run_cancel_running' AND priority_value IS NULL AND
+			        attempt_id IS NOT NULL AND attempt_number IS NOT NULL AND plan_revision IS NOT NULL AND stage_key IS NOT NULL AND execution_number IS NOT NULL AND
+			        execution_start_stage_event_id IS NOT NULL AND authority_epoch IS NOT NULL AND authority_stage_event_id IS NOT NULL AND reporter_id IS NOT NULL AND agent_run_id IS NOT NULL AND
+			        lease_id IS NOT NULL AND lease_revision IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_binding_digest IS NOT NULL AND lease_action_digest IS NOT NULL AND
+			        input_request_id IS NULL AND input_request_revision IS NULL AND input_request_expires_at IS NULL AND runtime_revision IS NULL AND input_response_kind IS NULL AND input_choice_ordinal IS NULL AND input_choice_code IS NULL) OR
+			       (action='input.respond' AND challenge_template IN ('input_approve','input_reject','input_choice') AND priority_value IS NULL AND
+			        attempt_id IS NOT NULL AND attempt_number IS NOT NULL AND plan_revision IS NOT NULL AND stage_key IS NOT NULL AND execution_number IS NOT NULL AND
+			        execution_start_stage_event_id IS NOT NULL AND authority_epoch IS NOT NULL AND authority_stage_event_id IS NOT NULL AND reporter_id IS NOT NULL AND agent_run_id IS NOT NULL AND
+			        lease_id IS NOT NULL AND lease_revision IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_binding_digest IS NOT NULL AND lease_action_digest IS NOT NULL AND
+			        input_request_id IS NOT NULL AND input_request_revision IS NOT NULL AND input_request_expires_at IS NOT NULL AND runtime_revision IS NULL AND input_response_kind IS NOT NULL AND
+			        ((input_response_kind='approve' AND challenge_template='input_approve' AND input_choice_ordinal IS NULL AND input_choice_code IS NULL) OR
+			         (input_response_kind='reject' AND challenge_template='input_reject' AND input_choice_ordinal IS NULL AND input_choice_code IS NULL) OR
+			         (input_response_kind='choice' AND challenge_template='input_choice' AND input_choice_ordinal IS NOT NULL AND input_choice_code='choice_'||input_choice_ordinal))) OR
+			       (action IN ('run.pause','run.resume') AND challenge_template=CASE action WHEN 'run.pause' THEN 'run_pause' ELSE 'run_resume' END AND priority_value IS NULL AND
+			        attempt_id IS NOT NULL AND attempt_number IS NOT NULL AND plan_revision IS NOT NULL AND stage_key IS NOT NULL AND execution_number IS NOT NULL AND
+			        execution_start_stage_event_id IS NOT NULL AND authority_epoch IS NOT NULL AND authority_stage_event_id IS NOT NULL AND reporter_id IS NOT NULL AND agent_run_id IS NOT NULL AND
+			        lease_id IS NOT NULL AND lease_revision IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_binding_digest IS NOT NULL AND lease_action_digest IS NOT NULL AND
+			        input_request_id IS NULL AND input_request_revision IS NULL AND input_request_expires_at IS NULL AND runtime_revision IS NOT NULL AND input_response_kind IS NULL AND input_choice_ordinal IS NULL AND input_choice_code IS NULL)),0))
+			)`,
+			`CREATE INDEX idx_control_commands_subject ON control_commands(delivery_id,created_at DESC)`,
+			`CREATE UNIQUE INDEX idx_control_commands_canonical ON control_commands(canonical_digest)`,
+			`CREATE INDEX idx_control_commands_status ON control_commands(status,expires_at)`,
+			`CREATE INDEX idx_control_commands_run ON control_commands(agent_run_id,status) WHERE agent_run_id IS NOT NULL`,
+			`CREATE UNIQUE INDEX idx_control_commands_consumed_input
+			 ON control_commands(input_request_id,input_request_revision)
+			 WHERE action='input.respond' AND status IN ('accepted','applied')`,
+			`CREATE UNIQUE INDEX idx_control_commands_consumed_runtime
+			 ON control_commands(agent_run_id,runtime_revision)
+			 WHERE action IN ('run.pause','run.resume') AND status IN ('accepted','applied')`,
+			`CREATE UNIQUE INDEX idx_control_commands_consumed_running_cancel
+			 ON control_commands(delivery_id,attempt_id,stage_key,execution_number,execution_start_stage_event_id,agent_run_id)
+			 WHERE action='run.cancel.running' AND status IN ('accepted','applied')`,
+			`CREATE UNIQUE INDEX idx_control_commands_consumed_queued_cancel
+			 ON control_commands(agent_run_id)
+			 WHERE action='run.cancel.queued' AND status IN ('accepted','applied')`,
+			`CREATE TRIGGER trg_control_commands_insert_guard
+			 BEFORE INSERT ON control_commands
+			 WHEN NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.updated_at IS NOT NEW.created_at OR
+			      NEW.expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			      NEW.status<>'pending_confirmation' OR NEW.status_revision<>1 OR NEW.outcome IS NOT NULL OR
+			      NEW.safe_reason IS NOT NULL OR NEW.result_digest IS NOT NULL OR NEW.accepted_at IS NOT NULL OR NEW.terminal_at IS NOT NULL OR
+			      NOT EXISTS(SELECT 1 FROM control_capability_grant_seals seal
+			       WHERE seal.grant_id=NEW.grant_id AND seal.grant_revision=NEW.grant_revision) OR
+			      NOT EXISTS(SELECT 1 FROM control_capability_grant_actions granted_action
+			       WHERE granted_action.grant_id=NEW.grant_id AND granted_action.grant_revision=NEW.grant_revision
+			        AND granted_action.action=NEW.action) OR
+			      NOT EXISTS(SELECT 1 FROM control_capability_grants grant_row
+			       WHERE grant_row.grant_id=NEW.grant_id AND grant_row.revision=NEW.grant_revision AND grant_row.revoked_at IS NULL
+			        AND grant_row.created_at<=NEW.created_at AND grant_row.expires_at>NEW.created_at
+			        AND grant_row.actor_user_id=NEW.actor_user_id AND grant_row.user_id=NEW.user_id
+			        AND grant_row.principal_kind=NEW.principal_kind
+			        AND grant_row.actor_session_credential_id IS NEW.actor_session_credential_id
+			        AND grant_row.actor_api_key_id IS NEW.actor_api_key_id
+			        AND grant_row.delivery_id=NEW.delivery_id AND grant_row.delivery_key=NEW.delivery_key
+			        AND grant_row.delivery_revision=NEW.delivery_revision AND grant_row.project_id=NEW.project_id
+			        AND grant_row.root_issue_id=NEW.root_issue_id AND grant_row.issue_revision=NEW.issue_revision
+			        AND grant_row.issue_etag_digest=NEW.issue_etag_digest
+			        AND grant_row.expires_at=NEW.grant_expires_at AND grant_row.binding_digest=NEW.grant_binding_digest
+			        AND grant_row.action_set_digest=NEW.grant_action_digest)
+			 BEGIN SELECT RAISE(ABORT,'invalid control command creation'); END`,
+			`CREATE TRIGGER trg_control_commands_lease_binding_guard
+			 BEFORE INSERT ON control_commands
+			 WHEN NEW.action IN ('run.cancel.running','input.respond','run.pause','run.resume') AND NOT EXISTS(
+			  SELECT 1 FROM control_capability_leases lease
+			  JOIN control_capability_lease_seals seal ON seal.lease_id=lease.lease_id AND seal.lease_revision=lease.revision
+			  JOIN control_capability_lease_actions lease_action ON lease_action.lease_id=lease.lease_id
+			   AND lease_action.lease_revision=lease.revision AND lease_action.action=NEW.action
+			   WHERE lease.lease_id=NEW.lease_id AND lease.revision=NEW.lease_revision AND lease.revoked_at IS NULL
+			   AND lease.created_at<=NEW.created_at AND lease.expires_at>NEW.created_at
+			   AND lease.expires_at=NEW.lease_expires_at AND lease.binding_digest=NEW.lease_binding_digest
+			   AND lease.action_set_digest=NEW.lease_action_digest AND lease.delivery_id=NEW.delivery_id
+			   AND lease.delivery_key=NEW.delivery_key AND lease.delivery_revision=NEW.delivery_revision AND lease.project_id=NEW.project_id
+			   AND lease.root_issue_id=NEW.root_issue_id AND lease.issue_revision=NEW.issue_revision
+			   AND lease.attempt_id=NEW.attempt_id AND lease.attempt_number=NEW.attempt_number AND lease.plan_revision=NEW.plan_revision
+			   AND lease.stage_key=NEW.stage_key AND lease.execution_number=NEW.execution_number
+			   AND lease.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			   AND lease.authority_epoch=NEW.authority_epoch AND lease.authority_stage_event_id=NEW.authority_stage_event_id
+			   AND lease.reporter_id=NEW.reporter_id AND lease.agent_run_id=NEW.agent_run_id)
+			 BEGIN SELECT RAISE(ABORT,'control command lease binding is stale'); END`,
+			`CREATE TRIGGER trg_control_commands_target_binding_guard
+			 BEFORE INSERT ON control_commands
+			 WHEN NOT EXISTS(
+			  SELECT 1 FROM deliveries delivery JOIN issues issue ON issue.id=delivery.issue_id
+			  JOIN projects project ON project.id=issue.project_id
+			  WHERE delivery.id=NEW.delivery_id AND delivery.delivery_key=NEW.delivery_key
+			   AND delivery.issue_id=NEW.root_issue_id AND issue.project_id=NEW.project_id AND issue.deleted_at IS NULL
+			   AND (SELECT revision FROM issue_control_revisions WHERE issue_id=issue.id)=NEW.issue_revision
+			   AND COALESCE((SELECT MAX(event.delivery_revision) FROM delivery_events event
+			                WHERE event.delivery_id=delivery.id),0)=NEW.delivery_revision
+			   AND (project.status IN ('active','frozen') OR
+			        (project.status='archived' AND NEW.action IN ('run.cancel.queued','run.cancel.running')
+			         AND NOT EXISTS(SELECT 1 FROM control_capability_grant_actions action
+			          WHERE action.grant_id=NEW.grant_id AND action.grant_revision=NEW.grant_revision
+			           AND action.action NOT IN ('run.cancel.queued','run.cancel.running'))
+			         AND (NEW.action='run.cancel.queued' OR NOT EXISTS(
+			          SELECT 1 FROM control_capability_lease_actions action
+			          WHERE action.lease_id=NEW.lease_id AND action.lease_revision=NEW.lease_revision
+			           AND action.action<>'run.cancel.running')))))
+			 BEGIN SELECT RAISE(ABORT,'control command target is stale'); END`,
+			`CREATE TRIGGER trg_control_commands_run_state_guard
+			 BEFORE INSERT ON control_commands
+			 WHEN (NEW.action='run.cancel.queued' AND NOT EXISTS(
+			        SELECT 1 FROM agent_runs run
+			        JOIN delivery_agent_run_links link ON link.agent_run_id=run.id AND link.delivery_id=NEW.delivery_id
+			         AND link.attempt_id=NEW.attempt_id AND link.stage_key=NEW.stage_key
+			         AND link.execution_number=NEW.execution_number AND link.reporter_id=NEW.reporter_id
+			         AND link.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			        JOIN delivery_agent_run_activations activation ON activation.agent_run_id=run.id
+			         AND activation.delivery_id=NEW.delivery_id AND activation.attempt_id=NEW.attempt_id
+			         AND activation.stage_key=NEW.stage_key AND activation.execution_number=NEW.execution_number
+			         AND activation.authority_epoch=NEW.authority_epoch AND activation.reporter_id=NEW.reporter_id
+			         AND activation.authority_stage_event_id=NEW.authority_stage_event_id
+			        JOIN delivery_stage_latest latest ON latest.delivery_id=NEW.delivery_id AND latest.attempt_id=NEW.attempt_id
+			         AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
+			         AND latest.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			         AND latest.authority_epoch=NEW.authority_epoch AND latest.authority_stage_event_id=NEW.authority_stage_event_id
+			         AND latest.current_reporter_id=NEW.reporter_id
+			        WHERE run.id=NEW.agent_run_id AND run.status='queued' AND run.issue_id=NEW.root_issue_id)) OR
+			      (NEW.action IN ('run.cancel.running','input.respond','run.pause','run.resume') AND NOT EXISTS(
+			        SELECT 1 FROM agent_runs run WHERE run.id=NEW.agent_run_id AND run.status='running' AND run.issue_id=NEW.root_issue_id))
+			 BEGIN SELECT RAISE(ABORT,'control command run state is stale'); END`,
+			`CREATE TRIGGER trg_control_commands_input_choice_guard
+			 BEFORE INSERT ON control_commands
+			 WHEN NEW.action='input.respond' AND NOT EXISTS(
+			  SELECT 1 FROM control_input_requests request
+			  JOIN control_input_request_seals seal ON seal.request_id=request.request_id AND seal.request_revision=request.revision
+			  JOIN control_input_request_states state ON state.request_id=request.request_id
+			   AND state.current_revision=request.revision AND state.terminal_event_id IS NULL
+			  LEFT JOIN control_input_resolution_events terminal ON terminal.request_id=request.request_id AND terminal.request_revision=request.revision
+			  WHERE request.request_id=NEW.input_request_id AND request.revision=NEW.input_request_revision AND terminal.id IS NULL
+			   AND request.created_at<=NEW.created_at AND request.expires_at>NEW.created_at
+			   AND request.expires_at=NEW.input_request_expires_at AND request.lease_id=NEW.lease_id
+			   AND request.lease_revision=NEW.lease_revision AND request.delivery_id=NEW.delivery_id
+			   AND request.delivery_key=NEW.delivery_key AND request.delivery_revision=NEW.delivery_revision
+			   AND request.project_id=NEW.project_id AND request.root_issue_id=NEW.root_issue_id
+			   AND request.issue_revision=NEW.issue_revision AND request.attempt_id=NEW.attempt_id
+			   AND request.attempt_number=NEW.attempt_number AND request.plan_revision=NEW.plan_revision
+			   AND request.stage_key=NEW.stage_key AND request.execution_number=NEW.execution_number
+			   AND request.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			   AND request.authority_epoch=NEW.authority_epoch AND request.authority_stage_event_id=NEW.authority_stage_event_id
+			   AND request.reporter_id=NEW.reporter_id AND request.agent_run_id=NEW.agent_run_id
+			   AND ((NEW.input_response_kind IN ('approve','reject') AND request.request_kind='approval') OR
+			        (NEW.input_response_kind='choice' AND request.request_kind='choice' AND EXISTS(
+			         SELECT 1 FROM control_input_request_options option WHERE option.request_id=request.request_id
+			          AND option.request_revision=request.revision AND option.ordinal=NEW.input_choice_ordinal
+			          AND option.option_code=NEW.input_choice_code))) )
+			 BEGIN SELECT RAISE(ABORT,'control command input binding is stale'); END`,
+			`CREATE TRIGGER trg_control_commands_runtime_binding_guard
+			 BEFORE INSERT ON control_commands
+			 WHEN NEW.action IN ('run.pause','run.resume') AND NOT EXISTS(
+			  SELECT 1 FROM control_runtime_states runtime
+			  WHERE runtime.agent_run_id=NEW.agent_run_id AND runtime.delivery_id=NEW.delivery_id
+			   AND runtime.root_issue_id=NEW.root_issue_id AND runtime.attempt_id=NEW.attempt_id
+			   AND runtime.stage_key=NEW.stage_key AND runtime.execution_number=NEW.execution_number
+			   AND runtime.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			   AND runtime.revision=NEW.runtime_revision
+			   AND ((NEW.action='run.pause' AND runtime.state='running') OR
+			        (NEW.action='run.resume' AND runtime.state='paused')))
+			 BEGIN SELECT RAISE(ABORT,'control command runtime state is stale'); END`,
+			`CREATE TRIGGER trg_control_commands_transition_guard
+			 BEFORE UPDATE ON control_commands
+			 WHEN OLD.status IN ('applied','rejected','expired') OR NEW.status_revision<>OLD.status_revision+1 OR
+			  NOT ((OLD.status='pending_confirmation' AND NEW.status IN ('accepted','expired')) OR
+			       (OLD.status='accepted' AND NEW.status IN ('accepted','applied','rejected'))) OR
+			  (OLD.status='pending_confirmation' AND NEW.status='accepted' AND
+			   (NEW.outcome IS NOT NULL OR NEW.safe_reason IS NOT NULL OR NEW.result_digest IS NOT NULL)) OR
+			  (OLD.status='accepted' AND NEW.status='accepted' AND
+			   (NOT (OLD.outcome IS NULL AND OLD.safe_reason IS NULL AND NEW.outcome='outcome_unknown' AND NEW.safe_reason='runner_lost') OR
+			    NEW.action IN ('issue.priority.set','run.cancel.queued') OR NOT EXISTS(
+			     SELECT 1 FROM control_outbox outbox WHERE outbox.command_id=OLD.command_id
+			      AND outbox.delivery_state='claimed' AND outbox.lease_id=OLD.lease_id
+			      AND outbox.lease_revision=OLD.lease_revision AND outbox.effect_digest=OLD.canonical_digest))) OR
+			  (OLD.outcome='outcome_unknown' AND NEW.outcome IS NULL) OR
+			  (OLD.accepted_at IS NOT NULL AND NEW.accepted_at IS NOT OLD.accepted_at) OR
+			  NEW.updated_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			  (OLD.status='pending_confirmation' AND NEW.status='accepted' AND
+			   (NEW.accepted_at IS NOT NEW.updated_at OR strftime('%Y-%m-%dT%H:%M:%fZ','now')>=OLD.expires_at)) OR
+			  (OLD.status='pending_confirmation' AND NEW.status='expired' AND
+			   (NEW.terminal_at IS NOT NEW.updated_at OR
+			    (NEW.safe_reason='withdrawn' AND strftime('%Y-%m-%dT%H:%M:%fZ','now')>=OLD.expires_at) OR
+			    (NEW.safe_reason='confirmation_expired' AND strftime('%Y-%m-%dT%H:%M:%fZ','now')<OLD.expires_at))) OR
+			  (OLD.status='accepted' AND NEW.status IN ('applied','rejected') AND NEW.terminal_at IS NOT NEW.updated_at) OR
+			  NEW.command_id IS NOT OLD.command_id OR NEW.actor_user_id IS NOT OLD.actor_user_id OR NEW.user_id IS NOT OLD.user_id OR
+			  NEW.principal_kind IS NOT OLD.principal_kind OR
+			  NEW.actor_session_credential_id IS NOT OLD.actor_session_credential_id OR NEW.actor_api_key_id IS NOT OLD.actor_api_key_id OR
+			  NEW.canonical_digest IS NOT OLD.canonical_digest OR
+			  NEW.grant_id IS NOT OLD.grant_id OR NEW.grant_revision IS NOT OLD.grant_revision OR
+			  NEW.grant_expires_at IS NOT OLD.grant_expires_at OR NEW.grant_binding_digest IS NOT OLD.grant_binding_digest OR
+			  NEW.grant_action_digest IS NOT OLD.grant_action_digest OR NEW.action IS NOT OLD.action OR
+			  NEW.challenge_template IS NOT OLD.challenge_template OR NEW.delivery_id IS NOT OLD.delivery_id OR
+			  NEW.delivery_key IS NOT OLD.delivery_key OR NEW.delivery_revision IS NOT OLD.delivery_revision OR NEW.project_id IS NOT OLD.project_id OR
+			  NEW.root_issue_id IS NOT OLD.root_issue_id OR NEW.issue_revision IS NOT OLD.issue_revision OR NEW.issue_etag_digest IS NOT OLD.issue_etag_digest OR
+			  NEW.target_snapshot_digest IS NOT OLD.target_snapshot_digest OR NEW.attempt_id IS NOT OLD.attempt_id OR
+			  NEW.attempt_number IS NOT OLD.attempt_number OR NEW.plan_revision IS NOT OLD.plan_revision OR
+			  NEW.stage_key IS NOT OLD.stage_key OR NEW.execution_number IS NOT OLD.execution_number OR
+			  NEW.execution_start_stage_event_id IS NOT OLD.execution_start_stage_event_id OR
+			  NEW.authority_epoch IS NOT OLD.authority_epoch OR NEW.authority_stage_event_id IS NOT OLD.authority_stage_event_id OR NEW.reporter_id IS NOT OLD.reporter_id OR
+			  NEW.agent_run_id IS NOT OLD.agent_run_id OR NEW.lease_id IS NOT OLD.lease_id OR
+			  NEW.lease_revision IS NOT OLD.lease_revision OR NEW.lease_expires_at IS NOT OLD.lease_expires_at OR
+			  NEW.lease_binding_digest IS NOT OLD.lease_binding_digest OR NEW.lease_action_digest IS NOT OLD.lease_action_digest OR
+			  NEW.input_request_id IS NOT OLD.input_request_id OR NEW.input_request_revision IS NOT OLD.input_request_revision OR
+			  NEW.input_request_expires_at IS NOT OLD.input_request_expires_at OR
+			  NEW.runtime_revision IS NOT OLD.runtime_revision OR NEW.priority_value IS NOT OLD.priority_value OR
+			  NEW.input_response_kind IS NOT OLD.input_response_kind OR NEW.input_choice_ordinal IS NOT OLD.input_choice_ordinal OR
+			  NEW.input_choice_code IS NOT OLD.input_choice_code OR NEW.parameter_digest IS NOT OLD.parameter_digest OR
+			  NEW.expires_at IS NOT OLD.expires_at OR NEW.created_at IS NOT OLD.created_at OR
+			  NEW.updated_at<OLD.updated_at
+			 BEGIN SELECT RAISE(ABORT,'invalid control command transition'); END`,
+			`CREATE TRIGGER trg_control_commands_accept_grant_target_guard
+			 BEFORE UPDATE ON control_commands
+			 WHEN OLD.status='pending_confirmation' AND NEW.status='accepted' AND NOT EXISTS(
+			  SELECT 1 FROM control_capability_grants grant_row
+			  JOIN control_capability_grant_seals grant_seal ON grant_seal.grant_id=grant_row.grant_id
+			   AND grant_seal.grant_revision=grant_row.revision
+			  JOIN control_capability_grant_actions grant_action ON grant_action.grant_id=grant_row.grant_id
+			   AND grant_action.grant_revision=grant_row.revision AND grant_action.action=OLD.action
+			  JOIN deliveries delivery ON delivery.id=grant_row.delivery_id AND delivery.delivery_key=grant_row.delivery_key
+			   AND delivery.issue_id=grant_row.root_issue_id
+			  JOIN issues issue ON issue.id=delivery.issue_id AND issue.project_id=grant_row.project_id AND issue.deleted_at IS NULL
+			  JOIN projects project ON project.id=issue.project_id
+			  WHERE grant_row.grant_id=OLD.grant_id AND grant_row.revision=OLD.grant_revision
+			   AND grant_row.revoked_at IS NULL AND grant_row.expires_at=OLD.grant_expires_at
+			   AND grant_row.binding_digest=OLD.grant_binding_digest
+			   AND grant_row.action_set_digest=OLD.grant_action_digest
+			   AND grant_seal.binding_digest=grant_row.binding_digest
+			   AND grant_seal.action_set_digest=grant_row.action_set_digest
+			   AND strftime('%Y-%m-%dT%H:%M:%fZ','now')<grant_row.expires_at
+			   AND (SELECT revision FROM issue_control_revisions WHERE issue_id=issue.id)=grant_row.issue_revision
+			   AND COALESCE((SELECT MAX(event.delivery_revision) FROM delivery_events event
+			                WHERE event.delivery_id=delivery.id),0)=grant_row.delivery_revision
+			   AND grant_row.delivery_id=OLD.delivery_id AND grant_row.root_issue_id=OLD.root_issue_id
+			   AND grant_row.issue_revision=OLD.issue_revision AND grant_row.delivery_revision=OLD.delivery_revision
+			   AND (project.status IN ('active','frozen') OR
+			        (project.status='archived' AND OLD.action IN ('run.cancel.queued','run.cancel.running')
+			         AND NOT EXISTS(SELECT 1 FROM control_capability_grant_actions action
+			          WHERE action.grant_id=OLD.grant_id AND action.grant_revision=OLD.grant_revision
+			           AND action.action NOT IN ('run.cancel.queued','run.cancel.running'))
+			         AND (OLD.action='run.cancel.queued' OR NOT EXISTS(
+			          SELECT 1 FROM control_capability_lease_actions action
+			          WHERE action.lease_id=OLD.lease_id AND action.lease_revision=OLD.lease_revision
+			           AND action.action<>'run.cancel.running')))))
+			 BEGIN SELECT RAISE(ABORT,'control command acceptance target is stale'); END`,
+			`CREATE TRIGGER trg_control_commands_accept_lease_guard
+			 BEFORE UPDATE ON control_commands
+			 WHEN OLD.status='pending_confirmation' AND NEW.status='accepted'
+			  AND OLD.action IN ('run.cancel.running','input.respond','run.pause','run.resume') AND NOT EXISTS(
+			  SELECT 1 FROM control_capability_leases lease
+			  JOIN control_capability_lease_seals lease_seal ON lease_seal.lease_id=lease.lease_id
+			   AND lease_seal.lease_revision=lease.revision
+			  JOIN control_capability_lease_actions lease_action ON lease_action.lease_id=lease.lease_id
+			   AND lease_action.lease_revision=lease.revision AND lease_action.action=OLD.action
+			  JOIN api_keys runner_key ON runner_key.id=lease.actor_api_key_id AND runner_key.user_id=lease.user_id
+			   AND runner_key.disabled_at IS NULL
+			   AND (runner_key.expires_at IS NULL OR runner_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			  JOIN users runner_user ON runner_user.id=lease.user_id AND runner_user.status='active'
+			  JOIN delivery_agent_run_links link ON link.delivery_id=lease.delivery_id AND link.attempt_id=lease.attempt_id
+			   AND link.stage_key=lease.stage_key AND link.execution_number=lease.execution_number
+			   AND link.execution_start_stage_event_id=lease.execution_start_stage_event_id
+			   AND link.agent_run_id=lease.agent_run_id AND link.reporter_id=lease.reporter_id
+			  JOIN agent_runs run ON run.id=lease.agent_run_id AND run.issue_id=lease.root_issue_id AND run.status='running'
+			  JOIN delivery_agent_run_activations activation ON activation.delivery_id=lease.delivery_id
+			   AND activation.attempt_id=lease.attempt_id AND activation.stage_key=lease.stage_key
+			   AND activation.execution_number=lease.execution_number AND activation.authority_epoch=lease.authority_epoch
+			   AND activation.agent_run_id=lease.agent_run_id AND activation.reporter_id=lease.reporter_id
+			   AND activation.authority_stage_event_id=lease.authority_stage_event_id
+			  JOIN delivery_stage_latest latest ON latest.delivery_id=lease.delivery_id AND latest.attempt_id=lease.attempt_id
+			   AND latest.stage_key=lease.stage_key AND latest.execution_number=lease.execution_number
+			   AND latest.execution_start_stage_event_id=lease.execution_start_stage_event_id
+			   AND latest.authority_epoch=lease.authority_epoch AND latest.current_reporter_id=lease.reporter_id
+			   AND latest.authority_stage_event_id=lease.authority_stage_event_id
+			  WHERE lease.lease_id=OLD.lease_id AND lease.revision=OLD.lease_revision
+			   AND lease.revoked_at IS NULL AND lease.expires_at=OLD.lease_expires_at
+			   AND lease.binding_digest=OLD.lease_binding_digest AND lease.action_set_digest=OLD.lease_action_digest
+			   AND strftime('%Y-%m-%dT%H:%M:%fZ','now')<lease.expires_at
+			   AND lease.delivery_id=OLD.delivery_id AND lease.root_issue_id=OLD.root_issue_id
+			   AND lease.issue_revision=OLD.issue_revision AND lease.delivery_revision=OLD.delivery_revision
+			   AND lease.attempt_id=OLD.attempt_id AND lease.stage_key=OLD.stage_key
+			   AND lease.execution_number=OLD.execution_number
+			   AND lease.execution_start_stage_event_id=OLD.execution_start_stage_event_id
+			   AND lease.authority_epoch=OLD.authority_epoch AND lease.authority_stage_event_id=OLD.authority_stage_event_id
+			   AND lease.reporter_id=OLD.reporter_id AND lease.agent_run_id=OLD.agent_run_id)
+			 BEGIN SELECT RAISE(ABORT,'control command acceptance lease is stale'); END`,
+			`CREATE TRIGGER trg_control_commands_accept_action_state_guard
+			 BEFORE UPDATE ON control_commands
+			 WHEN OLD.status='pending_confirmation' AND NEW.status='accepted' AND
+			  ((OLD.action='run.cancel.queued' AND NOT EXISTS(
+			    SELECT 1 FROM agent_runs run
+			    JOIN delivery_agent_run_links link ON link.agent_run_id=run.id AND link.delivery_id=OLD.delivery_id
+			     AND link.attempt_id=OLD.attempt_id AND link.stage_key=OLD.stage_key
+			     AND link.execution_number=OLD.execution_number AND link.reporter_id=OLD.reporter_id
+			     AND link.execution_start_stage_event_id=OLD.execution_start_stage_event_id
+			    JOIN delivery_stage_latest latest ON latest.delivery_id=OLD.delivery_id AND latest.attempt_id=OLD.attempt_id
+			     AND latest.stage_key=OLD.stage_key AND latest.execution_number=OLD.execution_number
+			     AND latest.execution_start_stage_event_id=OLD.execution_start_stage_event_id
+			     AND latest.authority_epoch=OLD.authority_epoch AND latest.current_reporter_id=OLD.reporter_id
+			     AND latest.authority_stage_event_id=OLD.authority_stage_event_id
+			    WHERE run.id=OLD.agent_run_id AND run.issue_id=OLD.root_issue_id AND run.status='queued')) OR
+			   (OLD.action='input.respond' AND NOT EXISTS(
+			    SELECT 1 FROM control_input_requests request
+			    JOIN control_input_request_seals request_seal ON request_seal.request_id=request.request_id
+			     AND request_seal.request_revision=request.revision
+			    JOIN control_input_request_states input_state ON input_state.request_id=request.request_id
+			     AND input_state.current_revision=request.revision AND input_state.terminal_event_id IS NULL
+			    WHERE request.request_id=OLD.input_request_id AND request.revision=OLD.input_request_revision
+			     AND request.expires_at=OLD.input_request_expires_at
+			     AND NOT EXISTS(SELECT 1 FROM control_input_resolution_events terminal
+			      WHERE terminal.request_id=request.request_id AND terminal.request_revision=request.revision)
+			     AND strftime('%Y-%m-%dT%H:%M:%fZ','now')<request.expires_at)) OR
+			   (OLD.action IN ('run.pause','run.resume') AND NOT EXISTS(
+			    SELECT 1 FROM control_runtime_states runtime
+			    WHERE runtime.agent_run_id=OLD.agent_run_id AND runtime.revision=OLD.runtime_revision
+			     AND runtime.delivery_id=OLD.delivery_id AND runtime.root_issue_id=OLD.root_issue_id
+			     AND runtime.attempt_id=OLD.attempt_id AND runtime.stage_key=OLD.stage_key
+			     AND runtime.execution_number=OLD.execution_number
+			     AND runtime.execution_start_stage_event_id=OLD.execution_start_stage_event_id
+			     AND ((OLD.action='run.pause' AND runtime.state='running') OR
+			          (OLD.action='run.resume' AND runtime.state='paused')))))
+			 BEGIN SELECT RAISE(ABORT,'control command acceptance state is stale'); END`,
+			`CREATE TRIGGER trg_control_commands_no_delete
+			 BEFORE DELETE ON control_commands
+			 BEGIN SELECT RAISE(ABORT,'control commands are retained'); END`,
+			`CREATE TRIGGER trg_agent_run_cancellation_command_guard
+			 BEFORE INSERT ON agent_run_cancellation_facts
+			 WHEN NEW.recorded_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NOT EXISTS(
+			  SELECT 1 FROM agent_runs run
+			  WHERE run.id=NEW.run_id AND run.status='cancelled' AND run.finished_at IS NOT NULL
+			   AND (NEW.cancellation_cause<>'operator_command' OR EXISTS(
+			    SELECT 1 FROM control_commands command
+			    WHERE command.command_id=NEW.command_id AND command.agent_run_id=NEW.run_id
+			     AND command.action IN ('run.cancel.queued','run.cancel.running')
+			     AND command.status='applied' AND command.outcome='applied' AND command.result_digest IS NOT NULL)))
+			 BEGIN SELECT RAISE(ABORT,'cancellation fact lacks terminal run proof'); END`,
+			`CREATE TRIGGER trg_control_runtime_command_proof_guard
+			 BEFORE UPDATE ON control_runtime_states
+			 WHEN NOT EXISTS(
+			  SELECT 1 FROM control_commands command
+			  WHERE command.command_id=NEW.last_command_id AND command.status='applied'
+			   AND command.result_digest=NEW.last_result_digest AND command.agent_run_id=NEW.agent_run_id
+			   AND command.delivery_id=NEW.delivery_id AND command.root_issue_id=NEW.root_issue_id
+			   AND command.attempt_id=NEW.attempt_id AND command.stage_key=NEW.stage_key
+			   AND command.execution_number=NEW.execution_number
+			   AND command.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			   AND command.runtime_revision=OLD.revision AND
+			   ((OLD.state='running' AND NEW.state='paused' AND command.action='run.pause') OR
+			    (OLD.state='paused' AND NEW.state='running' AND command.action='run.resume')))
+			 BEGIN SELECT RAISE(ABORT,'runtime transition lacks verified command proof'); END`,
+
+			`CREATE TABLE control_outbox (
+			 id                    INTEGER PRIMARY KEY AUTOINCREMENT CHECK(id>0),
+			 command_id            TEXT NOT NULL UNIQUE,
+			 lease_id              TEXT NOT NULL,
+			 lease_revision        INTEGER NOT NULL CHECK(lease_revision>0),
+			 delivery_state        TEXT NOT NULL CHECK(delivery_state IN (` + sqlEnum(controlcontract.OutboxStates()) + `)),
+			 effect_sequence       INTEGER NOT NULL DEFAULT 1 CHECK(effect_sequence=1),
+			 effect_digest         BLOB NOT NULL CHECK(typeof(effect_digest)='blob' AND length(effect_digest)=32),
+			 claim_sequence        INTEGER CHECK(claim_sequence>0),
+			 claim_user_id         INTEGER CHECK(claim_user_id>0),
+			 claim_principal_kind  TEXT CHECK(claim_principal_kind IS NULL OR claim_principal_kind='api_key'),
+			 claim_session_credential_id TEXT,
+			 claim_api_key_id      INTEGER CHECK(claim_api_key_id>0),
+			 claim_device_id       TEXT CHECK(claim_device_id IS NULL OR ` + sqlSafeDeviceIDCheck("claim_device_id") + `),
+			 claimed_at            TEXT CHECK(` + sqlNullableControlTimestampCheck("claimed_at") + `),
+			 result_sequence       INTEGER CHECK(result_sequence>0),
+			 result_digest         BLOB CHECK(result_digest IS NULL OR (typeof(result_digest)='blob' AND length(result_digest)=32)),
+			 result_outcome        TEXT CHECK(result_outcome IS NULL OR result_outcome IN ('applied','rejected')),
+			 safe_reason           TEXT CHECK(safe_reason IS NULL OR safe_reason IN (` + sqlEnum(controlcontract.SafeReasons()) + `)),
+			 acknowledged_at       TEXT CHECK(` + sqlNullableControlTimestampCheck("acknowledged_at") + `),
+			 created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 updated_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 FOREIGN KEY(command_id) REFERENCES control_commands(command_id),
+			 FOREIGN KEY(lease_id,lease_revision)
+			  REFERENCES control_capability_leases(lease_id,revision),
+			 CHECK(COALESCE((claim_principal_kind IS NULL AND claim_session_credential_id IS NULL AND claim_api_key_id IS NULL AND claim_device_id IS NULL) OR
+			       (claim_principal_kind='api_key' AND ` + sqlTypedPrincipalCheck("claim_principal_kind", "claim_session_credential_id", "claim_api_key_id") + `),0)),
+			 CHECK(COALESCE((delivery_state='queued' AND claim_sequence IS NULL AND claim_user_id IS NULL AND claim_principal_kind IS NULL AND claim_session_credential_id IS NULL AND claim_api_key_id IS NULL AND claim_device_id IS NULL AND claimed_at IS NULL AND result_sequence IS NULL AND result_digest IS NULL AND result_outcome IS NULL AND safe_reason IS NULL AND acknowledged_at IS NULL) OR
+			       (delivery_state='claimed' AND claim_sequence=1 AND claim_user_id IS NOT NULL AND claim_principal_kind='api_key' AND claim_device_id IS NOT NULL AND claimed_at>=created_at AND result_sequence IS NULL AND result_digest IS NULL AND result_outcome IS NULL AND (safe_reason IS NULL OR safe_reason='runner_lost') AND acknowledged_at IS NULL) OR
+			       (delivery_state='acknowledged' AND claim_sequence=1 AND claim_user_id IS NOT NULL AND claim_principal_kind='api_key' AND claim_device_id IS NOT NULL AND claimed_at>=created_at AND result_sequence=1 AND result_digest IS NOT NULL AND result_outcome IS NOT NULL AND acknowledged_at>=claimed_at AND
+			        ((result_outcome='applied' AND safe_reason IS NULL) OR (result_outcome='rejected' AND safe_reason IS NOT NULL))) OR
+			       (delivery_state='abandoned' AND claim_sequence IS NULL AND claim_user_id IS NULL AND claim_principal_kind IS NULL AND claim_session_credential_id IS NULL AND claim_api_key_id IS NULL AND claim_device_id IS NULL AND claimed_at IS NULL AND result_sequence IS NULL AND result_digest IS NULL AND result_outcome IS NULL AND safe_reason IS NOT NULL AND acknowledged_at>=created_at),0)),
+			 CHECK(updated_at>=created_at)
+			)`,
+			`CREATE INDEX idx_control_outbox_delivery ON control_outbox(delivery_state,id)`,
+			`CREATE INDEX idx_control_outbox_lease ON control_outbox(lease_id,lease_revision,delivery_state)`,
+			`CREATE TRIGGER trg_control_outbox_insert_guard
+			 BEFORE INSERT ON control_outbox
+			 WHEN NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.updated_at IS NOT NEW.created_at OR
+			      NEW.delivery_state<>'queued' OR NEW.claim_sequence IS NOT NULL OR NEW.claim_user_id IS NOT NULL OR
+			      NEW.claim_principal_kind IS NOT NULL OR NEW.claim_session_credential_id IS NOT NULL OR NEW.claim_api_key_id IS NOT NULL OR NEW.claim_device_id IS NOT NULL OR
+			      NEW.claimed_at IS NOT NULL OR NEW.result_sequence IS NOT NULL OR NEW.result_digest IS NOT NULL OR
+			      NEW.result_outcome IS NOT NULL OR NEW.safe_reason IS NOT NULL OR NEW.acknowledged_at IS NOT NULL OR
+			      NOT EXISTS(SELECT 1 FROM control_commands command
+			       WHERE command.command_id=NEW.command_id AND command.status='accepted' AND command.outcome IS NULL
+			        AND command.action IN ('run.cancel.running','input.respond','run.pause','run.resume')
+			        AND command.lease_id=NEW.lease_id AND command.lease_revision=NEW.lease_revision
+			        AND command.canonical_digest=NEW.effect_digest)
+			 BEGIN SELECT RAISE(ABORT,'control outbox must start queued'); END`,
+			`CREATE TRIGGER trg_control_outbox_transition_guard
+			 BEFORE UPDATE ON control_outbox
+			 WHEN OLD.delivery_state IN ('acknowledged','abandoned') OR
+			 NOT ((OLD.delivery_state='queued' AND NEW.delivery_state IN ('claimed','abandoned')) OR
+			      (OLD.delivery_state='claimed' AND NEW.delivery_state='acknowledged') OR
+			      (OLD.delivery_state='claimed' AND NEW.delivery_state='claimed' AND OLD.safe_reason IS NULL AND NEW.safe_reason='runner_lost')) OR
+			  NEW.id IS NOT OLD.id OR NEW.command_id IS NOT OLD.command_id OR NEW.lease_id IS NOT OLD.lease_id OR
+			  NEW.lease_revision IS NOT OLD.lease_revision OR NEW.effect_sequence IS NOT OLD.effect_sequence OR
+			 NEW.effect_digest IS NOT OLD.effect_digest OR NEW.created_at IS NOT OLD.created_at OR
+			 NEW.updated_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.updated_at<OLD.updated_at OR
+			 (OLD.delivery_state='queued' AND NEW.delivery_state='claimed' AND
+			  (NEW.claimed_at IS NOT NEW.updated_at OR NEW.safe_reason IS NOT NULL)) OR
+			 (OLD.delivery_state='claimed' AND NEW.delivery_state='acknowledged' AND NEW.acknowledged_at IS NOT NEW.updated_at) OR
+			 (OLD.delivery_state='queued' AND NEW.delivery_state='abandoned' AND NEW.acknowledged_at IS NOT NEW.updated_at) OR
+			 (OLD.delivery_state='claimed' AND (NEW.claim_sequence IS NOT OLD.claim_sequence OR
+			  NEW.claim_user_id IS NOT OLD.claim_user_id OR NEW.claim_principal_kind IS NOT OLD.claim_principal_kind OR
+			  NEW.claim_session_credential_id IS NOT OLD.claim_session_credential_id OR NEW.claim_api_key_id IS NOT OLD.claim_api_key_id OR
+			  NEW.claim_device_id IS NOT OLD.claim_device_id OR NEW.claimed_at IS NOT OLD.claimed_at))
+			 BEGIN SELECT RAISE(ABORT,'invalid control outbox transition'); END`,
+			`CREATE TRIGGER trg_control_outbox_claim_binding_guard
+			 BEFORE UPDATE ON control_outbox
+			 WHEN OLD.delivery_state='queued' AND NEW.delivery_state='claimed' AND NOT EXISTS(
+			  SELECT 1 FROM control_capability_leases lease
+			  JOIN control_commands command ON command.command_id=NEW.command_id
+			  JOIN control_capability_grants grant_row ON grant_row.grant_id=command.grant_id
+			   AND grant_row.revision=command.grant_revision
+			  JOIN control_capability_grant_seals grant_seal ON grant_seal.grant_id=grant_row.grant_id
+			   AND grant_seal.grant_revision=grant_row.revision
+			  JOIN control_capability_grant_actions grant_action ON grant_action.grant_id=grant_row.grant_id
+			   AND grant_action.grant_revision=grant_row.revision AND grant_action.action=command.action
+			  JOIN api_keys runner_key ON runner_key.id=lease.actor_api_key_id AND runner_key.user_id=lease.user_id
+			   AND runner_key.disabled_at IS NULL
+			   AND (runner_key.expires_at IS NULL OR runner_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			  JOIN users runner_user ON runner_user.id=lease.user_id AND runner_user.status='active'
+			  JOIN deliveries delivery ON delivery.id=lease.delivery_id AND delivery.delivery_key=lease.delivery_key
+			   AND delivery.issue_id=lease.root_issue_id
+			  JOIN issues issue ON issue.id=delivery.issue_id AND issue.project_id=lease.project_id AND issue.deleted_at IS NULL
+			  JOIN projects project ON project.id=issue.project_id AND project.status<>'deleted'
+			  JOIN delivery_agent_run_links link ON link.delivery_id=lease.delivery_id AND link.attempt_id=lease.attempt_id
+			   AND link.stage_key=lease.stage_key AND link.execution_number=lease.execution_number
+			   AND link.execution_start_stage_event_id=lease.execution_start_stage_event_id
+			   AND link.agent_run_id=lease.agent_run_id AND link.reporter_id=lease.reporter_id
+			  JOIN agent_runs run ON run.id=lease.agent_run_id AND run.issue_id=lease.root_issue_id AND run.status='running'
+			  JOIN delivery_agent_run_activations activation ON activation.delivery_id=lease.delivery_id
+			   AND activation.attempt_id=lease.attempt_id AND activation.stage_key=lease.stage_key
+			   AND activation.execution_number=lease.execution_number AND activation.authority_epoch=lease.authority_epoch
+			   AND activation.agent_run_id=lease.agent_run_id AND activation.reporter_id=lease.reporter_id
+			   AND activation.authority_stage_event_id=lease.authority_stage_event_id
+			  JOIN delivery_stage_latest latest ON latest.delivery_id=lease.delivery_id AND latest.attempt_id=lease.attempt_id
+			   AND latest.stage_key=lease.stage_key AND latest.execution_number=lease.execution_number
+			   AND latest.execution_start_stage_event_id=lease.execution_start_stage_event_id
+			   AND latest.authority_epoch=lease.authority_epoch AND latest.current_reporter_id=lease.reporter_id
+			   AND latest.authority_stage_event_id=lease.authority_stage_event_id
+			  WHERE lease.lease_id=NEW.lease_id AND lease.revision=NEW.lease_revision
+			   AND lease.revoked_at IS NULL AND lease.expires_at=command.lease_expires_at
+			   AND strftime('%Y-%m-%dT%H:%M:%fZ','now')<command.lease_expires_at
+			   AND grant_row.revoked_at IS NULL AND grant_row.expires_at=command.grant_expires_at
+			   AND grant_row.binding_digest=command.grant_binding_digest
+			   AND grant_row.action_set_digest=command.grant_action_digest
+			   AND grant_seal.binding_digest=grant_row.binding_digest
+			   AND grant_seal.action_set_digest=grant_row.action_set_digest
+			   AND strftime('%Y-%m-%dT%H:%M:%fZ','now')<command.grant_expires_at
+			   AND (SELECT revision FROM issue_control_revisions WHERE issue_id=issue.id)=lease.issue_revision
+			   AND COALESCE((SELECT MAX(event.delivery_revision) FROM delivery_events event
+			                WHERE event.delivery_id=delivery.id),0)=lease.delivery_revision
+			   AND (project.status IN ('active','frozen') OR
+			        (project.status='archived' AND command.action='run.cancel.running'
+			         AND NOT EXISTS(SELECT 1 FROM control_capability_grant_actions action
+			          WHERE action.grant_id=grant_row.grant_id AND action.grant_revision=grant_row.revision
+			           AND action.action NOT IN ('run.cancel.queued','run.cancel.running'))
+			         AND NOT EXISTS(SELECT 1 FROM control_capability_lease_actions action
+			          WHERE action.lease_id=lease.lease_id AND action.lease_revision=lease.revision
+			           AND action.action<>'run.cancel.running')))
+			   AND lease.user_id=NEW.claim_user_id AND lease.principal_kind='api_key'
+			   AND lease.actor_api_key_id=NEW.claim_api_key_id AND lease.device_id=NEW.claim_device_id
+			   AND command.status='accepted' AND command.outcome IS NULL
+			   AND command.lease_id=lease.lease_id AND command.lease_revision=lease.revision
+			   AND command.canonical_digest=NEW.effect_digest
+			   AND ((command.action='input.respond' AND EXISTS(
+			          SELECT 1 FROM control_input_requests request
+			          JOIN control_input_request_seals request_seal ON request_seal.request_id=request.request_id
+			           AND request_seal.request_revision=request.revision
+			          JOIN control_input_request_states input_state ON input_state.request_id=request.request_id
+			           AND input_state.current_revision=request.revision AND input_state.terminal_event_id IS NULL
+			          WHERE request.request_id=command.input_request_id
+			           AND request.revision=command.input_request_revision
+			           AND request.expires_at=command.input_request_expires_at
+			           AND NOT EXISTS(SELECT 1 FROM control_input_resolution_events terminal
+			            WHERE terminal.request_id=request.request_id AND terminal.request_revision=request.revision)
+			           AND strftime('%Y-%m-%dT%H:%M:%fZ','now')<request.expires_at)
+			         AND NOT EXISTS(
+			          SELECT 1 FROM control_outbox prior_outbox
+			          JOIN control_commands prior_command ON prior_command.command_id=prior_outbox.command_id
+			          WHERE prior_command.command_id<>command.command_id
+			           AND prior_command.input_request_id=command.input_request_id
+			           AND prior_command.input_request_revision=command.input_request_revision
+			           AND (prior_outbox.delivery_state='claimed' OR
+			                (prior_outbox.delivery_state='acknowledged' AND prior_outbox.result_outcome='applied')))) OR
+			        (command.action IN ('run.pause','run.resume') AND EXISTS(
+			          SELECT 1 FROM control_runtime_states runtime
+			          WHERE runtime.agent_run_id=command.agent_run_id AND runtime.revision=command.runtime_revision
+			           AND runtime.delivery_id=command.delivery_id AND runtime.root_issue_id=command.root_issue_id
+			           AND runtime.attempt_id=command.attempt_id AND runtime.stage_key=command.stage_key
+			           AND runtime.execution_number=command.execution_number
+			           AND runtime.execution_start_stage_event_id=command.execution_start_stage_event_id
+			           AND ((command.action='run.pause' AND runtime.state='running') OR
+			                (command.action='run.resume' AND runtime.state='paused')))
+			         AND NOT EXISTS(
+			          SELECT 1 FROM control_outbox prior_outbox
+			          JOIN control_commands prior_command ON prior_command.command_id=prior_outbox.command_id
+			          WHERE prior_command.command_id<>command.command_id
+			           AND prior_command.agent_run_id=command.agent_run_id
+			           AND prior_command.runtime_revision=command.runtime_revision
+			           AND prior_command.action=command.action
+			           AND (prior_outbox.delivery_state='claimed' OR
+			                (prior_outbox.delivery_state='acknowledged' AND prior_outbox.result_outcome='applied')))) OR
+			        (command.action='run.cancel.running' AND NOT EXISTS(
+			          SELECT 1 FROM control_outbox prior_outbox
+			          JOIN control_commands prior_command ON prior_command.command_id=prior_outbox.command_id
+			          WHERE prior_command.command_id<>command.command_id
+			           AND prior_command.action='run.cancel.running'
+			           AND prior_command.delivery_id=command.delivery_id
+			           AND prior_command.attempt_id=command.attempt_id
+			           AND prior_command.stage_key=command.stage_key
+			           AND prior_command.execution_number=command.execution_number
+			           AND prior_command.execution_start_stage_event_id=command.execution_start_stage_event_id
+			           AND prior_command.agent_run_id=command.agent_run_id
+			           AND (prior_outbox.delivery_state='claimed' OR
+			                (prior_outbox.delivery_state='acknowledged' AND prior_outbox.result_outcome='applied')))) OR
+			        command.action NOT IN ('input.respond','run.pause','run.resume','run.cancel.running')))
+			 BEGIN SELECT RAISE(ABORT,'control outbox claimant is stale'); END`,
+			`CREATE TRIGGER trg_control_outbox_result_binding_guard
+			 BEFORE UPDATE ON control_outbox
+			 WHEN OLD.delivery_state='claimed' AND NEW.delivery_state='acknowledged' AND NOT EXISTS(
+			  SELECT 1 FROM control_commands command
+			  WHERE command.command_id=NEW.command_id AND command.result_digest=NEW.result_digest
+			   AND ((NEW.result_outcome='applied' AND command.status='applied' AND command.outcome='applied' AND command.safe_reason IS NULL) OR
+			        (NEW.result_outcome='rejected' AND command.status='rejected' AND command.outcome='rejected' AND command.safe_reason=NEW.safe_reason))
+			   AND ((command.status_revision=4 AND EXISTS(
+			          SELECT 1 FROM control_events unknown_fact
+			          WHERE unknown_fact.command_id=command.command_id AND unknown_fact.event_kind='effect_outcome_unknown')) OR
+			        (command.status_revision=3 AND
+			         (command.status='applied' OR
+			          (command.status='rejected' AND
+			           (command.safe_reason IN ('effect_rejected','unsupported_platform') OR
+			            (command.action='run.cancel.running' AND
+			             command.safe_reason IN ('process_termination_failed','natural_exit'))))) AND EXISTS(
+			          SELECT 1 FROM control_capability_leases lease
+			          JOIN control_capability_grants grant_row ON grant_row.grant_id=command.grant_id
+			           AND grant_row.revision=command.grant_revision
+			          JOIN control_capability_grant_seals grant_seal ON grant_seal.grant_id=grant_row.grant_id
+			           AND grant_seal.grant_revision=grant_row.revision
+			          JOIN control_capability_grant_actions grant_action ON grant_action.grant_id=grant_row.grant_id
+			           AND grant_action.grant_revision=grant_row.revision AND grant_action.action=command.action
+			          JOIN api_keys runner_key ON runner_key.id=lease.actor_api_key_id AND runner_key.user_id=lease.user_id
+			           AND runner_key.disabled_at IS NULL
+			           AND (runner_key.expires_at IS NULL OR runner_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			          JOIN users runner_user ON runner_user.id=lease.user_id AND runner_user.status='active'
+			          JOIN deliveries delivery ON delivery.id=lease.delivery_id AND delivery.delivery_key=lease.delivery_key
+			           AND delivery.issue_id=lease.root_issue_id
+			          JOIN issues issue ON issue.id=delivery.issue_id AND issue.project_id=lease.project_id
+			          JOIN projects project ON project.id=issue.project_id
+			          JOIN delivery_agent_run_links link ON link.delivery_id=lease.delivery_id AND link.attempt_id=lease.attempt_id
+			           AND link.stage_key=lease.stage_key AND link.execution_number=lease.execution_number
+			           AND link.execution_start_stage_event_id=lease.execution_start_stage_event_id
+			           AND link.agent_run_id=lease.agent_run_id AND link.reporter_id=lease.reporter_id
+			          JOIN agent_runs run ON run.id=lease.agent_run_id AND run.issue_id=lease.root_issue_id
+			          JOIN delivery_agent_run_activations activation ON activation.delivery_id=lease.delivery_id
+			           AND activation.attempt_id=lease.attempt_id AND activation.stage_key=lease.stage_key
+			           AND activation.execution_number=lease.execution_number AND activation.authority_epoch=lease.authority_epoch
+			           AND activation.agent_run_id=lease.agent_run_id AND activation.reporter_id=lease.reporter_id
+			           AND activation.authority_stage_event_id=lease.authority_stage_event_id
+			          JOIN delivery_stage_latest latest ON latest.delivery_id=lease.delivery_id AND latest.attempt_id=lease.attempt_id
+			           AND latest.stage_key=lease.stage_key AND latest.execution_number=lease.execution_number
+			           AND latest.execution_start_stage_event_id=lease.execution_start_stage_event_id
+			           AND latest.authority_epoch=lease.authority_epoch AND latest.current_reporter_id=lease.reporter_id
+			           AND latest.authority_stage_event_id=lease.authority_stage_event_id
+			          WHERE lease.lease_id=NEW.lease_id AND lease.revision=NEW.lease_revision
+			           AND lease.revoked_at IS NULL AND lease.expires_at=command.lease_expires_at
+			           AND strftime('%Y-%m-%dT%H:%M:%fZ','now')<command.lease_expires_at
+			           AND grant_row.revoked_at IS NULL AND grant_row.expires_at=command.grant_expires_at
+			           AND grant_row.binding_digest=command.grant_binding_digest
+			           AND grant_row.action_set_digest=command.grant_action_digest
+			           AND grant_seal.binding_digest=grant_row.binding_digest
+			           AND grant_seal.action_set_digest=grant_row.action_set_digest
+			           AND strftime('%Y-%m-%dT%H:%M:%fZ','now')<command.grant_expires_at
+			           AND lease.user_id=NEW.claim_user_id AND lease.principal_kind='api_key'
+			           AND lease.actor_api_key_id=NEW.claim_api_key_id AND lease.device_id=NEW.claim_device_id
+			           AND command.lease_id=lease.lease_id AND command.lease_revision=lease.revision
+			           AND issue.deleted_at IS NULL
+			           AND (SELECT revision FROM issue_control_revisions WHERE issue_id=issue.id)=lease.issue_revision
+			           AND COALESCE((SELECT MAX(event.delivery_revision) FROM delivery_events event
+			                        WHERE event.delivery_id=delivery.id),0)=lease.delivery_revision
+			           AND (project.status IN ('active','frozen') OR
+			                (project.status='archived' AND command.action='run.cancel.running'))
+			           AND ((run.status='running' AND NOT (
+			                 command.action='run.cancel.running' AND NEW.result_outcome='rejected'
+			                 AND NEW.safe_reason='natural_exit')) OR
+			                (command.action='run.cancel.running' AND command.status='rejected'
+			                 AND command.outcome='rejected' AND command.safe_reason='natural_exit'
+			                 AND NEW.result_outcome='rejected' AND NEW.safe_reason='natural_exit'
+			                 AND run.status IN ('completed','tests_passed','tests_failed','deployed','failed','drafted')
+			                 AND run.finished_at IS NOT NULL
+			                 AND NOT EXISTS(SELECT 1 FROM agent_run_cancellation_facts cancellation
+			                  WHERE cancellation.run_id=run.id)))
+			           AND (command.action NOT IN ('input.respond','run.pause','run.resume') OR
+			                (command.action='input.respond' AND EXISTS(
+			                  SELECT 1 FROM control_input_requests request
+			                  JOIN control_input_request_seals request_seal ON request_seal.request_id=request.request_id
+			                   AND request_seal.request_revision=request.revision
+			                  JOIN control_input_request_states input_state ON input_state.request_id=request.request_id
+			                   AND input_state.current_revision=request.revision AND input_state.terminal_event_id IS NULL
+			                  WHERE request.request_id=command.input_request_id
+			                   AND request.revision=command.input_request_revision
+			                   AND request.expires_at=command.input_request_expires_at
+			                   AND NOT EXISTS(SELECT 1 FROM control_input_resolution_events terminal
+			                    WHERE terminal.request_id=request.request_id AND terminal.request_revision=request.revision)
+			                   AND strftime('%Y-%m-%dT%H:%M:%fZ','now')<request.expires_at)) OR
+			                (command.action IN ('run.pause','run.resume') AND EXISTS(
+			                  SELECT 1 FROM control_runtime_states runtime
+			                  WHERE runtime.agent_run_id=command.agent_run_id AND runtime.revision=command.runtime_revision
+			                   AND runtime.delivery_id=command.delivery_id AND runtime.root_issue_id=command.root_issue_id
+			                   AND runtime.attempt_id=command.attempt_id AND runtime.stage_key=command.stage_key
+			                   AND runtime.execution_number=command.execution_number
+			                   AND runtime.execution_start_stage_event_id=command.execution_start_stage_event_id
+			                   AND ((command.action='run.pause' AND runtime.state='running') OR
+			                        (command.action='run.resume' AND runtime.state='paused')))))))))
+			 BEGIN SELECT RAISE(ABORT,'control outbox result lacks command proof'); END`,
+			`CREATE TRIGGER trg_control_outbox_unknown_binding_guard
+			 BEFORE UPDATE ON control_outbox
+			 WHEN OLD.delivery_state='claimed' AND NEW.delivery_state='claimed' AND NOT EXISTS(
+			  SELECT 1 FROM control_commands command
+			  WHERE command.command_id=NEW.command_id AND command.status='accepted'
+			   AND command.outcome='outcome_unknown' AND command.safe_reason='runner_lost')
+			 BEGIN SELECT RAISE(ABORT,'control outbox unknown outcome lacks command proof'); END`,
+			`CREATE TRIGGER trg_control_outbox_abandon_binding_guard
+			 BEFORE UPDATE ON control_outbox
+			 WHEN OLD.delivery_state='queued' AND NEW.delivery_state='abandoned' AND NOT EXISTS(
+			  SELECT 1 FROM control_commands command
+			  WHERE command.command_id=NEW.command_id AND command.status='rejected'
+			   AND command.outcome='rejected' AND command.result_digest IS NOT NULL
+			   AND command.safe_reason=NEW.safe_reason)
+			 BEGIN SELECT RAISE(ABORT,'control outbox abandonment lacks command proof'); END`,
+			`CREATE TRIGGER trg_control_outbox_no_delete
+			 BEFORE DELETE ON control_outbox
+			 BEGIN SELECT RAISE(ABORT,'control outbox is retained'); END`,
+
+			`CREATE TABLE control_events (
+			 id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+			 sequence              INTEGER NOT NULL CHECK(sequence>0),
+			 event_kind            TEXT NOT NULL CHECK(event_kind IN (` + sqlEnum(controlcontract.EventKinds()) + `)),
+			 grant_id              TEXT CHECK(grant_id IS NULL OR ` + sqlUUIDCheck("grant_id") + `),
+			 grant_revision        INTEGER CHECK(grant_revision>0),
+			 lease_id              TEXT CHECK(lease_id IS NULL OR ` + sqlUUIDCheck("lease_id") + `),
+			 lease_revision        INTEGER CHECK(lease_revision>0),
+			 input_request_id      TEXT CHECK(input_request_id IS NULL OR ` + sqlUUIDCheck("input_request_id") + `),
+			 input_request_revision INTEGER CHECK(input_request_revision>0),
+			 command_id            TEXT CHECK(command_id IS NULL OR ` + sqlUUIDCheck("command_id") + `),
+			 command_status_revision INTEGER CHECK(command_status_revision>0),
+			 cancellation_run_id    INTEGER CHECK(cancellation_run_id>0),
+			 cancellation_command_id TEXT CHECK(cancellation_command_id IS NULL OR ` + sqlUUIDCheck("cancellation_command_id") + `),
+			 actor_user_id         INTEGER CHECK(actor_user_id>0),
+			 user_id               INTEGER CHECK(user_id>0),
+			 principal_kind        TEXT CHECK(principal_kind IS NULL OR principal_kind IN ('session','api_key')),
+			 actor_session_credential_id TEXT,
+			 actor_api_key_id      INTEGER CHECK(actor_api_key_id>0),
+			 executor_user_id      INTEGER CHECK(executor_user_id>0),
+			 executor_principal_kind TEXT CHECK(executor_principal_kind IS NULL OR executor_principal_kind IN ('session','api_key')),
+			 executor_session_credential_id TEXT,
+			 executor_api_key_id   INTEGER CHECK(executor_api_key_id>0),
+			 device_id            TEXT CHECK(device_id IS NULL OR ` + sqlSafeDeviceIDCheck("device_id") + `),
+			 delivery_id          INTEGER CHECK(delivery_id>0),
+			 root_issue_id        INTEGER CHECK(root_issue_id>0),
+			 issue_revision       INTEGER CHECK(issue_revision>0),
+			 attempt_id           INTEGER CHECK(attempt_id>0),
+			 stage_key            TEXT CHECK(stage_key IS NULL OR stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number     INTEGER CHECK(execution_number>0),
+			 authority_epoch      INTEGER CHECK(authority_epoch>0),
+			 reporter_id          INTEGER CHECK(reporter_id>0),
+			 agent_run_id         INTEGER CHECK(agent_run_id>0),
+			 action               TEXT CHECK(action IS NULL OR action IN (` + sqlEnum(controlcontract.Actions()) + `)),
+			 command_status       TEXT CHECK(command_status IS NULL OR command_status IN (` + sqlEnum(controlcontract.CommandStatuses()) + `)),
+			 runtime_state        TEXT CHECK(runtime_state IS NULL OR runtime_state IN (` + sqlEnum(controlcontract.RuntimeStates()) + `)),
+			 runtime_revision     INTEGER CHECK(runtime_revision>0),
+			 outcome              TEXT CHECK(outcome IS NULL OR outcome IN (` + sqlEnum(controlcontract.SafeOutcomes()) + `)),
+			 safe_reason          TEXT CHECK(safe_reason IS NULL OR safe_reason IN (` + sqlEnum(controlcontract.SafeReasons()) + `)),
+			 cancellation_cause   TEXT CHECK(cancellation_cause IS NULL OR cancellation_cause IN (` + sqlEnum(controlcontract.CancellationCauses()) + `)),
+			 subject_expires_at   TEXT CHECK(` + sqlNullableControlTimestampCheck("subject_expires_at") + `),
+			 subject_updated_at   TEXT CHECK(` + sqlNullableControlTimestampCheck("subject_updated_at") + `),
+			 parameter_digest     BLOB CHECK(parameter_digest IS NULL OR (typeof(parameter_digest)='blob' AND length(parameter_digest)=32)),
+			 binding_digest       BLOB CHECK(binding_digest IS NULL OR (typeof(binding_digest)='blob' AND length(binding_digest)=32)),
+			 action_set_digest    BLOB CHECK(action_set_digest IS NULL OR (typeof(action_set_digest)='blob' AND length(action_set_digest)=32)),
+			 result_digest        BLOB CHECK(result_digest IS NULL OR (typeof(result_digest)='blob' AND length(result_digest)=32)),
+			 correlation_id       TEXT CHECK(correlation_id IS NULL OR ` + sqlUUIDCheck("correlation_id") + `),
+			 server_recorded_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("server_recorded_at") + `),
+			 CHECK((actor_user_id IS NULL AND user_id IS NULL AND principal_kind IS NULL AND actor_session_credential_id IS NULL AND actor_api_key_id IS NULL) OR
+			       (actor_user_id IS NOT NULL AND user_id IS NOT NULL AND principal_kind IS NOT NULL AND actor_user_id=user_id AND
+			        ` + sqlTypedPrincipalCheck("principal_kind", "actor_session_credential_id", "actor_api_key_id") + `)),
+			 CHECK((executor_user_id IS NULL AND executor_principal_kind IS NULL AND executor_session_credential_id IS NULL AND executor_api_key_id IS NULL) OR
+			       (executor_user_id IS NOT NULL AND executor_principal_kind='api_key' AND
+			        ` + sqlTypedPrincipalCheck("executor_principal_kind", "executor_session_credential_id", "executor_api_key_id") + `)),
+			 CHECK((event_kind='runtime_changed' AND runtime_state IS NOT NULL AND runtime_revision IS NOT NULL) OR
+			       (event_kind<>'runtime_changed' AND runtime_state IS NULL AND runtime_revision IS NULL)),
+			 CHECK((grant_id IS NULL)=(grant_revision IS NULL)),
+			 CHECK((lease_id IS NULL)=(lease_revision IS NULL)),
+			 CHECK((input_request_id IS NULL)=(input_request_revision IS NULL)),
+			 CHECK((command_id IS NULL)=(command_status_revision IS NULL)),
+			 CHECK((event_kind IN ('grant_issued','grant_renewed','grant_revoked','grant_expired','lease_issued','lease_renewed','lease_revoked','lease_expired')
+			        AND subject_expires_at IS NOT NULL AND subject_updated_at IS NOT NULL) OR
+			       (event_kind NOT IN ('grant_issued','grant_renewed','grant_revoked','grant_expired','lease_issued','lease_renewed','lease_revoked','lease_expired')
+			        AND subject_expires_at IS NULL AND subject_updated_at IS NULL)),
+			 CHECK((event_kind IN ('grant_issued','grant_renewed','grant_revoked','grant_expired') AND grant_id IS NOT NULL AND grant_revision IS NOT NULL AND lease_id IS NULL AND input_request_id IS NULL AND command_id IS NULL AND cancellation_run_id IS NULL AND cancellation_command_id IS NULL) OR
+			       (event_kind IN ('lease_issued','lease_renewed','lease_revoked','lease_expired') AND grant_id IS NULL AND lease_id IS NOT NULL AND lease_revision IS NOT NULL AND input_request_id IS NULL AND command_id IS NULL AND cancellation_run_id IS NULL AND cancellation_command_id IS NULL) OR
+			       (event_kind IN ('input_requested','input_resolved','input_superseded','input_expired','input_cancelled','input_run_terminal') AND grant_id IS NULL AND lease_id IS NULL AND input_request_id IS NOT NULL AND input_request_revision IS NOT NULL AND command_id IS NULL AND cancellation_run_id IS NULL AND cancellation_command_id IS NULL) OR
+			       (event_kind IN ('runtime_changed','command_created','command_expired','command_withdrawn','command_accepted','command_applied','command_rejected','effect_queued','effect_claimed','effect_outcome_unknown','effect_acknowledged','effect_abandoned','effect_reconciled') AND grant_id IS NULL AND lease_id IS NULL AND input_request_id IS NULL AND command_id IS NOT NULL AND command_status_revision IS NOT NULL AND cancellation_run_id IS NULL AND cancellation_command_id IS NULL) OR
+			       (event_kind='cancellation_recorded' AND grant_id IS NULL AND lease_id IS NULL AND input_request_id IS NULL AND command_id IS NULL AND command_status_revision IS NULL AND cancellation_run_id IS NOT NULL AND agent_run_id IS NOT NULL AND agent_run_id=cancellation_run_id AND cancellation_cause IS NOT NULL AND
+			        ((cancellation_cause='operator_command' AND cancellation_command_id IS NOT NULL) OR
+			         (cancellation_cause<>'operator_command' AND cancellation_command_id IS NULL))))
+			)`,
+			`CREATE UNIQUE INDEX idx_control_events_grant_sequence
+			 ON control_events(grant_id,sequence) WHERE grant_id IS NOT NULL`,
+			`CREATE UNIQUE INDEX idx_control_events_lease_sequence
+			 ON control_events(lease_id,sequence) WHERE lease_id IS NOT NULL`,
+			`CREATE UNIQUE INDEX idx_control_events_input_sequence
+			 ON control_events(input_request_id,sequence) WHERE input_request_id IS NOT NULL`,
+			`CREATE UNIQUE INDEX idx_control_events_input_requested_revision
+			 ON control_events(input_request_id,input_request_revision)
+			 WHERE event_kind='input_requested'`,
+			`CREATE UNIQUE INDEX idx_control_events_input_terminal_revision
+			 ON control_events(input_request_id,input_request_revision)
+			 WHERE input_request_id IS NOT NULL AND event_kind<>'input_requested'`,
+			`CREATE UNIQUE INDEX idx_control_events_command_kind_revision
+			 ON control_events(command_id,event_kind,command_status_revision)
+			 WHERE command_id IS NOT NULL`,
+			`CREATE UNIQUE INDEX idx_control_events_grant_fact
+			 ON control_events(grant_id,event_kind,grant_revision,subject_updated_at)
+			 WHERE grant_id IS NOT NULL`,
+			`CREATE UNIQUE INDEX idx_control_events_lease_fact
+			 ON control_events(lease_id,event_kind,lease_revision,subject_updated_at)
+			 WHERE lease_id IS NOT NULL`,
+			`CREATE UNIQUE INDEX idx_control_events_command_sequence
+			 ON control_events(command_id,sequence) WHERE command_id IS NOT NULL`,
+			`CREATE UNIQUE INDEX idx_control_events_cancellation_sequence
+			 ON control_events(cancellation_run_id,sequence) WHERE cancellation_run_id IS NOT NULL`,
+			`CREATE INDEX idx_control_events_delivery_tail ON control_events(delivery_id,id)`,
+			`CREATE INDEX idx_control_events_run_tail ON control_events(agent_run_id,id)`,
+			`CREATE TRIGGER trg_control_events_id_order_guard
+			 AFTER INSERT ON control_events
+			 WHEN NEW.id<=0 OR NEW.id<>(SELECT MAX(id) FROM control_events)
+			 BEGIN SELECT RAISE(ABORT,'control event id is not append ordered'); END`,
+			`CREATE TRIGGER trg_control_events_sequence_guard
+			 BEFORE INSERT ON control_events
+			 WHEN NEW.server_recorded_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.sequence<>CASE
+			  WHEN NEW.grant_id IS NOT NULL THEN COALESCE((SELECT MAX(sequence)+1 FROM control_events WHERE grant_id=NEW.grant_id),1)
+			  WHEN NEW.lease_id IS NOT NULL THEN COALESCE((SELECT MAX(sequence)+1 FROM control_events WHERE lease_id=NEW.lease_id),1)
+			  WHEN NEW.input_request_id IS NOT NULL THEN COALESCE((SELECT MAX(sequence)+1 FROM control_events WHERE input_request_id=NEW.input_request_id),1)
+			  WHEN NEW.command_id IS NOT NULL THEN COALESCE((SELECT MAX(sequence)+1 FROM control_events WHERE command_id=NEW.command_id),1)
+			  ELSE COALESCE((SELECT MAX(sequence)+1 FROM control_events WHERE cancellation_run_id=NEW.cancellation_run_id),1)
+			 END
+			 BEGIN SELECT RAISE(ABORT,'control event sequence is not contiguous'); END`,
+			`CREATE TRIGGER trg_control_events_initial_kind_guard
+			 BEFORE INSERT ON control_events
+			 WHEN (NEW.sequence=1 AND NOT (
+			       (NEW.grant_id IS NOT NULL AND NEW.event_kind='grant_issued') OR
+			       (NEW.lease_id IS NOT NULL AND NEW.event_kind='lease_issued') OR
+			       (NEW.input_request_id IS NOT NULL AND NEW.event_kind='input_requested') OR
+			       (NEW.command_id IS NOT NULL AND NEW.event_kind='command_created') OR
+			       (NEW.cancellation_run_id IS NOT NULL AND NEW.event_kind='cancellation_recorded'))) OR
+			      (NEW.sequence>1 AND NEW.event_kind IN ('grant_issued','lease_issued','command_created')) OR
+			      (NEW.cancellation_run_id IS NOT NULL AND NEW.sequence<>1)
+			 BEGIN SELECT RAISE(ABORT,'invalid initial control event'); END`,
+			`CREATE TRIGGER trg_control_events_grant_proof_guard
+			 BEFORE INSERT ON control_events
+			 WHEN NEW.grant_id IS NOT NULL AND NOT EXISTS(
+			  SELECT 1 FROM control_capability_grants grant_row
+			  WHERE grant_row.grant_id=NEW.grant_id AND grant_row.revision=NEW.grant_revision
+			   AND NEW.actor_user_id=grant_row.actor_user_id AND NEW.user_id=grant_row.user_id
+			   AND NEW.principal_kind=grant_row.principal_kind
+			   AND NEW.actor_session_credential_id IS grant_row.actor_session_credential_id
+			   AND NEW.actor_api_key_id IS grant_row.actor_api_key_id
+			   AND NEW.executor_user_id IS NULL AND NEW.executor_principal_kind IS NULL
+			   AND NEW.executor_session_credential_id IS NULL AND NEW.executor_api_key_id IS NULL AND NEW.device_id IS NULL
+			   AND NEW.delivery_id=grant_row.delivery_id AND NEW.root_issue_id=grant_row.root_issue_id
+			   AND NEW.issue_revision=grant_row.issue_revision AND NEW.binding_digest=grant_row.binding_digest
+			   AND NEW.action_set_digest=grant_row.action_set_digest
+			   AND NEW.subject_expires_at=grant_row.expires_at AND NEW.subject_updated_at=grant_row.updated_at
+			   AND NEW.attempt_id IS NULL AND NEW.stage_key IS NULL AND NEW.execution_number IS NULL
+			   AND NEW.authority_epoch IS NULL AND NEW.reporter_id IS NULL AND NEW.agent_run_id IS NULL
+			   AND NEW.action IS NULL AND NEW.command_status IS NULL AND NEW.outcome IS NULL
+			   AND NEW.parameter_digest IS NULL AND NEW.result_digest IS NULL AND NEW.cancellation_cause IS NULL
+			   AND ((NEW.event_kind IN ('grant_issued','grant_renewed') AND grant_row.revoked_at IS NULL AND NEW.safe_reason IS NULL
+			         AND EXISTS(SELECT 1 FROM control_capability_grant_seals seal
+			          WHERE seal.grant_id=grant_row.grant_id AND seal.grant_revision=grant_row.revision
+			           AND seal.binding_digest=grant_row.binding_digest AND seal.action_set_digest=grant_row.action_set_digest
+			           AND seal.action_count=grant_row.action_count)) OR
+			        (NEW.event_kind='grant_revoked' AND grant_row.revoked_at IS NOT NULL AND grant_row.revoked_at<grant_row.expires_at
+			         AND NEW.server_recorded_at>=grant_row.revoked_at AND NEW.safe_reason IN ('capability_revoked','credential_revoked','authority_changed','stale_target')) OR
+			        (NEW.event_kind='grant_expired' AND grant_row.revoked_at IS NOT NULL
+			         AND grant_row.revoked_at>=grant_row.expires_at AND NEW.server_recorded_at>=grant_row.revoked_at
+			         AND NEW.safe_reason='capability_expired')))
+			 BEGIN SELECT RAISE(ABORT,'control grant event lacks exact proof'); END`,
+			`CREATE TRIGGER trg_control_events_lease_proof_guard
+			 BEFORE INSERT ON control_events
+			 WHEN NEW.lease_id IS NOT NULL AND NOT EXISTS(
+			  SELECT 1 FROM control_capability_leases lease
+			  WHERE lease.lease_id=NEW.lease_id AND lease.revision=NEW.lease_revision
+			   AND NEW.actor_user_id IS NULL AND NEW.user_id IS NULL AND NEW.principal_kind IS NULL
+			   AND NEW.actor_session_credential_id IS NULL AND NEW.actor_api_key_id IS NULL
+			   AND NEW.executor_user_id=lease.user_id AND NEW.executor_principal_kind='api_key'
+			   AND NEW.executor_session_credential_id IS NULL AND NEW.executor_api_key_id=lease.actor_api_key_id
+			   AND NEW.device_id=lease.device_id AND NEW.delivery_id=lease.delivery_id
+			   AND NEW.root_issue_id=lease.root_issue_id AND NEW.issue_revision=lease.issue_revision
+			   AND NEW.attempt_id=lease.attempt_id AND NEW.stage_key=lease.stage_key
+			   AND NEW.execution_number=lease.execution_number AND NEW.authority_epoch=lease.authority_epoch
+			   AND NEW.reporter_id=lease.reporter_id AND NEW.agent_run_id=lease.agent_run_id
+			   AND NEW.binding_digest=lease.binding_digest AND NEW.action_set_digest=lease.action_set_digest
+			   AND NEW.subject_expires_at=lease.expires_at AND NEW.subject_updated_at=lease.updated_at
+			   AND NEW.action IS NULL AND NEW.command_status IS NULL AND NEW.outcome IS NULL
+			   AND NEW.parameter_digest IS NULL AND NEW.result_digest IS NULL AND NEW.cancellation_cause IS NULL
+			   AND ((NEW.event_kind IN ('lease_issued','lease_renewed') AND lease.revoked_at IS NULL AND NEW.safe_reason IS NULL
+			         AND EXISTS(SELECT 1 FROM control_capability_lease_seals seal
+			          WHERE seal.lease_id=lease.lease_id AND seal.lease_revision=lease.revision
+			           AND seal.binding_digest=lease.binding_digest AND seal.action_set_digest=lease.action_set_digest
+			           AND seal.action_count=lease.action_count)) OR
+			        (NEW.event_kind='lease_revoked' AND lease.revoked_at IS NOT NULL AND lease.revoked_at<lease.expires_at
+			         AND NEW.server_recorded_at>=lease.revoked_at AND NEW.safe_reason IN ('lease_revoked','credential_revoked','authority_changed','stale_target')) OR
+			        (NEW.event_kind='lease_expired' AND lease.revoked_at IS NOT NULL
+			         AND lease.revoked_at>=lease.expires_at AND NEW.server_recorded_at>=lease.revoked_at
+			         AND NEW.safe_reason='lease_expired')))
+			 BEGIN SELECT RAISE(ABORT,'control lease event lacks exact proof'); END`,
+			`CREATE TRIGGER trg_control_events_capability_graph_guard
+			 BEFORE INSERT ON control_events
+			 WHEN (NEW.grant_id IS NOT NULL AND NEW.sequence>1 AND NOT (
+			        (NEW.event_kind='grant_renewed' AND (
+			          (COALESCE((SELECT grant_revision FROM control_events WHERE grant_id=NEW.grant_id ORDER BY sequence DESC LIMIT 1),0)=NEW.grant_revision
+			           AND COALESCE((SELECT event_kind FROM control_events WHERE grant_id=NEW.grant_id ORDER BY sequence DESC LIMIT 1),'') IN ('grant_issued','grant_renewed')
+			           AND NEW.subject_updated_at>(SELECT subject_updated_at FROM control_events WHERE grant_id=NEW.grant_id ORDER BY sequence DESC LIMIT 1)
+			           AND NEW.subject_expires_at>(SELECT subject_expires_at FROM control_events WHERE grant_id=NEW.grant_id ORDER BY sequence DESC LIMIT 1)) OR
+			          (COALESCE((SELECT grant_revision FROM control_events WHERE grant_id=NEW.grant_id ORDER BY sequence DESC LIMIT 1),0)=NEW.grant_revision-1
+			           AND COALESCE((SELECT event_kind FROM control_events WHERE grant_id=NEW.grant_id ORDER BY sequence DESC LIMIT 1),'') IN ('grant_revoked','grant_expired')))) OR
+			        (NEW.event_kind IN ('grant_revoked','grant_expired')
+			         AND COALESCE((SELECT grant_revision FROM control_events WHERE grant_id=NEW.grant_id ORDER BY sequence DESC LIMIT 1),0)=NEW.grant_revision
+			         AND COALESCE((SELECT event_kind FROM control_events WHERE grant_id=NEW.grant_id ORDER BY sequence DESC LIMIT 1),'') IN ('grant_issued','grant_renewed')))) OR
+			      (NEW.lease_id IS NOT NULL AND NEW.sequence>1 AND NOT (
+			        (NEW.event_kind='lease_renewed' AND (
+			          (COALESCE((SELECT lease_revision FROM control_events WHERE lease_id=NEW.lease_id ORDER BY sequence DESC LIMIT 1),0)=NEW.lease_revision
+			           AND COALESCE((SELECT event_kind FROM control_events WHERE lease_id=NEW.lease_id ORDER BY sequence DESC LIMIT 1),'') IN ('lease_issued','lease_renewed')
+			           AND NEW.subject_updated_at>(SELECT subject_updated_at FROM control_events WHERE lease_id=NEW.lease_id ORDER BY sequence DESC LIMIT 1)
+			           AND NEW.subject_expires_at>(SELECT subject_expires_at FROM control_events WHERE lease_id=NEW.lease_id ORDER BY sequence DESC LIMIT 1)) OR
+			          (COALESCE((SELECT lease_revision FROM control_events WHERE lease_id=NEW.lease_id ORDER BY sequence DESC LIMIT 1),0)=NEW.lease_revision-1
+			           AND COALESCE((SELECT event_kind FROM control_events WHERE lease_id=NEW.lease_id ORDER BY sequence DESC LIMIT 1),'') IN ('lease_revoked','lease_expired')))) OR
+			        (NEW.event_kind IN ('lease_revoked','lease_expired')
+			         AND COALESCE((SELECT lease_revision FROM control_events WHERE lease_id=NEW.lease_id ORDER BY sequence DESC LIMIT 1),0)=NEW.lease_revision
+			         AND COALESCE((SELECT event_kind FROM control_events WHERE lease_id=NEW.lease_id ORDER BY sequence DESC LIMIT 1),'') IN ('lease_issued','lease_renewed'))))
+			 BEGIN SELECT RAISE(ABORT,'invalid capability event transition'); END`,
+			`CREATE TRIGGER trg_control_events_input_proof_guard
+			 BEFORE INSERT ON control_events
+			 WHEN NEW.input_request_id IS NOT NULL AND NOT EXISTS(
+			  SELECT 1 FROM control_input_requests request
+			  JOIN control_capability_leases lease ON lease.lease_id=request.lease_id AND lease.revision=request.lease_revision
+			  WHERE request.request_id=NEW.input_request_id AND request.revision=NEW.input_request_revision
+			   AND (NEW.event_kind='input_requested' OR EXISTS(
+			    SELECT 1 FROM control_events requested
+			    WHERE requested.input_request_id=request.request_id
+			     AND requested.input_request_revision=request.revision
+			     AND requested.event_kind='input_requested' AND requested.sequence<NEW.sequence))
+			   AND NEW.delivery_id=request.delivery_id AND NEW.root_issue_id=request.root_issue_id
+			   AND NEW.issue_revision=request.issue_revision AND NEW.attempt_id=request.attempt_id
+			   AND NEW.stage_key=request.stage_key AND NEW.execution_number=request.execution_number
+			   AND NEW.authority_epoch=request.authority_epoch AND NEW.reporter_id=request.reporter_id
+			   AND NEW.agent_run_id=request.agent_run_id AND NEW.binding_digest=lease.binding_digest
+			   AND NEW.action_set_digest IS NULL AND NEW.cancellation_cause IS NULL
+			   AND ((NEW.event_kind='input_requested'
+			     AND EXISTS(SELECT 1 FROM control_input_request_seals request_seal
+			      WHERE request_seal.request_id=request.request_id AND request_seal.request_revision=request.revision)
+			     AND EXISTS(SELECT 1 FROM control_input_request_states request_state
+			      WHERE request_state.request_id=request.request_id AND request_state.current_revision=request.revision
+			       AND request_state.terminal_event_id IS NULL)
+			     AND EXISTS(SELECT 1 FROM control_events lease_fact
+			      WHERE lease_fact.lease_id=lease.lease_id AND lease_fact.lease_revision=lease.revision
+			       AND lease_fact.event_kind IN ('lease_issued','lease_renewed')
+			       AND lease_fact.subject_expires_at=lease.expires_at AND lease_fact.subject_updated_at=lease.updated_at)
+			     AND ((request.revision=1 AND NEW.sequence=1) OR
+			          (request.revision>1 AND NEW.sequence>1
+			           AND COALESCE((SELECT input_request_revision FROM control_events
+			                         WHERE input_request_id=request.request_id ORDER BY sequence DESC LIMIT 1),0)=request.revision-1
+			           AND COALESCE((SELECT event_kind FROM control_events
+			                         WHERE input_request_id=request.request_id ORDER BY sequence DESC LIMIT 1),'')='input_superseded'
+			           AND EXISTS(
+			           SELECT 1 FROM control_input_request_states state WHERE state.request_id=request.request_id
+			            AND state.current_revision=request.revision AND state.terminal_event_id IS NULL)))
+			     AND NEW.actor_user_id IS NULL AND NEW.user_id IS NULL AND NEW.principal_kind IS NULL
+			     AND NEW.actor_session_credential_id IS NULL AND NEW.actor_api_key_id IS NULL
+			     AND NEW.executor_user_id=lease.user_id AND NEW.executor_principal_kind='api_key'
+			     AND NEW.executor_session_credential_id IS NULL AND NEW.executor_api_key_id=lease.actor_api_key_id
+			     AND NEW.device_id=lease.device_id
+			     AND NEW.action IS NULL AND NEW.command_status IS NULL AND NEW.outcome IS NULL
+			     AND NEW.safe_reason IS NULL AND NEW.parameter_digest=request.request_digest AND NEW.result_digest IS NULL) OR
+			    (NEW.event_kind='input_resolved' AND EXISTS(
+			     SELECT 1 FROM control_input_resolution_events terminal
+			     JOIN control_input_request_states state ON state.request_id=terminal.request_id
+			      AND state.current_revision=terminal.request_revision AND state.terminal_event_id=terminal.id
+			     JOIN control_commands command ON command.command_id=terminal.command_id
+			     JOIN control_outbox outbox ON outbox.command_id=command.command_id AND outbox.delivery_state='acknowledged'
+			     WHERE terminal.request_id=request.request_id AND terminal.request_revision=request.revision
+			      AND terminal.event_digest=NEW.result_digest AND command.status='applied' AND command.action='input.respond'
+			      AND EXISTS(SELECT 1 FROM control_events command_fact
+			       WHERE command_fact.command_id=command.command_id AND command_fact.event_kind='command_applied')
+			      AND EXISTS(SELECT 1 FROM control_events effect_fact
+			       WHERE effect_fact.command_id=command.command_id
+			        AND effect_fact.event_kind IN ('effect_acknowledged','effect_reconciled'))
+			      AND NEW.actor_user_id=command.actor_user_id AND NEW.user_id=command.user_id
+			      AND NEW.principal_kind=command.principal_kind
+			      AND NEW.actor_session_credential_id IS command.actor_session_credential_id
+			      AND NEW.actor_api_key_id IS command.actor_api_key_id
+			      AND NEW.executor_user_id=outbox.claim_user_id AND NEW.executor_principal_kind='api_key'
+			      AND NEW.executor_session_credential_id IS NULL AND NEW.executor_api_key_id=outbox.claim_api_key_id
+			      AND NEW.device_id=outbox.claim_device_id AND NEW.action='input.respond'
+			      AND NEW.command_status='applied' AND NEW.outcome='applied' AND NEW.safe_reason IS NULL
+			      AND NEW.parameter_digest=command.parameter_digest)) OR
+			    (NEW.event_kind IN ('input_superseded','input_expired','input_cancelled','input_run_terminal')
+			     AND NEW.actor_user_id IS NULL AND NEW.user_id IS NULL AND NEW.principal_kind IS NULL
+			     AND NEW.actor_session_credential_id IS NULL AND NEW.actor_api_key_id IS NULL
+			     AND NEW.executor_user_id IS NULL AND NEW.executor_principal_kind IS NULL
+			     AND NEW.executor_session_credential_id IS NULL AND NEW.executor_api_key_id IS NULL AND NEW.device_id IS NULL
+			     AND NEW.action IS NULL AND NEW.command_status IS NULL AND NEW.outcome IS NULL
+			     AND NEW.parameter_digest IS NULL AND NEW.result_digest IS NOT NULL
+			     AND NEW.safe_reason=CASE NEW.event_kind
+			      WHEN 'input_superseded' THEN 'input_superseded'
+			      WHEN 'input_expired' THEN 'input_expired'
+			      WHEN 'input_cancelled' THEN 'cancelled'
+			      ELSE 'run_terminal' END
+			     AND (NEW.event_kind<>'input_expired' OR NEW.server_recorded_at>=request.expires_at)
+			     AND (NEW.event_kind<>'input_run_terminal' OR EXISTS(
+			      SELECT 1 FROM agent_runs run WHERE run.id=request.agent_run_id AND run.status NOT IN ('queued','running')))
+			     AND (NEW.event_kind<>'input_cancelled' OR EXISTS(
+			      SELECT 1 FROM agent_run_cancellation_facts fact WHERE fact.run_id=request.agent_run_id)
+			      AND EXISTS(SELECT 1 FROM control_events cancellation_fact
+			       WHERE cancellation_fact.event_kind='cancellation_recorded'
+			        AND cancellation_fact.cancellation_run_id=request.agent_run_id))
+			     AND EXISTS(
+			      SELECT 1 FROM control_input_resolution_events terminal
+			      JOIN control_input_request_states state ON state.request_id=terminal.request_id
+			       AND state.current_revision=terminal.request_revision AND state.terminal_event_id=terminal.id
+			      WHERE terminal.request_id=request.request_id AND terminal.request_revision=request.revision
+			       AND terminal.event_digest=NEW.result_digest AND terminal.safe_reason=NEW.safe_reason
+			       AND terminal.event_kind=CASE NEW.event_kind
+			        WHEN 'input_superseded' THEN 'superseded'
+			        WHEN 'input_expired' THEN 'expired'
+			        WHEN 'input_cancelled' THEN 'cancelled'
+			        ELSE 'run_terminal' END))))
+			 BEGIN SELECT RAISE(ABORT,'control input event lacks exact proof'); END`,
+			`CREATE TRIGGER trg_control_events_command_proof_guard
+			 BEFORE INSERT ON control_events
+			 WHEN NEW.command_id IS NOT NULL AND NOT EXISTS(
+			  SELECT 1 FROM control_commands command
+			  WHERE command.command_id=NEW.command_id AND command.status_revision=NEW.command_status_revision
+			   AND NEW.actor_user_id=command.actor_user_id AND NEW.user_id=command.user_id
+			   AND NEW.principal_kind=command.principal_kind
+			   AND NEW.actor_session_credential_id IS command.actor_session_credential_id
+			   AND NEW.actor_api_key_id IS command.actor_api_key_id
+			   AND NEW.delivery_id=command.delivery_id AND NEW.root_issue_id=command.root_issue_id
+			   AND NEW.issue_revision=command.issue_revision AND NEW.attempt_id IS command.attempt_id
+			   AND NEW.stage_key IS command.stage_key AND NEW.execution_number IS command.execution_number
+			   AND NEW.authority_epoch IS command.authority_epoch AND NEW.reporter_id IS command.reporter_id
+			   AND NEW.agent_run_id IS command.agent_run_id AND NEW.action=command.action
+			   AND NEW.command_status=command.status AND NEW.outcome IS command.outcome
+			   AND NEW.safe_reason IS command.safe_reason AND NEW.parameter_digest=command.parameter_digest
+			   AND NEW.binding_digest=command.target_snapshot_digest AND NEW.action_set_digest=command.grant_action_digest
+			   AND NEW.result_digest IS command.result_digest AND NEW.cancellation_cause IS NULL
+			   AND ((NEW.event_kind='command_created' AND command.status='pending_confirmation'
+			         AND EXISTS(SELECT 1 FROM control_capability_grants grant_row
+			          JOIN control_events grant_fact ON grant_fact.grant_id=grant_row.grant_id
+			           AND grant_fact.grant_revision=grant_row.revision
+			           AND grant_fact.event_kind IN ('grant_issued','grant_renewed')
+			          WHERE grant_row.grant_id=command.grant_id AND grant_row.revision=command.grant_revision
+			           AND grant_fact.subject_expires_at=command.grant_expires_at
+			           AND grant_fact.subject_updated_at=grant_row.updated_at)
+			         AND (command.action IN ('issue.priority.set','run.cancel.queued') OR EXISTS(
+			          SELECT 1 FROM control_capability_leases lease
+			          JOIN control_events lease_fact ON lease_fact.lease_id=lease.lease_id
+			           AND lease_fact.lease_revision=lease.revision
+			           AND lease_fact.event_kind IN ('lease_issued','lease_renewed')
+			          WHERE lease.lease_id=command.lease_id AND lease.revision=command.lease_revision
+			           AND lease_fact.subject_expires_at=command.lease_expires_at
+			           AND lease_fact.subject_updated_at=lease.updated_at))
+			         AND (command.action<>'input.respond' OR EXISTS(
+			          SELECT 1 FROM control_events input_fact
+			          WHERE input_fact.input_request_id=command.input_request_id
+			           AND input_fact.input_request_revision=command.input_request_revision
+			           AND input_fact.event_kind='input_requested'))
+			         AND (command.action NOT IN ('run.pause','run.resume') OR command.runtime_revision=1 OR EXISTS(
+			          SELECT 1 FROM control_events runtime_fact
+			          WHERE runtime_fact.agent_run_id=command.agent_run_id
+			           AND runtime_fact.event_kind='runtime_changed'
+			           AND runtime_fact.runtime_revision=command.runtime_revision))) OR
+			        (NEW.event_kind='command_accepted' AND command.status='accepted' AND command.outcome IS NULL) OR
+			        (NEW.event_kind='command_expired' AND command.status='expired' AND command.safe_reason='confirmation_expired') OR
+			        (NEW.event_kind='command_withdrawn' AND command.status='expired' AND command.safe_reason='withdrawn') OR
+			        (NEW.event_kind='command_applied' AND command.status='applied' AND command.outcome='applied') OR
+			        (NEW.event_kind='command_rejected' AND command.status='rejected' AND command.outcome='rejected') OR
+			        (NEW.event_kind='effect_queued' AND command.status='accepted' AND command.outcome IS NULL AND EXISTS(
+			         SELECT 1 FROM control_outbox outbox WHERE outbox.command_id=command.command_id
+			          AND outbox.delivery_state='queued' AND outbox.effect_digest=command.canonical_digest)) OR
+			        (NEW.event_kind='effect_claimed' AND command.status='accepted' AND command.outcome IS NULL AND EXISTS(
+			         SELECT 1 FROM control_outbox outbox WHERE outbox.command_id=command.command_id
+			          AND outbox.delivery_state='claimed' AND outbox.safe_reason IS NULL
+			          AND NEW.executor_user_id=outbox.claim_user_id AND NEW.executor_principal_kind='api_key'
+			          AND NEW.executor_session_credential_id IS NULL AND NEW.executor_api_key_id=outbox.claim_api_key_id
+			          AND NEW.device_id=outbox.claim_device_id)) OR
+			        (NEW.event_kind='effect_outcome_unknown' AND command.status='accepted' AND command.outcome='outcome_unknown'
+			         AND command.safe_reason='runner_lost' AND EXISTS(
+			          SELECT 1 FROM control_outbox outbox WHERE outbox.command_id=command.command_id
+			           AND outbox.delivery_state='claimed' AND outbox.safe_reason='runner_lost'
+			           AND NEW.executor_user_id=outbox.claim_user_id AND NEW.executor_principal_kind='api_key'
+			           AND NEW.executor_session_credential_id IS NULL AND NEW.executor_api_key_id=outbox.claim_api_key_id
+			           AND NEW.device_id=outbox.claim_device_id)) OR
+			        (NEW.event_kind IN ('effect_acknowledged','effect_reconciled') AND command.status IN ('applied','rejected') AND EXISTS(
+			         SELECT 1 FROM control_outbox outbox WHERE outbox.command_id=command.command_id
+			          AND outbox.delivery_state='acknowledged' AND outbox.result_digest=command.result_digest
+			          AND NEW.executor_user_id=outbox.claim_user_id AND NEW.executor_principal_kind='api_key'
+			          AND NEW.executor_session_credential_id IS NULL AND NEW.executor_api_key_id=outbox.claim_api_key_id
+			          AND NEW.device_id=outbox.claim_device_id)) OR
+			        (NEW.event_kind='effect_abandoned' AND command.status='rejected' AND EXISTS(
+			         SELECT 1 FROM control_outbox outbox WHERE outbox.command_id=command.command_id
+			          AND outbox.delivery_state='abandoned' AND outbox.safe_reason=command.safe_reason)) OR
+			        (NEW.event_kind='runtime_changed' AND command.status='applied'
+			         AND command.action IN ('run.pause','run.resume') AND EXISTS(
+			          SELECT 1 FROM control_runtime_states runtime WHERE runtime.agent_run_id=command.agent_run_id
+			           AND runtime.last_command_id=command.command_id AND runtime.last_result_digest=command.result_digest
+			           AND runtime.revision=command.runtime_revision+1 AND NEW.runtime_revision=runtime.revision
+			           AND runtime.state=CASE command.action WHEN 'run.pause' THEN 'paused' ELSE 'running' END
+			           AND NEW.runtime_state=runtime.state)
+			         AND EXISTS(SELECT 1 FROM control_outbox outbox WHERE outbox.command_id=command.command_id
+			          AND outbox.delivery_state='acknowledged' AND NEW.executor_user_id=outbox.claim_user_id
+			          AND NEW.executor_principal_kind='api_key' AND NEW.executor_session_credential_id IS NULL
+			          AND NEW.executor_api_key_id=outbox.claim_api_key_id AND NEW.device_id=outbox.claim_device_id))))
+			 BEGIN SELECT RAISE(ABORT,'control command event lacks exact proof'); END`,
+			`CREATE TRIGGER trg_control_events_command_executor_shape_guard
+			 BEFORE INSERT ON control_events
+			 WHEN NEW.command_id IS NOT NULL AND
+			  ((NEW.event_kind IN ('effect_claimed','effect_outcome_unknown','effect_acknowledged','effect_reconciled','runtime_changed') AND
+			    (NEW.executor_user_id IS NULL OR NEW.executor_principal_kind<>'api_key' OR NEW.executor_api_key_id IS NULL OR NEW.device_id IS NULL)) OR
+			   (NEW.event_kind NOT IN ('effect_claimed','effect_outcome_unknown','effect_acknowledged','effect_reconciled','runtime_changed') AND
+			    (NEW.executor_user_id IS NOT NULL OR NEW.executor_principal_kind IS NOT NULL OR
+			     NEW.executor_session_credential_id IS NOT NULL OR NEW.executor_api_key_id IS NOT NULL OR NEW.device_id IS NOT NULL)))
+			 BEGIN SELECT RAISE(ABORT,'control command event executor shape is invalid'); END`,
+			`CREATE TRIGGER trg_control_events_command_graph_guard
+			 BEFORE INSERT ON control_events
+			 WHEN NEW.command_id IS NOT NULL AND NOT (
+			  (NEW.event_kind='command_created' AND NEW.sequence=1) OR
+			  (NEW.event_kind='command_accepted' AND EXISTS(
+			   SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='command_created')
+			   AND NOT EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('command_accepted','command_expired','command_withdrawn'))) OR
+			  (NEW.event_kind IN ('command_expired','command_withdrawn') AND EXISTS(
+			   SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='command_created')
+			   AND NOT EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('command_accepted','command_expired','command_withdrawn'))) OR
+			  (NEW.event_kind='effect_queued' AND EXISTS(
+			   SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='command_accepted')
+			   AND NOT EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('effect_queued','command_applied','command_rejected','command_expired','command_withdrawn'))) OR
+			  (NEW.event_kind='effect_claimed' AND EXISTS(
+			   SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='effect_queued')
+			   AND NOT EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('effect_claimed','effect_abandoned','effect_acknowledged','effect_reconciled'))) OR
+			  (NEW.event_kind='effect_outcome_unknown' AND EXISTS(
+			   SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='effect_claimed')
+			   AND NOT EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('effect_outcome_unknown','effect_acknowledged','effect_reconciled'))) OR
+			  (NEW.event_kind='effect_acknowledged' AND EXISTS(
+			   SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='effect_claimed')
+			   AND EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('command_applied','command_rejected'))
+			   AND NOT EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('effect_outcome_unknown','effect_acknowledged','effect_reconciled','effect_abandoned'))) OR
+			  (NEW.event_kind='effect_reconciled' AND EXISTS(
+			   SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='effect_outcome_unknown')
+			   AND EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('command_applied','command_rejected'))
+			   AND NOT EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('effect_acknowledged','effect_reconciled','effect_abandoned'))) OR
+			  (NEW.event_kind='effect_abandoned' AND EXISTS(
+			   SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='effect_queued')
+			   AND EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='command_rejected')
+			   AND NOT EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('effect_claimed','effect_abandoned','effect_acknowledged','effect_reconciled'))) OR
+			  (NEW.event_kind IN ('command_applied','command_rejected') AND EXISTS(
+			   SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='command_accepted')
+			   AND ((NEW.command_status_revision=3 AND NOT EXISTS(
+			          SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			           AND prior.event_kind='effect_outcome_unknown')) OR
+			        (NEW.command_status_revision=4 AND EXISTS(
+			          SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			           AND prior.event_kind='effect_outcome_unknown')))
+			   AND ((NEW.action IN ('issue.priority.set','run.cancel.queued')) OR
+			        (NEW.action NOT IN ('issue.priority.set','run.cancel.queued')
+			         AND EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='effect_queued')
+			         AND ((EXISTS(SELECT 1 FROM control_outbox outbox WHERE outbox.command_id=NEW.command_id AND outbox.delivery_state='acknowledged')
+			               AND EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='effect_claimed')) OR
+			              (NEW.event_kind='command_rejected' AND EXISTS(
+			               SELECT 1 FROM control_outbox outbox WHERE outbox.command_id=NEW.command_id AND outbox.delivery_state='abandoned')))))
+			   AND NOT EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('command_applied','command_rejected'))) OR
+			  (NEW.event_kind='runtime_changed' AND EXISTS(
+			   SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id
+			    AND prior.event_kind IN ('effect_acknowledged','effect_reconciled'))
+			   AND NOT EXISTS(SELECT 1 FROM control_events prior WHERE prior.command_id=NEW.command_id AND prior.event_kind='runtime_changed')))
+			 BEGIN SELECT RAISE(ABORT,'invalid command event transition'); END`,
+			`CREATE TRIGGER trg_control_events_cancellation_proof_guard
+			 BEFORE INSERT ON control_events
+			 WHEN NEW.cancellation_run_id IS NOT NULL AND NOT EXISTS(
+			  SELECT 1 FROM agent_run_cancellation_facts fact
+			  WHERE fact.run_id=NEW.cancellation_run_id AND fact.cancellation_cause=NEW.cancellation_cause
+			   AND NEW.agent_run_id=fact.run_id AND fact.command_id IS NEW.cancellation_command_id AND NEW.server_recorded_at>=fact.recorded_at
+			   AND NEW.safe_reason IS NULL
+			   AND ((fact.cancellation_cause='operator_command' AND EXISTS(
+			    SELECT 1 FROM control_commands command WHERE command.command_id=fact.command_id
+			     AND command.agent_run_id=fact.run_id AND command.status='applied' AND command.outcome='applied'
+			     AND command.action IN ('run.cancel.queued','run.cancel.running')
+			     AND EXISTS(SELECT 1 FROM control_events command_fact
+			      WHERE command_fact.command_id=command.command_id AND command_fact.event_kind='command_applied')
+			     AND (command.action='run.cancel.queued' OR EXISTS(
+			      SELECT 1 FROM control_events effect_fact WHERE effect_fact.command_id=command.command_id
+			       AND effect_fact.event_kind IN ('effect_acknowledged','effect_reconciled')))
+			     AND NEW.actor_user_id=command.actor_user_id AND NEW.user_id=command.user_id
+			     AND NEW.principal_kind=command.principal_kind
+			     AND NEW.actor_session_credential_id IS command.actor_session_credential_id
+			     AND NEW.actor_api_key_id IS command.actor_api_key_id
+			     AND NEW.executor_user_id IS NULL AND NEW.executor_principal_kind IS NULL
+			     AND NEW.executor_session_credential_id IS NULL AND NEW.executor_api_key_id IS NULL AND NEW.device_id IS NULL
+			     AND NEW.delivery_id=command.delivery_id AND NEW.root_issue_id=command.root_issue_id
+			     AND NEW.issue_revision=command.issue_revision AND NEW.attempt_id=command.attempt_id
+			     AND NEW.stage_key=command.stage_key AND NEW.execution_number=command.execution_number
+			     AND NEW.authority_epoch=command.authority_epoch AND NEW.reporter_id=command.reporter_id
+			     AND NEW.action=command.action AND NEW.command_status=command.status AND NEW.outcome=command.outcome
+			     AND NEW.parameter_digest=command.parameter_digest AND NEW.binding_digest=command.target_snapshot_digest
+			     AND NEW.action_set_digest=command.grant_action_digest AND NEW.result_digest=command.result_digest)) OR
+			   (fact.cancellation_cause<>'operator_command'
+			    AND NEW.actor_user_id IS NULL AND NEW.user_id IS NULL AND NEW.principal_kind IS NULL
+			    AND NEW.actor_session_credential_id IS NULL AND NEW.actor_api_key_id IS NULL
+			    AND NEW.executor_user_id IS NULL AND NEW.executor_principal_kind IS NULL
+			    AND NEW.executor_session_credential_id IS NULL AND NEW.executor_api_key_id IS NULL AND NEW.device_id IS NULL
+			    AND NEW.delivery_id IS NULL AND NEW.root_issue_id IS NULL AND NEW.issue_revision IS NULL
+			    AND NEW.attempt_id IS NULL AND NEW.stage_key IS NULL AND NEW.execution_number IS NULL
+			    AND NEW.authority_epoch IS NULL AND NEW.reporter_id IS NULL
+			    AND NEW.action IS NULL AND NEW.command_status IS NULL AND NEW.outcome IS NULL
+			    AND NEW.parameter_digest IS NULL AND NEW.binding_digest IS NULL
+			    AND NEW.action_set_digest IS NULL AND NEW.result_digest IS NULL)))
+			 BEGIN SELECT RAISE(ABORT,'cancellation event lacks exact proof'); END`,
+			`CREATE TRIGGER trg_control_events_no_update
+			 BEFORE UPDATE ON control_events
+			 BEGIN SELECT RAISE(ABORT,'control events are append-only'); END`,
+			`CREATE TRIGGER trg_control_events_no_delete
+			 BEFORE DELETE ON control_events
+			 BEGIN SELECT RAISE(ABORT,'control events are append-only'); END`,
+			`CREATE TRIGGER trg_control_grants_audit_precondition
+			 BEFORE UPDATE ON control_capability_grants
+			 WHEN NOT EXISTS(
+			  SELECT 1 FROM control_events fact
+			  WHERE fact.id=(SELECT MAX(latest.id) FROM control_events latest WHERE latest.grant_id=OLD.grant_id)
+			   AND fact.grant_id=OLD.grant_id AND fact.grant_revision=OLD.revision
+			   AND fact.event_kind IN ('grant_issued','grant_renewed')
+			   AND fact.subject_expires_at=OLD.expires_at AND fact.subject_updated_at=OLD.updated_at)
+			 BEGIN SELECT RAISE(ABORT,'control grant update lacks current audit fact'); END`,
+			`CREATE TRIGGER trg_control_grants_renewal_target_guard
+			 BEFORE UPDATE ON control_capability_grants
+			 WHEN OLD.revoked_at IS NULL AND NEW.revoked_at IS NULL AND NOT EXISTS(
+			  SELECT 1 FROM deliveries delivery
+			  JOIN issues issue ON issue.id=delivery.issue_id AND issue.deleted_at IS NULL
+			  JOIN projects project ON project.id=issue.project_id
+			  WHERE delivery.id=OLD.delivery_id AND delivery.delivery_key=OLD.delivery_key
+			   AND delivery.issue_id=OLD.root_issue_id AND issue.project_id=OLD.project_id
+			   AND (SELECT revision FROM issue_control_revisions WHERE issue_id=issue.id)=OLD.issue_revision
+			   AND COALESCE((SELECT MAX(event.delivery_revision) FROM delivery_events event
+			                WHERE event.delivery_id=delivery.id),0)=OLD.delivery_revision
+			   AND (project.status IN ('active','frozen') OR
+			        (project.status='archived' AND NOT EXISTS(
+			         SELECT 1 FROM control_capability_grant_actions action
+			         WHERE action.grant_id=OLD.grant_id AND action.grant_revision=OLD.revision
+			          AND action.action NOT IN ('run.cancel.queued','run.cancel.running')))))
+			 BEGIN SELECT RAISE(ABORT,'control grant renewal target is stale'); END`,
+			`CREATE TRIGGER trg_control_leases_audit_precondition
+			 BEFORE UPDATE ON control_capability_leases
+			 WHEN NOT EXISTS(
+			  SELECT 1 FROM control_events fact
+			  WHERE fact.id=(SELECT MAX(latest.id) FROM control_events latest WHERE latest.lease_id=OLD.lease_id)
+			   AND fact.lease_id=OLD.lease_id AND fact.lease_revision=OLD.revision
+			   AND fact.event_kind IN ('lease_issued','lease_renewed')
+			   AND fact.subject_expires_at=OLD.expires_at AND fact.subject_updated_at=OLD.updated_at)
+			 BEGIN SELECT RAISE(ABORT,'control lease update lacks current audit fact'); END`,
+			`CREATE TRIGGER trg_control_leases_renewal_target_guard
+			 BEFORE UPDATE ON control_capability_leases
+			 WHEN OLD.revoked_at IS NULL AND NEW.revoked_at IS NULL AND NOT EXISTS(
+			  SELECT 1 FROM api_keys runner_key
+			  JOIN users runner_user ON runner_user.id=runner_key.user_id AND runner_user.status='active'
+			  JOIN deliveries delivery ON delivery.id=OLD.delivery_id AND delivery.delivery_key=OLD.delivery_key
+			   AND delivery.issue_id=OLD.root_issue_id
+			  JOIN issues issue ON issue.id=delivery.issue_id AND issue.project_id=OLD.project_id AND issue.deleted_at IS NULL
+			  JOIN projects project ON project.id=issue.project_id
+			  JOIN delivery_agent_run_links link ON link.delivery_id=OLD.delivery_id AND link.attempt_id=OLD.attempt_id
+			   AND link.stage_key=OLD.stage_key AND link.execution_number=OLD.execution_number
+			   AND link.execution_start_stage_event_id=OLD.execution_start_stage_event_id
+			   AND link.agent_run_id=OLD.agent_run_id AND link.reporter_id=OLD.reporter_id
+			  JOIN agent_runs run ON run.id=OLD.agent_run_id AND run.issue_id=OLD.root_issue_id AND run.status='running'
+			  JOIN delivery_agent_run_activations activation ON activation.delivery_id=OLD.delivery_id
+			   AND activation.attempt_id=OLD.attempt_id AND activation.stage_key=OLD.stage_key
+			   AND activation.execution_number=OLD.execution_number AND activation.authority_epoch=OLD.authority_epoch
+			   AND activation.agent_run_id=OLD.agent_run_id AND activation.reporter_id=OLD.reporter_id
+			   AND activation.authority_stage_event_id=OLD.authority_stage_event_id
+			  JOIN delivery_stage_latest latest ON latest.delivery_id=OLD.delivery_id AND latest.attempt_id=OLD.attempt_id
+			   AND latest.stage_key=OLD.stage_key AND latest.execution_number=OLD.execution_number
+			   AND latest.execution_start_stage_event_id=OLD.execution_start_stage_event_id
+			   AND latest.authority_epoch=OLD.authority_epoch AND latest.current_reporter_id=OLD.reporter_id
+			   AND latest.authority_stage_event_id=OLD.authority_stage_event_id
+			  WHERE runner_key.id=OLD.actor_api_key_id AND runner_key.user_id=OLD.user_id
+			   AND runner_key.disabled_at IS NULL
+			   AND (runner_key.expires_at IS NULL OR runner_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			   AND (SELECT revision FROM issue_control_revisions WHERE issue_id=issue.id)=OLD.issue_revision
+			   AND COALESCE((SELECT MAX(event.delivery_revision) FROM delivery_events event
+			                WHERE event.delivery_id=delivery.id),0)=OLD.delivery_revision
+			   AND (project.status IN ('active','frozen') OR
+			        (project.status='archived' AND NOT EXISTS(
+			         SELECT 1 FROM control_capability_lease_actions action
+			         WHERE action.lease_id=OLD.lease_id AND action.lease_revision=OLD.revision
+			          AND action.action<>'run.cancel.running'))))
+			 BEGIN SELECT RAISE(ABORT,'control lease renewal target is stale'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
+		if m.version > maxVersion {
+			continue
+		}
 		var count int
 		if err := db.QueryRow("SELECT COUNT(*) FROM schema_versions WHERE version=?", m.version).Scan(&count); err != nil {
 			return fmt.Errorf("check migration %d: %w", m.version, err)
@@ -5646,7 +10101,7 @@ func migrate(db *sql.DB) error {
 
 func applyMigration(ctx context.Context, conn *sql.Conn, m migration) error {
 	if migrationUsesForeignKeyPragma(m) {
-		return applyMigrationNonAtomic(ctx, conn, m)
+		return applyForeignKeyRebuildMigration(ctx, conn, m)
 	}
 	return applyMigrationAtomic(ctx, conn, m)
 }
@@ -5672,17 +10127,45 @@ func applyMigrationAtomic(ctx context.Context, conn *sql.Conn, m migration) erro
 	return nil
 }
 
-func applyMigrationNonAtomic(ctx context.Context, conn *sql.Conn, m migration) error {
-	// SQLite ignores PRAGMA foreign_keys=OFF/ON inside an open transaction, so
-	// table-rebuild migrations that toggle that pragma must stay connection-
-	// pinned but non-transactional. These are the explicit exception path.
+func applyForeignKeyRebuildMigration(ctx context.Context, conn *sql.Conn, m migration) error {
+	// SQLite ignores PRAGMA foreign_keys=OFF inside an open transaction. Disable
+	// it first on this pinned connection, then transact the complete rebuild and
+	// schema-version write. A failed or interrupted rebuild therefore rolls back
+	// as one unit instead of leaving a half-renamed table behind.
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+		return fmt.Errorf("migration %d: disable foreign keys: %w", m.version, err)
+	}
+	restoreForeignKeys := func() error {
+		_, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=ON")
+		return err
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		_ = restoreForeignKeys()
+		return fmt.Errorf("migration %d: begin rebuild tx: %w", m.version, err)
+	}
 	for _, step := range m.steps {
-		if _, err := conn.ExecContext(ctx, step); err != nil {
+		normalized := strings.ToUpper(strings.Join(strings.Fields(step), " "))
+		if normalized == "PRAGMA FOREIGN_KEYS=OFF" || normalized == "PRAGMA FOREIGN_KEYS=ON" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, step); err != nil {
+			_ = tx.Rollback()
+			_ = restoreForeignKeys()
 			return migrationStepError(m.version, step, err)
 		}
 	}
-	if _, err := conn.ExecContext(ctx, "INSERT INTO schema_versions(version) VALUES(?)", m.version); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_versions(version) VALUES(?)", m.version); err != nil {
+		_ = tx.Rollback()
+		_ = restoreForeignKeys()
 		return fmt.Errorf("record migration %d: %w", m.version, err)
+	}
+	if err := tx.Commit(); err != nil {
+		_ = restoreForeignKeys()
+		return fmt.Errorf("migration %d: commit rebuild: %w", m.version, err)
+	}
+	if err := restoreForeignKeys(); err != nil {
+		return fmt.Errorf("migration %d: restore foreign keys: %w", m.version, err)
 	}
 	return nil
 }
@@ -5708,6 +10191,84 @@ func migrationUsesForeignKeyPragma(m migration) bool {
 var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	// PAI-576: migration 113 adds a UNIQUE index on (project_id, issue_number).
 	113: checkNoDuplicateIssueNumbers,
+	// PAI-799/801: M142's original SQLite length() checks counted Unicode
+	// code points. HTTP already enforced bytes, but refuse to carry any row
+	// written by a direct legacy DB client across the byte-bound correction.
+	143: checkAgentRunTelemetryByteBounds,
+	// PAI-809: M147 is deliberately non-idempotent. A partial or locally
+	// modified control schema must fail before the first ALTER rather than be
+	// silently accepted behind object-existence clauses.
+	147: checkM147SchemaIsUnapplied,
+}
+
+func checkM147SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT 'sessions.'||name FROM pragma_table_info('sessions') WHERE name='credential_id'
+		UNION ALL
+		SELECT 'api_keys.'||name FROM pragma_table_info('api_keys') WHERE name IN ('disabled_at','expires_at')
+		UNION ALL
+		SELECT type||':'||name FROM sqlite_master
+		WHERE name GLOB 'trg_control_*' OR name GLOB 'idx_control_*' OR name IN (
+		 'issue_control_revisions','agent_run_cancellation_facts','control_operation_keys',
+		 'control_capability_grants','control_capability_grant_actions','control_capability_grant_seals',
+		 'control_capability_leases','control_capability_lease_actions','control_capability_lease_seals',
+		 'control_input_requests','control_input_request_options','control_input_request_seals',
+		 'control_input_resolution_events','control_input_request_states','control_runtime_states',
+		 'control_commands','control_outbox','control_events',
+		 'idx_sessions_credential_id','trg_sessions_credential_insert_guard','trg_sessions_identity_update_guard',
+		 'idx_api_keys_enabled_hash','idx_api_keys_expiry','trg_api_keys_identity_update_guard','trg_api_keys_disabled_terminal',
+		 'trg_issue_control_revision_on_insert','trg_issue_control_revision_on_update','trg_issue_control_revision_on_delete',
+		 'trg_issue_control_revision_guard','trg_issue_control_revision_no_delete',
+		 'idx_agent_run_cancellation_cause','trg_agent_run_cancellation_facts_no_update',
+		 'trg_agent_run_cancellation_facts_no_delete','trg_agent_run_cancellation_command_guard'
+		)
+		ORDER BY 1`)
+	if err != nil {
+		return fmt.Errorf("inspect M147 schema ownership: %w", err)
+	}
+	defer rows.Close()
+	var collisions []string
+	for rows.Next() {
+		var collision string
+		if err := rows.Scan(&collision); err != nil {
+			return fmt.Errorf("scan M147 schema ownership: %w", err)
+		}
+		collisions = append(collisions, collision)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate M147 schema ownership: %w", err)
+	}
+	if len(collisions) > 0 {
+		return fmt.Errorf("M147 schema is partially present or locally incompatible: %s", strings.Join(collisions, ", "))
+	}
+	return nil
+}
+
+func checkAgentRunTelemetryByteBounds(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `SELECT id,length(CAST(activity AS BLOB)),length(CAST(estimate_basis AS BLOB))
+		FROM agent_run_telemetry
+		WHERE length(CAST(activity AS BLOB))>280 OR length(CAST(estimate_basis AS BLOB))>240
+		ORDER BY id LIMIT 10`)
+	if err != nil {
+		return fmt.Errorf("scan telemetry UTF-8 byte bounds: %w", err)
+	}
+	defer rows.Close()
+	var violations []string
+	for rows.Next() {
+		var id int64
+		var activityBytes, basisBytes int
+		if err := rows.Scan(&id, &activityBytes, &basisBytes); err != nil {
+			return fmt.Errorf("scan telemetry UTF-8 byte-bound row: %w", err)
+		}
+		violations = append(violations, fmt.Sprintf("id=%d activity_bytes=%d estimate_basis_bytes=%d", id, activityBytes, basisBytes))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate telemetry UTF-8 byte-bound rows: %w", err)
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf("legacy telemetry exceeds the M143 UTF-8 byte bounds; repair the listed rows before upgrading: %s", strings.Join(violations, ", "))
+	}
+	return nil
 }
 
 // checkNoDuplicateIssueNumbers refuses migration 113 if the issues table holds

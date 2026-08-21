@@ -26,9 +26,21 @@ const props = withDefaults(defineProps<{
   mdMode: boolean
   isMonospace: boolean
   canEdit?: boolean
+  /** Embeddings such as Agent Mode may only create internal notes. */
+  internalOnly?: boolean
+  compact?: boolean
+  composerNotice?: string | null
 }>(), {
   canEdit: true,
+  internalOnly: false,
+  compact: false,
+  composerNotice: null,
 })
+
+const emit = defineEmits<{
+  'dirty-change': [dirty: boolean]
+  'in-flight-change': [inFlight: boolean]
+}>()
 
 const authStore = useAuthStore()
 const { confirm } = useConfirm()
@@ -44,13 +56,51 @@ const commentError  = ref('')
 // next comment doesn't accidentally inherit the previous selection.
 const commentVisibility = ref<CommentVisibility>('internal')
 
+watch(commentBody, (body) => emit('dirty-change', body.trim() !== ''))
+watch(commentSaving, (saving) => emit('in-flight-change', saving), { immediate: true })
+
+let loadSequence = 0
+let contextGeneration = 0
+let activeSubmission = 0
 async function load() {
-  try { comments.value = await loadIssueComments(props.issueId) } catch {}
+  const sequence = ++loadSequence
+  const issueId = props.issueId
+  try {
+    const loaded = await loadIssueComments(issueId)
+    if (sequence === loadSequence && props.issueId === issueId) comments.value = loaded
+  } catch {}
 }
 
 defineExpose({ load })
 
-watch(() => props.issueId, () => load())
+watch(() => props.issueId, () => {
+  contextGeneration += 1
+  activeSubmission += 1
+  commentSaving.value = false
+  comments.value = []
+  commentBody.value = ''
+  commentVisibility.value = 'internal'
+  commentError.value = ''
+  emit('dirty-change', false)
+  void load()
+}, { immediate: true })
+
+watch(() => props.canEdit, (allowed) => {
+  contextGeneration += 1
+  if (allowed === false) {
+    activeSubmission += 1
+    commentSaving.value = false
+    commentBody.value = ''
+    commentVisibility.value = 'internal'
+    commentError.value = ''
+  }
+})
+
+function canApplyMutation(issueId: number, generation: number): boolean {
+  return props.canEdit !== false
+    && props.issueId === issueId
+    && contextGeneration === generation
+}
 
 function escapeHtmlBr(s: string): string {
   return escapeHtml(s, true)
@@ -62,33 +112,49 @@ function sanitiseComment(s: string): string {
 }
 
 async function submitComment() {
-  if (props.canEdit === false) return
+  if (props.canEdit === false || commentSaving.value) return
   commentError.value = ''
-  if (!commentBody.value.trim()) return
+  const body = commentBody.value.trim()
+  if (!body) return
+  const issueId = props.issueId
+  const generation = contextGeneration
+  const submission = ++activeSubmission
   commentSaving.value = true
   try {
     const c = await createIssueComment(
-      props.issueId,
-      commentBody.value.trim(),
-      commentVisibility.value,
+      issueId,
+      body,
+      props.internalOnly ? 'internal' : commentVisibility.value,
     )
+    if (!canApplyMutation(issueId, generation)) return
     comments.value.push(c)
-    commentBody.value = ''
+    // Preserve anything typed after the submitted body while the request was
+    // pending. In Agent Mode selection is blocked during the post, but this
+    // also protects forced identity changes and normal shared-component use.
+    if (commentBody.value.trim() === body) commentBody.value = ''
     // Reset to internal: the safe default for the next comment, even
     // if the previous one was customer-visible.
     commentVisibility.value = 'internal'
-  } catch (e: unknown) { commentError.value = errMsg(e, 'Failed to post comment.') }
-  finally { commentSaving.value = false }
+  } catch (e: unknown) {
+    if (canApplyMutation(issueId, generation)) commentError.value = errMsg(e, 'Failed to post comment.')
+  }
+  finally {
+    if (submission === activeSubmission) commentSaving.value = false
+  }
 }
 
 async function deleteComment(comment: Comment) {
-  if (props.canEdit === false) return
+  if (props.canEdit === false || props.internalOnly) return
+  const issueId = props.issueId
+  const generation = contextGeneration
   const isOther = comment.author_id !== authStore.user?.id
   const msg = isOther
     ? `Delete ${comment.author ?? 'another user'}'s comment? You can undo this from Recent activity.`
     : 'Delete this comment? You can undo this from Recent activity.'
   if (!await confirm({ message: msg, confirmLabel: 'Delete', danger: true })) return
+  if (!canApplyMutation(issueId, generation)) return
   await deleteIssueComment(comment.id)
+  if (!canApplyMutation(issueId, generation)) return
   comments.value = comments.value.filter(c => c.id !== comment.id)
 }
 
@@ -96,12 +162,14 @@ async function deleteComment(comment: Comment) {
 // somebody composed an internal answer and then realised the customer
 // should see it (or vice versa).
 function canFlipVisibility(comment: Comment): boolean {
-  if (props.canEdit === false) return false
+  if (props.canEdit === false || props.internalOnly) return false
   if (!authStore.user) return false
   return comment.author_id === authStore.user.id || authStore.isAdmin
 }
 
 async function flipVisibility(comment: Comment) {
+  const issueId = props.issueId
+  const generation = contextGeneration
   const next: CommentVisibility =
     comment.visibility === 'external' ? 'internal' : 'external'
   // For internal → external, take a moment to confirm — pushing a
@@ -113,17 +181,21 @@ async function flipVisibility(comment: Comment) {
     })
     if (!ok) return
   }
+  if (!canApplyMutation(issueId, generation)) return
   try {
     await updateIssueCommentVisibility(comment.id, next)
+    if (!canApplyMutation(issueId, generation)) return
     comment.visibility = next
   } catch (e: unknown) {
-    commentError.value = errMsg(e, 'Failed to update visibility.')
+    if (canApplyMutation(issueId, generation)) {
+      commentError.value = errMsg(e, 'Failed to update visibility.')
+    }
   }
 }
 </script>
 
 <template>
-  <div class="comments-section">
+  <div class="comments-section" :class="{ 'comments-section--compact': compact }">
     <h3 class="comments-title">Comments <span class="comments-count" v-if="comments.length">{{ formatInteger(comments.length) }}</span></h3>
 
     <div v-if="comments.length" class="comments-list">
@@ -155,7 +227,7 @@ async function flipVisibility(comment: Comment) {
                 : t('comments.visibility.badgeInternal') }}
             </button>
             <button
-              v-if="canEdit !== false && authStore.user && (c.author_id === authStore.user.id || authStore.isAdmin)"
+              v-if="canEdit !== false && !internalOnly && authStore.user && (c.author_id === authStore.user.id || authStore.isAdmin)"
               class="comment-delete" @click="deleteComment(c)" title="Delete comment"
             ><AppIcon name="x" :size="11" /></button>
           </div>
@@ -186,7 +258,12 @@ async function flipVisibility(comment: Comment) {
              external chips behave like a radio group; the helper line
              swaps copy + color when external is selected so the author
              cannot accidentally publish to the customer portal. -->
-        <div class="comment-vis-row" role="radiogroup" :aria-label="t('comments.visibility.toggleAriaLabel')">
+        <p v-if="composerNotice" class="comment-composer-notice">{{ composerNotice }}</p>
+        <div v-if="internalOnly" class="comment-vis-row comment-vis-row--locked">
+          <span class="comment-vis-pill comment-vis-pill--active">{{ t('comments.visibility.badgeInternal') }}</span>
+          <span class="comment-vis-hint">{{ t('comments.visibility.composerHint') }}</span>
+        </div>
+        <div v-else class="comment-vis-row" role="radiogroup" :aria-label="t('comments.visibility.toggleAriaLabel')">
           <button
             type="button"
             role="radio"
@@ -233,6 +310,11 @@ async function flipVisibility(comment: Comment) {
   margin-top: 1.75rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--border);
+}
+.comments-section--compact { margin-top: .9rem; padding-top: .9rem; }
+.comment-composer-notice {
+  margin: 0; padding: .45rem .55rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text-muted); font-size: 11px; line-height: 1.4;
 }
 .comments-title {
   font-size: 13px; font-weight: 700; text-transform: uppercase;

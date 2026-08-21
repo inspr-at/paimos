@@ -69,6 +69,46 @@ or undo snapshots.
 | `PAIMOS_LIVE_UPDATES_ENABLED` | `false` | Set to `true` to enable `GET /api/changes?since=<seq>`. When disabled, the endpoint returns 404 and clients keep using conditional polling. |
 | `PAIMOS_LIVE_UPDATES_MAX_CONNECTIONS` | `100` | Process-local cap for concurrent SSE clients. |
 
+## Agent run reconciliation
+
+The server reconciles active Implement-this runs at boot and on a timer. All
+durations use Go duration syntax (`45s`, `15m`, `2h`). Invalid or non-positive
+values fall back to the documented default.
+
+| Var | Default | Notes |
+|---|---|---|
+| `PAIMOS_RUN_RECONCILE_INTERVAL` | `30s` | Active-run watchdog cadence. |
+| `PAIMOS_RUN_QUEUED_TIMEOUT` | `15m` | Fail a run that no runner claimed. |
+| `PAIMOS_RUN_FIRST_HEARTBEAT_TIMEOUT` | `1m` | Fail a newly supervised claim whose first server-received heartbeat never arrives. |
+| `PAIMOS_RUN_HEARTBEAT_TIMEOUT` | `90s` | Fail a supervised run after its latest server-received heartbeat becomes stale. Semantic events do not reset this clock. |
+| `PAIMOS_RUN_LEGACY_TIMEOUT` | `2h` | Longer fallback for old/uninstrumented running rows without the durable supervised-claim marker. |
+
+## Local agent runner flags
+
+`paimos run-agent watch` is configured with CLI flags rather than server
+environment variables. The safety-relevant defaults are:
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--execution-timeout` | `2h` | Hard lifetime for the owned provider process tree. |
+| `--heartbeat-timeout` | `5m` | Maximum child stdout/stderr silence before termination. |
+| `--heartbeat-interval` | `15s` | Supervisor-owned liveness cadence; independent of provider callbacks. |
+| `--exec` | `claude` | Built-in Claude structured-stream mode with validated direct argv, `--safe-mode`, and repository read/edit tools only. Any custom value is an explicit raw shell-command fallback with neutral `paimos/custom-runner` telemetry identity. |
+| `--claude-permission-mode` | `dontAsk` | One of the installed modes `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, or `plan`; stale/unknown values and shell controls are rejected. |
+| `--claude-allowed-tools` | `Read,Glob,Grep,Edit,Write` | Passed to `--tools` as the hard built-in availability boundary and to `--allowedTools` for approval. Bash, browser, MCP, and inherited customizations are absent by default. |
+| `--unsafe-allow-bypass-permissions` | `false` | Separate unsafe opt-in required for `bypassPermissions`; only the dual opt-in generates Claude's dangerous-skip acknowledgement argument. |
+| `--test-exec` | *(empty)* | The only runner-owned test evidence source. Empty means successful implementation reports `completed`, not `tests_passed`. |
+| `--attach-logs` | `false` | Opt-in bounded raw log capture; output can contain secrets. |
+| `--allow-deploy` | `false` | Still requires `--deploy-exec`, a run `deploy_target`, and separate consent unless `--yes-deploy`. |
+
+Provider, test, and enabled deploy commands all run through the same
+process-group supervisor, execution/silence watchdogs, and heartbeat cadence.
+
+The built-in Claude action does not enable Bash, MCP, browser tools, or
+permission bypass. A custom `--exec` can broaden permissions, but that is an
+operator-authored arbitrary shell command and its stream is not parsed into
+telemetry.
+
 ### Set-once (changing after data exists has consequences)
 
 | Var | Default | Caveat |
@@ -365,17 +405,19 @@ soft block but get an `X-AI-Over-Cap: true` response header for UI
 warning. Settings → AI surfaces the org-wide totals + per-user
 table.
 
-### Voice provider + session budget (PAI-703 … PAI-714)
+### Voice provider + session budget (PAI-703 … PAI-808)
 
-Voice input/output for the intake workbench is configured at
+Voice input/output for the intake workbench and Agent Mode is configured at
 Settings → Integrations → AI (admin; `PUT /api/ai/voice-settings`):
 `provider` (`""` = off, `elevenlabs`), `api_key` (write-only — reads
 report `has_api_key` only), `base_url`, `stt_model`, `tts_model`, and
 `tts_voice_id`. The base URL may be blank (standard endpoint) or the HTTPS
 root of `api.elevenlabs.io` / `api.eu.residency.elevenlabs.io`; credentials,
 ports, paths, queries, fragments, and other hosts are rejected before the
-key is stored or loaded. Audio is transcribed and dropped — never stored
-(INV-INTAKE-06); TTS returns bytes with `Cache-Control: no-store`.
+key is stored or loaded. Intake audio is transcribed and dropped; Agent Mode
+audio and transcripts are wholly ephemeral. TTS returns bytes with
+`Cache-Control: no-store`, and Agent Mode TTS accepts server-owned templates
+only—never arbitrary caller text.
 
 Each intake session also has an LLM token budget so a runaway dictation
 can't spend unbounded: `app_settings` key
@@ -385,13 +427,17 @@ spec freezes with an explanatory stage message.
 
 ### Voice cost gates (PAI-724)
 
-The intake voice endpoints (`.../audio` STT, `.../tts`) call paid
-provider APIs and run their own gates before every provider call:
+The Intake voice endpoints (`.../audio` STT, `.../tts`) and Agent Mode voice
+endpoints (`.../voice/transcribe`, `.../voice/speak`) call paid provider APIs
+and run shared modality gates before every provider call:
 per-user concurrency (2 in flight), per-minute burst caps (20 STT /
 10 TTS), the PAI-161 usage cap above, and per-user daily unit
 budgets, all answering `429` + `Retry-After` when exceeded. The daily
-budgets are soft caps (admins pass) summed from today's `ai_calls`
-rows — STT in estimated audio seconds, TTS in characters:
+budgets are soft caps (admins pass) summed from today's `ai_calls` rows across
+both surfaces—`intake_stt` + `agent_mode_stt` in estimated audio seconds and
+`intake_tts` + `agent_mode_tts` in characters. Concurrent admitted calls hold
+pending-unit reservations until their metadata row is recorded, so alternating
+or racing the two surfaces cannot double-spend the same allowance:
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
@@ -401,7 +447,10 @@ rows — STT in estimated audio seconds, TTS in characters:
 Successful voice calls record their units in `prompt_tokens` and an
 estimated `cost_micro_usd` on the paper trail (Scribe ≈ $0.40/audio-
 hour, multilingual TTS ≈ $0.10/1k chars), so voice spend shows up in
-the cost totals instead of as zero.
+the cost totals instead of as zero. Provider attempts are recorded with a
+short cancellation-independent context after the provider returns; request
+disconnects cannot erase billed metadata. No audio, transcript, template
+text, note body, or candidate identity is copied into `ai_calls`.
 
 ### Paper trail (`PAI-207` / `PAI-208`)
 

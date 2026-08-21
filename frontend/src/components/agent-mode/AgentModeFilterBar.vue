@@ -1,0 +1,220 @@
+<!--
+  PAIMOS — Your Professional & Personal AI Project OS
+  Copyright (C) 2026 Markus Barta <markus@barta.com>
+  AGPL-3.0-only — see LICENSE.
+
+  PAI-805 — filter bar. Filters narrow the lanes; they never touch the
+  selection (the view pins an excluded selected delivery).
+
+  The health filter is a real radiogroup (WAI-ARIA APG): one tab stop,
+  Arrow keys move the checked option and focus (wrapping), Home / End
+  jump to the ends. Key events are consumed here so the delivery-
+  navigation handler of the view never sees them.
+-->
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+import AppIcon from '@/components/AppIcon.vue'
+import type { AgentModeAggregates, AgentModeCountSet } from '@/services/agentModeAggregateSchema'
+import {
+  filtersActive,
+  nextRadioIndex,
+  type AgentModeFilters,
+  type HealthFilter,
+} from '@/composables/agent-mode/agentModeFilters'
+
+const props = defineProps<{
+  filters: AgentModeFilters
+  aggregates: AgentModeAggregates | null
+}>()
+
+const emit = defineEmits<{ 'update:filters': [patch: Partial<AgentModeFilters>] }>()
+const { t } = useI18n()
+
+const projects = computed(() => {
+  return (props.aggregates?.projects ?? []).map((project) => ({
+    id: project.projectId,
+    key: project.projectKey,
+    name: project.projectName,
+    count: project.counts.activeTotal,
+  }))
+})
+
+type HealthOption = { value: HealthFilter; count: (root: AgentModeCountSet) => number }
+const healthOptions: HealthOption[] = [
+  { value: 'all', count: (root) => root.activeTotal },
+  { value: 'attention', count: (root) => root.flags.attention },
+  { value: 'blocked', count: (root) => root.flags.blocked },
+  { value: 'stale', count: (root) => root.flags.stale_no_signal },
+]
+
+const active = computed(() => filtersActive(props.filters))
+const healthGroup = ref<HTMLElement | null>(null)
+
+function update(patch: Partial<AgentModeFilters>) {
+  emit('update:filters', patch)
+}
+
+function onProject(event: Event) {
+  const raw = (event.target as HTMLSelectElement).value
+  update({ projectId: raw === '' ? null : Number(raw), laneKey: null })
+}
+
+function onQuery(event: Event) {
+  update({ query: (event.target as HTMLInputElement).value })
+}
+
+function clear() {
+  update({ projectId: null, laneKey: null, health: 'all', query: '', states: [], attention: 'all' })
+}
+
+function onHealthKeydown(event: KeyboardEvent) {
+  const current = healthOptions.findIndex((o) => o.value === props.filters.health)
+  const next = nextRadioIndex(current < 0 ? 0 : current, event.key, healthOptions.length)
+  if (next == null) return
+  event.preventDefault()
+  // The group owns these keys; the view's delivery navigation must not
+  // also react to them.
+  event.stopPropagation()
+  const option = healthOptions[next]
+  update({ health: option.value })
+  const el = healthGroup.value?.querySelector<HTMLElement>(`[data-health="${option.value}"]`)
+  el?.focus()
+}
+</script>
+
+<template>
+  <div class="am-filters" role="group" :aria-label="t('agentMode.filters.label')">
+    <span v-if="filters.laneKey" class="am-filter-lane" :title="filters.laneKey">
+      <AppIcon name="git-branch" :size="11" aria-hidden="true" />
+      {{ t('agentMode.filters.laneActive') }}
+    </span>
+    <label class="am-filter-project">
+      <span class="am-sr-only">{{ t('agentMode.filters.project') }}</span>
+      <AppIcon name="folder" :size="12" aria-hidden="true" />
+      <select :value="filters.projectId ?? ''" @change="onProject">
+        <option value="">{{ t('agentMode.filters.allProjects') }}</option>
+        <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.key }} · {{ p.name }} ({{ p.count }})</option>
+      </select>
+    </label>
+
+    <div
+      ref="healthGroup"
+      class="am-filter-health"
+      role="radiogroup"
+      :aria-label="t('agentMode.filters.healthLabel')"
+      @keydown="onHealthKeydown"
+    >
+      <button
+        v-for="opt in healthOptions"
+        :key="opt.value"
+        type="button"
+        role="radio"
+        :aria-checked="filters.health === opt.value ? 'true' : 'false'"
+        :tabindex="filters.health === opt.value ? 0 : -1"
+        :data-health="opt.value"
+        class="am-filter-chip"
+        :class="{ 'is-active': filters.health === opt.value }"
+        @click="update({ health: opt.value })"
+      >
+        {{ t(`agentMode.filters.health.${opt.value}`) }}
+        <span v-if="aggregates" class="am-filter-count">{{ opt.count(aggregates.root) }}</span>
+      </button>
+    </div>
+
+    <label class="am-filter-query">
+      <span class="am-sr-only">{{ t('agentMode.filters.query') }}</span>
+      <AppIcon name="search" :size="12" aria-hidden="true" />
+      <input
+        type="search"
+        :value="filters.query"
+        :placeholder="t('agentMode.filters.query')"
+        autocomplete="off"
+        spellcheck="false"
+        @input="onQuery"
+      />
+    </label>
+
+    <button v-if="active" type="button" class="am-filter-clear" @click="clear">
+      <AppIcon name="x" :size="11" aria-hidden="true" />
+      {{ t('agentMode.filters.clear') }}
+    </button>
+  </div>
+</template>
+
+<style scoped>
+.am-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.am-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.am-filter-project,
+.am-filter-query,
+.am-filter-lane {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  height: 30px;
+  border: 1px solid var(--am-line);
+  border-radius: 9px;
+  background: var(--am-surface);
+  color: var(--am-muted);
+}
+.am-filter-lane { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.am-filter-project select,
+.am-filter-query input {
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--am-ink);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  width: auto;
+}
+.am-filter-project select { max-width: 240px; }
+.am-filter-query { flex: 1 1 180px; max-width: 320px; }
+.am-filter-query input { flex: 1; min-width: 0; }
+.am-filter-project:focus-within,
+.am-filter-query:focus-within { border-color: var(--am-focus); box-shadow: 0 0 0 2px color-mix(in srgb, var(--am-focus) 18%, transparent); }
+
+.am-filter-health {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--am-line);
+  border-radius: 9px;
+  background: var(--am-surface);
+}
+.am-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--am-muted);
+  font-size: 12px;
+}
+.am-filter-chip.is-active { background: color-mix(in srgb, var(--am-ink) 9%, var(--am-surface)); color: var(--am-ink); font-weight: 600; }
+.am-filter-chip:focus-visible { outline: 2px solid var(--am-focus); outline-offset: 1px; }
+.am-filter-count { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; font-variant-numeric: tabular-nums; opacity: 0.85; }
+.am-filter-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 9px;
+  border: 1px dashed var(--am-line-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--am-muted);
+  font-size: 12px;
+}
+.am-filter-clear:hover { color: var(--am-ink); border-color: var(--am-ink); }
+.am-filter-clear:focus-visible { outline: 2px solid var(--am-focus); outline-offset: 2px; }
+</style>

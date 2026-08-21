@@ -26,62 +26,71 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/inspr-at/paimos/backend/agentmode"
 	"github.com/inspr-at/paimos/backend/ai"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/sse"
 )
 
+const agentRunTestsSummaryMaxBytes = 4096
+
 // AgentRun is the lifecycle record for one "Implement this" run.
 type AgentRun struct {
-	ID                 int64   `json:"id"`
-	IssueID            int64   `json:"issue_id"`
-	ProjectID          *int64  `json:"project_id"`
-	DeviceID           string  `json:"device_id"`
-	RequestedBy        *int64  `json:"requested_by"`
-	ClaimedBy          *int64  `json:"claimed_by"`
-	ActionKey          string  `json:"action_key"`
-	ProviderKind       string  `json:"provider_kind"`
-	ProviderID         string  `json:"provider_id"`
-	ProviderLabel      string  `json:"provider_label"`
-	Model              string  `json:"model"`
-	RunMode            string  `json:"run_mode"`
-	ProfileID          string  `json:"profile_id"`
-	Effort             string  `json:"effort"`
-	PromptPresetRef    string  `json:"prompt_preset_ref"`
-	ContextPack        string  `json:"context_pack"`
-	ContextTruncated   bool    `json:"context_truncated,omitempty"`
-	ContextSourcesJSON string  `json:"context_sources_json,omitempty"`
-	PromptTokens       int     `json:"prompt_tokens,omitempty"`
-	CompletionTokens   int     `json:"completion_tokens,omitempty"`
-	FinishReason       string  `json:"finish_reason,omitempty"`
-	AgentName          string  `json:"agent_name"`
-	SessionID          string  `json:"session_id"`
-	Status             string  `json:"status"`
-	Version            string  `json:"version"`
-	TestsSummary       *string `json:"tests_summary"`
-	DeployTarget       string  `json:"deploy_target"`
-	RepoURL            string  `json:"repo_url"`
-	BranchName         string  `json:"branch_name"`
-	CommitBaseSHA      string  `json:"commit_base_sha"`
-	CommitSHA          string  `json:"commit_sha"`
-	LogAttachmentID    *int64  `json:"log_attachment_id"`
-	Error              string  `json:"error"`
-	CreatedAt          string  `json:"created_at"`
-	StartedAt          *string `json:"started_at"`
-	FinishedAt         *string `json:"finished_at"`
-	SourceDraftRunID   *int64  `json:"source_draft_run_id,omitempty"`
-	FollowupRunID      *int64  `json:"followup_run_id,omitempty"`
+	ID                             int64   `json:"id"`
+	IssueID                        int64   `json:"issue_id"`
+	ProjectID                      *int64  `json:"project_id"`
+	DeviceID                       string  `json:"device_id"`
+	RequestedBy                    *int64  `json:"requested_by"`
+	ClaimedBy                      *int64  `json:"claimed_by"`
+	ActionKey                      string  `json:"action_key"`
+	ProviderKind                   string  `json:"provider_kind"`
+	ProviderID                     string  `json:"provider_id"`
+	ProviderLabel                  string  `json:"provider_label"`
+	Model                          string  `json:"model"`
+	RunMode                        string  `json:"run_mode"`
+	ProfileID                      string  `json:"profile_id"`
+	Effort                         string  `json:"effort"`
+	PromptPresetRef                string  `json:"prompt_preset_ref"`
+	ContextPack                    string  `json:"context_pack"`
+	ContextTruncated               bool    `json:"context_truncated,omitempty"`
+	ContextSourcesJSON             string  `json:"context_sources_json,omitempty"`
+	PromptTokens                   int     `json:"prompt_tokens,omitempty"`
+	CompletionTokens               int     `json:"completion_tokens,omitempty"`
+	FinishReason                   string  `json:"finish_reason,omitempty"`
+	AgentName                      string  `json:"agent_name"`
+	SessionID                      string  `json:"session_id"`
+	Status                         string  `json:"status"`
+	Version                        string  `json:"version"`
+	TestsSummary                   *string `json:"tests_summary"`
+	DeployTarget                   string  `json:"deploy_target"`
+	RepoURL                        string  `json:"repo_url"`
+	BranchName                     string  `json:"branch_name"`
+	CommitBaseSHA                  string  `json:"commit_base_sha"`
+	CommitSHA                      string  `json:"commit_sha"`
+	LogAttachmentID                *int64  `json:"log_attachment_id"`
+	Error                          string  `json:"error"`
+	CreatedAt                      string  `json:"created_at"`
+	StartedAt                      *string `json:"started_at"`
+	FinishedAt                     *string `json:"finished_at"`
+	SourceDraftRunID               *int64  `json:"source_draft_run_id,omitempty"`
+	FollowupRunID                  *int64  `json:"followup_run_id,omitempty"`
+	ExpectsSupervisorTelemetry     bool    `json:"expects_supervisor_telemetry"`
+	DeliveryInstrumentationVersion int     `json:"delivery_instrumentation_version"`
 }
 
 // agentRunStatuses is the allowed lifecycle set (mirrors the DB CHECK).
 var agentRunStatuses = map[string]bool{
-	"queued": true, "running": true, "tests_passed": true, "tests_failed": true,
+	"queued": true, "running": true, "completed": true, "tests_passed": true, "tests_failed": true,
 	"deployed": true, "failed": true, "cancelled": true, "drafted": true,
 }
 
+// agentRunIsTerminal means lifecycle-immutable. Test result statuses retain
+// explicit deploy/fail edges, even though they close the separate telemetry
+// stream (see agentRunTelemetryIsTerminal).
 func agentRunIsTerminal(s string) bool {
-	return s == "deployed" || s == "failed" || s == "cancelled" || s == "drafted"
+	return s == "completed" || s == "deployed" || s == "failed" || s == "cancelled" || s == "drafted"
 }
 
 // legalRunTransitions is the run lifecycle as a directed graph. Terminal states
@@ -89,7 +98,7 @@ func agentRunIsTerminal(s string) bool {
 // terminal-immutability guard. A same-status PATCH is a no-op (not a transition).
 var legalRunTransitions = map[string]map[string]bool{
 	"queued":       {"running": true, "cancelled": true},
-	"running":      {"tests_passed": true, "tests_failed": true, "deployed": true, "failed": true, "cancelled": true, "drafted": true},
+	"running":      {"completed": true, "tests_passed": true, "tests_failed": true, "deployed": true, "failed": true, "cancelled": true, "drafted": true},
 	"tests_passed": {"deployed": true, "failed": true},
 	"tests_failed": {"failed": true},
 }
@@ -112,13 +121,13 @@ const agentRunCols = `id, issue_id, project_id, device_id, requested_by, claimed
 	`profile_id, effort, prompt_preset_ref, context_pack, context_truncated, context_sources_json, prompt_tokens, completion_tokens, finish_reason, ` +
 	`agent_name, session_id, ` +
 	`status, version, tests_summary, deploy_target, repo_url, branch_name, commit_base_sha, commit_sha, log_attachment_id, error, created_at, started_at, finished_at, ` +
-	`source_draft_run_id, followup_run_id`
+	`source_draft_run_id, followup_run_id, expects_supervisor_telemetry, delivery_instrumentation_version`
 
 func scanAgentRun(row interface{ Scan(...any) error }) (*AgentRun, error) {
 	var ar AgentRun
 	var projectID, requestedBy, claimedBy, logAtt, sourceDraftRunID, followupRunID sql.NullInt64
 	var tests, startedAt, finishedAt sql.NullString
-	var contextTruncated int
+	var contextTruncated, expectsSupervisorTelemetry int
 	if err := row.Scan(&ar.ID, &ar.IssueID, &projectID, &ar.DeviceID, &requestedBy,
 		&claimedBy, &ar.ActionKey, &ar.ProviderKind, &ar.ProviderID, &ar.ProviderLabel,
 		&ar.Model, &ar.RunMode, &ar.ProfileID, &ar.Effort, &ar.PromptPresetRef,
@@ -126,10 +135,11 @@ func scanAgentRun(row interface{ Scan(...any) error }) (*AgentRun, error) {
 		&ar.CompletionTokens, &ar.FinishReason, &ar.AgentName, &ar.SessionID, &ar.Status, &ar.Version, &tests,
 		&ar.DeployTarget, &ar.RepoURL, &ar.BranchName, &ar.CommitBaseSHA, &ar.CommitSHA,
 		&logAtt, &ar.Error, &ar.CreatedAt, &startedAt, &finishedAt,
-		&sourceDraftRunID, &followupRunID); err != nil {
+		&sourceDraftRunID, &followupRunID, &expectsSupervisorTelemetry, &ar.DeliveryInstrumentationVersion); err != nil {
 		return nil, err
 	}
 	ar.ContextTruncated = contextTruncated == 1
+	ar.ExpectsSupervisorTelemetry = expectsSupervisorTelemetry == 1
 	if projectID.Valid {
 		ar.ProjectID = &projectID.Int64
 	}
@@ -164,6 +174,42 @@ func getAgentRunByID(id int64) (*AgentRun, error) {
 	return scanAgentRun(db.DB.QueryRow(`SELECT `+agentRunCols+` FROM agent_runs WHERE id=?`, id))
 }
 
+// deliveryStoreForRequest binds every delivery-side write to the request's
+// current project edit authority. The delivery package resolves the root
+// issue's project inside the caller's transaction, so this deliberately does
+// not trust the run's requester/claimer or its historical project_id.
+// Projectless issues retain the existing RequireIssueEdit orphan semantics.
+func deliveryStoreForRequest(r *http.Request) *delivery.Store {
+	return delivery.NewStore(db.DB, delivery.Options{Freshness: deliveryFreshnessPolicy(), Observer: agentmode.NotifyChange, Authorizer: delivery.AuthorizerFunc(
+		func(_ context.Context, req delivery.AuthorizationRequest) error {
+			user := auth.GetUser(r)
+			if user == nil || user.Status != "active" {
+				return errors.New("active authenticated user required")
+			}
+			if req.ProjectID != nil && !auth.CanEditProject(r, *req.ProjectID) {
+				return errors.New("current project edit access required")
+			}
+			return nil
+		},
+	)})
+}
+
+func deliveryFreshnessPolicy() delivery.FreshnessPolicy {
+	cfg := AgentRunReconcilerConfigFromEnv()
+	return delivery.FreshnessPolicy{
+		FirstSignalTimeout: cfg.FirstHeartbeatTimeout,
+		HeartbeatTimeout:   cfg.HeartbeatTimeout,
+		EstimateTimeout:    cfg.HeartbeatTimeout,
+	}
+}
+
+func deliveryUserActor(r *http.Request) delivery.Actor {
+	if u := auth.GetUser(r); u != nil {
+		return delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", u.ID)}
+	}
+	return delivery.Actor{Type: "system", OpaqueKey: "paimos"}
+}
+
 // canReadAgentRun: an admin, requester, or project editor may read a run. This
 // keeps the UI/watch surfaces usable for project editors without granting every
 // editor write access to another user's queued/running job.
@@ -176,6 +222,9 @@ func canReadAgentRun(r *http.Request, run *AgentRun) bool {
 		return true
 	}
 	if run.RequestedBy != nil && *run.RequestedBy == u.ID {
+		return true
+	}
+	if run.ClaimedBy != nil && *run.ClaimedBy == u.ID {
 		return true
 	}
 	return run.ProjectID != nil && auth.CanEditProject(r, *run.ProjectID)
@@ -295,25 +344,13 @@ func ImplementIssue(w http.ResponseWriter, r *http.Request) {
 		sourceDraftRunID = body.SourceDraftRunID
 	}
 
-	// Idempotency + stale-orphan reaping (PAI-605 M7 + audit). The DB enforces
-	// at most one active run per issue (idx_agent_runs_active_issue, migration
-	// 127), so the INSERT below is the real authority; this pre-check just returns
-	// the existing active run on the common (non-racing) path, and reaps a run a
-	// crashed runner left wedged in 'running' so the pipeline can recover.
-	var activeID int64
-	var activeStatus string
-	var activeStarted sql.NullString
-	if err := db.DB.QueryRow(
-		`SELECT id, status, COALESCE(NULLIF(started_at, ''), created_at) FROM agent_runs WHERE issue_id=? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1`,
-		issueID).Scan(&activeID, &activeStatus, &activeStarted); err == nil && activeID > 0 {
-		if activeStatus == "running" && agentRunStartedBefore(activeStarted, 2*time.Hour) {
-			_, _ = db.DB.Exec(
-				`UPDATE agent_runs SET status='failed', error='abandoned (runner did not finish)', finished_at=datetime('now') WHERE id=? AND status='running'`,
-				activeID)
-		} else if run, rerr := getAgentRunByID(activeID); rerr == nil {
-			jsonOK(w, run) // 200 (not 201): an existing active run is returned
-			return
-		}
+	// The background reconciler is authoritative for stale runs. Running one
+	// idempotent pass here preserves the historic immediate-retry behaviour, but
+	// recovery no longer depends on a user clicking Implement again.
+	_, _ = ReconcileStaleAgentRuns(r.Context(), time.Now().UTC(), AgentRunReconcilerConfigFromEnv())
+	if active := activeRunForIssue(issueID); active != nil {
+		jsonOK(w, active) // 200 (not 201): an existing active run is returned
+		return
 	}
 	deviceID := strings.TrimSpace(body.DeviceID)
 	if explicitAction && projectID.Valid && deviceID != "" && !deviceSupportsAgentAction(projectID.Int64, deviceID, action.ActionKey) {
@@ -324,14 +361,22 @@ func ImplementIssue(w http.ResponseWriter, r *http.Request) {
 	if u := auth.GetUser(r); u != nil {
 		requestedBy = &u.ID
 	}
-	res, err := db.DB.Exec(
+	tx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		jsonError(w, "could not create run", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(r.Context(),
 		`INSERT INTO agent_runs(
 			issue_id, project_id, device_id, requested_by, deploy_target,
-			action_key, provider_kind, provider_id, provider_label, model, run_mode, agent_name, source_draft_run_id, status
-		 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?, 'queued')`,
+			action_key, provider_kind, provider_id, provider_label, model, run_mode, agent_name, source_draft_run_id,
+			status, delivery_instrumentation_version
+		 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?, 'queued', 1)`,
 		issueID, projectID, deviceID, requestedBy, strings.TrimSpace(body.DeployTarget),
 		action.ActionKey, action.ProviderKind, action.ProviderID, action.ProviderLabel, action.Model, action.RunMode, agentName, sourceDraftRunID)
 	if err != nil {
+		_ = tx.Rollback()
 		// Lost the unique-index race to a concurrent click — return its run (200).
 		if existing := activeRunForIssue(issueID); existing != nil {
 			jsonOK(w, existing)
@@ -342,8 +387,29 @@ func ImplementIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := res.LastInsertId()
 	if sourceDraftRunID != nil {
-		_, _ = db.DB.Exec(`UPDATE agent_runs SET followup_run_id=? WHERE id=? AND followup_run_id IS NULL`, id, *sourceDraftRunID)
+		result, err := tx.ExecContext(r.Context(), `UPDATE agent_runs SET followup_run_id=? WHERE id=? AND followup_run_id IS NULL`, id, *sourceDraftRunID)
+		if err != nil {
+			jsonError(w, "could not link source draft", http.StatusInternalServerError)
+			return
+		}
+		if n, _ := result.RowsAffected(); n != 1 {
+			jsonError(w, "source draft changed concurrently", http.StatusConflict)
+			return
+		}
 	}
+	store := deliveryStoreForRequest(r)
+	effects := store.NewEffects()
+	if _, err := store.BootstrapRunTx(r.Context(), tx, effects, delivery.RunBootstrap{IssueID: issueID,
+		RunID: id, Mode: "implementation", Actor: deliveryUserActor(r), IdempotencyKey: fmt.Sprintf("run:%d", id)}); err != nil {
+		log.Printf("agent run delivery bootstrap: issue=%d run=%d: %v", issueID, id, err)
+		jsonError(w, "could not instrument run", http.StatusInternalServerError)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		jsonError(w, "could not create run", http.StatusInternalServerError)
+		return
+	}
+	effects.Dispatch(r.Context())
 	run, err := getAgentRunByID(id)
 	if err != nil {
 		jsonError(w, "run created but reload failed", http.StatusInternalServerError)
@@ -389,20 +455,10 @@ func implementDraftIssue(
 
 	// Keep the same active-run guard as shell-backed implement runs: a draft
 	// should not run concurrently with a queued/running local implementation.
-	var activeID int64
-	var activeStatus string
-	var activeStarted sql.NullString
-	if err := db.DB.QueryRow(
-		`SELECT id, status, COALESCE(NULLIF(started_at, ''), created_at) FROM agent_runs WHERE issue_id=? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1`,
-		issueID).Scan(&activeID, &activeStatus, &activeStarted); err == nil && activeID > 0 {
-		if activeStatus == "running" && agentRunStartedBefore(activeStarted, 2*time.Hour) {
-			_, _ = db.DB.Exec(
-				`UPDATE agent_runs SET status='failed', error='abandoned (runner did not finish)', finished_at=datetime('now') WHERE id=? AND status='running'`,
-				activeID)
-		} else if run, rerr := getAgentRunByID(activeID); rerr == nil {
-			jsonOK(w, run)
-			return
-		}
+	_, _ = ReconcileStaleAgentRuns(r.Context(), time.Now().UTC(), AgentRunReconcilerConfigFromEnv())
+	if active := activeRunForIssue(issueID); active != nil {
+		jsonOK(w, active)
+		return
 	}
 
 	requestID := newAIRequestID()
@@ -589,18 +645,25 @@ func implementDraftIssue(
 	}
 
 	contextSourcesJSON := marshalAIContextSources(ax.Options.ContextSources)
-	res, err := db.DB.Exec(
+	createTx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		jsonError(w, "could not create run", http.StatusInternalServerError)
+		return
+	}
+	defer createTx.Rollback()
+	res, err := createTx.ExecContext(r.Context(),
 		`INSERT INTO agent_runs(
 			issue_id, project_id, requested_by,
 			action_key, provider_kind, provider_id, provider_label, model, run_mode,
 			profile_id, effort, prompt_preset_ref, context_pack, context_truncated, context_sources_json,
-			agent_name, status, started_at
-		 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'running',datetime('now'))`,
+			agent_name, status, started_at, delivery_instrumentation_version
+		 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'running',datetime('now'),1)`,
 		issueID, projectID, requestedBy,
 		action.ActionKey, action.ProviderKind, action.ProviderID, action.ProviderLabel, ax.Options.Model, action.RunMode,
 		ax.Options.ProfileID, ax.Options.Effort, ax.Options.PromptPresetRef, ax.Options.ContextPack, boolToSQLite(ax.Options.ContextTruncated), contextSourcesJSON,
 		agentName)
 	if err != nil {
+		_ = createTx.Rollback()
 		if existing := activeRunForIssue(issueID); existing != nil {
 			jsonOK(w, existing)
 			return
@@ -610,6 +673,19 @@ func implementDraftIssue(
 		return
 	}
 	runID, _ := res.LastInsertId()
+	store := deliveryStoreForRequest(r)
+	createEffects := store.NewEffects()
+	if _, err := store.BootstrapRunTx(r.Context(), createTx, createEffects, delivery.RunBootstrap{IssueID: issueID,
+		RunID: runID, Mode: "draft", Actor: deliveryUserActor(r), IdempotencyKey: fmt.Sprintf("run:%d", runID)}); err != nil {
+		log.Printf("agent_draft: delivery bootstrap failed: %v", err)
+		jsonError(w, "could not instrument run", http.StatusInternalServerError)
+		return
+	}
+	if err := createTx.Commit(); err != nil {
+		jsonError(w, "could not create run", http.StatusInternalServerError)
+		return
+	}
+	createEffects.Dispatch(r.Context())
 
 	notes := loadIssueNotes(issueID)
 	systemPrompt := applyAIPromptPreset(draftRunSystemPrompt, ax)
@@ -651,7 +727,10 @@ func implementDraftIssue(
 		callArgs.Outcome = outcome
 		callArgs.ErrorClass = errorClass
 		recordAICall(r.Context(), callArgs)
-		markAgentRunFailed(runID, safeDraftProviderError(err))
+		if err := markAgentRunFailed(r, runID, safeDraftProviderError(err)); err != nil {
+			jsonError(w, "run update failed", http.StatusInternalServerError)
+			return
+		}
 		run, reloadErr := getAgentRunByID(runID)
 		if reloadErr != nil {
 			jsonError(w, "run created but reload failed", http.StatusInternalServerError)
@@ -667,7 +746,10 @@ func implementDraftIssue(
 		callArgs.Outcome = outcomeFailUpstream
 		callArgs.ErrorClass = "empty_response"
 		recordAICall(r.Context(), callArgs)
-		markAgentRunFailed(runID, "AI provider returned an empty draft")
+		if err := markAgentRunFailed(r, runID, "AI provider returned an empty draft"); err != nil {
+			jsonError(w, "run update failed", http.StatusInternalServerError)
+			return
+		}
 		run, reloadErr := getAgentRunByID(runID)
 		if reloadErr != nil {
 			jsonError(w, "run created but reload failed", http.StatusInternalServerError)
@@ -679,7 +761,13 @@ func implementDraftIssue(
 	}
 
 	testsSummary := "AI draft generated; no local tests were run and no deployment was attempted."
-	if _, err := db.DB.Exec(
+	resultTx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		jsonError(w, "run update failed", http.StatusInternalServerError)
+		return
+	}
+	defer resultTx.Rollback()
+	updateResult, err := resultTx.ExecContext(r.Context(),
 		`UPDATE agent_runs
 		    SET status='drafted',
 		        tests_summary=?,
@@ -692,11 +780,29 @@ func implementDraftIssue(
 		        finished_at=datetime('now')
 		  WHERE id=? AND status='running'`,
 		testsSummary, model, resp.PromptTokens, resp.CompletionTokens, strings.ToLower(resp.FinishReason),
-		boolToSQLite(ax.Options.ContextTruncated), contextSourcesJSON, runID); err != nil {
+		boolToSQLite(ax.Options.ContextTruncated), contextSourcesJSON, runID)
+	if err != nil {
 		log.Printf("agent_draft: mark drafted failed")
 		jsonError(w, "run update failed", http.StatusInternalServerError)
 		return
 	}
+	if n, _ := updateResult.RowsAffected(); n != 1 {
+		jsonError(w, "run changed concurrently", http.StatusConflict)
+		return
+	}
+	resultStore := deliveryStoreForRequest(r)
+	resultEffects := resultStore.NewEffects()
+	if err := resultStore.NormalizeRunTx(r.Context(), resultTx, resultEffects, delivery.RunNormalization{RunID: runID,
+		Status: "drafted", IdempotencyKey: fmt.Sprintf("run:%d:drafted", runID)}); err != nil {
+		log.Printf("agent_draft: delivery normalization failed: %v", err)
+		jsonError(w, "run update failed", http.StatusInternalServerError)
+		return
+	}
+	if err := resultTx.Commit(); err != nil {
+		jsonError(w, "run update failed", http.StatusInternalServerError)
+		return
+	}
+	resultEffects.Dispatch(r.Context())
 	postAgentRunDraftComment(issueID, requestedBy, runID, action.ProviderLabel, model, draft, ax.Options, agentName)
 	callArgs.Outcome = outcomeOK
 	recordAICall(r.Context(), callArgs)
@@ -908,13 +1014,35 @@ func safeDraftProviderError(err error) string {
 	}
 }
 
-func markAgentRunFailed(runID int64, msg string) {
+func markAgentRunFailed(r *http.Request, runID int64, msg string) error {
+	ctx := r.Context()
 	if strings.TrimSpace(msg) == "" {
 		msg = "AI draft failed"
 	}
-	_, _ = db.DB.Exec(
-		`UPDATE agent_runs SET status='failed', error=?, finished_at=datetime('now') WHERE id=? AND status='running'`,
-		msg, runID)
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE agent_runs SET status='failed', error=?, finished_at=datetime('now') WHERE id=? AND status='running'`, msg, runID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("draft run changed concurrently")
+	}
+	store := deliveryStoreForRequest(r)
+	effects := store.NewEffects()
+	if err := store.NormalizeRunTx(ctx, tx, effects, delivery.RunNormalization{RunID: runID, Status: "failed",
+		IdempotencyKey: fmt.Sprintf("run:%d:failed", runID)}); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	effects.Dispatch(ctx)
+	return nil
 }
 
 func postAgentRunDraftComment(
@@ -1004,19 +1132,6 @@ func markdownInline(s string) string {
 		return s[:117] + "..."
 	}
 	return s
-}
-
-// agentRunStartedBefore reports whether started_at (SQLite UTC "YYYY-MM-DD
-// HH:MM:SS") is older than d ago. A null/blank/unparseable value is "not old".
-func agentRunStartedBefore(started sql.NullString, d time.Duration) bool {
-	if !started.Valid || strings.TrimSpace(started.String) == "" {
-		return false
-	}
-	t, err := time.Parse("2006-01-02 15:04:05", started.String)
-	if err != nil {
-		return false
-	}
-	return time.Since(t) > d
 }
 
 // activeRunForIssue returns the issue's current active (queued/running) run, or
@@ -1216,19 +1331,21 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Status          *string `json:"status"`
-		IfStatus        *string `json:"if_status"` // optimistic claim guard (PAI-605 H3)
-		DeviceID        *string `json:"device_id"`
-		ActionKey       *string `json:"action_key"`
-		Version         *string `json:"version"`
-		TestsSummary    *string `json:"tests_summary"`
-		DeployTarget    *string `json:"deploy_target"`
-		RepoURL         *string `json:"repo_url"`
-		BranchName      *string `json:"branch_name"`
-		CommitBaseSHA   *string `json:"commit_base_sha"`
-		CommitSHA       *string `json:"commit_sha"`
-		LogAttachmentID *int64  `json:"log_attachment_id"`
-		Error           *string `json:"error"`
+		Status                     *string `json:"status"`
+		IfStatus                   *string `json:"if_status"` // optimistic claim guard (PAI-605 H3)
+		DeviceID                   *string `json:"device_id"`
+		ActionKey                  *string `json:"action_key"`
+		Version                    *string `json:"version"`
+		TestsSummary               *string `json:"tests_summary"`
+		DeployTarget               *string `json:"deploy_target"`
+		RepoURL                    *string `json:"repo_url"`
+		BranchName                 *string `json:"branch_name"`
+		CommitBaseSHA              *string `json:"commit_base_sha"`
+		CommitSHA                  *string `json:"commit_sha"`
+		LogAttachmentID            *int64  `json:"log_attachment_id"`
+		Error                      *string `json:"error"`
+		ExpectsSupervisorTelemetry *bool   `json:"expects_supervisor_telemetry"`
+		CancellationCause          *string `json:"cancellation_cause"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid body", http.StatusBadRequest)
@@ -1251,6 +1368,20 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if body.CancellationCause != nil {
+		cause := strings.TrimSpace(*body.CancellationCause)
+		if cause != "execution_timeout" && cause != "silence_timeout" && cause != "runner_shutdown" && cause != "server_cancel" {
+			jsonError(w, "invalid cancellation_cause", http.StatusBadRequest)
+			return
+		}
+		principal, ok := auth.GetPrincipal(r)
+		if !ok || principal.Kind() != auth.PrincipalAPIKey || body.Status == nil ||
+			strings.TrimSpace(*body.Status) != "cancelled" || existing.Status != "running" || body.DeviceID == nil ||
+			!canRecordNonOperatorCancellation(r, existing, strings.TrimSpace(*body.DeviceID)) {
+			jsonError(w, "cancellation_cause is unavailable", http.StatusConflict)
+			return
+		}
+	}
 	claimAttempt := false
 	if body.Status != nil && body.IfStatus != nil {
 		claimAttempt = existing.Status == "queued" &&
@@ -1269,9 +1400,33 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	exactLifecycleReplay := body.Status != nil && strings.TrimSpace(*body.Status) == existing.Status
+	exactLifecycleReplay = exactLifecycleReplay && (body.DeviceID == nil || strings.TrimSpace(*body.DeviceID) == existing.DeviceID)
+	exactLifecycleReplay = exactLifecycleReplay && (body.ActionKey == nil || strings.TrimSpace(*body.ActionKey) == existing.ActionKey)
+	exactLifecycleReplay = exactLifecycleReplay && (body.Version == nil || strings.TrimSpace(*body.Version) == existing.Version)
+	exactLifecycleReplay = exactLifecycleReplay && (body.TestsSummary == nil || (existing.TestsSummary != nil && *body.TestsSummary == *existing.TestsSummary))
+	exactLifecycleReplay = exactLifecycleReplay && (body.DeployTarget == nil || strings.TrimSpace(*body.DeployTarget) == existing.DeployTarget)
+	exactLifecycleReplay = exactLifecycleReplay && (body.RepoURL == nil || strings.TrimSpace(*body.RepoURL) == existing.RepoURL)
+	exactLifecycleReplay = exactLifecycleReplay && (body.BranchName == nil || strings.TrimSpace(*body.BranchName) == existing.BranchName)
+	exactLifecycleReplay = exactLifecycleReplay && (body.CommitBaseSHA == nil || strings.ToLower(strings.TrimSpace(*body.CommitBaseSHA)) == existing.CommitBaseSHA)
+	exactLifecycleReplay = exactLifecycleReplay && (body.CommitSHA == nil || strings.ToLower(strings.TrimSpace(*body.CommitSHA)) == existing.CommitSHA)
+	exactLifecycleReplay = exactLifecycleReplay && (body.LogAttachmentID == nil || (existing.LogAttachmentID != nil && *body.LogAttachmentID == *existing.LogAttachmentID))
+	exactLifecycleReplay = exactLifecycleReplay && (body.Error == nil || *body.Error == existing.Error)
+	exactLifecycleReplay = exactLifecycleReplay && (body.ExpectsSupervisorTelemetry == nil || *body.ExpectsSupervisorTelemetry == existing.ExpectsSupervisorTelemetry)
+	exactLifecycleReplay = exactLifecycleReplay && (body.CancellationCause == nil || agentRunCancellationCauseIs(id, strings.TrimSpace(*body.CancellationCause)))
+	if agentRunTelemetryIsTerminal(existing.Status) && exactLifecycleReplay {
+		jsonOK(w, existing)
+		return
+	}
+	if body.ExpectsSupervisorTelemetry != nil && (!claimAttempt || !*body.ExpectsSupervisorTelemetry) {
+		jsonError(w, "expects_supervisor_telemetry can only be enabled when claiming a queued run", http.StatusConflict)
+		return
+	}
 	// Audit: a terminal run is immutable — reject ANY update (a status move out of
 	// terminal AND non-status field edits), so the historical record can't be
-	// rewritten after the fact.
+	// rewritten after the fact. An exact lifecycle transport replay returns the
+	// original row: its delivery normalization committed in the same transaction,
+	// so this adds neither a domain event nor a change hint.
 	if agentRunIsTerminal(existing.Status) {
 		jsonError(w, "run is already in a terminal status", http.StatusConflict)
 		return
@@ -1307,8 +1462,32 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 				args = append(args, u.ID)
 			}
 		}
-		if agentRunIsReportable(s) {
+		if agentRunTelemetryIsTerminal(s) {
 			sets = append(sets, "finished_at=datetime('now')")
+		}
+	}
+	if body.TestsSummary != nil && len(*body.TestsSummary) > agentRunTestsSummaryMaxBytes {
+		jsonError(w, fmt.Sprintf("tests_summary must be at most %d bytes", agentRunTestsSummaryMaxBytes), http.StatusBadRequest)
+		return
+	}
+	if newStatus == "tests_passed" || newStatus == "tests_failed" {
+		evidence := existing.TestsSummary
+		if body.TestsSummary != nil {
+			evidence = body.TestsSummary
+		}
+		if evidence == nil || strings.TrimSpace(*evidence) == "" || len(*evidence) > agentRunTestsSummaryMaxBytes {
+			jsonError(w, newStatus+" requires non-empty bounded tests_summary evidence", http.StatusConflict)
+			return
+		}
+	}
+	if newStatus == "completed" {
+		evidence := existing.TestsSummary
+		if body.TestsSummary != nil {
+			evidence = body.TestsSummary
+		}
+		if evidence != nil && strings.TrimSpace(*evidence) != "" {
+			jsonError(w, "completed means tests were not run and cannot carry tests_summary", http.StatusConflict)
+			return
 		}
 	}
 	if body.Version != nil {
@@ -1325,16 +1504,19 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid device_id", http.StatusBadRequest)
 			return
 		}
-		if existing.Status != "queued" || newStatus != "running" {
+		if body.CancellationCause != nil {
+			// Exact runner-device proof only. The device was stamped by the
+			// queued→running claim and is immutable during cancellation.
+		} else if existing.Status != "queued" || newStatus != "running" {
 			jsonError(w, "device_id can only be stamped when claiming a queued run", http.StatusConflict)
 			return
-		}
-		if existing.DeviceID != "" && existing.DeviceID != d {
+		} else if existing.DeviceID != "" && existing.DeviceID != d {
 			jsonError(w, "run is targeted to another device", http.StatusConflict)
 			return
+		} else {
+			sets = append(sets, "device_id=?")
+			args = append(args, d)
 		}
-		sets = append(sets, "device_id=?")
-		args = append(args, d)
 	}
 	if body.DeployTarget != nil {
 		sets = append(sets, "deploy_target=?")
@@ -1390,6 +1572,9 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		sets = append(sets, "error=?")
 		args = append(args, *body.Error)
 	}
+	if body.ExpectsSupervisorTelemetry != nil {
+		sets = append(sets, "expects_supervisor_telemetry=1")
+	}
 	// Stamp the attributing agent/session if the runner forwarded them. A
 	// selected project agent is already stored on creation and must not be
 	// overwritten by the reporter's generic CLI attribution.
@@ -1423,8 +1608,23 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		guardStatus = strings.TrimSpace(*body.IfStatus)
 	}
 	query += ` AND status=?`
+	// A running run with any supervisory-control lease may only transition to
+	// cancelled through the exact claimed-result transaction. This closes the
+	// generic PATCH side door while preserving legacy cancellation for runs
+	// which have never entered the control protocol.
+	if existing.Status == "running" && newStatus == "cancelled" && body.CancellationCause == nil {
+		query += ` AND NOT EXISTS (
+			SELECT 1 FROM control_capability_leases lease WHERE lease.agent_run_id=agent_runs.id
+		)`
+	}
 	args = append(args, id, guardStatus)
-	res, err := db.DB.Exec(query, args...)
+	tx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		jsonError(w, "update failed", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return
@@ -1433,6 +1633,41 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "run changed concurrently (claim lost)", http.StatusConflict)
 		return
 	}
+	if body.CancellationCause != nil {
+		if err := recordNonOperatorCancellationTx(r.Context(), tx, id, strings.TrimSpace(*body.CancellationCause)); err != nil {
+			jsonError(w, "cancellation fact failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	store := deliveryStoreForRequest(r)
+	effects := store.NewEffects()
+	if existing.DeliveryInstrumentationVersion == 1 && statusChanged && agentRunTelemetryIsTerminal(newStatus) {
+		if err := store.NormalizeRunTx(r.Context(), tx, effects, delivery.RunNormalization{RunID: id, Status: newStatus,
+			IdempotencyKey: fmt.Sprintf("run:%d:%s", id, newStatus)}); err != nil {
+			log.Printf("agent run delivery normalization: run=%d status=%s: %v", id, newStatus, err)
+			if errors.Is(err, delivery.ErrUnauthorized) {
+				jsonError(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			jsonError(w, "delivery normalization failed", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if err := store.RecordRunMutationChangeTx(r.Context(), tx, effects, id); err != nil {
+			log.Printf("agent run delivery mutation hint: run=%d: %v", id, err)
+			if errors.Is(err, delivery.ErrUnauthorized) {
+				jsonError(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			jsonError(w, "delivery mutation failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		jsonError(w, "update failed", http.StatusInternalServerError)
+		return
+	}
+	effects.Dispatch(r.Context())
 	run, err := getAgentRunByID(id)
 	if err != nil {
 		jsonError(w, "reload failed", http.StatusInternalServerError)
@@ -1455,7 +1690,7 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 // agentRunIsReportable reports whether a terminal status warrants a summary
 // comment (cancelled/declined runs are intentionally silent).
 func agentRunIsReportable(s string) bool {
-	return s == "deployed" || s == "tests_passed" || s == "tests_failed" || s == "failed"
+	return s == "completed" || s == "deployed" || s == "tests_passed" || s == "tests_failed" || s == "failed"
 }
 
 // postAgentRunReport writes an internal issue comment summarizing a finished
@@ -1497,6 +1732,12 @@ func agentRunReportBody(run *AgentRun) string {
 			target = ", deployed to " + run.DeployTarget
 		}
 		return fmt.Sprintf("🤖 Implemented%s%s%s.%s%s (run #%d on %s)", ver, at, target, tests, code, run.ID, on)
+	case "completed":
+		ver := ""
+		if run.Version != "" {
+			ver = " (v" + run.Version + ")"
+		}
+		return fmt.Sprintf("🤖 Implemented%s%s. Tests were not run.%s (run #%d on %s)", at, ver, code, run.ID, on)
 	case "tests_passed":
 		ver := ""
 		if run.Version != "" {

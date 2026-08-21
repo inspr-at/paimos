@@ -34,6 +34,22 @@ export class ApiError extends Error {
   }
 }
 
+export class StalePermissionsEpochError extends ApiError {
+  readonly isStalePermissionsEpoch = true as const;
+
+  constructor() {
+    super(0, "response carried a stale permissions epoch");
+  }
+}
+
+export function isStalePermissionsEpochError(value: unknown): value is StalePermissionsEpochError {
+  return value instanceof StalePermissionsEpochError || (
+    typeof value === "object"
+    && value !== null
+    && (value as { isStalePermissionsEpoch?: boolean }).isStalePermissionsEpoch === true
+  );
+}
+
 function apiErrorFromData(status: number, data: any, fallback: string): ApiError {
   const message =
     data && typeof data === "object"
@@ -64,9 +80,53 @@ export const sessionExpiresAt = ref<Date | null>(null);
 // Bumped server-side on every role / status / membership mutation;
 // the auth store watches this ref and triggers refreshMe() on a
 // change so the SPA's local access cache stays consistent without a
-// hard logout. -1 means "not yet observed" — distinct from a real 0
-// (the migration default).
-export const permissionsEpoch = ref<number>(-1);
+// hard logout. null means "not yet observed" — distinct from a real "0"
+// (the migration default). Canonical strings preserve the full int64 range.
+export const permissionsEpoch = ref<string | null>(null);
+export const permissionsEpochGeneration = ref(0);
+const MAX_PERMISSIONS_EPOCH = "9223372036854775807";
+
+export function capturePermissionsEpochGeneration(): number {
+  return permissionsEpochGeneration.value;
+}
+
+export function isPermissionsEpochGenerationCurrent(generation: number): boolean {
+  return generation === permissionsEpochGeneration.value;
+}
+
+/** Strict response-local parser. Epochs are monotonic only within one
+ * authenticated session; auth transitions reset the sentinel explicitly. */
+export function parsePermissionsEpochHeader(raw: string | null): string | null {
+  if (raw == null || !/^(?:0|[1-9]\d*)$/.test(raw)) return null;
+  if (
+    raw.length > MAX_PERMISSIONS_EPOCH.length ||
+    (raw.length === MAX_PERMISSIONS_EPOCH.length && raw > MAX_PERMISSIONS_EPOCH)
+  ) return null;
+  return raw;
+}
+
+export function comparePermissionsEpoch(left: string, right: string): number {
+  if (left.length !== right.length) return left.length < right.length ? -1 : 1;
+  return left === right ? 0 : left < right ? -1 : 1;
+}
+
+/** Observes an authenticated response without allowing an older in-flight
+ * response to regress the process-wide authority epoch. The parsed local
+ * value is returned so callers that commit authority-bearing payloads can
+ * bind the payload to its own response rather than the ambient ref. */
+export function observePermissionsEpochHeader(raw: string | null): string | null {
+  const parsed = parsePermissionsEpochHeader(raw);
+  if (parsed == null) return null;
+  if (permissionsEpoch.value == null || comparePermissionsEpoch(parsed, permissionsEpoch.value) > 0) {
+    permissionsEpoch.value = parsed;
+  }
+  return parsed;
+}
+
+export function resetPermissionsEpoch() {
+  permissionsEpoch.value = null;
+  permissionsEpochGeneration.value += 1;
+}
 
 // PAI-321: true while the current user has must_change_password set.
 // Flipped on by the global 403 interceptor when the backend returns
@@ -120,7 +180,9 @@ if (authChannel) {
   authChannel.addEventListener("message", (ev: MessageEvent<AuthBroadcast>) => {
     if (ev.data?.type === "session-expired") {
       sessionExpired.value = true;
+      resetPermissionsEpoch();
     } else if (ev.data?.type === "session-restored") {
+      resetPermissionsEpoch();
       sessionExpired.value = false;
       sessionReturnPath.value = null;
     }
@@ -134,6 +196,7 @@ function broadcastAuth(msg: AuthBroadcast) {
 // Public — call from auth store when login/TOTP succeeds, so sibling
 // tabs dismiss their session-expired modals.
 export function announceSessionRestored() {
+  resetPermissionsEpoch();
   sessionExpired.value = false;
   sessionReturnPath.value = null;
   broadcastAuth({ type: "session-restored" });
@@ -158,6 +221,7 @@ function markSessionExpired() {
       if (!path.startsWith("/login")) sessionReturnPath.value = path;
     }
     sessionExpired.value = true;
+    resetPermissionsEpoch();
     broadcastAuth({ type: "session-expired" });
   }
 }
@@ -251,6 +315,10 @@ export interface ApiMetaResponse<T> {
   data: T;
   etag: string | null;
   lastModified: string | null;
+  /** Exact epoch carried by this response, before monotonic observation. */
+  permissionsEpoch: string | null;
+  /** Session identity generation captured when this request started. */
+  permissionsEpochGeneration: number;
   status: number;
 }
 
@@ -276,6 +344,27 @@ function responseSnippet(raw: string): string {
   return singleLine.length > 180
     ? `${singleLine.slice(0, 177)}...`
     : singleLine;
+}
+
+const responseAuthority = new WeakMap<Response, {
+  generation: number;
+  permissionsEpoch: string | null;
+}>();
+
+function responseEpochGeneration(res: Response): number {
+  return responseAuthority.get(res)?.generation ?? -1;
+}
+
+function requireCurrentResponseEpochGeneration(res: Response) {
+  const authority = responseAuthority.get(res);
+  if (!authority || !isPermissionsEpochGenerationCurrent(authority.generation)) {
+    throw new ApiError(0, "request superseded by an authentication change");
+  }
+  if (
+    authority.permissionsEpoch != null
+    && permissionsEpoch.value != null
+    && comparePermissionsEpoch(authority.permissionsEpoch, permissionsEpoch.value) < 0
+  ) throw new StalePermissionsEpochError();
 }
 
 async function readJSON<T>(res: Response): Promise<T> {
@@ -305,6 +394,7 @@ async function fetchResponse(
   body?: unknown,
   opts?: RequestOptions,
 ): Promise<Response> {
+  const epochGeneration = capturePermissionsEpochGeneration();
   const ctrl = new AbortController();
   const timeoutMs = opts?.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -330,6 +420,9 @@ async function fetchResponse(
       credentials: "same-origin",
       signal: ctrl.signal,
     });
+    if (!isPermissionsEpochGenerationCurrent(epochGeneration)) {
+      throw new ApiError(0, "request superseded by an authentication change");
+    }
     // PAI-322: surface the server-side session expiry so the toast
     // component can show a low-key warning as the absolute cap
     // approaches. Always present on authed responses; absent on
@@ -343,11 +436,19 @@ async function fetchResponse(
     // watches this ref and refetches /auth/me on a change so the
     // local access cache picks up admin-driven role / membership
     // changes within one round-trip.
-    const epochHdr = res.headers.get("X-Permissions-Epoch");
-    if (epochHdr) {
-      const n = Number(epochHdr);
-      if (Number.isFinite(n)) permissionsEpoch.value = n;
+    const rawResponseEpoch = res.headers.get("X-Permissions-Epoch");
+    const responseEpoch = parsePermissionsEpochHeader(rawResponseEpoch);
+    if (rawResponseEpoch != null && responseEpoch == null) {
+      throw new ApiError(0, "response carried an invalid permissions epoch");
     }
+    if (
+      responseEpoch != null
+      && permissionsEpoch.value != null
+      && comparePermissionsEpoch(responseEpoch, permissionsEpoch.value) < 0
+    ) {
+      throw new StalePermissionsEpochError();
+    }
+    observePermissionsEpochHeader(res.headers.get("X-Permissions-Epoch"));
     if (res.status === 401) {
       // Auth-endpoint 401s (wrong password, bad reset token, first
       // pristine /auth/me) bubble as ApiError so the login form can
@@ -360,6 +461,10 @@ async function fetchResponse(
       markSessionExpired();
       throw new SessionExpiredError();
     }
+    responseAuthority.set(res, {
+      generation: epochGeneration,
+      permissionsEpoch: responseEpoch,
+    });
     return res;
   } catch (e) {
     if ((e as Error).name === "AbortError") {
@@ -379,9 +484,13 @@ async function request<T>(
 ): Promise<T> {
   const res = await fetchResponse(method, path, body, opts);
 
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) {
+    requireCurrentResponseEpochGeneration(res);
+    return undefined as T;
+  }
 
   const data = await readJSON<any>(res);
+  requireCurrentResponseEpochGeneration(res);
   if (!res.ok) {
     // PAI-321/485: a 403 Problem Details body with
     // code="must_change_password" is the backend's signal that the
@@ -407,28 +516,39 @@ async function requestWithMeta<T>(
   opts?: RequestOptions,
 ): Promise<ApiMetaResponse<T>> {
   const res = await fetchResponse(method, path, body, opts);
+  const responsePermissionsEpochGeneration = responseEpochGeneration(res);
   const etag = res.headers.get("ETag");
   const lastModified = res.headers.get("Last-Modified");
+  const responsePermissionsEpoch = parsePermissionsEpochHeader(
+    res.headers.get("X-Permissions-Epoch"),
+  );
 
   if (res.status === 304) {
+    requireCurrentResponseEpochGeneration(res);
     return {
       data: null as T,
       etag,
       lastModified,
+      permissionsEpoch: responsePermissionsEpoch,
+      permissionsEpochGeneration: responsePermissionsEpochGeneration,
       status: res.status,
     };
   }
 
   if (res.status === 204) {
+    requireCurrentResponseEpochGeneration(res);
     return {
       data: undefined as T,
       etag,
       lastModified,
+      permissionsEpoch: responsePermissionsEpoch,
+      permissionsEpochGeneration: responsePermissionsEpochGeneration,
       status: res.status,
     };
   }
 
   const data = await readJSON<any>(res);
+  requireCurrentResponseEpochGeneration(res);
   if (!res.ok) {
     throw apiErrorFromData(res.status, data, "request failed");
   }
@@ -436,6 +556,8 @@ async function requestWithMeta<T>(
     data: data as T,
     etag,
     lastModified,
+    permissionsEpoch: responsePermissionsEpoch,
+    permissionsEpochGeneration: responsePermissionsEpochGeneration,
     status: res.status,
   };
 }
@@ -445,6 +567,7 @@ async function upload<T>(
   formData: FormData,
   onProgress?: (pct: number) => void,
 ): Promise<T> {
+  const epochGeneration = capturePermissionsEpochGeneration();
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${BASE}${path}`);
@@ -460,6 +583,10 @@ async function upload<T>(
       });
     }
     xhr.onload = () => {
+      if (!isPermissionsEpochGenerationCurrent(epochGeneration)) {
+        reject(new ApiError(0, "request superseded by an authentication change"));
+        return;
+      }
       // PAI-322: mirror the fetch path for header capture + error type.
       const expHdr = xhr.getResponseHeader("X-Session-Expires-At");
       if (expHdr) {
@@ -467,11 +594,21 @@ async function upload<T>(
         if (!Number.isNaN(t.valueOf())) sessionExpiresAt.value = t;
       }
       // PAI-320: mirror epoch capture too.
-      const epochHdr = xhr.getResponseHeader("X-Permissions-Epoch");
-      if (epochHdr) {
-        const n = Number(epochHdr);
-        if (Number.isFinite(n)) permissionsEpoch.value = n;
+      const rawResponseEpoch = xhr.getResponseHeader("X-Permissions-Epoch");
+      const responseEpoch = parsePermissionsEpochHeader(rawResponseEpoch);
+      if (rawResponseEpoch != null && responseEpoch == null) {
+        reject(new ApiError(0, "response carried an invalid permissions epoch"));
+        return;
       }
+      if (
+        responseEpoch != null
+        && permissionsEpoch.value != null
+        && comparePermissionsEpoch(responseEpoch, permissionsEpoch.value) < 0
+      ) {
+        reject(new StalePermissionsEpochError());
+        return;
+      }
+      observePermissionsEpochHeader(xhr.getResponseHeader("X-Permissions-Epoch"));
       if (xhr.status === 401) {
         if (isAuthEndpoint(path)) {
           reject(new ApiError(401, "unauthorized"));

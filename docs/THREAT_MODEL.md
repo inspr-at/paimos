@@ -186,10 +186,21 @@ Defences:
   (default `claude`), never anything the server supplies.
 - **One job at a time.** A busy runner refuses new jobs rather than spawning
   concurrent agents in the same checkout.
+- **Bounded provider supervision.** Built-in Claude runs use bounded structured
+  JSON-line parsing and generic allowlisted progress. Prompts, source, tool
+  arguments, command output, environment values, and provider error bodies are
+  never forwarded as telemetry. Custom `--exec` streams remain raw.
+- **Independent liveness and owned termination.** Supervisor heartbeats are
+  timer-driven rather than model-driven. Silence, execution timeout, and
+  cancellation terminate the owned process group before the outcome is chosen,
+  so a descendant cannot outlive the run or race into success.
+  Unix-family runners enforce this with a process group. Other Go targets have
+  only direct-child termination and must use wrappers that do not detach
+  descendants.
 - **Report-back only by default; deploy is triple-gated.** The runner never
   deploys unless the operator passed BOTH `--allow-deploy` and a `--deploy-exec`
   command AND the run carries a `deploy_target`. Absent any of the three it can
-  only move a run to `tests_passed` / `failed`.
+  only report `completed`, a test-evidenced result, or `failed`.
 - **Authorized + audited.** `POST /implement` is project-editor gated; run reads
   and updates are requester, project-editor, or admin only. Every request is
   recorded in the HTTP-level session audit (`session_activity`, §4.4). Note: the
@@ -326,6 +337,9 @@ PAI-110 shipped the **INV-FILES-03** application-layer fix end-to-end. Uploads n
 | **INV-RUNNER-03** | Deploy is off by default — it requires `--allow-deploy` AND `--deploy-exec` AND a run-level `deploy_target`. | `cmd_run_agent.go:agentRunner.handle` | `cmd_run_agent_test.go` |
 | **INV-RUNNER-04** | `POST /implement` is project-editor gated; run reads/updates are requester or admin only. | `handlers/agent_runs.go:canManageAgentRun` + `main.go` routes | `agent_runs_test.go` |
 | **INV-RUNNER-05** | Draft Implement-this providers cannot use local runner, repo mutation, test, or deploy paths, and local endpoint labels do not display credentials. | `handlers/agent_runs.go:implementDraftIssue`, `handlers/ai_execution_options.go:safeEndpointLabel` | `agent_runs_test.go` |
+| **INV-RUNNER-06** | Structured provider streams are size/count bounded and translate only generic allowlisted phases; raw prompt/tool/output/environment data never enters runner telemetry. | `cmd/paimos/runner_supervisor.go:claudeStreamAdapter` | `cmd_run_agent_test.go` |
+| **INV-RUNNER-07** | Liveness is supervisor-owned, and timeout/cancellation terminate the owned process group before reporting one typed outcome. | `cmd/paimos/runner_supervisor.go:superviseAgentProcess` | `cmd_run_agent_test.go` |
+| **INV-RUNNER-08** | `tests_passed` requires a successful configured `--test-exec`; a normal coding exit without it reports `completed`. | `cmd/paimos/cmd_run_agent.go:completedRunStatus` | `cmd_run_agent_test.go` |
 
 ### 4.9 · Voice-intake workbench (PAI-703)
 
@@ -337,6 +351,19 @@ PAI-110 shipped the **INV-FILES-03** application-layer fix end-to-end. Uploads n
 | **INV-INTAKE-04** | Every orchestrator provider call passes the daily cap and the per-session budget and emits exactly one audit line plus one `ai_calls` row. | `handlers/intake_orchestrator.go` (all three stages) | `intake_orchestrator_internal_test.go` |
 | **INV-INTAKE-05** | Issue creation from a session is idempotent: a replayed Idempotency-Key or an already-completed session never files a second issue. | `handlers/intake_create_issue.go:CreateIntakeIssue` + `IdempotencyMiddleware` | `intake_create_issue_test.go:TestIntakeCreateIssue_HappyPathAndIdempotency` |
 | **INV-INTAKE-06** | Spoken audio is transcribed and dropped: audio bytes never reach disk, the DB, logs, or `ai_calls`; the STT key is encrypted at rest and never sent to the browser. | `handlers/intake_audio.go:TranscribeIntakeAudio`, `handlers/voice_settings.go` | `intake_audio_test.go` (metadata-only paper trail; key never in responses) |
+
+### 4.10 · Agent Mode delivery read surface (PAI-804)
+
+| ID | Statement | Code path | Verification |
+|---|---|---|---|
+| **INV-AGENTMODE-01** | Agent Mode is authenticated and internal-only. External users, missing projects/deliveries, and inaccessible projects/deliveries share the canonical `404` response; concealment runs before the forced-password gate. Every response is `private, no-store`; SSE also uses `no-transform`. | `auth/agent_mode.go`, `httpcontract/agent_mode.go`, `handlers/agent_mode*.go`, route order in `main.go` | `auth/agent_mode_test.go`, `handlers/agent_mode_test.go` |
+| **INV-AGENTMODE-02** | Snapshot and stream authorization derives from the current live issue project plus the current user/permission epoch. Historical requester, run, project-hint, and revoked-audience values never grant current access; every stream drain reauthorizes. | `agentmode/reader.go`, `agentmode/stream.go`, `auth/access.go` | `agentmode/reader_test.go`, `agentmode/stream_test.go` |
+| **INV-AGENTMODE-03** | The schema-v1 projection is an explicit allowlist. It never serializes reporter/run-link identities, provider/adapter metadata, evidence references, prompts, logs, output, environment, or secret-like text. Telemetry ingestion and SQLite guards reject the same secret corpus, while retained pre-upgrade unsafe facts and blockers fail closed before DTO/trust influence. | `agentmode/trust.go`, `safetext/secret.go`, `delivery/store.go`, M145 guards in `db/db.go` | `agentmode/reader_frontier_test.go`, `agentmode/contract_fixtures_test.go`, `db/agent_mode_schema_test.go`, `delivery/delivery_test.go` |
+| **INV-AGENTMODE-04** | The 211-character cursor is encrypted, canonically encoded, expiring, and bound to user, permission epoch, route audience, and result filters. `Last-Event-ID` is authoritative whenever present. Tamper, expiry, revocation, wrong scope, retention gaps, and rollback/ahead-of-tail claims produce the same identity-free reset and close. | `agentmode/cursor.go`, `agentmode/filters.go`, `handlers/agent_mode_events.go` | `agentmode/cursor_test.go`, `handlers/agent_mode_test.go` |
+| **INV-AGENTMODE-05** | SSE is an invalidation channel, not row truth. Durable same-transaction change facts and per-delivery sequences are authoritative; process wakeups occur after commit and polling covers lost/coalesced wakes and restart. Unauthorized facts advance only an opaque checkpoint, while removal/move-away never exposes the hidden identity. | M145 triggers in `db/db.go`, `agentmode/stream.go`, delivery effect dispatch | `db/agent_mode_schema_test.go`, `agentmode/stream_test.go` |
+| **INV-AGENTMODE-06** | A storage/lineage invariant detected before response headers returns one private problem+json `500`; if discovered after an SSE session is established, the only safe recovery is one identity-free reset and close. Hidden-project corruption is not an oracle. | `agentmode/reader.go`, `agentmode/stream.go`, `handlers/agent_mode*.go` | `agentmode/reader_test.go`, `handlers/agent_mode_test.go` |
+| **INV-AGENTMODE-07** | Agent Mode STT is ephemeral and Agent Mode TTS is template-only. Every voice response and auth/CSRF failure is private/no-store; external callers receive the canonical 404 before CSRF. TTS authorizes the primary plus all active candidates in one coherent bounded Reader snapshot before configuration, budget, or provider side channels, and narrates only closed structured facts with unknown-confidence estimates withheld. Paid-call audit is metadata-only and survives request cancellation. | `handlers/agent_mode_voice.go`, `handlers/voice_provider.go`, `handlers/voice_limits.go`, Agent Mode route order in `main.go` | `handlers/agent_mode_voice_test.go`, `handlers/voice_provider_internal_test.go`, `agentmode/reader_test.go` |
+| **INV-AGENTMODE-08** | Confirmed voice notes are internal and exact-once per authenticated author/client identity. A database partial unique index makes concurrent retries atomic; mismatch is 409, only the inserted row emits a mutation, keyed rows cannot become external, and the generic response cache never stores their body. | M146 in `db/db.go`, `handlers/comments.go`, `handlers/idempotency.go`, `handlers/mutation_log.go` | `db/comment_idempotency_schema_test.go`, `handlers/comments_client_request_test.go` |
 
 ---
 

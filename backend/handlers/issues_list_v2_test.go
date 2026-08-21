@@ -159,17 +159,19 @@ func TestIssueListV2GlobalSortValidationAndNegatedProjectFilter(t *testing.T) {
 }
 
 func TestIssueListV2AIWorkStatusFilterAndSort(t *testing.T) {
-	ts := newTestServer(t)
+	ts := newDirectTelemetryServer(t)
 	projectID := seedBatchProject(t, "PAI", "PAI")
 	seedListV2Issue(t, projectID, 1, "No run", "backlog")
 	queued := seedListV2Issue(t, projectID, 2, "Queued run", "backlog")
 	deployed := seedListV2Issue(t, projectID, 3, "Deployed latest", "backlog")
 	failed := seedListV2Issue(t, projectID, 4, "Failed run", "backlog")
+	completed := seedListV2Issue(t, projectID, 5, "Implemented run", "backlog")
 
 	seedListV2AgentRun(t, projectID, queued, "queued")
 	seedListV2AgentRun(t, projectID, deployed, "failed")
 	seedListV2AgentRun(t, projectID, deployed, "deployed")
 	seedListV2AgentRun(t, projectID, failed, "failed")
+	seedListV2AgentRun(t, projectID, completed, "completed")
 
 	titlesFor := func(path string) []string {
 		t.Helper()
@@ -196,16 +198,19 @@ func TestIssueListV2AIWorkStatusFilterAndSort(t *testing.T) {
 	if got := titlesFor(base + "&ai_status=deployed"); len(got) != 1 || got[0] != "Deployed latest" {
 		t.Fatalf("ai_status=deployed titles=%v, want Deployed latest", got)
 	}
+	if got := titlesFor(base + "&ai_status=completed"); len(got) != 1 || got[0] != "Implemented run" {
+		t.Fatalf("ai_status=completed titles=%v, want Implemented run", got)
+	}
 	if got := titlesFor(base + "&ai_work_status=queued"); len(got) != 1 || got[0] != "Queued run" {
 		t.Fatalf("ai_work_status alias titles=%v, want Queued run", got)
 	}
 	if got := titlesFor(base + "&ai_status=none"); len(got) != 1 || got[0] != "No run" {
 		t.Fatalf("ai_status=none titles=%v, want No run", got)
 	}
-	if got := titlesFor(base + "&ai_status=!failed&sort=ai_status&order=asc"); strings.Join(got, ",") != "No run,Queued run,Deployed latest" {
+	if got := titlesFor(base + "&ai_status=!failed&sort=ai_status&order=asc"); strings.Join(got, ",") != "No run,Queued run,Implemented run,Deployed latest" {
 		t.Fatalf("ai_status=!failed sorted titles=%v", got)
 	}
-	if got := titlesFor(base + "&sort=ai_status&order=asc"); strings.Join(got, ",") != "No run,Queued run,Deployed latest,Failed run" {
+	if got := titlesFor(base + "&sort=ai_status&order=asc"); strings.Join(got, ",") != "No run,Queued run,Implemented run,Deployed latest,Failed run" {
 		t.Fatalf("sort=ai_status titles=%v", got)
 	}
 }

@@ -32,3 +32,25 @@ a73fdaccfb1161b26047de9e7846a8038b9d46cf:backend/cmd/paimos/cmd_serve_test.go:ge
 
 # plaintext := []byte(...) input for a vault round-trip test
 fff415ceacc12d3e6490c78426db1c3803f6656a:backend/secretvault/vault_test.go:generic-api-key:87
+
+# PAI-799/802/804/809 delivery privacy negative fixtures (2026-08-21).
+# These literals are intentionally secret-shaped test canaries. The tests feed
+# them into telemetry, delivery evidence, reporter IDs, and private route
+# parameters and assert rejection plus zero persistence/log/audit leakage.
+# Fingerprints remain exact to commit + file + rule + line; no test path or
+# upstream detector is exempted.
+
+# PAI-802 persisted-value rejection and complete privacy corpus
+2b9275441c208be5a523b884f8665eff7ddddd6f:backend/db/delivery_schema_test.go:slack-legacy-workspace-token:234
+2b9275441c208be5a523b884f8665eff7ddddd6f:backend/db/delivery_schema_test.go:slack-legacy-workspace-token:235
+2b9275441c208be5a523b884f8665eff7ddddd6f:backend/delivery/corrections_test.go:generic-api-key:600
+2b9275441c208be5a523b884f8665eff7ddddd6f:backend/delivery/corrections_test.go:slack-legacy-workspace-token:661
+2b9275441c208be5a523b884f8665eff7ddddd6f:backend/delivery/corrections_test.go:slack-legacy-workspace-token:662
+
+# PAI-804 telemetry and delivery secret-corpus rejection
+4a382a3622f534507481b30ad5aa641f9b9b0ea6:backend/delivery/corrections_test.go:generic-api-key:656
+4a382a3622f534507481b30ad5aa641f9b9b0ea6:backend/handlers/agent_run_telemetry_test.go:slack-legacy-workspace-token:264
+4a382a3622f534507481b30ad5aa641f9b9b0ea6:backend/handlers/agent_run_telemetry_test.go:slack-legacy-workspace-token:265
+
+# PAI-809 private control-route path/logging canary
+356eca78330b1daefc321714609028963d3d6234:backend/handlers/control_privacy_test.go:generic-api-key:26

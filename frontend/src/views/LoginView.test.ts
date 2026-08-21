@@ -32,12 +32,28 @@ vi.mock("@/router", () => ({
 
 vi.mock("@/api/client", async () => {
   const { ref } = await import("vue");
+  const permissionsEpoch = ref<string | null>(null);
+  const permissionsEpochGeneration = ref(0);
+  const sessionExpired = ref(false);
   return {
-    api: { get: apiGet, post: apiPost },
+    api: { get: apiGet, getWithMeta: vi.fn(), post: apiPost },
     ApiError: class ApiError extends Error {},
     // Consumed by the auth store at setup time.
-    permissionsEpoch: ref(-1),
-    announceSessionRestored: vi.fn(),
+    permissionsEpoch,
+    permissionsEpochGeneration,
+    sessionExpired,
+    comparePermissionsEpoch: (left: string, right: string) => left.length === right.length
+      ? (left === right ? 0 : left < right ? -1 : 1)
+      : left.length < right.length ? -1 : 1,
+    resetPermissionsEpoch: () => {
+      permissionsEpoch.value = null;
+      permissionsEpochGeneration.value += 1;
+    },
+    announceSessionRestored: vi.fn(() => {
+      permissionsEpoch.value = null;
+      permissionsEpochGeneration.value += 1;
+      sessionExpired.value = false;
+    }),
   };
 });
 

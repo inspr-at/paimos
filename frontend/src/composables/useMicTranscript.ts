@@ -53,6 +53,7 @@ let chunks: Blob[] = [];
 let gateTimer = 0;
 let generation = 0; // bumped on every cleanup — stale callbacks self-discard
 let onUtterance: ((blob: Blob) => Promise<void>) | null = null;
+let trackEndHandlers: Array<{ track: MediaStreamTrack; handler: () => void }> = [];
 
 export function micSupported(): boolean {
   return (
@@ -77,96 +78,126 @@ function onVisibilityChange() {
 
 function cleanup() {
   generation++; // invalidate every in-flight callback of the old loop
+  // A stopped singleton must not retain the disposed Voice instance and its
+  // authorized context through the last callback closure.
+  onUtterance = null;
   clearInterval(gateTimer);
   gateTimer = 0;
   document.removeEventListener("visibilitychange", onVisibilityChange);
   try {
+    if (recorder) recorder.onerror = null;
     if (recorder && recorder.state !== "inactive") recorder.stop();
   } catch {
     /* already stopped */
   }
   recorder = null;
   chunks = [];
-  stream?.getTracks().forEach((t) => t.stop());
+  for (const { track, handler } of trackEndHandlers) track.removeEventListener?.("ended", handler);
+  trackEndHandlers = [];
+  stream?.getTracks().forEach((track) => {
+    try {
+      track.stop();
+    } catch {
+      /* the capture is already unusable */
+    }
+  });
   stream = null;
-  void audioCtx?.close().catch(() => {});
+  try {
+    void audioCtx?.close().catch(() => {});
+  } catch {
+    /* a partially constructed context may reject close synchronously */
+  }
   audioCtx = null;
   analyser = null;
   level.value = 0;
 }
 
+function failCapture(expectedGeneration: number, message: string) {
+  if (expectedGeneration !== generation) return;
+  cleanup();
+  errorMessage.value = message;
+  state.value = "error";
+}
+
 /** One utterance cycle: record until the silence gate closes. */
-function armRecorder() {
-  if (!stream) return;
+function armRecorder(): boolean {
+  if (!stream) return false;
   const myGen = generation;
   chunks = [];
-  const rec = new MediaRecorder(stream);
-  recorder = rec;
-  rec.ondataavailable = (e) => {
-    if (myGen === generation && e.data.size > 0) chunks.push(e.data);
-  };
-  rec.onstop = () => {
-    // A stopped recorder from a previous generation must never act:
-    // its stream is dead and re-arming would fork a zombie loop.
-    if (myGen !== generation) return;
-    const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
-    chunks = [];
-    if (blob.size >= MIN_UTTERANCE_BYTES && onUtterance) {
-      state.value = "transcribing";
-      void onUtterance(blob)
-        .catch(() => {
-          /* surfaced via the session error ref by the caller */
-        })
-        .finally(() => {
-          if (myGen === generation) {
-            state.value = "listening";
-            armRecorder();
-          }
-        });
-    } else {
-      armRecorder(); // silent/too short — recycle and keep listening
-    }
-  };
-  rec.start(200); // 200 ms timeslice, per the amt-start tuning
+  try {
+    const rec = new MediaRecorder(stream);
+    recorder = rec;
+    rec.onerror = () => failCapture(myGen, "Microphone recording failed.");
+    rec.ondataavailable = (e) => {
+      if (myGen === generation && e.data.size > 0) chunks.push(e.data);
+    };
+    rec.onstop = () => {
+      // A stopped recorder from a previous generation must never act:
+      // its stream is dead and re-arming would fork a zombie loop.
+      if (myGen !== generation) return;
+      const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+      chunks = [];
+      if (blob.size >= MIN_UTTERANCE_BYTES && onUtterance) {
+        state.value = "transcribing";
+        void onUtterance(blob)
+          .catch(() => {
+            /* surfaced via the session error ref by the caller */
+          })
+          .finally(() => {
+            if (myGen === generation) {
+              state.value = "listening";
+              armRecorder();
+            }
+          });
+      } else {
+        armRecorder(); // silent/too short — recycle and keep listening
+      }
+    };
+    rec.start(200); // 200 ms timeslice, per the amt-start tuning
 
-  // RMS silence gate — interval-based (see header).
-  const data = new Uint8Array(analyser!.fftSize);
-  let speechHeard = false;
-  let lastSpeechAt = performance.now();
-  const startedAt = performance.now();
-  clearInterval(gateTimer);
-  gateTimer = window.setInterval(() => {
-    if (myGen !== generation || !analyser || recorder !== rec) {
-      clearInterval(gateTimer);
-      return;
-    }
-    analyser.getByteTimeDomainData(data);
-    let sum = 0;
-    for (let i = 0; i < data.length; i++) {
-      const v = (data[i] - 128) / 128;
-      sum += v * v;
-    }
-    const rms = Math.sqrt(sum / data.length);
-    level.value = level.value + (Math.min(1, rms * 6) - level.value) * 0.25;
-    const now = performance.now();
-    if (rms > RMS_SPEECH_THRESHOLD) {
-      speechHeard = true;
-      lastSpeechAt = now;
-    }
-    if (speechHeard && now - lastSpeechAt > TRAILING_SILENCE_MS) {
-      clearInterval(gateTimer);
-      rec.stop(); // utterance complete → onstop ships it
-      return;
-    }
-    if (!speechHeard && now - startedAt > SILENT_RECYCLE_MS) {
-      // Nothing said for a while: recycle the recorder so the silent
-      // recording doesn't grow unbounded — but KEEP listening. The mic
-      // only stops when the user says so (or the page is left).
-      clearInterval(gateTimer);
-      rec.stop(); // blob is silent → onstop discards it and re-arms
-      return;
-    }
-  }, 40);
+    // RMS silence gate — interval-based (see header).
+    const data = new Uint8Array(analyser!.fftSize);
+    let speechHeard = false;
+    let lastSpeechAt = performance.now();
+    const startedAt = performance.now();
+    clearInterval(gateTimer);
+    gateTimer = window.setInterval(() => {
+      if (myGen !== generation || !analyser || recorder !== rec) {
+        clearInterval(gateTimer);
+        return;
+      }
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      level.value = level.value + (Math.min(1, rms * 6) - level.value) * 0.25;
+      const now = performance.now();
+      if (rms > RMS_SPEECH_THRESHOLD) {
+        speechHeard = true;
+        lastSpeechAt = now;
+      }
+      if (speechHeard && now - lastSpeechAt > TRAILING_SILENCE_MS) {
+        clearInterval(gateTimer);
+        rec.stop(); // utterance complete → onstop ships it
+        return;
+      }
+      if (!speechHeard && now - startedAt > SILENT_RECYCLE_MS) {
+        // Nothing said for a while: recycle the recorder so the silent
+        // recording doesn't grow unbounded — but KEEP listening. The mic
+        // only stops when the user says so (or the page is left).
+        clearInterval(gateTimer);
+        rec.stop(); // blob is silent → onstop discards it and re-arms
+        return;
+      }
+    }, 40);
+    return true;
+  } catch {
+    failCapture(myGen, "Microphone recording failed.");
+    return false;
+  }
 }
 
 /** Start continuous listening; utterances flow to `handleUtterance`. */
@@ -190,6 +221,7 @@ async function start(handleUtterance: (blob: Blob) => Promise<void>): Promise<bo
     });
   } catch {
     if (myGeneration !== generation) return false;
+    cleanup();
     state.value = "error";
     errorMessage.value = "Microphone unavailable or permission denied — you can type instead.";
     return false;
@@ -199,14 +231,23 @@ async function start(handleUtterance: (blob: Blob) => Promise<void>): Promise<bo
     return false;
   }
   stream = acquiredStream;
-  audioCtx = new AudioContext();
-  analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 512;
-  audioCtx.createMediaStreamSource(stream).connect(analyser);
-  document.addEventListener("visibilitychange", onVisibilityChange);
-  state.value = "listening";
-  armRecorder();
-  return true;
+  try {
+    trackEndHandlers = acquiredStream.getTracks().map((track) => {
+      const handler = () => failCapture(myGeneration, "Microphone stream ended.");
+      track.addEventListener?.("ended", handler, { once: true });
+      return { track, handler };
+    });
+    audioCtx = new AudioContext();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    state.value = "listening";
+    return armRecorder();
+  } catch {
+    failCapture(myGeneration, "Microphone initialization failed.");
+    return false;
+  }
 }
 
 function stop() {

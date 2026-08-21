@@ -113,6 +113,7 @@ const isFormValid = computed(() => nameError.value === '')
 const STATUS_LABEL: Record<string, string> = {
   queued: 'Queued',
   running: 'Running',
+  completed: 'Implemented',
   tests_passed: 'Tests passed',
   tests_failed: 'Tests failed',
   deployed: 'Deployed',
@@ -1023,6 +1024,7 @@ onMounted(load)
 .pa-run-status--running {
   color: #175cd3;
 }
+.pa-run-status--completed,
 .pa-run-status--tests_passed,
 .pa-run-status--deployed {
   color: #067647;

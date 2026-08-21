@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/httpcontract"
 	"github.com/inspr-at/paimos/backend/models"
 )
 
@@ -136,6 +137,16 @@ func shouldAuditImpersonatedRequest(r *http.Request) bool {
 }
 
 func requestIDForImpersonationAudit(r *http.Request, h http.Header) string {
+	if httpcontract.IsControlRequest(r) {
+		// RequestIDMiddleware replaces caller ids for classified control
+		// traffic and places the server id on the response. Never fall back
+		// to a request header here: that would persist the very canary the
+		// privacy boundary intentionally ignored.
+		if h == nil {
+			return ""
+		}
+		return safeControlAuditToken(h.Get("X-PAIMOS-Request-Id"))
+	}
 	for _, key := range []string{"X-PAIMOS-Request-Id", "X-PAIMOS-AI-Request-Id", "X-Request-Id"} {
 		if v := strings.TrimSpace(r.Header.Get(key)); v != "" {
 			return v
@@ -147,6 +158,24 @@ func requestIDForImpersonationAudit(r *http.Request, h http.Header) string {
 		}
 	}
 	return ""
+}
+
+func safeControlAuditToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 64 {
+		return ""
+	}
+	for _, char := range value {
+		switch {
+		case char >= '0' && char <= '9',
+			char >= 'a' && char <= 'z',
+			char >= 'A' && char <= 'Z',
+			char == '-', char == '_', char == '.', char == ':':
+		default:
+			return ""
+		}
+	}
+	return value
 }
 
 func recordImpersonatedActionAudit(r *http.Request, rec *sessionRecord, status int, requestID string) {
@@ -168,6 +197,10 @@ func recordImpersonatedActionAudit(r *http.Request, rec *sessionRecord, status i
 		return
 	}
 	endpoint := strings.TrimSpace(r.Method + " " + r.URL.Path)
+	if class, ok := httpcontract.ClassifyControlRequest(r); ok {
+		endpoint = r.Method + " " + string(class)
+		requestID = safeControlAuditToken(requestID)
+	}
 	if _, err := db.DB.ExecContext(r.Context(), `
 		INSERT INTO super_admin_audit(actor_user_id, target_user_id, capability, endpoint, request_id, details_json)
 		VALUES(?,?,?,?,?,?)

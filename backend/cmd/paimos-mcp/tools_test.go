@@ -77,6 +77,69 @@ func TestToolsCallRoundTripRetrieveAndBlastRadius(t *testing.T) {
 	}
 }
 
+func TestToolReportProgressForwardsOnlyAllowlistedRunFacts(t *testing.T) {
+	var received map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/runs/799/telemetry", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"accepted":true,"duplicate":false}`))
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	srv := &Server{client: testMCPClient(t, ts.URL), logger: func(string, ...any) {}}
+
+	args := map[string]any{
+		"run_id": float64(799), "sequence": float64(4),
+		"correlation_id": "claude-session-abc", "provider": "anthropic", "adapter": "claude-code",
+		"agent_reported_at": "2026-08-20T10:00:00Z", "kind": "progress",
+		"phase": "testing", "progress_percent": 80.0, "estimate_revision": float64(3),
+		"estimate_source": "adapter", "estimate_confidence": .8,
+		"activity":       strings.Repeat("é", 140),
+		"estimate_basis": strings.Repeat("é", 120),
+	}
+	withPayload := make(map[string]any, len(args)+1)
+	for key, value := range args {
+		withPayload[key] = value
+	}
+	withPayload["provider_payload"] = map[string]any{"prompt": "must not pass through"}
+	if _, err := srv.toolReportProgress(withPayload); err == nil || !strings.Contains(err.Error(), "unknown telemetry field") {
+		t.Fatalf("unknown provider payload error=%v", err)
+	}
+	for _, tt := range []struct {
+		field string
+		value string
+		want  string
+	}{
+		{field: "activity", value: strings.Repeat("é", 141), want: "280 UTF-8 bytes"},
+		{field: "estimate_basis", value: strings.Repeat("é", 121), want: "240 UTF-8 bytes"},
+	} {
+		over := make(map[string]any, len(args))
+		for key, value := range args {
+			over[key] = value
+		}
+		over[tt.field] = tt.value
+		if _, err := srv.toolReportProgress(over); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("%s over-bound error=%v, want %q", tt.field, err, tt.want)
+		}
+	}
+
+	text, err := srv.toolReportProgress(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, `"accepted":true`) {
+		t.Fatalf("result=%s", text)
+	}
+	if received["provider"] != "anthropic" || received["adapter"] != "claude-code" || received["sequence"] != float64(4) {
+		t.Fatalf("received=%+v", received)
+	}
+}
+
 // TestToolsCallAgentCRUD exercises the PAI-506 project-agent tools end
 // to end against a stub server: create → get (.json artifact, peeled) →
 // list → delete. Mirrors the issue/retrieve round-trip pattern above.

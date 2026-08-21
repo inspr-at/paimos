@@ -35,6 +35,8 @@ import (
 //
 // The version doubles as cache key: clients refetch when the value changes.
 //
+// 2.2.0 (PAI-809): added the agent-controls:write and agent-controls:runner
+// scopes for the supervised Agent Mode control surface.
 // 2.1.0 (PAI-754): added the project_status enum, bound project.status to it,
 // and documented the active/frozen/archived/deleted lifecycle contract.
 // 2.0.0 (PAI-599 599-B, BREAKING): the issue payload now returns `cost_unit`
@@ -77,7 +79,7 @@ import (
 // discover which api-key scopes unlock which endpoints. The scope list
 // is populated at init() from auth.ScopeCatalog() — a single source of
 // truth shared with the runtime check.
-const SchemaVersion = "2.1.0"
+const SchemaVersion = "2.2.0"
 
 // SchemaPayload is the shape returned by GET /api/schema. See PAI-87.
 type SchemaPayload struct {

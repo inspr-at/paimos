@@ -241,6 +241,14 @@ curl -s -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/js
   -d '{"body":"## Build Report\n\nAll tests pass\n- Backend: 42 tests, 0 failures\n- Frontend: typecheck clean"}'
 ```
 
+For retry-safe internal notes, add `visibility:"internal"` and a bounded
+`client_request_id` (`A-Z`, `a-z`, digits, `.`, `_`, `:`, `-`; at most 128
+bytes). The identity is scoped to the authenticated author. An exact retry
+returns the original comment; reuse for another issue or body returns `409`.
+Keyed notes bypass the generic response cache, so it never duplicates the
+confirmed note response in `idempotency_keys`. A keyed comment can never be
+external.
+
 ### 4. Time tracking
 
 Agents should log time against the issues they work on so humans can
@@ -313,17 +321,20 @@ auto-deploy.** Deploy stays a manual step until the deploy-gating phase.
 ### Run lifecycle
 
 ```
-queued → running → tests_passed | tests_failed → deployed
-                                                ↘ failed | cancelled
-running → drafted
+queued → running → completed
+                 → tests_passed → deployed | failed
+                 → tests_failed → failed
+                 → deployed | failed | cancelled | drafted
 ```
 
-The runner itself sets `running` / `tests_passed` / `failed` / `deployed`;
+The runner itself sets `running` / `completed` / `tests_passed` / `tests_failed`
+/ `failed` / `deployed`;
 `cancelled` is the decline-the-prompt off-ramp before `running`, and
-`tests_failed` is only ever set by the spawned agent reporting its own result.
+`tests_failed` is set only when the configured `--test-exec` actually runs and
+exits non-zero.
 Draft providers move their server-created run from `running` to `drafted` after
-posting the draft comment. Terminal statuses (`drafted` / `deployed` / `failed`
-/ `cancelled`) are enforced
+posting the draft comment. Terminal statuses (`completed` / `drafted` /
+`deployed` / `failed` / `cancelled`) are enforced
 server-side — a run can't be moved back out of one.
 
 ### Endpoints
@@ -432,8 +443,8 @@ paimos run-agent watch --project PAI --repo-root .
 #   subscribes advertising implement-capability (?implement=1), and on an
 #   implement_requested event: claims matching-action runs, generates an
 #   issue-context prompt, spawns Claude Code (override with --exec) in --repo-root,
-#   optionally runs --test-exec, then reports
-#   tests_passed / tests_failed / failed.
+#   optionally runs --test-exec, then reports completed (no test command),
+#   tests_passed / tests_failed (test command ran), or failed.
 #   It reconnects on a dropped stream, processes one job at a time, and
 #   periodically catches up on queued runs it missed; prompts before each run
 #   unless --yes. Two runners never double-execute the same run (atomic claim).
@@ -448,12 +459,29 @@ the inference when a wrapper command name would be ambiguous:
 paimos run-agent watch --project PAI --repo-root . --exec "codex exec" --action-key codex_cli.implement
 ```
 
-The default `--exec "claude"` is normalized to Claude Code print mode and fed
-the generated issue prompt, so the runner does not open an interactive TUI for a
-queued web run. The spawned command sees `PAIMOS_RUN_ID`, `PAIMOS_ISSUE_KEY`,
+The default `--exec "claude"` is normalized to Claude Code print mode with
+`--output-format stream-json`, a non-interactive permission mode, and an
+allowlist of repository read/edit tools (`Read,Glob,Grep,Edit,Write`). The
+validated argv passes that list to `--tools` as the hard built-in availability
+boundary and to `--allowedTools` as the additional approval policy. It also
+uses `--safe-mode`, disabling inherited CLAUDE.md, skills, plugins, hooks, MCP,
+custom commands/agents, and other user/project customizations. It does not
+enable Bash, browser, or permission bypass by default. Operators can
+explicitly set `--claude-permission-mode` and `--claude-allowed-tools`; both are
+validated before launch. The supported installed modes are exactly
+`acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, and `plan`.
+Selecting `bypassPermissions` is rejected unless the separate
+`--unsafe-allow-bypass-permissions` flag is also present, and the generated argv
+then includes Claude's `--allow-dangerously-skip-permissions` acknowledgement;
+merely typing the mode never opts into bypass. A custom `--exec` remains the
+deliberate raw-command escape hatch.
+The generated issue prompt
+is fed on stdin, so a queued run never opens an interactive TUI. The spawned
+command sees `PAIMOS_RUN_ID`, `PAIMOS_PROJECT_ID`, `PAIMOS_ISSUE_KEY`,
 `PAIMOS_ISSUE_TITLE`, `PAIMOS_CONTEXT_PACK`, `PAIMOS_CONTEXT_PACK_LABEL`, and
-`PAIMOS_PROMPT_FILE`; custom provider commands can read the prompt file
-themselves.
+`PAIMOS_PROMPT_FILE`. The supervisor also sets `PAIMOS_RUN_CORRELATION_ID`,
+`PAIMOS_RUN_PROVIDER`, and `PAIMOS_RUN_ADAPTER` to its exact telemetry identity;
+custom provider commands can read the prompt file themselves.
 
 When the run carries `agent_name`, the watcher fetches the canonical
 `/api/projects/:id/agents/:name.json` artifact before spawning the command. The
@@ -464,11 +492,57 @@ also receives:
 - `PAIMOS_AGENT_ARTIFACT_FILE` — a temporary redacted copy of the canonical
   artifact for harnesses that prefer structured input.
 
-`--exec` runs through a shell (`sh -c`), so quoting, pipes, and chaining work for
-custom commands, e.g. `--exec 'codex exec "$(cat "$PAIMOS_PROMPT_FILE")"'`.
+`--exec` is the explicit provider-neutral/raw fallback. It runs through a shell
+(`sh -c`), so quoting, pipes, and chaining work for custom commands, e.g.
+`--exec 'codex exec "$(cat "$PAIMOS_PROMPT_FILE")"'`. Raw output is not parsed
+or persisted as telemetry. Telemetry identity follows the actual execution
+mode, not the queue action: exact built-in Claude is `anthropic/claude-code`, a
+direct Codex CLI command is `openai/codex-cli`, and raw Aider, OpenCode,
+wrappers, or shell pipelines are the neutral `paimos/custom-runner`.
 
-`--test-exec` is the preferred way to prove tests in the run record. It runs
-after the agent command, captures a bounded summary into `tests_summary`, reports
+The supervisor parses only bounded Claude JSON-line envelopes. It translates
+an allowlist of event type/tool-name classes into the wire phases `starting`,
+`planning`, `implementing`, `testing`, `waiting`, and `reviewing`; prompt text, assistant text, tool
+arguments, command output, source text, environment values, and provider error
+bodies never enter telemetry. Oversized events, aggregate stream floods, and
+malformed/unknown events fail closed. Terminal outcomes distinguish spawn
+failure, malformed stream, silent child, execution timeout, cancellation,
+provider failure, runner disappearance, report failure, and normal exit.
+
+While a child is alive, the supervisor emits its own liveness heartbeat; this
+does not depend on model callbacks. `--execution-timeout` (default `2h`),
+`--heartbeat-timeout` (default `5m` of child stdout/stderr silence), and
+`--heartbeat-interval` (default `15s`) are configurable. Timeout/cancellation
+terminate the process group owned by the runner before any terminal report is
+chosen, preventing a late successful exit from overwriting the failure.
+On Unix-family platforms this kills the complete owned process group and is
+covered by a descendant-death fixture. On other Go targets the portable fallback
+can kill only the direct child; wrappers on those platforms must not detach
+descendants, and this limitation is explicit rather than claiming tree-level
+enforcement.
+
+The supervisor sends these facts directly to `POST /api/runs/:id/telemetry`.
+It owns one stable correlation id and strictly increasing sequence per run.
+The correlation is a cryptographically random UUID created once after the
+claim and reused in every fact and child environment value. Heartbeat and
+semantic callbacks are serialized per run. Ambiguous network/5xx results retry
+the exact request body and sequence; allocation advances only after append 201
+or authoritative duplicate 200 acceptance. A 409 triggers a run refetch so
+cancellation, another terminal/reaped status, and disappearance stay distinct.
+Heartbeat reports use `kind=heartbeat`, `heartbeat=true`, and no activity text;
+semantic phase/needs-input/blocker reports use `heartbeat=false`. Therefore a
+stream of model activity cannot keep the supervisor watchdog alive. Claiming a
+run atomically persists `expects_supervisor_telemetry=true` before launch.
+Ordinary high-volume phase chatter may be coalesced when its bounded channel is
+full, but `needs_input` is a priority safety fact: it evicts queued ordinary
+progress, is delivered exactly once, and stops the one-shot runner. A burst of
+provider output therefore cannot hide a human or permission blocker.
+
+`--test-exec` is the only runner-owned way to prove tests in the run record. It runs
+after the agent command through the same process-group, heartbeat, silence, and
+execution watchdog as the provider and records a bounded result summary in
+`tests_summary` (never command text or output). The server accepts any non-empty
+bounded test evidence rather than one runner-specific sentence, and reports
 `tests_failed` if the command exits non-zero, and skips deploy on test failure:
 
 ```bash
@@ -479,15 +553,182 @@ paimos run-agent watch --project PAI --repo-root . --yes \
 `--attach-logs` (OFF by default) captures the job's combined output and attaches
 it to the ticket as a log, stamping `log_attachment_id`. It is opt-in because
 agent output can contain secrets, and a ticket attachment is visible to every
-project member — only enable it for repos/tickets where that's acceptable.
+project member — only enable it for repos/tickets where that's acceptable. The
+capture is capped; the cap does not turn raw output into telemetry.
+
+A normal provider exit without `--test-exec` reports `completed`, never
+`tests_passed`; its issue comment explicitly says tests were not run. Provider
+exit itself emits `reviewing`, never telemetry `completed`, because tests and
+deploy have not yet finished. Configured deploy commands also use the same
+supervisor/watchdog path with `deploying` heartbeats. Deployment and smoke verification remain separate facts; the
+runner reports neither unless the corresponding configured command actually
+ran successfully. If deploy fails or is cancelled after tests passed, the final
+failed/cancelled record retains the bounded test summary, version, and attempted
+`deploy_target`; a downstream failure never erases earlier verification facts.
 
 The run lifecycle is enforced server-side: status changes must follow a legal
 edge (e.g. a run can't jump straight to `deployed`), and a terminal run
-(`drafted`/`deployed`/`failed`/`cancelled`) is immutable. For non-requester project-editor
+(`completed`/`drafted`/`deployed`/`failed`/`cancelled`) is immutable. For non-requester project-editor
 claims, the server requires the caller's user, device, and requested `action_key`
 to match a live implement-capable runner connection; after the first
 `queued -> running` claim, later writes are limited to the requester, admin, or
 the stamped `claimed_by` executor.
+
+### Single-run telemetry (PAI-799)
+
+Run lifecycle status and run telemetry are separate contracts. Lifecycle
+`PATCH /api/runs/{id}` remains the authority for state transitions. Telemetry
+adds append-only facts about that one run:
+
+```http
+POST /api/runs/799/telemetry
+GET  /api/runs/799/telemetry?after_sequence=0&limit=100
+GET  /api/runs/799/telemetry/latest
+```
+
+The POST is limited to the run requester, stamped claimer, or an admin. Missing
+and unauthorized runs both return 404. Reads use normal run visibility. A
+terminal run (`completed`, `tests_passed`, `tests_failed`, `drafted`, `deployed`,
+`failed`, or `cancelled`) rejects every new fact and conflicting replay with
+409. An exact already-persisted same-sequence replay remains a read-only 200
+duplicate acknowledgement and does not mutate history or the latest projection.
+For telemetry, `tests_passed` and `tests_failed` close the fact stream even
+though the lifecycle still permits their explicit deployment/failure edges;
+those later outcomes are authoritative run PATCHes, not post-result telemetry.
+
+Example report:
+
+```json
+{
+  "sequence": 3,
+  "correlation_id": "claude-session-abc",
+  "provider": "anthropic",
+  "adapter": "claude-code",
+  "agent_reported_at": "2026-08-20T10:00:00Z",
+  "kind": "progress",
+  "heartbeat": true,
+  "phase": "testing",
+  "activity": "Running the documented backend test gate",
+  "needs_input": false,
+  "blocker_state": "none",
+  "estimate_revision": 2,
+  "progress_percent": 75,
+  "eta_seconds": 300,
+  "eta_min_seconds": 180,
+  "eta_max_seconds": 480,
+  "estimate_source": "adapter",
+  "estimate_confidence": 0.8,
+  "estimate_basis": "Three of four named verification checkpoints completed"
+}
+```
+
+`sequence` must increase; exact same-sequence/same-body replay returns 200 with
+`duplicate: true`, including after the run becomes terminal, while conflicting
+duplicates, out-of-order reports, and every new post-terminal fact return 409;
+a newly appended fact returns 201. `correlation_id`, `provider`, and `adapter` become immutable after the
+first accepted report. Delayed reports are accepted when their sequence is
+newer. `agent_reported_at` is retained as agent evidence, but freshness,
+clock-skew detection use `server_received_at`. Active liveness uses only the
+server-received timestamp of a report explicitly marked `heartbeat=true`;
+latest-event freshness remains separate. Thus a bad workstation clock or a
+stream of non-heartbeat semantic events cannot reset the supervisor watchdog.
+
+Progress and ETA are optional. When supplied they require a monotonic
+`estimate_revision`, `estimate_source`, confidence from 0 through 1, and a
+short evidence basis; ETA always requires a complete, ordered range. PAIMOS never
+creates a percentage from elapsed wall-clock time. A run with no reports is
+returned by `/latest` as `instrumented: false`, `liveness: "unknown"`, and
+`latest: null`—never as 0%. The indexed snapshot exposes `latest_event`,
+`latest_heartbeat`, `latest_semantic`, and `latest_estimate` plus separate
+freshness ages. A later heartbeat-only report does not erase activity,
+needs-input/blocker, progress, or ETA evidence. History remains the append-only
+authority. The projection is fully reconstructible from ordered history; the
+M143 upgrade performs that rebuild rather than trusting existing pointer rows,
+and an equivalence regression compares rebuilt output with incremental writes.
+SSE publishes only `{type: "run_telemetry", name:
+run_id, rev: sequence}` as an invalidation hint, and consumers refetch REST.
+
+The body uses a strict field allowlist and small one-line limits. Never send raw
+prompts, tool arguments, command output, environment values, secrets, source
+contents, or arbitrary provider payloads in `activity` or `estimate_basis`.
+Those data classes have no telemetry field and unknown JSON keys are rejected.
+The 280-byte activity and 240-byte estimate-basis limits are UTF-8 byte limits,
+not character counts. HTTP, CLI, MCP, adapters, and SQLite enforce the same
+boundary; MCP validates bytes locally because JSON Schema `maxLength` counts
+code points.
+The server also rejects obvious bearer tokens, credential assignments, cloud
+keys, and private-key headers in `activity` or `estimate_basis`; adapters remain
+responsible for never constructing those fields from raw provider data.
+
+The provider-neutral CLI seam is:
+
+```bash
+paimos run report "$PAIMOS_RUN_ID" \
+  --sequence 3 --correlation-id claude-session-abc \
+  --provider anthropic --adapter claude-code \
+  --kind progress --heartbeat --phase testing \
+  --activity "Running the documented backend test gate" \
+  --estimate-revision 2 --progress-percent 75 \
+  --eta-seconds 300 --eta-min-seconds 180 --eta-max-seconds 480 \
+  --estimate-source adapter --confidence 0.8 \
+  --basis "Three of four named verification checkpoints completed"
+```
+
+`PAIMOS_RUN_ID`, `PAIMOS_PROJECT_ID`, `PAIMOS_RUN_CORRELATION_ID`, `PAIMOS_RUN_PROVIDER`, and
+`PAIMOS_RUN_ADAPTER` can supply the stable runner context. `--dry-run` prints
+the exact request. MCP clients use `paimos_report_progress`, which maps to the
+same POST and forwards only the allowlisted fields.
+
+The built-in supervisor serializes heartbeat and structured callbacks through
+that same POST. It owns delivery order and estimate revisions; an adapter may
+provide progress/ETA only with source, confidence, and a bounded evidence
+basis. Without that evidence, progress and ETA stay absent rather than becoming
+a fabricated percentage.
+
+Claude Code is a proof adapter, not a server special case:
+
+| Claude Code signal | Provider-neutral report |
+|---|---|
+| session/run start | `kind=heartbeat`, `phase=starting`, stable correlation id |
+| bounded adapter phase change | `kind=phase`, one of the phase enum values |
+| permission or human question | `kind=needs_input`, `needs_input=true`, `blocker_state=input` |
+| named checkpoint completion | `kind=progress`; optional evidence-backed estimate revision |
+| quiet active session | `kind=heartbeat`; no fabricated percentage |
+| normal exit | `kind=phase`, `phase=reviewing`; lifecycle verification remains pending |
+
+Codex CLI uses the same contract explicitly:
+
+| Codex signal | Provider-neutral report |
+|---|---|
+| process start / supervisor tick | `provider=openai`, `adapter=codex-cli`, `kind=heartbeat` |
+| repository analysis | `kind=phase`, `phase=planning` |
+| patch application | `kind=phase`, `phase=implementing` |
+| test command class | `kind=phase`, `phase=testing` |
+| normal exit | `kind=phase`, `phase=reviewing`; lifecycle later records `completed` or a test-evidenced status |
+
+Aider is the third-harness mapping for an explicit Aider adapter that opts into
+this endpoint. Merely using raw `--exec aider` stays `paimos/custom-runner`:
+
+| Aider signal | Provider-neutral report |
+|---|---|
+| adapter-owned tick | `provider=<selected-model-provider>`, `adapter=aider`, `kind=heartbeat` |
+| repository map/read phase | `kind=phase`, `phase=planning` |
+| edit commit/application | `kind=phase`, `phase=implementing` |
+| operator question | `kind=needs_input`, `phase=waiting`, `blocker_state=input` |
+| adapter failure | `kind=blocker`, `phase=unknown`; no raw error body |
+| normal exit | `kind=phase`, `phase=reviewing`; never pre-claims test/deploy completion |
+
+The adapter summarizes only the allowlisted state. Claude hook payloads, tool
+inputs/results, prompts, and transcript text are never copied. Provider adapters
+map to the same fields without changes to server or domain code.
+
+The server watchdog runs at boot and on a configurable interval. It separately
+fails an unclaimed queued run, a supervised run that never delivered its first
+heartbeat, and a supervised run whose latest heartbeat is stale. A durable
+claim marker preserves the longer legacy fallback for old uninstrumented
+runners. Every failure update repeats its status/freshness predicate, so a
+heartbeat or terminal write that wins the database race suppresses the stale
+write; late success after timeout/cancellation receives 409.
 
 Enabling deploy is **triple-gated** and off by default — it runs only when all
 three hold: `--allow-deploy` AND `--deploy-exec "<cmd>"` AND the run carries a
@@ -510,10 +751,88 @@ For the PAI-629/PAI-630 path from one generic action to explicit Claude, Codex,
 local-model, and OpenRouter actions, see
 [`IMPLEMENT_THIS_PROVIDERS.md`](IMPLEMENT_THIS_PROVIDERS.md).
 
-The spawned command can read the generated prompt, selected-agent artifact, or
-PATCH richer progress itself. On any transition into a terminal status the
+The spawned command can read the generated prompt or selected-agent artifact
+and report bounded progress through `paimos run report`. `needs_input` is a safe
+blocker telemetry signal only: this one-shot runner stops the child and cannot
+advertise pause/resume, accept an answer, or resume a session. On any transition
+into a terminal status the
 server auto-posts a summary comment on the ticket — attributed to the reporting
 user — so the human-readable trail always matches the structured run record.
+
+Post-M144 runs are also linked into the issue-rooted delivery audit model in the
+same transaction as creation. An authenticated Implement/follow-up click records
+approval of the server-canonical issue-spec digest, then opens an implementation
+execution with explicit predecessor lineage. Draft mode opens a specification
+execution only; `drafted` is an incomplete `draft_ready` fact and never approves
+the specification. A run is linked to exactly one stage execution.
+
+Accepted terminal PATCH transitions are normalized atomically into that linked
+execution. `completed`, `tests_passed`, and `deployed` can satisfy only the
+implementation stage and only with an allowlisted commit or same-issue
+attachment; they never imply canonical QA, deployment, or verification.
+Failures/cancellation record bounded semantic outcomes without copying provider
+errors. Telemetry remains in the PAI-799 tables: M144 appends only a safe
+delivery invalidation identity in the same transaction, and freshness continues
+to use the separate server-received heartbeat pointer.
+Every terminal status, including `cancelled`, receives an immutable
+`finished_at`. If a retry, specification edit, handoff, or project move already
+superseded the linked execution, the closure is retained as one exact-once
+`run_lifecycle_observed` attempt-history event while current delivery truth stays
+unchanged.
+
+### Agent Mode delivery snapshots and invalidations (schema v1)
+
+The internal Agent Mode read surface projects delivery truth without exposing
+reporter IDs, run IDs, provider/adapter metadata, evidence references, prompts,
+or output. It is available to authenticated internal users at:
+
+- `GET /api/agent-mode/deliveries`
+- `GET /api/agent-mode/projects/{projectID}/deliveries`
+- `GET /api/agent-mode/deliveries/{deliveryKey}`
+- `GET /api/agent-mode/deliveries/events`
+
+Snapshot responses are `private, no-store` schema-v1 JSON. The top-level
+`cursor` is opaque and bound to the authenticated user, permission epoch,
+route audience, and result filters. Project query filtering is not an
+authorization boundary; the project path is. A detail path is a selection
+lookup and deliberately shares the global event scope. `selected_delivery` is
+not cursor-bound and the response has only one outside-selection shape:
+`selected_outside: {reason, row}`. Rows, root/project/lane count sets, and the
+maximum-12 attention list all come from the same pinned database snapshot and
+calculation instant.
+
+The events endpoint is an SSE invalidation stream, not a second source of row
+truth. Resume with `Last-Event-ID` (authoritative when present) or `cursor=`.
+`refetch` and `checkpoint` events carry their replacement opaque cursor in the
+SSE `id`; refetch data contains only currently authorized delivery hints, while
+checkpoint data has no hints. Any invalid, expired, revoked, wrong-scope,
+below-retention, or ahead-of-tail resume returns one identity-free `reset` with
+`{"schema_version":1,"reason":"resync_required"}` and closes. Clients then
+reload a snapshot. SSE responses use `private, no-store, no-transform`; malformed
+non-cursor filters remain canonical problem+json `400`, and missing versus
+inaccessible resources remain indistinguishable canonical `404`s.
+
+The complete field and enum contract is the served OpenAPI document at
+`GET /api/openapi.json`. Frontend transport adaptation is intentionally a
+separate integration step; generic change-stream envelopes are not aliases for
+these Agent Mode events.
+
+Agent Mode voice uses the same internal-only, canonical-404, CSRF, and
+`private, no-store` boundary:
+
+- `POST /api/agent-mode/voice/transcribe?language=en|de` accepts one raw,
+  allowlisted browser audio/video blob (12 MiB maximum) and returns exactly
+  `{utterance_id,text,final:true}`. Audio and transcript are ephemeral.
+- `POST /api/agent-mode/voice/speak` accepts exactly
+  `{template,delivery_id,delivery_revision,candidate_ids,locale}`. Templates
+  are `status`, `note_ready`, or `clarification`; there is no caller-text
+  field. The server authorizes the primary and up to three active candidates
+  in one coherent snapshot, rechecks the revision/capability, and narrates
+  only closed structured facts.
+
+Voice audit rows contain action/surface/provider/model/unit/outcome metadata
+only. Intake and Agent Mode share the same per-user STT and TTS admission and
+daily-budget pools.
 
 ---
 

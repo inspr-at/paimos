@@ -14,9 +14,11 @@ import { useTimerPanel } from '@/composables/useTimerPanel'
 import { useSidebarSprints } from '@/composables/useSidebarSprints'
 import { useRecentProjects } from '@/composables/useRecentProjects'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import { useTotpNag } from '@/composables/useTotpNag'
 import { api } from '@/api/client'
 import { instanceLabel, loadInstance } from '@/api/instance'
 import AppIcon from '@/components/AppIcon.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import { useSidePanelPinned } from '@/composables/useSidePanelPinned'
 import { useSidePanelWidth } from '@/composables/useSidePanelWidth'
@@ -49,10 +51,9 @@ initKeyboardShortcuts()
 
 // ── Local state ──────────────────────────────────────────────────────────────
 const isAdmin = computed(() => auth.isAdmin)
-// PAI-742: SSO-minted sessions never see the local-2FA nag — their
-// second factor is the IdP's policy, and a wrong nag trains users to
-// ignore security banners.
-const show2FAWarning = computed(() => auth.checked && !!auth.user && auth.totpChecked && !auth.totpEnabled && !auth.suppressSecurityNags && !auth.ssoSession)
+// PAI-742 rule lives in useTotpNag so the Agent Mode shell (PAI-805)
+// shows exactly the same security nag.
+const { show2FAWarning } = useTotpNag()
 
 function isActive(path: string) {
   if (path === '/') return route.path === '/'
@@ -200,7 +201,7 @@ onBeforeUnmount(() => {
 
         <!-- Brand: logo always, text only when expanded -->
         <RouterLink to="/" class="brand" :title="isExpanded ? '' : 'Home'">
-          <img :src="branding.logo" :alt="branding.company" class="brand-logo" />
+          <BrandLogo :src="branding.logo" :alt="branding.company" class="brand-logo" />
           <span class="sl brand-name">{{ brandName }}</span>
         </RouterLink>
 
@@ -231,6 +232,9 @@ onBeforeUnmount(() => {
           </RouterLink>
           <RouterLink v-if="voiceIntakeEnabled" to="/intake" :class="['nav-item', { active: isActive('/intake') }]" :title="isExpanded ? '' : 'Voice Intake'">
             <AppIcon name="mic" /><span class="sl">Voice Intake</span>
+          </RouterLink>
+          <RouterLink to="/agent-mode" :class="['nav-item', { active: isActive('/agent-mode') }]" :title="isExpanded ? '' : 'Agent Mode'">
+            <AppIcon name="activity" /><span class="sl">Agent Mode</span>
           </RouterLink>
           <RouterLink v-if="sidebarSprints.length" to="/sprint-board" :class="['nav-item', { active: isActive('/sprint-board') }]" :title="isExpanded ? '' : 'Sprint Board'">
             <AppIcon name="layout-grid" /><span class="sl">Sprint Board</span>

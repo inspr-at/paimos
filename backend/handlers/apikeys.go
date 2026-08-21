@@ -116,7 +116,8 @@ func CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	for _, s := range body.Scopes {
 		s = strings.TrimSpace(s)
 		if s == "" {
-			continue
+			jsonError(w, "scope entries must not be blank", http.StatusBadRequest)
+			return
 		}
 		scopeSet[s] = struct{}{}
 	}

@@ -29,12 +29,12 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
+	"github.com/inspr-at/paimos/backend/httpcontract"
 
 	_ "modernc.org/sqlite"
 )
@@ -113,7 +113,8 @@ func newTestServer(t *testing.T) *testServer {
 // buildRouter mirrors main.go router setup but without static file serving.
 func buildRouter() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.Recoverer)
+	r.Use(handlers.ClassifiedControlCachePolicyMiddleware)
+	r.Use(handlers.ControlAwareRecoverer)
 	r.Use(handlers.SessionAuditMiddleware) // PAI-97 — off unless PAIMOS_AUDIT_SESSIONS=true
 	r.Use(handlers.RequestIDMiddleware)
 
@@ -162,6 +163,25 @@ func buildRouter() http.Handler {
 			r.Get("/avatars/{filename}", func(w http.ResponseWriter, req *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			})
+			r.Post("/runs/{id}/telemetry", handlers.IngestAgentRunTelemetry)
+			r.Get("/runs/{id}/telemetry", handlers.ListAgentRunTelemetry)
+			r.Get("/runs/{id}/telemetry/latest", handlers.GetLatestAgentRunTelemetry)
+		})
+
+		r.Route("/agent-mode", func(r chi.Router) {
+			r.Use(auth.AgentModePrivateNoStore)
+			r.Use(auth.Middleware)
+			r.Use(auth.RequireAgentModeInternal)
+			r.Use(auth.CSRFMiddleware)
+			r.Use(auth.MustChangePasswordGate)
+			r.NotFound(httpcontract.WriteAgentModeNotFound)
+			r.MethodNotAllowed(httpcontract.WriteAgentModeNotFound)
+			r.Get("/deliveries/events", handlers.AgentModeEvents)
+			r.Get("/deliveries", handlers.AgentModeDeliveries)
+			r.Get("/projects/{projectID}/deliveries", handlers.AgentModeProjectDeliveries)
+			r.Get("/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
+			r.Post("/voice/transcribe", handlers.TranscribeAgentModeVoice)
+			r.Post("/voice/speak", handlers.SpeakAgentModeVoice)
 		})
 
 		// Portal (external + admin)
@@ -319,7 +339,7 @@ func buildRouter() http.Handler {
 			r.Delete("/projects/{id}/tags/{tag_id}", handlers.RemoveTagFromProject)
 
 			r.With(auth.RequireIssueAccess).Get("/issues/{id}/comments", handlers.ListComments)
-			r.With(auth.RequireIssueEdit, handlers.IdempotencyMiddleware).Post("/issues/{id}/comments", handlers.CreateComment)
+			r.With(auth.RequireIssueEdit, handlers.CommentIdempotencyMiddleware).Post("/issues/{id}/comments", handlers.CreateComment)
 			r.With(auth.RequireCommentEdit).Patch("/comments/{id}", handlers.UpdateCommentVisibility)
 			r.With(auth.RequireCommentAccess).Delete("/comments/{id}", handlers.DeleteComment)
 

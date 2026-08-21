@@ -22,7 +22,8 @@ import { readFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
-const version = readFileSync(resolve(__dirname, '../VERSION'), 'utf-8').trim()
+const frontendDir = fileURLToPath(new URL('.', import.meta.url))
+const version = readFileSync(resolve(frontendDir, '../VERSION'), 'utf-8').trim()
 let gitHash = ''
 try { gitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim() } catch { /* not in git */ }
 
