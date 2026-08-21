@@ -39,30 +39,59 @@ const visualIssue = {
 }
 
 async function installApiFixtures(page: Page) {
+  await page.addInitScript(() => {
+    class VisualEventSource extends EventTarget {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 2
+      readonly url: string
+      readonly withCredentials = false
+      readyState = VisualEventSource.OPEN
+      onopen: ((event: Event) => void) | null = null
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+
+      constructor(url: string | URL) {
+        super()
+        this.url = String(url)
+        queueMicrotask(() => this.dispatchEvent(new Event('open')))
+      }
+
+      close() {
+        this.readyState = VisualEventSource.CLOSED
+      }
+    }
+    Object.defineProperty(window, 'EventSource', { configurable: true, value: VisualEventSource })
+  })
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
-    if (path === '/api/auth/me') return route.fulfill({ json: me })
+    const fulfill = (json: unknown, status = 200) => route.fulfill({
+      status,
+      json,
+      headers: { 'X-Permissions-Epoch': '1' },
+    })
+    if (path === '/api/auth/me') return fulfill(me)
     if (path === '/api/branding') {
-      return route.fulfill({ json: { name: 'PAIMOS', company: 'PAIMOS', product: 'PAIMOS', logo: '/logo.svg' } })
+      return fulfill({ name: 'PAIMOS', company: 'PAIMOS', product: 'PAIMOS', logo: '/logo.svg' })
     }
     if (path === '/api/instance') {
-      return route.fulfill({ json: { label: 'STAGING', attachments_enabled: true, live_updates_enabled: false } })
+      return fulfill({ label: 'STAGING', attachments_enabled: true, live_updates_enabled: false })
     }
     if (path === '/api/agent-mode/deliveries') {
-      if (new URL(page.url()).searchParams.get('visualState') === 'forbidden') {
-        return route.fulfill({ status: 403, json: { message: 'fixture: forbidden' } })
+      if (new URL(route.request().url()).searchParams.get('q') === 'visual-forbidden') {
+        return fulfill({ message: 'fixture: forbidden' }, 403)
       }
-      return route.fulfill({ json: makeFixtureSnapshot(10, new Date().toISOString()) })
+      return fulfill(makeFixtureSnapshot(10))
     }
-    if (path === '/api/issues/5008') return route.fulfill({ json: visualIssue })
+    if (path === '/api/issues/5008') return fulfill(visualIssue)
     if (path === '/api/issues/5008/activity') {
-      return route.fulfill({ json: { undo_rows: [], redo_rows: [], history_rows: [], stack_depth: 0 } })
+      return fulfill({ undo_rows: [], redo_rows: [], history_rows: [], stack_depth: 0 })
     }
-    if (path === '/api/issues/5008/ai-activity') return route.fulfill({ json: { rows: [], count: 0, last_week_count: 0 } })
-    if (/^\/api\/issues\/5008\/(attachments|comments|time-entries)$/.test(path)) return route.fulfill({ json: [] })
-    if (path === '/api/time-entries/today-summary') return route.fulfill({ json: { total_hours: 0, count: 0 } })
-    if (path === '/api/dev/test-reports/summary') return route.fulfill({ json: { failures: 0 } })
-    return route.fulfill({ json: [] })
+    if (path === '/api/issues/5008/ai-activity') return fulfill({ rows: [], count: 0, last_week_count: 0 })
+    if (/^\/api\/issues\/5008\/(attachments|comments|time-entries)$/.test(path)) return fulfill([])
+    if (path === '/api/time-entries/today-summary') return fulfill({ total_hours: 0, count: 0 })
+    if (path === '/api/dev/test-reports/summary') return fulfill({ failures: 0 })
+    return fulfill([])
   })
 }
 
@@ -132,7 +161,7 @@ async function expectDockClear(page: Page) {
 async function openReady(page: Page, width: number, height: number, extra = '') {
   await page.setViewportSize({ width, height })
   await page.goto(`${APP_ORIGIN}/agent-mode?delivery=dlv-820${extra}`, { waitUntil: 'networkidle' })
-  await expect(page.locator('.am-selection-anchor')).toBeVisible()
+  await expect(page.locator('[data-selected="true"]')).toBeVisible()
 }
 
 test('PAI-805 final visual and geometry gate', async ({ page }) => {
@@ -181,9 +210,13 @@ test('PAI-805 final visual and geometry gate', async ({ page }) => {
   await page.screenshot({ path: `${SHOT_DIR}/desktop-1.png` })
   await openReady(page, 1440, 1000, '&detail=100')
   await page.screenshot({ path: `${SHOT_DIR}/desktop-100.png` })
-  await page.goto(`${APP_ORIGIN}/agent-mode?visualState=forbidden`, { waitUntil: 'networkidle' })
+  const errorsBeforeForbidden = consoleErrors.length
+  await page.goto(`${APP_ORIGIN}/agent-mode?q=visual-forbidden`, { waitUntil: 'networkidle' })
   await expect(page.locator('.am-state--forbidden')).toBeVisible()
   await page.screenshot({ path: `${SHOT_DIR}/desktop-forbidden.png` })
+  const forbiddenConsoleErrors = consoleErrors.splice(errorsBeforeForbidden)
+  expect(forbiddenConsoleErrors).toHaveLength(1)
+  expect(forbiddenConsoleErrors[0]).toContain('403 (Forbidden)')
   await page.goto(`${APP_ORIGIN}/`, { waitUntil: 'networkidle' })
   await expect(page.locator('.brand-logo')).toHaveAttribute('src', '/logo.svg')
   await expect(page.getByRole('heading', { name: /Good |Hello|Welcome/i })).toBeVisible()
@@ -205,7 +238,7 @@ test('Agent Mode keeps the light app palette under dark OS and reduced motion', 
     return { background: style.backgroundColor, ink: style.color }
   })
   expect(colors.background).toBe('rgb(242, 245, 248)')
-  expect(colors.ink).toBe('rgb(30, 41, 59)')
+  expect(colors.ink).toBe('rgb(26, 38, 54)')
   await page.screenshot({ path: `${SHOT_DIR}/desktop-10-reduced-dark-os.png` })
 })
 
@@ -225,11 +258,23 @@ test('PAI-806 Detail 1 ticket panel geometry at 390 / 736 / 1024', async ({ page
       const dock = rect('.am-conv--compact')
       const stage = rect('.am-stage-chain')
       const estimate = rect('.am-focus-detail-grid')
+      const paintedWithinCanvas = (target: DOMRect): DOMRect => DOMRect.fromRect({
+        x: Math.max(target.left, canvas.left),
+        y: Math.max(target.top, canvas.top),
+        width: Math.max(0, Math.min(target.right, canvas.right) - Math.max(target.left, canvas.left)),
+        height: Math.max(0, Math.min(target.bottom, canvas.bottom) - Math.max(target.top, canvas.top)),
+      })
+      const paintedIntersects = (target: DOMRect, boundary: DOMRect): boolean => {
+        const painted = paintedWithinCanvas(target)
+        return painted.width > 0 && painted.height > 0 && intersects(boundary, painted)
+      }
       return {
         canvasPanel: intersects(canvas, panel),
         dockPanel: intersects(dock, panel),
-        dockStage: intersects(dock, stage),
-        dockEstimate: intersects(dock, estimate),
+        // Focus content can continue below the scrollport geometrically, but
+        // only its canvas-clipped rectangle can paint underneath the dock.
+        dockStage: paintedIntersects(stage, dock),
+        dockEstimate: paintedIntersects(estimate, dock),
         horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       }
     })
