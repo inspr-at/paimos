@@ -30,6 +30,10 @@ keywords    = ["paimos_"]
 # chars so they cannot collide with real 64-char keys, and only allowed
 # in markdown files (where docs live).
 [allowlist]
-description = "PAIMOS documentation example prefixes in markdown"
+description = "PAIMOS documentation examples and fixed synthetic test values"
 paths       = ['''docs/.*\.md''', '''README\.md''']
-regexes     = ['''paimos_[a-fA-F0-9]{1,16}\b''']
+regexes     = [
+  '''paimos_[a-fA-F0-9]{1,16}\b''',
+  # Canonical UUID fixture used only to test CLI idempotency-key validation.
+  '''9f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f''',
+]
