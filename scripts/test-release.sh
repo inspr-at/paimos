@@ -203,10 +203,12 @@ setup_repo() {
   git -C "$repo" config user.name 'Release Author'
   git -C "$repo" config user.email 'release-author@example.test'
   mkdir -p "$repo/docs"
+  mkdir -p "$repo/backend/contracts/fixtures/external-stage"
   printf '1.0.0\n' > "$repo/VERSION"
   printf '<code>v1.0.0</code>\n' > "$repo/README.md"
   printf '# Changelog\n\n## [1.0.0] — 2026-01-01\n\n- Initial.\n' > "$repo/docs/CHANGELOG.md"
   printf 'VER=1.0.0\nVER=1.0.0\npaimos --version    # 1.0.0\n' > "$repo/docs/INSTALL.md"
+  printf '%s\n' '{"paimos_release":"v1.0.1"}' > "$repo/backend/contracts/fixtures/external-stage/manifest-v1.json"
   write_stub_scripts "$repo"
   git -C "$repo" add .
   git -C "$repo" commit -q --signoff -m 'initial release'
@@ -533,6 +535,38 @@ test_tag_drift_is_rejected() {
   fi
 }
 
+test_pending_external_stage_release_pin_is_rejected() {
+  local repo state
+  repo=$(setup_repo pending-external-stage-pin)
+  state="$TMP_ROOT/pending-external-stage-pin/gh-state"
+  printf '%s\n' '{"paimos_release":"PENDING_RELEASE_TAG"}' > \
+    "$repo/backend/contracts/fixtures/external-stage/manifest-v1.json"
+  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'leave external-stage release pending'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+  prepend_release_notes "$repo"
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release accepted PENDING_RELEASE_TAG in the external-stage manifest'
+  fi
+}
+
+test_unavailable_external_stage_release_pin_is_rejected() {
+  local repo state
+  repo=$(setup_repo unavailable-external-stage-pin)
+  state="$TMP_ROOT/unavailable-external-stage-pin/gh-state"
+  printf '%s\n' '{"paimos_release":"v9.9.9"}' > \
+    "$repo/backend/contracts/fixtures/external-stage/manifest-v1.json"
+  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'pin an unavailable external-stage release'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+  prepend_release_notes "$repo"
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release accepted an unavailable external-stage tag unrelated to the prepared release'
+  fi
+}
+
 write_fake_commands "$TMP_ROOT/fake-bin"
 test_protected_release_and_resume_states
 test_open_pr_is_reused_after_timeout
@@ -545,5 +579,7 @@ test_reused_pr_gates_the_pinned_head
 test_unsigned_merged_resume_is_rejected
 test_remote_branch_drift_is_rejected
 test_tag_drift_is_rejected
+test_pending_external_stage_release_pin_is_rejected
+test_unavailable_external_stage_release_pin_is_rejected
 
 echo 'test-release: ok'
