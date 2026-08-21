@@ -157,7 +157,21 @@ type GrantProjection struct {
 	DeliveryKey string
 	IssueKey    string
 	Actions     []Action
+	Targets     []GrantTarget
 	ExpiresAt   time.Time
+}
+
+// GrantTarget is a live, authorized and secret-free description of one exact
+// command target. It is deliberately not part of the stable grant digest.
+type GrantTarget struct {
+	Action               Action
+	RunID                int64
+	RuntimeState         RuntimeState
+	RuntimeRevision      int64
+	InputRequestID       string
+	InputRequestRevision int64
+	InputKind            InputKind
+	OptionCodes          []string
 }
 
 type LeaseProjection struct {
@@ -280,6 +294,7 @@ type LeaseRenewRequest struct {
 type LeaseRevokeRequest struct {
 	LeaseID            string
 	Revision           int64
+	DeviceID           string
 	OperationKeyDigest [32]byte
 }
 
@@ -326,6 +341,7 @@ type CommandWithdrawRequest struct {
 type PullRequest struct {
 	LeaseID       string
 	LeaseRevision int64
+	DeviceID      string
 	Cursor        int64
 }
 

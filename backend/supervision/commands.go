@@ -423,13 +423,17 @@ func loadCommandProjectionTx(ctx context.Context, tx *sql.Tx, commandID string) 
 	err := tx.QueryRowContext(ctx, `SELECT command.command_id,command.status_revision,command.action,command.status,
 		command.outcome,command.safe_reason,command.challenge_template,command.expires_at,command.priority_value,
 		command.agent_run_id,request.request_kind,command.input_choice_ordinal,command.input_choice_code,
-		runtime.state,command.runtime_revision
+		CASE command.action WHEN 'run.pause' THEN 'running' WHEN 'run.resume' THEN 'paused' END,
+		command.runtime_revision,project.key||'-'||issue.issue_number,command.delivery_key
 		FROM control_commands command LEFT JOIN control_input_requests request
 		 ON request.request_id=command.input_request_id AND request.revision=command.input_request_revision
-		LEFT JOIN control_runtime_states runtime ON runtime.agent_run_id=command.agent_run_id
+		JOIN issues issue ON issue.id=command.root_issue_id AND issue.deleted_at IS NULL
+		 AND issue.project_id=command.project_id
+		JOIN projects project ON project.id=command.project_id AND project.status<>'deleted'
 		WHERE command.command_id=?`, commandID).Scan(&projection.CommandID, &projection.StatusRevision,
 		&projection.Action, &projection.Status, &outcome, &reason, &projection.ChallengeTemplate, &expiry,
-		&priority, &runID, &inputKind, &choiceOrdinal, &choiceCode, &runtimeState, &runtimeRevision)
+		&priority, &runID, &inputKind, &choiceOrdinal, &choiceCode, &runtimeState, &runtimeRevision,
+		&projection.Display.IssueKey, &projection.Display.DeliveryKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CommandProjection{}, domainError(ErrNotFound, CodeTargetNotFound)
 	}
@@ -461,12 +465,17 @@ func (s *Service) GetCommand(ctx context.Context, principal auth.Principal, requ
 		return CommandProjection{}, err
 	}
 	defer authz.tx.Rollback()
-	var projectID, userID int64
-	if err := authz.tx.QueryRowContext(ctx, `SELECT command.project_id,command.user_id FROM control_commands command
+	kind, session, apiKey, ok := credentialColumns(authz.principal)
+	if !ok {
+		return CommandProjection{}, domainError(ErrForbidden, CodeCredentialRevoked)
+	}
+	var projectID int64
+	if err := authz.tx.QueryRowContext(ctx, `SELECT command.project_id FROM control_commands command
 		JOIN issues issue ON issue.id=command.root_issue_id AND issue.deleted_at IS NULL
 		JOIN projects project ON project.id=command.project_id AND project.id=issue.project_id
-		 AND project.status<>'deleted' WHERE command.command_id=?`, request.CommandID).
-		Scan(&projectID, &userID); err != nil || userID != authz.principal.UserID() {
+		 AND project.status<>'deleted' WHERE command.command_id=? AND command.user_id=? AND command.principal_kind=?
+		 AND command.actor_session_credential_id IS ? AND command.actor_api_key_id IS ?`, request.CommandID,
+		authz.principal.UserID(), kind, session, apiKey).Scan(&projectID); err != nil {
 		return CommandProjection{}, domainError(ErrNotFound, CodeTargetNotFound)
 	}
 	if err := requireProjectEdit(ctx, authz.tx, authz.user, projectID); err != nil {
@@ -509,13 +518,18 @@ func (s *Service) transitionCommand(ctx context.Context, principal auth.Principa
 		return CommandProjection{}, err
 	}
 	defer authz.tx.Rollback()
-	var projectID, issueID, issueRevision, runID, userID int64
+	kind, session, apiKey, ok := credentialColumns(authz.principal)
+	if !ok {
+		return CommandProjection{}, domainError(ErrForbidden, CodeCredentialRevoked)
+	}
+	var projectID, issueID, issueRevision, runID int64
 	var action Action
 	var status string
 	var issueETag []byte
 	if err := authz.tx.QueryRowContext(ctx, `SELECT project_id,root_issue_id,issue_revision,COALESCE(agent_run_id,0),
-		user_id,action,status,issue_etag_digest FROM control_commands WHERE command_id=?`, commandID).
-		Scan(&projectID, &issueID, &issueRevision, &runID, &userID, &action, &status, &issueETag); err != nil || userID != authz.principal.UserID() {
+		action,status,issue_etag_digest FROM control_commands WHERE command_id=? AND user_id=? AND principal_kind=?
+		 AND actor_session_credential_id IS ? AND actor_api_key_id IS ?`, commandID, authz.principal.UserID(),
+		kind, session, apiKey).Scan(&projectID, &issueID, &issueRevision, &runID, &action, &status, &issueETag); err != nil {
 		return CommandProjection{}, domainError(ErrNotFound, CodeTargetNotFound)
 	}
 	if err := requireProjectEdit(ctx, authz.tx, authz.user, projectID); err != nil {
@@ -686,8 +700,9 @@ func insertCommandEvent(ctx context.Context, tx *sql.Tx, commandID, kind string)
 }
 
 func insertCancellationFact(ctx context.Context, tx *sql.Tx, commandID string, runID int64) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO agent_run_cancellation_facts(run_id,cancellation_cause,command_id)
-		VALUES(?,'operator_command',?)`, runID, commandID)
+	_, err := tx.ExecContext(ctx, `INSERT INTO agent_run_cancellation_facts(
+		run_id,cancellation_cause,command_id,recorded_at)
+		VALUES(?,'operator_command',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, runID, commandID)
 	return sqliteConflict(err)
 }
 

@@ -665,9 +665,9 @@ func TestProjectLifecycleAuthorityDoesNotReviveOldGrant(t *testing.T) {
 	if _, err := database.Exec(`UPDATE projects SET status='archived' WHERE id=?`, projectID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.GetActorGrant(context.Background(), principal, GrantGetRequest{GrantID: grant.GrantID,
-		Revision: grant.Revision}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("archived priority grant error=%v code=%s", err, ErrorCode(err))
+	if projection, err := service.GetActorGrant(context.Background(), principal, GrantGetRequest{GrantID: grant.GrantID,
+		Revision: grant.Revision}); !errors.Is(err, ErrConflict) || len(projection.Targets) != 0 {
+		t.Fatalf("archived priority grant targets=%+v error=%v code=%s", projection.Targets, err, ErrorCode(err))
 	}
 	confirmKey := sha256.Sum256([]byte("lifecycle-confirm"))
 	if _, err := service.ConfirmCommand(context.Background(), principal, CommandConfirmRequest{CommandID: command.CommandID,
@@ -677,9 +677,9 @@ func TestProjectLifecycleAuthorityDoesNotReviveOldGrant(t *testing.T) {
 	if _, err := database.Exec(`UPDATE projects SET status='active' WHERE id=?`, projectID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.GetActorGrant(context.Background(), principal, GrantGetRequest{GrantID: grant.GrantID,
-		Revision: grant.Revision}); !IsCode(err, CodeStaleTarget) {
-		t.Fatalf("revived old grant error=%v code=%s", err, ErrorCode(err))
+	if projection, err := service.GetActorGrant(context.Background(), principal, GrantGetRequest{GrantID: grant.GrantID,
+		Revision: grant.Revision}); !IsCode(err, CodeStaleTarget) || len(projection.Targets) != 0 {
+		t.Fatalf("revived old grant targets=%+v error=%v code=%s", projection.Targets, err, ErrorCode(err))
 	}
 	if _, err := service.ConfirmCommand(context.Background(), principal, CommandConfirmRequest{CommandID: command.CommandID,
 		StatusRevision: 1, OperationKeyDigest: confirmKey}); err == nil {
@@ -907,7 +907,7 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 		t.Fatalf("confirm pause: command=%+v err=%v code=%s", command, err, ErrorCode(err))
 	}
 	pulled, err := service.Pull(context.Background(), runner, PullRequest{LeaseID: lease.LeaseID,
-		LeaseRevision: lease.Revision})
+		LeaseRevision: lease.Revision, DeviceID: "runner-01"})
 	if err != nil || len(pulled.Effects) != 1 || pulled.Effects[0].CommandID != command.CommandID {
 		t.Fatalf("pull: projection=%+v err=%v code=%s", pulled, err, ErrorCode(err))
 	}
@@ -945,9 +945,15 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 		t.Fatalf("runtime/outbox truth state=%s revision=%d outbox=%s", runtimeState, runtimeRevision, outboxState)
 	}
 
+	resumeGrant, err := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
+		OperationKeyDigest: sha256.Sum256([]byte("actor-grant-after-pause"))})
+	if err != nil || !containsAction(resumeGrant.Actions, "run.resume") || containsAction(resumeGrant.Actions, "run.pause") ||
+		!grantHasExactRunTarget(resumeGrant, "run.resume", runID) {
+		t.Fatalf("resume grant=%+v err=%v code=%s", resumeGrant, err, ErrorCode(err))
+	}
 	resumeKey := sha256.Sum256([]byte("resume-command"))
-	resume, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
-		GrantRevision: grant.Revision, Action: "run.resume", RunID: runID, RuntimeRevision: 2,
+	resume, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: resumeGrant.GrantID,
+		GrantRevision: resumeGrant.Revision, Action: "run.resume", RunID: runID, RuntimeRevision: 2,
 		OperationKeyDigest: resumeKey})
 	if err != nil {
 		t.Fatalf("create resume: %v (%s)", err, ErrorCode(err))
@@ -976,7 +982,7 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 	}
 	revokeKey := sha256.Sum256([]byte("lease-loss"))
 	if _, err := service.RevokeRunnerLease(context.Background(), runner, LeaseRevokeRequest{LeaseID: lease.LeaseID,
-		Revision: lease.Revision, OperationKeyDigest: revokeKey}); err != nil {
+		Revision: lease.Revision, DeviceID: "runner-01", OperationKeyDigest: revokeKey}); err != nil {
 		t.Fatalf("revoke claimed lease: %v (%s)", err, ErrorCode(err))
 	}
 	reconcileRequest := ReconcileRequest{Mode: ReconcileRunner, Limit: 100, LeaseID: lease.LeaseID,
@@ -1155,7 +1161,7 @@ func TestThirtyTwoConnectionAcceptedEffectReservationAndClaimConverge(t *testing
 
 func TestAuthorityRotationInvalidatesAndRevisesLeaseLineage(t *testing.T) {
 	database := openSupervisionTestDB(t)
-	deliveryID, humanID, _ := seedGrantTarget(t, database)
+	deliveryID, humanID, human := seedGrantTarget(t, database)
 	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
 	service := NewService(database, Options{})
 	firstKey := sha256.Sum256([]byte("authority-lease-1"))
@@ -1164,6 +1170,11 @@ func TestAuthorityRotationInvalidatesAndRevisesLeaseLineage(t *testing.T) {
 		OperationKeyDigest: firstKey})
 	if err != nil {
 		t.Fatalf("issue lease: %v (%s)", err, ErrorCode(err))
+	}
+	grant, err := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
+		OperationKeyDigest: sha256.Sum256([]byte("authority-target-grant"))})
+	if err != nil || !grantHasExactRunTarget(grant, "run.cancel.running", runID) {
+		t.Fatalf("initial authority target grant=%+v err=%v", grant, err)
 	}
 	var attemptID, reporterID, startID int64
 	if err := database.QueryRow(`SELECT attempt_id,reporter_id,execution_start_stage_event_id
@@ -1199,8 +1210,12 @@ func TestAuthorityRotationInvalidatesAndRevisesLeaseLineage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := service.Pull(context.Background(), runner, PullRequest{LeaseID: lease.LeaseID,
-		LeaseRevision: lease.Revision}); !IsCode(err, CodeStaleTarget) {
+		LeaseRevision: lease.Revision, DeviceID: "runner-01"}); !IsCode(err, CodeStaleTarget) {
 		t.Fatalf("old authority pull error=%v code=%s", err, ErrorCode(err))
+	}
+	if projection, err := service.GetActorGrant(context.Background(), human, GrantGetRequest{GrantID: grant.GrantID,
+		Revision: grant.Revision}); !IsCode(err, CodeStaleTarget) || len(projection.Targets) != 0 {
+		t.Fatalf("authority/revision change disclosed targets=%+v err=%v code=%s", projection.Targets, err, ErrorCode(err))
 	}
 	secondKey := sha256.Sum256([]byte("authority-lease-2"))
 	revised, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
@@ -1316,7 +1331,7 @@ func TestPullAndReconcileHaveBoundedActualQueryCounts(t *testing.T) {
 
 	counter.Store(0)
 	if _, err := service.Pull(context.Background(), runner, PullRequest{LeaseID: lease.LeaseID,
-		LeaseRevision: lease.Revision}); err != nil {
+		LeaseRevision: lease.Revision, DeviceID: "runner-01"}); err != nil {
 		t.Fatalf("pull: %v (%s)", err, ErrorCode(err))
 	}
 	pullQueries := counter.Load()
@@ -1513,7 +1528,8 @@ func TestRunnerReconcileRejectsCrossKeyDeviceLeaseAndProjectAccess(t *testing.T)
 		t.Fatal(err)
 	}
 	if _, err := serviceA.RevokeRunnerLease(context.Background(), runnerA, LeaseRevokeRequest{LeaseID: leaseA.LeaseID,
-		Revision: leaseA.Revision, OperationKeyDigest: sha256.Sum256([]byte("privacy-a-revoke"))}); err != nil {
+		Revision: leaseA.Revision, DeviceID: "runner-a",
+		OperationKeyDigest: sha256.Sum256([]byte("privacy-a-revoke"))}); err != nil {
 		t.Fatalf("revoke owned lease: %v (%s)", err, ErrorCode(err))
 	}
 	owned, err := serviceA.Reconcile(context.Background(), runnerA, requestA)
@@ -1682,20 +1698,28 @@ func TestProjectLifecycleRealServiceActionMatrix(t *testing.T) {
 			lease, leaseErr := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
 				DeviceID: "runner-01", SupportedActions: []Action{"run.cancel.running", "input.respond", "run.pause", "run.resume"},
 				OperationKeyDigest: sha256.Sum256([]byte("matrix-lease-" + status))})
+			var input InputRequestProjection
+			var inputErr error
+			if status == "active" || status == "frozen" {
+				input, inputErr = service.CreateInputRequest(context.Background(), runner, InputCreateRequest{LeaseID: lease.LeaseID,
+					LeaseRevision: lease.Revision, Kind: "approval", PromptTemplate: "approval_required",
+					OperationKeyDigest: sha256.Sum256([]byte("matrix-input-" + status))})
+			}
 			grant, grantErr := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
 				OperationKeyDigest: sha256.Sum256([]byte("matrix-grant-" + status))})
 			if status == "deleted" {
-				if leaseErr == nil || grantErr == nil {
+				if leaseErr == nil || grantErr == nil || len(grant.Targets) != 0 {
 					t.Fatalf("deleted project exposed controls lease=%+v/%v grant=%+v/%v", lease, leaseErr, grant, grantErr)
 				}
 				return
 			}
-			if leaseErr != nil || grantErr != nil {
-				t.Fatalf("issue controls status=%s lease=%+v/%v grant=%+v/%v", status, lease, leaseErr, grant, grantErr)
+			if leaseErr != nil || grantErr != nil || inputErr != nil {
+				t.Fatalf("issue controls status=%s lease=%+v/%v grant=%+v/%v input=%+v/%v",
+					status, lease, leaseErr, grant, grantErr, input, inputErr)
 			}
 			if status == "archived" {
 				if len(grant.Actions) != 1 || grant.Actions[0] != "run.cancel.running" || len(lease.Actions) != 1 ||
-					lease.Actions[0] != "run.cancel.running" {
+					lease.Actions[0] != "run.cancel.running" || !grantHasExactRunTarget(grant, "run.cancel.running", runID) {
 					t.Fatalf("archived action surface grant=%v lease=%v", grant.Actions, lease.Actions)
 				}
 				if _, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
@@ -1710,16 +1734,18 @@ func TestProjectLifecycleRealServiceActionMatrix(t *testing.T) {
 				}
 				return
 			}
-			for _, action := range []Action{"issue.priority.set", "run.cancel.running", "input.respond", "run.pause", "run.resume"} {
+			for _, action := range []Action{"issue.priority.set", "run.cancel.running", "input.respond", "run.pause"} {
 				if !containsAction(grant.Actions, action) {
 					t.Fatalf("%s grant omitted %s: %v", status, action, grant.Actions)
 				}
 			}
-			input, err := service.CreateInputRequest(context.Background(), runner, InputCreateRequest{LeaseID: lease.LeaseID,
-				LeaseRevision: lease.Revision, Kind: "approval", PromptTemplate: "approval_required",
-				OperationKeyDigest: sha256.Sum256([]byte("matrix-input-" + status))})
-			if err != nil {
-				t.Fatal(err)
+			if containsAction(grant.Actions, "run.resume") {
+				t.Fatalf("%s grant advertised resume from running runtime: %v", status, grant.Actions)
+			}
+			for _, action := range []Action{"issue.priority.set", "run.cancel.running", "input.respond", "run.pause"} {
+				if !grantHasTarget(grant, action) {
+					t.Fatalf("%s grant omitted target %s: %+v", status, action, grant.Targets)
+				}
 			}
 			requests := []CommandCreateRequest{
 				{GrantID: grant.GrantID, GrantRevision: grant.Revision, Action: "issue.priority.set", Priority: "high"},

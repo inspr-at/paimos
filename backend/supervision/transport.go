@@ -16,12 +16,16 @@ func (s *Service) Pull(ctx context.Context, principal auth.Principal, request Pu
 	if !validUUID(request.LeaseID) || request.LeaseRevision <= 0 || request.Cursor < 0 {
 		return PullProjection{}, domainError(ErrInvalid, CodeInvalidRequest)
 	}
+	if err := validateDevice(request.DeviceID); err != nil {
+		return PullProjection{}, err
+	}
 	authz, err := s.beginAuthorized(ctx, principal, true, ScopeRunner)
 	if err != nil {
 		return PullProjection{}, err
 	}
 	defer authz.tx.Rollback()
-	lease, err := loadCurrentLeaseRecordTx(ctx, authz.tx, authz.principal, request.LeaseID, request.LeaseRevision, "", "")
+	lease, err := loadCurrentLeaseRecordTx(ctx, authz.tx, authz.principal, request.LeaseID, request.LeaseRevision,
+		request.DeviceID, "")
 	if err != nil {
 		return PullProjection{}, err
 	}

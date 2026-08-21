@@ -138,7 +138,9 @@ func (s *Service) putRunnerLease(ctx context.Context, principal auth.Principal, 
 	defer authz.tx.Rollback()
 	if expectedID != "" {
 		if err := authz.tx.QueryRowContext(ctx, `SELECT agent_run_id FROM control_capability_leases
-			WHERE lease_id=? AND revision=? AND user_id=?`, expectedID, expectedRevision, authz.principal.UserID()).Scan(&runID); err != nil {
+			WHERE lease_id=? AND revision=? AND user_id=? AND principal_kind='api_key'
+			 AND actor_api_key_id=? AND device_id=?`, expectedID, expectedRevision, authz.principal.UserID(),
+			authz.principal.APIKeyID(), deviceID).Scan(&runID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return LeaseProjection{}, domainError(ErrNotFound, CodeTargetNotFound)
 			}
@@ -168,7 +170,7 @@ func (s *Service) putRunnerLease(ctx context.Context, principal auth.Principal, 
 		return LeaseProjection{}, err
 	}
 	if replay.found {
-		projection, loadErr := loadLeaseProjectionTx(ctx, authz.tx, authz.principal.UserID(), replay.leaseID.String, true)
+		projection, loadErr := loadLeaseProjectionTx(ctx, authz.tx, authz.principal, replay.leaseID.String, 0, deviceID, true)
 		if loadErr != nil {
 			return LeaseProjection{}, loadErr
 		}
@@ -246,7 +248,7 @@ func (s *Service) putRunnerLease(ctx context.Context, principal auth.Principal, 
 			return LeaseProjection{}, sqliteConflict(err)
 		}
 	}
-	projection, err := loadLeaseProjectionTx(ctx, authz.tx, authz.principal.UserID(), leaseID, true)
+	projection, err := loadLeaseProjectionTx(ctx, authz.tx, authz.principal, leaseID, 0, deviceID, true)
 	if err != nil {
 		return LeaseProjection{}, err
 	}
@@ -349,9 +351,13 @@ func insertLeaseEvent(ctx context.Context, tx *sql.Tx, id string, revision int64
 	return nil
 }
 
-func loadLeaseProjectionTx(ctx context.Context, tx *sql.Tx, userID int64, leaseID string, requireLive bool) (LeaseProjection, error) {
+func loadLeaseProjectionTx(ctx context.Context, tx *sql.Tx, principal auth.Principal, leaseID string, exactRevision int64,
+	deviceID string, requireLive bool) (LeaseProjection, error) {
 	if !validUUID(leaseID) {
 		return LeaseProjection{}, domainError(ErrNotFound, CodeTargetNotFound)
+	}
+	if principal.Kind() != auth.PrincipalAPIKey || principal.APIKeyID() <= 0 {
+		return LeaseProjection{}, domainError(ErrForbidden, CodeCredentialRevoked)
 	}
 	var projection LeaseProjection
 	var expiry string
@@ -364,13 +370,23 @@ func loadLeaseProjectionTx(ctx context.Context, tx *sql.Tx, userID int64, leaseI
 		FROM control_capability_leases lease
 		JOIN issues issue ON issue.id=lease.root_issue_id AND issue.deleted_at IS NULL
 		JOIN projects project ON project.id=issue.project_id
-		WHERE lease.lease_id=? AND lease.user_id=?`
+		WHERE lease.lease_id=? AND lease.user_id=? AND lease.principal_kind='api_key'
+		 AND lease.actor_api_key_id=?`
+	args := []any{leaseID, principal.UserID(), principal.APIKeyID()}
+	if exactRevision > 0 {
+		query += ` AND lease.revision=?`
+		args = append(args, exactRevision)
+	}
+	if deviceID != "" {
+		query += ` AND lease.device_id=?`
+		args = append(args, deviceID)
+	}
 	if requireLive {
 		query += ` AND lease.revision=(SELECT MAX(revision) FROM control_capability_leases WHERE lease_id=lease.lease_id)
 		 AND lease.revoked_at IS NULL AND lease.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')`
 	}
 	query += ` ORDER BY lease.revision DESC LIMIT 1`
-	err := tx.QueryRowContext(ctx, query, leaseID, userID).Scan(&projection.LeaseID, &projection.Revision,
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&projection.LeaseID, &projection.Revision,
 		&projection.DeliveryKey, &projection.IssueKey, &expiry, &projectID,
 		&projection.Target.DeliveryID, &projection.Target.DeliveryRevision, &projection.Target.RootIssueID,
 		&projection.Target.IssueRevision, &projection.Target.AttemptID, &projection.Target.AttemptNumber,
@@ -419,26 +435,29 @@ func (s *Service) RevokeRunnerLease(ctx context.Context, principal auth.Principa
 	if principal.Kind() != auth.PrincipalAPIKey || !validUUID(request.LeaseID) || request.Revision <= 0 {
 		return LeaseProjection{}, domainError(ErrInvalid, CodeInvalidRequest)
 	}
+	if err := validateDevice(request.DeviceID); err != nil {
+		return LeaseProjection{}, err
+	}
 	keyDigest, err := operationKeyDigest(request.OperationKeyDigest)
 	if err != nil {
 		return LeaseProjection{}, err
 	}
-	requestDigest := canonicalDigest("lease.revoke", stringField("lease_id", request.LeaseID), intField("revision", request.Revision))
+	requestDigest := canonicalDigest("lease.revoke", stringField("lease_id", request.LeaseID),
+		intField("revision", request.Revision), stringField("device_id", request.DeviceID))
 	authz, err := s.beginAuthorized(ctx, principal, false, ScopeRunner)
 	if err != nil {
 		return LeaseProjection{}, err
 	}
 	defer authz.tx.Rollback()
-	var projectID, ownerID int64
-	if err := authz.tx.QueryRowContext(ctx, `SELECT project_id,user_id FROM control_capability_leases WHERE lease_id=? AND revision=?`,
-		request.LeaseID, request.Revision).Scan(&projectID, &ownerID); err != nil {
+	var projectID int64
+	if err := authz.tx.QueryRowContext(ctx, `SELECT project_id FROM control_capability_leases
+		WHERE lease_id=? AND revision=? AND user_id=? AND principal_kind='api_key'
+		 AND actor_api_key_id=? AND device_id=?`, request.LeaseID, request.Revision, authz.principal.UserID(),
+		authz.principal.APIKeyID(), request.DeviceID).Scan(&projectID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return LeaseProjection{}, domainError(ErrNotFound, CodeTargetNotFound)
 		}
 		return LeaseProjection{}, storageError(ctx, err)
-	}
-	if ownerID != authz.principal.UserID() {
-		return LeaseProjection{}, domainError(ErrNotFound, CodeTargetNotFound)
 	}
 	if err := requireProjectEdit(ctx, authz.tx, authz.user, projectID); err != nil {
 		return LeaseProjection{}, err
@@ -448,7 +467,8 @@ func (s *Service) RevokeRunnerLease(ctx context.Context, principal auth.Principa
 		return LeaseProjection{}, err
 	}
 	if replay.found {
-		projection, loadErr := loadLeaseProjectionTx(ctx, authz.tx, authz.principal.UserID(), request.LeaseID, false)
+		projection, loadErr := loadLeaseProjectionTx(ctx, authz.tx, authz.principal, request.LeaseID,
+			request.Revision, request.DeviceID, false)
 		if loadErr != nil {
 			return LeaseProjection{}, loadErr
 		}
@@ -457,7 +477,8 @@ func (s *Service) RevokeRunnerLease(ctx context.Context, principal auth.Principa
 		}
 		return projection, nil
 	}
-	projection, err := loadLeaseProjectionTx(ctx, authz.tx, authz.principal.UserID(), request.LeaseID, true)
+	projection, err := loadLeaseProjectionTx(ctx, authz.tx, authz.principal, request.LeaseID,
+		request.Revision, request.DeviceID, true)
 	if err != nil {
 		return LeaseProjection{}, err
 	}
