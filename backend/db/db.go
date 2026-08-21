@@ -10066,6 +10066,1138 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			          AND action.action<>'run.cancel.running'))))
 			 BEGIN SELECT RAISE(ABORT,'control lease renewal target is stale'); END`,
 		}},
+
+		// M148 / PAI-810: versioned external-stage handoffs. The schema is
+		// deliberately additive: M144's canonical stage enums and M147's
+		// control enums remain closed. Owner and dependency reports have
+		// independent append-only streams and latest projections, so a Janus
+		// dependency fact cannot become a canonical stage fact by construction.
+		{148, []string{
+			`CREATE VIEW external_stage_user_roles AS
+			 SELECT id,status,
+			  CASE
+			   WHEN is_super_admin=1 THEN 'super_admin'
+			   WHEN role_key='member' AND role IN ('admin','external') THEN role
+			   WHEN role_key IN ('admin','member','external','super_admin') THEN role_key
+			   WHEN role IN ('admin','member','external') THEN role
+			   ELSE 'member'
+			  END AS effective_role
+			 FROM users`,
+			`CREATE TABLE external_stage_reporter_registrations (
+			 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+			 delivery_id        INTEGER NOT NULL,
+			 project_id         INTEGER NOT NULL,
+			 user_id            INTEGER NOT NULL,
+			 api_key_id         INTEGER NOT NULL,
+			 reporter_id        INTEGER NOT NULL,
+			 reporter_class     TEXT NOT NULL CHECK(reporter_class IN ('pharos','janus')),
+			 reporter_role      TEXT NOT NULL CHECK(reporter_role IN ('owner','dependency')),
+			 dependency_key     TEXT CHECK(dependency_key IS NULL OR
+			  (length(CAST(dependency_key AS BLOB)) BETWEEN 1 AND 64 AND
+			   dependency_key GLOB '[a-z]*' AND dependency_key NOT GLOB '*[^a-z0-9._-]*')),
+			 workflow_symbol    TEXT CHECK(workflow_symbol IS NULL OR
+			  (length(CAST(workflow_symbol AS BLOB)) BETWEEN 1 AND 64 AND
+			   workflow_symbol GLOB '[a-z]*' AND workflow_symbol NOT GLOB '*[^a-z0-9._-]*')),
+			 environment_symbol TEXT CHECK(environment_symbol IS NULL OR
+			  (length(CAST(environment_symbol AS BLOB)) BETWEEN 1 AND 64 AND
+			   environment_symbol GLOB '[a-z]*' AND environment_symbol NOT GLOB '*[^a-z0-9._-]*')),
+			 allow_deployment         INTEGER NOT NULL CHECK(allow_deployment IN (0,1)),
+			 allow_verification       INTEGER NOT NULL CHECK(allow_verification IN (0,1)),
+			 allow_authorization      INTEGER NOT NULL CHECK(allow_authorization IN (0,1)),
+			 allow_credential_handoff INTEGER NOT NULL CHECK(allow_credential_handoff IN (0,1)),
+			 created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 revoked_at         TEXT,
+			 UNIQUE(delivery_id,id),
+			 UNIQUE(delivery_id,api_key_id,reporter_class,reporter_role,dependency_key),
+			 FOREIGN KEY(delivery_id,reporter_id) REFERENCES delivery_reporters(delivery_id,id),
+			 FOREIGN KEY(api_key_id) REFERENCES api_keys(id),
+			 FOREIGN KEY(user_id) REFERENCES users(id),
+			 FOREIGN KEY(project_id) REFERENCES projects(id),
+			 CHECK((reporter_class='pharos' AND reporter_role='owner' AND dependency_key IS NULL AND
+			        workflow_symbol IS NOT NULL AND environment_symbol IS NOT NULL AND
+			        allow_deployment=1 AND allow_verification=1 AND
+			        allow_authorization=0 AND allow_credential_handoff=0) OR
+			       (reporter_class='janus' AND reporter_role='dependency' AND dependency_key IS NOT NULL AND
+			        workflow_symbol IS NULL AND environment_symbol IS NULL AND
+			        allow_deployment=0 AND allow_verification=0 AND
+			        allow_authorization=1 AND allow_credential_handoff=1)),
+			 CHECK(revoked_at IS NULL OR revoked_at>=created_at)
+			)`,
+			`CREATE INDEX idx_external_stage_registrations_key
+			 ON external_stage_reporter_registrations(api_key_id,delivery_id)`,
+			`CREATE UNIQUE INDEX idx_external_stage_registration_owner_exact
+			 ON external_stage_reporter_registrations(
+			  delivery_id,api_key_id,reporter_class,reporter_role,workflow_symbol,environment_symbol)
+			 WHERE reporter_role='owner' AND revoked_at IS NULL`,
+			`CREATE TRIGGER trg_external_stage_registration_insert_guard
+			 BEFORE INSERT ON external_stage_reporter_registrations
+			 WHEN NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.revoked_at IS NOT NULL OR
+			  NOT EXISTS(SELECT 1 FROM deliveries delivery
+			   JOIN issues issue ON issue.id=delivery.issue_id AND issue.deleted_at IS NULL
+			   JOIN projects project ON project.id=issue.project_id
+			   JOIN delivery_reporters reporter ON reporter.delivery_id=delivery.id AND reporter.id=NEW.reporter_id
+			   JOIN api_keys api_key ON api_key.id=NEW.api_key_id AND api_key.user_id=NEW.user_id
+			   JOIN external_stage_user_roles user ON user.id=NEW.user_id AND user.status='active'
+			   WHERE delivery.id=NEW.delivery_id AND issue.project_id=NEW.project_id
+			    AND reporter.reporter_type='external' AND api_key.disabled_at IS NULL
+			    AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			    AND (user.effective_role IN ('admin','super_admin') OR
+			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
+			          AND membership.project_id=NEW.project_id AND membership.access_level IN ('viewer','editor')) OR
+			         (user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+			          WHERE membership.user_id=user.id AND membership.project_id=NEW.project_id))))
+			 BEGIN SELECT RAISE(ABORT,'external stage registration binding is not current'); END`,
+			`CREATE TRIGGER trg_external_stage_registration_update_guard
+			 BEFORE UPDATE ON external_stage_reporter_registrations
+			 WHEN NEW.id<>OLD.id OR NEW.delivery_id<>OLD.delivery_id OR NEW.project_id<>OLD.project_id OR
+			  NEW.user_id<>OLD.user_id OR NEW.api_key_id<>OLD.api_key_id OR NEW.reporter_id<>OLD.reporter_id OR
+			  NEW.reporter_class<>OLD.reporter_class OR NEW.reporter_role<>OLD.reporter_role OR
+			  NEW.dependency_key IS NOT OLD.dependency_key OR NEW.workflow_symbol IS NOT OLD.workflow_symbol OR
+			  NEW.environment_symbol IS NOT OLD.environment_symbol OR NEW.allow_deployment<>OLD.allow_deployment OR
+			  NEW.allow_verification<>OLD.allow_verification OR NEW.allow_authorization<>OLD.allow_authorization OR
+			  NEW.allow_credential_handoff<>OLD.allow_credential_handoff OR NEW.created_at<>OLD.created_at OR
+			  OLD.revoked_at IS NOT NULL OR NEW.revoked_at IS NULL
+			 BEGIN SELECT RAISE(ABORT,'external stage registration identity is immutable'); END`,
+			`CREATE TRIGGER trg_external_stage_registration_no_delete BEFORE DELETE ON external_stage_reporter_registrations
+			 BEGIN SELECT RAISE(ABORT,'external stage registrations are append-only'); END`,
+
+			`CREATE TABLE external_stage_prerequisite_sets (
+			 delivery_id                   INTEGER NOT NULL,
+			 attempt_id                    INTEGER NOT NULL,
+			 stage_key                     TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number              INTEGER NOT NULL CHECK(execution_number>0),
+			 execution_start_stage_event_id INTEGER NOT NULL,
+			 authority_epoch               INTEGER NOT NULL CHECK(authority_epoch>0),
+			 authority_stage_event_id      INTEGER NOT NULL,
+			 declared_count                INTEGER NOT NULL CHECK(declared_count BETWEEN 0 AND 16),
+			 created_at                    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 sealed_at                     TEXT,
+			 PRIMARY KEY(attempt_id,stage_key,execution_number,authority_epoch),
+			 UNIQUE(delivery_id,attempt_id,stage_key,execution_number,authority_epoch),
+			 FOREIGN KEY(delivery_id,attempt_id) REFERENCES delivery_attempts(delivery_id,id),
+			 FOREIGN KEY(delivery_id,attempt_id,stage_key,execution_number,execution_start_stage_event_id)
+			  REFERENCES delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,id),
+			 FOREIGN KEY(delivery_id,attempt_id,stage_key,execution_number,authority_stage_event_id)
+			  REFERENCES delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,id)
+			) WITHOUT ROWID`,
+			`CREATE TABLE external_stage_prerequisites (
+			 delivery_id      INTEGER NOT NULL,
+			 attempt_id       INTEGER NOT NULL,
+			 stage_key        TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number INTEGER NOT NULL CHECK(execution_number>0),
+			 authority_epoch  INTEGER NOT NULL CHECK(authority_epoch>0),
+			 dependency_key   TEXT NOT NULL CHECK(length(CAST(dependency_key AS BLOB)) BETWEEN 1 AND 64 AND
+			  dependency_key GLOB '[a-z]*' AND dependency_key NOT GLOB '*[^a-z0-9._-]*'),
+			 registration_id  INTEGER NOT NULL,
+			 ordinal          INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 15),
+			 created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 PRIMARY KEY(attempt_id,stage_key,execution_number,authority_epoch,dependency_key),
+			 UNIQUE(attempt_id,stage_key,execution_number,authority_epoch,ordinal),
+			 FOREIGN KEY(delivery_id,attempt_id,stage_key,execution_number,authority_epoch)
+			  REFERENCES external_stage_prerequisite_sets(delivery_id,attempt_id,stage_key,execution_number,authority_epoch),
+			 FOREIGN KEY(delivery_id,registration_id)
+			  REFERENCES external_stage_reporter_registrations(delivery_id,id)
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_external_stage_prerequisite_set_guard
+			 BEFORE INSERT ON external_stage_prerequisite_sets
+			 WHEN NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.sealed_at IS NOT NULL OR
+			  NOT EXISTS(SELECT 1 FROM delivery_stage_latest latest
+			   WHERE latest.delivery_id=NEW.delivery_id AND latest.attempt_id=NEW.attempt_id
+			    AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
+			    AND latest.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			    AND latest.authority_epoch=NEW.authority_epoch
+			    AND latest.authority_stage_event_id=NEW.authority_stage_event_id)
+			 BEGIN SELECT RAISE(ABORT,'external stage prerequisite set is stale'); END`,
+			`CREATE TRIGGER trg_external_stage_prerequisite_guard
+			 BEFORE INSERT ON external_stage_prerequisites
+			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_prerequisite_sets
+			  WHERE attempt_id=NEW.attempt_id AND stage_key=NEW.stage_key AND execution_number=NEW.execution_number
+			   AND authority_epoch=NEW.authority_epoch AND sealed_at IS NULL) OR
+			  NOT EXISTS(SELECT 1 FROM external_stage_reporter_registrations registration
+			   WHERE registration.id=NEW.registration_id AND registration.delivery_id=NEW.delivery_id
+			    AND registration.reporter_class='janus' AND registration.reporter_role='dependency'
+			    AND registration.dependency_key=NEW.dependency_key AND registration.revoked_at IS NULL)
+			 BEGIN SELECT RAISE(ABORT,'invalid external stage prerequisite'); END`,
+			`CREATE TRIGGER trg_external_stage_prerequisite_sets_update_guard
+			 BEFORE UPDATE ON external_stage_prerequisite_sets
+			 WHEN OLD.sealed_at IS NOT NULL OR NEW.sealed_at IS NULL OR
+			  NEW.delivery_id<>OLD.delivery_id OR NEW.attempt_id<>OLD.attempt_id OR NEW.stage_key<>OLD.stage_key OR
+			  NEW.execution_number<>OLD.execution_number OR
+			  NEW.execution_start_stage_event_id<>OLD.execution_start_stage_event_id OR
+			  NEW.authority_epoch<>OLD.authority_epoch OR NEW.authority_stage_event_id<>OLD.authority_stage_event_id OR
+			  NEW.declared_count<>OLD.declared_count OR NEW.created_at<>OLD.created_at OR
+			  (SELECT COUNT(*) FROM external_stage_prerequisites prerequisite
+			   WHERE prerequisite.attempt_id=OLD.attempt_id AND prerequisite.stage_key=OLD.stage_key
+			    AND prerequisite.execution_number=OLD.execution_number
+			    AND prerequisite.authority_epoch=OLD.authority_epoch)<>OLD.declared_count
+			 BEGIN SELECT RAISE(ABORT,'invalid external stage prerequisite seal'); END`,
+			`CREATE TRIGGER trg_external_stage_prerequisite_sets_no_delete BEFORE DELETE ON external_stage_prerequisite_sets
+			 BEGIN SELECT RAISE(ABORT,'external stage prerequisite sets are immutable'); END`,
+			`CREATE TRIGGER trg_external_stage_prerequisites_no_update BEFORE UPDATE ON external_stage_prerequisites
+			 BEGIN SELECT RAISE(ABORT,'external stage prerequisites are immutable'); END`,
+			`CREATE TRIGGER trg_external_stage_prerequisites_no_delete BEFORE DELETE ON external_stage_prerequisites
+			 BEGIN SELECT RAISE(ABORT,'external stage prerequisites are immutable'); END`,
+
+			`CREATE TABLE external_stage_handoffs (
+			 id                             INTEGER PRIMARY KEY AUTOINCREMENT,
+			 handoff_id                     TEXT NOT NULL UNIQUE CHECK(length(CAST(handoff_id AS BLOB))=26 AND
+			  handoff_id NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*'),
+			 delivery_id                    INTEGER NOT NULL,
+			 delivery_key                   TEXT NOT NULL,
+			 root_issue_id                  INTEGER NOT NULL,
+			 project_id                     INTEGER NOT NULL,
+			 attempt_id                     INTEGER NOT NULL,
+			 attempt_number                 INTEGER NOT NULL CHECK(attempt_number>0),
+			 plan_revision                  INTEGER NOT NULL CHECK(plan_revision>0),
+			 plan_digest                    BLOB NOT NULL CHECK(typeof(plan_digest)='blob' AND length(plan_digest)=32),
+			 stage_key                      TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number               INTEGER NOT NULL CHECK(execution_number>0),
+			 execution_start_stage_event_id INTEGER NOT NULL,
+			 predecessor_digest             BLOB NOT NULL CHECK(typeof(predecessor_digest)='blob' AND length(predecessor_digest)=32),
+			 authority_epoch                INTEGER NOT NULL CHECK(authority_epoch>0),
+			 authority_stage_event_id       INTEGER NOT NULL,
+			 reporter_registration_id       INTEGER NOT NULL,
+			 reporter_id                    INTEGER NOT NULL,
+			 api_key_id                     INTEGER NOT NULL,
+			 reporter_class                 TEXT NOT NULL CHECK(reporter_class IN ('pharos','janus')),
+			 reporter_role                  TEXT NOT NULL CHECK(reporter_role IN ('owner','dependency')),
+			 dependency_key                 TEXT CHECK(dependency_key IS NULL OR
+			  (length(CAST(dependency_key AS BLOB)) BETWEEN 1 AND 64 AND dependency_key GLOB '[a-z]*'
+			   AND dependency_key NOT GLOB '*[^a-z0-9._-]*')),
+			 workflow_symbol                TEXT,
+			 environment_symbol             TEXT,
+			 allow_deployment               INTEGER NOT NULL CHECK(allow_deployment IN (0,1)),
+			 allow_verification             INTEGER NOT NULL CHECK(allow_verification IN (0,1)),
+			 allow_authorization            INTEGER NOT NULL CHECK(allow_authorization IN (0,1)),
+			 allow_credential_handoff       INTEGER NOT NULL CHECK(allow_credential_handoff IN (0,1)),
+			 contract_major                 INTEGER NOT NULL CHECK(contract_major=1),
+			 fixture_digest                 BLOB NOT NULL CHECK(typeof(fixture_digest)='blob' AND
+			  fixture_digest=x'0318f4025902c9d5dd790384950cc9daebb16e02e79a4a90ce7dddc673e68bed'),
+			 credential_epoch               INTEGER NOT NULL DEFAULT 0 CHECK(credential_epoch>=0),
+			 secret_digest                  BLOB CHECK(secret_digest IS NULL OR (typeof(secret_digest)='blob' AND length(secret_digest)=32)),
+			 expires_at                     TEXT NOT NULL,
+			 context_digest                 BLOB NOT NULL CHECK(typeof(context_digest)='blob' AND length(context_digest)=32),
+			 lifecycle_state                TEXT NOT NULL DEFAULT 'issued' CHECK(lifecycle_state IN
+			  ('issued','accepted','active','waiting','blocked','succeeded','failed')),
+			 last_sequence                  INTEGER NOT NULL DEFAULT 0 CHECK(last_sequence>=0),
+			 created_at                     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 accepted_at                    TEXT,
+			 terminal_at                    TEXT,
+			 revoked_at                     TEXT,
+			 UNIQUE(delivery_id,id),
+			 FOREIGN KEY(delivery_id,root_issue_id) REFERENCES deliveries(id,issue_id),
+			 FOREIGN KEY(delivery_id,attempt_id) REFERENCES delivery_attempts(delivery_id,id),
+			 FOREIGN KEY(delivery_id,reporter_registration_id)
+			  REFERENCES external_stage_reporter_registrations(delivery_id,id),
+			 FOREIGN KEY(delivery_id,reporter_id) REFERENCES delivery_reporters(delivery_id,id),
+			 FOREIGN KEY(api_key_id) REFERENCES api_keys(id),
+			 FOREIGN KEY(delivery_id,attempt_id,stage_key,execution_number,execution_start_stage_event_id)
+			  REFERENCES delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,id),
+			 FOREIGN KEY(delivery_id,attempt_id,stage_key,execution_number,authority_stage_event_id)
+			  REFERENCES delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,id),
+			 CHECK(expires_at>created_at),
+			 CHECK((credential_epoch=0 AND secret_digest IS NULL) OR (credential_epoch>0 AND secret_digest IS NOT NULL)),
+			 CHECK((lifecycle_state='issued' AND accepted_at IS NULL AND terminal_at IS NULL) OR
+			       (lifecycle_state IN ('accepted','active','waiting','blocked') AND accepted_at IS NOT NULL AND terminal_at IS NULL) OR
+			       (lifecycle_state IN ('succeeded','failed') AND accepted_at IS NOT NULL AND terminal_at IS NOT NULL)),
+			 CHECK(revoked_at IS NULL OR revoked_at>=created_at),
+			 CHECK((reporter_class='pharos' AND reporter_role='owner' AND dependency_key IS NULL AND
+			        workflow_symbol IS NOT NULL AND environment_symbol IS NOT NULL AND
+			        allow_deployment=1 AND allow_verification=1 AND allow_authorization=0 AND allow_credential_handoff=0) OR
+			       (reporter_class='janus' AND reporter_role='dependency' AND dependency_key IS NOT NULL AND
+			        workflow_symbol IS NULL AND environment_symbol IS NULL AND
+			        allow_deployment=0 AND allow_verification=0 AND allow_authorization=1 AND allow_credential_handoff=1))
+			)`,
+			`CREATE UNIQUE INDEX idx_external_stage_owner_handoff
+			 ON external_stage_handoffs(attempt_id,stage_key,execution_number,authority_epoch)
+			 WHERE reporter_role='owner' AND revoked_at IS NULL`,
+			`CREATE UNIQUE INDEX idx_external_stage_dependency_handoff
+			 ON external_stage_handoffs(attempt_id,stage_key,execution_number,authority_epoch,dependency_key,reporter_registration_id)
+			 WHERE reporter_role='dependency' AND revoked_at IS NULL`,
+			`CREATE INDEX idx_external_stage_handoff_api_key ON external_stage_handoffs(api_key_id,handoff_id)`,
+			`CREATE TRIGGER trg_external_stage_handoff_insert_guard
+			 BEFORE INSERT ON external_stage_handoffs
+			 WHEN NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.credential_epoch<>0 OR
+			  NEW.secret_digest IS NOT NULL OR NEW.lifecycle_state<>'issued' OR NEW.last_sequence<>0 OR
+			  NEW.accepted_at IS NOT NULL OR NEW.terminal_at IS NOT NULL OR NEW.revoked_at IS NOT NULL OR
+			  NOT EXISTS(SELECT 1 FROM deliveries delivery
+			   JOIN issues issue ON issue.id=delivery.issue_id AND issue.deleted_at IS NULL
+			   JOIN delivery_attempts attempt ON attempt.delivery_id=delivery.id AND attempt.id=NEW.attempt_id
+			   JOIN delivery_stage_latest latest ON latest.delivery_id=delivery.id AND latest.attempt_id=attempt.id
+			    AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
+			    AND latest.execution_start_stage_event_id=NEW.execution_start_stage_event_id
+			    AND latest.authority_epoch=NEW.authority_epoch AND latest.authority_stage_event_id=NEW.authority_stage_event_id
+			   JOIN external_stage_reporter_registrations registration
+			    ON registration.id=NEW.reporter_registration_id AND registration.delivery_id=delivery.id
+			    AND registration.project_id=NEW.project_id
+			    AND registration.reporter_id=NEW.reporter_id AND registration.api_key_id=NEW.api_key_id
+			    AND registration.reporter_class=NEW.reporter_class AND registration.reporter_role=NEW.reporter_role
+			    AND registration.dependency_key IS NEW.dependency_key AND registration.workflow_symbol IS NEW.workflow_symbol
+			    AND registration.environment_symbol IS NEW.environment_symbol
+			    AND registration.allow_deployment=NEW.allow_deployment
+			    AND registration.allow_verification=NEW.allow_verification
+			    AND registration.allow_authorization=NEW.allow_authorization
+			    AND registration.allow_credential_handoff=NEW.allow_credential_handoff
+			    AND registration.revoked_at IS NULL
+			    AND EXISTS(SELECT 1 FROM external_stage_setup_events setup
+			     WHERE setup.registration_id=registration.id AND setup.event_kind='registration_created'
+			      AND setup.delivery_id=registration.delivery_id AND setup.project_id=registration.project_id)
+			   JOIN api_keys api_key ON api_key.id=registration.api_key_id AND api_key.user_id=registration.user_id
+			    AND api_key.disabled_at IS NULL
+			    AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			   JOIN external_stage_user_roles reporter_user ON reporter_user.id=registration.user_id AND reporter_user.status='active'
+			   WHERE delivery.id=NEW.delivery_id AND delivery.delivery_key=NEW.delivery_key
+			    AND delivery.issue_id=NEW.root_issue_id AND issue.project_id=NEW.project_id
+			    AND attempt.attempt_number=NEW.attempt_number AND attempt.plan_revision=NEW.plan_revision
+			    AND (reporter_user.effective_role IN ('admin','super_admin') OR
+			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=reporter_user.id
+			          AND membership.project_id=NEW.project_id AND membership.access_level IN ('viewer','editor')) OR
+			         (reporter_user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+			          WHERE membership.user_id=reporter_user.id AND membership.project_id=NEW.project_id)))
+			    AND ((NEW.reporter_role='owner' AND latest.current_reporter_id=NEW.reporter_id) OR
+			         (NEW.reporter_role='dependency' AND EXISTS(SELECT 1 FROM external_stage_prerequisites prerequisite
+			          JOIN external_stage_prerequisite_sets prerequisite_set
+			           ON prerequisite_set.attempt_id=prerequisite.attempt_id AND prerequisite_set.stage_key=prerequisite.stage_key
+			           AND prerequisite_set.execution_number=prerequisite.execution_number
+			           AND prerequisite_set.authority_epoch=prerequisite.authority_epoch AND prerequisite_set.sealed_at IS NOT NULL
+			          WHERE prerequisite.attempt_id=NEW.attempt_id AND prerequisite.stage_key=NEW.stage_key
+			           AND prerequisite.execution_number=NEW.execution_number AND prerequisite.authority_epoch=NEW.authority_epoch
+			           AND prerequisite.dependency_key=NEW.dependency_key
+			           AND prerequisite.registration_id=NEW.reporter_registration_id)))
+			  )
+			 BEGIN SELECT RAISE(ABORT,'external stage handoff binding is stale'); END`,
+			`CREATE TRIGGER trg_external_stage_handoff_binding_guard
+			 BEFORE UPDATE ON external_stage_handoffs
+			 WHEN NEW.id<>OLD.id OR NEW.handoff_id<>OLD.handoff_id OR NEW.delivery_id<>OLD.delivery_id OR
+			  NEW.delivery_key<>OLD.delivery_key OR NEW.root_issue_id<>OLD.root_issue_id OR NEW.project_id<>OLD.project_id OR
+			  NEW.attempt_id<>OLD.attempt_id OR NEW.attempt_number<>OLD.attempt_number OR NEW.plan_revision<>OLD.plan_revision OR
+			  NEW.plan_digest<>OLD.plan_digest OR NEW.stage_key<>OLD.stage_key OR NEW.execution_number<>OLD.execution_number OR
+			  NEW.execution_start_stage_event_id<>OLD.execution_start_stage_event_id OR NEW.predecessor_digest<>OLD.predecessor_digest OR
+			  NEW.authority_epoch<>OLD.authority_epoch OR NEW.authority_stage_event_id<>OLD.authority_stage_event_id OR
+			  NEW.reporter_registration_id<>OLD.reporter_registration_id OR NEW.reporter_id<>OLD.reporter_id OR
+			  NEW.api_key_id<>OLD.api_key_id OR NEW.reporter_class<>OLD.reporter_class OR NEW.reporter_role<>OLD.reporter_role OR
+			  NEW.dependency_key IS NOT OLD.dependency_key OR NEW.workflow_symbol IS NOT OLD.workflow_symbol OR
+			  NEW.environment_symbol IS NOT OLD.environment_symbol OR NEW.allow_deployment<>OLD.allow_deployment OR
+			  NEW.allow_verification<>OLD.allow_verification OR NEW.allow_authorization<>OLD.allow_authorization OR
+			  NEW.allow_credential_handoff<>OLD.allow_credential_handoff OR NEW.contract_major<>OLD.contract_major OR
+			  NEW.fixture_digest<>OLD.fixture_digest OR NEW.expires_at<>OLD.expires_at OR
+			  NEW.context_digest<>OLD.context_digest OR NEW.created_at<>OLD.created_at OR
+			  NEW.credential_epoch<OLD.credential_epoch OR NEW.credential_epoch>OLD.credential_epoch+1 OR
+			  (NEW.credential_epoch<>OLD.credential_epoch AND NEW.secret_digest IS OLD.secret_digest) OR
+			  NEW.last_sequence<OLD.last_sequence OR NEW.last_sequence>OLD.last_sequence+1 OR
+			  (OLD.revoked_at IS NOT NULL AND NEW.revoked_at IS NOT OLD.revoked_at) OR
+			  (OLD.accepted_at IS NOT NULL AND NEW.accepted_at IS NOT OLD.accepted_at) OR
+			  (OLD.terminal_at IS NOT NULL AND NEW.terminal_at IS NOT OLD.terminal_at)
+			 BEGIN SELECT RAISE(ABORT,'external stage handoff binding is immutable'); END`,
+			`CREATE TRIGGER trg_external_stage_handoff_no_delete BEFORE DELETE ON external_stage_handoffs
+			 BEGIN SELECT RAISE(ABORT,'external stage handoffs are append-only'); END`,
+
+			`CREATE TABLE external_stage_operation_events (
+			 id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+			 handoff_row_id        INTEGER NOT NULL,
+			 operation_kind        TEXT NOT NULL CHECK(operation_kind IN ('created','secret_minted','secret_rotated','revoked','accepted')),
+			 request_digest        BLOB NOT NULL CHECK(typeof(request_digest)='blob' AND length(request_digest)=32),
+			 idempotency_digest    BLOB NOT NULL CHECK(typeof(idempotency_digest)='blob' AND length(idempotency_digest)=32),
+			 actor_user_id         INTEGER NOT NULL,
+			 actor_principal_kind  TEXT NOT NULL CHECK(actor_principal_kind IN ('session','api_key')),
+			 actor_session_id      TEXT,
+			 actor_api_key_id      INTEGER,
+			 credential_epoch      INTEGER NOT NULL CHECK(credential_epoch>=0),
+			 sequence              INTEGER CHECK(sequence>0),
+			 server_received_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 UNIQUE(handoff_row_id,operation_kind,idempotency_digest),
+			 FOREIGN KEY(handoff_row_id) REFERENCES external_stage_handoffs(id),
+			 CHECK((actor_principal_kind='session' AND actor_session_id IS NOT NULL AND actor_api_key_id IS NULL) OR
+			       (actor_principal_kind='api_key' AND actor_session_id IS NULL AND actor_api_key_id IS NOT NULL)),
+			 CHECK((operation_kind='accepted' AND sequence IS NOT NULL) OR (operation_kind<>'accepted' AND sequence IS NULL))
+			)`,
+			`CREATE UNIQUE INDEX idx_external_stage_operation_causal
+			 ON external_stage_operation_events(handoff_row_id,operation_kind,credential_epoch)`,
+			`CREATE TRIGGER trg_external_stage_operations_no_update BEFORE UPDATE ON external_stage_operation_events
+			 BEGIN SELECT RAISE(ABORT,'external stage operations are append-only'); END`,
+			`CREATE TRIGGER trg_external_stage_operations_no_delete BEFORE DELETE ON external_stage_operation_events
+			 BEGIN SELECT RAISE(ABORT,'external stage operations are append-only'); END`,
+
+			`CREATE TABLE external_stage_report_events (
+			 id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+			 handoff_row_id        INTEGER NOT NULL,
+			 actor_api_key_id      INTEGER NOT NULL REFERENCES api_keys(id),
+			 sequence              INTEGER NOT NULL CHECK(sequence>0),
+			 credential_epoch      INTEGER NOT NULL CHECK(credential_epoch>0),
+			 request_digest        BLOB NOT NULL CHECK(typeof(request_digest)='blob' AND length(request_digest)=32),
+			 idempotency_digest    BLOB NOT NULL CHECK(typeof(idempotency_digest)='blob' AND length(idempotency_digest)=32),
+			 lifecycle_state       TEXT NOT NULL CHECK(lifecycle_state IN ('active','waiting','blocked','succeeded','failed')),
+			 observed_at           TEXT NOT NULL,
+			 server_received_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 heartbeat              INTEGER NOT NULL CHECK(heartbeat IN (0,1)),
+			 declared_blockers     INTEGER NOT NULL CHECK(declared_blockers BETWEEN 0 AND 8),
+			 evidence_kind         TEXT CHECK(evidence_kind IN ('deployment','verification','authorization','credential_handoff')),
+			 UNIQUE(handoff_row_id,sequence),
+			 UNIQUE(handoff_row_id,idempotency_digest),
+			 FOREIGN KEY(handoff_row_id) REFERENCES external_stage_handoffs(id),
+			 CHECK((heartbeat=1 AND evidence_kind IS NULL AND declared_blockers=0 AND lifecycle_state IN ('active','waiting','blocked')) OR heartbeat=0),
+			 CHECK(heartbeat=1 OR lifecycle_state<>'blocked' OR declared_blockers>0),
+			 CHECK(lifecycle_state NOT IN ('succeeded','failed') OR declared_blockers=0)
+			)`,
+			`CREATE INDEX idx_external_stage_report_received ON external_stage_report_events(handoff_row_id,server_received_at DESC)`,
+			`CREATE TRIGGER trg_external_stage_reports_no_update BEFORE UPDATE ON external_stage_report_events
+			 BEGIN SELECT RAISE(ABORT,'external stage reports are append-only'); END`,
+			`CREATE TRIGGER trg_external_stage_reports_no_delete BEFORE DELETE ON external_stage_report_events
+			 BEGIN SELECT RAISE(ABORT,'external stage reports are append-only'); END`,
+			`CREATE TABLE external_stage_heartbeat_windows (
+			 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+			 handoff_row_id     INTEGER NOT NULL REFERENCES external_stage_handoffs(id),
+			 actor_api_key_id   INTEGER NOT NULL REFERENCES api_keys(id),
+			 credential_epoch   INTEGER NOT NULL CHECK(credential_epoch>0),
+			 window_number      INTEGER NOT NULL CHECK(window_number>0),
+			 first_sequence     INTEGER NOT NULL CHECK(first_sequence>0),
+			 last_sequence      INTEGER NOT NULL CHECK(last_sequence>=first_sequence),
+			 heartbeat_count    INTEGER NOT NULL CHECK(heartbeat_count BETWEEN 1 AND 64),
+			 lifecycle_state    TEXT NOT NULL CHECK(lifecycle_state IN ('active','waiting','blocked')),
+			 replay_json        TEXT NOT NULL CHECK(json_valid(replay_json) AND json_type(replay_json)='array'
+			  AND length(CAST(replay_json AS BLOB)) BETWEEN 100 AND 8192),
+			 window_started_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 last_observed_at   TEXT NOT NULL,
+			 last_received_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 UNIQUE(handoff_row_id,credential_epoch,window_number),
+			 CHECK(last_sequence=first_sequence+heartbeat_count-1),
+			 CHECK(json_array_length(replay_json)=heartbeat_count)
+			)`,
+			`CREATE INDEX idx_external_stage_heartbeat_tail
+			 ON external_stage_heartbeat_windows(handoff_row_id,credential_epoch,window_number DESC)`,
+			`CREATE TRIGGER trg_external_stage_heartbeat_insert_guard
+			 BEFORE INSERT ON external_stage_heartbeat_windows
+			 WHEN NEW.window_started_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			  NEW.last_received_at<>NEW.window_started_at OR NEW.heartbeat_count<>1 OR
+			  NEW.first_sequence<>NEW.last_sequence OR
+			  EXISTS(SELECT 1 FROM json_each(NEW.replay_json) replay WHERE json_type(replay.value)<>'object' OR
+			   (SELECT COUNT(*) FROM json_each(replay.value))<>3 OR
+			   EXISTS(SELECT 1 FROM json_each(replay.value) member
+			    WHERE member.key NOT IN ('sequence','request_digest','idempotency_digest')) OR
+			   json_type(replay.value,'$.sequence')<>'integer' OR
+			   json_type(replay.value,'$.request_digest')<>'text' OR
+			   json_type(replay.value,'$.idempotency_digest')<>'text' OR
+			   json_extract(replay.value,'$.sequence')<>NEW.last_sequence OR
+			   length(json_extract(replay.value,'$.request_digest'))<>64 OR
+			   json_extract(replay.value,'$.request_digest') GLOB '*[^0-9a-f]*' OR
+			   length(json_extract(replay.value,'$.idempotency_digest'))<>64 OR
+			   json_extract(replay.value,'$.idempotency_digest') GLOB '*[^0-9a-f]*') OR
+			  NOT EXISTS(SELECT 1 FROM external_stage_handoffs handoff
+			   JOIN external_stage_reporter_registrations registration ON registration.id=handoff.reporter_registration_id
+			    AND registration.delivery_id=handoff.delivery_id AND registration.api_key_id=handoff.api_key_id
+			    AND registration.revoked_at IS NULL
+			   JOIN api_keys api_key ON api_key.id=handoff.api_key_id AND api_key.user_id=registration.user_id
+			    AND api_key.disabled_at IS NULL
+			    AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			   JOIN external_stage_user_roles user ON user.id=registration.user_id AND user.status='active'
+			   JOIN issues issue ON issue.id=handoff.root_issue_id AND issue.project_id=handoff.project_id AND issue.deleted_at IS NULL
+			   JOIN projects project ON project.id=handoff.project_id AND project.status IN ('active','frozen')
+			   JOIN delivery_attempts attempt ON attempt.id=handoff.attempt_id AND attempt.delivery_id=handoff.delivery_id
+			    AND attempt.attempt_number=handoff.attempt_number AND attempt.plan_revision=handoff.plan_revision
+			   JOIN delivery_stage_latest latest ON latest.delivery_id=handoff.delivery_id AND latest.attempt_id=handoff.attempt_id
+			    AND latest.stage_key=handoff.stage_key AND latest.execution_number=handoff.execution_number
+			    AND latest.execution_start_stage_event_id=handoff.execution_start_stage_event_id
+			    AND latest.authority_epoch=handoff.authority_epoch AND latest.authority_stage_event_id=handoff.authority_stage_event_id
+			   WHERE handoff.id=NEW.handoff_row_id AND NEW.actor_api_key_id=handoff.api_key_id
+			    AND NEW.credential_epoch=handoff.credential_epoch AND handoff.secret_digest IS NOT NULL
+			    AND handoff.revoked_at IS NULL AND handoff.terminal_at IS NULL
+			    AND handoff.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			    AND handoff.lifecycle_state=NEW.lifecycle_state AND NEW.last_sequence=handoff.last_sequence+1
+			    AND NEW.window_number=COALESCE((SELECT MAX(prior.window_number)+1 FROM external_stage_heartbeat_windows prior
+			     WHERE prior.handoff_row_id=handoff.id AND prior.credential_epoch=handoff.credential_epoch),1)
+			    AND (user.effective_role IN ('admin','super_admin') OR
+			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
+			          AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
+			         (user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+			          WHERE membership.user_id=user.id AND membership.project_id=handoff.project_id)))
+			    AND ((handoff.reporter_role='owner' AND latest.current_reporter_id=handoff.reporter_id) OR
+			         (handoff.reporter_role='dependency' AND EXISTS(SELECT 1 FROM external_stage_prerequisites prerequisite
+			          JOIN external_stage_prerequisite_sets prerequisite_set
+			           ON prerequisite_set.attempt_id=prerequisite.attempt_id AND prerequisite_set.stage_key=prerequisite.stage_key
+			           AND prerequisite_set.execution_number=prerequisite.execution_number
+			           AND prerequisite_set.authority_epoch=prerequisite.authority_epoch AND prerequisite_set.sealed_at IS NOT NULL
+			          WHERE prerequisite.attempt_id=handoff.attempt_id AND prerequisite.stage_key=handoff.stage_key
+			           AND prerequisite.execution_number=handoff.execution_number AND prerequisite.authority_epoch=handoff.authority_epoch
+			           AND prerequisite.dependency_key=handoff.dependency_key
+			           AND prerequisite.registration_id=handoff.reporter_registration_id))))
+			 BEGIN SELECT RAISE(ABORT,'external stage heartbeat window lacks a current exact binding'); END`,
+			`CREATE TRIGGER trg_external_stage_heartbeat_update_guard
+			 BEFORE UPDATE ON external_stage_heartbeat_windows
+			 WHEN NEW.id<>OLD.id OR NEW.handoff_row_id<>OLD.handoff_row_id OR NEW.actor_api_key_id<>OLD.actor_api_key_id OR
+			  NEW.credential_epoch<>OLD.credential_epoch OR NEW.window_number<>OLD.window_number OR
+			  NEW.first_sequence<>OLD.first_sequence OR NEW.window_started_at<>OLD.window_started_at OR
+			  NEW.last_sequence<>OLD.last_sequence+1 OR NEW.heartbeat_count<>OLD.heartbeat_count+1 OR
+			  NEW.last_received_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			  NEW.heartbeat_count>64 OR julianday(NEW.last_received_at)-julianday(OLD.window_started_at)>30.0/86400.0 OR
+			  NEW.lifecycle_state<>OLD.lifecycle_state OR json_array_length(NEW.replay_json)<>NEW.heartbeat_count OR
+			  json_remove(NEW.replay_json,'$[#-1]')<>OLD.replay_json OR
+			  json_extract(NEW.replay_json,'$[#-1].sequence')<>NEW.last_sequence OR
+			  EXISTS(SELECT 1 FROM json_each(NEW.replay_json) replay WHERE json_type(replay.value)<>'object' OR
+			   (SELECT COUNT(*) FROM json_each(replay.value))<>3 OR
+			   EXISTS(SELECT 1 FROM json_each(replay.value) member
+			    WHERE member.key NOT IN ('sequence','request_digest','idempotency_digest')) OR
+			   json_type(replay.value,'$.sequence')<>'integer' OR
+			   json_type(replay.value,'$.request_digest')<>'text' OR
+			   json_type(replay.value,'$.idempotency_digest')<>'text' OR
+			   CAST(json_extract(replay.value,'$.sequence') AS INTEGER)<NEW.first_sequence OR
+			   CAST(json_extract(replay.value,'$.sequence') AS INTEGER)>NEW.last_sequence OR
+			   length(json_extract(replay.value,'$.request_digest'))<>64 OR
+			   json_extract(replay.value,'$.request_digest') GLOB '*[^0-9a-f]*' OR
+			   length(json_extract(replay.value,'$.idempotency_digest'))<>64 OR
+			   json_extract(replay.value,'$.idempotency_digest') GLOB '*[^0-9a-f]*') OR
+			  NOT EXISTS(SELECT 1 FROM external_stage_handoffs handoff
+			   JOIN external_stage_reporter_registrations registration ON registration.id=handoff.reporter_registration_id
+			    AND registration.api_key_id=handoff.api_key_id AND registration.revoked_at IS NULL
+			   JOIN api_keys api_key ON api_key.id=handoff.api_key_id AND api_key.user_id=registration.user_id
+			    AND api_key.disabled_at IS NULL
+			   JOIN external_stage_user_roles user ON user.id=registration.user_id AND user.status='active'
+			   WHERE handoff.id=OLD.handoff_row_id AND handoff.api_key_id=OLD.actor_api_key_id
+			    AND handoff.credential_epoch=OLD.credential_epoch AND handoff.lifecycle_state=OLD.lifecycle_state
+			    AND handoff.last_sequence=OLD.last_sequence AND handoff.revoked_at IS NULL AND handoff.terminal_at IS NULL
+			    AND handoff.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			    AND (user.effective_role IN ('admin','super_admin') OR
+			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
+			          AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
+			         (user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+			          WHERE membership.user_id=user.id AND membership.project_id=handoff.project_id))))
+			 BEGIN SELECT RAISE(ABORT,'invalid heartbeat window coalescing advance'); END`,
+			`CREATE TRIGGER trg_external_stage_heartbeat_no_delete BEFORE DELETE ON external_stage_heartbeat_windows
+			 BEGIN SELECT RAISE(ABORT,'heartbeat windows are durable'); END`,
+
+			`CREATE TABLE external_stage_pharos_evidence (
+			 report_event_id    INTEGER PRIMARY KEY REFERENCES external_stage_report_events(id),
+			 evidence_kind      TEXT NOT NULL CHECK(evidence_kind IN ('deployment','verification')),
+			 workflow_symbol    TEXT NOT NULL CHECK(length(CAST(workflow_symbol AS BLOB)) BETWEEN 1 AND 64 AND
+			  workflow_symbol GLOB '[a-z]*' AND workflow_symbol NOT GLOB '*[^a-z0-9._-]*'),
+			 environment_symbol TEXT NOT NULL CHECK(length(CAST(environment_symbol AS BLOB)) BETWEEN 1 AND 64 AND
+			  environment_symbol GLOB '[a-z]*' AND environment_symbol NOT GLOB '*[^a-z0-9._-]*'),
+			 artifact_version   TEXT NOT NULL CHECK(length(CAST(artifact_version AS BLOB)) BETWEEN 1 AND 64 AND
+			  artifact_version GLOB '[A-Za-z0-9]*' AND artifact_version NOT GLOB '*[^A-Za-z0-9._+-]*'),
+			 artifact_digest    BLOB NOT NULL CHECK(typeof(artifact_digest)='blob' AND length(artifact_digest)=32),
+			 commit_digest      TEXT NOT NULL CHECK(length(CAST(commit_digest AS BLOB)) IN (40,64) AND
+			  commit_digest NOT GLOB '*[^0-9a-f]*'),
+			 result             TEXT NOT NULL CHECK(result IN ('succeeded','failed')),
+			 observed_at        TEXT NOT NULL,
+			 server_received_at TEXT NOT NULL,
+			 CHECK(evidence_kind<>'verification' OR result IN ('succeeded','failed'))
+			) WITHOUT ROWID`,
+			`CREATE TABLE external_stage_janus_evidence (
+			 report_event_id    INTEGER PRIMARY KEY REFERENCES external_stage_report_events(id),
+			 evidence_kind      TEXT NOT NULL CHECK(evidence_kind IN ('authorization','credential_handoff')),
+			 result             TEXT NOT NULL CHECK(result IN ('satisfied','blocked')),
+			 authorized         INTEGER CHECK(authorized IN (0,1)),
+			 credential_ready   INTEGER CHECK(credential_ready IN (0,1)),
+			 observed_at        TEXT NOT NULL,
+			 server_received_at TEXT NOT NULL,
+			 CHECK((evidence_kind='authorization' AND authorized IS NOT NULL AND credential_ready IS NULL AND
+			        ((result='satisfied' AND authorized=1) OR (result='blocked' AND authorized=0))) OR
+			       (evidence_kind='credential_handoff' AND authorized IS NULL AND credential_ready IS NOT NULL AND
+			        ((result='satisfied' AND credential_ready=1) OR (result='blocked' AND credential_ready=0))))
+			) WITHOUT ROWID`,
+			`CREATE TABLE external_stage_report_blockers (
+			 report_event_id INTEGER NOT NULL REFERENCES external_stage_report_events(id),
+			 ordinal         INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 7),
+			 blocker_code    TEXT NOT NULL CHECK(blocker_code IN
+			  ('dependency_pending','dependency_failed','reporter_stale','external_waiting')),
+			 PRIMARY KEY(report_event_id,ordinal),
+			 UNIQUE(report_event_id,blocker_code)
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_external_stage_pharos_evidence_no_update BEFORE UPDATE ON external_stage_pharos_evidence
+			 BEGIN SELECT RAISE(ABORT,'external stage evidence is immutable'); END`,
+			`CREATE TRIGGER trg_external_stage_pharos_evidence_no_delete BEFORE DELETE ON external_stage_pharos_evidence
+			 BEGIN SELECT RAISE(ABORT,'external stage evidence is immutable'); END`,
+			`CREATE TRIGGER trg_external_stage_janus_evidence_no_update BEFORE UPDATE ON external_stage_janus_evidence
+			 BEGIN SELECT RAISE(ABORT,'external stage evidence is immutable'); END`,
+			`CREATE TRIGGER trg_external_stage_janus_evidence_no_delete BEFORE DELETE ON external_stage_janus_evidence
+			 BEGIN SELECT RAISE(ABORT,'external stage evidence is immutable'); END`,
+			`CREATE TRIGGER trg_external_stage_blockers_no_update BEFORE UPDATE ON external_stage_report_blockers
+			 BEGIN SELECT RAISE(ABORT,'external stage blockers are immutable'); END`,
+			`CREATE TRIGGER trg_external_stage_blockers_no_delete BEFORE DELETE ON external_stage_report_blockers
+			 BEGIN SELECT RAISE(ABORT,'external stage blockers are immutable'); END`,
+
+			`CREATE TABLE external_stage_owner_events (
+			 id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			 delivery_id      INTEGER NOT NULL,
+			 attempt_id       INTEGER NOT NULL,
+			 stage_key        TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number INTEGER NOT NULL CHECK(execution_number>0),
+			 authority_epoch  INTEGER NOT NULL CHECK(authority_epoch>0),
+			 handoff_row_id   INTEGER NOT NULL,
+			 report_event_id  INTEGER NOT NULL UNIQUE,
+			 sequence         INTEGER NOT NULL CHECK(sequence>0),
+			 lifecycle_state  TEXT NOT NULL CHECK(lifecycle_state IN ('active','waiting','blocked','succeeded','failed')),
+			 server_received_at TEXT NOT NULL,
+			 UNIQUE(attempt_id,stage_key,execution_number,authority_epoch,sequence),
+			 FOREIGN KEY(delivery_id,handoff_row_id) REFERENCES external_stage_handoffs(delivery_id,id),
+			 FOREIGN KEY(report_event_id) REFERENCES external_stage_report_events(id)
+			)`,
+			`CREATE TABLE external_stage_owner_latest (
+			 delivery_id      INTEGER NOT NULL,
+			 attempt_id       INTEGER NOT NULL,
+			 stage_key        TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number INTEGER NOT NULL CHECK(execution_number>0),
+			 authority_epoch  INTEGER NOT NULL CHECK(authority_epoch>0),
+			 owner_event_id   INTEGER NOT NULL UNIQUE REFERENCES external_stage_owner_events(id),
+			 handoff_row_id   INTEGER NOT NULL,
+			 report_event_id  INTEGER NOT NULL,
+			 sequence         INTEGER NOT NULL CHECK(sequence>0),
+			 lifecycle_state  TEXT NOT NULL CHECK(lifecycle_state IN ('active','waiting','blocked','succeeded','failed')),
+			 updated_at       TEXT NOT NULL,
+			 PRIMARY KEY(attempt_id,stage_key,execution_number,authority_epoch),
+			 FOREIGN KEY(delivery_id,handoff_row_id) REFERENCES external_stage_handoffs(delivery_id,id),
+			 FOREIGN KEY(report_event_id) REFERENCES external_stage_report_events(id)
+			) WITHOUT ROWID`,
+			`CREATE TABLE external_stage_dependency_events (
+			 id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			 delivery_id       INTEGER NOT NULL,
+			 attempt_id        INTEGER NOT NULL,
+			 stage_key         TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number  INTEGER NOT NULL CHECK(execution_number>0),
+			 authority_epoch   INTEGER NOT NULL CHECK(authority_epoch>0),
+			 dependency_key    TEXT NOT NULL,
+			 registration_id   INTEGER NOT NULL,
+			 handoff_row_id    INTEGER NOT NULL,
+			 report_event_id   INTEGER NOT NULL UNIQUE,
+			 credential_epoch  INTEGER NOT NULL CHECK(credential_epoch>0),
+			 sequence          INTEGER NOT NULL CHECK(sequence>0),
+			 lifecycle_state   TEXT NOT NULL CHECK(lifecycle_state IN ('active','waiting','blocked','succeeded','failed')),
+			 server_received_at TEXT NOT NULL,
+			 UNIQUE(attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id,credential_epoch,sequence),
+			 FOREIGN KEY(delivery_id,handoff_row_id) REFERENCES external_stage_handoffs(delivery_id,id),
+			 FOREIGN KEY(delivery_id,registration_id) REFERENCES external_stage_reporter_registrations(delivery_id,id),
+			 FOREIGN KEY(report_event_id) REFERENCES external_stage_report_events(id)
+			)`,
+			`CREATE TABLE external_stage_dependency_latest (
+			 delivery_id        INTEGER NOT NULL,
+			 attempt_id         INTEGER NOT NULL,
+			 stage_key          TEXT NOT NULL CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number   INTEGER NOT NULL CHECK(execution_number>0),
+			 authority_epoch    INTEGER NOT NULL CHECK(authority_epoch>0),
+			 dependency_key     TEXT NOT NULL,
+			 registration_id    INTEGER NOT NULL,
+			 credential_epoch   INTEGER NOT NULL CHECK(credential_epoch>0),
+			 dependency_event_id INTEGER NOT NULL UNIQUE REFERENCES external_stage_dependency_events(id),
+			 handoff_row_id     INTEGER NOT NULL,
+			 report_event_id    INTEGER NOT NULL,
+			 sequence           INTEGER NOT NULL CHECK(sequence>0),
+			 lifecycle_state    TEXT NOT NULL CHECK(lifecycle_state IN ('active','waiting','blocked','succeeded','failed')),
+			 updated_at         TEXT NOT NULL,
+			 PRIMARY KEY(attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id,credential_epoch),
+			 FOREIGN KEY(delivery_id,handoff_row_id) REFERENCES external_stage_handoffs(delivery_id,id),
+			 FOREIGN KEY(delivery_id,registration_id) REFERENCES external_stage_reporter_registrations(delivery_id,id),
+			 FOREIGN KEY(report_event_id) REFERENCES external_stage_report_events(id)
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_external_stage_owner_event_guard BEFORE INSERT ON external_stage_owner_events
+			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_handoffs handoff
+			  JOIN external_stage_report_events report ON report.id=NEW.report_event_id AND report.handoff_row_id=handoff.id
+			  WHERE handoff.id=NEW.handoff_row_id AND handoff.delivery_id=NEW.delivery_id AND handoff.attempt_id=NEW.attempt_id
+			   AND handoff.stage_key=NEW.stage_key AND handoff.execution_number=NEW.execution_number
+			   AND handoff.authority_epoch=NEW.authority_epoch AND handoff.reporter_role='owner'
+			   AND report.sequence=NEW.sequence AND report.lifecycle_state=NEW.lifecycle_state
+			   AND report.server_received_at=NEW.server_received_at)
+			 BEGIN SELECT RAISE(ABORT,'owner event lacks exact owner report'); END`,
+			`CREATE TRIGGER trg_external_stage_dependency_event_guard BEFORE INSERT ON external_stage_dependency_events
+			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_handoffs handoff
+			  JOIN external_stage_report_events report ON report.id=NEW.report_event_id AND report.handoff_row_id=handoff.id
+			  JOIN external_stage_prerequisites prerequisite ON prerequisite.attempt_id=handoff.attempt_id
+			   AND prerequisite.stage_key=handoff.stage_key AND prerequisite.execution_number=handoff.execution_number
+			   AND prerequisite.authority_epoch=handoff.authority_epoch AND prerequisite.dependency_key=handoff.dependency_key
+			   AND prerequisite.registration_id=handoff.reporter_registration_id
+			  WHERE handoff.id=NEW.handoff_row_id AND handoff.delivery_id=NEW.delivery_id AND handoff.attempt_id=NEW.attempt_id
+			   AND handoff.stage_key=NEW.stage_key AND handoff.execution_number=NEW.execution_number
+			   AND handoff.authority_epoch=NEW.authority_epoch AND handoff.reporter_role='dependency'
+			   AND handoff.dependency_key=NEW.dependency_key AND handoff.reporter_registration_id=NEW.registration_id
+			   AND report.credential_epoch=NEW.credential_epoch AND report.sequence=NEW.sequence
+			   AND report.lifecycle_state=NEW.lifecycle_state AND report.server_received_at=NEW.server_received_at)
+			 BEGIN SELECT RAISE(ABORT,'dependency event lacks exact declared dependency report'); END`,
+			`CREATE TRIGGER trg_external_stage_owner_events_no_update BEFORE UPDATE ON external_stage_owner_events
+			 BEGIN SELECT RAISE(ABORT,'external stage owner events are append-only'); END`,
+			`CREATE TRIGGER trg_external_stage_owner_events_no_delete BEFORE DELETE ON external_stage_owner_events
+			 BEGIN SELECT RAISE(ABORT,'external stage owner events are append-only'); END`,
+			`CREATE TRIGGER trg_external_stage_dependency_events_no_update BEFORE UPDATE ON external_stage_dependency_events
+			 BEGIN SELECT RAISE(ABORT,'external stage dependency events are append-only'); END`,
+			`CREATE TRIGGER trg_external_stage_dependency_events_no_delete BEFORE DELETE ON external_stage_dependency_events
+			 BEGIN SELECT RAISE(ABORT,'external stage dependency events are append-only'); END`,
+
+			`CREATE TABLE external_stage_audit_events (
+			 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+			 event_kind         TEXT NOT NULL CHECK(event_kind IN ('created','secret_minted','secret_rotated','revoked','accepted','reported')),
+			 handoff_row_id     INTEGER NOT NULL REFERENCES external_stage_handoffs(id),
+			 operation_event_id INTEGER REFERENCES external_stage_operation_events(id),
+			 report_event_id    INTEGER REFERENCES external_stage_report_events(id),
+			 api_key_id         INTEGER,
+			 credential_epoch   INTEGER NOT NULL CHECK(credential_epoch>=0),
+			 sequence           INTEGER CHECK(sequence>0),
+			 outcome            TEXT NOT NULL CHECK(outcome IN ('committed','duplicate')),
+			 server_received_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 CHECK((event_kind='reported' AND report_event_id IS NOT NULL AND operation_event_id IS NULL AND sequence IS NOT NULL) OR
+			       (event_kind<>'reported' AND operation_event_id IS NOT NULL AND report_event_id IS NULL))
+			)`,
+			`CREATE INDEX idx_external_stage_audit_handoff ON external_stage_audit_events(handoff_row_id,id DESC)`,
+			`CREATE UNIQUE INDEX idx_external_stage_audit_operation
+			 ON external_stage_audit_events(operation_event_id) WHERE operation_event_id IS NOT NULL`,
+			`CREATE UNIQUE INDEX idx_external_stage_audit_report
+			 ON external_stage_audit_events(report_event_id) WHERE report_event_id IS NOT NULL`,
+			`CREATE TABLE external_stage_setup_events (
+			 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+			 event_kind         TEXT NOT NULL CHECK(event_kind IN ('registration_created','registration_revoked','prerequisites_sealed')),
+			 delivery_id        INTEGER NOT NULL REFERENCES deliveries(id),
+			 project_id         INTEGER NOT NULL REFERENCES projects(id),
+			 registration_id    INTEGER,
+			 attempt_id         INTEGER,
+			 stage_key          TEXT CHECK(stage_key IN ('specification','implementation','qa','deployment','verification')),
+			 execution_number   INTEGER CHECK(execution_number>0),
+			 authority_epoch    INTEGER CHECK(authority_epoch>0),
+			 actor_user_id      INTEGER NOT NULL REFERENCES users(id),
+			 actor_principal_kind TEXT NOT NULL CHECK(actor_principal_kind IN ('session','api_key')),
+			 actor_session_id   TEXT,
+			 actor_api_key_id   INTEGER REFERENCES api_keys(id),
+			 request_digest     BLOB NOT NULL CHECK(typeof(request_digest)='blob' AND length(request_digest)=32),
+			 idempotency_digest BLOB NOT NULL CHECK(typeof(idempotency_digest)='blob' AND length(idempotency_digest)=32),
+			 server_received_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 CHECK((event_kind IN ('registration_created','registration_revoked') AND registration_id IS NOT NULL AND
+			        attempt_id IS NULL AND stage_key IS NULL AND execution_number IS NULL AND authority_epoch IS NULL) OR
+			       (event_kind='prerequisites_sealed' AND registration_id IS NULL AND attempt_id IS NOT NULL AND
+			        stage_key IS NOT NULL AND execution_number IS NOT NULL AND authority_epoch IS NOT NULL)),
+			 CHECK((actor_principal_kind='session' AND actor_session_id IS NOT NULL AND actor_api_key_id IS NULL) OR
+			       (actor_principal_kind='api_key' AND actor_session_id IS NULL AND actor_api_key_id IS NOT NULL)),
+			 FOREIGN KEY(delivery_id,registration_id) REFERENCES external_stage_reporter_registrations(delivery_id,id),
+			 FOREIGN KEY(delivery_id,attempt_id) REFERENCES delivery_attempts(delivery_id,id)
+			)`,
+			`CREATE UNIQUE INDEX idx_external_stage_setup_registration
+			 ON external_stage_setup_events(registration_id,event_kind) WHERE registration_id IS NOT NULL`,
+			`CREATE UNIQUE INDEX idx_external_stage_setup_prerequisites
+			 ON external_stage_setup_events(attempt_id,stage_key,execution_number,authority_epoch,event_kind)
+			 WHERE event_kind='prerequisites_sealed'`,
+			`CREATE UNIQUE INDEX idx_external_stage_setup_idempotency
+			 ON external_stage_setup_events(actor_user_id,actor_principal_kind,
+			  COALESCE(actor_session_id,''),COALESCE(actor_api_key_id,0),event_kind,idempotency_digest)`,
+			`CREATE TRIGGER trg_external_stage_setup_insert_guard
+			 BEFORE INSERT ON external_stage_setup_events
+			 WHEN NEW.server_received_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			  NOT EXISTS(SELECT 1 FROM external_stage_user_roles actor WHERE actor.id=NEW.actor_user_id AND actor.status='active'
+			   AND actor.effective_role<>'external'
+			   AND (actor.effective_role IN ('admin','super_admin') OR
+			        EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=actor.id
+			         AND membership.project_id=NEW.project_id AND membership.access_level='editor') OR
+			        (actor.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+			         WHERE membership.user_id=actor.id AND membership.project_id=NEW.project_id)))
+			   AND ((NEW.actor_principal_kind='session' AND EXISTS(SELECT 1 FROM sessions session
+			         WHERE session.credential_id=NEW.actor_session_id
+			          AND COALESCE(session.acting_as_user_id,session.user_id)=actor.id
+			          AND session.expires_at>datetime('now'))) OR
+			        (NEW.actor_principal_kind='api_key' AND EXISTS(SELECT 1 FROM api_keys api_key
+			         WHERE api_key.id=NEW.actor_api_key_id AND api_key.user_id=actor.id AND api_key.disabled_at IS NULL
+			          AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			          AND (api_key.scopes='*' OR (','||replace(api_key.scopes,' ','')||',') LIKE '%,agent-controls:write,%'))))) OR
+			  NOT ((NEW.event_kind='registration_created' AND EXISTS(SELECT 1 FROM external_stage_reporter_registrations registration
+			    WHERE registration.id=NEW.registration_id AND registration.delivery_id=NEW.delivery_id
+			     AND registration.project_id=NEW.project_id AND registration.revoked_at IS NULL
+			     AND NEW.server_received_at>=registration.created_at
+			     AND julianday(NEW.server_received_at)-julianday(registration.created_at)<=1.0/86400.0)) OR
+			   (NEW.event_kind='registration_revoked' AND EXISTS(SELECT 1 FROM external_stage_reporter_registrations registration
+			    WHERE registration.id=NEW.registration_id AND registration.delivery_id=NEW.delivery_id
+			     AND registration.project_id=NEW.project_id AND registration.revoked_at IS NULL)) OR
+			   (NEW.event_kind='prerequisites_sealed' AND EXISTS(SELECT 1 FROM external_stage_prerequisite_sets prerequisite_set
+			    JOIN deliveries delivery ON delivery.id=prerequisite_set.delivery_id
+			    JOIN issues issue ON issue.id=delivery.issue_id AND issue.project_id=NEW.project_id AND issue.deleted_at IS NULL
+			    WHERE prerequisite_set.delivery_id=NEW.delivery_id AND prerequisite_set.attempt_id=NEW.attempt_id
+			     AND prerequisite_set.stage_key=NEW.stage_key AND prerequisite_set.execution_number=NEW.execution_number
+			     AND prerequisite_set.authority_epoch=NEW.authority_epoch AND prerequisite_set.sealed_at IS NULL
+			     AND prerequisite_set.declared_count=(SELECT COUNT(*) FROM external_stage_prerequisites prerequisite
+			      WHERE prerequisite.attempt_id=NEW.attempt_id AND prerequisite.stage_key=NEW.stage_key
+			       AND prerequisite.execution_number=NEW.execution_number AND prerequisite.authority_epoch=NEW.authority_epoch))))
+			 BEGIN SELECT RAISE(ABORT,'external stage setup lacks current operator authority'); END`,
+			`CREATE TRIGGER trg_external_stage_setup_no_update BEFORE UPDATE ON external_stage_setup_events
+			 BEGIN SELECT RAISE(ABORT,'external stage setup audit is append-only'); END`,
+			`CREATE TRIGGER trg_external_stage_setup_no_delete BEFORE DELETE ON external_stage_setup_events
+			 BEGIN SELECT RAISE(ABORT,'external stage setup audit is append-only'); END`,
+			`CREATE TRIGGER trg_external_stage_registration_revoke_causal_guard
+			 BEFORE UPDATE OF revoked_at ON external_stage_reporter_registrations
+			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_setup_events setup
+			  WHERE setup.event_kind='registration_revoked' AND setup.registration_id=OLD.id
+			   AND setup.delivery_id=OLD.delivery_id AND setup.project_id=OLD.project_id
+			   AND NEW.revoked_at=setup.server_received_at)
+			 BEGIN SELECT RAISE(ABORT,'registration revoke lacks setup audit'); END`,
+			`CREATE TRIGGER trg_external_stage_prerequisite_seal_causal_guard
+			 BEFORE UPDATE OF sealed_at ON external_stage_prerequisite_sets
+			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_setup_events setup
+			  WHERE setup.event_kind='prerequisites_sealed' AND setup.delivery_id=OLD.delivery_id
+			   AND setup.attempt_id=OLD.attempt_id AND setup.stage_key=OLD.stage_key
+			   AND setup.execution_number=OLD.execution_number AND setup.authority_epoch=OLD.authority_epoch
+			   AND NEW.sealed_at=setup.server_received_at)
+			 BEGIN SELECT RAISE(ABORT,'prerequisite seal lacks setup audit'); END`,
+
+			`CREATE TRIGGER trg_external_stage_operation_insert_guard
+			 BEFORE INSERT ON external_stage_operation_events
+			 WHEN NEW.server_received_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			  NOT EXISTS(SELECT 1 FROM external_stage_handoffs handoff
+			   JOIN issues issue ON issue.id=handoff.root_issue_id AND issue.project_id=handoff.project_id AND issue.deleted_at IS NULL
+			   JOIN projects project ON project.id=handoff.project_id AND project.status IN ('active','frozen')
+			   JOIN external_stage_user_roles actor ON actor.id=NEW.actor_user_id AND actor.status='active'
+			   WHERE handoff.id=NEW.handoff_row_id AND
+			    ((NEW.operation_kind IN ('created','secret_minted','secret_rotated','revoked') AND actor.effective_role<>'external' AND
+			      (actor.effective_role IN ('admin','super_admin') OR
+			       EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=NEW.actor_user_id
+			        AND membership.project_id=handoff.project_id AND membership.access_level='editor') OR
+			       (actor.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+			        WHERE membership.user_id=NEW.actor_user_id AND membership.project_id=handoff.project_id))) AND
+			      ((NEW.actor_principal_kind='session' AND EXISTS(SELECT 1 FROM sessions session
+			        WHERE session.credential_id=NEW.actor_session_id
+			         AND COALESCE(session.acting_as_user_id,session.user_id)=NEW.actor_user_id
+			         AND session.expires_at>datetime('now'))) OR
+			       (NEW.actor_principal_kind='api_key' AND EXISTS(SELECT 1 FROM api_keys api_key
+			        WHERE api_key.id=NEW.actor_api_key_id AND api_key.user_id=NEW.actor_user_id
+			         AND api_key.disabled_at IS NULL
+			         AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			         AND (api_key.scopes='*' OR (','||replace(api_key.scopes,' ','')||',') LIKE '%,agent-controls:write,%')))))
+			     OR (NEW.operation_kind='accepted' AND NEW.actor_principal_kind='api_key' AND EXISTS(SELECT 1 FROM api_keys api_key
+			       WHERE api_key.id=NEW.actor_api_key_id AND api_key.user_id=NEW.actor_user_id
+			        AND api_key.disabled_at IS NULL
+			        AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))))) AND
+			    ((NEW.operation_kind='created' AND NEW.credential_epoch=0 AND handoff.credential_epoch=0 AND
+			       NEW.sequence IS NULL AND handoff.secret_digest IS NULL AND handoff.lifecycle_state='issued' AND
+			       handoff.last_sequence=0 AND handoff.accepted_at IS NULL AND handoff.terminal_at IS NULL AND
+			       handoff.revoked_at IS NULL AND NEW.server_received_at>=handoff.created_at AND
+			       julianday(NEW.server_received_at)-julianday(handoff.created_at)<=1.0/86400.0) OR
+			     (NEW.operation_kind='secret_minted' AND NEW.credential_epoch=1 AND handoff.credential_epoch=0 AND
+			       handoff.secret_digest IS NULL AND handoff.revoked_at IS NULL AND handoff.terminal_at IS NULL) OR
+			     (NEW.operation_kind='secret_rotated' AND NEW.credential_epoch=handoff.credential_epoch+1 AND
+			       handoff.secret_digest IS NOT NULL AND handoff.revoked_at IS NULL AND handoff.terminal_at IS NULL) OR
+			     (NEW.operation_kind='revoked' AND NEW.credential_epoch=handoff.credential_epoch AND
+			       handoff.revoked_at IS NULL) OR
+			     (NEW.operation_kind='accepted' AND NEW.actor_principal_kind='api_key' AND
+			       NEW.actor_api_key_id=handoff.api_key_id AND NEW.credential_epoch=handoff.credential_epoch AND
+			       handoff.credential_epoch>0 AND handoff.secret_digest IS NOT NULL AND handoff.lifecycle_state='issued' AND
+			       handoff.revoked_at IS NULL AND handoff.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND
+			       (actor.effective_role IN ('admin','super_admin') OR
+			        EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=actor.id
+			         AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
+			        (actor.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+			         WHERE membership.user_id=actor.id AND membership.project_id=handoff.project_id))) AND
+			       NEW.sequence=handoff.last_sequence+1 AND EXISTS(SELECT 1 FROM external_stage_reporter_registrations registration
+			        WHERE registration.id=handoff.reporter_registration_id AND registration.api_key_id=handoff.api_key_id
+			         AND registration.user_id=NEW.actor_user_id AND registration.project_id=handoff.project_id
+			         AND registration.revoked_at IS NULL))))
+			 BEGIN SELECT RAISE(ABORT,'external stage operation lacks a current exact binding'); END`,
+
+			`CREATE TRIGGER trg_external_stage_report_insert_guard
+			 BEFORE INSERT ON external_stage_report_events
+			 WHEN NEW.heartbeat<>0 OR NEW.server_received_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			  NOT EXISTS(SELECT 1 FROM external_stage_handoffs handoff
+			   JOIN external_stage_reporter_registrations registration
+			    ON registration.id=handoff.reporter_registration_id AND registration.delivery_id=handoff.delivery_id
+			    AND registration.api_key_id=handoff.api_key_id AND registration.reporter_id=handoff.reporter_id
+			    AND registration.reporter_class=handoff.reporter_class AND registration.reporter_role=handoff.reporter_role
+			    AND registration.dependency_key IS handoff.dependency_key AND registration.revoked_at IS NULL
+			   JOIN api_keys api_key ON api_key.id=handoff.api_key_id AND api_key.user_id=registration.user_id
+			    AND api_key.disabled_at IS NULL
+			    AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			   JOIN external_stage_user_roles user ON user.id=registration.user_id AND user.status='active'
+			   JOIN issues issue ON issue.id=handoff.root_issue_id AND issue.project_id=handoff.project_id AND issue.deleted_at IS NULL
+			   JOIN projects project ON project.id=handoff.project_id AND project.status IN ('active','frozen')
+			   JOIN delivery_attempts attempt ON attempt.id=handoff.attempt_id AND attempt.delivery_id=handoff.delivery_id
+			    AND attempt.attempt_number=handoff.attempt_number AND attempt.plan_revision=handoff.plan_revision
+			   JOIN delivery_stage_latest latest ON latest.delivery_id=handoff.delivery_id AND latest.attempt_id=handoff.attempt_id
+			    AND latest.stage_key=handoff.stage_key AND latest.execution_number=handoff.execution_number
+			    AND latest.execution_start_stage_event_id=handoff.execution_start_stage_event_id
+			    AND latest.authority_epoch=handoff.authority_epoch AND latest.authority_stage_event_id=handoff.authority_stage_event_id
+			   WHERE handoff.id=NEW.handoff_row_id AND NEW.actor_api_key_id=handoff.api_key_id
+			    AND handoff.credential_epoch=NEW.credential_epoch
+			    AND handoff.secret_digest IS NOT NULL AND handoff.revoked_at IS NULL
+			    AND handoff.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND handoff.terminal_at IS NULL
+			    AND handoff.lifecycle_state IN ('accepted','active','waiting','blocked')
+			    AND NEW.sequence=handoff.last_sequence+1
+			    AND (user.effective_role IN ('admin','super_admin') OR
+			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
+			          AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
+			         (user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+			          WHERE membership.user_id=user.id AND membership.project_id=handoff.project_id)))
+			    AND ((handoff.reporter_role='owner' AND latest.current_reporter_id=handoff.reporter_id) OR
+			         (handoff.reporter_role='dependency' AND EXISTS(SELECT 1 FROM external_stage_prerequisites prerequisite
+			          JOIN external_stage_prerequisite_sets prerequisite_set
+			           ON prerequisite_set.attempt_id=prerequisite.attempt_id AND prerequisite_set.stage_key=prerequisite.stage_key
+			           AND prerequisite_set.execution_number=prerequisite.execution_number
+			           AND prerequisite_set.authority_epoch=prerequisite.authority_epoch AND prerequisite_set.sealed_at IS NOT NULL
+			          WHERE prerequisite.attempt_id=handoff.attempt_id AND prerequisite.stage_key=handoff.stage_key
+			           AND prerequisite.execution_number=handoff.execution_number AND prerequisite.authority_epoch=handoff.authority_epoch
+			           AND prerequisite.dependency_key=handoff.dependency_key
+			           AND prerequisite.registration_id=handoff.reporter_registration_id)))
+			    AND (handoff.reporter_role<>'owner' OR NEW.lifecycle_state<>'succeeded' OR
+			         (EXISTS(SELECT 1 FROM external_stage_prerequisite_sets prerequisite_set
+			           WHERE prerequisite_set.delivery_id=handoff.delivery_id
+			            AND prerequisite_set.attempt_id=handoff.attempt_id AND prerequisite_set.stage_key=handoff.stage_key
+			            AND prerequisite_set.execution_number=handoff.execution_number
+			            AND prerequisite_set.execution_start_stage_event_id=handoff.execution_start_stage_event_id
+			            AND prerequisite_set.authority_epoch=handoff.authority_epoch
+			            AND prerequisite_set.authority_stage_event_id=handoff.authority_stage_event_id
+			            AND prerequisite_set.sealed_at IS NOT NULL
+			            AND prerequisite_set.declared_count=(SELECT COUNT(*) FROM external_stage_prerequisites prerequisite
+			             WHERE prerequisite.attempt_id=handoff.attempt_id AND prerequisite.stage_key=handoff.stage_key
+			              AND prerequisite.execution_number=handoff.execution_number
+			              AND prerequisite.authority_epoch=handoff.authority_epoch))
+			          AND NOT EXISTS(SELECT 1 FROM external_stage_prerequisites prerequisite
+			           LEFT JOIN external_stage_reporter_registrations dependency_registration
+			            ON dependency_registration.id=prerequisite.registration_id
+			            AND dependency_registration.delivery_id=prerequisite.delivery_id
+			            AND dependency_registration.reporter_role='dependency'
+			            AND dependency_registration.dependency_key=prerequisite.dependency_key
+			            AND dependency_registration.revoked_at IS NULL
+			           LEFT JOIN api_keys dependency_key ON dependency_key.id=dependency_registration.api_key_id
+			            AND dependency_key.user_id=dependency_registration.user_id AND dependency_key.disabled_at IS NULL
+			            AND (dependency_key.expires_at IS NULL OR dependency_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			           LEFT JOIN external_stage_user_roles dependency_user ON dependency_user.id=dependency_registration.user_id
+			            AND dependency_user.status='active'
+			           LEFT JOIN external_stage_handoffs dependency_handoff
+			            ON dependency_handoff.attempt_id=prerequisite.attempt_id
+			            AND dependency_handoff.stage_key=prerequisite.stage_key
+			            AND dependency_handoff.execution_number=prerequisite.execution_number
+			            AND dependency_handoff.authority_epoch=prerequisite.authority_epoch
+			            AND dependency_handoff.reporter_registration_id=prerequisite.registration_id
+			            AND dependency_handoff.dependency_key=prerequisite.dependency_key
+			            AND dependency_handoff.revoked_at IS NULL
+			           LEFT JOIN external_stage_dependency_latest dependency_latest
+			            ON dependency_latest.attempt_id=prerequisite.attempt_id
+			            AND dependency_latest.stage_key=prerequisite.stage_key
+			            AND dependency_latest.execution_number=prerequisite.execution_number
+			            AND dependency_latest.authority_epoch=prerequisite.authority_epoch
+			            AND dependency_latest.registration_id=prerequisite.registration_id
+			            AND dependency_latest.dependency_key=prerequisite.dependency_key
+			            AND dependency_latest.handoff_row_id=dependency_handoff.id
+			            AND dependency_latest.credential_epoch=dependency_handoff.credential_epoch
+			            AND dependency_latest.lifecycle_state='succeeded'
+			           WHERE prerequisite.attempt_id=handoff.attempt_id AND prerequisite.stage_key=handoff.stage_key
+			            AND prerequisite.execution_number=handoff.execution_number
+			            AND prerequisite.authority_epoch=handoff.authority_epoch
+			            AND (dependency_registration.id IS NULL OR dependency_key.id IS NULL OR dependency_user.id IS NULL OR
+			             NOT (dependency_user.effective_role IN ('admin','super_admin') OR
+			              EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=dependency_user.id
+			               AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
+			              (dependency_user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+			               WHERE membership.user_id=dependency_user.id AND membership.project_id=handoff.project_id))) OR
+			             dependency_handoff.id IS NULL OR dependency_handoff.credential_epoch<=0 OR
+			             dependency_handoff.secret_digest IS NULL OR dependency_handoff.lifecycle_state<>'succeeded' OR
+			             dependency_handoff.terminal_at IS NULL OR dependency_handoff.expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			             dependency_latest.handoff_row_id IS NULL))))
+			    AND ((NEW.evidence_kind IS NULL) OR
+			         (handoff.reporter_class='pharos' AND handoff.reporter_role='owner' AND
+			          ((NEW.evidence_kind='deployment' AND handoff.stage_key='deployment' AND handoff.allow_deployment=1) OR
+			           (NEW.evidence_kind='verification' AND handoff.stage_key='verification' AND handoff.allow_verification=1))) OR
+			         (handoff.reporter_class='janus' AND handoff.reporter_role='dependency' AND
+			          ((NEW.evidence_kind='authorization' AND handoff.allow_authorization=1) OR
+			           (NEW.evidence_kind='credential_handoff' AND handoff.allow_credential_handoff=1))))
+			    AND (NEW.lifecycle_state NOT IN ('succeeded','failed') OR NEW.evidence_kind IS NOT NULL)
+			    AND (handoff.reporter_class<>'janus' OR NEW.lifecycle_state NOT IN ('blocked','succeeded') OR NEW.evidence_kind IS NOT NULL)
+			  )
+			 BEGIN SELECT RAISE(ABORT,'external stage report lacks a current exact binding'); END`,
+
+			`CREATE TRIGGER trg_external_stage_pharos_evidence_insert_guard
+			 BEFORE INSERT ON external_stage_pharos_evidence
+			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_report_events report
+			  JOIN external_stage_handoffs handoff ON handoff.id=report.handoff_row_id
+			  WHERE report.id=NEW.report_event_id AND report.evidence_kind=NEW.evidence_kind
+			   AND report.observed_at=NEW.observed_at AND report.server_received_at=NEW.server_received_at
+			   AND report.heartbeat=0 AND handoff.reporter_class='pharos' AND handoff.reporter_role='owner'
+			   AND handoff.workflow_symbol=NEW.workflow_symbol AND handoff.environment_symbol=NEW.environment_symbol
+			   AND ((NEW.result='succeeded' AND report.lifecycle_state='succeeded') OR
+			        (NEW.result='failed' AND report.lifecycle_state='failed'))
+			   AND ((NEW.evidence_kind='deployment' AND handoff.allow_deployment=1) OR
+			        (NEW.evidence_kind='verification' AND handoff.allow_verification=1))) OR
+			  (NEW.evidence_kind='verification' AND NOT EXISTS(
+			   SELECT 1 FROM external_stage_pharos_evidence deployment_evidence
+			   JOIN external_stage_report_events deployment_report ON deployment_report.id=deployment_evidence.report_event_id
+			   JOIN external_stage_handoffs deployment_handoff ON deployment_handoff.id=deployment_report.handoff_row_id
+			   JOIN external_stage_audit_events deployment_audit ON deployment_audit.report_event_id=deployment_report.id
+			    AND deployment_audit.event_kind='reported' AND deployment_audit.outcome='committed'
+			   JOIN external_stage_owner_events deployment_owner ON deployment_owner.report_event_id=deployment_report.id
+			    AND deployment_owner.handoff_row_id=deployment_handoff.id
+			   JOIN external_stage_owner_latest deployment_latest ON deployment_latest.owner_event_id=deployment_owner.id
+			    AND deployment_latest.report_event_id=deployment_report.id
+			   JOIN external_stage_report_events verification_report ON verification_report.id=NEW.report_event_id
+			   JOIN external_stage_handoffs verification_handoff ON verification_handoff.id=verification_report.handoff_row_id
+			   WHERE deployment_handoff.delivery_id=verification_handoff.delivery_id
+			    AND deployment_handoff.attempt_id=verification_handoff.attempt_id
+			    AND deployment_handoff.stage_key='deployment' AND verification_handoff.stage_key='verification'
+			    AND deployment_handoff.lifecycle_state='succeeded' AND deployment_handoff.terminal_at IS NOT NULL
+			    AND deployment_evidence.evidence_kind='deployment' AND deployment_evidence.result='succeeded'
+			    AND deployment_evidence.environment_symbol=NEW.environment_symbol
+			    AND deployment_evidence.artifact_version=NEW.artifact_version
+			    AND deployment_evidence.artifact_digest=NEW.artifact_digest
+			    AND deployment_evidence.commit_digest=NEW.commit_digest
+			    AND NEW.observed_at>deployment_evidence.server_received_at
+			    AND NEW.server_received_at>deployment_evidence.server_received_at))
+			 BEGIN SELECT RAISE(ABORT,'invalid external stage Pharos evidence'); END`,
+			`CREATE TRIGGER trg_external_stage_janus_evidence_insert_guard
+			 BEFORE INSERT ON external_stage_janus_evidence
+			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_report_events report
+			  JOIN external_stage_handoffs handoff ON handoff.id=report.handoff_row_id
+			  WHERE report.id=NEW.report_event_id AND report.evidence_kind=NEW.evidence_kind
+			   AND report.observed_at=NEW.observed_at AND report.server_received_at=NEW.server_received_at
+			   AND report.heartbeat=0 AND handoff.reporter_class='janus' AND handoff.reporter_role='dependency'
+			   AND ((NEW.result='satisfied' AND report.lifecycle_state='succeeded') OR
+			        (NEW.result='blocked' AND report.lifecycle_state='blocked'))
+			   AND ((NEW.evidence_kind='authorization' AND handoff.allow_authorization=1) OR
+			        (NEW.evidence_kind='credential_handoff' AND handoff.allow_credential_handoff=1)))
+			 BEGIN SELECT RAISE(ABORT,'invalid external stage Janus evidence'); END`,
+			`CREATE TRIGGER trg_external_stage_blocker_insert_guard
+			 BEFORE INSERT ON external_stage_report_blockers
+			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_report_events report WHERE report.id=NEW.report_event_id
+			  AND NEW.ordinal<report.declared_blockers AND report.heartbeat=0)
+			 BEGIN SELECT RAISE(ABORT,'invalid external stage blocker'); END`,
+
+			`CREATE TRIGGER trg_external_stage_audit_insert_guard
+			 BEFORE INSERT ON external_stage_audit_events
+			 WHEN NEW.server_received_at<>COALESCE(
+			   (SELECT operation.server_received_at FROM external_stage_operation_events operation WHERE operation.id=NEW.operation_event_id),
+			   (SELECT report.server_received_at FROM external_stage_report_events report WHERE report.id=NEW.report_event_id)) OR
+			  NOT ((NEW.event_kind='reported' AND NEW.outcome='committed' AND EXISTS(
+			    SELECT 1 FROM external_stage_report_events report
+			    JOIN external_stage_handoffs handoff ON handoff.id=report.handoff_row_id
+			    WHERE report.id=NEW.report_event_id AND report.handoff_row_id=NEW.handoff_row_id
+			     AND handoff.api_key_id=NEW.api_key_id AND report.actor_api_key_id=handoff.api_key_id
+			     AND report.credential_epoch=NEW.credential_epoch
+			     AND report.sequence=NEW.sequence AND report.declared_blockers=(SELECT COUNT(*) FROM external_stage_report_blockers blocker
+			      WHERE blocker.report_event_id=report.id)
+			     AND ((report.evidence_kind IS NULL AND NOT EXISTS(SELECT 1 FROM external_stage_pharos_evidence pharos
+			           WHERE pharos.report_event_id=report.id) AND NOT EXISTS(SELECT 1 FROM external_stage_janus_evidence janus
+			           WHERE janus.report_event_id=report.id)) OR
+			          (handoff.reporter_class='pharos' AND EXISTS(SELECT 1 FROM external_stage_pharos_evidence pharos
+			           WHERE pharos.report_event_id=report.id AND pharos.evidence_kind=report.evidence_kind)) OR
+			          (handoff.reporter_class='janus' AND EXISTS(SELECT 1 FROM external_stage_janus_evidence janus
+			           WHERE janus.report_event_id=report.id AND janus.evidence_kind=report.evidence_kind))))) OR
+			   (NEW.event_kind<>'reported' AND NEW.outcome='committed' AND EXISTS(
+			    SELECT 1 FROM external_stage_operation_events operation
+			    WHERE operation.id=NEW.operation_event_id AND operation.handoff_row_id=NEW.handoff_row_id
+			     AND operation.credential_epoch=NEW.credential_epoch AND operation.sequence IS NEW.sequence
+			     AND ((NEW.event_kind='created' AND operation.operation_kind='created') OR
+			          (NEW.event_kind='secret_minted' AND operation.operation_kind='secret_minted') OR
+			          (NEW.event_kind='secret_rotated' AND operation.operation_kind='secret_rotated') OR
+			          (NEW.event_kind='revoked' AND operation.operation_kind='revoked') OR
+			          (NEW.event_kind='accepted' AND operation.operation_kind='accepted'))
+			     AND NEW.api_key_id IS operation.actor_api_key_id)))
+			 BEGIN SELECT RAISE(ABORT,'external stage audit lacks an exact complete fact'); END`,
+
+			`CREATE TRIGGER trg_external_stage_owner_latest_insert_guard
+			 BEFORE INSERT ON external_stage_owner_latest
+			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_owner_events owner_event
+			  JOIN external_stage_handoffs handoff ON handoff.id=owner_event.handoff_row_id AND handoff.reporter_role='owner'
+			  JOIN external_stage_audit_events audit ON audit.report_event_id=owner_event.report_event_id AND audit.event_kind='reported'
+			  WHERE owner_event.id=NEW.owner_event_id AND owner_event.delivery_id=NEW.delivery_id
+			   AND owner_event.attempt_id=NEW.attempt_id AND owner_event.stage_key=NEW.stage_key
+			   AND owner_event.execution_number=NEW.execution_number AND owner_event.authority_epoch=NEW.authority_epoch
+			   AND owner_event.handoff_row_id=NEW.handoff_row_id AND owner_event.report_event_id=NEW.report_event_id
+			   AND owner_event.sequence=NEW.sequence AND owner_event.lifecycle_state=NEW.lifecycle_state
+			   AND owner_event.server_received_at=NEW.updated_at)
+			 BEGIN SELECT RAISE(ABORT,'owner latest lacks exact owner event'); END`,
+			`CREATE TRIGGER trg_external_stage_owner_latest_update_guard
+			 BEFORE UPDATE ON external_stage_owner_latest
+			 WHEN NEW.delivery_id<>OLD.delivery_id OR NEW.attempt_id<>OLD.attempt_id OR NEW.stage_key<>OLD.stage_key OR
+			  NEW.execution_number<>OLD.execution_number OR NEW.authority_epoch<>OLD.authority_epoch OR
+			  NEW.sequence<=OLD.sequence OR NOT EXISTS(SELECT 1 FROM external_stage_owner_events owner_event
+			   JOIN external_stage_handoffs handoff ON handoff.id=owner_event.handoff_row_id AND handoff.reporter_role='owner'
+			   JOIN external_stage_audit_events audit ON audit.report_event_id=owner_event.report_event_id AND audit.event_kind='reported'
+			   WHERE owner_event.id=NEW.owner_event_id AND owner_event.delivery_id=NEW.delivery_id
+			    AND owner_event.attempt_id=NEW.attempt_id AND owner_event.stage_key=NEW.stage_key
+			    AND owner_event.execution_number=NEW.execution_number AND owner_event.authority_epoch=NEW.authority_epoch
+			    AND owner_event.handoff_row_id=NEW.handoff_row_id AND owner_event.report_event_id=NEW.report_event_id
+			    AND owner_event.sequence=NEW.sequence AND owner_event.lifecycle_state=NEW.lifecycle_state
+			    AND owner_event.server_received_at=NEW.updated_at)
+			 BEGIN SELECT RAISE(ABORT,'invalid owner latest advance'); END`,
+			`CREATE TRIGGER trg_external_stage_owner_latest_no_delete BEFORE DELETE ON external_stage_owner_latest
+			 BEGIN SELECT RAISE(ABORT,'external stage owner latest is durable'); END`,
+			`CREATE TRIGGER trg_external_stage_dependency_latest_insert_guard
+			 BEFORE INSERT ON external_stage_dependency_latest
+			 WHEN NOT EXISTS(SELECT 1 FROM external_stage_dependency_events dependency_event
+			  JOIN external_stage_handoffs handoff ON handoff.id=dependency_event.handoff_row_id AND handoff.reporter_role='dependency'
+			  JOIN external_stage_audit_events audit ON audit.report_event_id=dependency_event.report_event_id AND audit.event_kind='reported'
+			  WHERE dependency_event.id=NEW.dependency_event_id AND dependency_event.delivery_id=NEW.delivery_id
+			   AND dependency_event.attempt_id=NEW.attempt_id AND dependency_event.stage_key=NEW.stage_key
+			   AND dependency_event.execution_number=NEW.execution_number AND dependency_event.authority_epoch=NEW.authority_epoch
+			   AND dependency_event.dependency_key=NEW.dependency_key AND dependency_event.registration_id=NEW.registration_id
+			   AND dependency_event.credential_epoch=NEW.credential_epoch AND dependency_event.handoff_row_id=NEW.handoff_row_id
+			   AND dependency_event.report_event_id=NEW.report_event_id AND dependency_event.sequence=NEW.sequence
+			   AND dependency_event.lifecycle_state=NEW.lifecycle_state AND dependency_event.server_received_at=NEW.updated_at)
+			 BEGIN SELECT RAISE(ABORT,'dependency latest lacks exact dependency event'); END`,
+			`CREATE TRIGGER trg_external_stage_dependency_latest_update_guard
+			 BEFORE UPDATE ON external_stage_dependency_latest
+			 WHEN NEW.delivery_id<>OLD.delivery_id OR NEW.attempt_id<>OLD.attempt_id OR NEW.stage_key<>OLD.stage_key OR
+			  NEW.execution_number<>OLD.execution_number OR NEW.authority_epoch<>OLD.authority_epoch OR
+			  NEW.dependency_key<>OLD.dependency_key OR NEW.registration_id<>OLD.registration_id OR
+			  NEW.credential_epoch<>OLD.credential_epoch OR NEW.sequence<=OLD.sequence OR
+			  NOT EXISTS(SELECT 1 FROM external_stage_dependency_events dependency_event
+			   JOIN external_stage_handoffs handoff ON handoff.id=dependency_event.handoff_row_id AND handoff.reporter_role='dependency'
+			   JOIN external_stage_audit_events audit ON audit.report_event_id=dependency_event.report_event_id AND audit.event_kind='reported'
+			   WHERE dependency_event.id=NEW.dependency_event_id AND dependency_event.delivery_id=NEW.delivery_id
+			    AND dependency_event.attempt_id=NEW.attempt_id AND dependency_event.stage_key=NEW.stage_key
+			    AND dependency_event.execution_number=NEW.execution_number AND dependency_event.authority_epoch=NEW.authority_epoch
+			    AND dependency_event.dependency_key=NEW.dependency_key AND dependency_event.registration_id=NEW.registration_id
+			    AND dependency_event.credential_epoch=NEW.credential_epoch AND dependency_event.handoff_row_id=NEW.handoff_row_id
+			    AND dependency_event.report_event_id=NEW.report_event_id AND dependency_event.sequence=NEW.sequence
+			    AND dependency_event.lifecycle_state=NEW.lifecycle_state AND dependency_event.server_received_at=NEW.updated_at)
+			 BEGIN SELECT RAISE(ABORT,'invalid dependency latest advance'); END`,
+			`CREATE TRIGGER trg_external_stage_dependency_latest_no_delete BEFORE DELETE ON external_stage_dependency_latest
+			 BEGIN SELECT RAISE(ABORT,'external stage dependency latest is durable'); END`,
+
+			`CREATE TRIGGER trg_external_stage_handoff_causal_update_guard
+			 BEFORE UPDATE ON external_stage_handoffs
+			 WHEN NOT (
+			  (NEW.credential_epoch=OLD.credential_epoch+1 AND NEW.secret_digest IS NOT OLD.secret_digest AND
+			   NEW.lifecycle_state=OLD.lifecycle_state AND NEW.last_sequence=OLD.last_sequence AND
+			   NEW.accepted_at IS OLD.accepted_at AND NEW.terminal_at IS OLD.terminal_at AND NEW.revoked_at IS OLD.revoked_at AND
+			   EXISTS(SELECT 1 FROM external_stage_operation_events operation
+			    JOIN external_stage_audit_events audit ON audit.operation_event_id=operation.id
+			    WHERE operation.handoff_row_id=OLD.id AND operation.credential_epoch=NEW.credential_epoch
+			     AND operation.operation_kind=CASE WHEN OLD.credential_epoch=0 THEN 'secret_minted' ELSE 'secret_rotated' END
+			     AND audit.event_kind=CASE WHEN OLD.credential_epoch=0 THEN 'secret_minted' ELSE 'secret_rotated' END
+			     AND audit.credential_epoch=NEW.credential_epoch AND audit.outcome='committed')) OR
+			  (NEW.credential_epoch=OLD.credential_epoch AND NEW.secret_digest IS OLD.secret_digest AND
+			   NEW.lifecycle_state=OLD.lifecycle_state AND NEW.last_sequence=OLD.last_sequence AND
+			   NEW.accepted_at IS OLD.accepted_at AND NEW.terminal_at IS OLD.terminal_at AND OLD.revoked_at IS NULL AND
+			   EXISTS(SELECT 1 FROM external_stage_operation_events operation
+			    JOIN external_stage_audit_events audit ON audit.operation_event_id=operation.id
+			    WHERE operation.handoff_row_id=OLD.id AND operation.operation_kind='revoked'
+			     AND operation.credential_epoch=OLD.credential_epoch AND NEW.revoked_at=operation.server_received_at
+			     AND audit.event_kind='revoked' AND audit.credential_epoch=OLD.credential_epoch AND audit.outcome='committed')) OR
+			  (NEW.credential_epoch=OLD.credential_epoch AND NEW.secret_digest IS OLD.secret_digest AND
+			   OLD.lifecycle_state='issued' AND NEW.lifecycle_state='accepted' AND NEW.last_sequence=OLD.last_sequence+1 AND
+			   OLD.accepted_at IS NULL AND NEW.terminal_at IS NULL AND OLD.revoked_at IS NULL AND NEW.revoked_at IS NULL AND
+			   EXISTS(SELECT 1 FROM external_stage_operation_events operation
+			    JOIN external_stage_audit_events audit ON audit.operation_event_id=operation.id
+			    WHERE operation.handoff_row_id=OLD.id AND operation.operation_kind='accepted'
+			     AND operation.sequence=NEW.last_sequence AND operation.credential_epoch=OLD.credential_epoch
+			     AND NEW.accepted_at=operation.server_received_at AND audit.event_kind='accepted'
+			     AND audit.sequence=NEW.last_sequence AND audit.outcome='committed')) OR
+			  (NEW.credential_epoch=OLD.credential_epoch AND NEW.secret_digest IS OLD.secret_digest AND
+			   NEW.lifecycle_state=OLD.lifecycle_state AND NEW.last_sequence=OLD.last_sequence+1 AND
+			   NEW.accepted_at IS OLD.accepted_at AND NEW.terminal_at IS OLD.terminal_at AND NEW.revoked_at IS OLD.revoked_at AND
+			   EXISTS(SELECT 1 FROM external_stage_heartbeat_windows window
+			    WHERE window.handoff_row_id=OLD.id AND window.credential_epoch=OLD.credential_epoch
+			     AND window.last_sequence=NEW.last_sequence AND window.lifecycle_state=OLD.lifecycle_state)) OR
+			  (NEW.credential_epoch=OLD.credential_epoch AND NEW.secret_digest IS OLD.secret_digest AND
+			   NEW.last_sequence=OLD.last_sequence+1 AND NEW.accepted_at IS OLD.accepted_at AND NEW.revoked_at IS OLD.revoked_at AND
+			   ((OLD.lifecycle_state='accepted' AND NEW.lifecycle_state IN ('active','waiting','blocked')) OR
+			    (OLD.lifecycle_state IN ('active','waiting','blocked') AND NEW.lifecycle_state IN ('active','waiting','blocked','succeeded','failed'))) AND
+			   ((NEW.lifecycle_state IN ('succeeded','failed') AND NEW.terminal_at IS NOT NULL) OR
+			    (NEW.lifecycle_state IN ('active','waiting','blocked') AND NEW.terminal_at IS NULL)) AND
+			   EXISTS(SELECT 1 FROM external_stage_report_events report
+			    JOIN external_stage_audit_events audit ON audit.report_event_id=report.id AND audit.event_kind='reported'
+			    WHERE report.handoff_row_id=OLD.id AND report.sequence=NEW.last_sequence
+			     AND report.credential_epoch=OLD.credential_epoch AND report.lifecycle_state=NEW.lifecycle_state
+			     AND ((NEW.lifecycle_state IN ('succeeded','failed') AND NEW.terminal_at=report.server_received_at) OR
+			          (NEW.lifecycle_state IN ('active','waiting','blocked') AND NEW.terminal_at IS NULL))
+			     AND audit.sequence=report.sequence AND audit.credential_epoch=report.credential_epoch AND audit.outcome='committed'
+			     AND ((OLD.reporter_role='owner' AND EXISTS(SELECT 1 FROM external_stage_owner_latest latest
+			          WHERE latest.handoff_row_id=OLD.id AND latest.report_event_id=report.id AND latest.sequence=report.sequence)) OR
+			          (OLD.reporter_role='dependency' AND EXISTS(SELECT 1 FROM external_stage_dependency_latest latest
+			          WHERE latest.handoff_row_id=OLD.id AND latest.report_event_id=report.id AND latest.sequence=report.sequence
+			           AND latest.credential_epoch=OLD.credential_epoch)))) )
+			 )
+			 BEGIN SELECT RAISE(ABORT,'external stage handoff update lacks an exact causal fact'); END`,
+			`CREATE TRIGGER trg_external_stage_audit_no_update BEFORE UPDATE ON external_stage_audit_events
+			 BEGIN SELECT RAISE(ABORT,'external stage audit is append-only'); END`,
+			`CREATE TRIGGER trg_external_stage_audit_no_delete BEFORE DELETE ON external_stage_audit_events
+			 BEGIN SELECT RAISE(ABORT,'external stage audit is append-only'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -10199,6 +11331,42 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	// modified control schema must fail before the first ALTER rather than be
 	// silently accepted behind object-existence clauses.
 	147: checkM147SchemaIsUnapplied,
+	// PAI-810: M148 is also a pure additive, non-idempotent migration. Refuse
+	// partial local copies so sealed-stream invariants cannot be skipped behind
+	// CREATE IF NOT EXISTS behavior.
+	148: checkM148SchemaIsUnapplied,
+}
+
+func checkM148SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT type||':'||name FROM sqlite_master
+		WHERE name GLOB 'trg_external_stage_*' OR name GLOB 'idx_external_stage_*' OR name IN (
+		 'external_stage_reporter_registrations','external_stage_prerequisite_sets','external_stage_prerequisites',
+		 'external_stage_handoffs','external_stage_operation_events','external_stage_report_events',
+		 'external_stage_heartbeat_windows','external_stage_user_roles',
+		 'external_stage_pharos_evidence','external_stage_janus_evidence','external_stage_report_blockers',
+		 'external_stage_owner_events','external_stage_owner_latest','external_stage_dependency_events',
+		 'external_stage_dependency_latest','external_stage_audit_events','external_stage_setup_events')
+		ORDER BY 1`)
+	if err != nil {
+		return fmt.Errorf("inspect M148 schema ownership: %w", err)
+	}
+	defer rows.Close()
+	var collisions []string
+	for rows.Next() {
+		var collision string
+		if err := rows.Scan(&collision); err != nil {
+			return fmt.Errorf("scan M148 schema ownership: %w", err)
+		}
+		collisions = append(collisions, collision)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate M148 schema ownership: %w", err)
+	}
+	if len(collisions) > 0 {
+		return fmt.Errorf("M148 schema is partially present or locally incompatible: %s", strings.Join(collisions, ", "))
+	}
+	return nil
 }
 
 func checkM147SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
