@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -39,6 +40,26 @@ type serviceFixture struct {
 }
 
 type partialSecretReader struct{ target []byte }
+
+func TestMintIdempotencyDigestPreservesFullCredentialEpoch(t *testing.T) {
+	requestDigest := [32]byte{1, 2, 3}
+	if mintIdempotencyDigest(requestDigest, 0) == mintIdempotencyDigest(requestDigest, 256) {
+		t.Fatal("credential epochs separated by 256 produced the same idempotency digest")
+	}
+	if mintIdempotencyDigest(requestDigest, math.MaxInt64) == mintIdempotencyDigest(requestDigest, math.MaxInt64-256) {
+		t.Fatal("credential epoch high bits were not preserved at the int64 boundary")
+	}
+}
+
+func TestMintRejectsCredentialEpochOutsideIncrementableRange(t *testing.T) {
+	service := &Service{}
+	principal := Principal{UserID: 1, Kind: "session", SessionCredentialID: "credential"}
+	for _, expected := range []int64{-1, math.MaxInt64} {
+		if _, err := service.Mint(t.Context(), principal, "handoff", expected, true); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("Mint expected epoch %d error = %v, want ErrInvalid", expected, err)
+		}
+	}
+}
 
 func assertExternalStageSentinelsAbsent(t *testing.T, database *sql.DB, secret []byte) {
 	t.Helper()

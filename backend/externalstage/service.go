@@ -15,11 +15,13 @@ import (
 	"database/sql"
 	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -110,6 +112,17 @@ func secretDigest(secret []byte) [sha256.Size]byte {
 	var out [sha256.Size]byte
 	copy(out[:], h.Sum(nil))
 	return out
+}
+
+func mintIdempotencyDigest(requestDigest [sha256.Size]byte, expected int64) [sha256.Size]byte {
+	var encodedEpoch [8]byte
+	_, _ = binary.Encode(encodedEpoch[:], binary.BigEndian, expected)
+	hash := sha256.New()
+	_, _ = hash.Write(requestDigest[:])
+	_, _ = hash.Write(encodedEpoch[:])
+	var digest [sha256.Size]byte
+	copy(digest[:], hash.Sum(nil))
+	return digest
 }
 
 func (s *Service) newHandoffID() (string, error) {
@@ -439,7 +452,7 @@ func (s *Service) Mint(ctx context.Context, p Principal, handoffID string, expec
 	if err != nil {
 		return nil, err
 	}
-	if expected < 0 {
+	if expected < 0 || expected == math.MaxInt64 {
 		return nil, ErrInvalid
 	}
 	opKind := "secret_minted"
@@ -451,7 +464,7 @@ func (s *Service) Mint(ctx context.Context, p Principal, handoffID string, expec
 		Epoch     int64
 		Operation string
 	}{handoffID, expected, opKind})
-	idem := sha256.Sum256(append(reqDigest[:], byte(expected)))
+	idem := mintIdempotencyDigest(reqDigest, expected)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err

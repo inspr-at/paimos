@@ -34,11 +34,23 @@ func openExternalStageSecretFile(path string) (*os.File, error) {
 		_ = file.Close()
 		return nil, errors.New("inspect handoff credential file: unavailable or unsafe")
 	}
-	if err := validateExternalStageSecretMetadata(info.Mode(), uint64(stat.Uid), uint64(unix.Geteuid()), uint64(stat.Nlink)); err != nil {
+	effectiveUID, ok := nonNegativeIntToUint64(unix.Geteuid())
+	if !ok {
+		_ = file.Close()
+		return nil, errors.New("inspect handoff credential file: unavailable or unsafe")
+	}
+	if err := validateExternalStageSecretMetadata(info.Mode(), uint64(stat.Uid), effectiveUID, uint64(stat.Nlink)); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
 	return file, nil
+}
+
+func nonNegativeIntToUint64(value int) (uint64, bool) {
+	if value < 0 {
+		return 0, false
+	}
+	return uint64(value), true
 }
 
 func syncExternalStageOutputDirectory(path string) error {
