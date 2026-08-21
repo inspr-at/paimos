@@ -6,6 +6,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,6 +27,7 @@ func externalStageRequestWithPrincipal(t *testing.T, request *http.Request, keyI
 }
 
 func TestExternalStageAPIKeyAuthConcealsMalformedCredentials(t *testing.T) {
+	var canonical []byte
 	tests := []struct {
 		name   string
 		values []string
@@ -54,8 +56,24 @@ func TestExternalStageAPIKeyAuthConcealsMalformedCredentials(t *testing.T) {
 			if recorder.Header().Get("Cache-Control") != "private, no-store" ||
 				recorder.Header().Get("Content-Type") != "application/problem+json" ||
 				recorder.Header().Get("X-Permissions-Epoch") != "" ||
+				recorder.Header().Get("Allow") != "" ||
 				strings.Contains(recorder.Body.String(), "secret") || strings.Contains(recorder.Body.String(), "first") {
 				t.Fatalf("credential concealment failed: headers=%v body=%s", recorder.Header(), recorder.Body.String())
+			}
+			var problem map[string]any
+			if err := json.Unmarshal(recorder.Body.Bytes(), &problem); err != nil {
+				t.Fatal(err)
+			}
+			delete(problem, "instance")
+			delete(problem, "request_id")
+			normalized, err := json.Marshal(problem)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if canonical == nil {
+				canonical = normalized
+			} else if !bytes.Equal(canonical, normalized) {
+				t.Fatalf("malformed credential response drifted: got=%s want=%s", normalized, canonical)
 			}
 		})
 	}
