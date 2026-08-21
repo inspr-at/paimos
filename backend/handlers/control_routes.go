@@ -954,6 +954,15 @@ func ControlAwareNotFound(w http.ResponseWriter, r *http.Request) {
 }
 
 func ControlAwareMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	// External-stage adapter routes are API-key-only concealed capabilities.
+	// chi reaches this global handler before the route group's authentication
+	// middleware, so a method distinction here would disclose the route.
+	if strings.HasPrefix(r.URL.Path, "/api/external-stage/") {
+		w.Header().Del("Allow")
+		w.Header().Del("X-Permissions-Epoch")
+		writeControlNotFound(w, r)
+		return
+	}
 	if IsClassifiedControlRequest(r) {
 		requestID := trustedControlResponseRequestID(r)
 		w.Header().Set(RequestIDHeader, requestID)

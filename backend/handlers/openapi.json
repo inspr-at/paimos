@@ -1110,6 +1110,271 @@
           }
         }
       },
+      "ExternalStageCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage_key", "execution_number", "expected_plan_revision", "expected_authority_epoch", "reporter_registration_id", "expires_at"],
+        "properties": {
+          "stage_key": {"type": "string", "enum": ["specification", "implementation", "qa", "deployment", "verification"]},
+          "execution_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "expected_plan_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "expected_authority_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_registration_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "expires_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ExternalStageCredentialEpochRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["expected_credential_epoch"],
+        "properties": {"expected_credential_epoch": {"type": "integer", "format": "int64", "minimum": 0}}
+      },
+      "ExternalStageRevokeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["expected_credential_epoch"],
+        "properties": {"expected_credential_epoch": {"type": "integer", "format": "int64", "minimum": 0}}
+      },
+      "ExternalStageReporterRegistrationRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["api_key_id", "reporter_class", "reporter_role"],
+        "properties": {
+          "api_key_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_class": {"type": "string", "enum": ["pharos", "janus"]},
+          "reporter_role": {"type": "string", "enum": ["owner", "dependency"]},
+          "dependency_key": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "workflow": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "environment": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"}
+        },
+        "oneOf": [
+          {"properties": {"reporter_class": {"const": "pharos"}, "reporter_role": {"const": "owner"}}, "required": ["workflow", "environment"], "not": {"required": ["dependency_key"]}},
+          {"properties": {"reporter_class": {"const": "janus"}, "reporter_role": {"const": "dependency"}}, "required": ["dependency_key"], "not": {"anyOf": [{"required": ["workflow"]}, {"required": ["environment"]}]}}
+        ]
+      },
+      "ExternalStageReporterRegistration": {
+        "type": "object", "additionalProperties": false,
+        "required": ["registration_id", "reporter_id", "api_key_id", "reporter_class", "reporter_role", "evidence_ceiling", "created_at"],
+        "properties": {
+          "registration_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "api_key_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_class": {"type": "string", "enum": ["pharos", "janus"]},
+          "reporter_role": {"type": "string", "enum": ["owner", "dependency"]},
+          "dependency_key": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "workflow": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "environment": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "evidence_ceiling": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "enum": ["deployment", "verification", "authorization", "credential_handoff"]}},
+          "created_at": {"type": "string", "format": "date-time"},
+          "revoked_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ExternalStageReporterRegistrationList": {
+        "type": "object", "additionalProperties": false, "required": ["registrations"],
+        "properties": {"registrations": {"type": "array", "maxItems": 256, "items": {"$ref": "#/components/schemas/ExternalStageReporterRegistration"}}}
+      },
+      "ExternalStagePrerequisite": {
+        "type": "object", "additionalProperties": false,
+        "required": ["dependency_key", "reporter_registration_id", "requirement"],
+        "properties": {
+          "dependency_key": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "reporter_registration_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "requirement": {"type": "string", "enum": ["required", "optional"]}
+        }
+      },
+      "ExternalStagePrerequisiteSetRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["stage_key", "execution_number", "expected_plan_revision", "expected_authority_epoch", "prerequisites"],
+        "properties": {
+          "stage_key": {"type": "string", "enum": ["specification", "implementation", "qa", "deployment", "verification"]},
+          "execution_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "expected_plan_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "expected_authority_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "prerequisites": {"type": "array", "minItems": 0, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/components/schemas/ExternalStagePrerequisite"}}
+        }
+      },
+      "ExternalStagePrerequisiteSet": {
+        "type": "object", "additionalProperties": false,
+        "required": ["delivery_key", "stage_key", "execution_number", "plan_revision", "authority_epoch", "declared_count", "sealed_at"],
+        "properties": {
+          "delivery_key": {"type": "string", "minLength": 1, "maxLength": 128},
+          "stage_key": {"type": "string", "enum": ["specification", "implementation", "qa", "deployment", "verification"]},
+          "execution_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "plan_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "authority_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "declared_count": {"type": "integer", "minimum": 0, "maximum": 16},
+          "sealed_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ExternalStageHandoffMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["handoff_id", "delivery_key", "issue_key", "attempt_number", "plan_revision", "plan_digest", "stage_key", "execution_number", "execution_start_stage_event_id", "predecessor_digest", "authority_epoch", "authority_stage_event_id", "reporter_registration_id", "reporter_class", "reporter_role", "evidence_ceiling", "contract_major", "fixture_digest", "credential_epoch", "expires_at", "context_digest", "state", "created_at"],
+        "properties": {
+          "handoff_id": {"$ref": "#/components/schemas/ExternalStageHandoffID"},
+          "delivery_key": {"type": "string", "minLength": 1, "maxLength": 128},
+          "issue_key": {"type": "string", "minLength": 1, "maxLength": 64},
+          "attempt_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "plan_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "plan_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "stage_key": {"type": "string", "enum": ["specification", "implementation", "qa", "deployment", "verification"]},
+          "execution_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "execution_start_stage_event_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "predecessor_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "authority_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "authority_stage_event_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_registration_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_class": {"type": "string", "enum": ["pharos", "janus"]},
+          "reporter_role": {"type": "string", "enum": ["owner", "dependency"]},
+          "dependency_key": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "evidence_ceiling": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "enum": ["deployment", "verification", "authorization", "credential_handoff"]}},
+          "contract_major": {"type": "integer", "const": 1},
+          "fixture_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "credential_epoch": {"type": "integer", "format": "int64", "minimum": 0},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "context_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "state": {"$ref": "#/components/schemas/ExternalStageHandoffState"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "revoked_at": {"type": "string", "format": "date-time"}
+        },
+        "description": "Safe metadata only. The raw or encoded handoff secret is never a JSON field."
+      },
+      "ExternalStagePullResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["handoff_id", "contract_major", "fixture_digest", "credential_epoch", "expires_at", "state", "reporter_class", "reporter_role", "evidence_ceiling", "stage_key", "execution_number", "plan_digest", "predecessor_digest", "authority_epoch", "context_digest"],
+        "properties": {
+          "handoff_id": {"$ref": "#/components/schemas/ExternalStageHandoffID"},
+          "contract_major": {"type": "integer", "const": 1},
+          "fixture_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "credential_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "state": {"$ref": "#/components/schemas/ExternalStageHandoffState"},
+          "reporter_class": {"type": "string", "enum": ["pharos", "janus"]},
+          "reporter_role": {"type": "string", "enum": ["owner", "dependency"]},
+          "dependency_key": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "evidence_ceiling": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "enum": ["deployment", "verification", "authorization", "credential_handoff"]}},
+          "stage_key": {"type": "string", "enum": ["specification", "implementation", "qa", "deployment", "verification"]},
+          "execution_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "plan_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "predecessor_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"},
+          "authority_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "context_digest": {"$ref": "#/components/schemas/ExternalStageSHA256Digest"}
+        }
+      },
+      "ExternalStageAcceptRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "observed_at"],
+        "properties": {
+          "sequence": {"type": "integer", "format": "int64", "const": 1},
+          "observed_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ExternalStageArtifactEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "digest", "commit_digest"],
+        "properties": {
+          "version": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"},
+          "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "commit_digest": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"}
+        }
+      },
+      "ExternalStagePharosEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "workflow", "environment", "artifact", "result", "observed_at"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["deployment", "verification"]},
+          "workflow": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "environment": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "artifact": {"$ref": "#/components/schemas/ExternalStageArtifactEvidence"},
+          "result": {"type": "string", "enum": ["succeeded", "failed"]},
+          "observed_at": {"type": "string", "format": "date-time"}
+        },
+        "description": "Symbolic allowlisted workflow/environment and exact artifact identity only; no command, path, callback, or URL fields exist."
+      },
+      "ExternalStageJanusEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "result", "observed_at"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["authorization", "credential_handoff"]},
+          "result": {"type": "string", "enum": ["satisfied", "blocked"]},
+          "authorized": {"type": "boolean"},
+          "credential_ready": {"type": "boolean"},
+          "observed_at": {"type": "string", "format": "date-time"}
+        },
+        "oneOf": [
+          {"properties": {"kind": {"const": "authorization"}, "result": {"const": "satisfied"}, "authorized": {"const": true}}, "required": ["authorized"], "not": {"required": ["credential_ready"]}},
+          {"properties": {"kind": {"const": "authorization"}, "result": {"const": "blocked"}, "authorized": {"const": false}}, "required": ["authorized"], "not": {"required": ["credential_ready"]}},
+          {"properties": {"kind": {"const": "credential_handoff"}, "result": {"const": "satisfied"}, "credential_ready": {"const": true}}, "required": ["credential_ready"], "not": {"required": ["authorized"]}},
+          {"properties": {"kind": {"const": "credential_handoff"}, "result": {"const": "blocked"}, "credential_ready": {"const": false}}, "required": ["credential_ready"], "not": {"required": ["authorized"]}}
+        ],
+        "description": "Value-free enum, boolean, and timestamp facts only; no free text, opaque ID, path, URL, digest, version, ciphertext, command, callback, or secret field exists."
+      },
+      "ExternalStageReportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "state", "observed_at", "heartbeat"],
+        "properties": {
+          "sequence": {"type": "integer", "format": "int64", "minimum": 2},
+          "state": {"type": "string", "enum": ["active", "waiting", "blocked", "succeeded", "failed"]},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "heartbeat": {"type": "boolean"},
+          "blocker_codes": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "enum": ["dependency_pending", "dependency_failed", "reporter_stale", "external_waiting"]}},
+          "pharos_evidence": {"$ref": "#/components/schemas/ExternalStagePharosEvidence"},
+          "janus_evidence": {"$ref": "#/components/schemas/ExternalStageJanusEvidence"}
+        },
+        "allOf": [
+          {"not": {"required": ["pharos_evidence", "janus_evidence"]}},
+          {"if": {"properties": {"heartbeat": {"const": true}}, "required": ["heartbeat"]}, "then": {
+            "properties": {"state": {"enum": ["active", "waiting", "blocked"]}},
+            "not": {"anyOf": [{"required": ["blocker_codes"]}, {"required": ["pharos_evidence"]}, {"required": ["janus_evidence"]}]}
+          }},
+          {"if": {"properties": {"heartbeat": {"const": false}, "state": {"const": "blocked"}}, "required": ["heartbeat", "state"]}, "then": {
+            "required": ["blocker_codes"], "properties": {"blocker_codes": {"minItems": 1}}
+          }},
+          {"if": {"properties": {"heartbeat": {"const": false}, "state": {"enum": ["active", "waiting", "succeeded", "failed"]}}, "required": ["heartbeat", "state"]}, "then": {
+            "not": {"required": ["blocker_codes"]}
+          }},
+          {"if": {"properties": {"state": {"enum": ["succeeded", "failed"]}}, "required": ["state"]}, "then": {
+            "oneOf": [{"required": ["pharos_evidence"]}, {"required": ["janus_evidence"]}]
+          }},
+          {"if": {"properties": {"state": {"enum": ["active", "waiting"]}}, "required": ["state"]}, "then": {
+            "not": {"anyOf": [{"required": ["pharos_evidence"]}, {"required": ["janus_evidence"]}]}
+          }},
+          {"if": {"required": ["pharos_evidence"]}, "then": {"oneOf": [
+            {"properties": {"state": {"const": "succeeded"}, "pharos_evidence": {"properties": {"result": {"const": "succeeded"}}}}},
+            {"properties": {"state": {"const": "failed"}, "pharos_evidence": {"properties": {"result": {"const": "failed"}}}}}
+          ]}},
+          {"if": {"required": ["janus_evidence"]}, "then": {"oneOf": [
+            {"properties": {"state": {"const": "succeeded"}, "janus_evidence": {"properties": {"result": {"const": "satisfied"}}}}},
+            {"properties": {"state": {"const": "blocked"}, "janus_evidence": {"properties": {"result": {"const": "blocked"}}}}}
+          ]}}
+        ],
+        "description": "The registered reporter class and server-owned ceiling select the permitted evidence variant; body fields never grant class or role."
+      },
+      "ExternalStageReportReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["handoff_id", "sequence", "state", "credential_epoch", "duplicate", "server_received_at"],
+        "properties": {
+          "handoff_id": {"$ref": "#/components/schemas/ExternalStageHandoffID"},
+          "sequence": {"type": "integer", "format": "int64", "minimum": 1},
+          "state": {"$ref": "#/components/schemas/ExternalStageHandoffState"},
+          "credential_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "duplicate": {"type": "boolean"},
+          "server_received_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ExternalStageHandoffID": {
+        "type": "string",
+        "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+        "description": "Server-generated non-sequential opaque public locator, distinct from the handoff secret."
+      },
+      "ExternalStageSHA256Digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+      "ExternalStageHandoffState": {"type": "string", "enum": ["issued", "accepted", "active", "waiting", "blocked", "succeeded", "failed"]},
       "AgentModeProblem": {
         "type": "object",
         "additionalProperties": false,
@@ -1569,6 +1834,30 @@
       "AgentModeDeliveryPath": {
         "name": "deliveryKey", "in": "path", "required": true,
         "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}
+      },
+      "ExternalStageHandoffPath": {
+        "name": "handoffID", "in": "path", "required": true,
+        "schema": {"$ref": "#/components/schemas/ExternalStageHandoffID"}
+      },
+      "ExternalStageAcceptHeader": {
+        "name": "Accept", "in": "header", "required": true,
+        "schema": {"type": "string", "const": "application/vnd.paimos.external-stage.v1+json"},
+        "description": "Exact v1 negotiation; absent or any other media version is rejected."
+      },
+      "ExternalStageSecretAcceptHeader": {
+        "name": "Accept", "in": "header", "required": true,
+        "schema": {"type": "string", "const": "application/vnd.paimos.external-stage-secret.v1"},
+        "description": "Exact one-time binary secret response negotiation for mint and rotate."
+      },
+      "ExternalStageSecretHeader": {
+        "name": "X-PAIMOS-Handoff-Secret", "in": "header", "required": true,
+        "schema": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+        "description": "Inbound base64url-without-padding encoding of the 32 raw credential bytes. Never accepted in URL, query, cookie, or JSON and never returned in a response header."
+      },
+      "ExternalStageIdempotencyHeader": {
+        "name": "Idempotency-Key", "in": "header", "required": true,
+        "schema": {"type": "string", "minLength": 26, "maxLength": 36},
+        "description": "Canonical lowercase UUID or uppercase ULID. Only a domain-separated digest is persisted."
       }
     }
   },
@@ -3773,6 +4062,190 @@
         "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],
         "requestBody": {"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["operation","status_revision"],"properties":{"operation":{"type":"string","enum":["confirm","withdraw"]},"status_revision":{"type":"integer","minimum":1}}}}}},
         "responses": {"200":{"description":"Safe current command projection"},"400":{"description":"Malformed closed request"},"404":{"description":"Canonical concealment"},"409":{"description":"Stale or semantic conflict"},"503":{"description":"Dependency unavailable"}}
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations": {
+      "get": {
+        "operationId": "listExternalStageReporterRegistrations", "tags": ["external-stage"],
+        "summary": "List safe current external reporter registrations",
+        "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}],
+        "responses": {"200": {"description": "Current registrations", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageReporterRegistrationList"}}}}, "404": {"description": "Canonical concealment"}}
+      },
+      "post": {
+        "operationId": "createExternalStageReporterRegistration", "tags": ["external-stage"],
+        "summary": "Create an exact server-owned external reporter registration",
+        "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageReporterRegistrationRequest"}}}},
+        "responses": {"201": {"description": "Registration created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageReporterRegistration"}}}}, "400": {"description": "Strict JSON refusal"}, "404": {"description": "Canonical concealment"}, "409": {"description": "Conflicting replay or binding"}}
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations/{registrationID}/revoke": {
+      "post": {
+        "operationId": "revokeExternalStageReporterRegistration", "tags": ["external-stage"],
+        "summary": "Revoke an exact external reporter registration",
+        "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}, {"name": "registrationID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false}}}},
+        "responses": {"200": {"description": "Registration revoked", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageReporterRegistration"}}}}, "400": {"description": "Strict JSON refusal"}, "404": {"description": "Canonical concealment"}, "409": {"description": "Conflicting replay"}}
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets": {
+      "post": {
+        "operationId": "sealExternalStagePrerequisiteSet", "tags": ["external-stage"],
+        "summary": "Seal the exact required and optional dependency set",
+        "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStagePrerequisiteSetRequest"}}}},
+        "responses": {"201": {"description": "Prerequisite set sealed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStagePrerequisiteSet"}}}}, "400": {"description": "Strict JSON refusal"}, "404": {"description": "Canonical concealment"}, "409": {"description": "Conflicting replay or stale authority"}}
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/external-stage-handoffs": {
+      "post": {
+        "operationId": "createExternalStageHandoff",
+        "tags": ["external-stage"],
+        "summary": "Create an immutable external-stage handoff without a credential",
+        "description": "Internal Agent Mode operation. Resolves current plan, execution, lineage, authority, and registered reporter policy server-side. Creation is idempotent and returns metadata only; it never mints or returns a secret.",
+        "parameters": [
+          {"$ref": "#/components/parameters/AgentModeDeliveryPath"},
+          {"$ref": "#/components/parameters/ExternalStageAcceptHeader"},
+          {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}
+        ],
+        "requestBody": {"required": true, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageCreateRequest"}}}},
+        "responses": {
+          "200": {"description": "Exact duplicate safe metadata", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageHandoffMetadata"}}}},
+          "201": {"description": "Created safe metadata; credential epoch remains zero", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageHandoffMetadata"}}}},
+          "400": {"description": "Strict JSON or idempotency refusal", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "404": {"description": "Canonical concealment", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "406": {"description": "Accept does not select v1", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "409": {"description": "Stale lineage, authority, reporter policy, or conflicting replay", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "413": {"description": "Bounded body exceeded", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "415": {"description": "Content-Type is not exact v1 vendor media", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Atomic persistence failed", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "503": {"description": "Delivery service unavailable", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/agent-mode/external-stage-handoffs/{handoffID}/mint": {
+      "post": {
+        "operationId": "mintExternalStageHandoffSecret",
+        "tags": ["external-stage"],
+        "summary": "Mint the first one-time handoff secret",
+        "description": "Returns exactly 32 raw random bytes once as application/vnd.paimos.external-stage-secret.v1. No JSON/base64 DTO or response header carries the secret, and the generic response cache is never used.",
+        "parameters": [{"$ref": "#/components/parameters/ExternalStageHandoffPath"}, {"$ref": "#/components/parameters/ExternalStageSecretAcceptHeader"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageCredentialEpochRequest"}}}},
+        "responses": {
+          "201": {"description": "Credential minted once; a lost response is unrecoverable and requires rotation", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage-secret.v1": {"schema": {"type": "string", "format": "binary", "minLength": 32, "maxLength": 32}}}},
+          "400": {"description": "Strict JSON or idempotency refusal", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "404": {"description": "Canonical concealment", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "406": {"description": "Accept does not select v1", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "409": {"description": "Already minted, stale epoch, or ambiguous/lost prior response; rotate instead", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "413": {"description": "Bounded body exceeded", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "415": {"description": "Content-Type is not exact v1 vendor media", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Atomic persistence failed", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/agent-mode/external-stage-handoffs/{handoffID}/rotate": {
+      "post": {
+        "operationId": "rotateExternalStageHandoffSecret",
+        "tags": ["external-stage"],
+        "summary": "Rotate a handoff secret and advance its credential epoch",
+        "description": "Invalidates the old credential and returns exactly 32 new raw random bytes once as application/vnd.paimos.external-stage-secret.v1. No JSON/base64 DTO or response header carries the secret.",
+        "parameters": [{"$ref": "#/components/parameters/ExternalStageHandoffPath"}, {"$ref": "#/components/parameters/ExternalStageSecretAcceptHeader"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageCredentialEpochRequest"}}}},
+        "responses": {
+          "201": {"description": "Credential rotated once; a lost response requires another rotation", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage-secret.v1": {"schema": {"type": "string", "format": "binary", "minLength": 32, "maxLength": 32}}}},
+          "400": {"description": "Strict JSON or idempotency refusal", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "404": {"description": "Canonical concealment", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "406": {"description": "Accept does not select v1", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "409": {"description": "Stale epoch, revoked/terminal handoff, or conflicting replay", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "413": {"description": "Bounded body exceeded", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "415": {"description": "Content-Type is not exact v1 vendor media", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Atomic persistence failed", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/agent-mode/external-stage-handoffs/{handoffID}/revoke": {
+      "post": {
+        "operationId": "revokeExternalStageHandoff",
+        "tags": ["external-stage"],
+        "summary": "Terminally revoke a handoff",
+        "parameters": [{"$ref": "#/components/parameters/ExternalStageHandoffPath"}, {"$ref": "#/components/parameters/ExternalStageAcceptHeader"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageRevokeRequest"}}}},
+        "responses": {
+          "200": {"description": "Exact duplicate or newly revoked safe metadata", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageHandoffMetadata"}}}},
+          "400": {"description": "Strict JSON or idempotency refusal", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "404": {"description": "Canonical concealment", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "406": {"description": "Accept does not select v1", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "409": {"description": "Stale epoch or conflicting replay", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "413": {"description": "Bounded body exceeded", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "415": {"description": "Content-Type is not exact v1 vendor media", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Atomic persistence failed", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/external-stage/handoffs/{handoffID}": {
+      "get": {
+        "operationId": "pullExternalStageHandoff",
+        "tags": ["external-stage"],
+        "summary": "Pull one opaque handoff",
+        "description": "Requires the exact registered bearer API key and the independent handoff secret. The opaque locator is server-generated, non-sequential, and not a credential.",
+        "security": [{"bearerAPIKey": []}],
+        "parameters": [{"$ref": "#/components/parameters/ExternalStageHandoffPath"}, {"$ref": "#/components/parameters/ExternalStageAcceptHeader"}, {"$ref": "#/components/parameters/ExternalStageSecretHeader"}],
+        "responses": {
+          "200": {"description": "Current safe handoff projection", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStagePullResponse"}}}},
+          "404": {"description": "Canonical parity for missing, unauthorized, wrong/expired/revoked/rotated credential, or stale authority", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "406": {"description": "Accept does not select v1", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Private persistence failure", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/external-stage/handoffs/{handoffID}/accept": {
+      "post": {
+        "operationId": "acceptExternalStageHandoff",
+        "tags": ["external-stage"],
+        "summary": "Accept the exact issued handoff as sequence one",
+        "security": [{"bearerAPIKey": []}],
+        "parameters": [{"$ref": "#/components/parameters/ExternalStageHandoffPath"}, {"$ref": "#/components/parameters/ExternalStageAcceptHeader"}, {"$ref": "#/components/parameters/ExternalStageSecretHeader"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageAcceptRequest"}}}},
+        "responses": {
+          "200": {"description": "Exact duplicate receipt", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageReportReceipt"}}}},
+          "201": {"description": "Accepted sequence one", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageReportReceipt"}}}},
+          "400": {"description": "Strict JSON or idempotency refusal", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "404": {"description": "Canonical credential/authority concealment", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "406": {"description": "Accept does not select v1", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "409": {"description": "Wrong state/sequence or conflicting replay; exact duplicate lookup precedes terminal/expiry checks", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "413": {"description": "Bounded body exceeded", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "415": {"description": "Content-Type is not exact v1 vendor media", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Atomic persistence failed", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/external-stage/handoffs/{handoffID}/reports": {
+      "post": {
+        "operationId": "reportExternalStageHandoff",
+        "tags": ["external-stage"],
+        "summary": "Append one exact-next owner or dependency report",
+        "description": "The registered key-to-reporter binding selects class, role, dependency, and evidence ceiling. Dependency reports never write canonical owner latest. Verification remains deployed-unverified unless exact artifact and environment evidence is observed and server-received after the matching deployment receipt. A nonterminal reporter is stale after two minutes without a server receipt; stale semantic progress is rejected until an exact-next heartbeat restores liveness, and reporter timestamps never extend this deadline.",
+        "security": [{"bearerAPIKey": []}],
+        "parameters": [{"$ref": "#/components/parameters/ExternalStageHandoffPath"}, {"$ref": "#/components/parameters/ExternalStageAcceptHeader"}, {"$ref": "#/components/parameters/ExternalStageSecretHeader"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageReportRequest"}}}},
+        "responses": {
+          "200": {"description": "Exact duplicate receipt with no mutation or wake", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageReportReceipt"}}}},
+          "201": {"description": "Report committed atomically before wake", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageReportReceipt"}}}},
+          "400": {"description": "Strict JSON, unknown field, unsafe evidence, or idempotency refusal", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "404": {"description": "Canonical credential/authority concealment", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "406": {"description": "Accept does not select v1", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "409": {"description": "Gap, regression, terminal/expiry, stale lineage/epoch, or conflicting replay; exact duplicate lookup runs first", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "413": {"description": "Bounded body exceeded", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "415": {"description": "Content-Type is not exact v1 vendor media", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}},
+          "429": {"description": "Bounded admission rejected", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}, "Retry-After": {"schema": {"type": "integer"}}}},
+          "500": {"description": "Atomic report/audit/evidence/hint persistence failed", "headers": {"Cache-Control": {"schema": {"const": "private, no-store"}}}}
+        }
       }
     },
     "/api/agent-mode/voice/transcribe": {

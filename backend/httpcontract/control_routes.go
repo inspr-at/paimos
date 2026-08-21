@@ -55,6 +55,13 @@ const (
 	ControlRouteRunCommands              ControlRouteClass = "run.control_commands"
 	ControlRouteCapabilityLeaseDetail    ControlRouteClass = "control_capability_lease"
 	ControlRouteCommandRootDetail        ControlRouteClass = "control_command"
+	ControlRouteExternalHandoffCreate    ControlRouteClass = "external_stage.handoff_create"
+	ControlRouteExternalHandoffMint      ControlRouteClass = "external_stage.handoff_mint"
+	ControlRouteExternalHandoffRotate    ControlRouteClass = "external_stage.handoff_rotate"
+	ControlRouteExternalHandoffRevoke    ControlRouteClass = "external_stage.handoff_revoke"
+	ControlRouteExternalHandoffPull      ControlRouteClass = "external_stage.handoff_pull"
+	ControlRouteExternalHandoffAccept    ControlRouteClass = "external_stage.handoff_accept"
+	ControlRouteExternalHandoffReport    ControlRouteClass = "external_stage.handoff_report"
 )
 
 // controlRouteParam marks a segment the caller supplies. It matches any
@@ -79,6 +86,13 @@ var controlRoutes = []struct {
 	{[]string{"api", "runs", controlRouteParam, "control-commands"}, ControlRouteRunCommands},
 	{[]string{"api", "control-capability-leases", controlRouteParam}, ControlRouteCapabilityLeaseDetail},
 	{[]string{"api", "control-commands", controlRouteParam}, ControlRouteCommandRootDetail},
+	{[]string{"api", "agent-mode", "deliveries", controlRouteParam, "external-stage-handoffs"}, ControlRouteExternalHandoffCreate},
+	{[]string{"api", "agent-mode", "external-stage-handoffs", controlRouteParam, "mint"}, ControlRouteExternalHandoffMint},
+	{[]string{"api", "agent-mode", "external-stage-handoffs", controlRouteParam, "rotate"}, ControlRouteExternalHandoffRotate},
+	{[]string{"api", "agent-mode", "external-stage-handoffs", controlRouteParam, "revoke"}, ControlRouteExternalHandoffRevoke},
+	{[]string{"api", "external-stage", "handoffs", controlRouteParam}, ControlRouteExternalHandoffPull},
+	{[]string{"api", "external-stage", "handoffs", controlRouteParam, "accept"}, ControlRouteExternalHandoffAccept},
+	{[]string{"api", "external-stage", "handoffs", controlRouteParam, "reports"}, ControlRouteExternalHandoffReport},
 }
 
 // ControlRouteClasses returns every label the classifier can produce.

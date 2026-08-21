@@ -38,8 +38,8 @@ import (
 // The hash is computed over the marshaled schemaJSON bytes (including the
 // version string), so a version bump alone also shifts it.
 func TestSchemaPayloadHash(t *testing.T) {
-	const expectedVersion = "2.2.0"
-	const expectedHash = "5e5bfd12faf163b208383c6ccbd327495f546ac058cb9ecb2dc8f93b38f9ce55"
+	const expectedVersion = "2.3.0"
+	const expectedHash = "d5eafe5004bfd52d58eb720c248337f6a54dce42cd0cb6234e46dd9c24109422"
 
 	if handlers.SchemaVersion != expectedVersion {
 		t.Errorf("SchemaVersion = %q, test expects %q — update either the code or the test constant",
@@ -159,13 +159,17 @@ func TestSchemaTagColorsMatchValidator(t *testing.T) {
 // which schema enum validates which request field.
 func TestSchemaEnumFieldsResolve(t *testing.T) {
 	want := map[string]string{
-		"issue.type":       "type",
-		"issue.status":     "status",
-		"issue.priority":   "priority",
-		"relation.type":    "relation",
-		"tag.color":        "tag_colors",
-		"knowledge.type":   "knowledge_types",
-		"knowledge.status": "knowledge_status",
+		"issue.type":                            "type",
+		"issue.status":                          "status",
+		"issue.priority":                        "priority",
+		"relation.type":                         "relation",
+		"tag.color":                             "tag_colors",
+		"knowledge.type":                        "knowledge_types",
+		"knowledge.status":                      "knowledge_status",
+		"external_stage_handoff.state":          "external_stage_handoff_state",
+		"external_stage_handoff.reporter_class": "external_stage_reporter_class",
+		"external_stage_handoff.reporter_role":  "external_stage_reporter_role",
+		"external_stage_evidence.kind":          "external_stage_evidence_kind",
 	}
 	for binding, domain := range want {
 		got, ok := handlers.Schema.EnumFields[binding]

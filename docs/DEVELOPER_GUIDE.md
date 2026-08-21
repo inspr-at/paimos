@@ -14,6 +14,11 @@ failure-mode guarantees.
 AI profile, effort, prompt, context, agent, runner, and provenance workflow
 to the current Vue and Go surfaces.
 
+**External delivery-stage adapters**:
+[`EXTERNAL_STAGE_CONTRACT.md`](EXTERNAL_STAGE_CONTRACT.md) defines the pinned
+Pharos/Janus v1 routes, credential boundary, canonical fixtures, and release
+pin tuple.
+
 **Project-context tooling**:
 - [`ANCHORS.md`](ANCHORS.md) defines `@paimos` source anchors.
 - `go run ./backend/cmd/paimos anchors scan --repo-root . --output .paimos/anchors.json`

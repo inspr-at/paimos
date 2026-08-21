@@ -834,6 +834,59 @@ Voice audit rows contain action/surface/provider/model/unit/outcome metadata
 only. Intake and Agent Mode share the same per-user STT and TTS admission and
 daily-budget pools.
 
+### External delivery-stage reports (PAI-810)
+
+External-stage reporting is a separate machine-to-machine boundary from local
+run telemetry. A handoff is bound to one delivery/issue, immutable attempt plan,
+stage execution and predecessor lineage, authority epoch, reporter
+registration, credential epoch, expiry, schema major, fixture digest, and safe
+context digest. Handoff lifecycle is
+`issued → accepted → active|waiting|blocked → succeeded|failed`; it does not
+widen the canonical delivery-stage enums.
+
+Every external pull, accept, or report requires the exact registered Bearer API
+key plus a separate credential in the inbound-only
+`X-PAIMOS-Handoff-Secret` header. Class, role, dependency key, and evidence
+ceiling are resolved from the current registration and key binding inside the
+transaction, including for wildcard API keys. Missing, wrong, rotated,
+revoked, expired, unauthorized, or stale-authority credentials share canonical
+concealment.
+
+Operators provision that server-owned state through the authenticated Agent
+Mode admin control plane, outside the frozen adapter routes. The CLI exposes
+`external-stage registrations list|create|revoke` and `prerequisites seal`;
+the list contains current non-revoked safe IDs only, and every mutation is
+idempotent and mandatorily audited. Handoff creation consumes the exact returned
+`registration_id`. Guessed IDs and direct-SQL provisioning are unsupported.
+Each sealed prerequisite explicitly carries `requirement: required|optional`;
+the CLI spelling is `required|optional:dependency=registration-id`, with no
+default. A sealed empty set and required-only, optional-only, or mixed sets up
+to 16 rows are valid. Only required rows gate owner success; optional rows do
+not transfer authority or complete canonical state.
+
+Owner and dependency streams use independent exact-next sequences and latest
+projections. A Janus dependency report may satisfy or block only its declared
+prerequisite and cannot update owner latest or complete a canonical stage.
+Pharos deployment success remains `deployed_unverified`. Verification is a
+separate verification-stage handoff for the same delivery and attempt: exact
+environment plus artifact version/digest/commit must match the deployment,
+while the allowlisted deploy and verification workflow symbols may differ.
+Both verification observation and server receipt must be strictly after the
+deployment server receipt.
+
+One semantic report atomically commits its sequence, owner/dependency fact,
+typed evidence or blockers, latest projection, mandatory safe audit, and
+durable Agent Mode change hint; wake occurs only after commit. An exact replay
+is read-only. Conflicting replay, a gap/regression, late new report, or any
+audit/hint/evidence failure produces no partial mutation.
+
+Use `paimos external-stage`; it keeps the raw 32-byte handoff credential out of
+argv, environment variables, URLs, JSON, cookies, output, errors, logs, audits,
+and fixtures. Mint/rotate stream to a new durable `0600` file only; pull,
+accept, and report read from that protected file or stdin. Full route, media,
+fixture, digest, pin, and loss-recovery details are in
+[`EXTERNAL_STAGE_CONTRACT.md`](EXTERNAL_STAGE_CONTRACT.md).
+
 ---
 
 ## Best practices for agent implementors

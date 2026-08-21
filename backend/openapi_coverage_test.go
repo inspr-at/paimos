@@ -36,6 +36,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/inspr-at/paimos/backend/deliverytrust"
+	"github.com/inspr-at/paimos/backend/externalstage"
 	"github.com/inspr-at/paimos/backend/handlers"
 )
 
@@ -219,6 +220,192 @@ func TestAgentModeOpenAPIRouteCoverageIsBidirectional(t *testing.T) {
 	for operation := range wantDocumented {
 		if !wantRegistered[operation] {
 			t.Errorf("documented Agent Mode operation is not mounted: %s", operation)
+		}
+	}
+}
+
+func TestExternalStageOpenAPIRouteCoverageIsBidirectional(t *testing.T) {
+	registered := registeredAPIOperations(t)
+	documented := documentedAPIOperations(t)
+	want := map[string]string{}
+	for _, route := range externalstage.Routes {
+		path := normalizeAPIPath(route.Path)
+		operation := strings.ToLower(route.Method)
+		key := strings.ToUpper(operation) + " " + path
+		want[key] = route.OperationID
+		if !registered[path][operation] {
+			t.Errorf("frozen external-stage route is not mounted: %s", key)
+		}
+		raw, ok := documented[path][operation]
+		if !ok {
+			t.Errorf("frozen external-stage route is not documented: %s", key)
+			continue
+		}
+		var value struct {
+			OperationID string `json:"operationId"`
+		}
+		if err := json.Unmarshal(raw, &value); err != nil {
+			t.Fatalf("%s: %v", key, err)
+		}
+		if value.OperationID != route.OperationID {
+			t.Errorf("%s operationId=%q want %q", key, value.OperationID, route.OperationID)
+		}
+	}
+	for path, methods := range registered {
+		if !strings.Contains(path, "/external-stage") {
+			continue
+		}
+		for method := range methods {
+			key := strings.ToUpper(method) + " " + path
+			if _, ok := want[key]; !ok {
+				t.Errorf("mounted external-stage operation is outside the frozen contract: %s", key)
+			}
+		}
+	}
+	for path, methods := range documented {
+		if !strings.Contains(path, "/external-stage") {
+			continue
+		}
+		for method := range methods {
+			key := strings.ToUpper(method) + " " + path
+			if _, ok := want[key]; !ok {
+				t.Errorf("documented external-stage operation is outside the frozen contract: %s", key)
+			}
+		}
+	}
+}
+
+func TestExternalStageOpenAPIDTOsMatchGoBothWays(t *testing.T) {
+	doc := documentedAPIDocument(t)
+	components, _ := doc.raw["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	cases := map[string]reflect.Type{
+		"ExternalStageCreateRequest":          reflect.TypeOf(externalstage.CreateHandoffRequest{}),
+		"ExternalStageCredentialEpochRequest": reflect.TypeOf(externalstage.CredentialEpochRequest{}),
+		"ExternalStageRevokeRequest":          reflect.TypeOf(externalstage.RevokeHandoffRequest{}),
+		"ExternalStageHandoffMetadata":        reflect.TypeOf(externalstage.HandoffMetadata{}),
+		"ExternalStagePullResponse":           reflect.TypeOf(externalstage.PullResponse{}),
+		"ExternalStageAcceptRequest":          reflect.TypeOf(externalstage.AcceptRequest{}),
+		"ExternalStageArtifactEvidence":       reflect.TypeOf(externalstage.ArtifactEvidence{}),
+		"ExternalStagePharosEvidence":         reflect.TypeOf(externalstage.PharosEvidence{}),
+		"ExternalStageJanusEvidence":          reflect.TypeOf(externalstage.JanusEvidence{}),
+		"ExternalStageReportRequest":          reflect.TypeOf(externalstage.ReportRequest{}),
+		"ExternalStageReportReceipt":          reflect.TypeOf(externalstage.ReportReceipt{}),
+	}
+	for name, typ := range cases {
+		schema, ok := schemas[name].(map[string]any)
+		if !ok {
+			t.Errorf("OpenAPI schema %s is missing", name)
+			continue
+		}
+		if schema["additionalProperties"] != false {
+			t.Errorf("OpenAPI schema %s is not closed", name)
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		requiredValues, _ := schema["required"].([]any)
+		required := map[string]bool{}
+		for _, value := range requiredValues {
+			required[fmt.Sprint(value)] = true
+		}
+		goFields := map[string]bool{}
+		for index := 0; index < typ.NumField(); index++ {
+			tag := typ.Field(index).Tag.Get("json")
+			parts := strings.Split(tag, ",")
+			field := parts[0]
+			goFields[field] = true
+			if _, ok := properties[field]; !ok {
+				t.Errorf("%s.%s is absent from OpenAPI", typ.Name(), field)
+			}
+			optional := len(parts) > 1 && parts[1] == "omitempty"
+			if required[field] == optional {
+				t.Errorf("%s.%s required=%v omitempty=%v", typ.Name(), field, required[field], optional)
+			}
+		}
+		for field := range properties {
+			if !goFields[field] {
+				t.Errorf("OpenAPI %s.%s is absent from Go DTO", name, field)
+			}
+		}
+	}
+}
+
+func TestExternalStageOpenAPINegotiationAndSecretChannelsArePinned(t *testing.T) {
+	doc := documentedAPIDocument(t)
+	for _, route := range externalstage.Routes {
+		raw := doc.Paths[route.Path][strings.ToLower(route.Method)]
+		var operation struct {
+			Parameters []struct {
+				Ref string `json:"$ref"`
+			} `json:"parameters"`
+			RequestBody struct {
+				Content map[string]json.RawMessage `json:"content"`
+			} `json:"requestBody"`
+			Responses map[string]struct {
+				Headers map[string]json.RawMessage `json:"headers"`
+				Content map[string]json.RawMessage `json:"content"`
+			} `json:"responses"`
+		}
+		if err := json.Unmarshal(raw, &operation); err != nil {
+			t.Fatalf("%s %s: %v", route.Method, route.Path, err)
+		}
+		refs := map[string]bool{}
+		for _, parameter := range operation.Parameters {
+			refs[parameter.Ref] = true
+		}
+		acceptRef := "#/components/parameters/ExternalStageAcceptHeader"
+		if route.Path == externalstage.InternalMintPath || route.Path == externalstage.InternalRotatePath {
+			acceptRef = "#/components/parameters/ExternalStageSecretAcceptHeader"
+		}
+		if !refs[acceptRef] {
+			t.Errorf("%s %s does not require exact Accept negotiation through %s", route.Method, route.Path, acceptRef)
+		}
+		if route.Method == http.MethodGet {
+			if len(operation.RequestBody.Content) != 0 {
+				t.Errorf("GET pull unexpectedly has a body contract: %v", operation.RequestBody.Content)
+			}
+		} else if len(operation.RequestBody.Content) != 1 || operation.RequestBody.Content[externalstage.MediaTypeV1] == nil {
+			t.Errorf("%s %s request media=%v", route.Method, route.Path, operation.RequestBody.Content)
+		}
+		secretRef := refs["#/components/parameters/ExternalStageSecretHeader"]
+		if secretRef != (route.Audience == "external") {
+			t.Errorf("%s %s secret header=%v audience=%s", route.Method, route.Path, secretRef, route.Audience)
+		}
+		for status, response := range operation.Responses {
+			if response.Headers["Cache-Control"] == nil {
+				t.Errorf("%s %s response %s is missing private no-store", route.Method, route.Path, status)
+			}
+		}
+	}
+	for _, target := range []struct{ path, method string }{
+		{externalstage.InternalMintPath, "post"},
+		{externalstage.InternalRotatePath, "post"},
+	} {
+		var operation struct {
+			Responses map[string]struct {
+				Headers map[string]json.RawMessage `json:"headers"`
+				Content map[string]struct {
+					Schema struct {
+						Format    string `json:"format"`
+						MinLength int    `json:"minLength"`
+						MaxLength int    `json:"maxLength"`
+					} `json:"schema"`
+				} `json:"content"`
+			} `json:"responses"`
+		}
+		if err := json.Unmarshal(doc.Paths[target.path][target.method], &operation); err != nil {
+			t.Fatal(err)
+		}
+		response := operation.Responses["201"]
+		if response.Headers[externalstage.HandoffSecretHeader] != nil {
+			t.Errorf("%s leaks the one-time secret through a response header", target.path)
+		}
+		if len(response.Content) != 1 {
+			t.Errorf("%s secret response media=%v", target.path, response.Content)
+			continue
+		}
+		binary := response.Content[externalstage.SecretMediaTypeV1].Schema
+		if binary.Format != "binary" || binary.MinLength != externalstage.OneTimeSecretBytes || binary.MaxLength != externalstage.OneTimeSecretBytes {
+			t.Errorf("%s binary secret schema=%+v", target.path, binary)
 		}
 	}
 }

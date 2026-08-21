@@ -148,6 +148,8 @@ Get started:
 	cmd.AddCommand(syncCmd())
 	cmd.AddCommand(runCmd())      // PAI-799: append-only progress reporting seam
 	cmd.AddCommand(runAgentCmd()) // PAI-608: local "Implement this" runner
+	// PAI-810: pinned external delivery-stage handoff protocol.
+	cmd.AddCommand(externalStageCmd())
 	// PAI-358: migrateCmd removed; the only verb (manifest-to-knowledge)
 	// is meaningless now that the project_manifests table is gone.
 

@@ -33,6 +33,13 @@ func TestClassifyControlPathCoversEveryFrozenFamily(t *testing.T) {
 		{"/api/runs/17/control-commands", ControlRouteRunCommands},
 		{"/api/control-capability-leases/17", ControlRouteCapabilityLeaseDetail},
 		{"/api/control-commands/17", ControlRouteCommandRootDetail},
+		{"/api/agent-mode/deliveries/PAI-810-42/external-stage-handoffs", ControlRouteExternalHandoffCreate},
+		{"/api/agent-mode/external-stage-handoffs/01K35P6YRG00000000000000AB/mint", ControlRouteExternalHandoffMint},
+		{"/api/agent-mode/external-stage-handoffs/01K35P6YRG00000000000000AB/rotate", ControlRouteExternalHandoffRotate},
+		{"/api/agent-mode/external-stage-handoffs/01K35P6YRG00000000000000AB/revoke", ControlRouteExternalHandoffRevoke},
+		{"/api/external-stage/handoffs/01K35P6YRG00000000000000AB", ControlRouteExternalHandoffPull},
+		{"/api/external-stage/handoffs/01K35P6YRG00000000000000AB/accept", ControlRouteExternalHandoffAccept},
+		{"/api/external-stage/handoffs/01K35P6YRG00000000000000AB/reports", ControlRouteExternalHandoffReport},
 	}
 	seen := map[ControlRouteClass]struct{}{}
 	for _, tc := range cases {
@@ -97,6 +104,13 @@ func TestClassifyControlPathRejectsNearMisses(t *testing.T) {
 		"/api/agent-mode/deliveries/PAI-1",
 		"/api/agent-mode/deliveries",
 		"/api/issues/17/implement",
+		"/api/agent-mode/deliveries/PAI-1/external-stage-handoff",
+		"/api/agent-mode/external-stage-handoffs/opaque",
+		"/api/agent-mode/external-stage-handoffs/opaque/action",
+		"/api/external-stage/handoffs",
+		"/api/external-stage/handoffs/opaque/",
+		"/api/external-stage/handoffs/opaque/report",
+		"/api/external-stage/handoffs/opaque/rotate",
 		"",
 		"/",
 	}
@@ -172,6 +186,13 @@ func TestClassifyControlRequestMatchesChiDispatch(t *testing.T) {
 		"/api/runs/{id}/control-commands",
 		"/api/control-capability-leases/{id}",
 		"/api/control-commands/{id}",
+		"/api/agent-mode/deliveries/{deliveryKey}/external-stage-handoffs",
+		"/api/agent-mode/external-stage-handoffs/{handoffID}/mint",
+		"/api/agent-mode/external-stage-handoffs/{handoffID}/rotate",
+		"/api/agent-mode/external-stage-handoffs/{handoffID}/revoke",
+		"/api/external-stage/handoffs/{handoffID}",
+		"/api/external-stage/handoffs/{handoffID}/accept",
+		"/api/external-stage/handoffs/{handoffID}/reports",
 	} {
 		router.Handle(pattern, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hit = true }))
 	}

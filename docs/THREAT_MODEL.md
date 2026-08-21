@@ -103,6 +103,8 @@ Each optional integration adds an outbound trust assumption. PAIMOS does not —
 | SMTP | `SMTP_USER` + `SMTP_PASS_FILE` (or compatibility env) | Password-reset endpoint refuses-with-warning; no link sent |
 | OIDC | `OIDC_CLIENT_SECRET_FILE` (or compatibility env) | SSO button hidden from login page when unconfigured |
 | OpenRouter | `ai_settings.api_key_encrypted` (DB, secretvault) | AI feature surface disabled; UI falls back to "AI not configured" |
+| Pharos external-stage owner | Registered Bearer API key + independent per-handoff credential | Deployment/verification stays waiting or fails closed; no caller-supplied command/path/callback is executed |
+| Janus external-stage dependency | Registered Bearer API key + independent per-handoff credential | Declared prerequisite stays unsatisfied/blocked; dependency evidence cannot complete canonical stage state |
 
 A compromised upstream provider can in theory exfiltrate data PAIMOS sent — see [`INCIDENT_RESPONSE.md` § 3.5](INCIDENT_RESPONSE.md) for the response runbook. PAIMOS-side defences:
 
@@ -222,6 +224,45 @@ draft comment and store safe provenance on `agent_runs`, but they reject
 `device_id` and `deploy_target`, do not claim a runner, do not mutate a repo,
 and do not claim local test execution. Local-model endpoint labels strip
 userinfo, query strings, and fragments before display.
+
+### 2.8 · External delivery-stage reporter boundary
+
+PAI-810 lets registered Pharos and Janus machines report into one delivery
+without making those machines PAIMOS users or canonical stage owners. This
+crosses an Internet-facing machine credential boundary and a semantic authority
+boundary at the same time.
+
+Defences:
+
+- Every external call requires the exact registered Bearer API-key identity and
+  a separate per-handoff credential. Wildcard API-key scope does not bypass the
+  current reporter/user/project/key binding check.
+- The raw 32-byte handoff credential is returned only once by mint/rotate,
+  stored server-side only as a SHA-256 digest, compared in
+  constant time, and accepted only through the inbound
+  `X-PAIMOS-Handoff-Secret` header. It has no URL, query, JSON, cookie, log,
+  audit, fixture, error, or later-response representation.
+- External paths are classified private before handlers run. Request IDs are
+  server-minted, responses are `private, no-store`, path parameters are
+  redacted, session activity is skipped, and missing/unauthorized/bad-secret
+  cases share canonical concealment.
+- Reporter class, owner/dependency role, dependency key, evidence ceiling,
+  contract/credential epoch, execution lineage, and authority are server-owned
+  registrations—not caller JSON.
+- Owner and dependency streams have independent exact-next sequences and latest
+  projections. Janus cannot race or overwrite owner latest. Its value-free DTO
+  has no free text, path, URL, digest, ID, ciphertext, command, or callback.
+- Pharos receives symbolic allowlisted workflow/environment names, never a
+  command or path. Deployment alone is unverified; verification is a separate
+  stage bound to the same delivery/attempt and exact artifact/environment, with
+  both timestamps fresh after the matching deployment receipt.
+- Semantic state, evidence/blockers, latest projection, mandatory safe audit,
+  and durable Agent Mode hint commit atomically; process wake is after commit.
+  Heartbeat persistence is coalesced and cannot generate semantic-log spam.
+- The CLI keeps raw credentials out of argv/environment/output, rejects
+  symlinks, wrong ownership, multiple links, and group/other-readable input,
+  disables redirects, and writes mint/rotate responses only to a new durable
+  `0600` file. Any ambiguous capture requires another rotation.
 
 ---
 
@@ -364,6 +405,18 @@ PAI-110 shipped the **INV-FILES-03** application-layer fix end-to-end. Uploads n
 | **INV-AGENTMODE-06** | A storage/lineage invariant detected before response headers returns one private problem+json `500`; if discovered after an SSE session is established, the only safe recovery is one identity-free reset and close. Hidden-project corruption is not an oracle. | `agentmode/reader.go`, `agentmode/stream.go`, `handlers/agent_mode*.go` | `agentmode/reader_test.go`, `handlers/agent_mode_test.go` |
 | **INV-AGENTMODE-07** | Agent Mode STT is ephemeral and Agent Mode TTS is template-only. Every voice response and auth/CSRF failure is private/no-store; external callers receive the canonical 404 before CSRF. TTS authorizes the primary plus all active candidates in one coherent bounded Reader snapshot before configuration, budget, or provider side channels, and narrates only closed structured facts with unknown-confidence estimates withheld. Paid-call audit is metadata-only and survives request cancellation. | `handlers/agent_mode_voice.go`, `handlers/voice_provider.go`, `handlers/voice_limits.go`, Agent Mode route order in `main.go` | `handlers/agent_mode_voice_test.go`, `handlers/voice_provider_internal_test.go`, `agentmode/reader_test.go` |
 | **INV-AGENTMODE-08** | Confirmed voice notes are internal and exact-once per authenticated author/client identity. A database partial unique index makes concurrent retries atomic; mismatch is 409, only the inserted row emits a mutation, keyed rows cannot become external, and the generic response cache never stores their body. | M146 in `db/db.go`, `handlers/comments.go`, `handlers/idempotency.go`, `handlers/mutation_log.go` | `db/comment_idempotency_schema_test.go`, `handlers/comments_client_request_test.go` |
+
+### 4.11 · External delivery-stage handoffs
+
+| ID | Statement | Code path | Verification |
+|---|---|---|---|
+| **INV-EXTSTAGE-01** | Every external call reauthorizes the exact current API-key/reporter/user/project binding and independently verifies the current handoff credential and authority; failure variants share concealed, private responses. | `externalstage/service.go`, `handlers/external_stage_contract.go`, external-stage route/privacy middleware | `externalstage/service_test.go`, `handlers/external_stage_transport_test.go` |
+| **INV-EXTSTAGE-02** | Raw handoff credential bytes exist only in the one-time mint/rotate response and protected CLI input/output path; storage, DTOs, URLs, queries, cookies, logs, audits, fixtures, errors, and later responses contain no raw or encoded value. | `externalstage/service.go`, `cmd/paimos/cmd_external_stage.go` | `externalstage/*_test.go`, `cmd/paimos/cmd_external_stage_test.go`, sentinel scans |
+| **INV-EXTSTAGE-03** | Owner and declared dependency streams are independent; only the owner can change canonical stage state, while Janus value-free evidence can only satisfy/block its prerequisite. | M148 tables/constraints, `externalstage/service.go` | M148 schema tests, `externalstage/*_test.go`, canonical Janus fixture |
+| **INV-EXTSTAGE-04** | Pharos deployment remains unverified until a distinct same-delivery/attempt verification stage reports the exact artifact/environment and both observation and receipt are strictly after deployment receipt; workflow symbols may differ. | `externalstage/service.go` verification guard | `externalstage/*_test.go`, canonical Pharos ordered fixture |
+| **INV-EXTSTAGE-05** | Exact replay is read-only; conflicting/gapped/late reports fail, while sequence, fact, evidence/blockers, latest, safe audit, and durable change hint commit atomically before wake. | M148 tables/triggers, `externalstage/service.go` | M148 rollback/replay/concurrency tests |
+| **INV-EXTSTAGE-06** | Schema major, DTO/OpenAPI fields, exact fixture bytes, per-file digests, fixture-set digest, certified contract commit, and release tag remain one reviewed adapter pin tuple. | `externalstage/contract.go`, `contracts/external_stage.go`, `contracts/fixtures/external-stage/` | `contracts/external_stage_fixtures_test.go`, OpenAPI coverage tests |
+| **INV-EXTSTAGE-07** | Reporter registration and prerequisite setup is an authenticated internal admin plane outside the frozen adapter routes. Every mutation reauthorizes the current editor/project/delivery binding, requires canonical idempotency, writes mandatory safe audit, and accepts only exact server-owned IDs and closed fields. A sealed set contains 0–16 explicitly required/optional rows; only required rows gate owner success. Discovery returns current non-revoked safe registrations only. | `externalstage/admin.go`, `handlers/external_stage_contract.go`, literal Agent Mode routes | `externalstage/service_test.go`, `handlers/external_stage_schema_test.go`, `cmd/paimos/cmd_external_stage_test.go` |
 
 ---
 

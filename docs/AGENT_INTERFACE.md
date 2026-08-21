@@ -698,6 +698,55 @@ gate by writing directly to storage or choosing another project.
 
 ## 6. MCP integration
 
+### External delivery-stage handoffs (PAI-810)
+
+Registered Pharos and Janus adapters use the first-class
+`paimos external-stage` command instead of hand-rolled HTTP. The command covers
+internal create/mint/rotate/revoke and external pull/accept/report operations
+against the frozen v1 vendor media types.
+
+Provisioning is an authenticated, audited Agent Mode admin plane outside the
+frozen adapter route family. `external-stage registrations list` discovers only
+current non-revoked safe registration IDs; `registrations create|revoke` and
+`prerequisites seal` perform the supported mutations with CLI-generated
+canonical idempotency keys. Use the returned exact `registration_id` for
+handoff creation.
+Never guess IDs or provision with direct SQL.
+
+Prerequisite sealing is explicit: repeat
+`--prerequisite required:dependency=registration-id` or
+`--prerequisite optional:dependency=registration-id` up to 16 times. There is
+no implicit mode. Omitting the flag seals an intentional empty set; only
+required rows gate owner success, while optional rows remain advisory
+dependency facts.
+
+The independent 32-byte handoff credential never enters argv, an environment
+variable, JSON, a URL, or CLI output. Mint/rotate require
+`--secret-output <new-path>`, create it as `0600` without overwriting, and
+durably stream exactly 32 raw response bytes. Pull/accept/report require exactly
+one of `--secret-file <owner-only-path>` or `--secret-stdin`; the CLI sends its
+unpadded base64url form only as `X-PAIMOS-Handoff-Secret`.
+
+```sh
+paimos --json external-stage registrations list issue:4664
+paimos --json external-stage registrations create issue:4664 \
+  --api-key-id "$PHAROS_API_KEY_ID" --class pharos --role owner \
+  --workflow deploy-production --environment production-eu1
+
+paimos external-stage mint "$HANDOFF_ID" \
+  --expected-credential-epoch 0 --secret-output /run/credentials/handoff.bin
+paimos external-stage pull "$HANDOFF_ID" \
+  --secret-file /run/credentials/handoff.bin
+paimos external-stage report "$HANDOFF_ID" \
+  --secret-file /run/credentials/handoff.bin --report-file report.json
+```
+
+A lost or ambiguously captured mint/rotate response is unrecoverable: rotate
+before use. There is no raw-secret stdout mode. Strict report decoding rejects
+unknown fields and invalid closed evidence locally. See
+[`EXTERNAL_STAGE_CONTRACT.md`](EXTERNAL_STAGE_CONTRACT.md) for the fixture
+digest, contract pins, exact cross-stage verification rule, and safe examples.
+
 ### Claude Desktop
 
 Add `paimos-mcp` to your MCP servers config:

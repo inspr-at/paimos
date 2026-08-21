@@ -38,6 +38,7 @@ if ! [[ "$MERGE_TIMEOUT" =~ ^[0-9]+$ && "$MERGE_TIMEOUT" -gt 0 &&
 fi
 
 EXPECTED_FILES=$'README.md\nVERSION\ndocs/CHANGELOG.md\ndocs/INSTALL.md'
+EXTERNAL_STAGE_MANIFEST='backend/contracts/fixtures/external-stage/manifest-v1.json'
 
 fail() {
   echo "error: $*" >&2
@@ -98,6 +99,72 @@ assert_release_files_at() {
     fail "$commit does not carry both pinned install examples for $version"
   grep -qE "paimos --version[[:space:]]+# $version" <<<"$content" ||
     fail "$commit does not carry the $version CLI smoke example"
+}
+
+# The external-stage v1 manifest is deliberately outside the four mutable
+# release files: adapters pin the first reviewed Paimos release forever. The
+# manifest metadata is not self-compared because its commit pin necessarily
+# predates that metadata; the contract and fixture bytes are compared instead.
+# For the first release the future tag is allowed. After that, the tag must
+# resolve, retain the pinned commit in its history, and carry the exact same
+# immutable manifest as the release ref.
+assert_external_stage_release_pin() {
+  local ref="$1" new_tag="$2" manifest pin_record release_pin commit_pin
+  local pinned_file current_oid pinned_oid
+  local -a pinned_files=(
+    'backend/contracts/fixtures/external-stage/dependency-janus-v1.json'
+    'backend/contracts/fixtures/external-stage/owner-pharos-v1.json'
+    'backend/externalstage/contract.go'
+  )
+
+  git cat-file -e "$ref:$EXTERNAL_STAGE_MANIFEST" 2>/dev/null ||
+    fail "$ref does not carry the external-stage v1 release manifest"
+  manifest=$(git show "$ref:$EXTERNAL_STAGE_MANIFEST")
+  pin_record=$(jq -er '
+    if type == "object"
+      and (.paimos_release | type) == "string"
+      and (.paimos_commit | type) == "string"
+    then [.paimos_release, .paimos_commit] | @tsv
+    else error("missing paimos_release or paimos_commit")
+    end
+  ' <<<"$manifest") || fail "$ref carries an invalid external-stage v1 release manifest"
+  IFS=$'\t' read -r release_pin commit_pin <<<"$pin_record"
+
+  [[ "$release_pin" != 'PENDING_RELEASE_TAG' ]] ||
+    fail "external-stage v1 still has PENDING_RELEASE_TAG; finalize its immutable Paimos release pin before publishing"
+  [[ "$release_pin" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    fail "external-stage v1 paimos_release is not a stable SemVer tag: $release_pin"
+  [[ "$commit_pin" =~ ^[0-9a-f]{40}$ ]] ||
+    fail "external-stage v1 paimos_commit is not a lowercase 40-hex commit: $commit_pin"
+  git cat-file -e "$commit_pin^{commit}" 2>/dev/null ||
+    fail "external-stage v1 paimos_commit is unavailable: $commit_pin"
+  git merge-base --is-ancestor "$commit_pin" "$ref" ||
+    fail "external-stage v1 paimos_commit is not an ancestor of $ref: $commit_pin"
+
+  for pinned_file in "${pinned_files[@]}"; do
+    git cat-file -e "$commit_pin:$pinned_file" 2>/dev/null ||
+      fail "external-stage v1 pinned commit does not carry $pinned_file"
+    git cat-file -e "$ref:$pinned_file" 2>/dev/null ||
+      fail "$ref does not carry pinned external-stage v1 file $pinned_file"
+    current_oid=$(git rev-parse "$ref:$pinned_file")
+    pinned_oid=$(git rev-parse "$commit_pin:$pinned_file")
+    [[ "$current_oid" == "$pinned_oid" ]] ||
+      fail "external-stage v1 file differs from immutable pinned commit $commit_pin: $pinned_file"
+  done
+
+  if git cat-file -e "refs/tags/$release_pin^{commit}" 2>/dev/null; then
+    git merge-base --is-ancestor "$commit_pin" "refs/tags/$release_pin^{commit}" ||
+      fail "external-stage v1 pinned tag $release_pin does not contain commit $commit_pin"
+    git cat-file -e "refs/tags/$release_pin:$EXTERNAL_STAGE_MANIFEST" 2>/dev/null ||
+      fail "external-stage v1 pinned tag $release_pin does not carry its manifest"
+    current_oid=$(git rev-parse "$ref:$EXTERNAL_STAGE_MANIFEST")
+    pinned_oid=$(git rev-parse "refs/tags/$release_pin:$EXTERNAL_STAGE_MANIFEST")
+    [[ "$current_oid" == "$pinned_oid" ]] ||
+      fail "external-stage v1 manifest differs from immutable pinned tag $release_pin"
+  else
+    [[ "$release_pin" == "$new_tag" ]] ||
+      fail "external-stage v1 pins unavailable tag $release_pin instead of the release being prepared ($new_tag)"
+  fi
 }
 
 assert_release_delta() {
@@ -605,6 +672,7 @@ case "$MODE" in
 esac
 NEW_TAG="v$NEW"
 RELEASE_BRANCH="release/$NEW_TAG"
+assert_external_stage_release_pin origin/main "$NEW_TAG"
 REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 [[ -n "$REPO" ]] || fail "could not resolve GitHub repository"
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)

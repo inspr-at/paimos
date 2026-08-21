@@ -24,12 +24,23 @@ description = "PAIMOS API key (paimos_ + ≥32 hex chars)"
 regex       = '''paimos_[a-fA-F0-9]{32,}'''
 keywords    = ["paimos_"]
 
-# ── Global allowlist: doc-example prefixes ──────────────────────────────
+# ── Scoped allowlists: docs and fixed test fixture ──────────────────────
 # `paimos_1a2b3c4` (7 hex chars), `paimos_xxxx` (placeholder), and similar
 # short prefixes are documentation examples. They are bounded to ≤16 hex
-# chars so they cannot collide with real 64-char keys, and only allowed
-# in markdown files (where docs live).
-[allowlist]
-description = "PAIMOS documentation example prefixes in markdown"
+# chars so they cannot collide with real 64-char keys. Both the path and
+# extracted secret must match, so unrelated findings in docs remain visible.
+[[allowlists]]
+description = "Short PAIMOS documentation example prefixes"
+condition   = "AND"
 paths       = ['''docs/.*\.md''', '''README\.md''']
-regexes     = ['''paimos_[a-fA-F0-9]{1,16}\b''']
+regexTarget = "secret"
+regexes     = ['''^paimos_[a-fA-F0-9]{1,16}$''']
+
+# Canonical UUID fixture used only to test CLI idempotency-key validation.
+# Anchor the entire extracted secret and scope the exception to the upstream
+# generic API-key rule; suffixed/prefixed values must continue to fail.
+[[allowlists]]
+description = "Fixed synthetic CLI idempotency UUID"
+rules       = ["generic-api-key"]
+regexTarget = "secret"
+regexes     = ['''^9f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f$''']
