@@ -46,6 +46,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/httpcontract"
 )
 
 // mustChangeAllowedPaths are the API paths that remain reachable
@@ -105,7 +106,11 @@ func MustChangePasswordGate(next http.Handler) http.Handler {
 			// Not authenticated — Middleware already returned 401, so
 			// this code path is reached only when the gate is mounted
 			// on a public route by mistake. Defensive log.
-			log.Printf("MustChangePasswordGate: no user on %s — gate misconfigured", r.URL.Path)
+			if class, ok := httpcontract.ClassifyControlRequest(r); ok {
+				log.Printf("MustChangePasswordGate: no user on route_class=%s — gate misconfigured", class)
+			} else {
+				log.Printf("MustChangePasswordGate: no user on %s — gate misconfigured", r.URL.Path)
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -120,7 +125,9 @@ func MustChangePasswordGate(next http.Handler) http.Handler {
 func writeMustChangePasswordProblem(w http.ResponseWriter, r *http.Request) {
 	const code = "must_change_password"
 	reqID := strings.TrimSpace(w.Header().Get("X-PAIMOS-Request-Id"))
-	if reqID == "" {
+	if httpcontract.IsControlRequest(r) {
+		reqID = safeControlAuditToken(reqID)
+	} else if reqID == "" {
 		reqID = strings.TrimSpace(r.Header.Get("X-PAIMOS-Request-Id"))
 	}
 	body := map[string]any{
@@ -128,10 +135,12 @@ func writeMustChangePasswordProblem(w http.ResponseWriter, r *http.Request) {
 		"title":      "Password change required",
 		"status":     http.StatusForbidden,
 		"detail":     "password change required before continuing",
-		"instance":   r.URL.RequestURI(),
 		"code":       code,
 		"error":      code,
 		"request_id": reqID,
+	}
+	if !httpcontract.IsControlRequest(r) {
+		body["instance"] = r.URL.RequestURI()
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(http.StatusForbidden)

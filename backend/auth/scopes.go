@@ -55,6 +55,14 @@ const ScopeAll = "*"
 // constants, so the catalog stays the single source of truth.
 const (
 	ScopeProjectsWrite = "projects:write"
+
+	// PAI-809 — supervisory control. Two scopes, not one, because the
+	// two principals are genuinely different: a human operator issues
+	// grants and commands from Agent Mode, while a runner process leases
+	// a capability and answers input requests. A key minted for one must
+	// not silently carry the other.
+	ScopeAgentControlsWrite  = "agent-controls:write"
+	ScopeAgentControlsRunner = "agent-controls:runner"
 )
 
 // ScopeDef describes one named scope: what role you must already have
@@ -71,12 +79,43 @@ type ScopeDef struct {
 // scopeCatalog is the authoritative list of named scopes. Keep this
 // short on purpose: a scope is only worth adding once an endpoint
 // actually wires `RequireScope` to it. Speculative scopes rot.
+//
+// PAI-809 is the one deliberate exception to "route first, scope after":
+// the supervisory-control route families are frozen, and the catalog
+// lands ahead of them so the route lane cannot invent a second spelling
+// of the same authority. The Endpoints lists below are the frozen path
+// families (informational, surfaced by /api/schema) — no method, status,
+// or payload shape is claimed here.
 var scopeCatalog = map[string]ScopeDef{
 	ScopeProjectsWrite: {
 		Name:         ScopeProjectsWrite,
-		RequiredRole: "admin",
+		RequiredRole: RoleAdmin,
 		Endpoints:    []string{"POST /api/projects"},
 		Description:  "Create new projects. Combined with the existing admin-role gate on the endpoint.",
+	},
+	ScopeAgentControlsWrite: {
+		Name:         ScopeAgentControlsWrite,
+		RequiredRole: RoleMember,
+		Endpoints: []string{
+			"/api/agent-mode/deliveries/{deliveryKey}/control-capability-grants",
+			"/api/agent-mode/deliveries/{deliveryKey}/control-commands",
+			"/api/agent-mode/control-capability-grants/{id}",
+			"/api/agent-mode/control-commands/{id}",
+			"/api/control-commands/{id}",
+		},
+		Description: "Operator side of supervisory control: capability grants and control commands. Narrows a key only — the route's own project-access gate still applies.",
+	},
+	ScopeAgentControlsRunner: {
+		Name:         ScopeAgentControlsRunner,
+		RequiredRole: RoleMember,
+		Endpoints: []string{
+			"/api/runs/{id}/control-capability-leases",
+			"/api/runs/{id}/input-requests",
+			"/api/runs/{id}/control-commands",
+			"/api/control-capability-leases/{id}",
+			"/api/control-commands/{id}",
+		},
+		Description: "Runner side of supervisory control: capability leases and input requests for a run. Narrows a key only — the route's own project-access gate still applies.",
 	},
 }
 
@@ -162,11 +201,34 @@ func ValidateScopesForRole(s ScopeSet, role string) error {
 		if !ok {
 			return fmt.Errorf("unknown scope %q", name)
 		}
-		if def.RequiredRole == "admin" && !IsAdminRole(role) {
-			return fmt.Errorf("scope %q requires admin role", name)
+		if !roleMeetsScopeMinimum(def.RequiredRole, role) {
+			return fmt.Errorf("scope %q requires %s role", name, def.RequiredRole)
 		}
 	}
 	return nil
+}
+
+// roleMeetsScopeMinimum is the catalog's role table. Admin and
+// super_admin satisfy the admin minimum; member, admin, and super_admin
+// satisfy the member minimum. External never satisfies any minimum —
+// every scoped surface is internal, and an external account with a
+// project grant is still not an operator.
+//
+// A minimum the table doesn't know denies. A typo in a catalog entry
+// must cost that scope its keys, not silently widen every key that
+// carries it.
+func roleMeetsScopeMinimum(minimumRole, role string) bool {
+	if role == RoleExternal || !IsValidRole(role) {
+		return false
+	}
+	switch minimumRole {
+	case RoleAdmin:
+		return IsAdminRole(role)
+	case RoleMember:
+		return IsInternalRole(role)
+	default:
+		return false
+	}
 }
 
 // ── context plumbing ─────────────────────────────────────────────────

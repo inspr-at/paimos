@@ -31,7 +31,10 @@ func WriteAgentModeNotFound(w http.ResponseWriter, r *http.Request) {
 		Type: "https://paimos.com/errors/not_found", Title: http.StatusText(http.StatusNotFound),
 		Status: http.StatusNotFound, Detail: "not found", Code: "not_found", Error: "not found",
 	}
-	if r != nil {
+	// Ordinary Agent Mode keeps its long-standing instance URI. A frozen
+	// supervisory-control route omits it because the path and query carry
+	// delivery/run/command identifiers that must not be reflected.
+	if r != nil && !IsControlRequest(r) {
 		payload.Instance = r.URL.RequestURI()
 	}
 	payload.RequestID = strings.TrimSpace(w.Header().Get(requestIDHeader))

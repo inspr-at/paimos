@@ -117,8 +117,15 @@ func main() {
 	handlers.StartAgentRunReconciler()
 
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	// PAI-809: first and unconditional for every structurally classified
+	// control request, including auth/parser failures, 404/405, and panic
+	// recovery. Near-miss routes retain their ordinary cache semantics.
+	r.Use(handlers.ClassifiedControlCachePolicyMiddleware)
+	// PAI-809: chi's Logger for ordinary traffic, a five-field private
+	// line for supervisory control. Outermost, so no earlier middleware
+	// can record a control request under the ordinary format.
+	r.Use(handlers.ControlAwareRequestLogger)
+	r.Use(handlers.ControlAwareRecoverer)
 	r.Use(middleware.Compress(5))
 	// PAI-114: baseline security headers on every response. Non-breaking
 	// (X-Frame-Options=SAMEORIGIN keeps the in-app PDF preview iframes

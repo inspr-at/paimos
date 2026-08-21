@@ -29,7 +29,6 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
@@ -114,7 +113,8 @@ func newTestServer(t *testing.T) *testServer {
 // buildRouter mirrors main.go router setup but without static file serving.
 func buildRouter() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.Recoverer)
+	r.Use(handlers.ClassifiedControlCachePolicyMiddleware)
+	r.Use(handlers.ControlAwareRecoverer)
 	r.Use(handlers.SessionAuditMiddleware) // PAI-97 — off unless PAIMOS_AUDIT_SESSIONS=true
 	r.Use(handlers.RequestIDMiddleware)
 

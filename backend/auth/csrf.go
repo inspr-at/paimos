@@ -50,12 +50,14 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/httpcontract"
 )
 
 const (
@@ -123,10 +125,10 @@ func NewCSRFToken() (string, error) {
 func SetCSRFCookie(w http.ResponseWriter, token string) {
 	// #nosec G124 -- intentionally non-HttpOnly (the SPA must echo the token back); SameSite=Strict; Secure mirrors COOKIE_SECURE.
 	http.SetCookie(w, &http.Cookie{
-		Name:     CSRFCookieName,
-		Value:    token,
-		Path:     "/",
-		Expires:  time.Now().Add(sessionAbsoluteLifetime),
+		Name:    CSRFCookieName,
+		Value:   token,
+		Path:    "/",
+		Expires: time.Now().Add(sessionAbsoluteLifetime),
 		// Intentionally NOT HttpOnly — the SPA must read this from JS.
 		HttpOnly: false,
 		Secure:   cookieSecure,
@@ -182,20 +184,54 @@ func CSRFMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		if !sameOrigin(r) {
-			log.Printf("audit: csrf_origin_blocked path=%s origin=%q referer=%q host=%q",
-				r.URL.Path, r.Header.Get("Origin"), r.Header.Get("Referer"), r.Host)
+			logCSRFRejection(r, "csrf_origin_blocked")
 			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 			return
 		}
 		got := r.Header.Get(CSRFHeaderName)
 		want := csrfTokenFromCtx(r.Context())
 		if got == "" || want == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-			log.Printf("audit: csrf_token_mismatch path=%s ip=%s", r.URL.Path, ClientIP(r))
+			logCSRFRejection(r, "csrf_token_mismatch")
 			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// logCSRFRejection records why a mutation was refused.
+//
+// PAI-809: the check above reads the real Origin, Referer, Host, and
+// token — a CSRF gate that saw redacted headers would not be a gate. The
+// *record* of the refusal is a different question. On an ordinary route
+// the offending headers are the whole diagnostic and stay. On a
+// supervisory-control route they identify the delivery, run, or command
+// under supervision, so only the normalized reason, the closed route
+// class, and the already-approved client-IP representation are written.
+func logCSRFRejection(r *http.Request, reason string) {
+	if class, ok := httpcontract.ClassifyControlRequest(r); ok {
+		log.Printf("audit: %s route_class=%s ip=%s", reason, class, safeControlClientIP(r))
+		return
+	}
+	switch reason {
+	case "csrf_origin_blocked":
+		log.Printf("audit: csrf_origin_blocked path=%s origin=%q referer=%q host=%q",
+			r.URL.Path, r.Header.Get("Origin"), r.Header.Get("Referer"), r.Host)
+	default:
+		log.Printf("audit: %s path=%s ip=%s", reason, r.URL.Path, ClientIP(r))
+	}
+}
+
+// safeControlClientIP keeps the existing client-IP lookup semantics but only
+// permits a parsed, canonical IP address onto a control log line. Forwarding
+// headers are caller-controlled at this layer; arbitrary text, ports, zones,
+// separators, and overlong values collapse to a closed fallback.
+func safeControlClientIP(r *http.Request) string {
+	parsed := net.ParseIP(strings.TrimSpace(ClientIP(r)))
+	if parsed == nil {
+		return "unavailable"
+	}
+	return parsed.String()
 }
 
 func isCSRFSafeMethod(m string) bool {

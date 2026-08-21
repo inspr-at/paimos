@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/backend/httpcontract"
 )
 
 const (
@@ -162,12 +164,22 @@ func (e *undoLockedError) Error() string { return e.Message }
 
 func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := strings.TrimSpace(r.Header.Get(RequestIDHeader))
-		if requestID == "" {
-			requestID = strings.TrimSpace(r.Header.Get(AIRequestIDHeader))
-		}
-		if requestID == "" {
+		var requestID string
+		if httpcontract.IsControlRequest(r) {
+			// A caller-provided correlation id is still caller-controlled
+			// content. On the control surface it must not be reflected in a
+			// response header, problem body, log line, or durable record, even
+			// when it happens to contain only log-safe characters. Mint the
+			// correlation id server-side instead.
 			requestID = newAIRequestID()
+		} else {
+			requestID = strings.TrimSpace(r.Header.Get(RequestIDHeader))
+			if requestID == "" {
+				requestID = strings.TrimSpace(r.Header.Get(AIRequestIDHeader))
+			}
+			if requestID == "" {
+				requestID = newAIRequestID()
+			}
 		}
 		ctx := context.WithValue(r.Context(), requestIDContextKey{}, requestID)
 		w.Header().Set(RequestIDHeader, requestID)
