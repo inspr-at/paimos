@@ -562,11 +562,76 @@ func TestServiceOwnerLifecycleReplayHeartbeatAndRestart(t *testing.T) {
 	time.Sleep(2 * time.Millisecond)
 	verificationEvidence := PharosEvidence{Kind: EvidenceKindVerification, Workflow: "verify-production", Environment: "production",
 		Artifact: terminalRequest.PharosEvidence.Artifact, Result: EvidenceResultSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano)}
-	mismatch := verificationEvidence
-	mismatch.Artifact.Version = "v9.9.9"
-	if _, err := f.service.Report(ctx, f.reporter, verificationHandoff.HandoffID, "mismatch-verification", verificationSecret,
-		ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano), PharosEvidence: &mismatch}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("mismatched verification err=%v", err)
+	verificationMismatches := []struct {
+		name   string
+		mutate func(*PharosEvidence)
+	}{
+		{name: "artifact-version", mutate: func(e *PharosEvidence) { e.Artifact.Version = "v9.9.9" }},
+		{name: "artifact-digest", mutate: func(e *PharosEvidence) {
+			e.Artifact.Digest = "sha256:" + fmt.Sprintf("%064x", 811)
+		}},
+		{name: "commit-digest", mutate: func(e *PharosEvidence) { e.Artifact.CommitDigest = fmt.Sprintf("%040x", 811) }},
+		{name: "observation-at-deployment-receipt", mutate: func(e *PharosEvidence) {
+			e.ObservedAt = terminal.ServerReceivedAt
+		}},
+	}
+	for _, test := range verificationMismatches {
+		mismatch := verificationEvidence
+		test.mutate(&mismatch)
+		if _, err := f.service.Report(ctx, f.reporter, verificationHandoff.HandoffID, "mismatch-verification-"+test.name, verificationSecret,
+			ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: mismatch.ObservedAt, PharosEvidence: &mismatch}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%s verification mismatch err=%v", test.name, err)
+		}
+	}
+
+	var deploymentEvidenceReceivedAt, deploymentEnvironment, evidenceNoUpdateTriggerSQL string
+	if err := f.database.QueryRow(`SELECT server_received_at,environment_symbol FROM external_stage_pharos_evidence
+		WHERE evidence_kind='deployment'`).Scan(&deploymentEvidenceReceivedAt, &deploymentEnvironment); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.database.QueryRow(`SELECT sql FROM sqlite_master WHERE type='trigger'
+		AND name='trg_external_stage_pharos_evidence_no_update'`).Scan(&evidenceNoUpdateTriggerSQL); err != nil {
+		t.Fatal(err)
+	}
+	// SQLite owns the receipt clock. In this isolated database, temporarily lift
+	// the append-only update guard and advance the already-valid deployment
+	// receipt so the real verification insert guard deterministically exercises
+	// its exact environment and server-receipt branches. Restore both before the
+	// positive verification below.
+	if _, err := f.database.Exec(`DROP TRIGGER trg_external_stage_pharos_evidence_no_update`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.Exec(`UPDATE external_stage_pharos_evidence SET environment_symbol='staging'
+		WHERE evidence_kind='deployment'`); err != nil {
+		t.Fatal(err)
+	}
+	_, environmentErr := f.service.Report(ctx, f.reporter, verificationHandoff.HandoffID, "mismatch-verification-environment", verificationSecret,
+		ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: verificationEvidence.ObservedAt, PharosEvidence: &verificationEvidence})
+	if _, err := f.database.Exec(`UPDATE external_stage_pharos_evidence SET environment_symbol=?
+		WHERE evidence_kind='deployment'`, deploymentEnvironment); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(environmentErr, ErrInvalid) {
+		t.Fatalf("verification environment mismatch err=%v", environmentErr)
+	}
+	futureDeploymentReceipt := f.now.Add(30 * time.Second).Format(time.RFC3339Nano)
+	if _, err := f.database.Exec(`UPDATE external_stage_pharos_evidence SET server_received_at=?
+		WHERE evidence_kind='deployment'`, futureDeploymentReceipt); err != nil {
+		t.Fatal(err)
+	}
+	receiptMismatch := verificationEvidence
+	receiptMismatch.ObservedAt = f.now.Add(31 * time.Second).Format(time.RFC3339Nano)
+	_, receiptErr := f.service.Report(ctx, f.reporter, verificationHandoff.HandoffID, "mismatch-verification-server-receipt", verificationSecret,
+		ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: receiptMismatch.ObservedAt, PharosEvidence: &receiptMismatch})
+	if _, err := f.database.Exec(`UPDATE external_stage_pharos_evidence SET server_received_at=?
+		WHERE evidence_kind='deployment'`, deploymentEvidenceReceivedAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.Exec(evidenceNoUpdateTriggerSQL); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(receiptErr, ErrInvalid) {
+		t.Fatalf("verification server receipt at-or-before deployment receipt err=%v", receiptErr)
 	}
 	verified, err := f.service.Report(ctx, f.reporter, verificationHandoff.HandoffID, "exact-verification", verificationSecret,
 		ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano), PharosEvidence: &verificationEvidence})
@@ -588,6 +653,105 @@ func TestServiceOwnerLifecycleReplayHeartbeatAndRestart(t *testing.T) {
 	if active.Sequence != 2 || terminal.Sequence != 4 {
 		t.Fatalf("receipt sequences active=%d terminal=%d", active.Sequence, terminal.Sequence)
 	}
+}
+
+func TestServiceCurrentExternalBindingMutationsAreConcealed(t *testing.T) {
+	createMintedHandoff := func(t *testing.T) (*serviceFixture, CreateHandoffResult, []byte) {
+		t.Helper()
+		f := setupServiceFixture(t)
+		f.sealEmpty(t)
+		handoff, err := f.service.CreateHandoff(t.Context(), f.operator, f.deliveryKey, "binding-create",
+			CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+				ExpectedAuthorityEpoch: 1, ReporterRegistrationID: f.registrationID,
+				ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		secret, err := f.service.Mint(t.Context(), f.operator, handoff.HandoffID, 0, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			for index := range secret {
+				secret[index] = 0
+			}
+		})
+		return f, handoff, secret
+	}
+
+	t.Run("revoked reporter registration", func(t *testing.T) {
+		f, handoff, secret := createMintedHandoff(t)
+		if _, err := f.service.Pull(t.Context(), f.reporter, handoff.HandoffID, secret); err != nil {
+			t.Fatalf("current registration rejected: %v", err)
+		}
+		if _, err := f.service.RevokeReporter(t.Context(), f.operator, f.deliveryKey, "binding-revoke", f.registrationID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Pull(t.Context(), f.reporter, handoff.HandoffID, secret); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("revoked registration remained valid: %v", err)
+		}
+	})
+
+	t.Run("disabled api key", func(t *testing.T) {
+		f, handoff, secret := createMintedHandoff(t)
+		if _, err := f.database.Exec(`UPDATE api_keys SET disabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, f.reporter.APIKeyID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Pull(t.Context(), f.reporter, handoff.HandoffID, secret); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("disabled key remained valid: %v", err)
+		}
+	})
+
+	t.Run("expired api key", func(t *testing.T) {
+		f, handoff, secret := createMintedHandoff(t)
+		if _, err := f.database.Exec(`UPDATE api_keys SET expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute') WHERE id=?`, f.reporter.APIKeyID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Pull(t.Context(), f.reporter, handoff.HandoffID, secret); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expired key remained valid: %v", err)
+		}
+	})
+
+	t.Run("superseded attempt", func(t *testing.T) {
+		f, handoff, secret := createMintedHandoff(t)
+		var reporterID, nextRevision int64
+		if err := f.database.QueryRow(`SELECT id FROM delivery_reporters WHERE delivery_id=? AND opaque_key='external-stage-test'`,
+			f.deliveryID).Scan(&reporterID); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.database.QueryRow(`SELECT COALESCE(MAX(delivery_revision),0)+1 FROM delivery_events WHERE delivery_id=?`,
+			f.deliveryID).Scan(&nextRevision); err != nil {
+			t.Fatal(err)
+		}
+		result, err := f.database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,payload_hash,
+			kind,reporter_id,server_received_at) VALUES(?,?,'binding-attempt-2',zeroblob(32),'attempt_started',?,
+			strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, f.deliveryID, nextRevision, reporterID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		startEventID, _ := result.LastInsertId()
+		attemptResult, err := f.database.Exec(`INSERT INTO delivery_attempts(delivery_id,attempt_number,plan_revision,previous_attempt_id,
+			start_delivery_event_id,reason_code,created_at) VALUES(?,2,2,?,?,'retry',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+			f.deliveryID, f.attemptID, startEventID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attemptID, _ := attemptResult.LastInsertId()
+		if _, err := f.database.Exec(`INSERT INTO delivery_attempt_stage_policy(delivery_id,attempt_id,stage_key,sort_order,
+			applicability,weight,policy_reference,reason_code,reason_text,authorized_by_reporter_id,created_at)
+			SELECT delivery_id,?,stage_key,sort_order,applicability,weight,policy_reference,reason_code,reason_text,
+			authorized_by_reporter_id,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			FROM delivery_attempt_stage_policy WHERE attempt_id=?`, attemptID, f.attemptID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.database.Exec(`INSERT INTO delivery_attempt_policy_seals(delivery_id,attempt_id,sealed_at)
+			VALUES(?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, f.deliveryID, attemptID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Pull(t.Context(), f.reporter, handoff.HandoffID, secret); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("superseded attempt handoff remained current: %v", err)
+		}
+	})
 }
 
 func TestServiceJanusDependencyIsAtomicAndCannotOwnCanonicalStage(t *testing.T) {

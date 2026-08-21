@@ -667,5 +667,41 @@ func TestExternalStageTransportPinsSuccessAndReplayStatuses(t *testing.T) {
 		rotated.Body.Len() != externalstage.OneTimeSecretBytes {
 		t.Fatalf("rotate status=%d headers=%v bytes=%d", rotated.Code, rotated.Header(), rotated.Body.Len())
 	}
+	currentSecret := append([]byte(nil), rotated.Body.Bytes()...)
+	defer zeroBytes(currentSecret)
 	zeroBytes(rotated.Body.Bytes())
+	pullPath := "/api/external-stage/handoffs/" + metadata.HandoffID
+	pull := func(principal auth.Principal, rawSecret []byte) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, pullPath, nil)
+		request.Header.Set("Accept", externalstage.MediaTypeV1)
+		request.Header.Set(externalstage.HandoffSecretHeader, base64.RawURLEncoding.EncodeToString(rawSecret))
+		request = externalStageRequestWithAuthPrincipal(request, principal)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+	current := pull(fixture.reporter, currentSecret)
+	if current.Code != http.StatusOK || current.Header().Get("Content-Type") != externalstage.MediaTypeV1 {
+		t.Fatalf("current epoch pull status=%d headers=%v body=%s", current.Code, current.Header(), current.Body.String())
+	}
+	oldEpoch := pull(fixture.reporter, secret)
+	wrongPrincipal, err := auth.NewAPIKeyPrincipal(fixture.reporter.APIKeyID()+1000, fixture.reporter.UserID(),
+		auth.ScopeSet{auth.ScopeAll: {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongKey := pull(wrongPrincipal, currentSecret)
+	for name, recorder := range map[string]*httptest.ResponseRecorder{"old epoch": oldEpoch, "wrong api key": wrongKey} {
+		if recorder.Code != http.StatusNotFound || recorder.Header().Get("X-Permissions-Epoch") != "" ||
+			recorder.Header().Get("Allow") != "" {
+			t.Fatalf("%s refusal status=%d headers=%v body=%s", name, recorder.Code, recorder.Header(), recorder.Body.String())
+		}
+		if strings.Contains(recorder.Body.String(), base64.RawURLEncoding.EncodeToString(currentSecret)) ||
+			strings.Contains(recorder.Body.String(), base64.RawURLEncoding.EncodeToString(secret)) {
+			t.Fatalf("%s refusal reflected a handoff secret: %s", name, recorder.Body.String())
+		}
+	}
+	if !bytes.Equal(normalizedExternalStageProblem(t, oldEpoch), normalizedExternalStageProblem(t, wrongKey)) {
+		t.Fatalf("old epoch and wrong-key refusals diverged: old=%s wrong=%s", oldEpoch.Body.String(), wrongKey.Body.String())
+	}
 }
