@@ -28,6 +28,10 @@ import AgentModeDeliveryCard from './AgentModeDeliveryCard.vue'
 const ten = normalizeWireSnapshot(makeFixtureSnapshot(10), 0).deliveries
 const SERVER_NOW = Date.parse('2026-08-20T13:48:00Z')
 
+function displayedTime(instant: string): string {
+  return new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit' }).format(new Date(instant))
+}
+
 function card(d: Delivery, extra: Record<string, unknown> = {}) {
   setActivePinia(createPinia())
   return mountComponent(AgentModeDeliveryCard, {
@@ -137,9 +141,9 @@ describe('AgentModeDeliveryCard (PAI-805)', () => {
     const m = await card(ranged)
     const range = m.el.querySelector('.am-card-eta--range')
     expect(range?.textContent).toContain('Landing range')
-    expect(range?.textContent).toContain('04:30 PM')
-    expect(range?.textContent).toContain('05:05 PM')
-    expect(range?.textContent).not.toContain('04:40 PM')
+    expect(range?.textContent).toContain(displayedTime(ranged.eta!.optimisticAt!))
+    expect(range?.textContent).toContain(displayedTime(ranged.eta!.pessimisticAt!))
+    expect(range?.textContent).not.toContain(displayedTime(ranged.eta!.landingAt!))
     expect(m.el.textContent).not.toContain('Lands ~')
     expect(m.el.textContent).not.toMatch(/remaining|<1 min/)
     expect(m.el.textContent).not.toContain('confidence too low')

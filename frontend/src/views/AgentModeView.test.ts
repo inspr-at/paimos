@@ -66,6 +66,10 @@ function snapshot(wire: WireSnapshot): AgentModeSnapshot {
   return normalizeWireSnapshot(wire, Date.now())
 }
 
+function displayedTime(instant: string): string {
+  return new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit' }).format(new Date(instant))
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   let reject!: (reason?: unknown) => void
@@ -2304,14 +2308,16 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect([...initialDetail.querySelectorAll('dt')].some((term) => term.textContent === 'Basis')).toBe(true)
     if (confidence === 'high') expect(initialCard.querySelector('.am-card-percent')?.textContent).toContain('73 %')
     else expect(initialCard.querySelector('.am-card-percent')).toBeNull()
+    const pointTime = displayedTime('2026-08-20T14:40:00Z')
+    const rangeLabel = `${displayedTime('2026-08-20T14:30:00Z')}–${displayedTime('2026-08-20T15:05:00Z')}`
     if (confidence === 'high') {
-      expect(initialDetail.textContent).toContain('04:40 PM')
-      expect(initialCard.textContent).toContain('Lands ~04:40 PM')
-      expect(initialNarration.textContent).toContain('Lands about 04:40 PM')
+      expect(initialDetail.textContent).toContain(pointTime)
+      expect(initialCard.textContent).toContain(`Lands ~${pointTime}`)
+      expect(initialNarration.textContent).toContain(`Lands about ${pointTime}`)
     } else {
-      expect(initialDetail.textContent).toContain('Landing range 04:30 PM–05:05 PM')
-      expect(initialCard.textContent).toContain('Landing range 04:30 PM–05:05 PM')
-      expect(initialNarration.textContent).toContain('Landing range 04:30 PM–05:05 PM')
+      expect(initialDetail.textContent).toContain(`Landing range ${rangeLabel}`)
+      expect(initialCard.textContent).toContain(`Landing range ${rangeLabel}`)
+      expect(initialNarration.textContent).toContain(`Landing range ${rangeLabel}`)
     }
 
     offline = true
@@ -2328,7 +2334,14 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     expect(card.querySelector('.am-card-progress')).toBeNull()
     expect(card.querySelector('.am-card-eta--range')).toBeNull()
     expect([...detail.querySelectorAll('dt')].some((term) => term.textContent === 'Basis')).toBe(false)
-    for (const precision of ['73 %', '04:40 PM', '04:30 PM', '05:05 PM', '52 min', basis]) {
+    for (const precision of [
+      '73 %',
+      pointTime,
+      displayedTime('2026-08-20T14:30:00Z'),
+      displayedTime('2026-08-20T15:05:00Z'),
+      '52 min',
+      basis,
+    ]) {
       expect(detail.textContent).not.toContain(precision)
       expect(card.textContent).not.toContain(precision)
       expect(narration.textContent).not.toContain(precision)
