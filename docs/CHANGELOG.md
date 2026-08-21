@@ -5,6 +5,37 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — Pinned external delivery-stage handoffs (PAI-810)
+
+- Added a fixed v1 internal handoff create/mint/rotate/revoke surface and an
+  external opaque pull/accept/report surface for registered Pharos owner and
+  Janus dependency reporters, without widening canonical delivery enums or
+  transferring stage ownership.
+- Added `paimos external-stage` with file/stdin-only credential input, durable
+  new-`0600` mint/rotate output, strict one-value report validation, exact
+  vendor media negotiation, and no raw-secret output mode.
+- Added an authenticated Agent Mode admin plane and matching CLI commands to
+  discover current registrations, create/revoke exact reporter bindings, and
+  seal current prerequisite sets with idempotent mandatory setup audit.
+- Published immutable owner deployment→verification and value-free dependency
+  fixtures with strict OpenAPI/DTO drift gates, per-file digests, and canonical
+  fixture-set digest
+  `sha256:0318f4025902c9d5dd790384950cc9daebb16e02e79a4a90ce7dddc673e68bed`.
+
+### Security
+
+- External calls now require the exact registered API-key identity plus an
+  independently rotated handoff credential. Current binding and authority are
+  reauthorized transactionally; missing, stale, or invalid authority is
+  concealed, and credential bytes never enter URLs, JSON, argv, environment,
+  cookies, logs, audits, fixtures, errors, or CLI output.
+- Owner and dependency sequences, evidence, latest projections, mandatory safe
+  audit, and durable Agent Mode hints commit atomically. Janus cannot complete
+  canonical state, and Pharos verification requires a fresh separate-stage
+  observation of the exact deployed artifact and environment.
+
 ## [5.10.1] — 2026-08-18
 
 ### Added — Synthetic human demo identity (PAI-697)

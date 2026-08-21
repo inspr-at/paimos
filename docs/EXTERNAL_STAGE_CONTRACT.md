@@ -1,0 +1,170 @@
+# External delivery-stage contract v1
+
+PAIMOS external-stage handoffs let registered machine reporters contribute
+deployment or dependency evidence without transferring delivery ownership.
+The v1 wire contract is frozen at Paimos commit
+`580c0bf50768582bcedaf09faceb5fcd56df1f46` and is published through
+`GET /api/openapi.json` and `GET /api/schema`.
+
+## Fixed wire surface
+
+All JSON requests and responses use
+`application/vnd.paimos.external-stage.v1+json`. Mint and rotate responses use
+`application/vnd.paimos.external-stage-secret.v1` and contain exactly 32 raw
+bytes—never JSON, base64, or a response header.
+
+| Audience | Method and route | Purpose |
+|---|---|---|
+| internal | `POST /api/agent-mode/deliveries/{deliveryKey}/external-stage-handoffs` | Create immutable safe metadata; no credential |
+| internal | `POST /api/agent-mode/external-stage-handoffs/{handoffID}/mint` | Mint the first credential once |
+| internal | `POST /api/agent-mode/external-stage-handoffs/{handoffID}/rotate` | Invalidate the prior credential and advance its epoch |
+| internal | `POST /api/agent-mode/external-stage-handoffs/{handoffID}/revoke` | Terminally revoke the handoff |
+| external | `GET /api/external-stage/handoffs/{handoffID}` | Pull the current value-free projection |
+| external | `POST /api/external-stage/handoffs/{handoffID}/accept` | Accept as sequence 1 |
+| external | `POST /api/external-stage/handoffs/{handoffID}/reports` | Append the exact-next report |
+
+External calls require two independent credentials: the exact registered
+Bearer API key and the handoff credential in the inbound-only
+`X-PAIMOS-Handoff-Secret` header. The header contains unpadded base64url of the
+32 raw bytes. The raw or encoded handoff credential is forbidden from URLs,
+queries, JSON, cookies, argv, environment variables, stdout/stderr, logs,
+audits, errors, and fixtures.
+
+## Safe CLI workflow
+
+Reporter registration and prerequisite setup is a separate authenticated Agent
+Mode admin control plane; it does not enlarge or alter the seven frozen adapter
+routes. It uses standard `application/json`, normal editor authorization, and a
+mandatory `Idempotency-Key` on every POST. Every mutation reauthorizes current
+delivery/project ownership and writes a mandatory safe setup audit row.
+
+| Method and route | Purpose |
+|---|---|
+| `GET /api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations` | Discover exact safe IDs for current, non-revoked registrations |
+| `POST /api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations` | Register an exact API key as Pharos owner or Janus dependency |
+| `POST /api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations/{registrationID}/revoke` | Revoke one exact registration |
+| `POST /api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets` | Seal 1–16 exact current Janus bindings for one stage execution |
+
+Use the corresponding CLI discovery and setup commands. Never guess an ID or
+provision with direct SQL:
+
+```sh
+paimos --json external-stage registrations list issue:4664
+
+paimos --json external-stage registrations create issue:4664 \
+  --api-key-id "$PHAROS_API_KEY_ID" --class pharos --role owner \
+  --workflow deploy-production --environment production-eu1
+
+paimos --json external-stage registrations create issue:4664 \
+  --api-key-id "$JANUS_API_KEY_ID" --class janus --role dependency \
+  --dependency authorization
+
+paimos --json external-stage prerequisites seal issue:4664 \
+  --stage deployment --execution 1 --plan-revision 3 --authority-epoch 2 \
+  --prerequisite "authorization=$JANUS_REGISTRATION_ID"
+```
+
+Read `registration_id` from the create response or the current-only
+`registrations list`; that exact safe ID is the only supported input to handoff
+creation. Then create metadata and mint directly into a path that does not exist:
+
+```sh
+paimos external-stage create issue:4664 \
+  --stage deployment --execution 1 --plan-revision 3 \
+  --authority-epoch 2 --reporter-registration-id "$REGISTRATION_ID" \
+  --expires-at 2026-08-22T12:00:00Z
+
+paimos external-stage mint 01ARZ3NDEKTSV4RRFFQ69G5FAV \
+  --expected-credential-epoch 0 \
+  --secret-output /run/credentials/pharos-handoff.bin
+```
+
+`mint` and `rotate` reserve the destination with `O_EXCL` and mode `0600`
+before the request, stream exactly 32 bytes, fsync and close the file, then
+fsync its parent directory. They never print the bytes, an encoding, a digest,
+or a prefix. An existing target fails before the request. Any ambiguous/lost
+response or output-finalization failure requires `rotate`; mint cannot recover
+or replay the original raw value.
+
+External operations read the raw credential only from an owner-owned,
+single-link, owner-only regular file or stdin:
+
+```sh
+paimos external-stage pull 01ARZ3NDEKTSV4RRFFQ69G5FAV \
+  --secret-file /run/credentials/pharos-handoff.bin
+
+paimos external-stage accept 01ARZ3NDEKTSV4RRFFQ69G5FAV \
+  --secret-file /run/credentials/pharos-handoff.bin \
+  --observed-at 2026-08-21T10:00:00Z
+
+paimos external-stage report 01ARZ3NDEKTSV4RRFFQ69G5FAV \
+  --secret-file /run/credentials/pharos-handoff.bin \
+  --report-file report.json
+```
+
+Use `--secret-stdin` for a protected pipe from a secret manager. A report can
+also use `--report-file -`, but not when the independent credential consumes
+stdin. Report JSON is decoded as one strict value; unknown fields and invalid
+closed enums, evidence, blocker, timestamp, digest, or state combinations fail
+locally before the credential is read or a request is sent.
+
+## Ownership, dependencies, and verification
+
+- Pharos is the owner reporter for guarded deployment and a separate fresh
+  verification stage. Deployment success establishes only
+  `deployed_unverified`.
+- Verification is a distinct verification-stage handoff for the same
+  delivery and attempt. Environment plus artifact version, SHA-256 digest,
+  and 40- or 64-character lowercase commit digest must exactly match the
+  deployment. Deployment and verification workflow symbols may differ.
+- Verification `observed_at` and server receipt must both be strictly after
+  the matching deployment server receipt. Otherwise state remains
+  `deployed_unverified`.
+- Janus is dependency-only. Its evidence is restricted to enum, boolean, and
+  timestamp authorization or credential-handoff facts. It has no free-text,
+  URL, path, ID, digest, ciphertext, callback, or command field and can never
+  complete canonical stage state.
+- Reporter class, role, dependency key, evidence ceiling, key binding, and
+  authority are server-owned. JSON never grants them. Owner and dependency
+  sequences and latest projections are independent.
+
+Exact same-sequence/same-body replay returns the prior safe receipt without a
+write or wake. Conflicting replay, a gap/regression, stale authority, a late
+new report, or invalid evidence fails closed. Server receipt time—not reporter
+clock time—controls freshness and liveness.
+
+## Canonical fixtures and adapter pins
+
+Canonical exact-byte fixtures live in
+`backend/contracts/fixtures/external-stage/`:
+
+- `owner-pharos-v1.json` is one ordered deployment → verification sequence
+  bound to a single delivery and attempt. It proves exact artifact/environment
+  matching and fresh cross-stage verification.
+- `dependency-janus-v1.json` contains only value-free dependency evidence and
+  explicitly records that neither case completes canonical stage state.
+- `manifest-v1.json` pins schema major, media type, exact lengths, per-file
+  SHA-256 values, the certified contract commit, release tag, and fixture-set
+  digest.
+
+The v1 fixture-set digest is:
+
+```text
+sha256:0318f4025902c9d5dd790384950cc9daebb16e02e79a4a90ce7dddc673e68bed
+```
+
+It is SHA-256 over `paimos.external-stage.fixtures.v1\0`, followed in lexical
+filename order by `filename + \0 + exact fixture bytes + \0`. The manifest is
+excluded so release metadata can be finalized without changing fixture
+identity. Fixture files are compact UTF-8 JSON with exactly one trailing LF.
+
+`paimos_release` remains `PENDING_RELEASE_TAG` until release preparation.
+Pharos and Janus adapters must refuse a pending pin and embed the complete
+tuple: schema major, fixture-set digest, certified Paimos contract commit, and
+the immutable release tag. CI must compare the embedded files byte-for-byte,
+recompute every digest, and confirm the tag resolves to the reviewed Paimos
+release before the adapter can build or publish.
+
+Changing route spelling, media types, DTO fields, enums, fixture bytes, digest
+algorithm, or evidence semantics requires a new contract major and new fixture
+directory. Never rewrite v1 in place after release.

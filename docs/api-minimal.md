@@ -296,6 +296,37 @@ DELETE /projects/:id/deploy-recipes/:recipeId
 `/projects/:id/repos` (existing) is the third inventory; all three are
 inlined into the canonical agent artifact at render time.
 
+## External delivery stages (PAI-810)
+
+JSON uses `application/vnd.paimos.external-stage.v1+json`. Mint/rotate return
+exactly 32 raw bytes as `application/vnd.paimos.external-stage-secret.v1`.
+The separate authenticated setup routes use standard `application/json`; their
+POSTs require `Idempotency-Key`, current editor authority, and mandatory audit.
+
+```
+GET  /agent-mode/deliveries/:deliveryKey/external-reporter-registrations
+POST /agent-mode/deliveries/:deliveryKey/external-reporter-registrations
+POST /agent-mode/deliveries/:deliveryKey/external-reporter-registrations/:registrationID/revoke
+POST /agent-mode/deliveries/:deliveryKey/external-prerequisite-sets
+
+POST /agent-mode/deliveries/:deliveryKey/external-stage-handoffs  internal create; metadata only
+POST /agent-mode/external-stage-handoffs/:handoffID/mint          internal one-time raw credential
+POST /agent-mode/external-stage-handoffs/:handoffID/rotate        internal rotate + epoch advance
+POST /agent-mode/external-stage-handoffs/:handoffID/revoke        internal terminal revoke
+
+GET  /external-stage/handoffs/:handoffID                          external pull
+POST /external-stage/handoffs/:handoffID/accept                   external sequence-one accept
+POST /external-stage/handoffs/:handoffID/reports                  external exact-next report
+```
+
+The external routes require the registered Bearer API key and an independent
+`X-PAIMOS-Handoff-Secret` request header. The header is inbound-only; no raw or
+encoded handoff credential is accepted in path/query/JSON/cookie or returned
+later. Missing, unauthorized, invalid, expired, revoked, rotated, and
+stale-authority handoffs share canonical 404 concealment. See
+[`EXTERNAL_STAGE_CONTRACT.md`](EXTERNAL_STAGE_CONTRACT.md) for the exact DTO,
+current-registration discovery, CLI, fixture, digest, and release-pin contract.
+
 ## Knowledge
 
 Knowledge entries (memory, runbook, external_system, related_project,
