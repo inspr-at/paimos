@@ -858,6 +858,11 @@ Mode admin control plane, outside the frozen adapter routes. The CLI exposes
 the list contains current non-revoked safe IDs only, and every mutation is
 idempotent and mandatorily audited. Handoff creation consumes the exact returned
 `registration_id`. Guessed IDs and direct-SQL provisioning are unsupported.
+Each sealed prerequisite explicitly carries `requirement: required|optional`;
+the CLI spelling is `required|optional:dependency=registration-id`, with no
+default. A sealed empty set and required-only, optional-only, or mixed sets up
+to 16 rows are valid. Only required rows gate owner success; optional rows do
+not transfer authority or complete canonical state.
 
 Owner and dependency streams use independent exact-next sequences and latest
 projections. A Janus dependency report may satisfy or block only its declared

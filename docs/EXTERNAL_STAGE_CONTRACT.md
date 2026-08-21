@@ -43,7 +43,7 @@ delivery/project ownership and writes a mandatory safe setup audit row.
 | `GET /api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations` | Discover exact safe IDs for current, non-revoked registrations |
 | `POST /api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations` | Register an exact API key as Pharos owner or Janus dependency |
 | `POST /api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations/{registrationID}/revoke` | Revoke one exact registration |
-| `POST /api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets` | Seal 1–16 exact current Janus bindings for one stage execution |
+| `POST /api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets` | Seal 0–16 exact current Janus bindings for one stage execution |
 
 Use the corresponding CLI discovery and setup commands. Never guess an ID or
 provision with direct SQL:
@@ -61,8 +61,19 @@ paimos --json external-stage registrations create issue:4664 \
 
 paimos --json external-stage prerequisites seal issue:4664 \
   --stage deployment --execution 1 --plan-revision 3 --authority-epoch 2 \
-  --prerequisite "authorization=$JANUS_REGISTRATION_ID"
+  --prerequisite "required:authorization=$JANUS_AUTH_REGISTRATION_ID" \
+  --prerequisite "optional:credential-handoff=$JANUS_CREDENTIAL_REGISTRATION_ID"
 ```
+
+Every declared item must explicitly use
+`required:dependency-key=registration-id` or
+`optional:dependency-key=registration-id`; there is no default requirement.
+Only `required` rows gate owner success. Optional rows remain visible
+dependency facts but do not block owner completion. Omitting all
+`--prerequisite` flags intentionally seals the mandatory empty set as
+`"prerequisites":[]`; an unsealed set is not equivalent. Required-only,
+optional-only, mixed, and empty sets are all valid, with at most 16 declared
+items.
 
 Read `registration_id` from the create response or the current-only
 `registrations list`; that exact safe ID is the only supported input to handoff
@@ -124,6 +135,9 @@ locally before the credential is read or a request is sent.
   timestamp authorization or credential-handoff facts. It has no free-text,
   URL, path, ID, digest, ciphertext, callback, or command field and can never
   complete canonical stage state.
+- Prerequisite `required|optional` is server-owned Agent Mode setup policy, not
+  an external adapter report field. Only required current bindings gate owner
+  completion; optional dependency evidence never completes canonical state.
 - Reporter class, role, dependency key, evidence ceiling, key binding, and
   authority are server-owned. JSON never grants them. Owner and dependency
   sequences and latest projections are independent.
@@ -158,8 +172,10 @@ filename order by `filename + \0 + exact fixture bytes + \0`. The manifest is
 excluded so release metadata can be finalized without changing fixture
 identity. Fixture files are compact UTF-8 JSON with exactly one trailing LF.
 
-`paimos_release` remains `PENDING_RELEASE_TAG` until release preparation.
-Pharos and Janus adapters must refuse a pending pin and embed the complete
+`paimos_release` intentionally remains `PENDING_RELEASE_TAG` during development
+and must be replaced with the immutable release tag before any release is cut;
+do not pin a guessed or provisional tag now. Pharos and Janus adapters must
+refuse a pending pin and embed the complete
 tuple: schema major, fixture-set digest, certified Paimos contract commit, and
 the immutable release tag. CI must compare the embedded files byte-for-byte,
 recompute every digest, and confirm the tag resolves to the reviewed Paimos

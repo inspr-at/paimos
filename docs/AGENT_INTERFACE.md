@@ -713,6 +713,13 @@ canonical idempotency keys. Use the returned exact `registration_id` for
 handoff creation.
 Never guess IDs or provision with direct SQL.
 
+Prerequisite sealing is explicit: repeat
+`--prerequisite required:dependency=registration-id` or
+`--prerequisite optional:dependency=registration-id` up to 16 times. There is
+no implicit mode. Omitting the flag seals an intentional empty set; only
+required rows gate owner success, while optional rows remain advisory
+dependency facts.
+
 The independent 32-byte handoff credential never enters argv, an environment
 variable, JSON, a URL, or CLI output. Mint/rotate require
 `--secret-output <new-path>`, create it as `0600` without overwriting, and

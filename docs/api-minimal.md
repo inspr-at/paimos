@@ -319,6 +319,11 @@ POST /external-stage/handoffs/:handoffID/accept                   external seque
 POST /external-stage/handoffs/:handoffID/reports                  external exact-next report
 ```
 
+Prerequisite-set requests always carry an explicit array of 0–16
+`{dependency_key, reporter_registration_id, requirement}` items, where
+`requirement` is exactly `required` or `optional`. An empty array intentionally
+seals no dependencies; only required rows gate owner success.
+
 The external routes require the registered Bearer API key and an independent
 `X-PAIMOS-Handoff-Secret` request header. The header is inbound-only; no raw or
 encoded handoff credential is accepted in path/query/JSON/cookie or returned

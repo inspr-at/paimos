@@ -112,6 +112,9 @@ func TestCanonicalExternalStageFixturesAndDigestManifest(t *testing.T) {
 		}
 		validateExternalStageFixture(t, fixture)
 		assertNoCredentialField(t, name, raw)
+		if bytes.Contains(raw, []byte(`"requirement"`)) {
+			t.Fatalf("%s leaked internal prerequisite policy into the frozen adapter fixture", name)
+		}
 	}
 
 	committedManifest, err := os.ReadFile(filepath.Join(directory, "manifest-v1.json"))

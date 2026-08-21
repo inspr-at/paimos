@@ -87,6 +87,7 @@ type externalStageRegistrationList struct {
 type externalStagePrerequisite struct {
 	DependencyKey          string `json:"dependency_key"`
 	ReporterRegistrationID int64  `json:"reporter_registration_id"`
+	Requirement            string `json:"requirement"`
 }
 
 type externalStagePrerequisiteSetRequest struct {
@@ -318,7 +319,7 @@ func externalStagePrerequisitesSealCmd() *cobra.Command {
 	var dryRun bool
 	c := &cobra.Command{
 		Use:   "seal <delivery-key>",
-		Short: "Seal 1–16 exact current Janus registration bindings",
+		Short: "Seal 0–16 explicit required or optional Janus bindings",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deliveryKey, err := validateExternalStageDeliveryKey(args[0])
@@ -355,7 +356,7 @@ func externalStagePrerequisitesSealCmd() *cobra.Command {
 	c.Flags().Int64Var(&request.ExecutionNumber, "execution", 0, "exact current stage execution number")
 	c.Flags().Int64Var(&request.ExpectedPlanRevision, "plan-revision", 0, "expected immutable attempt plan revision")
 	c.Flags().Int64Var(&request.ExpectedAuthorityEpoch, "authority-epoch", 0, "expected current delivery authority epoch")
-	c.Flags().StringArrayVar(&rawPrerequisites, "prerequisite", nil, "dependency=registration-id binding (repeat 1–16 times)")
+	c.Flags().StringArrayVar(&rawPrerequisites, "prerequisite", nil, "required|optional:dependency=registration-id binding (repeat 0–16 times)")
 	addExternalStageReusableIdempotencyFlag(c, &mutation)
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the safe request without sending it")
 	return c
@@ -1072,16 +1073,20 @@ func validateExternalStageRegistration(request externalStageRegistrationRequest)
 }
 
 func parseExternalStagePrerequisites(raw []string) ([]externalStagePrerequisite, error) {
-	if len(raw) < 1 || len(raw) > 16 {
-		return nil, &usageError{msg: "--prerequisite must be repeated 1–16 times"}
+	if len(raw) > 16 {
+		return nil, &usageError{msg: "--prerequisite may be repeated at most 16 times"}
 	}
 	result := make([]externalStagePrerequisite, 0, len(raw))
 	seenDependencies := make(map[string]bool, len(raw))
 	seenRegistrations := make(map[int64]bool, len(raw))
 	for _, binding := range raw {
-		dependencyKey, registrationText, ok := strings.Cut(binding, "=")
+		requirement, dependencyBinding, ok := strings.Cut(binding, ":")
+		if !ok || (requirement != "required" && requirement != "optional") {
+			return nil, &usageError{msg: "each --prerequisite must explicitly be required|optional:dependency-symbol=positive-registration-id"}
+		}
+		dependencyKey, registrationText, ok := strings.Cut(dependencyBinding, "=")
 		if !ok || !externalStageSymbolPattern.MatchString(dependencyKey) {
-			return nil, &usageError{msg: "each --prerequisite must be dependency-symbol=positive-registration-id"}
+			return nil, &usageError{msg: "each --prerequisite must explicitly be required|optional:dependency-symbol=positive-registration-id"}
 		}
 		registrationID, err := positiveExternalStageID("prerequisite registration-id", registrationText)
 		if err != nil {
@@ -1093,7 +1098,7 @@ func parseExternalStagePrerequisites(raw []string) ([]externalStagePrerequisite,
 		seenDependencies[dependencyKey] = true
 		seenRegistrations[registrationID] = true
 		result = append(result, externalStagePrerequisite{
-			DependencyKey: dependencyKey, ReporterRegistrationID: registrationID,
+			DependencyKey: dependencyKey, ReporterRegistrationID: registrationID, Requirement: requirement,
 		})
 	}
 	return result, nil
@@ -1106,8 +1111,13 @@ func validateExternalStagePrerequisiteSet(request externalStagePrerequisiteSetRe
 	if request.ExecutionNumber < 1 || request.ExpectedPlanRevision < 1 || request.ExpectedAuthorityEpoch < 1 {
 		return &usageError{msg: "--execution, --plan-revision, and --authority-epoch must be positive"}
 	}
-	if len(request.Prerequisites) < 1 || len(request.Prerequisites) > 16 {
-		return &usageError{msg: "prerequisites must contain 1–16 exact bindings"}
+	if len(request.Prerequisites) > 16 {
+		return &usageError{msg: "prerequisites must contain 0–16 exact bindings"}
+	}
+	for _, prerequisite := range request.Prerequisites {
+		if prerequisite.Requirement != "required" && prerequisite.Requirement != "optional" {
+			return &usageError{msg: "prerequisite requirement must be required or optional"}
+		}
 	}
 	return nil
 }

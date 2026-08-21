@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -112,7 +113,7 @@ func TestExternalStageReusableIdempotencyDryRunShowsSourceWithoutPrintingKey(t *
 		{name: "handoff-revoke", args: []string{"external-stage", "revoke", externalStageTestHandoffID, "--expected-credential-epoch", "1"}},
 		{name: "registration-create", args: []string{"external-stage", "registrations", "create", "issue:4664", "--api-key-id", "5", "--class", "pharos", "--role", "owner", "--workflow", "deploy-production", "--environment", "production-eu1"}},
 		{name: "registration-revoke", args: []string{"external-stage", "registrations", "revoke", "issue:4664", "9"}},
-		{name: "prerequisite-seal", args: []string{"external-stage", "prerequisites", "seal", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--prerequisite", "authorization=11"}},
+		{name: "prerequisite-seal", args: []string{"external-stage", "prerequisites", "seal", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--prerequisite", "required:authorization=11"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -160,7 +161,7 @@ func TestExternalStageReusableIdempotencyKeyOverridesAutoUUIDAcrossExactRetries(
 			return []string{"external-stage", "registrations", "revoke", "issue:4664", "9"}
 		}},
 		{name: "prerequisite-seal", args: func(_, _ string) []string {
-			return []string{"external-stage", "prerequisites", "seal", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--prerequisite", "authorization=11"}
+			return []string{"external-stage", "prerequisites", "seal", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--prerequisite", "required:authorization=11", "--prerequisite", "optional:credential-handoff=12"}
 		}},
 	}
 	for _, test := range tests {
@@ -373,8 +374,8 @@ func TestExternalStagePrerequisitesSealUsesLiteralRouteAndExactBindings(t *testi
 		}
 		if request.StageKey != "deployment" || request.ExecutionNumber != 2 || request.ExpectedPlanRevision != 4 ||
 			request.ExpectedAuthorityEpoch != 3 || len(request.Prerequisites) != 2 ||
-			request.Prerequisites[0] != (externalStagePrerequisite{DependencyKey: "authorization", ReporterRegistrationID: 11}) ||
-			request.Prerequisites[1] != (externalStagePrerequisite{DependencyKey: "credential-handoff", ReporterRegistrationID: 12}) {
+			request.Prerequisites[0] != (externalStagePrerequisite{DependencyKey: "authorization", ReporterRegistrationID: 11, Requirement: "required"}) ||
+			request.Prerequisites[1] != (externalStagePrerequisite{DependencyKey: "credential-handoff", ReporterRegistrationID: 12, Requirement: "optional"}) {
 			t.Errorf("seal request=%+v", request)
 		}
 		w.Header().Set("Content-Type", externalStageAdminMediaType)
@@ -388,7 +389,7 @@ func TestExternalStagePrerequisitesSealUsesLiteralRouteAndExactBindings(t *testi
 	out, errOut, err := executeCLIForTest(t,
 		"--json", "external-stage", "prerequisites", "seal", "issue:4664",
 		"--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3",
-		"--prerequisite", "authorization=11", "--prerequisite", "credential-handoff=12")
+		"--prerequisite", "required:authorization=11", "--prerequisite", "optional:credential-handoff=12")
 	if err != nil {
 		t.Fatalf("seal: %v stderr=%s", err, errOut)
 	}
@@ -397,6 +398,113 @@ func TestExternalStagePrerequisitesSealUsesLiteralRouteAndExactBindings(t *testi
 		t.Fatalf("seal response=%s error=%v", out, err)
 	}
 	assertExternalStageOutputHasNoSecret(t, out, errOut, nil)
+}
+
+func TestExternalStagePrerequisitesModelEmptyOptionalAndMixedSets(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  []string
+		want []externalStagePrerequisite
+	}{
+		{name: "empty", raw: nil, want: []externalStagePrerequisite{}},
+		{name: "optional-only", raw: []string{"optional:authorization=11"}, want: []externalStagePrerequisite{
+			{DependencyKey: "authorization", ReporterRegistrationID: 11, Requirement: "optional"},
+		}},
+		{name: "mixed", raw: []string{"required:authorization=11", "optional:credential-handoff=12"}, want: []externalStagePrerequisite{
+			{DependencyKey: "authorization", ReporterRegistrationID: 11, Requirement: "required"},
+			{DependencyKey: "credential-handoff", ReporterRegistrationID: 12, Requirement: "optional"},
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parsed, err := parseExternalStagePrerequisites(test.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(parsed, test.want) {
+				t.Fatalf("parsed=%+v want %+v", parsed, test.want)
+			}
+			request := externalStagePrerequisiteSetRequest{
+				StageKey: "deployment", ExecutionNumber: 2, ExpectedPlanRevision: 4,
+				ExpectedAuthorityEpoch: 3, Prerequisites: parsed,
+			}
+			if err := validateExternalStagePrerequisiteSet(request); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{
+				"--json", "external-stage", "prerequisites", "seal", "issue:4664",
+				"--stage", "deployment", "--execution", "2", "--plan-revision", "4",
+				"--authority-epoch", "3", "--dry-run",
+			}
+			for _, prerequisite := range test.raw {
+				args = append(args, "--prerequisite", prerequisite)
+			}
+			out, errOut, err := executeCLIForTest(t, args...)
+			if err != nil {
+				t.Fatalf("dry-run: %v stderr=%s", err, errOut)
+			}
+			var plan struct {
+				Body externalStagePrerequisiteSetRequest `json:"body"`
+			}
+			if err := json.Unmarshal([]byte(out), &plan); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(plan.Body.Prerequisites, test.want) {
+				t.Fatalf("dry-run prerequisites=%+v want %+v", plan.Body.Prerequisites, test.want)
+			}
+			if test.name == "empty" && plan.Body.Prerequisites == nil {
+				t.Fatalf("empty seal did not emit an explicit JSON array: %s", out)
+			}
+		})
+	}
+}
+
+func TestExternalStagePrerequisiteSealSendsEmptyAndOptionalOnlyArrays(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []externalStagePrerequisite
+	}{
+		{name: "empty", want: []externalStagePrerequisite{}},
+		{name: "optional-only", args: []string{"--prerequisite", "optional:authorization=11"}, want: []externalStagePrerequisite{
+			{DependencyKey: "authorization", ReporterRegistrationID: 11, Requirement: "optional"},
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+				}
+				if test.name == "empty" && !bytes.Contains(raw, []byte(`"prerequisites":[]`)) {
+					t.Errorf("empty request body=%s", raw)
+				}
+				var request externalStagePrerequisiteSetRequest
+				if err := json.Unmarshal(raw, &request); err != nil {
+					t.Error(err)
+				}
+				if !reflect.DeepEqual(request.Prerequisites, test.want) {
+					t.Errorf("request prerequisites=%+v want %+v", request.Prerequisites, test.want)
+				}
+				w.Header().Set("Content-Type", externalStageAdminMediaType)
+				_ = json.NewEncoder(w).Encode(externalStagePrerequisiteSet{
+					DeliveryKey: "issue:4664", StageKey: "deployment", ExecutionNumber: 2,
+					PlanRevision: 4, AuthorityEpoch: 3, DeclaredCount: len(test.want), SealedAt: "2026-08-21T09:00:00Z",
+				})
+			}))
+			defer server.Close()
+			setExternalStageTestInstance(t, server.URL)
+			args := []string{
+				"--json", "external-stage", "prerequisites", "seal", "issue:4664",
+				"--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3",
+			}
+			args = append(args, test.args...)
+			if _, errOut, err := executeCLIForTest(t, args...); err != nil {
+				t.Fatalf("seal: %v stderr=%s", err, errOut)
+			}
+		})
+	}
 }
 
 func TestExternalStageAdminValidationRejectsMutationsBeforeNetwork(t *testing.T) {
@@ -423,15 +531,24 @@ func TestExternalStageAdminValidationRejectsMutationsBeforeNetwork(t *testing.T)
 		})
 	}
 	for _, invalid := range [][]string{
-		nil,
-		{"Authorization=11"},
-		{"authorization=0"},
-		{"authorization=11", "authorization=12"},
-		{"authorization=11", "credential-handoff=11"},
+		{"authorization=11"},
+		{"mandatory:authorization=11"},
+		{"Required:authorization=11"},
+		{"required:Authorization=11"},
+		{"required:authorization=0"},
+		{"required:authorization=11", "optional:authorization=12"},
+		{"required:authorization=11", "optional:credential-handoff=11"},
 	} {
 		if parsed, err := parseExternalStagePrerequisites(invalid); err == nil {
 			t.Fatalf("invalid prerequisite bindings accepted: %+v", parsed)
 		}
+	}
+	tooMany := make([]string, 17)
+	for index := range tooMany {
+		tooMany[index] = fmt.Sprintf("required:dependency-%d=%d", index, index+1)
+	}
+	if _, err := parseExternalStagePrerequisites(tooMany); err == nil {
+		t.Fatal("more than 16 prerequisite bindings accepted")
 	}
 	validJanus := externalStageRegistrationRequest{
 		APIKeyID: 6, ReporterClass: "janus", ReporterRole: "dependency", DependencyKey: "authorization",

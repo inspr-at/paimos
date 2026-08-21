@@ -18,7 +18,8 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   vendor media negotiation, and no raw-secret output mode.
 - Added an authenticated Agent Mode admin plane and matching CLI commands to
   discover current registrations, create/revoke exact reporter bindings, and
-  seal current prerequisite sets with idempotent mandatory setup audit.
+  seal 0–16 explicit required/optional prerequisite bindings with idempotent
+  mandatory setup audit. Only required bindings gate owner success.
 - Published immutable owner deployment→verification and value-free dependency
   fixtures with strict OpenAPI/DTO drift gates, per-file digests, and canonical
   fixture-set digest
