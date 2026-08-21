@@ -46,6 +46,23 @@ func externalStageTransportTestRouter() http.Handler {
 	return router
 }
 
+func externalStageProductionRouteSlice() http.Handler {
+	router := chi.NewRouter()
+	router.Use(ClassifiedControlCachePolicyMiddleware)
+	router.Use(ControlAwareRecoverer)
+	router.Use(RequestIDMiddleware)
+	router.NotFound(ControlAwareNotFound)
+	router.MethodNotAllowed(ControlAwareMethodNotAllowed)
+	router.Route("/api", func(router chi.Router) {
+		router.Group(func(router chi.Router) {
+			router.Use(auth.AgentModePrivateNoStore)
+			router.Use(ExternalStageAPIKeyAuth)
+			MountExternalStageContractRoutes(router)
+		})
+	})
+	return router
+}
+
 func externalStageRequestWithAuthPrincipal(request *http.Request, principal auth.Principal) *http.Request {
 	return request.WithContext(auth.WithPrincipal(request.Context(), principal))
 }
@@ -63,6 +80,38 @@ func normalizedExternalStageProblem(t *testing.T, recorder *httptest.ResponseRec
 		t.Fatal(err)
 	}
 	return normalized
+}
+
+func TestExternalStageRealRouterWrongMethodIsCanonicallyConcealed(t *testing.T) {
+	router := externalStageProductionRouteSlice()
+	request := httptest.NewRequest(http.MethodPut,
+		"/api/external-stage/handoffs/opaque-do-not-echo/reports", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", externalstage.MediaTypeV1)
+	request.Header.Set("Accept", externalstage.MediaTypeV1)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status=%d want=%d headers=%v body=%s", recorder.Code, http.StatusNotFound,
+			recorder.Header(), recorder.Body.String())
+	}
+	if recorder.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("wrong-method response was not private/no-store: headers=%v", recorder.Header())
+	}
+	if recorder.Header().Get("Allow") != "" || recorder.Header().Get("X-Permissions-Epoch") != "" {
+		t.Fatalf("wrong-method response leaked routing/auth metadata: headers=%v", recorder.Header())
+	}
+	if strings.Contains(recorder.Body.String(), "opaque-do-not-echo") {
+		t.Fatalf("wrong-method response leaked opaque handoff path: %s", recorder.Body.String())
+	}
+
+	canonicalRecorder := httptest.NewRecorder()
+	writeControlNotFound(canonicalRecorder, httptest.NewRequest(http.MethodGet, request.URL.Path, nil))
+	if !bytes.Equal(normalizedExternalStageProblem(t, recorder), normalizedExternalStageProblem(t, canonicalRecorder)) {
+		t.Fatalf("wrong-method refusal differs from canonical not-found: wrong=%s canonical=%s",
+			recorder.Body.String(), canonicalRecorder.Body.String())
+	}
 }
 
 type externalStageTransportFixture struct {
