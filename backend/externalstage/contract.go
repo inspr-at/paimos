@@ -152,6 +152,11 @@ type HandoffMetadata struct {
 	RevokedAt                  string         `json:"revoked_at,omitempty"`
 }
 
+type CreateHandoffResult struct {
+	HandoffMetadata
+	Duplicate bool `json:"-"`
+}
+
 // PullResponse is the value-free external projection. Internal row IDs and
 // reporter registration IDs do not cross this boundary.
 type PullResponse struct {

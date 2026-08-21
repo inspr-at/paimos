@@ -17,6 +17,7 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
@@ -41,6 +42,7 @@ var perConnectionPragmas = []string{
 func init() {
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_cosine", 2, paimosCosineSQL)
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_contains_secret_like", 1, paimosContainsSecretLikeSQL)
+	sqlite.MustRegisterDeterministicScalarFunction("paimos_domain_sha256", -1, paimosDomainSHA256SQL)
 
 	// RegisterConnectionHook fires on every new connection in the pool —
 	// the right place for genuinely per-connection pragmas. NOT the right
@@ -60,6 +62,27 @@ func init() {
 		}
 		return nil
 	})
+}
+
+func paimosDomainSHA256SQL(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+	if len(args) < 2 {
+		return nil, fmt.Errorf("paimos_domain_sha256 requires a domain and at least one value")
+	}
+	hash := sha256.New()
+	for index, arg := range args {
+		if arg == nil {
+			return nil, fmt.Errorf("paimos_domain_sha256 arguments must be non-null text or blobs")
+		}
+		value, ok := sqliteBlobArg(arg)
+		if !ok {
+			return nil, fmt.Errorf("paimos_domain_sha256 arguments must be text or blobs")
+		}
+		if index > 0 {
+			_, _ = hash.Write([]byte{0})
+		}
+		_, _ = hash.Write(value)
+	}
+	return hash.Sum(nil), nil
 }
 
 func paimosContainsSecretLikeSQL(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
@@ -10108,7 +10131,6 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
 			 revoked_at         TEXT,
 			 UNIQUE(delivery_id,id),
-			 UNIQUE(delivery_id,api_key_id,reporter_class,reporter_role,dependency_key),
 			 FOREIGN KEY(delivery_id,reporter_id) REFERENCES delivery_reporters(delivery_id,id),
 			 FOREIGN KEY(api_key_id) REFERENCES api_keys(id),
 			 FOREIGN KEY(user_id) REFERENCES users(id),
@@ -10129,6 +10151,10 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 ON external_stage_reporter_registrations(
 			  delivery_id,api_key_id,reporter_class,reporter_role,workflow_symbol,environment_symbol)
 			 WHERE reporter_role='owner' AND revoked_at IS NULL`,
+			`CREATE UNIQUE INDEX idx_external_stage_registration_dependency_exact
+			 ON external_stage_reporter_registrations(
+			  delivery_id,api_key_id,reporter_class,reporter_role,dependency_key)
+			 WHERE reporter_role='dependency' AND revoked_at IS NULL`,
 			`CREATE TRIGGER trg_external_stage_registration_insert_guard
 			 BEFORE INSERT ON external_stage_reporter_registrations
 			 WHEN NEW.created_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NEW.revoked_at IS NOT NULL OR
@@ -10140,7 +10166,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   JOIN external_stage_user_roles user ON user.id=NEW.user_id AND user.status='active'
 			   WHERE delivery.id=NEW.delivery_id AND issue.project_id=NEW.project_id
 			    AND reporter.reporter_type='external' AND api_key.disabled_at IS NULL
-			    AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			    AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
 			    AND (user.effective_role IN ('admin','super_admin') OR
 			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
 			          AND membership.project_id=NEW.project_id AND membership.access_level IN ('viewer','editor')) OR
@@ -10189,6 +10215,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 dependency_key   TEXT NOT NULL CHECK(length(CAST(dependency_key AS BLOB)) BETWEEN 1 AND 64 AND
 			  dependency_key GLOB '[a-z]*' AND dependency_key NOT GLOB '*[^a-z0-9._-]*'),
 			 registration_id  INTEGER NOT NULL,
+			 requirement      TEXT NOT NULL CHECK(requirement IN ('required','optional')),
 			 ordinal          INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 15),
 			 created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
 			 PRIMARY KEY(attempt_id,stage_key,execution_number,authority_epoch,dependency_key),
@@ -10206,7 +10233,9 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
 			    AND latest.execution_start_stage_event_id=NEW.execution_start_stage_event_id
 			    AND latest.authority_epoch=NEW.authority_epoch
-			    AND latest.authority_stage_event_id=NEW.authority_stage_event_id)
+			    AND latest.authority_stage_event_id=NEW.authority_stage_event_id
+			    AND NOT EXISTS(SELECT 1 FROM delivery_stage_events terminal WHERE terminal.id=latest.semantic_stage_event_id
+			     AND terminal.semantic_state IN ('succeeded','failed','cancelled','draft_ready')))
 			 BEGIN SELECT RAISE(ABORT,'external stage prerequisite set is stale'); END`,
 			`CREATE TRIGGER trg_external_stage_prerequisite_guard
 			 BEFORE INSERT ON external_stage_prerequisites
@@ -10295,7 +10324,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			  REFERENCES delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,id),
 			 FOREIGN KEY(delivery_id,attempt_id,stage_key,execution_number,authority_stage_event_id)
 			  REFERENCES delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,id),
-			 CHECK(expires_at>created_at),
+			 CHECK(julianday(expires_at)>julianday(created_at)),
 			 CHECK((credential_epoch=0 AND secret_digest IS NULL) OR (credential_epoch>0 AND secret_digest IS NOT NULL)),
 			 CHECK((lifecycle_state='issued' AND accepted_at IS NULL AND terminal_at IS NULL) OR
 			       (lifecycle_state IN ('accepted','active','waiting','blocked') AND accepted_at IS NOT NULL AND terminal_at IS NULL) OR
@@ -10323,6 +10352,8 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			  NOT EXISTS(SELECT 1 FROM deliveries delivery
 			   JOIN issues issue ON issue.id=delivery.issue_id AND issue.deleted_at IS NULL
 			   JOIN delivery_attempts attempt ON attempt.delivery_id=delivery.id AND attempt.id=NEW.attempt_id
+			    AND attempt.attempt_number=(SELECT MAX(current_attempt.attempt_number) FROM delivery_attempts current_attempt
+			     WHERE current_attempt.delivery_id=delivery.id)
 			   JOIN delivery_stage_latest latest ON latest.delivery_id=delivery.id AND latest.attempt_id=attempt.id
 			    AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
 			    AND latest.execution_start_stage_event_id=NEW.execution_start_stage_event_id
@@ -10344,17 +10375,28 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			      AND setup.delivery_id=registration.delivery_id AND setup.project_id=registration.project_id)
 			   JOIN api_keys api_key ON api_key.id=registration.api_key_id AND api_key.user_id=registration.user_id
 			    AND api_key.disabled_at IS NULL
-			    AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			    AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
 			   JOIN external_stage_user_roles reporter_user ON reporter_user.id=registration.user_id AND reporter_user.status='active'
 			   WHERE delivery.id=NEW.delivery_id AND delivery.delivery_key=NEW.delivery_key
 			    AND delivery.issue_id=NEW.root_issue_id AND issue.project_id=NEW.project_id
 			    AND attempt.attempt_number=NEW.attempt_number AND attempt.plan_revision=NEW.plan_revision
+			    AND NEW.plan_digest=paimos_domain_sha256('paimos.external-stage.plan.v1',
+			     printf('%d:%d:%d',attempt.id,attempt.plan_revision,attempt.start_delivery_event_id))
+			    AND NEW.predecessor_digest=paimos_domain_sha256('paimos.external-stage.predecessor.v1',
+			     printf('%d:%d:%d',latest.execution_start_stage_event_id,latest.authority_stage_event_id,
+			      COALESCE(latest.semantic_stage_event_id,0)))
+			    AND NEW.context_digest=paimos_domain_sha256('paimos.external-stage.context.v1',delivery.delivery_key,
+			     CAST(attempt.id AS TEXT),NEW.stage_key,CAST(NEW.execution_number AS TEXT),
+			     CAST(NEW.authority_epoch AS TEXT),CAST(NEW.reporter_registration_id AS TEXT))
+			    AND NOT EXISTS(SELECT 1 FROM delivery_stage_events terminal WHERE terminal.id=latest.semantic_stage_event_id
+			     AND terminal.semantic_state IN ('succeeded','failed','cancelled','draft_ready'))
 			    AND (reporter_user.effective_role IN ('admin','super_admin') OR
 			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=reporter_user.id
 			          AND membership.project_id=NEW.project_id AND membership.access_level IN ('viewer','editor')) OR
 			         (reporter_user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
 			          WHERE membership.user_id=reporter_user.id AND membership.project_id=NEW.project_id)))
-			    AND ((NEW.reporter_role='owner' AND latest.current_reporter_id=NEW.reporter_id) OR
+			    AND ((NEW.reporter_role='owner' AND NEW.stage_key IN ('deployment','verification')
+			          AND latest.current_reporter_id=NEW.reporter_id) OR
 			         (NEW.reporter_role='dependency' AND EXISTS(SELECT 1 FROM external_stage_prerequisites prerequisite
 			          JOIN external_stage_prerequisite_sets prerequisite_set
 			           ON prerequisite_set.attempt_id=prerequisite.attempt_id AND prerequisite_set.stage_key=prerequisite.stage_key
@@ -10413,6 +10455,10 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			)`,
 			`CREATE UNIQUE INDEX idx_external_stage_operation_causal
 			 ON external_stage_operation_events(handoff_row_id,operation_kind,credential_epoch)`,
+			`CREATE UNIQUE INDEX idx_external_stage_operation_internal_idempotency
+			 ON external_stage_operation_events(actor_user_id,actor_principal_kind,
+			  COALESCE(actor_session_id,''),COALESCE(actor_api_key_id,0),operation_kind,idempotency_digest)
+			 WHERE operation_kind IN ('created','secret_minted','secret_rotated','revoked')`,
 			`CREATE TRIGGER trg_external_stage_operations_no_update BEFORE UPDATE ON external_stage_operation_events
 			 BEGIN SELECT RAISE(ABORT,'external stage operations are append-only'); END`,
 			`CREATE TRIGGER trg_external_stage_operations_no_delete BEFORE DELETE ON external_stage_operation_events
@@ -10471,13 +10517,15 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			  NEW.last_received_at<>NEW.window_started_at OR NEW.heartbeat_count<>1 OR
 			  NEW.first_sequence<>NEW.last_sequence OR
 			  EXISTS(SELECT 1 FROM json_each(NEW.replay_json) replay WHERE json_type(replay.value)<>'object' OR
-			   (SELECT COUNT(*) FROM json_each(replay.value))<>3 OR
+			   (SELECT COUNT(*) FROM json_each(replay.value))<>4 OR
 			   EXISTS(SELECT 1 FROM json_each(replay.value) member
-			    WHERE member.key NOT IN ('sequence','request_digest','idempotency_digest')) OR
+			    WHERE member.key NOT IN ('sequence','request_digest','idempotency_digest','server_received_at')) OR
 			   json_type(replay.value,'$.sequence')<>'integer' OR
 			   json_type(replay.value,'$.request_digest')<>'text' OR
 			   json_type(replay.value,'$.idempotency_digest')<>'text' OR
+			   json_type(replay.value,'$.server_received_at')<>'text' OR
 			   json_extract(replay.value,'$.sequence')<>NEW.last_sequence OR
+			   json_extract(replay.value,'$.server_received_at')<>NEW.last_received_at OR
 			   length(json_extract(replay.value,'$.request_digest'))<>64 OR
 			   json_extract(replay.value,'$.request_digest') GLOB '*[^0-9a-f]*' OR
 			   length(json_extract(replay.value,'$.idempotency_digest'))<>64 OR
@@ -10488,11 +10536,13 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND registration.revoked_at IS NULL
 			   JOIN api_keys api_key ON api_key.id=handoff.api_key_id AND api_key.user_id=registration.user_id
 			    AND api_key.disabled_at IS NULL
-			    AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			    AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
 			   JOIN external_stage_user_roles user ON user.id=registration.user_id AND user.status='active'
 			   JOIN issues issue ON issue.id=handoff.root_issue_id AND issue.project_id=handoff.project_id AND issue.deleted_at IS NULL
 			   JOIN projects project ON project.id=handoff.project_id AND project.status IN ('active','frozen')
 			   JOIN delivery_attempts attempt ON attempt.id=handoff.attempt_id AND attempt.delivery_id=handoff.delivery_id
+			    AND attempt.attempt_number=(SELECT MAX(current_attempt.attempt_number) FROM delivery_attempts current_attempt
+			     WHERE current_attempt.delivery_id=handoff.delivery_id)
 			    AND attempt.attempt_number=handoff.attempt_number AND attempt.plan_revision=handoff.plan_revision
 			   JOIN delivery_stage_latest latest ON latest.delivery_id=handoff.delivery_id AND latest.attempt_id=handoff.attempt_id
 			    AND latest.stage_key=handoff.stage_key AND latest.execution_number=handoff.execution_number
@@ -10501,7 +10551,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   WHERE handoff.id=NEW.handoff_row_id AND NEW.actor_api_key_id=handoff.api_key_id
 			    AND NEW.credential_epoch=handoff.credential_epoch AND handoff.secret_digest IS NOT NULL
 			    AND handoff.revoked_at IS NULL AND handoff.terminal_at IS NULL
-			    AND handoff.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			    AND julianday(handoff.expires_at)>julianday('now')
 			    AND handoff.lifecycle_state=NEW.lifecycle_state AND NEW.last_sequence=handoff.last_sequence+1
 			    AND NEW.window_number=COALESCE((SELECT MAX(prior.window_number)+1 FROM external_stage_heartbeat_windows prior
 			     WHERE prior.handoff_row_id=handoff.id AND prior.credential_epoch=handoff.credential_epoch),1)
@@ -10533,28 +10583,40 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			  json_remove(NEW.replay_json,'$[#-1]')<>OLD.replay_json OR
 			  json_extract(NEW.replay_json,'$[#-1].sequence')<>NEW.last_sequence OR
 			  EXISTS(SELECT 1 FROM json_each(NEW.replay_json) replay WHERE json_type(replay.value)<>'object' OR
-			   (SELECT COUNT(*) FROM json_each(replay.value))<>3 OR
+			   (SELECT COUNT(*) FROM json_each(replay.value))<>4 OR
 			   EXISTS(SELECT 1 FROM json_each(replay.value) member
-			    WHERE member.key NOT IN ('sequence','request_digest','idempotency_digest')) OR
+			    WHERE member.key NOT IN ('sequence','request_digest','idempotency_digest','server_received_at')) OR
 			   json_type(replay.value,'$.sequence')<>'integer' OR
 			   json_type(replay.value,'$.request_digest')<>'text' OR
 			   json_type(replay.value,'$.idempotency_digest')<>'text' OR
+			   json_type(replay.value,'$.server_received_at')<>'text' OR
 			   CAST(json_extract(replay.value,'$.sequence') AS INTEGER)<NEW.first_sequence OR
 			   CAST(json_extract(replay.value,'$.sequence') AS INTEGER)>NEW.last_sequence OR
 			   length(json_extract(replay.value,'$.request_digest'))<>64 OR
 			   json_extract(replay.value,'$.request_digest') GLOB '*[^0-9a-f]*' OR
 			   length(json_extract(replay.value,'$.idempotency_digest'))<>64 OR
-			   json_extract(replay.value,'$.idempotency_digest') GLOB '*[^0-9a-f]*') OR
+			   json_extract(replay.value,'$.idempotency_digest') GLOB '*[^0-9a-f]*' OR
+			   (json_extract(replay.value,'$.sequence')=NEW.last_sequence AND
+			    json_extract(replay.value,'$.server_received_at')<>NEW.last_received_at)) OR
 			  NOT EXISTS(SELECT 1 FROM external_stage_handoffs handoff
 			   JOIN external_stage_reporter_registrations registration ON registration.id=handoff.reporter_registration_id
 			    AND registration.api_key_id=handoff.api_key_id AND registration.revoked_at IS NULL
 			   JOIN api_keys api_key ON api_key.id=handoff.api_key_id AND api_key.user_id=registration.user_id
 			    AND api_key.disabled_at IS NULL
 			   JOIN external_stage_user_roles user ON user.id=registration.user_id AND user.status='active'
+			   JOIN delivery_attempts attempt ON attempt.id=handoff.attempt_id AND attempt.delivery_id=handoff.delivery_id
+			    AND attempt.attempt_number=(SELECT MAX(current_attempt.attempt_number) FROM delivery_attempts current_attempt
+			     WHERE current_attempt.delivery_id=handoff.delivery_id)
+			   JOIN delivery_stage_latest latest ON latest.delivery_id=handoff.delivery_id AND latest.attempt_id=handoff.attempt_id
+			    AND latest.stage_key=handoff.stage_key AND latest.execution_number=handoff.execution_number
+			    AND latest.execution_start_stage_event_id=handoff.execution_start_stage_event_id
+			    AND latest.authority_epoch=handoff.authority_epoch AND latest.authority_stage_event_id=handoff.authority_stage_event_id
 			   WHERE handoff.id=OLD.handoff_row_id AND handoff.api_key_id=OLD.actor_api_key_id
 			    AND handoff.credential_epoch=OLD.credential_epoch AND handoff.lifecycle_state=OLD.lifecycle_state
 			    AND handoff.last_sequence=OLD.last_sequence AND handoff.revoked_at IS NULL AND handoff.terminal_at IS NULL
-			    AND handoff.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			    AND julianday(handoff.expires_at)>julianday('now')
+			    AND ((handoff.reporter_role='owner' AND latest.current_reporter_id=handoff.reporter_id) OR
+			         handoff.reporter_role='dependency')
 			    AND (user.effective_role IN ('admin','super_admin') OR
 			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
 			          AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
@@ -10785,10 +10847,10 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   AND ((NEW.actor_principal_kind='session' AND EXISTS(SELECT 1 FROM sessions session
 			         WHERE session.credential_id=NEW.actor_session_id
 			          AND COALESCE(session.acting_as_user_id,session.user_id)=actor.id
-			          AND session.expires_at>datetime('now'))) OR
+			          AND julianday(session.expires_at)>julianday('now'))) OR
 			        (NEW.actor_principal_kind='api_key' AND EXISTS(SELECT 1 FROM api_keys api_key
 			         WHERE api_key.id=NEW.actor_api_key_id AND api_key.user_id=actor.id AND api_key.disabled_at IS NULL
-			          AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			          AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
 			          AND (api_key.scopes='*' OR (','||replace(api_key.scopes,' ','')||',') LIKE '%,agent-controls:write,%'))))) OR
 			  NOT ((NEW.event_kind='registration_created' AND EXISTS(SELECT 1 FROM external_stage_reporter_registrations registration
 			    WHERE registration.id=NEW.registration_id AND registration.delivery_id=NEW.delivery_id
@@ -10845,16 +10907,16 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			      ((NEW.actor_principal_kind='session' AND EXISTS(SELECT 1 FROM sessions session
 			        WHERE session.credential_id=NEW.actor_session_id
 			         AND COALESCE(session.acting_as_user_id,session.user_id)=NEW.actor_user_id
-			         AND session.expires_at>datetime('now'))) OR
+			         AND julianday(session.expires_at)>julianday('now'))) OR
 			       (NEW.actor_principal_kind='api_key' AND EXISTS(SELECT 1 FROM api_keys api_key
 			        WHERE api_key.id=NEW.actor_api_key_id AND api_key.user_id=NEW.actor_user_id
 			         AND api_key.disabled_at IS NULL
-			         AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			         AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
 			         AND (api_key.scopes='*' OR (','||replace(api_key.scopes,' ','')||',') LIKE '%,agent-controls:write,%')))))
 			     OR (NEW.operation_kind='accepted' AND NEW.actor_principal_kind='api_key' AND EXISTS(SELECT 1 FROM api_keys api_key
 			       WHERE api_key.id=NEW.actor_api_key_id AND api_key.user_id=NEW.actor_user_id
 			        AND api_key.disabled_at IS NULL
-			        AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))))) AND
+			        AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))))) AND
 			    ((NEW.operation_kind='created' AND NEW.credential_epoch=0 AND handoff.credential_epoch=0 AND
 			       NEW.sequence IS NULL AND handoff.secret_digest IS NULL AND handoff.lifecycle_state='issued' AND
 			       handoff.last_sequence=0 AND handoff.accepted_at IS NULL AND handoff.terminal_at IS NULL AND
@@ -10869,7 +10931,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			     (NEW.operation_kind='accepted' AND NEW.actor_principal_kind='api_key' AND
 			       NEW.actor_api_key_id=handoff.api_key_id AND NEW.credential_epoch=handoff.credential_epoch AND
 			       handoff.credential_epoch>0 AND handoff.secret_digest IS NOT NULL AND handoff.lifecycle_state='issued' AND
-			       handoff.revoked_at IS NULL AND handoff.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND
+			       handoff.revoked_at IS NULL AND julianday(handoff.expires_at)>julianday('now') AND
 			       (actor.effective_role IN ('admin','super_admin') OR
 			        EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=actor.id
 			         AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
@@ -10892,11 +10954,13 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND registration.dependency_key IS handoff.dependency_key AND registration.revoked_at IS NULL
 			   JOIN api_keys api_key ON api_key.id=handoff.api_key_id AND api_key.user_id=registration.user_id
 			    AND api_key.disabled_at IS NULL
-			    AND (api_key.expires_at IS NULL OR api_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			    AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
 			   JOIN external_stage_user_roles user ON user.id=registration.user_id AND user.status='active'
 			   JOIN issues issue ON issue.id=handoff.root_issue_id AND issue.project_id=handoff.project_id AND issue.deleted_at IS NULL
 			   JOIN projects project ON project.id=handoff.project_id AND project.status IN ('active','frozen')
 			   JOIN delivery_attempts attempt ON attempt.id=handoff.attempt_id AND attempt.delivery_id=handoff.delivery_id
+			    AND attempt.attempt_number=(SELECT MAX(current_attempt.attempt_number) FROM delivery_attempts current_attempt
+			     WHERE current_attempt.delivery_id=handoff.delivery_id)
 			    AND attempt.attempt_number=handoff.attempt_number AND attempt.plan_revision=handoff.plan_revision
 			   JOIN delivery_stage_latest latest ON latest.delivery_id=handoff.delivery_id AND latest.attempt_id=handoff.attempt_id
 			    AND latest.stage_key=handoff.stage_key AND latest.execution_number=handoff.execution_number
@@ -10905,9 +10969,18 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   WHERE handoff.id=NEW.handoff_row_id AND NEW.actor_api_key_id=handoff.api_key_id
 			    AND handoff.credential_epoch=NEW.credential_epoch
 			    AND handoff.secret_digest IS NOT NULL AND handoff.revoked_at IS NULL
-			    AND handoff.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND handoff.terminal_at IS NULL
+			    AND julianday(handoff.expires_at)>julianday('now') AND handoff.terminal_at IS NULL
 			    AND handoff.lifecycle_state IN ('accepted','active','waiting','blocked')
 			    AND NEW.sequence=handoff.last_sequence+1
+			    AND (handoff.lifecycle_state='accepted' OR
+			     julianday(strftime('%Y-%m-%dT%H:%M:%fZ','now'))-julianday((
+			      SELECT MAX(received_at) FROM (
+			       SELECT operation.server_received_at AS received_at FROM external_stage_operation_events operation
+			        WHERE operation.handoff_row_id=handoff.id AND operation.operation_kind='accepted'
+			       UNION ALL SELECT report.server_received_at FROM external_stage_report_events report
+			        WHERE report.handoff_row_id=handoff.id
+			       UNION ALL SELECT heartbeat.last_received_at FROM external_stage_heartbeat_windows heartbeat
+			        WHERE heartbeat.handoff_row_id=handoff.id)))<=120.0/86400.0)
 			    AND (user.effective_role IN ('admin','super_admin') OR
 			         EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=user.id
 			          AND membership.project_id=handoff.project_id AND membership.access_level IN ('viewer','editor')) OR
@@ -10945,7 +11018,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			            AND dependency_registration.revoked_at IS NULL
 			           LEFT JOIN api_keys dependency_key ON dependency_key.id=dependency_registration.api_key_id
 			            AND dependency_key.user_id=dependency_registration.user_id AND dependency_key.disabled_at IS NULL
-			            AND (dependency_key.expires_at IS NULL OR dependency_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			            AND (dependency_key.expires_at IS NULL OR julianday(dependency_key.expires_at)>julianday('now'))
 			           LEFT JOIN external_stage_user_roles dependency_user ON dependency_user.id=dependency_registration.user_id
 			            AND dependency_user.status='active'
 			           LEFT JOIN external_stage_handoffs dependency_handoff
@@ -10969,6 +11042,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			           WHERE prerequisite.attempt_id=handoff.attempt_id AND prerequisite.stage_key=handoff.stage_key
 			            AND prerequisite.execution_number=handoff.execution_number
 			            AND prerequisite.authority_epoch=handoff.authority_epoch
+			            AND prerequisite.requirement='required'
 			            AND (dependency_registration.id IS NULL OR dependency_key.id IS NULL OR dependency_user.id IS NULL OR
 			             NOT (dependency_user.effective_role IN ('admin','super_admin') OR
 			              EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=dependency_user.id
@@ -10977,7 +11051,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			               WHERE membership.user_id=dependency_user.id AND membership.project_id=handoff.project_id))) OR
 			             dependency_handoff.id IS NULL OR dependency_handoff.credential_epoch<=0 OR
 			             dependency_handoff.secret_digest IS NULL OR dependency_handoff.lifecycle_state<>'succeeded' OR
-			             dependency_handoff.terminal_at IS NULL OR dependency_handoff.expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			             dependency_handoff.terminal_at IS NULL OR julianday(dependency_handoff.expires_at)<=julianday('now') OR
 			             dependency_latest.handoff_row_id IS NULL))))
 			    AND ((NEW.evidence_kind IS NULL) OR
 			         (handoff.reporter_class='pharos' AND handoff.reporter_role='owner' AND
@@ -11013,8 +11087,26 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND deployment_owner.handoff_row_id=deployment_handoff.id
 			   JOIN external_stage_owner_latest deployment_latest ON deployment_latest.owner_event_id=deployment_owner.id
 			    AND deployment_latest.report_event_id=deployment_report.id
+			   JOIN delivery_stage_latest deployment_canonical_latest
+			    ON deployment_canonical_latest.delivery_id=deployment_handoff.delivery_id
+			    AND deployment_canonical_latest.attempt_id=deployment_handoff.attempt_id
+			    AND deployment_canonical_latest.stage_key='deployment'
+			    AND deployment_canonical_latest.execution_number=deployment_handoff.execution_number
+			    AND deployment_canonical_latest.authority_epoch=deployment_handoff.authority_epoch
+			   JOIN delivery_stage_events deployment_terminal
+			    ON deployment_terminal.id=deployment_canonical_latest.semantic_stage_event_id
+			    AND deployment_terminal.delivery_id=deployment_handoff.delivery_id
+			    AND deployment_terminal.attempt_id=deployment_handoff.attempt_id
+			    AND deployment_terminal.stage_key='deployment'
+			    AND deployment_terminal.execution_number=deployment_handoff.execution_number
+			    AND deployment_terminal.authority_epoch=deployment_handoff.authority_epoch
+			    AND deployment_terminal.reporter_id=deployment_handoff.reporter_id
+			    AND deployment_terminal.source_sequence=deployment_report.sequence
+			    AND deployment_terminal.semantic_state='succeeded'
 			   JOIN external_stage_report_events verification_report ON verification_report.id=NEW.report_event_id
 			   JOIN external_stage_handoffs verification_handoff ON verification_handoff.id=verification_report.handoff_row_id
+			   JOIN delivery_stage_events verification_start ON verification_start.id=verification_handoff.execution_start_stage_event_id
+			    AND verification_start.based_on_stage_event_id=deployment_terminal.id
 			   WHERE deployment_handoff.delivery_id=verification_handoff.delivery_id
 			    AND deployment_handoff.attempt_id=verification_handoff.attempt_id
 			    AND deployment_handoff.stage_key='deployment' AND verification_handoff.stage_key='verification'
@@ -11024,8 +11116,8 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND deployment_evidence.artifact_version=NEW.artifact_version
 			    AND deployment_evidence.artifact_digest=NEW.artifact_digest
 			    AND deployment_evidence.commit_digest=NEW.commit_digest
-			    AND NEW.observed_at>deployment_evidence.server_received_at
-			    AND NEW.server_received_at>deployment_evidence.server_received_at))
+			    AND julianday(NEW.observed_at)>julianday(deployment_evidence.server_received_at)
+			    AND julianday(NEW.server_received_at)>julianday(deployment_evidence.server_received_at)))
 			 BEGIN SELECT RAISE(ABORT,'invalid external stage Pharos evidence'); END`,
 			`CREATE TRIGGER trg_external_stage_janus_evidence_insert_guard
 			 BEFORE INSERT ON external_stage_janus_evidence

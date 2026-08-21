@@ -8,6 +8,7 @@
 package db
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -37,6 +38,35 @@ type externalStageSchemaFixture struct {
 	startEventID     int64
 	authorityEventID int64
 	handoffRowID     int64
+}
+
+func externalStageBindingDigests(t *testing.T, fixture externalStageSchemaFixture, registrationID int64) ([32]byte, [32]byte, [32]byte) {
+	t.Helper()
+	var planRevision, startDeliveryEventID, semanticStageEventID int64
+	if err := fixture.database.QueryRow(`SELECT attempt.plan_revision,attempt.start_delivery_event_id,
+		COALESCE(latest.semantic_stage_event_id,0) FROM delivery_attempts attempt
+		JOIN delivery_stage_latest latest ON latest.attempt_id=attempt.id AND latest.stage_key='deployment'
+		WHERE attempt.id=?`, fixture.attemptID).Scan(&planRevision, &startDeliveryEventID, &semanticStageEventID); err != nil {
+		t.Fatal(err)
+	}
+	plan := sha256.Sum256([]byte(fmt.Sprintf("paimos.external-stage.plan.v1\x00%d:%d:%d", fixture.attemptID, planRevision, startDeliveryEventID)))
+	predecessor := sha256.Sum256([]byte(fmt.Sprintf("paimos.external-stage.predecessor.v1\x00%d:%d:%d", fixture.startEventID, fixture.authorityEventID, semanticStageEventID)))
+	context := sha256.Sum256([]byte(fmt.Sprintf("paimos.external-stage.context.v1\x00%s\x00%d\x00deployment\x001\x001\x00%d", fixture.deliveryKey, fixture.attemptID, registrationID)))
+	var sqlPlan, sqlPredecessor, sqlContext []byte
+	if err := fixture.database.QueryRow(`SELECT
+		paimos_domain_sha256('paimos.external-stage.plan.v1',printf('%d:%d:%d',attempt.id,attempt.plan_revision,attempt.start_delivery_event_id)),
+		paimos_domain_sha256('paimos.external-stage.predecessor.v1',printf('%d:%d:%d',latest.execution_start_stage_event_id,latest.authority_stage_event_id,COALESCE(latest.semantic_stage_event_id,0))),
+		paimos_domain_sha256('paimos.external-stage.context.v1',delivery.delivery_key,CAST(attempt.id AS TEXT),'deployment','1','1',CAST(? AS TEXT))
+		FROM delivery_attempts attempt JOIN deliveries delivery ON delivery.id=attempt.delivery_id
+		JOIN delivery_stage_latest latest ON latest.attempt_id=attempt.id AND latest.stage_key='deployment'
+		WHERE attempt.id=?`, registrationID, fixture.attemptID).Scan(&sqlPlan, &sqlPredecessor, &sqlContext); err != nil {
+		t.Fatal(err)
+	}
+	if string(sqlPlan) != string(plan[:]) || string(sqlPredecessor) != string(predecessor[:]) || string(sqlContext) != string(context[:]) {
+		t.Fatalf("Go/SQLite external-stage digest derivation drift: plan=%t predecessor=%t context=%t",
+			string(sqlPlan) == string(plan[:]), string(sqlPredecessor) == string(predecessor[:]), string(sqlContext) == string(context[:]))
+	}
+	return plan, predecessor, context
 }
 
 func trySeedExternalStageSchemaFixture(t *testing.T, locator string) (externalStageSchemaFixture, error) {
@@ -134,16 +164,18 @@ func trySeedExternalStageSchemaFixture(t *testing.T, locator string) (externalSt
 	}
 
 	digest := contracts.ExternalStageV1FixtureDigest()
+	planDigest, predecessorDigest, contextDigest := externalStageBindingDigests(t, fixture, fixture.registrationID)
 	handoff, err := database.Exec(`INSERT INTO external_stage_handoffs(
 		handoff_id,delivery_id,delivery_key,root_issue_id,project_id,attempt_id,attempt_number,plan_revision,
 		plan_digest,stage_key,execution_number,execution_start_stage_event_id,predecessor_digest,authority_epoch,
 		authority_stage_event_id,reporter_registration_id,reporter_id,api_key_id,reporter_class,reporter_role,
 		workflow_symbol,environment_symbol,allow_deployment,allow_verification,allow_authorization,
 		allow_credential_handoff,contract_major,fixture_digest,expires_at,context_digest)
-		VALUES(?,?,?,?,?,?,1,1,zeroblob(32),'deployment',1,?,zeroblob(32),1,?,?,?,?,
-		'pharos','owner','deploy-production','production',1,1,0,0,1,?,strftime('%Y-%m-%dT%H:%M:%fZ','now','+1 hour'),zeroblob(32))`,
+		VALUES(?,?,?,?,?,?,1,1,?,'deployment',1,?,?,1,?,?,?,?,
+		'pharos','owner','deploy-production','production',1,1,0,0,1,?,strftime('%Y-%m-%dT%H:%M:%fZ','now','+1 hour'),?)`,
 		locator, fixture.deliveryID, fixture.deliveryKey, fixture.issueID, fixture.projectID, fixture.attemptID,
-		fixture.startEventID, fixture.authorityEventID, fixture.registrationID, fixture.reporterID, fixture.apiKeyID, digest[:])
+		planDigest[:], fixture.startEventID, predecessorDigest[:], fixture.authorityEventID, fixture.registrationID,
+		fixture.reporterID, fixture.apiKeyID, digest[:], contextDigest[:])
 	if err != nil {
 		return fixture, err
 	}
@@ -163,7 +195,7 @@ func seedExternalStageSchemaFixture(t *testing.T, locator string) externalStageS
 func insertExternalStageOperation(t *testing.T, fixture externalStageSchemaFixture, kind string, epoch int64,
 	sequence any, actorKind string, actorUserID int64, sessionID any, apiKeyID any) (int64, string) {
 	t.Helper()
-	digest := controlDigest(fmt.Sprintf("%s-%d-%v-%d", kind, epoch, sequence, actorUserID))
+	digest := controlDigest(fmt.Sprintf("%s-%d-%v-%d-%d", kind, epoch, sequence, actorUserID, fixture.handoffRowID))
 	result, err := fixture.database.Exec(`INSERT INTO external_stage_operation_events(
 		handoff_row_id,operation_kind,request_digest,idempotency_digest,actor_user_id,actor_principal_kind,
 		actor_session_id,actor_api_key_id,credential_epoch,sequence)
@@ -271,14 +303,63 @@ func prepareExternalStageDeploymentEvidenceReport(t *testing.T) (externalStageSc
 	mintExternalStageCredential(t, fixture)
 	acceptExternalStageHandoff(t, fixture)
 	commitExternalStageOwnerState(t, fixture, 2, "active", "")
+	seedJanusPrerequisite(t, fixture, "required", true)
+	digest := controlDigest("deployment-evidence-report")
+	result, err := fixture.database.Exec(`INSERT INTO external_stage_report_events(
+		handoff_row_id,actor_api_key_id,sequence,credential_epoch,request_digest,idempotency_digest,
+		lifecycle_state,observed_at,heartbeat,declared_blockers,evidence_kind)
+		VALUES(?,?,3,1,?,?,'succeeded',strftime('%Y-%m-%dT%H:%M:%fZ','now'),0,0,'deployment')`,
+		fixture.handoffRowID, fixture.apiKeyID, digest, digest)
+	if err != nil {
+		var ownerState string
+		var ownerSequence, sealedCount, prerequisiteCount, satisfiedCount int
+		_ = fixture.database.QueryRow(`SELECT lifecycle_state,last_sequence FROM external_stage_handoffs WHERE id=?`, fixture.handoffRowID).Scan(&ownerState, &ownerSequence)
+		_ = fixture.database.QueryRow(`SELECT COUNT(*) FROM external_stage_prerequisite_sets WHERE attempt_id=? AND stage_key='deployment' AND execution_number=1 AND authority_epoch=1 AND sealed_at IS NOT NULL`, fixture.attemptID).Scan(&sealedCount)
+		_ = fixture.database.QueryRow(`SELECT COUNT(*) FROM external_stage_prerequisites WHERE attempt_id=? AND stage_key='deployment' AND execution_number=1 AND authority_epoch=1`, fixture.attemptID).Scan(&prerequisiteCount)
+		_ = fixture.database.QueryRow(`SELECT COUNT(*) FROM external_stage_dependency_latest latest JOIN external_stage_handoffs handoff ON handoff.id=latest.handoff_row_id WHERE latest.attempt_id=? AND latest.stage_key='deployment' AND latest.execution_number=1 AND latest.authority_epoch=1 AND latest.lifecycle_state='succeeded' AND handoff.lifecycle_state='succeeded' AND handoff.terminal_at IS NOT NULL AND julianday(handoff.expires_at)>julianday('now')`, fixture.attemptID).Scan(&satisfiedCount)
+		t.Fatalf("insert succeeded owner report: %v (owner=%s/%d sealed=%d prerequisites=%d satisfied=%d)", err, ownerState, ownerSequence, sealedCount, prerequisiteCount, satisfiedCount)
+	}
+	reportID, _ := result.LastInsertId()
+	return fixture, reportID
+}
+
+func seedJanusPrerequisite(t *testing.T, fixture externalStageSchemaFixture, requirement string, satisfied bool) {
+	t.Helper()
+	userResult, err := fixture.database.Exec(`INSERT INTO users(username,password,role,status) VALUES('janus-reporter','x','member','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ := userResult.LastInsertId()
+	keyResult, err := fixture.database.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes) VALUES(?,'janus',?,'paimos_janus','*')`, userID, strings.Repeat("9", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyID, _ := keyResult.LastInsertId()
+	reporterResult, err := fixture.database.Exec(`INSERT INTO delivery_reporters(delivery_id,reporter_type,opaque_key,created_at) VALUES(?,'external','janus-auth',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, fixture.deliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporterID, _ := reporterResult.LastInsertId()
+	registrationResult, err := fixture.database.Exec(`INSERT INTO external_stage_reporter_registrations(delivery_id,project_id,user_id,api_key_id,reporter_id,reporter_class,reporter_role,dependency_key,allow_deployment,allow_verification,allow_authorization,allow_credential_handoff) VALUES(?,?,?,?,?,'janus','dependency','janus-auth',0,0,1,1)`, fixture.deliveryID, fixture.projectID, userID, keyID, reporterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrationID, _ := registrationResult.LastInsertId()
+	registrationDigest := controlDigest("janus-registration-created")
+	if _, err := fixture.database.Exec(`INSERT INTO external_stage_setup_events(event_kind,delivery_id,project_id,registration_id,actor_user_id,actor_principal_kind,actor_session_id,request_digest,idempotency_digest) VALUES('registration_created',?,?,?,?,'session',?,?,?)`, fixture.deliveryID, fixture.projectID, registrationID, fixture.operatorUserID, externalStageOperatorCredential, registrationDigest, registrationDigest); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := fixture.database.Exec(`INSERT INTO external_stage_prerequisite_sets(
 		delivery_id,attempt_id,stage_key,execution_number,execution_start_stage_event_id,
 		authority_epoch,authority_stage_event_id,declared_count)
-		VALUES(?,?,'deployment',1,?,1,?,0)`, fixture.deliveryID, fixture.attemptID,
+		VALUES(?,?,'deployment',1,?,1,?,1)`, fixture.deliveryID, fixture.attemptID,
 		fixture.startEventID, fixture.authorityEventID); err != nil {
 		t.Fatal(err)
 	}
-	sealDigest := controlDigest("seal-empty-deployment-prerequisites")
+	if _, err := fixture.database.Exec(`INSERT INTO external_stage_prerequisites(delivery_id,attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id,requirement,ordinal) VALUES(?,?,'deployment',1,1,'janus-auth',?,?,0)`, fixture.deliveryID, fixture.attemptID, registrationID, requirement); err != nil {
+		t.Fatal(err)
+	}
+	sealDigest := controlDigest("seal-janus-deployment-prerequisites")
 	var sealedAt string
 	result, err := fixture.database.Exec(`INSERT INTO external_stage_setup_events(
 		event_kind,delivery_id,project_id,attempt_id,stage_key,execution_number,authority_epoch,
@@ -299,17 +380,75 @@ func prepareExternalStageDeploymentEvidenceReport(t *testing.T) (externalStageSc
 		sealedAt, fixture.attemptID); err != nil {
 		t.Fatal(err)
 	}
-	digest := controlDigest("deployment-evidence-report")
-	result, err = fixture.database.Exec(`INSERT INTO external_stage_report_events(
-		handoff_row_id,actor_api_key_id,sequence,credential_epoch,request_digest,idempotency_digest,
-		lifecycle_state,observed_at,heartbeat,declared_blockers,evidence_kind)
-		VALUES(?,?,3,1,?,?,'succeeded',strftime('%Y-%m-%dT%H:%M:%fZ','now'),0,0,'deployment')`,
-		fixture.handoffRowID, fixture.apiKeyID, digest, digest)
+	if !satisfied {
+		return
+	}
+	digestFixture := contracts.ExternalStageV1FixtureDigest()
+	planDigest, predecessorDigest, contextDigest := externalStageBindingDigests(t, fixture, registrationID)
+	handoffResult, err := fixture.database.Exec(`INSERT INTO external_stage_handoffs(handoff_id,delivery_id,delivery_key,root_issue_id,project_id,attempt_id,attempt_number,plan_revision,plan_digest,stage_key,execution_number,execution_start_stage_event_id,predecessor_digest,authority_epoch,authority_stage_event_id,reporter_registration_id,reporter_id,api_key_id,reporter_class,reporter_role,dependency_key,allow_deployment,allow_verification,allow_authorization,allow_credential_handoff,contract_major,fixture_digest,expires_at,context_digest) VALUES('01ARZ3NDEKTSV4RRFFQ69G5FB0',?,?,?,?,?,1,1,?,'deployment',1,?,?,1,?,?,?,?,'janus','dependency','janus-auth',0,0,1,1,1,?,strftime('%Y-%m-%dT%H:%M:%fZ','now','+1 hour'),?)`, fixture.deliveryID, fixture.deliveryKey, fixture.issueID, fixture.projectID, fixture.attemptID, planDigest[:], fixture.startEventID, predecessorDigest[:], fixture.authorityEventID, registrationID, reporterID, keyID, digestFixture[:], contextDigest[:])
 	if err != nil {
 		t.Fatal(err)
 	}
-	reportID, _ := result.LastInsertId()
-	return fixture, reportID
+	depHandoffID, _ := handoffResult.LastInsertId()
+	dependency := fixture
+	dependency.registrationID = registrationID
+	dependency.reporterID = reporterID
+	dependency.apiKeyID = keyID
+	dependency.reporterUserID = userID
+	dependency.handoffRowID = depHandoffID
+	mintExternalStageCredential(t, dependency)
+	acceptExternalStageHandoff(t, dependency)
+	activeDigest := controlDigest("janus-active")
+	activeResult, err := fixture.database.Exec(`INSERT INTO external_stage_report_events(handoff_row_id,actor_api_key_id,sequence,credential_epoch,request_digest,idempotency_digest,lifecycle_state,observed_at,heartbeat,declared_blockers,evidence_kind) VALUES(?,?,2,1,?,?,'active',strftime('%Y-%m-%dT%H:%M:%fZ','now'),0,0,NULL)`, depHandoffID, keyID, activeDigest, activeDigest)
+	if err != nil {
+		t.Fatalf("insert active janus report: %v", err)
+	}
+	activeReportID, _ := activeResult.LastInsertId()
+	var activeReceived string
+	if err := fixture.database.QueryRow(`SELECT server_received_at FROM external_stage_report_events WHERE id=?`, activeReportID).Scan(&activeReceived); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.database.Exec(`INSERT INTO external_stage_audit_events(event_kind,handoff_row_id,report_event_id,api_key_id,credential_epoch,sequence,outcome,server_received_at) VALUES('reported',?,?,?,?,2,'committed',?)`, depHandoffID, activeReportID, keyID, 1, activeReceived); err != nil {
+		t.Fatal(err)
+	}
+	activeEventResult, err := fixture.database.Exec(`INSERT INTO external_stage_dependency_events(delivery_id,attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id,handoff_row_id,report_event_id,credential_epoch,sequence,lifecycle_state,server_received_at) VALUES(?,?,'deployment',1,1,'janus-auth',?,?,?,1,2,'active',?)`, fixture.deliveryID, fixture.attemptID, registrationID, depHandoffID, activeReportID, activeReceived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeEventID, _ := activeEventResult.LastInsertId()
+	if _, err := fixture.database.Exec(`INSERT INTO external_stage_dependency_latest(delivery_id,attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id,credential_epoch,dependency_event_id,handoff_row_id,report_event_id,sequence,lifecycle_state,updated_at) VALUES(?,?,'deployment',1,1,'janus-auth',?,1,?,?,?,2,'active',?)`, fixture.deliveryID, fixture.attemptID, registrationID, activeEventID, depHandoffID, activeReportID, activeReceived); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.database.Exec(`UPDATE external_stage_handoffs SET lifecycle_state='active',last_sequence=2 WHERE id=?`, depHandoffID); err != nil {
+		t.Fatal(err)
+	}
+	reportDigest := controlDigest("janus-satisfied")
+	reportResult, err := fixture.database.Exec(`INSERT INTO external_stage_report_events(handoff_row_id,actor_api_key_id,sequence,credential_epoch,request_digest,idempotency_digest,lifecycle_state,observed_at,heartbeat,declared_blockers,evidence_kind) VALUES(?,?,3,1,?,?,'succeeded',strftime('%Y-%m-%dT%H:%M:%fZ','now'),0,0,'authorization')`, depHandoffID, keyID, reportDigest, reportDigest)
+	if err != nil {
+		t.Fatalf("insert succeeded janus report: %v", err)
+	}
+	reportID, _ := reportResult.LastInsertId()
+	var received string
+	if err := fixture.database.QueryRow(`SELECT server_received_at FROM external_stage_report_events WHERE id=?`, reportID).Scan(&received); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.database.Exec(`INSERT INTO external_stage_janus_evidence(report_event_id,evidence_kind,result,authorized,observed_at,server_received_at) SELECT id,'authorization','satisfied',1,observed_at,server_received_at FROM external_stage_report_events WHERE id=?`, reportID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.database.Exec(`INSERT INTO external_stage_audit_events(event_kind,handoff_row_id,report_event_id,api_key_id,credential_epoch,sequence,outcome,server_received_at) VALUES('reported',?,?,?,?,3,'committed',?)`, depHandoffID, reportID, keyID, 1, received); err != nil {
+		t.Fatal(err)
+	}
+	eventResult, err := fixture.database.Exec(`INSERT INTO external_stage_dependency_events(delivery_id,attempt_id,stage_key,execution_number,authority_epoch,dependency_key,registration_id,handoff_row_id,report_event_id,credential_epoch,sequence,lifecycle_state,server_received_at) VALUES(?,?,'deployment',1,1,'janus-auth',?,?,?,1,3,'succeeded',?)`, fixture.deliveryID, fixture.attemptID, registrationID, depHandoffID, reportID, received)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventID, _ := eventResult.LastInsertId()
+	if _, err := fixture.database.Exec(`UPDATE external_stage_dependency_latest SET dependency_event_id=?,handoff_row_id=?,report_event_id=?,sequence=3,lifecycle_state='succeeded',updated_at=? WHERE attempt_id=? AND stage_key='deployment' AND execution_number=1 AND authority_epoch=1 AND dependency_key='janus-auth'`, eventID, depHandoffID, reportID, received, fixture.attemptID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.database.Exec(`UPDATE external_stage_handoffs SET lifecycle_state='succeeded',last_sequence=3,terminal_at=? WHERE id=?`, received, depHandoffID); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func insertExternalStageDeploymentEvidence(database *sql.DB, reportID int64, commit string) error {
@@ -330,6 +469,97 @@ func TestM148SchemaPinsFixtureDigestAndOpaqueULID(t *testing.T) {
 	want := contracts.ExternalStageV1FixtureDigest()
 	if hex.EncodeToString(got) != contracts.ExternalStageV1FixtureDigestHex || string(got) != string(want[:]) {
 		t.Fatalf("fixture digest=%x want=%s", got, contracts.ExternalStageV1FixtureDigestHex)
+	}
+}
+
+func TestM148HandoffInsertRejectsForgedBindingDigests(t *testing.T) {
+	fixture := seedExternalStageSchemaFixture(t, externalStageValidLocator)
+	operationID, received := insertExternalStageOperation(t, fixture, "revoked", 0, nil, "session",
+		fixture.operatorUserID, externalStageOperatorCredential, nil)
+	auditExternalStageOperation(t, fixture, operationID, "revoked", 0, nil, nil)
+	if _, err := fixture.database.Exec(`UPDATE external_stage_handoffs SET revoked_at=? WHERE id=?`, received, fixture.handoffRowID); err != nil {
+		t.Fatal(err)
+	}
+	plan, predecessor, context := externalStageBindingDigests(t, fixture, fixture.registrationID)
+	for _, mutation := range []struct {
+		name                       string
+		plan, predecessor, context []byte
+	}{
+		{name: "plan", plan: make([]byte, 32), predecessor: predecessor[:], context: context[:]},
+		{name: "predecessor", plan: plan[:], predecessor: make([]byte, 32), context: context[:]},
+		{name: "context", plan: plan[:], predecessor: predecessor[:], context: make([]byte, 32)},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			_, err := fixture.database.Exec(`INSERT INTO external_stage_handoffs(
+				handoff_id,delivery_id,delivery_key,root_issue_id,project_id,attempt_id,attempt_number,plan_revision,
+				plan_digest,stage_key,execution_number,execution_start_stage_event_id,predecessor_digest,authority_epoch,
+				authority_stage_event_id,reporter_registration_id,reporter_id,api_key_id,reporter_class,reporter_role,
+				workflow_symbol,environment_symbol,allow_deployment,allow_verification,allow_authorization,
+				allow_credential_handoff,contract_major,fixture_digest,expires_at,context_digest)
+			SELECT '01ARZ3NDEKTSV4RRFFQ69G5FB1',delivery_id,delivery_key,root_issue_id,project_id,attempt_id,
+				attempt_number,plan_revision,?,stage_key,execution_number,execution_start_stage_event_id,?,authority_epoch,
+				authority_stage_event_id,reporter_registration_id,reporter_id,api_key_id,reporter_class,reporter_role,
+				workflow_symbol,environment_symbol,allow_deployment,allow_verification,allow_authorization,
+				allow_credential_handoff,contract_major,fixture_digest,expires_at,?
+			FROM external_stage_handoffs WHERE id=?`, mutation.plan, mutation.predecessor, mutation.context, fixture.handoffRowID)
+			if err == nil {
+				t.Fatal("forged handoff digest unexpectedly persisted")
+			}
+		})
+	}
+}
+
+func TestM148DomainDigestIsFramedAndRejectsInvalidArguments(t *testing.T) {
+	fixture := seedExternalStageSchemaFixture(t, externalStageValidLocator)
+	var got []byte
+	if err := fixture.database.QueryRow(`SELECT paimos_domain_sha256('domain','value')`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	want := sha256.Sum256([]byte("domain\x00value"))
+	if string(got) != string(want[:]) {
+		t.Fatalf("domain digest=%x want=%x", got, want)
+	}
+	var unframed []byte
+	if err := fixture.database.QueryRow(`SELECT paimos_domain_sha256('domainvalue','')`).Scan(&unframed); err != nil {
+		t.Fatal(err)
+	}
+	if string(got) == string(unframed) {
+		t.Fatal("domain framing collision")
+	}
+	for _, query := range []string{
+		`SELECT paimos_domain_sha256('domain')`,
+		`SELECT paimos_domain_sha256('domain',NULL)`,
+		`SELECT paimos_domain_sha256('domain',1)`,
+	} {
+		if err := fixture.database.QueryRow(query).Scan(&got); err == nil {
+			t.Fatalf("invalid digest query unexpectedly succeeded: %s", query)
+		}
+	}
+}
+
+func TestM148ExternalLookupUsesBoundedCompositeIndex(t *testing.T) {
+	fixture := seedExternalStageSchemaFixture(t, externalStageValidLocator)
+	rows, err := fixture.database.Query(`EXPLAIN QUERY PLAN SELECT id FROM external_stage_handoffs
+		WHERE api_key_id=? AND handoff_id=?`, fixture.apiKeyID, externalStageValidLocator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(details, "\n")
+	if !strings.Contains(joined, "USING INDEX") || strings.Contains(joined, "SCAN external_stage_handoffs") {
+		t.Fatalf("unbounded external-stage lookup plan:\n%s", joined)
 	}
 }
 
@@ -472,7 +702,8 @@ func TestM148BlockedHeartbeatBurstUsesCoalescedLivenessProjection(t *testing.T) 
 				handoff_row_id,actor_api_key_id,credential_epoch,window_number,first_sequence,last_sequence,
 				heartbeat_count,lifecycle_state,replay_json,last_observed_at)
 				VALUES(?,?,1,1,?,?,1,'blocked',json_array(json_object(
-				 'sequence',?,'request_digest',?,'idempotency_digest',?)),strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+				 'sequence',?,'request_digest',?,'idempotency_digest',?,
+				 'server_received_at',strftime('%Y-%m-%dT%H:%M:%fZ','now'))),strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
 				fixture.handoffRowID, fixture.apiKeyID, sequence, sequence, sequence,
 				hex.EncodeToString(digest), hex.EncodeToString(digest))
 			if err != nil {
@@ -482,7 +713,8 @@ func TestM148BlockedHeartbeatBurstUsesCoalescedLivenessProjection(t *testing.T) 
 			if _, err := fixture.database.Exec(`UPDATE external_stage_heartbeat_windows SET
 				last_sequence=?,heartbeat_count=heartbeat_count+1,
 				replay_json=json_insert(replay_json,'$[#]',json_object(
-				 'sequence',?,'request_digest',?,'idempotency_digest',?)),
+				 'sequence',?,'request_digest',?,'idempotency_digest',?,
+				 'server_received_at',strftime('%Y-%m-%dT%H:%M:%fZ','now'))),
 				last_observed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 				last_received_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 				WHERE handoff_row_id=? AND window_number=1`, sequence, sequence,
@@ -610,6 +842,38 @@ func TestM148PharosCommitIdentityAcceptsLowercase40(t *testing.T) {
 	fixture, reportID := prepareExternalStageDeploymentEvidenceReport(t)
 	if err := insertExternalStageDeploymentEvidence(fixture.database, reportID, strings.Repeat("a", 40)); err != nil {
 		t.Fatalf("40-hex commit rejected: %v", err)
+	}
+}
+
+func TestM148OptionalDependencyDoesNotBlockOwnerSuccess(t *testing.T) {
+	fixture := seedExternalStageSchemaFixture(t, externalStageValidLocator)
+	mintExternalStageCredential(t, fixture)
+	acceptExternalStageHandoff(t, fixture)
+	commitExternalStageOwnerState(t, fixture, 2, "active", "")
+	seedJanusPrerequisite(t, fixture, "optional", false)
+	digest := controlDigest("optional-dependency-owner-success")
+	if _, err := fixture.database.Exec(`INSERT INTO external_stage_report_events(
+		handoff_row_id,actor_api_key_id,sequence,credential_epoch,request_digest,idempotency_digest,
+		lifecycle_state,observed_at,heartbeat,declared_blockers,evidence_kind)
+		VALUES(?,?,3,1,?,?,'succeeded',strftime('%Y-%m-%dT%H:%M:%fZ','now'),0,0,'deployment')`,
+		fixture.handoffRowID, fixture.apiKeyID, digest, digest); err != nil {
+		t.Fatalf("optional dependency blocked owner success: %v", err)
+	}
+}
+
+func TestM148UnsatisfiedRequiredDependencyBlocksOwnerSuccess(t *testing.T) {
+	fixture := seedExternalStageSchemaFixture(t, externalStageValidLocator)
+	mintExternalStageCredential(t, fixture)
+	acceptExternalStageHandoff(t, fixture)
+	commitExternalStageOwnerState(t, fixture, 2, "active", "")
+	seedJanusPrerequisite(t, fixture, "required", false)
+	digest := controlDigest("required-dependency-owner-success")
+	if _, err := fixture.database.Exec(`INSERT INTO external_stage_report_events(
+		handoff_row_id,actor_api_key_id,sequence,credential_epoch,request_digest,idempotency_digest,
+		lifecycle_state,observed_at,heartbeat,declared_blockers,evidence_kind)
+		VALUES(?,?,3,1,?,?,'succeeded',strftime('%Y-%m-%dT%H:%M:%fZ','now'),0,0,'deployment')`,
+		fixture.handoffRowID, fixture.apiKeyID, digest, digest); err == nil {
+		t.Fatal("unsatisfied required dependency allowed owner success")
 	}
 }
 

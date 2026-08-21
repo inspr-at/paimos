@@ -1133,7 +1133,77 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["expected_credential_epoch"],
-        "properties": {"expected_credential_epoch": {"type": "integer", "format": "int64", "minimum": 1}}
+        "properties": {"expected_credential_epoch": {"type": "integer", "format": "int64", "minimum": 0}}
+      },
+      "ExternalStageReporterRegistrationRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["api_key_id", "reporter_class", "reporter_role"],
+        "properties": {
+          "api_key_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_class": {"type": "string", "enum": ["pharos", "janus"]},
+          "reporter_role": {"type": "string", "enum": ["owner", "dependency"]},
+          "dependency_key": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "workflow": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "environment": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"}
+        },
+        "oneOf": [
+          {"properties": {"reporter_class": {"const": "pharos"}, "reporter_role": {"const": "owner"}}, "required": ["workflow", "environment"], "not": {"required": ["dependency_key"]}},
+          {"properties": {"reporter_class": {"const": "janus"}, "reporter_role": {"const": "dependency"}}, "required": ["dependency_key"], "not": {"anyOf": [{"required": ["workflow"]}, {"required": ["environment"]}]}}
+        ]
+      },
+      "ExternalStageReporterRegistration": {
+        "type": "object", "additionalProperties": false,
+        "required": ["registration_id", "reporter_id", "api_key_id", "reporter_class", "reporter_role", "evidence_ceiling", "created_at"],
+        "properties": {
+          "registration_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "api_key_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_class": {"type": "string", "enum": ["pharos", "janus"]},
+          "reporter_role": {"type": "string", "enum": ["owner", "dependency"]},
+          "dependency_key": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "workflow": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "environment": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "evidence_ceiling": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "enum": ["deployment", "verification", "authorization", "credential_handoff"]}},
+          "created_at": {"type": "string", "format": "date-time"},
+          "revoked_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ExternalStageReporterRegistrationList": {
+        "type": "object", "additionalProperties": false, "required": ["registrations"],
+        "properties": {"registrations": {"type": "array", "maxItems": 256, "items": {"$ref": "#/components/schemas/ExternalStageReporterRegistration"}}}
+      },
+      "ExternalStagePrerequisite": {
+        "type": "object", "additionalProperties": false,
+        "required": ["dependency_key", "reporter_registration_id", "requirement"],
+        "properties": {
+          "dependency_key": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+          "reporter_registration_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "requirement": {"type": "string", "enum": ["required", "optional"]}
+        }
+      },
+      "ExternalStagePrerequisiteSetRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["stage_key", "execution_number", "expected_plan_revision", "expected_authority_epoch", "prerequisites"],
+        "properties": {
+          "stage_key": {"type": "string", "enum": ["specification", "implementation", "qa", "deployment", "verification"]},
+          "execution_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "expected_plan_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "expected_authority_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "prerequisites": {"type": "array", "minItems": 0, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/components/schemas/ExternalStagePrerequisite"}}
+        }
+      },
+      "ExternalStagePrerequisiteSet": {
+        "type": "object", "additionalProperties": false,
+        "required": ["delivery_key", "stage_key", "execution_number", "plan_revision", "authority_epoch", "declared_count", "sealed_at"],
+        "properties": {
+          "delivery_key": {"type": "string", "minLength": 1, "maxLength": 128},
+          "stage_key": {"type": "string", "enum": ["specification", "implementation", "qa", "deployment", "verification"]},
+          "execution_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "plan_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "authority_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "declared_count": {"type": "integer", "minimum": 0, "maximum": 16},
+          "sealed_at": {"type": "string", "format": "date-time"}
+        }
       },
       "ExternalStageHandoffMetadata": {
         "type": "object",
@@ -1235,6 +1305,12 @@
           "credential_ready": {"type": "boolean"},
           "observed_at": {"type": "string", "format": "date-time"}
         },
+        "oneOf": [
+          {"properties": {"kind": {"const": "authorization"}, "result": {"const": "satisfied"}, "authorized": {"const": true}}, "required": ["authorized"], "not": {"required": ["credential_ready"]}},
+          {"properties": {"kind": {"const": "authorization"}, "result": {"const": "blocked"}, "authorized": {"const": false}}, "required": ["authorized"], "not": {"required": ["credential_ready"]}},
+          {"properties": {"kind": {"const": "credential_handoff"}, "result": {"const": "satisfied"}, "credential_ready": {"const": true}}, "required": ["credential_ready"], "not": {"required": ["authorized"]}},
+          {"properties": {"kind": {"const": "credential_handoff"}, "result": {"const": "blocked"}, "credential_ready": {"const": false}}, "required": ["credential_ready"], "not": {"required": ["authorized"]}}
+        ],
         "description": "Value-free enum, boolean, and timestamp facts only; no free text, opaque ID, path, URL, digest, version, ciphertext, command, callback, or secret field exists."
       },
       "ExternalStageReportRequest": {
@@ -1250,7 +1326,33 @@
           "pharos_evidence": {"$ref": "#/components/schemas/ExternalStagePharosEvidence"},
           "janus_evidence": {"$ref": "#/components/schemas/ExternalStageJanusEvidence"}
         },
-        "allOf": [{"not": {"required": ["pharos_evidence", "janus_evidence"]}}],
+        "allOf": [
+          {"not": {"required": ["pharos_evidence", "janus_evidence"]}},
+          {"if": {"properties": {"heartbeat": {"const": true}}, "required": ["heartbeat"]}, "then": {
+            "properties": {"state": {"enum": ["active", "waiting", "blocked"]}},
+            "not": {"anyOf": [{"required": ["blocker_codes"]}, {"required": ["pharos_evidence"]}, {"required": ["janus_evidence"]}]}
+          }},
+          {"if": {"properties": {"heartbeat": {"const": false}, "state": {"const": "blocked"}}, "required": ["heartbeat", "state"]}, "then": {
+            "required": ["blocker_codes"], "properties": {"blocker_codes": {"minItems": 1}}
+          }},
+          {"if": {"properties": {"heartbeat": {"const": false}, "state": {"enum": ["active", "waiting", "succeeded", "failed"]}}, "required": ["heartbeat", "state"]}, "then": {
+            "not": {"required": ["blocker_codes"]}
+          }},
+          {"if": {"properties": {"state": {"enum": ["succeeded", "failed"]}}, "required": ["state"]}, "then": {
+            "oneOf": [{"required": ["pharos_evidence"]}, {"required": ["janus_evidence"]}]
+          }},
+          {"if": {"properties": {"state": {"enum": ["active", "waiting"]}}, "required": ["state"]}, "then": {
+            "not": {"anyOf": [{"required": ["pharos_evidence"]}, {"required": ["janus_evidence"]}]}
+          }},
+          {"if": {"required": ["pharos_evidence"]}, "then": {"oneOf": [
+            {"properties": {"state": {"const": "succeeded"}, "pharos_evidence": {"properties": {"result": {"const": "succeeded"}}}}},
+            {"properties": {"state": {"const": "failed"}, "pharos_evidence": {"properties": {"result": {"const": "failed"}}}}}
+          ]}},
+          {"if": {"required": ["janus_evidence"]}, "then": {"oneOf": [
+            {"properties": {"state": {"const": "succeeded"}, "janus_evidence": {"properties": {"result": {"const": "satisfied"}}}}},
+            {"properties": {"state": {"const": "blocked"}, "janus_evidence": {"properties": {"result": {"const": "blocked"}}}}}
+          ]}}
+        ],
         "description": "The registered reporter class and server-owned ceiling select the permitted evidence variant; body fields never grant class or role."
       },
       "ExternalStageReportReceipt": {
@@ -3962,6 +4064,39 @@
         "responses": {"200":{"description":"Safe current command projection"},"400":{"description":"Malformed closed request"},"404":{"description":"Canonical concealment"},"409":{"description":"Stale or semantic conflict"},"503":{"description":"Dependency unavailable"}}
       }
     },
+    "/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations": {
+      "get": {
+        "operationId": "listExternalStageReporterRegistrations", "tags": ["external-stage"],
+        "summary": "List safe current external reporter registrations",
+        "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}],
+        "responses": {"200": {"description": "Current registrations", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageReporterRegistrationList"}}}}, "404": {"description": "Canonical concealment"}}
+      },
+      "post": {
+        "operationId": "createExternalStageReporterRegistration", "tags": ["external-stage"],
+        "summary": "Create an exact server-owned external reporter registration",
+        "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageReporterRegistrationRequest"}}}},
+        "responses": {"201": {"description": "Registration created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageReporterRegistration"}}}}, "400": {"description": "Strict JSON refusal"}, "404": {"description": "Canonical concealment"}, "409": {"description": "Conflicting replay or binding"}}
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations/{registrationID}/revoke": {
+      "post": {
+        "operationId": "revokeExternalStageReporterRegistration", "tags": ["external-stage"],
+        "summary": "Revoke an exact external reporter registration",
+        "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}, {"name": "registrationID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false}}}},
+        "responses": {"200": {"description": "Registration revoked", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageReporterRegistration"}}}}, "400": {"description": "Strict JSON refusal"}, "404": {"description": "Canonical concealment"}, "409": {"description": "Conflicting replay"}}
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets": {
+      "post": {
+        "operationId": "sealExternalStagePrerequisiteSet", "tags": ["external-stage"],
+        "summary": "Seal the exact required and optional dependency set",
+        "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStagePrerequisiteSetRequest"}}}},
+        "responses": {"201": {"description": "Prerequisite set sealed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStagePrerequisiteSet"}}}}, "400": {"description": "Strict JSON refusal"}, "404": {"description": "Canonical concealment"}, "409": {"description": "Conflicting replay or stale authority"}}
+      }
+    },
     "/api/agent-mode/deliveries/{deliveryKey}/external-stage-handoffs": {
       "post": {
         "operationId": "createExternalStageHandoff",
@@ -4095,7 +4230,7 @@
         "operationId": "reportExternalStageHandoff",
         "tags": ["external-stage"],
         "summary": "Append one exact-next owner or dependency report",
-        "description": "The registered key-to-reporter binding selects class, role, dependency, and evidence ceiling. Dependency reports never write canonical owner latest. Verification remains deployed-unverified unless exact artifact and environment evidence is observed and server-received after the matching deployment receipt.",
+        "description": "The registered key-to-reporter binding selects class, role, dependency, and evidence ceiling. Dependency reports never write canonical owner latest. Verification remains deployed-unverified unless exact artifact and environment evidence is observed and server-received after the matching deployment receipt. A nonterminal reporter is stale after two minutes without a server receipt; stale semantic progress is rejected until an exact-next heartbeat restores liveness, and reporter timestamps never extend this deadline.",
         "security": [{"bearerAPIKey": []}],
         "parameters": [{"$ref": "#/components/parameters/ExternalStageHandoffPath"}, {"$ref": "#/components/parameters/ExternalStageAcceptHeader"}, {"$ref": "#/components/parameters/ExternalStageSecretHeader"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
         "requestBody": {"required": true, "content": {"application/vnd.paimos.external-stage.v1+json": {"schema": {"$ref": "#/components/schemas/ExternalStageReportRequest"}}}},

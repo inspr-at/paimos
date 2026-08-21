@@ -512,13 +512,11 @@ func mountAPI(r chi.Router) {
 	})
 
 	// PAI-810 contract freeze: external stage adapters are API-key callers.
-	// The exact key/reporter/project/handoff binding is transactionally checked
-	// by the service; the contract-only handlers conceal every request until
-	// M148 and that service land.
+	// The transport conceals failed authentication, and the service rechecks the
+	// exact key/reporter/project/handoff binding in every transaction.
 	r.Group(func(r chi.Router) {
-		r.Use(auth.Middleware)
-		r.Use(auth.CSRFMiddleware)
-		r.Use(auth.MustChangePasswordGate)
+		r.Use(auth.AgentModePrivateNoStore)
+		r.Use(handlers.ExternalStageAPIKeyAuth)
 		handlers.MountExternalStageContractRoutes(r)
 	})
 
