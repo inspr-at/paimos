@@ -5,6 +5,26 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.11.0] — 2026-08-21
+
+### Added — Sealed external delivery-stage handoffs (PAI-810)
+
+- Published the immutable external-stage v1 contract, canonical Pharos owner
+  and Janus dependency fixtures, CLI parity, and a release/commit/digest pin
+  for downstream adapter conformance.
+- Added transactionally bound create, mint, rotate, revoke, pull, accept, and
+  report lifecycles with independent owner/dependency streams, exact replay,
+  server-time freshness, durable hints, and strict verification lineage.
+
+### Security
+
+- External reporters require both the exact registered machine/API-key identity
+  and a separate one-time handoff credential whose raw bytes never enter URLs,
+  JSON, argv, environment, logs, audits, fixtures, errors, or later responses.
+- Numeric epoch/UID boundaries, synthetic-fixture secret-scanner exceptions,
+  reporter-role ceilings, stale authority, and exact-artifact verification now
+  fail closed under focused, full-backend, SAST, and cross-model review.
+
 ## [Unreleased]
 
 ### Added — Pinned external delivery-stage handoffs (PAI-810)
