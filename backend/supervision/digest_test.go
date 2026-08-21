@@ -4,12 +4,42 @@
 package supervision
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestDigestLengthEncodingRejectsOverflowBoundaries(t *testing.T) {
+	type testCase struct {
+		name   string
+		length int
+		want   []byte
+		ok     bool
+	}
+	tests := []testCase{
+		{name: "zero", length: 0, want: []byte{0, 0, 0, 0}, ok: true},
+		{name: "negative", length: -1},
+	}
+	if strconv.IntSize == 64 {
+		maximum, overflow := int64(1<<32)-1, int64(1<<32)
+		tests = append(tests,
+			testCase{name: "maximum", length: int(maximum), want: []byte{0xff, 0xff, 0xff, 0xff}, ok: true},
+			testCase{name: "overflow", length: int(overflow)},
+		)
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := digestLength(tc.length)
+			if ok != tc.ok || (ok && !bytes.Equal(got[:], tc.want)) {
+				t.Fatalf("digestLength(%d)=%x,%v want %x,%v", tc.length, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
 
 func TestFrozenDurationsAndActionPolicy(t *testing.T) {
 	if GrantTTL != 5*time.Minute || LeaseTTL != 90*time.Second || LeaseRenewAfter != 30*time.Second ||

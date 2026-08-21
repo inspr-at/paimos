@@ -525,8 +525,12 @@ SELECT requester.user_id,requester.role,requester.permissions_epoch,
 	if !initialized {
 		return readCatalog{}, ErrNotFound
 	}
+	permissionDigest, err := permissionFingerprint(catalog.UserID, catalog.PermissionsEpoch, catalog.PermissionBasis)
+	if err != nil {
+		return readCatalog{}, err
+	}
 	catalog.Binding = CursorBinding{UserID: catalog.UserID, PermissionsEpoch: catalog.PermissionsEpoch,
-		PermissionDigest: permissionFingerprint(catalog.UserID, catalog.PermissionsEpoch, catalog.PermissionBasis)}
+		PermissionDigest: permissionDigest}
 	return catalog, nil
 }
 
@@ -792,10 +796,22 @@ func nullableInt64(value sql.NullInt64) *int64 {
 	return &out
 }
 
+func positiveUint64(value int64) (uint64, bool) {
+	if value <= 0 {
+		return 0, false
+	}
+	return uint64(value), true
+}
+
 func estimateFactFromRow(stage *trustStageFact, identity string, revision, sequence sql.NullInt64, source, receivedAt string,
 	confidence sql.NullFloat64, basis string, progress sql.NullFloat64, eta, etaMin, etaMax sql.NullInt64) (deliverytrust.EstimateFact, error) {
 	if !revision.Valid || !sequence.Valid || !confidence.Valid {
 		return deliverytrust.EstimateFact{}, fmt.Errorf("%w: incomplete estimate frontier", ErrInvariant)
+	}
+	revisionValue, revisionOK := positiveUint64(revision.Int64)
+	sequenceValue, sequenceOK := positiveUint64(sequence.Int64)
+	if !revisionOK || !sequenceOK {
+		return deliverytrust.EstimateFact{}, fmt.Errorf("%w: invalid estimate revision or sequence", ErrInvariant)
 	}
 	received, err := parseDBTime(receivedAt)
 	if err != nil {
@@ -805,8 +821,8 @@ func estimateFactFromRow(stage *trustStageFact, identity string, revision, seque
 	if stage.ReporterType == "agent_run" {
 		reporter = deliverytrust.ReporterAgentRun
 	}
-	fact := deliverytrust.EstimateFact{Identity: identity, Reporter: reporter, Revision: uint64(revision.Int64),
-		Sequence: uint64(sequence.Int64), Source: deliverytrust.EstimateSource(source), ServerReceivedAt: received,
+	fact := deliverytrust.EstimateFact{Identity: identity, Reporter: reporter, Revision: revisionValue,
+		Sequence: sequenceValue, Source: deliverytrust.EstimateSource(source), ServerReceivedAt: received,
 		Confidence: confidence.Float64, Basis: basis}
 	if progress.Valid {
 		value := progress.Float64
@@ -872,13 +888,17 @@ ORDER BY project_id_at_completion,stage_key,completed_at DESC,stage_execution_id
 		if err := rows.Scan(&executionID, &projectID, &stage, &policy, &completedRaw, &full, &active, &blocked, &human); err != nil {
 			return nil, err
 		}
+		stageExecutionID, ok := positiveUint64(executionID)
+		if !ok {
+			return nil, fmt.Errorf("%w: invalid duration execution identity", ErrInvariant)
+		}
 		completed, err := parseDBTime(completedRaw)
 		if err != nil {
 			return nil, fmt.Errorf("%w: malformed duration time", ErrInvariant)
 		}
 		key := durationKey{ProjectID: projectID, Stage: stage}
 		out[key] = append(out[key], deliverytrust.DurationSample{Identity: fmt.Sprintf("duration:%d", executionID),
-			StageExecutionID: uint64(executionID), ProjectIdentity: fmt.Sprintf("project:%d", projectID),
+			StageExecutionID: stageExecutionID, ProjectIdentity: fmt.Sprintf("project:%d", projectID),
 			Stage: deliverytrust.StageKey(stage), PolicyVersion: policy, CompletedAt: completed,
 			FullLeadSeconds: full, ActiveSeconds: active, BlockedSeconds: blocked, HumanWaitSeconds: human})
 	}

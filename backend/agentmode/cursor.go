@@ -84,11 +84,11 @@ func (c *CursorCodec) EncodeAt(binding CursorBinding, highWater int64, issuedAt 
 	}
 	plain := make([]byte, cursorPlaintextLength)
 	plain[0] = cursorPlaintextVersion
-	binary.BigEndian.PutUint64(plain[1:9], uint64(binding.UserID))
-	binary.BigEndian.PutUint64(plain[9:17], uint64(binding.PermissionsEpoch))
 	expires := issuedAt.UTC().Add(c.ttl).Unix()
-	binary.BigEndian.PutUint64(plain[17:25], uint64(expires))
-	binary.BigEndian.PutUint64(plain[25:33], uint64(highWater))
+	numericClaims := [4]int64{binding.UserID, binding.PermissionsEpoch, expires, highWater}
+	if written, err := binary.Encode(plain[1:33], binary.BigEndian, numericClaims); err != nil || written != 32 {
+		return "", fmt.Errorf("%w: cursor numeric encoding", ErrCursor)
+	}
 	copy(plain[33:65], binding.PermissionDigest[:])
 	copy(plain[65:97], binding.RouteDigest[:])
 	copy(plain[97:129], binding.FilterDigest[:])
@@ -140,11 +140,14 @@ func (c *CursorCodec) DecodeScopes(token string, userID int64, expected []Cursor
 	if err != nil || len(plain) != cursorPlaintextLength || plain[0] != cursorPlaintextVersion {
 		return CursorClaims{}, -1, ErrCursor
 	}
+	var numericClaims [4]int64
+	if read, decodeErr := binary.Decode(plain[1:33], binary.BigEndian, &numericClaims); decodeErr != nil || read != 32 {
+		return CursorClaims{}, -1, ErrCursor
+	}
 	claims := CursorClaims{CursorBinding: CursorBinding{
-		UserID:           int64(binary.BigEndian.Uint64(plain[1:9])),
-		PermissionsEpoch: int64(binary.BigEndian.Uint64(plain[9:17])),
-	}, ExpiresAt: time.Unix(int64(binary.BigEndian.Uint64(plain[17:25])), 0).UTC(),
-		HighWater: int64(binary.BigEndian.Uint64(plain[25:33]))}
+		UserID:           numericClaims[0],
+		PermissionsEpoch: numericClaims[1],
+	}, ExpiresAt: time.Unix(numericClaims[2], 0).UTC(), HighWater: numericClaims[3]}
 	copy(claims.PermissionDigest[:], plain[33:65])
 	copy(claims.RouteDigest[:], plain[65:97])
 	copy(claims.FilterDigest[:], plain[97:129])
@@ -157,7 +160,8 @@ func (c *CursorCodec) DecodeScopes(token string, userID int64, expected []Cursor
 			matchIndex = index
 		}
 	}
-	if claims.UserID != userID || claims.HighWater < 0 || !claims.ExpiresAt.After(c.clock.Now().UTC()) || matchCount != 1 {
+	if claims.UserID != userID || claims.PermissionsEpoch < 0 || claims.HighWater < 0 ||
+		!claims.ExpiresAt.After(c.clock.Now().UTC()) || matchCount != 1 {
 		return CursorClaims{}, -1, ErrCursor
 	}
 	return claims, matchIndex, nil

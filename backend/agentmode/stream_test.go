@@ -5,11 +5,26 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/delivery"
 )
+
+func TestAgentModeReplayQueryUsesCanonicalAuthorizationAndBoundParameters(t *testing.T) {
+	if !strings.HasPrefix(agentModeReplayQuery, auth.AgentModeAuthorizationCTE+",\nreplay AS (") {
+		t.Fatal("replay query does not begin with the canonical authorization CTE")
+	}
+	if placeholders := strings.Count(agentModeReplayQuery, "?"); placeholders != 11 {
+		t.Fatalf("replay query placeholders=%d, want 11 bound values", placeholders)
+	}
+	if strings.Contains(agentModeReplayQuery, "%!") || strings.Contains(agentModeReplayQuery, "%s") ||
+		strings.Contains(agentModeReplayQuery, "%d") {
+		t.Fatal("replay query contains a runtime formatting directive")
+	}
+}
 
 func TestStreamMoveDualAccessResetsOldScopeAndRefetchesTargetAndGlobal(t *testing.T) {
 	database := openAgentModeTestDB(t)

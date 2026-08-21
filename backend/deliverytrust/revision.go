@@ -50,7 +50,11 @@ func (w revisionWriter) uint64(value uint64) {
 	_, _ = w.Write(encoded[:])
 }
 
-func (w revisionWriter) int64(value int64) { w.uint64(uint64(value)) }
+func (w revisionWriter) int64(value int64) {
+	var encoded [8]byte
+	_, _ = binary.Encode(encoded[:], binary.BigEndian, value)
+	_, _ = w.Write(encoded[:])
+}
 
 func (w revisionWriter) integer(value int) { w.int64(int64(value)) }
 

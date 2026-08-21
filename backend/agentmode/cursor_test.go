@@ -3,6 +3,8 @@ package agentmode
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +12,55 @@ import (
 	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
+
+func TestCursorSignedClaimBoundariesRoundTripAndRejectInvalidValues(t *testing.T) {
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	binding := CursorBinding{UserID: math.MaxInt64, PermissionsEpoch: math.MaxInt64}
+	copy(binding.PermissionDigest[:], bytesOf(1, 32))
+	copy(binding.RouteDigest[:], bytesOf(2, 32))
+	copy(binding.FilterDigest[:], bytesOf(3, 32))
+	sealed := make([]byte, cursorCiphertextLength)
+	sealed[0] = 1
+	var plain []byte
+	codec := NewCursorCodecWithCrypt(delivery.ClockFunc(func() time.Time { return now }), time.Minute,
+		func(_ string, input []byte) ([]byte, error) {
+			plain = append([]byte(nil), input...)
+			return append([]byte(nil), sealed...), nil
+		}, func(_ string, _ []byte) ([]byte, error) {
+			return append([]byte(nil), plain...), nil
+		})
+	token, err := codec.EncodeAt(binding, math.MaxInt64, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := codec.Decode(token, binding)
+	if err != nil || claims.UserID != math.MaxInt64 || claims.PermissionsEpoch != math.MaxInt64 ||
+		claims.HighWater != math.MaxInt64 || !claims.ExpiresAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("maximum signed claims=%+v err=%v", claims, err)
+	}
+
+	validPlain := append([]byte(nil), plain...)
+	for _, tc := range []struct {
+		name   string
+		offset int
+		value  int64
+	}{
+		{name: "negative user", offset: 1, value: -1},
+		{name: "negative permission epoch", offset: 9, value: -1},
+		{name: "expired timestamp", offset: 17, value: -1},
+		{name: "negative high water", offset: 25, value: -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plain = append([]byte(nil), validPlain...)
+			if written, encodeErr := binary.Encode(plain[tc.offset:tc.offset+8], binary.BigEndian, tc.value); encodeErr != nil || written != 8 {
+				t.Fatalf("encode forged claim: written=%d err=%v", written, encodeErr)
+			}
+			if _, _, decodeErr := codec.DecodeScopes(token, binding.UserID, []CursorBinding{binding}); decodeErr == nil {
+				t.Fatal("invalid signed claim decoded")
+			}
+		})
+	}
+}
 
 func TestCursorFixedWidthRandomTamperExpiryAndBinding(t *testing.T) {
 	t.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(bytesOf(0x2a, 32)))

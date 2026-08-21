@@ -37,7 +37,7 @@ func canonicalDigest(operation string, fields ...digestField) [32]byte {
 	})
 	var framed bytes.Buffer
 	framed.Write(canonicalHeader)
-	_ = binary.Write(&framed, binary.BigEndian, uint32(len(all)))
+	writeDigestLength(&framed, len(all))
 	for _, field := range all {
 		writeFrame(&framed, field.name)
 		writeFrame(&framed, field.value)
@@ -46,8 +46,34 @@ func canonicalDigest(operation string, fields ...digestField) [32]byte {
 }
 
 func writeFrame(buffer *bytes.Buffer, value string) {
-	_ = binary.Write(buffer, binary.BigEndian, uint32(len([]byte(value))))
+	writeDigestLength(buffer, len(value))
 	buffer.WriteString(value)
+}
+
+func writeDigestLength(buffer *bytes.Buffer, length int) {
+	encoded, ok := digestLength(length)
+	if !ok {
+		// Canonical framing v1 reserves four bytes for lengths. Public inputs
+		// have much tighter limits; panic here prevents a future internal caller
+		// from silently truncating a frame and admitting digest collisions.
+		panic("supervision: canonical digest length exceeds uint32 framing")
+	}
+	_, _ = buffer.Write(encoded[:])
+}
+
+func digestLength(length int) ([4]byte, bool) {
+	const maxUint32 = int64(1<<32 - 1)
+	value := int64(length)
+	if value < 0 || value > maxUint32 {
+		return [4]byte{}, false
+	}
+	var wide [8]byte
+	if written, err := binary.Encode(wide[:], binary.BigEndian, value); err != nil || written != len(wide) {
+		return [4]byte{}, false
+	}
+	var encoded [4]byte
+	copy(encoded[:], wide[4:])
+	return encoded, true
 }
 
 func operationKeyDigest(digest [32]byte) ([32]byte, error) {

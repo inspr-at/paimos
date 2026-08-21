@@ -167,17 +167,21 @@ func requestFingerprints(request Request) ([32]byte, [32]byte, error) {
 	return RouteFingerprint(request.RouteProjectID, ""), normalizedFilters.CanonicalFingerprint(), nil
 }
 
-func permissionFingerprint(userID, epoch int64, basis string) [32]byte {
+func permissionFingerprint(userID, epoch int64, basis string) ([32]byte, error) {
+	if userID <= 0 || epoch < 0 {
+		return [32]byte{}, fmt.Errorf("%w: invalid permission identity", ErrInvariant)
+	}
 	h := sha256.New()
 	_, _ = h.Write([]byte("agent-mode-permissions-v1\x00"))
 	var buf [16]byte
-	binary.BigEndian.PutUint64(buf[:8], uint64(userID))
-	binary.BigEndian.PutUint64(buf[8:], uint64(epoch))
+	if written, err := binary.Encode(buf[:], binary.BigEndian, [2]int64{userID, epoch}); err != nil || written != len(buf) {
+		return [32]byte{}, fmt.Errorf("%w: permission identity encoding", ErrInvariant)
+	}
 	_, _ = h.Write(buf[:])
 	_, _ = h.Write([]byte(basis))
 	var out [32]byte
 	copy(out[:], h.Sum(nil))
-	return out
+	return out, nil
 }
 
 func (f Filters) matches(row DeliveryRow) bool {

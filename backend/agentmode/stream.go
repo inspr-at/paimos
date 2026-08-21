@@ -216,6 +216,43 @@ type replayRow struct {
 	GoneAudience     bool
 }
 
+// agentModeReplayQuery is compile-time composed exclusively from the canonical
+// authorization CTE and this static replay suffix. Every request value remains
+// a bound parameter.
+const agentModeReplayQuery = auth.AgentModeAuthorizationCTE + `,
+replay AS (
+ SELECT change.id,change.delivery_id,change.delivery_key,change.delivery_revision,change.change_sequence,
+	  (SELECT prior.change_sequence FROM delivery_change_log prior
+	   WHERE prior.delivery_id=change.delivery_id AND prior.id<=?
+	   ORDER BY prior.id DESC LIMIT 1) AS prior_sequence,
+	  CASE WHEN live.issue_id IS NOT NULL
+	    AND (?=0 OR live.project_id=?)
+	    AND EXISTS(SELECT 1 FROM agent_mode_projects allowed
+	     WHERE allowed.project_id=live.project_id)
+	   THEN 1 ELSE 0 END AS current_audience,
+	  CASE WHEN change.revoked_project_id IS NOT NULL
+	    AND (?=0 OR change.revoked_project_id=?)
+	    AND (?<>0 OR live.issue_id IS NULL)
+	    AND EXISTS(SELECT 1 FROM agent_mode_projects allowed WHERE allowed.project_id=change.revoked_project_id)
+   THEN 1 ELSE 0 END AS revoked_audience,
+	  CASE WHEN live.issue_id IS NULL AND change.project_id_hint IS NOT NULL AND change.revoked_project_id IS NULL
+    AND (?=0 OR change.project_id_hint=?)
+    AND EXISTS(SELECT 1 FROM agent_mode_projects allowed WHERE allowed.project_id=change.project_id_hint)
+   THEN 1 ELSE 0 END AS gone_audience
+ FROM delivery_change_log change
+ LEFT JOIN deliveries current_delivery ON current_delivery.id=change.delivery_id
+ LEFT JOIN agent_mode_legacy_roots legacy ON legacy.synthetic_delivery_id=change.delivery_id
+	 AND legacy.issue_id=change.root_issue_id AND legacy.delivery_key=change.delivery_key
+ LEFT JOIN agent_mode_roots live ON live.issue_id=change.root_issue_id
+	 AND (current_delivery.issue_id=live.issue_id OR (legacy.issue_id=live.issue_id
+	  AND NOT EXISTS(SELECT 1 FROM deliveries canonical WHERE canonical.issue_id=legacy.issue_id)
+	  AND EXISTS(SELECT 1 FROM agent_runs active_v0 WHERE active_v0.issue_id=legacy.issue_id
+	   AND active_v0.delivery_instrumentation_version=0 AND active_v0.status IN ('queued','running'))))
+ WHERE change.id>? AND change.id<=? ORDER BY change.id LIMIT 513
+)
+SELECT id,delivery_id,delivery_key,delivery_revision,change_sequence,prior_sequence,
+ current_audience,revoked_audience,gone_audience FROM replay ORDER BY id`
+
 func (s *StreamSession) Drain(ctx context.Context) (StreamBatch, error) {
 	if s == nil || s.streamer == nil || !s.expiresAt.After(s.streamer.clock.Now().UTC()) {
 		return StreamBatch{}, ErrReset
@@ -340,40 +377,7 @@ func (s *StreamSession) loadReplayRows(ctx context.Context, tail int64) ([]repla
 	if s.request.RouteProjectID != nil {
 		scopeProject = *s.request.RouteProjectID
 	}
-	query := auth.AgentModeAuthorizationCTE + `,
-replay AS (
- SELECT change.id,change.delivery_id,change.delivery_key,change.delivery_revision,change.change_sequence,
-	  (SELECT prior.change_sequence FROM delivery_change_log prior
-	   WHERE prior.delivery_id=change.delivery_id AND prior.id<=?
-	   ORDER BY prior.id DESC LIMIT 1) AS prior_sequence,
-	  CASE WHEN live.issue_id IS NOT NULL
-	    AND (?=0 OR live.project_id=?)
-	    AND EXISTS(SELECT 1 FROM agent_mode_projects allowed
-	     WHERE allowed.project_id=live.project_id)
-	   THEN 1 ELSE 0 END AS current_audience,
-	  CASE WHEN change.revoked_project_id IS NOT NULL
-	    AND (?=0 OR change.revoked_project_id=?)
-	    AND (?<>0 OR live.issue_id IS NULL)
-	    AND EXISTS(SELECT 1 FROM agent_mode_projects allowed WHERE allowed.project_id=change.revoked_project_id)
-   THEN 1 ELSE 0 END AS revoked_audience,
-	  CASE WHEN live.issue_id IS NULL AND change.project_id_hint IS NOT NULL AND change.revoked_project_id IS NULL
-    AND (?=0 OR change.project_id_hint=?)
-    AND EXISTS(SELECT 1 FROM agent_mode_projects allowed WHERE allowed.project_id=change.project_id_hint)
-   THEN 1 ELSE 0 END AS gone_audience
- FROM delivery_change_log change
- LEFT JOIN deliveries current_delivery ON current_delivery.id=change.delivery_id
- LEFT JOIN agent_mode_legacy_roots legacy ON legacy.synthetic_delivery_id=change.delivery_id
-	 AND legacy.issue_id=change.root_issue_id AND legacy.delivery_key=change.delivery_key
- LEFT JOIN agent_mode_roots live ON live.issue_id=change.root_issue_id
-	 AND (current_delivery.issue_id=live.issue_id OR (legacy.issue_id=live.issue_id
-	  AND NOT EXISTS(SELECT 1 FROM deliveries canonical WHERE canonical.issue_id=legacy.issue_id)
-	  AND EXISTS(SELECT 1 FROM agent_runs active_v0 WHERE active_v0.issue_id=legacy.issue_id
-	   AND active_v0.delivery_instrumentation_version=0 AND active_v0.status IN ('queued','running'))))
- WHERE change.id>? AND change.id<=? ORDER BY change.id LIMIT 513
-)
-SELECT id,delivery_id,delivery_key,delivery_revision,change_sequence,prior_sequence,
- current_audience,revoked_audience,gone_audience FROM replay ORDER BY id`
-	rows, err := s.streamer.db.QueryContext(ctx, query, s.request.UserID, s.highWater, scopeProject, scopeProject,
+	rows, err := s.streamer.db.QueryContext(ctx, agentModeReplayQuery, s.request.UserID, s.highWater, scopeProject, scopeProject,
 		scopeProject, scopeProject, scopeProject, scopeProject, scopeProject, s.highWater, tail)
 	if err != nil {
 		return nil, err
