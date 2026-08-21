@@ -152,6 +152,7 @@ func (s *Service) CreateCommand(ctx context.Context, principal auth.Principal, r
 		return CommandProjection{}, err
 	}
 	parameterDigest := commandParameterDigest(request)
+	challengeDeadline := s.controlDeadline(s.challengeTTL)
 	var targetDigest [32]byte
 	var canonical []byte
 	switch request.Action {
@@ -159,14 +160,14 @@ func (s *Service) CreateCommand(ctx context.Context, principal auth.Principal, r
 		targetDigest = canonicalDigest("command-target.issue", intField("issue_id", grant.rootIssueID),
 			intField("issue_revision", grant.issueRevision), stringField("issue_etag", fmt.Sprintf("%x", grant.issueETag)))
 		canonical = canonicalCommandDigest(grant, request.Action, targetDigest, parameterDigest)
-		err = insertPriorityCommandTx(ctx, authz.tx, commandID, grant, request.Priority, parameterDigest, targetDigest)
+		err = insertPriorityCommandTx(ctx, authz.tx, commandID, grant, request.Priority, parameterDigest, targetDigest, challengeDeadline)
 	case "run.cancel.queued":
 		var target RunnerTarget
 		target, err = loadRunTargetTx(ctx, authz.tx, grant.deliveryID, request.RunID, "queued")
 		if err == nil {
 			targetDigest = targetSnapshotDigest(target)
 			canonical = canonicalCommandDigest(grant, request.Action, targetDigest, parameterDigest)
-			err = insertQueuedCommandTx(ctx, authz.tx, commandID, grant, target, parameterDigest, targetDigest)
+			err = insertQueuedCommandTx(ctx, authz.tx, commandID, grant, target, parameterDigest, targetDigest, challengeDeadline)
 		}
 	default:
 		var lease leaseRecord
@@ -174,7 +175,7 @@ func (s *Service) CreateCommand(ctx context.Context, principal auth.Principal, r
 		if err == nil {
 			targetDigest = targetSnapshotDigest(lease.target)
 			canonical = canonicalCommandDigest(grant, request.Action, targetDigest, parameterDigest)
-			err = insertLeaseCommandTx(ctx, authz.tx, commandID, grant, lease, request, parameterDigest, targetDigest)
+			err = insertLeaseCommandTx(ctx, authz.tx, commandID, grant, lease, request, parameterDigest, targetDigest, challengeDeadline)
 		}
 	}
 	if err != nil {
@@ -301,7 +302,7 @@ func loadLeaseForCommandTx(ctx context.Context, tx *sql.Tx, grant grantRecord, r
 }
 
 func insertPriorityCommandTx(ctx context.Context, tx *sql.Tx, id string, grant grantRecord, priority string,
-	parameter, target [32]byte) error {
+	parameter, target [32]byte, challengeDeadline string) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO control_commands(command_id,actor_user_id,user_id,principal_kind,
 		actor_session_credential_id,actor_api_key_id,canonical_digest,grant_id,grant_revision,grant_expires_at,
 		grant_binding_digest,grant_action_digest,action,status,challenge_template,delivery_id,delivery_key,
@@ -310,15 +311,15 @@ func insertPriorityCommandTx(ctx context.Context, tx *sql.Tx, id string, grant g
 		SELECT ?,actor_user_id,user_id,principal_kind,actor_session_credential_id,actor_api_key_id,?,grant_id,
 		revision,expires_at,binding_digest,action_set_digest,'issue.priority.set','pending_confirmation',
 		'issue_priority_set',delivery_id,delivery_key,delivery_revision,project_id,root_issue_id,issue_revision,
-		issue_etag_digest,?,?,?,CASE WHEN expires_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','+120 seconds')
-		THEN expires_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ','now','+120 seconds') END
+		issue_etag_digest,?,?,?,CASE WHEN expires_at<? THEN expires_at ELSE ? END
 		FROM control_capability_grants WHERE grant_id=? AND revision=?`, id,
-		canonicalCommandDigest(grant, "issue.priority.set", target, parameter), target[:], priority, parameter[:], grant.grantID, grant.revision)
+		canonicalCommandDigest(grant, "issue.priority.set", target, parameter), target[:], priority, parameter[:],
+		challengeDeadline, challengeDeadline, grant.grantID, grant.revision)
 	return sqliteConflict(err)
 }
 
 func insertQueuedCommandTx(ctx context.Context, tx *sql.Tx, id string, grant grantRecord, target RunnerTarget,
-	parameter, targetDigest [32]byte) error {
+	parameter, targetDigest [32]byte, challengeDeadline string) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO control_commands(command_id,actor_user_id,user_id,principal_kind,
 		actor_session_credential_id,actor_api_key_id,canonical_digest,grant_id,grant_revision,grant_expires_at,
 		grant_binding_digest,grant_action_digest,action,status,challenge_template,delivery_id,delivery_key,
@@ -328,18 +329,17 @@ func insertQueuedCommandTx(ctx context.Context, tx *sql.Tx, id string, grant gra
 		SELECT ?,actor_user_id,user_id,principal_kind,actor_session_credential_id,actor_api_key_id,?,grant_id,
 		revision,expires_at,binding_digest,action_set_digest,'run.cancel.queued','pending_confirmation',
 		'run_cancel_queued',delivery_id,delivery_key,delivery_revision,project_id,root_issue_id,issue_revision,
-		issue_etag_digest,?,?,?,?,?,?,?,?,?,?,?,?,CASE WHEN expires_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','+120 seconds')
-		THEN expires_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ','now','+120 seconds') END
+		issue_etag_digest,?,?,?,?,?,?,?,?,?,?,?,?,CASE WHEN expires_at<? THEN expires_at ELSE ? END
 		FROM control_capability_grants WHERE grant_id=? AND revision=?`, id,
 		canonicalCommandDigest(grant, "run.cancel.queued", targetDigest, parameter), targetDigest[:],
 		target.AttemptID, target.AttemptNumber, target.PlanRevision, target.StageKey, target.ExecutionNumber,
 		target.ExecutionStartStageEventID, target.AuthorityEpoch, target.AuthorityStageEventID, target.ReporterID,
-		target.RunID, parameter[:], grant.grantID, grant.revision)
+		target.RunID, parameter[:], challengeDeadline, challengeDeadline, grant.grantID, grant.revision)
 	return sqliteConflict(err)
 }
 
 func insertLeaseCommandTx(ctx context.Context, tx *sql.Tx, id string, grant grantRecord, lease leaseRecord,
-	request CommandCreateRequest, parameter, target [32]byte) error {
+	request CommandCreateRequest, parameter, target [32]byte, challengeDeadline string) error {
 	template := map[Action]string{"run.cancel.running": "run_cancel_running", "input.respond": "input_" + string(request.InputResponse),
 		"run.pause": "run_pause", "run.resume": "run_resume"}[request.Action]
 	var inputID, inputExpiry any
@@ -392,14 +392,14 @@ func insertLeaseCommandTx(ctx context.Context, tx *sql.Tx, id string, grant gran
 		?,?,?,
 		?,
 		?,?,?,
-		?,MIN(expires_at,?,COALESCE(?,?),strftime('%Y-%m-%dT%H:%M:%fZ','now','+120 seconds'))
+		?,MIN(expires_at,?,COALESCE(?,?),?)
 		FROM control_capability_grants WHERE grant_id=? AND revision=?`, id,
 		canonicalCommandDigest(grant, request.Action, target, parameter), request.Action, template, target[:],
 		lease.target.AttemptID, lease.target.AttemptNumber, lease.target.PlanRevision, lease.target.StageKey,
 		lease.target.ExecutionNumber, lease.target.ExecutionStartStageEventID, lease.target.AuthorityEpoch,
 		lease.target.AuthorityStageEventID, lease.target.ReporterID, lease.target.RunID, lease.leaseID, lease.revision,
 		lease.expiresAt, lease.bindingDigest, lease.actionSetDigest, inputID, inputRevision, inputExpiry, runtimeRevision,
-		inputResponse, choiceOrdinal, choiceCode, parameter[:], lease.expiresAt, inputExpiry, lease.expiresAt,
+		inputResponse, choiceOrdinal, choiceCode, parameter[:], lease.expiresAt, inputExpiry, lease.expiresAt, challengeDeadline,
 		grant.grantID, grant.revision)
 	return sqliteConflict(err)
 }

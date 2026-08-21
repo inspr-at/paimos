@@ -178,6 +178,7 @@ func (s *Service) IssueActorGrant(ctx context.Context, principal auth.Principal,
 		return GrantProjection{}, err
 	}
 	credential := authz.principal.SafeCredentialID()
+	deadline := s.controlDeadline(s.grantTTL)
 	if current && expiredAt(s.clock.Now().UTC(), expiresAt) {
 		if err := revokeGrantRow(ctx, authz.tx, grantID, revision, "grant_expired", "capability_expired"); err != nil {
 			return GrantProjection{}, err
@@ -187,9 +188,9 @@ func (s *Service) IssueActorGrant(ctx context.Context, principal auth.Principal,
 	}
 	if current && currentCredential == credential && bytes.Equal(currentBinding, binding.bindingDigest[:]) && bytes.Equal(currentActions, actionDigest[:]) {
 		if _, err := authz.tx.ExecContext(ctx, `UPDATE control_capability_grants SET
-			expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+5 minutes'),
+			expires_at=?,
 			updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			WHERE grant_id=? AND revision=?`, grantID, revision); err != nil {
+			WHERE grant_id=? AND revision=?`, deadline, grantID, revision); err != nil {
 			return GrantProjection{}, sqliteConflict(err)
 		}
 		if err := insertGrantEvent(ctx, authz.tx, grantID, revision, "grant_renewed", ""); err != nil {
@@ -213,7 +214,7 @@ func (s *Service) IssueActorGrant(ctx context.Context, principal auth.Principal,
 			}
 			revision = 1
 		}
-		if err := insertGrant(ctx, authz.tx, authz.principal, binding, grantID, revision, actions, actionDigest); err != nil {
+		if err := insertGrant(ctx, authz.tx, authz.principal, binding, grantID, revision, actions, actionDigest, deadline); err != nil {
 			return GrantProjection{}, err
 		}
 		kind := "grant_issued"
@@ -267,7 +268,7 @@ func currentGrantTx(ctx context.Context, tx *sql.Tx, userID, deliveryID int64) (
 }
 
 func insertGrant(ctx context.Context, tx *sql.Tx, principal auth.Principal, binding issueBinding, grantID string, revision int64,
-	actions []Action, actionDigest [32]byte) error {
+	actions []Action, actionDigest [32]byte, expiresAt string) error {
 	kind, session, apiKey, ok := credentialColumns(principal)
 	if !ok {
 		return domainError(ErrForbidden, CodeCredentialRevoked)
@@ -276,10 +277,10 @@ func insertGrant(ctx context.Context, tx *sql.Tx, principal auth.Principal, bind
 		grant_id,revision,actor_user_id,user_id,principal_kind,actor_session_credential_id,actor_api_key_id,
 		delivery_id,delivery_key,delivery_revision,project_id,root_issue_id,issue_revision,issue_etag_digest,
 		binding_digest,action_set_digest,action_count,expires_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now','+5 minutes'))`,
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		grantID, revision, principal.UserID(), principal.UserID(), kind, session, apiKey,
 		binding.deliveryID, binding.deliveryKey, binding.deliveryRevision, binding.projectID, binding.issueID,
-		binding.issueRevision, binding.etagDigest[:], binding.bindingDigest[:], actionDigest[:], len(actions))
+		binding.issueRevision, binding.etagDigest[:], binding.bindingDigest[:], actionDigest[:], len(actions), expiresAt)
 	if err != nil {
 		return sqliteConflict(err)
 	}

@@ -99,6 +99,16 @@ type InputKind string
 type InputPromptTemplate string
 type InputResponseKind string
 type RuntimeState string
+type ReconcileMode string
+
+const (
+	// ReconcileActor expires only commands and grants owned by the caller's
+	// exact immutable actor credential.
+	ReconcileActor ReconcileMode = "actor"
+	// ReconcileRunner expires or terminalizes only state belonging to the
+	// caller's exact API-key, device, and lease revision lineage.
+	ReconcileRunner ReconcileMode = "runner"
+)
 
 func Actions() []Action {
 	values := controlcontract.Actions()
@@ -230,6 +240,8 @@ type ReconcileProjection struct {
 	ExpiredGrants    int
 	ExpiredLeases    int
 	ExpiredInputs    int
+	CancelledInputs  int
+	TerminalInputs   int
 	AbandonedEffects int
 	UnknownOutcomes  int
 }
@@ -340,7 +352,11 @@ type ResultRequest struct {
 }
 
 type ReconcileRequest struct {
-	Limit int
+	Mode          ReconcileMode
+	Limit         int
+	LeaseID       string
+	LeaseRevision int64
+	DeviceID      string
 }
 
 // SynchronousMutator owns the existing issue/run history and mutation truth.

@@ -7,20 +7,96 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/backend/auth"
 	storedb "github.com/inspr-at/paimos/backend/db"
+	"modernc.org/sqlite"
 )
 
 const testSessionCredential = "12345678-1234-4234-9234-123456789abc"
+
+type mutableClock struct {
+	mu  sync.RWMutex
+	now time.Time
+}
+
+type countingDriver struct {
+	inner driver.Driver
+	count *atomic.Int64
+}
+
+func (wrapped countingDriver) Open(name string) (driver.Conn, error) {
+	connection, err := wrapped.inner.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return &countingConnection{Conn: connection, count: wrapped.count}, nil
+}
+
+type countingConnection struct {
+	driver.Conn
+	count *atomic.Int64
+}
+
+func (connection *countingConnection) QueryContext(ctx context.Context, query string,
+	args []driver.NamedValue) (driver.Rows, error) {
+	connection.count.Add(1)
+	return connection.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+}
+
+func (connection *countingConnection) ExecContext(ctx context.Context, query string,
+	args []driver.NamedValue) (driver.Result, error) {
+	connection.count.Add(1)
+	return connection.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+}
+
+func (connection *countingConnection) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
+	return connection.Conn.(driver.ConnBeginTx).BeginTx(ctx, options)
+}
+
+var countingDriverSequence atomic.Int64
+
+func (clock *mutableClock) Now() time.Time {
+	clock.mu.RLock()
+	defer clock.mu.RUnlock()
+	return clock.now
+}
+
+func (clock *mutableClock) Set(now time.Time) {
+	clock.mu.Lock()
+	clock.now = now
+	clock.mu.Unlock()
+}
+
+func waitForSQLiteTime(t *testing.T, database *sql.DB, boundary time.Time) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var nowText string
+		if err := database.QueryRow(`SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')`).Scan(&nowText); err != nil {
+			t.Fatal(err)
+		}
+		now, err := parseControlTime(nowText)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !now.Before(boundary) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("SQLite clock did not reach %s", boundary)
+}
 
 func openSupervisionTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -41,8 +117,33 @@ func openSupervisionTestDB(t *testing.T) *sql.DB {
 }
 
 func seedGrantTarget(t *testing.T, database *sql.DB) (deliveryID, userID int64, principal auth.Principal) {
+	return seedGrantTargetNamed(t, database, "", "SUP", testSessionCredential)
+}
+
+func seedGrantTargetNamed(t *testing.T, database *sql.DB, suffix, projectKey, sessionCredential string) (deliveryID, userID int64, principal auth.Principal) {
 	t.Helper()
-	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Supervision','SUP')`)
+	deliveryID = seedDeliveryTargetNamed(t, database, suffix, projectKey)
+	user, err := database.Exec(`INSERT INTO users(username,password,role,status)
+		VALUES(?,'x','member','active')`, "supervision-human"+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ = user.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO sessions(id,user_id,expires_at,created_at,credential_id)
+		VALUES(?,?,'2030-12-01 00:00:00','2026-08-01 00:00:00',?)`,
+		"supervision-bearer"+suffix, userID, sessionCredential); err != nil {
+		t.Fatal(err)
+	}
+	principal, err = auth.NewSessionPrincipal(sessionCredential, userID, userID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return deliveryID, userID, principal
+}
+
+func seedDeliveryTargetNamed(t *testing.T, database *sql.DB, suffix, projectKey string) int64 {
+	t.Helper()
+	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES(?,?)`, "Supervision"+suffix, projectKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,13 +154,13 @@ func seedGrantTarget(t *testing.T, database *sql.DB) (deliveryID, userID int64, 
 	}
 	issueID, _ := issue.LastInsertId()
 	delivery, err := database.Exec(`INSERT INTO deliveries(issue_id,delivery_key,project_id_hint,created_at,updated_at)
-		VALUES(?, ?, ?, '2026-08-20T10:00:00Z','2026-08-20T10:00:00Z')`, issueID, "issue:1", projectID)
+		VALUES(?, ?, ?, '2026-08-20T10:00:00Z','2026-08-20T10:00:00Z')`, issueID, "issue:1"+suffix, projectID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deliveryID, _ = delivery.LastInsertId()
+	deliveryID, _ := delivery.LastInsertId()
 	reporter, err := database.Exec(`INSERT INTO delivery_reporters(delivery_id,reporter_type,opaque_key,created_at)
-		VALUES(?,'system','supervision-test','2026-08-20T10:00:00Z')`, deliveryID)
+		VALUES(?,'system',?,'2026-08-20T10:00:00Z')`, deliveryID, "supervision-test"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,22 +170,7 @@ func seedGrantTarget(t *testing.T, database *sql.DB) (deliveryID, userID int64, 
 		VALUES(?,1,'test-attempt',zeroblob(32),'attempt_started',?,'2026-08-20T10:00:00Z')`, deliveryID, reporterID); err != nil {
 		t.Fatal(err)
 	}
-	user, err := database.Exec(`INSERT INTO users(username,password,role,status)
-		VALUES('supervision-human','x','member','active')`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	userID, _ = user.LastInsertId()
-	if _, err := database.Exec(`INSERT INTO sessions(id,user_id,expires_at,created_at,credential_id)
-		VALUES('supervision-bearer',?,'2030-12-01 00:00:00','2026-08-01 00:00:00',?)`,
-		userID, testSessionCredential); err != nil {
-		t.Fatal(err)
-	}
-	principal, err = auth.NewSessionPrincipal(testSessionCredential, userID, userID, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return deliveryID, userID, principal
+	return deliveryID
 }
 
 func TestGrantReplayAndCompetingRevocationUseM147Truth(t *testing.T) {
@@ -116,6 +202,20 @@ func TestGrantReplayAndCompetingRevocationUseM147Truth(t *testing.T) {
 	}
 	if operationCount != 1 {
 		t.Fatalf("grant replay wrote %d operation rows, want 1", operationCount)
+	}
+	otherDelivery := seedDeliveryTargetNamed(t, database, "-conflict", "SUC")
+	if _, err := service.IssueActorGrant(context.Background(), principal, GrantIssueRequest{
+		DeliveryID: otherDelivery, OperationKeyDigest: key,
+	}); !IsCode(err, CodeIdempotencyConflict) {
+		t.Fatalf("changed grant request error=%v code=%s", err, ErrorCode(err))
+	}
+	var expiryAfterConflict string
+	if err := database.QueryRow(`SELECT expires_at FROM control_capability_grants WHERE grant_id=? AND revision=?`,
+		grant.GrantID, grant.Revision).Scan(&expiryAfterConflict); err != nil {
+		t.Fatal(err)
+	}
+	if expiryAfterConflict != controlTimestamp(grant.ExpiresAt) {
+		t.Fatalf("grant conflict renewed TTL: got=%s want=%s", expiryAfterConflict, controlTimestamp(grant.ExpiresAt))
 	}
 
 	start := make(chan struct{})
@@ -197,6 +297,52 @@ func (changes testChanges) RecordControlChangeTx(context.Context, *sql.Tx, Contr
 
 func (testChanges) WakeControlChange(context.Context, CommitWake) {}
 
+type queuedCancelMutator struct{ fail error }
+
+func (queuedCancelMutator) SetIssuePriorityTx(context.Context, *sql.Tx, PriorityMutation) error {
+	return errors.New("unexpected priority mutation")
+}
+
+func (mutator queuedCancelMutator) CancelQueuedRunTx(ctx context.Context, tx *sql.Tx, mutation RunCancellationMutation) error {
+	if mutator.fail != nil {
+		return mutator.fail
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE agent_runs SET status='cancelled',finished_at=datetime('now')
+		WHERE id=? AND issue_id=? AND status='queued'`, mutation.RunID, mutation.IssueID)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count != 1 {
+		return errors.New("queued run disappeared")
+	}
+	return nil
+}
+
+func (queuedCancelMutator) CancelRunningRunTx(context.Context, *sql.Tx, RunCancellationMutation) error {
+	return errors.New("unexpected running cancellation")
+}
+
+type trackingChanges struct {
+	fail  error
+	wakes *int
+}
+
+func (changes trackingChanges) RecordControlChangeTx(ctx context.Context, tx *sql.Tx, change ControlChange) (CommitWake, error) {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO supervision_test_hints(command_id) VALUES(?)`, change.CommandID); err != nil {
+		return CommitWake{}, err
+	}
+	if changes.fail != nil {
+		return CommitWake{}, changes.fail
+	}
+	return CommitWake{ID: 1}, nil
+}
+
+func (changes trackingChanges) WakeControlChange(context.Context, CommitWake) {
+	if changes.wakes != nil {
+		(*changes.wakes)++
+	}
+}
+
 func TestPriorityCommandRollsBackMutationWhenHintAppendFails(t *testing.T) {
 	database := openSupervisionTestDB(t)
 	deliveryID, _, principal := seedGrantTarget(t, database)
@@ -223,6 +369,10 @@ func TestPriorityCommandRollsBackMutationWhenHintAppendFails(t *testing.T) {
 		GrantRevision: grant.Revision, Action: "issue.priority.set", Priority: "high", OperationKeyDigest: commandKey})
 	if err != nil || replay.CommandID != command.CommandID {
 		t.Fatalf("command replay=%+v err=%v", replay, err)
+	}
+	if _, err := service.CreateCommand(context.Background(), principal, CommandCreateRequest{GrantID: grant.GrantID,
+		GrantRevision: grant.Revision, Action: "issue.priority.set", Priority: "low", OperationKeyDigest: commandKey}); !IsCode(err, CodeIdempotencyConflict) {
+		t.Fatalf("changed command request error=%v code=%s", err, ErrorCode(err))
 	}
 	convergingKey := sha256.Sum256([]byte("same-semantic-command-new-key"))
 	converged, err := service.CreateCommand(context.Background(), principal, CommandCreateRequest{GrantID: grant.GrantID,
@@ -264,6 +414,80 @@ func TestPriorityCommandRollsBackMutationWhenHintAppendFails(t *testing.T) {
 	}
 	if acceptedEvents != 0 {
 		t.Fatalf("failed hint append leaked %d accepted events", acceptedEvents)
+	}
+}
+
+func TestQueuedCancelRollsBackMutatorAndHintFailuresWithoutWake(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryID, humanID, human := seedGrantTarget(t, database)
+	runID, _ := seedRunnerActivation(t, database, deliveryID, humanID)
+	if _, err := database.Exec(`UPDATE agent_runs SET status='queued',started_at=NULL WHERE id=?`, runID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE supervision_test_hints(command_id TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(database, Options{})
+	grant, err := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
+		OperationKeyDigest: sha256.Sum256([]byte("queued-rollback-grant"))})
+	if err != nil {
+		t.Fatalf("grant: %v (%s)", err, ErrorCode(err))
+	}
+	command, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
+		GrantRevision: grant.Revision, Action: "run.cancel.queued", RunID: runID,
+		OperationKeyDigest: sha256.Sum256([]byte("queued-rollback-command"))})
+	if err != nil {
+		t.Fatalf("command: %v (%s)", err, ErrorCode(err))
+	}
+
+	wakes := 0
+	mutatorFailure := NewService(database, Options{Mutator: queuedCancelMutator{fail: errors.New("mutator failed")},
+		Changes: trackingChanges{wakes: &wakes}})
+	if _, err := mutatorFailure.ConfirmCommand(context.Background(), human, CommandConfirmRequest{CommandID: command.CommandID,
+		StatusRevision: 1, OperationKeyDigest: sha256.Sum256([]byte("queued-mutator-failure"))}); err == nil {
+		t.Fatal("mutator failure unexpectedly committed")
+	}
+	assertQueuedCancelRollback(t, database, command.CommandID, runID, wakes)
+
+	hintFailure := NewService(database, Options{Mutator: queuedCancelMutator{},
+		Changes: trackingChanges{fail: errors.New("hint failed"), wakes: &wakes}})
+	if _, err := hintFailure.ConfirmCommand(context.Background(), human, CommandConfirmRequest{CommandID: command.CommandID,
+		StatusRevision: 1, OperationKeyDigest: sha256.Sum256([]byte("queued-hint-failure"))}); err == nil {
+		t.Fatal("hint failure unexpectedly committed")
+	}
+	assertQueuedCancelRollback(t, database, command.CommandID, runID, wakes)
+}
+
+func assertQueuedCancelRollback(t *testing.T, database *sql.DB, commandID string, runID int64, wakes int) {
+	t.Helper()
+	var status string
+	var revision, outcomePresent, terminalEvents, cancellationFacts, hints, operations int
+	if err := database.QueryRow(`SELECT status,status_revision,outcome IS NOT NULL FROM control_commands WHERE command_id=?`,
+		commandID).Scan(&status, &revision, &outcomePresent); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM control_events WHERE command_id=? AND event_kind IN
+		('command_accepted','command_applied','cancellation_recorded')`, commandID).Scan(&terminalEvents); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM agent_run_cancellation_facts WHERE run_id=?`, runID).Scan(&cancellationFacts); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM supervision_test_hints`).Scan(&hints); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM control_operation_keys WHERE operation_kind='command.confirm'
+		AND command_id=?`, commandID).Scan(&operations); err != nil {
+		t.Fatal(err)
+	}
+	var runStatus string
+	if err := database.QueryRow(`SELECT status FROM agent_runs WHERE id=?`, runID).Scan(&runStatus); err != nil {
+		t.Fatal(err)
+	}
+	if status != "pending_confirmation" || revision != 1 || outcomePresent != 0 || terminalEvents != 0 ||
+		cancellationFacts != 0 || hints != 0 || operations != 0 || wakes != 0 || runStatus != "queued" {
+		t.Fatalf("rollback status=%s rev=%d outcome=%d events=%d facts=%d hints=%d operations=%d wakes=%d run=%s",
+			status, revision, outcomePresent, terminalEvents, cancellationFacts, hints, operations, wakes, runStatus)
 	}
 }
 
@@ -427,6 +651,12 @@ func TestProjectLifecycleAuthorityDoesNotReviveOldGrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue grant: %v (%s)", err, ErrorCode(err))
 	}
+	command, err := service.CreateCommand(context.Background(), principal, CommandCreateRequest{GrantID: grant.GrantID,
+		GrantRevision: grant.Revision, Action: "issue.priority.set", Priority: "high",
+		OperationKeyDigest: sha256.Sum256([]byte("lifecycle-command"))})
+	if err != nil {
+		t.Fatalf("create lifecycle command: %v (%s)", err, ErrorCode(err))
+	}
 	var projectID int64
 	if err := database.QueryRow(`SELECT issue.project_id FROM deliveries delivery
 		JOIN issues issue ON issue.id=delivery.issue_id WHERE delivery.id=?`, deliveryID).Scan(&projectID); err != nil {
@@ -439,12 +669,21 @@ func TestProjectLifecycleAuthorityDoesNotReviveOldGrant(t *testing.T) {
 		Revision: grant.Revision}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("archived priority grant error=%v code=%s", err, ErrorCode(err))
 	}
+	confirmKey := sha256.Sum256([]byte("lifecycle-confirm"))
+	if _, err := service.ConfirmCommand(context.Background(), principal, CommandConfirmRequest{CommandID: command.CommandID,
+		StatusRevision: 1, OperationKeyDigest: confirmKey}); err == nil {
+		t.Fatal("archived project accepted stale priority challenge")
+	}
 	if _, err := database.Exec(`UPDATE projects SET status='active' WHERE id=?`, projectID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.GetActorGrant(context.Background(), principal, GrantGetRequest{GrantID: grant.GrantID,
 		Revision: grant.Revision}); !IsCode(err, CodeStaleTarget) {
 		t.Fatalf("revived old grant error=%v code=%s", err, ErrorCode(err))
+	}
+	if _, err := service.ConfirmCommand(context.Background(), principal, CommandConfirmRequest{CommandID: command.CommandID,
+		StatusRevision: 1, OperationKeyDigest: confirmKey}); err == nil {
+		t.Fatal("active-again project revived stale challenge")
 	}
 	renewKey := sha256.Sum256([]byte("lifecycle-grant-new-authority"))
 	renewed, err := service.IssueActorGrant(context.Background(), principal, GrantIssueRequest{
@@ -459,6 +698,11 @@ func TestProjectLifecycleAuthorityDoesNotReviveOldGrant(t *testing.T) {
 }
 
 func seedRunnerActivation(t *testing.T, database *sql.DB, deliveryID, requestedBy int64) (int64, auth.Principal) {
+	return seedRunnerActivationNamed(t, database, deliveryID, requestedBy, "", "runner-01")
+}
+
+func seedRunnerActivationNamed(t *testing.T, database *sql.DB, deliveryID, requestedBy int64,
+	suffix, deviceID string) (int64, auth.Principal) {
 	t.Helper()
 	var issueID, projectID, reporterID, attemptEventID int64
 	if err := database.QueryRow(`SELECT delivery.issue_id,issue.project_id,reporter.id,event.id
@@ -505,21 +749,21 @@ func seedRunnerActivation(t *testing.T, database *sql.DB, deliveryID, requestedB
 	}
 	startID, _ := start.LastInsertId()
 	runner, err := database.Exec(`INSERT INTO users(username,password,role,status)
-		VALUES('supervision-runner','x','member','active')`)
+		VALUES(?,'x','member','active')`, "supervision-runner"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
 	runnerID, _ := runner.LastInsertId()
+	keyHash := fmt.Sprintf("%064x", sha256.Sum256([]byte("runner-key"+suffix)))
 	key, err := database.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes)
-		VALUES(?,'runner',?,'paimos_runner',?)`, runnerID,
-		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", ScopeRunner)
+		VALUES(?,?,?, ?,?)`, runnerID, "runner"+suffix, keyHash, "paimos_runner"+suffix, ScopeRunner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	keyID, _ := key.LastInsertId()
 	run, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,device_id,requested_by,agent_name,status,
 		delivery_instrumentation_version,started_at)
-		VALUES(?,?,'runner-01',?,'supervision-runner','running',1,datetime('now'))`, issueID, projectID, requestedBy)
+		VALUES(?,?,?,?,?,'running',1,datetime('now'))`, issueID, projectID, deviceID, requestedBy, "supervision-runner"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,6 +811,19 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 		OperationKeyDigest: leaseKey})
 	if err != nil {
 		t.Fatalf("issue runner lease: %v (%s)", err, ErrorCode(err))
+	}
+	if _, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner-01", SupportedActions: []Action{"run.cancel.running", "input.respond"},
+		OperationKeyDigest: leaseKey}); !IsCode(err, CodeIdempotencyConflict) {
+		t.Fatalf("changed lease request error=%v code=%s", err, ErrorCode(err))
+	}
+	var leaseExpiryAfterConflict string
+	if err := database.QueryRow(`SELECT expires_at FROM control_capability_leases WHERE lease_id=? AND revision=?`,
+		lease.LeaseID, lease.Revision).Scan(&leaseExpiryAfterConflict); err != nil {
+		t.Fatal(err)
+	}
+	if leaseExpiryAfterConflict != controlTimestamp(lease.ExpiresAt) {
+		t.Fatalf("lease conflict renewed TTL: got=%s want=%s", leaseExpiryAfterConflict, controlTimestamp(lease.ExpiresAt))
 	}
 	inputKey := sha256.Sum256([]byte("approval-input"))
 	input, err := service.CreateInputRequest(context.Background(), runner, InputCreateRequest{LeaseID: lease.LeaseID,
@@ -668,6 +925,12 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 	if err != nil || command.Status != "applied" || command.Outcome != "applied" {
 		t.Fatalf("result: command=%+v err=%v code=%s", command, err, ErrorCode(err))
 	}
+	if _, err := service.RecordResult(context.Background(), runner, ResultRequest{CommandID: command.CommandID,
+		LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1, ClaimSequence: 1,
+		ResultSequence: 1, DeviceID: "runner-01", Outcome: "rejected", Reason: "effect_rejected",
+		OperationKeyDigest: resultKey}); !IsCode(err, CodeIdempotencyConflict) {
+		t.Fatalf("changed result request error=%v code=%s", err, ErrorCode(err))
+	}
 	var runtimeState, outboxState string
 	var runtimeRevision int64
 	if err := database.QueryRow(`SELECT state,revision FROM control_runtime_states WHERE agent_run_id=?`, runID).
@@ -698,6 +961,16 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 	resumeClaimKey := sha256.Sum256([]byte("resume-claim"))
 	if _, err := service.Claim(context.Background(), runner, ClaimRequest{CommandID: resume.CommandID,
 		LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1, DeviceID: "runner-01",
+		OperationKeyDigest: claimKey}); !IsCode(err, CodeIdempotencyConflict) {
+		t.Fatalf("changed claim request error=%v code=%s", err, ErrorCode(err))
+	}
+	var resumeDeliveryState string
+	if err := database.QueryRow(`SELECT delivery_state FROM control_outbox WHERE command_id=?`, resume.CommandID).
+		Scan(&resumeDeliveryState); err != nil || resumeDeliveryState != "queued" {
+		t.Fatalf("claim conflict mutated state=%q err=%v", resumeDeliveryState, err)
+	}
+	if _, err := service.Claim(context.Background(), runner, ClaimRequest{CommandID: resume.CommandID,
+		LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1, DeviceID: "runner-01",
 		OperationKeyDigest: resumeClaimKey}); err != nil {
 		t.Fatalf("claim resume: %v (%s)", err, ErrorCode(err))
 	}
@@ -706,11 +979,13 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 		Revision: lease.Revision, OperationKeyDigest: revokeKey}); err != nil {
 		t.Fatalf("revoke claimed lease: %v (%s)", err, ErrorCode(err))
 	}
-	reconciled, err := service.Reconcile(context.Background(), runner, ReconcileRequest{Limit: 100})
+	reconcileRequest := ReconcileRequest{Mode: ReconcileRunner, Limit: 100, LeaseID: lease.LeaseID,
+		LeaseRevision: lease.Revision, DeviceID: "runner-01"}
+	reconciled, err := service.Reconcile(context.Background(), runner, reconcileRequest)
 	if err != nil || reconciled.UnknownOutcomes != 1 {
 		t.Fatalf("reconcile lease loss: projection=%+v err=%v code=%s", reconciled, err, ErrorCode(err))
 	}
-	if repeated, err := service.Reconcile(context.Background(), runner, ReconcileRequest{Limit: 100}); err != nil ||
+	if repeated, err := service.Reconcile(context.Background(), runner, reconcileRequest); err != nil ||
 		repeated.UnknownOutcomes != 0 {
 		t.Fatalf("repeat reconcile duplicated loss: projection=%+v err=%v code=%s", repeated, err, ErrorCode(err))
 	}
@@ -987,5 +1262,730 @@ func TestPullAndReconcileQueryPlansUseM147Indexes(t *testing.T) {
 		if !strings.Contains(detail.String(), testCase.index) {
 			t.Fatalf("plan %q does not use %s", detail.String(), testCase.index)
 		}
+	}
+}
+
+func TestPullAndReconcileHaveBoundedActualQueryCounts(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryID, humanID, _ := seedGrantTarget(t, database)
+	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+	lease, err := NewService(database, Options{}).IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner-01", SupportedActions: []Action{"input.respond"},
+		OperationKeyDigest: sha256.Sum256([]byte("query-count-lease"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var databaseSequence int
+	var databaseName, databasePath string
+	if err := database.QueryRow(`PRAGMA database_list`).Scan(&databaseSequence, &databaseName, &databasePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	storedb.DB = nil
+
+	counter := &atomic.Int64{}
+	driverName := fmt.Sprintf("supervision-counting-sqlite-%d", countingDriverSequence.Add(1))
+	sql.Register(driverName, countingDriver{inner: &sqlite.Driver{}, count: counter})
+	countingDB, err := sql.Open(driverName, databasePath+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = countingDB.Close() })
+	countingDB.SetMaxOpenConns(1)
+	for _, pragma := range []string{"PRAGMA busy_timeout=5000", "PRAGMA foreign_keys=ON"} {
+		if _, err := countingDB.Exec(pragma); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewService(countingDB, Options{})
+	probeTx, err := countingDB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := auth.ReauthorizePrincipalTx(context.Background(), probeTx, runner, time.Now().UTC()); err != nil {
+		_ = probeTx.Rollback()
+		t.Fatalf("counting driver reauthorize: %v", err)
+	}
+	if _, err := loadCurrentLeaseRecordTx(context.Background(), probeTx, runner, lease.LeaseID, lease.Revision, "", ""); err != nil {
+		_ = probeTx.Rollback()
+		t.Fatalf("counting driver lease load: %v", err)
+	}
+	_ = probeTx.Rollback()
+
+	counter.Store(0)
+	if _, err := service.Pull(context.Background(), runner, PullRequest{LeaseID: lease.LeaseID,
+		LeaseRevision: lease.Revision}); err != nil {
+		t.Fatalf("pull: %v (%s)", err, ErrorCode(err))
+	}
+	pullQueries := counter.Load()
+	if pullQueries < 1 || pullQueries > 8 {
+		t.Fatalf("Pull executed %d statements, bound is 8", pullQueries)
+	}
+
+	counter.Store(0)
+	if _, err := service.Reconcile(context.Background(), runner, ReconcileRequest{Mode: ReconcileRunner,
+		LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, DeviceID: "runner-01", Limit: 100}); err != nil {
+		t.Fatalf("reconcile: %v (%s)", err, ErrorCode(err))
+	}
+	reconcileQueries := counter.Load()
+	if reconcileQueries < 1 || reconcileQueries > 8 {
+		t.Fatalf("Reconcile executed %d statements, bound is 8", reconcileQueries)
+	}
+}
+
+func TestReconcileScopesEveryMutationAndCountToCurrentOwnedAuthority(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryA, userA, actorA := seedGrantTargetNamed(t, database, "-a", "SPA",
+		"aaaaaaaa-1234-4234-9234-123456789abc")
+	deliveryB, userB, actorB := seedGrantTargetNamed(t, database, "-b", "SPB",
+		"bbbbbbbb-1234-4234-9234-123456789abc")
+	clockA, clockB := &mutableClock{now: time.Now().UTC()}, &mutableClock{now: time.Now().UTC()}
+	actorServiceA, actorServiceB := NewService(database, Options{Clock: clockA}), NewService(database, Options{Clock: clockB})
+	actorServiceA.grantTTL, actorServiceB.grantTTL = 350*time.Millisecond, 350*time.Millisecond
+	grantA, err := actorServiceA.IssueActorGrant(context.Background(), actorA, GrantIssueRequest{
+		DeliveryID: deliveryA, OperationKeyDigest: sha256.Sum256([]byte("privacy-grant-a")),
+	})
+	if err != nil {
+		t.Fatalf("issue grant A: %v (%s)", err, ErrorCode(err))
+	}
+	clockB.Set(time.Now().UTC())
+	grantB, err := actorServiceB.IssueActorGrant(context.Background(), actorB, GrantIssueRequest{
+		DeliveryID: deliveryB, OperationKeyDigest: sha256.Sum256([]byte("privacy-grant-b")),
+	})
+	if err != nil {
+		t.Fatalf("issue grant B: %v (%s)", err, ErrorCode(err))
+	}
+
+	// Move A's issue after capability capture. Access must be resolved from the
+	// new current project, not from grant.project_id.
+	projectCResult, err := database.Exec(`INSERT INTO projects(name,key,status) VALUES('Moved','SPC','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectC, _ := projectCResult.LastInsertId()
+	if _, err := database.Exec(`UPDATE issues SET project_id=? WHERE id=(SELECT issue_id FROM deliveries WHERE id=?)`,
+		projectC, deliveryA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO project_members(project_id,user_id,access_level) VALUES(?,?,'viewer')`,
+		projectC, userA); err != nil {
+		t.Fatal(err)
+	}
+
+	clockA.Set(grantA.ExpiresAt.Add(-time.Millisecond))
+	if before, err := actorServiceA.Reconcile(context.Background(), actorA,
+		ReconcileRequest{Mode: ReconcileActor, Limit: 1}); err != nil || before.ExpiredGrants != 0 {
+		t.Fatalf("T-1 actor reconcile projection=%+v err=%v", before, err)
+	}
+	waitForSQLiteTime(t, database, grantA.ExpiresAt)
+	clockA.Set(grantA.ExpiresAt)
+	if viewed, err := actorServiceA.Reconcile(context.Background(), actorA,
+		ReconcileRequest{Mode: ReconcileActor, Limit: 1}); err != nil || viewed != (ReconcileProjection{}) {
+		t.Fatalf("viewer reconcile disclosed/mutated projection=%+v err=%v", viewed, err)
+	}
+	if _, err := database.Exec(`UPDATE project_members SET access_level='editor' WHERE project_id=? AND user_id=?`,
+		projectC, userA); err != nil {
+		t.Fatal(err)
+	}
+	owned, err := actorServiceA.Reconcile(context.Background(), actorA,
+		ReconcileRequest{Mode: ReconcileActor, Limit: 1})
+	if err != nil || owned.ExpiredGrants != 1 {
+		t.Fatalf("owned actor reconcile projection=%+v err=%v code=%s", owned, err, ErrorCode(err))
+	}
+	var revokedA, revokedB bool
+	if err := database.QueryRow(`SELECT revoked_at IS NOT NULL FROM control_capability_grants WHERE grant_id=? AND revision=?`,
+		grantA.GrantID, grantA.Revision).Scan(&revokedA); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT revoked_at IS NOT NULL FROM control_capability_grants WHERE grant_id=? AND revision=?`,
+		grantB.GrantID, grantB.Revision).Scan(&revokedB); err != nil {
+		t.Fatal(err)
+	}
+	if !revokedA || revokedB {
+		t.Fatalf("cross-user grant mutation A=%v B=%v", revokedA, revokedB)
+	}
+	if userA == userB {
+		t.Fatal("test users unexpectedly equal")
+	}
+	clockB.Set(grantB.ExpiresAt.Add(time.Millisecond))
+	waitForSQLiteTime(t, database, grantB.ExpiresAt)
+	if ownedB, err := actorServiceB.Reconcile(context.Background(), actorB,
+		ReconcileRequest{Mode: ReconcileActor, Limit: 1}); err != nil || ownedB.ExpiredGrants != 1 {
+		t.Fatalf("actor B owned reconcile projection=%+v err=%v", ownedB, err)
+	}
+}
+
+func TestRunnerReconcileRejectsCrossKeyDeviceLeaseAndProjectAccess(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryA, humanA, actorA := seedGrantTargetNamed(t, database, "-ra", "SRA",
+		"cccccccc-1234-4234-9234-123456789abc")
+	deliveryB, humanB, actorB := seedGrantTargetNamed(t, database, "-rb", "SRB",
+		"dddddddd-1234-4234-9234-123456789abc")
+	runA, runnerA := seedRunnerActivationNamed(t, database, deliveryA, humanA, "-a", "runner-a")
+	runB, runnerB := seedRunnerActivationNamed(t, database, deliveryB, humanB, "-b", "runner-b")
+	clockA, clockB := &mutableClock{now: time.Now().UTC()}, &mutableClock{now: time.Now().UTC()}
+	serviceA, serviceB := NewService(database, Options{Clock: clockA}), NewService(database, Options{Clock: clockB})
+	leaseA, err := serviceA.IssueRunnerLease(context.Background(), runnerA, LeaseIssueRequest{RunID: runA,
+		DeviceID: "runner-a", SupportedActions: []Action{"input.respond", "run.pause", "run.resume"},
+		OperationKeyDigest: sha256.Sum256([]byte("privacy-lease-a"))})
+	if err != nil {
+		t.Fatalf("issue lease A: %v (%s)", err, ErrorCode(err))
+	}
+	clockA.Set(time.Now().UTC())
+	inputA, err := serviceA.CreateInputRequest(context.Background(), runnerA, InputCreateRequest{LeaseID: leaseA.LeaseID,
+		LeaseRevision: leaseA.Revision, Kind: "approval", PromptTemplate: "approval_required",
+		OperationKeyDigest: sha256.Sum256([]byte("privacy-input-a"))})
+	if err != nil {
+		t.Fatalf("create input A: %v (%s)", err, ErrorCode(err))
+	}
+	clockB.Set(time.Now().UTC())
+	leaseB, err := serviceB.IssueRunnerLease(context.Background(), runnerB, LeaseIssueRequest{RunID: runB,
+		DeviceID: "runner-b", SupportedActions: []Action{"input.respond", "run.pause", "run.resume"},
+		OperationKeyDigest: sha256.Sum256([]byte("privacy-lease-b"))})
+	if err != nil {
+		t.Fatalf("issue lease B: %v (%s)", err, ErrorCode(err))
+	}
+	claimLostEffect := func(label string, service *Service, actor, runner auth.Principal, deliveryID, runID int64,
+		lease LeaseProjection, device string) string {
+		t.Helper()
+		grant, err := service.IssueActorGrant(context.Background(), actor, GrantIssueRequest{DeliveryID: deliveryID,
+			OperationKeyDigest: sha256.Sum256([]byte(label + "-grant"))})
+		if err != nil {
+			t.Fatalf("%s grant: %v (%s)", label, err, ErrorCode(err))
+		}
+		command, err := service.CreateCommand(context.Background(), actor, CommandCreateRequest{GrantID: grant.GrantID,
+			GrantRevision: grant.Revision, Action: "run.pause", RunID: runID, RuntimeRevision: 1,
+			OperationKeyDigest: sha256.Sum256([]byte(label + "-command"))})
+		if err != nil {
+			t.Fatalf("%s command: %v (%s)", label, err, ErrorCode(err))
+		}
+		command, err = service.ConfirmCommand(context.Background(), actor, CommandConfirmRequest{CommandID: command.CommandID,
+			StatusRevision: 1, OperationKeyDigest: sha256.Sum256([]byte(label + "-confirm"))})
+		if err != nil {
+			t.Fatalf("%s confirm: %v (%s)", label, err, ErrorCode(err))
+		}
+		if _, err := service.Claim(context.Background(), runner, ClaimRequest{CommandID: command.CommandID,
+			LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1, DeviceID: device,
+			OperationKeyDigest: sha256.Sum256([]byte(label + "-claim"))}); err != nil {
+			t.Fatalf("%s claim: %v (%s)", label, err, ErrorCode(err))
+		}
+		return command.CommandID
+	}
+	commandA := claimLostEffect("privacy-a", serviceA, actorA, runnerA, deliveryA, runA, leaseA, "runner-a")
+	commandB := claimLostEffect("privacy-b", serviceB, actorB, runnerB, deliveryB, runB, leaseB, "runner-b")
+
+	requestA := ReconcileRequest{Mode: ReconcileRunner, Limit: 10, LeaseID: leaseA.LeaseID,
+		LeaseRevision: leaseA.Revision, DeviceID: "runner-a"}
+	wrongLease := requestA
+	wrongLease.LeaseID, wrongLease.LeaseRevision, wrongLease.DeviceID = leaseB.LeaseID, leaseB.Revision, "runner-b"
+	if projection, err := serviceA.Reconcile(context.Background(), runnerA, wrongLease); !IsCode(err, CodeForbidden) ||
+		projection != (ReconcileProjection{}) {
+		t.Fatalf("cross-key reconcile projection=%+v err=%v code=%s", projection, err, ErrorCode(err))
+	}
+	wrongDevice := requestA
+	wrongDevice.DeviceID = "runner-b"
+	if projection, err := serviceA.Reconcile(context.Background(), runnerA, wrongDevice); !IsCode(err, CodeForbidden) ||
+		projection != (ReconcileProjection{}) {
+		t.Fatalf("cross-device reconcile projection=%+v err=%v code=%s", projection, err, ErrorCode(err))
+	}
+
+	movedProjectResult, err := database.Exec(`INSERT INTO projects(name,key,status) VALUES('Runner moved','SRM','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectA, _ := movedProjectResult.LastInsertId()
+	if _, err := database.Exec(`UPDATE issues SET project_id=? WHERE id=(SELECT issue_id FROM deliveries WHERE id=?)`,
+		projectA, deliveryA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO project_members(project_id,user_id,access_level) VALUES(?,?,'viewer')`,
+		projectA, runnerA.UserID()); err != nil {
+		t.Fatal(err)
+	}
+	if projection, err := serviceA.Reconcile(context.Background(), runnerA, requestA); !IsCode(err, CodeForbidden) ||
+		projection != (ReconcileProjection{}) {
+		t.Fatalf("runner viewer reconcile projection=%+v err=%v code=%s", projection, err, ErrorCode(err))
+	}
+	if _, err := database.Exec(`UPDATE project_members SET access_level='editor' WHERE project_id=? AND user_id=?`,
+		projectA, runnerA.UserID()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := serviceA.RevokeRunnerLease(context.Background(), runnerA, LeaseRevokeRequest{LeaseID: leaseA.LeaseID,
+		Revision: leaseA.Revision, OperationKeyDigest: sha256.Sum256([]byte("privacy-a-revoke"))}); err != nil {
+		t.Fatalf("revoke owned lease: %v (%s)", err, ErrorCode(err))
+	}
+	owned, err := serviceA.Reconcile(context.Background(), runnerA, requestA)
+	if err != nil || owned.ExpiredLeases != 0 || owned.ExpiredInputs != 0 || owned.UnknownOutcomes != 1 {
+		t.Fatalf("owned runner reconcile projection=%+v err=%v code=%s input=%+v", owned, err, ErrorCode(err), inputA)
+	}
+	var leaseARevoked, leaseBRevoked bool
+	if err := database.QueryRow(`SELECT revoked_at IS NOT NULL FROM control_capability_leases WHERE lease_id=? AND revision=?`,
+		leaseA.LeaseID, leaseA.Revision).Scan(&leaseARevoked); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT revoked_at IS NOT NULL FROM control_capability_leases WHERE lease_id=? AND revision=?`,
+		leaseB.LeaseID, leaseB.Revision).Scan(&leaseBRevoked); err != nil {
+		t.Fatal(err)
+	}
+	if !leaseARevoked || leaseBRevoked {
+		t.Fatalf("cross-key lease mutation A=%v B=%v", leaseARevoked, leaseBRevoked)
+	}
+	var outcomeA, outcomeB, reasonA, reasonB sql.NullString
+	if err := database.QueryRow(`SELECT command.outcome,outbox.safe_reason FROM control_commands command
+		JOIN control_outbox outbox ON outbox.command_id=command.command_id WHERE command.command_id=?`, commandA).
+		Scan(&outcomeA, &reasonA); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT command.outcome,outbox.safe_reason FROM control_commands command
+		JOIN control_outbox outbox ON outbox.command_id=command.command_id WHERE command.command_id=?`, commandB).
+		Scan(&outcomeB, &reasonB); err != nil {
+		t.Fatal(err)
+	}
+	if outcomeA.String != "outcome_unknown" || reasonA.String != "runner_lost" || outcomeB.Valid || reasonB.Valid {
+		t.Fatalf("cross-key effect mutation A=%v/%v B=%v/%v", outcomeA, reasonA, outcomeB, reasonB)
+	}
+}
+
+func TestReconcileRealMutationExpiryBoundaries(t *testing.T) {
+	boundaries := []struct {
+		name  string
+		delta time.Duration
+		want  int
+	}{{"T-minus-1ms", -time.Millisecond, 0}, {"T", 0, 1}, {"T-plus-1ms", time.Millisecond, 1}}
+
+	for _, boundary := range boundaries {
+		t.Run("grant/"+boundary.name, func(t *testing.T) {
+			database := openSupervisionTestDB(t)
+			deliveryID, _, actor := seedGrantTarget(t, database)
+			clock := &mutableClock{now: time.Now().UTC()}
+			service := NewService(database, Options{Clock: clock})
+			service.grantTTL = 250 * time.Millisecond
+			grant, err := service.IssueActorGrant(context.Background(), actor, GrantIssueRequest{DeliveryID: deliveryID,
+				OperationKeyDigest: sha256.Sum256([]byte("boundary-grant-" + boundary.name))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if boundary.delta >= 0 {
+				waitForSQLiteTime(t, database, grant.ExpiresAt)
+			}
+			clock.Set(grant.ExpiresAt.Add(boundary.delta))
+			projection, err := service.Reconcile(context.Background(), actor, ReconcileRequest{Mode: ReconcileActor})
+			if err != nil || projection.ExpiredGrants != boundary.want {
+				t.Fatalf("projection=%+v err=%v want=%d", projection, err, boundary.want)
+			}
+		})
+
+		t.Run("pending-command/"+boundary.name, func(t *testing.T) {
+			database := openSupervisionTestDB(t)
+			deliveryID, _, actor := seedGrantTarget(t, database)
+			clock := &mutableClock{now: time.Now().UTC()}
+			service := NewService(database, Options{Clock: clock})
+			service.grantTTL, service.challengeTTL = 2*time.Second, 250*time.Millisecond
+			grant, err := service.IssueActorGrant(context.Background(), actor, GrantIssueRequest{DeliveryID: deliveryID,
+				OperationKeyDigest: sha256.Sum256([]byte("boundary-command-grant-" + boundary.name))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			clock.Set(time.Now().UTC())
+			command, err := service.CreateCommand(context.Background(), actor, CommandCreateRequest{GrantID: grant.GrantID,
+				GrantRevision: grant.Revision, Action: "issue.priority.set", Priority: "high",
+				OperationKeyDigest: sha256.Sum256([]byte("boundary-command-" + boundary.name))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if boundary.delta >= 0 {
+				waitForSQLiteTime(t, database, command.ExpiresAt)
+			}
+			clock.Set(command.ExpiresAt.Add(boundary.delta))
+			projection, err := service.Reconcile(context.Background(), actor, ReconcileRequest{Mode: ReconcileActor})
+			if err != nil || projection.ExpiredCommands != boundary.want {
+				t.Fatalf("projection=%+v err=%v want=%d", projection, err, boundary.want)
+			}
+		})
+
+		t.Run("lease/"+boundary.name, func(t *testing.T) {
+			database := openSupervisionTestDB(t)
+			deliveryID, humanID, _ := seedGrantTarget(t, database)
+			runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+			clock := &mutableClock{now: time.Now().UTC()}
+			service := NewService(database, Options{Clock: clock})
+			service.leaseTTL = 250 * time.Millisecond
+			lease, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+				DeviceID: "runner-01", SupportedActions: []Action{"input.respond"},
+				OperationKeyDigest: sha256.Sum256([]byte("boundary-lease-" + boundary.name))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if boundary.delta >= 0 {
+				waitForSQLiteTime(t, database, lease.ExpiresAt)
+			}
+			clock.Set(lease.ExpiresAt.Add(boundary.delta))
+			projection, err := service.Reconcile(context.Background(), runner, ReconcileRequest{Mode: ReconcileRunner,
+				LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, DeviceID: "runner-01"})
+			if err != nil || projection.ExpiredLeases != boundary.want {
+				t.Fatalf("projection=%+v err=%v want=%d", projection, err, boundary.want)
+			}
+		})
+
+		t.Run("input/"+boundary.name, func(t *testing.T) {
+			database := openSupervisionTestDB(t)
+			deliveryID, humanID, _ := seedGrantTarget(t, database)
+			runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+			clock := &mutableClock{now: time.Now().UTC()}
+			service := NewService(database, Options{Clock: clock})
+			service.leaseTTL, service.inputTTL = 2*time.Second, 250*time.Millisecond
+			lease, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+				DeviceID: "runner-01", SupportedActions: []Action{"input.respond"},
+				OperationKeyDigest: sha256.Sum256([]byte("boundary-input-lease-" + boundary.name))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			clock.Set(time.Now().UTC())
+			input, err := service.CreateInputRequest(context.Background(), runner, InputCreateRequest{LeaseID: lease.LeaseID,
+				LeaseRevision: lease.Revision, Kind: "approval", PromptTemplate: "approval_required",
+				OperationKeyDigest: sha256.Sum256([]byte("boundary-input-" + boundary.name))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if boundary.delta >= 0 {
+				waitForSQLiteTime(t, database, input.ExpiresAt)
+			}
+			clock.Set(input.ExpiresAt.Add(boundary.delta))
+			projection, err := service.Reconcile(context.Background(), runner, ReconcileRequest{Mode: ReconcileRunner,
+				LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, DeviceID: "runner-01"})
+			if err != nil || projection.ExpiredInputs != boundary.want {
+				t.Fatalf("projection=%+v err=%v want=%d", projection, err, boundary.want)
+			}
+		})
+	}
+}
+
+func TestProjectLifecycleRealServiceActionMatrix(t *testing.T) {
+	for _, status := range []string{"active", "frozen", "archived", "deleted"} {
+		t.Run(status, func(t *testing.T) {
+			database := openSupervisionTestDB(t)
+			deliveryID, humanID, human := seedGrantTarget(t, database)
+			runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+			var projectID int64
+			if err := database.QueryRow(`SELECT issue.project_id FROM deliveries delivery JOIN issues issue
+				ON issue.id=delivery.issue_id WHERE delivery.id=?`, deliveryID).Scan(&projectID); err != nil {
+				t.Fatal(err)
+			}
+			if status != "active" {
+				if _, err := database.Exec(`UPDATE projects SET status=? WHERE id=?`, status, projectID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			service := NewService(database, Options{})
+			lease, leaseErr := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+				DeviceID: "runner-01", SupportedActions: []Action{"run.cancel.running", "input.respond", "run.pause", "run.resume"},
+				OperationKeyDigest: sha256.Sum256([]byte("matrix-lease-" + status))})
+			grant, grantErr := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
+				OperationKeyDigest: sha256.Sum256([]byte("matrix-grant-" + status))})
+			if status == "deleted" {
+				if leaseErr == nil || grantErr == nil {
+					t.Fatalf("deleted project exposed controls lease=%+v/%v grant=%+v/%v", lease, leaseErr, grant, grantErr)
+				}
+				return
+			}
+			if leaseErr != nil || grantErr != nil {
+				t.Fatalf("issue controls status=%s lease=%+v/%v grant=%+v/%v", status, lease, leaseErr, grant, grantErr)
+			}
+			if status == "archived" {
+				if len(grant.Actions) != 1 || grant.Actions[0] != "run.cancel.running" || len(lease.Actions) != 1 ||
+					lease.Actions[0] != "run.cancel.running" {
+					t.Fatalf("archived action surface grant=%v lease=%v", grant.Actions, lease.Actions)
+				}
+				if _, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
+					GrantRevision: grant.Revision, Action: "run.cancel.running", RunID: runID,
+					OperationKeyDigest: sha256.Sum256([]byte("matrix-archived-cancel"))}); err != nil {
+					t.Fatalf("archived cancel rejected: %v (%s)", err, ErrorCode(err))
+				}
+				if _, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
+					GrantRevision: grant.Revision, Action: "issue.priority.set", Priority: "high",
+					OperationKeyDigest: sha256.Sum256([]byte("matrix-archived-priority"))}); err == nil {
+					t.Fatal("archived priority command accepted")
+				}
+				return
+			}
+			for _, action := range []Action{"issue.priority.set", "run.cancel.running", "input.respond", "run.pause", "run.resume"} {
+				if !containsAction(grant.Actions, action) {
+					t.Fatalf("%s grant omitted %s: %v", status, action, grant.Actions)
+				}
+			}
+			input, err := service.CreateInputRequest(context.Background(), runner, InputCreateRequest{LeaseID: lease.LeaseID,
+				LeaseRevision: lease.Revision, Kind: "approval", PromptTemplate: "approval_required",
+				OperationKeyDigest: sha256.Sum256([]byte("matrix-input-" + status))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			requests := []CommandCreateRequest{
+				{GrantID: grant.GrantID, GrantRevision: grant.Revision, Action: "issue.priority.set", Priority: "high"},
+				{GrantID: grant.GrantID, GrantRevision: grant.Revision, Action: "run.cancel.running", RunID: runID},
+				{GrantID: grant.GrantID, GrantRevision: grant.Revision, Action: "input.respond", InputRequestID: input.RequestID,
+					InputRequestRevision: input.Revision, InputResponse: "approve"},
+				{GrantID: grant.GrantID, GrantRevision: grant.Revision, Action: "run.pause", RunID: runID, RuntimeRevision: 1},
+			}
+			for index := range requests {
+				requests[index].OperationKeyDigest = sha256.Sum256([]byte(fmt.Sprintf("matrix-%s-%d", status, index)))
+				if _, err := service.CreateCommand(context.Background(), human, requests[index]); err != nil {
+					t.Fatalf("%s action %s rejected: %v (%s)", status, requests[index].Action, err, ErrorCode(err))
+				}
+			}
+		})
+	}
+}
+
+func TestInputResponseAndSupersedeRaceConvergesToOneTerminalSeal(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryID, humanID, human := seedGrantTarget(t, database)
+	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+	service := NewService(database, Options{})
+	lease, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner-01", SupportedActions: []Action{"input.respond"},
+		OperationKeyDigest: sha256.Sum256([]byte("input-race-lease"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := service.CreateInputRequest(context.Background(), runner, InputCreateRequest{LeaseID: lease.LeaseID,
+		LeaseRevision: lease.Revision, Kind: "approval", PromptTemplate: "approval_required",
+		OperationKeyDigest: sha256.Sum256([]byte("input-race-request"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
+		OperationKeyDigest: sha256.Sum256([]byte("input-race-grant"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
+		GrantRevision: grant.Revision, Action: "input.respond", InputRequestID: input.RequestID,
+		InputRequestRevision: input.Revision, InputResponse: "approve",
+		OperationKeyDigest: sha256.Sum256([]byte("input-race-command"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err = service.ConfirmCommand(context.Background(), human, CommandConfirmRequest{CommandID: command.CommandID,
+		StatusRevision: 1, OperationKeyDigest: sha256.Sum256([]byte("input-race-confirm"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Claim(context.Background(), runner, ClaimRequest{CommandID: command.CommandID,
+		LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1, DeviceID: "runner-01",
+		OperationKeyDigest: sha256.Sum256([]byte("input-race-claim"))}); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	go func() {
+		<-start
+		_, resultErr := service.RecordResult(context.Background(), runner, ResultRequest{CommandID: command.CommandID,
+			LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1, ClaimSequence: 1,
+			ResultSequence: 1, DeviceID: "runner-01", Outcome: "applied",
+			OperationKeyDigest: sha256.Sum256([]byte("input-race-result"))})
+		results <- resultErr
+	}()
+	go func() {
+		<-start
+		_, supersedeErr := service.CreateInputRequest(context.Background(), runner, InputCreateRequest{LeaseID: lease.LeaseID,
+			LeaseRevision: lease.Revision, RequestID: input.RequestID, Kind: "approval", PromptTemplate: "approval_required",
+			OperationKeyDigest: sha256.Sum256([]byte("input-race-supersede"))})
+		results <- supersedeErr
+	}()
+	close(start)
+	successes := 0
+	for range 2 {
+		if resultErr := <-results; resultErr == nil {
+			successes++
+		} else if !errors.Is(resultErr, ErrConflict) && !errors.Is(resultErr, ErrUnavailable) {
+			t.Fatalf("unexpected input race loser: %v (%s)", resultErr, ErrorCode(resultErr))
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("input race successes=%d want 1", successes)
+	}
+	var terminalEvents, terminalAuditEvents, currentRevision, terminalPresent int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM control_input_resolution_events WHERE request_id=?`, input.RequestID).
+		Scan(&terminalEvents); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM control_events WHERE input_request_id=? AND event_kind IN
+		('input_resolved','input_superseded','input_expired','input_cancelled','input_run_terminal')`, input.RequestID).
+		Scan(&terminalAuditEvents); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT current_revision,terminal_event_id IS NOT NULL FROM control_input_request_states
+		WHERE request_id=?`, input.RequestID).Scan(&currentRevision, &terminalPresent); err != nil {
+		t.Fatal(err)
+	}
+	var seals int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM control_input_request_seals WHERE request_id=?`, input.RequestID).Scan(&seals); err != nil {
+		t.Fatal(err)
+	}
+	if terminalEvents != 1 || terminalAuditEvents != 1 ||
+		!((currentRevision == 1 && terminalPresent == 1 && seals == 1) || (currentRevision == 2 && terminalPresent == 0 && seals == 2)) {
+		t.Fatalf("terminal events=%d audit=%d revision=%d terminal=%d seals=%d",
+			terminalEvents, terminalAuditEvents, currentRevision, terminalPresent, seals)
+	}
+}
+
+func TestSecretSentinelCannotCrossRealServiceOrPersistenceBoundary(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryID, humanID, _ := seedGrantTarget(t, database)
+	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+	service := NewService(database, Options{})
+	const sentinel = "PAIMOS_SECRET_SENTINEL_DO_NOT_PERSIST_7f91"
+	_, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner\n" + sentinel, SupportedActions: []Action{"input.respond"},
+		OperationKeyDigest: sha256.Sum256([]byte("secret-invalid-request"))})
+	if !IsCode(err, CodeInvalidDevice) || strings.Contains(fmt.Sprint(err), sentinel) {
+		t.Fatalf("unsafe invalid-device error=%q code=%s", err, ErrorCode(err))
+	}
+	lease, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner-01", SupportedActions: []Action{"input.respond"},
+		OperationKeyDigest: sha256.Sum256([]byte("secret-valid-request"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", lease), sentinel) {
+		t.Fatalf("secret leaked in projection: %+v", lease)
+	}
+
+	tables, err := database.Query(`SELECT name FROM sqlite_master WHERE type='table' AND
+		(name LIKE 'control_%' OR name IN ('agent_runs','deliveries','issues','projects')) ORDER BY name`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tableNames []string
+	for tables.Next() {
+		var name string
+		if err := tables.Scan(&name); err != nil {
+			tables.Close()
+			t.Fatal(err)
+		}
+		tableNames = append(tableNames, name)
+	}
+	if err := tables.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range tableNames {
+		columns, err := database.Query(`SELECT name FROM pragma_table_info(?)`, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var columnNames []string
+		for columns.Next() {
+			var column string
+			if err := columns.Scan(&column); err != nil {
+				columns.Close()
+				t.Fatal(err)
+			}
+			columnNames = append(columnNames, column)
+		}
+		columns.Close()
+		for _, column := range columnNames {
+			var count int
+			query := fmt.Sprintf(`SELECT COUNT(*) FROM "%s" WHERE instr(CAST("%s" AS TEXT),?)>0`, table, column)
+			if err := database.QueryRow(query, sentinel).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("secret persisted in %s.%s", table, column)
+			}
+		}
+	}
+}
+
+func TestInputResponseAndRunTerminalRaceConvergesToOneTerminalEvent(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryID, humanID, human := seedGrantTarget(t, database)
+	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+	service := NewService(database, Options{})
+	lease, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner-01", SupportedActions: []Action{"input.respond"},
+		OperationKeyDigest: sha256.Sum256([]byte("terminal-race-lease"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := service.CreateInputRequest(context.Background(), runner, InputCreateRequest{LeaseID: lease.LeaseID,
+		LeaseRevision: lease.Revision, Kind: "approval", PromptTemplate: "approval_required",
+		OperationKeyDigest: sha256.Sum256([]byte("terminal-race-input"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
+		OperationKeyDigest: sha256.Sum256([]byte("terminal-race-grant"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
+		GrantRevision: grant.Revision, Action: "input.respond", InputRequestID: input.RequestID,
+		InputRequestRevision: input.Revision, InputResponse: "approve",
+		OperationKeyDigest: sha256.Sum256([]byte("terminal-race-command"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err = service.ConfirmCommand(context.Background(), human, CommandConfirmRequest{CommandID: command.CommandID,
+		StatusRevision: 1, OperationKeyDigest: sha256.Sum256([]byte("terminal-race-confirm"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Claim(context.Background(), runner, ClaimRequest{CommandID: command.CommandID,
+		LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1, DeviceID: "runner-01",
+		OperationKeyDigest: sha256.Sum256([]byte("terminal-race-claim"))}); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	resultDone := make(chan error, 1)
+	runDone := make(chan error, 1)
+	go func() {
+		<-start
+		_, resultErr := service.RecordResult(context.Background(), runner, ResultRequest{CommandID: command.CommandID,
+			LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1, ClaimSequence: 1,
+			ResultSequence: 1, DeviceID: "runner-01", Outcome: "applied",
+			OperationKeyDigest: sha256.Sum256([]byte("terminal-race-result"))})
+		resultDone <- resultErr
+	}()
+	go func() {
+		<-start
+		_, updateErr := database.Exec(`UPDATE agent_runs SET status='failed',finished_at=datetime('now')
+			WHERE id=? AND status='running'`, runID)
+		runDone <- updateErr
+	}()
+	close(start)
+	resultErr, updateErr := <-resultDone, <-runDone
+	if updateErr != nil {
+		t.Fatalf("terminal truth update: %v", updateErr)
+	}
+	if resultErr != nil && !errors.Is(resultErr, ErrConflict) && !errors.Is(resultErr, ErrUnavailable) {
+		t.Fatalf("unexpected result loser: %v (%s)", resultErr, ErrorCode(resultErr))
+	}
+	reconciled, err := service.Reconcile(context.Background(), runner, ReconcileRequest{Mode: ReconcileRunner,
+		LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, DeviceID: "runner-01"})
+	if err != nil {
+		t.Fatalf("terminal reconcile: %v (%s)", err, ErrorCode(err))
+	}
+	if (resultErr == nil && reconciled.TerminalInputs != 0) || (resultErr != nil && reconciled.TerminalInputs != 1) {
+		t.Fatalf("resultErr=%v reconcile=%+v", resultErr, reconciled)
+	}
+	var terminalEvents, terminalAudits, stateTerminal int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM control_input_resolution_events WHERE request_id=?`, input.RequestID).
+		Scan(&terminalEvents); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM control_events WHERE input_request_id=?
+		AND event_kind IN ('input_resolved','input_run_terminal')`, input.RequestID).Scan(&terminalAudits); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT terminal_event_id IS NOT NULL FROM control_input_request_states WHERE request_id=?`,
+		input.RequestID).Scan(&stateTerminal); err != nil {
+		t.Fatal(err)
+	}
+	if terminalEvents != 1 || terminalAudits != 1 || stateTerminal != 1 {
+		t.Fatalf("terminal events=%d audits=%d state=%d", terminalEvents, terminalAudits, stateTerminal)
 	}
 }

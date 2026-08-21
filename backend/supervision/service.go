@@ -23,6 +23,14 @@ type Service struct {
 	ids     IDSource
 	mutator SynchronousMutator
 	changes ChangeRecorder
+
+	// Durations stay on the service so package integration tests can exercise
+	// the real mutation paths at exact millisecond boundaries without waiting
+	// for production TTLs. NewService always installs the frozen values.
+	grantTTL     time.Duration
+	leaseTTL     time.Duration
+	inputTTL     time.Duration
+	challengeTTL time.Duration
 }
 
 func NewService(database *sql.DB, options Options) *Service {
@@ -34,7 +42,8 @@ func NewService(database *sql.DB, options Options) *Service {
 	if ids == nil {
 		ids = IDSourceFunc(uuid.NewString)
 	}
-	return &Service{db: database, clock: clock, ids: ids, mutator: options.Mutator, changes: options.Changes}
+	return &Service{db: database, clock: clock, ids: ids, mutator: options.Mutator, changes: options.Changes,
+		grantTTL: GrantTTL, leaseTTL: LeaseTTL, inputTTL: InputTTL, challengeTTL: ChallengeTTL}
 }
 
 type authorizedTx struct {
@@ -135,6 +144,16 @@ func parseControlTime(value string) (time.Time, error) {
 		return time.Time{}, domainError(ErrInvariant, CodeInvariant)
 	}
 	return parsed.UTC(), nil
+}
+
+func controlTimestamp(value time.Time) string {
+	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+}
+
+func (s *Service) controlNow() string { return controlTimestamp(s.clock.Now()) }
+
+func (s *Service) controlDeadline(ttl time.Duration) string {
+	return controlTimestamp(s.clock.Now().Add(ttl))
 }
 
 func expiredAt(now, expiry time.Time) bool { return !expiry.After(now) }

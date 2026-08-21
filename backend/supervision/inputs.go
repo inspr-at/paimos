@@ -182,6 +182,7 @@ func (s *Service) CreateInputRequest(ctx context.Context, principal auth.Princip
 
 	requestID := request.RequestID
 	revision := int64(1)
+	deadline := s.controlDeadline(s.inputTTL)
 	if requestID == "" {
 		requestID, err = safeID(s.ids)
 		if err != nil {
@@ -234,10 +235,10 @@ func (s *Service) CreateInputRequest(ctx context.Context, principal auth.Princip
 		SELECT ?,?,lease_id,revision,delivery_id,delivery_key,delivery_revision,project_id,root_issue_id,
 		 issue_revision,attempt_id,attempt_number,plan_revision,stage_key,execution_number,
 		 execution_start_stage_event_id,authority_epoch,authority_stage_event_id,reporter_id,agent_run_id,
-		 ?,?,?,?,CASE WHEN lease.expires_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','+60 seconds')
-		 THEN lease.expires_at ELSE strftime('%Y-%m-%dT%H:%M:%fZ','now','+60 seconds') END
+		 ?,?,?,?,CASE WHEN lease.expires_at<? THEN lease.expires_at ELSE ? END
 		FROM control_capability_leases lease WHERE lease_id=? AND revision=?`, requestID, revision,
-		request.Kind, request.PromptTemplate, len(request.OptionCodes), requestDigest[:], request.LeaseID, request.LeaseRevision); err != nil {
+		request.Kind, request.PromptTemplate, len(request.OptionCodes), requestDigest[:], deadline, deadline,
+		request.LeaseID, request.LeaseRevision); err != nil {
 		return InputRequestProjection{}, sqliteConflict(err)
 	}
 	for index, code := range request.OptionCodes {

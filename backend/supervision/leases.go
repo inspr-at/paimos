@@ -187,6 +187,7 @@ func (s *Service) putRunnerLease(ctx context.Context, principal auth.Principal, 
 		return LeaseProjection{}, domainError(ErrConflict, CodeStaleTarget)
 	}
 	credential := authz.principal.SafeCredentialID()
+	deadline := s.controlDeadline(s.leaseTTL)
 	if current && expiredAt(s.clock.Now().UTC(), expiresAt) {
 		if err := revokeLeaseRow(ctx, authz.tx, leaseID, revision, "lease_expired", "lease_expired"); err != nil {
 			return LeaseProjection{}, err
@@ -197,9 +198,9 @@ func (s *Service) putRunnerLease(ctx context.Context, principal auth.Principal, 
 	if current && currentCredential == credential && currentDevice == deviceID &&
 		bytes.Equal(currentBinding, binding.bindingDigest[:]) && bytes.Equal(currentActions, actionDigest[:]) {
 		if _, err := authz.tx.ExecContext(ctx, `UPDATE control_capability_leases SET
-			expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','+90 seconds'),
+			expires_at=?,
 			updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE lease_id=? AND revision=?`,
-			leaseID, revision); err != nil {
+			deadline, leaseID, revision); err != nil {
 			return LeaseProjection{}, sqliteConflict(err)
 		}
 		if err := insertLeaseEvent(ctx, authz.tx, leaseID, revision, "lease_renewed", ""); err != nil {
@@ -223,7 +224,7 @@ func (s *Service) putRunnerLease(ctx context.Context, principal auth.Principal, 
 			}
 			revision = 1
 		}
-		if err := insertLease(ctx, authz.tx, authz.principal, binding, leaseID, revision, actions, actionDigest); err != nil {
+		if err := insertLease(ctx, authz.tx, authz.principal, binding, leaseID, revision, actions, actionDigest, deadline); err != nil {
 			return LeaseProjection{}, err
 		}
 		kind := "lease_issued"
@@ -282,7 +283,7 @@ func currentLeaseTx(ctx context.Context, tx *sql.Tx, binding activationBinding) 
 }
 
 func insertLease(ctx context.Context, tx *sql.Tx, principal auth.Principal, binding activationBinding, leaseID string,
-	revision int64, actions []Action, actionDigest [32]byte) error {
+	revision int64, actions []Action, actionDigest [32]byte, expiresAt string) error {
 	if principal.Kind() != auth.PrincipalAPIKey {
 		return domainError(ErrForbidden, CodeForbidden)
 	}
@@ -292,13 +293,12 @@ func insertLease(ctx context.Context, tx *sql.Tx, principal auth.Principal, bind
 		attempt_id,attempt_number,plan_revision,stage_key,execution_number,execution_start_stage_event_id,
 		authority_epoch,authority_stage_event_id,reporter_id,agent_run_id,binding_digest,
 		action_set_digest,action_count,expires_at)
-		VALUES(?,?,?,?,'api_key',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-		strftime('%Y-%m-%dT%H:%M:%fZ','now','+90 seconds'))`,
+		VALUES(?,?,?,?,'api_key',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		leaseID, revision, principal.UserID(), principal.UserID(), principal.APIKeyID(), binding.deviceID,
 		binding.DeliveryID, binding.DeliveryKey, binding.DeliveryRevision, binding.projectID,
 		binding.RootIssueID, binding.IssueRevision, binding.AttemptID, binding.AttemptNumber, binding.PlanRevision,
 		binding.StageKey, binding.ExecutionNumber, binding.ExecutionStartStageEventID, binding.AuthorityEpoch,
-		binding.AuthorityStageEventID, binding.ReporterID, binding.RunID, binding.bindingDigest[:], actionDigest[:], len(actions))
+		binding.AuthorityStageEventID, binding.ReporterID, binding.RunID, binding.bindingDigest[:], actionDigest[:], len(actions), expiresAt)
 	if err != nil {
 		return sqliteConflict(err)
 	}
