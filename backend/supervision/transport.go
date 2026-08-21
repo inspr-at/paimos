@@ -4,6 +4,7 @@
 package supervision
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -223,23 +224,53 @@ func (s *Service) RecordResult(ctx context.Context, principal auth.Principal, re
 		return CommandProjection{}, err
 	}
 	defer authz.tx.Rollback()
-	requireActiveRun := request.Reason != "natural_exit"
-	if requireActiveRun {
-		var priorAction Action
-		var priorStatus string
-		if queryErr := authz.tx.QueryRowContext(ctx, `SELECT action,status FROM control_commands WHERE command_id=?`,
-			request.CommandID).Scan(&priorAction, &priorStatus); queryErr == nil &&
-			priorAction == "run.cancel.running" && priorStatus == "applied" {
-			requireActiveRun = false
-		}
+	resultDigest := canonicalDigest("runner-result", stringField("command_id", request.CommandID),
+		stringField("outcome", string(request.Outcome)), stringField("reason", string(request.Reason)),
+		intField("result_sequence", request.ResultSequence))
+	var action Action
+	var issueID, runID, statusRevision, projectID int64
+	var commandStatus, outboxState string
+	var commandOutcome, commandReason, outboxReason sql.NullString
+	var storedCommandDigest, storedOutboxDigest []byte
+	err = authz.tx.QueryRowContext(ctx, `SELECT command.action,command.root_issue_id,command.agent_run_id,
+		command.status_revision,command.project_id,command.status,command.outcome,command.safe_reason,
+		command.result_digest,outbox.delivery_state,outbox.safe_reason,outbox.result_digest
+		FROM control_commands command JOIN control_outbox outbox ON outbox.command_id=command.command_id
+		JOIN issues issue ON issue.id=command.root_issue_id AND issue.deleted_at IS NULL
+		JOIN projects project ON project.id=command.project_id AND project.id=issue.project_id
+		WHERE command.command_id=? AND command.lease_id=? AND command.lease_revision=?
+		 AND outbox.lease_id=command.lease_id AND outbox.lease_revision=command.lease_revision
+		 AND outbox.claim_user_id=? AND outbox.claim_api_key_id=? AND outbox.claim_device_id=?
+		 AND outbox.claim_sequence=1
+		 AND (project.status IN ('active','frozen') OR
+		 (project.status='archived' AND command.action='run.cancel.running'))`, request.CommandID,
+		request.LeaseID, request.LeaseRevision, authz.principal.UserID(), authz.principal.APIKeyID(),
+		request.DeviceID).Scan(&action, &issueID, &runID, &statusRevision, &projectID, &commandStatus,
+		&commandOutcome, &commandReason, &storedCommandDigest, &outboxState, &outboxReason, &storedOutboxDigest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommandProjection{}, domainError(ErrConflict, CodeStaleTarget)
 	}
-	lease, err := loadLeaseRecordTx(ctx, authz.tx, authz.principal, request.LeaseID, request.LeaseRevision,
-		request.DeviceID, "", requireActiveRun)
 	if err != nil {
+		return CommandProjection{}, storageError(ctx, err)
+	}
+	if err := requireProjectEdit(ctx, authz.tx, authz.user, projectID); err != nil {
 		return CommandProjection{}, err
 	}
-	if err := requireProjectEdit(ctx, authz.tx, authz.user, lease.projectID); err != nil {
-		return CommandProjection{}, err
+	if (request.Reason == "process_termination_failed" || request.Reason == "natural_exit") && action != "run.cancel.running" {
+		return CommandProjection{}, domainError(ErrInvalid, CodeInvalidRequest)
+	}
+	direct := commandStatus == "accepted" && statusRevision == 2 && !commandOutcome.Valid &&
+		outboxState == "claimed" && !outboxReason.Valid
+	lateUnknown := commandStatus == "accepted" && statusRevision == 3 && commandOutcome.String == "outcome_unknown" &&
+		commandReason.String == "runner_lost" && outboxState == "claimed" && outboxReason.String == "runner_lost"
+	terminal := (commandStatus == "applied" || commandStatus == "rejected") &&
+		(statusRevision == 3 || statusRevision == 4) && outboxState == "acknowledged"
+	if direct {
+		requireActiveRun := request.Reason != "natural_exit"
+		if _, err := loadLeaseRecordTx(ctx, authz.tx, authz.principal, request.LeaseID, request.LeaseRevision,
+			request.DeviceID, "", requireActiveRun); err != nil {
+			return CommandProjection{}, err
+		}
 	}
 	replay, err := lookupOperation(ctx, authz.tx, authz.principal, "command.result", keyDigest, requestDigest)
 	if err != nil {
@@ -255,40 +286,46 @@ func (s *Service) RecordResult(ctx context.Context, principal auth.Principal, re
 		}
 		return projection, nil
 	}
-	var action Action
-	var issueID, runID, statusRevision int64
-	var state string
-	err = authz.tx.QueryRowContext(ctx, `SELECT command.action,command.root_issue_id,command.agent_run_id,
-		command.status_revision,outbox.delivery_state FROM control_commands command
-		JOIN control_outbox outbox ON outbox.command_id=command.command_id
-		WHERE command.command_id=? AND outbox.lease_id=? AND outbox.lease_revision=?
-		 AND outbox.claim_user_id=? AND outbox.claim_api_key_id=? AND outbox.claim_device_id=?
-		 AND outbox.claim_sequence=1`, request.CommandID, request.LeaseID, request.LeaseRevision,
-		authz.principal.UserID(), authz.principal.APIKeyID(), request.DeviceID).
-		Scan(&action, &issueID, &runID, &statusRevision, &state)
-	if errors.Is(err, sql.ErrNoRows) {
+	if terminal {
+		exactOutcome := commandOutcome.String == string(request.Outcome)
+		exactReason := commandReason.String == string(request.Reason) && outboxReason.String == string(request.Reason)
+		if request.Outcome == "applied" {
+			exactReason = !commandReason.Valid && !outboxReason.Valid
+		}
+		if !exactOutcome || !exactReason || !bytes.Equal(storedCommandDigest, resultDigest[:]) ||
+			!bytes.Equal(storedOutboxDigest, resultDigest[:]) {
+			return CommandProjection{}, domainError(ErrConflict, CodeStaleTarget)
+		}
+		projection, loadErr := loadCommandProjectionTx(ctx, authz.tx, request.CommandID)
+		if loadErr != nil {
+			return CommandProjection{}, loadErr
+		}
+		if err := insertOperation(ctx, authz.tx, authz.principal, "command.result", keyDigest, requestDigest,
+			commandProjectionDigest(projection), "command_id", request.CommandID); err != nil {
+			return CommandProjection{}, err
+		}
+		if err := commitWithWake(ctx, authz, nil, nil); err != nil {
+			return CommandProjection{}, err
+		}
+		return projection, nil
+	}
+	if !direct && !lateUnknown {
 		return CommandProjection{}, domainError(ErrConflict, CodeStaleTarget)
 	}
-	if err != nil {
-		return CommandProjection{}, storageError(ctx, err)
-	}
-	if state != "claimed" || statusRevision != 2 {
-		return CommandProjection{}, domainError(ErrConflict, CodeStaleTarget)
-	}
-	if (request.Reason == "process_termination_failed" || request.Reason == "natural_exit") && action != "run.cancel.running" {
-		return CommandProjection{}, domainError(ErrInvalid, CodeInvalidRequest)
-	}
-	resultDigest := canonicalDigest("runner-result", stringField("command_id", request.CommandID),
-		stringField("outcome", string(request.Outcome)), stringField("reason", string(request.Reason)),
-		intField("result_sequence", request.ResultSequence))
 	status := "applied"
 	var reason any
 	if request.Outcome == "rejected" {
 		status, reason = "rejected", request.Reason
 	}
-	if _, err := authz.tx.ExecContext(ctx, `UPDATE control_commands SET status=?,status_revision=3,outcome=?,safe_reason=?,
+	nextRevision := int64(3)
+	effectEvent := "effect_acknowledged"
+	if lateUnknown {
+		nextRevision = 4
+		effectEvent = "effect_reconciled"
+	}
+	if _, err := authz.tx.ExecContext(ctx, `UPDATE control_commands SET status=?,status_revision=?,outcome=?,safe_reason=?,
 		result_digest=?,terminal_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		WHERE command_id=?`, status, request.Outcome, reason, resultDigest[:], request.CommandID); err != nil {
+		WHERE command_id=?`, status, nextRevision, request.Outcome, reason, resultDigest[:], request.CommandID); err != nil {
 		return CommandProjection{}, sqliteConflict(err)
 	}
 	if _, err := authz.tx.ExecContext(ctx, `UPDATE control_outbox SET delivery_state='acknowledged',result_sequence=1,
@@ -304,7 +341,7 @@ func (s *Service) RecordResult(ctx context.Context, principal auth.Principal, re
 	if err := insertCommandEvent(ctx, authz.tx, request.CommandID, commandEvent); err != nil {
 		return CommandProjection{}, err
 	}
-	if err := insertCommandEvent(ctx, authz.tx, request.CommandID, "effect_acknowledged"); err != nil {
+	if err := insertCommandEvent(ctx, authz.tx, request.CommandID, effectEvent); err != nil {
 		return CommandProjection{}, err
 	}
 	var wake *CommitWake

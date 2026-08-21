@@ -194,13 +194,48 @@ func (s *Service) Reconcile(ctx context.Context, principal auth.Principal, reque
 func (s *Service) reconcileOutboxTx(ctx context.Context, tx *sql.Tx, limit int, projection *ReconcileProjection) error {
 	rows, err := tx.QueryContext(ctx, `SELECT outbox.command_id,outbox.delivery_state,
 		CASE WHEN outbox.delivery_state='claimed' THEN 'runner_lost'
+		 WHEN EXISTS(SELECT 1 FROM control_capability_grants grant_row WHERE grant_row.grant_id=command.grant_id
+		  AND grant_row.revision=command.grant_revision AND grant_row.revoked_at IS NOT NULL) THEN 'capability_revoked'
 		 WHEN command.grant_expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') THEN 'capability_expired'
+		 WHEN EXISTS(SELECT 1 FROM control_capability_leases lease WHERE lease.lease_id=command.lease_id
+		  AND lease.revision=command.lease_revision AND lease.revoked_at IS NOT NULL) THEN 'lease_revoked'
 		 ELSE 'lease_expired' END
 		FROM control_outbox outbox JOIN control_commands command ON command.command_id=outbox.command_id
-		WHERE (outbox.delivery_state='queued' AND (command.grant_expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 OR command.lease_expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now')))
+		WHERE (outbox.delivery_state='queued' AND (NOT EXISTS(
+		 SELECT 1 FROM control_capability_grants grant_row WHERE grant_row.grant_id=command.grant_id
+		  AND grant_row.revision=command.grant_revision AND grant_row.revoked_at IS NULL
+		  AND grant_row.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')) OR NOT EXISTS(
+		 SELECT 1 FROM control_capability_leases lease WHERE lease.lease_id=command.lease_id
+		  AND lease.revision=command.lease_revision AND lease.revoked_at IS NULL
+		  AND lease.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))))
 		 OR (outbox.delivery_state='claimed' AND outbox.safe_reason IS NULL AND command.outcome IS NULL
-		 AND outbox.claimed_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 seconds'))
+		 AND NOT EXISTS(
+		 SELECT 1 FROM control_capability_leases lease
+		 JOIN api_keys runner_key ON runner_key.id=lease.actor_api_key_id AND runner_key.user_id=lease.user_id
+		  AND runner_key.disabled_at IS NULL
+		  AND (runner_key.expires_at IS NULL OR runner_key.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		 JOIN users runner_user ON runner_user.id=lease.user_id AND runner_user.status='active'
+		 JOIN deliveries delivery ON delivery.id=lease.delivery_id AND delivery.issue_id=lease.root_issue_id
+		 JOIN issues issue ON issue.id=lease.root_issue_id AND issue.deleted_at IS NULL
+		 JOIN issue_control_revisions issue_revision ON issue_revision.issue_id=issue.id
+		  AND issue_revision.revision=lease.issue_revision
+		 JOIN agent_runs run ON run.id=lease.agent_run_id AND run.status='running'
+		 JOIN delivery_agent_run_activations activation ON activation.delivery_id=lease.delivery_id
+		  AND activation.attempt_id=lease.attempt_id AND activation.stage_key=lease.stage_key
+		  AND activation.execution_number=lease.execution_number AND activation.authority_epoch=lease.authority_epoch
+		  AND activation.authority_stage_event_id=lease.authority_stage_event_id
+		  AND activation.reporter_id=lease.reporter_id AND activation.agent_run_id=lease.agent_run_id
+		 JOIN delivery_stage_latest latest ON latest.delivery_id=lease.delivery_id AND latest.attempt_id=lease.attempt_id
+		  AND latest.stage_key=lease.stage_key AND latest.execution_number=lease.execution_number
+		  AND latest.execution_start_stage_event_id=lease.execution_start_stage_event_id
+		  AND latest.authority_epoch=lease.authority_epoch AND latest.authority_stage_event_id=lease.authority_stage_event_id
+		  AND latest.current_reporter_id=lease.reporter_id
+		 WHERE lease.lease_id=outbox.lease_id AND lease.revision=outbox.lease_revision
+		  AND lease.revoked_at IS NULL AND lease.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		  AND lease.user_id=outbox.claim_user_id AND lease.actor_api_key_id=outbox.claim_api_key_id
+		  AND lease.device_id=outbox.claim_device_id
+		  AND COALESCE((SELECT MAX(event.delivery_revision) FROM delivery_events event
+		   WHERE event.delivery_id=delivery.id),0)=lease.delivery_revision))
 		ORDER BY outbox.id LIMIT ?`, limit)
 	if err != nil {
 		return storageError(ctx, err)

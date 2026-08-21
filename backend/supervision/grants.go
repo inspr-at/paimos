@@ -178,7 +178,7 @@ func (s *Service) IssueActorGrant(ctx context.Context, principal auth.Principal,
 		return GrantProjection{}, err
 	}
 	credential := authz.principal.SafeCredentialID()
-	if current && !expiresAt.After(s.clock.Now().UTC()) {
+	if current && expiredAt(s.clock.Now().UTC(), expiresAt) {
 		if err := revokeGrantRow(ctx, authz.tx, grantID, revision, "grant_expired", "capability_expired"); err != nil {
 			return GrantProjection{}, err
 		}

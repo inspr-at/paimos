@@ -187,7 +187,7 @@ func (s *Service) putRunnerLease(ctx context.Context, principal auth.Principal, 
 		return LeaseProjection{}, domainError(ErrConflict, CodeStaleTarget)
 	}
 	credential := authz.principal.SafeCredentialID()
-	if current && !expiresAt.After(s.clock.Now().UTC()) {
+	if current && expiredAt(s.clock.Now().UTC(), expiresAt) {
 		if err := revokeLeaseRow(ctx, authz.tx, leaseID, revision, "lease_expired", "lease_expired"); err != nil {
 			return LeaseProjection{}, err
 		}

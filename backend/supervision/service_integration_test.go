@@ -8,8 +8,10 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -414,6 +416,48 @@ func TestActorAPIKeyUsesExactScopeAndRechecksScopeRemoval(t *testing.T) {
 	}
 }
 
+func TestProjectLifecycleAuthorityDoesNotReviveOldGrant(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryID, _, principal := seedGrantTarget(t, database)
+	service := NewService(database, Options{})
+	issueKey := sha256.Sum256([]byte("lifecycle-grant"))
+	grant, err := service.IssueActorGrant(context.Background(), principal, GrantIssueRequest{
+		DeliveryID: deliveryID, OperationKeyDigest: issueKey,
+	})
+	if err != nil {
+		t.Fatalf("issue grant: %v (%s)", err, ErrorCode(err))
+	}
+	var projectID int64
+	if err := database.QueryRow(`SELECT issue.project_id FROM deliveries delivery
+		JOIN issues issue ON issue.id=delivery.issue_id WHERE delivery.id=?`, deliveryID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE projects SET status='archived' WHERE id=?`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetActorGrant(context.Background(), principal, GrantGetRequest{GrantID: grant.GrantID,
+		Revision: grant.Revision}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("archived priority grant error=%v code=%s", err, ErrorCode(err))
+	}
+	if _, err := database.Exec(`UPDATE projects SET status='active' WHERE id=?`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetActorGrant(context.Background(), principal, GrantGetRequest{GrantID: grant.GrantID,
+		Revision: grant.Revision}); !IsCode(err, CodeStaleTarget) {
+		t.Fatalf("revived old grant error=%v code=%s", err, ErrorCode(err))
+	}
+	renewKey := sha256.Sum256([]byte("lifecycle-grant-new-authority"))
+	renewed, err := service.IssueActorGrant(context.Background(), principal, GrantIssueRequest{
+		DeliveryID: deliveryID, OperationKeyDigest: renewKey,
+	})
+	if err != nil {
+		t.Fatalf("issue new authority grant: %v (%s)", err, ErrorCode(err))
+	}
+	if renewed.GrantID != grant.GrantID || renewed.Revision != grant.Revision+1 {
+		t.Fatalf("authority renewal lineage got=%+v old=%+v", renewed, grant)
+	}
+}
+
 func seedRunnerActivation(t *testing.T, database *sql.DB, deliveryID, requestedBy int64) (int64, auth.Principal) {
 	t.Helper()
 	var issueID, projectID, reporterID, attemptEventID int64
@@ -531,6 +575,61 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 	if err != nil || input.Revision != 1 || input.Kind != "approval" {
 		t.Fatalf("create input: input=%+v err=%v code=%s", input, err, ErrorCode(err))
 	}
+	choiceKey := sha256.Sum256([]byte("choice-input"))
+	choice, err := service.CreateInputRequest(context.Background(), runner, InputCreateRequest{LeaseID: lease.LeaseID,
+		LeaseRevision: lease.Revision, Kind: "choice", PromptTemplate: "choice_required",
+		OptionCodes: []string{"choice_1", "choice_2"}, OperationKeyDigest: choiceKey})
+	if err != nil || choice.Revision != 1 || len(choice.OptionCodes) != 2 {
+		t.Fatalf("create choice input: input=%+v err=%v code=%s", choice, err, ErrorCode(err))
+	}
+	supersedeKey := sha256.Sum256([]byte("choice-input-supersede"))
+	supersedeRequest := InputCreateRequest{LeaseID: lease.LeaseID, LeaseRevision: lease.Revision,
+		RequestID: choice.RequestID, Kind: "choice", PromptTemplate: "choice_required",
+		OptionCodes: []string{"choice_1", "choice_2"}, OperationKeyDigest: supersedeKey}
+	startSupersede := make(chan struct{})
+	superseded := make(chan struct {
+		projection InputRequestProjection
+		err        error
+	}, 2)
+	for range 2 {
+		go func() {
+			<-startSupersede
+			projection, err := service.CreateInputRequest(context.Background(), runner, supersedeRequest)
+			superseded <- struct {
+				projection InputRequestProjection
+				err        error
+			}{projection, err}
+		}()
+	}
+	close(startSupersede)
+	for range 2 {
+		result := <-superseded
+		if result.err != nil || result.projection.Revision != 2 || result.projection.RequestID != choice.RequestID {
+			t.Fatalf("choice supersession race: projection=%+v err=%v code=%s", result.projection,
+				result.err, ErrorCode(result.err))
+		}
+	}
+	var requestedFacts, supersededFacts, seals, currentInputRevision int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM control_events WHERE input_request_id=? AND event_kind='input_requested'`,
+		choice.RequestID).Scan(&requestedFacts); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM control_events WHERE input_request_id=? AND event_kind='input_superseded'`,
+		choice.RequestID).Scan(&supersededFacts); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM control_input_request_seals WHERE request_id=?`, choice.RequestID).
+		Scan(&seals); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT current_revision FROM control_input_request_states WHERE request_id=?
+		AND terminal_event_id IS NULL`, choice.RequestID).Scan(&currentInputRevision); err != nil {
+		t.Fatal(err)
+	}
+	if requestedFacts != 2 || supersededFacts != 1 || seals != 2 || currentInputRevision != 2 {
+		t.Fatalf("choice lineage requested=%d superseded=%d seals=%d current=%d", requestedFacts,
+			supersededFacts, seals, currentInputRevision)
+	}
 	grantKey := sha256.Sum256([]byte("actor-grant-with-lease"))
 	grant, err := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
 		OperationKeyDigest: grantKey})
@@ -582,6 +681,262 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 	if runtimeState != "paused" || runtimeRevision != 2 || outboxState != "acknowledged" {
 		t.Fatalf("runtime/outbox truth state=%s revision=%d outbox=%s", runtimeState, runtimeRevision, outboxState)
 	}
+
+	resumeKey := sha256.Sum256([]byte("resume-command"))
+	resume, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
+		GrantRevision: grant.Revision, Action: "run.resume", RunID: runID, RuntimeRevision: 2,
+		OperationKeyDigest: resumeKey})
+	if err != nil {
+		t.Fatalf("create resume: %v (%s)", err, ErrorCode(err))
+	}
+	resumeConfirmKey := sha256.Sum256([]byte("resume-confirm"))
+	resume, err = service.ConfirmCommand(context.Background(), human, CommandConfirmRequest{CommandID: resume.CommandID,
+		StatusRevision: 1, OperationKeyDigest: resumeConfirmKey})
+	if err != nil || resume.Status != "accepted" {
+		t.Fatalf("confirm resume: command=%+v err=%v code=%s", resume, err, ErrorCode(err))
+	}
+	resumeClaimKey := sha256.Sum256([]byte("resume-claim"))
+	if _, err := service.Claim(context.Background(), runner, ClaimRequest{CommandID: resume.CommandID,
+		LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1, DeviceID: "runner-01",
+		OperationKeyDigest: resumeClaimKey}); err != nil {
+		t.Fatalf("claim resume: %v (%s)", err, ErrorCode(err))
+	}
+	revokeKey := sha256.Sum256([]byte("lease-loss"))
+	if _, err := service.RevokeRunnerLease(context.Background(), runner, LeaseRevokeRequest{LeaseID: lease.LeaseID,
+		Revision: lease.Revision, OperationKeyDigest: revokeKey}); err != nil {
+		t.Fatalf("revoke claimed lease: %v (%s)", err, ErrorCode(err))
+	}
+	reconciled, err := service.Reconcile(context.Background(), runner, ReconcileRequest{Limit: 100})
+	if err != nil || reconciled.UnknownOutcomes != 1 {
+		t.Fatalf("reconcile lease loss: projection=%+v err=%v code=%s", reconciled, err, ErrorCode(err))
+	}
+	if repeated, err := service.Reconcile(context.Background(), runner, ReconcileRequest{Limit: 100}); err != nil ||
+		repeated.UnknownOutcomes != 0 {
+		t.Fatalf("repeat reconcile duplicated loss: projection=%+v err=%v code=%s", repeated, err, ErrorCode(err))
+	}
+	var resumeRevision int64
+	var resumeStatus, resumeOutcome, resumeReason, resumeOutboxState, resumeOutboxReason string
+	if err := database.QueryRow(`SELECT command.status_revision,command.status,command.outcome,command.safe_reason,
+		outbox.delivery_state,outbox.safe_reason FROM control_commands command JOIN control_outbox outbox
+		ON outbox.command_id=command.command_id WHERE command.command_id=?`, resume.CommandID).Scan(&resumeRevision,
+		&resumeStatus, &resumeOutcome, &resumeReason, &resumeOutboxState, &resumeOutboxReason); err != nil {
+		t.Fatal(err)
+	}
+	if resumeRevision != 3 || resumeStatus != "accepted" || resumeOutcome != "outcome_unknown" ||
+		resumeReason != "runner_lost" || resumeOutboxState != "claimed" || resumeOutboxReason != "runner_lost" {
+		t.Fatalf("unknown state rev=%d status=%s outcome=%s reason=%s outbox=%s/%s", resumeRevision,
+			resumeStatus, resumeOutcome, resumeReason, resumeOutboxState, resumeOutboxReason)
+	}
+	lateKey := sha256.Sum256([]byte("late-resume-result"))
+	lateRequest := ResultRequest{CommandID: resume.CommandID, LeaseID: lease.LeaseID,
+		LeaseRevision: lease.Revision, EffectSequence: 1, ClaimSequence: 1, ResultSequence: 1,
+		DeviceID: "runner-01", Outcome: "applied", OperationKeyDigest: lateKey}
+	late, err := service.RecordResult(context.Background(), runner, lateRequest)
+	if err != nil || late.Status != "applied" || late.StatusRevision != 4 || late.Outcome != "applied" {
+		t.Fatalf("late exact result: command=%+v err=%v code=%s", late, err, ErrorCode(err))
+	}
+	replayedLate, err := service.RecordResult(context.Background(), runner, lateRequest)
+	if err != nil || replayedLate.CommandID != late.CommandID || replayedLate.StatusRevision != 4 {
+		t.Fatalf("late result replay: command=%+v err=%v code=%s", replayedLate, err, ErrorCode(err))
+	}
+	convergedLate := lateRequest
+	convergedLate.OperationKeyDigest = sha256.Sum256([]byte("late-resume-result-new-key"))
+	if projection, err := service.RecordResult(context.Background(), runner, convergedLate); err != nil ||
+		projection.CommandID != late.CommandID || projection.StatusRevision != 4 {
+		t.Fatalf("late result semantic converge: command=%+v err=%v code=%s", projection, err, ErrorCode(err))
+	}
+	var reconciledFacts, acknowledgedFacts, unknownFacts, resultOperations int
+	for _, check := range []struct {
+		query string
+		value *int
+	}{
+		{`SELECT COUNT(*) FROM control_events WHERE command_id=? AND event_kind='effect_reconciled'`, &reconciledFacts},
+		{`SELECT COUNT(*) FROM control_events WHERE command_id=? AND event_kind='effect_acknowledged'`, &acknowledgedFacts},
+		{`SELECT COUNT(*) FROM control_events WHERE command_id=? AND event_kind='effect_outcome_unknown'`, &unknownFacts},
+		{`SELECT COUNT(*) FROM control_operation_keys WHERE command_id=? AND operation_kind='command.result'`, &resultOperations},
+	} {
+		if err := database.QueryRow(check.query, resume.CommandID).Scan(check.value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if reconciledFacts != 1 || acknowledgedFacts != 0 || unknownFacts != 1 || resultOperations != 2 {
+		t.Fatalf("late result facts reconciled=%d acknowledged=%d unknown=%d operations=%d",
+			reconciledFacts, acknowledgedFacts, unknownFacts, resultOperations)
+	}
+	if err := database.QueryRow(`SELECT state,revision FROM control_runtime_states WHERE agent_run_id=?`, runID).
+		Scan(&runtimeState, &runtimeRevision); err != nil {
+		t.Fatal(err)
+	}
+	if runtimeState != "running" || runtimeRevision != 3 {
+		t.Fatalf("late runtime truth state=%s revision=%d", runtimeState, runtimeRevision)
+	}
+	if _, err := database.Exec(`UPDATE api_keys SET scopes='' WHERE id=?`, runner.APIKeyID()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RecordResult(context.Background(), runner, lateRequest); !IsCode(err, CodeScopeRevoked) {
+		t.Fatalf("late replay after scope removal error=%v code=%s", err, ErrorCode(err))
+	}
+}
+
+func TestThirtyTwoConnectionAcceptedEffectReservationAndClaimConverge(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	database.SetMaxOpenConns(32)
+	deliveryID, humanID, human := seedGrantTarget(t, database)
+	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+	service := NewService(database, Options{})
+	leaseKey := sha256.Sum256([]byte("concurrent-lease"))
+	lease, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner-01", SupportedActions: []Action{"run.cancel.running", "run.pause", "run.resume"},
+		OperationKeyDigest: leaseKey})
+	if err != nil {
+		t.Fatalf("issue lease: %v (%s)", err, ErrorCode(err))
+	}
+	grantKey := sha256.Sum256([]byte("concurrent-async-grant"))
+	grant, err := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
+		OperationKeyDigest: grantKey})
+	if err != nil {
+		t.Fatalf("issue grant: %v (%s)", err, ErrorCode(err))
+	}
+	createKey := sha256.Sum256([]byte("concurrent-pause"))
+	command, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
+		GrantRevision: grant.Revision, Action: "run.pause", RunID: runID, RuntimeRevision: 1,
+		OperationKeyDigest: createKey})
+	if err != nil {
+		t.Fatalf("create command: %v (%s)", err, ErrorCode(err))
+	}
+
+	const contenders = 32
+	start := make(chan struct{})
+	confirmResults := make(chan error, contenders)
+	for index := 0; index < contenders; index++ {
+		go func(index int) {
+			<-start
+			key := sha256.Sum256([]byte(fmt.Sprintf("async-confirm-%02d", index)))
+			var err error
+			for attempt := 0; attempt < 8; attempt++ {
+				_, err = service.ConfirmCommand(context.Background(), human, CommandConfirmRequest{CommandID: command.CommandID,
+					StatusRevision: 1, OperationKeyDigest: key})
+				if !IsCode(err, CodeStorageUnavailable) {
+					break
+				}
+				time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+			}
+			confirmResults <- err
+		}(index)
+	}
+	close(start)
+	for index := 0; index < contenders; index++ {
+		if err := <-confirmResults; err != nil {
+			t.Fatalf("confirm contender %d: %v (%s)", index, err, ErrorCode(err))
+		}
+	}
+
+	start = make(chan struct{})
+	claimResults := make(chan error, contenders)
+	for index := 0; index < contenders; index++ {
+		go func(index int) {
+			<-start
+			key := sha256.Sum256([]byte(fmt.Sprintf("async-claim-%02d", index)))
+			var err error
+			for attempt := 0; attempt < 8; attempt++ {
+				_, err = service.Claim(context.Background(), runner, ClaimRequest{CommandID: command.CommandID,
+					LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1,
+					DeviceID: "runner-01", OperationKeyDigest: key})
+				if !IsCode(err, CodeStorageUnavailable) {
+					break
+				}
+				time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+			}
+			claimResults <- err
+		}(index)
+	}
+	close(start)
+	for index := 0; index < contenders; index++ {
+		if err := <-claimResults; err != nil {
+			t.Fatalf("claim contender %d: %v (%s)", index, err, ErrorCode(err))
+		}
+	}
+
+	var outboxes, queuedFacts, claimedFacts, confirmOps, claimOps int
+	for _, check := range []struct {
+		query string
+		value *int
+	}{
+		{`SELECT COUNT(*) FROM control_outbox WHERE command_id=? AND delivery_state='claimed'`, &outboxes},
+		{`SELECT COUNT(*) FROM control_events WHERE command_id=? AND event_kind='effect_queued'`, &queuedFacts},
+		{`SELECT COUNT(*) FROM control_events WHERE command_id=? AND event_kind='effect_claimed'`, &claimedFacts},
+		{`SELECT COUNT(*) FROM control_operation_keys WHERE command_id=? AND operation_kind='command.confirm'`, &confirmOps},
+		{`SELECT COUNT(*) FROM control_operation_keys WHERE command_id=? AND operation_kind='command.claim'`, &claimOps},
+	} {
+		if err := database.QueryRow(check.query, command.CommandID).Scan(check.value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if outboxes != 1 || queuedFacts != 1 || claimedFacts != 1 || confirmOps != contenders || claimOps != contenders {
+		t.Fatalf("async convergence outbox=%d queued=%d claimed=%d confirm_ops=%d claim_ops=%d",
+			outboxes, queuedFacts, claimedFacts, confirmOps, claimOps)
+	}
+}
+
+func TestAuthorityRotationInvalidatesAndRevisesLeaseLineage(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryID, humanID, _ := seedGrantTarget(t, database)
+	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+	service := NewService(database, Options{})
+	firstKey := sha256.Sum256([]byte("authority-lease-1"))
+	lease, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner-01", SupportedActions: []Action{"run.cancel.running", "run.pause", "run.resume"},
+		OperationKeyDigest: firstKey})
+	if err != nil {
+		t.Fatalf("issue lease: %v (%s)", err, ErrorCode(err))
+	}
+	var attemptID, reporterID, startID int64
+	if err := database.QueryRow(`SELECT attempt_id,reporter_id,execution_start_stage_event_id
+		FROM delivery_agent_run_links WHERE agent_run_id=?`, runID).Scan(&attemptID, &reporterID, &startID); err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,
+		payload_hash,kind,reporter_id,server_received_at)
+		VALUES(?,4,'authority-rotation',zeroblob(32),'handoff',?,'2026-08-20T10:03:00Z')`, deliveryID, reporterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelopeID, _ := envelope.LastInsertId()
+	authority, err := database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,
+		execution_number,event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,
+		execution_start_stage_event_id,previous_stage_event_id,handoff_from_reporter_id,
+		authority_source_sequence_cutoff,reason_code,server_received_at)
+		VALUES(?,?,'specification',1,2,2,?,'handoff',?,?,?,?,0,'authority_rotated','2026-08-20T10:03:00Z')`,
+		deliveryID, attemptID, envelopeID, reporterID, startID, startID, reporterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorityID, _ := authority.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO delivery_agent_run_activations(delivery_id,attempt_id,stage_key,
+		execution_number,authority_epoch,agent_run_id,reporter_id,authority_stage_event_id,
+		telemetry_sequence_cutoff,created_at) VALUES(?,?,'specification',1,2,?,?,?,0,'2026-08-20T10:03:00Z')`,
+		deliveryID, attemptID, runID, reporterID, authorityID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE delivery_stage_latest SET authority_epoch=2,authority_stage_event_id=?,
+		updated_at='2026-08-20T10:03:00Z' WHERE delivery_id=? AND attempt_id=? AND stage_key='specification'`,
+		authorityID, deliveryID, attemptID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Pull(context.Background(), runner, PullRequest{LeaseID: lease.LeaseID,
+		LeaseRevision: lease.Revision}); !IsCode(err, CodeStaleTarget) {
+		t.Fatalf("old authority pull error=%v code=%s", err, ErrorCode(err))
+	}
+	secondKey := sha256.Sum256([]byte("authority-lease-2"))
+	revised, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner-01", SupportedActions: []Action{"run.cancel.running", "run.pause", "run.resume"},
+		OperationKeyDigest: secondKey})
+	if err != nil {
+		t.Fatalf("revise lease: %v (%s)", err, ErrorCode(err))
+	}
+	if revised.LeaseID != lease.LeaseID || revised.Revision != lease.Revision+1 || revised.Target.AuthorityEpoch != 2 {
+		t.Fatalf("authority lease lineage old=%+v new=%+v", lease, revised)
+	}
 }
 
 func foreignKeyViolations(database *sql.DB) (int, error) {
@@ -595,4 +950,42 @@ func foreignKeyViolations(database *sql.DB) (int, error) {
 		count++
 	}
 	return count, rows.Err()
+}
+
+func TestPullAndReconcileQueryPlansUseM147Indexes(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	cases := []struct {
+		query string
+		index string
+	}{
+		{`EXPLAIN QUERY PLAN SELECT id FROM control_outbox WHERE lease_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+		 AND lease_revision=1 AND delivery_state='queued' AND id>0 AND id<=100 ORDER BY id LIMIT 101`,
+			"idx_control_outbox_lease"},
+		{`EXPLAIN QUERY PLAN SELECT command_id FROM control_commands WHERE status='pending_confirmation'
+		 AND expires_at<='2026-08-21T12:00:00.000Z' ORDER BY expires_at,command_id LIMIT 100`,
+			"idx_control_commands_status"},
+		{`EXPLAIN QUERY PLAN SELECT lease_id FROM control_capability_leases WHERE revoked_at IS NULL
+		 AND expires_at<='2026-08-21T12:00:00.000Z' ORDER BY expires_at,lease_id LIMIT 100`,
+			"idx_control_leases_expiry"},
+	}
+	for _, testCase := range cases {
+		rows, err := database.Query(testCase.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var detail strings.Builder
+		for rows.Next() {
+			var id, parent, unused int
+			var line string
+			if err := rows.Scan(&id, &parent, &unused, &line); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			detail.WriteString(line)
+		}
+		rows.Close()
+		if !strings.Contains(detail.String(), testCase.index) {
+			t.Fatalf("plan %q does not use %s", detail.String(), testCase.index)
+		}
+	}
 }

@@ -6,6 +6,7 @@ package supervision
 import (
 	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -31,6 +32,19 @@ func TestFrozenDurationsAndActionPolicy(t *testing.T) {
 	}
 	if _, err := runnerActions("active", []Action{"run.pause"}); !IsCode(err, CodeInvalidAction) {
 		t.Fatalf("unpaired pause error=%v code=%s", err, ErrorCode(err))
+	}
+}
+
+func TestExpiryBoundaryIsExact(t *testing.T) {
+	boundary := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	if expiredAt(boundary.Add(-time.Millisecond), boundary) {
+		t.Fatal("T-1ms is not expired")
+	}
+	if !expiredAt(boundary, boundary) {
+		t.Fatal("T equality must be expired")
+	}
+	if !expiredAt(boundary.Add(time.Millisecond), boundary) {
+		t.Fatal("T+1ms must be expired")
 	}
 }
 
@@ -60,6 +74,18 @@ func TestOperationKeyDigestAcceptsOnlyNonZeroDigest(t *testing.T) {
 	digest[31] = 1
 	if got, err := operationKeyDigest(digest); err != nil || got != digest {
 		t.Fatalf("valid digest got=%x err=%v", got, err)
+	}
+}
+
+func TestSecretSentinelsAreRejectedFromRunnerSafeStrings(t *testing.T) {
+	for _, sentinel := range []string{"sk_abcdefghijklmnopqrst", "sk-ant-abcdefghijklmnopqrst",
+		"github_pat_12345678901234567890", "AKIA1234567890ABCDEF"} {
+		if err := validateDevice(sentinel); !IsCode(err, CodeInvalidDevice) {
+			t.Fatalf("secret-like device %q error=%v code=%s", sentinel, err, ErrorCode(err))
+		}
+		if err := validateDevice("runner\n" + sentinel); err == nil || strings.Contains(err.Error(), sentinel) {
+			t.Fatalf("unsafe error for %q: %v", sentinel, err)
+		}
 	}
 }
 

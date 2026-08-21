@@ -137,6 +137,8 @@ func parseControlTime(value string) (time.Time, error) {
 	return parsed.UTC(), nil
 }
 
+func expiredAt(now, expiry time.Time) bool { return !expiry.After(now) }
+
 func safeID(source IDSource) (string, error) {
 	value := source.NewID()
 	if !validUUID(value) {
