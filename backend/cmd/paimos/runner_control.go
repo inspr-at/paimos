@@ -505,7 +505,7 @@ func newRunControlArbiterWithAdapter(client *Client, runID int64, deviceID strin
 	adapter runnerControlAdapter) *runControlArbiter {
 	actions := []string(nil)
 	if adapter != nil {
-		actions = adapter.SupportedActions()
+		actions = append([]string(nil), adapter.SupportedActions()...)
 	}
 	return &runControlArbiter{http: runnerControlHTTP{client: client, supportedActions: actions}, runID: runID, deviceID: deviceID,
 		journal: journal, requests: make(chan runnerClaimedCancellation, 100), now: time.Now,

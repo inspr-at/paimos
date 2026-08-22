@@ -32,6 +32,22 @@ type fakeDurableControlStore struct {
 	runtimeState string
 }
 
+type mutableCapabilityControlAdapter struct {
+	actions []string
+}
+
+func (a *mutableCapabilityControlAdapter) SupportedActions() []string {
+	return a.actions
+}
+
+func (*mutableCapabilityControlAdapter) Apply(context.Context, runnerControlEffect) (runnerControlDecision, error) {
+	return runnerControlDecision{Outcome: "applied"}, nil
+}
+
+func (*mutableCapabilityControlAdapter) Reconcile(context.Context, runnerControlEffect) (runnerControlDecision, bool, error) {
+	return runnerControlDecision{}, false, nil
+}
+
 func newFakeDurableControlAdapter() *fakeDurableControlAdapter {
 	return &fakeDurableControlAdapter{store: &fakeDurableControlStore{results: map[string]runnerControlDecision{},
 		applyCount: map[string]int{}, runtimeState: "running"}}
@@ -237,5 +253,16 @@ func TestOneShotRunnerControlAdapterAdvertisesOnlyOwnedCancellation(t *testing.T
 		if _, err := canonicalRunnerControlActions(invalid); err == nil {
 			t.Fatalf("invalid capability set was accepted: %v", invalid)
 		}
+	}
+}
+
+func TestRunnerControlAdapterCapabilitiesAreFrozenAtConstruction(t *testing.T) {
+	adapter := &mutableCapabilityControlAdapter{actions: []string{"run.cancel.running"}}
+	arbiter := newRunControlArbiterWithAdapter(&Client{}, 17, "device-a", nil, adapter)
+	adapter.actions[0] = "input.respond"
+	adapter.actions = append(adapter.actions, "run.pause", "run.resume")
+
+	if !reflect.DeepEqual(arbiter.http.supportedActions, []string{"run.cancel.running"}) {
+		t.Fatalf("frozen actions aliased mutable adapter storage: %v", arbiter.http.supportedActions)
 	}
 }
