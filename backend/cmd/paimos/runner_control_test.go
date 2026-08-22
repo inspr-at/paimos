@@ -96,6 +96,11 @@ func TestRunnerControlHTTPRetriesImmutableRequestAndStableKey(t *testing.T) {
 	if len(keys) != 2 || keys[0] == "" || keys[0] != keys[1] || bodies[0] != bodies[1] {
 		t.Fatalf("keys=%v bodies=%v", keys, bodies)
 	}
+	if !strings.Contains(bodies[0], `"supported_actions":["run.cancel.running"]`) ||
+		strings.Contains(bodies[0], "input.respond") || strings.Contains(bodies[0], "run.pause") ||
+		strings.Contains(bodies[0], "run.resume") {
+		t.Fatalf("one-shot lease advertised unsupported actions: %s", bodies[0])
+	}
 	if strings.Contains(strings.Join(bodies, ""), "test-key") {
 		t.Fatal("bearer key entered the request body")
 	}
@@ -312,6 +317,25 @@ func TestRunnerControlPullAndRevokeBindExactDevice(t *testing.T) {
 	}
 	if !reflect.DeepEqual(operations, []string{"", "revoke"}) {
 		t.Fatalf("operations=%v", operations)
+	}
+}
+
+func TestRunnerControlClaimRejectsTypedEffectDrift(t *testing.T) {
+	target := runnerControlTargetFixture(17)
+	effect := runnerControlEffect{OutboxID: 1, CommandID: "command-input", Action: "input.respond",
+		EffectSequence: 1, LeaseID: "lease-opaque", LeaseRevision: 3, Target: target,
+		InputRequestID: "request-opaque", InputRevision: 2, InputResponse: "choice", ChoiceOrdinal: 1,
+		ChoiceCode: "choice_1"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		drifted := effect
+		drifted.ChoiceOrdinal, drifted.ChoiceCode = 2, "choice_2"
+		_ = json.NewEncoder(w).Encode(drifted)
+	}))
+	defer server.Close()
+	controlHTTP := runnerControlHTTP{client: &Client{baseURL: server.URL, apiKey: "test", http: server.Client()},
+		supportedActions: []string{"input.respond"}}
+	if _, err := controlHTTP.claim(context.Background(), effect, "device-a"); err == nil {
+		t.Fatal("claim accepted a response that changed the pulled typed input")
 	}
 }
 
