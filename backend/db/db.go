@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -11316,6 +11317,103 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE TRIGGER trg_external_stage_audit_no_delete BEFORE DELETE ON external_stage_audit_events
 			 BEGIN SELECT RAISE(ABORT,'external stage audit is append-only'); END`,
 		}},
+
+		// M149 / PAI-810: principal-attributed audit for the additive internal
+		// owner-activation route. This remains separate from the immutable M148
+		// setup table so released v5.11.0 databases upgrade additively.
+		{149, []string{
+			`CREATE TABLE external_stage_owner_activation_events (
+			 id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+			 delivery_id          INTEGER NOT NULL,
+			 project_id           INTEGER NOT NULL REFERENCES projects(id),
+			 registration_id      INTEGER NOT NULL,
+			 attempt_id           INTEGER NOT NULL,
+			 stage_key            TEXT NOT NULL CHECK(stage_key IN ('deployment','verification')),
+			 execution_number     INTEGER NOT NULL CHECK(execution_number>0),
+			 authority_epoch      INTEGER NOT NULL CHECK(authority_epoch>0),
+			 reporter_id          INTEGER NOT NULL,
+			 actor_user_id        INTEGER NOT NULL REFERENCES users(id),
+			 actor_principal_kind TEXT NOT NULL CHECK(actor_principal_kind IN ('session','api_key')),
+			 actor_session_id     TEXT,
+			 actor_api_key_id     INTEGER REFERENCES api_keys(id),
+			 request_digest       BLOB NOT NULL CHECK(typeof(request_digest)='blob' AND length(request_digest)=32),
+			 idempotency_digest   BLOB NOT NULL CHECK(typeof(idempotency_digest)='blob' AND length(idempotency_digest)=32),
+			 server_received_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 CHECK((actor_principal_kind='session' AND actor_session_id IS NOT NULL AND actor_api_key_id IS NULL) OR
+			       (actor_principal_kind='api_key' AND actor_session_id IS NULL AND actor_api_key_id IS NOT NULL)),
+			 FOREIGN KEY(delivery_id,registration_id) REFERENCES external_stage_reporter_registrations(delivery_id,id),
+			 FOREIGN KEY(delivery_id,attempt_id) REFERENCES delivery_attempts(delivery_id,id),
+			 FOREIGN KEY(delivery_id,reporter_id) REFERENCES delivery_reporters(delivery_id,id)
+			)`,
+			`CREATE UNIQUE INDEX idx_external_stage_owner_activation_target
+			 ON external_stage_owner_activation_events(attempt_id,stage_key,execution_number,authority_epoch)`,
+			`CREATE UNIQUE INDEX idx_external_stage_owner_activation_idempotency
+			 ON external_stage_owner_activation_events(actor_user_id,actor_principal_kind,
+			  COALESCE(actor_session_id,''),COALESCE(actor_api_key_id,0),delivery_id,idempotency_digest)`,
+			`CREATE TRIGGER trg_external_stage_owner_activation_insert_guard
+			 BEFORE INSERT ON external_stage_owner_activation_events
+			 WHEN NEW.server_received_at<>strftime('%Y-%m-%dT%H:%M:%fZ','now') OR
+			  NOT EXISTS(SELECT 1 FROM external_stage_user_roles actor WHERE actor.id=NEW.actor_user_id
+			   AND actor.status='active' AND actor.effective_role<>'external'
+			   AND (actor.effective_role IN ('admin','super_admin') OR
+			        EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=actor.id
+			         AND membership.project_id=NEW.project_id AND membership.access_level='editor') OR
+			        (actor.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+			         WHERE membership.user_id=actor.id AND membership.project_id=NEW.project_id)))
+			   AND ((NEW.actor_principal_kind='session' AND EXISTS(SELECT 1 FROM sessions session
+			         WHERE session.credential_id=NEW.actor_session_id
+			          AND COALESCE(session.acting_as_user_id,session.user_id)=actor.id
+			          AND julianday(session.expires_at)>julianday('now'))) OR
+			        (NEW.actor_principal_kind='api_key' AND EXISTS(SELECT 1 FROM api_keys api_key
+			         WHERE api_key.id=NEW.actor_api_key_id AND api_key.user_id=actor.id
+			          AND api_key.disabled_at IS NULL
+			          AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
+			          AND (api_key.scopes='*' OR (','||replace(api_key.scopes,' ','')||',') LIKE '%,agent-controls:write,%'))))) OR
+			  NOT EXISTS(SELECT 1 FROM external_stage_reporter_registrations registration
+			   JOIN external_stage_setup_events setup ON setup.registration_id=registration.id
+			    AND setup.delivery_id=registration.delivery_id AND setup.event_kind='registration_created'
+			   JOIN delivery_attempts attempt ON attempt.id=NEW.attempt_id AND attempt.delivery_id=NEW.delivery_id
+			   JOIN deliveries delivery ON delivery.id=NEW.delivery_id
+			   JOIN issues issue ON issue.id=delivery.issue_id AND issue.project_id=NEW.project_id AND issue.deleted_at IS NULL
+			   JOIN delivery_stage_latest latest ON latest.delivery_id=NEW.delivery_id AND latest.attempt_id=NEW.attempt_id
+			    AND latest.stage_key=NEW.stage_key AND latest.execution_number=NEW.execution_number
+			    AND latest.authority_epoch=NEW.authority_epoch AND latest.current_reporter_id=NEW.reporter_id
+			   JOIN delivery_stage_events authority ON authority.id=latest.authority_stage_event_id
+			    AND authority.attempt_id=NEW.attempt_id AND authority.stage_key=NEW.stage_key
+			    AND authority.execution_number=NEW.execution_number AND authority.authority_epoch=NEW.authority_epoch
+			    AND authority.reporter_id=NEW.reporter_id AND authority.event_type='handoff'
+			    AND authority.reason_code='external_owner_activation'
+			   WHERE registration.id=NEW.registration_id AND registration.delivery_id=NEW.delivery_id
+			    AND registration.project_id=NEW.project_id AND registration.reporter_id=NEW.reporter_id
+			    AND registration.reporter_class='pharos' AND registration.reporter_role='owner'
+			    AND registration.revoked_at IS NULL)
+			 BEGIN SELECT RAISE(ABORT,'external owner activation lacks current operator and handoff proof'); END`,
+			`CREATE TRIGGER trg_external_stage_owner_activation_no_update
+			 BEFORE UPDATE ON external_stage_owner_activation_events
+			 BEGIN SELECT RAISE(ABORT,'external owner activation audit is append-only'); END`,
+			`CREATE TRIGGER trg_external_stage_owner_activation_no_delete
+			 BEFORE DELETE ON external_stage_owner_activation_events
+			 BEGIN SELECT RAISE(ABORT,'external owner activation audit is append-only'); END`,
+		}},
+
+		// M150 / PAI-810: source-free implementation evidence for the local
+		// report-back runner. The runner sends only a domain-separated SHA-256
+		// binding for the exact tested worktree; source, paths, diffs, commands,
+		// output, and credentials never enter the wire or database.
+		{150, []string{
+			`ALTER TABLE agent_runs ADD COLUMN implementation_result_digest TEXT NOT NULL DEFAULT ''
+			 CHECK(implementation_result_digest='' OR
+			  (length(CAST(implementation_result_digest AS BLOB))=64 AND
+			   implementation_result_digest NOT GLOB '*[^0-9a-f]*'))`,
+			`CREATE TRIGGER trg_agent_runs_implementation_result_digest_guard
+			 BEFORE UPDATE OF implementation_result_digest ON agent_runs
+			 WHEN NEW.implementation_result_digest<>OLD.implementation_result_digest AND
+			  (OLD.delivery_instrumentation_version<>1 OR OLD.implementation_result_digest<>'' OR
+			   OLD.status<>'running' OR NEW.status<>'tests_passed' OR
+			   length(CAST(NEW.implementation_result_digest AS BLOB))<>64 OR
+			   NEW.implementation_result_digest GLOB '*[^0-9a-f]*')
+			 BEGIN SELECT RAISE(ABORT,'invalid implementation result digest transition'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -11453,6 +11551,58 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	// partial local copies so sealed-stream invariants cannot be skipped behind
 	// CREATE IF NOT EXISTS behavior.
 	148: checkM148SchemaIsUnapplied,
+	149: checkM149SchemaIsUnapplied,
+	150: checkM150SchemaIsUnapplied,
+}
+
+func checkM149SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
+	return checkSchemaObjectsAbsent(ctx, conn, 149, []string{
+		"external_stage_owner_activation_events", "idx_external_stage_owner_activation_target",
+		"idx_external_stage_owner_activation_idempotency", "trg_external_stage_owner_activation_insert_guard",
+		"trg_external_stage_owner_activation_no_update", "trg_external_stage_owner_activation_no_delete",
+	})
+}
+
+func checkM150SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
+	var collisions []string
+	rows, err := conn.QueryContext(ctx, `
+		SELECT 'agent_runs.'||name FROM pragma_table_info('agent_runs') WHERE name='implementation_result_digest'
+		UNION ALL
+		SELECT type||':'||name FROM sqlite_master WHERE name='trg_agent_runs_implementation_result_digest_guard'
+		ORDER BY 1`)
+	if err != nil {
+		return fmt.Errorf("inspect M150 schema ownership: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var collision string
+		if err := rows.Scan(&collision); err != nil {
+			return fmt.Errorf("scan M150 schema ownership: %w", err)
+		}
+		collisions = append(collisions, collision)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate M150 schema ownership: %w", err)
+	}
+	if len(collisions) > 0 {
+		return fmt.Errorf("M150 schema is partially present or locally incompatible: %s", strings.Join(collisions, ", "))
+	}
+	return nil
+}
+
+func checkSchemaObjectsAbsent(ctx context.Context, conn *sql.Conn, version int, names []string) error {
+	for _, name := range names {
+		var kind string
+		err := conn.QueryRowContext(ctx, `SELECT type FROM sqlite_master WHERE name=?`, name).Scan(&kind)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect M%d schema ownership: %w", version, err)
+		}
+		return fmt.Errorf("M%d schema is partially present or locally incompatible: %s:%s", version, kind, name)
+	}
+	return nil
 }
 
 func checkM148SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {

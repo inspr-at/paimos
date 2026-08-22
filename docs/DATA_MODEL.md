@@ -563,11 +563,27 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M144 | `deliveries` and immutable delivery fact tables; `delivery_change_log`; `agent_runs.delivery_instrumentation_version` | Issue-rooted end-to-end delivery attempts, stage lineage/evidence, duration history, and deletion-safe invalidation identity (PAI-802). |
 | M145 | Agent Mode change audiences, legacy roots, and privacy guards | Revoked-project replay, live-only version-0 synthetic provenance, recursive metadata invalidation, and upgraded secret-like text backstops (PAI-804). |
 | M146 | `comments.client_request_id`, `idx_comments_author_client_request` | Per-author exact-once identity for confirmed internal notes. The partial unique index is the atomic backstop; a CHECK requires an authenticated author, internal visibility, ASCII-safe syntax, and a 128-byte maximum (PAI-808). |
+| M147 | supervisory control grants, approvals, commands, runtime state, outbox, and append-only control events | Principal-bound, compare-and-swap Agent Mode controls with exact target snapshots and auditable execution (PAI-809). |
+| M148 | external-stage registrations, handoffs, credentials, owner/dependency streams, projections, setup/audit events | Frozen v1 Pharos owner and Janus dependency reporting with exact authority, replay, and secret boundaries (PAI-810). |
+| M149 | `external_stage_owner_activation_events` | Principal-attributed, append-only proof for the additive internal Pharos owner-activation route; released M148 remains immutable (PAI-810). |
+| M150 | `agent_runs.implementation_result_digest` | Optional immutable source-free SHA-256 binding for the exact bounded covered repository source surface observed stable around successful tests when no commit exists; ignored payloads and the external execution environment are outside the binding (PAI-810). |
 
 `agent_runs.status=completed` means implementation finished without a configured
 test command; it never implies tests passed. `tests_passed` and `tests_failed`
 require a non-empty `tests_summary` of at most 4096 bytes, supplied by the same
-transition or already persisted. Telemetry history is append-only. Its latest
+transition or already persisted. For a current version-1 instrumented
+implementation run whose attempt requires QA, `tests_passed` additionally
+requires an allowlisted implementation commit, source-free implementation
+digest, or same-issue attachment and
+atomically records eligible implementation success plus eligible QA success;
+legacy version-0 runs are not backfilled. The QA `test_result` digest binds the
+run id, exactly one selected implementation reference (commit, else digest,
+else attachment), and the exact persisted bytes of the test summary. Unselected
+lower-priority transport fields do not enter that canonical tuple. A
+terminal QA execution is retried with exact current execution/epoch CAS, while
+an active human or external QA execution is never replaced. Later `deployed` or
+`failed` run statuses do not erase immutable valid test evidence; new upstream
+lineage can make it ineligible. Telemetry history is append-only. Its latest
 projection keeps independent event, heartbeat, semantic, and estimate pointers;
 only the server-received heartbeat timestamp is liveness evidence. M143
 reconstructs the complete projection from append-only history, including

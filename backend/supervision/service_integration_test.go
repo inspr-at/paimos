@@ -1678,6 +1678,47 @@ func TestReconcileRealMutationExpiryBoundaries(t *testing.T) {
 	}
 }
 
+func TestRunnerLeaseRevocationIsAtomicCancellationBarrier(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryID, humanID, human := seedGrantTarget(t, database)
+	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+	service := NewService(database, Options{})
+	lease, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner-01", SupportedActions: []Action{"run.cancel.running"},
+		OperationKeyDigest: sha256.Sum256([]byte("success-barrier-lease"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
+		OperationKeyDigest: sha256.Sum256([]byte("success-barrier-grant"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
+		GrantRevision: grant.Revision, Action: "run.cancel.running", RunID: runID,
+		OperationKeyDigest: sha256.Sum256([]byte("success-barrier-cancel"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revoke := LeaseRevokeRequest{LeaseID: lease.LeaseID, Revision: lease.Revision, DeviceID: "runner-01",
+		OperationKeyDigest: sha256.Sum256([]byte("success-barrier-revoke"))}
+	if _, err := service.RevokeRunnerLease(context.Background(), runner, revoke); !IsCode(err, CodeStaleTarget) {
+		t.Fatalf("pending cancellation did not block revoke: err=%v code=%s", err, ErrorCode(err))
+	}
+	var revoked bool
+	if err := database.QueryRow(`SELECT revoked_at IS NOT NULL FROM control_capability_leases
+		WHERE lease_id=? AND revision=?`, lease.LeaseID, lease.Revision).Scan(&revoked); err != nil || revoked {
+		t.Fatalf("blocked revocation mutated lease: revoked=%v err=%v", revoked, err)
+	}
+	if _, err := service.WithdrawCommand(context.Background(), human, CommandWithdrawRequest{CommandID: command.CommandID,
+		StatusRevision: 1, OperationKeyDigest: sha256.Sum256([]byte("success-barrier-withdraw"))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RevokeRunnerLease(context.Background(), runner, revoke); err != nil {
+		t.Fatalf("withdrawn cancellation still blocked revoke: %v (%s)", err, ErrorCode(err))
+	}
+}
+
 func TestProjectLifecycleRealServiceActionMatrix(t *testing.T) {
 	for _, status := range []string{"active", "frozen", "archived", "deleted"} {
 		t.Run(status, func(t *testing.T) {

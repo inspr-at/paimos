@@ -34,6 +34,7 @@ import (
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/contracts"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/externalstage"
 )
 
@@ -49,13 +50,24 @@ var (
 func externalStageMountPath(path, prefix string) string { return strings.TrimPrefix(path, prefix) }
 
 func externalStageService() (*externalstage.Service, error) {
+	return externalStageServiceWithAuthorizer(nil)
+}
+
+func externalStageServiceWithAuthorizer(authorizer delivery.Authorizer) (*externalstage.Service, error) {
 	return externalstage.NewService(db.DB, externalstage.Options{
 		FixtureDigest: contracts.ExternalStageV1FixtureDigest(), Observer: agentmode.NotifyChange,
+		DeliveryAuthorizer: authorizer, DeliveryFreshness: deliveryFreshnessPolicy(),
 	})
 }
 
 func externalStageServiceForRequest(w http.ResponseWriter, r *http.Request) (*externalstage.Service, bool) {
-	service, err := externalStageService()
+	service, err := externalStageServiceWithAuthorizer(delivery.AuthorizerFunc(func(_ context.Context, req delivery.AuthorizationRequest) error {
+		principal, ok := auth.GetPrincipal(r)
+		if !ok || req.Actor.Type != "user" || req.Actor.OpaqueKey != "user:"+strconv.FormatInt(principal.UserID(), 10) {
+			return errors.New("authenticated operator identity required")
+		}
+		return nil
+	}))
 	if err != nil {
 		writeExternalStageStatus(w, r, http.StatusInternalServerError)
 		return nil, false
@@ -221,6 +233,7 @@ func MountInternalExternalStageContractRoutes(r chi.Router) {
 		r.Post(externalStageMountPath(externalstage.AdminRegistrationsPath, "/api/agent-mode"), registerExternalStageReporter)
 		r.Post(externalStageMountPath(externalstage.AdminRegistrationRevokePath, "/api/agent-mode"), revokeExternalStageReporter)
 		r.Post(externalStageMountPath(externalstage.AdminPrerequisiteSetsPath, "/api/agent-mode"), sealExternalStagePrerequisites)
+		r.Post(externalStageMountPath(externalstage.AdminOwnerActivationsPath, "/api/agent-mode"), activateExternalStageOwner)
 	})
 }
 
@@ -619,4 +632,32 @@ func sealExternalStagePrerequisites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeExternalStageJSON(w, 201, "application/json", out)
+}
+
+func activateExternalStageOwner(w http.ResponseWriter, r *http.Request) {
+	var body externalstage.ActivateOwnerRequest
+	if err := decodeExternalStageAdmin(w, r, &body); err != nil {
+		writeExternalStageStatus(w, r, http.StatusBadRequest)
+		return
+	}
+	idem, err := externalStageIdempotency(r)
+	if err != nil {
+		writeExternalStageStatus(w, r, http.StatusBadRequest)
+		return
+	}
+	p, ok := externalStagePrincipal(r)
+	if !ok {
+		writeControlNotFound(w, r)
+		return
+	}
+	service, ok := externalStageServiceForRequest(w, r)
+	if !ok {
+		return
+	}
+	out, err := service.ActivateOwner(r.Context(), p, chi.URLParam(r, "deliveryKey"), idem, body)
+	if err != nil {
+		writeExternalStageServiceError(w, r, err)
+		return
+	}
+	writeExternalStageJSON(w, http.StatusCreated, "application/json", out)
 }

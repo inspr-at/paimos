@@ -27,6 +27,34 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed — PAI-810 production reachability
+
+- Version-1 instrumented `tests_passed` reports now atomically project bounded
+  implementation and required-QA evidence, retry terminal QA with exact CAS,
+  preserve active human/external QA ownership, and leave legacy runs untouched.
+- The no-commit local runner now binds the exact stable covered repository
+  source surface with a bounded source-free SHA-256 digest; no source, paths,
+  diffs, logs, commands, environment, credentials, or attachment side effects
+  cross the API boundary. The configured test command contributes only through
+  a one-way hash.
+- Configured deploys now persist the bounded `tests_passed` artifact/QA boundary
+  before execution and keep later lifecycle reports pinned to that tested Git
+  state, so deploy-side checkout mutations cannot replace verified evidence.
+  The runner quiesces the closed telemetry/control stream at that boundary while
+  retaining local process-group, timeout, silence, and output supervision.
+- Source-free snapshots now hash raw no-follow filesystem nodes rather than Git
+  patch presentation: HEAD/index-discovered nodes, real deletions, non-ignored
+  untracked nodes, every repository `.gitignore` policy, and initialized nested
+  repositories share whole-source 10,000-node, 64-MiB, time, and depth bounds.
+  They reject exceptional/hidden index entries, freeze a trusted absolute Git
+  executable before provider execution, scrub Git environment redirection, and
+  neutralize topology, replace-ref, attribute, filter, diff-driver, and exclude
+  config. Ignored payloads and the external test environment remain explicitly
+  outside this repository-source evidence boundary.
+- Added an authenticated, CAS-bound internal Pharos owner-activation command
+  whose operator start, external handoff, and principal-attributed append-only
+  M149 audit fact commit together; exact replay remains read-only after drift.
+
 ### Added — Pinned external delivery-stage handoffs (PAI-810)
 
 - Added a fixed v1 internal handoff create/mint/rotate/revoke surface and an

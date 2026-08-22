@@ -69,6 +69,7 @@ type AgentRun struct {
 	BranchName                     string  `json:"branch_name"`
 	CommitBaseSHA                  string  `json:"commit_base_sha"`
 	CommitSHA                      string  `json:"commit_sha"`
+	ImplementationResultDigest     string  `json:"implementation_result_digest,omitempty"`
 	LogAttachmentID                *int64  `json:"log_attachment_id"`
 	Error                          string  `json:"error"`
 	CreatedAt                      string  `json:"created_at"`
@@ -120,7 +121,7 @@ const agentRunCols = `id, issue_id, project_id, device_id, requested_by, claimed
 	`action_key, provider_kind, provider_id, provider_label, model, run_mode, ` +
 	`profile_id, effort, prompt_preset_ref, context_pack, context_truncated, context_sources_json, prompt_tokens, completion_tokens, finish_reason, ` +
 	`agent_name, session_id, ` +
-	`status, version, tests_summary, deploy_target, repo_url, branch_name, commit_base_sha, commit_sha, log_attachment_id, error, created_at, started_at, finished_at, ` +
+	`status, version, tests_summary, deploy_target, repo_url, branch_name, commit_base_sha, commit_sha, implementation_result_digest, log_attachment_id, error, created_at, started_at, finished_at, ` +
 	`source_draft_run_id, followup_run_id, expects_supervisor_telemetry, delivery_instrumentation_version`
 
 func scanAgentRun(row interface{ Scan(...any) error }) (*AgentRun, error) {
@@ -134,7 +135,7 @@ func scanAgentRun(row interface{ Scan(...any) error }) (*AgentRun, error) {
 		&ar.ContextPack, &contextTruncated, &ar.ContextSourcesJSON, &ar.PromptTokens,
 		&ar.CompletionTokens, &ar.FinishReason, &ar.AgentName, &ar.SessionID, &ar.Status, &ar.Version, &tests,
 		&ar.DeployTarget, &ar.RepoURL, &ar.BranchName, &ar.CommitBaseSHA, &ar.CommitSHA,
-		&logAtt, &ar.Error, &ar.CreatedAt, &startedAt, &finishedAt,
+		&ar.ImplementationResultDigest, &logAtt, &ar.Error, &ar.CreatedAt, &startedAt, &finishedAt,
 		&sourceDraftRunID, &followupRunID, &expectsSupervisorTelemetry, &ar.DeliveryInstrumentationVersion); err != nil {
 		return nil, err
 	}
@@ -1342,6 +1343,7 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		BranchName                 *string `json:"branch_name"`
 		CommitBaseSHA              *string `json:"commit_base_sha"`
 		CommitSHA                  *string `json:"commit_sha"`
+		ImplementationResultDigest *string `json:"implementation_result_digest"`
 		LogAttachmentID            *int64  `json:"log_attachment_id"`
 		Error                      *string `json:"error"`
 		ExpectsSupervisorTelemetry *bool   `json:"expects_supervisor_telemetry"`
@@ -1365,6 +1367,13 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		actionKey := strings.TrimSpace(*body.ActionKey)
 		if actionKey == "" || actionKey != existing.ActionKey {
 			jsonError(w, "run action cannot be changed", http.StatusConflict)
+			return
+		}
+	}
+	if body.ImplementationResultDigest != nil {
+		value := strings.TrimSpace(*body.ImplementationResultDigest)
+		if !agentRunSHA256Pattern.MatchString(value) {
+			jsonError(w, "invalid implementation_result_digest", http.StatusBadRequest)
 			return
 		}
 	}
@@ -1410,6 +1419,7 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 	exactLifecycleReplay = exactLifecycleReplay && (body.BranchName == nil || strings.TrimSpace(*body.BranchName) == existing.BranchName)
 	exactLifecycleReplay = exactLifecycleReplay && (body.CommitBaseSHA == nil || strings.ToLower(strings.TrimSpace(*body.CommitBaseSHA)) == existing.CommitBaseSHA)
 	exactLifecycleReplay = exactLifecycleReplay && (body.CommitSHA == nil || strings.ToLower(strings.TrimSpace(*body.CommitSHA)) == existing.CommitSHA)
+	exactLifecycleReplay = exactLifecycleReplay && (body.ImplementationResultDigest == nil || strings.TrimSpace(*body.ImplementationResultDigest) == existing.ImplementationResultDigest)
 	exactLifecycleReplay = exactLifecycleReplay && (body.LogAttachmentID == nil || (existing.LogAttachmentID != nil && *body.LogAttachmentID == *existing.LogAttachmentID))
 	exactLifecycleReplay = exactLifecycleReplay && (body.Error == nil || *body.Error == existing.Error)
 	exactLifecycleReplay = exactLifecycleReplay && (body.ExpectsSupervisorTelemetry == nil || *body.ExpectsSupervisorTelemetry == existing.ExpectsSupervisorTelemetry)
@@ -1464,6 +1474,24 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		}
 		if agentRunTelemetryIsTerminal(s) {
 			sets = append(sets, "finished_at=datetime('now')")
+		}
+	}
+	frozenTestEvidence := existing.Status == "tests_passed" &&
+		(newStatus == "tests_passed" || newStatus == "deployed" || newStatus == "failed")
+	if frozenTestEvidence {
+		conflict := (body.TestsSummary != nil && (existing.TestsSummary == nil || *body.TestsSummary != *existing.TestsSummary)) ||
+			(body.RepoURL != nil && strings.TrimSpace(*body.RepoURL) != existing.RepoURL) ||
+			(body.BranchName != nil && strings.TrimSpace(*body.BranchName) != existing.BranchName) ||
+			(body.CommitBaseSHA != nil && strings.ToLower(strings.TrimSpace(*body.CommitBaseSHA)) != existing.CommitBaseSHA) ||
+			(body.CommitSHA != nil && strings.ToLower(strings.TrimSpace(*body.CommitSHA)) != existing.CommitSHA) ||
+			(body.ImplementationResultDigest != nil && strings.TrimSpace(*body.ImplementationResultDigest) != existing.ImplementationResultDigest)
+		if body.LogAttachmentID != nil && agentRunImplementationUsesAttachment(existing) &&
+			(existing.LogAttachmentID == nil || *body.LogAttachmentID != *existing.LogAttachmentID) {
+			conflict = true
+		}
+		if conflict {
+			jsonError(w, "tested evidence cannot be changed after tests_passed", http.StatusConflict)
+			return
 		}
 	}
 	if body.TestsSummary != nil && len(*body.TestsSummary) > agentRunTestsSummaryMaxBytes {
@@ -1568,6 +1596,18 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 		sets = append(sets, "log_attachment_id=?")
 		args = append(args, *body.LogAttachmentID)
 	}
+	if body.ImplementationResultDigest != nil {
+		if frozenTestEvidence {
+			// An exact reassertion is accepted as transport-idempotent but does not
+			// rewrite the immutable M150 value on the later operational edge.
+		} else if existing.DeliveryInstrumentationVersion != 1 || body.Status == nil || newStatus != "tests_passed" || existing.Status != "running" {
+			jsonError(w, "implementation_result_digest is accepted only for an instrumented running-to-tests_passed transition", http.StatusConflict)
+			return
+		} else {
+			sets = append(sets, "implementation_result_digest=?")
+			args = append(args, strings.TrimSpace(*body.ImplementationResultDigest))
+		}
+	}
 	if body.Error != nil {
 		sets = append(sets, "error=?")
 		args = append(args, *body.Error)
@@ -1617,6 +1657,21 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 			SELECT 1 FROM control_capability_leases lease WHERE lease.agent_run_id=agent_runs.id
 		)`
 	}
+	// A supervised success may cross the running boundary only after the runner
+	// atomically revoked every cancellation lease. The command predicate is the
+	// second half of that barrier: an already-created or accepted cancellation
+	// wins even if a buggy client attempts the lifecycle PATCH directly.
+	if existing.Status == "running" && existing.ExpectsSupervisorTelemetry && statusChanged &&
+		(newStatus == "completed" || newStatus == "tests_passed" || newStatus == "deployed" || newStatus == "drafted") {
+		query += ` AND NOT EXISTS (
+			SELECT 1 FROM control_capability_leases lease
+			WHERE lease.agent_run_id=agent_runs.id AND lease.revoked_at IS NULL
+		) AND NOT EXISTS (
+			SELECT 1 FROM control_commands command
+			WHERE command.agent_run_id=agent_runs.id AND command.action='run.cancel.running'
+			 AND command.status IN ('pending_confirmation','accepted')
+		)`
+	}
 	args = append(args, id, guardStatus)
 	tx, err := db.DB.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -1647,6 +1702,10 @@ func PatchAgentRun(w http.ResponseWriter, r *http.Request) {
 			log.Printf("agent run delivery normalization: run=%d status=%s: %v", id, newStatus, err)
 			if errors.Is(err, delivery.ErrUnauthorized) {
 				jsonError(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			if errors.Is(err, delivery.ErrConflict) || errors.Is(err, delivery.ErrStaleAuthority) {
+				jsonError(w, "delivery normalization conflict", http.StatusConflict)
 				return
 			}
 			jsonError(w, "delivery normalization failed", http.StatusInternalServerError)
@@ -1755,6 +1814,19 @@ func agentRunReportBody(run *AgentRun) string {
 }
 
 var agentRunCommitPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+var agentRunSHA256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func agentRunImplementationUsesAttachment(run *AgentRun) bool {
+	if run == nil || run.LogAttachmentID == nil {
+		return false
+	}
+	base := strings.ToLower(strings.TrimSpace(run.CommitBaseSHA))
+	head := strings.ToLower(strings.TrimSpace(run.CommitSHA))
+	if agentRunCommitPattern.MatchString(head) && head != base {
+		return false
+	}
+	return !agentRunSHA256Pattern.MatchString(strings.TrimSpace(run.ImplementationResultDigest))
+}
 
 func validAgentRunRepoURL(raw string) bool {
 	if len(raw) > 2048 {

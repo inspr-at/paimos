@@ -84,6 +84,7 @@ func TestExternalStageReusableIdempotencyFlagIsLimitedToExactReplayJSONOperation
 	replayable := []*cobra.Command{
 		externalStageCreateCmd(), externalStageRevokeCmd(), externalStageAcceptCmd(), externalStageReportCmd(),
 		externalStageRegistrationsCreateCmd(), externalStageRegistrationsRevokeCmd(), externalStagePrerequisitesSealCmd(),
+		externalStageOwnerActivateCmd(),
 	}
 	for _, command := range replayable {
 		if command.Flags().Lookup("idempotency-key") == nil {
@@ -114,6 +115,7 @@ func TestExternalStageReusableIdempotencyDryRunShowsSourceWithoutPrintingKey(t *
 		{name: "registration-create", args: []string{"external-stage", "registrations", "create", "issue:4664", "--api-key-id", "5", "--class", "pharos", "--role", "owner", "--workflow", "deploy-production", "--environment", "production-eu1"}},
 		{name: "registration-revoke", args: []string{"external-stage", "registrations", "revoke", "issue:4664", "9"}},
 		{name: "prerequisite-seal", args: []string{"external-stage", "prerequisites", "seal", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--prerequisite", "required:authorization=11"}},
+		{name: "owner-activate", args: []string{"external-stage", "owner", "activate", "issue:4664", "--stage", "deployment", "--attempt", "1", "--plan-revision", "4", "--reporter-registration-id", "9"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -163,6 +165,9 @@ func TestExternalStageReusableIdempotencyKeyOverridesAutoUUIDAcrossExactRetries(
 		{name: "prerequisite-seal", args: func(_, _ string) []string {
 			return []string{"external-stage", "prerequisites", "seal", "issue:4664", "--stage", "deployment", "--execution", "2", "--plan-revision", "4", "--authority-epoch", "3", "--prerequisite", "required:authorization=11", "--prerequisite", "optional:credential-handoff=12"}
 		}},
+		{name: "owner-activate", args: func(_, _ string) []string {
+			return []string{"external-stage", "owner", "activate", "issue:4664", "--stage", "deployment", "--attempt", "1", "--plan-revision", "4", "--reporter-registration-id", "9"}
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -173,7 +178,8 @@ func TestExternalStageReusableIdempotencyKeyOverridesAutoUUIDAcrossExactRetries(
 					t.Errorf("idempotency header cardinality=%d", len(values))
 				}
 				receivedKeys = append(receivedKeys, r.Header.Get(idempotencyHeader))
-				if strings.Contains(r.URL.Path, "external-reporter-registrations") || strings.Contains(r.URL.Path, "external-prerequisite-sets") {
+				if strings.Contains(r.URL.Path, "external-reporter-registrations") || strings.Contains(r.URL.Path, "external-prerequisite-sets") ||
+					strings.Contains(r.URL.Path, "external-owner-activations") {
 					w.Header().Set("Content-Type", externalStageAdminMediaType)
 					_, _ = w.Write([]byte(`{}`))
 					return
@@ -400,6 +406,45 @@ func TestExternalStagePrerequisitesSealUsesLiteralRouteAndExactBindings(t *testi
 	assertExternalStageOutputHasNoSecret(t, out, errOut, nil)
 }
 
+func TestExternalStageOwnerActivateUsesLiteralRouteAndExactCAS(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/agent-mode/deliveries/issue:4664/external-owner-activations" {
+			t.Errorf("request=%s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get(idempotencyHeader) == "" || r.Header.Get("Content-Type") != externalStageAdminMediaType ||
+			r.Header.Get("Accept") != externalStageAdminMediaType || r.Header.Get(externalstage.HandoffSecretHeader) != "" {
+			t.Errorf("activation headers=%v", r.Header)
+		}
+		var request externalStageOwnerActivationRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		want := externalStageOwnerActivationRequest{ReporterRegistrationID: 9, StageKey: "verification",
+			ExpectedAttemptNumber: 3, ExpectedPlanRevision: 4,
+			ExpectedCurrentExecution: 2, ExpectedCurrentAuthorityEpoch: 5}
+		if request != want {
+			t.Errorf("activation request=%+v want %+v", request, want)
+		}
+		w.Header().Set("Content-Type", externalStageAdminMediaType)
+		_ = json.NewEncoder(w).Encode(externalStageOwnerActivation{DeliveryKey: "issue:4664",
+			ReporterRegistrationID: 9, StageKey: "verification", AttemptNumber: 3, PlanRevision: 4,
+			ExecutionNumber: 3, AuthorityEpoch: 2, ReporterID: 7})
+	}))
+	defer server.Close()
+	setExternalStageTestInstance(t, server.URL)
+	out, errOut, err := executeCLIForTest(t, "--json", "external-stage", "owner", "activate", "issue:4664",
+		"--stage", "verification", "--attempt", "3", "--plan-revision", "4", "--reporter-registration-id", "9",
+		"--current-execution", "2", "--current-authority-epoch", "5")
+	if err != nil {
+		t.Fatalf("activate: %v stderr=%s", err, errOut)
+	}
+	var response externalStageOwnerActivation
+	if err := json.Unmarshal([]byte(out), &response); err != nil || response.ExecutionNumber != 3 || response.AuthorityEpoch != 2 {
+		t.Fatalf("activation response=%s err=%v", out, err)
+	}
+	assertExternalStageOutputHasNoSecret(t, out, errOut, nil)
+}
+
 func TestExternalStagePrerequisitesModelEmptyOptionalAndMixedSets(t *testing.T) {
 	tests := []struct {
 		name string
@@ -555,6 +600,28 @@ func TestExternalStageAdminValidationRejectsMutationsBeforeNetwork(t *testing.T)
 	}
 	if err := validateExternalStageRegistration(validJanus); err != nil {
 		t.Fatalf("valid Janus registration rejected: %v", err)
+	}
+	validOwner := externalStageOwnerActivationRequest{ReporterRegistrationID: 9, StageKey: "deployment",
+		ExpectedAttemptNumber: 1, ExpectedPlanRevision: 4}
+	for _, test := range []struct {
+		name   string
+		mutate func(*externalStageOwnerActivationRequest)
+	}{
+		{name: "owner-registration", mutate: func(r *externalStageOwnerActivationRequest) { r.ReporterRegistrationID = 0 }},
+		{name: "owner-stage", mutate: func(r *externalStageOwnerActivationRequest) { r.StageKey = "qa" }},
+		{name: "owner-attempt", mutate: func(r *externalStageOwnerActivationRequest) { r.ExpectedAttemptNumber = 0 }},
+		{name: "owner-plan", mutate: func(r *externalStageOwnerActivationRequest) { r.ExpectedPlanRevision = 0 }},
+		{name: "owner-negative-execution", mutate: func(r *externalStageOwnerActivationRequest) { r.ExpectedCurrentExecution = -1 }},
+		{name: "owner-negative-epoch", mutate: func(r *externalStageOwnerActivationRequest) { r.ExpectedCurrentAuthorityEpoch = -1 }},
+		{name: "owner-half-zero", mutate: func(r *externalStageOwnerActivationRequest) { r.ExpectedCurrentExecution = 2 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := validOwner
+			test.mutate(&request)
+			if err := validateExternalStageOwnerActivation(request); err == nil {
+				t.Fatal("mutated owner activation accepted")
+			}
+		})
 	}
 }
 

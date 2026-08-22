@@ -9,12 +9,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/inspr-at/paimos/backend/delivery"
 )
 
 const (
 	AdminRegistrationsPath      = "/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations"
 	AdminRegistrationRevokePath = "/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations/{registrationID}/revoke"
 	AdminPrerequisiteSetsPath   = "/api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets"
+	AdminOwnerActivationsPath   = "/api/agent-mode/deliveries/{deliveryKey}/external-owner-activations"
 )
 
 type RegisterReporterRequest struct {
@@ -72,6 +75,26 @@ type PrerequisiteSet struct {
 	SealedAt        string `json:"sealed_at"`
 }
 
+type ActivateOwnerRequest struct {
+	ReporterRegistrationID        int64  `json:"reporter_registration_id"`
+	StageKey                      string `json:"stage_key"`
+	ExpectedAttemptNumber         int64  `json:"expected_attempt_number"`
+	ExpectedPlanRevision          int64  `json:"expected_plan_revision"`
+	ExpectedCurrentExecution      int64  `json:"expected_current_execution"`
+	ExpectedCurrentAuthorityEpoch int64  `json:"expected_current_authority_epoch"`
+}
+
+type OwnerActivation struct {
+	DeliveryKey            string `json:"delivery_key"`
+	ReporterRegistrationID int64  `json:"reporter_registration_id"`
+	StageKey               string `json:"stage_key"`
+	AttemptNumber          int64  `json:"attempt_number"`
+	PlanRevision           int64  `json:"plan_revision"`
+	ExecutionNumber        int64  `json:"execution_number"`
+	AuthorityEpoch         int64  `json:"authority_epoch"`
+	ReporterID             int64  `json:"reporter_id"`
+}
+
 func registrationCeiling(class ReporterClass) []EvidenceKind {
 	if class == ReporterClassPharos {
 		return []EvidenceKind{EvidenceKindDeployment, EvidenceKindVerification}
@@ -90,6 +113,185 @@ func validateRegistrationRequest(req RegisterReporterRequest) error {
 		return nil
 	}
 	return ErrInvalid
+}
+
+func validateOwnerActivationRequest(req ActivateOwnerRequest) error {
+	if req.ReporterRegistrationID <= 0 || (req.StageKey != delivery.StageDeployment && req.StageKey != delivery.StageVerification) ||
+		req.ExpectedAttemptNumber <= 0 || req.ExpectedPlanRevision <= 0 || req.ExpectedCurrentExecution < 0 ||
+		req.ExpectedCurrentAuthorityEpoch < 0 || ((req.ExpectedCurrentExecution == 0) != (req.ExpectedCurrentAuthorityEpoch == 0)) {
+		return ErrInvalid
+	}
+	return nil
+}
+
+func mapDeliveryMutationError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, delivery.ErrInvalid):
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	case errors.Is(err, delivery.ErrNotFound), errors.Is(err, delivery.ErrUnauthorized):
+		return fmt.Errorf("%w: delivery mutation target unavailable", ErrNotFound)
+	case errors.Is(err, delivery.ErrConflict), errors.Is(err, delivery.ErrStaleAuthority):
+		return fmt.Errorf("%w: %v", ErrConflict, err)
+	default:
+		return err
+	}
+}
+
+// ActivateOwner starts one exact deployment or verification execution and
+// immediately hands authority to a current Pharos owner registration. The
+// authenticated operator's start event and the external-owner handoff are
+// committed together, providing append-only audit and no ownerless interval.
+func (s *Service) ActivateOwner(ctx context.Context, p Principal, deliveryKey, idempotencyKey string, req ActivateOwnerRequest) (OwnerActivation, error) {
+	if _, _, _, err := principalColumns(p); err != nil {
+		return OwnerActivation{}, err
+	}
+	if deliveryKey == "" || idempotencyKey == "" || validateOwnerActivationRequest(req) != nil {
+		return OwnerActivation{}, ErrInvalid
+	}
+	request, err := canonicalDigest(struct {
+		Delivery string
+		Request  ActivateOwnerRequest
+	}{deliveryKey, req})
+	if err != nil {
+		return OwnerActivation{}, err
+	}
+	idem := sha256.Sum256([]byte(idempotencyKey))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return OwnerActivation{}, err
+	}
+	defer tx.Rollback()
+	deliveryID, issueID, projectID, err := authorizeInternalTx(ctx, tx, p, deliveryKey)
+	if err != nil {
+		return OwnerActivation{}, err
+	}
+	if id, found, replayErr := ownerActivationReplay(ctx, tx, p, deliveryID, idem, request); replayErr != nil {
+		return OwnerActivation{}, replayErr
+	} else if found {
+		return scanOwnerActivation(tx.QueryRowContext(ctx, ownerActivationSelect+`WHERE activation.id=?`, id))
+	}
+	var reporterID, attemptID, attemptNumber, planRevision int64
+	var reporterKey string
+	err = tx.QueryRowContext(ctx, `SELECT registration.reporter_id,reporter.opaque_key,attempt.id,
+		attempt.attempt_number,attempt.plan_revision
+		FROM external_stage_reporter_registrations registration
+		JOIN delivery_reporters reporter ON reporter.id=registration.reporter_id
+		 AND reporter.delivery_id=registration.delivery_id AND reporter.reporter_type='external'
+		JOIN api_keys api_key ON api_key.id=registration.api_key_id AND api_key.user_id=registration.user_id
+		 AND api_key.disabled_at IS NULL AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
+		JOIN external_stage_user_roles reporter_user ON reporter_user.id=registration.user_id
+		 AND reporter_user.status='active' AND reporter_user.effective_role<>'external'
+		JOIN delivery_attempts attempt ON attempt.delivery_id=registration.delivery_id
+		 AND attempt.attempt_number=(SELECT MAX(current.attempt_number) FROM delivery_attempts current WHERE current.delivery_id=registration.delivery_id)
+		WHERE registration.id=? AND registration.delivery_id=? AND registration.project_id=?
+		 AND registration.reporter_class='pharos' AND registration.reporter_role='owner'
+		 AND registration.revoked_at IS NULL AND registration.dependency_key IS NULL
+		 AND EXISTS(SELECT 1 FROM external_stage_setup_events setup WHERE setup.event_kind='registration_created'
+		  AND setup.registration_id=registration.id AND setup.delivery_id=registration.delivery_id
+		  AND setup.project_id=registration.project_id)
+		 AND registration.workflow_symbol IS NOT NULL AND registration.environment_symbol IS NOT NULL
+		 AND ((?='deployment' AND registration.allow_deployment=1) OR (?='verification' AND registration.allow_verification=1))
+		 AND (reporter_user.effective_role IN ('admin','super_admin') OR
+		  EXISTS(SELECT 1 FROM project_members membership WHERE membership.user_id=reporter_user.id
+		   AND membership.project_id=registration.project_id AND membership.access_level IN ('viewer','editor')) OR
+		  (reporter_user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+		   WHERE membership.user_id=reporter_user.id AND membership.project_id=registration.project_id)))`,
+		req.ReporterRegistrationID, deliveryID, projectID, req.StageKey, req.StageKey).
+		Scan(&reporterID, &reporterKey, &attemptID, &attemptNumber, &planRevision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OwnerActivation{}, ErrNotFound
+	}
+	if err != nil {
+		return OwnerActivation{}, err
+	}
+	if attemptNumber != req.ExpectedAttemptNumber || planRevision != req.ExpectedPlanRevision {
+		return OwnerActivation{}, ErrConflict
+	}
+	operator := delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", p.UserID)}
+	owner := delivery.Actor{Type: "external", OpaqueKey: reporterKey}
+	expectedExecution, expectedEpoch := req.ExpectedCurrentExecution, req.ExpectedCurrentAuthorityEpoch
+	effects := s.delivery.NewEffects()
+	started, err := s.delivery.StartStageRetryTx(ctx, tx, effects, delivery.StageStartRequest{
+		IssueID: issueID, AttemptNumber: attemptNumber, StageKey: req.StageKey, Reporter: operator,
+		ReasonCode: "external_owner_activation", ReasonText: fmt.Sprintf("Pharos registration %d", req.ReporterRegistrationID),
+		IdempotencyKey: idempotencyKey + ":start", ExpectedCurrentExecution: &expectedExecution,
+		ExpectedCurrentAuthorityEpoch: &expectedEpoch,
+	})
+	if err != nil {
+		return OwnerActivation{}, mapDeliveryMutationError(err)
+	}
+	handed, err := s.delivery.RecordHandoffTx(ctx, tx, effects, delivery.HandoffRequest{
+		IssueID: issueID, AttemptNumber: attemptNumber, StageKey: req.StageKey,
+		ExecutionNumber: started.ExecutionNumber, AuthorityEpoch: started.AuthorityEpoch,
+		From: operator, To: owner, ReasonCode: "external_owner_activation",
+		ReasonText:     fmt.Sprintf("Pharos registration %d", req.ReporterRegistrationID),
+		IdempotencyKey: idempotencyKey + ":handoff",
+	})
+	if err != nil {
+		return OwnerActivation{}, mapDeliveryMutationError(err)
+	}
+	if handed.ReporterID != reporterID || handed.AttemptID != attemptID {
+		return OwnerActivation{}, fmt.Errorf("%w: owner activation lineage mismatch", ErrConflict)
+	}
+	if err := insertOwnerActivation(ctx, tx, p, deliveryID, projectID, req.ReporterRegistrationID,
+		attemptID, req.StageKey, handed.ExecutionNumber, handed.AuthorityEpoch, handed.ReporterID, request, idem); err != nil {
+		return OwnerActivation{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return OwnerActivation{}, err
+	}
+	effects.Dispatch(ctx)
+	return OwnerActivation{DeliveryKey: deliveryKey, ReporterRegistrationID: req.ReporterRegistrationID,
+		StageKey: req.StageKey, AttemptNumber: attemptNumber, PlanRevision: planRevision,
+		ExecutionNumber: handed.ExecutionNumber, AuthorityEpoch: handed.AuthorityEpoch, ReporterID: handed.ReporterID}, nil
+}
+
+const ownerActivationSelect = `SELECT delivery.delivery_key,activation.registration_id,activation.stage_key,
+	attempt.attempt_number,attempt.plan_revision,activation.execution_number,activation.authority_epoch,activation.reporter_id
+	FROM external_stage_owner_activation_events activation
+	JOIN deliveries delivery ON delivery.id=activation.delivery_id
+	JOIN delivery_attempts attempt ON attempt.id=activation.attempt_id AND attempt.delivery_id=activation.delivery_id `
+
+func scanOwnerActivation(row interface{ Scan(...any) error }) (OwnerActivation, error) {
+	var out OwnerActivation
+	err := row.Scan(&out.DeliveryKey, &out.ReporterRegistrationID, &out.StageKey, &out.AttemptNumber,
+		&out.PlanRevision, &out.ExecutionNumber, &out.AuthorityEpoch, &out.ReporterID)
+	return out, err
+}
+
+func ownerActivationReplay(ctx context.Context, tx *sql.Tx, p Principal, deliveryID int64, idem, request [32]byte) (int64, bool, error) {
+	var id int64
+	var prior []byte
+	err := tx.QueryRowContext(ctx, `SELECT id,request_digest FROM external_stage_owner_activation_events
+		WHERE actor_user_id=? AND actor_principal_kind=? AND actor_session_id IS ? AND actor_api_key_id IS ?
+		 AND delivery_id=? AND idempotency_digest=?`, p.UserID, p.Kind, nullString(p.SessionCredentialID),
+		nullInt(p.APIKeyID), deliveryID, idem[:]).Scan(&id, &prior)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	if string(prior) != string(request[:]) {
+		return 0, false, ErrConflict
+	}
+	return id, true, nil
+}
+
+func insertOwnerActivation(ctx context.Context, tx *sql.Tx, p Principal, deliveryID, projectID,
+	registrationID, attemptID int64, stage string, execution, epoch, reporterID int64, request, idem [32]byte) error {
+	kind, session, key, err := principalColumns(p)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO external_stage_owner_activation_events(
+		delivery_id,project_id,registration_id,attempt_id,stage_key,execution_number,authority_epoch,reporter_id,
+		actor_user_id,actor_principal_kind,actor_session_id,actor_api_key_id,request_digest,idempotency_digest)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, deliveryID, projectID, registrationID, attemptID, stage, execution,
+		epoch, reporterID, p.UserID, kind, session, key, request[:], idem[:])
+	return mapConflict(err)
 }
 
 func setupReplay(ctx context.Context, tx *sql.Tx, p Principal, event string, idem, request [32]byte) (int64, bool, error) {

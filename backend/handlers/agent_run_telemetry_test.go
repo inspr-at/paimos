@@ -533,7 +533,48 @@ func TestAgentRunCompletedLifecycleAndTestEvidence(t *testing.T) {
 	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(testedID), ts.adminCookie, map[string]any{"status": "tests_passed"}), http.StatusConflict)
 	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(testedID), ts.adminCookie, map[string]any{
 		"status": "tests_passed", "tests_summary": "configured test command passed",
+		"commit_sha": strings.Repeat("a", 40),
 	}), http.StatusOK)
+}
+
+func TestAgentRunSupervisedSuccessRequiresRevokedCancellationLease(t *testing.T) {
+	ts := newDirectTelemetryServer(t)
+	_, runID := seedTelemetryRun(t, ts, ts.adminCookie)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+		"status": "running", "if_status": "queued", "device_id": "runner-1",
+		"expects_supervisor_telemetry": true,
+	}), http.StatusOK)
+	var userID, projectID, issueID int64
+	if err := db.DB.QueryRow(`SELECT claimed_by,project_id,issue_id FROM agent_runs WHERE id=?`, runID).
+		Scan(&userID, &projectID, &issueID); err != nil {
+		t.Fatal(err)
+	}
+	for _, trigger := range []string{"trg_control_lease_current_binding_guard", "trg_control_leases_binding_guard",
+		"trg_control_leases_audit_precondition"} {
+		if _, err := db.DB.Exec(`DROP TRIGGER ` + trigger); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.DB.Exec(`INSERT INTO control_capability_leases(
+		lease_id,revision,actor_user_id,user_id,principal_kind,actor_api_key_id,device_id,
+		delivery_id,delivery_key,delivery_revision,project_id,root_issue_id,issue_revision,
+		attempt_id,attempt_number,plan_revision,stage_key,execution_number,
+		execution_start_stage_event_id,authority_epoch,authority_stage_event_id,reporter_id,
+		agent_run_id,binding_digest,action_set_digest,action_count,expires_at)
+		VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',1,?,?,'api_key',11,'runner-1',
+		1,'delivery:opaque',1,?,?,1,1,1,1,'implementation',1,1,1,1,1,?,zeroblob(32),zeroblob(32),1,
+		strftime('%Y-%m-%dT%H:%M:%fZ','now','+1 hour'))`, userID, userID, projectID, issueID, runID); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+		map[string]any{"status": "completed"}), http.StatusConflict)
+	if _, err := db.DB.Exec(`UPDATE control_capability_leases SET
+		revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		WHERE lease_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+		map[string]any{"status": "completed"}), http.StatusOK)
 }
 
 func TestAgentRunTelemetryTerminalHandlerRaceHasOneConsistentWinner(t *testing.T) {

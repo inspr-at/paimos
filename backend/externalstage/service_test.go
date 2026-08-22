@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	cryptorand "crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -302,6 +303,169 @@ func (f *serviceFixture) sealEmpty(t *testing.T) {
 		SealPrerequisitesRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 2,
 			ExpectedAuthorityEpoch: 1, Prerequisites: []Prerequisite{}}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("conflicting seal replay err=%v", err)
+	}
+}
+
+func TestServiceActivateOwnerMakesVerificationReachableWithAuditedReplay(t *testing.T) {
+	f := setupServiceFixture(t)
+	f.sealEmpty(t)
+	ctx := context.Background()
+	deployment, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, "activation-deployment-handoff",
+		CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+			ExpectedAuthorityEpoch: 1, ReporterRegistrationID: f.registrationID,
+			ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := f.service.Mint(ctx, f.operator, deployment.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Accept(ctx, f.reporter, deployment.HandoffID, "activation-deployment-accept", secret,
+		AcceptRequest{Sequence: 1, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Report(ctx, f.reporter, deployment.HandoffID, "activation-deployment-active", secret,
+		ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Second)
+	observed = f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Report(ctx, f.reporter, deployment.HandoffID, "activation-deployment-success", secret,
+		ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: observed,
+			PharosEvidence: &PharosEvidence{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+				Artifact: ArtifactEvidence{Version: "v5.11.0", Digest: "sha256:" + fmt.Sprintf("%064x", 5110), CommitDigest: fmt.Sprintf("%040x", 5110)},
+				Result:   EvidenceResultSucceeded, ObservedAt: observed}}); err != nil {
+		t.Fatal(err)
+	}
+
+	request := ActivateOwnerRequest{ReporterRegistrationID: f.registrationID, StageKey: "verification",
+		ExpectedAttemptNumber: 1, ExpectedPlanRevision: 1,
+		ExpectedCurrentExecution: 0, ExpectedCurrentAuthorityEpoch: 0}
+	activation, err := f.service.ActivateOwner(ctx, f.operator, f.deliveryKey, "activate-verification", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activation.ExecutionNumber != 1 || activation.AuthorityEpoch != 2 || activation.ReporterRegistrationID != f.registrationID {
+		t.Fatalf("activation=%+v", activation)
+	}
+	var currentReporterID, currentExecution, currentEpoch int64
+	var currentReporterType string
+	if err := f.database.QueryRow(`SELECT latest.current_reporter_id,latest.execution_number,latest.authority_epoch,reporter.reporter_type
+		FROM delivery_stage_latest latest JOIN delivery_reporters reporter ON reporter.id=latest.current_reporter_id
+		WHERE latest.attempt_id=? AND latest.stage_key='verification'`, f.attemptID).
+		Scan(&currentReporterID, &currentExecution, &currentEpoch, &currentReporterType); err != nil {
+		t.Fatal(err)
+	}
+	if currentReporterID != activation.ReporterID || currentExecution != 1 || currentEpoch != 2 || currentReporterType != "external" {
+		t.Fatalf("current owner=%d/%d/%d/%s", currentReporterID, currentExecution, currentEpoch, currentReporterType)
+	}
+	var activationEvents int
+	if err := f.database.QueryRow(`SELECT COUNT(*) FROM delivery_events
+		WHERE delivery_id=? AND idempotency_key IN ('activate-verification:start','activate-verification:handoff')`, f.deliveryID).
+		Scan(&activationEvents); err != nil {
+		t.Fatal(err)
+	}
+	if activationEvents != 2 {
+		t.Fatalf("activation audit events=%d", activationEvents)
+	}
+	var activationAudits, auditUserID, auditRegistrationID, auditAttemptID, auditExecution, auditEpoch, auditReporterID int64
+	var auditKind, auditSession, auditStage string
+	var auditAPIKey sql.NullInt64
+	var requestBytes, idempotencyBytes int
+	if err := f.database.QueryRow(`SELECT COUNT(*),actor_user_id,actor_principal_kind,actor_session_id,
+		actor_api_key_id,registration_id,attempt_id,stage_key,execution_number,authority_epoch,reporter_id,
+		length(request_digest),length(idempotency_digest) FROM external_stage_owner_activation_events
+		WHERE delivery_id=?`, f.deliveryID).Scan(&activationAudits, &auditUserID, &auditKind, &auditSession,
+		&auditAPIKey, &auditRegistrationID, &auditAttemptID, &auditStage, &auditExecution, &auditEpoch,
+		&auditReporterID, &requestBytes, &idempotencyBytes); err != nil {
+		t.Fatal(err)
+	}
+	if activationAudits != 1 || auditUserID != f.operator.UserID || auditKind != "session" ||
+		auditSession != f.operator.SessionCredentialID || auditAPIKey.Valid || auditRegistrationID != f.registrationID ||
+		auditAttemptID != f.attemptID || auditStage != "verification" || auditExecution != activation.ExecutionNumber ||
+		auditEpoch != activation.AuthorityEpoch || auditReporterID != activation.ReporterID || requestBytes != 32 || idempotencyBytes != 32 {
+		t.Fatalf("activation setup audit mismatch: count=%d actor=%d/%s/%s/%+v target=%d/%d/%s/%d/%d/%d digests=%d/%d",
+			activationAudits, auditUserID, auditKind, auditSession, auditAPIKey, auditRegistrationID, auditAttemptID,
+			auditStage, auditExecution, auditEpoch, auditReporterID, requestBytes, idempotencyBytes)
+	}
+	var projectID int64
+	if err := f.database.QueryRow(`SELECT project_id FROM issues WHERE id=?`, f.issueID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	forgedDigest := sha256.Sum256([]byte("forged-owner-activation"))
+	if _, err := f.database.Exec(`INSERT INTO external_stage_owner_activation_events(
+		delivery_id,project_id,registration_id,attempt_id,stage_key,execution_number,authority_epoch,reporter_id,
+		actor_user_id,actor_principal_kind,actor_session_id,request_digest,idempotency_digest)
+		VALUES(?,?,?,?,'verification',99,99,?,?,'session',?,?,?)`, f.deliveryID, projectID,
+		f.registrationID, f.attemptID, activation.ReporterID, f.operator.UserID, f.operator.SessionCredentialID,
+		forgedDigest[:], forgedDigest[:]); err == nil || !strings.Contains(err.Error(), "lacks current operator and handoff proof") {
+		t.Fatalf("forged activation audit insert error=%v", err)
+	}
+	duplicateRequest := sha256.Sum256([]byte("duplicate-owner-activation-request"))
+	duplicateIdempotency := sha256.Sum256([]byte("duplicate-owner-activation-idempotency"))
+	if _, err := f.database.Exec(`INSERT INTO external_stage_owner_activation_events(
+		delivery_id,project_id,registration_id,attempt_id,stage_key,execution_number,authority_epoch,reporter_id,
+		actor_user_id,actor_principal_kind,actor_session_id,request_digest,idempotency_digest)
+		VALUES(?,?,?,?,'verification',1,2,?,?,'session',?,?,?)`, f.deliveryID, projectID,
+		f.registrationID, f.attemptID, activation.ReporterID, f.operator.UserID, f.operator.SessionCredentialID,
+		duplicateRequest[:], duplicateIdempotency[:]); err == nil || !strings.Contains(strings.ToLower(err.Error()), "unique") {
+		t.Fatalf("duplicate activation target error=%v", err)
+	}
+	if _, err := f.database.Exec(`UPDATE external_stage_owner_activation_events SET stage_key='deployment' WHERE delivery_id=?`, f.deliveryID); err == nil || !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("activation audit update error=%v", err)
+	}
+	if _, err := f.database.Exec(`DELETE FROM external_stage_owner_activation_events WHERE delivery_id=?`, f.deliveryID); err == nil || !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("activation audit delete error=%v", err)
+	}
+	replay, err := f.service.ActivateOwner(ctx, f.operator, f.deliveryKey, "activate-verification", request)
+	if err != nil || replay != activation {
+		t.Fatalf("activation replay=%+v err=%v", replay, err)
+	}
+	var activationEventsAfter int
+	if err := f.database.QueryRow(`SELECT COUNT(*) FROM delivery_events
+		WHERE delivery_id=? AND idempotency_key IN ('activate-verification:start','activate-verification:handoff')`, f.deliveryID).
+		Scan(&activationEventsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if activationEventsAfter != activationEvents {
+		t.Fatalf("activation replay added events: %d -> %d", activationEvents, activationEventsAfter)
+	}
+	if err := f.database.QueryRow(`SELECT COUNT(*) FROM external_stage_owner_activation_events WHERE delivery_id=?`, f.deliveryID).
+		Scan(&activationAudits); err != nil || activationAudits != 1 {
+		t.Fatalf("activation replay audit count=%d err=%v", activationAudits, err)
+	}
+	if _, err := f.service.ActivateOwner(ctx, f.operator, f.deliveryKey, "activate-verification-again", request); !errors.Is(err, ErrConflict) {
+		t.Fatalf("zero-CAS activation replaced live owner: %v", err)
+	}
+	sealed, err := f.service.SealPrerequisites(ctx, f.operator, f.deliveryKey, "seal-verification-after-activation",
+		SealPrerequisitesRequest{StageKey: "verification", ExecutionNumber: activation.ExecutionNumber,
+			ExpectedPlanRevision: activation.PlanRevision, ExpectedAuthorityEpoch: activation.AuthorityEpoch,
+			Prerequisites: []Prerequisite{}})
+	if err != nil || sealed.DeclaredCount != 0 {
+		t.Fatalf("verification prerequisite seal=%+v err=%v", sealed, err)
+	}
+	verification, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, "create-verification-after-activation",
+		CreateHandoffRequest{StageKey: "verification", ExecutionNumber: activation.ExecutionNumber,
+			ExpectedPlanRevision: activation.PlanRevision, ExpectedAuthorityEpoch: activation.AuthorityEpoch,
+			ReporterRegistrationID: f.registrationID, ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil || verification.StageKey != "verification" {
+		t.Fatalf("reachable verification handoff=%+v err=%v", verification, err)
+	}
+	if _, err := f.service.RevokeReporter(ctx, f.operator, f.deliveryKey, "revoke-after-owner-activation", f.registrationID); err != nil {
+		t.Fatal(err)
+	}
+	driftedAttempt, err := f.service.delivery.StartAttempt(ctx, delivery.AttemptRequest{
+		IssueID: f.issueID, Actor: delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", f.operator.UserID)},
+		Policies: delivery.DefaultPolicy(), ReasonCode: "policy_change", IdempotencyKey: "activation-replay-attempt-drift",
+	})
+	if err != nil || driftedAttempt.AttemptNumber != 2 || driftedAttempt.PlanRevision != 2 {
+		t.Fatalf("activation replay drift attempt=%+v err=%v", driftedAttempt, err)
+	}
+	replayAfterRevocation, err := f.service.ActivateOwner(ctx, f.operator, f.deliveryKey, "activate-verification", request)
+	if err != nil || replayAfterRevocation != activation {
+		t.Fatalf("activation replay after registration/attempt/plan drift=%+v err=%v", replayAfterRevocation, err)
 	}
 }
 

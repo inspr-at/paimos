@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 148
+const latestSchemaVersion = 150
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -84,6 +84,88 @@ func TestSchemaMigrationsReachLatestVersion(t *testing.T) {
 	}
 	if maxVersion != latestSchemaVersion {
 		t.Fatalf("max schema version=%d want %d", maxVersion, latestSchemaVersion)
+	}
+}
+
+func TestMigration150PreservesRunsAndPinsSourceFreeImplementationDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m150-populated.db")
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 149); err != nil {
+		t.Fatalf("create exact M149 fixture: %v", err)
+	}
+	user, err := database.Exec(`INSERT INTO users(username,password,role,status) VALUES('m150-runner','x','member','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ := user.LastInsertId()
+	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('M150','M150')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	issue, err := database.Exec(`INSERT INTO issues(project_id,issue_number,title) VALUES(?,1,'M150 issue')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := issue.LastInsertId()
+	run, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,delivery_instrumentation_version)
+		VALUES(?,?,?,'running',1)`, issueID, projectID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, _ := run.LastInsertId()
+
+	if err := migrate(database); err != nil {
+		t.Fatalf("M149 to M150: %v", err)
+	}
+	var status, digest string
+	if err := database.QueryRow(`SELECT status,implementation_result_digest FROM agent_runs WHERE id=?`, runID).
+		Scan(&status, &digest); err != nil {
+		t.Fatal(err)
+	}
+	if status != "running" || digest != "" {
+		t.Fatalf("M150 changed legacy run: status=%q digest=%q", status, digest)
+	}
+	valid := strings.Repeat("a", 64)
+	if _, err := database.Exec(`UPDATE agent_runs SET status='tests_passed',implementation_result_digest=? WHERE id=?`, valid, runID); err != nil {
+		t.Fatalf("valid digest transition rejected: %v", err)
+	}
+	if _, err := database.Exec(`UPDATE agent_runs SET implementation_result_digest=? WHERE id=?`, strings.Repeat("b", 64), runID); err == nil || !strings.Contains(err.Error(), "invalid implementation result digest transition") {
+		t.Fatalf("digest rewrite error=%v", err)
+	}
+	legacy, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,delivery_instrumentation_version)
+		VALUES(?,?,?,'running',0)`, issueID, projectID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyID, _ := legacy.LastInsertId()
+	if _, err := database.Exec(`UPDATE agent_runs SET status='tests_passed',implementation_result_digest=? WHERE id=?`, valid, legacyID); err == nil || !strings.Contains(err.Error(), "invalid implementation result digest transition") {
+		t.Fatalf("legacy digest transition error=%v", err)
+	}
+	if _, err := database.Exec(`UPDATE agent_runs SET status='failed' WHERE id=?`, legacyID); err != nil {
+		t.Fatal(err)
+	}
+	for name, invalid := range map[string]string{
+		"short": strings.Repeat("a", 63), "uppercase": strings.Repeat("A", 64), "nonhex": strings.Repeat("g", 64),
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,delivery_instrumentation_version)
+				VALUES(?,?,?,'running',1)`, issueID, projectID, userID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidateID, _ := result.LastInsertId()
+			if _, err := database.Exec(`UPDATE agent_runs SET status='tests_passed',implementation_result_digest=? WHERE id=?`, invalid, candidateID); err == nil {
+				t.Fatalf("malformed digest %q persisted", invalid)
+			}
+			if _, err := database.Exec(`UPDATE agent_runs SET status='failed' WHERE id=?`, candidateID); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

@@ -47,11 +47,51 @@ func TestExternalStageOpenAPIClosesSemanticAndAdministrativeShapes(t *testing.T)
 	if epoch["minimum"] != float64(0) {
 		t.Fatalf("unminted handoff revoke minimum=%v", epoch["minimum"])
 	}
+	activation := schemas["ExternalStageOwnerActivationRequest"].(map[string]any)
+	if activation["additionalProperties"] != false {
+		t.Fatalf("owner activation must be closed: %v", activation["additionalProperties"])
+	}
+	wantActivationRequired := map[string]bool{
+		"reporter_registration_id": true, "stage_key": true, "expected_attempt_number": true,
+		"expected_plan_revision": true, "expected_current_execution": true,
+		"expected_current_authority_epoch": true,
+	}
+	for _, field := range activation["required"].([]any) {
+		delete(wantActivationRequired, field.(string))
+	}
+	if len(wantActivationRequired) != 0 {
+		t.Fatalf("owner activation missing required fields: %v", wantActivationRequired)
+	}
+	activationProperties := activation["properties"].(map[string]any)
+	for _, field := range []string{"reporter_registration_id", "expected_attempt_number", "expected_plan_revision"} {
+		if activationProperties[field].(map[string]any)["minimum"] != float64(1) {
+			t.Fatalf("owner activation %s minimum=%v", field, activationProperties[field])
+		}
+	}
+	stageEnum := activationProperties["stage_key"].(map[string]any)["enum"].([]any)
+	if len(stageEnum) != 2 || stageEnum[0] != "deployment" || stageEnum[1] != "verification" {
+		t.Fatalf("owner activation stage enum=%v", stageEnum)
+	}
+	casBranches, ok := activation["oneOf"].([]any)
+	if !ok || len(casBranches) != 2 {
+		t.Fatalf("owner activation CAS branches=%v", activation["oneOf"])
+	}
+	zeroCAS := casBranches[0].(map[string]any)["properties"].(map[string]any)
+	positiveCAS := casBranches[1].(map[string]any)["properties"].(map[string]any)
+	for _, field := range []string{"expected_current_execution", "expected_current_authority_epoch"} {
+		if activationProperties[field].(map[string]any)["minimum"] != float64(0) ||
+			zeroCAS[field].(map[string]any)["const"] != float64(0) ||
+			positiveCAS[field].(map[string]any)["minimum"] != float64(1) {
+			t.Fatalf("owner activation paired CAS %s root=%v zero=%v positive=%v",
+				field, activationProperties[field], zeroCAS[field], positiveCAS[field])
+		}
+	}
 	paths := document["paths"].(map[string]any)
 	for _, path := range []string{
 		"/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations",
 		"/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations/{registrationID}/revoke",
 		"/api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets",
+		"/api/agent-mode/deliveries/{deliveryKey}/external-owner-activations",
 	} {
 		if paths[path] == nil {
 			t.Fatalf("administrative path %q missing", path)

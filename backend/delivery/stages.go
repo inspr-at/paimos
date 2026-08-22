@@ -36,6 +36,11 @@ func (s *Store) startStageRetryTx(ctx context.Context, tx *sql.Tx, effects *Effe
 	if req.IssueID <= 0 || stageOrder(req.StageKey) == 0 || validateActor(req.Reporter) != nil || req.IdempotencyKey == "" {
 		return StageRef{}, fmt.Errorf("%w: invalid stage start", ErrInvalid)
 	}
+	if (req.ExpectedCurrentExecution == nil) != (req.ExpectedCurrentAuthorityEpoch == nil) ||
+		(req.ExpectedCurrentExecution != nil && (*req.ExpectedCurrentExecution < 0 || *req.ExpectedCurrentAuthorityEpoch < 0 ||
+			((*req.ExpectedCurrentExecution == 0) != (*req.ExpectedCurrentAuthorityEpoch == 0)))) {
+		return StageRef{}, fmt.Errorf("%w: invalid current-stage expectation", ErrInvalid)
+	}
 	if req.Reporter.Type == "agent_run" {
 		runID, ok := agentRunActorID(req.Reporter)
 		if !allowAtomicRunLink || !ok {
@@ -70,13 +75,16 @@ func (s *Store) startStageRetryTx(ctx context.Context, tx *sql.Tx, effects *Effe
 		return StageRef{}, err
 	}
 	payload := struct {
-		AttemptNumber int64  `json:"attempt_number"`
-		StageKey      string `json:"stage_key"`
-		ReporterType  string `json:"reporter_type"`
-		ReporterKey   string `json:"reporter_key"`
-		ReasonCode    string `json:"reason_code"`
-		ReasonText    string `json:"reason_text"`
-	}{req.AttemptNumber, req.StageKey, req.Reporter.Type, req.Reporter.OpaqueKey, req.ReasonCode, req.ReasonText}
+		AttemptNumber            int64  `json:"attempt_number"`
+		StageKey                 string `json:"stage_key"`
+		ReporterType             string `json:"reporter_type"`
+		ReporterKey              string `json:"reporter_key"`
+		ReasonCode               string `json:"reason_code"`
+		ReasonText               string `json:"reason_text"`
+		ExpectedCurrentExecution *int64 `json:"expected_current_execution,omitempty"`
+		ExpectedCurrentEpoch     *int64 `json:"expected_current_authority_epoch,omitempty"`
+	}{req.AttemptNumber, req.StageKey, req.Reporter.Type, req.Reporter.OpaqueKey, req.ReasonCode, req.ReasonText,
+		req.ExpectedCurrentExecution, req.ExpectedCurrentAuthorityEpoch}
 	if prior, err := lookupEnvelopeDuplicateForActor(ctx, tx, d, req.Reporter, "stage_execution_started", req.IdempotencyKey, payload); err != nil {
 		return StageRef{}, err
 	} else if prior.Duplicate {
@@ -88,6 +96,34 @@ func (s *Store) startStageRetryTx(ctx context.Context, tx *sql.Tx, effects *Effe
 	}
 	if req.AttemptNumber != attempt.AttemptNumber {
 		return StageRef{}, ErrConflict
+	}
+	if req.ExpectedCurrentExecution != nil {
+		current, currentErr := loadCurrentStage(ctx, tx, d.ID, req.AttemptNumber, req.StageKey)
+		if *req.ExpectedCurrentExecution == 0 {
+			if currentErr == nil {
+				return StageRef{}, fmt.Errorf("%w: stage already has a current execution", ErrConflict)
+			}
+			if !errors.Is(currentErr, sql.ErrNoRows) {
+				return StageRef{}, currentErr
+			}
+		} else {
+			if errors.Is(currentErr, sql.ErrNoRows) {
+				return StageRef{}, fmt.Errorf("%w: expected current stage is absent", ErrConflict)
+			}
+			if currentErr != nil {
+				return StageRef{}, currentErr
+			}
+			if current.ExecutionNumber != *req.ExpectedCurrentExecution || current.AuthorityEpoch != *req.ExpectedCurrentAuthorityEpoch {
+				return StageRef{}, ErrStaleAuthority
+			}
+			terminal, _, terminalErr := stageExecutionTerminal(ctx, tx, current.AttemptID, req.StageKey, current.ExecutionNumber)
+			if terminalErr != nil {
+				return StageRef{}, terminalErr
+			}
+			if !terminal {
+				return StageRef{}, fmt.Errorf("%w: current stage execution is still active", ErrConflict)
+			}
+		}
 	}
 	policy := policyForStage(attempt.Policies, req.StageKey)
 	if policy == nil || policy.Applicability != "required" {

@@ -307,6 +307,7 @@ POSTs require `Idempotency-Key`, current editor authority, and mandatory audit.
 GET  /agent-mode/deliveries/:deliveryKey/external-reporter-registrations
 POST /agent-mode/deliveries/:deliveryKey/external-reporter-registrations
 POST /agent-mode/deliveries/:deliveryKey/external-reporter-registrations/:registrationID/revoke
+POST /agent-mode/deliveries/:deliveryKey/external-owner-activations
 POST /agent-mode/deliveries/:deliveryKey/external-prerequisite-sets
 
 POST /agent-mode/deliveries/:deliveryKey/external-stage-handoffs  internal create; metadata only
