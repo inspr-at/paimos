@@ -491,10 +491,12 @@ func assertQueuedCancelRollback(t *testing.T, database *sql.DB, commandID string
 	}
 }
 
-// The protected race gate runs four phases that use this helper. A one-minute
-// bound per phase leaves at least four minutes for setup and the other tests
-// inside the workflow's eight-minute package timeout.
-const concurrentStorageRetryLimit = 60 * time.Second
+// The protected race gate runs four phases that use this helper. Linux race
+// instrumentation plus SQLite's five-second busy waits can serialize the tail
+// of 32 durable writers beyond one minute even while the database is making
+// progress. A two-minute bound preserves that production-shaped contention
+// while leaving the package inside the workflow's eight-minute timeout.
+const concurrentStorageRetryLimit = 120 * time.Second
 
 type concurrentMutationResult[T any] struct {
 	index      int
