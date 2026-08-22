@@ -197,7 +197,7 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
         controlTransitions.push(operation)
         controlCommand = operation === 'confirm'
           ? { ...controlCommand, status_revision: 2, status: 'accepted' }
-          : { ...controlCommand, status_revision: 2, status: 'rejected', outcome: 'rejected', reason: 'withdrawn' }
+          : { ...controlCommand, status_revision: 2, status: 'expired', reason: 'withdrawn' }
         controlCommands.set(commandId, controlCommand)
       }
       return fulfill(controlCommand)
@@ -639,6 +639,8 @@ test('PAI-811 controls require an explicit second phase for withdrawal and confi
 
   await challenge.locator('button', { hasText: 'Back' }).click()
   await expect(challenge).toHaveCount(0)
+  await expect(page.locator('.am-controls-live')).toContainText('The pending command was withdrawn.')
+  await expect(page.locator('.am-controls-dismiss')).toBeVisible()
   expect(api.controlTransitions).toEqual(['withdraw'])
   await page.locator('.am-controls-dismiss').click()
 
