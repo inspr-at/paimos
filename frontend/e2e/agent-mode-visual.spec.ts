@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Request } from '@playwright/test'
 import { mkdir, readFile } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 
@@ -8,6 +8,7 @@ const SHOT_DIR = process.env.PAI805_SHOT_DIR ?? '/tmp/pai805-shots'
 const SELF_HOST = process.env.PAI805_SELF_HOST_DIST === '1'
 const APP_ORIGIN = SELF_HOST ? 'http://pai805.local' : ''
 const DIST_DIR = resolve(process.cwd(), 'dist')
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 test.beforeAll(async () => {
   await mkdir(SHOT_DIR, { recursive: true })
@@ -55,12 +56,32 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
   let deliveryRequests = 0
   let releaseLoading: (() => void) | null = null
   const controlTransitions: string[] = []
-  let controlCommand: Record<string, unknown> | null = null
+  const controlCommands = new Map<string, Record<string, unknown>>()
+  const controlIdempotencyKeys = new Set<string>()
+  let controlCommandSequence = 0
   let issueFixture = { ...visualIssue }
   let issueMutations = 0
   let commentPosts = 0
   let attachmentUploads = 0
   const comments: Array<Record<string, unknown>> = []
+  const requireMethod = (request: Request, ...allowed: string[]) => {
+    const method = request.method()
+    if (!allowed.includes(method)) {
+      throw new Error(`fixture: ${request.url()} requires ${allowed.join(' or ')}, received ${method}`)
+    }
+    return method
+  }
+  const requireExactJSON = (request: Request, expected: Record<string, unknown>) => {
+    expect(request.postDataJSON(), `exact request body for ${request.url()}`).toEqual(expected)
+  }
+  const requireControlMutation = (request: Request, expected: Record<string, unknown>) => {
+    requireMethod(request, 'POST')
+    requireExactJSON(request, expected)
+    const idempotencyKey = request.headers()['idempotency-key']
+    expect(idempotencyKey, `Idempotency-Key for ${request.url()}`).toMatch(UUID_V4)
+    expect(controlIdempotencyKeys.has(idempotencyKey), `fresh Idempotency-Key for ${request.url()}`).toBe(false)
+    controlIdempotencyKeys.add(idempotencyKey)
+  }
   await page.addInitScript(() => {
     const sources: EventTarget[] = []
     class VisualEventSource extends EventTarget {
@@ -125,6 +146,7 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
       return fulfill(makeFixtureSnapshot(10))
     }
     if (/^\/api\/agent-mode\/deliveries\/dlv-\d+\/control-capability-grants$/.test(path)) {
+      requireControlMutation(route.request(), {})
       const deliveryKey = path.split('/')[4]
       const selected = makeFixtureSnapshot(10).rows?.find((delivery) => delivery.delivery_id === deliveryKey)
       return fulfill({
@@ -138,10 +160,18 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
       })
     }
     if (/^\/api\/agent-mode\/deliveries\/dlv-\d+\/control-commands$/.test(path)) {
+      requireControlMutation(route.request(), {
+        grant_id: '11111111-1111-4111-8111-111111111111',
+        grant_revision: 1,
+        action: 'run.cancel.running',
+        run_id: 42,
+      })
       const deliveryKey = path.split('/')[4]
       const selected = makeFixtureSnapshot(10).rows?.find((delivery) => delivery.delivery_id === deliveryKey)
-      controlCommand = {
-        command_id: '22222222-2222-4222-8222-222222222222',
+      controlCommandSequence += 1
+      const commandId = `22222222-2222-4222-8222-${String(controlCommandSequence).padStart(12, '0')}`
+      const controlCommand = {
+        command_id: commandId,
         status_revision: 1,
         action: 'run.cancel.running',
         status: 'pending_confirmation',
@@ -149,23 +179,35 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
         expires_at: '2027-01-02T03:04:05Z',
         display: { issue_key: selected?.issue_key ?? 'REL-820', delivery_key: deliveryKey, run_id: 42 },
       }
+      controlCommands.set(commandId, controlCommand)
       return fulfill(controlCommand)
     }
     if (/^\/api\/agent-mode\/control-commands\/[0-9a-f-]+$/.test(path)) {
+      const request = route.request()
+      const method = requireMethod(request, 'GET', 'POST')
+      const commandId = path.split('/').at(-1) ?? ''
+      let controlCommand = controlCommands.get(commandId)
       if (!controlCommand) return fulfill({ message: 'fixture: command missing' }, 404)
-      if (route.request().method() === 'POST') {
-        const body = route.request().postDataJSON() as { operation?: unknown }
-        const operation = typeof body.operation === 'string' ? body.operation : ''
+      if (method === 'POST') {
+        expect(controlCommand.status, `pending command ${commandId}`).toBe('pending_confirmation')
+        const body = request.postDataJSON() as { operation?: unknown; status_revision?: unknown }
+        expect(body.operation === 'confirm' || body.operation === 'withdraw', 'exact control operation').toBe(true)
+        const operation = body.operation as 'confirm' | 'withdraw'
+        requireControlMutation(request, { operation, status_revision: 1 })
         controlTransitions.push(operation)
         controlCommand = operation === 'confirm'
           ? { ...controlCommand, status_revision: 2, status: 'accepted' }
           : { ...controlCommand, status_revision: 2, status: 'rejected', outcome: 'rejected', reason: 'withdrawn' }
+        controlCommands.set(commandId, controlCommand)
       }
       return fulfill(controlCommand)
     }
     if (path === '/api/issues/5008') {
-      if (route.request().method() !== 'GET') {
-        const body = route.request().postDataJSON() as Record<string, unknown>
+      const request = route.request()
+      const method = requireMethod(request, 'GET', 'PUT')
+      if (method === 'PUT') {
+        expect(request.headers()['if-match'], 'editor If-Match').toBe('"issue-5008-2026-08-20T12:00:00"')
+        const body = request.postDataJSON() as Record<string, unknown>
         issueMutations += 1
         issueFixture = { ...issueFixture, ...body, updated_at: '2026-08-22 06:00:00' }
       }
@@ -176,16 +218,19 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
     }
     if (path === '/api/issues/5008/ai-activity') return fulfill({ rows: [], count: 0, last_week_count: 0 })
     if (path === '/api/issues/5008/comments') {
-      if (route.request().method() === 'GET') return fulfill(comments)
-      const body = route.request().postDataJSON() as { body?: unknown; visibility?: unknown }
+      const request = route.request()
+      const method = requireMethod(request, 'GET', 'POST')
+      if (method === 'GET') return fulfill(comments)
+      requireExactJSON(request, { body: 'PAI-811 browser acceptance note', visibility: 'internal' })
+      const body = request.postDataJSON() as { body: string; visibility: 'internal' }
       const comment = {
         id: 901 + comments.length,
         issue_id: 5008,
         author_id: 7,
         author: 'mba',
         avatar_path: null,
-        body: typeof body.body === 'string' ? body.body : '',
-        visibility: body.visibility === 'external' ? 'external' : 'internal',
+        body: body.body,
+        visibility: body.visibility,
         created_at: '2026-08-22T06:00:00Z',
       }
       comments.push(comment)
@@ -193,7 +238,23 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
       return fulfill(comment)
     }
     if (path === '/api/issues/5008/attachments') {
-      if (route.request().method() === 'GET') return fulfill([])
+      const request = route.request()
+      const method = requireMethod(request, 'GET', 'POST')
+      if (method === 'GET') return fulfill([])
+      const contentType = request.headers()['content-type'] ?? ''
+      const boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType)
+      const boundary = boundaryMatch?.[1] ?? boundaryMatch?.[2]
+      expect(contentType, 'attachment Content-Type').toMatch(/^multipart\/form-data;\s*boundary=/i)
+      expect(boundary, 'attachment multipart boundary').toBeTruthy()
+      const multipart = request.postDataBuffer()
+      expect(multipart, 'attachment multipart body').not.toBeNull()
+      expect(multipart!.byteLength, 'non-empty attachment multipart body').toBeGreaterThan(Buffer.byteLength('browser proof file'))
+      const multipartText = multipart!.toString('utf8')
+      expect(multipartText).toContain(`--${boundary}`)
+      expect(multipartText).toContain('Content-Disposition: form-data; name="file"; filename="pai811-proof.txt"')
+      expect(multipartText).toContain('Content-Type: text/plain')
+      expect(multipartText).toContain('\r\n\r\nbrowser proof file\r\n')
+      expect(multipartText).toContain(`--${boundary}--`)
       attachmentUploads += 1
       return fulfill({
         id: 701,
@@ -201,7 +262,7 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
         object_key: 'fixture/pai811-proof.txt',
         filename: 'pai811-proof.txt',
         content_type: 'text/plain',
-        size_bytes: 17,
+        size_bytes: Buffer.byteLength('browser proof file'),
         uploaded_by: 7,
         uploader: 'mba',
         created_at: '2026-08-22T06:00:00Z',
