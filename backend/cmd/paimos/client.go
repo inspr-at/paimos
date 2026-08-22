@@ -148,6 +148,7 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 		}
 		reqBody = bytes.NewReader(b)
 	}
+	// #nosec G704 -- baseURL is the operator-selected PAIMOS instance and path is assembled by CLI commands for that instance.
 	req, err := http.NewRequest(method, c.baseURL+path, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -157,6 +158,7 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 }
 
 func (c *Client) doRequest(req *http.Request) ([]byte, error) {
+	// #nosec G704 -- callers construct requests only for the configured PAIMOS instance; outbound HTTP is the CLI client's purpose.
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP %s %s: %w", req.Method, req.URL.Path, err)
