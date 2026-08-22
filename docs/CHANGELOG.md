@@ -78,6 +78,9 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added — Pinned external delivery-stage handoffs (PAI-810)
 
+- Published the exact-byte standalone Draft 2020-12 external-stage v1 JSON
+  Schema catalogue under `backend/contracts`, with a closed reference graph,
+  complete OpenAPI-component alignment, and immutable schema digest.
 - Added a fixed v1 internal handoff create/mint/rotate/revoke surface and an
   external opaque pull/accept/report surface for registered Pharos owner and
   Janus dependency reporters, without widening canonical delivery enums or
