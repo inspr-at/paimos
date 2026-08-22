@@ -2,7 +2,7 @@ import { expect, test, type Page, type Request } from '@playwright/test'
 import { mkdir, readFile } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 
-import { makeFixtureSnapshot } from '../src/services/agentModeFixtures'
+import { makeFixtureSnapshot, rebuildFixtureAggregates } from '../src/services/agentModeFixtures'
 
 const SHOT_DIR = process.env.PAI805_SHOT_DIR ?? '/tmp/pai805-shots'
 const SELF_HOST = process.env.PAI805_SELF_HOST_DIST === '1'
@@ -40,9 +40,11 @@ const visualIssue = {
 }
 
 type VisualDeliveryMode = 'ready' | 'loading' | 'empty' | 'offline' | 'forbidden' | 'not-found' | 'malformed'
+type VisualDeliverySnapshot = ReturnType<typeof makeFixtureSnapshot>
 
 interface VisualApiControl {
   setDeliveryMode(mode: VisualDeliveryMode): void
+  setDeliverySnapshot(snapshot: VisualDeliverySnapshot): void
   releaseLoading(): void
   readonly deliveryRequests: number
   readonly controlTransitions: readonly string[]
@@ -53,6 +55,7 @@ interface VisualApiControl {
 
 async function installApiFixtures(page: Page): Promise<VisualApiControl> {
   let deliveryMode: VisualDeliveryMode = 'ready'
+  let deliverySnapshot = makeFixtureSnapshot(10)
   let deliveryRequests = 0
   let releaseLoading: (() => void) | null = null
   const controlTransitions: string[] = []
@@ -143,7 +146,7 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
           headers: { 'X-Permissions-Epoch': '1' },
         })
       }
-      return fulfill(makeFixtureSnapshot(10))
+      return fulfill(deliverySnapshot)
     }
     if (/^\/api\/agent-mode\/deliveries\/dlv-\d+\/control-capability-grants$/.test(path)) {
       requireControlMutation(route.request(), {})
@@ -275,6 +278,7 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
   })
   return {
     setDeliveryMode(mode) { deliveryMode = mode },
+    setDeliverySnapshot(snapshot) { deliverySnapshot = snapshot },
     releaseLoading() {
       deliveryMode = 'ready'
       releaseLoading?.()
@@ -286,6 +290,68 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
     get commentPosts() { return commentPosts },
     get attachmentUploads() { return attachmentUploads },
   }
+}
+
+function makeVerifiedDeliverySnapshot(): VisualDeliverySnapshot {
+  const snapshot = makeFixtureSnapshot(10)
+  const delivery = snapshot.rows?.find((row) => row.delivery_id === 'dlv-820')
+  if (!delivery) throw new Error('fixture: dlv-820 is required')
+
+  const verifiedAt = '2026-08-20T13:47:00Z'
+  const trustRevision = `tr1_${'f'.repeat(64)}`
+  delivery.attempt_status = 'completed'
+  delivery.delivery_revision = 'delivery:820:2'
+  delivery.trust_revision = trustRevision
+  delivery.activity = { kind: 'idle', text: 'Exact production artifact verified', since: verifiedAt }
+  delivery.stage = { key: 'verification', label: 'Verification', index: 5, total: 5 }
+  delivery.stages = delivery.stages?.map((stage) => ({
+    ...stage,
+    status: 'succeeded',
+    activity: stage.key === 'verification' ? 'Exact production artifact verified' : undefined,
+    blockers: [],
+    evidence: [{ kind: 'stage_result', status: 'passed', reported_at: verifiedAt }],
+    started_at: stage.started_at ?? '2026-08-20T13:40:00Z',
+    completed_at: stage.completed_at ?? verifiedAt,
+  })) ?? []
+  delivery.evidence = delivery.stages.flatMap((stage) => stage.evidence ?? [])
+  delivery.health = 'healthy'
+  delivery.attention = { level: 0, since: null }
+  delivery.blockers = []
+  delivery.progress = {
+    percent: 100,
+    trusted: true,
+    confidence: 'high',
+    source: 'stage_evidence',
+    basis: 'exact production artifact verified',
+    revision: trustRevision,
+  }
+  delivery.eta = null
+  delivery.trust = {
+    schema_version: 1,
+    trust_revision: trustRevision,
+    progress_known: true,
+    progress_percent: 100,
+    confidence_label: 'high',
+    reporter_kind: 'external',
+    source_kind: 'stage_evidence',
+    basis: 'exact production artifact verified',
+    optimistic_landing_at: null,
+    pessimistic_landing_at: null,
+    landing_at: null,
+    range_only: false,
+    suppression: 'terminal_complete',
+    scope: {
+      attempt_id: 'attempt-820-1',
+      plan_id: 'plan:820:1',
+      execution_id: 'execution:820:1',
+      authority_id: 'authority:820:1',
+      reset_id: 'reset:820:0',
+    },
+    flags: [],
+  }
+  delivery.status_text = 'Verified exact production artifact'
+  delivery.updated_at = verifiedAt
+  return rebuildFixtureAggregates(snapshot)
 }
 
 async function emitVisualStreamEvent(page: Page, type: 'refetch' | 'reset') {
@@ -728,6 +794,30 @@ test('PAI-811 browser states stay honest and retry without retaining unauthorize
   await expect(page.locator('[data-selected="true"]')).toBeVisible()
   await expect(page.locator('.am-card-eta--withheld').first()).toBeVisible()
   await expectCompactFeedAuthority(page, /^Offline(?:\s|$)/)
+})
+
+test('PAI-811 browser replaces deployed-unverified truth with later exact-artifact verification', async ({ page }) => {
+  await installStaticHost(page)
+  const api = await installApiFixtures(page)
+  await openReady(page, 1440, 1000)
+
+  const selected = page.locator('[data-selected="true"]')
+  await expect(selected).toHaveCount(1)
+  await expect(selected.locator('.am-card-reason')).toHaveText('Deployed — verification needed')
+  await expect(page.locator('body')).not.toContainText('deployed_unverified')
+
+  const requestsBeforeVerification = api.deliveryRequests
+  api.setDeliverySnapshot(makeVerifiedDeliverySnapshot())
+  await emitVisualStreamEvent(page, 'refetch')
+
+  await expect.poll(() => api.deliveryRequests).toBeGreaterThan(requestsBeforeVerification)
+  await expect(selected).toHaveCount(1)
+  await expect(page.locator('[aria-current="true"]')).toHaveCount(1)
+  await expect(selected.locator('.am-card-reason')).toHaveCount(0)
+  await expect(selected.locator('.am-card-facts')).toContainText('Verification · 5/5')
+  await expect(selected.locator('.am-card-status')).toHaveText('Verified exact production artifact')
+  await expect(selected).not.toContainText('Deployed — verification needed')
+  await expect(page.locator('body')).not.toContainText('deployed_unverified')
 })
 
 test('PAI-811 live ACL revocation clears every authoritative delivery surface', async ({ page }) => {

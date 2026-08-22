@@ -77,6 +77,14 @@ jobs:
         working-directory: backend
         run: go test -count=1 -run '^TestRegression_|^TestAuthzFuzz_' ./handlers/...
 
+      # PAI-809: force the complementary process implementation into the
+      # executable Linux test binary. A cross-compile proves only syntax; this
+      # test proves the unsupported-platform path withholds the owned-process
+      # signal and therefore never issues a running-cancel control lease.
+      - name: Backend — unsupported platform fails closed
+        working-directory: backend
+        run: go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
+
       # PAI-809: keep the race detector on the control-plane paths that own
       # concurrent confirmation, claim, input sealing, adapter dedupe, and the
       # durable runner journal. A repository-wide -race run is prohibitively
