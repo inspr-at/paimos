@@ -233,6 +233,9 @@ function logout() {
   outline: 2px solid #fff;
   outline-offset: 2px;
 }
+@media (prefers-reduced-motion: reduce) {
+  .aml-rail-btn { transition: none; }
+}
 
 /* ── Main column: slim top bar (view title · live chip · lever · settings) ── */
 .aml-main {

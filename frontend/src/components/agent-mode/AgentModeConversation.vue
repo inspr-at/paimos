@@ -153,11 +153,16 @@ const visibleLines = computed(() => (props.compact ? props.lines.slice(-3) : pro
 .am-conv--compact .am-conv-controls { margin-bottom: 8px; }
 .am-conv--compact .am-conv-line { max-width: 100%; box-shadow: 0 8px 28px color-mix(in srgb, var(--am-ink) 14%, transparent); }
 .am-conv--compact .am-conv-dock { box-shadow: 0 8px 28px color-mix(in srgb, var(--am-ink) 12%, transparent); }
-/* Touch-size screens: keyboard guidance is irrelevant; keep only the
-   recent bubble so the dock stays small. */
+/* Touch-size screens keep the approved desktop composition but reflow the
+   compact surface into one full-width, in-flow status row. One authoritative
+   latest line is enough here: the canvas already presents the selected
+   delivery and the app header carries feed state. This preserves a usable
+   canvas instead of allowing narration/control chrome to consume most of a
+   phone viewport. */
 @media (max-width: 640px) {
-  .am-conv--compact { width: min(220px, calc(100% - 28px)); }
-  .am-conv--compact .am-conv-key-help { display: none; }
+  .am-conv--compact { width: calc(100% - 28px); }
+  .am-conv--compact .am-conv-lines > :not(:last-child),
+  .am-conv--compact .am-conv-dock { display: none; }
   .am-conv--compact .am-conv-lines { padding-bottom: 0; }
 }
 </style>

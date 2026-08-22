@@ -1511,6 +1511,12 @@ const selectedPosition = computed(() => {
   .am-root--ticket.am-root--compact :deep(.am-conv) { grid-column: 1; grid-row: 3; }
 }
 
+@media (max-width: 640px) {
+  .am-root--compact :deep(.am-conv-controls) {
+    grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.4fr);
+  }
+}
+
 .am-header-tools { display: inline-flex; align-items: center; gap: 12px; }
 .am-live-chip {
   display: inline-flex;

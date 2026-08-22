@@ -201,6 +201,33 @@ async function expectControlVoiceGeometry(page: Page) {
   })
 }
 
+async function expectMobileCompactFlow(page: Page) {
+  const result = await page.evaluate(() => {
+    const canvas = document.querySelector<HTMLElement>('.am-canvas')!.getBoundingClientRect()
+    const conversation = document.querySelector<HTMLElement>('.am-conv--compact')!.getBoundingClientRect()
+    const root = document.querySelector<HTMLElement>('.am-root')!.getBoundingClientRect()
+    const selected = document.querySelector<HTMLElement>('[data-selected="true"]')!.getBoundingClientRect()
+    const renderedLines = [...document.querySelectorAll<HTMLElement>('.am-conv-line')]
+      .filter((line) => getComputedStyle(line).display !== 'none')
+    const feedDock = document.querySelector<HTMLElement>('.am-conv-dock')!
+    return {
+      renderedLines: renderedLines.length,
+      feedDockDisplay: getComputedStyle(feedDock).display,
+      conversationWidth: conversation.width,
+      rootWidth: root.width,
+      canvasHeight: canvas.height,
+      selectedWithinCanvas: selected.top >= canvas.top && selected.bottom <= canvas.bottom,
+      horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    }
+  })
+  expect(result.renderedLines).toBe(1)
+  expect(result.feedDockDisplay).toBe('none')
+  expect(result.conversationWidth).toBeGreaterThanOrEqual(result.rootWidth - 29)
+  expect(result.canvasHeight).toBeGreaterThanOrEqual(420)
+  expect(result.selectedWithinCanvas).toBe(true)
+  expect(result.horizontalOverflow).toBe(false)
+}
+
 async function openReady(page: Page, width: number, height: number, extra = '') {
   await page.setViewportSize({ width, height })
   await page.goto(`${APP_ORIGIN}/agent-mode?delivery=dlv-820${extra}`, { waitUntil: 'networkidle' })
@@ -233,6 +260,7 @@ test('PAI-805 final visual and geometry gate', async ({ page }) => {
     await openReady(page, width, height)
     await expectControlVoiceGeometry(page)
     await expectDockClear(page)
+    if (width === 390) await expectMobileCompactFlow(page)
     await page.locator('.am-canvas').evaluate((canvas) => { canvas.scrollTop = canvas.scrollHeight })
     await expectDockClear(page)
     if (width === 900) await page.screenshot({ path: `${SHOT_DIR}/narrow-10.png` })
@@ -284,7 +312,66 @@ test('Agent Mode keeps the light app palette under dark OS and reduced motion', 
   })
   expect(colors.background).toBe('rgb(242, 245, 248)')
   expect(colors.ink).toBe('rgb(26, 38, 54)')
+  const moving = await page.locator('.aml-shell').evaluate((shell) =>
+    [...shell.querySelectorAll<HTMLElement>('*')]
+      .filter((element) => {
+        const rect = element.getBoundingClientRect()
+        if (rect.width === 0 || rect.height === 0) return false
+        const style = getComputedStyle(element)
+        const nonZero = (value: string) => value.split(',').some((part) => Number.parseFloat(part) > 0)
+        const spatial = new Set([
+          'all', 'transform', 'translate', 'scale', 'rotate', 'width', 'height', 'max-width', 'max-height',
+          'min-width', 'min-height', 'top', 'right', 'bottom', 'left', 'margin', 'padding', 'inset',
+        ])
+        const properties = style.transitionProperty.split(',').map((property) => property.trim())
+        const durations = style.transitionDuration.split(',').map((duration) => Number.parseFloat(duration))
+        const hasSpatialTransition = properties.some((property, index) =>
+          spatial.has(property) && (durations[index % durations.length] ?? 0) > 0)
+        return (style.animationName !== 'none' && nonZero(style.animationDuration))
+          || hasSpatialTransition
+      })
+      .map((element) => {
+        const style = getComputedStyle(element)
+        return {
+          tag: element.tagName,
+          id: element.id,
+          className: element.className,
+          animation: `${style.animationName} ${style.animationDuration}`,
+          transition: `${style.transitionProperty} ${style.transitionDuration}`,
+        }
+      })
+  )
+  expect(moving).toEqual([])
   await page.screenshot({ path: `${SHOT_DIR}/desktop-10-reduced-dark-os.png` })
+})
+
+test('PAI-811 200% effective zoom keeps mobile flow reachable and non-occluding', async ({ page }) => {
+  await installStaticHost(page)
+  await installApiFixtures(page)
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 512,
+    height: 450,
+    deviceScaleFactor: 2,
+    mobile: false,
+  })
+  await page.goto(`${APP_ORIGIN}/agent-mode?delivery=dlv-820`, { waitUntil: 'networkidle' })
+  await expect(page.locator('[data-selected="true"]')).toBeVisible()
+  await expectControlVoiceGeometry(page)
+  await expectDockClear(page)
+  const geometry = await page.evaluate(() => ({
+    devicePixelRatio: window.devicePixelRatio,
+    innerWidth: window.innerWidth,
+    horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    canvasScrollable: document.querySelector<HTMLElement>('.am-canvas')!.scrollHeight
+      > document.querySelector<HTMLElement>('.am-canvas')!.clientHeight,
+  }))
+  expect(geometry).toEqual({
+    devicePixelRatio: 2,
+    innerWidth: 512,
+    horizontalOverflow: false,
+    canvasScrollable: true,
+  })
 })
 
 test('PAI-806 Detail 1 ticket panel geometry at 390 / 736 / 1024', async ({ page }) => {
