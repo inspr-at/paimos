@@ -5,6 +5,27 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.12.0] — 2026-08-22
+
+### Added — Production-safe PAI-810 delivery reachability
+
+- Version-1 instrumented runs now bind successful tests to an allowlisted commit,
+  same-issue attachment, or bounded source-free SHA-256 snapshot, then atomically
+  project eligible implementation and required-QA evidence without taking over
+  active human or external QA work.
+- Added the authenticated, CAS-bound `external-stage owner activate` command and
+  API, atomically committing operator activation, exact Pharos handoff, and
+  principal-attributed append-only audit evidence.
+
+### Fixed
+
+- The local runner freezes trusted Git and repository identity, pins deploy
+  reports to the tested state, resolves supervision/cancellation races before
+  success, and keeps source, paths, diffs, commands, output, environment, and
+  credentials outside the API boundary.
+- Serialized backend CI now permits the additive migration suite up to 30 minutes
+  while retaining per-package execution.
+
 ## [5.11.0] — 2026-08-21
 
 ### Added — Sealed external delivery-stage handoffs (PAI-810)
