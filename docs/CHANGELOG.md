@@ -5,6 +5,35 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.13.0] — 2026-08-22
+
+### Added — Provider-neutral supervisory control and external-stage contracts
+
+- Published the standalone Draft 2020-12 external-stage v1 schema catalogue,
+  with a closed reference graph and exact OpenAPI-component alignment for
+  independently implemented Pharos and Janus adapters.
+- Added provider-neutral runner-control adapter conformance with truthful
+  cancel-only capability reporting, so unsupported pause, resume, and input
+  actions remain unreachable instead of being advertised optimistically.
+
+### Changed — Responsive and authority-safe Agent Mode
+
+- Hardened the approved Detail-10 Agent Mode surface across responsive layouts,
+  reduced-motion preferences, focus and visual states, while retaining the
+  human-accepted information architecture and design language.
+- Frozen runner capabilities and authority at activation, preserving the exact
+  device, credential, lease, target, and revision boundaries through control
+  delivery and reconciliation.
+
+### Reliability and security
+
+- Made control apply/reconcile state durable across duplicate reports, restarts,
+  concurrent journal writers, and cancel/result races without widening safe
+  provider capabilities or accepting stale authority.
+- Added production-shaped 32-writer SQLite contention coverage, deterministic
+  expired-lease zero-mutation proof, adapter mutation oracles, and protected
+  race gates for command confirmation, effect claims, and terminal sealing.
+
 ## [5.12.0] — 2026-08-22
 
 ### Added — Production-safe PAI-810 delivery reachability
