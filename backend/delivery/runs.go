@@ -17,6 +17,7 @@ import (
 )
 
 var commitDigest = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+var sha256Digest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func agentRunActorID(actor Actor) (int64, bool) {
 	if actor.Type != "agent_run" || !strings.HasPrefix(actor.OpaqueKey, "run:") {
@@ -405,7 +406,8 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 		return fmt.Errorf("%w: invalid run normalization", ErrInvalid)
 	}
 	var issueID, deliveryID, attemptID, currentAttemptID, attemptNumber, execution, currentExecution, epoch, reporterID, currentReporterID, executionStartID int64
-	var stage, reporterType, reporterKey, runStatus, commitSHA, commitBase string
+	var stage, reporterType, reporterKey, runStatus, commitSHA, commitBase, implementationDigest string
+	var testsSummary sql.NullString
 	var attachment sql.NullInt64
 	var deletedAt sql.NullString
 	var runIssueID int64
@@ -417,7 +419,7 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 		 ON seal.delivery_id=ca.delivery_id AND seal.attempt_id=ca.id
 		 WHERE ca.delivery_id=link.delivery_id ORDER BY ca.attempt_number DESC LIMIT 1),
 		r.reporter_type,r.opaque_key,
-		ar.status,ar.commit_sha,ar.commit_base_sha,ar.log_attachment_id,
+		ar.status,ar.commit_sha,ar.commit_base_sha,ar.implementation_result_digest,ar.log_attachment_id,ar.tests_summary,
 		ar.issue_id,ar.delivery_instrumentation_version,i.deleted_at
 		FROM delivery_agent_run_links link JOIN delivery_attempts a ON a.id=link.attempt_id
 		JOIN delivery_stage_latest l ON l.attempt_id=link.attempt_id AND l.stage_key=link.stage_key
@@ -426,7 +428,7 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 		JOIN issues i ON i.id=link.root_issue_id WHERE link.agent_run_id=?`, normalization.RunID).
 		Scan(&issueID, &deliveryID, &attemptID, &attemptNumber, &stage, &execution, &currentExecution, &epoch, &reporterID, &currentReporterID,
 			&executionStartID, &currentAttemptID,
-			&reporterType, &reporterKey, &runStatus, &commitSHA, &commitBase, &attachment,
+			&reporterType, &reporterKey, &runStatus, &commitSHA, &commitBase, &implementationDigest, &attachment, &testsSummary,
 			&runIssueID, &instrumentation, &deletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: instrumented run is unlinked", ErrInvariant)
@@ -451,12 +453,14 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 	// superseded its authority. Its legal lifecycle must still commit, but it
 	// can only invalidate the delivery read—not alter current stage truth.
 	currentLineage := attemptID == currentAttemptID && execution == currentExecution && reporterID == currentReporterID
+	var currentAttempt Attempt
 	if currentLineage {
-		attempt, loadErr := loadAttemptByNumber(ctx, tx, deliveryID, attemptNumber)
+		var loadErr error
+		currentAttempt, loadErr = loadAttemptByNumber(ctx, tx, deliveryID, attemptNumber)
 		if loadErr != nil {
 			return fmt.Errorf("load run attempt: %w", loadErr)
 		}
-		currentLineage, loadErr = stageExecutionCurrentLineageMode(ctx, tx, attempt, stage, executionStartID, hidden)
+		currentLineage, loadErr = stageExecutionCurrentLineageMode(ctx, tx, currentAttempt, stage, executionStartID, hidden)
 		if loadErr != nil {
 			return fmt.Errorf("validate run stage lineage: %w", loadErr)
 		}
@@ -469,6 +473,7 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 	}
 	state, activity := "", ""
 	var evidence []Evidence
+	implementationCommit := ""
 	switch runStatus {
 	case "drafted":
 		state, activity = "draft_ready", "Implementation draft ready"
@@ -481,7 +486,10 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 		commitSHA = strings.ToLower(strings.TrimSpace(commitSHA))
 		commitBase = strings.ToLower(strings.TrimSpace(commitBase))
 		if commitDigest.MatchString(commitSHA) && commitSHA != commitBase {
+			implementationCommit = commitSHA
 			evidence = append(evidence, Evidence{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: commitSHA})
+		} else if sha256Digest.MatchString(implementationDigest) {
+			evidence = append(evidence, Evidence{Type: "implementation_result", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: implementationDigest})
 		} else if attachment.Valid {
 			id := attachment.Int64
 			evidence = append(evidence, Evidence{Type: "implementation_result", Outcome: "passed", ReferenceKind: "attachment", AttachmentID: &id})
@@ -490,6 +498,17 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 		}
 	default:
 		return nil
+	}
+	qaRequired := false
+	if !hidden && runStatus == "tests_passed" && stage == StageImplementation {
+		qaPolicy := policyForStage(currentAttempt.Policies, StageQA)
+		if qaPolicy == nil {
+			return fmt.Errorf("%w: normalized QA policy is absent", ErrInvariant)
+		}
+		qaRequired = qaPolicy.Applicability == "required"
+		if qaRequired && len(evidence) == 0 {
+			return fmt.Errorf("%w: tests_passed lacks bounded implementation evidence", ErrConflict)
+		}
 	}
 	if stage == StageSpecification && runStatus != "drafted" && runStatus != "failed" && runStatus != "cancelled" {
 		return fmt.Errorf("%w: specification run has an invalid lifecycle outcome", ErrInvariant)
@@ -525,6 +544,100 @@ func (s *Store) NormalizeRunTx(ctx context.Context, tx *sql.Tx, effects *Effects
 	_, err = s.reportStageTxMode(ctx, tx, effects, report, "lifecycle_normalized", "run_normalized", "run", "agent_run", &id, false, hidden)
 	if err != nil {
 		return fmt.Errorf("normalize run stage: %w", err)
+	}
+	if !hidden && qaRequired {
+		return s.normalizePassedQATx(ctx, tx, effects, normalization.RunID, issueID, attemptNumber,
+			implementationCommit, implementationDigest, attachment, testsSummary)
+	}
+	return nil
+}
+
+// normalizePassedQATx projects the runner's bounded test result into the
+// canonical QA stage. The implementation result, QA start, and QA result share
+// the caller's transaction, so deployment can never observe a half-normalized
+// tests_passed lifecycle. Server-derived keys make transport/reconciler replay
+// an exact read, independent of the caller's lifecycle idempotency key.
+func (s *Store) normalizePassedQATx(ctx context.Context, tx *sql.Tx, effects *Effects, runID, issueID, attemptNumber int64,
+	commitSHA, implementationDigest string, attachment sql.NullInt64, testsSummary sql.NullString) error {
+	if !testsSummary.Valid || strings.TrimSpace(testsSummary.String) == "" {
+		return fmt.Errorf("%w: tests_passed run lacks bounded test evidence", ErrInvariant)
+	}
+	// Bind exactly one implementation result using the same precedence as the
+	// implementation stage. Conflicting lower-priority transport fields are not
+	// part of canonical QA evidence and cannot perturb its digest.
+	if commitSHA != "" {
+		implementationDigest = ""
+		attachment = sql.NullInt64{}
+	} else if sha256Digest.MatchString(implementationDigest) {
+		attachment = sql.NullInt64{}
+	} else if attachment.Valid {
+		implementationDigest = ""
+	} else {
+		return fmt.Errorf("%w: tests_passed run lacks bounded implementation evidence", ErrInvariant)
+	}
+	d, err := loadDeliveryByIssue(ctx, tx, issueID)
+	if err != nil {
+		return fmt.Errorf("load normalized QA delivery: %w", err)
+	}
+	attempt, err := loadAttemptByNumber(ctx, tx, d.ID, attemptNumber)
+	if err != nil {
+		return fmt.Errorf("load normalized QA attempt: %w", err)
+	}
+	qaPolicy := policyForStage(attempt.Policies, StageQA)
+	if qaPolicy == nil {
+		return fmt.Errorf("%w: normalized QA policy is absent", ErrInvariant)
+	}
+	if qaPolicy.Applicability != "required" {
+		return nil
+	}
+	reporter := Actor{Type: "system", OpaqueKey: "paimos:run-normalizer"}
+	prefix := fmt.Sprintf("run:%d:tests_passed:qa", runID)
+	expectedExecution, expectedEpoch := int64(0), int64(0)
+	current, currentErr := loadCurrentStage(ctx, tx, d.ID, attemptNumber, StageQA)
+	if currentErr == nil {
+		terminal, _, terminalErr := stageExecutionTerminal(ctx, tx, current.AttemptID, StageQA, current.ExecutionNumber)
+		if terminalErr != nil {
+			return fmt.Errorf("load normalized QA terminal state: %w", terminalErr)
+		}
+		// Never steal an active human or external QA execution. The new
+		// implementation result commits, while that execution becomes
+		// lineage-ineligible and must be finished or retried by its owner.
+		if !terminal {
+			return nil
+		}
+		expectedExecution, expectedEpoch = current.ExecutionNumber, current.AuthorityEpoch
+	} else if !errors.Is(currentErr, sql.ErrNoRows) {
+		return fmt.Errorf("load normalized QA current stage: %w", currentErr)
+	}
+	qa, err := s.StartStageRetryTx(ctx, tx, effects, StageStartRequest{
+		IssueID: issueID, AttemptNumber: attemptNumber, StageKey: StageQA, Reporter: reporter,
+		ReasonCode: "run_tests_passed", IdempotencyKey: prefix + ":start",
+		ExpectedCurrentExecution: &expectedExecution, ExpectedCurrentAuthorityEpoch: &expectedEpoch,
+	})
+	if err != nil {
+		return fmt.Errorf("start normalized QA stage: %w", err)
+	}
+	digest, err := canonicalHash(struct {
+		Domain               string `json:"domain"`
+		RunID                int64  `json:"run_id"`
+		CommitSHA            string `json:"commit_sha,omitempty"`
+		ImplementationDigest string `json:"implementation_result_digest,omitempty"`
+		AttachmentID         *int64 `json:"attachment_id,omitempty"`
+		TestResult           string `json:"test_result"`
+	}{Domain: "paimos.agent-run.test-result.v1", RunID: runID, CommitSHA: commitSHA,
+		ImplementationDigest: implementationDigest, AttachmentID: nullInt64Ptr(attachment), TestResult: testsSummary.String})
+	if err != nil {
+		return fmt.Errorf("digest normalized QA evidence: %w", err)
+	}
+	_, err = s.ReportStageTx(ctx, tx, effects, StageReport{
+		IssueID: issueID, AttemptNumber: attemptNumber, StageKey: StageQA,
+		ExecutionNumber: qa.ExecutionNumber, AuthorityEpoch: qa.AuthorityEpoch, Reporter: reporter,
+		IdempotencyKey: prefix + ":succeeded", Kind: "semantic", State: "succeeded",
+		Activity: "Configured tests passed", ReasonCode: "run_tests_passed",
+		Evidence: []Evidence{{Type: "test_result", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: hex.EncodeToString(digest)}},
+	})
+	if err != nil {
+		return fmt.Errorf("report normalized QA stage: %w", err)
 	}
 	return nil
 }

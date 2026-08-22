@@ -64,11 +64,14 @@ jobs:
         # -p 1 serializes per-package test execution. The handlers
         # package + db package both call db.Open() against an in-memory
         # SQLite, which under concurrent setup races on PRAGMA
-        # journal_mode=WAL (SQLITE_BUSY). The runtime cost is small and
-        # the failures it prevents are 100% flake.
+        # journal_mode=WAL (SQLITE_BUSY). The handlers package contains
+        # hundreds of fresh-DB tests and every open applies the complete
+        # migration chain, so keep an explicit package timeout above Go's
+        # 10-minute default rather than turning expected progress into a
+        # false hang after additive migrations.
         run: |
           go vet ./...
-          go test -count=1 -p 1 ./...
+          go test -count=1 -p 1 -timeout=30m ./...
 
       - name: Backend — security invariants
         working-directory: backend

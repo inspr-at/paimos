@@ -34,6 +34,7 @@ const (
 	externalStageRegistrationsPath      = "/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations"
 	externalStageRegistrationRevokePath = "/api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations/{registrationID}/revoke"
 	externalStagePrerequisiteSetsPath   = "/api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets"
+	externalStageOwnerActivationsPath   = "/api/agent-mode/deliveries/{deliveryKey}/external-owner-activations"
 )
 
 var (
@@ -108,6 +109,26 @@ type externalStagePrerequisiteSet struct {
 	SealedAt        string `json:"sealed_at"`
 }
 
+type externalStageOwnerActivationRequest struct {
+	ReporterRegistrationID        int64  `json:"reporter_registration_id"`
+	StageKey                      string `json:"stage_key"`
+	ExpectedAttemptNumber         int64  `json:"expected_attempt_number"`
+	ExpectedPlanRevision          int64  `json:"expected_plan_revision"`
+	ExpectedCurrentExecution      int64  `json:"expected_current_execution"`
+	ExpectedCurrentAuthorityEpoch int64  `json:"expected_current_authority_epoch"`
+}
+
+type externalStageOwnerActivation struct {
+	DeliveryKey            string `json:"delivery_key"`
+	ReporterRegistrationID int64  `json:"reporter_registration_id"`
+	StageKey               string `json:"stage_key"`
+	AttemptNumber          int64  `json:"attempt_number"`
+	PlanRevision           int64  `json:"plan_revision"`
+	ExecutionNumber        int64  `json:"execution_number"`
+	AuthorityEpoch         int64  `json:"authority_epoch"`
+	ReporterID             int64  `json:"reporter_id"`
+}
+
 func externalStageCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "external-stage",
@@ -124,12 +145,65 @@ X-PAIMOS-Handoff-Secret request header.`,
 	c.AddCommand(externalStageCreateCmd())
 	c.AddCommand(externalStageRegistrationsCmd())
 	c.AddCommand(externalStagePrerequisitesCmd())
+	c.AddCommand(externalStageOwnerCmd())
 	c.AddCommand(externalStageMintCmd(false))
 	c.AddCommand(externalStageMintCmd(true))
 	c.AddCommand(externalStageRevokeCmd())
 	c.AddCommand(externalStagePullCmd())
 	c.AddCommand(externalStageAcceptCmd())
 	c.AddCommand(externalStageReportCmd())
+	return c
+}
+
+func externalStageOwnerCmd() *cobra.Command {
+	c := &cobra.Command{Use: "owner", Short: "Activate exact Pharos owners for deployment or verification"}
+	c.AddCommand(externalStageOwnerActivateCmd())
+	return c
+}
+
+func externalStageOwnerActivateCmd() *cobra.Command {
+	var request externalStageOwnerActivationRequest
+	var mutation externalStageMutationOptions
+	var dryRun bool
+	c := &cobra.Command{
+		Use:   "activate <delivery-key>",
+		Short: "Start one CAS-bound stage execution under an exact Pharos owner",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			deliveryKey, err := validateExternalStageDeliveryKey(args[0])
+			if err != nil {
+				return err
+			}
+			if err := validateExternalStageOwnerActivation(request); err != nil {
+				return err
+			}
+			if err := mutation.validate(); err != nil {
+				return err
+			}
+			path := externalStageDeliveryAdminPath(externalStageOwnerActivationsPath, deliveryKey)
+			if dryRun {
+				return emitJSON(externalStageDryRunPlan(http.MethodPost, path, request, mutation))
+			}
+			client, err := instanceClient()
+			if err != nil {
+				return err
+			}
+			var response externalStageOwnerActivation
+			if err := externalStageAdminJSONRoundTrip(client, http.MethodPost, path, request, mutation.idempotencyKey, &response); err != nil {
+				return reportError(err)
+			}
+			return emitExternalStageResult(response, fmt.Sprintf("activated Pharos registration %d for %s %s execution %d",
+				response.ReporterRegistrationID, deliveryKey, response.StageKey, response.ExecutionNumber))
+		},
+	}
+	c.Flags().Int64Var(&request.ReporterRegistrationID, "reporter-registration-id", 0, "exact current Pharos owner registration id")
+	c.Flags().StringVar(&request.StageKey, "stage", "", "stage to start: deployment or verification")
+	c.Flags().Int64Var(&request.ExpectedAttemptNumber, "attempt", 0, "expected current delivery attempt number")
+	c.Flags().Int64Var(&request.ExpectedPlanRevision, "plan-revision", 0, "expected immutable attempt plan revision")
+	c.Flags().Int64Var(&request.ExpectedCurrentExecution, "current-execution", 0, "expected current execution, or 0 when none exists")
+	c.Flags().Int64Var(&request.ExpectedCurrentAuthorityEpoch, "current-authority-epoch", 0, "expected current authority epoch, or 0 when none exists")
+	addExternalStageReusableIdempotencyFlag(c, &mutation)
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the safe request without sending it")
 	return c
 }
 
@@ -1068,6 +1142,20 @@ func validateExternalStageRegistration(request externalStageRegistrationRequest)
 		}
 	default:
 		return &usageError{msg: "--class must be pharos or janus"}
+	}
+	return nil
+}
+
+func validateExternalStageOwnerActivation(request externalStageOwnerActivationRequest) error {
+	if request.ReporterRegistrationID < 1 || request.ExpectedAttemptNumber < 1 || request.ExpectedPlanRevision < 1 {
+		return &usageError{msg: "--reporter-registration-id, --attempt, and --plan-revision must be positive"}
+	}
+	if request.StageKey != "deployment" && request.StageKey != "verification" {
+		return &usageError{msg: "--stage must be deployment or verification"}
+	}
+	if request.ExpectedCurrentExecution < 0 || request.ExpectedCurrentAuthorityEpoch < 0 ||
+		((request.ExpectedCurrentExecution == 0) != (request.ExpectedCurrentAuthorityEpoch == 0)) {
+		return &usageError{msg: "--current-execution and --current-authority-epoch must both be zero or both be positive"}
 	}
 	return nil
 }

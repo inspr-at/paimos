@@ -550,6 +550,67 @@ paimos run-agent watch --project PAI --repo-root . --yes \
   --test-exec "npm test"
 ```
 
+When the provider intentionally leaves an uncommitted worktree, the runner
+captures a bounded source-free snapshot before execution, at the state given to
+`--test-exec`, and again after successful tests. If the covered source state is
+stable and differs from the pre-run state, it sends only a domain-separated
+`implementation_result_digest`; source bytes, paths, filenames, diffs, test
+commands/output, environment, and remote credentials never leave the
+workstation. The configured test command is represented inside that digest only
+by a one-way hash.
+
+The covered source surface is every actual node discovered from the frozen HEAD
+tree or stage-0 index, plus non-ignored untracked nodes and every repository
+`.gitignore` policy file (including self-ignored policies). Raw regular-file
+bytes, symlink targets, executable state, real deletions, and recursively nested
+Git worktrees are hashed through no-follow descriptors. Index modes and object
+IDs are discovery/stability inputs rather than hashed source; every discovered
+actual node that enters the covered set is raw-hashed. Mutable attributes,
+filters, diff drivers, replace refs, inherited `GIT_*`, local/global excludes,
+or Git presentation config cannot change the result. The runner resolves and
+freezes one trusted absolute Git executable before starting the provider. It
+also resolves `--repo-root` once to its physical directory and uses that frozen
+path for provider, test, and deploy execution; later retargeting of an input
+symlink cannot redirect execution away from the repository being evidenced.
+Here, trusted deliberately means that neither the executable nor any ancestor
+directory is mutable by the runner identity. A same-user package-manager Git
+(or a root-owned Git when the runner itself is root) is therefore rejected;
+select a system- or administrator-owned immutable Git through `PATH`.
+
+The boundary is deliberately repository-source evidence, not a hermetic build
+attestation. Payloads excluded by repository `.gitignore`, external dependencies,
+the compiler/toolchain, and other process environment state are not hashed.
+Snapshots prove the covered source state at both sides of the configured test;
+they cannot prove that an arbitrary test program did not temporarily mutate and
+restore state while it ran, or that a passing test implements the issue. Use a
+trusted, preferably hermetic `--test-exec`; use a real reviewed commit for the
+strongest provenance.
+
+The explicit snapshot ceilings—more than 10,000 covered nodes, more than 64 MiB
+of covered raw content, a path or Git-output record above its bound, or nested
+repository depth above eight—disable the source-free/no-commit binding. A
+changed-commit lane remains available only when a separate streaming proof
+establishes both that the base and tested commit tree IDs differ and that the
+index plus every covered raw worktree node exactly matches the tested HEAD
+before and after the configured test. That proof computes Git blob identities
+directly from no-follow raw nodes, rejects non-ignored untracked source and
+untracked ignore-policy files, recurses through initialized submodules, and is
+bounded by a 1,000,000-path ceiling, repository-depth ceiling, and 30-second
+deadline. It therefore supports large committed source without trusting Git
+filters, attributes, diff/status presentation, or a merely changed commit ID.
+Whenever the richer pre-test snapshot fits, its exact post-test recheck remains
+mandatory too. The no-commit lane requires all three bounded snapshots and a
+covered change before tests followed by exact stability after them.
+
+An empty or metadata-only changed commit; a dirty worktree that differs from the
+reported commit; an exceptional, conflicted, or hidden index entry; an untrusted or mutated Git
+executable; repository-root/topology/identity drift; an unsafe filesystem node;
+a hashing or integrity failure; timeout or cancellation; no covered source
+change; or differing available snapshots always hard-fails and never enters the
+changed-commit fallback. Ignored payloads, external dependencies/toolchains, and
+transient mutations restored within the test window remain outside the stated
+boundary. Opt-in same-issue attachments remain a separate fallback.
+
 `--attach-logs` (OFF by default) captures the job's combined output and attaches
 it to the ticket as a log, stamping `log_attachment_id`. It is opt-in because
 agent output can contain secrets, and a ticket attachment is visible to every
@@ -559,11 +620,17 @@ capture is capped; the cap does not turn raw output into telemetry.
 A normal provider exit without `--test-exec` reports `completed`, never
 `tests_passed`; its issue comment explicitly says tests were not run. Provider
 exit itself emits `reviewing`, never telemetry `completed`, because tests and
-deploy have not yet finished. Configured deploy commands also use the same
-supervisor/watchdog path with `deploying` heartbeats. Deployment and smoke verification remain separate facts; the
+deploy have not yet finished. Configured deploy commands use the same local
+process-group, timeout, silence, and output watchdog. Once `tests_passed` has
+closed the run's telemetry/control stream, the deploy phase emits no later
+telemetry; its authoritative outcome is the following lifecycle PATCH.
+Deployment and smoke verification remain separate facts; the
 runner reports neither unless the corresponding configured command actually
-ran successfully. If deploy fails or is cancelled after tests passed, the final
-failed/cancelled record retains the bounded test summary, version, and attempted
+ran successfully. Before any configured deploy starts, the runner first commits
+the tested commit or source-free digest through `tests_passed`; the later
+`deployed`/`failed` transition stays pinned to that tested Git state even if the
+deploy command mutates the checkout. If deploy fails or is cancelled after tests passed, the final
+failed record retains the bounded test summary, version, and attempted
 `deploy_target`; a downstream failure never erases earlier verification facts.
 
 The run lifecycle is enforced server-side: status changes must follow a legal
@@ -573,6 +640,15 @@ claims, the server requires the caller's user, device, and requested `action_key
 to match a live implement-capable runner connection; after the first
 `queued -> running` claim, later writes are limited to the requester, admin, or
 the stamped `claimed_by` executor.
+
+Before a supervised success crosses out of `running`, the local control pump
+must terminate without an internal renewal, identity, or journal failure; all
+locally claimed cancellations are resolved; and the runner must revoke the
+exact server cancellation lease. Lease revocation atomically refuses to cross
+any cancellation already pending confirmation or accepted. The lifecycle
+compare-and-swap also rejects supervised success while an unrevoked lease or
+pending/accepted running cancellation remains, so a cancellation racing the
+boundary wins.
 
 ### Single-run telemetry (PAI-799)
 
@@ -739,9 +815,9 @@ three hold: `--allow-deploy` AND `--deploy-exec "<cmd>"` AND the run carries a
 paimos run-agent watch --project PAI --yes \
   --test-exec "npm test" \
   --allow-deploy --deploy-exec "just deploy-ppm" --yes-deploy
-#   after a successful run with a deploy_target, runs the deploy command,
-#   captures tests_summary + the version from ./VERSION, and marks the run
-#   `deployed`.
+#   after a successful run with a deploy_target, commits `tests_passed` with
+#   its tested artifact binding, runs the deploy command, captures the version
+#   from ./VERSION, and then marks the run `deployed`.
 ```
 
 For the local non-production PAI-625 demo harness and exact workstation
@@ -766,10 +842,25 @@ execution with explicit predecessor lineage. Draft mode opens a specification
 execution only; `drafted` is an incomplete `draft_ready` fact and never approves
 the specification. A run is linked to exactly one stage execution.
 
-Accepted terminal PATCH transitions are normalized atomically into that linked
-execution. `completed`, `tests_passed`, and `deployed` can satisfy only the
-implementation stage and only with an allowlisted commit or same-issue
-attachment; they never imply canonical QA, deployment, or verification.
+Accepted terminal PATCH transitions for delivery-instrumented version-1 runs are
+normalized atomically into that linked execution; legacy version-0 runs retain
+their pre-delivery behavior and are never backfilled. `completed` and `deployed`
+can satisfy only the implementation stage
+and only with an allowlisted commit, source-free implementation-result digest,
+or same-issue attachment. For a current visible run whose QA is required,
+`tests_passed` requires one of those bounded implementation bindings and
+atomically satisfies that same implementation execution, starts QA,
+and records QA success with a domain-separated digest binding the run, the one
+selected implementation reference (commit, else digest, else attachment), and
+the exact persisted bytes of bounded `tests_summary`; lower-priority conflicting
+transport fields are not part of the canonical tuple. It never implies
+deployment or verification. Superseded or hidden closures remain history-only,
+and QA-not-applicable policy retains its existing non-projection behavior. A
+terminal QA execution is retried with an exact
+compare-and-swap; an active human or external QA execution is never stolen. A
+later `deployed` or `failed` run-lifecycle status records a later operational
+outcome and does not erase valid immutable implementation/QA evidence. Only a
+new upstream execution or attempt can make that evidence lineage-ineligible.
 Failures/cancellation record bounded semantic outcomes without copying provider
 errors. Telemetry remains in the PAI-799 tables: M144 appends only a safe
 delivery invalidation identity in the same transaction, and freshness continues

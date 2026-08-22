@@ -36,13 +36,14 @@ Reporter registration and prerequisite setup is a separate authenticated Agent
 Mode admin control plane; it does not enlarge or alter the seven frozen adapter
 routes. It uses standard `application/json`, normal editor authorization, and a
 mandatory `Idempotency-Key` on every POST. Every mutation reauthorizes current
-delivery/project ownership and writes a mandatory safe setup audit row.
+delivery/project ownership and writes mandatory append-only audit evidence.
 
 | Method and route | Purpose |
 |---|---|
 | `GET /api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations` | Discover exact safe IDs for current, non-revoked registrations |
 | `POST /api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations` | Register an exact API key as Pharos owner or Janus dependency |
 | `POST /api/agent-mode/deliveries/{deliveryKey}/external-reporter-registrations/{registrationID}/revoke` | Revoke one exact registration |
+| `POST /api/agent-mode/deliveries/{deliveryKey}/external-owner-activations` | Atomically start deployment/verification and hand authority to one exact current Pharos owner |
 | `POST /api/agent-mode/deliveries/{deliveryKey}/external-prerequisite-sets` | Seal 0–16 exact current Janus bindings for one stage execution |
 
 Use the corresponding CLI discovery and setup commands. Never guess an ID or
@@ -58,6 +59,11 @@ paimos --json external-stage registrations create issue:4664 \
 paimos --json external-stage registrations create issue:4664 \
   --api-key-id "$JANUS_API_KEY_ID" --class janus --role dependency \
   --dependency authorization
+
+paimos --json external-stage owner activate issue:4664 \
+  --stage deployment --attempt 1 --plan-revision 3 \
+  --reporter-registration-id "$PHAROS_REGISTRATION_ID" \
+  --current-execution 0 --current-authority-epoch 0
 
 paimos --json external-stage prerequisites seal issue:4664 \
   --stage deployment --execution 1 --plan-revision 3 --authority-epoch 2 \

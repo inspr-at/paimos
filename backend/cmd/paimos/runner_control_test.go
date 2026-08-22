@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -439,6 +440,25 @@ func TestRunnerControlRestartReplaysOnlyCompletedExactClaim(t *testing.T) {
 	defer mu.Unlock()
 	if operations["claim"] != 1 || operations["result"] != 1 {
 		t.Fatalf("operations=%v", operations)
+	}
+}
+
+func TestRunnerControlQuiesceConfirmationFailsClosed(t *testing.T) {
+	stuck := &runControlArbiter{cancel: func() {}, done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if stuck.quiesceConfirmed(ctx) {
+		t.Fatal("timed-out control pump reported quiesced")
+	}
+	close(stuck.done)
+	if !stuck.quiesceConfirmed(context.Background()) {
+		t.Fatal("closed control pump did not report quiesced")
+	}
+	failedDone := make(chan struct{})
+	close(failedDone)
+	failed := &runControlArbiter{done: failedDone, cancel: func() {}, pumpErr: errors.New("journal failed")}
+	if failed.quiesceConfirmed(context.Background()) {
+		t.Fatal("failed control pump reported healthy quiescence")
 	}
 }
 

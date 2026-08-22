@@ -313,6 +313,7 @@ type runControlArbiter struct {
 	done     chan struct{}
 	requests chan runnerClaimedCancellation
 	revoked  bool
+	pumpErr  error
 
 	now           func() time.Time
 	newAttempt    func() string
@@ -351,13 +352,25 @@ func (a *runControlArbiter) start(ctx context.Context, owned bool) error {
 		return err
 	}
 	pumpCtx, cancel := context.WithCancel(context.Background())
-	a.lease, a.cancel, a.done = lease, cancel, make(chan struct{})
+	a.lease, a.cancel, a.done, a.pumpErr = lease, cancel, make(chan struct{}), nil
 	go a.pump(pumpCtx)
 	return nil
 }
 
 func (a *runControlArbiter) pump(ctx context.Context) {
-	defer close(a.done)
+	a.mu.Lock()
+	done := a.done
+	a.mu.Unlock()
+	err := a.pumpLoop(ctx)
+	a.mu.Lock()
+	if err != nil {
+		a.pumpErr = err
+	}
+	a.mu.Unlock()
+	close(done)
+}
+
+func (a *runControlArbiter) pumpLoop(ctx context.Context) error {
 	renew := time.NewTimer(a.renewEvery)
 	poll := time.NewTicker(a.pullInterval)
 	defer renew.Stop()
@@ -369,7 +382,7 @@ func (a *runControlArbiter) pump(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-renew.C:
 			a.mu.Lock()
 			lease := a.lease
@@ -379,7 +392,7 @@ func (a *runControlArbiter) pump(ctx context.Context) {
 				if issueAttemptID == "" {
 					issueAttemptID = a.newAttempt()
 					if issueAttemptID == "" {
-						return
+						return errors.New("runner control lease attempt identity became unavailable")
 					}
 				}
 				opCtx, cancel := context.WithTimeout(ctx, a.operationTime)
@@ -387,7 +400,7 @@ func (a *runControlArbiter) pump(ctx context.Context) {
 				cancel()
 				if err != nil {
 					if isDefinitiveRunnerControlError(err) {
-						return
+						return fmt.Errorf("runner control lease reissue failed definitively: %w", err)
 					}
 					renew.Reset(retryDelay)
 					retryDelay = nextRunnerControlRetry(retryDelay, a.retryMax)
@@ -403,7 +416,7 @@ func (a *runControlArbiter) pump(ctx context.Context) {
 			if renewAttemptID == "" {
 				renewAttemptID = a.newAttempt()
 				if renewAttemptID == "" {
-					return
+					return errors.New("runner control lease renewal identity became unavailable")
 				}
 			}
 			opCtx, cancel := context.WithTimeout(ctx, a.operationTime)
@@ -466,13 +479,13 @@ func (a *runControlArbiter) pump(ctx context.Context) {
 							LeaseRevision: claimed.LeaseRevision, EffectSequence: claimed.EffectSequence,
 							ClaimSequence: 1, ResultSequence: 1, RequestDigest: hex.EncodeToString(digest[:]),
 							Outcome: "outcome_unknown", State: "claimed"}); journalErr != nil {
-							return
+							return fmt.Errorf("persist claimed runner cancellation: %w", journalErr)
 						}
 					}
 					select {
 					case a.requests <- runnerClaimedCancellation{Effect: claimed}:
 					case <-ctx.Done():
-						return
+						return nil
 					}
 				}
 				if !page.HasMore {
@@ -565,38 +578,67 @@ func (a *runControlArbiter) replayCompleted(ctx context.Context, lease runnerCon
 }
 
 func (a *runControlArbiter) quiesce(ctx context.Context) {
+	_ = a.quiesceConfirmed(ctx)
+}
+
+func (a *runControlArbiter) quiesceConfirmed(ctx context.Context) bool {
 	if a == nil {
-		return
+		return true
 	}
 	a.mu.Lock()
 	cancel, done := a.cancel, a.done
 	a.mu.Unlock()
 	if cancel == nil {
-		return
+		return true
 	}
 	cancel()
 	select {
 	case <-done:
+		a.mu.Lock()
+		healthy := a.pumpErr == nil
+		a.mu.Unlock()
+		return healthy
 	case <-ctx.Done():
-		return
+		return false
 	}
-
 }
 
 func (a *runControlArbiter) stop(ctx context.Context) {
 	if a == nil {
 		return
 	}
-	a.quiesce(ctx)
+	_ = a.revokeConfirmed(ctx)
+}
+
+// revokeConfirmed is the success-boundary barrier: the pump must terminate
+// without an internal failure and the server must atomically close the exact
+// cancellation lease. Callers must not publish success when it returns an
+// error.
+func (a *runControlArbiter) revokeConfirmed(ctx context.Context) error {
+	if a == nil {
+		return nil
+	}
+	if !a.quiesceConfirmed(ctx) {
+		return errors.New("runner control stream did not terminate cleanly")
+	}
 	a.mu.Lock()
 	lease := a.lease
-	if a.revoked || lease.LeaseID == "" {
+	if a.revoked {
 		a.mu.Unlock()
-		return
+		return nil
 	}
-	a.revoked = true
+	if lease.LeaseID == "" {
+		a.mu.Unlock()
+		return nil
+	}
 	a.mu.Unlock()
 	revokeCtx, revokeCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer revokeCancel()
-	_ = a.http.revokeLease(revokeCtx, lease, a.deviceID)
+	if err := a.http.revokeLease(revokeCtx, lease, a.deviceID); err != nil {
+		return fmt.Errorf("revoke runner control lease: %w", err)
+	}
+	a.mu.Lock()
+	a.revoked = true
+	a.mu.Unlock()
+	return nil
 }

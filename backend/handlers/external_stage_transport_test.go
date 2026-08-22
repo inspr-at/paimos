@@ -117,6 +117,7 @@ func TestExternalStageRealRouterWrongMethodIsCanonicallyConcealed(t *testing.T) 
 type externalStageTransportFixture struct {
 	operator       auth.Principal
 	reporter       auth.Principal
+	projectID      int64
 	deliveryKey    string
 	registrationID int64
 }
@@ -269,7 +270,7 @@ func setupExternalStageTransportFixture(t *testing.T) externalStageTransportFixt
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return externalStageTransportFixture{operator: operator, reporter: reporter, deliveryKey: deliveryKey,
+	return externalStageTransportFixture{operator: operator, reporter: reporter, projectID: projectID, deliveryKey: deliveryKey,
 		registrationID: registration.RegistrationID}
 }
 
@@ -706,6 +707,101 @@ func TestExternalStageTransportPinsSuccessAndReplayStatuses(t *testing.T) {
 	}
 	if !bytes.Equal(normalizedExternalStageProblem(t, oldEpoch), normalizedExternalStageProblem(t, wrongKey)) {
 		t.Fatalf("old epoch and wrong-key refusals diverged: old=%s wrong=%s", oldEpoch.Body.String(), wrongKey.Body.String())
+	}
+	terminalObserved := time.Now().UTC().Format(time.RFC3339Nano)
+	terminalRequest := externalStageTransportJSONRequest(t, http.MethodPost, reportPath, externalstage.MediaTypeV1,
+		"81000000-0000-4000-8000-000000000819", externalstage.ReportRequest{Sequence: 3,
+			State: externalstage.HandoffStateSucceeded, ObservedAt: terminalObserved,
+			PharosEvidence: &externalstage.PharosEvidence{Kind: externalstage.EvidenceKindDeployment,
+				Workflow: "deploy-production", Environment: "production",
+				Artifact: externalstage.ArtifactEvidence{Version: "v5.11.0", Digest: "sha256:" + fmt.Sprintf("%064x", 5110),
+					CommitDigest: fmt.Sprintf("%040x", 5110)},
+				Result: externalstage.EvidenceResultSucceeded, ObservedAt: terminalObserved}}, fixture.reporter)
+	terminalRequest.Header.Set(externalstage.HandoffSecretHeader, base64.RawURLEncoding.EncodeToString(currentSecret))
+	terminalRecorder := httptest.NewRecorder()
+	router.ServeHTTP(terminalRecorder, terminalRequest)
+	if terminalRecorder.Code != http.StatusCreated {
+		t.Fatalf("terminal report status=%d headers=%v body=%s", terminalRecorder.Code, terminalRecorder.Header(), terminalRecorder.Body.String())
+	}
+	activationBody := externalstage.ActivateOwnerRequest{ReporterRegistrationID: fixture.registrationID,
+		StageKey: "verification", ExpectedAttemptNumber: 1, ExpectedPlanRevision: 1,
+		ExpectedCurrentExecution: 0, ExpectedCurrentAuthorityEpoch: 0}
+	rawActivation, err := json.Marshal(activationBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activationRequest := httptest.NewRequest(http.MethodPost,
+		"/api/agent-mode/deliveries/"+fixture.deliveryKey+"/external-owner-activations", bytes.NewReader(rawActivation))
+	activationRequest.Header.Set("Content-Type", "application/json")
+	activationRequest.Header.Set("Accept", "application/json")
+	activationRequest.Header.Set(idempotencyHeader, "81000000-0000-4000-8000-000000000820")
+	activationRequest = externalStageRequestWithAuthPrincipal(activationRequest, fixture.operator)
+	activationRecorder := httptest.NewRecorder()
+	router.ServeHTTP(activationRecorder, activationRequest)
+	if activationRecorder.Code != http.StatusCreated || activationRecorder.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("owner activation status=%d headers=%v body=%s", activationRecorder.Code, activationRecorder.Header(), activationRecorder.Body.String())
+	}
+	var activation externalstage.OwnerActivation
+	if err := json.Unmarshal(activationRecorder.Body.Bytes(), &activation); err != nil ||
+		activation.StageKey != "verification" || activation.ExecutionNumber != 1 || activation.AuthorityEpoch != 2 {
+		t.Fatalf("owner activation=%+v err=%v", activation, err)
+	}
+
+	unknownFieldRequest := httptest.NewRequest(http.MethodPost,
+		"/api/agent-mode/deliveries/"+fixture.deliveryKey+"/external-owner-activations",
+		strings.NewReader(fmt.Sprintf(`{"reporter_registration_id":%d,"stage_key":"verification","expected_attempt_number":1,"expected_plan_revision":1,"expected_current_execution":0,"expected_current_authority_epoch":0,"unknown":true}`,
+			fixture.registrationID)))
+	unknownFieldRequest.Header.Set("Content-Type", "application/json")
+	unknownFieldRequest.Header.Set("Accept", "application/json")
+	unknownFieldRequest.Header.Set(idempotencyHeader, "81000000-0000-4000-8000-000000000821")
+	unknownFieldRequest = externalStageRequestWithAuthPrincipal(unknownFieldRequest, fixture.operator)
+	unknownFieldRecorder := httptest.NewRecorder()
+	router.ServeHTTP(unknownFieldRecorder, unknownFieldRequest)
+	if unknownFieldRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("unknown activation field status=%d body=%s", unknownFieldRecorder.Code, unknownFieldRecorder.Body.String())
+	}
+
+	missingIdempotencyRequest := httptest.NewRequest(http.MethodPost,
+		"/api/agent-mode/deliveries/"+fixture.deliveryKey+"/external-owner-activations", bytes.NewReader(rawActivation))
+	missingIdempotencyRequest.Header.Set("Content-Type", "application/json")
+	missingIdempotencyRequest.Header.Set("Accept", "application/json")
+	missingIdempotencyRequest = externalStageRequestWithAuthPrincipal(missingIdempotencyRequest, fixture.operator)
+	missingIdempotencyRecorder := httptest.NewRecorder()
+	router.ServeHTTP(missingIdempotencyRecorder, missingIdempotencyRequest)
+	if missingIdempotencyRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("missing activation idempotency status=%d body=%s", missingIdempotencyRecorder.Code, missingIdempotencyRecorder.Body.String())
+	}
+
+	viewerResult, err := db.DB.Exec(`INSERT INTO users(username,password,role,status)
+		VALUES('external-stage-activation-viewer','x','member','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewerID, _ := viewerResult.LastInsertId()
+	if _, err := db.DB.Exec(`INSERT INTO project_members(user_id,project_id,access_level) VALUES(?,?,'viewer')`,
+		viewerID, fixture.projectID); err != nil {
+		t.Fatal(err)
+	}
+	const viewerCredential = "81000000-0000-4000-8000-000000000822"
+	if _, err := db.DB.Exec(`INSERT INTO sessions(id,user_id,expires_at,created_at,credential_id)
+		VALUES('external-stage-activation-viewer-session',?,datetime('now','+1 hour'),datetime('now'),?)`,
+		viewerID, viewerCredential); err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := auth.NewSessionPrincipal(viewerCredential, viewerID, viewerID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	concealedRequest := httptest.NewRequest(http.MethodPost,
+		"/api/agent-mode/deliveries/"+fixture.deliveryKey+"/external-owner-activations", bytes.NewReader(rawActivation))
+	concealedRequest.Header.Set("Content-Type", "application/json")
+	concealedRequest.Header.Set("Accept", "application/json")
+	concealedRequest.Header.Set(idempotencyHeader, "81000000-0000-4000-8000-000000000823")
+	concealedRequest = externalStageRequestWithAuthPrincipal(concealedRequest, viewer)
+	concealedRecorder := httptest.NewRecorder()
+	router.ServeHTTP(concealedRecorder, concealedRequest)
+	if concealedRecorder.Code != http.StatusNotFound {
+		t.Fatalf("viewer activation status=%d body=%s", concealedRecorder.Code, concealedRecorder.Body.String())
 	}
 }
 

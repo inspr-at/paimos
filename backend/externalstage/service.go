@@ -62,11 +62,13 @@ type Principal struct {
 }
 
 type Options struct {
-	FixtureDigest    [sha256.Size]byte
-	Random           io.Reader
-	Clock            Clock
-	Observer         delivery.CommitObserver
-	ActiveStaleAfter time.Duration
+	FixtureDigest      [sha256.Size]byte
+	Random             io.Reader
+	Clock              Clock
+	Observer           delivery.CommitObserver
+	DeliveryAuthorizer delivery.Authorizer
+	DeliveryFreshness  delivery.FreshnessPolicy
+	ActiveStaleAfter   time.Duration
 }
 
 type Service struct {
@@ -74,6 +76,7 @@ type Service struct {
 	random           io.Reader
 	clock            Clock
 	observer         delivery.CommitObserver
+	delivery         *delivery.Store
 	activeStaleAfter time.Duration
 	beforeCommit     func(string) error
 	fixture          [sha256.Size]byte
@@ -93,7 +96,9 @@ func NewService(database *sql.DB, opts Options) (*Service, error) {
 	if opts.ActiveStaleAfter <= 0 {
 		opts.ActiveStaleAfter = ActiveReporterStaleAfter
 	}
-	return &Service{db: database, random: opts.Random, clock: opts.Clock, observer: opts.Observer,
+	deliveryStore := delivery.NewStore(database, delivery.Options{Clock: opts.Clock, Authorizer: opts.DeliveryAuthorizer,
+		Observer: opts.Observer, Freshness: opts.DeliveryFreshness})
+	return &Service{db: database, random: opts.Random, clock: opts.Clock, observer: opts.Observer, delivery: deliveryStore,
 		activeStaleAfter: opts.ActiveStaleAfter, fixture: opts.FixtureDigest}, nil
 }
 

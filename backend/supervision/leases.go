@@ -485,6 +485,21 @@ func (s *Service) RevokeRunnerLease(ctx context.Context, principal auth.Principa
 	if projection.Revision != request.Revision {
 		return LeaseProjection{}, domainError(ErrConflict, CodeStaleTarget)
 	}
+	// This transaction is the runner's success-boundary barrier. A cancellation
+	// created or accepted before the lease closes wins; revocation must not make
+	// it disappear behind a later success PATCH. Because command confirmation,
+	// command creation, and this update are serialized SQLite writes, no command
+	// can cross the check/revoke boundary unnoticed.
+	var cancellationPending int
+	if err := authz.tx.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM control_commands WHERE lease_id=? AND lease_revision=?
+		 AND action='run.cancel.running' AND status IN ('pending_confirmation','accepted'))`,
+		request.LeaseID, request.Revision).Scan(&cancellationPending); err != nil {
+		return LeaseProjection{}, storageError(ctx, err)
+	}
+	if cancellationPending != 0 {
+		return LeaseProjection{}, domainError(ErrConflict, CodeStaleTarget)
+	}
 	if err := revokeLeaseRow(ctx, authz.tx, request.LeaseID, request.Revision, "lease_revoked", "lease_revoked"); err != nil {
 		return LeaseProjection{}, err
 	}

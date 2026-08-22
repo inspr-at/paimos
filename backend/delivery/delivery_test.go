@@ -3,9 +3,11 @@ package delivery
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -657,8 +659,17 @@ func TestRunNormalizationProjectMoveAndDeletionSafeRetention(t *testing.T) {
 	effects.Dispatch(context.Background())
 
 	commit := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	conflictingDigest := strings.Repeat("d", 64)
+	attachmentResult, err := database.Exec(`INSERT INTO attachments(issue_id,object_key,filename,content_type,size_bytes,uploaded_by)
+		VALUES(?,?,'run.log','text/plain',1,?)`, issueID, fmt.Sprintf("qa-conflict-%d", runID), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachmentID, _ := attachmentResult.LastInsertId()
+	testSummary := "  go test ./...: passed  "
 	tx, _ = database.BeginTx(context.Background(), nil)
-	if _, err := tx.Exec(`UPDATE agent_runs SET status='tests_passed',commit_sha=? WHERE id=?`, commit, runID); err != nil {
+	if _, err := tx.Exec(`UPDATE agent_runs SET status='tests_passed',commit_sha=?,tests_summary=?,
+		implementation_result_digest=?,log_attachment_id=? WHERE id=?`, commit, testSummary, conflictingDigest, attachmentID, runID); err != nil {
 		t.Fatal(err)
 	}
 	effects = store.NewEffects()
@@ -671,8 +682,31 @@ func TestRunNormalizationProjectMoveAndDeletionSafeRetention(t *testing.T) {
 	}
 	effects.Dispatch(context.Background())
 	snapshot, _ := store.SnapshotByIssue(context.Background(), issueID)
-	if !stageEligible(snapshot.Stages, StageImplementation) || stageEligible(snapshot.Stages, StageQA) || stageEligible(snapshot.Stages, StageDeployment) {
-		t.Fatalf("run status collapsed canonical stages: %+v", snapshot)
+	if !stageEligible(snapshot.Stages, StageImplementation) || !stageEligible(snapshot.Stages, StageQA) || stageEligible(snapshot.Stages, StageDeployment) {
+		t.Fatalf("tests_passed did not atomically project implementation and QA: %+v", snapshot)
+	}
+	var qaEvidenceType, qaReferenceKind, qaDigest string
+	if err := database.QueryRow(`SELECT evidence_type,reference_kind,digest_sha256 FROM delivery_evidence evidence
+		JOIN delivery_stage_events stage ON stage.id=evidence.stage_event_id
+		WHERE stage.attempt_id=? AND stage.stage_key='qa' AND stage.semantic_state='succeeded'`, snapshot.AttemptID).
+		Scan(&qaEvidenceType, &qaReferenceKind, &qaDigest); err != nil {
+		t.Fatal(err)
+	}
+	if qaEvidenceType != "test_result" || qaReferenceKind != "digest" || len(qaDigest) != 64 {
+		t.Fatalf("QA evidence=%q/%q/%q", qaEvidenceType, qaReferenceKind, qaDigest)
+	}
+	wantQADigest, err := canonicalHash(struct {
+		Domain       string `json:"domain"`
+		RunID        int64  `json:"run_id"`
+		CommitSHA    string `json:"commit_sha,omitempty"`
+		AttachmentID *int64 `json:"attachment_id,omitempty"`
+		TestResult   string `json:"test_result"`
+	}{Domain: "paimos.agent-run.test-result.v1", RunID: runID, CommitSHA: commit, TestResult: testSummary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if qaDigest != hex.EncodeToString(wantQADigest) {
+		t.Fatalf("QA digest=%q want artifact-bound %q", qaDigest, hex.EncodeToString(wantQADigest))
 	}
 	before := snapshotChangeSequence(t, database, issueID)
 	// Exact lifecycle replay is a read even if it arrives after the fact.
@@ -756,6 +790,208 @@ func TestRunNormalizationProjectMoveAndDeletionSafeRetention(t *testing.T) {
 	}
 	if err := database.QueryRow(`SELECT MAX(floor_id) FROM delivery_change_retention`).Scan(&floor); err != nil || floor != maxID {
 		t.Fatalf("retention floor=%d err=%v", floor, err)
+	}
+}
+
+func TestTestsPassedArtifactConflictIsScopedToCurrentVisibleRequiredQA(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		qaNA         bool
+		hidden       bool
+		wantConflict bool
+	}{
+		{name: "required_current", wantConflict: true},
+		{name: "qa_not_applicable", qaNA: true},
+		{name: "hidden_current", hidden: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database := openDeliveryTestDB(t)
+			issueID, projectID, userID := seedDeliveryIssue(t, database)
+			store := NewStore(database, Options{Authorizer: AuthorizerFunc(func(context.Context, AuthorizationRequest) error { return nil })})
+			actor := Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)}
+			if tc.qaNA {
+				policies := DefaultPolicy()
+				policies[2] = Policy{StageKey: StageQA, Applicability: "not_applicable", Weight: 20,
+					PolicyReference: "policy:qa-not-applicable", ReasonCode: "trusted_override", ReasonText: "QA covered externally"}
+				if _, err := store.StartAttempt(context.Background(), AttemptRequest{IssueID: issueID, Actor: actor,
+					Policies: policies, ReasonCode: "policy_change", IdempotencyKey: "qa-na-attempt"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,delivery_instrumentation_version)
+				VALUES(?,?,?,'running',1)`, issueID, projectID, userID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID, _ := result.LastInsertId()
+			tx, _ := database.BeginTx(context.Background(), nil)
+			effects := store.NewEffects()
+			if _, err := store.BootstrapRunTx(context.Background(), tx, effects, RunBootstrap{IssueID: issueID,
+				RunID: runID, Mode: "implementation", Actor: actor, IdempotencyKey: "scoped-artifact-bootstrap"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			if tc.hidden {
+				if _, err := database.Exec(`UPDATE issues SET deleted_at='2026-08-22T03:00:00Z' WHERE id=?`, issueID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tx, _ = database.BeginTx(context.Background(), nil)
+			if _, err := tx.Exec(`UPDATE agent_runs SET status='tests_passed',tests_summary='configured tests passed' WHERE id=?`, runID); err != nil {
+				t.Fatal(err)
+			}
+			effects = store.NewEffects()
+			err = store.NormalizeRunTx(context.Background(), tx, effects, RunNormalization{RunID: runID,
+				Status: "tests_passed", IdempotencyKey: "scoped-artifact-result"})
+			if tc.wantConflict {
+				_ = tx.Rollback()
+				if !errors.Is(err, ErrConflict) {
+					t.Fatalf("normalization error=%v, want conflict", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRunNormalizationBindsSourceFreeImplementationDigestIntoQA(t *testing.T) {
+	database := openDeliveryTestDB(t)
+	issueID, projectID, userID := seedDeliveryIssue(t, database)
+	store := NewStore(database, Options{})
+	result, err := database.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,delivery_instrumentation_version)
+		VALUES(?,?,?,'running',1)`, issueID, projectID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, _ := result.LastInsertId()
+	tx, _ := database.BeginTx(context.Background(), nil)
+	effects := store.NewEffects()
+	if _, err := store.BootstrapRunTx(context.Background(), tx, effects, RunBootstrap{IssueID: issueID, RunID: runID,
+		Mode: "implementation", Actor: Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)},
+		IdempotencyKey: "digest-bootstrap"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	implementationDigest := strings.Repeat("c", 64)
+	testSummary := "configured digest-bound tests passed"
+	attachmentResult, err := database.Exec(`INSERT INTO attachments(issue_id,object_key,filename,content_type,size_bytes,uploaded_by)
+		VALUES(?,?,'run.log','text/plain',1,?)`, issueID, fmt.Sprintf("qa-digest-conflict-%d", runID), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachmentID, _ := attachmentResult.LastInsertId()
+	tx, _ = database.BeginTx(context.Background(), nil)
+	if _, err := tx.Exec(`UPDATE agent_runs SET status='tests_passed',tests_summary=?,implementation_result_digest=?,
+		log_attachment_id=? WHERE id=?`, testSummary, implementationDigest, attachmentID, runID); err != nil {
+		t.Fatal(err)
+	}
+	effects = store.NewEffects()
+	if err := store.NormalizeRunTx(context.Background(), tx, effects, RunNormalization{RunID: runID,
+		Status: "tests_passed", IdempotencyKey: "digest-result"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var implementationKind, storedImplementationDigest, qaDigest string
+	if err := database.QueryRow(`SELECT evidence.reference_kind,evidence.digest_sha256
+		FROM deliveries delivery JOIN delivery_stage_events stage ON stage.delivery_id=delivery.id
+		JOIN delivery_evidence evidence ON evidence.stage_event_id=stage.id
+		WHERE delivery.issue_id=? AND stage.stage_key='implementation' AND evidence.evidence_type='implementation_result'`, issueID).
+		Scan(&implementationKind, &storedImplementationDigest); err != nil {
+		t.Fatal(err)
+	}
+	if implementationKind != "digest" || storedImplementationDigest != implementationDigest {
+		t.Fatalf("implementation digest evidence=%q/%q", implementationKind, storedImplementationDigest)
+	}
+	if err := database.QueryRow(`SELECT evidence.digest_sha256
+		FROM deliveries delivery JOIN delivery_stage_events stage ON stage.delivery_id=delivery.id
+		JOIN delivery_evidence evidence ON evidence.stage_event_id=stage.id
+		WHERE delivery.issue_id=? AND stage.stage_key='qa' AND evidence.evidence_type='test_result'`, issueID).
+		Scan(&qaDigest); err != nil {
+		t.Fatal(err)
+	}
+	want, err := canonicalHash(struct {
+		Domain               string `json:"domain"`
+		RunID                int64  `json:"run_id"`
+		CommitSHA            string `json:"commit_sha,omitempty"`
+		ImplementationDigest string `json:"implementation_result_digest,omitempty"`
+		AttachmentID         *int64 `json:"attachment_id,omitempty"`
+		TestResult           string `json:"test_result"`
+	}{Domain: "paimos.agent-run.test-result.v1", RunID: runID,
+		ImplementationDigest: implementationDigest, TestResult: testSummary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if qaDigest != hex.EncodeToString(want) {
+		t.Fatalf("QA digest=%q want source-free binding %q", qaDigest, hex.EncodeToString(want))
+	}
+}
+
+func TestStageStartCurrentExpectationIsReplaySafeCAS(t *testing.T) {
+	database := openDeliveryTestDB(t)
+	issueID, _, userID := seedDeliveryIssue(t, database)
+	store := NewStore(database, Options{})
+	actor := Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)}
+	attempt, err := store.StartAttempt(context.Background(), AttemptRequest{IssueID: issueID, Actor: actor,
+		Policies: DefaultPolicy(), ReasonCode: "instrumentation", IdempotencyKey: "cas-attempt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	request := StageStartRequest{IssueID: issueID, AttemptNumber: attempt.AttemptNumber,
+		StageKey: StageSpecification, Reporter: actor, ReasonCode: "cas_start", IdempotencyKey: "cas-spec-start",
+		ExpectedCurrentExecution: &zero, ExpectedCurrentAuthorityEpoch: &zero}
+	first, err := store.StartStageRetry(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := store.StartStageRetry(context.Background(), request)
+	if err != nil || replay.ExecutionNumber != first.ExecutionNumber || replay.ExecutionStartEventID != first.ExecutionStartEventID {
+		t.Fatalf("exact start replay=%+v err=%v", replay, err)
+	}
+	conflict := request
+	conflict.IdempotencyKey = "cas-spec-second"
+	if _, err := store.StartStageRetry(context.Background(), conflict); !errors.Is(err, ErrConflict) {
+		t.Fatalf("zero expectation replaced current stage: %v", err)
+	}
+	currentExecution, currentEpoch := first.ExecutionNumber, first.AuthorityEpoch
+	activeRetry := request
+	activeRetry.IdempotencyKey = "cas-spec-active-retry"
+	activeRetry.ExpectedCurrentExecution, activeRetry.ExpectedCurrentAuthorityEpoch = &currentExecution, &currentEpoch
+	if _, err := store.StartStageRetry(context.Background(), activeRetry); !errors.Is(err, ErrConflict) {
+		t.Fatalf("active stage was replaced: %v", err)
+	}
+	digest, err := canonicalIssueSpecDigest(context.Background(), database, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReportStage(context.Background(), StageReport{IssueID: issueID, AttemptNumber: attempt.AttemptNumber,
+		StageKey: StageSpecification, ExecutionNumber: first.ExecutionNumber, AuthorityEpoch: first.AuthorityEpoch,
+		Reporter: actor, IdempotencyKey: "cas-spec-pass", Kind: "semantic", State: "succeeded",
+		Evidence: []Evidence{{Type: "approval", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: digest}}}); err != nil {
+		t.Fatal(err)
+	}
+	retry := activeRetry
+	retry.IdempotencyKey = "cas-spec-terminal-retry"
+	second, err := store.StartStageRetry(context.Background(), retry)
+	if err != nil || second.ExecutionNumber != first.ExecutionNumber+1 {
+		t.Fatalf("terminal CAS retry=%+v err=%v", second, err)
+	}
+	stale := retry
+	stale.IdempotencyKey = "cas-spec-stale-retry"
+	if _, err := store.StartStageRetry(context.Background(), stale); !errors.Is(err, ErrStaleAuthority) {
+		t.Fatalf("stale retry expectation error=%v", err)
 	}
 }
 

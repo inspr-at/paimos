@@ -213,6 +213,8 @@ func TestExternalStageDTOAndOpenAPISchemaFieldsStayAligned(t *testing.T) {
 		{"ExternalStageJanusEvidence", reflect.TypeOf(externalstage.JanusEvidence{})},
 		{"ExternalStageReportRequest", reflect.TypeOf(externalstage.ReportRequest{})},
 		{"ExternalStageReportReceipt", reflect.TypeOf(externalstage.ReportReceipt{})},
+		{"ExternalStageOwnerActivationRequest", reflect.TypeOf(externalstage.ActivateOwnerRequest{})},
+		{"ExternalStageOwnerActivation", reflect.TypeOf(externalstage.OwnerActivation{})},
 	}
 	for _, item := range contractsToCheck {
 		schema, ok := document.Components.Schemas[item.name]

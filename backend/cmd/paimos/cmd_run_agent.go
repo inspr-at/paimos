@@ -456,15 +456,16 @@ func runnerTelemetryIdentityForExecution(execCmd string) (string, string) {
 }
 
 type agentRunDetail struct {
-	IssueID       int64  `json:"issue_id"`
-	ProjectID     *int64 `json:"project_id"`
-	DeviceID      string `json:"device_id"`
-	ActionKey     string `json:"action_key"`
-	ProviderLabel string `json:"provider_label"`
-	AgentName     string `json:"agent_name"`
-	ContextPack   string `json:"context_pack"`
-	DeployTarget  string `json:"deploy_target"`
-	Status        string `json:"status"`
+	IssueID                        int64  `json:"issue_id"`
+	ProjectID                      *int64 `json:"project_id"`
+	DeviceID                       string `json:"device_id"`
+	ActionKey                      string `json:"action_key"`
+	ProviderLabel                  string `json:"provider_label"`
+	AgentName                      string `json:"agent_name"`
+	ContextPack                    string `json:"context_pack"`
+	DeployTarget                   string `json:"deploy_target"`
+	Status                         string `json:"status"`
+	DeliveryInstrumentationVersion int    `json:"delivery_instrumentation_version"`
 }
 
 type agentIssueContext struct {
@@ -613,6 +614,20 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 		}
 		return fmt.Errorf("claim run %d: %w", runID, err)
 	}
+	testsRan := strings.TrimSpace(a.testExec) != ""
+	implementationBindingRequired := testsRan && detail.DeliveryInstrumentationVersion == 1
+	var evidenceCapture *agentRunWorktreeCapture
+	var evidenceCaptureErr error
+	var beforeTestsSnapshot agentRunWorktreeSnapshot
+	var beforeTestsSnapshotErr error
+	executionRoot := a.repoRoot
+	if implementationBindingRequired {
+		evidenceCapture, evidenceCaptureErr = newAgentRunWorktreeCapture(ctx, a.repoRoot)
+		if evidenceCaptureErr == nil {
+			executionRoot = evidenceCapture.executionRoot
+			beforeTestsSnapshot, beforeTestsSnapshotErr = evidenceCapture.snapshot(ctx)
+		}
+	}
 	var control *runControlArbiter
 	if a.controlJournal != nil {
 		control = newRunControlArbiter(a.client, runID, a.deviceID, a.controlJournal)
@@ -622,22 +637,52 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			control.stop(stopCtx)
 		}()
 	}
-	baseGit := inspectAgentRunGitEvidence(a.repoRoot)
+	inspectGitEvidence := func() agentRunGitEvidence {
+		if evidenceCapture != nil {
+			return inspectAgentRunGitEvidence(ctx, executionRoot, evidenceCapture)
+		}
+		if implementationBindingRequired {
+			// Never fall back to PATH after an instrumented capture failed.
+			return agentRunGitEvidence{}
+		}
+		return inspectAgentRunGitEvidence(ctx, executionRoot, nil)
+	}
+	baseGit := inspectGitEvidence()
 	repoURL := a.resolveAgentRunRepoURL(detail.ProjectID, baseGit.RepoURL)
+	var testedGit agentRunGitEvidence
+	testedGitPinned := false
 	finish := func(logFile *os.File, fields map[string]any) error {
 		if control != nil {
 			quiesceCtx, quiesceCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			control.quiesce(quiesceCtx)
+			quiesced := control.quiesceConfirmed(quiesceCtx)
 			quiesceCancel()
+			if !quiesced {
+				return fmt.Errorf("run %d control stream could not be quiesced before lifecycle report", runID)
+			}
+			if fields["status"] != "cancelled" {
+				naturalCtx, naturalCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				naturalErr := control.rejectNaturalExit(naturalCtx)
+				naturalCancel()
+				if naturalErr != nil {
+					return naturalErr
+				}
+			}
+			if agentRunSuccessReport(fields) {
+				revokeCtx, revokeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				revokeErr := control.revokeConfirmed(revokeCtx)
+				revokeCancel()
+				if revokeErr != nil {
+					return fmt.Errorf("run %d cancellation lease could not be closed before success: %w", runID, revokeErr)
+				}
+			}
 		}
-		addAgentRunGitEvidence(fields, repoURL, baseGit, inspectAgentRunGitEvidence(a.repoRoot))
+		headGit := inspectGitEvidence()
+		if testedGitPinned {
+			headGit = testedGit
+		}
+		addAgentRunGitEvidence(fields, repoURL, baseGit, headGit)
 		if err := a.finishRun(runID, detail.IssueID, logFile, fields); err != nil {
 			return err
-		}
-		if control != nil && fields["status"] != "cancelled" {
-			naturalCtx, naturalCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer naturalCancel()
-			return control.rejectNaturalExit(naturalCtx)
 		}
 		return nil
 	}
@@ -653,7 +698,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 		agentNote = " as " + strings.TrimSpace(runCtx.AgentName)
 	}
 	fmt.Fprintf(stdout, "%s implementing %s%s (run %d) in %s\n",
-		time.Now().Format(time.RFC3339), issueKey, agentNote, runID, a.repoRoot)
+		time.Now().Format(time.RFC3339), issueKey, agentNote, runID, executionRoot)
 
 	provider, adapter := runnerTelemetryIdentityForExecution(a.execCmd)
 	var correlationID string
@@ -702,7 +747,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 		defer cleanupArtifact()
 		env = append(env, "PAIMOS_AGENT_ARTIFACT_FILE="+artifactPath)
 	}
-	promptPath, cleanupPrompt, promptErr := writeAgentPromptFile(runID, buildAgentPrompt(issueCtx, runID, a.repoRoot, a.testExec, detail.DeployTarget, runCtx))
+	promptPath, cleanupPrompt, promptErr := writeAgentPromptFile(runID, buildAgentPrompt(issueCtx, runID, executionRoot, a.testExec, detail.DeployTarget, runCtx))
 	if promptErr != nil {
 		closeLog(logFile)
 		if reportErr := finish(logFile, map[string]any{"status": "failed", "error": "agent prompt could not be prepared"}); reportErr != nil {
@@ -723,6 +768,16 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			defer func() { _ = os.Remove(f.Name()) }()
 		}
 	}
+	if implementationBindingRequired && evidenceCaptureErr == nil {
+		refreshedBase := inspectAgentRunGitEvidence(ctx, executionRoot, evidenceCapture)
+		if baseGit.CommitSHA == "" || refreshedBase.CommitSHA == "" || refreshedBase.CommitSHA != baseGit.CommitSHA {
+			evidenceCaptureErr = errAgentRunWorktreeEvidence
+		} else if beforeTestsSnapshotErr == nil && refreshedBase.CommitSHA != beforeTestsSnapshot.commitSHA {
+			beforeTestsSnapshotErr = errAgentRunWorktreeEvidence
+		} else {
+			baseGit = refreshedBase
+		}
+	}
 
 	var runResult supervisorResult
 	if a.supervise != nil {
@@ -737,14 +792,14 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			effectiveCmd = strings.Join(effectiveArgv, " ")
 		}
 		runResult = a.supervise(ctx, supervisorRequest{
-			RunID: runID, RepoRoot: a.repoRoot, ExecCmd: effectiveCmd, ExecArgv: effectiveArgv, Env: env,
+			RunID: runID, RepoRoot: executionRoot, ExecCmd: effectiveCmd, ExecArgv: effectiveArgv, Env: env,
 			StructuredClaude: strings.TrimSpace(a.execCmd) == "claude",
 			ExecutionTimeout: a.executionTimeout, SilenceTimeout: a.heartbeatTimeout,
 			HeartbeatInterval: a.heartbeatInterval, LogSink: logSink, Reporter: a.reporter,
 			OwnedProcessStarted: controlStart(control), ControlRequests: controlRequests(control),
 			ControlResult: controlResult(control),
 		})
-	} else if spawnErr := a.spawn(ctx, a.repoRoot, a.execCmd, env, logSink); spawnErr != nil {
+	} else if spawnErr := a.spawn(ctx, executionRoot, a.execCmd, env, logSink); spawnErr != nil {
 		runResult = supervisorResult{Outcome: outcomeProviderFailure, Summary: "provider process exited unsuccessfully"}
 	} else {
 		runResult = supervisorResult{Outcome: outcomeNormalExit, Summary: "provider process exited normally"}
@@ -765,11 +820,52 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	}
 
 	resultFields := map[string]any{
-		"version": readVersionFile(a.repoRoot),
+		"version": readVersionFile(executionRoot),
 	}
-	testsRan := strings.TrimSpace(a.testExec) != ""
+	implementationResultBinding := ""
 	if testsRan {
-		summary, testResult := a.runTests(ctx, runID, env, logSink, control)
+		var testedSnapshot agentRunWorktreeSnapshot
+		var testedSnapshotErr error
+		var testedGitBeforeTests agentRunGitEvidence
+		commitChanged := false
+		var pretestBindingErr error
+		failBinding := func(reason error) error {
+			closeLog(logFile)
+			resultFields["status"] = "failed"
+			resultFields["error"] = reason.Error()
+			if reportErr := finish(logFile, resultFields); reportErr != nil {
+				return fmt.Errorf("run %d report failure: %w", runID, reportErr)
+			}
+			return fmt.Errorf("run %d: %w", runID, reason)
+		}
+		if implementationBindingRequired && evidenceCaptureErr == nil {
+			testedGitBeforeTests = inspectGitEvidence()
+			if testedGitBeforeTests.CommitSHA == "" {
+				evidenceCaptureErr = errAgentRunWorktreeEvidence
+			} else if beforeTestsSnapshotErr == nil || errors.Is(beforeTestsSnapshotErr, errAgentRunWorktreeLimit) {
+				testedSnapshot, testedSnapshotErr = evidenceCapture.snapshot(ctx)
+				if testedSnapshotErr == nil && testedSnapshot.commitSHA != testedGitBeforeTests.CommitSHA {
+					testedSnapshotErr = errAgentRunWorktreeEvidence
+				}
+			}
+		}
+		if implementationBindingRequired {
+			if evidenceCaptureErr != nil ||
+				(beforeTestsSnapshotErr != nil && !errors.Is(beforeTestsSnapshotErr, errAgentRunWorktreeLimit)) ||
+				(testedSnapshotErr != nil && !errors.Is(testedSnapshotErr, errAgentRunWorktreeLimit)) {
+				pretestBindingErr = errAgentRunWorktreeEvidence
+			} else if commitChanged = baseGit.CommitSHA != testedGitBeforeTests.CommitSHA; commitChanged {
+				if err := evidenceCapture.proveChangedCommitMatchesWorktree(ctx, baseGit.CommitSHA, testedGitBeforeTests.CommitSHA); err != nil {
+					pretestBindingErr = errAgentRunWorktreeEvidence
+				}
+			} else {
+				rawSnapshotsAvailable := beforeTestsSnapshotErr == nil && testedSnapshotErr == nil
+				if !rawSnapshotsAvailable || beforeTestsSnapshot.equal(testedSnapshot) {
+					pretestBindingErr = errAgentRunWorktreeEvidence
+				}
+			}
+		}
+		summary, testResult := a.runTestsAt(ctx, runID, executionRoot, env, logSink, control)
 		if summary != "" {
 			resultFields["tests_summary"] = summary
 		}
@@ -793,6 +889,44 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			fmt.Fprintf(stdout, "run %d tests failed\n", runID)
 			return nil
 		}
+		if implementationBindingRequired {
+			if pretestBindingErr != nil {
+				return failBinding(pretestBindingErr)
+			}
+			verifiedGit := inspectGitEvidence()
+			if verifiedGit.CommitSHA == "" {
+				return failBinding(errAgentRunWorktreeEvidence)
+			}
+			if testedGitBeforeTests.CommitSHA != verifiedGit.CommitSHA {
+				return failBinding(errAgentRunWorktreeChangedInTests)
+			}
+			testedSnapshotAvailable := testedSnapshotErr == nil
+			if testedSnapshotAvailable {
+				verifiedSnapshot, verifiedSnapshotErr := evidenceCapture.snapshot(ctx)
+				if verifiedSnapshotErr != nil {
+					if errors.Is(verifiedSnapshotErr, errAgentRunWorktreeLimit) {
+						return failBinding(errAgentRunWorktreeChangedInTests)
+					}
+					return failBinding(errAgentRunWorktreeEvidence)
+				}
+				if !testedSnapshot.equal(verifiedSnapshot) || verifiedSnapshot.commitSHA != verifiedGit.CommitSHA {
+					return failBinding(errAgentRunWorktreeChangedInTests)
+				}
+			}
+			if commitChanged {
+				if err := evidenceCapture.proveChangedCommitMatchesWorktree(ctx, baseGit.CommitSHA, verifiedGit.CommitSHA); err != nil {
+					return failBinding(errAgentRunWorktreeChangedInTests)
+				}
+			} else {
+				implementationResultBinding = implementationResultDigest(
+					runID, beforeTestsSnapshot.commitSHA, testedSnapshot.commitSHA, a.testExec, summary, beforeTestsSnapshot, testedSnapshot,
+				)
+			}
+			testedGit = verifiedGit
+		} else {
+			testedGit = inspectGitEvidence()
+		}
+		testedGitPinned = true
 	}
 
 	// Deploy is triple-gated AND needs its own consent (PAI-605 M6): even under
@@ -802,10 +936,72 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			fmt.Fprintf(stdout, "run %d: deploy declined\n", runID)
 			closeLog(logFile)
 			resultFields["status"] = completedRunStatus(testsRan)
+			if implementationResultBinding != "" {
+				resultFields["implementation_result_digest"] = implementationResultBinding
+			}
 			return finish(logFile, resultFields)
 		}
+		if testsRan && control != nil {
+			// tests_passed closes both the remote telemetry stream and the
+			// running-only control lease. Quiesce the pump before crossing that
+			// boundary, and honor any cancellation it already claimed instead of
+			// starting a deployment after the operator asked us to stop.
+			quiesceCtx, quiesceCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			quiesced := control.quiesceConfirmed(quiesceCtx)
+			quiesceCancel()
+			if !quiesced {
+				return fmt.Errorf("run %d control stream could not be quiesced before deployment", runID)
+			}
+			select {
+			case cancellation := <-control.requests:
+				resultCtx, resultCancel := context.WithTimeout(context.Background(), 15*time.Second)
+				resultErr := control.recordResult(resultCtx, cancellation, "applied", "")
+				resultCancel()
+				if resultErr != nil {
+					return fmt.Errorf("run %d control result failure: %w", runID, resultErr)
+				}
+				return nil
+			default:
+			}
+			revokeCtx, revokeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			revokeErr := control.revokeConfirmed(revokeCtx)
+			revokeCancel()
+			if revokeErr != nil {
+				return fmt.Errorf("run %d cancellation lease could not be closed before deployment: %w", runID, revokeErr)
+			}
+		}
+		// Commit the successful test result before deployment starts. Besides
+		// preserving an accurate crash boundary, the tests_passed transition is
+		// what atomically projects implementation and QA evidence. A direct
+		// running -> deployed report would bypass that projection, especially for
+		// equal-SHA source-free results.
+		if testsRan {
+			passedFields := make(map[string]any, len(resultFields)+6)
+			for key, value := range resultFields {
+				passedFields[key] = value
+			}
+			passedFields["status"] = "tests_passed"
+			if implementationResultBinding != "" {
+				passedFields["implementation_result_digest"] = implementationResultBinding
+			}
+			addAgentRunGitEvidence(passedFields, repoURL, baseGit, testedGit)
+			if reportErr := a.report(runID, passedFields); reportErr != nil {
+				closeLog(logFile)
+				return fmt.Errorf("run %d tests_passed report failure: %w", runID, reportErr)
+			}
+		}
 		fmt.Fprintf(stdout, "run %d: deploying to %s via %q\n", runID, detail.DeployTarget, a.deployExec)
-		deployResult := a.runSupervisedCommand(ctx, runID, a.deployExec, "deploying", "Configured deploy command started", env, logSink, control)
+		deployReporter := a.reporter
+		deployControl := control
+		if testsRan {
+			// The server intentionally makes tests_passed telemetry-terminal.
+			// Deployment retains the same local process-group, timeout, silence,
+			// and output supervision, but its outcome belongs on the later
+			// lifecycle PATCH rather than on the closed fact stream.
+			deployReporter = nil
+			deployControl = nil
+		}
+		deployResult := a.runSupervisedCommandWithReporterAt(ctx, runID, executionRoot, a.deployExec, "deploying", "Configured deploy command started", env, logSink, deployReporter, deployControl)
 		if deployResult.Outcome != outcomeNormalExit {
 			closeLog(logFile)
 			if deployResult.Outcome == outcomeOperatorCancellation {
@@ -813,6 +1009,14 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 			}
 			for key, value := range supervisorFailureFields(deployResult) {
 				resultFields[key] = value
+			}
+			if testsRan {
+				// tests_passed has only deployed/failed lifecycle exits. Runner
+				// shutdown, timeout, or silence during the later deploy is therefore
+				// a failed deployment, not a cancellation of the already-committed
+				// test result; cancellation_cause is scoped to running -> cancelled.
+				resultFields["status"] = "failed"
+				delete(resultFields, "cancellation_cause")
 			}
 			if _, cancelled := resultFields["cancellation_cause"]; cancelled {
 				resultFields["device_id"] = a.deviceID
@@ -828,7 +1032,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 		}
 		closeLog(logFile)
 		resultFields["status"] = "deployed"
-		resultFields["version"] = readVersionFile(a.repoRoot)
+		resultFields["version"] = readVersionFile(executionRoot)
 		resultFields["deploy_target"] = detail.DeployTarget
 		if reportErr := finish(logFile, resultFields); reportErr != nil {
 			return fmt.Errorf("run %d report failure: %w", runID, reportErr)
@@ -841,6 +1045,9 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	// the agent already advanced the run, this is a harmless 409, not a clobber).
 	closeLog(logFile)
 	resultFields["status"] = completedRunStatus(testsRan)
+	if implementationResultBinding != "" {
+		resultFields["implementation_result_digest"] = implementationResultBinding
+	}
 	if reportErr := finish(logFile, resultFields); reportErr != nil {
 		return fmt.Errorf("run %d report failure: %w", runID, reportErr)
 	}
@@ -881,7 +1088,11 @@ func closeLog(f *os.File) {
 }
 
 func (a *agentRunner) runTests(ctx context.Context, runID int64, env []string, logSink io.Writer, control *runControlArbiter) (string, supervisorResult) {
-	result := a.runSupervisedCommand(ctx, runID, a.testExec, "testing", "Configured test command started", env, logSink, control)
+	return a.runTestsAt(ctx, runID, a.repoRoot, env, logSink, control)
+}
+
+func (a *agentRunner) runTestsAt(ctx context.Context, runID int64, repoRoot string, env []string, logSink io.Writer, control *runControlArbiter) (string, supervisorResult) {
+	result := a.runSupervisedCommandAt(ctx, runID, repoRoot, a.testExec, "testing", "Configured test command started", env, logSink, control)
 	if result.Outcome == outcomeNormalExit {
 		return commandResultSummary(nil), result
 	}
@@ -889,14 +1100,26 @@ func (a *agentRunner) runTests(ctx context.Context, runID int64, env []string, l
 }
 
 func (a *agentRunner) runSupervisedCommand(ctx context.Context, runID int64, command, phase, startSummary string, env []string, logSink io.Writer, control *runControlArbiter) supervisorResult {
+	return a.runSupervisedCommandAt(ctx, runID, a.repoRoot, command, phase, startSummary, env, logSink, control)
+}
+
+func (a *agentRunner) runSupervisedCommandAt(ctx context.Context, runID int64, repoRoot, command, phase, startSummary string, env []string, logSink io.Writer, control *runControlArbiter) supervisorResult {
+	return a.runSupervisedCommandWithReporterAt(ctx, runID, repoRoot, command, phase, startSummary, env, logSink, a.reporter, control)
+}
+
+func (a *agentRunner) runSupervisedCommandWithReporter(ctx context.Context, runID int64, command, phase, startSummary string, env []string, logSink io.Writer, reporter runnerReportTransport, control *runControlArbiter) supervisorResult {
+	return a.runSupervisedCommandWithReporterAt(ctx, runID, a.repoRoot, command, phase, startSummary, env, logSink, reporter, control)
+}
+
+func (a *agentRunner) runSupervisedCommandWithReporterAt(ctx context.Context, runID int64, repoRoot, command, phase, startSummary string, env []string, logSink io.Writer, reporter runnerReportTransport, control *runControlArbiter) supervisorResult {
 	supervise := a.supervise
 	if supervise == nil {
 		supervise = superviseAgentProcess
 	}
 	return supervise(ctx, supervisorRequest{
-		RunID: runID, RepoRoot: a.repoRoot, ExecCmd: command, Env: env,
+		RunID: runID, RepoRoot: repoRoot, ExecCmd: command, Env: env,
 		ExecutionTimeout: a.executionTimeout, SilenceTimeout: a.heartbeatTimeout,
-		HeartbeatInterval: a.heartbeatInterval, LogSink: logSink, Reporter: a.reporter,
+		HeartbeatInterval: a.heartbeatInterval, LogSink: logSink, Reporter: reporter,
 		InitialPhase: phase, StartSummary: startSummary, OwnedProcessStarted: controlStart(control),
 		ControlRequests: controlRequests(control), ControlResult: controlResult(control),
 	})
@@ -1377,6 +1600,16 @@ func agentRunStatusIsTerminal(status string) bool {
 	}
 }
 
+func agentRunSuccessReport(fields map[string]any) bool {
+	status, _ := fields["status"].(string)
+	switch status {
+	case "completed", "tests_passed", "deployed", "drafted":
+		return true
+	default:
+		return false
+	}
+}
+
 // isConflict reports whether err is an HTTP 409 from the API (a lost claim or a
 // rejected terminal-status transition).
 func isConflict(err error) bool {
@@ -1396,7 +1629,25 @@ func readVersionFile(repoRoot string) string {
 	return strings.TrimSpace(string(b))
 }
 
-func inspectAgentRunGitEvidence(repoRoot string) agentRunGitEvidence {
+func inspectAgentRunGitEvidence(ctx context.Context, repoRoot string, capture *agentRunWorktreeCapture) agentRunGitEvidence {
+	if capture != nil {
+		pinnedCtx, cancel := context.WithTimeout(ctx, agentRunWorktreeDeadline)
+		defer cancel()
+		if capture.revalidate(pinnedCtx) != nil {
+			return agentRunGitEvidence{}
+		}
+		commit, _ := agentRunGitOptionalOneLine(pinnedCtx, capture, capture.top, capture.top, "rev-parse", "--verify", "HEAD")
+		branch, _ := agentRunGitOptionalOneLine(pinnedCtx, capture, capture.top, capture.top, "branch", "--show-current")
+		remote, _ := agentRunGitOptionalOneLine(pinnedCtx, capture, capture.top, capture.top, "config", "--get", "remote.origin.url")
+		if !agentRunHexOID(strings.ToLower(commit)) {
+			commit = ""
+		}
+		return agentRunGitEvidence{
+			RepoURL:   strings.TrimSpace(remote),
+			Branch:    strings.TrimSpace(branch),
+			CommitSHA: strings.ToLower(strings.TrimSpace(commit)),
+		}
+	}
 	_, commit, remote := detectRepoIdentity(repoRoot)
 	branch, _ := gitOutput(repoRoot, "branch", "--show-current")
 	return agentRunGitEvidence{

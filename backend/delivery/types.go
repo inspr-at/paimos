@@ -205,13 +205,15 @@ type StageRef struct {
 }
 
 type StageStartRequest struct {
-	IssueID        int64
-	AttemptNumber  int64
-	StageKey       string
-	Reporter       Actor
-	ReasonCode     string
-	ReasonText     string
-	IdempotencyKey string
+	IssueID                       int64
+	AttemptNumber                 int64
+	StageKey                      string
+	Reporter                      Actor
+	ReasonCode                    string
+	ReasonText                    string
+	IdempotencyKey                string
+	ExpectedCurrentExecution      *int64
+	ExpectedCurrentAuthorityEpoch *int64
 }
 
 type HandoffRequest struct {

@@ -1308,12 +1308,8 @@ func TestLateSupersededRunOutcomeIsHistoryOnly(t *testing.T) {
 				}
 				sequenceBefore, wakesBefore := before.ChangeSequence, wakes
 				tx, _ = database.BeginTx(context.Background(), nil)
-				commit := ""
-				if outcome == "tests_passed" {
-					commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-				}
 				if _, err := tx.Exec(`UPDATE agent_runs SET status=?,commit_sha=?,finished_at=? WHERE id=?`,
-					outcome, commit, formatTime(now.Add(time.Minute)), runID); err != nil {
+					outcome, "", formatTime(now.Add(time.Minute)), runID); err != nil {
 					t.Fatal(err)
 				}
 				effects = store.NewEffects()
@@ -1666,7 +1662,8 @@ func TestDurationIncludesPostActivationAgentRunWaits(t *testing.T) {
 	now = now.Add(10 * time.Second)
 	commit := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	tx, _ = database.BeginTx(context.Background(), nil)
-	if _, err := tx.Exec(`UPDATE agent_runs SET status='tests_passed',commit_sha=? WHERE id=?`, commit, runID); err != nil {
+	if _, err := tx.Exec(`UPDATE agent_runs SET status='tests_passed',commit_sha=?,tests_summary=? WHERE id=?`,
+		commit, "go test ./...: passed", runID); err != nil {
 		t.Fatal(err)
 	}
 	effects = store.NewEffects()

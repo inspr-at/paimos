@@ -926,7 +926,7 @@
             "type": "string",
             "nullable": true,
             "maxLength": 4096,
-            "description": "Non-empty evidence required by tests_passed/tests_failed; completed means tests were not run"
+            "description": "Non-empty evidence required by tests_passed/tests_failed; completed means tests were not run. On version-1 delivery-instrumented implementation runs, tests_passed also requires an allowlisted commit, source-free implementation digest, or same-issue attachment and atomically projects implementation plus required QA success; legacy runs are not backfilled."
           },
           "deploy_target": {
             "type": "string"
@@ -947,6 +947,11 @@
           "commit_sha": {
             "type": "string",
             "description": "Full Git object ID observed after execution; equal to commit_base_sha when no commit was produced"
+          },
+          "implementation_result_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Optional source-free SHA-256 binding for the exact bounded covered repository source surface observed stable around successful tests on a version-1 delivery-instrumented run when no commit was produced; ignored payloads and the external execution environment are outside the binding"
           },
           "log_attachment_id": {
             "type": "integer",
@@ -1203,6 +1208,37 @@
           "authority_epoch": {"type": "integer", "format": "int64", "minimum": 1},
           "declared_count": {"type": "integer", "minimum": 0, "maximum": 16},
           "sealed_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ExternalStageOwnerActivationRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["reporter_registration_id", "stage_key", "expected_attempt_number", "expected_plan_revision", "expected_current_execution", "expected_current_authority_epoch"],
+        "oneOf": [
+          {"properties": {"expected_current_execution": {"const": 0}, "expected_current_authority_epoch": {"const": 0}}},
+          {"properties": {"expected_current_execution": {"minimum": 1}, "expected_current_authority_epoch": {"minimum": 1}}}
+        ],
+        "properties": {
+          "reporter_registration_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "stage_key": {"type": "string", "enum": ["deployment", "verification"]},
+          "expected_attempt_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "expected_plan_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "expected_current_execution": {"type": "integer", "format": "int64", "minimum": 0},
+          "expected_current_authority_epoch": {"type": "integer", "format": "int64", "minimum": 0}
+        },
+        "description": "Both current-stage expectations must be zero for the first execution, or both positive and exact for a terminal retry."
+      },
+      "ExternalStageOwnerActivation": {
+        "type": "object", "additionalProperties": false,
+        "required": ["delivery_key", "reporter_registration_id", "stage_key", "attempt_number", "plan_revision", "execution_number", "authority_epoch", "reporter_id"],
+        "properties": {
+          "delivery_key": {"type": "string", "minLength": 1, "maxLength": 128},
+          "reporter_registration_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "stage_key": {"type": "string", "enum": ["deployment", "verification"]},
+          "attempt_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "plan_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "execution_number": {"type": "integer", "format": "int64", "minimum": 1},
+          "authority_epoch": {"type": "integer", "format": "int64", "minimum": 1},
+          "reporter_id": {"type": "integer", "format": "int64", "minimum": 1}
         }
       },
       "ExternalStageHandoffMetadata": {
@@ -3645,7 +3681,7 @@
                   "tests_summary": {
                     "type": "string",
                     "maxLength": 4096,
-                    "description": "bounded runner-owned result evidence; tests_passed and tests_failed require a non-empty value in this request or already persisted, while completed rejects test evidence"
+                    "description": "bounded runner-owned result evidence; tests_passed and tests_failed require a non-empty value in this request or already persisted, while completed rejects test evidence. On version-1 delivery-instrumented implementation runs, tests_passed also requires an allowlisted commit, source-free implementation digest, or same-issue attachment and atomically projects implementation plus required QA success; legacy runs are not backfilled."
                   },
                   "deploy_target": {
                     "type": "string"
@@ -3666,6 +3702,11 @@
                   "commit_sha": {
                     "type": "string",
                     "description": "full Git object ID after execution"
+                  },
+                  "implementation_result_digest": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "source-free SHA-256 binding for the exact bounded covered repository source surface observed stable around successful tests; ignored payloads and the external execution environment are outside the binding; accepted only with a version-1 delivery-instrumented running-to-tests_passed transition"
                   },
                   "log_attachment_id": {
                     "type": "integer",
@@ -3696,7 +3737,7 @@
             }
           },
           "409": {
-            "description": "Claim lost (if_status mismatch) or a transition out of a terminal status was rejected",
+            "description": "Claim lost (if_status mismatch), a transition out of a terminal status was rejected, or a current version-1 QA-required tests_passed result lacked an allowlisted implementation commit, source-free implementation digest, or same-issue attachment",
             "content": {
               "application/json": {
                 "schema": {
@@ -4095,6 +4136,16 @@
         "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStagePrerequisiteSetRequest"}}}},
         "responses": {"201": {"description": "Prerequisite set sealed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStagePrerequisiteSet"}}}}, "400": {"description": "Strict JSON refusal"}, "404": {"description": "Canonical concealment"}, "409": {"description": "Conflicting replay or stale authority"}}
+      }
+    },
+    "/api/agent-mode/deliveries/{deliveryKey}/external-owner-activations": {
+      "post": {
+        "operationId": "activateExternalStageOwner", "tags": ["external-stage"],
+        "summary": "Start a CAS-bound deployment or verification execution under one exact Pharos owner",
+        "description": "The authenticated operator start, immediate external-owner handoff, and principal-attributed append-only audit commit atomically. Exact replay is scoped to the principal and delivery and remains a read after registration or attempt drift; a live execution cannot be silently replaced.",
+        "parameters": [{"$ref": "#/components/parameters/AgentModeDeliveryPath"}, {"$ref": "#/components/parameters/ExternalStageIdempotencyHeader"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageOwnerActivationRequest"}}}},
+        "responses": {"201": {"description": "Owner activation committed or exactly replayed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ExternalStageOwnerActivation"}}}}, "400": {"description": "Strict JSON refusal"}, "404": {"description": "Canonical concealment"}, "409": {"description": "Stale plan, attempt, authority, active execution, or conflicting replay"}}
       }
     },
     "/api/agent-mode/deliveries/{deliveryKey}/external-stage-handoffs": {

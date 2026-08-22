@@ -10,6 +10,7 @@ package handlers_test
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/delivery"
+	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/sse"
 )
 
@@ -1141,7 +1143,10 @@ func TestAgentRunTestStatusesRequireBoundedEvidence(t *testing.T) {
 
 	passedID := newRunning(3)
 	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(passedID), ts.adminCookie,
-		map[string]any{"status": "tests_passed", "tests_summary": "go test ./...: 248 packages passed"}), http.StatusOK)
+		map[string]any{"status": "tests_passed", "tests_summary": "go test ./...: 248 packages passed"}), http.StatusConflict)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(passedID), ts.adminCookie,
+		map[string]any{"status": "tests_passed", "tests_summary": "go test ./...: 248 packages passed",
+			"commit_sha": strings.Repeat("a", 40)}), http.StatusOK)
 	failedID := newRunning(4)
 	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(failedID), ts.adminCookie,
 		map[string]any{"status": "tests_failed", "tests_summary": "frontend suite: 1 failed, 127 passed"}), http.StatusOK)
@@ -1158,6 +1163,25 @@ func TestAgentRunTestStatusesRequireBoundedEvidence(t *testing.T) {
 	completedID := newRunning(7)
 	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(completedID), ts.adminCookie,
 		map[string]any{"status": "completed", "tests_summary": "tests passed"}), http.StatusConflict)
+
+	var adminID int64
+	if err := db.DB.QueryRow(`SELECT id FROM users WHERE username='admin'`).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	issueResult, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status)
+		VALUES(?,8,'ticket','Legacy test evidence','in-progress')`, projID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyIssueID, _ := issueResult.LastInsertId()
+	runResult, err := db.DB.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,
+		delivery_instrumentation_version) VALUES(?,?,?,'running',0)`, legacyIssueID, projID, adminID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyRunID, _ := runResult.LastInsertId()
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(legacyRunID), ts.adminCookie,
+		map[string]any{"status": "tests_passed", "tests_summary": "legacy tests passed"}), http.StatusOK)
 }
 
 func TestAgentRunCompletedCommentSaysTestsWereNotRun(t *testing.T) {
@@ -1172,10 +1196,10 @@ func TestAgentRunCompletedCommentSaysTestsWereNotRun(t *testing.T) {
 	}
 }
 
-// TestAgentRunTestsPassedStampsFinishedAtButCanDeploy pins the result-state
-// semantics used by report-back-only runners: tests_passed is a completed
-// result with a timestamp, but it remains non-terminal so a later deploy report
-// can still move tests_passed -> deployed.
+// TestAgentRunTestsPassedStampsFinishedAtButCanDeploy pins the run-lifecycle
+// semantics used by report-back-only runners: tests_passed atomically projects
+// implementation + QA delivery truth and stamps a timestamp, while the run
+// status can still move tests_passed -> deployed.
 func TestAgentRunTestsPassedStampsFinishedAtButCanDeploy(t *testing.T) {
 	ts := newTestServer(t)
 	projID := seedBatchProject(t, "PAI", "PAI")
@@ -1184,12 +1208,16 @@ func TestAgentRunTestsPassedStampsFinishedAtButCanDeploy(t *testing.T) {
 
 	resp := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
 		"status": "tests_passed", "tests_summary": "configured test command passed",
+		"commit_sha": strings.Repeat("a", 40),
 	})
 	assertStatus(t, resp, http.StatusOK)
 	var run map[string]any
 	decode(t, resp, &run)
 	if run["finished_at"] == nil {
 		t.Fatalf("tests_passed should stamp finished_at")
+	}
+	if _, present := run["implementation_result_digest"]; present {
+		t.Fatalf("empty optional implementation_result_digest violated response schema: %+v", run)
 	}
 
 	resp = ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
@@ -1204,6 +1232,366 @@ func TestAgentRunTestsPassedStampsFinishedAtButCanDeploy(t *testing.T) {
 	}
 	if run["finished_at"] == nil {
 		t.Fatalf("deployed should keep/stamp finished_at")
+	}
+}
+
+func TestAgentRunFailureAfterTestsPassedPreservesMonotonicQAEvidence(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "QAM", "Monotonic QA evidence")
+	issueID, runID := seedRunForIssue(t, ts, projectID, 1)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+		map[string]any{"status": "running"}), http.StatusOK)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+		"status": "tests_passed", "tests_summary": "configured test command passed",
+		"commit_sha": strings.Repeat("a", 40),
+	}), http.StatusOK)
+
+	store := delivery.NewStore(db.DB, delivery.Options{})
+	assertImplementationAndQAEligible := func(stage string) {
+		t.Helper()
+		snapshot, err := store.SnapshotByIssue(t.Context(), issueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		eligible := map[string]bool{}
+		for _, current := range snapshot.Stages {
+			eligible[current.StageKey] = current.EligibleSuccess
+		}
+		if !eligible[delivery.StageImplementation] || !eligible[delivery.StageQA] {
+			t.Fatalf("%s erased valid implementation/QA evidence: %+v", stage, snapshot.Stages)
+		}
+	}
+	assertImplementationAndQAEligible("tests_passed")
+
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+		map[string]any{"status": "failed", "error": "post-test deployment failed"}), http.StatusOK)
+	assertImplementationAndQAEligible("later operational failure")
+}
+
+func TestAgentRunTestsPassedEvidenceTupleIsFrozenAcrossOperationalTransitions(t *testing.T) {
+	for index, tc := range []struct {
+		status           string
+		reassertEvidence bool
+	}{
+		{status: "deployed", reassertEvidence: true},
+		{status: "failed", reassertEvidence: false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			ts := newTestServer(t)
+			projectID := seedBatchProject(t, "ETF"+itoa(int64(index)), "Evidence tuple freeze")
+			issueID, runID := seedRunForIssue(t, ts, projectID, index+1)
+			assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+				map[string]any{"status": "running"}), http.StatusOK)
+			base := strings.Repeat("a", 40)
+			digest := strings.Repeat("c", 64)
+			summary := "configured tests passed"
+			repoURL := "https://github.com/example/tested"
+			branch := "tested-branch"
+			assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+				"status": "tests_passed", "tests_summary": summary, "repo_url": repoURL,
+				"branch_name": branch, "commit_base_sha": base, "commit_sha": base,
+				"implementation_result_digest": digest,
+			}), http.StatusOK)
+
+			conflicts := []map[string]any{
+				{"tests_summary": "rewritten test result"},
+				{"repo_url": "https://github.com/example/rewritten"},
+				{"branch_name": "rewritten-branch"},
+				{"commit_base_sha": strings.Repeat("b", 40)},
+				{"commit_sha": strings.Repeat("b", 40)},
+				{"implementation_result_digest": strings.Repeat("d", 64)},
+			}
+			for _, conflict := range conflicts {
+				conflict["status"] = tc.status
+				assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, conflict), http.StatusConflict)
+			}
+			assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+				"status": "tests_passed", "tests_summary": "same-status rewrite",
+			}), http.StatusConflict)
+
+			var adminID int64
+			if err := db.DB.QueryRow(`SELECT id FROM users WHERE username='admin'`).Scan(&adminID); err != nil {
+				t.Fatal(err)
+			}
+			attachmentResult, err := db.DB.Exec(`INSERT INTO attachments(
+				issue_id,object_key,filename,content_type,size_bytes,uploaded_by)
+				VALUES(?,?,?,'text/plain',1,?)`, issueID, fmt.Sprintf("tested-evidence-%d-%s", runID, tc.status),
+				"run.log", adminID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attachmentID, _ := attachmentResult.LastInsertId()
+			final := map[string]any{"status": tc.status, "log_attachment_id": attachmentID,
+				"version": "5.11.1", "deploy_target": "production"}
+			if tc.status == "failed" {
+				final["error"] = "post-test deployment failed"
+			}
+			if tc.reassertEvidence {
+				final["tests_summary"] = summary
+				final["repo_url"] = repoURL
+				final["branch_name"] = branch
+				final["commit_base_sha"] = base
+				final["commit_sha"] = base
+				final["implementation_result_digest"] = digest
+			}
+			response := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, final)
+			assertStatus(t, response, http.StatusOK)
+			var run handlers.AgentRun
+			decode(t, response, &run)
+			if run.Status != tc.status || run.TestsSummary == nil || *run.TestsSummary != summary ||
+				run.RepoURL != repoURL || run.BranchName != branch || run.CommitBaseSHA != base ||
+				run.CommitSHA != base || run.ImplementationResultDigest != digest ||
+				run.LogAttachmentID == nil || *run.LogAttachmentID != attachmentID {
+				t.Fatalf("final run rewrote tested evidence or rejected new log: %+v", run)
+			}
+		})
+	}
+}
+
+func TestAgentRunTestsPassedBoundImplementationAttachmentCannotBeReplaced(t *testing.T) {
+	for index, status := range []string{"deployed", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			ts := newTestServer(t)
+			projectID := seedBatchProject(t, "ATF"+itoa(int64(index)), "Attachment evidence freeze")
+			issueID, runID := seedRunForIssue(t, ts, projectID, index+20)
+			var adminID int64
+			if err := db.DB.QueryRow(`SELECT id FROM users WHERE username='admin'`).Scan(&adminID); err != nil {
+				t.Fatal(err)
+			}
+			seedAttachment := func(suffix string) int64 {
+				t.Helper()
+				result, err := db.DB.Exec(`INSERT INTO attachments(
+					issue_id,object_key,filename,content_type,size_bytes,uploaded_by)
+					VALUES(?,?,?,'text/plain',1,?)`, issueID, fmt.Sprintf("bound-evidence-%d-%s", runID, suffix),
+					suffix+".log", adminID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				id, _ := result.LastInsertId()
+				return id
+			}
+			boundAttachment := seedAttachment("bound")
+			replacementAttachment := seedAttachment("replacement")
+			assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+				map[string]any{"status": "running"}), http.StatusOK)
+			assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+				"status": "tests_passed", "tests_summary": "attachment-bound tests passed",
+				"log_attachment_id": boundAttachment,
+			}), http.StatusOK)
+			assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+				"status": status, "log_attachment_id": replacementAttachment,
+			}), http.StatusConflict)
+			response := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+				"status": status, "log_attachment_id": boundAttachment,
+			})
+			assertStatus(t, response, http.StatusOK)
+			var run handlers.AgentRun
+			decode(t, response, &run)
+			if run.Status != status || run.LogAttachmentID == nil || *run.LogAttachmentID != boundAttachment {
+				t.Fatalf("bound attachment changed: %+v", run)
+			}
+		})
+	}
+}
+
+func TestAgentRunSourceFreeImplementationDigestProjectsExactEvidence(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "IRD", "Implementation result digest")
+	issueID, runID := seedRunForIssue(t, ts, projectID, 1)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+		map[string]any{"status": "running"}), http.StatusOK)
+	digest := strings.Repeat("a", 64)
+	body := map[string]any{"status": "tests_passed", "tests_summary": "configured tests passed",
+		"implementation_result_digest": digest}
+	response := ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, body)
+	assertStatus(t, response, http.StatusOK)
+	var run handlers.AgentRun
+	decode(t, response, &run)
+	if run.ImplementationResultDigest != digest || run.LogAttachmentID != nil || run.CommitSHA != run.CommitBaseSHA {
+		t.Fatalf("source-free run evidence=%+v", run)
+	}
+	var referenceKind, storedDigest string
+	if err := db.DB.QueryRow(`SELECT evidence.reference_kind,evidence.digest_sha256
+		FROM deliveries delivery JOIN delivery_stage_events stage ON stage.delivery_id=delivery.id
+		JOIN delivery_evidence evidence ON evidence.stage_event_id=stage.id
+		WHERE delivery.issue_id=? AND stage.stage_key='implementation'
+		 AND evidence.evidence_type='implementation_result' ORDER BY stage.id DESC LIMIT 1`, issueID).
+		Scan(&referenceKind, &storedDigest); err != nil {
+		t.Fatal(err)
+	}
+	if referenceKind != "digest" || storedDigest != digest {
+		t.Fatalf("implementation evidence=%q/%q", referenceKind, storedDigest)
+	}
+	var eventsBefore int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM delivery_events event JOIN deliveries delivery ON delivery.id=event.delivery_id
+		WHERE delivery.issue_id=?`, issueID).Scan(&eventsBefore); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, body), http.StatusOK)
+	var eventsAfter int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM delivery_events event JOIN deliveries delivery ON delivery.id=event.delivery_id
+		WHERE delivery.issue_id=?`, issueID).Scan(&eventsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if eventsAfter != eventsBefore {
+		t.Fatalf("exact digest replay added delivery events: %d -> %d", eventsBefore, eventsAfter)
+	}
+	conflict := map[string]any{"status": "tests_passed", "tests_summary": "configured tests passed",
+		"implementation_result_digest": strings.Repeat("b", 64)}
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, conflict), http.StatusConflict)
+}
+
+func TestAgentRunImplementationDigestValidationAndTransitionScope(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "IDV", "Implementation digest validation")
+	for index, invalid := range []string{strings.Repeat("a", 63), strings.Repeat("A", 64), strings.Repeat("g", 64)} {
+		_, runID := seedRunForIssue(t, ts, projectID, index+1)
+		assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie,
+			map[string]any{"status": "running"}), http.StatusOK)
+		assertStatus(t, ts.patch(t, "/api/runs/"+itoa(runID), ts.adminCookie, map[string]any{
+			"status": "tests_passed", "tests_summary": "tests passed", "implementation_result_digest": invalid,
+		}), http.StatusBadRequest)
+	}
+	_, unrelatedRunID := seedRunForIssue(t, ts, projectID, 10)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(unrelatedRunID), ts.adminCookie,
+		map[string]any{"status": "running"}), http.StatusOK)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(unrelatedRunID), ts.adminCookie, map[string]any{
+		"status": "completed", "implementation_result_digest": strings.Repeat("c", 64),
+	}), http.StatusConflict)
+	var adminID int64
+	if err := db.DB.QueryRow(`SELECT id FROM users WHERE username='admin'`).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	issueResult, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status)
+		VALUES(?,11,'ticket','Legacy digest refusal','in-progress')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyIssueID, _ := issueResult.LastInsertId()
+	runResult, err := db.DB.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,delivery_instrumentation_version)
+		VALUES(?,?,?,'running',0)`, legacyIssueID, projectID, adminID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyRunID, _ := runResult.LastInsertId()
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(legacyRunID), ts.adminCookie, map[string]any{
+		"status": "tests_passed", "tests_summary": "legacy tests passed",
+		"implementation_result_digest": strings.Repeat("d", 64),
+	}), http.StatusConflict)
+}
+
+func TestSecondImplementationTestsPassedRetriesCanonicalQA(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "QAR", "QA retry")
+	issueID, firstRunID := seedRunForIssue(t, ts, projectID, 1)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(firstRunID), ts.adminCookie,
+		map[string]any{"status": "running"}), http.StatusOK)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(firstRunID), ts.adminCookie, map[string]any{
+		"status": "tests_passed", "tests_summary": "first implementation tests passed",
+		"commit_sha": strings.Repeat("a", 40),
+	}), http.StatusOK)
+
+	resp := ts.post(t, "/api/issues/"+itoa(issueID)+"/implement", ts.adminCookie, map[string]any{})
+	assertStatus(t, resp, http.StatusCreated)
+	var secondRun map[string]any
+	decode(t, resp, &secondRun)
+	secondRunID := int64(secondRun["id"].(float64))
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(secondRunID), ts.adminCookie,
+		map[string]any{"status": "running"}), http.StatusOK)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(secondRunID), ts.adminCookie, map[string]any{
+		"status": "tests_passed", "tests_summary": "second implementation tests passed",
+		"commit_sha": strings.Repeat("b", 40),
+	}), http.StatusOK)
+
+	var implementationExecution, qaExecution int64
+	if err := db.DB.QueryRow(`SELECT implementation.execution_number,qa.execution_number
+		FROM deliveries delivery
+		JOIN delivery_stage_latest implementation ON implementation.delivery_id=delivery.id AND implementation.stage_key='implementation'
+		JOIN delivery_stage_latest qa ON qa.delivery_id=delivery.id AND qa.attempt_id=implementation.attempt_id AND qa.stage_key='qa'
+		WHERE delivery.issue_id=?`, issueID).Scan(&implementationExecution, &qaExecution); err != nil {
+		t.Fatal(err)
+	}
+	if implementationExecution != 2 || qaExecution != 2 {
+		t.Fatalf("current implementation/QA executions=%d/%d, want 2/2", implementationExecution, qaExecution)
+	}
+	snapshot, err := delivery.NewStore(db.DB, delivery.Options{}).SnapshotByIssue(t.Context(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var qaEligible bool
+	for _, stage := range snapshot.Stages {
+		if stage.StageKey == delivery.StageQA {
+			qaEligible = stage.EligibleSuccess
+		}
+	}
+	if !qaEligible {
+		t.Fatalf("second implementation did not leave QA eligible: %+v", snapshot.Stages)
+	}
+}
+
+func TestTestsPassedDoesNotStealActiveCanonicalQA(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "QAA", "QA active")
+	issueID, firstRunID := seedRunForIssue(t, ts, projectID, 1)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(firstRunID), ts.adminCookie,
+		map[string]any{"status": "running"}), http.StatusOK)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(firstRunID), ts.adminCookie, map[string]any{
+		"status": "completed", "commit_sha": strings.Repeat("a", 40),
+	}), http.StatusOK)
+
+	var adminID int64
+	if err := db.DB.QueryRow(`SELECT id FROM users WHERE username='admin'`).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	store := delivery.NewStore(db.DB, delivery.Options{})
+	snapshot, err := store.SnapshotByIssue(t.Context(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	qa, err := store.StartStageRetry(t.Context(), delivery.StageStartRequest{
+		IssueID: issueID, AttemptNumber: snapshot.AttemptNumber, StageKey: delivery.StageQA,
+		Reporter:   delivery.Actor{Type: "user", OpaqueKey: "user:" + itoa(adminID)},
+		ReasonCode: "manual_qa", IdempotencyKey: "manual-qa-active",
+		ExpectedCurrentExecution: &zero, ExpectedCurrentAuthorityEpoch: &zero,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := ts.post(t, "/api/issues/"+itoa(issueID)+"/implement", ts.adminCookie, map[string]any{})
+	assertStatus(t, resp, http.StatusCreated)
+	var secondRun map[string]any
+	decode(t, resp, &secondRun)
+	secondRunID := int64(secondRun["id"].(float64))
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(secondRunID), ts.adminCookie,
+		map[string]any{"status": "running"}), http.StatusOK)
+	assertStatus(t, ts.patch(t, "/api/runs/"+itoa(secondRunID), ts.adminCookie, map[string]any{
+		"status": "tests_passed", "tests_summary": "new implementation tests passed",
+		"commit_sha": strings.Repeat("b", 40),
+	}), http.StatusOK)
+
+	var execution, epoch int64
+	var reporterType, semanticState string
+	if err := db.DB.QueryRow(`SELECT latest.execution_number,latest.authority_epoch,reporter.reporter_type,
+		COALESCE(stage.semantic_state,'') FROM deliveries delivery
+		JOIN delivery_stage_latest latest ON latest.delivery_id=delivery.id AND latest.stage_key='qa'
+		JOIN delivery_reporters reporter ON reporter.id=latest.current_reporter_id
+		LEFT JOIN delivery_stage_events stage ON stage.id=latest.semantic_stage_event_id
+		WHERE delivery.issue_id=?`, issueID).Scan(&execution, &epoch, &reporterType, &semanticState); err != nil {
+		t.Fatal(err)
+	}
+	if execution != qa.ExecutionNumber || epoch != qa.AuthorityEpoch || reporterType != "user" || semanticState != "" {
+		t.Fatalf("active QA was replaced: execution=%d epoch=%d reporter=%q semantic=%q", execution, epoch, reporterType, semanticState)
+	}
+	snapshot, err = store.SnapshotByIssue(t.Context(), issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range snapshot.Stages {
+		if stage.StageKey == delivery.StageQA && stage.EligibleSuccess {
+			t.Fatalf("stale active QA became eligible after implementation retry: %+v", stage)
+		}
 	}
 }
 
