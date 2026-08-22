@@ -38,8 +38,31 @@ const visualIssue = {
   time_rollup: 0, time_total: 0, accepted_at: null, accepted_by: null, invoiced_at: null, invoice_number: '',
 }
 
-async function installApiFixtures(page: Page) {
+type VisualDeliveryMode = 'ready' | 'loading' | 'empty' | 'offline' | 'forbidden' | 'not-found' | 'malformed'
+
+interface VisualApiControl {
+  setDeliveryMode(mode: VisualDeliveryMode): void
+  releaseLoading(): void
+  readonly deliveryRequests: number
+  readonly controlTransitions: readonly string[]
+  readonly issueMutations: number
+  readonly commentPosts: number
+  readonly attachmentUploads: number
+}
+
+async function installApiFixtures(page: Page): Promise<VisualApiControl> {
+  let deliveryMode: VisualDeliveryMode = 'ready'
+  let deliveryRequests = 0
+  let releaseLoading: (() => void) | null = null
+  const controlTransitions: string[] = []
+  let controlCommand: Record<string, unknown> | null = null
+  let issueFixture = { ...visualIssue }
+  let issueMutations = 0
+  let commentPosts = 0
+  let attachmentUploads = 0
+  const comments: Array<Record<string, unknown>> = []
   await page.addInitScript(() => {
+    const sources: EventTarget[] = []
     class VisualEventSource extends EventTarget {
       static readonly CONNECTING = 0
       static readonly OPEN = 1
@@ -54,6 +77,7 @@ async function installApiFixtures(page: Page) {
       constructor(url: string | URL) {
         super()
         this.url = String(url)
+        sources.push(this)
         queueMicrotask(() => this.dispatchEvent(new Event('open')))
       }
 
@@ -62,6 +86,7 @@ async function installApiFixtures(page: Page) {
       }
     }
     Object.defineProperty(window, 'EventSource', { configurable: true, value: VisualEventSource })
+    Object.defineProperty(window, '__pai811EventSources', { configurable: true, value: sources })
   })
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
@@ -78,8 +103,24 @@ async function installApiFixtures(page: Page) {
       return fulfill({ label: 'STAGING', attachments_enabled: true, live_updates_enabled: false })
     }
     if (path === '/api/agent-mode/deliveries') {
+      deliveryRequests += 1
       if (new URL(route.request().url()).searchParams.get('q') === 'visual-forbidden') {
         return fulfill({ message: 'fixture: forbidden' }, 403)
+      }
+      if (deliveryMode === 'loading') {
+        await new Promise<void>((resolveLoading) => { releaseLoading = resolveLoading })
+      }
+      if (deliveryMode === 'empty') return fulfill(makeFixtureSnapshot(0))
+      if (deliveryMode === 'offline') return route.abort('failed')
+      if (deliveryMode === 'forbidden') return fulfill({ message: 'fixture: revoked' }, 403)
+      if (deliveryMode === 'not-found') return fulfill({ message: 'fixture: missing' }, 404)
+      if (deliveryMode === 'malformed') {
+        return route.fulfill({
+          status: 200,
+          body: '{"schema_version":',
+          contentType: 'application/json',
+          headers: { 'X-Permissions-Epoch': '1' },
+        })
       }
       return fulfill(makeFixtureSnapshot(10))
     }
@@ -96,16 +137,108 @@ async function installApiFixtures(page: Page) {
         expires_at: '2027-01-02T03:04:05Z',
       })
     }
-    if (path === '/api/issues/5008') return fulfill(visualIssue)
+    if (/^\/api\/agent-mode\/deliveries\/dlv-\d+\/control-commands$/.test(path)) {
+      const deliveryKey = path.split('/')[4]
+      const selected = makeFixtureSnapshot(10).rows?.find((delivery) => delivery.delivery_id === deliveryKey)
+      controlCommand = {
+        command_id: '22222222-2222-4222-8222-222222222222',
+        status_revision: 1,
+        action: 'run.cancel.running',
+        status: 'pending_confirmation',
+        challenge_template: 'run_cancel_running',
+        expires_at: '2027-01-02T03:04:05Z',
+        display: { issue_key: selected?.issue_key ?? 'REL-820', delivery_key: deliveryKey, run_id: 42 },
+      }
+      return fulfill(controlCommand)
+    }
+    if (/^\/api\/agent-mode\/control-commands\/[0-9a-f-]+$/.test(path)) {
+      if (!controlCommand) return fulfill({ message: 'fixture: command missing' }, 404)
+      if (route.request().method() === 'POST') {
+        const body = route.request().postDataJSON() as { operation?: unknown }
+        const operation = typeof body.operation === 'string' ? body.operation : ''
+        controlTransitions.push(operation)
+        controlCommand = operation === 'confirm'
+          ? { ...controlCommand, status_revision: 2, status: 'accepted' }
+          : { ...controlCommand, status_revision: 2, status: 'rejected', outcome: 'rejected', reason: 'withdrawn' }
+      }
+      return fulfill(controlCommand)
+    }
+    if (path === '/api/issues/5008') {
+      if (route.request().method() !== 'GET') {
+        const body = route.request().postDataJSON() as Record<string, unknown>
+        issueMutations += 1
+        issueFixture = { ...issueFixture, ...body, updated_at: '2026-08-22 06:00:00' }
+      }
+      return fulfill(issueFixture)
+    }
     if (path === '/api/issues/5008/activity') {
       return fulfill({ undo_rows: [], redo_rows: [], history_rows: [], stack_depth: 0 })
     }
     if (path === '/api/issues/5008/ai-activity') return fulfill({ rows: [], count: 0, last_week_count: 0 })
-    if (/^\/api\/issues\/5008\/(attachments|comments|time-entries)$/.test(path)) return fulfill([])
+    if (path === '/api/issues/5008/comments') {
+      if (route.request().method() === 'GET') return fulfill(comments)
+      const body = route.request().postDataJSON() as { body?: unknown; visibility?: unknown }
+      const comment = {
+        id: 901 + comments.length,
+        issue_id: 5008,
+        author_id: 7,
+        author: 'mba',
+        avatar_path: null,
+        body: typeof body.body === 'string' ? body.body : '',
+        visibility: body.visibility === 'external' ? 'external' : 'internal',
+        created_at: '2026-08-22T06:00:00Z',
+      }
+      comments.push(comment)
+      commentPosts += 1
+      return fulfill(comment)
+    }
+    if (path === '/api/issues/5008/attachments') {
+      if (route.request().method() === 'GET') return fulfill([])
+      attachmentUploads += 1
+      return fulfill({
+        id: 701,
+        issue_id: 5008,
+        object_key: 'fixture/pai811-proof.txt',
+        filename: 'pai811-proof.txt',
+        content_type: 'text/plain',
+        size_bytes: 17,
+        uploaded_by: 7,
+        uploader: 'mba',
+        created_at: '2026-08-22T06:00:00Z',
+      })
+    }
+    if (path === '/api/issues/5008/time-entries') return fulfill([])
     if (path === '/api/time-entries/today-summary') return fulfill({ total_hours: 0, count: 0 })
     if (path === '/api/dev/test-reports/summary') return fulfill({ failures: 0 })
     return fulfill([])
   })
+  return {
+    setDeliveryMode(mode) { deliveryMode = mode },
+    releaseLoading() {
+      deliveryMode = 'ready'
+      releaseLoading?.()
+      releaseLoading = null
+    },
+    get deliveryRequests() { return deliveryRequests },
+    get controlTransitions() { return [...controlTransitions] },
+    get issueMutations() { return issueMutations },
+    get commentPosts() { return commentPosts },
+    get attachmentUploads() { return attachmentUploads },
+  }
+}
+
+async function emitVisualStreamEvent(page: Page, type: 'refetch' | 'reset') {
+  await page.evaluate((eventType) => {
+    const target = window as Window & { __pai811EventSources?: EventTarget[] }
+    const source = target.__pai811EventSources?.at(-1)
+    if (!source) throw new Error('visual EventSource is not open')
+    source.dispatchEvent(new MessageEvent(eventType, {
+      data: JSON.stringify(eventType === 'reset'
+        ? { schema_version: 1, reason: 'resync_required' }
+        : { schema_version: 1, hints: [] }),
+      lastEventId: 'A'.repeat(211),
+    }))
+  }, type)
 }
 
 async function installStaticHost(page: Page) {
@@ -372,6 +505,134 @@ test('PAI-811 200% effective zoom keeps mobile flow reachable and non-occluding'
     horizontalOverflow: false,
     canvasScrollable: true,
   })
+})
+
+test('PAI-811 browser states stay honest and retry without retaining unauthorized truth', async ({ page }) => {
+  await installStaticHost(page)
+  const api = await installApiFixtures(page)
+
+  api.setDeliveryMode('loading')
+  await page.goto(`${APP_ORIGIN}/agent-mode?delivery=dlv-820`, { waitUntil: 'domcontentloaded' })
+  await expect(page.locator('.am-state--loading')).toBeVisible()
+  api.releaseLoading()
+  await expect(page.locator('[data-selected="true"]')).toBeVisible()
+
+  for (const [mode, selector] of [
+    ['empty', '.am-state--empty'],
+    ['not-found', '.am-state--not-found'],
+    ['malformed', '.am-state--error'],
+    ['offline', '.am-state--offline'],
+  ] as const) {
+    api.setDeliveryMode(mode)
+    await page.reload({ waitUntil: 'networkidle' })
+    await expect(page.locator(selector)).toBeVisible()
+    await expect(page.locator('[data-selected="true"]')).toHaveCount(0)
+  }
+
+  const requestsBeforeRetry = api.deliveryRequests
+  api.setDeliveryMode('ready')
+  await page.locator('.am-state--offline .am-state-retry').click()
+  await expect(page.locator('[data-selected="true"]')).toBeVisible()
+  expect(api.deliveryRequests).toBeGreaterThan(requestsBeforeRetry)
+
+  api.setDeliveryMode('offline')
+  await emitVisualStreamEvent(page, 'refetch')
+  await expect(page.locator('.am-banner')).toContainText('Last known state')
+  await expect(page.locator('[data-selected="true"]')).toBeVisible()
+  await expect(page.locator('.am-card-eta--withheld').first()).toBeVisible()
+})
+
+test('PAI-811 live ACL revocation clears every authoritative delivery surface', async ({ page }) => {
+  await installStaticHost(page)
+  const api = await installApiFixtures(page)
+  await openReady(page, 1440, 1000, '&detail=1')
+  await expect(page.locator('.am-conv')).toContainText('REL-820')
+  await expect(page.locator('.am-controls')).toBeVisible()
+  await expect(page.locator('.am-stage-chain')).toBeVisible()
+
+  api.setDeliveryMode('forbidden')
+  await emitVisualStreamEvent(page, 'reset')
+  await expect(page.locator('.am-state--forbidden')).toBeVisible()
+  await expect(page.locator('[data-selected="true"]')).toHaveCount(0)
+  await expect(page.locator('.am-conv')).not.toContainText('REL-820')
+  await expect(page.locator('.am-controls')).toHaveCount(0)
+  await expect(page.locator('.am-stage-chain')).toHaveCount(0)
+  await expect(page.locator('.am-card-eta')).toHaveCount(0)
+  await expect(page.getByText('REL-820', { exact: false })).toHaveCount(0)
+
+  await page.keyboard.press('ArrowDown')
+  await expect(page.locator('[data-selected="true"]')).toHaveCount(0)
+})
+
+test('PAI-811 controls require an explicit second phase for withdrawal and confirmation', async ({ page }) => {
+  await installStaticHost(page)
+  const api = await installApiFixtures(page)
+  await openReady(page, 1440, 1000)
+
+  const cancel = page.locator('.am-controls-target > button', { hasText: 'Cancel running run' })
+  await cancel.click()
+  const challenge = page.locator('.am-controls-challenge')
+  await expect(challenge).toBeVisible()
+  await expect(challenge).toContainText('Confirmation required')
+  expect(api.controlTransitions).toEqual([])
+
+  await challenge.locator('button', { hasText: 'Back' }).click()
+  await expect(challenge).toHaveCount(0)
+  expect(api.controlTransitions).toEqual(['withdraw'])
+  await page.locator('.am-controls-dismiss').click()
+
+  await cancel.click()
+  await expect(challenge).toBeVisible()
+  await challenge.locator('button.is-consequential').click()
+  await expect(challenge).toHaveCount(0)
+  await expect(page.locator('.am-controls-live')).toContainText('Accepted')
+  expect(api.controlTransitions).toEqual(['withdraw', 'confirm'])
+})
+
+test('PAI-811 voice uses the same exact two-utterance control boundary', async ({ page }) => {
+  await installStaticHost(page)
+  const api = await installApiFixtures(page)
+  await openReady(page, 1440, 1000)
+
+  const input = page.locator('#am-voice-command')
+  await input.fill('Cancel running run REL-820')
+  await input.press('Enter')
+  await expect(page.locator('.am-controls-challenge')).toBeVisible()
+  expect(api.controlTransitions).toEqual([])
+
+  await input.fill('Cancel running run REL-820')
+  await input.press('Enter')
+  await expect(page.locator('.am-controls-challenge')).toHaveCount(0)
+  await expect(page.locator('.am-controls-live')).toContainText('Accepted')
+  expect(api.controlTransitions).toEqual(['confirm'])
+})
+
+test('PAI-811 Detail 1 browser flow edits, uploads, and posts an internal note', async ({ page }) => {
+  await installStaticHost(page)
+  const api = await installApiFixtures(page)
+  await openReady(page, 1440, 1000, '&detail=1')
+  await page.getByRole('button', { name: 'Open ticket' }).click()
+  const panel = page.locator('.side-panel--embedded')
+  await expect(panel).toBeVisible()
+
+  await panel.locator('.comment-textarea').fill('PAI-811 browser acceptance note')
+  await panel.getByRole('button', { name: 'Post', exact: true }).click()
+  await expect(panel.locator('.comment-text')).toContainText('PAI-811 browser acceptance note')
+  expect(api.commentPosts).toBe(1)
+
+  await panel.getByTitle('Quick Edit').click()
+  const title = panel.locator('.sp-form input[type="text"]').first()
+  await title.fill('Release 5.11.0 live acceptance')
+  await panel.locator('.att-file-input').setInputFiles({
+    name: 'pai811-proof.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('browser proof file'),
+  })
+  await expect(panel.locator('.att-item--done')).toContainText('pai811-proof.txt')
+  await panel.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(panel).toContainText('Release 5.11.0 live acceptance')
+  expect(api.attachmentUploads).toBe(1)
+  expect(api.issueMutations).toBe(1)
 })
 
 test('PAI-806 Detail 1 ticket panel geometry at 390 / 736 / 1024', async ({ page }) => {

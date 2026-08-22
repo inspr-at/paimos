@@ -9,9 +9,10 @@
   global navigation: it never carries app chrome.
 
   `compact` (constrained widths, or when the ticket editor opens):
-  the column collapses into a small lower-left dock showing only the most
-  recent two or three lines plus listening/live state. The parent reserves a grid row for it,
-  so its rectangle never intersects the scrolling delivery canvas.
+  the column collapses into a reserved grid row showing recent narration plus
+  listening/live state. At phone widths only the latest line remains and the
+  app header owns live status. Its rectangle never intersects the scrolling
+  delivery canvas.
 -->
 <script setup lang="ts">
 import { computed } from 'vue'

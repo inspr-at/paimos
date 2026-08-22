@@ -30,8 +30,11 @@ PAI805_SELF_HOST_DIST=1 PAI805_SHOT_DIR=/tmp/pai811-mobile-shots \
   npx playwright test e2e/agent-mode-visual.spec.ts
 ```
 
-Latest candidate result: **4/4 passed**, including the 200%-effective-zoom
-boundary, with deterministic screenshots in `/tmp/pai811-mobile-shots`.
+Latest candidate result: **9/9 passed**, including the original visual,
+geometry, reduced-motion, and 200%-effective-zoom boundaries plus honest
+failure/retry, live ACL revocation, two-phase controls/voice, and embedded
+editor/upload/comment flows. Deterministic screenshots are in
+`/tmp/pai811-mobile-shots`.
 
 ## Scale and deterministic build
 
@@ -51,17 +54,17 @@ boundary, with deterministic screenshots in `/tmp/pai811-mobile-shots`.
 These rows must be refreshed against the protected-merge candidate rather than
 inferred from earlier ticket-specific runs.
 
-- [ ] Loading, empty, offline/retained, forbidden, not-found, malformed, and
+- [x] Loading, empty, offline/retained, forbidden, not-found, malformed, and
   retry states pass in unit and browser surfaces without fabricated truth.
 - [ ] SSE resume, oversized cursor refusal, disconnect/reconnect, permissions
   epoch change, and stale-event non-influence pass.
-- [ ] Full ACL revocation clears previously authorized identity and narration;
+- [x] Full ACL revocation clears previously authorized identity and narration;
   unauthorized requests cannot move selection, controls, stages, or ETA.
 - [ ] Runner/reporter restart, server restart, clock skew, concurrent control,
   cancellation, and stale-authority `412` cases pass without split brain.
-- [ ] Detail 1 editor, upload, comments, voice, two-phase controls,
-  deployed-unverified, fresh verification, and stale/unknown states pass in the
-  final browser matrix.
+- [ ] Detail 1 editor, upload, comments, voice, and click/voice two-phase
+  controls pass in the production-build browser matrix. Deployed-unverified,
+  fresh verification, and stale/unknown transition proof remains.
 - [ ] Full backend, focused race, gosec, schema/OpenAPI, release-hygiene, and
   generated-artifact gates pass on the final protected-merge candidate.
 
