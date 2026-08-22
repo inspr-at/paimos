@@ -491,6 +491,58 @@ func assertQueuedCancelRollback(t *testing.T, database *sql.DB, commandID string
 	}
 }
 
+// The protected race gate runs four phases that use this helper. A one-minute
+// bound per phase leaves at least four minutes for setup and the other tests
+// inside the workflow's eight-minute package timeout.
+const concurrentStorageRetryLimit = 60 * time.Second
+
+type concurrentMutationResult[T any] struct {
+	index      int
+	attempts   int
+	projection T
+	err        error
+}
+
+func retryConcurrentStorageUnavailable[T any](parent context.Context, index int,
+	operation func(context.Context) (T, error),
+) concurrentMutationResult[T] {
+	ctx, cancel := context.WithTimeout(parent, concurrentStorageRetryLimit)
+	defer cancel()
+
+	var lastStorageErr error
+	for attempt := 1; ; attempt++ {
+		projection, err := operation(ctx)
+		result := concurrentMutationResult[T]{index: index, attempts: attempt, projection: projection, err: err}
+		if !IsCode(err, CodeStorageUnavailable) {
+			if (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) && lastStorageErr != nil {
+				result.err = fmt.Errorf("storage retry deadline exceeded; final operation: %v: %w", err, lastStorageErr)
+			}
+			return result
+		}
+		lastStorageErr = err
+
+		shift := attempt - 1
+		if shift > 4 {
+			shift = 4
+		}
+		backoff := 20 * time.Millisecond * time.Duration(1<<shift)
+		jitter := time.Duration(((index+1)*53+attempt*97)%181) * time.Millisecond
+		timer := time.NewTimer(backoff + jitter)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			result.err = fmt.Errorf("storage retry deadline exceeded: %w", lastStorageErr)
+			return result
+		}
+	}
+}
+
 func TestThirtyTwoConcurrentCommandCreateAndConfirmConverge(t *testing.T) {
 	database := openSupervisionTestDB(t)
 	deliveryID, _, principal := seedGrantTarget(t, database)
@@ -505,30 +557,18 @@ func TestThirtyTwoConcurrentCommandCreateAndConfirmConverge(t *testing.T) {
 
 	const contenders = 32
 	start := make(chan struct{})
-	created := make(chan struct {
-		projection CommandProjection
-		err        error
-	}, contenders)
+	created := make(chan concurrentMutationResult[CommandProjection], contenders)
 	for index := 0; index < contenders; index++ {
 		go func(index int) {
 			<-start
 			key := sha256.Sum256([]byte("create-" + string(rune(index))))
-			var projection CommandProjection
-			var err error
-			for attempt := 0; attempt < 8; attempt++ {
-				projection, err = service.CreateCommand(context.Background(), principal, CommandCreateRequest{
-					GrantID: grant.GrantID, GrantRevision: grant.Revision, Action: "issue.priority.set",
-					Priority: "high", OperationKeyDigest: key,
+			created <- retryConcurrentStorageUnavailable(context.Background(), index,
+				func(ctx context.Context) (CommandProjection, error) {
+					return service.CreateCommand(ctx, principal, CommandCreateRequest{
+						GrantID: grant.GrantID, GrantRevision: grant.Revision, Action: "issue.priority.set",
+						Priority: "high", OperationKeyDigest: key,
+					})
 				})
-				if !IsCode(err, CodeStorageUnavailable) {
-					break
-				}
-				time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
-			}
-			created <- struct {
-				projection CommandProjection
-				err        error
-			}{projection, err}
 		}(index)
 	}
 	close(start)
@@ -536,7 +576,8 @@ func TestThirtyTwoConcurrentCommandCreateAndConfirmConverge(t *testing.T) {
 	for index := 0; index < contenders; index++ {
 		result := <-created
 		if result.err != nil {
-			t.Fatalf("create contender %d: %v (%s)", index, result.err, ErrorCode(result.err))
+			t.Fatalf("create contender %d after %d attempts: %v (%s)", result.index, result.attempts,
+				result.err, ErrorCode(result.err))
 		}
 		if commandID == "" {
 			commandID = result.projection.CommandID
@@ -546,36 +587,25 @@ func TestThirtyTwoConcurrentCommandCreateAndConfirmConverge(t *testing.T) {
 	}
 
 	start = make(chan struct{})
-	confirmed := make(chan struct {
-		projection CommandProjection
-		err        error
-	}, contenders)
+	confirmed := make(chan concurrentMutationResult[CommandProjection], contenders)
 	for index := 0; index < contenders; index++ {
 		go func(index int) {
 			<-start
 			key := sha256.Sum256([]byte("confirm-" + string(rune(index))))
-			var projection CommandProjection
-			var err error
-			for attempt := 0; attempt < 8; attempt++ {
-				projection, err = service.ConfirmCommand(context.Background(), principal, CommandConfirmRequest{
-					CommandID: commandID, StatusRevision: 1, OperationKeyDigest: key,
+			confirmed <- retryConcurrentStorageUnavailable(context.Background(), index,
+				func(ctx context.Context) (CommandProjection, error) {
+					return service.ConfirmCommand(ctx, principal, CommandConfirmRequest{
+						CommandID: commandID, StatusRevision: 1, OperationKeyDigest: key,
+					})
 				})
-				if !IsCode(err, CodeStorageUnavailable) {
-					break
-				}
-				time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
-			}
-			confirmed <- struct {
-				projection CommandProjection
-				err        error
-			}{projection, err}
 		}(index)
 	}
 	close(start)
 	for index := 0; index < contenders; index++ {
 		result := <-confirmed
 		if result.err != nil {
-			t.Fatalf("confirm contender %d: %v (%s)", index, result.err, ErrorCode(result.err))
+			t.Fatalf("confirm contender %d after %d attempts: %v (%s)", result.index, result.attempts,
+				result.err, ErrorCode(result.err))
 		}
 		if result.projection.CommandID != commandID || result.projection.Status != "applied" {
 			t.Fatalf("confirm diverged: %+v", result.projection)
@@ -1086,53 +1116,47 @@ func TestThirtyTwoConcurrentAcceptedEffectReservationAndClaimConverge(t *testing
 
 	const contenders = 32
 	start := make(chan struct{})
-	confirmResults := make(chan error, contenders)
+	confirmResults := make(chan concurrentMutationResult[CommandProjection], contenders)
 	for index := 0; index < contenders; index++ {
 		go func(index int) {
 			<-start
 			key := sha256.Sum256([]byte(fmt.Sprintf("async-confirm-%02d", index)))
-			var err error
-			for attempt := 0; attempt < 8; attempt++ {
-				_, err = service.ConfirmCommand(context.Background(), human, CommandConfirmRequest{CommandID: command.CommandID,
-					StatusRevision: 1, OperationKeyDigest: key})
-				if !IsCode(err, CodeStorageUnavailable) {
-					break
-				}
-				time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
-			}
-			confirmResults <- err
+			confirmResults <- retryConcurrentStorageUnavailable(context.Background(), index,
+				func(ctx context.Context) (CommandProjection, error) {
+					return service.ConfirmCommand(ctx, human, CommandConfirmRequest{CommandID: command.CommandID,
+						StatusRevision: 1, OperationKeyDigest: key})
+				})
 		}(index)
 	}
 	close(start)
 	for index := 0; index < contenders; index++ {
-		if err := <-confirmResults; err != nil {
-			t.Fatalf("confirm contender %d: %v (%s)", index, err, ErrorCode(err))
+		result := <-confirmResults
+		if result.err != nil {
+			t.Fatalf("confirm contender %d after %d attempts: %v (%s)", result.index, result.attempts,
+				result.err, ErrorCode(result.err))
 		}
 	}
 
 	start = make(chan struct{})
-	claimResults := make(chan error, contenders)
+	claimResults := make(chan concurrentMutationResult[EffectProjection], contenders)
 	for index := 0; index < contenders; index++ {
 		go func(index int) {
 			<-start
 			key := sha256.Sum256([]byte(fmt.Sprintf("async-claim-%02d", index)))
-			var err error
-			for attempt := 0; attempt < 8; attempt++ {
-				_, err = service.Claim(context.Background(), runner, ClaimRequest{CommandID: command.CommandID,
-					LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1,
-					DeviceID: "runner-01", OperationKeyDigest: key})
-				if !IsCode(err, CodeStorageUnavailable) {
-					break
-				}
-				time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
-			}
-			claimResults <- err
+			claimResults <- retryConcurrentStorageUnavailable(context.Background(), index,
+				func(ctx context.Context) (EffectProjection, error) {
+					return service.Claim(ctx, runner, ClaimRequest{CommandID: command.CommandID,
+						LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1,
+						DeviceID: "runner-01", OperationKeyDigest: key})
+				})
 		}(index)
 	}
 	close(start)
 	for index := 0; index < contenders; index++ {
-		if err := <-claimResults; err != nil {
-			t.Fatalf("claim contender %d: %v (%s)", index, err, ErrorCode(err))
+		result := <-claimResults
+		if result.err != nil {
+			t.Fatalf("claim contender %d after %d attempts: %v (%s)", result.index, result.attempts,
+				result.err, ErrorCode(result.err))
 		}
 	}
 
