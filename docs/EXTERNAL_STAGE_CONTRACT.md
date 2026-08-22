@@ -173,6 +173,14 @@ Canonical exact-byte fixtures live in
 - `manifest-v1.json` pins schema major, media type, exact lengths, per-file
   SHA-256 values, the certified contract commit, release tag, and fixture-set
   digest.
+- [`backend/contracts/external-stage-v1.schema.json`](../backend/contracts/external-stage-v1.schema.json)
+  is the standalone Draft 2020-12 catalogue for every v1 JSON route body. Its
+  complete 22-definition inventory is mechanically compared with the
+  `ExternalStage*` OpenAPI components, every reference must resolve locally,
+  and its exact UTF-8 bytes are pinned at
+  `sha256:c9de59698e68cb7c21dd84ff8d8a9a209eef1188a54bdca8f766613f540182ff`.
+  The raw mint/rotate secret uses a separate binary media type and is therefore
+  intentionally not a JSON-schema root.
 
 The v1 fixture-set digest is:
 
@@ -186,8 +194,10 @@ excluded so release metadata can be finalized without changing fixture
 identity. Fixture files are compact UTF-8 JSON with exactly one trailing LF.
 
 External-stage v1 is immutably pinned to Paimos commit
-`e5f4c86bc061775c853d5847e8fb8bb7e3a31c34` and its planned first release,
-`v5.11.0`. Pharos and Janus adapters must embed the complete tuple: schema
+`e5f4c86bc061775c853d5847e8fb8bb7e3a31c34` and its first release,
+`v5.11.0`. The standalone schema was published later without changing those
+already certified v1 semantics or fixture bytes. Pharos and Janus adapters
+must embed the complete tuple: schema
 major, fixture-set digest, certified Paimos contract commit, and immutable
 release tag. Release CI requires the pinned commit to be an ancestor of the
 release ref and compares both canonical fixture files plus
