@@ -5,6 +5,17 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.13.1] — 2026-08-22
+
+### Fixed — Final Agent Mode proof coverage
+
+- Added protected-CI execution of the unsupported-platform runner fallback,
+  proving unavailable process-group ownership fails closed without issuing a
+  cancel-control lease.
+- Added exact-build browser proof for the deployed-but-unverified to verified
+  transition while preserving one persistent selection and the accepted
+  Detail-10 Agent Mode design.
+
 ## [5.13.0] — 2026-08-22
 
 ### Added — Provider-neutral supervisory control and external-stage contracts
