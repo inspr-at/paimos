@@ -557,8 +557,8 @@ function onKeydown(event: KeyboardEvent) {
 
 /* At phone width the selected card is the authoritative delivery surface.
    Keep its title and current activity fully readable instead of applying the
-   overview-card ellipsis. Tighten only vertical chrome so the expanded text
-   still fits in the initial canvas with the in-flow narration and controls. */
+   overview-card ellipsis. Tighten only vertical chrome so Detail 10 still
+   fits in the initial canvas; Detail 1/100 remain safely scrollable. */
 @media (max-width: 640px) {
   .am-card.is-selected .am-card-hit { padding: 13px 12px 8px; }
   .am-card.is-selected .am-card-title,
@@ -573,7 +573,13 @@ function onKeydown(event: KeyboardEvent) {
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr) minmax(0, 0.85fr);
     margin-top: 6px;
   }
-  .am-card.is-selected .am-card-facts dd { font-size: 11px; }
+  .am-card.is-selected .am-card-facts dd {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 11px;
+  }
   .am-card.is-selected .am-card-tags { margin-top: 4px; }
   .am-card.is-selected .am-card-blocker,
   .am-card.is-selected .am-card-reason,

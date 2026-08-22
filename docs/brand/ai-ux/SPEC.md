@@ -77,29 +77,31 @@ idle
 
 ## PAI-811 Agent Mode taste-review inputs
 
-The final ImageGen pass was grounded in the certified real-browser Detail
-1/10/100 and 390 px captures. These images are taste references, not product
-screenshots or implementation authority:
+PAI-811 owns four ImageGen taste inputs as governed PPM attachments rather
+than generated files in this repository:
 
-- [Detail 1 focused delivery](pai811-agent-mode-detail-1.png)
-- [Detail 10 operational overview](pai811-agent-mode-detail-10.png)
-- [Detail 100 aggregate truth](pai811-agent-mode-detail-100.png)
-- [Detail 10 mobile density](pai811-agent-mode-detail-10-mobile.png)
+- attachment `#231`: Detail 1 focused delivery
+- attachment `#230`: Detail 10 operational overview
+- attachment `#228`: Detail 100 aggregate truth
+- attachment `#229`: 390 px Detail 10 mobile direction
 
-Controller parity and correctness review: **passed, with no redesign**. The
-desktop references preserve the existing shell, typography, color,
-selected-card hierarchy, stage truth, and attention queue; implementation
-changes are limited to spacing and alignment required by measured browser
-geometry. The mobile reference preserves the same semantics in a
-non-occluding flow: narration collapses in place, controls follow the selected
-delivery, and the selected card plus needs-input queue remain readable without
-overlap or horizontal scrolling.
+The three desktop inputs preserve the established shell, typography, color,
+selected-card hierarchy, stage truth, and attention queue. They are direction
+for human taste review, not implementation authority or evidence that a
+candidate matches exact pixel geometry.
 
-Human taste decision: **pending**. These four references are review inputs;
-controller parity/correctness checks do not accept visual taste on the human's
-behalf.
+The mobile input is deliberately looser: it expresses density, hierarchy, and
+readability direction, while the real responsive composition keeps the
+existing Detail-10 information architecture. At phone width the app header
+retains feed authority, narration and controls reflow in document order, the
+redundant feed dock is hidden, and the selected delivery remains the primary
+surface. That is not the same layout as attachment `#229`, and no parity,
+correctness, or automated browser result should be described as a human taste
+acceptance.
 
-Generated text and pixel geometry are never acceptance evidence. The shipped
-Vue DOM, 390/736/1024/wide and 200% browser measurements, reduced-motion tests,
-accessibility assertions, and inspected deterministic screenshots remain the
-authoritative proof.
+Candidate acceptance state, review decisions, and screenshots belong to the
+PAI-811 PPM comments and attachments. Generated text and pixels are never
+acceptance evidence. The shipped Vue DOM, exact browser geometry,
+reduced-motion checks, accessibility assertions, and deterministic screenshots
+provide candidate correctness evidence only; the reusable procedure and claim
+boundaries live in [`../../VISUAL_VERIFY.md`](../../VISUAL_VERIFY.md).

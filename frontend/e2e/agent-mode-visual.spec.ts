@@ -341,7 +341,7 @@ async function expectDockClear(page: Page) {
   const result = await page.evaluate(() => {
     const intersects = (a: DOMRect, b: DOMRect) =>
       a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
-    const dock = document.querySelector<HTMLElement>('.am-conv--compact')!.getBoundingClientRect()
+    const dock = document.querySelector<HTMLElement>('.am-conv')!.getBoundingClientRect()
     const canvas = document.querySelector<HTMLElement>('.am-canvas')!.getBoundingClientRect()
     const cards = [...document.querySelectorAll<HTMLElement>('.am-card, .am-selection-anchor')]
     const visibleCardRect = (card: HTMLElement): DOMRect => {
@@ -395,7 +395,27 @@ async function expectControlVoiceGeometry(page: Page) {
   })
 }
 
-async function expectMobileCompactFlow(page: Page) {
+async function expectCompactFeedAuthority(page: Page, expected: RegExp) {
+  const result = await page.evaluate(() => {
+    const dock = document.querySelector<HTMLElement>('.am-conv-dock')!
+    const chip = document.querySelector<HTMLElement>('.am-live-chip')!
+    const rect = chip.getBoundingClientRect()
+    return {
+      dockDisplay: getComputedStyle(dock).display,
+      chipDisplay: getComputedStyle(chip).display,
+      chipText: chip.textContent?.trim() ?? '',
+      chipWidth: rect.width,
+      chipHeight: rect.height,
+    }
+  })
+  expect(result.dockDisplay).toBe('none')
+  expect(result.chipDisplay).not.toBe('none')
+  expect(result.chipText).toMatch(expected)
+  expect(result.chipWidth).toBeGreaterThan(0)
+  expect(result.chipHeight).toBeGreaterThan(0)
+}
+
+async function expectMobileCompactFlow(page: Page, requireInitialCanvas = true) {
   const result = await page.evaluate(() => {
     const canvas = document.querySelector<HTMLElement>('.am-canvas')!.getBoundingClientRect()
     const conversation = document.querySelector<HTMLElement>('.am-conv--compact')!.getBoundingClientRect()
@@ -418,10 +438,17 @@ async function expectMobileCompactFlow(page: Page) {
       }
     })
     const essentialFacts = [...document.querySelectorAll<HTMLElement>('[data-selected="true"] .am-card-facts dd')]
-      .map((element) => ({
-        text: element.textContent?.trim(),
-        clipped: element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight,
-      }))
+      .map((element) => {
+        const style = getComputedStyle(element)
+        return {
+          text: element.textContent?.trim(),
+          whiteSpace: style.whiteSpace,
+          textOverflow: style.textOverflow,
+          overflowX: style.overflowX,
+          overflowWrap: style.overflowWrap,
+          clipped: element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight,
+        }
+      })
     return {
       renderedLines: renderedLines.length,
       feedDockDisplay: getComputedStyle(feedDock).display,
@@ -436,9 +463,10 @@ async function expectMobileCompactFlow(page: Page) {
   })
   expect(result.renderedLines).toBe(1)
   expect(result.feedDockDisplay).toBe('none')
+  await expectCompactFeedAuthority(page, /^Live(?:\s|$)/)
   expect(result.conversationWidth).toBeGreaterThanOrEqual(result.rootWidth - 29)
   expect(result.canvasHeight).toBeGreaterThanOrEqual(420)
-  expect(result.selectedWithinCanvas).toBe(true)
+  if (requireInitialCanvas) expect(result.selectedWithinCanvas).toBe(true)
   expect(result.horizontalOverflow).toBe(false)
   expect(result.essentialText).toEqual([
     {
@@ -457,10 +485,71 @@ async function expectMobileCompactFlow(page: Page) {
     },
   ])
   expect(result.essentialFacts).toEqual([
-    { text: 'Codex · agent', clipped: false },
-    { text: 'Deployment · 4/5', clipped: false },
-    { text: '1 minute ago', clipped: false },
+    {
+      text: 'Codex · agent', whiteSpace: 'normal', textOverflow: 'clip', overflowX: 'visible',
+      overflowWrap: 'anywhere', clipped: false,
+    },
+    {
+      text: 'Deployment · 4/5', whiteSpace: 'normal', textOverflow: 'clip', overflowX: 'visible',
+      overflowWrap: 'anywhere', clipped: false,
+    },
+    {
+      text: '1 minute ago', whiteSpace: 'normal', textOverflow: 'clip', overflowX: 'visible',
+      overflowWrap: 'anywhere', clipped: false,
+    },
   ])
+}
+
+async function expectReducedMotionStatic(page: Page, state: string) {
+  const moving = await page.locator('.aml-shell').evaluate((shell) => {
+    const seconds = (value: string): number => {
+      const trimmed = value.trim().toLowerCase()
+      const parsed = Number.parseFloat(trimmed)
+      if (!Number.isFinite(parsed)) return 0
+      return trimmed.endsWith('ms') ? parsed / 1000 : parsed
+    }
+    const values = (value: string): string[] => value.split(',').map((part) => part.trim())
+    // Color-only transitions do not move, resize, fade, or occlude content.
+    // Everything else, including `all`, opacity, shadow, and transform, is a
+    // reduced-motion violation.
+    const chromaticOnly = new Set([
+      'color', 'background-color', 'border-color', 'border-top-color', 'border-right-color',
+      'border-bottom-color', 'border-left-color', 'outline-color', 'text-decoration-color', 'fill', 'stroke',
+    ])
+    const findings: Array<Record<string, string>> = []
+    const elements = [shell as HTMLElement, ...shell.querySelectorAll<HTMLElement>('*')]
+    for (const element of elements) {
+      const rect = element.getBoundingClientRect()
+      const base = getComputedStyle(element)
+      if (rect.width <= 0 || rect.height <= 0 || base.display === 'none' || base.visibility === 'hidden') continue
+      for (const pseudo of ['', '::before', '::after'] as const) {
+        const style = getComputedStyle(element, pseudo || null)
+        if (pseudo && (style.content === 'none' || style.content === 'normal')
+          && style.backgroundImage === 'none' && style.boxShadow === 'none') continue
+        const animationNames = values(style.animationName)
+        const animationDurations = values(style.animationDuration).map(seconds)
+        const animated = animationNames.some((name, index) =>
+          name !== 'none' && (animationDurations[index % animationDurations.length] ?? 0) > 0)
+        const properties = values(style.transitionProperty)
+        const durations = values(style.transitionDuration).map(seconds)
+        const transitioned = properties.some((property, index) =>
+          property !== 'none' && !chromaticOnly.has(property)
+          && (durations[index % durations.length] ?? 0) > 0)
+        if (animated || transitioned) {
+          findings.push({
+            tag: element.tagName,
+            id: element.id,
+            className: String(element.className),
+            pseudo,
+            animation: `${style.animationName} ${style.animationDuration}`,
+            transition: `${style.transitionProperty} ${style.transitionDuration}`,
+          })
+        }
+      }
+    }
+    return findings
+  })
+  expect(moving, `nonzero reduced-motion animation/transition in ${state}`).toEqual([])
 }
 
 async function openReady(page: Page, width: number, height: number, extra = '') {
@@ -491,10 +580,11 @@ test('PAI-805 final visual and geometry gate', async ({ page }) => {
   expect(await logo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
   await page.screenshot({ path: `${SHOT_DIR}/desktop-10.png` })
 
-  for (const [width, height] of [[900, 800], [736, 900], [520, 900], [390, 844]] as const) {
+  for (const [width, height] of [[1024, 900], [900, 800], [736, 900], [640, 900], [520, 900], [390, 844]] as const) {
     await openReady(page, width, height)
     await expectControlVoiceGeometry(page)
     await expectDockClear(page)
+    if (width <= 640) await expectCompactFeedAuthority(page, /^Live(?:\s|$)/)
     if (width === 390) await expectMobileCompactFlow(page)
     await page.locator('.am-canvas').evaluate((canvas) => { canvas.scrollTop = canvas.scrollHeight })
     await expectDockClear(page)
@@ -510,7 +600,7 @@ test('PAI-805 final visual and geometry gate', async ({ page }) => {
       expect(widths.canvasWidth).toBeLessThanOrEqual(widths.clientWidth - 52)
       expect(widths.widest).toBeLessThanOrEqual(widths.canvasWidth)
       await page.locator('.am-canvas').evaluate((canvas) => { canvas.scrollTop = 0 })
-      await page.screenshot({ path: `${SHOT_DIR}/phone-10-fixed.png` })
+      await page.screenshot({ path: `${SHOT_DIR}/phone-390.png` })
     }
   }
 
@@ -518,6 +608,13 @@ test('PAI-805 final visual and geometry gate', async ({ page }) => {
   await page.screenshot({ path: `${SHOT_DIR}/desktop-1.png` })
   await openReady(page, 1440, 1000, '&detail=100')
   await page.screenshot({ path: `${SHOT_DIR}/desktop-100.png` })
+  for (const [detail, filename] of [['1', 'phone-1.png'], ['100', 'phone-100.png']] as const) {
+    await openReady(page, 390, 844, `&detail=${detail}`)
+    await expectControlVoiceGeometry(page)
+    await expectDockClear(page)
+    await expectMobileCompactFlow(page, false)
+    await page.screenshot({ path: `${SHOT_DIR}/${filename}` })
+  }
   const errorsBeforeForbidden = consoleErrors.length
   await page.goto(`${APP_ORIGIN}/agent-mode?q=visual-forbidden`, { waitUntil: 'networkidle' })
   await expect(page.locator('.am-state--forbidden')).toBeVisible()
@@ -539,45 +636,31 @@ test('Agent Mode keeps the light app palette under dark OS and reduced motion', 
   await installStaticHost(page)
   await installApiFixtures(page)
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
-  await openReady(page, 1440, 1000)
-  await expectSelectedAnchorInInitialCanvas(page)
-  const colors = await page.locator('.am-root').evaluate((el) => {
-    const style = getComputedStyle(el)
-    return { background: style.backgroundColor, ink: style.color }
-  })
-  expect(colors.background).toBe('rgb(242, 245, 248)')
-  expect(colors.ink).toBe('rgb(26, 38, 54)')
-  const moving = await page.locator('.aml-shell').evaluate((shell) =>
-    [...shell.querySelectorAll<HTMLElement>('*')]
-      .filter((element) => {
-        const rect = element.getBoundingClientRect()
-        if (rect.width === 0 || rect.height === 0) return false
-        const style = getComputedStyle(element)
-        const nonZero = (value: string) => value.split(',').some((part) => Number.parseFloat(part) > 0)
-        const spatial = new Set([
-          'all', 'transform', 'translate', 'scale', 'rotate', 'width', 'height', 'max-width', 'max-height',
-          'min-width', 'min-height', 'top', 'right', 'bottom', 'left', 'margin', 'padding', 'inset',
-        ])
-        const properties = style.transitionProperty.split(',').map((property) => property.trim())
-        const durations = style.transitionDuration.split(',').map((duration) => Number.parseFloat(duration))
-        const hasSpatialTransition = properties.some((property, index) =>
-          spatial.has(property) && (durations[index % durations.length] ?? 0) > 0)
-        return (style.animationName !== 'none' && nonZero(style.animationDuration))
-          || hasSpatialTransition
-      })
-      .map((element) => {
-        const style = getComputedStyle(element)
-        return {
-          tag: element.tagName,
-          id: element.id,
-          className: element.className,
-          animation: `${style.animationName} ${style.animationDuration}`,
-          transition: `${style.transitionProperty} ${style.transitionDuration}`,
-        }
-      })
-  )
-  expect(moving).toEqual([])
-  await page.screenshot({ path: `${SHOT_DIR}/desktop-10-reduced-dark-os.png` })
+  for (const [detail, label] of [['1', 'desktop Detail 1'], ['', 'desktop Detail 10'], ['100', 'desktop Detail 100']] as const) {
+    await openReady(page, 1440, 1000, detail ? `&detail=${detail}` : '')
+    await expectSelectedAnchorInInitialCanvas(page)
+    const colors = await page.locator('.am-root').evaluate((el) => {
+      const style = getComputedStyle(el)
+      return { background: style.backgroundColor, ink: style.color }
+    })
+    expect(colors.background).toBe('rgb(242, 245, 248)')
+    expect(colors.ink).toBe('rgb(26, 38, 54)')
+    await expectReducedMotionStatic(page, label)
+    if (!detail) await page.screenshot({ path: `${SHOT_DIR}/desktop-10-reduced-dark-os.png` })
+  }
+
+  await openReady(page, 390, 844, '&detail=1')
+  await page.getByRole('button', { name: 'Open ticket' }).click()
+  await expect(page.locator('.side-panel--embedded')).toBeVisible()
+  await expectReducedMotionStatic(page, 'phone Detail 1 with embedded ticket')
+
+  await openReady(page, 390, 844)
+  await page.locator('.am-controls-target > button', { hasText: 'Cancel running run' }).click()
+  await expect(page.locator('.am-controls-challenge')).toBeVisible()
+  await expectReducedMotionStatic(page, 'phone Detail 10 control challenge')
+
+  await openReady(page, 390, 844, '&detail=100')
+  await expectReducedMotionStatic(page, 'phone Detail 100')
 })
 
 test('PAI-811 200% effective zoom keeps mobile flow reachable and non-occluding', async ({ page }) => {
@@ -613,6 +696,8 @@ test('PAI-811 browser states stay honest and retry without retaining unauthorize
   await installStaticHost(page)
   const api = await installApiFixtures(page)
 
+  await page.setViewportSize({ width: 390, height: 844 })
+
   api.setDeliveryMode('loading')
   await page.goto(`${APP_ORIGIN}/agent-mode?delivery=dlv-820`, { waitUntil: 'domcontentloaded' })
   await expect(page.locator('.am-state--loading')).toBeVisible()
@@ -642,6 +727,7 @@ test('PAI-811 browser states stay honest and retry without retaining unauthorize
   await expect(page.locator('.am-banner')).toContainText('Last known state')
   await expect(page.locator('[data-selected="true"]')).toBeVisible()
   await expect(page.locator('.am-card-eta--withheld').first()).toBeVisible()
+  await expectCompactFeedAuthority(page, /^Offline(?:\s|$)/)
 })
 
 test('PAI-811 live ACL revocation clears every authoritative delivery surface', async ({ page }) => {
