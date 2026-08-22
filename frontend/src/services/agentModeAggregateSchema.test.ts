@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { Delivery } from './agentMode'
 import { compareIsoInstants, parseAgentModeAggregates, parseIsoInstant } from './agentModeAggregateSchema'
+import { makeFixtureSnapshot } from './agentModeFixtures'
 import { normalizeWireSnapshot } from './agentModeTransport'
 
 interface MutableCountSet {
@@ -104,6 +105,11 @@ describe('PAI-804 aggregate schema-v1 golden contract (PAI-807)', () => {
       expect(normalized.aggregates!.attention.items.length).toBeLessThanOrEqual(12)
       expect(normalized.aggregates!.attention.total).toBe(normalized.aggregates!.root.flags.attention)
     }
+  })
+
+  it('accepts the 1000-row API budget and rejects the first oversized snapshot', () => {
+    expect(() => normalizeWireSnapshot(makeFixtureSnapshot(1000), 123)).not.toThrow()
+    expect(() => normalizeWireSnapshot(makeFixtureSnapshot(1001), 123)).toThrow()
   })
 
   it('classifies missing and unsupported aggregates without fabricating zero', () => {

@@ -1511,6 +1511,24 @@ const selectedPosition = computed(() => {
   .am-root--ticket.am-root--compact :deep(.am-conv) { grid-column: 1; grid-row: 3; }
 }
 
+@media (max-width: 640px) {
+  .am-root--compact :deep(.am-conv-controls) {
+    grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.4fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Detail 1 embeds the existing issue editor inside Agent Mode. Its generic
+     hover/fade transitions must obey the shell's reduced-motion contract too. */
+  .am-root :deep(.side-panel--embedded *),
+  .am-root :deep(.side-panel--embedded *::before),
+  .am-root :deep(.side-panel--embedded *::after) {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 .am-header-tools { display: inline-flex; align-items: center; gap: 12px; }
 .am-live-chip {
   display: inline-flex;

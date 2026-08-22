@@ -74,3 +74,34 @@ idle
         -> applied
         -> dismissed
 ```
+
+## PAI-811 Agent Mode taste-review inputs
+
+PAI-811 owns four ImageGen taste inputs as governed PPM attachments rather
+than generated files in this repository:
+
+- attachment `#231`: Detail 1 focused delivery
+- attachment `#230`: Detail 10 operational overview
+- attachment `#228`: Detail 100 aggregate truth
+- attachment `#229`: 390 px Detail 10 mobile direction
+
+The three desktop inputs preserve the established shell, typography, color,
+selected-card hierarchy, stage truth, and attention queue. They are direction
+for human taste review, not implementation authority or evidence that a
+candidate matches exact pixel geometry.
+
+The mobile input is deliberately looser: it expresses density, hierarchy, and
+readability direction, while the real responsive composition keeps the
+existing Detail-10 information architecture. At phone width the app header
+retains feed authority, narration and controls reflow in document order, the
+redundant feed dock is hidden, and the selected delivery remains the primary
+surface. That is not the same layout as attachment `#229`, and no parity,
+correctness, or automated browser result should be described as a human taste
+acceptance.
+
+Candidate acceptance state, review decisions, and screenshots belong to the
+PAI-811 PPM comments and attachments. Generated text and pixels are never
+acceptance evidence. The shipped Vue DOM, exact browser geometry,
+reduced-motion checks, accessibility assertions, and deterministic screenshots
+provide candidate correctness evidence only; the reusable procedure and claim
+boundaries live in [`../../VISUAL_VERIFY.md`](../../VISUAL_VERIFY.md).
