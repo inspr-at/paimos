@@ -491,9 +491,8 @@ func assertQueuedCancelRollback(t *testing.T, database *sql.DB, commandID string
 	}
 }
 
-func TestThirtyTwoConnectionCommandCreateAndConfirmConverge(t *testing.T) {
+func TestThirtyTwoConcurrentCommandCreateAndConfirmConverge(t *testing.T) {
 	database := openSupervisionTestDB(t)
-	database.SetMaxOpenConns(32)
 	deliveryID, _, principal := seedGrantTarget(t, database)
 	service := NewService(database, Options{Mutator: priorityMutator{}, Changes: testChanges{}})
 	grantKey := sha256.Sum256([]byte("concurrent-grant"))
@@ -1059,9 +1058,8 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 	}
 }
 
-func TestThirtyTwoConnectionAcceptedEffectReservationAndClaimConverge(t *testing.T) {
+func TestThirtyTwoConcurrentAcceptedEffectReservationAndClaimConverge(t *testing.T) {
 	database := openSupervisionTestDB(t)
-	database.SetMaxOpenConns(32)
 	deliveryID, humanID, human := seedGrantTarget(t, database)
 	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
 	service := NewService(database, Options{})
