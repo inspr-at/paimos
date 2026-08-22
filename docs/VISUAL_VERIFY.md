@@ -61,6 +61,52 @@ clock so relative timestamps do not churn the PNGs. Baselines live in
 `frontend/e2e/__screenshots__/`; review changed images in git before committing
 an update.
 
+## Agent Mode candidate verification
+
+Agent Mode's deterministic Playwright gate runs against the exact production
+bundle rather than the Vite development server:
+
+```sh
+cd frontend
+npm run build
+PAI805_SELF_HOST_DIST=1 \
+PAI805_SHOT_DIR=/tmp/pai811-shots \
+  npx playwright test e2e/agent-mode-visual.spec.ts --project=chromium
+```
+
+Use stable, viewport-oriented filenames such as `desktop-1.png`,
+`desktop-10.png`, `desktop-100.png`, and `phone-390.png`; do not encode review
+sequence (`fixed`, `final`, and similar) in evidence names. Generated taste
+references and candidate screenshots belong in the governing PPM issue's
+attachments, not in the repository.
+
+For responsive claims, measure the exact widths named in the claim. The
+PAI-811 matrix is 390, 520, 640, 736, 900, 1024, and 1440 CSS pixels, plus a
+512×450 viewport at device scale 2 for the 200%-effective-zoom boundary. At
+every applicable width, prove no horizontal document overflow and no painted
+intersection among the canvas, cards, narration/control surface, and embedded
+ticket panel. At 640 px and below, where the compact feed dock is hidden, also
+prove the app-header live chip has a nonzero rectangle and nonempty Live or
+Offline status text.
+
+Do not use fixture text alone as evidence that essential selected-delivery
+facts are readable. The responsive CSS must structurally disable ellipsis and
+allow safe wrapping for the selected title, activity, actor, stage position,
+and reported time. Browser assertions should additionally inspect computed
+`white-space`, `overflow`, and `text-overflow`, then compare both horizontal
+and vertical scroll/client geometry.
+
+Reduced-motion verification must inspect every visible element and pseudo
+element in the Agent Mode shell. Flag any nonzero animation and any nonzero
+transition; an explicit exemption may cover only chromatic properties such as
+`color`, `background-color`, and border colors. Exercise Detail 1, 10, and 100,
+including representative phone, control-challenge, and embedded-ticket states.
+
+These gates prove only the named local candidate and viewport/state matrix.
+They do not prove human taste acceptance, protected CI, merge inclusion,
+release artifacts, deployment, or live behavior. Record those distinct states
+only in the governing PPM acceptance trail.
+
 ## Notes
 
 - Functional/layout breakage and obvious visual bugs are catchable here;
