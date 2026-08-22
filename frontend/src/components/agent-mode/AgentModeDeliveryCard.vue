@@ -555,6 +555,32 @@ function onKeydown(event: KeyboardEvent) {
 }
 .am-card-drill:focus-visible { outline: 2px solid var(--am-focus); outline-offset: 2px; }
 
+/* At phone width the selected card is the authoritative delivery surface.
+   Keep its title and current activity fully readable instead of applying the
+   overview-card ellipsis. Tighten only vertical chrome so the expanded text
+   still fits in the initial canvas with the in-flow narration and controls. */
+@media (max-width: 640px) {
+  .am-card.is-selected .am-card-hit { padding: 13px 12px 8px; }
+  .am-card.is-selected .am-card-title,
+  .am-card.is-selected .am-card-now-text {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .am-card.is-selected .am-card-now { margin-top: 8px; padding-top: 7px; align-items: flex-start; }
+  .am-card.is-selected .am-card-facts {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr) minmax(0, 0.85fr);
+    margin-top: 6px;
+  }
+  .am-card.is-selected .am-card-facts dd { font-size: 11px; }
+  .am-card.is-selected .am-card-tags { margin-top: 4px; }
+  .am-card.is-selected .am-card-blocker,
+  .am-card.is-selected .am-card-reason,
+  .am-card.is-selected .am-card-status { margin-top: 5px; }
+  .am-card.is-selected .am-card-estimate { margin-top: 7px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .am-card { transition: none; }
 }

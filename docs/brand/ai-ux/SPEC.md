@@ -75,7 +75,7 @@ idle
         -> dismissed
 ```
 
-## PAI-811 Agent Mode taste acceptance
+## PAI-811 Agent Mode taste-review inputs
 
 The final ImageGen pass was grounded in the certified real-browser Detail
 1/10/100 and 390 px captures. These images are taste references, not product
@@ -86,14 +86,18 @@ screenshots or implementation authority:
 - [Detail 100 aggregate truth](pai811-agent-mode-detail-100.png)
 - [Detail 10 mobile density](pai811-agent-mode-detail-10-mobile.png)
 
-Controller taste decision: **accepted as direction, with no redesign**. The
-desktop references affirm the existing shell, typography, color, selected-card
-hierarchy, stage truth, and attention queue; implementation should change only
-spacing and alignment where measured browser geometry requires it. The mobile
-reference is accepted specifically for its non-occluding flow: narration
-collapses in place, controls follow the selected delivery, and the selected
-card plus needs-input queue remain readable without overlap or horizontal
-scrolling.
+Controller parity and correctness review: **passed, with no redesign**. The
+desktop references preserve the existing shell, typography, color,
+selected-card hierarchy, stage truth, and attention queue; implementation
+changes are limited to spacing and alignment required by measured browser
+geometry. The mobile reference preserves the same semantics in a
+non-occluding flow: narration collapses in place, controls follow the selected
+delivery, and the selected card plus needs-input queue remain readable without
+overlap or horizontal scrolling.
+
+Human taste decision: **pending**. These four references are review inputs;
+controller parity/correctness checks do not accept visual taste on the human's
+behalf.
 
 Generated text and pixel geometry are never acceptance evidence. The shipped
 Vue DOM, 390/736/1024/wide and 200% browser measurements, reduced-motion tests,

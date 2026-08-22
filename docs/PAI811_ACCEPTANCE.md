@@ -8,12 +8,16 @@ published, deployed, and observed in the target environment.
 ## Visual authority and accessibility
 
 - [x] Preserve the approved Detail-10 desktop shell; no redesign.
-- [x] Document final ImageGen taste references for Detail 1, Detail 10,
+- [x] Record the four ImageGen taste-review inputs for Detail 1, Detail 10,
   Detail 100, and 390 px Detail 10 in
-  [`brand/ai-ux/SPEC.md`](brand/ai-ux/SPEC.md).
+  [`brand/ai-ux/SPEC.md`](brand/ai-ux/SPEC.md), without treating controller
+  parity/correctness review as human taste acceptance.
+- [ ] Human reviewer records the final taste decision for those four inputs.
 - [x] Reflow 390 px compact narration and operator controls in normal document
   flow: one latest narration line, no redundant feed dock, no horizontal
   overflow, and the complete selected delivery remains in the initial canvas.
+  Its title, activity, actor, stage position, and reported time render without
+  ellipsis; the browser gate compares computed overflow and scroll geometry.
 - [x] Measure non-occlusion at 390, 520, 736, 900, 1024, and 1440 CSS pixels.
 - [x] Measure a 512×450 CSS-pixel viewport at device scale 2 as the 200%
   effective-zoom boundary; the canvas remains reachable and scrollable, with
@@ -56,17 +60,24 @@ inferred from earlier ticket-specific runs.
 
 - [x] Loading, empty, offline/retained, forbidden, not-found, malformed, and
   retry states pass in unit and browser surfaces without fabricated truth.
-- [ ] SSE resume, oversized cursor refusal, disconnect/reconnect, permissions
-  epoch change, and stale-event non-influence pass.
+- [x] SSE resume, oversized cursor refusal, disconnect/reconnect, permissions
+  epoch change, and stale-event non-influence pass in the full rebased-candidate
+  backend and frontend suites.
 - [x] Full ACL revocation clears previously authorized identity and narration;
   unauthorized requests cannot move selection, controls, stages, or ETA.
-- [ ] Runner/reporter restart, server restart, clock skew, concurrent control,
-  cancellation, and stale-authority `412` cases pass without split brain.
-- [ ] Detail 1 editor, upload, comments, voice, and click/voice two-phase
-  controls pass in the production-build browser matrix. Deployed-unverified,
-  fresh verification, and stale/unknown transition proof remains.
-- [ ] Full backend, focused race, gosec, schema/OpenAPI, release-hygiene, and
-  generated-artifact gates pass on the final protected-merge candidate.
+- [x] Runner/child silence and death, reporter and server restart, clock skew,
+  concurrent control, cancellation, stale heartbeat, reporter outage, and
+  stale-authority `412` cases pass without split brain in the full suites.
+- [x] Detail 1 editor, upload, internal comments, typed voice, and click/voice
+  two-phase controls pass in the production-build browser matrix.
+- [ ] Deployed-unverified, fresh exact verification, and stale/unknown browser
+  transition proof remains for the pinned live releases.
+- [x] Full backend, focused Agent Mode/delivery/supervision race, `go vet`,
+  security invariants, gosec, schema/OpenAPI generation, frontend lint,
+  typecheck/build, release hygiene, and `git diff --check` pass on the current
+  rebased candidate.
+- [ ] Protected CI's complete E2E/visual-baseline and release-generated-artifact
+  gates pass on the final protected-merge candidate.
 
 ## Release and live proof
 

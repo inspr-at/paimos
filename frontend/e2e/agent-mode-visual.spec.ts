@@ -404,6 +404,24 @@ async function expectMobileCompactFlow(page: Page) {
     const renderedLines = [...document.querySelectorAll<HTMLElement>('.am-conv-line')]
       .filter((line) => getComputedStyle(line).display !== 'none')
     const feedDock = document.querySelector<HTMLElement>('.am-conv-dock')!
+    const essentialText = [
+      document.querySelector<HTMLElement>('[data-selected="true"] .am-card-title')!,
+      document.querySelector<HTMLElement>('[data-selected="true"] .am-card-now-text')!,
+    ].map((element) => {
+      const style = getComputedStyle(element)
+      return {
+        text: element.textContent?.trim(),
+        whiteSpace: style.whiteSpace,
+        textOverflow: style.textOverflow,
+        overflowX: style.overflowX,
+        clipped: element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight,
+      }
+    })
+    const essentialFacts = [...document.querySelectorAll<HTMLElement>('[data-selected="true"] .am-card-facts dd')]
+      .map((element) => ({
+        text: element.textContent?.trim(),
+        clipped: element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight,
+      }))
     return {
       renderedLines: renderedLines.length,
       feedDockDisplay: getComputedStyle(feedDock).display,
@@ -412,6 +430,8 @@ async function expectMobileCompactFlow(page: Page) {
       canvasHeight: canvas.height,
       selectedWithinCanvas: selected.top >= canvas.top && selected.bottom <= canvas.bottom,
       horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      essentialText,
+      essentialFacts,
     }
   })
   expect(result.renderedLines).toBe(1)
@@ -420,6 +440,27 @@ async function expectMobileCompactFlow(page: Page) {
   expect(result.canvasHeight).toBeGreaterThanOrEqual(420)
   expect(result.selectedWithinCanvas).toBe(true)
   expect(result.horizontalOverflow).toBe(false)
+  expect(result.essentialText).toEqual([
+    {
+      text: 'Release 5.11.0 smoke suite',
+      whiteSpace: 'normal',
+      textOverflow: 'clip',
+      overflowX: 'visible',
+      clipped: false,
+    },
+    {
+      text: 'Smoke-testing the production release',
+      whiteSpace: 'normal',
+      textOverflow: 'clip',
+      overflowX: 'visible',
+      clipped: false,
+    },
+  ])
+  expect(result.essentialFacts).toEqual([
+    { text: 'Codex · agent', clipped: false },
+    { text: 'Deployment · 4/5', clipped: false },
+    { text: '1 minute ago', clipped: false },
+  ])
 }
 
 async function openReady(page: Page, width: number, height: number, extra = '') {
@@ -469,7 +510,7 @@ test('PAI-805 final visual and geometry gate', async ({ page }) => {
       expect(widths.canvasWidth).toBeLessThanOrEqual(widths.clientWidth - 52)
       expect(widths.widest).toBeLessThanOrEqual(widths.canvasWidth)
       await page.locator('.am-canvas').evaluate((canvas) => { canvas.scrollTop = 0 })
-      await page.screenshot({ path: `${SHOT_DIR}/phone-10.png` })
+      await page.screenshot({ path: `${SHOT_DIR}/phone-10-fixed.png` })
     }
   }
 
