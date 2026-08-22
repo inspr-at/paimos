@@ -79,8 +79,12 @@ func (clock *mutableClock) Set(now time.Time) {
 }
 
 func waitForSQLiteTime(t *testing.T, database *sql.DB, boundary time.Time) {
+	waitForSQLiteTimeWithin(t, database, boundary, 2*time.Second)
+}
+
+func waitForSQLiteTimeWithin(t *testing.T, database *sql.DB, boundary time.Time, limit time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) {
 		var nowText string
 		if err := database.QueryRow(`SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')`).Scan(&nowText); err != nil {
@@ -491,9 +495,62 @@ func assertQueuedCancelRollback(t *testing.T, database *sql.DB, commandID string
 	}
 }
 
-func TestThirtyTwoConnectionCommandCreateAndConfirmConverge(t *testing.T) {
+// The protected race gate runs four phases that use this helper. Linux race
+// instrumentation plus SQLite's five-second busy waits can serialize the tail
+// of 32 durable writers beyond one minute even while the database is making
+// progress. A two-minute bound preserves that production-shaped contention
+// while leaving the package inside the workflow's eight-minute timeout.
+const concurrentStorageRetryLimit = 120 * time.Second
+
+type concurrentMutationResult[T any] struct {
+	index      int
+	attempts   int
+	projection T
+	err        error
+}
+
+func retryConcurrentStorageUnavailable[T any](parent context.Context, index int,
+	operation func(context.Context) (T, error),
+) concurrentMutationResult[T] {
+	ctx, cancel := context.WithTimeout(parent, concurrentStorageRetryLimit)
+	defer cancel()
+
+	var lastStorageErr error
+	for attempt := 1; ; attempt++ {
+		projection, err := operation(ctx)
+		result := concurrentMutationResult[T]{index: index, attempts: attempt, projection: projection, err: err}
+		if !IsCode(err, CodeStorageUnavailable) {
+			if (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) && lastStorageErr != nil {
+				result.err = fmt.Errorf("storage retry deadline exceeded; final operation: %v: %w", err, lastStorageErr)
+			}
+			return result
+		}
+		lastStorageErr = err
+
+		shift := attempt - 1
+		if shift > 4 {
+			shift = 4
+		}
+		backoff := 20 * time.Millisecond * time.Duration(1<<shift)
+		jitter := time.Duration(((index+1)*53+attempt*97)%181) * time.Millisecond
+		timer := time.NewTimer(backoff + jitter)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			result.err = fmt.Errorf("storage retry deadline exceeded: %w", lastStorageErr)
+			return result
+		}
+	}
+}
+
+func TestThirtyTwoConcurrentCommandCreateAndConfirmConverge(t *testing.T) {
 	database := openSupervisionTestDB(t)
-	database.SetMaxOpenConns(32)
 	deliveryID, _, principal := seedGrantTarget(t, database)
 	service := NewService(database, Options{Mutator: priorityMutator{}, Changes: testChanges{}})
 	grantKey := sha256.Sum256([]byte("concurrent-grant"))
@@ -506,30 +563,18 @@ func TestThirtyTwoConnectionCommandCreateAndConfirmConverge(t *testing.T) {
 
 	const contenders = 32
 	start := make(chan struct{})
-	created := make(chan struct {
-		projection CommandProjection
-		err        error
-	}, contenders)
+	created := make(chan concurrentMutationResult[CommandProjection], contenders)
 	for index := 0; index < contenders; index++ {
 		go func(index int) {
 			<-start
 			key := sha256.Sum256([]byte("create-" + string(rune(index))))
-			var projection CommandProjection
-			var err error
-			for attempt := 0; attempt < 8; attempt++ {
-				projection, err = service.CreateCommand(context.Background(), principal, CommandCreateRequest{
-					GrantID: grant.GrantID, GrantRevision: grant.Revision, Action: "issue.priority.set",
-					Priority: "high", OperationKeyDigest: key,
+			created <- retryConcurrentStorageUnavailable(context.Background(), index,
+				func(ctx context.Context) (CommandProjection, error) {
+					return service.CreateCommand(ctx, principal, CommandCreateRequest{
+						GrantID: grant.GrantID, GrantRevision: grant.Revision, Action: "issue.priority.set",
+						Priority: "high", OperationKeyDigest: key,
+					})
 				})
-				if !IsCode(err, CodeStorageUnavailable) {
-					break
-				}
-				time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
-			}
-			created <- struct {
-				projection CommandProjection
-				err        error
-			}{projection, err}
 		}(index)
 	}
 	close(start)
@@ -537,7 +582,8 @@ func TestThirtyTwoConnectionCommandCreateAndConfirmConverge(t *testing.T) {
 	for index := 0; index < contenders; index++ {
 		result := <-created
 		if result.err != nil {
-			t.Fatalf("create contender %d: %v (%s)", index, result.err, ErrorCode(result.err))
+			t.Fatalf("create contender %d after %d attempts: %v (%s)", result.index, result.attempts,
+				result.err, ErrorCode(result.err))
 		}
 		if commandID == "" {
 			commandID = result.projection.CommandID
@@ -547,36 +593,25 @@ func TestThirtyTwoConnectionCommandCreateAndConfirmConverge(t *testing.T) {
 	}
 
 	start = make(chan struct{})
-	confirmed := make(chan struct {
-		projection CommandProjection
-		err        error
-	}, contenders)
+	confirmed := make(chan concurrentMutationResult[CommandProjection], contenders)
 	for index := 0; index < contenders; index++ {
 		go func(index int) {
 			<-start
 			key := sha256.Sum256([]byte("confirm-" + string(rune(index))))
-			var projection CommandProjection
-			var err error
-			for attempt := 0; attempt < 8; attempt++ {
-				projection, err = service.ConfirmCommand(context.Background(), principal, CommandConfirmRequest{
-					CommandID: commandID, StatusRevision: 1, OperationKeyDigest: key,
+			confirmed <- retryConcurrentStorageUnavailable(context.Background(), index,
+				func(ctx context.Context) (CommandProjection, error) {
+					return service.ConfirmCommand(ctx, principal, CommandConfirmRequest{
+						CommandID: commandID, StatusRevision: 1, OperationKeyDigest: key,
+					})
 				})
-				if !IsCode(err, CodeStorageUnavailable) {
-					break
-				}
-				time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
-			}
-			confirmed <- struct {
-				projection CommandProjection
-				err        error
-			}{projection, err}
 		}(index)
 	}
 	close(start)
 	for index := 0; index < contenders; index++ {
 		result := <-confirmed
 		if result.err != nil {
-			t.Fatalf("confirm contender %d: %v (%s)", index, result.err, ErrorCode(result.err))
+			t.Fatalf("confirm contender %d after %d attempts: %v (%s)", result.index, result.attempts,
+				result.err, ErrorCode(result.err))
 		}
 		if result.projection.CommandID != commandID || result.projection.Status != "applied" {
 			t.Fatalf("confirm diverged: %+v", result.projection)
@@ -1059,12 +1094,16 @@ func TestRunnerLeaseOutboxClaimAndRuntimeResultFollowM147Ordering(t *testing.T) 
 	}
 }
 
-func TestThirtyTwoConnectionAcceptedEffectReservationAndClaimConverge(t *testing.T) {
+func TestThirtyTwoConcurrentAcceptedEffectReservationAndClaimConverge(t *testing.T) {
 	database := openSupervisionTestDB(t)
-	database.SetMaxOpenConns(32)
 	deliveryID, humanID, human := seedGrantTarget(t, database)
 	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
 	service := NewService(database, Options{})
+	// This test measures durable convergence across two bounded 32-writer phases,
+	// not lease expiry. Give its fixture a lease longer than the eight-minute race
+	// gate; TestClaimAgainstExpiredLeaseFailsClosed owns the fail-closed boundary,
+	// while TestFrozenDurationsAndActionPolicy keeps production LeaseTTL frozen.
+	service.leaseTTL = 10 * time.Minute
 	leaseKey := sha256.Sum256([]byte("concurrent-lease"))
 	lease, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
 		DeviceID: "runner-01", SupportedActions: []Action{"run.cancel.running", "run.pause", "run.resume"},
@@ -1088,53 +1127,47 @@ func TestThirtyTwoConnectionAcceptedEffectReservationAndClaimConverge(t *testing
 
 	const contenders = 32
 	start := make(chan struct{})
-	confirmResults := make(chan error, contenders)
+	confirmResults := make(chan concurrentMutationResult[CommandProjection], contenders)
 	for index := 0; index < contenders; index++ {
 		go func(index int) {
 			<-start
 			key := sha256.Sum256([]byte(fmt.Sprintf("async-confirm-%02d", index)))
-			var err error
-			for attempt := 0; attempt < 8; attempt++ {
-				_, err = service.ConfirmCommand(context.Background(), human, CommandConfirmRequest{CommandID: command.CommandID,
-					StatusRevision: 1, OperationKeyDigest: key})
-				if !IsCode(err, CodeStorageUnavailable) {
-					break
-				}
-				time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
-			}
-			confirmResults <- err
+			confirmResults <- retryConcurrentStorageUnavailable(context.Background(), index,
+				func(ctx context.Context) (CommandProjection, error) {
+					return service.ConfirmCommand(ctx, human, CommandConfirmRequest{CommandID: command.CommandID,
+						StatusRevision: 1, OperationKeyDigest: key})
+				})
 		}(index)
 	}
 	close(start)
 	for index := 0; index < contenders; index++ {
-		if err := <-confirmResults; err != nil {
-			t.Fatalf("confirm contender %d: %v (%s)", index, err, ErrorCode(err))
+		result := <-confirmResults
+		if result.err != nil {
+			t.Fatalf("confirm contender %d after %d attempts: %v (%s)", result.index, result.attempts,
+				result.err, ErrorCode(result.err))
 		}
 	}
 
 	start = make(chan struct{})
-	claimResults := make(chan error, contenders)
+	claimResults := make(chan concurrentMutationResult[EffectProjection], contenders)
 	for index := 0; index < contenders; index++ {
 		go func(index int) {
 			<-start
 			key := sha256.Sum256([]byte(fmt.Sprintf("async-claim-%02d", index)))
-			var err error
-			for attempt := 0; attempt < 8; attempt++ {
-				_, err = service.Claim(context.Background(), runner, ClaimRequest{CommandID: command.CommandID,
-					LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1,
-					DeviceID: "runner-01", OperationKeyDigest: key})
-				if !IsCode(err, CodeStorageUnavailable) {
-					break
-				}
-				time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
-			}
-			claimResults <- err
+			claimResults <- retryConcurrentStorageUnavailable(context.Background(), index,
+				func(ctx context.Context) (EffectProjection, error) {
+					return service.Claim(ctx, runner, ClaimRequest{CommandID: command.CommandID,
+						LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1,
+						DeviceID: "runner-01", OperationKeyDigest: key})
+				})
 		}(index)
 	}
 	close(start)
 	for index := 0; index < contenders; index++ {
-		if err := <-claimResults; err != nil {
-			t.Fatalf("claim contender %d: %v (%s)", index, err, ErrorCode(err))
+		result := <-claimResults
+		if result.err != nil {
+			t.Fatalf("claim contender %d after %d attempts: %v (%s)", result.index, result.attempts,
+				result.err, ErrorCode(result.err))
 		}
 	}
 
@@ -1156,6 +1189,67 @@ func TestThirtyTwoConnectionAcceptedEffectReservationAndClaimConverge(t *testing
 	if outboxes != 1 || queuedFacts != 1 || claimedFacts != 1 || confirmOps != contenders || claimOps != contenders {
 		t.Fatalf("async convergence outbox=%d queued=%d claimed=%d confirm_ops=%d claim_ops=%d",
 			outboxes, queuedFacts, claimedFacts, confirmOps, claimOps)
+	}
+}
+
+func TestClaimAgainstExpiredLeaseFailsClosed(t *testing.T) {
+	database := openSupervisionTestDB(t)
+	deliveryID, humanID, human := seedGrantTarget(t, database)
+	runID, runner := seedRunnerActivation(t, database, deliveryID, humanID)
+	service := NewService(database, Options{})
+	// Leave ample race-instrumented setup headroom while making expiry quick
+	// enough to exercise in every full-suite run. SQLite's clock below owns the
+	// actual boundary.
+	service.leaseTTL = 15 * time.Second
+	actions := []Action{"run.cancel.running", "run.pause", "run.resume"}
+	lease, err := service.IssueRunnerLease(context.Background(), runner, LeaseIssueRequest{RunID: runID,
+		DeviceID: "runner-01", SupportedActions: actions,
+		OperationKeyDigest: sha256.Sum256([]byte("expired-claim-lease"))})
+	if err != nil {
+		t.Fatalf("issue lease: %v (%s)", err, ErrorCode(err))
+	}
+	grant, err := service.IssueActorGrant(context.Background(), human, GrantIssueRequest{DeliveryID: deliveryID,
+		OperationKeyDigest: sha256.Sum256([]byte("expired-claim-grant"))})
+	if err != nil {
+		t.Fatalf("issue grant: %v (%s)", err, ErrorCode(err))
+	}
+	command, err := service.CreateCommand(context.Background(), human, CommandCreateRequest{GrantID: grant.GrantID,
+		GrantRevision: grant.Revision, Action: "run.pause", RunID: runID, RuntimeRevision: 1,
+		OperationKeyDigest: sha256.Sum256([]byte("expired-claim-command"))})
+	if err != nil {
+		t.Fatalf("create command: %v (%s)", err, ErrorCode(err))
+	}
+	command, err = service.ConfirmCommand(context.Background(), human, CommandConfirmRequest{
+		CommandID: command.CommandID, StatusRevision: 1,
+		OperationKeyDigest: sha256.Sum256([]byte("expired-claim-confirm"))})
+	if err != nil || command.Status != "accepted" {
+		t.Fatalf("confirm command: command=%+v err=%v code=%s", command, err, ErrorCode(err))
+	}
+
+	// Cross expiry using SQLite's clock—the authority Claim checks.
+	waitForSQLiteTimeWithin(t, database, lease.ExpiresAt, 20*time.Second)
+	if _, err := service.Claim(context.Background(), runner, ClaimRequest{CommandID: command.CommandID,
+		LeaseID: lease.LeaseID, LeaseRevision: lease.Revision, EffectSequence: 1,
+		DeviceID: "runner-01", OperationKeyDigest: sha256.Sum256([]byte("expired-claim-attempt"))}); !IsCode(err, CodeCapabilityUnavailable) {
+		t.Fatalf("claim after lease expiry error=%v code=%s", err, ErrorCode(err))
+	}
+
+	var claimedOutboxes, claimedFacts, claimOperations int
+	for _, check := range []struct {
+		query string
+		value *int
+	}{
+		{`SELECT COUNT(*) FROM control_outbox WHERE command_id=? AND delivery_state='claimed'`, &claimedOutboxes},
+		{`SELECT COUNT(*) FROM control_events WHERE command_id=? AND event_kind='effect_claimed'`, &claimedFacts},
+		{`SELECT COUNT(*) FROM control_operation_keys WHERE command_id=? AND operation_kind='command.claim'`, &claimOperations},
+	} {
+		if err := database.QueryRow(check.query, command.CommandID).Scan(check.value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if claimedOutboxes != 0 || claimedFacts != 0 || claimOperations != 0 {
+		t.Fatalf("expired claim mutated state: outboxes=%d facts=%d operations=%d",
+			claimedOutboxes, claimedFacts, claimOperations)
 	}
 }
 

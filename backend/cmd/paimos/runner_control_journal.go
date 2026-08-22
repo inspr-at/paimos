@@ -25,16 +25,17 @@ const (
 )
 
 type runnerControlJournalRecord struct {
-	CommandID      string `json:"command_id"`
-	LeaseID        string `json:"lease_id"`
-	LeaseRevision  int64  `json:"lease_revision"`
-	EffectSequence int64  `json:"effect_sequence"`
-	ClaimSequence  int64  `json:"claim_sequence"`
-	ResultSequence int64  `json:"result_sequence"`
-	RequestDigest  string `json:"request_digest"`
-	Outcome        string `json:"outcome"`
-	Reason         string `json:"reason"`
-	State          string `json:"state"`
+	CommandID      string               `json:"command_id"`
+	LeaseID        string               `json:"lease_id"`
+	LeaseRevision  int64                `json:"lease_revision"`
+	EffectSequence int64                `json:"effect_sequence"`
+	ClaimSequence  int64                `json:"claim_sequence"`
+	ResultSequence int64                `json:"result_sequence"`
+	RequestDigest  string               `json:"request_digest"`
+	Outcome        string               `json:"outcome"`
+	Reason         string               `json:"reason"`
+	State          string               `json:"state"`
+	Effect         *runnerControlEffect `json:"effect,omitempty"`
 }
 
 type runnerControlJournalEvent struct {
@@ -316,9 +317,16 @@ func validateRunnerControlRecord(record runnerControlJournalRecord) error {
 		return errors.New("invalid runner control reason")
 	}
 	if record.State == "completed" && ((record.Outcome == "applied" && record.Reason != "") ||
-		(record.Outcome == "rejected" && record.Reason != "natural_exit" && record.Reason != "process_termination_failed") ||
+		(record.Outcome == "rejected" && record.Reason != "natural_exit" && record.Reason != "process_termination_failed" &&
+			record.Reason != "effect_rejected" && record.Reason != "unsupported_platform") ||
 		(record.Outcome != "applied" && record.Outcome != "rejected")) {
 		return errors.New("invalid runner control reason")
+	}
+	if record.Effect != nil && (record.Effect.CommandID != record.CommandID || record.Effect.LeaseID != record.LeaseID ||
+		record.Effect.LeaseRevision != record.LeaseRevision || record.Effect.EffectSequence != record.EffectSequence ||
+		!record.Effect.Target.validForRun(record.Effect.Target.RunID) ||
+		!record.Effect.validForLease(runnerControlLease{Actions: []string{record.Effect.Action}})) {
+		return errors.New("invalid runner control effect")
 	}
 	digest, err := hex.DecodeString(record.RequestDigest)
 	if err != nil || len(digest) != sha256.Size {

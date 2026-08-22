@@ -409,6 +409,7 @@ type agentRunner struct {
 	supervise            func(context.Context, supervisorRequest) supervisorResult
 	reporter             runnerReportTransport
 	controlJournal       *runnerControlJournal
+	controlAdapter       runnerControlAdapter
 	confirm              func(issueKey string, runID int64, repoRoot string) bool
 	confirmDeploy        func(issueKey string, runID int64, target string) bool
 }
@@ -438,6 +439,7 @@ func newAgentRunner(client *Client, deviceID, repoRoot, execCmd, actionKey, test
 		spawn:                defaultSpawn,
 		supervise:            superviseAgentProcess,
 		reporter:             &httpRunnerReportTransport{client: client, provider: provider, adapter: adapter},
+		controlAdapter:       oneShotRunnerControlAdapter{},
 		confirm:              defaultConfirm,
 		confirmDeploy:        defaultDeployConfirm,
 	}
@@ -630,7 +632,7 @@ func (a *agentRunner) handleRun(ctx context.Context, j runJob) error {
 	}
 	var control *runControlArbiter
 	if a.controlJournal != nil {
-		control = newRunControlArbiter(a.client, runID, a.deviceID, a.controlJournal)
+		control = newRunControlArbiterWithAdapter(a.client, runID, a.deviceID, a.controlJournal, a.controlAdapter)
 		defer func() {
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer stopCancel()

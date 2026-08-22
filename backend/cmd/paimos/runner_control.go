@@ -70,10 +70,50 @@ func validRunnerDeliveryKey(value string) bool {
 }
 
 func (lease runnerControlLease) validForRun(runID int64) bool {
-	return lease.LeaseID != "" && lease.Revision > 0 && validRunnerDeliveryKey(lease.DeliveryKey) &&
-		runnerIssueKeyPattern.MatchString(lease.IssueKey) && len(lease.Actions) == 1 &&
-		lease.Actions[0] == "run.cancel.running" && lease.Target.validForRun(runID) &&
-		lease.Target.DeliveryKey == lease.DeliveryKey && lease.ExpiresAt.After(time.Now())
+	return lease.validForRunActions(runID, []string{"run.cancel.running"})
+}
+
+func (lease runnerControlLease) validForRunActions(runID int64, supported []string) bool {
+	canonical, err := canonicalRunnerControlActions(supported)
+	if err != nil || lease.LeaseID == "" || lease.Revision <= 0 || !validRunnerDeliveryKey(lease.DeliveryKey) ||
+		!runnerIssueKeyPattern.MatchString(lease.IssueKey) || len(lease.Actions) == 0 ||
+		!lease.Target.validForRun(runID) || lease.Target.DeliveryKey != lease.DeliveryKey || !lease.ExpiresAt.After(time.Now()) {
+		return false
+	}
+	allowed := make(map[string]bool, len(canonical))
+	for _, action := range canonical {
+		allowed[action] = true
+	}
+	previous := -1
+	for _, action := range lease.Actions {
+		if !allowed[action] {
+			return false
+		}
+		position := -1
+		for index, candidate := range runnerControlActionOrder {
+			if candidate == action {
+				position = index
+				break
+			}
+		}
+		if position <= previous {
+			return false
+		}
+		previous = position
+	}
+	return true
+}
+
+func reflectStringSlices(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 type runnerControlLease struct {
@@ -86,14 +126,60 @@ type runnerControlLease struct {
 	Target      runnerControlTarget `json:"target"`
 }
 
+var runnerControlActionOrder = []string{"run.cancel.running", "input.respond", "run.pause", "run.resume"}
+
+// runnerControlAdapter is the closed boundary between the durable control
+// transport and a provider runtime. An adapter may advertise only actions it
+// can durably apply and reconcile after a runner restart.
+type runnerControlAdapter interface {
+	SupportedActions() []string
+	Apply(context.Context, runnerControlEffect) (runnerControlDecision, error)
+	Reconcile(context.Context, runnerControlEffect) (runnerControlDecision, bool, error)
+}
+
+type runnerControlDecision struct {
+	Deferred bool
+	Outcome  string
+	Reason   string
+}
+
+// oneShotRunnerControlAdapter is the truthful production capability boundary
+// for the current Claude Code, Codex, and custom command runners. They expose
+// no durable provider input or pause channel; owned process cancellation is
+// deferred to the supervisor so it can acknowledge only after process reap.
+type oneShotRunnerControlAdapter struct{}
+
+func (oneShotRunnerControlAdapter) SupportedActions() []string {
+	return []string{"run.cancel.running"}
+}
+
+func (oneShotRunnerControlAdapter) Apply(_ context.Context, effect runnerControlEffect) (runnerControlDecision, error) {
+	if effect.Action != "run.cancel.running" {
+		return runnerControlDecision{}, errors.New("one-shot runner received an unsupported control action")
+	}
+	return runnerControlDecision{Deferred: true}, nil
+}
+
+func (oneShotRunnerControlAdapter) Reconcile(context.Context, runnerControlEffect) (runnerControlDecision, bool, error) {
+	// A replacement process cannot prove the outcome of a prior process-tree
+	// termination. Server reconciliation must conservatively seal it unknown.
+	return runnerControlDecision{}, false, nil
+}
+
 type runnerControlEffect struct {
-	OutboxID       int64               `json:"outbox_id"`
-	CommandID      string              `json:"command_id"`
-	Action         string              `json:"action"`
-	EffectSequence int64               `json:"effect_sequence"`
-	LeaseID        string              `json:"lease_id"`
-	LeaseRevision  int64               `json:"lease_revision"`
-	Target         runnerControlTarget `json:"target"`
+	OutboxID        int64               `json:"outbox_id"`
+	CommandID       string              `json:"command_id"`
+	Action          string              `json:"action"`
+	EffectSequence  int64               `json:"effect_sequence"`
+	LeaseID         string              `json:"lease_id"`
+	LeaseRevision   int64               `json:"lease_revision"`
+	Target          runnerControlTarget `json:"target"`
+	InputRequestID  string              `json:"input_request_id,omitempty"`
+	InputRevision   int64               `json:"input_request_revision,omitempty"`
+	InputResponse   string              `json:"input_response,omitempty"`
+	ChoiceOrdinal   int                 `json:"choice_ordinal,omitempty"`
+	ChoiceCode      string              `json:"choice_code,omitempty"`
+	RuntimeRevision int64               `json:"runtime_revision,omitempty"`
 }
 
 type runnerControlPull struct {
@@ -107,20 +193,67 @@ type runnerClaimedCancellation struct {
 	Effect runnerControlEffect
 }
 
-type runnerControlHTTP struct{ client *Client }
+type runnerControlHTTP struct {
+	client           *Client
+	supportedActions []string
+}
+
+func canonicalRunnerControlActions(actions []string) ([]string, error) {
+	if len(actions) == 0 {
+		return nil, errors.New("runner control adapter advertises no actions")
+	}
+	wanted := make(map[string]bool, len(actions))
+	for _, action := range actions {
+		if wanted[action] {
+			return nil, errors.New("runner control adapter contains a duplicate action")
+		}
+		wanted[action] = true
+	}
+	out := make([]string, 0, len(actions))
+	for _, action := range runnerControlActionOrder {
+		if wanted[action] {
+			out = append(out, action)
+			delete(wanted, action)
+		}
+	}
+	if len(wanted) != 0 || len(out) == 0 {
+		return nil, errors.New("runner control adapter contains an unsupported action")
+	}
+	hasPause, hasResume := false, false
+	for _, action := range out {
+		hasPause = hasPause || action == "run.pause"
+		hasResume = hasResume || action == "run.resume"
+	}
+	if hasPause != hasResume {
+		return nil, errors.New("runner pause and resume capabilities must be advertised together")
+	}
+	return out, nil
+}
+
+func (h runnerControlHTTP) actions() ([]string, error) {
+	actions := h.supportedActions
+	if actions == nil {
+		actions = (oneShotRunnerControlAdapter{}).SupportedActions()
+	}
+	return canonicalRunnerControlActions(actions)
+}
 
 func (h runnerControlHTTP) issueLease(ctx context.Context, runID int64, deviceID, attemptID string) (runnerControlLease, error) {
 	if runID <= 0 || strings.TrimSpace(deviceID) == "" || strings.TrimSpace(attemptID) != attemptID || attemptID == "" {
 		return runnerControlLease{}, errors.New("runner control lease request is invalid")
 	}
+	actions, err := h.actions()
+	if err != nil {
+		return runnerControlLease{}, err
+	}
 	body := struct {
 		DeviceID         string   `json:"device_id"`
 		SupportedActions []string `json:"supported_actions"`
-	}{DeviceID: deviceID, SupportedActions: []string{"run.cancel.running"}}
+	}{DeviceID: deviceID, SupportedActions: actions}
 	var lease runnerControlLease
-	err := h.postWithKey(ctx, fmt.Sprintf("/api/runs/%d/control-capability-leases", runID), body,
+	err = h.postWithKey(ctx, fmt.Sprintf("/api/runs/%d/control-capability-leases", runID), body,
 		stableRunnerControlKey("lease.issue", strconv.FormatInt(runID, 10), deviceID, attemptID), &lease)
-	if err == nil && !lease.validForRun(runID) {
+	if err == nil && !lease.validForRunActions(runID, actions) {
 		err = errors.New("runner control lease response is invalid")
 	}
 	return lease, err
@@ -130,19 +263,23 @@ func (h runnerControlHTTP) renewLease(ctx context.Context, lease runnerControlLe
 	if strings.TrimSpace(attemptID) != attemptID || attemptID == "" {
 		return runnerControlLease{}, errors.New("runner control lease renewal identity is unavailable")
 	}
+	actions, err := h.actions()
+	if err != nil {
+		return runnerControlLease{}, err
+	}
 	body := struct {
 		Operation        string   `json:"operation"`
 		Revision         int64    `json:"revision"`
 		DeviceID         string   `json:"device_id"`
 		SupportedActions []string `json:"supported_actions"`
-	}{Operation: "renew", Revision: lease.Revision, DeviceID: deviceID,
-		SupportedActions: []string{"run.cancel.running"}}
+	}{Operation: "renew", Revision: lease.Revision, DeviceID: deviceID, SupportedActions: actions}
 	var renewed runnerControlLease
-	err := h.postWithKey(ctx, "/api/control-capability-leases/"+lease.LeaseID, body,
+	err = h.postWithKey(ctx, "/api/control-capability-leases/"+lease.LeaseID, body,
 		stableRunnerControlKey("lease.renew", lease.LeaseID, strconv.FormatInt(lease.Revision, 10), attemptID), &renewed)
 	if err == nil && (renewed.LeaseID != lease.LeaseID || renewed.Revision != lease.Revision ||
 		renewed.DeliveryKey != lease.DeliveryKey || renewed.IssueKey != lease.IssueKey || renewed.Target != lease.Target ||
-		!renewed.validForRun(lease.Target.RunID) || !renewed.ExpiresAt.After(lease.ExpiresAt)) {
+		!renewed.validForRunActions(lease.Target.RunID, actions) || !reflectStringSlices(renewed.Actions, lease.Actions) ||
+		!renewed.ExpiresAt.After(lease.ExpiresAt)) {
 		err = errors.New("runner control lease renewal response is invalid")
 	}
 	return renewed, err
@@ -182,9 +319,9 @@ func (page runnerControlPull) validForLease(lease runnerControlLease, cursor int
 	previous := cursor
 	for _, effect := range page.Effects {
 		if effect.OutboxID <= previous || effect.OutboxID > page.SnapshotHighWater ||
-			effect.CommandID == "" || effect.Action != "run.cancel.running" || effect.EffectSequence != 1 ||
+			effect.CommandID == "" || effect.EffectSequence != 1 ||
 			effect.LeaseID != lease.LeaseID || effect.LeaseRevision != lease.Revision ||
-			!effect.Target.validForRun(lease.Target.RunID) || effect.Target != lease.Target {
+			!effect.Target.validForRun(lease.Target.RunID) || effect.Target != lease.Target || !effect.validForLease(lease) {
 			return false
 		}
 		previous = effect.OutboxID
@@ -193,6 +330,42 @@ func (page runnerControlPull) validForLease(lease runnerControlLease, cursor int
 		return page.NextCursor == cursor && !page.HasMore
 	}
 	return page.NextCursor == previous && (!page.HasMore || len(page.Effects) == 100)
+}
+
+func (effect runnerControlEffect) validForLease(lease runnerControlLease) bool {
+	supported := false
+	for _, action := range lease.Actions {
+		if action == effect.Action {
+			supported = true
+			break
+		}
+	}
+	if !supported {
+		return false
+	}
+	hasInput := effect.InputRequestID != "" || effect.InputRevision != 0 || effect.InputResponse != "" ||
+		effect.ChoiceOrdinal != 0 || effect.ChoiceCode != ""
+	switch effect.Action {
+	case "run.cancel.running":
+		return !hasInput && effect.RuntimeRevision == 0
+	case "run.pause", "run.resume":
+		return !hasInput && effect.RuntimeRevision > 0
+	case "input.respond":
+		if effect.InputRequestID == "" || effect.InputRevision <= 0 || effect.RuntimeRevision != 0 {
+			return false
+		}
+		switch effect.InputResponse {
+		case "approve", "reject":
+			return effect.ChoiceOrdinal == 0 && effect.ChoiceCode == ""
+		case "choice":
+			return effect.ChoiceOrdinal >= 1 && effect.ChoiceOrdinal <= 8 &&
+				effect.ChoiceCode == "choice_"+strconv.Itoa(effect.ChoiceOrdinal)
+		default:
+			return false
+		}
+	default:
+		return false
+	}
 }
 
 func (h runnerControlHTTP) claim(ctx context.Context, effect runnerControlEffect, deviceID string) (runnerControlEffect, error) {
@@ -208,10 +381,9 @@ func (h runnerControlHTTP) claim(ctx context.Context, effect runnerControlEffect
 	err := h.postWithKey(ctx, "/api/control-commands/"+effect.CommandID, body,
 		stableRunnerControlKey("command.claim", effect.CommandID, effect.LeaseID,
 			strconv.FormatInt(effect.LeaseRevision, 10), strconv.FormatInt(effect.EffectSequence, 10)), &claimed)
-	if err == nil && (claimed.CommandID != effect.CommandID || claimed.LeaseID != effect.LeaseID ||
-		claimed.LeaseRevision != effect.LeaseRevision || claimed.EffectSequence != effect.EffectSequence ||
-		claimed.Action != "run.cancel.running" || claimed.Target != effect.Target ||
-		!claimed.Target.validForRun(effect.Target.RunID)) {
+	if err == nil && (claimed != effect ||
+		!claimed.validForLease(runnerControlLease{LeaseID: effect.LeaseID, Revision: effect.LeaseRevision,
+			Actions: []string{effect.Action}, Target: effect.Target})) {
 		err = errors.New("runner control claim response is invalid")
 	}
 	return claimed, err
@@ -306,6 +478,7 @@ type runControlArbiter struct {
 	runID    int64
 	deviceID string
 	journal  *runnerControlJournal
+	adapter  runnerControlAdapter
 
 	mu       sync.Mutex
 	lease    runnerControlLease
@@ -325,8 +498,18 @@ type runControlArbiter struct {
 }
 
 func newRunControlArbiter(client *Client, runID int64, deviceID string, journal *runnerControlJournal) *runControlArbiter {
-	return &runControlArbiter{http: runnerControlHTTP{client: client}, runID: runID, deviceID: deviceID,
+	return newRunControlArbiterWithAdapter(client, runID, deviceID, journal, oneShotRunnerControlAdapter{})
+}
+
+func newRunControlArbiterWithAdapter(client *Client, runID int64, deviceID string, journal *runnerControlJournal,
+	adapter runnerControlAdapter) *runControlArbiter {
+	actions := []string(nil)
+	if adapter != nil {
+		actions = append([]string(nil), adapter.SupportedActions()...)
+	}
+	return &runControlArbiter{http: runnerControlHTTP{client: client, supportedActions: actions}, runID: runID, deviceID: deviceID,
 		journal: journal, requests: make(chan runnerClaimedCancellation, 100), now: time.Now,
+		adapter:    adapter,
 		newAttempt: uuid.NewString, renewEvery: runnerControlRenewEvery, pullInterval: runnerControlPullInterval,
 		operationTime: 10 * time.Second, retryMin: runnerControlRetryMin, retryMax: runnerControlRetryMax}
 }
@@ -340,6 +523,14 @@ func (a *runControlArbiter) start(ctx context.Context, owned bool) error {
 	if a.done != nil {
 		return nil
 	}
+	if a.adapter == nil {
+		return errors.New("runner control adapter is unavailable")
+	}
+	// Validate the capability snapshot captured at construction; never ask a
+	// mutable adapter again after its lease contract has been frozen.
+	if _, err := canonicalRunnerControlActions(a.http.supportedActions); err != nil {
+		return err
+	}
 	attemptID := a.newAttempt()
 	if attemptID == "" {
 		return errors.New("runner control lease attempt identity is unavailable")
@@ -348,7 +539,7 @@ func (a *runControlArbiter) start(ctx context.Context, owned bool) error {
 	if err != nil {
 		return err
 	}
-	if err := a.replayCompleted(ctx, lease); err != nil {
+	if err := a.replayDurable(ctx, lease); err != nil {
 		return err
 	}
 	pumpCtx, cancel := context.WithCancel(context.Background())
@@ -463,7 +654,7 @@ func (a *runControlArbiter) pumpLoop(ctx context.Context) error {
 				}
 				for _, effect := range page.Effects {
 					cursor = effect.OutboxID
-					if effect.Action != "run.cancel.running" || effect.Target.RunID != a.runID ||
+					if effect.Target.RunID != a.runID || !effect.validForLease(lease) ||
 						effect.LeaseID != lease.LeaseID || effect.LeaseRevision != lease.Revision || effect.EffectSequence != 1 {
 						continue
 					}
@@ -478,14 +669,33 @@ func (a *runControlArbiter) pumpLoop(ctx context.Context) error {
 						if journalErr := a.journal.put(runnerControlJournalRecord{CommandID: claimed.CommandID, LeaseID: claimed.LeaseID,
 							LeaseRevision: claimed.LeaseRevision, EffectSequence: claimed.EffectSequence,
 							ClaimSequence: 1, ResultSequence: 1, RequestDigest: hex.EncodeToString(digest[:]),
-							Outcome: "outcome_unknown", State: "claimed"}); journalErr != nil {
-							return fmt.Errorf("persist claimed runner cancellation: %w", journalErr)
+							Outcome: "outcome_unknown", State: "claimed", Effect: &claimed}); journalErr != nil {
+							return fmt.Errorf("persist claimed runner control effect: %w", journalErr)
 						}
 					}
-					select {
-					case a.requests <- runnerClaimedCancellation{Effect: claimed}:
-					case <-ctx.Done():
-						return nil
+					decision, applyErr := a.adapter.Apply(ctx, claimed)
+					if applyErr != nil {
+						return fmt.Errorf("apply runner control effect: %w", applyErr)
+					}
+					if decision.Deferred {
+						if claimed.Action != "run.cancel.running" || decision.Outcome != "" || decision.Reason != "" {
+							return errors.New("runner control adapter returned an invalid deferred decision")
+						}
+						select {
+						case a.requests <- runnerClaimedCancellation{Effect: claimed}:
+						case <-ctx.Done():
+							return nil
+						}
+						continue
+					}
+					if !validRunnerControlDecision(decision) {
+						return errors.New("runner control adapter returned an invalid result")
+					}
+					resultCtx, resultCancel := context.WithTimeout(ctx, a.operationTime)
+					resultErr := a.recordResult(resultCtx, runnerClaimedCancellation{Effect: claimed}, decision.Outcome, decision.Reason)
+					resultCancel()
+					if resultErr != nil {
+						return fmt.Errorf("record runner control result: %w", resultErr)
 					}
 				}
 				if !page.HasMore {
@@ -513,6 +723,17 @@ func nextRunnerControlRetry(current, maximum time.Duration) time.Duration {
 	return next
 }
 
+func validRunnerControlDecision(decision runnerControlDecision) bool {
+	if decision.Deferred {
+		return decision.Outcome == "" && decision.Reason == ""
+	}
+	if decision.Outcome == "applied" {
+		return decision.Reason == ""
+	}
+	return decision.Outcome == "rejected" && (decision.Reason == "effect_rejected" ||
+		decision.Reason == "unsupported_platform")
+}
+
 func (a *runControlArbiter) recordResult(ctx context.Context, claim runnerClaimedCancellation, outcome, reason string) error {
 	if a == nil {
 		return errors.New("runner control arbiter is unavailable")
@@ -521,7 +742,8 @@ func (a *runControlArbiter) recordResult(ctx context.Context, claim runnerClaime
 	bodyDigest := sha256.Sum256([]byte(effect.CommandID + "\x00" + outcome + "\x00" + reason))
 	record := runnerControlJournalRecord{CommandID: effect.CommandID, LeaseID: effect.LeaseID,
 		LeaseRevision: effect.LeaseRevision, EffectSequence: effect.EffectSequence, ClaimSequence: 1,
-		ResultSequence: 1, RequestDigest: hex.EncodeToString(bodyDigest[:]), Outcome: outcome, Reason: reason, State: "completed"}
+		ResultSequence: 1, RequestDigest: hex.EncodeToString(bodyDigest[:]), Outcome: outcome, Reason: reason,
+		State: "completed", Effect: &effect}
 	if a.journal != nil {
 		if err := a.journal.put(record); err != nil {
 			return err
@@ -553,16 +775,40 @@ func (a *runControlArbiter) rejectNaturalExit(ctx context.Context) error {
 	}
 }
 
-func (a *runControlArbiter) replayCompleted(ctx context.Context, lease runnerControlLease) error {
+func (a *runControlArbiter) replayDurable(ctx context.Context, lease runnerControlLease) error {
 	if a == nil || a.journal == nil {
 		return nil
 	}
 	for _, record := range a.journal.snapshot() {
-		if record.State != "completed" || record.LeaseID != lease.LeaseID || record.LeaseRevision != lease.Revision {
+		if record.LeaseID != lease.LeaseID || record.LeaseRevision != lease.Revision {
 			continue
 		}
 		effect := runnerControlEffect{CommandID: record.CommandID, Action: "run.cancel.running", LeaseID: record.LeaseID,
 			LeaseRevision: record.LeaseRevision, EffectSequence: record.EffectSequence, Target: lease.Target}
+		if record.Effect != nil {
+			effect = *record.Effect
+		}
+		if !effect.validForLease(lease) || effect.Target != lease.Target {
+			continue
+		}
+		if record.State == "claimed" {
+			decision, known, err := a.adapter.Reconcile(ctx, effect)
+			if err != nil {
+				return fmt.Errorf("reconcile runner control effect: %w", err)
+			}
+			if !known {
+				continue
+			}
+			if !validRunnerControlDecision(decision) || decision.Deferred {
+				return errors.New("runner control adapter returned an invalid reconciliation result")
+			}
+			record.Outcome, record.Reason, record.State = decision.Outcome, decision.Reason, "completed"
+			digest := sha256.Sum256([]byte(effect.CommandID + "\x00" + decision.Outcome + "\x00" + decision.Reason))
+			record.RequestDigest = hex.EncodeToString(digest[:])
+			if err := a.journal.put(record); err != nil {
+				return err
+			}
+		}
 		claimed, err := a.http.claim(ctx, effect, a.deviceID)
 		if err != nil {
 			continue
