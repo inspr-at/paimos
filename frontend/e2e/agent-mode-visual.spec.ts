@@ -126,6 +126,14 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
     if (path === '/api/instance') {
       return fulfill({ label: 'STAGING', attachments_enabled: true, live_updates_enabled: false })
     }
+    if (path === '/api/projects') {
+      return fulfill([
+        { id: 6, key: 'PAI', name: 'PAIMOS Core platform', status: 'active' },
+        { id: 9, key: 'RUN', name: 'Agent runtime', status: 'active' },
+        { id: 12, key: 'REL', name: 'Release operations', status: 'active' },
+        { id: 77, key: 'VAC', name: 'Vacation planning', status: 'active' },
+      ])
+    }
     if (path === '/api/agent-mode/deliveries') {
       deliveryRequests += 1
       if (new URL(route.request().url()).searchParams.get('q') === 'visual-forbidden') {
@@ -641,6 +649,12 @@ test('PAI-805 final visual and geometry gate', async ({ page }) => {
   await openReady(page, 1440, 1000)
   await expectSelectedAnchorInInitialCanvas(page)
   await expectControlVoiceGeometry(page)
+  await page.locator('.am-project-picker__trigger').click()
+  await expect(page.locator('.am-project-picker__options [role="option"]')).toHaveCount(5)
+  await expect(page.locator('[data-project-id="77"]')).toContainText('No active deliveries')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.am-project-picker__popover')).toBeHidden()
+  await expect(page.locator('.am-hints-current')).toBeVisible()
   const logo = page.locator('.aml-brand-logo')
   await expect(logo).toHaveAttribute('src', '/logo.svg')
   expect(await logo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)

@@ -19,6 +19,7 @@ import { useI18n } from 'vue-i18n'
 import type { Delivery } from '@/services/agentMode'
 import type { AgentModeProjectGroup } from '@/composables/agent-mode/agentModeOrdering'
 import AgentModeDeliveryCard from './AgentModeDeliveryCard.vue'
+import type { AgentModeCardDensity } from './AgentModeFilterBar.vue'
 
 defineProps<{
   groups: readonly AgentModeProjectGroup[]
@@ -37,6 +38,7 @@ defineProps<{
   locale: string
   /** Last-known data shown while the feed is unreachable. */
   degraded?: boolean
+  density?: AgentModeCardDensity
 }>()
 
 const emit = defineEmits<{
@@ -114,6 +116,7 @@ function laneDomId(key: string): string {
               :server-now-ms="serverNowMs"
               :locale="locale"
               :degraded="degraded"
+              :density="density"
               @select="emit('select', $event)"
               @activate="emit('activate', $event)"
               @interact="emit('interact')"

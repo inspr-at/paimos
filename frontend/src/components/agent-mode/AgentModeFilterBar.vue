@@ -16,7 +16,9 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import AppIcon from '@/components/AppIcon.vue'
+import AgentModeProjectPicker from '@/components/agent-mode/AgentModeProjectPicker.vue'
 import type { AgentModeAggregates, AgentModeCountSet } from '@/services/agentModeAggregateSchema'
+import type { VoiceProjectRef } from '@/composables/agent-mode/agentModeVoiceIntent'
 import {
   filtersActive,
   nextRadioIndex,
@@ -24,22 +26,29 @@ import {
   type HealthFilter,
 } from '@/composables/agent-mode/agentModeFilters'
 
-const props = defineProps<{
+export type AgentModeCardDensity = 'calm' | 'full'
+
+const props = withDefaults(defineProps<{
   filters: AgentModeFilters
   aggregates: AgentModeAggregates | null
-}>()
+  projectCatalog?: readonly VoiceProjectRef[]
+  projectActiveTotals?: ReadonlyMap<number, number> | null
+  density?: AgentModeCardDensity
+}>(), { projectCatalog: () => [], projectActiveTotals: null, density: 'calm' })
 
-const emit = defineEmits<{ 'update:filters': [patch: Partial<AgentModeFilters>] }>()
+const emit = defineEmits<{
+  'update:filters': [patch: Partial<AgentModeFilters>]
+  'update:density': [density: AgentModeCardDensity]
+}>()
 const { t } = useI18n()
 
-const projects = computed(() => {
-  return (props.aggregates?.projects ?? []).map((project) => ({
-    id: project.projectId,
-    key: project.projectKey,
-    name: project.projectName,
-    count: project.counts.activeTotal,
-  }))
-})
+const projects = computed<readonly VoiceProjectRef[]>(() => props.projectCatalog.length
+  ? props.projectCatalog
+  : (props.aggregates?.projects ?? []).map((project) => ({
+      projectId: project.projectId,
+      projectKey: project.projectKey,
+      projectName: project.projectName,
+    })))
 
 type HealthOption = { value: HealthFilter; count: (root: AgentModeCountSet) => number }
 const healthOptions: HealthOption[] = [
@@ -56,9 +65,8 @@ function update(patch: Partial<AgentModeFilters>) {
   emit('update:filters', patch)
 }
 
-function onProject(event: Event) {
-  const raw = (event.target as HTMLSelectElement).value
-  update({ projectId: raw === '' ? null : Number(raw), laneKey: null })
+function onProject(projectId: number | null) {
+  update({ projectId, laneKey: null })
 }
 
 function onQuery(event: Event) {
@@ -90,14 +98,12 @@ function onHealthKeydown(event: KeyboardEvent) {
       <AppIcon name="git-branch" :size="11" aria-hidden="true" />
       {{ t('agentMode.filters.laneActive') }}
     </span>
-    <label class="am-filter-project">
-      <span class="am-sr-only">{{ t('agentMode.filters.project') }}</span>
-      <AppIcon name="folder" :size="12" aria-hidden="true" />
-      <select :value="filters.projectId ?? ''" @change="onProject">
-        <option value="">{{ t('agentMode.filters.allProjects') }}</option>
-        <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.key }} · {{ p.name }} ({{ p.count }})</option>
-      </select>
-    </label>
+    <AgentModeProjectPicker
+      :model-value="filters.projectId"
+      :projects="projects"
+      :active-totals="projectActiveTotals"
+      @update:model-value="onProject"
+    />
 
     <div
       ref="healthGroup"
@@ -136,6 +142,20 @@ function onHealthKeydown(event: KeyboardEvent) {
       />
     </label>
 
+    <div class="am-density" role="radiogroup" :aria-label="t('agentMode.filters.densityLabel')">
+      <button
+        v-for="option in (['calm', 'full'] as const)"
+        :key="option"
+        type="button"
+        role="radio"
+        :aria-checked="density === option"
+        :class="{ 'is-active': density === option }"
+        @click="emit('update:density', option)"
+      >
+        {{ t(`agentMode.filters.density.${option}`) }}
+      </button>
+    </div>
+
     <button v-if="active" type="button" class="am-filter-clear" @click="clear">
       <AppIcon name="x" :size="11" aria-hidden="true" />
       {{ t('agentMode.filters.clear') }}
@@ -151,7 +171,6 @@ function onHealthKeydown(event: KeyboardEvent) {
   align-items: center;
   gap: 8px;
 }
-.am-filter-project,
 .am-filter-query,
 .am-filter-lane {
   display: inline-flex;
@@ -165,7 +184,6 @@ function onHealthKeydown(event: KeyboardEvent) {
   color: var(--am-muted);
 }
 .am-filter-lane { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.am-filter-project select,
 .am-filter-query input {
   height: 100%;
   padding: 0;
@@ -177,11 +195,14 @@ function onHealthKeydown(event: KeyboardEvent) {
   outline: none;
   width: auto;
 }
-.am-filter-project select { max-width: 240px; }
 .am-filter-query { flex: 1 1 180px; max-width: 320px; }
 .am-filter-query input { flex: 1; min-width: 0; }
-.am-filter-project:focus-within,
 .am-filter-query:focus-within { border-color: var(--am-focus); box-shadow: 0 0 0 2px color-mix(in srgb, var(--am-focus) 18%, transparent); }
+
+.am-density { display: inline-flex; padding: 2px; border: 1px solid var(--am-line); border-radius: 9px; background: var(--am-surface); }
+.am-density button { padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--am-muted); font: inherit; font-size: 11px; }
+.am-density button.is-active { background: color-mix(in srgb, var(--am-ink) 9%, var(--am-surface)); color: var(--am-ink); font-weight: 600; }
+.am-density button:focus-visible { outline: 2px solid var(--am-focus); outline-offset: 1px; }
 
 .am-filter-health {
   display: inline-flex;

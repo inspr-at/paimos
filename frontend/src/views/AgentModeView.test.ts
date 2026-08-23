@@ -281,6 +281,8 @@ function makeVoiceDependencies(): AgentModeVoiceDependencies {
     postNote: vi.fn(async () => ({ id: 1 } as never)),
     loadProjectCatalog: vi.fn(async () => [
       { projectId: 6, projectKey: 'PAI', projectName: 'PAIMOS Core platform' },
+      { projectId: 9, projectKey: 'RUN', projectName: 'Agent runtime' },
+      { projectId: 12, projectKey: 'REL', projectName: 'Release operations' },
       { projectId: 99, projectKey: 'OPS', projectName: 'Operations archive' },
     ]),
     sessionNonce: 'viewtest',
@@ -1624,12 +1626,14 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     const { root, router } = harness
     const selected = selectedId(root)!
     const selectedProject = root.querySelector<HTMLElement>('.am-selected-above')!.closest('.am-project')!
-    const projectSelect = root.querySelector<HTMLSelectElement>('.am-filter-project select')!
-    const otherOption = [...projectSelect.options].find((o) => o.value !== '' && !selectedProject.querySelector(`#am-project-${o.value}`))!
-    projectSelect.value = otherOption.value
-    projectSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    const selectedProjectId = selectedProject.getAttribute('aria-labelledby')!.replace('am-project-', '')
+    root.querySelector<HTMLButtonElement>('.am-project-picker__trigger')!.click()
     await flush()
-    expect(router.currentRoute.value.query.project).toBe(otherOption.value)
+    const otherOption = [...root.querySelectorAll<HTMLButtonElement>('.am-project-picker__options [data-project-id]')]
+      .find((option) => option.dataset.projectId !== selectedProjectId && Number(option.dataset.activeTotal) > 0)!
+    otherOption.click()
+    await flush()
+    expect(router.currentRoute.value.query.project).toBe(otherOption.dataset.projectId)
     // Lanes only show the filtered project …
     expect(root.querySelectorAll('.am-lanes .am-project')).toHaveLength(1)
     // … while the selection survives, pinned with its reason.
@@ -1650,10 +1654,12 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     const { root } = harness
     const pinnedId = selectedId(root)!
     const selectedProject = root.querySelector<HTMLElement>('.am-selected-above')!.closest('.am-project')!
-    const projectSelect = root.querySelector<HTMLSelectElement>('.am-filter-project select')!
-    const otherOption = [...projectSelect.options].find((o) => o.value !== '' && !selectedProject.querySelector(`#am-project-${o.value}`))!
-    projectSelect.value = otherOption.value
-    projectSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    const selectedProjectId = selectedProject.getAttribute('aria-labelledby')!.replace('am-project-', '')
+    root.querySelector<HTMLButtonElement>('.am-project-picker__trigger')!.click()
+    await flush()
+    const otherOption = [...root.querySelectorAll<HTMLButtonElement>('.am-project-picker__options [data-project-id]')]
+      .find((option) => option.dataset.projectId !== selectedProjectId && Number(option.dataset.activeTotal) > 0)!
+    otherOption.click()
     await flush()
     expect(root.querySelector('.am-selection-anchor .am-card-pinned-note')).not.toBeNull()
     hit(root, pinnedId).focus()
@@ -2210,8 +2216,8 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
     const search = root.querySelector<HTMLInputElement>('.am-filter-query input')!
     for (const k of ['ArrowRight', 'ArrowLeft', 'Home', 'End', 'Escape']) key(root, k, search)
     await flush()
-    const select = root.querySelector<HTMLSelectElement>('.am-filter-project select')!
-    for (const k of ['ArrowDown', 'ArrowUp', 'Escape']) key(root, k, select)
+    const projectTrigger = root.querySelector<HTMLButtonElement>('.am-project-picker__trigger')!
+    for (const k of ['ArrowDown', 'ArrowUp', 'Escape']) key(root, k, projectTrigger)
     await flush()
     const offer = root.querySelector<HTMLButtonElement>('.am-attention-select')!
     for (const k of ['ArrowRight', 'End', 'Escape']) key(root, k, offer)

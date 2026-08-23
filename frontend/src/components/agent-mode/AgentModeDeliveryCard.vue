@@ -66,8 +66,10 @@ const props = withDefaults(
     activatable?: boolean
     /** Last-known data shown while the feed is unreachable. */
     degraded?: boolean
+    /** Calm hides supplemental metadata; full preserves the audit-rich card. */
+    density?: 'calm' | 'full'
   }>(),
-  { tabbable: false, pinnedReason: null, size: 'md', activatable: true, degraded: false },
+  { tabbable: false, pinnedReason: null, size: 'md', activatable: true, degraded: false, density: 'full' },
 )
 
 const emit = defineEmits<{
@@ -147,6 +149,7 @@ function onKeydown(event: KeyboardEvent) {
     :class="[
       `am-card--${d.health}`,
       `am-card--${size}`,
+      `am-card--${density}`,
       {
         'is-selected': selected,
         'is-attention': attention,
@@ -197,7 +200,7 @@ function onKeydown(event: KeyboardEvent) {
         <span class="am-card-now-text" :class="{ 'is-empty': !d.activity.text }">{{ activityText }}</span>
       </div>
 
-      <dl class="am-card-facts">
+      <dl v-if="density === 'full'" class="am-card-facts">
         <div>
           <dt>{{ t('agentMode.card.by') }}</dt>
           <dd>{{ actorLabel }}</dd>
@@ -215,12 +218,20 @@ function onKeydown(event: KeyboardEvent) {
         </div>
       </dl>
 
+      <dl v-else class="am-card-calm-meta">
+        <div><dt>{{ t('agentMode.card.stage') }}</dt><dd>{{ stage }}</dd></div>
+        <div class="am-card-fresh" :class="`am-card-fresh--${d.freshness.state}`">
+          <dt>{{ t('agentMode.card.reported') }}</dt>
+          <dd>{{ reported ?? t('agentMode.freshness.noReport') }}<span v-if="stale"> · {{ t(freshnessKey(d)) }}</span></dd>
+        </div>
+      </dl>
+
       <p v-if="degraded" class="am-card-retained">
         <AppIcon name="wifi-off" :size="11" aria-hidden="true" />
         <span>{{ t('agentMode.card.retained') }}</span>
       </p>
 
-      <p v-if="d.tags.length" class="am-card-tags">
+      <p v-if="density === 'full' && d.tags.length" class="am-card-tags">
         <span class="am-sr-only">{{ t('agentMode.card.tagsSummary', { list: d.tags.join(', ') }) }}</span>
         <span aria-hidden="true" class="am-card-tags-visible">
           <span v-for="tag in visibleTags" :key="tag" class="am-card-tag">#{{ tag }}</span>
@@ -260,7 +271,7 @@ function onKeydown(event: KeyboardEvent) {
         </span>
       </div>
 
-      <p v-if="d.statusText" class="am-card-status">{{ d.statusText }}</p>
+      <p v-if="density === 'full' && d.statusText" class="am-card-status">{{ d.statusText }}</p>
     </button>
 
     <div v-if="pinnedReason" class="am-card-pinned-note" aria-hidden="true">
@@ -374,6 +385,7 @@ function onKeydown(event: KeyboardEvent) {
   cursor: pointer;
 }
 .am-card--lg .am-card-hit { padding: 22px 20px 16px; }
+.am-card--calm .am-card-hit { padding: 13px 13px 10px; }
 /* keyboard focus: ink ring, offset outside the selection ring so both read */
 .am-card-hit:focus { outline: none; }
 .am-card-hit:focus-visible {
@@ -474,6 +486,20 @@ function onKeydown(event: KeyboardEvent) {
 .am-card-fresh--stale dd,
 .am-card-fresh--unknown dd { color: var(--am-amber); }
 .am-card-fresh-state { font-weight: 600; }
+
+.am-card-calm-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 8px 0 0;
+}
+.am-card-calm-meta > div { display: flex; min-width: 0; gap: 5px; }
+.am-card-calm-meta dt { color: var(--am-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.am-card-calm-meta dd { margin: 0; overflow: hidden; color: var(--am-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.am-card--calm .am-card-now { margin-top: 9px; padding-top: 8px; }
+.am-card--calm .am-card-estimate { margin-top: 9px; }
+.am-card--calm .am-card-blocker,
+.am-card--calm .am-card-reason { margin-top: 7px; }
 
 .am-card-retained {
   display: flex;

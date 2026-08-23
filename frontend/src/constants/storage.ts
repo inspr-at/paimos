@@ -117,6 +117,10 @@ export const LS_INTAKE_TTS_MUTED = 'paimos:intake:tts-muted'
 export const lsAgentModeSelectedKey = (userId: number | undefined) =>
   `paimos:agent-mode:selected:${userId ?? 0}`
 
+/** PAI-818: Agent Mode card density preference per effective user. */
+export const lsAgentModeDensityKey = (userId: number | undefined) =>
+  `paimos:agent-mode:density:${userId ?? 0}`
+
 /** PAI-809: opaque pending/accepted command id for one effective user and
  * canonical delivery. This key is sessionStorage-only; callers must not use
  * it with localStorage. */

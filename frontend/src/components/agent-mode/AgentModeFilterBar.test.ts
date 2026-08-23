@@ -17,6 +17,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { nextTick } from 'vue'
 
 import { mountComponent } from '@/components/ai/testMount'
 import { EMPTY_FILTERS, type AgentModeFilters } from '@/composables/agent-mode/agentModeFilters'
@@ -26,9 +27,9 @@ import AgentModeFilterBar from './AgentModeFilterBar.vue'
 
 const fixture = normalizeWireSnapshot(makeFixtureSnapshot(10), 0)
 
-async function bar(filters: AgentModeFilters, onUpdate = vi.fn()) {
+async function bar(filters: AgentModeFilters, onUpdate = vi.fn(), extra: Record<string, unknown> = {}) {
   setActivePinia(createPinia())
-  const m = await mountComponent(AgentModeFilterBar, { filters, aggregates: fixture.aggregates, 'onUpdate:filters': onUpdate })
+  const m = await mountComponent(AgentModeFilterBar, { filters, aggregates: fixture.aggregates, 'onUpdate:filters': onUpdate, ...extra })
   return { ...m, onUpdate }
 }
 
@@ -114,5 +115,37 @@ describe('AgentModeFilterBar (PAI-805) — health radiogroup', () => {
     const active = await bar({ ...EMPTY_FILTERS, query: '\uFEFF' })
     expect(active.el.querySelector('.am-filter-clear')).not.toBeNull()
     await active.unmount()
+  })
+
+  it('switches from the shared authorized catalog, including a zero-active project absent from aggregates', async () => {
+    const m = await bar(EMPTY_FILTERS, vi.fn(), {
+      projectCatalog: [
+        { projectId: 12, projectKey: 'PAI', projectName: 'Paimos' },
+        { projectId: 91, projectKey: 'VAC', projectName: 'Vacation' },
+      ],
+      projectActiveTotals: new Map([[12, 7], [91, 0]]),
+    })
+    m.el.querySelector<HTMLButtonElement>('.am-project-picker__trigger')!.click()
+    await nextTick()
+    const options = [...m.el.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+    expect(options.map((option) => option.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'All projects',
+      'PAI · Paimos7 active',
+      'VAC · VacationNo active deliveries',
+    ])
+    options[2].click()
+    expect(m.onUpdate).toHaveBeenLastCalledWith({ projectId: 91, laneKey: null })
+    await m.unmount()
+  })
+
+  it('offers a persisted-presentation density choice separately from filters', async () => {
+    const onDensity = vi.fn()
+    const m = await bar(EMPTY_FILTERS, vi.fn(), { density: 'calm', 'onUpdate:density': onDensity })
+    const group = m.el.querySelector<HTMLElement>('.am-density')!
+    const options = [...group.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
+    expect(options.map((option) => option.getAttribute('aria-checked'))).toEqual(['true', 'false'])
+    options[1].click()
+    expect(onDensity).toHaveBeenCalledWith('full')
+    await m.unmount()
   })
 })
