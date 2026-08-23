@@ -86,6 +86,22 @@ describe('AgentModeDeliveryCard (PAI-805)', () => {
     await m.unmount()
   })
 
+  it('keeps decision signals in calm mode while hiding supplemental card detail', async () => {
+    const d = { ...ten[0], tags: ['supplemental'], statusText: 'Verbose secondary status' }
+    const m = await card(d, { density: 'calm' })
+    const text = m.el.textContent ?? ''
+    expect(text).toContain(d.issueKey)
+    expect(text).toContain('Writing membership checks')
+    expect(text).toContain('Specification')
+    expect(text).toContain('Healthy')
+    expect(text).toContain('64 %')
+    expect(text).not.toContain('Codex · agent')
+    expect(text).not.toContain('#supplemental')
+    expect(text).not.toContain('Verbose secondary status')
+    expect(m.el.querySelector('.am-card-calm-meta')).not.toBeNull()
+    await m.unmount()
+  })
+
   it('shows percent and landing time only when trusted, and names the reason otherwise', async () => {
     const trusted = ten[0]
     const m1 = await card(trusted)

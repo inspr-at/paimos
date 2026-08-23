@@ -12,13 +12,15 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import AppIcon from '@/components/AppIcon.vue'
+import AgentModeCommandHints from '@/components/agent-mode/AgentModeCommandHints.vue'
+import type { AgentModeCommandHint } from '@/composables/agent-mode/agentModeCommandHints'
 import type { AgentModeVoiceCandidateView, AgentModeVoiceError, AgentModeVoiceNotice } from '@/composables/agent-mode/useAgentModeVoice'
 import type { UnsupportedVoiceControl } from '@/composables/agent-mode/agentModeVoiceIntent'
 import type { VoiceNoteState } from '@/composables/agent-mode/agentModeVoiceMachine'
 import type { MicPermission } from '@/composables/useMicPermission'
 import type { MicState } from '@/composables/useMicTranscript'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   micState: MicState
   micLevel: number
   micSupported: boolean
@@ -44,7 +46,8 @@ const props = defineProps<{
   inputResetToken: number
   oneShotWarning: boolean
   compact: boolean
-}>()
+  hints?: readonly AgentModeCommandHint[]
+}>(), { hints: () => [] })
 
 const emit = defineEmits<{
   toggleMic: []
@@ -153,6 +156,8 @@ watch(() => props.inputResetToken, () => { typed.value = '' }, { flush: 'sync' }
       </button>
     </div>
 
+    <AgentModeCommandHints :hints="hints" :disabled="!authorized || busy" :compact="compact" @execute="emit('submit', $event)" />
+
     <form class="am-voice-form" @submit.prevent="submitTyped">
       <label class="am-voice-sr" for="am-voice-command">{{ t('agentMode.voice.typed.label') }}</label>
       <input
@@ -232,7 +237,11 @@ watch(() => props.inputResetToken, () => { typed.value = '' }, { flush: 'sync' }
   box-shadow: 0 1px 2px color-mix(in srgb, var(--am-ink) 7%, transparent);
   font-size: 11px;
 }
+.am-voice.is-compact { gap: 5px; }
 .am-voice-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.am-voice.is-compact .am-voice-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.am-voice.is-compact .am-voice-mic span,
+.am-voice.is-compact .am-voice-replies span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .am-voice button,
 .am-voice input { font: inherit; }
 .am-voice button { cursor: pointer; }

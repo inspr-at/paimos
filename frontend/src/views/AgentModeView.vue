@@ -50,7 +50,7 @@ import AgentModeConversation, { type NarrationLine } from '@/components/agent-mo
 import AgentModeControlsCard from '@/components/agent-mode/AgentModeControlsCard.vue'
 import AgentModeVoiceConsole from '@/components/agent-mode/AgentModeVoiceConsole.vue'
 import AgentModeDetailLever, { type DetailLevel } from '@/components/agent-mode/AgentModeDetailLever.vue'
-import AgentModeFilterBar from '@/components/agent-mode/AgentModeFilterBar.vue'
+import AgentModeFilterBar, { type AgentModeCardDensity } from '@/components/agent-mode/AgentModeFilterBar.vue'
 import AgentModeLanes from '@/components/agent-mode/AgentModeLanes.vue'
 import AgentModePortfolioOverview from '@/components/agent-mode/AgentModePortfolioOverview.vue'
 import AgentModeSelectionAnchor from '@/components/agent-mode/AgentModeSelectionAnchor.vue'
@@ -59,9 +59,11 @@ import AgentModeStateNotice from '@/components/agent-mode/AgentModeStateNotice.v
 import { COMPACT_CONVERSATION_QUERY, TIGHT_EDITOR_QUERY, estimateView } from '@/components/agent-mode/agentModePresentation'
 import {
   EMPTY_FILTERS,
+  filtersActive,
   type AgentModeFilters,
   type HealthFilter,
 } from '@/composables/agent-mode/agentModeFilters'
+import { buildAgentModeCommandHints } from '@/composables/agent-mode/agentModeCommandHints'
 import {
   TOMBSTONE_TTL_MS,
   buildProjectGroups,
@@ -89,7 +91,7 @@ import {
 import { buildControlVoicePhrase } from '@/composables/agent-mode/agentModeVoiceIntent'
 import { useInteractionHold } from '@/composables/agent-mode/useInteractionHold'
 import { formatRelativeTimeWithLocale, formatTimeWithLocale, useDateFormat } from '@/composables/useDateFormat'
-import { lsAgentModeSelectedKey } from '@/constants/storage'
+import { lsAgentModeDensityKey, lsAgentModeSelectedKey } from '@/constants/storage'
 import type { AgentModeSnapshotLoader, Delivery } from '@/services/agentMode'
 import type { AgentModeAggregates } from '@/services/agentModeAggregateSchema'
 import type { AgentModeEventSourceFactory } from '@/services/agentModeEvents'
@@ -316,6 +318,19 @@ function parseFilters(): { filters: AgentModeFilters; query: AgentModeSnapshotQu
   }
 }
 const filters = canonicalRouteFilters
+
+function readCardDensity(userId: number | undefined): AgentModeCardDensity {
+  try {
+    return localStorage.getItem(lsAgentModeDensityKey(userId)) === 'full' ? 'full' : 'calm'
+  } catch {
+    return 'calm'
+  }
+}
+const cardDensity = ref<AgentModeCardDensity>(readCardDensity(auth.user?.id))
+watch(() => auth.user?.id, (userId) => { cardDensity.value = readCardDensity(userId) })
+watch(cardDensity, (density) => {
+  try { localStorage.setItem(lsAgentModeDensityKey(auth.user?.id), density) } catch { /* preference remains in memory */ }
+})
 
 // Filter identity is a privacy boundary and is therefore loaded explicitly.
 // Selection has a different lifecycle below: user/deep-link changes refetch,
@@ -964,6 +979,32 @@ const voice = useAgentModeVoice({
   },
 })
 
+const projectCatalog = computed(() => voice.projectCatalog.value)
+const projectPickerTotals = computed<ReadonlyMap<number, number> | null>(() => {
+  const totals = projectActiveTotals.value
+  if (!totals || filtersActive(filters.value)) return totals
+  return new Map(projectCatalog.value.map((project) => [
+    project.projectId,
+    totals.get(project.projectId) ?? 0,
+  ]))
+})
+const commandHints = computed(() => {
+  const flags = canonicalAggregates.value?.root.flags
+  return buildAgentModeCommandHints({
+    locale: locale.value,
+    detailLevel: detailLevel.value,
+    selected: selectedDelivery.value != null,
+    travelCount: travelOrder.value.length,
+    filtersActive: filtersActive(filters.value),
+    health: filters.value.health,
+    blockedCount: flags?.blocked ?? 0,
+    attentionCount: flags?.attention ?? 0,
+    staleCount: flags?.stale_no_signal ?? 0,
+    candidateCount: voice.candidateMatchCount.value,
+    notePending: voice.note.value != null,
+  })
+})
+
 /** Deterministic entry seam for card activation now and voice intent later.
  * It changes semantic zoom only; opening the mouse editor remains explicit. */
 defineExpose({ showDetails: drill })
@@ -1261,6 +1302,7 @@ const selectedPosition = computed(() => {
           :input-reset-token="voice.inputResetToken.value"
           :one-shot-warning="voiceOneShotWarning"
           :compact="compactConversation"
+          :hints="commandHints"
           @toggle-mic="voice.toggleListening"
           @set-replies="voice.setVoiceReplies"
           @submit="voice.submitTyped"
@@ -1289,7 +1331,11 @@ const selectedPosition = computed(() => {
         v-if="detailLevel === 10"
         :filters="filters"
         :aggregates="canonicalAggregates"
+        :project-catalog="projectCatalog"
+        :project-active-totals="projectPickerTotals"
+        :density="cardDensity"
         @update:filters="setFilters"
+        @update:density="cardDensity = $event"
       />
 
       <AgentModeStateNotice
@@ -1400,6 +1446,7 @@ const selectedPosition = computed(() => {
             :server-now-ms="serverNowMs"
             :locale="locale"
             :degraded="data.degraded.value"
+            :density="cardDensity"
             @select="selectDelivery"
             @activate="drill"
             @interact="hold.markInteraction"
