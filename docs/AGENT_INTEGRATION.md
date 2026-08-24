@@ -202,8 +202,14 @@ MCP clients can launch the same broker over stdio:
 paimos serve --project PAI --repo-root . --mcp-stdio
 ```
 
-The broker does not accept writes. HTTP mode is loopback-only unless the
-operator explicitly passes `--unsafe-allow-remote`.
+The broker does not accept project or repository writes. HTTP mode is
+loopback-only unless the operator explicitly passes `--unsafe-allow-remote`.
+For Claude Code, `--mcp-stdio --channel-as <harness>:<agent>` opts into the
+experimental `claude/channel` server capability and polls that attributed
+inbox. It emits `notifications/claude/channel` with framed message content and
+safe string metadata, then advances only the durable message read cursor after
+the JSON-RPC notification is written successfully. Without `--channel-as`, the
+capability is absent and the broker remains wholly read-only.
 
 Blast-radius queries are available at
 `GET /api/projects/:id/graph/blast-radius?issue=PAI-79&depth=3` for the

@@ -24,6 +24,22 @@ write limits, and appear separately from human comments on anchored issues.
 Addressee/listen reads return the PAI-817 untrusted-data framing in the first
 text part; human project and issue inspection keeps the structured raw parts.
 
+Allow a sender, then consume an inbox with a durable receiver cursor:
+
+```bash
+paimos message allow paimos:claude --for codex:codex --project PAI
+paimos listen --as codex:codex --project PAI --ack
+paimos listen --as codex:codex --project PAI --follow --deliver codex --deliver-target "$CODEX_THREAD_ID"
+```
+
+`listen` exits 3 when a one-shot read has no mail and 4 when the selected
+native adapter is unavailable. `--ack` advances the server cursor only after
+output succeeds; `--deliver codex|claude` implies acknowledgement only after
+the vendor handoff succeeds. Codex uses `codex queue --thread`. Claude uses
+the active Claude Code messaging socket from
+`CLAUDE_CODE_MESSAGING_SOCKET` (and its token environment when present).
+Neither adapter stores or prints vendor credentials.
+
 ## Which surface should I use?
 
 **TL;DR — one-line decision rule:**
@@ -833,6 +849,19 @@ paimos serve --project PAI --repo-root . --addr 127.0.0.1:8765
 The broker is read-only and loopback-only by default. Repo-derived
 content is marked `untrusted_data` because an agent must treat local code
 and docs as prompt input, not instructions.
+
+Claude Code can opt into the experimental channel capability while launching
+the stdio broker:
+
+```bash
+paimos serve --project PAI --repo-root . --mcp-stdio --channel-as claude:claude
+```
+
+This adds `capabilities.experimental["claude/channel"]` and emits
+`notifications/claude/channel` after initialization. The option changes only
+message read/cursor state; it does not grant repo or PAIMOS mutation tools.
+See Anthropic's [channels reference](https://code.claude.com/docs/en/channels-reference)
+and [channels guide](https://code.claude.com/docs/en/channels).
 
 ---
 

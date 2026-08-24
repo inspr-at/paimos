@@ -11507,6 +11507,22 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE INDEX idx_agent_messages_envelope_to ON agent_messages(to_address, id)`,
 			`CREATE INDEX idx_agent_messages_thread ON agent_messages(thread_id, id)`,
 		}},
+
+		// M153 / PAI-816: durable, monotonic receiver cursors. Acknowledgement
+		// belongs to an attributed project agent and one full harness address;
+		// read_at records which delivered rows the receiver has durably consumed.
+		{153, []string{
+			`ALTER TABLE agent_messages ADD COLUMN read_at TEXT`,
+			`CREATE TABLE agent_message_cursors (
+				project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+				project_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				address          TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+				cursor           INTEGER NOT NULL DEFAULT 0 CHECK(cursor >= 0),
+				updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+				PRIMARY KEY(project_id, address)
+			)`,
+			`CREATE INDEX idx_agent_message_cursors_agent ON agent_message_cursors(project_agent_id, address)`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -11650,6 +11666,7 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	// security. Refuse partial local copies so the security contract is not bypassed.
 	151: checkM151SchemaIsUnapplied,
 	152: checkM152SchemaIsUnapplied,
+	153: checkM153SchemaIsUnapplied,
 }
 
 func checkM149SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
@@ -11728,6 +11745,34 @@ func checkM152SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
 	}
 	if len(collisions) > 0 {
 		return fmt.Errorf("M152 schema is partially present or locally incompatible: %s", strings.Join(collisions, ", "))
+	}
+	return nil
+}
+
+func checkM153SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT 'column:agent_messages.'||name FROM pragma_table_info('agent_messages') WHERE name='read_at'
+		UNION ALL
+		SELECT type||':'||name FROM sqlite_master
+		WHERE name IN ('agent_message_cursors','idx_agent_message_cursors_agent')
+		ORDER BY 1`)
+	if err != nil {
+		return fmt.Errorf("inspect M153 schema ownership: %w", err)
+	}
+	defer rows.Close()
+	var collisions []string
+	for rows.Next() {
+		var collision string
+		if err := rows.Scan(&collision); err != nil {
+			return fmt.Errorf("scan M153 schema ownership: %w", err)
+		}
+		collisions = append(collisions, collision)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate M153 schema ownership: %w", err)
+	}
+	if len(collisions) > 0 {
+		return fmt.Errorf("M153 schema is partially present or locally incompatible: %s", strings.Join(collisions, ", "))
 	}
 	return nil
 }

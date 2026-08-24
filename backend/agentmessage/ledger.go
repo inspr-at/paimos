@@ -41,6 +41,21 @@ type ListFilter struct {
 	Limit         int
 }
 
+type InboxInput struct {
+	ProjectID int64
+	Address   string
+	Agent     string
+	AfterID   int64
+	Limit     int
+}
+
+type AckInput struct {
+	ProjectID int64
+	Address   string
+	Agent     string
+	Cursor    int64
+}
+
 func parseAddress(raw string) (string, string, error) {
 	parts := strings.Split(strings.TrimSpace(raw), ":")
 	if len(parts) != 2 || !addressPart.MatchString(parts[0]) || !addressPart.MatchString(parts[1]) {
@@ -232,8 +247,142 @@ func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, 
 	return out, rows.Err()
 }
 
+// ListInbox binds an addressee read to trusted request attribution and starts
+// after the receiver's durable acknowledged cursor. A caller may advance the
+// in-memory position with AfterID, but only AckInbox changes durable state.
+func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, error) {
+	address, _, err := s.resolveAttributedInbox(ctx, in.ProjectID, in.Address, in.Agent)
+	if err != nil {
+		return nil, err
+	}
+	var cursor int64
+	err = s.db.QueryRowContext(ctx, `SELECT cursor FROM agent_message_cursors WHERE project_id=? AND address=?`, in.ProjectID, address).Scan(&cursor)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if in.AfterID < cursor {
+		in.AfterID = cursor
+	}
+	messages, err := s.ListEnvelopes(ctx, ListFilter{
+		ProjectID: in.ProjectID, To: address, DeliveredOnly: true, AfterID: in.AfterID, Limit: in.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	next := in.AfterID
+	for i := range messages {
+		if messages[i].Cursor > next {
+			next = messages[i].Cursor
+		}
+	}
+	return &InboxPage{Address: address, Cursor: cursor, NextCursor: next, Messages: messages}, nil
+}
+
+// AckInbox advances one receiver/address cursor monotonically and records the
+// read timestamp for delivered rows covered by that acknowledgement. The
+// cursor must name a real delivered message in this inbox, preventing a client
+// from skipping arbitrary future rows.
+func (s *Service) AckInbox(ctx context.Context, in AckInput) (*CursorState, error) {
+	if in.Cursor <= 0 {
+		return nil, coded("agent_message_cursor_invalid", "cursor must be greater than zero")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	address, agentID, err := resolveAttributedInboxQuery(ctx, tx, in.ProjectID, in.Address, in.Agent)
+	if err != nil {
+		return nil, err
+	}
+	var current int64
+	err = tx.QueryRowContext(ctx, `SELECT cursor FROM agent_message_cursors WHERE project_id=? AND address=?`, in.ProjectID, address).Scan(&current)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if in.Cursor <= current {
+		return &CursorState{Address: address, Cursor: current}, nil
+	}
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_messages am
+		JOIN project_agents pa ON pa.id=am.to_agent_id
+		WHERE pa.project_id=? AND am.id=? AND am.to_address=? AND am.delivered=1 AND am.is_action_request=0`,
+		in.ProjectID, in.Cursor, address).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if exists == 0 {
+		return nil, coded("agent_message_cursor_unknown", "cursor is not a delivered message in this inbox")
+	}
+	readAt := time.Now().UTC().Format(time.RFC3339)
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_messages SET read_at=COALESCE(read_at,?)
+		WHERE to_agent_id=? AND to_address=? AND delivered=1 AND is_action_request=0 AND id>? AND id<=?`,
+		readAt, agentID, address, current, in.Cursor); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_cursors(project_id,project_agent_id,address,cursor,updated_at)
+		VALUES(?,?,?,?,?)
+		ON CONFLICT(project_id,address) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at
+		WHERE excluded.cursor>agent_message_cursors.cursor`, in.ProjectID, agentID, address, in.Cursor, readAt); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &CursorState{Address: address, Cursor: in.Cursor}, nil
+}
+
+// AllowSender is the human/operator control plane for the PAI-817 sender
+// allowlist. Addresses stay name-based; only the existing project-agent IDs are
+// persisted.
+func (s *Service) AllowSender(ctx context.Context, projectID int64, receiverAddress, senderAddress string) error {
+	_, receiverName, err := parseAddress(receiverAddress)
+	if err != nil {
+		return err
+	}
+	_, senderName, err := parseAddress(senderAddress)
+	if err != nil {
+		return err
+	}
+	var receiverID, senderID int64
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, projectID, receiverName).Scan(&receiverID); err != nil {
+		return coded("agent_message_addressee_unknown", "receiver is not registered in this project")
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, projectID, senderName).Scan(&senderID); err != nil {
+		return coded("agent_message_sender_unknown", "sender is not registered in this project")
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO agent_message_allowlist(receiver_agent_id,sender_agent_id) VALUES(?,?)
+		ON CONFLICT(receiver_agent_id,sender_agent_id) DO NOTHING`, receiverID, senderID)
+	return err
+}
+
+func (s *Service) resolveAttributedInbox(ctx context.Context, projectID int64, rawAddress, attributedAgent string) (string, int64, error) {
+	return resolveAttributedInboxQuery(ctx, s.db, projectID, rawAddress, attributedAgent)
+}
+
+type queryRower interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func resolveAttributedInboxQuery(ctx context.Context, q queryRower, projectID int64, rawAddress, attributedAgent string) (string, int64, error) {
+	harness, name, err := parseAddress(rawAddress)
+	if err != nil {
+		return "", 0, err
+	}
+	if strings.TrimSpace(attributedAgent) == "" {
+		return "", 0, coded("agent_message_attribution_required", "X-Paimos-Agent-Name attribution is required")
+	}
+	if name != strings.TrimSpace(attributedAgent) {
+		return "", 0, coded("agent_message_addressee_mismatch", "attributed agent does not match inbox addressee")
+	}
+	var agentID int64
+	if err := q.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, projectID, name).Scan(&agentID); err != nil {
+		return "", 0, coded("agent_message_addressee_unknown", "addressee is not registered in this project")
+	}
+	return harness + ":" + name, agentID, nil
+}
+
 const envelopeSelect = `SELECT am.id,am.message_id,am.context_id,am.task_id,am.role,am.parts_json,am.metadata_json,
-	am.from_address,am.to_address,am.reply_to,am.thread_id,am.hop_count,am.delivered,am.held_reason,am.is_action_request,am.created_at
+	am.from_address,am.to_address,am.reply_to,am.thread_id,am.hop_count,am.delivered,am.held_reason,am.is_action_request,am.created_at,COALESCE(am.read_at,'')
 	FROM agent_messages am JOIN project_agents pa ON pa.id=am.from_agent_id`
 
 type scanner interface{ Scan(...any) error }
@@ -241,7 +390,7 @@ type scanner interface{ Scan(...any) error }
 func scanEnvelope(row scanner) (*Envelope, error) {
 	var e Envelope
 	var parts, metadata string
-	if err := row.Scan(&e.Cursor, &e.MessageID, &e.ContextID, &e.TaskID, &e.Role, &parts, &metadata, &e.From, &e.To, &e.ReplyTo, &e.ThreadID, &e.Hop, &e.Delivered, &e.HeldReason, &e.IsActionRequest, &e.CreatedAt); err != nil {
+	if err := row.Scan(&e.Cursor, &e.MessageID, &e.ContextID, &e.TaskID, &e.Role, &parts, &metadata, &e.From, &e.To, &e.ReplyTo, &e.ThreadID, &e.Hop, &e.Delivered, &e.HeldReason, &e.IsActionRequest, &e.CreatedAt, &e.ReadAt); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(parts), &e.Parts); err != nil {

@@ -9,6 +9,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestBroker(t *testing.T) (*contextBroker, string) {
@@ -139,5 +141,76 @@ func TestServeMCPStdioRepoState(t *testing.T) {
 	}
 	if len(resp.Result.Content) != 1 || !strings.Contains(resp.Result.Content[0].Text, "AGENTS.md") {
 		t.Fatalf("repo state content missing AGENTS.md: %s", out.String())
+	}
+}
+
+func TestServeMCPClaudeChannelCapabilityIsOptIn(t *testing.T) {
+	b, _ := newTestBroker(t)
+	result, err := b.handleMCPRequest(mcpRequest{Method: "initialize"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(result)
+	if strings.Contains(string(raw), "claude/channel") {
+		t.Fatalf("channel capability must be absent by default: %s", raw)
+	}
+	b.channelAddress, b.channelAgent = "claude:claude", "claude"
+	result, err = b.handleMCPRequest(mcpRequest{Method: "initialize"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(result)
+	if !strings.Contains(string(raw), `"claude/channel"`) || !strings.Contains(string(raw), `"instructions"`) {
+		t.Fatalf("channel initialization incomplete: %s", raw)
+	}
+}
+
+func TestServeMCPClaudeChannelNotifiesThenAcknowledges(t *testing.T) {
+	message := messageEnvelope{Cursor: 12, MessageID: "m12", From: "paimos:codex", To: "claude:claude", ThreadID: "thread-12", TaskID: "PAI-816"}
+	message.Parts = append(message.Parts, struct {
+		Kind string `json:"kind"`
+		Text string `json:"text"`
+	}{Kind: "text", Text: "framed channel payload"})
+	acked := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/projects/6/messages/listen":
+			if r.Header.Get(agentAttrHeader) != "claude" {
+				t.Errorf("missing channel attribution")
+			}
+			_ = json.NewEncoder(w).Encode(inboxPage{Address: "claude:claude", NextCursor: 12, Messages: []messageEnvelope{message}})
+		case "/api/projects/6/messages/ack":
+			_ = json.NewEncoder(w).Encode(map[string]any{"cursor": 12})
+			acked <- struct{}{}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	b, _ := newTestBroker(t)
+	b.client = &Client{baseURL: srv.URL, http: srv.Client()}
+	b.channelAddress, b.channelAgent, b.channelPollInterval = "claude:claude", "claude", time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out bytes.Buffer
+	go b.runClaudeChannel(ctx, newLockedJSONEncoder(&out))
+	select {
+	case <-acked:
+		cancel()
+	case <-time.After(time.Second):
+		t.Fatal("channel did not acknowledge delivered notification")
+	}
+	var notification struct {
+		Method string `json:"method"`
+		Params struct {
+			Content string            `json:"content"`
+			Meta    map[string]string `json:"meta"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &notification); err != nil {
+		t.Fatalf("decode notification: %v\n%s", err, out.String())
+	}
+	if notification.Method != "notifications/claude/channel" || notification.Params.Content != "framed channel payload" || notification.Params.Meta["cursor"] != "12" {
+		t.Fatalf("notification=%#v", notification)
 	}
 }

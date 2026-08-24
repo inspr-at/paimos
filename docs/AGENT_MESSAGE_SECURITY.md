@@ -28,7 +28,7 @@ This implementation provides the following **irrevocable security guarantees**:
 
 ## Architecture
 
-### Database Schema (M151 + M152)
+### Database Schema (M151–M153)
 
 Three tables implement the security contract:
 
@@ -52,6 +52,12 @@ the sender from trusted session attribution and the addressee from a
 select numeric agent IDs. The envelope persists stable message/thread/reply
 IDs, project and issue context, text parts, metadata, hop, and session audit
 data. See `backend/contracts/agent-message-v1.schema.json`.
+
+M153 adds a per-project/address durable cursor and message `read_at` timestamp.
+Listen and acknowledge requests bind the address to trusted
+`X-Paimos-Agent-Name` attribution. An acknowledgement advances monotonically
+and only to an actual delivered, non-action row in that inbox, so a malicious
+client cannot skip unseen future messages.
 
 ### Message Framing
 
@@ -123,94 +129,53 @@ This separation prevents prompt injection: free-text messages cannot trigger act
 
 ### Send Message
 ```
-POST /api/agent-messages/send
+POST /api/projects/:projectID/messages
 {
-  "from_agent_id": 1,
-  "to_agent_id": 2,
-  "issue_id": 123,              // optional
-  "parent_message_id": 456,     // optional, for replies
+  "to": "codex:reviewer",
+  "issue_id": 123,
+  "reply_to": "019...",
   "body": "Message content"
 }
 ```
 
-### Get Delivered Messages
+The sender comes from trusted request attribution, never the body.
+
+### Listen and Acknowledge
 ```
-GET /api/agent-messages/delivered/{agentID}?limit=10&after_id=123
+GET  /api/projects/:projectID/messages/listen?to=codex:reviewer&after=123&limit=10
+POST /api/projects/:projectID/messages/ack
+{"to":"codex:reviewer","cursor":130}
 ```
 
 - `limit`: Maximum messages per request (default 10, max 10)
-- `after_id`: Cursor for pagination - only return messages with ID > after_id
-
-### Get Held Messages (requires authorization)
-```
-GET /api/agent-messages/held/{agentID}
-```
+- `after`: Ephemeral resume position; the durable acknowledged cursor is also enforced
+- receiver attribution must match the address name
 
 ### Manage Allowlist
 ```
-POST /api/agent-messages/allowlist
+POST /api/projects/:projectID/message-allowlist
 {
-  "receiver_agent_id": 1,
-  "sender_agent_id": 2
+  "receiver": "codex:reviewer",
+  "sender": "paimos:planner"
 }
-
-DELETE /api/agent-messages/allowlist
-{
-  "receiver_agent_id": 1,
-  "sender_agent_id": 2
-}
-
-GET /api/agent-messages/allowlist/{receiverAgentID}
 ```
+
+The allowlist mutation is an operator control plane. Held rows remain visible
+through project/issue inspection and are never returned by listen.
 
 ## Usage Example
 
-```go
-// Set up service
-svc := agentmessage.NewService(db)
+```bash
+# Human/operator control plane: allow the sender for this receiver.
+paimos message allow paimos:planner --for codex:reviewer --project PAI
 
-// Get agent IDs from project_agents table
-var agentAID, agentBID int64
-db.QueryRow(`SELECT id FROM project_agents WHERE name = 'agent-a'`).Scan(&agentAID)
-db.QueryRow(`SELECT id FROM project_agents WHERE name = 'agent-b'`).Scan(&agentBID)
+# Sender identity is trusted CLI attribution, not a message field.
+PAIMOS_AGENT_NAME=planner paimos tell codex:reviewer --project PAI \
+  --message "I found a potential issue in the auth flow"
 
-// Agent B adds Agent A to allowlist
-svc.AddAllowlistEntry(ctx, agentBID, agentAID)
-
-// Agent A sends message to Agent B
-msg, _ := svc.SendMessage(ctx, agentAID, agentBID, nil, nil, "I found a potential issue in the auth flow")
-
-// Agent B retrieves delivered messages (capped at 10 per turn)
-messages, _ := svc.GetDeliveredMessages(ctx, agentBID, 10, 0)
-for _, msg := range messages {
-    // Get agent names for framing
-    var fromName, projectKey string
-    // ... fetch from database ...
-    
-    framed := agentmessage.FramedMessage{
-        From:    fromName,
-        Project: projectKey,
-        Hop:     msg.HopCount,
-        Body:    msg.Body,
-        IsActionRequest: msg.IsActionRequest,
-    }
-    
-    // Deliver with untrusted wrapper + preamble
-    delivered := framed.FullMessage()
-    
-    // If action request, this should never happen (they're never delivered)
-    // but check defensively and surface to human
-    if msg.IsActionRequest {
-        log.Printf("CRITICAL: Action request was delivered (should be impossible): %s", msg.Body)
-    }
-}
-
-// Check held messages
-held, _ := svc.GetHeldMessages(ctx, agentBID)
-for _, msg := range held {
-    log.Printf("Held message: reason=%s, body=%s", msg.HeldReason, msg.Body)
-    // Surface to human for review
-}
+# Receiver identity must match the inbox. The cursor advances only after output.
+PAIMOS_AGENT_NAME=reviewer paimos listen --as codex:reviewer \
+  --project PAI --ack
 ```
 
 ## Testing
@@ -226,6 +191,8 @@ Comprehensive tests cover all security controls:
 - `TestPerTurnBound`: At most 10 messages per turn with cursor-based pagination
 - `TestActionRequestDetection`: Action requests detected and NEVER delivered
 - `TestHeldMessages`: Held messages are surfaced
+- durable-listen integration tests: attribution binding, bounded replay,
+  monotonic acknowledgement, `read_at`, and future-cursor rejection
 
 Run tests:
 ```bash
