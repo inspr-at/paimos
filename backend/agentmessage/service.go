@@ -13,6 +13,7 @@ import (
 )
 
 // Service implements the agent message security contract (PAI-817).
+// Uses existing project_agents registry for authorization.
 type Service struct {
 	db *sql.DB
 }
@@ -23,45 +24,67 @@ func NewService(db *sql.DB) *Service {
 }
 
 // SendMessage creates a new agent message with security checks.
-// It enforces the security contract: authorization, hop limits, rate limits,
-// size caps, action-request detection, and secret scanning.
-func (s *Service) SendMessage(ctx context.Context, msg *Message) error {
-	// Validate agent names
-	if err := ValidateAgentName(msg.FromAgent); err != nil {
-		return fmt.Errorf("invalid from_agent: %w", err)
-	}
-	if err := ValidateAgentName(msg.ToAgent); err != nil {
-		return fmt.Errorf("invalid to_agent: %w", err)
-	}
-
+// Hop count is end-to-end and system-incremented based on parent_message_id.
+// If parentMessageID is provided, hop count is parent + 1.
+// Action-request messages are NEVER delivered, only held for human review.
+func (s *Service) SendMessage(ctx context.Context, fromAgentID, toAgentID int64, issueID *int64, parentMessageID *int64, body string) (*Message, error) {
 	// Check body size
-	if len(msg.Body) > MaxBodySize {
-		return ErrBodyTooLarge
+	if len(body) > MaxBodySize {
+		return nil, ErrBodyTooLarge
 	}
 
-	// Check hop count
-	if msg.HopCount > MaxHopCount {
-		return ErrHopLimitExceeded
+	// Calculate hop count (end-to-end, system-tracked)
+	hopCount := 1
+	if parentMessageID != nil {
+		var parentHop int
+		err := s.db.QueryRowContext(ctx, `SELECT hop_count FROM agent_messages WHERE id = ?`, *parentMessageID).Scan(&parentHop)
+		if err != nil {
+			return nil, fmt.Errorf("fetch parent hop count: %w", err)
+		}
+		hopCount = parentHop + 1
+	}
+
+	// Check hop ceiling
+	if hopCount > MaxHopCount {
+		return nil, ErrHopLimitExceeded
 	}
 
 	// Detect action requests
-	msg.IsActionRequest = detectActionRequest(msg.Body)
+	isActionRequest := detectActionRequest(body)
 
-	// Check authorization allowlist
-	authorized, err := s.isAuthorized(ctx, msg.ToAgent, msg.ToProject, msg.FromAgent, msg.FromProject)
+	msg := &Message{
+		FromAgentID:     fromAgentID,
+		ToAgentID:       toAgentID,
+		IssueID:         issueID,
+		ParentMessageID: parentMessageID,
+		HopCount:        hopCount,
+		Body:            body,
+		IsActionRequest: isActionRequest,
+		CreatedAt:       time.Now(),
+	}
+
+	// Action-request messages are NEVER delivered, always held
+	if isActionRequest {
+		msg.Delivered = false
+		msg.HeldReason = "action request - requires human approval"
+		return msg, s.insertMessage(ctx, msg)
+	}
+
+	// Check authorization allowlist (uses project_agents registry)
+	authorized, err := s.isAuthorized(ctx, toAgentID, fromAgentID)
 	if err != nil {
-		return fmt.Errorf("check authorization: %w", err)
+		return nil, fmt.Errorf("check authorization: %w", err)
 	}
 	
 	if !authorized {
-		// Hold message for manual review
+		// Hold message for manual review - unlisted senders are HELD, not delivered
 		msg.Delivered = false
 		msg.HeldReason = "sender not in receiver allowlist"
 	} else {
 		// Check rate limit
-		allowed, err := s.checkRateLimit(ctx, msg.FromAgent, msg.FromProject, msg.ToAgent, msg.ToProject)
+		allowed, err := s.checkRateLimit(ctx, fromAgentID, toAgentID)
 		if err != nil {
-			return fmt.Errorf("check rate limit: %w", err)
+			return nil, fmt.Errorf("check rate limit: %w", err)
 		}
 		if !allowed {
 			msg.Delivered = false
@@ -74,18 +97,16 @@ func (s *Service) SendMessage(ctx context.Context, msg *Message) error {
 		}
 	}
 
-	// Insert message
-	return s.insertMessage(ctx, msg)
+	return msg, s.insertMessage(ctx, msg)
 }
 
-// isAuthorized checks if sender is in receiver's allowlist.
-func (s *Service) isAuthorized(ctx context.Context, receiverAgent string, receiverProject int64, senderAgent string, senderProject int64) (bool, error) {
+// isAuthorized checks if sender is in receiver's allowlist using project_agents registry.
+func (s *Service) isAuthorized(ctx context.Context, receiverAgentID, senderAgentID int64) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM agent_message_registry
-		WHERE receiver_agent = ? AND receiver_project = ?
-		  AND sender_agent = ? AND sender_project = ?
-	`, receiverAgent, receiverProject, senderAgent, senderProject).Scan(&count)
+		SELECT COUNT(*) FROM agent_message_allowlist
+		WHERE receiver_agent_id = ? AND sender_agent_id = ?
+	`, receiverAgentID, senderAgentID).Scan(&count)
 	if err != nil {
 		return false, err
 	}
@@ -94,7 +115,7 @@ func (s *Service) isAuthorized(ctx context.Context, receiverAgent string, receiv
 
 // checkRateLimit enforces per-sender rate limits.
 // Returns true if message is allowed, false if rate limit exceeded.
-func (s *Service) checkRateLimit(ctx context.Context, senderAgent string, senderProject int64, receiverAgent string, receiverProject int64) (bool, error) {
+func (s *Service) checkRateLimit(ctx context.Context, senderAgentID, receiverAgentID int64) (bool, error) {
 	now := time.Now()
 	windowStart := now.Add(-1 * time.Minute)
 
@@ -102,10 +123,9 @@ func (s *Service) checkRateLimit(ctx context.Context, senderAgent string, sender
 	var count int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COALESCE(message_count, 0) FROM agent_message_rate_limits
-		WHERE sender_agent = ? AND sender_project = ?
-		  AND receiver_agent = ? AND receiver_project = ?
+		WHERE sender_agent_id = ? AND receiver_agent_id = ?
 		  AND julianday(window_start) > julianday(?)
-	`, senderAgent, senderProject, receiverAgent, receiverProject, windowStart.Format(time.RFC3339)).Scan(&count)
+	`, senderAgentID, receiverAgentID, windowStart.Format(time.RFC3339)).Scan(&count)
 	
 	if err != nil && err != sql.ErrNoRows {
 		return false, err
@@ -117,9 +137,9 @@ func (s *Service) checkRateLimit(ctx context.Context, senderAgent string, sender
 
 	// Update or insert rate limit record
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO agent_message_rate_limits (sender_agent, sender_project, receiver_agent, receiver_project, message_count, window_start)
-		VALUES (?, ?, ?, ?, 1, ?)
-		ON CONFLICT(sender_agent, sender_project, receiver_agent, receiver_project) DO UPDATE SET
+		INSERT INTO agent_message_rate_limits (sender_agent_id, receiver_agent_id, message_count, window_start)
+		VALUES (?, ?, 1, ?)
+		ON CONFLICT(sender_agent_id, receiver_agent_id) DO UPDATE SET
 			message_count = CASE 
 				WHEN julianday(window_start) > julianday(?) THEN message_count + 1
 				ELSE 1
@@ -128,7 +148,7 @@ func (s *Service) checkRateLimit(ctx context.Context, senderAgent string, sender
 				WHEN julianday(window_start) > julianday(?) THEN window_start
 				ELSE ?
 			END
-	`, senderAgent, senderProject, receiverAgent, receiverProject, now.Format(time.RFC3339),
+	`, senderAgentID, receiverAgentID, now.Format(time.RFC3339),
 	   windowStart.Format(time.RFC3339), windowStart.Format(time.RFC3339), now.Format(time.RFC3339))
 
 	return err == nil, err
@@ -137,9 +157,9 @@ func (s *Service) checkRateLimit(ctx context.Context, senderAgent string, sender
 // insertMessage inserts a message into the database.
 func (s *Service) insertMessage(ctx context.Context, msg *Message) error {
 	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO agent_messages (from_agent, from_project, to_agent, to_project, issue_id, hop_count, body, is_action_request, delivered, held_reason, delivered_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, msg.FromAgent, msg.FromProject, msg.ToAgent, msg.ToProject, msg.IssueID, msg.HopCount, msg.Body, boolToInt(msg.IsActionRequest), boolToInt(msg.Delivered), msg.HeldReason, msg.DeliveredAt)
+		INSERT INTO agent_messages (from_agent_id, to_agent_id, issue_id, parent_message_id, hop_count, body, is_action_request, delivered, held_reason, delivered_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, msg.FromAgentID, msg.ToAgentID, msg.IssueID, msg.ParentMessageID, msg.HopCount, msg.Body, boolToInt(msg.IsActionRequest), boolToInt(msg.Delivered), msg.HeldReason, msg.DeliveredAt)
 	
 	if err != nil {
 		return err
@@ -155,77 +175,57 @@ func (s *Service) insertMessage(ctx context.Context, msg *Message) error {
 }
 
 // GetDeliveredMessages returns delivered messages for a receiver, bounded to prevent overwhelming a turn.
-func (s *Service) GetDeliveredMessages(ctx context.Context, receiverAgent string, receiverProject int64, limit int) ([]Message, error) {
+// Only non-action-request messages are returned (action requests are never delivered).
+func (s *Service) GetDeliveredMessages(ctx context.Context, receiverAgentID int64, limit int) ([]Message, error) {
 	if limit <= 0 || limit > MaxDeliveredPerTurn {
 		limit = MaxDeliveredPerTurn
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, from_agent, from_project, to_agent, to_project, issue_id, hop_count, body, is_action_request, delivered, held_reason, created_at, delivered_at
+		SELECT id, from_agent_id, to_agent_id, issue_id, parent_message_id, hop_count, body, is_action_request, delivered, held_reason, created_at, delivered_at
 		FROM agent_messages
-		WHERE to_agent = ? AND to_project = ? AND delivered = 1
+		WHERE to_agent_id = ? AND delivered = 1
 		ORDER BY created_at DESC
 		LIMIT ?
-	`, receiverAgent, receiverProject, limit)
+	`, receiverAgentID, limit)
 	
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var messages []Message
-	for rows.Next() {
-		var msg Message
-		var deliveredAt sql.NullString
-		var createdAt string
-		var issueID sql.NullInt64
-		
-		err := rows.Scan(&msg.ID, &msg.FromAgent, &msg.FromProject, &msg.ToAgent, &msg.ToProject, 
-		                 &issueID, &msg.HopCount, &msg.Body, &msg.IsActionRequest, &msg.Delivered, 
-		                 &msg.HeldReason, &createdAt, &deliveredAt)
-		if err != nil {
-			return nil, err
-		}
-		
-		if issueID.Valid {
-			msg.IssueID = &issueID.Int64
-		}
-		if deliveredAt.Valid {
-			t, _ := time.Parse("2006-01-02T15:04:05Z", deliveredAt.String)
-			msg.DeliveredAt = &t
-		}
-		t, _ := time.Parse("2006-01-02T15:04:05Z", createdAt)
-		msg.CreatedAt = t
-		
-		messages = append(messages, msg)
-	}
-	
-	return messages, rows.Err()
+	return s.scanMessages(rows)
 }
 
 // GetHeldMessages returns messages held for manual review.
-func (s *Service) GetHeldMessages(ctx context.Context, receiverAgent string, receiverProject int64) ([]Message, error) {
+// Includes both unauthorized senders and action-request messages.
+func (s *Service) GetHeldMessages(ctx context.Context, receiverAgentID int64) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, from_agent, from_project, to_agent, to_project, issue_id, hop_count, body, is_action_request, delivered, held_reason, created_at, delivered_at
+		SELECT id, from_agent_id, to_agent_id, issue_id, parent_message_id, hop_count, body, is_action_request, delivered, held_reason, created_at, delivered_at
 		FROM agent_messages
-		WHERE to_agent = ? AND to_project = ? AND delivered = 0
+		WHERE to_agent_id = ? AND delivered = 0
 		ORDER BY created_at DESC
-	`, receiverAgent, receiverProject)
+	`, receiverAgentID)
 	
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	return s.scanMessages(rows)
+}
+
+// scanMessages scans message rows from the database.
+func (s *Service) scanMessages(rows *sql.Rows) ([]Message, error) {
 	var messages []Message
 	for rows.Next() {
 		var msg Message
 		var deliveredAt sql.NullString
 		var createdAt string
-		var issueID sql.NullInt64
+		var issueID, parentMessageID sql.NullInt64
 		
-		err := rows.Scan(&msg.ID, &msg.FromAgent, &msg.FromProject, &msg.ToAgent, &msg.ToProject,
-		                 &issueID, &msg.HopCount, &msg.Body, &msg.IsActionRequest, &msg.Delivered,
+		err := rows.Scan(&msg.ID, &msg.FromAgentID, &msg.ToAgentID, &issueID, &parentMessageID,
+		                 &msg.HopCount, &msg.Body, &msg.IsActionRequest, &msg.Delivered,
 		                 &msg.HeldReason, &createdAt, &deliveredAt)
 		if err != nil {
 			return nil, err
@@ -233,6 +233,9 @@ func (s *Service) GetHeldMessages(ctx context.Context, receiverAgent string, rec
 		
 		if issueID.Valid {
 			msg.IssueID = &issueID.Int64
+		}
+		if parentMessageID.Valid {
+			msg.ParentMessageID = &parentMessageID.Int64
 		}
 		if deliveredAt.Valid {
 			t, _ := time.Parse("2006-01-02T15:04:05Z", deliveredAt.String)
@@ -248,50 +251,33 @@ func (s *Service) GetHeldMessages(ctx context.Context, receiverAgent string, rec
 }
 
 // AddAllowlistEntry adds a sender to receiver's allowlist.
-func (s *Service) AddAllowlistEntry(ctx context.Context, entry *AllowlistEntry) error {
-	if err := ValidateAgentName(entry.ReceiverAgent); err != nil {
-		return fmt.Errorf("invalid receiver_agent: %w", err)
-	}
-	if err := ValidateAgentName(entry.SenderAgent); err != nil {
-		return fmt.Errorf("invalid sender_agent: %w", err)
-	}
-
-	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO agent_message_registry (receiver_agent, receiver_project, sender_agent, sender_project)
-		VALUES (?, ?, ?, ?)
+// Uses existing project_agents IDs (not free-text names).
+func (s *Service) AddAllowlistEntry(ctx context.Context, receiverAgentID, senderAgentID int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO agent_message_allowlist (receiver_agent_id, sender_agent_id)
+		VALUES (?, ?)
 		ON CONFLICT DO NOTHING
-	`, entry.ReceiverAgent, entry.ReceiverProject, entry.SenderAgent, entry.SenderProject)
-	
-	if err != nil {
-		return err
-	}
-	
-	id, err := result.LastInsertId()
-	if err == nil {
-		entry.ID = id
-	}
-	
-	return nil
+	`, receiverAgentID, senderAgentID)
+	return err
 }
 
 // RemoveAllowlistEntry removes a sender from receiver's allowlist.
-func (s *Service) RemoveAllowlistEntry(ctx context.Context, receiverAgent string, receiverProject int64, senderAgent string, senderProject int64) error {
+func (s *Service) RemoveAllowlistEntry(ctx context.Context, receiverAgentID, senderAgentID int64) error {
 	_, err := s.db.ExecContext(ctx, `
-		DELETE FROM agent_message_registry
-		WHERE receiver_agent = ? AND receiver_project = ?
-		  AND sender_agent = ? AND sender_project = ?
-	`, receiverAgent, receiverProject, senderAgent, senderProject)
+		DELETE FROM agent_message_allowlist
+		WHERE receiver_agent_id = ? AND sender_agent_id = ?
+	`, receiverAgentID, senderAgentID)
 	return err
 }
 
 // GetAllowlist returns all authorized senders for a receiver.
-func (s *Service) GetAllowlist(ctx context.Context, receiverAgent string, receiverProject int64) ([]AllowlistEntry, error) {
+func (s *Service) GetAllowlist(ctx context.Context, receiverAgentID int64) ([]AllowlistEntry, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, receiver_agent, receiver_project, sender_agent, sender_project, created_at
-		FROM agent_message_registry
-		WHERE receiver_agent = ? AND receiver_project = ?
+		SELECT id, receiver_agent_id, sender_agent_id, created_at
+		FROM agent_message_allowlist
+		WHERE receiver_agent_id = ?
 		ORDER BY created_at DESC
-	`, receiverAgent, receiverProject)
+	`, receiverAgentID)
 	
 	if err != nil {
 		return nil, err
@@ -302,8 +288,7 @@ func (s *Service) GetAllowlist(ctx context.Context, receiverAgent string, receiv
 	for rows.Next() {
 		var entry AllowlistEntry
 		var createdAt string
-		err := rows.Scan(&entry.ID, &entry.ReceiverAgent, &entry.ReceiverProject, 
-		                 &entry.SenderAgent, &entry.SenderProject, &createdAt)
+		err := rows.Scan(&entry.ID, &entry.ReceiverAgentID, &entry.SenderAgentID, &createdAt)
 		if err != nil {
 			return nil, err
 		}
@@ -316,7 +301,7 @@ func (s *Service) GetAllowlist(ctx context.Context, receiverAgent string, receiv
 }
 
 // detectActionRequest uses pattern matching to identify action-request messages.
-// These must be surfaced to humans and never automatically executed.
+// These must be surfaced to humans and NEVER automatically executed.
 func detectActionRequest(body string) bool {
 	// Lowercase for case-insensitive matching
 	lower := strings.ToLower(body)

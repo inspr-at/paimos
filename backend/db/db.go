@@ -11417,62 +11417,62 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 
 		// M151 / PAI-817: Untrusted-message security contract for delivered agent messages.
 		// Prevents prompt injection by wrapping messages with security framing, enforcing
-		// per-receiver allowlists, hop limits, rate limits, size caps, and per-turn bounds.
-		// Action-request messages are marked and never executed; they surface to humans.
-		// Message bodies are logged and treated as durable/readable (no secrets allowed).
+		// per-receiver allowlists via existing project_agents registry, hop limits, rate
+		// limits, size caps, and per-turn bounds. Action-request messages are marked and
+		// NEVER delivered as executable; they surface to humans. Message bodies are logged
+		// and treated as durable/readable (no secrets allowed).
 		{151, []string{
-			// agent_message_registry: Per-receiver allowlist of authorized senders
-			`CREATE TABLE IF NOT EXISTS agent_message_registry (
-				id               INTEGER PRIMARY KEY AUTOINCREMENT,
-				receiver_agent   TEXT NOT NULL CHECK(length(receiver_agent) BETWEEN 1 AND 64),
-				receiver_project INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-				sender_agent     TEXT NOT NULL CHECK(length(sender_agent) BETWEEN 1 AND 64),
-				sender_project   INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-				created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-				UNIQUE(receiver_agent, receiver_project, sender_agent, sender_project)
+			// agent_message_allowlist: Per-receiver allowlist using existing project_agents
+			`CREATE TABLE IF NOT EXISTS agent_message_allowlist (
+				id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+				receiver_agent_id     INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				sender_agent_id       INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+				UNIQUE(receiver_agent_id, sender_agent_id)
 			)`,
-			`CREATE INDEX IF NOT EXISTS idx_agent_message_registry_receiver
-				ON agent_message_registry(receiver_project, receiver_agent)`,
-			`CREATE INDEX IF NOT EXISTS idx_agent_message_registry_sender
-				ON agent_message_registry(sender_project, sender_agent)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_message_allowlist_receiver
+				ON agent_message_allowlist(receiver_agent_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_message_allowlist_sender
+				ON agent_message_allowlist(sender_agent_id)`,
 
 			// agent_messages: Message delivery records with security metadata
+			// hop_count is end-to-end and system-incremented, not client-supplied
 			`CREATE TABLE IF NOT EXISTS agent_messages (
-				id               INTEGER PRIMARY KEY AUTOINCREMENT,
-				from_agent       TEXT NOT NULL CHECK(length(from_agent) BETWEEN 1 AND 64),
-				from_project     INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-				to_agent         TEXT NOT NULL CHECK(length(to_agent) BETWEEN 1 AND 64),
-				to_project       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-				issue_id         INTEGER REFERENCES issues(id) ON DELETE SET NULL,
-				hop_count        INTEGER NOT NULL DEFAULT 1 CHECK(hop_count BETWEEN 1 AND 10),
-				body             TEXT NOT NULL CHECK(length(CAST(body AS BLOB)) <= 32768),
+				id                INTEGER PRIMARY KEY AUTOINCREMENT,
+				from_agent_id     INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				to_agent_id       INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				issue_id          INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+				parent_message_id INTEGER REFERENCES agent_messages(id) ON DELETE SET NULL,
+				hop_count         INTEGER NOT NULL DEFAULT 1 CHECK(hop_count BETWEEN 1 AND 10),
+				body              TEXT NOT NULL CHECK(length(CAST(body AS BLOB)) <= 32768),
 				is_action_request INTEGER NOT NULL DEFAULT 0 CHECK(is_action_request IN (0,1)),
-				delivered        INTEGER NOT NULL DEFAULT 0 CHECK(delivered IN (0,1)),
-				held_reason      TEXT NOT NULL DEFAULT '',
-				created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-				delivered_at     TEXT,
+				delivered         INTEGER NOT NULL DEFAULT 0 CHECK(delivered IN (0,1)),
+				held_reason       TEXT NOT NULL DEFAULT '',
+				created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+				delivered_at      TEXT,
 				CHECK(delivered=0 OR delivered_at IS NOT NULL),
 				CHECK(delivered=0 OR held_reason=''),
 				CHECK(delivered=1 OR delivered_at IS NULL),
+				CHECK(is_action_request=0 OR delivered=0),
 				CHECK(NOT paimos_contains_secret_like(body))
 			)`,
 			`CREATE INDEX IF NOT EXISTS idx_agent_messages_to
-				ON agent_messages(to_project, to_agent, delivered, created_at)`,
+				ON agent_messages(to_agent_id, delivered, created_at)`,
 			`CREATE INDEX IF NOT EXISTS idx_agent_messages_from
-				ON agent_messages(from_project, from_agent, created_at)`,
+				ON agent_messages(from_agent_id, created_at)`,
 			`CREATE INDEX IF NOT EXISTS idx_agent_messages_issue
 				ON agent_messages(issue_id) WHERE issue_id IS NOT NULL`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_messages_parent
+				ON agent_messages(parent_message_id) WHERE parent_message_id IS NOT NULL`,
 
 			// agent_message_rate_limits: Per-sender rate limiting
 			`CREATE TABLE IF NOT EXISTS agent_message_rate_limits (
-				id               INTEGER PRIMARY KEY AUTOINCREMENT,
-				sender_agent     TEXT NOT NULL,
-				sender_project   INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-				receiver_agent   TEXT NOT NULL,
-				receiver_project INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-				message_count    INTEGER NOT NULL DEFAULT 0 CHECK(message_count >= 0),
-				window_start     TEXT NOT NULL DEFAULT (datetime('now')),
-				UNIQUE(sender_agent, sender_project, receiver_agent, receiver_project)
+				id                INTEGER PRIMARY KEY AUTOINCREMENT,
+				sender_agent_id   INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				receiver_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				message_count     INTEGER NOT NULL DEFAULT 0 CHECK(message_count >= 0),
+				window_start      TEXT NOT NULL DEFAULT (datetime('now')),
+				UNIQUE(sender_agent_id, receiver_agent_id)
 			)`,
 			`CREATE INDEX IF NOT EXISTS idx_agent_message_rate_limits_window
 				ON agent_message_rate_limits(window_start)`,
