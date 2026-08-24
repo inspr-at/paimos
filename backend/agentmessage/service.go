@@ -184,10 +184,10 @@ func (s *Service) insertMessage(ctx context.Context, msg *Message) error {
 	
 	if err != nil {
 		// Map SQLite CHECK constraint failure for secrets to typed error
+		// Only map the secret-specific CHECK, not all CHECK constraints
 		errStr := err.Error()
 		if strings.Contains(errStr, "paimos_contains_secret_like") ||
-		   strings.Contains(errStr, "message body contains secret-like content") ||
-		   strings.Contains(errStr, "CHECK constraint failed") {
+		   strings.Contains(errStr, "message body contains secret-like content") {
 			return ErrContainsSecret
 		}
 		return err

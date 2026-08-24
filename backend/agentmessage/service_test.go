@@ -6,6 +6,7 @@ package agentmessage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -528,12 +529,9 @@ func TestSecretRejection(t *testing.T) {
 					t.Error("expected error for message containing secret, got nil")
 					return
 				}
-				// The error should be ErrContainsSecret or a database constraint violation
-				if err != ErrContainsSecret && 
-				   !strings.Contains(err.Error(), "paimos_contains_secret_like") &&
-				   !strings.Contains(err.Error(), "message body contains secret-like content") &&
-				   !strings.Contains(err.Error(), "CHECK constraint failed") {
-					t.Errorf("expected secret CHECK error, got: %v", err)
+				// Must be the typed ErrContainsSecret, not raw SQLite text
+				if !errors.Is(err, ErrContainsSecret) {
+					t.Errorf("expected errors.Is(err, ErrContainsSecret), got: %v", err)
 				}
 			} else {
 				if err != nil {
@@ -604,6 +602,48 @@ func TestHopResetPrevention(t *testing.T) {
 			t.Logf("debug: last hop for A→B before msg3 was: %d", lastHop)
 		}
 		t.Errorf("msg3 hop = %d, want 3", msg3.HopCount)
+	}
+}
+
+// TestReversePairHopTracking verifies A→B hop=1 then B→A (omitted parent) is hop=2.
+// AC: Hop is end-to-end on the conversation, not per (from,to) pair.
+func TestReversePairHopTracking(t *testing.T) {
+	db, agentA, agentB, _ := setupTestDB(t)
+	defer db.Close()
+	
+	svc := NewService(db)
+	ctx := context.Background()
+	
+	// Set up bidirectional allowlist
+	svc.AddAllowlistEntry(ctx, agentA, agentB)
+	svc.AddAllowlistEntry(ctx, agentB, agentA)
+	
+	// A→B (hop 1)
+	msg1, err := svc.SendMessage(ctx, agentA, agentB, nil, nil, "msg1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg1.HopCount != 1 {
+		t.Errorf("A→B hop = %d, want 1", msg1.HopCount)
+	}
+	
+	// B→A (omitting parent) - should be hop 2, not reset to 1
+	// This tests reverse-pair hop tracking
+	msg2, err := svc.SendMessage(ctx, agentB, agentA, nil, nil, "reply")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg2.HopCount != 2 {
+		t.Errorf("B→A (reverse pair, omitted parent) hop = %d, want 2", msg2.HopCount)
+	}
+	
+	// A→B again (omitting parent) - should be hop 3
+	msg3, err := svc.SendMessage(ctx, agentA, agentB, nil, nil, "msg3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg3.HopCount != 3 {
+		t.Errorf("A→B (after reverse, omitted parent) hop = %d, want 3", msg3.HopCount)
 	}
 }
 

@@ -11423,21 +11423,21 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		// and treated as durable/readable (no secrets allowed).
 		{151, []string{
 			// agent_message_allowlist: Per-receiver allowlist using existing project_agents
-			`CREATE TABLE IF NOT EXISTS agent_message_allowlist (
+			`CREATE TABLE agent_message_allowlist (
 				id                    INTEGER PRIMARY KEY AUTOINCREMENT,
 				receiver_agent_id     INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
 				sender_agent_id       INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
 				created_at            TEXT NOT NULL DEFAULT (datetime('now')),
 				UNIQUE(receiver_agent_id, sender_agent_id)
 			)`,
-			`CREATE INDEX IF NOT EXISTS idx_agent_message_allowlist_receiver
+			`CREATE INDEX idx_agent_message_allowlist_receiver
 				ON agent_message_allowlist(receiver_agent_id)`,
-			`CREATE INDEX IF NOT EXISTS idx_agent_message_allowlist_sender
+			`CREATE INDEX idx_agent_message_allowlist_sender
 				ON agent_message_allowlist(sender_agent_id)`,
 
 			// agent_messages: Message delivery records with security metadata
 			// hop_count is end-to-end and system-incremented, not client-supplied
-			`CREATE TABLE IF NOT EXISTS agent_messages (
+			`CREATE TABLE agent_messages (
 				id                INTEGER PRIMARY KEY AUTOINCREMENT,
 				from_agent_id     INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
 				to_agent_id       INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
@@ -11456,17 +11456,17 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 				CHECK(is_action_request=0 OR delivered=0),
 				CHECK(NOT paimos_contains_secret_like(body))
 			)`,
-			`CREATE INDEX IF NOT EXISTS idx_agent_messages_to
+			`CREATE INDEX idx_agent_messages_to
 				ON agent_messages(to_agent_id, delivered, created_at)`,
-			`CREATE INDEX IF NOT EXISTS idx_agent_messages_from
+			`CREATE INDEX idx_agent_messages_from
 				ON agent_messages(from_agent_id, created_at)`,
-			`CREATE INDEX IF NOT EXISTS idx_agent_messages_issue
+			`CREATE INDEX idx_agent_messages_issue
 				ON agent_messages(issue_id) WHERE issue_id IS NOT NULL`,
-			`CREATE INDEX IF NOT EXISTS idx_agent_messages_parent
+			`CREATE INDEX idx_agent_messages_parent
 				ON agent_messages(parent_message_id) WHERE parent_message_id IS NOT NULL`,
 
 			// agent_message_rate_limits: Per-sender rate limiting
-			`CREATE TABLE IF NOT EXISTS agent_message_rate_limits (
+			`CREATE TABLE agent_message_rate_limits (
 				id                INTEGER PRIMARY KEY AUTOINCREMENT,
 				sender_agent_id   INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
 				receiver_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
@@ -11474,7 +11474,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 				window_start      TEXT NOT NULL DEFAULT (datetime('now')),
 				UNIQUE(sender_agent_id, receiver_agent_id)
 			)`,
-			`CREATE INDEX IF NOT EXISTS idx_agent_message_rate_limits_window
+			`CREATE INDEX idx_agent_message_rate_limits_window
 				ON agent_message_rate_limits(window_start)`,
 		}},
 	}
