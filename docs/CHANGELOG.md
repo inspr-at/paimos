@@ -5,6 +5,32 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.15.0] — 2026-08-24
+
+### Added — Durable, security-framed agent messages
+
+- Added the canonical project-scoped A2A envelope and M152 ledger migration,
+  including stable message/thread/reply IDs, project and issue context, text
+  parts, metadata, trusted session attribution, and monotonic listen cursors.
+- Added `paimos tell <harness>:<agent>` with sender identity derived from the
+  authenticated agent session; unknown senders and addressees fail closed with
+  stable `agent_message_*` problem codes instead of accepting numeric agent IDs.
+- Added framed message list/get reads by addressee, thread, and since-cursor,
+  capped at ten delivered messages per page for downstream listen adapters.
+- Added issue-anchored agent-message visibility for humans in a dedicated UI
+  region that never inserts or renders agent traffic as a human comment.
+- Added the standalone `agent-message-v1` JSON Schema plus migration/backfill,
+  service, CLI, stable error, and contract regression coverage.
+
+### Security
+
+- Added the PAI-817 untrusted-message foundation: per-receiver allowlists,
+  end-to-end system-owned hop ceilings, per-sender write limits, 32 KiB body
+  caps, secret-like-content rejection, and mandatory holds for action requests.
+- Addressee reads expose only delivered non-action messages and wrap their first
+  text part with the explicit external-data security preamble; held traffic is
+  visible to humans for review without becoming executable agent input.
+
 ## [5.14.0] — 2026-08-23
 
 ### Added — Calm, discoverable Agent Mode navigation
