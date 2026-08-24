@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 151
+const latestSchemaVersion = 152
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -84,6 +84,46 @@ func TestSchemaMigrationsReachLatestVersion(t *testing.T) {
 	}
 	if maxVersion != latestSchemaVersion {
 		t.Fatalf("max schema version=%d want %d", maxVersion, latestSchemaVersion)
+	}
+}
+
+func TestMigration152BackfillsCanonicalAgentMessageEnvelope(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m152-populated.db")
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 151); err != nil {
+		t.Fatalf("create exact M151 fixture: %v", err)
+	}
+	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Messages','MSG')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	sender, err := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?, 'sender')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiver, err := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?, 'receiver')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	senderID, _ := sender.LastInsertId()
+	receiverID, _ := receiver.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO agent_messages(from_agent_id,to_agent_id,body,delivered,delivered_at) VALUES(?,?,'hello',1,datetime('now'))`, senderID, receiverID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(database); err != nil {
+		t.Fatalf("M151 to M152: %v", err)
+	}
+	var messageID, contextID, from, to, parts string
+	if err := database.QueryRow(`SELECT message_id,context_id,from_address,to_address,parts_json FROM agent_messages`).Scan(&messageID, &contextID, &from, &to, &parts); err != nil {
+		t.Fatal(err)
+	}
+	if messageID != "legacy-1" || contextID != "MSG" || from != "paimos:sender" || to != "paimos:receiver" || parts != `[{"kind":"text","text":"hello"}]` {
+		t.Fatalf("unexpected envelope backfill: %q %q %q %q %s", messageID, contextID, from, to, parts)
 	}
 }
 

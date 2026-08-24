@@ -28,7 +28,7 @@ This implementation provides the following **irrevocable security guarantees**:
 
 ## Architecture
 
-### Database Schema (M151)
+### Database Schema (M151 + M152)
 
 Three tables implement the security contract:
 
@@ -45,6 +45,13 @@ Three tables implement the security contract:
    - Foreign keys to `project_agents(id)` for both sender and receiver
    - Rolling 1-minute windows
    - 10 messages per sender-receiver pair per minute
+
+M152 adds the canonical A2A envelope and project-scoped API. Writes resolve
+the sender from trusted session attribution and the addressee from a
+`<harness>:<registered-agent>` address in the same project; clients cannot
+select numeric agent IDs. The envelope persists stable message/thread/reply
+IDs, project and issue context, text parts, metadata, hop, and session audit
+data. See `backend/contracts/agent-message-v1.schema.json`.
 
 ### Message Framing
 
@@ -241,4 +248,3 @@ go test -v
 - **PAI-809**: Agent Mode supervisory control (typed actions)
 - **PAI-801**: Delivery supervision (approval workflows)
 - Claude Code cross-session message framing (inspiration for preamble design)
-

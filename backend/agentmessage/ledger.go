@@ -1,0 +1,254 @@
+// PAIMOS — Your Professional & Personal AI Project OS
+// Copyright (C) 2026 Markus Barta <markus@barta.com>
+
+package agentmessage
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/google/uuid"
+)
+
+var addressPart = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
+
+type SendEnvelopeInput struct {
+	ProjectID int64
+	Sender    string
+	SessionID string
+	To        string
+	IssueID   *int64
+	ReplyTo   string
+	ThreadID  string
+	Body      string
+	Metadata  map[string]any
+}
+
+type ListFilter struct {
+	ProjectID     int64
+	To            string
+	ThreadID      string
+	IssueID       *int64
+	DeliveredOnly bool
+	AfterID       int64
+	Limit         int
+}
+
+func parseAddress(raw string) (string, string, error) {
+	parts := strings.Split(strings.TrimSpace(raw), ":")
+	if len(parts) != 2 || !addressPart.MatchString(parts[0]) || !addressPart.MatchString(parts[1]) {
+		return "", "", &CodedError{Code: AddressErrorCodeInvalid, Err: fmt.Errorf("address must be <harness>:<registered-agent>")}
+	}
+	return strings.ToLower(parts[0]), parts[1], nil
+}
+
+func coded(code, detail string) error { return &CodedError{Code: code, Err: errors.New(detail)} }
+
+// SendEnvelope resolves both parties inside one project and derives the sender
+// exclusively from trusted request attribution. Client-supplied numeric agent
+// IDs are never accepted.
+func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Envelope, error) {
+	if strings.TrimSpace(in.Sender) == "" {
+		return nil, coded("agent_message_attribution_required", "X-Paimos-Agent-Name attribution is required")
+	}
+	targetHarness, targetName, err := parseAddress(in.To)
+	if err != nil {
+		return nil, err
+	}
+	if !utf8.ValidString(in.Body) || len([]byte(in.Body)) == 0 {
+		return nil, coded("agent_message_body_required", "message body is required")
+	}
+	if len([]byte(in.Body)) > MaxBodySize {
+		return nil, ErrBodyTooLarge
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var projectKey string
+	if err := tx.QueryRowContext(ctx, `SELECT key FROM projects WHERE id=?`, in.ProjectID).Scan(&projectKey); err != nil {
+		return nil, coded("agent_message_project_unknown", "project not found")
+	}
+	var fromID, toID int64
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, in.ProjectID, strings.TrimSpace(in.Sender)).Scan(&fromID); err != nil {
+		return nil, coded("agent_message_sender_unknown", "attributed sender is not registered in this project")
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, in.ProjectID, targetName).Scan(&toID); err != nil {
+		return nil, coded("agent_message_addressee_unknown", "addressee is not registered in this project")
+	}
+
+	taskID := ""
+	if in.IssueID != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT p.key||'-'||i.issue_number FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.id=? AND i.project_id=?`, *in.IssueID, in.ProjectID).Scan(&taskID); err != nil {
+			return nil, coded("agent_message_issue_unknown", "issue is not in this project")
+		}
+	}
+
+	hop, parentID, threadID := 1, (*int64)(nil), strings.TrimSpace(in.ThreadID)
+	if in.ReplyTo != "" {
+		var parentHop int
+		var parentThread string
+		var pid int64
+		if err := tx.QueryRowContext(ctx, `SELECT am.id,am.hop_count,am.thread_id FROM agent_messages am JOIN project_agents pa ON pa.id=am.from_agent_id WHERE am.message_id=? AND pa.project_id=?`, in.ReplyTo, in.ProjectID).Scan(&pid, &parentHop, &parentThread); err != nil {
+			return nil, coded("agent_message_reply_unknown", "reply_to message not found in project")
+		}
+		parentID, hop = &pid, parentHop+1
+		if threadID == "" {
+			threadID = parentThread
+		}
+	} else if threadID != "" {
+		// A caller cannot reset the hop budget merely by omitting reply_to.
+		// An existing thread always advances from its last durable row.
+		var lastHop int
+		err := tx.QueryRowContext(ctx, `SELECT am.hop_count FROM agent_messages am JOIN project_agents pa ON pa.id=am.from_agent_id WHERE pa.project_id=? AND am.thread_id=? ORDER BY am.id DESC LIMIT 1`, in.ProjectID, threadID).Scan(&lastHop)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if err == nil {
+			hop = lastHop + 1
+		}
+	}
+	if hop > MaxHopCount {
+		return nil, ErrHopLimitExceeded
+	}
+
+	var recent int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_messages WHERE from_agent_id=? AND created_at>=datetime('now','-1 minute')`, fromID).Scan(&recent); err != nil {
+		return nil, err
+	}
+	if recent >= MaxMessagesPerMin {
+		return nil, ErrRateLimitExceeded
+	}
+
+	messageUUID, err := uuid.NewV7()
+	if err != nil {
+		messageUUID = uuid.Must(uuid.NewRandom())
+	}
+	messageID := messageUUID.String()
+	if threadID == "" {
+		threadID = messageID
+	}
+	fromAddress := "paimos:" + strings.TrimSpace(in.Sender)
+	toAddress := targetHarness + ":" + targetName
+	parts := []TextPart{{Kind: "text", Text: in.Body}}
+	partsJSON, _ := json.Marshal(parts)
+	metadata := in.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, coded("agent_message_metadata_invalid", "metadata must be JSON encodable")
+	}
+
+	isAction := detectActionRequest(in.Body)
+	authorized := 0
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_message_allowlist WHERE receiver_agent_id=? AND sender_agent_id=?`, toID, fromID).Scan(&authorized); err != nil {
+		return nil, err
+	}
+	delivered := authorized > 0 && !isAction
+	heldReason := ""
+	var deliveredAt any
+	if isAction {
+		heldReason = "action request - requires human approval"
+	} else if !delivered {
+		heldReason = "sender not in receiver allowlist"
+	}
+	if delivered {
+		deliveredAt = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	_, err = tx.ExecContext(ctx, `INSERT INTO agent_messages
+		(from_agent_id,to_agent_id,issue_id,parent_message_id,hop_count,body,is_action_request,delivered,held_reason,delivered_at,
+		 message_id,context_id,task_id,role,parts_json,metadata_json,from_address,to_address,reply_to,thread_id,session_id)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		fromID, toID, in.IssueID, parentID, hop, in.Body, boolToInt(isAction), boolToInt(delivered), heldReason, deliveredAt,
+		messageID, projectKey, taskID, "agent", string(partsJSON), string(metadataJSON), fromAddress, toAddress, in.ReplyTo, threadID, strings.TrimSpace(in.SessionID))
+	if err != nil {
+		if strings.Contains(err.Error(), "paimos_contains_secret_like") {
+			return nil, ErrContainsSecret
+		}
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetEnvelope(ctx, in.ProjectID, messageID)
+}
+
+func (s *Service) GetEnvelope(ctx context.Context, projectID int64, messageID string) (*Envelope, error) {
+	return scanEnvelope(s.db.QueryRowContext(ctx, envelopeSelect+` WHERE pa.project_id=? AND am.message_id=?`, projectID, messageID))
+}
+
+func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, error) {
+	if f.Limit <= 0 || f.Limit > 100 {
+		f.Limit = 50
+	}
+	if f.To != "" && f.Limit > MaxDeliveredPerTurn {
+		f.Limit = MaxDeliveredPerTurn
+	}
+	q := envelopeSelect + ` WHERE pa.project_id=? AND am.id>?`
+	args := []any{f.ProjectID, f.AfterID}
+	if f.To != "" {
+		q += ` AND am.to_address=?`
+		args = append(args, f.To)
+	}
+	if f.ThreadID != "" {
+		q += ` AND am.thread_id=?`
+		args = append(args, f.ThreadID)
+	}
+	if f.IssueID != nil {
+		q += ` AND am.issue_id=?`
+		args = append(args, *f.IssueID)
+	}
+	if f.DeliveredOnly {
+		q += ` AND am.delivered=1 AND am.is_action_request=0`
+	}
+	q += ` ORDER BY am.id ASC LIMIT ?`
+	args = append(args, f.Limit)
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Envelope{}
+	for rows.Next() {
+		e, err := scanEnvelope(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *e)
+	}
+	return out, rows.Err()
+}
+
+const envelopeSelect = `SELECT am.id,am.message_id,am.context_id,am.task_id,am.role,am.parts_json,am.metadata_json,
+	am.from_address,am.to_address,am.reply_to,am.thread_id,am.hop_count,am.delivered,am.held_reason,am.is_action_request,am.created_at
+	FROM agent_messages am JOIN project_agents pa ON pa.id=am.from_agent_id`
+
+type scanner interface{ Scan(...any) error }
+
+func scanEnvelope(row scanner) (*Envelope, error) {
+	var e Envelope
+	var parts, metadata string
+	if err := row.Scan(&e.Cursor, &e.MessageID, &e.ContextID, &e.TaskID, &e.Role, &parts, &metadata, &e.From, &e.To, &e.ReplyTo, &e.ThreadID, &e.Hop, &e.Delivered, &e.HeldReason, &e.IsActionRequest, &e.CreatedAt); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(parts), &e.Parts); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(metadata), &e.Metadata); err != nil {
+		return nil, err
+	}
+	return &e, nil
+}

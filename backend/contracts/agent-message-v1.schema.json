@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paimos.example/contracts/agent-message-v1.schema.json",
+  "title": "PAIMOS Agent Message v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cursor", "message_id", "context_id", "role", "parts", "metadata", "from", "to", "thread_id", "hop", "delivered", "is_action_request", "created_at"],
+  "properties": {
+    "cursor": { "type": "integer", "minimum": 1 },
+    "message_id": { "type": "string", "minLength": 1 },
+    "context_id": { "type": "string", "minLength": 1, "description": "Project key" },
+    "task_id": { "type": "string", "description": "Optional issue key" },
+    "role": { "const": "agent" },
+    "parts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/TextPart" } },
+    "metadata": { "type": "object" },
+    "from": { "$ref": "#/$defs/Address" },
+    "to": { "$ref": "#/$defs/Address" },
+    "reply_to": { "type": "string" },
+    "thread_id": { "type": "string", "minLength": 1 },
+    "hop": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "delivered": { "type": "boolean" },
+    "held_reason": { "type": "string" },
+    "is_action_request": { "type": "boolean" },
+    "created_at": { "type": "string" }
+  },
+  "$defs": {
+    "Address": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}:[A-Za-z][A-Za-z0-9_-]{0,63}$" },
+    "TextPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "text"],
+      "properties": { "kind": { "const": "text" }, "text": { "type": "string" } }
+    }
+  }
+}

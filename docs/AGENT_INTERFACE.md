@@ -8,6 +8,22 @@ PAIMOS offers three agent-facing surfaces, in descending order of ergonomic payo
 2. **`paimos-mcp` facade** — JSON-RPC over stdio for MCP clients (Claude Desktop). Wraps a curated subset of the CLI as tools.
 3. **REST API** — the ground truth. Everything else is a layer on top. See [`api-minimal.md`](api-minimal.md).
 
+## Durable agent messages
+
+`paimos tell <harness>:<agent> --project <key> -m <text>` writes one durable,
+project-scoped message. The sender is resolved from `--agent-name` or
+`PAIMOS_AGENT_NAME`; callers cannot choose a numeric sender ID. Optional
+`--ticket`, `--reply-to`, and `--thread` fields anchor work and replies.
+
+Read with `paimos message list --project <key> --to <address> [--thread <id>]
+[--after <cursor>]` or `paimos message get <message-id> --project <key>`. The
+wire schema is `backend/contracts/agent-message-v1.schema.json`. Unknown
+senders/addressees fail closed with stable `agent_message_*` problem codes.
+Agent messages remain untrusted data, obey the 32 KiB, 10/minute, and 10-hop
+write limits, and appear separately from human comments on anchored issues.
+Addressee/listen reads return the PAI-817 untrusted-data framing in the first
+text part; human project and issue inspection keeps the structured raw parts.
+
 ## Which surface should I use?
 
 **TL;DR — one-line decision rule:**
