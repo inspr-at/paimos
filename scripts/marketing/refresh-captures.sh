@@ -38,12 +38,12 @@ command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg is required"
 command -v ffprobe >/dev/null 2>&1 || die "ffprobe is required"
 command -v node >/dev/null 2>&1 || die "node is required"
-command -v sqlite3 >/dev/null 2>&1 || die "sqlite3 is required"
 
 RELEASE_COMMIT=$(git -C "$ROOT" rev-list -n 1 "v$CAPTURE_RELEASE" 2>/dev/null || true)
 [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || \
   die "v$CAPTURE_RELEASE is not available locally; public captures must come from a shipped tag"
-if ! git -C "$ROOT" diff --quiet "v$CAPTURE_RELEASE" -- backend frontend; then
+if ! git -C "$ROOT" diff --quiet "v$CAPTURE_RELEASE" -- \
+  backend frontend ':(exclude)backend/cmd/dev-fixture-sql'; then
   die "backend/frontend differ from v$CAPTURE_RELEASE; capture the shipped release, not unreleased UI"
 fi
 
@@ -74,8 +74,14 @@ TOOL="$ROOT/scripts/.visual-tooling"
 CAPTURE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/paimos-captures.XXXXXX")
 
 echo "→ polishing the local seeded workspace"
-sqlite3 "$ROOT/data/paimos.db" < "$ROOT/scripts/marketing/demo-polish.sql"
-sqlite3 "$ROOT/data/paimos.db" < "$ROOT/scripts/marketing/demo-intake-events.sql"
+for fixture_sql in \
+  demo-polish.sql \
+  demo-memory.sql \
+  demo-intake-session.sql \
+  demo-intake-events.sql; do
+  (cd "$ROOT/backend" && DATA_DIR="$ROOT/data" PAIMOS_ENV=development \
+    go run ./cmd/dev-fixture-sql < "$ROOT/scripts/marketing/$fixture_sql")
+done
 
 echo "→ capturing Paimos v$CAPTURE_RELEASE at 1600×1000 @2x"
 OUT_DIR="$CAPTURE_DIR" NODE_PATH="$TOOL/node_modules" \
