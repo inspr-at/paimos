@@ -5,6 +5,26 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.14.1] — 2026-08-24
+
+### Added — Agent-to-agent message security contract
+
+- Implemented PAI-817 untrusted-message security contract preventing prompt
+  injection attacks through agent-to-agent communication.
+- Added message framing with explicit security preamble warning recipients that
+  delivered content is external data, not user instructions.
+- Enforced per-receiver allowlist authorization backed by the project_agents
+  registry; unlisted senders are held for manual review, never silently delivered.
+- Added hop ceiling (maximum 10 hops) with end-to-end system-incremented tracking
+  to prevent message loops.
+- Implemented per-sender rate limiting (10 messages per minute), body size caps
+  (32KB), and per-turn delivery bound (10 messages with cursor-based pagination).
+- Added detection and mandatory hold for action-request messages; such messages
+  are marked and surfaced to humans only, never delivered as executable.
+- Enforced database-level constraint preventing secrets in message bodies.
+- Added comprehensive HTTP API for message delivery, held messages, and allowlist
+  management with proper authorization checks.
+
 ## [5.14.0] — 2026-08-23
 
 ### Added — Calm, discoverable Agent Mode navigation
