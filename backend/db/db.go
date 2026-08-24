@@ -11414,6 +11414,69 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   NEW.implementation_result_digest GLOB '*[^0-9a-f]*')
 			 BEGIN SELECT RAISE(ABORT,'invalid implementation result digest transition'); END`,
 		}},
+
+		// M151 / PAI-817: Untrusted-message security contract for delivered agent messages.
+		// Prevents prompt injection by wrapping messages with security framing, enforcing
+		// per-receiver allowlists via existing project_agents registry, hop limits, rate
+		// limits, size caps, and per-turn bounds. Action-request messages are marked and
+		// NEVER delivered as executable; they surface to humans. Message bodies are logged
+		// and treated as durable/readable (no secrets allowed).
+		{151, []string{
+			// agent_message_allowlist: Per-receiver allowlist using existing project_agents
+			`CREATE TABLE agent_message_allowlist (
+				id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+				receiver_agent_id     INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				sender_agent_id       INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+				UNIQUE(receiver_agent_id, sender_agent_id)
+			)`,
+			`CREATE INDEX idx_agent_message_allowlist_receiver
+				ON agent_message_allowlist(receiver_agent_id)`,
+			`CREATE INDEX idx_agent_message_allowlist_sender
+				ON agent_message_allowlist(sender_agent_id)`,
+
+			// agent_messages: Message delivery records with security metadata
+			// hop_count is end-to-end and system-incremented, not client-supplied
+			`CREATE TABLE agent_messages (
+				id                INTEGER PRIMARY KEY AUTOINCREMENT,
+				from_agent_id     INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				to_agent_id       INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				issue_id          INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+				parent_message_id INTEGER REFERENCES agent_messages(id) ON DELETE SET NULL,
+				hop_count         INTEGER NOT NULL DEFAULT 1 CHECK(hop_count BETWEEN 1 AND 10),
+				body              TEXT NOT NULL CHECK(length(CAST(body AS BLOB)) <= 32768),
+				is_action_request INTEGER NOT NULL DEFAULT 0 CHECK(is_action_request IN (0,1)),
+				delivered         INTEGER NOT NULL DEFAULT 0 CHECK(delivered IN (0,1)),
+				held_reason       TEXT NOT NULL DEFAULT '',
+				created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+				delivered_at      TEXT,
+				CHECK(delivered=0 OR delivered_at IS NOT NULL),
+				CHECK(delivered=0 OR held_reason=''),
+				CHECK(delivered=1 OR delivered_at IS NULL),
+				CHECK(is_action_request=0 OR delivered=0),
+				CHECK(NOT paimos_contains_secret_like(body))
+			)`,
+			`CREATE INDEX idx_agent_messages_to
+				ON agent_messages(to_agent_id, delivered, created_at)`,
+			`CREATE INDEX idx_agent_messages_from
+				ON agent_messages(from_agent_id, created_at)`,
+			`CREATE INDEX idx_agent_messages_issue
+				ON agent_messages(issue_id) WHERE issue_id IS NOT NULL`,
+			`CREATE INDEX idx_agent_messages_parent
+				ON agent_messages(parent_message_id) WHERE parent_message_id IS NOT NULL`,
+
+			// agent_message_rate_limits: Per-sender rate limiting
+			`CREATE TABLE agent_message_rate_limits (
+				id                INTEGER PRIMARY KEY AUTOINCREMENT,
+				sender_agent_id   INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				receiver_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+				message_count     INTEGER NOT NULL DEFAULT 0 CHECK(message_count >= 0),
+				window_start      TEXT NOT NULL DEFAULT (datetime('now')),
+				UNIQUE(sender_agent_id, receiver_agent_id)
+			)`,
+			`CREATE INDEX idx_agent_message_rate_limits_window
+				ON agent_message_rate_limits(window_start)`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -11553,6 +11616,9 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	148: checkM148SchemaIsUnapplied,
 	149: checkM149SchemaIsUnapplied,
 	150: checkM150SchemaIsUnapplied,
+	// PAI-817: M151 is a pure additive, non-idempotent migration for agent message
+	// security. Refuse partial local copies so the security contract is not bypassed.
+	151: checkM151SchemaIsUnapplied,
 }
 
 func checkM149SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
@@ -11588,6 +11654,21 @@ func checkM150SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
 		return fmt.Errorf("M150 schema is partially present or locally incompatible: %s", strings.Join(collisions, ", "))
 	}
 	return nil
+}
+
+func checkM151SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
+	return checkSchemaObjectsAbsent(ctx, conn, 151, []string{
+		"agent_message_allowlist",
+		"idx_agent_message_allowlist_receiver",
+		"idx_agent_message_allowlist_sender",
+		"agent_messages",
+		"idx_agent_messages_to",
+		"idx_agent_messages_from",
+		"idx_agent_messages_issue",
+		"idx_agent_messages_parent",
+		"agent_message_rate_limits",
+		"idx_agent_message_rate_limits_window",
+	})
 }
 
 func checkSchemaObjectsAbsent(ctx context.Context, conn *sql.Conn, version int, names []string) error {

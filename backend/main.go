@@ -590,6 +590,11 @@ func mountAPI(r chi.Router) {
 		// without a JSON parser.
 		r.With(auth.RequireProjectView).Get("/projects/{id}/agents/events", handlers.AgentsEventsStream)
 		r.With(auth.RequireProjectView).Get("/projects/{id}/agents/{name}.rev", handlers.AgentRevHandler)
+		// PAI-817 — agent-to-agent messaging security contract.
+		// Prevents prompt injection via framing, allowlists, hop
+		// limits, rate limits. Action-request messages are NEVER
+		// delivered as executable; they surface to humans only.
+		handlers.RegisterAgentMessageRoutes(r)
 		// PAI-607: online implement-capable runners for the device picker.
 		r.With(auth.RequireProjectView).Get("/projects/{id}/runners", handlers.ListProjectRunners)
 		r.With(auth.RequireProjectView).Get("/projects/{id}/runs", handlers.ListProjectRuns)
