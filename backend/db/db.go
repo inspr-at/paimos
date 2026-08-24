@@ -11616,6 +11616,9 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	148: checkM148SchemaIsUnapplied,
 	149: checkM149SchemaIsUnapplied,
 	150: checkM150SchemaIsUnapplied,
+	// PAI-817: M151 is a pure additive, non-idempotent migration for agent message
+	// security. Refuse partial local copies so the security contract is not bypassed.
+	151: checkM151SchemaIsUnapplied,
 }
 
 func checkM149SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
@@ -11651,6 +11654,21 @@ func checkM150SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
 		return fmt.Errorf("M150 schema is partially present or locally incompatible: %s", strings.Join(collisions, ", "))
 	}
 	return nil
+}
+
+func checkM151SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
+	return checkSchemaObjectsAbsent(ctx, conn, 151, []string{
+		"agent_message_allowlist",
+		"idx_agent_message_allowlist_receiver",
+		"idx_agent_message_allowlist_sender",
+		"agent_messages",
+		"idx_agent_messages_to",
+		"idx_agent_messages_from",
+		"idx_agent_messages_issue",
+		"idx_agent_messages_parent",
+		"agent_message_rate_limits",
+		"idx_agent_message_rate_limits_window",
+	})
 }
 
 func checkSchemaObjectsAbsent(ctx context.Context, conn *sql.Conn, version int, names []string) error {

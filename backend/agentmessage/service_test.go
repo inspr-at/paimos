@@ -336,51 +336,43 @@ func TestRateLimit(t *testing.T) {
 	// Add to allowlist
 	svc.AddAllowlistEntry(ctx, agentA, agentB)
 	
-	// Send 5 messages (less than hop ceiling to avoid ErrHopLimitExceeded)
-	// This tests rate limiting without hitting hop ceiling
-	for i := 0; i < 5; i++ {
-		issueID := int64(i + 1)
-		msg, err := svc.SendMessage(ctx, agentB, agentA, &issueID, nil, fmt.Sprintf("msg%d", i))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !msg.Delivered {
-			t.Errorf("message %d should be delivered", i)
-		}
-	}
-	
-	// Send 5 more messages rapidly to test the rate limit within the same minute window
-	// After 10 total messages in the window, the 11th should be rate-limited
-	for i := 5; i < MaxMessagesPerMin; i++ {
-		issueID := int64(i + 1)
-		msg, err := svc.SendMessage(ctx, agentB, agentA, &issueID, nil, fmt.Sprintf("msg%d", i))
-		if err != nil {
-			// Might hit hop limit before rate limit, which is acceptable
-			if err == ErrHopLimitExceeded {
-				t.Skip("hit hop ceiling before rate limit - test passes conceptually")
-			}
-			t.Fatal(err)
-		}
-		if !msg.Delivered {
-			t.Errorf("message %d should be delivered", i)
-		}
-	}
-	
-	// Next message should be rate-limited
-	issueID := int64(MaxMessagesPerMin + 1)
-	msg, err := svc.SendMessage(ctx, agentB, agentA, &issueID, nil, "rate-limited")
+	// Send first message to establish a parent for subsequent messages
+	// This keeps hop count low by reusing the same parent
+	msg1, err := svc.SendMessage(ctx, agentB, agentA, nil, nil, "msg0")
 	if err != nil {
-		// If we hit hop limit, skip the test
-		if err == ErrHopLimitExceeded {
-			t.Skip("hit hop ceiling - test proves hop tracking works, rate limit not separately testable in this scenario")
-		}
 		t.Fatal(err)
 	}
+	if !msg1.Delivered {
+		t.Error("first message should be delivered")
+	}
+	
+	// Send 9 more messages with explicit parent pointing to msg1
+	// This keeps hop count at 2 for all subsequent messages
+	for i := 1; i < MaxMessagesPerMin; i++ {
+		parentID := msg1.ID
+		msg, err := svc.SendMessage(ctx, agentB, agentA, nil, &parentID, fmt.Sprintf("msg%d", i))
+		if err != nil {
+			t.Fatalf("message %d failed: %v", i, err)
+		}
+		if !msg.Delivered {
+			t.Errorf("message %d should be delivered", i)
+		}
+		if msg.HopCount != 2 {
+			t.Errorf("message %d hop = %d, want 2", i, msg.HopCount)
+		}
+	}
+	
+	// Next message (11th in the same minute window) should be rate-limited
+	parentID := msg1.ID
+	msg, err := svc.SendMessage(ctx, agentB, agentA, nil, &parentID, "rate-limited")
+	if err != nil {
+		t.Fatalf("rate-limited message failed: %v", err)
+	}
 	if msg.Delivered {
-		t.Error("rate-limited message should be held")
+		t.Error("rate-limited message should be held, not delivered")
 	}
 	if msg.HeldReason != "rate limit exceeded" {
-		t.Errorf("wrong held reason: %s", msg.HeldReason)
+		t.Errorf("held reason = %q, want %q", msg.HeldReason, "rate limit exceeded")
 	}
 }
 
