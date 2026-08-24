@@ -5,6 +5,29 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.16.0] — 2026-08-24
+
+### Added — Native durable agent-message delivery
+
+- Added `paimos listen --as <harness>:<agent>` with bounded one-shot and
+  follow reads, explicit acknowledgement, durable per-address cursors, and
+  distinct exit codes for no new mail and unavailable native adapters.
+- Added first-party delivery into existing agent sessions: Codex through
+  `codex queue --thread`, Claude Code through its authenticated messaging
+  socket, and an opt-in MCP `claude/channel` capability that emits
+  `notifications/claude/channel`.
+- Added the M153 message `read_at` field and receiver cursor table, attributed
+  listen/ack endpoints, and an editor-controlled name-based allowlist endpoint.
+
+### Security
+
+- Receiver reads and acknowledgements are bound to trusted agent attribution;
+  acknowledgements advance monotonically only to real delivered, non-action
+  rows in that inbox and occur only after output or vendor handoff succeeds.
+- Vendor session credentials remain in the vendor-owned process environment:
+  PAIMOS neither stores nor logs Claude tokens or Codex session credentials.
+  The Claude channel capability is absent unless explicitly configured.
+
 ## [5.15.0] — 2026-08-24
 
 ### Added — Durable, security-framed agent messages
