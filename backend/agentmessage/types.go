@@ -16,6 +16,45 @@ import (
 	"time"
 )
 
+const AddressErrorCodeInvalid = "agent_message_address_invalid"
+
+// TextPart is the v1 A2A content part. Keeping parts as an array leaves the
+// wire contract extensible without making the durable v1 ledger ambiguous.
+type TextPart struct {
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+}
+
+// Envelope is the canonical project-scoped message contract (PAI-815).
+// Numeric database IDs are deliberately absent from the public shape.
+type Envelope struct {
+	Cursor          int64          `json:"cursor"`
+	MessageID       string         `json:"message_id"`
+	ContextID       string         `json:"context_id"`
+	TaskID          string         `json:"task_id,omitempty"`
+	Role            string         `json:"role"`
+	Parts           []TextPart     `json:"parts"`
+	Metadata        map[string]any `json:"metadata"`
+	From            string         `json:"from"`
+	To              string         `json:"to"`
+	ReplyTo         string         `json:"reply_to,omitempty"`
+	ThreadID        string         `json:"thread_id"`
+	Hop             int            `json:"hop"`
+	Delivered       bool           `json:"delivered"`
+	HeldReason      string         `json:"held_reason,omitempty"`
+	IsActionRequest bool           `json:"is_action_request"`
+	CreatedAt       string         `json:"created_at"`
+}
+
+// CodedError gives API and CLI clients a stable fail-closed reason.
+type CodedError struct {
+	Code string
+	Err  error
+}
+
+func (e *CodedError) Error() string { return e.Err.Error() }
+func (e *CodedError) Unwrap() error { return e.Err }
+
 const (
 	// Security limits (PAI-817)
 	MaxHopCount         = 10    // Maximum hops before message dies (prevents A→B→A loops)
@@ -78,10 +117,10 @@ type FramedMessage struct {
 	Project string `json:"project"`
 	Issue   string `json:"issue,omitempty"`
 	Hop     int    `json:"hop"`
-	
+
 	// The actual message body - UNTRUSTED
 	Body string `json:"body"`
-	
+
 	// Action request marker - when true, NEVER deliver as executable
 	IsActionRequest bool `json:"is_action_request"`
 }
@@ -91,7 +130,7 @@ type FramedMessage struct {
 func (f FramedMessage) Wrapper() string {
 	// Use strconv.Itoa for safe integer conversion (fixes G115)
 	hopStr := strconv.Itoa(f.Hop)
-	
+
 	wrapper := "<paimos-message from=\"" + f.From + "\" project=\"" + f.Project + "\""
 	if f.Issue != "" {
 		wrapper += " issue=\"" + f.Issue + "\""
@@ -125,4 +164,3 @@ func (f FramedMessage) FullMessage() string {
 	result := f.Wrapper() + f.Preamble() + "\n" + f.Body
 	return result
 }
-

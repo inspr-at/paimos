@@ -63,6 +63,7 @@ import IssueApplicableMemories from '@/components/issue/IssueApplicableMemories.
 import IssueAIWorkbench from '@/components/issue/IssueAIWorkbench.vue'
 import IssueAttachments from '@/components/issue/IssueAttachments.vue'
 import IssueComments from '@/components/issue/IssueComments.vue'
+import IssueAgentMessages from '@/components/issue/IssueAgentMessages.vue'
 import IssueAnchors from '@/components/issue/IssueAnchors.vue'
 import IssueGroupMembers from '@/components/issue/IssueGroupMembers.vue'
 import IssueMetaGrid from '@/components/issue/IssueMetaGrid.vue'
@@ -1540,6 +1541,8 @@ async function cancelEdit() {
     <IssueAttachments ref="attachmentsRef" :issue-id="issueId" :can-edit="canEditThisProject" />
 
     <!-- Comments -->
+    <IssueAgentMessages :issue-id="issueId" />
+
     <IssueComments
       ref="commentsRef"
       :issue-id="issueId"

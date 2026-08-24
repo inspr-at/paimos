@@ -148,6 +148,8 @@ Get started:
 	cmd.AddCommand(syncCmd())
 	cmd.AddCommand(runCmd())      // PAI-799: append-only progress reporting seam
 	cmd.AddCommand(runAgentCmd()) // PAI-608: local "Implement this" runner
+	cmd.AddCommand(tellCmd())     // PAI-815: durable name-addressed A2A messages
+	cmd.AddCommand(messageCmd())  // PAI-815: ledger read/listen primitives
 	// PAI-810: pinned external delivery-stage handoff protocol.
 	cmd.AddCommand(externalStageCmd())
 	// PAI-358: migrateCmd removed; the only verb (manifest-to-knowledge)

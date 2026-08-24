@@ -477,6 +477,22 @@ Both: UNIQUE on `(project_id, name)`; ordering index on `(project_id, sort_order
 inventory and is reused as-is; the canonical agent-artifact endpoint
 inlines all three.
 
+### Durable agent message ledger (M151 + M152 — PAI-817, PAI-815)
+
+`agent_messages` stores the M151 security fields (`from_agent_id`,
+`to_agent_id`, optional `issue_id`, parent, hop, body, held/delivered state)
+and the M152 public envelope: `message_id`, project `context_id`, optional
+issue-key `task_id`, `role`, JSON `parts`/`metadata`, canonical `from_address`
+and `to_address`, `reply_to`, `thread_id`, and the trusted `session_id`.
+The numeric row ID is the monotonic listen cursor but is exposed only as
+`cursor`; numeric agent IDs never enter the public write contract.
+
+M152 backfills M151 rows with stable `legacy-<id>` message/thread identifiers
+and name-based addresses, then pins unique message IDs and addressee/thread
+indexes. `agent_message_allowlist` and `agent_message_rate_limits` remain the
+security support tables. Issue-anchored rows are displayed in their own agent
+message region, never inserted into or rendered as human comments.
+
 ### Auto-watch sync subscriptions (M98 — PAI-331)
 
 Per-(user, device, project) opt-in for the sync engine's SSE push

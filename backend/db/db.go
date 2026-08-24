@@ -11477,6 +11477,36 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE INDEX idx_agent_message_rate_limits_window
 				ON agent_message_rate_limits(window_start)`,
 		}},
+
+		// M152 / PAI-815: canonical, project-scoped A2A envelope. M151 remains
+		// the security/storage foundation; these additive columns make every
+		// row independently addressable and readable without exposing numeric
+		// agent IDs as the public contract.
+		{152, []string{
+			`ALTER TABLE agent_messages ADD COLUMN message_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE agent_messages ADD COLUMN context_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE agent_messages ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE agent_messages ADD COLUMN role TEXT NOT NULL DEFAULT 'agent'`,
+			`ALTER TABLE agent_messages ADD COLUMN parts_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(parts_json))`,
+			`ALTER TABLE agent_messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata_json))`,
+			`ALTER TABLE agent_messages ADD COLUMN from_address TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE agent_messages ADD COLUMN to_address TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE agent_messages ADD COLUMN reply_to TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE agent_messages ADD COLUMN thread_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE agent_messages ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`,
+			`UPDATE agent_messages SET
+				message_id='legacy-'||id,
+				context_id=(SELECT p.key FROM project_agents pa JOIN projects p ON p.id=pa.project_id WHERE pa.id=agent_messages.from_agent_id),
+				task_id=COALESCE((SELECT p.key||'-'||i.issue_number FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.id=agent_messages.issue_id),''),
+				parts_json=json_array(json_object('kind','text','text',body)),
+				from_address='paimos:'||(SELECT name FROM project_agents WHERE id=agent_messages.from_agent_id),
+				to_address='paimos:'||(SELECT name FROM project_agents WHERE id=agent_messages.to_agent_id),
+				reply_to=COALESCE((SELECT message_id FROM agent_messages parent WHERE parent.id=agent_messages.parent_message_id),''),
+				thread_id='legacy-'||COALESCE(parent_message_id,id)`,
+			`CREATE UNIQUE INDEX idx_agent_messages_message_id ON agent_messages(message_id)`,
+			`CREATE INDEX idx_agent_messages_envelope_to ON agent_messages(to_address, id)`,
+			`CREATE INDEX idx_agent_messages_thread ON agent_messages(thread_id, id)`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -11619,6 +11649,7 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	// PAI-817: M151 is a pure additive, non-idempotent migration for agent message
 	// security. Refuse partial local copies so the security contract is not bypassed.
 	151: checkM151SchemaIsUnapplied,
+	152: checkM152SchemaIsUnapplied,
 }
 
 func checkM149SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
@@ -11669,6 +11700,36 @@ func checkM151SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
 		"agent_message_rate_limits",
 		"idx_agent_message_rate_limits_window",
 	})
+}
+
+func checkM152SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT 'column:agent_messages.'||name FROM pragma_table_info('agent_messages')
+		WHERE name IN ('message_id','context_id','task_id','role','parts_json','metadata_json',
+		 'from_address','to_address','reply_to','thread_id','session_id')
+		UNION ALL
+		SELECT type||':'||name FROM sqlite_master
+		WHERE name IN ('idx_agent_messages_message_id','idx_agent_messages_envelope_to','idx_agent_messages_thread')
+		ORDER BY 1`)
+	if err != nil {
+		return fmt.Errorf("inspect M152 schema ownership: %w", err)
+	}
+	defer rows.Close()
+	var collisions []string
+	for rows.Next() {
+		var collision string
+		if err := rows.Scan(&collision); err != nil {
+			return fmt.Errorf("scan M152 schema ownership: %w", err)
+		}
+		collisions = append(collisions, collision)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate M152 schema ownership: %w", err)
+	}
+	if len(collisions) > 0 {
+		return fmt.Errorf("M152 schema is partially present or locally incompatible: %s", strings.Join(collisions, ", "))
+	}
+	return nil
 }
 
 func checkSchemaObjectsAbsent(ctx context.Context, conn *sql.Conn, version int, names []string) error {
