@@ -21,7 +21,7 @@ const (
 	MaxHopCount         = 10    // Maximum hops before message dies (prevents A→B→A loops)
 	MaxBodySize         = 32768 // 32KB maximum message body size
 	MaxMessagesPerMin   = 10    // Rate limit: messages per sender per minute
-	MaxDeliveredPerTurn = 5     // Maximum messages delivered in a single turn
+	MaxDeliveredPerTurn = 10    // Maximum messages delivered in a single turn
 )
 
 var (

@@ -26,6 +26,8 @@ func NewService(db *sql.DB) *Service {
 // SendMessage creates a new agent message with security checks.
 // Hop count is end-to-end and system-incremented based on parent_message_id.
 // If parentMessageID is provided, hop count is parent + 1.
+// If parentMessageID is omitted, looks up the most recent message in the conversation
+// to prevent hop-reset attacks. Only truly new conversations start at hop=1.
 // Action-request messages are NEVER delivered, only held for human review.
 func (s *Service) SendMessage(ctx context.Context, fromAgentID, toAgentID int64, issueID *int64, parentMessageID *int64, body string) (*Message, error) {
 	// Check body size
@@ -36,12 +38,30 @@ func (s *Service) SendMessage(ctx context.Context, fromAgentID, toAgentID int64,
 	// Calculate hop count (end-to-end, system-tracked)
 	hopCount := 1
 	if parentMessageID != nil {
+		// Explicit parent provided - use it
 		var parentHop int
 		err := s.db.QueryRowContext(ctx, `SELECT hop_count FROM agent_messages WHERE id = ?`, *parentMessageID).Scan(&parentHop)
 		if err != nil {
 			return nil, fmt.Errorf("fetch parent hop count: %w", err)
 		}
 		hopCount = parentHop + 1
+	} else {
+		// No parent provided - check if there's a recent message in this conversation
+		// to prevent hop-reset by omission
+		var lastHop sql.NullInt64
+		err := s.db.QueryRowContext(ctx, `
+			SELECT hop_count FROM agent_messages
+			WHERE from_agent_id = ? AND to_agent_id = ?
+			ORDER BY created_at DESC, id DESC LIMIT 1
+		`, fromAgentID, toAgentID).Scan(&lastHop)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("lookup last message hop: %w", err)
+		}
+		if lastHop.Valid {
+			// Continuation of existing conversation
+			hopCount = int(lastHop.Int64) + 1
+		}
+		// else: genuinely new conversation, hop=1
 	}
 
 	// Check hop ceiling
