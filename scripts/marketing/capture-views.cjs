@@ -3,17 +3,22 @@
 // in every caption.
 const { chromium } = require('playwright');
 const fs = require('fs');
+const path = require('path');
 
 const API = 'http://localhost:8888';
 const APP = 'http://localhost:5173';
 const OUT = process.env.OUT_DIR || '/tmp/pai746';
 const TOKEN = process.env.PAIMOS_DEV_LOGIN_TOKEN || '';
+const AGENT_MODE_FIXTURE = JSON.parse(fs.readFileSync(
+  path.join(__dirname, '../../backend/contracts/fixtures/agent-mode/snapshot-v1-10.json'),
+  'utf8',
+));
 
 if (!TOKEN) throw new Error('PAIMOS_DEV_LOGIN_TOKEN is required');
 
 // Anything that screams "developer laptop" rather than "product".
 const HIDE_CHROME = `
-  .dev-login-banner, .totp-warning, .app-dev-banner,
+  .dev-login-banner, .totp-warning, .aml-totp-warning, .app-dev-banner,
   [class*="dev-login"], [class*="staging-banner"] { display: none !important; }
   /* Freeze anything that could blur a 2x capture mid-animation. */
   *, *::before, *::after {
@@ -49,6 +54,10 @@ function normalizedBox(box) {
   };
 }
 
+function currentAgentModeFixture() {
+  return JSON.parse(JSON.stringify(AGENT_MODE_FIXTURE));
+}
+
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch();
@@ -64,8 +73,41 @@ function normalizedBox(box) {
     data: { username: 'dev_admin', token: TOKEN },
   });
   if (!res.ok()) throw new Error(`dev-login failed: ${res.status()}`);
+  const me = await ctx.request.get(`${API}/api/auth/me`);
+  const permissionsEpoch = me.headers()['x-permissions-epoch'];
+  if (!me.ok() || !permissionsEpoch) throw new Error('dev-login authority proof is missing');
 
   const page = await ctx.newPage();
+  await page.addInitScript(() => {
+    class CaptureEventSource extends EventTarget {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSED = 2;
+      constructor(url) {
+        super();
+        this.url = String(url);
+        this.withCredentials = false;
+        this.readyState = CaptureEventSource.OPEN;
+        this.onopen = null;
+        this.onmessage = null;
+        this.onerror = null;
+        queueMicrotask(() => this.dispatchEvent(new Event('open')));
+      }
+      close() { this.readyState = CaptureEventSource.CLOSED; }
+    }
+    Object.defineProperty(window, 'EventSource', { configurable: true, value: CaptureEventSource });
+  });
+  await page.route('**/api/agent-mode/deliveries**', async (route) => {
+    if (new URL(route.request().url()).pathname !== '/api/agent-mode/deliveries') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      json: currentAgentModeFixture(),
+      headers: { 'X-Permissions-Epoch': permissionsEpoch },
+    });
+  });
 
   await shoot(page, 'product-surface', {
     path: '/issues/PAI-1',
@@ -101,7 +143,14 @@ function normalizedBox(box) {
     },
   });
 
-  await shoot(page, 'ui-dashboard', { path: '/' });
+  await shoot(page, 'ui-agent-mode', {
+    path: '/agent-mode?detail=10',
+    prepare: async (p) => {
+      await p.locator('.am-selection-anchor').waitFor({ state: 'visible' });
+      await p.locator('.am-project-picker__trigger').waitFor({ state: 'visible' });
+      await p.locator('.am-hints-current').waitFor({ state: 'visible' });
+    },
+  });
 
   await shoot(page, 'ui-issues', { path: '/issues' });
 

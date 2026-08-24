@@ -44,7 +44,7 @@ A deployment that meets 4-of-5 (e.g., never upgraded yet) is a *candidate* refer
 
 ## 2 · Reference deployment register
 
-The register contains two validated deployment histories. As of 2026-06-30, ppm is the only active deploy target; the second-operator instance is historical and inactive since the operator exit in June 2026. The current ppm proof is the live `5.6.2` deployment verified on 2026-08-06 (fifth composeStack pin-bump deploy of that day: v5.5.0 → v5.6.2).
+The register contains two validated deployment histories. As of 2026-06-30, ppm is the only active deploy target; the second-operator instance is historical and inactive since the operator exit in June 2026. The current ppm proof is the live `5.14.0` deployment verified on 2026-08-24 after the protected release, supply-chain verification, composeStack pin-bump, and authenticated operator smoke.
 
 ### 2.1 · ppm · `pm.barta.cm`
 
@@ -58,7 +58,7 @@ The register contains two validated deployment histories. As of 2026-06-30, ppm 
 | AI assist | OpenRouter (configured), `anthropic/claude-sonnet-4.5` model |
 | OIDC | configured against Zitadel (`auth.inspr.at`) via generic OIDC + PKCE; local password + TOTP remain available |
 | Active since | v1.x (continuously upgraded; no fresh-install in current era) |
-| Last verified runtime | 2026-08-18: `5.10.1` (`/api/health`, `paimos --instance ppm doctor` incl. auth + schema `2.1.0`) |
+| Last verified runtime | 2026-08-24: `5.14.0` (`/api/health`, `paimos --instance ppm doctor` incl. auth + schema `2.3.0`) |
 | Backup pattern | per-deploy volume tar + manifest under `/home/mba/paimos-backups/ppm/<ts>/` (composeStack path, see [`DEPLOY.md`](DEPLOY.md)); backups on the same host (acknowledged limitation tracked under [§3 Findings](#3--structured-findings) F-08) |
 | Audience | the maintainer + a small group; current production canary |
 

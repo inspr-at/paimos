@@ -22,10 +22,13 @@ just marketing-captures       # terminal 2: regenerate + verify + publish
 ```
 
 The second command bootstraps Playwright, sources the same local dev-login
-token as `dev-up` without printing it, polishes the gitignored fixture DB,
+token as `dev-up` without printing it, polishes the gitignored fixture DB
+through the dev binary's initialized SQLite connection,
 captures all six current site images plus two short product flows, transcodes
 the flows to Safari-compatible fast-start H.264, and publishes everything into
-`../inspr-at`.
+`../inspr-at`. The six stills include the fixture-backed Agent Mode supervision
+surface, so releases that change its project picker, command hints, or delivery
+density cannot leave the public product gallery behind.
 Pass a different reviewed site worktree when needed:
 
 ```sh

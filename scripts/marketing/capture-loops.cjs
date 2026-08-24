@@ -67,7 +67,7 @@ async function record(browser, name, prepare, perform) {
     browser,
     'loop-issue-workbench',
     async (page) => {
-      await page.goto(`${APP}/issues/PAI-28`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`${APP}/issues/PAI-1`, { waitUntil: 'domcontentloaded' });
       await page.waitForLoadState('networkidle').catch(() => {});
       await page.locator('#ai-workbench').waitFor({ state: 'attached' });
       await page.evaluate(() => {
@@ -101,7 +101,7 @@ async function record(browser, name, prepare, perform) {
     async (page) => {
       const input = page.locator('.ah-search-input');
       await input.click();
-      await input.type('PAI-28', { delay: 150 });
+      await input.type('PAI-1', { delay: 150 });
       await page.locator('.search-palette .sp-item').first().waitFor({ state: 'visible' });
       await page.waitForTimeout(1100);
       await page.keyboard.press('Enter');
