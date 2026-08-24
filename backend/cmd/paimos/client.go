@@ -9,6 +9,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -140,6 +141,13 @@ func newClient(inst InstanceConfig) *Client {
 // it returns a typed error that includes the server's JSON error
 // payload so callers can surface a useful message.
 func (c *Client) do(method, path string, body any) ([]byte, error) {
+	return c.doForAgentContext(context.Background(), method, path, body, "")
+}
+
+// doForAgentContext is used by receiver-bound message reads and acknowledgements.
+// Unlike general reads, those calls must carry trusted agent attribution so the
+// server can prove the caller matches the requested inbox.
+func (c *Client) doForAgentContext(ctx context.Context, method, path string, body any, agent string) ([]byte, error) {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -149,11 +157,17 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 		reqBody = bytes.NewReader(b)
 	}
 	// #nosec G704 -- baseURL is the operator-selected PAIMOS instance and path is assembled by CLI commands for that instance.
-	req, err := http.NewRequest(method, c.baseURL+path, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	c.prepareRequest(req, body != nil, "application/json", "application/json")
+	if agent = strings.TrimSpace(agent); agent != "" {
+		if len(agent) > agentAttrCap {
+			agent = agent[:agentAttrCap]
+		}
+		req.Header.Set(agentAttrHeader, agent)
+	}
 	return c.doRequest(req)
 }
 

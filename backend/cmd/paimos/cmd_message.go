@@ -14,17 +14,23 @@ import (
 )
 
 type messageEnvelope struct {
-	Cursor     int64  `json:"cursor"`
-	MessageID  string `json:"message_id"`
-	From       string `json:"from"`
-	To         string `json:"to"`
-	TaskID     string `json:"task_id"`
-	ThreadID   string `json:"thread_id"`
-	Hop        int    `json:"hop"`
-	Delivered  bool   `json:"delivered"`
-	HeldReason string `json:"held_reason"`
-	CreatedAt  string `json:"created_at"`
-	Parts      []struct {
+	Cursor          int64          `json:"cursor"`
+	MessageID       string         `json:"message_id"`
+	ContextID       string         `json:"context_id"`
+	From            string         `json:"from"`
+	To              string         `json:"to"`
+	TaskID          string         `json:"task_id,omitempty"`
+	Role            string         `json:"role"`
+	Metadata        map[string]any `json:"metadata"`
+	ReplyTo         string         `json:"reply_to,omitempty"`
+	ThreadID        string         `json:"thread_id"`
+	Hop             int            `json:"hop"`
+	Delivered       bool           `json:"delivered"`
+	HeldReason      string         `json:"held_reason,omitempty"`
+	IsActionRequest bool           `json:"is_action_request"`
+	CreatedAt       string         `json:"created_at"`
+	ReadAt          string         `json:"read_at,omitempty"`
+	Parts           []struct {
 		Kind string `json:"kind"`
 		Text string `json:"text"`
 	} `json:"parts"`
@@ -104,7 +110,47 @@ func tellCmd() *cobra.Command {
 
 func messageCmd() *cobra.Command {
 	c := &cobra.Command{Use: "message", Short: "Read the durable agent message ledger"}
-	c.AddCommand(messageListCmd(), messageGetCmd())
+	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd())
+	return c
+}
+
+func messageAllowCmd() *cobra.Command {
+	var projectRef, receiver string
+	c := &cobra.Command{
+		Use:   "allow <sender-address>",
+		Short: "Allow a registered sender to deliver to one receiver inbox",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(projectRef) == "" {
+				return &usageError{msg: "--project is required"}
+			}
+			if strings.TrimSpace(receiver) == "" {
+				return &usageError{msg: "--for is required"}
+			}
+			client, err := instanceClient()
+			if err != nil {
+				return err
+			}
+			pid, err := resolveProjectRefToID(client, projectRef)
+			if err != nil {
+				return reportError(err)
+			}
+			raw, err := client.do("POST", fmt.Sprintf("/api/projects/%d/message-allowlist", pid), map[string]string{
+				"receiver": strings.TrimSpace(receiver), "sender": strings.TrimSpace(args[0]),
+			})
+			if err != nil {
+				return reportError(err)
+			}
+			if flagJSON {
+				fmt.Fprintln(stdout, strings.TrimSpace(string(raw)))
+			} else {
+				fmt.Fprintf(stdout, "✓ %s may deliver to %s\n", strings.TrimSpace(args[0]), strings.TrimSpace(receiver))
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
+	c.Flags().StringVar(&receiver, "for", "", "receiver address (required)")
 	return c
 }
 

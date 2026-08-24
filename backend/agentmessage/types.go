@@ -44,6 +44,23 @@ type Envelope struct {
 	HeldReason      string         `json:"held_reason,omitempty"`
 	IsActionRequest bool           `json:"is_action_request"`
 	CreatedAt       string         `json:"created_at"`
+	ReadAt          string         `json:"read_at,omitempty"`
+}
+
+// InboxPage is an attributed receiver read. Cursor is the durable acknowledged
+// position; NextCursor is the highest row returned by this page (or Cursor when
+// there is no new mail).
+type InboxPage struct {
+	Address    string     `json:"address"`
+	Cursor     int64      `json:"cursor"`
+	NextCursor int64      `json:"next_cursor"`
+	Messages   []Envelope `json:"messages"`
+}
+
+// CursorState is returned after a monotonic acknowledgement.
+type CursorState struct {
+	Address string `json:"address"`
+	Cursor  int64  `json:"cursor"`
 }
 
 // CodedError gives API and CLI clients a stable fail-closed reason.

@@ -275,6 +275,9 @@ Durable A2A messages use registered names rather than numeric agent IDs:
 ```
 POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_id?, metadata? }
 GET  /projects/:id/messages            ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
+GET  /projects/:id/messages/listen     ?to=<address>&after=<cursor>&limit=<n>
+POST /projects/:id/messages/ack        { to, cursor }
+POST /projects/:id/message-allowlist   { receiver, sender }
 GET  /projects/:id/messages/:messageId
 GET  /issues/:id/messages              human-visible issue-anchored records (not comments)
 ```
@@ -284,6 +287,10 @@ addressees fail closed with stable `agent_message_*` problem codes. Addressee
 reads return delivered, non-action messages only, capped at 10 per cursor page
 and wrapped with the untrusted-message preamble. The v1 envelope schema is
 `backend/contracts/agent-message-v1.schema.json`.
+Listen and ack additionally require `X-Paimos-Agent-Name` to match the named
+addressee. Listen resumes from the greater of the supplied and durable cursor;
+acknowledgement is monotonic and rejects cursors that are not delivered rows in
+that inbox.
 
 PAI-800 runner liveness/progress uses the PAI-799 integration seam directly:
 `POST /runs/:id/telemetry`. The supervisor owns stable correlation plus

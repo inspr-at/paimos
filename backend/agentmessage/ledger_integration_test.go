@@ -72,6 +72,71 @@ func TestEnvelopeLedgerResolvesAddressesAndSupportsCursorReads(t *testing.T) {
 	if len(rows) != 1 || rows[0].MessageID != second.MessageID {
 		t.Fatalf("cursor/thread read=%#v", rows)
 	}
+	if _, err := svc.ListInbox(context.Background(), agentmessage.InboxInput{ProjectID: projectID, Address: "codex:reviewer", Agent: "builder", Limit: 10}); err == nil {
+		t.Fatal("mismatched attributed agent should not read another inbox")
+	} else if !errors.As(err, &coded) || coded.Code != "agent_message_addressee_mismatch" {
+		t.Fatalf("mismatched inbox error=%v", err)
+	}
+	page, err := svc.ListInbox(context.Background(), agentmessage.InboxInput{ProjectID: projectID, Address: "codex:reviewer", Agent: "reviewer", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Cursor != 0 || page.NextCursor != second.Cursor || len(page.Messages) != 2 {
+		t.Fatalf("initial inbox page=%#v", page)
+	}
+	state, err := svc.AckInbox(context.Background(), agentmessage.AckInput{ProjectID: projectID, Address: "codex:reviewer", Agent: "reviewer", Cursor: second.Cursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Cursor != second.Cursor {
+		t.Fatalf("ack state=%#v", state)
+	}
+	page, err = svc.ListInbox(context.Background(), agentmessage.InboxInput{ProjectID: projectID, Address: "codex:reviewer", Agent: "reviewer", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Cursor != second.Cursor || page.NextCursor != second.Cursor || len(page.Messages) != 0 {
+		t.Fatalf("acked inbox page=%#v", page)
+	}
+	var readRows int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_messages WHERE to_address='codex:reviewer' AND read_at IS NOT NULL`).Scan(&readRows); err != nil || readRows != 2 {
+		t.Fatalf("read rows=%d err=%v", readRows, err)
+	}
+	if _, err := svc.AckInbox(context.Background(), agentmessage.AckInput{ProjectID: projectID, Address: "codex:reviewer", Agent: "reviewer", Cursor: second.Cursor + 100}); err == nil {
+		t.Fatal("ack must reject a cursor outside the delivered inbox")
+	} else if !errors.As(err, &coded) || coded.Code != "agent_message_cursor_unknown" {
+		t.Fatalf("unknown cursor error=%v", err)
+	}
+}
+
+func TestEnvelopeLedgerAllowSenderIsNameScopedAndIdempotent(t *testing.T) {
+	oldDir, oldMode := os.Getenv("DATA_DIR"), os.Getenv("PAIMOS_TEST_MODE")
+	t.Cleanup(func() {
+		if db.DB != nil {
+			_ = db.DB.Close()
+			db.DB = nil
+		}
+		_ = os.Setenv("DATA_DIR", oldDir)
+		_ = os.Setenv("PAIMOS_TEST_MODE", oldMode)
+	})
+	_ = os.Setenv("DATA_DIR", t.TempDir())
+	_ = os.Setenv("PAIMOS_TEST_MODE", "1")
+	if err := db.Open(); err != nil {
+		t.Fatal(err)
+	}
+	project, _ := db.DB.Exec(`INSERT INTO projects(name,key) VALUES('Allow','ALW')`)
+	projectID, _ := project.LastInsertId()
+	_, _ = db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'sender'),(?,'receiver')`, projectID, projectID)
+	svc := agentmessage.NewService(db.DB)
+	for range 2 {
+		if err := svc.AllowSender(context.Background(), projectID, "codex:receiver", "claude:sender"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_allowlist`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("allowlist count=%d err=%v", count, err)
+	}
 }
 
 func TestEnvelopeLedgerEnforcesBodyCap(t *testing.T) {

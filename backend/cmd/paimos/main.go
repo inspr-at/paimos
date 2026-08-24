@@ -28,12 +28,15 @@
 //
 // Global flags: --instance <name>, --json, --config <path>.
 //
-// Exit codes: 0 ok, 1 API error, 2 usage/config error.
+// Exit codes: 0 ok, 1 API error, 2 usage/config error, 3 no inbox messages,
+// 4 selected native message adapter unavailable.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 
 	"github.com/spf13/cobra"
 )
@@ -58,7 +61,9 @@ var (
 )
 
 func main() {
-	if err := rootCmd().Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := rootCmd().ExecuteContext(ctx); err != nil {
 		// Usage errors: our own error type → print + exit 2 (convention).
 		// apiError has already been printed in the caller's chosen
 		// format (pretty or --json), don't double up.
@@ -77,6 +82,12 @@ func main() {
 		// message to stderr in its chosen format).
 		if ce, ok := err.(*checkExitCode); ok {
 			os.Exit(ce.code)
+		}
+		if le, ok := err.(*listenExitCode); ok {
+			if le.err != nil {
+				fmt.Fprintln(os.Stderr, "paimos:", le.err)
+			}
+			os.Exit(le.code)
 		}
 		if _, ok := err.(*apiError); !ok {
 			fmt.Fprintln(os.Stderr, "Error:", err)
@@ -150,6 +161,7 @@ Get started:
 	cmd.AddCommand(runAgentCmd()) // PAI-608: local "Implement this" runner
 	cmd.AddCommand(tellCmd())     // PAI-815: durable name-addressed A2A messages
 	cmd.AddCommand(messageCmd())  // PAI-815: ledger read/listen primitives
+	cmd.AddCommand(listenCmd())   // PAI-816: durable receiver cursor and native adapters
 	// PAI-810: pinned external delivery-stage handoff protocol.
 	cmd.AddCommand(externalStageCmd())
 	// PAI-358: migrateCmd removed; the only verb (manifest-to-knowledge)

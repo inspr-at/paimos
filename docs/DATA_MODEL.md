@@ -477,7 +477,7 @@ Both: UNIQUE on `(project_id, name)`; ordering index on `(project_id, sort_order
 inventory and is reused as-is; the canonical agent-artifact endpoint
 inlines all three.
 
-### Durable agent message ledger (M151 + M152 — PAI-817, PAI-815)
+### Durable agent message ledger (M151–M153 — PAI-817, PAI-815, PAI-816)
 
 `agent_messages` stores the M151 security fields (`from_agent_id`,
 `to_agent_id`, optional `issue_id`, parent, hop, body, held/delivered state)
@@ -492,6 +492,13 @@ and name-based addresses, then pins unique message IDs and addressee/thread
 indexes. `agent_message_allowlist` and `agent_message_rate_limits` remain the
 security support tables. Issue-anchored rows are displayed in their own agent
 message region, never inserted into or rendered as human comments.
+
+M153 adds nullable `agent_messages.read_at` plus
+`agent_message_cursors(project_id, project_agent_id, address, cursor,
+updated_at)`. One row per project/address records the last acknowledged
+delivered message. Acknowledgements are monotonic, must name a real delivered
+non-action row in the attributed inbox, and mark only covered rows read; a
+caller cannot acknowledge an arbitrary future cursor.
 
 ### Auto-watch sync subscriptions (M98 — PAI-331)
 

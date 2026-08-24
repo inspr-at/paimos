@@ -21,7 +21,8 @@
     "delivered": { "type": "boolean" },
     "held_reason": { "type": "string" },
     "is_action_request": { "type": "boolean" },
-    "created_at": { "type": "string" }
+    "created_at": { "type": "string" },
+    "read_at": { "type": "string", "description": "Set when the receiver durably acknowledges this row" }
   },
   "$defs": {
     "Address": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}:[A-Za-z][A-Za-z0-9_-]{0,63}$" },

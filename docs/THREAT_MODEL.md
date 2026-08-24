@@ -149,8 +149,10 @@ Defences:
   clients in middleware. Non-loopback bind requires the explicit
   `--unsafe-allow-remote` operator flag.
 - The broker exposes read-only tools only. It never writes files, runs
-  package managers, executes arbitrary commands, or forwards mutation
-  endpoints.
+  package managers, executes arbitrary commands, or forwards general mutation
+  endpoints. The opt-in `--channel-as` mode has one narrow state change: after
+  a channel notification is written, it acknowledges that inbox's durable
+  message cursor.
 - Local file reads resolve symlinks and reject traversal or symlink
   escape outside the bound repo root.
 - Generated and secret-prone paths (`.git`, `node_modules`, `dist`,
@@ -373,6 +375,7 @@ PAI-110 shipped the **INV-FILES-03** application-layer fix end-to-end. Uploads n
 | **INV-BROKER-02** | Local broker file reads cannot traverse outside the repo root or follow symlinks outside it. | `cmd/paimos/cmd_serve.go:resolveRepoPath` | `cmd_serve_test.go` |
 | **INV-BROKER-03** | Local broker reads block obvious secret files and redact common token/password shapes in returned content. | `cmd/paimos/cmd_serve.go:denyUnsafeRepoRel`, `redactSensitiveTextWithFlag` | `cmd_serve_test.go` |
 | **INV-BROKER-04** | MCP stdio exposes the same read-only broker methods as HTTP mode; stdout carries JSON-RPC only. | `cmd/paimos/cmd_serve.go:serveMCP` | `cmd_serve_test.go` |
+| **INV-BROKER-05** | Claude channel capability is absent unless explicitly configured; configured delivery binds to receiver attribution and acknowledges only after the notification write succeeds. | `cmd/paimos/cmd_serve.go:runClaudeChannel` | `cmd_serve_test.go` |
 
 ### 4.8 · Remote-triggered execution (PAI-605)
 

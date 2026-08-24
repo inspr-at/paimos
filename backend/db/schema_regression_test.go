@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 152
+const latestSchemaVersion = 153
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -124,6 +124,41 @@ func TestMigration152BackfillsCanonicalAgentMessageEnvelope(t *testing.T) {
 	}
 	if messageID != "legacy-1" || contextID != "MSG" || from != "paimos:sender" || to != "paimos:receiver" || parts != `[{"kind":"text","text":"hello"}]` {
 		t.Fatalf("unexpected envelope backfill: %q %q %q %q %s", messageID, contextID, from, to, parts)
+	}
+}
+
+func TestMigration153AddsDurableMessageCursorsWithoutRewritingLedger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m153-populated.db")
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 152); err != nil {
+		t.Fatalf("create exact M152 fixture: %v", err)
+	}
+	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Cursors','CUR')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	sender, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'sender')`, projectID)
+	receiver, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'receiver')`, projectID)
+	senderID, _ := sender.LastInsertId()
+	receiverID, _ := receiver.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO agent_messages(from_agent_id,to_agent_id,body,delivered,delivered_at,message_id,context_id,parts_json,from_address,to_address,thread_id)
+		VALUES(?,?,'hello',1,datetime('now'),'msg-1','CUR','[{"kind":"text","text":"hello"}]','paimos:sender','codex:receiver','msg-1')`, senderID, receiverID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(database); err != nil {
+		t.Fatalf("M152 to M153: %v", err)
+	}
+	if !columnExists(t, database, "agent_messages", "read_at") || !tableExists(t, database, "agent_message_cursors") {
+		t.Fatal("M153 cursor schema missing")
+	}
+	var body string
+	if err := database.QueryRow(`SELECT body FROM agent_messages WHERE message_id='msg-1'`).Scan(&body); err != nil || body != "hello" {
+		t.Fatalf("ledger row changed: body=%q err=%v", body, err)
 	}
 }
 
