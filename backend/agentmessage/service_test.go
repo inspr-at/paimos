@@ -416,7 +416,7 @@ func TestPerTurnBound(t *testing.T) {
 	}
 	
 	// GetDeliveredMessages should be bounded
-	messages, err := svc.GetDeliveredMessages(ctx, agentA, 0)
+	messages, err := svc.GetDeliveredMessages(ctx, agentA, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,8 +528,10 @@ func TestSecretRejection(t *testing.T) {
 					t.Error("expected error for message containing secret, got nil")
 					return
 				}
-				// The error should be a database constraint violation
-				if err != nil && !strings.Contains(err.Error(), "paimos_contains_secret_like") &&
+				// The error should be ErrContainsSecret or a database constraint violation
+				if err != ErrContainsSecret && 
+				   !strings.Contains(err.Error(), "paimos_contains_secret_like") &&
+				   !strings.Contains(err.Error(), "message body contains secret-like content") &&
 				   !strings.Contains(err.Error(), "CHECK constraint failed") {
 					t.Errorf("expected secret CHECK error, got: %v", err)
 				}

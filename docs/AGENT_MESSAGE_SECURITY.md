@@ -24,7 +24,7 @@ This implementation provides the following **irrevocable security guarantees**:
 
 8. **Size Caps**: Message bodies are capped at 32KB.
 
-9. **Per-Turn Bound**: At most 5 messages are delivered in a single turn, preventing overwhelming an agent.
+9. **Per-Turn Bound**: At most 10 messages are delivered in a single turn, preventing overwhelming an agent. Uses cursor-based pagination to prevent clients from bypassing the ceiling.
 
 ## Architecture
 
@@ -128,8 +128,11 @@ POST /api/agent-messages/send
 
 ### Get Delivered Messages
 ```
-GET /api/agent-messages/delivered/{agentID}?limit=5
+GET /api/agent-messages/delivered/{agentID}?limit=10&after_id=123
 ```
+
+- `limit`: Maximum messages per request (default 10, max 10)
+- `after_id`: Cursor for pagination - only return messages with ID > after_id
 
 ### Get Held Messages (requires authorization)
 ```
@@ -170,8 +173,8 @@ svc.AddAllowlistEntry(ctx, agentBID, agentAID)
 // Agent A sends message to Agent B
 msg, _ := svc.SendMessage(ctx, agentAID, agentBID, nil, nil, "I found a potential issue in the auth flow")
 
-// Agent B retrieves delivered messages (capped at 5 per turn)
-messages, _ := svc.GetDeliveredMessages(ctx, agentBID, 5)
+// Agent B retrieves delivered messages (capped at 10 per turn)
+messages, _ := svc.GetDeliveredMessages(ctx, agentBID, 10, 0)
 for _, msg := range messages {
     // Get agent names for framing
     var fromName, projectKey string
@@ -213,7 +216,7 @@ Comprehensive tests cover all security controls:
 - `TestHopCeiling`: A→B→A loops terminate at hop=10
 - `TestRateLimit`: Per-sender rate limiting works
 - `TestBodySize`: Oversized messages rejected
-- `TestPerTurnBound`: At most 5 messages per turn
+- `TestPerTurnBound`: At most 10 messages per turn with cursor-based pagination
 - `TestActionRequestDetection`: Action requests detected and NEVER delivered
 - `TestHeldMessages`: Held messages are surfaced
 

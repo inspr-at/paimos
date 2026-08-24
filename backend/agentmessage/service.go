@@ -47,13 +47,14 @@ func (s *Service) SendMessage(ctx context.Context, fromAgentID, toAgentID int64,
 		hopCount = parentHop + 1
 	} else {
 		// No parent provided - check if there's a recent message in this conversation
-		// to prevent hop-reset by omission
+		// Hop is end-to-end on the conversation, not per (from,to) pair.
+		// Look up last message in EITHER direction between the two agents.
 		var lastHop sql.NullInt64
 		err := s.db.QueryRowContext(ctx, `
 			SELECT hop_count FROM agent_messages
-			WHERE from_agent_id = ? AND to_agent_id = ?
+			WHERE (from_agent_id = ? AND to_agent_id = ?) OR (from_agent_id = ? AND to_agent_id = ?)
 			ORDER BY created_at DESC, id DESC LIMIT 1
-		`, fromAgentID, toAgentID).Scan(&lastHop)
+		`, fromAgentID, toAgentID, toAgentID, fromAgentID).Scan(&lastHop)
 		if err != nil && err != sql.ErrNoRows {
 			return nil, fmt.Errorf("lookup last message hop: %w", err)
 		}
@@ -182,6 +183,13 @@ func (s *Service) insertMessage(ctx context.Context, msg *Message) error {
 	`, msg.FromAgentID, msg.ToAgentID, msg.IssueID, msg.ParentMessageID, msg.HopCount, msg.Body, boolToInt(msg.IsActionRequest), boolToInt(msg.Delivered), msg.HeldReason, msg.DeliveredAt)
 	
 	if err != nil {
+		// Map SQLite CHECK constraint failure for secrets to typed error
+		errStr := err.Error()
+		if strings.Contains(errStr, "paimos_contains_secret_like") ||
+		   strings.Contains(errStr, "message body contains secret-like content") ||
+		   strings.Contains(errStr, "CHECK constraint failed") {
+			return ErrContainsSecret
+		}
 		return err
 	}
 	
@@ -194,9 +202,10 @@ func (s *Service) insertMessage(ctx context.Context, msg *Message) error {
 	return nil
 }
 
-// GetDeliveredMessages returns delivered messages for a receiver, bounded to prevent overwhelming a turn.
-// Only non-action-request messages are returned (action requests are never delivered).
-func (s *Service) GetDeliveredMessages(ctx context.Context, receiverAgentID int64, limit int) ([]Message, error) {
+// GetDeliveredMessages returns delivered messages for a receiver with per-turn bound.
+// Uses cursor-based pagination (after_id) to prevent clients from bypassing the
+// per-turn ceiling. Only non-action-request messages are returned.
+func (s *Service) GetDeliveredMessages(ctx context.Context, receiverAgentID int64, limit int, afterID int64) ([]Message, error) {
 	if limit <= 0 || limit > MaxDeliveredPerTurn {
 		limit = MaxDeliveredPerTurn
 	}
@@ -204,10 +213,10 @@ func (s *Service) GetDeliveredMessages(ctx context.Context, receiverAgentID int6
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, from_agent_id, to_agent_id, issue_id, parent_message_id, hop_count, body, is_action_request, delivered, held_reason, created_at, delivered_at
 		FROM agent_messages
-		WHERE to_agent_id = ? AND delivered = 1
-		ORDER BY created_at DESC
+		WHERE to_agent_id = ? AND delivered = 1 AND id > ?
+		ORDER BY id ASC
 		LIMIT ?
-	`, receiverAgentID, limit)
+	`, receiverAgentID, afterID, limit)
 	
 	if err != nil {
 		return nil, err

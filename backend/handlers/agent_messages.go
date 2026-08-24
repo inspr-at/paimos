@@ -111,6 +111,20 @@ func getDeliveredMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
+	// Authorization: ensure user can view messages for this agent
+	var projectID int64
+	err = db.DB.QueryRow(`SELECT project_id FROM project_agents WHERE id = ?`, agentID).Scan(&projectID)
+	if err != nil {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	
+	if !auth.CanViewProject(r, projectID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	
+	// Per-turn bound with cursor
 	limit := 10 // Default to MaxDeliveredPerTurn
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= agentmessage.MaxDeliveredPerTurn {
@@ -118,7 +132,14 @@ func getDeliveredMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
-	messages, err := svc.GetDeliveredMessages(r.Context(), agentID, limit)
+	afterID := int64(0) // Cursor for pagination
+	if afterStr := r.URL.Query().Get("after_id"); afterStr != "" {
+		if a, err := strconv.ParseInt(afterStr, 10, 64); err == nil && a > 0 {
+			afterID = a
+		}
+	}
+	
+	messages, err := svc.GetDeliveredMessages(r.Context(), agentID, limit, afterID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -281,6 +302,19 @@ func getAgentAllowlist(w http.ResponseWriter, r *http.Request) {
 	agentID, err := strconv.ParseInt(chi.URLParam(r, "receiverAgentID"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid agent ID", http.StatusBadRequest)
+		return
+	}
+	
+	// Authorization: ensure user can view allowlist for this agent
+	var projectID int64
+	err = db.DB.QueryRow(`SELECT project_id FROM project_agents WHERE id = ?`, agentID).Scan(&projectID)
+	if err != nil {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	
+	if !auth.CanViewProject(r, projectID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	
