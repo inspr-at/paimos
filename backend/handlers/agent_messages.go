@@ -40,12 +40,13 @@ type allowSenderRequest struct {
 }
 
 type sendEnvelopeRequest struct {
-	To       string         `json:"to"`
-	IssueID  *int64         `json:"issue_id"`
-	ReplyTo  string         `json:"reply_to"`
-	ThreadID string         `json:"thread_id"`
-	Body     string         `json:"body"`
-	Metadata map[string]any `json:"metadata"`
+	To              string         `json:"to"`
+	IssueID         *int64         `json:"issue_id"`
+	ReplyTo         string         `json:"reply_to"`
+	ThreadID        string         `json:"thread_id"`
+	Body            string         `json:"body"`
+	Metadata        map[string]any `json:"metadata"`
+	IsActionRequest bool           `json:"is_action_request"`
 }
 
 func sendAgentMessage(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +73,7 @@ func sendAgentMessage(w http.ResponseWriter, r *http.Request) {
 	msg, err := agentmessage.NewService(db.DB).SendEnvelope(r.Context(), agentmessage.SendEnvelopeInput{
 		ProjectID: projectID, Sender: sender, SessionID: sessionID, To: req.To,
 		IssueID: req.IssueID, ReplyTo: strings.TrimSpace(req.ReplyTo), ThreadID: strings.TrimSpace(req.ThreadID),
-		Body: req.Body, Metadata: req.Metadata,
+		Body: req.Body, Metadata: req.Metadata, ActionRequest: req.IsActionRequest,
 	})
 	if err != nil {
 		writeAgentMessageError(w, r, err)

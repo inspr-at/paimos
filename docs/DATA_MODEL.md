@@ -485,13 +485,17 @@ and the M152 public envelope: `message_id`, project `context_id`, optional
 issue-key `task_id`, `role`, JSON `parts`/`metadata`, canonical `from_address`
 and `to_address`, `reply_to`, `thread_id`, and the trusted `session_id`.
 The numeric row ID is the monotonic listen cursor but is exposed only as
-`cursor`; numeric agent IDs never enter the public write contract.
+`cursor`; numeric agent IDs never enter the public write contract. The public
+write accepts an optional `is_action_request` marker; marked rows are forced to
+held/non-delivered state and remain visible only through human inspection.
 
 M152 backfills M151 rows with stable `legacy-<id>` message/thread identifiers
 and name-based addresses, then pins unique message IDs and addressee/thread
-indexes. `agent_message_allowlist` and `agent_message_rate_limits` remain the
-security support tables. Issue-anchored rows are displayed in their own agent
-message region, never inserted into or rendered as human comments.
+indexes. `agent_message_allowlist` remains the active sender gate. The M151
+`agent_message_rate_limits` table is retained for migration compatibility;
+the canonical M152 write path enforces its project-wide per-sender minute
+budget from durable ledger rows. Issue-anchored rows are displayed in their own
+agent message region, never inserted into or rendered as human comments.
 
 M153 adds nullable `agent_messages.read_at` plus
 `agent_message_cursors(project_id, project_agent_id, address, cursor,

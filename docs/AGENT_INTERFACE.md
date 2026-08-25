@@ -13,7 +13,11 @@ PAIMOS offers three agent-facing surfaces, in descending order of ergonomic payo
 `paimos tell <harness>:<agent> --project <key> -m <text>` writes one durable,
 project-scoped message. The sender is resolved from `--agent-name` or
 `PAIMOS_AGENT_NAME`; callers cannot choose a numeric sender ID. Optional
-`--ticket`, `--reply-to`, and `--thread` fields anchor work and replies.
+`--ticket`, `--reply-to`, and `--thread` fields anchor work and replies. Use
+`--action-request` whenever the body asks the receiver to act; the server
+persists the explicit marker but holds the row out of every agent inbox for
+human review. Text matching catches common missed markers only as defence in
+depth.
 
 Read with `paimos message list --project <key> --to <address> [--thread <id>]
 [--after <cursor>]` or `paimos message get <message-id> --project <key>`. The
@@ -28,6 +32,7 @@ Allow a sender, then consume an inbox with a durable receiver cursor:
 
 ```bash
 paimos message allow paimos:claude --for codex:codex --project PAI
+paimos tell codex:codex --project PAI --ticket PAI-817 --action-request --message "Restart the service"
 paimos listen --as codex:codex --project PAI --ack
 paimos listen --as codex:codex --project PAI --follow --deliver codex --deliver-target "$CODEX_THREAD_ID"
 paimos listen --as grok:grok --project PAI --deliver grok --deliver-target "$GROK_SESSION_ID" --enable-grok-build-delivery

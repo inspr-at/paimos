@@ -39,6 +39,7 @@ type messageEnvelope struct {
 // tellCmd writes one durable, session-attributed ledger row.
 func tellCmd() *cobra.Command {
 	var projectRef, ticketRef, replyTo, threadID, message, messageFile string
+	var actionRequest bool
 	c := &cobra.Command{
 		Use: "tell <harness>:<agent>", Short: "Send a durable message to a registered project agent",
 		Args: cobra.ExactArgs(1),
@@ -70,6 +71,9 @@ func tellCmd() *cobra.Command {
 				issueID = &id
 			}
 			payload := map[string]any{"to": strings.TrimSpace(args[0]), "body": body}
+			if actionRequest {
+				payload["is_action_request"] = true
+			}
 			if issueID != nil {
 				payload["issue_id"] = *issueID
 			}
@@ -105,6 +109,7 @@ func tellCmd() *cobra.Command {
 	c.Flags().StringVar(&threadID, "thread", "", "conversation thread id")
 	c.Flags().StringVarP(&message, "message", "m", "", "message body")
 	c.Flags().StringVar(&messageFile, "message-file", "", "read message body from file, or - for stdin")
+	c.Flags().BoolVar(&actionRequest, "action-request", false, "mark as a human-gated action request; never deliver to an agent inbox")
 	return c
 }
 
