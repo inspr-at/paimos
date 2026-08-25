@@ -41,7 +41,7 @@ use the CLI, MCP facade, or JSON API. Both work against the same project state,
 permissions, knowledge, and history.
 
 > [!NOTE]
-> Paimos 5.8 is production-used and actively developed. Its current deployment
+> Paimos 5.x is production-used and actively developed. Its current deployment
 > model is deliberately compact: one Go process and one SQLite database. It is
 > not a multi-node high-availability service. See
 > [Current maturity and limits](#current-maturity-and-limits) before a production
@@ -61,6 +61,7 @@ project work
   + maintained knowledge
   + issue-to-file anchors
   + people and project agents
+  + durable agent handoffs
   + bounded execution choices
   + action and run evidence
   = one inspectable project history
@@ -69,7 +70,7 @@ project work
 This is useful without AI as a focused project system. With agents, the same
 model becomes the context and accountability layer around their work.
 
-## What ships in 5.8
+## What ships in 5.x
 
 | Area                | Current capability                                                                                                                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -77,6 +78,7 @@ model becomes the context and accountability layer around their work.
 | Voice intake        | A spec workbench that turns continuous speech (or typed input) into a live, editable specification with project detection, impact analysis, ELI5/10/15 understanding checks with spoken playback, per-language (EN/DE) cached artifacts, time-travel history, and one-click issue creation. Voice endpoints are rate-limited, budgeted, and cost-metered. |
 | Project context     | Linked repositories, typed knowledge, canonical project-agent artifacts, issue-to-file anchors, entity graph and blast-radius reads, and mixed-context retrieval.                                            |
 | Agent interfaces    | A typed `paimos` CLI, `paimos-mcp`, REST, curated OpenAPI, self-describing schema, JSON output, file-first multiline input, dry runs, idempotent transitions, and declarative bulk apply.                    |
+| Agent relay         | Durable, project-scoped message threads with issue links, sender allowlists, untrusted-data framing, typed action-request holds, and vendor-native delivery to Claude Code, Codex, and opt-in Grok Build sessions. |
 | Assisted work       | Thirteen in-app AI actions with operator-managed prompts, usage limits, cost records, execution profiles, context packs, and metadata-only audit records.                                                    |
 | Implementation runs | Explicit Claude Code and Codex local-runner actions, plus OpenRouter and OpenAI-compatible local-model draft providers. Trusted runners report repository, branch, and before/after commit evidence; draft providers cannot claim repository mutation, tests, shell, or deploy authority. |
 | Collaboration       | Internal roles and project grants, an external customer portal, acceptance workflows, customer-facing summaries, and JSON/PDF project reports.                                                               |
@@ -111,6 +113,10 @@ shipped code and documented verification.
   schema and compatible with macOS Bash 3.2. Project lifecycle controls in
   5.8.17 keep active work visible by default and stop frozen or archived
   projects from silently accepting new issues.
+- Durable agent messaging shipped across 5.15.0–5.17.1: an attributable,
+  issue-visible ledger; security-framed reads and human-gated action requests;
+  durable receiver cursors; and vendor-native delivery to Claude Code, Codex,
+  and explicitly enabled Grok Build sessions.
 - From 4.8: generic OIDC with PKCE (Zitadel-validated), shared
   provider/profile/effort/prompt metadata across AI actions and
   implementation runs, and Claude Code / Codex as distinct local
