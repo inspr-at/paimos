@@ -4,11 +4,44 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/inspr-at/paimos/backend/db"
 )
+
+func openEnvelopeSecurityDB(t *testing.T, agentNames ...string) (*agentmessage.Service, int64, map[string]int64) {
+	t.Helper()
+	oldDir, oldMode := os.Getenv("DATA_DIR"), os.Getenv("PAIMOS_TEST_MODE")
+	t.Cleanup(func() {
+		if db.DB != nil {
+			_ = db.DB.Close()
+			db.DB = nil
+		}
+		_ = os.Setenv("DATA_DIR", oldDir)
+		_ = os.Setenv("PAIMOS_TEST_MODE", oldMode)
+	})
+	_ = os.Setenv("DATA_DIR", t.TempDir())
+	_ = os.Setenv("PAIMOS_TEST_MODE", "1")
+	if err := db.Open(); err != nil {
+		t.Fatal(err)
+	}
+	project, err := db.DB.Exec(`INSERT INTO projects(name,key) VALUES('Security','SEC')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	agents := make(map[string]int64, len(agentNames))
+	for _, name := range agentNames {
+		result, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,?)`, projectID, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		agents[name], _ = result.LastInsertId()
+	}
+	return agentmessage.NewService(db.DB), projectID, agents
+}
 
 func TestEnvelopeLedgerResolvesAddressesAndSupportsCursorReads(t *testing.T) {
 	oldDir, oldMode := os.Getenv("DATA_DIR"), os.Getenv("PAIMOS_TEST_MODE")
@@ -144,5 +177,190 @@ func TestEnvelopeLedgerEnforcesBodyCap(t *testing.T) {
 	_, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{Sender: "sender", To: "codex:receiver", Body: string(make([]byte, agentmessage.MaxBodySize+1))})
 	if !errors.Is(err, agentmessage.ErrBodyTooLarge) {
 		t.Fatalf("oversize error=%v", err)
+	}
+}
+
+func TestCanonicalEnvelopeHoldsAndSurfacesExplicitActionRequests(t *testing.T) {
+	svc, projectID, agents := openEnvelopeSecurityDB(t, "sender", "receiver")
+	issue, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status) VALUES(?,817,'ticket','Security contract','in-progress')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := issue.LastInsertId()
+
+	explicit, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:receiver", IssueID: &issueID,
+		Body: "Restart the service", ActionRequest: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit.Delivered || !explicit.IsActionRequest || explicit.HeldReason != "action request - requires human approval" {
+		t.Fatalf("explicit action request escaped human gate: %#v", explicit)
+	}
+	held, err := svc.ListEnvelopes(context.Background(), agentmessage.ListFilter{ProjectID: projectID, IssueID: &issueID, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(held) != 1 || held[0].MessageID != explicit.MessageID || !held[0].IsActionRequest {
+		t.Fatalf("issue inspection did not surface held action request: %#v", held)
+	}
+
+	if err := svc.AllowSender(context.Background(), projectID, "codex:receiver", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	heuristic, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:receiver", Body: "Please execute the maintenance command",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if heuristic.Delivered || !heuristic.IsActionRequest {
+		t.Fatalf("heuristic fallback did not hold action request: %#v", heuristic)
+	}
+	neutral, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:receiver", Body: "Maintenance window observed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !neutral.Delivered || neutral.IsActionRequest {
+		t.Fatalf("neutral allowlisted message not delivered: %#v", neutral)
+	}
+	var deliveredActions int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_messages WHERE delivered=1 AND is_action_request=1`).Scan(&deliveredActions); err != nil || deliveredActions != 0 {
+		t.Fatalf("delivered action rows=%d err=%v", deliveredActions, err)
+	}
+	_, err = svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:receiver", Body: "credential: abcdefghijk",
+	})
+	if !errors.Is(err, agentmessage.ErrContainsSecret) {
+		t.Fatalf("canonical secret rejection error=%v", err)
+	}
+	var senderID int64
+	if err := db.DB.QueryRow(`SELECT from_agent_id FROM agent_messages WHERE message_id=?`, neutral.MessageID).Scan(&senderID); err != nil || senderID != agents["sender"] {
+		t.Fatalf("trusted sender id=%d err=%v", senderID, err)
+	}
+}
+
+func TestCanonicalEnvelopeUnlistedSenderIsHeldThenAllowlisted(t *testing.T) {
+	svc, projectID, _ := openEnvelopeSecurityDB(t, "sender", "receiver")
+	held, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:receiver", Body: "Observation only",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held.Delivered || held.HeldReason != "sender not in receiver allowlist" {
+		t.Fatalf("unlisted message=%#v", held)
+	}
+	page, err := svc.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:receiver", Agent: "receiver", Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 0 {
+		t.Fatalf("held message leaked into agent inbox: %#v", page.Messages)
+	}
+	if err := svc.AllowSender(context.Background(), projectID, "codex:receiver", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	delivered, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:receiver", Body: "Second observation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !delivered.Delivered || delivered.HeldReason != "" {
+		t.Fatalf("allowlisted message=%#v", delivered)
+	}
+}
+
+func TestCanonicalEnvelopeLoopTerminatesAtHopCeiling(t *testing.T) {
+	svc, projectID, _ := openEnvelopeSecurityDB(t, "alpha", "beta")
+	if err := svc.AllowSender(context.Background(), projectID, "codex:beta", "paimos:alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AllowSender(context.Background(), projectID, "codex:alpha", "paimos:beta"); err != nil {
+		t.Fatal(err)
+	}
+	last, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "alpha", To: "codex:beta", Body: "hop one",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for hop := 2; hop <= agentmessage.MaxHopCount; hop++ {
+		sender, receiver := "beta", "alpha"
+		if hop%2 == 1 {
+			sender, receiver = "alpha", "beta"
+		}
+		last, err = svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+			ProjectID: projectID, Sender: sender, To: "codex:" + receiver,
+			ReplyTo: last.MessageID, Body: "loop observation",
+		})
+		if err != nil {
+			t.Fatalf("hop %d: %v", hop, err)
+		}
+		if last.Hop != hop {
+			t.Fatalf("hop=%d want=%d", last.Hop, hop)
+		}
+	}
+	_, err = svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "beta", To: "codex:alpha", ReplyTo: last.MessageID, Body: "must stop",
+	})
+	if !errors.Is(err, agentmessage.ErrHopLimitExceeded) {
+		t.Fatalf("hop ceiling error=%v", err)
+	}
+}
+
+func TestCanonicalEnvelopeRateAndInboxBatchBounds(t *testing.T) {
+	svc, projectID, _ := openEnvelopeSecurityDB(t, "sender-a", "sender-b", "receiver")
+	for _, sender := range []string{"sender-a", "sender-b"} {
+		if err := svc.AllowSender(context.Background(), projectID, "codex:receiver", "paimos:"+sender); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < agentmessage.MaxMessagesPerMin; i++ {
+		if _, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+			ProjectID: projectID, Sender: "sender-a", To: "codex:receiver", Body: "bounded observation",
+		}); err != nil {
+			t.Fatalf("sender-a message %d: %v", i+1, err)
+		}
+	}
+	_, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender-a", To: "codex:receiver", Body: "eleventh observation",
+	})
+	if !errors.Is(err, agentmessage.ErrRateLimitExceeded) {
+		t.Fatalf("rate bound error=%v", err)
+	}
+	for i := 0; i < 6; i++ {
+		if _, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+			ProjectID: projectID, Sender: "sender-b", To: "codex:receiver", Body: "second sender observation",
+		}); err != nil {
+			t.Fatalf("sender-b message %d: %v", i+1, err)
+		}
+	}
+	first, err := svc.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:receiver", Agent: "receiver", Limit: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Messages) != agentmessage.MaxDeliveredPerTurn {
+		t.Fatalf("first inbox batch=%d want=%d", len(first.Messages), agentmessage.MaxDeliveredPerTurn)
+	}
+	second, err := svc.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:receiver", Agent: "receiver", AfterID: first.NextCursor, Limit: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Messages) != 6 {
+		t.Fatalf("second inbox batch=%d want=6", len(second.Messages))
+	}
+	if strings.Contains(first.Messages[0].Parts[0].Text, "<paimos-message") {
+		t.Fatal("storage/service layer should return structured raw body; framing belongs to the HTTP delivery boundary")
 	}
 }

@@ -29,7 +29,8 @@ watch(() => props.issueId, async (issueId) => {
       <p v-for="(part, index) in message.parts" :key="index">{{ part.text }}</p>
       <footer>
         thread {{ message.thread_id }} · hop {{ message.hop }}
-        <strong v-if="!message.delivered">Held: {{ message.held_reason }}</strong>
+        <strong v-if="message.is_action_request">Action request held: human approval required</strong>
+        <strong v-else-if="!message.delivered">Held: {{ message.held_reason }}</strong>
       </footer>
     </article>
   </section>

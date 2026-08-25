@@ -29,6 +29,11 @@ type SendEnvelopeInput struct {
 	ThreadID  string
 	Body      string
 	Metadata  map[string]any
+	// ActionRequest is the sender's explicit, typed declaration that the
+	// free-text body asks the receiver to act. Heuristic detection remains a
+	// defence-in-depth fallback, but callers do not have to depend on prose
+	// classification to enter the human-only held path.
+	ActionRequest bool
 }
 
 type ListFilter struct {
@@ -166,7 +171,7 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		return nil, coded("agent_message_metadata_invalid", "metadata must be JSON encodable")
 	}
 
-	isAction := detectActionRequest(in.Body)
+	isAction := in.ActionRequest || detectActionRequest(in.Body)
 	authorized := 0
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_message_allowlist WHERE receiver_agent_id=? AND sender_agent_id=?`, toID, fromID).Scan(&authorized); err != nil {
 		return nil, err

@@ -273,7 +273,7 @@ PATCH  /runs/:id                       lifecycle/report compare-and-set
 Durable A2A messages use registered names rather than numeric agent IDs:
 
 ```
-POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_id?, metadata? }
+POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_id?, metadata?, is_action_request? }
 GET  /projects/:id/messages            ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
 GET  /projects/:id/messages/listen     ?to=<address>&after=<cursor>&limit=<n>
 POST /projects/:id/messages/ack        { to, cursor }
@@ -287,6 +287,9 @@ addressees fail closed with stable `agent_message_*` problem codes. Addressee
 reads return delivered, non-action messages only, capped at 10 per cursor page
 and wrapped with the untrusted-message preamble. The v1 envelope schema is
 `backend/contracts/agent-message-v1.schema.json`.
+Explicit `is_action_request=true` rows are stored as held for human inspection
+and never enter listen; conservative prose detection is a fallback, not a
+replacement for the typed marker.
 Listen and ack additionally require `X-Paimos-Agent-Name` to match the named
 addressee. Listen resumes from the greater of the supplied and durable cursor;
 acknowledgement is monotonic and rejects cursors that are not delivered rows in

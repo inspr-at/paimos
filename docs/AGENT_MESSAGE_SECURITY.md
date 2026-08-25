@@ -2,11 +2,11 @@
 
 ## Overview
 
-PAI-817 implements a security contract for agent-to-agent message delivery that prevents prompt injection attacks. Every delivered message is wrapped with security framing, and strict controls prevent malicious agents from executing unauthorized actions.
+PAI-817 implements a fail-closed security contract for agent-to-agent message delivery. Every delivered message is wrapped with security framing, while authorization, explicit action marking, and bounded reads reduce the prompt-injection surface. The frame is a receiver instruction boundary, not a claim that arbitrary model behavior can be proven safe.
 
 ## Security Guarantees
 
-This implementation provides the following **irrevocable security guarantees**:
+This implementation enforces the following boundaries:
 
 1. **No Consent or Authorization**: A delivered agent message **cannot** grant consent, approve permissions, authorize actions, or change configuration.
 
@@ -14,13 +14,13 @@ This implementation provides the following **irrevocable security guarantees**:
 
 3. **Allowlist Authorization**: Messages are only delivered to receivers who have explicitly added the sender to their allowlist using the existing `project_agents` registry. Unlisted senders are held for manual review, never silently delivered.
 
-4. **Action-Request Detection**: Messages containing action requests (commands, permission grants, configuration changes) are **marked** and **NEVER delivered as executable**. They are **always held** and **surfaced to humans** only.
+4. **Action-Request Marker**: Senders can explicitly mark action requests with `is_action_request` / `paimos tell --action-request`. Marked messages are **never returned to an agent inbox** and are **surfaced to humans** only. Conservative text matching adds a defence-in-depth marker for common command phrases, but callers must use the explicit marker rather than treating natural-language classification as complete.
 
 5. **Value-Free Bodies**: Message bodies are logged and treated as durable/readable. They **must not** contain secrets. The database enforces this with the `paimos_contains_secret_like` check.
 
 6. **Hop Ceiling**: Messages die after 10 hops. Hop count is **end-to-end** and **system-incremented**, not client-supplied. This prevents A→B→A→... loops.
 
-7. **Rate Limiting**: Per-sender rate limits (10 messages/minute) prevent spam.
+7. **Rate Limiting**: The canonical ledger accepts at most 10 writes per registered sender per minute across the project. The next write is rejected with a stable rate-limit error before insertion.
 
 8. **Size Caps**: Message bodies are capped at 32KB.
 
@@ -41,10 +41,7 @@ Three tables implement the security contract:
    - Constraints: hop_count ≤ 10, body ≤ 32KB, no secrets in body
    - **Important**: `CHECK(is_action_request=0 OR delivered=0)` enforces that action requests are NEVER delivered
 
-3. **`agent_message_rate_limits`**: Per-sender rate tracking
-   - Foreign keys to `project_agents(id)` for both sender and receiver
-   - Rolling 1-minute windows
-   - 10 messages per sender-receiver pair per minute
+3. **`agent_message_rate_limits`**: Legacy M151 counter storage retained for migration compatibility. The canonical M152 ledger enforces the live 10-per-minute sender bound directly from durable `agent_messages` rows, so all target addresses share one sender budget.
 
 M152 adds the canonical A2A envelope and project-scoped API. Writes resolve
 the sender from trusted session attribution and the addressee from a
@@ -95,11 +92,11 @@ The framing is **added by the delivery system**, not parsed from message content
 ### Authorization Flow
 
 1. Agent A sends message to Agent B
-2. System checks if action request: **If yes**, message is held with `held_reason = "action request - requires human approval"` and `delivered = 0`. Action requests are **NEVER delivered**, regardless of allowlist.
+2. System combines the explicit `is_action_request` marker with conservative text detection. **If either marks the row**, the message is held with `held_reason = "action request - requires human approval"` and `delivered = 0`. Marked action requests are **never returned by listen**, regardless of allowlist.
 3. System checks if A is in B's allowlist (via `agent_message_allowlist`)
 4. **If not authorized**: Message is held with `held_reason = "sender not in receiver allowlist"`
-5. **If authorized**: System checks rate limit
-6. **If rate exceeded**: Message is held with `held_reason = "rate limit exceeded"`
+5. **If authorized**: System checks the project-wide per-sender write rate
+6. **If rate exceeded**: The write is rejected with HTTP 429 and is not inserted
 7. **If all checks pass**: Message is delivered with `delivered = 1`, `delivered_at = NOW()`
 
 ### Hop Tracking (End-to-End)
@@ -113,12 +110,21 @@ This prevents A→B→A loops from continuing indefinitely.
 
 ### Action-Request Detection
 
-Messages are scanned for action-request patterns:
+The sender-facing API and CLI provide a typed marker:
+
+```bash
+paimos tell codex:reviewer --project PAI --ticket PAI-817 \
+  --action-request --message "Restart the service"
+```
+
+The row is stored with `is_action_request = 1`, `delivered = 0`, and a
+human-approval held reason. In addition, messages are conservatively scanned
+for common action-request patterns:
 
 - Command phrases: "execute", "run the following", "grant permission"
 - Shell commands: `sudo`, `rm`, `chmod`, `git`, `npm`, `docker`, `kubectl`
 
-Detected action requests are marked with `is_action_request = 1` and **MUST NEVER be delivered** (enforced by database constraint). They are always held and must be surfaced to humans.
+Explicitly marked or heuristically detected action requests are stored with `is_action_request = 1` and **must never be delivered** (enforced by database constraint and inbox predicates). They are always held and surfaced in issue-anchored human inspection. Heuristics are defence in depth only; a sender that knows it is requesting action must set the typed marker.
 
 ## Relationship to PAI-809 (Agent Mode)
 
@@ -141,6 +147,7 @@ POST /api/projects/:projectID/messages
   "to": "codex:reviewer",
   "issue_id": 123,
   "reply_to": "019...",
+  "is_action_request": true,
   "body": "Message content"
 }
 ```
@@ -180,6 +187,10 @@ paimos message allow paimos:planner --for codex:reviewer --project PAI
 PAIMOS_AGENT_NAME=planner paimos tell codex:reviewer --project PAI \
   --message "I found a potential issue in the auth flow"
 
+# Requests for action take the human-only held path and never enter listen.
+PAIMOS_AGENT_NAME=planner paimos tell codex:reviewer --project PAI \
+  --ticket PAI-817 --action-request --message "Restart the service"
+
 # Receiver identity must match the inbox. The cursor advances only after output.
 PAIMOS_AGENT_NAME=reviewer paimos listen --as codex:reviewer \
   --project PAI --ack
@@ -187,17 +198,17 @@ PAIMOS_AGENT_NAME=reviewer paimos listen --as codex:reviewer \
 
 ## Testing
 
-Comprehensive tests cover all security controls:
+Canonical-ledger and delivery-boundary tests cover all security controls:
 
 - `TestFramingAndPreamble`: Verifies correct wrapper format `<paimos-message ...>`
 - `TestHopEncoding`: Hop encoding correct for hop≥10 (gosec G115)
-- `TestAuthorization`: Unlisted senders are held, allowlisted senders delivered
-- `TestHopCeiling`: A→B→A loops terminate at hop=10
-- `TestRateLimit`: Per-sender rate limiting works
-- `TestBodySize`: Oversized messages rejected
-- `TestPerTurnBound`: At most 10 messages per turn with cursor-based pagination
-- `TestActionRequestDetection`: Action requests detected and NEVER delivered
-- `TestHeldMessages`: Held messages are surfaced
+- `TestCanonicalEnvelopeUnlistedSenderIsHeldThenAllowlisted`: production ledger allowlist behavior
+- `TestCanonicalEnvelopeLoopTerminatesAtHopCeiling`: production A→B→A reply-chain termination
+- `TestCanonicalEnvelopeRateAndInboxBatchBounds`: production sender-rate and ten-row inbox bounds
+- `TestEnvelopeLedgerEnforcesBodyCap`: canonical oversized-body rejection
+- `TestCanonicalEnvelopeHoldsAndSurfacesExplicitActionRequests`: typed marker, heuristic fallback, secret rejection, DB invariant, and issue visibility
+- `TestFrameAgentEnvelopePutsTrustedBoundaryBeforeSpoofedBody`: server framing remains ahead of an attempted nested wrapper
+- `IssueAgentMessages security surfacing`: held action requests and unauthorized messages remain visibly human-only
 - durable-listen integration tests: attribution binding, bounded replay,
   monotonic acknowledgement, `read_at`, and future-cursor rejection
 
