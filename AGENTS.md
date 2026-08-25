@@ -35,7 +35,7 @@ Start here when opening this repo cold.
 - `paimos onboard --project PAI [--agent <name>]` — single-shot project briefing (PAI-340)
 - `paimos skill render <agent>` — render an agent artifact through a harness adapter (PAI-329 / PAI-332)
 - `paimos run-agent watch --project PAI --repo-root .` — local "Implement this" runner; spawns Claude Code on a UI-triggered run, report-back only (PAI-608)
-- `paimos listen --as <harness>:<agent> --project PAI [--follow] [--ack] [--deliver codex|claude]` — durable native inbox delivery (PAI-816)
+- `paimos listen --as <harness>:<agent> --project PAI [--follow] [--ack] [--deliver codex|claude|grok]` — durable native inbox delivery; Grok Build additionally requires `--enable-grok-build-delivery` (PAI-816)
 
 ## Notes
 

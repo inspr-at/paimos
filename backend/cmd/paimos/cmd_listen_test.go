@@ -29,7 +29,7 @@ func TestRunListenNoMessagesUsesExitThree(t *testing.T) {
 	}))
 	defer srv.Close()
 	client := &Client{baseURL: srv.URL, http: srv.Client()}
-	err := runListen(context.Background(), client, 1, "codex:codex", "codex", false, false, "", "", time.Millisecond)
+	err := runListen(context.Background(), client, 1, "codex:codex", "codex", false, false, "", "", false, time.Millisecond)
 	exit, ok := err.(*listenExitCode)
 	if !ok || exit.code != listenExitNoMessages {
 		t.Fatalf("error=%#v want listen exit %d", err, listenExitNoMessages)
@@ -50,7 +50,7 @@ func TestRunListenAdapterUnavailableUsesExitFour(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "")
 	t.Setenv("CODEX_SESSION_ID", "")
 	client := &Client{baseURL: srv.URL, http: srv.Client()}
-	err := runListen(context.Background(), client, 1, "codex:codex", "codex", false, true, "codex", "", time.Millisecond)
+	err := runListen(context.Background(), client, 1, "codex:codex", "codex", false, true, "codex", "", false, time.Millisecond)
 	exit, ok := err.(*listenExitCode)
 	if !ok || exit.code != listenExitAdapterUnavailable {
 		t.Fatalf("error=%#v want listen exit %d", err, listenExitAdapterUnavailable)
@@ -90,7 +90,7 @@ func TestRunListenAcknowledgesOnlyAfterOutput(t *testing.T) {
 	var out bytes.Buffer
 	stdout = &out
 	defer func() { stdout = oldStdout }()
-	if err := runListen(context.Background(), client, 1, "codex:codex", "codex", false, true, "", "", time.Millisecond); err != nil {
+	if err := runListen(context.Background(), client, 1, "codex:codex", "codex", false, true, "", "", false, time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "untrusted payload") {
@@ -127,7 +127,7 @@ func TestRunListenDoesNotAcknowledgeFailedOutput(t *testing.T) {
 	oldStdout := stdout
 	stdout = failingListenWriter{}
 	defer func() { stdout = oldStdout }()
-	if err := runListen(context.Background(), client, 1, "codex:receiver", "receiver", false, true, "", "", time.Millisecond); err == nil {
+	if err := runListen(context.Background(), client, 1, "codex:receiver", "receiver", false, true, "", "", false, time.Millisecond); err == nil {
 		t.Fatal("expected output failure")
 	}
 	if ackCalls != 0 {
@@ -200,5 +200,65 @@ func TestDeliverClaudeWritesAuthAndUserFrames(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for Claude socket frames")
+	}
+}
+
+func TestDeliverGrokRequiresExplicitGate(t *testing.T) {
+	err := deliverGrok(context.Background(), "payload", "01991b7e-1847-7e18-bc1c-b28e8cfaad4a", false)
+	var unavailable *adapterUnavailableError
+	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "--enable-grok-build-delivery") {
+		t.Fatalf("error=%#v want gate guidance", err)
+	}
+}
+
+func TestDeliverGrokRequiresCanonicalSessionUUID(t *testing.T) {
+	t.Setenv("GROK_SESSION_ID", "")
+	for _, target := range []string{"", "latest", "01991B7E-1847-7E18-BC1C-B28E8CFAAD4A"} {
+		err := deliverGrok(context.Background(), "payload", target, true)
+		var unavailable *adapterUnavailableError
+		if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "canonical lowercase session UUID") {
+			t.Fatalf("target=%q error=%#v want UUID guidance", target, err)
+		}
+	}
+}
+
+func TestDeliverGrokRequiresNativeCLI(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	err := deliverGrok(context.Background(), "payload", "01991b7e-1847-7e18-bc1c-b28e8cfaad4a", true)
+	var unavailable *adapterUnavailableError
+	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "grok CLI in PATH") {
+		t.Fatalf("error=%#v want native CLI guidance", err)
+	}
+}
+
+func TestDeliverGrokUsesBoundedNativeArgvAndDiscardsResponse(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args")
+	script := filepath.Join(dir, "grok")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PAIMOS_TEST_ARGS\"\nprintf 'sensitive vendor response\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("PAIMOS_TEST_ARGS", argsFile)
+	oldStdout := stdout
+	var out bytes.Buffer
+	stdout = &out
+	defer func() { stdout = oldStdout }()
+	target := "01991b7e-1847-7e18-bc1c-b28e8cfaad4a"
+	if err := deliverGrok(context.Background(), "hello from ledger", target, true); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "--single\nhello from ledger\n--resume\n" + target + "\n" +
+		"--output-format\njson\n--permission-mode\ndontAsk\n--tools\n\n" +
+		"--no-plan\n--no-subagents\n--disable-web-search\n--max-turns\n1\n--verbatim\n"
+	if got := string(raw); got != want {
+		t.Fatalf("argv=%q want %q", got, want)
+	}
+	if strings.Contains(out.String(), "sensitive vendor response") {
+		t.Fatalf("vendor response leaked to stdout: %q", out.String())
 	}
 }

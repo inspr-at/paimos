@@ -211,6 +211,26 @@ safe string metadata, then advances only the durable message read cursor after
 the JSON-RPC notification is written successfully. Without `--channel-as`, the
 capability is absent and the broker remains wholly read-only.
 
+Grok Build delivery is an explicit experimental CLI path:
+
+```bash
+paimos listen --as grok:grok --project PAI \
+  --deliver grok --deliver-target "$GROK_SESSION_ID" \
+  --enable-grok-build-delivery
+```
+
+The adapter requires a canonical lowercase Grok session UUID and the
+first-party `grok` executable. It invokes one bounded `--single --resume` turn
+with fixed argv, `dontAsk`, no tools, no planning, no subagents, no web access,
+and a one-turn ceiling. PAIMOS never reads or persists Grok authentication or
+the model response; a zero vendor exit is the delivery acknowledgement. The
+gate is deliberately per invocation so installing Grok cannot silently enable
+model use.
+
+Grok Bot is a different Cursor-hosted product and has no documented external
+receiving API or CLI. It therefore remains receive-by-human: PAIMOS stores and
+shows the message, but does not automate its UI or claim native delivery.
+
 Blast-radius queries are available at
 `GET /api/projects/:id/graph/blast-radius?issue=PAI-79&depth=3` for the
 "what else is affected if I change this?" agent flow.

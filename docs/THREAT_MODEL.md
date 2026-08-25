@@ -376,6 +376,7 @@ PAI-110 shipped the **INV-FILES-03** application-layer fix end-to-end. Uploads n
 | **INV-BROKER-03** | Local broker reads block obvious secret files and redact common token/password shapes in returned content. | `cmd/paimos/cmd_serve.go:denyUnsafeRepoRel`, `redactSensitiveTextWithFlag` | `cmd_serve_test.go` |
 | **INV-BROKER-04** | MCP stdio exposes the same read-only broker methods as HTTP mode; stdout carries JSON-RPC only. | `cmd/paimos/cmd_serve.go:serveMCP` | `cmd_serve_test.go` |
 | **INV-BROKER-05** | Claude channel capability is absent unless explicitly configured; configured delivery binds to receiver attribution and acknowledges only after the notification write succeeds. | `cmd/paimos/cmd_serve.go:runClaudeChannel` | `cmd_serve_test.go` |
+| **INV-BROKER-06** | Grok Build delivery is disabled unless the operator passes the explicit experimental gate. Enabled delivery accepts only a canonical session UUID, uses fixed no-shell argv with tools/subagents/planning/web disabled and one turn, discards vendor output, and acknowledges only after a zero vendor exit. | `cmd/paimos/cmd_listen.go:deliverGrok` | `cmd_listen_test.go` |
 
 ### 4.8 · Remote-triggered execution (PAI-605)
 

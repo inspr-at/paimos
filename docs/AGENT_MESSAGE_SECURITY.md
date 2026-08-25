@@ -59,6 +59,13 @@ Listen and acknowledge requests bind the address to trusted
 and only to an actual delivered, non-action row in that inbox, so a malicious
 client cannot skip unseen future messages.
 
+Native delivery preserves that boundary. Codex, Claude, and Grok Build receive
+the server-added untrusted-data frame, never the raw stored body. Grok Build is
+additionally off by default behind `--enable-grok-build-delivery`, accepts only
+a canonical session UUID, runs one fixed-argv turn with tools and network
+helpers disabled, and discards the vendor response. The durable cursor advances
+only after the selected native handoff succeeds.
+
 ### Message Framing
 
 Every delivered message is wrapped with the `<paimos-message>` tag and untrusted preamble:
