@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -56,6 +55,7 @@ func listenCmd() *cobra.Command {
 		ack           bool
 		deliver       string
 		deliverTarget string
+		deliverMode   string
 		enableGrok    bool
 		pollInterval  time.Duration
 	)
@@ -75,6 +75,13 @@ func listenCmd() *cobra.Command {
 			if deliver != "" && deliver != "codex" && deliver != "claude" && deliver != "grok" {
 				return &usageError{msg: "--deliver must be codex, claude, or grok"}
 			}
+			deliverMode = strings.ToLower(strings.TrimSpace(deliverMode))
+			if deliverMode == "" {
+				deliverMode = "queue"
+			}
+			if deliverMode != "queue" && deliverMode != "steer" {
+				return &usageError{msg: "--deliver-mode must be queue or steer"}
+			}
 			if pollInterval <= 0 {
 				return &usageError{msg: "--poll-interval must be greater than zero"}
 			}
@@ -86,7 +93,7 @@ func listenCmd() *cobra.Command {
 			if err != nil {
 				return reportError(err)
 			}
-			return runListen(cmd.Context(), client, projectID, address, agent, follow, ack || deliver != "", deliver, strings.TrimSpace(deliverTarget), enableGrok, pollInterval)
+			return runListen(cmd.Context(), client, projectID, address, agent, follow, ack || deliver != "", deliver, strings.TrimSpace(deliverTarget), deliverMode, enableGrok, pollInterval)
 		},
 	}
 	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
@@ -95,6 +102,7 @@ func listenCmd() *cobra.Command {
 	c.Flags().BoolVar(&ack, "ack", false, "durably acknowledge messages after output")
 	c.Flags().StringVar(&deliver, "deliver", "", "deliver each message to codex, claude, or grok, then acknowledge")
 	c.Flags().StringVar(&deliverTarget, "deliver-target", "", "Codex thread id, Claude Unix socket, or Grok session UUID (defaults to vendor environment)")
+	c.Flags().StringVar(&deliverMode, "deliver-mode", "queue", "delivery mode: queue (wait until idle, default) or steer (mid-turn interrupt)")
 	c.Flags().BoolVar(&enableGrok, "enable-grok-build-delivery", false, "enable the experimental Grok Build delivery adapter")
 	c.Flags().DurationVar(&pollInterval, "poll-interval", listenDefaultPollInterval, "follow polling interval")
 	return c
@@ -111,7 +119,7 @@ func splitListenAddress(raw string) (string, string, error) {
 var addressPartCLI = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 var grokSessionUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
-func runListen(ctx context.Context, client *Client, projectID int64, address, agent string, follow, acknowledge bool, deliver, target string, enableGrok bool, pollInterval time.Duration) error {
+func runListen(ctx context.Context, client *Client, projectID int64, address, agent string, follow, acknowledge bool, deliver, target, mode string, enableGrok bool, pollInterval time.Duration) error {
 	after, seen := int64(0), false
 	for {
 		page, err := fetchInbox(ctx, client, projectID, address, agent, after)
@@ -124,7 +132,7 @@ func runListen(ctx context.Context, client *Client, projectID int64, address, ag
 		if len(page.Messages) > 0 {
 			seen = true
 			for _, message := range page.Messages {
-				if err := emitOrDeliverMessage(ctx, message, deliver, target, enableGrok); err != nil {
+				if err := emitOrDeliverMessage(ctx, message, deliver, target, mode, enableGrok); err != nil {
 					if ctx.Err() != nil {
 						return nil
 					}
@@ -184,7 +192,7 @@ func ackInbox(ctx context.Context, client *Client, projectID int64, address, age
 	return err
 }
 
-func emitOrDeliverMessage(ctx context.Context, message messageEnvelope, deliver, target string, enableGrok bool) error {
+func emitOrDeliverMessage(ctx context.Context, message messageEnvelope, deliver, target, mode string, enableGrok bool) error {
 	if deliver == "" {
 		if flagJSON {
 			raw, err := json.Marshal(message)
@@ -201,7 +209,7 @@ func emitOrDeliverMessage(ctx context.Context, message messageEnvelope, deliver,
 	body := messageText(message)
 	switch deliver {
 	case "codex":
-		return deliverCodex(ctx, body, target)
+		return deliverCodex(ctx, body, target, mode)
 	case "claude":
 		return deliverClaude(ctx, body, target)
 	case "grok":
@@ -225,7 +233,7 @@ type adapterUnavailableError struct{ message string }
 
 func (e *adapterUnavailableError) Error() string { return e.message }
 
-func deliverCodex(ctx context.Context, body, target string) error {
+func deliverCodex(ctx context.Context, body, target, mode string) error {
 	if target == "" {
 		target = strings.TrimSpace(os.Getenv("CODEX_THREAD_ID"))
 	}
@@ -235,6 +243,19 @@ func deliverCodex(ctx context.Context, body, target string) error {
 	if target == "" {
 		return &adapterUnavailableError{message: "Codex delivery requires --deliver-target or CODEX_THREAD_ID"}
 	}
+	// mode defaults to "queue" and was validated by the caller.
+	// "queue" uses the codex CLI and waits until the thread is idle.
+	// "steer" sends a JSON-RPC turn/steer request to the app-server control socket for mid-turn interruption.
+	if mode == "" {
+		mode = "queue"
+	}
+	if mode == "steer" {
+		return deliverCodexSteer(ctx, body, target)
+	}
+	return deliverCodexQueue(ctx, body, target)
+}
+
+func deliverCodexQueue(ctx context.Context, body, target string) error {
 	path, err := exec.LookPath("codex")
 	if err != nil {
 		return &adapterUnavailableError{message: "Codex delivery requires the codex CLI in PATH"}
@@ -249,34 +270,184 @@ func deliverCodex(ctx context.Context, body, target string) error {
 	return nil
 }
 
+func deliverCodexSteer(ctx context.Context, body, threadID string) error {
+	// Use codex app-server proxy to communicate with the app-server control socket.
+	// The proxy provides JSON-RPC over stdio (newline-delimited JSON).
+	// Requires a running app-server daemon: `codex app-server daemon start`
+	// Control socket: ~/.codex/app-server-control/app-server-control.sock
+	path, err := exec.LookPath("codex")
+	if err != nil {
+		return &adapterUnavailableError{message: "Codex steer requires the codex CLI in PATH"}
+	}
+
+	// #nosec G204 G702 -- codex is resolved from the operator-controlled PATH;
+	// all remaining values are fixed argv entries and no shell is involved.
+	cmd := exec.CommandContext(ctx, path, "app-server", "proxy")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("create stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("create stdout pipe: %w", err)
+	}
+	cmd.Stderr = stderr
+
+	if err := cmd.Start(); err != nil {
+		return &adapterUnavailableError{message: fmt.Sprintf("start codex app-server proxy (daemon not running?): %v", err)}
+	}
+	defer func() {
+		stdin.Close()
+		_ = cmd.Wait()
+	}()
+
+	// JSON-RPC communication over stdio (newline-delimited JSON).
+	encoder := json.NewEncoder(stdin)
+	decoder := json.NewDecoder(stdout)
+
+	// Handshake: initialize request (required) followed by initialized notification.
+	initReq := map[string]any{
+		"id":     0,
+		"method": "initialize",
+		"params": map[string]any{
+			"clientInfo": map[string]string{
+				"name":    "paimos",
+				"version": "1.0.0",
+			},
+		},
+	}
+	if err := encoder.Encode(initReq); err != nil {
+		return fmt.Errorf("send initialize: %w", err)
+	}
+
+	var initResp map[string]any
+	if err := decoder.Decode(&initResp); err != nil {
+		return fmt.Errorf("read initialize response: %w", err)
+	}
+	if errObj, ok := initResp["error"].(map[string]any); ok {
+		return fmt.Errorf("initialize error: %v", errObj["message"])
+	}
+
+	// Send initialized notification (no id, no response expected).
+	initNotif := map[string]any{
+		"method": "initialized",
+	}
+	if err := encoder.Encode(initNotif); err != nil {
+		return fmt.Errorf("send initialized: %w", err)
+	}
+
+	// Query thread/turns/list to find the active turn.
+	// Method: thread/turns/list
+	// Params: {threadId: string}
+	// Response: {data: Turn[]} where Turn.status is "inProgress" | "completed" | "interrupted" | "failed"
+	turnsListReq := map[string]any{
+		"id":     1,
+		"method": "thread/turns/list",
+		"params": map[string]any{"threadId": threadID},
+	}
+	if err := encoder.Encode(turnsListReq); err != nil {
+		return fmt.Errorf("send thread/turns/list: %w", err)
+	}
+
+	var turnsListResp map[string]any
+	if err := decoder.Decode(&turnsListResp); err != nil {
+		return fmt.Errorf("read thread/turns/list response: %w", err)
+	}
+
+	if errObj, ok := turnsListResp["error"].(map[string]any); ok {
+		return fmt.Errorf("thread/turns/list error: %v", errObj["message"])
+	}
+
+	result, ok := turnsListResp["result"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("invalid thread/turns/list response")
+	}
+
+	turns, ok := result["data"].([]any)
+	if !ok || len(turns) == 0 {
+		// No turns; fall back to queue.
+		stdin.Close()
+		_ = cmd.Wait()
+		return deliverCodexQueue(ctx, body, threadID)
+	}
+
+	// Find the most recent turn with status "inProgress".
+	var activeTurnID string
+	for i := len(turns) - 1; i >= 0; i-- {
+		turn, ok := turns[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		turnID, _ := turn["id"].(string)
+		status, _ := turn["status"].(string)
+		if status == "inProgress" && turnID != "" {
+			activeTurnID = turnID
+			break
+		}
+	}
+
+	if activeTurnID == "" {
+		// No turn in progress; fall back to queue.
+		stdin.Close()
+		_ = cmd.Wait()
+		return deliverCodexQueue(ctx, body, threadID)
+	}
+
+	// Send turn/steer JSON-RPC request.
+	// Method: turn/steer
+	// Params: {threadId: string, expectedTurnId: string, input: UserInput[]}
+	// UserInput TextUserInput: {type: "text", text: string}
+	// Response: {turnId: string}
+	// Error codes: activeTurnNotSteerable (e.g. /review or /compact in progress)
+	steerReq := map[string]any{
+		"id":     2,
+		"method": "turn/steer",
+		"params": map[string]any{
+			"threadId":       threadID,
+			"expectedTurnId": activeTurnID,
+			"input": []map[string]any{
+				{"type": "text", "text": body},
+			},
+		},
+	}
+	if err := encoder.Encode(steerReq); err != nil {
+		return fmt.Errorf("send turn/steer: %w", err)
+	}
+
+	var steerResp map[string]any
+	if err := decoder.Decode(&steerResp); err != nil {
+		return fmt.Errorf("read turn/steer response: %w", err)
+	}
+
+	if errObj, ok := steerResp["error"].(map[string]any); ok {
+		code, _ := errObj["code"].(string)
+		message, _ := errObj["message"].(string)
+		// activeTurnNotSteerable: /review or /compact in progress.
+		if code == "activeTurnNotSteerable" {
+			return fmt.Errorf("turn/steer rejected (%s): %s", code, message)
+		}
+		return fmt.Errorf("turn/steer error: %s", message)
+	}
+
+	return nil
+}
+
 func deliverClaude(ctx context.Context, body, target string) error {
+	// Claude Code messaging socket delivery is unsupported for mid-turn interrupts.
+	// Official docs (https://code.claude.com/docs/en/headless.md) specify only
+	// the optional auth line {"type":"auth","token":"..."}, not the message frame.
+	//
+	// Supported paths for Claude delivery:
+	// - Idle turn: `claude -p --resume <session_id>` (new turn)
+	// - Cloud session: `claude -p --cloud <session_id>` (queued follow-up)
+	// - Cross-session: in-session SendMessage tool (receiver reads between tool calls)
+	// - Channels: MCP notifications/claude/channel (research preview, allowlisted plugins)
+	//
+	// PAIMOS does not implement these paths yet. Print the message for human relay.
 	if target == "" {
 		target = strings.TrimSpace(os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET"))
 	}
-	if target == "" {
-		return &adapterUnavailableError{message: "Claude delivery requires --deliver-target or CLAUDE_CODE_MESSAGING_SOCKET"}
-	}
-	dialer := net.Dialer{}
-	conn, err := dialer.DialContext(ctx, "unix", target)
-	if err != nil {
-		return &adapterUnavailableError{message: "Claude messaging socket is unavailable: " + err.Error()}
-	}
-	defer conn.Close()
-	enc := json.NewEncoder(conn)
-	if token := os.Getenv("CLAUDE_CODE_MESSAGING_TOKEN"); token != "" {
-		if err := enc.Encode(map[string]string{"type": "auth", "token": token}); err != nil {
-			return fmt.Errorf("authenticate Claude messaging socket: %w", err)
-		}
-	}
-	if err := enc.Encode(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": body}}); err != nil {
-		return fmt.Errorf("deliver to Claude messaging socket: %w", err)
-	}
-	if unix, ok := conn.(*net.UnixConn); ok {
-		_ = unix.CloseWrite()
-	}
-	// A successful write is the adapter acknowledgement. No credential or
-	// vendor response is persisted by PAIMOS.
-	return nil
+	return &adapterUnavailableError{message: "Claude mid-turn delivery unsupported; use --resume / --cloud for idle turns or SendMessage tool for cross-session"}
 }
 
 func deliverGrok(ctx context.Context, body, target string, enabled bool) error {
