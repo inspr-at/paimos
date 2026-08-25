@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -55,6 +56,7 @@ func listenCmd() *cobra.Command {
 		ack           bool
 		deliver       string
 		deliverTarget string
+		enableGrok    bool
 		pollInterval  time.Duration
 	)
 	c := &cobra.Command{
@@ -70,8 +72,8 @@ func listenCmd() *cobra.Command {
 			}
 			address = harness + ":" + agent
 			deliver = strings.ToLower(strings.TrimSpace(deliver))
-			if deliver != "" && deliver != "codex" && deliver != "claude" {
-				return &usageError{msg: "--deliver must be codex or claude"}
+			if deliver != "" && deliver != "codex" && deliver != "claude" && deliver != "grok" {
+				return &usageError{msg: "--deliver must be codex, claude, or grok"}
 			}
 			if pollInterval <= 0 {
 				return &usageError{msg: "--poll-interval must be greater than zero"}
@@ -84,15 +86,16 @@ func listenCmd() *cobra.Command {
 			if err != nil {
 				return reportError(err)
 			}
-			return runListen(cmd.Context(), client, projectID, address, agent, follow, ack || deliver != "", deliver, strings.TrimSpace(deliverTarget), pollInterval)
+			return runListen(cmd.Context(), client, projectID, address, agent, follow, ack || deliver != "", deliver, strings.TrimSpace(deliverTarget), enableGrok, pollInterval)
 		},
 	}
 	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
 	c.Flags().StringVar(&address, "as", "", "receiver address <harness>:<registered-agent> (required)")
 	c.Flags().BoolVar(&follow, "follow", false, "keep polling until interrupted")
 	c.Flags().BoolVar(&ack, "ack", false, "durably acknowledge messages after output")
-	c.Flags().StringVar(&deliver, "deliver", "", "deliver each message to codex or claude, then acknowledge")
-	c.Flags().StringVar(&deliverTarget, "deliver-target", "", "Codex thread id or Claude Unix socket (defaults to vendor environment)")
+	c.Flags().StringVar(&deliver, "deliver", "", "deliver each message to codex, claude, or grok, then acknowledge")
+	c.Flags().StringVar(&deliverTarget, "deliver-target", "", "Codex thread id, Claude Unix socket, or Grok session UUID (defaults to vendor environment)")
+	c.Flags().BoolVar(&enableGrok, "enable-grok-build-delivery", false, "enable the experimental Grok Build delivery adapter")
 	c.Flags().DurationVar(&pollInterval, "poll-interval", listenDefaultPollInterval, "follow polling interval")
 	return c
 }
@@ -106,8 +109,9 @@ func splitListenAddress(raw string) (string, string, error) {
 }
 
 var addressPartCLI = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
+var grokSessionUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
-func runListen(ctx context.Context, client *Client, projectID int64, address, agent string, follow, acknowledge bool, deliver, target string, pollInterval time.Duration) error {
+func runListen(ctx context.Context, client *Client, projectID int64, address, agent string, follow, acknowledge bool, deliver, target string, enableGrok bool, pollInterval time.Duration) error {
 	after, seen := int64(0), false
 	for {
 		page, err := fetchInbox(ctx, client, projectID, address, agent, after)
@@ -120,7 +124,7 @@ func runListen(ctx context.Context, client *Client, projectID int64, address, ag
 		if len(page.Messages) > 0 {
 			seen = true
 			for _, message := range page.Messages {
-				if err := emitOrDeliverMessage(ctx, message, deliver, target); err != nil {
+				if err := emitOrDeliverMessage(ctx, message, deliver, target, enableGrok); err != nil {
 					if ctx.Err() != nil {
 						return nil
 					}
@@ -180,7 +184,7 @@ func ackInbox(ctx context.Context, client *Client, projectID int64, address, age
 	return err
 }
 
-func emitOrDeliverMessage(ctx context.Context, message messageEnvelope, deliver, target string) error {
+func emitOrDeliverMessage(ctx context.Context, message messageEnvelope, deliver, target string, enableGrok bool) error {
 	if deliver == "" {
 		if flagJSON {
 			raw, err := json.Marshal(message)
@@ -200,6 +204,8 @@ func emitOrDeliverMessage(ctx context.Context, message messageEnvelope, deliver,
 		return deliverCodex(ctx, body, target)
 	case "claude":
 		return deliverClaude(ctx, body, target)
+	case "grok":
+		return deliverGrok(ctx, body, target, enableGrok)
 	default:
 		return fmt.Errorf("unsupported delivery adapter %q", deliver)
 	}
@@ -270,5 +276,42 @@ func deliverClaude(ctx context.Context, body, target string) error {
 	}
 	// A successful write is the adapter acknowledgement. No credential or
 	// vendor response is persisted by PAIMOS.
+	return nil
+}
+
+func deliverGrok(ctx context.Context, body, target string, enabled bool) error {
+	if !enabled {
+		return &adapterUnavailableError{message: "Grok Build delivery is experimental; pass --enable-grok-build-delivery"}
+	}
+	if target == "" {
+		target = strings.TrimSpace(os.Getenv("GROK_SESSION_ID"))
+	}
+	if !grokSessionUUIDPattern.MatchString(target) {
+		return &adapterUnavailableError{message: "Grok Build delivery requires a canonical lowercase session UUID via --deliver-target or GROK_SESSION_ID"}
+	}
+	path, err := exec.LookPath("grok")
+	if err != nil {
+		return &adapterUnavailableError{message: "Grok Build delivery requires the grok CLI in PATH"}
+	}
+	// #nosec G204 G702 -- grok is resolved from the operator-controlled PATH;
+	// all remaining values are fixed argv entries and no shell is involved.
+	cmd := exec.CommandContext(ctx, path,
+		"--single", body,
+		"--resume", target,
+		"--output-format", "json",
+		"--permission-mode", "dontAsk",
+		"--tools", "",
+		"--no-plan",
+		"--no-subagents",
+		"--disable-web-search",
+		"--max-turns", "1",
+		"--verbatim",
+	)
+	// The vendor response can contain session context. PAIMOS treats a zero exit
+	// as the handoff acknowledgement and never captures, stores, or prints it.
+	cmd.Stdout, cmd.Stderr = io.Discard, stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("deliver to Grok Build session: %w", err)
+	}
 	return nil
 }

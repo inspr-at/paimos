@@ -30,15 +30,20 @@ Allow a sender, then consume an inbox with a durable receiver cursor:
 paimos message allow paimos:claude --for codex:codex --project PAI
 paimos listen --as codex:codex --project PAI --ack
 paimos listen --as codex:codex --project PAI --follow --deliver codex --deliver-target "$CODEX_THREAD_ID"
+paimos listen --as grok:grok --project PAI --deliver grok --deliver-target "$GROK_SESSION_ID" --enable-grok-build-delivery
 ```
 
 `listen` exits 3 when a one-shot read has no mail and 4 when the selected
 native adapter is unavailable. `--ack` advances the server cursor only after
-output succeeds; `--deliver codex|claude` implies acknowledgement only after
-the vendor handoff succeeds. Codex uses `codex queue --thread`. Claude uses
-the active Claude Code messaging socket from
+output succeeds; `--deliver codex|claude|grok` implies acknowledgement only
+after the vendor handoff succeeds. Codex uses `codex queue --thread`. Claude
+uses the active Claude Code messaging socket from
 `CLAUDE_CODE_MESSAGING_SOCKET` (and its token environment when present).
-Neither adapter stores or prints vendor credentials.
+The experimental Grok Build adapter is off unless
+`--enable-grok-build-delivery` is present. It resumes only a canonical session
+UUID through the first-party `grok` CLI, sends one verbatim turn with tools,
+subagents, planning, and web access disabled, and discards the vendor response.
+No adapter stores or prints vendor credentials.
 
 ## Which surface should I use?
 
