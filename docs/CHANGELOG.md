@@ -5,6 +5,20 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.17.1] — 2026-08-25
+
+### Fixed — Canonical relay security enforcement
+
+- Added an explicit `is_action_request` API field and `paimos tell
+  --action-request` flag so state-changing free-text requests reliably enter
+  the human-only held path instead of depending on prose detection.
+- Added a trusted message-body boundary and a clear issue-detail label for held
+  action requests, while retaining conservative detection as defence in depth.
+- Added production-ledger regression proof for sender allowlists, held-message
+  visibility, A→B→A hop termination, rate and per-turn bounds, body caps,
+  secret rejection, trusted attribution, and the never-delivered action
+  invariant; corrected the security and data-model docs to match live behavior.
+
 ## [5.17.0] — 2026-08-25
 
 ### Added — Gated Grok Build delivery
