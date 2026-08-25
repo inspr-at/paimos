@@ -47,20 +47,22 @@ interface VisualApiControl {
   setDeliverySnapshot(snapshot: VisualDeliverySnapshot): void
   releaseLoading(): void
   readonly deliveryRequests: number
+  readonly deliveryQueries: readonly string[]
   readonly controlTransitions: readonly string[]
   readonly issueMutations: number
   readonly commentPosts: number
   readonly attachmentUploads: number
 }
 
-async function installApiFixtures(page: Page): Promise<VisualApiControl> {
+async function installApiFixtures(page: Page, respectDeliveryFilters = false): Promise<VisualApiControl> {
   let deliveryMode: VisualDeliveryMode = 'ready'
   let deliverySnapshot = makeFixtureSnapshot(10)
   let deliveryRequests = 0
+  const deliveryQueries: string[] = []
   let releaseLoading: (() => void) | null = null
   const controlTransitions: string[] = []
   const controlCommands = new Map<string, Record<string, unknown>>()
-  const controlIdempotencyKeys = new Set<string>()
+  const controlIdempotencyKeys = new Map<string, string | null>()
   let controlCommandSequence = 0
   let issueFixture = { ...visualIssue }
   let issueMutations = 0
@@ -77,13 +79,21 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
   const requireExactJSON = (request: Request, expected: Record<string, unknown>) => {
     expect(request.postDataJSON(), `exact request body for ${request.url()}`).toEqual(expected)
   }
-  const requireControlMutation = (request: Request, expected: Record<string, unknown>) => {
+  const requireControlMutation = (
+    request: Request,
+    expected: Record<string, unknown>,
+    reusableScope?: string,
+  ) => {
     requireMethod(request, 'POST')
     requireExactJSON(request, expected)
     const idempotencyKey = request.headers()['idempotency-key']
     expect(idempotencyKey, `Idempotency-Key for ${request.url()}`).toMatch(UUID_V4)
-    expect(controlIdempotencyKeys.has(idempotencyKey), `fresh Idempotency-Key for ${request.url()}`).toBe(false)
-    controlIdempotencyKeys.add(idempotencyKey)
+    if (controlIdempotencyKeys.has(idempotencyKey)) {
+      expect(reusableScope, `fresh Idempotency-Key for ${request.url()}`).toBeTruthy()
+      expect(controlIdempotencyKeys.get(idempotencyKey), `same-scope Idempotency-Key retry for ${request.url()}`).toBe(reusableScope)
+    } else {
+      controlIdempotencyKeys.set(idempotencyKey, reusableScope ?? null)
+    }
   }
   await page.addInitScript(() => {
     const sources: EventTarget[] = []
@@ -136,6 +146,7 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
     }
     if (path === '/api/agent-mode/deliveries') {
       deliveryRequests += 1
+      deliveryQueries.push(new URL(route.request().url()).search)
       if (new URL(route.request().url()).searchParams.get('q') === 'visual-forbidden') {
         return fulfill({ message: 'fixture: forbidden' }, 403)
       }
@@ -154,11 +165,30 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
           headers: { 'X-Permissions-Epoch': '1' },
         })
       }
+      if (respectDeliveryFilters) {
+        const requestUrl = new URL(route.request().url())
+        const wire = structuredClone(deliverySnapshot)
+        const allRows = wire.rows ?? []
+        const projectId = Number(requestUrl.searchParams.get('project_id')) || null
+        const selectedDelivery = requestUrl.searchParams.get('selected_delivery')
+        const rows = projectId == null
+          ? allRows
+          : allRows.filter((row) => row.project_id === projectId)
+        wire.rows = rows
+        if (selectedDelivery) {
+          wire.selected_delivery = selectedDelivery
+          const outside = allRows.find((row) => row.delivery_id === selectedDelivery && !rows.includes(row))
+          if (outside) wire.selected_outside = { reason: 'filter_excluded', row: outside }
+          else delete wire.selected_outside
+        }
+        rebuildFixtureAggregates(wire)
+        return fulfill(wire)
+      }
       return fulfill(deliverySnapshot)
     }
     if (/^\/api\/agent-mode\/deliveries\/dlv-\d+\/control-capability-grants$/.test(path)) {
-      requireControlMutation(route.request(), {})
       const deliveryKey = path.split('/')[4]
+      requireControlMutation(route.request(), {}, respectDeliveryFilters ? `grant:${deliveryKey}` : undefined)
       const selected = makeFixtureSnapshot(10).rows?.find((delivery) => delivery.delivery_id === deliveryKey)
       return fulfill({
         grant_id: '11111111-1111-4111-8111-111111111111',
@@ -293,6 +323,7 @@ async function installApiFixtures(page: Page): Promise<VisualApiControl> {
       releaseLoading = null
     },
     get deliveryRequests() { return deliveryRequests },
+    get deliveryQueries() { return deliveryQueries },
     get controlTransitions() { return [...controlTransitions] },
     get issueMutations() { return issueMutations },
     get commentPosts() { return commentPosts },
@@ -973,4 +1004,82 @@ test('PAI-806 Detail 1 ticket panel geometry at 390 / 736 / 1024', async ({ page
       horizontalOverflow: false,
     })
   }
+})
+
+test('PAI-806 final QA switches deliveries and projects by mouse, keyboard, and typed voice', async ({ page }) => {
+  await installStaticHost(page)
+  const api = await installApiFixtures(page, true)
+
+  const requireId = (id: string | null, label: string) => {
+    if (!id) throw new Error(`${label} must expose a delivery id`)
+    return id
+  }
+  const selectedId = async () => requireId(
+    await page.locator('[data-selected="true"]').getAttribute('data-delivery-id'),
+    'selected card',
+  )
+  const submitVoice = async (command: string) => {
+    const input = page.locator('#am-voice-command')
+    await input.fill(command)
+    await input.press('Enter')
+  }
+
+  await openReady(page, 1440, 1000)
+  const initialId = await selectedId()
+
+  // Mouse: choose another visible delivery card.
+  const mouseTarget = page.locator('.am-lanes [data-card-hit]').first()
+  const mouseTargetId = requireId(await mouseTarget.getAttribute('data-card-hit'), 'mouse target')
+  expect(mouseTargetId).not.toBe(initialId)
+  await mouseTarget.click()
+  await expect.poll(selectedId).toBe(mouseTargetId)
+  await expect.poll(() => new URL(page.url()).searchParams.get('delivery')).toBe(mouseTargetId)
+
+  // Keyboard: the selected card owns roving focus and arrow travel.
+  const beforeKeyboard = await selectedId()
+  await page.locator(`[data-card-hit="${beforeKeyboard}"]`).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(selectedId).not.toBe(beforeKeyboard)
+  const afterKeyboard = await selectedId()
+  await expect(page.locator(`[data-card-hit="${afterKeyboard}"]`)).toBeFocused()
+  await expect.poll(() => new URL(page.url()).searchParams.get('delivery')).toBe(afterKeyboard)
+
+  // Typed voice uses the same selection state machine.
+  const beforeVoice = await selectedId()
+  await submitVoice('next')
+  await expect.poll(selectedId).not.toBe(beforeVoice)
+  const afterVoice = await selectedId()
+  await expect.poll(() => new URL(page.url()).searchParams.get('delivery')).toBe(afterVoice)
+
+  // Mouse: switch to another project, then select one of its issues.
+  await page.locator('.am-project-picker__trigger').click()
+  await page.locator('[data-project-id="9"]').click()
+  await expect.poll(() => new URL(page.url()).searchParams.get('project')).toBe('9')
+  await expect(page.locator('.am-lanes .am-project')).toHaveCount(1)
+  await expect(page.locator('.am-lanes .am-project')).toHaveAttribute('aria-labelledby', 'am-project-9')
+  const runIssue = page.locator('.am-lanes [data-card-hit]').first()
+  const runIssueId = requireId(await runIssue.getAttribute('data-card-hit'), 'RUN issue target')
+  await runIssue.click()
+  await expect.poll(selectedId).toBe(runIssueId)
+  await expect.poll(() => new URL(page.url()).searchParams.get('delivery')).toBe(runIssueId)
+
+  // Keyboard: search the project picker and choose the sole match with Enter.
+  await page.locator('.am-project-picker__trigger').focus()
+  await page.keyboard.press('Enter')
+  const projectSearch = page.locator('.am-project-picker__search input')
+  await projectSearch.fill('Release operations')
+  await projectSearch.press('Enter')
+  await expect.poll(() => new URL(page.url()).searchParams.get('project')).toBe('12')
+  await expect(page.locator('.am-lanes .am-project')).toHaveAttribute('aria-labelledby', 'am-project-12')
+
+  // Typed voice: switch projects and select an exact issue within that project.
+  await submitVoice('project PAIMOS Core platform')
+  await expect.poll(() => new URL(page.url()).searchParams.get('project')).toBe('6')
+  await submitVoice('select PAI-821')
+  await expect.poll(selectedId).toBe('dlv-821')
+  await expect.poll(() => new URL(page.url()).searchParams.get('delivery')).toBe('dlv-821')
+
+  const finalQuery = new URLSearchParams(api.deliveryQueries.at(-1))
+  expect(finalQuery.get('project_id')).toBe('6')
+  expect(finalQuery.get('selected_delivery')).toBe('dlv-821')
 })
