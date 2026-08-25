@@ -5,6 +5,24 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.17.0] — 2026-08-25
+
+### Added — Gated Grok Build delivery
+
+- Added `--deliver grok` for one-turn delivery into an existing Grok Build
+  session through the first-party `grok` CLI, with canonical session UUID
+  targeting and an explicit per-invocation `--enable-grok-build-delivery` gate.
+- Documented Grok Bot as receive-by-human because it has no documented external
+  receiving API or CLI; PAIMOS does not automate its UI or claim native delivery.
+
+### Security
+
+- Grok Build delivery uses fixed no-shell argv, disables tools, planning,
+  subagents, and web access, caps execution at one turn, discards vendor output,
+  and advances the durable cursor only after a zero vendor exit.
+- PAIMOS never reads, stores, forwards, or prints Grok authentication material
+  or the model response.
+
 ## [5.16.0] — 2026-08-24
 
 ### Added — Native durable agent-message delivery
