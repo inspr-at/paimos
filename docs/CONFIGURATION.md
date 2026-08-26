@@ -95,6 +95,15 @@ and `pma` at the same target registry or dispatcher configuration.
 | `PAIMOS_AGENT_BUS_WEBHOOK_HOSTS` | *(empty / all denied)* | Comma-separated exact hostnames approved for operator-registered `https_webhook` targets. Amy's Grok Bot routine hostname must appear here before its target can be registered. |
 | `PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS` | `false` | When `true`, permits loopback/private/link-local webhook addresses. Intended only for isolated local capture tests; keep false in production. HTTPS and the hostname allowlist still apply. |
 
+For the later, separate `ppm` rollout, pin these exact values before registering
+Amy's target (replace only the hostname placeholder):
+
+```text
+PAIMOS_AGENT_BUS_INSTANCE=ppm
+PAIMOS_AGENT_BUS_WEBHOOK_HOSTS=<Amy routine hostname>
+PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS=false
+```
+
 The webhook capability itself is not an environment variable. Register it via
 the closed admin API field `target_ref`, or equivalently
 `printf '%s' "$AMY_GROK_BOT_ROUTINE_WEBHOOK" | paimos message target set ... --target-ref-file -`.

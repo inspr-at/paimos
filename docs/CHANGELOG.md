@@ -42,20 +42,27 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Added — Codex mid-turn steer delivery (PAI-825)
 
 - Added `--deliver-mode steer` for mid-turn interruption of live Codex agents
-  through the `codex app-server proxy` JSON-RPC transport.
+  through the `codex app-server proxy` JSON-RPC transport, communicating with
+  the app-server control socket at `~/.codex/app-server-control/app-server-control.sock`.
 - Steer delivery performs the required `initialize` + `initialized` handshake,
   queries active turns via `thread/turns/list` (matching `status: "inProgress"`),
-  and sends `turn/steer` with `expectedTurnId` and typed text input.
+  and sends `turn/steer` with `expectedTurnId` and `input: [{type: "text", text}]`.
 - Falls back to `codex queue` when no turn is in progress or the turn is not
-  steerable. Queue mode remains the default.
-- Claude mid-turn delivery is explicitly unsupported; no undocumented socket
-  message frame is used.
+  steerable (e.g. `/review` or `/compact`).
+- Queue mode (`--deliver-mode queue`, default) remains unchanged and uses the
+  existing `codex queue` CLI for wait-until-idle delivery.
+- Claude mid-turn delivery marked unsupported; official messaging socket frame
+  is not documented beyond the optional auth line. Idle Claude delivery should
+  use `claude -p --resume` / `--cloud` or cross-session SendMessage tool.
 
 ### Security
 
-- Codex steer uses `codex app-server proxy` and does not implement custom
-  WebSocket framing or direct socket connections.
+- Codex steer uses `codex app-server proxy` (validated transport) and does not
+  implement custom WebSocket framing or direct socket connections.
 - PAIMOS does not store or replay Codex app-server responses or credentials.
+- All tests verify correct JSON-RPC schema compliance: `initialize` with
+  `clientInfo`, `thread/turns/list` for `inProgress` turns, and `turn/steer`
+  with `{type: "text", text}` input format.
 
 ## [5.17.2] — 2026-08-25
 
