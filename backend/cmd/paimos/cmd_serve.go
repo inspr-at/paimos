@@ -1289,24 +1289,47 @@ func (b *contextBroker) runClaudeChannel(ctx context.Context, enc *lockedJSONEnc
 			b.audit("claude_channel_listen", map[string]any{"address": b.channelAddress}, 0, err)
 		} else {
 			for _, message := range page.Messages {
+				// PAI-827: the Channels path is a simple handoff. The requested
+				// level is the durable envelope level (PAI-826 delivery_level,
+				// empty on pre-bus rows = simple); a steer request is recorded as
+				// fallback_reason=unsupported, never a guessed frame or command.
+				outcome := claudeSimpleDelivery(claudeAdapterChannel, "notifications/claude/channel", message.DeliveryLevel)
+				// Meta keys must be identifiers (letters, digits, underscores);
+				// Claude Code silently drops any other key.
+				meta := map[string]string{
+					"message_id":      message.MessageID,
+					"from":            message.From,
+					"thread_id":       message.ThreadID,
+					"task_id":         message.TaskID,
+					"cursor":          strconv.FormatInt(message.Cursor, 10),
+					"requested_level": outcome.RequestedLevel,
+					"effective_level": outcome.EffectiveLevel,
+				}
+				if outcome.FallbackReason != "" {
+					meta["fallback_reason"] = outcome.FallbackReason
+				}
 				notification := map[string]any{
 					"jsonrpc": "2.0",
 					"method":  "notifications/claude/channel",
 					"params": map[string]any{
 						"content": messageText(message),
-						"meta": map[string]string{
-							"message_id": message.MessageID,
-							"from":       message.From,
-							"thread_id":  message.ThreadID,
-							"task_id":    message.TaskID,
-							"cursor":     strconv.FormatInt(message.Cursor, 10),
-						},
+						"meta":    meta,
 					},
 				}
 				if err := enc.Encode(notification); err != nil {
 					b.audit("claude_channel_write", map[string]any{"address": b.channelAddress}, 0, err)
 					return
 				}
+				// A successful JSON-RPC write is the handoff: Claude Code queues
+				// the event as a new turn and never acknowledges notifications.
+				b.audit("claude_channel_handoff", map[string]any{
+					"address":         b.channelAddress,
+					"message_id":      message.MessageID,
+					"adapter":         outcome.Adapter,
+					"requested_level": outcome.RequestedLevel,
+					"effective_level": outcome.EffectiveLevel,
+					"fallback_reason": outcome.FallbackReason,
+				}, 1, nil)
 				if err := ackInbox(ctx, b.client, b.projectID, b.channelAddress, b.channelAgent, message.Cursor); err != nil {
 					b.audit("claude_channel_ack", map[string]any{"address": b.channelAddress}, 0, err)
 					break

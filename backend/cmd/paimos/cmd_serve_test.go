@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -165,12 +166,19 @@ func TestServeMCPClaudeChannelCapabilityIsOptIn(t *testing.T) {
 	}
 }
 
-func TestServeMCPClaudeChannelNotifiesThenAcknowledges(t *testing.T) {
-	message := messageEnvelope{Cursor: 12, MessageID: "m12", From: "paimos:codex", To: "claude:claude", ThreadID: "thread-12", TaskID: "PAI-816"}
-	message.Parts = append(message.Parts, struct {
-		Kind string `json:"kind"`
-		Text string `json:"text"`
-	}{Kind: "text", Text: "framed channel payload"})
+type channelNotification struct {
+	Method string `json:"method"`
+	Params struct {
+		Content string            `json:"content"`
+		Meta    map[string]string `json:"meta"`
+	} `json:"params"`
+}
+
+// captureChannelNotification runs the opt-in Channels broker against a fake
+// inbox holding one message and returns the single emitted JSON-RPC
+// notification after the durable cursor was acknowledged.
+func captureChannelNotification(t *testing.T, message messageEnvelope) channelNotification {
+	t.Helper()
 	acked := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -178,20 +186,20 @@ func TestServeMCPClaudeChannelNotifiesThenAcknowledges(t *testing.T) {
 			if r.Header.Get(agentAttrHeader) != "claude" {
 				t.Errorf("missing channel attribution")
 			}
-			_ = json.NewEncoder(w).Encode(inboxPage{Address: "claude:claude", NextCursor: 12, Messages: []messageEnvelope{message}})
+			_ = json.NewEncoder(w).Encode(inboxPage{Address: "claude:claude", NextCursor: message.Cursor, Messages: []messageEnvelope{message}})
 		case "/api/projects/6/messages/ack":
-			_ = json.NewEncoder(w).Encode(map[string]any{"cursor": 12})
+			_ = json.NewEncoder(w).Encode(map[string]any{"cursor": message.Cursor})
 			acked <- struct{}{}
 		default:
 			http.NotFound(w, r)
 		}
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	b, _ := newTestBroker(t)
 	b.client = &Client{baseURL: srv.URL, http: srv.Client()}
 	b.channelAddress, b.channelAgent, b.channelPollInterval = "claude:claude", "claude", time.Hour
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 	var out bytes.Buffer
 	go b.runClaudeChannel(ctx, newLockedJSONEncoder(&out))
 	select {
@@ -200,17 +208,55 @@ func TestServeMCPClaudeChannelNotifiesThenAcknowledges(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("channel did not acknowledge delivered notification")
 	}
-	var notification struct {
-		Method string `json:"method"`
-		Params struct {
-			Content string            `json:"content"`
-			Meta    map[string]string `json:"meta"`
-		} `json:"params"`
-	}
+	var notification channelNotification
 	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &notification); err != nil {
 		t.Fatalf("decode notification: %v\n%s", err, out.String())
 	}
+	for key := range notification.Params.Meta {
+		// Claude Code silently drops meta keys that are not identifiers.
+		if !channelMetaKeyPattern.MatchString(key) {
+			t.Fatalf("meta key %q is not an identifier", key)
+		}
+	}
+	return notification
+}
+
+func TestServeMCPClaudeChannelNotifiesThenAcknowledges(t *testing.T) {
+	message := messageEnvelope{Cursor: 12, MessageID: "m12", From: "paimos:codex", To: "claude:claude", ThreadID: "thread-12", TaskID: "PAI-816"}
+	message.Parts = append(message.Parts, struct {
+		Kind string `json:"kind"`
+		Text string `json:"text"`
+	}{Kind: "text", Text: "framed channel payload"})
+	notification := captureChannelNotification(t, message)
 	if notification.Method != "notifications/claude/channel" || notification.Params.Content != "framed channel payload" || notification.Params.Meta["cursor"] != "12" {
 		t.Fatalf("notification=%#v", notification)
 	}
+	// PAI-827: the Channels path is a simple handoff with explicit delivery state.
+	if notification.Params.Meta["requested_level"] != "simple" || notification.Params.Meta["effective_level"] != "simple" {
+		t.Fatalf("channel delivery state=%v want simple/simple", notification.Params.Meta)
+	}
+	if _, has := notification.Params.Meta["fallback_reason"]; has {
+		t.Fatalf("simple request must not record a fallback: %v", notification.Params.Meta)
+	}
 }
+
+func TestServeMCPClaudeChannelSteerLevelRecordsUnsupportedFallback(t *testing.T) {
+	// A durable PAI-826 steer request still reaches the session as the same
+	// simple channel push; the downgrade is recorded in meta, and no steer
+	// command or socket frame is invented.
+	message := messageEnvelope{Cursor: 13, MessageID: "m13", From: "paimos:codex", To: "claude:claude", DeliveryLevel: "steer"}
+	message.Parts = append(message.Parts, struct {
+		Kind string `json:"kind"`
+		Text string `json:"text"`
+	}{Kind: "text", Text: "steer via channel"})
+	notification := captureChannelNotification(t, message)
+	if notification.Method != "notifications/claude/channel" || notification.Params.Content != "steer via channel" {
+		t.Fatalf("notification=%#v", notification)
+	}
+	meta := notification.Params.Meta
+	if meta["requested_level"] != "steer" || meta["effective_level"] != "simple" || meta["fallback_reason"] != "unsupported" {
+		t.Fatalf("channel delivery state=%v want steer/simple/unsupported", meta)
+	}
+}
+
+var channelMetaKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)

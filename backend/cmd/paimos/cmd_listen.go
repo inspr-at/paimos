@@ -107,8 +107,8 @@ func listenCmd() *cobra.Command {
 	c.Flags().BoolVar(&follow, "follow", false, "keep polling until interrupted")
 	c.Flags().BoolVar(&ack, "ack", false, "durably acknowledge messages after output")
 	c.Flags().StringVar(&deliver, "deliver", "", "deliver each message to codex, claude, or grok, then acknowledge")
-	c.Flags().StringVar(&deliverTarget, "deliver-target", "", "legacy target for pre-bus messages; bus messages use their receiver-owned target version")
-	c.Flags().StringVar(&deliverMode, "deliver-mode", "queue", "legacy pre-bus delivery mode; bus messages use their durable message level")
+	c.Flags().StringVar(&deliverTarget, "deliver-target", "", "Claude session target: local session UUID (claude -p --resume) or cloud session id session_…/cse_… (claude -p --cloud); for Codex and Grok only a legacy pre-bus target — bus messages use their receiver-owned target version")
+	c.Flags().StringVar(&deliverMode, "deliver-mode", "queue", "legacy pre-bus delivery mode (queue or steer); bus messages use their durable message level, and Claude has no steer primitive so steer falls back to simple")
 	c.Flags().BoolVar(&enableGrok, "enable-grok-build-delivery", false, "enable the experimental Grok Build delivery adapter")
 	c.Flags().DurationVar(&pollInterval, "poll-interval", listenDefaultPollInterval, "follow polling interval")
 	return c
@@ -124,6 +124,14 @@ func splitListenAddress(raw string) (string, string, error) {
 
 var addressPartCLI = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 var grokSessionUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+// Claude session targets. A local session is the lowercase UUID that
+// `claude -p --output-format json` prints as session_id and that --resume
+// accepts; a cloud session is the `session_…`/`cse_…` tagged id shown at
+// claude.ai/code and accepted by --cloud. Socket paths, URLs, and session
+// names are rejected: PAIMOS never guesses a Claude target.
+var claudeLocalSessionPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+var claudeCloudSessionPattern = regexp.MustCompile(`^(session|cse)_[A-Za-z0-9_-]{1,128}$`)
 
 func runListen(ctx context.Context, client *Client, projectID int64, address, agent string, follow, acknowledge bool, deliver, target, legacyMode string, enableGrok bool, pollInterval time.Duration) error {
 	after, seen := int64(0), false
@@ -237,7 +245,7 @@ func emitOrDeliverMessage(ctx context.Context, message messageEnvelope, deliver,
 	case "codex":
 		return deliverCodexMessage(ctx, message, body, target, legacyMode)
 	case "claude":
-		return &deliveryOutcome{EffectiveLevel: "simple"}, deliverClaude(ctx, body, target)
+		return deliverClaudeMessage(ctx, message, body, target, legacyMode)
 	case "grok":
 		return &deliveryOutcome{EffectiveLevel: "simple"}, deliverGrok(ctx, body, target, enableGrok)
 	default:
@@ -301,6 +309,80 @@ func messageText(message messageEnvelope) string {
 type adapterUnavailableError struct{ message string }
 
 func (e *adapterUnavailableError) Error() string { return e.message }
+
+// Delivery levels and the Claude delivery-state record.
+//
+// Claude has no steer primitive: there is no `claude steer`, no
+// send-to-session CLI, and no documented messaging-socket user frame. Every
+// Claude handoff is therefore effective level `simple`; a `steer` request is
+// honored as simple and recorded as fallback_reason=unsupported rather than
+// inventing a vendor command.
+const (
+	deliveryLevelSimple = "simple"
+	deliveryLevelSteer  = "steer"
+
+	claudeAdapterResume  = "claude_resume"
+	claudeAdapterChannel = "claude_channel"
+
+	claudeFallbackUnsupported = "unsupported"
+)
+
+// claudeDelivery is the typed outcome of one Claude handoff. EffectiveLevel
+// and FallbackReason are the PAI-826 delivery-state fields (deliveryOutcome);
+// Adapter and Primitive are audited locally.
+type claudeDelivery struct {
+	Adapter        string `json:"adapter"`
+	Primitive      string `json:"primitive"`
+	RequestedLevel string `json:"requested_level"`
+	EffectiveLevel string `json:"effective_level"`
+	FallbackReason string `json:"fallback_reason,omitempty"`
+}
+
+// claudeSimpleDelivery builds the state record for a Claude adapter. The
+// effective level is always simple; a steer request records the fallback.
+func claudeSimpleDelivery(adapter, primitive, requestedLevel string) claudeDelivery {
+	outcome := claudeDelivery{
+		Adapter:        adapter,
+		Primitive:      primitive,
+		RequestedLevel: normalizeDeliveryLevel(requestedLevel),
+		EffectiveLevel: deliveryLevelSimple,
+	}
+	if outcome.RequestedLevel == deliveryLevelSteer {
+		outcome.FallbackReason = claudeFallbackUnsupported
+	}
+	return outcome
+}
+
+// normalizeDeliveryLevel applies the envelope default: anything other than an
+// explicit steer request is simple.
+func normalizeDeliveryLevel(level string) string {
+	if strings.EqualFold(strings.TrimSpace(level), deliveryLevelSteer) {
+		return deliveryLevelSteer
+	}
+	return deliveryLevelSimple
+}
+
+// deliveryLevelFromMode maps the legacy process-wide --deliver-mode to a
+// requested level. It applies only to pre-bus envelopes without a durable
+// delivery_level; bus messages always carry their server-normalized level.
+func deliveryLevelFromMode(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), deliveryLevelSteer) {
+		return deliveryLevelSteer
+	}
+	return deliveryLevelSimple
+}
+
+// claudeSessionFlag selects the documented print-mode primitive for a target.
+func claudeSessionFlag(target string) (string, bool) {
+	switch {
+	case claudeLocalSessionPattern.MatchString(target):
+		return "--resume", true
+	case claudeCloudSessionPattern.MatchString(target):
+		return "--cloud", true
+	default:
+		return "", false
+	}
+}
 
 func deliverCodex(ctx context.Context, body, target string) error {
 	if target == "" {
@@ -457,22 +539,67 @@ func codexRPCCall(encoder *json.Encoder, decoder *json.Decoder, id int, method s
 	}
 }
 
-func deliverClaude(ctx context.Context, body, target string) error {
-	// Claude Code messaging socket delivery is unsupported for mid-turn interrupts.
-	// Official docs (https://code.claude.com/docs/en/headless.md) specify only
-	// the optional auth line {"type":"auth","token":"..."}, not the message frame.
-	//
-	// Supported paths for Claude delivery:
-	// - Idle turn: `claude -p --resume <session_id>` (new turn)
-	// - Cloud session: `claude -p --cloud <session_id>` (queued follow-up)
-	// - Cross-session: in-session SendMessage tool (receiver reads between tool calls)
-	// - Channels: MCP notifications/claude/channel (research preview, allowlisted plugins)
-	//
-	// PAIMOS does not implement these paths yet. Print the message for human relay.
-	if target == "" {
-		target = strings.TrimSpace(os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET"))
+// deliverClaudeMessage selects the requested level from the durable envelope
+// (PAI-826 delivery_level); a pre-bus envelope without one falls back to the
+// legacy process-wide --deliver-mode. The session target still comes from
+// --deliver-target: the PAI-826 target registry accepts only codex and
+// grok_bot_routine adapters, so listen discloses no receiver-owned Claude
+// binding yet and acknowledges Claude handoffs through the plain cursor ack.
+func deliverClaudeMessage(ctx context.Context, message messageEnvelope, body, target, legacyMode string) (*deliveryOutcome, error) {
+	requested := message.DeliveryLevel
+	if requested == "" {
+		requested = deliveryLevelFromMode(legacyMode)
 	}
-	return &adapterUnavailableError{message: "Claude mid-turn delivery unsupported; use --resume / --cloud for idle turns or SendMessage tool for cross-session"}
+	outcome, err := deliverClaude(ctx, body, target, requested)
+	if err != nil {
+		return nil, err
+	}
+	return &deliveryOutcome{EffectiveLevel: outcome.EffectiveLevel, FallbackReason: outcome.FallbackReason}, nil
+}
+
+// deliverClaude hands one framed message to a Claude Code session as a new
+// user turn using only the documented print-mode primitives:
+//
+//   - local idle session: `claude -p --resume <session_uuid>`
+//   - cloud session:      `claude -p --cloud <session_id>` (queue-and-exit)
+//
+// The untrusted body travels over stdin, the documented print-mode prompt
+// transport, never through argv or a shell, so a body that starts with "-"
+// cannot be parsed as a flag. A zero exit status is the handoff
+// acknowledgement; the vendor response is discarded. Claude steer is
+// UNSUPPORTED: a steer request falls back to the same simple primitive and is
+// recorded as fallback_reason=unsupported. PAIMOS never adds
+// --dangerously-skip-permissions, a permission mode, or any other escalation;
+// the resumed session keeps its own permission configuration.
+func deliverClaude(ctx context.Context, body, target, requestedLevel string) (claudeDelivery, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return claudeDelivery{}, &adapterUnavailableError{message: "Claude delivery requires --deliver-target: a local session UUID (claude -p --resume) or a cloud session id session_…/cse_… (claude -p --cloud)"}
+	}
+	flag, ok := claudeSessionFlag(target)
+	if !ok {
+		return claudeDelivery{}, &adapterUnavailableError{message: "Claude delivery target must be a lowercase local session UUID or a cloud session id (session_…/cse_…); socket paths, URLs, and session names are not accepted"}
+	}
+	path, err := exec.LookPath("claude")
+	if err != nil {
+		return claudeDelivery{}, &adapterUnavailableError{message: "Claude delivery requires the claude CLI in PATH"}
+	}
+	outcome := claudeSimpleDelivery(claudeAdapterResume, "claude -p "+flag, requestedLevel)
+	if outcome.FallbackReason != "" {
+		fmt.Fprintf(stderr, "claude: steer is unsupported; delivering as simple via %s (fallback_reason=%s)\n", outcome.Primitive, outcome.FallbackReason)
+	}
+	// #nosec G204 G702 -- claude is resolved from the operator-controlled PATH;
+	// argv is fixed, the body is piped over stdin, and no shell is involved.
+	cmd := exec.CommandContext(ctx, path, "-p", flag, target)
+	cmd.Stdin = strings.NewReader(body)
+	// The vendor response is the receiver's own model output. PAIMOS treats a
+	// zero exit as the handoff acknowledgement and never captures, stores, or
+	// prints it.
+	cmd.Stdout, cmd.Stderr = io.Discard, stderr
+	if err := cmd.Run(); err != nil {
+		return claudeDelivery{}, fmt.Errorf("deliver to Claude session via %s: %w", outcome.Primitive, err)
+	}
+	return outcome, nil
 }
 
 func deliverGrok(ctx context.Context, body, target string, enabled bool) error {

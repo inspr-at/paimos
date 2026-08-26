@@ -209,7 +209,46 @@ experimental `claude/channel` server capability and polls that attributed
 inbox. It emits `notifications/claude/channel` with framed message content and
 safe string metadata, then advances only the durable message read cursor after
 the JSON-RPC notification is written successfully. Without `--channel-as`, the
-capability is absent and the broker remains wholly read-only.
+capability is absent and the broker remains wholly read-only. Every channel
+event carries `requested_level` and `effective_level` meta (`simple` today;
+Claude Code queues channel events as a new turn and never acknowledges them),
+so the durable cursor advances on the successful write and each handoff is
+audited as `claude_channel_handoff`.
+
+Claude delivery through `paimos listen` is simple-only and uses the two
+documented print-mode primitives. A local, idle session is woken as a new
+turn; a cloud session receives a queued follow-up:
+
+```bash
+paimos listen --as claude:claude --project PAI --follow \
+  --deliver claude --deliver-target 8f3c2a1e-4b6d-4c8e-9a1f-0d2e3f4a5b6c   # claude -p --resume
+paimos listen --as claude:claude --project PAI --follow \
+  --deliver claude --deliver-target session_01DiUkqY2kzbUbDmW1w96rfi         # claude -p --cloud
+```
+
+The adapter accepts only a lowercase local session UUID (the `session_id` that
+`claude -p --output-format json` prints) or a `session_…`/`cse_…` cloud id from
+claude.ai/code; socket paths, URLs, and session names are rejected and nothing
+is inferred from the environment. The framed body is piped over stdin, never
+placed in argv or a shell, argv is fixed, and a zero vendor exit is the
+handoff acknowledgement; the model response is discarded and the cursor
+advances only afterwards. PAIMOS adds no permission mode and never passes
+`--dangerously-skip-permissions`: the resumed session keeps its own
+configuration, and because a `-p` run cannot answer permission prompts the
+receiver must allow the tools it needs in its own settings. The `--resume`
+path runs the receiver's whole turn inside the listener and is meant for an
+idle session; PAIMOS cannot detect a live interactive turn on the same
+session. Resuming from a different directory needs Claude Code v2.1.223 or
+later.
+
+Claude has no steer primitive. There is no `claude steer`, no send-to-session
+command, and no documented messaging-socket user frame, so a `steer` request
+(the durable `paimos tell --level steer`, or legacy `--deliver-mode steer` on
+a pre-bus row) delivers the same simple turn and records
+`fallback_reason=unsupported` instead of guessing a vendor command. The Claude
+session is named by `--deliver-target`: the receiver target registry accepts
+only `codex` and `grok_bot_routine` adapters today, so no Claude binding is
+snapshotted onto messages yet.
 
 Grok Build delivery is an explicit experimental CLI path:
 
