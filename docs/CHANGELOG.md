@@ -17,6 +17,11 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   vendor exit is the handoff, the response is discarded, and the durable
   cursor advances only afterwards. Socket paths, URLs, and session names are
   rejected, and no target is inferred from the environment.
+- Added the opt-in `TestAgentBusRealClaudeSimpleE2E` proof: with
+  `PAIMOS_AGENT_BUS_E2E_CLAUDE_SESSION=<local session UUID>` it runs
+  `paimos tell --level simple|steer` through the ledger, a live listener,
+  the real `claude -p --resume` primitive, and the cursor ack, and logs
+  commit/pickup/handoff timings.
 - The opt-in Channels path (`paimos serve --mcp-stdio --channel-as`) records
   simple delivery state on every `notifications/claude/channel` event
   (`requested_level`, `effective_level`, and `fallback_reason` when set) and
