@@ -11523,6 +11523,74 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			)`,
 			`CREATE INDEX idx_agent_message_cursors_agent ON agent_message_cursors(project_agent_id, address)`,
 		}},
+
+		// M154 / PAI-826: durable message-level delivery intent, immutable
+		// receiver-owned target versions, and one linked delivery/outbox row.
+		// Capability targets are encrypted by the service before insertion; the
+		// schema never stores a plaintext vendor session or webhook reference.
+		{154, []string{
+			`ALTER TABLE agent_messages ADD COLUMN delivery_level TEXT NOT NULL DEFAULT 'simple'
+			 CHECK(delivery_level IN ('simple','steer'))`,
+			`ALTER TABLE agent_messages ADD COLUMN delivery_fallback TEXT NOT NULL DEFAULT 'simple'
+			 CHECK(delivery_fallback='simple')`,
+			`ALTER TABLE agent_messages ADD COLUMN delivery_primary_target_id TEXT`,
+			`ALTER TABLE agent_messages ADD COLUMN delivery_fallback_target_id TEXT`,
+			`CREATE TABLE agent_message_targets (
+			 id                TEXT PRIMARY KEY CHECK(length(CAST(id AS BLOB)) BETWEEN 1 AND 64),
+			 instance          TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+			 project_id        INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 address           TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+			 adapter           TEXT NOT NULL CHECK(adapter IN ('codex','grok_bot_routine')),
+			 target_kind       TEXT NOT NULL CHECK(target_kind IN ('codex_thread','https_webhook')),
+			 target_ref_cipher BLOB NOT NULL CHECK(typeof(target_ref_cipher)='blob' AND length(target_ref_cipher)>28),
+			 maximum_level     TEXT NOT NULL DEFAULT 'simple' CHECK(maximum_level IN ('simple','steer')),
+			 role              TEXT NOT NULL DEFAULT 'primary' CHECK(role IN ('primary','simple_fallback')),
+			 enabled           INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+			 version           INTEGER NOT NULL CHECK(version>0),
+			 created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 UNIQUE(instance,project_id,address,role,version),
+			 CHECK((adapter='codex' AND target_kind='codex_thread') OR
+			       (adapter='grok_bot_routine' AND target_kind='https_webhook'))
+			)`,
+			`CREATE UNIQUE INDEX idx_agent_message_targets_enabled_role
+			 ON agent_message_targets(instance,project_id,address,role) WHERE enabled=1`,
+			`CREATE INDEX idx_agent_message_targets_receiver
+			 ON agent_message_targets(instance,project_id,address,enabled)`,
+			`CREATE TABLE agent_message_deliveries (
+			 delivery_id       TEXT PRIMARY KEY CHECK(length(CAST(delivery_id AS BLOB)) BETWEEN 1 AND 64),
+			 message_row_id    INTEGER NOT NULL UNIQUE REFERENCES agent_messages(id) ON DELETE CASCADE,
+			 instance          TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+			 primary_target_id TEXT REFERENCES agent_message_targets(id),
+			 fallback_target_id TEXT REFERENCES agent_message_targets(id),
+			 requested_level   TEXT NOT NULL CHECK(requested_level IN ('simple','steer')),
+			 effective_level   TEXT CHECK(effective_level IS NULL OR effective_level IN ('simple','steer')),
+			 state             TEXT NOT NULL CHECK(state IN ('pending','leased','retry','blocked','handed_off','dead')),
+			 fallback_reason   TEXT NOT NULL DEFAULT '' CHECK(fallback_reason IN ('','idle','unsupported','policy_capped','target_missing','not_steerable')),
+			 attempt_count     INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count>=0),
+			 next_attempt_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 lease_until       TEXT,
+			 last_error_code   TEXT NOT NULL DEFAULT '' CHECK(length(CAST(last_error_code AS BLOB))<=64),
+			 handed_off_at     TEXT,
+			 created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 CHECK((state='handed_off' AND handed_off_at IS NOT NULL AND effective_level IS NOT NULL) OR
+			       (state<>'handed_off' AND handed_off_at IS NULL))
+			)`,
+			`CREATE INDEX idx_agent_message_deliveries_dispatch
+			 ON agent_message_deliveries(instance,state,next_attempt_at,message_row_id)`,
+			`CREATE INDEX idx_agent_message_deliveries_target
+			 ON agent_message_deliveries(primary_target_id,state,message_row_id)`,
+			`CREATE TABLE agent_message_idempotency (
+			 instance        TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+			 project_id      INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 sender_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 key_digest      BLOB NOT NULL CHECK(typeof(key_digest)='blob' AND length(key_digest)=32),
+			 request_digest  BLOB NOT NULL CHECK(typeof(request_digest)='blob' AND length(request_digest)=32),
+			 message_row_id  INTEGER NOT NULL UNIQUE REFERENCES agent_messages(id) ON DELETE CASCADE,
+			 created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 PRIMARY KEY(instance,project_id,sender_agent_id,key_digest)
+			)`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -11667,6 +11735,37 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	151: checkM151SchemaIsUnapplied,
 	152: checkM152SchemaIsUnapplied,
 	153: checkM153SchemaIsUnapplied,
+	154: checkM154SchemaIsUnapplied,
+}
+
+func checkM154SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT 'column:agent_messages.'||name FROM pragma_table_info('agent_messages')
+		WHERE name IN ('delivery_level','delivery_fallback','delivery_primary_target_id','delivery_fallback_target_id')
+		UNION ALL
+		SELECT type||':'||name FROM sqlite_master
+		WHERE name IN ('agent_message_targets','idx_agent_message_targets_enabled_role','idx_agent_message_targets_receiver',
+		 'agent_message_deliveries','idx_agent_message_deliveries_dispatch','idx_agent_message_deliveries_target',
+		 'agent_message_idempotency') ORDER BY 1`)
+	if err != nil {
+		return fmt.Errorf("inspect M154 schema ownership: %w", err)
+	}
+	defer rows.Close()
+	var collisions []string
+	for rows.Next() {
+		var collision string
+		if err := rows.Scan(&collision); err != nil {
+			return fmt.Errorf("scan M154 schema ownership: %w", err)
+		}
+		collisions = append(collisions, collision)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate M154 schema ownership: %w", err)
+	}
+	if len(collisions) > 0 {
+		return fmt.Errorf("M154 schema is partially present or locally incompatible: %s", strings.Join(collisions, ", "))
+	}
+	return nil
 }
 
 func checkM149SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {

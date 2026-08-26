@@ -88,14 +88,14 @@ func runSecretsRotate(args []string) {
 	}
 
 	if *dryRun {
-		fmt.Printf("dry-run: would rotate %d CRM provider config row(s) and %d AI settings row(s).\n",
-			report.CRMRows, report.AIRows)
+		fmt.Printf("dry-run: would rotate %d CRM provider config row(s), %d AI settings row(s), and %d agent-message target row(s).\n",
+			report.CRMRows, report.AIRows, report.AgentMessageTargetRows)
 		fmt.Println("(decrypts confirmed under the current PAIMOS_SECRET_KEY; nothing was written.)")
 		return
 	}
 
-	fmt.Printf("✔ rotated %d CRM provider config row(s) and %d AI settings row(s).\n",
-		report.CRMRows, report.AIRows)
+	fmt.Printf("✔ rotated %d CRM provider config row(s), %d AI settings row(s), and %d agent-message target row(s).\n",
+		report.CRMRows, report.AIRows, report.AgentMessageTargetRows)
 	fmt.Println()
 	fmt.Println("Next steps (the existing service is still running on the OLD key):")
 	fmt.Println("  1. Stop the service.")

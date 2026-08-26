@@ -25,26 +25,58 @@ type TextPart struct {
 	Text string `json:"text"`
 }
 
+// DeliveryTargetBinding is the non-secret target version snapshotted onto a
+// message. The receiver-owned target reference is never part of this public
+// contract.
+type DeliveryTargetBinding struct {
+	BindingID string `json:"binding_id"`
+	Kind      string `json:"kind"`
+}
+
+// DeliveryTargetSnapshot records the immutable primary and optional simple
+// fallback versions selected when the canonical message was committed.
+type DeliveryTargetSnapshot struct {
+	Primary        *DeliveryTargetBinding `json:"primary"`
+	SimpleFallback *DeliveryTargetBinding `json:"simple_fallback"`
+}
+
+// DeliveryWork is disclosed only by the attributed listen endpoint to the
+// receiver-side worker. TargetRef is decrypted for that worker and is never
+// returned by ordinary message list/get APIs.
+type DeliveryWork struct {
+	DeliveryID     string `json:"delivery_id"`
+	State          string `json:"state"`
+	Adapter        string `json:"adapter,omitempty"`
+	TargetKind     string `json:"target_kind,omitempty"`
+	TargetRef      string `json:"target_ref,omitempty"`
+	MaximumLevel   string `json:"maximum_level,omitempty"`
+	RequestedLevel string `json:"requested_level"`
+}
+
 // Envelope is the canonical project-scoped message contract (PAI-815).
 // Numeric database IDs are deliberately absent from the public shape.
 type Envelope struct {
-	Cursor          int64          `json:"cursor"`
-	MessageID       string         `json:"message_id"`
-	ContextID       string         `json:"context_id"`
-	TaskID          string         `json:"task_id,omitempty"`
-	Role            string         `json:"role"`
-	Parts           []TextPart     `json:"parts"`
-	Metadata        map[string]any `json:"metadata"`
-	From            string         `json:"from"`
-	To              string         `json:"to"`
-	ReplyTo         string         `json:"reply_to,omitempty"`
-	ThreadID        string         `json:"thread_id"`
-	Hop             int            `json:"hop"`
-	Delivered       bool           `json:"delivered"`
-	HeldReason      string         `json:"held_reason,omitempty"`
-	IsActionRequest bool           `json:"is_action_request"`
-	CreatedAt       string         `json:"created_at"`
-	ReadAt          string         `json:"read_at,omitempty"`
+	Cursor           int64                   `json:"cursor"`
+	MessageID        string                  `json:"message_id"`
+	ContextID        string                  `json:"context_id"`
+	TaskID           string                  `json:"task_id,omitempty"`
+	Role             string                  `json:"role"`
+	Parts            []TextPart              `json:"parts"`
+	Metadata         map[string]any          `json:"metadata"`
+	From             string                  `json:"from"`
+	To               string                  `json:"to"`
+	ReplyTo          string                  `json:"reply_to,omitempty"`
+	ThreadID         string                  `json:"thread_id"`
+	Hop              int                     `json:"hop"`
+	Delivered        bool                    `json:"delivered"`
+	HeldReason       string                  `json:"held_reason,omitempty"`
+	IsActionRequest  bool                    `json:"is_action_request"`
+	CreatedAt        string                  `json:"created_at"`
+	ReadAt           string                  `json:"read_at,omitempty"`
+	DeliveryLevel    string                  `json:"delivery_level"`
+	DeliveryFallback string                  `json:"delivery_fallback"`
+	DeliveryTarget   *DeliveryTargetSnapshot `json:"delivery_target"`
+	DeliveryWork     *DeliveryWork           `json:"delivery_work,omitempty"`
 }
 
 // InboxPage is an attributed receiver read. Cursor is the durable acknowledged

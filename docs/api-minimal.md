@@ -273,11 +273,17 @@ PATCH  /runs/:id                       lifecycle/report compare-and-set
 Durable A2A messages use registered names rather than numeric agent IDs:
 
 ```
-POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_id?, metadata?, is_action_request? }
+POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_id?, metadata?, is_action_request?, delivery_level?: "simple"|"steer" }
 GET  /projects/:id/messages            ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
 GET  /projects/:id/messages/listen     ?to=<address>&after=<cursor>&limit=<n>
 POST /projects/:id/messages/ack        { to, cursor }
+POST /projects/:id/messages/delivery-complete { to, cursor, delivery_id, effective_level, fallback_reason }
 POST /projects/:id/message-allowlist   { receiver, sender }
+POST /projects/:id/message-targets     { address, adapter, target_kind, target_ref, maximum_level?, role? } (admin)
+GET  /projects/:id/message-targets     ?address=<receiver> (admin; never returns target_ref)
+POST /projects/:id/message-targets/requeue { address } (admin; target_missing only)
+GET  /projects/:id/message-deliveries  redacted outbox state (admin)
+POST /projects/:id/message-deliveries/:deliveryId/requeue (admin)
 GET  /projects/:id/messages/:messageId
 GET  /issues/:id/messages              human-visible issue-anchored records (not comments)
 ```
@@ -294,6 +300,15 @@ Listen and ack additionally require `X-Paimos-Agent-Name` to match the named
 addressee. Listen resumes from the greater of the supplied and durable cursor;
 acknowledgement is monotonic and rejects cursors that are not delivered rows in
 that inbox.
+
+`Idempotency-Key` is optional on message POSTs and accepts one opaque 1–128 byte
+value. It is scoped to the current instance, project, and attributed sender;
+an exact replay returns the original canonical message, while changed request
+content returns HTTP 409 `agent_message_idempotency_conflict`. The raw key is
+not stored. Attributed Codex workers request `delivery=codex` on listen; only
+that response includes the decrypted snapshotted Codex target and leases the
+row. Successful vendor handoff uses `delivery-complete`, which records the
+effective level/fallback and advances the receiver cursor atomically.
 
 PAI-800 runner liveness/progress uses the PAI-799 integration seam directly:
 `POST /runs/:id/telemetry`. The supervisor owns stable correlation plus

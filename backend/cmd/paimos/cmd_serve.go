@@ -1281,7 +1281,7 @@ func (b *contextBroker) runClaudeChannel(ctx context.Context, enc *lockedJSONEnc
 	}
 	after := int64(0)
 	for {
-		page, err := fetchInbox(ctx, b.client, b.projectID, b.channelAddress, b.channelAgent, after)
+		page, err := fetchInbox(ctx, b.client, b.projectID, b.channelAddress, b.channelAgent, after, "")
 		if err != nil {
 			if ctx.Err() != nil {
 				return

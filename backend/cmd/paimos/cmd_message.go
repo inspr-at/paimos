@@ -14,31 +14,45 @@ import (
 )
 
 type messageEnvelope struct {
-	Cursor          int64          `json:"cursor"`
-	MessageID       string         `json:"message_id"`
-	ContextID       string         `json:"context_id"`
-	From            string         `json:"from"`
-	To              string         `json:"to"`
-	TaskID          string         `json:"task_id,omitempty"`
-	Role            string         `json:"role"`
-	Metadata        map[string]any `json:"metadata"`
-	ReplyTo         string         `json:"reply_to,omitempty"`
-	ThreadID        string         `json:"thread_id"`
-	Hop             int            `json:"hop"`
-	Delivered       bool           `json:"delivered"`
-	HeldReason      string         `json:"held_reason,omitempty"`
-	IsActionRequest bool           `json:"is_action_request"`
-	CreatedAt       string         `json:"created_at"`
-	ReadAt          string         `json:"read_at,omitempty"`
-	Parts           []struct {
+	Cursor           int64                `json:"cursor"`
+	MessageID        string               `json:"message_id"`
+	ContextID        string               `json:"context_id"`
+	From             string               `json:"from"`
+	To               string               `json:"to"`
+	TaskID           string               `json:"task_id,omitempty"`
+	Role             string               `json:"role"`
+	Metadata         map[string]any       `json:"metadata"`
+	ReplyTo          string               `json:"reply_to,omitempty"`
+	ThreadID         string               `json:"thread_id"`
+	Hop              int                  `json:"hop"`
+	Delivered        bool                 `json:"delivered"`
+	HeldReason       string               `json:"held_reason,omitempty"`
+	IsActionRequest  bool                 `json:"is_action_request"`
+	CreatedAt        string               `json:"created_at"`
+	ReadAt           string               `json:"read_at,omitempty"`
+	DeliveryLevel    string               `json:"delivery_level"`
+	DeliveryFallback string               `json:"delivery_fallback"`
+	DeliveryTarget   any                  `json:"delivery_target"`
+	DeliveryWork     *messageDeliveryWork `json:"delivery_work,omitempty"`
+	Parts            []struct {
 		Kind string `json:"kind"`
 		Text string `json:"text"`
 	} `json:"parts"`
 }
 
+type messageDeliveryWork struct {
+	DeliveryID     string `json:"delivery_id"`
+	State          string `json:"state"`
+	Adapter        string `json:"adapter,omitempty"`
+	TargetKind     string `json:"target_kind,omitempty"`
+	TargetRef      string `json:"target_ref,omitempty"`
+	MaximumLevel   string `json:"maximum_level,omitempty"`
+	RequestedLevel string `json:"requested_level"`
+}
+
 // tellCmd writes one durable, session-attributed ledger row.
 func tellCmd() *cobra.Command {
-	var projectRef, ticketRef, replyTo, threadID, message, messageFile string
+	var projectRef, ticketRef, replyTo, threadID, message, messageFile, level string
 	var actionRequest bool
 	c := &cobra.Command{
 		Use: "tell <harness>:<agent>", Short: "Send a durable message to a registered project agent",
@@ -53,6 +67,10 @@ func tellCmd() *cobra.Command {
 			}
 			if !set || strings.TrimSpace(body) == "" {
 				return &usageError{msg: "--message or --message-file is required"}
+			}
+			level = strings.ToLower(strings.TrimSpace(level))
+			if level != "simple" && level != "steer" {
+				return &usageError{msg: "--level must be simple or steer"}
 			}
 			client, err := instanceClient()
 			if err != nil {
@@ -70,7 +88,7 @@ func tellCmd() *cobra.Command {
 				}
 				issueID = &id
 			}
-			payload := map[string]any{"to": strings.TrimSpace(args[0]), "body": body}
+			payload := map[string]any{"to": strings.TrimSpace(args[0]), "body": body, "delivery_level": level}
 			if actionRequest {
 				payload["is_action_request"] = true
 			}
@@ -109,13 +127,155 @@ func tellCmd() *cobra.Command {
 	c.Flags().StringVar(&threadID, "thread", "", "conversation thread id")
 	c.Flags().StringVarP(&message, "message", "m", "", "message body")
 	c.Flags().StringVar(&messageFile, "message-file", "", "read message body from file, or - for stdin")
+	c.Flags().StringVar(&level, "level", "simple", "delivery level: simple or steer")
 	c.Flags().BoolVar(&actionRequest, "action-request", false, "mark as a human-gated action request; never deliver to an agent inbox")
 	return c
 }
 
 func messageCmd() *cobra.Command {
 	c := &cobra.Command{Use: "message", Short: "Read the durable agent message ledger"}
-	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd())
+	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd(), messageTargetCmd(), messageDeliveryCmd())
+	return c
+}
+
+func messageTargetCmd() *cobra.Command {
+	c := &cobra.Command{Use: "target", Short: "Manage receiver-owned delivery target versions"}
+	c.AddCommand(messageTargetSetCmd(), messageTargetListCmd(), messageTargetRequeueCmd())
+	return c
+}
+
+func messageTargetSetCmd() *cobra.Command {
+	var projectRef, address, adapter, kind, ref, refFile, maximumLevel, role string
+	c := &cobra.Command{Use: "set", Short: "Register and enable a new encrypted target version", RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(projectRef) == "" || strings.TrimSpace(address) == "" {
+			return &usageError{msg: "--project and --address are required"}
+		}
+		targetRef, set, err := readMultilineInput(ref, refFile, "target ref")
+		if err != nil {
+			return err
+		}
+		if !set || strings.TrimSpace(targetRef) == "" {
+			return &usageError{msg: "--target-ref or --target-ref-file is required"}
+		}
+		if strings.EqualFold(strings.TrimSpace(adapter), "grok_bot_routine") && strings.TrimSpace(ref) != "" {
+			return &usageError{msg: "webhook capability URLs must use --target-ref-file (use - for stdin) so they do not enter process arguments"}
+		}
+		client, err := instanceClient()
+		if err != nil {
+			return err
+		}
+		projectID, err := resolveProjectRefToID(client, projectRef)
+		if err != nil {
+			return reportError(err)
+		}
+		payload := map[string]string{"address": address, "adapter": adapter, "target_kind": kind, "target_ref": strings.TrimSpace(targetRef), "maximum_level": maximumLevel, "role": role}
+		raw, err := client.do("POST", fmt.Sprintf("/api/projects/%d/message-targets", projectID), payload)
+		if err != nil {
+			return reportError(err)
+		}
+		if flagJSON {
+			fmt.Fprintln(stdout, strings.TrimSpace(string(raw)))
+			return nil
+		}
+		var target struct {
+			ID      string `json:"id"`
+			Version int    `json:"version"`
+		}
+		if err := json.Unmarshal(raw, &target); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "✓ enabled target %s version %d for %s\n", target.ID, target.Version, address)
+		return nil
+	}}
+	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
+	c.Flags().StringVar(&address, "address", "", "receiver address (required)")
+	c.Flags().StringVar(&adapter, "adapter", "", "codex or grok_bot_routine (required)")
+	c.Flags().StringVar(&kind, "kind", "", "codex_thread or https_webhook (required)")
+	c.Flags().StringVar(&ref, "target-ref", "", "receiver-owned Codex thread (webhook capabilities must use --target-ref-file)")
+	c.Flags().StringVar(&refFile, "target-ref-file", "", "read target reference from file, or - for stdin")
+	c.Flags().StringVar(&maximumLevel, "maximum-level", "simple", "receiver policy: simple or steer")
+	c.Flags().StringVar(&role, "role", "primary", "primary or simple_fallback")
+	return c
+}
+
+func messageTargetListCmd() *cobra.Command {
+	var projectRef, address string
+	c := &cobra.Command{Use: "list", Short: "List non-secret target versions", RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(projectRef) == "" {
+			return &usageError{msg: "--project is required"}
+		}
+		client, err := instanceClient()
+		if err != nil {
+			return err
+		}
+		projectID, err := resolveProjectRefToID(client, projectRef)
+		if err != nil {
+			return reportError(err)
+		}
+		query := url.Values{}
+		if strings.TrimSpace(address) != "" {
+			query.Set("address", strings.TrimSpace(address))
+		}
+		raw, err := client.do("GET", fmt.Sprintf("/api/projects/%d/message-targets?%s", projectID, query.Encode()), nil)
+		if err != nil {
+			return reportError(err)
+		}
+		fmt.Fprintln(stdout, strings.TrimSpace(string(raw)))
+		return nil
+	}}
+	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
+	c.Flags().StringVar(&address, "address", "", "optional receiver address")
+	return c
+}
+
+func messageTargetRequeueCmd() *cobra.Command {
+	var projectRef, address string
+	c := &cobra.Command{Use: "requeue", Short: "Attach current targets to never-attempted target_missing deliveries", RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(projectRef) == "" || strings.TrimSpace(address) == "" {
+			return &usageError{msg: "--project and --address are required"}
+		}
+		client, err := instanceClient()
+		if err != nil {
+			return err
+		}
+		projectID, err := resolveProjectRefToID(client, projectRef)
+		if err != nil {
+			return reportError(err)
+		}
+		raw, err := client.do("POST", fmt.Sprintf("/api/projects/%d/message-targets/requeue", projectID), map[string]string{"address": address})
+		if err != nil {
+			return reportError(err)
+		}
+		fmt.Fprintln(stdout, strings.TrimSpace(string(raw)))
+		return nil
+	}}
+	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
+	c.Flags().StringVar(&address, "address", "", "receiver address (required)")
+	return c
+}
+
+func messageDeliveryCmd() *cobra.Command {
+	var projectRef string
+	c := &cobra.Command{Use: "deliveries", Short: "List redacted message delivery state", RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(projectRef) == "" {
+			return &usageError{msg: "--project is required"}
+		}
+		client, err := instanceClient()
+		if err != nil {
+			return err
+		}
+		projectID, err := resolveProjectRefToID(client, projectRef)
+		if err != nil {
+			return reportError(err)
+		}
+		raw, err := client.do("GET", fmt.Sprintf("/api/projects/%d/message-deliveries", projectID), nil)
+		if err != nil {
+			return reportError(err)
+		}
+		fmt.Fprintln(stdout, strings.TrimSpace(string(raw)))
+		return nil
+	}}
+	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
 	return c
 }
 

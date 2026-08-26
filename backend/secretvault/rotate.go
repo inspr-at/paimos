@@ -47,17 +47,18 @@ import (
 	"log"
 )
 
-// RotateReport summarises a rotation pass. CRMRows and AIRows are the
-// per-domain affected counts; CRMRows excludes provider_configs rows
+// RotateReport summarises a rotation pass. The row counts are per-domain;
+// CRMRows excludes provider_configs rows
 // that have no secret (config_secret_json IS NULL or empty), AIRows
 // excludes the ai_settings singleton when api_key_encrypted is unset.
 //
 // DryRun=true means the caller asked for counts only and no writes
 // happened — see RotateOptions.
 type RotateReport struct {
-	CRMRows int
-	AIRows  int
-	DryRun  bool
+	CRMRows                int
+	AIRows                 int
+	AgentMessageTargetRows int
+	DryRun                 bool
 }
 
 // RotateOptions parameterises a rotation call. NewKey MUST be exactly
@@ -81,10 +82,11 @@ var ErrPartialRotation = errors.New("rotation failed mid-transaction; no rows ch
 // process's current key without any extra plumbing. The NEW key
 // comes from opts.
 //
-// The implementation walks two known consumer tables:
+// The implementation walks the known consumer tables:
 //
 //   - provider_configs (CRM domain): config_secret_json BLOB.
 //   - ai_settings (AI domain): api_key_encrypted BLOB.
+//   - agent_message_targets (agent bus domain): target_ref_cipher BLOB.
 //
 // Adding a new consumer means adding a switch arm here AND filing
 // the migration that introduces the new encrypted column. There is
@@ -120,6 +122,9 @@ func Rotate(ctx context.Context, db *sql.DB, opts RotateOptions) (RotateReport, 
 	if err := rotateAI(ctx, tx, oldKey, opts, &report); err != nil {
 		return report, fmt.Errorf("%w: ai_settings: %v", ErrPartialRotation, err)
 	}
+	if err := rotateAgentMessageTargets(ctx, tx, oldKey, opts, &report); err != nil {
+		return report, fmt.Errorf("%w: agent_message_targets: %v", ErrPartialRotation, err)
+	}
 
 	if opts.DryRun {
 		return report, nil
@@ -128,6 +133,55 @@ func Rotate(ctx context.Context, db *sql.DB, opts RotateOptions) (RotateReport, 
 		return report, fmt.Errorf("commit: %w", err)
 	}
 	return report, nil
+}
+
+func rotateAgentMessageTargets(ctx context.Context, tx *sql.Tx, oldKey []byte, opts RotateOptions, report *RotateReport) error {
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_message_targets'`).Scan(&exists); err != nil {
+		return fmt.Errorf("inspect schema: %w", err)
+	}
+	if exists == 0 {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id,target_ref_cipher FROM agent_message_targets ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("select: %w", err)
+	}
+	type cipherRow struct {
+		id     string
+		cipher []byte
+	}
+	var batch []cipherRow
+	for rows.Next() {
+		var row cipherRow
+		if err := rows.Scan(&row.id, &row.cipher); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan: %w", err)
+		}
+		batch = append(batch, row)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	for _, row := range batch {
+		plain, err := DecryptWithKey(oldKey, "agent-message-targets", row.cipher)
+		if err != nil {
+			return fmt.Errorf("decrypt target %s: %w", row.id, err)
+		}
+		if !opts.DryRun {
+			newCipher, err := EncryptWithKey(opts.NewKey, "agent-message-targets", plain)
+			if err != nil {
+				return fmt.Errorf("encrypt target %s: %w", row.id, err)
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE agent_message_targets SET target_ref_cipher=? WHERE id=?`, newCipher, row.id); err != nil {
+				return fmt.Errorf("update target %s: %w", row.id, err)
+			}
+		}
+		report.AgentMessageTargetRows++
+	}
+	return nil
 }
 
 func rotateCRM(ctx context.Context, tx *sql.Tx, oldKey []byte, opts RotateOptions, report *RotateReport) error {

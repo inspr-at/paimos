@@ -5,32 +5,57 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.18.0] — 2026-08-26
+
+### Added — Instant bidirectional agent bus
+
+- Added M154 durable `simple|steer` delivery intent, atomic message-send
+  idempotency, encrypted versioned receiver targets, and one linked
+  delivery/outbox state row per eligible canonical message.
+- Added the instance-local `grok_bot_routine` HTTPS dispatcher with a stable
+  delivery ID, security-framed minimal wake payload, bounded retry/dead-letter
+  state, SSRF controls, and atomic handoff/cursor completion. Grok Bot steer is
+  explicitly unsupported and records a simple fallback.
+- Added per-message Codex listener delivery: `simple` uses exactly `codex queue
+  --thread`; `steer` uses the app-server daemon/proxy initialize handshake,
+  checks the latest turn for `inProgress`, and sends `turn/steer` with typed
+  text input. Idle, policy-capped, raced, and non-steerable turns fall back to
+  the exact queue primitive. The 5.17.3 `--deliver-mode` flag remains available
+  only for legacy pre-bus envelopes; bus rows always use their durable level.
+- Added operator CLI/API controls for target registration, non-secret target
+  and delivery visibility, explicit missing-target attachment, and stable-ID
+  delivery requeue. `paimos tell --level` makes sender intent durable.
+
+### Security
+
+- Capability webhook URLs and Codex thread references are encrypted at rest,
+  omitted from ledger, status, audit, and webhook payloads, and disclosed only
+  to an attributed local Codex delivery worker. Webhooks require HTTPS, an
+  explicit hostname allowlist, public resolved addresses by default, bounded
+  timeouts, and no redirects.
+- Held, action-request, unallowlisted, secret-like, over-hop, over-rate, and
+  cross-instance messages retain the existing fail-closed behavior and never
+  gain runnable delivery from message text.
+
 ## [5.17.3] — 2026-08-25
 
 ### Added — Codex mid-turn steer delivery (PAI-825)
 
 - Added `--deliver-mode steer` for mid-turn interruption of live Codex agents
-  through the `codex app-server proxy` JSON-RPC transport, communicating with
-  the app-server control socket at `~/.codex/app-server-control/app-server-control.sock`.
+  through the `codex app-server proxy` JSON-RPC transport.
 - Steer delivery performs the required `initialize` + `initialized` handshake,
   queries active turns via `thread/turns/list` (matching `status: "inProgress"`),
-  and sends `turn/steer` with `expectedTurnId` and `input: [{type: "text", text}]`.
+  and sends `turn/steer` with `expectedTurnId` and typed text input.
 - Falls back to `codex queue` when no turn is in progress or the turn is not
-  steerable (e.g. `/review` or `/compact`).
-- Queue mode (`--deliver-mode queue`, default) remains unchanged and uses the
-  existing `codex queue` CLI for wait-until-idle delivery.
-- Claude mid-turn delivery marked unsupported; official messaging socket frame
-  is not documented beyond the optional auth line. Idle Claude delivery should
-  use `claude -p --resume` / `--cloud` or cross-session SendMessage tool.
+  steerable. Queue mode remains the default.
+- Claude mid-turn delivery is explicitly unsupported; no undocumented socket
+  message frame is used.
 
 ### Security
 
-- Codex steer uses `codex app-server proxy` (validated transport) and does not
-  implement custom WebSocket framing or direct socket connections.
+- Codex steer uses `codex app-server proxy` and does not implement custom
+  WebSocket framing or direct socket connections.
 - PAIMOS does not store or replay Codex app-server responses or credentials.
-- All tests verify correct JSON-RPC schema compliance: `initialize` with
-  `clientInfo`, `thread/turns/list` for `inProgress` turns, and `turn/steer`
-  with `{type: "text", text}` input format.
 
 ## [5.17.2] — 2026-08-25
 

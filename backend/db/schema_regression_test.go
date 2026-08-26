@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 153
+const latestSchemaVersion = 154
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -159,6 +159,43 @@ func TestMigration153AddsDurableMessageCursorsWithoutRewritingLedger(t *testing.
 	var body string
 	if err := database.QueryRow(`SELECT body FROM agent_messages WHERE message_id='msg-1'`).Scan(&body); err != nil || body != "hello" {
 		t.Fatalf("ledger row changed: body=%q err=%v", body, err)
+	}
+}
+
+func TestMigration154BackfillsSimpleIntentAndAddsAgentBusState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m154-populated.db")
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 153); err != nil {
+		t.Fatalf("create exact M153 fixture: %v", err)
+	}
+	project, _ := database.Exec(`INSERT INTO projects(name,key) VALUES('Bus migration','BUS')`)
+	projectID, _ := project.LastInsertId()
+	sender, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'sender')`, projectID)
+	receiver, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'receiver')`, projectID)
+	senderID, _ := sender.LastInsertId()
+	receiverID, _ := receiver.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO agent_messages(from_agent_id,to_agent_id,body,delivered,delivered_at,message_id,context_id,parts_json,from_address,to_address,thread_id)
+		VALUES(?,?,'legacy intent',1,datetime('now'),'legacy-bus','BUS','[{"kind":"text","text":"legacy intent"}]','paimos:sender','codex:receiver','legacy-bus')`, senderID, receiverID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(database); err != nil {
+		t.Fatalf("M153 to M154: %v", err)
+	}
+	for _, table := range []string{"agent_message_targets", "agent_message_deliveries", "agent_message_idempotency"} {
+		if !tableExists(t, database, table) {
+			t.Fatalf("M154 table %s missing", table)
+		}
+	}
+	var level, fallback string
+	if err := database.QueryRow(`SELECT delivery_level,delivery_fallback FROM agent_messages WHERE message_id='legacy-bus'`).Scan(&level, &fallback); err != nil {
+		t.Fatal(err)
+	}
+	if level != "simple" || fallback != "simple" {
+		t.Fatalf("legacy intent level=%q fallback=%q", level, fallback)
 	}
 }
 

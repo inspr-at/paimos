@@ -29,6 +29,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/brand"
 	"github.com/inspr-at/paimos/backend/db"
@@ -114,6 +115,9 @@ func main() {
 	// server-received supervisor heartbeat evidence. This is process-owned and
 	// does not depend on an issue page or another Implement click.
 	handlers.StartAgentRunReconciler()
+	// PAI-826: instance-local durable webhook outbox for Grok Bot routine
+	// wake targets. Local Codex targets remain owned by paimos listen.
+	agentmessage.StartWebhookDispatcher(db.DB)
 
 	r := chi.NewRouter()
 	// PAI-809: first and unconditional for every structurally classified
