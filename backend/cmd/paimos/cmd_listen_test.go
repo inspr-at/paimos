@@ -142,7 +142,7 @@ func TestDeliverCodexUsesQueueArgv(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("PAIMOS_TEST_ARGS", argsFile)
-	if err := deliverCodex(context.Background(), "hello from ledger", "thread-7", "queue"); err != nil {
+	if err := deliverCodex(context.Background(), "hello from ledger", "thread-7"); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(argsFile)
@@ -154,91 +154,119 @@ func TestDeliverCodexUsesQueueArgv(t *testing.T) {
 	}
 }
 
-func TestDeliverCodexSteerRequiresCodexCLI(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	// No codex CLI in PATH
-	err := deliverCodex(context.Background(), "interrupt now", "thread-42", "steer")
-	var unavailable *adapterUnavailableError
-	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "codex CLI in PATH") {
-		t.Fatalf("error=%#v want codex CLI requirement", err)
-	}
-}
-
-func TestDeliverCodexSteerUsesAppServerProxy(t *testing.T) {
+func installFakeCodexAppServer(t *testing.T) (string, string) {
+	t.Helper()
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "args")
-	rpcFile := filepath.Join(dir, "rpc")
-	// Mock codex app-server proxy: capture argv, read stdin line-by-line and echo responses
+	framesFile := filepath.Join(dir, "frames")
 	script := filepath.Join(dir, "codex")
-	scriptContent := `#!/bin/sh
-printf '%s\n' "$@" > "$PAIMOS_TEST_ARGS"
-# Read 4 JSON-RPC requests (initialize, initialized, thread/turns/list, turn/steer)
-# and write them to the RPC file while sending responses
-{
-  read line && echo "$line" >> "$PAIMOS_TEST_RPC"
-  echo '{"id":0,"result":{"serverInfo":{"name":"codex-app-server","version":"0.149.1"}}}'
-  
-  read line && echo "$line" >> "$PAIMOS_TEST_RPC"
-  # initialized is a notification, no response
-  
-  read line && echo "$line" >> "$PAIMOS_TEST_RPC"
-  echo '{"id":1,"result":{"data":[{"id":"turn-123","status":"inProgress"}]}}'
-  
-  read line && echo "$line" >> "$PAIMOS_TEST_RPC"
-  echo '{"id":2,"result":{"turnId":"turn-123"}}'
-}
+	body := `#!/bin/sh
+printf '%s\n' "$@" >> "$PAIMOS_TEST_ARGS"
+if [ "$1" = "queue" ]; then exit 0; fi
+if [ "$1" = "app-server" ] && [ "$2" = "daemon" ]; then exit 0; fi
+if [ "$1" = "app-server" ] && [ "$2" = "proxy" ]; then
+  while IFS= read -r line; do
+    printf '%s\n' "$line" >> "$PAIMOS_TEST_FRAMES"
+    case "$line" in
+      *'"id":1'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"codex","version":"test"}}}' ;;
+      *'"id":2'*) printf '%s\n' "$PAIMOS_TEST_TURNS" ;;
+      *'"id":3'*) printf '%s\n' "$PAIMOS_TEST_STEER" ;;
+    esac
+  done
+fi
 `
-	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("PAIMOS_TEST_ARGS", argsFile)
-	t.Setenv("PAIMOS_TEST_RPC", rpcFile)
-	
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := deliverCodex(ctx, "interrupt now", "thread-42", "steer"); err != nil {
-		t.Fatal(err)
-	}
-	
-	// Verify argv uses app-server proxy
-	raw, err := os.ReadFile(argsFile)
+	t.Setenv("PAIMOS_TEST_FRAMES", framesFile)
+	return argsFile, framesFile
+}
+
+func TestDeliverCodexMessageSteersInProgressTurn(t *testing.T) {
+	argsFile, framesFile := installFakeCodexAppServer(t)
+	t.Setenv("PAIMOS_TEST_TURNS", `{"jsonrpc":"2.0","id":2,"result":{"data":[{"id":"turn-live","status":"inProgress"}]}}`)
+	t.Setenv("PAIMOS_TEST_STEER", `{"jsonrpc":"2.0","id":3,"result":{"turnId":"turn-live"}}`)
+	message := messageEnvelope{DeliveryLevel: "steer", DeliveryWork: &messageDeliveryWork{
+		DeliveryID: "delivery-1", Adapter: "codex", TargetRef: "thread-live", MaximumLevel: "steer", RequestedLevel: "steer",
+	}}
+	outcome, err := deliverCodexMessage(context.Background(), message, "steer payload", "ignored-process-target", "queue")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(raw), "app-server\nproxy\n"; got != want {
-		t.Fatalf("argv=%q want %q", got, want)
+	if outcome.EffectiveLevel != "steer" || outcome.FallbackReason != "" {
+		t.Fatalf("outcome=%#v", outcome)
 	}
-	
-	// Verify JSON-RPC requests were sent with correct schema
-	rpc, err := os.ReadFile(rpcFile)
+	args, _ := os.ReadFile(argsFile)
+	if strings.Contains(string(args), "queue\n") {
+		t.Fatalf("successful steer unexpectedly queued: %q", args)
+	}
+	frames, _ := os.ReadFile(framesFile)
+	for _, required := range []string{`"method":"initialize"`, `"method":"initialized"`, `"method":"thread/turns/list"`, `"method":"turn/steer"`, `"expectedTurnId":"turn-live"`, `"type":"text"`, `"text":"steer payload"`} {
+		if !strings.Contains(string(frames), required) {
+			t.Fatalf("frames missing %s: %s", required, frames)
+		}
+	}
+}
+
+func TestDeliverCodexMessageBusLevelIgnoresLegacyProcessMode(t *testing.T) {
+	argsFile, _ := installFakeCodexAppServer(t)
+	message := messageEnvelope{DeliveryLevel: "simple", DeliveryWork: &messageDeliveryWork{
+		DeliveryID: "delivery-simple", Adapter: "codex", TargetRef: "thread-simple", MaximumLevel: "steer", RequestedLevel: "simple",
+	}}
+	outcome, err := deliverCodexMessage(context.Background(), message, "simple payload", "ignored-process-target", "steer")
 	if err != nil {
 		t.Fatal(err)
 	}
-	rpcStr := string(rpc)
-	if !strings.Contains(rpcStr, `"method":"initialize"`) {
-		t.Fatalf("missing initialize in RPC: %q", rpcStr)
+	if outcome.EffectiveLevel != "simple" || outcome.FallbackReason != "" {
+		t.Fatalf("outcome=%#v", outcome)
 	}
-	if !strings.Contains(rpcStr, `"method":"initialized"`) {
-		t.Fatalf("missing initialized notification in RPC: %q", rpcStr)
+	args, _ := os.ReadFile(argsFile)
+	if got, want := string(args), "queue\n--thread\nthread-simple\n--message\nsimple payload\n"; got != want {
+		t.Fatalf("argv=%q want exact per-message queue %q", got, want)
 	}
-	if !strings.Contains(rpcStr, `"clientInfo"`) {
-		t.Fatalf("missing clientInfo in RPC: %q", rpcStr)
+}
+
+func TestDeliverCodexMessageFallsBackToQueueWhenIdle(t *testing.T) {
+	argsFile, _ := installFakeCodexAppServer(t)
+	t.Setenv("PAIMOS_TEST_TURNS", `{"jsonrpc":"2.0","id":2,"result":{"data":[{"id":"turn-old","status":"completed"}]}}`)
+	message := messageEnvelope{DeliveryLevel: "steer", DeliveryWork: &messageDeliveryWork{
+		DeliveryID: "delivery-2", Adapter: "codex", TargetRef: "thread-idle", MaximumLevel: "steer", RequestedLevel: "steer",
+	}}
+	outcome, err := deliverCodexMessage(context.Background(), message, "idle payload", "ignored", "queue")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(rpcStr, "thread/turns/list") {
-		t.Fatalf("missing thread/turns/list in RPC: %q", rpcStr)
+	if outcome.EffectiveLevel != "simple" || outcome.FallbackReason != "idle" {
+		t.Fatalf("outcome=%#v", outcome)
 	}
-	if !strings.Contains(rpcStr, "turn/steer") {
-		t.Fatalf("missing turn/steer in RPC: %q", rpcStr)
+	args, _ := os.ReadFile(argsFile)
+	if !strings.Contains(string(args), "queue\n--thread\nthread-idle\n--message\nidle payload\n") {
+		t.Fatalf("queue argv missing: %q", args)
 	}
-	if !strings.Contains(rpcStr, "thread-42") {
-		t.Fatalf("missing threadId in RPC: %q", rpcStr)
-	}
-	if !strings.Contains(rpcStr, `"type":"text"`) {
-		t.Fatalf("missing UserInput type:text in RPC: %q", rpcStr)
-	}
-	if !strings.Contains(rpcStr, "interrupt now") {
-		t.Fatalf("missing message text in RPC: %q", rpcStr)
+}
+
+func TestDeliverCodexMessageFallsBackOnNotSteerableOrTurnRace(t *testing.T) {
+	for _, errorData := range []string{
+		`{"code":-32000,"message":"active turn cannot accept steer","data":{"activeTurnNotSteerable":{"kind":"review"}}}`,
+		`{"code":-32001,"message":"expected turn does not match"}`,
+	} {
+		t.Run(errorData, func(t *testing.T) {
+			_, _ = installFakeCodexAppServer(t)
+			t.Setenv("PAIMOS_TEST_TURNS", `{"jsonrpc":"2.0","id":2,"result":{"data":[{"id":"turn-raced","status":"inProgress"}]}}`)
+			t.Setenv("PAIMOS_TEST_STEER", `{"jsonrpc":"2.0","id":3,"error":`+errorData+`}`)
+			message := messageEnvelope{DeliveryLevel: "steer", DeliveryWork: &messageDeliveryWork{
+				DeliveryID: "delivery-3", Adapter: "codex", TargetRef: "thread-raced", MaximumLevel: "steer", RequestedLevel: "steer",
+			}}
+			outcome, err := deliverCodexMessage(context.Background(), message, "raced payload", "ignored", "queue")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome.EffectiveLevel != "simple" || outcome.FallbackReason != "not_steerable" {
+				t.Fatalf("outcome=%#v", outcome)
+			}
+		})
 	}
 }
 
@@ -251,7 +279,7 @@ func TestDeliverCodexDefaultsToQueueWhenModeEmpty(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("PAIMOS_TEST_ARGS", argsFile)
-	if err := deliverCodex(context.Background(), "default mode test", "thread-9", ""); err != nil {
+	if err := deliverCodex(context.Background(), "default mode test", "thread-9"); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(argsFile)
@@ -267,7 +295,7 @@ func TestDeliverCodexQueueRequiresTarget(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("CODEX_THREAD_ID", "")
 	t.Setenv("CODEX_SESSION_ID", "")
-	err := deliverCodex(context.Background(), "no target", "", "queue")
+	err := deliverCodex(context.Background(), "no target", "")
 	var unavailable *adapterUnavailableError
 	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "requires --deliver-target or CODEX_THREAD_ID") {
 		t.Fatalf("error=%#v want missing target guidance", err)
@@ -277,9 +305,9 @@ func TestDeliverCodexQueueRequiresTarget(t *testing.T) {
 func TestDeliverCodexSteerRequiresTarget(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "")
 	t.Setenv("CODEX_SESSION_ID", "")
-	err := deliverCodex(context.Background(), "no target", "", "steer")
+	_, _, err := deliverCodexSteer(context.Background(), "no target", "")
 	var unavailable *adapterUnavailableError
-	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "requires --deliver-target or CODEX_THREAD_ID") {
+	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "receiver-owned thread target") {
 		t.Fatalf("error=%#v want missing target guidance", err)
 	}
 }
@@ -296,7 +324,7 @@ func TestDeliverCodexQueueDoesNotStoreCredentials(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("PAIMOS_TEST_RESPONSE", responseFile)
-	if err := deliverCodex(context.Background(), "test message", "thread-1", "queue"); err != nil {
+	if err := deliverCodex(context.Background(), "test message", "thread-1"); err != nil {
 		t.Fatal(err)
 	}
 	// PAIMOS does not capture the codex CLI response to a file or database.

@@ -83,6 +83,35 @@ values fall back to the documented default.
 | `PAIMOS_RUN_HEARTBEAT_TIMEOUT` | `90s` | Fail a supervised run after its latest server-received heartbeat becomes stale. Semantic events do not reset this clock. |
 | `PAIMOS_RUN_LEGACY_TIMEOUT` | `2h` | Longer fallback for old/uninstrumented running rows without the durable supervised-claim marker. |
 
+## Instant agent bus
+
+The message ledger and delivery coordinator belong to exactly one PAIMOS
+instance. Set a distinct instance name on each deployment; never point `ppm`
+and `pma` at the same target registry or dispatcher configuration.
+
+| Var | Default | Notes |
+|---|---|---|
+| `PAIMOS_AGENT_BUS_INSTANCE` | `default` | Stable non-secret bus identity written into target, delivery, idempotency, and webhook records. Production `ppm` must set `ppm`; `pma` must independently set `pma`. |
+| `PAIMOS_AGENT_BUS_WEBHOOK_HOSTS` | *(empty / all denied)* | Comma-separated exact hostnames approved for operator-registered `https_webhook` targets. Amy's Grok Bot routine hostname must appear here before its target can be registered. |
+| `PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS` | `false` | When `true`, permits loopback/private/link-local webhook addresses. Intended only for isolated local capture tests; keep false in production. HTTPS and the hostname allowlist still apply. |
+
+For the later, separate `ppm` rollout, pin these exact values before registering
+Amy's target (replace only the hostname placeholder):
+
+```text
+PAIMOS_AGENT_BUS_INSTANCE=ppm
+PAIMOS_AGENT_BUS_WEBHOOK_HOSTS=<Amy routine hostname>
+PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS=false
+```
+
+The webhook capability itself is not an environment variable. Register it via
+the closed admin API field `target_ref`, or equivalently
+`printf '%s' "$AMY_GROK_BOT_ROUTINE_WEBHOOK" | paimos message target set ... --target-ref-file -`.
+PAIMOS encrypts that value under the `agent-message-targets` secretvault domain
+using `PAIMOS_SECRET_KEY`; list/status responses never return it. Dispatch uses
+bounded DNS/connect/response timeouts, revalidates resolved addresses, disables
+proxies and redirects, and sends the stable `delivery_id` as `Idempotency-Key`.
+
 ## Local agent runner flags
 
 `paimos run-agent watch` is configured with CLI flags rather than server

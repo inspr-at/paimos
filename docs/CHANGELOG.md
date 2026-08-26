@@ -5,6 +5,38 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.18.0] — 2026-08-26
+
+### Added — Instant bidirectional agent bus
+
+- Added M154 durable `simple|steer` delivery intent, atomic message-send
+  idempotency, encrypted versioned receiver targets, and one linked
+  delivery/outbox state row per eligible canonical message.
+- Added the instance-local `grok_bot_routine` HTTPS dispatcher with a stable
+  delivery ID, security-framed minimal wake payload, bounded retry/dead-letter
+  state, SSRF controls, and atomic handoff/cursor completion. Grok Bot steer is
+  explicitly unsupported and records a simple fallback.
+- Added per-message Codex listener delivery: `simple` uses exactly `codex queue
+  --thread`; `steer` uses the app-server daemon/proxy initialize handshake,
+  checks the latest turn for `inProgress`, and sends `turn/steer` with typed
+  text input. Idle, policy-capped, raced, and non-steerable turns fall back to
+  the exact queue primitive. The 5.17.3 `--deliver-mode` flag remains available
+  only for legacy pre-bus envelopes; bus rows always use their durable level.
+- Added operator CLI/API controls for target registration, non-secret target
+  and delivery visibility, explicit missing-target attachment, and stable-ID
+  delivery requeue. `paimos tell --level` makes sender intent durable.
+
+### Security
+
+- Capability webhook URLs and Codex thread references are encrypted at rest,
+  omitted from ledger, status, audit, and webhook payloads, and disclosed only
+  to an attributed local Codex delivery worker. Webhooks require HTTPS, an
+  explicit hostname allowlist, public resolved addresses by default, bounded
+  timeouts, and no redirects.
+- Held, action-request, unallowlisted, secret-like, over-hop, over-rate, and
+  cross-instance messages retain the existing fail-closed behavior and never
+  gain runnable delivery from message text.
+
 ## [5.17.3] — 2026-08-25
 
 ### Added — Codex mid-turn steer delivery (PAI-825)

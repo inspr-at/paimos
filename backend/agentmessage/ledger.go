@@ -4,7 +4,9 @@
 package agentmessage
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -33,7 +35,9 @@ type SendEnvelopeInput struct {
 	// free-text body asks the receiver to act. Heuristic detection remains a
 	// defence-in-depth fallback, but callers do not have to depend on prose
 	// classification to enter the human-only held path.
-	ActionRequest bool
+	ActionRequest  bool
+	DeliveryLevel  string
+	IdempotencyKey string
 }
 
 type ListFilter struct {
@@ -47,11 +51,12 @@ type ListFilter struct {
 }
 
 type InboxInput struct {
-	ProjectID int64
-	Address   string
-	Agent     string
-	AfterID   int64
-	Limit     int
+	ProjectID     int64
+	Address       string
+	Agent         string
+	WorkerAdapter string
+	AfterID       int64
+	Limit         int
 }
 
 type AckInput struct {
@@ -88,6 +93,16 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 	if len([]byte(in.Body)) > MaxBodySize {
 		return nil, ErrBodyTooLarge
 	}
+	in.DeliveryLevel = strings.ToLower(strings.TrimSpace(in.DeliveryLevel))
+	if in.DeliveryLevel == "" {
+		in.DeliveryLevel = "simple"
+	}
+	if in.DeliveryLevel != "simple" && in.DeliveryLevel != "steer" {
+		return nil, coded("agent_message_delivery_level_invalid", "delivery_level must be simple or steer")
+	}
+	if in.IdempotencyKey != "" && (!utf8.ValidString(in.IdempotencyKey) || len([]byte(in.IdempotencyKey)) < 1 || len([]byte(in.IdempotencyKey)) > 128) {
+		return nil, coded("agent_message_idempotency_key_invalid", "Idempotency-Key must be 1 to 128 UTF-8 bytes")
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -105,6 +120,33 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, in.ProjectID, targetName).Scan(&toID); err != nil {
 		return nil, coded("agent_message_addressee_unknown", "addressee is not registered in this project")
+	}
+	instance := instanceName()
+	if instance == "" {
+		return nil, coded("agent_message_instance_invalid", "PAIMOS_AGENT_BUS_INSTANCE must be 1 to 64 UTF-8 bytes")
+	}
+	requestDigest, err := sendRequestDigest(in, targetHarness+":"+targetName)
+	if err != nil {
+		return nil, coded("agent_message_metadata_invalid", "metadata must be JSON encodable")
+	}
+	if in.IdempotencyKey != "" {
+		keyDigest := sha256.Sum256([]byte(instance + "\x00" + in.IdempotencyKey))
+		var priorDigest []byte
+		var priorMessageID string
+		err := tx.QueryRowContext(ctx, `SELECT ami.request_digest,am.message_id
+			FROM agent_message_idempotency ami JOIN agent_messages am ON am.id=ami.message_row_id
+			WHERE ami.instance=? AND ami.project_id=? AND ami.sender_agent_id=? AND ami.key_digest=?`,
+			instance, in.ProjectID, fromID, keyDigest[:]).Scan(&priorDigest, &priorMessageID)
+		if err == nil {
+			if !bytes.Equal(priorDigest, requestDigest) {
+				return nil, coded("agent_message_idempotency_conflict", "Idempotency-Key was already used for a different message request")
+			}
+			_ = tx.Rollback()
+			return s.GetEnvelope(ctx, in.ProjectID, priorMessageID)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
 	}
 
 	taskID := ""
@@ -187,23 +229,90 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 	if delivered {
 		deliveredAt = time.Now().UTC().Format(time.RFC3339)
 	}
+	primaryTargetID, fallbackTargetID := "", ""
+	if delivered {
+		primaryTargetID, fallbackTargetID, err = resolveTargetVersionsTx(ctx, tx, instance, in.ProjectID, toAddress)
+		if err != nil {
+			return nil, err
+		}
+	}
 
-	_, err = tx.ExecContext(ctx, `INSERT INTO agent_messages
+	result, err := tx.ExecContext(ctx, `INSERT INTO agent_messages
 		(from_agent_id,to_agent_id,issue_id,parent_message_id,hop_count,body,is_action_request,delivered,held_reason,delivered_at,
-		 message_id,context_id,task_id,role,parts_json,metadata_json,from_address,to_address,reply_to,thread_id,session_id)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 message_id,context_id,task_id,role,parts_json,metadata_json,from_address,to_address,reply_to,thread_id,session_id,
+		 delivery_level,delivery_fallback,delivery_primary_target_id,delivery_fallback_target_id)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		fromID, toID, in.IssueID, parentID, hop, in.Body, boolToInt(isAction), boolToInt(delivered), heldReason, deliveredAt,
-		messageID, projectKey, taskID, "agent", string(partsJSON), string(metadataJSON), fromAddress, toAddress, in.ReplyTo, threadID, strings.TrimSpace(in.SessionID))
+		messageID, projectKey, taskID, "agent", string(partsJSON), string(metadataJSON), fromAddress, toAddress, in.ReplyTo, threadID, strings.TrimSpace(in.SessionID),
+		in.DeliveryLevel, "simple", nullableString(primaryTargetID), nullableString(fallbackTargetID))
 	if err != nil {
 		if strings.Contains(err.Error(), "paimos_contains_secret_like") {
 			return nil, ErrContainsSecret
 		}
 		return nil, err
 	}
+	messageRowID, err := result.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	if delivered {
+		state, reason := "pending", ""
+		if primaryTargetID == "" && fallbackTargetID == "" {
+			state, reason = "blocked", "target_missing"
+		}
+		deliveryUUID, uuidErr := uuid.NewV7()
+		if uuidErr != nil {
+			deliveryUUID = uuid.Must(uuid.NewRandom())
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_deliveries
+			(delivery_id,message_row_id,instance,primary_target_id,fallback_target_id,requested_level,state,fallback_reason)
+			VALUES(?,?,?,?,?,?,?,?)`, deliveryUUID.String(), messageRowID, instance,
+			nullableString(primaryTargetID), nullableString(fallbackTargetID), in.DeliveryLevel, state, reason); err != nil {
+			return nil, err
+		}
+	}
+	if in.IdempotencyKey != "" {
+		keyDigest := sha256.Sum256([]byte(instance + "\x00" + in.IdempotencyKey))
+		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_idempotency
+			(instance,project_id,sender_agent_id,key_digest,request_digest,message_row_id) VALUES(?,?,?,?,?,?)`,
+			instance, in.ProjectID, fromID, keyDigest[:], requestDigest, messageRowID); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetEnvelope(ctx, in.ProjectID, messageID)
+}
+
+func sendRequestDigest(in SendEnvelopeInput, normalizedTo string) ([]byte, error) {
+	metadata := in.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	canonical := struct {
+		To            string         `json:"to"`
+		IssueID       *int64         `json:"issue_id,omitempty"`
+		ReplyTo       string         `json:"reply_to,omitempty"`
+		ThreadID      string         `json:"thread_id,omitempty"`
+		Body          string         `json:"body"`
+		Metadata      map[string]any `json:"metadata"`
+		ActionRequest bool           `json:"is_action_request"`
+		DeliveryLevel string         `json:"delivery_level"`
+	}{normalizedTo, in.IssueID, strings.TrimSpace(in.ReplyTo), strings.TrimSpace(in.ThreadID), in.Body, metadata, in.ActionRequest, in.DeliveryLevel}
+	raw, err := json.Marshal(canonical)
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(raw)
+	return digest[:], nil
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func (s *Service) GetEnvelope(ctx context.Context, projectID int64, messageID string) (*Envelope, error) {
@@ -274,6 +383,19 @@ func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, err
 	if err != nil {
 		return nil, err
 	}
+	if in.WorkerAdapter == "codex" {
+		leased := messages[:0]
+		for i := range messages {
+			include, err := s.attachDeliveryWork(ctx, in.ProjectID, address, in.Agent, &messages[i])
+			if err != nil {
+				return nil, err
+			}
+			if include {
+				leased = append(leased, messages[i])
+			}
+		}
+		messages = leased
+	}
 	next := in.AfterID
 	for i := range messages {
 		if messages[i].Cursor > next {
@@ -300,19 +422,30 @@ func (s *Service) AckInbox(ctx context.Context, in AckInput) (*CursorState, erro
 	if err != nil {
 		return nil, err
 	}
+	state, err := ackInboxTx(ctx, tx, in.ProjectID, address, agentID, in.Cursor)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
+func ackInboxTx(ctx context.Context, tx *sql.Tx, projectID int64, address string, agentID, cursor int64) (*CursorState, error) {
 	var current int64
-	err = tx.QueryRowContext(ctx, `SELECT cursor FROM agent_message_cursors WHERE project_id=? AND address=?`, in.ProjectID, address).Scan(&current)
+	err := tx.QueryRowContext(ctx, `SELECT cursor FROM agent_message_cursors WHERE project_id=? AND address=?`, projectID, address).Scan(&current)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if in.Cursor <= current {
+	if cursor <= current {
 		return &CursorState{Address: address, Cursor: current}, nil
 	}
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_messages am
 		JOIN project_agents pa ON pa.id=am.to_agent_id
 		WHERE pa.project_id=? AND am.id=? AND am.to_address=? AND am.delivered=1 AND am.is_action_request=0`,
-		in.ProjectID, in.Cursor, address).Scan(&exists); err != nil {
+		projectID, cursor, address).Scan(&exists); err != nil {
 		return nil, err
 	}
 	if exists == 0 {
@@ -321,19 +454,16 @@ func (s *Service) AckInbox(ctx context.Context, in AckInput) (*CursorState, erro
 	readAt := time.Now().UTC().Format(time.RFC3339)
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_messages SET read_at=COALESCE(read_at,?)
 		WHERE to_agent_id=? AND to_address=? AND delivered=1 AND is_action_request=0 AND id>? AND id<=?`,
-		readAt, agentID, address, current, in.Cursor); err != nil {
+		readAt, agentID, address, current, cursor); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_cursors(project_id,project_agent_id,address,cursor,updated_at)
 		VALUES(?,?,?,?,?)
 		ON CONFLICT(project_id,address) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at
-		WHERE excluded.cursor>agent_message_cursors.cursor`, in.ProjectID, agentID, address, in.Cursor, readAt); err != nil {
+		WHERE excluded.cursor>agent_message_cursors.cursor`, projectID, agentID, address, cursor, readAt); err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return &CursorState{Address: address, Cursor: in.Cursor}, nil
+	return &CursorState{Address: address, Cursor: cursor}, nil
 }
 
 // AllowSender is the human/operator control plane for the PAI-817 sender
@@ -387,15 +517,20 @@ func resolveAttributedInboxQuery(ctx context.Context, q queryRower, projectID in
 }
 
 const envelopeSelect = `SELECT am.id,am.message_id,am.context_id,am.task_id,am.role,am.parts_json,am.metadata_json,
-	am.from_address,am.to_address,am.reply_to,am.thread_id,am.hop_count,am.delivered,am.held_reason,am.is_action_request,am.created_at,COALESCE(am.read_at,'')
+	am.from_address,am.to_address,am.reply_to,am.thread_id,am.hop_count,am.delivered,am.held_reason,am.is_action_request,am.created_at,COALESCE(am.read_at,''),
+	am.delivery_level,am.delivery_fallback,COALESCE(am.delivery_primary_target_id,''),
+	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_primary_target_id),''),
+	COALESCE(am.delivery_fallback_target_id,''),
+	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_fallback_target_id),'')
 	FROM agent_messages am JOIN project_agents pa ON pa.id=am.from_agent_id`
 
 type scanner interface{ Scan(...any) error }
 
 func scanEnvelope(row scanner) (*Envelope, error) {
 	var e Envelope
-	var parts, metadata string
-	if err := row.Scan(&e.Cursor, &e.MessageID, &e.ContextID, &e.TaskID, &e.Role, &parts, &metadata, &e.From, &e.To, &e.ReplyTo, &e.ThreadID, &e.Hop, &e.Delivered, &e.HeldReason, &e.IsActionRequest, &e.CreatedAt, &e.ReadAt); err != nil {
+	var parts, metadata, primaryID, primaryKind, fallbackID, fallbackKind string
+	if err := row.Scan(&e.Cursor, &e.MessageID, &e.ContextID, &e.TaskID, &e.Role, &parts, &metadata, &e.From, &e.To, &e.ReplyTo, &e.ThreadID, &e.Hop, &e.Delivered, &e.HeldReason, &e.IsActionRequest, &e.CreatedAt, &e.ReadAt,
+		&e.DeliveryLevel, &e.DeliveryFallback, &primaryID, &primaryKind, &fallbackID, &fallbackKind); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(parts), &e.Parts); err != nil {
@@ -403,6 +538,15 @@ func scanEnvelope(row scanner) (*Envelope, error) {
 	}
 	if err := json.Unmarshal([]byte(metadata), &e.Metadata); err != nil {
 		return nil, err
+	}
+	if primaryID != "" || fallbackID != "" {
+		e.DeliveryTarget = &DeliveryTargetSnapshot{}
+		if primaryID != "" {
+			e.DeliveryTarget.Primary = &DeliveryTargetBinding{BindingID: primaryID, Kind: primaryKind}
+		}
+		if fallbackID != "" {
+			e.DeliveryTarget.SimpleFallback = &DeliveryTargetBinding{BindingID: fallbackID, Kind: fallbackKind}
+		}
 	}
 	return &e, nil
 }

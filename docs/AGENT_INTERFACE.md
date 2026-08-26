@@ -13,7 +13,10 @@ PAIMOS offers three agent-facing surfaces, in descending order of ergonomic payo
 `paimos tell <harness>:<agent> --project <key> -m <text>` writes one durable,
 project-scoped message. The sender is resolved from `--agent-name` or
 `PAIMOS_AGENT_NAME`; callers cannot choose a numeric sender ID. Optional
-`--ticket`, `--reply-to`, and `--thread` fields anchor work and replies. Use
+`--ticket`, `--reply-to`, and `--thread` fields anchor work and replies.
+`--level simple|steer` records receiver interruption intent on each message;
+it defaults to `simple`, and every unsupported or unavailable steer path has a
+deterministic `simple` fallback. Use
 `--action-request` whenever the body asks the receiver to act; the server
 persists the explicit marker but holds the row out of every agent inbox for
 human review. Text matching catches common missed markers only as defence in
@@ -32,23 +35,60 @@ Allow a sender, then consume an inbox with a durable receiver cursor:
 
 ```bash
 paimos message allow paimos:claude --for codex:codex --project PAI
-paimos tell codex:codex --project PAI --ticket PAI-817 --action-request --message "Restart the service"
+paimos message target set --project PAI --address codex:codex \
+  --adapter codex --kind codex_thread --target-ref "$CODEX_THREAD_ID" \
+  --maximum-level steer
+paimos tell codex:codex --project PAI --level simple --message "Status observation"
 paimos listen --as codex:codex --project PAI --ack
-paimos listen --as codex:codex --project PAI --follow --deliver codex --deliver-target "$CODEX_THREAD_ID"
+paimos listen --as codex:codex --project PAI --follow --deliver codex
 paimos listen --as grok:grok --project PAI --deliver grok --deliver-target "$GROK_SESSION_ID" --enable-grok-build-delivery
 ```
 
 `listen` exits 3 when a one-shot read has no mail and 4 when the selected
 native adapter is unavailable. `--ack` advances the server cursor only after
 output succeeds; `--deliver codex|claude|grok` implies acknowledgement only
-after the vendor handoff succeeds. Codex uses `codex queue --thread`. Claude
-uses the active Claude Code messaging socket from
-`CLAUDE_CODE_MESSAGING_SOCKET` (and its token environment when present).
+after the vendor handoff succeeds. For M154 bus messages, the Codex target is
+the receiver-owned encrypted target version snapshotted when the message was
+committed; `--deliver-target` remains only for pre-bus/legacy rows. `simple`
+uses exactly `codex queue --thread THREAD --message TEXT`. `steer` starts the
+app-server daemon, connects only through `codex app-server proxy`, performs
+`initialize` then `initialized`, lists the latest turn, and calls `turn/steer`
+only when its status is `inProgress`. Idle, policy-capped, raced, and
+`activeTurnNotSteerable` cases use the exact queue fallback. Claude delivery
+remains unsupported in this pass; `--deliver claude` returns adapter
+unavailable and PAIMOS sends no undocumented socket frame.
 The experimental Grok Build adapter is off unless
 `--enable-grok-build-delivery` is present. It resumes only a canonical session
 UUID through the first-party `grok` CLI, sends one verbatim turn with tools,
 subagents, planning, and web access disabled, and discards the vendor response.
 No adapter stores or prints vendor credentials.
+
+### Grok Bot routine wake
+
+Grok Bot has no inbound CLI or mid-turn steer primitive. Register Amy's
+vendor-generated generic routine webhook as an encrypted receiver target:
+
+```bash
+printf '%s' "$AMY_GROK_BOT_ROUTINE_WEBHOOK" | \
+  paimos message target set --project PHAROS --address grok_bot:amy \
+  --adapter grok_bot_routine --kind https_webhook \
+  --target-ref-file - --maximum-level simple
+paimos tell grok_bot:amy --project PHAROS --level steer --message "Observation"
+```
+
+The exact secret configuration field is the target registration request's
+`target_ref` (CLI: `--target-ref-file`, with `-` for stdin); the server encrypts it in
+`agent_message_targets.target_ref_cipher` and never returns it. The server must
+also set `PAIMOS_AGENT_BUS_INSTANCE=ppm` and include the routine hostname in
+`PAIMOS_AGENT_BUS_WEBHOOK_HOSTS`. A steer request to this adapter is recorded
+as `effective_level=simple` with `fallback_reason=unsupported`; PAIMOS does not
+run `grok send`, `grok queue`, or `grok steer`.
+
+Operators can inspect only redacted state with `paimos message target list`
+and `paimos message deliveries`. A message committed before a target existed
+stays `blocked/target_missing` until the explicit
+`paimos message target requeue --address ...` operation; allowing a sender or
+registering a target never releases a historical held row as a side effect.
 
 ## Which surface should I use?
 

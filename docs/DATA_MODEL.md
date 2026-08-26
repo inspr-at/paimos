@@ -477,7 +477,7 @@ Both: UNIQUE on `(project_id, name)`; ordering index on `(project_id, sort_order
 inventory and is reused as-is; the canonical agent-artifact endpoint
 inlines all three.
 
-### Durable agent message ledger (M151–M153 — PAI-817, PAI-815, PAI-816)
+### Durable agent message ledger and bus (M151–M154 — PAI-817, PAI-815, PAI-816, PAI-826)
 
 `agent_messages` stores the M151 security fields (`from_agent_id`,
 `to_agent_id`, optional `issue_id`, parent, hop, body, held/delivered state)
@@ -503,6 +503,29 @@ updated_at)`. One row per project/address records the last acknowledged
 delivered message. Acknowledgements are monotonic, must name a real delivered
 non-action row in the attributed inbox, and mark only covered rows read; a
 caller cannot acknowledge an arbitrary future cursor.
+
+M154 adds immutable `delivery_level` (`simple|steer`), fixed
+`delivery_fallback='simple'`, and nullable primary/fallback target-version IDs
+to every canonical envelope. Existing rows backfill to `simple` with no target.
+`agent_message_idempotency` keeps a scoped SHA-256 key digest, normalized
+request digest, and canonical message row for the life of that message; exact
+replays return the original row and conflicts fail without creating another
+message or delivery.
+
+`agent_message_targets` stores versioned, per-instance, project/address-owned
+bindings. Only one primary and one simple fallback version may be enabled for
+an address. Vendor references are domain-separated secretvault ciphertext;
+ordinary ledger, target-list, delivery-status, and webhook payloads contain
+only non-secret target IDs and kinds. The shipped adapters in M154 are `codex`
+with `codex_thread` and `grok_bot_routine` with `https_webhook`.
+
+`agent_message_deliveries` is one unique intent/outbox row per eligible
+message, with stable `delivery_id`, snapshotted targets, requested/effective
+level, typed fallback reason, state (`pending`, `leased`, `retry`, `blocked`,
+`handed_off`, `dead`), attempts, lease/retry timestamps, redacted error code,
+and handoff timestamp. It stores no second message body. Held and action rows
+have no runnable delivery; missing-target rows remain explicitly blocked until
+an operator attaches current targets and requeues them.
 
 ### Auto-watch sync subscriptions (M98 — PAI-331)
 
