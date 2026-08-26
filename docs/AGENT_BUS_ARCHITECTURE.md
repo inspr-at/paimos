@@ -97,8 +97,10 @@ sequenceDiagram
 - An unlisted or action-request row is held and is never returned by listen.
   `message allow` is currently prospective: it does not replay the old held
   row. The verified flow therefore required a resend after allowlisting.
-- Hop is system-owned, thread-scoped, and limited to 10. Delivery retries are
-  attempts for the same row and do not increment hop.
+- Hop is system-owned and limited to 10. A `reply_to` advances from its parent;
+  otherwise an existing `thread_id` advances from that thread's latest durable
+  row, and a new thread starts at 1. Delivery retries are attempts for the same
+  row and do not increment hop.
 - At most 10 messages enter one attributed inbox page.
 - Receiver reads are security-framed by the server. Human inspection keeps the
   structured raw envelope.
@@ -149,9 +151,11 @@ that wants to reply writes a new attributed `paimos tell`.
 
 ### 3.1 Target registration
 
-Each receiver address has at most one enabled primary delivery-target version.
-Changing a target creates a new version instead of mutating a target already
-snapshotted onto a message.
+Each receiver address has at most one enabled primary delivery-target version
+and, optionally, one enabled `simple` fallback target. Most bindings use the
+same target for both levels; the second target exists only when the primary
+steer target cannot perform a simple wake. Changing either target creates a
+new version instead of mutating one already snapshotted onto a message.
 
 Conceptual target fields:
 
@@ -164,6 +168,7 @@ Conceptual target fields:
 | `target_kind` | For example `codex_thread`, `claude_session`, `grok_session`, or `https_webhook` |
 | `target_ref` | Receiver-owned vendor thread/session reference or encrypted webhook URL |
 | `maximum_level` | Receiver policy: `simple` or `steer`; default `simple` |
+| `role` | `primary` or `simple_fallback`; unique while enabled per receiver |
 | `enabled`, `version` | Explicit activation and immutable version |
 | `secret_ref` | Optional reference to encrypted auth material; never a message field |
 
@@ -181,7 +186,8 @@ UUID. PAIMOS conversation `thread_id` is never used as this value.
 For an allowlisted, non-action message, one database transaction:
 
 1. inserts the canonical `agent_messages` row;
-2. resolves and snapshots the enabled receiver target version, if any; and
+2. resolves and snapshots the enabled primary and optional simple-fallback
+   target versions, if any; and
 3. inserts one unique delivery row/outbox reference.
 
 A held row creates no runnable delivery attempt. Allowlisting remains
@@ -190,9 +196,11 @@ and the sender resends. If the product later needs release, it must be an
 explicit, operator-only, audited `release` operation, not a side effect of
 allowing a sender.
 
-If no target exists, the message remains durably readable and the delivery row
-is `blocked` with `target_missing`; it is not acknowledged or dropped.
-Registering a target can explicitly requeue blocked rows.
+If no target exists, the message remains durably readable and its single
+delivery-intent row is `blocked` with `target_missing`; it is not acknowledged
+or dropped. Registering a target can explicitly requeue it by atomically
+assigning the first target snapshot and transitioning that same row. A target
+already snapshotted onto an attempted delivery is never changed.
 
 For local sessions, the existing `listen --follow` process is the delivery
 worker and provides a current upper-bound polling delay of approximately two
@@ -207,19 +215,21 @@ Conceptual `agent_message_deliveries` fields:
 | Field | Meaning |
 |---|---|
 | `delivery_id` | Stable UUID and retry/idempotency key |
-| `message_id`, `target_id` | Unique canonical message/target-version pair |
+| `message_id` | Unique canonical message; exactly one delivery-intent row |
+| `primary_target_id`, `fallback_target_id` | Nullable snapshotted target versions |
 | `requested_level` | Immutable copy of the message level |
 | `effective_level` | `simple` or `steer` actually used; set on success |
 | `state` | `pending`, `leased`, `retry`, `blocked`, `handed_off`, or `dead` |
-| `fallback_reason` | Typed reason such as `idle`, `unsupported`, `target_missing`, `not_steerable` |
+| `fallback_reason` | Typed reason such as `idle`, `unsupported`, `policy_capped`, `target_missing`, `not_steerable` |
 | `attempt_count`, `next_attempt_at`, `lease_until` | Retry and competing-worker control |
 | `last_error_code` | Typed and redacted; never vendor output or credentials |
 | `handed_off_at` | Successful vendor handoff time |
 
-The pair `(message_id, target_id)` is unique. A worker leases the oldest row
-for one address so concurrent workers cannot inject or acknowledge messages
-out of order. Lease expiry permits recovery after a crash. Completion is
-idempotent.
+`message_id` is unique in this table. This avoids nullable-target uniqueness
+ambiguity and represents one delivery intent, not one mailbox per target. A
+worker leases the oldest row for one address so concurrent workers cannot
+inject or acknowledge messages out of order. Lease expiry permits recovery
+after a crash. Completion is idempotent.
 
 The existing inbox cursor advances only after:
 
@@ -242,8 +252,11 @@ The canonical envelope gains the following server-normalized fields:
   "delivery_level": "steer",
   "delivery_fallback": "simple",
   "delivery_target": {
-    "binding_id": "019c...",
-    "kind": "codex_thread"
+    "primary": {
+      "binding_id": "019c...",
+      "kind": "codex_thread"
+    },
+    "simple_fallback": null
   }
 }
 ```
@@ -255,8 +268,11 @@ Rules:
 - `delivery_fallback` is `simple` in this contract. It is stored so replay has
   deterministic behavior rather than inheriting future process defaults.
 - `delivery_target` is nullable and server-owned. It contains only an opaque
-  binding/version ID and non-secret kind. The actual `target_ref` is disclosed
-  only to the authorized delivery worker.
+  primary binding/version ID, optional simple-fallback binding/version ID, and
+  non-secret kinds. The actual `target_ref` values are disclosed only to the
+  authorized delivery worker.
+- `delivery_level`, `delivery_fallback`, and `delivery_target` are required
+  output properties. `delivery_target` is JSON `null` when unresolved.
 - The HTTP send request accepts `"delivery_level":"simple|steer"`.
   `paimos tell` exposes the same field as `--level simple|steer`, defaulting to
   `simple`. Both reject caller-supplied target, fallback, effective level, or
@@ -277,12 +293,17 @@ ALTER TABLE agent_messages
   ADD COLUMN delivery_fallback TEXT NOT NULL DEFAULT 'simple'
     CHECK(delivery_fallback = 'simple');
 ALTER TABLE agent_messages
-  ADD COLUMN delivery_target_id TEXT;
+  ADD COLUMN delivery_primary_target_id TEXT;
+ALTER TABLE agent_messages
+  ADD COLUMN delivery_fallback_target_id TEXT;
 ```
 
 The follow-up implementation must update the closed JSON schema, Go envelope,
 HTTP request, CLI JSON shape, data-model documentation, migration tests, and
 old-row backfill together. This document does not reserve a migration number.
+Slice 1 has no target registry: it always stores and returns
+`"delivery_target": null` and performs no target lookup. Slice 2 introduces
+resolution and the object form.
 
 ### 4.2 Send idempotency
 
@@ -290,11 +311,21 @@ The current CLI sends an `Idempotency-Key` header, but the message handler does
 not consume it. The target bus must make message creation idempotent before
 automatic sender retry is enabled:
 
+- The header remains optional for backward compatibility. A send without it
+  keeps current non-idempotent behavior.
+- Accept an opaque 1–128-byte key. One logical `paimos tell` invocation creates
+  one key before its first HTTP attempt and reuses that key for every retry.
 - Scope the key to instance, project, and attributed sender.
-- Persist a hash of the normalized request and the resulting `message_id`.
-- A retry with the same key and same request returns the original row.
-- Reuse with a different request fails closed.
-- No key, body, target reference, or credential appears in normal logs.
+- In the same transaction as message creation, atomically reserve the scoped
+  key, normalized-request hash, and resulting `message_id`. A unique constraint
+  serializes concurrent duplicates; the loser reads the winning row.
+- A retry with the same key and same request returns the original
+  representation and status without creating a row or delivery intent.
+- Reuse with a different request fails with HTTP 409 and a stable
+  `agent_message_idempotency_conflict` code.
+- Keep the reservation for the lifetime of the canonical message. A future
+  message-retention feature must expire both atomically.
+- No raw key, body, target reference, or credential appears in normal logs.
 
 Delivery retries reuse the stable `delivery_id`; they never create another
 message and never increment hop.
@@ -310,6 +341,7 @@ priority.
 | `steer`, Codex target, latest turn is `inProgress` and steerable | Use `turn/steer`; record effective `steer` |
 | `steer`, Codex thread is idle or has no `inProgress` turn | Use `codex queue`; reason `idle` |
 | `steer`, Codex returns `activeTurnNotSteerable` or the expected turn races | Use `codex queue`; reason `not_steerable` |
+| `steer`, receiver policy has `maximum_level=simple` | Use the configured simple target; reason `policy_capped` |
 | `steer`, adapter has no steer primitive | Use its supported simple primitive; reason `unsupported` |
 | `steer`, no thread target, but a distinct simple target is configured | Use that simple target; reason `target_missing` |
 | Any level with no usable simple target | Leave unacknowledged and `blocked`; do not invent a target or command |
@@ -457,6 +489,8 @@ primitive:
 - Require HTTPS, an operator-approved hostname, bounded DNS resolution and
   connect timeouts, and rejection of loopback, link-local, and private
   destinations unless an explicit deployment policy allows them.
+- Disable redirects, or revalidate every redirect hostname, resolved address,
+  and connected IP against the same policy before following it.
 - Do not assume Grok Bot supports a custom signing header.
 
 For a PAIMOS-controlled adapter endpoint, a follow-up may additionally sign
@@ -492,11 +526,11 @@ URL, or credential.
 mapping; anything marked **UNSUPPORTED** must not be replaced with a guessed
 CLI or socket frame.
 
-| Receiver | Level | Exact primitive | Current | Target and fallback |
+| Receiver | Level | Allowed vendor primitive | Current | Target and fallback |
 |---|---|---|---|---|
 | Codex | `simple` | `codex queue --thread <THREAD> --message <TEXT>` | Implemented by `listen --deliver codex`; mode is process-wide | Supported. `<THREAD>` is a Codex rollout/session UUID or exact session name, never a Cursor chat UUID |
 | Codex | `steer` | Start daemon with `codex app-server daemon start`; worker runs `codex app-server proxy`, performs `initialize` + `initialized`, queries `thread/turns/list {threadId}` for status `inProgress`, then calls `turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}` | Implemented, but `activeTurnNotSteerable` currently returns an error | Supported. Idle, race, or not-steerable falls back to the exact queue primitive |
-| Claude local | `simple` | `claude -p --resume` or `claude -p --cloud <session_id>` | Documented in code but not implemented by `listen` | Follow-up adapter only after exact print-mode input and success semantics are tested |
+| Claude local | `simple` | `claude -p --resume <session_id>` or `claude -p --cloud <session_id>` | Documented in code but not implemented by `listen` | Follow-up adapter only after documented print-mode prompt transport and success semantics are tested; this architecture does not guess them |
 | Claude Channels | `simple` | MCP `notifications/claude/channel`; session opts in with `--channels` or `--dangerously-load-development-channels` | Research-preview channel path exists under `paimos serve --mcp-stdio --channel-as` | Supported simple push when explicitly enabled; successful JSON-RPC write is handoff |
 | Claude | `steer` | **UNSUPPORTED** | `listen --deliver claude` returns adapter unavailable | Fall back to a configured simple resume/cloud or Channels target; otherwise remain blocked |
 | Grok CLI / Grok Build | `simple` | `grok --single` (or `-p`) with `--resume`; current adapter uses one bounded `--single --resume` turn | Implemented behind `--enable-grok-build-delivery` | Supported only as an explicit receiver-owned target |
@@ -566,8 +600,10 @@ text:
    `CLAUDE_CODE_MESSAGING_SOCKET`, and the old 5.16.0 changelog says native
    socket delivery exists. Live `deliverClaude` always returns adapter
    unavailable, and official socket documentation defines only optional auth,
-   not a user-message frame. The socket claim is a documentation bug; no
-   implementation may invent the frame.
+   not a user-message frame. The socket claim, `--deliver-target` help that
+   advertises a Claude Unix socket, and the dead
+   `CLAUDE_CODE_MESSAGING_SOCKET` lookup are repo bugs; no implementation may
+   invent the frame.
 2. The PAI-825 changelog says Codex falls back when a live turn is not
    steerable. Live code falls back only when there is no `inProgress` turn;
    `activeTurnNotSteerable` returns an error. The target fallback table above
@@ -588,10 +624,12 @@ No ticket below is implemented by this architecture-only change.
 - Add `delivery_level`, fixed `delivery_fallback=simple`, and nullable
   server-owned target binding to the durable envelope and closed JSON schema.
 - Default existing clients and rows to `simple`.
+- Always persist/output `delivery_target: null`; Slice 1 has no target lookup.
 - Add `paimos tell --level simple|steer` and the matching HTTP
   `delivery_level`; reject sender-supplied target, fallback, or effective
   state.
-- Enforce POST message idempotency.
+- Enforce the optional, atomic, message-lifetime POST idempotency contract in
+  section 4.2, including concurrent duplicate and conflict tests.
 - Add migration, API, CLI, schema, security, and compatibility tests.
 - Do not change vendor delivery behavior yet.
 
@@ -633,11 +671,22 @@ This slice requires no vendor verb.
 
 - First map the existing opt-in Channels path to `simple` delivery state.
 - Separately add and test idle local delivery using only
-  `claude -p --resume` or `claude -p --cloud <session_id>`.
+  `claude -p --resume <session_id>` or
+  `claude -p --cloud <session_id>`.
 - Keep steer **UNSUPPORTED** and fall back to the selected simple binding.
-- Remove the false Claude messaging-socket claims from current docs.
+- Remove the false Claude messaging-socket claims, stale CLI help, and dead
+  socket-target lookup.
 
-### Slice 6 — operations and rollout
+### Slice 6 — Grok CLI target parity
+
+- Wire receiver-owned Grok session targets to the existing bounded
+  `grok --single`/`-p` plus `--resume` simple adapter.
+- Preserve the explicit experimental enable gate, canonical lowercase session
+  UUID check, fixed no-shell argv, disabled tools/planning/subagents/web, one
+  turn, discarded vendor response, and zero-exit acknowledgement.
+- Keep Grok steer **UNSUPPORTED** and record fallback to `simple`.
+
+### Slice 7 — operations and rollout
 
 - Add target health, pending/blocked/dead counts, last typed error, retry and
   operator requeue controls without exposing body or credentials.
