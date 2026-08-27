@@ -2409,12 +2409,19 @@ describe('AgentModeView (PAI-805 detail 10)', () => {
   })
 
   it('scales to 100 deliveries with one selection and consistent lane totals', async () => {
+    const maxHundredDeliveryRenderLatencyMs = 2000
+    const started = performance.now()
     harness = await mountView(async () => snapshot(makeFixtureSnapshot(100)))
+    const elapsed = performance.now() - started
     const { root } = harness
     expect(root.querySelectorAll('.am-lanes .am-card')).toHaveLength(99)
     expect(selectedCards(root)).toHaveLength(1)
     const laneCounts = [...root.querySelectorAll('.am-lane')].map((lane) => lane.querySelectorAll('.am-card, .am-selected-above').length)
     expect(laneCounts.reduce((a, b) => a + b, 0)).toBe(100)
     expect(document.getElementById('app-header-left')!.textContent).toContain('100 deliveries in motion')
+    console.info(
+      `Agent Mode render latency: deliveries=100 elapsed=${elapsed.toFixed(1)}ms budget=${maxHundredDeliveryRenderLatencyMs}ms`,
+    )
+    expect(elapsed).toBeLessThanOrEqual(maxHundredDeliveryRenderLatencyMs)
   })
 })

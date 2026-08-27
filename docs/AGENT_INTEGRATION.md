@@ -990,6 +990,11 @@ The complete field and enum contract is the served OpenAPI document at
 separate integration step; generic change-stream envelopes are not aliases for
 these Agent Mode events.
 
+The 100-card render gate and 1,000-delivery query, HTTP, and durable-change
+latency budgets are numeric, test-enforced, and documented in
+[`AGENT_MODE_SCALE.md`](AGENT_MODE_SCALE.md). Row and SQL-call limits alone are
+not accepted as scale evidence.
+
 Agent Mode voice uses the same internal-only, canonical-404, CSRF, and
 `private, no-store` boundary:
 

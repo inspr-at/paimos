@@ -416,6 +416,8 @@ func TestReaderFailsClosedForAuthorizedUnlinkedV1WithoutHiddenProjectOracle(t *t
 }
 
 func TestReaderUsesOneClockInstantAtEverySupportedScale(t *testing.T) {
+	const maxThousandRootQueryLatency = time.Second
+
 	database := openAgentModeTestDB(t)
 	adminID := insertAgentModeUser(t, database, "clock-admin", "admin", "admin")
 	sizes := []int{1, 10, 100, MaxCandidateRoots}
@@ -518,11 +520,17 @@ func TestReaderUsesOneClockInstantAtEverySupportedScale(t *testing.T) {
 				}
 			}
 			projectID := projectIDs[size]
+			started := time.Now()
 			result, readErr := reader.Read(
 				context.Background(), Request{UserID: adminID, RouteProjectID: &projectID,
 					Filters: Filters{Attention: "all", Health: "all"}})
+			elapsed := time.Since(started)
 			if readErr != nil {
 				t.Fatal(readErr)
+			}
+			t.Logf("Agent Mode query latency: roots=%d elapsed=%s budget=%s", size, elapsed, maxThousandRootQueryLatency)
+			if size == MaxCandidateRoots && elapsed > maxThousandRootQueryLatency {
+				t.Fatalf("1,000-root query latency=%s exceeds budget=%s", elapsed, maxThousandRootQueryLatency)
 			}
 			captured := base.Add(time.Second)
 			if calls != 1 || len(result.Rows) != size || !result.ServerTime.Equal(captured) ||
