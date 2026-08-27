@@ -57,7 +57,13 @@ and only to an actual delivered, non-action row in that inbox, so a malicious
 client cannot skip unseen future messages.
 
 Native delivery preserves that boundary. Codex, Claude, and Grok Build receive
-the server-added untrusted-data frame, never the raw stored body. Grok Build is
+the server-added untrusted-data frame, never the raw stored body. Claude
+delivery is simple-only: it pipes the framed body over stdin to fixed-argv
+`claude -p --resume <session_id>` or `claude -p --cloud <session_id>`, accepts
+only an explicit session target (the encrypted receiver-owned `claude_session`
+registry target, disclosed only to the attributed worker that leased the
+delivery, or a legacy `--deliver-target` for pre-bus rows), adds no permission
+escalation, discards the vendor response, and has no steer or socket path. Grok Build is
 additionally off by default behind `--enable-grok-build-delivery`, accepts only
 a canonical session UUID, runs one fixed-argv turn with tools and network
 helpers disabled, and discards the vendor response. The durable cursor advances

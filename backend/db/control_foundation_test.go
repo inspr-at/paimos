@@ -590,8 +590,14 @@ func TestM147IsPureNonIdempotentSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := strings.Index(string(body), "// M147 / PAI-809")
-	end := strings.Index(string(body)[start:], "\n\t}\n\n\tfor _, m := range migrations")
-	if start < 0 || end < 0 {
+	if start < 0 {
+		t.Fatal("could not isolate M147 source")
+	}
+	// Bound the slice at the next migration block: later migrations (for
+	// example the M155 target-table rebuild) may legitimately use the
+	// foreign-key pragma without changing what M147 itself contains.
+	end := strings.Index(string(body)[start:], "\n\t\t// M148 / PAI-810")
+	if end < 0 {
 		t.Fatal("could not isolate M147 source")
 	}
 	migration147 := string(body)[start : start+end]

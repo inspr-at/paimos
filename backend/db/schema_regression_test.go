@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 154
+const latestSchemaVersion = 155
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -1238,5 +1238,114 @@ func TestSchemaSeedsSuperAdminCapabilities(t *testing.T) {
 		).Scan(&found); err != nil {
 			t.Fatalf("expected role_permissions row (%s, %s): %v", row.role, row.capability, err)
 		}
+	}
+}
+
+func TestMigration155WidensTargetAdaptersForClaudeSessionsAndKeepsRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m155-populated.db")
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 154); err != nil {
+		t.Fatalf("create exact M154 fixture: %v", err)
+	}
+	if _, err := database.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		t.Fatal(err)
+	}
+	project, _ := database.Exec(`INSERT INTO projects(name,key) VALUES('Bus migration','BUS')`)
+	projectID, _ := project.LastInsertId()
+	sender, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'sender')`, projectID)
+	receiver, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'receiver')`, projectID)
+	senderID, _ := sender.LastInsertId()
+	receiverID, _ := receiver.LastInsertId()
+	cipher := []byte("opaque-ciphertext-longer-than-twenty-eight-bytes")
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+		VALUES('t-codex','ppm',?,'codex:receiver','codex','codex_thread',?,'steer','primary',1,1)`, projectID, cipher); err != nil {
+		t.Fatal(err)
+	}
+	message, err := database.Exec(`INSERT INTO agent_messages(from_agent_id,to_agent_id,body,delivered,delivered_at,message_id,context_id,parts_json,from_address,to_address,thread_id,delivery_primary_target_id)
+		VALUES(?,?,'bus intent',1,datetime('now'),'bus-155','BUS','[{"kind":"text","text":"bus intent"}]','paimos:sender','codex:receiver','bus-155','t-codex')`, senderID, receiverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageRowID, _ := message.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO agent_message_deliveries(delivery_id,message_row_id,instance,primary_target_id,requested_level,state)
+		VALUES('d-155',?,'ppm','t-codex','steer','pending')`, messageRowID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+		VALUES('t-claude','ppm',?,'claude:receiver','claude_resume','claude_session',?,'simple','primary',1,1)`, projectID, cipher); err == nil {
+		t.Fatal("M154 must still reject Claude adapters before the migration")
+	}
+
+	if err := migrate(database); err != nil {
+		t.Fatalf("M154 to M155: %v", err)
+	}
+
+	// Every pre-existing target version, its ciphertext, and the delivery row
+	// that references it survive the rebuild under the original table name.
+	var adapter, kind, level, role string
+	var enabled, version int
+	var keptCipher []byte
+	if err := database.QueryRow(`SELECT adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version FROM agent_message_targets WHERE id='t-codex'`).Scan(
+		&adapter, &kind, &keptCipher, &level, &role, &enabled, &version); err != nil {
+		t.Fatalf("codex target lost in rebuild: %v", err)
+	}
+	if adapter != "codex" || kind != "codex_thread" || string(keptCipher) != string(cipher) || level != "steer" || role != "primary" || enabled != 1 || version != 1 {
+		t.Fatalf("codex target changed: adapter=%q kind=%q level=%q role=%q enabled=%d version=%d", adapter, kind, level, role, enabled, version)
+	}
+	var referenced string
+	if err := database.QueryRow(`SELECT t.id FROM agent_message_deliveries d JOIN agent_message_targets t ON t.id=d.primary_target_id WHERE d.delivery_id='d-155'`).Scan(&referenced); err != nil || referenced != "t-codex" {
+		t.Fatalf("delivery no longer joins its target: id=%q err=%v", referenced, err)
+	}
+	violations, err := database.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer violations.Close()
+	if violations.Next() {
+		t.Fatal("foreign_key_check returned a violation after the M155 rebuild")
+	}
+	for _, index := range []string{"idx_agent_message_targets_enabled_role", "idx_agent_message_targets_receiver"} {
+		var count int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=? AND tbl_name='agent_message_targets'`, index).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("index %s missing after rebuild: count=%d err=%v", index, count, err)
+		}
+	}
+	for _, name := range []string{"agent_message_targets_m155", "agent_message_targets_old155"} {
+		if tableExists(t, database, name) {
+			t.Fatalf("rebuild residue %s left behind", name)
+		}
+	}
+
+	// Claude session targets are accepted for both Claude adapters, only with
+	// target_kind claude_session and maximum_level simple.
+	for _, tc := range []struct {
+		name, id, adapter, kind, level string
+		ok                             bool
+	}{
+		{"claude_resume session", "t-resume", "claude_resume", "claude_session", "simple", true},
+		{"claude_channel session", "t-channel", "claude_channel", "claude_session", "simple", true},
+		{"claude_resume with codex kind", "t-bad-kind", "claude_resume", "codex_thread", "simple", false},
+		{"claude_channel with webhook kind", "t-bad-kind2", "claude_channel", "https_webhook", "simple", false},
+		{"codex with claude kind", "t-bad-kind3", "codex", "claude_session", "simple", false},
+		{"claude_resume steer policy", "t-bad-level", "claude_resume", "claude_session", "steer", false},
+		{"unknown adapter", "t-bad-adapter", "claude", "claude_session", "simple", false},
+	} {
+		_, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+			VALUES(?,'ppm',?,?,?,?,?,?,'primary',0,1)`, tc.id, projectID, "claude:"+tc.id, tc.adapter, tc.kind, cipher, tc.level)
+		if tc.ok && err != nil {
+			t.Fatalf("%s: rejected: %v", tc.name, err)
+		}
+		if !tc.ok && err == nil {
+			t.Fatalf("%s: accepted", tc.name)
+		}
+	}
+	// Existing adapter pairs remain valid after the rebuild.
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+		VALUES('t-webhook','ppm',?,'grok_bot:amy','grok_bot_routine','https_webhook',?,'simple','primary',1,1)`, projectID, cipher); err != nil {
+		t.Fatalf("grok_bot_routine target rejected after rebuild: %v", err)
 	}
 }

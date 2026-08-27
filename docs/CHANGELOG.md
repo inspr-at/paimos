@@ -5,6 +5,53 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — Claude simple delivery (PAI-827)
+
+- `paimos listen --deliver claude` now performs idle Claude delivery with the
+  two documented print-mode primitives: a local session UUID target runs
+  `claude -p --resume <session_id>` as a new turn, and a `session_…`/`cse_…`
+  cloud target runs `claude -p --cloud <session_id>` as a queued follow-up.
+  The framed body is piped over stdin with fixed argv and no shell; a zero
+  vendor exit is the handoff, the response is discarded, and the durable
+  cursor advances only afterwards. Socket paths, URLs, and session names are
+  rejected, and no target is inferred from the environment.
+- Added the opt-in `TestAgentBusRealClaudeSimpleE2E` proof: with
+  `PAIMOS_AGENT_BUS_E2E_CLAUDE_SESSION=<local session UUID>` it runs
+  `paimos tell --level simple|steer` through the ledger, a live listener,
+  the real `claude -p --resume` primitive, and the cursor ack, and logs
+  commit/pickup/handoff timings.
+- The opt-in Channels path (`paimos serve --mcp-stdio --channel-as`) records
+  simple delivery state on every `notifications/claude/channel` event
+  (`requested_level`, `effective_level`, and `fallback_reason` when set) and
+  audits each successful write as `claude_channel_handoff`.
+- Claude steer stays unsupported by design: a `steer` request (durable
+  `paimos tell --level steer`, or legacy `--deliver-mode steer` on pre-bus
+  rows) with `--deliver claude` falls back to the selected simple primitive
+  and records `fallback_reason=unsupported` instead of exiting 4.
+- Folded Claude into the receiver target registry (M155): `paimos message
+  target set --adapter claude_resume|claude_channel --kind claude_session`
+  binds a receiver to an encrypted local session UUID or `session_…`/`cse_…`
+  cloud id. `listen --deliver claude` now leases `claude_resume` work
+  (`?delivery=claude_resume`), resumes the receiver-owned session instead of
+  `--deliver-target`, and completes through `delivery-complete`; the opt-in
+  channel leases `claude_channel` work and completes each successful push the
+  same way, leaving rows that belong to another adapter or still have no
+  target untouched. Claude targets are fixed to `maximum_level=simple`, a
+  Claude delivery can never complete as `steer`, and an unknown `?delivery=`
+  worker adapter is rejected instead of ignored. `--deliver-target` remains
+  only for pre-bus envelopes.
+
+### Fixed
+
+- Removed the false Claude messaging-socket claims: the dead
+  `CLAUDE_CODE_MESSAGING_SOCKET` lookup, the "Claude Unix socket"
+  `--deliver-target` help, and the `docs/AGENT_INTERFACE.md` sentence. The
+  5.16.0 entry described a socket adapter that never delivered; Claude Code
+  documents only the optional socket auth line, and PAIMOS does not invent a
+  user-message frame.
+
 ## [5.18.0] — 2026-08-26
 
 ### Added — Instant bidirectional agent bus
@@ -115,7 +162,9 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   distinct exit codes for no new mail and unavailable native adapters.
 - Added first-party delivery into existing agent sessions: Codex through
   `codex queue --thread`, Claude Code through its authenticated messaging
-  socket, and an opt-in MCP `claude/channel` capability that emits
+  socket *(correction, PAI-827: that socket adapter never delivered and was
+  removed; Claude uses `claude -p --resume`/`--cloud` or Channels)*, and an
+  opt-in MCP `claude/channel` capability that emits
   `notifications/claude/channel`.
 - Added the M153 message `read_at` field and receiver cursor table, attributed
   listen/ack endpoints, and an editor-controlled name-based allowlist endpoint.

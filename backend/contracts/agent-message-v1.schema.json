@@ -47,8 +47,8 @@
       "properties": {
         "delivery_id": { "type": "string", "minLength": 1 },
         "state": { "enum": ["pending", "leased", "retry", "blocked", "handed_off", "dead"] },
-        "adapter": { "enum": ["codex", "grok_bot_routine"] },
-        "target_kind": { "enum": ["codex_thread", "https_webhook"] },
+        "adapter": { "enum": ["codex", "grok_bot_routine", "claude_resume", "claude_channel"] },
+        "target_kind": { "enum": ["codex_thread", "https_webhook", "claude_session"] },
         "target_ref": { "type": "string", "minLength": 1 },
         "maximum_level": { "enum": ["simple", "steer"] },
         "requested_level": { "enum": ["simple", "steer"] }
@@ -69,7 +69,7 @@
       "required": ["binding_id", "kind"],
       "properties": {
         "binding_id": { "type": "string", "minLength": 1 },
-        "kind": { "enum": ["codex_thread", "https_webhook"] }
+        "kind": { "enum": ["codex_thread", "https_webhook", "claude_session"] }
       }
     }
   }

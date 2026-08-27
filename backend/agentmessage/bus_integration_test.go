@@ -311,3 +311,220 @@ func TestWebhookTargetRejectsHTTPAndPrivateAddressByDefault(t *testing.T) {
 		}
 	}
 }
+
+const (
+	busTestClaudeLocalSession = "8f3c2a1e-4b6d-4c8e-9a1f-0d2e3f4a5b6c"
+	busTestClaudeCloudSession = "session_01DiUkqY2kzbUbDmW1w96rfi"
+)
+
+func addBusClaudeReceiver(t *testing.T, service *Service, projectID int64) {
+	t.Helper()
+	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'claude')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	allowBusSender(t, service, projectID, "claude:claude")
+}
+
+func codedErrorCode(err error) string {
+	if coded, ok := err.(*CodedError); ok {
+		return coded.Code
+	}
+	return ""
+}
+
+// TestBusClaudeResumeTargetLeaseAndCompletion proves the PAI-827 registry
+// fold: a receiver-owned claude_resume session target is snapshotted onto the
+// message, disclosed only to a claude_resume worker, and completed as a simple
+// handoff with the unsupported-steer fallback recorded durably.
+func TestBusClaudeResumeTargetLeaseAndCompletion(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	addBusClaudeReceiver(t, service, projectID)
+	target, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:claude", Adapter: "claude_resume", TargetKind: "claude_session",
+		TargetRef: busTestClaudeLocalSession,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Adapter != AdapterClaudeResume || target.TargetKind != TargetKindClaudeSession || target.MaximumLevel != "simple" || !target.Enabled || target.Version != 1 {
+		t.Fatalf("target=%#v", target)
+	}
+	first, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{ProjectID: projectID, Sender: "sender", To: "claude:claude", Body: "claude observation", DeliveryLevel: "steer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.DeliveryTarget == nil || first.DeliveryTarget.Primary == nil || first.DeliveryTarget.Primary.BindingID != target.ID || first.DeliveryTarget.Primary.Kind != TargetKindClaudeSession {
+		t.Fatalf("snapshot=%#v", first.DeliveryTarget)
+	}
+
+	// A Codex worker sees redacted state only: no lease, no session reference.
+	page, err := service.ListInbox(context.Background(), InboxInput{ProjectID: projectID, Address: "claude:claude", Agent: "claude", WorkerAdapter: "codex", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.State != "pending" ||
+		page.Messages[0].DeliveryWork.Adapter != AdapterClaudeResume || page.Messages[0].DeliveryWork.TargetRef != "" {
+		t.Fatalf("codex worker page=%#v", page.Messages)
+	}
+
+	// The claude_resume worker leases the row and receives the decrypted session.
+	page, err = service.ListInbox(context.Background(), InboxInput{ProjectID: projectID, Address: "claude:claude", Agent: "claude", WorkerAdapter: "claude_resume", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil {
+		t.Fatalf("claude worker page=%#v", page.Messages)
+	}
+	work := page.Messages[0].DeliveryWork
+	if work.State != "leased" || work.Adapter != AdapterClaudeResume || work.TargetKind != TargetKindClaudeSession ||
+		work.TargetRef != busTestClaudeLocalSession || work.RequestedLevel != "steer" || work.MaximumLevel != "simple" {
+		t.Fatalf("work=%#v", work)
+	}
+
+	// Claude has no steer primitive: a steer completion is refused durably.
+	_, err = service.CompleteLocalDelivery(context.Background(), CompleteDeliveryInput{
+		ProjectID: projectID, Address: "claude:claude", Agent: "claude", Cursor: first.Cursor, DeliveryID: work.DeliveryID, EffectiveLevel: "steer",
+	})
+	if codedErrorCode(err) != "agent_message_effective_level_invalid" {
+		t.Fatalf("steer completion err=%v", err)
+	}
+	state, err := service.CompleteLocalDelivery(context.Background(), CompleteDeliveryInput{
+		ProjectID: projectID, Address: "claude:claude", Agent: "claude", Cursor: first.Cursor, DeliveryID: work.DeliveryID,
+		EffectiveLevel: "simple", FallbackReason: "unsupported",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Cursor != first.Cursor {
+		t.Fatalf("state=%#v", state)
+	}
+	var deliveryState, effective, fallback string
+	if err := paimosdb.DB.QueryRow(`SELECT state,effective_level,fallback_reason FROM agent_message_deliveries WHERE delivery_id=?`, work.DeliveryID).Scan(&deliveryState, &effective, &fallback); err != nil {
+		t.Fatal(err)
+	}
+	if deliveryState != "handed_off" || effective != "simple" || fallback != "unsupported" {
+		t.Fatalf("delivery state=%q effective=%q fallback=%q", deliveryState, effective, fallback)
+	}
+	statuses, err := service.ListDeliveryStatus(context.Background(), projectID)
+	if err != nil || len(statuses) != 1 || statuses[0].State != "handed_off" || statuses[0].EffectiveLevel != "simple" || statuses[0].FallbackReason != "unsupported" {
+		t.Fatalf("statuses=%#v err=%v", statuses, err)
+	}
+	var cipher []byte
+	if err := paimosdb.DB.QueryRow(`SELECT target_ref_cipher FROM agent_message_targets WHERE id=?`, target.ID).Scan(&cipher); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(cipher), busTestClaudeLocalSession) {
+		t.Fatal("Claude session reference was stored in plaintext")
+	}
+	// The handed-off row is no longer offered to any worker.
+	page, err = service.ListInbox(context.Background(), InboxInput{ProjectID: projectID, Address: "claude:claude", Agent: "claude", WorkerAdapter: "claude_resume", Limit: 10})
+	if err != nil || len(page.Messages) != 0 {
+		t.Fatalf("page after completion=%#v err=%v", page, err)
+	}
+}
+
+func TestBusClaudeChannelTargetLeasesOnlyForChannelWorker(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	addBusClaudeReceiver(t, service, projectID)
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:claude", Adapter: "claude_channel", TargetKind: "claude_session",
+		TargetRef: busTestClaudeLocalSession,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{ProjectID: projectID, Sender: "sender", To: "claude:claude", Body: "channel push"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.ListInbox(context.Background(), InboxInput{ProjectID: projectID, Address: "claude:claude", Agent: "claude", WorkerAdapter: "claude_resume", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.State != "pending" ||
+		page.Messages[0].DeliveryWork.Adapter != AdapterClaudeChannel || page.Messages[0].DeliveryWork.TargetRef != "" {
+		t.Fatalf("resume worker must not lease a channel target: %#v", page.Messages)
+	}
+	page, err = service.ListInbox(context.Background(), InboxInput{ProjectID: projectID, Address: "claude:claude", Agent: "claude", WorkerAdapter: "claude_channel", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.State != "leased" ||
+		page.Messages[0].DeliveryWork.TargetRef != busTestClaudeLocalSession || page.Messages[0].DeliveryWork.RequestedLevel != "simple" {
+		t.Fatalf("channel worker page=%#v", page.Messages)
+	}
+	if _, err := service.CompleteLocalDelivery(context.Background(), CompleteDeliveryInput{
+		ProjectID: projectID, Address: "claude:claude", Agent: "claude", Cursor: first.Cursor,
+		DeliveryID: page.Messages[0].DeliveryWork.DeliveryID, EffectiveLevel: "simple",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var deliveryState string
+	if err := paimosdb.DB.QueryRow(`SELECT state FROM agent_message_deliveries WHERE delivery_id=?`, page.Messages[0].DeliveryWork.DeliveryID).Scan(&deliveryState); err != nil || deliveryState != "handed_off" {
+		t.Fatalf("state=%q err=%v", deliveryState, err)
+	}
+}
+
+func TestBusClaudeTargetRegistrationValidation(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	addBusClaudeReceiver(t, service, projectID)
+	for _, tc := range []struct {
+		name, adapter, kind, ref, level, wantCode string
+	}{
+		{"resume with codex kind", "claude_resume", "codex_thread", busTestClaudeLocalSession, "simple", "agent_message_target_kind_invalid"},
+		{"channel with webhook kind", "claude_channel", "https_webhook", busTestClaudeLocalSession, "simple", "agent_message_target_kind_invalid"},
+		{"socket path is not a session", "claude_resume", "claude_session", "/tmp/claude-messaging.sock", "simple", "agent_message_target_ref_invalid"},
+		{"url is not a session", "claude_resume", "claude_session", "https://claude.ai/code/session_x", "simple", "agent_message_target_ref_invalid"},
+		{"session name is not a session", "claude_resume", "claude_session", "my-session", "simple", "agent_message_target_ref_invalid"},
+		{"uppercase uuid is not canonical", "claude_resume", "claude_session", strings.ToUpper(busTestClaudeLocalSession), "simple", "agent_message_target_ref_invalid"},
+		{"channel needs a local session", "claude_channel", "claude_session", busTestClaudeCloudSession, "simple", "agent_message_target_ref_invalid"},
+		{"claude has no steer policy", "claude_resume", "claude_session", busTestClaudeLocalSession, "steer", "agent_message_target_level_invalid"},
+		{"cli adapter name is not a registry adapter", "claude", "claude_session", busTestClaudeLocalSession, "simple", "agent_message_target_adapter_invalid"},
+		{"resume accepts a local session", "claude_resume", "claude_session", busTestClaudeLocalSession, "", ""},
+		{"resume accepts a cloud session", "claude_resume", "claude_session", busTestClaudeCloudSession, "simple", ""},
+		{"channel accepts a local session", "claude_channel", "claude_session", busTestClaudeLocalSession, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+				ProjectID: projectID, Address: "claude:claude", Adapter: tc.adapter, TargetKind: tc.kind, TargetRef: tc.ref, MaximumLevel: tc.level,
+			})
+			if got := codedErrorCode(err); got != tc.wantCode {
+				t.Fatalf("code=%q err=%v want %q", got, err, tc.wantCode)
+			}
+			if tc.wantCode == "" && (target == nil || target.Adapter != tc.adapter || target.TargetKind != TargetKindClaudeSession || target.MaximumLevel != "simple") {
+				t.Fatalf("target=%#v", target)
+			}
+		})
+	}
+}
+
+func TestBusListInboxRejectsNonLocalWorkerAdapters(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	allowBusSender(t, service, projectID, "codex:codex")
+	for _, worker := range []string{"grok_bot_routine", "claude", "grok", "CODEX"} {
+		_, err := service.ListInbox(context.Background(), InboxInput{ProjectID: projectID, Address: "codex:codex", Agent: "codex", WorkerAdapter: worker, Limit: 10})
+		if codedErrorCode(err) != "agent_message_worker_adapter_invalid" {
+			t.Fatalf("worker %q err=%v", worker, err)
+		}
+	}
+	if _, err := service.ListInbox(context.Background(), InboxInput{ProjectID: projectID, Address: "codex:codex", Agent: "codex", Limit: 10}); err != nil {
+		t.Fatalf("plain read must stay valid: %v", err)
+	}
+}
+
+func TestClaudeSessionPrimitiveShapes(t *testing.T) {
+	for ref, want := range map[string]string{
+		busTestClaudeLocalSession:              "--resume",
+		busTestClaudeCloudSession:              "--cloud",
+		"cse_abc-DEF_123":                      "--cloud",
+		"session_":                             "",
+		"/tmp/claude.sock":                     "",
+		"ws://localhost:1234":                  "",
+		"8F3C2A1E-4B6D-4C8E-9A1F-0D2E3F4A5B6C": "",
+		"":                                     "",
+	} {
+		flag, ok := ClaudeSessionPrimitive(ref)
+		if flag != want || ok != (want != "") {
+			t.Fatalf("ClaudeSessionPrimitive(%q)=%q,%v want %q", ref, flag, ok, want)
+		}
+	}
+}

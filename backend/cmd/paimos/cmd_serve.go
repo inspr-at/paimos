@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/spf13/cobra"
 )
 
@@ -171,6 +172,7 @@ type contextBroker struct {
 	channelAddress      string
 	channelAgent        string
 	channelPollInterval time.Duration
+	channelSkipped      map[string]string
 }
 
 func newContextBroker(client *Client, projectID int64, projectRef, repoRoot string, loopbackOnly bool) *contextBroker {
@@ -1281,7 +1283,7 @@ func (b *contextBroker) runClaudeChannel(ctx context.Context, enc *lockedJSONEnc
 	}
 	after := int64(0)
 	for {
-		page, err := fetchInbox(ctx, b.client, b.projectID, b.channelAddress, b.channelAgent, after, "")
+		page, err := fetchInbox(ctx, b.client, b.projectID, b.channelAddress, b.channelAgent, after, agentmessage.AdapterClaudeChannel)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -1289,25 +1291,70 @@ func (b *contextBroker) runClaudeChannel(ctx context.Context, enc *lockedJSONEnc
 			b.audit("claude_channel_listen", map[string]any{"address": b.channelAddress}, 0, err)
 		} else {
 			for _, message := range page.Messages {
+				if work := message.DeliveryWork; work != nil && (work.Adapter != agentmessage.AdapterClaudeChannel || work.TargetRef == "") {
+					// The delivery row is not leased to this channel: it has no
+					// receiver-owned target yet (blocked/target_missing) or it
+					// belongs to another adapter such as a claude_resume
+					// listener. Leave it to that worker or to an explicit
+					// operator requeue; never push or acknowledge it here.
+					b.auditChannelSkip(message.MessageID, work.Adapter, work.State)
+					continue
+				}
+				// PAI-827: the Channels path is a simple handoff. The requested
+				// level is the durable level of the leased delivery work, else
+				// the envelope level (PAI-826 delivery_level, empty on pre-bus
+				// rows = simple); a steer request is recorded as
+				// fallback_reason=unsupported, never a guessed frame or command.
+				requested := message.DeliveryLevel
+				if message.DeliveryWork != nil {
+					requested = message.DeliveryWork.RequestedLevel
+				}
+				outcome := claudeSimpleDelivery(claudeAdapterChannel, "notifications/claude/channel", requested)
+				// Meta keys must be identifiers (letters, digits, underscores);
+				// Claude Code silently drops any other key.
+				meta := map[string]string{
+					"message_id":      message.MessageID,
+					"from":            message.From,
+					"thread_id":       message.ThreadID,
+					"task_id":         message.TaskID,
+					"cursor":          strconv.FormatInt(message.Cursor, 10),
+					"requested_level": outcome.RequestedLevel,
+					"effective_level": outcome.EffectiveLevel,
+				}
+				if outcome.FallbackReason != "" {
+					meta["fallback_reason"] = outcome.FallbackReason
+				}
 				notification := map[string]any{
 					"jsonrpc": "2.0",
 					"method":  "notifications/claude/channel",
 					"params": map[string]any{
 						"content": messageText(message),
-						"meta": map[string]string{
-							"message_id": message.MessageID,
-							"from":       message.From,
-							"thread_id":  message.ThreadID,
-							"task_id":    message.TaskID,
-							"cursor":     strconv.FormatInt(message.Cursor, 10),
-						},
+						"meta":    meta,
 					},
 				}
 				if err := enc.Encode(notification); err != nil {
 					b.audit("claude_channel_write", map[string]any{"address": b.channelAddress}, 0, err)
 					return
 				}
-				if err := ackInbox(ctx, b.client, b.projectID, b.channelAddress, b.channelAgent, message.Cursor); err != nil {
+				// A successful JSON-RPC write is the handoff: Claude Code queues
+				// the event as a new turn and never acknowledges notifications.
+				b.audit("claude_channel_handoff", map[string]any{
+					"address":         b.channelAddress,
+					"message_id":      message.MessageID,
+					"adapter":         outcome.Adapter,
+					"requested_level": outcome.RequestedLevel,
+					"effective_level": outcome.EffectiveLevel,
+					"fallback_reason": outcome.FallbackReason,
+				}, 1, nil)
+				// Leased bus work completes through delivery-complete, which
+				// records the handoff and advances the cursor atomically; a
+				// pre-bus row keeps the plain cursor acknowledgement.
+				if message.DeliveryWork != nil {
+					err = completeInboxDelivery(ctx, b.client, b.projectID, b.channelAddress, b.channelAgent, message, deliveryOutcome{EffectiveLevel: outcome.EffectiveLevel, FallbackReason: outcome.FallbackReason})
+				} else {
+					err = ackInbox(ctx, b.client, b.projectID, b.channelAddress, b.channelAgent, message.Cursor)
+				}
+				if err != nil {
 					b.audit("claude_channel_ack", map[string]any{"address": b.channelAddress}, 0, err)
 					break
 				}
@@ -1322,6 +1369,21 @@ func (b *contextBroker) runClaudeChannel(ctx context.Context, enc *lockedJSONEnc
 		case <-timer.C:
 		}
 	}
+}
+
+// auditChannelSkip records once per state change that the channel left a
+// delivery row to another worker or to an operator requeue, so a long-lived
+// channel does not repeat the same audit line on every poll.
+func (b *contextBroker) auditChannelSkip(messageID, adapter, state string) {
+	key := adapter + "/" + state
+	if b.channelSkipped == nil {
+		b.channelSkipped = map[string]string{}
+	}
+	if b.channelSkipped[messageID] == key {
+		return
+	}
+	b.channelSkipped[messageID] = key
+	b.audit("claude_channel_skip", map[string]any{"address": b.channelAddress, "message_id": messageID, "adapter": adapter, "state": state}, 0, nil)
 }
 
 func (b *contextBroker) callMCPTool(name string, args json.RawMessage) (any, error) {
