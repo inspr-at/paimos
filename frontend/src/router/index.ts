@@ -171,6 +171,14 @@ export function buildRoutes(includeDev: boolean): RouteRecordRaw[] {
       component: () => import("@/views/LieferberichtView.vue"),
     },
     {
+      path: "/hours/week",
+      component: () => import("@/views/HoursWeekView.vue"),
+    },
+    {
+      path: "/hours/project",
+      component: () => import("@/views/HoursProjectView.vue"),
+    },
+    {
       // PAI-703: Voice Intake workbench — first-class route since the epic
       // shipped end-to-end (promoted from the DEV gate in the PAI-709 slice).
       // PAI-735: the workbench toolbar lives in the app header; the search

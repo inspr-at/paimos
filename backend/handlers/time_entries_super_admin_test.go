@@ -74,17 +74,14 @@ func TestRegression_SuperAdmin_001_NonSuperAdminCannotCrossUser(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("INV-SA-001 violated: member with user_id=admin returned %d, want 403 — body: %s", resp.StatusCode, body)
 	}
-	if !strings.Contains(string(body), "super-admin") {
-		t.Errorf("INV-SA-001 violated: 403 body should mention super-admin, got: %s", body)
+	if !strings.Contains(string(body), "admins") {
+		t.Errorf("INV-SA-001 violated: 403 body should mention admins, got: %s", body)
 	}
 }
 
-// TestRegression_SuperAdmin_002_AdminAloneCannotCrossUser asserts
-// that the existing role check (`Role == 'admin'`) does NOT subsume
-// super-admin — an admin who isn't promoted is still not allowed to
-// create time entries on other users' behalf. Today's admins picked
-// up no new powers; super-admin is the strictly narrower gate.
-func TestRegression_SuperAdmin_002_AdminAloneCannotCrossUser(t *testing.T) {
+// TestRegression_SuperAdmin_002_AdminCanCrossUser covers PAI-830's weekly
+// filing rule: both admin roles can create a missing day for another user.
+func TestRegression_SuperAdmin_002_AdminCanCrossUser(t *testing.T) {
 	ts := newTestServer(t)
 	issueID := seedTestProjectAndIssue(t, ts)
 	memberID := userIDByUsername(t, "member")
@@ -93,9 +90,18 @@ func TestRegression_SuperAdmin_002_AdminAloneCannotCrossUser(t *testing.T) {
 		"started_at": "2026-05-01T09:00:00Z",
 		"user_id":    memberID,
 	})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("INV-SA-002 violated: admin (not super-admin) cross-user create returned %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("INV-SA-002 violated: admin cross-user create returned %d, want 201 — body: %s", resp.StatusCode, body)
+	}
+	entryID := responseID(t, resp)
+	var owner int64
+	if err := db.DB.QueryRow(`SELECT user_id FROM time_entries WHERE id=?`, entryID).Scan(&owner); err != nil {
+		t.Fatalf("lookup admin-created entry: %v", err)
+	}
+	if owner != memberID {
+		t.Errorf("admin-created entry owner = %d, want member %d", owner, memberID)
 	}
 }
 

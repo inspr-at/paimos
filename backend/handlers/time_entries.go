@@ -82,11 +82,10 @@ func GetTimeEntry(w http.ResponseWriter, r *http.Request) {
 // CreateTimeEntry starts a new time entry (or records a manual one).
 // POST /api/issues/:id/time-entries
 //
-// PAI-335: when the caller is a super-admin, `user_id` may be set to
-// any other user — useful for retrospectively adding a forgotten
-// timer for a teammate, or correcting a wrong-user assignment.
-// Non-super-admins sending a foreign `user_id` get 403; absent /
-// matching `user_id` keeps the existing self-only behaviour.
+// PAI-335 / PAI-830: when the caller is an admin or has the explicit
+// cross-user capability, `user_id` may be set to another user. This is
+// useful for retrospectively adding a forgotten timer for a teammate.
+// Other callers remain self-only.
 func CreateTimeEntry(w http.ResponseWriter, r *http.Request) {
 	ticketID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
@@ -119,15 +118,14 @@ func CreateTimeEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// PAI-336: decide whose entry this is. Default = caller. A caller
-	// with time_entries.write_any_user can pass any user_id; anyone else
-	// passing a foreign id is denied even if the field's value would have
-	// been a no-op.
+	// Decide whose entry this is. Default = caller. Admins and callers with
+	// time_entries.write_any_user can pass any user_id; anyone else passing
+	// a foreign id is denied even if the field's value would have been a no-op.
 	targetUserID := caller.ID
 	crossUser := false
 	if body.UserID != nil && *body.UserID != caller.ID {
-		if !auth.HasCapability(r.Context(), caller, auth.CapabilityTimeEntriesWriteAny) {
-			jsonError(w, "only super-admin can create time entries for other users", http.StatusForbidden)
+		if !auth.IsAdmin(caller) && !auth.HasCapability(r.Context(), caller, auth.CapabilityTimeEntriesWriteAny) {
+			jsonError(w, "only admins can create time entries for other users", http.StatusForbidden)
 			return
 		}
 		targetUserID = *body.UserID
