@@ -1,7 +1,7 @@
 # PAIMOS Data Model
 
-**Status**: Current with known maintenance follow-up (active API schema `2.0.0`)
-**Last verified**: 2026-06-24 against `backend/db/db.go`, `backend/handlers/schema.go`, and live ppm `/api/schema`
+**Status**: Current with known maintenance follow-up (active API schema `2.3.0`)
+**Last verified**: 2026-08-27 against `backend/db/db.go`, `backend/handlers/schema.go`, and live ppm `/api/schema` (`5.18.0`, schema `2.3.0`)
 **Schema source of truth**: `backend/db/db.go` — migrations run in order on startup.
 **Legacy**: `docs/archive/DATA_MODEL.md` captures the v0.3.5 pre-release baseline and is kept for archival reference only.
 
@@ -477,7 +477,7 @@ Both: UNIQUE on `(project_id, name)`; ordering index on `(project_id, sort_order
 inventory and is reused as-is; the canonical agent-artifact endpoint
 inlines all three.
 
-### Durable agent message ledger and bus (M151–M154 — PAI-817, PAI-815, PAI-816, PAI-826)
+### Durable agent message ledger and bus (M151–M155 — PAI-817, PAI-815, PAI-816, PAI-826, PAI-827)
 
 `agent_messages` stores the M151 security fields (`from_agent_id`,
 `to_agent_id`, optional `issue_id`, parent, hop, body, held/delivered state)
@@ -622,6 +622,11 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M148 | external-stage registrations, handoffs, credentials, owner/dependency streams, projections, setup/audit events | Frozen v1 Pharos owner and Janus dependency reporting with exact authority, replay, and secret boundaries (PAI-810). |
 | M149 | `external_stage_owner_activation_events` | Principal-attributed, append-only proof for the additive internal Pharos owner-activation route; released M148 remains immutable (PAI-810). |
 | M150 | `agent_runs.implementation_result_digest` | Optional immutable source-free SHA-256 binding for the exact bounded covered repository source surface observed stable around successful tests when no commit exists; ignored payloads and the external execution environment are outside the binding (PAI-810). |
+| M151 | `agent_messages`, `agent_message_allowlist`, `agent_message_rate_limits` | Untrusted-message security contract: per-receiver sender allowlists, hop/rate/size bounds, and held action-request rows that are never delivered as executable (PAI-817). |
+| M152 | `agent_messages.message_id/context_id/task_id/role/parts_json/…`, unique message-ID and addressee/thread indexes | Canonical project-scoped A2A envelope with name-based addresses; M151 rows are backfilled to `legacy-<id>` identifiers (PAI-815). |
+| M153 | `agent_messages.read_at`, `agent_message_cursors` | Durable, monotonic per-project/address receiver cursors bound to attributed acknowledgements (PAI-816). |
+| M154 | `agent_messages.delivery_level/delivery_fallback/delivery_*_target_id`, `agent_message_targets`, `agent_message_deliveries`, `agent_message_idempotency` | Message-level `simple`/`steer` intent, encrypted versioned receiver targets (`codex`, `grok_bot_routine`), one linked delivery/outbox row per eligible message, and atomic send idempotency (PAI-826). |
+| M155 | rebuilt `agent_message_targets` | Adds the `claude_resume` and `claude_channel` adapters with `claude_session` targets while carrying every existing version and ciphertext over; Claude targets are fixed to `maximum_level='simple'` (PAI-827). |
 
 `agent_runs.status=completed` means implementation finished without a configured
 test command; it never implies tests passed. `tests_passed` and `tests_failed`

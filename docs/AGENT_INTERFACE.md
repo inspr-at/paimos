@@ -255,10 +255,11 @@ If you upgrade from an older `paimos` that stored `api_key:` inline in `config.y
 
 ```sh
 paimos doctor
-#   ✓ config   ok — ppm (https://pm.barta.cm) [url=config:ppm, credential=keyring:paimos-cli/ppm]
-#   ✓ health   ok
-#   ✓ auth     ok — user=mba
-#   ✓ schema   ok — version=2.0.0
+#   ✓ config       ok — ppm (https://pm.barta.cm) [url=config:ppm, credential=keyring:paimos-cli/ppm]
+#   ✓ health       ok
+#   ✓ auth         ok — user=mba
+#   ✓ schema       ok — version=2.3.0
+#   ✓ attribution  ok — agent=(unset) [unset], session=01a04231… [auto]
 ```
 
 CI-safe; exit 0 all green, 1 warnings only, 2 any failure.

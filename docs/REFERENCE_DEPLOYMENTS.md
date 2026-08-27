@@ -44,7 +44,7 @@ A deployment that meets 4-of-5 (e.g., never upgraded yet) is a *candidate* refer
 
 ## 2 · Reference deployment register
 
-The register contains two validated deployment histories. As of 2026-06-30, ppm is the only active deploy target; the second-operator instance is historical and inactive since the operator exit in June 2026. The current ppm proof is the live `5.17.1` deployment verified on 2026-08-25 after the protected release, supply-chain verification, composeStack pin-bump, authenticated operator smoke, and a live two-way Claude Code ↔ Codex relay check.
+The register contains two validated deployment histories. As of 2026-06-30, ppm is the only active deploy target; the second-operator instance is historical and inactive since the operator exit in June 2026. The current ppm proof is the live `5.18.0` deployment verified on 2026-08-27 (`/api/health` plus an authenticated `paimos --instance ppm doctor` including schema `2.3.0`); the preceding `5.17.1` verification on 2026-08-25 covered the protected release, supply-chain verification, composeStack pin-bump, authenticated operator smoke, and a live two-way Claude Code ↔ Codex relay check.
 
 ### 2.1 · ppm · `pm.barta.cm`
 
@@ -58,7 +58,7 @@ The register contains two validated deployment histories. As of 2026-06-30, ppm 
 | AI assist | OpenRouter (configured), `anthropic/claude-sonnet-4.5` model |
 | OIDC | configured against Zitadel (`auth.inspr.at`) via generic OIDC + PKCE; local password + TOTP remain available |
 | Active since | v1.x (continuously upgraded; no fresh-install in current era) |
-| Last verified runtime | 2026-08-25: `5.17.1` (`/api/health`, `paimos --instance ppm doctor` incl. auth + schema `2.3.0`, and live Claude Code ↔ Codex message IDs `01a038cf-d364-716b-8d11-021fb06bca52` / `01a038d0-33f1-724b-a78c-20e5b4beed3a`) |
+| Last verified runtime | 2026-08-27: `5.18.0` (`/api/health`, `paimos --instance ppm doctor` incl. auth + schema `2.3.0`). Previous: 2026-08-25 `5.17.1` with live Claude Code ↔ Codex message IDs `01a038cf-d364-716b-8d11-021fb06bca52` / `01a038d0-33f1-724b-a78c-20e5b4beed3a` |
 | Backup pattern | per-deploy volume tar + manifest under `/home/mba/paimos-backups/ppm/<ts>/` (composeStack path, see [`DEPLOY.md`](DEPLOY.md)); backups on the same host (acknowledged limitation tracked under [§3 Findings](#3--structured-findings) F-08) |
 | Audience | the maintainer + a small group; current production canary |
 
