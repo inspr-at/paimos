@@ -50,3 +50,20 @@ func TestFrameAgentEnvelopePutsTrustedBoundaryBeforeSpoofedBody(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterTargetRequestAcceptsWriteOnlySenderSecret(t *testing.T) {
+	var req registerTargetRequest
+	dec := json.NewDecoder(strings.NewReader(`{"address":"grok_bot:amy","adapter":"grok_bot_routine","target_kind":"https_webhook",` +
+		`"target_ref":"https://routine.example/automations/webhook/fixture","target_secret":"crsr_fixture_sender_key_0001","maximum_level":"simple"}`))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil || req.TargetSecret != "crsr_fixture_sender_key_0001" {
+		t.Fatalf("req=%#v err=%v", req, err)
+	}
+	view, err := json.Marshal(agentmessage.Target{ID: "t-amy", HasSecret: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(view), "target_secret") || strings.Contains(string(view), "target_ref") || !strings.Contains(string(view), `"has_secret":true`) {
+		t.Fatalf("public target view must expose only the has_secret flag: %s", view)
+	}
+}

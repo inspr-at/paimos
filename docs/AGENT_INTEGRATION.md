@@ -278,11 +278,13 @@ model use.
 Grok Bot is a different Cursor-hosted product with no inbound CLI and no
 mid-turn steer primitive. Since 5.18.0 an operator can register its
 vendor-generated routine webhook as an encrypted `grok_bot_routine` /
-`https_webhook` receiver target; the server then dispatches a security-framed
-wake payload (the untrusted-data frame, never the raw stored body) over HTTPS
-with a stable `delivery_id`, bounded retry/dead-letter state, and SSRF
-controls, and records a `steer` request as `effective_level=simple` with
-`fallback_reason=unsupported`. PAIMOS never runs `grok send`, `grok queue`, or
+`https_webhook` receiver target, and since PAI-828 the routine's sender key
+travels with it (`--target-key-file`, never an argument) so every wake is
+authenticated as `Authorization: Bearer <sender key>`; the server then
+dispatches a security-framed wake payload (the untrusted-data frame, never the
+raw stored body) over HTTPS with a stable `delivery_id`, bounded
+retry/dead-letter state, and SSRF controls, and records a `steer` request as
+`effective_level=simple` with `fallback_reason=unsupported`. PAIMOS never runs `grok send`, `grok queue`, or
 `grok steer` and does not automate the Grok Bot UI. See
 [`AGENT_INTERFACE.md` § Grok Bot routine wake](AGENT_INTERFACE.md#grok-bot-routine-wake)
 and [`CONFIGURATION.md` § Instant agent bus](CONFIGURATION.md#instant-agent-bus).

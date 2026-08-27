@@ -92,21 +92,35 @@ No adapter stores or prints vendor credentials.
 
 ### Grok Bot routine wake
 
-Grok Bot has no inbound CLI or mid-turn steer primitive. Register Amy's
-vendor-generated generic routine webhook as an encrypted receiver target:
+Grok Bot has no inbound CLI or mid-turn steer primitive. A routine created
+with the "When a webhook fires" trigger shows a POST URL and a sender key on
+its trigger card (Grok Bot desktop app). Keep each in its own one-line file
+that you own with mode `0600` — the CLI opens both without following symlinks
+and refuses group- or world-readable files, symlinks, hard links, directories,
+and files owned by another user before reading a byte — and register them as
+one encrypted receiver target:
 
 ```bash
-printf '%s' "$AMY_GROK_BOT_ROUTINE_WEBHOOK" | \
-  paimos message target set --project PHAROS --address grok_bot:amy \
+paimos message target set --project PHAROS --address grok_bot:amy \
   --adapter grok_bot_routine --kind https_webhook \
-  --target-ref-file - --maximum-level simple
+  --target-ref-file /path/to/routine-url.txt \
+  --target-key-file /path/to/routine-sender-key.txt \
+  --maximum-level simple
 paimos tell grok_bot:amy --project PHAROS --level steer --message "Observation"
 ```
 
-The exact secret configuration field is the target registration request's
-`target_ref` (CLI: `--target-ref-file`, with `-` for stdin); the server encrypts it in
-`agent_message_targets.target_ref_cipher` and never returns it. The server must
-also set `PAIMOS_AGENT_BUS_INSTANCE=ppm` and include the routine hostname in
+The exact secret configuration fields are the target registration request's
+`target_ref` (the URL; CLI `--target-ref-file`) and `target_secret` (the raw
+sender key; CLI `--target-key-file`). Both flags accept `-` for stdin, but
+only one per invocation, and neither value is ever accepted as an argument.
+The server encrypts them in `agent_message_targets.target_ref_cipher` and
+`target_secret_cipher` under separate secretvault domains, never returns
+either, and reports only `has_secret`. Every wake POST carries
+`Authorization: Bearer <sender key>` — the header the trigger card issues —
+next to `Idempotency-Key`. A `grok_bot_routine` target without a sender key
+is refused, and a version registered before the key existed blocks with
+`target_secret_missing` instead of calling the endpoint. The server must also
+set `PAIMOS_AGENT_BUS_INSTANCE=ppm` and include the routine hostname in
 `PAIMOS_AGENT_BUS_WEBHOOK_HOSTS`. A steer request to this adapter is recorded
 as `effective_level=simple` with `fallback_reason=unsupported`; PAIMOS does not
 run `grok send`, `grok queue`, or `grok steer`.

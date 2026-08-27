@@ -279,8 +279,8 @@ GET  /projects/:id/messages/listen     ?to=<address>&after=<cursor>&limit=<n>
 POST /projects/:id/messages/ack        { to, cursor }
 POST /projects/:id/messages/delivery-complete { to, cursor, delivery_id, effective_level, fallback_reason }
 POST /projects/:id/message-allowlist   { receiver, sender }
-POST /projects/:id/message-targets     { address, adapter, target_kind, target_ref, maximum_level?, role? } (admin)
-GET  /projects/:id/message-targets     ?address=<receiver> (admin; never returns target_ref)
+POST /projects/:id/message-targets     { address, adapter, target_kind, target_ref, target_secret?, maximum_level?, role? } (admin; target_secret is the write-only routine sender key: required by grok_bot_routine, refused by adapters without a secret header)
+GET  /projects/:id/message-targets     ?address=<receiver> (admin; never returns target_ref or target_secret; has_secret only)
 POST /projects/:id/message-targets/requeue { address } (admin; target_missing only)
 GET  /projects/:id/message-deliveries  redacted outbox state (admin)
 POST /projects/:id/message-deliveries/:deliveryId/requeue (admin)

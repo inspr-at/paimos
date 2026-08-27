@@ -477,7 +477,7 @@ Both: UNIQUE on `(project_id, name)`; ordering index on `(project_id, sort_order
 inventory and is reused as-is; the canonical agent-artifact endpoint
 inlines all three.
 
-### Durable agent message ledger and bus (M151–M156 — PAI-817, PAI-815, PAI-816, PAI-826, PAI-827, PAI-829)
+### Durable agent message ledger and bus (M151–M157 — PAI-817, PAI-815, PAI-816, PAI-826, PAI-827, PAI-828, PAI-829)
 
 `agent_messages` stores the M151 security fields (`from_agent_id`,
 `to_agent_id`, optional `issue_id`, parent, hop, body, held/delivered state)
@@ -524,7 +524,13 @@ delivery reference, to add `claude_resume` and `claude_channel` with
 cloud id). M156 rebuilds the table once more so `adapter` and `target_kind`
 are lowercase plugin keys rather than vendor allowlists. Adapter/kind pairing
 and maximum-level capability remain fail-closed in the Go harness registry;
-unknown adapters are unsupported.
+unknown adapters are unsupported. M157 (PAI-828) adds the nullable
+`target_secret_cipher` column: the receiver-owned sender secret a server-side
+webhook vendor requires in one request header (Grok Bot routines:
+`Authorization: Bearer <sender key>`), encrypted under the separate
+`agent-message-target-secrets` secretvault domain. Adapters without that
+capability keep `NULL`, read surfaces expose only `has_secret`, listen never
+discloses it, and `paimos secrets rotate` re-encrypts both columns together.
 
 `agent_message_deliveries` is one unique intent/outbox row per eligible
 message, with stable `delivery_id`, snapshotted targets, requested/effective
@@ -630,6 +636,7 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M154 | `agent_messages.delivery_level/delivery_fallback/delivery_*_target_id`, `agent_message_targets`, `agent_message_deliveries`, `agent_message_idempotency` | Message-level `simple`/`steer` intent, encrypted versioned receiver targets (`codex`, `grok_bot_routine`), one linked delivery/outbox row per eligible message, and atomic send idempotency (PAI-826). |
 | M155 | rebuilt `agent_message_targets` | Adds the `claude_resume` and `claude_channel` adapters with `claude_session` targets while carrying every existing version and ciphertext over; Claude targets are fixed to `maximum_level='simple'` (PAI-827). |
 | M156 | rebuilt `agent_message_targets` | Replaces schema-level vendor allowlists and pairings with bounded lowercase harness plugin keys while preserving all target rows, ciphertext, enabled state, indexes, and foreign-key references; plugin binding and capability validation remain in Go (PAI-829). |
+| M157 | `agent_message_targets.target_secret_cipher` | Nullable, domain-separated ciphertext for the receiver-owned sender secret a server-side webhook adapter sends as `Authorization: Bearer` (Grok Bot routine sender key); existing rows keep `NULL`, and a version without it is never dispatched (PAI-828). |
 
 `agent_runs.status=completed` means implementation finished without a configured
 test command; it never implies tests passed. `tests_passed` and `tests_failed`

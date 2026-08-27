@@ -170,7 +170,7 @@ Conceptual target fields:
 | `maximum_level` | Receiver policy: `simple` or `steer`; default `simple` |
 | `role` | `primary` or `simple_fallback`; unique while enabled per receiver |
 | `enabled`, `version` | Explicit activation and immutable version |
-| `secret_ref` | Optional reference to encrypted auth material; never a message field |
+| `target_secret` | Optional receiver-owned sender secret the vendor requires in one wake request header (`grok_bot_routine`: the routine sender key sent as `Authorization: Bearer`); encrypted separately from `target_ref`, write-only, never a message field (PAI-828) |
 
 Only the operator control plane may create, change, enable, or requeue a
 target. A sender can request a level but cannot supply a vendor thread,
@@ -481,7 +481,10 @@ The payload contains the server-added security frame and only the metadata
 needed to present and deduplicate the event. It omits arbitrary message
 metadata, vendor thread/session references, webhook URLs, API keys, auth
 tokens, cookies, and all other secrets. The existing body secret rejection
-still applies before a message can enter this path.
+still applies before a message can enter this path. The request carries the
+stable `Idempotency-Key` and, for `grok_bot_routine`, the routine sender key
+as `Authorization: Bearer <sender key>` (section 7.3); the key is never part
+of the payload.
 
 ### 7.3 Authentication and endpoint safety
 
@@ -497,12 +500,29 @@ primitive:
   destinations unless an explicit deployment policy allows them.
 - Disable redirects, or revalidate every redirect hostname, resolved address,
   and connected IP against the same policy before following it.
-- Do not assume Grok Bot supports a custom signing header.
+- Authenticate every wake exactly the way the vendor's own trigger card does.
+  A Grok Bot routine created with the "When a webhook fires" trigger issues a
+  POST URL, a **sender key**, and a ready-made `Authorization: Bearer <sender
+  key>` header (verified 2026-08-27 against the vendor's trigger card and its
+  public support guidance:
+  [webhook URL and sender key on the desktop trigger card](https://forum.cursor.com/t/webhook-url-missing-on-ios/169589),
+  [example `curl … -H "Authorization: Bearer crsr_…"`](https://forum.cursor.com/t/grok-bot-webhooks-are-failing-with-internal-server-error/169323)).
+  PAIMOS stores only the raw sender key (`target_secret`, CLI
+  `--target-key-file`), encrypted under its own secretvault domain, and adds
+  the header at dispatch. Do not invent any other signing scheme for Grok Bot.
+- Treat the sender key as a capability secret exactly like the URL: never
+  place it in a message, wake body, audit detail, error, log, list/status
+  response, listen disclosure, ticket, or process argument. The CLI accepts
+  both values only from stdin or from a regular, owner-only (`0600`),
+  single-linked file owned by the caller, opened without following symlinks.
 
-For a PAIMOS-controlled adapter endpoint, a follow-up may additionally sign
-the request in headers with an encrypted per-target secret. That is an
-internal HTTP adapter contract, not a Grok, Claude, or Codex primitive. The
-direct Grok routine path must not depend on it.
+A `grok_bot_routine` target without a sender key is refused at registration,
+and a version that predates the key column is never dispatched: the delivery
+blocks with `target_secret_missing` without contacting the endpoint until a
+new version is registered with the key. For a PAIMOS-controlled adapter
+endpoint, a follow-up may additionally sign the request with an encrypted
+per-target secret through the same `SecretHeaderPlugin` capability. That is
+an internal HTTP adapter contract, not a Grok, Claude, or Codex primitive.
 
 The receiver's outbound reply uses separately scoped PAIMOS credentials and
 trusted agent attribution. A webhook URL never grants PAIMOS write access.
@@ -665,6 +685,10 @@ This slice requires no vendor verb.
   tolerance, and dead-letter/requeue visibility.
 - Acceptance: a Codex tell wakes Amy's routine in seconds without a poll.
 - Explicitly label steer to Grok Bot as fallback-to-simple.
+- PAI-828: send the routine's sender key as `Authorization: Bearer` from the
+  encrypted per-target `target_secret` (CLI `--target-key-file`, file or
+  stdin only); refuse a `grok_bot_routine` target without it and never
+  dispatch a pre-key version.
 
 ### Slice 4 — message-level Codex delivery (shipped)
 
@@ -710,7 +734,9 @@ This slice requires no vendor verb.
 ## 12. Non-goals
 
 - No merge or automatic merge behavior.
-- No custom WebSocket or direct Codex control-socket implementation.
+- No direct Codex control-socket connection and no bespoke frame code: the
+  WebSocket framing the daemon requires is spoken only through the documented
+  `codex app-server proxy` byte pipe with the standard Go WebSocket client.
 - No invented vendor CLI, JSON frame, or Grok Bot chat API.
 - No Grok Bot mid-turn steer.
 - No Claude mid-turn steer in this contract.
