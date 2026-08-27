@@ -6,7 +6,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -146,7 +148,7 @@ func messageTargetCmd() *cobra.Command {
 }
 
 func messageTargetSetCmd() *cobra.Command {
-	var projectRef, address, adapter, kind, ref, refFile, maximumLevel, role string
+	var projectRef, address, adapter, kind, ref, refFile, keyFile, maximumLevel, role string
 	c := &cobra.Command{Use: "set", Short: "Register and enable a new encrypted target version", RunE: func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(projectRef) == "" || strings.TrimSpace(address) == "" {
 			return &usageError{msg: "--project and --address are required"}
@@ -159,12 +161,29 @@ func messageTargetSetCmd() *cobra.Command {
 		if strings.TrimSpace(ref) != "" && (strings.EqualFold(strings.TrimSpace(kind), harnessplugin.KindHTTPSWebhook) || webhookAdapter) {
 			return &usageError{msg: "webhook capability URLs must use --target-ref-file (use - for stdin) so they do not enter process arguments"}
 		}
+		if refFile == "-" && keyFile == "-" {
+			return &usageError{msg: "stdin can carry only one of --target-ref-file and --target-key-file"}
+		}
 		targetRef, set, err := readMultilineInput(ref, refFile, "target ref")
 		if err != nil {
 			return err
 		}
 		if !set || strings.TrimSpace(targetRef) == "" {
 			return &usageError{msg: "--target-ref or --target-ref-file is required"}
+		}
+		secret, hasSecret, err := readTargetKeyFile(keyFile)
+		if err != nil {
+			return err
+		}
+		// Fail closed before any network call: the sender key is required
+		// exactly where the adapter sends one and refused everywhere else.
+		if _, _, required, err := harnessplugin.SecretHeader(adapterName); err == nil {
+			if required && !hasSecret {
+				return &usageError{msg: adapterName + " targets require --target-key-file: the receiver-owned routine sender key as one line from a file, or - for stdin (never an argument)"}
+			}
+			if !required && hasSecret {
+				return &usageError{msg: adapterName + " targets send no sender key; drop --target-key-file"}
+			}
 		}
 		client, err := instanceClient()
 		if err != nil {
@@ -175,6 +194,9 @@ func messageTargetSetCmd() *cobra.Command {
 			return reportError(err)
 		}
 		payload := map[string]string{"address": address, "adapter": adapter, "target_kind": kind, "target_ref": strings.TrimSpace(targetRef), "maximum_level": maximumLevel, "role": role}
+		if hasSecret {
+			payload["target_secret"] = secret
+		}
 		raw, err := client.do("POST", fmt.Sprintf("/api/projects/%d/message-targets", projectID), payload)
 		if err != nil {
 			return reportError(err)
@@ -184,13 +206,18 @@ func messageTargetSetCmd() *cobra.Command {
 			return nil
 		}
 		var target struct {
-			ID      string `json:"id"`
-			Version int    `json:"version"`
+			ID        string `json:"id"`
+			Version   int    `json:"version"`
+			HasSecret bool   `json:"has_secret"`
 		}
 		if err := json.Unmarshal(raw, &target); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "✓ enabled target %s version %d for %s\n", target.ID, target.Version, address)
+		suffix := ""
+		if target.HasSecret {
+			suffix = " (sender key stored encrypted; never printed)"
+		}
+		fmt.Fprintf(stdout, "✓ enabled target %s version %d for %s%s\n", target.ID, target.Version, address, suffix)
 		return nil
 	}}
 	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
@@ -199,9 +226,37 @@ func messageTargetSetCmd() *cobra.Command {
 	c.Flags().StringVar(&kind, "kind", "", "plugin target kind (required)")
 	c.Flags().StringVar(&ref, "target-ref", "", "receiver-owned target reference (webhook capabilities must use --target-ref-file)")
 	c.Flags().StringVar(&refFile, "target-ref-file", "", "read target reference from file, or - for stdin")
+	c.Flags().StringVar(&keyFile, "target-key-file", "", "read the receiver-owned sender key from file, or - for stdin; required by grok_bot_routine (sent as Authorization: Bearer on every wake) and never accepted as an argument")
 	c.Flags().StringVar(&maximumLevel, "maximum-level", "simple", "receiver policy: simple or steer")
 	c.Flags().StringVar(&role, "role", "primary", "primary or simple_fallback")
 	return c
+}
+
+// readTargetKeyFile reads one raw sender key from a file or stdin. There is
+// deliberately no --target-key flag: a credential must never enter process
+// arguments, shell history, or ps output, and it is never echoed back.
+func readTargetKeyFile(path string) (string, bool, error) {
+	if path == "" {
+		return "", false, nil
+	}
+	var raw []byte
+	var err error
+	if path == "-" {
+		raw, err = io.ReadAll(os.Stdin)
+	} else {
+		raw, err = os.ReadFile(path) // #nosec G304 -- path comes from the CLI user's own --target-key-file flag.
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read --target-key-file %s: %w", path, err)
+	}
+	secret := strings.TrimSpace(string(raw))
+	if secret == "" {
+		return "", false, &usageError{msg: "--target-key-file is empty"}
+	}
+	if strings.ContainsAny(secret, "\r\n") {
+		return "", false, &usageError{msg: "--target-key-file must contain exactly one line: the raw sender key"}
+	}
+	return secret, true, nil
 }
 
 func messageTargetListCmd() *cobra.Command {

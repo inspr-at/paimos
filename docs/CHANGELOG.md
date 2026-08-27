@@ -7,6 +7,28 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added — Amy inbound webhook sender key (PAI-828)
+
+- `grok_bot_routine` targets now carry the routine's receiver-owned sender
+  key. `paimos message target set … --target-key-file <file|->` (a file or
+  stdin, never an argument) sends it as the write-only `target_secret`
+  field; the server validates it as one raw key, encrypts it under the
+  separate `agent-message-target-secrets` secretvault domain in the new
+  nullable `agent_message_targets.target_secret_cipher` column (M157), and
+  every wake POST carries `Authorization: Bearer <sender key>` — the header
+  the Grok Bot "When a webhook fires" trigger card issues — next to the
+  stable `Idempotency-Key`.
+- The harness plugin socket gained the optional `SecretHeaderPlugin`
+  capability. A plugin that implements it requires the secret at
+  registration, every other plugin refuses one, a hostile validator cannot
+  echo it, and a webhook version registered without a key is never
+  dispatched: the delivery blocks with `last_error_code=target_secret_missing`
+  without contacting the endpoint.
+- Registration and `message target list` responses expose only `has_secret`.
+  The key never appears in the ledger, delivery status, audit, wake payload,
+  listen disclosure, CLI output, or error text, and `paimos secrets rotate`
+  re-encrypts the new column atomically with the target references.
+
 ### Added — Claude simple delivery (PAI-827)
 
 - `paimos listen --deliver claude` now performs idle Claude delivery with the

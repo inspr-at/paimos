@@ -11669,6 +11669,18 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 ON agent_message_targets(instance,project_id,address,enabled)`,
 			`PRAGMA foreign_keys=ON`,
 		}},
+
+		// M157 / PAI-828: a server-side https_webhook target may carry the
+		// receiver-owned sender secret its vendor requires in one request header
+		// (Grok Bot routine webhooks authenticate with
+		// `Authorization: Bearer <sender key>`). The secret is domain-separated
+		// secretvault ciphertext in its own nullable column: adapters without
+		// that capability keep NULL, list/status views expose only a boolean,
+		// and listen never discloses it. Existing rows are untouched.
+		{157, []string{
+			`ALTER TABLE agent_message_targets ADD COLUMN target_secret_cipher BLOB
+			 CHECK(target_secret_cipher IS NULL OR (typeof(target_secret_cipher)='blob' AND length(target_secret_cipher)>28))`,
+		}},
 	}
 
 	for _, m := range migrations {

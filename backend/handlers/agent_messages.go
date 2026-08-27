@@ -64,11 +64,15 @@ type completeDeliveryRequest struct {
 	FallbackReason string `json:"fallback_reason"`
 }
 
+// registerTargetRequest is the closed admin registration contract. target_ref
+// and target_secret are write-only: the service encrypts both and no read API
+// ever returns them.
 type registerTargetRequest struct {
 	Address      string `json:"address"`
 	Adapter      string `json:"adapter"`
 	TargetKind   string `json:"target_kind"`
 	TargetRef    string `json:"target_ref"`
+	TargetSecret string `json:"target_secret"`
 	MaximumLevel string `json:"maximum_level"`
 	Role         string `json:"role"`
 }
@@ -169,7 +173,7 @@ func registerAgentMessageTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	target, err := agentmessage.NewService(db.DB).RegisterTarget(r.Context(), agentmessage.RegisterTargetInput{
 		ProjectID: projectID, Address: req.Address, Adapter: req.Adapter, TargetKind: req.TargetKind,
-		TargetRef: req.TargetRef, MaximumLevel: req.MaximumLevel, Role: req.Role,
+		TargetRef: req.TargetRef, TargetSecret: req.TargetSecret, MaximumLevel: req.MaximumLevel, Role: req.Role,
 	})
 	if err != nil {
 		writeAgentMessageError(w, r, err)

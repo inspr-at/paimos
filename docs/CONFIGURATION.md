@@ -104,13 +104,19 @@ PAIMOS_AGENT_BUS_WEBHOOK_HOSTS=<Amy routine hostname>
 PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS=false
 ```
 
-The webhook capability itself is not an environment variable. Register it via
-the closed admin API field `target_ref`, or equivalently
-`printf '%s' "$AMY_GROK_BOT_ROUTINE_WEBHOOK" | paimos message target set ... --target-ref-file -`.
-PAIMOS encrypts that value under the `agent-message-targets` secretvault domain
-using `PAIMOS_SECRET_KEY`; list/status responses never return it. Dispatch uses
+The webhook capability and the routine sender key are not environment
+variables. Register them via the closed admin API fields `target_ref` (the
+POST URL) and `target_secret` (the raw sender key), or equivalently
+`paimos message target set ... --target-ref-file <url-file> --target-key-file <key-file>`
+(each flag also accepts `-` for stdin, but only one of them per invocation;
+neither value is accepted as an argument). Both come from the routine's "When
+a webhook fires" trigger card in the Grok Bot desktop app. PAIMOS encrypts the
+URL under the `agent-message-targets` secretvault domain and the key under the
+separate `agent-message-target-secrets` domain using `PAIMOS_SECRET_KEY`;
+list/status responses return neither, only `has_secret`. Dispatch uses
 bounded DNS/connect/response timeouts, revalidates resolved addresses, disables
-proxies and redirects, and sends the stable `delivery_id` as `Idempotency-Key`.
+proxies and redirects, sends the stable `delivery_id` as `Idempotency-Key`, and
+authenticates every wake with `Authorization: Bearer <sender key>`.
 
 ## Local agent runner flags
 

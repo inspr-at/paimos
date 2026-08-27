@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 const InterfaceVersion = 1
@@ -28,15 +29,21 @@ const (
 )
 
 const (
-	CodeUnsupported          = "agent_message_adapter_unsupported"
-	CodeTargetKindInvalid    = "agent_message_target_kind_invalid"
-	CodeTargetLevelInvalid   = "agent_message_target_level_invalid"
-	CodeTargetRefInvalid     = "agent_message_target_ref_invalid"
-	CodeWebhookInvalid       = "agent_message_target_webhook_invalid"
-	CodeWebhookHostDenied    = "agent_message_target_webhook_host_denied"
-	CodeWebhookDNSFailed     = "agent_message_target_webhook_dns_failed"
-	CodeWebhookAddressDenied = "agent_message_target_webhook_address_denied"
+	CodeUnsupported             = "agent_message_adapter_unsupported"
+	CodeTargetKindInvalid       = "agent_message_target_kind_invalid"
+	CodeTargetLevelInvalid      = "agent_message_target_level_invalid"
+	CodeTargetRefInvalid        = "agent_message_target_ref_invalid"
+	CodeTargetSecretRequired    = "agent_message_target_secret_required"
+	CodeTargetSecretInvalid     = "agent_message_target_secret_invalid"
+	CodeTargetSecretUnsupported = "agent_message_target_secret_unsupported"
+	CodeWebhookInvalid          = "agent_message_target_webhook_invalid"
+	CodeWebhookHostDenied       = "agent_message_target_webhook_host_denied"
+	CodeWebhookDNSFailed        = "agent_message_target_webhook_dns_failed"
+	CodeWebhookAddressDenied    = "agent_message_target_webhook_address_denied"
 )
+
+// MaxSecretBytes bounds any per-target sender secret before a plugin sees it.
+const MaxSecretBytes = 1024
 
 var ErrUnsupported = errors.New("UNSUPPORTED")
 
@@ -97,6 +104,23 @@ type Plugin interface {
 	Mode() string
 	ValidateTarget(context.Context, string) error
 	Deliver(context.Context, DeliverRequest) (DeliverResult, error)
+}
+
+// SecretHeaderPlugin is an optional capability for server-mode plugins whose
+// vendor authenticates every wake request with a receiver-owned sender secret
+// carried in exactly one HTTP header (Grok Bot routine webhooks:
+// `Authorization: Bearer <sender key>`). Core stores that secret as
+// domain-separated ciphertext, never lists, logs, or discloses it through
+// listen, and renders it only onto the outbound request. A plugin that
+// implements this interface requires the secret at registration: a target
+// whose wake cannot authenticate is not a usable target and fails closed.
+type SecretHeaderPlugin interface {
+	Plugin
+	// SecretHeader returns the request header name and the value prefix that
+	// precedes the raw secret, for example ("Authorization", "Bearer ").
+	SecretHeader() (name, prefix string)
+	// ValidateSecret checks the raw secret shape. It must never echo the value.
+	ValidateSecret(secret string) error
 }
 
 type registeredPlugin struct {
@@ -285,6 +309,71 @@ func (r *Registry) Deliver(ctx context.Context, name string, req DeliverRequest)
 	return result, nil
 }
 
+// secretCapability unwraps the registry envelope and reports whether the
+// underlying plugin sends a per-target sender secret.
+func secretCapability(plugin Plugin) (SecretHeaderPlugin, bool) {
+	if wrapped, ok := plugin.(registeredPlugin); ok {
+		plugin = wrapped.plugin
+	}
+	capable, ok := plugin.(SecretHeaderPlugin)
+	return capable, ok
+}
+
+// SecretHeader reports whether the named plugin requires a per-target sender
+// secret and, if so, which header and value prefix carry it on the wire.
+func (r *Registry) SecretHeader(name string) (headerName, prefix string, required bool, err error) {
+	plugin, err := r.Lookup(name)
+	if err != nil {
+		return "", "", false, err
+	}
+	capable, ok := secretCapability(plugin)
+	if !ok {
+		return "", "", false, nil
+	}
+	headerName, prefix = capable.SecretHeader()
+	if strings.TrimSpace(headerName) == "" {
+		return "", "", false, &Error{Code: CodeUnsupported, Message: "harness adapter declared an empty secret header"}
+	}
+	return headerName, prefix, true, nil
+}
+
+// ValidateSecret enforces the plugin's sender-secret policy without echoing
+// the value: a plugin with the capability requires a well-formed secret, and
+// every other plugin rejects one so a credential can never be stored for an
+// adapter that has no header to put it in.
+func (r *Registry) ValidateSecret(name, secret string) error {
+	plugin, err := r.Lookup(name)
+	if err != nil {
+		return err
+	}
+	capable, ok := secretCapability(plugin)
+	if !ok {
+		if secret != "" {
+			return &Error{Code: CodeTargetSecretUnsupported, Message: "this harness adapter sends no sender secret; omit target_secret"}
+		}
+		return nil
+	}
+	if secret == "" {
+		return &Error{Code: CodeTargetSecretRequired, Message: "this harness adapter requires the receiver-owned sender secret (CLI: --target-key-file)"}
+	}
+	if len([]byte(secret)) > MaxSecretBytes || !utf8.ValidString(secret) || strings.ContainsAny(secret, "\x00\r\n") {
+		return &Error{Code: CodeTargetSecretInvalid, Message: "target_secret must be one line of at most 1024 safe UTF-8 bytes"}
+	}
+	err = capable.ValidateSecret(secret)
+	if err == nil {
+		return nil
+	}
+	code := ErrorCode(err)
+	if code == "" {
+		code = CodeTargetSecretInvalid
+	}
+	message := err.Error()
+	if strings.Contains(message, secret) {
+		message = "target secret is invalid"
+	}
+	return &Error{Code: code, Message: message}
+}
+
 func sanitizeTargetError(err error, ref string) error {
 	if err == nil || ref == "" || !strings.Contains(err.Error(), ref) {
 		return err
@@ -335,6 +424,10 @@ func ValidateTarget(ctx context.Context, name, ref string) error {
 func ValidateBinding(ctx context.Context, name, kind, maximumLevel, ref string) error {
 	return defaultRegistry.ValidateBinding(ctx, name, kind, maximumLevel, ref)
 }
+func SecretHeader(name string) (headerName, prefix string, required bool, err error) {
+	return defaultRegistry.SecretHeader(name)
+}
+func ValidateSecret(name, secret string) error { return defaultRegistry.ValidateSecret(name, secret) }
 func Deliver(ctx context.Context, name string, req DeliverRequest) (DeliverResult, error) {
 	return defaultRegistry.Deliver(ctx, name, req)
 }

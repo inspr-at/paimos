@@ -67,7 +67,11 @@ delivery, or a legacy `--deliver-target` for pre-bus rows), adds no permission
 escalation, discards the vendor response, and has no steer or socket path. Grok Build is
 additionally off by default behind `--enable-grok-build-delivery`, accepts only
 a canonical session UUID, runs one fixed-argv turn with tools and network
-helpers disabled, and discards the vendor response. The durable cursor advances
+helpers disabled, and discards the vendor response. The `grok_bot_routine`
+wake authenticates with the receiver-owned routine sender key sent as
+`Authorization: Bearer`; the key is stored as ciphertext in its own secretvault
+domain, separate from the capability URL, and never appears in a payload,
+error, log, or read surface. The durable cursor advances
 only after the selected native handoff succeeds.
 
 ### Message Framing
