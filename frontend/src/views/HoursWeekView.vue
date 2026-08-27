@@ -112,7 +112,7 @@ function bookedTotal(userID: number | undefined): number {
 
 function canFileFor(userID: number | undefined): boolean {
   if (userID == null || reportUser(userID) == null) return false
-  return auth.isAdmin || userID === auth.user?.id
+  return auth.isSuperAdmin || userID === auth.user?.id
 }
 
 function resetDrafts() {

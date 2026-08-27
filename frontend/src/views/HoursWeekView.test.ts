@@ -23,7 +23,7 @@ vi.mock('@/composables/useConfirm', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ user: { id: 2, username: 'Markus' }, isAdmin: true }),
+  useAuthStore: () => ({ user: { id: 2, username: 'Markus' }, isSuperAdmin: true }),
 }))
 
 import HoursWeekView from '@/views/HoursWeekView.vue'

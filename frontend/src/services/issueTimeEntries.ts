@@ -7,8 +7,8 @@ export interface CreateTimeEntryPayload {
   started_at: string
   stopped_at: string
   material_lp?: number // PAI-581: material booked on this entry (LP / token cost)
-  // PAI-335 / PAI-830: admins can log time on behalf of another user.
-  // Backend rejects with 403 when this is set by a non-admin.
+  // PAI-335: super-admin only — log time on behalf of another user.
+  // Backend rejects with 403 when this is set by a non-super-admin.
   // Omit (or send caller's id) for the normal self-write case.
   user_id?: number
 }
