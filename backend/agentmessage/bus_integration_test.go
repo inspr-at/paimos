@@ -250,8 +250,20 @@ func TestBusTargetParticipatesInAtomicSecretRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var before []byte
+	t.Setenv("PAIMOS_AGENT_BUS_WEBHOOK_HOSTS", "127.0.0.1")
+	t.Setenv("PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS", "true")
+	webhook, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "grok_bot:amy", Adapter: "grok_bot_routine", TargetKind: "https_webhook",
+		TargetRef: "https://127.0.0.1/hook", TargetSecret: busTestSenderKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, secretBefore []byte
 	if err := paimosdb.DB.QueryRow(`SELECT target_ref_cipher FROM agent_message_targets WHERE id=?`, target.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if err := paimosdb.DB.QueryRow(`SELECT target_secret_cipher FROM agent_message_targets WHERE id=?`, webhook.ID).Scan(&secretBefore); err != nil {
 		t.Fatal(err)
 	}
 	newKey := make([]byte, 32)
@@ -262,10 +274,10 @@ func TestBusTargetParticipatesInAtomicSecretRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.AgentMessageTargetRows != 1 {
+	if report.AgentMessageTargetRows != 2 || report.AgentMessageTargetSecretRows != 1 {
 		t.Fatalf("report=%#v", report)
 	}
-	var after []byte
+	var after, secretAfter []byte
 	if err := paimosdb.DB.QueryRow(`SELECT target_ref_cipher FROM agent_message_targets WHERE id=?`, target.ID).Scan(&after); err != nil {
 		t.Fatal(err)
 	}
@@ -276,17 +288,31 @@ func TestBusTargetParticipatesInAtomicSecretRotation(t *testing.T) {
 	if err != nil || string(plain) != "rotation-thread" {
 		t.Fatalf("plain=%q err=%v", plain, err)
 	}
+	if err := paimosdb.DB.QueryRow(`SELECT target_secret_cipher FROM agent_message_targets WHERE id=?`, webhook.ID).Scan(&secretAfter); err != nil {
+		t.Fatal(err)
+	}
+	if string(secretBefore) == string(secretAfter) {
+		t.Fatal("rotation did not replace the sender secret ciphertext")
+	}
+	secretPlain, err := secretvault.DecryptWithKey(newKey, "agent-message-target-secrets", secretAfter)
+	if err != nil || string(secretPlain) != busTestSenderKey {
+		t.Fatalf("secret rotation err=%v matches=%v", err, string(secretPlain) == busTestSenderKey)
+	}
+	if _, err := secretvault.DecryptWithKey(newKey, "agent-message-targets", secretAfter); err == nil {
+		t.Fatal("sender secret ciphertext must not verify under the target-reference domain")
+	}
 }
 
 func TestBusWebhookMeasuredHandoffAndSteerFallback(t *testing.T) {
 	service, projectID := openBusTestDB(t)
 	allowBusSender(t, service, projectID, "grok_bot:amy")
 	var received webhookWake
-	var idempotency string
+	var idempotency, authorization string
 	var receivedAt time.Time
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAt = time.Now().UTC()
 		idempotency = r.Header.Get("Idempotency-Key")
+		authorization = r.Header.Get("Authorization")
 		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
 			t.Error(err)
 		}
@@ -295,11 +321,15 @@ func TestBusWebhookMeasuredHandoffAndSteerFallback(t *testing.T) {
 	defer server.Close()
 	t.Setenv("PAIMOS_AGENT_BUS_WEBHOOK_HOSTS", "127.0.0.1")
 	t.Setenv("PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS", "true")
-	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+	target, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
 		ProjectID: projectID, Address: "grok_bot:amy", Adapter: "grok_bot_routine", TargetKind: "https_webhook",
-		TargetRef: server.URL, MaximumLevel: "simple", Role: "primary",
-	}); err != nil {
+		TargetRef: server.URL, TargetSecret: busTestSenderKey, MaximumLevel: "simple", Role: "primary",
+	})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !target.HasSecret {
+		t.Fatalf("target=%#v, want has_secret", target)
 	}
 	tellStarted := time.Now().UTC()
 	message, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
@@ -320,6 +350,35 @@ func TestBusWebhookMeasuredHandoffAndSteerFallback(t *testing.T) {
 	if received.MessageID != message.MessageID || received.DeliveryID == "" || idempotency != received.DeliveryID ||
 		received.RequestedLevel != "steer" || received.EffectiveLevel != "simple" || received.FallbackReason != "unsupported" {
 		t.Fatalf("wake=%#v idempotency=%q message=%#v", received, idempotency, message)
+	}
+	if authorization != "Bearer "+busTestSenderKey {
+		t.Fatalf("Authorization header=%q, want the routine sender key as a bearer token", authorization)
+	}
+	if strings.Contains(received.Content, busTestSenderKey) || strings.Contains(received.Content, server.URL) {
+		t.Fatal("wake payload leaked the capability URL or sender key")
+	}
+	var secretCipher []byte
+	if err := paimosdb.DB.QueryRow(`SELECT target_secret_cipher FROM agent_message_targets WHERE id=?`, target.ID).Scan(&secretCipher); err != nil {
+		t.Fatal(err)
+	}
+	if len(secretCipher) <= 28 || strings.Contains(string(secretCipher), busTestSenderKey) {
+		t.Fatal("sender key was not stored as ciphertext")
+	}
+	listed, err := service.ListTargets(context.Background(), projectID, "grok_bot:amy")
+	if err != nil || len(listed) != 1 || !listed[0].HasSecret {
+		t.Fatalf("listed=%#v err=%v", listed, err)
+	}
+	listedJSON, _ := json.Marshal(listed)
+	if strings.Contains(string(listedJSON), busTestSenderKey) || strings.Contains(string(listedJSON), server.URL) || strings.Contains(string(listedJSON), "target_secret") {
+		t.Fatalf("target list exposed a secret: %s", listedJSON)
+	}
+	statuses, err := service.ListDeliveryStatus(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusJSON, _ := json.Marshal(statuses)
+	if strings.Contains(string(statusJSON), busTestSenderKey) || strings.Contains(string(statusJSON), server.URL) {
+		t.Fatalf("delivery status exposed a secret: %s", statusJSON)
 	}
 	if !strings.Contains(received.Content, "SECURITY NOTICE") || !strings.Contains(received.Content, "captured webhook payload") {
 		t.Fatalf("content was not security framed: %q", received.Content)
@@ -347,13 +406,119 @@ func TestBusWebhookMeasuredHandoffAndSteerFallback(t *testing.T) {
 func TestWebhookTargetRejectsHTTPAndPrivateAddressByDefault(t *testing.T) {
 	service, projectID := openBusTestDB(t)
 	t.Setenv("PAIMOS_AGENT_BUS_WEBHOOK_HOSTS", "127.0.0.1")
-	for _, targetRef := range []string{"http://127.0.0.1/hook", "https://127.0.0.1/hook"} {
+	for targetRef, wantCode := range map[string]string{
+		"http://127.0.0.1/hook":  "agent_message_target_webhook_invalid",
+		"https://127.0.0.1/hook": "agent_message_target_webhook_address_denied",
+	} {
 		_, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
-			ProjectID: projectID, Address: "grok_bot:amy", Adapter: "grok_bot_routine", TargetKind: "https_webhook", TargetRef: targetRef,
+			ProjectID: projectID, Address: "grok_bot:amy", Adapter: "grok_bot_routine", TargetKind: "https_webhook",
+			TargetRef: targetRef, TargetSecret: busTestSenderKey,
 		})
-		if err == nil {
-			t.Fatalf("unsafe webhook %q was accepted", targetRef)
+		if codedErrorCode(err) != wantCode {
+			t.Fatalf("unsafe webhook %q err=%v want %s", targetRef, err, wantCode)
 		}
+	}
+}
+
+const busTestSenderKey = "crsr_fixture_sender_key_0001"
+
+// TestBusWebhookTargetSenderSecretPolicy proves the sender key is required
+// exactly where the adapter sends one, refused everywhere else, validated
+// without being echoed, and never visible through any read surface.
+func TestBusWebhookTargetSenderSecretPolicy(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	t.Setenv("PAIMOS_AGENT_BUS_WEBHOOK_HOSTS", "127.0.0.1")
+	t.Setenv("PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS", "true")
+	for _, tc := range []struct {
+		name, adapter, kind, ref, secret, wantCode string
+	}{
+		{"webhook without sender key", "grok_bot_routine", "https_webhook", "https://127.0.0.1/hook", "", "agent_message_target_secret_required"},
+		{"webhook with prebuilt header value", "grok_bot_routine", "https_webhook", "https://127.0.0.1/hook", "Bearer " + busTestSenderKey, "agent_message_target_secret_invalid"},
+		{"webhook with whitespace in key", "grok_bot_routine", "https_webhook", "https://127.0.0.1/hook", "crsr_bad key", "agent_message_target_secret_invalid"},
+		{"codex with sender key", "codex", "codex_thread", "019d-codex-thread", busTestSenderKey, "agent_message_target_secret_unsupported"},
+		{"webhook with raw sender key", "grok_bot_routine", "https_webhook", "https://127.0.0.1/hook", busTestSenderKey, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+				ProjectID: projectID, Address: "grok_bot:amy", Adapter: tc.adapter, TargetKind: tc.kind, TargetRef: tc.ref, TargetSecret: tc.secret,
+			})
+			if codedErrorCode(err) != tc.wantCode {
+				t.Fatalf("code=%q err=%v want %q", codedErrorCode(err), err, tc.wantCode)
+			}
+			if err != nil && tc.secret != "" && strings.Contains(err.Error(), tc.secret) {
+				t.Fatalf("error echoed the sender key: %v", err)
+			}
+			if tc.wantCode == "" && (target == nil || !target.HasSecret) {
+				t.Fatalf("target=%#v", target)
+			}
+		})
+	}
+	var count int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_targets WHERE target_secret_cipher IS NOT NULL`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("stored secrets=%d err=%v", count, err)
+	}
+}
+
+// TestBusWebhookLegacyTargetWithoutSenderSecretFailsClosed proves a pre-M157
+// webhook target version is never dispatched without its sender key: the
+// endpoint is not contacted and the delivery blocks with a typed reason.
+func TestBusWebhookLegacyTargetWithoutSenderSecretFailsClosed(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	allowBusSender(t, service, projectID, "grok_bot:amy")
+	var calls int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+	t.Setenv("PAIMOS_AGENT_BUS_WEBHOOK_HOSTS", "127.0.0.1")
+	t.Setenv("PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS", "true")
+	target, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "grok_bot:amy", Adapter: "grok_bot_routine", TargetKind: "https_webhook",
+		TargetRef: server.URL, TargetSecret: busTestSenderKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE agent_message_targets SET target_secret_cipher=NULL WHERE id=?`, target.ID); err != nil {
+		t.Fatal(err)
+	}
+	message, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{ProjectID: projectID, Sender: "sender", To: "grok_bot:amy", Body: "legacy wake"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := NewWebhookDispatcher(paimosdb.DB)
+	dispatcher.client = server.Client()
+	worked, err := dispatcher.DispatchOne(context.Background())
+	if !worked || err == nil {
+		t.Fatalf("worked=%v err=%v", worked, err)
+	}
+	if calls != 0 {
+		t.Fatalf("endpoint was contacted %d times without a sender key", calls)
+	}
+	var state, code string
+	if err := paimosdb.DB.QueryRow(`SELECT d.state,d.last_error_code FROM agent_message_deliveries d JOIN agent_messages am ON am.id=d.message_row_id WHERE am.message_id=?`, message.MessageID).Scan(&state, &code); err != nil {
+		t.Fatal(err)
+	}
+	if state != "blocked" || code != "target_secret_missing" {
+		t.Fatalf("state=%q code=%q", state, code)
+	}
+	// A new version registered with the sender key wakes the next message.
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "grok_bot:amy", Adapter: "grok_bot_routine", TargetKind: "https_webhook",
+		TargetRef: server.URL, TargetSecret: busTestSenderKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE agent_message_deliveries SET state='dead'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{ProjectID: projectID, Sender: "sender", To: "grok_bot:amy", Body: "authenticated wake"}); err != nil {
+		t.Fatal(err)
+	}
+	worked, err = dispatcher.DispatchOne(context.Background())
+	if !worked || err != nil || calls != 1 {
+		t.Fatalf("worked=%v err=%v calls=%d", worked, err, calls)
 	}
 }
 

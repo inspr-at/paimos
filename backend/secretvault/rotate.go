@@ -58,7 +58,10 @@ type RotateReport struct {
 	CRMRows                int
 	AIRows                 int
 	AgentMessageTargetRows int
-	DryRun                 bool
+	// AgentMessageTargetSecretRows counts target rows that also carried an
+	// encrypted sender secret (M157); each is included in AgentMessageTargetRows.
+	AgentMessageTargetSecretRows int
+	DryRun                       bool
 }
 
 // RotateOptions parameterises a rotation call. NewKey MUST be exactly
@@ -86,7 +89,9 @@ var ErrPartialRotation = errors.New("rotation failed mid-transaction; no rows ch
 //
 //   - provider_configs (CRM domain): config_secret_json BLOB.
 //   - ai_settings (AI domain): api_key_encrypted BLOB.
-//   - agent_message_targets (agent bus domain): target_ref_cipher BLOB.
+//   - agent_message_targets (agent bus domain): target_ref_cipher BLOB and,
+//     from M157, the nullable target_secret_cipher BLOB under its own
+//     agent-message-target-secrets domain.
 //
 // Adding a new consumer means adding a switch arm here AND filing
 // the migration that introduces the new encrypted column. There is
@@ -143,18 +148,27 @@ func rotateAgentMessageTargets(ctx context.Context, tx *sql.Tx, oldKey []byte, o
 	if exists == 0 {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id,target_ref_cipher FROM agent_message_targets ORDER BY id`)
+	hasSecretColumn, err := tableHasColumn(ctx, tx, "agent_message_targets", "target_secret_cipher")
+	if err != nil {
+		return fmt.Errorf("inspect schema: %w", err)
+	}
+	query := `SELECT id,target_ref_cipher,NULL FROM agent_message_targets ORDER BY id`
+	if hasSecretColumn {
+		query = `SELECT id,target_ref_cipher,target_secret_cipher FROM agent_message_targets ORDER BY id`
+	}
+	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("select: %w", err)
 	}
 	type cipherRow struct {
-		id     string
-		cipher []byte
+		id           string
+		cipher       []byte
+		secretCipher []byte
 	}
 	var batch []cipherRow
 	for rows.Next() {
 		var row cipherRow
-		if err := rows.Scan(&row.id, &row.cipher); err != nil {
+		if err := rows.Scan(&row.id, &row.cipher, &row.secretCipher); err != nil {
 			_ = rows.Close()
 			return fmt.Errorf("scan: %w", err)
 		}
@@ -170,6 +184,13 @@ func rotateAgentMessageTargets(ctx context.Context, tx *sql.Tx, oldKey []byte, o
 		if err != nil {
 			return fmt.Errorf("decrypt target %s: %w", row.id, err)
 		}
+		var secretPlain []byte
+		if len(row.secretCipher) > 0 {
+			secretPlain, err = DecryptWithKey(oldKey, "agent-message-target-secrets", row.secretCipher)
+			if err != nil {
+				return fmt.Errorf("decrypt target secret %s: %w", row.id, err)
+			}
+		}
 		if !opts.DryRun {
 			newCipher, err := EncryptWithKey(opts.NewKey, "agent-message-targets", plain)
 			if err != nil {
@@ -178,10 +199,42 @@ func rotateAgentMessageTargets(ctx context.Context, tx *sql.Tx, oldKey []byte, o
 			if _, err := tx.ExecContext(ctx, `UPDATE agent_message_targets SET target_ref_cipher=? WHERE id=?`, newCipher, row.id); err != nil {
 				return fmt.Errorf("update target %s: %w", row.id, err)
 			}
+			if secretPlain != nil {
+				newSecretCipher, err := EncryptWithKey(opts.NewKey, "agent-message-target-secrets", secretPlain)
+				if err != nil {
+					return fmt.Errorf("encrypt target secret %s: %w", row.id, err)
+				}
+				if _, err := tx.ExecContext(ctx, `UPDATE agent_message_targets SET target_secret_cipher=? WHERE id=?`, newSecretCipher, row.id); err != nil {
+					return fmt.Errorf("update target secret %s: %w", row.id, err)
+				}
+			}
 		}
 		report.AgentMessageTargetRows++
+		if secretPlain != nil {
+			report.AgentMessageTargetSecretRows++
+		}
 	}
 	return nil
+}
+
+// tableHasColumn reports whether a column exists so rotation stays correct on
+// a database that has not yet applied the migration introducing it.
+func tableHasColumn(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func rotateCRM(ctx context.Context, tx *sql.Tx, oldKey []byte, opts RotateOptions, report *RotateReport) error {

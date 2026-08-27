@@ -37,7 +37,7 @@ Start here when opening this repo cold.
 - `paimos skill render <agent>` — render an agent artifact through a harness adapter (PAI-329 / PAI-332)
 - `paimos run-agent watch --project PAI --repo-root .` — local "Implement this" runner; spawns Claude Code on a UI-triggered run, report-back only (PAI-608)
 - `paimos tell <harness>:<agent> --project PAI --level simple|steer -m <text>` — durable message with receiver interruption intent; `--action-request` holds it for humans (PAI-826)
-- `paimos message target set --project PAI --address <harness>:<agent> --adapter codex|grok_bot_routine|claude_resume|claude_channel --kind codex_thread|https_webhook|claude_session …` — register an encrypted receiver target; `message target list` / `message deliveries` show redacted state (PAI-826 / PAI-827)
+- `paimos message target set --project PAI --address <harness>:<agent> --adapter codex|grok_bot_routine|claude_resume|claude_channel --kind codex_thread|https_webhook|claude_session …` — register an encrypted receiver target; `grok_bot_routine` additionally requires `--target-key-file <file|->` (the routine sender key, sent as `Authorization: Bearer` on every wake; never an argument); `message target list` / `message deliveries` show redacted state (PAI-826 / PAI-827 / PAI-828)
 - `paimos listen --as <harness>:<agent> --project PAI [--follow] [--ack] [--deliver codex|claude|grok]` — durable native inbox delivery using the receiver-owned target (`--deliver-target` only for pre-bus rows); Grok Build additionally requires `--enable-grok-build-delivery` (PAI-816 / PAI-826)
 
 ## Notes

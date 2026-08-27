@@ -163,3 +163,95 @@ func TestRegistryDoesNotEchoTargetRefsInErrors(t *testing.T) {
 		t.Fatalf("delivery error leaked target ref: %v", err)
 	}
 }
+
+type fakeSecretPlugin struct {
+	fakePlugin
+	header, prefix string
+	validateSecret func(string) error
+}
+
+func (p fakeSecretPlugin) SecretHeader() (string, string) { return p.header, p.prefix }
+func (p fakeSecretPlugin) ValidateSecret(secret string) error {
+	if p.validateSecret != nil {
+		return p.validateSecret(secret)
+	}
+	return nil
+}
+
+func TestRegistrySecretHeaderCapabilityFailsClosed(t *testing.T) {
+	registry := NewRegistry()
+	if err := RegisterBuiltins(registry); err != nil {
+		t.Fatal(err)
+	}
+	name, prefix, required, err := registry.SecretHeader(AdapterGrokBotRoutine)
+	if err != nil || !required || name != "Authorization" || prefix != "Bearer " {
+		t.Fatalf("grok secret header=%q prefix=%q required=%v err=%v", name, prefix, required, err)
+	}
+	for _, adapter := range []string{AdapterCodex, AdapterClaudeResume, AdapterClaudeChannel} {
+		if _, _, required, err := registry.SecretHeader(adapter); err != nil || required {
+			t.Fatalf("%s must not require a sender secret: required=%v err=%v", adapter, required, err)
+		}
+		if err := registry.ValidateSecret(adapter, "crsr_must_not_be_stored"); ErrorCode(err) != CodeTargetSecretUnsupported {
+			t.Fatalf("%s accepted a sender secret: %v", adapter, err)
+		}
+		if err := registry.ValidateSecret(adapter, ""); err != nil {
+			t.Fatalf("%s without a secret must be valid: %v", adapter, err)
+		}
+	}
+	if err := registry.ValidateSecret(AdapterGrokBotRoutine, ""); ErrorCode(err) != CodeTargetSecretRequired {
+		t.Fatalf("grok without a sender key err=%v", err)
+	}
+	for _, bad := range []string{
+		"Bearer crsr_prebuilt_header_value",
+		"Authorization: Bearer crsr_prebuilt_header_value",
+		"crsr_with a space",
+		"crsr_tab\tseparated",
+		"short",
+		strings.Repeat("a", 513),
+		"crsr_non_ascii_ü",
+	} {
+		err := registry.ValidateSecret(AdapterGrokBotRoutine, bad)
+		if ErrorCode(err) != CodeTargetSecretInvalid {
+			t.Fatalf("secret %q err=%v want %s", bad, err, CodeTargetSecretInvalid)
+		}
+		if strings.Contains(err.Error(), bad) {
+			t.Fatalf("validation error echoed the secret: %v", err)
+		}
+	}
+	if err := registry.ValidateSecret(AdapterGrokBotRoutine, "crsr_fixture_sender_key_0001"); err != nil {
+		t.Fatalf("raw sender key rejected: %v", err)
+	}
+	if _, _, _, err := registry.SecretHeader("missing"); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("unknown adapter err=%v", err)
+	}
+}
+
+func TestRegistryDoesNotEchoSecretsFromHostilePlugins(t *testing.T) {
+	const secret = "crsr_fixture_secret_never_echo"
+	registry := NewRegistry()
+	leaky := fakeSecretPlugin{
+		fakePlugin: fakePlugin{name: "leaky_secret", kind: "fake_ref", maximum: LevelSimple, mode: ModeServer},
+		header:     "X-Fake-Key",
+		validateSecret: func(value string) error {
+			return fmt.Errorf("hostile validator included %s", value)
+		},
+	}
+	if err := registry.Register(leaky); err != nil {
+		t.Fatal(err)
+	}
+	name, prefix, required, err := registry.SecretHeader(leaky.Name())
+	if err != nil || !required || name != "X-Fake-Key" || prefix != "" {
+		t.Fatalf("capability lookup through the registry envelope failed: %q %q %v %v", name, prefix, required, err)
+	}
+	err = registry.ValidateSecret(leaky.Name(), secret)
+	if err == nil || strings.Contains(err.Error(), secret) || ErrorCode(err) != CodeTargetSecretInvalid {
+		t.Fatalf("hostile validator error leaked or lost its code: %v", err)
+	}
+	empty := fakeSecretPlugin{fakePlugin: fakePlugin{name: "empty_header", kind: "fake_ref", maximum: LevelSimple, mode: ModeServer}}
+	if err := registry.Register(empty); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := registry.SecretHeader(empty.Name()); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("empty header name must fail closed: %v", err)
+	}
+}

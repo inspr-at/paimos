@@ -17,7 +17,13 @@ import (
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
 
-const targetSecretDomain = "agent-message-targets"
+// Receiver-owned target references and their optional sender secrets live in
+// separate secretvault domains so one ciphertext can never be replayed as the
+// other.
+const (
+	targetSecretDomain       = "agent-message-targets"
+	targetSenderSecretDomain = "agent-message-target-secrets"
+)
 
 // Registry adapters and target kinds. Local adapters are executed by an
 // attributed receiver-side worker that leases the delivery through listen and
@@ -54,7 +60,8 @@ const selectedDeliveryTargetSQL = `(CASE
 	THEN d.fallback_target_id ELSE COALESCE(d.primary_target_id,d.fallback_target_id) END)`
 
 // Target is the non-secret operator view of an immutable receiver target
-// version. TargetRef is deliberately absent.
+// version. TargetRef and the sender secret are deliberately absent; HasSecret
+// only reports that an encrypted sender secret is bound to this version.
 type Target struct {
 	ID           string `json:"id"`
 	Instance     string `json:"instance"`
@@ -66,6 +73,7 @@ type Target struct {
 	Role         string `json:"role"`
 	Enabled      bool   `json:"enabled"`
 	Version      int    `json:"version"`
+	HasSecret    bool   `json:"has_secret"`
 	CreatedAt    string `json:"created_at"`
 }
 
@@ -75,8 +83,17 @@ type RegisterTargetInput struct {
 	Adapter      string
 	TargetKind   string
 	TargetRef    string
+	TargetSecret string
 	MaximumLevel string
 	Role         string
+}
+
+const targetSelectColumns = `id,instance,project_id,address,adapter,target_kind,maximum_level,role,enabled,version,
+	target_secret_cipher IS NOT NULL,created_at`
+
+func scanTarget(row interface{ Scan(...any) error }, target *Target) error {
+	return row.Scan(&target.ID, &target.Instance, &target.ProjectID, &target.Address, &target.Adapter, &target.TargetKind,
+		&target.MaximumLevel, &target.Role, &target.Enabled, &target.Version, &target.HasSecret, &target.CreatedAt)
 }
 
 func instanceName() string {
@@ -131,9 +148,24 @@ func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*
 		}
 		return nil, coded(code, err.Error())
 	}
+	secret := strings.TrimSpace(in.TargetSecret)
+	if err := harnessplugin.ValidateSecret(in.Adapter, secret); err != nil {
+		code := harnessplugin.ErrorCode(err)
+		if code == "" || code == harnessplugin.CodeUnsupported {
+			code = harnessplugin.CodeTargetSecretInvalid
+		}
+		return nil, coded(code, err.Error())
+	}
 	ciphertext, err := secretvault.Encrypt(targetSecretDomain, []byte(ref))
 	if err != nil {
 		return nil, fmt.Errorf("encrypt agent message target: %w", err)
+	}
+	var secretCipher []byte
+	if secret != "" {
+		secretCipher, err = secretvault.Encrypt(targetSenderSecretDomain, []byte(secret))
+		if err != nil {
+			return nil, fmt.Errorf("encrypt agent message target secret: %w", err)
+		}
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -163,9 +195,9 @@ func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*
 	}
 	targetID := uuid.NewString()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_targets
-		(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,version)
-		VALUES(?,?,?,?,?,?,?,?,?,?)`, targetID, instance, in.ProjectID, in.Address, in.Adapter, in.TargetKind,
-		ciphertext, in.MaximumLevel, in.Role, version); err != nil {
+		(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,target_secret_cipher,maximum_level,role,version)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, targetID, instance, in.ProjectID, in.Address, in.Adapter, in.TargetKind,
+		ciphertext, secretCipher, in.MaximumLevel, in.Role, version); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -176,10 +208,8 @@ func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*
 
 func (s *Service) GetTarget(ctx context.Context, projectID int64, targetID string) (*Target, error) {
 	var target Target
-	if err := s.db.QueryRowContext(ctx, `SELECT id,instance,project_id,address,adapter,target_kind,maximum_level,role,enabled,version,created_at
-		FROM agent_message_targets WHERE project_id=? AND id=?`, projectID, targetID).Scan(
-		&target.ID, &target.Instance, &target.ProjectID, &target.Address, &target.Adapter, &target.TargetKind,
-		&target.MaximumLevel, &target.Role, &target.Enabled, &target.Version, &target.CreatedAt); err != nil {
+	if err := scanTarget(s.db.QueryRowContext(ctx, `SELECT `+targetSelectColumns+`
+		FROM agent_message_targets WHERE project_id=? AND id=?`, projectID, targetID), &target); err != nil {
 		return nil, err
 	}
 	return &target, nil
@@ -187,7 +217,7 @@ func (s *Service) GetTarget(ctx context.Context, projectID int64, targetID strin
 
 func (s *Service) ListTargets(ctx context.Context, projectID int64, address string) ([]Target, error) {
 	args := []any{projectID, instanceName()}
-	query := `SELECT id,instance,project_id,address,adapter,target_kind,maximum_level,role,enabled,version,created_at
+	query := `SELECT ` + targetSelectColumns + `
 		FROM agent_message_targets WHERE project_id=? AND instance=?`
 	if strings.TrimSpace(address) != "" {
 		harness, agent, err := parseAddress(address)
@@ -206,8 +236,7 @@ func (s *Service) ListTargets(ctx context.Context, projectID int64, address stri
 	var targets []Target
 	for rows.Next() {
 		var target Target
-		if err := rows.Scan(&target.ID, &target.Instance, &target.ProjectID, &target.Address, &target.Adapter,
-			&target.TargetKind, &target.MaximumLevel, &target.Role, &target.Enabled, &target.Version, &target.CreatedAt); err != nil {
+		if err := scanTarget(rows, &target); err != nil {
 			return nil, err
 		}
 		targets = append(targets, target)
