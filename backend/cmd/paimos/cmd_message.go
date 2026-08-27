@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	"github.com/spf13/cobra"
 )
 
@@ -150,15 +151,20 @@ func messageTargetSetCmd() *cobra.Command {
 		if strings.TrimSpace(projectRef) == "" || strings.TrimSpace(address) == "" {
 			return &usageError{msg: "--project and --address are required"}
 		}
+		adapterName := strings.ToLower(strings.TrimSpace(adapter))
+		webhookAdapter := adapterName == harnessplugin.AdapterGrokBotRoutine
+		if plugin, err := harnessplugin.Resolve(adapterName); err == nil && plugin.Kind() == harnessplugin.KindHTTPSWebhook {
+			webhookAdapter = true
+		}
+		if strings.TrimSpace(ref) != "" && (strings.EqualFold(strings.TrimSpace(kind), harnessplugin.KindHTTPSWebhook) || webhookAdapter) {
+			return &usageError{msg: "webhook capability URLs must use --target-ref-file (use - for stdin) so they do not enter process arguments"}
+		}
 		targetRef, set, err := readMultilineInput(ref, refFile, "target ref")
 		if err != nil {
 			return err
 		}
 		if !set || strings.TrimSpace(targetRef) == "" {
 			return &usageError{msg: "--target-ref or --target-ref-file is required"}
-		}
-		if strings.EqualFold(strings.TrimSpace(adapter), "grok_bot_routine") && strings.TrimSpace(ref) != "" {
-			return &usageError{msg: "webhook capability URLs must use --target-ref-file (use - for stdin) so they do not enter process arguments"}
 		}
 		client, err := instanceClient()
 		if err != nil {
@@ -189,9 +195,9 @@ func messageTargetSetCmd() *cobra.Command {
 	}}
 	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
 	c.Flags().StringVar(&address, "address", "", "receiver address (required)")
-	c.Flags().StringVar(&adapter, "adapter", "", "codex, grok_bot_routine, claude_resume, or claude_channel (required)")
-	c.Flags().StringVar(&kind, "kind", "", "codex_thread, https_webhook, or claude_session (required)")
-	c.Flags().StringVar(&ref, "target-ref", "", "receiver-owned Codex thread or Claude session id (webhook capabilities must use --target-ref-file)")
+	c.Flags().StringVar(&adapter, "adapter", "", "registered harness plugin name (required)")
+	c.Flags().StringVar(&kind, "kind", "", "plugin target kind (required)")
+	c.Flags().StringVar(&ref, "target-ref", "", "receiver-owned target reference (webhook capabilities must use --target-ref-file)")
 	c.Flags().StringVar(&refFile, "target-ref-file", "", "read target reference from file, or - for stdin")
 	c.Flags().StringVar(&maximumLevel, "maximum-level", "simple", "receiver policy: simple or steer")
 	c.Flags().StringVar(&role, "role", "primary", "primary or simple_fallback")

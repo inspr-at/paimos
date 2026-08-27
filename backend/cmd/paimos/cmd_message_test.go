@@ -103,3 +103,17 @@ func TestWebhookTargetRefMustNotEnterProcessArguments(t *testing.T) {
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestWebhookAdapterTargetRefMustNotEnterProcessArgumentsWhenKindOmitted(t *testing.T) {
+	for _, args := range [][]string{
+		{"--project", "PAI", "--address", "grok_bot:amy", "--adapter", "grok_bot_routine", "--target-ref", "https://routine.example/capability"},
+		{"--project", "PAI", "--address", "grok_bot:amy", "--adapter", "grok_bot_routine", "--kind", "wrong_kind", "--target-ref", "https://routine.example/capability"},
+	} {
+		command := messageTargetSetCmd()
+		command.SetArgs(args)
+		err := command.Execute()
+		if err == nil || !strings.Contains(err.Error(), "--target-ref-file") {
+			t.Fatalf("args=%v error=%v", args, err)
+		}
+	}
+}
