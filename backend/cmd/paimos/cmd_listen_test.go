@@ -155,122 +155,6 @@ func TestDeliverCodexUsesQueueArgv(t *testing.T) {
 	}
 }
 
-func installFakeCodexAppServer(t *testing.T) (string, string) {
-	t.Helper()
-	dir := t.TempDir()
-	argsFile := filepath.Join(dir, "args")
-	framesFile := filepath.Join(dir, "frames")
-	script := filepath.Join(dir, "codex")
-	body := `#!/bin/sh
-printf '%s\n' "$@" >> "$PAIMOS_TEST_ARGS"
-if [ "$1" = "queue" ]; then exit 0; fi
-if [ "$1" = "app-server" ] && [ "$2" = "daemon" ]; then exit 0; fi
-if [ "$1" = "app-server" ] && [ "$2" = "proxy" ]; then
-  while IFS= read -r line; do
-    printf '%s\n' "$line" >> "$PAIMOS_TEST_FRAMES"
-    case "$line" in
-      *'"id":1'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"codex","version":"test"}}}' ;;
-      *'"id":2'*) printf '%s\n' "$PAIMOS_TEST_TURNS" ;;
-      *'"id":3'*) printf '%s\n' "$PAIMOS_TEST_STEER" ;;
-    esac
-  done
-fi
-`
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("PAIMOS_TEST_ARGS", argsFile)
-	t.Setenv("PAIMOS_TEST_FRAMES", framesFile)
-	return argsFile, framesFile
-}
-
-func TestDeliverCodexMessageSteersInProgressTurn(t *testing.T) {
-	argsFile, framesFile := installFakeCodexAppServer(t)
-	t.Setenv("PAIMOS_TEST_TURNS", `{"jsonrpc":"2.0","id":2,"result":{"data":[{"id":"turn-live","status":"inProgress"}]}}`)
-	t.Setenv("PAIMOS_TEST_STEER", `{"jsonrpc":"2.0","id":3,"result":{"turnId":"turn-live"}}`)
-	message := messageEnvelope{DeliveryLevel: "steer", DeliveryWork: &messageDeliveryWork{
-		DeliveryID: "delivery-1", Adapter: "codex", TargetRef: "thread-live", MaximumLevel: "steer", RequestedLevel: "steer",
-	}}
-	outcome, err := deliverCodexMessage(context.Background(), message, "steer payload", "ignored-process-target", "queue")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if outcome.EffectiveLevel != "steer" || outcome.FallbackReason != "" {
-		t.Fatalf("outcome=%#v", outcome)
-	}
-	args, _ := os.ReadFile(argsFile)
-	if strings.Contains(string(args), "queue\n") {
-		t.Fatalf("successful steer unexpectedly queued: %q", args)
-	}
-	frames, _ := os.ReadFile(framesFile)
-	for _, required := range []string{`"method":"initialize"`, `"method":"initialized"`, `"method":"thread/turns/list"`, `"method":"turn/steer"`, `"expectedTurnId":"turn-live"`, `"type":"text"`, `"text":"steer payload"`} {
-		if !strings.Contains(string(frames), required) {
-			t.Fatalf("frames missing %s: %s", required, frames)
-		}
-	}
-}
-
-func TestDeliverCodexMessageBusLevelIgnoresLegacyProcessMode(t *testing.T) {
-	argsFile, _ := installFakeCodexAppServer(t)
-	message := messageEnvelope{DeliveryLevel: "simple", DeliveryWork: &messageDeliveryWork{
-		DeliveryID: "delivery-simple", Adapter: "codex", TargetRef: "thread-simple", MaximumLevel: "steer", RequestedLevel: "simple",
-	}}
-	outcome, err := deliverCodexMessage(context.Background(), message, "simple payload", "ignored-process-target", "steer")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if outcome.EffectiveLevel != "simple" || outcome.FallbackReason != "" {
-		t.Fatalf("outcome=%#v", outcome)
-	}
-	args, _ := os.ReadFile(argsFile)
-	if got, want := string(args), "queue\n--thread\nthread-simple\n--message\nsimple payload\n"; got != want {
-		t.Fatalf("argv=%q want exact per-message queue %q", got, want)
-	}
-}
-
-func TestDeliverCodexMessageFallsBackToQueueWhenIdle(t *testing.T) {
-	argsFile, _ := installFakeCodexAppServer(t)
-	t.Setenv("PAIMOS_TEST_TURNS", `{"jsonrpc":"2.0","id":2,"result":{"data":[{"id":"turn-old","status":"completed"}]}}`)
-	message := messageEnvelope{DeliveryLevel: "steer", DeliveryWork: &messageDeliveryWork{
-		DeliveryID: "delivery-2", Adapter: "codex", TargetRef: "thread-idle", MaximumLevel: "steer", RequestedLevel: "steer",
-	}}
-	outcome, err := deliverCodexMessage(context.Background(), message, "idle payload", "ignored", "queue")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if outcome.EffectiveLevel != "simple" || outcome.FallbackReason != "idle" {
-		t.Fatalf("outcome=%#v", outcome)
-	}
-	args, _ := os.ReadFile(argsFile)
-	if !strings.Contains(string(args), "queue\n--thread\nthread-idle\n--message\nidle payload\n") {
-		t.Fatalf("queue argv missing: %q", args)
-	}
-}
-
-func TestDeliverCodexMessageFallsBackOnNotSteerableOrTurnRace(t *testing.T) {
-	for _, errorData := range []string{
-		`{"code":-32000,"message":"active turn cannot accept steer","data":{"activeTurnNotSteerable":{"kind":"review"}}}`,
-		`{"code":-32001,"message":"expected turn does not match"}`,
-	} {
-		t.Run(errorData, func(t *testing.T) {
-			_, _ = installFakeCodexAppServer(t)
-			t.Setenv("PAIMOS_TEST_TURNS", `{"jsonrpc":"2.0","id":2,"result":{"data":[{"id":"turn-raced","status":"inProgress"}]}}`)
-			t.Setenv("PAIMOS_TEST_STEER", `{"jsonrpc":"2.0","id":3,"error":`+errorData+`}`)
-			message := messageEnvelope{DeliveryLevel: "steer", DeliveryWork: &messageDeliveryWork{
-				DeliveryID: "delivery-3", Adapter: "codex", TargetRef: "thread-raced", MaximumLevel: "steer", RequestedLevel: "steer",
-			}}
-			outcome, err := deliverCodexMessage(context.Background(), message, "raced payload", "ignored", "queue")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if outcome.EffectiveLevel != "simple" || outcome.FallbackReason != "not_steerable" {
-				t.Fatalf("outcome=%#v", outcome)
-			}
-		})
-	}
-}
-
 func TestDeliverCodexDefaultsToQueueWhenModeEmpty(t *testing.T) {
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "args")
@@ -299,16 +183,6 @@ func TestDeliverCodexQueueRequiresTarget(t *testing.T) {
 	err := deliverCodex(context.Background(), "no target", "")
 	var unavailable *adapterUnavailableError
 	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "requires --deliver-target or CODEX_THREAD_ID") {
-		t.Fatalf("error=%#v want missing target guidance", err)
-	}
-}
-
-func TestDeliverCodexSteerRequiresTarget(t *testing.T) {
-	t.Setenv("CODEX_THREAD_ID", "")
-	t.Setenv("CODEX_SESSION_ID", "")
-	_, _, err := deliverCodexSteer(context.Background(), "no target", "")
-	var unavailable *adapterUnavailableError
-	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "receiver-owned thread target") {
 		t.Fatalf("error=%#v want missing target guidance", err)
 	}
 }

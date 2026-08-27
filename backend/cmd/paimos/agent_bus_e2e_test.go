@@ -28,6 +28,50 @@ func TestAgentBusRealCodexSimpleE2E(t *testing.T) {
 	if threadID == "" {
 		t.Skip("set PAIMOS_AGENT_BUS_E2E_THREAD to an explicit real Codex thread")
 	}
+	proof := runAgentBusRealCodexE2E(t, threadID, "simple", "PAI-826 E2E probe only; no action requested")
+	if proof.EffectiveLevel != "simple" || proof.FallbackReason != "" {
+		t.Fatalf("simple delivery recorded effective=%q fallback=%q", proof.EffectiveLevel, proof.FallbackReason)
+	}
+}
+
+// TestAgentBusRealCodexSteerE2E is opt-in because it steers the explicitly
+// supplied real Codex thread mid-turn through the documented app-server
+// sequence (daemon start, `codex app-server proxy`, WebSocket handshake,
+// initialize/initialized, active-turn discovery, `turn/steer`). When the
+// thread has no turn in progress the delivery must complete through the exact
+// queue fallback with fallback_reason=idle; the log line records which path
+// the live daemon took so the evidence cannot be mistaken for a steer.
+func TestAgentBusRealCodexSteerE2E(t *testing.T) {
+	threadID := strings.TrimSpace(os.Getenv("PAIMOS_AGENT_BUS_E2E_STEER_THREAD"))
+	if threadID == "" {
+		t.Skip("set PAIMOS_AGENT_BUS_E2E_STEER_THREAD to an explicit real Codex thread")
+	}
+	proof := runAgentBusRealCodexE2E(t, threadID, "steer", "PAI-825 steer E2E probe only; no action requested, continue your current work")
+	switch {
+	case proof.EffectiveLevel == "steer" && proof.FallbackReason == "":
+	case proof.EffectiveLevel == "simple" && (proof.FallbackReason == "idle" || proof.FallbackReason == "not_steerable"):
+	default:
+		t.Fatalf("steer delivery recorded effective=%q fallback=%q", proof.EffectiveLevel, proof.FallbackReason)
+	}
+}
+
+type agentBusE2EProof struct {
+	MessageID      string
+	DeliveryID     string
+	EffectiveLevel string
+	FallbackReason string
+	TellStarted    time.Time
+	Committed      time.Time
+	ListenPicked   time.Time
+	HandedOff      time.Time
+}
+
+// runAgentBusRealCodexE2E runs one durable message from amy to codex:codex
+// through a local ledger, a live `listen --deliver codex` worker, and the
+// real vendor primitive selected by the requested level, then returns the
+// measured proof.
+func runAgentBusRealCodexE2E(t *testing.T, threadID, level, probe string) agentBusE2EProof {
+	t.Helper()
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
 	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "ppm")
@@ -57,15 +101,7 @@ func TestAgentBusRealCodexSimpleE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	type evidence struct {
-		MessageID    string
-		DeliveryID   string
-		TellStarted  time.Time
-		Committed    time.Time
-		ListenPicked time.Time
-		HandedOff    time.Time
-	}
-	var proof evidence
+	var proof agentBusE2EProof
 	var proofMu sync.Mutex
 	firstListen := make(chan struct{}, 1)
 	completed := make(chan struct{}, 1)
@@ -144,6 +180,8 @@ func TestAgentBusRealCodexSimpleE2E(t *testing.T) {
 			}
 			proofMu.Lock()
 			proof.HandedOff = time.Now().UTC()
+			proof.EffectiveLevel = request.EffectiveLevel
+			proof.FallbackReason = request.FallbackReason
 			proofMu.Unlock()
 			_ = json.NewEncoder(w).Encode(state)
 			select {
@@ -174,15 +212,14 @@ func TestAgentBusRealCodexSimpleE2E(t *testing.T) {
 	proofMu.Lock()
 	proof.TellStarted = time.Now().UTC()
 	proofMu.Unlock()
-	probe := "PAI-826 E2E probe only; no action requested"
 	command := tellCmd()
-	command.SetArgs([]string{"codex:codex", "--project", "E2E", "--level", "simple", "--message", probe})
+	command.SetArgs([]string{"codex:codex", "--project", "E2E", "--level", level, "--message", probe})
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-completed:
-	case <-time.After(20 * time.Second):
+	case <-time.After(codexSteerTimeout + 20*time.Second):
 		t.Fatal("Codex handoff did not complete")
 	}
 	cancelListener()
@@ -194,8 +231,9 @@ func TestAgentBusRealCodexSimpleE2E(t *testing.T) {
 	if proof.MessageID == "" || proof.DeliveryID == "" || proof.Committed.IsZero() || proof.ListenPicked.IsZero() || proof.HandedOff.IsZero() {
 		t.Fatalf("incomplete proof=%#v", proof)
 	}
-	t.Logf("PAI-826_E2E direction=amy_to_codex message_id=%s delivery_id=%s tell_started=%s committed=%s listen_picked=%s handed_off=%s commit_ms=%d pickup_ms=%d handoff_ms=%d",
-		proof.MessageID, proof.DeliveryID, proof.TellStarted.Format(time.RFC3339Nano), proof.Committed.Format(time.RFC3339Nano),
+	t.Logf("PAI-826_E2E direction=amy_to_codex requested_level=%s effective_level=%s fallback_reason=%q message_id=%s delivery_id=%s tell_started=%s committed=%s listen_picked=%s handed_off=%s commit_ms=%d pickup_ms=%d handoff_ms=%d",
+		level, proof.EffectiveLevel, proof.FallbackReason, proof.MessageID, proof.DeliveryID, proof.TellStarted.Format(time.RFC3339Nano), proof.Committed.Format(time.RFC3339Nano),
 		proof.ListenPicked.Format(time.RFC3339Nano), proof.HandedOff.Format(time.RFC3339Nano),
 		proof.Committed.Sub(proof.TellStarted).Milliseconds(), proof.ListenPicked.Sub(proof.Committed).Milliseconds(), proof.HandedOff.Sub(proof.ListenPicked).Milliseconds())
+	return proof
 }

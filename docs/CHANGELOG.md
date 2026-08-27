@@ -7,6 +7,38 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed — Codex steer transport (PAI-825 follow-up)
+
+- `paimos listen --deliver codex` steer delivery never reached the Codex
+  app-server: 5.17.3 and 5.18.0 wrote newline-delimited JSON into
+  `codex app-server proxy`, but the vendor documents that proxied stream as
+  the WebSocket HTTP Upgrade handshake followed by WebSocket frames, so the
+  daemon waited for an HTTP request head, `initialize` never got an answer,
+  and the timeout cleanup of the npm wrapper orphaned the native proxy and
+  surfaced as `initialize Codex app-server: EOF` (reproduced against Codex
+  CLI 0.149.1 with app-server daemon 0.150.1). The worker now performs the
+  documented handshake through the same vendor proxy and sends one JSON-RPC
+  message per text frame without the `jsonrpc` header; PAIMOS still never
+  opens the control socket itself.
+- Active-turn discovery no longer depends on `thread/turns/list` alone, which
+  0.150.x gates behind the `experimentalApi` initialize capability. The worker
+  opts in, checks the stable `thread/read` status first, and only for an
+  `active` thread pages the latest turn, falling back to
+  `thread/read {includeTurns:true}` when the paginated page is rejected. A
+  thread that is idle or not loaded in the daemon uses the exact queue
+  primitive with `fallback_reason=idle`.
+- A proxy that never answers now fails inside the 20 s steer budget with a
+  precise error naming the wire phase and the daemon/CLI versions from
+  `codex app-server daemon version`, and the whole proxy process group is
+  killed so the npm wrapper cannot leave an orphaned native proxy holding the
+  pipes.
+- Added the opt-in `TestAgentBusRealCodexSteerE2E` proof
+  (`PAIMOS_AGENT_BUS_E2E_STEER_THREAD=<thread>`) and the read-only
+  `TestCodexAppServerProxyReadOnlyProbe` (`PAIMOS_CODEX_PROBE_THREAD`); the
+  fake Codex CLI in tests now proxies to a real WebSocket server so the
+  handshake and framing are exercised, including the gated-page fallback and
+  the silent-proxy timeout.
+
 ### Added — Claude simple delivery (PAI-827)
 
 - `paimos listen --deliver claude` now performs idle Claude delivery with the
