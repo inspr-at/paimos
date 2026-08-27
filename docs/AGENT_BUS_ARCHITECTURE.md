@@ -401,11 +401,17 @@ sequenceDiagram
     participant X as codex app-server proxy
     participant Q as codex queue
 
-    W->>X: initialize {clientInfo:{name,version}}
+    W->>X: HTTP Upgrade handshake (proxied stream is WebSocket frames)
+    X-->>W: 101 Switching Protocols
+    W->>X: initialize {clientInfo, capabilities:{experimentalApi:true}}
     X-->>W: initialize result
     W->>X: initialized
-    W->>X: thread/turns/list {threadId}
-    X-->>W: turns
+    W->>X: thread/read {threadId}
+    X-->>W: thread.status
+    alt status is active
+        W->>X: thread/turns/list {threadId, limit:1, sortDirection:desc}
+        X-->>W: latest turn (or thread/read {includeTurns:true} when the page is rejected)
+    end
     alt latest usable status is inProgress
         W->>X: turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}
         alt success
@@ -549,7 +555,7 @@ CLI or socket frame.
 | Receiver | Level | Allowed vendor primitive | Current | Target and fallback |
 |---|---|---|---|---|
 | Codex | `simple` | `codex queue --thread <THREAD> --message <TEXT>` | Implemented by `listen --deliver codex`; mode is process-wide | Supported. `<THREAD>` is a Codex rollout/session UUID or exact session name, never a Cursor chat UUID |
-| Codex | `steer` | Start daemon with `codex app-server daemon start`; worker runs `codex app-server proxy`, performs `initialize` + `initialized`, queries `thread/turns/list {threadId}` for status `inProgress`, then calls `turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}` | Implemented, but `activeTurnNotSteerable` currently returns an error | Supported. Idle, race, or not-steerable falls back to the exact queue primitive |
+| Codex | `steer` | Start daemon with `codex app-server daemon start`; worker runs `codex app-server proxy`, whose proxied stream carries the WebSocket HTTP Upgrade handshake and one JSON-RPC message per text frame; performs `initialize` (`capabilities.experimentalApi=true`) + `initialized`, reads `thread/read {threadId}` status, resolves the latest turn of an `active` thread via `thread/turns/list` (or `thread/read {includeTurns:true}`) and calls `turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}` only for an `inProgress` turn | Implemented (PAI-825 follow-up; 5.17.3–5.18.0 wrote JSON lines into the proxy and never got an `initialize` answer) | Supported. Idle, not loaded, race, or not-steerable falls back to the exact queue primitive; any other `turn/steer` rejection (unknown method, request-shape drift, sub-agent ownership, internal error) fails the delivery instead of queueing |
 | Claude local | `simple` | `claude -p --resume <session_id>` or `claude -p --cloud <session_id>` | Implemented by `listen --deliver claude` from a receiver-owned `claude_resume` / `claude_session` target; framed body over stdin, zero exit is handoff, completed through `delivery-complete` | Supported. A local UUID resumes an idle session; a `session_…`/`cse_…` id queues a cloud follow-up |
 | Claude Channels | `simple` | MCP `notifications/claude/channel`; session opts in with `--channels` or `--dangerously-load-development-channels` | Research-preview channel path under `paimos serve --mcp-stdio --channel-as`; leases `claude_channel` targets and completes each push | Supported simple push when explicitly enabled; successful JSON-RPC write is handoff |
 | Claude | `steer` | **UNSUPPORTED** | Falls back to the selected simple primitive with `fallback_reason=unsupported`; Claude targets are fixed to `maximum_level=simple` | Fall back to a configured simple resume/cloud or Channels target; otherwise remain blocked |
@@ -625,9 +631,14 @@ text:
    `CLAUDE_CODE_MESSAGING_SOCKET` lookup are repo bugs; no implementation may
    invent the frame.
 2. The PAI-825 changelog says Codex falls back when a live turn is not
-   steerable. Live code falls back only when there is no `inProgress` turn;
-   `activeTurnNotSteerable` returns an error. The target fallback table above
-   is the required behavior and needs a code/test follow-up.
+   steerable. 5.18.0 added that fallback, but 5.17.3–5.18.0 also wrote
+   newline-delimited JSON into `codex app-server proxy`, whose proxied stream
+   is documented as the WebSocket HTTP Upgrade handshake plus frames, so the
+   daemon never answered `initialize` and every live steer ended as
+   `initialize Codex app-server: EOF` with an orphaned native proxy. The
+   PAI-825 follow-up speaks the documented framing, checks `thread/read`
+   status before paying for turn discovery, and bounds a silent proxy with a
+   precise error. The target fallback table above is the implemented behavior.
 3. `--deliver-mode` is accepted for all listeners but used only by Codex.
    Message-level intent removes that silent process-wide mismatch.
 4. The CLI emits `Idempotency-Key` on POST, but the message endpoint does not
@@ -723,7 +734,9 @@ This slice requires no vendor verb.
 ## 12. Non-goals
 
 - No merge or automatic merge behavior.
-- No custom WebSocket or direct Codex control-socket implementation.
+- No direct Codex control-socket connection and no bespoke frame code: the
+  WebSocket framing the daemon requires is spoken only through the documented
+  `codex app-server proxy` byte pipe with the standard Go WebSocket client.
 - No invented vendor CLI, JSON frame, or Grok Bot chat API.
 - No Grok Bot mid-turn steer.
 - No Claude mid-turn steer in this contract.

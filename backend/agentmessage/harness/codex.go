@@ -4,17 +4,12 @@
 package harness
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -38,6 +33,10 @@ func (CodexPlugin) ValidateTarget(_ context.Context, ref string) error {
 	return nil
 }
 
+// Deliver runs the exact documented primitives: `codex queue --thread` for a
+// simple request, and for a steer request the app-server `turn/steer`
+// sequence in codex_app_server.go with the exact queue primitive as the
+// documented fallback for idle, not-loaded, raced, and not-steerable turns.
 func (p CodexPlugin) Deliver(ctx context.Context, req DeliverRequest) (DeliverResult, error) {
 	target := strings.TrimSpace(req.TargetRef)
 	if target == "" {
@@ -86,135 +85,6 @@ func deliverCodexQueue(ctx context.Context, body, target string, stdout, stderr 
 		return fmt.Errorf("deliver to Codex thread: %w", err)
 	}
 	return nil
-}
-
-type codexRPCError struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data"`
-}
-
-func (e *codexRPCError) Error() string {
-	return fmt.Sprintf("Codex app-server error %d: %s", e.Code, e.Message)
-}
-
-// DeliverCodexSteer uses only the documented app-server proxy JSON-RPC
-// sequence. It returns idle and raced/rejected turns as simple fallbacks.
-func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Writer, clientVersion string) (bool, string, error) {
-	if strings.TrimSpace(target) == "" {
-		return false, "", &UnavailableError{Message: "Codex steer requires a receiver-owned thread target"}
-	}
-	path, err := exec.LookPath("codex")
-	if err != nil {
-		return false, "", &UnavailableError{Message: "Codex delivery requires the codex CLI in PATH"}
-	}
-	operationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	daemon := exec.CommandContext(operationCtx, path, "app-server", "daemon", "start") // #nosec G204 G702 -- fixed argv and operator-controlled PATH.
-	daemon.Stdout, daemon.Stderr = io.Discard, writerOrDiscard(stderr)
-	if err := daemon.Run(); err != nil {
-		return false, "", fmt.Errorf("start Codex app-server daemon: %w", err)
-	}
-	proxy := exec.CommandContext(operationCtx, path, "app-server", "proxy") // #nosec G204 G702 -- fixed argv and operator-controlled PATH.
-	stdin, err := proxy.StdinPipe()
-	if err != nil {
-		return false, "", fmt.Errorf("open Codex proxy stdin: %w", err)
-	}
-	stdoutPipe, err := proxy.StdoutPipe()
-	if err != nil {
-		return false, "", fmt.Errorf("open Codex proxy stdout: %w", err)
-	}
-	proxy.Stderr = writerOrDiscard(stderr)
-	if err := proxy.Start(); err != nil {
-		return false, "", fmt.Errorf("start Codex app-server proxy: %w", err)
-	}
-	encoder := json.NewEncoder(stdin)
-	decoder := json.NewDecoder(bufio.NewReader(stdoutPipe))
-	finish := func() error {
-		_ = stdin.Close()
-		if err := proxy.Wait(); err != nil && operationCtx.Err() == nil {
-			return fmt.Errorf("Codex app-server proxy: %w", err)
-		}
-		return nil
-	}
-	if clientVersion == "" {
-		clientVersion = defaultClientVersion
-	}
-	var initialize json.RawMessage
-	if err := codexRPCCall(encoder, decoder, 1, "initialize", map[string]any{
-		"clientInfo": map[string]string{"name": "paimos", "version": clientVersion},
-	}, &initialize); err != nil {
-		_ = finish()
-		return false, "", fmt.Errorf("initialize Codex app-server: %w", err)
-	}
-	if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "method": "initialized"}); err != nil {
-		_ = finish()
-		return false, "", fmt.Errorf("notify Codex app-server initialized: %w", err)
-	}
-	var turns struct {
-		Data []struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-		} `json:"data"`
-	}
-	if err := codexRPCCall(encoder, decoder, 2, "thread/turns/list", map[string]any{
-		"threadId": target, "limit": 1, "sortDirection": "desc", "itemsView": "notLoaded",
-	}, &turns); err != nil {
-		_ = finish()
-		return false, "", fmt.Errorf("list Codex thread turns: %w", err)
-	}
-	if len(turns.Data) == 0 || turns.Data[0].Status != "inProgress" {
-		if err := finish(); err != nil {
-			return false, "", err
-		}
-		return false, "idle", nil
-	}
-	var steerResult struct {
-		TurnID string `json:"turnId"`
-	}
-	err = codexRPCCall(encoder, decoder, 3, "turn/steer", map[string]any{
-		"threadId": target, "expectedTurnId": turns.Data[0].ID,
-		"input": []map[string]string{{"type": "text", "text": body}},
-	}, &steerResult)
-	if err != nil {
-		var remote *codexRPCError
-		if errors.As(err, &remote) {
-			_ = finish()
-			return false, "not_steerable", nil
-		}
-		_ = finish()
-		return false, "", fmt.Errorf("steer Codex turn: %w", err)
-	}
-	if err := finish(); err != nil {
-		return false, "", err
-	}
-	return true, "", nil
-}
-
-func codexRPCCall(encoder *json.Encoder, decoder *json.Decoder, id int, method string, params, result any) error {
-	if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
-		return err
-	}
-	for {
-		var response struct {
-			ID     json.RawMessage `json:"id"`
-			Result json.RawMessage `json:"result"`
-			Error  *codexRPCError  `json:"error"`
-		}
-		if err := decoder.Decode(&response); err != nil {
-			return err
-		}
-		if len(response.ID) == 0 || string(response.ID) != strconv.Itoa(id) {
-			continue
-		}
-		if response.Error != nil {
-			return response.Error
-		}
-		if result == nil || len(response.Result) == 0 {
-			return nil
-		}
-		return json.Unmarshal(response.Result, result)
-	}
 }
 
 func init() {

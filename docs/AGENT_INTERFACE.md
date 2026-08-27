@@ -54,10 +54,20 @@ after the vendor handoff succeeds. For M154 bus messages, the Codex target is
 the receiver-owned encrypted target version snapshotted when the message was
 committed; `--deliver-target` remains only for pre-bus/legacy rows. `simple`
 uses exactly `codex queue --thread THREAD --message TEXT`. `steer` starts the
-app-server daemon, connects only through `codex app-server proxy`, performs
-`initialize` then `initialized`, lists the latest turn, and calls `turn/steer`
-only when its status is `inProgress`. Idle, policy-capped, raced, and
-`activeTurnNotSteerable` cases use the exact queue fallback. Claude delivery
+app-server daemon and connects only through `codex app-server proxy`. That
+proxied stream is a WebSocket byte pipe to the daemon's control socket, so the
+worker performs the HTTP Upgrade handshake and sends one JSON-RPC message per
+text frame (no `jsonrpc` header on the wire): `initialize` with
+`capabilities.experimentalApi=true`, `initialized`, `thread/read` for the
+thread status, then, only for an `active` thread, the latest turn via
+`thread/turns/list` (falling back to `thread/read {includeTurns:true}` when the
+daemon rejects the paginated page), and `turn/steer` with the required
+`expectedTurnId` only when that turn is `inProgress`. Idle, not-loaded,
+policy-capped, raced, and `activeTurnNotSteerable` cases use the exact queue
+fallback; any other `turn/steer` rejection (unknown method, request-shape
+drift, sub-agent ownership, internal error) fails the delivery instead of
+queueing, and a silent proxy fails within the steer budget with the
+daemon/CLI versions and kills the whole proxy process group. Claude delivery
 is simple-only and uses two documented print-mode primitives: a local session
 UUID target runs `claude -p --resume <session_id>` as a new turn, and a
 `session_…`/`cse_…` cloud target runs `claude -p --cloud <session_id>` as a
