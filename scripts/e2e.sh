@@ -37,10 +37,18 @@ ensure_debug_password PAIMOS_DEBUG_ADMIN_PASSWORD
 ensure_debug_password PAIMOS_DEBUG_USER_PASSWORD
 ensure_debug_password PAIMOS_DEBUG_CUSTOMER_PASSWORD
 
-# The backend defaults DATA_DIR to /app/data (the container path), which isn't
-# writable on a CI runner with no direnv to point it elsewhere. Give it an
-# isolated, writable, throwaway dir so dev-seed can create the DB.
-if [[ -z "${DATA_DIR:-}" ]]; then
+# Visual snapshots must never inherit a developer's persistent devenv database:
+# its accumulated issues and edited profiles make otherwise-correct pixels
+# depend on local history. Always give that opt-in gate an isolated fixture DB.
+# The broader smoke runner keeps its established explicit-DATA_DIR behavior.
+if [[ "${PAIMOS_VISUAL_BASELINE:-}" == 1 ]]; then
+  DATA_DIR=$(mktemp -d)
+  export DATA_DIR
+  CLEAN_DATA_DIR=1
+elif [[ -z "${DATA_DIR:-}" ]]; then
+  # The backend defaults DATA_DIR to /app/data (the container path), which isn't
+  # writable on a CI runner with no direnv to point it elsewhere. Give it an
+  # isolated, writable, throwaway dir so dev-seed can create the DB.
   DATA_DIR=$(mktemp -d)
   export DATA_DIR
   CLEAN_DATA_DIR=1
@@ -73,8 +81,8 @@ cleanup() {
 trap cleanup EXIT
 
 wait_for() {
-  local url=$1 name=$2 i
-  for i in $(seq 1 60); do
+  local url=$1 name=$2
+  for _ in $(seq 1 60); do
     curl -sS -m 1 "$url" >/dev/null 2>&1 && {
       echo "  ✓ $name up"
       return 0

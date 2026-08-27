@@ -559,6 +559,8 @@ func TestAgentModeLastEventIDHasAbsolutePrecedenceOverEveryQueryCursorShape(t *t
 }
 
 func TestAgentModeDetailScopePrecedesScaleLimitAndOversizeSnapshotsAreExplicit(t *testing.T) {
+	const maxThousandDeliveryAPILatency = 2 * time.Second
+
 	ts := newTestServer(t)
 	project, err := db.DB.Exec(`INSERT INTO projects(name,key,status) VALUES('HTTP detail scale','HDS','active')`)
 	if err != nil {
@@ -578,6 +580,7 @@ func TestAgentModeDetailScopePrecedesScaleLimitAndOversizeSnapshotsAreExplicit(t
 		t.Fatal(err)
 	}
 	var lateIssueID int64
+	var overflowIssueIDs []int64
 	// The historical bug filtered detail after LIMIT 1001, so exercise the
 	// 1002nd root rather than a root that the buggy prefix still contained.
 	for number := 1; number <= 1002; number++ {
@@ -588,6 +591,9 @@ func TestAgentModeDetailScopePrecedesScaleLimitAndOversizeSnapshotsAreExplicit(t
 			t.Fatal(insertErr)
 		}
 		lateIssueID, _ = issue.LastInsertId()
+		if number > agentmode.MaxCandidateRoots {
+			overflowIssueIDs = append(overflowIssueIDs, lateIssueID)
+		}
 		if _, insertErr = tx.Exec(`INSERT INTO agent_runs(issue_id,project_id,requested_by,status,
 			delivery_instrumentation_version) VALUES(?,?,?,'running',0)`, lateIssueID, projectID, memberID); insertErr != nil {
 			_ = tx.Rollback()
@@ -595,6 +601,35 @@ func TestAgentModeDetailScopePrecedesScaleLimitAndOversizeSnapshotsAreExplicit(t
 		}
 	}
 	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Measure the exact supported boundary through the HTTP handler, including
+	// the four Reader queries, projection, JSON encoding, and loopback transport.
+	if _, err := db.DB.Exec(`UPDATE issues SET deleted_at=CURRENT_TIMESTAMP WHERE id IN (?,?)`,
+		overflowIssueIDs[0], overflowIssueIDs[1]); err != nil {
+		t.Fatal(err)
+	}
+	apiStarted := time.Now()
+	exactScaleResponse := ts.get(t, "/api/agent-mode/projects/"+intString(projectID)+"/deliveries", ts.adminCookie)
+	var exactScaleSnapshot struct {
+		Rows []json.RawMessage `json:"rows"`
+	}
+	decodeErr := json.NewDecoder(exactScaleResponse.Body).Decode(&exactScaleSnapshot)
+	_ = exactScaleResponse.Body.Close()
+	apiElapsed := time.Since(apiStarted)
+	t.Logf("Agent Mode API latency: deliveries=%d elapsed=%s budget=%s",
+		agentmode.MaxCandidateRoots, apiElapsed, maxThousandDeliveryAPILatency)
+	if exactScaleResponse.StatusCode != http.StatusOK || decodeErr != nil ||
+		len(exactScaleSnapshot.Rows) != agentmode.MaxCandidateRoots {
+		t.Fatalf("exact-scale status=%d rows=%d decode=%v", exactScaleResponse.StatusCode,
+			len(exactScaleSnapshot.Rows), decodeErr)
+	}
+	if apiElapsed > maxThousandDeliveryAPILatency {
+		t.Fatalf("1,000-delivery API latency=%s exceeds budget=%s", apiElapsed, maxThousandDeliveryAPILatency)
+	}
+	if _, err := db.DB.Exec(`UPDATE issues SET deleted_at=NULL WHERE id IN (?,?)`,
+		overflowIssueIDs[0], overflowIssueIDs[1]); err != nil {
 		t.Fatal(err)
 	}
 

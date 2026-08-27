@@ -825,19 +825,45 @@ func TestStreamSubscribeRaceOverflowLostWakeRestartAndPermissionChanges(t *testi
 			t.Fatalf("restart replay batch=%+v err=%v", batch, err)
 		}
 
+		const (
+			changeVolume            = 1000
+			maxChangeCommitLatency  = 5 * time.Second
+			maxOverflowResetLatency = time.Second
+		)
 		overflow, err := NewStreamer(database, StreamerOptions{Clock: delivery.ClockFunc(func() time.Time { return now })}).Open(
 			context.Background(), request, "")
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer overflow.Close()
-		for index := 0; index <= MaxReplayBatch; index++ {
-			if _, err := database.Exec(`UPDATE issues SET title=? WHERE id=?`, fmt.Sprintf("Overflow %d", index), issueID); err != nil {
+		changeStarted := time.Now()
+		changeTx, err := database.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for index := 0; index < changeVolume; index++ {
+			if _, err := changeTx.Exec(`UPDATE issues SET title=? WHERE id=?`, fmt.Sprintf("Overflow %d", index), issueID); err != nil {
+				_ = changeTx.Rollback()
 				t.Fatal(err)
 			}
 		}
-		if _, err := overflow.Drain(context.Background()); !errors.Is(err, ErrReset) {
-			t.Fatalf("overflow drain error=%v, want reset", err)
+		if err := changeTx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		changeElapsed := time.Since(changeStarted)
+		t.Logf("Agent Mode change ingestion: changes=%d elapsed=%s budget=%s", changeVolume, changeElapsed, maxChangeCommitLatency)
+		if changeElapsed > maxChangeCommitLatency {
+			t.Fatalf("%d-change commit latency=%s exceeds budget=%s", changeVolume, changeElapsed, maxChangeCommitLatency)
+		}
+		resetStarted := time.Now()
+		_, drainErr := overflow.Drain(context.Background())
+		resetElapsed := time.Since(resetStarted)
+		t.Logf("Agent Mode overflow recovery: changes=%d elapsed=%s budget=%s", changeVolume, resetElapsed, maxOverflowResetLatency)
+		if !errors.Is(drainErr, ErrReset) {
+			t.Fatalf("overflow drain error=%v, want reset", drainErr)
+		}
+		if resetElapsed > maxOverflowResetLatency {
+			t.Fatalf("%d-change overflow reset latency=%s exceeds budget=%s", changeVolume, resetElapsed, maxOverflowResetLatency)
 		}
 	})
 
