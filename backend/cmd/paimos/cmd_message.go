@@ -164,9 +164,23 @@ func messageTargetSetCmd() *cobra.Command {
 		if refFile == "-" && keyFile == "-" {
 			return &usageError{msg: "stdin can carry only one of --target-ref-file and --target-key-file"}
 		}
-		targetRef, set, err := readMultilineInput(ref, refFile, "target ref")
-		if err != nil {
-			return err
+		var targetRef string
+		var set bool
+		var err error
+		if capabilityFile := strings.TrimSpace(refFile); capabilityFile != "" && (webhookAdapter || strings.EqualFold(strings.TrimSpace(kind), harnessplugin.KindHTTPSWebhook)) {
+			// A webhook capability URL is itself a bearer secret: read it only
+			// from a protected owner-only file (or stdin), never from an
+			// ordinary readable path.
+			raw, readErr := readProtectedSecretInput(capabilityFile, "--target-ref-file")
+			if readErr != nil {
+				return readErr
+			}
+			targetRef, set = string(raw), true
+		} else {
+			targetRef, set, err = readMultilineInput(ref, refFile, "target ref")
+			if err != nil {
+				return err
+			}
 		}
 		if !set || strings.TrimSpace(targetRef) == "" {
 			return &usageError{msg: "--target-ref or --target-ref-file is required"}
@@ -232,22 +246,50 @@ func messageTargetSetCmd() *cobra.Command {
 	return c
 }
 
-// readTargetKeyFile reads one raw sender key from a file or stdin. There is
-// deliberately no --target-key flag: a credential must never enter process
-// arguments, shell history, or ps output, and it is never echoed back.
+// maxProtectedSecretInputBytes bounds a one-line capability value before any
+// validation runs.
+const maxProtectedSecretInputBytes = 4096
+
+// readProtectedSecretInput reads one capability value for a file-only flag.
+// "-" reads stdin. Any other path must be a protected file: it is opened
+// without following symlinks and verified as a regular, single-linked file
+// owned by the effective user with owner-only permissions (0600/0400) — the
+// same policy as external-stage handoff credentials. Group- or world-readable
+// files, symlinks, hard links, directories, devices, and files owned by
+// another user are refused before a single byte is read. Errors carry the
+// flag, the path, and the reason, never the contents.
+func readProtectedSecretInput(path, flag string) ([]byte, error) {
+	var reader io.Reader
+	if path == "-" {
+		reader = os.Stdin
+	} else {
+		file, err := openExternalStageSecretFile(path)
+		if err != nil {
+			return nil, &usageError{msg: fmt.Sprintf("%s %s refused: it must be a regular file owned by you with owner-only permissions (chmod 0600), not a symlink or hard link (%v)", flag, path, err)}
+		}
+		defer file.Close()
+		reader = file
+	}
+	raw, err := io.ReadAll(io.LimitReader(reader, maxProtectedSecretInputBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", flag, err)
+	}
+	if len(raw) > maxProtectedSecretInputBytes {
+		return nil, &usageError{msg: flag + " must be one short line; the input is larger than 4096 bytes"}
+	}
+	return raw, nil
+}
+
+// readTargetKeyFile reads one raw sender key from a protected file or stdin.
+// There is deliberately no --target-key flag: a credential must never enter
+// process arguments, shell history, or ps output, and it is never echoed back.
 func readTargetKeyFile(path string) (string, bool, error) {
 	if path == "" {
 		return "", false, nil
 	}
-	var raw []byte
-	var err error
-	if path == "-" {
-		raw, err = io.ReadAll(os.Stdin)
-	} else {
-		raw, err = os.ReadFile(path) // #nosec G304 -- path comes from the CLI user's own --target-key-file flag.
-	}
+	raw, err := readProtectedSecretInput(path, "--target-key-file")
 	if err != nil {
-		return "", false, fmt.Errorf("read --target-key-file %s: %w", path, err)
+		return "", false, err
 	}
 	secret := strings.TrimSpace(string(raw))
 	if secret == "" {

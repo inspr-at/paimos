@@ -85,7 +85,10 @@ No adapter stores or prints vendor credentials.
 Grok Bot has no inbound CLI or mid-turn steer primitive. A routine created
 with the "When a webhook fires" trigger shows a POST URL and a sender key on
 its trigger card (Grok Bot desktop app). Keep each in its own one-line file
-(mode `0600`) and register them as one encrypted receiver target:
+that you own with mode `0600` — the CLI opens both without following symlinks
+and refuses group- or world-readable files, symlinks, hard links, directories,
+and files owned by another user before reading a byte — and register them as
+one encrypted receiver target:
 
 ```bash
 paimos message target set --project PHAROS --address grok_bot:amy \

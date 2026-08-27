@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -229,5 +230,147 @@ func TestTargetSetHasNoArgvSenderKeyFlag(t *testing.T) {
 	}
 	if command.Flags().Lookup("target-key-file") == nil {
 		t.Fatal("--target-key-file is missing")
+	}
+}
+
+// newTargetRegistrationServer records the registration payload so tests can
+// prove which file inputs reached the API and which were refused locally.
+func newTargetRegistrationServer(t *testing.T, payload *map[string]any) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
+			_, _ = w.Write([]byte(`[{"id":17,"key":"PHAROS","name":"Pharos"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/17/message-targets":
+			if err := json.NewDecoder(r.Body).Decode(payload); err != nil {
+				t.Error(err)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"t-1","version":1,"has_secret":true}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.Error(w, `{"error":"unexpected request"}`, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+	return srv
+}
+
+func TestTargetKeyFileRefusesGroupOrWorldReadableFiles(t *testing.T) {
+	const senderKey = "crsr_fixture_sender_key_0001"
+	refFile := writeSecretFixture(t, "target-ref.txt", "https://routine.example/automations/webhook/fixture\n")
+	for _, mode := range []os.FileMode{0o644, 0o640, 0o604, 0o660, 0o666, 0o440} {
+		keyFile := writeSecretFixture(t, fmt.Sprintf("key-%o.txt", mode), senderKey+"\n")
+		if err := os.Chmod(keyFile, mode); err != nil {
+			t.Fatal(err)
+		}
+		command := messageTargetSetCmd()
+		command.SetArgs([]string{"--project", "PHAROS", "--address", "grok_bot:amy", "--adapter", "grok_bot_routine",
+			"--kind", "https_webhook", "--target-ref-file", refFile, "--target-key-file", keyFile})
+		err := command.Execute()
+		if err == nil || !strings.Contains(err.Error(), "--target-key-file") || !strings.Contains(err.Error(), "owner-only") {
+			t.Fatalf("mode %o: error=%v", mode, err)
+		}
+		if strings.Contains(err.Error(), senderKey) {
+			t.Fatalf("mode %o: error echoed the sender key: %v", mode, err)
+		}
+	}
+}
+
+func TestTargetKeyFileRefusesSymlinksAndNonRegularFiles(t *testing.T) {
+	const senderKey = "crsr_fixture_sender_key_0001"
+	refFile := writeSecretFixture(t, "target-ref.txt", "https://routine.example/automations/webhook/fixture\n")
+	real := writeSecretFixture(t, "real-key.txt", senderKey+"\n")
+	cases := map[string]string{"directory": t.TempDir()}
+	link := filepath.Join(t.TempDir(), "key-symlink.txt")
+	if err := os.Symlink(real, link); err == nil {
+		cases["symlink"] = link
+	}
+	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+		hardLink := filepath.Join(t.TempDir(), "key-hardlink.txt")
+		if err := os.Link(real, hardLink); err == nil {
+			cases["hard link"] = hardLink
+		}
+	}
+	if len(cases) < 2 {
+		t.Fatal("fixture could not create a symlink or hard link")
+	}
+	for name, path := range cases {
+		command := messageTargetSetCmd()
+		command.SetArgs([]string{"--project", "PHAROS", "--address", "grok_bot:amy", "--adapter", "grok_bot_routine",
+			"--kind", "https_webhook", "--target-ref-file", refFile, "--target-key-file", path})
+		err := command.Execute()
+		if err == nil || !strings.Contains(err.Error(), "--target-key-file") || strings.Contains(err.Error(), senderKey) {
+			t.Fatalf("%s: error=%v", name, err)
+		}
+	}
+}
+
+func TestTargetKeyFileAcceptsOwnerOnlyReadOnlyFile(t *testing.T) {
+	const senderKey = "crsr_fixture_sender_key_0001"
+	var payload map[string]any
+	newTargetRegistrationServer(t, &payload)
+	refFile := writeSecretFixture(t, "target-ref.txt", "https://routine.example/automations/webhook/fixture\n")
+	keyFile := writeSecretFixture(t, "target-key.txt", senderKey+"\n")
+	if err := os.Chmod(keyFile, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, err := executeCLIForTest(t, "message", "target", "set", "--project", "PHAROS", "--address", "grok_bot:amy",
+		"--adapter", "grok_bot_routine", "--kind", "https_webhook", "--target-ref-file", refFile, "--target-key-file", keyFile)
+	if err != nil {
+		t.Fatalf("err=%v stderr=%s", err, errOut)
+	}
+	if payload["target_secret"] != senderKey {
+		t.Fatalf("payload=%#v", payload)
+	}
+	if strings.Contains(out+errOut, senderKey) {
+		t.Fatalf("CLI output exposed the sender key: %q %q", out, errOut)
+	}
+}
+
+func TestWebhookTargetRefFileRequiresOwnerOnlyFile(t *testing.T) {
+	const capability = "https://routine.example/automations/webhook/fixture-capability"
+	keyFile := writeSecretFixture(t, "target-key.txt", "crsr_fixture_sender_key_0001\n")
+	refFile := writeSecretFixture(t, "target-ref.txt", capability+"\n")
+	if err := os.Chmod(refFile, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := messageTargetSetCmd()
+	command.SetArgs([]string{"--project", "PHAROS", "--address", "grok_bot:amy", "--adapter", "grok_bot_routine",
+		"--kind", "https_webhook", "--target-ref-file", refFile, "--target-key-file", keyFile})
+	err := command.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--target-ref-file") || !strings.Contains(err.Error(), "owner-only") || strings.Contains(err.Error(), capability) {
+		t.Fatalf("webhook capability file with mode 0644 was not refused: %v", err)
+	}
+	if err := os.Chmod(refFile, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	newTargetRegistrationServer(t, &payload)
+	if _, _, err := executeCLIForTest(t, "message", "target", "set", "--project", "PHAROS", "--address", "grok_bot:amy",
+		"--adapter", "grok_bot_routine", "--kind", "https_webhook", "--target-ref-file", refFile, "--target-key-file", keyFile); err != nil {
+		t.Fatalf("owner-only capability file rejected: %v", err)
+	}
+	if payload["target_ref"] != capability {
+		t.Fatalf("payload=%#v", payload)
+	}
+}
+
+func TestCodexTargetRefFileIsNotHeldToTheSecretFilePolicy(t *testing.T) {
+	var payload map[string]any
+	newTargetRegistrationServer(t, &payload)
+	threadFile := writeSecretFixture(t, "codex-thread.txt", "019d-codex-thread\n")
+	if err := os.Chmod(threadFile, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := executeCLIForTest(t, "message", "target", "set", "--project", "PHAROS", "--address", "codex:codex",
+		"--adapter", "codex", "--kind", "codex_thread", "--target-ref-file", threadFile, "--maximum-level", "steer"); err != nil {
+		t.Fatalf("codex thread reference file rejected: %v", err)
+	}
+	if payload["target_ref"] != "019d-codex-thread" || payload["target_secret"] != nil {
+		t.Fatalf("payload=%#v", payload)
 	}
 }

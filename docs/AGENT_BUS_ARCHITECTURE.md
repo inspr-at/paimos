@@ -506,7 +506,9 @@ primitive:
   the header at dispatch. Do not invent any other signing scheme for Grok Bot.
 - Treat the sender key as a capability secret exactly like the URL: never
   place it in a message, wake body, audit detail, error, log, list/status
-  response, listen disclosure, ticket, or process argument.
+  response, listen disclosure, ticket, or process argument. The CLI accepts
+  both values only from stdin or from a regular, owner-only (`0600`),
+  single-linked file owned by the caller, opened without following symlinks.
 
 A `grok_bot_routine` target without a sender key is refused at registration,
 and a version that predates the key column is never dispatched: the delivery

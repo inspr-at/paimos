@@ -109,7 +109,9 @@ variables. Register them via the closed admin API fields `target_ref` (the
 POST URL) and `target_secret` (the raw sender key), or equivalently
 `paimos message target set ... --target-ref-file <url-file> --target-key-file <key-file>`
 (each flag also accepts `-` for stdin, but only one of them per invocation;
-neither value is accepted as an argument). Both come from the routine's "When
+neither value is accepted as an argument, and a file must be a regular,
+owner-only `0600` file owned by the caller — symlinks, hard links, and group-
+or world-readable files are refused). Both come from the routine's "When
 a webhook fires" trigger card in the Grok Bot desktop app. PAIMOS encrypts the
 URL under the `agent-message-targets` secretvault domain and the key under the
 separate `agent-message-target-secrets` domain using `PAIMOS_SECRET_KEY`;

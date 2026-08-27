@@ -28,6 +28,13 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   The key never appears in the ledger, delivery status, audit, wake payload,
   listen disclosure, CLI output, or error text, and `paimos secrets rotate`
   re-encrypts the new column atomically with the target references.
+- Both file flags are fail-closed inputs: `--target-key-file` and, for
+  webhook adapters, `--target-ref-file` are read only from a regular,
+  single-linked file owned by the caller with owner-only permissions
+  (`0600`/`0400`), opened without following symlinks — the same policy as
+  external-stage handoff credentials. Group- or world-readable files,
+  symlinks, hard links, directories, and other users' files are refused
+  before any byte is read; `-` (stdin) remains available for one of the two.
 
 ### Added — Claude simple delivery (PAI-827)
 
