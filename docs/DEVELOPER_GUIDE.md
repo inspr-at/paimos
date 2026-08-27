@@ -68,6 +68,12 @@ backend/
   main.go              entrypoint; all routes wired here
   brand/               BRAND_* env parsing (single source of truth)
   auth/                sessions, password hashing, TOTP, API keys, rate limiting
+  agentmessage/        durable agent message ledger, delivery bus, adapters, and
+                       webhook dispatcher (M151–M155; see AGENT_BUS_ARCHITECTURE.md)
+  secretvault/         authenticated encryption for stored secrets and receiver targets
+  contracts/           versioned JSON schemas + fixtures (agent-message-v1, external-stage-v1)
+  cmd/paimos/          `paimos` CLI (issue, tell, message, listen, serve, run-agent, …)
+  cmd/paimos-mcp/      MCP server binary
   db/                  SQLite open + migrations (each migration inline in db.go)
   models/              shared structs (User, Issue, Project, …)
   handlers/            HTTP handlers; one file per domain
@@ -92,6 +98,11 @@ docs/
   archive/
     DATA_MODEL.md      legacy v0.3.5 snapshot — archival only
   AGENT_INTEGRATION.md authenticated API usage for agents
+  AGENT_INTERFACE.md   `paimos` CLI, MCP, and durable agent message surface
+  AGENT_BUS_ARCHITECTURE.md
+                       instant agent bus design: levels, targets, deliveries, adapters
+  AGENT_MESSAGE_SECURITY.md
+                       untrusted-message framing and native delivery boundary
   api-minimal.md       compact API surface reference
   brand/               visual identity (mark + wordmark + brand guide)
 +agents/rules/         rules agents follow when editing this codebase
@@ -300,6 +311,14 @@ hides in a ⋯-menu modal.
   auth, imports, sprint logic, reports.
 - **Frontend**: `cd frontend && npm test` (Vitest + happy-dom) —
   covers the thin API client and a handful of critical components.
+- **Agent bus proofs** (opt-in, real vendor CLIs; skipped when the
+  variable is unset): `PAIMOS_AGENT_BUS_E2E_THREAD=<codex thread id>
+  go test ./cmd/paimos -run TestAgentBusRealCodexSimpleE2E` and
+  `PAIMOS_AGENT_BUS_E2E_CLAUDE_SESSION=<local session UUID>
+  go test ./cmd/paimos -run TestAgentBusRealClaudeSimpleE2E` drive
+  `paimos tell` through the ledger, a live listener, the real
+  `codex queue` / `claude -p --resume` primitive, and the cursor ack,
+  logging commit/pickup/handoff timings.
 - **Smoke test**: `docker compose up --build`, then visit
   `http://localhost:8888`, create an admin, create a project and
   issue, upload an attachment (MinIO required), log out, reset

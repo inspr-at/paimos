@@ -275,9 +275,17 @@ the model response; a zero vendor exit is the delivery acknowledgement. The
 gate is deliberately per invocation so installing Grok cannot silently enable
 model use.
 
-Grok Bot is a different Cursor-hosted product and has no documented external
-receiving API or CLI. It therefore remains receive-by-human: PAIMOS stores and
-shows the message, but does not automate its UI or claim native delivery.
+Grok Bot is a different Cursor-hosted product with no inbound CLI and no
+mid-turn steer primitive. Since 5.18.0 an operator can register its
+vendor-generated routine webhook as an encrypted `grok_bot_routine` /
+`https_webhook` receiver target; the server then dispatches a security-framed
+wake payload (the untrusted-data frame, never the raw stored body) over HTTPS
+with a stable `delivery_id`, bounded retry/dead-letter state, and SSRF
+controls, and records a `steer` request as `effective_level=simple` with
+`fallback_reason=unsupported`. PAIMOS never runs `grok send`, `grok queue`, or
+`grok steer` and does not automate the Grok Bot UI. See
+[`AGENT_INTERFACE.md` § Grok Bot routine wake](AGENT_INTERFACE.md#grok-bot-routine-wake)
+and [`CONFIGURATION.md` § Instant agent bus](CONFIGURATION.md#instant-agent-bus).
 
 Blast-radius queries are available at
 `GET /api/projects/:id/graph/blast-radius?issue=PAI-79&depth=3` for the

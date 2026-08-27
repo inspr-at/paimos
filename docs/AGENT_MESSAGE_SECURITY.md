@@ -56,8 +56,9 @@ Listen and acknowledge requests bind the address to trusted
 and only to an actual delivered, non-action row in that inbox, so a malicious
 client cannot skip unseen future messages.
 
-Native delivery preserves that boundary. Codex, Claude, and Grok Build receive
-the server-added untrusted-data frame, never the raw stored body. Claude
+Native delivery preserves that boundary. Codex, Claude, Grok Build, and the
+`grok_bot_routine` webhook wake payload receive the server-added untrusted-data
+frame, never the raw stored body. Claude
 delivery is simple-only: it pipes the framed body over stdin to fixed-argv
 `claude -p --resume <session_id>` or `claude -p --cloud <session_id>`, accepts
 only an explicit session target (the encrypted receiver-owned `claude_session`
