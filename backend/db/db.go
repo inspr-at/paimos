@@ -11634,6 +11634,41 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 ON agent_message_targets(instance,project_id,address,enabled)`,
 			`PRAGMA foreign_keys=ON`,
 		}},
+
+		// M156 / PAI-829: harness adapters and target kinds are registry plugin
+		// keys, not a closed vendor list. Rebuild the target table again so a
+		// separately registered plugin can persist its binding without a core
+		// migration. Adapter/kind pairing and maximum-level capability remain
+		// fail-closed in harness.ValidateBinding.
+		{156, []string{
+			`PRAGMA foreign_keys=OFF`,
+			`CREATE TABLE agent_message_targets_m156 (
+			 id                TEXT PRIMARY KEY CHECK(length(CAST(id AS BLOB)) BETWEEN 1 AND 64),
+			 instance          TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+			 project_id        INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 address           TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+			 adapter           TEXT NOT NULL CHECK(length(CAST(adapter AS BLOB)) BETWEEN 1 AND 64 AND length(adapter)=length(CAST(adapter AS BLOB)) AND adapter GLOB '[a-z]*' AND adapter NOT GLOB '*[^a-z0-9_]*'),
+			 target_kind       TEXT NOT NULL CHECK(length(CAST(target_kind AS BLOB)) BETWEEN 1 AND 64 AND length(target_kind)=length(CAST(target_kind AS BLOB)) AND target_kind GLOB '[a-z]*' AND target_kind NOT GLOB '*[^a-z0-9_]*'),
+			 target_ref_cipher BLOB NOT NULL CHECK(typeof(target_ref_cipher)='blob' AND length(target_ref_cipher)>28),
+			 maximum_level     TEXT NOT NULL DEFAULT 'simple' CHECK(maximum_level IN ('simple','steer')),
+			 role              TEXT NOT NULL DEFAULT 'primary' CHECK(role IN ('primary','simple_fallback')),
+			 enabled           INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+			 version           INTEGER NOT NULL CHECK(version>0),
+			 created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 UNIQUE(instance,project_id,address,role,version)
+			)`,
+			`INSERT INTO agent_message_targets_m156
+			 (id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version,created_at)
+			 SELECT id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version,created_at
+			   FROM agent_message_targets`,
+			`DROP TABLE agent_message_targets`,
+			`ALTER TABLE agent_message_targets_m156 RENAME TO agent_message_targets`,
+			`CREATE UNIQUE INDEX idx_agent_message_targets_enabled_role
+			 ON agent_message_targets(instance,project_id,address,role) WHERE enabled=1`,
+			`CREATE INDEX idx_agent_message_targets_receiver
+			 ON agent_message_targets(instance,project_id,address,enabled)`,
+			`PRAGMA foreign_keys=ON`,
+		}},
 	}
 
 	for _, m := range migrations {

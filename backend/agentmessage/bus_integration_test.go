@@ -11,9 +11,23 @@ import (
 	"testing"
 	"time"
 
+	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	paimosdb "github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
+
+type durableThirdAdapterStub struct{}
+
+func (durableThirdAdapterStub) Name() string         { return "third_adapter" }
+func (durableThirdAdapterStub) Kind() string         { return "third_ref" }
+func (durableThirdAdapterStub) MaximumLevel() string { return harnessplugin.LevelSimple }
+func (durableThirdAdapterStub) Mode() string         { return harnessplugin.ModeLocal }
+func (durableThirdAdapterStub) ValidateTarget(context.Context, string) error {
+	return nil
+}
+func (durableThirdAdapterStub) Deliver(context.Context, harnessplugin.DeliverRequest) (harnessplugin.DeliverResult, error) {
+	return harnessplugin.DeliverResult{EffectiveLevel: harnessplugin.LevelSimple}, nil
+}
 
 func openBusTestDB(t *testing.T) (*Service, int64) {
 	t.Helper()
@@ -48,6 +62,37 @@ func allowBusSender(t *testing.T, service *Service, projectID int64, receiver st
 	t.Helper()
 	if err := service.AllowSender(context.Background(), projectID, receiver, "paimos:sender"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBusPersistsRegisteredThirdAdapterTargetWithoutCoreChanges(t *testing.T) {
+	if err := harnessplugin.Register(durableThirdAdapterStub{}); err != nil {
+		t.Fatal(err)
+	}
+	service, projectID := openBusTestDB(t)
+	target, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "third:amy", Adapter: "third_adapter", TargetKind: "third_ref",
+		TargetRef: "safe-third-party-reference", MaximumLevel: "simple", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Adapter != "third_adapter" || target.TargetKind != "third_ref" {
+		t.Fatalf("target=%#v", target)
+	}
+	targets, err := service.ListTargets(context.Background(), projectID, "third:amy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].Adapter != "third_adapter" || targets[0].TargetKind != "third_ref" {
+		t.Fatalf("targets=%#v", targets)
+	}
+	listed, err := json.Marshal(targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(listed), "target_ref") || strings.Contains(string(listed), "safe-third-party-reference") {
+		t.Fatalf("target list exposed a secret reference: %s", listed)
 	}
 }
 
