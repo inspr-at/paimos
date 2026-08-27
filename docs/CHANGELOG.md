@@ -16,10 +16,11 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   daemon waited for an HTTP request head, `initialize` never got an answer,
   and the timeout cleanup of the npm wrapper orphaned the native proxy and
   surfaced as `initialize Codex app-server: EOF` (reproduced against Codex
-  CLI 0.149.1 with app-server daemon 0.150.1). The worker now performs the
-  documented handshake through the same vendor proxy and sends one JSON-RPC
-  message per text frame without the `jsonrpc` header; PAIMOS still never
-  opens the control socket itself.
+  CLI 0.149.1 with app-server daemon 0.150.1). The harness Codex plugin
+  (`backend/agentmessage/harness`, PAI-829) now performs the documented
+  handshake through the same vendor proxy and sends one JSON-RPC message per
+  text frame without the `jsonrpc` header; PAIMOS still never opens the
+  control socket itself.
 - Active-turn discovery no longer depends on `thread/turns/list` alone, which
   0.150.x gates behind the `experimentalApi` initialize capability. The worker
   opts in, checks the stable `thread/read` status first, and only for an

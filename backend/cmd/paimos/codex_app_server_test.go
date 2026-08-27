@@ -14,13 +14,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	"golang.org/x/net/websocket"
 )
 
@@ -417,8 +417,7 @@ func TestDeliverCodexMessageUnknownSteerRejectionFailsWithoutQueue(t *testing.T)
 			if err == nil {
 				t.Fatalf("unexpected success outcome=%#v", outcome)
 			}
-			var remote *codexRPCError
-			if !errors.As(err, &remote) || !strings.Contains(err.Error(), "unexpected app-server rejection") || !strings.Contains(err.Error(), "expected turn turn-live") {
+			if !strings.Contains(err.Error(), "unexpected app-server rejection") || !strings.Contains(err.Error(), "Codex app-server error") || !strings.Contains(err.Error(), "expected turn turn-live") {
 				t.Fatalf("error=%q must name the unexpected rejection and the expected turn", err)
 			}
 			var unavailable *adapterUnavailableError
@@ -433,71 +432,14 @@ func TestDeliverCodexMessageUnknownSteerRejectionFailsWithoutQueue(t *testing.T)
 	}
 }
 
-func TestClassifyCodexSteerRejection(t *testing.T) {
-	for _, tc := range []struct {
-		name, rejection, reason string
-		documented              bool
-	}{
-		{"review turn with structured data", codexRejectionReviewTurn, "not_steerable", true},
-		{"structured data wins even with another code", `{"code":-32603,"message":"steer failed","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"compact"}}}}`, "not_steerable", true},
-		{"compact turn message only", `{"code":-32600,"message":"cannot steer a compact turn"}`, "not_steerable", true},
-		{"expected turn mismatch", codexRejectionTurnRace, "not_steerable", true},
-		{"no active turn", codexRejectionNoTurn, "idle", true},
-		{"no active turn with surrounding whitespace", `{"code":-32600,"message":" no active turn to steer\n"}`, "idle", true},
-		{"unknown variant", "{\"code\":-32600,\"message\":\"Invalid request: unknown variant `turn/steer`\"}", "", false},
-		{"method not found", `{"code":-32601,"message":"Method not found"}`, "", false},
-		{"ownership rejection", `{"code":-32600,"message":"direct app-server input is not allowed for multi-agent v2 sub-agents"}`, "", false},
-		{"output schema mismatch", `{"code":-32600,"message":"active turn uses a different output schema"}`, "", false},
-		{"documented text under a foreign code", "{\"code\":-32603,\"message\":\"expected active turn id `a` but found `b`\"}", "", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var remote codexRPCError
-			if err := json.Unmarshal([]byte(tc.rejection), &remote); err != nil {
-				t.Fatal(err)
-			}
-			reason, documented := classifyCodexSteerRejection(&remote)
-			if reason != tc.reason || documented != tc.documented {
-				t.Fatalf("classify(%s)=%q,%v want %q,%v", tc.rejection, reason, documented, tc.reason, tc.documented)
-			}
-		})
-	}
-	if reason, documented := classifyCodexSteerRejection(nil); reason != "" || documented {
-		t.Fatalf("nil error classified as %q,%v", reason, documented)
-	}
-}
-
-func TestCodexTurnPageUnavailable(t *testing.T) {
-	for _, tc := range []struct {
-		rejection   string
-		unavailable bool
-	}{
-		{`{"code":-32600,"message":"thread/turns/list requires experimentalApi capability"}`, true},
-		{"{\"code\":-32600,\"message\":\"Invalid request: unknown variant `thread/turns/list`, expected one of `initialize`\"}", true},
-		{`{"code":-32601,"message":"Method not found"}`, true},
-		{`{"code":-32600,"message":"Invalid request: invalid type: string \"x\", expected u32"}`, false},
-		{`{"code":-32600,"message":"thread not found: thread-missing"}`, false},
-		{`{"code":-32603,"message":"internal error"}`, false},
-	} {
-		var remote codexRPCError
-		if err := json.Unmarshal([]byte(tc.rejection), &remote); err != nil {
-			t.Fatal(err)
-		}
-		if got := codexTurnPageUnavailable(&remote); got != tc.unavailable {
-			t.Fatalf("codexTurnPageUnavailable(%s)=%v want %v", tc.rejection, got, tc.unavailable)
-		}
-	}
-	if codexTurnPageUnavailable(nil) {
-		t.Fatal("nil error must not be treated as an unavailable page")
-	}
-}
-
 // A turn-page rejection that is not the documented gate must surface instead
-// of silently loading the full history or queueing.
+// of silently loading the full history or queueing. (The classifier tables
+// themselves live with the transport in the harness package.)
 func TestDeliverCodexMessageTurnPageRejectionOtherThanGatingFails(t *testing.T) {
 	argsFile, framesFile := installFakeCodexAppServer(t)
-	t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"error":{"code":-32600,"message":"thread not found: thread-vanished"}}`)
+	t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"error":{"code":-32600,"message":"Invalid request: invalid type: string \"x\", expected u32"}}`)
 	_, err := deliverCodexMessage(context.Background(), steerMessage("thread-vanished"), "vanished payload", "ignored", "queue")
-	if err == nil || !strings.Contains(err.Error(), "list Codex thread turns") || !strings.Contains(err.Error(), "thread not found") {
+	if err == nil || !strings.Contains(err.Error(), "list Codex thread turns") || !strings.Contains(err.Error(), "Invalid request") {
 		t.Fatalf("error=%v want the turn page rejection surfaced", err)
 	}
 	args, _ := os.ReadFile(argsFile)
@@ -568,16 +510,16 @@ func TestDeliverCodexSteerRequiresTarget(t *testing.T) {
 func TestDeliverCodexSteerSilentProxyFailsPreciselyWithinBudget(t *testing.T) {
 	_, _ = installFakeCodexAppServer(t)
 	t.Setenv("PAIMOS_TEST_SCENARIO", "hang")
-	previous := codexSteerTimeout
-	codexSteerTimeout = 2 * time.Second
-	t.Cleanup(func() { codexSteerTimeout = previous })
+	previous := harnessplugin.CodexSteerTimeout
+	harnessplugin.CodexSteerTimeout = 2 * time.Second
+	t.Cleanup(func() { harnessplugin.CodexSteerTimeout = previous })
 	started := time.Now()
 	steered, reason, err := deliverCodexSteer(context.Background(), "hang payload", "thread-hang")
 	elapsed := time.Since(started)
 	if steered || reason != "" {
 		t.Fatalf("steered=%v reason=%q on a silent proxy", steered, reason)
 	}
-	var timeout *codexProxyTimeoutError
+	var timeout *harnessplugin.CodexProxyTimeoutError
 	if !errors.As(err, &timeout) {
 		t.Fatalf("error=%#v want a typed proxy timeout", err)
 	}
@@ -593,33 +535,4 @@ func TestDeliverCodexSteerSilentProxyFailsPreciselyWithinBudget(t *testing.T) {
 	if errors.As(err, &unavailable) {
 		t.Fatalf("a transport timeout must stay retryable, got adapter unavailable: %v", err)
 	}
-}
-
-// TestCodexAppServerProxyReadOnlyProbe is opt-in evidence gathering against
-// the real local daemon: it performs the documented handshake through the
-// vendor proxy and reads the named thread's status without steering it.
-func TestCodexAppServerProxyReadOnlyProbe(t *testing.T) {
-	threadID := strings.TrimSpace(os.Getenv("PAIMOS_CODEX_PROBE_THREAD"))
-	if threadID == "" {
-		t.Skip("set PAIMOS_CODEX_PROBE_THREAD to a real local Codex thread id")
-	}
-	path, err := exec.LookPath("codex")
-	if err != nil {
-		t.Skip("codex CLI not in PATH")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), codexSteerTimeout)
-	defer cancel()
-	started := time.Now()
-	session, err := openCodexAppServerSession(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer session.close()
-	handshake := time.Since(started)
-	turnID, reason, err := session.activeTurn(ctx, threadID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("PAI-825_PROBE thread=%s handshake_ms=%d total_ms=%d in_progress_turn=%q fallback_reason=%q",
-		threadID, handshake.Milliseconds(), time.Since(started).Milliseconds(), turnID, reason)
 }

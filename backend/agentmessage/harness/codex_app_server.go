@@ -1,7 +1,7 @@
 // PAIMOS — Your Professional & Personal AI Project OS
 // Copyright (C) 2026 Markus Barta <markus@barta.com>
 
-package main
+package harness
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-// Codex steer transport (PAI-825 follow-up).
+// Codex steer transport (PAI-825 follow-up, PAI-831).
 //
 // The Codex app-server daemon serves its control plane on a Unix socket. The
 // documented client path is `codex app-server proxy`, which opens exactly one
@@ -34,9 +34,9 @@ import (
 // socket itself, never starts its own app-server, and never invents a
 // `codex steer` CLI.
 
-// codexSteerTimeout bounds one steer attempt end to end: daemon start, proxy
+// CodexSteerTimeout bounds one steer attempt end to end: daemon start, proxy
 // spawn, WebSocket handshake, and the JSON-RPC exchange. Tests lower it.
-var codexSteerTimeout = 20 * time.Second
+var CodexSteerTimeout = 20 * time.Second
 
 // codexProxyMaxPayloadBytes caps one inbound frame. The stable
 // `thread/read {includeTurns:true}` fallback returns the whole thread history
@@ -44,6 +44,14 @@ var codexSteerTimeout = 20 * time.Second
 const codexProxyMaxPayloadBytes = 512 << 20
 
 const codexProxyReapDelay = 2 * time.Second
+
+// codexRPCInvalidRequest is the JSON-RPC code the app-server uses for its
+// documented request rejections (`invalid_request` in codex-rs); the
+// standard method-not-found code is what a server without a method returns.
+const (
+	codexRPCInvalidRequest = -32600
+	codexRPCMethodNotFound = -32601
+)
 
 type codexRPCError struct {
 	Code    int             `json:"code"`
@@ -70,19 +78,20 @@ type codexTurn struct {
 	Status string `json:"status"`
 }
 
-// codexProxyTimeoutError names the wire phase that produced no answer within
+// CodexProxyTimeoutError names the wire phase that produced no answer within
 // the steer budget so an operator can tell a dead daemon from a wrong
-// framing assumption.
-type codexProxyTimeoutError struct {
-	phase   string
-	timeout time.Duration
-	daemon  string
+// framing assumption. It is a transport failure, not an UNSUPPORTED
+// primitive, so deliveries stay retryable.
+type CodexProxyTimeoutError struct {
+	Phase   string
+	Timeout time.Duration
+	Daemon  string
 }
 
-func (e *codexProxyTimeoutError) Error() string {
-	msg := fmt.Sprintf("Codex app-server proxy: no response to %s within %s (the proxied stream is a WebSocket byte pipe to the app-server daemon)", e.phase, e.timeout)
-	if e.daemon != "" {
-		msg += "; " + e.daemon
+func (e *CodexProxyTimeoutError) Error() string {
+	msg := fmt.Sprintf("Codex app-server proxy: no response to %s within %s (the proxied stream is a WebSocket byte pipe to the app-server daemon)", e.Phase, e.Timeout)
+	if e.Daemon != "" {
+		msg += "; " + e.Daemon
 	}
 	return msg
 }
@@ -117,7 +126,7 @@ func codexCommand(ctx context.Context, path string, args ...string) *exec.Cmd {
 	// #nosec G204 G702 -- codex is resolved from the operator-controlled PATH and every argv entry is fixed.
 	cmd := exec.CommandContext(ctx, path, args...)
 	configureProcessGroup(cmd)
-	cmd.Cancel = func() error { return signalOwnedProcess(cmd, true) }
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.WaitDelay = codexProxyReapDelay
 	return cmd
 }
@@ -126,7 +135,11 @@ func codexCommand(ctx context.Context, path string, args ...string) *exec.Cmd {
 // proxy, performs the WebSocket Upgrade handshake, and completes the
 // documented initialize/initialized exchange. Every blocking step is bounded
 // by ctx; on timeout the proxy process group is killed before returning.
-func openCodexAppServerSession(ctx context.Context, path string) (*codexAppServerSession, error) {
+func openCodexAppServerSession(ctx context.Context, path string, stderr io.Writer, clientVersion string) (*codexAppServerSession, error) {
+	stderr = writerOrDiscard(stderr)
+	if clientVersion == "" {
+		clientVersion = defaultClientVersion
+	}
 	daemon := codexCommand(ctx, path, "app-server", "daemon", "start")
 	daemon.Stdout = io.Discard
 	daemon.Stderr = stderr
@@ -186,7 +199,7 @@ func openCodexAppServerSession(ctx context.Context, path string) (*codexAppServe
 	session.conn.MaxPayloadBytes = codexProxyMaxPayloadBytes
 	go session.readLoop()
 	if err := session.call(ctx, "initialize", map[string]any{
-		"clientInfo":   map[string]string{"name": "paimos", "title": "PAIMOS agent bus", "version": Version},
+		"clientInfo":   map[string]string{"name": "paimos", "title": "PAIMOS agent bus", "version": clientVersion},
 		"capabilities": map[string]any{"experimentalApi": true},
 	}, nil); err != nil {
 		session.close()
@@ -247,7 +260,7 @@ func (s *codexAppServerSession) call(ctx context.Context, method string, params 
 			if !ok {
 				<-s.readDone
 				if ctx.Err() != nil {
-					return &codexProxyTimeoutError{phase: method, timeout: codexSteerTimeout}
+					return &CodexProxyTimeoutError{Phase: method, Timeout: CodexSteerTimeout}
 				}
 				return fmt.Errorf("Codex app-server proxy closed the stream while waiting for %s: %w", method, s.readErr)
 			}
@@ -265,7 +278,7 @@ func (s *codexAppServerSession) call(ctx context.Context, method string, params 
 			}
 			return nil
 		case <-ctx.Done():
-			return &codexProxyTimeoutError{phase: method, timeout: codexSteerTimeout}
+			return &CodexProxyTimeoutError{Phase: method, Timeout: CodexSteerTimeout}
 		}
 	}
 }
@@ -343,18 +356,10 @@ func (s *codexAppServerSession) reap() {
 	select {
 	case <-waited:
 	case <-time.After(codexProxyReapDelay):
-		_ = signalOwnedProcess(s.proxy, true)
+		_ = killProcessGroup(s.proxy)
 		<-waited
 	}
 }
-
-// codexRPCInvalidRequest is the JSON-RPC code the app-server uses for its
-// documented request rejections (`invalid_request` in codex-rs); the
-// standard method-not-found code is what a server without a method returns.
-const (
-	codexRPCInvalidRequest = -32600
-	codexRPCMethodNotFound = -32601
-)
 
 // classifyCodexSteerRejection maps a `turn/steer` JSON-RPC error onto the
 // documented simple-fallback reasons and reports false for everything else.
@@ -408,7 +413,7 @@ func codexTurnPageUnavailable(err *codexRPCError) bool {
 // codexTimeout builds the precise timeout error for a blocking phase and
 // attaches the daemon/CLI version pair when the vendor CLI can report it.
 func codexTimeout(path, phase string) error {
-	return &codexProxyTimeoutError{phase: phase, timeout: codexSteerTimeout, daemon: describeCodexDaemon(path)}
+	return &CodexProxyTimeoutError{Phase: phase, Timeout: CodexSteerTimeout, Daemon: describeCodexDaemon(path)}
 }
 
 // describeCodexDaemon reports the installed CLI and running app-server
@@ -432,23 +437,26 @@ func describeCodexDaemon(path string) string {
 	return fmt.Sprintf("codex cli=%s app-server=%s status=%s", info.CLIVersion, info.AppServerVersion, info.Status)
 }
 
-// deliverCodexSteer performs one mid-turn steer through the documented
+// DeliverCodexSteer performs one mid-turn steer through the documented
 // app-server sequence: daemon start, proxy, WebSocket handshake, initialize,
 // initialized, active-turn discovery, then `turn/steer` with the required
-// expectedTurnId and typed text input. A clean idle thread or a
-// rejected/raced steer is returned as a typed simple-fallback decision;
-// transport and handshake failures remain retryable errors.
-func deliverCodexSteer(ctx context.Context, body, target string) (bool, string, error) {
+// expectedTurnId and typed text input. A clean idle thread or a documented
+// rejection (not steerable, expected-turn race, turn finished first) is
+// returned as a typed simple-fallback decision; transport and handshake
+// failures and every undocumented rejection remain retryable errors so a
+// broken primitive is never masked by the queue fallback.
+func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Writer, clientVersion string) (bool, string, error) {
+	stderr = writerOrDiscard(stderr)
 	if strings.TrimSpace(target) == "" {
-		return false, "", &adapterUnavailableError{message: "Codex steer requires a receiver-owned thread target"}
+		return false, "", &UnavailableError{Message: "Codex steer requires a receiver-owned thread target"}
 	}
 	path, err := exec.LookPath("codex")
 	if err != nil {
-		return false, "", &adapterUnavailableError{message: "Codex delivery requires the codex CLI in PATH"}
+		return false, "", &UnavailableError{Message: "Codex delivery requires the codex CLI in PATH"}
 	}
-	operationCtx, cancel := context.WithTimeout(ctx, codexSteerTimeout)
+	operationCtx, cancel := context.WithTimeout(ctx, CodexSteerTimeout)
 	defer cancel()
-	session, err := openCodexAppServerSession(operationCtx, path)
+	session, err := openCodexAppServerSession(operationCtx, path, stderr, clientVersion)
 	if err != nil {
 		return false, "", err
 	}

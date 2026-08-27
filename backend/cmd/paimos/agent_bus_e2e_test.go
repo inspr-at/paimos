@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/agentmessage"
+	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	paimosdb "github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
@@ -219,7 +220,7 @@ func runAgentBusRealCodexE2E(t *testing.T, threadID, level, probe string) agentB
 	}
 	select {
 	case <-completed:
-	case <-time.After(codexSteerTimeout + 20*time.Second):
+	case <-time.After(harnessplugin.CodexSteerTimeout + 20*time.Second):
 		t.Fatal("Codex handoff did not complete")
 	}
 	cancelListener()

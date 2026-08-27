@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/agentmessage"
+	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	"github.com/spf13/cobra"
 )
 
@@ -78,8 +79,11 @@ func listenCmd() *cobra.Command {
 			}
 			address = harness + ":" + agent
 			deliver = strings.ToLower(strings.TrimSpace(deliver))
-			if deliver != "" && deliver != "codex" && deliver != "claude" && deliver != "grok" {
-				return &usageError{msg: "--deliver must be codex, claude, or grok"}
+			if deliver != "" && deliver != "grok" {
+				plugin, lookupErr := harnessplugin.Resolve(deliver)
+				if lookupErr != nil || plugin.Mode() != harnessplugin.ModeLocal {
+					return &usageError{msg: "--deliver must name a registered local harness plugin, a registered alias, or grok"}
+				}
 			}
 			deliverMode = strings.ToLower(strings.TrimSpace(deliverMode))
 			if deliverMode == "" {
@@ -193,20 +197,15 @@ func completeInboxDelivery(ctx context.Context, client *Client, projectID int64,
 	return err
 }
 
-// workerAdapterFor maps a --deliver adapter to the registry adapter this
-// worker can execute, so the server leases only matching receiver-owned
-// targets: codex for the Codex queue/steer primitives and claude_resume for
-// `claude -p --resume|--cloud`. Grok Build has no registry adapter and keeps
-// using --deliver-target.
+// workerAdapterFor resolves a CLI alias through the harness registry and asks
+// the server to lease work only for receiver-side adapters. The experimental
+// Grok Build path is not a durable registry worker.
 func workerAdapterFor(deliver string) string {
-	switch deliver {
-	case "codex":
-		return agentmessage.AdapterCodex
-	case "claude":
-		return agentmessage.AdapterClaudeResume
-	default:
+	plugin, err := harnessplugin.Resolve(deliver)
+	if err != nil || plugin.Mode() != harnessplugin.ModeLocal {
 		return ""
 	}
+	return plugin.Name()
 }
 
 // fetchInbox reads one attributed inbox page. A non-empty workerAdapter asks
@@ -252,59 +251,65 @@ func emitOrDeliverMessage(ctx context.Context, message messageEnvelope, deliver,
 		return nil, err
 	}
 	body := messageText(message)
-	switch deliver {
-	case "codex":
-		return deliverCodexMessage(ctx, message, body, target, legacyMode)
-	case "claude":
-		return deliverClaudeMessage(ctx, message, body, target, legacyMode)
-	case "grok":
+	// Grok Build is an explicitly gated legacy CLI path, separate from the
+	// server-owned grok_bot_routine webhook plugin.
+	if deliver == "grok" {
 		return &deliveryOutcome{EffectiveLevel: "simple"}, deliverGrok(ctx, body, target, enableGrok)
-	default:
-		return nil, fmt.Errorf("unsupported delivery adapter %q", deliver)
 	}
+	return deliverHarnessMessage(ctx, message, body, deliver, target, legacyMode)
 }
 
 func deliverCodexMessage(ctx context.Context, message messageEnvelope, body, legacyTarget, legacyMode string) (*deliveryOutcome, error) {
+	return deliverHarnessMessage(ctx, message, body, agentmessage.AdapterCodex, legacyTarget, legacyMode)
+}
+
+func deliverHarnessMessage(ctx context.Context, message messageEnvelope, body, adapter, legacyTarget, legacyMode string) (*deliveryOutcome, error) {
+	plugin, err := harnessplugin.Resolve(adapter)
+	if err != nil || plugin.Mode() != harnessplugin.ModeLocal {
+		return nil, &adapterUnavailableError{message: "UNSUPPORTED: delivery adapter is not a registered local harness plugin"}
+	}
 	target := legacyTarget
-	requested, maximum := message.DeliveryLevel, "steer"
+	requested := message.DeliveryLevel
 	if requested == "" {
-		if legacyMode == "steer" {
-			requested = "steer"
-		} else {
-			requested = "simple"
-		}
+		requested = deliveryLevelFromMode(legacyMode)
 	}
-	if message.DeliveryWork != nil {
-		if message.DeliveryWork.Adapter != "codex" {
-			return nil, &adapterUnavailableError{message: "message target is not a Codex adapter"}
+	maximum := plugin.MaximumLevel()
+	if work := message.DeliveryWork; work != nil {
+		switch {
+		case work.Adapter == "":
+			return nil, &adapterUnavailableError{message: "message has no receiver-owned harness target (delivery " + work.State + "); register a compatible target and requeue"}
+		case work.Adapter != plugin.Name():
+			return nil, &adapterUnavailableError{message: "message target adapter does not match the selected harness plugin"}
+		case work.TargetKind != "" && work.TargetKind != plugin.Kind():
+			return nil, &adapterUnavailableError{message: "message target kind does not match the selected harness plugin"}
+		case work.TargetRef == "":
+			return nil, &adapterUnavailableError{message: "message has no usable receiver-owned harness target"}
 		}
-		target = message.DeliveryWork.TargetRef
-		requested = message.DeliveryWork.RequestedLevel
-		maximum = message.DeliveryWork.MaximumLevel
-		if target == "" {
-			return nil, &adapterUnavailableError{message: "message has no usable receiver-owned Codex thread target"}
-		}
+		target, requested, maximum = work.TargetRef, work.RequestedLevel, work.MaximumLevel
 	}
-	if requested != "steer" {
-		return &deliveryOutcome{EffectiveLevel: "simple"}, deliverCodex(ctx, body, target)
+	pluginLevel := requested
+	policyCapped := requested == harnessplugin.LevelSteer && maximum == harnessplugin.LevelSimple && plugin.MaximumLevel() == harnessplugin.LevelSteer
+	if policyCapped {
+		pluginLevel = harnessplugin.LevelSimple
 	}
-	if maximum == "simple" {
-		if err := deliverCodex(ctx, body, target); err != nil {
-			return nil, err
-		}
-		return &deliveryOutcome{EffectiveLevel: "simple", FallbackReason: "policy_capped"}, nil
-	}
-	steered, reason, err := deliverCodexSteer(ctx, body, target)
+	result, err := harnessplugin.Deliver(ctx, plugin.Name(), harnessplugin.DeliverRequest{
+		Level: pluginLevel, Body: body, TargetRef: target, Stdout: stdout, Stderr: stderr, ClientVersion: Version,
+	})
 	if err != nil {
-		return nil, err
+		return nil, mapHarnessDeliveryError(err)
 	}
-	if steered {
-		return &deliveryOutcome{EffectiveLevel: "steer"}, nil
+	if policyCapped {
+		result.FallbackReason = "policy_capped"
 	}
-	if err := deliverCodex(ctx, body, target); err != nil {
-		return nil, err
+	return &deliveryOutcome{EffectiveLevel: result.EffectiveLevel, FallbackReason: result.FallbackReason}, nil
+}
+
+func mapHarnessDeliveryError(err error) error {
+	var unavailable *harnessplugin.UnavailableError
+	if errors.As(err, &unavailable) || errors.Is(err, harnessplugin.ErrUnsupported) || harnessplugin.ErrorCode(err) != "" {
+		return &adapterUnavailableError{message: err.Error()}
 	}
-	return &deliveryOutcome{EffectiveLevel: "simple", FallbackReason: reason}, nil
+	return err
 }
 
 func messageText(message messageEnvelope) string {
@@ -391,27 +396,18 @@ func claudeSessionFlag(target string) (string, bool) {
 }
 
 func deliverCodex(ctx context.Context, body, target string) error {
-	if target == "" {
-		target = strings.TrimSpace(os.Getenv("CODEX_THREAD_ID"))
-	}
-	if target == "" {
-		target = strings.TrimSpace(os.Getenv("CODEX_SESSION_ID"))
-	}
-	if target == "" {
-		return &adapterUnavailableError{message: "Codex delivery requires --deliver-target or CODEX_THREAD_ID"}
-	}
-	path, err := exec.LookPath("codex")
-	if err != nil {
-		return &adapterUnavailableError{message: "Codex delivery requires the codex CLI in PATH"}
-	}
-	// #nosec G204 G702 -- codex is resolved from the operator-controlled PATH;
-	// all remaining values are fixed argv entries and no shell is involved.
-	cmd := exec.CommandContext(ctx, path, "queue", "--thread", target, "--message", body)
-	cmd.Stdout, cmd.Stderr = stdout, stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("deliver to Codex thread: %w", err)
-	}
-	return nil
+	_, err := harnessplugin.Deliver(ctx, agentmessage.AdapterCodex, harnessplugin.DeliverRequest{
+		Level: harnessplugin.LevelSimple, Body: body, TargetRef: target, Stdout: stdout, Stderr: stderr, ClientVersion: Version,
+	})
+	return mapHarnessDeliveryError(err)
+}
+
+// deliverCodexSteer uses only the documented app-server proxy JSON-RPC
+// sequence. A clean idle or rejected/raced steer is returned as a typed simple
+// fallback decision; transport and handshake failures remain retryable errors.
+func deliverCodexSteer(ctx context.Context, body, target string) (bool, string, error) {
+	steered, reason, err := harnessplugin.DeliverCodexSteer(ctx, body, target, stderr, Version)
+	return steered, reason, mapHarnessDeliveryError(err)
 }
 
 // deliverClaudeMessage resolves the Claude session and the requested level.
@@ -423,26 +419,7 @@ func deliverCodex(ctx context.Context, body, target string) error {
 // attached target or that belongs to another adapter (for example the
 // receiver's claude_channel push) is never delivered from here.
 func deliverClaudeMessage(ctx context.Context, message messageEnvelope, body, legacyTarget, legacyMode string) (*deliveryOutcome, error) {
-	target, requested := legacyTarget, message.DeliveryLevel
-	if requested == "" {
-		requested = deliveryLevelFromMode(legacyMode)
-	}
-	if work := message.DeliveryWork; work != nil {
-		switch {
-		case work.Adapter == "":
-			return nil, &adapterUnavailableError{message: "message has no receiver-owned Claude session target (delivery " + work.State + "); register a claude_resume target and requeue"}
-		case work.Adapter != agentmessage.AdapterClaudeResume:
-			return nil, &adapterUnavailableError{message: "message target is a " + work.Adapter + " adapter, not claude_resume"}
-		case work.TargetRef == "":
-			return nil, &adapterUnavailableError{message: "message has no usable receiver-owned Claude session target"}
-		}
-		target, requested = work.TargetRef, work.RequestedLevel
-	}
-	outcome, err := deliverClaude(ctx, body, target, requested)
-	if err != nil {
-		return nil, err
-	}
-	return &deliveryOutcome{EffectiveLevel: outcome.EffectiveLevel, FallbackReason: outcome.FallbackReason}, nil
+	return deliverHarnessMessage(ctx, message, body, agentmessage.AdapterClaudeResume, legacyTarget, legacyMode)
 }
 
 // deliverClaude hands one framed message to a Claude Code session as a new
@@ -460,34 +437,17 @@ func deliverClaudeMessage(ctx context.Context, message messageEnvelope, body, le
 // --dangerously-skip-permissions, a permission mode, or any other escalation;
 // the resumed session keeps its own permission configuration.
 func deliverClaude(ctx context.Context, body, target, requestedLevel string) (claudeDelivery, error) {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return claudeDelivery{}, &adapterUnavailableError{message: "Claude delivery requires --deliver-target: a local session UUID (claude -p --resume) or a cloud session id session_…/cse_… (claude -p --cloud)"}
-	}
-	flag, ok := claudeSessionFlag(target)
-	if !ok {
-		return claudeDelivery{}, &adapterUnavailableError{message: "Claude delivery target must be a lowercase local session UUID or a cloud session id (session_…/cse_…); socket paths, URLs, and session names are not accepted"}
-	}
-	path, err := exec.LookPath("claude")
+	requestedLevel = normalizeDeliveryLevel(requestedLevel)
+	result, err := harnessplugin.Deliver(ctx, agentmessage.AdapterClaudeResume, harnessplugin.DeliverRequest{
+		Level: requestedLevel, Body: body, TargetRef: target, Stdout: stdout, Stderr: stderr, ClientVersion: Version,
+	})
 	if err != nil {
-		return claudeDelivery{}, &adapterUnavailableError{message: "Claude delivery requires the claude CLI in PATH"}
+		return claudeDelivery{}, mapHarnessDeliveryError(err)
 	}
-	outcome := claudeSimpleDelivery(claudeAdapterResume, "claude -p "+flag, requestedLevel)
-	if outcome.FallbackReason != "" {
-		fmt.Fprintf(stderr, "claude: steer is unsupported; delivering as simple via %s (fallback_reason=%s)\n", outcome.Primitive, outcome.FallbackReason)
-	}
-	// #nosec G204 G702 -- claude is resolved from the operator-controlled PATH;
-	// argv is fixed, the body is piped over stdin, and no shell is involved.
-	cmd := exec.CommandContext(ctx, path, "-p", flag, target)
-	cmd.Stdin = strings.NewReader(body)
-	// The vendor response is the receiver's own model output. PAIMOS treats a
-	// zero exit as the handoff acknowledgement and never captures, stores, or
-	// prints it.
-	cmd.Stdout, cmd.Stderr = io.Discard, stderr
-	if err := cmd.Run(); err != nil {
-		return claudeDelivery{}, fmt.Errorf("deliver to Claude session via %s: %w", outcome.Primitive, err)
-	}
-	return outcome, nil
+	return claudeDelivery{
+		Adapter: agentmessage.AdapterClaudeResume, Primitive: result.Primitive, RequestedLevel: requestedLevel,
+		EffectiveLevel: result.EffectiveLevel, FallbackReason: result.FallbackReason,
+	}, nil
 }
 
 func deliverGrok(ctx context.Context, body, target string, enabled bool) error {

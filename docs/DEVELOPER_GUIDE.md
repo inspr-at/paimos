@@ -69,7 +69,7 @@ backend/
   brand/               BRAND_* env parsing (single source of truth)
   auth/                sessions, password hashing, TOTP, API keys, rate limiting
   agentmessage/        durable agent message ledger, delivery bus, adapters, and
-                       webhook dispatcher (M151–M155; see AGENT_BUS_ARCHITECTURE.md)
+                       webhook dispatcher (M151–M156; see AGENT_BUS_ARCHITECTURE.md)
   secretvault/         authenticated encryption for stored secrets and receiver targets
   contracts/           versioned JSON schemas + fixtures (agent-message-v1, external-stage-v1)
   cmd/paimos/          `paimos` CLI (issue, tell, message, listen, serve, run-agent, …)
@@ -136,6 +136,22 @@ scripts/               maintenance helpers
 - **Error envelopes**: handlers call `jsonError(w, msg, status)` for
   errors and `jsonOK(w, payload)` for success. No panic recovery
   beyond chi's default `middleware.Recoverer`.
+
+### Adding a harness delivery plugin
+
+Harness delivery adapters live in `backend/agentmessage/harness`. A new
+adapter normally needs one Go file: implement the version-1 `Plugin` interface
+(`Name`, `Kind`, `MaximumLevel`, `Mode`, `ValidateTarget`, and `Deliver`) and
+register it from `init` with `harness.Register`. Core address policy, the
+durable ledger, encrypted target storage, leasing, retry, and acknowledgement
+remain outside the plugin.
+
+Validation errors and delivery errors must never contain `TargetRef`. Use only
+documented vendor primitives, declare `simple` when steer is unavailable, and
+return `UNSUPPORTED` instead of guessing an inbound command. Tests can prove
+an extension on a fresh `harness.NewRegistry()` without editing the bus or
+ledger. The shipped plugins are Codex, Claude resume/channel, and the
+server-side `grok_bot_routine` webhook; OpenCode and Pi are not shipped.
 
 ## 4. Database
 

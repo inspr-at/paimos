@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 )
 
 // TestDeliverCodexSteerTimeoutKillsProxyProcessTree reproduces the 5.18.0
@@ -23,9 +25,9 @@ func TestDeliverCodexSteerTimeoutKillsProxyProcessTree(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "proxy.pid")
 	t.Setenv("PAIMOS_TEST_PIDFILE", pidFile)
 	t.Setenv("PAIMOS_TEST_SCENARIO", "hang")
-	previous := codexSteerTimeout
-	codexSteerTimeout = 2 * time.Second
-	t.Cleanup(func() { codexSteerTimeout = previous })
+	previous := harnessplugin.CodexSteerTimeout
+	harnessplugin.CodexSteerTimeout = 2 * time.Second
+	t.Cleanup(func() { harnessplugin.CodexSteerTimeout = previous })
 	_, _, err := deliverCodexSteer(context.Background(), "hang payload", "thread-hang")
 	if err == nil || !strings.Contains(err.Error(), "no response to websocket handshake") {
 		t.Fatalf("error=%v want handshake timeout", err)

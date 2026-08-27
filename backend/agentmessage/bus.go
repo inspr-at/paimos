@@ -9,11 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
 
@@ -24,53 +24,28 @@ const targetSecretDomain = "agent-message-targets"
 // records the handoff through delivery-complete; grok_bot_routine is
 // dispatched server-side by the webhook dispatcher instead.
 const (
-	AdapterCodex          = "codex"
-	AdapterGrokBotRoutine = "grok_bot_routine"
-	AdapterClaudeResume   = "claude_resume"
-	AdapterClaudeChannel  = "claude_channel"
+	AdapterCodex          = harnessplugin.AdapterCodex
+	AdapterGrokBotRoutine = harnessplugin.AdapterGrokBotRoutine
+	AdapterClaudeResume   = harnessplugin.AdapterClaudeResume
+	AdapterClaudeChannel  = harnessplugin.AdapterClaudeChannel
 
-	TargetKindCodexThread   = "codex_thread"
-	TargetKindHTTPSWebhook  = "https_webhook"
-	TargetKindClaudeSession = "claude_session"
-)
-
-// Claude session references. A local session is the lowercase UUID that
-// `claude -p --output-format json` prints as session_id and that
-// `claude -p --resume` accepts; a cloud session is the `session_…`/`cse_…`
-// tagged id shown at claude.ai/code and accepted by `claude -p --cloud`.
-// Socket paths, URLs, and session names are rejected: PAIMOS never guesses a
-// Claude target.
-var (
-	claudeLocalSessionPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-	claudeCloudSessionPattern = regexp.MustCompile(`^(session|cse)_[A-Za-z0-9_-]{1,128}$`)
+	TargetKindCodexThread   = harnessplugin.KindCodexThread
+	TargetKindHTTPSWebhook  = harnessplugin.KindHTTPSWebhook
+	TargetKindClaudeSession = harnessplugin.KindClaudeSession
 )
 
 // ClaudeSessionPrimitive maps a Claude session reference to the documented
 // print-mode flag that addresses it: --resume for a local session UUID and
 // --cloud for a cloud session id. ok is false for every other shape.
 func ClaudeSessionPrimitive(ref string) (flag string, ok bool) {
-	switch {
-	case claudeLocalSessionPattern.MatchString(ref):
-		return "--resume", true
-	case claudeCloudSessionPattern.MatchString(ref):
-		return "--cloud", true
-	default:
-		return "", false
-	}
+	return harnessplugin.ClaudeSessionPrimitive(ref)
 }
 
 // IsLocalWorkerAdapter reports whether adapter names a delivery adapter that
 // an attributed receiver-side worker executes and completes locally.
 func IsLocalWorkerAdapter(adapter string) bool {
-	switch adapter {
-	case AdapterCodex, AdapterClaudeResume, AdapterClaudeChannel:
-		return true
-	}
-	return false
-}
-
-func isClaudeAdapter(adapter string) bool {
-	return adapter == AdapterClaudeResume || adapter == AdapterClaudeChannel
+	plugin, err := harnessplugin.Lookup(adapter)
+	return err == nil && plugin.Mode() == harnessplugin.ModeLocal
 }
 
 const selectedDeliveryTargetSQL = `(CASE
@@ -146,42 +121,15 @@ func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*
 	if !utf8.ValidString(ref) || len([]byte(ref)) < 1 || len([]byte(ref)) > 2048 || strings.ContainsAny(ref, "\x00\r\n") {
 		return nil, coded("agent_message_target_ref_invalid", "target_ref must be 1 to 2048 safe UTF-8 bytes")
 	}
-	switch in.Adapter {
-	case AdapterCodex:
-		if in.TargetKind != TargetKindCodexThread {
-			return nil, coded("agent_message_target_kind_invalid", "codex targets require target_kind codex_thread")
+	if err := harnessplugin.ValidateBinding(ctx, in.Adapter, in.TargetKind, in.MaximumLevel, ref); err != nil {
+		code := harnessplugin.ErrorCode(err)
+		if code == harnessplugin.CodeUnsupported {
+			return nil, coded("agent_message_target_adapter_invalid", err.Error())
 		}
-		if len([]byte(ref)) > 256 {
-			return nil, coded("agent_message_target_ref_invalid", "Codex thread references are limited to 256 bytes")
+		if code == "" {
+			code = "agent_message_target_ref_invalid"
 		}
-	case AdapterGrokBotRoutine:
-		if in.TargetKind != TargetKindHTTPSWebhook {
-			return nil, coded("agent_message_target_kind_invalid", "grok_bot_routine targets require target_kind https_webhook")
-		}
-		if err := validateWebhookTargetRef(ctx, ref); err != nil {
-			return nil, err
-		}
-	case AdapterClaudeResume, AdapterClaudeChannel:
-		// claude_resume names the session that `claude -p --resume|--cloud`
-		// addresses; claude_channel names the local session that loaded the
-		// PAIMOS channel through `paimos serve --mcp-stdio --channel-as`.
-		// Claude has no steer primitive, so a Claude target can never promise
-		// more than simple delivery.
-		if in.TargetKind != TargetKindClaudeSession {
-			return nil, coded("agent_message_target_kind_invalid", in.Adapter+" targets require target_kind claude_session")
-		}
-		flag, ok := ClaudeSessionPrimitive(ref)
-		if !ok {
-			return nil, coded("agent_message_target_ref_invalid", "Claude session references must be a lowercase local session UUID or a session_…/cse_… cloud session id")
-		}
-		if in.Adapter == AdapterClaudeChannel && flag != "--resume" {
-			return nil, coded("agent_message_target_ref_invalid", "claude_channel targets name the local session UUID that loaded the PAIMOS channel")
-		}
-		if in.MaximumLevel != "simple" {
-			return nil, coded("agent_message_target_level_invalid", "Claude targets have no steer primitive; maximum_level must be simple")
-		}
-	default:
-		return nil, coded("agent_message_target_adapter_invalid", "adapter must be codex, grok_bot_routine, claude_resume, or claude_channel")
+		return nil, coded(code, err.Error())
 	}
 	ciphertext, err := secretvault.Encrypt(targetSecretDomain, []byte(ref))
 	if err != nil {
@@ -447,10 +395,14 @@ func (s *Service) CompleteLocalDelivery(ctx context.Context, in CompleteDelivery
 		return nil, coded("agent_message_delivery_unknown", "delivery does not belong to this inbox")
 	}
 	if !IsLocalWorkerAdapter(adapter) {
-		return nil, coded("agent_message_delivery_adapter_mismatch", "local completion is available only for Codex and Claude targets")
+		return nil, coded("agent_message_delivery_adapter_mismatch", "local completion is available only for local harness adapters")
 	}
-	if in.EffectiveLevel == "steer" && isClaudeAdapter(adapter) {
-		return nil, coded("agent_message_effective_level_invalid", "Claude targets have no steer primitive; effective_level must be simple")
+	plugin, err := harnessplugin.Lookup(adapter)
+	if err != nil {
+		return nil, coded("agent_message_delivery_adapter_mismatch", "UNSUPPORTED: delivery adapter is not registered")
+	}
+	if in.EffectiveLevel == "steer" && plugin.MaximumLevel() == "simple" {
+		return nil, coded("agent_message_effective_level_invalid", "adapter has no steer primitive; effective_level must be simple")
 	}
 	if in.EffectiveLevel == "steer" && (requestedLevel != "steer" || maximumLevel != "steer") {
 		return nil, coded("agent_message_effective_level_invalid", "steer was not allowed by the durable request and receiver policy")
