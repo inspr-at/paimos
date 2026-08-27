@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	"github.com/spf13/cobra"
 )
 
@@ -157,7 +158,7 @@ func messageTargetSetCmd() *cobra.Command {
 		if !set || strings.TrimSpace(targetRef) == "" {
 			return &usageError{msg: "--target-ref or --target-ref-file is required"}
 		}
-		if strings.EqualFold(strings.TrimSpace(adapter), "grok_bot_routine") && strings.TrimSpace(ref) != "" {
+		if strings.EqualFold(strings.TrimSpace(kind), harnessplugin.KindHTTPSWebhook) && strings.TrimSpace(ref) != "" {
 			return &usageError{msg: "webhook capability URLs must use --target-ref-file (use - for stdin) so they do not enter process arguments"}
 		}
 		client, err := instanceClient()
@@ -189,9 +190,9 @@ func messageTargetSetCmd() *cobra.Command {
 	}}
 	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
 	c.Flags().StringVar(&address, "address", "", "receiver address (required)")
-	c.Flags().StringVar(&adapter, "adapter", "", "codex, grok_bot_routine, claude_resume, or claude_channel (required)")
-	c.Flags().StringVar(&kind, "kind", "", "codex_thread, https_webhook, or claude_session (required)")
-	c.Flags().StringVar(&ref, "target-ref", "", "receiver-owned Codex thread or Claude session id (webhook capabilities must use --target-ref-file)")
+	c.Flags().StringVar(&adapter, "adapter", "", "registered harness plugin name (required)")
+	c.Flags().StringVar(&kind, "kind", "", "plugin target kind (required)")
+	c.Flags().StringVar(&ref, "target-ref", "", "receiver-owned target reference (webhook capabilities must use --target-ref-file)")
 	c.Flags().StringVar(&refFile, "target-ref-file", "", "read target reference from file, or - for stdin")
 	c.Flags().StringVar(&maximumLevel, "maximum-level", "simple", "receiver policy: simple or steer")
 	c.Flags().StringVar(&role, "role", "primary", "primary or simple_fallback")

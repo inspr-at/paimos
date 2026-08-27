@@ -15,12 +15,11 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
 
@@ -134,23 +133,34 @@ func (d *WebhookDispatcher) DispatchOne(ctx context.Context) (bool, error) {
 }
 
 func (d *WebhookDispatcher) leaseWebhook(ctx context.Context) (*webhookJob, error) {
+	serverAdapters := harnessplugin.Names(harnessplugin.ModeServer, harnessplugin.KindHTTPSWebhook)
+	if len(serverAdapters) == 0 {
+		return nil, sql.ErrNoRows
+	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 	var deliveryID string
-	err = tx.QueryRowContext(ctx, `SELECT d.delivery_id FROM agent_message_deliveries d
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(serverAdapters)), ",")
+	query := `SELECT d.delivery_id FROM agent_message_deliveries d
 		JOIN agent_messages am ON am.id=d.message_row_id
-		JOIN agent_message_targets t ON t.id=`+selectedDeliveryTargetSQL+`
-		WHERE d.instance=? AND t.instance=d.instance AND t.adapter='grok_bot_routine'
+		JOIN agent_message_targets t ON t.id=` + selectedDeliveryTargetSQL + `
+		WHERE d.instance=? AND t.instance=d.instance AND t.adapter IN (` + placeholders + `)
 		AND ((d.state IN ('pending','retry') AND d.next_attempt_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		 OR (d.state='leased' AND d.lease_until<=strftime('%Y-%m-%dT%H:%M:%fZ','now')))
 		AND NOT EXISTS (
 		 SELECT 1 FROM agent_message_deliveries older JOIN agent_messages older_message ON older_message.id=older.message_row_id
 		 WHERE older.instance=d.instance AND older_message.to_address=am.to_address AND older_message.id<am.id
 		 AND older.state NOT IN ('handed_off','dead'))
-		ORDER BY am.to_address,am.id LIMIT 1`, d.instance).Scan(&deliveryID)
+		ORDER BY am.to_address,am.id LIMIT 1`
+	queryArgs := make([]any, 0, len(serverAdapters)+1)
+	queryArgs = append(queryArgs, d.instance)
+	for _, adapter := range serverAdapters {
+		queryArgs = append(queryArgs, adapter)
+	}
+	err = tx.QueryRowContext(ctx, query, queryArgs...).Scan(&deliveryID)
 	if err != nil {
 		return nil, err
 	}
@@ -303,43 +313,6 @@ func boundedRetryAfter(value string) time.Duration {
 	return delay
 }
 
-func validateWebhookTargetRef(ctx context.Context, raw string) error {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" {
-		return coded("agent_message_target_webhook_invalid", "webhook target must be an HTTPS URL without userinfo or fragment")
-	}
-	if !webhookHostAllowed(parsed.Hostname()) {
-		return coded("agent_message_target_webhook_host_denied", "webhook hostname is not in PAIMOS_AGENT_BUS_WEBHOOK_HOSTS")
-	}
-	addresses, err := net.DefaultResolver.LookupIPAddr(ctx, parsed.Hostname())
-	if err != nil || len(addresses) == 0 {
-		return coded("agent_message_target_webhook_dns_failed", "webhook hostname did not resolve")
-	}
-	for _, address := range addresses {
-		if !webhookIPAllowed(address.IP) {
-			return coded("agent_message_target_webhook_address_denied", "webhook hostname resolves to a denied address")
-		}
-	}
-	return nil
-}
-
-func webhookHostAllowed(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	for _, allowed := range strings.Split(os.Getenv("PAIMOS_AGENT_BUS_WEBHOOK_HOSTS"), ",") {
-		if strings.ToLower(strings.TrimSuffix(strings.TrimSpace(allowed), ".")) == host && host != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func webhookIPAllowed(ip net.IP) bool {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS")), "true") {
-		return true
-	}
-	return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast())
-}
-
 func newWebhookHTTPClient() *http.Client {
 	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
@@ -350,7 +323,7 @@ func newWebhookHTTPClient() *http.Client {
 	}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
-		if err != nil || !webhookHostAllowed(host) {
+		if err != nil || !harnessplugin.WebhookHostAllowed(host) {
 			return nil, errors.New("webhook destination denied")
 		}
 		addresses, err := net.DefaultResolver.LookupIPAddr(ctx, host)
@@ -358,7 +331,7 @@ func newWebhookHTTPClient() *http.Client {
 			return nil, errors.New("webhook DNS failed")
 		}
 		for _, candidate := range addresses {
-			if !webhookIPAllowed(candidate.IP) {
+			if !harnessplugin.WebhookIPAllowed(candidate.IP) {
 				continue
 			}
 			conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(candidate.IP.String(), port))
