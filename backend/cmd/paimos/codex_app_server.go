@@ -304,7 +304,7 @@ func (s *codexAppServerSession) activeTurn(ctx context.Context, threadID string)
 	switch {
 	case err == nil:
 		turns = page.Data
-	case errors.As(err, &remote):
+	case errors.As(err, &remote) && codexTurnPageUnavailable(remote):
 		var history threadRead
 		if err := s.call(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": true}, &history); err != nil {
 			return "", "", fmt.Errorf("read Codex thread turns: %w", err)
@@ -346,6 +346,63 @@ func (s *codexAppServerSession) reap() {
 		_ = signalOwnedProcess(s.proxy, true)
 		<-waited
 	}
+}
+
+// codexRPCInvalidRequest is the JSON-RPC code the app-server uses for its
+// documented request rejections (`invalid_request` in codex-rs); the
+// standard method-not-found code is what a server without a method returns.
+const (
+	codexRPCInvalidRequest = -32600
+	codexRPCMethodNotFound = -32601
+)
+
+// classifyCodexSteerRejection maps a `turn/steer` JSON-RPC error onto the
+// documented simple-fallback reasons and reports false for everything else.
+// The vendor rejects a steer with an invalid-request error in exactly three
+// documented situations: the active turn cannot accept same-turn steering
+// (structured `activeTurnNotSteerable` error info and the "cannot steer a
+// review|compact turn" message), the expectedTurnId precondition no longer
+// matches ("expected active turn id `x` but found `y`"), or the turn finished
+// first ("no active turn to steer"). Unknown methods, malformed requests,
+// sub-agent ownership rejections, and internal errors are not fallbacks: they
+// mean the primitive is broken and must surface as delivery failures.
+func classifyCodexSteerRejection(err *codexRPCError) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+	if strings.Contains(string(err.Data), "activeTurnNotSteerable") {
+		return "not_steerable", true
+	}
+	if err.Code != codexRPCInvalidRequest {
+		return "", false
+	}
+	switch message := strings.TrimSpace(err.Message); {
+	case strings.HasPrefix(message, "cannot steer a "):
+		return "not_steerable", true
+	case strings.HasPrefix(message, "expected active turn id "):
+		return "not_steerable", true
+	case message == "no active turn to steer":
+		return "idle", true
+	}
+	return "", false
+}
+
+// codexTurnPageUnavailable reports whether a `thread/turns/list` rejection
+// means the paginated page is simply not available on this app-server, so the
+// stable `thread/read {includeTurns:true}` history is the documented
+// alternative: the 0.150.x experimentalApi gate, an app-server that does not
+// implement the method, or the standard method-not-found code. Any other
+// rejection (bad thread id, malformed params, internal error) must fail.
+func codexTurnPageUnavailable(err *codexRPCError) bool {
+	if err == nil {
+		return false
+	}
+	if err.Code == codexRPCMethodNotFound {
+		return true
+	}
+	message := err.Message
+	return strings.Contains(message, "requires experimentalApi capability") ||
+		strings.Contains(message, "unknown variant `thread/turns/list`")
 }
 
 // codexTimeout builds the precise timeout error for a blocking phase and
@@ -415,8 +472,15 @@ func deliverCodexSteer(ctx context.Context, body, target string) (bool, string, 
 	if err != nil {
 		var remote *codexRPCError
 		if errors.As(err, &remote) {
-			fmt.Fprintf(stderr, "codex: turn/steer rejected for expected turn %s (%v); delivering as simple via codex queue (fallback_reason=not_steerable)\n", turnID, remote)
-			return false, "not_steerable", nil
+			if reason, documented := classifyCodexSteerRejection(remote); documented {
+				fmt.Fprintf(stderr, "codex: turn/steer rejected for expected turn %s (%v); delivering as simple via codex queue (fallback_reason=%s)\n", turnID, remote, reason)
+				return false, reason, nil
+			}
+			// Anything else (unknown method, malformed request, ownership
+			// rejection, internal failure) means the steer primitive itself is
+			// broken or unavailable. Falling back to the queue would mask that,
+			// so the delivery fails and stays undelivered for a retry.
+			return false, "", fmt.Errorf("steer Codex turn (expected turn %s): unexpected app-server rejection: %w", turnID, remote)
 		}
 		return false, "", fmt.Errorf("steer Codex turn: %w", err)
 	}

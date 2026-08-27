@@ -64,8 +64,10 @@ thread status, then, only for an `active` thread, the latest turn via
 daemon rejects the paginated page), and `turn/steer` with the required
 `expectedTurnId` only when that turn is `inProgress`. Idle, not-loaded,
 policy-capped, raced, and `activeTurnNotSteerable` cases use the exact queue
-fallback; a silent proxy fails within the steer budget with the daemon/CLI
-versions and kills the whole proxy process group. Claude delivery
+fallback; any other `turn/steer` rejection (unknown method, request-shape
+drift, sub-agent ownership, internal error) fails the delivery instead of
+queueing, and a silent proxy fails within the steer budget with the
+daemon/CLI versions and kills the whole proxy process group. Claude delivery
 is simple-only and uses two documented print-mode primitives: a local session
 UUID target runs `claude -p --resume <session_id>` as a new turn, and a
 `session_…`/`cse_…` cloud target runs `claude -p --cloud <session_id>` as a

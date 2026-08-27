@@ -32,6 +32,17 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `codex app-server daemon version`, and the whole proxy process group is
   killed so the npm wrapper cannot leave an orphaned native proxy holding the
   pipes.
+- The queue fallback after a rejected `turn/steer` is limited to the vendor's
+  documented preconditions: an active turn that cannot accept same-turn
+  steering (`activeTurnNotSteerable`, "cannot steer a review|compact turn")
+  and the expected-turn race ("expected active turn id … but found …") record
+  `fallback_reason=not_steerable`, a turn that finished first ("no active turn
+  to steer") records `idle`. Any other app-server rejection (unknown method,
+  request-shape drift, sub-agent ownership, internal error) now fails the
+  delivery with the rejection in the error instead of silently queueing, so a
+  broken primitive cannot masquerade as a successful simple handoff; the same
+  rule applies to the `thread/turns/list` history fallback, which only
+  triggers on the experimentalApi gate or a missing method.
 - Added the opt-in `TestAgentBusRealCodexSteerE2E` proof
   (`PAIMOS_AGENT_BUS_E2E_STEER_THREAD=<thread>`) and the read-only
   `TestCodexAppServerProxyReadOnlyProbe` (`PAIMOS_CODEX_PROBE_THREAD`); the

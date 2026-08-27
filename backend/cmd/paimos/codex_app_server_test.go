@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -324,50 +325,233 @@ func TestDeliverCodexMessageActiveThreadWithoutInProgressTurnFallsBackToQueue(t 
 }
 
 func TestDeliverCodexMessageFallsBackToFullHistoryWhenTurnPageIsGated(t *testing.T) {
-	argsFile, framesFile := installFakeCodexAppServer(t)
-	t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"error":{"code":-32600,"message":"thread/turns/list requires experimentalApi capability"}}`)
-	t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-old","status":"completed"},{"id":"turn-live","status":"inProgress"}]`)
-	t.Setenv("PAIMOS_TEST_STEER", `{"result":{"turnId":"turn-live"}}`)
-	outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-gated"), "gated payload", "ignored", "queue")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if outcome.EffectiveLevel != "steer" || outcome.FallbackReason != "" {
-		t.Fatalf("outcome=%#v", outcome)
-	}
-	args, _ := os.ReadFile(argsFile)
-	if strings.Contains(string(args), "queue\n") {
-		t.Fatalf("successful steer unexpectedly queued: %q", args)
-	}
-	frames := readFrames(t, framesFile)
-	for _, required := range []string{`"method":"thread/turns/list"`, `"includeTurns":true`, `"expectedTurnId":"turn-live"`} {
-		if !strings.Contains(frames, required) {
-			t.Fatalf("frames missing %s: %s", required, frames)
-		}
+	for _, tc := range []struct{ name, rejection string }{
+		{"0.150 experimentalApi gate", `{"code":-32600,"message":"thread/turns/list requires experimentalApi capability"}`},
+		{"method absent on this app-server", "{\"code\":-32600,\"message\":\"Invalid request: unknown variant `thread/turns/list`, expected one of `initialize`\"}"},
+		{"standard method not found", `{"code":-32601,"message":"Method not found"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argsFile, framesFile := installFakeCodexAppServer(t)
+			t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"error":`+tc.rejection+`}`)
+			t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-old","status":"completed"},{"id":"turn-live","status":"inProgress"}]`)
+			t.Setenv("PAIMOS_TEST_STEER", `{"result":{"turnId":"turn-live"}}`)
+			outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-gated"), "gated payload", "ignored", "queue")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome.EffectiveLevel != "steer" || outcome.FallbackReason != "" {
+				t.Fatalf("outcome=%#v", outcome)
+			}
+			args, _ := os.ReadFile(argsFile)
+			if strings.Contains(string(args), "queue\n") {
+				t.Fatalf("successful steer unexpectedly queued: %q", args)
+			}
+			frames := readFrames(t, framesFile)
+			for _, required := range []string{`"method":"thread/turns/list"`, `"includeTurns":true`, `"expectedTurnId":"turn-live"`} {
+				if !strings.Contains(frames, required) {
+					t.Fatalf("frames missing %s: %s", required, frames)
+				}
+			}
+		})
 	}
 }
 
-func TestDeliverCodexMessageFallsBackOnNotSteerableOrTurnRace(t *testing.T) {
-	for _, errorData := range []string{
-		`{"code":-32600,"message":"active turn cannot accept steer","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"review"}}}}`,
-		`{"code":-32600,"message":"expected turn does not match the active turn"}`,
+// The rejection fixtures below are the exact shapes the app-server emits
+// (codex-rs app-server turn_processor `turn_steer_inner`): every documented
+// precondition failure is JSON-RPC -32600 `invalid request`, the
+// not-steerable case additionally serializes a TurnError with
+// `codexErrorInfo.activeTurnNotSteerable` into `error.data`.
+const (
+	codexRejectionReviewTurn = `{"code":-32600,"message":"cannot steer a review turn","data":{"message":"cannot steer a review turn","codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"review"}},"additionalDetails":null,"misalignment":null}}`
+	codexRejectionTurnRace   = "{\"code\":-32600,\"message\":\"expected active turn id `turn-raced` but found `turn-next`\"}"
+	codexRejectionNoTurn     = `{"code":-32600,"message":"no active turn to steer"}`
+)
+
+func TestDeliverCodexMessageFallsBackOnDocumentedSteerRejections(t *testing.T) {
+	for _, tc := range []struct {
+		name, rejection, reason string
+	}{
+		{"active turn not steerable (review)", codexRejectionReviewTurn, "not_steerable"},
+		{"compact turn without structured data", `{"code":-32600,"message":"cannot steer a compact turn"}`, "not_steerable"},
+		{"expected turn race", codexRejectionTurnRace, "not_steerable"},
+		{"turn finished before steer", codexRejectionNoTurn, "idle"},
 	} {
-		t.Run(errorData, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			argsFile, _ := installFakeCodexAppServer(t)
 			t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"result":{"data":[{"id":"turn-raced","status":"inProgress"}]}}`)
-			t.Setenv("PAIMOS_TEST_STEER", `{"error":`+errorData+`}`)
+			t.Setenv("PAIMOS_TEST_STEER", `{"error":`+tc.rejection+`}`)
 			outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-raced"), "raced payload", "ignored", "queue")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if outcome.EffectiveLevel != "simple" || outcome.FallbackReason != "not_steerable" {
-				t.Fatalf("outcome=%#v", outcome)
+			if outcome.EffectiveLevel != "simple" || outcome.FallbackReason != tc.reason {
+				t.Fatalf("outcome=%#v want simple/%s", outcome, tc.reason)
 			}
 			args, _ := os.ReadFile(argsFile)
 			if !strings.Contains(string(args), "queue\n--thread\nthread-raced\n--message\nraced payload\n") {
 				t.Fatalf("queue argv missing: %q", args)
 			}
 		})
+	}
+}
+
+// An undocumented rejection means the steer primitive itself is broken or
+// unavailable (method missing, request shape drift, ownership rule, internal
+// failure). Queueing would mask that, so the delivery must fail, stay
+// retryable, and leave nothing in the receiver thread.
+func TestDeliverCodexMessageUnknownSteerRejectionFailsWithoutQueue(t *testing.T) {
+	for _, tc := range []struct{ name, rejection string }{
+		{"standard method not found", `{"code":-32601,"message":"Method not found"}`},
+		{"0.150 unknown variant", "{\"code\":-32600,\"message\":\"Invalid request: unknown variant `turn/steer`, expected one of `initialize`, `thread/start`\"}"},
+		{"request shape drift", "{\"code\":-32600,\"message\":\"Invalid request: missing field `input`\"}"},
+		{"sub-agent ownership", `{"code":-32600,"message":"direct app-server input is not allowed for multi-agent v2 sub-agents"}`},
+		{"empty input", `{"code":-32600,"message":"input must not be empty"}`},
+		{"internal error", `{"code":-32603,"message":"failed to steer turn: boom"}`},
+		{"documented text under a foreign code", `{"code":-32603,"message":"no active turn to steer"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argsFile, _ := installFakeCodexAppServer(t)
+			t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"result":{"data":[{"id":"turn-live","status":"inProgress"}]}}`)
+			t.Setenv("PAIMOS_TEST_STEER", `{"error":`+tc.rejection+`}`)
+			outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-broken"), "broken payload", "ignored", "queue")
+			if err == nil {
+				t.Fatalf("unexpected success outcome=%#v", outcome)
+			}
+			var remote *codexRPCError
+			if !errors.As(err, &remote) || !strings.Contains(err.Error(), "unexpected app-server rejection") || !strings.Contains(err.Error(), "expected turn turn-live") {
+				t.Fatalf("error=%q must name the unexpected rejection and the expected turn", err)
+			}
+			var unavailable *adapterUnavailableError
+			if errors.As(err, &unavailable) {
+				t.Fatalf("a broken steer primitive must stay a retryable delivery error, got adapter unavailable: %v", err)
+			}
+			args, _ := os.ReadFile(argsFile)
+			if strings.Contains(string(args), "queue\n") {
+				t.Fatalf("unknown rejection must not fall back to codex queue: %q", args)
+			}
+		})
+	}
+}
+
+func TestClassifyCodexSteerRejection(t *testing.T) {
+	for _, tc := range []struct {
+		name, rejection, reason string
+		documented              bool
+	}{
+		{"review turn with structured data", codexRejectionReviewTurn, "not_steerable", true},
+		{"structured data wins even with another code", `{"code":-32603,"message":"steer failed","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"compact"}}}}`, "not_steerable", true},
+		{"compact turn message only", `{"code":-32600,"message":"cannot steer a compact turn"}`, "not_steerable", true},
+		{"expected turn mismatch", codexRejectionTurnRace, "not_steerable", true},
+		{"no active turn", codexRejectionNoTurn, "idle", true},
+		{"no active turn with surrounding whitespace", `{"code":-32600,"message":" no active turn to steer\n"}`, "idle", true},
+		{"unknown variant", "{\"code\":-32600,\"message\":\"Invalid request: unknown variant `turn/steer`\"}", "", false},
+		{"method not found", `{"code":-32601,"message":"Method not found"}`, "", false},
+		{"ownership rejection", `{"code":-32600,"message":"direct app-server input is not allowed for multi-agent v2 sub-agents"}`, "", false},
+		{"output schema mismatch", `{"code":-32600,"message":"active turn uses a different output schema"}`, "", false},
+		{"documented text under a foreign code", "{\"code\":-32603,\"message\":\"expected active turn id `a` but found `b`\"}", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var remote codexRPCError
+			if err := json.Unmarshal([]byte(tc.rejection), &remote); err != nil {
+				t.Fatal(err)
+			}
+			reason, documented := classifyCodexSteerRejection(&remote)
+			if reason != tc.reason || documented != tc.documented {
+				t.Fatalf("classify(%s)=%q,%v want %q,%v", tc.rejection, reason, documented, tc.reason, tc.documented)
+			}
+		})
+	}
+	if reason, documented := classifyCodexSteerRejection(nil); reason != "" || documented {
+		t.Fatalf("nil error classified as %q,%v", reason, documented)
+	}
+}
+
+func TestCodexTurnPageUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		rejection   string
+		unavailable bool
+	}{
+		{`{"code":-32600,"message":"thread/turns/list requires experimentalApi capability"}`, true},
+		{"{\"code\":-32600,\"message\":\"Invalid request: unknown variant `thread/turns/list`, expected one of `initialize`\"}", true},
+		{`{"code":-32601,"message":"Method not found"}`, true},
+		{`{"code":-32600,"message":"Invalid request: invalid type: string \"x\", expected u32"}`, false},
+		{`{"code":-32600,"message":"thread not found: thread-missing"}`, false},
+		{`{"code":-32603,"message":"internal error"}`, false},
+	} {
+		var remote codexRPCError
+		if err := json.Unmarshal([]byte(tc.rejection), &remote); err != nil {
+			t.Fatal(err)
+		}
+		if got := codexTurnPageUnavailable(&remote); got != tc.unavailable {
+			t.Fatalf("codexTurnPageUnavailable(%s)=%v want %v", tc.rejection, got, tc.unavailable)
+		}
+	}
+	if codexTurnPageUnavailable(nil) {
+		t.Fatal("nil error must not be treated as an unavailable page")
+	}
+}
+
+// A turn-page rejection that is not the documented gate must surface instead
+// of silently loading the full history or queueing.
+func TestDeliverCodexMessageTurnPageRejectionOtherThanGatingFails(t *testing.T) {
+	argsFile, framesFile := installFakeCodexAppServer(t)
+	t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"error":{"code":-32600,"message":"thread not found: thread-vanished"}}`)
+	_, err := deliverCodexMessage(context.Background(), steerMessage("thread-vanished"), "vanished payload", "ignored", "queue")
+	if err == nil || !strings.Contains(err.Error(), "list Codex thread turns") || !strings.Contains(err.Error(), "thread not found") {
+		t.Fatalf("error=%v want the turn page rejection surfaced", err)
+	}
+	args, _ := os.ReadFile(argsFile)
+	if strings.Contains(string(args), "queue\n") {
+		t.Fatalf("turn page rejection must not fall back to codex queue: %q", args)
+	}
+	frames := readFrames(t, framesFile)
+	for _, forbidden := range []string{`"includeTurns":true`, `"method":"turn/steer"`} {
+		if strings.Contains(frames, forbidden) {
+			t.Fatalf("turn page rejection must not continue with %s: %s", forbidden, frames)
+		}
+	}
+}
+
+// runListen must not complete the delivery row when the steer primitive is
+// broken: the row stays open for a retry and the receiver cursor does not
+// advance past the undelivered message.
+func TestRunListenUnknownSteerRejectionKeepsDeliveryOpen(t *testing.T) {
+	argsFile, _ := installFakeCodexAppServer(t)
+	t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"result":{"data":[{"id":"turn-live","status":"inProgress"}]}}`)
+	t.Setenv("PAIMOS_TEST_STEER", `{"error":{"code":-32601,"message":"Method not found"}}`)
+	message := steerMessage("thread-broken")
+	message.Cursor, message.MessageID = 7, "m-broken"
+	message.Parts = append(message.Parts, struct {
+		Kind string `json:"kind"`
+		Text string `json:"text"`
+	}{Kind: "text", Text: "broken payload"})
+	completeCalls, ackCalls := 0, 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/listen"):
+			_ = json.NewEncoder(w).Encode(inboxPage{NextCursor: 7, Messages: []messageEnvelope{message}})
+		case strings.HasSuffix(r.URL.Path, "/delivery-complete"):
+			completeCalls++
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		case strings.HasSuffix(r.URL.Path, "/ack"):
+			ackCalls++
+			_ = json.NewEncoder(w).Encode(map[string]any{"cursor": 7})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	client := &Client{baseURL: srv.URL, http: srv.Client()}
+	err := runListen(context.Background(), client, 1, "codex:codex", "codex", false, true, "codex", "", "queue", false, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "unexpected app-server rejection") {
+		t.Fatalf("error=%v want the unexpected rejection surfaced from listen", err)
+	}
+	if completeCalls != 0 || ackCalls != 0 {
+		t.Fatalf("delivery-complete=%d ack=%d want 0/0 for a failed steer", completeCalls, ackCalls)
+	}
+	args, _ := os.ReadFile(argsFile)
+	if strings.Contains(string(args), "queue\n") {
+		t.Fatalf("listen must not queue after an unknown steer rejection: %q", args)
 	}
 }
 
