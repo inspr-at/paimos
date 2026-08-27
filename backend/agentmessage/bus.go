@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -17,6 +18,60 @@ import (
 )
 
 const targetSecretDomain = "agent-message-targets"
+
+// Registry adapters and target kinds. Local adapters are executed by an
+// attributed receiver-side worker that leases the delivery through listen and
+// records the handoff through delivery-complete; grok_bot_routine is
+// dispatched server-side by the webhook dispatcher instead.
+const (
+	AdapterCodex          = "codex"
+	AdapterGrokBotRoutine = "grok_bot_routine"
+	AdapterClaudeResume   = "claude_resume"
+	AdapterClaudeChannel  = "claude_channel"
+
+	TargetKindCodexThread   = "codex_thread"
+	TargetKindHTTPSWebhook  = "https_webhook"
+	TargetKindClaudeSession = "claude_session"
+)
+
+// Claude session references. A local session is the lowercase UUID that
+// `claude -p --output-format json` prints as session_id and that
+// `claude -p --resume` accepts; a cloud session is the `session_…`/`cse_…`
+// tagged id shown at claude.ai/code and accepted by `claude -p --cloud`.
+// Socket paths, URLs, and session names are rejected: PAIMOS never guesses a
+// Claude target.
+var (
+	claudeLocalSessionPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	claudeCloudSessionPattern = regexp.MustCompile(`^(session|cse)_[A-Za-z0-9_-]{1,128}$`)
+)
+
+// ClaudeSessionPrimitive maps a Claude session reference to the documented
+// print-mode flag that addresses it: --resume for a local session UUID and
+// --cloud for a cloud session id. ok is false for every other shape.
+func ClaudeSessionPrimitive(ref string) (flag string, ok bool) {
+	switch {
+	case claudeLocalSessionPattern.MatchString(ref):
+		return "--resume", true
+	case claudeCloudSessionPattern.MatchString(ref):
+		return "--cloud", true
+	default:
+		return "", false
+	}
+}
+
+// IsLocalWorkerAdapter reports whether adapter names a delivery adapter that
+// an attributed receiver-side worker executes and completes locally.
+func IsLocalWorkerAdapter(adapter string) bool {
+	switch adapter {
+	case AdapterCodex, AdapterClaudeResume, AdapterClaudeChannel:
+		return true
+	}
+	return false
+}
+
+func isClaudeAdapter(adapter string) bool {
+	return adapter == AdapterClaudeResume || adapter == AdapterClaudeChannel
+}
 
 const selectedDeliveryTargetSQL = `(CASE
 	WHEN d.requested_level='steer' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
@@ -92,22 +147,41 @@ func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*
 		return nil, coded("agent_message_target_ref_invalid", "target_ref must be 1 to 2048 safe UTF-8 bytes")
 	}
 	switch in.Adapter {
-	case "codex":
-		if in.TargetKind != "codex_thread" {
+	case AdapterCodex:
+		if in.TargetKind != TargetKindCodexThread {
 			return nil, coded("agent_message_target_kind_invalid", "codex targets require target_kind codex_thread")
 		}
 		if len([]byte(ref)) > 256 {
 			return nil, coded("agent_message_target_ref_invalid", "Codex thread references are limited to 256 bytes")
 		}
-	case "grok_bot_routine":
-		if in.TargetKind != "https_webhook" {
+	case AdapterGrokBotRoutine:
+		if in.TargetKind != TargetKindHTTPSWebhook {
 			return nil, coded("agent_message_target_kind_invalid", "grok_bot_routine targets require target_kind https_webhook")
 		}
 		if err := validateWebhookTargetRef(ctx, ref); err != nil {
 			return nil, err
 		}
+	case AdapterClaudeResume, AdapterClaudeChannel:
+		// claude_resume names the session that `claude -p --resume|--cloud`
+		// addresses; claude_channel names the local session that loaded the
+		// PAIMOS channel through `paimos serve --mcp-stdio --channel-as`.
+		// Claude has no steer primitive, so a Claude target can never promise
+		// more than simple delivery.
+		if in.TargetKind != TargetKindClaudeSession {
+			return nil, coded("agent_message_target_kind_invalid", in.Adapter+" targets require target_kind claude_session")
+		}
+		flag, ok := ClaudeSessionPrimitive(ref)
+		if !ok {
+			return nil, coded("agent_message_target_ref_invalid", "Claude session references must be a lowercase local session UUID or a session_…/cse_… cloud session id")
+		}
+		if in.Adapter == AdapterClaudeChannel && flag != "--resume" {
+			return nil, coded("agent_message_target_ref_invalid", "claude_channel targets name the local session UUID that loaded the PAIMOS channel")
+		}
+		if in.MaximumLevel != "simple" {
+			return nil, coded("agent_message_target_level_invalid", "Claude targets have no steer primitive; maximum_level must be simple")
+		}
 	default:
-		return nil, coded("agent_message_target_adapter_invalid", "adapter must be codex or grok_bot_routine")
+		return nil, coded("agent_message_target_adapter_invalid", "adapter must be codex, grok_bot_routine, claude_resume, or claude_channel")
 	}
 	ciphertext, err := secretvault.Encrypt(targetSecretDomain, []byte(ref))
 	if err != nil {
@@ -249,10 +323,13 @@ func (s *Service) RequeueMissingTargets(ctx context.Context, projectID int64, ad
 	return count, nil
 }
 
-// attachDeliveryWork leases one local Codex delivery and decrypts only the
-// snapshotted receiver-owned Codex thread reference. Webhook capabilities are
-// never disclosed through listen.
-func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, address, agent string, envelope *Envelope) (bool, error) {
+// attachDeliveryWork leases one local delivery whose selected target matches
+// the worker's adapter (a Codex thread for codex, a Claude session for
+// claude_resume or claude_channel) and decrypts only that snapshotted
+// receiver-owned reference. Work that belongs to another adapter is returned
+// as redacted state for observability and is never leased or disclosed;
+// webhook capabilities are never disclosed through listen.
+func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, address, agent, workerAdapter string, envelope *Envelope) (bool, error) {
 	if _, _, err := s.resolveAttributedInbox(ctx, projectID, address, agent); err != nil {
 		return false, err
 	}
@@ -293,9 +370,10 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 			return false, err
 		}
 	}
-	if work.Adapter != "codex" {
-		// The server-side dispatcher owns webhook delivery. Return state for
-		// observability without ever exposing the capability URL.
+	if work.Adapter != workerAdapter {
+		// Another worker (or the server-side webhook dispatcher) owns this
+		// target. Return state for observability without ever exposing the
+		// reference.
 		envelope.DeliveryWork = &work
 		return true, nil
 	}
@@ -337,8 +415,9 @@ type CompleteDeliveryInput struct {
 	FallbackReason string
 }
 
-// CompleteLocalDelivery records one accepted Codex primitive and advances the
-// inbox cursor in the same transaction.
+// CompleteLocalDelivery records one accepted local primitive (Codex queue or
+// steer, Claude print-mode resume/cloud, or Claude channel push) and advances
+// the inbox cursor in the same transaction.
 func (s *Service) CompleteLocalDelivery(ctx context.Context, in CompleteDeliveryInput) (*CursorState, error) {
 	if in.EffectiveLevel != "simple" && in.EffectiveLevel != "steer" {
 		return nil, coded("agent_message_effective_level_invalid", "effective_level must be simple or steer")
@@ -358,18 +437,20 @@ func (s *Service) CompleteLocalDelivery(ctx context.Context, in CompleteDelivery
 	}
 	var state string
 	var messageCursor int64
-	var requestedLevel, maximumLevel string
-	var codexTarget int
-	if err := tx.QueryRowContext(ctx, `SELECT d.state,d.requested_level,t.maximum_level,
-		CASE WHEN t.adapter='codex' THEN 1 ELSE 0 END,am.id FROM agent_message_deliveries d
+	var requestedLevel, maximumLevel, adapter string
+	if err := tx.QueryRowContext(ctx, `SELECT d.state,d.requested_level,t.maximum_level,t.adapter,am.id
+		FROM agent_message_deliveries d
 		JOIN agent_messages am ON am.id=d.message_row_id
 		JOIN agent_message_targets t ON t.id=`+selectedDeliveryTargetSQL+`
 		WHERE d.delivery_id=? AND d.instance=? AND am.to_address=?`, in.DeliveryID, instanceName(), address).Scan(
-		&state, &requestedLevel, &maximumLevel, &codexTarget, &messageCursor); err != nil {
+		&state, &requestedLevel, &maximumLevel, &adapter, &messageCursor); err != nil {
 		return nil, coded("agent_message_delivery_unknown", "delivery does not belong to this inbox")
 	}
-	if codexTarget != 1 {
-		return nil, coded("agent_message_delivery_adapter_mismatch", "local completion is available only for Codex targets")
+	if !IsLocalWorkerAdapter(adapter) {
+		return nil, coded("agent_message_delivery_adapter_mismatch", "local completion is available only for Codex and Claude targets")
+	}
+	if in.EffectiveLevel == "steer" && isClaudeAdapter(adapter) {
+		return nil, coded("agent_message_effective_level_invalid", "Claude targets have no steer primitive; effective_level must be simple")
 	}
 	if in.EffectiveLevel == "steer" && (requestedLevel != "steer" || maximumLevel != "steer") {
 		return nil, coded("agent_message_effective_level_invalid", "steer was not allowed by the durable request and receiver policy")

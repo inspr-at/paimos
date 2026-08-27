@@ -189,9 +189,9 @@ func messageTargetSetCmd() *cobra.Command {
 	}}
 	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
 	c.Flags().StringVar(&address, "address", "", "receiver address (required)")
-	c.Flags().StringVar(&adapter, "adapter", "", "codex or grok_bot_routine (required)")
-	c.Flags().StringVar(&kind, "kind", "", "codex_thread or https_webhook (required)")
-	c.Flags().StringVar(&ref, "target-ref", "", "receiver-owned Codex thread (webhook capabilities must use --target-ref-file)")
+	c.Flags().StringVar(&adapter, "adapter", "", "codex, grok_bot_routine, claude_resume, or claude_channel (required)")
+	c.Flags().StringVar(&kind, "kind", "", "codex_thread, https_webhook, or claude_session (required)")
+	c.Flags().StringVar(&ref, "target-ref", "", "receiver-owned Codex thread or Claude session id (webhook capabilities must use --target-ref-file)")
 	c.Flags().StringVar(&refFile, "target-ref-file", "", "read target reference from file, or - for stdin")
 	c.Flags().StringVar(&maximumLevel, "maximum-level", "simple", "receiver policy: simple or steer")
 	c.Flags().StringVar(&role, "role", "primary", "primary or simple_fallback")

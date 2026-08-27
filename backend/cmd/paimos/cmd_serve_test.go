@@ -260,3 +260,97 @@ func TestServeMCPClaudeChannelSteerLevelRecordsUnsupportedFallback(t *testing.T)
 }
 
 var channelMetaKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+func TestServeMCPClaudeChannelCompletesLeasedRegistryWorkAndSkipsForeignRows(t *testing.T) {
+	part := func(text string) struct {
+		Kind string `json:"kind"`
+		Text string `json:"text"`
+	} {
+		return struct {
+			Kind string `json:"kind"`
+			Text string `json:"text"`
+		}{Kind: "text", Text: text}
+	}
+	leased := messageEnvelope{Cursor: 14, MessageID: "m14", From: "paimos:codex", To: "claude:claude", DeliveryLevel: "steer",
+		DeliveryWork: &messageDeliveryWork{DeliveryID: "d14", State: "leased", Adapter: "claude_channel", TargetKind: "claude_session",
+			TargetRef: claudeTestLocalSession, MaximumLevel: "simple", RequestedLevel: "steer"}}
+	leased.Parts = append(leased.Parts, part("leased channel push"))
+	foreign := messageEnvelope{Cursor: 15, MessageID: "m15", From: "paimos:codex", To: "claude:claude",
+		DeliveryWork: &messageDeliveryWork{DeliveryID: "d15", State: "pending", Adapter: "claude_resume", TargetKind: "claude_session", RequestedLevel: "simple"}}
+	foreign.Parts = append(foreign.Parts, part("belongs to the resume listener"))
+	missing := messageEnvelope{Cursor: 16, MessageID: "m16", From: "paimos:codex", To: "claude:claude",
+		DeliveryWork: &messageDeliveryWork{DeliveryID: "d16", State: "blocked", RequestedLevel: "simple"}}
+	missing.Parts = append(missing.Parts, part("no target yet"))
+	queries := make(chan string, 4)
+	completed := make(chan registryCompletion, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/projects/6/messages/listen":
+			queries <- r.URL.RawQuery
+			_ = json.NewEncoder(w).Encode(inboxPage{Address: "claude:claude", NextCursor: 16, Messages: []messageEnvelope{leased, foreign, missing}})
+		case "/api/projects/6/messages/delivery-complete":
+			var completion registryCompletion
+			_ = json.NewDecoder(r.Body).Decode(&completion)
+			_ = json.NewEncoder(w).Encode(map[string]any{"cursor": completion.Cursor})
+			completed <- completion
+		case "/api/projects/6/messages/ack":
+			t.Errorf("registry work must complete through delivery-complete; foreign or blocked rows must never be acknowledged")
+			http.Error(w, "unexpected ack", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	b, _ := newTestBroker(t)
+	b.client = &Client{baseURL: srv.URL, http: srv.Client()}
+	b.channelAddress, b.channelAgent, b.channelPollInterval = "claude:claude", "claude", time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var out bytes.Buffer
+	go b.runClaudeChannel(ctx, newLockedJSONEncoder(&out))
+	var completion registryCompletion
+	select {
+	case completion = <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("channel did not complete the leased delivery")
+	}
+	if query := <-queries; !strings.Contains(query, "delivery=claude_channel") {
+		t.Fatalf("listen query=%q must lease claude_channel work", query)
+	}
+	want := registryCompletion{To: "claude:claude", Cursor: 14, DeliveryID: "d14", EffectiveLevel: "simple", FallbackReason: "unsupported"}
+	if completion != want {
+		t.Fatalf("completion=%+v want %+v", completion, want)
+	}
+	// Only the leased row was pushed; the foreign and blocked rows emit
+	// nothing and are left to their own worker or an operator requeue.
+	var notifications []channelNotification
+	dec := json.NewDecoder(bytes.NewReader(out.Bytes()))
+	for dec.More() {
+		var notification channelNotification
+		if err := dec.Decode(&notification); err != nil {
+			t.Fatalf("decode notification: %v\n%s", err, out.String())
+		}
+		notifications = append(notifications, notification)
+	}
+	if len(notifications) != 1 || notifications[0].Params.Content != "leased channel push" || notifications[0].Params.Meta["message_id"] != "m14" {
+		t.Fatalf("notifications=%#v", notifications)
+	}
+	meta := notifications[0].Params.Meta
+	if meta["requested_level"] != "steer" || meta["effective_level"] != "simple" || meta["fallback_reason"] != "unsupported" {
+		t.Fatalf("channel delivery state=%v want steer/simple/unsupported", meta)
+	}
+}
+
+func TestChannelSkipAuditIsRecordedOncePerStateChange(t *testing.T) {
+	b, _ := newTestBroker(t)
+	var logs bytes.Buffer
+	b.logger = log.New(&logs, "", 0)
+	b.channelAddress = "claude:claude"
+	b.auditChannelSkip("m1", "claude_resume", "pending")
+	b.auditChannelSkip("m1", "claude_resume", "pending")
+	b.auditChannelSkip("m1", "", "blocked")
+	b.auditChannelSkip("m2", "", "blocked")
+	if got := strings.Count(logs.String(), "claude_channel_skip"); got != 3 {
+		t.Fatalf("skip audits=%d want 3 (one per message and state change)\n%s", got, logs.String())
+	}
+}

@@ -29,9 +29,19 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Claude steer stays unsupported by design: a `steer` request (durable
   `paimos tell --level steer`, or legacy `--deliver-mode steer` on pre-bus
   rows) with `--deliver claude` falls back to the selected simple primitive
-  and records `fallback_reason=unsupported` instead of exiting 4. The Claude
-  session is still named by `--deliver-target`; the target registry accepts
-  no Claude adapter yet.
+  and records `fallback_reason=unsupported` instead of exiting 4.
+- Folded Claude into the receiver target registry (M155): `paimos message
+  target set --adapter claude_resume|claude_channel --kind claude_session`
+  binds a receiver to an encrypted local session UUID or `session_…`/`cse_…`
+  cloud id. `listen --deliver claude` now leases `claude_resume` work
+  (`?delivery=claude_resume`), resumes the receiver-owned session instead of
+  `--deliver-target`, and completes through `delivery-complete`; the opt-in
+  channel leases `claude_channel` work and completes each successful push the
+  same way, leaving rows that belong to another adapter or still have no
+  target untouched. Claude targets are fixed to `maximum_level=simple`, a
+  Claude delivery can never complete as `steer`, and an unknown `?delivery=`
+  worker adapter is rejected instead of ignored. `--deliver-target` remains
+  only for pre-bus envelopes.
 
 ### Fixed
 

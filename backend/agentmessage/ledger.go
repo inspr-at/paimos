@@ -365,6 +365,9 @@ func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, 
 // after the receiver's durable acknowledged cursor. A caller may advance the
 // in-memory position with AfterID, but only AckInbox changes durable state.
 func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, error) {
+	if in.WorkerAdapter != "" && !IsLocalWorkerAdapter(in.WorkerAdapter) {
+		return nil, coded("agent_message_worker_adapter_invalid", "delivery must name a local worker adapter: codex, claude_resume, or claude_channel")
+	}
 	address, _, err := s.resolveAttributedInbox(ctx, in.ProjectID, in.Address, in.Agent)
 	if err != nil {
 		return nil, err
@@ -383,10 +386,10 @@ func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, err
 	if err != nil {
 		return nil, err
 	}
-	if in.WorkerAdapter == "codex" {
+	if in.WorkerAdapter != "" {
 		leased := messages[:0]
 		for i := range messages {
-			include, err := s.attachDeliveryWork(ctx, in.ProjectID, address, in.Agent, &messages[i])
+			include, err := s.attachDeliveryWork(ctx, in.ProjectID, address, in.Agent, in.WorkerAdapter, &messages[i])
 			if err != nil {
 				return nil, err
 			}

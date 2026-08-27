@@ -220,16 +220,17 @@ documented print-mode primitives. A local, idle session is woken as a new
 turn; a cloud session receives a queued follow-up:
 
 ```bash
-paimos listen --as claude:claude --project PAI --follow \
-  --deliver claude --deliver-target 8f3c2a1e-4b6d-4c8e-9a1f-0d2e3f4a5b6c   # claude -p --resume
-paimos listen --as claude:claude --project PAI --follow \
-  --deliver claude --deliver-target session_01DiUkqY2kzbUbDmW1w96rfi         # claude -p --cloud
+paimos message target set --project PAI --address claude:claude \
+  --adapter claude_resume --kind claude_session \
+  --target-ref 8f3c2a1e-4b6d-4c8e-9a1f-0d2e3f4a5b6c   # or session_01DiUkqY2kzbUbDmW1w96rfi
+paimos listen --as claude:claude --project PAI --follow --deliver claude
 ```
 
-The adapter accepts only a lowercase local session UUID (the `session_id` that
-`claude -p --output-format json` prints) or a `session_…`/`cse_…` cloud id from
-claude.ai/code; socket paths, URLs, and session names are rejected and nothing
-is inferred from the environment. The framed body is piped over stdin, never
+The registry and the adapter accept only a lowercase local session UUID (the
+`session_id` that `claude -p --output-format json` prints) or a
+`session_…`/`cse_…` cloud id from claude.ai/code; a local UUID runs
+`claude -p --resume`, a cloud id runs `claude -p --cloud`, socket paths, URLs,
+and session names are rejected, and nothing is inferred from the environment. The framed body is piped over stdin, never
 placed in argv or a shell, argv is fixed, and a zero vendor exit is the
 handoff acknowledgement; the model response is discarded and the cursor
 advances only afterwards. PAIMOS adds no permission mode and never passes
@@ -246,9 +247,17 @@ command, and no documented messaging-socket user frame, so a `steer` request
 (the durable `paimos tell --level steer`, or legacy `--deliver-mode steer` on
 a pre-bus row) delivers the same simple turn and records
 `fallback_reason=unsupported` instead of guessing a vendor command. The Claude
-session is named by `--deliver-target`: the receiver target registry accepts
-only `codex` and `grok_bot_routine` adapters today, so no Claude binding is
-snapshotted onto messages yet.
+session is the receiver-owned `claude_resume` target: the listener asks for
+`?delivery=claude_resume`, the server leases the row and discloses the
+decrypted session only to that attributed worker, and a zero vendor exit is
+reported through `delivery-complete`, which records `handed_off` and advances
+the cursor atomically. Claude targets are fixed to `maximum_level=simple`.
+`--deliver-target` applies only to pre-bus envelopes without delivery work;
+work that has no target or belongs to another adapter exits 4 instead of
+being guessed. The opt-in channel leases `claude_channel` targets the same
+way (register the local session UUID that loaded the channel), completes each
+successful push, and skips rows owned by another adapter or still blocked
+without a target.
 
 Grok Build delivery is an explicit experimental CLI path:
 

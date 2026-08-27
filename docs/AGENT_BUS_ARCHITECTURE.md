@@ -522,7 +522,7 @@ URL, or credential.
 
 ## 8. Adapter matrix
 
-“Current” describes `04dea97`. “Target” describes the smallest supported
+“Current” describes `04dea97`, with the Claude rows updated for PAI-827. “Target” describes the smallest supported
 mapping; anything marked **UNSUPPORTED** must not be replaced with a guessed
 CLI or socket frame.
 
@@ -530,9 +530,9 @@ CLI or socket frame.
 |---|---|---|---|---|
 | Codex | `simple` | `codex queue --thread <THREAD> --message <TEXT>` | Implemented by `listen --deliver codex`; mode is process-wide | Supported. `<THREAD>` is a Codex rollout/session UUID or exact session name, never a Cursor chat UUID |
 | Codex | `steer` | Start daemon with `codex app-server daemon start`; worker runs `codex app-server proxy`, performs `initialize` + `initialized`, queries `thread/turns/list {threadId}` for status `inProgress`, then calls `turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}` | Implemented, but `activeTurnNotSteerable` currently returns an error | Supported. Idle, race, or not-steerable falls back to the exact queue primitive |
-| Claude local | `simple` | `claude -p --resume <session_id>` or `claude -p --cloud <session_id>` | Documented in code but not implemented by `listen` | Follow-up adapter only after documented print-mode prompt transport and success semantics are tested; this architecture does not guess them |
-| Claude Channels | `simple` | MCP `notifications/claude/channel`; session opts in with `--channels` or `--dangerously-load-development-channels` | Research-preview channel path exists under `paimos serve --mcp-stdio --channel-as` | Supported simple push when explicitly enabled; successful JSON-RPC write is handoff |
-| Claude | `steer` | **UNSUPPORTED** | `listen --deliver claude` returns adapter unavailable | Fall back to a configured simple resume/cloud or Channels target; otherwise remain blocked |
+| Claude local | `simple` | `claude -p --resume <session_id>` or `claude -p --cloud <session_id>` | Implemented by `listen --deliver claude` from a receiver-owned `claude_resume` / `claude_session` target; framed body over stdin, zero exit is handoff, completed through `delivery-complete` | Supported. A local UUID resumes an idle session; a `session_…`/`cse_…` id queues a cloud follow-up |
+| Claude Channels | `simple` | MCP `notifications/claude/channel`; session opts in with `--channels` or `--dangerously-load-development-channels` | Research-preview channel path under `paimos serve --mcp-stdio --channel-as`; leases `claude_channel` targets and completes each push | Supported simple push when explicitly enabled; successful JSON-RPC write is handoff |
+| Claude | `steer` | **UNSUPPORTED** | Falls back to the selected simple primitive with `fallback_reason=unsupported`; Claude targets are fixed to `maximum_level=simple` | Fall back to a configured simple resume/cloud or Channels target; otherwise remain blocked |
 | Grok CLI / Grok Build | `simple` | `grok --single` (or `-p`) with `--resume`; current adapter uses one bounded `--single --resume` turn | Implemented behind `--enable-grok-build-delivery` | Supported only as an explicit receiver-owned target |
 | Grok CLI / Grok Build | `steer` | **UNSUPPORTED** | No steer primitive | Fall back to the exact simple resume primitive |
 | Grok Bot | `simple` | Generic HTTPS webhook that triggers Amy's routine | No PAIMOS inbound; current docs correctly call it receive-by-human | Preferred instant wake. PAIMOS POSTs the framed event to the configured routine webhook |

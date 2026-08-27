@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/spf13/cobra"
 )
 
@@ -107,7 +108,7 @@ func listenCmd() *cobra.Command {
 	c.Flags().BoolVar(&follow, "follow", false, "keep polling until interrupted")
 	c.Flags().BoolVar(&ack, "ack", false, "durably acknowledge messages after output")
 	c.Flags().StringVar(&deliver, "deliver", "", "deliver each message to codex, claude, or grok, then acknowledge")
-	c.Flags().StringVar(&deliverTarget, "deliver-target", "", "Claude session target: local session UUID (claude -p --resume) or cloud session id session_…/cse_… (claude -p --cloud); for Codex and Grok only a legacy pre-bus target — bus messages use their receiver-owned target version")
+	c.Flags().StringVar(&deliverTarget, "deliver-target", "", "legacy target for pre-bus messages (Codex thread; Claude local session UUID or session_…/cse_… cloud id; Grok session UUID); bus messages use their receiver-owned target version")
 	c.Flags().StringVar(&deliverMode, "deliver-mode", "queue", "legacy pre-bus delivery mode (queue or steer); bus messages use their durable message level, and Claude has no steer primitive so steer falls back to simple")
 	c.Flags().BoolVar(&enableGrok, "enable-grok-build-delivery", false, "enable the experimental Grok Build delivery adapter")
 	c.Flags().DurationVar(&pollInterval, "poll-interval", listenDefaultPollInterval, "follow polling interval")
@@ -125,18 +126,11 @@ func splitListenAddress(raw string) (string, string, error) {
 var addressPartCLI = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 var grokSessionUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
-// Claude session targets. A local session is the lowercase UUID that
-// `claude -p --output-format json` prints as session_id and that --resume
-// accepts; a cloud session is the `session_…`/`cse_…` tagged id shown at
-// claude.ai/code and accepted by --cloud. Socket paths, URLs, and session
-// names are rejected: PAIMOS never guesses a Claude target.
-var claudeLocalSessionPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-var claudeCloudSessionPattern = regexp.MustCompile(`^(session|cse)_[A-Za-z0-9_-]{1,128}$`)
-
 func runListen(ctx context.Context, client *Client, projectID int64, address, agent string, follow, acknowledge bool, deliver, target, legacyMode string, enableGrok bool, pollInterval time.Duration) error {
 	after, seen := int64(0), false
+	worker := workerAdapterFor(deliver)
 	for {
-		page, err := fetchInbox(ctx, client, projectID, address, agent, after, deliver)
+		page, err := fetchInbox(ctx, client, projectID, address, agent, after, worker)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -200,13 +194,31 @@ func completeInboxDelivery(ctx context.Context, client *Client, projectID int64,
 	return err
 }
 
-func fetchInbox(ctx context.Context, client *Client, projectID int64, address, agent string, after int64, deliveryAdapter string) (*inboxPage, error) {
+// workerAdapterFor maps a --deliver adapter to the registry adapter this
+// worker can execute, so the server leases only matching receiver-owned
+// targets: codex for the Codex queue/steer primitives and claude_resume for
+// `claude -p --resume|--cloud`. Grok Build has no registry adapter and keeps
+// using --deliver-target.
+func workerAdapterFor(deliver string) string {
+	switch deliver {
+	case "codex":
+		return agentmessage.AdapterCodex
+	case "claude":
+		return agentmessage.AdapterClaudeResume
+	default:
+		return ""
+	}
+}
+
+// fetchInbox reads one attributed inbox page. A non-empty workerAdapter asks
+// the server to lease matching receiver-owned delivery work onto the page.
+func fetchInbox(ctx context.Context, client *Client, projectID int64, address, agent string, after int64, workerAdapter string) (*inboxPage, error) {
 	q := url.Values{"to": []string{address}, "limit": []string{"10"}}
 	if after > 0 {
 		q.Set("after", strconv.FormatInt(after, 10))
 	}
-	if deliveryAdapter == "codex" {
-		q.Set("delivery", "codex")
+	if workerAdapter != "" {
+		q.Set("delivery", workerAdapter)
 	}
 	raw, err := client.doForAgentContext(ctx, "GET", fmt.Sprintf("/api/projects/%d/messages/listen?%s", projectID, q.Encode()), nil, agent)
 	if err != nil {
@@ -372,16 +384,11 @@ func deliveryLevelFromMode(mode string) string {
 	return deliveryLevelSimple
 }
 
-// claudeSessionFlag selects the documented print-mode primitive for a target.
+// claudeSessionFlag selects the documented print-mode primitive for a target:
+// --resume for a local session UUID, --cloud for a session_…/cse_… cloud id.
+// The shape rule is shared with the server-side target registry.
 func claudeSessionFlag(target string) (string, bool) {
-	switch {
-	case claudeLocalSessionPattern.MatchString(target):
-		return "--resume", true
-	case claudeCloudSessionPattern.MatchString(target):
-		return "--cloud", true
-	default:
-		return "", false
-	}
+	return agentmessage.ClaudeSessionPrimitive(target)
 }
 
 func deliverCodex(ctx context.Context, body, target string) error {
@@ -539,16 +546,29 @@ func codexRPCCall(encoder *json.Encoder, decoder *json.Decoder, id int, method s
 	}
 }
 
-// deliverClaudeMessage selects the requested level from the durable envelope
-// (PAI-826 delivery_level); a pre-bus envelope without one falls back to the
-// legacy process-wide --deliver-mode. The session target still comes from
-// --deliver-target: the PAI-826 target registry accepts only codex and
-// grok_bot_routine adapters, so listen discloses no receiver-owned Claude
-// binding yet and acknowledges Claude handoffs through the plain cursor ack.
-func deliverClaudeMessage(ctx context.Context, message messageEnvelope, body, target, legacyMode string) (*deliveryOutcome, error) {
-	requested := message.DeliveryLevel
+// deliverClaudeMessage resolves the Claude session and the requested level.
+// A bus message arrives with leased delivery work: the receiver-owned
+// claude_resume target and its durable requested level win, and runListen
+// then records the handoff through delivery-complete. A pre-bus envelope
+// keeps the legacy --deliver-target session and, without a durable
+// delivery_level, the process-wide --deliver-mode. Delivery work that has no
+// attached target or that belongs to another adapter (for example the
+// receiver's claude_channel push) is never delivered from here.
+func deliverClaudeMessage(ctx context.Context, message messageEnvelope, body, legacyTarget, legacyMode string) (*deliveryOutcome, error) {
+	target, requested := legacyTarget, message.DeliveryLevel
 	if requested == "" {
 		requested = deliveryLevelFromMode(legacyMode)
+	}
+	if work := message.DeliveryWork; work != nil {
+		switch {
+		case work.Adapter == "":
+			return nil, &adapterUnavailableError{message: "message has no receiver-owned Claude session target (delivery " + work.State + "); register a claude_resume target and requeue"}
+		case work.Adapter != agentmessage.AdapterClaudeResume:
+			return nil, &adapterUnavailableError{message: "message target is a " + work.Adapter + " adapter, not claude_resume"}
+		case work.TargetRef == "":
+			return nil, &adapterUnavailableError{message: "message has no usable receiver-owned Claude session target"}
+		}
+		target, requested = work.TargetRef, work.RequestedLevel
 	}
 	outcome, err := deliverClaude(ctx, body, target, requested)
 	if err != nil {

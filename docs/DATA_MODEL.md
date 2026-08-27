@@ -517,7 +517,12 @@ bindings. Only one primary and one simple fallback version may be enabled for
 an address. Vendor references are domain-separated secretvault ciphertext;
 ordinary ledger, target-list, delivery-status, and webhook payloads contain
 only non-secret target IDs and kinds. The shipped adapters in M154 are `codex`
-with `codex_thread` and `grok_bot_routine` with `https_webhook`.
+with `codex_thread` and `grok_bot_routine` with `https_webhook`. M155
+(PAI-827) rebuilds the table in place, keeping every version, ciphertext, and
+delivery reference, to add `claude_resume` and `claude_channel` with
+`claude_session` (an encrypted local session UUID or `session_…`/`cse_…`
+cloud id); Claude targets are schema-fixed to `maximum_level='simple'`
+because Claude has no steer primitive.
 
 `agent_message_deliveries` is one unique intent/outbox row per eligible
 message, with stable `delivery_id`, snapshotted targets, requested/effective

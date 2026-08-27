@@ -26,9 +26,10 @@ import (
 // listener, the exact `claude -p --resume <session_id>` primitive with the
 // framed body on stdin, and cursor acknowledgement. The second message is a
 // steer request and proves the unsupported-steer simple fallback on a real
-// session. No target is registered: the PAI-826 registry accepts no Claude
-// adapter, so listen discloses no delivery_work and the handoff is
-// acknowledged through the plain cursor ack.
+// session. The session is a receiver-owned claude_resume registry target:
+// listen leases the delivery work, resumes the disclosed session, and records
+// the handoff through delivery-complete, so the durable delivery row ends
+// handed_off instead of blocked/target_missing.
 func TestAgentBusRealClaudeSimpleE2E(t *testing.T) {
 	sessionID := strings.TrimSpace(os.Getenv("PAIMOS_AGENT_BUS_E2E_CLAUDE_SESSION"))
 	if sessionID == "" {
@@ -57,6 +58,12 @@ func TestAgentBusRealClaudeSimpleE2E(t *testing.T) {
 	}
 	service := agentmessage.NewService(paimosdb.DB)
 	if err := service.AllowSender(context.Background(), projectID, "claude:claude", "paimos:codex"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:claude", Adapter: agentmessage.AdapterClaudeResume,
+		TargetKind: agentmessage.TargetKindClaudeSession, TargetRef: sessionID,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -107,12 +114,13 @@ func TestAgentBusRealClaudeSimpleE2E(t *testing.T) {
 			case firstListen <- struct{}{}:
 			default:
 			}
-			if r.URL.Query().Get("delivery") != "" {
-				t.Errorf("Claude listener must not request delivery work: %q", r.URL.RawQuery)
+			if r.URL.Query().Get("delivery") != agentmessage.AdapterClaudeResume {
+				t.Errorf("Claude listener must lease claude_resume delivery work: %q", r.URL.RawQuery)
 			}
 			after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 			page, err := service.ListInbox(r.Context(), agentmessage.InboxInput{
-				ProjectID: projectID, Address: r.URL.Query().Get("to"), Agent: r.Header.Get(agentAttrHeader), AfterID: after, Limit: 10,
+				ProjectID: projectID, Address: r.URL.Query().Get("to"), Agent: r.Header.Get(agentAttrHeader),
+				WorkerAdapter: r.URL.Query().Get("delivery"), AfterID: after, Limit: 10,
 			})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -129,16 +137,23 @@ func TestAgentBusRealClaudeSimpleE2E(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(page)
 		case r.Method == http.MethodPost && r.URL.Path == fmt.Sprintf("/api/projects/%d/messages/ack", projectID):
+			t.Errorf("registry delivery work must complete through delivery-complete, not the plain cursor ack")
+			http.Error(w, "unexpected", http.StatusBadRequest)
+		case r.Method == http.MethodPost && r.URL.Path == fmt.Sprintf("/api/projects/%d/messages/delivery-complete", projectID):
 			var request struct {
-				To     string `json:"to"`
-				Cursor int64  `json:"cursor"`
+				To             string `json:"to"`
+				Cursor         int64  `json:"cursor"`
+				DeliveryID     string `json:"delivery_id"`
+				EffectiveLevel string `json:"effective_level"`
+				FallbackReason string `json:"fallback_reason"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			state, err := service.AckInbox(r.Context(), agentmessage.AckInput{
+			state, err := service.CompleteLocalDelivery(r.Context(), agentmessage.CompleteDeliveryInput{
 				ProjectID: projectID, Address: request.To, Agent: r.Header.Get(agentAttrHeader), Cursor: request.Cursor,
+				DeliveryID: request.DeliveryID, EffectiveLevel: request.EffectiveLevel, FallbackReason: request.FallbackReason,
 			})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -151,9 +166,6 @@ func TestAgentBusRealClaudeSimpleE2E(t *testing.T) {
 			proofMu.Unlock()
 			_ = json.NewEncoder(w).Encode(state)
 			acked <- request.Cursor
-		case r.Method == http.MethodPost && r.URL.Path == fmt.Sprintf("/api/projects/%d/messages/delivery-complete", projectID):
-			t.Errorf("Claude path has no registry delivery work and must not call delivery-complete")
-			http.Error(w, "unexpected", http.StatusBadRequest)
 		default:
 			http.NotFound(w, r)
 		}
@@ -173,7 +185,8 @@ func TestAgentBusRealClaudeSimpleE2E(t *testing.T) {
 	listenerErr := make(chan error, 1)
 	client := &Client{baseURL: server.URL, apiKey: "e2e-test-key", http: server.Client()}
 	go func() {
-		listenerErr <- runListen(listenerCtx, client, projectID, "claude:claude", "claude", true, true, "claude", sessionID, "queue", false, 20*time.Millisecond)
+		// No --deliver-target: the session comes from the leased registry work.
+		listenerErr <- runListen(listenerCtx, client, projectID, "claude:claude", "claude", true, true, "claude", "", "queue", false, 20*time.Millisecond)
 	}()
 	select {
 	case <-firstListen:
@@ -229,14 +242,22 @@ func TestAgentBusRealClaudeSimpleE2E(t *testing.T) {
 		state := "none"
 		for _, delivery := range deliveries {
 			if delivery.MessageID == proof.MessageID {
-				// Until the registry accepts a Claude adapter the server-side
-				// delivery row stays blocked/target_missing even though the
-				// listener handed the message off and advanced the cursor.
-				state = delivery.State + "/" + delivery.FallbackReason
-				if delivery.State != "blocked" || delivery.FallbackReason != "target_missing" || delivery.RequestedLevel != proof.Level {
+				// The registry fold makes the server-side row truthful: the
+				// leased claude_resume delivery is handed_off at level simple,
+				// with the steer probe recording the unsupported fallback.
+				state = delivery.State + "/" + delivery.EffectiveLevel + "/" + delivery.FallbackReason
+				wantFallback := ""
+				if proof.Level == "steer" {
+					wantFallback = "unsupported"
+				}
+				if delivery.State != "handed_off" || delivery.EffectiveLevel != "simple" || delivery.FallbackReason != wantFallback ||
+					delivery.RequestedLevel != proof.Level || delivery.AttemptCount != 1 || delivery.HandedOffAt == "" {
 					t.Fatalf("unexpected delivery row for %s probe: %+v", proof.Level, delivery)
 				}
 			}
+		}
+		if state == "none" {
+			t.Fatalf("%s probe has no delivery row", proof.Level)
 		}
 		t.Logf("PAI-827_E2E direction=codex_to_claude level=%s primitive=\"claude -p --resume\" message_id=%s cursor=%d delivery_row=%s tell_started=%s committed=%s listen_picked=%s handed_off=%s commit_ms=%d pickup_ms=%d handoff_ms=%d",
 			proof.Level, proof.MessageID, proof.Cursor, state, proof.TellStarted.Format(time.RFC3339Nano), proof.Committed.Format(time.RFC3339Nano),

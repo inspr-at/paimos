@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -754,5 +755,147 @@ func TestDeliverGrokUsesBoundedNativeArgvAndDiscardsResponse(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "sensitive vendor response") {
 		t.Fatalf("vendor response leaked to stdout: %q", out.String())
+	}
+}
+
+// registryCompletion is the delivery-complete payload a registry handoff must
+// send instead of the plain cursor ack.
+type registryCompletion struct {
+	To             string `json:"to"`
+	Cursor         int64  `json:"cursor"`
+	DeliveryID     string `json:"delivery_id"`
+	EffectiveLevel string `json:"effective_level"`
+	FallbackReason string `json:"fallback_reason"`
+}
+
+// claudeRegistryListenServer serves one bus message carrying leased
+// claude_resume delivery work, records the listen query and the
+// delivery-complete payload, and rejects the plain cursor ack.
+func claudeRegistryListenServer(t *testing.T, message messageEnvelope) (*httptest.Server, *registryCompletion, *string, *sync.Mutex) {
+	t.Helper()
+	var mu sync.Mutex
+	var completed registryCompletion
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(agentAttrHeader) != "claude" {
+			t.Errorf("agent header=%q want claude", r.Header.Get(agentAttrHeader))
+		}
+		switch r.URL.Path {
+		case "/api/projects/1/messages/listen":
+			mu.Lock()
+			query = r.URL.RawQuery
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(inboxPage{Address: "claude:claude", NextCursor: message.Cursor, Messages: []messageEnvelope{message}})
+		case "/api/projects/1/messages/delivery-complete":
+			mu.Lock()
+			_ = json.NewDecoder(r.Body).Decode(&completed)
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"cursor": message.Cursor})
+		case "/api/projects/1/messages/ack":
+			t.Errorf("registry delivery work must complete through delivery-complete, not the plain ack")
+			http.Error(w, "unexpected ack", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &completed, &query, &mu
+}
+
+func leasedClaudeResumeMessage(cursor int64, level string) messageEnvelope {
+	message := messageEnvelope{Cursor: cursor, MessageID: "m" + strconv.FormatInt(cursor, 10), From: "paimos:codex", To: "claude:claude", DeliveryLevel: level,
+		DeliveryWork: &messageDeliveryWork{DeliveryID: "d" + strconv.FormatInt(cursor, 10), State: "leased", Adapter: "claude_resume",
+			TargetKind: "claude_session", TargetRef: claudeTestLocalSession, MaximumLevel: "simple", RequestedLevel: level}}
+	message.Parts = append(message.Parts, struct {
+		Kind string `json:"kind"`
+		Text string `json:"text"`
+	}{Kind: "text", Text: "registry payload"})
+	return message
+}
+
+func TestRunListenClaudeRegistryTargetCompletesDelivery(t *testing.T) {
+	message := leasedClaudeResumeMessage(41, "steer")
+	srv, completed, query, mu := claudeRegistryListenServer(t, message)
+	argsFile, stdinFile := installFakeClaude(t)
+	_, errOut := captureListenOutput(t)
+	client := &Client{baseURL: srv.URL, http: srv.Client()}
+	// The legacy --deliver-target names a different (cloud) session and the
+	// legacy mode is queue: the receiver-owned registry target and its durable
+	// steer request win.
+	if err := runListen(context.Background(), client, 1, "claude:claude", "claude", false, true, "claude", claudeTestCloudSession, "queue", false, time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(argsFile)
+	if got, want := string(raw), "-p\n--resume\n"+claudeTestLocalSession+"\n"; got != want {
+		t.Fatalf("argv=%q want %q", got, want)
+	}
+	stdin, _ := os.ReadFile(stdinFile)
+	if string(stdin) != "registry payload" {
+		t.Fatalf("stdin=%q", stdin)
+	}
+	if !strings.Contains(errOut.String(), "fallback_reason=unsupported") {
+		t.Fatalf("stderr=%q want fallback note", errOut.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(*query, "delivery=claude_resume") {
+		t.Fatalf("listen query=%q must lease claude_resume work", *query)
+	}
+	want := registryCompletion{To: "claude:claude", Cursor: 41, DeliveryID: "d41", EffectiveLevel: "simple", FallbackReason: "unsupported"}
+	if *completed != want {
+		t.Fatalf("completion=%+v want %+v", *completed, want)
+	}
+}
+
+func TestRunListenClaudeDoesNotCompleteFailedRegistryHandoff(t *testing.T) {
+	message := leasedClaudeResumeMessage(42, "simple")
+	srv, completed, _, mu := claudeRegistryListenServer(t, message)
+	installFakeClaude(t)
+	captureListenOutput(t)
+	t.Setenv("PAIMOS_TEST_EXIT", "2")
+	client := &Client{baseURL: srv.URL, http: srv.Client()}
+	err := runListen(context.Background(), client, 1, "claude:claude", "claude", false, true, "claude", "", "queue", false, time.Millisecond)
+	if err == nil {
+		t.Fatal("expected failed handoff to surface")
+	}
+	if exit, ok := err.(*listenExitCode); ok {
+		t.Fatalf("vendor failure must not be reported as listen exit %d", exit.code)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if completed.DeliveryID != "" {
+		t.Fatalf("failed handoff must leave the lease uncompleted: %+v", *completed)
+	}
+}
+
+func TestDeliverClaudeMessageRefusesForeignOrMissingDeliveryWork(t *testing.T) {
+	for name, work := range map[string]*messageDeliveryWork{
+		"blocked without target":  {DeliveryID: "d1", State: "blocked", RequestedLevel: "simple"},
+		"channel adapter":         {DeliveryID: "d2", State: "pending", Adapter: "claude_channel", TargetKind: "claude_session", RequestedLevel: "simple"},
+		"codex adapter":           {DeliveryID: "d3", State: "pending", Adapter: "codex", TargetKind: "codex_thread", RequestedLevel: "simple"},
+		"resume adapter unleased": {DeliveryID: "d4", State: "pending", Adapter: "claude_resume", TargetKind: "claude_session", RequestedLevel: "simple"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			argsFile, _ := installFakeClaude(t)
+			captureListenOutput(t)
+			message := messageEnvelope{Cursor: 5, MessageID: "m5", DeliveryWork: work}
+			// A legacy --deliver-target must not paper over missing registry work.
+			_, err := deliverClaudeMessage(context.Background(), message, "payload", claudeTestLocalSession, "queue")
+			var unavailable *adapterUnavailableError
+			if !errors.As(err, &unavailable) {
+				t.Fatalf("err=%v want adapter unavailable", err)
+			}
+			if _, statErr := os.Stat(argsFile); statErr == nil {
+				t.Fatal("claude must not run without a usable receiver-owned target")
+			}
+		})
+	}
+}
+
+func TestWorkerAdapterForMapsDeliverFlagToRegistryAdapter(t *testing.T) {
+	for deliver, want := range map[string]string{"codex": "codex", "claude": "claude_resume", "grok": "", "": ""} {
+		if got := workerAdapterFor(deliver); got != want {
+			t.Fatalf("workerAdapterFor(%q)=%q want %q", deliver, got, want)
+		}
 	}
 }

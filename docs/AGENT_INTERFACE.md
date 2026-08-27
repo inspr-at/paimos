@@ -41,7 +41,9 @@ paimos message target set --project PAI --address codex:codex \
 paimos tell codex:codex --project PAI --level simple --message "Status observation"
 paimos listen --as codex:codex --project PAI --ack
 paimos listen --as codex:codex --project PAI --follow --deliver codex
-paimos listen --as claude:claude --project PAI --follow --deliver claude --deliver-target <claude-session-uuid>
+paimos message target set --project PAI --address claude:claude \
+  --adapter claude_resume --kind claude_session --target-ref "$CLAUDE_SESSION_ID"
+paimos listen --as claude:claude --project PAI --follow --deliver claude
 paimos listen --as grok:grok --project PAI --deliver grok --deliver-target "$GROK_SESSION_ID" --enable-grok-build-delivery
 ```
 
@@ -60,13 +62,18 @@ is simple-only and uses two documented print-mode primitives: a local session
 UUID target runs `claude -p --resume <session_id>` as a new turn, and a
 `session_…`/`cse_…` cloud target runs `claude -p --cloud <session_id>` as a
 queued follow-up. The framed body is piped over stdin, a zero exit is the
-handoff, and the vendor response is discarded. The Claude session is still
-named by `--deliver-target` because the target registry accepts no Claude
-adapter yet. There is no Claude messaging socket or send-to-session command;
+handoff, and the vendor response is discarded. The Claude session is the
+receiver-owned `claude_resume` target (`--kind claude_session`: an encrypted
+local session UUID or `session_…`/`cse_…` cloud id); the listener leases that
+work with `?delivery=claude_resume` and completes it through
+`delivery-complete`, while `--deliver-target` applies only to pre-bus
+envelopes. There is no Claude messaging socket or send-to-session command;
 a `steer` request (durable `--level steer`, or legacy `--deliver-mode steer`)
 falls back to the same simple primitive and records
 `fallback_reason=unsupported`. A session started with `--channels` can instead
-receive pushes from `paimos serve --mcp-stdio --channel-as`.
+receive pushes from `paimos serve --mcp-stdio --channel-as`; with a
+`claude_channel` target registered, the channel leases and completes each
+push's delivery row and leaves rows owned by another adapter alone.
 The experimental Grok Build adapter is off unless
 `--enable-grok-build-delivery` is present. It resumes only a canonical session
 UUID through the first-party `grok` CLI, sends one verbatim turn with tools,

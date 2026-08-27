@@ -11591,6 +11591,49 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 PRIMARY KEY(instance,project_id,sender_agent_id,key_digest)
 			)`,
 		}},
+
+		// M155 / PAI-827: Claude session targets. The Claude simple adapters
+		// (`claude_resume` for `claude -p --resume|--cloud`, `claude_channel`
+		// for the opt-in MCP channel push) bind a receiver to a Claude session
+		// id. SQLite cannot widen a CHECK constraint in place, so the target
+		// table is rebuilt under its own name: agent_message_deliveries keeps
+		// referencing agent_message_targets(id), and every existing version,
+		// ciphertext, and enabled flag is carried over unchanged. Claude has no
+		// steer primitive, so a Claude target's maximum_level is fixed to
+		// simple at the schema level.
+		{155, []string{
+			`PRAGMA foreign_keys=OFF`,
+			`CREATE TABLE agent_message_targets_m155 (
+			 id                TEXT PRIMARY KEY CHECK(length(CAST(id AS BLOB)) BETWEEN 1 AND 64),
+			 instance          TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+			 project_id        INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 address           TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+			 adapter           TEXT NOT NULL CHECK(adapter IN ('codex','grok_bot_routine','claude_resume','claude_channel')),
+			 target_kind       TEXT NOT NULL CHECK(target_kind IN ('codex_thread','https_webhook','claude_session')),
+			 target_ref_cipher BLOB NOT NULL CHECK(typeof(target_ref_cipher)='blob' AND length(target_ref_cipher)>28),
+			 maximum_level     TEXT NOT NULL DEFAULT 'simple' CHECK(maximum_level IN ('simple','steer')),
+			 role              TEXT NOT NULL DEFAULT 'primary' CHECK(role IN ('primary','simple_fallback')),
+			 enabled           INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+			 version           INTEGER NOT NULL CHECK(version>0),
+			 created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 UNIQUE(instance,project_id,address,role,version),
+			 CHECK((adapter='codex' AND target_kind='codex_thread') OR
+			       (adapter='grok_bot_routine' AND target_kind='https_webhook') OR
+			       (adapter IN ('claude_resume','claude_channel') AND target_kind='claude_session')),
+			 CHECK(adapter NOT IN ('claude_resume','claude_channel') OR maximum_level='simple')
+			)`,
+			`INSERT INTO agent_message_targets_m155
+			 (id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version,created_at)
+			 SELECT id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version,created_at
+			   FROM agent_message_targets`,
+			`DROP TABLE agent_message_targets`,
+			`ALTER TABLE agent_message_targets_m155 RENAME TO agent_message_targets`,
+			`CREATE UNIQUE INDEX idx_agent_message_targets_enabled_role
+			 ON agent_message_targets(instance,project_id,address,role) WHERE enabled=1`,
+			`CREATE INDEX idx_agent_message_targets_receiver
+			 ON agent_message_targets(instance,project_id,address,enabled)`,
+			`PRAGMA foreign_keys=ON`,
+		}},
 	}
 
 	for _, m := range migrations {
