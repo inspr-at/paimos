@@ -381,8 +381,19 @@ assert_release_recovery_receipt() {
     fail "release recovery receipt approved_head is not lowercase 40-hex"
   [[ "$receipt_merge" =~ ^[0-9a-f]{40}$ ]] ||
     fail "release recovery receipt merge_commit is not lowercase 40-hex"
-  [[ "$receipt_reason" == "manual_squash_merge_missing_auto_merge_provenance" ]] ||
-    fail "release recovery receipt carries an unrecognized incident reason"
+  case "$receipt_release:$receipt_reason" in
+    v5.19.0:manual_squash_merge_missing_auto_merge_provenance)
+      ;;
+    v5.20.0:canonical_auto_merge_immediate_merge_post_merge_request_missing)
+      # GitHub can merge immediately while `gh pr merge --auto` is enabling
+      # canonical squash auto-merge, then omit autoMergeRequest from the
+      # post-merge PR response. The reviewed receipt remains mandatory and
+      # every pinned head/check/tree/ancestry/tag gate below still applies.
+      ;;
+    *)
+      fail "release recovery receipt carries an unrecognized incident reason"
+      ;;
+  esac
 
   live_pr=$(printf '%s\n' "$pr_json" | jq -r '.number // empty')
   live_head=$(printf '%s\n' "$pr_json" | jq -r '.headRefOid // empty')
