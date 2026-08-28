@@ -314,14 +314,6 @@ func (s *codexAppServerSession) activeTurn(ctx context.Context, threadID string)
 	if history.Thread.ID != threadID || history.Thread.Turns == nil {
 		return "", "", &codexProtocolError{Phase: "validate thread/read result"}
 	}
-	switch history.Thread.Status.Type {
-	case "idle", "notLoaded":
-		return "", "idle", nil
-	case "active":
-		// Continue below and select the latest usable active turn.
-	default:
-		return "", "", &codexProtocolError{Phase: "validate thread/read status"}
-	}
 	turns := *history.Thread.Turns
 	for _, turn := range turns {
 		switch turn.Status {
@@ -329,6 +321,19 @@ func (s *codexAppServerSession) activeTurn(ctx context.Context, threadID string)
 		default:
 			return "", "", &codexProtocolError{Phase: "validate thread/read turn status"}
 		}
+	}
+	switch history.Thread.Status.Type {
+	case "idle", "notLoaded":
+		for _, turn := range turns {
+			if turn.Status == "inProgress" {
+				return "", "", &codexProtocolError{Phase: "validate thread/read inactive history"}
+			}
+		}
+		return "", "idle", nil
+	case "active":
+		// Continue below and select the latest usable active turn.
+	default:
+		return "", "", &codexProtocolError{Phase: "validate thread/read status"}
 	}
 	for index := len(turns) - 1; index >= 0; index-- {
 		if turns[index].Status == "inProgress" && turns[index].ID != "" {

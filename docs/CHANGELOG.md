@@ -46,7 +46,8 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   unknown/system-error thread status,
   an unknown turn status, missing thread history, a mismatched thread, or a
   missing/mismatched returned turn ID cannot masquerade as a transport failure
-  or successful queue fallback.
+  or successful queue fallback. An inactive thread response that still contains
+  an `inProgress` turn is likewise rejected as contradictory protocol data.
   Fallback diagnostics retain only the controlled phase and typed reason;
   vendor error text cannot echo target references, bodies, or secret-like
   values into listener output. Queue stdout and stderr are also discarded,

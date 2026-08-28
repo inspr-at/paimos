@@ -70,7 +70,8 @@ hard delivery error, as is any undocumented steer rejection, malformed frame,
 or malformed/mismatched successful response. Only `idle` and `notLoaded` are
 clean inactive statuses; system-error/unknown status, missing history, a mismatched thread,
 an unknown turn status, or a missing/mismatched returned turn ID indicate
-protocol drift. These cases are never relabeled as transport fallback.
+protocol drift. An inactive status paired with an `inProgress` turn is also
+rejected as contradictory. These cases are never relabeled as transport fallback.
 Fallback diagnostics contain only the controlled phase and reason;
 vendor error text, target references, message bodies, and secret-like values
 are never copied to listener output. The queue primitive's stdout and stderr

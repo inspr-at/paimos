@@ -342,7 +342,7 @@ priority.
 | `steer`, Codex thread is idle or has no `inProgress` turn | Use `codex queue`; reason `idle` |
 | `steer`, Codex returns `activeTurnNotSteerable` or the expected turn races | Use `codex queue`; reason `not_steerable` |
 | `steer`, Codex daemon/proxy/initialize/read/steer transport fails | Use `codex queue`; reason `transport_error` |
-| `steer`, Codex returns a malformed frame, initialize/read returns a JSON-RPC rejection, steer returns an undocumented rejection, or a successful response has invalid thread/turn status, history, IDs, or schema | Leave unacknowledged and retry; do not mask protocol drift with queue fallback |
+| `steer`, Codex returns a malformed frame, initialize/read returns a JSON-RPC rejection, steer returns an undocumented rejection, or a successful response has invalid/contradictory thread/turn status, history, IDs, or schema | Leave unacknowledged and retry; do not mask protocol drift with queue fallback |
 | `steer`, receiver policy has `maximum_level=simple` | Use the configured simple target; reason `policy_capped` |
 | `steer`, adapter has no steer primitive | Use its supported simple primitive; reason `unsupported` |
 | `steer`, no thread target, but a distinct simple target is configured | Use that simple target; reason `target_missing` |

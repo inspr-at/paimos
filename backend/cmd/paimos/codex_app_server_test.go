@@ -676,6 +676,18 @@ func TestDeliverCodexMessageMalformedRPCResultsFailWithoutQueue(t *testing.T) {
 		{"thread unknown turn status", "validate thread/read turn status", func(t *testing.T) {
 			t.Setenv("PAIMOS_TEST_THREAD_READ", `{"result":{"thread":{"id":"`+leakTarget+`","status":{"type":"active"},"turns":[{"id":"turn-unknown","status":"`+leakSecret+`"},{"id":"turn-live","status":"inProgress"}]}}}`)
 		}},
+		{"idle thread unknown turn status", "validate thread/read turn status", func(t *testing.T) {
+			t.Setenv("PAIMOS_TEST_THREAD_READ", `{"result":{"thread":{"id":"`+leakTarget+`","status":{"type":"idle"},"turns":[{"id":"turn-unknown","status":"`+leakSecret+`"}]}}}`)
+		}},
+		{"not loaded thread missing turn status", "validate thread/read turn status", func(t *testing.T) {
+			t.Setenv("PAIMOS_TEST_THREAD_READ", `{"result":{"thread":{"id":"`+leakTarget+`","status":{"type":"notLoaded"},"turns":[{"id":"turn-unknown"}]}}}`)
+		}},
+		{"idle thread has in-progress turn", "validate thread/read inactive history", func(t *testing.T) {
+			t.Setenv("PAIMOS_TEST_THREAD_READ", `{"result":{"thread":{"id":"`+leakTarget+`","status":{"type":"idle"},"turns":[{"id":"turn-live","status":"inProgress"}]}}}`)
+		}},
+		{"not loaded thread has in-progress turn", "validate thread/read inactive history", func(t *testing.T) {
+			t.Setenv("PAIMOS_TEST_THREAD_READ", `{"result":{"thread":{"id":"`+leakTarget+`","status":{"type":"notLoaded"},"turns":[{"id":"turn-live","status":"inProgress"}]}}}`)
+		}},
 		{"turn steer", "decode turn/steer result", func(t *testing.T) {
 			t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-live","status":"inProgress"}]`)
 			t.Setenv("PAIMOS_TEST_STEER", `{"result":{"turnId":{"value":"`+leakSecret+`"}}}`)
