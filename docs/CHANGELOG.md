@@ -7,6 +7,16 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added — Week and project hours views (PAI-830)
+
+- Added the user-facing `/hours/week` and `/hours/project` Reporting routes. The
+  weekly grid is backed by the new authenticated `GET /api/time-entries/week`
+  endpoint, while the project view presents the existing
+  `GET /api/projects/{id}/time-report` rollup by issue and person.
+- Filing from the weekly grid reuses the existing time-entry write endpoint.
+  Only super-admins can create entries for another user; regular users and
+  non-super-admin administrators remain limited to their own hours.
+
 ### Fixed — Codex steer transport (PAI-825 follow-up)
 
 - `paimos listen --deliver codex` steer delivery never reached the Codex
