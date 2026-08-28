@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -129,6 +130,9 @@ func fakeCodexAppServer(ws *websocket.Conn) {
 			continue
 		}
 		if os.Getenv("PAIMOS_TEST_CLOSE_ON") == request.Method {
+			if diagnostic := os.Getenv("PAIMOS_TEST_VENDOR_STDERR"); diagnostic != "" {
+				fmt.Fprintln(os.Stderr, diagnostic)
+			}
 			return
 		}
 		if os.Getenv("PAIMOS_TEST_DECOY_ID") != "" {
@@ -191,7 +195,10 @@ if [ "$1" = "app-server" ] && [ "$2" = "daemon" ] && [ "$3" = "version" ]; then
   exit 0
 fi
 if [ "$1" = "app-server" ] && [ "$2" = "daemon" ]; then
-  if [ -n "$PAIMOS_TEST_DAEMON_FAIL" ]; then exit 42; fi
+  if [ -n "$PAIMOS_TEST_DAEMON_FAIL" ]; then
+    printf '%s\n' "$PAIMOS_TEST_VENDOR_STDERR" >&2
+    exit 42
+  fi
   exit 0
 fi
 if [ "$1" = "app-server" ] && [ "$2" = "proxy" ]; then
@@ -216,6 +223,7 @@ exit 1
 	t.Setenv("PAIMOS_TEST_STEER", "")
 	t.Setenv("PAIMOS_TEST_CLOSE_ON", "")
 	t.Setenv("PAIMOS_TEST_DECOY_ID", "")
+	t.Setenv("PAIMOS_TEST_VENDOR_STDERR", "")
 	t.Setenv("PAIMOS_TEST_PIDFILE", "")
 	return argsFile, framesFile
 }
@@ -304,26 +312,41 @@ func TestDeliverCodexMessageBusLevelIgnoresLegacyProcessMode(t *testing.T) {
 }
 
 func TestDeliverCodexMessageTransportFailuresFallBackToExactQueue(t *testing.T) {
+	const (
+		leakTarget = "fixture-encrypted-target-ref-never-log"
+		leakBody   = "Bearer-sk-body-never-log"
+		leakSecret = "sk-secret-like-never-log-abcdefghijklmnopqrstuvwxyz"
+	)
+	leakDiagnostic := strings.Join([]string{leakTarget, leakBody, leakSecret}, " ")
 	for _, tc := range []struct {
 		name  string
+		phase string
 		setup func(*testing.T)
 	}{
-		{"daemon start", func(t *testing.T) { t.Setenv("PAIMOS_TEST_DAEMON_FAIL", "1") }},
-		{"initialize", func(t *testing.T) {
-			t.Setenv("PAIMOS_TEST_INITIALIZE", `{"error":{"code":-32603,"message":"initialize failed"}}`)
+		{"daemon start", "app-server session", func(t *testing.T) {
+			t.Setenv("PAIMOS_TEST_DAEMON_FAIL", "1")
+			t.Setenv("PAIMOS_TEST_VENDOR_STDERR", leakDiagnostic)
 		}},
-		{"thread read", func(t *testing.T) {
-			t.Setenv("PAIMOS_TEST_THREAD_READ", `{"error":{"code":-32603,"message":"read failed"}}`)
+		{"initialize", "app-server session", func(t *testing.T) {
+			t.Setenv("PAIMOS_TEST_INITIALIZE", `{"error":{"code":-32603,"message":"`+leakDiagnostic+`"}}`)
 		}},
-		{"turn steer transport", func(t *testing.T) {
+		{"thread read", "thread/read", func(t *testing.T) {
+			t.Setenv("PAIMOS_TEST_THREAD_READ", `{"error":{"code":-32603,"message":"`+leakDiagnostic+`"}}`)
+		}},
+		{"turn steer transport", "turn/steer", func(t *testing.T) {
 			t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-live","status":"inProgress"}]`)
 			t.Setenv("PAIMOS_TEST_CLOSE_ON", "turn/steer")
+			t.Setenv("PAIMOS_TEST_VENDOR_STDERR", leakDiagnostic)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argsFile, _ := installFakeCodexAppServer(t)
+			var errOut bytes.Buffer
+			oldStderr := stderr
+			stderr = &errOut
+			t.Cleanup(func() { stderr = oldStderr })
 			tc.setup(t)
-			outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-transport"), "transport payload", "ignored", "queue")
+			outcome, err := deliverCodexMessage(context.Background(), steerMessage(leakTarget), leakBody, "ignored", "queue")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -331,8 +354,19 @@ func TestDeliverCodexMessageTransportFailuresFallBackToExactQueue(t *testing.T) 
 				t.Fatalf("outcome=%#v want simple/transport_error", outcome)
 			}
 			args, _ := os.ReadFile(argsFile)
-			if !strings.Contains(string(args), "queue\n--thread\nthread-transport\n--message\ntransport payload\n") {
+			if !strings.Contains(string(args), "queue\n--thread\n"+leakTarget+"\n--message\n"+leakBody+"\n") {
 				t.Fatalf("exact queue argv missing: %q", args)
+			}
+			diagnostic := errOut.String()
+			for _, required := range []string{tc.phase + " failed", "fallback_reason=transport_error"} {
+				if !strings.Contains(diagnostic, required) {
+					t.Fatalf("stderr=%q missing controlled diagnostic %q", diagnostic, required)
+				}
+			}
+			for _, forbidden := range []string{leakTarget, leakBody, leakSecret} {
+				if strings.Contains(diagnostic, forbidden) {
+					t.Fatalf("stderr leaked %q: %q", forbidden, diagnostic)
+				}
 			}
 		})
 	}
@@ -395,19 +429,28 @@ const (
 )
 
 func TestDeliverCodexMessageFallsBackOnDocumentedSteerRejections(t *testing.T) {
+	const (
+		leakTarget = "fixture-encrypted-target-ref-never-log"
+		leakBody   = "Bearer-sk-body-never-log"
+		leakSecret = "sk-secret-like-never-log-abcdefghijklmnopqrstuvwxyz"
+	)
 	for _, tc := range []struct {
 		name, rejection, reason string
 	}{
-		{"active turn not steerable (review)", codexRejectionReviewTurn, "not_steerable"},
-		{"compact turn without structured data", `{"code":-32600,"message":"cannot steer a compact turn"}`, "not_steerable"},
-		{"expected turn race", codexRejectionTurnRace, "not_steerable"},
-		{"turn finished before steer", codexRejectionNoTurn, "idle"},
+		{"active turn not steerable (review)", `{"code":-32600,"message":"cannot steer a review turn ` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"review"}}}}`, "not_steerable"},
+		{"compact turn without structured data", `{"code":-32600,"message":"cannot steer a compact turn ` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `"}`, "not_steerable"},
+		{"expected turn race", `{"code":-32600,"message":"expected active turn id ` + "`turn-raced`" + ` but found ` + "`turn-next`" + ` ` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `"}`, "not_steerable"},
+		{"turn finished before steer", `{"code":-32600,"message":"no active turn to steer","data":{"additionalDetails":"` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `"}}`, "idle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argsFile, _ := installFakeCodexAppServer(t)
+			var errOut bytes.Buffer
+			oldStderr := stderr
+			stderr = &errOut
+			t.Cleanup(func() { stderr = oldStderr })
 			t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-raced","status":"inProgress"}]`)
 			t.Setenv("PAIMOS_TEST_STEER", `{"error":`+tc.rejection+`}`)
-			outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-raced"), "raced payload", "ignored", "queue")
+			outcome, err := deliverCodexMessage(context.Background(), steerMessage(leakTarget), leakBody, "ignored", "queue")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -415,8 +458,17 @@ func TestDeliverCodexMessageFallsBackOnDocumentedSteerRejections(t *testing.T) {
 				t.Fatalf("outcome=%#v want simple/%s", outcome, tc.reason)
 			}
 			args, _ := os.ReadFile(argsFile)
-			if !strings.Contains(string(args), "queue\n--thread\nthread-raced\n--message\nraced payload\n") {
+			if !strings.Contains(string(args), "queue\n--thread\n"+leakTarget+"\n--message\n"+leakBody+"\n") {
 				t.Fatalf("queue argv missing: %q", args)
+			}
+			diagnostic := errOut.String()
+			if !strings.Contains(diagnostic, "turn/steer rejected") || !strings.Contains(diagnostic, "fallback_reason="+tc.reason) {
+				t.Fatalf("stderr=%q missing controlled fallback diagnostic", diagnostic)
+			}
+			for _, forbidden := range []string{leakTarget, leakBody, leakSecret} {
+				if strings.Contains(diagnostic, forbidden) {
+					t.Fatalf("stderr leaked %q: %q", forbidden, diagnostic)
+				}
 			}
 		})
 	}
@@ -435,6 +487,7 @@ func TestDeliverCodexMessageUnknownSteerRejectionFailsWithoutQueue(t *testing.T)
 		{"empty input", `{"code":-32600,"message":"input must not be empty"}`},
 		{"internal error", `{"code":-32603,"message":"failed to steer turn: boom"}`},
 		{"documented text under a foreign code", `{"code":-32603,"message":"no active turn to steer"}`},
+		{"documented marker under a foreign code", `{"code":-32603,"message":"steer failed","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"review"}}}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argsFile, _ := installFakeCodexAppServer(t)

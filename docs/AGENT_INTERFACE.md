@@ -65,8 +65,11 @@ not-loaded, policy-capped, raced, and `activeTurnNotSteerable` cases use the
 exact queue fallback. Daemon, proxy, initialize, thread-read, and steer
 transport failures also use that queue with `fallback_reason=transport_error`;
 the steer budget still bounds a silent proxy and kills its whole process
-group. Any other `turn/steer` rejection (unknown method, request-shape drift,
-sub-agent ownership, internal error) fails the delivery instead of queueing.
+group. Fallback diagnostics contain only the controlled phase and reason;
+vendor error text, target references, message bodies, and secret-like values
+are never copied to listener stderr. Any other `turn/steer` rejection (unknown
+method, request-shape drift, sub-agent ownership, internal error) fails the
+delivery instead of queueing.
 Claude delivery
 is simple-only and uses two documented print-mode primitives: a local session
 UUID target runs `claude -p --resume <session_id>` as a new turn, and a

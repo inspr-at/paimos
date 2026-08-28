@@ -6,7 +6,6 @@ package harness
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -31,7 +30,7 @@ func TestClassifyCodexSteerRejection(t *testing.T) {
 		documented              bool
 	}{
 		{"review turn with structured data", codexRejectionReviewTurn, "not_steerable", true},
-		{"structured data wins even with another code", `{"code":-32603,"message":"steer failed","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"compact"}}}}`, "not_steerable", true},
+		{"structured data under another code stays unknown", `{"code":-32603,"message":"steer failed","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"compact"}}}}`, "", false},
 		{"compact turn message only", `{"code":-32600,"message":"cannot steer a compact turn"}`, "not_steerable", true},
 		{"expected turn mismatch", codexRejectionTurnRace, "not_steerable", true},
 		{"no active turn", codexRejectionNoTurn, "idle", true},
@@ -85,7 +84,7 @@ func TestCodexAppServerProxyReadOnlyProbe(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), CodexSteerTimeout)
 	defer cancel()
 	started := time.Now()
-	session, err := openCodexAppServerSession(ctx, path, io.Discard, "probe")
+	session, err := openCodexAppServerSession(ctx, path, "probe")
 	if err != nil {
 		t.Fatal(err)
 	}

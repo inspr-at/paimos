@@ -132,14 +132,15 @@ func codexCommand(ctx context.Context, path string, args ...string) *exec.Cmd {
 // proxy, performs the WebSocket Upgrade handshake, and completes the
 // documented initialize/initialized exchange. Every blocking step is bounded
 // by ctx; on timeout the proxy process group is killed before returning.
-func openCodexAppServerSession(ctx context.Context, path string, stderr io.Writer, clientVersion string) (*codexAppServerSession, error) {
-	stderr = writerOrDiscard(stderr)
+// Vendor stderr is untrusted and may echo RPC data, so it is discarded; the
+// delivery layer emits only controlled phase and fallback-reason diagnostics.
+func openCodexAppServerSession(ctx context.Context, path, clientVersion string) (*codexAppServerSession, error) {
 	if clientVersion == "" {
 		clientVersion = defaultClientVersion
 	}
 	daemon := codexCommand(ctx, path, "app-server", "daemon", "start")
 	daemon.Stdout = io.Discard
-	daemon.Stderr = stderr
+	daemon.Stderr = io.Discard
 	if err := daemon.Run(); err != nil {
 		if ctx.Err() != nil {
 			return nil, codexTimeout(path, "app-server daemon start")
@@ -155,7 +156,7 @@ func openCodexAppServerSession(ctx context.Context, path string, stderr io.Write
 	if err != nil {
 		return nil, fmt.Errorf("open Codex proxy stdout: %w", err)
 	}
-	proxy.Stderr = stderr
+	proxy.Stderr = io.Discard
 	if err := proxy.Start(); err != nil {
 		return nil, fmt.Errorf("start Codex app-server proxy: %w", err)
 	}
@@ -337,8 +338,8 @@ func (s *codexAppServerSession) reap() {
 
 // classifyCodexSteerRejection maps a `turn/steer` JSON-RPC error onto the
 // documented simple-fallback reasons and reports false for everything else.
-// The vendor rejects a steer with an invalid-request error in exactly three
-// documented situations: the active turn cannot accept same-turn steering
+// The vendor rejects a steer with an invalid-request (-32600) error in exactly
+// three documented situations: the active turn cannot accept same-turn steering
 // (structured `activeTurnNotSteerable` error info and the "cannot steer a
 // review|compact turn" message), the expectedTurnId precondition no longer
 // matches ("expected active turn id `x` but found `y`"), or the turn finished
@@ -346,14 +347,11 @@ func (s *codexAppServerSession) reap() {
 // sub-agent ownership rejections, and internal errors are not fallbacks: they
 // mean the primitive is broken and must surface as delivery failures.
 func classifyCodexSteerRejection(err *codexRPCError) (string, bool) {
-	if err == nil {
+	if err == nil || err.Code != codexRPCInvalidRequest {
 		return "", false
 	}
 	if strings.Contains(string(err.Data), "activeTurnNotSteerable") {
 		return "not_steerable", true
-	}
-	if err.Code != codexRPCInvalidRequest {
-		return "", false
 	}
 	switch message := strings.TrimSpace(err.Message); {
 	case strings.HasPrefix(message, "cannot steer a "):
@@ -413,14 +411,14 @@ func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Write
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, CodexSteerTimeout)
 	defer cancel()
-	session, err := openCodexAppServerSession(operationCtx, path, stderr, clientVersion)
+	session, err := openCodexAppServerSession(operationCtx, path, clientVersion)
 	if err != nil {
-		return codexTransportFallback(stderr, "app-server session", err)
+		return codexTransportFallback(stderr, "app-server session")
 	}
 	defer session.close()
 	turnID, reason, err := session.activeTurn(operationCtx, target)
 	if err != nil {
-		return codexTransportFallback(stderr, "thread/read", err)
+		return codexTransportFallback(stderr, "thread/read")
 	}
 	if turnID == "" {
 		fmt.Fprintf(stderr, "codex: no steerable turn in progress; delivering as simple via codex queue (fallback_reason=%s)\n", reason)
@@ -438,7 +436,7 @@ func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Write
 		var remote *codexRPCError
 		if errors.As(err, &remote) {
 			if reason, documented := classifyCodexSteerRejection(remote); documented {
-				fmt.Fprintf(stderr, "codex: turn/steer rejected for expected turn %s (%v); delivering as simple via codex queue (fallback_reason=%s)\n", turnID, remote, reason)
+				fmt.Fprintf(stderr, "codex: turn/steer rejected; delivering as simple via codex queue (fallback_reason=%s)\n", reason)
 				return false, reason, nil
 			}
 			// Anything else (unknown method, malformed request, ownership
@@ -447,7 +445,7 @@ func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Write
 			// so the delivery fails and stays undelivered for a retry.
 			return false, "", fmt.Errorf("steer Codex turn (expected turn %s): unexpected app-server rejection: %w", turnID, remote)
 		}
-		return codexTransportFallback(stderr, "turn/steer", err)
+		return codexTransportFallback(stderr, "turn/steer")
 	}
 	// Evidence for operators: the turn that accepted the input is the exact
 	// expected-turn precondition the daemon verified. No body is echoed.
@@ -455,7 +453,7 @@ func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Write
 	return true, "", nil
 }
 
-func codexTransportFallback(stderr io.Writer, phase string, err error) (bool, string, error) {
-	fmt.Fprintf(stderr, "codex: %s failed (%v); delivering as simple via codex queue (fallback_reason=transport_error)\n", phase, err)
+func codexTransportFallback(stderr io.Writer, phase string) (bool, string, error) {
+	fmt.Fprintf(stderr, "codex: %s failed; delivering as simple via codex queue (fallback_reason=transport_error)\n", phase)
 	return false, "transport_error", nil
 }

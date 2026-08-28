@@ -351,6 +351,9 @@ priority.
 For Codex, simple fallback still requires a valid Codex thread target. If
 neither the requested target nor a configured default exists, queueing is
 impossible and the correct result is `blocked`, not a Cursor chat UUID guess.
+Codex fallback logs contain only a controlled phase and typed reason. Raw
+vendor diagnostics, target references, message bodies, and secret-like values
+are not copied into listener output.
 
 ## 6. Target sequences
 

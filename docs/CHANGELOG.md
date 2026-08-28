@@ -41,6 +41,9 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   with `fallback_reason=transport_error`. RPC attempts remain bounded and
   response-ID matched; undocumented remote `turn/steer` rejections still fail
   closed so request drift cannot masquerade as a successful queue fallback.
+  Fallback diagnostics retain only the controlled phase and typed reason;
+  vendor error text cannot echo target references, bodies, or secret-like
+  values into listener stderr.
 
 ## [5.19.0] — 2026-08-28
 
