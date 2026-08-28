@@ -39,6 +39,7 @@ fi
 
 EXPECTED_FILES=$'README.md\nVERSION\ndocs/CHANGELOG.md\ndocs/INSTALL.md'
 EXTERNAL_STAGE_MANIFEST='backend/contracts/fixtures/external-stage/manifest-v1.json'
+RECOVERY_RECEIPT_DIR='scripts/release/recovery'
 
 fail() {
   echo "error: $*" >&2
@@ -330,6 +331,113 @@ assert_squash_auto_merge() {
   method=$(printf '%s\n' "$json" | jq -r '.autoMergeRequest.mergeMethod // empty')
   [[ "$method" == "SQUASH" ]] ||
     fail "release PR is missing protected squash auto-merge provenance (got: ${method:-none})"
+}
+
+assert_release_recovery_receipt() {
+  local pr_json="$1" receipt_path receipt mode receipt_fields
+  local receipt_release receipt_pr receipt_head receipt_merge receipt_reason
+  local live_pr live_head live_merge parent_count merge_tree head_tree checks
+
+  receipt_path="$RECOVERY_RECEIPT_DIR/$NEW_TAG.json"
+  git fetch --quiet origin main
+  mode=$(git ls-tree origin/main -- "$receipt_path" | awk 'NR == 1 {print $1}')
+  [[ "$mode" == "100644" ]] ||
+    fail "missing tracked release recovery receipt on origin/main: $receipt_path"
+  receipt=$(git show "origin/main:$receipt_path") ||
+    fail "could not read release recovery receipt from origin/main: $receipt_path"
+  receipt_fields=$(jq -er '
+    if type == "object"
+      and (keys | sort) == ([
+        "approved_head",
+        "incident_reason",
+        "merge_commit",
+        "pull_request",
+        "release",
+        "schema_version"
+      ] | sort)
+      and .schema_version == 1
+      and (.release | type) == "string"
+      and (.pull_request | type) == "number"
+      and (.approved_head | type) == "string"
+      and (.merge_commit | type) == "string"
+      and (.incident_reason | type) == "string"
+    then [
+      .release,
+      (.pull_request | tostring),
+      .approved_head,
+      .merge_commit,
+      .incident_reason
+    ] | @tsv
+    else error("invalid recovery receipt")
+    end
+  ' <<<"$receipt") || fail "invalid release recovery receipt: $receipt_path"
+  IFS=$'\t' read -r receipt_release receipt_pr receipt_head receipt_merge receipt_reason <<<"$receipt_fields"
+
+  [[ "$receipt_release" == "$NEW_TAG" ]] ||
+    fail "release recovery receipt targets $receipt_release instead of $NEW_TAG"
+  [[ "$receipt_pr" == "$PR_NUMBER" ]] ||
+    fail "release recovery receipt targets PR $receipt_pr instead of PR $PR_NUMBER"
+  [[ "$receipt_head" =~ ^[0-9a-f]{40}$ ]] ||
+    fail "release recovery receipt approved_head is not lowercase 40-hex"
+  [[ "$receipt_merge" =~ ^[0-9a-f]{40}$ ]] ||
+    fail "release recovery receipt merge_commit is not lowercase 40-hex"
+  [[ "$receipt_reason" == "manual_squash_merge_missing_auto_merge_provenance" ]] ||
+    fail "release recovery receipt carries an unrecognized incident reason"
+
+  live_pr=$(printf '%s\n' "$pr_json" | jq -r '.number // empty')
+  live_head=$(printf '%s\n' "$pr_json" | jq -r '.headRefOid // empty')
+  live_merge=$(printf '%s\n' "$pr_json" | jq -r '.mergeCommit.oid // empty')
+  [[ "$receipt_pr" == "$live_pr" ]] ||
+    fail "release recovery receipt PR does not match live GitHub PR JSON"
+  [[ "$receipt_head" == "$live_head" && "$receipt_head" == "$VALIDATED_HEAD_OID" ]] ||
+    fail "release recovery receipt approved head does not match live validated PR head"
+  [[ "$receipt_merge" == "$live_merge" ]] ||
+    fail "release recovery receipt merge does not match live GitHub PR JSON"
+
+  git cat-file -e "$receipt_merge^{commit}" 2>/dev/null ||
+    fail "release recovery merge commit is unavailable: $receipt_merge"
+  git merge-base --is-ancestor "$receipt_merge" origin/main ||
+    fail "release recovery merge is not an ancestor of current origin/main"
+  parent_count=$(git rev-list --parents -n1 "$receipt_merge" | awk '{print NF-1}')
+  [[ "$parent_count" == "1" ]] ||
+    fail "release recovery merge is not a one-parent squash (got $parent_count parents)"
+  merge_tree=$(git rev-parse "$receipt_merge^{tree}")
+  head_tree=$(git rev-parse "$PR_HEAD_REF^{tree}")
+  [[ "$merge_tree" == "$head_tree" ]] ||
+    fail "release recovery merge tree differs from approved PR head $receipt_head"
+
+  if git show-ref --verify --quiet "refs/tags/$NEW_TAG" ||
+     git ls-remote --exit-code --tags origin "refs/tags/$NEW_TAG" >/dev/null 2>&1; then
+    fail "release recovery requires absent tag $NEW_TAG"
+  fi
+
+  checks=$(gh pr checks "$PR_NUMBER" \
+    --repo "$REPO" \
+    --required \
+    --json name,state,bucket,workflow) ||
+    fail "could not verify required checks for approved PR head $receipt_head"
+  jq -e '
+    type == "array"
+      and length > 0
+      and all(.[];
+        (.name | type) == "string"
+          and (.name | length) > 0
+          and (.state == "SUCCESS" or .state == "SKIPPED")
+      )
+  ' >/dev/null <<<"$checks" ||
+    fail "approved PR head has missing, pending, or failed required checks"
+
+  echo "Accepted audited recovery receipt for $NEW_TAG / PR $PR_NUMBER at $receipt_merge." >&2
+}
+
+assert_merged_release_provenance() {
+  local pr_json="$1" auto
+  auto=$(printf '%s\n' "$pr_json" | jq -r 'if .autoMergeRequest == null then "none" else "present" end')
+  if [[ "$auto" == "present" ]]; then
+    assert_squash_auto_merge "$pr_json"
+    return
+  fi
+  assert_release_recovery_receipt "$pr_json"
 }
 
 find_release_pr() {
@@ -768,7 +876,7 @@ case "$PR_STATE" in
   MERGED)
     fetch_and_validate_pr_head "$PR_JSON"
     run_release_gates_at_ref "$PR_HEAD_REF"
-    assert_squash_auto_merge "$PR_JSON"
+    assert_merged_release_provenance "$PR_JSON"
     MERGE_OID=$(printf '%s\n' "$PR_JSON" | jq -r '.mergeCommit.oid // empty')
     [[ -n "$MERGE_OID" ]] || fail "merged release PR has no merge commit"
     ;;
