@@ -112,6 +112,14 @@ pr_head_oid() {
   git --git-dir="$origin" rev-parse refs/pull/1/head
 }
 
+pr_merge_oid() {
+  if [[ -f "$state/override-merge-oid" ]]; then
+    cat "$state/override-merge-oid"
+  else
+    cat "$state/merge-oid"
+  fi
+}
+
 case "${1:-} ${2:-}" in
   'repo view')
     printf '%s\n' 'example/paimos'
@@ -124,10 +132,12 @@ case "${1:-} ${2:-}" in
       head_oid=$(pr_head_oid)
       [[ -f "$state/wrong-head" ]] && head_oid=0000000000000000000000000000000000000000
       if [[ -f "$state/pr-merged" ]]; then
-        merge_oid=$(<"$state/merge-oid")
+        merge_oid=$(pr_merge_oid)
         method=SQUASH
         [[ -f "$state/wrong-method" ]] && method=REBASE
-        printf '[{"number":1,"state":"MERGED","url":"https://example.test/pr/1","headRefName":"release/v1.0.1","headRefOid":"%s","baseRefName":"%s","autoMergeRequest":{"mergeMethod":"%s"},"mergeCommit":{"oid":"%s"}}]\n' "$head_oid" "$base_ref" "$method" "$merge_oid"
+        auto="{\"mergeMethod\":\"$method\"}"
+        [[ -f "$state/missing-auto-merge-provenance" ]] && auto=null
+        printf '[{"number":1,"state":"MERGED","url":"https://example.test/pr/1","headRefName":"release/v1.0.1","headRefOid":"%s","baseRefName":"%s","autoMergeRequest":%s,"mergeCommit":{"oid":"%s"}}]\n' "$head_oid" "$base_ref" "$auto" "$merge_oid"
       else
         method=SQUASH
         [[ -f "$state/wrong-method" ]] && method=REBASE
@@ -158,10 +168,12 @@ case "${1:-} ${2:-}" in
     head_oid=$(pr_head_oid)
     [[ -f "$state/wrong-head" ]] && head_oid=0000000000000000000000000000000000000000
     if [[ -f "$state/pr-merged" ]]; then
-      merge_oid=$(<"$state/merge-oid")
+      merge_oid=$(pr_merge_oid)
       method=SQUASH
       [[ -f "$state/wrong-method" ]] && method=REBASE
-      printf '{"number":1,"state":"MERGED","url":"https://example.test/pr/1","headRefName":"release/v1.0.1","headRefOid":"%s","baseRefName":"%s","mergeStateStatus":"CLEAN","autoMergeRequest":{"enabledAt":"now","mergeMethod":"%s"},"mergeCommit":{"oid":"%s"}}\n' "$head_oid" "$base_ref" "$method" "$merge_oid"
+      auto="{\"enabledAt\":\"now\",\"mergeMethod\":\"$method\"}"
+      [[ -f "$state/missing-auto-merge-provenance" ]] && auto=null
+      printf '{"number":1,"state":"MERGED","url":"https://example.test/pr/1","headRefName":"release/v1.0.1","headRefOid":"%s","baseRefName":"%s","mergeStateStatus":"CLEAN","autoMergeRequest":%s,"mergeCommit":{"oid":"%s"}}\n' "$head_oid" "$base_ref" "$auto" "$merge_oid"
     else
       auto=null
       merge_status=CLEAN
@@ -171,6 +183,27 @@ case "${1:-} ${2:-}" in
       git --git-dir="$origin" merge-base --is-ancestor \
         refs/heads/main refs/heads/release/v1.0.1 || merge_status=BEHIND
       printf '{"number":1,"state":"OPEN","url":"https://example.test/pr/1","headRefName":"release/v1.0.1","headRefOid":"%s","baseRefName":"%s","mergeStateStatus":"%s","autoMergeRequest":%s,"mergeCommit":null}\n' "$head_oid" "$base_ref" "$merge_status" "$auto"
+    fi
+    ;;
+  'pr checks')
+    [[ "$*" == *'--required'* && "$*" == *'--json name,state,bucket,workflow'* ]]
+    state_value=SUCCESS
+    bucket=pass
+    if [[ -f "$state/checks-pending" ]]; then
+      state_value=PENDING
+      bucket=pending
+    elif [[ -f "$state/checks-failed" ]]; then
+      state_value=FAILURE
+      bucket=fail
+    elif [[ -f "$state/checks-skipped" ]]; then
+      state_value=SKIPPED
+      bucket=skipping
+    fi
+    if [[ -f "$state/checks-empty" ]]; then
+      printf '[]\n'
+    else
+      printf '[{"name":"test","state":"%s","bucket":"%s","workflow":"ci"},{"name":"dco","state":"SUCCESS","bucket":"pass","workflow":"ci"}]\n' \
+        "$state_value" "$bucket"
     fi
     ;;
   'run list')
@@ -302,6 +335,195 @@ assert_one_pr() {
   [[ $(grep -c '^pr create' "$state/calls.log") -eq 1 ]] || fail 'release PR was duplicated'
 }
 
+write_recovery_receipt() {
+  local repo="$1" release="$2" pull_request="$3" approved_head="$4" merge_commit="$5" reason="$6"
+  local path="$repo/scripts/release/recovery/v1.0.1.json"
+
+  mkdir -p "$(dirname "$path")"
+  jq -n \
+    --arg release "$release" \
+    --argjson pull_request "$pull_request" \
+    --arg approved_head "$approved_head" \
+    --arg merge_commit "$merge_commit" \
+    --arg incident_reason "$reason" \
+    '{
+      schema_version: 1,
+      release: $release,
+      pull_request: $pull_request,
+      approved_head: $approved_head,
+      merge_commit: $merge_commit,
+      incident_reason: $incident_reason
+    }' > "$path"
+}
+
+publish_recovery_receipt() {
+  local repo="$1" label="$2" release="$3" pull_request="$4" approved_head="$5" merge_commit="$6" reason="$7"
+
+  write_recovery_receipt "$repo" "$release" "$pull_request" "$approved_head" "$merge_commit" "$reason"
+  git -C "$repo" add scripts/release/recovery/v1.0.1.json
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m "$label"
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q --force origin HEAD:main
+}
+
+assert_recovery_rejected() {
+  local repo="$1" state="$2" origin="$3" label="$4" expected="${5:-}" output
+
+  output=$(mktemp "$state/rejection.XXXXXX")
+  if run_release "$repo" "$state" 1.0.1 --no-edit >"$output" 2>&1; then
+    fail "release recovery accepted $label"
+  fi
+  if [[ -n "$expected" ]] && ! grep -qF "$expected" "$output"; then
+    cat "$output" >&2
+    fail "release recovery rejected $label at the wrong gate"
+  fi
+  rm "$output"
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/tags/v1.0.1 ||
+    fail "release recovery tagged after rejecting $label"
+}
+
+test_missing_auto_merge_recovery_receipt() {
+  local repo state origin head merge receipt_work receipt_path valid_main
+  local base_parent base_tree head_tree side_parent wrong_parent wrong_tree nonancestor output
+  repo=$(setup_repo recovery-receipt)
+  state="$TMP_ROOT/recovery-receipt/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  prepend_release_notes "$repo"
+  mkdir -p "$state"
+  touch "$state/missing-auto-merge-provenance"
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'recovery fixture unexpectedly completed its missing-provenance merge'
+  fi
+  [[ -f "$state/pr-merged" ]] || fail 'recovery fixture did not produce the merged PR'
+  head=$(git --git-dir="$origin" rev-parse refs/pull/1/head)
+  merge=$(<"$state/merge-oid")
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a missing receipt' \
+    'missing tracked release recovery receipt on origin/main'
+
+  write_recovery_receipt "$repo" v1.0.1 1 "$head" "$merge" manual_squash_merge_missing_auto_merge_provenance
+  assert_recovery_rejected "$repo" "$state" "$origin" 'an untracked receipt' \
+    'working tree is dirty while reusing the canonical release PR'
+  rm -rf "$repo/scripts/release/recovery"
+
+  receipt_work="$TMP_ROOT/recovery-receipt/receipt-work"
+  git clone -q "$origin" "$receipt_work"
+  git -C "$receipt_work" config user.name 'Recovery Reviewer'
+  git -C "$receipt_work" config user.email 'recovery-reviewer@example.test'
+  publish_recovery_receipt "$receipt_work" 'add reviewed recovery receipt' \
+    v1.0.1 1 "$head" "$merge" manual_squash_merge_missing_auto_merge_provenance
+  valid_main=$(git -C "$receipt_work" rev-parse HEAD)
+  receipt_path="$receipt_work/scripts/release/recovery/v1.0.1.json"
+
+  printf '\n' >> "$receipt_path"
+  assert_recovery_rejected "$receipt_work" "$state" "$origin" 'a dirty tracked receipt' \
+    'working tree is dirty while reusing the canonical release PR'
+  git -C "$receipt_work" restore scripts/release/recovery/v1.0.1.json
+
+  publish_recovery_receipt "$receipt_work" 'mutate recovery release' \
+    v1.0.0 1 "$head" "$merge" manual_squash_merge_missing_auto_merge_provenance
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong release receipt' \
+    'targets v1.0.0 instead of v1.0.1'
+
+  publish_recovery_receipt "$receipt_work" 'mutate recovery pull request' \
+    v1.0.1 2 "$head" "$merge" manual_squash_merge_missing_auto_merge_provenance
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong PR receipt' \
+    'targets PR 2 instead of PR 1'
+
+  publish_recovery_receipt "$receipt_work" 'mutate recovery head' \
+    v1.0.1 1 0000000000000000000000000000000000000000 "$merge" manual_squash_merge_missing_auto_merge_provenance
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong approved-head receipt' \
+    'approved head does not match live validated PR head'
+
+  publish_recovery_receipt "$receipt_work" 'mutate recovery merge' \
+    v1.0.1 1 "$head" 0000000000000000000000000000000000000000 manual_squash_merge_missing_auto_merge_provenance
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong merge receipt' \
+    'merge does not match live GitHub PR JSON'
+
+  publish_recovery_receipt "$receipt_work" 'mutate recovery reason' \
+    v1.0.1 1 "$head" "$merge" operator_override
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a mismatched incident reason' \
+    'carries an unrecognized incident reason'
+
+  publish_recovery_receipt "$receipt_work" 'restore exact recovery receipt' \
+    v1.0.1 1 "$head" "$merge" manual_squash_merge_missing_auto_merge_provenance
+  jq '.unexpected = "not allowed"' "$receipt_path" > "$receipt_path.next"
+  mv "$receipt_path.next" "$receipt_path"
+  git -C "$receipt_work" add scripts/release/recovery/v1.0.1.json
+  git -C "$receipt_work" commit -q --no-gpg-sign --signoff -m 'add unexpected recovery field'
+  FAKE_GH_SERVER_MERGE=1 git -C "$receipt_work" push -q origin HEAD:main
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a receipt with unreviewed fields' \
+    'invalid release recovery receipt'
+
+  publish_recovery_receipt "$receipt_work" 'restore exact recovery receipt again' \
+    v1.0.1 1 "$head" "$merge" manual_squash_merge_missing_auto_merge_provenance
+  valid_main=$(git -C "$receipt_work" rev-parse HEAD)
+
+  touch "$state/checks-pending"
+  assert_recovery_rejected "$repo" "$state" "$origin" 'pending required checks' \
+    'approved PR head has missing, pending, or failed required checks'
+  rm "$state/checks-pending"
+  touch "$state/checks-failed"
+  assert_recovery_rejected "$repo" "$state" "$origin" 'failed required checks' \
+    'approved PR head has missing, pending, or failed required checks'
+  rm "$state/checks-failed"
+  touch "$state/checks-empty"
+  assert_recovery_rejected "$repo" "$state" "$origin" 'an empty required-check set' \
+    'approved PR head has missing, pending, or failed required checks'
+  rm "$state/checks-empty"
+
+  git -C "$receipt_work" tag -a --no-sign v1.0.1 "$merge" -m 'premature recovery tag'
+  git -C "$receipt_work" push -q origin v1.0.1
+  output=$(mktemp "$state/rejection-tag.XXXXXX")
+  if run_release "$repo" "$state" 1.0.1 --no-edit >"$output" 2>&1; then
+    fail 'release recovery accepted a pre-existing release tag'
+  fi
+  grep -qF 'release recovery requires absent tag v1.0.1' "$output" ||
+    fail 'pre-existing recovery tag was rejected at the wrong gate'
+  rm "$output"
+  git -C "$receipt_work" tag -d v1.0.1 >/dev/null
+  git --git-dir="$origin" tag -d v1.0.1 >/dev/null
+  git -C "$repo" tag -d v1.0.1 >/dev/null
+
+  base_parent=$(git --git-dir="$origin" rev-parse "$merge^")
+  base_tree=$(git --git-dir="$origin" rev-parse "$base_parent^{tree}")
+  head_tree=$(git --git-dir="$origin" rev-parse "$head^{tree}")
+  side_parent=$(printf 'unrelated side parent\n' | git -C "$receipt_work" commit-tree "$base_tree" -p "$base_parent")
+  wrong_parent=$(printf 'non-squash merge\n' | git -C "$receipt_work" commit-tree "$head_tree" -p "$base_parent" -p "$side_parent")
+  git -C "$receipt_work" switch -q --detach "$wrong_parent"
+  publish_recovery_receipt "$receipt_work" 'pin a two-parent merge' \
+    v1.0.1 1 "$head" "$wrong_parent" manual_squash_merge_missing_auto_merge_provenance
+  printf '%s\n' "$wrong_parent" > "$state/override-merge-oid"
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a two-parent merge' \
+    'release recovery merge is not a one-parent squash'
+
+  wrong_tree=$(printf 'wrong release tree\n' | git -C "$receipt_work" commit-tree "$base_tree" -p "$base_parent")
+  git -C "$receipt_work" switch -q --detach "$wrong_tree"
+  publish_recovery_receipt "$receipt_work" 'pin a wrong-tree merge' \
+    v1.0.1 1 "$head" "$wrong_tree" manual_squash_merge_missing_auto_merge_provenance
+  printf '%s\n' "$wrong_tree" > "$state/override-merge-oid"
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a merge whose tree differs from the approved head' \
+    'release recovery merge tree differs from approved PR head'
+
+  nonancestor=$(printf 'nonancestor release merge\n' | git -C "$receipt_work" commit-tree "$head_tree" -p "$base_parent")
+  git -C "$receipt_work" update-ref refs/heads/nonancestor-recovery-test "$nonancestor"
+  git -C "$repo" fetch -q "$receipt_work" \
+    refs/heads/nonancestor-recovery-test:refs/recovery-tests/nonancestor
+  git -C "$receipt_work" switch -q --detach "$merge"
+  publish_recovery_receipt "$receipt_work" 'pin a nonancestor merge' \
+    v1.0.1 1 "$head" "$nonancestor" manual_squash_merge_missing_auto_merge_provenance
+  printf '%s\n' "$nonancestor" > "$state/override-merge-oid"
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a merge outside current main history' \
+    'release recovery merge is not an ancestor of current origin/main'
+
+  rm "$state/override-merge-oid"
+  git --git-dir="$origin" update-ref refs/heads/main "$valid_main"
+  run_release "$repo" "$state" 1.0.1 --no-edit >/dev/null
+  grep -q '^pr checks 1 .*--required .*--json name,state,bucket,workflow' "$state/calls.log" ||
+    fail 'release recovery did not query required checks for the approved PR head'
+  [[ $(git --git-dir="$origin" rev-parse 'refs/tags/v1.0.1^{}') == "$merge" ]] ||
+    fail 'exact recovery receipt tagged a commit other than the reviewed squash merge'
+}
+
 test_protected_release_and_resume_states() {
   local repo state origin merge_oid tag_oid
   repo=$(setup_repo success)
@@ -317,6 +539,8 @@ test_protected_release_and_resume_states() {
     fail 'tag followed a later main commit instead of the release PR merge'
   [[ $(git --git-dir="$origin" show refs/pull/1/head:VERSION) == '1.0.1' ]] || fail 'release PR head version mismatch'
   git --git-dir="$origin" show -s --format='%B' refs/pull/1/head | grep -q 'Signed-off-by: Release Author <release-author@example.test>' || fail 'release commit lacks DCO sign-off'
+  ! grep -q '^pr checks' "$state/calls.log" ||
+    fail 'normal auto-merge path consulted the exceptional recovery verifier'
   ! git -C "$repo" show-ref --verify --quiet refs/heads/release/v1.0.1 || fail 'local release branch was not cleaned up'
   ! git --git-dir="$origin" show-ref --verify --quiet refs/heads/release/v1.0.1 || fail 'remote release branch was not cleaned up'
   assert_one_pr "$state"
@@ -792,6 +1016,7 @@ test_duplicate_unreleased_is_rejected
 test_versioned_entry_cannot_leave_stale_unreleased
 test_unreleased_consumption_rejects_prior_history_tamper
 test_protected_release_and_resume_states
+test_missing_auto_merge_recovery_receipt
 test_open_pr_is_reused_after_timeout
 test_mid_wait_head_mutation_is_rejected
 test_local_pre_push_interruption_resumes

@@ -119,6 +119,13 @@ merged with current `origin/main` locally using a merge commit carrying the
 author's DCO sign-off, so the required checks can rerun without an unsigned
 GitHub-generated update.
 
+An exceptional merged PR with missing GitHub auto-merge provenance is not a
+manual-tag invitation. It can resume only after a separate reviewed main-branch
+change adds the exact receipt under `scripts/release/recovery/`; the script then
+revalidates live PR identity, approved-head required checks, squash parent/tree,
+main ancestry, and tag absence before creating the tag. The ordinary protected
+auto-merge path is unchanged.
+
 **Picking the level (what the AI looks at):** if `git log vLAST..HEAD` contains
 commits that touch files under `backend/` or `frontend/src/`, lean **minor**.
 Breaking API or schema changes → **major**. Pure docs / brand / scripts →
