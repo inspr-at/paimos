@@ -30,8 +30,10 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -96,6 +98,11 @@ func currentPolicy() retentionPolicy {
 
 var retentionStartOnce sync.Once
 
+const (
+	retentionBatchSize = 50
+	retentionYield     = 10 * time.Millisecond
+)
+
 // StartRetentionSweeper launches the background cleanup loop. Idempotent
 // — wired from main.go at boot. The first sweep runs after a short delay
 // so a cold start doesn't immediately spike DB activity.
@@ -114,69 +121,123 @@ func retentionLoop() {
 	}
 }
 
-// runRetentionSweep deletes rows older than the configured retention
-// window for each class. Bounded by a single transaction per class to
-// keep lock contention low on busy instances.
+// runRetentionSweep deletes rows older than the configured retention window.
+// Candidate scans are read-only and every mutation commits a bounded batch so
+// no large or unexpectedly unindexed table can monopolize SQLite's writer slot.
 func runRetentionSweep() {
 	p := currentPolicy()
-	sweepOlderThan("sessions",
-		"DELETE FROM sessions WHERE expires_at < datetime('now')", p.Sessions)
-	sweepOlderThan("password_reset_tokens",
-		"DELETE FROM password_reset_tokens WHERE created_at < datetime('now', ?)",
-		p.ResetTokens)
-	sweepOlderThan("access_audit",
+	// Freeze one clock value for the whole pass. A long backlog must not chase
+	// rows that become eligible while earlier bounded batches are yielding.
+	sweepStartedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	sweepRetentionDelete("sessions", "sessions", "expires_at < datetime(?)", sweepStartedAt)
+	sweepRetentionDelete("password_reset_tokens", "password_reset_tokens",
+		"created_at < datetime(?, ?)", sweepStartedAt, "-"+strconv.Itoa(p.ResetTokens)+" days")
+	sweepRetentionDelete("access_audit", "access_audit",
 		// access_audit timestamps rows with created_at (only session_activity
 		// has occurred_at) — the wrong column name made this sweep error out
 		// every run ("no such column: occurred_at").
-		"DELETE FROM access_audit WHERE created_at < datetime('now', ?)",
-		p.AccessAudit)
-	sweepOlderThan("session_activity",
-		"DELETE FROM session_activity WHERE occurred_at < datetime('now', ?)",
-		p.SessionActivity)
-	sweepOlderThan("incident_log_closed",
-		"DELETE FROM incident_log WHERE status='closed' AND updated_at < datetime('now', ?)",
-		p.IncidentClosed)
-	sweepOlderThan("ai_calls",
-		"DELETE FROM ai_calls WHERE created_at < datetime('now', ?)",
-		p.AICalls)
-	sweepOlderThan("mutation_log",
-		"DELETE FROM mutation_log WHERE created_at < datetime('now', ?)",
-		p.MutationLog)
+		"created_at < datetime(?, ?)", sweepStartedAt, "-"+strconv.Itoa(p.AccessAudit)+" days")
+	sweepRetentionDelete("session_activity", "session_activity",
+		"occurred_at < datetime(?, ?)", sweepStartedAt, "-"+strconv.Itoa(p.SessionActivity)+" days")
+	sweepRetentionDelete("incident_log_closed", "incident_log",
+		"status='closed' AND updated_at < datetime(?, ?)", sweepStartedAt, "-"+strconv.Itoa(p.IncidentClosed)+" days")
+	sweepRetentionDelete("ai_calls", "ai_calls",
+		"created_at < datetime(?, ?)", sweepStartedAt, "-"+strconv.Itoa(p.AICalls)+" days")
+	sweepRetentionDelete("mutation_log", "mutation_log",
+		"created_at < datetime(?, ?)", sweepStartedAt, "-"+strconv.Itoa(p.MutationLog)+" days")
 	// Voice-intake sessions (PAI-704): stale active sessions become
 	// abandoned first, then finished sessions age out entirely
 	// (intake_events cascade on delete).
-	sweepOlderThan("intake_sessions_idle",
-		"UPDATE intake_sessions SET status='abandoned', updated_at=datetime('now') "+
-			"WHERE status='active' AND updated_at < datetime('now', ?)",
-		p.IntakeIdle)
-	sweepOlderThan("intake_sessions",
-		"DELETE FROM intake_sessions WHERE status IN ('completed','abandoned') "+
-			"AND updated_at < datetime('now', ?)",
-		p.IntakeSessions)
+	sweepRetentionUpdate("intake_sessions_idle", "intake_sessions",
+		"status='active' AND updated_at < datetime(?, ?)",
+		"status='abandoned', updated_at=datetime('now')", sweepStartedAt, "-"+strconv.Itoa(p.IntakeIdle)+" days")
+	sweepRetentionDelete("intake_sessions", "intake_sessions",
+		"status IN ('completed','abandoned') AND updated_at < datetime(?, ?)",
+		sweepStartedAt, "-"+strconv.Itoa(p.IntakeSessions)+" days")
 	// TOTP pending is measured in minutes — already gated by expires_at;
 	// this just trims rows that the verify path never got around to.
-	if _, err := db.DB.Exec(
-		"DELETE FROM totp_pending WHERE expires_at < datetime('now')",
-	); err != nil {
-		log.Printf("retention: totp_pending: %v", err)
-	}
+	sweepRetentionDelete("totp_pending", "totp_pending", "expires_at < datetime(?)", sweepStartedAt)
 }
 
-// sweepOlderThan runs a parameterised DELETE. The parameter form depends
-// on whether the SQL has a ? placeholder; sessions are gated by their
-// own expires_at column without a parameter, the rest take "-N days".
-func sweepOlderThan(label, sqlText string, days int) {
-	var args []any
-	if strings.Contains(sqlText, "?") {
-		args = []any{"-" + strconv.Itoa(days) + " days"}
-	}
-	res, err := db.DB.Exec(sqlText, args...)
+func sweepRetentionDelete(label, table, predicate string, predicateArgs ...any) {
+	sweepRetention(label, table, predicate, "DELETE FROM "+table, predicateArgs...)
+}
+
+func sweepRetentionUpdate(label, table, predicate, assignments string, predicateArgs ...any) {
+	sweepRetention(label, table, predicate, "UPDATE "+table+" SET "+assignments, predicateArgs...)
+}
+
+func sweepRetention(label, table, predicate, mutation string, predicateArgs ...any) {
+	removed, err := sweepRetentionBatches(context.Background(), db.DB, table, predicate, mutation,
+		retentionBatchSize, func() { time.Sleep(retentionYield) }, predicateArgs...)
 	if err != nil {
 		log.Printf("retention: %s: %v", label, err)
 		return
 	}
-	if n, _ := res.RowsAffected(); n > 0 {
-		log.Printf("retention: %s removed %d rows", label, n)
+	if removed > 0 {
+		log.Printf("retention: %s removed %d rows", label, removed)
+	}
+}
+
+func sweepRetentionBatches(ctx context.Context, database *sql.DB, table, predicate, mutation string,
+	batchSize int, yield func(), predicateArgs ...any) (int64, error) {
+	if batchSize <= 0 {
+		return 0, errors.New("retention batch size must be positive")
+	}
+	var removed int64
+	for {
+		selectArgs := append(append([]any{}, predicateArgs...), batchSize)
+		// #nosec G202 -- table, predicate, and mutation are closed constants at
+		// the call sites above; only predicate values remain bound parameters.
+		rows, err := database.QueryContext(ctx, "SELECT rowid FROM "+table+" WHERE "+predicate+" ORDER BY rowid LIMIT ?", selectArgs...)
+		if err != nil {
+			return removed, err
+		}
+		ids := make([]int64, 0, batchSize)
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return removed, err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return removed, err
+		}
+		if err := rows.Close(); err != nil {
+			return removed, err
+		}
+		if len(ids) == 0 {
+			return removed, nil
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+		args := make([]any, 0, len(ids)+len(predicateArgs))
+		for _, id := range ids {
+			args = append(args, id)
+		}
+		args = append(args, predicateArgs...)
+		// #nosec G202 -- see the closed-query contract above; row ids and
+		// retention cutoffs are parameterized.
+		result, err := database.ExecContext(ctx, mutation+" WHERE rowid IN ("+placeholders+") AND ("+predicate+")", args...)
+		if err != nil {
+			return removed, err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return removed, err
+		}
+		if count == 0 {
+			// Concurrent work or a future trigger may move every candidate out
+			// of the predicate. Stop this pass instead of selecting the same
+			// unchanged batch forever.
+			return removed, nil
+		}
+		removed += count
+		if yield != nil {
+			yield()
+		}
 	}
 }
 

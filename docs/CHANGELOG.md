@@ -5,6 +5,18 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed — Bounded startup retention (PAI-843)
+
+- Startup retention now deletes or updates at most 50 eligible rows per
+  transaction and yields between batches, so a backlog cannot monopolize
+  SQLite's writer slot while authenticated requests are starting.
+- The mutation-log self-reference has a partial child-key index, avoiding a
+  full table scan for every retained parent removed. Recent API-key reads stay
+  read-only; a due best-effort usage stamp has a short, connection-local busy
+  policy and never inherits the normal five-second writer wait.
+
 ## [5.20.0] — 2026-08-28
 
 ### Added — Pharos request links on work records (PAI-812)

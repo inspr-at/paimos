@@ -16,15 +16,23 @@
 package auth
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
+)
+
+const (
+	apiKeyUsageStampTimeout       = 300 * time.Millisecond
+	apiKeyUsageStampBusyTimeoutMS = 100
 )
 
 // ResolveAPIKey looks up a raw API key (full "paimos_..." string), verifies it
@@ -53,12 +61,12 @@ func resolveAPIKeyPrincipalAt(rawKey string, now time.Time) (*models.User, Princ
 
 	var keyID int64
 	var scopesCSV string
-	var disabledAt, expiresAt sql.NullString
+	var disabledAt, expiresAt, lastUsedAt sql.NullString
 	u := &models.User{}
 	// Scan order: key id + scopes column + the user-cols list.
-	dests := append([]any{&keyID, &scopesCSV, &disabledAt, &expiresAt}, userScanDests(u)...)
+	dests := append([]any{&keyID, &scopesCSV, &disabledAt, &expiresAt, &lastUsedAt}, userScanDests(u)...)
 	err := db.DB.QueryRow(`
-		SELECT ak.id,ak.scopes,ak.disabled_at,ak.expires_at,`+userSelectCols+`
+		SELECT ak.id,ak.scopes,ak.disabled_at,ak.expires_at,ak.last_used_at,`+userSelectCols+`
 		FROM api_keys ak JOIN users u ON u.id = ak.user_id
 		WHERE ak.key_hash = ?
 	`, hash).Scan(dests...)
@@ -75,11 +83,11 @@ func resolveAPIKeyPrincipalAt(rawKey string, now time.Time) (*models.User, Princ
 		}
 	}
 
-	// Best-effort, write-throttled usage stamp. The prior per-request UPDATE
-	// serialized otherwise independent API-key calls on SQLite's write lock.
-	if _, err := db.DB.Exec(`UPDATE api_keys SET last_used_at=datetime('now')
-		WHERE id=? AND (last_used_at IS NULL OR last_used_at<datetime('now','-1 hour'))`, keyID); err != nil {
-		log.Printf("ResolveAPIKey: update last_used_at key_id=%d: %v", keyID, err)
+	// Best-effort, write-throttled usage stamp. Authentication must not inherit
+	// SQLite's five-second busy timeout when maintenance owns the writer slot.
+	lastUsed, lastUsedErr := parseCredentialTimestamp(lastUsedAt.String)
+	if !lastUsedAt.Valid || lastUsedErr != nil || lastUsed.Before(now.Add(-time.Hour)) {
+		stampAPIKeyUsage(keyID)
 	}
 
 	principal, err := principalForAPIKey(keyID, u.ID, ParseScopes(scopesCSV))
@@ -87,4 +95,33 @@ func resolveAPIKeyPrincipalAt(rawKey string, now time.Time) (*models.User, Princ
 		return nil, Principal{}, fmt.Errorf("invalid api key")
 	}
 	return u, principal, nil
+}
+
+func stampAPIKeyUsage(keyID int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), apiKeyUsageStampTimeout)
+	defer cancel()
+	conn, err := db.DB.Conn(ctx)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d", apiKeyUsageStampBusyTimeoutMS)); err != nil {
+		return
+	}
+	_, usageErr := conn.ExecContext(ctx, `UPDATE api_keys SET last_used_at=datetime('now')
+		WHERE id=? AND (last_used_at IS NULL OR last_used_at<datetime('now','-1 hour'))`, keyID)
+	// Restore the pool-wide default before returning this connection. PRAGMA
+	// busy_timeout does not acquire the database writer lock.
+	restoreCtx, restoreCancel := context.WithTimeout(context.Background(), time.Second)
+	_, restoreErr := conn.ExecContext(restoreCtx, fmt.Sprintf("PRAGMA busy_timeout=%d", db.DefaultBusyTimeoutMS))
+	restoreCancel()
+	if restoreErr != nil {
+		// Never return a connection with a shortened policy to the shared pool.
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		log.Printf("ResolveAPIKey: restore usage-stamp connection policy: %v", restoreErr)
+	}
+	if usageErr != nil && ctx.Err() == nil && !strings.Contains(usageErr.Error(), "SQLITE_BUSY") &&
+		!strings.Contains(usageErr.Error(), "database is locked") {
+		log.Printf("ResolveAPIKey: update last_used_at key_id=%d: %v", keyID, usageErr)
+	}
 }
