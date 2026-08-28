@@ -5,6 +5,16 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed — Agent bus SQLite writer starvation (PAI-835)
+
+- Empty webhook-dispatcher polls now stay read-only until eligible work exists,
+  instead of opening an immediate SQLite transaction every 250 ms and starving
+  authenticated request writes such as API-key usage stamps and session audit
+  records. A positive probe is reselected inside the existing transaction, so
+  FIFO leasing, retries, and exactly-once handoff remain atomic.
+
 ## [5.19.0] — 2026-08-28
 
 ### Added — Week and project hours views (PAI-830)
