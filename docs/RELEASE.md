@@ -148,8 +148,10 @@ one file uncommitted, then run:
 That reviewed working-tree change moves onto the release branch before the
 other deterministic release files are updated. Interactive runs start clean,
 create the release branch first, and open `$EDITOR` on the generated draft.
-Duplicate, non-leading, or stale `Unreleased` sections fail before a release PR
-can be created.
+The canonical leading `Unreleased` path is already reviewed and is consumed
+deterministically without reopening the editor. A duplicate active section or
+a versioned entry that leaves the leading `Unreleased` section behind fails
+before a release PR can be created; historical changelog bytes are preserved.
 
 Rerunning the same explicit version is safe: a matching open PR, a merged but
 untagged PR, and an already-correct tag resume from their last checkpoint.
