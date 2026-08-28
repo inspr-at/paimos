@@ -264,6 +264,21 @@ prepend_release_notes() {
   mv "$tmp" "$repo/docs/CHANGELOG.md"
 }
 
+commit_unreleased_notes() {
+  local repo="$1"
+  local tmp="$repo/docs/CHANGELOG.md.next"
+  {
+    printf '# Changelog\n\n## [Unreleased]\n\n### Added\n\n- Pending feature.\n\n'
+    sed -n '/^## \[1.0.0\]/,$p' "$repo/docs/CHANGELOG.md"
+    printf '\n## [Unreleased]\n\n- Historical unreleased heading.\n\n'
+    printf '## [0.9.0] — 2025-12-01\n\n- Older release.\n'
+  } > "$tmp"
+  mv "$tmp" "$repo/docs/CHANGELOG.md"
+  git -C "$repo" add docs/CHANGELOG.md
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'add unreleased notes'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+}
+
 run_release() {
   local repo="$1" state="$2"
   shift 2
@@ -665,7 +680,117 @@ test_existing_tag_external_stage_manifest_drift_is_rejected() {
   fi
 }
 
+test_canonical_unreleased_is_consumed() {
+  local repo state origin base_history released history first_heading
+  repo=$(setup_repo canonical-unreleased)
+  state="$TMP_ROOT/canonical-unreleased/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  commit_unreleased_notes "$repo"
+  base_history="$TMP_ROOT/canonical-unreleased/base-history"
+  released="$TMP_ROOT/canonical-unreleased/released-changelog"
+  history="$TMP_ROOT/canonical-unreleased/released-history"
+  sed -n '/^## \[1.0.0\]/,$p' "$repo/docs/CHANGELOG.md" > "$base_history"
+
+  run_release "$repo" "$state" patch --no-edit >/dev/null
+  git --git-dir="$origin" show refs/pull/1/head:docs/CHANGELOG.md > "$released"
+
+  first_heading=$(awk '/^## \[/{print; exit}' "$released")
+  [[ "$first_heading" == "## [1.0.1] — "* ]] ||
+    fail 'release did not consume the active leading Unreleased heading'
+  [[ $(grep -c '^## \[Unreleased\]$' "$released" || true) -eq 1 ]] ||
+    fail 'release did not preserve the historical Unreleased heading exactly once'
+  [[ $(grep -c '^## \[1.0.1\] — ' "$released" || true) -eq 1 ]] ||
+    fail 'release did not create exactly one versioned heading'
+  grep -qF -- '- Pending feature.' "$released" ||
+    fail 'release dropped the canonical Unreleased content'
+  sed -n '/^## \[1.0.0\]/,$p' "$released" > "$history"
+  cmp -s "$base_history" "$history" ||
+    fail 'release changed older released history while consuming Unreleased'
+}
+
+test_duplicate_unreleased_is_rejected() {
+  local repo state output
+  repo=$(setup_repo duplicate-unreleased)
+  state="$TMP_ROOT/duplicate-unreleased/gh-state"
+  commit_unreleased_notes "$repo"
+  perl -0pi -e 's/## \[1\.0\.0\]/## [Unreleased]\n\n- Duplicate active note.\n\n## [1.0.0]/' "$repo/docs/CHANGELOG.md"
+  git -C "$repo" add docs/CHANGELOG.md
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'duplicate unreleased heading'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+
+  output="$TMP_ROOT/duplicate-unreleased/output"
+  if run_release "$repo" "$state" patch --no-edit >"$output" 2>&1; then
+    fail 'release accepted duplicate Unreleased headings'
+  fi
+  grep -qF 'duplicate or non-canonical leading [Unreleased] section' "$output" ||
+    fail 'duplicate Unreleased rejection reported the wrong failure'
+  ! grep -q '^pr create' "$state/calls.log" 2>/dev/null ||
+    fail 'duplicate Unreleased headings reached PR creation'
+}
+
+test_versioned_entry_cannot_leave_stale_unreleased() {
+  local repo state output tmp
+  repo=$(setup_repo stale-unreleased)
+  state="$TMP_ROOT/stale-unreleased/gh-state"
+  commit_unreleased_notes "$repo"
+  tmp="$repo/docs/CHANGELOG.md.next"
+  {
+    printf '# Changelog\n\n## [1.0.1] — 2026-01-02\n\n### Fixed\n\n- Protected releases.\n\n'
+    sed -n '/^## \[Unreleased\]/,$p' "$repo/docs/CHANGELOG.md"
+  } > "$tmp"
+  mv "$tmp" "$repo/docs/CHANGELOG.md"
+
+  output="$TMP_ROOT/stale-unreleased/output"
+  if run_release "$repo" "$state" patch --no-edit >"$output" 2>&1; then
+    fail 'release accepted a versioned entry followed by stale Unreleased notes'
+  fi
+  grep -qF 'reviewed [1.0.1] entry must consume, not retain, the leading [Unreleased] section' "$output" ||
+    fail 'stale Unreleased rejection reported the wrong failure'
+  ! grep -q '^pr create' "$state/calls.log" 2>/dev/null ||
+    fail 'stale Unreleased notes reached PR creation'
+}
+
+test_unreleased_consumption_rejects_prior_history_tamper() {
+  local repo state output
+  repo=$(setup_repo unreleased-history-tamper)
+  state="$TMP_ROOT/unreleased-history-tamper/gh-state"
+  commit_unreleased_notes "$repo"
+
+  if RELEASE_TEST_FAILPOINT=before-branch-push run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'prior-history tamper fixture unexpectedly completed'
+  fi
+  perl -0pi -e 's/- Initial\./- Tampered prior release./' "$repo/docs/CHANGELOG.md"
+  git -C "$repo" add docs/CHANGELOG.md
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'tamper with prior release history'
+  git -C "$repo" push -q -u origin release/v1.0.1
+  git -C "$repo" switch -q main
+
+  output="$TMP_ROOT/unreleased-history-tamper/output"
+  if run_release "$repo" "$state" patch --no-edit >"$output" 2>&1; then
+    fail 'release accepted prior-history tampering after Unreleased consumption'
+  fi
+  grep -qF 'did not consume [Unreleased] exactly or changed prior CHANGELOG history' "$output" ||
+    fail 'prior-history tamper rejection reported the wrong failure'
+}
+
+test_canonical_unreleased_interactive_path_is_deterministic() {
+  local repo state editor
+  repo=$(setup_repo canonical-unreleased-interactive)
+  state="$TMP_ROOT/canonical-unreleased-interactive/gh-state"
+  editor="$TMP_ROOT/canonical-unreleased-interactive/editor-must-not-run"
+  commit_unreleased_notes "$repo"
+  printf '#!/usr/bin/env bash\nexit 99\n' > "$editor"
+  chmod +x "$editor"
+
+  EDITOR="$editor" run_release "$repo" "$state" patch >/dev/null
+}
+
 write_fake_commands "$TMP_ROOT/fake-bin"
+test_canonical_unreleased_is_consumed
+test_canonical_unreleased_interactive_path_is_deterministic
+test_duplicate_unreleased_is_rejected
+test_versioned_entry_cannot_leave_stale_unreleased
+test_unreleased_consumption_rejects_prior_history_tamper
 test_protected_release_and_resume_states
 test_open_pr_is_reused_after_timeout
 test_mid_wait_head_mutation_is_rejected

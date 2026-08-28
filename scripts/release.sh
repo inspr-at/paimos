@@ -169,7 +169,7 @@ assert_external_stage_release_pin() {
 
 assert_release_delta() {
   local base="$1" head="$2" version="$3"
-  local first_heading entry_count changed entry_date validate_tmp history_bytes base_first_heading head_second_heading
+  local first_heading entry_count changed entry_date validate_tmp history_bytes base_first_heading base_second_heading head_second_heading
 
   changed=$(changed_commit_files "$base" "$head")
   assert_expected_file_set "$changed" "$head relative to $base"
@@ -210,21 +210,6 @@ assert_release_delta() {
     fail "$head changed the CHANGELOG preamble"
   fi
 
-  sed -n '/^## \[/,$p' "$validate_tmp/base-changelog" > "$validate_tmp/expected"
-  history_bytes=$(wc -c < "$validate_tmp/expected" | tr -d '[:space:]')
-  tail -c "$history_bytes" "$validate_tmp/head-changelog" > "$validate_tmp/actual"
-  if ! cmp -s "$validate_tmp/actual" "$validate_tmp/expected"; then
-    rm -rf "$validate_tmp"
-    fail "$head changed prior CHANGELOG history"
-  fi
-
-  base_first_heading=$(awk '/^## \[/{print; exit}' "$validate_tmp/base-changelog")
-  head_second_heading=$(awk '/^## \[/{headings++; if (headings == 2) {print; exit}}' "$validate_tmp/head-changelog")
-  if [[ "$head_second_heading" != "$base_first_heading" ]]; then
-    rm -rf "$validate_tmp"
-    fail "$head inserted unexpected CHANGELOG sections before prior history"
-  fi
-
   first_heading=$(awk '/^## \[/{print; exit}' "$validate_tmp/head-changelog")
   entry_date=${first_heading#"## [$version] — "}
   if [[ "$first_heading" == "$entry_date" || ! "$entry_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
@@ -236,6 +221,40 @@ assert_release_delta() {
   if [[ "$entry_count" != "1" ]]; then
     rm -rf "$validate_tmp"
     fail "$head must contain exactly one [$version] CHANGELOG entry"
+  fi
+
+  base_first_heading=$(awk '/^## \[/{print; exit}' "$validate_tmp/base-changelog")
+  if [[ "$base_first_heading" == "## [Unreleased]" ]]; then
+    base_second_heading=$(awk '/^## \[/{headings++; if (headings == 2) {print; exit}}' "$validate_tmp/base-changelog")
+    if [[ ! "$base_second_heading" =~ ^##\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+      rm -rf "$validate_tmp"
+      fail "$base carries a duplicate or non-canonical leading [Unreleased] CHANGELOG section"
+    fi
+    awk -v replacement="## [$version] — $entry_date" \
+      '!consumed && $0 == "## [Unreleased]" {$0=replacement; consumed=1} {print}' \
+      "$validate_tmp/base-changelog" > "$validate_tmp/expected"
+    if ! cmp -s "$validate_tmp/head-changelog" "$validate_tmp/expected"; then
+      rm -rf "$validate_tmp"
+      fail "$head did not consume [Unreleased] exactly or changed prior CHANGELOG history"
+    fi
+  else
+    if [[ "$base_first_heading" == "## [Unreleased]"* ]]; then
+      rm -rf "$validate_tmp"
+      fail "$base carries a non-canonical leading [Unreleased] CHANGELOG section"
+    fi
+    sed -n '/^## \[/,$p' "$validate_tmp/base-changelog" > "$validate_tmp/expected"
+    history_bytes=$(wc -c < "$validate_tmp/expected" | tr -d '[:space:]')
+    tail -c "$history_bytes" "$validate_tmp/head-changelog" > "$validate_tmp/actual"
+    if ! cmp -s "$validate_tmp/actual" "$validate_tmp/expected"; then
+      rm -rf "$validate_tmp"
+      fail "$head changed prior CHANGELOG history"
+    fi
+
+    head_second_heading=$(awk '/^## \[/{headings++; if (headings == 2) {print; exit}}' "$validate_tmp/head-changelog")
+    if [[ "$head_second_heading" != "$base_first_heading" ]]; then
+      rm -rf "$validate_tmp"
+      fail "$head inserted unexpected CHANGELOG sections before prior history"
+    fi
   fi
   rm -rf "$validate_tmp"
 }
@@ -489,7 +508,7 @@ tag_release_merge() {
 }
 
 prepare_release_branch() {
-  local current changed tmp today base
+  local current changed tmp today base first_existing_heading second_existing_heading canonical_unreleased=0
   current=$(git rev-parse --abbrev-ref HEAD)
   changed=$(changed_worktree_files)
 
@@ -534,9 +553,24 @@ prepare_release_branch() {
 
   "$ROOT/scripts/check-claims.sh"
   today=$(date -u +%Y-%m-%d)
+  first_existing_heading=$(awk '/^## \[/{print; exit}' docs/CHANGELOG.md)
+  second_existing_heading=$(awk '/^## \[/{headings++; if (headings == 2) {print; exit}}' docs/CHANGELOG.md)
 
-  if [[ $NO_EDIT -eq 1 ]] && ! grep -qE "^## \[$NEW\] " docs/CHANGELOG.md; then
-    fail "non-interactive release requires a reviewed ## [$NEW] changelog entry before invocation"
+  if [[ "$first_existing_heading" == "## [Unreleased]" ]]; then
+    if [[ ! "$second_existing_heading" =~ ^##\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+      fail "docs/CHANGELOG.md carries a duplicate or non-canonical leading [Unreleased] section"
+    fi
+    canonical_unreleased=1
+  elif [[ "$first_existing_heading" == "## [Unreleased]"* ]]; then
+    fail "docs/CHANGELOG.md carries a non-canonical leading [Unreleased] section"
+  fi
+  if grep -qE "^## \[$NEW\] " docs/CHANGELOG.md && \
+     [[ ! "$second_existing_heading" =~ ^##\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    fail "reviewed [$NEW] entry must consume, not retain, the leading [Unreleased] section"
+  fi
+
+  if [[ $NO_EDIT -eq 1 ]] && ! grep -qE "^## \[$NEW\] " docs/CHANGELOG.md && [[ "$canonical_unreleased" -ne 1 ]]; then
+    fail "non-interactive release requires a reviewed ## [$NEW] entry or one canonical ## [Unreleased] section"
   fi
 
   printf '%s\n' "$NEW" > VERSION
@@ -555,6 +589,12 @@ prepare_release_branch() {
   if grep -qE "^## \[$NEW\] " docs/CHANGELOG.md; then
     tmp=$(mktemp)
     sed -E "s|^## \[$NEW\] .*|## [$NEW] — $today|" docs/CHANGELOG.md > "$tmp"
+    mv "$tmp" docs/CHANGELOG.md
+  elif [[ "$canonical_unreleased" -eq 1 ]]; then
+    tmp=$(mktemp)
+    awk -v replacement="## [$NEW] — $today" \
+      '!consumed && $0 == "## [Unreleased]" {$0=replacement; consumed=1} {print}' \
+      docs/CHANGELOG.md > "$tmp"
     mv "$tmp" docs/CHANGELOG.md
   else
     tmp=$(mktemp)
