@@ -264,6 +264,19 @@ prepend_release_notes() {
   mv "$tmp" "$repo/docs/CHANGELOG.md"
 }
 
+commit_unreleased_notes() {
+  local repo="$1"
+  local tmp="$repo/docs/CHANGELOG.md.next"
+  {
+    printf '# Changelog\n\n## [Unreleased]\n\n### Added\n\n- Pending feature.\n\n'
+    sed -n '/^## \[1.0.0\]/,$p' "$repo/docs/CHANGELOG.md"
+  } > "$tmp"
+  mv "$tmp" "$repo/docs/CHANGELOG.md"
+  git -C "$repo" add docs/CHANGELOG.md
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'add unreleased notes'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+}
+
 run_release() {
   local repo="$1" state="$2"
   shift 2
@@ -665,7 +678,87 @@ test_existing_tag_external_stage_manifest_drift_is_rejected() {
   fi
 }
 
+test_canonical_unreleased_is_consumed() {
+  local repo state origin base_history released history
+  repo=$(setup_repo canonical-unreleased)
+  state="$TMP_ROOT/canonical-unreleased/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  commit_unreleased_notes "$repo"
+  base_history="$TMP_ROOT/canonical-unreleased/base-history"
+  released="$TMP_ROOT/canonical-unreleased/released-changelog"
+  history="$TMP_ROOT/canonical-unreleased/released-history"
+  sed -n '/^## \[1.0.0\]/,$p' "$repo/docs/CHANGELOG.md" > "$base_history"
+
+  run_release "$repo" "$state" patch --no-edit >/dev/null
+  git --git-dir="$origin" show refs/pull/1/head:docs/CHANGELOG.md > "$released"
+
+  [[ $(grep -c '^## \[Unreleased\]$' "$released" || true) -eq 0 ]] ||
+    fail 'release left a stale Unreleased heading'
+  [[ $(grep -c '^## \[1.0.1\] — ' "$released" || true) -eq 1 ]] ||
+    fail 'release did not create exactly one versioned heading'
+  grep -qF -- '- Pending feature.' "$released" ||
+    fail 'release dropped the canonical Unreleased content'
+  sed -n '/^## \[1.0.0\]/,$p' "$released" > "$history"
+  cmp -s "$base_history" "$history" ||
+    fail 'release changed older released history while consuming Unreleased'
+}
+
+test_duplicate_unreleased_is_rejected() {
+  local repo state
+  repo=$(setup_repo duplicate-unreleased)
+  state="$TMP_ROOT/duplicate-unreleased/gh-state"
+  commit_unreleased_notes "$repo"
+  printf '\n## [Unreleased]\n\n- Duplicate pending note.\n' >> "$repo/docs/CHANGELOG.md"
+  git -C "$repo" add docs/CHANGELOG.md
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'duplicate unreleased heading'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release accepted duplicate Unreleased headings'
+  fi
+  ! grep -q '^pr create' "$state/calls.log" 2>/dev/null ||
+    fail 'duplicate Unreleased headings reached PR creation'
+}
+
+test_versioned_entry_cannot_leave_stale_unreleased() {
+  local repo state
+  repo=$(setup_repo stale-unreleased)
+  state="$TMP_ROOT/stale-unreleased/gh-state"
+  commit_unreleased_notes "$repo"
+  prepend_release_notes "$repo"
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release accepted a versioned entry followed by stale Unreleased notes'
+  fi
+  ! grep -q '^pr create' "$state/calls.log" 2>/dev/null ||
+    fail 'stale Unreleased notes reached PR creation'
+}
+
+test_unreleased_consumption_rejects_prior_history_tamper() {
+  local repo state
+  repo=$(setup_repo unreleased-history-tamper)
+  state="$TMP_ROOT/unreleased-history-tamper/gh-state"
+  commit_unreleased_notes "$repo"
+
+  if RELEASE_TEST_FAILPOINT=before-branch-push run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'prior-history tamper fixture unexpectedly completed'
+  fi
+  perl -0pi -e 's/- Initial\./- Tampered prior release./' "$repo/docs/CHANGELOG.md"
+  git -C "$repo" add docs/CHANGELOG.md
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'tamper with prior release history'
+  git -C "$repo" push -q -u origin release/v1.0.1
+  git -C "$repo" switch -q main
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release accepted prior-history tampering after Unreleased consumption'
+  fi
+}
+
 write_fake_commands "$TMP_ROOT/fake-bin"
+test_canonical_unreleased_is_consumed
+test_duplicate_unreleased_is_rejected
+test_versioned_entry_cannot_leave_stale_unreleased
+test_unreleased_consumption_rejects_prior_history_tamper
 test_protected_release_and_resume_states
 test_open_pr_is_reused_after_timeout
 test_mid_wait_head_mutation_is_rejected
