@@ -5,7 +5,7 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [5.19.0] — 2026-08-28
 
 ### Fixed — Codex steer transport (PAI-825 follow-up)
 
