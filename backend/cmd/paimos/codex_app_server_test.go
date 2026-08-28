@@ -334,10 +334,12 @@ func TestDeliverCodexMessageTransportFailuresFallBackToExactQueue(t *testing.T) 
 			t.Setenv("PAIMOS_TEST_VENDOR_STDERR", leakDiagnostic)
 		}},
 		{"initialize", "app-server session", func(t *testing.T) {
-			t.Setenv("PAIMOS_TEST_INITIALIZE", `{"error":{"code":-32603,"message":"`+leakDiagnostic+`"}}`)
+			t.Setenv("PAIMOS_TEST_CLOSE_ON", "initialize")
+			t.Setenv("PAIMOS_TEST_VENDOR_STDERR", leakDiagnostic)
 		}},
 		{"thread read", "thread/read", func(t *testing.T) {
-			t.Setenv("PAIMOS_TEST_THREAD_READ", `{"error":{"code":-32603,"message":"`+leakDiagnostic+`"}}`)
+			t.Setenv("PAIMOS_TEST_CLOSE_ON", "thread/read")
+			t.Setenv("PAIMOS_TEST_VENDOR_STDERR", leakDiagnostic)
 		}},
 		{"turn steer transport", "turn/steer", func(t *testing.T) {
 			t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-live","status":"inProgress"}]`)
@@ -374,6 +376,54 @@ func TestDeliverCodexMessageTransportFailuresFallBackToExactQueue(t *testing.T) 
 			for _, forbidden := range []string{leakTarget, leakBody, leakSecret} {
 				if strings.Contains(combinedOutput, forbidden) {
 					t.Fatalf("listener output leaked %q: stdout=%q stderr=%q", forbidden, out.String(), diagnostic)
+				}
+			}
+		})
+	}
+}
+
+// A completed JSON-RPC response is not a transport failure. Remote rejections
+// during session initialization or thread discovery signal request/schema
+// drift and must remain hard delivery errors instead of silently queueing.
+func TestDeliverCodexMessageRemoteSessionRejectionsFailWithoutQueue(t *testing.T) {
+	const (
+		leakTarget = "fixture-encrypted-target-ref-never-log"
+		leakBody   = "Bearer-sk-body-never-log"
+		leakSecret = "sk-secret-like-never-log-abcdefghijklmnopqrstuvwxyz"
+	)
+	leakDiagnostic := strings.Join([]string{leakTarget, leakBody, leakSecret}, " ")
+	for _, tc := range []struct {
+		name, phase, env string
+	}{
+		{"initialize internal error", "initialize Codex app-server", "PAIMOS_TEST_INITIALIZE"},
+		{"thread read invalid request", "read Codex thread", "PAIMOS_TEST_THREAD_READ"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argsFile, _ := installFakeCodexAppServer(t)
+			var out, errOut bytes.Buffer
+			oldStdout, oldStderr := stdout, stderr
+			stdout, stderr = &out, &errOut
+			t.Cleanup(func() { stdout, stderr = oldStdout, oldStderr })
+			code := -32603
+			if tc.env == "PAIMOS_TEST_THREAD_READ" {
+				code = -32600
+			}
+			t.Setenv(tc.env, fmt.Sprintf(`{"error":{"code":%d,"message":%q}}`, code, leakDiagnostic))
+			outcome, err := deliverCodexMessage(context.Background(), steerMessage(leakTarget), leakBody, "ignored", "queue")
+			if err == nil || outcome != nil {
+				t.Fatalf("outcome=%#v error=%v want hard remote rejection", outcome, err)
+			}
+			if !strings.Contains(err.Error(), tc.phase+": unexpected app-server rejection") || !strings.Contains(err.Error(), fmt.Sprintf("code %d", code)) {
+				t.Fatalf("error=%q must carry only controlled phase and code", err)
+			}
+			args, _ := os.ReadFile(argsFile)
+			if strings.Contains(string(args), "queue\n") {
+				t.Fatalf("remote rejection must not fall back to codex queue: %q", args)
+			}
+			combinedOutput := out.String() + errOut.String() + err.Error()
+			for _, forbidden := range []string{leakTarget, leakBody, leakSecret} {
+				if strings.Contains(combinedOutput, forbidden) {
+					t.Fatalf("remote rejection leaked %q: stdout=%q stderr=%q error=%q", forbidden, out.String(), errOut.String(), err)
 				}
 			}
 		})

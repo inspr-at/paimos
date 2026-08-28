@@ -413,11 +413,19 @@ func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Write
 	defer cancel()
 	session, err := openCodexAppServerSession(operationCtx, path, clientVersion)
 	if err != nil {
+		var remote *codexRPCError
+		if errors.As(err, &remote) {
+			return false, "", fmt.Errorf("initialize Codex app-server: unexpected app-server rejection (code %d)", remote.Code)
+		}
 		return codexTransportFallback(stderr, "app-server session")
 	}
 	defer session.close()
 	turnID, reason, err := session.activeTurn(operationCtx, target)
 	if err != nil {
+		var remote *codexRPCError
+		if errors.As(err, &remote) {
+			return false, "", fmt.Errorf("read Codex thread: unexpected app-server rejection (code %d)", remote.Code)
+		}
 		return codexTransportFallback(stderr, "thread/read")
 	}
 	if turnID == "" {

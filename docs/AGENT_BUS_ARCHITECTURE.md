@@ -342,6 +342,7 @@ priority.
 | `steer`, Codex thread is idle or has no `inProgress` turn | Use `codex queue`; reason `idle` |
 | `steer`, Codex returns `activeTurnNotSteerable` or the expected turn races | Use `codex queue`; reason `not_steerable` |
 | `steer`, Codex daemon/proxy/initialize/read/steer transport fails | Use `codex queue`; reason `transport_error` |
+| `steer`, Codex initialize/read returns a JSON-RPC rejection or steer returns an undocumented rejection | Leave unacknowledged and retry; do not mask request drift with queue fallback |
 | `steer`, receiver policy has `maximum_level=simple` | Use the configured simple target; reason `policy_capped` |
 | `steer`, adapter has no steer primitive | Use its supported simple primitive; reason `unsupported` |
 | `steer`, no thread target, but a distinct simple target is configured | Use that simple target; reason `target_missing` |
@@ -428,6 +429,8 @@ sequenceDiagram
     else daemon, proxy, initialize, read, or steer transport error
         W->>Q: codex queue --thread THREAD --message TEXT
         Q-->>W: exit 0
+    else initialize/read rejection or undocumented steer rejection
+        W-->>W: fail delivery for retry; do not queue
     end
 ```
 
@@ -559,7 +562,7 @@ CLI or socket frame.
 | Receiver | Level | Allowed vendor primitive | Current | Target and fallback |
 |---|---|---|---|---|
 | Codex | `simple` | `codex queue --thread <THREAD> --message <TEXT>` | Implemented by `listen --deliver codex`; mode is process-wide | Supported. `<THREAD>` is a Codex rollout/session UUID or exact session name, never a Cursor chat UUID |
-| Codex | `steer` | Start daemon with `codex app-server daemon start`; worker runs `codex app-server proxy`, whose proxied stream carries the WebSocket HTTP Upgrade handshake and one JSON-RPC message per text frame; performs `initialize` (`capabilities.experimentalApi=true`) + `initialized`, reads exactly one `thread/read {threadId,includeTurns:true}`, selects the latest nonempty `inProgress` turn, and calls `turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}` | Implemented (PAI-825 follow-up; 5.17.3–5.18.0 wrote JSON lines into the proxy and never got an `initialize` answer) | Supported. Idle, not loaded, race, not-steerable, and app-server transport failure fall back to the exact queue primitive; any other `turn/steer` rejection (unknown method, request-shape drift, sub-agent ownership, internal error) fails the delivery instead of queueing |
+| Codex | `steer` | Start daemon with `codex app-server daemon start`; worker runs `codex app-server proxy`, whose proxied stream carries the WebSocket HTTP Upgrade handshake and one JSON-RPC message per text frame; performs `initialize` (`capabilities.experimentalApi=true`) + `initialized`, reads exactly one `thread/read {threadId,includeTurns:true}`, selects the latest nonempty `inProgress` turn, and calls `turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}` | Implemented (PAI-825 follow-up; 5.17.3–5.18.0 wrote JSON lines into the proxy and never got an `initialize` answer) | Supported. Idle, not loaded, race, not-steerable, and genuine app-server transport failure fall back to the exact queue primitive; completed initialize/read JSON-RPC rejections and any other `turn/steer` rejection (unknown method, request-shape drift, sub-agent ownership, internal error) fail the delivery instead of queueing |
 | Claude local | `simple` | `claude -p --resume <session_id>` or `claude -p --cloud <session_id>` | Implemented by `listen --deliver claude` from a receiver-owned `claude_resume` / `claude_session` target; framed body over stdin, zero exit is handoff, completed through `delivery-complete` | Supported. A local UUID resumes an idle session; a `session_…`/`cse_…` id queues a cloud follow-up |
 | Claude Channels | `simple` | MCP `notifications/claude/channel`; session opts in with `--channels` or `--dangerously-load-development-channels` | Research-preview channel path under `paimos serve --mcp-stdio --channel-as`; leases `claude_channel` targets and completes each push | Supported simple push when explicitly enabled; successful JSON-RPC write is handoff |
 | Claude | `steer` | **UNSUPPORTED** | Falls back to the selected simple primitive with `fallback_reason=unsupported`; Claude targets are fixed to `maximum_level=simple` | Fall back to a configured simple resume/cloud or Channels target; otherwise remain blocked |
