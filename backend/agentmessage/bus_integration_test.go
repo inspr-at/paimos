@@ -459,6 +459,78 @@ func TestBusWebhookTargetSenderSecretPolicy(t *testing.T) {
 	}
 }
 
+// TestWebhookDispatcherEmptyQueueLeavesRequestWritesWritable proves an idle
+// poll stays read-only while representative authenticated-request writes are
+// in flight. Production opens SQLite with _txlock=immediate, so a BeginTx here
+// would wait behind the request writer even though there is no webhook work to
+// lease, joining the writer queue that it used to starve every 250ms.
+func TestWebhookDispatcherEmptyQueueLeavesRequestWritesWritable(t *testing.T) {
+	_, _ = openBusTestDB(t)
+	var journalMode string
+	if err := paimosdb.DB.QueryRow(`PRAGMA journal_mode=WAL`).Scan(&journalMode); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ToLower(journalMode) != "wal" {
+		t.Fatalf("journal_mode=%q, want wal", journalMode)
+	}
+	user, err := paimosdb.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES('poll-writer','x','member','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, err := user.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := paimosdb.DB.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes) VALUES(?,'poll-writer','hash','prefix','issues:read')`, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyID, err := key.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writer, err := paimosdb.DB.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	if _, err := writer.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	defer writer.ExecContext(context.Background(), `ROLLBACK`)
+
+	started := make(chan struct{})
+	type dispatchResult struct {
+		worked bool
+		err    error
+	}
+	result := make(chan dispatchResult, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	go func() {
+		close(started)
+		worked, dispatchErr := NewWebhookDispatcher(paimosdb.DB).DispatchOne(ctx)
+		result <- dispatchResult{worked: worked, err: dispatchErr}
+	}()
+	<-started
+
+	// These mirror ResolveAPIKey's write-throttled usage stamp and
+	// SessionAuditMiddleware's mutation audit insert. They must remain usable
+	// while the empty dispatcher poll is running.
+	if _, err := writer.ExecContext(context.Background(), `UPDATE api_keys SET last_used_at=datetime('now') WHERE id=?`, keyID); err != nil {
+		t.Fatalf("api-key usage stamp was not writable: %v", err)
+	}
+	if _, err := writer.ExecContext(context.Background(), `INSERT INTO session_activity(session_id,user_id,method,path,status_code) VALUES(NULL,?,'POST','/api/issues',201)`, userID); err != nil {
+		t.Fatalf("session activity was not writable: %v", err)
+	}
+
+	dispatched := <-result
+	if dispatched.err != nil || dispatched.worked {
+		t.Fatalf("empty poll joined the writer queue: worked=%v err=%v", dispatched.worked, dispatched.err)
+	}
+}
+
 // TestBusWebhookLegacyTargetWithoutSenderSecretFailsClosed proves a pre-M157
 // webhook target version is never dispatched without its sender key: the
 // endpoint is not contacted and the delivery blocks with a typed reason.
