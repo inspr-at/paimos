@@ -35,8 +35,10 @@ import (
 	"github.com/inspr-at/paimos/backend/safetext"
 )
 
+const DefaultBusyTimeoutMS = 5000
+
 var perConnectionPragmas = []string{
-	"PRAGMA busy_timeout=5000",
+	fmt.Sprintf("PRAGMA busy_timeout=%d", DefaultBusyTimeoutMS),
 	"PRAGMA foreign_keys=ON",
 }
 
@@ -11734,6 +11736,16 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE INDEX idx_agent_message_deliveries_target
 			 ON agent_message_deliveries(primary_target_id,state,message_row_id)`,
 			`PRAGMA foreign_keys=ON`,
+		}},
+
+		// M160 / PAI-843: mutation_log is self-referential. SQLite probes the
+		// child key for every retained parent deleted by the GDPR sweeper; without
+		// this index each probe scans the whole table while holding the WAL writer
+		// slot. The partial index contains exactly the rows that can reference a
+		// parent and keeps the cold-start retention path bounded.
+		{160, []string{
+			`CREATE INDEX idx_mutation_log_parent
+			 ON mutation_log(parent_log_id) WHERE parent_log_id IS NOT NULL`,
 		}},
 	}
 

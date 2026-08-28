@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 159
+const latestSchemaVersion = 160
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -1189,6 +1189,7 @@ func TestSchemaContainsCriticalIndexes(t *testing.T) {
 		"idx_ai_calls_issue_time",
 		"idx_mutation_log_user_stack",
 		"idx_mutation_log_request",
+		"idx_mutation_log_parent",
 		"idx_documents_project",
 		"idx_time_entries_mite_id",
 		// PAI-338 / M96 — slug uniqueness for the knowledge plane.
@@ -1635,5 +1636,68 @@ func TestMigration159AddsTransportFallbackReasonWithoutChangingDeliveries(t *tes
 		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=? AND tbl_name='agent_message_deliveries'`, index).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("index %s missing after M159: count=%d err=%v", index, count, err)
 		}
+	}
+}
+
+func TestMigration160IndexesMutationLogParentWithoutChangingRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m160-populated.db")
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 159); err != nil {
+		t.Fatalf("create exact M159 fixture: %v", err)
+	}
+	parent, err := database.Exec(`INSERT INTO mutation_log
+		(request_id,mutation_type,subject_type,subject_id,inverse_op,before_state,before_hash,after_hash,after_state)
+		VALUES('m160-parent','update','issue',1,'restore','{}','before','after','{}')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentID, _ := parent.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO mutation_log
+		(request_id,mutation_type,subject_type,subject_id,parent_log_id,inverse_op,before_state,before_hash,after_hash,after_state)
+		VALUES('m160-child','undo','issue',1,?,'restore','{}','before','after','{}')`, parentID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrateThrough(database, 160); err != nil {
+		t.Fatalf("M159 to M160: %v", err)
+	}
+	var rows, linked int
+	if err := database.QueryRow(`SELECT COUNT(*),COUNT(parent_log_id) FROM mutation_log`).Scan(&rows, &linked); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 || linked != 1 {
+		t.Fatalf("mutation rows changed: rows=%d linked=%d", rows, linked)
+	}
+	var indexSQL string
+	if err := database.QueryRow(`SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_mutation_log_parent'`).Scan(&indexSQL); err != nil {
+		t.Fatalf("parent index missing: %v", err)
+	}
+	if !strings.Contains(indexSQL, "parent_log_id") || !strings.Contains(indexSQL, "IS NOT NULL") {
+		t.Fatalf("unexpected parent index: %q", indexSQL)
+	}
+	planRows, err := database.Query(`EXPLAIN QUERY PLAN DELETE FROM mutation_log WHERE id=?`, parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer planRows.Close()
+	var plan strings.Builder
+	for planRows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := planRows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(detail)
+	}
+	if !strings.Contains(plan.String(), "idx_mutation_log_parent") {
+		t.Fatalf("delete FK enforcement did not use M160 child index: %q", plan.String())
+	}
+	var violations int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&violations); err != nil || violations != 0 {
+		t.Fatalf("foreign-key violations=%d err=%v", violations, err)
 	}
 }

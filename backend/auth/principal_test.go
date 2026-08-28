@@ -669,6 +669,92 @@ func TestResolveAPIKeyPrincipalUsesExactCurrentExpiryAndStatus(t *testing.T) {
 	}
 }
 
+func TestResolveAPIKeyUsageStampNeverInheritsSQLiteBusyTimeout(t *testing.T) {
+	setupPrincipalTestDB(t)
+	now := time.Date(2026, 8, 28, 15, 0, 0, 0, time.UTC)
+	userID := insertPrincipalUser(t, "nonblocking-usage-stamp")
+	rawKey := "paimos_test_nonblocking_usage_stamp"
+	digest := sha256.Sum256([]byte(rawKey))
+	result, err := db.DB.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes)
+		VALUES(?,'nonblocking-usage',?,'paimos_test','issues:read')`, userID, hex.EncodeToString(digest[:]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyID, _ := result.LastInsertId()
+	writer, err := db.DB.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	if _, err := writer.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	defer writer.ExecContext(context.Background(), `ROLLBACK`)
+
+	started := time.Now()
+	user, principal, err := resolveAPIKeyPrincipalAt(rawKey, now)
+	elapsed := time.Since(started)
+	if err != nil || user.ID != userID || principal.APIKeyID() != keyID {
+		t.Fatalf("authentication failed while optional usage stamp was busy: user=%#v principal=%#v err=%v", user, principal, err)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("authentication inherited SQLite's busy timeout: %s", elapsed)
+	}
+	policyConn, err := db.DB.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer policyConn.Close()
+	var busyTimeout int
+	if err := policyConn.QueryRowContext(context.Background(), `PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+		t.Fatal(err)
+	}
+	if busyTimeout != db.DefaultBusyTimeoutMS {
+		t.Fatalf("usage-stamp connection returned with busy_timeout=%d want %d", busyTimeout, db.DefaultBusyTimeoutMS)
+	}
+}
+
+func TestResolveAPIKeyRecentUsageStaysReadOnlyWhileSQLiteWriterIsBusy(t *testing.T) {
+	setupPrincipalTestDB(t)
+	now := time.Date(2026, 8, 28, 15, 0, 0, 0, time.UTC)
+	userID := insertPrincipalUser(t, "read-only-usage-stamp")
+	rawKey := "paimos_test_read_only_usage_stamp"
+	digest := sha256.Sum256([]byte(rawKey))
+	lastUsed := now.Add(-30 * time.Minute).Format("2006-01-02T15:04:05.000Z")
+	result, err := db.DB.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes,last_used_at)
+		VALUES(?,'read-only-usage',?,'paimos_test','issues:read',?)`, userID, hex.EncodeToString(digest[:]), lastUsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyID, _ := result.LastInsertId()
+	writer, err := db.DB.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	if _, err := writer.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	defer writer.ExecContext(context.Background(), `ROLLBACK`)
+
+	started := time.Now()
+	user, principal, err := resolveAPIKeyPrincipalAt(rawKey, now)
+	elapsed := time.Since(started)
+	if err != nil || user.ID != userID || principal.APIKeyID() != keyID {
+		t.Fatalf("authentication failed while writer was busy: user=%#v principal=%#v err=%v", user, principal, err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("recent API-key authentication attempted a writer lock: %s", elapsed)
+	}
+	var stamped string
+	if err := db.DB.QueryRow(`SELECT last_used_at FROM api_keys WHERE id=?`, keyID).Scan(&stamped); err != nil {
+		t.Fatal(err)
+	}
+	if stamped != lastUsed {
+		t.Fatalf("recent usage stamp changed: got %q want %q", stamped, lastUsed)
+	}
+}
+
 func TestAPIKeyOwnerStatusFailsClosedInTxAndMiddleware(t *testing.T) {
 	for _, status := range []string{"inactive", "deleted", "suspended"} {
 		t.Run(status, func(t *testing.T) {
