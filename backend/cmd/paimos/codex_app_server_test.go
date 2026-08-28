@@ -535,9 +535,9 @@ func TestDeliverCodexMessageFallsBackOnDocumentedSteerRejections(t *testing.T) {
 	for _, tc := range []struct {
 		name, rejection, reason string
 	}{
-		{"active turn not steerable (review)", `{"code":-32600,"message":"cannot steer a review turn ` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"review"}}}}`, "not_steerable"},
-		{"compact turn without structured data", `{"code":-32600,"message":"cannot steer a compact turn ` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `"}`, "not_steerable"},
-		{"expected turn race", `{"code":-32600,"message":"expected active turn id ` + "`turn-raced`" + ` but found ` + "`turn-next`" + ` ` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `"}`, "not_steerable"},
+		{"active turn not steerable (review)", `{"code":-32600,"message":"cannot steer a review turn","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"review"}},"additionalDetails":"` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `"}}`, "not_steerable"},
+		{"compact turn without structured data", `{"code":-32600,"message":"cannot steer a compact turn","data":{"additionalDetails":"` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `"}}`, "not_steerable"},
+		{"expected turn race", `{"code":-32600,"message":"expected active turn id ` + "`turn-raced`" + ` but found ` + "`turn-next`" + `","data":{"additionalDetails":"` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `"}}`, "not_steerable"},
 		{"turn finished before steer", `{"code":-32600,"message":"no active turn to steer","data":{"additionalDetails":"` + leakTarget + ` ` + leakBody + ` ` + leakSecret + `"}}`, "idle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -586,6 +586,14 @@ func TestDeliverCodexMessageUnknownSteerRejectionFailsWithoutQueue(t *testing.T)
 		{"internal error", `{"code":-32603,"message":"failed to steer turn: boom"}`},
 		{"documented text under a foreign code", `{"code":-32603,"message":"no active turn to steer"}`},
 		{"documented marker under a foreign code", `{"code":-32603,"message":"steer failed","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"review"}}}}`},
+		{"marker text in unrelated data", `{"code":-32600,"message":"steer failed","data":{"additionalDetails":"activeTurnNotSteerable"}}`},
+		{"marker at wrong path", `{"code":-32600,"message":"steer failed","data":{"activeTurnNotSteerable":{"turnKind":"review"}}}`},
+		{"marker has wrong type", `{"code":-32600,"message":"steer failed","data":{"codexErrorInfo":{"activeTurnNotSteerable":"review"}}}`},
+		{"marker is empty object", `{"code":-32600,"message":"steer failed","data":{"codexErrorInfo":{"activeTurnNotSteerable":{}}}}`},
+		{"marker misses turn kind", `{"code":-32600,"message":"steer failed","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"kind":"review"}}}}`},
+		{"marker has foreign turn kind", `{"code":-32600,"message":"steer failed","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"foreign"}}}}`},
+		{"unknown turn kind", `{"code":-32600,"message":"cannot steer a foreign turn"}`},
+		{"expected race with suffix", "{\"code\":-32600,\"message\":\"expected active turn id `turn-live` but found `turn-next` trailing\"}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argsFile, _ := installFakeCodexAppServer(t)

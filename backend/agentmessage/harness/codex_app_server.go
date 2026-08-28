@@ -384,18 +384,47 @@ func classifyCodexSteerRejection(err *codexRPCError) (string, bool) {
 	if err == nil || err.Code != codexRPCInvalidRequest {
 		return "", false
 	}
-	if strings.Contains(string(err.Data), "activeTurnNotSteerable") {
+	var data struct {
+		CodexErrorInfo struct {
+			ActiveTurnNotSteerable json.RawMessage `json:"activeTurnNotSteerable"`
+		} `json:"codexErrorInfo"`
+	}
+	if json.Unmarshal(err.Data, &data) == nil && len(data.CodexErrorInfo.ActiveTurnNotSteerable) > 0 {
+		var marker struct {
+			TurnKind string `json:"turnKind"`
+		}
+		if json.Unmarshal(data.CodexErrorInfo.ActiveTurnNotSteerable, &marker) == nil && (marker.TurnKind == "review" || marker.TurnKind == "compact") {
+			return "not_steerable", true
+		}
+	}
+	message := strings.TrimSpace(err.Message)
+	if message == "cannot steer a review turn" || message == "cannot steer a compact turn" {
 		return "not_steerable", true
 	}
-	switch message := strings.TrimSpace(err.Message); {
-	case strings.HasPrefix(message, "cannot steer a "):
+	if isExpectedTurnRace(message) {
 		return "not_steerable", true
-	case strings.HasPrefix(message, "expected active turn id "):
-		return "not_steerable", true
-	case message == "no active turn to steer":
+	}
+	if message == "no active turn to steer" {
 		return "idle", true
 	}
 	return "", false
+}
+
+func isExpectedTurnRace(message string) bool {
+	const (
+		prefix      = "expected active turn id `"
+		separator   = "` but found `"
+		maxIDLength = 256
+	)
+	if !strings.HasPrefix(message, prefix) || !strings.HasSuffix(message, "`") {
+		return false
+	}
+	ids := strings.TrimSuffix(strings.TrimPrefix(message, prefix), "`")
+	expected, found, ok := strings.Cut(ids, separator)
+	if !ok || expected == "" || found == "" || len(expected) > maxIDLength || len(found) > maxIDLength {
+		return false
+	}
+	return !strings.ContainsAny(expected, "`\r\n") && !strings.ContainsAny(found, "`\r\n")
 }
 
 // codexTimeout builds the precise timeout error for a blocking phase and

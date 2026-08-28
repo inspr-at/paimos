@@ -48,6 +48,10 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   missing/mismatched returned turn ID cannot masquerade as a transport failure
   or successful queue fallback. An inactive thread response that still contains
   an `inProgress` turn is likewise rejected as contradictory protocol data.
+  Documented steer rejection classification requires the structured
+  `codexErrorInfo.activeTurnNotSteerable` object or the exact bounded vendor
+  message shapes; marker text in unrelated data and unknown turn kinds fail
+  closed.
   Fallback diagnostics retain only the controlled phase and typed reason;
   vendor error text cannot echo target references, bodies, or secret-like
   values into listener output. Queue stdout and stderr are also discarded,
