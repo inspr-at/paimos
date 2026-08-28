@@ -41,6 +41,17 @@ const bookedHoursCaseSQL = `SUM(CASE
 	WHEN te.stopped_at IS NOT NULL THEN (julianday(te.stopped_at) - julianday(te.started_at)) * 24
 	ELSE 0 END)`
 
+const weekTimeEntriesSQL = `
+	SELECT date(te.started_at), ` + bookedHoursCaseSQL + `, COUNT(*),
+	       MAX(CASE WHEN LOWER(COALESCE(te.comment, '')) LIKE '%assumed%' THEN 1 ELSE 0 END)
+	FROM time_entries te
+	WHERE te.user_id = ?
+	  AND date(te.started_at) >= date(?)
+	  AND date(te.started_at) <= date(?)
+	GROUP BY date(te.started_at)
+	ORDER BY date(te.started_at)
+`
+
 const materialSumSQL = `SUM(COALESCE(te.material_lp, 0))`
 
 type timeReportUserRow struct {
@@ -141,7 +152,6 @@ func GetWeekTimeEntries(w http.ResponseWriter, r *http.Request) {
 
 	canReadOthers := auth.IsAdmin(caller) || auth.HasCapability(r.Context(), caller, auth.CapabilityTimeEntriesWriteAny)
 	resp := weekTimeEntriesResponse{From: from, To: to, Users: []weekTimeEntryUser{}}
-	userIndex := map[int64]int{}
 	for _, requestedUsername := range requested {
 		var userID int64
 		var username string
@@ -152,7 +162,6 @@ func GetWeekTimeEntries(w http.ResponseWriter, r *http.Request) {
 		if err != nil || (userID != caller.ID && !canReadOthers) {
 			continue
 		}
-		userIndex[userID] = len(resp.Users)
 		resp.Users = append(resp.Users, weekTimeEntryUser{
 			UserID: userID, Username: username, Days: []weekTimeEntryDay{},
 		})
@@ -163,40 +172,23 @@ func GetWeekTimeEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	placeholders := make([]string, len(resp.Users))
-	args := make([]any, 0, len(resp.Users)+2)
-	for i, user := range resp.Users {
-		placeholders[i] = "?"
-		args = append(args, user.UserID)
-	}
-	args = append(args, from, to)
-	rows, err := db.DB.QueryContext(r.Context(), `
-		SELECT te.user_id, date(te.started_at), `+bookedHoursCaseSQL+`, COUNT(*),
-		       MAX(CASE WHEN LOWER(COALESCE(te.comment, '')) LIKE '%assumed%' THEN 1 ELSE 0 END)
-		FROM time_entries te
-		WHERE te.user_id IN (`+strings.Join(placeholders, ",")+`)
-		  AND date(te.started_at) >= date(?)
-		  AND date(te.started_at) <= date(?)
-		GROUP BY te.user_id, date(te.started_at)
-		ORDER BY te.user_id, date(te.started_at)
-	`, args...)
-	if err != nil {
-		jsonError(w, "query failed", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var userID int64
-		var day weekTimeEntryDay
-		var assumed int
-		if err := rows.Scan(&userID, &day.Date, &day.Hours, &day.Entries, &assumed); err != nil {
-			continue
+	for i := range resp.Users {
+		rows, err := db.DB.QueryContext(r.Context(), weekTimeEntriesSQL, resp.Users[i].UserID, from, to)
+		if err != nil {
+			jsonError(w, "query failed", http.StatusInternalServerError)
+			return
 		}
-		day.Hours = roundTo(day.Hours, 2)
-		day.Assumed = assumed == 1
-		if idx, ok := userIndex[userID]; ok {
-			resp.Users[idx].Days = append(resp.Users[idx].Days, day)
+		for rows.Next() {
+			var day weekTimeEntryDay
+			var assumed int
+			if err := rows.Scan(&day.Date, &day.Hours, &day.Entries, &assumed); err != nil {
+				continue
+			}
+			day.Hours = roundTo(day.Hours, 2)
+			day.Assumed = assumed == 1
+			resp.Users[i].Days = append(resp.Users[i].Days, day)
 		}
+		rows.Close()
 	}
 
 	jsonOK(w, resp)
