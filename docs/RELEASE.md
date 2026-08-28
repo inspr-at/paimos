@@ -133,10 +133,13 @@ The script never pushes `main` or uses a ruleset bypass. It creates or reuses
 auto-merge, and tags the merge commit returned for that PR. If another change
 lands on `main` later, it is not accidentally included in the release tag.
 
-For agent / non-TTY runs, the reviewed CHANGELOG entry for the new version
-must already exist (the script refuses to commit its generated TODO stub).
-Starting from clean, current `main`, add only the `## [<x.y.z>]` section to
-[`docs/CHANGELOG.md`](CHANGELOG.md), leave that one file uncommitted, then run:
+For agent / non-TTY runs, the reviewed CHANGELOG content must already exist
+(the script refuses to commit its generated TODO stub). When current `main`
+starts with exactly one canonical `## [Unreleased]` section, the script
+consumes that section in place as `## [<x.y.z>]` and preserves every older
+release byte-for-byte. Otherwise, starting from clean, current `main`, add only
+the `## [<x.y.z>]` section to [`docs/CHANGELOG.md`](CHANGELOG.md), leave that
+one file uncommitted, then run:
 
     ./scripts/release.sh patch --no-edit
     # or the explicit form, e.g. when the latest tag is an -rc pre-release:
@@ -145,6 +148,10 @@ Starting from clean, current `main`, add only the `## [<x.y.z>]` section to
 That reviewed working-tree change moves onto the release branch before the
 other deterministic release files are updated. Interactive runs start clean,
 create the release branch first, and open `$EDITOR` on the generated draft.
+The canonical leading `Unreleased` path is already reviewed and is consumed
+deterministically without reopening the editor. A duplicate active section or
+a versioned entry that leaves the leading `Unreleased` section behind fails
+before a release PR can be created; historical changelog bytes are preserved.
 
 Rerunning the same explicit version is safe: a matching open PR, a merged but
 untagged PR, and an already-correct tag resume from their last checkpoint.
