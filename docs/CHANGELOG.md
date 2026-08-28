@@ -40,9 +40,13 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   degrade safely to the exact `codex queue --thread … --message …` primitive
   with `fallback_reason=transport_error`. RPC attempts remain bounded and
   response-ID matched. A completed remote JSON-RPC rejection during initialize
-  or thread-read, and any undocumented remote `turn/steer` rejection, still
-  fail closed so request drift cannot masquerade as a transport failure or a
-  successful queue fallback.
+  or thread-read, any undocumented remote `turn/steer` rejection, and any
+  malformed frame or malformed/mismatched successful response fail closed.
+  Only `idle` and `notLoaded` are clean inactive statuses;
+  unknown/system-error thread status,
+  an unknown turn status, missing thread history, a mismatched thread, or a
+  missing/mismatched returned turn ID cannot masquerade as a transport failure
+  or successful queue fallback.
   Fallback diagnostics retain only the controlled phase and typed reason;
   vendor error text cannot echo target references, bodies, or secret-like
   values into listener output. Queue stdout and stderr are also discarded,

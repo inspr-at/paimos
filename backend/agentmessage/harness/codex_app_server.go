@@ -59,6 +59,17 @@ func (e *codexRPCError) Error() string {
 	return fmt.Sprintf("Codex app-server error %d: %s", e.Code, e.Message)
 }
 
+// codexProtocolError is a locally detected request/response schema failure.
+// Its text is deliberately controlled: decoder errors may otherwise quote
+// untrusted vendor values from the response body into listener diagnostics.
+type codexProtocolError struct {
+	Phase string
+}
+
+func (e *codexProtocolError) Error() string {
+	return "Codex app-server protocol error during " + e.Phase
+}
+
 // codexRPCMessage is one server-to-client wire message. Responses carry an id
 // plus result or error; notifications carry a method without an id; server
 // requests carry both and are never answered by this client.
@@ -221,7 +232,8 @@ func (s *codexAppServerSession) readLoop() {
 		}
 		var msg codexRPCMessage
 		if err := json.Unmarshal([]byte(text), &msg); err != nil {
-			continue
+			s.readErr = &codexProtocolError{Phase: "decode app-server frame"}
+			return
 		}
 		select {
 		case s.messages <- msg:
@@ -234,7 +246,7 @@ func (s *codexAppServerSession) readLoop() {
 func (s *codexAppServerSession) send(value any) error {
 	raw, err := json.Marshal(value)
 	if err != nil {
-		return err
+		return &codexProtocolError{Phase: "request encoding"}
 	}
 	return websocket.Message.Send(s.conn, string(raw))
 }
@@ -272,7 +284,7 @@ func (s *codexAppServerSession) call(ctx context.Context, method string, params 
 				return nil
 			}
 			if err := json.Unmarshal(msg.Result, result); err != nil {
-				return fmt.Errorf("decode %s result: %w", method, err)
+				return &codexProtocolError{Phase: "decode " + method + " result"}
 			}
 			return nil
 		case <-ctx.Done():
@@ -288,22 +300,39 @@ func (s *codexAppServerSession) call(ctx context.Context, method string, params 
 func (s *codexAppServerSession) activeTurn(ctx context.Context, threadID string) (string, string, error) {
 	type threadRead struct {
 		Thread struct {
+			ID     string `json:"id"`
 			Status struct {
 				Type string `json:"type"`
 			} `json:"status"`
-			Turns []codexTurn `json:"turns"`
+			Turns *[]codexTurn `json:"turns"`
 		} `json:"thread"`
 	}
 	var history threadRead
 	if err := s.call(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": true}, &history); err != nil {
 		return "", "", fmt.Errorf("read Codex thread: %w", err)
 	}
-	if history.Thread.Status.Type != "active" {
-		return "", "idle", nil
+	if history.Thread.ID != threadID || history.Thread.Turns == nil {
+		return "", "", &codexProtocolError{Phase: "validate thread/read result"}
 	}
-	for index := len(history.Thread.Turns) - 1; index >= 0; index-- {
-		if history.Thread.Turns[index].Status == "inProgress" && history.Thread.Turns[index].ID != "" {
-			return history.Thread.Turns[index].ID, "", nil
+	switch history.Thread.Status.Type {
+	case "idle", "notLoaded":
+		return "", "idle", nil
+	case "active":
+		// Continue below and select the latest usable active turn.
+	default:
+		return "", "", &codexProtocolError{Phase: "validate thread/read status"}
+	}
+	turns := *history.Thread.Turns
+	for _, turn := range turns {
+		switch turn.Status {
+		case "completed", "interrupted", "failed", "inProgress":
+		default:
+			return "", "", &codexProtocolError{Phase: "validate thread/read turn status"}
+		}
+	}
+	for index := len(turns) - 1; index >= 0; index-- {
+		if turns[index].Status == "inProgress" && turns[index].ID != "" {
+			return turns[index].ID, "", nil
 		}
 	}
 	return "", "idle", nil
@@ -417,6 +446,10 @@ func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Write
 		if errors.As(err, &remote) {
 			return false, "", fmt.Errorf("initialize Codex app-server: unexpected app-server rejection (code %d)", remote.Code)
 		}
+		var protocol *codexProtocolError
+		if errors.As(err, &protocol) {
+			return false, "", protocol
+		}
 		return codexTransportFallback(stderr, "app-server session")
 	}
 	defer session.close()
@@ -425,6 +458,10 @@ func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Write
 		var remote *codexRPCError
 		if errors.As(err, &remote) {
 			return false, "", fmt.Errorf("read Codex thread: unexpected app-server rejection (code %d)", remote.Code)
+		}
+		var protocol *codexProtocolError
+		if errors.As(err, &protocol) {
+			return false, "", protocol
 		}
 		return codexTransportFallback(stderr, "thread/read")
 	}
@@ -451,9 +488,16 @@ func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Write
 			// rejection, internal failure) means the steer primitive itself is
 			// broken or unavailable. Falling back to the queue would mask that,
 			// so the delivery fails and stays undelivered for a retry.
-			return false, "", fmt.Errorf("steer Codex turn (expected turn %s): unexpected app-server rejection: %w", turnID, remote)
+			return false, "", fmt.Errorf("steer Codex turn (expected turn %s): unexpected app-server rejection (code %d)", turnID, remote.Code)
+		}
+		var protocol *codexProtocolError
+		if errors.As(err, &protocol) {
+			return false, "", protocol
 		}
 		return codexTransportFallback(stderr, "turn/steer")
+	}
+	if steered.TurnID == "" || steered.TurnID != turnID {
+		return false, "", &codexProtocolError{Phase: "validate turn/steer result"}
 	}
 	// Evidence for operators: the turn that accepted the input is the exact
 	// expected-turn precondition the daemon verified. No body is echoed.

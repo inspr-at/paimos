@@ -66,8 +66,11 @@ exact queue fallback. Daemon, proxy, initialize, thread-read, and steer
 transport failures also use that queue with `fallback_reason=transport_error`;
 the steer budget still bounds a silent proxy and kills its whole process
 group. A completed JSON-RPC rejection during initialize or thread-read is a
-hard delivery error, as is any undocumented steer rejection; these indicate
-request or schema drift and are never relabeled as transport fallback.
+hard delivery error, as is any undocumented steer rejection, malformed frame,
+or malformed/mismatched successful response. Only `idle` and `notLoaded` are
+clean inactive statuses; system-error/unknown status, missing history, a mismatched thread,
+an unknown turn status, or a missing/mismatched returned turn ID indicate
+protocol drift. These cases are never relabeled as transport fallback.
 Fallback diagnostics contain only the controlled phase and reason;
 vendor error text, target references, message bodies, and secret-like values
 are never copied to listener output. The queue primitive's stdout and stderr
