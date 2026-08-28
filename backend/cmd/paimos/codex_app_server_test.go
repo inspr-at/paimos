@@ -87,10 +87,13 @@ func runFakeCodexProxy(args []string) int {
 
 // fakeCodexAppServer scripts the daemon side from environment variables:
 //
+//	PAIMOS_TEST_INITIALIZE     JSON {"result":{...}} or {"error":{...}} for initialize
 //	PAIMOS_TEST_THREAD_STATUS  thread/read status type (default active)
-//	PAIMOS_TEST_TURNS_LIST     JSON {"result":{...}} or {"error":{...}} for thread/turns/list
-//	PAIMOS_TEST_THREAD_TURNS   JSON turns array for thread/read includeTurns
+//	PAIMOS_TEST_THREAD_READ    JSON {"result":{...}} or {"error":{...}} for thread/read
+//	PAIMOS_TEST_THREAD_TURNS   JSON turns array for the default thread/read result
 //	PAIMOS_TEST_STEER          JSON {"result":{...}} or {"error":{...}} for turn/steer
+//	PAIMOS_TEST_CLOSE_ON       method whose request closes the transport without a response
+//	PAIMOS_TEST_DECOY_ID       when set, send a wrong-id response before the real one
 //	PAIMOS_TEST_FRAMES         file receiving every client frame, one per line
 func fakeCodexAppServer(ws *websocket.Conn) {
 	defer ws.Close()
@@ -125,11 +128,25 @@ func fakeCodexAppServer(ws *websocket.Conn) {
 		if err := json.Unmarshal([]byte(text), &request); err != nil || len(request.ID) == 0 {
 			continue
 		}
+		if os.Getenv("PAIMOS_TEST_CLOSE_ON") == request.Method {
+			return
+		}
+		if os.Getenv("PAIMOS_TEST_DECOY_ID") != "" {
+			reply(json.RawMessage(`999999`), `{"result":{"turnId":"turn-decoy"}}`)
+		}
 		switch request.Method {
 		case "initialize":
 			_ = websocket.Message.Send(ws, `{"method":"remoteControl/status/changed","params":{"status":"disabled"}}`)
-			reply(request.ID, `{"result":{"userAgent":"fake-codex"}}`)
+			envelope := os.Getenv("PAIMOS_TEST_INITIALIZE")
+			if envelope == "" {
+				envelope = `{"result":{"userAgent":"fake-codex"}}`
+			}
+			reply(request.ID, envelope)
 		case "thread/read":
+			if envelope := os.Getenv("PAIMOS_TEST_THREAD_READ"); envelope != "" {
+				reply(request.ID, envelope)
+				continue
+			}
 			status := os.Getenv("PAIMOS_TEST_THREAD_STATUS")
 			if status == "" {
 				status = "active"
@@ -141,12 +158,6 @@ func fakeCodexAppServer(ws *websocket.Conn) {
 				}
 			}
 			reply(request.ID, `{"result":{"thread":{"id":"thread","status":{"type":"`+status+`","activeFlags":[]},"turns":`+turns+`}}}`)
-		case "thread/turns/list":
-			envelope := os.Getenv("PAIMOS_TEST_TURNS_LIST")
-			if envelope == "" {
-				envelope = `{"result":{"data":[]}}`
-			}
-			reply(request.ID, envelope)
 		case "turn/steer":
 			envelope := os.Getenv("PAIMOS_TEST_STEER")
 			if envelope == "" {
@@ -179,7 +190,10 @@ if [ "$1" = "app-server" ] && [ "$2" = "daemon" ] && [ "$3" = "version" ]; then
   printf '%s\n' '{"status":"running","cliVersion":"0.149.1-fake","appServerVersion":"0.150.1-fake"}'
   exit 0
 fi
-if [ "$1" = "app-server" ] && [ "$2" = "daemon" ]; then exit 0; fi
+if [ "$1" = "app-server" ] && [ "$2" = "daemon" ]; then
+  if [ -n "$PAIMOS_TEST_DAEMON_FAIL" ]; then exit 42; fi
+  exit 0
+fi
 if [ "$1" = "app-server" ] && [ "$2" = "proxy" ]; then
   PAIMOS_FAKE_CODEX_HELPER=1 "$PAIMOS_TEST_HELPER" -test.run='^TestHelperFakeCodex$' -- "$@"
   exit $?
@@ -194,10 +208,14 @@ exit 1
 	t.Setenv("PAIMOS_TEST_ARGS", argsFile)
 	t.Setenv("PAIMOS_TEST_FRAMES", framesFile)
 	t.Setenv("PAIMOS_TEST_SCENARIO", "")
+	t.Setenv("PAIMOS_TEST_DAEMON_FAIL", "")
+	t.Setenv("PAIMOS_TEST_INITIALIZE", "")
 	t.Setenv("PAIMOS_TEST_THREAD_STATUS", "")
-	t.Setenv("PAIMOS_TEST_TURNS_LIST", "")
+	t.Setenv("PAIMOS_TEST_THREAD_READ", "")
 	t.Setenv("PAIMOS_TEST_THREAD_TURNS", "")
 	t.Setenv("PAIMOS_TEST_STEER", "")
+	t.Setenv("PAIMOS_TEST_CLOSE_ON", "")
+	t.Setenv("PAIMOS_TEST_DECOY_ID", "")
 	t.Setenv("PAIMOS_TEST_PIDFILE", "")
 	return argsFile, framesFile
 }
@@ -219,8 +237,9 @@ func readFrames(t *testing.T, framesFile string) string {
 
 func TestDeliverCodexMessageSteersInProgressTurn(t *testing.T) {
 	argsFile, framesFile := installFakeCodexAppServer(t)
-	t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"result":{"data":[{"id":"turn-live","status":"inProgress"}],"nextCursor":null}}`)
+	t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-old","status":"inProgress"},{"id":"turn-complete","status":"completed"},{"id":"turn-live","status":"inProgress"}]`)
 	t.Setenv("PAIMOS_TEST_STEER", `{"result":{"turnId":"turn-live"}}`)
+	t.Setenv("PAIMOS_TEST_DECOY_ID", "1")
 	outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-live"), "steer payload", "ignored-process-target", "queue")
 	if err != nil {
 		t.Fatal(err)
@@ -239,8 +258,7 @@ func TestDeliverCodexMessageSteersInProgressTurn(t *testing.T) {
 	for _, required := range []string{
 		`"method":"initialize"`, `"name":"paimos"`, `"experimentalApi":true`,
 		`"method":"initialized"`,
-		`"method":"thread/read"`, `"threadId":"thread-live"`,
-		`"method":"thread/turns/list"`, `"limit":1`, `"sortDirection":"desc"`, `"itemsView":"notLoaded"`,
+		`"method":"thread/read"`, `"threadId":"thread-live"`, `"includeTurns":true`,
 		`"method":"turn/steer"`, `"expectedTurnId":"turn-live"`, `"type":"text"`, `"text":"steer payload"`,
 	} {
 		if !strings.Contains(frames, required) {
@@ -250,10 +268,13 @@ func TestDeliverCodexMessageSteersInProgressTurn(t *testing.T) {
 	if strings.Contains(frames, `"jsonrpc"`) {
 		t.Fatalf("frames must omit the jsonrpc header on the wire: %s", frames)
 	}
-	if strings.Contains(frames, `"includeTurns":true`) {
-		t.Fatalf("paginated turn page succeeded; full history must not be loaded: %s", frames)
+	if strings.Contains(frames, `"method":"thread/turns/list"`) {
+		t.Fatalf("turn discovery must use only the stable thread/read schema: %s", frames)
 	}
-	order := []string{`"method":"initialize"`, `"method":"initialized"`, `"method":"thread/read"`, `"method":"thread/turns/list"`, `"method":"turn/steer"`}
+	if got := strings.Count(frames, `"method":"thread/read"`); got != 1 {
+		t.Fatalf("thread/read calls=%d want exactly 1: %s", got, frames)
+	}
+	order := []string{`"method":"initialize"`, `"method":"initialized"`, `"method":"thread/read"`, `"method":"turn/steer"`}
 	last := -1
 	for _, step := range order {
 		index := strings.Index(frames, step)
@@ -282,6 +303,41 @@ func TestDeliverCodexMessageBusLevelIgnoresLegacyProcessMode(t *testing.T) {
 	}
 }
 
+func TestDeliverCodexMessageTransportFailuresFallBackToExactQueue(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T)
+	}{
+		{"daemon start", func(t *testing.T) { t.Setenv("PAIMOS_TEST_DAEMON_FAIL", "1") }},
+		{"initialize", func(t *testing.T) {
+			t.Setenv("PAIMOS_TEST_INITIALIZE", `{"error":{"code":-32603,"message":"initialize failed"}}`)
+		}},
+		{"thread read", func(t *testing.T) {
+			t.Setenv("PAIMOS_TEST_THREAD_READ", `{"error":{"code":-32603,"message":"read failed"}}`)
+		}},
+		{"turn steer transport", func(t *testing.T) {
+			t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-live","status":"inProgress"}]`)
+			t.Setenv("PAIMOS_TEST_CLOSE_ON", "turn/steer")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argsFile, _ := installFakeCodexAppServer(t)
+			tc.setup(t)
+			outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-transport"), "transport payload", "ignored", "queue")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome.EffectiveLevel != "simple" || outcome.FallbackReason != "transport_error" {
+				t.Fatalf("outcome=%#v want simple/transport_error", outcome)
+			}
+			args, _ := os.ReadFile(argsFile)
+			if !strings.Contains(string(args), "queue\n--thread\nthread-transport\n--message\ntransport payload\n") {
+				t.Fatalf("exact queue argv missing: %q", args)
+			}
+		})
+	}
+}
+
 func TestDeliverCodexMessageFallsBackToQueueWhenIdle(t *testing.T) {
 	for _, status := range []string{"idle", "notLoaded"} {
 		t.Run(status, func(t *testing.T) {
@@ -299,7 +355,10 @@ func TestDeliverCodexMessageFallsBackToQueueWhenIdle(t *testing.T) {
 				t.Fatalf("queue argv missing: %q", args)
 			}
 			frames := readFrames(t, framesFile)
-			for _, forbidden := range []string{`"method":"thread/turns/list"`, `"includeTurns":true`, `"method":"turn/steer"`} {
+			if !strings.Contains(frames, `"includeTurns":true`) {
+				t.Fatalf("thread discovery must use includeTurns even for an inactive result: %s", frames)
+			}
+			for _, forbidden := range []string{`"method":"thread/turns/list"`, `"method":"turn/steer"`} {
 				if strings.Contains(frames, forbidden) {
 					t.Fatalf("an inactive thread must not pay for %s: %s", forbidden, frames)
 				}
@@ -310,7 +369,7 @@ func TestDeliverCodexMessageFallsBackToQueueWhenIdle(t *testing.T) {
 
 func TestDeliverCodexMessageActiveThreadWithoutInProgressTurnFallsBackToQueue(t *testing.T) {
 	argsFile, _ := installFakeCodexAppServer(t)
-	t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"result":{"data":[{"id":"turn-old","status":"completed"}]}}`)
+	t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-old","status":"completed"}]`)
 	outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-settling"), "settling payload", "ignored", "queue")
 	if err != nil {
 		t.Fatal(err)
@@ -321,38 +380,6 @@ func TestDeliverCodexMessageActiveThreadWithoutInProgressTurnFallsBackToQueue(t 
 	args, _ := os.ReadFile(argsFile)
 	if !strings.Contains(string(args), "queue\n--thread\nthread-settling\n--message\nsettling payload\n") {
 		t.Fatalf("queue argv missing: %q", args)
-	}
-}
-
-func TestDeliverCodexMessageFallsBackToFullHistoryWhenTurnPageIsGated(t *testing.T) {
-	for _, tc := range []struct{ name, rejection string }{
-		{"0.150 experimentalApi gate", `{"code":-32600,"message":"thread/turns/list requires experimentalApi capability"}`},
-		{"method absent on this app-server", "{\"code\":-32600,\"message\":\"Invalid request: unknown variant `thread/turns/list`, expected one of `initialize`\"}"},
-		{"standard method not found", `{"code":-32601,"message":"Method not found"}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			argsFile, framesFile := installFakeCodexAppServer(t)
-			t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"error":`+tc.rejection+`}`)
-			t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-old","status":"completed"},{"id":"turn-live","status":"inProgress"}]`)
-			t.Setenv("PAIMOS_TEST_STEER", `{"result":{"turnId":"turn-live"}}`)
-			outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-gated"), "gated payload", "ignored", "queue")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if outcome.EffectiveLevel != "steer" || outcome.FallbackReason != "" {
-				t.Fatalf("outcome=%#v", outcome)
-			}
-			args, _ := os.ReadFile(argsFile)
-			if strings.Contains(string(args), "queue\n") {
-				t.Fatalf("successful steer unexpectedly queued: %q", args)
-			}
-			frames := readFrames(t, framesFile)
-			for _, required := range []string{`"method":"thread/turns/list"`, `"includeTurns":true`, `"expectedTurnId":"turn-live"`} {
-				if !strings.Contains(frames, required) {
-					t.Fatalf("frames missing %s: %s", required, frames)
-				}
-			}
-		})
 	}
 }
 
@@ -378,7 +405,7 @@ func TestDeliverCodexMessageFallsBackOnDocumentedSteerRejections(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argsFile, _ := installFakeCodexAppServer(t)
-			t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"result":{"data":[{"id":"turn-raced","status":"inProgress"}]}}`)
+			t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-raced","status":"inProgress"}]`)
 			t.Setenv("PAIMOS_TEST_STEER", `{"error":`+tc.rejection+`}`)
 			outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-raced"), "raced payload", "ignored", "queue")
 			if err != nil {
@@ -411,7 +438,7 @@ func TestDeliverCodexMessageUnknownSteerRejectionFailsWithoutQueue(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argsFile, _ := installFakeCodexAppServer(t)
-			t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"result":{"data":[{"id":"turn-live","status":"inProgress"}]}}`)
+			t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-live","status":"inProgress"}]`)
 			t.Setenv("PAIMOS_TEST_STEER", `{"error":`+tc.rejection+`}`)
 			outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-broken"), "broken payload", "ignored", "queue")
 			if err == nil {
@@ -432,34 +459,12 @@ func TestDeliverCodexMessageUnknownSteerRejectionFailsWithoutQueue(t *testing.T)
 	}
 }
 
-// A turn-page rejection that is not the documented gate must surface instead
-// of silently loading the full history or queueing. (The classifier tables
-// themselves live with the transport in the harness package.)
-func TestDeliverCodexMessageTurnPageRejectionOtherThanGatingFails(t *testing.T) {
-	argsFile, framesFile := installFakeCodexAppServer(t)
-	t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"error":{"code":-32600,"message":"Invalid request: invalid type: string \"x\", expected u32"}}`)
-	_, err := deliverCodexMessage(context.Background(), steerMessage("thread-vanished"), "vanished payload", "ignored", "queue")
-	if err == nil || !strings.Contains(err.Error(), "list Codex thread turns") || !strings.Contains(err.Error(), "Invalid request") {
-		t.Fatalf("error=%v want the turn page rejection surfaced", err)
-	}
-	args, _ := os.ReadFile(argsFile)
-	if strings.Contains(string(args), "queue\n") {
-		t.Fatalf("turn page rejection must not fall back to codex queue: %q", args)
-	}
-	frames := readFrames(t, framesFile)
-	for _, forbidden := range []string{`"includeTurns":true`, `"method":"turn/steer"`} {
-		if strings.Contains(frames, forbidden) {
-			t.Fatalf("turn page rejection must not continue with %s: %s", forbidden, frames)
-		}
-	}
-}
-
 // runListen must not complete the delivery row when the steer primitive is
 // broken: the row stays open for a retry and the receiver cursor does not
 // advance past the undelivered message.
 func TestRunListenUnknownSteerRejectionKeepsDeliveryOpen(t *testing.T) {
 	argsFile, _ := installFakeCodexAppServer(t)
-	t.Setenv("PAIMOS_TEST_TURNS_LIST", `{"result":{"data":[{"id":"turn-live","status":"inProgress"}]}}`)
+	t.Setenv("PAIMOS_TEST_THREAD_TURNS", `[{"id":"turn-live","status":"inProgress"}]`)
 	t.Setenv("PAIMOS_TEST_STEER", `{"error":{"code":-32601,"message":"Method not found"}}`)
 	message := steerMessage("thread-broken")
 	message.Cursor, message.MessageID = 7, "m-broken"
@@ -507,32 +512,26 @@ func TestDeliverCodexSteerRequiresTarget(t *testing.T) {
 	}
 }
 
-func TestDeliverCodexSteerSilentProxyFailsPreciselyWithinBudget(t *testing.T) {
-	_, _ = installFakeCodexAppServer(t)
+func TestDeliverCodexSteerSilentProxyFallsBackPreciselyWithinBudget(t *testing.T) {
+	argsFile, _ := installFakeCodexAppServer(t)
 	t.Setenv("PAIMOS_TEST_SCENARIO", "hang")
 	previous := harnessplugin.CodexSteerTimeout
 	harnessplugin.CodexSteerTimeout = 2 * time.Second
 	t.Cleanup(func() { harnessplugin.CodexSteerTimeout = previous })
 	started := time.Now()
-	steered, reason, err := deliverCodexSteer(context.Background(), "hang payload", "thread-hang")
+	outcome, err := deliverCodexMessage(context.Background(), steerMessage("thread-hang"), "hang payload", "ignored", "queue")
 	elapsed := time.Since(started)
-	if steered || reason != "" {
-		t.Fatalf("steered=%v reason=%q on a silent proxy", steered, reason)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var timeout *harnessplugin.CodexProxyTimeoutError
-	if !errors.As(err, &timeout) {
-		t.Fatalf("error=%#v want a typed proxy timeout", err)
+	if outcome.EffectiveLevel != "simple" || outcome.FallbackReason != "transport_error" {
+		t.Fatalf("outcome=%#v on a silent proxy", outcome)
 	}
-	for _, required := range []string{"no response to websocket handshake within 2s", "WebSocket byte pipe", "codex cli=0.149.1-fake app-server=0.150.1-fake"} {
-		if !strings.Contains(err.Error(), required) {
-			t.Fatalf("error=%q missing %q", err, required)
-		}
+	args, _ := os.ReadFile(argsFile)
+	if !strings.Contains(string(args), "queue\n--thread\nthread-hang\n--message\nhang payload\n") {
+		t.Fatalf("exact queue argv missing after proxy timeout: %q", args)
 	}
 	if elapsed > 8*time.Second {
 		t.Fatalf("silent proxy took %s; the budget plus reap delay must bound it", elapsed)
-	}
-	var unavailable *adapterUnavailableError
-	if errors.As(err, &unavailable) {
-		t.Fatalf("a transport timeout must stay retryable, got adapter unavailable: %v", err)
 	}
 }

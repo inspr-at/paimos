@@ -36,7 +36,8 @@ func (CodexPlugin) ValidateTarget(_ context.Context, ref string) error {
 // Deliver runs the exact documented primitives: `codex queue --thread` for a
 // simple request, and for a steer request the app-server `turn/steer`
 // sequence in codex_app_server.go with the exact queue primitive as the
-// documented fallback for idle, not-loaded, raced, and not-steerable turns.
+// documented fallback for idle, not-loaded, raced, not-steerable, and
+// app-server transport-failure outcomes.
 func (p CodexPlugin) Deliver(ctx context.Context, req DeliverRequest) (DeliverResult, error) {
 	target := strings.TrimSpace(req.TargetRef)
 	if target == "" {

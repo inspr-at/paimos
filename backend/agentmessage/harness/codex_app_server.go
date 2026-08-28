@@ -39,19 +39,15 @@ import (
 var CodexSteerTimeout = 20 * time.Second
 
 // codexProxyMaxPayloadBytes caps one inbound frame. The stable
-// `thread/read {includeTurns:true}` fallback returns the whole thread history
-// in a single frame, which is tens of megabytes for a long gauntlet thread.
+// `thread/read {includeTurns:true}` returns the whole thread history in a
+// single frame, which is tens of megabytes for a long gauntlet thread.
 const codexProxyMaxPayloadBytes = 512 << 20
 
 const codexProxyReapDelay = 2 * time.Second
 
 // codexRPCInvalidRequest is the JSON-RPC code the app-server uses for its
-// documented request rejections (`invalid_request` in codex-rs); the
-// standard method-not-found code is what a server without a method returns.
-const (
-	codexRPCInvalidRequest = -32600
-	codexRPCMethodNotFound = -32601
-)
+// documented request rejections (`invalid_request` in codex-rs).
+const codexRPCInvalidRequest = -32600
 
 type codexRPCError struct {
 	Code    int             `json:"code"`
@@ -81,7 +77,8 @@ type codexTurn struct {
 // CodexProxyTimeoutError names the wire phase that produced no answer within
 // the steer budget so an operator can tell a dead daemon from a wrong
 // framing assumption. It is a transport failure, not an UNSUPPORTED
-// primitive, so deliveries stay retryable.
+// primitive. The delivery layer reports it and degrades to the exact queue
+// primitive with fallback_reason=transport_error.
 type CodexProxyTimeoutError struct {
 	Phase   string
 	Timeout time.Duration
@@ -285,11 +282,8 @@ func (s *codexAppServerSession) call(ctx context.Context, method string, params 
 
 // activeTurn returns the id of the turn currently in progress on the thread,
 // or "" plus the typed simple-fallback reason when nothing steerable is
-// running in this daemon. The cheap `thread/read` status check runs first;
-// only an active thread pays for turn discovery, which prefers the paginated
-// `thread/turns/list` page and falls back to the stable full-history
-// `thread/read {includeTurns:true}` when the daemon rejects the paginated
-// method (0.150.x gates it behind the experimentalApi capability).
+// running in this daemon. The stable `thread/read {includeTurns:true}` schema
+// is the only turn-discovery call; the latest nonempty in-progress turn wins.
 func (s *codexAppServerSession) activeTurn(ctx context.Context, threadID string) (string, string, error) {
 	type threadRead struct {
 		Thread struct {
@@ -299,36 +293,16 @@ func (s *codexAppServerSession) activeTurn(ctx context.Context, threadID string)
 			Turns []codexTurn `json:"turns"`
 		} `json:"thread"`
 	}
-	var status threadRead
-	if err := s.call(ctx, "thread/read", map[string]any{"threadId": threadID}, &status); err != nil {
+	var history threadRead
+	if err := s.call(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": true}, &history); err != nil {
 		return "", "", fmt.Errorf("read Codex thread: %w", err)
 	}
-	if status.Thread.Status.Type != "active" {
+	if history.Thread.Status.Type != "active" {
 		return "", "idle", nil
 	}
-	var turns []codexTurn
-	var page struct {
-		Data []codexTurn `json:"data"`
-	}
-	err := s.call(ctx, "thread/turns/list", map[string]any{
-		"threadId": threadID, "limit": 1, "sortDirection": "desc", "itemsView": "notLoaded",
-	}, &page)
-	var remote *codexRPCError
-	switch {
-	case err == nil:
-		turns = page.Data
-	case errors.As(err, &remote) && codexTurnPageUnavailable(remote):
-		var history threadRead
-		if err := s.call(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": true}, &history); err != nil {
-			return "", "", fmt.Errorf("read Codex thread turns: %w", err)
-		}
-		turns = history.Thread.Turns
-	default:
-		return "", "", fmt.Errorf("list Codex thread turns: %w", err)
-	}
-	for index := len(turns) - 1; index >= 0; index-- {
-		if turns[index].Status == "inProgress" && turns[index].ID != "" {
-			return turns[index].ID, "", nil
+	for index := len(history.Thread.Turns) - 1; index >= 0; index-- {
+		if history.Thread.Turns[index].Status == "inProgress" && history.Thread.Turns[index].ID != "" {
+			return history.Thread.Turns[index].ID, "", nil
 		}
 	}
 	return "", "idle", nil
@@ -392,24 +366,6 @@ func classifyCodexSteerRejection(err *codexRPCError) (string, bool) {
 	return "", false
 }
 
-// codexTurnPageUnavailable reports whether a `thread/turns/list` rejection
-// means the paginated page is simply not available on this app-server, so the
-// stable `thread/read {includeTurns:true}` history is the documented
-// alternative: the 0.150.x experimentalApi gate, an app-server that does not
-// implement the method, or the standard method-not-found code. Any other
-// rejection (bad thread id, malformed params, internal error) must fail.
-func codexTurnPageUnavailable(err *codexRPCError) bool {
-	if err == nil {
-		return false
-	}
-	if err.Code == codexRPCMethodNotFound {
-		return true
-	}
-	message := err.Message
-	return strings.Contains(message, "requires experimentalApi capability") ||
-		strings.Contains(message, "unknown variant `thread/turns/list`")
-}
-
 // codexTimeout builds the precise timeout error for a blocking phase and
 // attaches the daemon/CLI version pair when the vendor CLI can report it.
 func codexTimeout(path, phase string) error {
@@ -442,9 +398,10 @@ func describeCodexDaemon(path string) string {
 // initialized, active-turn discovery, then `turn/steer` with the required
 // expectedTurnId and typed text input. A clean idle thread or a documented
 // rejection (not steerable, expected-turn race, turn finished first) is
-// returned as a typed simple-fallback decision; transport and handshake
-// failures and every undocumented rejection remain retryable errors so a
-// broken primitive is never masked by the queue fallback.
+// returned as a typed simple-fallback decision. Transport failures in the
+// daemon/proxy/RPC path also degrade to the exact queue primitive with the
+// truthful `transport_error` reason. Undocumented remote rejections remain
+// retryable errors so a broken request contract is never masked.
 func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Writer, clientVersion string) (bool, string, error) {
 	stderr = writerOrDiscard(stderr)
 	if strings.TrimSpace(target) == "" {
@@ -458,12 +415,12 @@ func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Write
 	defer cancel()
 	session, err := openCodexAppServerSession(operationCtx, path, stderr, clientVersion)
 	if err != nil {
-		return false, "", err
+		return codexTransportFallback(stderr, "app-server session", err)
 	}
 	defer session.close()
 	turnID, reason, err := session.activeTurn(operationCtx, target)
 	if err != nil {
-		return false, "", err
+		return codexTransportFallback(stderr, "thread/read", err)
 	}
 	if turnID == "" {
 		fmt.Fprintf(stderr, "codex: no steerable turn in progress; delivering as simple via codex queue (fallback_reason=%s)\n", reason)
@@ -490,10 +447,15 @@ func DeliverCodexSteer(ctx context.Context, body, target string, stderr io.Write
 			// so the delivery fails and stays undelivered for a retry.
 			return false, "", fmt.Errorf("steer Codex turn (expected turn %s): unexpected app-server rejection: %w", turnID, remote)
 		}
-		return false, "", fmt.Errorf("steer Codex turn: %w", err)
+		return codexTransportFallback(stderr, "turn/steer", err)
 	}
 	// Evidence for operators: the turn that accepted the input is the exact
 	// expected-turn precondition the daemon verified. No body is echoed.
 	fmt.Fprintf(stderr, "codex: turn/steer accepted by turn %s (expected turn %s)\n", steered.TurnID, turnID)
 	return true, "", nil
+}
+
+func codexTransportFallback(stderr io.Writer, phase string, err error) (bool, string, error) {
+	fmt.Fprintf(stderr, "codex: %s failed (%v); delivering as simple via codex queue (fallback_reason=transport_error)\n", phase, err)
+	return false, "transport_error", nil
 }

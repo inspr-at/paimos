@@ -97,6 +97,24 @@ func TestRegistrySimplePluginSteerFailsClosed(t *testing.T) {
 	}
 }
 
+func TestRegistryAcceptsTransportFallbackReason(t *testing.T) {
+	registry := NewRegistry()
+	plugin := fakePlugin{name: "transport_fallback", kind: "fake_ref", maximum: LevelSteer, mode: ModeLocal}
+	plugin.deliver = func(context.Context, DeliverRequest) (DeliverResult, error) {
+		return DeliverResult{EffectiveLevel: LevelSimple, FallbackReason: "transport_error"}, nil
+	}
+	if err := registry.Register(plugin); err != nil {
+		t.Fatal(err)
+	}
+	result, err := registry.Deliver(context.Background(), plugin.Name(), DeliverRequest{Level: LevelSteer, TargetRef: "opaque-ref"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.EffectiveLevel != LevelSimple || result.FallbackReason != "transport_error" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
 func TestRegistryRejectsMalformedHostilePlugins(t *testing.T) {
 	registry := NewRegistry()
 	if err := registry.Register(fakePlugin{kind: "fake_ref", maximum: LevelSimple, mode: ModeLocal}); err == nil {

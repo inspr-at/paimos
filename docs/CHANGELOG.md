@@ -29,6 +29,19 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   records. A positive probe is reselected inside the existing transaction, so
   FIFO leasing, retries, and exactly-once handoff remain atomic.
 
+### Fixed — Stable Codex steer discovery and fallback (PAI-840)
+
+- Codex steer delivery now discovers turns with exactly one documented
+  `thread/read {threadId,includeTurns:true}` request, selects the latest
+  nonempty `inProgress` turn, and sends the schema-required `turn/steer`
+  request with its exact `expectedTurnId`. It no longer depends on the gated
+  `thread/turns/list` method.
+- Daemon, proxy, initialize, thread-read, and steer transport failures now
+  degrade safely to the exact `codex queue --thread … --message …` primitive
+  with `fallback_reason=transport_error`. RPC attempts remain bounded and
+  response-ID matched; undocumented remote `turn/steer` rejections still fail
+  closed so request drift cannot masquerade as a successful queue fallback.
+
 ## [5.19.0] — 2026-08-28
 
 ### Added — Week and project hours views (PAI-830)

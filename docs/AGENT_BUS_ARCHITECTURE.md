@@ -220,7 +220,7 @@ Conceptual `agent_message_deliveries` fields:
 | `requested_level` | Immutable copy of the message level |
 | `effective_level` | `simple` or `steer` actually used; set on success |
 | `state` | `pending`, `leased`, `retry`, `blocked`, `handed_off`, or `dead` |
-| `fallback_reason` | Typed reason such as `idle`, `unsupported`, `policy_capped`, `target_missing`, `not_steerable` |
+| `fallback_reason` | Typed reason such as `idle`, `unsupported`, `policy_capped`, `target_missing`, `not_steerable`, `transport_error` |
 | `attempt_count`, `next_attempt_at`, `lease_until` | Retry and competing-worker control |
 | `last_error_code` | Typed and redacted; never vendor output or credentials |
 | `handed_off_at` | Successful vendor handoff time |
@@ -341,11 +341,12 @@ priority.
 | `steer`, Codex target, latest turn is `inProgress` and steerable | Use `turn/steer`; record effective `steer` |
 | `steer`, Codex thread is idle or has no `inProgress` turn | Use `codex queue`; reason `idle` |
 | `steer`, Codex returns `activeTurnNotSteerable` or the expected turn races | Use `codex queue`; reason `not_steerable` |
+| `steer`, Codex daemon/proxy/initialize/read/steer transport fails | Use `codex queue`; reason `transport_error` |
 | `steer`, receiver policy has `maximum_level=simple` | Use the configured simple target; reason `policy_capped` |
 | `steer`, adapter has no steer primitive | Use its supported simple primitive; reason `unsupported` |
 | `steer`, no thread target, but a distinct simple target is configured | Use that simple target; reason `target_missing` |
 | Any level with no usable simple target | Leave unacknowledged and `blocked`; do not invent a target or command |
-| Any transient transport failure | Leave unacknowledged and retry the same delivery |
+| Any other transient transport failure | Leave unacknowledged and retry the same delivery |
 
 For Codex, simple fallback still requires a valid Codex thread target. If
 neither the requested target nor a configured default exists, queueing is
@@ -406,12 +407,8 @@ sequenceDiagram
     W->>X: initialize {clientInfo, capabilities:{experimentalApi:true}}
     X-->>W: initialize result
     W->>X: initialized
-    W->>X: thread/read {threadId}
-    X-->>W: thread.status
-    alt status is active
-        W->>X: thread/turns/list {threadId, limit:1, sortDirection:desc}
-        X-->>W: latest turn (or thread/read {includeTurns:true} when the page is rejected)
-    end
+    W->>X: thread/read {threadId, includeTurns:true}
+    X-->>W: thread.status and turns
     alt latest usable status is inProgress
         W->>X: turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}
         alt success
@@ -422,6 +419,9 @@ sequenceDiagram
             Q-->>W: exit 0
         end
     else no inProgress turn
+        W->>Q: codex queue --thread THREAD --message TEXT
+        Q-->>W: exit 0
+    else daemon, proxy, initialize, read, or steer transport error
         W->>Q: codex queue --thread THREAD --message TEXT
         Q-->>W: exit 0
     end
@@ -555,7 +555,7 @@ CLI or socket frame.
 | Receiver | Level | Allowed vendor primitive | Current | Target and fallback |
 |---|---|---|---|---|
 | Codex | `simple` | `codex queue --thread <THREAD> --message <TEXT>` | Implemented by `listen --deliver codex`; mode is process-wide | Supported. `<THREAD>` is a Codex rollout/session UUID or exact session name, never a Cursor chat UUID |
-| Codex | `steer` | Start daemon with `codex app-server daemon start`; worker runs `codex app-server proxy`, whose proxied stream carries the WebSocket HTTP Upgrade handshake and one JSON-RPC message per text frame; performs `initialize` (`capabilities.experimentalApi=true`) + `initialized`, reads `thread/read {threadId}` status, resolves the latest turn of an `active` thread via `thread/turns/list` (or `thread/read {includeTurns:true}`) and calls `turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}` only for an `inProgress` turn | Implemented (PAI-825 follow-up; 5.17.3–5.18.0 wrote JSON lines into the proxy and never got an `initialize` answer) | Supported. Idle, not loaded, race, or not-steerable falls back to the exact queue primitive; any other `turn/steer` rejection (unknown method, request-shape drift, sub-agent ownership, internal error) fails the delivery instead of queueing |
+| Codex | `steer` | Start daemon with `codex app-server daemon start`; worker runs `codex app-server proxy`, whose proxied stream carries the WebSocket HTTP Upgrade handshake and one JSON-RPC message per text frame; performs `initialize` (`capabilities.experimentalApi=true`) + `initialized`, reads exactly one `thread/read {threadId,includeTurns:true}`, selects the latest nonempty `inProgress` turn, and calls `turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}` | Implemented (PAI-825 follow-up; 5.17.3–5.18.0 wrote JSON lines into the proxy and never got an `initialize` answer) | Supported. Idle, not loaded, race, not-steerable, and app-server transport failure fall back to the exact queue primitive; any other `turn/steer` rejection (unknown method, request-shape drift, sub-agent ownership, internal error) fails the delivery instead of queueing |
 | Claude local | `simple` | `claude -p --resume <session_id>` or `claude -p --cloud <session_id>` | Implemented by `listen --deliver claude` from a receiver-owned `claude_resume` / `claude_session` target; framed body over stdin, zero exit is handoff, completed through `delivery-complete` | Supported. A local UUID resumes an idle session; a `session_…`/`cse_…` id queues a cloud follow-up |
 | Claude Channels | `simple` | MCP `notifications/claude/channel`; session opts in with `--channels` or `--dangerously-load-development-channels` | Research-preview channel path under `paimos serve --mcp-stdio --channel-as`; leases `claude_channel` targets and completes each push | Supported simple push when explicitly enabled; successful JSON-RPC write is handoff |
 | Claude | `steer` | **UNSUPPORTED** | Falls back to the selected simple primitive with `fallback_reason=unsupported`; Claude targets are fixed to `maximum_level=simple` | Fall back to a configured simple resume/cloud or Channels target; otherwise remain blocked |

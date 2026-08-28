@@ -302,7 +302,7 @@ func (r *Registry) Deliver(ctx context.Context, name string, req DeliverRequest)
 	if plugin.MaximumLevel() == LevelSimple && req.Level == LevelSteer && result.FallbackReason == "" {
 		result.FallbackReason = "unsupported"
 	}
-	validFallback := map[string]bool{"": true, "unsupported": true, "policy_capped": true, "idle": true, "not_steerable": true, "target_missing": true}
+	validFallback := map[string]bool{"": true, "unsupported": true, "policy_capped": true, "idle": true, "not_steerable": true, "target_missing": true, "transport_error": true}
 	if !validFallback[result.FallbackReason] {
 		return DeliverResult{}, &Error{Code: CodeUnsupported, Message: "adapter returned an unsupported fallback reason"}
 	}

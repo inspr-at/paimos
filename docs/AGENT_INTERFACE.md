@@ -58,16 +58,16 @@ app-server daemon and connects only through `codex app-server proxy`. That
 proxied stream is a WebSocket byte pipe to the daemon's control socket, so the
 worker performs the HTTP Upgrade handshake and sends one JSON-RPC message per
 text frame (no `jsonrpc` header on the wire): `initialize` with
-`capabilities.experimentalApi=true`, `initialized`, `thread/read` for the
-thread status, then, only for an `active` thread, the latest turn via
-`thread/turns/list` (falling back to `thread/read {includeTurns:true}` when the
-daemon rejects the paginated page), and `turn/steer` with the required
-`expectedTurnId` only when that turn is `inProgress`. Idle, not-loaded,
-policy-capped, raced, and `activeTurnNotSteerable` cases use the exact queue
-fallback; any other `turn/steer` rejection (unknown method, request-shape
-drift, sub-agent ownership, internal error) fails the delivery instead of
-queueing, and a silent proxy fails within the steer budget with the
-daemon/CLI versions and kills the whole proxy process group. Claude delivery
+`capabilities.experimentalApi=true`, `initialized`, exactly one
+`thread/read {threadId,includeTurns:true}`, and `turn/steer` with the required
+`expectedTurnId` only for the latest nonempty `inProgress` turn. Idle,
+not-loaded, policy-capped, raced, and `activeTurnNotSteerable` cases use the
+exact queue fallback. Daemon, proxy, initialize, thread-read, and steer
+transport failures also use that queue with `fallback_reason=transport_error`;
+the steer budget still bounds a silent proxy and kills its whole process
+group. Any other `turn/steer` rejection (unknown method, request-shape drift,
+sub-agent ownership, internal error) fails the delivery instead of queueing.
+Claude delivery
 is simple-only and uses two documented print-mode primitives: a local session
 UUID target runs `claude -p --resume <session_id>` as a new turn, and a
 `session_…`/`cse_…` cloud target runs `claude -p --cloud <session_id>` as a

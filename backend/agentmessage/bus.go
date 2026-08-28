@@ -399,7 +399,7 @@ func (s *Service) CompleteLocalDelivery(ctx context.Context, in CompleteDelivery
 	if in.EffectiveLevel != "simple" && in.EffectiveLevel != "steer" {
 		return nil, coded("agent_message_effective_level_invalid", "effective_level must be simple or steer")
 	}
-	validReason := map[string]bool{"": true, "idle": true, "unsupported": true, "policy_capped": true, "target_missing": true, "not_steerable": true}
+	validReason := map[string]bool{"": true, "idle": true, "unsupported": true, "policy_capped": true, "target_missing": true, "not_steerable": true, "transport_error": true}
 	if !validReason[in.FallbackReason] {
 		return nil, coded("agent_message_fallback_reason_invalid", "fallback_reason is not recognized")
 	}

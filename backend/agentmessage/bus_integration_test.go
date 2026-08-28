@@ -167,6 +167,43 @@ func TestBusCodexTargetIdempotencyLeaseAndCompletion(t *testing.T) {
 	}
 }
 
+func TestBusCodexTransportFallbackCompletion(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	allowBusSender(t, service, projectID, "codex:codex")
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:codex", Adapter: "codex", TargetKind: "codex_thread",
+		TargetRef: "019d-transport-codex-thread", MaximumLevel: "steer", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	message, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "transport fallback", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.ListInbox(context.Background(), InboxInput{
+		ProjectID: projectID, Address: "codex:codex", Agent: "codex", WorkerAdapter: "codex", Limit: 10,
+	})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil {
+		t.Fatalf("page=%#v err=%v", page, err)
+	}
+	work := page.Messages[0].DeliveryWork
+	if _, err := service.CompleteLocalDelivery(context.Background(), CompleteDeliveryInput{
+		ProjectID: projectID, Address: "codex:codex", Agent: "codex", Cursor: message.Cursor,
+		DeliveryID: work.DeliveryID, EffectiveLevel: "simple", FallbackReason: "transport_error",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var state, effective, reason string
+	if err := paimosdb.DB.QueryRow(`SELECT state,effective_level,fallback_reason FROM agent_message_deliveries WHERE delivery_id=?`, work.DeliveryID).Scan(&state, &effective, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if state != "handed_off" || effective != "simple" || reason != "transport_error" {
+		t.Fatalf("state=%q effective=%q reason=%q", state, effective, reason)
+	}
+}
+
 func TestBusConcurrentIdempotencyCreatesOneMessageAndDelivery(t *testing.T) {
 	service, projectID := openBusTestDB(t)
 	allowBusSender(t, service, projectID, "codex:codex")

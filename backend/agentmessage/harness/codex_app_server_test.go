@@ -58,32 +58,7 @@ func TestClassifyCodexSteerRejection(t *testing.T) {
 	}
 }
 
-func TestCodexTurnPageUnavailable(t *testing.T) {
-	for _, tc := range []struct {
-		rejection   string
-		unavailable bool
-	}{
-		{`{"code":-32600,"message":"thread/turns/list requires experimentalApi capability"}`, true},
-		{"{\"code\":-32600,\"message\":\"Invalid request: unknown variant `thread/turns/list`, expected one of `initialize`\"}", true},
-		{`{"code":-32601,"message":"Method not found"}`, true},
-		{`{"code":-32600,"message":"Invalid request: invalid type: string \"x\", expected u32"}`, false},
-		{`{"code":-32600,"message":"thread not found: thread-missing"}`, false},
-		{`{"code":-32603,"message":"internal error"}`, false},
-	} {
-		var remote codexRPCError
-		if err := json.Unmarshal([]byte(tc.rejection), &remote); err != nil {
-			t.Fatal(err)
-		}
-		if got := codexTurnPageUnavailable(&remote); got != tc.unavailable {
-			t.Fatalf("codexTurnPageUnavailable(%s)=%v want %v", tc.rejection, got, tc.unavailable)
-		}
-	}
-	if codexTurnPageUnavailable(nil) {
-		t.Fatal("nil error must not be treated as an unavailable page")
-	}
-}
-
-func TestCodexProxyTimeoutErrorIsRetryableNotUnsupported(t *testing.T) {
+func TestCodexProxyTimeoutErrorPreservesTransportDiagnostics(t *testing.T) {
 	err := &CodexProxyTimeoutError{Phase: "websocket handshake", Timeout: 2 * time.Second, Daemon: "codex cli=x app-server=y status=running"}
 	for _, required := range []string{"no response to websocket handshake within 2s", "WebSocket byte pipe", "codex cli=x app-server=y"} {
 		if !strings.Contains(err.Error(), required) {
@@ -91,7 +66,7 @@ func TestCodexProxyTimeoutErrorIsRetryableNotUnsupported(t *testing.T) {
 		}
 	}
 	if ErrorCode(err) != "" {
-		t.Fatalf("timeout must not carry a plugin error code: %q", ErrorCode(err))
+		t.Fatalf("transport timeout must not carry a plugin error code: %q", ErrorCode(err))
 	}
 }
 
