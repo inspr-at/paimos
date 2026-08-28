@@ -4,6 +4,20 @@ import AppIcon from '@/components/AppIcon.vue'
 
 const reports = [
   {
+    id: 'weekly-hours',
+    title: 'Weekly Hours',
+    description: 'Zeitbuchungen — review and file the AISP working week for Markus and David.',
+    icon: 'clock',
+    to: '/hours/week',
+  },
+  {
+    id: 'project-hours',
+    title: 'Project Hours',
+    description: 'Projektbuchungen — read-only AISP grant evidence rolled up by issue and person.',
+    icon: 'bar-chart-3',
+    to: '/hours/project',
+  },
+  {
     id: 'lieferbericht',
     title: 'Projektbericht',
     description: 'Project report — issues grouped by epic with AR calculations, subtotals, PDF export, and acceptance workflow.',
