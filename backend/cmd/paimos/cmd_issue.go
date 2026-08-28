@@ -254,6 +254,9 @@ func renderIssuePretty(iss map[string]any) {
 	fmt.Fprintf(stdout, "  type:     %s\n", typ)
 	fmt.Fprintf(stdout, "  status:   %s\n", status)
 	fmt.Fprintf(stdout, "  priority: %s\n", priority)
+	if requestID, _ := iss["pharos_request_id"].(string); requestID != "" {
+		fmt.Fprintf(stdout, "  pharos:   %s\n", requestID)
+	}
 	if desc, _ := iss["description"].(string); desc != "" {
 		// First 160 chars — the user can go fetch the full thing with --json.
 		if len(desc) > 160 {

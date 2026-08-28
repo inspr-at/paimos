@@ -7,6 +7,20 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added — Pharos request links on work records (PAI-812)
+
+- Issues can carry one optional `pharos_request_id`, linking a need-a-host work
+  record to an opaque Pharos host-action/request ID without making Paimos a
+  provisioner or Pharos a Paimos client. REST, `paimos issue create|update`,
+  and the issue MCP tools expose the same field; an empty update clears it.
+- The link accepts only 8–128 ASCII letters, digits, hyphens, and underscores,
+  rejects secret-like material at both the application and SQLite boundaries,
+  and never performs a remote lookup. URLs, ticket prose, credentials, webhook
+  host creation, and scraped ticket-to-host automation remain out of scope.
+- Clone starts with no Pharos request link so a new work record cannot silently
+  claim the source issue's one host action. Mutation snapshots retain the field
+  so undo/redo restores intentional changes.
+
 ### Fixed — Codex steer transport (PAI-825 follow-up)
 
 - `paimos listen --deliver codex` steer delivery never reached the Codex

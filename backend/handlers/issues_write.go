@@ -33,6 +33,7 @@ import (
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/models"
+	"github.com/inspr-at/paimos/backend/pharoslink"
 )
 
 func CreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +69,7 @@ func CreateIssue(w http.ResponseWriter, r *http.Request) {
 		JiraID             string   `json:"jira_id"`
 		JiraVersion        string   `json:"jira_version"`
 		JiraText           string   `json:"jira_text"`
+		PharosRequestID    string   `json:"pharos_request_id"`
 		EstimateHours      *float64 `json:"estimate_hours"`
 		EstimateLp         *float64 `json:"estimate_lp"`
 		ArHours            *float64 `json:"ar_hours"`
@@ -89,6 +91,10 @@ func CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Type == "" {
 		body.Type = inferType(body.ParentID)
+	}
+	if err := pharoslink.ValidateRequestID(body.PharosRequestID); err != nil {
+		jsonError(w, "invalid pharos_request_id: "+err.Error(), http.StatusUnprocessableEntity)
+		return
 	}
 	for _, check := range []struct {
 		binding string
@@ -136,16 +142,16 @@ func CreateIssue(w http.ResponseWriter, r *http.Request) {
 		                   acceptance_criteria,notes,report_summary,
 		                   status,priority,
 		                   billing_type,total_budget,rate_hourly,rate_lp,
-		                   start_date,end_date,group_state,sprint_state,jira_id,jira_version,jira_text,
+		                   start_date,end_date,group_state,sprint_state,jira_id,jira_version,jira_text,pharos_request_id,
 		                   estimate_hours,estimate_lp,ar_hours,ar_lp,time_override,
 		                   color,assignee_id,created_by)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	`, projectID, nextNum, body.Type, body.Title, body.Description,
 		body.AcceptanceCriteria, body.Notes, body.ReportSummary,
 		body.Status, body.Priority,
 		body.BillingType, body.TotalBudget, body.RateHourly, body.RateLp,
 		body.StartDate, body.EndDate, body.GroupState, body.SprintState,
-		body.JiraID, body.JiraVersion, body.JiraText,
+		body.JiraID, body.JiraVersion, body.JiraText, body.PharosRequestID,
 		body.EstimateHours, body.EstimateLp, body.ArHours, body.ArLp, body.TimeOverride,
 		body.Color, body.AssigneeID, createdByID)
 	if handleDBError(w, err, "issue") {
@@ -243,6 +249,9 @@ func CloneIssue(w http.ResponseWriter, r *http.Request) {
 	// PAI-584 P6: parent_id column dropped — clone inherits the source's parent
 	// via the `parent` edge (setParentEdge below).
 	// PAI-599: cost_unit/release columns dropped — cloned as edges below.
+	// PAI-812: pharos_request_id intentionally stays at its empty default. A
+	// clone is a new work record and must not silently claim the source issue's
+	// one host-action request.
 	res, err := tx.ExecContext(r.Context(), `
 		INSERT INTO issues(project_id,issue_number,type,title,description,
 		                   acceptance_criteria,notes,report_summary,
@@ -372,6 +381,7 @@ func UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		JiraID             *string  `json:"jira_id"`
 		JiraVersion        *string  `json:"jira_version"`
 		JiraText           *string  `json:"jira_text"`
+		PharosRequestID    *string  `json:"pharos_request_id"`
 		EstimateHours      *float64 `json:"estimate_hours"`
 		EstimateLp         *float64 `json:"estimate_lp"`
 		ArHours            *float64 `json:"ar_hours"`
@@ -461,6 +471,12 @@ func UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if body.PharosRequestID != nil {
+		if err := pharoslink.ValidateRequestID(*body.PharosRequestID); err != nil {
+			jsonError(w, "invalid pharos_request_id: "+err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+	}
 	newParent := existing.ParentID
 	if parentIDPresent {
 		newParent = body.ParentID
@@ -495,6 +511,9 @@ func UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Priority != nil && *body.Priority != existing.Priority {
 			diverged = append(diverged, "priority")
+		}
+		if body.PharosRequestID != nil && ptrOrEmpty(existing.PharosRequestID) != *body.PharosRequestID {
+			diverged = append(diverged, "pharos_request_id")
 		}
 		w.Header().Set("ETag", issueETag(existing.ID, existing.UpdatedAt))
 		w.Header().Set("Content-Type", "application/json")
@@ -552,6 +571,7 @@ func UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			jira_id             = COALESCE(?, jira_id),
 			jira_version        = COALESCE(?, jira_version),
 			jira_text           = COALESCE(?, jira_text),
+			pharos_request_id   = COALESCE(?, pharos_request_id),
 			estimate_hours      = CASE WHEN ? = 1 THEN ? ELSE estimate_hours END,
 			estimate_lp         = CASE WHEN ? = 1 THEN ? ELSE estimate_lp END,
 			ar_hours            = CASE WHEN ? = 1 THEN ? ELSE ar_hours END,
@@ -571,7 +591,7 @@ func UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		rateHourlyPresent, body.RateHourly,
 		rateLpPresent, body.RateLp,
 		body.StartDate, body.EndDate, body.GroupState, body.SprintState,
-		body.JiraID, body.JiraVersion, body.JiraText,
+		body.JiraID, body.JiraVersion, body.JiraText, body.PharosRequestID,
 		estimateHoursPresent, body.EstimateHours,
 		estimateLpPresent, body.EstimateLp,
 		arHoursPresent, body.ArHours,

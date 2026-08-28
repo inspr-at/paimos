@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 157
+const latestSchemaVersion = 158
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -1525,6 +1525,47 @@ func TestMigration157AddsNullableTargetSecretCipher(t *testing.T) {
 		var count int
 		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=? AND tbl_name='agent_message_targets'`, index).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("index %s missing after M157: count=%d err=%v", index, count, err)
+		}
+	}
+}
+
+func TestMigration158AddsConstrainedPharosRequestLink(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m158-populated.db")
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 157); err != nil {
+		t.Fatalf("create exact M157 fixture: %v", err)
+	}
+	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Pharos Link','PHL')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	issue, err := database.Exec(`INSERT INTO issues(project_id,issue_number,type,title) VALUES(?,1,'ticket','Need a host')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := issue.LastInsertId()
+
+	if err := migrateThrough(database, 158); err != nil {
+		t.Fatalf("M157 to M158: %v", err)
+	}
+	var title, requestID string
+	if err := database.QueryRow(`SELECT title,pharos_request_id FROM issues WHERE id=?`, issueID).Scan(&title, &requestID); err != nil {
+		t.Fatal(err)
+	}
+	if title != "Need a host" || requestID != "" {
+		t.Fatalf("legacy issue changed: title=%q request=%q", title, requestID)
+	}
+	if _, err := database.Exec(`UPDATE issues SET pharos_request_id='pharos-create-csb1-1787912345000-1' WHERE id=?`, issueID); err != nil {
+		t.Fatalf("valid request id rejected: %v", err)
+	}
+	for _, invalid := range []string{"short", "https://pharos.invalid/request/1", "Bearer sk-secret-value", "sk_test_abcdefghijklmnopqrstuvwxyz", strings.Repeat("a", 129)} {
+		if _, err := database.Exec(`UPDATE issues SET pharos_request_id=? WHERE id=?`, invalid, issueID); err == nil {
+			t.Errorf("invalid request id %q bypassed database constraint", invalid)
 		}
 	}
 }

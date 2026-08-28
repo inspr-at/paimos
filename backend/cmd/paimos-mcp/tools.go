@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/backend/handlers"
+	"github.com/inspr-at/paimos/backend/pharoslink"
 )
 
 // Tool is the MCP-facing shape for one tool declaration: name, human
@@ -264,6 +265,7 @@ func (s *Server) tools() []Tool {
 					"description":         map[string]any{"type": "string"},
 					"acceptance_criteria": map[string]any{"type": "string"},
 					"notes":               map[string]any{"type": "string"},
+					"pharos_request_id":   map[string]any{"type": "string", "pattern": `^$|^[A-Za-z0-9_-]{8,128}$`, "description": "optional opaque Pharos host-action/request id; never a URL or secret"},
 					"parent":              map[string]any{"type": "string", "description": "parent ref (key or id)"},
 				},
 				"required": []string{"project_key", "title"},
@@ -314,6 +316,7 @@ func (s *Server) tools() []Tool {
 					"description":         map[string]any{"type": "string"},
 					"acceptance_criteria": map[string]any{"type": "string"},
 					"notes":               map[string]any{"type": "string"},
+					"pharos_request_id":   map[string]any{"type": "string", "pattern": `^$|^[A-Za-z0-9_-]{8,128}$`, "description": "opaque Pharos host-action/request id; empty clears the link"},
 				},
 				"required": []string{"ref"},
 			},
@@ -660,6 +663,12 @@ func (s *Server) toolIssueCreate(args map[string]any) (string, error) {
 			body[k] = v
 		}
 	}
+	if requestID, _ := args["pharos_request_id"].(string); requestID != "" {
+		if err := pharoslink.ValidateRequestID(requestID); err != nil {
+			return "", fmt.Errorf("pharos_request_id %w", err)
+		}
+		body["pharos_request_id"] = requestID
+	}
 	if parent, _ := args["parent"].(string); parent != "" {
 		// Resolve to numeric id via GET /api/issues/{ref}.
 		raw, err := s.client.Do("GET", "/api/issues/"+url.PathEscape(parent), nil)
@@ -888,6 +897,12 @@ func (s *Server) toolIssueUpdate(args map[string]any) (string, error) {
 			}
 			body[k] = v
 		}
+	}
+	if requestID, ok := args["pharos_request_id"].(string); ok {
+		if err := pharoslink.ValidateRequestID(requestID); err != nil {
+			return "", fmt.Errorf("pharos_request_id %w", err)
+		}
+		body["pharos_request_id"] = requestID
 	}
 	if len(body) == 0 {
 		return "", fmt.Errorf("no fields to update")

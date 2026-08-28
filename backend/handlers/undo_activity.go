@@ -623,6 +623,8 @@ func assignIssueField(target *issueMutationSnapshot, field string, value any) {
 		_ = json.Unmarshal(blob, &target.JiraVersion)
 	case "jira_text":
 		_ = json.Unmarshal(blob, &target.JiraText)
+	case "pharos_request_id":
+		_ = json.Unmarshal(blob, &target.PharosRequestID)
 	case "estimate_hours":
 		_ = json.Unmarshal(blob, &target.EstimateHours)
 	case "estimate_lp":
