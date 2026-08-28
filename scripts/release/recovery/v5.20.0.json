@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "release": "v5.20.0",
+  "pull_request": 163,
+  "approved_head": "5d8aa5876b6924b6533bd3ff6b1dfdb1e91effe2",
+  "merge_commit": "a202cb7992aef948fc1fd391bbee63f2c946400c",
+  "incident_reason": "canonical_auto_merge_immediate_merge_post_merge_request_missing"
+}
