@@ -163,6 +163,22 @@ are checked against the deterministic transformations, and the final squash
 tree must match it exactly. Local commit/tag signing configuration is disabled
 for these DCO commits and the annotated tag; CI signs the published artifacts.
 
+### Audited missing-provenance recovery
+
+The normal path still requires GitHub's protected squash auto-merge receipt. A
+merged release PR whose `autoMergeRequest` is missing remains blocked unless a
+separate reviewed change has committed an exact, value-free receipt at
+`scripts/release/recovery/v<x.y.z>.json` on current `origin/main`. The receipt
+pins the version, PR number, approved head, squash merge, and incident reason.
+
+Recovery is deliberately one-shot and fail-closed. `release.sh` accepts the
+receipt only when its exact schema and values match live GitHub PR JSON, the
+merge is a one-parent ancestor of current main with the approved head's exact
+tree, every required check on that head is successful or explicitly skipped,
+and the tag is still absent. An untracked, dirty, stale, or mismatched receipt
+has no authority. If normal auto-merge provenance exists, this exceptional path
+is not consulted.
+
 After the tag is pushed, both workflows run in parallel — total
 wall-clock is typically 8–15 minutes (Apple's notarytool dominates the
 darwin job). `scripts/release.sh` waits for both tag workflows to succeed
