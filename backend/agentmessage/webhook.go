@@ -154,30 +154,20 @@ func (d *WebhookDispatcher) leaseWebhook(ctx context.Context) (*webhookJob, erro
 	if len(serverAdapters) == 0 {
 		return nil, sql.ErrNoRows
 	}
+	// A production transaction is BEGIN IMMEDIATE. Probe through the database
+	// first so the common empty-queue poll remains a WAL reader instead of
+	// taking SQLite's sole writer slot every 250 ms. A positive probe is only a
+	// hint: the immediate transaction below re-runs the exact FIFO selector and
+	// is still the sole authority for leasing work.
+	if _, err := nextWebhookDeliveryID(ctx, d.db, d.instance, serverAdapters); err != nil {
+		return nil, err
+	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	var deliveryID string
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(serverAdapters)), ",")
-	query := `SELECT d.delivery_id FROM agent_message_deliveries d
-		JOIN agent_messages am ON am.id=d.message_row_id
-		JOIN agent_message_targets t ON t.id=` + selectedDeliveryTargetSQL + `
-		WHERE d.instance=? AND t.instance=d.instance AND t.adapter IN (` + placeholders + `)
-		AND ((d.state IN ('pending','retry') AND d.next_attempt_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		 OR (d.state='leased' AND d.lease_until<=strftime('%Y-%m-%dT%H:%M:%fZ','now')))
-		AND NOT EXISTS (
-		 SELECT 1 FROM agent_message_deliveries older JOIN agent_messages older_message ON older_message.id=older.message_row_id
-		 WHERE older.instance=d.instance AND older_message.to_address=am.to_address AND older_message.id<am.id
-		 AND older.state NOT IN ('handed_off','dead'))
-		ORDER BY am.to_address,am.id LIMIT 1`
-	queryArgs := make([]any, 0, len(serverAdapters)+1)
-	queryArgs = append(queryArgs, d.instance)
-	for _, adapter := range serverAdapters {
-		queryArgs = append(queryArgs, adapter)
-	}
-	err = tx.QueryRowContext(ctx, query, queryArgs...).Scan(&deliveryID)
+	deliveryID, err := nextWebhookDeliveryID(ctx, tx, d.instance, serverAdapters)
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +237,35 @@ func (d *WebhookDispatcher) leaseWebhook(ctx context.Context) (*webhookJob, erro
 		return nil, err
 	}
 	return &job, nil
+}
+
+type webhookDeliveryQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func nextWebhookDeliveryID(ctx context.Context, queryer webhookDeliveryQueryer, instance string, serverAdapters []string) (string, error) {
+	var deliveryID string
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(serverAdapters)), ",")
+	query := `SELECT d.delivery_id FROM agent_message_deliveries d
+		JOIN agent_messages am ON am.id=d.message_row_id
+		JOIN agent_message_targets t ON t.id=` + selectedDeliveryTargetSQL + `
+		WHERE d.instance=? AND t.instance=d.instance AND t.adapter IN (` + placeholders + `)
+		AND ((d.state IN ('pending','retry') AND d.next_attempt_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		 OR (d.state='leased' AND d.lease_until<=strftime('%Y-%m-%dT%H:%M:%fZ','now')))
+		AND NOT EXISTS (
+		 SELECT 1 FROM agent_message_deliveries older JOIN agent_messages older_message ON older_message.id=older.message_row_id
+		 WHERE older.instance=d.instance AND older_message.to_address=am.to_address AND older_message.id<am.id
+		 AND older.state NOT IN ('handed_off','dead'))
+		ORDER BY am.to_address,am.id LIMIT 1`
+	queryArgs := make([]any, 0, len(serverAdapters)+1)
+	queryArgs = append(queryArgs, instance)
+	for _, adapter := range serverAdapters {
+		queryArgs = append(queryArgs, adapter)
+	}
+	if err := queryer.QueryRowContext(ctx, query, queryArgs...).Scan(&deliveryID); err != nil {
+		return "", err
+	}
+	return deliveryID, nil
 }
 
 func (d *WebhookDispatcher) completeWebhook(ctx context.Context, wake webhookWake) error {
