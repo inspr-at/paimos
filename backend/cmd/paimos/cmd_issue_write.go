@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/inspr-at/paimos/backend/pharoslink"
 	"github.com/spf13/cobra"
 )
 
@@ -76,23 +77,24 @@ func parsePositiveInt64Flag(flagName, raw string) (int64, error) {
 // issueCreateCmd: paimos issue create --project PAI --type ticket --title "..." [flags]
 func issueCreateCmd() *cobra.Command {
 	var (
-		projectKey string
-		title      string
-		typ        string
-		status     string
-		priority   string
-		parent     string
-		assignee   string
-		costUnit   string
-		release    string
-		desc       string
-		descFile   string
-		ac         string
-		acFile     string
-		notes      string
-		notesFile  string
-		tags       []string
-		dryRun     bool
+		projectKey      string
+		title           string
+		typ             string
+		status          string
+		priority        string
+		parent          string
+		assignee        string
+		costUnit        string
+		release         string
+		pharosRequestID string
+		desc            string
+		descFile        string
+		ac              string
+		acFile          string
+		notes           string
+		notesFile       string
+		tags            []string
+		dryRun          bool
 	)
 	c := &cobra.Command{
 		Use:   "create",
@@ -115,6 +117,9 @@ Use --dry-run to print the request payload without hitting the API.`,
 			}
 			if title == "" {
 				return &usageError{msg: "--title is required"}
+			}
+			if err := pharoslink.ValidateRequestID(pharosRequestID); err != nil {
+				return &usageError{msg: "--pharos-request-id " + err.Error()}
 			}
 			tagNames, err := normalizeTagNames("tags", tags)
 			if err != nil {
@@ -176,6 +181,9 @@ Use --dry-run to print the request payload without hitting the API.`,
 			}
 			if release != "" {
 				body["release"] = release
+			}
+			if pharosRequestID != "" {
+				body["pharos_request_id"] = pharosRequestID
 			}
 			if parent != "" {
 				pid, err := resolveIssueRefToID(client, parent)
@@ -266,6 +274,7 @@ Use --dry-run to print the request payload without hitting the API.`,
 	c.Flags().StringVar(&assignee, "assignee", "", "assignee user id")
 	c.Flags().StringVar(&costUnit, "cost-unit", "", "cost unit name")
 	c.Flags().StringVar(&release, "release", "", "release name")
+	c.Flags().StringVar(&pharosRequestID, "pharos-request-id", "", "opaque Pharos host-action/request id (never a URL or secret)")
 	c.Flags().StringVar(&desc, "description", "", "inline description (multi-line ok; use --description-file for long markdown or stdin)")
 	c.Flags().StringVar(&descFile, "description-file", "", "path to markdown description (or - for stdin)")
 	c.Flags().StringVar(&ac, "ac", "", "inline acceptance criteria (multi-line ok; use --ac-file for long markdown)")
@@ -281,26 +290,27 @@ Use --dry-run to print the request payload without hitting the API.`,
 // issueUpdateCmd: paimos issue update <ref> --status done --close-note ...
 func issueUpdateCmd() *cobra.Command {
 	var (
-		title         string
-		typ           string
-		status        string
-		priority      string
-		parent        string
-		assignee      string
-		costUnit      string
-		release       string
-		desc          string
-		descFile      string
-		ac            string
-		acFile        string
-		notes         string
-		notesFile     string
-		closeNote     string
-		closeNoteFile string
-		projectMove   string
-		addTags       []string
-		removeTags    []string
-		dryRun        bool
+		title           string
+		typ             string
+		status          string
+		priority        string
+		parent          string
+		assignee        string
+		costUnit        string
+		release         string
+		pharosRequestID string
+		desc            string
+		descFile        string
+		ac              string
+		acFile          string
+		notes           string
+		notesFile       string
+		closeNote       string
+		closeNoteFile   string
+		projectMove     string
+		addTags         []string
+		removeTags      []string
+		dryRun          bool
 		// PAI-343 — opt-in lesson-capture flags. When --draft-memory
 		// is set on a terminal-status transition, the CLI will create
 		// a memory entry on the project and link it back to the
@@ -363,6 +373,12 @@ Use --dry-run to print the payload without sending.`,
 				return err
 			}
 			hasTagChanges := len(addTagNames) > 0 || len(removeTagNames) > 0
+			pharosRequestIDSet := cmd.Flags().Changed("pharos-request-id")
+			if pharosRequestIDSet {
+				if err := pharoslink.ValidateRequestID(pharosRequestID); err != nil {
+					return &usageError{msg: "--pharos-request-id " + err.Error()}
+				}
+			}
 			client, err := instanceClient()
 			if err != nil {
 				return err
@@ -373,7 +389,7 @@ Use --dry-run to print the payload without sending.`,
 			// field edits so the two concerns stay separable and reviewable.
 			if projectMove != "" {
 				if title != "" || typ != "" || status != "" || priority != "" ||
-					parent != "" || assignee != "" || costUnit != "" || release != "" ||
+					parent != "" || assignee != "" || costUnit != "" || release != "" || pharosRequestIDSet ||
 					desc != "" || descFile != "" || ac != "" || acFile != "" ||
 					notes != "" || notesFile != "" || closeNote != "" || closeNoteFile != "" ||
 					draftMemory || hasTagChanges {
@@ -449,6 +465,9 @@ Use --dry-run to print the payload without sending.`,
 			}
 			if release != "" {
 				body["release"] = release
+			}
+			if pharosRequestIDSet {
+				body["pharos_request_id"] = pharosRequestID
 			}
 			if parent != "" {
 				// Detach (parent=null) is NOT supported: the server's
@@ -603,6 +622,7 @@ Use --dry-run to print the payload without sending.`,
 	c.Flags().StringVar(&assignee, "assignee", "", "new assignee user id")
 	c.Flags().StringVar(&costUnit, "cost-unit", "", "new cost unit")
 	c.Flags().StringVar(&release, "release", "", "new release")
+	c.Flags().StringVar(&pharosRequestID, "pharos-request-id", "", "opaque Pharos host-action/request id; pass an empty string to clear")
 	c.Flags().StringVar(&desc, "description", "", "inline description")
 	c.Flags().StringVar(&descFile, "description-file", "", "path to new description (or -)")
 	c.Flags().StringVar(&ac, "ac", "", "inline acceptance criteria (multi-line ok; use --ac-file for long markdown)")

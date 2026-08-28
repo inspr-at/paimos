@@ -57,6 +57,9 @@ type Issue struct {
 	JiraID        *string  `json:"jira_id"`
 	JiraVersion   *string  `json:"jira_version"`
 	JiraText      *string  `json:"jira_text"`
+	// Optional opaque Pharos host-action/request reference. Paimos stores the
+	// work-record link only; it does not resolve or execute the request.
+	PharosRequestID *string `json:"pharos_request_id"`
 	// epic color — optional visual accent for epic badges
 	Color *string `json:"color"`
 	// sprint membership — IDs of sprints this issue belongs to (source_id in issue_relations type=sprint)

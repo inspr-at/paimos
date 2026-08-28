@@ -241,6 +241,74 @@ func TestIssueUpdateDryRun_AssigneeIDIsNumeric(t *testing.T) {
 	}
 }
 
+func TestIssuePharosRequestIDFlags(t *testing.T) {
+	t.Setenv(envURL, "https://example.test")
+	t.Setenv(envAPIKey, "test_key")
+	requestID := "pharos-create-csb1-1787912345000-1"
+
+	t.Run("create dry-run sends typed link", func(t *testing.T) {
+		out, _, err := executeCLIForTest(t, "--json", "issue", "create",
+			"--project", "PAI", "--title", "Need a host",
+			"--pharos-request-id", requestID, "--dry-run")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Body map[string]any `json:"body"`
+		}
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Body["pharos_request_id"] != requestID {
+			t.Fatalf("body=%v", got.Body)
+		}
+	})
+
+	t.Run("update empty value clears link", func(t *testing.T) {
+		out, _, err := executeCLIForTest(t, "--json", "issue", "update", "PAI-1",
+			"--pharos-request-id", "", "--dry-run")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Body map[string]any `json:"body"`
+		}
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatal(err)
+		}
+		value, present := got.Body["pharos_request_id"]
+		if !present || value != "" {
+			t.Fatalf("body=%v, want explicit empty pharos_request_id", got.Body)
+		}
+	})
+
+	t.Run("secret-like value fails before transport", func(t *testing.T) {
+		_, _, err := executeCLIForTest(t, "issue", "update", "PAI-1",
+			"--pharos-request-id", "sk_test_abcdefghijklmnopqrstuvwxyz")
+		if err == nil || !strings.Contains(err.Error(), "secret-like") {
+			t.Fatalf("err=%v, want secret-like usage error", err)
+		}
+	})
+}
+
+func TestRenderIssuePrettyShowsPharosRequestID(t *testing.T) {
+	var out bytes.Buffer
+	oldStdout := stdout
+	stdout = &out
+	t.Cleanup(func() { stdout = oldStdout })
+	renderIssuePretty(map[string]any{
+		"issue_key":         "PAI-812",
+		"title":             "Need a host",
+		"type":              "ticket",
+		"status":            "in-progress",
+		"priority":          "medium",
+		"pharos_request_id": "pharos-create-csb1-1787912345000-1",
+	})
+	if !strings.Contains(out.String(), "pharos:   pharos-create-csb1-1787912345000-1") {
+		t.Fatalf("output=%q", out.String())
+	}
+}
+
 func TestIssueUpdateCombinedRequest_AssigneeIDIsNumeric(t *testing.T) {
 	var received map[string]any
 	var handlerErr string

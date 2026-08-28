@@ -143,6 +143,7 @@ The knowledge types share the issue infrastructure — history, comments, tags, 
 | `sprint_state` | TEXT | sprint | `planned` / `active` / `complete` |
 | `jira_id` | TEXT | epic, cost_unit, sprint | External Jira ID for mapping |
 | `jira_version` | TEXT | release | External Jira version for mapping |
+| `pharos_request_id` | TEXT | any issue | Optional opaque Pharos host-action/request ID; empty means unlinked. Syntax-constrained and secret-rejecting; no remote lookup or provisioning side effect. |
 
 ### Fields that go away
 

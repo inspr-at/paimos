@@ -96,6 +96,7 @@ type issueMutationSnapshot struct {
 	JiraID             *string  `json:"jira_id"`
 	JiraVersion        *string  `json:"jira_version"`
 	JiraText           *string  `json:"jira_text"`
+	PharosRequestID    *string  `json:"pharos_request_id"`
 	EstimateHours      *float64 `json:"estimate_hours"`
 	EstimateLp         *float64 `json:"estimate_lp"`
 	ArHours            *float64 `json:"ar_hours"`
@@ -442,7 +443,7 @@ func fetchIssueMutationSnapshotTx(tx *sql.Tx, issueID int64) (issueMutationSnaps
 	var snap issueMutationSnapshot
 	var projectID sql.NullInt64
 	var parentID sql.NullInt64
-	var billingType, startDate, endDate, groupState, sprintState, jiraID, jiraVersion, jiraText, color, deletedAt, contentRevisedAt sql.NullString
+	var billingType, startDate, endDate, groupState, sprintState, jiraID, jiraVersion, jiraText, pharosRequestID, color, deletedAt, contentRevisedAt sql.NullString
 	var totalBudget, rateHourly, rateLp, estimateHours, estimateLp, arHours, arLp, timeOverride sql.NullFloat64
 	var assigneeID sql.NullInt64
 	// PAI-584 P6: parent_id column dropped — capture the parent from the
@@ -456,14 +457,14 @@ func fetchIssueMutationSnapshotTx(tx *sql.Tx, issueID int64) (issueMutationSnaps
 		       COALESCE((SELECT c.title FROM issue_relations r JOIN issues c ON c.id=r.source_id WHERE r.target_id=issues.id AND r.type='cost_unit'), ''),
 		       COALESCE((SELECT c.title FROM issue_relations r JOIN issues c ON c.id=r.source_id WHERE r.target_id=issues.id AND r.type='release'), ''),
 		       billing_type, total_budget, rate_hourly, rate_lp,
-		       start_date, end_date, group_state, sprint_state, jira_id, jira_version, jira_text,
+		       start_date, end_date, group_state, sprint_state, jira_id, jira_version, jira_text, pharos_request_id,
 		       estimate_hours, estimate_lp, ar_hours, ar_lp, time_override, color, assignee_id, deleted_at, content_revised_at
 		FROM issues WHERE id = ?
 	`, issueID).Scan(
 		&snap.ID, &projectID, &snap.Type, &parentID, &snap.Title, &snap.Description, &snap.AcceptanceCriteria, &snap.Notes,
 		&snap.ReportSummary,
 		&snap.Status, &snap.Priority, &snap.CostUnit, &snap.Release, &billingType, &totalBudget, &rateHourly, &rateLp,
-		&startDate, &endDate, &groupState, &sprintState, &jiraID, &jiraVersion, &jiraText,
+		&startDate, &endDate, &groupState, &sprintState, &jiraID, &jiraVersion, &jiraText, &pharosRequestID,
 		&estimateHours, &estimateLp, &arHours, &arLp, &timeOverride, &color, &assigneeID, &deletedAt, &contentRevisedAt,
 	)
 	if err != nil {
@@ -482,6 +483,7 @@ func fetchIssueMutationSnapshotTx(tx *sql.Tx, issueID int64) (issueMutationSnaps
 	snap.JiraID = nullStringPtr(jiraID)
 	snap.JiraVersion = nullStringPtr(jiraVersion)
 	snap.JiraText = nullStringPtr(jiraText)
+	snap.PharosRequestID = nullStringPtr(pharosRequestID)
 	snap.EstimateHours = nullFloat64Ptr(estimateHours)
 	snap.EstimateLp = nullFloat64Ptr(estimateLp)
 	snap.ArHours = nullFloat64Ptr(arHours)
@@ -644,7 +646,7 @@ func applyIssueSnapshotTx(tx *sql.Tx, issueID int64, snap issueMutationSnapshot)
 			report_summary = ?,
 			status = ?, priority = ?, billing_type = ?, total_budget = ?,
 			rate_hourly = ?, rate_lp = ?, start_date = ?, end_date = ?, group_state = ?, sprint_state = ?,
-			jira_id = ?, jira_version = ?, jira_text = ?, estimate_hours = ?, estimate_lp = ?, ar_hours = ?,
+			jira_id = ?, jira_version = ?, jira_text = ?, pharos_request_id = ?, estimate_hours = ?, estimate_lp = ?, ar_hours = ?,
 			ar_lp = ?, time_override = ?, color = ?, assignee_id = ?, deleted_at = ?, content_revised_at = ?, updated_at = ?
 		WHERE id = ?
 	`,
@@ -652,7 +654,7 @@ func applyIssueSnapshotTx(tx *sql.Tx, issueID int64, snap issueMutationSnapshot)
 		snap.ReportSummary,
 		snap.Status, snap.Priority, snap.BillingType, snap.TotalBudget,
 		snap.RateHourly, snap.RateLp, snap.StartDate, snap.EndDate, snap.GroupState, snap.SprintState,
-		snap.JiraID, snap.JiraVersion, snap.JiraText, snap.EstimateHours, snap.EstimateLp, snap.ArHours,
+		snap.JiraID, snap.JiraVersion, snap.JiraText, ptrOrEmpty(snap.PharosRequestID), snap.EstimateHours, snap.EstimateLp, snap.ArHours,
 		snap.ArLp, snap.TimeOverride, snap.Color, snap.AssigneeID, snap.DeletedAt, snap.ContentRevisedAt, time.Now().UTC().Format("2006-01-02 15:04:05"),
 		issueID,
 	)

@@ -37,7 +37,7 @@ const issueSelect = `
 	       cu_issue.id, cu_issue.title, rel_issue.id, rel_issue.title,
 	       i.billing_type, i.total_budget, i.rate_hourly, i.rate_lp,
 	       i.start_date, i.end_date, i.group_state, i.sprint_state,
-	       i.jira_id, i.jira_version, i.jira_text,
+	       i.jira_id, i.jira_version, i.jira_text, i.pharos_request_id,
 	       i.estimate_hours, i.estimate_lp, i.ar_hours, i.ar_lp,
 	       i.time_override,
 	       i.color,
@@ -101,7 +101,7 @@ const issueSelectCore = `
 	       cu_issue.id, cu_issue.title, rel_issue.id, rel_issue.title,
 	       i.billing_type, i.total_budget, i.rate_hourly, i.rate_lp,
 	       i.start_date, i.end_date, i.group_state, i.sprint_state,
-	       i.jira_id, i.jira_version, i.jira_text,
+	       i.jira_id, i.jira_version, i.jira_text, i.pharos_request_id,
 	       i.estimate_hours, i.estimate_lp, i.ar_hours, i.ar_lp,
 	       i.time_override,
 	       i.color,
@@ -166,7 +166,7 @@ func scanIssue(rows interface {
 	// v2 nullable fields — stored as empty string NOT NULL DEFAULT '' in DB;
 	// treat empty string as nil for clean JSON output.
 	var billingType, startDate, endDate, groupState, sprintState string
-	var jiraID, jiraVersion, jiraText string
+	var jiraID, jiraVersion, jiraText, pharosRequestID string
 	// PAI-599: cost_unit/release edge-sourced container id + title (nullable).
 	var cuID, relID sql.NullInt64
 	var cuTitle, relTitle sql.NullString
@@ -179,7 +179,7 @@ func scanIssue(rows interface {
 		&i.Status, &i.Priority, &cuID, &cuTitle, &relID, &relTitle,
 		&billingType, &i.TotalBudget, &i.RateHourly, &i.RateLp,
 		&startDate, &endDate, &groupState, &sprintState,
-		&jiraID, &jiraVersion, &jiraText,
+		&jiraID, &jiraVersion, &jiraText, &pharosRequestID,
 		&i.EstimateHours, &i.EstimateLp, &i.ArHours, &i.ArLp,
 		&i.TimeOverride,
 		&i.Color,
@@ -241,6 +241,9 @@ func scanIssue(rows interface {
 	}
 	if jiraText != "" {
 		i.JiraText = &jiraText
+	}
+	if pharosRequestID != "" {
+		i.PharosRequestID = &pharosRequestID
 	}
 	// PAI-599: build the edge-sourced cost_unit/release refs (nil if no edge).
 	if cuID.Valid {

@@ -346,6 +346,25 @@ EOF
 
 Mixing `--description` + `--description-file` on the same command is a hard error (exit 2). No silent preference.
 
+### Link need-a-host work to Pharos by opaque request ID
+
+Paimos remains the work record. When Pharos owns the corresponding host action,
+store only its request ID on the issue:
+
+```sh
+paimos issue update PAI-812 \
+  --pharos-request-id pharos-create-csb1-1787912345000-1
+
+# Explicitly remove the link.
+paimos issue update PAI-812 --pharos-request-id ''
+```
+
+The value is an opaque 8–128 character identifier containing only ASCII
+letters, digits, `-`, and `_`. Do not pass a URL, credential, host inventory,
+or free text. Paimos validates and stores the reference but never checks Pharos,
+creates a host, or turns a ticket into a provisioning request. REST and MCP use
+the field name `pharos_request_id` with the same semantics.
+
 ### Knowledge metadata updates are explicit
 
 `paimos knowledge update <type> <slug>` preserves existing `metadata`

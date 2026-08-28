@@ -11681,6 +11681,20 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`ALTER TABLE agent_message_targets ADD COLUMN target_secret_cipher BLOB
 			 CHECK(target_secret_cipher IS NULL OR (typeof(target_secret_cipher)='blob' AND length(target_secret_cipher)>28))`,
 		}},
+
+		// M158 / PAI-812: Paimos remains the work record while optionally
+		// linking an issue to one opaque Pharos host-action/request id. The
+		// constrained scalar cannot hold a URL, prose, or secret; no trigger or
+		// integration call is attached to it.
+		{158, []string{
+			`ALTER TABLE issues ADD COLUMN pharos_request_id TEXT NOT NULL DEFAULT ''
+			 CHECK(pharos_request_id='' OR (
+			   typeof(pharos_request_id)='text' AND
+			   length(CAST(pharos_request_id AS BLOB)) BETWEEN 8 AND 128 AND
+			   pharos_request_id NOT GLOB '*[^A-Za-z0-9_-]*' AND
+			   paimos_contains_secret_like(CAST(pharos_request_id AS BLOB))=0
+			 ))`,
+		}},
 	}
 
 	for _, m := range migrations {
