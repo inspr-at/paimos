@@ -2819,6 +2819,78 @@
         }
       }
     },
+    "/api/time-entries/week": {
+      "get": {
+        "tags": [
+          "time-entries"
+        ],
+        "summary": "Get booked hours by requested user and started-at date",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "string", "format": "date"}
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "string", "format": "date"}
+          },
+          {
+            "name": "usernames",
+            "in": "query",
+            "required": true,
+            "description": "Comma-separated usernames. Unauthorized users other than the caller are omitted.",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-user daily booked hours",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["from", "to", "users"],
+                  "properties": {
+                    "from": {"type": "string", "format": "date"},
+                    "to": {"type": "string", "format": "date"},
+                    "users": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["user_id", "username", "days"],
+                        "properties": {
+                          "user_id": {"type": "integer", "format": "int64"},
+                          "username": {"type": "string"},
+                          "days": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": ["date", "hours", "entries", "assumed"],
+                              "properties": {
+                                "date": {"type": "string", "format": "date"},
+                                "hours": {"type": "number"},
+                                "entries": {"type": "integer"},
+                                "assumed": {"type": "boolean"}
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {"description": "Invalid date range or usernames"},
+          "401": {"description": "Authentication required"}
+        }
+      }
+    },
     "/api/issues/{id}/time-entries": {
       "get": {
         "tags": [

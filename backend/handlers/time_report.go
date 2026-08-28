@@ -19,8 +19,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 )
 
@@ -38,6 +40,17 @@ const bookedHoursCaseSQL = `SUM(CASE
 	WHEN te.override IS NOT NULL THEN te.override
 	WHEN te.stopped_at IS NOT NULL THEN (julianday(te.stopped_at) - julianday(te.started_at)) * 24
 	ELSE 0 END)`
+
+const weekTimeEntriesSQL = `
+	SELECT date(te.started_at), ` + bookedHoursCaseSQL + `, COUNT(*),
+	       MAX(CASE WHEN LOWER(COALESCE(te.comment, '')) LIKE '%assumed%' THEN 1 ELSE 0 END)
+	FROM time_entries te
+	WHERE te.user_id = ?
+	  AND date(te.started_at) >= date(?)
+	  AND date(te.started_at) <= date(?)
+	GROUP BY date(te.started_at)
+	ORDER BY date(te.started_at)
+`
 
 const materialSumSQL = `SUM(COALESCE(te.material_lp, 0))`
 
@@ -75,6 +88,110 @@ type timeReportResponse struct {
 	ByUser          []timeReportUserRow  `json:"by_user"`
 	ByDay           []timeReportDayRow   `json:"by_day"`
 	ByIssue         []timeReportIssueRow `json:"by_issue"`
+}
+
+type weekTimeEntryDay struct {
+	Date    string  `json:"date"`
+	Hours   float64 `json:"hours"`
+	Entries int     `json:"entries"`
+	Assumed bool    `json:"assumed"`
+}
+
+type weekTimeEntryUser struct {
+	UserID   int64              `json:"user_id"`
+	Username string             `json:"username"`
+	Days     []weekTimeEntryDay `json:"days"`
+}
+
+type weekTimeEntriesResponse struct {
+	From  string              `json:"from"`
+	To    string              `json:"to"`
+	Users []weekTimeEntryUser `json:"users"`
+}
+
+// GetWeekTimeEntries handles the cross-project hours grid used by the weekly
+// Arbeitszeit view. Requested users other than the caller are silently omitted
+// unless the caller is an admin or has the cross-user time-entry capability.
+// Attribution and booked hours deliberately match GetProjectTimeReport.
+func GetWeekTimeEntries(w http.ResponseWriter, r *http.Request) {
+	caller := auth.GetUser(r)
+	if caller == nil {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	fromDate, fromErr := time.Parse("2006-01-02", from)
+	toDate, toErr := time.Parse("2006-01-02", to)
+	if fromErr != nil || toErr != nil || toDate.Before(fromDate) {
+		jsonError(w, "from and to must be a valid inclusive date range (YYYY-MM-DD)", http.StatusBadRequest)
+		return
+	}
+
+	rawUsernames := strings.Split(r.URL.Query().Get("usernames"), ",")
+	requested := make([]string, 0, len(rawUsernames))
+	seen := map[string]bool{}
+	for _, raw := range rawUsernames {
+		username := strings.TrimSpace(raw)
+		key := strings.ToLower(username)
+		if username == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		requested = append(requested, username)
+	}
+	if len(requested) == 0 {
+		jsonError(w, "usernames is required", http.StatusBadRequest)
+		return
+	}
+	if len(requested) > 50 {
+		jsonError(w, "too many usernames", http.StatusBadRequest)
+		return
+	}
+
+	canReadOthers := auth.IsAdmin(caller) || auth.HasCapability(r.Context(), caller, auth.CapabilityTimeEntriesWriteAny)
+	resp := weekTimeEntriesResponse{From: from, To: to, Users: []weekTimeEntryUser{}}
+	for _, requestedUsername := range requested {
+		var userID int64
+		var username string
+		err := db.DB.QueryRowContext(r.Context(), `
+			SELECT id, username FROM users
+			WHERE username = ? COLLATE NOCASE AND status = 'active'
+		`, requestedUsername).Scan(&userID, &username)
+		if err != nil || (userID != caller.ID && !canReadOthers) {
+			continue
+		}
+		resp.Users = append(resp.Users, weekTimeEntryUser{
+			UserID: userID, Username: username, Days: []weekTimeEntryDay{},
+		})
+	}
+
+	if len(resp.Users) == 0 {
+		jsonOK(w, resp)
+		return
+	}
+
+	for i := range resp.Users {
+		rows, err := db.DB.QueryContext(r.Context(), weekTimeEntriesSQL, resp.Users[i].UserID, from, to)
+		if err != nil {
+			jsonError(w, "query failed", http.StatusInternalServerError)
+			return
+		}
+		for rows.Next() {
+			var day weekTimeEntryDay
+			var assumed int
+			if err := rows.Scan(&day.Date, &day.Hours, &day.Entries, &assumed); err != nil {
+				continue
+			}
+			day.Hours = roundTo(day.Hours, 2)
+			day.Assumed = assumed == 1
+			resp.Users[i].Days = append(resp.Users[i].Days, day)
+		}
+		rows.Close()
+	}
+
+	jsonOK(w, resp)
 }
 
 // GetProjectTimeReport handles GET /api/projects/{id}/time-report?from=&to=&user=
