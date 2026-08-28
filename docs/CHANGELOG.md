@@ -5,7 +5,17 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [5.19.0] — 2026-08-28
+
+### Added — Week and project hours views (PAI-830)
+
+- Added the user-facing `/hours/week` and `/hours/project` Reporting routes. The
+  weekly grid is backed by the new authenticated `GET /api/time-entries/week`
+  endpoint, while the project view presents the existing
+  `GET /api/projects/{id}/time-report` rollup by issue and person.
+- Filing from the weekly grid reuses the existing time-entry write endpoint.
+  Only super-admins can create entries for another user; regular users and
+  non-super-admin administrators remain limited to their own hours.
 
 ### Added — Pharos request links on work records (PAI-812)
 
