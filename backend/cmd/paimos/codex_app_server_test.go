@@ -189,7 +189,11 @@ func installFakeCodexAppServer(t *testing.T) (argsFile, framesFile string) {
 	framesFile = filepath.Join(dir, "frames")
 	body := `#!/bin/sh
 printf '%s\n' "$@" >> "$PAIMOS_TEST_ARGS"
-if [ "$1" = "queue" ]; then exit 0; fi
+if [ "$1" = "queue" ]; then
+  printf '%s\n' "$PAIMOS_TEST_QUEUE_VENDOR_OUTPUT"
+  printf '%s\n' "$PAIMOS_TEST_QUEUE_VENDOR_OUTPUT" >&2
+  exit "${PAIMOS_TEST_QUEUE_EXIT:-0}"
+fi
 if [ "$1" = "app-server" ] && [ "$2" = "daemon" ] && [ "$3" = "version" ]; then
   printf '%s\n' '{"status":"running","cliVersion":"0.149.1-fake","appServerVersion":"0.150.1-fake"}'
   exit 0
@@ -224,6 +228,8 @@ exit 1
 	t.Setenv("PAIMOS_TEST_CLOSE_ON", "")
 	t.Setenv("PAIMOS_TEST_DECOY_ID", "")
 	t.Setenv("PAIMOS_TEST_VENDOR_STDERR", "")
+	t.Setenv("PAIMOS_TEST_QUEUE_VENDOR_OUTPUT", "")
+	t.Setenv("PAIMOS_TEST_QUEUE_EXIT", "")
 	t.Setenv("PAIMOS_TEST_PIDFILE", "")
 	return argsFile, framesFile
 }
@@ -341,10 +347,11 @@ func TestDeliverCodexMessageTransportFailuresFallBackToExactQueue(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argsFile, _ := installFakeCodexAppServer(t)
-			var errOut bytes.Buffer
-			oldStderr := stderr
-			stderr = &errOut
-			t.Cleanup(func() { stderr = oldStderr })
+			var out, errOut bytes.Buffer
+			oldStdout, oldStderr := stdout, stderr
+			stdout, stderr = &out, &errOut
+			t.Cleanup(func() { stdout, stderr = oldStdout, oldStderr })
+			t.Setenv("PAIMOS_TEST_QUEUE_VENDOR_OUTPUT", leakDiagnostic)
 			tc.setup(t)
 			outcome, err := deliverCodexMessage(context.Background(), steerMessage(leakTarget), leakBody, "ignored", "queue")
 			if err != nil {
@@ -363,12 +370,46 @@ func TestDeliverCodexMessageTransportFailuresFallBackToExactQueue(t *testing.T) 
 					t.Fatalf("stderr=%q missing controlled diagnostic %q", diagnostic, required)
 				}
 			}
+			combinedOutput := out.String() + diagnostic
 			for _, forbidden := range []string{leakTarget, leakBody, leakSecret} {
-				if strings.Contains(diagnostic, forbidden) {
-					t.Fatalf("stderr leaked %q: %q", forbidden, diagnostic)
+				if strings.Contains(combinedOutput, forbidden) {
+					t.Fatalf("listener output leaked %q: stdout=%q stderr=%q", forbidden, out.String(), diagnostic)
 				}
 			}
 		})
+	}
+}
+
+func TestDeliverCodexMessageQueueFailureDoesNotLeakVendorOutput(t *testing.T) {
+	const (
+		leakTarget = "fixture-encrypted-target-ref-never-log"
+		leakBody   = "Bearer-sk-body-never-log"
+		leakSecret = "sk-secret-like-never-log-abcdefghijklmnopqrstuvwxyz"
+	)
+	argsFile, _ := installFakeCodexAppServer(t)
+	var out, errOut bytes.Buffer
+	oldStdout, oldStderr := stdout, stderr
+	stdout, stderr = &out, &errOut
+	t.Cleanup(func() { stdout, stderr = oldStdout, oldStderr })
+	t.Setenv("PAIMOS_TEST_DAEMON_FAIL", "1")
+	t.Setenv("PAIMOS_TEST_QUEUE_VENDOR_OUTPUT", strings.Join([]string{leakTarget, leakBody, leakSecret}, " "))
+	t.Setenv("PAIMOS_TEST_QUEUE_EXIT", "23")
+	outcome, err := deliverCodexMessage(context.Background(), steerMessage(leakTarget), leakBody, "ignored", "queue")
+	if err == nil || outcome != nil || err.Error() != "deliver to Codex thread: exit status 23" {
+		t.Fatalf("outcome=%#v error=%v want controlled queue failure", outcome, err)
+	}
+	args, _ := os.ReadFile(argsFile)
+	if !strings.Contains(string(args), "queue\n--thread\n"+leakTarget+"\n--message\n"+leakBody+"\n") {
+		t.Fatalf("exact queue argv missing: %q", args)
+	}
+	combinedOutput := out.String() + errOut.String() + err.Error()
+	for _, forbidden := range []string{leakTarget, leakBody, leakSecret} {
+		if strings.Contains(combinedOutput, forbidden) {
+			t.Fatalf("queue failure leaked %q: stdout=%q stderr=%q error=%q", forbidden, out.String(), errOut.String(), err)
+		}
+	}
+	if !strings.Contains(errOut.String(), "fallback_reason=transport_error") {
+		t.Fatalf("stderr=%q missing controlled transport fallback", errOut.String())
 	}
 }
 

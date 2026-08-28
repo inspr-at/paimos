@@ -353,7 +353,8 @@ neither the requested target nor a configured default exists, queueing is
 impossible and the correct result is `blocked`, not a Cursor chat UUID guess.
 Codex fallback logs contain only a controlled phase and typed reason. Raw
 vendor diagnostics, target references, message bodies, and secret-like values
-are not copied into listener output.
+are not copied into listener output. Queue stdout and stderr are discarded;
+only a controlled nonzero-exit error survives a failed handoff.
 
 ## 6. Target sequences
 

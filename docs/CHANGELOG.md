@@ -43,7 +43,8 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   closed so request drift cannot masquerade as a successful queue fallback.
   Fallback diagnostics retain only the controlled phase and typed reason;
   vendor error text cannot echo target references, bodies, or secret-like
-  values into listener stderr.
+  values into listener output. Queue stdout and stderr are also discarded,
+  while a nonzero exit remains a controlled failed-handoff error.
 
 ## [5.19.0] — 2026-08-28
 

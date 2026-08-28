@@ -53,7 +53,7 @@ func (p CodexPlugin) Deliver(ctx context.Context, req DeliverRequest) (DeliverRe
 		return DeliverResult{}, err
 	}
 	if req.Level != LevelSteer {
-		return DeliverResult{EffectiveLevel: LevelSimple, Primitive: "codex queue --thread"}, deliverCodexQueue(ctx, req.Body, target, req.Stdout, req.Stderr)
+		return DeliverResult{EffectiveLevel: LevelSimple, Primitive: "codex queue --thread"}, deliverCodexQueue(ctx, req.Body, target)
 	}
 	steered, reason, err := DeliverCodexSteer(ctx, req.Body, target, req.Stderr, req.ClientVersion)
 	if err != nil {
@@ -62,7 +62,7 @@ func (p CodexPlugin) Deliver(ctx context.Context, req DeliverRequest) (DeliverRe
 	if steered {
 		return DeliverResult{EffectiveLevel: LevelSteer, Primitive: "codex app-server turn/steer"}, nil
 	}
-	if err := deliverCodexQueue(ctx, req.Body, target, req.Stdout, req.Stderr); err != nil {
+	if err := deliverCodexQueue(ctx, req.Body, target); err != nil {
 		return DeliverResult{}, err
 	}
 	return DeliverResult{EffectiveLevel: LevelSimple, FallbackReason: reason, Primitive: "codex queue --thread"}, nil
@@ -75,13 +75,16 @@ func writerOrDiscard(w io.Writer) io.Writer {
 	return w
 }
 
-func deliverCodexQueue(ctx context.Context, body, target string, stdout, stderr io.Writer) error {
+func deliverCodexQueue(ctx context.Context, body, target string) error {
 	path, err := exec.LookPath("codex")
 	if err != nil {
 		return &UnavailableError{Message: "Codex delivery requires the codex CLI in PATH"}
 	}
 	cmd := exec.CommandContext(ctx, path, "queue", "--thread", target, "--message", body) // #nosec G204 G702 -- fixed argv and operator-controlled PATH.
-	cmd.Stdout, cmd.Stderr = writerOrDiscard(stdout), writerOrDiscard(stderr)
+	// Vendor output is untrusted and may echo argv, including the encrypted
+	// receiver target and message body. A zero exit is the entire handoff
+	// contract; preserve only the controlled exit-status error on failure.
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("deliver to Codex thread: %w", err)
 	}
