@@ -11695,6 +11695,46 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   paimos_contains_secret_like(CAST(pharos_request_id AS BLOB))=0
 			 ))`,
 		}},
+
+		// M159 / PAI-840: Codex app-server control-path failures can safely
+		// degrade to the exact queue primitive. Widen the durable fallback
+		// reason constraint so that truthful handoff result survives restart.
+		{159, []string{
+			`PRAGMA foreign_keys=OFF`,
+			`CREATE TABLE agent_message_deliveries_m159 (
+			 delivery_id        TEXT PRIMARY KEY CHECK(length(CAST(delivery_id AS BLOB)) BETWEEN 1 AND 64),
+			 message_row_id     INTEGER NOT NULL UNIQUE REFERENCES agent_messages(id) ON DELETE CASCADE,
+			 instance           TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+			 primary_target_id  TEXT REFERENCES agent_message_targets(id),
+			 fallback_target_id TEXT REFERENCES agent_message_targets(id),
+			 requested_level    TEXT NOT NULL CHECK(requested_level IN ('simple','steer')),
+			 effective_level    TEXT CHECK(effective_level IS NULL OR effective_level IN ('simple','steer')),
+			 state              TEXT NOT NULL CHECK(state IN ('pending','leased','retry','blocked','handed_off','dead')),
+			 fallback_reason    TEXT NOT NULL DEFAULT '' CHECK(fallback_reason IN ('','idle','unsupported','policy_capped','target_missing','not_steerable','transport_error')),
+			 attempt_count      INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count>=0),
+			 next_attempt_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 lease_until        TEXT,
+			 last_error_code    TEXT NOT NULL DEFAULT '' CHECK(length(CAST(last_error_code AS BLOB))<=64),
+			 handed_off_at      TEXT,
+			 created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 CHECK((state='handed_off' AND handed_off_at IS NOT NULL AND effective_level IS NOT NULL) OR
+			       (state<>'handed_off' AND handed_off_at IS NULL))
+			)`,
+			`INSERT INTO agent_message_deliveries_m159
+			 (delivery_id,message_row_id,instance,primary_target_id,fallback_target_id,requested_level,effective_level,state,
+			  fallback_reason,attempt_count,next_attempt_at,lease_until,last_error_code,handed_off_at,created_at,updated_at)
+			 SELECT delivery_id,message_row_id,instance,primary_target_id,fallback_target_id,requested_level,effective_level,state,
+			        fallback_reason,attempt_count,next_attempt_at,lease_until,last_error_code,handed_off_at,created_at,updated_at
+			   FROM agent_message_deliveries`,
+			`DROP TABLE agent_message_deliveries`,
+			`ALTER TABLE agent_message_deliveries_m159 RENAME TO agent_message_deliveries`,
+			`CREATE INDEX idx_agent_message_deliveries_dispatch
+			 ON agent_message_deliveries(instance,state,next_attempt_at,message_row_id)`,
+			`CREATE INDEX idx_agent_message_deliveries_target
+			 ON agent_message_deliveries(primary_target_id,state,message_row_id)`,
+			`PRAGMA foreign_keys=ON`,
+		}},
 	}
 
 	for _, m := range migrations {

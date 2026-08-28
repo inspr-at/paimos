@@ -29,6 +29,34 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   records. A positive probe is reselected inside the existing transaction, so
   FIFO leasing, retries, and exactly-once handoff remain atomic.
 
+### Fixed — Stable Codex steer discovery and fallback (PAI-840)
+
+- Codex steer delivery now discovers turns with exactly one documented
+  `thread/read {threadId,includeTurns:true}` request, selects the latest
+  nonempty `inProgress` turn, and sends the schema-required `turn/steer`
+  request with its exact `expectedTurnId`. It no longer depends on the gated
+  `thread/turns/list` method.
+- Daemon, proxy, initialize, thread-read, and steer transport failures now
+  degrade safely to the exact `codex queue --thread … --message …` primitive
+  with `fallback_reason=transport_error`. RPC attempts remain bounded and
+  response-ID matched. A completed remote JSON-RPC rejection during initialize
+  or thread-read, any undocumented remote `turn/steer` rejection, and any
+  malformed frame or malformed/mismatched successful response fail closed.
+  Only `idle` and `notLoaded` are clean inactive statuses;
+  unknown/system-error thread status,
+  an unknown turn status, missing thread history, a mismatched thread, or a
+  missing/mismatched returned turn ID cannot masquerade as a transport failure
+  or successful queue fallback. An inactive thread response that still contains
+  an `inProgress` turn is likewise rejected as contradictory protocol data.
+  Documented steer rejection classification requires the structured
+  `codexErrorInfo.activeTurnNotSteerable` object or the exact bounded vendor
+  message shapes; marker text in unrelated data and unknown turn kinds fail
+  closed.
+  Fallback diagnostics retain only the controlled phase and typed reason;
+  vendor error text cannot echo target references, bodies, or secret-like
+  values into listener output. Queue stdout and stderr are also discarded,
+  while a nonzero exit remains a controlled failed-handoff error.
+
 ## [5.19.0] — 2026-08-28
 
 ### Added — Week and project hours views (PAI-830)

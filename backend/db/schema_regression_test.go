@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 158
+const latestSchemaVersion = 159
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -1566,6 +1566,74 @@ func TestMigration158AddsConstrainedPharosRequestLink(t *testing.T) {
 	for _, invalid := range []string{"short", "https://pharos.invalid/request/1", "Bearer sk-secret-value", "sk_test_abcdefghijklmnopqrstuvwxyz", strings.Repeat("a", 129)} {
 		if _, err := database.Exec(`UPDATE issues SET pharos_request_id=? WHERE id=?`, invalid, issueID); err == nil {
 			t.Errorf("invalid request id %q bypassed database constraint", invalid)
+		}
+	}
+}
+
+func TestMigration159AddsTransportFallbackReasonWithoutChangingDeliveries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m159-populated.db")
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 158); err != nil {
+		t.Fatalf("create exact M158 fixture: %v", err)
+	}
+	project, _ := database.Exec(`INSERT INTO projects(name,key) VALUES('Transport fallback','TRN')`)
+	projectID, _ := project.LastInsertId()
+	sender, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'sender')`, projectID)
+	receiver, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'codex')`, projectID)
+	senderID, _ := sender.LastInsertId()
+	receiverID, _ := receiver.LastInsertId()
+	cipher := []byte("opaque-ciphertext-longer-than-twenty-eight-bytes")
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+		VALUES('t-m159','ppm',?,'codex:codex','codex','codex_thread',?,'steer','primary',1,1)`, projectID, cipher); err != nil {
+		t.Fatal(err)
+	}
+	message, err := database.Exec(`INSERT INTO agent_messages(from_agent_id,to_agent_id,body,delivered,delivered_at,message_id,context_id,parts_json,from_address,to_address,thread_id,delivery_level,delivery_primary_target_id)
+		VALUES(?,?,'fallback',1,datetime('now'),'bus-159','TRN','[{"kind":"text","text":"fallback"}]','paimos:sender','codex:codex','bus-159','steer','t-m159')`, senderID, receiverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageRowID, _ := message.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO agent_message_deliveries
+		(delivery_id,message_row_id,instance,primary_target_id,requested_level,effective_level,state,fallback_reason,attempt_count,last_error_code,handed_off_at)
+		VALUES('d-m159',?,'ppm','t-m159','steer','simple','handed_off','not_steerable',3,'',datetime('now'))`, messageRowID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrateThrough(database, 159); err != nil {
+		t.Fatalf("M158 to M159: %v", err)
+	}
+	var state, effective, reason, targetID string
+	var attempts int
+	if err := database.QueryRow(`SELECT d.state,d.effective_level,d.fallback_reason,d.attempt_count,t.id
+		FROM agent_message_deliveries d JOIN agent_message_targets t ON t.id=d.primary_target_id
+		WHERE d.delivery_id='d-m159'`).Scan(&state, &effective, &reason, &attempts, &targetID); err != nil {
+		t.Fatalf("legacy delivery lost: %v", err)
+	}
+	if state != "handed_off" || effective != "simple" || reason != "not_steerable" || attempts != 3 || targetID != "t-m159" {
+		t.Fatalf("state=%q effective=%q reason=%q attempts=%d target=%q", state, effective, reason, attempts, targetID)
+	}
+	if _, err := database.Exec(`UPDATE agent_message_deliveries SET fallback_reason='transport_error' WHERE delivery_id='d-m159'`); err != nil {
+		t.Fatalf("transport_error rejected after M159: %v", err)
+	}
+	if _, err := database.Exec(`UPDATE agent_message_deliveries SET fallback_reason='invented' WHERE delivery_id='d-m159'`); err == nil {
+		t.Fatal("unknown fallback reason bypassed M159 constraint")
+	}
+	violations, err := database.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer violations.Close()
+	if violations.Next() {
+		t.Fatal("foreign_key_check returned a violation after M159")
+	}
+	for _, index := range []string{"idx_agent_message_deliveries_dispatch", "idx_agent_message_deliveries_target"} {
+		var count int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=? AND tbl_name='agent_message_deliveries'`, index).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("index %s missing after M159: count=%d err=%v", index, count, err)
 		}
 	}
 }

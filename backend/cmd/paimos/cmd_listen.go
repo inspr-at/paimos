@@ -404,7 +404,8 @@ func deliverCodex(ctx context.Context, body, target string) error {
 
 // deliverCodexSteer uses only the documented app-server proxy JSON-RPC
 // sequence. A clean idle or rejected/raced steer is returned as a typed simple
-// fallback decision; transport and handshake failures remain retryable errors.
+// fallback decision; transport and handshake failures degrade to the exact
+// queue primitive with the truthful transport_error fallback reason.
 func deliverCodexSteer(ctx context.Context, body, target string) (bool, string, error) {
 	steered, reason, err := harnessplugin.DeliverCodexSteer(ctx, body, target, stderr, Version)
 	return steered, reason, mapHarnessDeliveryError(err)

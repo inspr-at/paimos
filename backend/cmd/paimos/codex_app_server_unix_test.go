@@ -28,9 +28,9 @@ func TestDeliverCodexSteerTimeoutKillsProxyProcessTree(t *testing.T) {
 	previous := harnessplugin.CodexSteerTimeout
 	harnessplugin.CodexSteerTimeout = 2 * time.Second
 	t.Cleanup(func() { harnessplugin.CodexSteerTimeout = previous })
-	_, _, err := deliverCodexSteer(context.Background(), "hang payload", "thread-hang")
-	if err == nil || !strings.Contains(err.Error(), "no response to websocket handshake") {
-		t.Fatalf("error=%v want handshake timeout", err)
+	steered, reason, err := deliverCodexSteer(context.Background(), "hang payload", "thread-hang")
+	if err != nil || steered || reason != "transport_error" {
+		t.Fatalf("steered=%v reason=%q error=%v want transport fallback", steered, reason, err)
 	}
 	raw, readErr := os.ReadFile(pidFile)
 	if readErr != nil {
