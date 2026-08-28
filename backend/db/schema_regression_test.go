@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 155
+const latestSchemaVersion = 157
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -1280,7 +1280,7 @@ func TestMigration155WidensTargetAdaptersForClaudeSessionsAndKeepsRows(t *testin
 		t.Fatal("M154 must still reject Claude adapters before the migration")
 	}
 
-	if err := migrate(database); err != nil {
+	if err := migrateThrough(database, 155); err != nil {
 		t.Fatalf("M154 to M155: %v", err)
 	}
 
@@ -1347,5 +1347,184 @@ func TestMigration155WidensTargetAdaptersForClaudeSessionsAndKeepsRows(t *testin
 	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
 		VALUES('t-webhook','ppm',?,'grok_bot:amy','grok_bot_routine','https_webhook',?,'simple','primary',1,1)`, projectID, cipher); err != nil {
 		t.Fatalf("grok_bot_routine target rejected after rebuild: %v", err)
+	}
+}
+
+func TestMigration156OpensHarnessPluginKeysAndKeepsRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m156-populated.db")
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 155); err != nil {
+		t.Fatalf("create exact M155 fixture: %v", err)
+	}
+	if _, err := database.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		t.Fatal(err)
+	}
+	project, _ := database.Exec(`INSERT INTO projects(name,key) VALUES('Plugin migration','PLG')`)
+	projectID, _ := project.LastInsertId()
+	sender, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'sender')`, projectID)
+	receiver, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'receiver')`, projectID)
+	senderID, _ := sender.LastInsertId()
+	receiverID, _ := receiver.LastInsertId()
+	cipher := []byte("opaque-ciphertext-longer-than-twenty-eight-bytes")
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+		VALUES('t-known','ppm',?,'codex:receiver','codex','codex_thread',?,'steer','primary',1,1)`, projectID, cipher); err != nil {
+		t.Fatal(err)
+	}
+	message, err := database.Exec(`INSERT INTO agent_messages(from_agent_id,to_agent_id,body,delivered,delivered_at,message_id,context_id,parts_json,from_address,to_address,thread_id,delivery_primary_target_id)
+		VALUES(?,?,'plugin intent',1,datetime('now'),'bus-156','PLG','[{"kind":"text","text":"plugin intent"}]','paimos:sender','codex:receiver','bus-156','t-known')`, senderID, receiverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageRowID, _ := message.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO agent_message_deliveries(delivery_id,message_row_id,instance,primary_target_id,requested_level,state)
+		VALUES('d-156',?,'ppm','t-known','steer','pending')`, messageRowID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrateThrough(database, 156); err != nil {
+		t.Fatalf("M155 to M156: %v", err)
+	}
+
+	var adapter, kind, level, role, referenced string
+	var enabled, version int
+	var keptCipher []byte
+	if err := database.QueryRow(`SELECT adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version FROM agent_message_targets WHERE id='t-known'`).Scan(
+		&adapter, &kind, &keptCipher, &level, &role, &enabled, &version); err != nil {
+		t.Fatalf("known target lost in rebuild: %v", err)
+	}
+	if adapter != "codex" || kind != "codex_thread" || string(keptCipher) != string(cipher) || level != "steer" || role != "primary" || enabled != 1 || version != 1 {
+		t.Fatalf("known target changed: adapter=%q kind=%q level=%q role=%q enabled=%d version=%d", adapter, kind, level, role, enabled, version)
+	}
+	if err := database.QueryRow(`SELECT t.id FROM agent_message_deliveries d JOIN agent_message_targets t ON t.id=d.primary_target_id WHERE d.delivery_id='d-156'`).Scan(&referenced); err != nil || referenced != "t-known" {
+		t.Fatalf("delivery no longer joins its target: id=%q err=%v", referenced, err)
+	}
+
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+		VALUES('t-third','ppm',?,'third:receiver','third_adapter','third_ref',?,'steer','primary',0,1)`, projectID, cipher); err != nil {
+		t.Fatalf("third-party plugin keys rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name, id, adapter, kind string
+	}{
+		{"uppercase adapter", "t-upper-adapter", "Third_adapter", "third_ref"},
+		{"empty adapter", "t-empty-adapter", "", "third_ref"},
+		{"punctuated adapter", "t-punct-adapter", "third-adapter", "third_ref"},
+		{"digit-leading adapter", "t-digit-adapter", "3third", "third_ref"},
+		{"underscore-leading adapter", "t-underscore-adapter", "_third", "third_ref"},
+		{"long adapter", "t-long-adapter", strings.Repeat("a", 65), "third_ref"},
+		{"uppercase kind", "t-upper-kind", "third_adapter", "Third_ref"},
+		{"empty kind", "t-empty-kind", "third_adapter", ""},
+		{"punctuated kind", "t-punct-kind", "third_adapter", "third-ref"},
+		{"digit-leading kind", "t-digit-kind", "third_adapter", "3third"},
+		{"underscore-leading kind", "t-underscore-kind", "third_adapter", "_third"},
+		{"long kind", "t-long-kind", "third_adapter", strings.Repeat("a", 65)},
+	} {
+		if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+			VALUES(?,'ppm',?,?,?,?,?,'simple','primary',0,1)`, tc.id, projectID, "third:"+tc.id, tc.adapter, tc.kind, cipher); err == nil {
+			t.Fatalf("%s was accepted", tc.name)
+		}
+	}
+
+	violations, err := database.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer violations.Close()
+	if violations.Next() {
+		t.Fatal("foreign_key_check returned a violation after the M156 rebuild")
+	}
+	for _, index := range []string{"idx_agent_message_targets_enabled_role", "idx_agent_message_targets_receiver"} {
+		var count int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=? AND tbl_name='agent_message_targets'`, index).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("index %s missing after rebuild: count=%d err=%v", index, count, err)
+		}
+	}
+	for _, name := range []string{"agent_message_targets_m156", "agent_message_targets_old156"} {
+		if tableExists(t, database, name) {
+			t.Fatalf("rebuild residue %s left behind", name)
+		}
+	}
+}
+
+func TestMigration157AddsNullableTargetSecretCipher(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m157-populated.db")
+	database, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrateThrough(database, 156); err != nil {
+		t.Fatalf("create exact M156 fixture: %v", err)
+	}
+	if _, err := database.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		t.Fatal(err)
+	}
+	project, _ := database.Exec(`INSERT INTO projects(name,key) VALUES('Sender secret migration','SSM')`)
+	projectID, _ := project.LastInsertId()
+	sender, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'sender')`, projectID)
+	receiver, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'amy')`, projectID)
+	senderID, _ := sender.LastInsertId()
+	receiverID, _ := receiver.LastInsertId()
+	cipher := []byte("opaque-ciphertext-longer-than-twenty-eight-bytes")
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+		VALUES('t-legacy','ppm',?,'grok_bot:amy','grok_bot_routine','https_webhook',?,'simple','primary',1,1)`, projectID, cipher); err != nil {
+		t.Fatal(err)
+	}
+	message, err := database.Exec(`INSERT INTO agent_messages(from_agent_id,to_agent_id,body,delivered,delivered_at,message_id,context_id,parts_json,from_address,to_address,thread_id,delivery_primary_target_id)
+		VALUES(?,?,'wake intent',1,datetime('now'),'bus-157','SSM','[{"kind":"text","text":"wake intent"}]','paimos:sender','grok_bot:amy','bus-157','t-legacy')`, senderID, receiverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageRowID, _ := message.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO agent_message_deliveries(delivery_id,message_row_id,instance,primary_target_id,requested_level,state)
+		VALUES('d-157',?,'ppm','t-legacy','simple','pending')`, messageRowID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrateThrough(database, 157); err != nil {
+		t.Fatalf("M156 to M157: %v", err)
+	}
+
+	var keptCipher []byte
+	var hasSecret int
+	if err := database.QueryRow(`SELECT target_ref_cipher,target_secret_cipher IS NOT NULL FROM agent_message_targets WHERE id='t-legacy'`).Scan(&keptCipher, &hasSecret); err != nil {
+		t.Fatalf("legacy target lost: %v", err)
+	}
+	if string(keptCipher) != string(cipher) || hasSecret != 0 {
+		t.Fatalf("legacy target changed: cipher kept=%v has_secret=%d", string(keptCipher) == string(cipher), hasSecret)
+	}
+	var referenced string
+	if err := database.QueryRow(`SELECT t.id FROM agent_message_deliveries d JOIN agent_message_targets t ON t.id=d.primary_target_id WHERE d.delivery_id='d-157'`).Scan(&referenced); err != nil || referenced != "t-legacy" {
+		t.Fatalf("delivery no longer joins its target: id=%q err=%v", referenced, err)
+	}
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,target_secret_cipher,maximum_level,role,enabled,version)
+		VALUES('t-short-secret','ppm',?,'grok_bot:amy','grok_bot_routine','https_webhook',?,X'00','simple','primary',0,2)`, projectID, cipher); err == nil {
+		t.Fatal("a secret ciphertext shorter than the AEAD envelope was accepted")
+	}
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,target_secret_cipher,maximum_level,role,enabled,version)
+		VALUES('t-with-secret','ppm',?,'grok_bot:amy','grok_bot_routine','https_webhook',?,?,'simple','primary',0,3)`, projectID, cipher, []byte("opaque-secret-ciphertext-longer-than-28-bytes")); err != nil {
+		t.Fatalf("encrypted sender secret rejected: %v", err)
+	}
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+		VALUES('t-codex-no-secret','ppm',?,'codex:sender','codex','codex_thread',?,'steer','primary',1,1)`, projectID, cipher); err != nil {
+		t.Fatalf("secret-free target rejected after M157: %v", err)
+	}
+	violations, err := database.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer violations.Close()
+	if violations.Next() {
+		t.Fatal("foreign_key_check returned a violation after M157")
+	}
+	for _, index := range []string{"idx_agent_message_targets_enabled_role", "idx_agent_message_targets_receiver"} {
+		var count int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=? AND tbl_name='agent_message_targets'`, index).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("index %s missing after M157: count=%d err=%v", index, count, err)
+		}
 	}
 }

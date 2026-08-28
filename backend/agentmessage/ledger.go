@@ -366,7 +366,7 @@ func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, 
 // in-memory position with AfterID, but only AckInbox changes durable state.
 func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, error) {
 	if in.WorkerAdapter != "" && !IsLocalWorkerAdapter(in.WorkerAdapter) {
-		return nil, coded("agent_message_worker_adapter_invalid", "delivery must name a local worker adapter: codex, claude_resume, or claude_channel")
+		return nil, coded("agent_message_worker_adapter_invalid", "delivery must name a registered local worker adapter")
 	}
 	address, _, err := s.resolveAttributedInbox(ctx, in.ProjectID, in.Address, in.Agent)
 	if err != nil {

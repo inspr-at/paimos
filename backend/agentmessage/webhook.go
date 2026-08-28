@@ -15,12 +15,11 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	"github.com/inspr-at/paimos/backend/secretvault"
 )
 
@@ -45,10 +44,16 @@ type webhookWake struct {
 	Content        string `json:"content"`
 }
 
+// webhookJob is one leased wake. The capability URL and the optional sender
+// secret header are decrypted only for the outbound request and never copied
+// into the delivery row, an error, or a log line.
 type webhookJob struct {
-	wake         webhookWake
-	URL          string
-	attemptCount int
+	wake              webhookWake
+	URL               string
+	authHeaderName    string
+	authHeaderValue   string
+	authHeaderMissing bool
+	attemptCount      int
 }
 
 // WebhookDispatcher owns server-side grok_bot_routine wake attempts.
@@ -100,6 +105,14 @@ func (d *WebhookDispatcher) DispatchOne(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if job.authHeaderMissing {
+		// The adapter authenticates every wake with a sender secret and this
+		// target version has none (registered before M157). Fail closed without
+		// contacting the endpoint; the operator registers a new version with
+		// the sender key and requeues.
+		d.failWebhook(ctx, job.wake.DeliveryID, job.attemptCount, "target_secret_missing", false, 0)
+		return true, errors.New("webhook target has no sender secret")
+	}
 	payload, err := json.Marshal(job.wake)
 	if err != nil {
 		d.failWebhook(ctx, job.wake.DeliveryID, job.attemptCount, "payload_invalid", false, 0)
@@ -113,6 +126,9 @@ func (d *WebhookDispatcher) DispatchOne(ctx context.Context) (bool, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Idempotency-Key", job.wake.DeliveryID)
+	if job.authHeaderName != "" {
+		req.Header.Set(job.authHeaderName, job.authHeaderValue)
+	}
 	resp, err := d.client.Do(req) // #nosec G704 -- target is operator-registered, encrypted, allowlisted, and revalidated by the transport.
 	if err != nil {
 		d.failWebhook(ctx, job.wake.DeliveryID, job.attemptCount, "transport_error", true, 0)
@@ -134,23 +150,34 @@ func (d *WebhookDispatcher) DispatchOne(ctx context.Context) (bool, error) {
 }
 
 func (d *WebhookDispatcher) leaseWebhook(ctx context.Context) (*webhookJob, error) {
+	serverAdapters := harnessplugin.Names(harnessplugin.ModeServer, harnessplugin.KindHTTPSWebhook)
+	if len(serverAdapters) == 0 {
+		return nil, sql.ErrNoRows
+	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 	var deliveryID string
-	err = tx.QueryRowContext(ctx, `SELECT d.delivery_id FROM agent_message_deliveries d
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(serverAdapters)), ",")
+	query := `SELECT d.delivery_id FROM agent_message_deliveries d
 		JOIN agent_messages am ON am.id=d.message_row_id
-		JOIN agent_message_targets t ON t.id=`+selectedDeliveryTargetSQL+`
-		WHERE d.instance=? AND t.instance=d.instance AND t.adapter='grok_bot_routine'
+		JOIN agent_message_targets t ON t.id=` + selectedDeliveryTargetSQL + `
+		WHERE d.instance=? AND t.instance=d.instance AND t.adapter IN (` + placeholders + `)
 		AND ((d.state IN ('pending','retry') AND d.next_attempt_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		 OR (d.state='leased' AND d.lease_until<=strftime('%Y-%m-%dT%H:%M:%fZ','now')))
 		AND NOT EXISTS (
 		 SELECT 1 FROM agent_message_deliveries older JOIN agent_messages older_message ON older_message.id=older.message_row_id
 		 WHERE older.instance=d.instance AND older_message.to_address=am.to_address AND older_message.id<am.id
 		 AND older.state NOT IN ('handed_off','dead'))
-		ORDER BY am.to_address,am.id LIMIT 1`, d.instance).Scan(&deliveryID)
+		ORDER BY am.to_address,am.id LIMIT 1`
+	queryArgs := make([]any, 0, len(serverAdapters)+1)
+	queryArgs = append(queryArgs, d.instance)
+	for _, adapter := range serverAdapters {
+		queryArgs = append(queryArgs, adapter)
+	}
+	err = tx.QueryRowContext(ctx, query, queryArgs...).Scan(&deliveryID)
 	if err != nil {
 		return nil, err
 	}
@@ -167,17 +194,17 @@ func (d *WebhookDispatcher) leaseWebhook(ctx context.Context) (*webhookJob, erro
 		return nil, sql.ErrNoRows
 	}
 	var job webhookJob
-	var cipher []byte
-	var from, project, task, body string
+	var cipher, secretCipher []byte
+	var from, project, task, body, adapter string
 	var hop int
 	var maximumLevel, primaryID, chosenID string
 	err = tx.QueryRowContext(ctx, `SELECT d.delivery_id,d.attempt_count,d.requested_level,
 		COALESCE(d.primary_target_id,''),`+selectedDeliveryTargetSQL+`,
-		t.maximum_level,t.target_ref_cipher,am.id,am.message_id,am.context_id,am.task_id,am.from_address,am.to_address,am.hop_count,am.body
+		t.maximum_level,t.adapter,t.target_ref_cipher,t.target_secret_cipher,am.id,am.message_id,am.context_id,am.task_id,am.from_address,am.to_address,am.hop_count,am.body
 		FROM agent_message_deliveries d JOIN agent_messages am ON am.id=d.message_row_id
 		JOIN agent_message_targets t ON t.id=`+selectedDeliveryTargetSQL+`
 		WHERE d.delivery_id=?`, deliveryID).Scan(&job.wake.DeliveryID, &job.attemptCount, &job.wake.RequestedLevel,
-		&primaryID, &chosenID, &maximumLevel, &cipher, &job.wake.Cursor, &job.wake.MessageID, &project, &task,
+		&primaryID, &chosenID, &maximumLevel, &adapter, &cipher, &secretCipher, &job.wake.Cursor, &job.wake.MessageID, &project, &task,
 		&from, &job.wake.To, &hop, &body)
 	if err != nil {
 		return nil, err
@@ -187,6 +214,22 @@ func (d *WebhookDispatcher) leaseWebhook(ctx context.Context) (*webhookJob, erro
 		return nil, err
 	}
 	job.URL = string(plain)
+	headerName, headerPrefix, secretRequired, err := harnessplugin.SecretHeader(adapter)
+	if err != nil {
+		return nil, err
+	}
+	if secretRequired {
+		if len(secretCipher) == 0 {
+			job.authHeaderMissing = true
+		} else {
+			secret, err := secretvault.Decrypt(targetSenderSecretDomain, secretCipher)
+			if err != nil {
+				return nil, err
+			}
+			job.authHeaderName = headerName
+			job.authHeaderValue = headerPrefix + string(secret)
+		}
+	}
 	job.wake.Event = "agent_message.available"
 	job.wake.Version = 1
 	job.wake.Instance = d.instance
@@ -303,43 +346,6 @@ func boundedRetryAfter(value string) time.Duration {
 	return delay
 }
 
-func validateWebhookTargetRef(ctx context.Context, raw string) error {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" {
-		return coded("agent_message_target_webhook_invalid", "webhook target must be an HTTPS URL without userinfo or fragment")
-	}
-	if !webhookHostAllowed(parsed.Hostname()) {
-		return coded("agent_message_target_webhook_host_denied", "webhook hostname is not in PAIMOS_AGENT_BUS_WEBHOOK_HOSTS")
-	}
-	addresses, err := net.DefaultResolver.LookupIPAddr(ctx, parsed.Hostname())
-	if err != nil || len(addresses) == 0 {
-		return coded("agent_message_target_webhook_dns_failed", "webhook hostname did not resolve")
-	}
-	for _, address := range addresses {
-		if !webhookIPAllowed(address.IP) {
-			return coded("agent_message_target_webhook_address_denied", "webhook hostname resolves to a denied address")
-		}
-	}
-	return nil
-}
-
-func webhookHostAllowed(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	for _, allowed := range strings.Split(os.Getenv("PAIMOS_AGENT_BUS_WEBHOOK_HOSTS"), ",") {
-		if strings.ToLower(strings.TrimSuffix(strings.TrimSpace(allowed), ".")) == host && host != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func webhookIPAllowed(ip net.IP) bool {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS")), "true") {
-		return true
-	}
-	return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast())
-}
-
 func newWebhookHTTPClient() *http.Client {
 	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
@@ -350,7 +356,7 @@ func newWebhookHTTPClient() *http.Client {
 	}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
-		if err != nil || !webhookHostAllowed(host) {
+		if err != nil || !harnessplugin.WebhookHostAllowed(host) {
 			return nil, errors.New("webhook destination denied")
 		}
 		addresses, err := net.DefaultResolver.LookupIPAddr(ctx, host)
@@ -358,7 +364,7 @@ func newWebhookHTTPClient() *http.Client {
 			return nil, errors.New("webhook DNS failed")
 		}
 		for _, candidate := range addresses {
-			if !webhookIPAllowed(candidate.IP) {
+			if !harnessplugin.WebhookIPAllowed(candidate.IP) {
 				continue
 			}
 			conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(candidate.IP.String(), port))

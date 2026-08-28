@@ -7,6 +7,78 @@ and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed — Codex steer transport (PAI-825 follow-up)
+
+- `paimos listen --deliver codex` steer delivery never reached the Codex
+  app-server: 5.17.3 and 5.18.0 wrote newline-delimited JSON into
+  `codex app-server proxy`, but the vendor documents that proxied stream as
+  the WebSocket HTTP Upgrade handshake followed by WebSocket frames, so the
+  daemon waited for an HTTP request head, `initialize` never got an answer,
+  and the timeout cleanup of the npm wrapper orphaned the native proxy and
+  surfaced as `initialize Codex app-server: EOF` (reproduced against Codex
+  CLI 0.149.1 with app-server daemon 0.150.1). The harness Codex plugin
+  (`backend/agentmessage/harness`, PAI-829) now performs the documented
+  handshake through the same vendor proxy and sends one JSON-RPC message per
+  text frame without the `jsonrpc` header; PAIMOS still never opens the
+  control socket itself.
+- Active-turn discovery no longer depends on `thread/turns/list` alone, which
+  0.150.x gates behind the `experimentalApi` initialize capability. The worker
+  opts in, checks the stable `thread/read` status first, and only for an
+  `active` thread pages the latest turn, falling back to
+  `thread/read {includeTurns:true}` when the paginated page is rejected. A
+  thread that is idle or not loaded in the daemon uses the exact queue
+  primitive with `fallback_reason=idle`.
+- A proxy that never answers now fails inside the 20 s steer budget with a
+  precise error naming the wire phase and the daemon/CLI versions from
+  `codex app-server daemon version`, and the whole proxy process group is
+  killed so the npm wrapper cannot leave an orphaned native proxy holding the
+  pipes.
+- The queue fallback after a rejected `turn/steer` is limited to the vendor's
+  documented preconditions: an active turn that cannot accept same-turn
+  steering (`activeTurnNotSteerable`, "cannot steer a review|compact turn")
+  and the expected-turn race ("expected active turn id … but found …") record
+  `fallback_reason=not_steerable`, a turn that finished first ("no active turn
+  to steer") records `idle`. Any other app-server rejection (unknown method,
+  request-shape drift, sub-agent ownership, internal error) now fails the
+  delivery with the rejection in the error instead of silently queueing, so a
+  broken primitive cannot masquerade as a successful simple handoff; the same
+  rule applies to the `thread/turns/list` history fallback, which only
+  triggers on the experimentalApi gate or a missing method.
+- Added the opt-in `TestAgentBusRealCodexSteerE2E` proof
+  (`PAIMOS_AGENT_BUS_E2E_STEER_THREAD=<thread>`) and the read-only
+  `TestCodexAppServerProxyReadOnlyProbe` (`PAIMOS_CODEX_PROBE_THREAD`); the
+  fake Codex CLI in tests now proxies to a real WebSocket server so the
+  handshake and framing are exercised, including the gated-page fallback and
+  the silent-proxy timeout.
+### Added — Amy inbound webhook sender key (PAI-828)
+
+- `grok_bot_routine` targets now carry the routine's receiver-owned sender
+  key. `paimos message target set … --target-key-file <file|->` (a file or
+  stdin, never an argument) sends it as the write-only `target_secret`
+  field; the server validates it as one raw key, encrypts it under the
+  separate `agent-message-target-secrets` secretvault domain in the new
+  nullable `agent_message_targets.target_secret_cipher` column (M157), and
+  every wake POST carries `Authorization: Bearer <sender key>` — the header
+  the Grok Bot "When a webhook fires" trigger card issues — next to the
+  stable `Idempotency-Key`.
+- The harness plugin socket gained the optional `SecretHeaderPlugin`
+  capability. A plugin that implements it requires the secret at
+  registration, every other plugin refuses one, a hostile validator cannot
+  echo it, and a webhook version registered without a key is never
+  dispatched: the delivery blocks with `last_error_code=target_secret_missing`
+  without contacting the endpoint.
+- Registration and `message target list` responses expose only `has_secret`.
+  The key never appears in the ledger, delivery status, audit, wake payload,
+  listen disclosure, CLI output, or error text, and `paimos secrets rotate`
+  re-encrypts the new column atomically with the target references.
+- Both file flags are fail-closed inputs: `--target-key-file` and, for
+  webhook adapters, `--target-ref-file` are read only from a regular,
+  single-linked file owned by the caller with owner-only permissions
+  (`0600`/`0400`), opened without following symlinks — the same policy as
+  external-stage handoff credentials. Group- or world-readable files,
+  symlinks, hard links, directories, and other users' files are refused
+  before any byte is read; `-` (stdin) remains available for one of the two.
+
 ### Added — Claude simple delivery (PAI-827)
 
 - `paimos listen --deliver claude` now performs idle Claude delivery with the
