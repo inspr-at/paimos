@@ -51,8 +51,12 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	common := addCommonFlags(flags)
 	adapter, workspace, identity := "codex", "", ""
 	sessionID, correlationID, codexPath := "", "", ""
+	claudePath, nodePath, claudeSDKPath := "", "", ""
 	if command == "serve" {
 		flags.StringVar(&codexPath, "codex-path", "", "absolute Codex CLI path")
+		flags.StringVar(&claudePath, "claude-path", "", "absolute operator-authenticated Claude CLI path")
+		flags.StringVar(&nodePath, "node-path", "", "absolute Node.js >=18 runtime path")
+		flags.StringVar(&claudeSDKPath, "claude-sdk-path", "", "absolute operator-installed @anthropic-ai/claude-agent-sdk@0.3.251 sdk.mjs path")
 	}
 	if command == "start" {
 		flags.StringVar(&adapter, "adapter", "codex", "harness adapter")
@@ -80,7 +84,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		defer lock.Close()
 		supervisor, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: common.instance, StateRoot: root,
-			Adapters: []agentd.Adapter{agentd.NewCodexAdapter(codexPath, Version), agentd.NewUnsupportedAdapter(agentd.AdapterClaude)}})
+			Adapters: serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath)})
 		if err != nil {
 			return err
 		}
@@ -121,6 +125,13 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	return json.NewEncoder(stdout).Encode(output)
+}
+
+func serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath string) []agentd.Adapter {
+	return []agentd.Adapter{
+		agentd.NewCodexAdapter(codexPath, Version),
+		agentd.NewClaudeAdapter(claudePath, nodePath, claudeSDKPath),
+	}
 }
 
 func addCommonFlags(flags *flag.FlagSet) *commonFlags {

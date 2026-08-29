@@ -389,7 +389,7 @@ func TestSupervisorPrunesOwnershipLostHistoryBeforeActiveBound(t *testing.T) {
 	t.Fatal("new session did not stop before cleanup")
 }
 
-func TestClaudeBoundaryStaysUnsupportedUntilOwnedAdapterExists(t *testing.T) {
+func TestExplicitUnsupportedClaudeAdapterFailsClosed(t *testing.T) {
 	supervisor, err := NewSupervisor(SupervisorConfig{Adapters: []Adapter{NewUnsupportedAdapter(AdapterClaude)}})
 	if err != nil {
 		t.Fatal(err)

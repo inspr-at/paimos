@@ -767,7 +767,7 @@ func TestDeliverClaudeMessageRefusesForeignOrMissingDeliveryWork(t *testing.T) {
 }
 
 func TestWorkerAdapterForMapsDeliverFlagToRegistryAdapter(t *testing.T) {
-	for deliver, want := range map[string]string{"codex": "codex", "claude": "claude_resume", "grok": "", "": ""} {
+	for deliver, want := range map[string]string{"codex": "codex", "agentd_claude": "agentd_claude", "claude": "claude_resume", "grok": "", "": ""} {
 		if got := workerAdapterFor(deliver); got != want {
 			t.Fatalf("workerAdapterFor(%q)=%q want %q", deliver, got, want)
 		}

@@ -6,8 +6,11 @@ package main
 import (
 	"bytes"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/backend/agentd"
 )
 
 func TestVersionAndRequiredInstance(t *testing.T) {
@@ -24,6 +27,20 @@ func TestVersionAndRequiredInstance(t *testing.T) {
 	}
 	if err := run([]string{"status"}, strings.NewReader(""), &output); err == nil || !strings.Contains(err.Error(), "--instance") {
 		t.Fatalf("status without instance error=%v", err)
+	}
+}
+
+func TestServeRegistersOwnedCodexAndClaudeAdapters(t *testing.T) {
+	adapters := serveAdapters("/operator/codex", "/operator/claude", "/runtime/node", "/operator/sdk.mjs")
+	var names []string
+	for _, adapter := range adapters {
+		names = append(names, adapter.Name())
+		if !slices.Contains(adapter.Capabilities(), agentd.CapabilityStop) {
+			t.Fatalf("adapter %q has no stop capability", adapter.Name())
+		}
+	}
+	if !slices.Equal(names, []string{agentd.AdapterCodex, agentd.AdapterClaude}) {
+		t.Fatalf("adapters=%v", names)
 	}
 }
 

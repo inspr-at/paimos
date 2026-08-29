@@ -1142,16 +1142,18 @@ collaborate.
 ## Operator-local managed sessions (`paimos-agentd`)
 
 `paimos-agentd` is a per-machine process supervisor, not an inference client.
-It starts a fresh documented `codex app-server --listen stdio://` child under
-the operator's existing authenticated login, then creates the thread and turn
-through that exact initialized connection. It keeps the only authoritative
-Process handle in memory. The local Unix socket and persisted registry are
-private and partitioned by PPM instance; vendor-private sockets are never used.
+It starts either a documented `codex app-server --listen stdio://` child or a
+Claude Agent SDK streaming `Query` under the operator's existing authenticated
+local installation. It keeps the only authoritative Process/Query handle in
+memory. The local Unix socket and persisted registry are private and
+partitioned by PPM instance; vendor-private sockets are never used.
 
 ```bash
 paimos-agentd serve --instance production
 printf '%s' 'Implement PAI-849.' | paimos-agentd start \
   --instance production --adapter codex --workspace "$PWD" --identity codex:worker
+printf '%s' 'Implement PAI-850.' | paimos-agentd start \
+  --instance production --adapter claude --workspace "$PWD" --identity claude:worker
 paimos-agentd status --instance production
 ```
 
@@ -1168,6 +1170,31 @@ authority to locate or reconstruct a control connection. After an agentd
 restart, every persisted formerly owned session is reconciled to
 `ownership_lost`; PID, steer, interrupt, and stop authority are cleared, so a
 reused PID can never be adopted or signalled.
+
+Claude start requires Node.js 18+, Claude CLI 2.1.251+, and an operator-installed
+`@anthropic-ai/claude-agent-sdk` 0.3.251 whose `sdk.mjs` path and SHA-256 are
+validated before launch. PAIMOS does not redistribute or fetch that package.
+The SDK invokes the operator-authenticated local `claude` executable; PAIMOS
+never accepts, stores, or forwards a Claude credential. The Query must expose
+documented async streaming plus `interrupt()` and `close()`, and its init frame
+must advertise `interrupt_receipt_v1`.
+
+`Steer` yields a bridge-minted UUID-stamped input to that exact live Query and
+calls `interrupt()`. A successful result proves that the input was accepted by
+the streaming boundary and the Query returned a valid interrupt receipt; the
+UUID is not returned or endorsed by Claude. If later Query output carries that
+UUID, agentd emits a correlated, content-free `turn_started` reaction marker.
+That optional marker is stronger live-reaction evidence, but it is not required
+to complete the durable delivery and its absence does not destroy the Query.
+Unmatched reaction correlations expire after 60 seconds, so a CLI that omits
+the UUID cannot consume the fixed 256-entry evidence bound indefinitely.
+`Interrupt` uses the same Query, and `Stop` calls `close()` before drain-first,
+unreaped process-group cleanup. `persistSession:false`, empty setting sources,
+the default `Read,Glob,Grep,Edit,Write` tool boundary, and content-free bridge
+events prevent prompts, output, and credentials entering agentd state. Bash is
+not enabled by durable bus text. The owner-only temporary runtime contains only
+the PAIMOS bridge; cleanup is waited for at most 250 ms and then continues as
+best effort, so a pathological filesystem cannot wedge Process completion.
 
 Managed same-box steering remains an Agent Intercom delivery: `paimos listen`
 first obtains the FIFO delivery lease, passes its `delivery_id` as the local
@@ -1192,14 +1219,26 @@ printf '%s' '<codex-thread-id>' | paimos message target set --project PAI \
 paimos listen --as codex:worker --project PAI --follow --deliver agentd_codex
 ```
 
+Owned Claude uses a separate target and worker name. It never changes the
+unmanaged `claude_resume` or `claude_channel` targets, which remain
+simple-only:
+
+```bash
+printf '%s' '{"socket":"/private/path/agentd.sock","session_id":"<agentd-session-uuid>"}' | \
+  paimos message target set --project PAI --address claude:worker \
+  --adapter agentd_claude --kind agentd_session --maximum-level steer \
+  --role primary --target-ref-file -
+paimos listen --as claude:worker --project PAI --follow --deliver agentd_claude
+```
+
 PAI-848 must expose only an M161 session currently reported `steerable` to the
 managed worker. A turn that becomes idle after lease acquisition remains
 uncompleted and retryable; PAI-848 must requeue or reroute it rather than
 allowing an idle managed target to hold FIFO indefinitely. Agentd deliberately
 does not claim a queue handoff as a managed steer.
 
-Claude is deliberately registered as unsupported here. PAI-850 supplies a
-Process implementation whose steer/interrupt methods remain bound to its live
-Agent SDK Query object. PAI-848 supplies the authenticated Reporter and the
+Unmanaged Claude attachment remains unsupported for control; only a fresh
+PAI-850 owned Process can advertise steer/interrupt/stop, and those methods
+remain bound to its live Agent SDK Query object. PAI-848 supplies the authenticated Reporter and the
 M161 `harness_sessions` API/table; agentd does not reuse `agent_runs` or the
 PAI-809 run-control journal as a session registry.

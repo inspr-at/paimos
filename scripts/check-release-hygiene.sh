@@ -75,6 +75,24 @@ for artifact in paimos-agentd_darwin_universal.tar.gz paimos-agentd_linux_amd64.
   fi
 done
 
+# The release workflow archives one bare binary. Proprietary Claude SDK bytes,
+# license copies, and generated manifests must never enter this AGPL artifact.
+for forbidden in backend/agentd/claudeassets/sdk.mjs backend/agentd/claudeassets/LICENSE.txt backend/agentd/claudeassets/manifest.json; do
+  if [[ -e "$forbidden" ]]; then
+    echo "release hygiene: forbidden Claude vendor asset is present: $forbidden" >&2
+    fail=1
+  fi
+done
+if grep -Eq 'Claude Agent SDK.*(embedded|bundled)|SDK JavaScript and license are embedded' docs/INSTALL.md docs/RELEASE.md docs/AGENT_INTEGRATION.md; then
+  echo "release hygiene: documentation falsely claims the Claude Agent SDK ships in paimos-agentd" >&2
+  fail=1
+fi
+if [[ $(grep -c 'tar czf' .github/workflows/release-v2.yml) -ne 2 ]] ||
+   [[ $(grep -cE -- '-C .*?("\$\{binary\}"|"\$binary")$' .github/workflows/release-v2.yml) -ne 2 ]]; then
+  echo "release hygiene: release tar commands must archive exactly the selected bare binary" >&2
+  fail=1
+fi
+
 if [[ $fail -ne 0 ]]; then
   exit 1
 fi

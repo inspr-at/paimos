@@ -8,7 +8,9 @@ package agentd
 import (
 	"bufio"
 	"context"
+	"io"
 	"os/exec"
+	"sync/atomic"
 	"testing"
 
 	"github.com/inspr-at/paimos/backend/ownedprocess"
@@ -31,7 +33,10 @@ func TestOwnedProcessCancellationEscalatesAndReaps(t *testing.T) {
 		t.Fatalf("readiness=%q err=%v", line, err)
 	}
 	process := newOwnedProcess(cmd)
-	process.startWait()
+	go func() {
+		_, _ = io.Copy(io.Discard, stdout)
+		process.reapAfterDrain()
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	effect, err := process.Stop(ctx, ControlRequest{CorrelationID: "cancelled-stop"})
@@ -43,5 +48,33 @@ func TestOwnedProcessCancellationEscalatesAndReaps(t *testing.T) {
 	}
 	if err := process.Wait(); err == nil {
 		t.Fatal("forced termination unexpectedly reported a clean child exit")
+	}
+}
+
+func TestOwnedProcessNeverSignalsAfterReapBegins(t *testing.T) {
+	process := newOwnedProcess(exec.Command("/bin/true"))
+	waiting := make(chan struct{})
+	release := make(chan struct{})
+	process.wait = func() error {
+		close(waiting)
+		<-release
+		return nil
+	}
+	var signals atomic.Int32
+	process.signal = func(*exec.Cmd, bool) error {
+		signals.Add(1)
+		return nil
+	}
+	go process.reapAfterDrain()
+	<-waiting
+	if sent, err := process.signalOwned(true); err != nil || sent {
+		t.Fatalf("sent=%t err=%v", sent, err)
+	}
+	close(release)
+	if err := process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if sent, err := process.signalOwned(true); err != nil || sent || signals.Load() != 0 {
+		t.Fatalf("post-reap sent=%t signals=%d err=%v", sent, signals.Load(), err)
 	}
 }

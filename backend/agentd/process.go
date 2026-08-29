@@ -19,24 +19,50 @@ const (
 )
 
 type ownedProcess struct {
-	cmd     *exec.Cmd
-	done    chan struct{}
-	mu      sync.Mutex
+	cmd    *exec.Cmd
+	done   chan struct{}
+	mu     sync.Mutex
+	wait   func() error
+	signal func(*exec.Cmd, bool) error
+
+	reaping bool
+	reaped  bool
 	waitErr error
 }
 
 func newOwnedProcess(cmd *exec.Cmd) *ownedProcess {
-	return &ownedProcess{cmd: cmd, done: make(chan struct{})}
+	p := &ownedProcess{cmd: cmd, done: make(chan struct{}), signal: ownedprocess.Signal}
+	if cmd != nil {
+		p.wait = cmd.Wait
+	}
+	return p
 }
 
-func (p *ownedProcess) startWait() {
-	go func() {
-		err := p.cmd.Wait()
-		p.mu.Lock()
-		p.waitErr = err
+// reapAfterDrain is the sole Cmd.Wait owner. Callers invoke it only after the
+// stdout reader reaches EOF. reaping is set before Wait so signalOwned cannot
+// target a PID after the operating system is allowed to reuse it.
+func (p *ownedProcess) reapAfterDrain() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	if p.reaping || p.reaped {
 		p.mu.Unlock()
-		close(p.done)
-	}()
+		return
+	}
+	p.reaping = true
+	wait := p.wait
+	p.mu.Unlock()
+
+	err := errors.New("owned process wait is unavailable")
+	if wait != nil {
+		err = wait()
+	}
+	p.mu.Lock()
+	p.waitErr = err
+	p.reaped = true
+	p.mu.Unlock()
+	close(p.done)
 }
 
 func (p *ownedProcess) PID() int {
@@ -64,16 +90,42 @@ func (*ownedProcess) Interrupt(context.Context, ControlRequest) (ControlEffect, 
 	return ControlEffect{}, ErrCapabilityMissing
 }
 
+// signalOwned serializes group signals with the transition into Cmd.Wait.
+func (p *ownedProcess) signalOwned(force bool) (bool, error) {
+	if p == nil || p.cmd == nil {
+		return false, errors.New("owned process is unavailable")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.reaping || p.reaped {
+		return false, nil
+	}
+	if p.signal == nil {
+		return false, errors.New("owned process signal is unavailable")
+	}
+	return true, p.signal(p.cmd, force)
+}
+
+func waitOwned(ctx context.Context, done <-chan struct{}) error {
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (p *ownedProcess) Stop(ctx context.Context, request ControlRequest) (ControlEffect, error) {
 	if p == nil || p.cmd == nil {
 		return ControlEffect{}, errors.New("owned process is unavailable")
 	}
-	select {
-	case <-p.done:
+	sent, termErr := p.signalOwned(false)
+	if !sent {
+		if err := waitOwned(ctx, p.done); err != nil {
+			return ControlEffect{}, err
+		}
 		return ControlEffect{Primitive: "owned process already exited", CorrelationID: request.CorrelationID}, nil
-	default:
 	}
-	termErr := ownedprocess.Signal(p.cmd, false)
 	grace := time.NewTimer(processGracePeriod)
 	defer grace.Stop()
 	select {
@@ -84,10 +136,17 @@ func (p *ownedProcess) Stop(ctx context.Context, request ControlRequest) (Contro
 		// owned child. Escalate now and return only after it is reaped.
 	case <-grace.C:
 	}
-	if err := ownedprocess.Signal(p.cmd, true); err != nil && termErr != nil {
-		return ControlEffect{}, errors.Join(termErr, err)
-	} else if err != nil {
-		return ControlEffect{}, err
+	forcedSent, forceErr := p.signalOwned(true)
+	if !forcedSent {
+		if err := waitOwned(ctx, p.done); err != nil {
+			return ControlEffect{}, err
+		}
+		return ControlEffect{Primitive: "owned process-group terminate", CorrelationID: request.CorrelationID}, nil
+	}
+	if forceErr != nil && termErr != nil {
+		return ControlEffect{}, errors.Join(termErr, forceErr)
+	} else if forceErr != nil {
+		return ControlEffect{}, forceErr
 	}
 	forced := time.NewTimer(processKillPeriod)
 	defer forced.Stop()

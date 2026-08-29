@@ -84,6 +84,7 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 	}
 	if err := ownedprocess.Verify(cmd, configured); err != nil {
 		_ = ownedprocess.Signal(cmd, true)
+		_, _ = io.Copy(io.Discard, stdout)
 		_ = cmd.Wait()
 		return nil, err
 	}
@@ -182,7 +183,6 @@ func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, obse
 	p := &codexProcess{ownedProcess: newOwnedProcess(cmd), stdin: stdin, observe: observe,
 		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1)}
 	go p.readLoop(stdout)
-	p.startWait()
 	return p
 }
 
@@ -193,6 +193,12 @@ func (p *codexProcess) observeEvent(event AdapterEvent) {
 }
 
 func (p *codexProcess) readLoop(reader io.Reader) {
+	defer func() {
+		// Drain stdout before the sole Wait. The exact group is still owned and
+		// unreaped while descendants are terminated.
+		_, _ = p.signalOwned(true)
+		p.reapAfterDrain()
+	}()
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), maxCodexFrameBytes)
 	for scanner.Scan() {
@@ -224,7 +230,7 @@ func (p *codexProcess) readLoop(reader io.Reader) {
 
 func (p *codexProcess) abortStream() {
 	p.closeInput()
-	_ = ownedprocess.Signal(p.cmd, true)
+	_, _ = p.signalOwned(true)
 }
 
 func (p *codexProcess) handleNotification(message codexRPCMessage) {

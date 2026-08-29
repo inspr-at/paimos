@@ -32,6 +32,7 @@ const (
 const (
 	AdapterCodex          = harnessplugin.AdapterCodex
 	AdapterAgentdCodex    = harnessplugin.AdapterAgentdCodex
+	AdapterAgentdClaude   = harnessplugin.AdapterAgentdClaude
 	AdapterGrokBotRoutine = harnessplugin.AdapterGrokBotRoutine
 	AdapterClaudeResume   = harnessplugin.AdapterClaudeResume
 	AdapterClaudeChannel  = harnessplugin.AdapterClaudeChannel
@@ -58,7 +59,7 @@ func IsLocalWorkerAdapter(adapter string) bool {
 
 const selectedDeliveryTargetSQL = `(CASE
 	WHEN d.requested_level='simple' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
-	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id)='agentd_codex'
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id) IN ('agentd_codex','agentd_claude')
 	THEN d.fallback_target_id
 	WHEN d.requested_level='steer' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
 	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id)='simple'

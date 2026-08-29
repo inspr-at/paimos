@@ -45,7 +45,7 @@ curl -fL https://github.com/inspr-at/paimos/releases/latest/download/paimos-mcp_
 ```
 
 Install the operator-local worker supervisor separately on machines that run
-managed Codex children:
+managed Codex or Claude children:
 
 ```bash
 curl -fL https://github.com/inspr-at/paimos/releases/latest/download/paimos-agentd_darwin_universal.tar.gz \
@@ -54,8 +54,9 @@ curl -fL https://github.com/inspr-at/paimos/releases/latest/download/paimos-agen
 
 Run one daemon per PPM instance. The instance value partitions both private
 state and the Unix socket; prompts and control text are accepted on stdin, not
-argv. `paimos-agentd` owns a documented Codex app-server stdio child, inherits
-the operator's existing Codex login, and never accepts a vendor token:
+argv. `paimos-agentd` owns either a documented Codex app-server stdio child or
+a documented Claude Agent SDK streaming Query, inherits the operator's local
+CLI login, and never accepts a vendor token:
 
 ```bash
 paimos-agentd serve --instance production
@@ -63,6 +64,27 @@ printf '%s' 'Implement the assigned ticket.' | paimos-agentd start \
   --instance production --adapter codex --workspace "$PWD" --identity codex:worker
 paimos-agentd status --instance production
 ```
+
+Claude owned sessions additionally require Node.js 18+, Claude CLI 2.1.251 or
+newer, and the operator-installed Agent SDK at exactly 0.3.251. Install the SDK
+deliberately; `paimos-agentd` never downloads it and its release tarball contains
+only the `paimos-agentd` binary:
+
+```bash
+npm install -g @anthropic-ai/claude-agent-sdk@0.3.251
+CLAUDE_SDK_PATH="$(npm root -g)/@anthropic-ai/claude-agent-sdk/sdk.mjs"
+shasum -a 256 "$CLAUDE_SDK_PATH"
+# expected: 9235fac983c29e614d7f572a578406dc5dbda006305faa99f9447f577738eb93
+paimos-agentd serve --instance production \
+  --claude-sdk-path "$CLAUDE_SDK_PATH"
+```
+
+The daemon also validates the adjacent package version, Node version, Claude
+CLI version, documented streaming Query methods, and `interrupt_receipt_v1`. Missing or
+incompatible capabilities fail Claude session startup with an actionable
+diagnostic; Codex sessions remain available. Override executable discovery only
+with absolute `--node-path` and `--claude-path` values. The default Claude tool
+boundary is `Read,Glob,Grep,Edit,Write`; durable messages never grant Bash.
 
 ---
 
