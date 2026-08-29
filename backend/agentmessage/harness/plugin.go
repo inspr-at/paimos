@@ -409,7 +409,7 @@ var defaultRegistry = NewRegistry()
 // primarily useful to isolated callers and tests; each built-in also registers
 // itself with the process registry from its own file.
 func RegisterBuiltins(registry *Registry) error {
-	for _, plugin := range []Plugin{CodexPlugin{}, AgentdCodexPlugin{}, ClaudePlugin{}, ClaudePlugin{Channel: true}, GrokRoutinePlugin{}} {
+	for _, plugin := range []Plugin{CodexPlugin{}, AgentdCodexPlugin{}, ClaudePlugin{}, ClaudePlugin{Channel: true}, GrokRoutinePlugin{}, ManagedPlugin{}} {
 		if err := registry.Register(plugin); err != nil {
 			return err
 		}

@@ -60,6 +60,18 @@ func TestRegisterBuiltinsAndLookupByName(t *testing.T) {
 	}
 }
 
+func TestManagedPluginRejectsPathAndURLTargets(t *testing.T) {
+	plugin := ManagedPlugin{}
+	for _, ref := range []string{"/tmp/private.sock", "https://vendor.example/session", "opaque://session"} {
+		if err := plugin.ValidateTarget(context.Background(), ref); ErrorCode(err) != CodeTargetRefInvalid {
+			t.Fatalf("ValidateTarget(%q) err=%v", ref, err)
+		}
+	}
+	if err := plugin.ValidateTarget(context.Background(), "stable-thread-ref"); err != nil {
+		t.Fatalf("opaque session ref rejected: %v", err)
+	}
+}
+
 func TestRegistryDeliversSimpleThroughLocalPlugin(t *testing.T) {
 	registry := NewRegistry()
 	called := false

@@ -5,6 +5,7 @@ package agentmessage
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -35,11 +36,13 @@ const (
 	AdapterGrokBotRoutine = harnessplugin.AdapterGrokBotRoutine
 	AdapterClaudeResume   = harnessplugin.AdapterClaudeResume
 	AdapterClaudeChannel  = harnessplugin.AdapterClaudeChannel
+	AdapterManagedHarness = harnessplugin.AdapterManagedHarness
 
-	TargetKindCodexThread   = harnessplugin.KindCodexThread
-	TargetKindAgentdSession = harnessplugin.KindAgentdSession
-	TargetKindHTTPSWebhook  = harnessplugin.KindHTTPSWebhook
-	TargetKindClaudeSession = harnessplugin.KindClaudeSession
+	TargetKindCodexThread    = harnessplugin.KindCodexThread
+	TargetKindAgentdSession  = harnessplugin.KindAgentdSession
+	TargetKindHTTPSWebhook   = harnessplugin.KindHTTPSWebhook
+	TargetKindClaudeSession  = harnessplugin.KindClaudeSession
+	TargetKindHarnessSession = harnessplugin.KindHarnessSession
 )
 
 // ClaudeSessionPrimitive maps a Claude session reference to the documented
@@ -220,6 +223,24 @@ func (s *Service) GetTarget(ctx context.Context, projectID int64, targetID strin
 	return &target, nil
 }
 
+// TargetRefMatches compares an expected private reference with target
+// ciphertext without disclosing the stored value to callers.
+func (s *Service) TargetRefMatches(ctx context.Context, projectID int64, targetID, expected string) (bool, error) {
+	var cipher []byte
+	if err := s.db.QueryRowContext(ctx, `SELECT target_ref_cipher FROM agent_message_targets WHERE project_id=? AND id=?`, projectID, targetID).Scan(&cipher); err != nil {
+		return false, err
+	}
+	plain, err := secretvault.Decrypt(targetSecretDomain, cipher)
+	if err != nil {
+		return false, fmt.Errorf("decrypt agent message target: %w", err)
+	}
+	want := []byte(expected)
+	if len(plain) != len(want) {
+		return false, nil
+	}
+	return subtle.ConstantTimeCompare(plain, want) == 1, nil
+}
+
 func (s *Service) ListTargets(ctx context.Context, projectID int64, address string) ([]Target, error) {
 	args := []any{projectID, instanceName()}
 	query := `SELECT ` + targetSelectColumns + `
@@ -311,7 +332,7 @@ func (s *Service) RequeueMissingTargets(ctx context.Context, projectID int64, ad
 // receiver-owned reference. Work that belongs to another adapter is returned
 // as redacted state for observability and is never leased or disclosed;
 // webhook capabilities are never disclosed through listen.
-func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, address, agent, workerAdapter string, envelope *Envelope) (bool, error) {
+func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, address, agent, workerAdapter, workerTargetID string, envelope *Envelope) (bool, error) {
 	if _, _, err := s.resolveAttributedInbox(ctx, projectID, address, agent); err != nil {
 		return false, err
 	}
@@ -347,6 +368,11 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 		// reference.
 		envelope.DeliveryWork = &work
 		return true, nil
+	}
+	if workerTargetID != "" && selectedID != workerTargetID {
+		// A durable managed worker owns exactly its encrypted binding. Do not
+		// lease work after an operator rotates the address to another target.
+		return false, nil
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE agent_message_deliveries SET state='leased',attempt_count=attempt_count+1,
 		lease_until=strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 seconds'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -384,6 +410,7 @@ type CompleteDeliveryInput struct {
 	DeliveryID     string
 	EffectiveLevel string
 	FallbackReason string
+	TargetID       string
 }
 
 // CompleteLocalDelivery records one accepted local primitive (including a
@@ -408,14 +435,17 @@ func (s *Service) CompleteLocalDelivery(ctx context.Context, in CompleteDelivery
 	}
 	var state string
 	var messageCursor int64
-	var requestedLevel, maximumLevel, adapter string
-	if err := tx.QueryRowContext(ctx, `SELECT d.state,d.requested_level,t.maximum_level,t.adapter,am.id
+	var requestedLevel, maximumLevel, adapter, targetID string
+	if err := tx.QueryRowContext(ctx, `SELECT d.state,d.requested_level,t.maximum_level,t.adapter,t.id,am.id
 		FROM agent_message_deliveries d
 		JOIN agent_messages am ON am.id=d.message_row_id
 		JOIN agent_message_targets t ON t.id=`+selectedDeliveryTargetSQL+`
 		WHERE d.delivery_id=? AND d.instance=? AND am.to_address=?`, in.DeliveryID, instanceName(), address).Scan(
-		&state, &requestedLevel, &maximumLevel, &adapter, &messageCursor); err != nil {
+		&state, &requestedLevel, &maximumLevel, &adapter, &targetID, &messageCursor); err != nil {
 		return nil, coded("agent_message_delivery_unknown", "delivery does not belong to this inbox")
+	}
+	if in.TargetID != "" && targetID != in.TargetID {
+		return nil, coded("agent_message_delivery_target_mismatch", "delivery is leased to another encrypted target binding")
 	}
 	if !IsLocalWorkerAdapter(adapter) {
 		return nil, coded("agent_message_delivery_adapter_mismatch", "local completion is available only for local harness adapters")

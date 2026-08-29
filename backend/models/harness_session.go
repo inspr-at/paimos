@@ -1,0 +1,54 @@
+// PAIMOS — Your Professional & Personal AI Project OS
+// Copyright (C) 2026 Markus Barta <markus@barta.com>
+
+package models
+
+// HarnessCapabilities is the closed set of capabilities advertised by one
+// harness session. The server caps these claims against the bound adapter;
+// they are never a server certification of vendor behavior.
+type HarnessCapabilities struct {
+	Inbox     bool `json:"inbox"`
+	Status    bool `json:"status"`
+	Steer     bool `json:"steer"`
+	Interrupt bool `json:"interrupt"`
+	Stop      bool `json:"stop"`
+}
+
+// HarnessSession is the durable control-plane identity for one agent process
+// or externally managed vendor session. The attribution session created by
+// `paimos session start` is a different resource and never appears here.
+type HarnessSession struct {
+	ID              string              `json:"id"`
+	ProjectID       int64               `json:"project_id"`
+	ProjectAgentID  int64               `json:"project_agent_id"`
+	AgentName       string              `json:"agent_name"`
+	Harness         string              `json:"harness"`
+	Host            string              `json:"host"`
+	MessageTargetID string              `json:"message_target_id,omitempty"`
+	ManagementMode  string              `json:"management_mode"`
+	Role            string              `json:"role"`
+	SteerMode       string              `json:"steer_mode"`
+	Capabilities    HarnessCapabilities `json:"advertised_capabilities"`
+	Phase           string              `json:"phase"`
+	HeartbeatAt     string              `json:"heartbeat_at,omitempty"`
+	YieldedAt       string              `json:"yielded_at,omitempty"`
+	YieldSequence   int64               `json:"yield_sequence"`
+	Revision        int64               `json:"revision"`
+	CreatedAt       string              `json:"created_at"`
+	UpdatedAt       string              `json:"updated_at"`
+}
+
+// HarnessControl is a typed interrupt/stop request. Free-form command text is
+// intentionally absent: the daemon maps these closed values to a child it owns.
+type HarnessControl struct {
+	ID                string `json:"id"`
+	HarnessSessionID  string `json:"harness_session_id"`
+	Sequence          int64  `json:"sequence"`
+	Kind              string `json:"kind"`
+	State             string `json:"state"`
+	Reason            string `json:"reason,omitempty"`
+	RequestedByUserID int64  `json:"requested_by_user_id"`
+	RequestedAt       string `json:"requested_at"`
+	ClaimedAt         string `json:"claimed_at,omitempty"`
+	CompletedAt       string `json:"completed_at,omitempty"`
+}
