@@ -620,6 +620,27 @@ bare `462` because that is indistinguishable from a pasted issue-key suffix.
 Commands whose argument is explicitly another resource ID, plus
 `paimos issue restore <id>`, keep ordinary bare numeric syntax.
 
+## Harness sessions
+
+- `GET|POST /projects/{id}/harness-sessions` — list/register durable,
+  non-secret managed or unmanaged harness identities.
+- `GET /projects/{id}/harness-sessions/{sessionID}` — status with host and
+  public session attribution; the encrypted private reference is never shown.
+- `POST .../{sessionID}/heartbeat` · `POST .../{sessionID}/yield` — attributed
+  status/yield and typed owned-control claim.
+- `POST .../{sessionID}/drain-steer` · `POST .../{sessionID}/complete-steer` —
+  canonical message-bus lease/completion preserving FIFO and delivery fields.
+- `POST .../{sessionID}/controls/{interrupt|stop}` ·
+  `POST .../{sessionID}/controls/{controlID}/complete` — typed owned-process
+  requests; no free-form command or PAI-809 action extension.
+- `POST .../{sessionID}/stop` — attributed terminal lifecycle transition after
+  worker cleanup.
+
+Capability fields are advertised and server-capped. Unmanaged steer is valid
+only for a bound Codex target whose plugin and durable target both cap at
+`steer`; unmanaged interrupt/stop and OpenClaw/private-socket transports are
+rejected.
+
 ---
 
 ## Create backlog item

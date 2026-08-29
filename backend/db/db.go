@@ -11747,6 +11747,92 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE INDEX idx_mutation_log_parent
 			 ON mutation_log(parent_log_id) WHERE parent_log_id IS NOT NULL`,
 		}},
+
+		// M161 / PAI-848: additive provider-neutral harness-session identity
+		// and typed owned-process controls. The private vendor session reference
+		// is encrypted in agent_message_targets; only a digest and safe target FK
+		// are stored here for replay identity and redacted attribution.
+		{161, []string{
+			`CREATE TABLE harness_sessions (
+			 id                   TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("id") + `),
+			 project_id           INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 project_agent_id     INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 agent_name           TEXT NOT NULL CHECK(` + sqlStableKeyCheck("agent_name", 64) + `),
+			 harness              TEXT NOT NULL CHECK(` + sqlStableKeyCheck("harness", 64) + ` AND lower(harness)<>'openclaw'),
+			 host                 TEXT NOT NULL CHECK(` + sqlStableKeyCheck("host", 128) + `),
+			 session_ref_digest   BLOB NOT NULL CHECK(typeof(session_ref_digest)='blob' AND length(session_ref_digest)=32),
+			 message_target_id    TEXT REFERENCES agent_message_targets(id),
+			 management_mode      TEXT NOT NULL CHECK(management_mode IN ('managed','unmanaged')),
+			 role                 TEXT NOT NULL CHECK(role IN ('coordinator','worker')),
+			 steer_mode           TEXT NOT NULL CHECK(steer_mode IN ('none','owned','codex_external')),
+			 advertised_inbox     INTEGER NOT NULL CHECK(advertised_inbox IN (0,1)),
+			 advertised_status    INTEGER NOT NULL CHECK(advertised_status IN (0,1)),
+			 advertised_steer     INTEGER NOT NULL CHECK(advertised_steer IN (0,1)),
+			 advertised_interrupt INTEGER NOT NULL CHECK(advertised_interrupt IN (0,1)),
+			 advertised_stop      INTEGER NOT NULL CHECK(advertised_stop IN (0,1)),
+			 phase                TEXT NOT NULL DEFAULT 'starting' CHECK(phase IN ('starting','working','yielded','stopping','stopped')),
+			 heartbeat_at         TEXT CHECK(` + sqlNullableControlTimestampCheck("heartbeat_at") + `),
+			 yielded_at           TEXT CHECK(` + sqlNullableControlTimestampCheck("yielded_at") + `),
+			 yield_sequence       INTEGER NOT NULL DEFAULT 0 CHECK(yield_sequence>=0),
+			 revision             INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),
+			 created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 UNIQUE(project_id,harness,host,session_ref_digest),
+			 CHECK((advertised_steer=0 AND steer_mode='none') OR (advertised_steer=1 AND steer_mode<>'none')),
+			 CHECK(advertised_steer=0 OR (advertised_inbox=1 AND advertised_status=1)),
+			 CHECK(advertised_interrupt=0 OR advertised_status=1),
+			 CHECK(advertised_stop=0 OR advertised_status=1),
+			 CHECK((management_mode='managed' AND advertised_status=1 AND
+			        (advertised_steer=0 OR steer_mode='owned')) OR
+			       (management_mode='unmanaged' AND advertised_interrupt=0 AND advertised_stop=0 AND
+			        (advertised_steer=0 OR (harness='codex' AND steer_mode='codex_external'))))
+			)`,
+			`CREATE UNIQUE INDEX idx_harness_sessions_active_address
+			 ON harness_sessions(project_id,harness,agent_name) WHERE phase<>'stopped'`,
+			`CREATE INDEX idx_harness_sessions_host_phase
+			 ON harness_sessions(host,phase,heartbeat_at)`,
+			`CREATE TRIGGER trg_harness_sessions_identity_immutable BEFORE UPDATE OF
+			 project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
+			 advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop
+			 ON harness_sessions BEGIN SELECT RAISE(ABORT,'harness session identity is immutable'); END`,
+			`CREATE TRIGGER trg_harness_sessions_agent_insert BEFORE INSERT ON harness_sessions
+			 WHEN NOT EXISTS(SELECT 1 FROM project_agents pa WHERE pa.id=NEW.project_agent_id
+			  AND pa.project_id=NEW.project_id AND pa.name=NEW.agent_name)
+			 BEGIN SELECT RAISE(ABORT,'harness session agent attribution mismatch'); END`,
+			`CREATE TRIGGER trg_harness_sessions_target_insert BEFORE INSERT ON harness_sessions
+			 WHEN NEW.message_target_id IS NOT NULL AND NOT EXISTS(
+			  SELECT 1 FROM agent_message_targets t WHERE t.id=NEW.message_target_id AND t.project_id=NEW.project_id
+			   AND t.address=lower(NEW.harness)||':'||NEW.agent_name)
+			 BEGIN SELECT RAISE(ABORT,'harness session target attribution mismatch'); END`,
+			`CREATE TRIGGER trg_harness_sessions_target_update BEFORE UPDATE OF message_target_id ON harness_sessions
+			 WHEN NEW.message_target_id IS NOT NULL AND NOT EXISTS(
+			  SELECT 1 FROM agent_message_targets t WHERE t.id=NEW.message_target_id AND t.project_id=NEW.project_id
+			   AND t.address=lower(NEW.harness)||':'||NEW.agent_name)
+			 BEGIN SELECT RAISE(ABORT,'harness session target attribution mismatch'); END`,
+			`CREATE TABLE harness_session_controls (
+			 id                    TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("id") + `),
+			 harness_session_id    TEXT NOT NULL REFERENCES harness_sessions(id) ON DELETE CASCADE,
+			 sequence              INTEGER NOT NULL CHECK(sequence>0),
+			 kind                  TEXT NOT NULL CHECK(kind IN ('interrupt','stop')),
+			 state                 TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','claimed','applied','rejected')),
+			 reason                TEXT NOT NULL DEFAULT '' CHECK(reason IN ('','applied','not_running','unsupported','ownership_lost','failed')),
+			 requested_by_user_id  INTEGER NOT NULL REFERENCES users(id),
+			 requested_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("requested_at") + `),
+			 claimed_at            TEXT CHECK(` + sqlNullableControlTimestampCheck("claimed_at") + `),
+			 completed_at          TEXT CHECK(` + sqlNullableControlTimestampCheck("completed_at") + `),
+			 UNIQUE(harness_session_id,sequence),
+			 CHECK((state='pending' AND claimed_at IS NULL AND completed_at IS NULL AND reason='') OR
+			       (state='claimed' AND claimed_at IS NOT NULL AND completed_at IS NULL AND reason='') OR
+			       (state IN ('applied','rejected') AND claimed_at IS NOT NULL AND completed_at IS NOT NULL AND reason<>''))
+			)`,
+			`CREATE UNIQUE INDEX idx_harness_session_control_active
+			 ON harness_session_controls(harness_session_id,kind) WHERE state IN ('pending','claimed')`,
+			`CREATE INDEX idx_harness_session_control_drain
+			 ON harness_session_controls(harness_session_id,state,sequence)`,
+			`CREATE TRIGGER trg_harness_session_control_identity_immutable BEFORE UPDATE OF
+			 harness_session_id,sequence,kind,requested_by_user_id,requested_at
+			 ON harness_session_controls BEGIN SELECT RAISE(ABORT,'harness session control identity is immutable'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -11892,6 +11978,15 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	152: checkM152SchemaIsUnapplied,
 	153: checkM153SchemaIsUnapplied,
 	154: checkM154SchemaIsUnapplied,
+	161: func(ctx context.Context, conn *sql.Conn) error {
+		return checkSchemaObjectsAbsent(ctx, conn, 161, []string{
+			"harness_sessions", "idx_harness_sessions_active_address", "idx_harness_sessions_host_phase",
+			"trg_harness_sessions_identity_immutable", "trg_harness_sessions_agent_insert", "trg_harness_sessions_target_insert",
+			"trg_harness_sessions_target_update", "harness_session_controls",
+			"idx_harness_session_control_active", "idx_harness_session_control_drain",
+			"trg_harness_session_control_identity_immutable",
+		})
+	},
 }
 
 func checkM154SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {

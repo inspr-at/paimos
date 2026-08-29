@@ -755,3 +755,21 @@ This slice requires no vendor verb.
 - No automatic release of historical held rows.
 - No exactly-once claim for model attention or vendor-side execution.
 - No storage of vendor responses as implicit replies.
+
+## 13. Managed harness worker binding (PAI-848)
+
+The additive M161 `harness_sessions` resource binds one active harness address
+to an encrypted `agent_message_targets` version. It is intentionally separate
+from `agent_runs` and all PAI-809 supervisory-control tables/actions. The
+private vendor session reference remains target ciphertext; M161 retains only
+its domain-separated digest and target FK for idempotent identity and redacted
+host/session attribution.
+
+`managed_harness` is a local adapter with `MaximumLevel=steer`. It has no
+delivery primitive: the PAI-849 daemon leases through `ListInbox` and commits
+through `CompleteLocalDelivery`. This keeps the message ledger authoritative
+for FIFO, leases, requested/effective levels, fallback reasons, handoff time,
+and cursor acknowledgement. The harness drain response strips the decrypted
+target reference before crossing HTTP. Unmanaged steer additionally requires
+the existing `codex` adapter and a `steer` target cap; CLI validation is only
+an early error, not the security boundary.

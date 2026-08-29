@@ -1138,3 +1138,43 @@ Use markdown freely — the web UI renders it.
 
 That is the whole integration surface. An agent that can `curl` can
 collaborate.
+
+## Durable harness-session control plane (PAI-848)
+
+`paimos harness` is the control-plane noun for a running harness process. It
+does not replace or alias `paimos session start`, which remains attribution
+only. The durable resource is `/api/projects/{id}/harness-sessions`; it records
+the project agent, harness address, non-secret host attribution,
+managed/unmanaged ownership, coordinator/worker role, phase, heartbeat/yield
+state, and advertised `inbox`, `status`, `steer`, `interrupt`, and `stop`
+capabilities.
+
+Capabilities are advertisements constrained by PAIMOS policy, never server
+certification of vendor behavior. Managed sessions can advertise owned steer,
+interrupt, and stop. Unmanaged sessions cannot advertise interrupt or stop;
+steer is limited to the documented Codex external primitive and is checked
+server-side against both the adapter `MaximumLevel` and durable target cap.
+Claude and every simple-only adapter remain capped to simple delivery.
+
+Register with a private reference from an owner-only file:
+
+```bash
+paimos harness register --project PAI --agent worker --harness codex \
+  --host build-mbp --harness-session-file ./thread-id --management managed \
+  --role worker --steer-mode owned \
+  --capability inbox,status,steer,interrupt,stop
+```
+
+The write-only reference is encrypted in `agent_message_targets`. M161's
+separate `harness_sessions` table stores only a domain-separated digest and
+safe target FK; list/status responses expose host and public harness-session
+UUID but never the private reference, vendor credentials, URLs, sockets, or
+OpenClaw state.
+
+The PAI-849 worker must heartbeat, yield to claim typed interrupt/stop rows,
+lease steer through `POST .../{sessionID}/drain-steer`, and acknowledge the
+lease through `POST .../{sessionID}/complete-steer`. Those endpoints call the
+existing attributed `ListInbox` worker and `CompleteLocalDelivery`, preserving
+FIFO, `effective_level`, `fallback_reason`, `handed_off_at`, and cursor state.
+After owned cleanup it marks the session stopped through
+`POST .../{sessionID}/stop`. PAI-848 starts no process and defines no daemon.

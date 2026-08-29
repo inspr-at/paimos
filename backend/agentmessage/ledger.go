@@ -46,6 +46,7 @@ type ListFilter struct {
 	ThreadID      string
 	IssueID       *int64
 	DeliveredOnly bool
+	DeliveryLevel string
 	AfterID       int64
 	Limit         int
 }
@@ -55,6 +56,8 @@ type InboxInput struct {
 	Address       string
 	Agent         string
 	WorkerAdapter string
+	DeliveryLevel string
+	TargetID      string
 	AfterID       int64
 	Limit         int
 }
@@ -343,6 +346,13 @@ func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, 
 	if f.DeliveredOnly {
 		q += ` AND am.delivered=1 AND am.is_action_request=0`
 	}
+	if f.DeliveryLevel != "" {
+		if f.DeliveryLevel != "simple" && f.DeliveryLevel != "steer" {
+			return nil, coded("agent_message_delivery_level_invalid", "delivery_level must be simple or steer")
+		}
+		q += ` AND am.delivery_level=?`
+		args = append(args, f.DeliveryLevel)
+	}
 	q += ` ORDER BY am.id ASC LIMIT ?`
 	args = append(args, f.Limit)
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -381,7 +391,7 @@ func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, err
 		in.AfterID = cursor
 	}
 	messages, err := s.ListEnvelopes(ctx, ListFilter{
-		ProjectID: in.ProjectID, To: address, DeliveredOnly: true, AfterID: in.AfterID, Limit: in.Limit,
+		ProjectID: in.ProjectID, To: address, DeliveredOnly: true, DeliveryLevel: in.DeliveryLevel, AfterID: in.AfterID, Limit: in.Limit,
 	})
 	if err != nil {
 		return nil, err
@@ -389,7 +399,7 @@ func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, err
 	if in.WorkerAdapter != "" {
 		leased := messages[:0]
 		for i := range messages {
-			include, err := s.attachDeliveryWork(ctx, in.ProjectID, address, in.Agent, in.WorkerAdapter, &messages[i])
+			include, err := s.attachDeliveryWork(ctx, in.ProjectID, address, in.Agent, in.WorkerAdapter, in.TargetID, &messages[i])
 			if err != nil {
 				return nil, err
 			}

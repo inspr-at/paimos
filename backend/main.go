@@ -599,6 +599,8 @@ func mountAPI(r chi.Router) {
 		// limits, rate limits. Action-request messages are NEVER
 		// delivered as executable; they surface to humans only.
 		handlers.RegisterAgentMessageRoutes(r)
+		// PAI-848 — durable harness-session identity and daemon-owned controls.
+		handlers.RegisterHarnessSessionRoutes(r)
 		// PAI-607: online implement-capable runners for the device picker.
 		r.With(auth.RequireProjectView).Get("/projects/{id}/runners", handlers.ListProjectRunners)
 		r.With(auth.RequireProjectView).Get("/projects/{id}/runs", handlers.ListProjectRuns)
