@@ -1172,13 +1172,17 @@ UUID but never the private reference, vendor credentials, URLs, sockets, or
 OpenClaw state.
 
 The PAI-849 worker must heartbeat, yield to claim typed interrupt/stop rows,
-lease steer through `POST .../{sessionID}/drain-steer`, and acknowledge the
-lease through `POST .../{sessionID}/complete-steer`. Those endpoints call the
-existing attributed `ListInbox` worker and `CompleteLocalDelivery`, preserving
-FIFO, `effective_level`, `fallback_reason`, `handed_off_at`, and cursor state.
+lease inbox work through `POST .../{sessionID}/drain`, and acknowledge each
+lease through `POST .../{sessionID}/complete-delivery`. Those endpoints call
+the existing attributed `ListInbox` worker without a level filter and
+`CompleteLocalDelivery`, preserving FIFO across simple and steer,
+`effective_level`, `fallback_reason`, `handed_off_at`, and cursor state. The
+steer-named endpoints remain compatibility aliases for steer-capable workers;
+they also return older simple work first and must complete it as simple.
 After owned cleanup it marks the session stopped through
 `POST .../{sessionID}/stop`. PAI-848 starts no process and defines no daemon.
-Stopping closes that immutable generation: registering the same stable
-external session reference again creates a new public harness-session UUID,
-while the stopped row remains available as history and active retries remain
-idempotent.
+Stopping closes that immutable harness-session generation: registering the
+same stable external session reference again creates a new public
+harness-session UUID while reusing the matching enabled encrypted target
+version. This retains stopped-row history and keeps pre-stop delivery snapshots
+drainable; active retries remain idempotent.

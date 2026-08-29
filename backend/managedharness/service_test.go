@@ -200,12 +200,25 @@ func TestStoppedSessionCanRegisterNewActiveGeneration(t *testing.T) {
 	if _, err := service.Heartbeat(context.Background(), first.ID, PhaseWorking); err != nil {
 		t.Fatal(err)
 	}
+	bus := agentmessage.NewService(paimosdb.DB)
+	if err := bus.AllowSender(context.Background(), projectID, "codex:worker", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	simpleMessage, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "queued before restart", DeliveryLevel: "simple",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := service.Stop(context.Background(), first.ID); err != nil {
 		t.Fatal(err)
 	}
 	second, created, err := service.Register(context.Background(), input)
 	if err != nil || !created || second.ID == first.ID {
 		t.Fatalf("replacement register: first=%s second=%s created=%v err=%v", first.ID, second.ID, created, err)
+	}
+	if second.MessageTargetID != first.MessageTargetID {
+		t.Fatalf("replacement rotated stable encrypted binding: first=%s second=%s", first.MessageTargetID, second.MessageTargetID)
 	}
 	old, err := service.GetByID(context.Background(), first.ID)
 	if err != nil || old.Phase != PhaseStopped {
@@ -217,6 +230,38 @@ func TestStoppedSessionCanRegisterNewActiveGeneration(t *testing.T) {
 	yielded, err := service.Yield(context.Background(), second.ID)
 	if err != nil || yielded.Session.ID != second.ID || yielded.Session.Phase != PhaseYielded || yielded.Session.YieldSequence != 1 {
 		t.Fatalf("replacement yield=%#v err=%v", yielded, err)
+	}
+	steerMessage, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "queued after restart", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain := func(wantCursor int64, wantLevel string) {
+		t.Helper()
+		page, listErr := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+			ProjectID: projectID, Address: Address(second), Agent: second.AgentName,
+			WorkerAdapter: agentmessage.AdapterManagedHarness, TargetID: second.MessageTargetID, Limit: 100,
+		})
+		if listErr != nil || len(page.Messages) != 1 || page.Messages[0].Cursor != wantCursor || page.Messages[0].DeliveryWork == nil {
+			t.Fatalf("drain cursor=%d level=%s page=%#v err=%v", wantCursor, wantLevel, page, listErr)
+		}
+		work := page.Messages[0].DeliveryWork
+		if work.RequestedLevel != wantLevel || work.State != "leased" || work.TargetRef != input.SessionRef {
+			t.Fatalf("drain work=%#v want level=%s", work, wantLevel)
+		}
+		if _, completeErr := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+			ProjectID: projectID, Address: Address(second), Agent: second.AgentName, Cursor: wantCursor,
+			DeliveryID: work.DeliveryID, EffectiveLevel: wantLevel, TargetID: second.MessageTargetID,
+		}); completeErr != nil {
+			t.Fatalf("complete cursor=%d level=%s: %v", wantCursor, wantLevel, completeErr)
+		}
+	}
+	drain(simpleMessage.Cursor, "simple")
+	drain(steerMessage.Cursor, "steer")
+	var handedOff int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_deliveries WHERE state='handed_off' AND handed_off_at IS NOT NULL`).Scan(&handedOff); err != nil || handedOff != 2 {
+		t.Fatalf("canonical delivery completions=%d err=%v", handedOff, err)
 	}
 
 	const replays = 8
@@ -259,6 +304,63 @@ func TestStoppedSessionCanRegisterNewActiveGeneration(t *testing.T) {
 	}
 	if total != 2 || active != 1 {
 		t.Fatalf("history total=%d active=%d", total, active)
+	}
+}
+
+func TestConcurrentInitialRegistrationReplayCreatesOneActiveRow(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	input := RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "concurrent-thread-ref",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+	}
+	type result struct {
+		session models.HarnessSession
+		created bool
+		err     error
+	}
+	const attempts = 8
+	start := make(chan struct{})
+	results := make(chan result, attempts)
+	var wg sync.WaitGroup
+	for range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			session, created, err := service.Register(context.Background(), input)
+			results <- result{session: session, created: created, err: err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var id string
+	createdCount := 0
+	for got := range results {
+		if got.err != nil {
+			t.Fatalf("concurrent replay: %v", got.err)
+		}
+		if got.created {
+			createdCount++
+		}
+		if id == "" {
+			id = got.session.ID
+		}
+		if got.session.ID != id {
+			t.Fatalf("concurrent replay IDs: got=%s want=%s", got.session.ID, id)
+		}
+		if got.session.MessageTargetID == "" {
+			t.Fatal("concurrent replay returned before the encrypted target binding was durable")
+		}
+	}
+	if createdCount != 1 {
+		t.Fatalf("created results=%d want 1", createdCount)
+	}
+	var active int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_sessions WHERE project_id=? AND phase<>'stopped'`, projectID).Scan(&active); err != nil || active != 1 {
+		t.Fatalf("active rows=%d err=%v", active, err)
 	}
 }
 

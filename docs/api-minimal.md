@@ -628,8 +628,10 @@ Commands whose argument is explicitly another resource ID, plus
   public session attribution; the encrypted private reference is never shown.
 - `POST .../{sessionID}/heartbeat` · `POST .../{sessionID}/yield` — attributed
   status/yield and typed owned-control claim.
-- `POST .../{sessionID}/drain-steer` · `POST .../{sessionID}/complete-steer` —
-  canonical message-bus lease/completion preserving FIFO and delivery fields.
+- `POST .../{sessionID}/drain` · `POST .../{sessionID}/complete-delivery` —
+  canonical full-FIFO message-bus lease/completion for both simple and steer,
+  preserving delivery fields. The legacy steer-named pair is a compatibility
+  alias for steer-capable workers and also drains older simple work first.
 - `POST .../{sessionID}/controls/{interrupt|stop}` ·
   `POST .../{sessionID}/controls/{controlID}/complete` — typed owned-process
   requests; no free-form command or PAI-809 action extension.

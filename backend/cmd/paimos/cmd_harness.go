@@ -17,7 +17,8 @@ import (
 func harnessCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "harness", Short: "Manage durable harness-session control-plane state"}
 	cmd.AddCommand(harnessRegisterCmd(), harnessListCmd(), harnessStatusCmd(), harnessHeartbeatCmd(), harnessYieldCmd(),
-		harnessDrainSteerCmd(), harnessCompleteSteerCmd(), harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessCompleteControlCmd(), harnessMarkStoppedCmd())
+		harnessDrainCmd(), harnessCompleteDeliveryCmd(), harnessDrainSteerCmd(), harnessCompleteSteerCmd(),
+		harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessCompleteControlCmd(), harnessMarkStoppedCmd())
 	return cmd
 }
 
@@ -159,18 +160,27 @@ func harnessHeartbeatCmd() *cobra.Command {
 func harnessYieldCmd() *cobra.Command {
 	return harnessProjectCommand("yield", "Yield and claim typed owned controls", http.MethodPost, "/{session}/yield", func() any { return map[string]any{} }, true)
 }
+func harnessDrainCmd() *cobra.Command {
+	return harnessProjectCommand("drain", "Lease managed inbox work in canonical FIFO order", http.MethodPost, "/{session}/drain", func() any { return map[string]any{} }, true)
+}
 func harnessDrainSteerCmd() *cobra.Command {
-	return harnessProjectCommand("drain-steer", "Lease FIFO steer work through the canonical inbox worker", http.MethodPost, "/{session}/drain-steer", func() any { return map[string]any{} }, true)
+	return harnessProjectCommand("drain-steer", "Lease full FIFO work for a steer-capable managed worker", http.MethodPost, "/{session}/drain-steer", func() any { return map[string]any{} }, true)
+}
+func harnessCompleteDeliveryCmd() *cobra.Command {
+	return harnessDeliveryCompletionCmd("complete-delivery", "Complete a leased managed delivery canonically", "/{session}/complete-delivery", "simple")
 }
 func harnessCompleteSteerCmd() *cobra.Command {
+	return harnessDeliveryCompletionCmd("complete-steer", "Complete a leased delivery for a steer-capable worker", "/{session}/complete-steer", "steer")
+}
+func harnessDeliveryCompletionCmd(use, short, suffix, defaultLevel string) *cobra.Command {
 	var cursor int64
 	var delivery, level, reason string
-	cmd := harnessProjectCommand("complete-steer", "Complete a leased steer delivery canonically", http.MethodPost, "/{session}/complete-steer", func() any {
+	cmd := harnessProjectCommand(use, short, http.MethodPost, suffix, func() any {
 		return map[string]any{"cursor": cursor, "delivery_id": delivery, "effective_level": level, "fallback_reason": reason}
 	}, true)
 	cmd.Flags().Int64Var(&cursor, "cursor", 0, "leased message cursor")
 	cmd.Flags().StringVar(&delivery, "delivery-id", "", "leased delivery UUID")
-	cmd.Flags().StringVar(&level, "effective-level", "steer", "simple or steer")
+	cmd.Flags().StringVar(&level, "effective-level", defaultLevel, "simple or steer")
 	cmd.Flags().StringVar(&reason, "fallback-reason", "", "canonical fallback reason when effective level is simple")
 	return cmd
 }

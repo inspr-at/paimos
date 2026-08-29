@@ -767,13 +767,17 @@ host/session attribution.
 
 Identity and address uniqueness apply only while a generation is active. A
 stopped row is immutable history; re-registering the same stable external
-reference creates a fresh public row and encrypted target binding.
+reference creates a fresh public row and reuses its matching enabled encrypted
+target version, so delivery snapshots from the prior generation remain FIFO-
+drainable without exposing or rewriting the private reference.
 
 `managed_harness` is a local adapter with `MaximumLevel=steer`. It has no
-delivery primitive: the PAI-849 daemon leases through `ListInbox` and commits
-through `CompleteLocalDelivery`. This keeps the message ledger authoritative
-for FIFO, leases, requested/effective levels, fallback reasons, handoff time,
-and cursor acknowledgement. The harness drain response strips the decrypted
-target reference before crossing HTTP. Unmanaged steer additionally requires
-the existing `codex` adapter and a `steer` target cap; CLI validation is only
-an early error, not the security boundary.
+delivery primitive: the PAI-849 daemon leases the complete address FIFO through
+`ListInbox` without a level filter and commits through `CompleteLocalDelivery`.
+Simple-only managed sessions use the same path; steer-capable sessions must
+complete older simple work before later steer. This keeps the message ledger
+authoritative for FIFO, leases, requested/effective levels, fallback reasons,
+handoff time, and cursor acknowledgement. The harness drain response strips
+the decrypted target reference before crossing HTTP. Unmanaged steer
+additionally requires the existing `codex` adapter and a `steer` target cap;
+CLI validation is only an early error, not the security boundary.

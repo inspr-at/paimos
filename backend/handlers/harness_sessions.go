@@ -26,6 +26,8 @@ func RegisterHarnessSessionRoutes(r chi.Router) {
 	r.With(auth.RequireProjectView).Get("/projects/{id}/harness-sessions/{sessionID}", getHarnessSession)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/heartbeat", heartbeatHarnessSession)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/yield", yieldHarnessSession)
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/drain", drainHarnessDeliveries)
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/complete-delivery", completeHarnessDelivery)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/drain-steer", drainHarnessSteer)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/complete-steer", completeHarnessSteer)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/controls/{kind}", requestHarnessControl)
@@ -195,7 +197,15 @@ func yieldHarnessSession(w http.ResponseWriter, r *http.Request) {
 	writeHarnessJSON(w, 200, out)
 }
 
+func drainHarnessDeliveries(w http.ResponseWriter, r *http.Request) {
+	drainHarnessInbox(w, r, false)
+}
+
 func drainHarnessSteer(w http.ResponseWriter, r *http.Request) {
+	drainHarnessInbox(w, r, true)
+}
+
+func drainHarnessInbox(w http.ResponseWriter, r *http.Request, requireSteer bool) {
 	projectID, ok := harnessProjectID(w, r)
 	if !ok {
 		return
@@ -204,13 +214,20 @@ func drainHarnessSteer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if session.ManagementMode != managedharness.ManagementManaged || session.SteerMode != managedharness.SteerOwned || !session.Capabilities.Steer {
+	if session.ManagementMode != managedharness.ManagementManaged || session.Phase == managedharness.PhaseStopped || !session.Capabilities.Inbox {
+		harnessProblem(w, errors.New("managed inbox delivery is unavailable"), managedharness.CodeCapabilityUnavailable, 400)
+		return
+	}
+	if requireSteer && (session.SteerMode != managedharness.SteerOwned || !session.Capabilities.Steer) {
 		harnessProblem(w, errors.New("owned steer is unavailable"), managedharness.CodeCapabilityUnavailable, 400)
 		return
 	}
-	page, err := agentmessage.NewService(db.DB).ListInbox(r.Context(), agentmessage.InboxInput{ProjectID: projectID, Address: managedharness.Address(session), Agent: session.AgentName, WorkerAdapter: agentmessage.AdapterManagedHarness, DeliveryLevel: "steer", TargetID: session.MessageTargetID, Limit: 100})
+	// Never filter by requested delivery level here: the canonical ledger is
+	// FIFO across simple and steer work, so a steer-capable worker must first
+	// complete any older simple message for the same address.
+	page, err := agentmessage.NewService(db.DB).ListInbox(r.Context(), agentmessage.InboxInput{ProjectID: projectID, Address: managedharness.Address(session), Agent: session.AgentName, WorkerAdapter: agentmessage.AdapterManagedHarness, TargetID: session.MessageTargetID, Limit: 100})
 	if err != nil {
-		harnessProblem(w, err, "harness_session_steer_drain_failed", 400)
+		harnessProblem(w, err, "harness_session_delivery_drain_failed", 400)
 		return
 	}
 	for i := range page.Messages {
@@ -220,7 +237,16 @@ func drainHarnessSteer(w http.ResponseWriter, r *http.Request) {
 	}
 	writeHarnessJSON(w, 200, page)
 }
+
+func completeHarnessDelivery(w http.ResponseWriter, r *http.Request) {
+	completeHarnessInboxDelivery(w, r, false)
+}
+
 func completeHarnessSteer(w http.ResponseWriter, r *http.Request) {
+	completeHarnessInboxDelivery(w, r, true)
+}
+
+func completeHarnessInboxDelivery(w http.ResponseWriter, r *http.Request, requireSteer bool) {
 	projectID, ok := harnessProjectID(w, r)
 	if !ok {
 		return
@@ -229,7 +255,11 @@ func completeHarnessSteer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if session.ManagementMode != managedharness.ManagementManaged || !session.Capabilities.Steer {
+	if session.ManagementMode != managedharness.ManagementManaged || session.Phase == managedharness.PhaseStopped || !session.Capabilities.Inbox {
+		harnessProblem(w, errors.New("managed inbox delivery is unavailable"), managedharness.CodeCapabilityUnavailable, 400)
+		return
+	}
+	if requireSteer && (session.SteerMode != managedharness.SteerOwned || !session.Capabilities.Steer) {
 		harnessProblem(w, errors.New("owned steer is unavailable"), managedharness.CodeCapabilityUnavailable, 400)
 		return
 	}
@@ -237,9 +267,13 @@ func completeHarnessSteer(w http.ResponseWriter, r *http.Request) {
 	if !decodeHarnessJSON(w, r, &req) {
 		return
 	}
+	if req.EffectiveLevel == "steer" && (session.SteerMode != managedharness.SteerOwned || !session.Capabilities.Steer) {
+		harnessProblem(w, errors.New("effective steer exceeds this session's advertised capability"), managedharness.CodeCapabilityUnavailable, 400)
+		return
+	}
 	state, err := agentmessage.NewService(db.DB).CompleteLocalDelivery(r.Context(), agentmessage.CompleteDeliveryInput{ProjectID: projectID, Address: managedharness.Address(session), Agent: session.AgentName, Cursor: req.Cursor, DeliveryID: req.DeliveryID, EffectiveLevel: req.EffectiveLevel, FallbackReason: req.FallbackReason, TargetID: session.MessageTargetID})
 	if err != nil {
-		harnessProblem(w, err, "harness_session_steer_complete_failed", 400)
+		harnessProblem(w, err, "harness_session_delivery_complete_failed", 400)
 		return
 	}
 	writeHarnessJSON(w, 200, state)

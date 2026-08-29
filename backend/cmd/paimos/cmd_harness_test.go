@@ -25,6 +25,12 @@ func TestHarnessNounDoesNotCollideWithAttributionSession(t *testing.T) {
 			t.Fatal("managed harness control plane must not define a second ambiguous start command")
 		}
 	}
+	for _, name := range []string{"drain", "complete-delivery", "drain-steer", "complete-steer"} {
+		child, _, findErr := root.Find([]string{"harness", name})
+		if findErr != nil || child.Name() != name {
+			t.Fatalf("harness %s command missing: command=%v err=%v", name, child, findErr)
+		}
+	}
 }
 
 func TestHarnessRegisterRejectsCapabilityEscalationBeforeNetwork(t *testing.T) {

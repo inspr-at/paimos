@@ -4534,7 +4534,7 @@
         "tags": ["agents"], "summary": "Register a managed or unmanaged harness session",
         "description": "The write-only private session reference is encrypted in an agent-message target; M161 stores only a digest and safe FK. Capability claims are advertised and capped by adapter MaximumLevel and target policy.",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSessionRegister"}}}},
-        "responses": {"201": {"description": "Registered", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "400": {"description": "Invalid capability or ownership claim"}, "409": {"description": "Active identity conflict"}}
+        "responses": {"200": {"description": "Idempotent replay of the active registration", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "201": {"description": "Registered", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "400": {"description": "Invalid capability or ownership claim"}, "409": {"description": "Active identity or address conflict"}}
       }
     },
     "/api/projects/{id}/harness-sessions/{sessionID}": {
@@ -4549,13 +4549,21 @@
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
       "post": {"tags": ["agents"], "summary": "Yield and claim typed owned interrupt/stop requests", "responses": {"200": {"description": "Yielded session and claimed controls"}, "403": {"description": "Agent attribution mismatch"}}}
     },
+    "/api/projects/{id}/harness-sessions/{sessionID}/drain": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+      "post": {"tags": ["agents"], "summary": "Lease managed inbox work in canonical FIFO order", "description": "Uses attributed ListInbox with the managed_harness local adapter and no level filter, so older simple work cannot block later steer. The encrypted target ref is used internally and removed from this response.", "responses": {"200": {"description": "Canonical inbox page with at most the next leased delivery work"}, "400": {"description": "Managed inbox unavailable"}, "403": {"description": "Agent attribution mismatch"}}}
+    },
+    "/api/projects/{id}/harness-sessions/{sessionID}/complete-delivery": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+      "post": {"tags": ["agents"], "summary": "Complete a leased managed delivery through CompleteLocalDelivery", "description": "Preserves canonical effective_level, fallback_reason, handed_off_at, cursor advancement, FIFO, and adapter/target/session caps.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessDeliveryComplete"}}}}, "responses": {"200": {"description": "Advanced canonical inbox cursor"}, "400": {"description": "Delivery or capability validation failed"}}}
+    },
     "/api/projects/{id}/harness-sessions/{sessionID}/drain-steer": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "post": {"tags": ["agents"], "summary": "Lease FIFO steer work through the canonical attributed listen worker", "description": "Uses ListInbox with the managed_harness local adapter. The encrypted target ref is checked internally and removed from this response.", "responses": {"200": {"description": "Canonical inbox page with leased steer delivery work"}, "400": {"description": "Owned steer unavailable"}, "403": {"description": "Agent attribution mismatch"}}}
+      "post": {"tags": ["agents"], "summary": "Compatibility drain for a steer-capable managed worker", "description": "Leases the same complete FIFO as drain, including older simple work; it never applies a steer-only level filter. The encrypted target ref is checked internally and removed from this response.", "responses": {"200": {"description": "Canonical inbox page with at most the next leased simple or steer work"}, "400": {"description": "Owned steer unavailable"}, "403": {"description": "Agent attribution mismatch"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/complete-steer": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "post": {"tags": ["agents"], "summary": "Complete a leased steer delivery through CompleteLocalDelivery", "description": "Preserves canonical effective_level, fallback_reason, handed_off_at, cursor advancement, FIFO, and adapter/target MaximumLevel caps.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessDeliveryComplete"}}}}, "responses": {"200": {"description": "Advanced canonical inbox cursor"}, "400": {"description": "Delivery or capability validation failed"}}}
+      "post": {"tags": ["agents"], "summary": "Compatibility completion for a steer-capable managed worker", "description": "Completes either simple or steer work returned by drain-steer through CompleteLocalDelivery, preserving canonical delivery evidence and caps.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessDeliveryComplete"}}}}, "responses": {"200": {"description": "Advanced canonical inbox cursor"}, "400": {"description": "Delivery or capability validation failed"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/controls/{kind}": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "kind", "in": "path", "required": true, "schema": {"type": "string", "enum": ["interrupt", "stop"]}}],

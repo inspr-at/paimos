@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -54,6 +55,14 @@ const (
 )
 
 var stableValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
+
+// registerMu closes the short in-process gap between claiming an active
+// harness_sessions identity and attaching its encrypted target FK. The partial
+// unique indexes remain the durable cross-process authority; PAIMOS runs one
+// SQLite-owning backend process, so serializing this low-volume control-plane
+// operation also guarantees that idempotent HTTP replays never observe a
+// half-initialized managed row.
+var registerMu sync.Mutex
 
 type Error struct {
 	Code string
@@ -202,8 +211,30 @@ func (s *Service) validateTarget(ctx context.Context, in RegisterInput) (string,
 		if in.Capabilities.Steer {
 			level = harnessplugin.LevelSteer
 		}
+		address := in.Harness + ":" + in.AgentName
+		targets, err := bus.ListTargets(ctx, in.ProjectID, address)
+		if err != nil {
+			return "", err
+		}
+		for _, target := range targets {
+			if !target.Enabled || target.Role != "primary" || target.Adapter != agentmessage.AdapterManagedHarness ||
+				target.TargetKind != agentmessage.TargetKindHarnessSession {
+				continue
+			}
+			matches, matchErr := bus.TargetRefMatches(ctx, in.ProjectID, target.ID, in.SessionRef)
+			if matchErr != nil {
+				return "", matchErr
+			}
+			if matches {
+				// Stable external identities retain their encrypted target version and
+				// its immutable MaximumLevel cap. Delivery rows snapshot this ID, so
+				// reuse preserves FIFO across stopped harness-session generations
+				// without exposing the ref or escalating prior receiver policy.
+				return target.ID, nil
+			}
+		}
 		target, err := bus.RegisterTarget(ctx, agentmessage.RegisterTargetInput{
-			ProjectID: in.ProjectID, Address: in.Harness + ":" + in.AgentName,
+			ProjectID: in.ProjectID, Address: address,
 			Adapter: agentmessage.AdapterManagedHarness, TargetKind: agentmessage.TargetKindHarnessSession,
 			TargetRef: in.SessionRef, MaximumLevel: level, Role: "primary",
 		})
@@ -241,11 +272,13 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 	if err := validateRegister(in); err != nil {
 		return models.HarnessSession{}, false, err
 	}
+	registerMu.Lock()
+	defer registerMu.Unlock()
 	digest := digestRef(in.ProjectID, in.Harness, in.Host, in.SessionRef)
 	existing, err := scanSession(s.db.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND harness=? AND host=? AND session_ref_digest=? AND phase<>'stopped'`, in.ProjectID, in.Harness, in.Host, digest))
 	if err == nil {
 		if !sameRegistration(existing, in) {
-			return models.HarnessSession{}, false, coded(CodeConflict, "harness session is already registered with different advertised capabilities")
+			return models.HarnessSession{}, false, coded(CodeConflict, "stable external identity is already registered with different agent, ownership, role, or advertised capabilities")
 		}
 		return existing, false, nil
 	}
@@ -277,7 +310,23 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, nullString(targetID), in.ManagementMode, in.Role, in.SteerMode,
 		boolInt(c.Inbox), boolInt(c.Status), boolInt(c.Steer), boolInt(c.Interrupt), boolInt(c.Stop), PhaseStarting)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		const identityConstraint = "UNIQUE constraint failed: harness_sessions.project_id, harness_sessions.harness, harness_sessions.host, harness_sessions.session_ref_digest"
+		const addressConstraint = "UNIQUE constraint failed: harness_sessions.project_id, harness_sessions.harness, harness_sessions.agent_name"
+		identityConflict := strings.Contains(err.Error(), identityConstraint)
+		addressConflict := strings.Contains(err.Error(), addressConstraint)
+		if identityConflict || addressConflict {
+			replay, replayErr := scanSession(s.db.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND harness=? AND host=? AND session_ref_digest=? AND phase<>'stopped'`, in.ProjectID, in.Harness, in.Host, digest))
+			if replayErr == nil && sameRegistration(replay, in) {
+				return replay, false, nil
+			}
+			if replayErr != nil && !errors.Is(replayErr, sql.ErrNoRows) {
+				return models.HarnessSession{}, false, replayErr
+			}
+		}
+		switch {
+		case identityConflict:
+			return models.HarnessSession{}, false, coded(CodeConflict, "an active harness session already owns this stable external identity")
+		case addressConflict:
 			return models.HarnessSession{}, false, coded(CodeConflict, "an active harness session already owns this agent address")
 		}
 		return models.HarnessSession{}, false, err
