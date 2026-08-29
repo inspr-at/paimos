@@ -27,6 +27,7 @@ Start here when opening this repo cold.
 - `GET /api/projects/{id}/agents/{name}.json` — canonical agent artifact (PAI-329)
 - `GET /api/projects/{id}/messages/listen` · `POST /api/projects/{id}/messages/ack` — attributed durable agent inbox (PAI-816)
 - `POST /api/projects/{id}/messages` · `GET|POST /api/projects/{id}/message-targets` · `GET /api/projects/{id}/message-deliveries` — durable send with `delivery_level`, encrypted receiver targets, and redacted delivery state (PAI-826; see [`docs/api-minimal.md`](docs/api-minimal.md))
+- `GET|POST /api/projects/{id}/harness-sessions` · `POST /api/projects/{id}/harness-sessions/{sessionID}/{heartbeat|yield|drain|complete-delivery|stop}` · `POST .../{sessionID}/controls/{kind}` — durable managed/unmanaged harness control plane with attributed full-FIFO inbox delivery and typed owned controls (PAI-848; see [`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md))
 - `POST /api/issues/{id}/implement` · `GET /api/issues/{id}/runs` · `GET|PATCH /api/runs/{id}` · `GET /api/projects/{id}/runners` — "Implement this" run lifecycle (PAI-605; see [`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md))
 
 ## Repo-side tooling
@@ -39,6 +40,7 @@ Start here when opening this repo cold.
 - `paimos tell <harness>:<agent> --project PAI --level simple|steer -m <text>` — durable message with receiver interruption intent; `--action-request` holds it for humans (PAI-826)
 - `paimos message target set --project PAI --address <harness>:<agent> --adapter codex|grok_bot_routine|claude_resume|claude_channel --kind codex_thread|https_webhook|claude_session …` — register an encrypted receiver target; `grok_bot_routine` additionally requires `--target-key-file <file|->` (the routine sender key, sent as `Authorization: Bearer` on every wake; never an argument); `message target list` / `message deliveries` show redacted state (PAI-826 / PAI-827 / PAI-828)
 - `paimos listen --as <harness>:<agent> --project PAI [--follow] [--ack] [--deliver codex|claude|grok]` — durable native inbox delivery using the receiver-owned target (`--deliver-target` only for pre-bus rows); Grok Build additionally requires `--enable-grok-build-delivery` (PAI-816 / PAI-826)
+- `paimos harness register|list|status|heartbeat|yield|drain|complete-delivery|interrupt|stop|complete-control|mark-stopped ...` — durable harness-session lifecycle, with steer-named drain/completion compatibility aliases; distinct from attribution-only `paimos session start` (PAI-848)
 
 ## Notes
 
