@@ -41,6 +41,7 @@ func TestRegisterBuiltinsAndLookupByName(t *testing.T) {
 	}
 	for name, want := range map[string]struct{ kind, maximum, mode string }{
 		AdapterCodex:          {KindCodexThread, LevelSteer, ModeLocal},
+		AdapterAgentdCodex:    {KindAgentdSession, LevelSteer, ModeLocal},
 		AdapterClaudeResume:   {KindClaudeSession, LevelSimple, ModeLocal},
 		AdapterClaudeChannel:  {KindClaudeSession, LevelSimple, ModeLocal},
 		AdapterGrokBotRoutine: {KindHTTPSWebhook, LevelSimple, ModeServer},

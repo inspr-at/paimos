@@ -31,11 +31,13 @@ const (
 // dispatched server-side by the webhook dispatcher instead.
 const (
 	AdapterCodex          = harnessplugin.AdapterCodex
+	AdapterAgentdCodex    = harnessplugin.AdapterAgentdCodex
 	AdapterGrokBotRoutine = harnessplugin.AdapterGrokBotRoutine
 	AdapterClaudeResume   = harnessplugin.AdapterClaudeResume
 	AdapterClaudeChannel  = harnessplugin.AdapterClaudeChannel
 
 	TargetKindCodexThread   = harnessplugin.KindCodexThread
+	TargetKindAgentdSession = harnessplugin.KindAgentdSession
 	TargetKindHTTPSWebhook  = harnessplugin.KindHTTPSWebhook
 	TargetKindClaudeSession = harnessplugin.KindClaudeSession
 )
@@ -55,6 +57,9 @@ func IsLocalWorkerAdapter(adapter string) bool {
 }
 
 const selectedDeliveryTargetSQL = `(CASE
+	WHEN d.requested_level='simple' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id)='agentd_codex'
+	THEN d.fallback_target_id
 	WHEN d.requested_level='steer' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
 	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id)='simple'
 	THEN d.fallback_target_id ELSE COALESCE(d.primary_target_id,d.fallback_target_id) END)`
@@ -311,11 +316,11 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 		return false, err
 	}
 	var work DeliveryWork
-	var primaryID, fallbackID sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT d.delivery_id,d.state,d.requested_level,d.primary_target_id,d.fallback_target_id
+	var selectedTargetID sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT d.delivery_id,d.state,d.requested_level,`+selectedDeliveryTargetSQL+`
 		FROM agent_message_deliveries d JOIN agent_messages am ON am.id=d.message_row_id
 		WHERE am.message_id=? AND d.instance=?`, envelope.MessageID, instanceName()).Scan(
-		&work.DeliveryID, &work.State, &work.RequestedLevel, &primaryID, &fallbackID)
+		&work.DeliveryID, &work.State, &work.RequestedLevel, &selectedTargetID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
@@ -325,10 +330,7 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 	if work.State == "handed_off" {
 		return false, nil
 	}
-	selectedID := primaryID.String
-	if selectedID == "" {
-		selectedID = fallbackID.String
-	}
+	selectedID := selectedTargetID.String
 	if selectedID == "" {
 		envelope.DeliveryWork = &work
 		return true, nil
@@ -338,14 +340,6 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 		FROM agent_message_targets WHERE id=? AND instance=? AND project_id=? AND address=?`, selectedID,
 		instanceName(), projectID, address).Scan(&work.Adapter, &work.TargetKind, &cipher, &work.MaximumLevel); err != nil {
 		return false, err
-	}
-	if work.RequestedLevel == "steer" && work.MaximumLevel == "simple" && fallbackID.Valid {
-		selectedID = fallbackID.String
-		if err := s.db.QueryRowContext(ctx, `SELECT adapter,target_kind,target_ref_cipher,maximum_level
-			FROM agent_message_targets WHERE id=? AND instance=? AND project_id=? AND address=?`, selectedID,
-			instanceName(), projectID, address).Scan(&work.Adapter, &work.TargetKind, &cipher, &work.MaximumLevel); err != nil {
-			return false, err
-		}
 	}
 	if work.Adapter != workerAdapter {
 		// Another worker (or the server-side webhook dispatcher) owns this
@@ -392,9 +386,9 @@ type CompleteDeliveryInput struct {
 	FallbackReason string
 }
 
-// CompleteLocalDelivery records one accepted local primitive (Codex queue or
-// steer, Claude print-mode resume/cloud, or Claude channel push) and advances
-// the inbox cursor in the same transaction.
+// CompleteLocalDelivery records one accepted local primitive (including a
+// lease-correlated agentd managed steer) and advances the FIFO inbox cursor in
+// the same transaction while preserving effective level, fallback and time.
 func (s *Service) CompleteLocalDelivery(ctx context.Context, in CompleteDeliveryInput) (*CursorState, error) {
 	if in.EffectiveLevel != "simple" && in.EffectiveLevel != "steer" {
 		return nil, coded("agent_message_effective_level_invalid", "effective_level must be simple or steer")

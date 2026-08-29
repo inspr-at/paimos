@@ -30,9 +30,9 @@ import (
 // the daemon kept waiting for an HTTP request head, `initialize` never got an
 // answer, and the timeout cleanup of the npm wrapper orphaned the native proxy
 // and surfaced as `initialize Codex app-server: EOF`. This file speaks the
-// documented framing through the vendor proxy. PAIMOS still never opens the
-// socket itself, never starts its own app-server, and never invents a
-// `codex steer` CLI.
+// documented framing through the vendor proxy. This ordinary inbox adapter
+// never opens the private socket itself and never invents a `codex steer` CLI;
+// managed sessions instead own a separate documented app-server stdio child.
 
 // CodexSteerTimeout bounds one steer attempt end to end: daemon start, proxy
 // spawn, WebSocket handshake, and the JSON-RPC exchange. Tests lower it.

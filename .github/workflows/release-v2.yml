@@ -12,6 +12,9 @@ name: release
 #   paimos-mcp_<ver>_darwin_universal.tar.gz   paimos-mcp_darwin_universal.tar.gz
 #   paimos-mcp_<ver>_linux_amd64.tar.gz        paimos-mcp_linux_amd64.tar.gz
 #   paimos-mcp_<ver>_linux_arm64.tar.gz        paimos-mcp_linux_arm64.tar.gz
+#   paimos-agentd_<ver>_darwin_universal.tar.gz paimos-agentd_darwin_universal.tar.gz
+#   paimos-agentd_<ver>_linux_amd64.tar.gz      paimos-agentd_linux_amd64.tar.gz
+#   paimos-agentd_<ver>_linux_arm64.tar.gz      paimos-agentd_linux_arm64.tar.gz
 #   sha256sums.txt
 #
 # The unversioned aliases let `releases/latest/download/<name>` work
@@ -76,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../dist
-          for binary in paimos paimos-mcp; do
+          for binary in paimos paimos-mcp paimos-agentd; do
             echo "→ build $binary linux/$ARCH"
             GOARCH=$ARCH go build \
               -trimpath \
@@ -131,7 +134,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../dist
-          for binary in paimos paimos-mcp; do
+          for binary in paimos paimos-mcp paimos-agentd; do
             for arch in amd64 arm64; do
               echo "→ build $binary darwin/$arch"
               # CC override is the multi-arch trick: macos-latest is
@@ -286,7 +289,7 @@ jobs:
           fi
           echo "→ using identity: $IDENTITY"
 
-          for binary in paimos paimos-mcp; do
+          for binary in paimos paimos-mcp paimos-agentd; do
             DIR="dist/${binary}_darwin_universal"
             BIN="$DIR/${binary}"
 

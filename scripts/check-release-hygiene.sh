@@ -61,6 +61,20 @@ if grep -qF 'Claim (paimos.com' docs/claim-matrix.md; then
   fail=1
 fi
 
+# Every release-v2 binary phase must use the same explicit inventory. This
+# catches a daemon added to one platform but omitted from signing/notarization.
+release_binary_loop='for binary in paimos paimos-mcp paimos-agentd; do'
+if [[ $(grep -cF "$release_binary_loop" .github/workflows/release-v2.yml) -ne 3 ]]; then
+  echo "release hygiene: release-v2 must build/sign exactly paimos, paimos-mcp, and paimos-agentd in all three binary loops" >&2
+  fail=1
+fi
+for artifact in paimos-agentd_darwin_universal.tar.gz paimos-agentd_linux_amd64.tar.gz paimos-agentd_linux_arm64.tar.gz; do
+  if ! grep -qF "$artifact" docs/RELEASE.md; then
+    echo "release hygiene: docs/RELEASE.md omits $artifact" >&2
+    fail=1
+  fi
+done
+
 if [[ $fail -ne 0 ]]; then
   exit 1
 fi

@@ -1,6 +1,6 @@
 # Installing the PAIMOS CLI
 
-The `paimos` CLI (and its sibling `paimos-mcp`) ships as a signed,
+The `paimos` CLI (and its siblings `paimos-mcp` and `paimos-agentd`) ships as a signed,
 notarized universal binary for macOS and unsigned tarballs for Linux.
 A new release lands on every `v*` git tag (PAI-99); the
 `releases/latest/` URL always points at the most recent one.
@@ -44,6 +44,26 @@ curl -fL https://github.com/inspr-at/paimos/releases/latest/download/paimos-mcp_
   | tar xz -C /usr/local/bin paimos-mcp
 ```
 
+Install the operator-local worker supervisor separately on machines that run
+managed Codex children:
+
+```bash
+curl -fL https://github.com/inspr-at/paimos/releases/latest/download/paimos-agentd_darwin_universal.tar.gz \
+  | tar xz -C /usr/local/bin paimos-agentd
+```
+
+Run one daemon per PPM instance. The instance value partitions both private
+state and the Unix socket; prompts and control text are accepted on stdin, not
+argv. `paimos-agentd` owns a documented Codex app-server stdio child, inherits
+the operator's existing Codex login, and never accepts a vendor token:
+
+```bash
+paimos-agentd serve --instance production
+printf '%s' 'Implement the assigned ticket.' | paimos-agentd start \
+  --instance production --adapter codex --workspace "$PWD" --identity codex:worker
+paimos-agentd status --instance production
+```
+
 ---
 
 ## Linux
@@ -55,6 +75,9 @@ ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 curl -fL https://github.com/inspr-at/paimos/releases/latest/download/paimos_linux_${ARCH}.tar.gz \
   | tar xz -C /usr/local/bin paimos
 ```
+
+Substitute `paimos-agentd` for `paimos` to install the Linux supervisor
+artifact on an operator workstation.
 
 ---
 
@@ -79,6 +102,7 @@ Linux server, in CI, or for a contribution):
 ```bash
 go install github.com/inspr-at/paimos/backend/cmd/paimos@latest
 go install github.com/inspr-at/paimos/backend/cmd/paimos-mcp@latest
+go install github.com/inspr-at/paimos/backend/cmd/paimos-agentd@latest
 ```
 
 The Nix flake at [`pkgs/paimos-cli`](https://github.com/markus-barta/nixcfg)

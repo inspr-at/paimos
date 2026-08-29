@@ -3,23 +3,15 @@
 package main
 
 import (
-	"errors"
-	"os"
 	"os/exec"
+
+	"github.com/inspr-at/paimos/backend/ownedprocess"
 )
 
-func configureProcessGroup(_ *exec.Cmd) bool { return false }
+func configureProcessGroup(cmd *exec.Cmd) bool { return ownedprocess.Configure(cmd) }
 
-func verifyOwnedProcess(_ *exec.Cmd, _ bool) error {
-	return errors.New("owned process groups are unsupported")
+func verifyOwnedProcess(cmd *exec.Cmd, configured bool) error {
+	return ownedprocess.Verify(cmd, configured)
 }
 
-func signalOwnedProcess(cmd *exec.Cmd, force bool) error {
-	if cmd == nil || cmd.Process == nil {
-		return errors.New("owned process is unavailable")
-	}
-	if force {
-		return cmd.Process.Kill()
-	}
-	return cmd.Process.Signal(os.Interrupt)
-}
+func signalOwnedProcess(cmd *exec.Cmd, force bool) error { return ownedprocess.Signal(cmd, force) }

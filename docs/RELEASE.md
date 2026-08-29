@@ -32,8 +32,9 @@ fully published.
 
 ### CLI binaries (`release-v2.yml` — PAI-99)
 
-The `paimos` CLI and the `paimos-mcp` MCP server are built for three
-platforms and attached to the GitHub Release as tarballs:
+The `paimos` CLI, `paimos-mcp` MCP server, and operator-local
+`paimos-agentd` process supervisor are built for three platforms and attached
+to the GitHub Release as tarballs:
 
 | Artifact (versioned) | Alias (unversioned) | Signed? |
 |---|---|---|
@@ -43,6 +44,9 @@ platforms and attached to the GitHub Release as tarballs:
 | `paimos-mcp_<x.y.z>_darwin_universal.tar.gz` | `paimos-mcp_darwin_universal.tar.gz` | ✅ |
 | `paimos-mcp_<x.y.z>_linux_amd64.tar.gz` | `paimos-mcp_linux_amd64.tar.gz` | — |
 | `paimos-mcp_<x.y.z>_linux_arm64.tar.gz` | `paimos-mcp_linux_arm64.tar.gz` | — |
+| `paimos-agentd_<x.y.z>_darwin_universal.tar.gz` | `paimos-agentd_darwin_universal.tar.gz` | ✅ |
+| `paimos-agentd_<x.y.z>_linux_amd64.tar.gz` | `paimos-agentd_linux_amd64.tar.gz` | — |
+| `paimos-agentd_<x.y.z>_linux_arm64.tar.gz` | `paimos-agentd_linux_arm64.tar.gz` | — |
 | `sha256sums.txt` — versioned filenames only | — | — |
 
 The unversioned aliases let `releases/latest/download/<name>` work in
