@@ -242,7 +242,7 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		return models.HarnessSession{}, false, err
 	}
 	digest := digestRef(in.ProjectID, in.Harness, in.Host, in.SessionRef)
-	existing, err := scanSession(s.db.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND harness=? AND host=? AND session_ref_digest=?`, in.ProjectID, in.Harness, in.Host, digest))
+	existing, err := scanSession(s.db.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND harness=? AND host=? AND session_ref_digest=? AND phase<>'stopped'`, in.ProjectID, in.Harness, in.Host, digest))
 	if err == nil {
 		if !sameRegistration(existing, in) {
 			return models.HarnessSession{}, false, coded(CodeConflict, "harness session is already registered with different advertised capabilities")

@@ -765,6 +765,10 @@ private vendor session reference remains target ciphertext; M161 retains only
 its domain-separated digest and target FK for idempotent identity and redacted
 host/session attribution.
 
+Identity and address uniqueness apply only while a generation is active. A
+stopped row is immutable history; re-registering the same stable external
+reference creates a fresh public row and encrypted target binding.
+
 `managed_harness` is a local adapter with `MaximumLevel=steer`. It has no
 delivery primitive: the PAI-849 daemon leases through `ListInbox` and commits
 through `CompleteLocalDelivery`. This keeps the message ledger authoritative

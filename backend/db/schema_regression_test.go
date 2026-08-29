@@ -114,10 +114,36 @@ func TestMigration161AddsDistinctEncryptedReferenceHarnessControlPlane(t *testin
 	_, err = database.Exec(`INSERT INTO harness_sessions(
 		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
-		VALUES('11111111-1111-4111-8111-111111111111',?,?,?,?,?,randomblob(32),?,?,?,1,1,1,1,1,'working')`,
+		VALUES('11111111-1111-4111-8111-111111111111',?,?,?,?,?,zeroblob(32),?,?,?,1,1,1,1,1,'working')`,
 		projectID, agentID, "worker", "codex", "mbp0", "managed", "worker", "owned")
 	if err != nil {
 		t.Fatalf("valid managed session rejected: %v", err)
+	}
+	if _, err := database.Exec(`UPDATE harness_sessions SET phase='stopped' WHERE id='11111111-1111-4111-8111-111111111111'`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(`INSERT INTO harness_sessions(
+		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
+		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
+		VALUES('55555555-5555-4555-8555-555555555555',?,?,?,?,?,zeroblob(32),?,?,?,1,1,1,1,1,'working')`,
+		projectID, agentID, "worker", "codex", "mbp0", "managed", "worker", "owned")
+	if err != nil {
+		t.Fatalf("replacement generation rejected: %v", err)
+	}
+	if _, err := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'worker2')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	var worker2ID int64
+	if err := database.QueryRow(`SELECT id FROM project_agents WHERE project_id=? AND name='worker2'`, projectID).Scan(&worker2ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(`INSERT INTO harness_sessions(
+		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
+		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
+		VALUES('66666666-6666-4666-8666-666666666666',?,?,?,?,?,zeroblob(32),?,?,?,0,1,0,0,0,'working')`,
+		projectID, worker2ID, "worker2", "codex", "mbp0", "managed", "worker", "none")
+	if err == nil {
+		t.Fatal("second active generation with the same stable identity was accepted")
 	}
 	otherProject, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Other harnesses','OHS')`)
 	if err != nil {

@@ -11777,7 +11777,6 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 revision             INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),
 			 created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
 			 updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
-			 UNIQUE(project_id,harness,host,session_ref_digest),
 			 CHECK((advertised_steer=0 AND steer_mode='none') OR (advertised_steer=1 AND steer_mode<>'none')),
 			 CHECK(advertised_steer=0 OR (advertised_inbox=1 AND advertised_status=1)),
 			 CHECK(advertised_interrupt=0 OR advertised_status=1),
@@ -11789,6 +11788,8 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			)`,
 			`CREATE UNIQUE INDEX idx_harness_sessions_active_address
 			 ON harness_sessions(project_id,harness,agent_name) WHERE phase<>'stopped'`,
+			`CREATE UNIQUE INDEX idx_harness_sessions_active_identity
+			 ON harness_sessions(project_id,harness,host,session_ref_digest) WHERE phase<>'stopped'`,
 			`CREATE INDEX idx_harness_sessions_host_phase
 			 ON harness_sessions(host,phase,heartbeat_at)`,
 			`CREATE TRIGGER trg_harness_sessions_identity_immutable BEFORE UPDATE OF
@@ -11980,7 +11981,8 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	154: checkM154SchemaIsUnapplied,
 	161: func(ctx context.Context, conn *sql.Conn) error {
 		return checkSchemaObjectsAbsent(ctx, conn, 161, []string{
-			"harness_sessions", "idx_harness_sessions_active_address", "idx_harness_sessions_host_phase",
+			"harness_sessions", "idx_harness_sessions_active_address", "idx_harness_sessions_active_identity",
+			"idx_harness_sessions_host_phase",
 			"trg_harness_sessions_identity_immutable", "trg_harness_sessions_agent_insert", "trg_harness_sessions_target_insert",
 			"trg_harness_sessions_target_update", "harness_session_controls",
 			"idx_harness_session_control_active", "idx_harness_session_control_drain",

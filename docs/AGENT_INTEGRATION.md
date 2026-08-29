@@ -1178,3 +1178,7 @@ existing attributed `ListInbox` worker and `CompleteLocalDelivery`, preserving
 FIFO, `effective_level`, `fallback_reason`, `handed_off_at`, and cursor state.
 After owned cleanup it marks the session stopped through
 `POST .../{sessionID}/stop`. PAI-848 starts no process and defines no daemon.
+Stopping closes that immutable generation: registering the same stable
+external session reference again creates a new public harness-session UUID,
+while the stopped row remains available as history and active retries remain
+idempotent.

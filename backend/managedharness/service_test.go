@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/inspr-at/paimos/backend/agentmessage"
@@ -181,6 +182,83 @@ func TestRegisterEnforcesManagedAndExternalSteerTruth(t *testing.T) {
 	privateSocket.Host, privateSocket.SessionRef = "mbp3", "/tmp/private.sock"
 	if _, _, err := service.Register(context.Background(), privateSocket); !IsCode(err, CodeInvalid) {
 		t.Fatalf("private socket error=%v", err)
+	}
+}
+
+func TestStoppedSessionCanRegisterNewActiveGeneration(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	input := RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "stable-thread-ref",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
+	}
+	first, created, err := service.Register(context.Background(), input)
+	if err != nil || !created {
+		t.Fatalf("first register: created=%v err=%v", created, err)
+	}
+	if _, err := service.Heartbeat(context.Background(), first.ID, PhaseWorking); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Stop(context.Background(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, created, err := service.Register(context.Background(), input)
+	if err != nil || !created || second.ID == first.ID {
+		t.Fatalf("replacement register: first=%s second=%s created=%v err=%v", first.ID, second.ID, created, err)
+	}
+	old, err := service.GetByID(context.Background(), first.ID)
+	if err != nil || old.Phase != PhaseStopped {
+		t.Fatalf("old session=%#v err=%v", old, err)
+	}
+	if _, err := service.Heartbeat(context.Background(), second.ID, PhaseWorking); err != nil {
+		t.Fatalf("replacement heartbeat: %v", err)
+	}
+	yielded, err := service.Yield(context.Background(), second.ID)
+	if err != nil || yielded.Session.ID != second.ID || yielded.Session.Phase != PhaseYielded || yielded.Session.YieldSequence != 1 {
+		t.Fatalf("replacement yield=%#v err=%v", yielded, err)
+	}
+
+	const replays = 8
+	var wg sync.WaitGroup
+	results := make(chan models.HarnessSession, replays)
+	errors := make(chan error, replays)
+	createdResults := make(chan bool, replays)
+	for range replays {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			session, replayCreated, replayErr := service.Register(context.Background(), input)
+			results <- session
+			createdResults <- replayCreated
+			errors <- replayErr
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(createdResults)
+	close(errors)
+	for replayErr := range errors {
+		if replayErr != nil {
+			t.Fatalf("active replay: %v", replayErr)
+		}
+	}
+	for replayCreated := range createdResults {
+		if replayCreated {
+			t.Fatal("active replay created another generation")
+		}
+	}
+	for replay := range results {
+		if replay.ID != second.ID {
+			t.Fatalf("active replay id=%s want %s", replay.ID, second.ID)
+		}
+	}
+	var total, active int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*),SUM(phase<>'stopped') FROM harness_sessions WHERE project_id=? AND harness=? AND host=?`, projectID, input.Harness, input.Host).Scan(&total, &active); err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || active != 1 {
+		t.Fatalf("history total=%d active=%d", total, active)
 	}
 }
 

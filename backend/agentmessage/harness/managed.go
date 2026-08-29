@@ -25,8 +25,8 @@ func (ManagedPlugin) MaximumLevel() string { return LevelSteer }
 func (ManagedPlugin) Mode() string         { return ModeLocal }
 
 func (ManagedPlugin) ValidateTarget(_ context.Context, ref string) error {
-	if !utf8.ValidString(ref) || len([]byte(ref)) < 1 || len([]byte(ref)) > 256 || strings.ContainsAny(ref, "\x00\r\n") {
-		return &Error{Code: CodeTargetRefInvalid, Message: "managed harness session references must be 1 to 256 safe UTF-8 bytes"}
+	if !utf8.ValidString(ref) || len([]byte(ref)) < 1 || len([]byte(ref)) > 256 || strings.ContainsAny(ref, "\x00\r\n") || strings.Contains(ref, "://") || strings.HasPrefix(ref, "/") {
+		return &Error{Code: CodeTargetRefInvalid, Message: "managed harness session references must be 1 to 256 opaque UTF-8 bytes, not a path or URL"}
 	}
 	return nil
 }
