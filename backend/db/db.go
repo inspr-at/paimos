@@ -12034,6 +12034,18 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 }
 
 func checkKnowledgeScopeIdentities(ctx context.Context, conn *sql.Conn) error {
+	var legacyKind string
+	err := conn.QueryRowContext(ctx, `SELECT type FROM sqlite_master WHERE name='idx_issues_type_slug_project'`).Scan(&legacyKind)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("M162 prerequisite is missing: index:idx_issues_type_slug_project; restore the M96 index before upgrading")
+	}
+	if err != nil {
+		return fmt.Errorf("inspect M162 prerequisite index: %w", err)
+	}
+	if legacyKind != "index" {
+		return fmt.Errorf("M162 prerequisite is locally incompatible: %s:idx_issues_type_slug_project", legacyKind)
+	}
+
 	if err := checkSchemaObjectsAbsent(ctx, conn, 162, []string{
 		"idx_issues_knowledge_project_identity", "idx_issues_knowledge_user_identity",
 		"idx_issues_knowledge_instance_identity", "trg_issues_scope_owner_insert",

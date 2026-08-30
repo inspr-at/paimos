@@ -420,18 +420,21 @@ knowledge entries as first-class rows:
 
 Plus the `type` CHECK now includes `memory`, `runbook`, `external_system`,
 `related_project`, `guideline`; the `status` CHECK adds `archived` and
-`proposed`. Index: `UNIQUE(type, slug, project_id) WHERE slug IS NOT NULL`
-— scoped via partial index so non-knowledge issues stay unconstrained.
+`proposed`. M96 initially added one nullable project index. M162 replaces it
+with partial unique indexes for each live project, user, and instance scope;
+non-knowledge and soft-deleted rows stay unconstrained.
 
 ### Cross-scope memory + reference tracking (M99 — PAI-345, M100 — PAI-347)
 
 | Migration | Column | Type | Purpose |
 |---|---|---|---|
-| M99 | `issues.user_id` | INTEGER NULL REFERENCES users(id) | Discriminator for the three memory scopes: `(project_id NOT NULL, user_id NULL)` = project memory; `(project_id NULL, user_id NOT NULL)` = user memory; both NULL = instance memory (admin-only). Enforced application-side. |
+| M99 | `issues.user_id` | INTEGER NULL REFERENCES users(id) | Discriminator for the three memory scopes: `(project_id NOT NULL, user_id NULL)` = project memory; `(project_id NULL, user_id NOT NULL)` = user memory; both NULL = instance memory (admin-only). M162 enforces exclusive ownership and user-owned memory types with database triggers. |
 | M100 | `issues.reference_count` | INTEGER NOT NULL DEFAULT 0 | Increments on each `paimos session start --bundle full` resolve (PAI-340) and on auto-suggest surface (PAI-342). |
 | M100 | `issues.last_referenced_at` | TEXT NULL | Wall-clock of the most recent reference. Pre-M100 rows treated as "freshly referenced" by the stale-proposal logic so the migration day doesn't flood the archive queue. |
 
 Index: `idx_issues_user_type` partial — only rows with `user_id IS NOT NULL`.
+M162 adds live-identity indexes on `(project_id,type,slug)`,
+`(user_id,type,slug)`, and `(type,slug)` for the three respective scopes.
 
 ### Project agents + inventories (M94 — PAI-326, M95 — PAI-329)
 

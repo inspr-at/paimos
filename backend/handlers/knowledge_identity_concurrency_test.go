@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -162,6 +163,49 @@ func TestKnowledgeIdentityCanBeRecreatedAfterSoftDelete(t *testing.T) {
 			assertStatus(t, ts.del(t, entry, ts.adminCookie), http.StatusNoContent)
 			payload["title"] = "Second"
 			assertStatus(t, ts.post(t, collection, ts.adminCookie, payload), http.StatusCreated)
+		})
+	}
+}
+
+func TestKnowledgeIdentityRestoreAfterReuseReturns409(t *testing.T) {
+	tests := []struct {
+		name      string
+		endpoints func(*testing.T, *testServer) (collection, entry string)
+	}{
+		{
+			name: "project",
+			endpoints: func(t *testing.T, ts *testServer) (string, string) {
+				projectID := createTestProject(t, ts, "Restore project identity", "RST")
+				return knowledgeURL(projectID, "memory"), knowledgeEntryURL(projectID, "memory", "reused")
+			},
+		},
+		{name: "user", endpoints: func(_ *testing.T, _ *testServer) (string, string) {
+			return userMemoryURL, userMemoryEntryURL("reused")
+		}},
+		{name: "instance", endpoints: func(_ *testing.T, _ *testServer) (string, string) {
+			return instanceMemoryURL, instanceMemoryEntryURL("reused")
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ts := newTestServer(t)
+			collection, entry := test.endpoints(t, ts)
+			first := ts.post(t, collection, ts.adminCookie, map[string]any{"slug": "reused", "title": "First"})
+			assertStatus(t, first, http.StatusCreated)
+			oldID := responseID(t, first)
+			assertStatus(t, ts.del(t, entry, ts.adminCookie), http.StatusNoContent)
+			assertStatus(t, ts.post(t, collection, ts.adminCookie, map[string]any{"slug": "reused", "title": "Second"}), http.StatusCreated)
+
+			restore := ts.post(t, "/api/issues/"+itoa(oldID)+"/restore", ts.adminCookie, nil)
+			assertStatus(t, restore, http.StatusConflict)
+			var body struct {
+				Error string `json:"error"`
+			}
+			decode(t, restore, &body)
+			if !strings.Contains(body.Error, `memory "reused"`) || !strings.Contains(body.Error, test.name+"-scope identity") {
+				t.Fatalf("restore conflict=%q, want named %s identity", body.Error, test.name)
+			}
 		})
 	}
 }

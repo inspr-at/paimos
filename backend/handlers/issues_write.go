@@ -1141,6 +1141,20 @@ func RestoreIssue(w http.ResponseWriter, r *http.Request) {
 		`UPDATE issues SET deleted_at = NULL, deleted_by = NULL
 		  WHERE id = ? AND deleted_at IS NOT NULL`, id)
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			var issueType, slug, scope string
+			lookupErr := db.DB.QueryRow(`
+				SELECT type,COALESCE(slug,''),
+				       CASE WHEN project_id IS NOT NULL THEN 'project'
+				            WHEN user_id IS NOT NULL THEN 'user' ELSE 'instance' END
+				FROM issues WHERE id=? AND deleted_at IS NOT NULL`, id).Scan(&issueType, &slug, &scope)
+			if lookupErr == nil && slug != "" {
+				jsonError(w, fmt.Sprintf("cannot restore %s %q: the %s-scope identity is already active", issueType, slug, scope), http.StatusConflict)
+				return
+			}
+			jsonError(w, "cannot restore: the knowledge identity is already active", http.StatusConflict)
+			return
+		}
 		jsonError(w, "restore failed", http.StatusInternalServerError)
 		return
 	}

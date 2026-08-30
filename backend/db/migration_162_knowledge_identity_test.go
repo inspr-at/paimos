@@ -72,6 +72,10 @@ func TestMigration162StopsWithActionableLegacyViolations(t *testing.T) {
 				if _, err := database.Exec(`DROP INDEX idx_issues_type_slug_project`); err != nil {
 					t.Fatal(err)
 				}
+				if _, err := database.Exec(`CREATE INDEX idx_issues_type_slug_project
+					ON issues(type,slug,project_id) WHERE slug IS NOT NULL`); err != nil {
+					t.Fatal(err)
+				}
 				insertM162Issue(t, database, projectID, nil, 1, "memory", "duplicate")
 				insertM162Issue(t, database, projectID, nil, 2, "memory", "duplicate")
 			},
@@ -130,6 +134,25 @@ func TestMigration162StopsWithActionableLegacyViolations(t *testing.T) {
 				t.Fatalf("M162 failure left %d schema objects, err=%v", newObjects, err)
 			}
 		})
+	}
+}
+
+func TestMigration162StopsActionablyWhenLegacyIndexIsMissing(t *testing.T) {
+	database := openM162Fixture(t)
+	if _, err := database.Exec(`DROP INDEX idx_issues_type_slug_project`); err != nil {
+		t.Fatal(err)
+	}
+	err := migrateThrough(database, 162)
+	if err == nil || !strings.Contains(err.Error(), "M162 prerequisite is missing: index:idx_issues_type_slug_project") {
+		t.Fatalf("M162 error=%v, want actionable missing prerequisite", err)
+	}
+	var version int
+	if err := database.QueryRow(`SELECT MAX(version) FROM schema_versions`).Scan(&version); err != nil || version != 161 {
+		t.Fatalf("schema version=%d err=%v, want unchanged 161", version, err)
+	}
+	var newObjects int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'idx_issues_knowledge_%' OR name LIKE 'trg_issues_scope_%' OR name LIKE 'trg_issues_user_type_%'`).Scan(&newObjects); err != nil || newObjects != 0 {
+		t.Fatalf("missing prerequisite left %d M162 objects, err=%v", newObjects, err)
 	}
 }
 
