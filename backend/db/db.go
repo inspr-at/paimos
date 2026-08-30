@@ -11948,6 +11948,10 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			  SELECT 1 FROM project_agents pa
 			  WHERE pa.id=NEW.target_project_agent_id AND pa.project_id=NEW.project_id)
 			 BEGIN SELECT RAISE(ABORT,'product session agent project mismatch'); END`,
+			`CREATE TRIGGER trg_project_agents_product_session_move BEFORE UPDATE OF project_id ON project_agents
+			 WHEN NEW.project_id IS NOT OLD.project_id AND EXISTS(
+			  SELECT 1 FROM product_sessions ps WHERE ps.target_project_agent_id=OLD.id)
+			 BEGIN SELECT RAISE(ABORT,'product session target prevents agent project move'); END`,
 			`CREATE TRIGGER trg_product_sessions_node_insert BEFORE INSERT ON product_sessions
 			 WHEN NEW.node_id IS NOT NULL AND NOT EXISTS(
 			  SELECT 1 FROM issues i
@@ -12214,7 +12218,8 @@ func checkProductSessionNodeFoundation(ctx context.Context, conn *sql.Conn) erro
 		"product_sessions", "idx_product_sessions_project_updated", "idx_product_sessions_node",
 		"idx_product_sessions_target_agent", "product_session_events", "idx_product_session_events_session",
 		"trg_product_sessions_actor_insert",
-		"trg_product_sessions_agent_insert", "trg_product_sessions_node_insert",
+		"trg_product_sessions_agent_insert", "trg_project_agents_product_session_move",
+		"trg_product_sessions_node_insert",
 		"trg_product_sessions_node_update", "trg_product_sessions_mutation_guard",
 		"trg_product_sessions_identity_immutable", "trg_product_sessions_no_delete",
 		"trg_product_sessions_event_create", "trg_product_sessions_event_update",

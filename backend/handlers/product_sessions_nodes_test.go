@@ -307,6 +307,50 @@ func TestAttachedProductSessionRejectsMoveDeleteAndQualifiedReadCannotLeak(t *te
 	}
 }
 
+func TestProductSessionAgentDriftRejectedAndQualifiedReadConcealsName(t *testing.T) {
+	ts := newTestServer(t)
+	oldProject := seedBatchProject(t, "Agent owner", "AGO")
+	newProject := seedBatchProject(t, "Agent secret", "AGS")
+	agent, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'Secret rehomed agent')`, oldProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentID, _ := agent.LastInsertId()
+	var memberID int64
+	_ = db.DB.QueryRow(`SELECT id FROM users WHERE username='member'`).Scan(&memberID)
+	_, _ = db.DB.Exec(`DELETE FROM project_members WHERE user_id=?`, memberID)
+	_, _ = db.DB.Exec(`INSERT INTO project_members(user_id,project_id,access_level) VALUES(?,?,'viewer')`, memberID, oldProject)
+	base := fmt.Sprintf("/api/projects/%d/product-sessions", oldProject)
+	created := ts.post(t, base, ts.adminCookie, map[string]any{
+		"target_kind": "project_agent", "target_project_agent_id": agentID, "title": "Agent bound",
+	})
+	assertStatus(t, created, http.StatusCreated)
+	var session productSessionResponse
+	decode(t, created, &session)
+
+	if _, err := db.DB.Exec(`UPDATE project_agents SET project_id=? WHERE id=?`, newProject, agentID); err == nil ||
+		!strings.Contains(err.Error(), "product session target prevents agent project move") {
+		t.Fatalf("referenced agent drift error=%v, want database rejection", err)
+	}
+	if _, err := db.DB.Exec(`DROP TRIGGER trg_project_agents_product_session_move`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`UPDATE project_agents SET project_id=? WHERE id=?`, newProject, agentID); err != nil {
+		t.Fatal(err)
+	}
+	read := ts.get(t, fmt.Sprintf("%s/%s", base, session.ProductSessionID), ts.memberCookie)
+	assertStatus(t, read, http.StatusOK)
+	var raw map[string]json.RawMessage
+	decode(t, read, &raw)
+	encoded, _ := json.Marshal(raw)
+	if strings.Contains(string(encoded), "Secret rehomed agent") {
+		t.Fatalf("old-project-only viewer received rehomed agent name: %s", encoded)
+	}
+	if err := json.Unmarshal(encoded, &session); err != nil || session.TargetAgentName != "" {
+		t.Fatalf("drifted target concealment session=%+v err=%v", session, err)
+	}
+}
+
 func TestNodeLabelDefaultsProjectPrecedenceAndLegacyTypePreserved(t *testing.T) {
 	ts := newTestServer(t)
 	projectID := seedBatchProject(t, "Configured labels", "LBL")

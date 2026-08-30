@@ -21,12 +21,12 @@ import (
 
 const productSessionSelect = `
 	SELECT ps.product_session_id,ps.project_id,ps.target_kind,ps.target_project_agent_id,
-	       CASE WHEN ps.target_kind='paimos' THEN 'paimos' ELSE pa.name END,
+	       CASE WHEN ps.target_kind='paimos' THEN 'paimos' ELSE COALESCE(pa.name,'') END,
 	       ps.node_id,i.id,COALESCE(p.key||'-'||i.issue_number,''),COALESCE(i.title,''),
 	       ps.title,ps.summary,ps.revision,ps.created_by_user_id,ps.updated_by_user_id,
 	       ps.created_at,ps.updated_at
 	FROM product_sessions ps
-	LEFT JOIN project_agents pa ON pa.id=ps.target_project_agent_id
+	LEFT JOIN project_agents pa ON pa.id=ps.target_project_agent_id AND pa.project_id=ps.project_id
 	LEFT JOIN issues i ON i.id=ps.node_id AND i.project_id=ps.project_id AND i.deleted_at IS NULL
 	LEFT JOIN projects p ON p.id=ps.project_id`
 

@@ -102,6 +102,8 @@ func TestMigration163EnforcesProductSessionProjectOwnership(t *testing.T) {
 	projectBID, _ := projectB.LastInsertId()
 	agent, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'other')`, projectBID)
 	agentID, _ := agent.LastInsertId()
+	ownedAgent, _ := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'owned')`, projectAID)
+	ownedAgentID, _ := ownedAgent.LastInsertId()
 	node, _ := database.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status,priority)
 		VALUES(?,1,'ticket','Other node','backlog','medium')`, projectBID)
 	nodeID, _ := node.LastInsertId()
@@ -115,6 +117,14 @@ func TestMigration163EnforcesProductSessionProjectOwnership(t *testing.T) {
 		product_session_id,project_id,target_kind,node_id,title,created_by_user_id,updated_by_user_id)
 		VALUES('44444444-4444-4444-8444-444444444444',?,'paimos',?,'Wrong node',?,?)`, projectAID, nodeID, userID, userID); err == nil {
 		t.Fatal("cross-project node attachment accepted")
+	}
+	if _, err := database.Exec(`INSERT INTO product_sessions(
+		product_session_id,project_id,target_kind,target_project_agent_id,title,created_by_user_id,updated_by_user_id)
+		VALUES('66666666-6666-4666-8666-666666666666',?,'project_agent',?,'Owned agent',?,?)`, projectAID, ownedAgentID, userID, userID); err != nil {
+		t.Fatalf("valid project agent session rejected: %v", err)
+	}
+	if _, err := database.Exec(`UPDATE project_agents SET project_id=? WHERE id=?`, projectBID, ownedAgentID); err == nil || !strings.Contains(err.Error(), "product session target prevents agent project move") {
+		t.Fatalf("referenced agent drift error=%v, want actionable database rejection", err)
 	}
 }
 
