@@ -100,20 +100,23 @@ func ListApplicableMemories(w http.ResponseWriter, r *http.Request) {
 // loadLinkedMemories returns the memory entries already linked to
 // the issue via issue_relations(type='applies_to_memory'). The
 // source side of the row is always the ticket so the JOIN here is
-// one-directional. Cross-project links work out of the box because
-// issue_relations doesn't constrain the target's project_id.
+// one-directional. The owning-project equality is repeated in the query so
+// legacy cross-project rows can never hydrate memory metadata.
 func loadLinkedMemories(issueID int64) ([]ApplicableMemory, error) {
 	rows, err := db.DB.Query(`
 		SELECT m.id, m.project_id, COALESCE(p.key, ''),
 		       COALESCE(m.slug, ''), m.title, m.description,
 		       m.issue_number
 		  FROM issue_relations ir
+		  JOIN issues src ON src.id = ir.source_id
 		  JOIN issues   m ON m.id = ir.target_id
 		  LEFT JOIN projects p ON p.id = m.project_id
 		 WHERE ir.source_id = ?
 		   AND ir.type      = 'applies_to_memory'
 		   AND m.type       = 'memory'
 		   AND m.deleted_at IS NULL
+		   AND src.deleted_at IS NULL
+		   AND m.project_id = src.project_id
 		 ORDER BY m.slug ASC
 	`, issueID)
 	if err != nil {

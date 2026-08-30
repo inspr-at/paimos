@@ -167,6 +167,11 @@ func ListIssueRelations(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
+	sourceScope, err := loadKnowledgeScope(id)
+	if err != nil || !canViewKnowledgeEndpoint(r, sourceScope) {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
 	relType := r.URL.Query().Get("type") // optional filter
 
 	query := `
@@ -174,7 +179,9 @@ func ListIssueRelations(w http.ResponseWriter, r *http.Request) {
 		       CASE WHEN p.key IS NOT NULL THEN p.key || '-' || i2.issue_number
 		            ELSE 'SPRINT-' || i2.id END,
 		       i2.title,
-		       i2.project_id
+		       i2.project_id,
+		       i2.user_id,
+		       i2.type
 		FROM issue_relations ir
 		JOIN issues i2 ON i2.id = CASE WHEN ir.source_id = ? THEN ir.target_id ELSE ir.source_id END
 		LEFT JOIN projects p ON p.id = i2.project_id
@@ -197,8 +204,9 @@ func ListIssueRelations(w http.ResponseWriter, r *http.Request) {
 	relations := []models.IssueRelation{}
 	for rows.Next() {
 		var rel models.IssueRelation
-		var targetProjectID sql.NullInt64
-		if err := rows.Scan(&rel.SourceID, &rel.TargetID, &rel.Type, &rel.TargetKey, &rel.TargetTitle, &targetProjectID); err != nil {
+		var targetScope knowledgeScope
+		if err := rows.Scan(&rel.SourceID, &rel.TargetID, &rel.Type, &rel.TargetKey, &rel.TargetTitle,
+			&targetScope.projectID, &targetScope.userID, &targetScope.typ); err != nil {
 			continue
 		}
 		// Direction lets the UI render inverse labels for directional
@@ -213,7 +221,12 @@ func ListIssueRelations(w http.ResponseWriter, r *http.Request) {
 		// Restrict: if the relation's target issue lives in a project
 		// the caller can't view, keep the relation visible (so tooling
 		// that counts them still works) but redact the title and key.
-		if targetProjectID.Valid && !auth.CanViewProject(r, targetProjectID.Int64) {
+		if !canViewKnowledgeEndpoint(r, targetScope) && targetScope.isKnowledge() {
+			// Knowledge outside the caller's scope is not enumerable: omit the
+			// legacy edge entirely instead of returning its endpoint ID.
+			continue
+		}
+		if !canViewKnowledgeEndpoint(r, targetScope) {
 			rel.TargetKey = "RESTRICTED"
 			rel.TargetTitle = "Restricted"
 		}
@@ -224,6 +237,11 @@ func ListIssueRelations(w http.ResponseWriter, r *http.Request) {
 
 // CreateIssueRelation adds a relation between two issues.
 func CreateIssueRelation(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r)
+	if user == nil {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	sourceID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		jsonError(w, "invalid id", http.StatusBadRequest)
@@ -243,6 +261,48 @@ func CreateIssueRelation(w http.ResponseWriter, r *http.Request) {
 	}
 	if sourceID == body.TargetID {
 		jsonError(w, "source and target must be different issues", http.StatusBadRequest)
+		return
+	}
+	tx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Authorize both endpoints before any type-specific lookup or validation.
+	// Missing and unauthorized targets intentionally share one response.
+	sourceScope, err := loadKnowledgeScopeTx(r.Context(), tx, sourceID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			jsonError(w, "not found", http.StatusNotFound)
+		} else {
+			jsonError(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	targetScope, err := loadKnowledgeScopeTx(r.Context(), tx, body.TargetID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			jsonError(w, "not found", http.StatusNotFound)
+		} else {
+			jsonError(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	for _, scope := range []knowledgeScope{sourceScope, targetScope} {
+		allowed, authErr := canEditKnowledgeEndpointTx(r.Context(), tx, user, scope)
+		if authErr != nil {
+			jsonError(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !allowed {
+			jsonError(w, "not found", http.StatusNotFound)
+			return
+		}
+	}
+	if !sameKnowledgeScope(sourceScope, targetScope) {
+		jsonError(w, "knowledge relations must remain within one owner scope", http.StatusUnprocessableEntity)
 		return
 	}
 	// PAI-584 P4: epic→ticket membership is the `parent` edge now. Legacy
@@ -281,14 +341,8 @@ func CreateIssueRelation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// For sprint relations, assign rank = max+1 so new items appear at the bottom
+	// For sprint relations, assign rank = max+1 so new items appear at the bottom.
 	rank := 0
-	tx, err := db.DB.BeginTx(r.Context(), nil)
-	if err != nil {
-		jsonError(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	defer tx.Rollback()
 	beforeSnap, err := fetchRelationMutationSnapshotTx(tx, dbSource, dbTarget, body.Type)
 	if err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
