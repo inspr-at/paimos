@@ -5,15 +5,35 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BACKEND="$ROOT/backend"
 MODULE='github.com/inspr-at/paimos/backend'
 GO_COMMAND=${GO_COMMAND:-go}
+DB_SHARDS=4
 HANDLER_SHARDS=4
+LANE=affected
 DRY_RUN=0
 
-if [[ "${1:-}" == '--dry-run' ]]; then
-  DRY_RUN=1
-  shift
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --lane=*)
+      LANE=${1#--lane=}
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+case "$LANE" in
+  affected|db|handlers|performance) ;;
+  *)
+    echo "backend-pr-test: invalid lane: $LANE" >&2
+    exit 2
+    ;;
+esac
 [[ $# -gt 0 ]] || {
-  echo "usage: $0 [--dry-run] <changed-package>..." >&2
+  echo "usage: $0 [--dry-run] [--lane=affected|db|handlers|performance] <affected-package>..." >&2
   exit 2
 }
 
@@ -36,33 +56,34 @@ run_normal() {
   "$GO_COMMAND" test -count=1 -timeout=8m "$@"
 }
 
-run_handler_shards() {
+run_shards() {
+  local package="$1" match="$2" shard_count="$3" label="$4"
   local names=() shard index pattern pid failed=0
   local pids=()
   cd "$BACKEND"
   while IFS= read -r name; do
     [[ "$name" =~ ^(Test|Fuzz)[A-Za-z0-9_]+$ ]] || {
-      echo "backend-pr-test: unsafe handler test name: $name" >&2
+      echo "backend-pr-test: unsafe $label test name: $name" >&2
       exit 2
     }
     names+=("$name")
-  done < <("$GO_COMMAND" test -list '^(Test|Fuzz)' ./handlers | awk '/^(Test|Fuzz)[A-Za-z0-9_]+$/')
+  done < <("$GO_COMMAND" test -list "$match" "$package" | awk '/^(Test|Fuzz)[A-Za-z0-9_]+$/')
   [[ "${#names[@]}" -gt 0 ]] || {
-    echo 'backend-pr-test: handlers package has no tests to shard' >&2
+    echo "backend-pr-test: $label package has no tests to shard" >&2
     exit 1
   }
 
-  for ((shard = 0; shard < HANDLER_SHARDS; shard++)); do
+  for ((shard = 0; shard < shard_count; shard++)); do
     pattern='^('
-    for ((index = shard; index < ${#names[@]}; index += HANDLER_SHARDS)); do
+    for ((index = shard; index < ${#names[@]}; index += shard_count)); do
       [[ "$pattern" == '^(' ]] || pattern+='|'
       pattern+="${names[$index]}"
     done
     pattern+=')$'
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      printf 'go test -count=1 -timeout=8m ./handlers -run %q\n' "$pattern"
+      printf 'go test -count=1 -timeout=8m %q -run %q\n' "$package" "$pattern"
     else
-      "$GO_COMMAND" test -count=1 -timeout=8m ./handlers -run "$pattern" &
+      "$GO_COMMAND" test -count=1 -timeout=8m "$package" -run "$pattern" &
       pids+=("$!")
     fi
   done
@@ -87,19 +108,49 @@ if [[ " ${packages[*]} " == *' ./... '* ]]; then
 fi
 
 normal=()
-run_handlers=0
 for package in "${packages[@]}"; do
   validate_package "$package"
-  if [[ "$package" == "$MODULE/handlers" ]]; then
-    run_handlers=1
-  else
-    normal+=("$package")
-  fi
 done
 
-if [[ "${#normal[@]}" -gt 0 ]]; then
-  run_normal "${normal[@]}"
-fi
-if [[ "$run_handlers" -eq 1 ]]; then
-  run_handler_shards
-fi
+has_package() {
+  local wanted="$1" package
+  for package in "${packages[@]}"; do
+    [[ "$package" == "$wanted" ]] && return 0
+  done
+  return 1
+}
+
+case "$LANE" in
+  affected)
+    for package in "${packages[@]}"; do
+      case "$package" in
+        "$MODULE/db"|"$MODULE/handlers") ;;
+        *) normal+=("$package") ;;
+      esac
+    done
+    if [[ "${#normal[@]}" -gt 0 ]]; then
+      # The overflow subtest owns a five-second performance SLO. It gets an
+      # otherwise-idle required runner below; package contention must neither
+      # relax that budget nor turn it into a false failure here.
+      run_normal -skip '^TestStreamSubscribeRaceOverflowLostWakeRestartAndPermissionChanges$' "${normal[@]}"
+    fi
+    if has_package "$MODULE/agentmode"; then
+      run_normal ./agentmode -run '^TestStreamSubscribeRaceOverflowLostWakeRestartAndPermissionChanges$/(subscribe before high-water|permission grant and revoke)$'
+    fi
+    ;;
+  db)
+    if has_package "$MODULE/db"; then
+      run_shards ./db '^(Test|Fuzz)' "$DB_SHARDS" db
+    fi
+    ;;
+  handlers)
+    if has_package "$MODULE/handlers"; then
+      run_shards ./handlers '^(Test|Fuzz)' "$HANDLER_SHARDS" handlers
+    fi
+    ;;
+  performance)
+    if has_package "$MODULE/agentmode"; then
+      run_normal ./agentmode -run '^TestStreamSubscribeRaceOverflowLostWakeRestartAndPermissionChanges$/^overflow lost wake coalescing and restart$'
+    fi
+    ;;
+esac

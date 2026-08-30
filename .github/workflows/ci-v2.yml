@@ -36,7 +36,7 @@ jobs:
       - name: Every PR commit carries its author's DCO sign-off
         run: ./scripts/check-dco.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
 
-  backend-pr:
+  backend-pr-vet:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -51,19 +51,116 @@ jobs:
           # Bump deliberately when govulncheck flags the standard library.
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — vet + changed-package tests
+      - name: Backend — vet
+        working-directory: backend
+        run: go vet ./...
+
+  backend-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend — affected package tests
         working-directory: backend
         run: |
           set -euo pipefail
           mapfile -t packages < <(../scripts/backend-changed-packages.sh \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
-          go vet ./...
           if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; reusing full-suite evidence from the protected base.'
+            echo 'No backend package changed; affected test lane is empty.'
           else
-            printf 'Changed backend package: %s\n' "${packages[@]}"
-            ../scripts/backend-pr-test.sh "${packages[@]}"
+            printf 'Affected backend package: %s\n' "${packages[@]}"
+            ../scripts/backend-pr-test.sh --lane=affected "${packages[@]}"
+          fi
+
+  backend-pr-db:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend — affected DB tests (four isolated shards)
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(../scripts/backend-changed-packages.sh \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
+          if (( ${#packages[@]} == 0 )); then
+            echo 'No backend package changed; DB test lane is empty.'
+          else
+            ../scripts/backend-pr-test.sh --lane=db "${packages[@]}"
+          fi
+
+  backend-pr-handlers:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend — affected handler tests (four isolated shards)
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(../scripts/backend-changed-packages.sh \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
+          if (( ${#packages[@]} == 0 )); then
+            echo 'No backend package changed; handler test lane is empty.'
+          else
+            ../scripts/backend-pr-test.sh --lane=handlers "${packages[@]}"
+          fi
+
+  backend-pr-performance:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      # This unchanged five-second SLO must run on an otherwise-idle runner.
+      # Package contention invalidates the measurement; the affected lane runs
+      # the parent test's other subtests and excludes only this exact duplicate.
+      - name: Backend — isolated Agent Mode performance contract
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(../scripts/backend-changed-packages.sh \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
+          if (( ${#packages[@]} == 0 )); then
+            echo 'No backend package changed; performance test lane is empty.'
+          else
+            ../scripts/backend-pr-test.sh --lane=performance "${packages[@]}"
           fi
 
   backend-pr-race:
@@ -79,7 +176,7 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — changed-package race
+      - name: Backend — directly changed package race
         working-directory: backend
         run: |
           set -euo pipefail
@@ -87,10 +184,61 @@ jobs:
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
           if (( ${#packages[@]} == 0 )); then
-            echo 'No backend package changed; no PR race target.'
+            echo 'No backend package changed; affected race lane is empty.'
           else
-            printf 'Changed backend race package: %s\n' "${packages[@]}"
-            ../scripts/backend-pr-race.sh "${packages[@]}"
+            ../scripts/backend-pr-race.sh --lane=affected "${packages[@]}"
+          fi
+
+  backend-pr-db-race:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend — directly changed DB race contracts
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(../scripts/backend-changed-packages.sh --direct \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
+          if (( ${#packages[@]} == 0 )); then
+            echo 'No backend package changed; DB race lane is empty.'
+          else
+            ../scripts/backend-pr-race.sh --lane=db "${packages[@]}"
+          fi
+
+  backend-pr-handlers-race:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend — directly changed handler race contracts
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(../scripts/backend-changed-packages.sh --direct \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
+          if (( ${#packages[@]} == 0 )); then
+            echo 'No backend package changed; handler race lane is empty.'
+          else
+            ../scripts/backend-pr-race.sh --lane=handlers "${packages[@]}"
           fi
 
   backend-security-invariants:
@@ -228,26 +376,55 @@ jobs:
   # concurrently. The ruleset still fails closed if any relevant lane fails.
   test:
     if: always() && (github.ref == 'refs/heads/main' || github.event_name == 'pull_request')
-    needs: [backend-pr, backend-pr-race, backend-security-invariants, quality, frontend-quality]
+    needs:
+      - backend-pr-vet
+      - backend-pr
+      - backend-pr-db
+      - backend-pr-handlers
+      - backend-pr-performance
+      - backend-pr-race
+      - backend-pr-db-race
+      - backend-pr-handlers-race
+      - backend-security-invariants
+      - quality
+      - frontend-quality
     runs-on: ubuntu-latest
     steps:
       - name: Require every event-relevant test lane
         env:
           EVENT_NAME: ${{ github.event_name }}
+          BACKEND_PR_VET: ${{ needs.backend-pr-vet.result }}
           BACKEND_PR: ${{ needs.backend-pr.result }}
+          BACKEND_PR_DB: ${{ needs.backend-pr-db.result }}
+          BACKEND_PR_HANDLERS: ${{ needs.backend-pr-handlers.result }}
+          BACKEND_PR_PERFORMANCE: ${{ needs.backend-pr-performance.result }}
           BACKEND_PR_RACE: ${{ needs.backend-pr-race.result }}
+          BACKEND_PR_DB_RACE: ${{ needs.backend-pr-db-race.result }}
+          BACKEND_PR_HANDLERS_RACE: ${{ needs.backend-pr-handlers-race.result }}
           BACKEND_SECURITY_INVARIANTS: ${{ needs.backend-security-invariants.result }}
           QUALITY: ${{ needs.quality.result }}
           FRONTEND_QUALITY: ${{ needs.frontend-quality.result }}
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == 'pull_request' ]]; then
+            [[ "$BACKEND_PR_VET" == 'success' ]]
             [[ "$BACKEND_PR" == 'success' ]]
+            [[ "$BACKEND_PR_DB" == 'success' ]]
+            [[ "$BACKEND_PR_HANDLERS" == 'success' ]]
+            [[ "$BACKEND_PR_PERFORMANCE" == 'success' ]]
             [[ "$BACKEND_PR_RACE" == 'success' ]]
+            [[ "$BACKEND_PR_DB_RACE" == 'success' ]]
+            [[ "$BACKEND_PR_HANDLERS_RACE" == 'success' ]]
             [[ "$BACKEND_SECURITY_INVARIANTS" == 'success' ]]
           else
+            [[ "$BACKEND_PR_VET" == 'skipped' ]]
             [[ "$BACKEND_PR" == 'skipped' ]]
+            [[ "$BACKEND_PR_DB" == 'skipped' ]]
+            [[ "$BACKEND_PR_HANDLERS" == 'skipped' ]]
+            [[ "$BACKEND_PR_PERFORMANCE" == 'skipped' ]]
             [[ "$BACKEND_PR_RACE" == 'skipped' ]]
+            [[ "$BACKEND_PR_DB_RACE" == 'skipped' ]]
+            [[ "$BACKEND_PR_HANDLERS_RACE" == 'skipped' ]]
             [[ "$BACKEND_SECURITY_INVARIANTS" == 'skipped' ]]
           fi
           [[ "$QUALITY" == 'success' ]]

@@ -321,7 +321,9 @@ func TestM147ConcurrentCanonicalCommandsConverge(t *testing.T) {
 	database := openTestDB(t)
 	fixture := seedControlGraph(t, database)
 	insertControlRootAudits(t, fixture)
-	database.SetMaxOpenConns(32)
+	if got := database.Stats().MaxOpenConnections; got != DefaultMaxOpenConnections {
+		t.Fatalf("max open connections=%d, want production bound %d", got, DefaultMaxOpenConnections)
+	}
 	expires := controlTimeOffset(t, database, "+5 minutes")
 	canonical := controlDigest("concurrent-canonical-command")
 	start := make(chan struct{})
@@ -365,7 +367,9 @@ func TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwner(t *testing.T) {
 	database := openTestDB(t)
 	fixture := seedControlGraph(t, database)
 	insertControlRootAudits(t, fixture)
-	database.SetMaxOpenConns(32)
+	if got := database.Stats().MaxOpenConnections; got != DefaultMaxOpenConnections {
+		t.Fatalf("max open connections=%d, want production bound %d", got, DefaultMaxOpenConnections)
+	}
 	expires := controlTimeOffset(t, database, "+5 minutes")
 	commandIDs := make([]string, 32)
 	for i := range commandIDs {

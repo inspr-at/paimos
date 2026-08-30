@@ -35,7 +35,10 @@ import (
 	"github.com/inspr-at/paimos/backend/safetext"
 )
 
-const DefaultBusyTimeoutMS = 5000
+const (
+	DefaultBusyTimeoutMS      = 5000
+	DefaultMaxOpenConnections = 10
+)
 
 var perConnectionPragmas = []string{
 	fmt.Sprintf("PRAGMA busy_timeout=%d", DefaultBusyTimeoutMS),
@@ -370,7 +373,7 @@ func Open() error {
 	// internally. busy_timeout prevents immediate SQLITE_BUSY errors under
 	// write contention — connections wait up to 5s before failing
 	// (busy_timeout is set per-connection via the hook above).
-	db.SetMaxOpenConns(10)
+	db.SetMaxOpenConns(DefaultMaxOpenConnections)
 	db.SetMaxIdleConns(5)
 
 	// PAI-369: set WAL once at file open. journal_mode is a database-level

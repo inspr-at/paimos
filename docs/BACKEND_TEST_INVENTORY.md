@@ -80,15 +80,22 @@ covers the original risk.
 
 ## Execution policy and timing evidence
 
-- Pull requests run `go vet ./...`, normal tests for directly changed packages
-  plus their bounded transitive reverse test-dependency closure, security
-  regression/authz fuzz tests, and race tests for directly changed packages.
-  The 664-test handlers package uses four isolated normal shards; its actual
-  concurrency contracts use four race shards. E2E and security scanning remain
-  separate required contexts.
-- The protected `test` context is an aggregator over normal, race, backend
-  quality, and frontend quality lanes, so GitHub still fails closed while
-  those lanes run concurrently.
+- Pull requests run independent required lanes for `go vet ./...`, affected
+  normal packages, four DB shards, four handler shards, the unchanged Agent
+  Mode five-second performance contract, and directly changed race targets.
+  Selection for normal tests is the directly changed package plus its bounded
+  transitive reverse test-dependency closure. The affected lane excludes only
+  the DB/handler shards and isolated performance duplicate; it still runs the
+  parent stream test's other subtests.
+- DB, handler, and other directly changed race targets use separate required
+  runners. The two M147 SQLite arbitration tests still start 32 simultaneous
+  application goroutines under `-race`, each in its own process, while the SQL
+  pool retains the production ten-connection bound and five-second busy
+  timeout. The 19 handler concurrency contracts use four isolated race shards.
+  E2E and security scanning remain separate required contexts.
+- The protected `test` context is an aggregator over every vet, normal, race,
+  performance, backend quality, and frontend quality lane, so GitHub still
+  fails closed while those lanes run concurrently.
 - Full serial `go test -p 1 ./...` and a broad sequential sweep of package-local
   control-plane concurrency contracts run in a dedicated workflow on `main`,
   nightly, release tags, and manual dispatch, outside the ordinary PR merge path.
@@ -107,10 +114,24 @@ covers the original risk.
 - Post-change local handlers evidence: all 664 tests passed across four isolated
   shards in 129.35s (slowest shard 127.868s); 19 handler concurrency contracts
   passed across four race shards in 101.13s (slowest shard 99.519s).
-- The exact candidate's affected normal lane (`go vet` plus the DB change's
-  16-package reverse closure, including all handler shards) passed in 219.23s;
-  its non-handler long poles were `db` 94.947s and `supervision` 60.510s.
-- The final broad package-local concurrency sweep passed in 446.89s. Agent
+- The first hosted candidate correctly disproved the original combined lane:
+  vet took about 53s, `db` took 284.400s under package contention, and the
+  unchanged Agent Mode five-second SLO measured 6.510s; the job failed in
+  6m42s. Its combined DB race also exposed `SQLITE_BUSY` in both preserved M147
+  32-writer proofs on the two-core runner.
+- The corrected local lanes passed concurrently: the 14 non-special reverse
+  dependents in 71.37s, all 136 DB tests in four shards in 39.39s, and all 664
+  handler tests in four shards in 139.44s. The unchanged Agent Mode performance
+  contract passed alone in 2.37s. The exact pre-fix hosted topology
+  (`GOMAXPROCS=2`, 32 writers, `-race`) reproduced `SQLITE_BUSY` locally in
+  46.98s; retaining 32 writers while restoring the production pool bound made
+  the same mutation proof pass in 57.85s. Split DB and handler race lanes then
+  passed under simultaneous local load in 85.85s and 115.20s respectively.
+- The corrected full serial suite passed in 689.81s, including unsharded
+  `handlers` in 394.602s, `db` in 87.326s, and `supervision` in 54.967s. This is
+  the exact assurance retained on main, nightly, tags, and manual dispatch.
+- The corrected final broad package-local concurrency sweep passed in 445.75s.
+  Agent
   Mode's five-second overflow performance budget remains in normal/full serial;
   its non-performance stream concurrency subtests passed under race instead.
 

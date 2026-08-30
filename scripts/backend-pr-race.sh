@@ -5,14 +5,34 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BACKEND="$ROOT/backend"
 MODULE='github.com/inspr-at/paimos/backend'
 GO_COMMAND=${GO_COMMAND:-go}
+RACE_GOMAXPROCS=${BACKEND_RACE_GOMAXPROCS:-2}
+LANE=all
 DRY_RUN=0
 
-if [[ "${1:-}" == '--dry-run' ]]; then
-  DRY_RUN=1
-  shift
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --lane=*)
+      LANE=${1#--lane=}
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+case "$LANE" in
+  all|affected|db|handlers) ;;
+  *)
+    echo "backend-pr-race: invalid lane: $LANE" >&2
+    exit 2
+    ;;
+esac
 [[ $# -gt 0 ]] || {
-  echo "usage: $0 [--dry-run] <changed-package>..." >&2
+  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers] <changed-package>..." >&2
   exit 2
 }
 
@@ -35,9 +55,9 @@ run_race() {
       echo "backend-pr-race: no tests matched $pattern in $package" >&2
       exit 1
     }
-    "$GO_COMMAND" test -race -count=1 -timeout=8m "$package" -run "$pattern"
+    GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout=8m "$package" -run "$pattern"
   else
-    "$GO_COMMAND" test -race -count=1 -timeout=8m "$package"
+    GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout=8m "$package"
   fi
 }
 
@@ -68,7 +88,7 @@ run_race_shards() {
     if [[ "$DRY_RUN" -eq 1 ]]; then
       printf 'go test -race -count=1 -timeout=8m %q -run %q\n' "$package" "$pattern"
     else
-      "$GO_COMMAND" test -race -count=1 -timeout=8m "$package" -run "$pattern" &
+      GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout=8m "$package" -run "$pattern" &
       pids+=("$!")
     fi
   done
@@ -98,7 +118,12 @@ run_package() {
 
   case "$package" in
     ./db)
-      run_race ./db '^(TestApplyMigrationAtomic.*|TestSchemaAgentRunTelemetryTerminalWriteRace|TestM147ConcurrentCanonicalCommandsConverge|TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwner)$'
+      run_race ./db '^(TestApplyMigrationAtomic.*|TestSchemaAgentRunTelemetryTerminalWriteRace)$'
+      # Keep each 32-goroutine SQLite arbitration proof in its own instrumented
+      # process. The pool itself stays production-bounded, so the test measures
+      # application concurrency instead of creating 32 database connections.
+      run_race ./db '^TestM147ConcurrentCanonicalCommandsConverge$'
+      run_race ./db '^TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwner$'
       ;;
     ./handlers)
       run_race_shards ./handlers '^Test.*(Concurrent|Concurrency|Race|Atomic|BatchesReleaseWriter|RacedPoke).*$' 4
@@ -125,6 +150,24 @@ run_package() {
   esac
 }
 
+run_selected_package() {
+  local import_path="$1"
+  case "$LANE" in
+    all)
+      run_package "$import_path"
+      ;;
+    affected)
+      [[ "$import_path" == "$MODULE/db" || "$import_path" == "$MODULE/handlers" ]] || run_package "$import_path"
+      ;;
+    db)
+      [[ "$import_path" != "$MODULE/db" ]] || run_package "$import_path"
+      ;;
+    handlers)
+      [[ "$import_path" != "$MODULE/handlers" ]] || run_package "$import_path"
+      ;;
+  esac
+}
+
 for import_path in "$@"; do
   if [[ "$import_path" == './...' ]]; then
     for affected in \
@@ -138,9 +181,9 @@ for import_path in "$@"; do
       "$MODULE/localjournal" \
       "$MODULE/ownedprocess"
     do
-      run_package "$affected"
+      run_selected_package "$affected"
     done
   else
-    run_package "$import_path"
+    run_selected_package "$import_path"
   fi
 done

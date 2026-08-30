@@ -78,23 +78,46 @@ check_selection './...' backend/go.mod
 check_selection './...' backend/removed-package/deleted.go
 check_selection './...' backend/contracts/fixtures/deleted.go
 
-handler_plan=$("$TEST_RUNNER" --dry-run github.com/inspr-at/paimos/backend/handlers)
+affected_plan=$("$TEST_RUNNER" --dry-run --lane=affected \
+  github.com/inspr-at/paimos/backend/agentmode \
+  github.com/inspr-at/paimos/backend/db \
+  github.com/inspr-at/paimos/backend/handlers)
+[[ "$affected_plan" == *'subscribe\ before\ high-water'* && "$affected_plan" == *'permission\ grant\ and\ revoke'* ]] ||
+  fail 'affected normal lane lost non-performance Agent Mode stream contracts'
+[[ "$affected_plan" != *'overflow\ lost\ wake\ coalescing\ and\ restart'* && "$affected_plan" != *'./db'* && "$affected_plan" != *'./handlers'* ]] ||
+  fail 'affected normal lane duplicates an isolated performance, DB, or handler contract'
+
+db_plan=$("$TEST_RUNNER" --dry-run --lane=db github.com/inspr-at/paimos/backend/db)
+[[ "$(grep -c '^go test .* ./db -run ' <<<"$db_plan")" -eq 4 ]] ||
+  fail 'db package is not split into four normal-test shards'
+[[ "$(printf '%s\n' "$db_plan" | rg -o 'Test[A-Za-z0-9_]+' | LC_ALL=C sort -u | wc -l | tr -d ' ')" -eq 136 ]] ||
+  fail 'db normal-test shards do not account for every top-level test'
+
+handler_plan=$("$TEST_RUNNER" --dry-run --lane=handlers github.com/inspr-at/paimos/backend/handlers)
 [[ "$(grep -c '^go test .* ./handlers -run ' <<<"$handler_plan")" -eq 4 ]] ||
   fail 'handlers package is not split into four normal-test shards'
 [[ "$(printf '%s\n' "$handler_plan" | rg -o 'Test[A-Za-z0-9_]+' | LC_ALL=C sort -u | wc -l | tr -d ' ')" -eq 664 ]] ||
   fail 'handlers normal-test shards do not account for every top-level test'
 
-db_race_plan=$("$RACE_RUNNER" --dry-run github.com/inspr-at/paimos/backend/db)
-[[ "$db_race_plan" == *'./db'* && "$db_race_plan" == *'TestSchemaAgentRunTelemetryTerminalWriteRace'* ]] ||
+performance_plan=$("$TEST_RUNNER" --dry-run --lane=performance github.com/inspr-at/paimos/backend/agentmode)
+[[ "$performance_plan" == *'overflow\ lost\ wake\ coalescing\ and\ restart'* && "$performance_plan" != *'subscribe\ before\ high-water'* ]] ||
+  fail 'isolated normal lane does not exclusively own the unchanged Agent Mode performance contract'
+
+db_race_plan=$("$RACE_RUNNER" --dry-run --lane=db github.com/inspr-at/paimos/backend/db)
+[[ "$db_race_plan" == *'./db'* && "$db_race_plan" == *'TestSchemaAgentRunTelemetryTerminalWriteRace'* &&
+  "$db_race_plan" == *'TestM147ConcurrentCanonicalCommandsConverge'* &&
+  "$db_race_plan" == *'TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwner'* ]] ||
   fail 'db race plan lost its package-local concurrency proof'
+[[ "$(grep -c '^go test -race .* ./db -run ' <<<"$db_race_plan")" -eq 3 ]] ||
+  fail 'db race plan does not isolate the two 32-writer arbitration proofs'
 [[ "$db_race_plan" != *'./...'* && "$db_race_plan" != *'./handlers'* ]] ||
   fail 'db race plan escaped the changed package'
-handler_race_plan=$("$RACE_RUNNER" --dry-run github.com/inspr-at/paimos/backend/handlers)
+handler_race_plan=$("$RACE_RUNNER" --dry-run --lane=handlers github.com/inspr-at/paimos/backend/handlers)
 [[ "$handler_race_plan" == *'Concurrent'* && "$handler_race_plan" != *'TestRegression_'* && "$handler_race_plan" != *'TestAuthzFuzz_'* ]] ||
   fail 'handler race plan is not limited to concurrency contracts'
 [[ "$(grep -c '^go test -race .* ./handlers -run ' <<<"$handler_race_plan")" -eq 4 ]] ||
   fail 'handler concurrency race is not split into four shards'
-agentmode_race_plan=$("$RACE_RUNNER" --dry-run github.com/inspr-at/paimos/backend/agentmode)
+agentmode_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected github.com/inspr-at/paimos/backend/agentmode)
 [[ "$agentmode_race_plan" == *'subscribe\ before\ high-water'* && "$agentmode_race_plan" == *'permission\ grant\ and\ revoke'* ]] ||
   fail 'agentmode race plan lost non-performance stream concurrency subtests'
 [[ "$agentmode_race_plan" != *'overflow\ lost\ wake'* ]] ||
@@ -115,25 +138,46 @@ grep -q '^  workflow_dispatch:$' "$FULL_WORKFLOW" || fail 'manual full-suite tri
 grep -q 'branches: \[main\]' "$FULL_WORKFLOW" || fail 'main full-suite trigger is missing'
 grep -q "tags: \['v\*'\]" "$FULL_WORKFLOW" || fail 'tag full-suite trigger is missing'
 
+vet=$(job_block backend-pr-vet)
 normal=$(job_block backend-pr)
+db=$(job_block backend-pr-db)
+handlers=$(job_block backend-pr-handlers)
+performance=$(job_block backend-pr-performance)
 race=$(job_block backend-pr-race)
+db_race=$(job_block backend-pr-db-race)
+handlers_race=$(job_block backend-pr-handlers-race)
 invariants=$(job_block backend-security-invariants)
 full=$(job_block backend-full "$FULL_WORKFLOW")
 quality=$(job_block quality)
 frontend=$(job_block frontend-quality)
 aggregate=$(job_block test)
 
-[[ "$normal" == *"github.event_name == 'pull_request'"* ]] || fail 'normal PR lane is not pull-request-only'
-[[ "$normal" == *'backend-changed-packages.sh'* && "$normal" == *'go vet ./...'* && "$normal" == *'backend-pr-test.sh'* ]] ||
-  fail 'normal PR lane does not vet and test changed packages'
-[[ "$normal" != *'-p 1'* && "$normal" != *'go test -count=1 -timeout=30m ./...'* ]] ||
-  fail 'normal PR lane still runs the serialized/full tree'
+[[ "$vet" == *"github.event_name == 'pull_request'"* && "$vet" == *'go vet ./...'* ]] ||
+  fail 'parallel PR vet lane is incomplete'
+for lane_and_plan in \
+  "affected:$normal" \
+  "db:$db" \
+  "handlers:$handlers" \
+  "performance:$performance"
+do
+  lane=${lane_and_plan%%:*}
+  plan=${lane_and_plan#*:}
+  [[ "$plan" == *"github.event_name == 'pull_request'"* && "$plan" == *'backend-changed-packages.sh'* &&
+    "$plan" == *"backend-pr-test.sh --lane=$lane"* ]] ||
+    fail "parallel PR $lane lane is incomplete"
+  [[ "$plan" != *'-p 1'* && "$plan" != *'go test -count=1 -timeout=30m ./...'* ]] ||
+    fail "parallel PR $lane lane still runs the serialized/full tree"
+done
 
 [[ "$race" == *"github.event_name == 'pull_request'"* ]] || fail 'race PR lane is not pull-request-only'
-[[ "$race" == *'backend-changed-packages.sh --direct'* && "$race" == *'backend-pr-race.sh'* ]] ||
+[[ "$race" == *'backend-changed-packages.sh --direct'* && "$race" == *'backend-pr-race.sh --lane=affected'* ]] ||
   fail 'race PR lane does not race changed packages'
 [[ "$race" != *'-p 1'* && "$race" != *'go test -race -count=1 -timeout=30m ./...'* ]] ||
   fail 'race PR lane still races the full tree'
+[[ "$db_race" == *'backend-changed-packages.sh --direct'* && "$db_race" == *'backend-pr-race.sh --lane=db'* ]] ||
+  fail 'parallel PR DB race lane is incomplete'
+[[ "$handlers_race" == *'backend-changed-packages.sh --direct'* && "$handlers_race" == *'backend-pr-race.sh --lane=handlers'* ]] ||
+  fail 'parallel PR handler race lane is incomplete'
 
 [[ "$invariants" == *'TestRegression_'* && "$invariants" == *'TestAuthzFuzz_'* && "$invariants" == *'paimos_test_unsupported'* ]] ||
   fail 'parallel security/platform invariant lane is incomplete'
@@ -145,7 +189,11 @@ aggregate=$(job_block test)
 [[ -n "$quality" ]] || fail 'quality lane is missing'
 [[ "$frontend" == *'npm run schema:check'* && "$frontend" == *'npm test'* ]] ||
   fail 'frontend quality lane lost schema, lint, type, or unit assurance'
-for dependency in backend-pr backend-pr-race backend-security-invariants quality frontend-quality; do
+for dependency in \
+  backend-pr-vet backend-pr backend-pr-db backend-pr-handlers backend-pr-performance \
+  backend-pr-race backend-pr-db-race backend-pr-handlers-race \
+  backend-security-invariants quality frontend-quality
+do
   [[ "$aggregate" == *"$dependency"* ]] || fail "required test aggregator does not depend on $dependency"
 done
 [[ "$aggregate" != *'backend-full'* ]] || fail 'required PR test aggregator still depends on the full backend suite'
