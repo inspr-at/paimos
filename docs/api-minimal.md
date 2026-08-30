@@ -125,17 +125,25 @@ projects default to `nested`, while `1` forbids every parent edge.
 GET|POST /projects/:id/nodes
 GET      /projects/:id/nodes/:nodeID
 PUT      /projects/:id/nodes/:nodeID/parent
+GET|PUT  /node-labels
+GET|PUT  /projects/:id/node-labels
 GET|POST /projects/:id/product-sessions
 GET      /projects/:id/product-sessions/:productSessionID
+GET      /projects/:id/product-sessions/:productSessionID/events
 POST     /projects/:id/product-sessions/:productSessionID/attach-node
 POST     /projects/:id/product-sessions/:productSessionID/detach-node
 ```
 
 The node API is additive over existing `issues` rows. It always returns
-`kind: "node"`; `cosmetic_type_label` is derived presentation text and never
-rewrites `issues.type`. New node clients do not choose epic/ticket/task. Parent
-writes use `parent_node_id` and the same `issue_relations(type='parent')` SSOT
-as legacy issue APIs.
+`kind: "node"`; `cosmetic_type_label` is presentation text and never rewrites
+`issues.type`. Labels use validated global defaults with optional per-project
+overrides. The exposed precedence string is exactly
+`project_override_then_global_default`; project PUT replaces the override set,
+while global PUT is admin-only and requires every supported storage type. New
+node clients do not choose epic/ticket/task. Parent writes use `parent_node_id`
+and the same `issue_relations(type='parent')` SSOT as legacy issue APIs. Every
+delete-before-insert reparent runs in one database transaction, including Jira
+imports, so a rejected replacement preserves the old parent edge.
 
 A product session is a separate project resource identified only by
 `product_session_id`. It may target Paimos or a registered project agent, may
@@ -143,7 +151,11 @@ remain unattached, and has at most one nullable `node_id`; many sessions may
 attach to the same node or select the same agent. Attach, reattach, and detach
 require `expected_revision`, returning 409 on stale CAS. A product session is
 not an attribution header session, harness session, agent run, delivery, issue,
-or intake session, and creating one creates none of those resources.
+or intake session, and creating one creates none of those resources. Create,
+attach, reattach, and detach also append immutable actor, before/after node, and
+before/after revision evidence in the same atomic mutation. A failed CAS
+appends no event. An attached node must be explicitly detached before it can be
+moved to another project or sent to trash.
 
 ## Time entries
 

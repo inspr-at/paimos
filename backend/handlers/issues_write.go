@@ -1104,6 +1104,10 @@ func DeleteIssue(w http.ResponseWriter, r *http.Request) {
 		 WHERE id IN (SELECT id FROM descendants)
 	`, id, deletedBy)
 	if err != nil {
+		if strings.Contains(err.Error(), "product session attached node") {
+			jsonError(w, "detach the product session before deleting this node", http.StatusConflict)
+			return
+		}
 		jsonError(w, "delete failed", http.StatusInternalServerError)
 		return
 	}

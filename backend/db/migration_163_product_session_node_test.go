@@ -118,6 +118,60 @@ func TestMigration163EnforcesProductSessionProjectOwnership(t *testing.T) {
 	}
 }
 
+func TestMigration163ProductSessionAuditAndAttachedNodeLifecycleAreDatabaseOwned(t *testing.T) {
+	database := openM163Fixture(t)
+	if err := migrateThrough(database, 163); err != nil {
+		t.Fatal(err)
+	}
+	user, _ := database.Exec(`INSERT INTO users(username,password,role,status) VALUES('m163-auditor','x','member','active')`)
+	actorID, _ := user.LastInsertId()
+	projectA, _ := database.Exec(`INSERT INTO projects(name,key) VALUES('Audit A','AUA')`)
+	projectB, _ := database.Exec(`INSERT INTO projects(name,key) VALUES('Audit B','AUB')`)
+	projectAID, _ := projectA.LastInsertId()
+	projectBID, _ := projectB.LastInsertId()
+	node, _ := database.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status,priority)
+		VALUES(?,1,'ticket','Attached','backlog','medium')`, projectAID)
+	nodeID, _ := node.LastInsertId()
+	sessionID := "55555555-5555-4555-8555-555555555555"
+	if _, err := database.Exec(`INSERT INTO product_sessions(
+		product_session_id,project_id,target_kind,node_id,title,created_by_user_id,updated_by_user_id)
+		VALUES(?,?,'paimos',?,'Audited',?,?)`, sessionID, projectAID, nodeID, actorID, actorID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE issues SET project_id=? WHERE id=?`, projectBID, nodeID); err == nil || !strings.Contains(err.Error(), "must be detached before move") {
+		t.Fatalf("attached move error=%v, want actionable rejection", err)
+	}
+	if _, err := database.Exec(`UPDATE issues SET deleted_at=datetime('now') WHERE id=?`, nodeID); err == nil || !strings.Contains(err.Error(), "must be detached before delete") {
+		t.Fatalf("attached delete error=%v, want actionable rejection", err)
+	}
+	if _, err := database.Exec(`UPDATE product_sessions SET node_id=NULL,revision=2,updated_by_user_id=? WHERE product_session_id=?`, actorID, sessionID); err != nil {
+		t.Fatalf("explicit detach rejected: %v", err)
+	}
+	if _, err := database.Exec(`UPDATE issues SET project_id=? WHERE id=?`, projectBID, nodeID); err != nil {
+		t.Fatalf("move after explicit detach rejected: %v", err)
+	}
+	var count int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM product_session_events WHERE product_session_id=?`, sessionID).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("event count=%d err=%v, want create+detach", count, err)
+	}
+	var operation string
+	var beforeNode, actor, beforeRevision, afterRevision int64
+	if err := database.QueryRow(`SELECT operation,before_node_id,actor_user_id,before_revision,after_revision
+		FROM product_session_events WHERE product_session_id=? AND event_sequence=2`, sessionID).
+		Scan(&operation, &beforeNode, &actor, &beforeRevision, &afterRevision); err != nil || operation != "detach" || beforeNode != nodeID || actor != actorID || beforeRevision != 1 || afterRevision != 2 {
+		t.Fatalf("detach evidence op=%q node=%d actor=%d revisions=%d->%d err=%v", operation, beforeNode, actor, beforeRevision, afterRevision, err)
+	}
+	if _, err := database.Exec(`UPDATE product_session_events SET operation='attach' WHERE product_session_id=? AND event_sequence=2`, sessionID); err == nil {
+		t.Fatal("event update accepted")
+	}
+	if _, err := database.Exec(`DELETE FROM product_session_events WHERE product_session_id=? AND event_sequence=2`, sessionID); err == nil {
+		t.Fatal("event delete accepted")
+	}
+	if _, err := database.Exec(`UPDATE product_sessions SET node_id=?,revision=3 WHERE product_session_id=?`, nodeID, sessionID); err == nil {
+		t.Fatal("unattributed direct session mutation accepted")
+	}
+}
+
 func TestMigration163ParentGuardsAreDatabaseOwned(t *testing.T) {
 	database := openM163Fixture(t)
 	if err := migrateThrough(database, 163); err != nil {

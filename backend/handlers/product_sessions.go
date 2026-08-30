@@ -27,8 +27,8 @@ const productSessionSelect = `
 	       ps.created_at,ps.updated_at
 	FROM product_sessions ps
 	LEFT JOIN project_agents pa ON pa.id=ps.target_project_agent_id
-	LEFT JOIN issues i ON i.id=ps.node_id AND i.deleted_at IS NULL
-	LEFT JOIN projects p ON p.id=i.project_id`
+	LEFT JOIN issues i ON i.id=ps.node_id AND i.project_id=ps.project_id AND i.deleted_at IS NULL
+	LEFT JOIN projects p ON p.id=ps.project_id`
 
 type createProductSessionRequest struct {
 	TargetKind           string `json:"target_kind"`
@@ -51,8 +51,49 @@ func RegisterProductSessionRoutes(r chi.Router) {
 	r.With(auth.RequireProjectView).Get("/projects/{id}/product-sessions", ListProductSessions)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/product-sessions", CreateProductSession)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/product-sessions/{productSessionID}", GetProductSession)
+	r.With(auth.RequireProjectView).Get("/projects/{id}/product-sessions/{productSessionID}/events", ListProductSessionEvents)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/product-sessions/{productSessionID}/attach-node", AttachProductSessionNode)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/product-sessions/{productSessionID}/detach-node", DetachProductSessionNode)
+}
+
+func ListProductSessionEvents(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := productSessionProjectID(w, r)
+	if !ok {
+		return
+	}
+	productSessionID := chi.URLParam(r, "productSessionID")
+	var exists int
+	if err := db.DB.QueryRowContext(r.Context(), `SELECT 1 FROM product_sessions WHERE project_id=? AND product_session_id=?`, projectID, productSessionID).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
+		jsonError(w, "product session not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		jsonError(w, "product session events read failed", http.StatusInternalServerError)
+		return
+	}
+	rows, err := db.DB.QueryContext(r.Context(), `SELECT event_id,product_session_id,event_sequence,operation,
+		actor_user_id,before_node_id,after_node_id,before_revision,after_revision,created_at
+		FROM product_session_events WHERE product_session_id=? ORDER BY event_sequence`, productSessionID)
+	if err != nil {
+		jsonError(w, "product session events read failed", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	out := []models.ProductSessionEvent{}
+	for rows.Next() {
+		var event models.ProductSessionEvent
+		if err := rows.Scan(&event.EventID, &event.ProductSessionID, &event.EventSequence, &event.Operation,
+			&event.ActorUserID, &event.BeforeNodeID, &event.AfterNodeID, &event.BeforeRevision,
+			&event.AfterRevision, &event.CreatedAt); err != nil {
+			jsonError(w, "product session events read failed", http.StatusInternalServerError)
+			return
+		}
+		out = append(out, event)
+	}
+	if err := rows.Err(); err != nil {
+		jsonError(w, "product session events read failed", http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, out)
 }
 
 func decodeProductSessionJSON(w http.ResponseWriter, r *http.Request, dst any) bool {

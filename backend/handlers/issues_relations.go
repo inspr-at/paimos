@@ -32,12 +32,6 @@ import (
 	"github.com/inspr-at/paimos/backend/models"
 )
 
-// parentEdgeExecer is satisfied by both *sql.Tx and *sql.DB so setParentEdge
-// can run inside a transaction (the common case) or against the pool.
-type parentEdgeExecer interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-}
-
 func writeParentEdgeError(w http.ResponseWriter, err error) {
 	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
 		jsonError(w, "issue already has a parent", http.StatusConflict)
@@ -52,18 +46,18 @@ func writeParentEdgeError(w http.ResponseWriter, err error) {
 // existing parent for childID, then inserts the new one when parentID is set.
 // A nil/zero/self parentID leaves the child parentless. Callers still accept a
 // legacy `parent_id` input and pass it straight through here.
-func setParentEdge(ctx context.Context, ex parentEdgeExecer, childID int64, parentID *int64) error {
+func setParentEdge(ctx context.Context, tx *sql.Tx, childID int64, parentID *int64) error {
 	if childID <= 0 {
 		return nil
 	}
-	if _, err := ex.ExecContext(ctx,
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM issue_relations WHERE target_id=? AND type='parent'`, childID); err != nil {
 		return err
 	}
 	if parentID == nil || *parentID <= 0 || *parentID == childID {
 		return nil
 	}
-	_, err := ex.ExecContext(ctx,
+	_, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO issue_relations(source_id, target_id, type) VALUES(?,?,'parent')`,
 		*parentID, childID)
 	return err

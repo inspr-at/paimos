@@ -11885,6 +11885,24 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		{163, []string{
 			`ALTER TABLE projects ADD COLUMN node_depth TEXT NOT NULL DEFAULT 'nested'
 			 CHECK(node_depth IN ('1','nested'))`,
+			`CREATE TABLE node_label_defaults (
+			 issue_type TEXT PRIMARY KEY CHECK(issue_type IN ('epic','task','ticket','cost_unit','release','sprint','memory','runbook','external_system','related_project','guideline')),
+			 label TEXT NOT NULL CHECK(length(CAST(label AS BLOB)) BETWEEN 1 AND 64 AND label=trim(label)
+			  AND instr(label,char(9))=0 AND instr(label,char(10))=0 AND instr(label,char(13))=0)
+			)`,
+			`INSERT INTO node_label_defaults(issue_type,label) VALUES
+			 ('epic','Epic'),('task','Task'),('ticket','Ticket'),('cost_unit','Cost unit'),
+			 ('release','Release'),('sprint','Sprint'),('memory','Memory'),('runbook','Runbook'),
+			 ('external_system','External system'),('related_project','Related project'),('guideline','Guideline')`,
+			`CREATE TRIGGER trg_node_label_defaults_no_delete BEFORE DELETE ON node_label_defaults
+			 BEGIN SELECT RAISE(ABORT,'global node label defaults cannot be deleted'); END`,
+			`CREATE TABLE project_node_label_overrides (
+			 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 issue_type TEXT NOT NULL REFERENCES node_label_defaults(issue_type) ON DELETE RESTRICT,
+			 label TEXT NOT NULL CHECK(length(CAST(label AS BLOB)) BETWEEN 1 AND 64 AND label=trim(label)
+			  AND instr(label,char(9))=0 AND instr(label,char(10))=0 AND instr(label,char(13))=0),
+			 PRIMARY KEY(project_id,issue_type)
+			)`,
 			`CREATE TABLE product_sessions (
 			 product_session_id       TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("product_session_id") + `),
 			 project_id               INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -11907,6 +11925,21 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 ON product_sessions(node_id,project_id) WHERE node_id IS NOT NULL`,
 			`CREATE INDEX idx_product_sessions_target_agent
 			 ON product_sessions(project_id,target_project_agent_id) WHERE target_project_agent_id IS NOT NULL`,
+			`CREATE TABLE product_session_events (
+			 event_id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+			 product_session_id        TEXT NOT NULL REFERENCES product_sessions(product_session_id) ON DELETE CASCADE,
+			 event_sequence            INTEGER NOT NULL CHECK(event_sequence>0),
+			 operation                 TEXT NOT NULL CHECK(operation IN ('create','attach','reattach','detach')),
+			 actor_user_id              INTEGER NOT NULL,
+			 before_node_id             INTEGER,
+			 after_node_id              INTEGER,
+			 before_revision            INTEGER NOT NULL CHECK(before_revision>=0),
+			 after_revision             INTEGER NOT NULL CHECK(after_revision=before_revision+1),
+			 created_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(product_session_id,event_sequence)
+			)`,
+			`CREATE INDEX idx_product_session_events_session
+			 ON product_session_events(product_session_id,event_sequence)`,
 			`CREATE TRIGGER trg_product_sessions_actor_insert BEFORE INSERT ON product_sessions
 			 WHEN NEW.created_by_user_id IS NULL OR NEW.updated_by_user_id IS NULL
 			 BEGIN SELECT RAISE(ABORT,'product session actor attribution required'); END`,
@@ -11925,10 +11958,36 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			  SELECT 1 FROM issues i
 			  WHERE i.id=NEW.node_id AND i.project_id=NEW.project_id AND i.deleted_at IS NULL)
 			 BEGIN SELECT RAISE(ABORT,'product session node project mismatch'); END`,
+			`CREATE TRIGGER trg_product_sessions_mutation_guard BEFORE UPDATE ON product_sessions
+			 WHEN NEW.node_id IS OLD.node_id OR NEW.revision<>OLD.revision+1 OR NEW.updated_by_user_id IS NULL
+			 BEGIN SELECT RAISE(ABORT,'product session mutation requires attributed node revision'); END`,
 			`CREATE TRIGGER trg_product_sessions_identity_immutable BEFORE UPDATE OF
-			 product_session_id,project_id,target_kind,target_project_agent_id,created_by_user_id,created_at
+			 product_session_id,project_id,target_kind,target_project_agent_id,title,summary,created_by_user_id,created_at
 			 ON product_sessions
 			 BEGIN SELECT RAISE(ABORT,'product session identity is immutable'); END`,
+			`CREATE TRIGGER trg_product_sessions_no_delete BEFORE DELETE ON product_sessions
+			 BEGIN SELECT RAISE(ABORT,'product sessions are immutable resources'); END`,
+			`CREATE TRIGGER trg_product_sessions_event_create AFTER INSERT ON product_sessions
+			 BEGIN INSERT INTO product_session_events(
+			  product_session_id,event_sequence,operation,actor_user_id,before_node_id,after_node_id,before_revision,after_revision)
+			 VALUES(NEW.product_session_id,1,'create',NEW.created_by_user_id,NULL,NEW.node_id,0,NEW.revision); END`,
+			`CREATE TRIGGER trg_product_sessions_event_update AFTER UPDATE ON product_sessions
+			 BEGIN INSERT INTO product_session_events(
+			  product_session_id,event_sequence,operation,actor_user_id,before_node_id,after_node_id,before_revision,after_revision)
+			 VALUES(NEW.product_session_id,NEW.revision,
+			  CASE WHEN OLD.node_id IS NULL THEN 'attach' WHEN NEW.node_id IS NULL THEN 'detach' ELSE 'reattach' END,
+			  NEW.updated_by_user_id,OLD.node_id,NEW.node_id,OLD.revision,NEW.revision); END`,
+			`CREATE TRIGGER trg_product_session_events_immutable_update BEFORE UPDATE ON product_session_events
+			 BEGIN SELECT RAISE(ABORT,'product session events are immutable'); END`,
+			`CREATE TRIGGER trg_product_session_events_immutable_delete BEFORE DELETE ON product_session_events
+			 BEGIN SELECT RAISE(ABORT,'product session events are immutable'); END`,
+			`CREATE TRIGGER trg_issues_attached_session_move BEFORE UPDATE OF project_id ON issues
+			 WHEN NEW.project_id IS NOT OLD.project_id AND EXISTS(SELECT 1 FROM product_sessions ps WHERE ps.node_id=OLD.id)
+			 BEGIN SELECT RAISE(ABORT,'product session attached node must be detached before move'); END`,
+			`CREATE TRIGGER trg_issues_attached_session_soft_delete BEFORE UPDATE OF deleted_at ON issues
+			 WHEN NEW.deleted_at IS NOT OLD.deleted_at AND NEW.deleted_at IS NOT NULL
+			  AND EXISTS(SELECT 1 FROM product_sessions ps WHERE ps.node_id=OLD.id)
+			 BEGIN SELECT RAISE(ABORT,'product session attached node must be detached before delete'); END`,
 			`CREATE TRIGGER trg_projects_node_depth_guard BEFORE UPDATE OF node_depth ON projects
 			 WHEN NEW.node_depth='1' AND EXISTS(
 			  SELECT 1 FROM issue_relations edge
@@ -12151,10 +12210,16 @@ func checkProductSessionNodeFoundation(ctx context.Context, conn *sql.Conn) erro
 		return fmt.Errorf("M163 schema is partially present or locally incompatible: column:projects.node_depth")
 	}
 	if err := checkSchemaObjectsAbsent(ctx, conn, 163, []string{
+		"node_label_defaults", "trg_node_label_defaults_no_delete", "project_node_label_overrides",
 		"product_sessions", "idx_product_sessions_project_updated", "idx_product_sessions_node",
-		"idx_product_sessions_target_agent", "trg_product_sessions_actor_insert",
+		"idx_product_sessions_target_agent", "product_session_events", "idx_product_session_events_session",
+		"trg_product_sessions_actor_insert",
 		"trg_product_sessions_agent_insert", "trg_product_sessions_node_insert",
-		"trg_product_sessions_node_update", "trg_product_sessions_identity_immutable",
+		"trg_product_sessions_node_update", "trg_product_sessions_mutation_guard",
+		"trg_product_sessions_identity_immutable", "trg_product_sessions_no_delete",
+		"trg_product_sessions_event_create", "trg_product_sessions_event_update",
+		"trg_product_session_events_immutable_update", "trg_product_session_events_immutable_delete",
+		"trg_issues_attached_session_move", "trg_issues_attached_session_soft_delete",
 		"trg_projects_node_depth_guard", "trg_issue_parent_guard_insert", "trg_issue_parent_guard_update",
 	}); err != nil {
 		return err

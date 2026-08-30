@@ -795,8 +795,16 @@ func runJiraImport(cfg *jiraConfig, req importJiraRequest, actorID int64, job *i
 		}
 		// PAI-584 P6: parent_id column dropped — write the `parent` edge.
 		pid := parentID
-		if err := setParentEdge(context.Background(), db.DB, issueID, &pid); err != nil {
-			log.Printf("JiraImport: set parent id=%d parent=%d: %v", issueID, parentID, err)
+		parentTx, err := db.DB.BeginTx(context.Background(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("begin Jira parent transaction id=%d parent=%d: %w", issueID, parentID, err)
+		}
+		if err := setParentEdge(context.Background(), parentTx, issueID, &pid); err != nil {
+			_ = parentTx.Rollback()
+			return nil, fmt.Errorf("set Jira parent id=%d parent=%d: %w", issueID, parentID, err)
+		}
+		if err := parentTx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit Jira parent id=%d parent=%d: %w", issueID, parentID, err)
 		}
 	}
 

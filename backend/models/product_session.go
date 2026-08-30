@@ -28,3 +28,18 @@ type ProductSessionNode struct {
 	NodeKey string `json:"node_key"`
 	Label   string `json:"label"`
 }
+
+// ProductSessionEvent is immutable audit evidence for one durable session
+// lifecycle mutation. Node IDs are snapshots, deliberately not live joins.
+type ProductSessionEvent struct {
+	EventID          int64  `json:"event_id"`
+	ProductSessionID string `json:"product_session_id"`
+	EventSequence    int64  `json:"event_sequence"`
+	Operation        string `json:"operation"`
+	ActorUserID      int64  `json:"actor_user_id"`
+	BeforeNodeID     *int64 `json:"before_node_id"`
+	AfterNodeID      *int64 `json:"after_node_id"`
+	BeforeRevision   int64  `json:"before_revision"`
+	AfterRevision    int64  `json:"after_revision"`
+	CreatedAt        string `json:"created_at"`
+}

@@ -20,3 +20,10 @@ type Node struct {
 	CreatedAt         string `json:"created_at"`
 	UpdatedAt         string `json:"updated_at"`
 }
+
+type NodeLabelConfig struct {
+	Precedence       string            `json:"precedence"`
+	GlobalDefaults   map[string]string `json:"global_defaults"`
+	ProjectOverrides map[string]string `json:"project_overrides"`
+	Resolved         map[string]string `json:"resolved"`
+}
