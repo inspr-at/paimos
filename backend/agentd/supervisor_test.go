@@ -336,7 +336,12 @@ func TestSupervisorRestartReconcilesPersistedChildrenToOwnershipLost(t *testing.
 	if stops != 0 {
 		t.Fatalf("new daemon signalled an unproven PID %d times", stops)
 	}
-	_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "test-cleanup"})
+	// The assertion above is the daemon-disappearance boundary: the restarted
+	// supervisor never controlled the foreign child. Only now close the original
+	// owner so its monitor finishes terminal persistence before TempDir cleanup.
+	if err := first.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSupervisorStateIsSeparatedByPPMInstance(t *testing.T) {
