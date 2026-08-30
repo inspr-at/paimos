@@ -24,6 +24,7 @@ func RegisterAgentMessageRoutes(r chi.Router) {
 	r.With(auth.RequireProjectView).Get("/projects/{id}/messages/listen", listenAgentMessages)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/ack", ackAgentMessages)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/delivery-complete", completeAgentMessageDelivery)
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/delivery-unavailable", rerouteUnavailableAgentMessageDelivery)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/message-allowlist", allowAgentMessageSender)
 	r.With(auth.RequireAdmin, auth.RequireProjectView).Post("/projects/{id}/message-targets", registerAgentMessageTarget)
 	r.With(auth.RequireAdmin, auth.RequireProjectView).Get("/projects/{id}/message-targets", listAgentMessageTargets)
@@ -61,6 +62,13 @@ type completeDeliveryRequest struct {
 	Cursor         int64  `json:"cursor"`
 	DeliveryID     string `json:"delivery_id"`
 	EffectiveLevel string `json:"effective_level"`
+	FallbackReason string `json:"fallback_reason"`
+}
+
+type unavailableDeliveryRequest struct {
+	To             string `json:"to"`
+	Cursor         int64  `json:"cursor"`
+	DeliveryID     string `json:"delivery_id"`
 	FallbackReason string `json:"fallback_reason"`
 }
 
@@ -156,6 +164,35 @@ func completeAgentMessageDelivery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, state)
+}
+
+func rerouteUnavailableAgentMessageDelivery(w http.ResponseWriter, r *http.Request) {
+	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonError(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	var req unavailableDeliveryRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		messageProblem(w, r, "agent_message_request_invalid", err.Error(), http.StatusBadRequest)
+		return
+	}
+	agent, _ := readAgentAttribution(r)
+	attributed := ""
+	if agent != nil {
+		attributed = *agent
+	}
+	route, err := agentmessage.NewService(db.DB).RerouteUnavailableLocalDelivery(r.Context(), agentmessage.RerouteUnavailableInput{
+		ProjectID: projectID, Address: strings.TrimSpace(req.To), Agent: attributed, Cursor: req.Cursor,
+		DeliveryID: strings.TrimSpace(req.DeliveryID), FallbackReason: strings.TrimSpace(req.FallbackReason),
+	})
+	if err != nil {
+		writeAgentMessageError(w, r, err)
+		return
+	}
+	jsonOK(w, route)
 }
 
 func registerAgentMessageTarget(w http.ResponseWriter, r *http.Request) {

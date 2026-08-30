@@ -78,7 +78,11 @@ func ErrorCode(err error) string {
 }
 
 // UnavailableError reports that a documented local primitive cannot be used.
-type UnavailableError struct{ Message string }
+type UnavailableError struct {
+	Message        string
+	FallbackReason string
+	Reroute        bool
+}
 
 func (e *UnavailableError) Error() string { return e.Message }
 

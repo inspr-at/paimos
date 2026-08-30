@@ -51,6 +51,7 @@ type DeliveryWork struct {
 	TargetRef      string `json:"target_ref,omitempty"`
 	MaximumLevel   string `json:"maximum_level,omitempty"`
 	RequestedLevel string `json:"requested_level"`
+	FallbackReason string `json:"fallback_reason,omitempty"`
 }
 
 // Envelope is the canonical project-scoped message contract (PAI-815).

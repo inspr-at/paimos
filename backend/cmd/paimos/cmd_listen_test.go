@@ -56,6 +56,90 @@ func TestRunListenAdapterUnavailableUsesExitFour(t *testing.T) {
 	}
 }
 
+func TestRunListenForeignWorkerReturnsDistinctExitWithoutCompleting(t *testing.T) {
+	message := messageEnvelope{Cursor: 2, MessageID: "m-foreign", DeliveryWork: &messageDeliveryWork{
+		DeliveryID: "d-foreign", State: "pending", Adapter: "managed_harness", TargetKind: "harness_session", RequestedLevel: "steer",
+	}}
+	completes := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/projects/1/messages/listen":
+			_ = json.NewEncoder(w).Encode(inboxPage{NextCursor: 2, Messages: []messageEnvelope{message}})
+		case "/api/projects/1/messages/delivery-complete":
+			completes++
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	client := &Client{baseURL: srv.URL, http: srv.Client()}
+	err := runListen(context.Background(), client, 1, "codex:worker", "worker", false, true, "agentd_codex", "", "queue", false, time.Millisecond)
+	exit, ok := err.(*listenExitCode)
+	if !ok || exit.code != listenExitForeignWorker {
+		t.Fatalf("error=%#v want foreign-worker exit %d", err, listenExitForeignWorker)
+	}
+	if completes != 0 {
+		t.Fatalf("foreign work completed %d times", completes)
+	}
+}
+
+func TestDeliveryFallbackEvidenceDoesNotOverwriteAdapterReason(t *testing.T) {
+	if got := chooseDeliveryFallbackReason("transport_error", "idle"); got != "transport_error" {
+		t.Fatalf("adapter evidence overwritten: %q", got)
+	}
+	if got := chooseDeliveryFallbackReason("", "idle"); got != "idle" {
+		t.Fatalf("empty adapter evidence did not inherit durable row reason: %q", got)
+	}
+}
+
+func TestRunListenUnavailableAgentdReroutesLeaseWithoutCompletingIt(t *testing.T) {
+	message := messageEnvelope{Cursor: 17, MessageID: "m-agentd", From: "paimos:sender", To: "codex:worker", DeliveryLevel: "steer",
+		DeliveryWork: &messageDeliveryWork{DeliveryID: "11111111-1111-4111-8111-111111111111", State: "leased", Adapter: "agentd_codex",
+			TargetKind: "agentd_session", TargetRef: `{"socket":"/tmp/missing-pai849-agentd.sock","session_id":"22222222-2222-4222-8222-222222222222"}`,
+			MaximumLevel: "steer", RequestedLevel: "steer"}}
+	message.Parts = append(message.Parts, struct {
+		Kind string `json:"kind"`
+		Text string `json:"text"`
+	}{Kind: "text", Text: "leased managed steer"})
+	var unavailable struct {
+		To             string `json:"to"`
+		Cursor         int64  `json:"cursor"`
+		DeliveryID     string `json:"delivery_id"`
+		FallbackReason string `json:"fallback_reason"`
+	}
+	reroutes, completes, acks := 0, 0, 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(agentAttrHeader); got != "worker" {
+			t.Errorf("agent header=%q", got)
+		}
+		switch r.URL.Path {
+		case "/api/projects/1/messages/listen":
+			_ = json.NewEncoder(w).Encode(inboxPage{Address: "codex:worker", NextCursor: 17, Messages: []messageEnvelope{message}})
+		case "/api/projects/1/messages/delivery-unavailable":
+			reroutes++
+			_ = json.NewDecoder(r.Body).Decode(&unavailable)
+			_ = json.NewEncoder(w).Encode(map[string]any{"delivery_id": unavailable.DeliveryID, "route": "simple_fallback", "target_id": "fallback-generation"})
+		case "/api/projects/1/messages/delivery-complete":
+			completes++
+		case "/api/projects/1/messages/ack":
+			acks++
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	client := &Client{baseURL: srv.URL, http: srv.Client()}
+	if err := runListen(context.Background(), client, 1, "codex:worker", "worker", false, true, "agentd_codex", "", "queue", false, time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if reroutes != 1 || completes != 0 || acks != 0 {
+		t.Fatalf("reroutes=%d completes=%d acks=%d", reroutes, completes, acks)
+	}
+	if unavailable.To != "codex:worker" || unavailable.Cursor != 17 || unavailable.DeliveryID != message.DeliveryWork.DeliveryID || unavailable.FallbackReason != "transport_error" {
+		t.Fatalf("unavailable payload=%+v", unavailable)
+	}
+}
+
 func TestRunListenAcknowledgesOnlyAfterOutput(t *testing.T) {
 	var mu sync.Mutex
 	acked := int64(0)

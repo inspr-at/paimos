@@ -3,6 +3,7 @@ package contracts_test
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -17,5 +18,35 @@ func TestAgentMessageV1SchemaIsValidAndClosed(t *testing.T) {
 	}
 	if schema["$schema"] != "https://json-schema.org/draft/2020-12/schema" || schema["additionalProperties"] != false {
 		t.Fatalf("agent message schema identity or closed-world guard drifted: %#v", schema)
+	}
+}
+
+func TestAgentMessageDeliveryWorkSchemaAcceptsReachableTargetMissing(t *testing.T) {
+	raw, err := os.ReadFile("agent-message-v1.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties map[string]struct {
+			Properties map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	fixture := struct {
+		FallbackReason string `json:"fallback_reason"`
+	}{FallbackReason: "target_missing"}
+	allowed := schema.Properties["delivery_work"].Properties["fallback_reason"].Enum
+	if !slices.Contains(allowed, fixture.FallbackReason) {
+		t.Fatalf("reachable delivery_work fixture rejected: fallback_reason=%q enum=%v", fixture.FallbackReason, allowed)
+	}
+	want := []string{"idle", "unsupported", "policy_capped", "target_missing", "not_steerable", "transport_error"}
+	for _, value := range want {
+		if !slices.Contains(allowed, value) {
+			t.Fatalf("canonical fallback reason %q missing from enum %v", value, allowed)
+		}
 	}
 }

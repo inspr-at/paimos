@@ -25,6 +25,7 @@ import (
 const (
 	listenExitNoMessages         = 3
 	listenExitAdapterUnavailable = 4
+	listenExitForeignWorker      = 5
 	listenDefaultPollInterval    = 2 * time.Second
 )
 
@@ -133,6 +134,7 @@ func runListen(ctx context.Context, client *Client, projectID int64, address, ag
 	after, seen := int64(0), false
 	worker := workerAdapterFor(deliver)
 	for {
+		foreignWorker := false
 		page, err := fetchInbox(ctx, client, projectID, address, agent, after, worker)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -150,6 +152,16 @@ func runListen(ctx context.Context, client *Client, projectID int64, address, ag
 					}
 					var unavailable *adapterUnavailableError
 					if errors.As(err, &unavailable) {
+						if unavailable.foreignWorker {
+							foreignWorker = true
+							break
+						}
+						if unavailable.reroute && message.DeliveryWork != nil {
+							if rerouteErr := rerouteInboxDelivery(ctx, client, projectID, address, agent, message, unavailable.fallbackReason); rerouteErr != nil {
+								return reportError(rerouteErr)
+							}
+							break
+						}
 						return &listenExitCode{code: listenExitAdapterUnavailable, err: err}
 					}
 					return err
@@ -174,6 +186,9 @@ func runListen(ctx context.Context, client *Client, projectID int64, address, ag
 			}
 		}
 		if !follow {
+			if foreignWorker {
+				return &listenExitCode{code: listenExitForeignWorker, err: errors.New("delivery is pending for another local worker")}
+			}
 			if !seen {
 				return &listenExitCode{code: listenExitNoMessages}
 			}
@@ -187,6 +202,16 @@ func runListen(ctx context.Context, client *Client, projectID int64, address, ag
 		case <-timer.C:
 		}
 	}
+}
+
+func rerouteInboxDelivery(ctx context.Context, client *Client, projectID int64, address, agent string, message messageEnvelope, reason string) error {
+	if message.DeliveryWork == nil || reason == "" {
+		return errors.New("managed delivery reroute requires leased work and a fallback reason")
+	}
+	_, err := client.doForAgentContext(ctx, "POST", fmt.Sprintf("/api/projects/%d/messages/delivery-unavailable", projectID), map[string]any{
+		"to": address, "cursor": message.Cursor, "delivery_id": message.DeliveryWork.DeliveryID, "fallback_reason": reason,
+	}, agent)
+	return err
 }
 
 func completeInboxDelivery(ctx context.Context, client *Client, projectID int64, address, agent string, message messageEnvelope, outcome deliveryOutcome) error {
@@ -279,7 +304,7 @@ func deliverHarnessMessage(ctx context.Context, message messageEnvelope, body, a
 		case work.Adapter == "":
 			return nil, &adapterUnavailableError{message: "message has no receiver-owned harness target (delivery " + work.State + "); register a compatible target and requeue"}
 		case work.Adapter != plugin.Name():
-			return nil, &adapterUnavailableError{message: "message target adapter does not match the selected harness plugin"}
+			return nil, &adapterUnavailableError{message: "message target belongs to another local worker", foreignWorker: true}
 		case work.TargetKind != "" && work.TargetKind != plugin.Kind():
 			return nil, &adapterUnavailableError{message: "message target kind does not match the selected harness plugin"}
 		case work.TargetRef == "":
@@ -306,12 +331,27 @@ func deliverHarnessMessage(ctx context.Context, message messageEnvelope, body, a
 	if policyCapped {
 		result.FallbackReason = "policy_capped"
 	}
+	rowReason := ""
+	if message.DeliveryWork != nil {
+		rowReason = message.DeliveryWork.FallbackReason
+	}
+	result.FallbackReason = chooseDeliveryFallbackReason(result.FallbackReason, rowReason)
 	return &deliveryOutcome{EffectiveLevel: result.EffectiveLevel, FallbackReason: result.FallbackReason}, nil
+}
+
+func chooseDeliveryFallbackReason(adapterReason, rowReason string) string {
+	if adapterReason != "" {
+		return adapterReason
+	}
+	return rowReason
 }
 
 func mapHarnessDeliveryError(err error) error {
 	var unavailable *harnessplugin.UnavailableError
-	if errors.As(err, &unavailable) || errors.Is(err, harnessplugin.ErrUnsupported) || harnessplugin.ErrorCode(err) != "" {
+	if errors.As(err, &unavailable) {
+		return &adapterUnavailableError{message: err.Error(), fallbackReason: unavailable.FallbackReason, reroute: unavailable.Reroute}
+	}
+	if errors.Is(err, harnessplugin.ErrUnsupported) || harnessplugin.ErrorCode(err) != "" {
 		return &adapterUnavailableError{message: err.Error()}
 	}
 	return err
@@ -327,7 +367,12 @@ func messageText(message messageEnvelope) string {
 	return strings.Join(parts, "\n\n")
 }
 
-type adapterUnavailableError struct{ message string }
+type adapterUnavailableError struct {
+	message        string
+	fallbackReason string
+	reroute        bool
+	foreignWorker  bool
+}
 
 func (e *adapterUnavailableError) Error() string { return e.message }
 

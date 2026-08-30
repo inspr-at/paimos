@@ -22,6 +22,12 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	ErrSessionUnavailable    = errors.New("agentd managed session is unavailable")
+	ErrCapabilityUnavailable = errors.New("agentd managed steer capability is unavailable")
+	ErrTransportUnavailable  = errors.New("agentd local transport is unavailable")
+)
+
 type ControlRequest struct {
 	CorrelationID string `json:"correlation_id"`
 	Text          string `json:"text,omitempty"`
@@ -61,10 +67,20 @@ func Steer(ctx context.Context, socket, sessionID string, request ControlRequest
 	httpRequest.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(httpRequest)
 	if err != nil {
-		return Receipt{}, errors.New("agentd local transport failed")
+		return Receipt{}, ErrTransportUnavailable
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
+		var problem struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&problem)
+		if problem.Error == "session_not_found" || problem.Error == "session_not_running" {
+			return Receipt{}, ErrSessionUnavailable
+		}
+		if problem.Error == "unsupported" {
+			return Receipt{}, ErrCapabilityUnavailable
+		}
 		return Receipt{}, fmt.Errorf("agentd managed steer rejected with HTTP %d", response.StatusCode)
 	}
 	var receipt Receipt

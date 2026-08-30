@@ -51,6 +51,7 @@ type messageDeliveryWork struct {
 	TargetRef      string `json:"target_ref,omitempty"`
 	MaximumLevel   string `json:"maximum_level,omitempty"`
 	RequestedLevel string `json:"requested_level"`
+	FallbackReason string `json:"fallback_reason,omitempty"`
 }
 
 // tellCmd writes one durable, session-attributed ledger row.

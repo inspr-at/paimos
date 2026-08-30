@@ -63,7 +63,10 @@ func (AgentdCodexPlugin) ValidateTarget(_ context.Context, ref string) error {
 // remains on the ordinary inbox adapter; managed control never queue-fakes a
 // steer and cannot be invoked through the legacy unleased --deliver-target.
 func (AgentdCodexPlugin) Deliver(ctx context.Context, request DeliverRequest) (DeliverResult, error) {
-	if request.Level != LevelSteer || request.CorrelationID == "" || len(request.CorrelationID) > 128 || strings.ContainsAny(request.CorrelationID, "\x00\r\n") {
+	if request.Level != LevelSteer {
+		return DeliverResult{}, &UnavailableError{Message: "agentd managed target is steer-only", FallbackReason: "not_steerable", Reroute: true}
+	}
+	if request.CorrelationID == "" || len(request.CorrelationID) > 128 || strings.ContainsAny(request.CorrelationID, "\x00\r\n") {
 		return DeliverResult{}, &UnavailableError{Message: "agentd managed control requires a leased steer delivery"}
 	}
 	target, err := decodeAgentdTarget(request.TargetRef)
@@ -72,6 +75,15 @@ func (AgentdCodexPlugin) Deliver(ctx context.Context, request DeliverRequest) (D
 	}
 	receipt, err := agentdwire.Steer(ctx, target.Socket, target.SessionID, agentdwire.ControlRequest{CorrelationID: request.CorrelationID, Text: request.Body})
 	if err != nil {
+		if errors.Is(err, agentdwire.ErrSessionUnavailable) {
+			return DeliverResult{}, &UnavailableError{Message: "agentd managed session is not running", FallbackReason: "idle", Reroute: true}
+		}
+		if errors.Is(err, agentdwire.ErrCapabilityUnavailable) {
+			return DeliverResult{}, &UnavailableError{Message: "agentd managed session is not steerable", FallbackReason: "not_steerable", Reroute: true}
+		}
+		if errors.Is(err, agentdwire.ErrTransportUnavailable) {
+			return DeliverResult{}, &UnavailableError{Message: "agentd local transport is unavailable", FallbackReason: "transport_error", Reroute: true}
+		}
 		return DeliverResult{}, err
 	}
 	if receipt.CorrelationID != request.CorrelationID || receipt.Primitive != "codex app-server turn/steer" ||

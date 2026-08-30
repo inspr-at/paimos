@@ -176,13 +176,14 @@ type codexProcess struct {
 	earlyCompletedState string
 	turnDone            chan codexTurnResult
 	turnDoneOnce        sync.Once
+	streamDone          chan struct{}
+	streamDoneOnce      sync.Once
 }
 
 func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent)) *codexProcess {
 	p := &codexProcess{ownedProcess: newOwnedProcess(cmd), stdin: stdin, observe: observe,
-		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1)}
+		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1), streamDone: make(chan struct{})}
 	go p.readLoop(stdout)
-	p.startWait()
 	return p
 }
 
@@ -193,6 +194,11 @@ func (p *codexProcess) observeEvent(event AdapterEvent) {
 }
 
 func (p *codexProcess) readLoop(reader io.Reader) {
+	defer func() {
+		p.closeInput()
+		p.streamDoneOnce.Do(func() { close(p.streamDone) })
+		p.finishAfterDrain()
+	}()
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), maxCodexFrameBytes)
 	for scanner.Scan() {
@@ -224,7 +230,7 @@ func (p *codexProcess) readLoop(reader io.Reader) {
 
 func (p *codexProcess) abortStream() {
 	p.closeInput()
-	_ = ownedprocess.Signal(p.cmd, true)
+	_, _ = p.signalOwned(true)
 }
 
 func (p *codexProcess) handleNotification(message codexRPCMessage) {
@@ -354,6 +360,8 @@ func (p *codexProcess) call(ctx context.Context, method string, params, result a
 		return ctx.Err()
 	case <-p.done:
 		return errors.New("Codex app-server exited during request")
+	case <-p.streamDone:
+		return errors.New("Codex app-server event stream ended during request")
 	}
 }
 
@@ -445,6 +453,17 @@ func (p *codexProcess) Wait() error {
 		default:
 			_ = p.ownedProcess.Wait()
 			return errors.New("Codex app-server exited before turn completion")
+		}
+	case <-p.streamDone:
+		select {
+		case result := <-p.turnDone:
+			_ = p.ownedProcess.Wait()
+			if result.failed {
+				return errors.New("Codex turn failed")
+			}
+			return nil
+		default:
+			return errors.New("Codex app-server event stream ended before turn completion")
 		}
 	}
 }

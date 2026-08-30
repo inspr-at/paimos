@@ -216,8 +216,12 @@ func (s *Service) validateTarget(ctx context.Context, in RegisterInput) (string,
 		if err != nil {
 			return "", err
 		}
+		standby := false
 		for _, target := range targets {
-			if !target.Enabled || target.Role != "primary" || target.Adapter != agentmessage.AdapterManagedHarness ||
+			if target.Enabled && target.Role == "primary" && target.Adapter == agentmessage.AdapterAgentdCodex {
+				standby = true
+			}
+			if target.Role != "primary" || target.Adapter != agentmessage.AdapterManagedHarness ||
 				target.TargetKind != agentmessage.TargetKindHarnessSession {
 				continue
 			}
@@ -236,7 +240,7 @@ func (s *Service) validateTarget(ctx context.Context, in RegisterInput) (string,
 		target, err := bus.RegisterTarget(ctx, agentmessage.RegisterTargetInput{
 			ProjectID: in.ProjectID, Address: address,
 			Adapter: agentmessage.AdapterManagedHarness, TargetKind: agentmessage.TargetKindHarnessSession,
-			TargetRef: in.SessionRef, MaximumLevel: level, Role: "primary",
+			TargetRef: in.SessionRef, MaximumLevel: level, Role: "primary", Standby: standby,
 		})
 		if err != nil {
 			return "", err

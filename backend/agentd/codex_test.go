@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 )
@@ -80,6 +81,43 @@ func TestCodexStartCancellationReapsInFlightAppServer(t *testing.T) {
 	_, err := adapter.Start(ctx, StartRequest{Workspace: t.TempDir(), Prompt: "work", Identity: "codex:test", Adapter: AdapterCodex}, nil)
 	if err == nil || child == nil || child.ProcessState == nil || !child.ProcessState.Exited() {
 		t.Fatalf("err=%v child=%v state=%v", err, child, child.ProcessState)
+	}
+}
+
+func TestCodexDrainsFinalCompletionBeforeReapingAppServer(t *testing.T) {
+	adapter := NewCodexAdapter(os.Args[0], "test")
+	adapter.command = func(_ string, _ ...string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+		cmd.Env = append(os.Environ(), codexHelperEnvironment+"=complete-and-exit")
+		return cmd
+	}
+	var eventsMu sync.Mutex
+	var events []AdapterEvent
+	process, err := adapter.Start(context.Background(), StartRequest{
+		Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:drain", Adapter: AdapterCodex,
+	}, func(event AdapterEvent) {
+		// Keep the pipe measurably backlogged after the child exits. Calling
+		// Cmd.Wait concurrently with this callback used to close StdoutPipe and
+		// discard the final turn/completed frame.
+		if event.Kind == EventToolStarted {
+			time.Sleep(time.Millisecond)
+		}
+		eventsMu.Lock()
+		events = append(events, event)
+		eventsMu.Unlock()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatalf("final completion was not drained before reap: %v", err)
+	}
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	for _, event := range events {
+		if event.ErrorCode == ErrorEventStreamBound {
+			t.Fatalf("normal child exit was misreported as a bounded stream error: %+v", events)
+		}
 	}
 }
 
@@ -154,6 +192,13 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 			}
 			respond(map[string]any{"turn": map[string]any{"id": "turn-owned", "status": "inProgress"}})
 			_ = encoder.Encode(map[string]any{"method": "turn/started", "params": map[string]any{"threadId": "thread-owned", "turn": map[string]any{"id": "turn-owned", "status": "inProgress"}}})
+			if mode == "complete-and-exit" {
+				for range 48 {
+					_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{}})
+				}
+				_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-owned", "turn": map[string]any{"id": "turn-owned", "status": "completed"}}})
+				return
+			}
 		case "turn/steer":
 			respond(map[string]any{"turnId": "turn-owned"})
 		case "turn/interrupt":

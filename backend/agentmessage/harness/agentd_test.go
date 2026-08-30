@@ -21,5 +21,8 @@ func TestAgentdManagedDeliveryRequiresLeasedSteerCorrelation(t *testing.T) {
 		if !errors.As(err, &unavailable) {
 			t.Fatalf("request=%+v error=%v", request, err)
 		}
+		if request.Level == LevelSimple && (!unavailable.Reroute || unavailable.FallbackReason != "not_steerable") {
+			t.Fatalf("simple request unavailable=%+v", unavailable)
+		}
 	}
 }
