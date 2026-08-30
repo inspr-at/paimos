@@ -488,7 +488,7 @@ func (s *Service) RerouteUnavailableLocalDelivery(ctx context.Context, in Rerout
 	if state != "leased" || cursor != in.Cursor {
 		return nil, coded("agent_message_delivery_not_leased", "managed delivery lease is no longer current")
 	}
-	if !isAgentdManagedAdapter(selectedAdapter) {
+	if !IsManagedAgentdAdapter(selectedAdapter) {
 		return nil, coded("agent_message_delivery_adapter_mismatch", "only an unavailable agentd lease can be rerouted")
 	}
 	blockNoRoute := func(detail string) (*RerouteUnavailableResult, error) {
@@ -547,7 +547,7 @@ func (s *Service) RerouteUnavailableLocalDelivery(ctx context.Context, in Rerout
 		}
 		return nil, err
 	}
-	if fallbackMaximum != "simple" || fallbackRole != "simple_fallback" || isAgentdManagedAdapter(fallbackAdapter) || !IsLocalWorkerAdapter(fallbackAdapter) {
+	if fallbackMaximum != "simple" || fallbackRole != "simple_fallback" || IsManagedAgentdAdapter(fallbackAdapter) || !IsLocalWorkerAdapter(fallbackAdapter) {
 		return blockNoRoute("configured fallback is not an ordinary simple local target")
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE agent_message_deliveries SET state='pending',lease_until=NULL,
@@ -565,7 +565,10 @@ func (s *Service) RerouteUnavailableLocalDelivery(ctx context.Context, in Rerout
 	return &RerouteUnavailableResult{DeliveryID: in.DeliveryID, Route: "simple_fallback", TargetID: fallbackTargetID.String}, nil
 }
 
-func isAgentdManagedAdapter(adapter string) bool {
+// IsManagedAgentdAdapter reports whether adapter is an agentd-owned live
+// Process target. Bus reroute and managed-harness standby registration share
+// this predicate so adding an owned adapter cannot silently change primacy.
+func IsManagedAgentdAdapter(adapter string) bool {
 	return adapter == AdapterAgentdCodex || adapter == AdapterAgentdClaude
 }
 

@@ -435,7 +435,7 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 			if event.CorrelationID == "" {
 				p.signalReady(claudeStartupError(event.Reason))
 			} else {
-				p.resolveControl(event, errors.New("Claude Agent SDK control failed"))
+				p.resolveControl(event, claudeControlError(event.Reason))
 			}
 		default:
 			p.protocolFailure(ErrorAppServerProtocol)
@@ -444,6 +444,17 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 	}
 	if scanner.Err() != nil {
 		p.protocolFailure(ErrorEventStreamBound)
+	}
+}
+
+func claudeControlError(reason string) error {
+	switch reason {
+	case "stream_input_failed":
+		return errors.New("Claude Agent SDK Query.streamInput failed")
+	case "interrupt_receipt_failed":
+		return errors.New("Claude Agent SDK Query.interrupt receipt failed")
+	default:
+		return errors.New("Claude Agent SDK control failed")
 	}
 }
 

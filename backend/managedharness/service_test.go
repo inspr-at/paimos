@@ -513,6 +513,145 @@ func TestAgentdPrimaryAndManagedStandbySetupIsOrderStable(t *testing.T) {
 	}
 }
 
+func TestClaudeAgentdPrimaryAndManagedStandbySetupIsOrderStable(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	bus := agentmessage.NewService(paimosdb.DB)
+	claudeTarget, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:worker", Adapter: agentmessage.AdapterAgentdClaude,
+		TargetKind:   agentmessage.TargetKindAgentdSession,
+		TargetRef:    `{"socket":"/tmp/stable-claude-agentd.sock","session_id":"85000000-0000-4000-8000-000000000001"}`,
+		MaximumLevel: "steer", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(paimosdb.DB)
+	input := RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "stable-claude-host", SessionRef: "stable-claude-generation",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+	}
+	generation, _, err := service.Register(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets, err := bus.ListTargets(context.Background(), projectID, "claude:worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range targets {
+		if target.ID == claudeTarget.ID && !target.Enabled {
+			t.Fatal("Claude managed generation disabled the configured agentd_claude primary")
+		}
+		if target.ID == generation.MessageTargetID && target.Enabled {
+			t.Fatal("coexisting Claude managed_harness target must remain standby")
+		}
+	}
+
+	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'reverse-claude-worker')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	reverseInput := RegisterInput{
+		ProjectID: projectID, AgentName: "reverse-claude-worker", Harness: "claude", Host: "reverse-claude-host", SessionRef: "reverse-claude-generation",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+	}
+	reverseGeneration, _, err := service.Register(context.Background(), reverseInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reverseClaude, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:reverse-claude-worker", Adapter: agentmessage.AdapterAgentdClaude,
+		TargetKind:   agentmessage.TargetKindAgentdSession,
+		TargetRef:    `{"socket":"/tmp/reverse-claude-agentd.sock","session_id":"85000000-0000-4000-8000-000000000002"}`,
+		MaximumLevel: "steer", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reverseTargets, err := bus.ListTargets(context.Background(), projectID, "claude:reverse-claude-worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range reverseTargets {
+		if target.ID == reverseClaude.ID && !target.Enabled {
+			t.Fatal("Claude managed-first setup disabled the later agentd_claude primary")
+		}
+		if target.ID == reverseGeneration.MessageTargetID && target.Enabled {
+			t.Fatal("Claude managed-first setup did not converge to a managed_harness standby")
+		}
+	}
+}
+
+func TestUnavailableClaudeAgentdLeaseReroutesToFreshActiveGeneration(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	bus := agentmessage.NewService(paimosdb.DB)
+	if err := bus.AllowSender(context.Background(), projectID, "claude:worker", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:worker", Adapter: agentmessage.AdapterCodex,
+		TargetKind: agentmessage.TargetKindCodexThread, TargetRef: "claude-active-fallback", MaximumLevel: "simple", Role: "simple_fallback",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claudeTarget, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:worker", Adapter: agentmessage.AdapterAgentdClaude,
+		TargetKind:   agentmessage.TargetKindAgentdSession,
+		TargetRef:    `{"socket":"/tmp/active-claude-agentd.sock","session_id":"85000000-0000-4000-8000-000000000003"}`,
+		MaximumLevel: "steer", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "claude:worker", Body: "reroute to live Claude generation", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedPage, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "claude:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterAgentdClaude, Limit: 10,
+	})
+	if err != nil || len(failedPage.Messages) != 1 || failedPage.Messages[0].DeliveryWork == nil {
+		t.Fatalf("failed lease page=%#v err=%v", failedPage, err)
+	}
+	service := NewService(paimosdb.DB)
+	generation, _, err := service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "fresh-claude-host", SessionRef: "fresh-claude-generation",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Heartbeat(context.Background(), generation.ID, PhaseWorking); err != nil {
+		t.Fatal(err)
+	}
+	route, err := bus.RerouteUnavailableLocalDelivery(context.Background(), agentmessage.RerouteUnavailableInput{
+		ProjectID: projectID, Address: "claude:worker", Agent: "worker", Cursor: message.Cursor,
+		DeliveryID: failedPage.Messages[0].DeliveryWork.DeliveryID, FallbackReason: "idle",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route.Route != "active_generation" || route.HarnessSessionID != generation.ID || route.TargetID != generation.MessageTargetID {
+		t.Fatalf("route=%+v generation=%+v", route, generation)
+	}
+	targets, err := bus.ListTargets(context.Background(), projectID, "claude:worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range targets {
+		if target.ID == claudeTarget.ID && !target.Enabled {
+			t.Fatal("fresh Claude generation disabled the agentd_claude primary")
+		}
+		if target.ID == generation.MessageTargetID && target.Enabled {
+			t.Fatal("fresh Claude generation target must remain standby until durable reroute")
+		}
+	}
+}
+
 func TestRegisterEnforcesManagedAndExternalSteerTruth(t *testing.T) {
 	projectID, _ := openManagedHarnessTestDB(t)
 	service := NewService(paimosdb.DB)

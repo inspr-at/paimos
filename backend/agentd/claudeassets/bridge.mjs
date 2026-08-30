@@ -29,48 +29,79 @@ function validID(value, maximum = 256) {
 
 class InputStream {
   constructor(first) {
-    this.items = [{ message: first, acknowledged: null, rejected: null, settled: false }];
-    this.waiters = [];
+    this.first = first;
     this.closed = false;
-    this.inFlight = null;
+    this.closedPromise = new Promise((resolve) => { this.resolveClosed = resolve; });
   }
 
-  push(message) {
-    if (this.closed) return Promise.reject(new Error("closed"));
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.first = null;
+    this.resolveClosed();
+  }
+
+  async *[Symbol.asyncIterator]() {
+    if (this.closed || !this.first) return;
+    const first = this.first;
+    this.first = null;
+    yield first;
+    if (!this.closed) await this.closedPromise;
+  }
+}
+
+class ControlStream {
+  constructor() {
+    this.pending = null;
+    this.receiver = null;
+    this.closed = false;
+  }
+
+  send(message) {
+    if (this.closed || this.pending) return Promise.reject(new Error("closed"));
     return new Promise((resolve, reject) => {
-      const item = { message, acknowledged: resolve, rejected: reject, settled: false };
-      const waiter = this.waiters.shift();
-      if (waiter) waiter(item); else this.items.push(item);
+      const item = { message, resolve, reject };
+      if (this.receiver) {
+        const receiver = this.receiver;
+        this.receiver = null;
+        receiver({ value: item, done: false });
+      } else {
+        this.pending = item;
+      }
     });
   }
 
-  settle(item, error = null) {
-    if (!item || item.settled) return;
-    item.settled = true;
-    if (error) item.rejected?.(error); else item.acknowledged?.();
+  close() {
+    this.abort(new Error("closed"));
   }
 
-  close(error = new Error("closed")) {
+  abort(error) {
     if (this.closed) return;
     this.closed = true;
-    this.settle(this.inFlight, error);
-    for (const item of this.items.splice(0)) this.settle(item, error);
-    for (const waiter of this.waiters.splice(0)) waiter(null);
+    this.pending?.reject(error);
+    this.pending = null;
+    if (this.receiver) {
+      this.receiver({ done: true });
+      this.receiver = null;
+    }
+  }
+
+  async next() {
+    if (this.pending) {
+      const item = this.pending;
+      this.pending = null;
+      return { value: item, done: false };
+    }
+    if (this.closed) return { done: true };
+    return await new Promise((resolve) => { this.receiver = resolve; });
   }
 
   async *[Symbol.asyncIterator]() {
     while (!this.closed) {
-      let item = this.items.shift();
-      if (!item) item = await new Promise((resolve) => this.waiters.push(resolve));
-      if (!item) return;
-      this.inFlight = item;
-      try {
-        yield item.message;
-        this.settle(item);
-      } finally {
-        this.settle(item, new Error("input stream aborted"));
-        if (this.inFlight === item) this.inFlight = null;
-      }
+      const next = await this.next();
+      if (next.done) return;
+      next.value.resolve();
+      yield next.value.message;
     }
   }
 }
@@ -137,6 +168,7 @@ if (start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.le
 
 let queryHandle;
 let input;
+let controlInput;
 let stopping = false;
 let sessionStarted = false;
 let sessionID = "";
@@ -207,6 +239,8 @@ try {
   if (!queryHandle || typeof queryHandle.streamInput !== "function" ||
       typeof queryHandle.interrupt !== "function" || typeof queryHandle.close !== "function" ||
       typeof queryHandle[Symbol.asyncIterator] !== "function") throw new Error("query capabilities");
+  controlInput = new ControlStream();
+  queryHandle.streamInput(controlInput).catch(() => { controlInput.abort(new Error("stream input failed")); });
 } catch {
   fail("app_server_protocol", "", "sdk_query_capability_missing");
   process.exit(1);
@@ -215,14 +249,11 @@ try {
 let controlChain = Promise.resolve();
 let queryEndedResolve;
 const queryEnded = new Promise((resolve) => { queryEndedResolve = resolve; });
-async function* streamOne(message) {
-  yield message;
-}
 async function streamInputBound(message) {
   let timer;
   try {
     return await Promise.race([
-      queryHandle.streamInput(streamOne(message)),
+      controlInput.send(message),
       queryEnded.then(() => { throw new Error("Query ended before input acknowledgement"); }),
       new Promise((_, reject) => {
         timer = setTimeout(() => reject(new Error("Query input acknowledgement timed out")), CONTROL_INPUT_TIMEOUT_MS);
@@ -253,6 +284,7 @@ const handleControlLine = (line) => {
     }
     let controlUUID = "";
     let fatal = false;
+    let failureReason = "control_failed";
     try {
       if (request.op === "steer") {
         expireCorrelations();
@@ -268,8 +300,10 @@ const handleControlLine = (line) => {
         const uuid = randomUUID();
         controlUUID = uuid;
         const state = addCorrelation(uuid, correlationID);
+        failureReason = "stream_input_failed";
         await streamInputBound(userMessage(request.text, uuid));
         request.text = "";
+        failureReason = "interrupt_receipt_failed";
         const receipt = await queryHandle.interrupt();
         if (!receipt || !Array.isArray(receipt.still_queued)) {
           fatal = true;
@@ -292,6 +326,7 @@ const handleControlLine = (line) => {
         emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "stop") {
         stopping = true;
+        controlInput.close();
         input.close();
         queryHandle.close();
         emit({ kind: "control_applied", correlation_id: correlationID });
@@ -302,8 +337,9 @@ const handleControlLine = (line) => {
       }
     } catch {
       if (controlUUID) deleteCorrelation(controlUUID);
-      fail("app_server_protocol", correlationID);
+      fail("app_server_protocol", correlationID, failureReason);
       if (fatal) {
+        controlInput.close();
         input.close();
         queryHandle.close();
       }
@@ -342,7 +378,8 @@ try {
   }
   queryEndedResolve();
   lines.close();
-  input.close(new Error("Query ended"));
+  controlInput.close();
+  input.close();
   queryHandle.close();
   await controlChain;
   if (!stopping) {
@@ -352,7 +389,8 @@ try {
 } catch {
   queryEndedResolve();
   lines.close();
-  input?.close(new Error("Query aborted"));
+  controlInput?.close();
+  input?.close();
   queryHandle?.close();
   await controlChain.catch(() => {});
   if (!stopping) {

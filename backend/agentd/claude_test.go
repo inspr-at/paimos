@@ -384,6 +384,18 @@ func TestClaudeReleaseUsesPinnedOperatorSDKWithoutBundledVendorBytes(t *testing.
 	}
 }
 
+func TestClaudeBridgeHasNoLegacyPromptStreamSteerQueue(t *testing.T) {
+	bridge := string(claudeAgentSDKBridge)
+	for _, legacy := range []string{"push(message)", "acknowledged", "rejected", "settle(item", "inFlight"} {
+		if strings.Contains(bridge, legacy) {
+			t.Fatalf("legacy prompt-stream steer machinery remains: %q", legacy)
+		}
+	}
+	if !strings.Contains(bridge, "queryHandle.streamInput(controlInput)") {
+		t.Fatal("steer is not bound to the live Query.streamInput method")
+	}
+}
+
 func TestClaudeSteerAcceptsInterruptReceiptAfterInputWasAlreadyConsumed(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -454,7 +466,7 @@ func TestClaudeCorrelationExpiryPreventsCapacityOutage(t *testing.T) {
 	_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "expiry-stop"})
 }
 
-func TestClaudeQueryAbortRejectsPendingInputAndReaps(t *testing.T) {
+func TestClaudeQueryAbortRejectsControlAndReaps(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node runtime unavailable")
@@ -470,18 +482,18 @@ func TestClaudeQueryAbortRejectsPendingInputAndReaps(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if _, err := process.Steer(ctx, ControlRequest{CorrelationID: "pending-abort", Text: "steer"}); err == nil {
-		t.Fatal("aborted Query unexpectedly acknowledged pending input")
+		t.Fatal("aborted Query unexpectedly acknowledged control")
 	}
 	waited := make(chan error, 1)
 	go func() { waited <- process.Wait() }()
 	select {
 	case <-waited:
 	case <-time.After(time.Second):
-		t.Fatal("pending input acknowledgement wedged Query reap")
+		t.Fatal("aborted control wedged Query reap")
 	}
 }
 
-func TestClaudeInputAcknowledgementTimeoutReleasesControlChain(t *testing.T) {
+func TestClaudeInputDeliveryTimeoutReleasesControlChain(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node runtime unavailable")
@@ -499,7 +511,7 @@ func TestClaudeInputAcknowledgementTimeoutReleasesControlChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := process.Steer(context.Background(), ControlRequest{CorrelationID: "wedge-steer", Text: "steer"}); err == nil {
-		t.Fatal("wedged SDK streamInput unexpectedly succeeded")
+		t.Fatal("unconsumed SDK streamInput unexpectedly succeeded")
 	}
 	if _, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "after-wedge"}); err != nil {
 		t.Fatalf("control chain remained wedged after bounded input failure: %v", err)
@@ -583,6 +595,48 @@ interrupt:
 	t.Logf("live interrupt correlation=%s stop correlation=%s bridge_reaped=true", interruptReceipt.CorrelationID, stopReceipt.CorrelationID)
 }
 
+func TestClaudeLiveOwnedQueryDefaultToolsRejectBash(t *testing.T) {
+	if os.Getenv("PAIMOS_AGENTD_LIVE_CLAUDE") != "1" {
+		t.Skip("set PAIMOS_AGENTD_LIVE_CLAUDE=1 and PAIMOS_AGENTD_LIVE_CLAUDE_SDK=/absolute/sdk.mjs with authenticated local Claude to run live proof")
+	}
+	workspace := t.TempDir()
+	sentinel := filepath.Join(workspace, "pai850-bash-sentinel")
+	process, err := NewClaudeAdapter("", "", os.Getenv("PAIMOS_AGENTD_LIVE_CLAUDE_SDK")).Start(context.Background(), StartRequest{
+		Adapter: AdapterClaude, Workspace: workspace, Identity: "claude:live-safe-tools",
+		Prompt: "Use the Bash tool exactly once to run: printf enabled > pai850-bash-sentinel. Do not use Write, Edit, or any other tool to create the file. If Bash is unavailable, do not create the file.",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "live-safe-tools-cleanup"})
+	})
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, statErr := os.Stat(sentinel); statErr == nil {
+			t.Fatal("Bash executed despite the default owned-Query tool boundary")
+		} else if !os.IsNotExist(statErr) {
+			t.Fatal(statErr)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	stopReceipt, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "live-safe-tools-stop-850"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	claude := process.(*claudeProcess)
+	if claude.cmd.ProcessState == nil {
+		t.Fatal("owned safe-tools bridge was not reaped")
+	}
+	if _, err := os.Stat(claude.runtimeDir); !os.IsNotExist(err) {
+		t.Fatalf("temporary safe-tools runtime remains: %v", err)
+	}
+	t.Logf("live safe-tools sentinel_created=false stop_correlation=%s bridge_reaped=true", stopReceipt.CorrelationID)
+}
+
 const fakeClaudeSDKModule = `
 import { appendFileSync } from "node:fs";
 
@@ -646,8 +700,12 @@ export function query({ prompt }) {
   return {
     [Symbol.asyncIterator]() { return this; },
     next() { return output.next(); },
-    async streamInput(stream) { await handleInput(stream); },
+    async streamInput(stream) {
+      if (process.env.PAIMOS_CLAUDE_TEST_MODE === "wedge_stream_input") await new Promise(() => {});
+      await handleInput(stream);
+    },
     async interrupt() {
+      if (process.env.PAIMOS_CLAUDE_TEST_MODE === "abort_with_pending_input") throw new Error("query aborted");
       log("interrupt query=owned-query");
       const messages = queued.splice(0);
       const still_queued = messages.map((message) => message.uuid);
