@@ -361,12 +361,9 @@ func TestApplicableMemoriesSuggestExcludesLinked(t *testing.T) {
 	}
 }
 
-// TestApplicableMemoriesCrossProjectViaRelation verifies that a memory
-// in another project linked via the relations endpoint surfaces in
-// the manual-list path. The suggest path stays project-scoped (v1
-// scope cap) — that's covered by the absence of cross-project memories
-// in TestApplicableMemoriesSuggest.
-func TestApplicableMemoriesCrossProjectViaRelation(t *testing.T) {
+// PAI-855: knowledge relations are owner-scope local. Even an admin who may
+// edit both projects cannot create a cross-project knowledge link.
+func TestApplicableMemoriesCrossProjectRelationRejected(t *testing.T) {
 	ts := newTestServer(t)
 	projA := seedBatchProject(t, "PAI Project", "PAI")
 	projB := seedBatchProject(t, "ACME Project", "ACME")
@@ -379,18 +376,16 @@ func TestApplicableMemoriesCrossProjectViaRelation(t *testing.T) {
 		ts.adminCookie,
 		map[string]any{"target_id": memID, "type": "applies_to_memory"},
 	)
-	if resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusUnprocessableEntity {
 		b, _ := io.ReadAll(resp.Body)
-		t.Fatalf("POST cross-project: status=%d body=%s", resp.StatusCode, b)
+		t.Fatalf("POST cross-project: status=%d want=422 body=%s", resp.StatusCode, b)
 	}
 
-	resp = ts.get(t, "/api/issues/"+itoa(ticketID)+"/applicable-memories", ts.adminCookie)
-	var out []map[string]any
-	_ = json.NewDecoder(resp.Body).Decode(&out)
-	if len(out) != 1 {
-		t.Fatalf("expected 1 cross-project result, got %d", len(out))
+	var count int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM issue_relations WHERE source_id=? AND target_id=?`, ticketID, memID).Scan(&count); err != nil {
+		t.Fatal(err)
 	}
-	if out[0]["project_key"] != "ACME" {
-		t.Errorf("project_key=%v, want ACME", out[0]["project_key"])
+	if count != 0 {
+		t.Fatalf("cross-project knowledge relation was persisted")
 	}
 }

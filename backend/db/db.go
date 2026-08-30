@@ -35,7 +35,10 @@ import (
 	"github.com/inspr-at/paimos/backend/safetext"
 )
 
-const DefaultBusyTimeoutMS = 5000
+const (
+	DefaultBusyTimeoutMS      = 5000
+	DefaultMaxOpenConnections = 10
+)
 
 var perConnectionPragmas = []string{
 	fmt.Sprintf("PRAGMA busy_timeout=%d", DefaultBusyTimeoutMS),
@@ -328,11 +331,23 @@ func rebuildAgentRunTelemetryLatest(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func Open() error {
+func databasePathFromEnvironment() (string, error) {
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
+		if os.Getenv("PAIMOS_TEST_MODE") == "1" {
+			return "", errors.New("PAIMOS_TEST_MODE requires an explicit DATA_DIR for an isolated SQLite database")
+		}
 		dataDir = "/app/data"
 	}
+	return filepath.Join(dataDir, brand.Default.DBFilename), nil
+}
+
+func Open() error {
+	dbPath, err := databasePathFromEnvironment()
+	if err != nil {
+		return err
+	}
+	dataDir := filepath.Dir(dbPath)
 
 	// 0o750: the data dir holds the SQLite DB and secret key; only the
 	// backend process (and its group) need access.
@@ -341,7 +356,6 @@ func Open() error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	dbPath := filepath.Join(dataDir, brand.Default.DBFilename)
 	// PAI-596: `_txlock=immediate` makes every transaction issue BEGIN IMMEDIATE,
 	// acquiring the write lock up front instead of lazily upgrading a deferred
 	// read→write transaction. Lazy upgrades fail instantly with SQLITE_BUSY when
@@ -359,7 +373,7 @@ func Open() error {
 	// internally. busy_timeout prevents immediate SQLITE_BUSY errors under
 	// write contention — connections wait up to 5s before failing
 	// (busy_timeout is set per-connection via the hook above).
-	db.SetMaxOpenConns(10)
+	db.SetMaxOpenConns(DefaultMaxOpenConnections)
 	db.SetMaxIdleConns(5)
 
 	// PAI-369: set WAL once at file open. journal_mode is a database-level
@@ -4693,11 +4707,9 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		//   project_id NULL,     user_id NULL          → instance memory
 		//                                                (admin-only writes)
 		//
-		// The discriminator is enforced application-side (in
-		// handlers/knowledge_user.go and handlers/knowledge_instance.go),
-		// not via CHECK, so PAI-339's editor + PAI-349's bot drafts can
-		// mutate `category_metadata.scope` freely while the WHERE-clause
-		// invariant lives in one place.
+		// At this historical stage the discriminator was enforced only by the
+		// handlers. M162 later adds the database ownership/type firewall while
+		// leaving category_metadata.scope freely editable.
 		{99, []string{
 			`ALTER TABLE issues ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
 			`CREATE INDEX IF NOT EXISTS idx_issues_user_type ON issues(user_id, type) WHERE user_id IS NOT NULL`,
@@ -11834,6 +11846,35 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 harness_session_id,sequence,kind,requested_by_user_id,requested_at
 			 ON harness_session_controls BEGIN SELECT RAISE(ABORT,'harness session control identity is immutable'); END`,
 		}},
+
+		// M162 / PAI-857: SQLite treats NULL values as distinct inside a UNIQUE
+		// index, so M96 protected only project-owned knowledge. Give each of the
+		// three ownership scopes its actual identity and reject impossible mixed
+		// ownership or non-memory user-owned rows at the database boundary.
+		{162, []string{
+			`DROP INDEX idx_issues_type_slug_project`,
+			`CREATE UNIQUE INDEX idx_issues_knowledge_project_identity
+			 ON issues(project_id,type,slug)
+			 WHERE project_id IS NOT NULL AND slug IS NOT NULL AND deleted_at IS NULL`,
+			`CREATE UNIQUE INDEX idx_issues_knowledge_user_identity
+			 ON issues(user_id,type,slug)
+			 WHERE project_id IS NULL AND user_id IS NOT NULL AND slug IS NOT NULL AND deleted_at IS NULL`,
+			`CREATE UNIQUE INDEX idx_issues_knowledge_instance_identity
+			 ON issues(type,slug)
+			 WHERE project_id IS NULL AND user_id IS NULL AND slug IS NOT NULL AND deleted_at IS NULL`,
+			`CREATE TRIGGER trg_issues_scope_owner_insert BEFORE INSERT ON issues
+			 WHEN NEW.project_id IS NOT NULL AND NEW.user_id IS NOT NULL
+			 BEGIN SELECT RAISE(ABORT,'issue cannot have both project and user ownership'); END`,
+			`CREATE TRIGGER trg_issues_scope_owner_update BEFORE UPDATE OF project_id,user_id ON issues
+			 WHEN NEW.project_id IS NOT NULL AND NEW.user_id IS NOT NULL
+			 BEGIN SELECT RAISE(ABORT,'issue cannot have both project and user ownership'); END`,
+			`CREATE TRIGGER trg_issues_user_type_insert BEFORE INSERT ON issues
+			 WHEN NEW.user_id IS NOT NULL AND NEW.type<>'memory'
+			 BEGIN SELECT RAISE(ABORT,'user-owned issue type must be memory'); END`,
+			`CREATE TRIGGER trg_issues_user_type_update BEFORE UPDATE OF project_id,user_id,type ON issues
+			 WHEN NEW.user_id IS NOT NULL AND NEW.type<>'memory'
+			 BEGIN SELECT RAISE(ABORT,'user-owned issue type must be memory'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -11989,6 +12030,116 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			"trg_harness_session_control_identity_immutable",
 		})
 	},
+	162: checkKnowledgeScopeIdentities,
+}
+
+func checkKnowledgeScopeIdentities(ctx context.Context, conn *sql.Conn) error {
+	var legacyKind string
+	err := conn.QueryRowContext(ctx, `SELECT type FROM sqlite_master WHERE name='idx_issues_type_slug_project'`).Scan(&legacyKind)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("M162 prerequisite is missing: index:idx_issues_type_slug_project; restore the M96 index before upgrading")
+	}
+	if err != nil {
+		return fmt.Errorf("inspect M162 prerequisite index: %w", err)
+	}
+	if legacyKind != "index" {
+		return fmt.Errorf("M162 prerequisite is locally incompatible: %s:idx_issues_type_slug_project", legacyKind)
+	}
+
+	if err := checkSchemaObjectsAbsent(ctx, conn, 162, []string{
+		"idx_issues_knowledge_project_identity", "idx_issues_knowledge_user_identity",
+		"idx_issues_knowledge_instance_identity", "trg_issues_scope_owner_insert",
+		"trg_issues_scope_owner_update", "trg_issues_user_type_insert", "trg_issues_user_type_update",
+	}); err != nil {
+		return err
+	}
+
+	rows, err := conn.QueryContext(ctx, `
+		SELECT id,project_id,user_id,type
+		FROM issues
+		WHERE (project_id IS NOT NULL AND user_id IS NOT NULL)
+		   OR (user_id IS NOT NULL AND type<>'memory')
+		ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("inspect knowledge ownership rows: %w", err)
+	}
+	var invalid []string
+	for rows.Next() {
+		var id int64
+		var projectID, userID sql.NullInt64
+		var issueType string
+		if err := rows.Scan(&id, &projectID, &userID, &issueType); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan invalid knowledge ownership: %w", err)
+		}
+		invalid = append(invalid, fmt.Sprintf("id=%d project_id=%v user_id=%v type=%q", id, nullableIntLabel(projectID), nullableIntLabel(userID), issueType))
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate invalid knowledge ownership: %w", err)
+	}
+	rows.Close()
+	if len(invalid) > 0 {
+		return fmt.Errorf("invalid knowledge ownership blocks M162; repair these rows before upgrading: %s", strings.Join(invalid, "; "))
+	}
+
+	rows, err = conn.QueryContext(ctx, `
+		SELECT CASE WHEN project_id IS NOT NULL THEN 'project'
+		            WHEN user_id IS NOT NULL THEN 'user' ELSE 'instance' END,
+		       COALESCE(project_id,user_id,0),type,slug,id
+		FROM issues
+		WHERE slug IS NOT NULL AND deleted_at IS NULL
+		ORDER BY 1,2,type,slug,id`)
+	if err != nil {
+		return fmt.Errorf("inspect knowledge scope identities: %w", err)
+	}
+	type identityGroup struct {
+		scope string
+		owner int64
+		type_ string
+		slug  string
+		ids   []int64
+	}
+	var current identityGroup
+	var collisions []string
+	flush := func() {
+		if len(current.ids) > 1 {
+			collisions = append(collisions, fmt.Sprintf("scope=%s:%d type=%q slug=%q ids=%v", current.scope, current.owner, current.type_, current.slug, current.ids))
+		}
+	}
+	for rows.Next() {
+		var scope, issueType, slug string
+		var owner, id int64
+		if err := rows.Scan(&scope, &owner, &issueType, &slug, &id); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan knowledge scope identity: %w", err)
+		}
+		if len(current.ids) > 0 && (scope != current.scope || owner != current.owner || issueType != current.type_ || slug != current.slug) {
+			flush()
+			current = identityGroup{}
+		}
+		if len(current.ids) == 0 {
+			current.scope, current.owner, current.type_, current.slug = scope, owner, issueType, slug
+		}
+		current.ids = append(current.ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate knowledge scope identities: %w", err)
+	}
+	rows.Close()
+	flush()
+	if len(collisions) > 0 {
+		return fmt.Errorf("active knowledge scope identity collisions block M162; rename or merge the listed rows before upgrading: %s", strings.Join(collisions, "; "))
+	}
+	return nil
+}
+
+func nullableIntLabel(value sql.NullInt64) string {
+	if !value.Valid {
+		return "NULL"
+	}
+	return fmt.Sprint(value.Int64)
 }
 
 func checkM154SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {

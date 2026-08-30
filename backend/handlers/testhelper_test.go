@@ -25,7 +25,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -47,13 +46,14 @@ type testServer struct {
 	externalCookie string
 }
 
-// newTestServer opens an in-memory SQLite DB, runs all migrations, seeds
+// newTestServer opens an isolated temporary SQLite DB, runs all migrations, seeds
 // admin + member users, wires the real router, and starts an httptest.Server.
 func newTestServer(t *testing.T) *testServer {
 	t.Helper()
 
-	// Point db package at a fresh in-memory DB.
-	os.Setenv("DATA_DIR", t.TempDir())
+	// Keep every test process on its own temporary SQLite DSN and restore the
+	// environment during cleanup, including when a test fails early.
+	t.Setenv("DATA_DIR", t.TempDir())
 	// Speed up migrations (applied inside db.Open before we can set them here).
 	t.Setenv("PAIMOS_TEST_MODE", "1")
 

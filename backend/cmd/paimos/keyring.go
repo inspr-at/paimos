@@ -10,7 +10,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/zalando/go-keyring"
 )
@@ -25,10 +24,8 @@ const keyringServiceName = "paimos-cli"
 // ~/.paimos/config.yaml + keyring instance resolution entirely.
 const envURL = "PAIMOS_URL"
 
-// envAPIKey lets headless / CI environments without a session keyring
-// supply the key directly. With PAIMOS_URL it selects an env-only
-// instance; without PAIMOS_URL it overrides the keyring lookup for the
-// configured instance.
+// envAPIKey is valid only together with PAIMOS_URL, creating one env-only
+// target whose URL and credential provenance cannot be split.
 const envAPIKey = "PAIMOS_API_KEY"
 
 // PPM_* aliases match the personal-production secret files agents use
@@ -74,20 +71,19 @@ func keyringDelete(instance string) error {
 	return nil
 }
 
-// resolveAPIKey returns the API key to use for an instance. Precedence:
+// resolveAPIKey returns the instance-scoped keyring credential. Generic
+// PAIMOS_API_KEY is deliberately not consulted here: it is valid only as the
+// credential half of the PAIMOS_URL env-only target pair. Applying it to an
+// arbitrary configured name would let one instance silently authenticate a
+// different confidentiality domain.
 //
-//  1. PAIMOS_API_KEY env var — wins unconditionally so CI / headless
-//     boxes that have no session keyring can still authenticate.
-//  2. OS keyring entry under (paimos-cli, <instance>).
-//  3. "" with a nil error — caller maps this to a usage error pointing
+//  1. OS keyring entry under (paimos-cli, <instance>).
+//  2. "" with a nil error — caller maps this to a usage error pointing
 //     at `paimos auth login`.
 //
 // Backend errors (e.g. dbus refusing to talk) propagate; only "no such
 // entry" falls through to the empty-string case.
 func resolveAPIKey(instance string) (string, string, error) {
-	if v := os.Getenv(envAPIKey); v != "" {
-		return v, "env:" + envAPIKey, nil
-	}
 	key, ok, err := keyringGet(instance)
 	if err != nil {
 		return "", "", err

@@ -118,29 +118,19 @@ func PromoteMemory(w http.ResponseWriter, r *http.Request) {
 
 	mod := userMemoryModule()
 
-	// Locate the source row. The lookup hierarchy mirrors PAI-345's
-	// resolution precedence: explicit project hint > user-scope >
-	// instance-scope. Returning the canonical source scope lets the
-	// "promote to current scope" 400 below catch no-op promotions.
-	srcID, srcScope, err := findPromotionSource(slug, req.FromProjectID, user.ID)
-	if errors.Is(err, sql.ErrNoRows) {
-		jsonError(w, "source memory not found", http.StatusNotFound)
+	// Authorization, source lookup, destination insert, and source removal are
+	// one transaction. Unauthorized projects deliberately share the same 404
+	// shape as missing projects/memories so this cross-scope endpoint cannot be
+	// used as an enumeration oracle.
+	out, srcScope, err := promoteMemoryTx(r, mod, slug, req.FromProjectID, to, req.ToProjectID)
+	if errors.Is(err, errPromotionNotFound) || errors.Is(err, sql.ErrNoRows) {
+		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
-	if err != nil {
-		jsonError(w, "lookup failed", http.StatusInternalServerError)
-		return
-	}
-	if srcScope == to {
+	if errors.Is(err, errPromotionSameScope) {
 		jsonError(w, fmt.Sprintf("memory is already at %s scope", to), http.StatusBadRequest)
 		return
 	}
-
-	// Promotion is two writes inside one tx: INSERT at destination +
-	// soft-DELETE at source. Sharing the request id across both
-	// mutation_log entries lets the activity feed merge them as one
-	// "promote" event.
-	out, err := promoteMemoryTx(r, mod, srcID, srcScope, to, req.ToProjectID)
 	if errors.Is(err, knowledge.ErrSlugTaken) {
 		jsonError(w, "slug already exists at destination scope", http.StatusConflict)
 		return
@@ -162,10 +152,10 @@ func PromoteMemory(w http.ResponseWriter, r *http.Request) {
 // id and a string-typed scope discriminator ("project" / "user" /
 // "instance"). The caller can preempt with `fromProjectID` to skip
 // the user / instance lookups.
-func findPromotionSource(slug string, fromProjectID, currentUserID int64) (int64, string, error) {
+func findPromotionSourceTx(r *http.Request, tx *sql.Tx, slug string, fromProjectID, currentUserID int64) (int64, string, error) {
 	if fromProjectID > 0 {
 		var id int64
-		err := db.DB.QueryRow(`
+		err := tx.QueryRowContext(r.Context(), `
 			SELECT id FROM issues
 			 WHERE type = 'memory' AND slug = ?
 			   AND project_id = ? AND deleted_at IS NULL
@@ -177,7 +167,7 @@ func findPromotionSource(slug string, fromProjectID, currentUserID int64) (int64
 	}
 	// User scope.
 	var id int64
-	err := db.DB.QueryRow(`
+	err := tx.QueryRowContext(r.Context(), `
 		SELECT id FROM issues
 		 WHERE type = 'memory' AND slug = ?
 		   AND project_id IS NULL AND user_id = ? AND deleted_at IS NULL
@@ -189,7 +179,7 @@ func findPromotionSource(slug string, fromProjectID, currentUserID int64) (int64
 		return 0, "", err
 	}
 	// Instance scope.
-	err = db.DB.QueryRow(`
+	err = tx.QueryRowContext(r.Context(), `
 		SELECT id FROM issues
 		 WHERE type = 'memory' AND slug = ?
 		   AND project_id IS NULL AND user_id IS NULL AND deleted_at IS NULL
@@ -205,17 +195,89 @@ func findPromotionSource(slug string, fromProjectID, currentUserID int64) (int64
 // world unchanged. Both mutation_log entries share the request id so
 // PAI-209's undo machinery can group them on replay; the IDs differ so
 // each side can be undone independently when needed.
-func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScope, toScope string, toProjectID int64) (knowledge.Output, error) {
+var (
+	errPromotionNotFound  = errors.New("promotion resource not found")
+	errPromotionSameScope = errors.New("promotion source and destination scope match")
+)
+
+func promoteMemoryTx(r *http.Request, mod knowledge.Module, slug string, fromProjectID int64, toScope string, toProjectID int64) (knowledge.Output, string, error) {
 	user := auth.GetUser(r)
 	if user == nil {
-		return knowledge.Output{}, errors.New("unauthorized")
+		return knowledge.Output{}, "", errors.New("unauthorized")
 	}
 
 	tx, err := db.DB.BeginTx(r.Context(), nil)
 	if err != nil {
-		return knowledge.Output{}, err
+		return knowledge.Output{}, "", err
 	}
 	defer tx.Rollback()
+
+	// Check project permissions before looking up the source row. Destination
+	// authorization is also resolved before source lookup, preventing callers
+	// from probing a source through a destination they cannot edit.
+	if fromProjectID > 0 {
+		allowed, err := canEditProjectTx(r.Context(), tx, user, fromProjectID)
+		if err != nil {
+			return knowledge.Output{}, "", err
+		}
+		if !allowed {
+			return knowledge.Output{}, "", errPromotionNotFound
+		}
+	}
+	if toScope == "project" {
+		allowed, err := canEditProjectTx(r.Context(), tx, user, toProjectID)
+		if err != nil {
+			return knowledge.Output{}, "", err
+		}
+		if !allowed {
+			return knowledge.Output{}, "", errPromotionNotFound
+		}
+	}
+
+	srcID, srcScope, err := findPromotionSourceTx(r, tx, slug, fromProjectID, user.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return knowledge.Output{}, "", errPromotionNotFound
+	}
+	if err != nil {
+		return knowledge.Output{}, "", err
+	}
+	// Instance knowledge is admin-owned on both ingress and egress. A regular
+	// user's missing user-scope slug must not reveal that an instance row exists.
+	if srcScope == "instance" && !auth.IsAdmin(user) {
+		return knowledge.Output{}, "", errPromotionNotFound
+	}
+	if srcScope == toScope {
+		return knowledge.Output{}, srcScope, errPromotionSameScope
+	}
+
+	// Fail before mutating either row when the destination identity already
+	// exists. The scope-specific database indexes are the concurrency
+	// backstop; this transactional check provides an actionable conflict.
+	var destinationID int64
+	var collisionErr error
+	switch toScope {
+	case "project":
+		collisionErr = tx.QueryRowContext(r.Context(), `
+			SELECT id FROM issues WHERE project_id=? AND user_id IS NULL
+			 AND type=? AND slug=? AND deleted_at IS NULL`,
+			toProjectID, mod.Type(), slug).Scan(&destinationID)
+	case "user":
+		collisionErr = tx.QueryRowContext(r.Context(), `
+			SELECT id FROM issues WHERE project_id IS NULL AND user_id=?
+			 AND type=? AND slug=? AND deleted_at IS NULL`,
+			user.ID, mod.Type(), slug).Scan(&destinationID)
+	case "instance":
+		collisionErr = tx.QueryRowContext(r.Context(), `
+			SELECT id FROM issues WHERE project_id IS NULL AND user_id IS NULL
+			 AND type=? AND slug=? AND deleted_at IS NULL`,
+			mod.Type(), slug).Scan(&destinationID)
+	}
+	if collisionErr == nil {
+		return knowledge.Output{}, srcScope, knowledge.ErrSlugTaken
+	}
+	if !errors.Is(collisionErr, sql.ErrNoRows) {
+		return knowledge.Output{}, srcScope, collisionErr
+	}
 
 	// Snapshot the source row's payload columns. We only copy the bits
 	// the convenience-endpoint contract owns (slug, title, body, status,
@@ -230,7 +292,7 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 		SELECT COALESCE(slug,''), title, description, status, priority, category_metadata
 		  FROM issues WHERE id = ? AND deleted_at IS NULL
 	`, srcID).Scan(&srcSlug, &srcTitle, &srcBody, &srcStatus, &srcPriority, &srcMeta); err != nil {
-		return knowledge.Output{}, err
+		return knowledge.Output{}, srcScope, err
 	}
 
 	// INSERT at destination. The columns mirror createUserOrInstance /
@@ -243,7 +305,7 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 	case "project":
 		nextNum, err := db.NextIssueNumber(r.Context(), tx, toProjectID)
 		if err != nil {
-			return knowledge.Output{}, err
+			return knowledge.Output{}, srcScope, err
 		}
 		res, err := tx.ExecContext(r.Context(), `
 			INSERT INTO issues(project_id, user_id, issue_number, type, title, description,
@@ -253,9 +315,9 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 			user.ID, srcSlug, srcMeta.String)
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-				return knowledge.Output{}, knowledge.ErrSlugTaken
+				return knowledge.Output{}, srcScope, knowledge.ErrSlugTaken
 			}
-			return knowledge.Output{}, err
+			return knowledge.Output{}, srcScope, err
 		}
 		newID, _ = res.LastInsertId()
 	case "user":
@@ -264,7 +326,7 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 			`SELECT COALESCE(MAX(issue_number),0)+1 FROM issues
 			 WHERE project_id IS NULL AND user_id = ?`,
 			user.ID).Scan(&nextNum); err != nil {
-			return knowledge.Output{}, err
+			return knowledge.Output{}, srcScope, err
 		}
 		res, err := tx.ExecContext(r.Context(), `
 			INSERT INTO issues(project_id, user_id, issue_number, type, title, description,
@@ -274,9 +336,9 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 			user.ID, srcSlug, srcMeta.String)
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-				return knowledge.Output{}, knowledge.ErrSlugTaken
+				return knowledge.Output{}, srcScope, knowledge.ErrSlugTaken
 			}
-			return knowledge.Output{}, err
+			return knowledge.Output{}, srcScope, err
 		}
 		newID, _ = res.LastInsertId()
 	case "instance":
@@ -284,7 +346,7 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 		if err := tx.QueryRowContext(r.Context(),
 			`SELECT COALESCE(MAX(issue_number),0)+1 FROM issues
 			 WHERE project_id IS NULL AND user_id IS NULL`).Scan(&nextNum); err != nil {
-			return knowledge.Output{}, err
+			return knowledge.Output{}, srcScope, err
 		}
 		res, err := tx.ExecContext(r.Context(), `
 			INSERT INTO issues(project_id, user_id, issue_number, type, title, description,
@@ -294,13 +356,13 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 			user.ID, srcSlug, srcMeta.String)
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-				return knowledge.Output{}, knowledge.ErrSlugTaken
+				return knowledge.Output{}, srcScope, knowledge.ErrSlugTaken
 			}
-			return knowledge.Output{}, err
+			return knowledge.Output{}, srcScope, err
 		}
 		newID, _ = res.LastInsertId()
 	default:
-		return knowledge.Output{}, fmt.Errorf("unknown to scope %q", toScope)
+		return knowledge.Output{}, srcScope, fmt.Errorf("unknown to scope %q", toScope)
 	}
 
 	// Soft-delete the source row.
@@ -311,7 +373,7 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 		       updated_at = ?
 		 WHERE id = ?
 	`, user.ID, time.Now().UTC().Format("2006-01-02 15:04:05"), srcID); err != nil {
-		return knowledge.Output{}, err
+		return knowledge.Output{}, srcScope, err
 	}
 
 	// mutation_log entries — one for the destination create, one for
@@ -325,7 +387,7 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 
 	dstAfter, err := fetchIssueMutationSnapshotTx(tx, newID)
 	if err != nil {
-		return knowledge.Output{}, err
+		return knowledge.Output{}, srcScope, err
 	}
 	if _, err := recordMutation(r.Context(), tx, mutationRecordArgs{
 		RequestID:    reqID,
@@ -343,12 +405,12 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 		AfterState:  dstAfter,
 		Undoable:    true,
 	}); err != nil {
-		return knowledge.Output{}, err
+		return knowledge.Output{}, srcScope, err
 	}
 
 	srcAfter, err := fetchIssueMutationSnapshotTx(tx, srcID)
 	if err != nil {
-		return knowledge.Output{}, err
+		return knowledge.Output{}, srcScope, err
 	}
 	// Before-snapshot for the source: clone the post-delete snapshot
 	// and clear deleted_at / deleted_by so the undo inverse-op
@@ -372,11 +434,22 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 		AfterState:  srcAfter,
 		Undoable:    true,
 	}); err != nil {
-		return knowledge.Output{}, err
+		return knowledge.Output{}, srcScope, err
+	}
+
+	// Materialize the response before commit. Any destination read failure now
+	// rolls the entire promotion back instead of returning an error after the
+	// source has already been removed.
+	out, err := scanUserOrInstanceOutput(tx.QueryRowContext(r.Context(), `
+		SELECT id, COALESCE(project_id,0), type, COALESCE(slug,''), title, description,
+		       status, COALESCE(category_metadata,''), created_at, updated_at
+		  FROM issues WHERE id=?`, newID), mod)
+	if err != nil {
+		return knowledge.Output{}, srcScope, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return knowledge.Output{}, err
+		return knowledge.Output{}, srcScope, err
 	}
 
 	// Post-commit: history snapshots + system tag re-evaluation, the
@@ -392,5 +465,5 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, srcID int64, srcScop
 	EvaluateSystemTags(newID)
 	EvaluateSystemTags(srcID)
 
-	return loadOneUserOrInstanceMemoryByID(newID, mod)
+	return out, srcScope, nil
 }

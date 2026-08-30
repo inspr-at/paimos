@@ -127,6 +127,35 @@ func instanceName() string {
 	return name
 }
 
+// InstanceName returns the non-secret identity of this process's durable
+// Agent Intercom ledger. It is safe to expose in operational health evidence.
+func InstanceName() string {
+	return instanceName()
+}
+
+// ValidateInstanceIdentity is the startup/doctor firewall for the durable bus.
+// Development may keep the historical default when no deployment identity is
+// configured, but production must name its domain and any configured instance
+// must match it exactly.
+func ValidateInstanceIdentity(expected string, production bool) error {
+	raw := strings.TrimSpace(os.Getenv("PAIMOS_AGENT_BUS_INSTANCE"))
+	name := instanceName()
+	if name == "" {
+		return fmt.Errorf("PAIMOS_AGENT_BUS_INSTANCE must be 1 to 64 valid UTF-8 bytes")
+	}
+	if production && (raw == "" || name == "default") {
+		return fmt.Errorf("production requires PAIMOS_AGENT_BUS_INSTANCE to be an explicit non-default instance ID")
+	}
+	expected = strings.TrimSpace(expected)
+	if production && (expected == "" || expected == "default") {
+		return fmt.Errorf("production requires PAIMOS_DEPLOYMENT_INSTANCE to be an explicit non-default deployment ID")
+	}
+	if expected != "" && raw != "" && name != expected {
+		return fmt.Errorf("PAIMOS_AGENT_BUS_INSTANCE %q does not match configured instance %q", name, expected)
+	}
+	return nil
+}
+
 // RegisterTarget creates a new encrypted target version and atomically makes
 // it the one enabled binding for its receiver role.
 func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*Target, error) {

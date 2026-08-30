@@ -338,7 +338,7 @@ Bundle modes (PAI-340):
 			// for v1 (PAI-341 will harden this with a server-side rev
 			// check). `--refresh` forces a re-fetch regardless.
 			if !refresh && resolvedFormat != sessionFormatJSON {
-				if cached, _ := readBundleManifest(cacheRoot, projectKey); cached != nil {
+				if cached, _ := readBundleManifest(cacheRoot, client.identity, projectKey); cached != nil {
 					// We still emit the env exports / file confirmation
 					// against the cached payload so a `--bundle full`
 					// run is fast on the warm path. The JSON format
@@ -431,7 +431,11 @@ func resolveProjectKeyFromID(c *Client, projectID int64) (string, error) {
 // fires only when `--refresh` is unset and the format is not `json`
 // (json always returns a freshly-fetched payload — see the caller).
 func emitFromCache(format sessionFormat, agentName, sessionID, cacheRoot string, project projectSummary, m *cacheManifest) error {
-	dir := filepath.Clean(filepath.Join(cacheRoot, project.Key))
+	identity := instanceIdentity{Name: m.Instance, Origin: m.Origin, Namespace: m.Namespace}
+	dir, err := bundleCacheDir(cacheRoot, identity, project.Key)
+	if err != nil {
+		return err
+	}
 	switch format {
 	case sessionFormatEnv:
 		fmt.Fprintf(stdout, "export PAIMOS_AGENT_NAME=%s\n", agentName)

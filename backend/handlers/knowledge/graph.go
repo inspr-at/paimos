@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 )
 
@@ -50,6 +51,13 @@ func GraphHandler(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := projectIDFromRequest(r)
 	if !ok {
 		writeError(w, r, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	// The production router applies RequireProjectView too. Keep the handler
+	// fail-closed when reused or mounted elsewhere so graph hydration can never
+	// become a metadata side channel.
+	if !auth.CanViewProject(r, projectID) {
+		writeError(w, r, "not found", http.StatusNotFound)
 		return
 	}
 
@@ -123,7 +131,12 @@ func GraphHandler(w http.ResponseWriter, r *http.Request) {
 			for id := range extra {
 				ids = append(ids, id)
 			}
-			nr, err := db.DB.Query("SELECT id, type, COALESCE(slug,''), title FROM issues WHERE deleted_at IS NULL AND id IN ("+placeholders(len(ids))+")", ids...) // #nosec G202 -- only ?-placeholders are concatenated; ids are bound as parameterized args.
+			// Only hydrate endpoints in the requested project. Existing legacy
+			// cross-scope edges are subsequently dropped as unresolved.
+			queryArgs := make([]any, 0, len(ids)+1)
+			queryArgs = append(queryArgs, projectID)
+			queryArgs = append(queryArgs, ids...)
+			nr, err := db.DB.Query("SELECT id, type, COALESCE(slug,''), title FROM issues WHERE deleted_at IS NULL AND project_id=? AND id IN ("+placeholders(len(ids))+")", queryArgs...) // #nosec G202 -- only ?-placeholders are concatenated; ids are bound as parameterized args.
 			if err != nil {
 				writeError(w, r, "query failed", http.StatusInternalServerError)
 				return

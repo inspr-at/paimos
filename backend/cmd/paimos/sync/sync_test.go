@@ -27,6 +27,7 @@ type fakeClient struct {
 	getCalls    []string
 	streamRoute string
 	streamFn    func(ctx context.Context, onEvent func(Event)) error
+	identity    CacheIdentity
 }
 
 func (f *fakeClient) Get(path string) ([]byte, error) {
@@ -45,6 +46,13 @@ func (f *fakeClient) Stream(ctx context.Context, path string, onEvent func(Event
 		return ctx.Err()
 	}
 	return f.streamFn(ctx, onEvent)
+}
+
+func (f *fakeClient) CacheIdentity() (CacheIdentity, error) {
+	if f.identity.Namespace != "" {
+		return f.identity, nil
+	}
+	return CacheIdentity{Instance: "test", Origin: "https://test.example", Namespace: "test-identity"}, nil
 }
 
 func newSkillResourceForTest(t *testing.T) *SkillResource {
@@ -158,8 +166,8 @@ func TestSkillResource_SyncWritesAdapterPathAndHeader(t *testing.T) {
 	res := newSkillResourceForTest(t)
 	c := &fakeClient{
 		routes: map[string][]byte{
-			"/api/projects/7/agents":         []byte(`[{"name":"qa"},{"name":"ops"}]`),
-			"/api/projects/7/agents/qa.json": canonicalArtifact("ACME", "qa"),
+			"/api/projects/7/agents":          []byte(`[{"name":"qa"},{"name":"ops"}]`),
+			"/api/projects/7/agents/qa.json":  canonicalArtifact("ACME", "qa"),
 			"/api/projects/7/agents/ops.json": canonicalArtifact("ACME", "ops"),
 		},
 	}
@@ -244,9 +252,9 @@ func TestSkillResource_CheckReportsStates(t *testing.T) {
 	res := newSkillResourceForTest(t)
 	c := &fakeClient{
 		routes: map[string][]byte{
-			"/api/projects/7/agents":            []byte(`[{"name":"qa"},{"name":"ops"}]`),
-			"/api/projects/7/agents/qa.json":    canonicalArtifact("ACME", "qa"),
-			"/api/projects/7/agents/ops.json":   canonicalArtifact("ACME", "ops"),
+			"/api/projects/7/agents":          []byte(`[{"name":"qa"},{"name":"ops"}]`),
+			"/api/projects/7/agents/qa.json":  canonicalArtifact("ACME", "qa"),
+			"/api/projects/7/agents/ops.json": canonicalArtifact("ACME", "ops"),
 		},
 	}
 	work := t.TempDir()

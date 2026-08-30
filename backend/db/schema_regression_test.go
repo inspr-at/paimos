@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 161
+const latestSchemaVersion = 162
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -1250,6 +1250,30 @@ func TestSchemaCreatesDatabaseFileInConfiguredDataDir(t *testing.T) {
 	}
 }
 
+func TestTestDatabasePathRequiresExplicitIsolation(t *testing.T) {
+	t.Setenv("PAIMOS_TEST_MODE", "1")
+	t.Setenv("DATA_DIR", "")
+	if _, err := databasePathFromEnvironment(); err == nil || !strings.Contains(err.Error(), "explicit DATA_DIR") {
+		t.Fatalf("implicit test database path error=%v, want explicit DATA_DIR rejection", err)
+	}
+
+	firstDir := t.TempDir()
+	t.Setenv("DATA_DIR", firstDir)
+	first, err := databasePathFromEnvironment()
+	if err != nil {
+		t.Fatalf("first isolated database path: %v", err)
+	}
+	secondDir := t.TempDir()
+	t.Setenv("DATA_DIR", secondDir)
+	second, err := databasePathFromEnvironment()
+	if err != nil {
+		t.Fatalf("second isolated database path: %v", err)
+	}
+	if first == second || first != filepath.Join(firstDir, "paimos.db") || second != filepath.Join(secondDir, "paimos.db") {
+		t.Fatalf("isolated database paths first=%q second=%q", first, second)
+	}
+}
+
 func TestSchemaEnablesForeignKeysAndPassesIntegrityCheck(t *testing.T) {
 	db := openTestDB(t)
 	enabled, err := ForeignKeysEnabled(db)
@@ -1286,8 +1310,10 @@ func TestSchemaContainsCriticalIndexes(t *testing.T) {
 		"idx_mutation_log_parent",
 		"idx_documents_project",
 		"idx_time_entries_mite_id",
-		// PAI-338 / M96 — slug uniqueness for the knowledge plane.
-		"idx_issues_type_slug_project",
+		// PAI-857 / M162 — scope-correct knowledge identities.
+		"idx_issues_knowledge_project_identity",
+		"idx_issues_knowledge_user_identity",
+		"idx_issues_knowledge_instance_identity",
 		// PAI-345 / M99 — user-scoped knowledge lookups.
 		"idx_issues_user_type",
 		// PAI-336 / M105 — queryable privileged-action audit feed.

@@ -62,7 +62,7 @@ var UpdateEntryHook func(r *http.Request, projectID int64, mod Module, currentSl
 var DeleteEntryHook func(r *http.Request, projectID int64, mod Module, slug string) (int64, error)
 
 // ErrSlugTaken is the exported sentinel hook implementations return
-// when the partial UNIQUE INDEX on (type, slug, project_id) rejects
+// when a scope-specific live-knowledge identity index rejects
 // an insert/update. Mirrors the package-private errSlugTaken so a
 // hook in `handlers` can raise it without re-importing this file's
 // internals.

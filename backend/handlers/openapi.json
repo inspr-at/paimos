@@ -1971,6 +1971,18 @@
                     "version": {
                       "type": "string",
                       "description": "App version (semver) stamped at build time, or 'dev' for local builds."
+                    },
+                    "agent_bus_instance": {
+                      "type": "string",
+                      "description": "Non-secret identity of this server's durable Agent Intercom ledger."
+                    },
+                    "deployment_instance": {
+                      "type": "string",
+                      "description": "Non-secret server deployment identity used by the production identity firewall."
+                    },
+                    "agent_bus_identity_enforced": {
+                      "type": "boolean",
+                      "description": "True when production startup required the deployment and Agent Intercom identities to be explicit and equal."
                     }
                   }
                 }

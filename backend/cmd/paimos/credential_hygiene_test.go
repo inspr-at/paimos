@@ -8,7 +8,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -75,8 +74,13 @@ func TestAuthLogin_HelpSurface(t *testing.T) {
 	if !containsFold(c.Long, "hidden interactive prompt") {
 		t.Fatalf("help does not recommend the hidden prompt:\n%s", c.Long)
 	}
-	if !strings.Contains(c.Long, envAPIKey) {
-		t.Fatalf("help does not name the headless override:\n%s", c.Long)
+	for _, envName := range []string{envURL, envAPIKey} {
+		if !strings.Contains(c.Long, envName) {
+			t.Fatalf("help does not name the complete headless target pair %s:\n%s", envName, c.Long)
+		}
+		if !strings.Contains(f.Usage, envName) {
+			t.Fatalf("retired flag guidance does not name the complete headless target pair %s: %s", envName, f.Usage)
+		}
 	}
 }
 
@@ -106,48 +110,40 @@ func TestLoadConfig_MigratesEvenWithEnvSet(t *testing.T) {
 	})
 }
 
-// TestLoadConfig_KeyringDownWithEnv_KeepsFieldAndWarns: without a
-// usable keyring, deleting the only stored copy would destroy the
-// credential — the field stays, a warning names the cleanup, and the
-// in-memory copy is scrubbed. Never a hard failure (env keeps the
-// headless box working).
-func TestLoadConfig_KeyringDownWithEnv_KeepsFieldAndWarns(t *testing.T) {
+// TestLoadConfig_KeyringDownWithBareKeyFailsWithCompletePairGuidance proves a
+// bare PAIMOS_API_KEY cannot masquerade as a configured-instance override.
+// The legacy field stays because deleting the only copy would destroy it, and
+// the error names the complete PAIMOS_URL + PAIMOS_API_KEY env-only target.
+func TestLoadConfig_KeyringDownWithBareKeyFailsWithCompletePairGuidance(t *testing.T) {
 	t.Setenv(envAPIKey, "env-runtime-override")
+	t.Setenv(envURL, "")
 	keyring.MockInitWithError(errors.New("no session bus"))
 	t.Cleanup(keyring.MockInit)
 
 	withConfigDir(t, func(path string) {
 		writeLegacyConfig(t, path, "legacy_headless_secret")
 
-		var errBuf bytes.Buffer
-		oldErr := stderr
-		stderr = &errBuf
-		t.Cleanup(func() { stderr = oldErr })
-
-		cfg, err := loadConfig()
-		if err != nil {
-			t.Fatalf("loadConfig must not fail on headless+env: %v", err)
-		}
-		if cfg.Instances["ppm"].APIKey != "" {
-			t.Fatal("in-memory credential not scrubbed")
+		_, err := loadConfig()
+		if err == nil {
+			t.Fatal("loadConfig succeeded with a bare key despite unavailable keyring")
 		}
 		raw, _ := os.ReadFile(path)
 		if !strings.Contains(string(raw), "legacy_headless_secret") {
 			t.Fatal("field removed although the keyring was down — credential destroyed")
 		}
-		warning := errBuf.String()
-		if !containsFold(warning, "warning") || !containsFold(warning, "remove it manually") {
-			t.Fatalf("missing cleanup warning, got: %q", warning)
+		for _, envName := range []string{envURL, envAPIKey} {
+			if !strings.Contains(err.Error(), envName) {
+				t.Fatalf("error lacks complete env-pair guidance %s: %v", envName, err)
+			}
 		}
-		if strings.Contains(warning, "legacy_headless_secret") {
-			t.Fatal("warning echoed the credential value")
+		if strings.Contains(err.Error(), "legacy_headless_secret") {
+			t.Fatal("error echoed the credential value")
 		}
 	})
 }
 
-// TestLoadConfig_KeyringDownWithoutEnv_Errors: with no env override the
-// keyring failure stays a hard error pointing at the bypass — the
-// pre-existing contract.
+// TestLoadConfig_KeyringDownWithoutEnv_Errors: with no env target the
+// keyring failure stays a hard error pointing at the complete env-only pair.
 func TestLoadConfig_KeyringDownWithoutEnv_Errors(t *testing.T) {
 	if os.Getenv(envAPIKey) != "" {
 		t.Setenv(envAPIKey, "")
@@ -161,8 +157,10 @@ func TestLoadConfig_KeyringDownWithoutEnv_Errors(t *testing.T) {
 		if err == nil {
 			t.Fatal("loadConfig succeeded despite failed migration and no env override")
 		}
-		if !strings.Contains(err.Error(), envAPIKey) {
-			t.Fatalf("error lacks the bypass hint: %v", err)
+		for _, envName := range []string{envURL, envAPIKey} {
+			if !strings.Contains(err.Error(), envName) {
+				t.Fatalf("error lacks complete env-pair hint %s: %v", envName, err)
+			}
 		}
 	})
 }

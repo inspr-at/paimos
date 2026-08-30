@@ -147,9 +147,8 @@ func CreateInstanceMemory(w http.ResponseWriter, r *http.Request) {
 
 // UpdateInstanceMemory mutates an existing instance-scope memory
 // entry. Admin-only. URL slug locates the row; body slug renames it
-// (subject to the partial UNIQUE INDEX over (type, slug, project_id)
-// — instance rows all share project_id NULL so the constraint is
-// effectively "unique slug per type within instance scope").
+// subject to M162's partial UNIQUE index over (type, slug) for rows whose
+// project_id and user_id are both NULL.
 func UpdateInstanceMemory(w http.ResponseWriter, r *http.Request) {
 	if !requireAdminUser(w, r) {
 		return
