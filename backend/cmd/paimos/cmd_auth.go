@@ -47,9 +47,9 @@ OS keyring (Keychain on macOS, Secret Service or KWallet on Linux,
 Credential Manager on Windows) — it never appears in process
 arguments, shell history, or on disk.
 
-Headless / CI environments don't log in: set PAIMOS_API_KEY as a
-runtime-only override (with PAIMOS_URL to bypass config resolution
-entirely). It is never persisted to the keyring or YAML.
+Headless / CI environments don't log in: set PAIMOS_URL and
+PAIMOS_API_KEY together as one runtime-only target that bypasses config
+and keyring resolution entirely. Neither value is persisted.
 
 --url skips the URL prompt. The first configured instance becomes
 default_instance automatically.`,
@@ -62,7 +62,7 @@ default_instance automatically.`,
 				keyFlag = ""
 				return &usageError{msg: "--api-key was removed (credentials must not appear in process arguments):\n" +
 					"  workstations: run `paimos auth login` and use the hidden prompt\n" +
-					"  headless/CI:  set " + envAPIKey + " as a runtime-only override"}
+					"  headless/CI:  set " + envURL + " and " + envAPIKey + " as one runtime-only target"}
 			}
 			stdin := bufio.NewReader(os.Stdin)
 			if nameFlag == "" {
@@ -103,7 +103,7 @@ default_instance automatically.`,
 			// to bail out without leaving a half-configured instance
 			// pointing at a key the user can't retrieve.
 			if err := keyringSet(nameFlag, keyFlag); err != nil {
-				return fmt.Errorf("%w\n  tip: set %s in your environment to bypass the keyring (CI / headless)", err, envAPIKey)
+				return fmt.Errorf("%w\n  tip: set %s and %s together to bypass config and keyring resolution (CI / headless)", err, envURL, envAPIKey)
 			}
 
 			// Load existing config; append this instance.
@@ -153,7 +153,7 @@ default_instance automatically.`,
 	c.Flags().StringVar(&nameFlag, "name", "", `name for this instance in config (default "default")`)
 	// PAI-685: retired credential path — registered only so legacy
 	// invocations get an actionable error instead of "unknown flag".
-	c.Flags().StringVar(&keyFlag, "api-key", "", "removed — use the hidden prompt (workstations) or PAIMOS_API_KEY (headless)")
+	c.Flags().StringVar(&keyFlag, "api-key", "", "removed — use the hidden prompt (workstations) or PAIMOS_URL plus PAIMOS_API_KEY (headless)")
 	_ = c.Flags().MarkHidden("api-key")
 	return c
 }

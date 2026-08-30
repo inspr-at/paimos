@@ -108,8 +108,8 @@ func TestKnowledgeResource_SyncWritesCachedFile(t *testing.T) {
 		if it.Action != "wrote" {
 			t.Errorf("first sync should write, got action=%q for %s", it.Action, it.Name)
 		}
-		// Cache layout: .paimos/cache/ACME/memory/<slug>.md
-		expected := filepath.Join(work, ".paimos", "cache", "ACME", "memory", it.Name+".md")
+		// Cache layout includes proven instance/origin namespace.
+		expected := filepath.Join(work, ".paimos", "cache", "instances", "test-identity", "ACME", "memory", it.Name+".md")
 		if it.Path != expected {
 			t.Errorf("path = %q, want %q", it.Path, expected)
 		}
@@ -119,12 +119,45 @@ func TestKnowledgeResource_SyncWritesCachedFile(t *testing.T) {
 		}
 		// Header line follows the canonical pattern; kind=memory tail
 		// distinguishes it from skills.
-		if !strings.HasPrefix(string(body), "<!-- paimos: rendered from ACME/"+it.Name+"@") {
+		if !strings.HasPrefix(string(body), "<!-- paimos: rendered from instances/test-identity/ACME/"+it.Name+"@") {
 			t.Errorf("missing canonical header in %s: %.120q", it.Path, string(body))
 		}
 		if !strings.Contains(string(body), "kind=memory -->") {
 			t.Errorf("missing kind tail in %s", it.Path)
 		}
+	}
+}
+
+func TestKnowledgeCacheSameProjectKeyDoesNotReuseAcrossInstances(t *testing.T) {
+	work := t.TempDir()
+	res := NewMemoryResource()
+	entry := func(body string) []byte {
+		return []byte(`[{"id":1,"project_id":7,"type":"memory","slug":"shared","title":"Shared","body":"` + body + `","status":"backlog","metadata":{}}]`)
+	}
+	ppm := &fakeClient{
+		routes:   map[string][]byte{res.Endpoint(7): entry("ppm-only")},
+		identity: CacheIdentity{Instance: "ppm", Origin: "https://ppm.example", Namespace: "ppm-a1"},
+	}
+	pma := &fakeClient{
+		routes:   map[string][]byte{res.Endpoint(7): entry("pma-only")},
+		identity: CacheIdentity{Instance: "pma", Origin: "https://pma.example", Namespace: "pma-b2"},
+	}
+	for _, c := range []*fakeClient{ppm, pma} {
+		if err := res.Sync(context.Background(), c, 7, "PAI", work, "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ppmBody, err := os.ReadFile(filepath.Join(work, ".paimos", "cache", "instances", "ppm-a1", "PAI", "memory", "shared.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pmaBody, err := os.ReadFile(filepath.Join(work, ".paimos", "cache", "instances", "pma-b2", "PAI", "memory", "shared.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ppmBody), "ppm-only") || strings.Contains(string(ppmBody), "pma-only") ||
+		!strings.Contains(string(pmaBody), "pma-only") || strings.Contains(string(pmaBody), "ppm-only") {
+		t.Fatalf("cross-instance content reuse: ppm=%q pma=%q", ppmBody, pmaBody)
 	}
 }
 

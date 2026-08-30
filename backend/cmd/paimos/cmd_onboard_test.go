@@ -87,6 +87,7 @@ func fixtureBriefingInput(withAgent bool) briefingInput {
 			{IssueKey: "CON26-99", Title: "Fix flaky test", Status: "delivered", UpdatedAt: "2026-05-06T11:00:00Z"},
 		},
 		readingListSize: 10,
+		cacheNamespace:  "ppm-0123456789ab",
 	}
 	if withAgent {
 		in.agentName = "ops"
@@ -121,7 +122,7 @@ func TestRenderBriefing_ProjectLevelMarkdown(t *testing.T) {
 		"## Known runbooks",
 		"Deploy to prod",
 		"## Where to look",
-		".paimos/cache/CON26/",
+		".paimos/cache/instances/ppm-0123456789ab/CON26/",
 		"## Reading list",
 		"Use imac for prod",
 		"_(confidence: high)_",
@@ -191,6 +192,7 @@ func TestRenderBriefing_HTMLFormat(t *testing.T) {
 		"<h3>Non-negotiable rules</h3>",
 		"<h2>Known runbooks</h2>",
 		"<h2>Where to look</h2>",
+		".paimos/cache/instances/ppm-0123456789ab/CON26/",
 		"<h2>Reading list</h2>",
 	}
 	for _, want := range wantSubstrings {

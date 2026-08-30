@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -217,8 +218,7 @@ func TestMakeInheritWarning(t *testing.T) {
 }
 
 // TestUpstreamClientFor — same-instance pulls reuse `c`; cross-
-// instance pulls return a fresh client at the upstream URL; bad URLs
-// surface as errors so the resolver can degrade gracefully.
+// instance pulls are denied before a client can make a request.
 func TestUpstreamClientFor(t *testing.T) {
 	c := &Client{baseURL: "https://pm.example.com", http: http.DefaultClient}
 
@@ -230,15 +230,8 @@ func TestUpstreamClientFor(t *testing.T) {
 		t.Errorf("expected same-instance pull to reuse client; got fresh")
 	}
 
-	cross, err := upstreamClientFor(c, "https://pm.barta.cm")
-	if err != nil {
-		t.Fatalf("cross-instance err: %v", err)
-	}
-	if cross == c {
-		t.Errorf("cross-instance pull must return a fresh client")
-	}
-	if cross.baseURL != "https://pm.barta.cm" {
-		t.Errorf("cross.baseURL = %q, want pm.barta.cm", cross.baseURL)
+	if cross, err := upstreamClientFor(c, "https://pm.barta.cm"); err == nil || cross != nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("cross-instance result client=%v err=%v, want disabled refusal", cross, err)
 	}
 
 	// Trailing slash normalisation.
@@ -307,9 +300,10 @@ func startBundleAPIWithRelated(t *testing.T, hits *bundleHits, upstreamURL, upst
 // startUpstreamAPI returns a fake upstream that exposes one project
 // (PAI / id=99) with one inheritable memory entry, one runbook, one
 // guideline, and one inherit=false entry that must NOT propagate.
-func startUpstreamAPI(t *testing.T, projectKey string) *httptest.Server {
+func startUpstreamAPI(t *testing.T, projectKey string, requests *atomic.Int32) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
@@ -336,12 +330,10 @@ func startUpstreamAPI(t *testing.T, projectKey string) *httptest.Server {
 	return srv
 }
 
-// TestSessionStart_BundleFull_InheritsFromUpstream — the smoke case
-// from PAI-348's acceptance list: CON26 → related_projects → PAI;
-// PAI's "use_paimos_cli" memory + runbook + guideline land in the
-// bundle with inherited annotation. inherit=false drops.
-func TestSessionStart_BundleFull_InheritsFromUpstream(t *testing.T) {
-	upstream := startUpstreamAPI(t, "PAI")
+// Cross-instance declarations remain visible but cannot fetch or merge content.
+func TestSessionStart_BundleFull_DeniesCrossInstanceInheritanceWithoutRequest(t *testing.T) {
+	var upstreamRequests atomic.Int32
+	upstream := startUpstreamAPI(t, "PAI", &upstreamRequests)
 	hits := &bundleHits{}
 	srv := startBundleAPIWithRelated(t, hits, upstream.URL, "PAI")
 
@@ -373,48 +365,11 @@ func TestSessionStart_BundleFull_InheritsFromUpstream(t *testing.T) {
 		slug, _ := entry["slug"].(string)
 		gotSlugs = append(gotSlugs, slug)
 	}
-	wantSlugs := []string{"own_rule", "use_paimos_cli", "explicit_inherit"}
-	if !sameStringSet(gotSlugs, wantSlugs) {
-		t.Errorf("memory slugs = %v, want %v (private_lesson must NOT inherit)",
-			gotSlugs, wantSlugs)
+	if len(gotSlugs) != 2 || gotSlugs[0] != "own_rule" || !strings.HasPrefix(gotSlugs[1], "inherit_warning_") {
+		t.Errorf("memory slugs = %v, want own content plus denial warning", gotSlugs)
 	}
-
-	// inherited annotation present + correct.
-	for _, raw := range memories {
-		entry, _ := raw.(map[string]any)
-		slug, _ := entry["slug"].(string)
-		switch slug {
-		case "own_rule":
-			if _, has := entry["source"]; has {
-				t.Errorf("own_rule must NOT carry a source annotation: %+v", entry)
-			}
-		case "use_paimos_cli", "explicit_inherit":
-			source, ok := entry["source"].(map[string]any)
-			if !ok {
-				t.Errorf("%s missing source: %+v", slug, entry)
-				continue
-			}
-			if source["type"] != "inherited" {
-				t.Errorf("%s source.type = %v, want inherited", slug, source["type"])
-			}
-			if source["from_project"] != "PAI" {
-				t.Errorf("%s source.from_project = %v, want PAI", slug, source["from_project"])
-			}
-			if source["from_instance"] != upstream.URL {
-				t.Errorf("%s source.from_instance = %v, want %s",
-					slug, source["from_instance"], upstream.URL)
-			}
-		}
-	}
-
-	// Runbooks + guidelines also inherit.
-	runbooks, _ := doc["runbooks"].([]any)
-	if len(runbooks) != 1 {
-		t.Errorf("runbooks: got %d, want 1 inherited", len(runbooks))
-	}
-	guidelines, _ := doc["guidelines"].([]any)
-	if len(guidelines) != 1 {
-		t.Errorf("guidelines: got %d, want 1 inherited", len(guidelines))
+	if got := upstreamRequests.Load(); got != 0 {
+		t.Fatalf("cross-instance inheritance made %d upstream request(s), want zero", got)
 	}
 }
 
@@ -569,12 +524,10 @@ func TestSessionStart_BundleFull_DeclarationOrder(t *testing.T) {
 		entry, _ := raw.(map[string]any)
 		gotOrder = append(gotOrder, entry["slug"].(string))
 	}
-	// related_projects[] entries are sorted by slug ASC server-side
-	// (loadByType in handlers/knowledge/handlers.go), so a_aaa
-	// precedes b_bbb in declaration order, and the inherited slugs
-	// follow the same order.
-	want := []string{"from_aaa", "from_bbb"}
+	// Related-project declarations remain ordered, but cross-instance
+	// content is replaced by explicit denial warnings.
+	want := []string{"inherit_warning_aaa", "inherit_warning_bbb"}
 	if len(gotOrder) != 2 || gotOrder[0] != want[0] || gotOrder[1] != want[1] {
-		t.Errorf("inherited memory order = %v, want %v", gotOrder, want)
+		t.Errorf("inheritance denial order = %v, want %v", gotOrder, want)
 	}
 }

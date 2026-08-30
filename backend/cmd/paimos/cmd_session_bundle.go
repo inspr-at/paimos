@@ -154,6 +154,7 @@ type bundlePayload struct {
 	RelatedProjects []knowledgeEntry `json:"related_projects"`
 	Guidelines      []knowledgeEntry `json:"guidelines"`
 	FetchedAt       string           `json:"fetched_at"`
+	Identity        instanceIdentity `json:"instance_identity"`
 }
 
 // archivedStatus is the on-disk status value the knowledge plane uses
@@ -599,10 +600,8 @@ type inheritedSources struct {
 // bundle JSON) can attribute the rule to its origin.
 //
 // Same-instance pulls reuse `c` directly (auth, baseURL, headers).
-// Cross-instance pulls build a fresh unauthenticated client at the
-// upstream URL — the inherited memory plane is read-only here, and
-// PAI-348 v1 deliberately doesn't propagate API keys across instances
-// (PAI-341's sync infrastructure layers richer auth on top).
+// Cross-instance pulls fail closed before any network request. A warning is
+// surfaced in the bundle, but no content crosses the instance boundary.
 func fetchInheritedFromUpstream(c *Client, upstream relatedProjectRef) inheritedSources {
 	out := inheritedSources{}
 	upstreamClient, err := upstreamClientFor(c, upstream.InstanceURL)
@@ -751,12 +750,9 @@ func makeInheritWarning(upstream relatedProjectRef, reason string) *knowledgeEnt
 }
 
 // upstreamClientFor returns a Client configured to talk to the
-// upstream instance. Same-instance pulls return `c` unchanged so
-// auth + headers + custom transport carry over. Cross-instance pulls
-// get a fresh unauthenticated client — PAI-348 v1 doesn't propagate
-// credentials, the inheritance contract assumes the upstream's
-// memory plane is publicly readable for the configured projects (or
-// equivalent auth has been granted out-of-band).
+// upstream instance. Same-instance pulls return `c` unchanged so auth,
+// headers, and custom transport carry over. Cross-instance pulls are denied
+// pending an explicit future policy.
 func upstreamClientFor(c *Client, upstreamURL string) (*Client, error) {
 	upstreamURL = strings.TrimRight(strings.TrimSpace(upstreamURL), "/")
 	if upstreamURL == "" {
@@ -772,10 +768,7 @@ func upstreamClientFor(c *Client, upstreamURL string) (*Client, error) {
 	if parsed.Scheme == "" || parsed.Host == "" {
 		return nil, fmt.Errorf("instance_url must be absolute (scheme + host)")
 	}
-	return &Client{
-		baseURL: upstreamURL,
-		http:    c.http,
-	}, nil
+	return nil, fmt.Errorf("cross-instance knowledge inheritance is disabled: upstream origin %s differs from active origin %s", parsed.String(), c.baseURL)
 }
 
 // resolveProjectKeyToIDOnInstance fetches the project list from `c`
@@ -861,6 +854,9 @@ func mergeInherited(own, inherited []knowledgeEntry) []knowledgeEntry {
 // gracefully: the bundle keeps the project's own entries plus a
 // `source: warning` marker so the agent never silently misses content.
 func resolveBundle(c *Client, project projectSummary, agentName string, includeLow, includeProposed bool) (*bundlePayload, error) {
+	if c.identity.Name == "" || c.identity.Origin == "" || c.identity.Namespace == "" {
+		return nil, fmt.Errorf("bundle resolution requires a proven instance/origin identity")
+	}
 	// Agent artifact is canonical (PAI-329); we keep the full JSON so
 	// every field the server emits round-trips into the bundle.
 	agentRaw, err := c.do("GET",
@@ -944,6 +940,7 @@ func resolveBundle(c *Client, project projectSummary, agentName string, includeL
 		RelatedProjects: ownRelated,
 		Guidelines:      mergeInherited(ownGuidelines, inheritedGuidelines),
 		FetchedAt:       time.Now().UTC().Format(time.RFC3339),
+		Identity:        c.identity,
 	}
 
 	// PAI-347 — bump reference_count + last_referenced_at on every
@@ -985,13 +982,17 @@ func bumpMemoryReferences(c *Client, projectID int64, entries []knowledgeEntry) 
 }
 
 // cacheManifest is the on-disk JSON written under
-// `<cache-dir>/<project-key>/manifest.json`. `Rev` is a stable hash of
+// `<cache-dir>/instances/<instance-origin>/<project-key>/manifest.json`.
+// `Rev` is a stable hash of
 // the entries (excluding fetched_at, which would defeat the
 // invalidation cheapness) so PAI-341's sync verb can ask "did
 // anything change?" with one SELECT.
 type cacheManifest struct {
 	Project   string                      `json:"project"`
 	Agent     string                      `json:"agent"`
+	Instance  string                      `json:"instance"`
+	Origin    string                      `json:"origin"`
+	Namespace string                      `json:"namespace"`
 	FetchedAt string                      `json:"fetched_at"`
 	Rev       string                      `json:"rev"`
 	Entries   map[string][]knowledgeEntry `json:"entries"`
@@ -1039,7 +1040,7 @@ func computeBundleRev(b *bundlePayload) string {
 }
 
 // writeBundleManifest serialises the bundle into the canonical
-// manifest path under `<cacheRoot>/<project-key>/manifest.json`. The
+// manifest path under the instance/origin-scoped project directory. The
 // directory is created on demand (0o750) and the manifest is written
 // via tmp+rename so a concurrent reader never sees a half-written
 // JSON document.
@@ -1048,6 +1049,9 @@ func writeBundleManifest(cacheRoot string, b *bundlePayload, agentName string) (
 	manifest := cacheManifest{
 		Project:   b.Project.Key,
 		Agent:     agentName,
+		Instance:  b.Identity.Name,
+		Origin:    b.Identity.Origin,
+		Namespace: b.Identity.Namespace,
 		FetchedAt: b.FetchedAt,
 		Rev:       rev,
 		Entries: map[string][]knowledgeEntry{
@@ -1058,7 +1062,7 @@ func writeBundleManifest(cacheRoot string, b *bundlePayload, agentName string) (
 			"guidelines":       b.Guidelines,
 		},
 	}
-	dir, err := bundleCacheDir(cacheRoot, b.Project.Key)
+	dir, err := bundleCacheDir(cacheRoot, b.Identity, b.Project.Key)
 	if err != nil {
 		return "", "", err
 	}
@@ -1087,8 +1091,12 @@ func writeBundleManifest(cacheRoot string, b *bundlePayload, agentName string) (
 // freshness check, today the rule is "any well-formed manifest
 // counts" so a developer iterating with `--bundle full` doesn't beat
 // up the API on every command.
-func readBundleManifest(cacheRoot, projectKey string) (*cacheManifest, error) {
-	manifestPath := filepath.Join(cacheRoot, projectKey, "manifest.json")
+func readBundleManifest(cacheRoot string, identity instanceIdentity, projectKey string) (*cacheManifest, error) {
+	dir, err := bundleCacheDir(cacheRoot, identity, projectKey)
+	if err != nil {
+		return nil, err
+	}
+	manifestPath := filepath.Join(dir, "manifest.json")
 	// #nosec G304 -- cacheRoot comes from the user's own --cache-dir flag (default ./.paimos/cache) and the fixed manifest.json name is appended.
 	bs, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -1103,6 +1111,9 @@ func readBundleManifest(cacheRoot, projectKey string) (*cacheManifest, error) {
 		// over a stale cache file would be hostile.
 		return nil, nil
 	}
+	if m.Instance != identity.Name || m.Origin != identity.Origin || m.Namespace != identity.Namespace || m.Project != projectKey {
+		return nil, nil
+	}
 	return &m, nil
 }
 
@@ -1114,13 +1125,13 @@ func readBundleManifest(cacheRoot, projectKey string) (*cacheManifest, error) {
 //
 // Layout:
 //
-//	<cacheRoot>/<project-key>/manifest.json
-//	<cacheRoot>/<project-key>/agent.json
-//	<cacheRoot>/<project-key>/memory/<slug>.md
-//	<cacheRoot>/<project-key>/runbooks/<slug>.md
+//	<cacheRoot>/instances/<instance-origin>/<project-key>/manifest.json
+//	<cacheRoot>/instances/<instance-origin>/<project-key>/agent.json
+//	<cacheRoot>/instances/<instance-origin>/<project-key>/memory/<slug>.md
+//	<cacheRoot>/instances/<instance-origin>/<project-key>/runbooks/<slug>.md
 //	... (one folder per category)
 func writeBundleFiles(cacheRoot string, b *bundlePayload) (string, error) {
-	dir, err := bundleCacheDir(cacheRoot, b.Project.Key)
+	dir, err := bundleCacheDir(cacheRoot, b.Identity, b.Project.Key)
 	if err != nil {
 		return "", err
 	}
@@ -1181,14 +1192,17 @@ func writeCategoryFiles(rootDir, alias string, entries []knowledgeEntry) error {
 	return nil
 }
 
-// bundleCacheDir joins the server-reported project key under cacheRoot,
-// rejecting keys containing separators or ".." so a hostile bundle
-// payload cannot steer cache writes outside the cache root.
-func bundleCacheDir(cacheRoot, projectKey string) (string, error) {
+// bundleCacheDir joins a proven instance/origin namespace and the
+// server-reported project key under cacheRoot, rejecting unsafe names.
+func bundleCacheDir(cacheRoot string, identity instanceIdentity, projectKey string) (string, error) {
+	if identity.Name == "" || identity.Origin == "" || identity.Namespace == "" ||
+		!filepath.IsLocal(identity.Namespace) || strings.ContainsAny(identity.Namespace, `/\\`) {
+		return "", fmt.Errorf("unproven cache instance/origin identity")
+	}
 	if projectKey == "" || !filepath.IsLocal(projectKey) || strings.ContainsAny(projectKey, `/\`) {
 		return "", fmt.Errorf("project key %q is not a safe cache directory name", projectKey)
 	}
-	return filepath.Join(cacheRoot, projectKey), nil
+	return filepath.Join(cacheRoot, "instances", identity.Namespace, projectKey), nil
 }
 
 // renderEntryMarkdown serialises one knowledge entry as

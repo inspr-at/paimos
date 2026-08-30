@@ -83,7 +83,8 @@ type knowledgeResource struct {
 	// underscore (external_system ↔ external-system).
 	urlSegment string
 
-	// cacheSubdir is the directory name under .paimos/cache/<project>/
+	// cacheSubdir is the directory name under the instance-scoped project
+	// cache directory
 	// where the kind's slugs land on disk. Kept on the legacy
 	// plural form so existing on-disk caches don't get orphaned by
 	// the URL collapse.
@@ -102,9 +103,10 @@ func (k *knowledgeResource) Endpoint(projectID int64) string {
 }
 
 // LocalPath returns the cache target. Layout is
-// `.paimos/cache/<project-key>/<kind-subdir>/<slug>.md` so:
+// `.paimos/cache/instances/<instance-origin>/<project-key>/<kind-subdir>/<slug>.md`
+// in production. LocalPath accepts the already-scoped project path so:
 //
-//   - all knowledge kinds live under one parent (`.paimos/cache/<project>`)
+//   - all knowledge kinds live under one instance/project parent
 //     making it trivial to scope a `.gitignore` block.
 //
 //   - per-kind subdirectories prevent cross-kind slug collisions (memory
@@ -158,6 +160,10 @@ func (k *knowledgeResource) Sync(
 	if strings.TrimSpace(workspaceRoot) == "" {
 		return fmt.Errorf("%s sync: workspace root required", k.kind)
 	}
+	scopedProjectKey, err := knowledgeCacheProjectKey(c, projectKey)
+	if err != nil {
+		return fmt.Errorf("%s sync: %w", k.kind, err)
+	}
 
 	entries, err := k.fetchEntries(c, projectID, selectName)
 	if err != nil {
@@ -168,13 +174,25 @@ func (k *knowledgeResource) Sync(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		item, err := k.syncOne(projectKey, workspaceRoot, entry)
+		item, err := k.syncOne(scopedProjectKey, workspaceRoot, entry)
 		if err != nil {
 			return fmt.Errorf("sync %s %q: %w", k.kind, entry.Slug, err)
 		}
 		onWritten(item)
 	}
 	return nil
+}
+
+func knowledgeCacheProjectKey(c SyncClient, projectKey string) (string, error) {
+	i, err := c.CacheIdentity()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(i.Instance) == "" || strings.TrimSpace(i.Origin) == "" ||
+		strings.TrimSpace(i.Namespace) == "" || strings.ContainsAny(i.Namespace, `/\\`) || !filepath.IsLocal(i.Namespace) {
+		return "", fmt.Errorf("unproven knowledge cache instance/origin identity")
+	}
+	return filepath.ToSlash(filepath.Join("instances", i.Namespace, projectKey)), nil
 }
 
 // fetchEntries returns the entries to sync. With selectName set, fetches
@@ -317,6 +335,10 @@ func (k *knowledgeResource) Check(
 	if strings.TrimSpace(workspaceRoot) == "" {
 		return nil, fmt.Errorf("%s check: workspace root required", k.kind)
 	}
+	scopedProjectKey, err := knowledgeCacheProjectKey(c, projectKey)
+	if err != nil {
+		return nil, fmt.Errorf("%s check: %w", k.kind, err)
+	}
 	entries, err := k.fetchEntries(c, projectID, "")
 	if err != nil {
 		return nil, err
@@ -326,8 +348,8 @@ func (k *knowledgeResource) Check(
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		rendered := k.renderEntry(projectKey, entry)
-		suggested := k.LocalPath(projectKey, entry.Slug)
+		rendered := k.renderEntry(scopedProjectKey, entry)
+		suggested := k.LocalPath(scopedProjectKey, entry.Slug)
 		target, err := joinWorkspacePath(workspaceRoot, suggested)
 		if err != nil {
 			return out, fmt.Errorf("check %s %q: %w", k.kind, entry.Slug, err)

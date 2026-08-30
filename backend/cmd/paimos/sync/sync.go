@@ -64,6 +64,16 @@ type SyncClient interface {
 	// closes the stream. The path includes the device-id query param so
 	// the server can scope the subscription per-device.
 	Stream(ctx context.Context, path string, onEvent func(Event)) error
+
+	// CacheIdentity proves which instance/origin owns local knowledge files.
+	// Knowledge resources fail closed when this provenance is unavailable.
+	CacheIdentity() (CacheIdentity, error)
+}
+
+type CacheIdentity struct {
+	Instance  string
+	Origin    string
+	Namespace string
 }
 
 // Event is the SSE envelope dispatched by Stream. The shape is shared

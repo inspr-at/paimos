@@ -298,7 +298,11 @@ func TestSyncInit_PullsKnowledgePlaneEndToEnd(t *testing.T) {
 		"guidelines":       "no-secrets",
 	}
 	for subdir, slug := range knowledgeChecks {
-		path := filepath.Join(work, ".paimos", "cache", "ACME", subdir, slug+".md")
+		identity, err := newInstanceIdentity("env", srv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(work, ".paimos", "cache", "instances", identity.Namespace, "ACME", subdir, slug+".md")
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("knowledge %s/%s missing: %v", subdir, slug, err)
 		}

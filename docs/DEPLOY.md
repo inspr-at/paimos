@@ -75,7 +75,9 @@ sequence (v5.1.0 → v5.6.2):
    sudo; csb1's login shell is fish — pipe scripts to `bash -s`).
 5. **Verify**: `docker ps` shows the new image; `curl
    https://pm.barta.cm/api/health` reports the exact version;
-   `paimos --instance ppm doctor` passes.
+   `env -u PAIMOS_URL -u PAIMOS_API_KEY -u PPM_URL -u PPMAPIKEY paimos --instance ppm doctor`
+   passes. The clean environment is load-bearing: an explicit named instance
+   refuses ambient env-only URL/key targets rather than mixing credentials.
 
 Rollback = restore the volume tarball **and** repin the previous image
 in compose-spec.nix **and** rebuild — DB migrations are one-way, so the
@@ -236,7 +238,8 @@ require a PAIMOS API key for that instance. For a richer read-only operator
 smoke, configure a matching `paimos` CLI instance and run:
 
 ```
-paimos --instance ppm doctor
+env -u PAIMOS_URL -u PAIMOS_API_KEY -u PPM_URL -u PPMAPIKEY \
+  paimos --instance ppm doctor
 ```
 
 If an operator only has SSH deploy access for an instance, `doctor` may be

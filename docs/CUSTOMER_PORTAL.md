@@ -166,7 +166,8 @@ empty on the second pass, no duplicate audit rows.
 **Checkpoint:** confirm M110 ran by querying:
 
 ```sh
-paimos --instance ppm doctor
+env -u PAIMOS_URL -u PAIMOS_API_KEY -u PPM_URL -u PPMAPIKEY \
+  paimos --instance ppm doctor
 ```
 
 …and by spot-checking the admin visibility report on a project you
