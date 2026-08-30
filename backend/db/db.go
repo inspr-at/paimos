@@ -35,7 +35,10 @@ import (
 	"github.com/inspr-at/paimos/backend/safetext"
 )
 
-const DefaultBusyTimeoutMS = 5000
+const (
+	DefaultBusyTimeoutMS      = 5000
+	DefaultMaxOpenConnections = 10
+)
 
 var perConnectionPragmas = []string{
 	fmt.Sprintf("PRAGMA busy_timeout=%d", DefaultBusyTimeoutMS),
@@ -328,11 +331,23 @@ func rebuildAgentRunTelemetryLatest(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func Open() error {
+func databasePathFromEnvironment() (string, error) {
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
+		if os.Getenv("PAIMOS_TEST_MODE") == "1" {
+			return "", errors.New("PAIMOS_TEST_MODE requires an explicit DATA_DIR for an isolated SQLite database")
+		}
 		dataDir = "/app/data"
 	}
+	return filepath.Join(dataDir, brand.Default.DBFilename), nil
+}
+
+func Open() error {
+	dbPath, err := databasePathFromEnvironment()
+	if err != nil {
+		return err
+	}
+	dataDir := filepath.Dir(dbPath)
 
 	// 0o750: the data dir holds the SQLite DB and secret key; only the
 	// backend process (and its group) need access.
@@ -341,7 +356,6 @@ func Open() error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	dbPath := filepath.Join(dataDir, brand.Default.DBFilename)
 	// PAI-596: `_txlock=immediate` makes every transaction issue BEGIN IMMEDIATE,
 	// acquiring the write lock up front instead of lazily upgrading a deferred
 	// read→write transaction. Lazy upgrades fail instantly with SQLITE_BUSY when
@@ -359,7 +373,7 @@ func Open() error {
 	// internally. busy_timeout prevents immediate SQLITE_BUSY errors under
 	// write contention — connections wait up to 5s before failing
 	// (busy_timeout is set per-connection via the hook above).
-	db.SetMaxOpenConns(10)
+	db.SetMaxOpenConns(DefaultMaxOpenConnections)
 	db.SetMaxIdleConns(5)
 
 	// PAI-369: set WAL once at file open. journal_mode is a database-level

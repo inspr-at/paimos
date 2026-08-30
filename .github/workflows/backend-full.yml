@@ -1,0 +1,89 @@
+name: backend-full
+
+# Expensive exhaustive assurance stays off the ordinary PR merge path. It
+# runs for every protected-main commit, nightly, and on demand. release.sh
+# requires the exact protected-main result before creating a tag; no duplicate
+# tag run is needed for the identical commit. Applying the explicit
+# backend-full-evidence label provides the same hosted proof on a PR head.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [labeled]
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-full-authorize:
+    if: github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Authorize exhaustive backend evidence
+        env:
+          BACKEND_FULL_LABEL: ${{ github.event.label.name }}
+        run: scripts/backend-full-authorize.sh
+
+  backend-full-serial:
+    needs: backend-full-authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend — full serial suite
+        working-directory: backend
+        run: go test -count=1 -p 1 -timeout=30m ./...
+
+      - name: Backend — unsupported platform fails closed
+        working-directory: backend
+        run: |
+          go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
+          go test -tags paimos_test_unsupported -count=1 ./agentd ./agentdwire ./ownedprocess -run '^TestUnsupportedPlatform'
+
+  backend-full-race:
+    needs: backend-full-authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend — broad control-plane race
+        working-directory: backend
+        # The runner walks package-local and handler shard concurrency contracts sequentially.
+        # That stays broad without starving latency-budget tests by racing all
+        # heavyweight packages against each other on one shared CI machine.
+        run: ../scripts/backend-pr-race.sh './...'
+
+  backend-full:
+    if: always() && (github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence')
+    needs: [backend-full-authorize, backend-full-serial, backend-full-race]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require both exhaustive assurance lanes
+        env:
+          AUTHORIZATION: ${{ needs.backend-full-authorize.result }}
+          SERIAL: ${{ needs.backend-full-serial.result }}
+          RACE: ${{ needs.backend-full-race.result }}
+        run: |
+          set -euo pipefail
+          [[ "$AUTHORIZATION" == 'success' ]]
+          [[ "$SERIAL" == 'success' ]]
+          [[ "$RACE" == 'success' ]]
