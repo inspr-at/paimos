@@ -212,6 +212,14 @@ export function buildRoutes(includeDev: boolean): RouteRecordRaw[] {
             meta: { shell: "agent" as const },
           },
           {
+            // PAI-854: product-session-shaped Paimos 6 home preview.
+            // Deterministic local fixtures only: no 5.x delivery relabelling,
+            // session API claim, native/push claim, or production alias.
+            path: "/dev/paimos-6",
+            component: () => import("@/views/Paimos6PreviewView.vue"),
+            meta: { shell: "v6" as const },
+          },
+          {
             path: "/dev/undo",
             component: () => import("@/components/undo/UndoDevReference.vue"),
           },
