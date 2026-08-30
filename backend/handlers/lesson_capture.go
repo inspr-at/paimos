@@ -270,8 +270,8 @@ func lessonCaptureMatchComments(issueID int64) (string, error) {
 // "<type>_<first-six-words-of-rule>". The output is the suggested
 // name the prompt pre-populates so the user sees a sensible default
 // before tweaking. Whitespace collapses to a single underscore, all
-// non-alphanumeric runs get squeezed out — the partial UNIQUE INDEX
-// on (type, slug, project_id) accepts ASCII identifiers only.
+// non-alphanumeric runs get squeezed out — scope-specific live-knowledge
+// identities accept ASCII identifiers only.
 //
 // The first-six-words rule keeps slugs short enough to type and long
 // enough to survive de-duplication; the type prefix matches the

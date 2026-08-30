@@ -251,9 +251,8 @@ func promoteMemoryTx(r *http.Request, mod knowledge.Module, slug string, fromPro
 	}
 
 	// Fail before mutating either row when the destination identity already
-	// exists. PAI-857's planned database constraint is the concurrency
-	// backstop; this transactional check protects the hotfix on the current
-	// nullable-UNIQUE schema.
+	// exists. The scope-specific database indexes are the concurrency
+	// backstop; this transactional check provides an actionable conflict.
 	var destinationID int64
 	var collisionErr error
 	switch toScope {

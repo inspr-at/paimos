@@ -11855,13 +11855,13 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`DROP INDEX idx_issues_type_slug_project`,
 			`CREATE UNIQUE INDEX idx_issues_knowledge_project_identity
 			 ON issues(project_id,type,slug)
-			 WHERE project_id IS NOT NULL AND user_id IS NULL AND slug IS NOT NULL`,
+			 WHERE project_id IS NOT NULL AND slug IS NOT NULL AND deleted_at IS NULL`,
 			`CREATE UNIQUE INDEX idx_issues_knowledge_user_identity
 			 ON issues(user_id,type,slug)
-			 WHERE project_id IS NULL AND user_id IS NOT NULL AND slug IS NOT NULL`,
+			 WHERE project_id IS NULL AND user_id IS NOT NULL AND slug IS NOT NULL AND deleted_at IS NULL`,
 			`CREATE UNIQUE INDEX idx_issues_knowledge_instance_identity
 			 ON issues(type,slug)
-			 WHERE project_id IS NULL AND user_id IS NULL AND slug IS NOT NULL`,
+			 WHERE project_id IS NULL AND user_id IS NULL AND slug IS NOT NULL AND deleted_at IS NULL`,
 			`CREATE TRIGGER trg_issues_scope_owner_insert BEFORE INSERT ON issues
 			 WHEN NEW.project_id IS NOT NULL AND NEW.user_id IS NOT NULL
 			 BEGIN SELECT RAISE(ABORT,'issue cannot have both project and user ownership'); END`,
@@ -12076,7 +12076,7 @@ func checkKnowledgeScopeIdentities(ctx context.Context, conn *sql.Conn) error {
 		            WHEN user_id IS NOT NULL THEN 'user' ELSE 'instance' END,
 		       COALESCE(project_id,user_id,0),type,slug,id
 		FROM issues
-		WHERE slug IS NOT NULL
+		WHERE slug IS NOT NULL AND deleted_at IS NULL
 		ORDER BY 1,2,type,slug,id`)
 	if err != nil {
 		return fmt.Errorf("inspect knowledge scope identities: %w", err)
@@ -12118,7 +12118,7 @@ func checkKnowledgeScopeIdentities(ctx context.Context, conn *sql.Conn) error {
 	rows.Close()
 	flush()
 	if len(collisions) > 0 {
-		return fmt.Errorf("knowledge scope identity collisions block M162; rename or merge the listed rows before upgrading: %s", strings.Join(collisions, "; "))
+		return fmt.Errorf("active knowledge scope identity collisions block M162; rename or merge the listed rows before upgrading: %s", strings.Join(collisions, "; "))
 	}
 	return nil
 }

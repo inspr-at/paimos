@@ -132,3 +132,36 @@ func TestKnowledgeIdentityRenameConflictsReturn409(t *testing.T) {
 		})
 	}
 }
+
+func TestKnowledgeIdentityCanBeRecreatedAfterSoftDelete(t *testing.T) {
+	tests := []struct {
+		name      string
+		endpoints func(*testing.T, *testServer) (collection, entry string)
+	}{
+		{
+			name: "project",
+			endpoints: func(t *testing.T, ts *testServer) (string, string) {
+				projectID := createTestProject(t, ts, "Recreate project identity", "RDI")
+				return knowledgeURL(projectID, "memory"), knowledgeEntryURL(projectID, "memory", "recreated")
+			},
+		},
+		{name: "user", endpoints: func(_ *testing.T, _ *testServer) (string, string) {
+			return userMemoryURL, userMemoryEntryURL("recreated")
+		}},
+		{name: "instance", endpoints: func(_ *testing.T, _ *testServer) (string, string) {
+			return instanceMemoryURL, instanceMemoryEntryURL("recreated")
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ts := newTestServer(t)
+			collection, entry := test.endpoints(t, ts)
+			payload := map[string]any{"slug": "recreated", "title": "First"}
+			assertStatus(t, ts.post(t, collection, ts.adminCookie, payload), http.StatusCreated)
+			assertStatus(t, ts.del(t, entry, ts.adminCookie), http.StatusNoContent)
+			payload["title"] = "Second"
+			assertStatus(t, ts.post(t, collection, ts.adminCookie, payload), http.StatusCreated)
+		})
+	}
+}

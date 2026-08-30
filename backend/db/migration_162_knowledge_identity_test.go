@@ -187,6 +187,24 @@ func TestMigration162EnforcesThreeIndependentScopeIdentities(t *testing.T) {
 	}
 	assertRejected("update to unsupported user type", `UPDATE issues SET type='ticket' WHERE id=?`, userRow)
 
+	// Soft-deleted knowledge no longer occupies the live identity. This
+	// preserves the existing delete-then-recreate contract at every scope.
+	for _, rowID := range []int64{projectRow, userRow} {
+		if _, err := database.Exec(`UPDATE issues SET deleted_at=datetime('now') WHERE id=?`, rowID); err != nil {
+			t.Fatalf("soft-delete identity row %d: %v", rowID, err)
+		}
+	}
+	var instanceRow int64
+	if err := database.QueryRow(`SELECT id FROM issues WHERE project_id IS NULL AND user_id IS NULL AND slug='shared'`).Scan(&instanceRow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE issues SET deleted_at=datetime('now') WHERE id=?`, instanceRow); err != nil {
+		t.Fatalf("soft-delete instance identity: %v", err)
+	}
+	insertM162Issue(t, database, projectA, nil, 4, "memory", "shared")
+	insertM162Issue(t, database, nil, userA, 4, "memory", "shared")
+	insertM162Issue(t, database, nil, nil, 4, "memory", "shared")
+
 	var version int
 	if err := database.QueryRow(`SELECT MAX(version) FROM schema_versions`).Scan(&version); err != nil || version != 162 {
 		t.Fatalf("schema version=%d err=%v, want 162", version, err)
@@ -194,5 +212,65 @@ func TestMigration162EnforcesThreeIndependentScopeIdentities(t *testing.T) {
 	var oldIndex int
 	if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_issues_type_slug_project'`).Scan(&oldIndex); err != nil || oldIndex != 0 {
 		t.Fatalf("obsolete nullable index count=%d err=%v", oldIndex, err)
+	}
+}
+
+func TestMigration162ScopeLookupsUseIdentityIndexes(t *testing.T) {
+	database := openM162Fixture(t)
+	projectID, _, userID, _ := seedM162Owners(t, database)
+	insertM162Issue(t, database, projectID, nil, 1, "memory", "indexed")
+	insertM162Issue(t, database, nil, userID, 1, "memory", "indexed")
+	insertM162Issue(t, database, nil, nil, 1, "memory", "indexed")
+	if err := migrateThrough(database, 162); err != nil {
+		t.Fatalf("apply M162: %v", err)
+	}
+
+	tests := []struct {
+		name, query, index string
+		args               []any
+	}{
+		{"project", `EXPLAIN QUERY PLAN SELECT id FROM issues WHERE project_id=? AND type=? AND slug=? AND deleted_at IS NULL`, "idx_issues_knowledge_project_identity", []any{projectID, "memory", "indexed"}},
+		{"user", `EXPLAIN QUERY PLAN SELECT id FROM issues WHERE project_id IS NULL AND user_id=? AND type=? AND slug=? AND deleted_at IS NULL`, "idx_issues_knowledge_user_identity", []any{userID, "memory", "indexed"}},
+		{"instance", `EXPLAIN QUERY PLAN SELECT id FROM issues WHERE project_id IS NULL AND user_id IS NULL AND type=? AND slug=? AND deleted_at IS NULL`, "idx_issues_knowledge_instance_identity", []any{"memory", "indexed"}},
+	}
+	for _, test := range tests {
+		rows, err := database.Query(test.query, test.args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var detail strings.Builder
+		for rows.Next() {
+			var id, parent, unused int
+			var line string
+			if err := rows.Scan(&id, &parent, &unused, &line); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			detail.WriteString(line)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		rows.Close()
+		if !strings.Contains(detail.String(), test.index) {
+			t.Fatalf("%s lookup plan=%q, want %s", test.name, detail.String(), test.index)
+		}
+	}
+}
+
+func TestMigration162IgnoresDeletedIdentityCollisions(t *testing.T) {
+	database := openM162Fixture(t)
+	_, _, userID, _ := seedM162Owners(t, database)
+
+	for _, owner := range []any{userID, nil} {
+		rowID := insertM162Issue(t, database, nil, owner, 1, "memory", "recreated")
+		if _, err := database.Exec(`UPDATE issues SET deleted_at=datetime('now') WHERE id=?`, rowID); err != nil {
+			t.Fatal(err)
+		}
+		insertM162Issue(t, database, nil, owner, 2, "memory", "recreated")
+	}
+	if err := migrateThrough(database, 162); err != nil {
+		t.Fatalf("M162 rejected live+tombstone identities: %v", err)
 	}
 }
