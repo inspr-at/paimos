@@ -48,13 +48,19 @@ type detachProductSessionNodeRequest struct {
 }
 
 func RegisterProductSessionRoutes(r chi.Router) {
-	r.With(auth.AgentModePrivateNoStore, auth.RequireProjectView).Get("/projects/{id}/session-home/v1", SessionHomeV1)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/product-sessions", ListProductSessions)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/product-sessions", CreateProductSession)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/product-sessions/{productSessionID}", GetProductSession)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/product-sessions/{productSessionID}/events", ListProductSessionEvents)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/product-sessions/{productSessionID}/attach-node", AttachProductSessionNode)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/product-sessions/{productSessionID}/detach-node", DetachProductSessionNode)
+}
+
+// RegisterSessionHomeRoutes is mounted in its own private/no-store group so
+// authentication and role gates cannot terminate before the cache policy is
+// established. Product-session CRUD keeps its existing internal-group policy.
+func RegisterSessionHomeRoutes(r chi.Router) {
+	r.With(auth.RequireProjectView).Get("/projects/{id}/session-home/v1", SessionHomeV1)
 }
 
 func ListProductSessionEvents(w http.ResponseWriter, r *http.Request) {

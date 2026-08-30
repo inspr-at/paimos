@@ -546,6 +546,19 @@ func mountAPI(r chi.Router) {
 		handlers.MountExternalStageContractRoutes(r)
 	})
 
+	// PAI-861: session home is a private projection. Keep its no-store
+	// middleware outside every early authentication/role gate so 401, 403,
+	// concealed 404, and handler responses all carry the same cache policy.
+	// The remaining gates intentionally match the ordinary internal group.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.AgentModePrivateNoStore)
+		r.Use(auth.Middleware)
+		r.Use(auth.CSRFMiddleware)
+		r.Use(auth.MustChangePasswordGate)
+		r.Use(auth.BlockExternal)
+		handlers.RegisterSessionHomeRoutes(r)
+	})
+
 	// Portal (external + admin)
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware)

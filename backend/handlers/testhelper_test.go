@@ -184,6 +184,17 @@ func buildRouter() http.Handler {
 			r.Post("/voice/speak", handlers.SpeakAgentModeVoice)
 		})
 
+		// PAI-861 mirrors production's dedicated middleware order: no-store
+		// must run before authentication/password/external early exits.
+		r.Group(func(r chi.Router) {
+			r.Use(auth.AgentModePrivateNoStore)
+			r.Use(auth.Middleware)
+			r.Use(auth.CSRFMiddleware)
+			r.Use(auth.MustChangePasswordGate)
+			r.Use(auth.BlockExternal)
+			handlers.RegisterSessionHomeRoutes(r)
+		})
+
 		// Portal (external + admin)
 		r.Group(func(r chi.Router) {
 			r.Use(auth.Middleware)
