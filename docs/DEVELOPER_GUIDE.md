@@ -383,6 +383,42 @@ yourself.
 4. Test on a fresh DB and on a DB with the old schema (migrations are
    one-way).
 
+### One-shot offline PAI-857 pre-M162 repair
+
+`paimos-repair-knowledge-857` is an offline, clone-only repair for the
+single verified backup named `ppm-857-20260830-2130`. It has no defaults
+or discovery. Its built-in authorization lock requires the exact
+`ppm.db`, `ppm.db-wal`, and `ppm.db-shm` sizes and SHA-256 values recorded
+for that backup, along with `issues=4881`, knowledge rows `=326`, clean
+integrity/foreign keys, and M162 still pending.
+
+Run it from `backend/` with three new, explicit absolute paths:
+
+```sh
+go run ./cmd/paimos-repair-knowledge-857 \
+  --source-backup-dir /absolute/path/ppm-857-20260830-2130 \
+  --clone-dir /absolute/path/ppm-857-repaired-clone \
+  --report /absolute/path/pai-857-repair-report.json
+```
+
+The source directory is opened only for hashing and byte copying. The
+tool creates the clone with restrictive permissions, verifies both
+copies of the WAL-safe trio, and opens only the clone through SQLite. It
+refuses symlinks, an existing destination/report, schema drift, any
+unapproved collision, divergent or referenced losers, and any changed
+fingerprint. It never accepts a live database path or an unconditional
+delete instruction.
+
+A successful report has `status: "clean"`, enumerates survivor/loser IDs
+and every checked reference surface without issue content, and proves
+post-repair integrity, foreign keys, counts, and M162-pending state. Its
+`report_sha256` is SHA-256 of the compact JSON object with that field set
+to the empty string, making verification non-self-referential. Normal
+`db.Open` may apply M162 only to the verified repaired copy after this
+report exists. A report created from synthetic tests is not evidence
+that the actual backup is clean; actual-backup CLEAN requires the
+operator-produced report from the exact fingerprinted trio.
+
 ### Adding an integration
 
 Look at `handlers/integrations.go`, `handlers/jiraimport.go`, and
