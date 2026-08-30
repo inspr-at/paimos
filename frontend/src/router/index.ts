@@ -212,9 +212,10 @@ export function buildRoutes(includeDev: boolean): RouteRecordRaw[] {
             meta: { shell: "agent" as const },
           },
           {
-            // PAI-854: product-session-shaped Paimos 6 home preview.
-            // Deterministic local fixtures only: no 5.x delivery relabelling,
-            // session API claim, native/push claim, or production alias.
+            // PAI-854 / PAI-861: development-only Paimos 6 home preview.
+            // PAI-861 reads the strict project-authorized session-home
+            // projection; it remains read-only, web-only, and has no
+            // production/root alias.
             path: "/dev/paimos-6",
             component: () => import("@/views/Paimos6PreviewView.vue"),
             meta: { shell: "v6" as const },
