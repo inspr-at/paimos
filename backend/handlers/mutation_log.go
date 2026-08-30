@@ -659,6 +659,18 @@ func applyIssueSnapshotTx(tx *sql.Tx, issueID int64, snap issueMutationSnapshot)
 		issueID,
 	)
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			var issueType, slug, scope string
+			lookupErr := tx.QueryRow(`
+				SELECT type,COALESCE(slug,''),
+				       CASE WHEN project_id IS NOT NULL THEN 'project'
+				            WHEN user_id IS NOT NULL THEN 'user' ELSE 'instance' END
+				FROM issues WHERE id=?`, issueID).Scan(&issueType, &slug, &scope)
+			if lookupErr == nil && slug != "" {
+				return &undoConflictError{Message: fmt.Sprintf("cannot restore %s %q: the %s-scope identity is already active", issueType, slug, scope)}
+			}
+			return &undoConflictError{Message: "cannot restore: the knowledge identity is already active"}
+		}
 		return err
 	}
 	// PAI-584 P6: restore the hierarchy via the `parent` edge (parent_id

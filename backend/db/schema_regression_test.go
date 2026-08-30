@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 161
+const latestSchemaVersion = 162
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -1310,8 +1310,10 @@ func TestSchemaContainsCriticalIndexes(t *testing.T) {
 		"idx_mutation_log_parent",
 		"idx_documents_project",
 		"idx_time_entries_mite_id",
-		// PAI-338 / M96 — slug uniqueness for the knowledge plane.
-		"idx_issues_type_slug_project",
+		// PAI-857 / M162 — scope-correct knowledge identities.
+		"idx_issues_knowledge_project_identity",
+		"idx_issues_knowledge_user_identity",
+		"idx_issues_knowledge_instance_identity",
 		// PAI-345 / M99 — user-scoped knowledge lookups.
 		"idx_issues_user_type",
 		// PAI-336 / M105 — queryable privileged-action audit feed.

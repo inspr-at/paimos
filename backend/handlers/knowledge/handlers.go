@@ -467,7 +467,7 @@ func deleteEntry(r *http.Request, projectID int64, mod Module, slug string) (int
 // ── internals ───────────────────────────────────────────────────
 
 // errSlugTaken is the sentinel returned when a UNIQUE constraint
-// violation was detected on the (type, slug, project_id) index.
+// violation was detected on a scope-specific live-knowledge identity index.
 var errSlugTaken = errors.New("slug already exists for this type")
 
 // validateInput bundles the shared (slug + title) checks with the
