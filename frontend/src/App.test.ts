@@ -24,6 +24,7 @@ import App from './App.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const changeStreamGates = vi.hoisted(() => [] as Ref<boolean>[])
+const appLayoutModule = vi.hoisted(() => ({ loads: 0 }))
 
 vi.mock('@/api/client', () => ({ announceSessionExpired: vi.fn() }))
 
@@ -67,6 +68,7 @@ vi.mock('@/components/LoadingText.vue', async () => {
 })
 
 vi.mock('@/components/AppLayout.vue', async () => {
+  appLayoutModule.loads += 1
   const { defineComponent, h } = await import('vue')
   return {
     default: defineComponent({
@@ -131,7 +133,7 @@ describe('App route shell isolation', () => {
     vi.clearAllMocks()
   })
 
-  it('mounts no application shell at router start, then resolves matched standard and v6 shells', async () => {
+  it('defers the standard shell module through router start and v6, then loads it for a matched standard route', async () => {
     document.body.innerHTML = '<div id="root"></div>'
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -145,8 +147,10 @@ describe('App route shell isolation', () => {
     const V6View = defineComponent({
       setup: () => () => h('div', { 'data-view': 'v6' }),
     })
+    const history = createMemoryHistory()
+    history.push('/dev/paimos-6')
     const router = createRouter({
-      history: createMemoryHistory(),
+      history,
       routes: [
         { path: '/', component: StandardView },
         { path: '/dev/paimos-6', component: V6View, meta: { shell: 'v6' } },
@@ -162,11 +166,10 @@ describe('App route shell isolation', () => {
         releaseInitialNavigation = () => resolve(true)
       })
     })
-    const initialNavigation = router.push('/')
-
     const app = createApp(App)
     app.use(pinia)
     app.use(router)
+    const initialNavigation = router.isReady()
     app.mount(document.getElementById('root')!)
     await nextTick()
     await vi.waitFor(() => expect(releaseInitialNavigation).toBeTypeOf('function'))
@@ -176,23 +179,31 @@ describe('App route shell isolation', () => {
     expect(root.querySelector('[data-loading]')).not.toBeNull()
     expect(root.querySelector('[data-shell]')).toBeNull()
     expect(root.querySelector('[data-chrome*="Undo"]')).toBeNull()
+    expect(appLayoutModule.loads).toBe(0)
     expect(changeStreamGates).toHaveLength(1)
     expect(changeStreamGates[0].value).toBe(false)
 
     releaseInitialNavigation()
     await initialNavigation
     await router.isReady()
-    await nextTick()
-    expect(root.querySelector('[data-shell="standard"] [data-view="standard"]')).not.toBeNull()
-    expect(root.querySelector('[data-chrome="UndoToast"]')).not.toBeNull()
-    expect(changeStreamGates[0].value).toBe(true)
-
-    await router.push('/dev/paimos-6')
-    await nextTick()
-    expect(root.querySelector('[data-shell="v6"] [data-view="v6"]')).not.toBeNull()
+    await vi.waitFor(() => {
+      expect(
+        root.querySelector('[data-shell="v6"] [data-view="v6"]'),
+        `${router.currentRoute.value.fullPath}: ${root.innerHTML}`,
+      ).not.toBeNull()
+    })
     expect(root.querySelector('[data-shell="standard"]')).toBeNull()
     expect(root.querySelector('[data-chrome*="Undo"]')).toBeNull()
+    expect(appLayoutModule.loads).toBe(0)
     expect(changeStreamGates[0].value).toBe(false)
+
+    await router.push('/')
+    await vi.waitFor(() => {
+      expect(root.querySelector('[data-shell="standard"] [data-view="standard"]')).not.toBeNull()
+    })
+    expect(appLayoutModule.loads).toBe(1)
+    expect(root.querySelector('[data-chrome="UndoToast"]')).not.toBeNull()
+    expect(changeStreamGates[0].value).toBe(true)
 
     app.unmount()
   })
