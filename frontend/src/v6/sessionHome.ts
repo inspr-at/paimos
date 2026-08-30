@@ -238,7 +238,8 @@ function parseSession(value: unknown): Paimos6SessionWire | null {
     if (phase === 'paimos' || reason === 'paimos_target') return null
     if (harness === null && (address !== null || phase !== 'unavailable' || steer !== 'paimos_nudge'
       || controls.interrupt || controls.stop)) return null
-    if (harness !== null && (address === null || phase === 'unavailable' || reason !== 'active'
+    if (harness !== null && (address !== `${harness.harness}:${agentName}`
+      || phase === 'unavailable' || reason !== 'active'
       || (steer === 'direct') !== harness.advertised_capabilities.steer)) return null
   }
 

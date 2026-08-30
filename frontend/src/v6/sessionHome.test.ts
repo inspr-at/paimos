@@ -45,6 +45,12 @@ function unmanagedRow() {
     ...managedRow('27e5d8f7-0b11-4bee-a8a4-a11406de865a'),
     title: 'Second session on the same node',
     updated_at: '2026-08-30T12:01:00Z',
+    target: {
+      kind: 'project_agent',
+      project_agent_id: 8,
+      agent_name: 'amy',
+      address: 'claude:amy',
+    },
     harness: {
       harness: 'claude',
       management_mode: 'unmanaged',
@@ -59,6 +65,29 @@ function unmanagedRow() {
     controls: { steer: 'paimos_nudge', interrupt: false, stop: false },
     inbox: { unread_count: 1, latest_unread_at: '2026-08-30T11:58:00Z' },
     attention: { required: true, exception_count: 2, action_request_count: 1, reason: 'action_request' },
+  }
+}
+
+function sharedManagedRow() {
+  return {
+    ...managedRow('27e5d8f7-0b11-4bee-a8a4-a11406de865a'),
+    title: 'Second session for the same canonical target',
+    updated_at: '2026-08-30T12:01:00Z',
+  }
+}
+
+function unavailableRow() {
+  return {
+    ...managedRow(),
+    target: {
+      kind: 'project_agent',
+      project_agent_id: 7,
+      agent_name: 'amy',
+      address: null,
+    },
+    status: { phase: 'unavailable', reason: 'stale_harness' },
+    harness: null,
+    controls: { steer: 'paimos_nudge', interrupt: false, stop: false },
   }
 }
 
@@ -77,7 +106,13 @@ function paimosRow() {
   }
 }
 
-function projection(sessions = [managedRow(), unmanagedRow(), paimosRow()]) {
+interface ProjectionTestRow {
+  target: { kind: string; project_agent_id: number | null }
+  inbox: { unread_count: number }
+  attention: { required: boolean }
+}
+
+function projection(sessions: ProjectionTestRow[] = [managedRow(), unmanagedRow(), paimosRow()]) {
   const inboxByTarget = new Map<string, number>()
   for (const row of sessions) {
     const targetKey = row.target.kind === 'paimos' ? 'paimos' : `project-agent:${row.target.project_agent_id}`
@@ -134,10 +169,52 @@ describe('Paimos 6 session-home strict boundary (PAI-861)', () => {
     expect(() => parsePaimos6SessionHome(projection([corrupt]), 42)).toThrow(Paimos6SessionHomeContractError)
   })
 
+  it('requires one coherent canonical project-agent address when a harness is present', () => {
+    const contradictoryAddress = managedRow()
+    contradictoryAddress.target.address = 'claude:other'
+    expect(() => parsePaimos6SessionHome(projection([contradictoryAddress]), 42))
+      .toThrow(Paimos6SessionHomeContractError)
+
+    const contradictoryHarness = managedRow()
+    contradictoryHarness.harness.harness = 'claude'
+    expect(() => parsePaimos6SessionHome(projection([contradictoryHarness]), 42))
+      .toThrow(Paimos6SessionHomeContractError)
+
+    const missingCanonicalAddress = {
+      ...managedRow(),
+      target: { ...managedRow().target, address: null },
+    }
+    expect(() => parsePaimos6SessionHome(projection([missingCanonicalAddress]), 42))
+      .toThrow(Paimos6SessionHomeContractError)
+  })
+
+  it('accepts exact unavailable null identity and rejects non-null or Paimos contradictions', () => {
+    expect(parsePaimos6SessionHome(projection([unavailableRow()]), 42).sessions[0])
+      .toMatchObject({ target: { address: null }, harness: null, status: { phase: 'unavailable' } })
+
+    const unavailableWithAddress = {
+      ...unavailableRow(),
+      target: { ...unavailableRow().target, address: 'codex:amy' },
+    }
+    expect(() => parsePaimos6SessionHome(projection([unavailableWithAddress]), 42))
+      .toThrow(Paimos6SessionHomeContractError)
+
+    const contradictoryPaimos = {
+      ...paimosRow(),
+      target: { ...paimosRow().target, address: 'codex:paimos' },
+    }
+    expect(() => parsePaimos6SessionHome(projection([contradictoryPaimos]), 42))
+      .toThrow(Paimos6SessionHomeContractError)
+
+    const paimosWithHarness = { ...paimosRow(), harness: managedRow().harness }
+    expect(() => parsePaimos6SessionHome(projection([paimosWithHarness]), 42))
+      .toThrow(Paimos6SessionHomeContractError)
+  })
+
   it('counts a shared target inbox once and rejects divergent copies', () => {
-    const parsed = parsePaimos6SessionHome(projection(), 42)
+    const parsed = parsePaimos6SessionHome(projection([managedRow(), sharedManagedRow()]), 42)
     expect(parsed.totals.unread).toBe(1)
-    const divergent = unmanagedRow()
+    const divergent = sharedManagedRow()
     divergent.inbox = { unread_count: 2, latest_unread_at: '2026-08-30T11:58:00Z' }
     expect(() => parsePaimos6SessionHome(projection([managedRow(), divergent]), 42))
       .toThrow(Paimos6SessionHomeContractError)

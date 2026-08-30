@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { Paimos6SessionHomeProjection } from './usePaimos6SessionHome'
 import { usePaimos6SessionHome } from './usePaimos6SessionHome'
 import type { Paimos6SessionViewModel } from '@/v6/sessionHome'
-import { persistPaimos6Selection } from '@/v6/sessionHomeSelection'
+import { paimos6SelectionStorageKey, persistPaimos6Selection } from '@/v6/sessionHomeSelection'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -194,6 +194,117 @@ describe('usePaimos6SessionHome authority and selection owner (PAI-861)', () => 
     pending[1].resolve(projection(99, [row('project-99-row')]))
     await settle()
     expect(home.sessions.value.map((session) => session.id)).toEqual(['project-99-row'])
+    scope.stop()
+  })
+
+  it('holds an atomic B deep link through A clearing and validates it only against B', async () => {
+    const projectId = ref<number | null>(42)
+    const deepLinkedProjectId = ref<number | null>(42)
+    const deepLinkedSessionId = ref<string | null>('session-a')
+    const memory = storage()
+    persistPaimos6Selection(memory, { principalId: 7, projectId: 42 }, 'session-a')
+    const pending: Array<{
+      projectId: number
+      request: ReturnType<typeof deferred<Paimos6SessionHomeProjection>>
+    }> = []
+    const replacements: Array<string | null> = []
+    const scope = effectScope()
+    const home = scope.run(() => usePaimos6SessionHome({
+      principalId: ref(7),
+      authorityKey: ref('authority'),
+      projectId,
+      deepLinkedProjectId,
+      deepLinkedSessionId,
+      storage: memory,
+      load: (requestedProjectId) => {
+        const request = deferred<Paimos6SessionHomeProjection>()
+        pending.push({ projectId: requestedProjectId, request })
+        return request.promise
+      },
+      replaceSessionQuery: (id) => { replacements.push(id) },
+    }))!
+    await settle()
+    pending[0].request.resolve(projection(42, [row('session-a')]))
+    await settle()
+    expect(home.selectedId.value).toBe('session-a')
+
+    void home.load(true)
+    await settle()
+    expect(pending[1].projectId).toBe(42)
+    // Vue Router publishes the new query as one transition. The selection
+    // watcher runs before the view's project watcher, so both URL refs become
+    // B while the loaded projection is still A.
+    deepLinkedProjectId.value = 99
+    deepLinkedSessionId.value = 'session-b'
+    expect(replacements).toEqual([])
+
+    projectId.value = 99
+    expect(home.sessions.value).toEqual([])
+    expect(home.selectedId.value).toBeNull()
+    await settle()
+    expect(pending[2].projectId).toBe(99)
+
+    pending[1].request.resolve(projection(42, [row('stale-a-row')]))
+    await settle()
+    expect(home.sessions.value).toEqual([])
+    expect(home.selectedId.value).toBeNull()
+
+    pending[2].request.resolve(projection(99, [row('session-b')]))
+    await settle()
+    expect(home.sessions.value.map((session) => session.id)).toEqual(['session-b'])
+    expect(home.selectedId.value).toBe('session-b')
+    expect(memory.getItem(paimos6SelectionStorageKey({ principalId: 7, projectId: 42 }))).toBe('session-a')
+    expect(memory.getItem(paimos6SelectionStorageKey({ principalId: 7, projectId: 99 }))).toBe('session-b')
+    scope.stop()
+  })
+
+  it('clears an invalid atomic B target without restoring A selection or storage into B', async () => {
+    const projectId = ref<number | null>(42)
+    const deepLinkedProjectId = ref<number | null>(42)
+    const deepLinkedSessionId = ref<string | null>('session-a')
+    const memory = storage()
+    persistPaimos6Selection(memory, { principalId: 7, projectId: 42 }, 'session-a')
+    persistPaimos6Selection(memory, { principalId: 7, projectId: 99 }, 'stale-b-memory')
+    const pending: Array<ReturnType<typeof deferred<Paimos6SessionHomeProjection>>> = []
+    const replacements: Array<string | null> = []
+    const scope = effectScope()
+    const home = scope.run(() => usePaimos6SessionHome({
+      principalId: ref(7),
+      authorityKey: ref('authority'),
+      projectId,
+      deepLinkedProjectId,
+      deepLinkedSessionId,
+      storage: memory,
+      load: () => {
+        const request = deferred<Paimos6SessionHomeProjection>()
+        pending.push(request)
+        return request.promise
+      },
+      replaceSessionQuery: (id) => { replacements.push(id) },
+    }))!
+    await settle()
+    pending[0].resolve(projection(42, [row('session-a')]))
+    await settle()
+    expect(home.selectedId.value).toBe('session-a')
+
+    void home.load(true)
+    await settle()
+    deepLinkedProjectId.value = 99
+    deepLinkedSessionId.value = 'revoked-b-session'
+    expect(replacements).toEqual([])
+    projectId.value = 99
+    expect(home.sessions.value).toEqual([])
+    expect(home.selectedId.value).toBeNull()
+    await settle()
+
+    pending[1].resolve(projection(42, [row('stale-a-row')]))
+    pending[2].resolve(projection(99, [row('authorized-b-session')]))
+    await settle()
+    expect(home.sessions.value.map((session) => session.id)).toEqual(['authorized-b-session'])
+    expect(home.selectedId.value).toBeNull()
+    expect(replacements[replacements.length - 1]).toBeNull()
+    expect(memory.getItem(paimos6SelectionStorageKey({ principalId: 7, projectId: 42 }))).toBe('session-a')
+    expect(memory.getItem(paimos6SelectionStorageKey({ principalId: 7, projectId: 99 }))).toBeNull()
     scope.stop()
   })
 

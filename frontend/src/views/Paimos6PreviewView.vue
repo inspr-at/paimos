@@ -39,6 +39,7 @@ const deepLinkedSessionId = computed(() => {
   if (raw === undefined) return null
   return typeof raw === 'string' && raw !== '' ? raw : '__invalid-session-query__'
 })
+const deepLinkedProjectId = computed(() => requestedProjectId())
 
 async function replaceSessionQuery(id: string | null): Promise<void> {
   const query = {
@@ -53,6 +54,7 @@ const home = usePaimos6SessionHome({
   principalId,
   authorityKey,
   projectId: selectedProjectId,
+  deepLinkedProjectId,
   deepLinkedSessionId,
   load: loadPaimos6SessionHome,
   replaceSessionQuery,
@@ -67,17 +69,15 @@ function requestedProjectId(): number | null {
   return Number.isSafeInteger(id) ? id : null
 }
 
-function selectAvailableProject(requested: number | null, clearSession: boolean) {
+function selectAvailableProject(requested: number | null) {
   const next = projects.value.find((project) => project.id === requested)?.id ?? projects.value[0]?.id ?? null
-  const changed = next !== selectedProjectId.value
   selectedProjectId.value = next
   const routeProject = requestedProjectId()
-  if (routeProject !== next || clearSession && changed) {
+  if (routeProject !== next) {
     void router.replace({
       query: {
         ...route.query,
         project: next === null ? undefined : String(next),
-        session: clearSession && changed ? undefined : route.query.session,
       },
     }).catch(() => {})
   }
@@ -101,7 +101,7 @@ async function loadProjects() {
       || key !== authorityKey.value || principal !== principalId.value) return
     projects.value = response.map(({ id, key: projectKey, name }) => ({ id, key: projectKey, name }))
     projectState.value = projects.value.length === 0 ? 'empty' : 'ready'
-    selectAvailableProject(requestedProjectId(), false)
+    selectAvailableProject(requestedProjectId())
   } catch {
     if (version !== projectLoadVersion || controller.signal.aborted
       || key !== authorityKey.value || principal !== principalId.value) return
@@ -122,7 +122,10 @@ watch(authorityKey, () => {
 }, { immediate: true, flush: 'sync' })
 
 watch(() => route.query.project, () => {
-  if (projectState.value === 'ready') selectAvailableProject(requestedProjectId(), true)
+  // Preserve an atomic history/deep-link session value. The session owner
+  // sees its URL project mismatch, waits through the synchronous row clear,
+  // and validates only after this project's projection arrives.
+  if (projectState.value === 'ready') selectAvailableProject(requestedProjectId())
 }, { flush: 'sync' })
 
 function changeProject(event: Event) {
@@ -130,6 +133,8 @@ function changeProject(event: Event) {
   if (!projects.value.some((project) => project.id === id)) return
   // The assignment precedes navigation and synchronously clears home rows.
   selectedProjectId.value = id
+  // Picker navigation has no session deep link; unlike history navigation it
+  // intentionally clears the outgoing project selection.
   void router.replace({ query: { ...route.query, project: String(id), session: undefined } }).catch(() => {})
 }
 

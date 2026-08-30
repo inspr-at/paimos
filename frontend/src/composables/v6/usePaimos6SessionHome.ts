@@ -28,6 +28,10 @@ export interface UsePaimos6SessionHomeOptions {
   /** Changes for session, principal, role, or project-permission changes. */
   authorityKey: Ref<string>
   projectId: Ref<number | null>
+  /** Project carried by the URL selection. A mismatch means an atomic
+   * project/session transition is pending and must not be judged against the
+   * rows from the former project. */
+  deepLinkedProjectId?: Ref<number | null>
   deepLinkedSessionId: Ref<string | null>
   load: (projectId: number, signal: AbortSignal) => Promise<Paimos6SessionHomeProjection>
   replaceSessionQuery: (id: string | null) => void | Promise<void>
@@ -64,6 +68,8 @@ export function usePaimos6SessionHome(options: UsePaimos6SessionHomeOptions) {
   function reconcileSelection(resetCurrent = false) {
     const currentScope = scope()
     if (!currentScope || !['ready', 'empty'].includes(state.value)) return
+    if (options.deepLinkedProjectId
+      && options.deepLinkedProjectId.value !== options.projectId.value) return
     const result = resolvePaimos6Selection({
       scope: currentScope,
       authorizedIds: sessions.value.map((session) => session.id),
@@ -148,8 +154,10 @@ export function usePaimos6SessionHome(options: UsePaimos6SessionHomeOptions) {
     { immediate: true, flush: 'sync' },
   )
 
-  watch(options.deepLinkedSessionId, (id, previous) => {
-    if (id === previous || !['ready', 'empty'].includes(state.value)) return
+  watch([options.deepLinkedSessionId, ...(options.deepLinkedProjectId ? [options.deepLinkedProjectId] : [])], () => {
+    if (!['ready', 'empty'].includes(state.value)) return
+    if (options.deepLinkedProjectId
+      && options.deepLinkedProjectId.value !== options.projectId.value) return
     reconcileSelection(true)
   }, { flush: 'sync' })
 
