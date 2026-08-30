@@ -50,3 +50,26 @@ func TestAgentMessageDeliveryWorkSchemaAcceptsReachableTargetMissing(t *testing.
 		}
 	}
 }
+
+func TestAgentMessageDeliveryWorkSchemaIncludesBothOwnedAgentdAdapters(t *testing.T) {
+	raw, err := os.ReadFile("agent-message-v1.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties map[string]struct {
+			Properties map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	allowed := schema.Properties["delivery_work"].Properties["adapter"].Enum
+	for _, adapter := range []string{"agentd_codex", "agentd_claude", "managed_harness"} {
+		if !slices.Contains(allowed, adapter) {
+			t.Fatalf("owned adapter %q missing from enum %v", adapter, allowed)
+		}
+	}
+}

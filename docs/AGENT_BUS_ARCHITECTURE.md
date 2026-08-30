@@ -29,8 +29,9 @@ This design supports both directions:
   level.
 - Codex to or from Phil: the same flow applies to Phil's explicitly registered
   target. PAIMOS does not infer a vendor or session from the name `phil`.
-- Claude can be added through the supported simple paths below. Claude steer
-  remains unsupported in this version of the design.
+- Unmanaged Claude sessions use the supported simple paths below and remain
+  unsteerable. A separately registered `agentd_claude` target can steer only a
+  fresh PAIMOS-owned live Agent SDK Query.
 
 “Instant” means the first delivery attempt starts within seconds. It does not
 mean that PAIMOS can wake a powered-off workstation or a local vendor session
@@ -156,7 +157,7 @@ and, optionally, one enabled `simple` fallback target. Most bindings use the
 same target for both levels; the second target exists only when the primary
 steer target cannot perform a simple wake. The selector uses that fallback for
 a `simple` message only when the primary adapter is the steer-only
-`agentd_codex`; it preserves the established rule that a `steer` request uses
+`agentd_codex` or `agentd_claude`; it preserves the established rule that a `steer` request uses
 the fallback when the primary policy itself is capped at `simple`. Changing either target creates a
 new version instead of mutating one already snapshotted onto a message.
 
@@ -167,7 +168,7 @@ Conceptual target fields:
 | `id` | Opaque PAIMOS target ID |
 | `instance` | Exactly one PAIMOS instance, for example `ppm` |
 | `project_id`, `address` | Receiver ownership and `<harness>:<agent>` inbox |
-| `adapter` | `codex`, `agentd_codex`, `claude_resume`, `claude_channel`, `grok_build`, or `grok_bot_routine` |
+| `adapter` | `codex`, `agentd_codex`, `agentd_claude`, `claude_resume`, `claude_channel`, `grok_build`, or `grok_bot_routine` |
 | `target_kind` | For example `codex_thread`, `agentd_session`, `claude_session`, `grok_session`, or `https_webhook` |
 | `target_ref` | Receiver-owned vendor thread/session reference or encrypted webhook URL |
 | `maximum_level` | Receiver policy: `simple` or `steer`; default `simple` |
@@ -450,7 +451,8 @@ open the control socket itself.
 | Amy -> Codex | `simple` | Codex-side worker calls `codex queue` |
 | Amy -> Codex | `steer` | `turn/steer` only for an `inProgress` turn; otherwise `codex queue` |
 | Codex <-> Phil | either | Same rules using Phil's registered target; no target is inferred from his name |
-| Any direction -> Claude | `steer` | Claude steer is unsupported; use a configured simple path or remain blocked |
+| Any direction -> unmanaged Claude | `steer` | Unsupported; use a configured simple path or remain blocked |
+| Any direction -> owned Claude | `steer` | A leased `agentd_claude` delivery calls `streamInput()` and then `interrupt()` on that exact live Agent SDK Query; no session reconstruction or queue fallback |
 
 ## 7. Webhook wake contract
 
@@ -568,7 +570,8 @@ CLI or socket frame.
 | Codex | `steer` | Start daemon with `codex app-server daemon start`; worker runs `codex app-server proxy`, whose proxied stream carries the WebSocket HTTP Upgrade handshake and one JSON-RPC message per text frame; performs `initialize` (`capabilities.experimentalApi=true`) + `initialized`, reads exactly one `thread/read {threadId,includeTurns:true}`, selects the latest nonempty `inProgress` turn, and calls `turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}` | Implemented (PAI-825 follow-up; 5.17.3–5.18.0 wrote JSON lines into the proxy and never got an `initialize` answer) | Supported. Idle, not loaded, race, not-steerable, and genuine app-server transport failure fall back to the exact queue primitive; completed initialize/read JSON-RPC rejections, malformed/mismatched successful responses, and any other `turn/steer` rejection (unknown method, request-shape drift, sub-agent ownership, internal error) fail the delivery instead of queueing |
 | Claude local | `simple` | `claude -p --resume <session_id>` or `claude -p --cloud <session_id>` | Implemented by `listen --deliver claude` from a receiver-owned `claude_resume` / `claude_session` target; framed body over stdin, zero exit is handoff, completed through `delivery-complete` | Supported. A local UUID resumes an idle session; a `session_…`/`cse_…` id queues a cloud follow-up |
 | Claude Channels | `simple` | MCP `notifications/claude/channel`; session opts in with `--channels` or `--dangerously-load-development-channels` | Research-preview channel path under `paimos serve --mcp-stdio --channel-as`; leases `claude_channel` targets and completes each push | Supported simple push when explicitly enabled; successful JSON-RPC write is handoff |
-| Claude | `steer` | **UNSUPPORTED** | Falls back to the selected simple primitive with `fallback_reason=unsupported`; Claude targets are fixed to `maximum_level=simple` | Fall back to a configured simple resume/cloud or Channels target; otherwise remain blocked |
+| Claude owned Query | `steer` | Agent SDK `Query.streamInput()` plus `Query.interrupt()` on the same PAIMOS-owned live handle | Implemented by `listen --deliver agentd_claude`; the leased delivery ID is the correlation ID and the Query input UUID remains content-free control evidence inside agentd | Supported only while agentd owns the live Query; restart becomes `ownership_lost` and never reconstructs authority from the Claude session ID |
+| Claude unmanaged session | `steer` | **UNSUPPORTED** | Falls back to the selected simple primitive with `fallback_reason=unsupported`; `claude_resume` and `claude_channel` targets are fixed to `maximum_level=simple` | Fall back to a configured simple resume/cloud or Channels target; otherwise remain blocked |
 | Grok CLI / Grok Build | `simple` | `grok --single` (or `-p`) with `--resume`; current adapter uses one bounded `--single --resume` turn | Implemented behind `--enable-grok-build-delivery` | Supported only as an explicit receiver-owned target |
 | Grok CLI / Grok Build | `steer` | **UNSUPPORTED** | No steer primitive | Fall back to the exact simple resume primitive |
 | Grok Bot | `simple` | Generic HTTPS webhook that triggers Amy's routine | No PAIMOS inbound; current docs correctly call it receive-by-human | Preferred instant wake. PAIMOS POSTs the framed event to the configured routine webhook |
@@ -749,7 +752,8 @@ This slice requires no vendor verb.
   `codex app-server proxy` byte pipe with the standard Go WebSocket client.
 - No invented vendor CLI, JSON frame, or Grok Bot chat API.
 - No Grok Bot mid-turn steer.
-- No Claude mid-turn steer in this contract.
+- No mid-turn steer for unmanaged Claude sessions; owned Query control is a
+  separate `agentd_claude` contract.
 - No OpenClaw or Merlin adapter.
 - No PAIMOS-to-PAIMOS cross-instance bridge.
 - No automatic execution of free-text action requests.

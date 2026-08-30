@@ -244,6 +244,15 @@ func TestSupervisorStopRaceWithNaturalExitDoesNotOverwriteTerminalState(t *testi
 	t.Fatalf("status=%+v", supervisor.Status())
 }
 
+func TestSupervisorTerminalPersistenceBarrierHonorsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := waitSessionFinalized(ctx, &sessionEntry{monitorDone: make(chan struct{})})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("terminal persistence wait error=%v, want context cancellation", err)
+	}
+}
+
 func TestSupervisorKeepsLiveProcessControlAcrossAdapterReplacement(t *testing.T) {
 	process := newFakeProcess(4321)
 	process.steerErr = errors.New("proxy restart")
@@ -327,7 +336,12 @@ func TestSupervisorRestartReconcilesPersistedChildrenToOwnershipLost(t *testing.
 	if stops != 0 {
 		t.Fatalf("new daemon signalled an unproven PID %d times", stops)
 	}
-	_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "test-cleanup"})
+	// The assertion above is the daemon-disappearance boundary: the restarted
+	// supervisor never controlled the foreign child. Only now close the original
+	// owner so its monitor finishes terminal persistence before TempDir cleanup.
+	if err := first.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSupervisorStateIsSeparatedByPPMInstance(t *testing.T) {

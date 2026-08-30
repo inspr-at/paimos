@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	AdapterAgentdCodex = "agentd_codex"
-	KindAgentdSession  = "agentd_session"
+	AdapterAgentdCodex  = "agentd_codex"
+	AdapterAgentdClaude = "agentd_claude"
+	KindAgentdSession   = "agentd_session"
 )
 
 type AgentdTarget struct {
@@ -26,11 +27,16 @@ type AgentdTarget struct {
 }
 
 type AgentdCodexPlugin struct{}
+type AgentdClaudePlugin struct{}
 
-func (AgentdCodexPlugin) Name() string         { return AdapterAgentdCodex }
-func (AgentdCodexPlugin) Kind() string         { return KindAgentdSession }
-func (AgentdCodexPlugin) MaximumLevel() string { return LevelSteer }
-func (AgentdCodexPlugin) Mode() string         { return ModeLocal }
+func (AgentdCodexPlugin) Name() string          { return AdapterAgentdCodex }
+func (AgentdCodexPlugin) Kind() string          { return KindAgentdSession }
+func (AgentdCodexPlugin) MaximumLevel() string  { return LevelSteer }
+func (AgentdCodexPlugin) Mode() string          { return ModeLocal }
+func (AgentdClaudePlugin) Name() string         { return AdapterAgentdClaude }
+func (AgentdClaudePlugin) Kind() string         { return KindAgentdSession }
+func (AgentdClaudePlugin) MaximumLevel() string { return LevelSteer }
+func (AgentdClaudePlugin) Mode() string         { return ModeLocal }
 
 func decodeAgentdTarget(ref string) (AgentdTarget, error) {
 	if len(ref) > 4096 || !json.Valid([]byte(ref)) {
@@ -59,10 +65,22 @@ func (AgentdCodexPlugin) ValidateTarget(_ context.Context, ref string) error {
 	return nil
 }
 
+func (AgentdClaudePlugin) ValidateTarget(ctx context.Context, ref string) error {
+	return (AgentdCodexPlugin{}).ValidateTarget(ctx, ref)
+}
+
 // Deliver is intentionally steer-only and lease-correlated. Simple delivery
 // remains on the ordinary inbox adapter; managed control never queue-fakes a
 // steer and cannot be invoked through the legacy unleased --deliver-target.
 func (AgentdCodexPlugin) Deliver(ctx context.Context, request DeliverRequest) (DeliverResult, error) {
+	return deliverAgentdSteer(ctx, request, "codex app-server turn/steer", false)
+}
+
+func (AgentdClaudePlugin) Deliver(ctx context.Context, request DeliverRequest) (DeliverResult, error) {
+	return deliverAgentdSteer(ctx, request, agentdwire.ClaudeSteerPrimitive, true)
+}
+
+func deliverAgentdSteer(ctx context.Context, request DeliverRequest, primitive string, requireVendorMessageID bool) (DeliverResult, error) {
 	if request.Level != LevelSteer {
 		return DeliverResult{}, &UnavailableError{Message: "agentd managed target is steer-only", FallbackReason: "not_steerable", Reroute: true}
 	}
@@ -86,15 +104,21 @@ func (AgentdCodexPlugin) Deliver(ctx context.Context, request DeliverRequest) (D
 		}
 		return DeliverResult{}, err
 	}
-	if receipt.CorrelationID != request.CorrelationID || receipt.Primitive != "codex app-server turn/steer" ||
+	if receipt.CorrelationID != request.CorrelationID || receipt.Primitive != primitive ||
 		receipt.SessionID != target.SessionID || receipt.Operation != "steer" || receipt.EffectiveLevel != LevelSteer || receipt.FallbackReason != "" {
 		return DeliverResult{}, errors.New("agentd returned mismatched control evidence")
+	}
+	if requireVendorMessageID && (receipt.VendorMessageID == "" || len(receipt.VendorMessageID) > 256 || strings.ContainsAny(receipt.VendorMessageID, "\x00\r\n")) {
+		return DeliverResult{}, errors.New("agentd returned incomplete Claude Query input UUID evidence")
 	}
 	return DeliverResult{EffectiveLevel: LevelSteer, Primitive: receipt.Primitive}, nil
 }
 
 func init() {
 	if err := Register(AgentdCodexPlugin{}); err != nil {
+		panic(err)
+	}
+	if err := Register(AgentdClaudePlugin{}); err != nil {
 		panic(err)
 	}
 }

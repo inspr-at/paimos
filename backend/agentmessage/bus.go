@@ -34,6 +34,7 @@ const (
 const (
 	AdapterCodex          = harnessplugin.AdapterCodex
 	AdapterAgentdCodex    = harnessplugin.AdapterAgentdCodex
+	AdapterAgentdClaude   = harnessplugin.AdapterAgentdClaude
 	AdapterGrokBotRoutine = harnessplugin.AdapterGrokBotRoutine
 	AdapterClaudeResume   = harnessplugin.AdapterClaudeResume
 	AdapterClaudeChannel  = harnessplugin.AdapterClaudeChannel
@@ -64,7 +65,7 @@ const selectedDeliveryTargetSQL = `(CASE
 	WHEN d.last_error_code='managed_target_unavailable' AND d.fallback_target_id IS NOT NULL
 	THEN d.fallback_target_id
 	WHEN d.requested_level='simple' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
-	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id)='agentd_codex'
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id) IN ('agentd_codex','agentd_claude')
 	THEN d.fallback_target_id
 	WHEN d.requested_level='steer' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
 	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id)='simple'
@@ -103,7 +104,7 @@ type RegisterTargetInput struct {
 	MaximumLevel string
 	Role         string
 	// Standby creates a disabled managed_harness primary without replacing an
-	// enabled agentd_codex primary. It is reserved for M161 generation reroute.
+	// enabled agentd managed primary. It is reserved for M161 generation reroute.
 	Standby bool
 }
 
@@ -487,7 +488,7 @@ func (s *Service) RerouteUnavailableLocalDelivery(ctx context.Context, in Rerout
 	if state != "leased" || cursor != in.Cursor {
 		return nil, coded("agent_message_delivery_not_leased", "managed delivery lease is no longer current")
 	}
-	if selectedAdapter != AdapterAgentdCodex {
+	if !IsManagedAgentdAdapter(selectedAdapter) {
 		return nil, coded("agent_message_delivery_adapter_mismatch", "only an unavailable agentd lease can be rerouted")
 	}
 	blockNoRoute := func(detail string) (*RerouteUnavailableResult, error) {
@@ -546,7 +547,7 @@ func (s *Service) RerouteUnavailableLocalDelivery(ctx context.Context, in Rerout
 		}
 		return nil, err
 	}
-	if fallbackMaximum != "simple" || fallbackRole != "simple_fallback" || fallbackAdapter == AdapterAgentdCodex || !IsLocalWorkerAdapter(fallbackAdapter) {
+	if fallbackMaximum != "simple" || fallbackRole != "simple_fallback" || IsManagedAgentdAdapter(fallbackAdapter) || !IsLocalWorkerAdapter(fallbackAdapter) {
 		return blockNoRoute("configured fallback is not an ordinary simple local target")
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE agent_message_deliveries SET state='pending',lease_until=NULL,
@@ -562,6 +563,13 @@ func (s *Service) RerouteUnavailableLocalDelivery(ctx context.Context, in Rerout
 		return nil, err
 	}
 	return &RerouteUnavailableResult{DeliveryID: in.DeliveryID, Route: "simple_fallback", TargetID: fallbackTargetID.String}, nil
+}
+
+// IsManagedAgentdAdapter reports whether adapter is an agentd-owned live
+// Process target. Bus reroute and managed-harness standby registration share
+// this predicate so adding an owned adapter cannot silently change primacy.
+func IsManagedAgentdAdapter(adapter string) bool {
+	return adapter == AdapterAgentdCodex || adapter == AdapterAgentdClaude
 }
 
 // CompleteLocalDelivery records one accepted local primitive (including a

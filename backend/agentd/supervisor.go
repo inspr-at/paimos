@@ -20,6 +20,7 @@ import (
 
 const defaultHeartbeatInterval = 15 * time.Second
 const reporterTimeout = 10 * time.Second
+const sessionFinalizeTimeout = 10 * time.Second
 
 type SupervisorConfig struct {
 	Adapters          []Adapter
@@ -36,6 +37,8 @@ type sessionEntry struct {
 	session       Session
 	process       Process
 	capabilities  map[Capability]bool
+	monitorDone   chan struct{}
+	monitorErr    error
 	stopRequested bool
 	controlReady  bool
 }
@@ -184,7 +187,7 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 		ID: uuid.NewString(), Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
 		Capabilities: append([]Capability(nil), capabilities...), Managed: true, State: StateStarting,
 		StartedAt: now, HeartbeatAt: now,
-	}, capabilities: capabilitySet}
+	}, capabilities: capabilitySet, monitorDone: make(chan struct{})}
 	if err := s.reserveSession(entry); err != nil {
 		return Session{}, err
 	}
@@ -366,6 +369,7 @@ func validErrorCode(code ErrorCode) bool {
 func validCorrelationID(value string) bool { return validOpaqueID(value) && len(value) <= 128 }
 
 func (s *Supervisor) monitor(entry *sessionEntry) {
+	defer close(entry.monitorDone)
 	waited := make(chan error, 1)
 	go func() { waited <- entry.process.Wait() }()
 	ticker := time.NewTicker(s.heartbeatInterval)
@@ -394,10 +398,49 @@ func (s *Supervisor) monitor(entry *sessionEntry) {
 			}
 			entry.refreshSteerableLocked()
 			entry.mu.Unlock()
-			_ = s.persist(entry)
+			persistErr := s.persist(entry)
+			entry.mu.Lock()
+			entry.monitorErr = persistErr
+			entry.mu.Unlock()
 			s.scheduleReport()
 			return
 		}
+	}
+}
+
+func waitSessionFinalized(ctx context.Context, entry *sessionEntry) error {
+	if entry == nil || entry.monitorDone == nil {
+		return nil
+	}
+	result := func() error {
+		entry.mu.Lock()
+		defer entry.mu.Unlock()
+		return entry.monitorErr
+	}
+	select {
+	case <-entry.monitorDone:
+		return result()
+	default:
+	}
+	timer := time.NewTimer(sessionFinalizeTimeout)
+	defer timer.Stop()
+	select {
+	case <-entry.monitorDone:
+		return result()
+	case <-ctx.Done():
+		select {
+		case <-entry.monitorDone:
+			return result()
+		default:
+		}
+		return ctx.Err()
+	case <-timer.C:
+		select {
+		case <-entry.monitorDone:
+			return result()
+		default:
+		}
+		return errors.New("agentd session terminal persistence did not complete within the shutdown budget")
 	}
 }
 
@@ -622,6 +665,9 @@ func (s *Supervisor) Stop(ctx context.Context, id string, request ControlRequest
 	if err := validateControlEffect(request, effect); err != nil {
 		return Receipt{}, err
 	}
+	if err := waitSessionFinalized(ctx, entry); err != nil {
+		return Receipt{}, err
+	}
 	return effectReceipt("stop", id, identity, effect), nil
 }
 
@@ -667,6 +713,11 @@ func (s *Supervisor) Close(ctx context.Context) error {
 		}
 		entry.mu.Unlock()
 		entry.controlMu.Unlock()
+	}
+	for _, entry := range entries {
+		if err := waitSessionFinalized(ctx, entry); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return errors.Join(errs...)
 }

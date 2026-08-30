@@ -111,7 +111,7 @@ func listenCmd() *cobra.Command {
 	c.Flags().StringVar(&address, "as", "", "receiver address <harness>:<registered-agent> (required)")
 	c.Flags().BoolVar(&follow, "follow", false, "keep polling until interrupted")
 	c.Flags().BoolVar(&ack, "ack", false, "durably acknowledge messages after output")
-	c.Flags().StringVar(&deliver, "deliver", "", "deliver each message through a registered local adapter (codex, agentd_codex, claude) or grok, then acknowledge")
+	c.Flags().StringVar(&deliver, "deliver", "", "deliver each message through a registered local adapter (codex, agentd_codex, agentd_claude, claude) or grok, then acknowledge")
 	c.Flags().StringVar(&deliverTarget, "deliver-target", "", "legacy target for pre-bus messages (Codex thread; Claude local session UUID or session_…/cse_… cloud id; Grok session UUID); bus messages use their receiver-owned target version")
 	c.Flags().StringVar(&deliverMode, "deliver-mode", "queue", "legacy pre-bus delivery mode (queue or steer); bus messages use their durable message level, and Claude has no steer primitive so steer falls back to simple")
 	c.Flags().BoolVar(&enableGrok, "enable-grok-build-delivery", false, "enable the experimental Grok Build delivery adapter")

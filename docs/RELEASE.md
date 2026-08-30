@@ -54,6 +54,14 @@ the install one-liner without a "look up the latest tag first"
 round-trip. Bytes are identical to the versioned form, so the sums
 file lists only the versioned names.
 
+Each `paimos-agentd` tarball contains exactly one bare binary. It includes the
+AGPL PAIMOS bridge code, but no Anthropic SDK, Anthropic license copy, runtime
+manifest, Node.js, or Claude CLI. Claude owned sessions therefore require three
+operator-provided local dependencies: Node.js 18+, Claude CLI 2.1.251+ with an
+existing operator login, and exact Agent SDK 0.3.251 configured by absolute
+`sdk.mjs` path. Startup validates the SDK version and SHA-256 and never fetches
+packages, credentials, or private daemon state.
+
 **macOS signing** uses a Developer ID Application certificate held in
 a personal Apple Developer account ("Developer ID Application: Markus
 Barta (P66J39QV6V)"). Codesign sets the hardened runtime + a secure

@@ -218,7 +218,7 @@ func (s *Service) validateTarget(ctx context.Context, in RegisterInput) (string,
 		}
 		standby := false
 		for _, target := range targets {
-			if target.Enabled && target.Role == "primary" && target.Adapter == agentmessage.AdapterAgentdCodex {
+			if target.Enabled && target.Role == "primary" && agentmessage.IsManagedAgentdAdapter(target.Adapter) {
 				standby = true
 			}
 			if target.Role != "primary" || target.Adapter != agentmessage.AdapterManagedHarness ||

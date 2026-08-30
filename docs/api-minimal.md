@@ -310,7 +310,8 @@ not stored. Attributed Codex workers request `delivery=codex` on listen; only
 that response includes the decrypted snapshotted Codex target and leases the
 row. Successful vendor handoff uses `delivery-complete`, which records the
 effective level/fallback and advances the receiver cursor atomically.
-An unavailable leased `agentd_codex` target uses `delivery-unavailable`; the
+An unavailable leased `agentd_codex` or `agentd_claude` target uses
+`delivery-unavailable`; the
 server releases that lease to the currently working steerable M161 generation
 whose heartbeat is at most 90 seconds old, or its snapshotted ordinary simple
 fallback. A missing route becomes `blocked/target_missing`; the replacement

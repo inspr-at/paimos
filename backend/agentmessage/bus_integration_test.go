@@ -273,6 +273,41 @@ func TestBusAgentdManagedSteerUsesLeaseAndCanonicalCompletion(t *testing.T) {
 	}
 }
 
+func TestBusAgentdClaudeSteerCarriesDurableMessageAndDeliveryIDs(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	allowBusSender(t, service, projectID, "claude:codex")
+	targetRef := `{"socket":"/tmp/paimos-agentd-claude.sock","session_id":"019d1234-1234-7123-8123-123456789abc"}`
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:codex", Adapter: AdapterAgentdClaude,
+		TargetKind: TargetKindAgentdSession, TargetRef: targetRef, MaximumLevel: "steer", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	message, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "claude:codex", Body: "owned Claude steer", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.ListInbox(context.Background(), InboxInput{
+		ProjectID: projectID, Address: "claude:codex", Agent: "codex", WorkerAdapter: AdapterAgentdClaude, Limit: 10,
+	})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil {
+		t.Fatalf("page=%#v err=%v", page, err)
+	}
+	work := page.Messages[0].DeliveryWork
+	if message.MessageID == "" || work.DeliveryID == "" || work.Adapter != AdapterAgentdClaude ||
+		work.TargetRef != targetRef || work.RequestedLevel != "steer" || work.State != "leased" {
+		t.Fatalf("message=%#v work=%#v", message, work)
+	}
+	if _, err := service.CompleteLocalDelivery(context.Background(), CompleteDeliveryInput{
+		ProjectID: projectID, Address: "claude:codex", Agent: "codex", Cursor: message.Cursor,
+		DeliveryID: work.DeliveryID, EffectiveLevel: "steer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBusTargetSelectorPreservesLegacySimpleCappedSteerFallback(t *testing.T) {
 	service, projectID := openBusTestDB(t)
 	allowBusSender(t, service, projectID, "codex:codex")
