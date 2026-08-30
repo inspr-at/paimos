@@ -242,6 +242,10 @@ case "${1:-} ${2:-}" in
       printf '1\tcompleted\tsuccess\thttps://example.test/run/ci\n'
     fi
     ;;
+  'run view')
+    [[ "$*" == *'run view 3'* && "$*" == *'--json jobs'* ]]
+    printf '{"jobs":[{"name":"backend-full","status":"completed","conclusion":"success"}]}\n'
+    ;;
   *)
     echo "unexpected fake gh call: $*" >&2
     exit 64

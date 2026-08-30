@@ -102,17 +102,19 @@ covers the original risk.
   fails closed while those lanes run concurrently.
 - Full serial `go test -p 1 ./...` and a broad sequential sweep of package-local
   control-plane concurrency contracts (including sequential handler shards) run
-  in a dedicated workflow on `main`, nightly, release tags, and manual dispatch,
-  outside the ordinary PR merge path. Main and tag image paths additionally gate
+  as parallel jobs in a dedicated workflow on `main`, nightly, and manual
+  dispatch, outside the ordinary PR merge path. Main and tag image paths gate
   on a compact backend/platform job, including executable unsupported-platform
   denial contracts, and require a successful `backend-full.yml` run for their
   exact head before the stable `test` context can permit publication. A tag can
   reuse the already-green exhaustive result from the identical protected-main
-  head instead of starting the serial suite again.
+  head instead of starting the serial suite again. For hosted pre-merge timing
+  evidence, an operator can apply the explicit `backend-full-evidence` PR label;
+  other PR events and labels cannot authorize the exhaustive jobs.
 - A release tag is created from the exact protected-main merge only after that
   head has a successful exhaustive workflow result. The tag's `ci` workflow
-  reuses the already-green exact-head result instead of waiting for its newly
-  triggered duplicate; `release.sh` then waits only for the `ci` and `release`
+  reuses the already-green exact-head result; no duplicate exhaustive tag run is
+  triggered. `release.sh` then waits only for the `ci` and `release`
   evidence workflows. Release artifacts, SBOMs, signatures, and attestations
   remain tag-gated.
 - When a resumed release PR's required checks are already green for the pinned
@@ -162,7 +164,8 @@ covers the original risk.
   required runners; final exact-head hosted timing remains the acceptance proof.
 - The final full serial suite passed in 722.08s, including unsharded `handlers`
   in 413.893s, `db` in 92.098s, and `supervision` in 55.184s. This is
-  the exact assurance retained on main, nightly, tags, and manual dispatch.
+  the exact assurance retained on main, nightly, and manual dispatch before a
+  release tag can be created.
 - The final broad package-local concurrency sweep passed in 687.32s. Its five
   handler shards ran foreground-only in 80.149s, 75.453s, 61.048s, 61.892s, and
   58.120s; the three isolated DB race processes passed in 17.378s, 19.584s, and

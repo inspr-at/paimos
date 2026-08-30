@@ -34,7 +34,7 @@ case "${1:-}" in
     ;;
   *)
     [[ $# -eq 2 ]] || usage
-    if ! "$GIT_COMMAND" -C "$ROOT" diff --name-only --diff-filter=ACDMRTUXB -z \
+    if ! "$GIT_COMMAND" -C "$ROOT" diff --no-renames --name-only --diff-filter=ACDMRTUXB -z \
       "$1" "$2" -- backend >"$TMP_ROOT/changed-files"; then
       echo 'backend-changed-packages: git diff failed' >&2
       exit 1

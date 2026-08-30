@@ -5,16 +5,18 @@ artefacts live, and how an operator can verify them before deploying.
 
 ## What a tag publishes
 
-When CI runs against a `v*` tag, **three workflows** fire in parallel:
+When CI runs against a `v*` tag, **two tag workflows** fire in parallel:
 [`ci-v2.yml`](../.github/workflows/ci-v2.yml)
 produces the container image and supply-chain evidence,
 [`release-v2.yml`](../.github/workflows/release-v2.yml)
-(PAI-99) produces the signed CLI binaries, and
-[`backend-full.yml`](../.github/workflows/backend-full.yml) runs the exhaustive
-serial and race assurance retained outside the PR fast path. They execute
-independently; the image and CLI workflows must both succeed for a release to
-be fully published. Before creating the tag, the release script requires a
-successful exhaustive run for the exact protected-main merge.
+(PAI-99) produces the signed CLI binaries. They execute independently; both
+must succeed for a release to be fully published. Before creating the tag, the
+release script requires a successful [`backend-full.yml`](../.github/workflows/backend-full.yml)
+run for the exact protected-main merge. That workflow runs its exhaustive
+serial/platform and broad-race jobs in parallel and is not duplicated on the
+identical tag commit. Applying the explicit `backend-full-evidence` label is the
+supported way to obtain hosted exhaustive evidence for an exact PR head; normal
+PR events and unrelated labels do not authorize those jobs.
 
 ### Container image (`ci-v2.yml`)
 
@@ -194,13 +196,12 @@ and the tag is still absent. An untracked, dirty, stale, or mismatched receipt
 has no authority. If normal auto-merge provenance exists, this exceptional path
 is not consulted.
 
-After the tag is pushed, all three workflows run in parallel. The image and CLI
-evidence workflows typically take 8–15 minutes (Apple's notarytool dominates
-the darwin job). `scripts/release.sh` waits for those two tag workflows before
-it prints deploy commands. The tag's `ci` workflow reuses the exhaustive result
-that was required for the identical protected-main head before tag creation; it
-does not wait for the newly triggered tag copy of the serial suite. If you need
-to resume the release-evidence wait manually:
+After the tag is pushed, both artifact workflows run in parallel and typically
+take 8–15 minutes (Apple's notarytool dominates the darwin job).
+`scripts/release.sh` waits for both before it prints deploy commands. The tag's
+`ci` workflow reuses the exhaustive result required for the identical
+protected-main head before tag creation; no new tag copy of the serial suite is
+started. If you need to resume the release-evidence wait manually:
 
     just wait-release-ci v<x.y.z>
 

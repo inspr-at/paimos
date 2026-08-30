@@ -8,7 +8,10 @@ set -euo pipefail
 
 HEAD_SHA=$1
 GH_COMMAND=${GH_COMMAND:-gh}
-BACKEND_FULL_TIMEOUT_SECONDS=${BACKEND_FULL_TIMEOUT_SECONDS:-2700}
+# Both exhaustive jobs have a 40-minute execution budget and run in parallel.
+# Allow ten additional minutes for queueing, setup, and the fail-closed
+# aggregator; exact hosted measurements must remain comfortably inside this.
+BACKEND_FULL_TIMEOUT_SECONDS=${BACKEND_FULL_TIMEOUT_SECONDS:-3000}
 BACKEND_FULL_POLL_SECONDS=${BACKEND_FULL_POLL_SECONDS:-15}
 REPOSITORY=${GITHUB_REPOSITORY:-inspr-at/paimos}
 start=$(date +%s)
@@ -28,12 +31,28 @@ while true; do
     exit 1
   }
 
-  if jq -e --arg head "$HEAD_SHA" '
-    any(.[]; .headSha == $head and .status == "completed" and .conclusion == "success")
-  ' >/dev/null <<<"$runs"; then
-    echo "Exhaustive backend assurance is green for exact head $HEAD_SHA."
-    exit 0
-  fi
+  successful_run_ids=$(jq -r --arg head "$HEAD_SHA" '
+    .[] |
+    select(.headSha == $head and .status == "completed" and .conclusion == "success") |
+    .databaseId
+  ' <<<"$runs")
+  while IFS= read -r run_id; do
+    [[ -n "$run_id" ]] || continue
+    if ! jobs=$("$GH_COMMAND" run view "$run_id" --repo "$REPOSITORY" --json jobs); then
+      echo "wait-backend-full: could not inspect exhaustive backend run $run_id" >&2
+      exit 1
+    fi
+    jq -e '.jobs | type == "array"' >/dev/null <<<"$jobs" || {
+      echo "wait-backend-full: GitHub returned malformed job evidence for run $run_id" >&2
+      exit 1
+    }
+    if jq -e '
+      any(.jobs[]; .name == "backend-full" and .status == "completed" and .conclusion == "success")
+    ' >/dev/null <<<"$jobs"; then
+      echo "Exhaustive backend assurance is green for exact head $HEAD_SHA."
+      exit 0
+    fi
+  done <<<"$successful_run_ids"
 
   exact_count=$(jq --arg head "$HEAD_SHA" '[.[] | select(.headSha == $head)] | length' <<<"$runs")
   active_count=$(jq --arg head "$HEAD_SHA" \

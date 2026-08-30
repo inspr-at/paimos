@@ -7,12 +7,22 @@ CI_SELECTOR="$ROOT/scripts/backend-ci-packages.sh"
 TEST_RUNNER="$ROOT/scripts/backend-pr-test.sh"
 RACE_RUNNER="$ROOT/scripts/backend-pr-race.sh"
 FULL_WAITER="$ROOT/scripts/wait-backend-full.sh"
+FULL_AUTHORIZER="$ROOT/scripts/backend-full-authorize.sh"
 WORKFLOW="$ROOT/.github/workflows/ci-v2.yml"
 FULL_WORKFLOW="$ROOT/.github/workflows/backend-full.yml"
 RELEASE_DOC="$ROOT/docs/RELEASE.md"
 SELECTION_SENTINEL='PAIMOS_BACKEND_SELECTION_OK_V1'
 CI_SELECTION_CALL="selection=\$(../scripts/backend-ci-packages.sh"
 FULL_WAIT_CALL="wait-backend-full.sh \"\$GITHUB_SHA\""
+FULL_PR_GUARD="github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence'"
+FULL_AGGREGATE_GUARD="always() && (github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence')"
+FULL_LABEL_ENV="BACKEND_FULL_LABEL: \${{ github.event.label.name }}"
+FULL_AUTH_RESULT="AUTHORIZATION: \${{ needs.backend-full-authorize.result }}"
+FULL_SERIAL_RESULT="SERIAL: \${{ needs.backend-full-serial.result }}"
+FULL_RACE_RESULT="RACE: \${{ needs.backend-full-race.result }}"
+FULL_AUTH_ASSERT="[[ \"\$AUTHORIZATION\" == 'success' ]]"
+FULL_SERIAL_ASSERT="[[ \"\$SERIAL\" == 'success' ]]"
+FULL_RACE_ASSERT="[[ \"\$RACE\" == 'success' ]]"
 GO_COMMAND=${GO_COMMAND:-go}
 FIXTURES="$ROOT/scripts/testdata/backend-gate"
 TMP_ROOT=$(mktemp -d)
@@ -60,12 +70,21 @@ check_selection_contains() {
 [[ -x "$TEST_RUNNER" ]] || fail "missing executable changed-package test runner: $TEST_RUNNER"
 [[ -x "$RACE_RUNNER" ]] || fail "missing executable changed-package race runner: $RACE_RUNNER"
 [[ -x "$FULL_WAITER" ]] || fail "missing executable exact-head backend-full waiter: $FULL_WAITER"
+[[ -x "$FULL_AUTHORIZER" ]] || fail "missing executable backend-full evidence authorizer: $FULL_AUTHORIZER"
+
+GITHUB_EVENT_NAME=pull_request BACKEND_FULL_LABEL=backend-full-evidence "$FULL_AUTHORIZER" ||
+  fail 'backend-full evidence authorizer rejected the stable operator label'
+GITHUB_EVENT_NAME=push "$FULL_AUTHORIZER" ||
+  fail 'backend-full evidence authorizer rejected protected-main execution'
+if GITHUB_EVENT_NAME=pull_request BACKEND_FULL_LABEL=unrelated "$FULL_AUTHORIZER" >/dev/null 2>&1; then
+  fail 'backend-full evidence authorizer accepted an unrelated PR label'
+fi
 
 fixture_head='1111111111111111111111111111111111111111'
 FAKE_HEAD_SHA="$fixture_head" FAKE_BACKEND_FULL_MODE=success \
   GH_COMMAND="$FIXTURES/backend-full-gh.sh" "$FULL_WAITER" "$fixture_head" >/dev/null ||
   fail 'exact-head backend-full waiter rejected successful exhaustive evidence'
-for mode in failed wrong-head; do
+for mode in failed wrong-head skipped; do
   if FAKE_HEAD_SHA="$fixture_head" FAKE_BACKEND_FULL_MODE="$mode" \
     GH_COMMAND="$FIXTURES/backend-full-gh.sh" "$FULL_WAITER" "$fixture_head" >/dev/null 2>&1; then
     fail "exact-head backend-full waiter accepted $mode evidence"
@@ -87,6 +106,49 @@ fi
 if BACKEND_SELECTOR_COMMAND="$FIXTURES/no-sentinel.sh" "$CI_SELECTOR" HEAD HEAD >/dev/null 2>&1; then
   fail 'CI selection adapter accepted selector output without a success sentinel'
 fi
+
+# A detected rename reports only the destination to --name-only. Exercise a
+# real cross-package move in an isolated repository: selection must treat it as
+# an explicit deletion plus addition, then expand both reverse test closures.
+rename_repo="$TMP_ROOT/rename-repo"
+mkdir -p "$rename_repo/scripts" "$rename_repo/backend/source" "$rename_repo/backend/destination" \
+  "$rename_repo/backend/sourceconsumer" "$rename_repo/backend/destinationconsumer"
+cp "$SELECTOR" "$rename_repo/scripts/backend-changed-packages.sh"
+printf '%s\n' 'module github.com/inspr-at/paimos/backend' '' 'go 1.26.6' >"$rename_repo/backend/go.mod"
+printf '%s\n' 'package source' '' 'func Keep() string { return "source" }' >"$rename_repo/backend/source/keep.go"
+printf '%s\n' 'package source' '' '// Moved is intentionally long enough for Git rename detection.' \
+  '// Its body stays byte-identical across the cross-package move.' \
+  'func Moved() string { return "moved-contract-payload" }' >"$rename_repo/backend/source/moved.go"
+printf '%s\n' 'package destination' '' 'func Keep() string { return "destination" }' >"$rename_repo/backend/destination/keep.go"
+printf '%s\n' 'package sourceconsumer_test' '' 'import (' '  "testing"' \
+  '  "github.com/inspr-at/paimos/backend/source"' ')' '' \
+  'func TestSourceContract(t *testing.T) { _ = source.Moved() }' >"$rename_repo/backend/sourceconsumer/sourceconsumer_test.go"
+printf '%s\n' 'package destinationconsumer_test' '' 'import (' '  "testing"' \
+  '  "github.com/inspr-at/paimos/backend/destination"' ')' '' \
+  'func TestDestinationContract(t *testing.T) { _ = destination.Keep() }' >"$rename_repo/backend/destinationconsumer/destinationconsumer_test.go"
+git -C "$rename_repo" init -q -b main
+git -C "$rename_repo" config user.name 'Backend gate fixture'
+git -C "$rename_repo" config user.email 'backend-gate@example.test'
+git -C "$rename_repo" add .
+git -C "$rename_repo" commit -q -m 'fixture base'
+rename_base=$(git -C "$rename_repo" rev-parse HEAD)
+git -C "$rename_repo" mv backend/source/moved.go backend/destination/moved.go
+sed -i.bak 's/package source/package destination/' "$rename_repo/backend/destination/moved.go"
+rm "$rename_repo/backend/destination/moved.go.bak"
+git -C "$rename_repo" add .
+git -C "$rename_repo" commit -q -m 'move contract across packages'
+rename_head=$(git -C "$rename_repo" rev-parse HEAD)
+rename_selection=$(GO_COMMAND="$GO_COMMAND" "$rename_repo/scripts/backend-changed-packages.sh" \
+  "$rename_base" "$rename_head")
+for expected in \
+  github.com/inspr-at/paimos/backend/source \
+  github.com/inspr-at/paimos/backend/destination \
+  github.com/inspr-at/paimos/backend/sourceconsumer \
+  github.com/inspr-at/paimos/backend/destinationconsumer
+do
+  grep -Fxq "$expected" <<<"$rename_selection" ||
+    fail "cross-package rename selection omitted $expected: [$rename_selection]"
+done
 
 check_selection '' docs/INSTALL.md
 check_selection_contains 'backend/supervision/service.go backend/supervision/service_integration_test.go' \
@@ -278,10 +340,12 @@ job_block() {
 }
 
 [[ -f "$FULL_WORKFLOW" ]] || fail 'dedicated full backend workflow is missing'
+grep -q '^  pull_request:$' "$FULL_WORKFLOW" || fail 'labeled PR evidence trigger is missing'
+grep -q '^    types: \[labeled\]$' "$FULL_WORKFLOW" || fail 'PR evidence trigger is not limited to label events'
 grep -q '^  schedule:$' "$FULL_WORKFLOW" || fail 'nightly schedule trigger is missing'
 grep -q '^  workflow_dispatch:$' "$FULL_WORKFLOW" || fail 'manual full-suite trigger is missing'
 grep -q 'branches: \[main\]' "$FULL_WORKFLOW" || fail 'main full-suite trigger is missing'
-grep -q "tags: \['v\*'\]" "$FULL_WORKFLOW" || fail 'tag full-suite trigger is missing'
+! grep -q "tags: \['v\*'\]" "$FULL_WORKFLOW" || fail 'tag duplicates already-green protected-main exhaustive assurance'
 
 vet=$(job_block backend-pr-vet)
 normal=$(job_block backend-pr)
@@ -293,7 +357,10 @@ db_race=$(job_block backend-pr-db-race)
 handlers_race=$(job_block backend-pr-handlers-race)
 invariants=$(job_block backend-security-invariants)
 publish_invariants=$(job_block backend-publish-invariants)
+full_serial=$(job_block backend-full-serial "$FULL_WORKFLOW")
+full_race=$(job_block backend-full-race "$FULL_WORKFLOW")
 full=$(job_block backend-full "$FULL_WORKFLOW")
+full_authorize=$(job_block backend-full-authorize "$FULL_WORKFLOW")
 quality=$(job_block quality)
 frontend=$(job_block frontend-quality)
 aggregate=$(job_block test)
@@ -352,11 +419,25 @@ done
   "$publish_invariants" == *"$FULL_WAIT_CALL"* ]] ||
   fail 'main/tag publish path lacks executable backend fail-closed assurance'
 
-[[ "$full" == *'go test -count=1 -p 1 -timeout=30m ./...'* && "$full" == *"backend-pr-race.sh './...'"* ]] ||
-  fail 'full backend lane lost serial or broad-race assurance'
-[[ "$full" == *'paimos_test_unsupported'* && "$full" == *'sequential'* ]] ||
-  fail 'main/tag/nightly backend assurance lacks unsupported-platform or sequential-race coverage'
-[[ "$full" != *"github.event_name == 'pull_request'"* ]] || fail 'full backend lane still runs on pull requests'
+[[ "$full_authorize" == *'backend-full-authorize.sh'* &&
+  "$full_authorize" == *"if: $FULL_PR_GUARD"* &&
+  "$full_authorize" == *"$FULL_LABEL_ENV"* ]] ||
+  fail 'labeled PR exhaustive proof lacks a fail-closed operator-label guard'
+[[ "$full_serial" == *'needs: backend-full-authorize'* && "$full_serial" == *'timeout-minutes: 40'* &&
+  "$full_serial" == *'go test -count=1 -p 1 -timeout=30m ./...'* &&
+  "$full_serial" == *'paimos_test_unsupported'* ]] ||
+  fail 'full backend serial/platform assurance lacks an explicit independent budget'
+[[ "$full_race" == *'needs: backend-full-authorize'* && "$full_race" == *'timeout-minutes: 40'* &&
+  "$full_race" == *"backend-pr-race.sh './...'"* && "$full_race" == *'sequential'* ]] ||
+  fail 'full backend broad race lacks an explicit independent budget or sequential topology'
+[[ "$full" == *'needs: [backend-full-authorize, backend-full-serial, backend-full-race]'* &&
+  "$full" == *"if: $FULL_AGGREGATE_GUARD"* && "$full" == *"$FULL_AUTH_RESULT"* &&
+  "$full" == *"$FULL_AUTH_ASSERT"* && "$full" == *"$FULL_SERIAL_RESULT"* &&
+  "$full" == *"$FULL_RACE_RESULT"* && "$full" == *"$FULL_SERIAL_ASSERT"* &&
+  "$full" == *"$FULL_RACE_ASSERT"* ]] ||
+  fail 'full backend workflow lacks a fail-closed serial/race aggregator'
+grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-3000' "$FULL_WAITER" ||
+  fail 'exact-head full-suite waiter budget is not derived from parallel job budgets'
 
 [[ -n "$quality" ]] || fail 'quality lane is missing'
 [[ "$frontend" == *'npm run schema:check'* && "$frontend" == *'npm test'* ]] ||
@@ -373,7 +454,7 @@ done
   "$docker" != *"needs.test.result != 'failure'"* ]] ||
   fail 'docker can publish after the event-relevant test aggregator was skipped'
 
-grep -q 'three workflows' "$RELEASE_DOC" || fail 'release documentation does not name all three tag workflows'
-grep -q 'backend-full.yml' "$RELEASE_DOC" || fail 'release documentation omits exhaustive backend tag assurance'
+grep -q 'two tag workflows' "$RELEASE_DOC" || fail 'release documentation does not name the two artifact tag workflows'
+grep -q 'backend-full.yml' "$RELEASE_DOC" || fail 'release documentation omits pre-tag exhaustive backend assurance'
 
 echo 'test-backend-pr-gate: ok'
