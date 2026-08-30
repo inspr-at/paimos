@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { nextTick } from 'vue'
+import { nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
 const routerHarness = vi.hoisted(() => ({
   route: { query: {} as Record<string, unknown> },
-  replace: vi.fn(async () => undefined),
+  replace: vi.fn<(location: { query?: Record<string, unknown> }) => Promise<void>>(),
 }))
 
 vi.mock('vue-router', async (importOriginal) => ({
@@ -19,22 +19,33 @@ import { useAuthStore, type User } from '@/stores/auth'
 import Paimos6PreviewView from './Paimos6PreviewView.vue'
 
 const PROJECT_ID = 42
+const PROJECT_B_ID = 99
 const MANAGED_ID = '17e5d8f7-0b11-4bee-a8a4-a11406de865a'
 const UNMANAGED_ID = '27e5d8f7-0b11-4bee-a8a4-a11406de865a'
 const PAIMOS_ID = '37e5d8f7-0b11-4bee-a8a4-a11406de865a'
+const PROJECT_B_PAIMOS_ID = '47e5d8f7-0b11-4bee-a8a4-a11406de865a'
+const PROJECT_A_TITLE = 'Shape the live six home'
+const PROJECT_A_ADDRESS = 'codex:amy'
 
 function projectCatalog() {
   return [{ id: PROJECT_ID, key: 'PAI', name: 'Paimos' }]
 }
 
+function transitionProjectCatalog() {
+  return [
+    { id: PROJECT_ID, key: 'PAI-A', name: 'Project A' },
+    { id: PROJECT_B_ID, key: 'PAI-B', name: 'Project B' },
+  ]
+}
+
 function managedRow() {
   return {
     product_session_id: MANAGED_ID,
-    title: 'Shape the live six home',
+    title: PROJECT_A_TITLE,
     summary: 'Checking the strict session-home seam.',
     revision: 3,
     updated_at: '2026-08-30T12:02:00Z',
-    target: { kind: 'project_agent', project_agent_id: 7, agent_name: 'amy', address: 'codex:amy' },
+    target: { kind: 'project_agent', project_agent_id: 7, agent_name: 'amy', address: PROJECT_A_ADDRESS },
     status: { phase: 'working', reason: 'active' },
     harness: {
       harness: 'codex',
@@ -86,10 +97,18 @@ function paimosRow() {
   }
 }
 
-function liveProjection(sessions = [managedRow(), unmanagedRow(), paimosRow()]) {
+function projectBPaimosRow() {
+  return {
+    ...paimosRow(),
+    product_session_id: PROJECT_B_PAIMOS_ID,
+    title: 'Project B Paimos session',
+  }
+}
+
+function liveProjection(sessions = [managedRow(), unmanagedRow(), paimosRow()], projectId = PROJECT_ID) {
   return {
     schema_version: 1,
-    project_id: PROJECT_ID,
+    project_id: projectId,
     sessions,
     totals: {
       sessions: sessions.length,
@@ -113,18 +132,21 @@ async function flush() {
   }
 }
 
-function authorizePrincipal() {
+function authorizePrincipal(projectIds = [PROJECT_ID], userId = 7) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const auth = useAuthStore()
   auth.user = {
-    id: 7,
+    id: userId,
     username: 'amy',
     role: 'member',
     status: 'active',
   } as User
-  auth.hydrateAccess({ all_projects: false, levels: { [PROJECT_ID]: 'viewer' } })
+  const levels: Record<string, 'viewer'> = {}
+  for (const projectId of projectIds) levels[String(projectId)] = 'viewer'
+  auth.hydrateAccess({ all_projects: false, levels })
   auth.checked = true
+  return auth
 }
 
 async function mountWithHome(home: unknown | Promise<unknown>) {
@@ -137,11 +159,33 @@ async function mountWithHome(home: unknown | Promise<unknown>) {
   return mountComponent(Paimos6PreviewView)
 }
 
+async function mountTransitionHome(projectBHome: unknown | Promise<unknown>) {
+  const auth = authorizePrincipal([PROJECT_ID, PROJECT_B_ID])
+  vi.spyOn(api, 'get').mockImplementation((path: string) => {
+    if (path === '/projects?status=all') {
+      const authorized = transitionProjectCatalog().filter((project) => auth.accessibleProjects.has(project.id))
+      return Promise.resolve(authorized) as never
+    }
+    if (path === `/projects/${PROJECT_ID}/session-home/v1`) {
+      return Promise.resolve(liveProjection([managedRow()])) as never
+    }
+    if (path === `/projects/${PROJECT_B_ID}/session-home/v1`) return Promise.resolve(projectBHome) as never
+    return Promise.reject(new Error(`unexpected GET ${path}`))
+  })
+  return { auth, mounted: await mountComponent(Paimos6PreviewView) }
+}
+
+function renderedStatus(el: HTMLElement) {
+  return el.querySelector('.p6-status')?.textContent ?? ''
+}
+
 describe('Paimos6PreviewView live session home (PAI-861)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    routerHarness.route.query = {}
-    routerHarness.replace.mockReset().mockResolvedValue(undefined)
+    routerHarness.route = reactive({ query: {} })
+    routerHarness.replace.mockReset().mockImplementation(async ({ query }) => {
+      routerHarness.route.query = { ...query }
+    })
     sessionStorage.clear()
   })
 
@@ -191,6 +235,101 @@ describe('Paimos6PreviewView live session home (PAI-861)', () => {
     await flush()
     expect(mounted.el.querySelector('.p6-session-card.is-selected')).toBeNull()
     expect(mounted.el.textContent).toContain('No selection · preview target Paimos')
+    await mounted.unmount()
+  })
+
+  it('fences A metadata while an atomic history transition waits for B and selects only B', async () => {
+    const pendingB = deferred<ReturnType<typeof liveProjection>>()
+    routerHarness.route.query = { project: String(PROJECT_ID) }
+    const { mounted } = await mountTransitionHome(pendingB.promise)
+    await flush()
+
+    mounted.el.querySelector<HTMLButtonElement>('.p6-card-select')!.click()
+    await flush()
+    expect(renderedStatus(mounted.el)).toContain(PROJECT_A_TITLE)
+    expect(renderedStatus(mounted.el)).toContain(PROJECT_A_ADDRESS)
+
+    routerHarness.route.query = {
+      project: String(PROJECT_B_ID),
+      session: PROJECT_B_PAIMOS_ID,
+    }
+    await nextTick()
+
+    expect(mounted.el.textContent).not.toContain(PROJECT_A_TITLE)
+    expect(mounted.el.textContent).not.toContain(PROJECT_A_ADDRESS)
+    expect(renderedStatus(mounted.el)).toContain('Choose a session to target it')
+    expect(mounted.el.textContent).toContain('Loading authorized session home')
+    expect(routerHarness.route.query.session).toBe(PROJECT_B_PAIMOS_ID)
+
+    pendingB.resolve(liveProjection([projectBPaimosRow()], PROJECT_B_ID))
+    await flush()
+    const selected = mounted.el.querySelector<HTMLElement>('.p6-session-card.is-selected')
+    expect(selected?.textContent).toContain('Project B Paimos session')
+    expect(mounted.el.textContent).toContain('Selected agent target · Paimos')
+    expect(mounted.el.textContent).not.toContain(PROJECT_A_TITLE)
+    expect(mounted.el.textContent).not.toContain(PROJECT_A_ADDRESS)
+    expect(routerHarness.route.query.session).toBe(PROJECT_B_PAIMOS_ID)
+    await mounted.unmount()
+  })
+
+  it('fences A metadata on picker navigation before rendering B with no inherited selection', async () => {
+    routerHarness.route.query = { project: String(PROJECT_ID) }
+    const { mounted } = await mountTransitionHome(liveProjection([projectBPaimosRow()], PROJECT_B_ID))
+    await flush()
+
+    mounted.el.querySelector<HTMLButtonElement>('.p6-card-select')!.click()
+    await flush()
+    expect(renderedStatus(mounted.el)).toContain(PROJECT_A_ADDRESS)
+    mounted.el.querySelector<HTMLButtonElement>('.p6-card-actions button')!.click()
+    await flush()
+    expect(renderedStatus(mounted.el)).toContain(PROJECT_A_TITLE)
+    expect(renderedStatus(mounted.el)).toContain('No request was sent')
+
+    const picker = mounted.el.querySelector<HTMLSelectElement>('.p6-project-picker select')!
+    picker.value = String(PROJECT_B_ID)
+    picker.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+
+    expect(mounted.el.textContent).toContain('Project B Paimos session')
+    expect(mounted.el.textContent).toContain('No selection · preview target Paimos')
+    expect(mounted.el.textContent).not.toContain(PROJECT_A_TITLE)
+    expect(mounted.el.textContent).not.toContain(PROJECT_A_ADDRESS)
+    expect(renderedStatus(mounted.el)).toContain('Choose a session to target it')
+    expect(routerHarness.route.query).toEqual({ project: String(PROJECT_B_ID), session: undefined })
+    await mounted.unmount()
+  })
+
+  it('fences copied status on same-view permission and principal authority resets', async () => {
+    routerHarness.route.query = { project: String(PROJECT_ID) }
+    const { auth, mounted } = await mountTransitionHome(liveProjection([projectBPaimosRow()], PROJECT_B_ID))
+    await flush()
+
+    mounted.el.querySelector<HTMLButtonElement>('.p6-card-select')!.click()
+    await flush()
+    expect(renderedStatus(mounted.el)).toContain(PROJECT_A_TITLE)
+    expect(renderedStatus(mounted.el)).toContain(PROJECT_A_ADDRESS)
+    mounted.el.querySelector<HTMLButtonElement>('[aria-label="Open the talk-first door"]')!.click()
+    await nextTick()
+    expect(mounted.el.querySelector('.p6-talk-door')?.textContent).toContain(PROJECT_A_ADDRESS)
+
+    auth.hydrateAccess({ all_projects: false, levels: { [PROJECT_B_ID]: 'viewer' } })
+    await flush()
+    expect(mounted.el.querySelector('.p6-talk-door')).toBeNull()
+    expect(mounted.el.querySelector('main')?.hasAttribute('inert')).toBe(false)
+    expect(mounted.el.textContent).toContain('Project B Paimos session')
+    expect(mounted.el.textContent).not.toContain(PROJECT_A_TITLE)
+    expect(mounted.el.textContent).not.toContain(PROJECT_A_ADDRESS)
+    expect(renderedStatus(mounted.el)).toContain('Choose a session to target it')
+
+    mounted.el.querySelector<HTMLButtonElement>('.p6-card-select')!.click()
+    await flush()
+    expect(renderedStatus(mounted.el)).toContain('Project B Paimos session')
+    auth.user = { ...auth.user!, id: 8, username: 'next-principal' }
+    await flush()
+    expect(renderedStatus(mounted.el)).not.toContain('Project B Paimos session')
+    expect(renderedStatus(mounted.el)).toContain('Choose a session to target it')
+    expect(mounted.el.textContent).not.toContain(PROJECT_A_TITLE)
+    expect(mounted.el.textContent).not.toContain(PROJECT_A_ADDRESS)
     await mounted.unmount()
   })
 

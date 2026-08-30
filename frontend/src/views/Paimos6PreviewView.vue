@@ -13,11 +13,14 @@ import { loadPaimos6SessionHome } from '@/v6/sessionHome'
 
 interface ProjectOption { id: number; key: string; name: string }
 
+const DEFAULT_STATUS_MESSAGE = 'Choose a session to target it. No mutation endpoint exists in this preview.'
+
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const doorOpen = ref(false)
-const statusMessage = ref('Choose a session to target it. No mutation endpoint exists in this preview.')
+const statusMessage = ref(DEFAULT_STATUS_MESSAGE)
+const statusBoundary = ref(0)
 const projects = ref<ProjectOption[]>([])
 const projectState = ref<'loading' | 'ready' | 'empty' | 'unavailable'>('loading')
 const selectedProjectId = ref<number | null>(null)
@@ -61,6 +64,18 @@ const home = usePaimos6SessionHome({
 })
 const selectedSession = home.selectedSession
 const selectedProject = computed(() => projects.value.find((project) => project.id === selectedProjectId.value) ?? null)
+
+function resetAuxiliaryStatus() {
+  // The status channel and talk door can both contain copies of session
+  // metadata. Fence them with the same synchronous owner transitions as rows.
+  statusBoundary.value += 1
+  doorOpen.value = false
+  statusMessage.value = DEFAULT_STATUS_MESSAGE
+}
+
+function publishDoorStatus(message: string) {
+  statusMessage.value = message
+}
 
 function requestedProjectId(): number | null {
   const raw = route.query.project
@@ -110,6 +125,8 @@ async function loadProjects() {
     if (projectController === controller) projectController = null
   }
 }
+
+watch([authorityKey, selectedProjectId, home.selectedId], resetAuxiliaryStatus, { flush: 'sync' })
 
 watch(authorityKey, () => {
   // Clear the project vocabulary before a new principal/permission request.
@@ -253,9 +270,10 @@ onScopeDispose(() => {
   </main>
 
   <Paimos6TalkDoor
+      :key="statusBoundary"
       v-model:open="doorOpen"
       :target-agent="selectedSession?.agent ?? null"
-      @status="statusMessage = $event"
+      @status="publishDoorStatus"
     />
   </div>
 </template>
