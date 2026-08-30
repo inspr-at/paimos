@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -79,8 +80,17 @@ func TestCodexStartCancellationReapsInFlightAppServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	_, err := adapter.Start(ctx, StartRequest{Workspace: t.TempDir(), Prompt: "work", Identity: "codex:test", Adapter: AdapterCodex}, nil)
-	if err == nil || child == nil || child.ProcessState == nil || !child.ProcessState.Exited() {
-		t.Fatalf("err=%v child=%v state=%v", err, child, child.ProcessState)
+	if !errors.Is(err, context.DeadlineExceeded) || child == nil || child.Process == nil || child.ProcessState == nil {
+		t.Fatalf("err=%v child=%v", err, child)
+	}
+	if got, want := child.ProcessState.Pid(), child.Process.Pid; got != want {
+		t.Fatalf("reaped pid=%d want exact child pid=%d", got, want)
+	}
+	// ProcessState is populated by Cmd.Wait. A signal-terminated Unix child is
+	// reaped even though ProcessState.Exited reports false; ErrProcessDone from
+	// the waited Process handle proves this exact child cannot remain running.
+	if signalErr := child.Process.Signal(os.Kill); signalErr != os.ErrProcessDone {
+		t.Fatalf("signal after cancellation=%v want %v (state=%v)", signalErr, os.ErrProcessDone, child.ProcessState)
 	}
 }
 
@@ -153,7 +163,7 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 		t.Skip("helper process")
 	}
 	if mode == "block" {
-		select {}
+		time.Sleep(time.Hour)
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	encoder := json.NewEncoder(os.Stdout)
