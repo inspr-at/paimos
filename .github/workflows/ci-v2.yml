@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   packages: write
   # PAI-121: keyless signing via GitHub's OIDC token + sigstore. The
   # cosign step on tag pushes signs the published image and attaches
@@ -58,6 +59,10 @@ jobs:
   backend-pr:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -72,14 +77,16 @@ jobs:
         working-directory: backend
         run: |
           set -euo pipefail
-          mapfile -t packages < <(../scripts/backend-changed-packages.sh \
+          selection=$(../scripts/backend-ci-packages.sh \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          packages=()
+          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; affected test lane is empty.'
           else
             printf 'Affected backend package: %s\n' "${packages[@]}"
-            ../scripts/backend-pr-test.sh --lane=affected "${packages[@]}"
+            ../scripts/backend-pr-test.sh --lane=affected --shard="${{ matrix.shard }}/2" "${packages[@]}"
           fi
 
   backend-pr-db:
@@ -99,9 +106,11 @@ jobs:
         working-directory: backend
         run: |
           set -euo pipefail
-          mapfile -t packages < <(../scripts/backend-changed-packages.sh \
+          selection=$(../scripts/backend-ci-packages.sh \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          packages=()
+          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; DB test lane is empty.'
           else
@@ -129,9 +138,11 @@ jobs:
         working-directory: backend
         run: |
           set -euo pipefail
-          mapfile -t packages < <(../scripts/backend-changed-packages.sh \
+          selection=$(../scripts/backend-ci-packages.sh \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          packages=()
+          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; handler test lane is empty.'
           else
@@ -158,9 +169,11 @@ jobs:
         working-directory: backend
         run: |
           set -euo pipefail
-          mapfile -t packages < <(../scripts/backend-changed-packages.sh \
+          selection=$(../scripts/backend-ci-packages.sh \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          packages=()
+          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; performance test lane is empty.'
           else
@@ -184,9 +197,11 @@ jobs:
         working-directory: backend
         run: |
           set -euo pipefail
-          mapfile -t packages < <(../scripts/backend-changed-packages.sh --direct \
+          selection=$(../scripts/backend-ci-packages.sh --direct \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          packages=()
+          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; affected race lane is empty.'
           else
@@ -210,9 +225,11 @@ jobs:
         working-directory: backend
         run: |
           set -euo pipefail
-          mapfile -t packages < <(../scripts/backend-changed-packages.sh --direct \
+          selection=$(../scripts/backend-ci-packages.sh --direct \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          packages=()
+          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; DB race lane is empty.'
           else
@@ -240,9 +257,11 @@ jobs:
         working-directory: backend
         run: |
           set -euo pipefail
-          mapfile -t packages < <(../scripts/backend-changed-packages.sh --direct \
+          selection=$(../scripts/backend-ci-packages.sh --direct \
             '${{ github.event.pull_request.base.sha }}' \
             '${{ github.event.pull_request.head.sha }}')
+          packages=()
+          [[ -z "$selection" ]] || mapfile -t packages <<<"$selection"
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; handler race lane is empty.'
           else
@@ -273,6 +292,31 @@ jobs:
         run: |
           go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
           go test -tags paimos_test_unsupported -count=1 ./agentd ./agentdwire ./ownedprocess -run '^TestUnsupportedPlatform'
+
+  # Main and tag pushes skip the PR matrices, but publishing must still wait
+  # for executable backend/platform assurance on the exact image source head.
+  backend-publish-invariants:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend — main/tag smoke and unsupported platform fail-closed
+        working-directory: backend
+        run: |
+          go test -count=1 ./auth ./cmd/paimos ./ownedprocess
+          go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
+          go test -tags paimos_test_unsupported -count=1 ./agentd ./agentdwire ./ownedprocess -run '^TestUnsupportedPlatform'
+
+      - name: Require exhaustive backend assurance for this exact publish head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/wait-backend-full.sh "$GITHUB_SHA"
 
   quality:
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
@@ -383,7 +427,7 @@ jobs:
   # Keep the protected `test` context stable while its independent lanes run
   # concurrently. The ruleset still fails closed if any relevant lane fails.
   test:
-    if: always() && (github.ref == 'refs/heads/main' || github.event_name == 'pull_request')
+    if: always()
     needs:
       - backend-pr-vet
       - backend-pr
@@ -394,6 +438,7 @@ jobs:
       - backend-pr-db-race
       - backend-pr-handlers-race
       - backend-security-invariants
+      - backend-publish-invariants
       - quality
       - frontend-quality
     runs-on: ubuntu-latest
@@ -410,6 +455,7 @@ jobs:
           BACKEND_PR_DB_RACE: ${{ needs.backend-pr-db-race.result }}
           BACKEND_PR_HANDLERS_RACE: ${{ needs.backend-pr-handlers-race.result }}
           BACKEND_SECURITY_INVARIANTS: ${{ needs.backend-security-invariants.result }}
+          BACKEND_PUBLISH_INVARIANTS: ${{ needs.backend-publish-invariants.result }}
           QUALITY: ${{ needs.quality.result }}
           FRONTEND_QUALITY: ${{ needs.frontend-quality.result }}
         run: |
@@ -424,6 +470,7 @@ jobs:
             [[ "$BACKEND_PR_DB_RACE" == 'success' ]]
             [[ "$BACKEND_PR_HANDLERS_RACE" == 'success' ]]
             [[ "$BACKEND_SECURITY_INVARIANTS" == 'success' ]]
+            [[ "$BACKEND_PUBLISH_INVARIANTS" == 'skipped' ]]
           else
             [[ "$BACKEND_PR_VET" == 'skipped' ]]
             [[ "$BACKEND_PR" == 'skipped' ]]
@@ -434,9 +481,15 @@ jobs:
             [[ "$BACKEND_PR_DB_RACE" == 'skipped' ]]
             [[ "$BACKEND_PR_HANDLERS_RACE" == 'skipped' ]]
             [[ "$BACKEND_SECURITY_INVARIANTS" == 'skipped' ]]
+            [[ "$BACKEND_PUBLISH_INVARIANTS" == 'success' ]]
           fi
-          [[ "$QUALITY" == 'success' ]]
-          [[ "$FRONTEND_QUALITY" == 'success' ]]
+          if [[ "$EVENT_NAME" == 'push' && "$GITHUB_REF_TYPE" == 'tag' ]]; then
+            [[ "$QUALITY" == 'skipped' ]]
+            [[ "$FRONTEND_QUALITY" == 'skipped' ]]
+          else
+            [[ "$QUALITY" == 'success' ]]
+            [[ "$FRONTEND_QUALITY" == 'success' ]]
+          fi
 
   e2e:
     # PAI-297: E2E smoke — boots the real backend + vite stack and drives the
@@ -553,17 +606,17 @@ jobs:
 
   docker:
     # PAI-365: docker job runs on push events (main + tag).
-    # `always() && != 'failure'` lets docker run when test/security
-    # were SKIPPED on tag pushes (PAI-365 dedupe), but still gates on
-    # SUCCESS for main-branch pushes where they actually executed.
-    # Equivalent to: "needs passed OR were intentionally skipped".
+    # The event-relevant `test` aggregator must always succeed. Security is
+    # required on main and may be skipped only on the release-tag path, whose
+    # dedicated release evidence remains separately required.
     # `needs['security-scan']` uses bracket-notation because the job
     # ID contains a `-`; dot-notation would parse as subtraction.
     if: |
       github.event_name == 'push' &&
       always() &&
-      needs.test.result != 'failure' &&
-      needs['security-scan'].result != 'failure'
+      needs.test.result == 'success' &&
+      ((github.ref_type == 'tag' && needs['security-scan'].result == 'skipped') ||
+       (github.ref == 'refs/heads/main' && needs['security-scan'].result == 'success'))
     needs: [test, security-scan]
     runs-on: ubuntu-latest
     steps:

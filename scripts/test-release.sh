@@ -24,6 +24,7 @@ write_stub_scripts() {
   cp "$ROOT/scripts/release.sh" "$repo/scripts/release.sh"
   cp "$ROOT/scripts/_deploy-lib.sh" "$repo/scripts/_deploy-lib.sh"
   cp "$ROOT/scripts/wait-release-ci.sh" "$repo/scripts/wait-release-ci.sh"
+  cp "$ROOT/scripts/wait-backend-full.sh" "$repo/scripts/wait-backend-full.sh"
 
   cp "$ROOT/scripts/check-dco.sh" "$repo/scripts/check-dco.sh"
   cat > "$repo/scripts/check-claims.sh" <<'GATE'
@@ -197,6 +198,8 @@ case "${1:-} ${2:-}" in
     [[ "$*" == *'--required'* && "$*" == *'--json name,state,bucket,workflow'* ]]
     state_value=SUCCESS
     bucket=pass
+    check_name=test
+    [[ ! -f "$state/checks-unnamed" ]] || check_name=
     if [[ -f "$state/checks-pending" ]]; then
       state_value=PENDING
       bucket=pending
@@ -210,15 +213,32 @@ case "${1:-} ${2:-}" in
     if [[ -f "$state/checks-empty" ]]; then
       printf '[]\n'
     else
-      printf '[{"name":"test","state":"%s","bucket":"%s","workflow":"ci"},{"name":"dco","state":"SUCCESS","bucket":"pass","workflow":"ci"}]\n' \
-        "$state_value" "$bucket"
+      printf '[{"name":"%s","state":"%s","bucket":"%s","workflow":"ci"},{"name":"dco","state":"SUCCESS","bucket":"pass","workflow":"ci"}]\n' \
+        "$check_name" "$state_value" "$bucket"
     fi
     ;;
   'run list')
-    [[ "$*" == *"--branch $release_tag"* ]]
-    if printf '%s\n' "$*" | grep -q 'workflowName == \\"release\\"'; then
+    if [[ "$*" == *'--workflow backend-full.yml'* ]]; then
+      head_sha=
+      previous=
+      for argument in "$@"; do
+        if [[ "$previous" == '--commit' ]]; then
+          head_sha=$argument
+          break
+        fi
+        previous=$argument
+      done
+      [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+      printf '%s\n' "$head_sha" > "$state/backend-full-head"
+      conclusion=success
+      [[ ! -f "$state/backend-full-failed" ]] || conclusion=failure
+      printf '[{"databaseId":3,"headSha":"%s","status":"completed","conclusion":"%s","url":"https://example.test/run/backend-full"}]\n' \
+        "$head_sha" "$conclusion"
+    elif printf '%s\n' "$*" | grep -q 'workflowName == \\"release\\"'; then
+      [[ "$*" == *"--branch $release_tag"* ]]
       printf '2\tcompleted\tsuccess\thttps://example.test/run/release\n'
     else
+      [[ "$*" == *"--branch $release_tag"* ]]
       printf '1\tcompleted\tsuccess\thttps://example.test/run/ci\n'
     fi
     ;;
@@ -648,6 +668,40 @@ test_protected_release_and_resume_states() {
 
   run_release "$repo" "$state" 1.0.1 --no-edit >/dev/null
   assert_one_pr "$state"
+}
+
+test_exhaustive_backend_failure_blocks_tag_creation() {
+  local repo state origin
+  repo=$(setup_repo backend-full-failure)
+  state="$TMP_ROOT/backend-full-failure/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  prepend_release_notes "$repo"
+  mkdir -p "$state"
+  touch "$state/backend-full-failed"
+
+  if run_release "$repo" "$state" patch --no-edit >/dev/null 2>&1; then
+    fail 'release created a tag without exact-head exhaustive backend assurance'
+  fi
+  ! git --git-dir="$origin" show-ref --verify --quiet refs/tags/v1.0.1 ||
+    fail 'failed exact-head exhaustive backend assurance still created a release tag'
+  grep -q '^run list .*--workflow backend-full.yml .*--commit ' "$state/calls.log" ||
+    fail 'release did not query exact-head exhaustive backend assurance before tagging'
+  [[ "$(<"$state/backend-full-head")" == "$(<"$state/merge-oid")" ]] ||
+    fail 'release queried exhaustive backend assurance for a head other than its protected merge'
+}
+
+test_unnamed_required_check_is_not_reused_as_green() {
+  local repo state output
+  repo=$(setup_repo unnamed-required-check)
+  state="$TMP_ROOT/unnamed-required-check/gh-state"
+  output="$TMP_ROOT/unnamed-required-check/output"
+  prepend_release_notes "$repo"
+  mkdir -p "$state"
+  touch "$state/checks-unnamed"
+
+  run_release "$repo" "$state" patch --no-edit >"$output" 2>&1
+  ! grep -q 'Required checks already green for exact release head' "$output" ||
+    fail 'release reused unnamed required-check evidence as exact-head green'
 }
 
 test_open_pr_is_reused_after_timeout() {
@@ -1106,6 +1160,8 @@ test_duplicate_unreleased_is_rejected
 test_versioned_entry_cannot_leave_stale_unreleased
 test_unreleased_consumption_rejects_prior_history_tamper
 test_protected_release_and_resume_states
+test_exhaustive_backend_failure_blocks_tag_creation
+test_unnamed_required_check_is_not_reused_as_green
 test_missing_auto_merge_recovery_receipt
 test_existing_manual_recovery_reason_remains_accepted
 test_open_pr_is_reused_after_timeout

@@ -555,7 +555,11 @@ required_checks_green_for_pinned_head() {
   jq -e '
     type == "array"
       and length > 0
-      and all(.[]; .state == "SUCCESS" or .state == "SKIPPED")
+      and all(.[];
+        (.name | type) == "string"
+          and (.name | length) > 0
+          and (.state == "SUCCESS" or .state == "SKIPPED")
+      )
   ' >/dev/null <<<"$checks"
 }
 
@@ -922,6 +926,10 @@ case "$PR_STATE" in
 esac
 
 assert_release_merge "$MERGE_OID"
+# The exhaustive workflow is triggered by the protected-main merge. Require its
+# exact-head result before creating the tag, so tag CI can reuse evidence that
+# is already green instead of waiting for a second serial/race run.
+GITHUB_REPOSITORY="$REPO" "$ROOT/scripts/wait-backend-full.sh" "$MERGE_OID"
 tag_release_merge "$MERGE_OID"
 cleanup_checkout
 

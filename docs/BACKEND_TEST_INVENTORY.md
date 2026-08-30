@@ -1,9 +1,9 @@
 # Backend test inventory
 
 PAI-852 audited the backend corpus before changing CI selection. At the
-candidate head, the repository contains 1,792 top-level test or fuzz functions
+candidate head, the repository contains 1,794 top-level test or fuzz functions
 in 268 `_test.go` files (267 contain test/fuzz functions and one is the shared
-handlers helper): 1,787 `Test*` functions, five `Fuzz*` functions, and no
+handlers helper): 1,789 `Test*` functions, five `Fuzz*` functions, and no
 benchmarks. Subtests are intentionally counted under their owning function.
 
 The audit found no evidence-based deletion. The only duplicate top-level name,
@@ -24,7 +24,7 @@ Every source-level test is accounted for by its package group below.
 | --- | ---: | ---: | --- | --- |
 | `backend/handlers` | 123 | 664 | Keep | HTTP, authorization, privacy, untrusted input, SQLite concurrency, removed-route, and customer contract coverage; the runtime hotspot is per-test migration setup. |
 | `backend/cmd/paimos` | 45 | 428 | Keep | CLI parsing, attribution, durable inbox, runner control, and release-facing behavior; many tests are the only shell-to-API contract proof. |
-| `backend/db` | 12 | 136 | Keep | Migrations, schema guards, rollback/precondition behavior, busy/lock behavior, and the explicit isolated test-DB path guard. |
+| `backend/db` | 12 | 138 | Keep | Migrations, schema guards, rollback/precondition behavior, busy/lock behavior, and the explicit isolated test-DB path guard. |
 | `backend/auth` | 14 | 74 | Keep | Identity, scopes, API-key timing, CSRF, OIDC, dev-login separation, and fail-closed authorization. |
 | `backend/deliverytrust` | 4 | 50 | Keep | Trust evaluation, history, revision binding, and fuzzed hostile input. |
 | `backend/agentd` | 8 | 44 | Keep | Owned-process lifecycle, adapter privacy, restart/reap ordering, locking, and unsupported-platform denial. |
@@ -58,7 +58,7 @@ Every source-level test is accounted for by its package group below.
 | `backend/pharoslink` | 1 | 1 | Keep | PHAROS request identifier validation. |
 | `backend/models` | 1 | 1 | Keep | Entity graph model invariants. |
 | `backend/agentdwire` | 1 | 1 | Keep | Unsupported-platform client behavior. |
-| **Total** | **268** | **1,792** | **Keep: 1,792** | **Fold: 0; drop: 0.** |
+| **Total** | **268** | **1,794** | **Keep: 1,794** | **Fold: 0; drop: 0.** |
 
 ### Fold: zero today
 
@@ -80,17 +80,18 @@ covers the original risk.
 
 ## Execution policy and timing evidence
 
-- Pull requests run independent required lanes for `go vet ./...`, affected
-  normal packages, four DB shards, five handler shards, the unchanged Agent
+- Pull requests run independent required lanes for `go vet ./...`, two affected
+  normal-package shards, four DB shards, five handler shards, the unchanged Agent
   Mode five-second performance contract, and directly changed race targets.
   Selection for normal tests is the directly changed package plus its bounded
   transitive reverse test-dependency closure. The affected lane excludes only
   the DB/handler shards and isolated performance duplicate; it still runs the
   parent stream test's other subtests.
 - DB, handler, and other directly changed race targets use separate required
-  runners. The two M147 SQLite arbitration tests still start 32 simultaneous
-  application goroutines under `-race`, each in its own process, while the SQL
-  pool retains the production ten-connection bound and five-second busy
+  runners. The original two M147 SQLite arbitration tests retain 32 simultaneous
+  application goroutines and 32 open connections in the normal DB plan. Companion
+  variants exercise the same exactly-one-winner oracles under `-race`, each in its
+  own process, with the production ten-connection pool and five-second busy
   timeout. The 664 handler normal tests and 19 handler concurrency contracts
   each use five independently provisioned matrix runners, after hosted timing
   showed four left too little margin. The PR lanes reject an unindexed local
@@ -100,12 +101,20 @@ covers the original risk.
   performance, backend quality, and frontend quality lane, so GitHub still
   fails closed while those lanes run concurrently.
 - Full serial `go test -p 1 ./...` and a broad sequential sweep of package-local
-  control-plane concurrency contracts run in a dedicated workflow on `main`,
-  nightly, release tags, and manual dispatch, outside the ordinary PR merge path.
-- A release tag is created from the exact protected-main merge. Its independent
-  exhaustive sweep does not block `release.sh`, which waits only for the `ci`
-  and `release` evidence workflows; release artifacts, SBOMs, signatures, and
-  attestations remain tag-gated.
+  control-plane concurrency contracts (including sequential handler shards) run
+  in a dedicated workflow on `main`, nightly, release tags, and manual dispatch,
+  outside the ordinary PR merge path. Main and tag image paths additionally gate
+  on a compact backend/platform job, including executable unsupported-platform
+  denial contracts, and require a successful `backend-full.yml` run for their
+  exact head before the stable `test` context can permit publication. A tag can
+  reuse the already-green exhaustive result from the identical protected-main
+  head instead of starting the serial suite again.
+- A release tag is created from the exact protected-main merge only after that
+  head has a successful exhaustive workflow result. The tag's `ci` workflow
+  reuses the already-green exact-head result instead of waiting for its newly
+  triggered duplicate; `release.sh` then waits only for the `ci` and `release`
+  evidence workflows. Release artifacts, SBOMs, signatures, and attestations
+  remain tag-gated.
 - When a resumed release PR's required checks are already green for the pinned
   head, `release.sh` records that fact and waits only for GitHub to perform the
   protected merge. It does not claim that the remaining merge-state wait is gone.
@@ -145,13 +154,21 @@ covers the original risk.
   still missed the hard target by one second, the final race partition uses
   five independently provisioned runners while preserving an exact-once
   accounting guard over the same 19 contracts.
-- The corrected full serial suite passed in 689.81s, including unsharded
-  `handlers` in 394.602s, `db` in 87.326s, and `supervision` in 54.967s. This is
+- The fourth hosted candidate, exact head `703293a423e8ad398243c197d031c9b3a2e8c6a5`,
+  measured `quality` at 3m46s and `frontend-quality` at 2m14s. Every individual
+  backend lane was below five minutes, but the stable required `test` context
+  completed about 5m16s after workflow start because the 4m45s affected job
+  started later. The replacement therefore divides affected packages across two
+  required runners; final exact-head hosted timing remains the acceptance proof.
+- The final full serial suite passed in 722.08s, including unsharded `handlers`
+  in 413.893s, `db` in 92.098s, and `supervision` in 55.184s. This is
   the exact assurance retained on main, nightly, tags, and manual dispatch.
-- The corrected final broad package-local concurrency sweep passed in 445.75s.
-  Agent
-  Mode's five-second overflow performance budget remains in normal/full serial;
-  its non-performance stream concurrency subtests passed under race instead.
+- The final broad package-local concurrency sweep passed in 687.32s. Its five
+  handler shards ran foreground-only in 80.149s, 75.453s, 61.048s, 61.892s, and
+  58.120s; the three isolated DB race processes passed in 17.378s, 19.584s, and
+  36.064s. Agent Mode's five-second overflow performance budget remains in
+  normal/full serial; its non-performance stream concurrency subtests passed
+  under race instead.
 
 The inventory count is reproducible with:
 

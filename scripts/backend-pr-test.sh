@@ -5,6 +5,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BACKEND="$ROOT/backend"
 MODULE='github.com/inspr-at/paimos/backend'
 GO_COMMAND=${GO_COMMAND:-go}
+AFFECTED_SHARDS=2
 DB_SHARDS=4
 HANDLER_SHARDS=5
 LANE=affected
@@ -48,12 +49,12 @@ case "$LANE" in
     exit 2
     ;;
 esac
-if (( SELECTED_SHARD >= 0 )) && [[ "$LANE" != handlers ]]; then
-  echo "backend-pr-test: --shard is supported only for the handlers lane" >&2
+if (( SELECTED_SHARD >= 0 )) && [[ "$LANE" != affected && "$LANE" != handlers ]]; then
+  echo "backend-pr-test: --shard is supported only for the affected and handlers lanes" >&2
   exit 2
 fi
-if [[ "$LANE" == handlers ]] && (( SELECTED_SHARD < 0 )); then
-  echo "backend-pr-test: handlers lane requires exactly one --shard=INDEX/COUNT" >&2
+if [[ "$LANE" == affected || "$LANE" == handlers ]] && (( SELECTED_SHARD < 0 )); then
+  echo "backend-pr-test: $LANE lane requires exactly one --shard=INDEX/COUNT" >&2
   exit 2
 fi
 [[ $# -gt 0 ]] || {
@@ -82,16 +83,21 @@ run_normal() {
 
 run_shards() {
   local package="$1" match="$2" shard_count="$3" label="$4"
-  local names=() shard index pattern pid failed=0 shard_start=0 shard_end="$shard_count"
+  local listed name names=() shard index pattern pid failed=0 shard_start=0 shard_end="$shard_count"
   local pids=()
   cd "$BACKEND"
+  listed=$("$GO_COMMAND" test -list "$match" "$package")
   while IFS= read -r name; do
-    [[ "$name" =~ ^(Test|Fuzz)[A-Za-z0-9_]+$ ]] || {
-      echo "backend-pr-test: unsafe $label test name: $name" >&2
-      exit 2
-    }
-    names+=("$name")
-  done < <("$GO_COMMAND" test -list "$match" "$package" | awk '/^(Test|Fuzz)[A-Za-z0-9_]+$/')
+    case "$name" in
+      Test*|Fuzz*)
+        [[ "$name" =~ ^(Test|Fuzz)[A-Za-z0-9_]+$ ]] || {
+          echo "backend-pr-test: unsafe $label test name: $name" >&2
+          exit 2
+        }
+        names+=("$name")
+        ;;
+    esac
+  done <<<"$listed"
   [[ "${#names[@]}" -gt 0 ]] || {
     echo "backend-pr-test: $label package has no tests to shard" >&2
     exit 1
@@ -112,6 +118,10 @@ run_shards() {
       [[ "$pattern" == '^(' ]] || pattern+='|'
       pattern+="${names[$index]}"
     done
+    [[ "$pattern" != '^(' ]] || {
+      echo "backend-pr-test: $label shard $shard is empty" >&2
+      exit 1
+    }
     pattern+=')$'
     if [[ "$DRY_RUN" -eq 1 ]]; then
       printf 'go test -count=1 -timeout=8m %q -run %q\n' "$package" "$pattern"
@@ -134,10 +144,11 @@ run_shards() {
 
 packages=("$@")
 if [[ " ${packages[*]} " == *' ./... '* ]]; then
+  listed_packages=$(cd "$BACKEND" && "$GO_COMMAND" list ./...)
   packages=()
   while IFS= read -r package; do
-    packages+=("$package")
-  done < <(cd "$BACKEND" && "$GO_COMMAND" list ./...)
+    [[ -z "$package" ]] || packages+=("$package")
+  done <<<"$listed_packages"
 fi
 
 normal=()
@@ -155,10 +166,20 @@ has_package() {
 
 case "$LANE" in
   affected)
+    [[ "$SELECTED_SHARD_COUNT" -eq "$AFFECTED_SHARDS" ]] || {
+      echo "backend-pr-test: affected shard count=$SELECTED_SHARD_COUNT, want $AFFECTED_SHARDS" >&2
+      exit 2
+    }
+    normal_index=0
     for package in "${packages[@]}"; do
       case "$package" in
         "$MODULE/db"|"$MODULE/handlers") ;;
-        *) normal+=("$package") ;;
+        *)
+          if (( normal_index % AFFECTED_SHARDS == SELECTED_SHARD )); then
+            normal+=("$package")
+          fi
+          normal_index=$((normal_index + 1))
+          ;;
       esac
     done
     if [[ "${#normal[@]}" -gt 0 ]]; then
@@ -167,7 +188,7 @@ case "$LANE" in
       # relax that budget nor turn it into a false failure here.
       run_normal -skip '^TestStreamSubscribeRaceOverflowLostWakeRestartAndPermissionChanges$' "${normal[@]}"
     fi
-    if has_package "$MODULE/agentmode"; then
+    if [[ " ${normal[*]} " == *" $MODULE/agentmode "* ]]; then
       run_normal ./agentmode -run '^TestStreamSubscribeRaceOverflowLostWakeRestartAndPermissionChanges$/(subscribe before high-water|permission grant and revoke)$'
     fi
     ;;

@@ -87,16 +87,20 @@ run_race() {
 
 run_race_shards() {
   local package="$1" match="$2" shard_count="$3"
-  local names=() shard index pattern pid failed=0 shard_start=0 shard_end="$shard_count"
-  local pids=()
+  local listed name names=() shard index pattern shard_start=0 shard_end="$shard_count"
   cd "$BACKEND"
+  listed=$("$GO_COMMAND" test -list "$match" "$package")
   while IFS= read -r name; do
-    [[ "$name" =~ ^(Test|Fuzz)[A-Za-z0-9_]+$ ]] || {
-      echo "backend-pr-race: unsafe test name for $package: $name" >&2
-      exit 2
-    }
-    names+=("$name")
-  done < <("$GO_COMMAND" test -list "$match" "$package" | awk '/^(Test|Fuzz)[A-Za-z0-9_]+$/')
+    case "$name" in
+      Test*|Fuzz*)
+        [[ "$name" =~ ^(Test|Fuzz)[A-Za-z0-9_]+$ ]] || {
+          echo "backend-pr-race: unsafe test name for $package: $name" >&2
+          exit 2
+        }
+        names+=("$name")
+        ;;
+    esac
+  done <<<"$listed"
   [[ "${#names[@]}" -gt 0 ]] || {
     echo "backend-pr-race: no tests matched $match in $package" >&2
     exit 1
@@ -117,24 +121,20 @@ run_race_shards() {
       [[ "$pattern" == '^(' ]] || pattern+='|'
       pattern+="${names[$index]}"
     done
+    [[ "$pattern" != '^(' ]] || {
+      echo "backend-pr-race: shard $shard is empty for $package" >&2
+      exit 1
+    }
     pattern+=')$'
     if [[ "$DRY_RUN" -eq 1 ]]; then
       printf 'go test -race -count=1 -timeout=8m %q -run %q\n' "$package" "$pattern"
     else
-      GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout=8m "$package" -run "$pattern" &
-      pids+=("$!")
+      # An indexed PR job executes one shard. The exhaustive workflow walks all
+      # shards here in the foreground so heavyweight SQLite contracts never
+      # contend as multiple Go processes on one two-core runner.
+      GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout=8m "$package" -run "$pattern"
     fi
   done
-
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    return
-  fi
-  for pid in "${pids[@]}"; do
-    if ! wait "$pid"; then
-      failed=1
-    fi
-  done
-  [[ "$failed" -eq 0 ]]
 }
 
 run_package() {
@@ -152,11 +152,11 @@ run_package() {
   case "$package" in
     ./db)
       run_race ./db '^(TestApplyMigrationAtomic.*|TestSchemaAgentRunTelemetryTerminalWriteRace)$'
-      # Keep each 32-goroutine SQLite arbitration proof in its own instrumented
-      # process. The pool itself stays production-bounded, so the test measures
-      # application concurrency instead of creating 32 database connections.
-      run_race ./db '^TestM147ConcurrentCanonicalCommandsConverge$'
-      run_race ./db '^TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwner$'
+      # Race instrumentation uses the production pool in isolated processes.
+      # The exhaustive normal plan separately retains the original same-name
+      # 32-connection/32-writer M147 contention oracles without weakening them.
+      run_race ./db '^TestM147ConcurrentCanonicalCommandsConvergeProductionPool$'
+      run_race ./db '^TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwnerProductionPool$'
       ;;
     ./handlers)
       run_race_shards ./handlers '^Test.*(Concurrent|Concurrency|Race|Atomic|BatchesReleaseWriter|RacedPoke).*$' 5

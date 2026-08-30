@@ -318,11 +318,21 @@ func TestM147UUIDChecksRejectExtraHyphenAndNULTail(t *testing.T) {
 }
 
 func TestM147ConcurrentCanonicalCommandsConverge(t *testing.T) {
+	testM147ConcurrentCanonicalCommandsConverge(t, 32)
+}
+
+func TestM147ConcurrentCanonicalCommandsConvergeProductionPool(t *testing.T) {
+	testM147ConcurrentCanonicalCommandsConverge(t, DefaultMaxOpenConnections)
+}
+
+func testM147ConcurrentCanonicalCommandsConverge(t *testing.T, maxOpenConnections int) {
+	t.Helper()
 	database := openTestDB(t)
+	database.SetMaxOpenConns(maxOpenConnections)
 	fixture := seedControlGraph(t, database)
 	insertControlRootAudits(t, fixture)
-	if got := database.Stats().MaxOpenConnections; got != DefaultMaxOpenConnections {
-		t.Fatalf("max open connections=%d, want production bound %d", got, DefaultMaxOpenConnections)
+	if got := database.Stats().MaxOpenConnections; got != maxOpenConnections {
+		t.Fatalf("max open connections=%d, want %d", got, maxOpenConnections)
 	}
 	expires := controlTimeOffset(t, database, "+5 minutes")
 	canonical := controlDigest("concurrent-canonical-command")
@@ -364,11 +374,21 @@ func TestM147ConcurrentCanonicalCommandsConverge(t *testing.T) {
 }
 
 func TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwner(t *testing.T) {
+	testM147ConcurrentRuntimeAcceptanceHasOneEffectOwner(t, 32)
+}
+
+func TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwnerProductionPool(t *testing.T) {
+	testM147ConcurrentRuntimeAcceptanceHasOneEffectOwner(t, DefaultMaxOpenConnections)
+}
+
+func testM147ConcurrentRuntimeAcceptanceHasOneEffectOwner(t *testing.T, maxOpenConnections int) {
+	t.Helper()
 	database := openTestDB(t)
+	database.SetMaxOpenConns(maxOpenConnections)
 	fixture := seedControlGraph(t, database)
 	insertControlRootAudits(t, fixture)
-	if got := database.Stats().MaxOpenConnections; got != DefaultMaxOpenConnections {
-		t.Fatalf("max open connections=%d, want production bound %d", got, DefaultMaxOpenConnections)
+	if got := database.Stats().MaxOpenConnections; got != maxOpenConnections {
+		t.Fatalf("max open connections=%d, want %d", got, maxOpenConnections)
 	}
 	expires := controlTimeOffset(t, database, "+5 minutes")
 	commandIDs := make([]string, 32)

@@ -31,9 +31,15 @@ jobs:
         working-directory: backend
         run: go test -count=1 -p 1 -timeout=30m ./...
 
+      - name: Backend — unsupported platform fails closed
+        working-directory: backend
+        run: |
+          go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
+          go test -tags paimos_test_unsupported -count=1 ./agentd ./agentdwire ./ownedprocess -run '^TestUnsupportedPlatform'
+
       - name: Backend — broad control-plane race
         working-directory: backend
-        # The runner walks package-local concurrency contracts sequentially.
+        # The runner walks package-local and handler shard concurrency contracts sequentially.
         # That stays broad without starving latency-budget tests by racing all
         # heavyweight packages against each other on one shared CI machine.
         run: ../scripts/backend-pr-race.sh './...'
