@@ -161,9 +161,10 @@ to disk in plaintext.
 > history). Workstations use the hidden prompt above; automation sets
 > `PAIMOS_URL` and `PAIMOS_API_KEY` together as one runtime-only target — there is deliberately
 > no way to pass a credential via argv. Any legacy `api_key:` field
-> still in `config.yaml` is migrated into the keyring on the next CLI
-> run — even when `PAIMOS_API_KEY` is set; on keyring-less machines the
-> CLI warns instead and asks you to delete the field manually.
+> still in `config.yaml` is migrated into the keyring on the next configured
+> CLI run. On keyring-less machines the CLI leaves the only copy in place and
+> fails with instructions to use the complete `PAIMOS_URL` + `PAIMOS_API_KEY`
+> env-only target and remove the legacy field manually.
 
 ### 2. Try a read-only command
 

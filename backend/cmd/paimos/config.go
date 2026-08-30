@@ -27,10 +27,11 @@ type Config struct {
 // InstanceConfig is one named target. The URL is persisted to disk;
 // APIKey is a runtime-only field — it is never serialised back to
 // config.yaml (saveConfig strips it defensively) and is hydrated from
-// the OS keyring (or PAIMOS_API_KEY) when a command needs to make a
-// request. The yaml tag is kept so legacy config files written by
-// pre-keyring versions still parse cleanly during the one-time
-// migration in loadConfig.
+// the OS keyring when a configured-instance command needs to make a
+// request. PAIMOS_URL and PAIMOS_API_KEY form a separate, complete
+// env-only target and never hydrate a configured instance. The yaml tag is
+// kept so legacy config files written by pre-keyring versions still parse
+// cleanly during the one-time migration in loadConfig.
 type InstanceConfig struct {
 	URL          string `yaml:"url"`
 	APIKey       string `yaml:"api_key,omitempty"`
@@ -94,12 +95,10 @@ func loadConfig() (Config, error) {
 // (the common steady-state case after the first migration).
 //
 // PAI-685: a set PAIMOS_API_KEY used to skip migration entirely, so a
-// legacy plaintext key could sit in config.yaml forever on machines
-// that always export the env var. Env is a runtime override, never a
-// reason to keep secrets on disk — migration now always runs. Only
-// when the keyring itself is unusable (headless box) does the field
-// stay, with a loud nag instead of a hard failure, because deleting
-// the only stored copy would destroy the credential.
+// legacy plaintext key could sit in config.yaml forever. Migration now
+// always runs for configured instances. When the keyring is unusable, the
+// field stays and loading fails with guidance for the complete env-only
+// target; deleting the only stored copy would destroy the credential.
 func migrateAPIKeysToKeyring(cfg *Config, path string) error {
 	migrated := make([]string, 0)
 	for name, inst := range cfg.Instances {
@@ -107,16 +106,7 @@ func migrateAPIKeysToKeyring(cfg *Config, path string) error {
 			continue
 		}
 		if err := keyringSet(name, inst.APIKey); err != nil {
-			if os.Getenv(envAPIKey) != "" {
-				fmt.Fprintf(stderr, "paimos: WARNING: legacy api_key for instance %q remains in %s (keyring unavailable: %v) — remove it manually; %s is a runtime-only override\n",
-					name, path, err, envAPIKey)
-				// In-memory scrub: nothing downstream may read the
-				// YAML credential; resolution uses env → keyring only.
-				inst.APIKey = ""
-				cfg.Instances[name] = inst
-				continue
-			}
-			return fmt.Errorf("migrate api_key for instance %q to keyring: %w (set %s to bypass)", name, err, envAPIKey)
+			return fmt.Errorf("migrate api_key for instance %q to keyring: %w; the legacy field remains in %s — use %s and %s together for a complete env-only target, then remove the legacy field manually", name, err, path, envURL, envAPIKey)
 		}
 		inst.APIKey = ""
 		cfg.Instances[name] = inst
@@ -239,11 +229,12 @@ func pickInstance(cfg Config) (string, InstanceConfig, error) {
 	return pick, inst, nil
 }
 
-// resolveInstance picks the instance and hydrates its API key from
-// PAIMOS_API_KEY or the OS keyring. Used by every authenticated
-// command. Returns a usage error when the instance is configured but
-// no credential is available, so the caller can map it to exit code 2
-// and a "run paimos auth login" hint.
+// resolveInstance picks a configured instance and hydrates its API key from
+// the OS keyring. PAIMOS_URL plus PAIMOS_API_KEY is resolved earlier as a
+// complete env-only target and never reaches this function. Used by every
+// authenticated command. Returns a usage error when the instance is configured
+// but no credential is available, so the caller can map it to exit code 2 and
+// a "run paimos auth login" hint.
 func resolveInstance(cfg Config) (string, InstanceConfig, error) {
 	name, inst, err := pickInstance(cfg)
 	if err != nil {
