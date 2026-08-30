@@ -159,7 +159,7 @@ to disk in plaintext.
 > **Upgrading from ≤ 5.6:** `paimos auth login --api-key …` was removed
 > (a credential in process arguments lands in `ps` output and shell
 > history). Workstations use the hidden prompt above; automation sets
-> `PAIMOS_API_KEY` as a runtime-only override — there is deliberately
+> `PAIMOS_URL` and `PAIMOS_API_KEY` together as one runtime-only target — there is deliberately
 > no way to pass a credential via argv. Any legacy `api_key:` field
 > still in `config.yaml` is migrated into the keyring on the next CLI
 > run — even when `PAIMOS_API_KEY` is set; on keyring-less machines the
@@ -217,7 +217,8 @@ paimos auth login --name ppm       --url https://pm.barta.cm
 paimos auth login --name staging   --url https://pm.staging.example.com
 paimos --instance ppm issue list   # switch per-command
 
-# CI / containers (no OS keyring available)
+# CI / containers (no OS keyring available; URL and key are one target)
+export PAIMOS_URL="https://pm.barta.cm"
 export PAIMOS_API_KEY="paimos_<your-key>"
 paimos issue list --project PAI
 

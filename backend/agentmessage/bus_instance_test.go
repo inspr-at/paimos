@@ -19,6 +19,17 @@ func TestBusInstanceIdentityRejectsProductionDefault(t *testing.T) {
 	}
 }
 
+func TestBusInstanceIdentityRequiresProductionDeploymentIdentity(t *testing.T) {
+	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "ppm")
+	for _, expected := range []string{"", "default"} {
+		t.Run(expected, func(t *testing.T) {
+			if err := ValidateInstanceIdentity(expected, true); err == nil || !strings.Contains(err.Error(), "PAIMOS_INSTANCE") {
+				t.Fatalf("err=%v, want missing production deployment identity refusal", err)
+			}
+		})
+	}
+}
+
 func TestBusInstanceIdentityRejectsConfiguredMismatch(t *testing.T) {
 	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "pma")
 	if err := ValidateInstanceIdentity("ppm", true); err == nil || !strings.Contains(err.Error(), "does not match") {

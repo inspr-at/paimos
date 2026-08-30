@@ -141,6 +141,9 @@ func ValidateInstanceIdentity(expected string, production bool) error {
 		return fmt.Errorf("production requires PAIMOS_AGENT_BUS_INSTANCE to be an explicit non-default instance ID")
 	}
 	expected = strings.TrimSpace(expected)
+	if production && (expected == "" || expected == "default") {
+		return fmt.Errorf("production requires PAIMOS_INSTANCE to be an explicit non-default deployment ID")
+	}
 	if expected != "" && raw != "" && name != expected {
 		return fmt.Errorf("PAIMOS_AGENT_BUS_INSTANCE %q does not match configured instance %q", name, expected)
 	}

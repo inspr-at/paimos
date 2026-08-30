@@ -130,8 +130,9 @@ either, and reports only `has_secret`. Every wake POST carries
 `Authorization: Bearer <sender key>` — the header the trigger card issues —
 next to `Idempotency-Key`. A `grok_bot_routine` target without a sender key
 is refused, and a version registered before the key existed blocks with
-`target_secret_missing` instead of calling the endpoint. The server must also
-set `PAIMOS_AGENT_BUS_INSTANCE=ppm` and include the routine hostname in
+`target_secret_missing` instead of calling the endpoint. The live server must
+also set `PAIMOS_ENV=production`, matching `PAIMOS_INSTANCE=ppm` and
+`PAIMOS_AGENT_BUS_INSTANCE=ppm`, and include the routine hostname in
 `PAIMOS_AGENT_BUS_WEBHOOK_HOSTS`. A steer request to this adapter is recorded
 as `effective_level=simple` with `fallback_reason=unsupported`; PAIMOS does not
 run `grok send`, `grok queue`, or `grok steer`.
@@ -247,9 +248,10 @@ Use `--instance <name>` on any command to switch, or rely on `default_instance`.
 
 #### Headless / CI
 
-If there's no session keyring available (CI runners, containers, headless Linux without `gnome-keyring` / `kwalletd`), set `PAIMOS_API_KEY` in the environment. With a configured instance, it overrides the keyring lookup for the lifetime of the process:
+If there's no session keyring available (CI runners, containers, headless Linux without `gnome-keyring` / `kwalletd`), set `PAIMOS_URL` and `PAIMOS_API_KEY` together. They form one env-only target and bypass configured-instance and keyring resolution for the lifetime of the process:
 
 ```sh
+export PAIMOS_URL="https://pm.barta.cm"
 export PAIMOS_API_KEY="paimos_…"
 paimos issue list --project PAI
 ```
@@ -270,7 +272,7 @@ export PPMAPIKEY="paimos_…"
 paimos issue list --project PAI
 ```
 
-Precedence is: `PAIMOS_URL` + `PAIMOS_API_KEY`, then `PPM_URL` + `PPMAPIKEY`, then configured instances (`--instance`, `default_instance`, sole instance). Without an env URL, `PAIMOS_API_KEY` remains a credential-only override for the configured instance.
+Precedence is: `PAIMOS_URL` + `PAIMOS_API_KEY`, then `PPM_URL` + `PPMAPIKEY`, then configured instances (`--instance`, `default_instance`, sole instance). A generic `PAIMOS_API_KEY` without `PAIMOS_URL` never applies to a named configured instance; use `paimos auth login --name <instance>` so credentials stay scoped to that instance.
 
 #### Log out
 
@@ -820,6 +822,7 @@ auth (the browser SPA) is never narrowed.
 # Admin logs in to the web UI, goes to Settings → API Keys, ticks
 # "projects:write" on a new key, gives it to the agent.
 export PAIMOS_API_KEY="paimos_..."
+export PAIMOS_URL="https://pm.barta.cm"
 
 paimos project create --name "My new project" --key MYP
 # or, from Claude Desktop:

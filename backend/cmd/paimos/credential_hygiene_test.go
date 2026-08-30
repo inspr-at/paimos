@@ -75,8 +75,13 @@ func TestAuthLogin_HelpSurface(t *testing.T) {
 	if !containsFold(c.Long, "hidden interactive prompt") {
 		t.Fatalf("help does not recommend the hidden prompt:\n%s", c.Long)
 	}
-	if !strings.Contains(c.Long, envAPIKey) {
-		t.Fatalf("help does not name the headless override:\n%s", c.Long)
+	for _, envName := range []string{envURL, envAPIKey} {
+		if !strings.Contains(c.Long, envName) {
+			t.Fatalf("help does not name the complete headless target pair %s:\n%s", envName, c.Long)
+		}
+		if !strings.Contains(f.Usage, envName) {
+			t.Fatalf("retired flag guidance does not name the complete headless target pair %s: %s", envName, f.Usage)
+		}
 	}
 }
 
