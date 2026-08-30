@@ -69,6 +69,23 @@ func TestMigration162DeduplicatesOnlySafeScopeIdentities(t *testing.T) {
 	if err := migrateThrough(database, 162); err != nil {
 		t.Fatalf("apply M162: %v", err)
 	}
+	for index, predicate := range map[string]string{
+		"idx_issues_knowledge_identity_project":  "WHERE project_id IS NOT NULL AND slug IS NOT NULL",
+		"idx_issues_knowledge_identity_user":     "WHERE project_id IS NULL AND user_id IS NOT NULL AND slug IS NOT NULL",
+		"idx_issues_knowledge_identity_instance": "WHERE project_id IS NULL AND user_id IS NULL AND slug IS NOT NULL",
+	} {
+		var definition string
+		if err := database.QueryRow(`SELECT sql FROM sqlite_master WHERE type='index' AND name=?`, index).Scan(&definition); err != nil {
+			t.Fatalf("load %s: %v", index, err)
+		}
+		if !strings.Contains(definition, predicate) {
+			t.Fatalf("%s definition %q missing %q", index, definition, predicate)
+		}
+	}
+	var legacyIndex int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_issues_type_slug_project'`).Scan(&legacyIndex); err != nil || legacyIndex != 0 {
+		t.Fatalf("legacy knowledge identity index remains count=%d err=%v", legacyIndex, err)
+	}
 	for label, tc := range map[string]struct {
 		query  string
 		args   []any

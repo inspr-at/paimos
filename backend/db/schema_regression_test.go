@@ -1310,8 +1310,10 @@ func TestSchemaContainsCriticalIndexes(t *testing.T) {
 		"idx_mutation_log_parent",
 		"idx_documents_project",
 		"idx_time_entries_mite_id",
-		// PAI-338 / M96 — slug uniqueness for the knowledge plane.
-		"idx_issues_type_slug_project",
+		// PAI-857 / M162 — one slug identity namespace per owner scope.
+		"idx_issues_knowledge_identity_project",
+		"idx_issues_knowledge_identity_user",
+		"idx_issues_knowledge_identity_instance",
 		// PAI-345 / M99 — user-scoped knowledge lookups.
 		"idx_issues_user_type",
 		// PAI-336 / M105 — queryable privileged-action audit feed.
