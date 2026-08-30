@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/inspr-at/paimos/backend/db"
 )
 
 func TestKnowledgeIdentityConcurrentCreateReturnsOneCreatedAndConflicts(t *testing.T) {
@@ -205,6 +207,66 @@ func TestKnowledgeIdentityRestoreAfterReuseReturns409(t *testing.T) {
 			decode(t, restore, &body)
 			if !strings.Contains(body.Error, `memory "reused"`) || !strings.Contains(body.Error, test.name+"-scope identity") {
 				t.Fatalf("restore conflict=%q, want named %s identity", body.Error, test.name)
+			}
+		})
+	}
+}
+
+func TestKnowledgeIdentityUndoDeleteAfterReuseReturns409(t *testing.T) {
+	tests := []struct {
+		name      string
+		endpoints func(*testing.T, *testServer) (collection, entry string)
+	}{
+		{
+			name: "project",
+			endpoints: func(t *testing.T, ts *testServer) (string, string) {
+				projectID := createTestProject(t, ts, "Undo project identity", "UND")
+				return knowledgeURL(projectID, "memory"), knowledgeEntryURL(projectID, "memory", "reused")
+			},
+		},
+		{name: "user", endpoints: func(_ *testing.T, _ *testServer) (string, string) {
+			return userMemoryURL, userMemoryEntryURL("reused")
+		}},
+		{name: "instance", endpoints: func(_ *testing.T, _ *testServer) (string, string) {
+			return instanceMemoryURL, instanceMemoryEntryURL("reused")
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ts := newTestServer(t)
+			collection, entry := test.endpoints(t, ts)
+			first := ts.post(t, collection, ts.adminCookie, map[string]any{"slug": "reused", "title": "First"})
+			assertStatus(t, first, http.StatusCreated)
+			oldID := responseID(t, first)
+			assertStatus(t, ts.del(t, entry, ts.adminCookie), http.StatusNoContent)
+			assertStatus(t, ts.post(t, collection, ts.adminCookie, map[string]any{"slug": "reused", "title": "Second"}), http.StatusCreated)
+
+			var logID int64
+			if err := db.DB.QueryRow(`SELECT id FROM mutation_log
+				WHERE subject_type='issue' AND subject_id=? AND mutation_type='issue.delete'
+				ORDER BY id DESC LIMIT 1`, oldID).Scan(&logID); err != nil {
+				t.Fatalf("find delete mutation: %v", err)
+			}
+			undo := ts.post(t, "/api/undo/"+itoa(logID), ts.adminCookie, map[string]any{})
+			assertStatus(t, undo, http.StatusConflict)
+			var body struct {
+				Error string `json:"error"`
+			}
+			decode(t, undo, &body)
+			if !strings.Contains(body.Error, `memory "reused"`) || !strings.Contains(body.Error, test.name+"-scope identity") {
+				t.Fatalf("undo conflict=%q, want named %s identity", body.Error, test.name)
+			}
+			var oldStillTrashed, undoStillActive int
+			if err := db.DB.QueryRow(`SELECT COUNT(*) FROM issues WHERE id=? AND deleted_at IS NOT NULL`, oldID).Scan(&oldStillTrashed); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.DB.QueryRow(`SELECT COUNT(*) FROM mutation_log
+				WHERE id=? AND undone_at IS NULL AND on_user_stack=1`, logID).Scan(&undoStillActive); err != nil {
+				t.Fatal(err)
+			}
+			if oldStillTrashed != 1 || undoStillActive != 1 {
+				t.Fatalf("conflicting undo mutated state: oldStillTrashed=%d undoStillActive=%d", oldStillTrashed, undoStillActive)
 			}
 		})
 	}

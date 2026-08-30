@@ -1543,6 +1543,11 @@ func runUndoMode(w http.ResponseWriter, r *http.Request, mode undoMode, byReques
 					jsonError(w, "irreversible mutation", status)
 					return
 				}
+				var identityConflict *undoConflictError
+				if status == http.StatusConflict && errors.As(err, &identityConflict) {
+					jsonError(w, identityConflict.Error(), status)
+					return
+				}
 				jsonError(w, "undo failed", status)
 				return
 			}
@@ -1619,6 +1624,11 @@ func runUndoMode(w http.ResponseWriter, r *http.Request, mode undoMode, byReques
 		log.Printf("undo flow: %v", err)
 		if status == http.StatusLocked {
 			jsonError(w, "irreversible mutation", status)
+			return
+		}
+		var identityConflict *undoConflictError
+		if status == http.StatusConflict && errors.As(err, &identityConflict) {
+			jsonError(w, identityConflict.Error(), status)
 			return
 		}
 		jsonError(w, "undo failed", status)

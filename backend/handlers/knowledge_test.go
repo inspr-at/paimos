@@ -248,7 +248,7 @@ func TestKnowledge_CrossTypeSlugIndependence(t *testing.T) {
 	projectID := createTestProject(t, ts, "Cross Type", "XCT")
 
 	// Same slug in memory AND runbook should both succeed — the
-	// partial UNIQUE index is scoped on (type, slug, project_id).
+	// scope-specific live-knowledge identity includes the entry type.
 	memResp := ts.post(t, knowledgeURL(projectID, "memory"), ts.adminCookie, map[string]interface{}{
 		"slug":  "deploy",
 		"title": "Memory: deploy facts",
