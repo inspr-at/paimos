@@ -128,6 +128,7 @@ PUT      /projects/:id/nodes/:nodeID/parent
 GET|PUT  /node-labels
 GET|PUT  /projects/:id/node-labels
 GET|POST /projects/:id/product-sessions
+GET      /projects/:id/session-home/v1
 GET      /projects/:id/product-sessions/:productSessionID
 GET      /projects/:id/product-sessions/:productSessionID/events
 POST     /projects/:id/product-sessions/:productSessionID/attach-node
@@ -156,6 +157,30 @@ attach, reattach, and detach also append immutable actor, before/after node, and
 before/after revision evidence in the same atomic mutation. A failed CAS
 appends no event. An attached node must be explicitly detached before it can be
 moved to another project or sent to trash.
+
+The parallel session-home endpoint is a strict schema-v1, read-only projection
+for one viewed project. Its fixed top-level shape is `schema_version: 1`,
+`project_id`, `sessions`, and `totals`; every property is present, empty state
+uses `sessions: []`, and rows sort by `updated_at DESC, product_session_id ASC`.
+Each row retains its product-session identity and nullable node, so loose
+sessions and multiple sessions attached to one node remain distinct.
+
+Project-agent rows compose target-level unread inbox counts and held-message
+exception attention with at most one fresh, ownership-correct active M161
+harness generation. Management mode and advertised capabilities come only from
+that generation. Ambiguous, stale, ownership-mismatched, or cross-project
+candidates fail closed with no harness/address or direct controls; unmanaged
+rows never advertise interrupt or stop. Direct steer is exposed only when the
+generation advertises it, otherwise the closed control state is
+`paimos_nudge`. A Paimos-targeted product session returns an explicit `paimos`
+target with no invented project agent. The route reauthorizes the current
+principal and project ownership inside one read snapshot, and every response
+uses `Cache-Control: private, no-store`. The exact nested schema and closed
+enums are defined by `GET /openapi.json`.
+
+`totals.unread` de-duplicates shared target-agent inboxes when several product
+sessions select the same registered agent; `totals.attention` counts session
+rows whose exception-attention block is required.
 
 ## Time entries
 

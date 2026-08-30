@@ -48,6 +48,7 @@ type detachProductSessionNodeRequest struct {
 }
 
 func RegisterProductSessionRoutes(r chi.Router) {
+	r.With(auth.AgentModePrivateNoStore, auth.RequireProjectView).Get("/projects/{id}/session-home/v1", SessionHomeV1)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/product-sessions", ListProductSessions)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/product-sessions", CreateProductSession)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/product-sessions/{productSessionID}", GetProductSession)

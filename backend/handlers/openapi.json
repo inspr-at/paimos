@@ -81,6 +81,10 @@
       "description": "Paimos 6 product sessions, distinct from attribution, harness-control, run, delivery, and intake sessions"
     },
     {
+      "name": "session-home",
+      "description": "Strict project-scoped Paimos 6 session-home projection (schema v1)"
+    },
+    {
       "name": "nodes",
       "description": "Paimos 6 one-node compatibility API over legacy issues"
     }
@@ -1830,6 +1834,96 @@
           "node_id": {"type": "integer", "format": "int64", "minimum": 1},
           "node_key": {"type": "string"},
           "label": {"type": "string"}
+        }
+      },
+      "SessionHomeTargetV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["kind", "project_agent_id", "agent_name", "address"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["paimos", "project_agent"]},
+          "project_agent_id": {"type": ["integer", "null"], "format": "int64"},
+          "agent_name": {"type": ["string", "null"]},
+          "address": {"type": ["string", "null"]}
+        }
+      },
+      "SessionHomeStatusV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["phase", "reason"],
+        "properties": {
+          "phase": {"type": "string", "enum": ["paimos", "starting", "working", "yielded", "stopping", "unavailable"]},
+          "reason": {"type": "string", "enum": ["paimos_target", "active", "no_active_harness", "stale_harness", "ambiguous_harness", "ownership_mismatch"]}
+        }
+      },
+      "SessionHomeHarnessV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["harness", "management_mode", "advertised_capabilities"],
+        "properties": {
+          "harness": {"type": "string"},
+          "management_mode": {"type": "string", "enum": ["managed", "unmanaged"]},
+          "advertised_capabilities": {"$ref": "#/components/schemas/HarnessCapabilities"}
+        }
+      },
+      "SessionHomeControlsV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["steer", "interrupt", "stop"],
+        "properties": {
+          "steer": {"type": "string", "enum": ["direct", "paimos_nudge"]},
+          "interrupt": {"type": "boolean"},
+          "stop": {"type": "boolean"}
+        }
+      },
+      "SessionHomeInboxV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["unread_count", "latest_unread_at"],
+        "properties": {
+          "unread_count": {"type": "integer", "format": "int64", "minimum": 0},
+          "latest_unread_at": {"type": ["string", "null"], "format": "date-time"}
+        }
+      },
+      "SessionHomeAttentionV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["required", "exception_count", "action_request_count", "reason"],
+        "properties": {
+          "required": {"type": "boolean"},
+          "exception_count": {"type": "integer", "format": "int64", "minimum": 0},
+          "action_request_count": {"type": "integer", "format": "int64", "minimum": 0},
+          "reason": {"type": ["string", "null"], "enum": ["action_request", "sender_not_allowed", null]}
+        }
+      },
+      "SessionHomeRowV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["product_session_id", "title", "summary", "revision", "updated_at", "target", "status", "harness", "controls", "node", "inbox", "attention"],
+        "properties": {
+          "product_session_id": {"type": "string", "format": "uuid"},
+          "title": {"type": "string", "minLength": 1, "maxLength": 240},
+          "summary": {"type": "string", "maxLength": 4000},
+          "revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "updated_at": {"type": "string", "format": "date-time"},
+          "target": {"$ref": "#/components/schemas/SessionHomeTargetV1"},
+          "status": {"$ref": "#/components/schemas/SessionHomeStatusV1"},
+          "harness": {"oneOf": [{"$ref": "#/components/schemas/SessionHomeHarnessV1"}, {"type": "null"}]},
+          "controls": {"$ref": "#/components/schemas/SessionHomeControlsV1"},
+          "node": {"oneOf": [{"$ref": "#/components/schemas/ProductSessionNode"}, {"type": "null"}]},
+          "inbox": {"$ref": "#/components/schemas/SessionHomeInboxV1"},
+          "attention": {"$ref": "#/components/schemas/SessionHomeAttentionV1"}
+        }
+      },
+      "SessionHomeSnapshotV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "project_id", "sessions", "totals"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "project_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "sessions": {"type": "array", "items": {"$ref": "#/components/schemas/SessionHomeRowV1"}},
+          "totals": {
+            "type": "object", "additionalProperties": false,
+            "required": ["sessions", "unread", "attention"],
+            "properties": {
+              "sessions": {"type": "integer", "minimum": 0},
+              "unread": {"type": "integer", "format": "int64", "minimum": 0},
+              "attention": {"type": "integer", "minimum": 0}
+            }
+          }
         }
       },
       "ProductSession": {
@@ -4681,6 +4775,22 @@
     "/api/projects/{id}/messages/delivery-unavailable": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
       "post": {"tags": ["agents"], "summary": "Release an unavailable leased agentd delivery to a live generation or simple fallback", "description": "Does not complete or acknowledge the delivery. The same row must receive a fresh FIFO lease and CompleteLocalDelivery handoff. Working M161 generations require a heartbeat no older than 90 seconds; no valid route becomes blocked target_missing.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentDeliveryUnavailable"}}}}, "responses": {"200": {"description": "Delivery re-pended to an eligible route"}, "400": {"description": "Lease, attribution, or route validation failed"}}}
+    },
+    "/api/projects/{id}/session-home/v1": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {
+        "tags": ["session-home"],
+        "summary": "Read the strict version-one session home for an authorized project",
+        "description": "Composes durable product sessions with target-agent inbox and exception attention, nullable nodes, and fresh unambiguous M161 harness truth. Paimos is an explicit target. Ambiguous, stale, ownership-mismatched, and cross-project harness candidates fail closed. This does not change Agent Mode schema v1.",
+        "responses": {
+          "200": {
+            "description": "Authorized session-home snapshot in updated_at descending, product_session_id ascending order. Cache-Control is private, no-store.",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionHomeSnapshotV1"}}}
+          },
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
     },
     "/api/projects/{id}/product-sessions": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
