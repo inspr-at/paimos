@@ -78,6 +78,8 @@ import { ArrowLeft, Command, FlaskConical } from 'lucide-vue-next'
 .p6-back {
   justify-self: start;
   gap: 7px;
+  min-width: 30px;
+  min-height: 30px;
   color: var(--p6-muted);
   font-size: 12px;
   font-weight: 600;
@@ -148,6 +150,7 @@ import { ArrowLeft, Command, FlaskConical } from 'lucide-vue-next'
   }
   .p6-back span,
   .p6-fixture-chip { display: none; }
+  .p6-back { justify-content: center; }
   .p6-wordmark { justify-self: center; font-size: 15px; gap: 7px; }
   .p6-mark { width: 25px; height: 25px; border-radius: 8px; }
   .p6-six { font-size: 9px; }

@@ -148,7 +148,7 @@ defineEmits<{
   align-items: center;
 }
 .p6-card-topline { width: 100%; gap: 7px; min-height: 22px; }
-.p6-session-mode { gap: 5px; margin-right: auto; color: #738079; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.p6-session-mode { gap: 5px; margin-right: auto; color: #59655e; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .p6-state-flag { gap: 4px; padding: 3px 7px; border: 1px solid; border-radius: 999px; font-size: 10px; font-weight: 700; }
 .p6-state-selected { border-color: #b6d2c2; color: #285b45; background: #eef7f1; }
 .p6-state-attention { border-color: #e8c4aa; color: #89471f; background: #fff5ed; }
@@ -158,7 +158,7 @@ defineEmits<{
 .p6-summary { min-height: 42px; color: #606e66; font-size: 12.5px; line-height: 1.62; }
 .p6-attention-reason { display: flex; align-items: flex-start; gap: 8px; padding: 10px 11px; border-radius: 10px; color: #7b4828; background: #fff7f1; font-size: 11.5px; line-height: 1.45; }
 .p6-attention-reason svg { flex: 0 0 auto; margin-top: 1px; }
-.p6-card-facts { display: grid; gap: 7px; color: #707d76; font-size: 10.5px; }
+.p6-card-facts { display: grid; gap: 7px; color: #59655e; font-size: 10.5px; }
 .p6-card-facts > span { gap: 6px; }
 .p6-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #75827b; }
 .p6-status-dot.is-working { background: #3f8263; }
@@ -167,7 +167,7 @@ defineEmits<{
 .p6-card-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 11px 15px 14px; border-top: 1px solid #edf1ee; }
 .p6-card-actions button { gap: 5px; min-height: 30px; padding: 0 9px; border: 1px solid #dce4df; border-radius: 8px; color: #58665e; background: #fbfcfa; font: 600 10.5px/1 "DM Sans", sans-serif; }
 .p6-card-actions button:hover:not(:disabled) { border-color: #a9bdb1; color: #285b45; background: #f2f7f3; }
-.p6-card-actions button:disabled { cursor: not-allowed; opacity: 0.48; }
+.p6-card-actions button:disabled { border-style: dashed; color: #59655e; background: #f5f7f5; cursor: not-allowed; }
 .p6-card-actions .p6-paimos-nudge { border-color: #b9cdbf; color: #285b45; background: #f0f6f2; }
 .p6-unmanaged-note { padding: 0 15px 14px; color: #67756d; font-size: 10.5px; line-height: 1.45; }
 

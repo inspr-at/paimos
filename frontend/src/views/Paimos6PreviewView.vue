@@ -39,7 +39,8 @@ function previewAction(label: string, id: string) {
 </script>
 
 <template>
-  <main class="p6-home" aria-labelledby="p6-title">
+  <div class="p6-preview-root">
+  <main class="p6-home" aria-labelledby="p6-title" :inert="doorOpen || undefined">
     <section class="p6-intro">
       <div class="p6-source-framing" aria-label="Paimos sources">
         <span class="p6-source is-active"><CircleDot :size="12" aria-hidden="true" /> Paimos · active source</span>
@@ -105,15 +106,18 @@ function previewAction(label: string, id: string) {
       <Inbox :size="13" aria-hidden="true" /> {{ statusMessage }}
     </p>
 
-    <Paimos6TalkDoor
+  </main>
+
+  <Paimos6TalkDoor
       v-model:open="doorOpen"
       :target-agent="selectedSession?.agent ?? null"
       @status="statusMessage = $event"
     />
-  </main>
+  </div>
 </template>
 
 <style scoped>
+.p6-preview-root { min-height: 100%; }
 .p6-home {
   width: min(1180px, calc(100% - 64px));
   margin: 0 auto;
@@ -131,14 +135,14 @@ function previewAction(label: string, id: string) {
 .p6-deck { max-width: 680px; margin-top: 18px; color: #66736c; font-size: 13px; line-height: 1.7; }
 .p6-glance { display: grid; min-width: 250px; grid-template-columns: repeat(3, 1fr); gap: 0; padding-bottom: 5px; }
 .p6-glance div { padding: 0 16px; border-left: 1px solid #dbe3de; }
-.p6-glance dt { color: #7a857f; font-size: 9px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
+.p6-glance dt { color: #59655e; font-size: 9px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
 .p6-glance dd { display: flex; align-items: center; gap: 5px; margin-top: 5px; color: #31443a; font: 500 18px/1 "Bricolage Grotesque", sans-serif; }
-.p6-glance dd span { color: #78837d; font: 500 9px/1 "DM Sans", sans-serif; }
+.p6-glance dd span { color: #59655e; font: 500 9px/1 "DM Sans", sans-serif; }
 .p6-sessions { margin-top: 78px; }
 .p6-section-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 17px; }
 .p6-section-kicker { display: flex; align-items: center; gap: 6px; }
 .p6-section-head h2 { margin-top: 4px; font-family: "Bricolage Grotesque", "DM Sans", sans-serif; font-size: 23px; font-weight: 600; letter-spacing: -0.035em; }
-.p6-selection-copy { display: flex; align-items: center; gap: 12px; color: #6f7b74; font-size: 10.5px; }
+.p6-selection-copy { display: flex; align-items: center; gap: 12px; color: #59655e; font-size: 10.5px; }
 .p6-selection-copy strong { color: #315b47; font-family: "JetBrains Mono", monospace; font-size: 10px; }
 .p6-selection-copy button { padding: 5px 8px; border: 1px solid #d7e0da; border-radius: 7px; color: #53645b; background: #fbfcfa; font-size: 10px; }
 .p6-selection-copy button:hover { border-color: #aabdb1; }

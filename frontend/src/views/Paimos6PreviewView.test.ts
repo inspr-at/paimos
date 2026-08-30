@@ -69,6 +69,7 @@ describe('Paimos6PreviewView (PAI-854)', () => {
     await nextTick()
     const door = mounted.el.querySelector<HTMLElement>('.p6-talk-door')!
     expect(door).not.toBeNull()
+    expect(mounted.el.querySelector('main')?.hasAttribute('inert')).toBe(true)
     const mic = door.querySelector<HTMLButtonElement>('.p6-mic')!
     await vi.waitFor(() => expect(document.activeElement).toBe(mic))
     expect(door.textContent!.indexOf('Amy')).toBeLessThan(door.textContent!.indexOf('Human node form'))
@@ -91,12 +92,17 @@ describe('Paimos6PreviewView (PAI-854)', () => {
     expect(document.activeElement).toBe(summary)
 
     details.open = true
+    details.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(door.querySelector('.p6-door-status')?.textContent).toContain('Name the node')
+
     const input = details.querySelector<HTMLInputElement>('#p6-node-title')!
     input.value = 'Local planning node'
     input.dispatchEvent(new Event('input', { bubbles: true }))
     details.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await nextTick()
     expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain('staged in local preview state only')
+    expect(door.querySelector('.p6-door-status')?.textContent).toContain('staged in local preview state only')
     expect(fetchSpy).not.toHaveBeenCalled()
 
     const submit = details.querySelector<HTMLButtonElement>('button[type="submit"]')!
@@ -111,6 +117,7 @@ describe('Paimos6PreviewView (PAI-854)', () => {
     const reopenedTrigger = mounted.el.querySelector<HTMLButtonElement>('[aria-label="Open the talk-first door"]')!
     expect(reopenedTrigger).not.toBeNull()
     await vi.waitFor(() => expect(document.activeElement).toBe(reopenedTrigger))
+    expect(mounted.el.querySelector('main')?.hasAttribute('inert')).toBe(false)
     await mounted.unmount()
   })
 

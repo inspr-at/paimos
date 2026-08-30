@@ -14,6 +14,7 @@ const emit = defineEmits<{
 
 const micMode = ref<'idle' | 'tap' | 'hold'>('idle')
 const nodeTitle = ref('')
+const localStatus = ref('Local fixture only. Nothing is recorded, sent, or saved.')
 const triggerRef = ref<HTMLButtonElement | null>(null)
 const doorRef = ref<HTMLElement | null>(null)
 const micRef = ref<HTMLButtonElement | null>(null)
@@ -39,6 +40,11 @@ watch(
 
 function closeDoor() {
   emit('update:open', false)
+}
+
+function announce(message: string) {
+  localStatus.value = message
+  emit('status', message)
 }
 
 function trapFocus(event: KeyboardEvent) {
@@ -71,8 +77,7 @@ function toggleMic() {
     return
   }
   micMode.value = micMode.value === 'tap' ? 'idle' : 'tap'
-  emit(
-    'status',
+  announce(
     micMode.value === 'tap'
       ? 'Tap-toggle preview active. No microphone opened, speech recognized, or message sent.'
       : 'Tap-toggle preview stopped. Nothing was recorded or sent.',
@@ -81,12 +86,13 @@ function toggleMic() {
 
 function beginHold(event: PointerEvent) {
   const button = event.currentTarget as HTMLButtonElement
+  suppressClick = false
   button.setPointerCapture?.(event.pointerId)
   if (holdTimer) clearTimeout(holdTimer)
   holdTimer = setTimeout(() => {
     holdEngaged = true
     micMode.value = 'hold'
-    emit('status', 'Hold-to-talk preview active. No microphone opened, speech recognized, or message sent.')
+    announce('Hold-to-talk preview active. No microphone opened, speech recognized, or message sent.')
   }, 450)
 }
 
@@ -99,16 +105,16 @@ function endHold() {
   holdEngaged = false
   suppressClick = true
   micMode.value = 'idle'
-  emit('status', 'Hold-to-talk preview released. Nothing was recorded or sent.')
+  announce('Hold-to-talk preview released. Nothing was recorded or sent.')
 }
 
 function stageNode() {
   const title = nodeTitle.value.trim()
   if (!title) {
-    emit('status', 'Name the node before staging it in the local fixture.')
+    announce('Name the node before staging it in the local fixture.')
     return
   }
-  emit('status', `Node “${title}” staged in local preview state only. Nothing was saved.`)
+  announce(`Node “${title}” staged in local preview state only. Nothing was saved.`)
   nodeTitle.value = ''
 }
 
@@ -129,16 +135,23 @@ onBeforeUnmount(() => {
     <Plus :size="22" aria-hidden="true" />
   </button>
 
-  <aside
-    v-else
-    ref="doorRef"
-    class="p6-talk-door"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="p6-talk-title"
-    @keydown.esc.stop.prevent="closeDoor"
-    @keydown.tab="trapFocus"
-  >
+  <div v-else class="p6-door-layer">
+    <button
+      type="button"
+      class="p6-door-backdrop"
+      tabindex="-1"
+      aria-label="Close the talk-first door"
+      @click="closeDoor"
+    ></button>
+    <aside
+      ref="doorRef"
+      class="p6-talk-door"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="p6-talk-title"
+      @keydown.esc.stop.prevent="closeDoor"
+      @keydown.tab="trapFocus"
+    >
     <header class="p6-talk-head">
       <div>
         <span class="p6-eyebrow">Talk-first door</span>
@@ -181,7 +194,9 @@ onBeforeUnmount(() => {
       </p>
     </section>
 
-    <details class="p6-node-door">
+      <p class="p6-door-status" role="status" aria-live="polite" aria-atomic="true">{{ localStatus }}</p>
+
+      <details class="p6-node-door">
       <summary>
         <span>Human node form</span>
         <small>Secondary · the 1% door</small>
@@ -196,8 +211,9 @@ onBeforeUnmount(() => {
         <button type="submit">Stage locally</button>
         <p>Local preview state only. No API request and no saved node.</p>
       </form>
-    </details>
-  </aside>
+      </details>
+    </aside>
+  </div>
 </template>
 
 <style scoped>
@@ -226,10 +242,24 @@ onBeforeUnmount(() => {
   outline: 3px solid rgba(47, 107, 82, 0.3);
   outline-offset: 3px;
 }
-.p6-talk-door {
+.p6-door-layer {
   position: fixed;
+  inset: 0;
+  z-index: 9;
+}
+.p6-door-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: rgba(25, 38, 31, 0.2);
+}
+.p6-talk-door {
+  position: absolute;
   inset: 78px 18px 18px auto;
-  z-index: 10;
+  z-index: 1;
   width: min(410px, calc(100vw - 36px));
   overflow-y: auto;
   padding: 24px;
@@ -240,7 +270,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 24px 70px rgba(28, 48, 38, 0.16);
 }
 .p6-talk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
-.p6-eyebrow { color: #758079; font-size: 9px; font-weight: 750; letter-spacing: 0.11em; text-transform: uppercase; }
+.p6-eyebrow { color: #59655e; font-size: 9px; font-weight: 750; letter-spacing: 0.11em; text-transform: uppercase; }
 .p6-talk-head h2 { margin-top: 4px; font-family: "Bricolage Grotesque", "DM Sans", sans-serif; font-size: 23px; font-weight: 600; letter-spacing: -0.035em; }
 .p6-close { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid #dce4df; border-radius: 10px; color: #637068; background: #fff; }
 .p6-amy { margin-top: 24px; padding: 18px; border: 1px solid #d8e3dc; border-radius: 17px; background: linear-gradient(145deg, #f0f7f2, #fbfcfa 72%); }
@@ -253,6 +283,7 @@ onBeforeUnmount(() => {
 .p6-mic.is-active { color: #f4faf6; background: #315e49; box-shadow: 0 0 0 5px rgba(49, 94, 73, 0.1); }
 .p6-mic-help { margin-top: 10px; color: #536159; font-size: 11px; text-align: center; }
 .p6-mic-truth { margin-top: 8px; color: #59655e; font-size: 10.5px; line-height: 1.55; text-align: center; }
+.p6-door-status { margin-top: 14px; padding: 9px 10px; border: 1px solid #d8e1db; border-radius: 9px; color: #59655e; background: #f7f9f7; font-size: 10.5px; line-height: 1.45; }
 .p6-node-door { margin-top: 22px; border-top: 1px solid #e0e7e2; }
 .p6-node-door summary { display: flex; align-items: center; justify-content: space-between; padding: 18px 2px 12px; color: #536159; cursor: pointer; font-size: 11.5px; font-weight: 650; }
 .p6-node-door summary small { color: #59655e; font-size: 9.5px; font-weight: 600; }
