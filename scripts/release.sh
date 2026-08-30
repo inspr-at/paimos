@@ -546,8 +546,21 @@ ensure_auto_merge() {
   echo "Protected auto-merge enabled for $PR_URL." >&2
 }
 
+required_checks_green_for_pinned_head() {
+  local checks
+  checks=$(gh pr checks "$PR_NUMBER" \
+    --repo "$REPO" \
+    --required \
+    --json name,state,bucket,workflow) || return 1
+  jq -e '
+    type == "array"
+      and length > 0
+      and all(.[]; .state == "SUCCESS" or .state == "SKIPPED")
+  ' >/dev/null <<<"$checks"
+}
+
 wait_for_protected_merge() {
-  local start now pr_json state merge_status merge_oid
+  local start now pr_json state merge_status merge_oid known_green_checks=0
   start=$(date +%s)
   while true; do
     now=$(date +%s)
@@ -588,6 +601,15 @@ wait_for_protected_merge() {
         ensure_auto_merge "$pr_json"
         ;;
     esac
+    # A resumed release can reach this loop with every required check already
+    # green for the still-pinned PR head. Confirm that exact evidence once,
+    # distinguish the remaining protected-merge wait from a suite wait, and
+    # make one immediate state query before returning to the normal poll.
+    if [[ "$known_green_checks" -eq 0 ]] && required_checks_green_for_pinned_head; then
+      echo "Required checks already green for exact release head $VALIDATED_HEAD_OID; waiting only for protected merge." >&2
+      known_green_checks=1
+      continue
+    fi
     echo "Waiting for protected checks/merge ($merge_status): $PR_URL" >&2
     sleep "$MERGE_POLL"
   done

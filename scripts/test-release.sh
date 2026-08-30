@@ -611,13 +611,14 @@ test_committed_recovery_receipts_are_exact() {
 }
 
 test_protected_release_and_resume_states() {
-  local repo state origin merge_oid tag_oid
+  local repo state origin merge_oid tag_oid output
   repo=$(setup_repo success)
   state="$TMP_ROOT/success/gh-state"
+  output="$TMP_ROOT/success/release-output"
   origin=$(git -C "$repo" remote get-url origin)
   prepend_release_notes "$repo"
 
-  FAKE_GH_ADVANCE_AFTER_MERGE=1 run_release "$repo" "$state" patch --no-edit >/dev/null
+  FAKE_GH_ADVANCE_AFTER_MERGE=1 run_release "$repo" "$state" patch --no-edit >"$output" 2>&1
   merge_oid=$(<"$state/merge-oid")
   tag_oid=$(git --git-dir="$origin" rev-parse 'refs/tags/v1.0.1^{}')
   [[ "$tag_oid" == "$merge_oid" ]] || fail 'tag does not point at protected-main merge commit'
@@ -625,8 +626,10 @@ test_protected_release_and_resume_states() {
     fail 'tag followed a later main commit instead of the release PR merge'
   [[ $(git --git-dir="$origin" show refs/pull/1/head:VERSION) == '1.0.1' ]] || fail 'release PR head version mismatch'
   git --git-dir="$origin" show -s --format='%B' refs/pull/1/head | grep -q 'Signed-off-by: Release Author <release-author@example.test>' || fail 'release commit lacks DCO sign-off'
-  ! grep -q '^pr checks' "$state/calls.log" ||
-    fail 'normal auto-merge path consulted the exceptional recovery verifier'
+  grep -q '^pr checks 1 .*--required .*--json name,state,bucket,workflow' "$state/calls.log" ||
+    fail 'normal auto-merge path did not inspect exact-head required checks'
+  grep -q 'Required checks already green for exact release head.*waiting only for protected merge' "$output" ||
+    fail 'normal auto-merge path did not distinguish green checks from the remaining merge wait'
   ! git -C "$repo" show-ref --verify --quiet refs/heads/release/v1.0.1 || fail 'local release branch was not cleaned up'
   ! git --git-dir="$origin" show-ref --verify --quiet refs/heads/release/v1.0.1 || fail 'remote release branch was not cleaned up'
   assert_one_pr "$state"

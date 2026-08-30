@@ -328,11 +328,23 @@ func rebuildAgentRunTelemetryLatest(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func Open() error {
+func databasePathFromEnvironment() (string, error) {
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
+		if os.Getenv("PAIMOS_TEST_MODE") == "1" {
+			return "", errors.New("PAIMOS_TEST_MODE requires an explicit DATA_DIR for an isolated SQLite database")
+		}
 		dataDir = "/app/data"
 	}
+	return filepath.Join(dataDir, brand.Default.DBFilename), nil
+}
+
+func Open() error {
+	dbPath, err := databasePathFromEnvironment()
+	if err != nil {
+		return err
+	}
+	dataDir := filepath.Dir(dbPath)
 
 	// 0o750: the data dir holds the SQLite DB and secret key; only the
 	// backend process (and its group) need access.
@@ -341,7 +353,6 @@ func Open() error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	dbPath := filepath.Join(dataDir, brand.Default.DBFilename)
 	// PAI-596: `_txlock=immediate` makes every transaction issue BEGIN IMMEDIATE,
 	// acquiring the write lock up front instead of lazily upgrading a deferred
 	// read→write transaction. Lazy upgrades fail instantly with SQLITE_BUSY when

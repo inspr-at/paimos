@@ -1250,6 +1250,30 @@ func TestSchemaCreatesDatabaseFileInConfiguredDataDir(t *testing.T) {
 	}
 }
 
+func TestTestDatabasePathRequiresExplicitIsolation(t *testing.T) {
+	t.Setenv("PAIMOS_TEST_MODE", "1")
+	t.Setenv("DATA_DIR", "")
+	if _, err := databasePathFromEnvironment(); err == nil || !strings.Contains(err.Error(), "explicit DATA_DIR") {
+		t.Fatalf("implicit test database path error=%v, want explicit DATA_DIR rejection", err)
+	}
+
+	firstDir := t.TempDir()
+	t.Setenv("DATA_DIR", firstDir)
+	first, err := databasePathFromEnvironment()
+	if err != nil {
+		t.Fatalf("first isolated database path: %v", err)
+	}
+	secondDir := t.TempDir()
+	t.Setenv("DATA_DIR", secondDir)
+	second, err := databasePathFromEnvironment()
+	if err != nil {
+		t.Fatalf("second isolated database path: %v", err)
+	}
+	if first == second || first != filepath.Join(firstDir, "paimos.db") || second != filepath.Join(secondDir, "paimos.db") {
+		t.Fatalf("isolated database paths first=%q second=%q", first, second)
+	}
+}
+
 func TestSchemaEnablesForeignKeysAndPassesIntegrityCheck(t *testing.T) {
 	db := openTestDB(t)
 	enabled, err := ForeignKeysEnabled(db)

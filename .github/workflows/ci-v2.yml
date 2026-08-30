@@ -36,15 +36,13 @@ jobs:
       - name: Every PR commit carries its author's DCO sign-off
         run: ./scripts/check-dco.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
 
-  test:
-    # PAI-365: skip on tag pushes — the tag commit was already gated
-    # by the protected release PR and resulting main-branch run before
-    # release.sh tags that exact merge commit. Saves ~5 min per release.
-    # PRs and main-branch pushes still run the full pipeline.
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+  backend-pr:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
@@ -53,25 +51,58 @@ jobs:
           # Bump deliberately when govulncheck flags the standard library.
           cache-dependency-path: backend/go.sum
 
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Backend — vet + test
+      - name: Backend — vet + changed-package tests
         working-directory: backend
-        # -p 1 serializes per-package test execution. The handlers
-        # package + db package both call db.Open() against an in-memory
-        # SQLite, which under concurrent setup races on PRAGMA
-        # journal_mode=WAL (SQLITE_BUSY). The handlers package contains
-        # hundreds of fresh-DB tests and every open applies the complete
-        # migration chain, so keep an explicit package timeout above Go's
-        # 10-minute default rather than turning expected progress into a
-        # false hang after additive migrations.
         run: |
+          set -euo pipefail
+          mapfile -t packages < <(../scripts/backend-changed-packages.sh \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
           go vet ./...
-          go test -count=1 -p 1 -timeout=30m ./...
+          if (( ${#packages[@]} == 0 )); then
+            echo 'No backend package changed; reusing full-suite evidence from the protected base.'
+          else
+            printf 'Changed backend package: %s\n' "${packages[@]}"
+            ../scripts/backend-pr-test.sh "${packages[@]}"
+          fi
+
+  backend-pr-race:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend — changed-package race
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(../scripts/backend-changed-packages.sh --direct \
+            '${{ github.event.pull_request.base.sha }}' \
+            '${{ github.event.pull_request.head.sha }}')
+          if (( ${#packages[@]} == 0 )); then
+            echo 'No backend package changed; no PR race target.'
+          else
+            printf 'Changed backend race package: %s\n' "${packages[@]}"
+            ../scripts/backend-pr-race.sh "${packages[@]}"
+          fi
+
+  backend-security-invariants:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
 
       - name: Backend — security invariants
         working-directory: backend
@@ -87,16 +118,18 @@ jobs:
           go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
           go test -tags paimos_test_unsupported -count=1 ./agentd ./agentdwire ./ownedprocess -run '^TestUnsupportedPlatform'
 
-      # PAI-809: keep the race detector on the control-plane paths that own
-      # concurrent confirmation, claim, input sealing, adapter dedupe, and the
-      # durable runner journal. A repository-wide -race run is prohibitively
-      # slow because every handlers test reapplies the full SQLite migrations.
-      - name: Backend — supervisory control race gate
-        working-directory: backend
-        run: |
-          go test -race -count=1 -timeout=8m ./supervision -run '^(TestGrantReplayAndCompetingRevocationUseM147Truth|TestThirtyTwoConcurrentCommandCreateAndConfirmConverge|TestThirtyTwoConcurrentAcceptedEffectReservationAndClaimConverge|TestInputResponseAndSupersedeRaceConvergesToOneTerminalSeal|TestInputResponseAndRunTerminalRaceConvergesToOneTerminalEvent)$'
-          go test -race -count=1 -timeout=5m ./cmd/paimos -run '^(TestRunnerControlFakeAdapterConformance|TestRunnerControlJournalSerializesPumpAndResultWriters|TestHTTPRunnerReportTransportSerializesConcurrentSequence)$'
-          go test -race -count=1 -timeout=5m ./agentd ./localjournal ./ownedprocess
+  quality:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
 
       # PAI-578: the hygiene/freshness scripts use ripgrep (`rg`), which is
       # not preinstalled on the ubuntu-24 runner image. Without it,
@@ -116,6 +149,9 @@ jobs:
 
       - name: Release scripts — protected-main flow and recovery
         run: ./scripts/test-release.sh
+
+      - name: CI scripts — backend PR/full split
+        run: ./scripts/test-backend-pr-gate.sh
 
       # PAI-270: prove the dev-login route does NOT ship in production
       # binaries. Build the production binary the same way the
@@ -137,7 +173,7 @@ jobs:
               "PAIMOS_DEV_LOGIN_TOKEN must be at least 32 chars" \
               "DEV-LOGIN ROUTE ENABLED"
           do
-            if strings /tmp/paimos-prod | grep -qF "$canary"; then
+            if grep -aFq "$canary" /tmp/paimos-prod; then
               echo "::error::production binary contains dev-login canary: $canary"
               echo "::error::either the build-tag chain is broken or dev-login code leaked into a non-tagged file"
               exit 1
@@ -151,7 +187,7 @@ jobs:
               "PAIMOS_DEV_LOGIN_TOKEN must be at least 32 chars" \
               "DEV-LOGIN ROUTE ENABLED"
           do
-            if ! strings /tmp/paimos-dev | grep -qF "$canary"; then
+            if ! grep -aFq "$canary" /tmp/paimos-dev; then
               echo "::error::dev-build binary is missing canary: $canary"
               echo "::error::canary string was removed; this test is no longer load-bearing — pick a new canary"
               exit 1
@@ -159,9 +195,25 @@ jobs:
           done
           echo "✓ dev-login canaries: absent in prod build, present in dev build"
 
+      - name: Backend — dev-login tagged contracts
+        working-directory: backend
+        run: go test -tags dev_login -count=1 ./auth ./devseed
+
       - name: Anchor index — verify dogfood anchors
         working-directory: backend
         run: go run ./cmd/paimos anchors verify --repo-root .. --index ../.paimos/anchors.json
+
+  frontend-quality:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Frontend — lint + typecheck + test
         working-directory: frontend
@@ -171,6 +223,35 @@ jobs:
           npm run lint           # PAI-295: eslint gate (errors fail; existing debt is warnings)
           npm run typecheck
           npm test
+
+  # Keep the protected `test` context stable while its independent lanes run
+  # concurrently. The ruleset still fails closed if any relevant lane fails.
+  test:
+    if: always() && (github.ref == 'refs/heads/main' || github.event_name == 'pull_request')
+    needs: [backend-pr, backend-pr-race, backend-security-invariants, quality, frontend-quality]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every event-relevant test lane
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BACKEND_PR: ${{ needs.backend-pr.result }}
+          BACKEND_PR_RACE: ${{ needs.backend-pr-race.result }}
+          BACKEND_SECURITY_INVARIANTS: ${{ needs.backend-security-invariants.result }}
+          QUALITY: ${{ needs.quality.result }}
+          FRONTEND_QUALITY: ${{ needs.frontend-quality.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == 'pull_request' ]]; then
+            [[ "$BACKEND_PR" == 'success' ]]
+            [[ "$BACKEND_PR_RACE" == 'success' ]]
+            [[ "$BACKEND_SECURITY_INVARIANTS" == 'success' ]]
+          else
+            [[ "$BACKEND_PR" == 'skipped' ]]
+            [[ "$BACKEND_PR_RACE" == 'skipped' ]]
+            [[ "$BACKEND_SECURITY_INVARIANTS" == 'skipped' ]]
+          fi
+          [[ "$QUALITY" == 'success' ]]
+          [[ "$FRONTEND_QUALITY" == 'success' ]]
 
   e2e:
     # PAI-297: E2E smoke — boots the real backend + vite stack and drives the
@@ -390,9 +471,9 @@ jobs:
         run: |
           # Sign every meta tag we just pushed by digest so the
           # signature pins the immutable manifest, not a moving label.
-          for tag in $(echo "${{ steps.meta.outputs.tags }}"); do
-            cosign sign --yes "$tag@$DIGEST"
-          done
+          while IFS= read -r tag; do
+            [[ -z "$tag" ]] || cosign sign --yes "$tag@$DIGEST"
+          done <<<"${{ steps.meta.outputs.tags }}"
       - name: Cosign — attach SBOM attestations
         if: github.ref_type == 'tag'
         env:

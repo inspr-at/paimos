@@ -1,0 +1,39 @@
+name: backend-full
+
+# Expensive exhaustive assurance stays off the ordinary PR merge path. It
+# still runs for every protected-main and release-tag commit, nightly, and on
+# demand. release.sh waits only for the release-evidence workflows (`ci` and
+# `release`), so this independent tag sweep cannot make it re-wait the serial
+# suite it already proved on the exact protected head.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend — full serial suite
+        working-directory: backend
+        run: go test -count=1 -p 1 -timeout=30m ./...
+
+      - name: Backend — broad control-plane race
+        working-directory: backend
+        # The runner walks package-local concurrency contracts sequentially.
+        # That stays broad without starving latency-budget tests by racing all
+        # heavyweight packages against each other on one shared CI machine.
+        run: ../scripts/backend-pr-race.sh './...'
