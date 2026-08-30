@@ -244,6 +244,15 @@ func TestSupervisorStopRaceWithNaturalExitDoesNotOverwriteTerminalState(t *testi
 	t.Fatalf("status=%+v", supervisor.Status())
 }
 
+func TestSupervisorTerminalPersistenceBarrierHonorsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := waitSessionFinalized(ctx, &sessionEntry{monitorDone: make(chan struct{})})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("terminal persistence wait error=%v, want context cancellation", err)
+	}
+}
+
 func TestSupervisorKeepsLiveProcessControlAcrossAdapterReplacement(t *testing.T) {
 	process := newFakeProcess(4321)
 	process.steerErr = errors.New("proxy restart")

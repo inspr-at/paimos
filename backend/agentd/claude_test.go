@@ -366,6 +366,26 @@ func TestClaudeSupervisorRestartLosesOwnershipWithoutPersistingContent(t *testin
 	if _, err := first.Stop(context.Background(), session.ID, ControlRequest{CorrelationID: "cleanup-original-owner"}); err != nil {
 		t.Fatal(err)
 	}
+	// Match t.Cleanup's LIFO order explicitly, then prove Close is a complete
+	// terminal-persistence barrier before TempDir removes the shared StateRoot.
+	if err := second.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := first.get(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entry.monitorDone:
+	default:
+		t.Fatal("Supervisor.Close returned before terminal journal persistence completed")
+	}
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatalf("remove finalized supervisor StateRoot: %v", err)
+	}
 }
 
 func TestClaudeReleaseUsesPinnedOperatorSDKWithoutBundledVendorBytes(t *testing.T) {
