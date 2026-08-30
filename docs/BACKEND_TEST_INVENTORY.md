@@ -91,7 +91,9 @@ covers the original risk.
   runners. The two M147 SQLite arbitration tests still start 32 simultaneous
   application goroutines under `-race`, each in its own process, while the SQL
   pool retains the production ten-connection bound and five-second busy
-  timeout. The 19 handler concurrency contracts use four isolated race shards.
+  timeout. The 664 handler normal tests and 19 handler concurrency contracts
+  are each partitioned across four independently provisioned matrix runners;
+  the PR lane rejects an unindexed local four-process invocation.
   E2E and security scanning remain separate required contexts.
 - The protected `test` context is an aggregator over every vet, normal, race,
   performance, backend quality, and frontend quality lane, so GitHub still
@@ -127,6 +129,14 @@ covers the original risk.
   46.98s; retaining 32 writers while restoring the production pool bound made
   the same mutation proof pass in 57.85s. Split DB and handler race lanes then
   passed under simultaneous local load in 85.85s and 115.20s respectively.
+- The second hosted candidate proved every non-handler backend lane below five
+  minutes: affected reverse dependents 4m17s, DB race 3m42s, DB normal 1m48s,
+  security invariants 1m56s, vet 1m02s, and isolated performance 28s. It also
+  disproved four handler processes sharing one two-core runner: normal took
+  6m40s and race failed at 8m59s after resource contention produced a 500 and
+  `SQLITE_BUSY`. The final matrix gives each unchanged shard its own runner;
+  both failed-under-contention race tests passed alone with `GOMAXPROCS=2` in
+  24.60s and 22.81s.
 - The corrected full serial suite passed in 689.81s, including unsharded
   `handlers` in 394.602s, `db` in 87.326s, and `supervision` in 54.967s. This is
   the exact assurance retained on main, nightly, tags, and manual dispatch.

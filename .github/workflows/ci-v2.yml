@@ -111,6 +111,10 @@ jobs:
   backend-pr-handlers:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -131,7 +135,7 @@ jobs:
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; handler test lane is empty.'
           else
-            ../scripts/backend-pr-test.sh --lane=handlers "${packages[@]}"
+            ../scripts/backend-pr-test.sh --lane=handlers --shard="${{ matrix.shard }}/4" "${packages[@]}"
           fi
 
   backend-pr-performance:
@@ -218,6 +222,10 @@ jobs:
   backend-pr-handlers-race:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -238,7 +246,7 @@ jobs:
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; handler race lane is empty.'
           else
-            ../scripts/backend-pr-race.sh --lane=handlers "${packages[@]}"
+            ../scripts/backend-pr-race.sh --lane=handlers --shard="${{ matrix.shard }}/4" "${packages[@]}"
           fi
 
   backend-security-invariants:

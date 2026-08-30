@@ -93,9 +93,16 @@ db_plan=$("$TEST_RUNNER" --dry-run --lane=db github.com/inspr-at/paimos/backend/
 [[ "$(printf '%s\n' "$db_plan" | rg -o 'Test[A-Za-z0-9_]+' | LC_ALL=C sort -u | wc -l | tr -d ' ')" -eq 136 ]] ||
   fail 'db normal-test shards do not account for every top-level test'
 
-handler_plan=$("$TEST_RUNNER" --dry-run --lane=handlers github.com/inspr-at/paimos/backend/handlers)
-[[ "$(grep -c '^go test .* ./handlers -run ' <<<"$handler_plan")" -eq 4 ]] ||
-  fail 'handlers package is not split into four normal-test shards'
+handler_plan=
+if "$TEST_RUNNER" --dry-run --lane=handlers github.com/inspr-at/paimos/backend/handlers >/dev/null 2>&1; then
+  fail 'handler normal lane still allows four local processes instead of requiring one matrix shard'
+fi
+for shard in 0 1 2 3; do
+  plan=$("$TEST_RUNNER" --dry-run --lane=handlers --shard="$shard/4" github.com/inspr-at/paimos/backend/handlers)
+  [[ "$(grep -c '^go test .* ./handlers -run ' <<<"$plan")" -eq 1 ]] ||
+    fail "handler normal shard $shard does not own exactly one invocation"
+  handler_plan+="$plan"$'\n'
+done
 [[ "$(printf '%s\n' "$handler_plan" | rg -o 'Test[A-Za-z0-9_]+' | LC_ALL=C sort -u | wc -l | tr -d ' ')" -eq 664 ]] ||
   fail 'handlers normal-test shards do not account for every top-level test'
 
@@ -112,11 +119,22 @@ db_race_plan=$("$RACE_RUNNER" --dry-run --lane=db github.com/inspr-at/paimos/bac
   fail 'db race plan does not isolate the two 32-writer arbitration proofs'
 [[ "$db_race_plan" != *'./...'* && "$db_race_plan" != *'./handlers'* ]] ||
   fail 'db race plan escaped the changed package'
-handler_race_plan=$("$RACE_RUNNER" --dry-run --lane=handlers github.com/inspr-at/paimos/backend/handlers)
+handler_race_plan=
+if "$RACE_RUNNER" --dry-run --lane=handlers github.com/inspr-at/paimos/backend/handlers >/dev/null 2>&1; then
+  fail 'handler race lane still allows four local processes instead of requiring one matrix shard'
+fi
+for shard in 0 1 2 3; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=handlers --shard="$shard/4" github.com/inspr-at/paimos/backend/handlers)
+  [[ "$(grep -c '^go test -race .* ./handlers -run ' <<<"$plan")" -eq 1 ]] ||
+    fail "handler race shard $shard does not own exactly one invocation"
+  handler_race_plan+="$plan"$'\n'
+done
 [[ "$handler_race_plan" == *'Concurrent'* && "$handler_race_plan" != *'TestRegression_'* && "$handler_race_plan" != *'TestAuthzFuzz_'* ]] ||
   fail 'handler race plan is not limited to concurrency contracts'
 [[ "$(grep -c '^go test -race .* ./handlers -run ' <<<"$handler_race_plan")" -eq 4 ]] ||
-  fail 'handler concurrency race is not split into four shards'
+  fail 'handler concurrency race does not have four independently runnable shards'
+[[ "$(printf '%s\n' "$handler_race_plan" | rg -o 'Test[A-Za-z0-9_]+' | LC_ALL=C sort -u | wc -l | tr -d ' ')" -eq 19 ]] ||
+  fail 'handler concurrency race shards do not account for all 19 top-level contracts exactly once'
 agentmode_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected github.com/inspr-at/paimos/backend/agentmode)
 [[ "$agentmode_race_plan" == *'subscribe\ before\ high-water'* && "$agentmode_race_plan" == *'permission\ grant\ and\ revoke'* ]] ||
   fail 'agentmode race plan lost non-performance stream concurrency subtests'
@@ -168,6 +186,9 @@ do
   [[ "$plan" != *'-p 1'* && "$plan" != *'go test -count=1 -timeout=30m ./...'* ]] ||
     fail "parallel PR $lane lane still runs the serialized/full tree"
 done
+[[ "$handlers" == *'matrix:'* && "$handlers" == *'shard: [0, 1, 2, 3]'* &&
+  "$handlers" == *"--shard=\"\${{ matrix.shard }}/4\""* ]] ||
+  fail 'handler normal shards do not run on four independent matrix runners'
 
 [[ "$race" == *"github.event_name == 'pull_request'"* ]] || fail 'race PR lane is not pull-request-only'
 [[ "$race" == *'backend-changed-packages.sh --direct'* && "$race" == *'backend-pr-race.sh --lane=affected'* ]] ||
@@ -178,6 +199,9 @@ done
   fail 'parallel PR DB race lane is incomplete'
 [[ "$handlers_race" == *'backend-changed-packages.sh --direct'* && "$handlers_race" == *'backend-pr-race.sh --lane=handlers'* ]] ||
   fail 'parallel PR handler race lane is incomplete'
+[[ "$handlers_race" == *'matrix:'* && "$handlers_race" == *'shard: [0, 1, 2, 3]'* &&
+  "$handlers_race" == *"--shard=\"\${{ matrix.shard }}/4\""* ]] ||
+  fail 'handler race shards do not run on four independent matrix runners'
 
 [[ "$invariants" == *'TestRegression_'* && "$invariants" == *'TestAuthzFuzz_'* && "$invariants" == *'paimos_test_unsupported'* ]] ||
   fail 'parallel security/platform invariant lane is incomplete'

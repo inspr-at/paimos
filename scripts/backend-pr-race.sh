@@ -8,6 +8,8 @@ GO_COMMAND=${GO_COMMAND:-go}
 RACE_GOMAXPROCS=${BACKEND_RACE_GOMAXPROCS:-2}
 LANE=all
 DRY_RUN=0
+SELECTED_SHARD=-1
+SELECTED_SHARD_COUNT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -17,6 +19,20 @@ while [[ $# -gt 0 ]]; do
       ;;
     --lane=*)
       LANE=${1#--lane=}
+      shift
+      ;;
+    --shard=*)
+      shard_spec=${1#--shard=}
+      [[ "$shard_spec" =~ ^[0-9]+/[1-9][0-9]*$ ]] || {
+        echo "backend-pr-race: invalid shard: $shard_spec" >&2
+        exit 2
+      }
+      SELECTED_SHARD=$((10#${shard_spec%/*}))
+      SELECTED_SHARD_COUNT=$((10#${shard_spec#*/}))
+      (( SELECTED_SHARD < SELECTED_SHARD_COUNT )) || {
+        echo "backend-pr-race: shard index is outside count: $shard_spec" >&2
+        exit 2
+      }
       shift
       ;;
     *)
@@ -31,8 +47,16 @@ case "$LANE" in
     exit 2
     ;;
 esac
+if (( SELECTED_SHARD >= 0 )) && [[ "$LANE" != handlers ]]; then
+  echo "backend-pr-race: --shard is supported only for the handlers lane" >&2
+  exit 2
+fi
+if [[ "$LANE" == handlers ]] && (( SELECTED_SHARD < 0 )); then
+  echo "backend-pr-race: handlers lane requires exactly one --shard=INDEX/COUNT" >&2
+  exit 2
+fi
 [[ $# -gt 0 ]] || {
-  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers] <changed-package>..." >&2
+  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers] [--shard=INDEX/COUNT] <changed-package>..." >&2
   exit 2
 }
 
@@ -63,7 +87,7 @@ run_race() {
 
 run_race_shards() {
   local package="$1" match="$2" shard_count="$3"
-  local names=() shard index pattern pid failed=0
+  local names=() shard index pattern pid failed=0 shard_start=0 shard_end="$shard_count"
   local pids=()
   cd "$BACKEND"
   while IFS= read -r name; do
@@ -78,7 +102,16 @@ run_race_shards() {
     exit 1
   }
 
-  for ((shard = 0; shard < shard_count; shard++)); do
+  if (( SELECTED_SHARD >= 0 )); then
+    [[ "$SELECTED_SHARD_COUNT" -eq "$shard_count" ]] || {
+      echo "backend-pr-race: shard count=$SELECTED_SHARD_COUNT, want $shard_count" >&2
+      exit 2
+    }
+    shard_start=$SELECTED_SHARD
+    shard_end=$((SELECTED_SHARD + 1))
+  fi
+
+  for ((shard = shard_start; shard < shard_end; shard++)); do
     pattern='^('
     for ((index = shard; index < ${#names[@]}; index += shard_count)); do
       [[ "$pattern" == '^(' ]] || pattern+='|'
