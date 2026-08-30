@@ -53,7 +53,7 @@ All are optional; defaults produce "PAIMOS" out of the box.
 | `BRAND_PUBLIC_URL` | *(empty)* | Required for password-reset magic links. Falls back to `BRAND_WEBSITE_URL` if unset. No trailing slash. |
 | `BRAND_EMAIL_FROM` | *(empty)* | `From:` header on outgoing emails. Falls back to `noreply@<host-of-BRAND_WEBSITE_URL>` when SMTP is configured but this is unset. |
 | `BRAND_TOTP_ISSUER` | `BRAND_PRODUCT_NAME` | Shown by authenticator apps on TOTP enrollment |
-| `BRAND_HEALTH_SERVICE_NAME` | lowercase `BRAND_PRODUCT_NAME` | `GET /api/health` → `{"status":"ok","service":"…","version":"…"}` (`version` is stamped from `VERSION` at build time, `"dev"` for local builds) |
+| `BRAND_HEALTH_SERVICE_NAME` | lowercase `BRAND_PRODUCT_NAME` | `GET /api/health` service label. The response also reports the build version and non-secret remote deployment/Agent Intercom identity evidence used by `paimos doctor`. |
 | `BRAND_PAGE_TITLE` | `BRAND_PRODUCT_NAME` [+ ` — ` + `BRAND_COMPANY_NAME`] | Shipped as the `pageTitle` in default branding |
 
 ## Live updates
@@ -92,8 +92,8 @@ and `pma` at the same target registry or dispatcher configuration.
 | Var | Default | Notes |
 |---|---|---|
 | `PAIMOS_ENV` | *(empty / development)* | Set exactly `production` on every live deployment. This activates fail-closed deployment checks, including the agent-bus identity firewall. |
-| `PAIMOS_INSTANCE` | *(empty)* | Deployment instance ID used to prove that the bus identity matches the configured domain. Required and non-default when `PAIMOS_ENV=production`. |
-| `PAIMOS_AGENT_BUS_INSTANCE` | `default` (development only) | Stable non-secret bus identity written into target, delivery, idempotency, and webhook records. Production rejects an empty/`default` ID and any mismatch with `PAIMOS_INSTANCE`; `ppm` must set `ppm` and `pma` must independently set `pma`. |
+| `PAIMOS_DEPLOYMENT_INSTANCE` | *(empty)* | Server deployment ID used to prove that the bus identity matches the configured domain. Required and non-default when `PAIMOS_ENV=production`. This is separate from the CLI/MCP `PAIMOS_INSTANCE` configured-instance selector. |
+| `PAIMOS_AGENT_BUS_INSTANCE` | `default` (development only) | Stable non-secret bus identity written into target, delivery, idempotency, and webhook records. Production rejects an empty/`default` ID and any mismatch with `PAIMOS_DEPLOYMENT_INSTANCE`; `ppm` must set `ppm` and `pma` must independently set `pma`. |
 | `PAIMOS_AGENT_BUS_WEBHOOK_HOSTS` | *(empty / all denied)* | Comma-separated exact hostnames approved for operator-registered `https_webhook` targets. Amy's Grok Bot routine hostname must appear here before its target can be registered. |
 | `PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS` | `false` | When `true`, permits loopback/private/link-local webhook addresses. Intended only for isolated local capture tests; keep false in production. HTTPS and the hostname allowlist still apply. |
 
@@ -103,7 +103,7 @@ Amy's target (replace only the hostname placeholder):
 ```text
 PAIMOS_ENV=production
 PAIMOS_AGENT_BUS_INSTANCE=ppm
-PAIMOS_INSTANCE=ppm
+PAIMOS_DEPLOYMENT_INSTANCE=ppm
 PAIMOS_AGENT_BUS_WEBHOOK_HOSTS=<Amy routine hostname>
 PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS=false
 ```

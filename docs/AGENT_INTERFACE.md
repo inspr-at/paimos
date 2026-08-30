@@ -131,7 +131,7 @@ either, and reports only `has_secret`. Every wake POST carries
 next to `Idempotency-Key`. A `grok_bot_routine` target without a sender key
 is refused, and a version registered before the key existed blocks with
 `target_secret_missing` instead of calling the endpoint. The live server must
-also set `PAIMOS_ENV=production`, matching `PAIMOS_INSTANCE=ppm` and
+also set `PAIMOS_ENV=production`, matching `PAIMOS_DEPLOYMENT_INSTANCE=ppm` and
 `PAIMOS_AGENT_BUS_INSTANCE=ppm`, and include the routine hostname in
 `PAIMOS_AGENT_BUS_WEBHOOK_HOSTS`. A steer request to this adapter is recorded
 as `effective_level=simple` with `fallback_reason=unsupported`; PAIMOS does not

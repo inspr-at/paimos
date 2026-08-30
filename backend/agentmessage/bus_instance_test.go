@@ -23,10 +23,17 @@ func TestBusInstanceIdentityRequiresProductionDeploymentIdentity(t *testing.T) {
 	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "ppm")
 	for _, expected := range []string{"", "default"} {
 		t.Run(expected, func(t *testing.T) {
-			if err := ValidateInstanceIdentity(expected, true); err == nil || !strings.Contains(err.Error(), "PAIMOS_INSTANCE") {
+			if err := ValidateInstanceIdentity(expected, true); err == nil || !strings.Contains(err.Error(), "PAIMOS_DEPLOYMENT_INSTANCE") {
 				t.Fatalf("err=%v, want missing production deployment identity refusal", err)
 			}
 		})
+	}
+}
+
+func TestInstanceNameExposesOnlyTheValidatedLedgerIdentity(t *testing.T) {
+	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "ppm")
+	if got := InstanceName(); got != "ppm" {
+		t.Fatalf("InstanceName()=%q, want ppm", got)
 	}
 }
 

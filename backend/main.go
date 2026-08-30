@@ -79,9 +79,8 @@ func main() {
 		return
 	}
 
-	production := strings.EqualFold(strings.TrimSpace(os.Getenv("PAIMOS_ENV")), "production") ||
-		strings.EqualFold(strings.TrimSpace(os.Getenv("PAIMOS_ENV")), "prod")
-	if err := agentmessage.ValidateInstanceIdentity(os.Getenv("PAIMOS_INSTANCE"), production); err != nil {
+	production := productionEnvironment()
+	if err := agentmessage.ValidateInstanceIdentity(os.Getenv("PAIMOS_DEPLOYMENT_INSTANCE"), production); err != nil {
 		log.Fatalf("configuration: agent bus identity: %v", err)
 	}
 
@@ -233,12 +232,29 @@ const (
 // running image without SSHing to the host.
 var appVersion = "dev"
 
+type healthResponse struct {
+	Status                   string `json:"status"`
+	Service                  string `json:"service"`
+	Version                  string `json:"version"`
+	AgentBusInstance         string `json:"agent_bus_instance"`
+	DeploymentInstance       string `json:"deployment_instance"`
+	AgentBusIdentityEnforced bool   `json:"agent_bus_identity_enforced"`
+}
+
+func productionEnvironment() bool {
+	value := strings.TrimSpace(os.Getenv("PAIMOS_ENV"))
+	return strings.EqualFold(value, "production") || strings.EqualFold(value, "prod")
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "ok",
-		"service": brand.Default.HealthServiceName,
-		"version": appVersion,
+	json.NewEncoder(w).Encode(healthResponse{
+		Status:                   "ok",
+		Service:                  brand.Default.HealthServiceName,
+		Version:                  appVersion,
+		AgentBusInstance:         agentmessage.InstanceName(),
+		DeploymentInstance:       strings.TrimSpace(os.Getenv("PAIMOS_DEPLOYMENT_INSTANCE")),
+		AgentBusIdentityEnforced: productionEnvironment(),
 	})
 }
 

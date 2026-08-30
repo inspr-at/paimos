@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/spf13/cobra"
 )
 
@@ -209,6 +208,33 @@ type doctorCheck struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+type doctorHealthResponse struct {
+	Status                   string `json:"status"`
+	Service                  string `json:"service"`
+	Version                  string `json:"version"`
+	AgentBusInstance         string `json:"agent_bus_instance"`
+	DeploymentInstance       string `json:"deployment_instance"`
+	AgentBusIdentityEnforced bool   `json:"agent_bus_identity_enforced"`
+}
+
+func remoteBusIdentityCheck(health doctorHealthResponse) doctorCheck {
+	bus := strings.TrimSpace(health.AgentBusInstance)
+	deployment := strings.TrimSpace(health.DeploymentInstance)
+	if !health.AgentBusIdentityEnforced {
+		if bus == "" && deployment == "" {
+			return doctorCheck{Name: "bus_identity", Status: "warn", Detail: "server does not expose remote Agent Intercom identity evidence; upgrade the server"}
+		}
+		return doctorCheck{Name: "bus_identity", Status: "warn", Detail: "remote Agent Intercom identity firewall is not enforced"}
+	}
+	if bus == "" || bus == "default" || deployment == "" || deployment == "default" {
+		return doctorCheck{Name: "bus_identity", Status: "fail", Detail: "remote production identity is empty or default"}
+	}
+	if bus != deployment {
+		return doctorCheck{Name: "bus_identity", Status: "fail", Detail: fmt.Sprintf("remote Agent Intercom instance %q does not match deployment instance %q", bus, deployment)}
+	}
+	return doctorCheck{Name: "bus_identity", Status: "ok", Detail: "remote instance=" + bus + " [enforced]"}
+}
+
 // doctorCmd: `paimos doctor` — read-only preflight. Safe in CI.
 //
 // Checks (each prints status + optional hint). Exit codes: 0 all green,
@@ -236,26 +262,21 @@ Exit codes:
 			results = append(results, doctorCheck{Name: "config", Status: "ok",
 				Detail: resolvedInstanceDetail(instanceName, inst)})
 
-			production := strings.EqualFold(strings.TrimSpace(os.Getenv("PAIMOS_ENV")), "production") ||
-				strings.EqualFold(strings.TrimSpace(os.Getenv("PAIMOS_ENV")), "prod")
-			expectedBusInstance := strings.TrimSpace(os.Getenv("PAIMOS_INSTANCE"))
-			if expectedBusInstance == "" && instanceName != "env" && instanceName != "ppm-env" {
-				expectedBusInstance = instanceName
-			}
-			if err := agentmessage.ValidateInstanceIdentity(expectedBusInstance, production); err != nil {
-				results = append(results, doctorCheck{Name: "bus_identity", Status: "fail", Detail: err.Error()})
-				return renderDoctor(results)
-			}
-			results = append(results, doctorCheck{Name: "bus_identity", Status: "ok"})
-
 			client := newClient(inst)
 
 			// 2. /api/health — unauth, fast.
-			if _, err := client.do("GET", "/api/health", nil); err != nil {
+			healthBody, err := client.do("GET", "/api/health", nil)
+			if err != nil {
 				results = append(results, doctorCheck{Name: "health", Status: "fail", Detail: err.Error()})
 				return renderDoctor(results)
 			}
-			results = append(results, doctorCheck{Name: "health", Status: "ok"})
+			var health doctorHealthResponse
+			if err := json.Unmarshal(healthBody, &health); err != nil {
+				results = append(results, doctorCheck{Name: "health", Status: "fail", Detail: "invalid JSON response"})
+				return renderDoctor(results)
+			}
+			results = append(results, doctorCheck{Name: "health", Status: "ok", Detail: "service=" + health.Service + " version=" + health.Version})
+			results = append(results, remoteBusIdentityCheck(health))
 
 			// 3. /api/auth/me — verifies the API key is still valid.
 			me, err := client.do("GET", "/api/auth/me", nil)

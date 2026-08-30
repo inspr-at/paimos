@@ -9,9 +9,9 @@ services:
       - PORT=8888
       - INSTANCE_LABEL=${INSTANCE_LABEL:-}
       # Live deployments must pass PAIMOS_ENV=production and matching,
-      # non-default PAIMOS_INSTANCE / PAIMOS_AGENT_BUS_INSTANCE values.
+      # non-default PAIMOS_DEPLOYMENT_INSTANCE / PAIMOS_AGENT_BUS_INSTANCE values.
       - PAIMOS_ENV=${PAIMOS_ENV:-development}
-      - PAIMOS_INSTANCE=${PAIMOS_INSTANCE:-}
+      - PAIMOS_DEPLOYMENT_INSTANCE=${PAIMOS_DEPLOYMENT_INSTANCE:-}
       - PAIMOS_AGENT_BUS_INSTANCE=${PAIMOS_AGENT_BUS_INSTANCE:-default}
       # First-run only. Pass from the host for bootstrap; omit after rotation.
       - ADMIN_PASSWORD

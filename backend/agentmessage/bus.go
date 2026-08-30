@@ -127,6 +127,12 @@ func instanceName() string {
 	return name
 }
 
+// InstanceName returns the non-secret identity of this process's durable
+// Agent Intercom ledger. It is safe to expose in operational health evidence.
+func InstanceName() string {
+	return instanceName()
+}
+
 // ValidateInstanceIdentity is the startup/doctor firewall for the durable bus.
 // Development may keep the historical default when no deployment identity is
 // configured, but production must name its domain and any configured instance
@@ -142,7 +148,7 @@ func ValidateInstanceIdentity(expected string, production bool) error {
 	}
 	expected = strings.TrimSpace(expected)
 	if production && (expected == "" || expected == "default") {
-		return fmt.Errorf("production requires PAIMOS_INSTANCE to be an explicit non-default deployment ID")
+		return fmt.Errorf("production requires PAIMOS_DEPLOYMENT_INSTANCE to be an explicit non-default deployment ID")
 	}
 	if expected != "" && raw != "" && name != expected {
 		return fmt.Errorf("PAIMOS_AGENT_BUS_INSTANCE %q does not match configured instance %q", name, expected)
