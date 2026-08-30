@@ -1,0 +1,219 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, ref } from 'vue'
+import { Mic, MicOff, Plus, Sparkles, X } from 'lucide-vue-next'
+
+const props = defineProps<{
+  open: boolean
+  targetAgent: string | null
+}>()
+
+const emit = defineEmits<{
+  'update:open': [open: boolean]
+  status: [message: string]
+}>()
+
+const micMode = ref<'idle' | 'tap' | 'hold'>('idle')
+const nodeTitle = ref('')
+let holdTimer: ReturnType<typeof setTimeout> | null = null
+let holdEngaged = false
+let suppressClick = false
+
+const routeCopy = computed(() =>
+  props.targetAgent
+    ? `Preview target · Amy → ${props.targetAgent}`
+    : 'Preview target · Paimos (no session selected)',
+)
+
+function toggleMic() {
+  if (suppressClick) {
+    suppressClick = false
+    return
+  }
+  micMode.value = micMode.value === 'tap' ? 'idle' : 'tap'
+  emit(
+    'status',
+    micMode.value === 'tap'
+      ? 'Tap-toggle preview active. No microphone opened, speech recognized, or message sent.'
+      : 'Tap-toggle preview stopped. Nothing was recorded or sent.',
+  )
+}
+
+function beginHold() {
+  if (holdTimer) clearTimeout(holdTimer)
+  holdTimer = setTimeout(() => {
+    holdEngaged = true
+    micMode.value = 'hold'
+    emit('status', 'Hold-to-talk preview active. No microphone opened, speech recognized, or message sent.')
+  }, 450)
+}
+
+function endHold() {
+  if (holdTimer) {
+    clearTimeout(holdTimer)
+    holdTimer = null
+  }
+  if (!holdEngaged) return
+  holdEngaged = false
+  suppressClick = true
+  micMode.value = 'idle'
+  emit('status', 'Hold-to-talk preview released. Nothing was recorded or sent.')
+}
+
+function stageNode() {
+  const title = nodeTitle.value.trim()
+  if (!title) {
+    emit('status', 'Name the node before staging it in the local fixture.')
+    return
+  }
+  emit('status', `Node “${title}” staged in local preview state only. Nothing was saved.`)
+  nodeTitle.value = ''
+}
+
+onBeforeUnmount(() => {
+  if (holdTimer) clearTimeout(holdTimer)
+})
+</script>
+
+<template>
+  <button
+    v-if="!open"
+    type="button"
+    class="p6-door-trigger"
+    aria-label="Open the talk-first door"
+    @click="emit('update:open', true)"
+  >
+    <Plus :size="22" aria-hidden="true" />
+  </button>
+
+  <aside v-else class="p6-talk-door" aria-labelledby="p6-talk-title">
+    <header class="p6-talk-head">
+      <div>
+        <span class="p6-eyebrow">Talk-first door</span>
+        <h2 id="p6-talk-title">What should Amy do?</h2>
+      </div>
+      <button type="button" class="p6-close" aria-label="Close the talk-first door" @click="emit('update:open', false)">
+        <X :size="18" aria-hidden="true" />
+      </button>
+    </header>
+
+    <section class="p6-amy" aria-labelledby="p6-amy-title">
+      <div class="p6-amy-identity">
+        <span class="p6-amy-orb" aria-hidden="true"><Sparkles :size="17" /></span>
+        <div>
+          <h3 id="p6-amy-title">Amy</h3>
+          <p>{{ routeCopy }}</p>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        class="p6-mic"
+        :class="{ 'is-active': micMode !== 'idle' }"
+        :aria-pressed="micMode !== 'idle'"
+        aria-describedby="p6-mic-help p6-mic-truth"
+        @click="toggleMic"
+        @pointerdown.left="beginHold"
+        @pointerup.left="endHold"
+        @pointercancel="endHold"
+      >
+        <MicOff v-if="micMode === 'idle'" :size="25" aria-hidden="true" />
+        <Mic v-else :size="25" aria-hidden="true" />
+        <span>{{ micMode === 'hold' ? 'Holding · preview' : micMode === 'tap' ? 'Tap mode · preview' : 'Talk to Amy' }}</span>
+      </button>
+      <p id="p6-mic-help" class="p6-mic-help"><strong>Tap</strong> to toggle · <strong>hold</strong> to talk, release to stop</p>
+      <p id="p6-mic-truth" class="p6-mic-truth">
+        Interaction documentation only. This fixture does not request microphone access, run speech-to-text, record audio, or send a message.
+      </p>
+    </section>
+
+    <details class="p6-node-door">
+      <summary>
+        <span>Human node form</span>
+        <small>Secondary · the 1% door</small>
+      </summary>
+      <form @submit.prevent="stageNode">
+        <label for="p6-node-title">Node title</label>
+        <input id="p6-node-title" v-model="nodeTitle" type="text" autocomplete="off" placeholder="A small piece of work" />
+        <label for="p6-node-parent">Parent</label>
+        <select id="p6-node-parent" disabled>
+          <option>Parent selection unavailable in this fixture</option>
+        </select>
+        <button type="submit">Stage locally</button>
+        <p>Local preview state only. No API request and no saved node.</p>
+      </form>
+    </details>
+  </aside>
+</template>
+
+<style scoped>
+.p6-door-trigger {
+  position: fixed;
+  top: 50%;
+  right: 22px;
+  z-index: 8;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid #c7d5cc;
+  border-radius: 50%;
+  color: #284f3d;
+  background: rgba(248, 251, 248, 0.92);
+  box-shadow: 0 10px 30px rgba(34, 61, 47, 0.13);
+  transform: translateY(-50%);
+}
+.p6-door-trigger:hover { background: #fff; border-color: #89a795; }
+.p6-door-trigger:focus-visible,
+.p6-talk-door button:focus-visible,
+.p6-node-door summary:focus-visible,
+.p6-node-door input:focus-visible,
+.p6-node-door select:focus-visible {
+  outline: 3px solid rgba(47, 107, 82, 0.3);
+  outline-offset: 3px;
+}
+.p6-talk-door {
+  position: fixed;
+  inset: 78px 18px 18px auto;
+  z-index: 10;
+  width: min(410px, calc(100vw - 36px));
+  overflow-y: auto;
+  padding: 24px;
+  border: 1px solid #d3ded7;
+  border-radius: 22px;
+  color: #1d2723;
+  background: rgba(252, 253, 250, 0.97);
+  box-shadow: 0 24px 70px rgba(28, 48, 38, 0.16);
+}
+.p6-talk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.p6-eyebrow { color: #758079; font-size: 9px; font-weight: 750; letter-spacing: 0.11em; text-transform: uppercase; }
+.p6-talk-head h2 { margin-top: 4px; font-family: "Bricolage Grotesque", "DM Sans", sans-serif; font-size: 23px; font-weight: 600; letter-spacing: -0.035em; }
+.p6-close { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid #dce4df; border-radius: 10px; color: #637068; background: #fff; }
+.p6-amy { margin-top: 24px; padding: 18px; border: 1px solid #d8e3dc; border-radius: 17px; background: linear-gradient(145deg, #f0f7f2, #fbfcfa 72%); }
+.p6-amy-identity { display: flex; align-items: center; gap: 11px; }
+.p6-amy-orb { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 50%; color: #eff8f2; background: #315e49; box-shadow: inset 0 0 0 5px rgba(255, 255, 255, 0.12); }
+.p6-amy h3 { font: 600 16px/1.1 "Bricolage Grotesque", "DM Sans", sans-serif; }
+.p6-amy-identity p { margin-top: 3px; color: #647169; font: 500 10px/1.35 "JetBrains Mono", monospace; }
+.p6-mic { display: flex; width: 100%; min-height: 76px; align-items: center; justify-content: center; gap: 10px; margin-top: 20px; border: 1px solid #aac2b3; border-radius: 15px; color: #284f3d; background: rgba(255, 255, 255, 0.83); font: 650 13px/1 "DM Sans", sans-serif; }
+.p6-mic:hover { border-color: #6e9680; background: #fff; }
+.p6-mic.is-active { color: #f4faf6; background: #315e49; box-shadow: 0 0 0 5px rgba(49, 94, 73, 0.1); }
+.p6-mic-help { margin-top: 10px; color: #536159; font-size: 11px; text-align: center; }
+.p6-mic-truth { margin-top: 8px; color: #78847d; font-size: 10.5px; line-height: 1.55; text-align: center; }
+.p6-node-door { margin-top: 22px; border-top: 1px solid #e0e7e2; }
+.p6-node-door summary { display: flex; align-items: center; justify-content: space-between; padding: 18px 2px 12px; color: #536159; cursor: pointer; font-size: 11.5px; font-weight: 650; }
+.p6-node-door summary small { color: #89928d; font-size: 9.5px; font-weight: 600; }
+.p6-node-door form { display: grid; gap: 7px; padding: 4px 2px 2px; }
+.p6-node-door label { margin-top: 6px; color: #66736b; font-size: 10.5px; font-weight: 650; }
+.p6-node-door input,
+.p6-node-door select { min-height: 38px; border-color: #d8e1db; border-radius: 9px; background: #fff; font-size: 11.5px; }
+.p6-node-door button[type="submit"] { min-height: 38px; margin-top: 7px; border: 1px solid #315e49; border-radius: 9px; color: #f6faf7; background: #315e49; font-weight: 650; }
+.p6-node-door form p { color: #7a867f; font-size: 10px; text-align: center; }
+
+@media (max-width: 680px) {
+  .p6-door-trigger { right: 14px; bottom: 20px; top: auto; transform: none; }
+  .p6-talk-door { inset: 66px 8px 8px; width: auto; padding: 20px; border-radius: 19px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .p6-door-trigger { transition: none; }
+}
+</style>

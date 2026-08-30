@@ -30,20 +30,23 @@ describe('resolveLayout (PAI-805 route → shell contract)', () => {
     expect(resolveLayout({ adminOnly: true } as never)).toBe('standard')
   })
 
-  it('routes portal, public and agent shells', () => {
+  it('routes portal, public, agent and development preview shells', () => {
     expect(resolveLayout({ portal: true })).toBe('portal')
     expect(resolveLayout({ public: true })).toBe('public')
     expect(resolveLayout({ shell: 'agent' })).toBe('agent')
+    expect(resolveLayout({ shell: 'v6' })).toBe('v6')
   })
 
-  it('never lets the agent shell override portal / public precedence', () => {
+  it('never lets a focused shell override portal / public precedence', () => {
     expect(resolveLayout({ portal: true, shell: 'agent' })).toBe('portal')
     expect(resolveLayout({ public: true, shell: 'agent' })).toBe('public')
+    expect(resolveLayout({ portal: true, shell: 'v6' })).toBe('portal')
+    expect(resolveLayout({ public: true, shell: 'v6' })).toBe('public')
   })
 
   it('keeps every undo surface on the standard shell and none in Agent Mode', () => {
     expect(layoutSupportsUndoChrome('standard')).toBe(true)
-    for (const layout of ['agent', 'portal', 'public'] as const) {
+    for (const layout of ['agent', 'v6', 'portal', 'public'] as const) {
       expect(layoutSupportsUndoChrome(layout), `${layout} must have no undo chrome`).toBe(false)
     }
     const app = readFileSync(resolve(process.cwd(), 'src/App.vue'), 'utf8')
@@ -52,5 +55,12 @@ describe('resolveLayout (PAI-805 route → shell contract)', () => {
         new RegExp(`<${component}[\\s\\S]*?v-if="undoChromeEnabled"`),
       )
     }
+  })
+
+  it('mounts the dedicated v6 layout without routing it through ordinary AppLayout', () => {
+    const app = readFileSync(resolve(process.cwd(), 'src/App.vue'), 'utf8')
+    expect(app).toMatch(/<Paimos6Layout v-else-if="layoutKind === 'v6'">/)
+    expect(app).toMatch(/<AppLayout v-else>/)
+    expect(app).toMatch(/layoutKind\.value !== "v6"/)
   })
 })

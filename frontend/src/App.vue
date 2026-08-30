@@ -4,6 +4,7 @@ import { computed, onMounted, onBeforeUnmount } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import AppLayout from "@/components/AppLayout.vue";
 import AgentModeLayout from "@/components/AgentModeLayout.vue";
+import Paimos6Layout from "@/components/v6/Paimos6Layout.vue";
 import PortalLayout from "@/components/PortalLayout.vue";
 import AppConfirmDialog from "@/components/AppConfirmDialog.vue";
 import UndoToast from "@/components/undo/UndoToast.vue";
@@ -18,14 +19,17 @@ import { layoutSupportsUndoChrome, resolveLayout } from "@/router/shell";
 const auth = useAuthStore();
 const undo = useUndoStore();
 const route = useRoute();
+const layoutKind = computed(() => resolveLayout(route.meta));
 const internalChromeEnabled = computed(
   () => auth.checked && !!auth.user && auth.user.role !== "external" && !route.meta.portal && !route.meta.public,
 );
-useChangesStream(internalChromeEnabled);
 // PAI-805: the route decides its shell (see router/shell.ts). The Agent
 // Mode shell keeps the change stream (it feeds refetch hints) but drops
 // the ordinary undo chrome along with the rest of AppLayout.
-const layoutKind = computed(() => resolveLayout(route.meta));
+// PAI-854: the fixture-only v6 shell does not open the production change
+// stream. Its preview state stays deterministic and local.
+const changeStreamEnabled = computed(() => internalChromeEnabled.value && layoutKind.value !== "v6");
+useChangesStream(changeStreamEnabled);
 const undoChromeEnabled = computed(() => internalChromeEnabled.value && layoutSupportsUndoChrome(layoutKind.value));
 
 // ── Session-death heartbeat (PAI-322) ────────────────────────
@@ -117,6 +121,9 @@ onBeforeUnmount(() => {
     <AgentModeLayout v-else-if="layoutKind === 'agent'">
       <component :is="Component" />
     </AgentModeLayout>
+    <Paimos6Layout v-else-if="layoutKind === 'v6'">
+      <component :is="Component" />
+    </Paimos6Layout>
     <AppLayout v-else>
       <component :is="Component" />
     </AppLayout>

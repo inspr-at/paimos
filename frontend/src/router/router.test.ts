@@ -56,7 +56,7 @@ describe('router shell contract (PAI-805)', () => {
 
   it('leaves every other route on the standard shell (parity)', () => {
     for (const r of router.getRoutes()) {
-      if (r.path === '/agent-mode' || r.path === '/dev/agent-mode') continue
+      if (r.path === '/agent-mode' || r.path === '/dev/agent-mode' || r.path === '/dev/paimos-6') continue
       expect(r.meta.shell, `${r.path} must not opt into a reduced shell`).toBeUndefined()
     }
   })
@@ -69,5 +69,21 @@ describe('router shell contract (PAI-805)', () => {
     const ref = dev.find((r) => r.path === '/dev/agent-mode')
     expect(ref).toBeDefined()
     expect(ref!.meta?.shell).toBe('agent')
+  })
+
+  it('keeps the Paimos 6 preview development-only and preserves the exact Dashboard root', () => {
+    const prod = buildRoutes(false)
+    expect(prod.find((r) => r.path === '/dev/paimos-6')).toBeUndefined()
+    expect(prod.find((r) => r.path === '/legacy')).toBeUndefined()
+
+    const dashboard = prod.find((r) => r.path === '/')
+    expect(dashboard).toBeDefined()
+    expect(dashboard!.redirect).toBeUndefined()
+    expect(String(dashboard!.component)).toContain('DashboardView.vue')
+
+    const preview = buildRoutes(true).find((r) => r.path === '/dev/paimos-6')
+    expect(preview).toBeDefined()
+    expect(preview!.meta?.shell).toBe('v6')
+    expect(String(preview!.component)).toContain('Paimos6PreviewView.vue')
   })
 })

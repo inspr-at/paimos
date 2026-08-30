@@ -24,11 +24,12 @@
 //   portal    → PortalLayout (external users)
 //   public    → bare (login, reset, first-login)
 //   agent     → AgentModeLayout (PAI-805 reduced shell: rail + canvas)
+//   v6        → Paimos6Layout (PAI-854 development-only preview shell)
 //   standard  → AppLayout (sidebar, header, footer chrome)
 
-export type AppShell = 'agent'
+export type AppShell = 'agent' | 'v6'
 
-export type AppLayoutKind = 'portal' | 'public' | 'agent' | 'standard'
+export type AppLayoutKind = 'portal' | 'public' | 'agent' | 'v6' | 'standard'
 
 export interface ShellMeta {
   portal?: boolean
@@ -41,6 +42,7 @@ export function resolveLayout(meta: ShellMeta | null | undefined): AppLayoutKind
   if (meta.portal) return 'portal'
   if (meta.public) return 'public'
   if (meta.shell === 'agent') return 'agent'
+  if (meta.shell === 'v6') return 'v6'
   return 'standard'
 }
 
