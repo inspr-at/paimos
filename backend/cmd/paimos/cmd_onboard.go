@@ -185,6 +185,7 @@ Exit codes (with --check):
 				agentName:       renderAgent,
 				recent:          recent,
 				readingListSize: readingListSize,
+				cacheNamespace:  client.identity.Namespace,
 			}
 			rev := computeOnboardRev(bundle)
 			body, err := renderBriefing(input, format, rev)
@@ -388,6 +389,7 @@ type briefingInput struct {
 	agentName       string // empty → project-only briefing
 	recent          []recentIssue
 	readingListSize int
+	cacheNamespace  string // proven instance+origin namespace used by bundleCacheDir
 }
 
 // agentArtifactProbe is the subset of the canonical agent artifact the
@@ -396,10 +398,10 @@ type briefingInput struct {
 // the bundle's RawMessage).
 type agentArtifactProbe struct {
 	Agent struct {
-		Name               string `json:"name"`
-		Description        string `json:"description"`
-		Body               string `json:"body"`
-		BootstrapSteps     []struct {
+		Name           string `json:"name"`
+		Description    string `json:"description"`
+		Body           string `json:"body"`
+		BootstrapSteps []struct {
 			Title     string `json:"title"`
 			Command   string `json:"command"`
 			Rationale string `json:"rationale"`
@@ -611,7 +613,8 @@ func renderBriefingMarkdown(in briefingInput, _ []briefingSection, rev string) s
 	// Where to look.
 	fmt.Fprintln(&b, "## Where to look")
 	fmt.Fprintln(&b)
-	fmt.Fprintf(&b, "- Local memory cache: `.paimos/cache/%s/` (run `paimos session start --bundle full`)\n", in.project.Key)
+	fmt.Fprintf(&b, "- Local memory cache: `.paimos/cache/instances/%s/%s/` (run `paimos session start --bundle full`)\n",
+		fallback(in.cacheNamespace, "<instance-origin>"), in.project.Key)
 	fmt.Fprintln(&b, "- Issues, memory, runbooks: the paimos web UI for this project")
 	fmt.Fprintf(&b, "- CLI quickstart: `paimos session start --project %s --agent %s`\n",
 		in.project.Key, fallback(in.agentName, "<agent>"))
@@ -796,7 +799,8 @@ func renderBriefingHTML(in briefingInput, _ []briefingSection, rev string) strin
 
 	fmt.Fprintln(&b, "<h2>Where to look</h2>")
 	fmt.Fprintln(&b, "<ul>")
-	fmt.Fprintf(&b, "<li>Local memory cache: <code>.paimos/cache/%s/</code> (run <code>paimos session start --bundle full</code>)</li>\n", html.EscapeString(in.project.Key))
+	fmt.Fprintf(&b, "<li>Local memory cache: <code>.paimos/cache/instances/%s/%s/</code> (run <code>paimos session start --bundle full</code>)</li>\n",
+		html.EscapeString(fallback(in.cacheNamespace, "<instance-origin>")), html.EscapeString(in.project.Key))
 	fmt.Fprintln(&b, "<li>Issues, memory, runbooks: the paimos web UI for this project</li>")
 	fmt.Fprintf(&b, "<li>CLI quickstart: <code>paimos session start --project %s --agent %s</code></li>\n",
 		html.EscapeString(in.project.Key), html.EscapeString(fallback(in.agentName, "&lt;agent&gt;")))

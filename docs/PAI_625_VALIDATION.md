@@ -154,7 +154,8 @@ just deploy-ppm-preflight "sha-${short_sha}"
 # 3. Deploy the pushed image and verify the public health version.
 just deploy-ppm "sha-${short_sha}"
 curl -fsS https://pm.barta.cm/api/health
-paimos --instance ppm doctor
+env -u PAIMOS_URL -u PAIMOS_API_KEY -u PPM_URL -u PPMAPIKEY \
+  paimos --instance ppm doctor
 ```
 
 Then run the live Implement-this proof:

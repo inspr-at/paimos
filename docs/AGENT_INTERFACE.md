@@ -272,7 +272,14 @@ export PPMAPIKEY="paimos_…"
 paimos issue list --project PAI
 ```
 
-Precedence is: `PAIMOS_URL` + `PAIMOS_API_KEY`, then `PPM_URL` + `PPMAPIKEY`, then configured instances (`--instance`, `default_instance`, sole instance). A generic `PAIMOS_API_KEY` without `PAIMOS_URL` never applies to a named configured instance; use `paimos auth login --name <instance>` so credentials stay scoped to that instance.
+Target selection is fail-closed rather than fall-through precedence. Without
+`--instance`, exactly one complete env pair (`PAIMOS_URL` + `PAIMOS_API_KEY` or
+`PPM_URL` + `PPMAPIKEY`) selects an env-only target; two URL pairs or an
+incomplete pair are errors. An explicit `--instance` selects only the named
+configured instance and therefore requires both env URL/key pairs to be unset.
+A generic `PAIMOS_API_KEY` without `PAIMOS_URL` never applies to a named
+configured instance; use `paimos auth login --name <instance>` so credentials
+stay scoped to that instance.
 
 #### Log out
 
