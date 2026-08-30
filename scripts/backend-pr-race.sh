@@ -159,7 +159,7 @@ run_package() {
       run_race ./db '^TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwner$'
       ;;
     ./handlers)
-      run_race_shards ./handlers '^Test.*(Concurrent|Concurrency|Race|Atomic|BatchesReleaseWriter|RacedPoke).*$' 4
+      run_race_shards ./handlers '^Test.*(Concurrent|Concurrency|Race|Atomic|BatchesReleaseWriter|RacedPoke).*$' 5
       ;;
     ./cmd/paimos)
       run_race ./cmd/paimos '^(TestRunnerControlFakeAdapterConformance|TestRunnerControlJournalSerializesPumpAndResultWriters|TestHTTPRunnerReportTransportSerializesConcurrentSequence|TestAgentRunner.*Conflict.*)$'

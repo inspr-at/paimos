@@ -114,7 +114,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -125,7 +125,7 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — affected handler tests (four isolated shards)
+      - name: Backend — affected handler tests (five isolated shards)
         working-directory: backend
         run: |
           set -euo pipefail
@@ -135,7 +135,7 @@ jobs:
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; handler test lane is empty.'
           else
-            ../scripts/backend-pr-test.sh --lane=handlers --shard="${{ matrix.shard }}/4" "${packages[@]}"
+            ../scripts/backend-pr-test.sh --lane=handlers --shard="${{ matrix.shard }}/5" "${packages[@]}"
           fi
 
   backend-pr-performance:
@@ -225,7 +225,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -236,7 +236,7 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — directly changed handler race contracts
+      - name: Backend — directly changed handler race contracts (five isolated shards)
         working-directory: backend
         run: |
           set -euo pipefail
@@ -246,7 +246,7 @@ jobs:
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; handler race lane is empty.'
           else
-            ../scripts/backend-pr-race.sh --lane=handlers --shard="${{ matrix.shard }}/4" "${packages[@]}"
+            ../scripts/backend-pr-race.sh --lane=handlers --shard="${{ matrix.shard }}/5" "${packages[@]}"
           fi
 
   backend-security-invariants:

@@ -81,7 +81,7 @@ covers the original risk.
 ## Execution policy and timing evidence
 
 - Pull requests run independent required lanes for `go vet ./...`, affected
-  normal packages, four DB shards, four handler shards, the unchanged Agent
+  normal packages, four DB shards, five handler shards, the unchanged Agent
   Mode five-second performance contract, and directly changed race targets.
   Selection for normal tests is the directly changed package plus its bounded
   transitive reverse test-dependency closure. The affected lane excludes only
@@ -92,8 +92,9 @@ covers the original risk.
   application goroutines under `-race`, each in its own process, while the SQL
   pool retains the production ten-connection bound and five-second busy
   timeout. The 664 handler normal tests and 19 handler concurrency contracts
-  are each partitioned across four independently provisioned matrix runners;
-  the PR lane rejects an unindexed local four-process invocation.
+  each use five independently provisioned matrix runners, after hosted timing
+  showed four left too little margin. The PR lanes reject an unindexed local
+  multi-process invocation.
   E2E and security scanning remain separate required contexts.
 - The protected `test` context is an aggregator over every vet, normal, race,
   performance, backend quality, and frontend quality lane, so GitHub still
@@ -113,9 +114,10 @@ covers the original risk.
 - Pre-change local default-parallel run at `ec235d7cd03a13d06a02727cf55bad7c29bd89c7`:
   green in 6m50s; `handlers` 409.791s, `db` 96.892s, `cmd/paimos`
   59.046s, `supervision` 59.694s. Concurrent SQLite-using packages passed.
-- Post-change local handlers evidence: all 664 tests passed across four isolated
-  shards in 129.35s (slowest shard 127.868s); 19 handler concurrency contracts
-  passed across four race shards in 101.13s (slowest shard 99.519s).
+- Final local handler evidence under simultaneous load: all 664 tests passed
+  exactly once across five isolated shards, with wall times 88.24s–93.45s; all
+  19 handler concurrency contracts passed exactly once across five race shards
+  with `GOMAXPROCS=2`, with wall times 67.08s–88.10s.
 - The first hosted candidate correctly disproved the original combined lane:
   vet took about 53s, `db` took 284.400s under package contention, and the
   unchanged Agent Mode five-second SLO measured 6.510s; the job failed in
@@ -137,6 +139,12 @@ covers the original risk.
   `SQLITE_BUSY`. The final matrix gives each unchanged shard its own runner;
   both failed-under-contention race tests passed alone with `GOMAXPROCS=2` in
   24.60s and 22.81s.
+- The third hosted candidate was fully green and reduced normal handler shards
+  to 3m26s–4m45s and race shards to 3m54s–5m01s. The affected lane took 4m26s,
+  DB normal 2m08s, and DB race 3m37s. Because the slowest four-way race shard
+  still missed the hard target by one second, the final race partition uses
+  five independently provisioned runners while preserving an exact-once
+  accounting guard over the same 19 contracts.
 - The corrected full serial suite passed in 689.81s, including unsharded
   `handlers` in 394.602s, `db` in 87.326s, and `supervision` in 54.967s. This is
   the exact assurance retained on main, nightly, tags, and manual dispatch.
