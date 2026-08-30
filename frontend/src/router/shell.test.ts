@@ -22,6 +22,12 @@ import { resolve } from 'node:path'
 import { layoutSupportsUndoChrome, resolveLayout } from './shell'
 
 describe('resolveLayout (PAI-805 route → shell contract)', () => {
+  it('resolves no application shell until Vue Router has matched a route', () => {
+    expect(resolveLayout(undefined, false)).toBeNull()
+    expect(resolveLayout({}, false)).toBeNull()
+    expect(resolveLayout({ shell: 'v6' }, false)).toBeNull()
+  })
+
   it('keeps the standard AppLayout for every route that does not opt in', () => {
     expect(resolveLayout(undefined)).toBe('standard')
     expect(resolveLayout({})).toBe('standard')

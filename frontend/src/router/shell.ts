@@ -18,8 +18,9 @@
 // PAI-805 — route → application shell contract.
 //
 // App.vue picks the chrome around a route from its meta. The decision is
-// kept pure here so it can be tested for parity: every route that does not
-// opt into a reduced shell keeps the standard AppLayout exactly as before.
+// kept pure here so it can be tested for parity: the unmatched router start
+// has no application shell, while every matched route that does not opt into
+// a reduced shell keeps the standard AppLayout exactly as before.
 //
 //   portal    → PortalLayout (external users)
 //   public    → bare (login, reset, first-login)
@@ -37,7 +38,11 @@ export interface ShellMeta {
   shell?: AppShell
 }
 
-export function resolveLayout(meta: ShellMeta | null | undefined): AppLayoutKind {
+export function resolveLayout(
+  meta: ShellMeta | null | undefined,
+  hasMatchedRoute = true,
+): AppLayoutKind | null {
+  if (!hasMatchedRoute) return null
   if (!meta) return 'standard'
   if (meta.portal) return 'portal'
   if (meta.public) return 'public'
@@ -47,6 +52,6 @@ export function resolveLayout(meta: ShellMeta | null | undefined): AppLayoutKind
 }
 
 /** Undo toast, activity panel and conflict modal are one chrome family. */
-export function layoutSupportsUndoChrome(layout: AppLayoutKind): boolean {
+export function layoutSupportsUndoChrome(layout: AppLayoutKind | null): boolean {
   return layout === 'standard'
 }

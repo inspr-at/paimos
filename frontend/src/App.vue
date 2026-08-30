@@ -19,9 +19,15 @@ import { layoutSupportsUndoChrome, resolveLayout } from "@/router/shell";
 const auth = useAuthStore();
 const undo = useUndoStore();
 const route = useRoute();
-const layoutKind = computed(() => resolveLayout(route.meta));
+const layoutKind = computed(() => resolveLayout(route.meta, route.matched.length > 0));
 const internalChromeEnabled = computed(
-  () => auth.checked && !!auth.user && auth.user.role !== "external" && !route.meta.portal && !route.meta.public,
+  () =>
+    layoutKind.value !== null &&
+    auth.checked &&
+    !!auth.user &&
+    auth.user.role !== "external" &&
+    !route.meta.portal &&
+    !route.meta.public,
 );
 // PAI-805: the route decides its shell (see router/shell.ts). The Agent
 // Mode shell keeps the change stream (it feeds refetch hints) but drops
@@ -111,8 +117,8 @@ onBeforeUnmount(() => {
     @cancel="undo.clearConflict()"
     @apply="undo.resolveConflict($event)"
   />
-  <!-- Gate on auth.checked to prevent layout flash (sidebar visible before redirect) -->
-  <LoadingText v-if="!auth.checked" class="app-loading" label="Loading…" />
+  <!-- Wait for auth and a matched route so no application shell flashes before navigation resolves. -->
+  <LoadingText v-if="!auth.checked || layoutKind === null" class="app-loading" label="Loading…" />
   <RouterView v-else v-slot="{ Component }">
     <PortalLayout v-if="layoutKind === 'portal'">
       <component :is="Component" />
