@@ -204,6 +204,133 @@ func TestBusCodexTransportFallbackCompletion(t *testing.T) {
 	}
 }
 
+func TestBusAgentdManagedSteerUsesLeaseAndCanonicalCompletion(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	allowBusSender(t, service, projectID, "codex:codex")
+	targetRef := `{"socket":"/tmp/paimos-agentd-test.sock","session_id":"019d1234-1234-7123-8123-123456789abc"}`
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:codex", Adapter: AdapterAgentdCodex,
+		TargetKind: TargetKindAgentdSession, TargetRef: targetRef, MaximumLevel: "steer", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:codex", Adapter: AdapterCodex,
+		TargetKind: TargetKindCodexThread, TargetRef: "codex-simple-thread", MaximumLevel: "simple", Role: "simple_fallback",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	simple, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "simple inbox", DeliveryLevel: "simple",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	simplePage, err := service.ListInbox(context.Background(), InboxInput{
+		ProjectID: projectID, Address: "codex:codex", Agent: "codex", WorkerAdapter: AdapterCodex, Limit: 10,
+	})
+	if err != nil || len(simplePage.Messages) != 1 || simplePage.Messages[0].DeliveryWork == nil {
+		t.Fatalf("simple page=%#v err=%v", simplePage, err)
+	}
+	simpleWork := simplePage.Messages[0].DeliveryWork
+	if simpleWork.Adapter != AdapterCodex || simpleWork.TargetRef != "codex-simple-thread" || simpleWork.State != "leased" {
+		t.Fatalf("simple work=%#v", simpleWork)
+	}
+	if _, err := service.CompleteLocalDelivery(context.Background(), CompleteDeliveryInput{
+		ProjectID: projectID, Address: "codex:codex", Agent: "codex", Cursor: simple.Cursor,
+		DeliveryID: simpleWork.DeliveryID, EffectiveLevel: "simple",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	message, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "managed steer", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.ListInbox(context.Background(), InboxInput{
+		ProjectID: projectID, Address: "codex:codex", Agent: "codex", WorkerAdapter: AdapterAgentdCodex, Limit: 10,
+	})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil {
+		t.Fatalf("page=%#v err=%v", page, err)
+	}
+	work := page.Messages[0].DeliveryWork
+	if work.State != "leased" || work.DeliveryID == "" || work.TargetRef != targetRef {
+		t.Fatalf("work=%#v", work)
+	}
+	if _, err := service.CompleteLocalDelivery(context.Background(), CompleteDeliveryInput{
+		ProjectID: projectID, Address: "codex:codex", Agent: "codex", Cursor: message.Cursor,
+		DeliveryID: work.DeliveryID, EffectiveLevel: "steer", FallbackReason: "",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var state, effective, fallback, handedOff string
+	if err := paimosdb.DB.QueryRow(`SELECT state,effective_level,fallback_reason,handed_off_at FROM agent_message_deliveries WHERE delivery_id=?`, work.DeliveryID).Scan(&state, &effective, &fallback, &handedOff); err != nil {
+		t.Fatal(err)
+	}
+	if state != "handed_off" || effective != "steer" || fallback != "" || handedOff == "" {
+		t.Fatalf("state=%q effective=%q fallback=%q handed_off_at=%q", state, effective, fallback, handedOff)
+	}
+}
+
+func TestBusTargetSelectorPreservesLegacySimpleCappedSteerFallback(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	allowBusSender(t, service, projectID, "codex:codex")
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:codex", Adapter: AdapterCodex,
+		TargetKind: TargetKindCodexThread, TargetRef: "primary-simple", MaximumLevel: "simple", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:codex", Adapter: AdapterCodex,
+		TargetKind: TargetKindCodexThread, TargetRef: "fallback-simple", MaximumLevel: "simple", Role: "simple_fallback",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "legacy steer", DeliveryLevel: "steer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.ListInbox(context.Background(), InboxInput{
+		ProjectID: projectID, Address: "codex:codex", Agent: "codex", WorkerAdapter: AdapterCodex, Limit: 10,
+	})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil ||
+		page.Messages[0].DeliveryWork.TargetRef != "fallback-simple" {
+		t.Fatalf("page=%#v err=%v", page, err)
+	}
+}
+
+func TestBusTargetSelectorKeepsOrdinarySimpleOnPrimary(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	allowBusSender(t, service, projectID, "codex:codex")
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:codex", Adapter: AdapterCodex,
+		TargetKind: TargetKindCodexThread, TargetRef: "primary-steer", MaximumLevel: "steer", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:codex", Adapter: AdapterCodex,
+		TargetKind: TargetKindCodexThread, TargetRef: "fallback-simple", MaximumLevel: "simple", Role: "simple_fallback",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "ordinary simple", DeliveryLevel: "simple",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.ListInbox(context.Background(), InboxInput{
+		ProjectID: projectID, Address: "codex:codex", Agent: "codex", WorkerAdapter: AdapterCodex, Limit: 10,
+	})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil ||
+		page.Messages[0].DeliveryWork.TargetRef != "primary-steer" {
+		t.Fatalf("page=%#v err=%v", page, err)
+	}
+}
+
 func TestBusConcurrentIdempotencyCreatesOneMessageAndDelivery(t *testing.T) {
 	service, projectID := openBusTestDB(t)
 	allowBusSender(t, service, projectID, "codex:codex")

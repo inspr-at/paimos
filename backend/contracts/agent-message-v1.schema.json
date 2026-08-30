@@ -47,11 +47,12 @@
       "properties": {
         "delivery_id": { "type": "string", "minLength": 1 },
         "state": { "enum": ["pending", "leased", "retry", "blocked", "handed_off", "dead"] },
-        "adapter": { "enum": ["codex", "grok_bot_routine", "claude_resume", "claude_channel"] },
-        "target_kind": { "enum": ["codex_thread", "https_webhook", "claude_session"] },
+        "adapter": { "enum": ["codex", "agentd_codex", "managed_harness", "grok_bot_routine", "claude_resume", "claude_channel"] },
+        "target_kind": { "enum": ["codex_thread", "agentd_session", "harness_session", "https_webhook", "claude_session"] },
         "target_ref": { "type": "string", "minLength": 1 },
         "maximum_level": { "enum": ["simple", "steer"] },
-        "requested_level": { "enum": ["simple", "steer"] }
+        "requested_level": { "enum": ["simple", "steer"] },
+        "fallback_reason": { "enum": ["idle", "unsupported", "policy_capped", "target_missing", "not_steerable", "transport_error"] }
       }
     }
   },
@@ -69,7 +70,7 @@
       "required": ["binding_id", "kind"],
       "properties": {
         "binding_id": { "type": "string", "minLength": 1 },
-        "kind": { "enum": ["codex_thread", "https_webhook", "claude_session"] }
+        "kind": { "enum": ["codex_thread", "agentd_session", "harness_session", "https_webhook", "claude_session"] }
       }
     }
   }

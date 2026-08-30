@@ -78,7 +78,11 @@ func ErrorCode(err error) string {
 }
 
 // UnavailableError reports that a documented local primitive cannot be used.
-type UnavailableError struct{ Message string }
+type UnavailableError struct {
+	Message        string
+	FallbackReason string
+	Reroute        bool
+}
 
 func (e *UnavailableError) Error() string { return e.Message }
 
@@ -89,6 +93,9 @@ type DeliverRequest struct {
 	Stdout        io.Writer
 	Stderr        io.Writer
 	ClientVersion string
+	// CorrelationID is populated only from a server-leased delivery/control
+	// row. Local managed adapters require it and echo it in effect evidence.
+	CorrelationID string
 }
 
 type DeliverResult struct {
@@ -406,7 +413,7 @@ var defaultRegistry = NewRegistry()
 // primarily useful to isolated callers and tests; each built-in also registers
 // itself with the process registry from its own file.
 func RegisterBuiltins(registry *Registry) error {
-	for _, plugin := range []Plugin{CodexPlugin{}, ClaudePlugin{}, ClaudePlugin{Channel: true}, GrokRoutinePlugin{}, ManagedPlugin{}} {
+	for _, plugin := range []Plugin{CodexPlugin{}, AgentdCodexPlugin{}, ClaudePlugin{}, ClaudePlugin{Channel: true}, GrokRoutinePlugin{}, ManagedPlugin{}} {
 		if err := registry.Register(plugin); err != nil {
 			return err
 		}

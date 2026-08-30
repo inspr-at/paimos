@@ -1139,6 +1139,78 @@ Use markdown freely — the web UI renders it.
 That is the whole integration surface. An agent that can `curl` can
 collaborate.
 
+## Operator-local managed sessions (`paimos-agentd`)
+
+`paimos-agentd` is a per-machine process supervisor, not an inference client.
+It starts a fresh documented `codex app-server --listen stdio://` child under
+the operator's existing authenticated login, then creates the thread and turn
+through that exact initialized connection. It keeps the only authoritative
+Process handle in memory. The local Unix socket and persisted registry are
+private and partitioned by PPM instance; vendor-private sockets are never used.
+
+```bash
+paimos-agentd serve --instance production
+printf '%s' 'Implement PAI-849.' | paimos-agentd start \
+  --instance production --adapter codex --workspace "$PWD" --identity codex:worker
+paimos-agentd status --instance production
+```
+
+An operator-authenticated live protocol proof is deliberately opt-in because
+it starts a real vendor turn: from `backend`, run
+`PAIMOS_AGENTD_LIVE_CODEX=1 go test ./agentd -run TestCodexLiveOwnedAppServerSteer -count=1`.
+The ordinary suite uses a protocol-faithful child fixture and never spends a
+vendor turn.
+
+Codex start, steer, and interrupt use only documented app-server
+`thread/start`, `turn/start`, `turn/steer`, and `turn/interrupt` calls on that
+exact live Process object. A harness session ID is audit metadata, never
+authority to locate or reconstruct a control connection. After an agentd
+restart, every persisted formerly owned session is reconciled to
+`ownership_lost`; PID, steer, interrupt, and stop authority are cleared, so a
+reused PID can never be adopted or signalled.
+
+Managed same-box steering remains an Agent Intercom delivery: `paimos listen`
+first obtains the FIFO delivery lease, passes its `delivery_id` as the local
+correlation ID, then calls the existing delivery-complete endpoint. That
+transaction invokes `CompleteLocalDelivery`, setting `effective_level`,
+`fallback_reason`, and `handed_off_at` while advancing the inbox cursor. There
+is no direct stdin, queue, PTY, TUI socket, or unledgered managed-control path.
+
+Register the live agentd session as the steer-capable primary and ordinary
+Codex delivery as its required simple fallback. If M161 status reporting is
+also enabled, `managed_harness` is stored as a disabled standby generation;
+it does not replace the enabled `agentd_codex` primary and is selected only by
+an explicit durable unavailable-delivery reroute. Re-registering that stable
+generation reuses the standby target, so setup order cannot flip the primary.
+Target references are encrypted by the existing target registry; use
+owner-only files (or stdin) to avoid shell history:
+
+```bash
+printf '%s' '{"socket":"/private/path/agentd.sock","session_id":"<agentd-session-uuid>"}' | \
+  paimos message target set --project PAI --address codex:worker \
+  --adapter agentd_codex --kind agentd_session --maximum-level steer \
+  --role primary --target-ref-file -
+printf '%s' '<codex-thread-id>' | paimos message target set --project PAI \
+  --address codex:worker --adapter codex --kind codex_thread \
+  --maximum-level simple --role simple_fallback --target-ref-file -
+paimos listen --as codex:worker --project PAI --follow --deliver agentd_codex
+```
+
+Only an M161 generation currently reported working and steer-capable, with a
+heartbeat no older than 90 seconds, may take over a failed managed lease. If
+an agentd turn becomes idle or unavailable
+after acquisition, the attributed worker reports `delivery-unavailable`; the
+hub atomically re-pends the same delivery for that active generation or the
+snapshotted ordinary simple fallback. The replacement obtains a fresh FIFO
+lease and completes through `CompleteLocalDelivery`. Agentd deliberately does
+not claim a queue handoff as a managed steer.
+
+Claude is deliberately registered as unsupported here. PAI-850 supplies a
+Process implementation whose steer/interrupt methods remain bound to its live
+Agent SDK Query object. PAI-848 supplies the authenticated Reporter and the
+M161 `harness_sessions` API/table; agentd does not reuse `agent_runs` or the
+PAI-809 run-control journal as a session registry.
+
 ## Durable harness-session control plane (PAI-848)
 
 `paimos harness` is the control-plane noun for a running harness process. It

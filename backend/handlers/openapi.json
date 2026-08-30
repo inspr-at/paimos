@@ -1807,6 +1807,7 @@
       },
       "HarnessHeartbeat": {"type": "object", "additionalProperties": false, "required": ["phase"], "properties": {"phase": {"type": "string", "enum": ["starting", "working", "yielded", "stopping"]}}},
       "HarnessDeliveryComplete": {"type": "object", "additionalProperties": false, "required": ["cursor", "delivery_id", "effective_level"], "properties": {"cursor": {"type": "integer", "format": "int64"}, "delivery_id": {"type": "string", "format": "uuid"}, "effective_level": {"type": "string", "enum": ["simple", "steer"]}, "fallback_reason": {"type": "string", "enum": ["", "idle", "unsupported", "policy_capped", "target_missing", "not_steerable", "transport_error"]}}},
+      "AgentDeliveryUnavailable": {"type": "object", "additionalProperties": false, "required": ["to", "cursor", "delivery_id", "fallback_reason"], "properties": {"to": {"type": "string"}, "cursor": {"type": "integer", "format": "int64"}, "delivery_id": {"type": "string", "format": "uuid"}, "fallback_reason": {"type": "string", "enum": ["idle", "not_steerable", "transport_error"]}}},
       "HarnessControlComplete": {"type": "object", "additionalProperties": false, "required": ["outcome", "reason"], "properties": {"outcome": {"type": "string", "enum": ["applied", "rejected"]}, "reason": {"type": "string", "enum": ["applied", "not_running", "unsupported", "ownership_lost", "failed"]}}}
     },
     "responses": {
@@ -4526,6 +4527,10 @@
           }
         }
       }
+    },
+    "/api/projects/{id}/messages/delivery-unavailable": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "post": {"tags": ["agents"], "summary": "Release an unavailable leased agentd delivery to a live generation or simple fallback", "description": "Does not complete or acknowledge the delivery. The same row must receive a fresh FIFO lease and CompleteLocalDelivery handoff. Working M161 generations require a heartbeat no older than 90 seconds; no valid route becomes blocked target_missing.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentDeliveryUnavailable"}}}}, "responses": {"200": {"description": "Delivery re-pended to an eligible route"}, "400": {"description": "Lease, attribution, or route validation failed"}}}
     },
     "/api/projects/{id}/harness-sessions": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],

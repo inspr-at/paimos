@@ -83,7 +83,9 @@ jobs:
       # signal and therefore never issues a running-cancel control lease.
       - name: Backend — unsupported platform fails closed
         working-directory: backend
-        run: go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
+        run: |
+          go test -tags paimos_test_unsupported -count=1 ./cmd/paimos -run '^TestUnsupportedPlatformProcessOwnershipFailsClosed$'
+          go test -tags paimos_test_unsupported -count=1 ./agentd ./agentdwire ./ownedprocess -run '^TestUnsupportedPlatform'
 
       # PAI-809: keep the race detector on the control-plane paths that own
       # concurrent confirmation, claim, input sealing, adapter dedupe, and the
@@ -94,6 +96,7 @@ jobs:
         run: |
           go test -race -count=1 -timeout=8m ./supervision -run '^(TestGrantReplayAndCompetingRevocationUseM147Truth|TestThirtyTwoConcurrentCommandCreateAndConfirmConverge|TestThirtyTwoConcurrentAcceptedEffectReservationAndClaimConverge|TestInputResponseAndSupersedeRaceConvergesToOneTerminalSeal|TestInputResponseAndRunTerminalRaceConvergesToOneTerminalEvent)$'
           go test -race -count=1 -timeout=5m ./cmd/paimos -run '^(TestRunnerControlFakeAdapterConformance|TestRunnerControlJournalSerializesPumpAndResultWriters|TestHTTPRunnerReportTransportSerializesConcurrentSequence)$'
+          go test -race -count=1 -timeout=5m ./agentd ./localjournal ./ownedprocess
 
       # PAI-578: the hygiene/freshness scripts use ripgrep (`rg`), which is
       # not preinstalled on the ubuntu-24 runner image. Without it,

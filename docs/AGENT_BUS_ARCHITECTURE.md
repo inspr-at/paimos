@@ -154,7 +154,10 @@ that wants to reply writes a new attributed `paimos tell`.
 Each receiver address has at most one enabled primary delivery-target version
 and, optionally, one enabled `simple` fallback target. Most bindings use the
 same target for both levels; the second target exists only when the primary
-steer target cannot perform a simple wake. Changing either target creates a
+steer target cannot perform a simple wake. The selector uses that fallback for
+a `simple` message only when the primary adapter is the steer-only
+`agentd_codex`; it preserves the established rule that a `steer` request uses
+the fallback when the primary policy itself is capped at `simple`. Changing either target creates a
 new version instead of mutating one already snapshotted onto a message.
 
 Conceptual target fields:
@@ -164,8 +167,8 @@ Conceptual target fields:
 | `id` | Opaque PAIMOS target ID |
 | `instance` | Exactly one PAIMOS instance, for example `ppm` |
 | `project_id`, `address` | Receiver ownership and `<harness>:<agent>` inbox |
-| `adapter` | `codex`, `claude_resume`, `claude_channel`, `grok_build`, or `grok_bot_routine` |
-| `target_kind` | For example `codex_thread`, `claude_session`, `grok_session`, or `https_webhook` |
+| `adapter` | `codex`, `agentd_codex`, `claude_resume`, `claude_channel`, `grok_build`, or `grok_bot_routine` |
+| `target_kind` | For example `codex_thread`, `agentd_session`, `claude_session`, `grok_session`, or `https_webhook` |
 | `target_ref` | Receiver-owned vendor thread/session reference or encrypted webhook URL |
 | `maximum_level` | Receiver policy: `simple` or `steer`; default `simple` |
 | `role` | `primary` or `simple_fallback`; unique while enabled per receiver |

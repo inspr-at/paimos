@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -32,12 +33,14 @@ const (
 // dispatched server-side by the webhook dispatcher instead.
 const (
 	AdapterCodex          = harnessplugin.AdapterCodex
+	AdapterAgentdCodex    = harnessplugin.AdapterAgentdCodex
 	AdapterGrokBotRoutine = harnessplugin.AdapterGrokBotRoutine
 	AdapterClaudeResume   = harnessplugin.AdapterClaudeResume
 	AdapterClaudeChannel  = harnessplugin.AdapterClaudeChannel
 	AdapterManagedHarness = harnessplugin.AdapterManagedHarness
 
 	TargetKindCodexThread    = harnessplugin.KindCodexThread
+	TargetKindAgentdSession  = harnessplugin.KindAgentdSession
 	TargetKindHTTPSWebhook   = harnessplugin.KindHTTPSWebhook
 	TargetKindClaudeSession  = harnessplugin.KindClaudeSession
 	TargetKindHarnessSession = harnessplugin.KindHarnessSession
@@ -58,9 +61,19 @@ func IsLocalWorkerAdapter(adapter string) bool {
 }
 
 const selectedDeliveryTargetSQL = `(CASE
+	WHEN d.last_error_code='managed_target_unavailable' AND d.fallback_target_id IS NOT NULL
+	THEN d.fallback_target_id
+	WHEN d.requested_level='simple' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id)='agentd_codex'
+	THEN d.fallback_target_id
 	WHEN d.requested_level='steer' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
 	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id)='simple'
 	THEN d.fallback_target_id ELSE COALESCE(d.primary_target_id,d.fallback_target_id) END)`
+
+// ManagedGenerationLivenessWindow aligns reroute eligibility with the M161
+// heartbeat contract: three missed 30-second heartbeats make a working row
+// stale. Phase alone is never live-process proof.
+const ManagedGenerationLivenessWindow = 90 * time.Second
 
 // Target is the non-secret operator view of an immutable receiver target
 // version. TargetRef and the sender secret are deliberately absent; HasSecret
@@ -89,6 +102,9 @@ type RegisterTargetInput struct {
 	TargetSecret string
 	MaximumLevel string
 	Role         string
+	// Standby creates a disabled managed_harness primary without replacing an
+	// enabled agentd_codex primary. It is reserved for M161 generation reroute.
+	Standby bool
 }
 
 const targetSelectColumns = `id,instance,project_id,address,adapter,target_kind,maximum_level,role,enabled,version,
@@ -136,6 +152,9 @@ func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*
 	}
 	if in.Role == "simple_fallback" && in.MaximumLevel != "simple" {
 		return nil, coded("agent_message_target_level_invalid", "a simple_fallback target must have maximum_level simple")
+	}
+	if in.Standby && (in.Adapter != AdapterManagedHarness || in.Role != "primary") {
+		return nil, coded("agent_message_target_role_invalid", "standby targets are reserved for managed_harness primary generations")
 	}
 	ref := strings.TrimSpace(in.TargetRef)
 	if !utf8.ValidString(ref) || len([]byte(ref)) < 1 || len([]byte(ref)) > 2048 || strings.ContainsAny(ref, "\x00\r\n") {
@@ -192,15 +211,21 @@ func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*
 		WHERE instance=? AND project_id=? AND address=? AND role=?`, instance, in.ProjectID, in.Address, in.Role).Scan(&version); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_message_targets SET enabled=0
-		WHERE instance=? AND project_id=? AND address=? AND role=? AND enabled=1`, instance, in.ProjectID, in.Address, in.Role); err != nil {
-		return nil, err
+	if !in.Standby {
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_message_targets SET enabled=0
+			WHERE instance=? AND project_id=? AND address=? AND role=? AND enabled=1`, instance, in.ProjectID, in.Address, in.Role); err != nil {
+			return nil, err
+		}
 	}
 	targetID := uuid.NewString()
+	enabled := 1
+	if in.Standby {
+		enabled = 0
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_targets
-		(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,target_secret_cipher,maximum_level,role,version)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, targetID, instance, in.ProjectID, in.Address, in.Adapter, in.TargetKind,
-		ciphertext, secretCipher, in.MaximumLevel, in.Role, version); err != nil {
+		(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,target_secret_cipher,maximum_level,role,enabled,version)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, targetID, instance, in.ProjectID, in.Address, in.Adapter, in.TargetKind,
+		ciphertext, secretCipher, in.MaximumLevel, in.Role, enabled, version); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -332,11 +357,11 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 		return false, err
 	}
 	var work DeliveryWork
-	var primaryID, fallbackID sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT d.delivery_id,d.state,d.requested_level,d.primary_target_id,d.fallback_target_id
+	var selectedTargetID sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT d.delivery_id,d.state,d.requested_level,d.fallback_reason,`+selectedDeliveryTargetSQL+`
 		FROM agent_message_deliveries d JOIN agent_messages am ON am.id=d.message_row_id
 		WHERE am.message_id=? AND d.instance=?`, envelope.MessageID, instanceName()).Scan(
-		&work.DeliveryID, &work.State, &work.RequestedLevel, &primaryID, &fallbackID)
+		&work.DeliveryID, &work.State, &work.RequestedLevel, &work.FallbackReason, &selectedTargetID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
@@ -346,10 +371,7 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 	if work.State == "handed_off" {
 		return false, nil
 	}
-	selectedID := primaryID.String
-	if selectedID == "" {
-		selectedID = fallbackID.String
-	}
+	selectedID := selectedTargetID.String
 	if selectedID == "" {
 		envelope.DeliveryWork = &work
 		return true, nil
@@ -359,14 +381,6 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 		FROM agent_message_targets WHERE id=? AND instance=? AND project_id=? AND address=?`, selectedID,
 		instanceName(), projectID, address).Scan(&work.Adapter, &work.TargetKind, &cipher, &work.MaximumLevel); err != nil {
 		return false, err
-	}
-	if work.RequestedLevel == "steer" && work.MaximumLevel == "simple" && fallbackID.Valid {
-		selectedID = fallbackID.String
-		if err := s.db.QueryRowContext(ctx, `SELECT adapter,target_kind,target_ref_cipher,maximum_level
-			FROM agent_message_targets WHERE id=? AND instance=? AND project_id=? AND address=?`, selectedID,
-			instanceName(), projectID, address).Scan(&work.Adapter, &work.TargetKind, &cipher, &work.MaximumLevel); err != nil {
-			return false, err
-		}
 	}
 	if work.Adapter != workerAdapter {
 		// Another worker (or the server-side webhook dispatcher) owns this
@@ -419,9 +433,140 @@ type CompleteDeliveryInput struct {
 	TargetID       string
 }
 
-// CompleteLocalDelivery records one accepted local primitive (Codex queue or
-// steer, Claude print-mode resume/cloud, or Claude channel push) and advances
-// the inbox cursor in the same transaction.
+type RerouteUnavailableInput struct {
+	ProjectID      int64
+	Address        string
+	Agent          string
+	Cursor         int64
+	DeliveryID     string
+	FallbackReason string
+}
+
+type RerouteUnavailableResult struct {
+	DeliveryID       string `json:"delivery_id"`
+	Route            string `json:"route"`
+	TargetID         string `json:"target_id"`
+	HarnessSessionID string `json:"harness_session_id,omitempty"`
+}
+
+// RerouteUnavailableLocalDelivery releases a failed agentd lease without
+// claiming a managed effect. It atomically selects either the one currently
+// working, steer-capable M161 generation or the message's snapshotted simple
+// fallback. The replacement worker must obtain a fresh canonical lease and
+// finish through CompleteLocalDelivery.
+func (s *Service) RerouteUnavailableLocalDelivery(ctx context.Context, in RerouteUnavailableInput) (*RerouteUnavailableResult, error) {
+	validReason := in.FallbackReason == "idle" || in.FallbackReason == "not_steerable" || in.FallbackReason == "transport_error"
+	if !validReason {
+		return nil, coded("agent_message_fallback_reason_invalid", "managed reroute requires idle, not_steerable, or transport_error")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	address, _, err := resolveAttributedInboxQuery(ctx, tx, in.ProjectID, in.Address, in.Agent)
+	if err != nil {
+		return nil, err
+	}
+	harnessName, agentName, err := parseAddress(address)
+	if err != nil {
+		return nil, err
+	}
+	var state, selectedTargetID, selectedAdapter string
+	var cursor int64
+	var fallbackTargetID sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT d.state,am.id,`+selectedDeliveryTargetSQL+`,t.adapter,d.fallback_target_id
+		FROM agent_message_deliveries d
+		JOIN agent_messages am ON am.id=d.message_row_id
+		JOIN agent_message_targets t ON t.id=`+selectedDeliveryTargetSQL+`
+		WHERE d.delivery_id=? AND d.instance=? AND am.to_address=?`, strings.TrimSpace(in.DeliveryID), instanceName(), address).Scan(
+		&state, &cursor, &selectedTargetID, &selectedAdapter, &fallbackTargetID)
+	if err != nil {
+		return nil, coded("agent_message_delivery_unknown", "delivery does not belong to this inbox")
+	}
+	if state != "leased" || cursor != in.Cursor {
+		return nil, coded("agent_message_delivery_not_leased", "managed delivery lease is no longer current")
+	}
+	if selectedAdapter != AdapterAgentdCodex {
+		return nil, coded("agent_message_delivery_adapter_mismatch", "only an unavailable agentd lease can be rerouted")
+	}
+	blockNoRoute := func(detail string) (*RerouteUnavailableResult, error) {
+		result, updateErr := tx.ExecContext(ctx, `UPDATE agent_message_deliveries SET state='blocked',lease_until=NULL,
+			last_error_code='managed_target_blocked',fallback_reason='target_missing',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			WHERE delivery_id=? AND state='leased'`, strings.TrimSpace(in.DeliveryID))
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return nil, coded("agent_message_delivery_raced", "managed delivery lease changed before blocking")
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, coded("agent_message_target_missing", detail)
+	}
+
+	var sessionID, generationTargetID string
+	err = tx.QueryRowContext(ctx, `SELECT hs.id,hs.message_target_id
+		FROM harness_sessions hs JOIN agent_message_targets t ON t.id=hs.message_target_id
+		WHERE hs.project_id=? AND hs.harness=? AND hs.agent_name=? AND hs.management_mode='managed'
+		AND hs.phase='working' AND hs.steer_mode='owned' AND hs.advertised_steer=1
+		AND hs.heartbeat_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now',?)
+		AND t.instance=? AND t.adapter=? AND t.maximum_level='steer'
+		ORDER BY hs.created_at DESC,hs.id DESC LIMIT 1`, in.ProjectID, harnessName, agentName,
+		fmt.Sprintf("-%d seconds", int(ManagedGenerationLivenessWindow/time.Second)), instanceName(), AdapterManagedHarness).Scan(&sessionID, &generationTargetID)
+	if err == nil {
+		result, updateErr := tx.ExecContext(ctx, `UPDATE agent_message_deliveries SET primary_target_id=?,state='pending',
+			lease_until=NULL,last_error_code='',fallback_reason='',next_attempt_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+			updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE delivery_id=? AND state='leased'`,
+			generationTargetID, strings.TrimSpace(in.DeliveryID))
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return nil, coded("agent_message_delivery_raced", "managed delivery lease changed before reroute")
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return &RerouteUnavailableResult{DeliveryID: in.DeliveryID, Route: "active_generation", TargetID: generationTargetID, HarnessSessionID: sessionID}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if !fallbackTargetID.Valid {
+		return blockNoRoute("unavailable managed target has no active generation or simple fallback")
+	}
+	var fallbackAdapter, fallbackMaximum, fallbackRole string
+	if err := tx.QueryRowContext(ctx, `SELECT adapter,maximum_level,role FROM agent_message_targets
+		WHERE id=? AND instance=? AND project_id=? AND address=?`, fallbackTargetID.String, instanceName(), in.ProjectID, address).Scan(
+		&fallbackAdapter, &fallbackMaximum, &fallbackRole); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return blockNoRoute("configured simple fallback is unavailable")
+		}
+		return nil, err
+	}
+	if fallbackMaximum != "simple" || fallbackRole != "simple_fallback" || fallbackAdapter == AdapterAgentdCodex || !IsLocalWorkerAdapter(fallbackAdapter) {
+		return blockNoRoute("configured fallback is not an ordinary simple local target")
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE agent_message_deliveries SET state='pending',lease_until=NULL,
+		last_error_code='managed_target_unavailable',fallback_reason=?,next_attempt_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE delivery_id=? AND state='leased'`, in.FallbackReason, strings.TrimSpace(in.DeliveryID))
+	if err != nil {
+		return nil, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return nil, coded("agent_message_delivery_raced", "managed delivery lease changed before reroute")
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &RerouteUnavailableResult{DeliveryID: in.DeliveryID, Route: "simple_fallback", TargetID: fallbackTargetID.String}, nil
+}
+
+// CompleteLocalDelivery records one accepted local primitive (including a
+// lease-correlated agentd managed steer) and advances the FIFO inbox cursor in
+// the same transaction while preserving effective level, fallback and time.
 func (s *Service) CompleteLocalDelivery(ctx context.Context, in CompleteDeliveryInput) (*CursorState, error) {
 	if in.EffectiveLevel != "simple" && in.EffectiveLevel != "steer" {
 		return nil, coded("agent_message_effective_level_invalid", "effective_level must be simple or steer")
