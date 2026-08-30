@@ -5,6 +5,29 @@ All notable changes to PAIMOS are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and PAIMOS adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.21.0] — 2026-08-30
+
+### Added — Owned Agent Intercom sessions (PAI-848, PAI-849, PAI-850)
+
+- Added the durable M161 harness-session control plane for managed workers,
+  including authenticated status and heartbeat reporting, encrypted local
+  target references, FIFO delivery leases, and audited steer, interrupt, and
+  stop outcomes. Stale or unavailable generations reroute the same durable
+  delivery to an eligible active generation or its snapshotted simple
+  fallback instead of bypassing the ledger.
+- Added `paimos-agentd`, an operator-local per-instance supervisor shipped as a
+  signed, notarized Darwin universal artifact plus unsigned Linux amd64/arm64
+  tarballs. It owns the exact child process,
+  keeps private sockets and bounded content-free state under an instance lock,
+  drains output before reaping, and reconciles sessions to `ownership_lost`
+  after restart rather than adopting an unproven PID.
+- Managed Codex steer now stays on the owned documented app-server process.
+  Managed Claude steer uses the same live Agent SDK Query's documented
+  `streamInput()`, `interrupt()`, and `close()` primitives. Claude support
+  requires the operator-installed Agent SDK 0.3.251 with its pinned hash and
+  inherits the existing local CLI login; PAIMOS ships no proprietary SDK,
+  vendor token, prompt, response, PTY/TUI injection, or queue-faked steer.
+
 ## [5.20.1] — 2026-08-28
 
 ### Fixed — Bounded startup retention (PAI-843)
