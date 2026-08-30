@@ -157,6 +157,36 @@ type migration struct {
 	steps   []string
 }
 
+// m162KnowledgeSemanticEquality compares every current durable issues column
+// except identity (scope/type/slug), the row id, the scope-local issue number,
+// write clocks, and content_rev. Those exclusions do not change knowledge
+// meaning; the lowest id is the survivor and keeps its aliases/clocks. M120 and
+// M123 already removed parent_id, cost_unit, and release from this schema.
+const m162KnowledgeSemanticEquality = `
+	a.title IS b.title AND a.description IS b.description AND
+	a.acceptance_criteria IS b.acceptance_criteria AND a.notes IS b.notes AND
+	a.status IS b.status AND a.priority IS b.priority AND
+	a.billing_type IS b.billing_type AND a.total_budget IS b.total_budget AND
+	a.rate_hourly IS b.rate_hourly AND a.rate_lp IS b.rate_lp AND
+	a.start_date IS b.start_date AND a.end_date IS b.end_date AND
+	a.group_state IS b.group_state AND a.sprint_state IS b.sprint_state AND
+	a.jira_id IS b.jira_id AND a.jira_version IS b.jira_version AND
+	a.jira_text IS b.jira_text AND a.estimate_hours IS b.estimate_hours AND
+	a.estimate_lp IS b.estimate_lp AND a.ar_hours IS b.ar_hours AND
+	a.ar_lp IS b.ar_lp AND a.time_override IS b.time_override AND
+	a.color IS b.color AND a.archived IS b.archived AND
+	a.assignee_id IS b.assignee_id AND a.created_by IS b.created_by AND
+	a.accepted_at IS b.accepted_at AND a.accepted_by IS b.accepted_by AND
+	a.invoiced_at IS b.invoiced_at AND a.invoice_number IS b.invoice_number AND
+	a.target_ar IS b.target_ar AND a.deleted_at IS b.deleted_at AND
+	a.deleted_by IS b.deleted_by AND a.category_metadata IS b.category_metadata AND
+	a.reference_count IS b.reference_count AND
+	a.last_referenced_at IS b.last_referenced_at AND
+	a.report_summary IS b.report_summary AND
+	a.content_revised_at IS b.content_revised_at AND
+	a.deps_reviewed_at IS b.deps_reviewed_at AND
+	a.pharos_request_id IS b.pharos_request_id`
+
 func sqlEnum(values []string) string {
 	quoted := make([]string, 0, len(values))
 	for _, value := range values {
@@ -11848,6 +11878,51 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 harness_session_id,sequence,kind,requested_by_user_id,requested_at
 			 ON harness_session_controls BEGIN SELECT RAISE(ABORT,'harness session control identity is immutable'); END`,
 		}},
+
+		// M162 / PAI-857: enforce a separate knowledge identity namespace for
+		// each nullable owner scope. checkM162KnowledgeScopeIdentities runs first
+		// and refuses divergent or referenced collisions. This second equality
+		// guard makes the destructive step self-limiting even after preflight:
+		// only the higher-id copy of an equal payload can be removed.
+		{162, []string{
+			`DELETE FROM issues AS b
+			 WHERE b.slug IS NOT NULL
+			   AND b.type IN ('memory','runbook','external_system','related_project','guideline')
+			   AND EXISTS (
+			     SELECT 1 FROM issues a
+			      WHERE a.id < b.id
+			        AND a.project_id IS b.project_id
+			        AND a.user_id IS b.user_id
+			        AND a.type=b.type AND a.slug=b.slug
+			        AND (` + m162KnowledgeSemanticEquality + `)
+			   )`,
+			`DROP INDEX IF EXISTS idx_issues_type_slug_project`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_knowledge_identity_project
+			 ON issues(project_id,type,slug)
+			 WHERE project_id IS NOT NULL AND slug IS NOT NULL`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_knowledge_identity_user
+			 ON issues(user_id,type,slug)
+			 WHERE project_id IS NULL AND user_id IS NOT NULL AND slug IS NOT NULL`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_knowledge_identity_instance
+			 ON issues(type,slug)
+			 WHERE project_id IS NULL AND user_id IS NULL AND slug IS NOT NULL`,
+			`CREATE TRIGGER IF NOT EXISTS trg_issues_knowledge_owner_insert
+			 BEFORE INSERT ON issues
+			 WHEN NEW.project_id IS NOT NULL AND NEW.user_id IS NOT NULL
+			 BEGIN SELECT RAISE(ABORT,'knowledge scope cannot have both project and user owners'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_issues_knowledge_owner_update
+			 BEFORE UPDATE OF project_id,user_id ON issues
+			 WHEN NEW.project_id IS NOT NULL AND NEW.user_id IS NOT NULL
+			 BEGIN SELECT RAISE(ABORT,'knowledge scope cannot have both project and user owners'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_issues_user_knowledge_type_insert
+			 BEFORE INSERT ON issues
+			 WHEN NEW.user_id IS NOT NULL AND NEW.type <> 'memory'
+			 BEGIN SELECT RAISE(ABORT,'user-owned issues support only memory type'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_issues_user_knowledge_type_update
+			 BEFORE UPDATE OF project_id,user_id,type ON issues
+			 WHEN NEW.user_id IS NOT NULL AND NEW.type <> 'memory'
+			 BEGIN SELECT RAISE(ABORT,'user-owned issues support only memory type'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -12003,6 +12078,201 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			"trg_harness_session_control_identity_immutable",
 		})
 	},
+	162: checkM162KnowledgeScopeIdentities,
+}
+
+type m162IdentityCollision struct {
+	projectID sql.NullInt64
+	userID    sql.NullInt64
+	typ       string
+	slug      string
+	count     int
+	ids       string
+}
+
+func (c m162IdentityCollision) scopeLabel() string {
+	switch {
+	case c.projectID.Valid:
+		return fmt.Sprintf("project:%d", c.projectID.Int64)
+	case c.userID.Valid:
+		return fmt.Sprintf("user:%d", c.userID.Int64)
+	default:
+		return "instance"
+	}
+}
+
+func isM162KnowledgeType(typ string) bool {
+	switch typ {
+	case "memory", "runbook", "external_system", "related_project", "guideline":
+		return true
+	default:
+		return false
+	}
+}
+
+func quoteSQLiteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// checkM162KnowledgeScopeIdentities runs before the migration transaction. It
+// is deliberately conservative: only semantically equal knowledge duplicates
+// whose losing ids have no durable inbound reference may proceed to M162's
+// guarded deletion. Any other collision is an operator-visible hard stop.
+func checkM162KnowledgeScopeIdentities(ctx context.Context, conn *sql.Conn) error {
+	var invalidID int64
+	if err := conn.QueryRowContext(ctx, `SELECT id FROM issues
+		WHERE project_id IS NOT NULL AND user_id IS NOT NULL ORDER BY id LIMIT 1`).Scan(&invalidID); err == nil {
+		return fmt.Errorf("mixed project+user ownership at issue id=%d", invalidID)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("inspect mixed knowledge ownership: %w", err)
+	}
+	var invalidType string
+	if err := conn.QueryRowContext(ctx, `SELECT id,type FROM issues
+		WHERE user_id IS NOT NULL AND type<>'memory' ORDER BY id LIMIT 1`).Scan(&invalidID, &invalidType); err == nil {
+		return fmt.Errorf("unsupported user-owned issue id=%d type=%q; only memory is supported", invalidID, invalidType)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("inspect user-owned issue types: %w", err)
+	}
+
+	rows, err := conn.QueryContext(ctx, `
+		SELECT project_id,user_id,type,slug,COUNT(*),group_concat(id,',')
+		  FROM (SELECT * FROM issues WHERE slug IS NOT NULL ORDER BY id)
+		 GROUP BY project_id,user_id,type,slug HAVING COUNT(*)>1
+		 ORDER BY COALESCE(project_id,-1),COALESCE(user_id,-1),type,slug`)
+	if err != nil {
+		return fmt.Errorf("inspect knowledge identity collisions: %w", err)
+	}
+	defer rows.Close()
+	var collisions []m162IdentityCollision
+	for rows.Next() {
+		var collision m162IdentityCollision
+		if err := rows.Scan(&collision.projectID, &collision.userID, &collision.typ,
+			&collision.slug, &collision.count, &collision.ids); err != nil {
+			return fmt.Errorf("scan knowledge identity collision: %w", err)
+		}
+		collisions = append(collisions, collision)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate knowledge identity collisions: %w", err)
+	}
+
+	for _, collision := range collisions {
+		label := fmt.Sprintf("scope=%s type=%q slug=%q count=%d ids=[%s]",
+			collision.scopeLabel(), collision.typ, collision.slug, collision.count, collision.ids)
+		if !isM162KnowledgeType(collision.typ) {
+			return fmt.Errorf("ambiguous non-knowledge identity collision: %s", label)
+		}
+		var divergent int
+		if err := conn.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1 FROM issues a JOIN issues b
+			  ON a.id<b.id AND a.project_id IS b.project_id AND a.user_id IS b.user_id
+			 AND a.type=b.type AND a.slug=b.slug
+			 WHERE a.project_id IS ? AND a.user_id IS ? AND a.type=? AND a.slug=?
+			   AND NOT (`+m162KnowledgeSemanticEquality+`))`,
+			collision.projectID, collision.userID, collision.typ, collision.slug).Scan(&divergent); err != nil {
+			return fmt.Errorf("compare knowledge collision %s: %w", label, err)
+		}
+		if divergent != 0 {
+			return fmt.Errorf("divergent knowledge identity collision: %s", label)
+		}
+
+		loserQuery := `SELECT id FROM issues WHERE project_id IS ? AND user_id IS ? AND type=? AND slug=?
+			AND id<>(SELECT MIN(id) FROM issues WHERE project_id IS ? AND user_id IS ? AND type=? AND slug=?)`
+		args := []any{collision.projectID, collision.userID, collision.typ, collision.slug,
+			collision.projectID, collision.userID, collision.typ, collision.slug}
+		if reference, err := m162FirstDurableIssueReference(ctx, conn, loserQuery, args...); err != nil {
+			return fmt.Errorf("inspect references for %s: %w", label, err)
+		} else if reference != "" {
+			return fmt.Errorf("referenced knowledge identity collision (%s): %s", reference, label)
+		}
+	}
+	return nil
+}
+
+func m162FirstDurableIssueReference(ctx context.Context, conn *sql.Conn, loserQuery string, args ...any) (string, error) {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT DISTINCT m.name,fk."from"
+		  FROM sqlite_master m,pragma_foreign_key_list(m.name) fk
+		 WHERE m.type='table' AND fk."table"='issues'
+		 ORDER BY m.name,fk."from"`)
+	if err != nil {
+		return "", err
+	}
+	type referenceColumn struct{ table, column string }
+	var references []referenceColumn
+	for rows.Next() {
+		var ref referenceColumn
+		if err := rows.Scan(&ref.table, &ref.column); err != nil {
+			_ = rows.Close()
+			return "", err
+		}
+		references = append(references, ref)
+	}
+	if err := rows.Close(); err != nil {
+		return "", err
+	}
+
+	// Also catch durable issue-id columns that intentionally are not foreign
+	// keys (append-only logs/projections), including legacy parent/root records.
+	// issue_control_revisions is the sole exception: it is a mandatory 1:1
+	// projection created for every issue and the issue DELETE trigger removes it
+	// in the same transaction, after the live-row guard can no longer match.
+	rows, err = conn.QueryContext(ctx, `
+		SELECT DISTINCT m.name,ti.name
+		  FROM sqlite_master m,pragma_table_info(m.name) ti
+		 WHERE m.type='table' AND ti.name IN ('issue_id','root_issue_id','created_issue_id')
+		   AND m.name<>'issue_control_revisions'
+		   AND NOT EXISTS (SELECT 1 FROM pragma_foreign_key_list(m.name) fk
+		                   WHERE fk."table"='issues' AND fk."from"=ti.name)
+		 ORDER BY m.name,ti.name`)
+	if err != nil {
+		return "", err
+	}
+	for rows.Next() {
+		var ref referenceColumn
+		if err := rows.Scan(&ref.table, &ref.column); err != nil {
+			_ = rows.Close()
+			return "", err
+		}
+		references = append(references, ref)
+	}
+	if err := rows.Close(); err != nil {
+		return "", err
+	}
+
+	for _, ref := range references {
+		query := `SELECT EXISTS(SELECT 1 FROM ` + quoteSQLiteIdentifier(ref.table) +
+			` WHERE ` + quoteSQLiteIdentifier(ref.column) + ` IN (` + loserQuery + `))`
+		var found int
+		if err := conn.QueryRowContext(ctx, query, args...).Scan(&found); err != nil {
+			return "", err
+		}
+		if found != 0 {
+			return ref.table + "." + ref.column, nil
+		}
+	}
+
+	typedReferences := []struct {
+		table, typeColumn, idColumn string
+	}{
+		{"mutation_log", "subject_type", "subject_id"},
+		{"entity_embeddings", "entity_type", "entity_id"},
+		{"entity_relations", "source_type", "source_id"},
+		{"entity_relations", "target_type", "target_id"},
+	}
+	for _, ref := range typedReferences {
+		query := `SELECT EXISTS(SELECT 1 FROM ` + quoteSQLiteIdentifier(ref.table) + ` WHERE ` +
+			quoteSQLiteIdentifier(ref.typeColumn) + `='issue' AND ` + quoteSQLiteIdentifier(ref.idColumn) +
+			` IN (` + loserQuery + `))`
+		var found int
+		if err := conn.QueryRowContext(ctx, query, args...).Scan(&found); err != nil {
+			return "", err
+		}
+		if found != 0 {
+			return ref.table + "." + ref.idColumn, nil
+		}
+	}
+	return "", nil
 }
 
 func checkM154SchemaIsUnapplied(ctx context.Context, conn *sql.Conn) error {

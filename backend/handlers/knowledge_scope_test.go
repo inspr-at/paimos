@@ -28,8 +28,14 @@ package handlers_test
 //      server but the merge logic is pure).
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/inspr-at/paimos/backend/db"
@@ -143,6 +149,73 @@ func TestKnowledgeScope_UserMemoryCRUDRoundTrip(t *testing.T) {
 	decode(t, afterResp, &after)
 	if len(after) != 0 {
 		t.Fatalf("expected 0 entries after delete; got %d", len(after))
+	}
+}
+
+func TestKnowledgeScopeIdentityConcurrentUserCreateReturnsConflict(t *testing.T) {
+	ts := newTestServer(t)
+	payload, err := json.Marshal(map[string]any{
+		"slug": "one_identity", "title": "One identity", "body": "same",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		status int
+		body   string
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for range 2 {
+		go func() {
+			ready.Done()
+			<-start
+			req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodPost,
+				ts.srv.URL+userMemoryURL, bytes.NewReader(payload))
+			if reqErr != nil {
+				results <- result{err: reqErr}
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Cookie", ts.adminCookie)
+			resp, doErr := http.DefaultClient.Do(req)
+			if doErr != nil {
+				results <- result{err: doErr}
+				return
+			}
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			results <- result{status: resp.StatusCode, body: string(body), err: readErr}
+		}()
+	}
+	ready.Wait()
+	close(start)
+
+	statuses := map[int]int{}
+	var conflictBody string
+	for range 2 {
+		got := <-results
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		statuses[got.status]++
+		if got.status == http.StatusConflict {
+			conflictBody = got.body
+		}
+	}
+	if statuses[http.StatusCreated] != 1 || statuses[http.StatusConflict] != 1 {
+		t.Fatalf("concurrent statuses=%v, want one 201 and one 409", statuses)
+	}
+	if !strings.Contains(conflictBody, "slug already exists for this scope") ||
+		strings.Contains(conflictBody, "One identity") {
+		t.Fatalf("conflict response is not generic: %s", conflictBody)
+	}
+	var count int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM issues WHERE project_id IS NULL AND type='memory' AND slug='one_identity'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("identity count=%d err=%v, want 1", count, err)
 	}
 }
 
@@ -273,6 +346,40 @@ func TestKnowledgeScope_PromoteToSameScopeRejects(t *testing.T) {
 		"to": "user",
 	})
 	assertStatus(t, promoteResp, http.StatusBadRequest)
+}
+
+func TestKnowledgeScopeIdentityPromotionConflictIsAtomic(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := createTestProject(t, ts, "Promotion conflict", "PCON")
+	assertStatus(t, ts.post(t, userMemoryURL, ts.adminCookie, map[string]any{
+		"slug": "occupied", "title": "Destination", "body": "destination body",
+	}), http.StatusCreated)
+	assertStatus(t, ts.post(t, knowledgeURL(projectID, "memory"), ts.adminCookie, map[string]any{
+		"slug": "occupied", "title": "Source", "body": "source body",
+	}), http.StatusCreated)
+
+	response := ts.post(t, "/api/memory/occupied/promote", ts.adminCookie, map[string]any{
+		"to": "user", "from_project_id": projectID,
+	})
+	assertStatus(t, response, http.StatusConflict)
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "slug already exists at destination scope") || strings.Contains(string(body), "Destination") {
+		t.Fatalf("promotion conflict response is not generic: %s", body)
+	}
+	var liveSource, liveDestination int
+	if err := db.DB.QueryRow(`SELECT
+		COUNT(*) FILTER (WHERE project_id=? AND deleted_at IS NULL),
+		COUNT(*) FILTER (WHERE project_id IS NULL AND user_id IS NOT NULL AND deleted_at IS NULL)
+		FROM issues WHERE type='memory' AND slug='occupied'`, projectID).Scan(&liveSource, &liveDestination); err != nil {
+		t.Fatal(err)
+	}
+	if liveSource != 1 || liveDestination != 1 {
+		t.Fatalf("promotion conflict partially mutated source=%d destination=%d", liveSource, liveDestination)
+	}
 }
 
 func TestKnowledgeScope_PromoteToInstanceRequiresAdmin(t *testing.T) {
