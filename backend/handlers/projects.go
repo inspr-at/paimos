@@ -101,7 +101,7 @@ func ListProjects(w http.ResponseWriter, r *http.Request) {
 
 	// #nosec G202 G701 -- projectIDFilter returns a fixed SQL fragment plus placeholder args; status is allowlisted above.
 	rows, err := db.DB.Query(`
-		SELECT p.id, p.name, p.key, p.description, p.status,
+		SELECT p.id, p.name, p.key, p.description, p.status, p.node_depth,
 		       p.product_owner, p.customer_label, p.customer_id,
 		       COALESCE(c.name, ''),
 		       p.created_at, p.updated_at,
@@ -141,7 +141,7 @@ func ListProjects(w http.ResponseWriter, r *http.Request) {
 		var p models.Project
 		var custRateHourly, custRateLp *float64
 		var aiDefaultsRaw, aiPolicyRaw string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Key, &p.Description, &p.Status,
+		if err := rows.Scan(&p.ID, &p.Name, &p.Key, &p.Description, &p.Status, &p.NodeDepth,
 			&p.ProductOwner, &p.CustomerLabel, &p.CustomerID, &p.CustomerName,
 			&p.CreatedAt, &p.UpdatedAt, &p.IssueCount, &p.LogoPath,
 			&p.LastActivity, &p.OpenIssueCount, &p.DoneIssueCount, &p.ActiveIssueCount,
@@ -326,6 +326,7 @@ func CreateProject(w http.ResponseWriter, r *http.Request) {
 		// CustomerID is the FK to customers.id; nil = unassigned.
 		CustomerLabel string `json:"customer_label"`
 		CustomerID    *int64 `json:"customer_id"`
+		NodeDepth     string `json:"node_depth"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 		jsonError(w, "name required", http.StatusBadRequest)
@@ -341,9 +342,16 @@ func CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if body.NodeDepth == "" {
+		body.NodeDepth = "nested"
+	}
+	if body.NodeDepth != "1" && body.NodeDepth != "nested" {
+		jsonError(w, "node_depth must be 1 or nested", http.StatusBadRequest)
+		return
+	}
 	res, err := db.DB.Exec(
-		"INSERT INTO projects(name,key,description,product_owner,customer_label,customer_id) VALUES(?,?,?,?,?,?)",
-		body.Name, body.Key, body.Description, body.ProductOwner, body.CustomerLabel, body.CustomerID,
+		"INSERT INTO projects(name,key,description,product_owner,customer_label,customer_id,node_depth) VALUES(?,?,?,?,?,?,?)",
+		body.Name, body.Key, body.Description, body.ProductOwner, body.CustomerLabel, body.CustomerID, body.NodeDepth,
 	)
 	if handleDBError(w, err, "project key") {
 		return
@@ -449,6 +457,7 @@ func UpdateProject(w http.ResponseWriter, r *http.Request) {
 		Key           *string `json:"key"`
 		Description   *string `json:"description"`
 		Status        *string `json:"status"`
+		NodeDepth     *string `json:"node_depth"`
 		ProductOwner  *int64  `json:"product_owner"`
 		CustomerLabel *string `json:"customer_label"`
 		// CustomerID is the FK. Pass `null` to detach (the CASE WHEN below
@@ -491,6 +500,10 @@ func UpdateProject(w http.ResponseWriter, r *http.Request) {
 		}
 		body.Status = &status
 	}
+	if body.NodeDepth != nil && *body.NodeDepth != "1" && *body.NodeDepth != "nested" {
+		jsonError(w, "node_depth must be 1 or nested", http.StatusBadRequest)
+		return
+	}
 	aiDefaultsJSON := ""
 	aiPolicyJSON := ""
 	if body.AIDefaults != nil {
@@ -525,6 +538,7 @@ func UpdateProject(w http.ResponseWriter, r *http.Request) {
 			key            = COALESCE(?, key),
 			description    = COALESCE(?, description),
 			status         = COALESCE(?, status),
+			node_depth     = COALESCE(?, node_depth),
 			product_owner  = CASE WHEN ? IS NOT NULL THEN ? ELSE product_owner END,
 			customer_label = COALESCE(?, customer_label),
 			customer_id    = CASE WHEN ? THEN NULL ELSE COALESCE(?, customer_id) END,
@@ -534,7 +548,7 @@ func UpdateProject(w http.ResponseWriter, r *http.Request) {
 			ai_policy_json   = CASE WHEN ? THEN ? ELSE ai_policy_json END,
 			updated_at     = ?
 		WHERE id=?
-	`, body.Name, body.Key, body.Description, body.Status,
+	`, body.Name, body.Key, body.Description, body.Status, body.NodeDepth,
 		body.ProductOwner, body.ProductOwner,
 		body.CustomerLabel,
 		body.ClearCustomer, body.CustomerID,
@@ -648,7 +662,7 @@ func getProjectByID(id int64) *models.Project {
 	var custRateHourly, custRateLp *float64
 	var aiDefaultsRaw, aiPolicyRaw string
 	err := db.DB.QueryRow(`
-		SELECT p.id, p.name, p.key, p.description, p.status,
+		SELECT p.id, p.name, p.key, p.description, p.status, p.node_depth,
 		       p.product_owner, p.customer_label, p.customer_id,
 		       COALESCE(c.name, ''),
 		       p.created_at, p.updated_at,
@@ -675,7 +689,7 @@ func getProjectByID(id int64) *models.Project {
 		LEFT JOIN customers c ON c.id = p.customer_id
 		WHERE p.id=?
 		GROUP BY p.id
-	`, id).Scan(&p.ID, &p.Name, &p.Key, &p.Description, &p.Status,
+	`, id).Scan(&p.ID, &p.Name, &p.Key, &p.Description, &p.Status, &p.NodeDepth,
 		&p.ProductOwner, &p.CustomerLabel, &p.CustomerID, &p.CustomerName,
 		&p.CreatedAt, &p.UpdatedAt, &p.IssueCount, &p.LogoPath,
 		&p.LastActivity, &p.OpenIssueCount, &p.DoneIssueCount, &p.ActiveIssueCount,

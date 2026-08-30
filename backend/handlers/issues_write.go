@@ -160,7 +160,7 @@ func CreateIssue(w http.ResponseWriter, r *http.Request) {
 	id, _ := res.LastInsertId()
 
 	if err := setParentEdge(r.Context(), tx, id, body.ParentID); err != nil {
-		jsonError(w, "internal error", http.StatusInternalServerError)
+		writeParentEdgeError(w, err)
 		return
 	}
 	// PAI-599: cost_unit/release set from string labels via container edges.
@@ -277,7 +277,7 @@ func CloneIssue(w http.ResponseWriter, r *http.Request) {
 	newID, _ := res.LastInsertId()
 
 	if err := setParentEdge(r.Context(), tx, newID, src.ParentID); err != nil {
-		jsonError(w, "internal error", http.StatusInternalServerError)
+		writeParentEdgeError(w, err)
 		return
 	}
 	// PAI-599: clone inherits the source's cost_unit/release via edges.
@@ -608,7 +608,7 @@ func UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// when parent_id is part of this request (captured by afterSnap below).
 	if parentIDPresent {
 		if err := setParentEdge(r.Context(), tx, id, body.ParentID); err != nil {
-			jsonError(w, "internal error", http.StatusInternalServerError)
+			writeParentEdgeError(w, err)
 			return
 		}
 	}

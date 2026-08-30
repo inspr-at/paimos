@@ -75,6 +75,14 @@
     {
       "name": "agent-mode",
       "description": "Privacy-safe Agent Mode delivery snapshots and resumable invalidation stream (schema v1)"
+    },
+    {
+      "name": "product-sessions",
+      "description": "Paimos 6 product sessions, distinct from attribution, harness-control, run, delivery, and intake sessions"
+    },
+    {
+      "name": "nodes",
+      "description": "Paimos 6 one-node compatibility API over legacy issues"
     }
   ],
   "components": {
@@ -376,7 +384,8 @@
           "id",
           "name",
           "key",
-          "status"
+          "status",
+          "node_depth"
         ],
         "properties": {
           "id": {
@@ -401,6 +410,11 @@
               "archived",
               "deleted"
             ]
+          },
+          "node_depth": {
+            "type": "string",
+            "enum": ["1", "nested"],
+            "description": "Binary node hierarchy contract. Existing projects default to nested; 1 forbids parent edges."
           },
           "customer_id": {
             "type": "integer",
@@ -1808,7 +1822,89 @@
       "HarnessHeartbeat": {"type": "object", "additionalProperties": false, "required": ["phase"], "properties": {"phase": {"type": "string", "enum": ["starting", "working", "yielded", "stopping"]}}},
       "HarnessDeliveryComplete": {"type": "object", "additionalProperties": false, "required": ["cursor", "delivery_id", "effective_level"], "properties": {"cursor": {"type": "integer", "format": "int64"}, "delivery_id": {"type": "string", "format": "uuid"}, "effective_level": {"type": "string", "enum": ["simple", "steer"]}, "fallback_reason": {"type": "string", "enum": ["", "idle", "unsupported", "policy_capped", "target_missing", "not_steerable", "transport_error"]}}},
       "AgentDeliveryUnavailable": {"type": "object", "additionalProperties": false, "required": ["to", "cursor", "delivery_id", "fallback_reason"], "properties": {"to": {"type": "string"}, "cursor": {"type": "integer", "format": "int64"}, "delivery_id": {"type": "string", "format": "uuid"}, "fallback_reason": {"type": "string", "enum": ["idle", "not_steerable", "transport_error"]}}},
-      "HarnessControlComplete": {"type": "object", "additionalProperties": false, "required": ["outcome", "reason"], "properties": {"outcome": {"type": "string", "enum": ["applied", "rejected"]}, "reason": {"type": "string", "enum": ["applied", "not_running", "unsupported", "ownership_lost", "failed"]}}}
+      "HarnessControlComplete": {"type": "object", "additionalProperties": false, "required": ["outcome", "reason"], "properties": {"outcome": {"type": "string", "enum": ["applied", "rejected"]}, "reason": {"type": "string", "enum": ["applied", "not_running", "unsupported", "ownership_lost", "failed"]}}},
+      "ProductSessionNode": {
+        "type": "object", "additionalProperties": false,
+        "required": ["node_id", "node_key", "label"],
+        "properties": {
+          "node_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "node_key": {"type": "string"},
+          "label": {"type": "string"}
+        }
+      },
+      "ProductSession": {
+        "type": "object", "additionalProperties": false,
+        "description": "A first-class product session. product_session_id is never an attribution UUID/header session, harness_session_id, agent_run_id, delivery identity, or intake_session_id.",
+        "required": ["product_session_id", "project_id", "target_kind", "target_project_agent_id", "target_agent_name", "node_id", "node", "title", "summary", "revision", "created_by_user_id", "updated_by_user_id", "created_at", "updated_at"],
+        "properties": {
+          "product_session_id": {"type": "string", "format": "uuid"},
+          "project_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "target_kind": {"type": "string", "enum": ["paimos", "project_agent"]},
+          "target_project_agent_id": {"type": ["integer", "null"], "format": "int64"},
+          "target_agent_name": {"type": "string"},
+          "node_id": {"type": ["integer", "null"], "format": "int64"},
+          "node": {"oneOf": [{"$ref": "#/components/schemas/ProductSessionNode"}, {"type": "null"}]},
+          "title": {"type": "string", "minLength": 1, "maxLength": 240},
+          "summary": {"type": "string", "maxLength": 4000},
+          "revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "created_by_user_id": {"type": ["integer", "null"], "format": "int64"},
+          "updated_by_user_id": {"type": ["integer", "null"], "format": "int64"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ProductSessionCreate": {
+        "type": "object", "additionalProperties": false,
+        "required": ["target_kind", "title"],
+        "properties": {
+          "target_kind": {"type": "string", "enum": ["paimos", "project_agent"]},
+          "target_project_agent_id": {"type": ["integer", "null"], "format": "int64"},
+          "node_id": {"type": ["integer", "null"], "format": "int64"},
+          "title": {"type": "string", "minLength": 1, "maxLength": 240},
+          "summary": {"type": "string", "maxLength": 4000}
+        }
+      },
+      "ProductSessionAttachNode": {
+        "type": "object", "additionalProperties": false,
+        "required": ["node_id", "expected_revision"],
+        "properties": {
+          "node_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "expected_revision": {"type": "integer", "format": "int64", "minimum": 1}
+        }
+      },
+      "ProductSessionDetachNode": {
+        "type": "object", "additionalProperties": false,
+        "required": ["expected_revision"],
+        "properties": {"expected_revision": {"type": "integer", "format": "int64", "minimum": 1}}
+      },
+      "Node": {
+        "type": "object", "additionalProperties": false,
+        "description": "Presentation-only one-node DTO over an existing issues row. kind is always node and cosmetic_type_label never changes legacy issue storage.",
+        "required": ["node_id", "project_id", "node_key", "kind", "cosmetic_type_label", "parent_node_id", "title", "description", "status", "priority", "created_at", "updated_at"],
+        "properties": {
+          "node_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "project_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "node_key": {"type": "string"},
+          "kind": {"type": "string", "const": "node"},
+          "cosmetic_type_label": {"type": "string", "readOnly": true},
+          "parent_node_id": {"type": ["integer", "null"], "format": "int64"},
+          "title": {"type": "string"}, "description": {"type": "string"},
+          "status": {"type": "string"}, "priority": {"type": "string"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "NodeCreate": {
+        "type": "object", "additionalProperties": false, "required": ["title"],
+        "properties": {
+          "title": {"type": "string", "minLength": 1}, "description": {"type": "string"},
+          "parent_node_id": {"type": ["integer", "null"], "format": "int64"}
+        }
+      },
+      "NodeParentWrite": {
+        "type": "object", "additionalProperties": false, "required": ["parent_node_id"],
+        "properties": {"parent_node_id": {"type": ["integer", "null"], "format": "int64"}}
+      }
     },
     "responses": {
       "Unauthorized": {
@@ -4543,6 +4639,76 @@
     "/api/projects/{id}/messages/delivery-unavailable": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
       "post": {"tags": ["agents"], "summary": "Release an unavailable leased agentd delivery to a live generation or simple fallback", "description": "Does not complete or acknowledge the delivery. The same row must receive a fresh FIFO lease and CompleteLocalDelivery handoff. Working M161 generations require a heartbeat no older than 90 seconds; no valid route becomes blocked target_missing.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentDeliveryUnavailable"}}}}, "responses": {"200": {"description": "Delivery re-pended to an eligible route"}, "400": {"description": "Lease, attribution, or route validation failed"}}}
+    },
+    "/api/projects/{id}/product-sessions": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {
+        "tags": ["product-sessions"], "summary": "List first-class product sessions for a project",
+        "responses": {"200": {"description": "Product sessions", "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/ProductSession"}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}
+      },
+      "post": {
+        "tags": ["product-sessions"], "summary": "Create a product session targeting Paimos or a registered project agent",
+        "description": "Creates no harness session, agent run, delivery, issue, or intake session. Multiple product sessions may target the same registered agent.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProductSessionCreate"}}}},
+        "responses": {"201": {"description": "Created product session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProductSession"}}}}, "403": {"$ref": "#/components/responses/Forbidden"}, "422": {"description": "Agent or node belongs to another project"}}
+      }
+    },
+    "/api/projects/{id}/product-sessions/{productSessionID}": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "productSessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      ],
+      "get": {"tags": ["product-sessions"], "summary": "Get one product session by its typed identity", "responses": {"200": {"description": "Product session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProductSession"}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}
+    },
+    "/api/projects/{id}/product-sessions/{productSessionID}/attach-node": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "productSessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      ],
+      "post": {
+        "tags": ["product-sessions"], "summary": "Attach or reattach a product session to one same-project node with revision CAS",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProductSessionAttachNode"}}}},
+        "responses": {"200": {"description": "Attached product session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProductSession"}}}}, "409": {"description": "Revision conflict"}, "422": {"description": "Node is not live in this project"}}
+      }
+    },
+    "/api/projects/{id}/product-sessions/{productSessionID}/detach-node": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "productSessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      ],
+      "post": {
+        "tags": ["product-sessions"], "summary": "Detach a product session from its node with revision CAS",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProductSessionDetachNode"}}}},
+        "responses": {"200": {"description": "Detached product session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProductSession"}}}}, "409": {"description": "Revision conflict"}}
+      }
+    },
+    "/api/projects/{id}/nodes": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {"tags": ["nodes"], "summary": "List one-kind node DTOs over existing project issue rows", "responses": {"200": {"description": "Nodes", "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/Node"}}}}}}},
+      "post": {
+        "tags": ["nodes"], "summary": "Create a node without choosing epic, ticket, or task",
+        "description": "The compatibility row uses the existing ticket storage value; clients receive kind=node and presentation-only cosmetic labels.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NodeCreate"}}}},
+        "responses": {"201": {"description": "Created node", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Node"}}}}, "422": {"description": "Parent violates same-project, depth, or cycle rules"}}
+      }
+    },
+    "/api/projects/{id}/nodes/{nodeID}": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "nodeID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}
+      ],
+      "get": {"tags": ["nodes"], "summary": "Get a one-kind node DTO over an existing issue row", "responses": {"200": {"description": "Node", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Node"}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}
+    },
+    "/api/projects/{id}/nodes/{nodeID}/parent": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "nodeID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}
+      ],
+      "put": {
+        "tags": ["nodes"], "summary": "Set or clear the one-parent SSOT edge for a node",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/NodeParentWrite"}}}},
+        "responses": {"200": {"description": "Updated node", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Node"}}}}, "422": {"description": "Parent violates same-project, depth, or cycle rules"}}
+      }
     },
     "/api/projects/{id}/harness-sessions": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],

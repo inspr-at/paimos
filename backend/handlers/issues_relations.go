@@ -38,6 +38,14 @@ type parentEdgeExecer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+func writeParentEdgeError(w http.ResponseWriter, err error) {
+	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		jsonError(w, "issue already has a parent", http.StatusConflict)
+		return
+	}
+	jsonError(w, "parent must be a same-project node allowed by project depth without a cycle", http.StatusUnprocessableEntity)
+}
+
 // setParentEdge writes the issue hierarchy directly to the `parent` edge
 // (source=parent, target=child) — the single source of truth after P6 dropped
 // the issues.parent_id column. Idempotent delete-then-insert: clears any
@@ -375,6 +383,10 @@ func CreateIssueRelation(w http.ResponseWriter, r *http.Request) {
 		`INSERT OR IGNORE INTO issue_relations(source_id, target_id, type, rank) VALUES(?,?,?,?)`,
 		dbSource, dbTarget, body.Type, rank,
 	)
+	if err != nil && body.Type == "parent" {
+		writeParentEdgeError(w, err)
+		return
+	}
 	if handleDBError(w, err, "issue relation") {
 		return
 	}

@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 162
+const latestSchemaVersion = 163
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -1308,6 +1308,9 @@ func TestSchemaContainsCriticalIndexes(t *testing.T) {
 		"idx_mutation_log_user_stack",
 		"idx_mutation_log_request",
 		"idx_mutation_log_parent",
+		"idx_product_sessions_project_updated",
+		"idx_product_sessions_node",
+		"idx_product_sessions_target_agent",
 		"idx_documents_project",
 		"idx_time_entries_mite_id",
 		// PAI-857 / M162 — scope-correct knowledge identities.

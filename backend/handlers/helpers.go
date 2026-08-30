@@ -134,6 +134,10 @@ func handleDBError(w http.ResponseWriter, err error, entity string) bool {
 			return true
 		}
 	}
+	if strings.Contains(err.Error(), "project depth 1 forbids parent edges") {
+		jsonError(w, "remove all parent edges before setting node_depth to 1", http.StatusConflict)
+		return true
+	}
 	log.Printf("%s DB error: %v", entity, err)
 	jsonError(w, "internal error", http.StatusInternalServerError)
 	return true

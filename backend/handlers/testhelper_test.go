@@ -228,6 +228,8 @@ func buildRouter() http.Handler {
 			// inventories (environments, deploy recipes).
 			r.With(auth.RequireProjectView).Get("/projects/{id}/agents/{name}.json", handlers.GetProjectAgentArtifact)
 			r.With(auth.RequireProjectView).Get("/projects/{id}/agents/{name}.md", handlers.GetProjectAgentArtifactMarkdown)
+			handlers.RegisterProductSessionRoutes(r)
+			handlers.RegisterNodeRoutes(r)
 			r.With(auth.RequireProjectView).Get("/projects/{id}/environments", handlers.ListProjectEnvironments)
 			r.With(auth.RequireAdmin, auth.RequireProjectView).Post("/projects/{id}/environments", handlers.CreateProjectEnvironment)
 			r.With(auth.RequireAdmin, auth.RequireProjectView).Put("/projects/{id}/environments/{envId}", handlers.UpdateProjectEnvironment)

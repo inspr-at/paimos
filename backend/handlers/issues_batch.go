@@ -259,7 +259,7 @@ func CreateIssuesBatch(w http.ResponseWriter, r *http.Request) {
 		if err := setParentEdge(r.Context(), tx, id, parentID); err != nil {
 			writeBatchError(w, []BatchError{{
 				Index: i, Error: cleanDBError(err),
-			}}, http.StatusInternalServerError)
+			}}, http.StatusUnprocessableEntity)
 			return
 		}
 		// PAI-599: cost_unit/release set from string labels via container edges.
@@ -500,7 +500,7 @@ func UpdateIssuesBatch(w http.ResponseWriter, r *http.Request) {
 		// PAI-584 P6: hierarchy via the `parent` edge when this row touches it.
 		if rw.update.ParentIDPresent {
 			if err := setParentEdge(r.Context(), tx, rw.id, rw.update.ParentID); err != nil {
-				jsonError(w, "internal error", http.StatusInternalServerError)
+				writeParentEdgeError(w, err)
 				return
 			}
 		}
