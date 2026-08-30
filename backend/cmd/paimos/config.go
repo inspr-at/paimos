@@ -255,7 +255,7 @@ func resolveInstance(cfg Config) (string, InstanceConfig, error) {
 	}
 	if key == "" {
 		return name, inst, &usageError{
-			msg: fmt.Sprintf("no API key for instance %q — run `paimos auth login --name %s` (or set %s)", name, name, envAPIKey),
+			msg: fmt.Sprintf("no instance-scoped API key for instance %q — run `paimos auth login --name %s`; %s is accepted only together with %s for an env-only target", name, name, envAPIKey, envURL),
 		}
 	}
 	inst.APIKey = key
@@ -267,6 +267,11 @@ func resolveInstance(cfg Config) (string, InstanceConfig, error) {
 }
 
 func resolveEnvInstance() (string, InstanceConfig, bool, error) {
+	if strings.TrimSpace(os.Getenv(envURL)) != "" && strings.TrimSpace(os.Getenv(envPPMURL)) != "" {
+		return "", InstanceConfig{}, true, &usageError{
+			msg: fmt.Sprintf("%s and %s are both set; unset one complete URL/key pair so target provenance is unambiguous", envURL, envPPMURL),
+		}
+	}
 	if rawURL := strings.TrimSpace(os.Getenv(envURL)); rawURL != "" {
 		key := strings.TrimSpace(os.Getenv(envAPIKey))
 		if key == "" {
@@ -299,6 +304,17 @@ func resolveEnvInstance() (string, InstanceConfig, bool, error) {
 }
 
 func resolveActiveInstance() (string, InstanceConfig, error) {
+	// An explicit named target is a hard boundary. Ambient URL pairs must
+	// never supersede it, even when they happen to point at the same host:
+	// their generic credential has no proof that it belongs to the name.
+	if strings.TrimSpace(flagInstance) != "" {
+		if rawURL := strings.TrimSpace(os.Getenv(envURL)); rawURL != "" {
+			return "", InstanceConfig{}, &usageError{msg: fmt.Sprintf("--instance %q conflicts with %s; unset %s/%s or omit --instance", flagInstance, envURL, envURL, envAPIKey)}
+		}
+		if rawURL := strings.TrimSpace(os.Getenv(envPPMURL)); rawURL != "" {
+			return "", InstanceConfig{}, &usageError{msg: fmt.Sprintf("--instance %q conflicts with %s; unset %s/%s or omit --instance", flagInstance, envPPMURL, envPPMURL, envPPMAPIKey)}
+		}
+	}
 	if name, inst, ok, err := resolveEnvInstance(); ok || err != nil {
 		return name, inst, err
 	}

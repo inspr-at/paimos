@@ -91,7 +91,8 @@ and `pma` at the same target registry or dispatcher configuration.
 
 | Var | Default | Notes |
 |---|---|---|
-| `PAIMOS_AGENT_BUS_INSTANCE` | `default` | Stable non-secret bus identity written into target, delivery, idempotency, and webhook records. Production `ppm` must set `ppm`; `pma` must independently set `pma`. |
+| `PAIMOS_INSTANCE` | *(empty)* | Optional deployment instance ID used to prove that the bus identity matches the configured domain. Set it in production. |
+| `PAIMOS_AGENT_BUS_INSTANCE` | `default` (development only) | Stable non-secret bus identity written into target, delivery, idempotency, and webhook records. Production rejects an empty/`default` ID and any mismatch with `PAIMOS_INSTANCE`; `ppm` must set `ppm` and `pma` must independently set `pma`. |
 | `PAIMOS_AGENT_BUS_WEBHOOK_HOSTS` | *(empty / all denied)* | Comma-separated exact hostnames approved for operator-registered `https_webhook` targets. Amy's Grok Bot routine hostname must appear here before its target can be registered. |
 | `PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS` | `false` | When `true`, permits loopback/private/link-local webhook addresses. Intended only for isolated local capture tests; keep false in production. HTTPS and the hostname allowlist still apply. |
 
@@ -100,6 +101,7 @@ Amy's target (replace only the hostname placeholder):
 
 ```text
 PAIMOS_AGENT_BUS_INSTANCE=ppm
+PAIMOS_INSTANCE=ppm
 PAIMOS_AGENT_BUS_WEBHOOK_HOSTS=<Amy routine hostname>
 PAIMOS_AGENT_BUS_ALLOW_PRIVATE_WEBHOOKS=false
 ```

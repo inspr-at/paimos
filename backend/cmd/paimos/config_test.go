@@ -228,24 +228,20 @@ func TestPickInstance(t *testing.T) {
 }
 
 // TestResolveInstance_KeyHydration exercises the credential-loading
-// step layered on top of pickInstance: PAIMOS_API_KEY wins, then the
-// keyring, and a missing credential surfaces as a usage error.
+// step layered on top of pickInstance: only the named keyring entry is
+// eligible, and a missing credential surfaces as a usage error.
 func TestResolveInstance_KeyHydration(t *testing.T) {
 	cfg := Config{
 		DefaultInstance: "ppm",
 		Instances:       map[string]InstanceConfig{"ppm": {URL: "https://pm.barta.cm"}},
 	}
 
-	t.Run("env var wins", func(t *testing.T) {
+	t.Run("generic env key cannot authenticate named instance", func(t *testing.T) {
 		t.Setenv(envAPIKey, "env_key")
-		_ = keyringSet("ppm", "kr_key") // env should still win
-		t.Cleanup(func() { _ = keyringDelete("ppm") })
-		_, inst, err := resolveInstance(cfg)
-		if err != nil {
-			t.Fatalf("resolveInstance: %v", err)
-		}
-		if inst.APIKey != "env_key" {
-			t.Errorf("APIKey=%q, want env_key", inst.APIKey)
+		_ = keyringDelete("ppm")
+		_, _, err := resolveInstance(cfg)
+		if err == nil || !strings.Contains(err.Error(), "instance-scoped") {
+			t.Fatalf("resolveInstance err=%v, want instance-scoped credential refusal", err)
 		}
 	})
 
@@ -273,6 +269,23 @@ func TestResolveInstance_KeyHydration(t *testing.T) {
 		}
 		if _, ok := err.(*usageError); !ok {
 			t.Errorf("err type = %T, want *usageError", err)
+		}
+	})
+}
+
+func TestResolveActiveInstance_ExplicitInstanceConflictsWithAmbientURL(t *testing.T) {
+	withConfigDir(t, func(path string) {
+		if err := os.WriteFile(path, []byte("default_instance: ppm\ninstances:\n  ppm:\n    url: https://ppm.example\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		oldInstance := flagInstance
+		flagInstance = "ppm"
+		t.Cleanup(func() { flagInstance = oldInstance })
+		t.Setenv(envURL, "https://pma.example")
+		t.Setenv(envAPIKey, "generic")
+		_, _, err := resolveActiveInstance()
+		if err == nil || !strings.Contains(err.Error(), "conflicts") || !strings.Contains(err.Error(), envURL) {
+			t.Fatalf("err=%v, want actionable provenance conflict", err)
 		}
 	})
 }
@@ -338,6 +351,17 @@ func TestResolveEnvInstance_RequiresMatchingKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), envAPIKey) {
 		t.Errorf("error %q does not mention %s", err.Error(), envAPIKey)
+	}
+}
+
+func TestResolveEnvInstance_RejectsCompetingURLPairs(t *testing.T) {
+	t.Setenv(envURL, "https://pma.example")
+	t.Setenv(envAPIKey, "pma-key")
+	t.Setenv(envPPMURL, "https://ppm.example")
+	t.Setenv(envPPMAPIKey, "ppm-key")
+	_, _, _, err := resolveEnvInstance()
+	if err == nil || !strings.Contains(err.Error(), "both set") {
+		t.Fatalf("err=%v, want ambiguous provenance refusal", err)
 	}
 }
 

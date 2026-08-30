@@ -446,9 +446,14 @@ func defaultCLIString(value, fallback string) string {
 // All read commands share this preamble — keep it in one place so the
 // error message stays consistent.
 func instanceClient() (*Client, error) {
-	_, inst, err := resolveActiveInstance()
+	name, inst, err := resolveActiveInstance()
 	if err != nil {
 		return nil, err
 	}
-	return newClient(inst), nil
+	c := newClient(inst)
+	c.identity, err = newInstanceIdentity(name, inst.URL)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }

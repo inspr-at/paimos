@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/spf13/cobra"
 )
 
@@ -234,6 +235,18 @@ Exit codes:
 			}
 			results = append(results, doctorCheck{Name: "config", Status: "ok",
 				Detail: resolvedInstanceDetail(instanceName, inst)})
+
+			production := strings.EqualFold(strings.TrimSpace(os.Getenv("PAIMOS_ENV")), "production") ||
+				strings.EqualFold(strings.TrimSpace(os.Getenv("PAIMOS_ENV")), "prod")
+			expectedBusInstance := strings.TrimSpace(os.Getenv("PAIMOS_INSTANCE"))
+			if expectedBusInstance == "" && instanceName != "env" && instanceName != "ppm-env" {
+				expectedBusInstance = instanceName
+			}
+			if err := agentmessage.ValidateInstanceIdentity(expectedBusInstance, production); err != nil {
+				results = append(results, doctorCheck{Name: "bus_identity", Status: "fail", Detail: err.Error()})
+				return renderDoctor(results)
+			}
+			results = append(results, doctorCheck{Name: "bus_identity", Status: "ok"})
 
 			client := newClient(inst)
 

@@ -300,6 +300,58 @@ func TestComputeBundleRev_StableUnderMapOrder(t *testing.T) {
 	}
 }
 
+func TestBundleCacheSeparatesSameProjectAcrossInstancesAndMissesLegacy(t *testing.T) {
+	root := t.TempDir()
+	ppm, err := newInstanceIdentity("ppm", "https://ppm.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pma, err := newInstanceIdentity("pma", "https://pma.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(identity instanceIdentity, body string) *bundlePayload {
+		return &bundlePayload{
+			Project:   projectSummary{ID: 7, Key: "PAI"},
+			Agent:     json.RawMessage(`{"agent":{"name":"ops"}}`),
+			Memory:    []knowledgeEntry{{Slug: "domain", Title: "Domain", Body: body}},
+			FetchedAt: "2026-08-30T00:00:00Z",
+			Identity:  identity,
+		}
+	}
+	ppmDir, _, err := writeBundleManifest(root, mk(ppm, "ppm content"), "ops")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pmaDir, _, err := writeBundleManifest(root, mk(pma, "pma content"), "ops")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ppmDir == pmaDir {
+		t.Fatalf("same project key shared cache directory %s", ppmDir)
+	}
+	ppmManifest, err := readBundleManifest(root, ppm, "PAI")
+	if err != nil || ppmManifest == nil || ppmManifest.Entries["memory"][0].Body != "ppm content" {
+		t.Fatalf("ppm manifest=%+v err=%v", ppmManifest, err)
+	}
+	pmaManifest, err := readBundleManifest(root, pma, "PAI")
+	if err != nil || pmaManifest == nil || pmaManifest.Entries["memory"][0].Body != "pma content" {
+		t.Fatalf("pma manifest=%+v err=%v", pmaManifest, err)
+	}
+
+	legacyDir := filepath.Join(root, "PAI")
+	if err := os.MkdirAll(legacyDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "manifest.json"), []byte(`{"project":"PAI","entries":{"memory":[{"body":"legacy"}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unknown, _ := newInstanceIdentity("unknown", "https://unknown.example")
+	if cached, err := readBundleManifest(root, unknown, "PAI"); err != nil || cached != nil {
+		t.Fatalf("legacy/unproven cache was reused: cached=%+v err=%v", cached, err)
+	}
+}
+
 // ── end-to-end CLI ──────────────────────────────────────────────
 
 // fakeBundleAPI returns a fake server that wires every endpoint the
@@ -418,6 +470,15 @@ func useTempCWD(t *testing.T) string {
 	return resolved
 }
 
+func testInstanceCacheDir(t *testing.T, root, instanceName, instanceURL, projectKey string) string {
+	t.Helper()
+	identity, err := newInstanceIdentity(instanceName, instanceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(root, ".paimos", "cache", "instances", identity.Namespace, projectKey)
+}
+
 // TestSessionStart_BundleFull_FilesFormat — end-to-end exercise of
 // `--bundle full --format files`. Confirms the cache directory layout
 // (manifest + agent + per-category folders + per-entry markdown) and
@@ -446,7 +507,7 @@ func TestSessionStart_BundleFull_FilesFormat(t *testing.T) {
 		t.Errorf("expected rev in output, got %q", out)
 	}
 
-	cacheDir := filepath.Join(tmp, ".paimos", "cache", "CON26")
+	cacheDir := testInstanceCacheDir(t, tmp, "env", srv.URL, "CON26")
 	mustExist(t, filepath.Join(cacheDir, "manifest.json"))
 	mustExist(t, filepath.Join(cacheDir, "agent.json"))
 	// Memory: prod-host passes (project scope, no env clash); staging-only
@@ -491,6 +552,9 @@ func TestSessionStart_BundleFull_FilesFormat(t *testing.T) {
 	}
 	if manifest.Agent != "ops" {
 		t.Errorf("manifest.Agent = %q, want ops", manifest.Agent)
+	}
+	if manifest.Instance != "env" || manifest.Origin == "" || manifest.Namespace == "" {
+		t.Errorf("manifest missing instance/origin provenance: %+v", manifest)
 	}
 	if manifest.Rev == "" {
 		t.Error("manifest.Rev empty")
@@ -568,7 +632,7 @@ func TestSessionStart_BundleFull_EnvFormat(t *testing.T) {
 	if !strings.Contains(out, "export PAIMOS_SESSION_ID=") {
 		t.Errorf("missing PAIMOS_SESSION_ID export: %q", out)
 	}
-	wantDir := filepath.Join(tmp, ".paimos", "cache", "CON26")
+	wantDir := testInstanceCacheDir(t, tmp, "env", srv.URL, "CON26")
 	if !strings.Contains(out, "export PAIMOS_KNOWLEDGE_DIR="+wantDir) {
 		t.Errorf("missing PAIMOS_KNOWLEDGE_DIR export pointing at %q in %q", wantDir, out)
 	}
@@ -609,7 +673,7 @@ func TestSessionStart_BundleMinimal_BackwardsCompat(t *testing.T) {
 		t.Errorf("minimal mode must NOT set PAIMOS_KNOWLEDGE_DIR: %q", out)
 	}
 	// Cache must not exist.
-	cacheDir := filepath.Join(tmp, ".paimos", "cache", "CON26")
+	cacheDir := testInstanceCacheDir(t, tmp, "env", srv.URL, "CON26")
 	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
 		t.Errorf("cache dir created in minimal mode: %v", err)
 	}
@@ -640,7 +704,7 @@ func TestSessionStart_NoBundle_BackwardsCompat(t *testing.T) {
 	if strings.Contains(out, "PAIMOS_KNOWLEDGE_DIR") {
 		t.Errorf("no-bundle mode must NOT set PAIMOS_KNOWLEDGE_DIR: %q", out)
 	}
-	cacheDir := filepath.Join(tmp, ".paimos", "cache", "CON26")
+	cacheDir := testInstanceCacheDir(t, tmp, "env", srv.URL, "CON26")
 	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
 		t.Errorf("cache dir created in no-bundle mode: %v", err)
 	}

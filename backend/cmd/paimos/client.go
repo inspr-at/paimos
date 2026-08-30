@@ -120,9 +120,10 @@ func isWriteMethod(method string) bool {
 // Client is a thin HTTP wrapper with auth + error semantics tailored
 // for the CLI's JSON-first flow. One per command invocation.
 type Client struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
+	baseURL  string
+	apiKey   string
+	http     *http.Client
+	identity instanceIdentity
 }
 
 // newClient builds a client from the resolved InstanceConfig.

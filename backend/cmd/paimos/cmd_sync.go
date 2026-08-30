@@ -62,6 +62,14 @@ func (h *httpSyncClient) Get(path string) ([]byte, error) {
 	return h.client.do("GET", path, nil)
 }
 
+func (h *httpSyncClient) CacheIdentity() (sync.CacheIdentity, error) {
+	i := h.client.identity
+	if i.Name == "" || i.Origin == "" || i.Namespace == "" {
+		return sync.CacheIdentity{}, fmt.Errorf("knowledge cache requires a resolved instance/origin identity")
+	}
+	return sync.CacheIdentity{Instance: i.Name, Origin: i.Origin, Namespace: i.Namespace}, nil
+}
+
 // Stream opens an SSE connection. Handles parsing the `data: <json>`
 // frames and dispatches each Event to onEvent. Returns when the
 // context is cancelled or the server closes the stream.

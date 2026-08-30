@@ -79,6 +79,12 @@ func main() {
 		return
 	}
 
+	production := strings.EqualFold(strings.TrimSpace(os.Getenv("PAIMOS_ENV")), "production") ||
+		strings.EqualFold(strings.TrimSpace(os.Getenv("PAIMOS_ENV")), "prod")
+	if err := agentmessage.ValidateInstanceIdentity(os.Getenv("PAIMOS_INSTANCE"), production); err != nil {
+		log.Fatalf("configuration: agent bus identity: %v", err)
+	}
+
 	if err := secretinput.Validate(
 		"ADMIN_PASSWORD",
 		"PAIMOS_SECRET_KEY",
