@@ -30,7 +30,7 @@ describe('Paimos6PreviewView (PAI-854)', () => {
     await nextTick()
     expect(attentionCard.classList.contains('is-selected')).toBe(true)
     expect(attentionCard.classList.contains('needs-attention')).toBe(true)
-    expect(mounted.el.textContent).toContain('Target · Amy → claude:jan')
+    expect(mounted.el.textContent).toContain('Selected agent target · claude:jan')
 
     attentionCard.querySelector<HTMLButtonElement>('.p6-card-select')!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
@@ -69,18 +69,27 @@ describe('Paimos6PreviewView (PAI-854)', () => {
     await nextTick()
     const door = mounted.el.querySelector<HTMLElement>('.p6-talk-door')!
     expect(door).not.toBeNull()
+    const mic = door.querySelector<HTMLButtonElement>('.p6-mic')!
+    await vi.waitFor(() => expect(document.activeElement).toBe(mic))
     expect(door.textContent!.indexOf('Amy')).toBeLessThan(door.textContent!.indexOf('Human node form'))
     expect(door.textContent).toContain('Tap to toggle · hold to talk, release to stop')
     expect(door.textContent).toContain('does not request microphone access')
     expect(door.textContent).toContain('Preview target · Paimos (no session selected)')
 
-    const mic = door.querySelector<HTMLButtonElement>('.p6-mic')!
     mic.click()
     await nextTick()
     expect(mic.getAttribute('aria-pressed')).toBe('true')
     expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain('No microphone opened')
 
     const details = door.querySelector<HTMLDetailsElement>('.p6-node-door')!
+    const summary = details.querySelector<HTMLElement>('summary')!
+    const close = door.querySelector<HTMLButtonElement>('.p6-close')!
+    summary.focus()
+    summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(close)
+    close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(summary)
+
     details.open = true
     const input = details.querySelector<HTMLInputElement>('#p6-node-title')!
     input.value = 'Local planning node'
@@ -89,6 +98,19 @@ describe('Paimos6PreviewView (PAI-854)', () => {
     await nextTick()
     expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain('staged in local preview state only')
     expect(fetchSpy).not.toHaveBeenCalled()
+
+    const submit = details.querySelector<HTMLButtonElement>('button[type="submit"]')!
+    submit.focus()
+    submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(close)
+    close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(submit)
+
+    door.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await nextTick()
+    const reopenedTrigger = mounted.el.querySelector<HTMLButtonElement>('[aria-label="Open the talk-first door"]')!
+    expect(reopenedTrigger).not.toBeNull()
+    await vi.waitFor(() => expect(document.activeElement).toBe(reopenedTrigger))
     await mounted.unmount()
   })
 

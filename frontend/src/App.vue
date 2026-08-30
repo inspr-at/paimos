@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import LoadingText from "@/components/LoadingText.vue";
-import { computed, defineAsyncComponent, onMounted, onBeforeUnmount } from "vue";
+import { computed, onMounted, onBeforeUnmount } from "vue";
 import { RouterView, useRoute } from "vue-router";
+import AppLayout from "@/components/AppLayout.vue";
 import AgentModeLayout from "@/components/AgentModeLayout.vue";
 import Paimos6Layout from "@/components/v6/Paimos6Layout.vue";
 import PortalLayout from "@/components/PortalLayout.vue";
@@ -14,12 +15,6 @@ import { announceSessionExpired } from "@/api/client";
 import { useUndoStore } from "@/stores/undo";
 import { useChangesStream } from "@/composables/useChangesStream";
 import { layoutSupportsUndoChrome, resolveLayout } from "@/router/shell";
-
-// Keep the ordinary shell's eager module graph out of focused shells. In
-// particular, a cold v6 load must not initialize AppLayout-only composables.
-const AppLayout = defineAsyncComponent(() =>
-  import("@/components/AppLayout.vue").then((module) => module.default),
-);
 
 const auth = useAuthStore();
 const undo = useUndoStore();

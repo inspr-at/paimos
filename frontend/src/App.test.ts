@@ -133,7 +133,7 @@ describe('App route shell isolation', () => {
     vi.clearAllMocks()
   })
 
-  it('defers the standard shell module through router start and v6, then loads it for a matched standard route', async () => {
+  it('keeps the standard shell eager without mounting it through router start or v6', async () => {
     document.body.innerHTML = '<div id="root"></div>'
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -179,7 +179,7 @@ describe('App route shell isolation', () => {
     expect(root.querySelector('[data-loading]')).not.toBeNull()
     expect(root.querySelector('[data-shell]')).toBeNull()
     expect(root.querySelector('[data-chrome*="Undo"]')).toBeNull()
-    expect(appLayoutModule.loads).toBe(0)
+    expect(appLayoutModule.loads).toBe(1)
     expect(changeStreamGates).toHaveLength(1)
     expect(changeStreamGates[0].value).toBe(false)
 
@@ -194,7 +194,7 @@ describe('App route shell isolation', () => {
     })
     expect(root.querySelector('[data-shell="standard"]')).toBeNull()
     expect(root.querySelector('[data-chrome*="Undo"]')).toBeNull()
-    expect(appLayoutModule.loads).toBe(0)
+    expect(appLayoutModule.loads).toBe(1)
     expect(changeStreamGates[0].value).toBe(false)
 
     await router.push('/')

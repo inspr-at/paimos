@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Mic, MicOff, Plus, Sparkles, X } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -14,15 +14,56 @@ const emit = defineEmits<{
 
 const micMode = ref<'idle' | 'tap' | 'hold'>('idle')
 const nodeTitle = ref('')
+const triggerRef = ref<HTMLButtonElement | null>(null)
+const doorRef = ref<HTMLElement | null>(null)
+const micRef = ref<HTMLButtonElement | null>(null)
 let holdTimer: ReturnType<typeof setTimeout> | null = null
 let holdEngaged = false
 let suppressClick = false
 
 const routeCopy = computed(() =>
   props.targetAgent
-    ? `Preview target · Amy → ${props.targetAgent}`
+    ? `Preview target · ${props.targetAgent} (selected session)`
     : 'Preview target · Paimos (no session selected)',
 )
+
+watch(
+  () => props.open,
+  async (open) => {
+    await nextTick()
+    if (open) micRef.value?.focus()
+    else triggerRef.value?.focus()
+  },
+  { flush: 'post' },
+)
+
+function closeDoor() {
+  emit('update:open', false)
+}
+
+function trapFocus(event: KeyboardEvent) {
+  const door = doorRef.value
+  if (!door) return
+  const focusable = [...door.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [href], [tabindex]:not([tabindex="-1"])',
+  )].filter((element) => {
+    if (element.closest('[hidden]')) return false
+    const closedDetails = element.closest('details:not([open])')
+    return !closedDetails || element.tagName === 'SUMMARY'
+  })
+  if (focusable.length === 0) return
+
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  const active = document.activeElement
+  if (event.shiftKey && (active === first || !door.contains(active))) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
 
 function toggleMic() {
   if (suppressClick) {
@@ -38,7 +79,9 @@ function toggleMic() {
   )
 }
 
-function beginHold() {
+function beginHold(event: PointerEvent) {
+  const button = event.currentTarget as HTMLButtonElement
+  button.setPointerCapture?.(event.pointerId)
   if (holdTimer) clearTimeout(holdTimer)
   holdTimer = setTimeout(() => {
     holdEngaged = true
@@ -77,6 +120,7 @@ onBeforeUnmount(() => {
 <template>
   <button
     v-if="!open"
+    ref="triggerRef"
     type="button"
     class="p6-door-trigger"
     aria-label="Open the talk-first door"
@@ -85,13 +129,22 @@ onBeforeUnmount(() => {
     <Plus :size="22" aria-hidden="true" />
   </button>
 
-  <aside v-else class="p6-talk-door" aria-labelledby="p6-talk-title">
+  <aside
+    v-else
+    ref="doorRef"
+    class="p6-talk-door"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="p6-talk-title"
+    @keydown.esc.stop.prevent="closeDoor"
+    @keydown.tab="trapFocus"
+  >
     <header class="p6-talk-head">
       <div>
         <span class="p6-eyebrow">Talk-first door</span>
         <h2 id="p6-talk-title">What should Amy do?</h2>
       </div>
-      <button type="button" class="p6-close" aria-label="Close the talk-first door" @click="emit('update:open', false)">
+      <button type="button" class="p6-close" aria-label="Close the talk-first door" @click="closeDoor">
         <X :size="18" aria-hidden="true" />
       </button>
     </header>
@@ -106,6 +159,7 @@ onBeforeUnmount(() => {
       </div>
 
       <button
+        ref="micRef"
         type="button"
         class="p6-mic"
         :class="{ 'is-active': micMode !== 'idle' }"
@@ -115,6 +169,7 @@ onBeforeUnmount(() => {
         @pointerdown.left="beginHold"
         @pointerup.left="endHold"
         @pointercancel="endHold"
+        @lostpointercapture="endHold"
       >
         <MicOff v-if="micMode === 'idle'" :size="25" aria-hidden="true" />
         <Mic v-else :size="25" aria-hidden="true" />
@@ -192,21 +247,21 @@ onBeforeUnmount(() => {
 .p6-amy-identity { display: flex; align-items: center; gap: 11px; }
 .p6-amy-orb { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 50%; color: #eff8f2; background: #315e49; box-shadow: inset 0 0 0 5px rgba(255, 255, 255, 0.12); }
 .p6-amy h3 { font: 600 16px/1.1 "Bricolage Grotesque", "DM Sans", sans-serif; }
-.p6-amy-identity p { margin-top: 3px; color: #647169; font: 500 10px/1.35 "JetBrains Mono", monospace; }
+.p6-amy-identity p { margin-top: 3px; color: #59655e; font: 500 10px/1.35 "JetBrains Mono", monospace; }
 .p6-mic { display: flex; width: 100%; min-height: 76px; align-items: center; justify-content: center; gap: 10px; margin-top: 20px; border: 1px solid #aac2b3; border-radius: 15px; color: #284f3d; background: rgba(255, 255, 255, 0.83); font: 650 13px/1 "DM Sans", sans-serif; }
 .p6-mic:hover { border-color: #6e9680; background: #fff; }
 .p6-mic.is-active { color: #f4faf6; background: #315e49; box-shadow: 0 0 0 5px rgba(49, 94, 73, 0.1); }
 .p6-mic-help { margin-top: 10px; color: #536159; font-size: 11px; text-align: center; }
-.p6-mic-truth { margin-top: 8px; color: #78847d; font-size: 10.5px; line-height: 1.55; text-align: center; }
+.p6-mic-truth { margin-top: 8px; color: #59655e; font-size: 10.5px; line-height: 1.55; text-align: center; }
 .p6-node-door { margin-top: 22px; border-top: 1px solid #e0e7e2; }
 .p6-node-door summary { display: flex; align-items: center; justify-content: space-between; padding: 18px 2px 12px; color: #536159; cursor: pointer; font-size: 11.5px; font-weight: 650; }
-.p6-node-door summary small { color: #89928d; font-size: 9.5px; font-weight: 600; }
+.p6-node-door summary small { color: #59655e; font-size: 9.5px; font-weight: 600; }
 .p6-node-door form { display: grid; gap: 7px; padding: 4px 2px 2px; }
 .p6-node-door label { margin-top: 6px; color: #66736b; font-size: 10.5px; font-weight: 650; }
 .p6-node-door input,
 .p6-node-door select { min-height: 38px; border-color: #d8e1db; border-radius: 9px; background: #fff; font-size: 11.5px; }
 .p6-node-door button[type="submit"] { min-height: 38px; margin-top: 7px; border: 1px solid #315e49; border-radius: 9px; color: #f6faf7; background: #315e49; font-weight: 650; }
-.p6-node-door form p { color: #7a867f; font-size: 10px; text-align: center; }
+.p6-node-door form p { color: #59655e; font-size: 10px; text-align: center; }
 
 @media (max-width: 680px) {
   .p6-door-trigger { right: 14px; bottom: 20px; top: auto; transform: none; }

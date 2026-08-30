@@ -25,9 +25,9 @@ import { ArrowLeft, Command, FlaskConical } from 'lucide-vue-next'
         </span>
         <span
           class="p6-command-mount"
-          aria-label="Command palette visual mount only; shortcut behavior is unchanged in this preview"
-          title="Visual mount only — shortcut behavior is unchanged"
+          aria-label="Command palette visual mock only; shortcut behavior is unchanged in this preview"
         >
+          <span>Visual mock</span>
           <Command :size="13" aria-hidden="true" />
           <kbd>⌘ K</kbd>
         </span>

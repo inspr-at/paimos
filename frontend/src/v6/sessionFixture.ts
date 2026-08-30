@@ -15,7 +15,6 @@ export interface Paimos6SessionCapabilities {
   directSteer: boolean
   interrupt: boolean
   stop: boolean
-  attachNode: boolean
   paimosSteer: boolean
 }
 
@@ -73,7 +72,6 @@ export const PAIMOS6_SESSION_FIXTURES: readonly Paimos6SessionFixture[] = Object
       directSteer: true,
       interrupt: true,
       stop: true,
-      attachNode: true,
       paimosSteer: true,
     },
   },
@@ -94,7 +92,6 @@ export const PAIMOS6_SESSION_FIXTURES: readonly Paimos6SessionFixture[] = Object
       directSteer: true,
       interrupt: true,
       stop: false,
-      attachNode: true,
       paimosSteer: true,
     },
   },
@@ -115,7 +112,6 @@ export const PAIMOS6_SESSION_FIXTURES: readonly Paimos6SessionFixture[] = Object
       directSteer: false,
       interrupt: false,
       stop: false,
-      attachNode: true,
       paimosSteer: true,
     },
   },

@@ -23,7 +23,7 @@ function selectSession(id: string) {
   selectedId.value = id
   const session = PAIMOS6_SESSION_FIXTURES.find((candidate) => candidate.id === id)
   statusMessage.value = session
-    ? `${session.title} selected. Preview target is Amy at ${session.agent}; nothing was sent.`
+    ? `${session.title} selected. Preview target is ${session.agent}; nothing was sent.`
     : 'Selection unavailable.'
 }
 
@@ -43,8 +43,8 @@ function previewAction(label: string, id: string) {
     <section class="p6-intro">
       <div class="p6-source-framing" aria-label="Paimos sources">
         <span class="p6-source is-active"><CircleDot :size="12" aria-hidden="true" /> Paimos · active source</span>
-        <span class="p6-source is-reserved">Pharos · reserved</span>
-        <span class="p6-source is-reserved">Janus · reserved</span>
+        <span class="p6-source is-reserved">Pharos · reserved source</span>
+        <span class="p6-source is-reserved">Janus · reserved source</span>
       </div>
       <div class="p6-title-row">
         <div>
@@ -70,7 +70,7 @@ function previewAction(label: string, id: string) {
         </div>
         <div class="p6-selection-copy">
           <template v-if="selectedSession">
-            <span>Target · Amy → <strong>{{ selectedSession.agent }}</strong></span>
+            <span>Selected agent target · <strong>{{ selectedSession.agent }}</strong></span>
             <button type="button" @click="clearSelection">Clear selection <kbd>Esc on card</kbd></button>
           </template>
           <span v-else>No selection · preview target <strong>Paimos</strong></span>
@@ -123,7 +123,7 @@ function previewAction(label: string, id: string) {
 .p6-source-framing { display: flex; flex-wrap: wrap; gap: 7px; }
 .p6-source { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid #d8e2dc; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.055em; text-transform: uppercase; }
 .p6-source.is-active { color: #2d6048; background: #edf6f0; }
-.p6-source.is-reserved { color: #8e9792; background: rgba(255, 255, 255, 0.35); opacity: 0.64; }
+.p6-source.is-reserved { border-style: dashed; color: #59655e; background: rgba(255, 255, 255, 0.5); }
 .p6-title-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 70px; margin-top: 30px; }
 .p6-kicker,
 .p6-section-kicker { color: #5d7467; font-size: 10px; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; }
@@ -143,13 +143,13 @@ function previewAction(label: string, id: string) {
 .p6-selection-copy button { padding: 5px 8px; border: 1px solid #d7e0da; border-radius: 7px; color: #53645b; background: #fbfcfa; font-size: 10px; }
 .p6-selection-copy button:hover { border-color: #aabdb1; }
 .p6-selection-copy button:focus-visible { outline: 3px solid rgba(47, 107, 82, 0.3); outline-offset: 3px; }
-.p6-selection-copy kbd { margin-left: 4px; color: #8a948f; font: 500 8px/1 "JetBrains Mono", monospace; }
+.p6-selection-copy kbd { margin-left: 4px; color: #59655e; font: 500 9px/1 "JetBrains Mono", monospace; }
 .p6-session-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .p6-honesty { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; margin-top: 17px; padding: 16px 18px; border: 1px dashed #cad6cf; border-radius: 14px; color: #68756e; background: rgba(252, 253, 250, 0.58); }
 .p6-honesty h2 { color: #4d5b53; font-size: 11px; font-weight: 700; }
 .p6-honesty p { margin-top: 3px; font-size: 10.5px; line-height: 1.5; }
 .p6-honesty > span { padding: 4px 7px; border: 1px solid #d5ded9; border-radius: 999px; font-size: 9px; font-weight: 700; text-transform: uppercase; }
-.p6-status { display: flex; align-items: center; gap: 6px; min-height: 22px; margin-top: 14px; color: #78847d; font-size: 10px; }
+.p6-status { display: flex; align-items: center; gap: 6px; min-height: 22px; margin-top: 14px; color: #59655e; font-size: 10px; }
 
 @media (max-width: 940px) {
   .p6-home { width: min(100% - 36px, 760px); padding-top: 48px; }
