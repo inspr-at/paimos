@@ -157,13 +157,8 @@ func CreateUserMemory(w http.ResponseWriter, r *http.Request) {
 
 // UpdateUserMemory mutates an existing memory entry owned by the
 // current user. URL slug locates the row; body slug, when present,
-// renames it (subject to the partial UNIQUE INDEX over (type, slug,
-// project_id) — note that user-scope rows all share project_id NULL,
-// so the constraint collapses to "unique slug per type across all
-// users". To dodge cross-user collisions we extend the WHERE with
-// user_id and accept that two users can never pick the same slug for
-// a memory entry — acceptable for v1, the slug name space is large
-// enough; PAI-339's editor warns on common ones.
+// renames it subject to M162's partial UNIQUE index over
+// (user_id, type, slug), so each user owns an independent namespace.
 func UpdateUserMemory(w http.ResponseWriter, r *http.Request) {
 	uid, ok := requireAuthedUserID(w, r)
 	if !ok {
