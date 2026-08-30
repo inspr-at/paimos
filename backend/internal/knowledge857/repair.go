@@ -357,7 +357,7 @@ func fingerprintDirectory(dir string) (map[string]Fingerprint, error) {
 			return nil, refuse("unsafe_backup_shape", "%q is not a regular non-symlink file", entry.Name())
 		}
 		path := filepath.Join(dir, entry.Name())
-		f, err := os.Open(path)
+		f, err := os.Open(path) // #nosec G304 -- dir is a validated canonical source/new clone and entry.Name is one of the exact locked trio names.
 		if err != nil {
 			return nil, refuse("read_backup", "%s: %v", entry.Name(), err)
 		}
@@ -401,11 +401,11 @@ func copyTrio(source, clone string) error {
 		return refuse("create_clone", "%v", err)
 	}
 	for _, name := range trioNames {
-		in, err := os.Open(filepath.Join(source, name))
+		in, err := os.Open(filepath.Join(source, name)) // #nosec G304 -- source is canonical and name comes only from the fixed trioNames allowlist.
 		if err != nil {
 			return refuse("copy_clone", "%s: %v", name, err)
 		}
-		out, err := os.OpenFile(filepath.Join(clone, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		out, err := os.OpenFile(filepath.Join(clone, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) // #nosec G304 -- clone is a newly created validated directory and name is a fixed trio member.
 		if err != nil {
 			in.Close()
 			return refuse("copy_clone", "%s: %v", name, err)
@@ -666,6 +666,7 @@ func isKnowledgeType(issueType string) bool {
 
 func rowsSemanticallyEqual(ctx context.Context, tx *sql.Tx, group Identity, columns []string) (bool, error) {
 	ids := append([]int64{group.SurvivorID}, group.LoserIDs...)
+	// #nosec G202 -- columns is the closed expectedIssueColumns subset and placeholders emits only '?' tokens; every id is bound below.
 	query := `SELECT ` + strings.Join(columns, ",") + ` FROM issues WHERE id IN (` + placeholders(len(ids)) + `) ORDER BY id`
 	args := make([]any, len(ids))
 	for i, id := range ids {
@@ -763,6 +764,7 @@ func proveUnreferenced(ctx context.Context, tx *sql.Tx, plan []Identity) ([]stri
 		for _, loser := range group.LoserIDs {
 			for _, surface := range surfaces {
 				var count int
+				// #nosec G201 -- identifiers are quoted names discovered from the fingerprint-locked exact SQLite schema and checked against FK/closed non-FK rules.
 				query := fmt.Sprintf(`SELECT COUNT(*) FROM %q WHERE %q=?`, surface.table, surface.column)
 				if err := tx.QueryRowContext(ctx, query, loser).Scan(&count); err != nil {
 					return checked, refuse("reference_scan", "%s.%s: %v", surface.table, surface.column, err)
@@ -775,6 +777,7 @@ func proveUnreferenced(ctx context.Context, tx *sql.Tx, plan []Identity) ([]stri
 				{"mutation_log", "subject_type", "subject_id"}, {"entity_embeddings", "entity_type", "entity_id"}, {"entity_relations", "source_type", "source_id"}, {"entity_relations", "target_type", "target_id"},
 			} {
 				var count int
+				// #nosec G201 -- table and column identifiers are package-local constants in the closed typed-reference list above.
 				query := fmt.Sprintf(`SELECT COUNT(*) FROM %q WHERE %q='issue' AND %q=?`, typed.table, typed.typeCol, typed.idCol)
 				if err := tx.QueryRowContext(ctx, query, loser).Scan(&count); err != nil {
 					return checked, refuse("reference_scan", "%s: %v", typed.table, err)
@@ -926,7 +929,7 @@ func writeReport(path string, report *Report) error {
 		return err
 	}
 	payload = append(payload, '\n')
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) // #nosec G304 -- path is explicit absolute output validated as new beneath a real non-symlink parent.
 	if err != nil {
 		return err
 	}
