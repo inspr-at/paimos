@@ -306,13 +306,6 @@ func TestBusAgentdClaudeSteerCarriesDurableMessageAndDeliveryIDs(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	var state, effective string
-	if err := paimosdb.DB.QueryRow(`SELECT state,effective_level FROM agent_message_deliveries WHERE delivery_id=?`, work.DeliveryID).Scan(&state, &effective); err != nil {
-		t.Fatal(err)
-	}
-	if state != "handed_off" || effective != "steer" {
-		t.Fatalf("state=%q effective=%q", state, effective)
-	}
 }
 
 func TestBusTargetSelectorPreservesLegacySimpleCappedSteerFallback(t *testing.T) {

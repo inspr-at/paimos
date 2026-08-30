@@ -11,6 +11,7 @@ const MAX_PROMPT_BYTES = 256 * 1024;
 const MAX_STEER_BYTES = 64 * 1024;
 const MAX_PENDING_STEERS = 256;
 const CORRELATION_TTL_MS = 60 * 1000;
+const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"];
 
 function emit(frame) {
@@ -203,7 +204,8 @@ try {
       systemPrompt: { type: "preset", preset: "claude_code" }
     }
   });
-  if (!queryHandle || typeof queryHandle.interrupt !== "function" || typeof queryHandle.close !== "function" ||
+  if (!queryHandle || typeof queryHandle.streamInput !== "function" ||
+      typeof queryHandle.interrupt !== "function" || typeof queryHandle.close !== "function" ||
       typeof queryHandle[Symbol.asyncIterator] !== "function") throw new Error("query capabilities");
 } catch {
   fail("app_server_protocol", "", "sdk_query_capability_missing");
@@ -211,6 +213,25 @@ try {
 }
 
 let controlChain = Promise.resolve();
+let queryEndedResolve;
+const queryEnded = new Promise((resolve) => { queryEndedResolve = resolve; });
+async function* streamOne(message) {
+  yield message;
+}
+async function streamInputBound(message) {
+  let timer;
+  try {
+    return await Promise.race([
+      queryHandle.streamInput(streamOne(message)),
+      queryEnded.then(() => { throw new Error("Query ended before input acknowledgement"); }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Query input acknowledgement timed out")), CONTROL_INPUT_TIMEOUT_MS);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const handleControlLine = (line) => {
   controlChain = controlChain.then(async () => {
     if (Buffer.byteLength(line) > MAX_INPUT_FRAME_BYTES) {
@@ -247,7 +268,7 @@ const handleControlLine = (line) => {
         const uuid = randomUUID();
         controlUUID = uuid;
         const state = addCorrelation(uuid, correlationID);
-        await input.push(userMessage(request.text, uuid));
+        await streamInputBound(userMessage(request.text, uuid));
         request.text = "";
         const receipt = await queryHandle.interrupt();
         if (!receipt || !Array.isArray(receipt.still_queued)) {
@@ -319,6 +340,7 @@ try {
     observeReaction(message);
     observeTool(message);
   }
+  queryEndedResolve();
   lines.close();
   input.close(new Error("Query ended"));
   queryHandle.close();
@@ -328,6 +350,7 @@ try {
     process.exitCode = 1;
   }
 } catch {
+  queryEndedResolve();
   lines.close();
   input?.close(new Error("Query aborted"));
   queryHandle?.close();

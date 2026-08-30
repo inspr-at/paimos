@@ -1,0 +1,825 @@
+package managedharness
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/inspr-at/paimos/backend/agentmessage"
+	paimosdb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/models"
+)
+
+func openManagedHarnessTestDB(t *testing.T) (int64, int64) {
+	t.Helper()
+	previousDataDir := os.Getenv("DATA_DIR")
+	previousTestMode := os.Getenv("PAIMOS_TEST_MODE")
+	t.Cleanup(func() {
+		_ = paimosdb.DB.Close()
+		paimosdb.DB = nil
+		_ = os.Setenv("DATA_DIR", previousDataDir)
+		_ = os.Setenv("PAIMOS_TEST_MODE", previousTestMode)
+	})
+	_ = os.Setenv("DATA_DIR", t.TempDir())
+	_ = os.Setenv("PAIMOS_TEST_MODE", "1")
+	_ = os.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err := paimosdb.Open(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES('harness-actor','x','member','active')`); err != nil {
+		t.Fatal(err)
+	}
+	project, err := paimosdb.DB.Exec(`INSERT INTO projects(name,key) VALUES('Harness test','HST')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	agent, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'worker')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentID, _ := agent.LastInsertId()
+	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'sender')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	return projectID, agentID
+}
+
+func TestManagedSteerUsesCanonicalLeaseAndCompletion(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	session, _, err := service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "private-thread-ref",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus := agentmessage.NewService(paimosdb.DB)
+	if err := bus.AllowSender(context.Background(), projectID, "codex:worker", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	message, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "steer observation", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongPage, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: Address(session), Agent: session.AgentName,
+		WorkerAdapter: agentmessage.AdapterManagedHarness, DeliveryLevel: "steer", TargetID: "11111111-1111-4111-8111-111111111111", Limit: 10,
+	})
+	if err != nil || len(wrongPage.Messages) != 0 {
+		t.Fatalf("wrong target leased work: page=%#v err=%v", wrongPage, err)
+	}
+	page, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: Address(session), Agent: session.AgentName,
+		WorkerAdapter: agentmessage.AdapterManagedHarness, DeliveryLevel: "steer", TargetID: session.MessageTargetID, Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.State != "leased" {
+		t.Fatalf("page=%#v", page)
+	}
+	work := page.Messages[0].DeliveryWork
+	if work.TargetRef != "private-thread-ref" {
+		t.Fatal("canonical worker did not decrypt the encrypted session ref")
+	}
+	if _, err := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+		ProjectID: projectID, Address: Address(session), Agent: session.AgentName, Cursor: message.Cursor,
+		DeliveryID: work.DeliveryID, EffectiveLevel: "steer", TargetID: "22222222-2222-4222-8222-222222222222",
+	}); err == nil {
+		t.Fatal("wrong target completed leased work")
+	}
+	if _, err := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+		ProjectID: projectID, Address: Address(session), Agent: session.AgentName, Cursor: message.Cursor,
+		DeliveryID: work.DeliveryID, EffectiveLevel: "steer", TargetID: session.MessageTargetID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var state, requested, effective, fallback, handedOff string
+	if err := paimosdb.DB.QueryRow(`SELECT state,requested_level,effective_level,fallback_reason,handed_off_at FROM agent_message_deliveries WHERE delivery_id=?`, work.DeliveryID).Scan(&state, &requested, &effective, &fallback, &handedOff); err != nil {
+		t.Fatal(err)
+	}
+	if state != "handed_off" || requested != "steer" || effective != "steer" || fallback != "" || handedOff == "" {
+		t.Fatalf("state=%s requested=%s effective=%s fallback=%s handed_off_at=%s", state, requested, effective, fallback, handedOff)
+	}
+}
+
+func TestUnavailableAgentdLeaseReroutesToActiveHarnessGeneration(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	bus := agentmessage.NewService(paimosdb.DB)
+	if err := bus.AllowSender(context.Background(), projectID, "codex:worker", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterCodex,
+		TargetKind: agentmessage.TargetKindCodexThread, TargetRef: "ordinary-fallback-thread", MaximumLevel: "simple", Role: "simple_fallback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterAgentdCodex,
+		TargetKind:   agentmessage.TargetKindAgentdSession,
+		TargetRef:    `{"socket":"/tmp/paimos-agentd-ppm.sock","session_id":"11111111-1111-4111-8111-111111111111"}`,
+		MaximumLevel: "steer", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "leased before generation changed", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedPage, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterAgentdCodex, Limit: 10,
+	})
+	if err != nil || len(failedPage.Messages) != 1 || failedPage.Messages[0].DeliveryWork == nil {
+		t.Fatalf("failed lease page=%#v err=%v", failedPage, err)
+	}
+
+	service := NewService(paimosdb.DB)
+	generation, _, err := service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp-generation-2", SessionRef: "owned-generation-2",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Heartbeat(context.Background(), generation.ID, PhaseWorking); err != nil {
+		t.Fatal(err)
+	}
+	route, err := bus.RerouteUnavailableLocalDelivery(context.Background(), agentmessage.RerouteUnavailableInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", Cursor: message.Cursor,
+		DeliveryID: failedPage.Messages[0].DeliveryWork.DeliveryID, FallbackReason: "idle",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route.Route != "active_generation" || route.HarnessSessionID != generation.ID || route.TargetID != generation.MessageTargetID {
+		t.Fatalf("route=%+v generation=%+v", route, generation)
+	}
+	if route.TargetID == fallback.ID {
+		t.Fatal("active generation incorrectly selected ordinary fallback")
+	}
+	page, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterManagedHarness,
+		TargetID: generation.MessageTargetID, Limit: 10,
+	})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.State != "leased" {
+		t.Fatalf("generation page=%#v err=%v", page, err)
+	}
+	if _, err := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", Cursor: message.Cursor,
+		DeliveryID: page.Messages[0].DeliveryWork.DeliveryID, EffectiveLevel: "steer", TargetID: generation.MessageTargetID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnavailableAgentdLeaseFallsBackWithoutWedgingFIFO(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	bus := agentmessage.NewService(paimosdb.DB)
+	if err := bus.AllowSender(context.Background(), projectID, "codex:worker", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterCodex,
+		TargetKind: agentmessage.TargetKindCodexThread, TargetRef: "ordinary-fallback-thread", MaximumLevel: "simple", Role: "simple_fallback",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterAgentdCodex,
+		TargetKind:   agentmessage.TargetKindAgentdSession,
+		TargetRef:    `{"socket":"/tmp/paimos-agentd-ppm.sock","session_id":"22222222-2222-4222-8222-222222222222"}`,
+		MaximumLevel: "steer", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "turn already ended", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "later ordinary message", DeliveryLevel: "simple",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterAgentdCodex, Limit: 10,
+	})
+	if err != nil || len(failed.Messages) < 1 || failed.Messages[0].Cursor != first.Cursor || failed.Messages[0].DeliveryWork == nil || failed.Messages[0].DeliveryWork.State != "leased" {
+		t.Fatalf("failed page=%#v err=%v", failed, err)
+	}
+	route, err := bus.RerouteUnavailableLocalDelivery(context.Background(), agentmessage.RerouteUnavailableInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", Cursor: first.Cursor,
+		DeliveryID: failed.Messages[0].DeliveryWork.DeliveryID, FallbackReason: "idle",
+	})
+	if err != nil || route.Route != "simple_fallback" {
+		t.Fatalf("route=%+v err=%v", route, err)
+	}
+	completeFallback := func(wantCursor int64, wantReason string) {
+		t.Helper()
+		page, listErr := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+			ProjectID: projectID, Address: "codex:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterCodex, Limit: 10,
+		})
+		if listErr != nil || len(page.Messages) != 1 || page.Messages[0].Cursor != wantCursor || page.Messages[0].DeliveryWork == nil {
+			t.Fatalf("fallback cursor=%d page=%#v err=%v", wantCursor, page, listErr)
+		}
+		if _, completeErr := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+			ProjectID: projectID, Address: "codex:worker", Agent: "worker", Cursor: wantCursor,
+			DeliveryID: page.Messages[0].DeliveryWork.DeliveryID, EffectiveLevel: "simple", FallbackReason: wantReason,
+		}); completeErr != nil {
+			t.Fatal(completeErr)
+		}
+	}
+	completeFallback(first.Cursor, "idle")
+	completeFallback(second.Cursor, "")
+	var rows int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_deliveries WHERE state='handed_off' AND effective_level='simple' AND handed_off_at IS NOT NULL`).Scan(&rows); err != nil || rows != 2 {
+		t.Fatalf("handed-off rows=%d err=%v", rows, err)
+	}
+}
+
+func TestUnavailableClaudeAgentdLeaseUsesFinalDurableSimpleReroute(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	bus := agentmessage.NewService(paimosdb.DB)
+	if err := bus.AllowSender(context.Background(), projectID, "claude:worker", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:worker", Adapter: agentmessage.AdapterCodex,
+		TargetKind: agentmessage.TargetKindCodexThread, TargetRef: "claude-ordinary-fallback", MaximumLevel: "simple", Role: "simple_fallback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:worker", Adapter: agentmessage.AdapterAgentdClaude,
+		TargetKind:   agentmessage.TargetKindAgentdSession,
+		TargetRef:    `{"socket":"/tmp/missing-claude-agentd.sock","session_id":"85000000-0000-4000-8000-000000000850"}`,
+		MaximumLevel: "steer", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	message, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "claude:worker", Body: "owned Query unavailable", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "claude:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterAgentdClaude, Limit: 10,
+	})
+	if err != nil || len(failed.Messages) != 1 || failed.Messages[0].DeliveryWork == nil ||
+		failed.Messages[0].DeliveryWork.Adapter != agentmessage.AdapterAgentdClaude {
+		t.Fatalf("failed page=%#v err=%v", failed, err)
+	}
+	work := failed.Messages[0].DeliveryWork
+	route, err := bus.RerouteUnavailableLocalDelivery(context.Background(), agentmessage.RerouteUnavailableInput{
+		ProjectID: projectID, Address: "claude:worker", Agent: "worker", Cursor: message.Cursor,
+		DeliveryID: work.DeliveryID, FallbackReason: "transport_error",
+	})
+	if err != nil || route.Route != "simple_fallback" || route.TargetID != fallback.ID {
+		t.Fatalf("route=%+v fallback=%+v err=%v", route, fallback, err)
+	}
+	page, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "claude:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterCodex, Limit: 10,
+	})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.DeliveryID != work.DeliveryID {
+		t.Fatalf("fallback page=%#v err=%v", page, err)
+	}
+	if _, err := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+		ProjectID: projectID, Address: "claude:worker", Agent: "worker", Cursor: message.Cursor,
+		DeliveryID: work.DeliveryID, EffectiveLevel: "simple", FallbackReason: "transport_error",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnavailableAgentdIgnoresStaleWorkingGeneration(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	bus := agentmessage.NewService(paimosdb.DB)
+	if err := bus.AllowSender(context.Background(), projectID, "codex:worker", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterCodex,
+		TargetKind: agentmessage.TargetKindCodexThread, TargetRef: "fresh-fallback", MaximumLevel: "simple", Role: "simple_fallback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterAgentdCodex,
+		TargetKind:   agentmessage.TargetKindAgentdSession,
+		TargetRef:    `{"socket":"/tmp/stale-agentd.sock","session_id":"44444444-4444-4444-8444-444444444444"}`,
+		MaximumLevel: "steer", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	message, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "stale generation must not steer", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterAgentdCodex, Limit: 10,
+	})
+	if err != nil || len(failed.Messages) == 0 || failed.Messages[0].DeliveryWork == nil {
+		t.Fatalf("page=%#v err=%v", failed, err)
+	}
+	service := NewService(paimosdb.DB)
+	stale, _, err := service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "stale-host", SessionRef: "stale-generation",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Heartbeat(context.Background(), stale.ID, PhaseWorking); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET heartbeat_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-91 seconds') WHERE id=?`, stale.ID); err != nil {
+		t.Fatal(err)
+	}
+	route, err := bus.RerouteUnavailableLocalDelivery(context.Background(), agentmessage.RerouteUnavailableInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", Cursor: message.Cursor,
+		DeliveryID: failed.Messages[0].DeliveryWork.DeliveryID, FallbackReason: "idle",
+	})
+	if err != nil || route.Route != "simple_fallback" || route.TargetID != fallback.ID || route.HarnessSessionID != "" {
+		t.Fatalf("route=%+v stale=%+v err=%v", route, stale, err)
+	}
+	page, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterCodex, Limit: 10,
+	})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil {
+		t.Fatalf("fallback page=%#v err=%v", page, err)
+	}
+	if _, err := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", Cursor: message.Cursor,
+		DeliveryID: page.Messages[0].DeliveryWork.DeliveryID, EffectiveLevel: "simple", FallbackReason: "idle",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSimpleAgentdWithoutFallbackBlocksHonestlyAndDoesNotRelease(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	bus := agentmessage.NewService(paimosdb.DB)
+	if err := bus.AllowSender(context.Background(), projectID, "codex:worker", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterAgentdCodex,
+		TargetKind:   agentmessage.TargetKindAgentdSession,
+		TargetRef:    `{"socket":"/tmp/simple-agentd.sock","session_id":"55555555-5555-4555-8555-555555555555"}`,
+		MaximumLevel: "steer", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	message, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "simple cannot be managed steer", DeliveryLevel: "simple",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterAgentdCodex, Limit: 10,
+	})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.State != "leased" {
+		t.Fatalf("page=%#v err=%v", page, err)
+	}
+	_, err = bus.RerouteUnavailableLocalDelivery(context.Background(), agentmessage.RerouteUnavailableInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", Cursor: message.Cursor,
+		DeliveryID: page.Messages[0].DeliveryWork.DeliveryID, FallbackReason: "not_steerable",
+	})
+	var coded *agentmessage.CodedError
+	if !errors.As(err, &coded) || coded.Code != "agent_message_target_missing" {
+		t.Fatalf("reroute error=%v", err)
+	}
+	var state, fallback, lastError string
+	if err := paimosdb.DB.QueryRow(`SELECT state,fallback_reason,last_error_code FROM agent_message_deliveries WHERE delivery_id=?`, page.Messages[0].DeliveryWork.DeliveryID).Scan(&state, &fallback, &lastError); err != nil {
+		t.Fatal(err)
+	}
+	if state != "blocked" || fallback != "target_missing" || lastError != "managed_target_blocked" {
+		t.Fatalf("state=%s fallback=%s last_error=%s", state, fallback, lastError)
+	}
+	retry, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterAgentdCodex, Limit: 10,
+	})
+	if err != nil || len(retry.Messages) != 0 {
+		t.Fatalf("blocked delivery was leased again: page=%#v err=%v", retry, err)
+	}
+}
+
+func TestAgentdPrimaryAndManagedStandbySetupIsOrderStable(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	bus := agentmessage.NewService(paimosdb.DB)
+	agentdTarget, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterAgentdCodex,
+		TargetKind:   agentmessage.TargetKindAgentdSession,
+		TargetRef:    `{"socket":"/tmp/stable-agentd.sock","session_id":"66666666-6666-4666-8666-666666666666"}`,
+		MaximumLevel: "steer", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(paimosdb.DB)
+	input := RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "stable-host", SessionRef: "stable-managed-generation",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+	}
+	first, _, err := service.Register(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Stop(context.Background(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := service.Register(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.MessageTargetID != first.MessageTargetID {
+		t.Fatalf("standby target rotated across generation: first=%s second=%s", first.MessageTargetID, second.MessageTargetID)
+	}
+	targets, err := bus.ListTargets(context.Background(), projectID, "codex:worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range targets {
+		if target.ID == agentdTarget.ID && !target.Enabled {
+			t.Fatal("managed generation disabled the configured agentd primary")
+		}
+		if target.ID == second.MessageTargetID && target.Enabled {
+			t.Fatal("coexisting managed_harness target must remain standby")
+		}
+	}
+
+	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'reverse-worker')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	reverseInput := RegisterInput{
+		ProjectID: projectID, AgentName: "reverse-worker", Harness: "codex", Host: "reverse-host", SessionRef: "reverse-managed-generation",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+	}
+	reverseManaged, _, err := service.Register(context.Background(), reverseInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reverseAgentd, err := bus.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:reverse-worker", Adapter: agentmessage.AdapterAgentdCodex,
+		TargetKind:   agentmessage.TargetKindAgentdSession,
+		TargetRef:    `{"socket":"/tmp/reverse-agentd.sock","session_id":"77777777-7777-4777-8777-777777777777"}`,
+		MaximumLevel: "steer", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Register(context.Background(), reverseInput); err != nil {
+		t.Fatal(err)
+	}
+	reverseTargets, err := bus.ListTargets(context.Background(), projectID, "codex:reverse-worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range reverseTargets {
+		if target.ID == reverseAgentd.ID && !target.Enabled {
+			t.Fatal("managed-first setup disabled the later agentd primary")
+		}
+		if target.ID == reverseManaged.MessageTargetID && target.Enabled {
+			t.Fatal("managed-first setup did not converge to a managed_harness standby")
+		}
+	}
+}
+
+func TestRegisterEnforcesManagedAndExternalSteerTruth(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	base := RegisterInput{ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0",
+		SessionRef: "thread-1", ManagementMode: ManagementManaged, Role: RoleWorker,
+		SteerMode: SteerOwned, Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true}}
+	session, created, err := service.Register(context.Background(), base)
+	if err != nil || !created {
+		t.Fatalf("register: session=%#v created=%v err=%v", session, created, err)
+	}
+	if session.AgentName != "worker" || session.ManagementMode != ManagementManaged || !session.Capabilities.Steer {
+		t.Fatalf("session=%#v", session)
+	}
+	if _, created, err := service.Register(context.Background(), base); err != nil || created {
+		t.Fatalf("exact registration replay: created=%v err=%v", created, err)
+	}
+	encoded, err := json.Marshal(session)
+	if err != nil || strings.Contains(string(encoded), "thread-1") || strings.Contains(string(encoded), "session_ref") {
+		t.Fatalf("private session reference escaped response: %s err=%v", encoded, err)
+	}
+	var digest []byte
+	if err := paimosdb.DB.QueryRow(`SELECT session_ref_digest FROM harness_sessions WHERE id=?`, session.ID).Scan(&digest); err != nil || len(digest) != 32 {
+		t.Fatalf("digest len=%d err=%v", len(digest), err)
+	}
+	if _, err := service.Stop(context.Background(), session.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	unmanagedCodex := base
+	unmanagedCodex.Host, unmanagedCodex.SessionRef = "mbp1", "thread-2"
+	unmanagedCodex.ManagementMode, unmanagedCodex.SteerMode = ManagementUnmanaged, SteerCodexExternal
+	unmanagedCodex.Capabilities.Interrupt, unmanagedCodex.Capabilities.Stop = false, false
+	target, err := agentmessage.NewService(paimosdb.DB).RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterCodex,
+		TargetKind: agentmessage.TargetKindCodexThread, TargetRef: "thread-2", MaximumLevel: "steer", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unmanagedCodex.MessageTargetID = target.ID
+	unmanagedSession, _, err := service.Register(context.Background(), unmanagedCodex)
+	if err != nil {
+		t.Fatalf("documented Codex external steer rejected: %v", err)
+	}
+	if _, err := service.Stop(context.Background(), unmanagedSession.ID); err != nil {
+		t.Fatal(err)
+	}
+	simpleTarget, err := agentmessage.NewService(paimosdb.DB).RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterCodex,
+		TargetKind: agentmessage.TargetKindCodexThread, TargetRef: "thread-simple", MaximumLevel: "simple", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	capped := unmanagedCodex
+	capped.Host, capped.SessionRef, capped.MessageTargetID = "mbp-cap", "thread-simple", simpleTarget.ID
+	if _, _, err := service.Register(context.Background(), capped); !IsCode(err, CodeCapabilityInvalid) {
+		t.Fatalf("unmanaged steer exceeded target MaximumLevel: %v", err)
+	}
+
+	unmanagedClaude := unmanagedCodex
+	unmanagedClaude.Harness, unmanagedClaude.Host, unmanagedClaude.SessionRef = "claude", "mbp2", "11111111-1111-4111-8111-111111111111"
+	if _, _, err := service.Register(context.Background(), unmanagedClaude); !IsCode(err, CodeCapabilityInvalid) {
+		t.Fatalf("unmanaged Claude steer error=%v", err)
+	}
+
+	privateSocket := base
+	privateSocket.Host, privateSocket.SessionRef = "mbp3", "/tmp/private.sock"
+	if _, _, err := service.Register(context.Background(), privateSocket); !IsCode(err, CodeInvalid) {
+		t.Fatalf("private socket error=%v", err)
+	}
+}
+
+func TestStoppedSessionCanRegisterNewActiveGeneration(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	input := RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "stable-thread-ref",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
+	}
+	first, created, err := service.Register(context.Background(), input)
+	if err != nil || !created {
+		t.Fatalf("first register: created=%v err=%v", created, err)
+	}
+	if _, err := service.Heartbeat(context.Background(), first.ID, PhaseWorking); err != nil {
+		t.Fatal(err)
+	}
+	bus := agentmessage.NewService(paimosdb.DB)
+	if err := bus.AllowSender(context.Background(), projectID, "codex:worker", "paimos:sender"); err != nil {
+		t.Fatal(err)
+	}
+	simpleMessage, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "queued before restart", DeliveryLevel: "simple",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Stop(context.Background(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, created, err := service.Register(context.Background(), input)
+	if err != nil || !created || second.ID == first.ID {
+		t.Fatalf("replacement register: first=%s second=%s created=%v err=%v", first.ID, second.ID, created, err)
+	}
+	if second.MessageTargetID != first.MessageTargetID {
+		t.Fatalf("replacement rotated stable encrypted binding: first=%s second=%s", first.MessageTargetID, second.MessageTargetID)
+	}
+	old, err := service.GetByID(context.Background(), first.ID)
+	if err != nil || old.Phase != PhaseStopped {
+		t.Fatalf("old session=%#v err=%v", old, err)
+	}
+	if _, err := service.Heartbeat(context.Background(), second.ID, PhaseWorking); err != nil {
+		t.Fatalf("replacement heartbeat: %v", err)
+	}
+	yielded, err := service.Yield(context.Background(), second.ID)
+	if err != nil || yielded.Session.ID != second.ID || yielded.Session.Phase != PhaseYielded || yielded.Session.YieldSequence != 1 {
+		t.Fatalf("replacement yield=%#v err=%v", yielded, err)
+	}
+	steerMessage, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "queued after restart", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain := func(wantCursor int64, wantLevel string) {
+		t.Helper()
+		page, listErr := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+			ProjectID: projectID, Address: Address(second), Agent: second.AgentName,
+			WorkerAdapter: agentmessage.AdapterManagedHarness, TargetID: second.MessageTargetID, Limit: 100,
+		})
+		if listErr != nil || len(page.Messages) != 1 || page.Messages[0].Cursor != wantCursor || page.Messages[0].DeliveryWork == nil {
+			t.Fatalf("drain cursor=%d level=%s page=%#v err=%v", wantCursor, wantLevel, page, listErr)
+		}
+		work := page.Messages[0].DeliveryWork
+		if work.RequestedLevel != wantLevel || work.State != "leased" || work.TargetRef != input.SessionRef {
+			t.Fatalf("drain work=%#v want level=%s", work, wantLevel)
+		}
+		if _, completeErr := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+			ProjectID: projectID, Address: Address(second), Agent: second.AgentName, Cursor: wantCursor,
+			DeliveryID: work.DeliveryID, EffectiveLevel: wantLevel, TargetID: second.MessageTargetID,
+		}); completeErr != nil {
+			t.Fatalf("complete cursor=%d level=%s: %v", wantCursor, wantLevel, completeErr)
+		}
+	}
+	drain(simpleMessage.Cursor, "simple")
+	drain(steerMessage.Cursor, "steer")
+	var handedOff int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_deliveries WHERE state='handed_off' AND handed_off_at IS NOT NULL`).Scan(&handedOff); err != nil || handedOff != 2 {
+		t.Fatalf("canonical delivery completions=%d err=%v", handedOff, err)
+	}
+
+	const replays = 8
+	var wg sync.WaitGroup
+	results := make(chan models.HarnessSession, replays)
+	errors := make(chan error, replays)
+	createdResults := make(chan bool, replays)
+	for range replays {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			session, replayCreated, replayErr := service.Register(context.Background(), input)
+			results <- session
+			createdResults <- replayCreated
+			errors <- replayErr
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(createdResults)
+	close(errors)
+	for replayErr := range errors {
+		if replayErr != nil {
+			t.Fatalf("active replay: %v", replayErr)
+		}
+	}
+	for replayCreated := range createdResults {
+		if replayCreated {
+			t.Fatal("active replay created another generation")
+		}
+	}
+	for replay := range results {
+		if replay.ID != second.ID {
+			t.Fatalf("active replay id=%s want %s", replay.ID, second.ID)
+		}
+	}
+	var total, active int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*),SUM(phase<>'stopped') FROM harness_sessions WHERE project_id=? AND harness=? AND host=?`, projectID, input.Harness, input.Host).Scan(&total, &active); err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || active != 1 {
+		t.Fatalf("history total=%d active=%d", total, active)
+	}
+}
+
+func TestConcurrentInitialRegistrationReplayCreatesOneActiveRow(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	input := RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "concurrent-thread-ref",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+	}
+	type result struct {
+		session models.HarnessSession
+		created bool
+		err     error
+	}
+	const attempts = 8
+	start := make(chan struct{})
+	results := make(chan result, attempts)
+	var wg sync.WaitGroup
+	for range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			session, created, err := service.Register(context.Background(), input)
+			results <- result{session: session, created: created, err: err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var id string
+	createdCount := 0
+	for got := range results {
+		if got.err != nil {
+			t.Fatalf("concurrent replay: %v", got.err)
+		}
+		if got.created {
+			createdCount++
+		}
+		if id == "" {
+			id = got.session.ID
+		}
+		if got.session.ID != id {
+			t.Fatalf("concurrent replay IDs: got=%s want=%s", got.session.ID, id)
+		}
+		if got.session.MessageTargetID == "" {
+			t.Fatal("concurrent replay returned before the encrypted target binding was durable")
+		}
+	}
+	if createdCount != 1 {
+		t.Fatalf("created results=%d want 1", createdCount)
+	}
+	var active int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_sessions WHERE project_id=? AND phase<>'stopped'`, projectID).Scan(&active); err != nil || active != 1 {
+		t.Fatalf("active rows=%d err=%v", active, err)
+	}
+}
+
+func TestYieldClaimsOwnedInterruptAndStopRequests(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	session, _, err := service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "thread-1",
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupt, err := service.RequestControl(context.Background(), session.ID, ControlInterrupt, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop, err := service.RequestControl(context.Background(), session.ID, ControlStop, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	yielded, err := service.Yield(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if yielded.Session.YieldSequence != 1 || yielded.Session.Phase != PhaseYielded || len(yielded.Controls) != 2 {
+		t.Fatalf("yield=%#v", yielded)
+	}
+	if yielded.Controls[0].ID != interrupt.ID || yielded.Controls[1].ID != stop.ID ||
+		yielded.Controls[0].State != ControlClaimed || yielded.Controls[1].State != ControlClaimed {
+		t.Fatalf("controls=%#v", yielded.Controls)
+	}
+	completed, err := service.CompleteControl(context.Background(), session.ID, interrupt.ID, ControlApplied, ReasonApplied)
+	if err != nil || completed.State != ControlApplied {
+		t.Fatalf("complete=%#v err=%v", completed, err)
+	}
+}
+
+func TestUnmanagedSessionCannotRequestOwnedControl(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	target, err := agentmessage.NewService(paimosdb.DB).RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterCodex,
+		TargetKind: agentmessage.TargetKindCodexThread, TargetRef: "thread-1", MaximumLevel: "steer", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _, err := service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "thread-1", MessageTargetID: target.ID,
+		ManagementMode: ManagementUnmanaged, Role: RoleCoordinator, SteerMode: SteerCodexExternal,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RequestControl(context.Background(), session.ID, ControlInterrupt, 1); !IsCode(err, CodeCapabilityUnavailable) {
+		t.Fatalf("error=%v", err)
+	}
+}

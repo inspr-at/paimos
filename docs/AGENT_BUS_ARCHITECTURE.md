@@ -31,7 +31,7 @@ This design supports both directions:
   target. PAIMOS does not infer a vendor or session from the name `phil`.
 - Unmanaged Claude sessions use the supported simple paths below and remain
   unsteerable. A separately registered `agentd_claude` target can steer only a
-  fresh Paimos-owned live Agent SDK Query.
+  fresh PAIMOS-owned live Agent SDK Query.
 
 “Instant” means the first delivery attempt starts within seconds. It does not
 mean that PAIMOS can wake a powered-off workstation or a local vendor session
@@ -452,7 +452,7 @@ open the control socket itself.
 | Amy -> Codex | `steer` | `turn/steer` only for an `inProgress` turn; otherwise `codex queue` |
 | Codex <-> Phil | either | Same rules using Phil's registered target; no target is inferred from his name |
 | Any direction -> unmanaged Claude | `steer` | Unsupported; use a configured simple path or remain blocked |
-| Any direction -> owned Claude | `steer` | A leased `agentd_claude` delivery feeds the Query's documented streaming input and calls `interrupt()` on that exact live Agent SDK Query; no session reconstruction or queue fallback |
+| Any direction -> owned Claude | `steer` | A leased `agentd_claude` delivery calls `streamInput()` and then `interrupt()` on that exact live Agent SDK Query; no session reconstruction or queue fallback |
 
 ## 7. Webhook wake contract
 
@@ -570,7 +570,7 @@ CLI or socket frame.
 | Codex | `steer` | Start daemon with `codex app-server daemon start`; worker runs `codex app-server proxy`, whose proxied stream carries the WebSocket HTTP Upgrade handshake and one JSON-RPC message per text frame; performs `initialize` (`capabilities.experimentalApi=true`) + `initialized`, reads exactly one `thread/read {threadId,includeTurns:true}`, selects the latest nonempty `inProgress` turn, and calls `turn/steer {threadId, expectedTurnId, input:[{type:"text",text}]}` | Implemented (PAI-825 follow-up; 5.17.3–5.18.0 wrote JSON lines into the proxy and never got an `initialize` answer) | Supported. Idle, not loaded, race, not-steerable, and genuine app-server transport failure fall back to the exact queue primitive; completed initialize/read JSON-RPC rejections, malformed/mismatched successful responses, and any other `turn/steer` rejection (unknown method, request-shape drift, sub-agent ownership, internal error) fail the delivery instead of queueing |
 | Claude local | `simple` | `claude -p --resume <session_id>` or `claude -p --cloud <session_id>` | Implemented by `listen --deliver claude` from a receiver-owned `claude_resume` / `claude_session` target; framed body over stdin, zero exit is handoff, completed through `delivery-complete` | Supported. A local UUID resumes an idle session; a `session_…`/`cse_…` id queues a cloud follow-up |
 | Claude Channels | `simple` | MCP `notifications/claude/channel`; session opts in with `--channels` or `--dangerously-load-development-channels` | Research-preview channel path under `paimos serve --mcp-stdio --channel-as`; leases `claude_channel` targets and completes each push | Supported simple push when explicitly enabled; successful JSON-RPC write is handoff |
-| Claude owned Query | `steer` | Agent SDK streaming input plus `Query.interrupt()` on the same Paimos-owned live handle | Implemented by `listen --deliver agentd_claude`; the leased delivery ID is the correlation ID and the Query message UUID is retained only as content-free effect evidence | Supported only while agentd owns the live Query; restart becomes `ownership_lost` and never reconstructs authority from the Claude session ID |
+| Claude owned Query | `steer` | Agent SDK `Query.streamInput()` plus `Query.interrupt()` on the same PAIMOS-owned live handle | Implemented by `listen --deliver agentd_claude`; the leased delivery ID is the correlation ID and the Query input UUID remains content-free control evidence inside agentd | Supported only while agentd owns the live Query; restart becomes `ownership_lost` and never reconstructs authority from the Claude session ID |
 | Claude unmanaged session | `steer` | **UNSUPPORTED** | Falls back to the selected simple primitive with `fallback_reason=unsupported`; `claude_resume` and `claude_channel` targets are fixed to `maximum_level=simple` | Fall back to a configured simple resume/cloud or Channels target; otherwise remain blocked |
 | Grok CLI / Grok Build | `simple` | `grok --single` (or `-p`) with `--resume`; current adapter uses one bounded `--single --resume` turn | Implemented behind `--enable-grok-build-delivery` | Supported only as an explicit receiver-owned target |
 | Grok CLI / Grok Build | `steer` | **UNSUPPORTED** | No steer primitive | Fall back to the exact simple resume primitive |
@@ -762,3 +762,29 @@ This slice requires no vendor verb.
 - No automatic release of historical held rows.
 - No exactly-once claim for model attention or vendor-side execution.
 - No storage of vendor responses as implicit replies.
+
+## 13. Managed harness worker binding (PAI-848)
+
+The additive M161 `harness_sessions` resource binds one active harness address
+to an encrypted `agent_message_targets` version. It is intentionally separate
+from `agent_runs` and all PAI-809 supervisory-control tables/actions. The
+private vendor session reference remains target ciphertext; M161 retains only
+its domain-separated digest and target FK for idempotent identity and redacted
+host/session attribution.
+
+Identity and address uniqueness apply only while a generation is active. A
+stopped row is immutable history; re-registering the same stable external
+reference creates a fresh public row and reuses its matching enabled encrypted
+target version, so delivery snapshots from the prior generation remain FIFO-
+drainable without exposing or rewriting the private reference.
+
+`managed_harness` is a local adapter with `MaximumLevel=steer`. It has no
+delivery primitive: the PAI-849 daemon leases the complete address FIFO through
+`ListInbox` without a level filter and commits through `CompleteLocalDelivery`.
+Simple-only managed sessions use the same path; steer-capable sessions must
+complete older simple work before later steer. This keeps the message ledger
+authoritative for FIFO, leases, requested/effective levels, fallback reasons,
+handoff time, and cursor acknowledgement. The harness drain response strips
+the decrypted target reference before crossing HTTP. Unmanaged steer
+additionally requires the existing `codex` adapter and a `steer` target cap;
+CLI validation is only an early error, not the security boundary.

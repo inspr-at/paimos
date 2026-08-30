@@ -391,10 +391,9 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 	defer func() {
 		p.closeInput()
 		p.rejectPending(ErrSessionNotRunning)
-		// The stdout pipe is fully drained here. Signal descendants while the
-		// group leader is still unreaped, then make the sole Cmd.Wait call.
-		_, _ = p.signalOwned(true)
-		p.reapAfterDrain()
+		// The stdout pipe is fully drained here. Preserve ownedProcess's exact
+		// unreaped-group signal and sole-Wait discipline.
+		p.finishAfterDrain()
 		p.signalReady(errors.New("Claude Agent SDK bridge exited before the first turn"))
 		p.cleanupRuntime()
 	}()
@@ -461,7 +460,7 @@ func claudeStartupError(reason string) error {
 	case "interrupt_receipt_v1_missing":
 		return fmt.Errorf("Claude CLI >=%s must expose interrupt_receipt_v1 for the live Agent SDK Query", claudeMinimumCLIVersion)
 	case "sdk_query_capability_missing":
-		return fmt.Errorf("Claude Agent SDK %s must expose streaming Query async iteration, interrupt(), and close()", claudeAgentSDKVersion)
+		return fmt.Errorf("Claude Agent SDK %s must expose Query async iteration, streamInput(), interrupt(), and close()", claudeAgentSDKVersion)
 	default:
 		return errors.New("Claude Agent SDK bridge rejected startup")
 	}
@@ -600,7 +599,7 @@ func (p *claudeProcess) Stop(ctx context.Context, request ControlRequest) (Contr
 	if alreadyStopped {
 		stopCtx, cancel := context.WithTimeout(ctx, claudeStopTimeout)
 		defer cancel()
-		if err := waitOwned(stopCtx, p.done); err != nil {
+		if err := p.waitDone(stopCtx, claudeStopTimeout); err != nil {
 			return ControlEffect{}, err
 		}
 		return ControlEffect{Primitive: claudeStopPrimitive, CorrelationID: request.CorrelationID}, nil
@@ -620,7 +619,7 @@ func (p *claudeProcess) Stop(ctx context.Context, request ControlRequest) (Contr
 	// signal also catches a descendant if the bridge itself exited first.
 	sent, termErr := p.signalOwned(false)
 	if !sent {
-		if err := waitOwned(stopCtx, p.done); err != nil && controlErr == nil {
+		if err := p.waitDone(stopCtx, claudeStopTimeout); err != nil && controlErr == nil {
 			controlErr = err
 		}
 		if controlErr != nil {
@@ -633,7 +632,7 @@ func (p *claudeProcess) Stop(ctx context.Context, request ControlRequest) (Contr
 	case <-time.After(processGracePeriod):
 		forced, err := p.signalOwned(true)
 		if !forced {
-			if waitErr := waitOwned(stopCtx, p.done); waitErr != nil && controlErr == nil {
+			if waitErr := p.waitDone(stopCtx, claudeStopTimeout); waitErr != nil && controlErr == nil {
 				controlErr = waitErr
 			}
 		} else if err != nil && termErr != nil {

@@ -143,6 +143,8 @@ Get started:
 	cmd.AddCommand(applyCmd())
 	// PAI-327: agent-attribution session lifecycle.
 	cmd.AddCommand(sessionCmd())
+	// PAI-848: process-control noun, deliberately distinct from attribution sessions.
+	cmd.AddCommand(harnessCmd())
 	// PAI-349: memory propose verb.
 	cmd.AddCommand(memoryCmd())
 	cmd.AddCommand(knowledgeCmd())

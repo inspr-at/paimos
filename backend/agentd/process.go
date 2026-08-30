@@ -38,9 +38,10 @@ func newOwnedProcess(cmd *exec.Cmd) *ownedProcess {
 	return p
 }
 
-// reapAfterDrain is the sole Cmd.Wait owner. Callers invoke it only after the
-// stdout reader reaches EOF. reaping is set before Wait so signalOwned cannot
-// target a PID after the operating system is allowed to reuse it.
+// reapAfterDrain is the sole Cmd.Wait owner. Callers must first drain every
+// StdoutPipe reader. Marking reaping before Wait closes the PID-reuse window:
+// process-group signals are serialized under mu and are rejected from this
+// point onward, while the child cannot have been reaped before this method.
 func (p *ownedProcess) reapAfterDrain() {
 	if p == nil {
 		return
@@ -63,6 +64,15 @@ func (p *ownedProcess) reapAfterDrain() {
 	p.reaped = true
 	p.mu.Unlock()
 	close(p.done)
+}
+
+// finishAfterDrain terminates the exact still-unreaped process group before
+// entering the sole Wait. Reader EOF is only transport loss, not exit proof:
+// a child may close stdout and continue running. Once reapAfterDrain marks the
+// process reaping, no later raw signal is permitted.
+func (p *ownedProcess) finishAfterDrain() {
+	_, _ = p.signalOwned(true)
+	p.reapAfterDrain()
 }
 
 func (p *ownedProcess) PID() int {
@@ -90,7 +100,9 @@ func (*ownedProcess) Interrupt(context.Context, ControlRequest) (ControlEffect, 
 	return ControlEffect{}, ErrCapabilityMissing
 }
 
-// signalOwned serializes group signals with the transition into Cmd.Wait.
+// signalOwned may signal only before the sole reaper has announced its intent
+// to call Wait. Holding mu across the raw process-group signal makes that
+// ownership decision and the signal one indivisible operation.
 func (p *ownedProcess) signalOwned(force bool) (bool, error) {
 	if p == nil || p.cmd == nil {
 		return false, errors.New("owned process is unavailable")
@@ -106,12 +118,21 @@ func (p *ownedProcess) signalOwned(force bool) (bool, error) {
 	return true, p.signal(p.cmd, force)
 }
 
-func waitOwned(ctx context.Context, done <-chan struct{}) error {
+func (p *ownedProcess) waitDone(ctx context.Context, limit time.Duration) error {
 	select {
-	case <-done:
+	case <-p.done:
+		return nil
+	default:
+	}
+	timer := time.NewTimer(limit)
+	defer timer.Stop()
+	select {
+	case <-p.done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-timer.C:
+		return errors.New("owned process reap did not complete within the stop budget")
 	}
 }
 
@@ -121,7 +142,7 @@ func (p *ownedProcess) Stop(ctx context.Context, request ControlRequest) (Contro
 	}
 	sent, termErr := p.signalOwned(false)
 	if !sent {
-		if err := waitOwned(ctx, p.done); err != nil {
+		if err := p.waitDone(ctx, processKillPeriod); err != nil {
 			return ControlEffect{}, err
 		}
 		return ControlEffect{Primitive: "owned process already exited", CorrelationID: request.CorrelationID}, nil
@@ -138,7 +159,7 @@ func (p *ownedProcess) Stop(ctx context.Context, request ControlRequest) (Contro
 	}
 	forcedSent, forceErr := p.signalOwned(true)
 	if !forcedSent {
-		if err := waitOwned(ctx, p.done); err != nil {
+		if err := p.waitDone(ctx, processKillPeriod); err != nil {
 			return ControlEffect{}, err
 		}
 		return ControlEffect{Primitive: "owned process-group terminate", CorrelationID: request.CorrelationID}, nil

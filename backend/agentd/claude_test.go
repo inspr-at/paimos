@@ -481,6 +481,34 @@ func TestClaudeQueryAbortRejectsPendingInputAndReaps(t *testing.T) {
 	}
 }
 
+func TestClaudeInputAcknowledgementTimeoutReleasesControlChain(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node runtime unavailable")
+	}
+	t.Setenv("PAIMOS_CLAUDE_TEST_MODE", "wedge_stream_input")
+	adapter := newTestClaudeAdapter(t, node)
+	adapter.bridge = []byte(strings.Replace(string(adapter.bridge),
+		"const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;", "const CONTROL_INPUT_TIMEOUT_MS = 10;", 1))
+	digest := sha256.Sum256(adapter.bridge)
+	adapter.bridgeSHA256 = hex.EncodeToString(digest[:])
+	process, err := adapter.Start(context.Background(), StartRequest{
+		Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:test", Prompt: "initial",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Steer(context.Background(), ControlRequest{CorrelationID: "wedge-steer", Text: "steer"}); err == nil {
+		t.Fatal("wedged SDK streamInput unexpectedly succeeded")
+	}
+	if _, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "after-wedge"}); err != nil {
+		t.Fatalf("control chain remained wedged after bounded input failure: %v", err)
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "wedge-stop"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClaudeLiveOwnedQuerySteerAndInterrupt(t *testing.T) {
 	if os.Getenv("PAIMOS_AGENTD_LIVE_CLAUDE") != "1" {
 		t.Skip("set PAIMOS_AGENTD_LIVE_CLAUDE=1 and PAIMOS_AGENTD_LIVE_CLAUDE_SDK=/absolute/sdk.mjs with authenticated local Claude to run live proof")
@@ -603,10 +631,22 @@ export function query({ prompt }) {
       }
     }
   })().catch(() => output.close());
+  const handleInput = async (stream) => {
+    for await (const message of stream) {
+      if (process.env.PAIMOS_CLAUDE_TEST_MODE === "abort_with_pending_input" || process.env.PAIMOS_CLAUDE_TEST_MODE === "wedge_stream_input") {
+        await new Promise(() => {});
+      }
+      if (process.env.PAIMOS_CLAUDE_TEST_MODE !== "consumed_before_receipt") queued.push(message);
+      log("stream query=owned-query uuid=" + message.uuid);
+      if (process.env.PAIMOS_CLAUDE_TEST_MODE === "consumed_before_receipt") {
+        output.push({ type: "stream_event", session_id: "claude-owned-session", user_message_uuid: message.uuid });
+      }
+    }
+  };
   return {
     [Symbol.asyncIterator]() { return this; },
     next() { return output.next(); },
-    async streamInput() {},
+    async streamInput(stream) { await handleInput(stream); },
     async interrupt() {
       log("interrupt query=owned-query");
       const messages = queued.splice(0);

@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+var (
+	ErrSessionUnavailable    = errors.New("agentd managed session is unavailable")
+	ErrCapabilityUnavailable = errors.New("agentd managed steer capability is unavailable")
+	ErrTransportUnavailable  = errors.New("agentd local transport is unavailable")
+)
+
 type ControlRequest struct {
 	CorrelationID string `json:"correlation_id"`
 	Text          string `json:"text,omitempty"`

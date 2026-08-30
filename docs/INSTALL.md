@@ -80,11 +80,12 @@ paimos-agentd serve --instance production \
 ```
 
 The daemon also validates the adjacent package version, Node version, Claude
-CLI version, documented streaming Query methods, and `interrupt_receipt_v1`. Missing or
-incompatible capabilities fail Claude session startup with an actionable
-diagnostic; Codex sessions remain available. Override executable discovery only
-with absolute `--node-path` and `--claude-path` values. The default Claude tool
-boundary is `Read,Glob,Grep,Edit,Write`; durable messages never grant Bash.
+CLI version, documented streaming Query methods, and
+`interrupt_receipt_v1`. Missing or incompatible capabilities fail Claude
+session startup with an actionable diagnostic; Codex sessions remain
+available. Override executable discovery only with absolute `--node-path` and
+`--claude-path` values. The default Claude tool boundary is
+`Read,Glob,Grep,Edit,Write`; durable messages never grant Bash.
 
 ---
 

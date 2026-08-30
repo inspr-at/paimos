@@ -1175,26 +1175,26 @@ Claude start requires Node.js 18+, Claude CLI 2.1.251+, and an operator-installe
 `@anthropic-ai/claude-agent-sdk` 0.3.251 whose `sdk.mjs` path and SHA-256 are
 validated before launch. PAIMOS does not redistribute or fetch that package.
 The SDK invokes the operator-authenticated local `claude` executable; PAIMOS
-never accepts, stores, or forwards a Claude credential. The Query must expose
-documented async streaming plus `interrupt()` and `close()`, and its init frame
-must advertise `interrupt_receipt_v1`.
+never accepts, stores, or forwards a Claude credential. The live Query must
+expose documented async iteration, `streamInput()`, `interrupt()`, and
+`close()`, and its init frame must advertise `interrupt_receipt_v1`.
 
-`Steer` yields a bridge-minted UUID-stamped input to that exact live Query and
-calls `interrupt()`. A successful result proves that the input was accepted by
-the streaming boundary and the Query returned a valid interrupt receipt; the
+`Steer` sends a bridge-minted UUID-stamped input through `streamInput()` on that
+exact Query and then calls `interrupt()`. A successful receipt proves only that
+the SDK accepted the input stream and acknowledged the interrupt/control; the
 UUID is not returned or endorsed by Claude. If later Query output carries that
 UUID, agentd emits a correlated, content-free `turn_started` reaction marker.
-That optional marker is stronger live-reaction evidence, but it is not required
-to complete the durable delivery and its absence does not destroy the Query.
-Unmatched reaction correlations expire after 60 seconds, so a CLI that omits
-the UUID cannot consume the fixed 256-entry evidence bound indefinitely.
-`Interrupt` uses the same Query, and `Stop` calls `close()` before drain-first,
-unreaped process-group cleanup. `persistSession:false`, empty setting sources,
-the default `Read,Glob,Grep,Edit,Write` tool boundary, and content-free bridge
-events prevent prompts, output, and credentials entering agentd state. Bash is
-not enabled by durable bus text. The owner-only temporary runtime contains only
-the PAIMOS bridge; cleanup is waited for at most 250 ms and then continues as
-best effort, so a pathological filesystem cannot wedge Process completion.
+That marker is stronger live-reaction evidence, but Steer does not falsely
+claim reaction completion. Unmatched correlations expire after 60 seconds, so
+a CLI that omits the UUID cannot consume the fixed 256-entry evidence bound
+indefinitely. `Interrupt` uses the same Query, and `Stop` calls `close()` before
+drain-first, unreaped process-group cleanup. `persistSession:false`, empty
+setting sources, the default `Read,Glob,Grep,Edit,Write` tool boundary, and
+content-free bridge events prevent prompts, output, and credentials entering
+agentd state. Bash is not enabled by durable bus text. The owner-only temporary
+runtime contains only the PAIMOS bridge; cleanup is waited for at most 250 ms
+and then continues as best effort, so a pathological filesystem cannot wedge
+Process completion.
 
 Managed same-box steering remains an Agent Intercom delivery: `paimos listen`
 first obtains the FIFO delivery lease, passes its `delivery_id` as the local
@@ -1204,9 +1204,13 @@ transaction invokes `CompleteLocalDelivery`, setting `effective_level`,
 is no direct stdin, queue, PTY, TUI socket, or unledgered managed-control path.
 
 Register the live agentd session as the steer-capable primary and ordinary
-Codex delivery as its required simple fallback. Target references are encrypted by the
-existing target registry; use owner-only files (or stdin) to avoid shell
-history:
+Codex delivery as its required simple fallback. If M161 status reporting is
+also enabled, `managed_harness` is stored as a disabled standby generation;
+it does not replace the enabled `agentd_codex` primary and is selected only by
+an explicit durable unavailable-delivery reroute. Re-registering that stable
+generation reuses the standby target, so setup order cannot flip the primary.
+Target references are encrypted by the existing target registry; use
+owner-only files (or stdin) to avoid shell history:
 
 ```bash
 printf '%s' '{"socket":"/private/path/agentd.sock","session_id":"<agentd-session-uuid>"}' | \
@@ -1231,14 +1235,66 @@ printf '%s' '{"socket":"/private/path/agentd.sock","session_id":"<agentd-session
 paimos listen --as claude:worker --project PAI --follow --deliver agentd_claude
 ```
 
-PAI-848 must expose only an M161 session currently reported `steerable` to the
-managed worker. A turn that becomes idle after lease acquisition remains
-uncompleted and retryable; PAI-848 must requeue or reroute it rather than
-allowing an idle managed target to hold FIFO indefinitely. Agentd deliberately
-does not claim a queue handoff as a managed steer.
+Only an M161 generation currently reported working and steer-capable, with a
+heartbeat no older than 90 seconds, may take over a failed managed lease. If
+an agentd turn becomes idle or unavailable
+after acquisition, the attributed worker reports `delivery-unavailable`; the
+hub atomically re-pends the same delivery for that active generation or the
+snapshotted ordinary simple fallback. The replacement obtains a fresh FIFO
+lease and completes through `CompleteLocalDelivery`. Agentd deliberately does
+not claim a queue handoff as a managed steer.
 
 Unmanaged Claude attachment remains unsupported for control; only a fresh
 PAI-850 owned Process can advertise steer/interrupt/stop, and those methods
 remain bound to its live Agent SDK Query object. PAI-848 supplies the authenticated Reporter and the
 M161 `harness_sessions` API/table; agentd does not reuse `agent_runs` or the
 PAI-809 run-control journal as a session registry.
+
+## Durable harness-session control plane (PAI-848)
+
+`paimos harness` is the control-plane noun for a running harness process. It
+does not replace or alias `paimos session start`, which remains attribution
+only. The durable resource is `/api/projects/{id}/harness-sessions`; it records
+the project agent, harness address, non-secret host attribution,
+managed/unmanaged ownership, coordinator/worker role, phase, heartbeat/yield
+state, and advertised `inbox`, `status`, `steer`, `interrupt`, and `stop`
+capabilities.
+
+Capabilities are advertisements constrained by PAIMOS policy, never server
+certification of vendor behavior. Managed sessions can advertise owned steer,
+interrupt, and stop. Unmanaged sessions cannot advertise interrupt or stop;
+steer is limited to the documented Codex external primitive and is checked
+server-side against both the adapter `MaximumLevel` and durable target cap.
+Unmanaged Claude and every simple-only adapter remain capped to simple
+delivery; an `agentd_claude` target is a distinct owned-process adapter.
+
+Register with a private reference from an owner-only file:
+
+```bash
+paimos harness register --project PAI --agent worker --harness codex \
+  --host build-mbp --harness-session-file ./thread-id --management managed \
+  --role worker --steer-mode owned \
+  --capability inbox,status,steer,interrupt,stop
+```
+
+The write-only reference is encrypted in `agent_message_targets`. M161's
+separate `harness_sessions` table stores only a domain-separated digest and
+safe target FK; list/status responses expose host and public harness-session
+UUID but never the private reference, vendor credentials, URLs, sockets, or
+OpenClaw state.
+
+The PAI-849 worker must heartbeat, yield to claim typed interrupt/stop rows,
+lease inbox work through `POST .../{sessionID}/drain`, and acknowledge each
+lease through `POST .../{sessionID}/complete-delivery`. Those endpoints call
+the existing attributed `ListInbox` worker without a level filter and
+`CompleteLocalDelivery`, preserving FIFO across simple and steer,
+`effective_level`, `fallback_reason`, `handed_off_at`, and cursor state. The
+steer-named endpoints remain compatibility aliases for steer-capable workers;
+they also return older simple work first and must complete it as simple.
+After owned cleanup it marks the session stopped through
+`POST .../{sessionID}/stop`. PAI-848 starts no process and defines no daemon.
+Stopping closes that immutable harness-session generation: registering the
+same stable external session reference again creates a new public
+harness-session UUID while reusing the matching enabled encrypted target
+version. This retains stopped-row history and keeps pre-stop delivery snapshots
+drainable; active retries remain idempotent.

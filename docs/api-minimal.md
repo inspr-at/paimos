@@ -278,6 +278,7 @@ GET  /projects/:id/messages            ?to=<address>&thread=<id>&after=<cursor>&
 GET  /projects/:id/messages/listen     ?to=<address>&after=<cursor>&limit=<n>
 POST /projects/:id/messages/ack        { to, cursor }
 POST /projects/:id/messages/delivery-complete { to, cursor, delivery_id, effective_level, fallback_reason }
+POST /projects/:id/messages/delivery-unavailable { to, cursor, delivery_id, fallback_reason }
 POST /projects/:id/message-allowlist   { receiver, sender }
 POST /projects/:id/message-targets     { address, adapter, target_kind, target_ref, target_secret?, maximum_level?, role? } (admin; target_secret is the write-only routine sender key: required by grok_bot_routine, refused by adapters without a secret header)
 GET  /projects/:id/message-targets     ?address=<receiver> (admin; never returns target_ref or target_secret; has_secret only)
@@ -309,6 +310,13 @@ not stored. Attributed Codex workers request `delivery=codex` on listen; only
 that response includes the decrypted snapshotted Codex target and leases the
 row. Successful vendor handoff uses `delivery-complete`, which records the
 effective level/fallback and advances the receiver cursor atomically.
+An unavailable leased `agentd_codex` or `agentd_claude` target uses
+`delivery-unavailable`; the
+server releases that lease to the currently working steerable M161 generation
+whose heartbeat is at most 90 seconds old, or its snapshotted ordinary simple
+fallback. A missing route becomes `blocked/target_missing`; the replacement
+worker must lease the same durable row and still finish through
+`delivery-complete`.
 
 PAI-800 runner liveness/progress uses the PAI-799 integration seam directly:
 `POST /runs/:id/telemetry`. The supervisor owns stable correlation plus
@@ -619,6 +627,29 @@ default, or `id:462` when intentionally addressing the internal ID. It rejects
 bare `462` because that is indistinguishable from a pasted issue-key suffix.
 Commands whose argument is explicitly another resource ID, plus
 `paimos issue restore <id>`, keep ordinary bare numeric syntax.
+
+## Harness sessions
+
+- `GET|POST /projects/{id}/harness-sessions` — list/register durable,
+  non-secret managed or unmanaged harness identities.
+- `GET /projects/{id}/harness-sessions/{sessionID}` — status with host and
+  public session attribution; the encrypted private reference is never shown.
+- `POST .../{sessionID}/heartbeat` · `POST .../{sessionID}/yield` — attributed
+  status/yield and typed owned-control claim.
+- `POST .../{sessionID}/drain` · `POST .../{sessionID}/complete-delivery` —
+  canonical full-FIFO message-bus lease/completion for both simple and steer,
+  preserving delivery fields. The legacy steer-named pair is a compatibility
+  alias for steer-capable workers and also drains older simple work first.
+- `POST .../{sessionID}/controls/{interrupt|stop}` ·
+  `POST .../{sessionID}/controls/{controlID}/complete` — typed owned-process
+  requests; no free-form command or PAI-809 action extension.
+- `POST .../{sessionID}/stop` — attributed terminal lifecycle transition after
+  worker cleanup.
+
+Capability fields are advertised and server-capped. Unmanaged steer is valid
+only for a bound Codex target whose plugin and durable target both cap at
+`steer`; unmanaged interrupt/stop and OpenClaw/private-socket transports are
+rejected.
 
 ---
 
