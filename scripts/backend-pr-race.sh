@@ -179,10 +179,11 @@ run_package() {
       ;;
     ./auth)
       # The exhaustive auth package rebuilds the complete migration chain for
-      # every test and cannot fit the bounded PR race lane. Keep the two
-      # package-local SQLite contention contracts here; protected main and the
-      # nightly/full workflow retain the broad package race run.
-      run_race ./auth '^(TestResolveAPIKeyUsageStampNeverInheritsSQLiteBusyTimeout|TestResolveAPIKeyRecentUsageStaysReadOnlyWhileSQLiteWriterIsBusy)$'
+      # every test and cannot fit the bounded race lane. Keep the package-local
+      # SQLite contention proof here. The related recent-usage contract keeps
+      # its 500 ms latency oracle in the exhaustive serial suite; race
+      # instrumentation invalidates that wall-clock budget.
+      run_race ./auth '^TestResolveAPIKeyUsageStampNeverInheritsSQLiteBusyTimeout$'
       ;;
     *)
       run_race "$package"
