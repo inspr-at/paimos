@@ -449,7 +449,10 @@ func TestMigration145RebuildsExactM144PrivacyGuardsAndPreservesRetainedBlocker(t
 }
 
 func TestMigration145RecursiveInvalidationAndAudienceGuards(t *testing.T) {
-	database := openTestDB(t)
+	// This is deliberately an exact M145 fixture: M145's recursive invalidation
+	// triggers must terminate safely even for legacy cyclic data. M163 rejects
+	// creation of such cycles, covered by TestMigration163ParentGuardsAreDatabaseOwned.
+	database := openThroughMigration(t, 145)
 	projectID, _, _ := seedAgentModeDelivery(t, database, "Recursive", "REC", 1)
 	epic := insertAgentModeIssue(t, database, projectID, 2, "epic", "Epic")
 	child := insertAgentModeIssue(t, database, projectID, 3, "ticket", "Child")
@@ -1044,7 +1047,9 @@ func TestMigration145RelationUpdateInvalidatesOldAndNewSubtreesOnce(t *testing.T
 }
 
 func TestMigration145CanonicalInvalidationsAreFieldExactAndNonDuplicating(t *testing.T) {
-	database := openTestDB(t)
+	// Keep the legacy-cycle non-duplication proof at its owning schema version.
+	// M163's database guard separately makes new cycles impossible.
+	database := openThroughMigration(t, 145)
 	projectID := insertAgentModeProject(t, database, "Canonical invalidation", "CIV")
 
 	issueIDs := map[string]int64{}

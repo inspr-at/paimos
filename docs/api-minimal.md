@@ -114,6 +114,48 @@ target=child, one parent per child. To put a ticket under an epic:
 `POST /issues/{epic}/relations {target_id: ticket, type: parent}`. Legacy
 `type=groups` with an epic source is auto-translated to `parent`. A second parent
 for a child is rejected (409) — reparent via `parent_id` on issue update instead.
+Every parent insertion is also checked at the database boundary: both rows must
+belong to the same project, the edge must remain cycle-free, and the project's
+`node_depth` must permit it. `node_depth` is exactly `1|nested`; existing
+projects default to `nested`, while `1` forbids every parent edge.
+
+## Paimos 6 nodes and product sessions
+
+```
+GET|POST /projects/:id/nodes
+GET      /projects/:id/nodes/:nodeID
+PUT      /projects/:id/nodes/:nodeID/parent
+GET|PUT  /node-labels
+GET|PUT  /projects/:id/node-labels
+GET|POST /projects/:id/product-sessions
+GET      /projects/:id/product-sessions/:productSessionID
+GET      /projects/:id/product-sessions/:productSessionID/events
+POST     /projects/:id/product-sessions/:productSessionID/attach-node
+POST     /projects/:id/product-sessions/:productSessionID/detach-node
+```
+
+The node API is additive over existing `issues` rows. It always returns
+`kind: "node"`; `cosmetic_type_label` is presentation text and never rewrites
+`issues.type`. Labels use validated global defaults with optional per-project
+overrides. The exposed precedence string is exactly
+`project_override_then_global_default`; project PUT replaces the override set,
+while global PUT is admin-only and requires every supported storage type. New
+node clients do not choose epic/ticket/task. Parent writes use `parent_node_id`
+and the same `issue_relations(type='parent')` SSOT as legacy issue APIs. Every
+delete-before-insert reparent runs in one database transaction, including Jira
+imports, so a rejected replacement preserves the old parent edge.
+
+A product session is a separate project resource identified only by
+`product_session_id`. It may target Paimos or a registered project agent, may
+remain unattached, and has at most one nullable `node_id`; many sessions may
+attach to the same node or select the same agent. Attach, reattach, and detach
+require `expected_revision`, returning 409 on stale CAS. A product session is
+not an attribution header session, harness session, agent run, delivery, issue,
+or intake session, and creating one creates none of those resources. Create,
+attach, reattach, and detach also append immutable actor, before/after node, and
+before/after revision evidence in the same atomic mutation. A failed CAS
+appends no event. An attached node must be explicitly detached before it can be
+moved to another project or sent to trash.
 
 ## Time entries
 
@@ -606,10 +648,11 @@ POST   /import/csv                               admin only — global
 | `priority` | `low` `medium` `high` |
 | issue-relation `type` | `parent` `groups` `sprint` `depends_on` `impacts` `follows_from` `blocks` `related` |
 
-Hierarchy (epic⊃ticket, ticket⊃task) is the `parent` relation edge — the single
-source of truth (source=parent, target=child, at most one parent per child). Set
-it via `parent_id` on issue create/update OR a `type=parent` relation. `parent_id`
-is kept in sync and still returned, but reads come from the edge. `groups` is
+Hierarchy is the `parent` relation edge — the single source of truth
+(source=parent, target=child, at most one parent per child). Set it via
+`parent_id` on legacy issue create/update, `parent_node_id` on the node API, or
+a `type=parent` relation. Payload parent IDs are projected from the edge;
+there is no second hierarchy column. `groups` is
 cost_unit/release container membership (M:N, orthogonal axis). Orphan
 tickets/tasks allowed. 422 on invalid parent.  
 Issue key: `{PROJECT_KEY}-{n}` e.g. `PAI-1` — computed, not stored.  

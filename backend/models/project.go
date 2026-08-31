@@ -21,6 +21,7 @@ type Project struct {
 	Key          string `json:"key"`
 	Description  string `json:"description"`
 	Status       string `json:"status"`
+	NodeDepth    string `json:"node_depth,omitempty"`
 	ProductOwner *int64 `json:"product_owner"`
 	// CustomerLabel is the freeform legacy customer label (legacy-instance era).
 	// Kept for backward compat; new code should use CustomerID (FK).

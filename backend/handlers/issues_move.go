@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -387,6 +388,8 @@ func runMove(r *http.Request, issueID, targetProjectID int64) (*moveResult, int,
 			return nil, http.StatusUnprocessableEntity, err
 		case errors.Is(err, sql.ErrNoRows):
 			return nil, http.StatusNotFound, fmt.Errorf("issue or target project not found")
+		case strings.Contains(err.Error(), "product session attached node"):
+			return nil, http.StatusConflict, fmt.Errorf("detach the product session before moving this node")
 		default:
 			return nil, http.StatusInternalServerError, fmt.Errorf("internal error")
 		}

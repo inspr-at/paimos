@@ -623,6 +623,11 @@ func mountAPI(r chi.Router) {
 		handlers.RegisterAgentMessageRoutes(r)
 		// PAI-848 — durable harness-session identity and daemon-owned controls.
 		handlers.RegisterHarnessSessionRoutes(r)
+		// PAI-859 / PAI-860 — first-class product sessions and the additive
+		// one-node compatibility API. These resources do not alias the harness,
+		// run, delivery, attribution, issue, or intake-session identities.
+		handlers.RegisterProductSessionRoutes(r)
+		handlers.RegisterNodeRoutes(r)
 		// PAI-607: online implement-capable runners for the device picker.
 		r.With(auth.RequireProjectView).Get("/projects/{id}/runners", handlers.ListProjectRunners)
 		r.With(auth.RequireProjectView).Get("/projects/{id}/runs", handlers.ListProjectRuns)

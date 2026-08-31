@@ -11875,6 +11875,177 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 WHEN NEW.user_id IS NOT NULL AND NEW.type<>'memory'
 			 BEGIN SELECT RAISE(ABORT,'user-owned issue type must be memory'); END`,
 		}},
+
+		// M163 / PAI-859 + PAI-860: product sessions are their own project-
+		// scoped resource, not aliases for attribution, harness-control, agent
+		// run, delivery, or intake-session identities. The same migration adds
+		// the binary project node-depth contract and unbypassable parent-edge
+		// guards. The existing issue_relations(type='parent') row remains the
+		// hierarchy SSOT; no legacy issue row or type is rewritten.
+		{163, []string{
+			`ALTER TABLE projects ADD COLUMN node_depth TEXT NOT NULL DEFAULT 'nested'
+			 CHECK(node_depth IN ('1','nested'))`,
+			`CREATE TABLE node_label_defaults (
+			 issue_type TEXT PRIMARY KEY CHECK(issue_type IN ('epic','task','ticket','cost_unit','release','sprint','memory','runbook','external_system','related_project','guideline')),
+			 label TEXT NOT NULL CHECK(length(CAST(label AS BLOB)) BETWEEN 1 AND 64 AND label=trim(label)
+			  AND instr(label,char(9))=0 AND instr(label,char(10))=0 AND instr(label,char(13))=0)
+			)`,
+			`INSERT INTO node_label_defaults(issue_type,label) VALUES
+			 ('epic','Epic'),('task','Task'),('ticket','Ticket'),('cost_unit','Cost unit'),
+			 ('release','Release'),('sprint','Sprint'),('memory','Memory'),('runbook','Runbook'),
+			 ('external_system','External system'),('related_project','Related project'),('guideline','Guideline')`,
+			`CREATE TRIGGER trg_node_label_defaults_no_delete BEFORE DELETE ON node_label_defaults
+			 BEGIN SELECT RAISE(ABORT,'global node label defaults cannot be deleted'); END`,
+			`CREATE TABLE project_node_label_overrides (
+			 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 issue_type TEXT NOT NULL REFERENCES node_label_defaults(issue_type) ON DELETE RESTRICT,
+			 label TEXT NOT NULL CHECK(length(CAST(label AS BLOB)) BETWEEN 1 AND 64 AND label=trim(label)
+			  AND instr(label,char(9))=0 AND instr(label,char(10))=0 AND instr(label,char(13))=0),
+			 PRIMARY KEY(project_id,issue_type)
+			)`,
+			`CREATE TABLE product_sessions (
+			 product_session_id       TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("product_session_id") + `),
+			 project_id               INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 target_kind              TEXT NOT NULL CHECK(target_kind IN ('paimos','project_agent')),
+			 target_project_agent_id  INTEGER REFERENCES project_agents(id) ON DELETE RESTRICT,
+			 node_id                  INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+			 title                    TEXT NOT NULL CHECK(length(CAST(title AS BLOB)) BETWEEN 1 AND 240),
+			 summary                  TEXT NOT NULL DEFAULT '' CHECK(length(CAST(summary AS BLOB))<=4000),
+			 revision                 INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),
+			 created_by_user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+			 updated_by_user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+			 created_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 updated_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 CHECK((target_kind='paimos' AND target_project_agent_id IS NULL) OR
+			       (target_kind='project_agent' AND target_project_agent_id IS NOT NULL))
+			)`,
+			`CREATE INDEX idx_product_sessions_project_updated
+			 ON product_sessions(project_id,updated_at,product_session_id)`,
+			`CREATE INDEX idx_product_sessions_node
+			 ON product_sessions(node_id,project_id) WHERE node_id IS NOT NULL`,
+			`CREATE INDEX idx_product_sessions_target_agent
+			 ON product_sessions(project_id,target_project_agent_id) WHERE target_project_agent_id IS NOT NULL`,
+			`CREATE TABLE product_session_events (
+			 event_id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+			 product_session_id        TEXT NOT NULL REFERENCES product_sessions(product_session_id) ON DELETE CASCADE,
+			 event_sequence            INTEGER NOT NULL CHECK(event_sequence>0),
+			 operation                 TEXT NOT NULL CHECK(operation IN ('create','attach','reattach','detach')),
+			 actor_user_id              INTEGER NOT NULL,
+			 before_node_id             INTEGER,
+			 after_node_id              INTEGER,
+			 before_revision            INTEGER NOT NULL CHECK(before_revision>=0),
+			 after_revision             INTEGER NOT NULL CHECK(after_revision=before_revision+1),
+			 created_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(product_session_id,event_sequence)
+			)`,
+			`CREATE INDEX idx_product_session_events_session
+			 ON product_session_events(product_session_id,event_sequence)`,
+			`CREATE TRIGGER trg_product_sessions_actor_insert BEFORE INSERT ON product_sessions
+			 WHEN NEW.created_by_user_id IS NULL OR NEW.updated_by_user_id IS NULL
+			 BEGIN SELECT RAISE(ABORT,'product session actor attribution required'); END`,
+			`CREATE TRIGGER trg_product_sessions_agent_insert BEFORE INSERT ON product_sessions
+			 WHEN NEW.target_kind='project_agent' AND NOT EXISTS(
+			  SELECT 1 FROM project_agents pa
+			  WHERE pa.id=NEW.target_project_agent_id AND pa.project_id=NEW.project_id)
+			 BEGIN SELECT RAISE(ABORT,'product session agent project mismatch'); END`,
+			`CREATE TRIGGER trg_project_agents_product_session_move BEFORE UPDATE OF project_id ON project_agents
+			 WHEN NEW.project_id IS NOT OLD.project_id AND EXISTS(
+			  SELECT 1 FROM product_sessions ps WHERE ps.target_project_agent_id=OLD.id)
+			 BEGIN SELECT RAISE(ABORT,'product session target prevents agent project move'); END`,
+			`CREATE TRIGGER trg_product_sessions_node_insert BEFORE INSERT ON product_sessions
+			 WHEN NEW.node_id IS NOT NULL AND NOT EXISTS(
+			  SELECT 1 FROM issues i
+			  WHERE i.id=NEW.node_id AND i.project_id=NEW.project_id AND i.deleted_at IS NULL)
+			 BEGIN SELECT RAISE(ABORT,'product session node project mismatch'); END`,
+			`CREATE TRIGGER trg_product_sessions_node_update BEFORE UPDATE OF node_id ON product_sessions
+			 WHEN NEW.node_id IS NOT NULL AND NOT EXISTS(
+			  SELECT 1 FROM issues i
+			  WHERE i.id=NEW.node_id AND i.project_id=NEW.project_id AND i.deleted_at IS NULL)
+			 BEGIN SELECT RAISE(ABORT,'product session node project mismatch'); END`,
+			`CREATE TRIGGER trg_product_sessions_mutation_guard BEFORE UPDATE ON product_sessions
+			 WHEN NEW.node_id IS OLD.node_id OR NEW.revision<>OLD.revision+1 OR NEW.updated_by_user_id IS NULL
+			 BEGIN SELECT RAISE(ABORT,'product session mutation requires attributed node revision'); END`,
+			`CREATE TRIGGER trg_product_sessions_identity_immutable BEFORE UPDATE OF
+			 product_session_id,project_id,target_kind,target_project_agent_id,title,summary,created_by_user_id,created_at
+			 ON product_sessions
+			 BEGIN SELECT RAISE(ABORT,'product session identity is immutable'); END`,
+			`CREATE TRIGGER trg_product_sessions_no_delete BEFORE DELETE ON product_sessions
+			 BEGIN SELECT RAISE(ABORT,'product sessions are immutable resources'); END`,
+			`CREATE TRIGGER trg_product_sessions_event_create AFTER INSERT ON product_sessions
+			 BEGIN INSERT INTO product_session_events(
+			  product_session_id,event_sequence,operation,actor_user_id,before_node_id,after_node_id,before_revision,after_revision)
+			 VALUES(NEW.product_session_id,1,'create',NEW.created_by_user_id,NULL,NEW.node_id,0,NEW.revision); END`,
+			`CREATE TRIGGER trg_product_sessions_event_update AFTER UPDATE ON product_sessions
+			 BEGIN INSERT INTO product_session_events(
+			  product_session_id,event_sequence,operation,actor_user_id,before_node_id,after_node_id,before_revision,after_revision)
+			 VALUES(NEW.product_session_id,NEW.revision,
+			  CASE WHEN OLD.node_id IS NULL THEN 'attach' WHEN NEW.node_id IS NULL THEN 'detach' ELSE 'reattach' END,
+			  NEW.updated_by_user_id,OLD.node_id,NEW.node_id,OLD.revision,NEW.revision); END`,
+			`CREATE TRIGGER trg_product_session_events_immutable_update BEFORE UPDATE ON product_session_events
+			 BEGIN SELECT RAISE(ABORT,'product session events are immutable'); END`,
+			`CREATE TRIGGER trg_product_session_events_immutable_delete BEFORE DELETE ON product_session_events
+			 BEGIN SELECT RAISE(ABORT,'product session events are immutable'); END`,
+			`CREATE TRIGGER trg_issues_attached_session_move BEFORE UPDATE OF project_id ON issues
+			 WHEN NEW.project_id IS NOT OLD.project_id AND EXISTS(SELECT 1 FROM product_sessions ps WHERE ps.node_id=OLD.id)
+			 BEGIN SELECT RAISE(ABORT,'product session attached node must be detached before move'); END`,
+			`CREATE TRIGGER trg_issues_attached_session_soft_delete BEFORE UPDATE OF deleted_at ON issues
+			 WHEN NEW.deleted_at IS NOT OLD.deleted_at AND NEW.deleted_at IS NOT NULL
+			  AND EXISTS(SELECT 1 FROM product_sessions ps WHERE ps.node_id=OLD.id)
+			 BEGIN SELECT RAISE(ABORT,'product session attached node must be detached before delete'); END`,
+			`CREATE TRIGGER trg_projects_node_depth_guard BEFORE UPDATE OF node_depth ON projects
+			 WHEN NEW.node_depth='1' AND EXISTS(
+			  SELECT 1 FROM issue_relations edge
+			  JOIN issues child ON child.id=edge.target_id
+			  WHERE edge.type='parent' AND child.project_id=NEW.id)
+			 BEGIN SELECT RAISE(ABORT,'project depth 1 forbids parent edges'); END`,
+			`CREATE TRIGGER trg_issue_parent_guard_insert BEFORE INSERT ON issue_relations
+			 WHEN NEW.type='parent' AND (
+			  NEW.source_id=NEW.target_id OR
+			  NOT EXISTS(
+			   SELECT 1 FROM issues parent JOIN issues child
+			    ON child.id=NEW.target_id
+			   WHERE parent.id=NEW.source_id AND parent.project_id IS NOT NULL
+			    AND child.project_id=parent.project_id
+			  ) OR
+			  EXISTS(
+			   SELECT 1 FROM issues child JOIN projects project ON project.id=child.project_id
+			   WHERE child.id=NEW.target_id AND project.node_depth='1'
+			  ) OR
+			  EXISTS(
+			   WITH RECURSIVE descendants(issue_id) AS (
+			    SELECT NEW.target_id
+			    UNION
+			    SELECT edge.target_id FROM issue_relations edge
+			    JOIN descendants parent ON edge.source_id=parent.issue_id
+			    WHERE edge.type='parent'
+			   ) SELECT 1 FROM descendants WHERE issue_id=NEW.source_id
+			  )
+			 ) BEGIN SELECT RAISE(ABORT,'invalid project parent edge'); END`,
+			`CREATE TRIGGER trg_issue_parent_guard_update BEFORE UPDATE OF source_id,target_id,type ON issue_relations
+			 WHEN NEW.type='parent' AND (
+			  NEW.source_id=NEW.target_id OR
+			  NOT EXISTS(
+			   SELECT 1 FROM issues parent JOIN issues child
+			    ON child.id=NEW.target_id
+			   WHERE parent.id=NEW.source_id AND parent.project_id IS NOT NULL
+			    AND child.project_id=parent.project_id
+			  ) OR
+			  EXISTS(
+			   SELECT 1 FROM issues child JOIN projects project ON project.id=child.project_id
+			   WHERE child.id=NEW.target_id AND project.node_depth='1'
+			  ) OR
+			  EXISTS(
+			   WITH RECURSIVE descendants(issue_id) AS (
+			    SELECT NEW.target_id
+			    UNION
+			    SELECT edge.target_id FROM issue_relations edge
+			    JOIN descendants parent ON edge.source_id=parent.issue_id
+			    WHERE edge.type='parent' AND NOT (
+			     edge.source_id=OLD.source_id AND edge.target_id=OLD.target_id AND edge.type=OLD.type)
+			   ) SELECT 1 FROM descendants WHERE issue_id=NEW.source_id
+			  )
+			 ) BEGIN SELECT RAISE(ABORT,'invalid project parent edge'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -12031,6 +12202,93 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 		})
 	},
 	162: checkKnowledgeScopeIdentities,
+	163: checkProductSessionNodeFoundation,
+}
+
+func checkProductSessionNodeFoundation(ctx context.Context, conn *sql.Conn) error {
+	var nodeDepthColumn int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name='node_depth'`).Scan(&nodeDepthColumn); err != nil {
+		return fmt.Errorf("inspect M163 schema ownership: %w", err)
+	}
+	if nodeDepthColumn != 0 {
+		return fmt.Errorf("M163 schema is partially present or locally incompatible: column:projects.node_depth")
+	}
+	if err := checkSchemaObjectsAbsent(ctx, conn, 163, []string{
+		"node_label_defaults", "trg_node_label_defaults_no_delete", "project_node_label_overrides",
+		"product_sessions", "idx_product_sessions_project_updated", "idx_product_sessions_node",
+		"idx_product_sessions_target_agent", "product_session_events", "idx_product_session_events_session",
+		"trg_product_sessions_actor_insert",
+		"trg_product_sessions_agent_insert", "trg_project_agents_product_session_move",
+		"trg_product_sessions_node_insert",
+		"trg_product_sessions_node_update", "trg_product_sessions_mutation_guard",
+		"trg_product_sessions_identity_immutable", "trg_product_sessions_no_delete",
+		"trg_product_sessions_event_create", "trg_product_sessions_event_update",
+		"trg_product_session_events_immutable_update", "trg_product_session_events_immutable_delete",
+		"trg_issues_attached_session_move", "trg_issues_attached_session_soft_delete",
+		"trg_projects_node_depth_guard", "trg_issue_parent_guard_insert", "trg_issue_parent_guard_update",
+	}); err != nil {
+		return err
+	}
+
+	rows, err := conn.QueryContext(ctx, `
+		SELECT edge.source_id,edge.target_id
+		FROM issue_relations edge
+		JOIN issues parent ON parent.id=edge.source_id
+		JOIN issues child ON child.id=edge.target_id
+		WHERE edge.type='parent' AND (
+		 parent.project_id IS NULL OR child.project_id IS NULL OR parent.project_id<>child.project_id)
+		ORDER BY edge.source_id,edge.target_id LIMIT 10`)
+	if err != nil {
+		return fmt.Errorf("inspect M163 parent project ownership: %w", err)
+	}
+	var invalid []string
+	for rows.Next() {
+		var sourceID, targetID int64
+		if err := rows.Scan(&sourceID, &targetID); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan M163 parent project ownership: %w", err)
+		}
+		invalid = append(invalid, fmt.Sprintf("%d->%d", sourceID, targetID))
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate M163 parent project ownership: %w", err)
+	}
+	rows.Close()
+	if len(invalid) > 0 {
+		return fmt.Errorf("invalid cross-project parent edges block M163; repair these rows before upgrading: %s", strings.Join(invalid, ", "))
+	}
+
+	cycleRows, err := conn.QueryContext(ctx, `
+		WITH RECURSIVE walk(root_id,current_id) AS (
+		 SELECT source_id,target_id FROM issue_relations WHERE type='parent'
+		 UNION
+		 SELECT walk.root_id,edge.target_id
+		 FROM walk JOIN issue_relations edge ON edge.source_id=walk.current_id
+		 WHERE edge.type='parent'
+		)
+		SELECT DISTINCT root_id FROM walk WHERE current_id=root_id ORDER BY root_id LIMIT 10`)
+	if err != nil {
+		return fmt.Errorf("inspect M163 parent cycles: %w", err)
+	}
+	var cycleRoots []string
+	for cycleRows.Next() {
+		var rootID int64
+		if err := cycleRows.Scan(&rootID); err != nil {
+			cycleRows.Close()
+			return fmt.Errorf("scan M163 parent cycles: %w", err)
+		}
+		cycleRoots = append(cycleRoots, fmt.Sprint(rootID))
+	}
+	if err := cycleRows.Err(); err != nil {
+		cycleRows.Close()
+		return fmt.Errorf("iterate M163 parent cycles: %w", err)
+	}
+	cycleRows.Close()
+	if len(cycleRoots) > 0 {
+		return fmt.Errorf("parent cycles block M163; repair cycles containing issue ids: %s", strings.Join(cycleRoots, ", "))
+	}
+	return nil
 }
 
 func checkKnowledgeScopeIdentities(ctx context.Context, conn *sql.Conn) error {
