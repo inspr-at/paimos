@@ -435,7 +435,7 @@ done
   "$full_serial" == *'go test -count=1 -p 1 -timeout=30m ./...'* &&
   "$full_serial" == *'paimos_test_unsupported'* ]] ||
   fail 'full backend serial/platform assurance lacks an explicit independent budget'
-[[ "$full_race" == *'needs: backend-full-authorize'* && "$full_race" == *'timeout-minutes: 40'* &&
+[[ "$full_race" == *'needs: backend-full-authorize'* && "$full_race" == *'timeout-minutes: 70'* &&
   "$full_race" == *"backend-pr-race.sh './...'"* && "$full_race" == *'sequential'* ]] ||
   fail 'full backend broad race lacks an explicit independent budget or sequential topology'
 [[ "$full" == *'needs: [backend-full-authorize, backend-full-serial, backend-full-race]'* &&
@@ -444,7 +444,7 @@ done
   "$full" == *"$FULL_RACE_RESULT"* && "$full" == *"$FULL_SERIAL_ASSERT"* &&
   "$full" == *"$FULL_RACE_ASSERT"* ]] ||
   fail 'full backend workflow lacks a fail-closed serial/race aggregator'
-grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-3000' "$FULL_WAITER" ||
+grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-4800' "$FULL_WAITER" ||
   fail 'exact-head full-suite waiter budget is not derived from parallel job budgets'
 
 [[ -n "$quality" ]] || fail 'quality lane is missing'
