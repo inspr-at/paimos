@@ -251,9 +251,8 @@ func loadSessionHomeInbox(ctx context.Context, tx *sql.Tx, projectID, agentID in
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),strftime('%Y-%m-%dT%H:%M:%fZ',MAX(am.created_at))
 		FROM agent_messages am
 		JOIN project_agents receiver ON receiver.id=am.to_agent_id AND receiver.project_id=?
-		JOIN project_agents sender ON sender.id=am.from_agent_id AND sender.project_id=?
 		WHERE am.to_agent_id=? AND am.delivered=1 AND am.is_action_request=0 AND am.read_at IS NULL`,
-		projectID, projectID, agentID).Scan(&item.Inbox.UnreadCount, &latest); err != nil {
+		projectID, agentID).Scan(&item.Inbox.UnreadCount, &latest); err != nil {
 		return err
 	}
 	if latest.Valid {
@@ -263,8 +262,7 @@ func loadSessionHomeInbox(ctx context.Context, tx *sql.Tx, projectID, agentID in
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN am.is_action_request=1 THEN 1 ELSE 0 END),0)
 		FROM agent_messages am
 		JOIN project_agents receiver ON receiver.id=am.to_agent_id AND receiver.project_id=?
-		JOIN project_agents sender ON sender.id=am.from_agent_id AND sender.project_id=?
-		WHERE am.to_agent_id=? AND am.delivered=0`, projectID, projectID, agentID).
+		WHERE am.to_agent_id=? AND am.delivered=0`, projectID, agentID).
 		Scan(&item.Attention.ExceptionCount, &item.Attention.ActionRequestCount); err != nil {
 		return err
 	}

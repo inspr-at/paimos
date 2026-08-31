@@ -2,6 +2,7 @@
 import { computed, inject, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { Inbox, Layers3, RadioTower, WifiOff } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
 import { api, permissionsEpoch, permissionsEpochGeneration } from '@/api/client'
 import Paimos6SessionCard from '@/components/v6/Paimos6SessionCard.vue'
@@ -10,6 +11,7 @@ import Paimos6TalkDoor from '@/components/v6/Paimos6TalkDoor.vue'
 import Paimos6ZoomControl from '@/components/v6/Paimos6ZoomControl.vue'
 import Paimos6ZoomOverview from '@/components/v6/Paimos6ZoomOverview.vue'
 import { usePaimos6Orchestrator } from '@/composables/v6/usePaimos6Orchestrator'
+import { usePaimos6Voice } from '@/composables/v6/usePaimos6Voice'
 import { usePaimos6SessionZoom } from '@/composables/v6/usePaimos6SessionZoom'
 import { useAuthStore } from '@/stores/auth'
 import type { Project } from '@/types'
@@ -18,9 +20,10 @@ import { PAIMOS6_COMMAND_CONTEXT_KEY } from '@/v6/commandPaletteContext'
 
 interface ProjectOption { id: number; key: string; name: string }
 
-const DEFAULT_STATUS_MESSAGE = 'Choose a session to target it. No mutation endpoint exists in this preview.'
+const DEFAULT_STATUS_MESSAGE = 'Choose a session to target it for voice delivery, or leave it clear to talk to Paimos.'
 
 const auth = useAuthStore()
+const { locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const doorOpen = ref(false)
@@ -71,6 +74,23 @@ const home = usePaimos6SessionZoom({
   replaceSessionQuery,
 })
 const selectedSession = home.selectedSession
+const voiceSelection = computed(() => {
+  const selected = selectedSession.value
+  if (!selected) return null
+  return {
+    productSessionId: selected.id,
+    revision: selected.revision,
+    destination: selected.agent,
+    available: selected.mode !== 'unavailable' && selected.mode !== 'paimos',
+  }
+})
+const voice = usePaimos6Voice({
+  principalId,
+  authorityKey,
+  projectId: selectedProjectId,
+  selection: voiceSelection,
+  locale,
+})
 const selectedOutsideSample = computed(() => (
   selectedSession.value !== null
   && !home.sessions.value.some((session) => session.id === selectedSession.value?.id)
@@ -94,6 +114,14 @@ function resetAuxiliaryStatus() {
 
 function publishDoorStatus(message: string) {
   statusMessage.value = message
+}
+
+function startVoice() {
+  void voice.start()
+}
+
+function retryVoice() {
+  void voice.retry()
 }
 
 function requestedProjectId(): number | null {
@@ -320,7 +348,7 @@ onScopeDispose(() => {
       <div>
         <h2 id="p6-honesty-title">Read-only responsive web preview</h2>
         <p>
-          Rows come from the strict, project-authorized semantic-zoom endpoint. The exception-first sample is bounded while totals and a separately hydrated selection stay authoritative. Controls are capability truth only: no mutation endpoint exists yet. At 390px this remains mobile web—not a native client—and no push capability is claimed.
+          Rows come from the strict, project-authorized semantic-zoom endpoint. The exception-first sample is bounded while totals and a separately hydrated selection stay authoritative. Voice commits only a finalized transcript through the selected session contract; other controls remain capability previews. At 390px this remains mobile web—not a native client—and no push capability is claimed.
         </p>
       </div>
       <span>Web · no push</span>
@@ -338,7 +366,15 @@ onScopeDispose(() => {
       :target-agent="selectedSession?.agent ?? null"
       :orchestrator-label="orchestrator.identityLabel.value"
       :orchestrator-status="orchestrator.statusText.value"
+      :voice-state="voice.state.value"
+      :voice-message="voice.message.value"
+      :voice-supported="voice.supported.value"
+      :voice-can-retry="voice.canRetry.value"
       @status="publishDoorStatus"
+      @voice-start="startVoice"
+      @voice-finish="voice.finish()"
+      @voice-cancel="voice.cancel()"
+      @voice-retry="retryVoice"
     />
   </div>
 </template>

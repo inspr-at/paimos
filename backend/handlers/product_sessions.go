@@ -62,6 +62,7 @@ func RegisterProductSessionRoutes(r chi.Router) {
 func RegisterSessionHomeRoutes(r chi.Router) {
 	r.With(auth.RequireProjectView).Get("/projects/{id}/session-home/v1", SessionHomeV1)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/session-home/zoom/v1", SessionHomeZoomV1)
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/session-utterances/v1", SessionUtteranceV1)
 }
 
 func ListProductSessionEvents(w http.ResponseWriter, r *http.Request) {

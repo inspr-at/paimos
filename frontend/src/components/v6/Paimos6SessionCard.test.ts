@@ -15,6 +15,7 @@ function session(
 ): Paimos6SessionViewModel {
   return {
     id,
+    revision: 1,
     title: id,
     summary: 'Live summary',
     agent: 'codex:amy',

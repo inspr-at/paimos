@@ -41,7 +41,7 @@ func seedM165ProjectAgent(t *testing.T, database *sql.DB, projectKey, agentKey s
 	return projectID, agentID
 }
 
-func TestMigration165CreatesOnlyUnsetSingletonAndLeavesM164Unapplied(t *testing.T) {
+func TestMigration165CreatesOnlyUnsetSingletonAfterM164(t *testing.T) {
 	database, path := openM165Fixture(t, 162)
 	_, _ = seedM165ProjectAgent(t, database, "PPM", "amy")
 	if err := migrateThrough(database, 165); err != nil {
@@ -63,7 +63,7 @@ func TestMigration165CreatesOnlyUnsetSingletonAndLeavesM164Unapplied(t *testing.
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_versions WHERE version=165`).Scan(&m165); err != nil {
 		t.Fatal(err)
 	}
-	if m164 != 0 || m165 != 1 {
+	if m164 != 1 || m165 != 1 {
 		t.Fatalf("schema versions M164=%d M165=%d", m164, m165)
 	}
 	if err := database.Close(); err != nil {

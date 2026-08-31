@@ -63,6 +63,7 @@ export interface Paimos6SessionWire {
 
 export interface Paimos6SessionViewModel {
   id: string
+  revision: number
   title: string
   summary: string
   agent: string
@@ -353,6 +354,7 @@ export function toPaimos6SessionViewModel(session: Paimos6SessionWire): Paimos6S
       : null
   return {
     id: session.product_session_id,
+    revision: session.revision,
     title: session.title,
     summary: session.summary,
     agent: session.target.kind === 'paimos' ? 'Paimos' : session.target.address ?? 'Unavailable target',

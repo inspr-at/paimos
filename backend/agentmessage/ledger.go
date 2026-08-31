@@ -164,7 +164,13 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		var parentHop int
 		var parentThread string
 		var pid int64
-		if err := tx.QueryRowContext(ctx, `SELECT am.id,am.hop_count,am.thread_id FROM agent_messages am JOIN project_agents pa ON pa.id=am.from_agent_id WHERE am.message_id=? AND pa.project_id=?`, in.ReplyTo, in.ProjectID).Scan(&pid, &parentHop, &parentThread); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT am.id,am.hop_count,am.thread_id FROM agent_messages am
+			LEFT JOIN project_agents sender ON sender.id=am.from_agent_id
+			LEFT JOIN project_agents receiver ON receiver.id=am.to_agent_id
+			LEFT JOIN product_sessions session ON session.product_session_id=am.product_session_id
+			WHERE am.message_id=? AND ((am.role='agent' AND sender.project_id=?) OR
+			 (am.role='human' AND (receiver.project_id=? OR session.project_id=?)))`,
+			in.ReplyTo, in.ProjectID, in.ProjectID, in.ProjectID).Scan(&pid, &parentHop, &parentThread); err != nil {
 			return nil, coded("agent_message_reply_unknown", "reply_to message not found in project")
 		}
 		parentID, hop = &pid, parentHop+1
@@ -175,7 +181,13 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		// A caller cannot reset the hop budget merely by omitting reply_to.
 		// An existing thread always advances from its last durable row.
 		var lastHop int
-		err := tx.QueryRowContext(ctx, `SELECT am.hop_count FROM agent_messages am JOIN project_agents pa ON pa.id=am.from_agent_id WHERE pa.project_id=? AND am.thread_id=? ORDER BY am.id DESC LIMIT 1`, in.ProjectID, threadID).Scan(&lastHop)
+		err := tx.QueryRowContext(ctx, `SELECT am.hop_count FROM agent_messages am
+			LEFT JOIN project_agents sender ON sender.id=am.from_agent_id
+			LEFT JOIN project_agents receiver ON receiver.id=am.to_agent_id
+			LEFT JOIN product_sessions session ON session.product_session_id=am.product_session_id
+			WHERE ((am.role='agent' AND sender.project_id=?) OR
+			 (am.role='human' AND (receiver.project_id=? OR session.project_id=?))) AND am.thread_id=?
+			ORDER BY am.id DESC LIMIT 1`, in.ProjectID, in.ProjectID, in.ProjectID, threadID).Scan(&lastHop)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -319,7 +331,10 @@ func nullableString(value string) any {
 }
 
 func (s *Service) GetEnvelope(ctx context.Context, projectID int64, messageID string) (*Envelope, error) {
-	return scanEnvelope(s.db.QueryRowContext(ctx, envelopeSelect+` WHERE pa.project_id=? AND am.message_id=?`, projectID, messageID))
+	return scanEnvelope(s.db.QueryRowContext(ctx, envelopeSelect+`
+		WHERE ((am.role='agent' AND sender.project_id=?) OR
+		 (am.role='human' AND (receiver.project_id=? OR session.project_id=?))) AND am.message_id=?`,
+		projectID, projectID, projectID, messageID))
 }
 
 func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, error) {
@@ -329,8 +344,9 @@ func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, 
 	if f.To != "" && f.Limit > MaxDeliveredPerTurn {
 		f.Limit = MaxDeliveredPerTurn
 	}
-	q := envelopeSelect + ` WHERE pa.project_id=? AND am.id>?`
-	args := []any{f.ProjectID, f.AfterID}
+	q := envelopeSelect + ` WHERE ((am.role='agent' AND sender.project_id=?) OR
+		(am.role='human' AND (receiver.project_id=? OR session.project_id=?))) AND am.id>?`
+	args := []any{f.ProjectID, f.ProjectID, f.ProjectID, f.AfterID}
 	if f.To != "" {
 		q += ` AND am.to_address=?`
 		args = append(args, f.To)
@@ -535,7 +551,10 @@ const envelopeSelect = `SELECT am.id,am.message_id,am.context_id,am.task_id,am.r
 	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_primary_target_id),''),
 	COALESCE(am.delivery_fallback_target_id,''),
 	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_fallback_target_id),'')
-	FROM agent_messages am JOIN project_agents pa ON pa.id=am.from_agent_id`
+	FROM agent_messages am
+	LEFT JOIN project_agents sender ON sender.id=am.from_agent_id
+	LEFT JOIN project_agents receiver ON receiver.id=am.to_agent_id
+	LEFT JOIN product_sessions session ON session.product_session_id=am.product_session_id`
 
 type scanner interface{ Scan(...any) error }
 

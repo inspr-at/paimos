@@ -30,6 +30,7 @@ function storage() {
 function row(id: string, title = id): Paimos6SessionViewModel {
   return {
     id,
+    revision: 1,
     title,
     summary: '',
     agent: 'codex:amy',

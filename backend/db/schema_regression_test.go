@@ -89,8 +89,8 @@ func TestSchemaMigrationsReachLatestVersion(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_versions WHERE version=164`).Scan(&reservedM164); err != nil {
 		t.Fatalf("query reserved M164: %v", err)
 	}
-	if reservedM164 != 0 {
-		t.Fatalf("reserved M164 application count=%d want 0", reservedM164)
+	if reservedM164 != 1 {
+		t.Fatalf("M164 application count=%d want 1", reservedM164)
 	}
 }
 

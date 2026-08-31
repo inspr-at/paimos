@@ -12061,6 +12061,197 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			  )
 			 ) BEGIN SELECT RAISE(ABORT,'invalid project parent edge'); END`,
 		}},
+		// M164 / PAI-862: human-origin Paimos 6 utterances share the canonical
+		// message ledger without impersonating a registered project agent. The
+		// rebuild is atomic on one pinned connection and carries every legacy
+		// message plus the M154/M159 delivery and idempotency children unchanged.
+		{164, []string{
+			`PRAGMA foreign_keys=OFF`,
+			`DROP INDEX idx_agent_message_deliveries_dispatch`,
+			`DROP INDEX idx_agent_message_deliveries_target`,
+			`DROP INDEX idx_agent_messages_to`,
+			`DROP INDEX idx_agent_messages_from`,
+			`DROP INDEX idx_agent_messages_issue`,
+			`DROP INDEX idx_agent_messages_parent`,
+			`DROP INDEX idx_agent_messages_message_id`,
+			`DROP INDEX idx_agent_messages_envelope_to`,
+			`DROP INDEX idx_agent_messages_thread`,
+			`ALTER TABLE agent_message_deliveries RENAME TO agent_message_deliveries_old164`,
+			`ALTER TABLE agent_message_idempotency RENAME TO agent_message_idempotency_old164`,
+			`ALTER TABLE agent_messages RENAME TO agent_messages_old164`,
+			`CREATE TABLE agent_messages (
+			 id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+			 from_agent_id               INTEGER REFERENCES project_agents(id) ON DELETE CASCADE,
+			 to_agent_id                 INTEGER REFERENCES project_agents(id) ON DELETE CASCADE,
+			 issue_id                    INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+			 parent_message_id           INTEGER REFERENCES agent_messages(id) ON DELETE SET NULL,
+			 hop_count                   INTEGER NOT NULL DEFAULT 1 CHECK(hop_count BETWEEN 1 AND 10),
+			 body                        TEXT NOT NULL CHECK(length(CAST(body AS BLOB)) <= 32768),
+			 is_action_request           INTEGER NOT NULL DEFAULT 0 CHECK(is_action_request IN (0,1)),
+			 delivered                   INTEGER NOT NULL DEFAULT 0 CHECK(delivered IN (0,1)),
+			 held_reason                 TEXT NOT NULL DEFAULT '',
+			 created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+			 delivered_at                TEXT,
+			 message_id                  TEXT NOT NULL DEFAULT '',
+			 context_id                  TEXT NOT NULL DEFAULT '',
+			 task_id                     TEXT NOT NULL DEFAULT '',
+			 role                        TEXT NOT NULL DEFAULT 'agent' CHECK(role IN ('agent','human')),
+			 parts_json                  TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(parts_json)),
+			 metadata_json               TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata_json)),
+			 from_address                TEXT NOT NULL DEFAULT '',
+			 to_address                  TEXT NOT NULL DEFAULT '',
+			 reply_to                    TEXT NOT NULL DEFAULT '',
+			 thread_id                   TEXT NOT NULL DEFAULT '',
+			 session_id                  TEXT NOT NULL DEFAULT '',
+			 read_at                     TEXT,
+			 delivery_level              TEXT NOT NULL DEFAULT 'simple' CHECK(delivery_level IN ('simple','steer')),
+			 delivery_fallback           TEXT NOT NULL DEFAULT 'simple' CHECK(delivery_fallback='simple'),
+			 delivery_primary_target_id  TEXT,
+			 delivery_fallback_target_id TEXT,
+			 from_user_id                INTEGER REFERENCES users(id) ON DELETE RESTRICT,
+			 product_session_id          TEXT REFERENCES product_sessions(product_session_id) ON DELETE RESTRICT,
+			 CHECK(delivered=0 OR delivered_at IS NOT NULL),
+			 CHECK(delivered=0 OR held_reason=''),
+			 CHECK(delivered=1 OR delivered_at IS NULL),
+			 CHECK(is_action_request=0 OR delivered=0),
+			 CHECK(NOT paimos_contains_secret_like(body)),
+			 CHECK((role='agent' AND from_agent_id IS NOT NULL AND from_user_id IS NULL) OR
+			       (role='human' AND from_agent_id IS NULL AND from_user_id IS NOT NULL AND product_session_id IS NOT NULL)),
+			 CHECK(role<>'human' OR
+			       (to_agent_id IS NOT NULL AND to_address<>'paimos' AND delivery_primary_target_id IS NOT NULL) OR
+			       (to_agent_id IS NULL AND to_address='paimos' AND delivery_primary_target_id IS NULL AND delivery_fallback_target_id IS NULL))
+			)`,
+			`INSERT INTO agent_messages(
+			 id,from_agent_id,to_agent_id,issue_id,parent_message_id,hop_count,body,is_action_request,delivered,
+			 held_reason,created_at,delivered_at,message_id,context_id,task_id,role,parts_json,metadata_json,
+			 from_address,to_address,reply_to,thread_id,session_id,read_at,delivery_level,delivery_fallback,
+			 delivery_primary_target_id,delivery_fallback_target_id,from_user_id,product_session_id)
+			 SELECT id,from_agent_id,to_agent_id,issue_id,parent_message_id,hop_count,body,is_action_request,delivered,
+			 held_reason,created_at,delivered_at,message_id,context_id,task_id,role,parts_json,metadata_json,
+			 from_address,to_address,reply_to,thread_id,session_id,read_at,delivery_level,delivery_fallback,
+			 delivery_primary_target_id,delivery_fallback_target_id,NULL,NULL FROM agent_messages_old164`,
+			`CREATE UNIQUE INDEX idx_agent_messages_message_id ON agent_messages(message_id)`,
+			`CREATE INDEX idx_agent_messages_to ON agent_messages(to_agent_id,delivered,created_at)`,
+			`CREATE INDEX idx_agent_messages_from ON agent_messages(from_agent_id,created_at)`,
+			`CREATE INDEX idx_agent_messages_user ON agent_messages(from_user_id,created_at) WHERE from_user_id IS NOT NULL`,
+			`CREATE INDEX idx_agent_messages_product_session ON agent_messages(product_session_id,id) WHERE product_session_id IS NOT NULL`,
+			`CREATE INDEX idx_agent_messages_issue ON agent_messages(issue_id) WHERE issue_id IS NOT NULL`,
+			`CREATE INDEX idx_agent_messages_parent ON agent_messages(parent_message_id) WHERE parent_message_id IS NOT NULL`,
+			`CREATE INDEX idx_agent_messages_envelope_to ON agent_messages(to_address,id)`,
+			`CREATE INDEX idx_agent_messages_thread ON agent_messages(thread_id,id)`,
+			`CREATE TABLE agent_message_deliveries (
+			 delivery_id        TEXT PRIMARY KEY CHECK(length(CAST(delivery_id AS BLOB)) BETWEEN 1 AND 64),
+			 message_row_id     INTEGER NOT NULL UNIQUE REFERENCES agent_messages(id) ON DELETE CASCADE,
+			 instance           TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+			 primary_target_id  TEXT REFERENCES agent_message_targets(id),
+			 fallback_target_id TEXT REFERENCES agent_message_targets(id),
+			 requested_level    TEXT NOT NULL CHECK(requested_level IN ('simple','steer')),
+			 effective_level    TEXT CHECK(effective_level IS NULL OR effective_level IN ('simple','steer')),
+			 state              TEXT NOT NULL CHECK(state IN ('pending','leased','retry','blocked','handed_off','dead')),
+			 fallback_reason    TEXT NOT NULL DEFAULT '' CHECK(fallback_reason IN ('','idle','unsupported','policy_capped','target_missing','not_steerable','transport_error')),
+			 attempt_count      INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count>=0),
+			 next_attempt_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 lease_until        TEXT,
+			 last_error_code    TEXT NOT NULL DEFAULT '' CHECK(length(CAST(last_error_code AS BLOB))<=64),
+			 handed_off_at      TEXT,
+			 created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 CHECK((state='handed_off' AND handed_off_at IS NOT NULL AND effective_level IS NOT NULL) OR
+			       (state<>'handed_off' AND handed_off_at IS NULL))
+			)`,
+			`INSERT INTO agent_message_deliveries SELECT * FROM agent_message_deliveries_old164`,
+			`CREATE INDEX idx_agent_message_deliveries_dispatch ON agent_message_deliveries(instance,state,next_attempt_at,message_row_id)`,
+			`CREATE INDEX idx_agent_message_deliveries_target ON agent_message_deliveries(primary_target_id,state,message_row_id)`,
+			`CREATE TABLE agent_message_idempotency (
+			 instance        TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+			 project_id      INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 sender_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 key_digest      BLOB NOT NULL CHECK(typeof(key_digest)='blob' AND length(key_digest)=32),
+			 request_digest  BLOB NOT NULL CHECK(typeof(request_digest)='blob' AND length(request_digest)=32),
+			 message_row_id  INTEGER NOT NULL UNIQUE REFERENCES agent_messages(id) ON DELETE CASCADE,
+			 created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			 PRIMARY KEY(instance,project_id,sender_agent_id,key_digest)
+			)`,
+			`INSERT INTO agent_message_idempotency SELECT * FROM agent_message_idempotency_old164`,
+			`DROP TABLE agent_message_deliveries_old164`,
+			`DROP TABLE agent_message_idempotency_old164`,
+			`DROP TABLE agent_messages_old164`,
+			`CREATE TRIGGER trg_agent_messages_human_shape_insert BEFORE INSERT ON agent_messages
+			 WHEN NEW.role='human' AND NOT EXISTS(
+			  SELECT 1 FROM product_sessions ps
+			  LEFT JOIN project_agents receiver ON receiver.id=NEW.to_agent_id
+			  WHERE ps.product_session_id=NEW.product_session_id AND (
+			   (NEW.to_agent_id IS NULL AND ps.target_kind='paimos' AND NEW.to_address='paimos') OR
+			   (NEW.to_agent_id IS NOT NULL AND ps.target_kind='project_agent' AND
+			    ps.target_project_agent_id=NEW.to_agent_id AND receiver.project_id=ps.project_id AND
+			    EXISTS(SELECT 1 FROM agent_message_targets target
+			     WHERE target.id=NEW.delivery_primary_target_id AND target.project_id=ps.project_id AND
+			      target.enabled=1 AND target.address=NEW.to_address AND
+			      target.address LIKE '%:'||receiver.name))))
+			 BEGIN SELECT RAISE(ABORT,'human message session destination mismatch'); END`,
+			`CREATE TRIGGER trg_agent_messages_human_shape_update BEFORE UPDATE OF
+			 role,from_agent_id,from_user_id,to_agent_id,to_address,product_session_id,
+			 delivery_primary_target_id,delivery_fallback_target_id ON agent_messages
+			 WHEN NEW.role='human' AND NOT EXISTS(
+			  SELECT 1 FROM product_sessions ps
+			  LEFT JOIN project_agents receiver ON receiver.id=NEW.to_agent_id
+			  WHERE ps.product_session_id=NEW.product_session_id AND (
+			   (NEW.to_agent_id IS NULL AND ps.target_kind='paimos' AND NEW.to_address='paimos') OR
+			   (NEW.to_agent_id IS NOT NULL AND ps.target_kind='project_agent' AND
+			    ps.target_project_agent_id=NEW.to_agent_id AND receiver.project_id=ps.project_id AND
+			    EXISTS(SELECT 1 FROM agent_message_targets target
+			     WHERE target.id=NEW.delivery_primary_target_id AND target.project_id=ps.project_id AND
+			      target.enabled=1 AND target.address=NEW.to_address AND
+			      target.address LIKE '%:'||receiver.name))))
+			 BEGIN SELECT RAISE(ABORT,'human message session destination mismatch'); END`,
+			`CREATE TABLE paimos_conversation_bindings (
+			 project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			 product_session_id TEXT NOT NULL UNIQUE REFERENCES product_sessions(product_session_id) ON DELETE RESTRICT,
+			 created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 PRIMARY KEY(project_id,user_id)
+			)`,
+			`CREATE TRIGGER trg_paimos_conversation_binding_insert BEFORE INSERT ON paimos_conversation_bindings
+			 WHEN NOT EXISTS(SELECT 1 FROM product_sessions ps WHERE ps.product_session_id=NEW.product_session_id
+			  AND ps.project_id=NEW.project_id AND ps.target_kind='paimos')
+			 BEGIN SELECT RAISE(ABORT,'Paimos conversation binding mismatch'); END`,
+			`CREATE TRIGGER trg_paimos_conversation_binding_immutable BEFORE UPDATE ON paimos_conversation_bindings
+			 BEGIN SELECT RAISE(ABORT,'Paimos conversation binding is immutable'); END`,
+			`CREATE TABLE session_utterance_receipts (
+			 instance                 TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+			 project_id               INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 user_id                  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			 utterance_id             TEXT NOT NULL CHECK(length(CAST(utterance_id AS BLOB))=36 AND
+			  substr(utterance_id,1,4)='utt_' AND substr(utterance_id,5) NOT GLOB '*[^0-9a-f]*'),
+			 request_digest           BLOB NOT NULL CHECK(typeof(request_digest)='blob' AND length(request_digest)=32),
+			 message_row_id           INTEGER NOT NULL UNIQUE REFERENCES agent_messages(id) ON DELETE CASCADE,
+			 product_session_id       TEXT NOT NULL REFERENCES product_sessions(product_session_id) ON DELETE RESTRICT,
+			 product_session_revision INTEGER NOT NULL CHECK(product_session_revision>0),
+			 delivery_id              TEXT,
+			 created_at               TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 PRIMARY KEY(instance,project_id,user_id,utterance_id)
+			)`,
+			`CREATE TRIGGER trg_session_utterance_receipts_shape BEFORE INSERT ON session_utterance_receipts
+			 WHEN NOT EXISTS(
+			  SELECT 1 FROM agent_messages message
+			  JOIN product_sessions session ON session.product_session_id=NEW.product_session_id
+			  WHERE message.id=NEW.message_row_id AND message.role='human' AND
+			   message.from_user_id=NEW.user_id AND message.product_session_id=NEW.product_session_id AND
+			   session.project_id=NEW.project_id AND session.revision=NEW.product_session_revision AND (
+			    (message.to_agent_id IS NULL AND message.to_address='paimos' AND NEW.delivery_id IS NULL) OR
+			    (message.to_agent_id IS NOT NULL AND NEW.delivery_id IS NOT NULL AND
+			     EXISTS(SELECT 1 FROM agent_message_deliveries delivery
+			      JOIN agent_message_targets target ON target.id=delivery.primary_target_id
+			      WHERE delivery.delivery_id=NEW.delivery_id AND delivery.message_row_id=message.id AND
+			       delivery.instance=NEW.instance AND target.instance=NEW.instance AND
+			       delivery.primary_target_id=message.delivery_primary_target_id))))
+			 BEGIN SELECT RAISE(ABORT,'session utterance receipt mismatch'); END`,
+			`CREATE TRIGGER trg_session_utterance_receipts_no_update BEFORE UPDATE ON session_utterance_receipts
+			 BEGIN SELECT RAISE(ABORT,'session utterance receipts are immutable'); END`,
+			`CREATE TRIGGER trg_session_utterance_receipts_no_delete BEFORE DELETE ON session_utterance_receipts
+			 BEGIN SELECT RAISE(ABORT,'session utterance receipts are immutable'); END`,
+			`PRAGMA foreign_keys=ON`,
+		}},
 		// M165 / PAI-865: one explicit, nullable instance orchestrator pin.
 		// M164 remains reserved for PAI-862. The singleton starts unset and this
 		// migration deliberately performs no inference from existing projects or
@@ -12320,6 +12511,7 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	},
 	162: checkKnowledgeScopeIdentities,
 	163: checkProductSessionNodeFoundation,
+	164: checkSessionUtteranceFoundation,
 	165: func(ctx context.Context, conn *sql.Conn) error {
 		return checkSchemaObjectsAbsent(ctx, conn, 165, []string{
 			"instance_orchestrator", "instance_orchestrator_events", "idx_instance_orchestrator_events_created",
@@ -12337,6 +12529,51 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 		}
 		return nil
 	},
+}
+
+func checkSessionUtteranceFoundation(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `
+		SELECT 'column:agent_messages.'||name FROM pragma_table_info('agent_messages')
+		WHERE name IN ('from_user_id','product_session_id')
+		UNION ALL
+		SELECT type||':'||name FROM sqlite_master WHERE name IN (
+		 'idx_agent_messages_user','idx_agent_messages_product_session',
+		 'trg_agent_messages_human_shape_insert','trg_agent_messages_human_shape_update',
+		 'paimos_conversation_bindings','trg_paimos_conversation_binding_insert',
+		 'trg_paimos_conversation_binding_immutable','session_utterance_receipts',
+		 'trg_session_utterance_receipts_shape',
+		 'trg_session_utterance_receipts_no_update','trg_session_utterance_receipts_no_delete')
+		ORDER BY 1`)
+	if err != nil {
+		return fmt.Errorf("inspect M164 schema ownership: %w", err)
+	}
+	defer rows.Close()
+	var collisions []string
+	for rows.Next() {
+		var collision string
+		if err := rows.Scan(&collision); err != nil {
+			return fmt.Errorf("scan M164 schema ownership: %w", err)
+		}
+		collisions = append(collisions, collision)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate M164 schema ownership: %w", err)
+	}
+	if len(collisions) > 0 {
+		return fmt.Errorf("M164 schema is partially present or locally incompatible: %s", strings.Join(collisions, ", "))
+	}
+	var invalid int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_messages am
+		LEFT JOIN project_agents sender ON sender.id=am.from_agent_id
+		LEFT JOIN project_agents receiver ON receiver.id=am.to_agent_id
+		WHERE am.role<>'agent' OR am.from_agent_id IS NULL OR am.to_agent_id IS NULL OR
+		 sender.id IS NULL OR receiver.id IS NULL OR sender.project_id<>receiver.project_id`).Scan(&invalid); err != nil {
+		return fmt.Errorf("inspect M164 legacy message shape: %w", err)
+	}
+	if invalid != 0 {
+		return fmt.Errorf("invalid legacy agent message rows block M164: count=%d", invalid)
+	}
+	return nil
 }
 
 func checkProductSessionNodeFoundation(ctx context.Context, conn *sql.Conn) error {

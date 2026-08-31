@@ -47,8 +47,8 @@ func TestMigration166AddsOnlyNullableUserCommandPaletteOverride(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_versions WHERE version=164`).Scan(&reservedM164); err != nil {
 		t.Fatal(err)
 	}
-	if reservedM164 != 0 {
-		t.Fatalf("reserved M164 application count=%d, want zero", reservedM164)
+	if reservedM164 != 1 {
+		t.Fatalf("M164 application count=%d, want one", reservedM164)
 	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
