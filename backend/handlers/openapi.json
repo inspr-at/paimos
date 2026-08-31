@@ -5314,7 +5314,7 @@
           "403": {"description": "CSRF, password, or internal-role gate failed."},
           "404": {"description": "Project, authority, or selected destination is concealed."},
           "409": {"description": "Stale selection, unavailable target, or conflicting replay."},
-          "413": {"description": "The bounded JSON body exceeded 16 KiB."},
+          "413": {"description": "The bounded JSON envelope exceeded 52 KiB; decoded transcript text remains capped at 8,192 UTF-8 bytes."},
           "500": {"description": "Atomic transcript delivery could not commit."}
         }
       }
