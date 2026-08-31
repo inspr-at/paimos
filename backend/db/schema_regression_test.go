@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 163
+const latestSchemaVersion = 165
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -84,6 +84,13 @@ func TestSchemaMigrationsReachLatestVersion(t *testing.T) {
 	}
 	if maxVersion != latestSchemaVersion {
 		t.Fatalf("max schema version=%d want %d", maxVersion, latestSchemaVersion)
+	}
+	var reservedM164 int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_versions WHERE version=164`).Scan(&reservedM164); err != nil {
+		t.Fatalf("query reserved M164: %v", err)
+	}
+	if reservedM164 != 0 {
+		t.Fatalf("reserved M164 application count=%d want 0", reservedM164)
 	}
 }
 

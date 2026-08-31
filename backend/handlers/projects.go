@@ -556,6 +556,10 @@ func UpdateProject(w http.ResponseWriter, r *http.Request) {
 		body.AIDefaults != nil, aiDefaultsJSON,
 		body.AIPolicy != nil, aiPolicyJSON,
 		now, id)
+	if isOrchestratorProjectConflict(err) {
+		writeOrchestratorError(w, http.StatusConflict, "orchestrator_assigned")
+		return
+	}
 	if handleDBError(w, err, "project key") {
 		return
 	}
@@ -641,6 +645,10 @@ func DeleteProject(w http.ResponseWriter, r *http.Request) {
 		"UPDATE projects SET status='deleted', updated_at=datetime('now') WHERE id=? AND status != 'deleted'", id,
 	)
 	if err != nil {
+		if isOrchestratorProjectConflict(err) {
+			writeOrchestratorError(w, http.StatusConflict, "orchestrator_assigned")
+			return
+		}
 		jsonError(w, "delete failed", http.StatusInternalServerError)
 		return
 	}

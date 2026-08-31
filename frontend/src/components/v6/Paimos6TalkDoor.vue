@@ -5,6 +5,8 @@ import { Mic, MicOff, Plus, Sparkles, X } from 'lucide-vue-next'
 const props = defineProps<{
   open: boolean
   targetAgent: string | null
+  orchestratorLabel: string
+  orchestratorStatus: string
 }>()
 
 const emit = defineEmits<{
@@ -25,7 +27,7 @@ let suppressClick = false
 const routeCopy = computed(() =>
   props.targetAgent
     ? `Preview target · ${props.targetAgent} (selected session)`
-    : 'Preview target · Paimos (no session selected)',
+    : `Preview target · ${props.orchestratorLabel} (no session selected)`,
 )
 
 watch(
@@ -155,19 +157,20 @@ onBeforeUnmount(() => {
     <header class="p6-talk-head">
       <div>
         <span class="p6-eyebrow">Talk-first door</span>
-        <h2 id="p6-talk-title">What should Amy do?</h2>
+        <h2 id="p6-talk-title">What should {{ orchestratorLabel }} do?</h2>
       </div>
       <button type="button" class="p6-close" aria-label="Close the talk-first door" @click="closeDoor">
         <X :size="18" aria-hidden="true" />
       </button>
     </header>
 
-    <section class="p6-amy" aria-labelledby="p6-amy-title">
-      <div class="p6-amy-identity">
-        <span class="p6-amy-orb" aria-hidden="true"><Sparkles :size="17" /></span>
+    <section class="p6-orchestrator" aria-labelledby="p6-orchestrator-title">
+      <div class="p6-orchestrator-identity">
+        <span class="p6-orchestrator-orb" aria-hidden="true"><Sparkles :size="17" /></span>
         <div>
-          <h3 id="p6-amy-title">Amy</h3>
+          <h3 id="p6-orchestrator-title">{{ orchestratorLabel }}</h3>
           <p>{{ routeCopy }}</p>
+          <p class="p6-orchestrator-status">{{ orchestratorStatus }}</p>
         </div>
       </div>
 
@@ -186,7 +189,7 @@ onBeforeUnmount(() => {
       >
         <MicOff v-if="micMode === 'idle'" :size="25" aria-hidden="true" />
         <Mic v-else :size="25" aria-hidden="true" />
-        <span>{{ micMode === 'hold' ? 'Holding · preview' : micMode === 'tap' ? 'Tap mode · preview' : 'Talk to Amy' }}</span>
+        <span>{{ micMode === 'hold' ? 'Holding · preview' : micMode === 'tap' ? 'Tap mode · preview' : `Talk to ${orchestratorLabel}` }}</span>
       </button>
       <p id="p6-mic-help" class="p6-mic-help"><strong>Tap</strong> to toggle · <strong>hold</strong> to talk, release to stop</p>
       <p id="p6-mic-truth" class="p6-mic-truth">
@@ -273,11 +276,12 @@ onBeforeUnmount(() => {
 .p6-eyebrow { color: #59655e; font-size: 9px; font-weight: 750; letter-spacing: 0.11em; text-transform: uppercase; }
 .p6-talk-head h2 { margin-top: 4px; font-family: "Bricolage Grotesque", "DM Sans", sans-serif; font-size: 23px; font-weight: 600; letter-spacing: -0.035em; }
 .p6-close { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid #dce4df; border-radius: 10px; color: #637068; background: #fff; }
-.p6-amy { margin-top: 24px; padding: 18px; border: 1px solid #d8e3dc; border-radius: 17px; background: linear-gradient(145deg, #f0f7f2, #fbfcfa 72%); }
-.p6-amy-identity { display: flex; align-items: center; gap: 11px; }
-.p6-amy-orb { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 50%; color: #eff8f2; background: #315e49; box-shadow: inset 0 0 0 5px rgba(255, 255, 255, 0.12); }
-.p6-amy h3 { font: 600 16px/1.1 "Bricolage Grotesque", "DM Sans", sans-serif; }
-.p6-amy-identity p { margin-top: 3px; color: #59655e; font: 500 10px/1.35 "JetBrains Mono", monospace; }
+.p6-orchestrator { margin-top: 24px; padding: 18px; border: 1px solid #d8e3dc; border-radius: 17px; background: linear-gradient(145deg, #f0f7f2, #fbfcfa 72%); }
+.p6-orchestrator-identity { display: flex; align-items: center; gap: 11px; }
+.p6-orchestrator-orb { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 50%; color: #eff8f2; background: #315e49; box-shadow: inset 0 0 0 5px rgba(255, 255, 255, 0.12); }
+.p6-orchestrator h3 { font: 600 16px/1.1 "Bricolage Grotesque", "DM Sans", sans-serif; }
+.p6-orchestrator-identity p { margin-top: 3px; color: #59655e; font: 500 10px/1.35 "JetBrains Mono", monospace; }
+.p6-orchestrator-identity .p6-orchestrator-status { color: #42584c; font-family: "DM Sans", sans-serif; }
 .p6-mic { display: flex; width: 100%; min-height: 76px; align-items: center; justify-content: center; gap: 10px; margin-top: 20px; border: 1px solid #aac2b3; border-radius: 15px; color: #284f3d; background: rgba(255, 255, 255, 0.83); font: 650 13px/1 "DM Sans", sans-serif; }
 .p6-mic:hover { border-color: #6e9680; background: #fff; }
 .p6-mic.is-active { color: #f4faf6; background: #315e49; box-shadow: 0 0 0 5px rgba(49, 94, 73, 0.1); }

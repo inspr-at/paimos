@@ -30,6 +30,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -37,6 +38,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
 )
@@ -57,14 +59,15 @@ var reservedAgentNames = map[string]bool{
 }
 
 type projectAgentPayload struct {
-	Name               string                      `json:"name"`
-	Description        string                      `json:"description"`
-	SlashCommandName   string                      `json:"slash_command_name"`
-	LaneTags           []string                    `json:"lane_tags"`
-	Metadata           map[string]any              `json:"metadata"`
-	Body               string                      `json:"body"`
-	BootstrapSteps     []models.AgentBootstrapStep `json:"bootstrap_steps"`
-	NonNegotiableRules []models.AgentRule          `json:"non_negotiable_rules"`
+	Name                         string                      `json:"name"`
+	Description                  string                      `json:"description"`
+	SlashCommandName             string                      `json:"slash_command_name"`
+	LaneTags                     []string                    `json:"lane_tags"`
+	Metadata                     map[string]any              `json:"metadata"`
+	Body                         string                      `json:"body"`
+	BootstrapSteps               []models.AgentBootstrapStep `json:"bootstrap_steps"`
+	NonNegotiableRules           []models.AgentRule          `json:"non_negotiable_rules"`
+	ExpectedOrchestratorRevision *int64                      `json:"expected_orchestrator_revision,omitempty"`
 }
 
 // ListProjectAgents returns the array of agents declared on the given
@@ -105,7 +108,6 @@ func CreateProjectAgent(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, msg, http.StatusBadRequest)
 		return
 	}
-
 	encoded, err := encodeAgentJSONFields(body)
 	if err != nil {
 		jsonError(w, "invalid lane_tags / metadata / bootstrap_steps / non_negotiable_rules", http.StatusBadRequest)
@@ -171,14 +173,80 @@ func UpdateProjectAgent(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, msg, http.StatusBadRequest)
 		return
 	}
+	if body.ExpectedOrchestratorRevision != nil && *body.ExpectedOrchestratorRevision < 0 {
+		writeOrchestratorError(w, http.StatusBadRequest, "invalid_revision")
+		return
+	}
 	encoded, err := encodeAgentJSONFields(body)
 	if err != nil {
 		jsonError(w, "invalid lane_tags / metadata / bootstrap_steps / non_negotiable_rules", http.StatusBadRequest)
 		return
 	}
 
-	now := time.Now().UTC().Format("2006-01-02 15:04:05")
-	res, err := db.DB.Exec(`
+	tx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		jsonError(w, "update failed", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	var agentID int64
+	if err := tx.QueryRowContext(r.Context(), `SELECT id FROM project_agents WHERE project_id=? AND name=?`, projectID, currentName).Scan(&agentID); errors.Is(err, sql.ErrNoRows) {
+		jsonError(w, "agent not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		jsonError(w, "update failed", http.StatusInternalServerError)
+		return
+	}
+	renaming := currentName != body.Name
+	assigned := false
+	var orchestratorRevision int64
+	var displayLabel string
+	if renaming {
+		err = tx.QueryRowContext(r.Context(), `SELECT revision,display_label FROM instance_orchestrator
+			WHERE singleton_id=1 AND project_agent_id=?`, agentID).Scan(&orchestratorRevision, &displayLabel)
+		switch {
+		case err == nil:
+			assigned = true
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			jsonError(w, "update failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	var actorID int64
+	if assigned {
+		if body.ExpectedOrchestratorRevision == nil {
+			writeOrchestratorError(w, http.StatusConflict, "orchestrator_revision_required")
+			return
+		}
+		user, _, authErr := auth.ReauthorizeRequestPrincipalTx(r.Context(), tx, r, time.Now().UTC())
+		if authErr != nil || user == nil {
+			writeOrchestratorError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if !auth.IsSuperAdmin(user) {
+			writeOrchestratorError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		if *body.ExpectedOrchestratorRevision != orchestratorRevision {
+			writeOrchestratorError(w, http.StatusConflict, "revision_conflict")
+			return
+		}
+		var liveHarness int
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_agent_id=? AND phase<>'stopped')`, agentID).Scan(&liveHarness); err != nil {
+			orchestratorInternalError(w, err)
+			return
+		}
+		if liveHarness != 0 {
+			writeOrchestratorError(w, http.StatusConflict, "active_harness_rename_conflict")
+			return
+		}
+		actorID = user.ID
+	}
+
+	legacyNow := time.Now().UTC()
+	now := legacyNow.Format("2006-01-02 15:04:05")
+	res, err := tx.ExecContext(r.Context(), `
 		UPDATE project_agents
 		SET name=?, description=?, slash_command_name=?,
 		    lane_tags=?, metadata=?,
@@ -194,12 +262,50 @@ func UpdateProjectAgent(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "agent name already exists for this project", http.StatusConflict)
 			return
 		}
+		if isOrchestratorHarnessConflict(err) {
+			writeOrchestratorError(w, http.StatusConflict, "active_harness_rename_conflict")
+			return
+		}
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		jsonError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	if assigned {
+		updatedAt := canonicalOrchestratorTimestamp(legacyNow)
+		result, err := tx.ExecContext(r.Context(), `UPDATE instance_orchestrator
+			SET revision=?,updated_by_user_id=?,updated_at=? WHERE singleton_id=1 AND project_agent_id=? AND revision=?`,
+			orchestratorRevision+1, actorID, updatedAt, agentID, orchestratorRevision)
+		if err != nil {
+			orchestratorInternalError(w, err)
+			return
+		}
+		rows, err := result.RowsAffected()
+		if err != nil || rows != 1 {
+			if err != nil {
+				orchestratorInternalError(w, err)
+			} else {
+				writeOrchestratorError(w, http.StatusConflict, "revision_conflict")
+			}
+			return
+		}
+		before := &models.OrchestratorTarget{ProjectID: projectID, ProjectAgentID: agentID, Key: currentName, DisplayLabel: displayLabel}
+		after := &models.OrchestratorTarget{ProjectID: projectID, ProjectAgentID: agentID, Key: body.Name, DisplayLabel: displayLabel}
+		if err := insertOrchestratorEvent(r.Context(), tx, "target_rename", actorID, orchestratorRequestID(r),
+			orchestratorRevision, orchestratorRevision+1, before, after, updatedAt); err != nil {
+			orchestratorInternalError(w, err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		if assigned {
+			orchestratorInternalError(w, err)
+		} else {
+			jsonError(w, "update failed", http.StatusInternalServerError)
+		}
 		return
 	}
 	agent := getProjectAgentByProjectAndName(projectID, body.Name)
@@ -231,7 +337,30 @@ func DeleteProjectAgent(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "agent name required", http.StatusBadRequest)
 		return
 	}
-	res, err := db.DB.Exec(`DELETE FROM project_agents WHERE project_id=? AND name=?`, projectID, name)
+	tx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		jsonError(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	var agentID int64
+	var assigned int
+	err = tx.QueryRowContext(r.Context(), `SELECT pa.id,EXISTS(
+		SELECT 1 FROM instance_orchestrator io WHERE io.singleton_id=1 AND io.project_agent_id=pa.id)
+		FROM project_agents pa WHERE pa.project_id=? AND pa.name=?`, projectID, name).Scan(&agentID, &assigned)
+	if errors.Is(err, sql.ErrNoRows) {
+		jsonError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		jsonError(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	if assigned != 0 {
+		writeOrchestratorError(w, http.StatusConflict, "orchestrator_assigned")
+		return
+	}
+	res, err := tx.ExecContext(r.Context(), `DELETE FROM project_agents WHERE id=?`, agentID)
 	if err != nil {
 		jsonError(w, "delete failed", http.StatusInternalServerError)
 		return
@@ -239,6 +368,10 @@ func DeleteProjectAgent(w http.ResponseWriter, r *http.Request) {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		jsonError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		jsonError(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
 	// PAI-331: notify any active sync watchers.

@@ -550,6 +550,8 @@ func mountAPI(r chi.Router) {
 	// middleware outside every early authentication/role gate so 401, 403,
 	// concealed 404, and handler responses all carry the same cache policy.
 	// The remaining gates intentionally match the ordinary internal group.
+	// PAI-865: instance orchestrator identity is private on every outcome.
+	// Keep no-store outside authentication and every later refusal gate.
 	r.Group(func(r chi.Router) {
 		r.Use(auth.AgentModePrivateNoStore)
 		r.Use(auth.Middleware)
@@ -557,6 +559,7 @@ func mountAPI(r chi.Router) {
 		r.Use(auth.MustChangePasswordGate)
 		r.Use(auth.BlockExternal)
 		handlers.RegisterSessionHomeRoutes(r)
+		handlers.RegisterOrchestratorRoutes(r)
 	})
 
 	// Portal (external + admin)

@@ -32,6 +32,22 @@ function projectCatalog() {
   return [{ id: PROJECT_ID, key: 'PAI', name: 'Paimos' }]
 }
 
+const unsetOrchestrator = {
+  schema_version: 1,
+  revision: 0,
+  orchestrator: null,
+  updated_at: null,
+}
+
+function configuredOrchestrator(displayLabel = 'aMY / Primary') {
+  return {
+    schema_version: 1,
+    revision: 3,
+    orchestrator: { display_label: displayLabel },
+    updated_at: '2026-08-31T12:00:00.000Z',
+  }
+}
+
 function transitionProjectCatalog() {
   return [
     { id: PROJECT_ID, key: 'PAI-A', name: 'Project A' },
@@ -198,10 +214,11 @@ function authorizePrincipal(projectIds = [PROJECT_ID], userId = 7) {
   return auth
 }
 
-async function mountWithHome(home: unknown | Promise<unknown>) {
+async function mountWithHome(home: unknown | Promise<unknown>, orchestrator: unknown = unsetOrchestrator) {
   authorizePrincipal()
   vi.spyOn(api, 'get').mockImplementation((path: string) => {
     if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
+    if (path === '/orchestrator/v1') return Promise.resolve(orchestrator) as never
     if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`)) return projectionForPath(home, path) as never
     return Promise.reject(new Error(`unexpected GET ${path}`))
   })
@@ -215,6 +232,7 @@ async function mountTransitionHome(projectBHome: unknown | Promise<unknown>) {
       const authorized = transitionProjectCatalog().filter((project) => auth.accessibleProjects.has(project.id))
       return Promise.resolve(authorized) as never
     }
+    if (path === '/orchestrator/v1') return Promise.resolve(unsetOrchestrator) as never
     if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`)) {
       return projectionForPath(liveProjection([managedRow()]), path) as never
     }
@@ -472,14 +490,16 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     await flush()
     expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain('has no mutation endpoint yet')
     expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain('No request was sent')
-    expect(api.get).toHaveBeenCalledTimes(2)
+    // Projects and session home load once; the instance orchestrator reloads
+    // when the selected project's authority boundary becomes concrete.
+    expect(api.get).toHaveBeenCalledTimes(4)
     await mounted.unmount()
   })
 
   it('keeps the talk-first door local-only while live rows come from the strict endpoint', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
-    const mounted = await mountWithHome(liveProjection())
+    const mounted = await mountWithHome(liveProjection(), configuredOrchestrator())
     await flush()
 
     mounted.el.querySelector<HTMLButtonElement>('[aria-label="Open the talk-first door"]')!.click()
@@ -489,10 +509,12 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(mounted.el.querySelector('main')?.hasAttribute('inert')).toBe(true)
     const mic = door.querySelector<HTMLButtonElement>('.p6-mic')!
     await vi.waitFor(() => expect(document.activeElement).toBe(mic))
-    expect(door.textContent!.indexOf('Amy')).toBeLessThan(door.textContent!.indexOf('Human node form'))
+    expect(door.textContent!.indexOf('aMY / Primary')).toBeLessThan(door.textContent!.indexOf('Human node form'))
+    expect(door.textContent).toContain('What should aMY / Primary do?')
+    expect(door.textContent).toContain('orchestrator configured')
     expect(door.textContent).toContain('Tap to toggle · hold to talk, release to stop')
     expect(door.textContent).toContain('does not request microphone access')
-    expect(door.textContent).toContain('Preview target · Paimos (no session selected)')
+    expect(door.textContent).toContain('Preview target · aMY / Primary (no session selected)')
 
     mic.click()
     await nextTick()
@@ -540,6 +562,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     authorizePrincipal()
     vi.spyOn(api, 'get').mockImplementation((path: string) => {
       if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
+      if (path === '/orchestrator/v1') return Promise.resolve(unsetOrchestrator) as never
       if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`)) return Promise.reject(new Error('offline'))
       return Promise.reject(new Error(`unexpected GET ${path}`))
     })
