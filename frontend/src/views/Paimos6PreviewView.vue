@@ -9,6 +9,7 @@ import Paimos6SourceRail from '@/components/v6/Paimos6SourceRail.vue'
 import Paimos6TalkDoor from '@/components/v6/Paimos6TalkDoor.vue'
 import Paimos6ZoomControl from '@/components/v6/Paimos6ZoomControl.vue'
 import Paimos6ZoomOverview from '@/components/v6/Paimos6ZoomOverview.vue'
+import { usePaimos6Orchestrator } from '@/composables/v6/usePaimos6Orchestrator'
 import { usePaimos6SessionZoom } from '@/composables/v6/usePaimos6SessionZoom'
 import { useAuthStore } from '@/stores/auth'
 import type { Project } from '@/types'
@@ -74,6 +75,12 @@ const selectedOutsideSample = computed(() => (
   && !home.sessions.value.some((session) => session.id === selectedSession.value?.id)
 ))
 const selectedProject = computed(() => projects.value.find((project) => project.id === selectedProjectId.value) ?? null)
+const orchestratorProjectKey = computed(() => selectedProject.value?.key ?? null)
+const orchestrator = usePaimos6Orchestrator({
+  principalId,
+  authorityKey,
+  projectKey: orchestratorProjectKey,
+})
 
 function resetAuxiliaryStatus() {
   // The status channel and talk door can both contain copies of session
@@ -188,7 +195,7 @@ function selectSession(id: string) {
 
 function clearSelection() {
   home.clearSelection()
-  statusMessage.value = 'Selection cleared. Preview utterances would target Paimos; nothing was sent.'
+  statusMessage.value = `Selection cleared. Preview target is ${orchestrator.identityLabel.value}; ${orchestrator.statusText.value}. Nothing was sent.`
 }
 
 function previewAction(label: string, id: string) {
@@ -243,7 +250,8 @@ onScopeDispose(() => {
             <span>Selected agent target · <strong>{{ selectedSession.agent }}</strong></span>
             <button type="button" @click="clearSelection">Clear selection <kbd>Esc on card</kbd></button>
           </template>
-          <span v-else>No selection · preview target <strong>Paimos</strong></span>
+          <span v-else>No selection · preview target <strong>{{ orchestrator.identityLabel.value }}</strong></span>
+          <span class="p6-orchestrator-projection">{{ orchestrator.statusText.value }}</span>
         </div>
       </div>
 
@@ -319,6 +327,8 @@ onScopeDispose(() => {
       :key="statusBoundary"
       v-model:open="doorOpen"
       :target-agent="selectedSession?.agent ?? null"
+      :orchestrator-label="orchestrator.identityLabel.value"
+      :orchestrator-status="orchestrator.statusText.value"
       @status="publishDoorStatus"
     />
   </div>

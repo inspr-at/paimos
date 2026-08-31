@@ -49,7 +49,7 @@ defineEmits<{
 
       <span class="p6-card-heading">
         <span :id="`p6-session-${session.id}`" class="p6-card-title">{{ session.title }}</span>
-        <span class="p6-agent">{{ selected ? 'Selected target ·' : 'Agent ·' }} {{ session.agent }}</span>
+        <span class="p6-agent">{{ selected ? 'Selected target →' : 'Agent ·' }} {{ session.agent }}</span>
       </span>
       <span v-if="session.summary" class="p6-summary">{{ session.summary }}</span>
 
