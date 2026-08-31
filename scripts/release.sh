@@ -42,6 +42,7 @@ fi
 EXPECTED_FILES=$'README.md\nVERSION\ndocs/CHANGELOG.md\ndocs/INSTALL.md'
 EXTERNAL_STAGE_MANIFEST='backend/contracts/fixtures/external-stage/manifest-v1.json'
 RECOVERY_RECEIPT_DIR='scripts/release/recovery'
+CALENDAR_RECOVERY_MERGE_OID=''
 
 fail() {
   echo "error: $*" >&2
@@ -71,9 +72,24 @@ origin_tag_commit_oid() {
   printf '%s\n' "$oid"
 }
 
+fetch_origin_release_tag_commit() {
+  local tag="$1" remote_oid evidence_ref fetched_oid
+  remote_oid=$(origin_tag_commit_oid "$tag")
+  [[ "$remote_oid" =~ ^[0-9a-f]{40}$ ]] ||
+    fail "origin release tag has no exact object: $tag"
+  evidence_ref="refs/paimos/release-origin-tags/$tag"
+  git fetch --quiet origin "+refs/tags/$tag:$evidence_ref" ||
+    fail "could not fetch exact origin release tag: $tag"
+  fetched_oid=$(git rev-parse "$evidence_ref^{commit}" 2>/dev/null) ||
+    fail "origin release tag does not resolve to a commit: $tag"
+  [[ "$fetched_oid" == "$remote_oid" ]] ||
+    fail "fetched release tag differs from exact origin ref: $tag"
+  printf '%s\n' "$fetched_oid"
+}
+
 assert_origin_calendar_recut_evidence() {
-  local version="$1" existing_tags="$2" day tag stripped remote_oid fetched_oid
-  local evidence_ref evidence_count=0
+  local version="$1" existing_tags="$2" day tag stripped fetched_oid
+  local evidence_count=0
   release_version::has_recut_suffix "$version" || return 0
   day=$(release_version::calendar_day "$version")
   while IFS= read -r tag; do
@@ -81,16 +97,7 @@ assert_origin_calendar_recut_evidence() {
     if [[ "$stripped" == "$version" || ( "$stripped" != "$day" && "$stripped" != "$day".* ) ]]; then
       continue
     fi
-    remote_oid=$(origin_tag_commit_oid "$tag")
-    [[ "$remote_oid" =~ ^[0-9a-f]{40}$ ]] ||
-      fail "origin prior calendar tag has no exact object: $tag"
-    evidence_ref="refs/paimos/release-origin-tags/$tag"
-    git fetch --quiet origin "+refs/tags/$tag:$evidence_ref" ||
-      fail "could not fetch exact origin prior calendar tag: $tag"
-    fetched_oid=$(git rev-parse "$evidence_ref^{commit}" 2>/dev/null) ||
-      fail "origin prior calendar tag does not resolve to a commit: $tag"
-    [[ "$fetched_oid" == "$remote_oid" ]] ||
-      fail "fetched prior calendar tag differs from exact origin ref: $tag"
+    fetched_oid=$(fetch_origin_release_tag_commit "$tag")
     git merge-base --is-ancestor "$fetched_oid" origin/main ||
       fail "origin prior calendar tag is not an ancestor of origin/main: $tag"
     [[ "$(git show "$fetched_oid:VERSION" 2>/dev/null || true)" == "$stripped" ]] ||
@@ -99,6 +106,73 @@ assert_origin_calendar_recut_evidence() {
   done <<<"$existing_tags"
   (( evidence_count > 0 )) ||
     fail "calendar recut has no authoritative prior same-day release on origin"
+}
+
+assert_no_release_tag_after_merge() {
+  local release_merge="$1" tag stripped tag_oid existing_tags
+  existing_tags=$(origin_release_tags)
+  while IFS= read -r tag; do
+    [[ -n "$tag" && "$tag" != "$NEW_TAG" ]] || continue
+    stripped="${tag#v}"
+    tag_oid=$(fetch_origin_release_tag_commit "$tag")
+    git merge-base --is-ancestor "$tag_oid" "$release_merge" ||
+      fail "origin release tag is newer than or divergent from the interrupted release merge: $tag"
+    [[ "$(git show "$tag_oid:VERSION" 2>/dev/null || true)" == "$stripped" ]] ||
+      fail "origin release tag $tag does not carry VERSION=$stripped"
+  done <<<"$existing_tags"
+}
+
+assert_exact_calendar_recovery_main() {
+  local candidate="$1" origin_main remote_main
+  git fetch --quiet origin main
+  origin_main=$(git rev-parse origin/main)
+  remote_main=$(git ls-remote --heads origin refs/heads/main | awk 'NR == 1 {print $1}')
+  [[ "$remote_main" =~ ^[0-9a-f]{40}$ && "$origin_main" == "$remote_main" && "$candidate" == "$origin_main" ]] ||
+    fail "calendar recovery candidate is not the exact current protected origin/main head"
+}
+
+assert_calendar_descendant_recovery() {
+  local release_merge="$1" candidate="$2" tag_state="$3"
+  local remote_tag changed file required
+  local required_files=$'.github/workflows/backend-full.yml\nscripts/test-backend-pr-gate.sh\nscripts/wait-backend-full.sh'
+
+  assert_calendar_cut_day "calendar descendant recovery validation"
+  assert_exact_calendar_recovery_main "$candidate"
+  [[ "$candidate" != "$release_merge" ]] ||
+    fail "calendar descendant recovery requires a commit after the interrupted release merge"
+  git merge-base --is-ancestor "$release_merge" "$candidate" ||
+    fail "calendar recovery candidate does not descend from the interrupted release merge"
+  assert_release_files_at "$candidate" "$NEW"
+
+  remote_tag=$(origin_tag_commit_oid "$NEW_TAG")
+  case "$tag_state" in
+    absent)
+      [[ -z "$remote_tag" ]] || fail "origin/$NEW_TAG appeared during calendar descendant recovery"
+      ;;
+    exact)
+      [[ "$remote_tag" == "$candidate" ]] ||
+        fail "origin/$NEW_TAG does not point to the exact calendar recovery head $candidate"
+      ;;
+    *) fail "unknown calendar descendant recovery tag state: $tag_state" ;;
+  esac
+
+  changed=$(changed_commit_files "$release_merge" "$candidate")
+  [[ -n "$changed" ]] || fail "calendar descendant recovery has no corrective delta"
+  while IFS= read -r file; do
+    case "$file" in
+      .github/workflows/backend-full.yml|scripts/release.sh|scripts/test-backend-pr-gate.sh|scripts/test-release.sh|scripts/wait-backend-full.sh) ;;
+      *) fail "calendar descendant recovery contains an unrelated file: $file" ;;
+    esac
+  done <<<"$changed"
+  while IFS= read -r required; do
+    grep -qxF "$required" <<<"$changed" ||
+      fail "calendar descendant recovery is missing required timeout correction: $required"
+  done <<<"$required_files"
+  assert_no_release_tag_after_merge "$release_merge"
+  # The tag-history audit above performs remote list/fetch operations. Pin main
+  # again after that potentially long audit so tag creation cannot use a
+  # candidate that stopped being the protected-main head during the audit.
+  assert_exact_calendar_recovery_main "$candidate"
 }
 
 assert_calendar_cut_day() {
@@ -692,8 +766,38 @@ assert_release_merge() {
     fail "protected-main merge tree differs from validated PR head $VALIDATED_HEAD_OID"
 }
 
+select_release_tag_commit() {
+  local release_merge="$1" candidate remote_tag tag_state
+  TAG_OID="$release_merge"
+  CALENDAR_RECOVERY_MERGE_OID=''
+  release_version::is_calendar "$NEW" || return 0
+
+  git fetch --quiet origin main
+  candidate=$(git rev-parse origin/main)
+  [[ "$candidate" != "$release_merge" ]] || return 0
+  remote_tag=$(origin_tag_commit_oid "$NEW_TAG")
+  if [[ -z "$remote_tag" ]]; then
+    tag_state=absent
+  elif [[ "$remote_tag" == "$candidate" ]]; then
+    tag_state=exact
+  else
+    fail "origin/$NEW_TAG points to $remote_tag, not the exact protected-main recovery head $candidate"
+  fi
+  assert_calendar_descendant_recovery "$release_merge" "$candidate" "$tag_state"
+  TAG_OID="$candidate"
+  CALENDAR_RECOVERY_MERGE_OID="$release_merge"
+  echo "Calendar recovery will require exhaustive assurance for exact protected-main head $TAG_OID."
+}
+
 tag_release_merge() {
-  local merge_oid="$1" existing_oid remote_oid
+  local merge_oid="$1" existing_oid remote_oid recovery_tag_state
+  if [[ -n "$CALENDAR_RECOVERY_MERGE_OID" ]]; then
+    remote_oid=$(origin_tag_commit_oid "$NEW_TAG")
+    recovery_tag_state=absent
+    [[ -z "$remote_oid" ]] || recovery_tag_state=exact
+    assert_calendar_descendant_recovery \
+      "$CALENDAR_RECOVERY_MERGE_OID" "$merge_oid" "$recovery_tag_state"
+  fi
   remote_oid=$(origin_tag_commit_oid "$NEW_TAG")
   if [[ -n "$remote_oid" ]]; then
     [[ "$remote_oid" == "$merge_oid" ]] ||
@@ -705,8 +809,14 @@ tag_release_merge() {
       existing_oid=$(git rev-list -n1 "${NEW_TAG}^{}")
       fail "$NEW_TAG exists only locally at $existing_oid; refusing unproven tag publication"
     fi
+    if [[ -n "$CALENDAR_RECOVERY_MERGE_OID" ]]; then
+      # The absent-tag query above is remote work after the history audit.
+      # Re-pin protected main as the final operation before materializing the
+      # local tag, closing movement during that query as well.
+      assert_exact_calendar_recovery_main "$merge_oid"
+    fi
     git tag -a --no-sign "$NEW_TAG" "$merge_oid" -m "release $NEW"
-    echo "Created $NEW_TAG at protected-main merge $merge_oid."
+    echo "Created $NEW_TAG at protected-main commit $merge_oid."
     git push origin "refs/tags/$NEW_TAG"
     remote_oid=$(origin_tag_commit_oid "$NEW_TAG")
     [[ "$remote_oid" == "$merge_oid" ]] ||
@@ -1011,15 +1121,16 @@ case "$PR_STATE" in
 esac
 
 assert_release_merge "$MERGE_OID"
-# The exhaustive workflow is triggered by the protected-main merge. Require its
-# exact-head result before creating the tag, so tag CI can reuse evidence that
-# is already green instead of waiting for a second serial/race run.
-GITHUB_REPOSITORY="$REPO" "$ROOT/scripts/wait-backend-full.sh" "$MERGE_OID"
-tag_release_merge "$MERGE_OID"
+select_release_tag_commit "$MERGE_OID"
+# The exhaustive workflow is triggered by the protected-main commit selected
+# above. Require its exact-head result before creating the tag, so tag CI can
+# reuse evidence that is already green instead of waiting for a second run.
+GITHUB_REPOSITORY="$REPO" "$ROOT/scripts/wait-backend-full.sh" "$TAG_OID"
+tag_release_merge "$TAG_OID"
 cleanup_checkout
 
 echo
-echo "Pushed $NEW_TAG from protected-main merge $MERGE_OID."
+echo "Pushed $NEW_TAG from protected-main commit $TAG_OID."
 echo "Waiting for ghcr.io/inspr-at/paimos:$NEW to appear…"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/_deploy-lib.sh"

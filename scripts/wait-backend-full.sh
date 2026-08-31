@@ -8,10 +8,11 @@ set -euo pipefail
 
 HEAD_SHA=$1
 GH_COMMAND=${GH_COMMAND:-gh}
-# Both exhaustive jobs have a 40-minute execution budget and run in parallel.
+# The serial job has a 40-minute budget and the measured race job has a
+# 70-minute budget; they run in parallel.
 # Allow ten additional minutes for queueing, setup, and the fail-closed
 # aggregator; exact hosted measurements must remain comfortably inside this.
-BACKEND_FULL_TIMEOUT_SECONDS=${BACKEND_FULL_TIMEOUT_SECONDS:-3000}
+BACKEND_FULL_TIMEOUT_SECONDS=${BACKEND_FULL_TIMEOUT_SECONDS:-4800}
 BACKEND_FULL_POLL_SECONDS=${BACKEND_FULL_POLL_SECONDS:-15}
 REPOSITORY=${GITHUB_REPOSITORY:-inspr-at/paimos}
 start=$(date +%s)

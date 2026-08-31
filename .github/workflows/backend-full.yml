@@ -55,7 +55,10 @@ jobs:
   backend-full-race:
     needs: backend-full-authorize
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Run 33399087228 passed in 39m57s; run 33407634733 reached agentd after
+    # 39m56s before the 40m clip. Three package-local invocations remained,
+    # each with its unchanged 8m cap, so 70m is bounded measured headroom.
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v5
 

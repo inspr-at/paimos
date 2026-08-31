@@ -52,6 +52,52 @@ write_fake_commands() {
   local bin="$1"
   mkdir -p "$bin"
 
+  cat > "$bin/git" <<'GIT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_git=/usr/bin/git
+advance_main() {
+  local label="$1" advance_work="$FAKE_GH_STATE/$1-advance-work"
+  "$real_git" clone -q "${FAKE_GH_ORIGIN:?}" "$advance_work" >/dev/null 2>&1
+  "$real_git" -C "$advance_work" config user.name 'Protected Main Bot'
+  "$real_git" -C "$advance_work" config user.email 'protected-main@example.test'
+  "$real_git" -C "$advance_work" switch -q main
+  printf 'main moved during %s\n' "$label" > "$advance_work/$label-main.txt"
+  "$real_git" -C "$advance_work" add "$label-main.txt"
+  "$real_git" -C "$advance_work" commit -q --signoff -m "advance main during $label"
+  FAKE_GH_SERVER_MERGE=1 "$real_git" -C "$advance_work" push -q origin main
+}
+
+if [[ ( "${FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT:-0}" == "1" ||
+        "${FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY:-0}" == "1" ) &&
+      "$*" == *'refs/paimos/release-origin-tags/'* ]]; then
+  "$real_git" "$@"
+  count_file="${FAKE_GH_STATE:?}/tag-audit-count"
+  count=0
+  [[ ! -f "$count_file" ]] || count=$(<"$count_file")
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$count_file"
+  if [[ "$count" -eq 2 && "${FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT:-0}" == "1" ]]; then
+    advance_main historical-tag-audit
+  elif [[ "$count" -eq 2 ]]; then
+    touch "$FAKE_GH_STATE/post-audit-tag-query-ready"
+  fi
+  exit 0
+fi
+if [[ "${FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY:-0}" == "1" &&
+      "${1:-}" == "ls-remote" && "$*" == *"refs/tags/v${FAKE_RELEASE_VERSION:?}^{}"* &&
+      -f "$FAKE_GH_STATE/post-audit-tag-query-ready" &&
+      ! -f "$FAKE_GH_STATE/post-audit-tag-query-advanced" ]]; then
+  output=$("$real_git" "$@")
+  advance_main post-audit-tag-query
+  touch "$FAKE_GH_STATE/post-audit-tag-query-advanced"
+  printf '%s' "$output"
+  exit 0
+fi
+exec "$real_git" "$@"
+GIT
+
   cat > "$bin/date" <<'DATE'
 #!/usr/bin/env bash
 if [[ -n "${FAKE_GH_STATE:-}" && -f "$FAKE_GH_STATE/vienna-date" ]]; then
@@ -253,6 +299,17 @@ case "${1:-} ${2:-}" in
       if [[ "${FAKE_VIENNA_FLIP_AFTER_BACKEND:-0}" == "1" ]]; then
         printf '%s\n' "${FAKE_VIENNA_NEXT_DAY:?}" > "$state/vienna-date"
       fi
+      if [[ "${FAKE_ADVANCE_MAIN_AFTER_BACKEND:-0}" == "1" ]]; then
+        advance_work="$state/backend-advance-work"
+        git clone -q "$origin" "$advance_work" >/dev/null 2>&1
+        git -C "$advance_work" config user.name 'Protected Main Bot'
+        git -C "$advance_work" config user.email 'protected-main@example.test'
+        git -C "$advance_work" switch -q main
+        printf 'later protected-main commit\n' > "$advance_work/later-main.txt"
+        git -C "$advance_work" add later-main.txt
+        git -C "$advance_work" commit -q --signoff -m 'advance protected main after assurance'
+        FAKE_GH_SERVER_MERGE=1 git -C "$advance_work" push -q origin main
+      fi
       conclusion=success
       [[ ! -f "$state/backend-full-failed" ]] || conclusion=failure
       printf '[{"databaseId":3,"headSha":"%s","status":"completed","conclusion":"%s","url":"https://example.test/run/backend-full"}]\n' \
@@ -276,7 +333,7 @@ case "${1:-} ${2:-}" in
 esac
 GH
 
-  chmod +x "$bin/date" "$bin/docker" "$bin/gh"
+  chmod +x "$bin/date" "$bin/docker" "$bin/gh" "$bin/git"
 }
 
 setup_repo() {
@@ -395,6 +452,9 @@ run_release() {
       FAKE_VIENNA_FLIP_ON_REPO_VIEW="${FAKE_VIENNA_FLIP_ON_REPO_VIEW:-0}" \
       FAKE_VIENNA_FLIP_AFTER_BACKEND="${FAKE_VIENNA_FLIP_AFTER_BACKEND:-0}" \
       FAKE_VIENNA_NEXT_DAY="${FAKE_VIENNA_NEXT_DAY:-}" \
+      FAKE_ADVANCE_MAIN_AFTER_BACKEND="${FAKE_ADVANCE_MAIN_AFTER_BACKEND:-0}" \
+      FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT="${FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT:-0}" \
+      FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY="${FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY:-0}" \
       RELEASE_MERGE_TIMEOUT="${RELEASE_MERGE_TIMEOUT:-10}" \
       RELEASE_MERGE_POLL=1 \
       ./scripts/release.sh "$@"
@@ -1192,6 +1252,204 @@ test_canonical_unreleased_interactive_path_is_deterministic() {
   EDITOR="$editor" run_release "$repo" "$state" patch >/dev/null
 }
 
+setup_interrupted_calendar_descendant_recovery() {
+  local name="$1" calendar_version="$2" output
+  RECOVERY_REPO=$(setup_repo "$name" v1.0.0)
+  RECOVERY_STATE="$TMP_ROOT/$name/gh-state"
+  RECOVERY_ORIGIN=$(git -C "$RECOVERY_REPO" remote get-url origin)
+  output="$TMP_ROOT/$name/initial-output"
+  prepend_release_notes "$RECOVERY_REPO" "$calendar_version"
+  mkdir -p "$RECOVERY_STATE"
+  touch "$RECOVERY_STATE/backend-full-failed"
+
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar fixture unexpectedly tagged after failed exhaustive assurance'
+  fi
+  RECOVERY_MERGE=$(<"$RECOVERY_STATE/merge-oid")
+  ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'calendar fixture published a tag before descendant recovery'
+
+  git -C "$RECOVERY_REPO" switch -q main
+  git -C "$RECOVERY_REPO" fetch -q origin main
+  git -C "$RECOVERY_REPO" merge -q --ff-only origin/main
+  mkdir -p "$RECOVERY_REPO/.github/workflows"
+  printf '%s\n' 'jobs:' '  backend-full-race:' '    timeout-minutes: 70' > \
+    "$RECOVERY_REPO/.github/workflows/backend-full.yml"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    "grep -q 'timeout-minutes: 70' .github/workflows/backend-full.yml" > \
+    "$RECOVERY_REPO/scripts/test-backend-pr-gate.sh"
+  printf '\n# Exact-head calendar recovery waiter: 80 minutes.\n' >> \
+    "$RECOVERY_REPO/scripts/wait-backend-full.sh"
+  chmod +x "$RECOVERY_REPO/scripts/test-backend-pr-gate.sh"
+  git -C "$RECOVERY_REPO" add \
+    .github/workflows/backend-full.yml \
+    scripts/test-backend-pr-gate.sh \
+    scripts/wait-backend-full.sh
+  git -C "$RECOVERY_REPO" commit -q --no-gpg-sign --signoff \
+    -m 'fix exhaustive race timeout'
+  FAKE_GH_SERVER_MERGE=1 git -C "$RECOVERY_REPO" push -q origin main
+  RECOVERY_CANDIDATE=$(git -C "$RECOVERY_REPO" rev-parse HEAD)
+}
+
+test_interrupted_calendar_descendant_recovery() {
+  local calendar_version next_day output later_branch
+  calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
+  next_day=$(TZ=Europe/Vienna date -d \
+    "$(TZ=Europe/Vienna date +%Y-%m-%d) + 1 day" +%y.%m.%d)
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-success "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  FAKE_RELEASE_VERSION="$calendar_version" \
+    run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >/dev/null
+  [[ "$(<"$RECOVERY_STATE/backend-full-head")" == "$RECOVERY_CANDIDATE" ]] ||
+    fail 'calendar recovery did not require exhaustive assurance for the corrected exact main head'
+  [[ $(git --git-dir="$RECOVERY_ORIGIN" rev-parse "refs/tags/v$calendar_version^{}") == "$RECOVERY_CANDIDATE" ]] ||
+    fail 'calendar recovery did not tag the corrected exact protected-main head'
+  git -C "$RECOVERY_REPO" merge-base --is-ancestor "$RECOVERY_MERGE" "$RECOVERY_CANDIDATE" ||
+    fail 'calendar recovery fixture lost the original release merge ancestry'
+  FAKE_RELEASE_VERSION="$calendar_version" \
+    run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >/dev/null
+  [[ $(git --git-dir="$RECOVERY_ORIGIN" rev-parse "refs/tags/v$calendar_version^{}") == "$RECOVERY_CANDIDATE" ]] ||
+    fail 'calendar recovery did not safely resume its already-exact origin tag'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-missing-timeout "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  git -C "$RECOVERY_REPO" rm -q scripts/test-backend-pr-gate.sh
+  git -C "$RECOVERY_REPO" commit -q --no-gpg-sign --signoff -m 'drop timeout contract evidence'
+  FAKE_GH_SERVER_MERGE=1 git -C "$RECOVERY_REPO" push -q origin main
+  output="$TMP_ROOT/calendar-descendant-missing-timeout/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery accepted missing timeout evidence'
+  fi
+  grep -qF 'is missing required timeout correction: scripts/test-backend-pr-gate.sh' "$output" ||
+    fail 'missing timeout evidence rejection was not explicit'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-unrelated "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  printf 'unrelated product change\n' > "$RECOVERY_REPO/unrelated.txt"
+  git -C "$RECOVERY_REPO" add unrelated.txt
+  git -C "$RECOVERY_REPO" commit -q --no-gpg-sign --signoff -m 'unrelated product change'
+  FAKE_GH_SERVER_MERGE=1 git -C "$RECOVERY_REPO" push -q origin main
+  output="$TMP_ROOT/calendar-descendant-unrelated/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery accepted an unrelated descendant delta'
+  fi
+  grep -qF 'contains an unrelated file: unrelated.txt' "$output" ||
+    fail 'unrelated calendar recovery rejection was not explicit'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-version "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  printf '0.0.0\n' > "$RECOVERY_REPO/VERSION"
+  git -C "$RECOVERY_REPO" add VERSION
+  git -C "$RECOVERY_REPO" commit -q --no-gpg-sign --signoff -m 'drift release version'
+  FAKE_GH_SERVER_MERGE=1 git -C "$RECOVERY_REPO" push -q origin main
+  output="$TMP_ROOT/calendar-descendant-version/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery accepted a descendant with VERSION drift'
+  fi
+  grep -qF "does not carry VERSION=$calendar_version" "$output" ||
+    fail 'calendar recovery VERSION rejection was not explicit'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-wrong-tag "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  git -C "$RECOVERY_REPO" tag -a --no-sign "v$calendar_version" "$RECOVERY_MERGE" -m 'wrong recovery target'
+  git -C "$RECOVERY_REPO" push -q origin "v$calendar_version"
+  output="$TMP_ROOT/calendar-descendant-wrong-tag/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery accepted an existing tag outside the corrected exact main head'
+  fi
+  grep -qF 'not the exact protected-main recovery head' "$output" ||
+    fail 'wrong existing calendar recovery tag rejection was not explicit'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-local-tag "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  git -C "$RECOVERY_REPO" tag -a --no-sign "v$calendar_version" "$RECOVERY_CANDIDATE" -m 'local-only recovery target'
+  output="$TMP_ROOT/calendar-descendant-local-tag/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery published from a local-only tag'
+  fi
+  grep -qF 'exists only locally' "$output" ||
+    fail 'local-only calendar recovery tag rejection was not explicit'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-newer-tag "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  later_branch="newer-release-tag"
+  git -C "$RECOVERY_REPO" switch -q -c "$later_branch"
+  printf '9.0.0\n' > "$RECOVERY_REPO/VERSION"
+  git -C "$RECOVERY_REPO" add VERSION
+  git -C "$RECOVERY_REPO" commit -q --no-gpg-sign --signoff -m 'create later release evidence'
+  git -C "$RECOVERY_REPO" tag -a --no-sign v9.0.0 -m 'later release'
+  git -C "$RECOVERY_REPO" push -q origin v9.0.0
+  git -C "$RECOVERY_REPO" switch -q main
+  output="$TMP_ROOT/calendar-descendant-newer-tag/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery accepted a newer or divergent origin release tag'
+  fi
+  grep -qF 'is newer than or divergent from the interrupted release merge: v9.0.0' "$output" ||
+    fail 'newer release tag rejection was not explicit'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-main-race "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  output="$TMP_ROOT/calendar-descendant-main-race/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" FAKE_ADVANCE_MAIN_AFTER_BACKEND=1 \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery tagged after protected main moved beyond the assured head'
+  fi
+  grep -qF 'is not the exact current protected origin/main head' "$output" ||
+    fail 'protected-main recovery race rejection was not explicit'
+  ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'protected-main recovery race still published a tag'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-tag-audit-race "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  output="$TMP_ROOT/calendar-descendant-tag-audit-race/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT=1 \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery tagged after main moved during the historical tag audit'
+  fi
+  [[ "$(<"$RECOVERY_STATE/tag-audit-count")" == 2 ]] ||
+    fail 'historical tag audit race fixture did not advance main during the pre-tag audit'
+  grep -qF 'is not the exact current protected origin/main head' "$output" ||
+    fail 'historical tag audit main-race rejection was not explicit'
+  ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'historical tag audit main-race still published a tag'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-post-audit-race "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  output="$TMP_ROOT/calendar-descendant-post-audit-race/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY=1 \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery tagged after main moved during the post-audit tag query'
+  fi
+  [[ -f "$RECOVERY_STATE/post-audit-tag-query-advanced" ]] ||
+    fail 'post-audit tag-query fixture did not advance protected main'
+  grep -qF 'is not the exact current protected origin/main head' "$output" ||
+    fail 'post-audit tag-query main-race rejection was not explicit'
+  ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'post-audit tag-query main-race still published a tag'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-midnight "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  output="$TMP_ROOT/calendar-descendant-midnight/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     FAKE_VIENNA_FLIP_AFTER_BACKEND=1 FAKE_VIENNA_NEXT_DAY="$next_day" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery tagged after the Vienna cut day changed'
+  fi
+  grep -qF 'Vienna calendar day changed before calendar descendant recovery validation' "$output" ||
+    fail 'calendar recovery midnight rejection was not explicit'
+  ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'calendar recovery midnight rejection still published a tag'
+}
+
 test_calendar_release_and_rejections() {
   local repo state origin output calendar_version calendar_iso next_day recut_version merge_oid wrong_oid blob_oid
   calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
@@ -1363,6 +1621,7 @@ test_calendar_release_and_rejections() {
 }
 
 write_fake_commands "$TMP_ROOT/fake-bin"
+test_interrupted_calendar_descendant_recovery
 test_calendar_release_and_rejections
 test_committed_recovery_receipts_are_exact
 test_canonical_unreleased_is_consumed
