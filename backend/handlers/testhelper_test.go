@@ -194,6 +194,7 @@ func buildRouter() http.Handler {
 			r.Use(auth.BlockExternal)
 			handlers.RegisterSessionHomeRoutes(r)
 			handlers.RegisterOrchestratorRoutes(r)
+			handlers.RegisterCommandPaletteRoutes(r)
 		})
 
 		// Portal (external + admin)

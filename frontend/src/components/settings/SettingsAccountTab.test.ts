@@ -23,6 +23,9 @@ const { apiGet, apiPost, apiPatch, apiDelete } = vi.hoisted(() => ({
 
 vi.mock('@/api/client', () => ({
   api: { get: apiGet, post: apiPost, patch: apiPatch, delete: apiDelete, put: vi.fn(), upload: vi.fn() },
+  ApiError: class ApiError extends Error {},
+  permissionsEpoch: { value: null },
+  permissionsEpochGeneration: { value: 0 },
   csrfHeaders: () => ({}),
   errMsg: (_error: unknown, fallback: string) => fallback,
 }))

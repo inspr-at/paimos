@@ -196,6 +196,33 @@ an inaccessible project. Authorization, selection, totals, sampling, and one
 captured harness-freshness instant share one read transaction, and all
 responses are `Cache-Control: private, no-store`.
 
+## Paimos 6 command palette
+
+```
+GET|PUT /command-palette/v1/settings
+PUT     /command-palette/v1/instance-settings       admin only
+GET     /projects/:id/command-palette/v1?q=...&limit=8
+```
+
+Every outcome is private with `Cache-Control: private, no-store`. Shortcut
+precedence is nullable user override, nullable instance `app_settings`
+override, then the safe `Mod+KeyK` default. PUT accepts exactly
+`{"shortcut": string|null}` in at most 8 KiB; null resets that layer.
+Canonical chord modifiers are ordered `Mod`, `Ctrl`, `Meta`, `Alt`, `Shift`,
+followed by one allowlisted `KeyboardEvent.code`. `Mod` cannot be combined
+with explicit `Ctrl` or `Meta`, and at least one non-Shift modifier is required.
+The reserved browser/OS collision set and complete key-code allowlist are
+defined in `GET /openapi.json`; unsafe chords are never stored.
+
+Project search requires current view access and returns the closed
+`schema_version`, trimmed `query`, `sessions`, `nodes`, and `knowledge` groups.
+Each group is independently capped at 1–20 rows (default 8) and orders exact,
+prefix, then substring matches before stable title/key and identity ordering.
+The response omits project identity because it is already the authorized URL
+scope. It neither searches nor returns node descriptions, knowledge bodies,
+metadata, secrets, or hidden content. Knowledge `type` is the route-ready
+kebab token; session, node, and knowledge stable identities are explicit.
+
 ## Time entries
 
 ```

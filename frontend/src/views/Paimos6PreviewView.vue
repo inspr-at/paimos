@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onScopeDispose, ref, watch } from 'vue'
+import { computed, inject, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { Inbox, Layers3, RadioTower, WifiOff } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -14,6 +14,7 @@ import { usePaimos6SessionZoom } from '@/composables/v6/usePaimos6SessionZoom'
 import { useAuthStore } from '@/stores/auth'
 import type { Project } from '@/types'
 import { canonicalPaimos6Zoom, loadPaimos6SessionZoom } from '@/v6/sessionHomeZoom'
+import { PAIMOS6_COMMAND_CONTEXT_KEY } from '@/v6/commandPaletteContext'
 
 interface ProjectOption { id: number; key: string; name: string }
 
@@ -74,6 +75,7 @@ const selectedOutsideSample = computed(() => (
   selectedSession.value !== null
   && !home.sessions.value.some((session) => session.id === selectedSession.value?.id)
 ))
+const registerCommandContext = inject(PAIMOS6_COMMAND_CONTEXT_KEY, null)
 const selectedProject = computed(() => projects.value.find((project) => project.id === selectedProjectId.value) ?? null)
 const orchestratorProjectKey = computed(() => selectedProject.value?.key ?? null)
 const orchestrator = usePaimos6Orchestrator({
@@ -204,7 +206,14 @@ function previewAction(label: string, id: string) {
   statusMessage.value = `${label} has no mutation endpoint yet for ${session?.title ?? 'this session'}. No request was sent.`
 }
 
+onMounted(() => registerCommandContext?.({
+  selectedSessionId: home.selectedId,
+  openTalk: () => { doorOpen.value = true },
+  clearSession: clearSelection,
+}))
+
 onScopeDispose(() => {
+  registerCommandContext?.(null)
   projectLoadVersion += 1
   projectController?.abort()
 })

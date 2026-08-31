@@ -177,6 +177,14 @@ run_package() {
       # it. Race the stream subscription and permission-reset paths themselves.
       run_race ./agentmode '^TestStreamSubscribeRaceOverflowLostWakeRestartAndPermissionChanges$/(subscribe before high-water|permission grant and revoke)$'
       ;;
+    ./auth)
+      # The exhaustive auth package rebuilds the complete migration chain for
+      # every test and cannot fit the bounded race lane. Keep the package-local
+      # SQLite contention proof here. The related recent-usage contract keeps
+      # its 500 ms latency oracle in the exhaustive serial suite; race
+      # instrumentation invalidates that wall-clock budget.
+      run_race ./auth '^TestResolveAPIKeyUsageStampNeverInheritsSQLiteBusyTimeout$'
+      ;;
     *)
       run_race "$package"
       ;;
