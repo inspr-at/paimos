@@ -38,18 +38,17 @@ target_ids AS (
 ),
 target_metrics AS (
  SELECT target.agent_id,
-        COUNT(DISTINCT CASE WHEN sender.id IS NOT NULL AND message.delivered=1
+        COUNT(DISTINCT CASE WHEN message.delivered=1
           AND message.is_action_request=0 AND message.read_at IS NULL THEN message.id END) AS unread_count,
-        strftime('%Y-%m-%dT%H:%M:%fZ',MAX(CASE WHEN sender.id IS NOT NULL AND message.delivered=1
+        strftime('%Y-%m-%dT%H:%M:%fZ',MAX(CASE WHEN message.delivered=1
           AND message.is_action_request=0 AND message.read_at IS NULL THEN message.created_at END)) AS latest_unread_at,
-        COUNT(DISTINCT CASE WHEN sender.id IS NOT NULL AND message.delivered=0 THEN message.id END) AS exception_count,
-        COUNT(DISTINCT CASE WHEN sender.id IS NOT NULL AND message.delivered=0
+        COUNT(DISTINCT CASE WHEN message.delivered=0 THEN message.id END) AS exception_count,
+        COUNT(DISTINCT CASE WHEN message.delivered=0
           AND message.is_action_request=1 THEN message.id END) AS action_request_count
  FROM target_ids target
  JOIN scope
  JOIN project_agents receiver ON receiver.id=target.agent_id AND receiver.project_id=scope.project_id
  LEFT JOIN agent_messages message ON message.to_agent_id=receiver.id
- LEFT JOIN project_agents sender ON sender.id=message.from_agent_id AND sender.project_id=scope.project_id
  GROUP BY target.agent_id
 ),
 active_harnesses AS (
@@ -128,16 +127,15 @@ target_ids AS (
 ),
 target_metrics AS (
  SELECT target.agent_id,
-        COUNT(DISTINCT CASE WHEN sender.id IS NOT NULL AND message.delivered=1
+        COUNT(DISTINCT CASE WHEN message.delivered=1
           AND message.is_action_request=0 AND message.read_at IS NULL THEN message.id END) AS unread_count,
-        COUNT(DISTINCT CASE WHEN sender.id IS NOT NULL AND message.delivered=0 THEN message.id END) AS exception_count,
-        COUNT(DISTINCT CASE WHEN sender.id IS NOT NULL AND message.delivered=0
+        COUNT(DISTINCT CASE WHEN message.delivered=0 THEN message.id END) AS exception_count,
+        COUNT(DISTINCT CASE WHEN message.delivered=0
           AND message.is_action_request=1 THEN message.id END) AS action_request_count
  FROM target_ids target
  JOIN scope
  JOIN project_agents receiver ON receiver.id=target.agent_id AND receiver.project_id=scope.project_id
  LEFT JOIN agent_messages message ON message.to_agent_id=receiver.id
- LEFT JOIN project_agents sender ON sender.id=message.from_agent_id AND sender.project_id=scope.project_id
  GROUP BY target.agent_id
 )
 SELECT

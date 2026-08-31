@@ -96,7 +96,7 @@ func (s *Service) SendMessage(ctx context.Context, fromAgentID, toAgentID int64,
 	if err != nil {
 		return nil, fmt.Errorf("check authorization: %w", err)
 	}
-	
+
 	if !authorized {
 		// Hold message for manual review - unlisted senders are HELD, not delivered
 		msg.Delivered = false
@@ -147,7 +147,7 @@ func (s *Service) checkRateLimit(ctx context.Context, senderAgentID, receiverAge
 		WHERE sender_agent_id = ? AND receiver_agent_id = ?
 		  AND julianday(window_start) > julianday(?)
 	`, senderAgentID, receiverAgentID, windowStart.Format(time.RFC3339)).Scan(&count)
-	
+
 	if err != nil && err != sql.ErrNoRows {
 		return false, err
 	}
@@ -170,7 +170,7 @@ func (s *Service) checkRateLimit(ctx context.Context, senderAgentID, receiverAge
 				ELSE ?
 			END
 	`, senderAgentID, receiverAgentID, now.Format(time.RFC3339),
-	   windowStart.Format(time.RFC3339), windowStart.Format(time.RFC3339), now.Format(time.RFC3339))
+		windowStart.Format(time.RFC3339), windowStart.Format(time.RFC3339), now.Format(time.RFC3339))
 
 	return err == nil, err
 }
@@ -181,23 +181,23 @@ func (s *Service) insertMessage(ctx context.Context, msg *Message) error {
 		INSERT INTO agent_messages (from_agent_id, to_agent_id, issue_id, parent_message_id, hop_count, body, is_action_request, delivered, held_reason, delivered_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, msg.FromAgentID, msg.ToAgentID, msg.IssueID, msg.ParentMessageID, msg.HopCount, msg.Body, boolToInt(msg.IsActionRequest), boolToInt(msg.Delivered), msg.HeldReason, msg.DeliveredAt)
-	
+
 	if err != nil {
 		// Map SQLite CHECK constraint failure for secrets to typed error
 		// Only map the secret-specific CHECK, not all CHECK constraints
 		errStr := err.Error()
 		if strings.Contains(errStr, "paimos_contains_secret_like") ||
-		   strings.Contains(errStr, "message body contains secret-like content") {
+			strings.Contains(errStr, "message body contains secret-like content") {
 			return ErrContainsSecret
 		}
 		return err
 	}
-	
+
 	id, err := result.LastInsertId()
 	if err != nil {
 		return err
 	}
-	
+
 	msg.ID = id
 	return nil
 }
@@ -211,13 +211,13 @@ func (s *Service) GetDeliveredMessages(ctx context.Context, receiverAgentID int6
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, from_agent_id, to_agent_id, issue_id, parent_message_id, hop_count, body, is_action_request, delivered, held_reason, created_at, delivered_at
+		SELECT id, COALESCE(from_agent_id,0), to_agent_id, issue_id, parent_message_id, hop_count, body, is_action_request, delivered, held_reason, created_at, delivered_at
 		FROM agent_messages
 		WHERE to_agent_id = ? AND delivered = 1 AND id > ?
 		ORDER BY id ASC
 		LIMIT ?
 	`, receiverAgentID, afterID, limit)
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -230,12 +230,12 @@ func (s *Service) GetDeliveredMessages(ctx context.Context, receiverAgentID int6
 // Includes both unauthorized senders and action-request messages.
 func (s *Service) GetHeldMessages(ctx context.Context, receiverAgentID int64) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, from_agent_id, to_agent_id, issue_id, parent_message_id, hop_count, body, is_action_request, delivered, held_reason, created_at, delivered_at
+		SELECT id, COALESCE(from_agent_id,0), to_agent_id, issue_id, parent_message_id, hop_count, body, is_action_request, delivered, held_reason, created_at, delivered_at
 		FROM agent_messages
 		WHERE to_agent_id = ? AND delivered = 0
 		ORDER BY created_at DESC
 	`, receiverAgentID)
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -252,14 +252,14 @@ func (s *Service) scanMessages(rows *sql.Rows) ([]Message, error) {
 		var deliveredAt sql.NullString
 		var createdAt string
 		var issueID, parentMessageID sql.NullInt64
-		
+
 		err := rows.Scan(&msg.ID, &msg.FromAgentID, &msg.ToAgentID, &issueID, &parentMessageID,
-		                 &msg.HopCount, &msg.Body, &msg.IsActionRequest, &msg.Delivered,
-		                 &msg.HeldReason, &createdAt, &deliveredAt)
+			&msg.HopCount, &msg.Body, &msg.IsActionRequest, &msg.Delivered,
+			&msg.HeldReason, &createdAt, &deliveredAt)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		if issueID.Valid {
 			msg.IssueID = &issueID.Int64
 		}
@@ -272,10 +272,10 @@ func (s *Service) scanMessages(rows *sql.Rows) ([]Message, error) {
 		}
 		t, _ := time.Parse("2006-01-02T15:04:05Z", createdAt)
 		msg.CreatedAt = t
-		
+
 		messages = append(messages, msg)
 	}
-	
+
 	return messages, rows.Err()
 }
 
@@ -307,7 +307,7 @@ func (s *Service) GetAllowlist(ctx context.Context, receiverAgentID int64) ([]Al
 		WHERE receiver_agent_id = ?
 		ORDER BY created_at DESC
 	`, receiverAgentID)
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +325,7 @@ func (s *Service) GetAllowlist(ctx context.Context, receiverAgentID int64) ([]Al
 		entry.CreatedAt = t
 		entries = append(entries, entry)
 	}
-	
+
 	return entries, rows.Err()
 }
 
@@ -334,7 +334,7 @@ func (s *Service) GetAllowlist(ctx context.Context, receiverAgentID int64) ([]Al
 func detectActionRequest(body string) bool {
 	// Lowercase for case-insensitive matching
 	lower := strings.ToLower(body)
-	
+
 	// Patterns that indicate action requests
 	actionPatterns := []string{
 		"please execute",
@@ -348,19 +348,19 @@ func detectActionRequest(body string) bool {
 		"delete the",
 		"create a new",
 	}
-	
+
 	for _, pattern := range actionPatterns {
 		if strings.Contains(lower, pattern) {
 			return true
 		}
 	}
-	
+
 	// Check for shell command patterns
 	shellPattern := regexp.MustCompile(`(?m)^\s*(sudo|rm|chmod|chown|git|npm|docker|kubectl)\s+`)
 	if shellPattern.MatchString(body) {
 		return true
 	}
-	
+
 	return false
 }
 

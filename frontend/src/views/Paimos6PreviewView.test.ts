@@ -496,7 +496,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     await mounted.unmount()
   })
 
-  it('keeps the talk-first door local-only while live rows come from the strict endpoint', async () => {
+  it('keeps unsupported microphone capture honest while rows stay on the strict endpoint', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
     const mounted = await mountWithHome(liveProjection(), configuredOrchestrator())
@@ -513,13 +513,13 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(door.textContent).toContain('What should aMY / Primary do?')
     expect(door.textContent).toContain('orchestrator configured')
     expect(door.textContent).toContain('Tap to toggle · hold to talk, release to stop')
-    expect(door.textContent).toContain('does not request microphone access')
+    expect(door.textContent).toContain('Raw audio stays ephemeral')
     expect(door.textContent).toContain('Preview target · aMY / Primary (no session selected)')
 
     mic.click()
     await nextTick()
-    expect(mic.getAttribute('aria-pressed')).toBe('true')
-    expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain('No microphone opened')
+    expect(mic.getAttribute('aria-pressed')).toBe('false')
+    expect(door.querySelector('.p6-door-status')?.textContent).toContain('Microphone capture is unavailable')
 
     const details = door.querySelector<HTMLDetailsElement>('.p6-node-door')!
     const summary = details.querySelector<HTMLElement>('summary')!

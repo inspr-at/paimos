@@ -2,6 +2,7 @@ package agentmessage_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"strings"
@@ -139,6 +140,51 @@ func TestEnvelopeLedgerResolvesAddressesAndSupportsCursorReads(t *testing.T) {
 		t.Fatal("ack must reject a cursor outside the delivered inbox")
 	} else if !errors.As(err, &coded) || coded.Code != "agent_message_cursor_unknown" {
 		t.Fatalf("unknown cursor error=%v", err)
+	}
+}
+
+func TestEnvelopeLedgerDoesNotWidenAgentScopeThroughForeignProductSession(t *testing.T) {
+	svc, projectID, agents := openEnvelopeSecurityDB(t, "sender", "receiver")
+	foreignProject, err := db.DB.Exec(`INSERT INTO projects(name,key) VALUES('Foreign scope','FRN')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignProjectID, _ := foreignProject.LastInsertId()
+	user, err := db.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES('ledger-scope-user','x','admin','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ := user.LastInsertId()
+	foreignSessionID := "17e5d8f7-0b11-4bee-a8a4-a11406de865a"
+	if _, err := db.DB.Exec(`INSERT INTO product_sessions(
+		product_session_id,project_id,target_kind,title,created_by_user_id,updated_by_user_id)
+		VALUES(?,?,'paimos','Foreign conversation',?,?)`, foreignSessionID, foreignProjectID, userID, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO agent_message_allowlist(receiver_agent_id,sender_agent_id) VALUES(?,?)`, agents["receiver"], agents["sender"]); err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := svc.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:receiver", Body: "project-scoped message",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`UPDATE agent_messages SET product_session_id=? WHERE message_id=?`, foreignSessionID, envelope.MessageID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.GetEnvelope(context.Background(), foreignProjectID, envelope.MessageID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("foreign product session widened agent envelope scope: %v", err)
+	}
+	foreignRows, err := svc.ListEnvelopes(context.Background(), agentmessage.ListFilter{ProjectID: foreignProjectID, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(foreignRows) != 0 {
+		t.Fatalf("foreign project listed agent envelope through product session: %#v", foreignRows)
+	}
+	if own, err := svc.GetEnvelope(context.Background(), projectID, envelope.MessageID); err != nil || own.MessageID != envelope.MessageID {
+		t.Fatalf("sender project lost its envelope: envelope=%#v err=%v", own, err)
 	}
 }
 

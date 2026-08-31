@@ -54,6 +54,7 @@ let gateTimer = 0;
 let generation = 0; // bumped on every cleanup — stale callbacks self-discard
 let onUtterance: ((blob: Blob) => Promise<void>) | null = null;
 let trackEndHandlers: Array<{ track: MediaStreamTrack; handler: () => void }> = [];
+let finishRequestedGeneration: number | null = null;
 
 export function micSupported(): boolean {
   return (
@@ -78,6 +79,7 @@ function onVisibilityChange() {
 
 function cleanup() {
   generation++; // invalidate every in-flight callback of the old loop
+  finishRequestedGeneration = null;
   // A stopped singleton must not retain the disposed Voice instance and its
   // authorized context through the last callback closure.
   onUtterance = null;
@@ -137,6 +139,25 @@ function armRecorder(): boolean {
       if (myGen !== generation) return;
       const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
       chunks = [];
+      const finishing = finishRequestedGeneration === myGen;
+      if (finishing) {
+        const sink = onUtterance;
+        finishRequestedGeneration = null;
+        cleanup();
+        if (blob.size >= MIN_UTTERANCE_BYTES && sink) {
+          state.value = "transcribing";
+          void sink(blob)
+            .catch(() => {
+              /* surfaced via the session error ref by the caller */
+            })
+            .finally(() => {
+              if (state.value === "transcribing") state.value = "idle";
+            });
+        } else {
+          state.value = "idle";
+        }
+        return;
+      }
       if (blob.size >= MIN_UTTERANCE_BYTES && onUtterance) {
         state.value = "transcribing";
         void onUtterance(blob)
@@ -255,11 +276,38 @@ function stop() {
   state.value = "idle";
 }
 
+/** Finalize the current recorder once, release capture, and never re-arm.
+ * Existing continuous-listening callers retain stop()'s discard semantics. */
+function finish(): boolean {
+  if (!recorder || recorder.state !== "recording") return false;
+  finishRequestedGeneration = generation;
+  clearInterval(gateTimer);
+  gateTimer = 0;
+  try {
+    recorder.stop();
+    return true;
+  } catch {
+    finishRequestedGeneration = null;
+    return false;
+  }
+}
+
 const isActive = computed(
   () =>
     state.value === "starting" || state.value === "listening" || state.value === "transcribing",
 );
 
-export function useMicTranscript() {
-  return { state, level, errorMessage, isActive, start, stop, micSupported };
+export interface MicTranscriptAdapter {
+  state: typeof state;
+  level: typeof level;
+  errorMessage: typeof errorMessage;
+  isActive: typeof isActive;
+  start: typeof start;
+  finish?: typeof finish;
+  stop: typeof stop;
+  micSupported: typeof micSupported;
+}
+
+export function useMicTranscript(): MicTranscriptAdapter {
+  return { state, level, errorMessage, isActive, start, finish, stop, micSupported };
 }

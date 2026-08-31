@@ -85,6 +85,10 @@
       "description": "Strict project-scoped Paimos 6 session-home projection (schema v1)"
     },
     {
+      "name": "session-utterances",
+      "description": "One-generation Paimos 6 transcript delivery with commit-time authority and exact replay"
+    },
+    {
       "name": "nodes",
       "description": "Paimos 6 one-node compatibility API over legacy issues"
     },
@@ -1936,6 +1940,39 @@
               "attention": {"type": "integer", "minimum": 0}
             }
           }
+        }
+      },
+      "SessionUtteranceSelectionV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["product_session_id", "revision"],
+        "properties": {
+          "product_session_id": {"type": "string", "format": "uuid"},
+          "revision": {"type": "integer", "format": "int64", "minimum": 1}
+        }
+      },
+      "SessionUtteranceRequestV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "utterance_id", "text", "selected_session"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "utterance_id": {"type": "string", "pattern": "^utt_[0-9a-f]{32}$", "minLength": 36, "maxLength": 36},
+          "text": {"type": "string", "minLength": 1, "maxLength": 8192, "description": "Trimmed UTF-8 transcript, at most 8192 encoded bytes, without control characters."},
+          "selected_session": {"oneOf": [{"$ref": "#/components/schemas/SessionUtteranceSelectionV1"}, {"type": "null"}]}
+        }
+      },
+      "SessionUtteranceResultV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "utterance_id", "route_kind", "product_session_id", "product_session_revision", "message_id", "thread_id", "delivery_id", "created_at"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "utterance_id": {"type": "string", "pattern": "^utt_[0-9a-f]{32}$"},
+          "route_kind": {"type": "string", "enum": ["project_agent", "paimos"]},
+          "product_session_id": {"type": "string", "format": "uuid"},
+          "product_session_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "message_id": {"type": "string", "format": "uuid"},
+          "thread_id": {"type": "string", "format": "uuid"},
+          "delivery_id": {"type": ["string", "null"], "format": "uuid"},
+          "created_at": {"type": "string", "format": "date-time"}
         }
       },
       "SessionHomeZoomTotalsV1": {
@@ -5087,6 +5124,25 @@
           },
           "400": {"description": "Malformed, duplicate, or unknown query parameter"},
           "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/projects/{id}/session-utterances/v1": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+      "post": {
+        "tags": ["session-utterances"],
+        "summary": "Deliver one finalized Paimos 6 transcript",
+        "description": "Accepts transcript text only; raw audio is never part of this request. A selected session is reauthorized with its current revision, project, node, agent, harness, and encrypted delivery target in the commit transaction. Null selection continues the authenticated user's explicit project-scoped Paimos conversation. Exact retries return the original 201 result; a changed request under the same utterance ID conflicts.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionUtteranceRequestV1"}}}},
+        "responses": {
+          "201": {"description": "First commit or exact replay; always private and no-store.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionUtteranceResultV1"}}}},
+          "400": {"description": "Closed request, utterance identity, or transcript validation failed."},
+          "401": {"description": "Authentication is missing or expired."},
+          "403": {"description": "CSRF, password, or internal-role gate failed."},
+          "404": {"description": "Project, authority, or selected destination is concealed."},
+          "409": {"description": "Stale selection, unavailable target, or conflicting replay."},
+          "413": {"description": "The bounded JSON body exceeded 16 KiB."},
+          "500": {"description": "Atomic transcript delivery could not commit."}
         }
       }
     },

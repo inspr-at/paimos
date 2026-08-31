@@ -7,16 +7,24 @@ const props = defineProps<{
   targetAgent: string | null
   orchestratorLabel: string
   orchestratorStatus: string
+  voiceState: string
+  voiceMessage: string
+  voiceSupported: boolean
+  voiceCanRetry: boolean
 }>()
 
 const emit = defineEmits<{
   'update:open': [open: boolean]
   status: [message: string]
+  'voice-start': []
+  'voice-finish': []
+  'voice-cancel': []
+  'voice-retry': []
 }>()
 
 const micMode = ref<'idle' | 'tap' | 'hold'>('idle')
 const nodeTitle = ref('')
-const localStatus = ref('Development preview only. Nothing is recorded, sent, or saved.')
+const localStatus = ref('')
 const triggerRef = ref<HTMLButtonElement | null>(null)
 const doorRef = ref<HTMLElement | null>(null)
 const micRef = ref<HTMLButtonElement | null>(null)
@@ -29,6 +37,9 @@ const routeCopy = computed(() =>
     ? `Preview target · ${props.targetAgent} (selected session)`
     : `Preview target · ${props.orchestratorLabel} (no session selected)`,
 )
+const voiceActive = computed(() => props.voiceState === 'permission' || props.voiceState === 'listening')
+const voiceBusy = computed(() => props.voiceState === 'transcribing' || props.voiceState === 'sending')
+const doorStatus = computed(() => localStatus.value || props.voiceMessage)
 
 watch(
   () => props.open,
@@ -78,15 +89,22 @@ function toggleMic() {
     suppressClick = false
     return
   }
-  micMode.value = micMode.value === 'tap' ? 'idle' : 'tap'
-  announce(
-    micMode.value === 'tap'
-      ? 'Tap-toggle preview active. No microphone opened, speech recognized, or message sent.'
-      : 'Tap-toggle preview stopped. Nothing was recorded or sent.',
-  )
+  if (!props.voiceSupported || voiceBusy.value) {
+    announce('Microphone capture is unavailable in this browser.')
+    return
+  }
+  localStatus.value = ''
+  if (voiceActive.value) {
+    micMode.value = 'idle'
+    emit('voice-finish')
+  } else {
+    micMode.value = 'tap'
+    emit('voice-start')
+  }
 }
 
 function beginHold(event: PointerEvent) {
+  if (!props.voiceSupported || voiceBusy.value) return
   const button = event.currentTarget as HTMLButtonElement
   suppressClick = false
   button.setPointerCapture?.(event.pointerId)
@@ -94,7 +112,8 @@ function beginHold(event: PointerEvent) {
   holdTimer = setTimeout(() => {
     holdEngaged = true
     micMode.value = 'hold'
-    announce('Hold-to-talk preview active. No microphone opened, speech recognized, or message sent.')
+    localStatus.value = ''
+    if (!voiceActive.value) emit('voice-start')
   }, 450)
 }
 
@@ -107,7 +126,17 @@ function endHold() {
   holdEngaged = false
   suppressClick = true
   micMode.value = 'idle'
-  announce('Hold-to-talk preview released. Nothing was recorded or sent.')
+  emit('voice-finish')
+}
+
+function cancelVoice() {
+  localStatus.value = ''
+  emit('voice-cancel')
+}
+
+function retryVoice() {
+  localStatus.value = ''
+  emit('voice-retry')
 }
 
 function stageNode() {
@@ -122,6 +151,7 @@ function stageNode() {
 
 onBeforeUnmount(() => {
   if (holdTimer) clearTimeout(holdTimer)
+  if (voiceActive.value || voiceBusy.value) emit('voice-cancel')
 })
 </script>
 
@@ -178,8 +208,9 @@ onBeforeUnmount(() => {
         ref="micRef"
         type="button"
         class="p6-mic"
-        :class="{ 'is-active': micMode !== 'idle' }"
-        :aria-pressed="micMode !== 'idle'"
+        :class="{ 'is-active': voiceActive || micMode === 'hold' }"
+        :aria-pressed="voiceActive"
+        :aria-disabled="!voiceSupported || voiceBusy"
         aria-describedby="p6-mic-help p6-mic-truth"
         @click="toggleMic"
         @pointerdown.left="beginHold"
@@ -187,17 +218,21 @@ onBeforeUnmount(() => {
         @pointercancel="endHold"
         @lostpointercapture="endHold"
       >
-        <MicOff v-if="micMode === 'idle'" :size="25" aria-hidden="true" />
+        <MicOff v-if="!voiceActive" :size="25" aria-hidden="true" />
         <Mic v-else :size="25" aria-hidden="true" />
-        <span>{{ micMode === 'hold' ? 'Holding · preview' : micMode === 'tap' ? 'Tap mode · preview' : `Talk to ${orchestratorLabel}` }}</span>
+        <span>{{ voiceBusy ? 'Finalizing…' : micMode === 'hold' ? 'Holding · release to send' : voiceActive ? 'Listening · tap to send' : `Talk to ${orchestratorLabel}` }}</span>
       </button>
       <p id="p6-mic-help" class="p6-mic-help"><strong>Tap</strong> to toggle · <strong>hold</strong> to talk, release to stop</p>
       <p id="p6-mic-truth" class="p6-mic-truth">
-        Interaction documentation only. This development preview does not request microphone access, run speech-to-text, record audio, or send a message.
+        Raw audio stays ephemeral and is sent only to transcription. The finalized transcript is delivered once to the selected authorized agent, or to Paimos when no session is selected.
       </p>
+      <div class="p6-voice-actions">
+        <button v-if="voiceActive" type="button" @click="cancelVoice">Cancel capture</button>
+        <button v-if="voiceCanRetry" type="button" @click="retryVoice">Retry same utterance</button>
+      </div>
     </section>
 
-      <p class="p6-door-status" role="status" aria-live="polite" aria-atomic="true">{{ localStatus }}</p>
+      <p class="p6-door-status" role="status" aria-live="polite" aria-atomic="true">{{ doorStatus }}</p>
 
       <details class="p6-node-door">
       <summary>
@@ -285,8 +320,11 @@ onBeforeUnmount(() => {
 .p6-mic { display: flex; width: 100%; min-height: 76px; align-items: center; justify-content: center; gap: 10px; margin-top: 20px; border: 1px solid #aac2b3; border-radius: 15px; color: #284f3d; background: rgba(255, 255, 255, 0.83); font: 650 13px/1 "DM Sans", sans-serif; }
 .p6-mic:hover { border-color: #6e9680; background: #fff; }
 .p6-mic.is-active { color: #f4faf6; background: #315e49; box-shadow: 0 0 0 5px rgba(49, 94, 73, 0.1); }
+.p6-mic[aria-disabled="true"] { cursor: not-allowed; opacity: 0.58; }
 .p6-mic-help { margin-top: 10px; color: #536159; font-size: 11px; text-align: center; }
 .p6-mic-truth { margin-top: 8px; color: #59655e; font-size: 10.5px; line-height: 1.55; text-align: center; }
+.p6-voice-actions { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+.p6-voice-actions button { padding: 6px 9px; border: 1px solid #aac2b3; border-radius: 8px; color: #315e49; background: #fff; font-size: 10px; }
 .p6-door-status { margin-top: 14px; padding: 9px 10px; border: 1px solid #d8e1db; border-radius: 9px; color: #59655e; background: #f7f9f7; font-size: 10.5px; line-height: 1.45; }
 .p6-node-door { margin-top: 22px; border-top: 1px solid #e0e7e2; }
 .p6-node-door summary { display: flex; align-items: center; justify-content: space-between; padding: 18px 2px 12px; color: #536159; cursor: pointer; font-size: 11.5px; font-weight: 650; }

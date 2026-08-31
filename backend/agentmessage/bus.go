@@ -696,7 +696,7 @@ func (s *Service) ListDeliveryStatus(ctx context.Context, projectID int64) ([]De
 	rows, err := s.db.QueryContext(ctx, `SELECT d.delivery_id,am.message_id,am.to_address,d.requested_level,
 		COALESCE(d.effective_level,''),d.state,d.fallback_reason,d.attempt_count,d.last_error_code,
 		COALESCE(d.handed_off_at,''),d.updated_at FROM agent_message_deliveries d
-		JOIN agent_messages am ON am.id=d.message_row_id JOIN project_agents pa ON pa.id=am.from_agent_id
+		JOIN agent_messages am ON am.id=d.message_row_id JOIN project_agents pa ON pa.id=am.to_agent_id
 		WHERE pa.project_id=? AND d.instance=? ORDER BY am.id`, projectID, instanceName())
 	if err != nil {
 		return nil, err
@@ -724,7 +724,7 @@ func (s *Service) RequeueDelivery(ctx context.Context, projectID int64, delivery
 		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE delivery_id=? AND instance=? AND state IN ('blocked','dead','retry','leased')
 		AND COALESCE(primary_target_id,fallback_target_id) IS NOT NULL
-		AND message_row_id IN (SELECT am.id FROM agent_messages am JOIN project_agents pa ON pa.id=am.from_agent_id
+		AND message_row_id IN (SELECT am.id FROM agent_messages am JOIN project_agents pa ON pa.id=am.to_agent_id
 		 WHERE pa.project_id=?)`, strings.TrimSpace(deliveryID), instanceName(), projectID)
 	if err != nil {
 		return err
