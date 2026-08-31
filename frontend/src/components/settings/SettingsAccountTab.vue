@@ -15,6 +15,7 @@ import {
 import AppModal from '@/components/AppModal.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import AiPaperTrailPanel from '@/components/ai/AiPaperTrailPanel.vue'
+import Paimos6CommandShortcutSettings from '@/components/v6/Paimos6CommandShortcutSettings.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -703,6 +704,8 @@ init()
           </div>
           <div v-if="recordingError" class="form-error" style="margin-top:.4rem">{{ recordingError }}</div>
         </div>
+
+        <Paimos6CommandShortcutSettings style="grid-column:1/-1" />
 
         <div v-if="auth.isAdmin" class="section-divider" style="grid-column:1/-1">Reports</div>
 
