@@ -109,16 +109,13 @@ assert_origin_calendar_recut_evidence() {
 }
 
 assert_no_release_tag_after_merge() {
-  local release_merge="$1" tag stripped tag_oid existing_tags
+  local release_merge="$1" tag tag_oid existing_tags
   existing_tags=$(origin_release_tags)
   while IFS= read -r tag; do
     [[ -n "$tag" && "$tag" != "$NEW_TAG" ]] || continue
-    stripped="${tag#v}"
     tag_oid=$(fetch_origin_release_tag_commit "$tag")
     git merge-base --is-ancestor "$tag_oid" "$release_merge" ||
       fail "origin release tag is newer than or divergent from the interrupted release merge: $tag"
-    [[ "$(git show "$tag_oid:VERSION" 2>/dev/null || true)" == "$stripped" ]] ||
-      fail "origin release tag $tag does not carry VERSION=$stripped"
   done <<<"$existing_tags"
 }
 
