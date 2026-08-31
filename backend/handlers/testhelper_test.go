@@ -25,6 +25,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -242,6 +243,12 @@ func buildRouter() http.Handler {
 			r.With(auth.RequireProjectView).Get("/projects/{id}/agents/{name}.json", handlers.GetProjectAgentArtifact)
 			r.With(auth.RequireProjectView).Get("/projects/{id}/agents/{name}.md", handlers.GetProjectAgentArtifactMarkdown)
 			handlers.RegisterProductSessionRoutes(r)
+			// PAI-863 remains production-unregistered. Its focused tests opt in
+			// before constructing this router; every existing mirror test sees the
+			// unchanged production route set.
+			if os.Getenv("PAIMOS_TEST_PENDING_STRUCTURED_KNOWLEDGE") == "1" {
+				handlers.RegisterStructuredKnowledgeRoutes(r)
+			}
 			handlers.RegisterNodeRoutes(r)
 			r.With(auth.RequireProjectView).Get("/projects/{id}/environments", handlers.ListProjectEnvironments)
 			r.With(auth.RequireAdmin, auth.RequireProjectView).Post("/projects/{id}/environments", handlers.CreateProjectEnvironment)

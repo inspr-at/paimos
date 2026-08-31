@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 
 import { api, permissionsEpoch, permissionsEpochGeneration } from '@/api/client'
 import Paimos6SessionCard from '@/components/v6/Paimos6SessionCard.vue'
+import Paimos6KnowledgeCompact from '@/components/v6/Paimos6KnowledgeCompact.vue'
 import Paimos6SourceRail from '@/components/v6/Paimos6SourceRail.vue'
 import Paimos6TalkDoor from '@/components/v6/Paimos6TalkDoor.vue'
 import Paimos6ZoomControl from '@/components/v6/Paimos6ZoomControl.vue'
@@ -17,6 +18,7 @@ import { useAuthStore } from '@/stores/auth'
 import type { Project } from '@/types'
 import { canonicalPaimos6Zoom, loadPaimos6SessionZoom } from '@/v6/sessionHomeZoom'
 import { PAIMOS6_COMMAND_CONTEXT_KEY } from '@/v6/commandPaletteContext'
+import { loadStructuredKnowledgeSnapshot, type StructuredKnowledgeSnapshot } from '@/v6/structuredKnowledge'
 
 interface ProjectOption { id: number; key: string; name: string }
 
@@ -34,6 +36,10 @@ const projectState = ref<'loading' | 'ready' | 'empty' | 'unavailable'>('loading
 const selectedProjectId = ref<number | null>(null)
 let projectLoadVersion = 0
 let projectController: AbortController | null = null
+const knowledgeSnapshot = ref<StructuredKnowledgeSnapshot | null>(null)
+const knowledgeState = ref<'loading' | 'ready' | 'empty' | 'unavailable'>('loading')
+let knowledgeLoadVersion = 0
+let knowledgeController: AbortController | null = null
 
 const principalId = computed(() => auth.user?.id ?? null)
 const authorityKey = computed(() => JSON.stringify([
@@ -175,6 +181,31 @@ async function loadProjects() {
 
 watch([authorityKey, selectedProjectId, zoom, home.selectedId], resetAuxiliaryStatus, { flush: 'sync' })
 
+watch([authorityKey, selectedProjectId], () => {
+  const version = ++knowledgeLoadVersion
+  knowledgeController?.abort()
+  knowledgeSnapshot.value = null
+  knowledgeState.value = 'loading'
+  const principal = principalId.value
+  const projectId = selectedProjectId.value
+  const authority = authorityKey.value
+  if (principal === null || projectId === null) return
+  const controller = new AbortController()
+  knowledgeController = controller
+  void loadStructuredKnowledgeSnapshot(projectId, controller.signal).then((snapshot) => {
+    if (version !== knowledgeLoadVersion || controller.signal.aborted || principal !== principalId.value
+      || projectId !== selectedProjectId.value || authority !== authorityKey.value) return
+    knowledgeSnapshot.value = snapshot
+    knowledgeState.value = snapshot.entries.length || snapshot.legacy.length || snapshot.proposals.length ? 'ready' : 'empty'
+  }).catch(() => {
+    if (version !== knowledgeLoadVersion || controller.signal.aborted || principal !== principalId.value
+      || projectId !== selectedProjectId.value || authority !== authorityKey.value) return
+    knowledgeState.value = 'unavailable'
+  }).finally(() => {
+    if (knowledgeController === controller) knowledgeController = null
+  })
+}, { immediate: true, flush: 'sync' })
+
 watch(() => route.query.zoom, () => {
   if (!zoomResolution.value.replace) return
   void router.replace({ query: { ...route.query, zoom: '10' } }).catch(() => {})
@@ -184,6 +215,8 @@ watch(authorityKey, () => {
   // Clear the project vocabulary before a new principal/permission request.
   projectLoadVersion += 1
   projectController?.abort()
+  knowledgeLoadVersion += 1
+  knowledgeController?.abort()
   projects.value = []
   selectedProjectId.value = null
   projectState.value = 'loading'
@@ -244,6 +277,8 @@ onScopeDispose(() => {
   registerCommandContext?.(null)
   projectLoadVersion += 1
   projectController?.abort()
+  knowledgeLoadVersion += 1
+  knowledgeController?.abort()
 })
 </script>
 
@@ -342,6 +377,8 @@ onScopeDispose(() => {
         </div>
       </div>
     </section>
+
+    <Paimos6KnowledgeCompact :state="knowledgeState" :snapshot="knowledgeSnapshot" />
 
     <section class="p6-honesty" aria-labelledby="p6-honesty-title">
       <WifiOff :size="19" aria-hidden="true" />

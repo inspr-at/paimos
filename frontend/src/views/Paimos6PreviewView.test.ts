@@ -490,9 +490,9 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     await flush()
     expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain('has no mutation endpoint yet')
     expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain('No request was sent')
-    // Projects and session home load once; the instance orchestrator reloads
-    // when the selected project's authority boundary becomes concrete.
-    expect(api.get).toHaveBeenCalledTimes(4)
+    // Projects, session home, and structured knowledge load once; the instance
+    // orchestrator reloads when the selected project's authority becomes concrete.
+    expect(api.get).toHaveBeenCalledTimes(5)
     await mounted.unmount()
   })
 
