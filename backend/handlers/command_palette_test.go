@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
@@ -195,6 +196,14 @@ func TestCommandPaletteSearchIsGroupedBoundedDeterministicAndProjectScoped(t *te
 		result.Knowledge[0].Title != "Alpha" || result.Knowledge[0].Type != "memory" {
 		t.Fatalf("deterministic order/result=%+v", result)
 	}
+	assertFrontendTimestamp := func(name, value string) {
+		t.Helper()
+		if _, err := time.Parse(time.RFC3339Nano, value); err != nil || len(value) != len("2026-08-31T12:00:00.000Z") || value[10] != 'T' || value[19] != '.' || !strings.HasSuffix(value, "Z") {
+			t.Fatalf("%s updated_at=%q is not canonical millisecond RFC3339 UTC: %v", name, value, err)
+		}
+	}
+	assertFrontendTimestamp("default-timestamp node", result.Nodes[0].UpdatedAt)
+	assertFrontendTimestamp("default-timestamp knowledge", result.Knowledge[0].UpdatedAt)
 
 	response = ts.get(t, fmt.Sprintf("/api/projects/%d/command-palette/v1?q=hiddenneedle", projectID), ts.memberCookie)
 	assertStatus(t, response, http.StatusOK)

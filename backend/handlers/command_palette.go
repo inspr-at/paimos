@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -405,7 +406,12 @@ func searchCommandPaletteNodes(ctx context.Context, tx *sql.Tx, projectID int64,
 	out := []models.CommandPaletteNodeResult{}
 	for rows.Next() {
 		var item models.CommandPaletteNodeResult
-		if err := rows.Scan(&item.NodeID, &item.NodeKey, &item.Title, &item.Type, &item.TypeLabel, &item.Status, &item.UpdatedAt); err != nil {
+		var storedUpdatedAt string
+		if err := rows.Scan(&item.NodeID, &item.NodeKey, &item.Title, &item.Type, &item.TypeLabel, &item.Status, &storedUpdatedAt); err != nil {
+			return nil, err
+		}
+		item.UpdatedAt, err = canonicalCommandPaletteTimestamp(storedUpdatedAt)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, item)
@@ -435,12 +441,29 @@ func searchCommandPaletteKnowledge(ctx context.Context, tx *sql.Tx, projectID in
 	out := []models.CommandPaletteKnowledgeResult{}
 	for rows.Next() {
 		var item models.CommandPaletteKnowledgeResult
-		if err := rows.Scan(&item.KnowledgeID, &item.Type, &item.TypeLabel, &item.Slug, &item.Title, &item.UpdatedAt); err != nil {
+		var storedUpdatedAt string
+		if err := rows.Scan(&item.KnowledgeID, &item.Type, &item.TypeLabel, &item.Slug, &item.Title, &storedUpdatedAt); err != nil {
+			return nil, err
+		}
+		item.UpdatedAt, err = canonicalCommandPaletteTimestamp(storedUpdatedAt)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+func canonicalCommandPaletteTimestamp(stored string) (string, error) {
+	if parsed, err := time.Parse(time.RFC3339Nano, stored); err == nil {
+		return parsed.UTC().Format("2006-01-02T15:04:05.000Z"), nil
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05"} {
+		if parsed, err := time.ParseInLocation(layout, stored, time.UTC); err == nil {
+			return parsed.Format("2006-01-02T15:04:05.000Z"), nil
+		}
+	}
+	return "", fmt.Errorf("invalid stored command palette timestamp")
 }
 
 func writeCommandPaletteJSON(w http.ResponseWriter, status int, value any) {
