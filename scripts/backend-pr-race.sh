@@ -177,6 +177,13 @@ run_package() {
       # it. Race the stream subscription and permission-reset paths themselves.
       run_race ./agentmode '^TestStreamSubscribeRaceOverflowLostWakeRestartAndPermissionChanges$/(subscribe before high-water|permission grant and revoke)$'
       ;;
+    ./auth)
+      # The exhaustive auth package rebuilds the complete migration chain for
+      # every test and cannot fit the bounded PR race lane. Keep the two
+      # package-local SQLite contention contracts here; protected main and the
+      # nightly/full workflow retain the broad package race run.
+      run_race ./auth '^(TestResolveAPIKeyUsageStampNeverInheritsSQLiteBusyTimeout|TestResolveAPIKeyRecentUsageStaysReadOnlyWhileSQLiteWriterIsBusy)$'
+      ;;
     *)
       run_race "$package"
       ;;

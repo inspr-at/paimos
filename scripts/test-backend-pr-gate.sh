@@ -330,6 +330,13 @@ agentmode_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected github.com/inspr-
   fail 'agentmode race plan lost non-performance stream concurrency subtests'
 [[ "$agentmode_race_plan" != *'overflow\ lost\ wake'* ]] ||
   fail 'agentmode race plan includes a latency budget invalid under race instrumentation'
+auth_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected github.com/inspr-at/paimos/backend/auth)
+[[ "$(grep -c '^go test -race .* ./auth -run ' <<<"$auth_race_plan")" -eq 1 &&
+  "$auth_race_plan" == *'TestResolveAPIKeyUsageStampNeverInheritsSQLiteBusyTimeout'* &&
+  "$auth_race_plan" == *'TestResolveAPIKeyRecentUsageStaysReadOnlyWhileSQLiteWriterIsBusy'* ]] ||
+  fail 'auth PR race plan lost its package-local SQLite contention proofs'
+[[ "$auth_race_plan" != *' ./auth$' && "$auth_race_plan" != *'./...'* ]] ||
+  fail 'auth PR race plan expanded back to the exhaustive package suite'
 
 job_block() {
   local job="$1" file="${2:-$WORKFLOW}"
