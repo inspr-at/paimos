@@ -91,6 +91,10 @@
     {
       "name": "orchestrator",
       "description": "Explicit nullable instance orchestrator identity and super-admin configuration/audit"
+    },
+    {
+      "name": "command-palette",
+      "description": "Private Paimos 6 shortcut settings and authorized project-scoped grouped discovery"
     }
   ],
   "components": {
@@ -344,6 +348,10 @@
           "search_scope_shortcut": {
             "type": "string",
             "description": "JSON {ctrl,shift,alt,meta,code,key,label} or empty string when disabled. Must include Ctrl/Alt/Meta when set."
+          },
+          "command_palette_shortcut": {
+            "oneOf": [{"$ref": "#/components/schemas/CommandPaletteShortcut"}, {"type": "null"}],
+            "description": "Nullable Paimos 6 user override; null inherits the instance shortcut and then Mod+KeyK."
           },
           "created_at": {
             "type": "string",
@@ -2155,6 +2163,63 @@
           "schema_version": {"type": "integer", "const": 1},
           "events": {"type": "array", "items": {"$ref": "#/components/schemas/OrchestratorEvent"}},
           "next_after_revision": {"type": ["integer", "null"], "format": "int64", "minimum": 1}
+        }
+      },
+      "CommandPaletteShortcut": {
+        "type": "string", "minLength": 3, "maxLength": 128,
+        "description": "Canonical ordered chord: Mod, Ctrl, Meta, Alt, Shift, then one code from KeyA-KeyZ, Digit0-Digit9, Space, Slash, Backslash, BracketLeft, BracketRight, Semicolon, Quote, Comma, Period, Minus, Equal, Backquote. Mod excludes Ctrl/Meta; one of Mod/Ctrl/Meta/Alt is required. Mod/Ctrl/Meta plus optional Shift collides on KeyR/KeyL/KeyW/KeyQ/KeyT/KeyN/KeyP/KeyF or Digit1-Digit9."
+      },
+      "CommandPaletteSettings": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "default_shortcut", "instance_shortcut", "user_shortcut", "effective_shortcut", "source"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "default_shortcut": {"type": "string", "const": "Mod+KeyK"},
+          "instance_shortcut": {"oneOf": [{"$ref": "#/components/schemas/CommandPaletteShortcut"}, {"type": "null"}]},
+          "user_shortcut": {"oneOf": [{"$ref": "#/components/schemas/CommandPaletteShortcut"}, {"type": "null"}]},
+          "effective_shortcut": {"$ref": "#/components/schemas/CommandPaletteShortcut"},
+          "source": {"type": "string", "enum": ["default", "instance", "user"]}
+        }
+      },
+      "CommandPaletteSettingWrite": {
+        "type": "object", "additionalProperties": false, "required": ["shortcut"],
+        "properties": {"shortcut": {"oneOf": [{"$ref": "#/components/schemas/CommandPaletteShortcut"}, {"type": "null"}]}}
+      },
+      "CommandPaletteSessionResult": {
+        "type": "object", "additionalProperties": false,
+        "required": ["product_session_id", "title", "summary", "updated_at"],
+        "properties": {
+          "product_session_id": {"type": "string", "format": "uuid"}, "title": {"type": "string"},
+          "summary": {"type": "string"}, "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "CommandPaletteNodeResult": {
+        "type": "object", "additionalProperties": false,
+        "required": ["node_id", "node_key", "title", "type", "type_label", "status", "updated_at"],
+        "properties": {
+          "node_id": {"type": "integer", "format": "int64", "minimum": 1}, "node_key": {"type": "string"},
+          "title": {"type": "string"}, "type": {"type": "string"}, "type_label": {"type": "string"},
+          "status": {"type": "string"}, "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "CommandPaletteKnowledgeResult": {
+        "type": "object", "additionalProperties": false,
+        "required": ["knowledge_id", "type", "type_label", "slug", "title", "updated_at"],
+        "properties": {
+          "knowledge_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "type": {"type": "string", "enum": ["memory", "runbook", "external-system", "related-project", "guideline"]},
+          "type_label": {"type": "string"}, "slug": {"type": "string"}, "title": {"type": "string"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "CommandPaletteSearchResponse": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "query", "sessions", "nodes", "knowledge"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1}, "query": {"type": "string", "minLength": 1, "maxLength": 128},
+          "sessions": {"type": "array", "maxItems": 20, "items": {"$ref": "#/components/schemas/CommandPaletteSessionResult"}},
+          "nodes": {"type": "array", "maxItems": 20, "items": {"$ref": "#/components/schemas/CommandPaletteNodeResult"}},
+          "knowledge": {"type": "array", "maxItems": 20, "items": {"$ref": "#/components/schemas/CommandPaletteKnowledgeResult"}}
         }
       }
     },
@@ -4933,6 +4998,60 @@
     "/api/projects/{id}/messages/delivery-unavailable": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
       "post": {"tags": ["agents"], "summary": "Release an unavailable leased agentd delivery to a live generation or simple fallback", "description": "Does not complete or acknowledge the delivery. The same row must receive a fresh FIFO lease and CompleteLocalDelivery handoff. Working M161 generations require a heartbeat no older than 90 seconds; no valid route becomes blocked target_missing.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentDeliveryUnavailable"}}}}, "responses": {"200": {"description": "Delivery re-pended to an eligible route"}, "400": {"description": "Lease, attribution, or route validation failed"}}}
+    },
+    "/api/command-palette/v1/settings": {
+      "get": {
+        "tags": ["command-palette"], "summary": "Read effective private command-palette shortcut settings",
+        "responses": {
+          "200": {"description": "User then instance then default shortcut projection", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommandPaletteSettings"}}}},
+          "401": {"description": "Authentication required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "External or password-gated caller", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "500": {"description": "internal_error", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      },
+      "put": {
+        "tags": ["command-palette"], "summary": "Set or reset the current internal user's shortcut",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommandPaletteSettingWrite"}}}},
+        "responses": {
+          "200": {"description": "Updated effective settings", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommandPaletteSettings"}}}},
+          "400": {"description": "invalid_request, invalid_shortcut, or shortcut_collision", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "401": {"description": "Authentication required or lost before transactional reauthorization", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "External or password-gated caller", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "500": {"description": "internal_error", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/command-palette/v1/instance-settings": {
+      "put": {
+        "tags": ["command-palette"], "summary": "Set or reset the instance shortcut (admin)",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommandPaletteSettingWrite"}}}},
+        "responses": {
+          "200": {"description": "Updated settings as resolved for the current admin", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommandPaletteSettings"}}}},
+          "400": {"description": "invalid_request, invalid_shortcut, or shortcut_collision", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "401": {"description": "Authentication required or lost before transactional reauthorization", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "Current principal is not an internal admin", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "500": {"description": "internal_error", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/command-palette/v1": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+      "get": {
+        "tags": ["command-palette"], "summary": "Search authorized project sessions, nodes, and live knowledge",
+        "description": "Returns three independently bounded deterministic groups. It neither searches nor returns node descriptions, knowledge bodies, metadata, secrets, or project identity.",
+        "parameters": [
+          {"name": "q", "in": "query", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 128}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 20, "default": 8}}
+        ],
+        "responses": {
+          "200": {"description": "Closed grouped discovery response", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommandPaletteSearchResponse"}}}},
+          "400": {"description": "invalid_request", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "401": {"description": "Authentication required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "External or password-gated caller", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Project missing or not currently viewable", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "500": {"description": "internal_error", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
     },
     "/api/projects/{id}/session-home/v1": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],

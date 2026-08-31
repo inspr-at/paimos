@@ -560,6 +560,7 @@ func mountAPI(r chi.Router) {
 		r.Use(auth.BlockExternal)
 		handlers.RegisterSessionHomeRoutes(r)
 		handlers.RegisterOrchestratorRoutes(r)
+		handlers.RegisterCommandPaletteRoutes(r)
 	})
 
 	// Portal (external + admin)

@@ -28,7 +28,7 @@ const userRoleSelectExpr = `CASE
 	ELSE 'member'
 END`
 const userSuperAdminSelectExpr = `CASE WHEN ` + userRoleSelectExpr + ` = 'super_admin' OR is_super_admin = 1 THEN 1 ELSE 0 END`
-const userSelectCols = `id, username, ` + userRoleSelectExpr + `, status, created_at, nickname, first_name, last_name, email, avatar_path, markdown_default, monospace_fields, recent_projects_limit, internal_rate_hourly, show_alt_unit_table, show_alt_unit_detail, locale, recent_timers_limit, timezone, preview_hover_delay, issue_auto_refresh_enabled, issue_auto_refresh_interval_seconds, last_login_at, accruals_stats_enabled, accruals_extra_statuses, ` + userSuperAdminSelectExpr + `, search_scope_shortcut`
+const userSelectCols = `id, username, ` + userRoleSelectExpr + `, status, created_at, nickname, first_name, last_name, email, avatar_path, markdown_default, monospace_fields, recent_projects_limit, internal_rate_hourly, show_alt_unit_table, show_alt_unit_detail, locale, recent_timers_limit, timezone, preview_hover_delay, issue_auto_refresh_enabled, issue_auto_refresh_interval_seconds, last_login_at, accruals_stats_enabled, accruals_extra_statuses, ` + userSuperAdminSelectExpr + `, search_scope_shortcut, command_palette_shortcut`
 
 // userSelectColsWithTOTP appends totp_enabled — used by admin list/update endpoints.
 const userSelectColsWithTOTP = userSelectCols + `, totp_enabled`
@@ -42,7 +42,7 @@ func scanUser(row interface{ Scan(...any) error }, u *models.User) error {
 		&u.RecentTimersLimit, &u.Timezone, &u.PreviewHoverDelay,
 		&u.IssueAutoRefreshEnabled, &u.IssueAutoRefreshIntervalSeconds, &u.LastLoginAt,
 		&u.AccrualsStatsEnabled, &u.AccrualsExtraStatuses, &u.IsSuperAdmin,
-		&u.SearchScopeShortcut)
+		&u.SearchScopeShortcut, &u.CommandPaletteShortcut)
 }
 
 // scanUserWithTOTP scans the projection with totp_enabled into a User struct.
@@ -54,5 +54,5 @@ func scanUserWithTOTP(row interface{ Scan(...any) error }, u *models.User) error
 		&u.RecentTimersLimit, &u.Timezone, &u.PreviewHoverDelay,
 		&u.IssueAutoRefreshEnabled, &u.IssueAutoRefreshIntervalSeconds, &u.LastLoginAt,
 		&u.AccrualsStatsEnabled, &u.AccrualsExtraStatuses, &u.IsSuperAdmin,
-		&u.SearchScopeShortcut, &u.TotpEnabled)
+		&u.SearchScopeShortcut, &u.CommandPaletteShortcut, &u.TotpEnabled)
 }

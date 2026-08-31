@@ -51,6 +51,9 @@ type User struct {
 	// PAI-368 / M103: per-user search-scope shortcut. JSON blob (see
 	// handlers/profile.go validation) or empty string when disabled.
 	SearchScopeShortcut string `json:"search_scope_shortcut"`
+	// PAI-866 / M166: nullable Paimos 6 command-palette override. NULL
+	// inherits the instance setting and then the safe default.
+	CommandPaletteShortcut *string `json:"command_palette_shortcut"`
 	// PAI-706 / M135: voice-intake auto-switch confidence threshold
 	// override (50..100). NULL = use the instance default.
 	IntakeConfidenceThreshold *int `json:"intake_confidence_threshold"`

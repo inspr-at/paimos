@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/text/cases"
 	"modernc.org/sqlite"
 
 	"github.com/inspr-at/paimos/backend/brand"
@@ -45,10 +46,13 @@ var perConnectionPragmas = []string{
 	"PRAGMA foreign_keys=ON",
 }
 
+var paimosUnicodeCaseFolder = cases.Fold()
+
 func init() {
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_cosine", 2, paimosCosineSQL)
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_contains_secret_like", 1, paimosContainsSecretLikeSQL)
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_domain_sha256", -1, paimosDomainSHA256SQL)
+	sqlite.MustRegisterDeterministicScalarFunction("paimos_casefold", 1, paimosCasefoldSQL)
 
 	// RegisterConnectionHook fires on every new connection in the pool —
 	// the right place for genuinely per-connection pragmas. NOT the right
@@ -68,6 +72,17 @@ func init() {
 		}
 		return nil
 	})
+}
+
+func paimosCasefoldSQL(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("paimos_casefold requires exactly one text value")
+	}
+	value, ok := args[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("paimos_casefold requires a non-null text value")
+	}
+	return paimosUnicodeCaseFolder.String(value), nil
 }
 
 func paimosDomainSHA256SQL(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
@@ -12132,7 +12147,21 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 WHEN NEW.name<>OLD.name
 			  AND EXISTS(SELECT 1 FROM instance_orchestrator io WHERE io.singleton_id=1 AND io.project_agent_id=OLD.id)
 			  AND EXISTS(SELECT 1 FROM harness_sessions hs WHERE hs.project_agent_id=OLD.id AND hs.phase<>'stopped')
-			 BEGIN SELECT RAISE(ABORT,'assigned orchestrator has active harness'); END`,
+				 BEGIN SELECT RAISE(ABORT,'assigned orchestrator has active harness'); END`,
+		}},
+
+		// M166 / PAI-866: nullable per-user Paimos 6 command-palette
+		// shortcut. NULL inherits the instance app_settings override and then
+		// the safe default. M164 deliberately remains reserved/absent.
+		{166, []string{
+			`ALTER TABLE users ADD COLUMN command_palette_shortcut TEXT
+			 CHECK(command_palette_shortcut IS NULL OR (
+			  typeof(command_palette_shortcut)='text' AND
+			  length(CAST(command_palette_shortcut AS BLOB)) BETWEEN 3 AND 128 AND
+			  command_palette_shortcut=trim(command_palette_shortcut) AND
+			  instr(command_palette_shortcut,char(0))=0 AND
+			  command_palette_shortcut NOT GLOB ('*['||char(1)||'-'||char(31)||char(127)||']*')
+			 ))`,
 		}},
 	}
 
@@ -12297,6 +12326,16 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			"trg_instance_orchestrator_events_sequence", "trg_instance_orchestrator_events_no_update", "trg_instance_orchestrator_events_no_delete",
 			"trg_instance_orchestrator_project_no_soft_delete", "trg_instance_orchestrator_no_active_harness_rename",
 		})
+	},
+	166: func(ctx context.Context, conn *sql.Conn) error {
+		var count int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('users') WHERE name='command_palette_shortcut'`).Scan(&count); err != nil {
+			return fmt.Errorf("inspect M166 users ownership: %w", err)
+		}
+		if count != 0 {
+			return fmt.Errorf("M166 schema is partially present or locally incompatible: column:users.command_palette_shortcut")
+		}
+		return nil
 	},
 }
 
