@@ -72,6 +72,7 @@ func TestSessionHomeProductionRouterIsPrivateBeforeEveryGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := fmt.Sprintf("/api/projects/%d/session-home/v1", projectID)
+	zoomPath := fmt.Sprintf("/api/projects/%d/session-home/zoom/v1", projectID)
 
 	request := func(path, cookie string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -98,6 +99,15 @@ func TestSessionHomeProductionRouterIsPrivateBeforeEveryGate(t *testing.T) {
 		{name: "revoked project view", path: path, cookie: revokedCookie, status: http.StatusNotFound},
 		{name: "handler validation", path: "/api/projects/0/session-home/v1", cookie: adminCookie, status: http.StatusBadRequest},
 		{name: "success", path: path, cookie: adminCookie, status: http.StatusOK},
+		{name: "zoom unauthenticated", path: zoomPath, status: http.StatusUnauthorized},
+		{name: "zoom invalid credential", path: zoomPath, cookie: "session=not-a-session", status: http.StatusUnauthorized},
+		{name: "zoom inactive principal", path: zoomPath, cookie: inactiveCookie, status: http.StatusUnauthorized},
+		{name: "zoom must change password", path: zoomPath, cookie: mustChangeCookie, status: http.StatusForbidden},
+		{name: "zoom external role", path: zoomPath, cookie: externalCookie, status: http.StatusForbidden},
+		{name: "zoom revoked project view", path: zoomPath, cookie: revokedCookie, status: http.StatusNotFound},
+		{name: "zoom handler validation", path: "/api/projects/0/session-home/zoom/v1", cookie: adminCookie, status: http.StatusBadRequest},
+		{name: "zoom malformed query", path: zoomPath + "?zoom=0", cookie: adminCookie, status: http.StatusBadRequest},
+		{name: "zoom success", path: zoomPath, cookie: adminCookie, status: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			response := request(tc.path, tc.cookie)
