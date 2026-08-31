@@ -6,7 +6,7 @@ import { mountComponent } from '@/components/ai/testMount'
 import { commandShortcutLabel } from '@/v6/commandPalette'
 
 const { route, router } = vi.hoisted(() => ({
-  route: { query: { project: '42' } as Record<string, string>, fullPath: '/dev/paimos-6?project=42' },
+  route: { query: { project: '42' } as Record<string, string>, fullPath: '/?project=42' },
   router: { replace: vi.fn().mockResolvedValue(undefined), push: vi.fn().mockResolvedValue(undefined) },
 }))
 
@@ -24,7 +24,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 import Paimos6Layout from './Paimos6Layout.vue'
 
-describe('Paimos6Layout (PAI-854 isolated preview shell)', () => {
+describe('Paimos6Layout (PAI-854 / PAI-867 isolated production shell)', () => {
   afterEach(() => {
     document.body.innerHTML = ''
     vi.restoreAllMocks()
@@ -32,7 +32,7 @@ describe('Paimos6Layout (PAI-854 isolated preview shell)', () => {
     router.push.mockReset().mockResolvedValue(undefined)
   })
 
-  it('mounts the live read-only preview and command affordances without ordinary CRUD chrome or a rail', async () => {
+  it('mounts the live Paimos 6 home and command affordances without ordinary CRUD chrome or a rail', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({
       schema_version: 1, default_shortcut: 'Mod+KeyK', instance_shortcut: null,
       user_shortcut: null, effective_shortcut: 'Mod+KeyK', source: 'default',
@@ -45,8 +45,8 @@ describe('Paimos6Layout (PAI-854 isolated preview shell)', () => {
 
     expect(shell).not.toBeNull()
     expect(text).toContain('Paimos')
-    expect(text).toContain('6 preview')
-    expect(text).toContain('Development · live read-only')
+    expect(text).toContain('6.0')
+    expect(text).toContain('Live · web')
     expect(text).not.toContain('Visual mock')
     expect(shell.querySelector('kbd')?.textContent).toBe(commandShortcutLabel('Mod+KeyK'))
     expect(shell.querySelector('.p6-command-mount')?.getAttribute('aria-label')).toContain('Open command palette')
@@ -56,7 +56,7 @@ describe('Paimos6Layout (PAI-854 isolated preview shell)', () => {
     for (const label of ['Projects', 'Customers', 'Issues', 'Reporting', 'New Issue', 'Timer', 'Undo']) {
       expect(text).not.toContain(label)
     }
-    expect(shell.querySelector<HTMLAnchorElement>('.p6-back')?.getAttribute('href')).toBe('/')
+    expect(shell.querySelector<HTMLAnchorElement>('.p6-back')?.getAttribute('href')).toBe('/legacy')
 
     shell.querySelector<HTMLButtonElement>('.p6-command-mount')!.click()
     await nextTick()
@@ -65,8 +65,12 @@ describe('Paimos6Layout (PAI-854 isolated preview shell)', () => {
     expect(shell.textContent).toContain('Responsive web · no push')
     expect(shell.textContent).toContain('Open talk-first door')
     expect(shell.textContent).toContain('Command shortcut settings')
-    expect(shell.textContent).toContain('Return to 5.x dashboard')
+    expect(shell.textContent).toContain('Open 5.x dashboard')
     expect(shell.textContent).not.toContain('Clear selected session')
+    const legacy = [...shell.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+      .find((button) => button.textContent?.includes('Open 5.x dashboard'))!
+    legacy.click()
+    await vi.waitFor(() => expect(router.push).toHaveBeenCalledWith('/legacy'))
     await mounted.unmount()
   })
 

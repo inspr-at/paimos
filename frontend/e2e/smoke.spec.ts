@@ -69,12 +69,20 @@ test('backend + DB: dev-login, seeded projects, issues list endpoint', async ({ 
   expect(issues.ok(), `issues list failed: ${issues.status()}`).toBeTruthy()
 })
 
-test('frontend serves the authenticated shell (no login bounce)', async ({ page, context }) => {
+test('frontend serves Paimos 6 at root with an exact 5.x dashboard escape', async ({ page, context }) => {
   await devLogin(context.request)
   await page.goto('/')
   await expect(page).toHaveTitle(/PAIMOS/i)
   // authenticated session → the login form must not be shown
   await expect(page.locator('input[type="password"]')).toHaveCount(0)
+  await expect(page.locator('[data-shell="v6"]')).toBeVisible()
+  await expect(page.getByText('6.0', { exact: true })).toBeVisible()
+  await expect(page.locator('.p6-back')).toHaveAttribute('href', '/legacy')
+
+  await page.goto('/legacy')
+  await expect(page.locator('.app-shell')).toBeVisible()
+  await expect(page.locator('[data-shell="v6"]')).toHaveCount(0)
+  await expect(page.getByText('Dashboard', { exact: true }).first()).toBeVisible()
 })
 
 test('project view renders issues fetched from the backend', async ({ page, context }) => {

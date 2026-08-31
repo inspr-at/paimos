@@ -1,9 +1,9 @@
 <!--
-  PAI-854 — isolated Paimos 6 preview shell. This is intentionally not the
+  PAI-854 / PAI-867 — isolated Paimos 6 production shell. This is intentionally not the
   production AppLayout or AgentModeLayout: no left rail and no CRUD chrome.
 -->
 <script setup lang="ts">
-import { ArrowLeft, Command, FlaskConical } from 'lucide-vue-next'
+import { ArrowLeft, Command, RadioTower } from 'lucide-vue-next'
 import { computed, nextTick, provide, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -82,7 +82,7 @@ async function activate(item: Paimos6PaletteActivation) {
     await router.push('/settings?tab=account').catch(() => {})
   } else if (item.action === 'return_5x') {
     palette.close()
-    await router.push('/').catch(() => {})
+    await router.push('/legacy').catch(() => {})
   }
 }
 </script>
@@ -90,19 +90,19 @@ async function activate(item: Paimos6PaletteActivation) {
 <template>
   <div class="p6-shell" data-shell="v6">
     <header class="p6-shell-header">
-      <a class="p6-back" href="/" aria-label="Return to the current 5.x dashboard">
+      <a class="p6-back" href="/legacy" aria-label="Open the 5.x dashboard">
         <ArrowLeft :size="16" aria-hidden="true" />
         <span>5.x dashboard</span>
       </a>
-      <div class="p6-wordmark" aria-label="Paimos six preview">
+      <div class="p6-wordmark" aria-label="Paimos 6.0">
         <span class="p6-mark" aria-hidden="true">P</span>
         <span>Paimos</span>
-        <span class="p6-six">6 preview</span>
+        <span class="p6-six">6.0</span>
       </div>
       <div class="p6-shell-tools">
         <span class="p6-fixture-chip">
-          <FlaskConical :size="14" aria-hidden="true" />
-          Development · live read-only
+          <RadioTower :size="14" aria-hidden="true" />
+          Live · web
         </span>
         <button
           ref="commandButton"

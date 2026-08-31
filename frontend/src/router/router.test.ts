@@ -54,9 +54,9 @@ describe('router shell contract (PAI-805)', () => {
     expect(r!.meta.portal).toBeUndefined()
   })
 
-  it('leaves every other route on the standard shell (parity)', () => {
+  it('leaves every route except the focused production and development shells on standard chrome', () => {
     for (const r of router.getRoutes()) {
-      if (r.path === '/agent-mode' || r.path === '/dev/agent-mode' || r.path === '/dev/paimos-6') continue
+      if (r.path === '/' || r.path === '/agent-mode' || r.path === '/dev/agent-mode' || r.path === '/dev/paimos-6') continue
       expect(r.meta.shell, `${r.path} must not opt into a reduced shell`).toBeUndefined()
     }
   })
@@ -71,15 +71,21 @@ describe('router shell contract (PAI-805)', () => {
     expect(ref!.meta?.shell).toBe('agent')
   })
 
-  it('keeps the Paimos 6 preview development-only and preserves the exact Dashboard root', () => {
+  it('promotes Paimos 6 to production root and preserves the exact 5.x dashboard at /legacy', () => {
     const prod = buildRoutes(false)
     expect(prod.find((r) => r.path === '/dev/paimos-6')).toBeUndefined()
-    expect(prod.find((r) => r.path === '/legacy')).toBeUndefined()
 
-    const dashboard = prod.find((r) => r.path === '/')
-    expect(dashboard).toBeDefined()
-    expect(dashboard!.redirect).toBeUndefined()
-    expect(String(dashboard!.component)).toContain('DashboardView.vue')
+    const home = prod.find((r) => r.path === '/')
+    expect(home).toBeDefined()
+    expect(home!.redirect).toBeUndefined()
+    expect(home!.meta?.shell).toBe('v6')
+    expect(String(home!.component)).toContain('Paimos6PreviewView.vue')
+
+    const legacy = prod.find((r) => r.path === '/legacy')
+    expect(legacy).toBeDefined()
+    expect(legacy!.redirect).toBeUndefined()
+    expect(legacy!.meta?.shell).toBeUndefined()
+    expect(String(legacy!.component)).toContain('DashboardView.vue')
 
     const preview = buildRoutes(true).find((r) => r.path === '/dev/paimos-6')
     expect(preview).toBeDefined()
