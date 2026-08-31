@@ -18,12 +18,13 @@ import (
 //   - nodes: the project's knowledge entries (memory / runbook /
 //     external_system / related_project / guideline), plus any other issue
 //     (ticket / task / epic …) that is linked to one of them.
-//   - edges: issue_relations of the knowledge-meaningful types between those
-//     nodes — `applies_to_memory` (ticket → memory) and the generic
-//     cross-references (depends_on, impacts, follows_from, blocks, related).
+//   - edges: legacy issue_relations of the knowledge-meaningful types between
+//     those nodes, plus Paimos 6 canonical structured-knowledge links when the
+//     additive schema is present.
 //
-// Structural relations (parent / groups / sprint / cost_unit / release) are
-// intentionally excluded — they describe work hierarchy, not knowledge.
+// Legacy structural issue_relations (parent / groups / sprint / cost_unit /
+// release) remain excluded. A canonical `parent` row is a typed knowledge
+// hierarchy, not a work-breakdown relation.
 type graphNode struct {
 	ID             int64  `json:"id"`
 	Type           string `json:"type"`
@@ -124,6 +125,60 @@ func GraphHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rows.Close()
+
+		// PAI-863: structured entries use one canonical typed-link table.
+		// Project the same rows into the legacy graph response so 5.x presents
+		// the new truth without writing a competing issue_relations edge.
+		var structuredKnowledgeAvailable int
+		if err := db.DB.QueryRow(`SELECT EXISTS(
+			SELECT 1 FROM sqlite_schema WHERE type='table' AND name='structured_knowledge_links'
+		)`).Scan(&structuredKnowledgeAvailable); err != nil {
+			writeError(w, r, "query failed", http.StatusInternalServerError)
+			return
+		}
+		if structuredKnowledgeAvailable == 1 {
+			canonicalRows, err := db.DB.Query(`
+			SELECT link.source_knowledge_id,link.target_issue_id,link.canonical_kind
+			FROM structured_knowledge_links link
+			JOIN structured_knowledge_entries source_scope ON source_scope.knowledge_id=link.source_knowledge_id
+			JOIN issues source_issue ON source_issue.id=source_scope.knowledge_id
+			JOIN issues target_issue ON target_issue.id=link.target_issue_id
+			WHERE source_scope.level='project' AND source_scope.origin_project_id=?
+			 AND source_issue.project_id=? AND source_issue.deleted_at IS NULL
+			 AND target_issue.project_id=? AND target_issue.deleted_at IS NULL
+			ORDER BY link.link_id`, projectID, projectID, projectID)
+			if err != nil {
+				writeError(w, r, "query failed", http.StatusInternalServerError)
+				return
+			}
+			for canonicalRows.Next() {
+				var src, tgt int64
+				var kind string
+				if err := canonicalRows.Scan(&src, &tgt, &kind); err != nil {
+					canonicalRows.Close()
+					writeError(w, r, "query failed", http.StatusInternalServerError)
+					return
+				}
+				key := [3]any{src, tgt, kind}
+				if _, duplicate := seen[key]; duplicate {
+					continue
+				}
+				seen[key] = struct{}{}
+				edges = append(edges, graphEdge{Source: src, Target: tgt, Type: kind})
+				if _, ok := nodes[src]; !ok {
+					extra[src] = struct{}{}
+				}
+				if _, ok := nodes[tgt]; !ok {
+					extra[tgt] = struct{}{}
+				}
+			}
+			if err := canonicalRows.Err(); err != nil {
+				canonicalRows.Close()
+				writeError(w, r, "query failed", http.StatusInternalServerError)
+				return
+			}
+			canonicalRows.Close()
+		}
 
 		// Hydrate the non-knowledge endpoints (tickets/tasks/…) as nodes.
 		if len(extra) > 0 {
