@@ -52,6 +52,52 @@ write_fake_commands() {
   local bin="$1"
   mkdir -p "$bin"
 
+  cat > "$bin/git" <<'GIT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_git=/usr/bin/git
+advance_main() {
+  local label="$1" advance_work="$FAKE_GH_STATE/$1-advance-work"
+  "$real_git" clone -q "${FAKE_GH_ORIGIN:?}" "$advance_work" >/dev/null 2>&1
+  "$real_git" -C "$advance_work" config user.name 'Protected Main Bot'
+  "$real_git" -C "$advance_work" config user.email 'protected-main@example.test'
+  "$real_git" -C "$advance_work" switch -q main
+  printf 'main moved during %s\n' "$label" > "$advance_work/$label-main.txt"
+  "$real_git" -C "$advance_work" add "$label-main.txt"
+  "$real_git" -C "$advance_work" commit -q --signoff -m "advance main during $label"
+  FAKE_GH_SERVER_MERGE=1 "$real_git" -C "$advance_work" push -q origin main
+}
+
+if [[ ( "${FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT:-0}" == "1" ||
+        "${FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY:-0}" == "1" ) &&
+      "$*" == *'refs/paimos/release-origin-tags/'* ]]; then
+  "$real_git" "$@"
+  count_file="${FAKE_GH_STATE:?}/tag-audit-count"
+  count=0
+  [[ ! -f "$count_file" ]] || count=$(<"$count_file")
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$count_file"
+  if [[ "$count" -eq 2 && "${FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT:-0}" == "1" ]]; then
+    advance_main historical-tag-audit
+  elif [[ "$count" -eq 2 ]]; then
+    touch "$FAKE_GH_STATE/post-audit-tag-query-ready"
+  fi
+  exit 0
+fi
+if [[ "${FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY:-0}" == "1" &&
+      "${1:-}" == "ls-remote" && "$*" == *"refs/tags/v${FAKE_RELEASE_VERSION:?}^{}"* &&
+      -f "$FAKE_GH_STATE/post-audit-tag-query-ready" &&
+      ! -f "$FAKE_GH_STATE/post-audit-tag-query-advanced" ]]; then
+  output=$("$real_git" "$@")
+  advance_main post-audit-tag-query
+  touch "$FAKE_GH_STATE/post-audit-tag-query-advanced"
+  printf '%s' "$output"
+  exit 0
+fi
+exec "$real_git" "$@"
+GIT
+
   cat > "$bin/date" <<'DATE'
 #!/usr/bin/env bash
 if [[ -n "${FAKE_GH_STATE:-}" && -f "$FAKE_GH_STATE/vienna-date" ]]; then
@@ -287,7 +333,7 @@ case "${1:-} ${2:-}" in
 esac
 GH
 
-  chmod +x "$bin/date" "$bin/docker" "$bin/gh"
+  chmod +x "$bin/date" "$bin/docker" "$bin/gh" "$bin/git"
 }
 
 setup_repo() {
@@ -407,6 +453,8 @@ run_release() {
       FAKE_VIENNA_FLIP_AFTER_BACKEND="${FAKE_VIENNA_FLIP_AFTER_BACKEND:-0}" \
       FAKE_VIENNA_NEXT_DAY="${FAKE_VIENNA_NEXT_DAY:-}" \
       FAKE_ADVANCE_MAIN_AFTER_BACKEND="${FAKE_ADVANCE_MAIN_AFTER_BACKEND:-0}" \
+      FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT="${FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT:-0}" \
+      FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY="${FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY:-0}" \
       RELEASE_MERGE_TIMEOUT="${RELEASE_MERGE_TIMEOUT:-10}" \
       RELEASE_MERGE_POLL=1 \
       ./scripts/release.sh "$@"
@@ -1358,6 +1406,35 @@ test_interrupted_calendar_descendant_recovery() {
     fail 'protected-main recovery race rejection was not explicit'
   ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
     fail 'protected-main recovery race still published a tag'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-tag-audit-race "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  output="$TMP_ROOT/calendar-descendant-tag-audit-race/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" FAKE_ADVANCE_MAIN_DURING_TAG_AUDIT=1 \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery tagged after main moved during the historical tag audit'
+  fi
+  [[ "$(<"$RECOVERY_STATE/tag-audit-count")" == 2 ]] ||
+    fail 'historical tag audit race fixture did not advance main during the pre-tag audit'
+  grep -qF 'is not the exact current protected origin/main head' "$output" ||
+    fail 'historical tag audit main-race rejection was not explicit'
+  ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'historical tag audit main-race still published a tag'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-post-audit-race "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  output="$TMP_ROOT/calendar-descendant-post-audit-race/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     FAKE_ADVANCE_MAIN_DURING_POST_AUDIT_TAG_QUERY=1 \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery tagged after main moved during the post-audit tag query'
+  fi
+  [[ -f "$RECOVERY_STATE/post-audit-tag-query-advanced" ]] ||
+    fail 'post-audit tag-query fixture did not advance protected main'
+  grep -qF 'is not the exact current protected origin/main head' "$output" ||
+    fail 'post-audit tag-query main-race rejection was not explicit'
+  ! git --git-dir="$RECOVERY_ORIGIN" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'post-audit tag-query main-race still published a tag'
 
   setup_interrupted_calendar_descendant_recovery calendar-descendant-midnight "$calendar_version"
   rm "$RECOVERY_STATE/backend-full-failed"

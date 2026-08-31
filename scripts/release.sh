@@ -122,17 +122,22 @@ assert_no_release_tag_after_merge() {
   done <<<"$existing_tags"
 }
 
-assert_calendar_descendant_recovery() {
-  local release_merge="$1" candidate="$2" tag_state="$3"
-  local origin_main remote_main remote_tag changed file required
-  local required_files=$'.github/workflows/backend-full.yml\nscripts/test-backend-pr-gate.sh\nscripts/wait-backend-full.sh'
-
-  assert_calendar_cut_day "calendar descendant recovery validation"
+assert_exact_calendar_recovery_main() {
+  local candidate="$1" origin_main remote_main
   git fetch --quiet origin main
   origin_main=$(git rev-parse origin/main)
   remote_main=$(git ls-remote --heads origin refs/heads/main | awk 'NR == 1 {print $1}')
   [[ "$remote_main" =~ ^[0-9a-f]{40}$ && "$origin_main" == "$remote_main" && "$candidate" == "$origin_main" ]] ||
     fail "calendar recovery candidate is not the exact current protected origin/main head"
+}
+
+assert_calendar_descendant_recovery() {
+  local release_merge="$1" candidate="$2" tag_state="$3"
+  local remote_tag changed file required
+  local required_files=$'.github/workflows/backend-full.yml\nscripts/test-backend-pr-gate.sh\nscripts/wait-backend-full.sh'
+
+  assert_calendar_cut_day "calendar descendant recovery validation"
+  assert_exact_calendar_recovery_main "$candidate"
   [[ "$candidate" != "$release_merge" ]] ||
     fail "calendar descendant recovery requires a commit after the interrupted release merge"
   git merge-base --is-ancestor "$release_merge" "$candidate" ||
@@ -164,6 +169,10 @@ assert_calendar_descendant_recovery() {
       fail "calendar descendant recovery is missing required timeout correction: $required"
   done <<<"$required_files"
   assert_no_release_tag_after_merge "$release_merge"
+  # The tag-history audit above performs remote list/fetch operations. Pin main
+  # again after that potentially long audit so tag creation cannot use a
+  # candidate that stopped being the protected-main head during the audit.
+  assert_exact_calendar_recovery_main "$candidate"
 }
 
 assert_calendar_cut_day() {
@@ -799,6 +808,12 @@ tag_release_merge() {
     if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
       existing_oid=$(git rev-list -n1 "${NEW_TAG}^{}")
       fail "$NEW_TAG exists only locally at $existing_oid; refusing unproven tag publication"
+    fi
+    if [[ -n "$CALENDAR_RECOVERY_MERGE_OID" ]]; then
+      # The absent-tag query above is remote work after the history audit.
+      # Re-pin protected main as the final operation before materializing the
+      # local tag, closing movement during that query as well.
+      assert_exact_calendar_recovery_main "$merge_oid"
     fi
     git tag -a --no-sign "$NEW_TAG" "$merge_oid" -m "release $NEW"
     echo "Created $NEW_TAG at protected-main commit $merge_oid."
