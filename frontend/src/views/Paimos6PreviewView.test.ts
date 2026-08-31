@@ -5,15 +5,16 @@ import { createPinia, setActivePinia } from 'pinia'
 const routerHarness = vi.hoisted(() => ({
   route: { query: {} as Record<string, unknown> },
   replace: vi.fn<(location: { query?: Record<string, unknown> }) => Promise<void>>(),
+  push: vi.fn<(location: { query?: Record<string, unknown> }) => Promise<void>>(),
 }))
 
 vi.mock('vue-router', async (importOriginal) => ({
   ...await importOriginal<typeof import('vue-router')>(),
   useRoute: () => routerHarness.route,
-  useRouter: () => ({ replace: routerHarness.replace }),
+  useRouter: () => ({ replace: routerHarness.replace, push: routerHarness.push }),
 }))
 
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import { mountComponent } from '@/components/ai/testMount'
 import { useAuthStore, type User } from '@/stores/auth'
 import Paimos6PreviewView from './Paimos6PreviewView.vue'
@@ -105,17 +106,65 @@ function projectBPaimosRow() {
   }
 }
 
-function liveProjection(sessions = [managedRow(), unmanagedRow(), paimosRow()], projectId = PROJECT_ID) {
+function zoomBand(zoom: string) {
+  return zoom.length >= 4 ? 'far' : zoom.length >= 3 ? 'aggregate' : zoom.length >= 2 ? 'overview' : 'detail'
+}
+
+function zoomLimit(zoom: string) {
+  if (zoom.length >= 3) return 100
+  return zoom.length === 1 ? zoom.charCodeAt(0) - 48 : (zoom.charCodeAt(0) - 48) * 10 + zoom.charCodeAt(1) - 48
+}
+
+function liveProjection(
+  sessions = [managedRow(), unmanagedRow(), paimosRow()],
+  projectId = PROJECT_ID,
+  zoom = '10',
+  selectedSession: ReturnType<typeof managedRow> | ReturnType<typeof unmanagedRow> | ReturnType<typeof paimosRow> | null = null,
+  totalSessions = sessions.length,
+) {
+  const visible = selectedSession && !sessions.some((row) => row.product_session_id === selectedSession.product_session_id)
+    ? [...sessions, selectedSession]
+    : sessions
+  const targetFacts = new Map<number, (typeof visible)[number]>()
+  for (const row of visible) {
+    if (row.target.kind === 'project_agent') targetFacts.set(row.target.project_agent_id!, row)
+  }
+  const exceptionalTargets = [...targetFacts.values()].filter((row) => row.attention.required)
+  const sampledExceptionalTargets = new Set(sessions
+    .filter((row) => row.target.kind === 'project_agent' && row.attention.required)
+    .map((row) => row.target.project_agent_id))
   return {
     schema_version: 1,
     project_id: projectId,
+    zoom,
+    band: zoomBand(zoom),
+    sample_limit: zoomLimit(zoom),
+    sample_truncated: totalSessions > sessions.length,
     sessions,
+    selected_session: selectedSession,
     totals: {
-      sessions: sessions.length,
-      unread: sessions.reduce((total, row) => total + row.inbox.unread_count, 0),
-      attention: sessions.filter((row) => row.attention.required).length,
+      sessions: totalSessions,
+      unread: [...targetFacts.values()].reduce((total, row) => total + row.inbox.unread_count, 0),
+      attention_sessions: visible.filter((row) => row.attention.required).length,
+      exception_messages: exceptionalTargets.reduce((total, row) => total + row.attention.exception_count, 0),
+      action_requests: exceptionalTargets.reduce((total, row) => total + row.attention.action_request_count, 0),
+      exception_targets: exceptionalTargets.length,
+      sampled_exception_targets: sampledExceptionalTargets.size,
     },
   }
+}
+
+async function projectionForPath(home: unknown | Promise<unknown>, path: string) {
+  const value = await Promise.resolve(home) as ReturnType<typeof liveProjection>
+  const query = new URLSearchParams(path.split('?')[1] ?? '')
+  const requestedZoom = query.get('zoom') ?? '10'
+  const selectedId = query.get('selected_session_id')
+  const selected = selectedId === null
+    ? null
+    : value.sessions.find((row) => row.product_session_id === selectedId)
+      ?? (value.selected_session?.product_session_id === selectedId ? value.selected_session : null)
+  if (selectedId !== null && selected === null) throw new ApiError(404, 'not found')
+  return liveProjection(value.sessions, value.project_id, requestedZoom, selected, value.totals.sessions)
 }
 
 function deferred<T>() {
@@ -153,7 +202,7 @@ async function mountWithHome(home: unknown | Promise<unknown>) {
   authorizePrincipal()
   vi.spyOn(api, 'get').mockImplementation((path: string) => {
     if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
-    if (path === `/projects/${PROJECT_ID}/session-home/v1`) return Promise.resolve(home) as never
+    if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`)) return projectionForPath(home, path) as never
     return Promise.reject(new Error(`unexpected GET ${path}`))
   })
   return mountComponent(Paimos6PreviewView)
@@ -166,10 +215,10 @@ async function mountTransitionHome(projectBHome: unknown | Promise<unknown>) {
       const authorized = transitionProjectCatalog().filter((project) => auth.accessibleProjects.has(project.id))
       return Promise.resolve(authorized) as never
     }
-    if (path === `/projects/${PROJECT_ID}/session-home/v1`) {
-      return Promise.resolve(liveProjection([managedRow()])) as never
+    if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`)) {
+      return projectionForPath(liveProjection([managedRow()]), path) as never
     }
-    if (path === `/projects/${PROJECT_B_ID}/session-home/v1`) return Promise.resolve(projectBHome) as never
+    if (path.startsWith(`/projects/${PROJECT_B_ID}/session-home/zoom/v1?`)) return projectionForPath(projectBHome, path) as never
     return Promise.reject(new Error(`unexpected GET ${path}`))
   })
   return { auth, mounted: await mountComponent(Paimos6PreviewView) }
@@ -179,11 +228,14 @@ function renderedStatus(el: HTMLElement) {
   return el.querySelector('.p6-status')?.textContent ?? ''
 }
 
-describe('Paimos6PreviewView live session home (PAI-861)', () => {
+describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     routerHarness.route = reactive({ query: {} })
     routerHarness.replace.mockReset().mockImplementation(async ({ query }) => {
+      routerHarness.route.query = { ...query }
+    })
+    routerHarness.push.mockReset().mockImplementation(async ({ query }) => {
       routerHarness.route.query = { ...query }
     })
     sessionStorage.clear()
@@ -200,7 +252,7 @@ describe('Paimos6PreviewView live session home (PAI-861)', () => {
     const pending = deferred<ReturnType<typeof liveProjection>>()
     const mounted = await mountWithHome(pending.promise)
     await flush()
-    expect(mounted.el.textContent).toContain('Loading authorized session home')
+    expect(mounted.el.textContent).toContain('Loading authorized semantic-zoom projection')
     expect(mounted.el.querySelector('.p6-session-card')).toBeNull()
 
     pending.resolve(liveProjection())
@@ -208,7 +260,7 @@ describe('Paimos6PreviewView live session home (PAI-861)', () => {
     const text = mounted.el.textContent ?? ''
     expect(api.get).toHaveBeenCalledWith('/projects?status=all', expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(api.get).toHaveBeenCalledWith(
-      `/projects/${PROJECT_ID}/session-home/v1`,
+      `/projects/${PROJECT_ID}/session-home/zoom/v1?zoom=10`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
     expect(mounted.el.querySelectorAll('.p6-session-card')).toHaveLength(3)
@@ -222,19 +274,84 @@ describe('Paimos6PreviewView live session home (PAI-861)', () => {
     const attentionCard = mounted.el.querySelector<HTMLElement>('.p6-session-card.needs-attention')!
     attentionCard.querySelector<HTMLButtonElement>('.p6-card-select')!.click()
     await flush()
-    expect(attentionCard.classList.contains('is-selected')).toBe(true)
-    expect(attentionCard.classList.contains('needs-attention')).toBe(true)
+    const selectedAttentionCard = mounted.el.querySelector<HTMLElement>('.p6-session-card.needs-attention')!
+    expect(selectedAttentionCard.classList.contains('is-selected')).toBe(true)
+    expect(selectedAttentionCard.classList.contains('needs-attention')).toBe(true)
     expect(mounted.el.textContent).toContain('Selected agent target · claude:jan')
     expect(routerHarness.replace).toHaveBeenCalledWith(expect.objectContaining({
       query: expect.objectContaining({ project: String(PROJECT_ID), session: UNMANAGED_ID }),
     }))
 
-    attentionCard.querySelector<HTMLButtonElement>('.p6-card-select')!.dispatchEvent(
+    selectedAttentionCard.querySelector<HTMLButtonElement>('.p6-card-select')!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
     )
     await flush()
     expect(mounted.el.querySelector('.p6-session-card.is-selected')).toBeNull()
     expect(mounted.el.textContent).toContain('No selection · preview target Paimos')
+    await mounted.unmount()
+  })
+
+  it('canonicalizes an invalid zoom once and round-trips far-out lexical input through history', async () => {
+    routerHarness.route.query = { project: String(PROJECT_ID), zoom: '1e3' }
+    const mounted = await mountWithHome(liveProjection())
+    await flush()
+    expect(routerHarness.route.query.zoom).toBe('10')
+    expect(routerHarness.push).not.toHaveBeenCalled()
+    const canonicalReplacements = routerHarness.replace.mock.calls.filter(([location]) => (
+      location.query?.zoom === '10' && location.query?.project === String(PROJECT_ID)
+    ))
+    expect(canonicalReplacements).toHaveLength(1)
+
+    const input = mounted.el.querySelector<HTMLInputElement>('.p6-zoom input')!
+    const far = '1234567890123456789012345678901234567890'
+    input.value = far
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    expect(routerHarness.push).toHaveBeenCalledWith({
+      query: expect.objectContaining({ project: String(PROJECT_ID), zoom: far }),
+    })
+    expect(routerHarness.route.query.zoom).toBe(far)
+    expect(api.get).toHaveBeenCalledWith(
+      `/projects/${PROJECT_ID}/session-home/zoom/v1?zoom=${far}`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(mounted.el.textContent).toContain('Exception-first projection · far')
+    await mounted.unmount()
+  })
+
+  it('renders a selected row outside the sample and keeps it visible across zoom reorder', async () => {
+    routerHarness.route.query = {
+      project: String(PROJECT_ID),
+      session: PAIMOS_ID,
+      zoom: '1',
+    }
+    const home = liveProjection([managedRow()], PROJECT_ID, '1', paimosRow(), 2)
+    const mounted = await mountWithHome(home)
+    await flush()
+    expect(mounted.el.querySelector('.p6-pinned')?.textContent).toContain('Loose planning session')
+    expect(mounted.el.querySelectorAll('.p6-session-card')).toHaveLength(2)
+    expect(mounted.el.textContent).toContain('Selected agent target · Paimos')
+
+    routerHarness.route.query = { ...routerHarness.route.query, zoom: '25' }
+    await flush()
+    expect(mounted.el.querySelector('.p6-pinned')?.textContent).toContain('Loose planning session')
+    expect(mounted.el.textContent).toContain('Selected agent target · Paimos')
+    expect(routerHarness.route.query.session).toBe(PAIMOS_ID)
+    await mounted.unmount()
+  })
+
+  it('keeps the source rail static, disabled, and non-networked', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const mounted = await mountWithHome(liveProjection())
+    await flush()
+    const rail = mounted.el.querySelector<HTMLElement>('.p6-source-rail')!
+    expect(rail.textContent).toContain('Paimos · active source')
+    expect(rail.querySelectorAll('[aria-disabled="true"]')).toHaveLength(2)
+    expect(rail.querySelector('button, a')).toBeNull()
+    expect(rail.textContent).not.toContain('Coming Soon')
+    expect(fetchSpy).not.toHaveBeenCalled()
     await mounted.unmount()
   })
 
@@ -252,14 +369,16 @@ describe('Paimos6PreviewView live session home (PAI-861)', () => {
     routerHarness.route.query = {
       project: String(PROJECT_B_ID),
       session: PROJECT_B_PAIMOS_ID,
+      zoom: '1000',
     }
     await nextTick()
 
     expect(mounted.el.textContent).not.toContain(PROJECT_A_TITLE)
     expect(mounted.el.textContent).not.toContain(PROJECT_A_ADDRESS)
     expect(renderedStatus(mounted.el)).toContain('Choose a session to target it')
-    expect(mounted.el.textContent).toContain('Loading authorized session home')
+    expect(mounted.el.textContent).toContain('Loading authorized semantic-zoom projection')
     expect(routerHarness.route.query.session).toBe(PROJECT_B_PAIMOS_ID)
+    expect(routerHarness.route.query.zoom).toBe('1000')
 
     pendingB.resolve(liveProjection([projectBPaimosRow()], PROJECT_B_ID))
     await flush()
@@ -421,7 +540,7 @@ describe('Paimos6PreviewView live session home (PAI-861)', () => {
     authorizePrincipal()
     vi.spyOn(api, 'get').mockImplementation((path: string) => {
       if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
-      if (path === `/projects/${PROJECT_ID}/session-home/v1`) return Promise.reject(new Error('offline'))
+      if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`)) return Promise.reject(new Error('offline'))
       return Promise.reject(new Error(`unexpected GET ${path}`))
     })
     const unavailable = await mountComponent(Paimos6PreviewView)
