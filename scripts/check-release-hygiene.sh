@@ -3,12 +3,14 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/release-version.sh"
 
 fail=0
 
 version=$(tr -d '[:space:]' < VERSION)
-if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "release hygiene: VERSION is not semver x.y.z: $version" >&2
+if ! release_version::is_supported "$version"; then
+  echo "release hygiene: VERSION is not supported SemVer or yy.mm.dd[.hh.mm]: $version" >&2
   fail=1
 fi
 

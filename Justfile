@@ -8,8 +8,8 @@ default:
 status:
     @git fetch --tags --quiet origin
     @echo "--- last 5 release tags"
-    @git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -5
-    @last=$(git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1); \
+    @bash -c 'source scripts/release-version.sh; git tag --sort=-creatordate | release_version::tag_filter | sed -n "1,5p"'
+    @last=$(bash -c 'source scripts/release-version.sh; git tag --sort=-creatordate | release_version::tag_filter | sed -n "1p"'); \
       echo "--- commits on origin/main since $last"; \
       git log "$last..origin/main" --oneline; \
       echo "--- runtime-relevant only (backend/ frontend/src/)"; \
@@ -17,7 +17,7 @@ status:
 
 # Cut a release: prepare/reuse a protected PR, auto-merge, tag its exact
 # main commit, and wait for release CI. Never pushes directly to main.
-# Mode: patch | minor | major | <x.y.z>. Omit for AI-assist (commit log dump).
+# Mode: patch | minor | major | <x.y.z> | <yy.mm.dd[.hh.mm]>.
 release mode="":
     @./scripts/release.sh {{mode}}
 

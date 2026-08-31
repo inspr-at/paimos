@@ -5,13 +5,15 @@
 # published release evidence.
 #
 # Usage:
-#   scripts/release.sh patch|minor|major|<x.y.z> [--no-edit]
+#   scripts/release.sh patch|minor|major|<x.y.z>|<yy.mm.dd[.hh.mm]> [--no-edit]
 #   scripts/release.sh                            # report commits since tag
 
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/release-version.sh"
 
 NO_EDIT=0
 ARGS=()
@@ -51,7 +53,59 @@ require_command() {
 }
 
 latest_release_tag() {
-  git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true
+  git tag --sort=-creatordate | release_version::tag_filter | awk 'NR == 1 {first=$0} END {print first}'
+}
+
+origin_release_tags() {
+  git ls-remote --tags --refs origin |
+    awk '{sub("refs/tags/", "", $2); print $2}' |
+    release_version::tag_filter
+}
+
+origin_tag_commit_oid() {
+  local tag="$1" oid
+  oid=$(git ls-remote --tags origin "refs/tags/$tag^{}" | awk 'NR == 1 {print $1}')
+  if [[ -z "$oid" ]]; then
+    oid=$(git ls-remote --tags --refs origin "refs/tags/$tag" | awk 'NR == 1 {print $1}')
+  fi
+  printf '%s\n' "$oid"
+}
+
+assert_origin_calendar_recut_evidence() {
+  local version="$1" existing_tags="$2" day tag stripped remote_oid fetched_oid
+  local evidence_ref evidence_count=0
+  release_version::has_recut_suffix "$version" || return 0
+  day=$(release_version::calendar_day "$version")
+  while IFS= read -r tag; do
+    stripped="${tag#v}"
+    if [[ "$stripped" == "$version" || ( "$stripped" != "$day" && "$stripped" != "$day".* ) ]]; then
+      continue
+    fi
+    remote_oid=$(origin_tag_commit_oid "$tag")
+    [[ "$remote_oid" =~ ^[0-9a-f]{40}$ ]] ||
+      fail "origin prior calendar tag has no exact object: $tag"
+    evidence_ref="refs/paimos/release-origin-tags/$tag"
+    git fetch --quiet origin "+refs/tags/$tag:$evidence_ref" ||
+      fail "could not fetch exact origin prior calendar tag: $tag"
+    fetched_oid=$(git rev-parse "$evidence_ref^{commit}" 2>/dev/null) ||
+      fail "origin prior calendar tag does not resolve to a commit: $tag"
+    [[ "$fetched_oid" == "$remote_oid" ]] ||
+      fail "fetched prior calendar tag differs from exact origin ref: $tag"
+    git merge-base --is-ancestor "$fetched_oid" origin/main ||
+      fail "origin prior calendar tag is not an ancestor of origin/main: $tag"
+    [[ "$(git show "$fetched_oid:VERSION" 2>/dev/null || true)" == "$stripped" ]] ||
+      fail "origin prior calendar tag $tag does not carry VERSION=$stripped"
+    evidence_count=$((evidence_count + 1))
+  done <<<"$existing_tags"
+  (( evidence_count > 0 )) ||
+    fail "calendar recut has no authoritative prior same-day release on origin"
+}
+
+assert_calendar_cut_day() {
+  local context="$1"
+  if release_version::is_calendar "$NEW" && ! release_version::is_calendar_cut_today "$NEW"; then
+    fail "Vienna calendar day changed before $context; refusing release $NEW"
+  fi
 }
 
 changed_worktree_files() {
@@ -186,7 +240,7 @@ assert_release_delta() {
 
   git show "$head:README.md" > "$validate_tmp/actual"
   git show "$base:README.md" |
-    sed -E "s|<code>v[0-9]+\.[0-9]+\.[0-9]+</code>|<code>v$version</code>|" > "$validate_tmp/expected"
+    sed -E "s~<code>v${PAIMOS_RELEASE_VERSION_ERE}</code>~<code>v$version</code>~" > "$validate_tmp/expected"
   if ! cmp -s "$validate_tmp/actual" "$validate_tmp/expected"; then
     rm -rf "$validate_tmp"
     fail "$head contains non-deterministic README.md changes"
@@ -195,8 +249,8 @@ assert_release_delta() {
   git show "$head:docs/INSTALL.md" > "$validate_tmp/actual"
   git show "$base:docs/INSTALL.md" |
     sed -E \
-      -e "s|VER=[0-9]+\.[0-9]+\.[0-9]+|VER=$version|g" \
-      -e "s|(paimos --version[[:space:]]+# )[0-9]+\.[0-9]+\.[0-9]+|\1$version|" > "$validate_tmp/expected"
+      -e "s~VER=${PAIMOS_RELEASE_VERSION_ERE}~VER=$version~g" \
+      -e "s~(paimos --version[[:space:]]+# )${PAIMOS_RELEASE_VERSION_ERE}~\1$version~" > "$validate_tmp/expected"
   if ! cmp -s "$validate_tmp/actual" "$validate_tmp/expected"; then
     rm -rf "$validate_tmp"
     fail "$head contains non-deterministic docs/INSTALL.md changes"
@@ -227,7 +281,7 @@ assert_release_delta() {
   base_first_heading=$(awk '/^## \[/{print; exit}' "$validate_tmp/base-changelog")
   if [[ "$base_first_heading" == "## [Unreleased]" ]]; then
     base_second_heading=$(awk '/^## \[/{headings++; if (headings == 2) {print; exit}}' "$validate_tmp/base-changelog")
-    if [[ ! "$base_second_heading" =~ ^##\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    if [[ ! "$base_second_heading" =~ ^##\ \[${PAIMOS_RELEASE_VERSION_ERE}\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
       rm -rf "$validate_tmp"
       fail "$base carries a duplicate or non-canonical leading [Unreleased] CHANGELOG section"
     fi
@@ -639,17 +693,25 @@ assert_release_merge() {
 }
 
 tag_release_merge() {
-  local merge_oid="$1" existing_oid
-  if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
-    existing_oid=$(git rev-list -n1 "${NEW_TAG}^{}")
-    [[ "$existing_oid" == "$merge_oid" ]] ||
-      fail "$NEW_TAG already points to $existing_oid, expected PR merge $merge_oid"
-    echo "$NEW_TAG already tags the correct protected-main merge commit."
+  local merge_oid="$1" existing_oid remote_oid
+  remote_oid=$(origin_tag_commit_oid "$NEW_TAG")
+  if [[ -n "$remote_oid" ]]; then
+    [[ "$remote_oid" == "$merge_oid" ]] ||
+      fail "origin/$NEW_TAG points to $remote_oid, expected canonical protected merge $merge_oid"
+    echo "origin/$NEW_TAG already tags the correct protected-main merge commit."
   else
+    assert_calendar_cut_day "creating absent tag $NEW_TAG"
+    if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+      existing_oid=$(git rev-list -n1 "${NEW_TAG}^{}")
+      fail "$NEW_TAG exists only locally at $existing_oid; refusing unproven tag publication"
+    fi
     git tag -a --no-sign "$NEW_TAG" "$merge_oid" -m "release $NEW"
     echo "Created $NEW_TAG at protected-main merge $merge_oid."
+    git push origin "refs/tags/$NEW_TAG"
+    remote_oid=$(origin_tag_commit_oid "$NEW_TAG")
+    [[ "$remote_oid" == "$merge_oid" ]] ||
+      fail "origin/$NEW_TAG did not resolve to canonical protected merge $merge_oid after push"
   fi
-  git push origin "refs/tags/$NEW_TAG"
 }
 
 prepare_release_branch() {
@@ -669,6 +731,7 @@ prepare_release_branch() {
       fi
       git show-ref --verify --quiet "refs/heads/$RELEASE_BRANCH" &&
         fail "local branch already exists without a matching remote PR: $RELEASE_BRANCH"
+      assert_calendar_cut_day "release-branch materialization"
       git switch -c "$RELEASE_BRANCH" >/dev/null
       ;;
     "$RELEASE_BRANCH")
@@ -697,12 +760,16 @@ prepare_release_branch() {
   esac
 
   "$ROOT/scripts/check-claims.sh"
-  today=$(date -u +%Y-%m-%d)
+  if release_version::is_calendar "$NEW"; then
+    today=$(release_version::calendar_iso_date "$NEW")
+  else
+    today=$(release_version::vienna_iso_date)
+  fi
   first_existing_heading=$(awk '/^## \[/{print; exit}' docs/CHANGELOG.md)
   second_existing_heading=$(awk '/^## \[/{headings++; if (headings == 2) {print; exit}}' docs/CHANGELOG.md)
 
   if [[ "$first_existing_heading" == "## [Unreleased]" ]]; then
-    if [[ ! "$second_existing_heading" =~ ^##\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    if [[ ! "$second_existing_heading" =~ ^##\ \[${PAIMOS_RELEASE_VERSION_ERE}\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
       fail "docs/CHANGELOG.md carries a duplicate or non-canonical leading [Unreleased] section"
     fi
     canonical_unreleased=1
@@ -710,7 +777,7 @@ prepare_release_branch() {
     fail "docs/CHANGELOG.md carries a non-canonical leading [Unreleased] section"
   fi
   if grep -qE "^## \[$NEW\] " docs/CHANGELOG.md && \
-     [[ ! "$second_existing_heading" =~ ^##\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+     [[ ! "$second_existing_heading" =~ ^##\ \[${PAIMOS_RELEASE_VERSION_ERE}\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
     fail "reviewed [$NEW] entry must consume, not retain, the leading [Unreleased] section"
   fi
 
@@ -721,13 +788,13 @@ prepare_release_branch() {
   printf '%s\n' "$NEW" > VERSION
 
   tmp=$(mktemp)
-  sed -E "s|<code>v[0-9]+\.[0-9]+\.[0-9]+</code>|<code>v$NEW</code>|" README.md > "$tmp"
+  sed -E "s~<code>v${PAIMOS_RELEASE_VERSION_ERE}</code>~<code>v$NEW</code>~" README.md > "$tmp"
   mv "$tmp" README.md
 
   tmp=$(mktemp)
   sed -E \
-    -e "s|VER=[0-9]+\.[0-9]+\.[0-9]+|VER=$NEW|g" \
-    -e "s|(paimos --version[[:space:]]+# )[0-9]+\.[0-9]+\.[0-9]+|\1$NEW|" \
+    -e "s~VER=${PAIMOS_RELEASE_VERSION_ERE}~VER=$NEW~g" \
+    -e "s~(paimos --version[[:space:]]+# )${PAIMOS_RELEASE_VERSION_ERE}~\1$NEW~" \
     docs/INSTALL.md > "$tmp"
   mv "$tmp" docs/INSTALL.md
 
@@ -828,9 +895,9 @@ done
 git fetch --tags --quiet origin
 git fetch --quiet origin main
 LAST_TAG=$(latest_release_tag)
-[[ -n "$LAST_TAG" ]] || fail "no semver release tags yet — create v0.1.0 manually first"
+[[ -n "$LAST_TAG" ]] || fail "no supported release tags yet — create v0.1.0 manually first"
 LAST_VERSION="${LAST_TAG#v}"
-IFS=. read -r LAST_MAJOR LAST_MINOR LAST_PATCH <<<"$LAST_VERSION"
+LAST_KIND=$(release_version::kind "$LAST_VERSION")
 
 if [[ -z "$MODE" ]]; then
   echo "Last release: $LAST_TAG"
@@ -841,20 +908,38 @@ if [[ -z "$MODE" ]]; then
   echo "Runtime-relevant (backend/ frontend/src/):"
   git log "$LAST_TAG..origin/main" --oneline -- backend/ frontend/src/ || echo "  (none)"
   echo
-  echo "Re-run with: patch | minor | major | <x.y.z>"
+  echo "Re-run with: patch | minor | major | <x.y.z> | <yy.mm.dd[.hh.mm]>"
   exit 0
 fi
 
 case "$MODE" in
-  patch) NEW="$LAST_MAJOR.$LAST_MINOR.$((LAST_PATCH + 1))" ;;
-  minor) NEW="$LAST_MAJOR.$((LAST_MINOR + 1)).0" ;;
-  major) NEW="$((LAST_MAJOR + 1)).0.0" ;;
+  patch|minor|major)
+    [[ "$LAST_KIND" == semver ]] ||
+      fail "$MODE is available only before this product's first calendar release"
+    IFS=. read -r LAST_MAJOR LAST_MINOR LAST_PATCH <<<"$LAST_VERSION"
+    case "$MODE" in
+      patch) NEW="$LAST_MAJOR.$LAST_MINOR.$((LAST_PATCH + 1))" ;;
+      minor) NEW="$LAST_MAJOR.$((LAST_MINOR + 1)).0" ;;
+      major) NEW="$((LAST_MAJOR + 1)).0.0" ;;
+    esac
+    ;;
   *)
-    [[ "$MODE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
-      fail "mode must be patch|minor|major|<x.y.z> (got: $MODE)"
-    NEW="$MODE"
+    NEW="${MODE#v}"
+    release_version::is_supported "$NEW" ||
+      fail "mode must be patch|minor|major|<x.y.z>|<yy.mm.dd[.hh.mm]>; 6.0.0 is prohibited (got: $MODE)"
+    if release_version::is_calendar "$NEW"; then
+      EXISTING_RELEASE_TAGS=$(origin_release_tags)
+      release_version::calendar_recut_policy "$NEW" "$EXISTING_RELEASE_TAGS" ||
+        fail "calendar release must use today's Vienna date; .hh.mm is valid only for a same-day recut"
+      assert_origin_calendar_recut_evidence "$NEW" "$EXISTING_RELEASE_TAGS"
+    else
+      [[ "$LAST_KIND" == semver ]] ||
+        fail "legacy SemVer releases are closed after this product's first calendar release"
+    fi
     ;;
 esac
+release_version::is_supported "$NEW" ||
+  fail "computed release $NEW is prohibited; use the actual Vienna calendar cut for the next major"
 NEW_TAG="v$NEW"
 RELEASE_BRANCH="release/$NEW_TAG"
 assert_external_stage_release_pin origin/main "$NEW_TAG"

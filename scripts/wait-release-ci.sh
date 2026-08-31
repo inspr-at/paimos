@@ -9,6 +9,8 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/release-version.sh"
 
 TAG=""
 WORKFLOWS="${WAIT_RELEASE_WORKFLOWS:-ci,release}"
@@ -68,6 +70,11 @@ if [[ -z "$TAG" || -z "$WORKFLOWS" ]]; then
   usage
   exit 2
 fi
+release_version::is_supported "$TAG" || {
+  echo "error: unsupported release tag: $TAG" >&2
+  exit 2
+}
+TAG="v${TAG#v}"
 if ! [[ "$TIMEOUT" =~ ^[0-9]+$ && "$POLL" =~ ^[0-9]+$ && "$POLL" -gt 0 ]]; then
   echo "error: --timeout and --poll must be positive integers" >&2
   exit 2

@@ -11,7 +11,7 @@ ppm runbook `refresh-site-marketing-captures` (#3594).
 - Still viewport 1600×1000 @2x and video viewport 1280×800, with the dev-login
   banner and 2FA nag hidden and distracting animations/carets frozen.
 - Every published caption states provenance: *"Demo workspace, Paimos
-  vX.Y.Z"*. The scripts do not write captions — that lives with the site —
+  v<release-version>"*. The scripts do not write captions — that lives with the site —
   but the version in them must match the build you captured.
 
 ## One-command use

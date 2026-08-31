@@ -17,7 +17,9 @@ One production instance pulls from the registry:
 | **ppm**  | `pm.barta.cm` (csb1)  | SSH key (`mba@100.64.0.4:2222`, Tailscale IP) | named volume | NixOS composeStack (since OPS-116) — **not** `deploy.sh` |
 
 Registry: `ghcr.io/inspr-at/paimos`. Images produced per-commit on `main`
-(`:latest`, `:sha-<short>`) and per semver tag (`:X.Y.Z`, `:X.Y`, `:X`).
+(`:latest`, `:sha-<short>`) and per release tag. Legacy SemVer tags retain
+their `:X.Y.Z`, `:X.Y`, and `:X` aliases; calendar tags publish only their
+exact `:yy.mm.dd[.hh.mm]` value and never mutable numeric aliases.
 CI source of truth: [`.github/workflows/ci-v2.yml`](../.github/workflows/ci-v2.yml).
 
 ---
@@ -25,7 +27,7 @@ CI source of truth: [`.github/workflows/ci-v2.yml`](../.github/workflows/ci-v2.y
 ## The four steps
 
 ```
-just release [patch|minor|major|x.y.z]   # protected release PR → merge-commit tag → published evidence
+just release [patch|minor|major|x.y.z|yy.mm.dd[.hh.mm]] # protected PR → merge-commit tag → evidence
 just verify-release <tag>                # verify signature + SBOM attestations + provenance before deploy
 # deploy ppm via the composeStack path — see "Deploying ppm" below
 just doc-sync [tag]                      # file a "doc/site sync follow-up" ticket in PAIMOS
@@ -63,12 +65,12 @@ by design. The image pin lives in the **nixcfg** repo at
 caught a would-be downgrade from a floating reconcile). The proven
 sequence (v5.1.0 → v5.6.2):
 
-1. `just release <level>` → protected release PR/merge → wait for tag CI → `just verify-release vX.Y.Z`.
+1. `just release <version>` → protected release PR/merge → wait for tag CI → `just verify-release v<version>`.
 2. **Volume backup on csb1** — throwaway alpine tars `csb1_ppm_data` to
    `/home/mba/paimos-backups/ppm/<utc-ts>/data.tar.gz`, plus a
    `manifest.yaml` naming pre- and target images.
 3. **Bump the pin** in nixcfg `hosts/csb1/docker/compose-spec.nix` to
-   `ghcr.io/inspr-at/paimos:X.Y.Z`. `main` is branch-protected: PR,
+   `ghcr.io/inspr-at/paimos:<version>`. `main` is branch-protected: PR,
    checks, `gh pr merge --squash --auto`.
 4. **On csb1**: `git pull` in `/home/mba/Code/nixcfg`, then
    `sudo nixos-rebuild switch --flake .#csb1` (mba has passwordless
@@ -93,17 +95,17 @@ runbook `ppm-deploy-composestack` (#4278).
    `docs/CHANGELOG.md` entry for a non-interactive release.
 2. If no argument: dumps commits since the last release tag (all + runtime-only) and
    exits. Look at the output, decide patch/minor/major, re-run.
-3. Computes the new version from the last SemVer release tag (`vX.Y.Z`, not
-   operational/bookmark tags and not `VERSION` — that's why `VERSION` can never
-   drift again).
-4. Creates deterministic `release/vX.Y.Z`, updates `VERSION`, refreshes the
+3. Accepts `patch|minor|major` while the product remains on its legacy SemVer
+   line, or an explicit calendar `yy.mm.dd[.hh.mm]` cut matching the actual
+   Vienna day. The suffix is reserved for a same-day recut; `6.0.0` is rejected.
+4. Creates deterministic `release/v<version>`, updates `VERSION`, refreshes the
    README badge and pinned install examples, and prepends a draft CHANGELOG
    entry pre-seeded from commit subjects. Interactive runs open `$EDITOR`;
    non-interactive runs require the reviewed entry before invocation.
 5. Runs `scripts/check-release-hygiene.sh`: README badge must match `VERSION`,
    README's health example must stay generic (`<VERSION>`), and
    `docs/CHANGELOG.md` must not contain the auto-generated TODO stub.
-6. Commits with DCO sign-off (`release: vX.Y.Z`), pushes only the release
+6. Commits with DCO sign-off (`release: v<version>`), pushes only the release
    branch, and opens or reuses one PR against protected `main`.
 7. Enables squash auto-merge, waits for the required hosted checks, and tags
    the exact PR merge commit after proving it is on `origin/main` and changes
@@ -137,10 +139,10 @@ Breaking API or schema changes → **major**. Pure docs / brand / scripts →
 
 Run this after the tag workflows have completed and before deploying a
 release tag. `just release` does that wait automatically; if you are resuming
-or checking a tag cut elsewhere, run `just wait-release-ci vX.Y.Z` first:
+or checking a tag cut elsewhere, run `just wait-release-ci v<version>` first:
 
 ```
-just verify-release vX.Y.Z
+just verify-release v<version>
 ```
 
 It wraps `scripts/verify-release.sh` and checks:
@@ -168,7 +170,7 @@ Deploy targets are explicit by default:
 
 | Target form | Meaning |
 | ----------- | ------- |
-| `v2.4.8` / `2.4.8` | Semver release image. Use after `just release`. |
+| `v2.4.8` / `2.4.8` or `v26.08.31` / `26.08.31` | Exact release image. Use after `just release`. |
 | `sha-4808a9f` | Immutable image for a pushed `main` commit. Use for untagged canaries. |
 | `current` | Resolves to `sha-$(git rev-parse --short HEAD)`. Convenience for local HEAD. |
 | omitted | Allowed only when local `HEAD` is not ahead of the latest release tag. If `HEAD` has untagged commits, deploy aborts before any remote change. |
@@ -197,7 +199,7 @@ For each instance:
 8. Verify the restarted container reports the requested image.
 9. Tail logs for 5 seconds (surfaces migration output + "server starting").
 10. External `curl /api/health` from your laptop, up to 24s of retries.
-    Full semver targets must report that exact `version`; `sha-*` targets
+    Full supported release targets must report that exact `version`; `sha-*` targets
     must report a `version` containing the deployed short SHA.
 
 **On any failure in steps 2–10**, the script prints the exact rollback

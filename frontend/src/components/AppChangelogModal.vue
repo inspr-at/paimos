@@ -25,47 +25,12 @@ import DOMPurify from 'dompurify'
 import AppModal from '@/components/AppModal.vue'
 import changelogRaw from '@docs/CHANGELOG.md?raw'
 import { formatDateWithLocale } from '@/composables/useDateFormat'
+import { parseChangelog, type VersionEntry } from '@/utils/changelog'
 
 const props = defineProps<{ open: boolean }>()
 defineEmits<{ close: [] }>()
 
-interface VersionEntry {
-  version: string
-  date: string
-  bodyMd: string
-  bumpKind: 'major' | 'minor' | 'patch' | 'unknown'
-}
-
-// Matches `## [X.Y.Z] — YYYY-MM-DD` (canonical em-dash). Anything else
-// is silently ignored — better to drop a malformed heading than to
-// corrupt the parse with a noisy fallback.
-const VERSION_HEADING_RE = /^## \[(\d+\.\d+\.\d+)\] — (\d{4}-\d{2}-\d{2})/m
-
-const entries = computed<VersionEntry[]>(() => {
-  const sections = changelogRaw
-    .split(/(?=^## \[\d+\.\d+\.\d+\])/m)
-    .map(s => s.trim())
-    .filter(s => VERSION_HEADING_RE.test(s))
-
-  const list: VersionEntry[] = sections.map(s => {
-    const m = s.match(VERSION_HEADING_RE)!
-    return {
-      version: m[1],
-      date: m[2],
-      bodyMd: s.replace(VERSION_HEADING_RE, '').trim(),
-      bumpKind: 'unknown',
-    }
-  })
-
-  for (let i = 0; i < list.length - 1; i++) {
-    const cur = list[i].version.split('.').map(Number)
-    const prev = list[i + 1].version.split('.').map(Number)
-    if (cur[0] > prev[0])      list[i].bumpKind = 'major'
-    else if (cur[1] > prev[1]) list[i].bumpKind = 'minor'
-    else if (cur[2] > prev[2]) list[i].bumpKind = 'patch'
-  }
-  return list
-})
+const entries = computed<VersionEntry[]>(() => parseChangelog(changelogRaw))
 
 const selectedIndex = ref(0)
 const selected = computed<VersionEntry | null>(() =>

@@ -28,7 +28,7 @@ The single best fact about a solo-maintained FOSS project is that **most of the 
 |---|---|---|
 | Product source code | GitHub `inspr-at/paimos` (and every clone, fork, and CI runner cache) | ✓ AGPL-3.0-only; cannot be retracted. |
 | Public-site source | Private GitHub repository `inspr-at/inspr-site`, locally checked out as `~/Code/inspr-at` | Requires repository-account recovery; the deployed static release remains independently readable. |
-| Release artefacts | `ghcr.io/inspr-at/paimos:<x.y.z>` (immutable per tag) + GitHub Releases page (SBOMs, signatures) | ✓ Immutable on registry; survives indefinitely unless the registry itself goes dark. See §3.6. |
+| Release artefacts | `ghcr.io/inspr-at/paimos:<release-version>` (immutable per tag) + GitHub Releases page (SBOMs, signatures) | ✓ Immutable on registry; survives indefinitely unless the registry itself goes dark. See §3.6. |
 | User data | Each operator's own `$DATA_DIR/paimos.db` + their MinIO/S3 bucket if attachments | ✓ Always — self-hosted; the maintainer never had a copy. |
 | Documentation | In the same repo as the code, including this document. | ✓ Travels with the code. |
 | Disclosure history | GitHub Security Advisories (per release tag) + CHANGELOG entries with `SEC-YYYY-NN` identifiers | ✓ Public, durable. |
@@ -67,7 +67,7 @@ Cross-references — every routine operation has a runbook in the repo. Do not r
 | Operation | Runbook |
 |---|---|
 | Cut a release | [`DEPLOY.md` § The five commands](DEPLOY.md#the-five-commands) — `just release patch\|minor\|major` |
-| Verify a release before deploy | [`DEPLOY.md` § `just verify-release <tag>`](DEPLOY.md#just-verify-release-tag) — `just verify-release v<x.y.z>` |
+| Verify a release before deploy | [`DEPLOY.md` § `just verify-release <tag>`](DEPLOY.md#just-verify-release-tag) — `just verify-release v<release-version>` |
 | Deploy a tag to ppm | [`DEPLOY.md` § Deploying ppm](DEPLOY.md#deploying-ppm-composestack-since-ops-116) — signed image pin through nixcfg + NixOS composeStack |
 | Doc-sync follow-up after release | `just doc-sync` |
 | Restore a deployment from backup | [`DEPLOY.md` § Rollback](DEPLOY.md#rollback-if-a-deploy-goes-sideways) |
@@ -244,7 +244,7 @@ GitHub Container Registry (`ghcr.io`) becomes unavailable to operators. Could be
 
 **Recover** — multi-pronged:
 
-1. **Rebuild from source.** Every release tag in Git is reproducible: `git checkout v<x.y.z>`, `docker build -t paimos:<x.y.z> .`. The Dockerfile is in the repo.
+1. **Rebuild from source.** Every release tag in Git is reproducible: `git checkout v<release-version>`, `docker build -t paimos:<release-version> .`. The Dockerfile is in the repo.
 2. **Mirror the registry.** Operators can `docker pull` once and `docker save` to a tarball for re-distribution; the SBOM attestations stay valid against the digest.
 3. **Federate to a second registry.** If `ghcr.io` becomes unreliable, the project documents pushing to a second registry (Docker Hub, Quay) as a one-off, with the cosign signature reissued against the new identity.
 
@@ -281,7 +281,7 @@ Operators can do a lot for themselves. The reference deployment going dark does 
 **For operators running their own PAIMOS instance:**
 
 - **Backup discipline:** existing `DEPLOY.md` describes the backup-on-deploy flow. Keep at least one off-site backup.
-- **Image pinning:** pin the running deployment to a specific `<x.y.z>` digest, not `:latest`. Survives a registry pull.
+- **Image pinning:** pin the running deployment to a specific `<release-version>` digest, not `:latest`. Survives a registry pull.
 - **Source mirroring:** maintain a private mirror of the GitHub repo if you depend on PAIMOS for production. `git clone --mirror` weekly works.
 - **Watch for advisories:** subscribe to `https://github.com/inspr-at/paimos/security/advisories` (RSS feed available). Don't rely on email from the maintainer.
 - **If you discover a security issue and the maintainer is unreachable:** post a coordinated-disclosure ticket via GitHub's "Report a vulnerability" surface (built into Security Advisories). It does not require email.
