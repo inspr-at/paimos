@@ -32,8 +32,8 @@ const internalChromeEnabled = computed(
 // PAI-805: the route decides its shell (see router/shell.ts). The Agent
 // Mode shell keeps the change stream (it feeds refetch hints) but drops
 // the ordinary undo chrome along with the rest of AppLayout.
-// PAI-854: the fixture-only v6 shell does not open the production change
-// stream. Its preview state stays deterministic and local.
+// PAI-854 / PAI-867: the v6 shell owns its scoped projection lifecycle and
+// does not subscribe to the standard dashboard change-stream stores.
 const changeStreamEnabled = computed(() => internalChromeEnabled.value && layoutKind.value !== "v6");
 useChangesStream(changeStreamEnabled);
 const undoChromeEnabled = computed(() => internalChromeEnabled.value && layoutSupportsUndoChrome(layoutKind.value));

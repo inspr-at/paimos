@@ -25,7 +25,7 @@
 //   portal    → PortalLayout (external users)
 //   public    → bare (login, reset, first-login)
 //   agent     → AgentModeLayout (PAI-805 reduced shell: rail + canvas)
-//   v6        → Paimos6Layout (PAI-854 development-only preview shell)
+//   v6        → Paimos6Layout (PAI-867 production Paimos 6 shell)
 //   standard  → AppLayout (sidebar, header, footer chrome)
 
 export type AppShell = 'agent' | 'v6'
