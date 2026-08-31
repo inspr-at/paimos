@@ -35,10 +35,11 @@ expect_rejected 26.08.31-dev
 
 today=$(release_version::vienna_date)
 release_version::calendar_recut_policy "$today" $'v5.21.1' || fail "first calendar cut rejected"
-! release_version::calendar_recut_policy "$today" $'v5.21.1\nv'"$today" || fail "duplicate unsuffixed cut accepted"
+release_version::calendar_recut_policy "$today" $'v5.21.1\nv'"$today" || fail "exact unsuffixed resume rejected"
 release_version::calendar_recut_policy "$today.14.05" $'v5.21.1\nv'"$today" || fail "same-day recut rejected"
 ! release_version::calendar_recut_policy "$today.14.05" $'v5.21.1' || fail "suffix accepted without prior same-day cut"
 ! release_version::calendar_recut_policy 99.01.01 $'v5.21.1' || fail "non-Vienna-day calendar cut accepted"
+release_version::calendar_recut_policy 99.01.01 $'v5.21.1\nv99.01.01' || fail "published unsuffixed resume rejected after cut day"
 
 filtered=$(printf '%s\n' v5.21.1 v26.08.31 v26.08.31.14.05 v6.0.0 5.21.2 bad | release_version::tag_filter)
 [[ "$filtered" == $'v5.21.1\nv26.08.31\nv26.08.31.14.05' ]] || fail "tag filter drifted: $filtered"

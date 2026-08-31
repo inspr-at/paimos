@@ -65,6 +65,13 @@ release_version::vienna_iso_date() {
   TZ=Europe/Vienna date +%Y-%m-%d
 }
 
+release_version::calendar_iso_date() {
+  local version="${1#v}" year month day
+  release_version::is_calendar "$version" || return 1
+  IFS=. read -r year month day _ _ <<<"$version"
+  printf '20%s-%s-%s\n' "$year" "$month" "$day"
+}
+
 release_version::calendar_day() {
   local version="${1#v}"
   printf '%s\n' "${version:0:8}"
@@ -84,18 +91,26 @@ release_version::is_calendar_cut_today() {
 # supplies existing tags (one per line), keeping this helper deterministic and
 # free of repository/network access.
 release_version::calendar_recut_policy() {
-  local version="${1#v}" existing_tags="${2:-}" day found=0 tag
-  release_version::is_calendar_cut_today "$version" || return 1
+  local version="${1#v}" existing_tags="${2:-}" day exact=0 prior=0 tag
+  release_version::is_calendar "$version" || return 1
   day="$(release_version::calendar_day "$version")"
   while IFS= read -r tag; do
     tag="${tag#v}"
-    [[ "$tag" == "$day" || "$tag" == "$day".* ]] && found=1
+    [[ "$tag" == "$version" ]] && exact=1
+    [[ "$tag" != "$version" && ( "$tag" == "$day" || "$tag" == "$day".* ) ]] && prior=1
   done <<<"$existing_tags"
   if release_version::has_recut_suffix "$version"; then
-    (( found == 1 ))
+    # A recut always needs a different, already-published same-day release.
+    # Its own exact tag is resume evidence, never evidence of the prior cut.
+    (( prior == 1 )) || return 1
+    (( exact == 1 )) && return 0
   else
-    (( found == 0 ))
+    # An exact published tag may be a resume after midnight. The protected
+    # release flow must still prove it targets the canonical merge.
+    (( exact == 1 )) && return 0
+    (( prior == 0 )) || return 1
   fi
+  release_version::is_calendar_cut_today "$version"
 }
 
 release_version::tag_filter() {

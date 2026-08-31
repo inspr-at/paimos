@@ -56,6 +56,28 @@ latest_release_tag() {
   git tag --sort=-creatordate | release_version::tag_filter | awk 'NR == 1 {first=$0} END {print first}'
 }
 
+origin_release_tags() {
+  git ls-remote --tags --refs origin |
+    awk '{sub("refs/tags/", "", $2); print $2}' |
+    release_version::tag_filter
+}
+
+origin_tag_commit_oid() {
+  local tag="$1" oid
+  oid=$(git ls-remote --tags origin "refs/tags/$tag^{}" | awk 'NR == 1 {print $1}')
+  if [[ -z "$oid" ]]; then
+    oid=$(git ls-remote --tags --refs origin "refs/tags/$tag" | awk 'NR == 1 {print $1}')
+  fi
+  printf '%s\n' "$oid"
+}
+
+assert_calendar_cut_day() {
+  local context="$1"
+  if release_version::is_calendar "$NEW" && ! release_version::is_calendar_cut_today "$NEW"; then
+    fail "Vienna calendar day changed before $context; refusing release $NEW"
+  fi
+}
+
 changed_worktree_files() {
   { git diff --name-only HEAD; git diff --cached --name-only; git ls-files --others --exclude-standard; } |
     LC_ALL=C sort -u | grep -v '^$' || true
@@ -641,17 +663,25 @@ assert_release_merge() {
 }
 
 tag_release_merge() {
-  local merge_oid="$1" existing_oid
-  if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
-    existing_oid=$(git rev-list -n1 "${NEW_TAG}^{}")
-    [[ "$existing_oid" == "$merge_oid" ]] ||
-      fail "$NEW_TAG already points to $existing_oid, expected PR merge $merge_oid"
-    echo "$NEW_TAG already tags the correct protected-main merge commit."
+  local merge_oid="$1" existing_oid remote_oid
+  remote_oid=$(origin_tag_commit_oid "$NEW_TAG")
+  if [[ -n "$remote_oid" ]]; then
+    [[ "$remote_oid" == "$merge_oid" ]] ||
+      fail "origin/$NEW_TAG points to $remote_oid, expected canonical protected merge $merge_oid"
+    echo "origin/$NEW_TAG already tags the correct protected-main merge commit."
   else
+    assert_calendar_cut_day "creating absent tag $NEW_TAG"
+    if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+      existing_oid=$(git rev-list -n1 "${NEW_TAG}^{}")
+      fail "$NEW_TAG exists only locally at $existing_oid; refusing unproven tag publication"
+    fi
     git tag -a --no-sign "$NEW_TAG" "$merge_oid" -m "release $NEW"
     echo "Created $NEW_TAG at protected-main merge $merge_oid."
+    git push origin "refs/tags/$NEW_TAG"
+    remote_oid=$(origin_tag_commit_oid "$NEW_TAG")
+    [[ "$remote_oid" == "$merge_oid" ]] ||
+      fail "origin/$NEW_TAG did not resolve to canonical protected merge $merge_oid after push"
   fi
-  git push origin "refs/tags/$NEW_TAG"
 }
 
 prepare_release_branch() {
@@ -671,6 +701,7 @@ prepare_release_branch() {
       fi
       git show-ref --verify --quiet "refs/heads/$RELEASE_BRANCH" &&
         fail "local branch already exists without a matching remote PR: $RELEASE_BRANCH"
+      assert_calendar_cut_day "release-branch materialization"
       git switch -c "$RELEASE_BRANCH" >/dev/null
       ;;
     "$RELEASE_BRANCH")
@@ -699,7 +730,11 @@ prepare_release_branch() {
   esac
 
   "$ROOT/scripts/check-claims.sh"
-  today=$(release_version::vienna_iso_date)
+  if release_version::is_calendar "$NEW"; then
+    today=$(release_version::calendar_iso_date "$NEW")
+  else
+    today=$(release_version::vienna_iso_date)
+  fi
   first_existing_heading=$(awk '/^## \[/{print; exit}' docs/CHANGELOG.md)
   second_existing_heading=$(awk '/^## \[/{headings++; if (headings == 2) {print; exit}}' docs/CHANGELOG.md)
 
@@ -863,7 +898,7 @@ case "$MODE" in
     release_version::is_supported "$NEW" ||
       fail "mode must be patch|minor|major|<x.y.z>|<yy.mm.dd[.hh.mm]>; 6.0.0 is prohibited (got: $MODE)"
     if release_version::is_calendar "$NEW"; then
-      EXISTING_RELEASE_TAGS=$(git tag --sort=-creatordate | release_version::tag_filter)
+      EXISTING_RELEASE_TAGS=$(origin_release_tags)
       release_version::calendar_recut_policy "$NEW" "$EXISTING_RELEASE_TAGS" ||
         fail "calendar release must use today's Vienna date; .hh.mm is valid only for a same-day recut"
     else

@@ -52,6 +52,22 @@ write_fake_commands() {
   local bin="$1"
   mkdir -p "$bin"
 
+  cat > "$bin/date" <<'DATE'
+#!/usr/bin/env bash
+if [[ -n "${FAKE_GH_STATE:-}" && -f "$FAKE_GH_STATE/vienna-date" ]]; then
+  value=$(<"$FAKE_GH_STATE/vienna-date")
+  case "${1:-}" in
+    +%y.%m.%d) printf '%s\n' "$value"; exit 0 ;;
+    +%Y-%m-%d)
+      IFS=. read -r year month day <<<"$value"
+      printf '20%s-%s-%s\n' "$year" "$month" "$day"
+      exit 0
+      ;;
+  esac
+fi
+exec /usr/bin/date "$@"
+DATE
+
   cat > "$bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
 [[ "$*" == "manifest inspect ghcr.io/inspr-at/paimos:${FAKE_RELEASE_VERSION:-1.0.1}" ]]
@@ -132,6 +148,9 @@ pr_merge_oid() {
 
 case "${1:-} ${2:-}" in
   'repo view')
+    if [[ "${FAKE_VIENNA_FLIP_ON_REPO_VIEW:-0}" == "1" ]]; then
+      printf '%s\n' "${FAKE_VIENNA_NEXT_DAY:?}" > "$state/vienna-date"
+    fi
     printf '%s\n' 'example/paimos'
     ;;
   'pr list')
@@ -231,6 +250,9 @@ case "${1:-} ${2:-}" in
       done
       [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
       printf '%s\n' "$head_sha" > "$state/backend-full-head"
+      if [[ "${FAKE_VIENNA_FLIP_AFTER_BACKEND:-0}" == "1" ]]; then
+        printf '%s\n' "${FAKE_VIENNA_NEXT_DAY:?}" > "$state/vienna-date"
+      fi
       conclusion=success
       [[ ! -f "$state/backend-full-failed" ]] || conclusion=failure
       printf '[{"databaseId":3,"headSha":"%s","status":"completed","conclusion":"%s","url":"https://example.test/run/backend-full"}]\n' \
@@ -254,7 +276,7 @@ case "${1:-} ${2:-}" in
 esac
 GH
 
-  chmod +x "$bin/docker" "$bin/gh"
+  chmod +x "$bin/date" "$bin/docker" "$bin/gh"
 }
 
 setup_repo() {
@@ -360,6 +382,9 @@ run_release() {
       FAKE_CLAIMS_FAIL_MARKER="${FAKE_CLAIMS_FAIL_MARKER:-}" \
       FAKE_CLAIMS_FAIL_ON_BRANCH="${FAKE_CLAIMS_FAIL_ON_BRANCH:-}" \
       FAKE_CLAIMS_FAIL_ON_CONTENT="${FAKE_CLAIMS_FAIL_ON_CONTENT:-0}" \
+      FAKE_VIENNA_FLIP_ON_REPO_VIEW="${FAKE_VIENNA_FLIP_ON_REPO_VIEW:-0}" \
+      FAKE_VIENNA_FLIP_AFTER_BACKEND="${FAKE_VIENNA_FLIP_AFTER_BACKEND:-0}" \
+      FAKE_VIENNA_NEXT_DAY="${FAKE_VIENNA_NEXT_DAY:-}" \
       RELEASE_MERGE_TIMEOUT="${RELEASE_MERGE_TIMEOUT:-10}" \
       RELEASE_MERGE_POLL=1 \
       ./scripts/release.sh "$@"
@@ -1158,8 +1183,10 @@ test_canonical_unreleased_interactive_path_is_deterministic() {
 }
 
 test_calendar_release_and_rejections() {
-  local repo state origin output calendar_version recut_version
+  local repo state origin output calendar_version calendar_iso next_day recut_version merge_oid wrong_oid
   calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
+  calendar_iso=$(TZ=Europe/Vienna date +%Y-%m-%d)
+  next_day=$(TZ=Europe/Vienna date -d "$calendar_iso + 1 day" +%y.%m.%d)
   recut_version="$calendar_version.14.05"
   repo=$(setup_repo calendar-release v1.0.0)
   state="$TMP_ROOT/calendar-release/gh-state"
@@ -1173,6 +1200,24 @@ test_calendar_release_and_rejections() {
     fail 'calendar release lost leading zeroes in VERSION'
   [[ $(git --git-dir="$origin" rev-parse "refs/tags/v$calendar_version^{}") == "$(<"$state/merge-oid")" ]] ||
     fail 'calendar tag did not pin the protected merge'
+
+  # An exact published tag is a resumable checkpoint only through its
+  # canonical merged PR. This rerun must prove, not recreate, that tag.
+  FAKE_RELEASE_VERSION="$calendar_version" \
+    run_release "$repo" "$state" "$calendar_version" --no-edit >/dev/null
+
+  merge_oid=$(<"$state/merge-oid")
+  wrong_oid=$(git --git-dir="$origin" rev-parse "$merge_oid^")
+  git -C "$repo" tag -d "v$calendar_version" >/dev/null
+  git -C "$repo" push -q origin ":refs/tags/v$calendar_version"
+  git -C "$repo" tag -a --no-sign "v$calendar_version" "$wrong_oid" -m mismatched
+  git -C "$repo" push -q origin "v$calendar_version"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$repo" "$state" "$calendar_version" --no-edit >"$TMP_ROOT/calendar-release/mismatch" 2>&1; then
+    fail 'published calendar resume accepted a tag outside the canonical merge'
+  fi
+  grep -qF 'expected canonical protected merge' "$TMP_ROOT/calendar-release/mismatch" ||
+    fail 'mismatched published calendar tag rejection was not explicit'
 
   repo=$(setup_repo calendar-reject v1.0.0)
   output="$TMP_ROOT/calendar-reject/output"
@@ -1196,6 +1241,70 @@ test_calendar_release_and_rejections() {
   fi
   grep -qF 'computed release 6.0.0 is prohibited' "$output" ||
     fail 'major-mode calendar guidance was not explicit'
+
+  repo=$(setup_repo calendar-local-only v1.0.0)
+  GIT_COMMITTER_DATE='2031-01-01T00:00:00Z' \
+    git -C "$repo" tag -a --no-sign "v$calendar_version" -m local-only
+  prepend_release_notes "$repo" "$recut_version"
+  output="$TMP_ROOT/calendar-local-only/output"
+  if FAKE_RELEASE_VERSION="$recut_version" \
+     run_release "$repo" "$TMP_ROOT/calendar-local-only/gh-state" "$recut_version" --no-edit >"$output" 2>&1; then
+    fail 'local-only calendar tag was accepted as recut evidence'
+  fi
+  grep -qF '.hh.mm is valid only for a same-day recut' "$output" ||
+    fail 'local-only recut evidence rejection was not explicit'
+
+  repo=$(setup_repo calendar-remote-only v1.0.0)
+  origin=$(git -C "$repo" remote get-url origin)
+  GIT_COMMITTER_DATE='2031-01-01T00:00:00Z' \
+    git -C "$repo" tag -a --no-sign "v$calendar_version" -m remote-only
+  git -C "$repo" push -q origin "v$calendar_version"
+  git -C "$repo" tag -d "v$calendar_version" >/dev/null
+  ! git -C "$repo" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'remote-only recut fixture retained a local tag'
+  prepend_release_notes "$repo" "$recut_version"
+  FAKE_RELEASE_VERSION="$recut_version" \
+    run_release "$repo" "$TMP_ROOT/calendar-remote-only/gh-state" "$recut_version" --no-edit >/dev/null
+  git --git-dir="$origin" rev-parse "refs/tags/v$recut_version^{}" >/dev/null ||
+    fail 'origin-proven recut did not publish'
+
+  repo=$(setup_repo calendar-no-canonical-resume v1.0.0)
+  GIT_COMMITTER_DATE='2031-01-01T00:00:00Z' \
+    git -C "$repo" tag -a --no-sign "v$calendar_version" -m unproven
+  git -C "$repo" push -q origin "v$calendar_version"
+  git -C "$repo" tag -d "v$calendar_version" >/dev/null
+  output="$TMP_ROOT/calendar-no-canonical-resume/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$repo" "$TMP_ROOT/calendar-no-canonical-resume/gh-state" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'second unsuffixed cut resumed without a canonical protected PR'
+  fi
+  grep -qF 'exists without its canonical' "$output" ||
+    fail 'unproven unsuffixed resume rejection was not explicit'
+
+  repo=$(setup_repo calendar-branch-midnight v1.0.0)
+  prepend_release_notes "$repo" "$calendar_version"
+  output="$TMP_ROOT/calendar-branch-midnight/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     FAKE_VIENNA_FLIP_ON_REPO_VIEW=1 FAKE_VIENNA_NEXT_DAY="$next_day" \
+     run_release "$repo" "$TMP_ROOT/calendar-branch-midnight/gh-state" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar release materialized a branch after the Vienna day changed'
+  fi
+  grep -qF 'Vienna calendar day changed before release-branch materialization' "$output" ||
+    fail 'branch-midnight rejection was not explicit'
+
+  repo=$(setup_repo calendar-tag-midnight v1.0.0)
+  origin=$(git -C "$repo" remote get-url origin)
+  prepend_release_notes "$repo" "$calendar_version"
+  output="$TMP_ROOT/calendar-tag-midnight/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     FAKE_VIENNA_FLIP_AFTER_BACKEND=1 FAKE_VIENNA_NEXT_DAY="$next_day" \
+     run_release "$repo" "$TMP_ROOT/calendar-tag-midnight/gh-state" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar release created an absent tag after the Vienna day changed'
+  fi
+  grep -qF "Vienna calendar day changed before creating absent tag v$calendar_version" "$output" ||
+    fail 'tag-midnight rejection was not explicit'
+  ! git --git-dir="$origin" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
+    fail 'tag-midnight rejection still published a tag'
 }
 
 write_fake_commands "$TMP_ROOT/fake-bin"
