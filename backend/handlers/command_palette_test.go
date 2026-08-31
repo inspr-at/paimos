@@ -1,5 +1,5 @@
 // PAIMOS — Your Professional & Personal AI Project OS
-// Copyright (C) 2026 Markus Barta <camyb@users.noreply.github.com>
+// Copyright (C) 2026 Markus Barta <markus@barta.com>
 
 package handlers_test
 
