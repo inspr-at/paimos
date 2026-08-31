@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, onScopeDispose, ref, watch } from 'vue'
-import { CircleDot, Inbox, Layers3, RadioTower, WifiOff } from 'lucide-vue-next'
+import { Inbox, Layers3, RadioTower, WifiOff } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api, permissionsEpoch, permissionsEpochGeneration } from '@/api/client'
 import Paimos6SessionCard from '@/components/v6/Paimos6SessionCard.vue'
+import Paimos6SourceRail from '@/components/v6/Paimos6SourceRail.vue'
 import Paimos6TalkDoor from '@/components/v6/Paimos6TalkDoor.vue'
-import { usePaimos6SessionHome } from '@/composables/v6/usePaimos6SessionHome'
+import Paimos6ZoomControl from '@/components/v6/Paimos6ZoomControl.vue'
+import Paimos6ZoomOverview from '@/components/v6/Paimos6ZoomOverview.vue'
+import { usePaimos6SessionZoom } from '@/composables/v6/usePaimos6SessionZoom'
 import { useAuthStore } from '@/stores/auth'
 import type { Project } from '@/types'
-import { loadPaimos6SessionHome } from '@/v6/sessionHome'
+import { canonicalPaimos6Zoom, loadPaimos6SessionZoom } from '@/v6/sessionHomeZoom'
 
 interface ProjectOption { id: number; key: string; name: string }
 
@@ -43,6 +46,8 @@ const deepLinkedSessionId = computed(() => {
   return typeof raw === 'string' && raw !== '' ? raw : '__invalid-session-query__'
 })
 const deepLinkedProjectId = computed(() => requestedProjectId())
+const zoomResolution = computed(() => canonicalPaimos6Zoom(route.query.zoom))
+const zoom = computed(() => zoomResolution.value.zoom)
 
 async function replaceSessionQuery(id: string | null): Promise<void> {
   const query = {
@@ -53,16 +58,21 @@ async function replaceSessionQuery(id: string | null): Promise<void> {
   await router.replace({ query }).catch(() => {})
 }
 
-const home = usePaimos6SessionHome({
+const home = usePaimos6SessionZoom({
   principalId,
   authorityKey,
   projectId: selectedProjectId,
   deepLinkedProjectId,
   deepLinkedSessionId,
-  load: loadPaimos6SessionHome,
+  zoom,
+  load: loadPaimos6SessionZoom,
   replaceSessionQuery,
 })
 const selectedSession = home.selectedSession
+const selectedOutsideSample = computed(() => (
+  selectedSession.value !== null
+  && !home.sessions.value.some((session) => session.id === selectedSession.value?.id)
+))
 const selectedProject = computed(() => projects.value.find((project) => project.id === selectedProjectId.value) ?? null)
 
 function resetAuxiliaryStatus() {
@@ -126,7 +136,12 @@ async function loadProjects() {
   }
 }
 
-watch([authorityKey, selectedProjectId, home.selectedId], resetAuxiliaryStatus, { flush: 'sync' })
+watch([authorityKey, selectedProjectId, zoom, home.selectedId], resetAuxiliaryStatus, { flush: 'sync' })
+
+watch(() => route.query.zoom, () => {
+  if (!zoomResolution.value.replace) return
+  void router.replace({ query: { ...route.query, zoom: '10' } }).catch(() => {})
+}, { immediate: true, flush: 'sync' })
 
 watch(authorityKey, () => {
   // Clear the project vocabulary before a new principal/permission request.
@@ -155,9 +170,17 @@ function changeProject(event: Event) {
   void router.replace({ query: { ...route.query, project: String(id), session: undefined } }).catch(() => {})
 }
 
+function changeZoom(value: string) {
+  if (value === zoom.value && route.query.zoom === value) return
+  void router.push({ query: { ...route.query, zoom: value } }).catch(() => {})
+}
+
 function selectSession(id: string) {
-  if (!home.select(id)) return
+  // Capture current authorized union truth before URL publication. A router
+  // implementation may publish the query synchronously, which fences rows.
   const session = home.sessions.value.find((candidate) => candidate.id === id)
+    ?? (selectedSession.value?.id === id ? selectedSession.value : null)
+  if (!home.select(id)) return
   statusMessage.value = session
     ? `${session.title} selected. Target is ${session.agent}; nothing was sent.`
     : 'Selection unavailable.'
@@ -170,6 +193,7 @@ function clearSelection() {
 
 function previewAction(label: string, id: string) {
   const session = home.sessions.value.find((candidate) => candidate.id === id)
+    ?? (selectedSession.value?.id === id ? selectedSession.value : null)
   statusMessage.value = `${label} has no mutation endpoint yet for ${session?.title ?? 'this session'}. No request was sent.`
 }
 
@@ -183,11 +207,7 @@ onScopeDispose(() => {
   <div class="p6-preview-root">
   <main class="p6-home" aria-labelledby="p6-title" :inert="doorOpen || undefined">
     <section class="p6-intro">
-      <div class="p6-source-framing" aria-label="Paimos sources">
-        <span class="p6-source is-active"><CircleDot :size="12" aria-hidden="true" /> Paimos · active source</span>
-        <span class="p6-source is-reserved">Pharos · reserved source</span>
-        <span class="p6-source is-reserved">Janus · reserved source</span>
-      </div>
+      <Paimos6SourceRail />
       <div class="p6-title-row">
         <div>
           <p class="p6-kicker">Your agent loop, without the CRUD chrome</p>
@@ -197,7 +217,7 @@ onScopeDispose(() => {
           </p>
         </div>
         <dl class="p6-glance" aria-label="Live session summary">
-          <div><dt>Attention</dt><dd>{{ home.totals.value.attention }} <span>sessions</span></dd></div>
+          <div><dt>Attention</dt><dd>{{ home.totals.value.attention_sessions }} <span>sessions</span></dd></div>
           <div><dt>Inbox</dt><dd>{{ home.totals.value.unread }} <span>unread</span></dd></div>
           <div><dt>Source</dt><dd><RadioTower :size="16" aria-hidden="true" /> live</dd></div>
         </dl>
@@ -227,8 +247,12 @@ onScopeDispose(() => {
         </div>
       </div>
 
+      <div v-if="projectState === 'ready' && selectedProjectId !== null" class="p6-zoom-panel">
+        <Paimos6ZoomControl :model-value="zoom" :band="home.band.value" @update:model-value="changeZoom" />
+      </div>
+
       <div v-if="projectState === 'loading' || home.state.value === 'loading'" class="p6-load-state" role="status">
-        Loading authorized session home…
+        Loading authorized semantic-zoom projection…
       </div>
       <div v-else-if="projectState === 'empty'" class="p6-load-state">
         No project is available to this principal.
@@ -239,16 +263,38 @@ onScopeDispose(() => {
       <div v-else-if="home.state.value === 'empty'" class="p6-load-state">
         {{ selectedProject?.key ?? 'This project' }} has no product sessions yet.
       </div>
-      <div v-else class="p6-session-grid">
-        <Paimos6SessionCard
-          v-for="session in home.sessions.value"
-          :key="session.id"
-          :session="session"
-          :selected="home.selectedId.value === session.id"
-          @select="selectSession"
-          @clear="clearSelection"
-          @action="previewAction"
+      <div v-else>
+        <Paimos6ZoomOverview
+          :totals="home.totals.value"
+          :band="home.band.value"
+          :sample-limit="home.sampleLimit.value"
+          :sample-truncated="home.sampleTruncated.value"
+          :sampled-sessions="home.sessions.value.length"
         />
+        <section v-if="selectedOutsideSample && selectedSession" class="p6-pinned" aria-labelledby="p6-pinned-title">
+          <p id="p6-pinned-title">Selected outside this bounded sample</p>
+          <Paimos6SessionCard
+            :session="selectedSession"
+            selected
+            @select="selectSession"
+            @clear="clearSelection"
+            @action="previewAction"
+          />
+        </section>
+        <div class="p6-sample-label">
+          Exception-first sample · {{ home.sessions.value.length }} visible
+        </div>
+        <div class="p6-session-grid">
+          <Paimos6SessionCard
+            v-for="session in home.sessions.value"
+            :key="session.id"
+            :session="session"
+            :selected="home.selectedId.value === session.id"
+            @select="selectSession"
+            @clear="clearSelection"
+            @action="previewAction"
+          />
+        </div>
       </div>
     </section>
 
@@ -257,7 +303,7 @@ onScopeDispose(() => {
       <div>
         <h2 id="p6-honesty-title">Read-only responsive web preview</h2>
         <p>
-          Rows come from the strict, project-authorized session-home endpoint. Controls are capability truth only: no mutation endpoint exists yet. At 390px this remains mobile web—not a native client—and no push capability is claimed.
+          Rows come from the strict, project-authorized semantic-zoom endpoint. The exception-first sample is bounded while totals and a separately hydrated selection stay authoritative. Controls are capability truth only: no mutation endpoint exists yet. At 390px this remains mobile web—not a native client—and no push capability is claimed.
         </p>
       </div>
       <span>Web · no push</span>
@@ -286,10 +332,6 @@ onScopeDispose(() => {
   padding: 70px 0 44px;
 }
 .p6-intro { max-width: 1080px; margin: 0 auto; }
-.p6-source-framing { display: flex; flex-wrap: wrap; gap: 7px; }
-.p6-source { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid #d8e2dc; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.055em; text-transform: uppercase; }
-.p6-source.is-active { color: #2d6048; background: #edf6f0; }
-.p6-source.is-reserved { border-style: dashed; color: #59655e; background: rgba(255, 255, 255, 0.5); }
 .p6-title-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 70px; margin-top: 30px; }
 .p6-kicker,
 .p6-section-kicker { color: #5d7467; font-size: 10px; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; }
@@ -313,6 +355,10 @@ onScopeDispose(() => {
 .p6-selection-copy button:hover { border-color: #aabdb1; }
 .p6-selection-copy button:focus-visible { outline: 3px solid rgba(47, 107, 82, 0.3); outline-offset: 3px; }
 .p6-selection-copy kbd { margin-left: 4px; color: #59655e; font: 500 9px/1 "JetBrains Mono", monospace; }
+.p6-zoom-panel { display: grid; max-width: 560px; margin: 0 0 17px; }
+.p6-pinned { max-width: 380px; margin: 0 0 16px; padding: 10px; border: 1px solid #9db9a9; border-radius: 15px; background: #f1f7f3; }
+.p6-pinned > p,
+.p6-sample-label { margin-bottom: 8px; color: #4c6959; font-size: 9px; font-weight: 750; letter-spacing: 0.065em; text-transform: uppercase; }
 .p6-session-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .p6-load-state { padding: 36px 22px; border: 1px dashed #cad6cf; border-radius: 16px; color: #59655e; background: rgba(252, 253, 250, 0.7); font-size: 12px; text-align: center; }
 .p6-load-state.is-unavailable { border-color: #ddc3b8; color: #784d3b; background: #fff8f4; }
@@ -331,8 +377,6 @@ onScopeDispose(() => {
 
 @media (max-width: 680px) {
   .p6-home { width: calc(100% - 28px); padding: 34px 0 86px; }
-  .p6-source-framing { gap: 5px; }
-  .p6-source { padding: 4px 7px; font-size: 8.5px; }
   .p6-title-row { margin-top: 22px; }
   .p6-title-row h1 { font-size: clamp(34px, 11vw, 44px); }
   .p6-deck { font-size: 12px; }
@@ -342,6 +386,8 @@ onScopeDispose(() => {
   .p6-section-head { align-items: flex-start; flex-direction: column; }
   .p6-selection-copy { width: 100%; align-items: flex-start; justify-content: space-between; }
   .p6-selection-copy span { max-width: 220px; }
+  .p6-zoom-panel,
+  .p6-pinned { width: 100%; max-width: 100%; box-sizing: border-box; }
   .p6-honesty { grid-template-columns: auto 1fr; align-items: start; }
   .p6-honesty > span { grid-column: 2; justify-self: start; }
 }

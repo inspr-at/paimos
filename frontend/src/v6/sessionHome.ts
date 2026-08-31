@@ -140,7 +140,7 @@ function enumValue<T extends string>(value: unknown, values: ReadonlySet<T>): T 
   return typeof value === 'string' && values.has(value as T) ? value as T : null
 }
 
-function parseSession(value: unknown): Paimos6SessionWire | null {
+export function parsePaimos6SessionRow(value: unknown): Paimos6SessionWire | null {
   const row = record(value)
   if (!row || !exactKeys(row, [
     'product_session_id', 'title', 'summary', 'revision', 'updated_at', 'target',
@@ -279,7 +279,7 @@ export function parsePaimos6SessionHome(value: unknown, expectedProjectId: numbe
   const sessions: Paimos6SessionWire[] = []
   const seen = new Set<string>()
   for (const raw of root.sessions) {
-    const session = parseSession(raw)
+    const session = parsePaimos6SessionRow(raw)
     if (!session || seen.has(session.product_session_id)) throw new Paimos6SessionHomeContractError()
     const previous = sessions[sessions.length - 1]
     if (previous) {

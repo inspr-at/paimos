@@ -129,6 +129,7 @@ GET|PUT  /node-labels
 GET|PUT  /projects/:id/node-labels
 GET|POST /projects/:id/product-sessions
 GET      /projects/:id/session-home/v1
+GET      /projects/:id/session-home/zoom/v1
 GET      /projects/:id/product-sessions/:productSessionID
 GET      /projects/:id/product-sessions/:productSessionID/events
 POST     /projects/:id/product-sessions/:productSessionID/attach-node
@@ -181,6 +182,19 @@ enums are defined by `GET /openapi.json`.
 `totals.unread` de-duplicates shared target-agent inboxes when several product
 sessions select the same registered agent; `totals.attention` counts session
 rows whose exception-attention block is required.
+
+The additive semantic-zoom endpoint accepts only the optional query keys
+`zoom` and `selected_session_id`, each at most once. `zoom` defaults to `10`
+and remains a canonical 1–64 digit decimal string on the wire. Its digit count
+selects the `detail`, `overview`, `aggregate`, or `far` band; the returned
+sample limit is capped at 100. Exact global totals are computed independently
+of the deterministic exception-first sample. One newest session represents
+each exceptional target before other rows, with UUID tie-breaking. A selected
+same-project session is returned separately when it falls outside the sample;
+missing, foreign, or inaccessible selections use the same 404 concealment as
+an inaccessible project. Authorization, selection, totals, sampling, and one
+captured harness-freshness instant share one read transaction, and all
+responses are `Cache-Control: private, no-store`.
 
 ## Time entries
 

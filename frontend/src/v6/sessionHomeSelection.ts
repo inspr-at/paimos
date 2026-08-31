@@ -41,13 +41,13 @@ export function paimos6SelectionStorageKey(scope: Paimos6SelectionScope): string
   return `paimos6:session-home:${scope.principalId}:project:${scope.projectId}:selected-session`
 }
 
-function readStoredSelection(
+export function readPaimos6StoredSelection(
   storage: Paimos6SelectionStorage | null | undefined,
-  key: string,
+  scope: Paimos6SelectionScope,
 ): string | null {
   if (!storage) return null
   try {
-    const value = storage.getItem(key)
+    const value = storage.getItem(paimos6SelectionStorageKey(scope))
     return value && value.trim() !== '' ? value : null
   } catch {
     return null
@@ -88,10 +88,7 @@ export function resolvePaimos6Selection(
     return { id: null, source: 'none', clearInvalidDeepLink: true }
   }
 
-  const stored = readStoredSelection(
-    input.storage,
-    paimos6SelectionStorageKey(input.scope),
-  )
+  const stored = readPaimos6StoredSelection(input.storage, input.scope)
   if (stored && authorized.has(stored)) {
     return { id: stored, source: 'stored', clearInvalidDeepLink: false }
   }

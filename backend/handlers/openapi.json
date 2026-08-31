@@ -1926,6 +1926,34 @@
           }
         }
       },
+      "SessionHomeZoomTotalsV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sessions", "unread", "attention_sessions", "exception_messages", "action_requests", "exception_targets", "sampled_exception_targets"],
+        "properties": {
+          "sessions": {"type": "integer", "format": "int64", "minimum": 0},
+          "unread": {"type": "integer", "format": "int64", "minimum": 0},
+          "attention_sessions": {"type": "integer", "format": "int64", "minimum": 0},
+          "exception_messages": {"type": "integer", "format": "int64", "minimum": 0},
+          "action_requests": {"type": "integer", "format": "int64", "minimum": 0},
+          "exception_targets": {"type": "integer", "format": "int64", "minimum": 0},
+          "sampled_exception_targets": {"type": "integer", "format": "int64", "minimum": 0}
+        }
+      },
+      "SessionHomeZoomSnapshotV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "project_id", "zoom", "band", "sample_limit", "sample_truncated", "sessions", "selected_session", "totals"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "project_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "zoom": {"type": "string", "pattern": "^[1-9][0-9]{0,63}$", "minLength": 1, "maxLength": 64, "default": "10"},
+          "band": {"type": "string", "enum": ["detail", "overview", "aggregate", "far"]},
+          "sample_limit": {"type": "integer", "minimum": 1, "maximum": 100},
+          "sample_truncated": {"type": "boolean"},
+          "sessions": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/SessionHomeRowV1"}},
+          "selected_session": {"oneOf": [{"$ref": "#/components/schemas/SessionHomeRowV1"}, {"type": "null"}]},
+          "totals": {"$ref": "#/components/schemas/SessionHomeZoomTotalsV1"}
+        }
+      },
       "ProductSession": {
         "type": "object", "additionalProperties": false,
         "description": "A first-class product session. product_session_id is never an attribution UUID/header session, harness_session_id, agent_run_id, delivery identity, or intake_session_id.",
@@ -4788,6 +4816,27 @@
             "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionHomeSnapshotV1"}}}
           },
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/projects/{id}/session-home/zoom/v1": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+        {"name": "zoom", "in": "query", "required": false, "schema": {"type": "string", "pattern": "^[1-9][0-9]{0,63}$", "minLength": 1, "maxLength": 64, "default": "10"}},
+        {"name": "selected_session_id", "in": "query", "required": false, "schema": {"type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"}}
+      ],
+      "get": {
+        "tags": ["session-home"],
+        "summary": "Read a bounded semantic-zoom session-home projection",
+        "description": "Returns exact global totals and an exception-first deterministic sample bounded to 100 rows. Zoom is a canonical decimal string; its digit length selects detail, overview, aggregate, or far. An authorized selected session is hydrated independently when outside the sample.",
+        "responses": {
+          "200": {
+            "description": "Authorized bounded session-home snapshot. Cache-Control is private, no-store.",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionHomeZoomSnapshotV1"}}}
+          },
+          "400": {"description": "Malformed, duplicate, or unknown query parameter"},
           "404": {"$ref": "#/components/responses/NotFound"}
         }
       }

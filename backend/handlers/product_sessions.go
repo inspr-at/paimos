@@ -61,6 +61,7 @@ func RegisterProductSessionRoutes(r chi.Router) {
 // established. Product-session CRUD keeps its existing internal-group policy.
 func RegisterSessionHomeRoutes(r chi.Router) {
 	r.With(auth.RequireProjectView).Get("/projects/{id}/session-home/v1", SessionHomeV1)
+	r.With(auth.RequireProjectView).Get("/projects/{id}/session-home/zoom/v1", SessionHomeZoomV1)
 }
 
 func ListProductSessionEvents(w http.ResponseWriter, r *http.Request) {
