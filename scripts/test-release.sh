@@ -1293,7 +1293,7 @@ setup_interrupted_calendar_descendant_recovery() {
 }
 
 test_interrupted_calendar_descendant_recovery() {
-  local calendar_version next_day output later_branch
+  local calendar_version next_day output later_branch legacy_oid divergent_oid legacy_tag
   calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
   next_day=$(TZ=Europe/Vienna date -d \
     "$(TZ=Europe/Vienna date +%Y-%m-%d) + 1 day" +%y.%m.%d)
@@ -1312,6 +1312,18 @@ test_interrupted_calendar_descendant_recovery() {
     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >/dev/null
   [[ $(git --git-dir="$RECOVERY_ORIGIN" rev-parse "refs/tags/v$calendar_version^{}") == "$RECOVERY_CANDIDATE" ]] ||
     fail 'calendar recovery did not safely resume its already-exact origin tag'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-legacy-version "$calendar_version"
+  legacy_oid=$(git --git-dir="$RECOVERY_ORIGIN" rev-parse 'refs/tags/v1.0.0^{}')
+  for legacy_tag in v1.1.1 v1.1.2 v1.2.0 v1.2.1; do
+    git -C "$RECOVERY_REPO" tag -a --no-sign "$legacy_tag" "$legacy_oid" -m "$legacy_tag"
+  done
+  git -C "$RECOVERY_REPO" push -q origin v1.1.1 v1.1.2 v1.2.0 v1.2.1
+  rm "$RECOVERY_STATE/backend-full-failed"
+  FAKE_RELEASE_VERSION="$calendar_version" \
+    run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >/dev/null
+  [[ $(git --git-dir="$RECOVERY_ORIGIN" rev-parse "refs/tags/v$calendar_version^{}") == "$RECOVERY_CANDIDATE" ]] ||
+    fail 'calendar recovery rejected authoritative legacy ancestor tags with historical VERSION drift'
 
   setup_interrupted_calendar_descendant_recovery calendar-descendant-missing-timeout "$calendar_version"
   rm "$RECOVERY_STATE/backend-full-failed"
@@ -1394,6 +1406,20 @@ test_interrupted_calendar_descendant_recovery() {
   fi
   grep -qF 'is newer than or divergent from the interrupted release merge: v9.0.0' "$output" ||
     fail 'newer release tag rejection was not explicit'
+
+  setup_interrupted_calendar_descendant_recovery calendar-descendant-divergent-tag "$calendar_version"
+  rm "$RECOVERY_STATE/backend-full-failed"
+  divergent_oid=$(printf 'divergent release evidence\n' |
+    git -C "$RECOVERY_REPO" commit-tree "$RECOVERY_CANDIDATE^{tree}")
+  git -C "$RECOVERY_REPO" tag -a --no-sign v8.0.0 "$divergent_oid" -m 'divergent release'
+  git -C "$RECOVERY_REPO" push -q origin v8.0.0
+  output="$TMP_ROOT/calendar-descendant-divergent-tag/output"
+  if FAKE_RELEASE_VERSION="$calendar_version" \
+     run_release "$RECOVERY_REPO" "$RECOVERY_STATE" "$calendar_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recovery accepted a divergent origin release tag'
+  fi
+  grep -qF 'is newer than or divergent from the interrupted release merge: v8.0.0' "$output" ||
+    fail 'divergent release tag rejection was not explicit'
 
   setup_interrupted_calendar_descendant_recovery calendar-descendant-main-race "$calendar_version"
   rm "$RECOVERY_STATE/backend-full-failed"
