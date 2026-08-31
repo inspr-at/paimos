@@ -354,6 +354,16 @@ prepend_release_notes() {
   mv "$tmp" "$repo/docs/CHANGELOG.md"
 }
 
+prepend_release_notes_preserving_history() {
+  local repo="$1" version="$2"
+  local tmp="$repo/docs/CHANGELOG.md.next"
+  {
+    printf '# Changelog\n\n## [%s] — 2026-01-02\n\n### Fixed\n\n- Protected releases.\n\n' "$version"
+    sed -n '/^## \[/,$p' "$repo/docs/CHANGELOG.md"
+  } > "$tmp"
+  mv "$tmp" "$repo/docs/CHANGELOG.md"
+}
+
 commit_unreleased_notes() {
   local repo="$1"
   local tmp="$repo/docs/CHANGELOG.md.next"
@@ -1183,7 +1193,7 @@ test_canonical_unreleased_interactive_path_is_deterministic() {
 }
 
 test_calendar_release_and_rejections() {
-  local repo state origin output calendar_version calendar_iso next_day recut_version merge_oid wrong_oid
+  local repo state origin output calendar_version calendar_iso next_day recut_version merge_oid wrong_oid blob_oid
   calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
   calendar_iso=$(TZ=Europe/Vienna date +%Y-%m-%d)
   next_day=$(TZ=Europe/Vienna date -d "$calendar_iso + 1 day" +%y.%m.%d)
@@ -1256,17 +1266,62 @@ test_calendar_release_and_rejections() {
 
   repo=$(setup_repo calendar-remote-only v1.0.0)
   origin=$(git -C "$repo" remote get-url origin)
-  GIT_COMMITTER_DATE='2031-01-01T00:00:00Z' \
-    git -C "$repo" tag -a --no-sign "v$calendar_version" -m remote-only
-  git -C "$repo" push -q origin "v$calendar_version"
+  prepend_release_notes "$repo" "$calendar_version"
+  FAKE_RELEASE_VERSION="$calendar_version" \
+    run_release "$repo" "$TMP_ROOT/calendar-remote-only/prior-state" "$calendar_version" --no-edit >/dev/null
   git -C "$repo" tag -d "v$calendar_version" >/dev/null
   ! git -C "$repo" show-ref --verify --quiet "refs/tags/v$calendar_version" ||
     fail 'remote-only recut fixture retained a local tag'
-  prepend_release_notes "$repo" "$recut_version"
+  prepend_release_notes_preserving_history "$repo" "$recut_version"
   FAKE_RELEASE_VERSION="$recut_version" \
     run_release "$repo" "$TMP_ROOT/calendar-remote-only/gh-state" "$recut_version" --no-edit >/dev/null
   git --git-dir="$origin" rev-parse "refs/tags/v$recut_version^{}" >/dev/null ||
     fail 'origin-proven recut did not publish'
+
+  repo=$(setup_repo calendar-wrong-version v1.0.0)
+  GIT_COMMITTER_DATE='2031-01-01T00:00:00Z' \
+    git -C "$repo" tag -a --no-sign "v$calendar_version" -m wrong-version
+  git -C "$repo" push -q origin "v$calendar_version"
+  prepend_release_notes "$repo" "$recut_version"
+  output="$TMP_ROOT/calendar-wrong-version/output"
+  if FAKE_RELEASE_VERSION="$recut_version" \
+     run_release "$repo" "$TMP_ROOT/calendar-wrong-version/gh-state" "$recut_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recut accepted a prior tag carrying the wrong VERSION'
+  fi
+  grep -qF "does not carry VERSION=$calendar_version" "$output" ||
+    fail 'wrong-VERSION prior tag rejection was not explicit'
+
+  repo=$(setup_repo calendar-blob-tag v1.0.0)
+  blob_oid=$(printf 'not a release commit\n' | git -C "$repo" hash-object -w --stdin)
+  GIT_COMMITTER_DATE='2031-01-01T00:00:00Z' \
+    git -C "$repo" tag -a --no-sign "v$calendar_version" "$blob_oid" -m blob-tag
+  git -C "$repo" push -q origin "v$calendar_version"
+  prepend_release_notes "$repo" "$recut_version"
+  output="$TMP_ROOT/calendar-blob-tag/output"
+  if FAKE_RELEASE_VERSION="$recut_version" \
+     run_release "$repo" "$TMP_ROOT/calendar-blob-tag/gh-state" "$recut_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recut accepted a prior tag resolving to a blob'
+  fi
+  grep -qF 'does not resolve to a commit' "$output" ||
+    fail 'non-commit prior tag rejection was not explicit'
+
+  repo=$(setup_repo calendar-nonancestor v1.0.0)
+  git -C "$repo" switch -q --orphan calendar-evidence
+  printf '%s\n' "$calendar_version" > "$repo/VERSION"
+  git -C "$repo" add -A
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'nonancestor calendar evidence'
+  GIT_COMMITTER_DATE='2031-01-01T00:00:00Z' \
+    git -C "$repo" tag -a --no-sign "v$calendar_version" -m nonancestor
+  git -C "$repo" push -q origin "v$calendar_version"
+  git -C "$repo" switch -q main
+  prepend_release_notes "$repo" "$recut_version"
+  output="$TMP_ROOT/calendar-nonancestor/output"
+  if FAKE_RELEASE_VERSION="$recut_version" \
+     run_release "$repo" "$TMP_ROOT/calendar-nonancestor/gh-state" "$recut_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar recut accepted a prior tag outside origin/main ancestry'
+  fi
+  grep -qF 'is not an ancestor of origin/main' "$output" ||
+    fail 'nonancestor prior tag rejection was not explicit'
 
   repo=$(setup_repo calendar-no-canonical-resume v1.0.0)
   GIT_COMMITTER_DATE='2031-01-01T00:00:00Z' \

@@ -71,6 +71,36 @@ origin_tag_commit_oid() {
   printf '%s\n' "$oid"
 }
 
+assert_origin_calendar_recut_evidence() {
+  local version="$1" existing_tags="$2" day tag stripped remote_oid fetched_oid
+  local evidence_ref evidence_count=0
+  release_version::has_recut_suffix "$version" || return 0
+  day=$(release_version::calendar_day "$version")
+  while IFS= read -r tag; do
+    stripped="${tag#v}"
+    if [[ "$stripped" == "$version" || ( "$stripped" != "$day" && "$stripped" != "$day".* ) ]]; then
+      continue
+    fi
+    remote_oid=$(origin_tag_commit_oid "$tag")
+    [[ "$remote_oid" =~ ^[0-9a-f]{40}$ ]] ||
+      fail "origin prior calendar tag has no exact object: $tag"
+    evidence_ref="refs/paimos/release-origin-tags/$tag"
+    git fetch --quiet origin "+refs/tags/$tag:$evidence_ref" ||
+      fail "could not fetch exact origin prior calendar tag: $tag"
+    fetched_oid=$(git rev-parse "$evidence_ref^{commit}" 2>/dev/null) ||
+      fail "origin prior calendar tag does not resolve to a commit: $tag"
+    [[ "$fetched_oid" == "$remote_oid" ]] ||
+      fail "fetched prior calendar tag differs from exact origin ref: $tag"
+    git merge-base --is-ancestor "$fetched_oid" origin/main ||
+      fail "origin prior calendar tag is not an ancestor of origin/main: $tag"
+    [[ "$(git show "$fetched_oid:VERSION" 2>/dev/null || true)" == "$stripped" ]] ||
+      fail "origin prior calendar tag $tag does not carry VERSION=$stripped"
+    evidence_count=$((evidence_count + 1))
+  done <<<"$existing_tags"
+  (( evidence_count > 0 )) ||
+    fail "calendar recut has no authoritative prior same-day release on origin"
+}
+
 assert_calendar_cut_day() {
   local context="$1"
   if release_version::is_calendar "$NEW" && ! release_version::is_calendar_cut_today "$NEW"; then
@@ -901,6 +931,7 @@ case "$MODE" in
       EXISTING_RELEASE_TAGS=$(origin_release_tags)
       release_version::calendar_recut_policy "$NEW" "$EXISTING_RELEASE_TAGS" ||
         fail "calendar release must use today's Vienna date; .hh.mm is valid only for a same-day recut"
+      assert_origin_calendar_recut_evidence "$NEW" "$EXISTING_RELEASE_TAGS"
     else
       [[ "$LAST_KIND" == semver ]] ||
         fail "legacy SemVer releases are closed after this product's first calendar release"
