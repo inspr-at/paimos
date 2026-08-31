@@ -40,6 +40,40 @@ func openM167Fixture(t *testing.T) (*sql.DB, *sql.Conn) {
 	return database, conn
 }
 
+func TestMigration167ProductionRegistrationIsPinnedOrderedAndPreconditioned(t *testing.T) {
+	database := openTestDB(t)
+	var applied int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_versions WHERE version=167`).Scan(&applied); err != nil || applied != 1 {
+		t.Fatalf("M167 application count=%d err=%v, want exactly one", applied, err)
+	}
+	var triggerSQL string
+	if err := database.QueryRow(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name='trg_structured_knowledge_issue_update'`).Scan(&triggerSQL); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(triggerSQL, "BETWEEN 1 AND 1200") {
+		t.Fatalf("production trigger does not pin the 1,200-byte bound: %s", triggerSQL)
+	}
+
+	partial, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m167-partial.db")+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer partial.Close()
+	if err := migrateThrough(partial, 166); err != nil {
+		t.Fatalf("migrate partial fixture through M166: %v", err)
+	}
+	if _, err := partial.Exec(`CREATE TABLE structured_knowledge_entries(knowledge_id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateThrough(partial, 167); err == nil || !strings.Contains(err.Error(), "M167 schema is partially present") {
+		t.Fatalf("partial M167 was not rejected before migration: %v", err)
+	}
+	var partialApplied int
+	if err := partial.QueryRow(`SELECT COUNT(*) FROM schema_versions WHERE version=167`).Scan(&partialApplied); err != nil || partialApplied != 0 {
+		t.Fatalf("partial fixture recorded M167=%d err=%v", partialApplied, err)
+	}
+}
+
 func seedM167Project(t *testing.T, database *sql.DB, key string) (projectID, userID int64, compactID string) {
 	t.Helper()
 	result, err := database.Exec(`INSERT INTO projects(name,key) VALUES(?,?)`, key+" project", key)

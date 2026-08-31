@@ -29,10 +29,6 @@ func TestStructuredKnowledgePromotionTransactionConcealsAndCommitsAtomicDrop(t *
 			db.DB = nil
 		}
 	})
-	if err := db.ApplyStructuredKnowledgeMigrationForTest(context.Background(), db.DB, 1200); err != nil {
-		t.Fatal(err)
-	}
-
 	seedUser := func(username, role string) int64 {
 		result, err := db.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES(?, 'x',?,'active')`, username, role)
 		if err != nil {

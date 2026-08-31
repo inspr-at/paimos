@@ -12354,6 +12354,10 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			  command_palette_shortcut NOT GLOB ('*['||char(1)||'-'||char(31)||char(127)||']*')
 			 ))`,
 		}},
+
+		// M167 / PAI-863: reviewed structured-knowledge Compact, durable
+		// entries, canonical links, proposals, and atomic promotion evidence.
+		{167, migration167StructuredKnowledgeSteps(structuredKnowledgeShortBodyLimitBytes)},
 	}
 
 	for _, m := range migrations {
@@ -12529,6 +12533,7 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 		}
 		return nil
 	},
+	167: checkM167SchemaIsUnapplied,
 }
 
 func checkSessionUtteranceFoundation(ctx context.Context, conn *sql.Conn) error {

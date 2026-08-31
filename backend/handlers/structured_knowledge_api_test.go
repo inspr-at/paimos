@@ -4,7 +4,6 @@
 package handlers_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,19 +15,46 @@ import (
 	"github.com/inspr-at/paimos/backend/db"
 )
 
-const structuredKnowledgeTestLimit = 1200
-
 type structuredKnowledgeTestEntry struct {
 	KnowledgeID int64 `json:"knowledge_id"`
 }
 
+func structuredKnowledgeMutation(t *testing.T, ts *testServer, method, path, cookie string, body any) *http.Response {
+	t.Helper()
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequest(method, ts.srv.URL+path, strings.NewReader(string(encoded)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Cookie", cookie)
+	request.Header.Set("Origin", ts.srv.URL)
+	var csrfToken string
+	if err := db.DB.QueryRow(`SELECT csrf_token FROM sessions WHERE id=?`, strings.TrimPrefix(cookie, "session=")).Scan(&csrfToken); err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("X-CSRF-Token", csrfToken)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response
+}
+
+func structuredKnowledgePost(t *testing.T, ts *testServer, path, cookie string, body any) *http.Response {
+	return structuredKnowledgeMutation(t, ts, http.MethodPost, path, cookie, body)
+}
+
+func structuredKnowledgePut(t *testing.T, ts *testServer, path, cookie string, body any) *http.Response {
+	return structuredKnowledgeMutation(t, ts, http.MethodPut, path, cookie, body)
+}
+
 func setupStructuredKnowledgeAPI(t *testing.T) (*testServer, int64, string, int64, int64) {
 	t.Helper()
-	t.Setenv("PAIMOS_TEST_PENDING_STRUCTURED_KNOWLEDGE", "1")
 	ts := newTestServer(t)
-	if err := db.ApplyStructuredKnowledgeMigrationForTest(context.Background(), db.DB, structuredKnowledgeTestLimit); err != nil {
-		t.Fatalf("apply isolated M167: %v", err)
-	}
 	projectID := seedBatchProject(t, "Structured knowledge", "SKA")
 	var adminID, memberID int64
 	if err := db.DB.QueryRow(`SELECT id FROM users WHERE username='admin'`).Scan(&adminID); err != nil {
@@ -47,7 +73,7 @@ func setupStructuredKnowledgeAPI(t *testing.T) (*testServer, int64, string, int6
 		VALUES(?,?,'paimos','Knowledge Compact',?,?)`, compactID, projectID, adminID, adminID); err != nil {
 		t.Fatal(err)
 	}
-	response := ts.put(t, fmt.Sprintf("/api/projects/%d/structured-knowledge/v1/compact", projectID), ts.adminCookie,
+	response := structuredKnowledgePut(t, ts, fmt.Sprintf("/api/projects/%d/structured-knowledge/v1/compact", projectID), ts.adminCookie,
 		map[string]any{"product_session_id": compactID, "expected_revision": 0})
 	assertStatus(t, response, http.StatusOK)
 	response.Body.Close()
@@ -71,7 +97,7 @@ func TestStructuredKnowledgeAPIScopeProposalWritesLinksAndAttribution(t *testing
 		VALUES(?,?,'project_agent',?,'Agent conversation',?,?)`, agentSessionID, projectID, agentID, adminID, adminID); err != nil {
 		t.Fatal(err)
 	}
-	agentBind := ts.put(t, base+"/compact", ts.adminCookie,
+	agentBind := structuredKnowledgePut(t, ts, base+"/compact", ts.adminCookie,
 		map[string]any{"product_session_id": agentSessionID, "expected_revision": 1})
 	assertStatus(t, agentBind, http.StatusUnprocessableEntity)
 	agentBind.Body.Close()
@@ -80,7 +106,7 @@ func TestStructuredKnowledgeAPIScopeProposalWritesLinksAndAttribution(t *testing
 		"type": "memory", "slug": "reviewed-fact", "title": "Reviewed fact",
 		"purpose": "Keep one reviewed durable fact.", "short_body": "A compact reviewed body.",
 	}
-	remember := ts.post(t, base+"/remember", ts.memberCookie, candidate)
+	remember := structuredKnowledgePost(t, ts, base+"/remember", ts.memberCookie, candidate)
 	assertStatus(t, remember, http.StatusCreated)
 	var proposal struct {
 		ProposalID       string `json:"proposal_id"`
@@ -103,10 +129,10 @@ func TestStructuredKnowledgeAPIScopeProposalWritesLinksAndAttribution(t *testing
 		memberCreateBody[key] = value
 	}
 	memberCreateBody["proposal_id"] = proposal.ProposalID
-	forbiddenCreate := ts.post(t, base+"/entries", ts.memberCookie, memberCreateBody)
+	forbiddenCreate := structuredKnowledgePost(t, ts, base+"/entries", ts.memberCookie, memberCreateBody)
 	assertStatus(t, forbiddenCreate, http.StatusForbidden)
 	forbiddenCreate.Body.Close()
-	created := ts.post(t, base+"/entries", ts.adminCookie, memberCreateBody)
+	created := structuredKnowledgePost(t, ts, base+"/entries", ts.adminCookie, memberCreateBody)
 	assertStatus(t, created, http.StatusCreated)
 	var durable structuredKnowledgeTestEntry
 	decode(t, created, &durable)
@@ -135,27 +161,27 @@ func TestStructuredKnowledgeAPIScopeProposalWritesLinksAndAttribution(t *testing
 		t.Fatal(err)
 	}
 	legacyID, _ := legacyResult.LastInsertId()
-	unsafeAdopt := ts.post(t, fmt.Sprintf("%s/entries/%d/adopt", base, legacyID), ts.adminCookie,
+	unsafeAdopt := structuredKnowledgePost(t, ts, fmt.Sprintf("%s/entries/%d/adopt", base, legacyID), ts.adminCookie,
 		map[string]any{"purpose": "Normalize legacy fact."})
 	assertStatus(t, unsafeAdopt, http.StatusUnprocessableEntity)
 	unsafeAdopt.Body.Close()
 	if _, err := db.DB.Exec(`UPDATE issues SET category_metadata='{}' WHERE id=?`, legacyID); err != nil {
 		t.Fatal(err)
 	}
-	memberAdopt := ts.post(t, fmt.Sprintf("%s/entries/%d/adopt", base, legacyID), ts.memberCookie,
+	memberAdopt := structuredKnowledgePost(t, ts, fmt.Sprintf("%s/entries/%d/adopt", base, legacyID), ts.memberCookie,
 		map[string]any{"purpose": "Normalize legacy fact."})
 	assertStatus(t, memberAdopt, http.StatusForbidden)
 	memberAdopt.Body.Close()
-	adopted := ts.post(t, fmt.Sprintf("%s/entries/%d/adopt", base, legacyID), ts.adminCookie,
+	adopted := structuredKnowledgePost(t, ts, fmt.Sprintf("%s/entries/%d/adopt", base, legacyID), ts.adminCookie,
 		map[string]any{"purpose": "Normalize legacy fact."})
 	assertStatus(t, adopted, http.StatusOK)
 	adopted.Body.Close()
 
-	memberLink := ts.post(t, fmt.Sprintf("%s/entries/%d/links", base, durable.KnowledgeID), ts.memberCookie,
+	memberLink := structuredKnowledgePost(t, ts, fmt.Sprintf("%s/entries/%d/links", base, durable.KnowledgeID), ts.memberCookie,
 		map[string]any{"relation": "parent", "target_issue_id": legacyID})
 	assertStatus(t, memberLink, http.StatusForbidden)
 	memberLink.Body.Close()
-	adminLink := ts.post(t, fmt.Sprintf("%s/entries/%d/links", base, durable.KnowledgeID), ts.adminCookie,
+	adminLink := structuredKnowledgePost(t, ts, fmt.Sprintf("%s/entries/%d/links", base, durable.KnowledgeID), ts.adminCookie,
 		map[string]any{"relation": "parent", "target_issue_id": legacyID})
 	assertStatus(t, adminLink, http.StatusCreated)
 	adminLink.Body.Close()
@@ -170,7 +196,7 @@ func TestStructuredKnowledgeAPIScopeProposalWritesLinksAndAttribution(t *testing
 		t.Fatal(err)
 	}
 	foreignID, _ := foreignResult.LastInsertId()
-	crossLink := ts.post(t, fmt.Sprintf("%s/entries/%d/links", base, durable.KnowledgeID), ts.adminCookie,
+	crossLink := structuredKnowledgePost(t, ts, fmt.Sprintf("%s/entries/%d/links", base, durable.KnowledgeID), ts.adminCookie,
 		map[string]any{"relation": "about", "target_issue_id": foreignID})
 	assertStatus(t, crossLink, http.StatusNotFound)
 	crossLink.Body.Close()
@@ -198,7 +224,7 @@ func TestStructuredKnowledgeProposalHTTPRejectsCandidateSubstitution(t *testing.
 	ts, projectID, _, _, _ := setupStructuredKnowledgeAPI(t)
 	base := fmt.Sprintf("/api/projects/%d/structured-knowledge/v1", projectID)
 	candidate := map[string]any{"type": "memory", "slug": "exact-review", "title": "Exact review", "purpose": "Bind review.", "short_body": "Exact body."}
-	response := ts.post(t, base+"/remember", ts.memberCookie, candidate)
+	response := structuredKnowledgePost(t, ts, base+"/remember", ts.memberCookie, candidate)
 	assertStatus(t, response, http.StatusCreated)
 	var proposal map[string]json.RawMessage
 	decode(t, response, &proposal)
@@ -208,7 +234,60 @@ func TestStructuredKnowledgeProposalHTTPRejectsCandidateSubstitution(t *testing.
 	}
 	candidate["proposal_id"] = proposalID
 	candidate["title"] = "Substituted title"
-	create := ts.post(t, base+"/entries", ts.adminCookie, candidate)
+	create := structuredKnowledgePost(t, ts, base+"/entries", ts.adminCookie, candidate)
 	assertStatus(t, create, http.StatusConflict)
 	create.Body.Close()
+}
+
+func TestStructuredKnowledgeProductionPromotionPolicyRejectsTerminalShortcutAndCommitsAtomicInstanceMove(t *testing.T) {
+	ts, projectID, _, _, _ := setupStructuredKnowledgeAPI(t)
+	base := fmt.Sprintf("/api/projects/%d/structured-knowledge/v1", projectID)
+	create := structuredKnowledgePost(t, ts, base+"/entries", ts.adminCookie, map[string]any{
+		"type": "memory", "slug": "production-promotion", "title": "Production promotion",
+		"purpose": "Prove the activated authority matrix.", "short_body": "Reviewed promotion body.",
+	})
+	assertStatus(t, create, http.StatusCreated)
+	var source structuredKnowledgeTestEntry
+	decode(t, create, &source)
+
+	directTerminal := structuredKnowledgePost(t, ts,
+		fmt.Sprintf("/api/structured-knowledge/v1/entries/%d/promote", source.KnowledgeID), ts.adminCookie,
+		map[string]any{"to_level": "kernel"})
+	assertStatus(t, directTerminal, http.StatusUnprocessableEntity)
+	directTerminal.Body.Close()
+	var stillLive int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM issues WHERE id=? AND deleted_at IS NULL`, source.KnowledgeID).Scan(&stillLive); err != nil || stillLive != 1 {
+		t.Fatalf("prohibited project-to-terminal promotion mutated source: live=%d err=%v", stillLive, err)
+	}
+
+	promoted := structuredKnowledgePost(t, ts,
+		fmt.Sprintf("/api/structured-knowledge/v1/entries/%d/promote", source.KnowledgeID), ts.adminCookie,
+		map[string]any{"to_level": "instance"})
+	assertStatus(t, promoted, http.StatusOK)
+	var result struct {
+		PromotionID string                       `json:"promotion_id"`
+		FromLevel   string                       `json:"from_level"`
+		ToLevel     string                       `json:"to_level"`
+		Entry       structuredKnowledgeTestEntry `json:"entry"`
+	}
+	decode(t, promoted, &result)
+	if result.PromotionID == "" || result.FromLevel != "project" || result.ToLevel != "instance" ||
+		result.Entry.KnowledgeID <= 0 || result.Entry.KnowledgeID == source.KnowledgeID {
+		t.Fatalf("promotion receipt=%+v", result)
+	}
+	var sourceDeleted, destinationLevel, evidence int
+	if err := db.DB.QueryRow(`SELECT deleted_at IS NOT NULL FROM issues WHERE id=?`, source.KnowledgeID).Scan(&sourceDeleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM structured_knowledge_entries WHERE knowledge_id=? AND level='instance'`, result.Entry.KnowledgeID).Scan(&destinationLevel); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM structured_knowledge_promotions
+		WHERE promotion_id=? AND source_knowledge_id=? AND destination_knowledge_id=? AND from_level='project' AND to_level='instance'`,
+		result.PromotionID, source.KnowledgeID, result.Entry.KnowledgeID).Scan(&evidence); err != nil {
+		t.Fatal(err)
+	}
+	if sourceDeleted != 1 || destinationLevel != 1 || evidence != 1 {
+		t.Fatalf("atomic promotion state source_deleted=%d destination=%d evidence=%d", sourceDeleted, destinationLevel, evidence)
+	}
 }

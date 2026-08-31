@@ -10,10 +10,14 @@ import (
 	"os"
 )
 
-// ApplyStructuredKnowledgeMigrationForTest applies the still-unregistered
-// migration only to an isolated test database. Keeping the bound explicit lets
-// focused handler tests exercise the real schema without activating M167 in
-// production or disguising the pending product decision.
+// structuredKnowledgeShortBodyLimitBytes is the production-pinned reviewed
+// Compact body limit. Proposal candidates may be larger (up to 64 KiB), but a
+// durable structured entry cannot cross this UTF-8 byte boundary.
+const structuredKnowledgeShortBodyLimitBytes = 1200
+
+// ApplyStructuredKnowledgeMigrationForTest applies M167 explicitly to an
+// isolated database stopped at M166. Production registration lives in db.go;
+// this helper remains only for focused migration fixtures.
 func ApplyStructuredKnowledgeMigrationForTest(ctx context.Context, database *sql.DB, shortBodyLimit int) error {
 	if os.Getenv("PAIMOS_TEST_MODE") != "1" {
 		return fmt.Errorf("structured knowledge test migration requires PAIMOS_TEST_MODE=1")
@@ -32,10 +36,9 @@ func ApplyStructuredKnowledgeMigrationForTest(ctx context.Context, database *sql
 	return applyMigrationAtomic(ctx, conn, migration{version: 167, steps: migration167StructuredKnowledgeSteps(shortBodyLimit)})
 }
 
-// migration167StructuredKnowledgeSteps is parameterized so schema design and
-// isolated migration tests can proceed without disguising the still-unlocked
-// product short-body bound as an incidental SQL literal. Production registers
-// this migration only with the explicitly keyed product constant.
+// migration167StructuredKnowledgeSteps is parameterized so migration tests can
+// prove byte-bound behavior independently. Production always passes the pinned
+// structuredKnowledgeShortBodyLimitBytes constant.
 func migration167StructuredKnowledgeSteps(shortBodyLimit int) []string {
 	return []string{
 		`CREATE TABLE knowledge_compact_sessions (
