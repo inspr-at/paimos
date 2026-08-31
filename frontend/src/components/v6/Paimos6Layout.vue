@@ -21,7 +21,7 @@ import { ArrowLeft, Command, FlaskConical } from 'lucide-vue-next'
       <div class="p6-shell-tools">
         <span class="p6-fixture-chip">
           <FlaskConical :size="14" aria-hidden="true" />
-          Local fixture · non-live
+          Development · live read-only
         </span>
         <span
           class="p6-command-mount"

@@ -14,7 +14,7 @@ const emit = defineEmits<{
 
 const micMode = ref<'idle' | 'tap' | 'hold'>('idle')
 const nodeTitle = ref('')
-const localStatus = ref('Local fixture only. Nothing is recorded, sent, or saved.')
+const localStatus = ref('Development preview only. Nothing is recorded, sent, or saved.')
 const triggerRef = ref<HTMLButtonElement | null>(null)
 const doorRef = ref<HTMLElement | null>(null)
 const micRef = ref<HTMLButtonElement | null>(null)
@@ -111,10 +111,10 @@ function endHold() {
 function stageNode() {
   const title = nodeTitle.value.trim()
   if (!title) {
-    announce('Name the node before staging it in the local fixture.')
+    announce('Name the node before staging it in this development preview.')
     return
   }
-  announce(`Node “${title}” staged in local preview state only. Nothing was saved.`)
+  announce(`Node “${title}” staged in local preview state only. No mutation endpoint was called.`)
   nodeTitle.value = ''
 }
 
@@ -190,7 +190,7 @@ onBeforeUnmount(() => {
       </button>
       <p id="p6-mic-help" class="p6-mic-help"><strong>Tap</strong> to toggle · <strong>hold</strong> to talk, release to stop</p>
       <p id="p6-mic-truth" class="p6-mic-truth">
-        Interaction documentation only. This fixture does not request microphone access, run speech-to-text, record audio, or send a message.
+        Interaction documentation only. This development preview does not request microphone access, run speech-to-text, record audio, or send a message.
       </p>
     </section>
 
@@ -206,7 +206,7 @@ onBeforeUnmount(() => {
         <input id="p6-node-title" v-model="nodeTitle" type="text" autocomplete="off" placeholder="A small piece of work" />
         <label for="p6-node-parent">Parent</label>
         <select id="p6-node-parent" disabled>
-          <option>Parent selection unavailable in this fixture</option>
+          <option>Parent selection unavailable in this preview</option>
         </select>
         <button type="submit">Stage locally</button>
         <p>Local preview state only. No API request and no saved node.</p>

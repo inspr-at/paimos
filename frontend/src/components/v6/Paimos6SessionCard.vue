@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { CircleAlert, CirclePause, Link2, Mail, MessageCircle, Octagon, Radio, ShieldCheck } from 'lucide-vue-next'
 
-import type { Paimos6SessionFixture } from '@/v6/sessionFixture'
+import type { Paimos6SessionViewModel } from '@/v6/sessionHome'
 
 defineProps<{
-  session: Paimos6SessionFixture
+  session: Paimos6SessionViewModel
   selected: boolean
 }>()
 
@@ -33,7 +33,13 @@ defineEmits<{
         <span class="p6-session-mode">
           <ShieldCheck v-if="session.mode === 'managed'" :size="13" aria-hidden="true" />
           <Radio v-else :size="13" aria-hidden="true" />
-          {{ session.mode === 'managed' ? 'Managed session' : 'Unmanaged CLI' }}
+          {{ session.mode === 'managed'
+            ? 'Managed session'
+            : session.mode === 'unmanaged'
+              ? 'Unmanaged CLI'
+              : session.mode === 'paimos'
+                ? 'Paimos target'
+                : 'Harness unavailable' }}
         </span>
         <span v-if="selected" class="p6-state-flag p6-state-selected">Selected</span>
         <span v-if="session.attention" class="p6-state-flag p6-state-attention">
@@ -43,9 +49,9 @@ defineEmits<{
 
       <span class="p6-card-heading">
         <span :id="`p6-session-${session.id}`" class="p6-card-title">{{ session.title }}</span>
-        <span class="p6-agent">{{ selected ? 'Selected target · Amy →' : 'Agent ·' }} {{ session.agent }}</span>
+        <span class="p6-agent">{{ selected ? 'Selected target ·' : 'Agent ·' }} {{ session.agent }}</span>
       </span>
-      <span class="p6-summary">{{ session.summary }}</span>
+      <span v-if="session.summary" class="p6-summary">{{ session.summary }}</span>
 
       <span v-if="session.attentionReason" class="p6-attention-reason">
         <CircleAlert :size="14" aria-hidden="true" />
@@ -54,37 +60,46 @@ defineEmits<{
 
       <span class="p6-card-facts">
         <span><span class="p6-status-dot" :class="`is-${session.status}`" aria-hidden="true"></span>{{ session.statusLabel }}</span>
-        <span><Mail :size="13" aria-hidden="true" /> {{ session.unread }} unread · {{ session.inboxSummary }}</span>
+        <span>
+          <Mail :size="13" aria-hidden="true" />
+          {{ session.unread }} unread
+          <template v-if="session.latestUnreadAt"> · latest {{ session.latestUnreadAt }}</template>
+        </span>
         <span v-if="session.node"><Link2 :size="13" aria-hidden="true" /> {{ session.node.label }}</span>
         <span v-else class="p6-loose"><Link2 :size="13" aria-hidden="true" /> Loose session · no node attached</span>
+        <span v-if="session.advertisedCapabilities" class="p6-capabilities">
+          Advertised ·
+          {{ Object.entries(session.advertisedCapabilities).filter(([, enabled]) => enabled).map(([name]) => name).join(', ') || 'none' }}
+        </span>
+        <span v-else class="p6-capabilities">No canonical harness capabilities</span>
       </span>
     </button>
 
-    <div class="p6-card-actions" :aria-label="`Fixture controls for ${session.title}`">
+    <div class="p6-card-actions" :aria-label="`Available controls for ${session.title}`">
       <button
+        v-if="session.capabilities.directSteer"
         type="button"
-        :disabled="!session.capabilities.directSteer"
         @click="$emit('action', 'Steer', session.id)"
       >
         <MessageCircle :size="13" aria-hidden="true" />
-        {{ session.capabilities.directSteer ? 'Steer' : 'Direct steer unavailable' }}
+        Steer · preview
       </button>
       <button
+        v-if="session.mode === 'managed' && session.capabilities.interrupt"
         type="button"
-        :disabled="!session.capabilities.interrupt"
         @click="$emit('action', 'Interrupt', session.id)"
       >
-        <CirclePause :size="13" aria-hidden="true" /> Interrupt
+        <CirclePause :size="13" aria-hidden="true" /> Interrupt · preview
       </button>
       <button
+        v-if="session.mode === 'managed' && session.capabilities.stop"
         type="button"
-        :disabled="!session.capabilities.stop"
         @click="$emit('action', 'Stop', session.id)"
       >
-        <Octagon :size="13" aria-hidden="true" /> Stop
+        <Octagon :size="13" aria-hidden="true" /> Stop · preview
       </button>
       <button
-        v-if="session.mode === 'unmanaged' && session.capabilities.paimosSteer"
+        v-if="session.capabilities.paimosSteer"
         type="button"
         class="p6-paimos-nudge"
         @click="$emit('action', 'Paimos-steer nudge', session.id)"
@@ -94,6 +109,9 @@ defineEmits<{
     </div>
     <p v-if="session.mode === 'unmanaged'" class="p6-unmanaged-note">
       Paimos does not own this process. Interrupt and stop are unavailable; use the Paimos-steer nudge.
+    </p>
+    <p v-else-if="session.mode === 'unavailable'" class="p6-unmanaged-note">
+      No fresh, ownership-correct harness is available. Direct controls are withheld.
     </p>
   </article>
 </template>
@@ -162,12 +180,15 @@ defineEmits<{
 .p6-card-facts > span { gap: 6px; }
 .p6-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #75827b; }
 .p6-status-dot.is-working { background: #3f8263; }
-.p6-status-dot.is-waiting { border: 2px solid #b86a38; background: transparent; }
+.p6-status-dot.is-starting,
+.p6-status-dot.is-yielded,
+.p6-status-dot.is-stopping { border: 2px solid #b86a38; background: transparent; }
+.p6-status-dot.is-unavailable { background: #8b5d55; }
 .p6-loose { font-weight: 650; color: #4f6258; }
+.p6-capabilities { font-family: "JetBrains Mono", monospace; }
 .p6-card-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 11px 15px 14px; border-top: 1px solid #edf1ee; }
 .p6-card-actions button { gap: 5px; min-height: 30px; padding: 0 9px; border: 1px solid #dce4df; border-radius: 8px; color: #58665e; background: #fbfcfa; font: 600 10.5px/1 "DM Sans", sans-serif; }
 .p6-card-actions button:hover:not(:disabled) { border-color: #a9bdb1; color: #285b45; background: #f2f7f3; }
-.p6-card-actions button:disabled { border-style: dashed; color: #59655e; background: #f5f7f5; cursor: not-allowed; }
 .p6-card-actions .p6-paimos-nudge { border-color: #b9cdbf; color: #285b45; background: #f0f6f2; }
 .p6-unmanaged-note { padding: 0 15px 14px; color: #67756d; font-size: 10.5px; line-height: 1.45; }
 
