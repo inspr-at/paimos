@@ -15,7 +15,7 @@ const configured = {
 }
 
 describe('Paimos 6 ordinary orchestrator projection (PAI-865)', () => {
-  it('preserves the exact configured display label and accepts first-class unset', () => {
+  it('preserves the exact configured display label and accepts pristine or cleared unset', () => {
     expect(parsePaimos6Orchestrator(configured)).toEqual(configured)
     expect(parsePaimos6Orchestrator({
       schema_version: 1,
@@ -27,6 +27,17 @@ describe('Paimos 6 ordinary orchestrator projection (PAI-865)', () => {
       revision: 0,
       orchestrator: null,
       updated_at: null,
+    })
+    expect(parsePaimos6Orchestrator({
+      schema_version: 1,
+      revision: 4,
+      orchestrator: null,
+      updated_at: '2026-08-31T12:05:00Z',
+    })).toEqual({
+      schema_version: 1,
+      revision: 4,
+      orchestrator: null,
+      updated_at: '2026-08-31T12:05:00Z',
     })
     expect(parsePaimos6Orchestrator({
       ...configured,
@@ -44,8 +55,11 @@ describe('Paimos 6 ordinary orchestrator projection (PAI-865)', () => {
     ['control label', { ...configured, orchestrator: { display_label: 'Amy\nPrimary' } }],
     ['overlong UTF-8 label', { ...configured, orchestrator: { display_label: 'é'.repeat(33) } }],
     ['invalid Unicode scalar', { ...configured, orchestrator: { display_label: '\ud800' } }],
-    ['configured without timestamp', { ...configured, updated_at: null }],
-    ['unset with timestamp', { ...configured, orchestrator: null }],
+    ['revision zero configured', { ...configured, revision: 0, updated_at: null }],
+    ['revision zero with timestamp', { ...configured, revision: 0, orchestrator: null }],
+    ['positive configured without timestamp', { ...configured, updated_at: null }],
+    ['positive cleared without timestamp', { ...configured, orchestrator: null, updated_at: null }],
+    ['positive cleared with malformed timestamp', { ...configured, orchestrator: null, updated_at: '2026-02-31T12:00:00Z' }],
     ['impossible timestamp', { ...configured, updated_at: '2026-02-31T12:00:00Z' }],
     ['noncanonical timestamp', { ...configured, updated_at: '2026-08-31 12:00:00Z' }],
   ])('rejects %s', (_label, value) => {

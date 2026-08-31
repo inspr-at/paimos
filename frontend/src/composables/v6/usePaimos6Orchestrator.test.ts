@@ -21,13 +21,14 @@ const configured = {
   displayLabel: 'Amy',
   updatedAt: '2026-08-31T12:00:00.000Z',
 }
-const unset = { revision: 4, displayLabel: null, updatedAt: null }
+const pristineUnset = { revision: 0, displayLabel: null, updatedAt: null }
+const cleared = { revision: 4, displayLabel: null, updatedAt: '2026-08-31T12:05:00Z' }
 
 describe('usePaimos6Orchestrator authority fencing (PAI-865)', () => {
   it('synchronously clears a stale label across authority and project transitions', async () => {
     const first = deferred<typeof configured>()
-    const second = deferred<typeof unset>()
-    const third = deferred<typeof unset>()
+    const second = deferred<typeof cleared>()
+    const third = deferred<typeof cleared>()
     const loader = vi.fn<Paimos6OrchestratorLoader>()
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise)
@@ -53,12 +54,12 @@ describe('usePaimos6Orchestrator authority fencing (PAI-865)', () => {
     expect(loader.mock.calls[0]?.[0]?.aborted).toBe(true)
 
     authorityKey.value = 'pma:user-1:permission-2'
-    second.resolve(unset)
+    second.resolve(cleared)
     await nextTick()
     expect(subject.identityLabel.value).toBe('Paimos')
     expect(subject.statusText.value).toBe('orchestrator loading')
 
-    third.resolve(unset)
+    third.resolve(cleared)
     await nextTick()
     expect(subject.identityLabel.value).toBe('Paimos')
     expect(subject.statusText.value).toBe('orchestrator not configured')
@@ -81,7 +82,7 @@ describe('usePaimos6Orchestrator authority fencing (PAI-865)', () => {
     const principalId = ref<number | null>(1)
     const authorityKey = ref('pma:fresh-authority')
     const projectKey = ref<string | null>(null)
-    const unsetLoader = vi.fn<Paimos6OrchestratorLoader>().mockResolvedValue(unset)
+    const unsetLoader = vi.fn<Paimos6OrchestratorLoader>().mockResolvedValue(pristineUnset)
     const scope = effectScope()
     const subject = scope.run(() => usePaimos6Orchestrator({
       principalId,
@@ -95,7 +96,7 @@ describe('usePaimos6Orchestrator authority fencing (PAI-865)', () => {
     expect(subject.identityLabel.value).toBe('Paimos')
     expect(subject.statusText.value).toBe('orchestrator not configured')
 
-    const unavailable = deferred<typeof unset>()
+    const unavailable = deferred<typeof pristineUnset>()
     unsetLoader.mockReturnValueOnce(unavailable.promise)
     subject.reload()
     expect(subject.identityLabel.value).toBe('Paimos')

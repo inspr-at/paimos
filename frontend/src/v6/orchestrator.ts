@@ -94,13 +94,26 @@ export function parsePaimos6Orchestrator(value: unknown): Paimos6OrchestratorWir
     || !Number.isSafeInteger(root.revision)
     || root.revision < 0) throw new Paimos6OrchestratorContractError()
 
+  if (root.revision === 0) {
+    if (root.orchestrator !== null || root.updated_at !== null) {
+      throw new Paimos6OrchestratorContractError()
+    }
+    return {
+      schema_version: 1,
+      revision: 0,
+      orchestrator: null,
+      updated_at: null,
+    }
+  }
+
+  const updatedAt = canonicalTimestamp(root.updated_at)
+  if (updatedAt === null) throw new Paimos6OrchestratorContractError()
   if (root.orchestrator === null) {
-    if (root.updated_at !== null) throw new Paimos6OrchestratorContractError()
     return {
       schema_version: 1,
       revision: root.revision,
       orchestrator: null,
-      updated_at: null,
+      updated_at: updatedAt,
     }
   }
 
@@ -108,8 +121,7 @@ export function parsePaimos6Orchestrator(value: unknown): Paimos6OrchestratorWir
   const label = orchestrator && exactKeys(orchestrator, ['display_label'])
     ? displayLabel(orchestrator.display_label)
     : null
-  const updatedAt = canonicalTimestamp(root.updated_at)
-  if (label === null || updatedAt === null) throw new Paimos6OrchestratorContractError()
+  if (label === null) throw new Paimos6OrchestratorContractError()
   return {
     schema_version: 1,
     revision: root.revision,
