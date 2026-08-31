@@ -174,6 +174,7 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/handlers/crm/http \
   github.com/inspr-at/paimos/backend/handlers/crm/hubspot \
   github.com/inspr-at/paimos/backend/handlers/knowledge \
+  github.com/inspr-at/paimos/backend/internal/knowledge857 \
   github.com/inspr-at/paimos/backend/managedharness \
   github.com/inspr-at/paimos/backend/supervision)
 [[ "$db_affected" == "$db_expected" ]] ||
