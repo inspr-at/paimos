@@ -144,7 +144,9 @@ test('role smoke: member viewer grant sees read-only project work and no admin r
   await expect(page.getByRole('button', { name: /\+ New issue/i })).toHaveCount(0)
 
   await page.goto('/integrations')
-  await expect(page).toHaveURL(/\/$/)
+  // PAI-867: the Paimos 6 home canonicalizes its authorized project into the
+  // query string; the authorization redirect contract is the root pathname.
+  await expect(page).toHaveURL((url) => url.pathname === '/')
 })
 
 test('role smoke: external users are routed to the portal, not internal work screens', async ({ page, context }) => {
