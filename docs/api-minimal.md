@@ -733,6 +733,38 @@ only for a bound Codex target whose plugin and durable target both cap at
 `steer`; unmanaged interrupt/stop and OpenClaw/private-socket transports are
 rejected.
 
+## Instance orchestrator pin
+
+All orchestrator responses, including early authentication and authorization
+failures, carry `Cache-Control: private, no-store`.
+
+- `GET /orchestrator/v1` is available to authenticated internal users and
+  returns only `schema_version`, `revision`, nullable
+  `orchestrator: {display_label}`, and nullable `updated_at`. It never exposes
+  or infers a project, agent ID, or canonical key.
+- `GET|PUT /orchestrator/v1/config` is super-admin only. GET includes the full
+  stable target (`project_id`, `project_key`, `project_agent_id`, canonical
+  `key`, and separate `display_label`). PUT requires `expected_revision` and
+  either that exact target input (`project_id`, `key`, `display_label`) or
+  `orchestrator: null` to clear. JSON is strict and capped at 16 KiB.
+- `GET /orchestrator/v1/events?after_revision=0&limit=50` is the super-admin
+  append-only audit feed. Limits are 1–100 and events are ascending by
+  consecutive revision.
+
+Revision 0 is pristine unset and has `updated_at: null`. After any mutation,
+including clear, revision is positive and `updated_at` is a canonical UTC
+timestamp even when `orchestrator` is null. There is no only-agent fallback or
+cross-instance inheritance. M165 creates only the unset row; configuring an
+instance is a separate authorized operation. For example, after resolving the
+real project ID and reading revision 0, an authorized ppm operation may send:
+
+```json
+{"expected_revision":0,"orchestrator":{"project_id":42,"key":"amy","display_label":"Amy"}}
+```
+
+This documentation does not perform that operation, and no other instance is
+implicitly configured.
+
 ---
 
 ## Create backlog item

@@ -87,6 +87,10 @@
     {
       "name": "nodes",
       "description": "Paimos 6 one-node compatibility API over legacy issues"
+    },
+    {
+      "name": "orchestrator",
+      "description": "Explicit nullable instance orchestrator identity and super-admin configuration/audit"
     }
   ],
   "components": {
@@ -2068,6 +2072,90 @@
       "NodeParentWrite": {
         "type": "object", "additionalProperties": false, "required": ["parent_node_id"],
         "properties": {"parent_node_id": {"type": ["integer", "null"], "format": "int64"}}
+      },
+      "OrchestratorProjection": {
+        "type": "object", "additionalProperties": false, "required": ["display_label"],
+        "properties": {"display_label": {"type": "string", "minLength": 1, "maxLength": 64}}
+      },
+      "OrchestratorConfigTarget": {
+        "type": "object", "additionalProperties": false,
+        "required": ["project_id", "project_key", "project_agent_id", "key", "display_label"],
+        "properties": {
+          "project_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "project_key": {"type": "string"},
+          "project_agent_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "key": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"},
+          "display_label": {"type": "string", "minLength": 1, "maxLength": 64}
+        }
+      },
+      "OrchestratorAuditTarget": {
+        "type": "object", "additionalProperties": false,
+        "required": ["project_id", "project_agent_id", "key", "display_label"],
+        "properties": {
+          "project_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "project_agent_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "key": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"},
+          "display_label": {"type": "string", "minLength": 1, "maxLength": 64}
+        }
+      },
+      "OrchestratorProjectionResponse": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "revision", "orchestrator", "updated_at"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "revision": {"type": "integer", "format": "int64", "minimum": 0},
+          "orchestrator": {"oneOf": [{"$ref": "#/components/schemas/OrchestratorProjection"}, {"type": "null"}]},
+          "updated_at": {"type": ["string", "null"], "format": "date-time"}
+        }
+      },
+      "OrchestratorConfigResponse": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "revision", "orchestrator", "updated_at"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "revision": {"type": "integer", "format": "int64", "minimum": 0},
+          "orchestrator": {"oneOf": [{"$ref": "#/components/schemas/OrchestratorConfigTarget"}, {"type": "null"}]},
+          "updated_at": {"type": ["string", "null"], "format": "date-time"}
+        }
+      },
+      "OrchestratorPutTarget": {
+        "type": "object", "additionalProperties": false, "required": ["project_id", "key", "display_label"],
+        "properties": {
+          "project_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "key": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"},
+          "display_label": {"type": "string", "minLength": 1, "maxLength": 64}
+        }
+      },
+      "OrchestratorPutRequest": {
+        "type": "object", "additionalProperties": false, "required": ["expected_revision", "orchestrator"],
+        "properties": {
+          "expected_revision": {"type": "integer", "format": "int64", "minimum": 0},
+          "orchestrator": {"oneOf": [{"$ref": "#/components/schemas/OrchestratorPutTarget"}, {"type": "null"}]}
+        }
+      },
+      "OrchestratorEvent": {
+        "type": "object", "additionalProperties": false,
+        "required": ["event_id", "operation", "actor_user_id", "request_id", "before_revision", "after_revision", "before", "after", "created_at"],
+        "properties": {
+          "event_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "operation": {"type": "string", "enum": ["set", "clear", "reassign", "display_label_update", "target_rename"]},
+          "actor_user_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "before_revision": {"type": "integer", "format": "int64", "minimum": 0},
+          "after_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "before": {"oneOf": [{"$ref": "#/components/schemas/OrchestratorAuditTarget"}, {"type": "null"}]},
+          "after": {"oneOf": [{"$ref": "#/components/schemas/OrchestratorAuditTarget"}, {"type": "null"}]},
+          "created_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "OrchestratorEventsResponse": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "events", "next_after_revision"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "events": {"type": "array", "items": {"$ref": "#/components/schemas/OrchestratorEvent"}},
+          "next_after_revision": {"type": ["integer", "null"], "format": "int64", "minimum": 1}
+        }
       }
     },
     "responses": {
@@ -2207,6 +2295,48 @@
     }
   ],
   "paths": {
+    "/api/orchestrator/v1": {
+      "get": {
+        "tags": ["orchestrator"], "summary": "Read the redacted instance orchestrator identity",
+        "description": "Returns only the configured display label. It never infers an identity from projects, agents, or another instance. Every outcome is private and no-store.",
+        "responses": {
+          "200": {"description": "Redacted identity or explicit unset", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OrchestratorProjectionResponse"}}}},
+          "401": {"description": "Authentication required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "External or password-gated caller", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "500": {"description": "Storage invariant failure", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/orchestrator/v1/config": {
+      "get": {
+        "tags": ["orchestrator"], "summary": "Read full orchestrator configuration (super-admin)",
+        "responses": {"200": {"description": "Full target or explicit unset", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OrchestratorConfigResponse"}}}}, "401": {"description": "Authentication required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}, "403": {"description": "Current principal is not super-admin or is password/external gated", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}, "500": {"description": "Storage invariant failure", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}}
+      },
+      "put": {
+        "tags": ["orchestrator"], "summary": "CAS-set, reassign, relabel, or clear the orchestrator (super-admin)",
+        "description": "Strict 16 KiB JSON. The target must be a registered canonical agent in a non-deleted project. Mutation and one audit event commit atomically.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OrchestratorPutRequest"}}}},
+        "responses": {
+          "200": {"description": "Updated full configuration", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OrchestratorConfigResponse"}}}},
+          "400": {"description": "invalid_request, invalid_revision, invalid_orchestrator, or no_change", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "401": {"description": "Authentication lost before transactional reauthorization", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "Current principal is not super-admin", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "orchestrator_target_not_found", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "409": {"description": "revision_conflict", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "500": {"description": "internal_error; transaction rolled back", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/orchestrator/v1/events": {
+      "get": {
+        "tags": ["orchestrator"], "summary": "List immutable orchestrator audit events (super-admin)",
+        "parameters": [
+          {"name": "after_revision", "in": "query", "schema": {"type": "integer", "format": "int64", "minimum": 0, "default": 0}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}
+        ],
+        "responses": {"200": {"description": "Ascending immutable events", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OrchestratorEventsResponse"}}}}, "400": {"description": "invalid_request", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}, "401": {"description": "Authentication required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}, "403": {"description": "Current principal is not super-admin or is password/external gated", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}, "500": {"description": "Storage invariant failure", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}}
+      }
+    },
     "/api/health": {
       "get": {
         "tags": [

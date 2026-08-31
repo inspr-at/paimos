@@ -193,6 +193,7 @@ func buildRouter() http.Handler {
 			r.Use(auth.MustChangePasswordGate)
 			r.Use(auth.BlockExternal)
 			handlers.RegisterSessionHomeRoutes(r)
+			handlers.RegisterOrchestratorRoutes(r)
 		})
 
 		// Portal (external + admin)

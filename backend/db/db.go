@@ -12046,6 +12046,94 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			  )
 			 ) BEGIN SELECT RAISE(ABORT,'invalid project parent edge'); END`,
 		}},
+		// M165 / PAI-865: one explicit, nullable instance orchestrator pin.
+		// M164 remains reserved for PAI-862. The singleton starts unset and this
+		// migration deliberately performs no inference from existing projects or
+		// agents. Historical event snapshots are scalars so later identity changes
+		// cannot rewrite the audit record.
+		{165, []string{
+			`CREATE TABLE instance_orchestrator (
+			 singleton_id       INTEGER PRIMARY KEY CHECK(singleton_id=1),
+			 project_agent_id   INTEGER REFERENCES project_agents(id) ON DELETE RESTRICT,
+			 display_label      TEXT CHECK(display_label IS NULL OR (
+			  typeof(display_label)='text' AND
+			  length(CAST(display_label AS BLOB)) BETWEEN 1 AND 64 AND
+			  display_label=trim(display_label) AND
+			  instr(display_label,char(0))=0 AND
+			  display_label NOT GLOB ('*['||char(1)||'-'||char(31)||char(127)||']*')
+			 )),
+			 revision            INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),
+			 updated_by_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+			 updated_at           TEXT CHECK(` + sqlNullableControlTimestampCheck("updated_at") + `),
+			 CHECK((project_agent_id IS NULL)=(display_label IS NULL)),
+			 CHECK((revision=0 AND project_agent_id IS NULL AND display_label IS NULL AND
+			  updated_by_user_id IS NULL AND updated_at IS NULL) OR
+			  (revision>0 AND updated_at IS NOT NULL))
+			)`,
+			`INSERT INTO instance_orchestrator(singleton_id) VALUES(1)`,
+			`CREATE TABLE instance_orchestrator_events (
+			 event_id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+			 operation                TEXT NOT NULL CHECK(operation IN ('set','clear','reassign','display_label_update','target_rename')),
+			 actor_user_id            INTEGER NOT NULL CHECK(actor_user_id>0),
+			 request_id               TEXT NOT NULL CHECK(
+			  typeof(request_id)='text' AND length(CAST(request_id AS BLOB)) BETWEEN 1 AND 128 AND
+			  instr(request_id,char(0))=0 AND
+			  request_id NOT GLOB ('*['||char(1)||'-'||char(31)||char(127)||']*')
+			 ),
+			 before_revision          INTEGER NOT NULL CHECK(before_revision>=0),
+			 after_revision           INTEGER NOT NULL UNIQUE CHECK(after_revision=before_revision+1),
+			 before_project_agent_id  INTEGER,
+			 before_project_id        INTEGER,
+			 before_key               TEXT,
+			 before_display_label     TEXT,
+			 after_project_agent_id   INTEGER,
+			 after_project_id         INTEGER,
+			 after_key                TEXT,
+			 after_display_label      TEXT,
+			 created_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 CHECK((before_project_agent_id IS NULL AND before_project_id IS NULL AND before_key IS NULL AND before_display_label IS NULL) OR
+			       (before_project_agent_id>0 AND before_project_id>0 AND
+			        typeof(before_key)='text' AND length(CAST(before_key AS BLOB)) BETWEEN 1 AND 32 AND
+			        before_key GLOB '[a-z]*' AND before_key NOT GLOB '*[^a-z0-9_-]*' AND
+			        typeof(before_display_label)='text' AND length(CAST(before_display_label AS BLOB)) BETWEEN 1 AND 64 AND
+			        before_display_label=trim(before_display_label) AND instr(before_display_label,char(0))=0 AND
+			        before_display_label NOT GLOB ('*['||char(1)||'-'||char(31)||char(127)||']*'))),
+			 CHECK((after_project_agent_id IS NULL AND after_project_id IS NULL AND after_key IS NULL AND after_display_label IS NULL) OR
+			       (after_project_agent_id>0 AND after_project_id>0 AND
+			        typeof(after_key)='text' AND length(CAST(after_key AS BLOB)) BETWEEN 1 AND 32 AND
+			        after_key GLOB '[a-z]*' AND after_key NOT GLOB '*[^a-z0-9_-]*' AND
+			        typeof(after_display_label)='text' AND length(CAST(after_display_label AS BLOB)) BETWEEN 1 AND 64 AND
+			        after_display_label=trim(after_display_label) AND instr(after_display_label,char(0))=0 AND
+			        after_display_label NOT GLOB ('*['||char(1)||'-'||char(31)||char(127)||']*'))),
+			 CHECK(
+			  (operation='set' AND before_project_agent_id IS NULL AND after_project_agent_id IS NOT NULL) OR
+			  (operation='clear' AND before_project_agent_id IS NOT NULL AND after_project_agent_id IS NULL) OR
+			  (operation='reassign' AND before_project_agent_id IS NOT NULL AND after_project_agent_id IS NOT NULL AND before_project_agent_id<>after_project_agent_id) OR
+			  (operation='display_label_update' AND before_project_agent_id=after_project_agent_id AND before_project_id=after_project_id AND before_key=after_key AND before_display_label<>after_display_label) OR
+			  (operation='target_rename' AND before_project_agent_id=after_project_agent_id AND before_project_id=after_project_id AND before_key<>after_key AND before_display_label=after_display_label)
+			 )
+			)`,
+			`CREATE INDEX idx_instance_orchestrator_events_created
+			 ON instance_orchestrator_events(created_at DESC,event_id DESC)`,
+			`CREATE TRIGGER trg_instance_orchestrator_events_sequence BEFORE INSERT ON instance_orchestrator_events
+			 WHEN NEW.before_revision<>COALESCE((SELECT MAX(after_revision) FROM instance_orchestrator_events),0)
+			   OR NEW.after_revision<>(SELECT revision FROM instance_orchestrator WHERE singleton_id=1)
+			 BEGIN SELECT RAISE(ABORT,'instance orchestrator audit revision mismatch'); END`,
+			`CREATE TRIGGER trg_instance_orchestrator_events_no_update BEFORE UPDATE ON instance_orchestrator_events
+			 BEGIN SELECT RAISE(ABORT,'instance orchestrator audit is append-only'); END`,
+			`CREATE TRIGGER trg_instance_orchestrator_events_no_delete BEFORE DELETE ON instance_orchestrator_events
+			 BEGIN SELECT RAISE(ABORT,'instance orchestrator audit is append-only'); END`,
+			`CREATE TRIGGER trg_instance_orchestrator_project_no_soft_delete BEFORE UPDATE OF status ON projects
+			 WHEN NEW.status='deleted' AND OLD.status<>'deleted' AND EXISTS(
+			  SELECT 1 FROM instance_orchestrator io JOIN project_agents pa ON pa.id=io.project_agent_id
+			  WHERE io.singleton_id=1 AND pa.project_id=OLD.id
+			 ) BEGIN SELECT RAISE(ABORT,'assigned orchestrator project'); END`,
+			`CREATE TRIGGER trg_instance_orchestrator_no_active_harness_rename BEFORE UPDATE OF name ON project_agents
+			 WHEN NEW.name<>OLD.name
+			  AND EXISTS(SELECT 1 FROM instance_orchestrator io WHERE io.singleton_id=1 AND io.project_agent_id=OLD.id)
+			  AND EXISTS(SELECT 1 FROM harness_sessions hs WHERE hs.project_agent_id=OLD.id AND hs.phase<>'stopped')
+			 BEGIN SELECT RAISE(ABORT,'assigned orchestrator has active harness'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -12203,6 +12291,13 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 	},
 	162: checkKnowledgeScopeIdentities,
 	163: checkProductSessionNodeFoundation,
+	165: func(ctx context.Context, conn *sql.Conn) error {
+		return checkSchemaObjectsAbsent(ctx, conn, 165, []string{
+			"instance_orchestrator", "instance_orchestrator_events", "idx_instance_orchestrator_events_created",
+			"trg_instance_orchestrator_events_sequence", "trg_instance_orchestrator_events_no_update", "trg_instance_orchestrator_events_no_delete",
+			"trg_instance_orchestrator_project_no_soft_delete", "trg_instance_orchestrator_no_active_harness_rename",
+		})
+	},
 }
 
 func checkProductSessionNodeFoundation(ctx context.Context, conn *sql.Conn) error {
