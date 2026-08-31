@@ -733,7 +733,9 @@ test('PAI-805 final visual and geometry gate', async ({ page }) => {
   const forbiddenConsoleErrors = consoleErrors.splice(errorsBeforeForbidden)
   expect(forbiddenConsoleErrors).toHaveLength(1)
   expect(forbiddenConsoleErrors[0]).toContain('403 (Forbidden)')
-  await page.goto(`${APP_ORIGIN}/`, { waitUntil: 'networkidle' })
+  // PAI-867: the unchanged standard 5.x dashboard now lives at the explicit
+  // legacy escape; `/` intentionally renders the Paimos 6 shell.
+  await page.goto(`${APP_ORIGIN}/legacy`, { waitUntil: 'networkidle' })
   await expect(page.locator('.brand-logo')).toHaveAttribute('src', '/logo.svg')
   await expect(page.getByRole('heading', { name: /Good |Hello|Welcome/i })).toBeVisible()
   await page.screenshot({ path: `${SHOT_DIR}/desktop-standard-home.png` })

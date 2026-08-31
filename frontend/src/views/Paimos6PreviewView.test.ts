@@ -284,7 +284,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(mounted.el.querySelectorAll('.p6-session-card')).toHaveLength(3)
     expect(text.match(/PAI-854 · Paimos 6.0 cut/g)).toHaveLength(2)
     expect(text).toContain('Loose session · no node attached')
-    expect(text).toContain('Read-only responsive web preview')
+    expect(text).toContain('Responsive web home')
     expect(text).toContain('mobile web—not a native client')
     expect(mounted.el.querySelector('.p6-session-card.is-selected')).toBeNull()
     expect(text).toContain('No selection · preview target Paimos')

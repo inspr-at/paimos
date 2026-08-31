@@ -36,7 +36,7 @@ describe('resolveLayout (PAI-805 route → shell contract)', () => {
     expect(resolveLayout({ adminOnly: true } as never)).toBe('standard')
   })
 
-  it('routes portal, public, agent and development preview shells', () => {
+  it('routes portal, public, agent and Paimos 6 shells', () => {
     expect(resolveLayout({ portal: true })).toBe('portal')
     expect(resolveLayout({ public: true })).toBe('public')
     expect(resolveLayout({ shell: 'agent' })).toBe('agent')

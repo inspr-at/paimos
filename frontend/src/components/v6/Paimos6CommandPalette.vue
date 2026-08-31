@@ -65,7 +65,7 @@ const items = computed<PaletteItem[]>(() => {
   const actions: PaletteItem[] = [
     { key: 'action:open_talk', group: 'Shell actions', label: 'Open talk-first door', detail: 'Open the existing read-only talk surface', activation: { kind: 'action', action: 'open_talk' } },
     { key: 'action:open_settings', group: 'Shell actions', label: 'Command shortcut settings', detail: 'Open Settings → Account', activation: { kind: 'action', action: 'open_settings' } },
-    { key: 'action:return_5x', group: 'Shell actions', label: 'Return to 5.x dashboard', detail: 'Navigate to the existing dashboard', activation: { kind: 'action', action: 'return_5x' } },
+    { key: 'action:return_5x', group: 'Shell actions', label: 'Open 5.x dashboard', detail: 'Navigate to the legacy dashboard at /legacy', activation: { kind: 'action', action: 'return_5x' } },
   ]
   if (props.selectedSessionId) actions.splice(1, 0, {
     key: 'action:clear_session', group: 'Shell actions', label: 'Clear selected session',

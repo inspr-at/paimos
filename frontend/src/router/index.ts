@@ -86,7 +86,18 @@ export function buildRoutes(includeDev: boolean): RouteRecordRaw[] {
       component: () => import("@/views/FirstLoginView.vue"),
       meta: { public: true },
     },
-    { path: "/", component: () => import("@/views/DashboardView.vue") },
+    {
+      // PAI-867: the accepted Paimos 6 home owns the production root.
+      path: "/",
+      component: () => import("@/views/Paimos6PreviewView.vue"),
+      meta: { shell: "v6" },
+    },
+    {
+      // PAI-867: keep the exact 5.x dashboard and standard application
+      // chrome available as the explicit, stable rollback escape.
+      path: "/legacy",
+      component: () => import("@/views/DashboardView.vue"),
+    },
     { path: "/projects", component: () => import("@/views/ProjectsView.vue") },
     {
       path: "/projects/accruals/print",
@@ -212,10 +223,8 @@ export function buildRoutes(includeDev: boolean): RouteRecordRaw[] {
             meta: { shell: "agent" as const },
           },
           {
-            // PAI-854 / PAI-861: development-only Paimos 6 home preview.
-            // PAI-861 reads the strict project-authorized session-home
-            // projection; it remains read-only, web-only, and has no
-            // production/root alias.
+            // PAI-854 / PAI-861: retain the development alias for focused
+            // diagnostics after PAI-867 promotes the same home to `/`.
             path: "/dev/paimos-6",
             component: () => import("@/views/Paimos6PreviewView.vue"),
             meta: { shell: "v6" as const },

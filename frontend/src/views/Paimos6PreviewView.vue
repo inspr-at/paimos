@@ -383,7 +383,7 @@ onScopeDispose(() => {
     <section class="p6-honesty" aria-labelledby="p6-honesty-title">
       <WifiOff :size="19" aria-hidden="true" />
       <div>
-        <h2 id="p6-honesty-title">Read-only responsive web preview</h2>
+        <h2 id="p6-honesty-title">Responsive web home</h2>
         <p>
           Rows come from the strict, project-authorized semantic-zoom endpoint. The exception-first sample is bounded while totals and a separately hydrated selection stay authoritative. Voice commits only a finalized transcript through the selected session contract; other controls remain capability previews. At 390px this remains mobile web—not a native client—and no push capability is claimed.
         </p>
