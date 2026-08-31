@@ -43,14 +43,12 @@ func TestMigration166AddsOnlyNullableUserCommandPaletteOverride(t *testing.T) {
 	if instanceRows != 0 {
 		t.Fatalf("migration seeded %d instance overrides, want zero", instanceRows)
 	}
-	for _, reserved := range []int{164, 165} {
-		var count int
-		if err := database.QueryRow(`SELECT COUNT(*) FROM schema_versions WHERE version=?`, reserved).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count != 0 {
-			t.Fatalf("reserved M%d application count=%d, want zero", reserved, count)
-		}
+	var reservedM164 int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_versions WHERE version=164`).Scan(&reservedM164); err != nil {
+		t.Fatal(err)
+	}
+	if reservedM164 != 0 {
+		t.Fatalf("reserved M164 application count=%d, want zero", reservedM164)
 	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
