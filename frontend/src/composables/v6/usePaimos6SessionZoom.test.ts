@@ -87,6 +87,50 @@ async function settle() {
 }
 
 describe('usePaimos6SessionZoom fenced selection owner (PAI-864)', () => {
+  it('restores stored selection on initial no-session startup but honors popstate removal', async () => {
+    const memory = storage()
+    const linkedSession = ref<string | null>(null)
+    persistPaimos6Selection(memory, { principalId: 7, projectId: 42 }, B_ID)
+    const replacements: Array<string | null> = []
+    const candidates: Array<string | null> = []
+    const scope = effectScope()
+    const home = scope.run(() => usePaimos6SessionZoom({
+      principalId: ref(7),
+      authorityKey: ref('authority'),
+      projectId: ref(42),
+      zoom: ref('10'),
+      deepLinkedProjectId: ref(42),
+      deepLinkedSessionId: linkedSession,
+      storage: memory,
+      replaceSessionQuery: (id) => { replacements.push(id) },
+      load: async (projectId, zoom, candidate) => {
+        candidates.push(candidate)
+        return projection(projectId, zoom, [row(A_ID)], candidate === null ? null : row(candidate, 'Stored B'))
+      },
+    }))!
+    await settle()
+    expect(home.selectedId.value).toBe(B_ID)
+    expect(home.selectedSession.value?.title).toBe('Stored B')
+    expect(replacements).toEqual([B_ID])
+
+    // Simulate the router publishing the restored URL, then the browser Back
+    // button returning to the earlier entry with no session query.
+    linkedSession.value = B_ID
+    await settle()
+    linkedSession.value = null
+    expect(home.selectedId.value).toBeNull()
+    expect(home.selectedSession.value).toBeNull()
+    expect(home.sessions.value).toEqual([])
+    await settle()
+
+    expect(candidates).toEqual([B_ID, B_ID, null])
+    expect(home.selectedId.value).toBeNull()
+    expect(home.selectedSession.value).toBeNull()
+    expect(replacements).toEqual([B_ID])
+    expect(memory.getItem(paimos6SelectionStorageKey({ principalId: 7, projectId: 42 }))).toBeNull()
+    scope.stop()
+  })
+
   it('keeps an out-of-sample selection stable across zoom and sample reorder', async () => {
     const zoom = ref('1')
     const selected = ref<string | null>(B_ID)

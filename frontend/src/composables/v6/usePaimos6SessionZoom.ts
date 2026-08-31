@@ -66,6 +66,7 @@ export function usePaimos6SessionZoom(options: UsePaimos6SessionZoomOptions) {
   const selectedSession = ref<Paimos6SessionViewModel | null>(null)
   let requestVersion = 0
   let controller: AbortController | null = null
+  let routeExplicitlyClearedSelection = false
 
   function scope(): Paimos6SelectionScope | null {
     const principalId = options.principalId.value
@@ -101,6 +102,15 @@ export function usePaimos6SessionZoom(options: UsePaimos6SessionZoomOptions) {
   function requestedSelection(currentScope: Paimos6SelectionScope): string | null {
     if (options.deepLinkedProjectId
       && options.deepLinkedProjectId.value !== options.projectId.value) return null
+    if (routeExplicitlyClearedSelection) {
+      // A history entry without `session` is an explicit selection clear,
+      // unlike initial startup without the optional query. Consume it only
+      // in the destination scope so a simultaneous project transition stays
+      // atomic and cannot restore that project's stored selection.
+      routeExplicitlyClearedSelection = false
+      persistPaimos6Selection(storage, currentScope, null)
+      return null
+    }
     if (options.deepLinkedSessionId.value !== null) return options.deepLinkedSessionId.value
     if (selectedId.value !== null) return selectedId.value
     return readPaimos6StoredSelection(storage, currentScope)
@@ -215,7 +225,13 @@ export function usePaimos6SessionZoom(options: UsePaimos6SessionZoomOptions) {
 
   watch(
     [options.deepLinkedSessionId, ...(options.deepLinkedProjectId ? [options.deepLinkedProjectId] : [])],
-    () => {
+    ([nextSession], previous) => {
+      const previousSession = previous?.[0] ?? null
+      if (nextSession === null && previousSession !== null) {
+        routeExplicitlyClearedSelection = true
+        selectedId.value = null
+        selectedSession.value = null
+      }
       if (options.deepLinkedProjectId
         && options.deepLinkedProjectId.value !== options.projectId.value) return
       requestVersion += 1
