@@ -6,6 +6,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
@@ -26,16 +27,21 @@ func loadStructuredKnowledgeLinksTx(ctx context.Context, tx *sql.Tx, entries []m
 	if len(entries) == 0 {
 		return out, nil
 	}
-	ids := make([]any, 0, len(entries))
+	ids := make([]int64, 0, len(entries))
 	focal := make(map[int64]struct{}, len(entries))
 	for _, entry := range entries {
 		ids = append(ids, entry.KnowledgeID)
 		focal[entry.KnowledgeID] = struct{}{}
 		out[entry.KnowledgeID] = []models.StructuredKnowledgeLink{}
 	}
-	marks := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
-	args := append(append([]any{}, ids...), ids...)
-	rows, err := tx.QueryContext(ctx, `SELECT l.link_id,l.source_knowledge_id,l.target_issue_id,l.canonical_kind,
+	encodedIDs, err := json.Marshal(ids)
+	if err != nil {
+		return out, err
+	}
+	rows, err := tx.QueryContext(ctx, `WITH focal(knowledge_id) AS (
+		 SELECT CAST(value AS INTEGER) FROM json_each(?)
+		)
+		SELECT l.link_id,l.source_knowledge_id,l.target_issue_id,l.canonical_kind,
 		si.type,COALESCE(si.slug,''),si.title,CASE WHEN ssk.knowledge_id IS NULL THEN 0 ELSE 1 END,
 		ti.type,COALESCE(ti.slug,''),ti.title,CASE WHEN tsk.knowledge_id IS NULL THEN 0 ELSE 1 END
 		FROM structured_knowledge_links l
@@ -43,8 +49,9 @@ func loadStructuredKnowledgeLinksTx(ctx context.Context, tx *sql.Tx, entries []m
 		JOIN issues ti ON ti.id=l.target_issue_id AND ti.deleted_at IS NULL
 		LEFT JOIN structured_knowledge_entries ssk ON ssk.knowledge_id=si.id
 		LEFT JOIN structured_knowledge_entries tsk ON tsk.knowledge_id=ti.id
-		WHERE l.source_knowledge_id IN (`+marks+`) OR l.target_issue_id IN (`+marks+`)
-		ORDER BY l.link_id`, args...)
+		WHERE l.source_knowledge_id IN (SELECT knowledge_id FROM focal)
+		   OR l.target_issue_id IN (SELECT knowledge_id FROM focal)
+		ORDER BY l.link_id`, string(encodedIDs))
 	if err != nil {
 		return out, err
 	}
