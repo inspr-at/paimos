@@ -239,6 +239,71 @@ func TestStructuredKnowledgeProposalHTTPRejectsCandidateSubstitution(t *testing.
 	create.Body.Close()
 }
 
+func TestStructuredKnowledgeProposalWireHonorsDecodedByteLimit(t *testing.T) {
+	ts, projectID, _, _, _ := setupStructuredKnowledgeAPI(t)
+	base := fmt.Sprintf("/api/projects/%d/structured-knowledge/v1", projectID)
+	withinLimit := map[string]any{
+		"type": "memory", "slug": "escaped-candidate", "title": "Escaped candidate",
+		"purpose": "Keep decoded and wire limits distinct.", "short_body": "x" + strings.Repeat("\n", 40000),
+	}
+	validated := structuredKnowledgePost(t, ts, base+"/validate", ts.memberCookie, withinLimit)
+	assertStatus(t, validated, http.StatusOK)
+	validated.Body.Close()
+	remembered := structuredKnowledgePost(t, ts, base+"/remember", ts.memberCookie, withinLimit)
+	assertStatus(t, remembered, http.StatusCreated)
+	remembered.Body.Close()
+
+	overDecodedLimit := map[string]any{
+		"type": "memory", "slug": "decoded-oversize", "title": "Decoded oversize",
+		"purpose": "Reject the authoritative decoded cap.", "short_body": strings.Repeat("x", 65537),
+	}
+	decodedTooLarge := structuredKnowledgePost(t, ts, base+"/validate", ts.memberCookie, overDecodedLimit)
+	assertStatus(t, decodedTooLarge, http.StatusRequestEntityTooLarge)
+	decodedTooLarge.Body.Close()
+
+	overWireLimit := map[string]any{
+		"type": "memory", "slug": "wire-oversize", "title": "Wire oversize",
+		"purpose": "Reject the bounded JSON envelope.", "short_body": strings.Repeat("<", 70000),
+	}
+	wireTooLarge := structuredKnowledgePost(t, ts, base+"/validate", ts.memberCookie, overWireLimit)
+	assertStatus(t, wireTooLarge, http.StatusRequestEntityTooLarge)
+	wireTooLarge.Body.Close()
+}
+
+func TestStructuredKnowledgeMutationsDoNotAdvertisePartialUndo(t *testing.T) {
+	ts, projectID, _, _, _ := setupStructuredKnowledgeAPI(t)
+	base := fmt.Sprintf("/api/projects/%d/structured-knowledge/v1", projectID)
+	created := structuredKnowledgePost(t, ts, base+"/entries", ts.adminCookie, map[string]any{
+		"type": "memory", "slug": "non-undoable", "title": "Non-undoable aggregate",
+		"purpose": "Keep aggregate history honest.", "short_body": "Structured state spans more than an issue row.",
+	})
+	assertStatus(t, created, http.StatusCreated)
+	var entry structuredKnowledgeTestEntry
+	decode(t, created, &entry)
+
+	assertNotUndoable := func(stage string) {
+		t.Helper()
+		var undoable, onUserStack int
+		if err := db.DB.QueryRow(`SELECT undoable,on_user_stack FROM mutation_log
+			WHERE subject_type='issue' AND subject_id=? ORDER BY id DESC LIMIT 1`, entry.KnowledgeID).
+			Scan(&undoable, &onUserStack); err != nil {
+			t.Fatal(err)
+		}
+		if undoable != 0 || onUserStack != 0 {
+			t.Fatalf("%s mutation falsely advertised undoable=%d on_user_stack=%d", stage, undoable, onUserStack)
+		}
+	}
+	assertNotUndoable("create")
+
+	updated := structuredKnowledgePut(t, ts, fmt.Sprintf("%s/entries/%d", base, entry.KnowledgeID), ts.adminCookie, map[string]any{
+		"expected_revision": 1, "title": "Non-undoable aggregate", "purpose": "Purpose-only overlay change.",
+		"short_body": "Structured state spans more than an issue row.",
+	})
+	assertStatus(t, updated, http.StatusOK)
+	updated.Body.Close()
+	assertNotUndoable("update")
+}
+
 func TestStructuredKnowledgeProductionPromotionPolicyRejectsTerminalShortcutAndCommitsAtomicInstanceMove(t *testing.T) {
 	ts, projectID, _, _, _ := setupStructuredKnowledgeAPI(t)
 	base := fmt.Sprintf("/api/projects/%d/structured-knowledge/v1", projectID)

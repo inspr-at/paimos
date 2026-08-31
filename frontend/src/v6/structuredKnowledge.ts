@@ -93,6 +93,8 @@ const LEVELS = new Set<StructuredKnowledgeLevel>(['project', 'instance', 'kernel
 const RELATIONS = new Set<StructuredKnowledgeRelation>(['parent', 'child', 'about', 'see_also', 'supersedes'])
 const FLAGS = new Set<StructuredKnowledgeValidationFlag>(['essay', 'likely_duplicate', 'chat_note_prose', 'legacy_unstructured'])
 const PROPOSAL_STATES = new Set(['proposed', 'dismissed', 'promoted'])
+const SHORT_BODY_LIMIT_BYTES = 1200
+const PROPOSAL_BODY_LIMIT_BYTES = 64 * 1024
 
 export class StructuredKnowledgeContractError extends Error {
   constructor() {
@@ -260,7 +262,8 @@ function parseProposal(value: unknown, limit: number): StructuredKnowledgePropos
   const updatedAt = instant(raw.updated_at)
   if (!proposalId || raw.source_kind !== 'remember' || !sessionId || !type || !slug || title === null || purpose === null
     || candidateBody === null || !state || promotedKnowledgeId === null && raw.promoted_knowledge_id !== null
-    || !validation || utf8Bytes(candidateBody) !== validation.body_bytes || !createdAt || !updatedAt
+    || !validation || utf8Bytes(candidateBody) !== validation.body_bytes
+    || validation.body_bytes > PROPOSAL_BODY_LIMIT_BYTES || !createdAt || !updatedAt
     || (state === 'promoted') !== (promotedKnowledgeId !== null)) return null
   return {
     proposal_id: proposalId,
@@ -292,7 +295,9 @@ export function parseStructuredKnowledgeSnapshot(value: unknown, expectedProject
     ? null
     : typeof raw.compact_product_session_id === 'string' && UUID.test(raw.compact_product_session_id)
       ? raw.compact_product_session_id : null
-  if (!limit || compact === null && raw.compact_product_session_id !== null) throw new StructuredKnowledgeContractError()
+  if (limit !== SHORT_BODY_LIMIT_BYTES || compact === null && raw.compact_product_session_id !== null) {
+    throw new StructuredKnowledgeContractError()
+  }
   const entries = raw.entries.map((entry) => parseEntry(entry, limit))
   const legacy = raw.legacy.map((entry) => parseLegacy(entry, limit))
   const proposals = raw.proposals.map((proposal) => parseProposal(proposal, limit))

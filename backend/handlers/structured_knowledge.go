@@ -8,7 +8,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -24,6 +23,8 @@ import (
 )
 
 const structuredKnowledgeSchemaVersion = 1
+
+const structuredKnowledgeJSONEnvelopeBytes = 8 * 1024
 
 type structuredKnowledgeCandidateRequest struct {
 	Type      string `json:"type"`
@@ -72,14 +73,31 @@ func decodeStructuredKnowledgeJSON(w http.ResponseWriter, r *http.Request, maxBy
 	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
-		jsonError(w, "invalid structured knowledge body", http.StatusBadRequest)
+		writeStructuredKnowledgeDecodeError(w, err)
 		return false
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		jsonError(w, "invalid structured knowledge body", http.StatusBadRequest)
+		writeStructuredKnowledgeDecodeError(w, err)
 		return false
 	}
 	return true
+}
+
+func structuredKnowledgeJSONWireLimit(decodedStringBytes int) int64 {
+	// A valid decoded UTF-8 byte can occupy six JSON wire bytes when escaped as
+	// \u00XX. The envelope covers worst-case escaping of the separately bounded
+	// title, purpose, slug, IDs, and JSON syntax; the authoritative product
+	// limits continue to apply to decoded content.
+	return int64(decodedStringBytes*6 + structuredKnowledgeJSONEnvelopeBytes)
+}
+
+func writeStructuredKnowledgeDecodeError(w http.ResponseWriter, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		jsonError(w, "structured knowledge body exceeds the bounded JSON envelope", http.StatusRequestEntityTooLarge)
+		return
+	}
+	jsonError(w, "invalid structured knowledge body", http.StatusBadRequest)
 }
 
 func structuredKnowledgeProjectID(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -420,10 +438,13 @@ func structuredKnowledgeCreateMutationTx(r *http.Request, tx *sql.Tx, issueID, a
 		MutationType: mutationTypeForRequest(r, "issue.create"),
 		SubjectType:  "issue",
 		SubjectID:    issueID,
-		InverseOp:    InverseOp{Method: http.MethodDelete, Path: fmt.Sprintf("/issues/%d", issueID)},
+		InverseOp:    InverseOp{},
 		BeforeState:  nil,
 		AfterState:   after,
-		Undoable:     true,
+		// Structured state spans the issue row, overlay revision, Compact
+		// binding, links, and immutable promotion evidence. The generic issue
+		// inverse cannot restore that aggregate atomically.
+		Undoable: false,
 	})
 	return err
 }

@@ -28,8 +28,11 @@ import (
 
 const (
 	sessionUtteranceSchemaVersion = 1
-	sessionUtteranceMaxBodyBytes  = 16 * 1024
 	sessionUtteranceMaxTextBytes  = 8 * 1024
+	// A control-free transcript can still expand sixfold on the JSON wire when
+	// encoding/json escapes HTML-sensitive ASCII. The decoded text cap remains
+	// the authoritative product boundary.
+	sessionUtteranceMaxBodyBytes = sessionUtteranceMaxTextBytes*6 + 4*1024
 )
 
 var sessionUtteranceIDPattern = regexp.MustCompile(`^utt_[0-9a-f]{32}$`)

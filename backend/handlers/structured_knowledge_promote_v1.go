@@ -7,7 +7,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -387,8 +386,8 @@ func recordStructuredPromotionSourceDeleteTx(r *http.Request, tx *sql.Tx, source
 		RequestID: requestIDFromRequest(r), UserID: &userID, SessionID: sessionIDFromRequest(r),
 		AgentName: agentNameFromRequest(r), MutationType: mutationTypeForRequest(r, "issue.delete"),
 		SubjectType: "issue", SubjectID: sourceID,
-		InverseOp:   InverseOp{Method: http.MethodPut, Path: "/issues/" + fmt.Sprint(sourceID), Body: before},
-		BeforeState: before, AfterState: after, Undoable: true,
+		InverseOp:   InverseOp{},
+		BeforeState: before, AfterState: after, Undoable: false,
 	})
 	return err
 }
