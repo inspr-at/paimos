@@ -168,6 +168,54 @@ describe('Paimos 6 semantic-zoom strict boundary (PAI-864)', () => {
     )).toThrow(Paimos6SessionZoomContractError)
   })
 
+  it('rejects selected-outside-sample exception facts above the global totals', () => {
+    const selected = {
+      ...attentionRow(),
+      product_session_id: '47e5d8f7-0b11-4bee-a8a4-a11406de865a',
+      target: { kind: 'project_agent' as const, project_agent_id: 9, agent_name: 'star', address: 'claude:star' },
+      attention: { required: true, exception_count: 5, action_request_count: 3, reason: 'action_request' },
+    }
+    const wire = projection({ selected, totalSessions: 3 })
+    wire.totals = {
+      ...wire.totals,
+      attention_sessions: 2,
+      exception_messages: 6,
+      action_requests: 3,
+      exception_targets: 2,
+    }
+
+    expect(() => parsePaimos6SessionZoom(wire, 42, '10', selected.product_session_id))
+      .toThrow(Paimos6SessionZoomContractError)
+  })
+
+  it('accepts covered selected exception facts and deduplicates a same-target selection', () => {
+    const selected = {
+      ...attentionRow(),
+      product_session_id: '47e5d8f7-0b11-4bee-a8a4-a11406de865a',
+      target: { kind: 'project_agent' as const, project_agent_id: 9, agent_name: 'star', address: 'claude:star' },
+      attention: { required: true, exception_count: 5, action_request_count: 3, reason: 'action_request' },
+    }
+    const covered = projection({ selected, totalSessions: 3 })
+    covered.totals = {
+      ...covered.totals,
+      attention_sessions: 2,
+      exception_messages: 7,
+      action_requests: 4,
+      exception_targets: 2,
+    }
+    expect(parsePaimos6SessionZoom(covered, 42, '10', selected.product_session_id).selected_session)
+      .toEqual(selected)
+
+    const sameTarget = {
+      ...attentionRow(),
+      product_session_id: '57e5d8f7-0b11-4bee-a8a4-a11406de865a',
+    }
+    const deduplicated = projection({ selected: sameTarget, totalSessions: 3 })
+    deduplicated.totals = { ...deduplicated.totals, attention_sessions: 2 }
+    expect(parsePaimos6SessionZoom(deduplicated, 42, '10', sameTarget.product_session_id).selected_session)
+      .toEqual(sameTarget)
+  })
+
   it('calls only the exact zoom endpoint and preserves a far-out string', async () => {
     const zoom = '1234567890123456789012345678901234567890'
     const selected = paimosRow()

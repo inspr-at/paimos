@@ -244,9 +244,9 @@ export function parsePaimos6SessionZoom(
     .filter((session) => session.target.kind === 'project_agent' && session.attention.required)
   const visibleExceptionalTargets = [...targetFacts.values()]
     .filter((session) => session.target.kind === 'project_agent' && session.attention.required)
-  const sampledUnread = [...targetFacts.values()].reduce((sum, session) => sum + session.inbox.unread_count, 0)
-  const sampledExceptionMessages = sampledExceptionalTargets.reduce((sum, session) => sum + session.attention.exception_count, 0)
-  const sampledActionRequests = sampledExceptionalTargets.reduce((sum, session) => sum + session.attention.action_request_count, 0)
+  const visibleUnread = [...targetFacts.values()].reduce((sum, session) => sum + session.inbox.unread_count, 0)
+  const visibleExceptionMessages = visibleExceptionalTargets.reduce((sum, session) => sum + session.attention.exception_count, 0)
+  const visibleActionRequests = visibleExceptionalTargets.reduce((sum, session) => sum + session.attention.action_request_count, 0)
   const visibleAttentionSessions = visibleSessions.filter((session) => session.attention.required).length
 
   if (sessions.length > sampleLimit
@@ -254,10 +254,10 @@ export function parsePaimos6SessionZoom(
     || parsedTotals.sessions < visibleSessions.length
     || root.sample_truncated !== truncated
     || parsedTotals.sampled_exception_targets !== sampledExceptionalTargets.length
-    || parsedTotals.unread < sampledUnread
+    || parsedTotals.unread < visibleUnread
     || parsedTotals.attention_sessions < visibleAttentionSessions
-    || parsedTotals.exception_messages < sampledExceptionMessages
-    || parsedTotals.action_requests < sampledActionRequests
+    || parsedTotals.exception_messages < visibleExceptionMessages
+    || parsedTotals.action_requests < visibleActionRequests
     || parsedTotals.action_requests > parsedTotals.exception_messages
     || parsedTotals.attention_sessions > parsedTotals.sessions
     || parsedTotals.exception_targets > parsedTotals.sessions
