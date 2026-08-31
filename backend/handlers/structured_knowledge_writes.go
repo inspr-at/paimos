@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
@@ -28,7 +27,7 @@ func ValidateStructuredKnowledgeV1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body structuredKnowledgeCandidateRequest
-	if !decodeStructuredKnowledgeJSON(w, r, structuredKnowledgeProposalMaxBytes+4096, &body) {
+	if !decodeStructuredKnowledgeJSON(w, r, structuredKnowledgeJSONWireLimit(structuredKnowledgeProposalMaxBytes), &body) {
 		return
 	}
 	if err := normalizeStructuredKnowledgeCandidate(&body); err != nil {
@@ -69,7 +68,7 @@ func RememberStructuredKnowledgeV1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body structuredKnowledgeCandidateRequest
-	if !decodeStructuredKnowledgeJSON(w, r, structuredKnowledgeProposalMaxBytes+4096, &body) {
+	if !decodeStructuredKnowledgeJSON(w, r, structuredKnowledgeJSONWireLimit(structuredKnowledgeProposalMaxBytes), &body) {
 		return
 	}
 	if err := normalizeStructuredKnowledgeCandidate(&body); err != nil {
@@ -217,7 +216,7 @@ func CreateStructuredKnowledgeV1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body createStructuredKnowledgeRequest
-	if !decodeStructuredKnowledgeJSON(w, r, structuredKnowledgeProposalMaxBytes+4096, &body) {
+	if !decodeStructuredKnowledgeJSON(w, r, structuredKnowledgeJSONWireLimit(structuredKnowledgeShortBodyLimitBytes), &body) {
 		return
 	}
 	if err := normalizeStructuredKnowledgeCandidate(&body.structuredKnowledgeCandidateRequest); err != nil {
@@ -443,7 +442,7 @@ func UpdateStructuredKnowledgeV1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body updateStructuredKnowledgeRequest
-	if !decodeStructuredKnowledgeJSON(w, r, structuredKnowledgeShortBodyLimitBytes+4096, &body) {
+	if !decodeStructuredKnowledgeJSON(w, r, structuredKnowledgeJSONWireLimit(structuredKnowledgeShortBodyLimitBytes), &body) {
 		return
 	}
 	body.Title = strings.TrimSpace(body.Title)
@@ -513,8 +512,8 @@ func UpdateStructuredKnowledgeV1(w http.ResponseWriter, r *http.Request) {
 		RequestID: requestIDFromRequest(r), UserID: &userID, SessionID: sessionIDFromRequest(r),
 		AgentName: agentNameFromRequest(r), MutationType: mutationTypeForRequest(r, "issue.update"),
 		SubjectType: "issue", SubjectID: knowledgeID,
-		InverseOp:   InverseOp{Method: http.MethodPut, Path: "/issues/" + chi.URLParam(r, "knowledgeID"), Body: before},
-		BeforeState: before, AfterState: after, Undoable: true,
+		InverseOp:   InverseOp{},
+		BeforeState: before, AfterState: after, Undoable: false,
 	})
 	if err != nil {
 		jsonError(w, "structured knowledge update failed", http.StatusInternalServerError)

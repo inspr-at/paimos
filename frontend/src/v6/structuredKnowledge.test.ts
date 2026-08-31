@@ -95,6 +95,17 @@ describe('structured knowledge v1 contract', () => {
     ['foreign project', (raw: ReturnType<typeof snapshot>) => { raw.project_id = 43 }],
     ['unknown root property', (raw: ReturnType<typeof snapshot>) => { Object.assign(raw, { instance_id: 'ppm' }) }],
     ['body larger than declared limit', (raw: ReturnType<typeof snapshot>) => { raw.entries[0].short_body = 'x'.repeat(1201); raw.entries[0].validation = validation('x'.repeat(1201), ['essay']) }],
+    ['widened product body contract', (raw: ReturnType<typeof snapshot>) => {
+      raw.short_body_limit_bytes = 1201
+      raw.entries[0].validation.short_body_limit_bytes = 1201
+      raw.legacy[0].validation.short_body_limit_bytes = 1201
+      raw.proposals[0].validation.short_body_limit_bytes = 1201
+    }],
+    ['proposal above the locked candidate cap', (raw: ReturnType<typeof snapshot>) => {
+      const body = 'x'.repeat(65537)
+      raw.proposals[0].candidate_body = body
+      raw.proposals[0].validation = validation(body, ['essay'])
+    }],
     ['legacy body smuggling', (raw: ReturnType<typeof snapshot>) => { Object.assign(raw.legacy[0], { body: 'unbounded prose' }) }],
     ['metadata graph smuggling', (raw: ReturnType<typeof snapshot>) => { Object.assign(raw.entries[0], { metadata: { depends_on: ['x'] } }) }],
     ['multiline durable title', (raw: ReturnType<typeof snapshot>) => { raw.entries[0].title = 'Two\nlines' }],

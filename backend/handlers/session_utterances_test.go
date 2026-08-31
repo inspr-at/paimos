@@ -263,6 +263,32 @@ func TestSessionUtteranceNullSelectionContinuesOnePaimosConversation(t *testing.
 	}
 }
 
+func TestSessionUtteranceWireEnvelopePreservesDecodedTextLimit(t *testing.T) {
+	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "test")
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "Escaped voice", "EVR")
+	text := strings.Repeat("\\", 8*1024)
+
+	response, result := postSessionUtterance(t, ts, projectID, ts.adminCookie,
+		"utt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", text, nil)
+	assertStatus(t, response, http.StatusCreated)
+	if result.RouteKind != "paimos" || result.MessageID == "" {
+		t.Fatalf("escaped transcript was not delivered: %+v", result)
+	}
+	var persisted string
+	if err := db.DB.QueryRow(`SELECT body FROM agent_messages WHERE message_id=?`, result.MessageID).Scan(&persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted != text {
+		t.Fatalf("escaped transcript changed: got=%d bytes want=%d", len(persisted), len(text))
+	}
+
+	tooLong, _ := postSessionUtterance(t, ts, projectID, ts.adminCookie,
+		"utt_cccccccccccccccccccccccccccccccc", text+"\\", nil)
+	assertStatus(t, tooLong, http.StatusBadRequest)
+	tooLong.Body.Close()
+}
+
 func TestSessionUtteranceRejectsStaleUnavailableInvalidAndMissingCSRF(t *testing.T) {
 	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "test")
 	ts := newTestServer(t)

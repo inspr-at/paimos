@@ -81,6 +81,10 @@
       "description": "Paimos 6 product sessions, distinct from attribution, harness-control, run, delivery, and intake sessions"
     },
     {
+      "name": "structured-knowledge",
+      "description": "Reviewed Paimos 6 Compact knowledge, canonical links, proposals, and one-step promotion"
+    },
+    {
       "name": "session-home",
       "description": "Strict project-scoped Paimos 6 session-home projection (schema v1)"
     },
@@ -2063,6 +2067,175 @@
           "before_revision": {"type": "integer", "format": "int64", "minimum": 0},
           "after_revision": {"type": "integer", "format": "int64", "minimum": 1},
           "created_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "StructuredKnowledgeValidation": {
+        "type": "object", "additionalProperties": false,
+        "required": ["flags", "likely_duplicate_ids", "body_bytes", "short_body_limit_bytes"],
+        "properties": {
+          "flags": {"type": "array", "items": {"type": "string", "enum": ["essay", "chat_note_prose", "likely_duplicate"]}, "uniqueItems": true},
+          "likely_duplicate_ids": {"type": "array", "items": {"type": "integer", "format": "int64", "minimum": 1}, "uniqueItems": true},
+          "body_bytes": {"type": "integer", "minimum": 0},
+          "short_body_limit_bytes": {"type": "integer", "const": 1200}
+        }
+      },
+      "StructuredKnowledgeLink": {
+        "type": "object", "additionalProperties": false,
+        "required": ["link_id", "relation", "target_issue_id", "target_knowledge", "target_type", "target_slug", "target_title"],
+        "properties": {
+          "link_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "relation": {"type": "string", "enum": ["parent", "child", "about", "see_also", "supersedes"]},
+          "target_issue_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "target_knowledge": {"type": "boolean"},
+          "target_type": {"type": "string"},
+          "target_slug": {"type": "string"},
+          "target_title": {"type": "string"}
+        }
+      },
+      "StructuredKnowledgeEntry": {
+        "type": "object", "additionalProperties": false,
+        "required": ["knowledge_id", "level", "type", "slug", "title", "purpose", "short_body", "authored_product_session_id", "revision", "links", "validation", "created_at", "updated_at"],
+        "properties": {
+          "knowledge_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "level": {"type": "string", "enum": ["project", "instance", "kernel", "vision"]},
+          "type": {"type": "string", "enum": ["memory", "runbook", "external_system", "related_project", "guideline"]},
+          "slug": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+          "title": {"type": "string", "minLength": 1, "maxLength": 240},
+          "purpose": {"type": "string", "minLength": 1, "maxLength": 400},
+          "short_body": {"type": "string", "minLength": 1, "maxLength": 1200, "description": "At most 1,200 UTF-8 bytes; the server enforces bytes, not code points."},
+          "authored_product_session_id": {"type": "string", "format": "uuid"},
+          "revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "links": {"type": "array", "items": {"$ref": "#/components/schemas/StructuredKnowledgeLink"}},
+          "validation": {"$ref": "#/components/schemas/StructuredKnowledgeValidation"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "LegacyStructuredKnowledgeEntry": {
+        "type": "object", "additionalProperties": false,
+        "required": ["knowledge_id", "type", "slug", "title", "body_bytes", "validation", "updated_at"],
+        "description": "Explicit legacy candidate; purpose and body are withheld until reviewed adoption.",
+        "properties": {
+          "knowledge_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "type": {"type": "string", "enum": ["memory", "runbook", "external_system", "related_project", "guideline"]},
+          "slug": {"type": "string"}, "title": {"type": "string"},
+          "body_bytes": {"type": "integer", "minimum": 0},
+          "validation": {"$ref": "#/components/schemas/StructuredKnowledgeValidation"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "StructuredKnowledgeProposal": {
+        "type": "object", "additionalProperties": false,
+        "required": ["proposal_id", "source_kind", "product_session_id", "type", "slug", "title", "purpose", "candidate_body", "state", "promoted_knowledge_id", "validation", "created_at", "updated_at"],
+        "properties": {
+          "proposal_id": {"type": "string", "format": "uuid"},
+          "source_kind": {"type": "string", "const": "remember"},
+          "product_session_id": {"type": "string", "format": "uuid"},
+          "type": {"type": "string", "enum": ["memory", "runbook", "external_system", "related_project", "guideline"]},
+          "slug": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+          "title": {"type": "string", "minLength": 1, "maxLength": 240},
+          "purpose": {"type": "string", "minLength": 1, "maxLength": 400},
+          "candidate_body": {"type": "string", "minLength": 1, "maxLength": 65536, "description": "At most 64 KiB UTF-8 bytes; the server enforces bytes."},
+          "state": {"type": "string", "enum": ["proposed", "dismissed", "promoted"]},
+          "promoted_knowledge_id": {"type": ["integer", "null"], "format": "int64"},
+          "validation": {"$ref": "#/components/schemas/StructuredKnowledgeValidation"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "StructuredKnowledgeSnapshotV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "project_id", "short_body_limit_bytes", "compact_product_session_id", "entries", "legacy", "proposals"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "project_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "short_body_limit_bytes": {"type": "integer", "const": 1200},
+          "compact_product_session_id": {"type": ["string", "null"], "format": "uuid"},
+          "entries": {"type": "array", "items": {"$ref": "#/components/schemas/StructuredKnowledgeEntry"}},
+          "legacy": {"type": "array", "items": {"$ref": "#/components/schemas/LegacyStructuredKnowledgeEntry"}},
+          "proposals": {"type": "array", "items": {"$ref": "#/components/schemas/StructuredKnowledgeProposal"}}
+        }
+      },
+      "StructuredKnowledgeCandidate": {
+        "type": "object", "additionalProperties": false,
+        "required": ["type", "slug", "title", "purpose", "short_body"],
+        "properties": {
+          "type": {"type": "string", "enum": ["memory", "runbook", "external_system", "related_project", "guideline"]},
+          "slug": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+          "title": {"type": "string", "minLength": 1, "maxLength": 240},
+          "purpose": {"type": "string", "minLength": 1, "maxLength": 400},
+          "short_body": {"type": "string", "minLength": 1, "maxLength": 65536, "description": "Candidate cap is 64 KiB UTF-8 bytes; durable creation is limited to 1,200 bytes."}
+        }
+      },
+      "StructuredKnowledgeCreate": {
+        "type": "object", "additionalProperties": false,
+        "required": ["type", "slug", "title", "purpose", "short_body"],
+        "properties": {
+          "type": {"type": "string", "enum": ["memory", "runbook", "external_system", "related_project", "guideline"]},
+          "slug": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+          "title": {"type": "string", "minLength": 1, "maxLength": 240},
+          "purpose": {"type": "string", "minLength": 1, "maxLength": 400},
+          "short_body": {"type": "string", "minLength": 1, "maxLength": 1200, "description": "At most 1,200 UTF-8 bytes."},
+          "proposal_id": {"type": ["string", "null"], "format": "uuid", "description": "When present, exact reviewed type/slug/title/purpose/body binding is required."}
+        }
+      },
+      "StructuredKnowledgeUpdate": {
+        "type": "object", "additionalProperties": false,
+        "required": ["expected_revision", "title", "purpose", "short_body"],
+        "properties": {
+          "expected_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "title": {"type": "string", "minLength": 1, "maxLength": 240},
+          "purpose": {"type": "string", "minLength": 1, "maxLength": 400},
+          "short_body": {"type": "string", "minLength": 1, "maxLength": 1200, "description": "At most 1,200 UTF-8 bytes."}
+        }
+      },
+      "StructuredKnowledgeCompactBind": {
+        "type": "object", "additionalProperties": false,
+        "required": ["product_session_id", "expected_revision"],
+        "properties": {"product_session_id": {"type": "string", "format": "uuid"}, "expected_revision": {"type": "integer", "format": "int64", "minimum": 0}}
+      },
+      "StructuredKnowledgeCompactBinding": {
+        "type": "object", "additionalProperties": false,
+        "required": ["project_id", "product_session_id", "revision"],
+        "properties": {"project_id": {"type": "integer", "format": "int64", "minimum": 1}, "product_session_id": {"type": "string", "format": "uuid"}, "revision": {"type": "integer", "format": "int64", "minimum": 1}}
+      },
+      "StructuredKnowledgeAdopt": {
+        "type": "object", "additionalProperties": false, "required": ["purpose"],
+        "properties": {"purpose": {"type": "string", "minLength": 1, "maxLength": 400}}
+      },
+      "StructuredKnowledgeLinkCreate": {
+        "type": "object", "additionalProperties": false, "required": ["relation", "target_issue_id"],
+        "properties": {"relation": {"type": "string", "enum": ["parent", "child", "about", "see_also", "supersedes"]}, "target_issue_id": {"type": "integer", "format": "int64", "minimum": 1}}
+      },
+      "StructuredKnowledgeLinkCreateResult": {
+        "type": "object", "additionalProperties": false, "required": ["link_id", "entry"],
+        "properties": {"link_id": {"type": "integer", "format": "int64", "minimum": 1}, "entry": {"$ref": "#/components/schemas/StructuredKnowledgeEntry"}}
+      },
+      "StructuredKnowledgePromote": {
+        "type": "object", "additionalProperties": false, "required": ["to_level"],
+        "description": "Only project to instance and instance to kernel or vision are valid. Direct project to a terminal level is prohibited.",
+        "properties": {"to_level": {"type": "string", "enum": ["instance", "kernel", "vision"]}}
+      },
+      "StructuredKnowledgePromotionLinkResult": {
+        "type": "object", "additionalProperties": false,
+        "required": ["original_link_id", "outcome", "resulting_link_id", "reason"],
+        "properties": {
+          "original_link_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "outcome": {"type": "string", "enum": ["remapped", "dropped"]},
+          "resulting_link_id": {"type": ["integer", "null"], "format": "int64"},
+          "reason": {"type": "string"}
+        }
+      },
+      "StructuredKnowledgePromotionResult": {
+        "type": "object", "additionalProperties": false,
+        "description": "Atomic promotion receipt. Destination, immutable evidence, canonical-link outcomes, and source soft-deletion commit together or not at all.",
+        "required": ["promotion_id", "from_level", "to_level", "entry", "links"],
+        "properties": {
+          "promotion_id": {"type": "string", "format": "uuid"},
+          "from_level": {"type": "string", "enum": ["project", "instance"]},
+          "to_level": {"type": "string", "enum": ["instance", "kernel", "vision"]},
+          "entry": {"$ref": "#/components/schemas/StructuredKnowledgeEntry"},
+          "links": {"type": "array", "items": {"$ref": "#/components/schemas/StructuredKnowledgePromotionLinkResult"}}
         }
       },
       "NodeLabelMap": {
@@ -5141,8 +5314,150 @@
           "403": {"description": "CSRF, password, or internal-role gate failed."},
           "404": {"description": "Project, authority, or selected destination is concealed."},
           "409": {"description": "Stale selection, unavailable target, or conflicting replay."},
-          "413": {"description": "The bounded JSON body exceeded 16 KiB."},
+          "413": {"description": "The bounded JSON envelope exceeded 52 KiB; decoded transcript text remains capped at 8,192 UTF-8 bytes."},
           "500": {"description": "Atomic transcript delivery could not commit."}
+        }
+      }
+    },
+    "/api/projects/{id}/structured-knowledge/v1": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+      "get": {
+        "tags": ["structured-knowledge"], "summary": "Read the reviewed Compact knowledge snapshot for one authorized project",
+        "responses": {
+          "200": {"description": "Closed schema-v1 snapshot", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeSnapshotV1"}}}},
+          "401": {"description": "Authentication required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "External or password-gated caller", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Missing or concealed project", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/structured-knowledge/v1/validate": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+      "post": {
+        "tags": ["structured-knowledge"], "summary": "Validate a bounded candidate without persisting it",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeCandidate"}}}},
+        "responses": {
+          "200": {"description": "Deterministic validation", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeValidation"}}}},
+          "400": {"description": "Invalid strict request", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "413": {"description": "Candidate exceeds the 64 KiB UTF-8 byte cap", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/structured-knowledge/v1/remember": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+      "post": {
+        "tags": ["structured-knowledge"], "summary": "Remember a candidate as a Compact-bound proposal",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeCandidate"}}}},
+        "responses": {
+          "201": {"description": "Persisted proposal; no durable knowledge row is created", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeProposal"}}}},
+          "403": {"description": "Project edit authority required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "409": {"description": "No Compact is bound", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "413": {"description": "Candidate exceeds the 64 KiB UTF-8 byte cap", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/structured-knowledge/v1/compact": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+      "put": {
+        "tags": ["structured-knowledge"], "summary": "Bind the project Compact to a same-project Paimos product session with revision CAS",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeCompactBind"}}}},
+        "responses": {
+          "200": {"description": "Current Compact binding", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeCompactBinding"}}}},
+          "403": {"description": "Instance admin authority required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "409": {"description": "Revision conflict or Compact already used", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "422": {"description": "Product session is not the same-project Paimos target", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/structured-knowledge/v1/entries": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+      "post": {
+        "tags": ["structured-knowledge"], "summary": "Create a reviewed durable project knowledge entry",
+        "description": "Requires instance admin authority. A proposal_id, when supplied, binds the exact reviewed type, slug, title, purpose, body, and Compact session.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeCreate"}}}},
+        "responses": {
+          "201": {"description": "Durable reviewed entry", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeEntry"}}}},
+          "403": {"description": "Instance admin authority required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "409": {"description": "Identity collision or proposal mismatch", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "422": {"description": "Candidate is not reviewable under the 1,200-byte durable contract", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/structured-knowledge/v1/entries/{knowledgeID}/adopt": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+        {"name": "knowledgeID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+      ],
+      "post": {
+        "tags": ["structured-knowledge"], "summary": "Explicitly adopt a safe legacy knowledge row into the Compact contract",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeAdopt"}}}},
+        "responses": {
+          "200": {"description": "Adopted reviewed entry", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeEntry"}}}},
+          "403": {"description": "Instance admin authority required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Missing or concealed legacy row", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "422": {"description": "Legacy metadata or content is not canonically adoptable", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/structured-knowledge/v1/entries/{knowledgeID}": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+        {"name": "knowledgeID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+      ],
+      "put": {
+        "tags": ["structured-knowledge"], "summary": "Update reviewed content and purpose with revision CAS",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeUpdate"}}}},
+        "responses": {
+          "200": {"description": "Updated entry", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeEntry"}}}},
+          "403": {"description": "Instance admin authority required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Missing or concealed entry", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "409": {"description": "Revision conflict", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/structured-knowledge/v1/entries/{knowledgeID}/links": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+        {"name": "knowledgeID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+      ],
+      "post": {
+        "tags": ["structured-knowledge"], "summary": "Create one canonical scoped knowledge link",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeLinkCreate"}}}},
+        "responses": {
+          "201": {"description": "Canonical link and refreshed focal entry", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgeLinkCreateResult"}}}},
+          "403": {"description": "Instance admin authority required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Missing or concealed endpoint", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "422": {"description": "Link violates scope, canonical direction, or acyclic graph rules", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/structured-knowledge/v1/entries/{knowledgeID}/links/{linkID}": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+        {"name": "knowledgeID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+        {"name": "linkID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+      ],
+      "delete": {
+        "tags": ["structured-knowledge"], "summary": "Delete one canonical link from the authorized focal projection",
+        "responses": {
+          "204": {"description": "Deleted", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "403": {"description": "Instance admin authority required", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Missing or concealed link", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
+        }
+      }
+    },
+    "/api/structured-knowledge/v1/entries/{knowledgeID}/promote": {
+      "parameters": [{"name": "knowledgeID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+      "post": {
+        "tags": ["structured-knowledge"], "summary": "Atomically promote reviewed knowledge exactly one authorized level",
+        "description": "Project to instance requires instance admin. Instance to kernel or vision requires super-admin. Direct project to kernel or vision is prohibited. Destination creation, evidence, link remap/drop receipts, and source soft-deletion are one transaction.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgePromote"}}}},
+        "responses": {
+          "200": {"description": "Atomic promotion receipt", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StructuredKnowledgePromotionResult"}}}},
+          "403": {"description": "Project source is visible but instance-admin authority is absent", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "404": {"description": "Missing, foreign, or concealed instance source", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "409": {"description": "Destination identity collision; transaction rolled back", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}},
+          "422": {"description": "Transition is not project to instance or instance to kernel/vision", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}}
         }
       }
     },

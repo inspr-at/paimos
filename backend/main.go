@@ -563,6 +563,20 @@ func mountAPI(r chi.Router) {
 		handlers.RegisterCommandPaletteRoutes(r)
 	})
 
+	// PAI-863: the structured-knowledge surface is private on every outcome.
+	// No-store must wrap authentication and every refusal gate so even early
+	// 401/403/concealed-404 responses cannot be cached. Keep this dedicated
+	// group as the single production registration for the complete surface,
+	// including the instance/kernel/vision promotion endpoint.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.AgentModePrivateNoStore)
+		r.Use(auth.Middleware)
+		r.Use(auth.CSRFMiddleware)
+		r.Use(auth.MustChangePasswordGate)
+		r.Use(auth.BlockExternal)
+		handlers.RegisterStructuredKnowledgeRoutes(r)
+	})
+
 	// Portal (external + admin)
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware)

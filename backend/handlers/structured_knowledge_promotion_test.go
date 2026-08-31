@@ -29,10 +29,6 @@ func TestStructuredKnowledgePromotionTransactionConcealsAndCommitsAtomicDrop(t *
 			db.DB = nil
 		}
 	})
-	if err := db.ApplyStructuredKnowledgeMigrationForTest(context.Background(), db.DB, 1200); err != nil {
-		t.Fatal(err)
-	}
-
 	seedUser := func(username, role string) int64 {
 		result, err := db.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES(?, 'x',?,'active')`, username, role)
 		if err != nil {
@@ -193,10 +189,13 @@ func TestStructuredKnowledgePromotionTransactionConcealsAndCommitsAtomicDrop(t *
 		ORDER BY original_link_id`, projectResultValue.PromotionID).Scan(&linkOutcome); err != nil || !strings.Contains(linkOutcome, "dropped") || !strings.Contains(linkOutcome, "remapped") {
 		t.Fatalf("link evidence=%q err=%v", linkOutcome, err)
 	}
-	var adminMutationCount int
-	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM mutation_log WHERE user_id=? AND subject_type='issue'
-		AND subject_id IN (?,?)`, adminID, sourceID, instanceID).Scan(&adminMutationCount); err != nil || adminMutationCount != 2 {
-		t.Fatalf("admin mutation attribution=%d err=%v", adminMutationCount, err)
+	var adminMutationCount, undoableCount, stackedCount int
+	if err := db.DB.QueryRow(`SELECT COUNT(*),COALESCE(SUM(undoable),0),COALESCE(SUM(on_user_stack),0)
+		FROM mutation_log WHERE user_id=? AND subject_type='issue' AND subject_id IN (?,?)`,
+		adminID, sourceID, instanceID).Scan(&adminMutationCount, &undoableCount, &stackedCount); err != nil ||
+		adminMutationCount != 2 || undoableCount != 0 || stackedCount != 0 {
+		t.Fatalf("admin mutation attribution=%d undoable=%d stacked=%d err=%v",
+			adminMutationCount, undoableCount, stackedCount, err)
 	}
 
 	if _, _, err := promoteStructuredKnowledgeTx(context.Background(), requestFor(adminID, "instance-admin"), instanceID, "kernel", policy); !errors.Is(err, errStructuredPromotionNotFound) {

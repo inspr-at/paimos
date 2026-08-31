@@ -7,7 +7,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -24,10 +23,15 @@ type structuredKnowledgePromotionPolicyV1 struct {
 	InstanceToTerminalSuperAdmin bool
 }
 
-// Deliberately disabled until the product owner keys the public authority
-// matrix. Tests exercise the transaction with an explicit policy value; the
-// production value is changed only with that decision.
-var structuredKnowledgePromotionPolicy = structuredKnowledgePromotionPolicyV1{}
+// Production authority matrix: project knowledge can advance exactly one
+// level to instance under an instance admin; instance knowledge can advance
+// exactly one terminal step to kernel or vision under a super-admin. Direct
+// project-to-terminal promotion is rejected by authorizeStructuredKnowledgePromotion.
+var structuredKnowledgePromotionPolicy = structuredKnowledgePromotionPolicyV1{
+	Enabled:                      true,
+	ProjectToInstanceAdmin:       true,
+	InstanceToTerminalSuperAdmin: true,
+}
 
 type promoteStructuredKnowledgeRequest struct {
 	ToLevel string `json:"to_level"`
@@ -382,8 +386,8 @@ func recordStructuredPromotionSourceDeleteTx(r *http.Request, tx *sql.Tx, source
 		RequestID: requestIDFromRequest(r), UserID: &userID, SessionID: sessionIDFromRequest(r),
 		AgentName: agentNameFromRequest(r), MutationType: mutationTypeForRequest(r, "issue.delete"),
 		SubjectType: "issue", SubjectID: sourceID,
-		InverseOp:   InverseOp{Method: http.MethodPut, Path: "/issues/" + fmt.Sprint(sourceID), Body: before},
-		BeforeState: before, AfterState: after, Undoable: true,
+		InverseOp:   InverseOp{},
+		BeforeState: before, AfterState: after, Undoable: false,
 	})
 	return err
 }
