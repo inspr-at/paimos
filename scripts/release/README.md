@@ -53,7 +53,7 @@ is deliberately **not** named here.
 Verified from the published signature, not from the secret:
 
 ```bash
-tar xzf paimos_<x.y.z>_darwin_universal.tar.gz
+tar xzf paimos_<release-version>_darwin_universal.tar.gz
 codesign -dvvv --extract-certificates=cert- ./paimos
 openssl x509 -inform DER -in cert-0 -noout -subject -enddate
 ```

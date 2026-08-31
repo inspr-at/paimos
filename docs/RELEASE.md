@@ -20,11 +20,12 @@ PR events and unrelated labels do not authorize those jobs.
 
 ### Container image (`ci-v2.yml`)
 
-1. **Image** — `ghcr.io/inspr-at/paimos:<x.y.z>` (immutable per
-   tag) plus `:<x>.<y>` and `:<x>` moving aliases. The same digest is
+1. **Image** — `ghcr.io/inspr-at/paimos:<release-version>` (immutable per
+   tag). Legacy SemVer releases also publish `:<x>.<y>` and `:<x>` moving
+   aliases; calendar releases publish no mutable numeric aliases. The digest is
    also tagged `sha-<short>` for SHA-pinned deploys.
 2. **CycloneDX SBOMs** (PAI-121) — uploaded as a release artifact
-   named `sbom-v<x.y.z>` containing `backend.sbom.json` and
+   named `sbom-v<release-version>` containing `backend.sbom.json` and
    `frontend.sbom.json`. These describe every Go module and every npm
    package that ended up in the image, including transitive
    dependencies and resolved licenses.
@@ -43,15 +44,15 @@ to the GitHub Release as tarballs:
 
 | Artifact (versioned) | Alias (unversioned) | Signed? |
 |---|---|---|
-| `paimos_<x.y.z>_darwin_universal.tar.gz` | `paimos_darwin_universal.tar.gz` | ✅ Developer ID + notarized |
-| `paimos_<x.y.z>_linux_amd64.tar.gz` | `paimos_linux_amd64.tar.gz` | — |
-| `paimos_<x.y.z>_linux_arm64.tar.gz` | `paimos_linux_arm64.tar.gz` | — |
-| `paimos-mcp_<x.y.z>_darwin_universal.tar.gz` | `paimos-mcp_darwin_universal.tar.gz` | ✅ |
-| `paimos-mcp_<x.y.z>_linux_amd64.tar.gz` | `paimos-mcp_linux_amd64.tar.gz` | — |
-| `paimos-mcp_<x.y.z>_linux_arm64.tar.gz` | `paimos-mcp_linux_arm64.tar.gz` | — |
-| `paimos-agentd_<x.y.z>_darwin_universal.tar.gz` | `paimos-agentd_darwin_universal.tar.gz` | ✅ |
-| `paimos-agentd_<x.y.z>_linux_amd64.tar.gz` | `paimos-agentd_linux_amd64.tar.gz` | — |
-| `paimos-agentd_<x.y.z>_linux_arm64.tar.gz` | `paimos-agentd_linux_arm64.tar.gz` | — |
+| `paimos_<release-version>_darwin_universal.tar.gz` | `paimos_darwin_universal.tar.gz` | ✅ Developer ID + notarized |
+| `paimos_<release-version>_linux_amd64.tar.gz` | `paimos_linux_amd64.tar.gz` | — |
+| `paimos_<release-version>_linux_arm64.tar.gz` | `paimos_linux_arm64.tar.gz` | — |
+| `paimos-mcp_<release-version>_darwin_universal.tar.gz` | `paimos-mcp_darwin_universal.tar.gz` | ✅ |
+| `paimos-mcp_<release-version>_linux_amd64.tar.gz` | `paimos-mcp_linux_amd64.tar.gz` | — |
+| `paimos-mcp_<release-version>_linux_arm64.tar.gz` | `paimos-mcp_linux_arm64.tar.gz` | — |
+| `paimos-agentd_<release-version>_darwin_universal.tar.gz` | `paimos-agentd_darwin_universal.tar.gz` | ✅ |
+| `paimos-agentd_<release-version>_linux_amd64.tar.gz` | `paimos-agentd_linux_amd64.tar.gz` | — |
+| `paimos-agentd_<release-version>_linux_arm64.tar.gz` | `paimos-agentd_linux_arm64.tar.gz` | — |
 | `sha256sums.txt` — versioned filenames only | — | — |
 
 The unversioned aliases let `releases/latest/download/<name>` work in
@@ -85,7 +86,7 @@ tag, no SBOM, no signature, no CLI binaries.
 
 The short path is:
 
-    just verify-release v<x.y.z>
+    just verify-release v<release-version>
 
 That wraps [`scripts/verify-release.sh`](../scripts/verify-release.sh) and
 checks the image signature, SBOM attestations, GitHub provenance
@@ -95,9 +96,9 @@ for inspection.
 
 ### Container image
 
-Verify the signature (replace `<x.y.z>` with the tag you're pulling):
+Verify the signature (replace `<release-version>` with the tag you're pulling):
 
-    cosign verify ghcr.io/inspr-at/paimos:<x.y.z> \
+    cosign verify ghcr.io/inspr-at/paimos:<release-version> \
       --certificate-identity-regexp '^https://github.com/inspr-at/paimos/.+' \
       --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 
@@ -105,7 +106,7 @@ Pull the SBOM attestation:
 
     cosign download attestation \
       --predicate-type 'https://cyclonedx.org/bom' \
-      ghcr.io/inspr-at/paimos:<x.y.z> | \
+      ghcr.io/inspr-at/paimos:<release-version> | \
       jq -r '.payload | @base64d | fromjson | .predicate'
 
 The decoded predicate is the same CycloneDX JSON that lives next to
@@ -126,7 +127,7 @@ Barta (P66J39QV6V)` followed by Apple's intermediate and root CAs.
 
 Verify the SHA-256 against the published sums file:
 
-    curl -fLO https://github.com/inspr-at/paimos/releases/download/v<x.y.z>/sha256sums.txt
+    curl -fLO https://github.com/inspr-at/paimos/releases/download/v<release-version>/sha256sums.txt
     shasum -a 256 -c sha256sums.txt --ignore-missing
 
 ## Generating SBOMs locally
@@ -137,30 +138,32 @@ or when a downstream auditor asks for a snapshot.
 
 ## Cutting a release
 
-Pick patch / minor / major; the script handles the VERSION bump, README
+Legacy product lines may pick patch / minor / major. A new product cut uses
+the actual Vienna calendar version `yy.mm.dd`, adding `.hh.mm` only for a
+same-day recut. The script handles the VERSION update, README
 badge, CHANGELOG date, release commit with DCO sign-off, protected PR, auto-merge,
 exact merge-commit tag, and the wait for `ghcr.io/.../<ver>` to appear:
 
     just release patch
     just release minor
-    just release <x.y.z>      # explicit override (e.g., for post-rc cuts)
+    just release <yy.mm.dd[.hh.mm]> # explicit calendar cut
 
 The script never pushes `main` or uses a ruleset bypass. It creates or reuses
-`release/v<x.y.z>`, opens one PR against `main`, enables protected squash
+`release/v<release-version>`, opens one PR against `main`, enables protected squash
 auto-merge, and tags the merge commit returned for that PR. If another change
 lands on `main` later, it is not accidentally included in the release tag.
 
 For agent / non-TTY runs, the reviewed CHANGELOG content must already exist
 (the script refuses to commit its generated TODO stub). When current `main`
 starts with exactly one canonical `## [Unreleased]` section, the script
-consumes that section in place as `## [<x.y.z>]` and preserves every older
+consumes that section in place as `## [<release-version>]` and preserves every older
 release byte-for-byte. Otherwise, starting from clean, current `main`, add only
-the `## [<x.y.z>]` section to [`docs/CHANGELOG.md`](CHANGELOG.md), leave that
+the `## [<release-version>]` section to [`docs/CHANGELOG.md`](CHANGELOG.md), leave that
 one file uncommitted, then run:
 
     ./scripts/release.sh patch --no-edit
     # or the explicit form, e.g. when the latest tag is an -rc pre-release:
-    ./scripts/release.sh <x.y.z> --no-edit
+    ./scripts/release.sh <yy.mm.dd[.hh.mm]> --no-edit
 
 That reviewed working-tree change moves onto the release branch before the
 other deterministic release files are updated. Interactive runs start clean,
@@ -185,7 +188,7 @@ for these DCO commits and the annotated tag; CI signs the published artifacts.
 The normal path still requires GitHub's protected squash auto-merge receipt. A
 merged release PR whose `autoMergeRequest` is missing remains blocked unless a
 separate reviewed change has committed an exact, value-free receipt at
-`scripts/release/recovery/v<x.y.z>.json` on current `origin/main`. The receipt
+`scripts/release/recovery/v<release-version>.json` on current `origin/main`. The receipt
 pins the version, PR number, approved head, squash merge, and incident reason.
 
 Recovery is deliberately one-shot and fail-closed. `release.sh` accepts the
@@ -203,7 +206,7 @@ take 8–15 minutes (Apple's notarytool dominates the darwin job).
 protected-main head before tag creation; no new tag copy of the serial suite is
 started. If you need to resume the release-evidence wait manually:
 
-    just wait-release-ci v<x.y.z>
+    just wait-release-ci v<release-version>
 
 ## Background
 

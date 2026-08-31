@@ -22,6 +22,7 @@ write_stub_scripts() {
   local repo="$1"
   mkdir -p "$repo/scripts"
   cp "$ROOT/scripts/release.sh" "$repo/scripts/release.sh"
+  cp "$ROOT/scripts/release-version.sh" "$repo/scripts/release-version.sh"
   cp "$ROOT/scripts/_deploy-lib.sh" "$repo/scripts/_deploy-lib.sh"
   cp "$ROOT/scripts/wait-release-ci.sh" "$repo/scripts/wait-release-ci.sh"
   cp "$ROOT/scripts/wait-backend-full.sh" "$repo/scripts/wait-backend-full.sh"
@@ -1156,7 +1157,49 @@ test_canonical_unreleased_interactive_path_is_deterministic() {
   EDITOR="$editor" run_release "$repo" "$state" patch >/dev/null
 }
 
+test_calendar_release_and_rejections() {
+  local repo state origin output calendar_version recut_version
+  calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
+  recut_version="$calendar_version.14.05"
+  repo=$(setup_repo calendar-release v1.0.0)
+  state="$TMP_ROOT/calendar-release/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  prepend_release_notes "$repo" "$calendar_version"
+
+  FAKE_RELEASE_VERSION="$calendar_version" \
+    run_release "$repo" "$state" "$calendar_version" --no-edit >/dev/null
+
+  [[ $(git --git-dir="$origin" show refs/pull/1/head:VERSION) == "$calendar_version" ]] ||
+    fail 'calendar release lost leading zeroes in VERSION'
+  [[ $(git --git-dir="$origin" rev-parse "refs/tags/v$calendar_version^{}") == "$(<"$state/merge-oid")" ]] ||
+    fail 'calendar tag did not pin the protected merge'
+
+  repo=$(setup_repo calendar-reject v1.0.0)
+  output="$TMP_ROOT/calendar-reject/output"
+  if FAKE_RELEASE_VERSION="$recut_version" \
+     run_release "$repo" "$TMP_ROOT/calendar-reject/gh-state" "$recut_version" --no-edit >"$output" 2>&1; then
+    fail 'calendar suffix was accepted without a prior same-day cut'
+  fi
+  grep -qF '.hh.mm is valid only for a same-day recut' "$output" ||
+    fail 'calendar recut rejection was not explicit'
+
+  if run_release "$repo" "$TMP_ROOT/calendar-reject-600/gh-state" 6.0.0 --no-edit >"$output" 2>&1; then
+    fail 'prohibited 6.0.0 release was accepted'
+  fi
+  grep -qF '6.0.0 is prohibited' "$output" || fail '6.0.0 rejection was not explicit'
+
+  GIT_COMMITTER_DATE='2030-01-01T00:00:00Z' \
+    git -C "$repo" tag -a --no-sign v5.21.0 -m v5.21.0
+  git -C "$repo" push -q origin v5.21.0
+  if run_release "$repo" "$TMP_ROOT/calendar-reject-major/gh-state" major --no-edit >"$output" 2>&1; then
+    fail 'major mode synthesized prohibited 6.0.0'
+  fi
+  grep -qF 'computed release 6.0.0 is prohibited' "$output" ||
+    fail 'major-mode calendar guidance was not explicit'
+}
+
 write_fake_commands "$TMP_ROOT/fake-bin"
+test_calendar_release_and_rejections
 test_committed_recovery_receipts_are_exact
 test_canonical_unreleased_is_consumed
 test_canonical_unreleased_interactive_path_is_deterministic

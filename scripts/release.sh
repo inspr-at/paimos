@@ -5,13 +5,15 @@
 # published release evidence.
 #
 # Usage:
-#   scripts/release.sh patch|minor|major|<x.y.z> [--no-edit]
+#   scripts/release.sh patch|minor|major|<x.y.z>|<yy.mm.dd[.hh.mm]> [--no-edit]
 #   scripts/release.sh                            # report commits since tag
 
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/release-version.sh"
 
 NO_EDIT=0
 ARGS=()
@@ -51,7 +53,7 @@ require_command() {
 }
 
 latest_release_tag() {
-  git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true
+  git tag --sort=-creatordate | release_version::tag_filter | awk 'NR == 1 {first=$0} END {print first}'
 }
 
 changed_worktree_files() {
@@ -186,7 +188,7 @@ assert_release_delta() {
 
   git show "$head:README.md" > "$validate_tmp/actual"
   git show "$base:README.md" |
-    sed -E "s|<code>v[0-9]+\.[0-9]+\.[0-9]+</code>|<code>v$version</code>|" > "$validate_tmp/expected"
+    sed -E "s~<code>v${PAIMOS_RELEASE_VERSION_ERE}</code>~<code>v$version</code>~" > "$validate_tmp/expected"
   if ! cmp -s "$validate_tmp/actual" "$validate_tmp/expected"; then
     rm -rf "$validate_tmp"
     fail "$head contains non-deterministic README.md changes"
@@ -195,8 +197,8 @@ assert_release_delta() {
   git show "$head:docs/INSTALL.md" > "$validate_tmp/actual"
   git show "$base:docs/INSTALL.md" |
     sed -E \
-      -e "s|VER=[0-9]+\.[0-9]+\.[0-9]+|VER=$version|g" \
-      -e "s|(paimos --version[[:space:]]+# )[0-9]+\.[0-9]+\.[0-9]+|\1$version|" > "$validate_tmp/expected"
+      -e "s~VER=${PAIMOS_RELEASE_VERSION_ERE}~VER=$version~g" \
+      -e "s~(paimos --version[[:space:]]+# )${PAIMOS_RELEASE_VERSION_ERE}~\1$version~" > "$validate_tmp/expected"
   if ! cmp -s "$validate_tmp/actual" "$validate_tmp/expected"; then
     rm -rf "$validate_tmp"
     fail "$head contains non-deterministic docs/INSTALL.md changes"
@@ -227,7 +229,7 @@ assert_release_delta() {
   base_first_heading=$(awk '/^## \[/{print; exit}' "$validate_tmp/base-changelog")
   if [[ "$base_first_heading" == "## [Unreleased]" ]]; then
     base_second_heading=$(awk '/^## \[/{headings++; if (headings == 2) {print; exit}}' "$validate_tmp/base-changelog")
-    if [[ ! "$base_second_heading" =~ ^##\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    if [[ ! "$base_second_heading" =~ ^##\ \[${PAIMOS_RELEASE_VERSION_ERE}\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
       rm -rf "$validate_tmp"
       fail "$base carries a duplicate or non-canonical leading [Unreleased] CHANGELOG section"
     fi
@@ -697,12 +699,12 @@ prepare_release_branch() {
   esac
 
   "$ROOT/scripts/check-claims.sh"
-  today=$(date -u +%Y-%m-%d)
+  today=$(release_version::vienna_iso_date)
   first_existing_heading=$(awk '/^## \[/{print; exit}' docs/CHANGELOG.md)
   second_existing_heading=$(awk '/^## \[/{headings++; if (headings == 2) {print; exit}}' docs/CHANGELOG.md)
 
   if [[ "$first_existing_heading" == "## [Unreleased]" ]]; then
-    if [[ ! "$second_existing_heading" =~ ^##\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    if [[ ! "$second_existing_heading" =~ ^##\ \[${PAIMOS_RELEASE_VERSION_ERE}\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
       fail "docs/CHANGELOG.md carries a duplicate or non-canonical leading [Unreleased] section"
     fi
     canonical_unreleased=1
@@ -710,7 +712,7 @@ prepare_release_branch() {
     fail "docs/CHANGELOG.md carries a non-canonical leading [Unreleased] section"
   fi
   if grep -qE "^## \[$NEW\] " docs/CHANGELOG.md && \
-     [[ ! "$second_existing_heading" =~ ^##\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+     [[ ! "$second_existing_heading" =~ ^##\ \[${PAIMOS_RELEASE_VERSION_ERE}\]\ —\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
     fail "reviewed [$NEW] entry must consume, not retain, the leading [Unreleased] section"
   fi
 
@@ -721,13 +723,13 @@ prepare_release_branch() {
   printf '%s\n' "$NEW" > VERSION
 
   tmp=$(mktemp)
-  sed -E "s|<code>v[0-9]+\.[0-9]+\.[0-9]+</code>|<code>v$NEW</code>|" README.md > "$tmp"
+  sed -E "s~<code>v${PAIMOS_RELEASE_VERSION_ERE}</code>~<code>v$NEW</code>~" README.md > "$tmp"
   mv "$tmp" README.md
 
   tmp=$(mktemp)
   sed -E \
-    -e "s|VER=[0-9]+\.[0-9]+\.[0-9]+|VER=$NEW|g" \
-    -e "s|(paimos --version[[:space:]]+# )[0-9]+\.[0-9]+\.[0-9]+|\1$NEW|" \
+    -e "s~VER=${PAIMOS_RELEASE_VERSION_ERE}~VER=$NEW~g" \
+    -e "s~(paimos --version[[:space:]]+# )${PAIMOS_RELEASE_VERSION_ERE}~\1$NEW~" \
     docs/INSTALL.md > "$tmp"
   mv "$tmp" docs/INSTALL.md
 
@@ -828,9 +830,9 @@ done
 git fetch --tags --quiet origin
 git fetch --quiet origin main
 LAST_TAG=$(latest_release_tag)
-[[ -n "$LAST_TAG" ]] || fail "no semver release tags yet — create v0.1.0 manually first"
+[[ -n "$LAST_TAG" ]] || fail "no supported release tags yet — create v0.1.0 manually first"
 LAST_VERSION="${LAST_TAG#v}"
-IFS=. read -r LAST_MAJOR LAST_MINOR LAST_PATCH <<<"$LAST_VERSION"
+LAST_KIND=$(release_version::kind "$LAST_VERSION")
 
 if [[ -z "$MODE" ]]; then
   echo "Last release: $LAST_TAG"
@@ -841,20 +843,37 @@ if [[ -z "$MODE" ]]; then
   echo "Runtime-relevant (backend/ frontend/src/):"
   git log "$LAST_TAG..origin/main" --oneline -- backend/ frontend/src/ || echo "  (none)"
   echo
-  echo "Re-run with: patch | minor | major | <x.y.z>"
+  echo "Re-run with: patch | minor | major | <x.y.z> | <yy.mm.dd[.hh.mm]>"
   exit 0
 fi
 
 case "$MODE" in
-  patch) NEW="$LAST_MAJOR.$LAST_MINOR.$((LAST_PATCH + 1))" ;;
-  minor) NEW="$LAST_MAJOR.$((LAST_MINOR + 1)).0" ;;
-  major) NEW="$((LAST_MAJOR + 1)).0.0" ;;
+  patch|minor|major)
+    [[ "$LAST_KIND" == semver ]] ||
+      fail "$MODE is available only before this product's first calendar release"
+    IFS=. read -r LAST_MAJOR LAST_MINOR LAST_PATCH <<<"$LAST_VERSION"
+    case "$MODE" in
+      patch) NEW="$LAST_MAJOR.$LAST_MINOR.$((LAST_PATCH + 1))" ;;
+      minor) NEW="$LAST_MAJOR.$((LAST_MINOR + 1)).0" ;;
+      major) NEW="$((LAST_MAJOR + 1)).0.0" ;;
+    esac
+    ;;
   *)
-    [[ "$MODE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
-      fail "mode must be patch|minor|major|<x.y.z> (got: $MODE)"
-    NEW="$MODE"
+    NEW="${MODE#v}"
+    release_version::is_supported "$NEW" ||
+      fail "mode must be patch|minor|major|<x.y.z>|<yy.mm.dd[.hh.mm]>; 6.0.0 is prohibited (got: $MODE)"
+    if release_version::is_calendar "$NEW"; then
+      EXISTING_RELEASE_TAGS=$(git tag --sort=-creatordate | release_version::tag_filter)
+      release_version::calendar_recut_policy "$NEW" "$EXISTING_RELEASE_TAGS" ||
+        fail "calendar release must use today's Vienna date; .hh.mm is valid only for a same-day recut"
+    else
+      [[ "$LAST_KIND" == semver ]] ||
+        fail "legacy SemVer releases are closed after this product's first calendar release"
+    fi
     ;;
 esac
+release_version::is_supported "$NEW" ||
+  fail "computed release $NEW is prohibited; use the actual Vienna calendar cut for the next major"
 NEW_TAG="v$NEW"
 RELEASE_BRANCH="release/$NEW_TAG"
 assert_external_stage_release_pin origin/main "$NEW_TAG"

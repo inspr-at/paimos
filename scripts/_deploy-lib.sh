@@ -20,6 +20,10 @@
 #   BACKUP_ROOT           remote dir under which timestamped backups go
 #   INSTANCE_URL          public URL for the external smoke test
 
+DEPLOY_LIB_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091
+source "$DEPLOY_LIB_SCRIPT_DIR/release-version.sh"
+
 # Check whether an `<repo>:<tag>` exists on ghcr. Tries `docker manifest
 # inspect` first (fast, supports auth); falls back to a token-then-HEAD
 # probe via `curl` so the script works on machines that don't have a
@@ -254,13 +258,12 @@ deploy::run() {
 
 deploy::health_version_matches_target() {
   local tag="$1" version="$2"
-  local semver_re='^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'
   if [[ "$tag" == sha-* ]]; then
     local sha="${tag#sha-}"
     [[ -n "$version" && "$version" == *"+$sha"* ]]
     return $?
   fi
-  if [[ "$tag" =~ $semver_re ]]; then
+  if release_version::is_supported "$tag"; then
     [[ "$version" == "$tag" ]]
     return $?
   fi

@@ -6,6 +6,8 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# shellcheck disable=SC1091
+source "$ROOT/scripts/release-version.sh"
 SITE_ROOT="${1:-$ROOT/../inspr-at}"
 CAPTURE_RELEASE=$(tr -d '[:space:]' < "$ROOT/VERSION")
 API_URL=http://localhost:8888
@@ -28,8 +30,8 @@ die() {
   exit 1
 }
 
-[[ "$CAPTURE_RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
-  die "VERSION must be a shipped semver (got: $CAPTURE_RELEASE)"
+release_version::is_supported "$CAPTURE_RELEASE" || \
+  die "VERSION must be a shipped supported release (got: $CAPTURE_RELEASE)"
 [[ -d "$SITE_ROOT/.git" || -f "$SITE_ROOT/.git" ]] || \
   die "canonical inspr-site checkout not found at $SITE_ROOT"
 [[ -f "$SITE_ROOT/web/scripts/sync-paimos-captures.mjs" ]] || \

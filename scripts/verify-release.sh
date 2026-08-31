@@ -8,9 +8,15 @@ if [[ -z "$TAG" ]]; then
   exit 1
 fi
 
-TAG="${TAG#v}"
-IMAGE="ghcr.io/inspr-at/paimos:$TAG"
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck disable=SC1091
+source "$ROOT/scripts/release-version.sh"
+TAG="${TAG#v}"
+if ! release_version::is_supported "$TAG"; then
+  echo "error: unsupported release tag: $TAG" >&2
+  exit 1
+fi
+IMAGE="ghcr.io/inspr-at/paimos:$TAG"
 
 for cmd in cosign gh jq; do
   if ! command -v "$cmd" >/dev/null 2>&1; then

@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck disable=SC1091
 source "$ROOT/scripts/deploy-target.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/_deploy-lib.sh"
 
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/paimos-deploy-target.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -93,9 +95,31 @@ test_current_resolves_to_head_sha_tag() {
   )
 }
 
+test_calendar_release_targets_are_exact() {
+  local repo
+  repo=$(setup_repo calendar)
+  (
+    cd "$repo"
+    git tag -d v1.0.0 >/dev/null
+    git push -q origin :refs/tags/v1.0.0
+    git tag -a v26.08.31 -m v26.08.31
+    git push -q origin v26.08.31
+    deploy_target::resolve ""
+    [[ "$DEPLOY_TARGET_TAG" == "26.08.31" ]] || fail "calendar default lost leading zeroes"
+    deploy_target::resolve v26.08.31
+    [[ "$DEPLOY_TARGET_TAG" == "26.08.31" ]] || fail "calendar explicit target drifted"
+    deploy::health_version_matches_target 26.08.31 26.08.31 || fail "calendar health match rejected"
+    ! deploy::health_version_matches_target 26.08.31 26.8.31 || fail "calendar health mismatch accepted"
+    if deploy_target::resolve 6.0.0 >/dev/null 2>&1; then
+      fail "prohibited 6.0.0 deploy target accepted"
+    fi
+  )
+}
+
 test_default_release_at_tagged_head
 test_refuses_omitted_target_when_head_is_ahead
 test_explicit_targets_are_preserved
 test_current_resolves_to_head_sha_tag
+test_calendar_release_targets_are_exact
 
 echo "test-deploy-target: ok"

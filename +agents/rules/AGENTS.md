@@ -31,15 +31,15 @@ surfaces the bits an agent needs extra reminders for.
 ## Release workflow
 
 1. Merge PR to `main`.
-2. Update `docs/CHANGELOG.md`: new entry at the top, format
-   `## [X.Y.Z] — YYYY-MM-DD`, one-line headline, bullet list of
-   notable changes. Short and readable.
-3. Tag the commit: `git tag -s vX.Y.Z -m "vX.Y.Z"` and push the tag.
+2. Update `docs/CHANGELOG.md`: add one reviewed leading `## [Unreleased]`
+   section with a short headline and notable changes.
+3. Run the protected release script with legacy `patch|minor|major` or the
+   exact Vienna calendar cut `yy.mm.dd[.hh.mm]`; never create `6.0.0`.
 4. CI (`.github/workflows/ci.yml`) syncs `VERSION` from the git ref
    before the docker build, so the committed `VERSION` file is a
    dev baseline only — no manual bump is required for a release.
    Main-branch images bake `<base>-dev+<sha>`; tagged images bake the
-   semver string from the tag.
+   exact prefix-stripped release version from the tag.
 5. Publish (CI).
 
 ## Code conventions

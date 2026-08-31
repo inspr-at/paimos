@@ -67,7 +67,11 @@ jobs:
 
       - name: Extract version from tag
         id: ver
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          source scripts/release-version.sh
+          version="${GITHUB_REF_NAME#v}"
+          release_version::is_supported "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Build linux/${{ matrix.arch }}
         working-directory: backend
@@ -123,7 +127,11 @@ jobs:
 
       - name: Extract version from tag
         id: ver
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          source scripts/release-version.sh
+          version="${GITHUB_REF_NAME#v}"
+          release_version::is_supported "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Build darwin universal binaries
         working-directory: backend

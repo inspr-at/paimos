@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Files a single PAIMOS ticket — "Doc/site sync follow-up — vX.Y.Z" —
+# Files a single PAIMOS ticket — "Doc/site sync follow-up — v<release-version>" —
 # with a four-item checklist, a diff summary since the previous tag,
 # and a snapshot of the ../inspr-at sibling repo's state. Run after
 # `just release` so README / docs / website / screenshots don't drift.
@@ -17,9 +17,11 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/release-version.sh"
 
 release_tags() {
-  git tag --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'
+  git tag --sort=-creatordate | release_version::tag_filter
 }
 
 usage() {
@@ -70,9 +72,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$TAG" ]]; then
-  TAG=$(release_tags | head -1 || true)
+  TAG=$(release_tags | awk 'NR == 1 {first=$0} END {print first}')
   if [[ -z "$TAG" ]]; then
-    echo "error: no semver release tags exist on this repo" >&2
+    echo "error: no supported release tags exist on this repo" >&2
     exit 1
   fi
   echo "Using latest release tag: $TAG"
@@ -82,8 +84,8 @@ if ! git rev-parse "$TAG" >/dev/null 2>&1; then
   echo "error: tag $TAG does not exist" >&2
   exit 1
 fi
-if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "error: tag $TAG is not a semver release tag (expected vX.Y.Z)" >&2
+if ! release_version::is_supported "$TAG"; then
+  echo "error: tag $TAG is not a supported release tag" >&2
   exit 1
 fi
 # PAI-751: the lookup must match on a STABLE prefix, not on the full
@@ -273,11 +275,15 @@ if [[ -n "${EXISTING:-}" ]]; then
   # normally run right after a release, but a backfill or an out-of-order
   # run must not make the title claim an older release is the latest.
   CUR_TITLE=$(paimos --json issue get "$EXISTING" 2>/dev/null | jq -r '.title // ""' 2>/dev/null || true)
-  CUR_LATEST=$(printf '%s' "$CUR_TITLE" | sed -nE 's/.*latest (v[0-9]+\.[0-9]+\.[0-9]+).*/\1/p')
+  CUR_LATEST=""
+  if [[ "$CUR_TITLE" =~ latest\ (v${PAIMOS_RELEASE_VERSION_ERE}) ]]; then
+    CUR_LATEST="${BASH_REMATCH[1]}"
+  fi
   NEW_TITLE="$TITLE_PREFIX (rolling — latest $TAG)"
   if [[ -n "$CUR_LATEST" ]]; then
-    NEWEST=$(printf '%s\n%s\n' "${CUR_LATEST#v}" "${TAG#v}" | sort -V | tail -1)
-    [[ "$NEWEST" == "${CUR_LATEST#v}" ]] && NEW_TITLE="$CUR_TITLE"
+    LATEST_OF_PAIR=$(release_tags | awk -v current="$CUR_LATEST" -v proposed="$TAG" \
+      '!found && ($0 == current || $0 == proposed) {print; found=1}')
+    [[ "$LATEST_OF_PAIR" == "$CUR_LATEST" ]] && NEW_TITLE="$CUR_TITLE"
   fi
 
   paimos issue update "$EXISTING" \

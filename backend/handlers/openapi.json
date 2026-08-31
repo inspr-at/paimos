@@ -2635,7 +2635,7 @@
                     },
                     "version": {
                       "type": "string",
-                      "description": "App version (semver) stamped at build time, or 'dev' for local builds."
+                      "description": "App release version stamped at build time (legacy SemVer or yy.mm.dd[.hh.mm]), or 'dev' for local builds."
                     },
                     "agent_bus_instance": {
                       "type": "string",

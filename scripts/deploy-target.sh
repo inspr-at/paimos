@@ -2,9 +2,13 @@
 # Pure deploy-target resolution helpers. Sourced by scripts/deploy.sh and
 # tested by scripts/test-deploy-target.sh.
 
+DEPLOY_TARGET_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091
+source "$DEPLOY_TARGET_SCRIPT_DIR/release-version.sh"
+
 deploy_target::latest_release_tag() {
   git fetch --tags --quiet origin
-  git tag --sort=-creatordate | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true
+  git tag --sort=-creatordate | release_version::tag_filter | awk 'NR == 1 {first=$0} END {print first}'
 }
 
 deploy_target::head_sha_tag() {
@@ -37,7 +41,13 @@ deploy_target::resolve() {
         DEPLOY_TARGET_REASON="current-head"
         ;;
       *)
-        DEPLOY_TARGET_TAG="${requested#v}"
+        local candidate="${requested#v}"
+        if [[ "$candidate" =~ ^[0-9]+(\.[0-9]+){2,4}$ ]] &&
+           ! release_version::is_supported "$candidate"; then
+          echo "error: unsupported release version target: $requested" >&2
+          return 1
+        fi
+        DEPLOY_TARGET_TAG="$candidate"
         DEPLOY_TARGET_REASON="explicit"
         ;;
     esac
@@ -46,7 +56,7 @@ deploy_target::resolve() {
 
   DEPLOY_TARGET_LATEST_TAG="$(deploy_target::latest_release_tag)"
   if [[ -z "$DEPLOY_TARGET_LATEST_TAG" ]]; then
-    echo "error: no semver release tags on origin — run \`just release …\` first or pass an explicit image tag" >&2
+    echo "error: no supported release tags on origin — run \`just release …\` first or pass an explicit image tag" >&2
     return 1
   fi
 
