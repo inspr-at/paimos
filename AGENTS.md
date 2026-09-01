@@ -14,6 +14,7 @@ Start here when opening this repo cold.
 - [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md)
 - [`docs/AGENT_INTERFACE.md`](docs/AGENT_INTERFACE.md)
 - [`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md)
+- [`docs/AGENT_INTERCOM.md`](docs/AGENT_INTERCOM.md)
 - [`docs/ANCHORS.md`](docs/ANCHORS.md)
 
 ## Project-context surface

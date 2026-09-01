@@ -15,12 +15,17 @@ project-scoped message. The sender is resolved from `--agent-name` or
 `PAIMOS_AGENT_NAME`; callers cannot choose a numeric sender ID. Optional
 `--ticket`, `--reply-to`, and `--thread` fields anchor work and replies.
 `--level simple|steer` records receiver interruption intent on each message;
-it defaults to `simple`, and every unsupported or unavailable steer path has a
-deterministic `simple` fallback. Use
+it defaults to `simple`. A supported fallback is recorded truthfully as
+effective `simple`; missing targets, ownership/scope mismatches, and protocol
+drift fail closed instead of inventing a handoff. Use
 `--action-request` whenever the body asks the receiver to act; the server
 persists the explicit marker but holds the row out of every agent inbox for
 human review. Text matching catches common missed markers only as defence in
 depth.
+
+For owned Codex/Claude start, status, steer, interrupt, stop, the required
+simple-fallback worker, and recovery, use the canonical
+[Agent Intercom runbook](AGENT_INTERCOM.md).
 
 Read with `paimos message list --project <key> --to <address> [--thread <id>]
 [--after <cursor>]` or `paimos message get <message-id> --project <key>`. The

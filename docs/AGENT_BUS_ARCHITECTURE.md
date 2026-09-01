@@ -1,5 +1,11 @@
 # Instant Agent Bus Architecture
 
+> [!IMPORTANT]
+> This is the historical PAI-826 design record and retains its implementation
+> slices for traceability. For the current shipped Agent Intercom architecture,
+> support matrix, quickstart, and recovery procedures, use
+> [Agent Intercom: Architecture and Operator Runbook](AGENT_INTERCOM.md).
+
 > **Status:** slices 1–4 implemented by PAI-826 in M154 / 5.18.0. Slices 5–7
 > remain follow-up work.
 >
