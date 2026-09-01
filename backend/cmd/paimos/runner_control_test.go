@@ -202,14 +202,23 @@ func TestRunnerControlPumpRecoversTransientRenewal(t *testing.T) {
 	if err := arbiter.start(ctx, true); err != nil {
 		t.Fatal(err)
 	}
+	arbiter.mu.Lock()
+	initialExpiry := arbiter.lease.ExpiresAt
+	arbiter.mu.Unlock()
 	waitForRunnerControl(t, ctx, func() bool {
+		arbiter.mu.Lock()
+		renewed := arbiter.lease.ExpiresAt.After(initialExpiry)
+		arbiter.mu.Unlock()
 		mu.Lock()
 		defer mu.Unlock()
-		return renewCalls >= 2
+		return renewCalls >= 2 && renewed
 	})
 	arbiter.stop(ctx)
-	if !arbiter.lease.ExpiresAt.After(time.Now().Add(time.Second)) {
-		t.Fatalf("renewed lease was not installed: %+v", arbiter.lease)
+	arbiter.mu.Lock()
+	renewedLease := arbiter.lease
+	arbiter.mu.Unlock()
+	if !renewedLease.ExpiresAt.After(initialExpiry) {
+		t.Fatalf("renewed lease was not installed: %+v", renewedLease)
 	}
 }
 
