@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -79,6 +80,38 @@ func TestAgentIntercomDocsUseShippedAgentdCommandsAndFlags(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "flag needs an argument") {
 				t.Errorf("paimos-agentd %s lost --%s: %v", command, name, err)
 			}
+		}
+	}
+}
+
+func TestAgentIntercomDocsDistinguishVendorAndPublicSessionIDs(t *testing.T) {
+	encoded, err := json.Marshal(agentd.Status{Sessions: []agentd.Session{{
+		HarnessSessionID: "vendor-thread-or-session",
+		Reporter:         agentd.ReporterState{PublicSessionID: "public-generation"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := string(encoded)
+	if !strings.Contains(status, `"harness_session_id":"vendor-thread-or-session"`) ||
+		!strings.Contains(status, `"public_session_id":"public-generation"`) {
+		t.Fatalf("agentd status no longer exposes distinct vendor and public IDs: %s", status)
+	}
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "AGENT_INTERCOM.md")) // #nosec G304 -- fixed in-repo documentation path.
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := strings.Join(strings.Fields(string(raw)), " ")
+	for _, claim := range []string{
+		"agentd status `sessions[].harness_session_id` | Vendor Codex thread or Claude session",
+		"agentd status `sessions[].reporter.public_session_id` | Public durable control-plane generation",
+		"harness API `harness_session_id` | Public durable generation on a control-plane response",
+		"fallback reference is the vendor Codex thread ID in local agentd `sessions[].harness_session_id`",
+		"Never substitute the separately reported `sessions[].reporter.public_session_id`",
+	} {
+		if !strings.Contains(doc, claim) {
+			t.Errorf("runbook lost session-ID boundary %q", claim)
 		}
 	}
 }

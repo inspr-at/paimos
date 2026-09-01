@@ -5,9 +5,13 @@ owned local controls. The Paimos ledger is the source of truth; local delivery
 workers and `paimos-agentd` apply a message to a receiver only after leasing
 that durable work.
 
-This guide describes the shipped surface in 5.21.0 and later. It uses only
-public command names and placeholder identities. Keep actual target references,
-socket paths, credentials, and message content out of documentation and logs.
+The base owned-session commands first appeared in 5.21.0. The complete surface
+documented here—including scoped controls, generation worker leases, durable
+reporting, control-outcome reads, and the M168 database guards—requires the
+upcoming calendar release 26.09.01 or later. Do not use this guide as written
+with 5.21.0 or 26.08.31. It uses only public command names and placeholder
+identities. Keep actual target references, socket paths, credentials, and
+message content out of documentation and logs.
 
 ## Fast path: owned Codex
 
@@ -18,6 +22,12 @@ Prerequisites:
 - The coordinator and worker are registered project agents.
 - An administrator has allowed `paimos:coordinator` to send to
   `codex:worker`.
+- An authenticated Paimos administrator performs every message-target and
+  delivery administration operation: `paimos message target set`,
+  `paimos message target list`, `paimos message target requeue`,
+  `paimos message deliveries`, and the per-delivery requeue endpoint. Project
+  membership or agent attribution alone is insufficient; use separate
+  least-privilege shells for senders and listeners.
 - `AGENTD_SOCKET` names an absolute Unix socket in an owner-only directory.
   Do not commit or print it.
 - For durable status and typed interrupt/stop, `REPORT_HOST` is a stable
@@ -65,7 +75,9 @@ paimos-agentd status --instance "$INSTANCE" --socket "$AGENTD_SOCKET"
 ```
 
 Wait until that session reports `state=running`, `steerable=true`, and a
-non-empty `harness_session_id` before steering it.
+non-empty `sessions[].harness_session_id` before steering it. In local agentd
+status, `harness_session_id` is the vendor Codex thread or Claude session ID;
+it is not the public durable harness generation.
 
 For the durable bus, register two receiver-owned targets:
 
@@ -73,9 +85,12 @@ For the durable bus, register two receiver-owned targets:
 2. `codex` / `codex_thread` / `simple` as `simple_fallback`.
 
 The primary reference contains the private agentd socket and local session ID.
-The fallback reference is the Codex thread ID reported by agentd. Build both in
-the pipeline and pass them through stdin so no capability file remains on disk;
-never print or commit either value:
+The fallback reference is the vendor Codex thread ID in local agentd
+`sessions[].harness_session_id`. Never substitute the separately reported
+`sessions[].reporter.public_session_id`, which names the public durable
+generation. Build both references in the pipeline and pass them through stdin
+so no capability file remains on disk; never print or commit either value.
+Target registration is an administrator-only setup step:
 
 ```bash
 jq -n --arg socket "$AGENTD_SOCKET" --arg session_id "$SESSION_ID" \
@@ -194,9 +209,10 @@ only establishes request attribution, and from the local agentd session ID.
 | `delivery_id` | The retry/lease record for that message; also the managed bus steer correlation |
 | `thread_id` | Paimos conversation and hop chain, never a vendor thread |
 | agentd session ID | One child owned by one running daemon instance |
-| harness-session ID | Public durable control-plane generation |
+| agentd status `sessions[].harness_session_id` | Vendor Codex thread or Claude session; receiver capability, not a public generation |
+| agentd status `sessions[].reporter.public_session_id` | Public durable control-plane generation; the Paimos harness-session ID |
+| harness API `harness_session_id` | Public durable generation on a control-plane response |
 | control ID | Durable interrupt/stop request and exact agentd correlation UUID |
-| vendor thread/session ID | Receiver-owned capability stored encrypted as a target reference |
 | worker lease | Private authorization proof for one public harness-session generation |
 
 Do not substitute one ID for another. In particular, a harness-session row or
@@ -291,7 +307,10 @@ authorize a local or remote state transition.
 
 ## Diagnostics
 
-All commands below return non-secret or redacted state:
+All commands below return non-secret or redacted state. The message target and
+delivery listings are still administrator-only; redaction does not make them
+available to a project member, sender, or receiver. Run those two lines only in
+an authenticated administrator shell:
 
 ```bash
 paimos doctor
@@ -401,8 +420,9 @@ for managed reroute only while its heartbeat is no more than 90 seconds old.
 
 ### Target was missing
 
-After registering the receiver's primary and fallback targets, explicitly
-attach them to never-attempted `blocked/target_missing` rows:
+An authenticated administrator must register the receiver's primary and
+fallback targets, then explicitly attach them to never-attempted
+`blocked/target_missing` rows:
 
 ```bash
 paimos message target requeue --project PAI --address codex:worker
@@ -412,10 +432,12 @@ Target registration alone never mutates historical deliveries.
 
 ### Target is stale or a delivery is dead
 
-Registering a replacement creates a new target version for new messages; it
-does not rewrite a target already snapshotted onto an attempted delivery.
-Restore the original receiver target before requeueing that delivery. The
-admin endpoint `POST /api/projects/{id}/message-deliveries/{deliveryID}/requeue`
+All inspection, target registration, target requeue, and per-delivery requeue
+in this recovery path require an authenticated administrator. Registering a
+replacement creates a new target version for new messages; it does not rewrite
+a target already snapshotted onto an attempted delivery. Restore the original
+receiver target before requeueing that delivery. The administrator-only
+endpoint `POST /api/projects/{id}/message-deliveries/{deliveryID}/requeue`
 reuses the same delivery ID and snapshot; it does not retarget. If the original
 target cannot be restored, inspect whether any handoff may have occurred and
 send a new message only as an explicit operator decision.
@@ -464,8 +486,10 @@ The ordinary backend suite covers the documentation contract:
 
 ```bash
 cd backend
-go test ./cmd/paimos ./cmd/paimos-agentd ./contracts
-go test -race ./agentd ./agentmessage ./managedharness
+go test -count=1 ./cmd/paimos ./cmd/paimos-agentd ./contracts
+go test -count=1 ./db -run '^TestMigration168RetiresUnboundGenerationsAndEnforcesLeaseDigest$'
+go test -count=1 ./handlers -run '^(TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization|TestGetHarnessControlReturnsScopedNonSecretOutcome)$'
+go test -race -count=1 ./agentd ./agentmessage ./managedharness
 ```
 
 High-signal proofs include:

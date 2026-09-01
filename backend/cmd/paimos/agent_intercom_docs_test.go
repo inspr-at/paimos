@@ -214,6 +214,56 @@ func TestAgentIntercomREADMEQuickstartUsesShippedCLI(t *testing.T) {
 	}
 }
 
+func TestAgentIntercomRunbookPinsReleaseAndAdministratorBoundaries(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "AGENT_INTERCOM.md")) // #nosec G304 -- fixed in-repo documentation path.
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := strings.Join(strings.Fields(string(raw)), " ")
+	for _, claim := range []string{
+		"base owned-session commands first appeared in 5.21.0",
+		"requires the upcoming calendar release 26.09.01 or later",
+		"Do not use this guide as written with 5.21.0 or 26.08.31",
+		"authenticated Paimos administrator performs every message-target and delivery administration operation",
+		"`paimos message target set`, `paimos message target list`, `paimos message target requeue`, `paimos message deliveries`, and the per-delivery requeue endpoint",
+		"message target and delivery listings are still administrator-only",
+		"All inspection, target registration, target requeue, and per-delivery requeue in this recovery path require an authenticated administrator",
+	} {
+		if !strings.Contains(doc, claim) {
+			t.Errorf("runbook lost release or administrator boundary %q", claim)
+		}
+	}
+	if strings.Contains(doc, "shipped surface in 5.21.0 and later") {
+		t.Error("runbook restored the false legacy release floor")
+	}
+
+	handlerRaw, err := os.ReadFile(filepath.Join("..", "..", "handlers", "agent_messages.go")) // #nosec G304 -- fixed in-repo authorization source.
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := string(handlerRaw)
+	for _, route := range []string{
+		`r.With(auth.RequireAdmin, auth.RequireProjectView).Post("/projects/{id}/message-targets"`,
+		`r.With(auth.RequireAdmin, auth.RequireProjectView).Get("/projects/{id}/message-targets"`,
+		`r.With(auth.RequireAdmin, auth.RequireProjectView).Post("/projects/{id}/message-targets/requeue"`,
+		`r.With(auth.RequireAdmin, auth.RequireProjectView).Get("/projects/{id}/message-deliveries"`,
+		`r.With(auth.RequireAdmin, auth.RequireProjectView).Post("/projects/{id}/message-deliveries/{deliveryID}/requeue"`,
+	} {
+		if !strings.Contains(handler, route) {
+			t.Errorf("shipped message administration route lost RequireAdmin: %s", route)
+		}
+	}
+
+	for _, command := range []string{
+		"go test -count=1 ./db -run '^TestMigration168RetiresUnboundGenerationsAndEnforcesLeaseDigest$'",
+		"go test -count=1 ./handlers -run '^(TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization|TestGetHarnessControlReturnsScopedNonSecretOutcome)$'",
+	} {
+		if !strings.Contains(doc, command) {
+			t.Errorf("runbook executable evidence lost focused command %q", command)
+		}
+	}
+}
+
 func documentedCommandHasFlags(doc, command string, flags []string) bool {
 	for offset := 0; offset < len(doc); {
 		index := strings.Index(doc[offset:], command)
