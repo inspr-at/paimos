@@ -9,7 +9,7 @@ const routerHarness = vi.hoisted(() => ({
 }))
 
 vi.mock('vue-router', async (importOriginal) => ({
-  ...await importOriginal<typeof import('vue-router')>(),
+  ...(await importOriginal<typeof import('vue-router')>()),
   useRoute: () => routerHarness.route,
   useRouter: () => ({ replace: routerHarness.replace, push: routerHarness.push }),
 }))
@@ -62,12 +62,23 @@ function managedRow() {
     summary: 'Checking the strict session-home seam.',
     revision: 3,
     updated_at: '2026-08-30T12:02:00Z',
-    target: { kind: 'project_agent', project_agent_id: 7, agent_name: 'amy', address: PROJECT_A_ADDRESS },
+    target: {
+      kind: 'project_agent',
+      project_agent_id: 7,
+      agent_name: 'amy',
+      address: PROJECT_A_ADDRESS,
+    },
     status: { phase: 'working', reason: 'active' },
     harness: {
       harness: 'codex',
       management_mode: 'managed',
-      advertised_capabilities: { inbox: true, status: true, steer: true, interrupt: true, stop: true },
+      advertised_capabilities: {
+        inbox: true,
+        status: true,
+        steer: true,
+        interrupt: true,
+        stop: true,
+      },
     },
     controls: { steer: 'direct', interrupt: true, stop: true },
     node: { node_id: 854, node_key: 'PAI-854', label: 'PAI-854 · Paimos 6.0 cut' },
@@ -83,17 +94,33 @@ function unmanagedRow() {
     summary: 'An unmanaged second product session on the same node.',
     revision: 2,
     updated_at: '2026-08-30T12:01:00Z',
-    target: { kind: 'project_agent', project_agent_id: 8, agent_name: 'jan', address: 'claude:jan' },
+    target: {
+      kind: 'project_agent',
+      project_agent_id: 8,
+      agent_name: 'jan',
+      address: 'claude:jan',
+    },
     status: { phase: 'yielded', reason: 'active' },
     harness: {
       harness: 'claude',
       management_mode: 'unmanaged',
-      advertised_capabilities: { inbox: true, status: true, steer: false, interrupt: false, stop: false },
+      advertised_capabilities: {
+        inbox: true,
+        status: true,
+        steer: false,
+        interrupt: false,
+        stop: false,
+      },
     },
     controls: { steer: 'paimos_nudge', interrupt: false, stop: false },
     node: { node_id: 854, node_key: 'PAI-854', label: 'PAI-854 · Paimos 6.0 cut' },
     inbox: { unread_count: 0, latest_unread_at: null },
-    attention: { required: true, exception_count: 2, action_request_count: 1, reason: 'action_request' },
+    attention: {
+      required: true,
+      exception_count: 2,
+      action_request_count: 1,
+      reason: 'action_request',
+    },
   }
 }
 
@@ -123,32 +150,48 @@ function projectBPaimosRow() {
 }
 
 function zoomBand(zoom: string) {
-  return zoom.length >= 4 ? 'far' : zoom.length >= 3 ? 'aggregate' : zoom.length >= 2 ? 'overview' : 'detail'
+  return zoom.length >= 4
+    ? 'far'
+    : zoom.length >= 3
+      ? 'aggregate'
+      : zoom.length >= 2
+        ? 'overview'
+        : 'detail'
 }
 
 function zoomLimit(zoom: string) {
   if (zoom.length >= 3) return 100
-  return zoom.length === 1 ? zoom.charCodeAt(0) - 48 : (zoom.charCodeAt(0) - 48) * 10 + zoom.charCodeAt(1) - 48
+  return zoom.length === 1
+    ? zoom.charCodeAt(0) - 48
+    : (zoom.charCodeAt(0) - 48) * 10 + zoom.charCodeAt(1) - 48
 }
 
 function liveProjection(
   sessions = [managedRow(), unmanagedRow(), paimosRow()],
   projectId = PROJECT_ID,
   zoom = '10',
-  selectedSession: ReturnType<typeof managedRow> | ReturnType<typeof unmanagedRow> | ReturnType<typeof paimosRow> | null = null,
+  selectedSession:
+    | ReturnType<typeof managedRow>
+    | ReturnType<typeof unmanagedRow>
+    | ReturnType<typeof paimosRow>
+    | null = null,
   totalSessions = sessions.length,
 ) {
-  const visible = selectedSession && !sessions.some((row) => row.product_session_id === selectedSession.product_session_id)
-    ? [...sessions, selectedSession]
-    : sessions
+  const visible =
+    selectedSession &&
+    !sessions.some((row) => row.product_session_id === selectedSession.product_session_id)
+      ? [...sessions, selectedSession]
+      : sessions
   const targetFacts = new Map<number, (typeof visible)[number]>()
   for (const row of visible) {
     if (row.target.kind === 'project_agent') targetFacts.set(row.target.project_agent_id!, row)
   }
   const exceptionalTargets = [...targetFacts.values()].filter((row) => row.attention.required)
-  const sampledExceptionalTargets = new Set(sessions
-    .filter((row) => row.target.kind === 'project_agent' && row.attention.required)
-    .map((row) => row.target.project_agent_id))
+  const sampledExceptionalTargets = new Set(
+    sessions
+      .filter((row) => row.target.kind === 'project_agent' && row.attention.required)
+      .map((row) => row.target.project_agent_id),
+  )
   return {
     schema_version: 1,
     project_id: projectId,
@@ -162,8 +205,14 @@ function liveProjection(
       sessions: totalSessions,
       unread: [...targetFacts.values()].reduce((total, row) => total + row.inbox.unread_count, 0),
       attention_sessions: visible.filter((row) => row.attention.required).length,
-      exception_messages: exceptionalTargets.reduce((total, row) => total + row.attention.exception_count, 0),
-      action_requests: exceptionalTargets.reduce((total, row) => total + row.attention.action_request_count, 0),
+      exception_messages: exceptionalTargets.reduce(
+        (total, row) => total + row.attention.exception_count,
+        0,
+      ),
+      action_requests: exceptionalTargets.reduce(
+        (total, row) => total + row.attention.action_request_count,
+        0,
+      ),
       exception_targets: exceptionalTargets.length,
       sampled_exception_targets: sampledExceptionalTargets.size,
     },
@@ -171,22 +220,32 @@ function liveProjection(
 }
 
 async function projectionForPath(home: unknown | Promise<unknown>, path: string) {
-  const value = await Promise.resolve(home) as ReturnType<typeof liveProjection>
+  const value = (await Promise.resolve(home)) as ReturnType<typeof liveProjection>
   const query = new URLSearchParams(path.split('?')[1] ?? '')
   const requestedZoom = query.get('zoom') ?? '10'
   const selectedId = query.get('selected_session_id')
-  const selected = selectedId === null
-    ? null
-    : value.sessions.find((row) => row.product_session_id === selectedId)
-      ?? (value.selected_session?.product_session_id === selectedId ? value.selected_session : null)
+  const selected =
+    selectedId === null
+      ? null
+      : (value.sessions.find((row) => row.product_session_id === selectedId) ??
+        (value.selected_session?.product_session_id === selectedId ? value.selected_session : null))
   if (selectedId !== null && selected === null) throw new ApiError(404, 'not found')
-  return liveProjection(value.sessions, value.project_id, requestedZoom, selected, value.totals.sessions)
+  return liveProjection(
+    value.sessions,
+    value.project_id,
+    requestedZoom,
+    selected,
+    value.totals.sessions,
+  )
 }
 
 function deferred<T>() {
   let resolve!: (value: T) => void
   let reject!: (cause: unknown) => void
-  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
   return { promise, resolve, reject }
 }
 
@@ -224,7 +283,8 @@ async function mountWithHome(
   vi.spyOn(api, 'get').mockImplementation((path: string) => {
     if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
     if (path === '/orchestrator/v1') return Promise.resolve(orchestrator) as never
-    if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`)) return projectionForPath(home, path) as never
+    if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`))
+      return projectionForPath(home, path) as never
     return Promise.reject(new Error(`unexpected GET ${path}`))
   })
   return mountComponent(Paimos6PreviewView)
@@ -234,14 +294,17 @@ async function mountTransitionHome(projectBHome: unknown | Promise<unknown>) {
   const auth = authorizePrincipal([PROJECT_ID, PROJECT_B_ID])
   vi.spyOn(api, 'get').mockImplementation((path: string) => {
     if (path === '/projects?status=all') {
-      const authorized = transitionProjectCatalog().filter((project) => auth.accessibleProjects.has(project.id))
+      const authorized = transitionProjectCatalog().filter((project) =>
+        auth.accessibleProjects.has(project.id),
+      )
       return Promise.resolve(authorized) as never
     }
     if (path === '/orchestrator/v1') return Promise.resolve(unsetOrchestrator) as never
     if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`)) {
       return projectionForPath(liveProjection([managedRow()]), path) as never
     }
-    if (path.startsWith(`/projects/${PROJECT_B_ID}/session-home/zoom/v1?`)) return projectionForPath(projectBHome, path) as never
+    if (path.startsWith(`/projects/${PROJECT_B_ID}/session-home/zoom/v1?`))
+      return projectionForPath(projectBHome, path) as never
     return Promise.reject(new Error(`unexpected GET ${path}`))
   })
   return { auth, mounted: await mountComponent(Paimos6PreviewView) }
@@ -281,7 +344,10 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     pending.resolve(liveProjection())
     await flush()
     const text = mounted.el.textContent ?? ''
-    expect(api.get).toHaveBeenCalledWith('/projects?status=all', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(api.get).toHaveBeenCalledWith(
+      '/projects?status=all',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     expect(api.get).toHaveBeenCalledWith(
       `/projects/${PROJECT_ID}/session-home/zoom/v1?zoom=10`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -297,17 +363,23 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     const attentionCard = mounted.el.querySelector<HTMLElement>('.p6-session-card.needs-attention')!
     attentionCard.querySelector<HTMLButtonElement>('.p6-card-select')!.click()
     await flush()
-    const selectedAttentionCard = mounted.el.querySelector<HTMLElement>('.p6-session-card.needs-attention')!
+    const selectedAttentionCard = mounted.el.querySelector<HTMLElement>(
+      '.p6-session-card.needs-attention',
+    )!
     expect(selectedAttentionCard.classList.contains('is-selected')).toBe(true)
     expect(selectedAttentionCard.classList.contains('needs-attention')).toBe(true)
     expect(mounted.el.textContent).toContain('Selected agent target · claude:jan')
-    expect(routerHarness.replace).toHaveBeenCalledWith(expect.objectContaining({
-      query: expect.objectContaining({ project: String(PROJECT_ID), session: UNMANAGED_ID }),
-    }))
-
-    selectedAttentionCard.querySelector<HTMLButtonElement>('.p6-card-select')!.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    expect(routerHarness.replace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: expect.objectContaining({ project: String(PROJECT_ID), session: UNMANAGED_ID }),
+      }),
     )
+
+    selectedAttentionCard
+      .querySelector<HTMLButtonElement>('.p6-card-select')!
+      .dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      )
     await flush()
     expect(mounted.el.querySelector('.p6-session-card.is-selected')).toBeNull()
     expect(mounted.el.textContent).toContain('No selection · preview target Paimos')
@@ -320,9 +392,10 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     await flush()
     expect(routerHarness.route.query.zoom).toBe('10')
     expect(routerHarness.push).not.toHaveBeenCalled()
-    const canonicalReplacements = routerHarness.replace.mock.calls.filter(([location]) => (
-      location.query?.zoom === '10' && location.query?.project === String(PROJECT_ID)
-    ))
+    const canonicalReplacements = routerHarness.replace.mock.calls.filter(
+      ([location]) =>
+        location.query?.zoom === '10' && location.query?.project === String(PROJECT_ID),
+    )
     expect(canonicalReplacements).toHaveLength(1)
 
     const input = mounted.el.querySelector<HTMLInputElement>('.p6-zoom input')!
@@ -416,7 +489,9 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
 
   it('fences A metadata on picker navigation before rendering B with no inherited selection', async () => {
     routerHarness.route.query = { project: String(PROJECT_ID) }
-    const { mounted } = await mountTransitionHome(liveProjection([projectBPaimosRow()], PROJECT_B_ID))
+    const { mounted } = await mountTransitionHome(
+      liveProjection([projectBPaimosRow()], PROJECT_B_ID),
+    )
     await flush()
 
     mounted.el.querySelector<HTMLButtonElement>('.p6-card-select')!.click()
@@ -443,7 +518,9 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
 
   it('fences copied status on same-view permission and principal authority resets', async () => {
     routerHarness.route.query = { project: String(PROJECT_ID) }
-    const { auth, mounted } = await mountTransitionHome(liveProjection([projectBPaimosRow()], PROJECT_B_ID))
+    const { auth, mounted } = await mountTransitionHome(
+      liveProjection([projectBPaimosRow()], PROJECT_B_ID),
+    )
     await flush()
 
     mounted.el.querySelector<HTMLButtonElement>('.p6-card-select')!.click()
@@ -493,8 +570,12 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
 
     unmanaged.querySelector<HTMLButtonElement>('.p6-paimos-nudge')!.click()
     await flush()
-    expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain('has no mutation endpoint yet')
-    expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain('No request was sent')
+    expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain(
+      'has no mutation endpoint yet',
+    )
+    expect(mounted.el.querySelector('[role="status"]')?.textContent).toContain(
+      'No request was sent',
+    )
     // Projects, session home, and structured knowledge load once; the instance
     // orchestrator reloads when the selected project's authority becomes concrete.
     expect(api.get).toHaveBeenCalledTimes(5)
@@ -514,7 +595,9 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(mounted.el.querySelector('main')?.hasAttribute('inert')).toBe(true)
     const mic = door.querySelector<HTMLButtonElement>('.p6-mic')!
     await vi.waitFor(() => expect(document.activeElement).toBe(mic))
-    expect(door.textContent!.indexOf('aMY / Primary')).toBeLessThan(door.textContent!.indexOf('Human node form'))
+    expect(door.textContent!.indexOf('aMY / Primary')).toBeLessThan(
+      door.textContent!.indexOf('Human node form'),
+    )
     expect(door.textContent).toContain('What should aMY / Primary do?')
     expect(door.textContent).toContain('orchestrator configured')
     expect(door.textContent).toContain('Tap to toggle · hold to talk, release to stop')
@@ -524,33 +607,49 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     mic.click()
     await nextTick()
     expect(mic.getAttribute('aria-pressed')).toBe('false')
-    expect(door.querySelector('.p6-door-status')?.textContent).toContain('Microphone capture is unavailable')
+    expect(door.querySelector('.p6-door-status')?.textContent).toContain(
+      'Microphone capture is unavailable',
+    )
 
     const details = door.querySelector<HTMLDetailsElement>('.p6-node-door')!
     const summary = details.querySelector<HTMLElement>('summary')!
     const close = door.querySelector<HTMLButtonElement>('.p6-close')!
     summary.focus()
-    summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    summary.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
+    )
     expect(document.activeElement).toBe(close)
-    close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    close.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }),
+    )
     expect(document.activeElement).toBe(summary)
 
     details.open = true
-    details.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    details
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await nextTick()
     expect(door.querySelector('.p6-door-status')?.textContent).toContain('Name the node')
 
     const input = details.querySelector<HTMLInputElement>('#p6-node-title')!
     input.value = 'Local planning node'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    details.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    details
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await nextTick()
-    expect(door.querySelector('.p6-door-status')?.textContent).toContain('No mutation endpoint was called')
+    expect(door.querySelector('.p6-door-status')?.textContent).toContain(
+      'No mutation endpoint was called',
+    )
     expect(fetchSpy).not.toHaveBeenCalled()
 
-    door.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    door.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    )
     await nextTick()
-    const reopenedTrigger = mounted.el.querySelector<HTMLButtonElement>('[aria-label="Open the talk-first door"]')!
+    const reopenedTrigger = mounted.el.querySelector<HTMLButtonElement>(
+      '[aria-label="Open the talk-first door"]',
+    )!
     await vi.waitFor(() => expect(document.activeElement).toBe(reopenedTrigger))
     expect(mounted.el.querySelector('main')?.hasAttribute('inert')).toBe(false)
     await mounted.unmount()
@@ -561,11 +660,17 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     await flush()
     expect(empty.el.textContent).toContain('No managed product sessions')
     expect(empty.el.textContent).toContain('PAI has no managed sessions yet')
-    expect(empty.el.textContent).toContain('Local Codex or Claude sessions started outside Paimos stay unmanaged')
+    expect(empty.el.textContent).toContain(
+      'Local Codex or Claude sessions started outside Paimos stay unmanaged',
+    )
     expect(empty.el.textContent).toContain('Paimos does not adopt them retroactively')
     expect(empty.el.textContent).toContain('Orchestrator binding')
-    expect(empty.el.textContent).toContain('Not configured. This is separate from the project having no managed sessions')
-    expect(empty.el.textContent).toContain('A super admin can configure it through the documented instance setup')
+    expect(empty.el.textContent).toContain(
+      'Not configured. This is separate from the project having no managed sessions',
+    )
+    expect(empty.el.textContent).toContain(
+      'A super admin can configure it through the documented instance setup',
+    )
     expect(empty.el.querySelector('a')).toBeNull()
     expect(empty.el.querySelector('.p6-session-card')).toBeNull()
     await empty.unmount()
@@ -575,7 +680,8 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     vi.spyOn(api, 'get').mockImplementation((path: string) => {
       if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
       if (path === '/orchestrator/v1') return Promise.resolve(unsetOrchestrator) as never
-      if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`)) return Promise.reject(new Error('offline'))
+      if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`))
+        return Promise.reject(new Error('offline'))
       return Promise.reject(new Error(`unexpected GET ${path}`))
     })
     const unavailable = await mountComponent(Paimos6PreviewView)
@@ -592,7 +698,9 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
 
     const setup = empty.el.querySelector<HTMLAnchorElement>('.p6-empty-binding a')
     expect(setup?.textContent).toContain('Open authorized setup guide')
-    expect(setup?.href).toBe('https://github.com/inspr-at/paimos/blob/main/docs/api-minimal.md#instance-orchestrator-pin')
+    expect(setup?.href).toBe(
+      'https://github.com/inspr-at/paimos/blob/main/docs/api-minimal.md#instance-orchestrator-pin',
+    )
     expect(setup?.target).toBe('_blank')
     expect(setup?.rel).toContain('noopener')
     expect(empty.el.querySelector('.p6-session-card')).toBeNull()
@@ -601,8 +709,12 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     vi.restoreAllMocks()
     const configured = await mountWithHome(liveProjection([]), configuredOrchestrator())
     await flush()
-    expect(configured.el.querySelector('.p6-empty-binding')?.textContent).toContain('Configured as aMY / Primary')
-    expect(configured.el.querySelector('.p6-empty-binding')?.textContent).toContain('No managed sessions are present yet')
+    expect(configured.el.querySelector('.p6-empty-binding')?.textContent).toContain(
+      'Configured as aMY / Primary',
+    )
+    expect(configured.el.querySelector('.p6-empty-binding')?.textContent).toContain(
+      'No managed sessions are present yet',
+    )
     expect(configured.el.querySelector('.p6-empty-binding a')).toBeNull()
     expect(configured.el.querySelector('.p6-session-card')).toBeNull()
     await configured.unmount()
