@@ -197,15 +197,16 @@ async function flush() {
   }
 }
 
-function authorizePrincipal(projectIds = [PROJECT_ID], userId = 7) {
+function authorizePrincipal(projectIds = [PROJECT_ID], userId = 7, role: User['role'] = 'member') {
   const pinia = createPinia()
   setActivePinia(pinia)
   const auth = useAuthStore()
   auth.user = {
     id: userId,
     username: 'amy',
-    role: 'member',
+    role,
     status: 'active',
+    is_super_admin: role === 'super_admin',
   } as User
   const levels: Record<string, 'viewer'> = {}
   for (const projectId of projectIds) levels[String(projectId)] = 'viewer'
@@ -214,8 +215,12 @@ function authorizePrincipal(projectIds = [PROJECT_ID], userId = 7) {
   return auth
 }
 
-async function mountWithHome(home: unknown | Promise<unknown>, orchestrator: unknown = unsetOrchestrator) {
-  authorizePrincipal()
+async function mountWithHome(
+  home: unknown | Promise<unknown>,
+  orchestrator: unknown = unsetOrchestrator,
+  role: User['role'] = 'member',
+) {
+  authorizePrincipal([PROJECT_ID], 7, role)
   vi.spyOn(api, 'get').mockImplementation((path: string) => {
     if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
     if (path === '/orchestrator/v1') return Promise.resolve(orchestrator) as never
@@ -554,7 +559,14 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
   it('renders explicit empty and unavailable states without inventing or retaining rows', async () => {
     const empty = await mountWithHome(liveProjection([]))
     await flush()
-    expect(empty.el.textContent).toContain('PAI has no product sessions yet')
+    expect(empty.el.textContent).toContain('No managed product sessions')
+    expect(empty.el.textContent).toContain('PAI has no managed sessions yet')
+    expect(empty.el.textContent).toContain('Local Codex or Claude sessions started outside Paimos stay unmanaged')
+    expect(empty.el.textContent).toContain('Paimos does not adopt them retroactively')
+    expect(empty.el.textContent).toContain('Orchestrator binding')
+    expect(empty.el.textContent).toContain('Not configured. This is separate from the project having no managed sessions')
+    expect(empty.el.textContent).toContain('A super admin can configure it through the documented instance setup')
+    expect(empty.el.querySelector('a')).toBeNull()
     expect(empty.el.querySelector('.p6-session-card')).toBeNull()
     await empty.unmount()
 
@@ -572,5 +584,27 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(unavailable.el.textContent).toContain('Previously authorized rows have been cleared')
     expect(unavailable.el.querySelector('.p6-session-card')).toBeNull()
     await unavailable.unmount()
+  })
+
+  it('gives only an authorized super admin the documented orchestrator setup route', async () => {
+    const empty = await mountWithHome(liveProjection([]), unsetOrchestrator, 'super_admin')
+    await flush()
+
+    const setup = empty.el.querySelector<HTMLAnchorElement>('.p6-empty-binding a')
+    expect(setup?.textContent).toContain('Open authorized setup guide')
+    expect(setup?.href).toBe('https://github.com/inspr-at/paimos/blob/main/docs/api-minimal.md#instance-orchestrator-pin')
+    expect(setup?.target).toBe('_blank')
+    expect(setup?.rel).toContain('noopener')
+    expect(empty.el.querySelector('.p6-session-card')).toBeNull()
+    await empty.unmount()
+
+    vi.restoreAllMocks()
+    const configured = await mountWithHome(liveProjection([]), configuredOrchestrator())
+    await flush()
+    expect(configured.el.querySelector('.p6-empty-binding')?.textContent).toContain('Configured as aMY / Primary')
+    expect(configured.el.querySelector('.p6-empty-binding')?.textContent).toContain('No managed sessions are present yet')
+    expect(configured.el.querySelector('.p6-empty-binding a')).toBeNull()
+    expect(configured.el.querySelector('.p6-session-card')).toBeNull()
+    await configured.unmount()
   })
 })

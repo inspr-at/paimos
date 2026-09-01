@@ -23,6 +23,7 @@ import { loadStructuredKnowledgeSnapshot, type StructuredKnowledgeSnapshot } fro
 interface ProjectOption { id: number; key: string; name: string }
 
 const DEFAULT_STATUS_MESSAGE = 'Choose a session to target it for voice delivery, or leave it clear to talk to Paimos.'
+const ORCHESTRATOR_SETUP_GUIDE = 'https://github.com/inspr-at/paimos/blob/main/docs/api-minimal.md#instance-orchestrator-pin'
 
 const auth = useAuthStore()
 const { locale } = useI18n()
@@ -340,8 +341,36 @@ onScopeDispose(() => {
       <div v-else-if="projectState === 'unavailable' || home.state.value === 'unavailable'" class="p6-load-state is-unavailable" role="alert">
         Session home unavailable. Previously authorized rows have been cleared; no session data is shown.
       </div>
-      <div v-else-if="home.state.value === 'empty'" class="p6-load-state">
-        {{ selectedProject?.key ?? 'This project' }} has no product sessions yet.
+      <div v-else-if="home.state.value === 'empty'" class="p6-empty-state">
+        <div class="p6-empty-state-copy">
+          <p class="p6-empty-kicker">No managed product sessions</p>
+          <h3>{{ selectedProject?.key ?? 'This project' }} has no managed sessions yet.</h3>
+          <p>
+            Local Codex or Claude sessions started outside Paimos stay unmanaged. Paimos does not adopt them retroactively.
+          </p>
+        </div>
+        <div class="p6-empty-binding">
+          <p class="p6-empty-kicker">Orchestrator binding</p>
+          <p v-if="orchestrator.state.value === 'loading'">Checking the instance orchestrator…</p>
+          <p v-else-if="orchestrator.state.value === 'unavailable' || orchestrator.state.value === 'idle'">
+            Binding status is unavailable. No orchestrator is inferred.
+          </p>
+          <p v-else-if="orchestrator.projection.value?.displayLabel">
+            Configured as <strong>{{ orchestrator.projection.value.displayLabel }}</strong>. No managed sessions are present yet.
+          </p>
+          <template v-else>
+            <p>Not configured. This is separate from the project having no managed sessions.</p>
+            <a
+              v-if="auth.isSuperAdmin"
+              :href="ORCHESTRATOR_SETUP_GUIDE"
+              target="_blank"
+              rel="noopener noreferrer"
+            >Open authorized setup guide</a>
+            <p v-else class="p6-empty-operator-note">
+              A super admin can configure it through the documented instance setup.
+            </p>
+          </template>
+        </div>
       </div>
       <div v-else>
         <Paimos6ZoomOverview
@@ -454,6 +483,18 @@ onScopeDispose(() => {
 .p6-session-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .p6-load-state { padding: 36px 22px; border: 1px dashed #cad6cf; border-radius: 16px; color: #59655e; background: rgba(252, 253, 250, 0.7); font-size: 12px; text-align: center; }
 .p6-load-state.is-unavailable { border-color: #ddc3b8; color: #784d3b; background: #fff8f4; }
+.p6-empty-state { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(250px, 0.65fr); gap: 14px; }
+.p6-empty-state-copy,
+.p6-empty-binding { padding: 22px; border: 1px dashed #cad6cf; border-radius: 16px; color: #59655e; background: rgba(252, 253, 250, 0.7); }
+.p6-empty-state-copy h3 { margin-top: 6px; color: #31443a; font: 600 18px/1.25 "Bricolage Grotesque", "DM Sans", sans-serif; letter-spacing: -0.025em; }
+.p6-empty-state-copy > p:last-child,
+.p6-empty-binding > p:not(.p6-empty-kicker) { margin-top: 8px; font-size: 11.5px; line-height: 1.55; }
+.p6-empty-kicker { color: #5d7467; font-size: 9px; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
+.p6-empty-binding strong { color: #315b47; }
+.p6-empty-binding a { display: inline-flex; min-height: 36px; align-items: center; margin-top: 14px; padding: 0 12px; border: 1px solid #9db9a9; border-radius: 9px; color: #315b47; background: #f1f7f3; font-size: 10.5px; font-weight: 700; text-decoration: none; }
+.p6-empty-binding a:hover { border-color: #6f967f; background: #e8f2eb; }
+.p6-empty-binding a:focus-visible { outline: 3px solid rgba(47, 107, 82, 0.3); outline-offset: 3px; }
+.p6-empty-binding .p6-empty-operator-note { color: #6f7b74; font-size: 10.5px; }
 .p6-honesty { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; margin-top: 17px; padding: 16px 18px; border: 1px dashed #cad6cf; border-radius: 14px; color: #68756e; background: rgba(252, 253, 250, 0.58); }
 .p6-honesty h2 { color: #4d5b53; font-size: 11px; font-weight: 700; }
 .p6-honesty p { margin-top: 3px; font-size: 10.5px; line-height: 1.5; }
@@ -480,6 +521,9 @@ onScopeDispose(() => {
   .p6-selection-copy span { max-width: 220px; }
   .p6-zoom-panel,
   .p6-pinned { width: 100%; max-width: 100%; box-sizing: border-box; }
+  .p6-empty-state { grid-template-columns: 1fr; }
+  .p6-empty-state-copy,
+  .p6-empty-binding { padding: 18px; }
   .p6-honesty { grid-template-columns: auto 1fr; align-items: start; }
   .p6-honesty > span { grid-column: 2; justify-self: start; }
 }
