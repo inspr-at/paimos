@@ -40,9 +40,10 @@ const agentAttrCap = 64
 // (Go's http.Header canonicalises anyway, but matching the server's
 // constants makes greps easier and prevents drift).
 const (
-	agentAttrHeader   = "X-Paimos-Agent-Name"
-	sessionAttrHeader = "X-Paimos-Session-Id"
-	idempotencyHeader = "Idempotency-Key"
+	agentAttrHeader          = "X-Paimos-Agent-Name"
+	sessionAttrHeader        = "X-Paimos-Session-Id"
+	harnessWorkerLeaseHeader = "X-Paimos-Harness-Worker-Lease"
+	idempotencyHeader        = "Idempotency-Key"
 )
 
 // sessionID is generated once per CLI invocation and sent on every
@@ -132,7 +133,8 @@ func newClient(inst InstanceConfig) *Client {
 		baseURL: strings.TrimRight(inst.URL, "/"),
 		apiKey:  inst.APIKey,
 		http: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:       30 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 		},
 	}
 }
@@ -149,6 +151,13 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 // Unlike general reads, those calls must carry trusted agent attribution so the
 // server can prove the caller matches the requested inbox.
 func (c *Client) doForAgentContext(ctx context.Context, method, path string, body any, agent string) ([]byte, error) {
+	return c.doForHarnessContext(ctx, method, path, body, agent, "")
+}
+
+// doForHarnessContext binds a worker mutation to both its public attribution
+// and its private generation lease. The lease is carried only in an HTTPS
+// header and never in argv, URLs, response bodies, or diagnostics.
+func (c *Client) doForHarnessContext(ctx context.Context, method, path string, body any, agent, workerLease string) ([]byte, error) {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -169,6 +178,9 @@ func (c *Client) doForAgentContext(ctx context.Context, method, path string, bod
 		}
 		req.Header.Set(agentAttrHeader, agent)
 	}
+	if workerLease = strings.TrimSpace(workerLease); workerLease != "" {
+		req.Header.Set(harnessWorkerLeaseHeader, workerLease)
+	}
 	return c.doRequest(req)
 }
 
@@ -183,7 +195,7 @@ func (c *Client) doRequest(req *http.Request) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		return rawBody, &httpError{Code: resp.StatusCode, Body: rawBody, Method: req.Method, Path: req.URL.Path}
 	}
 	return rawBody, nil

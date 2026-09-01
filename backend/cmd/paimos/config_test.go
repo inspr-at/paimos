@@ -354,6 +354,37 @@ func TestResolveEnvInstance_RequiresMatchingKey(t *testing.T) {
 	}
 }
 
+func TestResolveEnvInstanceReadsProtectedAPIKeyFileWithoutKeyring(t *testing.T) {
+	t.Setenv(envURL, "https://pm.example")
+	t.Setenv(envAPIKey, "")
+	path := filepath.Join(t.TempDir(), "api-key")
+	if err := os.WriteFile(path, []byte("file_key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envAPIKeyFile, path)
+	name, inst, ok, err := resolveEnvInstance()
+	if err != nil || !ok || name != "env" || inst.APIKey != "file_key" || inst.APIKeySource != "file:"+path {
+		t.Fatalf("name=%q instance=%+v ok=%v error=%v", name, inst, ok, err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := resolveEnvInstance(); err == nil {
+		t.Fatal("group/world-readable API key file was accepted")
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "api-key-link")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envAPIKeyFile, link)
+	if _, _, _, err := resolveEnvInstance(); err == nil || strings.Contains(err.Error(), "file_key") {
+		t.Fatalf("symlink accepted or secret leaked: %v", err)
+	}
+}
+
 func TestResolveEnvInstance_RejectsCompetingURLPairs(t *testing.T) {
 	t.Setenv(envURL, "https://pma.example")
 	t.Setenv(envAPIKey, "pma-key")

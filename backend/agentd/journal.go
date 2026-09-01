@@ -89,6 +89,27 @@ func validateRegistryRecord(record registryRecord) error {
 	if s.LastErrorCode != "" && !validErrorCode(s.LastErrorCode) {
 		return errors.New("invalid agentd error code")
 	}
+	if s.Reporter.PublicSessionID != "" && !validOpaqueID(s.Reporter.PublicSessionID) {
+		return errors.New("invalid agentd reporter session id")
+	}
+	if len(s.Reporter.Capabilities) > 0 {
+		if _, err := canonicalCapabilities(s.Reporter.Capabilities); err != nil {
+			return errors.New("invalid agentd reporter capabilities")
+		}
+	}
+	if pending := s.Reporter.Pending; pending != nil {
+		validOutcome := pending.Outcome == "applied" && pending.Reason == "applied"
+		validRejection := pending.Outcome == "rejected" && (pending.Reason == "not_running" || pending.Reason == "unsupported" || pending.Reason == "ownership_lost" || pending.Reason == "failed")
+		if s.Reporter.PublicSessionID == "" || !validOpaqueID(pending.ControlID) || (pending.Kind != "interrupt" && pending.Kind != "stop") || (!validOutcome && !validRejection) {
+			return errors.New("invalid agentd reporter completion")
+		}
+	}
+	if s.Reporter.RemoteClosed && (s.Reporter.PublicSessionID == "" || s.Reporter.Pending != nil) {
+		return errors.New("invalid remote-closed agentd reporter state")
+	}
+	if s.Reporter.Closed && !s.Reporter.RemoteClosed {
+		return errors.New("invalid closed agentd reporter state")
+	}
 	return nil
 }
 

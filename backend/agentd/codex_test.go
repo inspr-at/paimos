@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -131,6 +132,29 @@ func TestCodexDrainsFinalCompletionBeforeReapingAppServer(t *testing.T) {
 	}
 }
 
+func TestCodexPrematureStreamEOFWaitsForExactChildReap(t *testing.T) {
+	adapter := NewCodexAdapter(os.Args[0], "test")
+	var child *exec.Cmd
+	adapter.command = func(_ string, _ ...string) *exec.Cmd {
+		child = exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+		child.Env = append(os.Environ(), codexHelperEnvironment+"=close-stdout-and-sleep")
+		return child
+	}
+	process, err := adapter.Start(context.Background(), StartRequest{Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:premature-eof", Adapter: AdapterCodex}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err == nil || !strings.Contains(err.Error(), "event stream ended") {
+		t.Fatalf("wait error=%v", err)
+	}
+	if child.ProcessState == nil || child.ProcessState.Pid() != child.Process.Pid {
+		t.Fatalf("Wait returned before exact child reap: state=%v pid=%d", child.ProcessState, child.Process.Pid)
+	}
+	if err := child.Process.Signal(os.Kill); err != os.ErrProcessDone {
+		t.Fatalf("signal after Wait=%v want %v", err, os.ErrProcessDone)
+	}
+}
+
 func TestCodexLiveOwnedAppServerSteer(t *testing.T) {
 	if os.Getenv("PAIMOS_AGENTD_LIVE_CODEX") != "1" {
 		t.Skip("set PAIMOS_AGENTD_LIVE_CODEX=1 with an authenticated codex CLI to run live proof")
@@ -202,6 +226,10 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 			}
 			respond(map[string]any{"turn": map[string]any{"id": "turn-owned", "status": "inProgress"}})
 			_ = encoder.Encode(map[string]any{"method": "turn/started", "params": map[string]any{"threadId": "thread-owned", "turn": map[string]any{"id": "turn-owned", "status": "inProgress"}}})
+			if mode == "close-stdout-and-sleep" {
+				_ = os.Stdout.Close()
+				time.Sleep(time.Hour)
+			}
 			if mode == "complete-and-exit" {
 				for range 48 {
 					_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{}})

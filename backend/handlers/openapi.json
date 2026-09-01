@@ -1834,10 +1834,11 @@
       },
       "HarnessSessionRegister": {
         "type": "object", "additionalProperties": false,
-        "required": ["agent_name", "harness", "host", "harness_session_ref", "management_mode", "role", "steer_mode", "advertised_capabilities"],
+        "required": ["agent_name", "harness", "host", "harness_session_ref", "worker_lease", "management_mode", "role", "steer_mode", "advertised_capabilities"],
         "properties": {
           "agent_name": {"type": "string"}, "harness": {"type": "string"}, "host": {"type": "string"},
           "harness_session_ref": {"type": "string", "writeOnly": true, "description": "Opaque private reference; encrypted at rest and never logged or returned."},
+          "worker_lease": {"type": "string", "writeOnly": true, "minLength": 43, "maxLength": 43, "pattern": "^[A-Za-z0-9_-]{43}$", "description": "Private 256-bit generation lease. Only its scope-bound SHA-256 digest is stored; it is never returned."},
           "message_target_id": {"type": "string", "format": "uuid", "description": "Existing encrypted target binding required for unmanaged inboxes."},
           "management_mode": {"type": "string", "enum": ["managed", "unmanaged"]}, "role": {"type": "string", "enum": ["coordinator", "worker"]},
           "steer_mode": {"type": "string", "enum": ["none", "owned", "codex_external"]}, "advertised_capabilities": {"$ref": "#/components/schemas/HarnessCapabilities"}
@@ -2484,6 +2485,11 @@
       }
     },
     "parameters": {
+      "HarnessWorkerLease": {
+        "name": "X-Paimos-Harness-Worker-Lease", "in": "header", "required": true,
+        "description": "Private 256-bit generation lease required with exact X-Paimos-Agent-Name attribution for worker mutations.",
+        "schema": {"type": "string", "minLength": 43, "maxLength": 43, "pattern": "^[A-Za-z0-9_-]{43}$"}
+      },
       "AgentModeProjectFilter": {
         "name": "project_id", "in": "query", "required": false,
         "description": "Result filter, not an authorization boundary.",
@@ -5565,40 +5571,40 @@
       "get": {"tags": ["agents"], "summary": "Get one durable non-secret harness session", "responses": {"200": {"description": "Harness session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/heartbeat": {
-      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "post": {"tags": ["agents"], "summary": "Report attributed harness status", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessHeartbeat"}}}}, "responses": {"200": {"description": "Updated harness session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "403": {"description": "Agent attribution mismatch"}}}
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
+      "post": {"tags": ["agents"], "summary": "Report attributed harness status", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessHeartbeat"}}}}, "responses": {"200": {"description": "Updated harness session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "403": {"description": "Worker attribution or generation lease mismatch"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/yield": {
-      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "post": {"tags": ["agents"], "summary": "Yield and claim typed owned interrupt/stop requests", "responses": {"200": {"description": "Yielded session and claimed controls"}, "403": {"description": "Agent attribution mismatch"}}}
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
+      "post": {"tags": ["agents"], "summary": "Yield and claim typed owned interrupt/stop requests", "responses": {"200": {"description": "Yielded session and claimed controls"}, "403": {"description": "Worker attribution or generation lease mismatch"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/drain": {
-      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "post": {"tags": ["agents"], "summary": "Lease managed inbox work in canonical FIFO order", "description": "Uses attributed ListInbox with the managed_harness local adapter and no level filter, so older simple work cannot block later steer. The encrypted target ref is used internally and removed from this response.", "responses": {"200": {"description": "Canonical inbox page with at most the next leased delivery work"}, "400": {"description": "Managed inbox unavailable"}, "403": {"description": "Agent attribution mismatch"}}}
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
+      "post": {"tags": ["agents"], "summary": "Lease managed inbox work in canonical FIFO order", "description": "Uses attributed ListInbox with the managed_harness local adapter and no level filter, so older simple work cannot block later steer. The encrypted target ref is used internally and removed from this response.", "responses": {"200": {"description": "Canonical inbox page with at most the next leased delivery work"}, "400": {"description": "Managed inbox unavailable"}, "403": {"description": "Worker attribution or generation lease mismatch"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/complete-delivery": {
-      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "post": {"tags": ["agents"], "summary": "Complete a leased managed delivery through CompleteLocalDelivery", "description": "Preserves canonical effective_level, fallback_reason, handed_off_at, cursor advancement, FIFO, and adapter/target/session caps.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessDeliveryComplete"}}}}, "responses": {"200": {"description": "Advanced canonical inbox cursor"}, "400": {"description": "Delivery or capability validation failed"}}}
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
+      "post": {"tags": ["agents"], "summary": "Complete a leased managed delivery through CompleteLocalDelivery", "description": "Preserves canonical effective_level, fallback_reason, handed_off_at, cursor advancement, FIFO, and adapter/target/session caps.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessDeliveryComplete"}}}}, "responses": {"200": {"description": "Advanced canonical inbox cursor"}, "400": {"description": "Delivery or capability validation failed"}, "403": {"description": "Worker attribution or generation lease mismatch"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/drain-steer": {
-      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "post": {"tags": ["agents"], "summary": "Compatibility drain for a steer-capable managed worker", "description": "Leases the same complete FIFO as drain, including older simple work; it never applies a steer-only level filter. The encrypted target ref is checked internally and removed from this response.", "responses": {"200": {"description": "Canonical inbox page with at most the next leased simple or steer work"}, "400": {"description": "Owned steer unavailable"}, "403": {"description": "Agent attribution mismatch"}}}
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
+      "post": {"tags": ["agents"], "summary": "Compatibility drain for a steer-capable managed worker", "description": "Leases the same complete FIFO as drain, including older simple work; it never applies a steer-only level filter. The encrypted target ref is checked internally and removed from this response.", "responses": {"200": {"description": "Canonical inbox page with at most the next leased simple or steer work"}, "400": {"description": "Owned steer unavailable"}, "403": {"description": "Worker attribution or generation lease mismatch"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/complete-steer": {
-      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "post": {"tags": ["agents"], "summary": "Compatibility completion for a steer-capable managed worker", "description": "Completes either simple or steer work returned by drain-steer through CompleteLocalDelivery, preserving canonical delivery evidence and caps.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessDeliveryComplete"}}}}, "responses": {"200": {"description": "Advanced canonical inbox cursor"}, "400": {"description": "Delivery or capability validation failed"}}}
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
+      "post": {"tags": ["agents"], "summary": "Compatibility completion for a steer-capable managed worker", "description": "Completes either simple or steer work returned by drain-steer through CompleteLocalDelivery, preserving canonical delivery evidence and caps.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessDeliveryComplete"}}}}, "responses": {"200": {"description": "Advanced canonical inbox cursor"}, "400": {"description": "Delivery or capability validation failed"}, "403": {"description": "Worker attribution or generation lease mismatch"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/controls/{kind}": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "kind", "in": "path", "required": true, "schema": {"type": "string", "enum": ["interrupt", "stop"]}}],
       "post": {"tags": ["agents"], "summary": "Request a typed owned-process control", "description": "Available only to managed sessions advertising the corresponding owned capability; no command text is accepted.", "responses": {"201": {"description": "Pending typed control"}, "400": {"description": "Owned control unavailable"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/controls/{controlID}/complete": {
-      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "controlID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "post": {"tags": ["agents"], "summary": "Complete a claimed typed owned-process control", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessControlComplete"}}}}, "responses": {"200": {"description": "Completed typed control"}, "409": {"description": "Control is not claimed by this session"}}}
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "controlID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
+      "post": {"tags": ["agents"], "summary": "Complete a claimed typed owned-process control", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessControlComplete"}}}}, "responses": {"200": {"description": "Completed typed control, including an exact idempotent replay"}, "403": {"description": "Worker attribution or generation lease mismatch"}, "409": {"description": "Control replay outcome or reason conflicts"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/stop": {
-      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
-      "post": {"tags": ["agents"], "summary": "Mark an attributed harness session stopped after daemon cleanup", "responses": {"200": {"description": "Stopped harness session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "403": {"description": "Agent attribution mismatch"}, "409": {"description": "Already stopped"}}}
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
+      "post": {"tags": ["agents"], "summary": "Atomically stop a worker generation and reject any outstanding controls", "responses": {"200": {"description": "Stopped harness session, including an exact idempotent replay", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "403": {"description": "Worker attribution or generation lease mismatch"}}}
     }
   }
 }

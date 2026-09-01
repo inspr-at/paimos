@@ -264,17 +264,20 @@ func resolveEnvInstance() (string, InstanceConfig, bool, error) {
 		}
 	}
 	if rawURL := strings.TrimSpace(os.Getenv(envURL)); rawURL != "" {
-		key := strings.TrimSpace(os.Getenv(envAPIKey))
+		key, source, err := resolveEnvAPIKey()
+		if err != nil {
+			return "", InstanceConfig{}, true, err
+		}
 		if key == "" {
 			return "", InstanceConfig{}, true, &usageError{
-				msg: fmt.Sprintf("%s is set but %s is missing", envURL, envAPIKey),
+				msg: fmt.Sprintf("%s is set but neither %s nor %s is configured", envURL, envAPIKey, envAPIKeyFile),
 			}
 		}
 		return "env", InstanceConfig{
 			URL:          normalizeInstanceURL(rawURL),
 			APIKey:       key,
 			URLSource:    "env:" + envURL,
-			APIKeySource: "env:" + envAPIKey,
+			APIKeySource: source,
 		}, true, nil
 	}
 	if rawURL := strings.TrimSpace(os.Getenv(envPPMURL)); rawURL != "" {
@@ -292,6 +295,29 @@ func resolveEnvInstance() (string, InstanceConfig, bool, error) {
 		}, true, nil
 	}
 	return "", InstanceConfig{}, false, nil
+}
+
+func resolveEnvAPIKey() (string, string, error) {
+	raw := strings.TrimSpace(os.Getenv(envAPIKey))
+	path := strings.TrimSpace(os.Getenv(envAPIKeyFile))
+	if raw != "" && path != "" {
+		return "", "", &usageError{msg: fmt.Sprintf("%s and %s are both set; choose one credential source", envAPIKey, envAPIKeyFile)}
+	}
+	if path == "" {
+		return raw, "env:" + envAPIKey, nil
+	}
+	if path == "-" {
+		return "", "", &usageError{msg: envAPIKeyFile + " cannot read a daemon credential from stdin"}
+	}
+	value, err := readProtectedSecretInput(path, envAPIKeyFile)
+	if err != nil {
+		return "", "", err
+	}
+	key := strings.TrimSpace(string(value))
+	if key == "" || strings.ContainsAny(key, "\r\n") {
+		return "", "", &usageError{msg: envAPIKeyFile + " must contain exactly one non-empty API key line"}
+	}
+	return key, "file:" + path, nil
 }
 
 func resolveActiveInstance() (string, InstanceConfig, error) {
