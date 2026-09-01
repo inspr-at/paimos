@@ -1141,6 +1141,11 @@ collaborate.
 
 ## Operator-local managed sessions (`paimos-agentd`)
 
+The concise end-to-end setup, supported/unsupported matrix, trust boundaries,
+and recovery procedure live in the canonical
+[Agent Intercom runbook](AGENT_INTERCOM.md). This section supplies protocol
+detail for implementors.
+
 `paimos-agentd` is a per-machine process supervisor, not an inference client.
 It starts either a documented `codex app-server --listen stdio://` child or a
 Claude Agent SDK streaming `Query` under the operator's existing authenticated
@@ -1149,11 +1154,19 @@ memory. The local Unix socket and persisted registry are private and
 partitioned by PPM instance; vendor-private sockets are never used.
 
 ```bash
-paimos-agentd serve --instance production
+PROJECT_ID="$(paimos --json project show PAI | jq -er '.id')"
+REPORT_HOST=worker-host
+REPORT_URL=https://paimos.example.com
+REPORT_API_KEY_FILE=/absolute/path/to/owner-only-api-key
+paimos-agentd serve --instance production \
+  --report-host "$REPORT_HOST" --report-url "$REPORT_URL" \
+  --report-api-key-file "$REPORT_API_KEY_FILE"
 printf '%s' 'Implement PAI-849.' | paimos-agentd start \
-  --instance production --adapter codex --workspace "$PWD" --identity codex:worker
+  --instance production --adapter codex --workspace "$PWD" \
+  --project-id "$PROJECT_ID" --identity codex:worker
 printf '%s' 'Implement PAI-850.' | paimos-agentd start \
-  --instance production --adapter claude --workspace "$PWD" --identity claude:worker
+  --instance production --adapter claude --workspace "$PWD" \
+  --project-id "$PROJECT_ID" --identity claude:worker
 paimos-agentd status --instance production
 ```
 
@@ -1201,26 +1214,33 @@ first obtains the FIFO delivery lease, passes its `delivery_id` as the local
 correlation ID, then calls the existing delivery-complete endpoint. That
 transaction invokes `CompleteLocalDelivery`, setting `effective_level`,
 `fallback_reason`, and `handed_off_at` while advancing the inbox cursor. There
-is no direct stdin, queue, PTY, TUI socket, or unledgered managed-control path.
+is no direct stdin, queue, PTY, TUI socket, or unledgered path inside that
+durable delivery flow. The separate `paimos-agentd steer|interrupt|stop`
+commands are local operator controls: they require an explicit correlation ID
+and return a local receipt, but do not create a Paimos message row.
 
 Register the live agentd session as the steer-capable primary and ordinary
-Codex delivery as its required simple fallback. If M161 status reporting is
-also enabled, `managed_harness` is stored as a disabled standby generation;
-it does not replace the enabled `agentd_codex` primary and is selected only by
-an explicit durable unavailable-delivery reroute. Re-registering that stable
-generation reuses the standby target, so setup order cannot flip the primary.
-Target references are encrypted by the existing target registry; use
-owner-only files (or stdin) to avoid shell history:
+Codex delivery as its required simple fallback. Agentd's M161 reporter
+advertises only status, interrupt, and stop, so it creates no inbox target and
+cannot replace the enabled `agentd_codex` primary or enter delivery rerouting.
+A distinct integration that truthfully advertises inbox/steer may have a
+disabled `managed_harness` standby, but it is not the agentd reporter described
+here. Target references are encrypted by the existing target registry. Build
+the private agentd capability and simple Codex fallback reference locally and
+pipe them through stdin; the variables below must never be exported, printed,
+or committed:
 
 ```bash
-printf '%s' '{"socket":"/private/path/agentd.sock","session_id":"<agentd-session-uuid>"}' | \
+printf '%s' "$AGENTD_TARGET_REF" |
   paimos message target set --project PAI --address codex:worker \
-  --adapter agentd_codex --kind agentd_session --maximum-level steer \
-  --role primary --target-ref-file -
-printf '%s' '<codex-thread-id>' | paimos message target set --project PAI \
-  --address codex:worker --adapter codex --kind codex_thread \
-  --maximum-level simple --role simple_fallback --target-ref-file -
+    --adapter agentd_codex --kind agentd_session --maximum-level steer \
+    --role primary --target-ref-file -
+printf '%s' "$SIMPLE_TARGET_REF" |
+  paimos message target set --project PAI --address codex:worker \
+    --adapter codex --kind codex_thread --maximum-level simple \
+    --role simple_fallback --target-ref-file -
 paimos listen --as codex:worker --project PAI --follow --deliver agentd_codex
+paimos listen --as codex:worker --project PAI --follow --deliver codex
 ```
 
 Owned Claude uses a separate target and worker name. It never changes the
@@ -1228,12 +1248,16 @@ unmanaged `claude_resume` or `claude_channel` targets, which remain
 simple-only:
 
 ```bash
-printf '%s' '{"socket":"/private/path/agentd.sock","session_id":"<agentd-session-uuid>"}' | \
+printf '%s' "$AGENTD_TARGET_REF" |
   paimos message target set --project PAI --address claude:worker \
-  --adapter agentd_claude --kind agentd_session --maximum-level steer \
-  --role primary --target-ref-file -
+    --adapter agentd_claude --kind agentd_session --maximum-level steer \
+    --role primary --target-ref-file -
 paimos listen --as claude:worker --project PAI --follow --deliver agentd_claude
 ```
+
+Owned Claude also needs a distinct valid simple target and its matching worker
+for ordinary messages and fallback. It must not reuse the non-persistent owned
+Query as an unmanaged resume target.
 
 Only an M161 generation currently reported working and steer-capable, with a
 heartbeat no older than 90 seconds, may take over a failed managed lease. If
@@ -1242,13 +1266,21 @@ after acquisition, the attributed worker reports `delivery-unavailable`; the
 hub atomically re-pends the same delivery for that active generation or the
 snapshotted ordinary simple fallback. The replacement obtains a fresh FIFO
 lease and completes through `CompleteLocalDelivery`. Agentd deliberately does
-not claim a queue handoff as a managed steer.
+not claim a queue handoff as a managed steer. Its status/control-only reporter
+is never eligible for this reroute because it advertises neither inbox nor
+steer.
 
 Unmanaged Claude attachment remains unsupported for control; only a fresh
 PAI-850 owned Process can advertise steer/interrupt/stop, and those methods
-remain bound to its live Agent SDK Query object. PAI-848 supplies the authenticated Reporter and the
-M161 `harness_sessions` API/table; agentd does not reuse `agent_runs` or the
-PAI-809 run-control journal as a session registry.
+remain bound to its live Agent SDK Query object. PAI-848 supplies the
+authenticated Reporter and the M161 `harness_sessions` API/table; agentd does
+not reuse `agent_runs` or the PAI-809 run-control journal as a session registry.
+Reporter configuration requires `--report-host`, `--report-url`, and
+`--report-api-key-file` together. The URL must be HTTPS except for loopback;
+the credential file is owner-only, redirects are rejected, and startup performs
+an authenticated preflight. `--paimos-path` is an optional absolute override.
+Without that configuration, agentd status/control remains local and no durable
+harness heartbeat or typed interrupt/stop worker is published.
 
 ## Durable harness-session control plane (PAI-848)
 
@@ -1268,20 +1300,31 @@ server-side against both the adapter `MaximumLevel` and durable target cap.
 Unmanaged Claude and every simple-only adapter remain capped to simple
 delivery; an `agentd_claude` target is a distinct owned-process adapter.
 
-Register with a private reference from an owner-only file:
+Register with a private reference and a distinct per-generation worker lease
+from separate owner-only files:
 
 ```bash
 paimos harness register --project PAI --agent worker --harness codex \
-  --host build-mbp --harness-session-file ./thread-id --management managed \
+  --host build-mbp --harness-session-file "$HARNESS_SESSION_REF_FILE" \
+  --worker-lease-file "$WORKER_LEASE_FILE" --management managed \
   --role worker --steer-mode owned \
   --capability inbox,status,steer,interrupt,stop
 ```
 
-The write-only reference is encrypted in `agent_message_targets`. M161's
-separate `harness_sessions` table stores only a domain-separated digest and
-safe target FK; list/status responses expose host and public harness-session
-UUID but never the private reference, vendor credentials, URLs, sockets, or
-OpenClaw state.
+The worker lease is not the vendor session reference and is not the shared API
+key. The reference may be encrypted in `agent_message_targets`; M161's separate
+`harness_sessions` table stores only domain-separated digests and a safe target
+FK. List/status responses expose host and the public harness-session UUID but
+never either private value, vendor credentials, URLs, sockets, or OpenClaw
+state. A public UUID and caller-supplied agent name are therefore insufficient
+to impersonate its worker.
+
+For an inbox-capable registration, target creation is deliberately first. The
+first active harness-session insert must carry both the generation lease digest
+and encrypted target FK; database guards enforce the same invariant on later
+updates. A crash before that insert leaves only a reusable encrypted target,
+not an active worker or authorization proof, and an exact registration retry
+reuses it.
 
 The PAI-849 worker must heartbeat, yield to claim typed interrupt/stop rows,
 lease inbox work through `POST .../{sessionID}/drain`, and acknowledge each
@@ -1293,8 +1336,27 @@ steer-named endpoints remain compatibility aliases for steer-capable workers;
 they also return older simple work first and must complete it as simple.
 After owned cleanup it marks the session stopped through
 `POST .../{sessionID}/stop`. PAI-848 starts no process and defines no daemon.
+Every worker mutation verifies the exact project, public session UUID,
+attributed agent, and generation lease. Missing, duplicate, wrong-generation,
+or cross-project proof fails closed; an ordinary ProjectEdit API key does not
+replace that proof. The CLI reads the lease from a protected file, keeps it out
+of argv and URLs, rejects redirects on secret-bearing requests, and treats any
+malformed or mismatched acknowledgement as failure rather than success.
+
 Stopping closes that immutable harness-session generation: registering the
-same stable external session reference again creates a new public
-harness-session UUID while reusing the matching enabled encrypted target
-version. This retains stopped-row history and keeps pre-stop delivery snapshots
-drainable; active retries remain idempotent.
+same stable external session reference with a new worker lease creates a new
+public harness-session UUID while reusing the matching enabled encrypted
+target version. This retains stopped-row history and keeps pre-stop delivery
+snapshots drainable; active retries remain idempotent. Legacy active
+generations without a worker-lease digest are stopped during migration, and
+pending/claimed controls are rejected with `ownership_lost`; they cannot be
+reauthorized after the fact.
+
+Agentd persists only content-free recovery checkpoints, not the lease. The
+lease lives in its separate instance-scoped owner-only credential store. On a
+terminal session, cleanup advances only after exact evidence through
+`remote_closed` (remote stop acknowledged), `lease_deleted` (the local lease
+durably removed), and then `prunable` (bounded terminal history may be
+discarded). Before remote closure, recovery first settles any journaled
+claimed-control completion with its exact recorded result. A restart resumes
+that sequence and never re-registers an `ownership_lost` child as live.
