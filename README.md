@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  Paimos keeps project work, repository context, operating knowledge,
-  execution choices, and run evidence in one self-hosted system.
+  Paimos keeps specifications, project work, repository context, operating
+  knowledge, execution choices, and run evidence in one self-hosted system.
 </p>
 
 <p align="center">
@@ -19,7 +19,8 @@
 </p>
 
 <p align="center">
-  <a href="https://paimos.inspr.at">Product site</a> ·
+  <a href="https://paimos.inspr.at/">Product site</a> ·
+  <a href="https://paimos.inspr.at/de/">Deutsch</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#agent-intercom-quickstart">Agent Intercom</a> ·
   <a href="docs/AGENT_INTERFACE.md">Agent interface</a> ·
@@ -41,10 +42,16 @@ software teams working with AI agents. People use the web application. Agents
 use the CLI, MCP facade, or JSON API. Both work against the same project state,
 permissions, knowledge, and history.
 
+Paimos is part of the open [INSPR product family](https://www.inspr.at/) and is
+authored and published by [Markus Barta](https://github.com/markus-barta).
+Augmentoring's professional services use and integrate Paimos; Augmentoring is
+not the product owner.
+
 > [!NOTE]
-> Paimos 5.x is production-used and actively developed. Its current deployment
-> model is deliberately compact: one Go process and one SQLite database. It is
-> not a multi-node high-availability service. See
+> Paimos 6 is production-used and actively developed. Releases use calendar
+> tags such as `v26.09.01`; the preserved 5.x interface remains available at
+> `/legacy`. The deployment model is deliberately compact: one Go process and
+> one SQLite database. It is not a multi-node high-availability service. See
 > [Current maturity and limits](#current-maturity-and-limits) before a production
 > rollout.
 
@@ -71,7 +78,7 @@ project work
 This is useful without AI as a focused project system. With agents, the same
 model becomes the context and accountability layer around their work.
 
-## What ships in 5.x
+## What ships now
 
 | Area                | Current capability                                                                                                                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -90,8 +97,12 @@ model becomes the context and accountability layer around their work.
 The [claim and evidence matrix](docs/claim-matrix.md) connects public claims to
 shipped code and documented verification.
 
-### What changed in the 5.x line
+### Recent product changes
 
+- Paimos 6 promoted the session-first product shell to the authenticated home
+  (26.08.31), while preserving the complete 5.x dashboard at `/legacy`.
+- Release tags now use the calendar form `yy.mm.dd[.hh.mm]`; the changelog keeps
+  the 5.x history and every later product cut in one sequence.
 - Voice Intake shipped end-to-end (5.1.0–5.4.0): ElevenLabs Scribe speech
   capture that survives interruptions, a live spec workbench with project
   auto-detection and impact analysis, spoken ELI summaries, and a
@@ -448,6 +459,8 @@ a sign-off created with `git commit -s`. Read [CONTRIBUTING.md](CONTRIBUTING.md)
 for the complete workflow.
 
 ## License
+
+Copyright © 2026 [Markus Barta](https://github.com/markus-barta).
 
 Paimos is licensed under
 [GNU Affero General Public License v3.0 only](LICENSE), SPDX identifier
