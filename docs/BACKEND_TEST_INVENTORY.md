@@ -1,9 +1,10 @@
 # Backend test inventory
 
-PAI-852 audited the backend corpus before changing CI selection. At the
-candidate head, the repository contains 1,797 top-level test or fuzz functions
+PAI-852 audited the backend corpus before changing CI selection. At the exact
+audit commit `8f540071c27608b38f7d8cca6c4ac001a7dc1ad9`, the repository contained
+1,794 top-level test or fuzz functions
 in 268 `_test.go` files (267 contain test/fuzz functions and one is the shared
-handlers helper): 1,792 `Test*` functions, five `Fuzz*` functions, and no
+handlers helper): 1,789 `Test*` functions, five `Fuzz*` functions, and no
 benchmarks. Subtests are intentionally counted under their owning function.
 
 The audit found no evidence-based deletion. The only duplicate top-level name,
@@ -18,7 +19,9 @@ that cost; redundant assertions were not the long pole.
 
 ## Keep / fold / drop ledger
 
-Every source-level test is accounted for by its package group below.
+Every source-level test at that point-in-time PAI-852 audit commit is accounted
+for by its package group below. Later additions are intentionally described in
+the execution-policy updates rather than retroactively changing this ledger.
 
 | Package group | Files | Tests/fuzz | Class | Evidence for the decision |
 | --- | ---: | ---: | --- | --- |
@@ -39,7 +42,7 @@ Every source-level test is accounted for by its package group below.
 | `backend/secretvault` | 2 | 18 | Keep | Encryption, key sources, rotation rollback, and SQLite transaction safety. |
 | `backend/agentmessage/harness` | 5 | 17 | Keep | Codex/agentd delivery adapters, Unix ownership, and stub boundary behavior. |
 | `backend/ai` | 2 | 15 | Keep | Prompt constraints and provider request/error contracts. |
-| `backend/managedharness` | 1 | 17 | Keep | Managed registration, identity, control routing, and isolated persistence. |
+| `backend/managedharness` | 1 | 14 | Keep | Managed registration, identity, control routing, and isolated persistence. |
 | `backend/contracts` | 4 | 10 | Keep | JSON schema and immutable cross-product fixture compatibility. |
 | `backend/devseed` | 1 | 10 | Keep | `dev_login`-tagged synthetic identities and assets; excluded from production builds and checked separately. |
 | `backend/handlers/crm/hubspot` | 1 | 9 | Keep | Provider-specific authentication, mapping, paging, and shared CRM contract. |
@@ -58,7 +61,7 @@ Every source-level test is accounted for by its package group below.
 | `backend/pharoslink` | 1 | 1 | Keep | PHAROS request identifier validation. |
 | `backend/models` | 1 | 1 | Keep | Entity graph model invariants. |
 | `backend/agentdwire` | 1 | 1 | Keep | Unsupported-platform client behavior. |
-| **Total** | **268** | **1,797** | **Keep: 1,797** | **Fold: 0; drop: 0.** |
+| **Total** | **268** | **1,794** | **Keep: 1,794** | **Fold: 0; drop: 0.** |
 
 ### Fold: zero today
 
