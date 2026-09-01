@@ -43,6 +43,8 @@ EXPECTED_FILES=$'README.md\nVERSION\ndocs/CHANGELOG.md\ndocs/INSTALL.md'
 EXTERNAL_STAGE_MANIFEST='backend/contracts/fixtures/external-stage/manifest-v1.json'
 RECOVERY_RECEIPT_DIR='scripts/release/recovery'
 CALENDAR_RECOVERY_MERGE_OID=''
+AUDITED_RELEASE_RECOVERY_MERGE_OID=''
+AUDITED_RELEASE_RECOVERY_RECEIPT_OID=''
 
 fail() {
   echo "error: $*" >&2
@@ -170,6 +172,61 @@ assert_calendar_descendant_recovery() {
   # again after that potentially long audit so tag creation cannot use a
   # candidate that stopped being the protected-main head during the audit.
   assert_exact_calendar_recovery_main "$candidate"
+}
+
+assert_audited_release_recovery_main() {
+  local release_merge="$1" candidate remote_main changed file receipt_path receipt_oid
+  local receipt_seen=0
+
+  [[ "$AUDITED_RELEASE_RECOVERY_MERGE_OID" == "$release_merge" ]] ||
+    fail "audited release recovery merge changed after receipt validation"
+  [[ -n "$AUDITED_RELEASE_RECOVERY_RECEIPT_OID" ]] ||
+    fail "audited release recovery has no validated receipt object"
+  assert_calendar_cut_day "audited release recovery validation"
+
+  git fetch --quiet origin main
+  candidate=$(git rev-parse origin/main)
+  remote_main=$(git ls-remote --heads origin refs/heads/main | awk 'NR == 1 {print $1}')
+  [[ "$remote_main" =~ ^[0-9a-f]{40}$ && "$candidate" == "$remote_main" ]] ||
+    fail "audited release recovery is not based on exact current protected origin/main"
+  [[ "$candidate" != "$release_merge" ]] ||
+    fail "audited release recovery requires a reviewed commit after the release merge"
+  git merge-base --is-ancestor "$release_merge" "$candidate" ||
+    fail "audited release recovery main does not descend from the protected release merge"
+
+  receipt_path="$RECOVERY_RECEIPT_DIR/$NEW_TAG.json"
+  changed=$(changed_commit_files "$release_merge" "$candidate")
+  [[ -n "$changed" ]] || fail "audited release recovery has no reviewed delta"
+  while IFS= read -r file; do
+    case "$NEW_TAG:$file" in
+      v26.09.01:scripts/release.sh|\
+      v26.09.01:scripts/release/recovery/v26.09.01.json|\
+      v26.09.01:scripts/test-release.sh)
+        ;;
+      *) fail "audited release recovery contains an unrelated file: $file" ;;
+    esac
+    [[ "$file" != "$receipt_path" ]] || receipt_seen=1
+  done <<<"$changed"
+  [[ "$receipt_seen" -eq 1 ]] ||
+    fail "audited release recovery delta is missing its exact receipt: $receipt_path"
+
+  receipt_oid=$(git rev-parse "origin/main:$receipt_path" 2>/dev/null) ||
+    fail "audited release recovery receipt disappeared from current origin/main"
+  [[ "$receipt_oid" == "$AUDITED_RELEASE_RECOVERY_RECEIPT_OID" ]] ||
+    fail "audited release recovery receipt changed after validation"
+  assert_no_release_tag_after_merge "$release_merge"
+
+  # The tag-history audit performs remote work. Pin both protected main and
+  # the validated receipt object again before the caller can materialize a tag.
+  git fetch --quiet origin main
+  candidate=$(git rev-parse origin/main)
+  remote_main=$(git ls-remote --heads origin refs/heads/main | awk 'NR == 1 {print $1}')
+  [[ "$remote_main" =~ ^[0-9a-f]{40}$ && "$candidate" == "$remote_main" ]] ||
+    fail "origin/main moved during audited release recovery validation"
+  receipt_oid=$(git rev-parse "origin/main:$receipt_path" 2>/dev/null) ||
+    fail "audited release recovery receipt disappeared during validation"
+  [[ "$receipt_oid" == "$AUDITED_RELEASE_RECOVERY_RECEIPT_OID" ]] ||
+    fail "audited release recovery receipt changed during validation"
 }
 
 assert_calendar_cut_day() {
@@ -515,6 +572,11 @@ assert_release_recovery_receipt() {
       # post-merge PR response. The reviewed receipt remains mandatory and
       # every pinned head/check/tree/ancestry/tag gate below still applies.
       ;;
+    v26.09.01:canonical_auto_merge_immediate_merge_post_merge_request_missing)
+      # PAI-874 records the same GitHub immediate-merge incident for PR #193.
+      # Keep this release-specific: the audited receipt and every fail-closed
+      # head/check/tree/ancestry/tag gate below remain mandatory.
+      ;;
     *)
       fail "release recovery receipt carries an unrecognized incident reason"
       ;;
@@ -563,6 +625,8 @@ assert_release_recovery_receipt() {
   ' >/dev/null <<<"$checks" ||
     fail "approved PR head has missing, pending, or failed required checks"
 
+  AUDITED_RELEASE_RECOVERY_MERGE_OID="$receipt_merge"
+  AUDITED_RELEASE_RECOVERY_RECEIPT_OID=$(git rev-parse "origin/main:$receipt_path")
   echo "Accepted audited recovery receipt for $NEW_TAG / PR $PR_NUMBER at $receipt_merge." >&2
 }
 
@@ -769,6 +833,14 @@ select_release_tag_commit() {
   CALENDAR_RECOVERY_MERGE_OID=''
   release_version::is_calendar "$NEW" || return 0
 
+  if [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
+    [[ "$AUDITED_RELEASE_RECOVERY_MERGE_OID" == "$release_merge" ]] ||
+      fail "audited release recovery does not match the selected protected merge"
+    assert_audited_release_recovery_main "$release_merge"
+    echo "Audited recovery will tag exact protected release merge $TAG_OID."
+    return 0
+  fi
+
   git fetch --quiet origin main
   candidate=$(git rev-parse origin/main)
   [[ "$candidate" != "$release_merge" ]] || return 0
@@ -788,6 +860,10 @@ select_release_tag_commit() {
 
 tag_release_merge() {
   local merge_oid="$1" existing_oid remote_oid recovery_tag_state
+  if release_version::is_calendar "$NEW" && [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
+    [[ "$merge_oid" == "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]] ||
+      fail "audited release recovery attempted to tag a different commit"
+  fi
   if [[ -n "$CALENDAR_RECOVERY_MERGE_OID" ]]; then
     remote_oid=$(origin_tag_commit_oid "$NEW_TAG")
     recovery_tag_state=absent
@@ -811,6 +887,11 @@ tag_release_merge() {
       # Re-pin protected main as the final operation before materializing the
       # local tag, closing movement during that query as well.
       assert_exact_calendar_recovery_main "$merge_oid"
+    elif release_version::is_calendar "$NEW" && [[ -n "$AUDITED_RELEASE_RECOVERY_MERGE_OID" ]]; then
+      # Revalidate the live receipt and exact recovery-only main delta after
+      # the remote tag query. TAG_OID remains the original protected squash.
+      assert_release_recovery_receipt "$PR_JSON"
+      assert_audited_release_recovery_main "$merge_oid"
     fi
     git tag -a --no-sign "$NEW_TAG" "$merge_oid" -m "release $NEW"
     echo "Created $NEW_TAG at protected-main commit $merge_oid."

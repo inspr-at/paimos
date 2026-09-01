@@ -728,6 +728,81 @@ test_committed_recovery_receipts_are_exact() {
     }
   ' "$ROOT/scripts/release/recovery/v5.20.0.json" >/dev/null ||
     fail 'committed v5.20.0 recovery receipt is missing or drifted'
+
+  jq -e --arg reason "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" '
+    . == {
+      schema_version: 1,
+      release: "v26.09.01",
+      pull_request: 193,
+      approved_head: "38803cef876cab1595141ee103cc56217a42d39c",
+      merge_commit: "47a8151719f7fb04d6d9a0677ced18e2b122e05b",
+      incident_reason: $reason
+    }
+  ' "$ROOT/scripts/release/recovery/v26.09.01.json" >/dev/null ||
+    fail 'committed v26.09.01 recovery receipt is missing or drifted'
+}
+
+test_calendar_immediate_auto_merge_receipt_recovery() {
+  local version='26.09.01'
+  local repo state origin head merge receipt_work valid_main output
+
+  repo=$(setup_repo calendar-immediate-recovery "v$version")
+  state="$TMP_ROOT/calendar-immediate-recovery/gh-state"
+  origin=$(git -C "$repo" remote get-url origin)
+  prepend_release_notes "$repo" "$version"
+  mkdir -p "$state"
+  printf '%s\n' "$version" > "$state/vienna-date"
+  touch "$state/missing-auto-merge-provenance"
+
+  output="$TMP_ROOT/calendar-immediate-recovery/missing-output"
+  if FAKE_RELEASE_VERSION="$version" \
+     run_release "$repo" "$state" "$version" --no-edit >"$output" 2>&1; then
+    fail 'calendar immediate-merge recovery accepted a missing receipt'
+  fi
+  grep -qF 'release PR is missing protected squash auto-merge provenance' "$output" ||
+    fail 'calendar immediate-merge interruption reported the wrong failure'
+  [[ -f "$state/pr-merged" ]] ||
+    fail 'calendar missing-receipt fixture did not produce the protected squash merge'
+  head=$(git --git-dir="$origin" rev-parse refs/pull/1/head)
+  merge=$(<"$state/merge-oid")
+  assert_recovery_rejected "$repo" "$state" "$origin" \
+    'a missing calendar recovery receipt' \
+    'missing tracked release recovery receipt on origin/main' "$version"
+
+  receipt_work="$TMP_ROOT/calendar-immediate-recovery/receipt-work"
+  git clone -q "$origin" "$receipt_work"
+  git -C "$receipt_work" config user.name 'Recovery Reviewer'
+  git -C "$receipt_work" config user.email 'recovery-reviewer@example.test'
+  printf '\n# Reviewed calendar receipt recovery.\n' >> "$receipt_work/scripts/release.sh"
+  printf '%s\n' '#!/usr/bin/env bash' '# Reviewed calendar recovery fixture.' > \
+    "$receipt_work/scripts/test-release.sh"
+  git -C "$receipt_work" add scripts/release.sh scripts/test-release.sh
+  git -C "$receipt_work" commit -q --no-gpg-sign --signoff \
+    -m 'add reviewed calendar recovery verifier'
+
+  publish_recovery_receipt "$receipt_work" 'add wrong calendar recovery receipt' \
+    "v$version" 2 "$head" "$merge" "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON"
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong calendar recovery receipt' \
+    'targets PR 2 instead of PR 1' "$version"
+
+  publish_recovery_receipt "$receipt_work" 'add exact calendar recovery receipt' \
+    "v$version" 1 "$head" "$merge" "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON"
+  valid_main=$(git -C "$receipt_work" rev-parse HEAD)
+
+  printf '%s\n' 'unrelated post-release source' > "$receipt_work/unrelated.txt"
+  git -C "$receipt_work" add unrelated.txt
+  git -C "$receipt_work" commit -q --no-gpg-sign --signoff \
+    -m 'add unrelated post-release source'
+  FAKE_GH_SERVER_MERGE=1 git -C "$receipt_work" push -q origin HEAD:main
+  assert_recovery_rejected "$repo" "$state" "$origin" \
+    'an unrelated calendar recovery delta' \
+    'audited release recovery contains an unrelated file: unrelated.txt' "$version"
+
+  git --git-dir="$origin" update-ref refs/heads/main "$valid_main"
+  FAKE_RELEASE_VERSION="$version" \
+    run_release "$repo" "$state" "$version" --no-edit >/dev/null
+  [[ $(git --git-dir="$origin" rev-parse "refs/tags/v$version^{}") == "$merge" ]] ||
+    fail 'calendar receipt recovery did not tag the canonical protected release merge'
 }
 
 test_protected_release_and_resume_states() {
@@ -1647,6 +1722,7 @@ test_calendar_release_and_rejections() {
 }
 
 write_fake_commands "$TMP_ROOT/fake-bin"
+test_calendar_immediate_auto_merge_receipt_recovery
 test_interrupted_calendar_descendant_recovery
 test_calendar_release_and_rejections
 test_committed_recovery_receipts_are_exact
