@@ -4,6 +4,9 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +41,7 @@ func TestAgentIntercomRunbookUsesShippedCLI(t *testing.T) {
 		{[]string{"harness", "status"}, []string{"project", "session"}},
 		{[]string{"harness", "interrupt"}, []string{"project", "session"}},
 		{[]string{"harness", "stop"}, []string{"project", "session"}},
+		{[]string{"harness", "control", "get"}, []string{"project", "session", "control-id"}},
 		{[]string{"harness", "mark-stopped"}, []string{"project", "session", "agent", "worker-lease-file"}},
 	}
 	for _, test := range tests {
@@ -63,6 +67,116 @@ func TestAgentIntercomRunbookUsesShippedCLI(t *testing.T) {
 	if root.PersistentFlags().Lookup("json") == nil || !strings.Contains(doc, "paimos --json project show") {
 		t.Error("numeric project lookup drifted from the documented --json project show command")
 	}
+}
+
+func TestAgentIntercomDocsMatchShippedControlOutcomeSurface(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "AGENT_INTERCOM.md")) // #nosec G304 -- fixed in-repo documentation path.
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := strings.Join(strings.Fields(string(raw)), " ")
+	for _, claim := range []string{
+		"paimos harness control get",
+		"exact project, public session, and control UUID",
+		"correlation ID equals the control UUID",
+		"initial pending request",
+	} {
+		if !strings.Contains(doc, claim) {
+			t.Errorf("runbook lost control-outcome contract %q", claim)
+		}
+	}
+
+	const sessionID = "11111111-1111-4111-8111-111111111111"
+	const controlID = "22222222-2222-4222-8222-222222222222"
+	var routeSeen bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case request.Method == http.MethodGet && request.URL.RequestURI() == "/api/projects?status=all":
+			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI"}]`))
+		case request.Method == http.MethodGet && request.URL.Path == "/api/projects/6/harness-sessions/"+sessionID+"/controls/"+controlID:
+			routeSeen = true
+			if request.Header.Get("X-Paimos-Harness-Worker-Lease") != "" {
+				t.Error("operator control read sent a worker lease")
+			}
+			_, _ = w.Write([]byte(`{"id":"` + controlID + `","project_id":6,"harness_session_id":"` + sessionID + `","correlation_id":"` + controlID + `","sequence":1,"kind":"interrupt","state":"applied","outcome":"applied","reason":"applied","requested_at":"2026-09-01T08:00:00Z","claimed_at":"2026-09-01T08:00:01Z","completed_at":"2026-09-01T08:00:02Z"}`))
+		default:
+			t.Errorf("unexpected request %s %s", request.Method, request.URL.String())
+			http.Error(w, `{"error":"unexpected"}`, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv(envURL, server.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	out, _, err := executeCLIForTest(t, "--json", "harness", "control", "get", "--project", "PAI", "--session", sessionID, "--control-id", controlID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outcome map[string]any
+	if err := json.Unmarshal([]byte(out), &outcome); err != nil {
+		t.Fatal(err)
+	}
+	if !routeSeen || outcome["id"] != controlID || outcome["correlation_id"] != controlID || outcome["state"] != "applied" {
+		t.Fatalf("routeSeen=%v outcome=%v", routeSeen, outcome)
+	}
+	for _, forbidden := range []string{"worker_lease", "harness_session_ref", "message_target_id", "body", "requested_by_user_id"} {
+		if _, exists := outcome[forbidden]; exists {
+			t.Errorf("control outcome exposed forbidden field %q", forbidden)
+		}
+	}
+
+	openAPIRaw, err := os.ReadFile(filepath.Join("..", "..", "handlers", "openapi.json")) // #nosec G304 -- fixed in-repo contract path.
+	if err != nil {
+		t.Fatal(err)
+	}
+	var openAPI map[string]any
+	if err := json.Unmarshal(openAPIRaw, &openAPI); err != nil {
+		t.Fatal(err)
+	}
+	paths := jsonObject(t, openAPI["paths"], "paths")
+	controlRoute := jsonObject(t, paths["/api/projects/{id}/harness-sessions/{sessionID}/controls/{controlID}"], "control outcome route")
+	get := jsonObject(t, controlRoute["get"], "control outcome GET")
+	responses := jsonObject(t, get["responses"], "control outcome responses")
+	okResponse := jsonObject(t, responses["200"], "control outcome 200")
+	content := jsonObject(t, okResponse["content"], "control outcome content")
+	media := jsonObject(t, content["application/json"], "control outcome JSON")
+	responseSchema := jsonObject(t, media["schema"], "control outcome response schema")
+	if responseSchema["$ref"] != "#/components/schemas/HarnessControlOutcome" {
+		t.Fatalf("control outcome response schema=%v", responseSchema["$ref"])
+	}
+	components := jsonObject(t, openAPI["components"], "components")
+	schemas := jsonObject(t, components["schemas"], "schemas")
+	outcomeSchema := jsonObject(t, schemas["HarnessControlOutcome"], "HarnessControlOutcome")
+	properties := jsonObject(t, outcomeSchema["properties"], "HarnessControlOutcome properties")
+	expectedFields := []string{"id", "project_id", "harness_session_id", "correlation_id", "sequence", "kind", "state", "outcome", "reason", "requested_at", "claimed_at", "completed_at"}
+	if len(properties) != len(expectedFields) {
+		t.Fatalf("HarnessControlOutcome fields=%v", properties)
+	}
+	for _, field := range expectedFields {
+		if _, exists := properties[field]; !exists {
+			t.Errorf("HarnessControlOutcome lost field %q", field)
+		}
+	}
+
+	for _, suffix := range []string{"heartbeat", "yield", "drain", "complete-delivery", "drain-steer", "complete-steer", "controls/{controlID}/complete", "stop"} {
+		route := jsonObject(t, paths["/api/projects/{id}/harness-sessions/{sessionID}/"+suffix], suffix+" route")
+		post := jsonObject(t, route["post"], suffix+" POST")
+		postResponses := jsonObject(t, post["responses"], suffix+" responses")
+		forbidden := jsonObject(t, postResponses["403"], suffix+" 403")
+		if forbidden["description"] != "Uniform non-enumerating worker authorization failure" {
+			t.Errorf("%s worker authorization description=%v", suffix, forbidden["description"])
+		}
+	}
+}
+
+func jsonObject(t *testing.T, value any, name string) map[string]any {
+	t.Helper()
+	object, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("%s is not an object: %T", name, value)
+	}
+	return object
 }
 
 func TestAgentIntercomREADMEQuickstartUsesShippedCLI(t *testing.T) {

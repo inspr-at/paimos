@@ -1338,10 +1338,23 @@ After owned cleanup it marks the session stopped through
 `POST .../{sessionID}/stop`. PAI-848 starts no process and defines no daemon.
 Every worker mutation verifies the exact project, public session UUID,
 attributed agent, and generation lease. Missing, duplicate, wrong-generation,
-or cross-project proof fails closed; an ordinary ProjectEdit API key does not
-replace that proof. The CLI reads the lease from a protected file, keeps it out
-of argv and URLs, rejects redirects on secret-bearing requests, and treats any
-malformed or mismatched acknowledgement as failure rather than success.
+or cross-project proof returns one uniform non-enumerating `403` without a
+mutation; an ordinary ProjectEdit API key does not replace that proof. The CLI
+reads the lease from a protected file, keeps it out of argv and URLs, rejects
+redirects on secret-bearing requests, and treats any malformed or mismatched
+acknowledgement as failure rather than success.
+
+An authorized operator reads a requested interrupt/stop outcome through:
+
+```bash
+paimos harness control get --project '<key-or-id>' \
+  --session '<public-session-uuid>' --control-id '<control-uuid>'
+```
+
+This ProjectView route is bound to all three identifiers and returns only the
+typed state, optional terminal outcome/reason, exact control correlation UUID,
+sequence, and timestamps. It never returns the worker lease, private session
+or target reference, message body, or requester ID.
 
 Stopping closes that immutable harness-session generation: registering the
 same stable external session reference with a new worker lease creates a new
