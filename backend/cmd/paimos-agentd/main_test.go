@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -27,6 +28,36 @@ func TestVersionAndRequiredInstance(t *testing.T) {
 	}
 	if err := run([]string{"status"}, strings.NewReader(""), &output); err == nil || !strings.Contains(err.Error(), "--instance") {
 		t.Fatalf("status without instance error=%v", err)
+	}
+}
+
+func TestOwnedSessionCommandsRequireProjectAndIdentityScope(t *testing.T) {
+	var output bytes.Buffer
+	for _, args := range [][]string{
+		{"start", "--instance", "ppm", "--identity", "codex:worker"},
+		{"steer", "--instance", "ppm", "--session", "019d1234-1234-7123-8123-123456789abc", "--identity", "codex:worker"},
+		{"interrupt", "--instance", "ppm", "--session", "019d1234-1234-7123-8123-123456789abc", "--project-id", "870"},
+		{"stop", "--instance", "ppm", "--session", "019d1234-1234-7123-8123-123456789abc", "--project-id", "870"},
+	} {
+		err := run(args, strings.NewReader("body"), &output)
+		if err == nil || (!strings.Contains(err.Error(), "--project-id") && !strings.Contains(err.Error(), "--identity")) {
+			t.Fatalf("args=%v error=%v", args, err)
+		}
+	}
+}
+
+func TestServeRejectsPartialReporterConfiguration(t *testing.T) {
+	for _, args := range [][]string{
+		{"serve", "--instance", "ppm", "--report-host", "camyb"},
+		{"serve", "--instance", "ppm", "--report-url", "https://ppm.example"},
+		{"serve", "--instance", "ppm", "--report-api-key-file", "/run/credentials/ppm"},
+		{"serve", "--instance", "ppm", "--paimos-path", "/opt/paimos"},
+		{"serve", "--instance", "ppm", "--report-host", "camyb", "--report-url", "https://ppm.example"},
+	} {
+		err := run(args, strings.NewReader(""), io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "requires --report-host, --report-url, and --report-api-key-file") {
+			t.Fatalf("args=%v error=%v", args, err)
+		}
 	}
 }
 

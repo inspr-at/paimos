@@ -8,7 +8,9 @@ package managedharness
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"regexp"
@@ -90,6 +92,7 @@ type RegisterInput struct {
 	Harness         string
 	Host            string
 	SessionRef      string
+	WorkerLease     string
 	MessageTargetID string
 	ManagementMode  string
 	Role            string
@@ -111,6 +114,7 @@ func normalizeRegister(in RegisterInput) RegisterInput {
 	in.Harness = strings.ToLower(strings.TrimSpace(in.Harness))
 	in.Host = strings.TrimSpace(in.Host)
 	in.SessionRef = strings.TrimSpace(in.SessionRef)
+	in.WorkerLease = strings.TrimSpace(in.WorkerLease)
 	in.MessageTargetID = strings.TrimSpace(in.MessageTargetID)
 	in.ManagementMode = strings.ToLower(strings.TrimSpace(in.ManagementMode))
 	in.Role = strings.ToLower(strings.TrimSpace(in.Role))
@@ -128,6 +132,9 @@ func validateRegister(in RegisterInput) error {
 	if !utf8.ValidString(in.SessionRef) || len([]byte(in.SessionRef)) < 1 || len([]byte(in.SessionRef)) > 256 ||
 		strings.ContainsAny(in.SessionRef, "\x00\r\n") || strings.Contains(in.SessionRef, "://") || strings.HasPrefix(in.SessionRef, "/") {
 		return coded(CodeInvalid, "harness session reference must be opaque, not a URL, private socket, path, or credential")
+	}
+	if !ValidWorkerLease(in.WorkerLease) {
+		return coded(CodeInvalid, "harness worker lease is invalid")
 	}
 	if in.ManagementMode != ManagementManaged && in.ManagementMode != ManagementUnmanaged {
 		return coded(CodeInvalid, "management mode must be managed or unmanaged")
@@ -173,6 +180,16 @@ func safeStable(value string, limit int) bool {
 }
 func digestRef(projectID int64, harness, host, ref string) []byte {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("paimos:harness-session-ref:v1\x00%d\x00%s\x00%s\x00%s", projectID, harness, host, ref)))
+	return sum[:]
+}
+
+func ValidWorkerLease(value string) bool {
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	return err == nil && len(raw) == 32 && base64.RawURLEncoding.EncodeToString(raw) == value
+}
+
+func digestWorkerLease(projectID int64, agent, sessionID, lease string) []byte {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("paimos:harness-worker-lease:v1\x00%d\x00%s\x00%s\x00%s", projectID, agent, sessionID, lease)))
 	return sum[:]
 }
 func boolInt(value bool) int {
@@ -281,6 +298,9 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 	digest := digestRef(in.ProjectID, in.Harness, in.Host, in.SessionRef)
 	existing, err := scanSession(s.db.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND harness=? AND host=? AND session_ref_digest=? AND phase<>'stopped'`, in.ProjectID, in.Harness, in.Host, digest))
 	if err == nil {
+		if ok, verifyErr := s.VerifyWorkerLease(ctx, existing.ProjectID, existing.ID, in.WorkerLease); verifyErr != nil || !ok {
+			return models.HarnessSession{}, false, coded(CodeInvalid, "harness worker lease is invalid")
+		}
 		if !sameRegistration(existing, in) {
 			return models.HarnessSession{}, false, coded(CodeConflict, "stable external identity is already registered with different agent, ownership, role, or advertised capabilities")
 		}
@@ -301,17 +321,18 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		return models.HarnessSession{}, false, coded(CodeNotFound, "agent is not registered in this project")
 	}
 	targetID := ""
-	if in.ManagementMode == ManagementUnmanaged {
+	if in.Capabilities.Inbox {
 		targetID, err = s.validateTarget(ctx, in)
 		if err != nil {
 			return models.HarnessSession{}, false, err
 		}
 	}
 	id := uuid.NewString()
+	workerDigest := digestWorkerLease(in.ProjectID, in.AgentName, id, in.WorkerLease)
 	c := in.Capabilities
-	_, err = s.db.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,message_target_id,management_mode,role,steer_mode,
-		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, nullString(targetID), in.ManagementMode, in.Role, in.SteerMode,
+	_, err = s.db.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
+		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, workerDigest, nullString(targetID), in.ManagementMode, in.Role, in.SteerMode,
 		boolInt(c.Inbox), boolInt(c.Status), boolInt(c.Steer), boolInt(c.Interrupt), boolInt(c.Stop), PhaseStarting)
 	if err != nil {
 		const identityConstraint = "UNIQUE constraint failed: harness_sessions.project_id, harness_sessions.harness, harness_sessions.host, harness_sessions.session_ref_digest"
@@ -321,7 +342,10 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		if identityConflict || addressConflict {
 			replay, replayErr := scanSession(s.db.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND harness=? AND host=? AND session_ref_digest=? AND phase<>'stopped'`, in.ProjectID, in.Harness, in.Host, digest))
 			if replayErr == nil && sameRegistration(replay, in) {
-				return replay, false, nil
+				if ok, _ := s.VerifyWorkerLease(ctx, replay.ProjectID, replay.ID, in.WorkerLease); ok {
+					return replay, false, nil
+				}
+				return models.HarnessSession{}, false, coded(CodeInvalid, "harness worker lease is invalid")
 			}
 			if replayErr != nil && !errors.Is(replayErr, sql.ErrNoRows) {
 				return models.HarnessSession{}, false, replayErr
@@ -335,19 +359,24 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		}
 		return models.HarnessSession{}, false, err
 	}
-	if in.ManagementMode == ManagementManaged && in.Capabilities.Inbox {
-		targetID, err = s.validateTarget(ctx, in)
-		if err != nil {
-			_, _ = s.db.ExecContext(ctx, `DELETE FROM harness_sessions WHERE id=?`, id)
-			return models.HarnessSession{}, false, err
-		}
-		if _, err = s.db.ExecContext(ctx, `UPDATE harness_sessions SET message_target_id=? WHERE id=?`, targetID, id); err != nil {
-			_, _ = s.db.ExecContext(ctx, `DELETE FROM harness_sessions WHERE id=?`, id)
-			return models.HarnessSession{}, false, err
-		}
-	}
 	created, err := s.GetByID(ctx, id)
 	return created, true, err
+}
+
+func (s *Service) VerifyWorkerLease(ctx context.Context, projectID int64, sessionID, lease string) (bool, error) {
+	if projectID <= 0 || !ValidWorkerLease(strings.TrimSpace(lease)) {
+		return false, nil
+	}
+	var agent string
+	var stored []byte
+	if err := s.db.QueryRowContext(ctx, `SELECT agent_name,worker_lease_digest FROM harness_sessions WHERE project_id=? AND id=?`, projectID, strings.TrimSpace(sessionID)).Scan(&agent, &stored); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	want := digestWorkerLease(projectID, agent, sessionID, strings.TrimSpace(lease))
+	return len(stored) == sha256.Size && subtle.ConstantTimeCompare(stored, want) == 1, nil
 }
 
 func sameRegistration(s models.HarnessSession, in RegisterInput) bool {
@@ -410,6 +439,31 @@ func scanControl(row interface{ Scan(...any) error }) (models.HarnessControl, er
 	return out, err
 }
 
+// GetControl returns the non-secret operator outcome for one exact
+// project/session/control tuple. The join is intentionally project-scoped so a
+// public UUID from another project cannot be used as an existence oracle.
+func (s *Service) GetControl(ctx context.Context, projectID int64, sessionID, controlID string) (models.HarnessControlOutcome, error) {
+	var out models.HarnessControlOutcome
+	err := s.db.QueryRowContext(ctx, `SELECT c.id,s.project_id,c.harness_session_id,c.sequence,c.kind,c.state,c.reason,
+		c.requested_at,COALESCE(c.claimed_at,''),COALESCE(c.completed_at,'')
+		FROM harness_session_controls c
+		JOIN harness_sessions s ON s.id=c.harness_session_id
+		WHERE s.project_id=? AND s.id=? AND c.id=?`, projectID, strings.TrimSpace(sessionID), strings.TrimSpace(controlID)).
+		Scan(&out.ID, &out.ProjectID, &out.HarnessSessionID, &out.Sequence, &out.Kind, &out.State, &out.Reason,
+			&out.RequestedAt, &out.ClaimedAt, &out.CompletedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.HarnessControlOutcome{}, coded(CodeNotFound, "harness control not found")
+	}
+	if err != nil {
+		return models.HarnessControlOutcome{}, err
+	}
+	out.CorrelationID = out.ID
+	if out.State == ControlApplied || out.State == ControlRejected {
+		out.Outcome = out.State
+	}
+	return out, nil
+}
+
 func (s *Service) RequestControl(ctx context.Context, sessionID, kind string, actor int64) (models.HarnessControl, error) {
 	kind = strings.ToLower(strings.TrimSpace(kind))
 	if (kind != ControlInterrupt && kind != ControlStop) || actor <= 0 {
@@ -464,6 +518,10 @@ func (s *Service) Yield(ctx context.Context, sessionID string) (YieldResult, err
 		return YieldResult{}, err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
+		existing, getErr := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, strings.TrimSpace(sessionID)))
+		if getErr == nil && existing.Phase == PhaseStopped {
+			return YieldResult{Session: existing, Controls: []models.HarnessControl{}}, nil
+		}
 		return YieldResult{}, coded(CodeCapabilityUnavailable, "only an active managed session can yield")
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE harness_session_controls SET state='claimed',claimed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE harness_session_id=? AND state='pending'`, sessionID); err != nil {
@@ -510,20 +568,45 @@ func (s *Service) CompleteControl(ctx context.Context, sessionID, controlID, out
 		return models.HarnessControl{}, err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
+		existing, getErr := scanControl(s.db.QueryRowContext(ctx, `SELECT `+controlColumns+` FROM harness_session_controls WHERE id=?`, controlID))
+		if getErr == nil && existing.HarnessSessionID == sessionID && existing.State == outcome && existing.Reason == reason {
+			return existing, nil
+		}
 		return models.HarnessControl{}, coded(CodeConflict, "control is not claimed by this harness session")
 	}
 	return scanControl(s.db.QueryRowContext(ctx, `SELECT `+controlColumns+` FROM harness_session_controls WHERE id=?`, controlID))
 }
 
 func (s *Service) Stop(ctx context.Context, id string) (models.HarnessSession, error) {
-	result, err := s.db.ExecContext(ctx, `UPDATE harness_sessions SET phase='stopped',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),revision=revision+1 WHERE id=? AND phase<>'stopped'`, id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.HarnessSession{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET phase='stopped',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),revision=revision+1 WHERE id=? AND phase<>'stopped'`, id)
 	if err != nil {
 		return models.HarnessSession{}, err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
+		// Exact retries are read-only: a daemon may have committed the remote
+		// stop immediately before crashing, then recover its local terminal row.
+		existing, getErr := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, strings.TrimSpace(id)))
+		if getErr == nil && existing.Phase == PhaseStopped {
+			return existing, nil
+		}
 		return models.HarnessSession{}, coded(CodeConflict, "harness session is already stopped or missing")
 	}
-	return s.GetByID(ctx, id)
+	if _, err := tx.ExecContext(ctx, `UPDATE harness_session_controls SET state='rejected',reason='ownership_lost',claimed_at=COALESCE(claimed_at,strftime('%Y-%m-%dT%H:%M:%fZ','now')),completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE harness_session_id=? AND state IN ('pending','claimed')`, id); err != nil {
+		return models.HarnessSession{}, err
+	}
+	out, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, strings.TrimSpace(id)))
+	if err != nil {
+		return models.HarnessSession{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.HarnessSession{}, err
+	}
+	return out, nil
 }
 
 func Address(session models.HarnessSession) string {

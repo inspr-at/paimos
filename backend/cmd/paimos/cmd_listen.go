@@ -321,10 +321,18 @@ func deliverHarnessMessage(ctx context.Context, message messageEnvelope, body, a
 	if message.DeliveryWork != nil {
 		correlationID = message.DeliveryWork.DeliveryID
 	}
-	result, err := harnessplugin.Deliver(ctx, plugin.Name(), harnessplugin.DeliverRequest{
+	deliveryRequest := harnessplugin.DeliverRequest{
 		Level: pluginLevel, Body: body, TargetRef: target, Stdout: stdout, Stderr: stderr, ClientVersion: Version,
 		CorrelationID: correlationID,
-	})
+	}
+	if message.DeliveryWork != nil {
+		// Managed controls must carry the exact lease scope into the local
+		// supervisor before any vendor primitive can be invoked.
+		deliveryRequest.Instance = message.DeliveryWork.Instance
+		deliveryRequest.ProjectID = message.DeliveryWork.ProjectID
+		deliveryRequest.Identity = message.To
+	}
+	result, err := harnessplugin.Deliver(ctx, plugin.Name(), deliveryRequest)
 	if err != nil {
 		return nil, mapHarnessDeliveryError(err)
 	}

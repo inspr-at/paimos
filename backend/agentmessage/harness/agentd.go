@@ -10,6 +10,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentdwire"
@@ -87,11 +88,20 @@ func deliverAgentdSteer(ctx context.Context, request DeliverRequest, primitive s
 	if request.CorrelationID == "" || len(request.CorrelationID) > 128 || strings.ContainsAny(request.CorrelationID, "\x00\r\n") {
 		return DeliverResult{}, &UnavailableError{Message: "agentd managed control requires a leased steer delivery"}
 	}
+	if request.Instance == "" || request.Instance != strings.TrimSpace(request.Instance) || len(request.Instance) > 512 ||
+		request.ProjectID <= 0 || request.Identity == "" || request.Identity != strings.TrimSpace(request.Identity) ||
+		len(request.Identity) > 256 || !utf8.ValidString(request.Instance) || !utf8.ValidString(request.Identity) ||
+		strings.ContainsAny(request.Instance+request.Identity, "\x00\r\n") {
+		return DeliverResult{}, errors.New("agentd managed control lease scope is invalid")
+	}
 	target, err := decodeAgentdTarget(request.TargetRef)
 	if err != nil {
 		return DeliverResult{}, &Error{Code: CodeTargetRefInvalid, Message: "agentd target is invalid"}
 	}
-	receipt, err := agentdwire.Steer(ctx, target.Socket, target.SessionID, agentdwire.ControlRequest{CorrelationID: request.CorrelationID, Text: request.Body})
+	receipt, err := agentdwire.Steer(ctx, target.Socket, target.SessionID, agentdwire.ControlRequest{
+		Instance: request.Instance, ProjectID: request.ProjectID, Identity: request.Identity,
+		CorrelationID: request.CorrelationID, Text: request.Body,
+	})
 	if err != nil {
 		if errors.Is(err, agentdwire.ErrSessionUnavailable) {
 			return DeliverResult{}, &UnavailableError{Message: "agentd managed session is not running", FallbackReason: "idle", Reroute: true}
@@ -102,10 +112,20 @@ func deliverAgentdSteer(ctx context.Context, request DeliverRequest, primitive s
 		if errors.Is(err, agentdwire.ErrTransportUnavailable) {
 			return DeliverResult{}, &UnavailableError{Message: "agentd local transport is unavailable", FallbackReason: "transport_error", Reroute: true}
 		}
+		if errors.Is(err, agentdwire.ErrScopeMismatch) {
+			return DeliverResult{}, errors.New("agentd rejected mismatched managed control scope")
+		}
+		if errors.Is(err, agentdwire.ErrReplayConflict) {
+			return DeliverResult{}, errors.New("agentd rejected conflicting managed control replay")
+		}
+		if errors.Is(err, agentdwire.ErrReplayCapacity) {
+			return DeliverResult{}, errors.New("agentd managed control replay bound reached")
+		}
 		return DeliverResult{}, err
 	}
 	if receipt.CorrelationID != request.CorrelationID || receipt.Primitive != primitive ||
-		receipt.SessionID != target.SessionID || receipt.Operation != "steer" || receipt.EffectiveLevel != LevelSteer || receipt.FallbackReason != "" {
+		receipt.SessionID != target.SessionID || receipt.Instance != request.Instance || receipt.ProjectID != request.ProjectID ||
+		receipt.Identity != request.Identity || receipt.Operation != "steer" || receipt.EffectiveLevel != LevelSteer || receipt.FallbackReason != "" {
 		return DeliverResult{}, errors.New("agentd returned mismatched control evidence")
 	}
 	if requireVendorMessageID && (receipt.VendorMessageID == "" || len(receipt.VendorMessageID) > 256 || strings.ContainsAny(receipt.VendorMessageID, "\x00\r\n")) {

@@ -41,22 +41,40 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$LANE" in
-  all|affected|db|handlers) ;;
+  all|affected|db|handlers|managedharness) ;;
   *)
     echo "backend-pr-race: invalid lane: $LANE" >&2
     exit 2
     ;;
 esac
-if (( SELECTED_SHARD >= 0 )) && [[ "$LANE" != handlers ]]; then
-  echo "backend-pr-race: --shard is supported only for the handlers lane" >&2
-  exit 2
-fi
-if [[ "$LANE" == handlers ]] && (( SELECTED_SHARD < 0 )); then
-  echo "backend-pr-race: handlers lane requires exactly one --shard=INDEX/COUNT" >&2
-  exit 2
-fi
+case "$LANE" in
+  affected)
+    [[ "$SELECTED_SHARD_COUNT" -eq 4 ]] || {
+      echo "backend-pr-race: affected lane requires exactly one --shard=INDEX/4" >&2
+      exit 2
+    }
+    ;;
+  handlers)
+    [[ "$SELECTED_SHARD_COUNT" -eq 5 ]] || {
+      echo "backend-pr-race: handlers lane requires exactly one --shard=INDEX/5" >&2
+      exit 2
+    }
+    ;;
+  managedharness)
+    [[ "$SELECTED_SHARD_COUNT" -eq 4 ]] || {
+      echo "backend-pr-race: managedharness lane requires exactly one --shard=INDEX/4" >&2
+      exit 2
+    }
+    ;;
+  *)
+    (( SELECTED_SHARD < 0 )) || {
+      echo "backend-pr-race: --shard is unsupported for the $LANE lane" >&2
+      exit 2
+    }
+    ;;
+esac
 [[ $# -gt 0 ]] || {
-  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers] [--shard=INDEX/COUNT] <changed-package>..." >&2
+  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers|managedharness] [--shard=INDEX/COUNT] <changed-package>..." >&2
   exit 2
 }
 
@@ -185,6 +203,16 @@ run_package() {
       # instrumentation invalidates that wall-clock budget.
       run_race ./auth '^TestResolveAPIKeyUsageStampNeverInheritsSQLiteBusyTimeout$'
       ;;
+    ./managedharness)
+      # Every managed-harness test rebuilds the complete SQLite migration chain.
+      # Keep PR race instrumentation on the package's actual concurrency and
+      # crash-replay oracles; normal PR and exhaustive workflows retain all
+      # serial registration, routing, authorization, and lifecycle contracts.
+      # A new concurrency/recovery oracle must use one of these semantic name
+      # markers (or add an explicit alternative) and update the shard contract.
+      managedharness_match='^(TestStoppedSessionCanRegisterNewActiveGeneration|Test.*(Concurrent|Concurrency|Race|Atomic|Replay|Recovers).*)$'
+      run_race_shards ./managedharness "$managedharness_match" 4
+      ;;
     *)
       run_race "$package"
       ;;
@@ -198,7 +226,12 @@ run_selected_package() {
       run_package "$import_path"
       ;;
     affected)
-      [[ "$import_path" == "$MODULE/db" || "$import_path" == "$MODULE/handlers" ]] || run_package "$import_path"
+      if [[ "$import_path" != "$MODULE/db" && "$import_path" != "$MODULE/handlers" && "$import_path" != "$MODULE/managedharness" ]]; then
+        if (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
+          run_package "$import_path"
+        fi
+        affected_index=$((affected_index + 1))
+      fi
       ;;
     db)
       [[ "$import_path" != "$MODULE/db" ]] || run_package "$import_path"
@@ -206,9 +239,13 @@ run_selected_package() {
     handlers)
       [[ "$import_path" != "$MODULE/handlers" ]] || run_package "$import_path"
       ;;
+    managedharness)
+      [[ "$import_path" != "$MODULE/managedharness" ]] || run_package "$import_path"
+      ;;
   esac
 }
 
+affected_index=0
 for import_path in "$@"; do
   if [[ "$import_path" == './...' ]]; then
     for affected in \
@@ -217,6 +254,7 @@ for import_path in "$@"; do
       "$MODULE/cmd/paimos" \
       "$MODULE/supervision" \
       "$MODULE/agentmessage" \
+      "$MODULE/managedharness" \
       "$MODULE/agentmode" \
       "$MODULE/agentd" \
       "$MODULE/localjournal" \

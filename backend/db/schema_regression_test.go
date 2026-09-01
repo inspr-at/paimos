@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 167
+const latestSchemaVersion = 168
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -118,11 +118,16 @@ func TestMigration161AddsDistinctEncryptedReferenceHarnessControlPlane(t *testin
 		t.Fatal(err)
 	}
 	agentID, _ := agent.LastInsertId()
+	const targetID = "target-managed-harness-worker-v1"
+	if _, err := database.Exec(`INSERT INTO agent_message_targets(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
+	 VALUES(?,'default',?,'codex:worker','managed_harness','harness_session',randomblob(29),'steer','primary',1,1)`, targetID, projectID); err != nil {
+		t.Fatal(err)
+	}
 	_, err = database.Exec(`INSERT INTO harness_sessions(
-		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
+		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
-		VALUES('11111111-1111-4111-8111-111111111111',?,?,?,?,?,zeroblob(32),?,?,?,1,1,1,1,1,'working')`,
-		projectID, agentID, "worker", "codex", "mbp0", "managed", "worker", "owned")
+		VALUES('11111111-1111-4111-8111-111111111111',?,?,?,?,?,zeroblob(32),zeroblob(32),?,?,?, ?,1,1,1,1,1,'working')`,
+		projectID, agentID, "worker", "codex", "mbp0", targetID, "managed", "worker", "owned")
 	if err != nil {
 		t.Fatalf("valid managed session rejected: %v", err)
 	}
@@ -130,10 +135,10 @@ func TestMigration161AddsDistinctEncryptedReferenceHarnessControlPlane(t *testin
 		t.Fatal(err)
 	}
 	_, err = database.Exec(`INSERT INTO harness_sessions(
-		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
+		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
-		VALUES('55555555-5555-4555-8555-555555555555',?,?,?,?,?,zeroblob(32),?,?,?,1,1,1,1,1,'working')`,
-		projectID, agentID, "worker", "codex", "mbp0", "managed", "worker", "owned")
+		VALUES('55555555-5555-4555-8555-555555555555',?,?,?,?,?,zeroblob(32),zeroblob(32),?,?,?, ?,1,1,1,1,1,'working')`,
+		projectID, agentID, "worker", "codex", "mbp0", targetID, "managed", "worker", "owned")
 	if err != nil {
 		t.Fatalf("replacement generation rejected: %v", err)
 	}
@@ -145,9 +150,9 @@ func TestMigration161AddsDistinctEncryptedReferenceHarnessControlPlane(t *testin
 		t.Fatal(err)
 	}
 	_, err = database.Exec(`INSERT INTO harness_sessions(
-		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
+		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,management_mode,role,steer_mode,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
-		VALUES('66666666-6666-4666-8666-666666666666',?,?,?,?,?,zeroblob(32),?,?,?,0,1,0,0,0,'working')`,
+		VALUES('66666666-6666-4666-8666-666666666666',?,?,?,?,?,zeroblob(32),zeroblob(32),?,?,?,0,1,0,0,0,'working')`,
 		projectID, worker2ID, "worker2", "codex", "mbp0", "managed", "worker", "none")
 	if err == nil {
 		t.Fatal("second active generation with the same stable identity was accepted")
@@ -163,25 +168,25 @@ func TestMigration161AddsDistinctEncryptedReferenceHarnessControlPlane(t *testin
 	}
 	otherAgentID, _ := otherAgent.LastInsertId()
 	_, err = database.Exec(`INSERT INTO harness_sessions(
-		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
+		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,management_mode,role,steer_mode,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
-		VALUES('44444444-4444-4444-8444-444444444444',?,?,?,?,?,randomblob(32),'managed','worker','none',0,1,0,0,0,'working')`,
+		VALUES('44444444-4444-4444-8444-444444444444',?,?,?,?,?,randomblob(32),randomblob(32),'managed','worker','none',0,1,0,0,0,'working')`,
 		projectID, otherAgentID, "worker", "other", "mbp-x")
 	if err == nil {
 		t.Fatal("cross-project project_agent attribution accepted")
 	}
 	_, err = database.Exec(`INSERT INTO harness_sessions(
-		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
+		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,management_mode,role,steer_mode,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
-		VALUES('22222222-2222-4222-8222-222222222222',?,?,?,?,?,randomblob(32),?,?,?,1,1,1,0,0,'working')`,
+		VALUES('22222222-2222-4222-8222-222222222222',?,?,?,?,?,randomblob(32),randomblob(32),?,?,?,1,1,1,0,0,'working')`,
 		projectID, agentID, "worker", "claude", "mbp1", "unmanaged", "coordinator", "codex_external")
 	if err == nil {
 		t.Fatal("unmanaged Claude session claimed steer")
 	}
 	_, err = database.Exec(`INSERT INTO harness_sessions(
-		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
+		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,management_mode,role,steer_mode,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
-		VALUES('33333333-3333-4333-8333-333333333333',?,?,?,?,?,randomblob(32),?,?,?,1,1,0,1,0,'working')`,
+		VALUES('33333333-3333-4333-8333-333333333333',?,?,?,?,?,randomblob(32),randomblob(32),?,?,?,1,1,0,1,0,'working')`,
 		projectID, agentID, "worker", "codex", "mbp2", "unmanaged", "worker", "none")
 	if err == nil {
 		t.Fatal("unmanaged session claimed owned interrupt")

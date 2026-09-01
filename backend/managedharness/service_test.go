@@ -5,15 +5,19 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	paimosdb "github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
 )
+
+const testWorkerLease = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 func openManagedHarnessTestDB(t *testing.T) (int64, int64) {
 	t.Helper()
@@ -54,7 +58,7 @@ func TestManagedSteerUsesCanonicalLeaseAndCompletion(t *testing.T) {
 	projectID, _ := openManagedHarnessTestDB(t)
 	service := NewService(paimosdb.DB)
 	session, _, err := service.Register(context.Background(), RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "private-thread-ref",
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "private-thread-ref", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
 	})
@@ -150,7 +154,7 @@ func TestUnavailableAgentdLeaseReroutesToActiveHarnessGeneration(t *testing.T) {
 
 	service := NewService(paimosdb.DB)
 	generation, _, err := service.Register(context.Background(), RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp-generation-2", SessionRef: "owned-generation-2",
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp-generation-2", SessionRef: "owned-generation-2", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
 	})
@@ -347,7 +351,7 @@ func TestUnavailableAgentdIgnoresStaleWorkingGeneration(t *testing.T) {
 	}
 	service := NewService(paimosdb.DB)
 	stale, _, err := service.Register(context.Background(), RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "stale-host", SessionRef: "stale-generation",
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "stale-host", SessionRef: "stale-generation", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
 	})
@@ -444,7 +448,7 @@ func TestAgentdPrimaryAndManagedStandbySetupIsOrderStable(t *testing.T) {
 	}
 	service := NewService(paimosdb.DB)
 	input := RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "stable-host", SessionRef: "stable-managed-generation",
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "stable-host", SessionRef: "stable-managed-generation", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
 	}
@@ -454,6 +458,14 @@ func TestAgentdPrimaryAndManagedStandbySetupIsOrderStable(t *testing.T) {
 	}
 	if _, err := service.Stop(context.Background(), first.ID); err != nil {
 		t.Fatal(err)
+	}
+	replayedStop, err := service.Stop(context.Background(), first.ID)
+	if err != nil || replayedStop.ID != first.ID || replayedStop.Phase != PhaseStopped {
+		t.Fatalf("exact stopped replay=%#v err=%v", replayedStop, err)
+	}
+	stoppedYield, err := service.Yield(context.Background(), first.ID)
+	if err != nil || stoppedYield.Session.ID != first.ID || stoppedYield.Session.Phase != PhaseStopped || len(stoppedYield.Controls) != 0 {
+		t.Fatalf("stopped yield replay=%#v err=%v", stoppedYield, err)
 	}
 	second, _, err := service.Register(context.Background(), input)
 	if err != nil {
@@ -479,7 +491,7 @@ func TestAgentdPrimaryAndManagedStandbySetupIsOrderStable(t *testing.T) {
 		t.Fatal(err)
 	}
 	reverseInput := RegisterInput{
-		ProjectID: projectID, AgentName: "reverse-worker", Harness: "codex", Host: "reverse-host", SessionRef: "reverse-managed-generation",
+		ProjectID: projectID, AgentName: "reverse-worker", Harness: "codex", Host: "reverse-host", SessionRef: "reverse-managed-generation", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
 	}
@@ -527,7 +539,7 @@ func TestClaudeAgentdPrimaryAndManagedStandbySetupIsOrderStable(t *testing.T) {
 	}
 	service := NewService(paimosdb.DB)
 	input := RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "stable-claude-host", SessionRef: "stable-claude-generation",
+		ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "stable-claude-host", SessionRef: "stable-claude-generation", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
 	}
@@ -552,7 +564,7 @@ func TestClaudeAgentdPrimaryAndManagedStandbySetupIsOrderStable(t *testing.T) {
 		t.Fatal(err)
 	}
 	reverseInput := RegisterInput{
-		ProjectID: projectID, AgentName: "reverse-claude-worker", Harness: "claude", Host: "reverse-claude-host", SessionRef: "reverse-claude-generation",
+		ProjectID: projectID, AgentName: "reverse-claude-worker", Harness: "claude", Host: "reverse-claude-host", SessionRef: "reverse-claude-generation", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
 	}
@@ -618,7 +630,7 @@ func TestUnavailableClaudeAgentdLeaseReroutesToFreshActiveGeneration(t *testing.
 	}
 	service := NewService(paimosdb.DB)
 	generation, _, err := service.Register(context.Background(), RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "fresh-claude-host", SessionRef: "fresh-claude-generation",
+		ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "fresh-claude-host", SessionRef: "fresh-claude-generation", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
 	})
@@ -656,7 +668,7 @@ func TestRegisterEnforcesManagedAndExternalSteerTruth(t *testing.T) {
 	projectID, _ := openManagedHarnessTestDB(t)
 	service := NewService(paimosdb.DB)
 	base := RegisterInput{ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0",
-		SessionRef: "thread-1", ManagementMode: ManagementManaged, Role: RoleWorker,
+		SessionRef: "thread-1", WorkerLease: testWorkerLease, ManagementMode: ManagementManaged, Role: RoleWorker,
 		SteerMode: SteerOwned, Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true}}
 	session, created, err := service.Register(context.Background(), base)
 	if err != nil || !created {
@@ -672,9 +684,18 @@ func TestRegisterEnforcesManagedAndExternalSteerTruth(t *testing.T) {
 	if err != nil || strings.Contains(string(encoded), "thread-1") || strings.Contains(string(encoded), "session_ref") {
 		t.Fatalf("private session reference escaped response: %s err=%v", encoded, err)
 	}
-	var digest []byte
-	if err := paimosdb.DB.QueryRow(`SELECT session_ref_digest FROM harness_sessions WHERE id=?`, session.ID).Scan(&digest); err != nil || len(digest) != 32 {
-		t.Fatalf("digest len=%d err=%v", len(digest), err)
+	var digest, workerDigest []byte
+	if err := paimosdb.DB.QueryRow(`SELECT session_ref_digest,worker_lease_digest FROM harness_sessions WHERE id=?`, session.ID).Scan(&digest, &workerDigest); err != nil || len(digest) != 32 || len(workerDigest) != 32 {
+		t.Fatalf("digest lengths=(%d,%d) err=%v", len(digest), len(workerDigest), err)
+	}
+	if strings.Contains(string(workerDigest), testWorkerLease) || strings.Contains(string(encoded), testWorkerLease) {
+		t.Fatal("raw worker lease escaped digest-only storage or public response")
+	}
+	if ok, err := service.VerifyWorkerLease(context.Background(), projectID, session.ID, testWorkerLease); err != nil || !ok {
+		t.Fatalf("exact worker lease rejected: ok=%v err=%v", ok, err)
+	}
+	if ok, err := service.VerifyWorkerLease(context.Background(), projectID, session.ID, "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"); err != nil || ok {
+		t.Fatalf("wrong worker lease accepted: ok=%v err=%v", ok, err)
 	}
 	if _, err := service.Stop(context.Background(), session.ID); err != nil {
 		t.Fatal(err)
@@ -729,7 +750,7 @@ func TestStoppedSessionCanRegisterNewActiveGeneration(t *testing.T) {
 	projectID, _ := openManagedHarnessTestDB(t)
 	service := NewService(paimosdb.DB)
 	input := RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "stable-thread-ref",
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "stable-thread-ref", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
 	}
@@ -851,7 +872,7 @@ func TestConcurrentInitialRegistrationReplayCreatesOneActiveRow(t *testing.T) {
 	projectID, _ := openManagedHarnessTestDB(t)
 	service := NewService(paimosdb.DB)
 	input := RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "concurrent-thread-ref",
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "concurrent-thread-ref", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
 	}
@@ -904,11 +925,45 @@ func TestConcurrentInitialRegistrationReplayCreatesOneActiveRow(t *testing.T) {
 	}
 }
 
+func TestRegisterRecoversAfterTargetCommitBeforeSessionInsert(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	input := RegisterInput{ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "crash-host", SessionRef: "crash-ref", WorkerLease: testWorkerLease,
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true}}
+	// This is the only durable partial state the pre-insert architecture can
+	// leave: the encrypted target committed, but no active session row exists.
+	prepared, err := agentmessage.NewService(paimosdb.DB).RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:worker", Adapter: agentmessage.AdapterManagedHarness,
+		TargetKind: agentmessage.TargetKindHarnessSession, TargetRef: input.SessionRef, MaximumLevel: "steer", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(paimosdb.DB)
+	session, created, err := service.Register(context.Background(), input)
+	if err != nil || !created || session.MessageTargetID != prepared.ID {
+		t.Fatalf("session=%+v created=%v err=%v", session, created, err)
+	}
+	var targets int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_targets WHERE project_id=? AND address='codex:worker' AND adapter='managed_harness'`, projectID).Scan(&targets); err != nil || targets != 1 {
+		t.Fatalf("target count=%d err=%v", targets, err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET message_target_id=NULL WHERE id=?`, session.ID); err == nil {
+		t.Fatal("database allowed an advertised inbox to lose its target")
+	}
+	wrong := input
+	wrong.WorkerLease = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+	wrong.Capabilities.Stop = true
+	if _, _, err := service.Register(context.Background(), wrong); !IsCode(err, CodeInvalid) {
+		t.Fatalf("wrong-lease replay disclosed registration mismatch: %v", err)
+	}
+}
+
 func TestYieldClaimsOwnedInterruptAndStopRequests(t *testing.T) {
 	projectID, _ := openManagedHarnessTestDB(t)
 	service := NewService(paimosdb.DB)
 	session, _, err := service.Register(context.Background(), RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "thread-1",
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "thread-1", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
 	})
@@ -938,6 +993,78 @@ func TestYieldClaimsOwnedInterruptAndStopRequests(t *testing.T) {
 	if err != nil || completed.State != ControlApplied {
 		t.Fatalf("complete=%#v err=%v", completed, err)
 	}
+	replayed, err := service.CompleteControl(context.Background(), session.ID, interrupt.ID, ControlApplied, ReasonApplied)
+	if err != nil || replayed.ID != completed.ID || replayed.CompletedAt != completed.CompletedAt {
+		t.Fatalf("exact completion replay=%#v err=%v", replayed, err)
+	}
+	if _, err := service.CompleteControl(context.Background(), session.ID, interrupt.ID, ControlRejected, ReasonFailed); !IsCode(err, CodeConflict) {
+		t.Fatalf("mismatched completion replay error=%v", err)
+	}
+	if _, err := service.Stop(context.Background(), session.ID); err != nil {
+		t.Fatal(err)
+	}
+	var stoppedState, stoppedReason string
+	if err := paimosdb.DB.QueryRow(`SELECT state,reason FROM harness_session_controls WHERE id=?`, stop.ID).Scan(&stoppedState, &stoppedReason); err != nil || stoppedState != ControlRejected || stoppedReason != ReasonOwnershipLost {
+		t.Fatalf("control on stopped generation state=%q reason=%q err=%v", stoppedState, stoppedReason, err)
+	}
+}
+
+func TestGetControlReturnsExactScopedOutcomeWithoutWorkerSecrets(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	session, _, err := service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "outcome-host", SessionRef: "private-outcome-ref", WorkerLease: testWorkerLease,
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerNone,
+		Capabilities: models.HarnessCapabilities{Status: true, Interrupt: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, err := service.RequestControl(context.Background(), session.ID, ControlInterrupt, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := service.GetControl(context.Background(), projectID, session.ID, control.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.ID != control.ID || pending.ProjectID != projectID || pending.HarnessSessionID != session.ID ||
+		pending.CorrelationID != control.ID || pending.Kind != ControlInterrupt || pending.State != ControlPending ||
+		pending.Outcome != "" || pending.Reason != "" || pending.RequestedAt == "" || pending.ClaimedAt != "" || pending.CompletedAt != "" {
+		t.Fatalf("pending outcome=%+v", pending)
+	}
+	if _, err := service.Yield(context.Background(), session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CompleteControl(context.Background(), session.ID, control.ID, ControlRejected, ReasonFailed); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.GetControl(context.Background(), projectID, session.ID, control.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.State != ControlRejected || completed.Outcome != ControlRejected || completed.Reason != ReasonFailed ||
+		completed.ClaimedAt == "" || completed.CompletedAt == "" {
+		t.Fatalf("completed outcome=%+v", completed)
+	}
+	if _, err := service.GetControl(context.Background(), projectID+1, session.ID, control.ID); !IsCode(err, CodeNotFound) {
+		t.Fatalf("wrong-project lookup error=%v", err)
+	}
+	if _, err := service.GetControl(context.Background(), projectID, uuid.NewString(), control.ID); !IsCode(err, CodeNotFound) {
+		t.Fatalf("wrong-session lookup error=%v", err)
+	}
+	if _, err := service.GetControl(context.Background(), projectID, session.ID, uuid.NewString()); !IsCode(err, CodeNotFound) {
+		t.Fatalf("wrong-control lookup error=%v", err)
+	}
+	raw, err := json.Marshal(completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"private-outcome-ref", testWorkerLease, "message_target_id", "requested_by_user_id"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("operator outcome leaked %q: %s", secret, raw)
+		}
+	}
 }
 
 func TestUnmanagedSessionCannotRequestOwnedControl(t *testing.T) {
@@ -951,7 +1078,7 @@ func TestUnmanagedSessionCannotRequestOwnedControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	session, _, err := service.Register(context.Background(), RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "thread-1", MessageTargetID: target.ID,
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "thread-1", WorkerLease: testWorkerLease, MessageTargetID: target.ID,
 		ManagementMode: ManagementUnmanaged, Role: RoleCoordinator, SteerMode: SteerCodexExternal,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
 	})
@@ -960,5 +1087,42 @@ func TestUnmanagedSessionCannotRequestOwnedControl(t *testing.T) {
 	}
 	if _, err := service.RequestControl(context.Background(), session.ID, ControlInterrupt, 1); !IsCode(err, CodeCapabilityUnavailable) {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestStopRacesControlRequestWithoutStrandingControl(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	for iteration := 0; iteration < 20; iteration++ {
+		session, _, err := service.Register(context.Background(), RegisterInput{
+			ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "race-host", SessionRef: fmt.Sprintf("race-ref-%d", iteration), WorkerLease: testWorkerLease,
+			ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerNone,
+			Capabilities: models.HarnessCapabilities{Status: true, Interrupt: true, Stop: true},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		errorsOut := make(chan error, 2)
+		go func() {
+			<-start
+			_, requestErr := service.RequestControl(context.Background(), session.ID, ControlInterrupt, 1)
+			errorsOut <- requestErr
+		}()
+		go func() {
+			<-start
+			_, stopErr := service.Stop(context.Background(), session.ID)
+			errorsOut <- stopErr
+		}()
+		close(start)
+		for range 2 {
+			if raceErr := <-errorsOut; raceErr != nil && !IsCode(raceErr, CodeNotFound) {
+				t.Fatalf("iteration=%d race error=%v", iteration, raceErr)
+			}
+		}
+		var nonterminal int
+		if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_controls WHERE harness_session_id=? AND state IN ('pending','claimed')`, session.ID).Scan(&nonterminal); err != nil || nonterminal != 0 {
+			t.Fatalf("iteration=%d nonterminal=%d err=%v", iteration, nonterminal, err)
+		}
 	}
 }

@@ -94,7 +94,8 @@ func TestDeliveryFallbackEvidenceDoesNotOverwriteAdapterReason(t *testing.T) {
 
 func TestRunListenUnavailableAgentdReroutesLeaseWithoutCompletingIt(t *testing.T) {
 	message := messageEnvelope{Cursor: 17, MessageID: "m-agentd", From: "paimos:sender", To: "codex:worker", DeliveryLevel: "steer",
-		DeliveryWork: &messageDeliveryWork{DeliveryID: "11111111-1111-4111-8111-111111111111", State: "leased", Adapter: "agentd_codex",
+		DeliveryWork: &messageDeliveryWork{DeliveryID: "11111111-1111-4111-8111-111111111111", Instance: "ppm-test", ProjectID: 1,
+			State: "leased", Adapter: "agentd_codex",
 			TargetKind: "agentd_session", TargetRef: `{"socket":"/tmp/missing-pai849-agentd.sock","session_id":"22222222-2222-4222-8222-222222222222"}`,
 			MaximumLevel: "steer", RequestedLevel: "steer"}}
 	message.Parts = append(message.Parts, struct {

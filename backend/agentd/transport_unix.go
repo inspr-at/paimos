@@ -165,6 +165,12 @@ func writeTransportResult(w http.ResponseWriter, value any, err error) {
 		status, code = http.StatusNotFound, "session_not_found"
 	case errors.Is(err, ErrSessionNotRunning):
 		status, code = http.StatusConflict, "session_not_running"
+	case errors.Is(err, ErrControlScopeMismatch):
+		status, code = http.StatusForbidden, "scope_mismatch"
+	case errors.Is(err, ErrControlReplayConflict):
+		status, code = http.StatusConflict, "control_replay_conflict"
+	case errors.Is(err, ErrControlReplayCapacity):
+		status, code = http.StatusTooManyRequests, "control_replay_capacity"
 	case errors.Is(err, ErrAdapterUnsupported), errors.Is(err, ErrCapabilityMissing):
 		status, code = http.StatusUnprocessableEntity, "unsupported"
 	}
@@ -206,6 +212,15 @@ func (c *Client) request(ctx context.Context, method, path string, input, output
 		}
 		if problem.Error == "session_not_running" {
 			return ErrSessionNotRunning
+		}
+		if problem.Error == "scope_mismatch" {
+			return ErrControlScopeMismatch
+		}
+		if problem.Error == "control_replay_conflict" {
+			return ErrControlReplayConflict
+		}
+		if problem.Error == "control_replay_capacity" {
+			return ErrControlReplayCapacity
 		}
 		if problem.Error == "unsupported" {
 			return ErrCapabilityMissing

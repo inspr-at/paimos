@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,16 +33,24 @@ func TestHarnessNounDoesNotCollideWithAttributionSession(t *testing.T) {
 			t.Fatalf("harness %s command missing: command=%v err=%v", name, child, findErr)
 		}
 	}
+	controlGet, _, err := root.Find([]string{"harness", "control", "get"})
+	if err != nil || controlGet.Name() != "get" {
+		t.Fatalf("harness control get command missing: command=%v err=%v", controlGet, err)
+	}
 }
 
 func TestHarnessRegisterRejectsCapabilityEscalationBeforeNetwork(t *testing.T) {
 	refFile := filepath.Join(t.TempDir(), "session-ref")
+	leaseFile := filepath.Join(t.TempDir(), "worker-lease")
 	if err := os.WriteFile(refFile, []byte("session-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(leaseFile, []byte("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	command := harnessRegisterCmd()
 	command.SetArgs([]string{"--project", "PAI", "--agent", "worker", "--harness", "claude", "--host", "mbp0",
-		"--harness-session-file", refFile, "--message-target-id", "11111111-1111-4111-8111-111111111111", "--management", "unmanaged", "--role", "worker", "--capability", "inbox,status,steer",
+		"--harness-session-file", refFile, "--worker-lease-file", leaseFile, "--message-target-id", "11111111-1111-4111-8111-111111111111", "--management", "unmanaged", "--role", "worker", "--capability", "inbox,status,steer",
 		"--steer-mode", "codex_external"})
 	err := command.Execute()
 	if err == nil || !strings.Contains(err.Error(), "unmanaged steer") {
@@ -55,5 +65,56 @@ func TestHarnessRegisterHasNoPlaintextSessionFlag(t *testing.T) {
 	}
 	if command.Flags().Lookup("harness-session-file") == nil {
 		t.Fatal("protected harness session file flag missing")
+	}
+	if command.Flags().Lookup("worker-lease") != nil || command.Flags().Lookup("worker-lease-file") == nil {
+		t.Fatal("worker lease must be accepted only through a protected file")
+	}
+}
+
+func TestHarnessRegistrationSecretsRejectUnknownDuplicateAndTrailingJSON(t *testing.T) {
+	lease := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	for name, raw := range map[string]string{
+		"unknown":   `{"harness_session_ref":"ref","worker_lease":"` + lease + `","extra":true}`,
+		"duplicate": `{"harness_session_ref":"ref","worker_lease":"` + lease + `","worker_lease":"` + lease + `"}`,
+		"trailing":  `{"harness_session_ref":"ref","worker_lease":"` + lease + `"} true`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeHarnessRegistrationSecrets([]byte(raw)); err == nil {
+				t.Fatal("unsafe registration JSON accepted")
+			}
+		})
+	}
+}
+
+func TestHarnessControlGetUsesExactReadOnlyScopedRoute(t *testing.T) {
+	sessionID := "11111111-1111-4111-8111-111111111111"
+	controlID := "22222222-2222-4222-8222-222222222222"
+	var routeSeen bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.RequestURI() == "/api/projects?status=all":
+			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI"}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/6/harness-sessions/"+sessionID+"/controls/"+controlID:
+			routeSeen = true
+			if r.Header.Get("X-Paimos-Harness-Worker-Lease") != "" {
+				t.Error("read-only operator route sent a worker lease")
+			}
+			_, _ = w.Write([]byte(`{"id":"` + controlID + `","project_id":6,"harness_session_id":"` + sessionID + `","correlation_id":"` + controlID + `","sequence":1,"kind":"interrupt","state":"applied","outcome":"applied","reason":"applied","requested_at":"2026-09-01T08:00:00Z","claimed_at":"2026-09-01T08:00:01Z","completed_at":"2026-09-01T08:00:02Z"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.String())
+			http.Error(w, `{"error":"unexpected"}`, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv(envURL, server.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	out, _, err := executeCLIForTest(t, "--json", "harness", "control", "get", "--project", "PAI", "--session", sessionID, "--control-id", controlID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !routeSeen || !strings.Contains(out, `"correlation_id":"`+controlID+`"`) || !strings.Contains(out, `"outcome":"applied"`) {
+		t.Fatalf("routeSeen=%v output=%s", routeSeen, out)
 	}
 }

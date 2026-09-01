@@ -463,6 +463,9 @@ func (p *codexProcess) Wait() error {
 			}
 			return nil
 		default:
+			// readLoop closes streamDone before finishAfterDrain signals and
+			// reaps the exact child. EOF is not process-exit proof.
+			_ = p.ownedProcess.Wait()
 			return errors.New("Codex app-server event stream ended before turn completion")
 		}
 	}

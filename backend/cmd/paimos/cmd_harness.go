@@ -5,7 +5,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -18,7 +20,7 @@ func harnessCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "harness", Short: "Manage durable harness-session control-plane state"}
 	cmd.AddCommand(harnessRegisterCmd(), harnessListCmd(), harnessStatusCmd(), harnessHeartbeatCmd(), harnessYieldCmd(),
 		harnessDrainCmd(), harnessCompleteDeliveryCmd(), harnessDrainSteerCmd(), harnessCompleteSteerCmd(),
-		harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessCompleteControlCmd(), harnessMarkStoppedCmd())
+		harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessControlGroupCmd(), harnessCompleteControlCmd(), harnessMarkStoppedCmd())
 	return cmd
 }
 
@@ -47,25 +49,48 @@ func parseHarnessCapabilities(raw []string) (models.HarnessCapabilities, error) 
 }
 
 func harnessRegisterCmd() *cobra.Command {
-	var project, agent, harness, host, refFile, targetID, management, role, steerMode string
+	var project, agent, harness, host, refFile, leaseFile, registrationFile, targetID, management, role, steerMode string
 	var capabilities []string
 	cmd := &cobra.Command{Use: "register", Short: "Register a durable managed or unmanaged harness session", RunE: func(cmd *cobra.Command, args []string) error {
-		if strings.TrimSpace(project) == "" || strings.TrimSpace(agent) == "" || strings.TrimSpace(harness) == "" || strings.TrimSpace(host) == "" || strings.TrimSpace(refFile) == "" {
-			return &usageError{msg: "--project, --agent, --harness, --host, and --harness-session-file are required"}
+		if strings.TrimSpace(project) == "" || strings.TrimSpace(agent) == "" || strings.TrimSpace(harness) == "" || strings.TrimSpace(host) == "" {
+			return &usageError{msg: "--project, --agent, --harness, and --host are required"}
 		}
-		rawRef, err := readProtectedSecretInput(refFile, "--harness-session-file")
-		if err != nil {
-			return err
+		if registrationFile != "" && (refFile != "" || leaseFile != "") {
+			return &usageError{msg: "--registration-file cannot be combined with --harness-session-file or --worker-lease-file"}
 		}
-		ref := strings.TrimSpace(string(rawRef))
-		if ref == "" || strings.ContainsAny(ref, "\r\n") {
-			return &usageError{msg: "--harness-session-file must contain exactly one opaque identifier line"}
+		var ref, workerLease string
+		if registrationFile != "" {
+			raw, err := readProtectedSecretInput(registrationFile, "--registration-file")
+			if err != nil {
+				return err
+			}
+			secret, decodeErr := decodeHarnessRegistrationSecrets(raw)
+			if decodeErr != nil {
+				return &usageError{msg: "--registration-file must contain only harness_session_ref and worker_lease"}
+			}
+			ref, workerLease = strings.TrimSpace(secret.SessionRef), strings.TrimSpace(secret.WorkerLease)
+		} else {
+			if refFile == "" || leaseFile == "" || (refFile == "-" && leaseFile == "-") {
+				return &usageError{msg: "--harness-session-file and --worker-lease-file are required and cannot both read stdin"}
+			}
+			rawRef, err := readProtectedSecretInput(refFile, "--harness-session-file")
+			if err != nil {
+				return err
+			}
+			rawLease, err := readProtectedSecretInput(leaseFile, "--worker-lease-file")
+			if err != nil {
+				return err
+			}
+			ref, workerLease = strings.TrimSpace(string(rawRef)), strings.TrimSpace(string(rawLease))
+		}
+		if ref == "" || strings.ContainsAny(ref, "\r\n") || workerLease == "" || strings.ContainsAny(workerLease, "\r\n") {
+			return &usageError{msg: "registration secrets must each contain exactly one value"}
 		}
 		caps, err := parseHarnessCapabilities(capabilities)
 		if err != nil {
 			return err
 		}
-		input := managedharness.RegisterInput{ProjectID: 1, AgentName: agent, Harness: harness, Host: host, SessionRef: ref, MessageTargetID: targetID, ManagementMode: management, Role: role, SteerMode: steerMode, Capabilities: caps}
+		input := managedharness.RegisterInput{ProjectID: 1, AgentName: agent, Harness: harness, Host: host, SessionRef: ref, WorkerLease: workerLease, MessageTargetID: targetID, ManagementMode: management, Role: role, SteerMode: steerMode, Capabilities: caps}
 		if err := managedharness.ValidateRegistration(input); err != nil {
 			return &usageError{msg: err.Error()}
 		}
@@ -77,7 +102,7 @@ func harnessRegisterCmd() *cobra.Command {
 		if err != nil {
 			return reportError(err)
 		}
-		payload := map[string]any{"agent_name": agent, "harness": harness, "host": host, "harness_session_ref": ref, "message_target_id": targetID, "management_mode": management, "role": role, "steer_mode": steerMode, "advertised_capabilities": caps}
+		payload := map[string]any{"agent_name": agent, "harness": harness, "host": host, "harness_session_ref": ref, "worker_lease": workerLease, "message_target_id": targetID, "management_mode": management, "role": role, "steer_mode": steerMode, "advertised_capabilities": caps}
 		response, err := client.do(http.MethodPost, fmt.Sprintf("/api/projects/%d/harness-sessions", projectID), payload)
 		if err != nil {
 			return reportError(err)
@@ -89,6 +114,8 @@ func harnessRegisterCmd() *cobra.Command {
 	cmd.Flags().StringVar(&harness, "harness", "", "harness address prefix (required)")
 	cmd.Flags().StringVar(&host, "host", "", "non-secret host attribution (required)")
 	cmd.Flags().StringVar(&refFile, "harness-session-file", "", "protected 0600 file containing the private session reference, or - for stdin")
+	cmd.Flags().StringVar(&leaseFile, "worker-lease-file", "", "protected 0600 file containing the private worker lease, or - for stdin")
+	cmd.Flags().StringVar(&registrationFile, "registration-file", "", "protected JSON containing both registration secrets, or - for stdin")
 	cmd.Flags().StringVar(&targetID, "message-target-id", "", "existing encrypted target id for an unmanaged inbox")
 	cmd.Flags().StringVar(&management, "management", "managed", "managed or unmanaged")
 	cmd.Flags().StringVar(&role, "role", "worker", "coordinator or worker")
@@ -97,8 +124,52 @@ func harnessRegisterCmd() *cobra.Command {
 	return cmd
 }
 
+type harnessRegistrationSecrets struct {
+	SessionRef  string
+	WorkerLease string
+}
+
+func decodeHarnessRegistrationSecrets(raw []byte) (harnessRegistrationSecrets, error) {
+	var out harnessRegistrationSecrets
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return out, errors.New("registration secrets must be an object")
+	}
+	seen := make(map[string]bool, 2)
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		key, ok := keyToken.(string)
+		if err != nil || !ok || seen[key] {
+			return out, errors.New("registration secrets contain duplicate or invalid fields")
+		}
+		seen[key] = true
+		switch key {
+		case "harness_session_ref":
+			err = decoder.Decode(&out.SessionRef)
+		case "worker_lease":
+			err = decoder.Decode(&out.WorkerLease)
+		default:
+			return out, errors.New("registration secrets contain an unknown field")
+		}
+		if err != nil {
+			return out, err
+		}
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return out, errors.New("registration secrets object is invalid")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return out, errors.New("registration secrets contain trailing data")
+	}
+	if len(seen) != 2 {
+		return out, errors.New("registration secrets are incomplete")
+	}
+	return out, nil
+}
+
 func harnessProjectCommand(use, short, method, suffix string, body func() any, attributed bool) *cobra.Command {
-	var project, sessionID, controlID, agent string
+	var project, sessionID, controlID, agent, workerLeaseFile string
 	cmd := &cobra.Command{Use: use, Short: short, RunE: func(cmd *cobra.Command, args []string) error {
 		if project == "" {
 			return &usageError{msg: "--project is required"}
@@ -120,10 +191,18 @@ func harnessProjectCommand(use, short, method, suffix string, body func() any, a
 		path := fmt.Sprintf("/api/projects/%d/harness-sessions", id) + strings.ReplaceAll(strings.ReplaceAll(suffix, "{session}", sessionID), "{control}", controlID)
 		var raw []byte
 		if attributed {
-			if agent == "" {
-				return &usageError{msg: "--agent is required for worker operations"}
+			if agent == "" || workerLeaseFile == "" {
+				return &usageError{msg: "--agent and --worker-lease-file are required for worker operations"}
 			}
-			raw, err = client.doForAgentContext(cmd.Context(), method, path, body(), agent)
+			secret, readErr := readProtectedSecretInput(workerLeaseFile, "--worker-lease-file")
+			if readErr != nil {
+				return readErr
+			}
+			lease := strings.TrimSpace(string(secret))
+			if !managedharness.ValidWorkerLease(lease) || strings.ContainsAny(lease, "\r\n") {
+				return &usageError{msg: "--worker-lease-file must contain exactly one worker lease"}
+			}
+			raw, err = client.doForHarnessContext(cmd.Context(), method, path, body(), agent, lease)
 		} else {
 			raw, err = client.do(method, path, body())
 		}
@@ -141,6 +220,7 @@ func harnessProjectCommand(use, short, method, suffix string, body func() any, a
 	}
 	if attributed {
 		cmd.Flags().StringVar(&agent, "agent", "", "registered project agent attribution (required)")
+		cmd.Flags().StringVar(&workerLeaseFile, "worker-lease-file", "", "protected 0600 file containing the generation worker lease, or - for stdin")
 	}
 	return cmd
 }
@@ -186,6 +266,11 @@ func harnessDeliveryCompletionCmd(use, short, suffix, defaultLevel string) *cobr
 }
 func harnessControlCmd(kind string) *cobra.Command {
 	return harnessProjectCommand(kind, "Request typed owned "+kind, http.MethodPost, "/{session}/controls/"+kind, func() any { return map[string]any{} }, false)
+}
+func harnessControlGroupCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "control", Short: "Inspect typed owned-control outcomes"}
+	cmd.AddCommand(harnessProjectCommand("get", "Get one scoped typed control outcome", http.MethodGet, "/{session}/controls/{control}", func() any { return nil }, false))
+	return cmd
 }
 func harnessCompleteControlCmd() *cobra.Command {
 	var outcome, reason string

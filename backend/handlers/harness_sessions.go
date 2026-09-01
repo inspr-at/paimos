@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/inspr-at/paimos/backend/agentmessage"
@@ -16,6 +17,8 @@ import (
 	"github.com/inspr-at/paimos/backend/managedharness"
 	"github.com/inspr-at/paimos/backend/models"
 )
+
+const harnessWorkerLeaseHeader = "X-Paimos-Harness-Worker-Lease"
 
 // RegisterHarnessSessionRoutes owns the PAI-848 control plane. These routes
 // never spawn a process and are intentionally distinct from agent_runs and
@@ -31,6 +34,7 @@ func RegisterHarnessSessionRoutes(r chi.Router) {
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/drain-steer", drainHarnessSteer)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/complete-steer", completeHarnessSteer)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/controls/{kind}", requestHarnessControl)
+	r.With(auth.RequireProjectView).Get("/projects/{id}/harness-sessions/{sessionID}/controls/{controlID}", getHarnessControl)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/controls/{controlID}/complete", completeHarnessControl)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/stop", stopHarnessSession)
 }
@@ -40,6 +44,7 @@ type harnessRegisterRequest struct {
 	Harness         string                     `json:"harness"`
 	Host            string                     `json:"host"`
 	SessionRef      string                     `json:"harness_session_ref"`
+	WorkerLease     string                     `json:"worker_lease"`
 	MessageTargetID string                     `json:"message_target_id"`
 	ManagementMode  string                     `json:"management_mode"`
 	Role            string                     `json:"role"`
@@ -105,12 +110,20 @@ func harnessStatus(err error) int {
 func requireHarnessWorker(w http.ResponseWriter, r *http.Request, projectID int64) (models.HarnessSession, bool) {
 	session, err := managedharness.NewService(db.DB).Get(r.Context(), projectID, chi.URLParam(r, "sessionID"))
 	if err != nil {
-		harnessProblem(w, err, "harness_session_not_found", harnessStatus(err))
+		// A worker mutation must not disclose whether a public session UUID is
+		// absent, belongs to another project, or merely has the wrong proof.
+		harnessProblem(w, errors.New("harness worker authorization failed"), "harness_session_worker_authorization_failed", http.StatusForbidden)
 		return session, false
 	}
 	agent, _ := readAgentAttribution(r)
-	if agent == nil || *agent != session.AgentName {
-		harnessProblem(w, errors.New("agent attribution must match the harness session"), "harness_session_attribution_required", http.StatusForbidden)
+	leaseHeaders := r.Header.Values(harnessWorkerLeaseHeader)
+	lease := ""
+	if len(leaseHeaders) == 1 && leaseHeaders[0] == strings.TrimSpace(leaseHeaders[0]) {
+		lease = leaseHeaders[0]
+	}
+	leaseOK, verifyErr := managedharness.NewService(db.DB).VerifyWorkerLease(r.Context(), projectID, session.ID, lease)
+	if verifyErr != nil || agent == nil || *agent != session.AgentName || !leaseOK {
+		harnessProblem(w, errors.New("harness worker authorization failed"), "harness_session_worker_authorization_failed", http.StatusForbidden)
 		return session, false
 	}
 	return session, true
@@ -125,7 +138,7 @@ func registerHarnessSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeHarnessJSON(w, r, &req) {
 		return
 	}
-	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, SteerMode: req.SteerMode, Capabilities: req.Capabilities})
+	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, SteerMode: req.SteerMode, Capabilities: req.Capabilities})
 	if err != nil {
 		harnessProblem(w, err, "harness_session_register_failed", harnessStatus(err))
 		return
@@ -299,6 +312,18 @@ func requestHarnessControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeHarnessJSON(w, 201, out)
+}
+func getHarnessControl(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := harnessProjectID(w, r)
+	if !ok {
+		return
+	}
+	out, err := managedharness.NewService(db.DB).GetControl(r.Context(), projectID, chi.URLParam(r, "sessionID"), chi.URLParam(r, "controlID"))
+	if err != nil {
+		harnessProblem(w, err, "harness_session_control_not_found", harnessStatus(err))
+		return
+	}
+	writeHarnessJSON(w, http.StatusOK, out)
 }
 func completeHarnessControl(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := harnessProjectID(w, r)

@@ -73,3 +73,24 @@ func TestAgentMessageDeliveryWorkSchemaIncludesBothOwnedAgentdAdapters(t *testin
 		}
 	}
 }
+
+func TestAgentMessageDeliveryWorkSchemaRequiresControlScope(t *testing.T) {
+	raw, err := os.ReadFile("agent-message-v1.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties map[string]struct {
+			Required []string `json:"required"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	required := schema.Properties["delivery_work"].Required
+	for _, field := range []string{"delivery_id", "instance", "project_id", "state", "requested_level"} {
+		if !slices.Contains(required, field) {
+			t.Fatalf("delivery_work scope field %q missing from required=%v", field, required)
+		}
+	}
+}

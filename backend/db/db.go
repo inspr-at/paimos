@@ -12358,6 +12358,36 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		// M167 / PAI-863: reviewed structured-knowledge Compact, durable
 		// entries, canonical links, proposals, and atomic promotion evidence.
 		{167, migration167StructuredKnowledgeSteps(structuredKnowledgeShortBodyLimitBytes)},
+
+		// M168 / PAI-870: a public harness-session UUID and caller-supplied
+		// agent attribution never authorize worker mutations. Store only the
+		// generation-bound digest of the agentd-minted worker lease.
+		{168, []string{
+			`ALTER TABLE harness_sessions ADD COLUMN worker_lease_digest BLOB
+			 CHECK(worker_lease_digest IS NULL OR (typeof(worker_lease_digest)='blob' AND length(worker_lease_digest)=32))`,
+			`UPDATE harness_session_controls
+			 SET state='rejected',reason='ownership_lost',
+			     claimed_at=COALESCE(claimed_at,strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			     completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 WHERE state IN ('pending','claimed') AND harness_session_id IN (
+			  SELECT id FROM harness_sessions WHERE worker_lease_digest IS NULL
+			 )`,
+			`UPDATE harness_sessions
+			 SET phase='stopped',heartbeat_at=COALESCE(heartbeat_at,strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),revision=revision+1
+			 WHERE worker_lease_digest IS NULL AND phase<>'stopped'`,
+			`CREATE TRIGGER trg_harness_sessions_worker_lease_required BEFORE INSERT ON harness_sessions
+			 WHEN NEW.worker_lease_digest IS NULL
+			 BEGIN SELECT RAISE(ABORT,'harness worker lease is required'); END`,
+			`CREATE TRIGGER trg_harness_sessions_inbox_target_required BEFORE INSERT ON harness_sessions
+			 WHEN NEW.advertised_inbox=1 AND NEW.message_target_id IS NULL
+			 BEGIN SELECT RAISE(ABORT,'harness inbox target is required'); END`,
+			`CREATE TRIGGER trg_harness_sessions_inbox_target_update BEFORE UPDATE OF advertised_inbox,message_target_id ON harness_sessions
+			 WHEN NEW.advertised_inbox=1 AND NEW.message_target_id IS NULL
+			 BEGIN SELECT RAISE(ABORT,'harness inbox target is required'); END`,
+			`CREATE TRIGGER trg_harness_sessions_worker_lease_immutable BEFORE UPDATE OF worker_lease_digest ON harness_sessions
+			 BEGIN SELECT RAISE(ABORT,'harness worker lease is immutable'); END`,
+		}},
 	}
 
 	for _, m := range migrations {

@@ -276,10 +276,10 @@ func TestOrchestratorAssignedRenameRejectsLiveHarnessWithoutChanges(t *testing.T
 	promoteToSuperAdmin(t, "admin")
 	projectID, agentID := seedOrchestratorAgent(t, ts, "LIV", "amy")
 	setOrchestrator(t, ts, 0, projectID, "amy", "Amy")
-	if _, err := db.DB.Exec(`INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,
+	if _, err := db.DB.Exec(`INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,
 		management_mode,role,steer_mode,advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
-		VALUES('22222222-2222-4222-8222-222222222222',?,?,?,'codex','host',?,
-		'managed','worker','none',1,1,0,0,0,'working')`, projectID, agentID, "amy", make([]byte, 32)); err != nil {
+		VALUES('22222222-2222-4222-8222-222222222222',?,?,?,'codex','host',?,randomblob(32),
+		'managed','worker','none',0,1,0,0,0,'working')`, projectID, agentID, "amy", make([]byte, 32)); err != nil {
 		t.Fatal(err)
 	}
 	response := ts.put(t, agentURL(projectID, "amy"), ts.adminCookie, map[string]any{
