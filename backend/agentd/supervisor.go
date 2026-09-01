@@ -750,11 +750,14 @@ func (s *Supervisor) Stop(ctx context.Context, id string, request ControlRequest
 	if err := s.validateControlScope(entry, request); err != nil {
 		return Receipt{}, err
 	}
-	if receipt, ok, err := entry.replay("stop", request); err != nil || ok {
-		if ok {
-			err = waitSessionFinalized(ctx, entry)
+	if receipt, ok, replayErr := entry.replay("stop", request); replayErr != nil || ok {
+		// A failed owned effect is memoized as strongly as a successful one. Do
+		// not let the later child-finalization barrier replace that exact failure
+		// with nil and turn a retry into a false applied receipt.
+		if replayErr != nil {
+			return receipt, replayErr
 		}
-		return receipt, err
+		return receipt, waitSessionFinalized(ctx, entry)
 	}
 	entry.mu.Lock()
 	if entry.session.State != StateRunning {

@@ -85,6 +85,22 @@ type blockingControlProcess struct {
 	release chan struct{}
 }
 
+type failedStopProcess struct {
+	*fakeProcess
+	failure error
+}
+
+type ownedStopFailure struct{ detail string }
+
+func (e *ownedStopFailure) Error() string { return e.detail }
+
+func (p *failedStopProcess) Stop(_ context.Context, _ ControlRequest) (ControlEffect, error) {
+	p.mu.Lock()
+	p.stops++
+	p.mu.Unlock()
+	return ControlEffect{}, p.failure
+}
+
 func (p *blockingControlProcess) Steer(_ context.Context, request ControlRequest) (ControlEffect, error) {
 	p.entered <- request.CorrelationID
 	<-p.release
@@ -276,6 +292,55 @@ func TestSupervisorStopRaceWithNaturalExitDoesNotOverwriteTerminalState(t *testi
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("status=%+v", supervisor.Status())
+}
+
+func TestSupervisorFailedStopReplayPreservesExactErrorAfterChildFinalizes(t *testing.T) {
+	stopFailure := &ownedStopFailure{detail: "ordinary owned stop failure"}
+	process := &failedStopProcess{fakeProcess: newFakeProcess(4250), failure: stopFailure}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-stop-replay", Adapters: []Adapter{&fakeAdapter{name: AdapterCodex, process: process, threadID: "thread-stop-replay"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{
+		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:stop-replay", ProjectID: 870,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := scopedControl(supervisor, session, "control-failed-stop-replay", "")
+	firstReceipt, firstErr := supervisor.Stop(context.Background(), session.ID, request)
+	if firstReceipt != (Receipt{}) || firstErr != stopFailure {
+		t.Fatalf("first stop receipt=%+v error=%v want exact failure", firstReceipt, firstErr)
+	}
+
+	// The process exits after the failed stop attempt, making monitorDone close
+	// successfully before the same correlation is retried. This is the window
+	// that previously overwrote the memoized failure with nil.
+	process.waited <- nil
+	entry, err := supervisor.get(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entry.monitorDone:
+	case <-time.After(time.Second):
+		t.Fatal("child finalization did not complete")
+	}
+	final := supervisor.Status().Sessions[0]
+	if final.LastErrorCode != ErrorChildStopFailed {
+		t.Fatalf("failed stop lost its terminal error invariant: %+v", final)
+	}
+	replayReceipt, replayErr := supervisor.Stop(context.Background(), session.ID, request)
+	if replayReceipt != (Receipt{}) || replayErr != stopFailure {
+		t.Fatalf("failed replay receipt=%+v error=%v want exact memoized failure", replayReceipt, replayErr)
+	}
+	process.mu.Lock()
+	stops := process.stops
+	process.mu.Unlock()
+	if stops != 1 {
+		t.Fatalf("failed stop replay reached vendor %d times, want once", stops)
+	}
 }
 
 func TestSupervisorTerminalPersistenceBarrierHonorsContext(t *testing.T) {
