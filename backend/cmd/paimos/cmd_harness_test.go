@@ -35,12 +35,16 @@ func TestHarnessNounDoesNotCollideWithAttributionSession(t *testing.T) {
 
 func TestHarnessRegisterRejectsCapabilityEscalationBeforeNetwork(t *testing.T) {
 	refFile := filepath.Join(t.TempDir(), "session-ref")
+	leaseFile := filepath.Join(t.TempDir(), "worker-lease")
 	if err := os.WriteFile(refFile, []byte("session-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(leaseFile, []byte("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	command := harnessRegisterCmd()
 	command.SetArgs([]string{"--project", "PAI", "--agent", "worker", "--harness", "claude", "--host", "mbp0",
-		"--harness-session-file", refFile, "--message-target-id", "11111111-1111-4111-8111-111111111111", "--management", "unmanaged", "--role", "worker", "--capability", "inbox,status,steer",
+		"--harness-session-file", refFile, "--worker-lease-file", leaseFile, "--message-target-id", "11111111-1111-4111-8111-111111111111", "--management", "unmanaged", "--role", "worker", "--capability", "inbox,status,steer",
 		"--steer-mode", "codex_external"})
 	err := command.Execute()
 	if err == nil || !strings.Contains(err.Error(), "unmanaged steer") {
@@ -55,5 +59,23 @@ func TestHarnessRegisterHasNoPlaintextSessionFlag(t *testing.T) {
 	}
 	if command.Flags().Lookup("harness-session-file") == nil {
 		t.Fatal("protected harness session file flag missing")
+	}
+	if command.Flags().Lookup("worker-lease") != nil || command.Flags().Lookup("worker-lease-file") == nil {
+		t.Fatal("worker lease must be accepted only through a protected file")
+	}
+}
+
+func TestHarnessRegistrationSecretsRejectUnknownDuplicateAndTrailingJSON(t *testing.T) {
+	lease := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	for name, raw := range map[string]string{
+		"unknown":   `{"harness_session_ref":"ref","worker_lease":"` + lease + `","extra":true}`,
+		"duplicate": `{"harness_session_ref":"ref","worker_lease":"` + lease + `","worker_lease":"` + lease + `"}`,
+		"trailing":  `{"harness_session_ref":"ref","worker_lease":"` + lease + `"} true`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeHarnessRegistrationSecrets([]byte(raw)); err == nil {
+				t.Fatal("unsafe registration JSON accepted")
+			}
+		})
 	}
 }

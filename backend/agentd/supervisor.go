@@ -65,6 +65,8 @@ type Supervisor struct {
 	instance          string
 	journal           *registryJournal
 	reporter          Reporter
+	reporterErrorCode ErrorCode
+	reporterFailures  int64
 	reportMu          sync.Mutex
 	reportWake        chan struct{}
 	done              chan struct{}
@@ -113,6 +115,11 @@ func NewSupervisor(config SupervisorConfig) (*Supervisor, error) {
 		}
 	}
 	if s.reporter != nil {
+		if binding, ok := s.reporter.(ControllerBindingReporter); ok {
+			if err := binding.BindController(s); err != nil {
+				return nil, err
+			}
+		}
 		go s.heartbeatLoop()
 	}
 	return s, nil
@@ -261,8 +268,9 @@ func (s *Supervisor) reserveSession(entry *sessionEntry) error {
 		existing.mu.Lock()
 		terminal := existing.session.State == StateStopped || existing.session.State == StateExited ||
 			existing.session.State == StateFailed || existing.session.State == StateOwnershipLost
+		remoteClosed := existing.session.Reporter.PublicSessionID == "" || existing.session.Reporter.Closed
 		existing.mu.Unlock()
-		if terminal {
+		if terminal && remoteClosed {
 			candidates = append(candidates, existing)
 		}
 	}
@@ -466,7 +474,15 @@ func (s *Supervisor) report(ctx context.Context) {
 	defer s.reportMu.Unlock()
 	reportCtx, cancel := context.WithTimeout(ctx, reporterTimeout)
 	defer cancel()
-	_ = s.reporter.ReportStatus(reportCtx, s.Status())
+	err := s.reporter.ReportStatus(reportCtx, s.Status())
+	s.mu.Lock()
+	if err != nil {
+		s.reporterErrorCode = ErrorReporterUnavailable
+		s.reporterFailures++
+	} else {
+		s.reporterErrorCode = ""
+	}
+	s.mu.Unlock()
 }
 
 func (s *Supervisor) heartbeatLoop() {
@@ -493,6 +509,25 @@ func (s *Supervisor) scheduleReport() {
 	case s.reportWake <- struct{}{}:
 	default:
 	}
+}
+
+func (s *Supervisor) CheckpointReporter(_ context.Context, id string, request ControlRequest, state ReporterState) error {
+	entry, err := s.get(id)
+	if err != nil {
+		return err
+	}
+	if err := s.validateControlScope(entry, request); err != nil {
+		return err
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	prior := entry.session.Reporter
+	entry.session.Reporter = state
+	if err := s.journal.put(entry.snapshotLocked()); err != nil {
+		entry.session.Reporter = prior
+		return err
+	}
+	return nil
 }
 
 func (e *sessionEntry) refreshSteerableLocked() {
@@ -525,7 +560,11 @@ func (s *Supervisor) Status() Status {
 		}
 		return sessions[i].StartedAt.Before(sessions[j].StartedAt)
 	})
-	return Status{DaemonID: daemonID, Instance: s.instance, HeartbeatAt: time.Now().UTC(), Sessions: sessions}
+	s.mu.RLock()
+	reporterErrorCode, reporterFailures := s.reporterErrorCode, s.reporterFailures
+	s.mu.RUnlock()
+	return Status{DaemonID: daemonID, Instance: s.instance, HeartbeatAt: time.Now().UTC(), Sessions: sessions,
+		ReporterErrorCode: reporterErrorCode, ReporterFailureCount: reporterFailures}
 }
 
 func (s *Supervisor) persist(entry *sessionEntry) error {

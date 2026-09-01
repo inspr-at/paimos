@@ -53,11 +53,16 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	var projectID int64
 	sessionID, correlationID, codexPath := "", "", ""
 	claudePath, nodePath, claudeSDKPath := "", "", ""
+	reportHost, reportURL, reportAPIKeyFile, paimosPath := "", "", "", ""
 	if command == "serve" {
 		flags.StringVar(&codexPath, "codex-path", "", "absolute Codex CLI path")
 		flags.StringVar(&claudePath, "claude-path", "", "absolute operator-authenticated Claude CLI path")
 		flags.StringVar(&nodePath, "node-path", "", "absolute Node.js >=18 runtime path")
 		flags.StringVar(&claudeSDKPath, "claude-sdk-path", "", "absolute operator-installed @anthropic-ai/claude-agent-sdk@0.3.251 sdk.mjs path")
+		flags.StringVar(&reportHost, "report-host", "", "non-secret stable host identity for authenticated M161 reporting")
+		flags.StringVar(&reportURL, "report-url", "", "exact M161 instance URL for non-interactive reporting")
+		flags.StringVar(&reportAPIKeyFile, "report-api-key-file", "", "protected owner-only file containing the M161 API key")
+		flags.StringVar(&paimosPath, "paimos-path", "", "paimos CLI used for authenticated M161 reporting")
 	}
 	if command == "start" {
 		flags.StringVar(&adapter, "adapter", "codex", "harness adapter")
@@ -90,13 +95,24 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if command == "serve" {
+		reportConfigured := reportHost != "" || reportURL != "" || reportAPIKeyFile != "" || paimosPath != ""
+		if reportConfigured && (reportHost == "" || reportURL == "" || reportAPIKeyFile == "") {
+			return errors.New("reporting requires --report-host, --report-url, and --report-api-key-file together")
+		}
 		lock, err := agentd.AcquireInstanceLock(root, common.instance)
 		if err != nil {
 			return err
 		}
 		defer lock.Close()
+		var reporter agentd.Reporter
+		if reportConfigured {
+			reporter, err = newCLIReporter(common.instance, root, reportHost, paimosPath, reportURL, reportAPIKeyFile)
+			if err != nil {
+				return err
+			}
+		}
 		supervisor, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: common.instance, StateRoot: root,
-			Adapters: serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath)})
+			Adapters: serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath), Reporter: reporter})
 		if err != nil {
 			return err
 		}

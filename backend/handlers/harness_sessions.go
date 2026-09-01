@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/inspr-at/paimos/backend/agentmessage"
@@ -16,6 +17,8 @@ import (
 	"github.com/inspr-at/paimos/backend/managedharness"
 	"github.com/inspr-at/paimos/backend/models"
 )
+
+const harnessWorkerLeaseHeader = "X-Paimos-Harness-Worker-Lease"
 
 // RegisterHarnessSessionRoutes owns the PAI-848 control plane. These routes
 // never spawn a process and are intentionally distinct from agent_runs and
@@ -40,6 +43,7 @@ type harnessRegisterRequest struct {
 	Harness         string                     `json:"harness"`
 	Host            string                     `json:"host"`
 	SessionRef      string                     `json:"harness_session_ref"`
+	WorkerLease     string                     `json:"worker_lease"`
 	MessageTargetID string                     `json:"message_target_id"`
 	ManagementMode  string                     `json:"management_mode"`
 	Role            string                     `json:"role"`
@@ -109,8 +113,14 @@ func requireHarnessWorker(w http.ResponseWriter, r *http.Request, projectID int6
 		return session, false
 	}
 	agent, _ := readAgentAttribution(r)
-	if agent == nil || *agent != session.AgentName {
-		harnessProblem(w, errors.New("agent attribution must match the harness session"), "harness_session_attribution_required", http.StatusForbidden)
+	leaseHeaders := r.Header.Values(harnessWorkerLeaseHeader)
+	lease := ""
+	if len(leaseHeaders) == 1 && leaseHeaders[0] == strings.TrimSpace(leaseHeaders[0]) {
+		lease = leaseHeaders[0]
+	}
+	leaseOK, verifyErr := managedharness.NewService(db.DB).VerifyWorkerLease(r.Context(), projectID, session.ID, lease)
+	if verifyErr != nil || agent == nil || *agent != session.AgentName || !leaseOK {
+		harnessProblem(w, errors.New("harness worker authorization failed"), "harness_session_worker_authorization_failed", http.StatusForbidden)
 		return session, false
 	}
 	return session, true
@@ -125,7 +135,7 @@ func registerHarnessSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeHarnessJSON(w, r, &req) {
 		return
 	}
-	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, SteerMode: req.SteerMode, Capabilities: req.Capabilities})
+	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, SteerMode: req.SteerMode, Capabilities: req.Capabilities})
 	if err != nil {
 		harnessProblem(w, err, "harness_session_register_failed", harnessStatus(err))
 		return

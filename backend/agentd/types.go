@@ -68,11 +68,12 @@ const (
 type ErrorCode string
 
 const (
-	ErrorEventStreamBound  ErrorCode = "event_stream_bound"
-	ErrorAppServerProtocol ErrorCode = "app_server_protocol"
-	ErrorChildExitFailed   ErrorCode = "child_exit_failed"
-	ErrorChildStopFailed   ErrorCode = "child_stop_failed"
-	ErrorOwnershipLost     ErrorCode = "ownership_lost"
+	ErrorEventStreamBound    ErrorCode = "event_stream_bound"
+	ErrorAppServerProtocol   ErrorCode = "app_server_protocol"
+	ErrorChildExitFailed     ErrorCode = "child_exit_failed"
+	ErrorChildStopFailed     ErrorCode = "child_stop_failed"
+	ErrorOwnershipLost       ErrorCode = "ownership_lost"
+	ErrorReporterUnavailable ErrorCode = "reporter_unavailable"
 )
 
 type ControlRequest struct {
@@ -118,36 +119,66 @@ const (
 )
 
 type Session struct {
-	ID                string       `json:"id"`
-	Identity          string       `json:"identity"`
-	ProjectID         int64        `json:"project_id"`
-	Adapter           string       `json:"adapter"`
-	Workspace         string       `json:"workspace"`
-	HarnessSessionID  string       `json:"harness_session_id,omitempty"`
-	Capabilities      []Capability `json:"capabilities"`
-	Managed           bool         `json:"managed"`
-	Steerable         bool         `json:"steerable"`
-	State             SessionState `json:"state"`
-	PID               int          `json:"pid,omitempty"`
-	LastEventKind     EventKind    `json:"last_event_kind,omitempty"`
-	LastCorrelationID string       `json:"last_correlation_id,omitempty"`
-	LastErrorCode     ErrorCode    `json:"last_error_code,omitempty"`
-	StartedAt         time.Time    `json:"started_at"`
-	HeartbeatAt       time.Time    `json:"heartbeat_at"`
-	ExitedAt          *time.Time   `json:"exited_at,omitempty"`
+	ID                string        `json:"id"`
+	Identity          string        `json:"identity"`
+	ProjectID         int64         `json:"project_id"`
+	Adapter           string        `json:"adapter"`
+	Workspace         string        `json:"workspace"`
+	HarnessSessionID  string        `json:"harness_session_id,omitempty"`
+	Capabilities      []Capability  `json:"capabilities"`
+	Managed           bool          `json:"managed"`
+	Steerable         bool          `json:"steerable"`
+	State             SessionState  `json:"state"`
+	PID               int           `json:"pid,omitempty"`
+	LastEventKind     EventKind     `json:"last_event_kind,omitempty"`
+	LastCorrelationID string        `json:"last_correlation_id,omitempty"`
+	LastErrorCode     ErrorCode     `json:"last_error_code,omitempty"`
+	StartedAt         time.Time     `json:"started_at"`
+	HeartbeatAt       time.Time     `json:"heartbeat_at"`
+	ExitedAt          *time.Time    `json:"exited_at,omitempty"`
+	Reporter          ReporterState `json:"reporter,omitempty"`
+}
+
+type ReporterState struct {
+	PublicSessionID string              `json:"public_session_id,omitempty"`
+	Capabilities    []Capability        `json:"capabilities,omitempty"`
+	Pending         *ReporterCompletion `json:"pending,omitempty"`
+	RemoteClosed    bool                `json:"remote_closed,omitempty"`
+	Closed          bool                `json:"closed,omitempty"`
+}
+
+type ReporterCompletion struct {
+	ControlID string `json:"control_id"`
+	Kind      string `json:"kind"`
+	Outcome   string `json:"outcome"`
+	Reason    string `json:"reason"`
 }
 
 type Status struct {
-	DaemonID    string    `json:"daemon_id"`
-	Instance    string    `json:"instance"`
-	HeartbeatAt time.Time `json:"heartbeat_at"`
-	Sessions    []Session `json:"sessions"`
+	DaemonID             string    `json:"daemon_id"`
+	Instance             string    `json:"instance"`
+	HeartbeatAt          time.Time `json:"heartbeat_at"`
+	Sessions             []Session `json:"sessions"`
+	ReporterErrorCode    ErrorCode `json:"reporter_error_code,omitempty"`
+	ReporterFailureCount int64     `json:"reporter_failure_count,omitempty"`
 }
 
 // Reporter is the narrow PAI-848 handoff. Its implementation authenticates
 // to PPM and upserts M161 harness_sessions; agentd owns no DB/API schema.
 type Reporter interface {
 	ReportStatus(context.Context, Status) error
+}
+
+type Controller interface {
+	Interrupt(context.Context, string, ControlRequest) (Receipt, error)
+	Stop(context.Context, string, ControlRequest) (Receipt, error)
+	CheckpointReporter(context.Context, string, ControlRequest, ReporterState) error
+}
+
+// ControllerBindingReporter consumes M161 typed controls. The supervisor
+// binds it before starting the reporting goroutine.
+type ControllerBindingReporter interface {
+	BindController(Controller) error
 }
 
 // Receipt is the exact local effect evidence the PAI-848 hub integration must

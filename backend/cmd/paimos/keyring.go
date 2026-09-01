@@ -28,6 +28,11 @@ const envURL = "PAIMOS_URL"
 // target whose URL and credential provenance cannot be split.
 const envAPIKey = "PAIMOS_API_KEY"
 
+// envAPIKeyFile is the daemon-safe alternative to envAPIKey. It is valid only
+// with PAIMOS_URL and must name an owner-only regular file. The CLI reads it
+// directly, so launch services never need to copy the key into argv or logs.
+const envAPIKeyFile = "PAIMOS_API_KEY_FILE"
+
 // PPM_* aliases match the personal-production secret files agents use
 // while working against pm.barta.cm.
 const envPPMURL = "PPM_URL"

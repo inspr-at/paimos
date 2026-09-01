@@ -27,6 +27,27 @@ type fakeProcess struct {
 	stopErr    error
 }
 
+func TestSupervisorPrunesOnlyAfterDurableReporterClosure(t *testing.T) {
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-prune-reporter", MaxSessions: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	old := &sessionEntry{session: Session{ID: "11111111-1111-4111-8111-111111111111", Managed: true, State: StateOwnershipLost,
+		StartedAt: time.Now().Add(-time.Hour), Reporter: ReporterState{PublicSessionID: "22222222-2222-4222-8222-222222222222", RemoteClosed: true}}}
+	supervisor.sessions[old.session.ID] = old
+	newEntry := &sessionEntry{session: Session{ID: "33333333-3333-4333-8333-333333333333", Managed: true, State: StateStarting, StartedAt: time.Now()}}
+	if err := supervisor.reserveSession(newEntry); err == nil {
+		t.Fatal("remote-closed session was pruned before durable lease release")
+	}
+	old.mu.Lock()
+	old.session.Reporter.Closed = true
+	old.mu.Unlock()
+	if err := supervisor.reserveSession(newEntry); err != nil {
+		t.Fatalf("durably closed session remained unprunable: %v", err)
+	}
+}
+
 func newFakeProcess(pid int) *fakeProcess { return &fakeProcess{pid: pid, waited: make(chan error, 1)} }
 func (p *fakeProcess) PID() int           { return p.pid }
 func (p *fakeProcess) Wait() error        { return <-p.waited }
@@ -71,6 +92,7 @@ func (p *blockingControlProcess) Steer(_ context.Context, request ControlRequest
 }
 
 type fakeReporter struct{ reports chan Status }
+type failingStatusReporter struct{}
 
 type closeRaceAdapter struct {
 	process *fakeProcess
@@ -94,6 +116,10 @@ func (r *fakeReporter) ReportStatus(_ context.Context, status Status) error {
 	default:
 	}
 	return nil
+}
+
+func (failingStatusReporter) ReportStatus(context.Context, Status) error {
+	return errors.New("private upstream detail must not surface")
 }
 
 func (a *fakeAdapter) Name() string { return a.name }
@@ -478,6 +504,25 @@ func TestSupervisorReportsHeartbeatWithoutOwnedSessions(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("daemon emitted no empty heartbeat")
+	}
+}
+
+func TestSupervisorSurfacesSanitizedReporterFailureState(t *testing.T) {
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-reporter-error", Reporter: failingStatusReporter{}, HeartbeatInterval: 2 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	deadline := time.Now().Add(time.Second)
+	for {
+		status := supervisor.Status()
+		if status.ReporterErrorCode == ErrorReporterUnavailable && status.ReporterFailureCount > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("reporter failure was not surfaced: %+v", status)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
