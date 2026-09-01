@@ -22,6 +22,13 @@ type diskReporterLeaseStore struct {
 	directory string
 }
 
+// reporterLeaseOwnedByCurrentUser compares through int64: both uint32 uid_t
+// and Go's platform int widen without loss, so the custody check never relies
+// on a narrowing conversion of the effective uid.
+func reporterLeaseOwnedByCurrentUser(uid uint32) bool {
+	return int64(uid) == int64(unix.Geteuid())
+}
+
 func (s *diskReporterLeaseStore) Delete(sessionID string) error {
 	if uuid.Validate(sessionID) != nil || filepath.Base(sessionID) != sessionID {
 		return errors.New("reporter lease session is invalid")
@@ -64,7 +71,7 @@ func newDiskReporterLeaseStore(root, instance string) (reporterLeaseStore, error
 	}
 	defer directoryFile.Close()
 	var stat unix.Stat_t
-	if unix.Fstat(fd, &stat) != nil || stat.Uid != uint32(unix.Geteuid()) || stat.Mode&0o777 != 0o700 {
+	if unix.Fstat(fd, &stat) != nil || !reporterLeaseOwnedByCurrentUser(stat.Uid) || stat.Mode&0o777 != 0o700 {
 		return nil, errors.New("reporter lease directory has unsafe ownership or mode")
 	}
 	if err := sweepReporterLeaseTemps(directoryFile, fd); err != nil {
@@ -86,7 +93,7 @@ func sweepReporterLeaseTemps(directory *os.File, dirFD int) error {
 			continue
 		}
 		var stat unix.Stat_t
-		if unix.Fstatat(dirFD, name, &stat, unix.AT_SYMLINK_NOFOLLOW) != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != uint32(unix.Geteuid()) || stat.Nlink != 1 || stat.Mode&0o777 != 0o600 {
+		if unix.Fstatat(dirFD, name, &stat, unix.AT_SYMLINK_NOFOLLOW) != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || !reporterLeaseOwnedByCurrentUser(stat.Uid) || stat.Nlink != 1 || stat.Mode&0o777 != 0o600 {
 			return errors.New("reporter lease residue has unsafe ownership, mode, or type")
 		}
 		if err := unix.Unlinkat(dirFD, name, 0); err != nil {
@@ -167,7 +174,7 @@ func readReporterLeaseAt(dirFD int, name string) (string, error) {
 	info, infoErr := file.Stat()
 	var stat unix.Stat_t
 	statErr := unix.Fstat(fd, &stat)
-	if infoErr != nil || statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || stat.Uid != uint32(unix.Geteuid()) || stat.Nlink != 1 || info.Size() > 64 {
+	if infoErr != nil || statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || !reporterLeaseOwnedByCurrentUser(stat.Uid) || stat.Nlink != 1 || info.Size() > 64 {
 		return "", errors.New("private reporter lease has unsafe ownership, mode, or type")
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, 65))
