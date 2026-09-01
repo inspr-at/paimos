@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	paimosdb "github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
@@ -1005,6 +1006,64 @@ func TestYieldClaimsOwnedInterruptAndStopRequests(t *testing.T) {
 	var stoppedState, stoppedReason string
 	if err := paimosdb.DB.QueryRow(`SELECT state,reason FROM harness_session_controls WHERE id=?`, stop.ID).Scan(&stoppedState, &stoppedReason); err != nil || stoppedState != ControlRejected || stoppedReason != ReasonOwnershipLost {
 		t.Fatalf("control on stopped generation state=%q reason=%q err=%v", stoppedState, stoppedReason, err)
+	}
+}
+
+func TestGetControlReturnsExactScopedOutcomeWithoutWorkerSecrets(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	session, _, err := service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "outcome-host", SessionRef: "private-outcome-ref", WorkerLease: testWorkerLease,
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerNone,
+		Capabilities: models.HarnessCapabilities{Status: true, Interrupt: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, err := service.RequestControl(context.Background(), session.ID, ControlInterrupt, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := service.GetControl(context.Background(), projectID, session.ID, control.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.ID != control.ID || pending.ProjectID != projectID || pending.HarnessSessionID != session.ID ||
+		pending.CorrelationID != control.ID || pending.Kind != ControlInterrupt || pending.State != ControlPending ||
+		pending.Outcome != "" || pending.Reason != "" || pending.RequestedAt == "" || pending.ClaimedAt != "" || pending.CompletedAt != "" {
+		t.Fatalf("pending outcome=%+v", pending)
+	}
+	if _, err := service.Yield(context.Background(), session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CompleteControl(context.Background(), session.ID, control.ID, ControlRejected, ReasonFailed); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.GetControl(context.Background(), projectID, session.ID, control.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.State != ControlRejected || completed.Outcome != ControlRejected || completed.Reason != ReasonFailed ||
+		completed.ClaimedAt == "" || completed.CompletedAt == "" {
+		t.Fatalf("completed outcome=%+v", completed)
+	}
+	if _, err := service.GetControl(context.Background(), projectID+1, session.ID, control.ID); !IsCode(err, CodeNotFound) {
+		t.Fatalf("wrong-project lookup error=%v", err)
+	}
+	if _, err := service.GetControl(context.Background(), projectID, uuid.NewString(), control.ID); !IsCode(err, CodeNotFound) {
+		t.Fatalf("wrong-session lookup error=%v", err)
+	}
+	if _, err := service.GetControl(context.Background(), projectID, session.ID, uuid.NewString()); !IsCode(err, CodeNotFound) {
+		t.Fatalf("wrong-control lookup error=%v", err)
+	}
+	raw, err := json.Marshal(completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"private-outcome-ref", testWorkerLease, "message_target_id", "requested_by_user_id"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("operator outcome leaked %q: %s", secret, raw)
+		}
 	}
 }
 

@@ -52,3 +52,21 @@ type HarnessControl struct {
 	ClaimedAt         string `json:"claimed_at,omitempty"`
 	CompletedAt       string `json:"completed_at,omitempty"`
 }
+
+// HarnessControlOutcome is the read-only, project-scoped operator view of one
+// typed control. CorrelationID deliberately repeats the public control UUID:
+// agentd uses that exact value as its local owned-effect correlation key.
+type HarnessControlOutcome struct {
+	ID               string `json:"id"`
+	ProjectID        int64  `json:"project_id"`
+	HarnessSessionID string `json:"harness_session_id"`
+	CorrelationID    string `json:"correlation_id"`
+	Sequence         int64  `json:"sequence"`
+	Kind             string `json:"kind"`
+	State            string `json:"state"`
+	Outcome          string `json:"outcome,omitempty"`
+	Reason           string `json:"reason,omitempty"`
+	RequestedAt      string `json:"requested_at"`
+	ClaimedAt        string `json:"claimed_at,omitempty"`
+	CompletedAt      string `json:"completed_at,omitempty"`
+}

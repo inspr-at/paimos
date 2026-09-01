@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
 )
@@ -43,21 +44,46 @@ func seedSessionHomeProductSession(t *testing.T, projectID int64, targetKind str
 func seedSessionHomeHarness(t *testing.T, projectID, agentID int64, agentName, harness, management, phase string, caps models.HarnessCapabilities, fresh bool) string {
 	t.Helper()
 	id := uuid.NewString()
+	var targetID any
+	if caps.Inbox {
+		adapter := agentmessage.AdapterManagedHarness
+		targetKind := agentmessage.TargetKindHarnessSession
+		if management == "unmanaged" {
+			switch harness {
+			case "codex":
+				adapter, targetKind = agentmessage.AdapterCodex, agentmessage.TargetKindCodexThread
+			case "claude":
+				adapter, targetKind = agentmessage.AdapterClaudeResume, agentmessage.TargetKindClaudeSession
+			}
+		}
+		maximumLevel := "simple"
+		if caps.Steer {
+			maximumLevel = "steer"
+		}
+		target, err := agentmessage.NewService(db.DB).RegisterTarget(t.Context(), agentmessage.RegisterTargetInput{
+			ProjectID: projectID, Address: harness + ":" + agentName, Adapter: adapter, TargetKind: targetKind,
+			TargetRef: id, MaximumLevel: maximumLevel, Role: "primary",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		targetID = target.ID
+	}
 	heartbeat := "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 	if !fresh {
 		heartbeat = "strftime('%Y-%m-%dT%H:%M:%fZ','now','-91 seconds')"
 	}
 	query := fmt.Sprintf(`INSERT INTO harness_sessions(
-		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,
+		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,heartbeat_at,updated_at)
-		VALUES(?,?,?,?,?,'test-host-'||?,randomblob(32),?,'worker',?, ?,?,?,?,?,?,%s,%s)`, heartbeat, heartbeat)
+		VALUES(?,?,?,?,?,'test-host-'||?,randomblob(32),randomblob(32),?,?,'worker',?, ?,?,?,?,?,?,%s,%s)`, heartbeat, heartbeat)
 	steerMode := "none"
 	if caps.Steer && management == "managed" {
 		steerMode = "owned"
 	} else if caps.Steer {
 		steerMode = "codex_external"
 	}
-	_, err := db.DB.Exec(query, id, projectID, agentID, agentName, harness, harness, management, steerMode,
+	_, err := db.DB.Exec(query, id, projectID, agentID, agentName, harness, harness, targetID, management, steerMode,
 		caps.Inbox, caps.Status, caps.Steer, caps.Interrupt, caps.Stop, phase)
 	if err != nil {
 		t.Fatal(err)

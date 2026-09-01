@@ -34,6 +34,7 @@ func RegisterHarnessSessionRoutes(r chi.Router) {
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/drain-steer", drainHarnessSteer)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/complete-steer", completeHarnessSteer)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/controls/{kind}", requestHarnessControl)
+	r.With(auth.RequireProjectView).Get("/projects/{id}/harness-sessions/{sessionID}/controls/{controlID}", getHarnessControl)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/controls/{controlID}/complete", completeHarnessControl)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/stop", stopHarnessSession)
 }
@@ -109,7 +110,9 @@ func harnessStatus(err error) int {
 func requireHarnessWorker(w http.ResponseWriter, r *http.Request, projectID int64) (models.HarnessSession, bool) {
 	session, err := managedharness.NewService(db.DB).Get(r.Context(), projectID, chi.URLParam(r, "sessionID"))
 	if err != nil {
-		harnessProblem(w, err, "harness_session_not_found", harnessStatus(err))
+		// A worker mutation must not disclose whether a public session UUID is
+		// absent, belongs to another project, or merely has the wrong proof.
+		harnessProblem(w, errors.New("harness worker authorization failed"), "harness_session_worker_authorization_failed", http.StatusForbidden)
 		return session, false
 	}
 	agent, _ := readAgentAttribution(r)
@@ -309,6 +312,18 @@ func requestHarnessControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeHarnessJSON(w, 201, out)
+}
+func getHarnessControl(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := harnessProjectID(w, r)
+	if !ok {
+		return
+	}
+	out, err := managedharness.NewService(db.DB).GetControl(r.Context(), projectID, chi.URLParam(r, "sessionID"), chi.URLParam(r, "controlID"))
+	if err != nil {
+		harnessProblem(w, err, "harness_session_control_not_found", harnessStatus(err))
+		return
+	}
+	writeHarnessJSON(w, http.StatusOK, out)
 }
 func completeHarnessControl(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := harnessProjectID(w, r)
