@@ -728,6 +728,18 @@ test_committed_recovery_receipts_are_exact() {
     }
   ' "$ROOT/scripts/release/recovery/v5.20.0.json" >/dev/null ||
     fail 'committed v5.20.0 recovery receipt is missing or drifted'
+
+  jq -e --arg reason "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" '
+    . == {
+      schema_version: 1,
+      release: "v26.09.01",
+      pull_request: 193,
+      approved_head: "38803cef876cab1595141ee103cc56217a42d39c",
+      merge_commit: "47a8151719f7fb04d6d9a0677ced18e2b122e05b",
+      incident_reason: $reason
+    }
+  ' "$ROOT/scripts/release/recovery/v26.09.01.json" >/dev/null ||
+    fail 'committed v26.09.01 recovery receipt is missing or drifted'
 }
 
 test_protected_release_and_resume_states() {

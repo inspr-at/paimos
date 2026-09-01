@@ -515,6 +515,11 @@ assert_release_recovery_receipt() {
       # post-merge PR response. The reviewed receipt remains mandatory and
       # every pinned head/check/tree/ancestry/tag gate below still applies.
       ;;
+    v26.09.01:canonical_auto_merge_immediate_merge_post_merge_request_missing)
+      # PAI-874 records the same GitHub immediate-merge incident for PR #193.
+      # Keep this release-specific: the audited receipt and every fail-closed
+      # head/check/tree/ancestry/tag gate below remain mandatory.
+      ;;
     *)
       fail "release recovery receipt carries an unrecognized incident reason"
       ;;
