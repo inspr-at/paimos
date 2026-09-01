@@ -45,6 +45,8 @@ type messageEnvelope struct {
 
 type messageDeliveryWork struct {
 	DeliveryID     string `json:"delivery_id"`
+	Instance       string `json:"instance"`
+	ProjectID      int64  `json:"project_id"`
 	State          string `json:"state"`
 	Adapter        string `json:"adapter,omitempty"`
 	TargetKind     string `json:"target_kind,omitempty"`

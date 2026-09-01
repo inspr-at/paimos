@@ -43,6 +43,7 @@ func TestAgentdExitedSessionRequestsDurableIdleReroute(t *testing.T) {
 	target := `{"socket":"` + socket + `","session_id":"33333333-3333-4333-8333-333333333333"}`
 	_, err = (AgentdCodexPlugin{}).Deliver(context.Background(), DeliverRequest{
 		Level: LevelSteer, TargetRef: target, Body: "managed steer", CorrelationID: "delivery-exited",
+		Instance: "ppm-test", ProjectID: 849, Identity: "codex:worker",
 	})
 	var unavailable *UnavailableError
 	if !errors.As(err, &unavailable) {
@@ -73,6 +74,7 @@ func TestAgentdClaudeDeliveryRequiresCorrelatedQueryInputEvidence(t *testing.T) 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"operation": "steer", "session_id": sessionID, "identity": "claude:worker",
+			"instance": "ppm-test", "project_id": 850,
 			"requested_level": "steer", "effective_level": "steer", "fallback_reason": "",
 			"primitive": agentdwire.ClaudeSteerPrimitive, "correlation_id": "delivery-850",
 			"vendor_message_id": "85000000-0000-4000-8000-000000000851", "applied_at": "2026-08-30T04:00:00Z",
@@ -86,7 +88,7 @@ func TestAgentdClaudeDeliveryRequiresCorrelatedQueryInputEvidence(t *testing.T) 
 
 	result, err := (AgentdClaudePlugin{}).Deliver(context.Background(), DeliverRequest{
 		Level: LevelSteer, TargetRef: `{"socket":"` + socket + `","session_id":"` + sessionID + `"}`,
-		Body: "same Query steer", CorrelationID: "delivery-850",
+		Body: "same Query steer", CorrelationID: "delivery-850", Instance: "ppm-test", ProjectID: 850, Identity: "claude:worker",
 	})
 	if err != nil {
 		t.Fatal(err)

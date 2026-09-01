@@ -141,6 +141,9 @@ func TestBusCodexTargetIdempotencyLeaseAndCompletion(t *testing.T) {
 		t.Fatalf("page=%#v", page)
 	}
 	work := page.Messages[0].DeliveryWork
+	if work.Instance != "ppm" || work.ProjectID != projectID {
+		t.Fatalf("delivery scope=%q/%d want ppm/%d", work.Instance, work.ProjectID, projectID)
+	}
 	state, err := service.CompleteLocalDelivery(context.Background(), CompleteDeliveryInput{
 		ProjectID: projectID, Address: "codex:codex", Agent: "codex", Cursor: first.Cursor,
 		DeliveryID: work.DeliveryID, EffectiveLevel: "steer",

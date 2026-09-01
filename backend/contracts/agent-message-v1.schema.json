@@ -43,9 +43,11 @@
       "type": "object",
       "description": "Attributed listen-worker context; absent from ordinary ledger reads",
       "additionalProperties": false,
-      "required": ["delivery_id", "state", "requested_level"],
+      "required": ["delivery_id", "instance", "project_id", "state", "requested_level"],
       "properties": {
         "delivery_id": { "type": "string", "minLength": 1 },
+        "instance": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "project_id": { "type": "integer", "minimum": 1 },
         "state": { "enum": ["pending", "leased", "retry", "blocked", "handed_off", "dead"] },
         "adapter": { "enum": ["codex", "agentd_codex", "agentd_claude", "managed_harness", "grok_bot_routine", "claude_resume", "claude_channel"] },
         "target_kind": { "enum": ["codex_thread", "agentd_session", "harness_session", "https_webhook", "claude_session"] },
