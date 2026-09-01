@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.01] — 2026-09-01
+
+### Added — Secure Agent Intercom operations (PAI-870, PAI-871)
+
+- Added project-scoped, value-free control-outcome reads through the API and
+  `paimos harness control get`, with stable message, delivery, correlation,
+  vendor-session, and public-session identifiers kept distinct.
+- Added the canonical Agent Intercom operator guide and executable
+  documentation contracts for start, status, tell, steer, interrupt, stop,
+  recovery, authorization, support boundaries, and released-version checks.
+
+### Changed
+
+- Bound every managed worker mutation to a protected per-generation lease,
+  retired invalid legacy inbox state fail closed, and made dead-target
+  retargeting, FIFO delivery, restart reconciliation, cleanup, and process
+  reaping durable across races and restarts.
+- Normalized worker authorization failures to non-enumerating no-mutation
+  responses and preserved the original typed result when a failed control,
+  including `stop`, is replayed with the same correlation ID.
+- Split the protected pull-request race gate across bounded generic and
+  managed-harness matrices while keeping the exhaustive serial and broad race
+  suites on main, nightly, manual, and release runs.
+
 ## [26.08.31] — 2026-08-31
 
 ### Added — Paimos 6.0 product train (PAI-855–PAI-866)
