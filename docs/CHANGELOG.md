@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.01.17.31] — 2026-09-01
+
+### Changed — Truthful empty Agent Intercom state (PAI-878)
+
+- Explained that an empty Paimos home has no product-session records without
+  implying that local Codex or Claude processes are adopted or hidden.
+- Separated configured, unset, and unavailable orchestrator-binding states and
+  exposed the existing setup guide only to authorized super-admins.
+
 ## [26.09.01.15.52] — 2026-09-01
 
 ### Fixed — Deterministic release-tag assurance (PAI-875)
