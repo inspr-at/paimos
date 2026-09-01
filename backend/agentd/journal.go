@@ -72,7 +72,9 @@ func openRegistryJournal(root, instance string, maximum int) (*registryJournal, 
 
 func validateRegistryRecord(record registryRecord) error {
 	s := record.Session
-	if !validOpaqueID(s.ID) || !validOpaqueID(s.Identity) || !filepath.IsAbs(s.Workspace) || s.StartedAt.IsZero() || s.HeartbeatAt.IsZero() ||
+	// ProjectID zero is accepted only for pre-PAI-870 history. Start rejects it,
+	// and recovery strips control authority before the row becomes observable.
+	if !validOpaqueID(s.ID) || !validOpaqueID(s.Identity) || s.ProjectID < 0 || !filepath.IsAbs(s.Workspace) || s.StartedAt.IsZero() || s.HeartbeatAt.IsZero() ||
 		s.PID != 0 || !s.Managed {
 		return errors.New("invalid agentd registry record")
 	}

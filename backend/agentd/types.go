@@ -30,10 +30,13 @@ const (
 )
 
 var (
-	ErrSessionNotFound    = errors.New("managed session not found")
-	ErrSessionNotRunning  = errors.New("managed session is not running")
-	ErrAdapterUnsupported = errors.New("harness adapter is unsupported")
-	ErrCapabilityMissing  = errors.New("managed session capability is unavailable")
+	ErrSessionNotFound       = errors.New("managed session not found")
+	ErrSessionNotRunning     = errors.New("managed session is not running")
+	ErrAdapterUnsupported    = errors.New("harness adapter is unsupported")
+	ErrCapabilityMissing     = errors.New("managed session capability is unavailable")
+	ErrControlScopeMismatch  = errors.New("managed control scope does not match the owned session")
+	ErrControlReplayConflict = errors.New("managed control correlation was reused with different input")
+	ErrControlReplayCapacity = errors.New("managed control replay bound reached")
 )
 
 type StartRequest struct {
@@ -41,6 +44,7 @@ type StartRequest struct {
 	Workspace string `json:"workspace"`
 	Prompt    string `json:"prompt"`
 	Identity  string `json:"identity"`
+	ProjectID int64  `json:"project_id"`
 }
 
 type AdapterEvent struct {
@@ -72,6 +76,9 @@ const (
 )
 
 type ControlRequest struct {
+	Instance      string `json:"instance"`
+	ProjectID     int64  `json:"project_id"`
+	Identity      string `json:"identity"`
 	CorrelationID string `json:"correlation_id"`
 	Text          string `json:"text,omitempty"`
 }
@@ -113,6 +120,7 @@ const (
 type Session struct {
 	ID                string       `json:"id"`
 	Identity          string       `json:"identity"`
+	ProjectID         int64        `json:"project_id"`
 	Adapter           string       `json:"adapter"`
 	Workspace         string       `json:"workspace"`
 	HarnessSessionID  string       `json:"harness_session_id,omitempty"`
@@ -148,6 +156,8 @@ type Reporter interface {
 type Receipt struct {
 	Operation       string    `json:"operation"`
 	SessionID       string    `json:"session_id"`
+	Instance        string    `json:"instance"`
+	ProjectID       int64     `json:"project_id"`
 	Identity        string    `json:"identity"`
 	RequestedLevel  string    `json:"requested_level"`
 	EffectiveLevel  string    `json:"effective_level"`

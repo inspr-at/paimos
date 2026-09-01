@@ -50,6 +50,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	flags.SetOutput(io.Discard)
 	common := addCommonFlags(flags)
 	adapter, workspace, identity := "codex", "", ""
+	var projectID int64
 	sessionID, correlationID, codexPath := "", "", ""
 	claudePath, nodePath, claudeSDKPath := "", "", ""
 	if command == "serve" {
@@ -62,16 +63,27 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.StringVar(&adapter, "adapter", "codex", "harness adapter")
 		flags.StringVar(&workspace, "workspace", "", "absolute child workspace")
 		flags.StringVar(&identity, "identity", "", "attributed harness identity")
+		flags.Int64Var(&projectID, "project-id", 0, "owning PPM project numeric ID")
 	}
 	if command == "steer" || command == "interrupt" || command == "stop" {
 		flags.StringVar(&sessionID, "session", "", "managed agentd session UUID")
 		flags.StringVar(&correlationID, "correlation-id", "", "durable message/delivery/control ID")
+		flags.StringVar(&identity, "identity", "", "expected attributed harness identity")
+		flags.Int64Var(&projectID, "project-id", 0, "expected PPM project numeric ID")
 	}
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if common.instance == "" {
 		return errors.New("--instance is required")
+	}
+	if command == "start" || command == "steer" || command == "interrupt" || command == "stop" {
+		if projectID <= 0 {
+			return errors.New("--project-id is required")
+		}
+		if strings.TrimSpace(identity) == "" {
+			return errors.New("--identity is required")
+		}
 	}
 	root, socket, err := resolvePaths(common)
 	if err != nil {
@@ -107,17 +119,25 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		if readErr != nil || len(prompt) == 0 || len(prompt) > 256<<10 {
 			return errors.New("start prompt on stdin is invalid")
 		}
-		output, err = client.Start(ctx, agentd.StartRequest{Adapter: adapter, Workspace: workspace, Identity: identity, Prompt: string(prompt)})
+		output, err = client.Start(ctx, agentd.StartRequest{
+			Adapter: adapter, Workspace: workspace, Identity: identity, ProjectID: projectID, Prompt: string(prompt),
+		})
 	case "steer":
 		body, readErr := io.ReadAll(io.LimitReader(stdin, (64<<10)+1))
 		if readErr != nil || len(body) == 0 || len(body) > 64<<10 {
 			return errors.New("steer text on stdin is invalid")
 		}
-		output, err = client.Steer(ctx, sessionID, agentd.ControlRequest{CorrelationID: correlationID, Text: string(body)})
+		output, err = client.Steer(ctx, sessionID, agentd.ControlRequest{
+			Instance: common.instance, ProjectID: projectID, Identity: identity, CorrelationID: correlationID, Text: string(body),
+		})
 	case "interrupt":
-		output, err = client.Interrupt(ctx, sessionID, agentd.ControlRequest{CorrelationID: correlationID})
+		output, err = client.Interrupt(ctx, sessionID, agentd.ControlRequest{
+			Instance: common.instance, ProjectID: projectID, Identity: identity, CorrelationID: correlationID,
+		})
 	case "stop":
-		output, err = client.Stop(ctx, sessionID, agentd.ControlRequest{CorrelationID: correlationID})
+		output, err = client.Stop(ctx, sessionID, agentd.ControlRequest{
+			Instance: common.instance, ProjectID: projectID, Identity: identity, CorrelationID: correlationID,
+		})
 	default:
 		return errors.New("command must be serve, start, status, steer, interrupt, stop, or version")
 	}

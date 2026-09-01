@@ -386,7 +386,7 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 	if _, _, err := s.resolveAttributedInbox(ctx, projectID, address, agent); err != nil {
 		return false, err
 	}
-	var work DeliveryWork
+	work := DeliveryWork{Instance: instanceName(), ProjectID: projectID}
 	var selectedTargetID sql.NullString
 	err := s.db.QueryRowContext(ctx, `SELECT d.delivery_id,d.state,d.requested_level,d.fallback_reason,`+selectedDeliveryTargetSQL+`
 		FROM agent_message_deliveries d JOIN agent_messages am ON am.id=d.message_row_id

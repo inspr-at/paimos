@@ -5,6 +5,7 @@ package agentd
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -21,6 +22,7 @@ import (
 const defaultHeartbeatInterval = 15 * time.Second
 const reporterTimeout = 10 * time.Second
 const sessionFinalizeTimeout = 10 * time.Second
+const maxControlReplayEntries = 256
 
 type SupervisorConfig struct {
 	Adapters          []Adapter
@@ -32,15 +34,23 @@ type SupervisorConfig struct {
 }
 
 type sessionEntry struct {
-	mu            sync.Mutex
-	controlMu     sync.Mutex
-	session       Session
-	process       Process
-	capabilities  map[Capability]bool
-	monitorDone   chan struct{}
-	monitorErr    error
-	stopRequested bool
-	controlReady  bool
+	mu             sync.Mutex
+	controlMu      sync.Mutex
+	session        Session
+	process        Process
+	capabilities   map[Capability]bool
+	monitorDone    chan struct{}
+	monitorErr     error
+	stopRequested  bool
+	controlReady   bool
+	controlReplays map[string]controlReplay
+}
+
+type controlReplay struct {
+	operation string
+	textHash  [sha256.Size]byte
+	receipt   Receipt
+	err       error
 }
 
 type Supervisor struct {
@@ -185,6 +195,7 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 	now := time.Now().UTC()
 	entry := &sessionEntry{session: Session{
 		ID: uuid.NewString(), Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
+		ProjectID:    validated.ProjectID,
 		Capabilities: append([]Capability(nil), capabilities...), Managed: true, State: StateStarting,
 		StartedAt: now, HeartbeatAt: now,
 	}, capabilities: capabilitySet, monitorDone: make(chan struct{})}
@@ -298,6 +309,9 @@ func validateStartRequest(request StartRequest) (StartRequest, error) {
 	if request.Identity == "" || request.Identity != strings.TrimSpace(request.Identity) || len(request.Identity) > 256 ||
 		!utf8.ValidString(request.Identity) || strings.ContainsAny(request.Identity, "\x00\r\n") {
 		return StartRequest{}, errors.New("agentd identity is invalid")
+	}
+	if request.ProjectID <= 0 {
+		return StartRequest{}, errors.New("agentd project is invalid")
 	}
 	if request.Prompt == "" || len(request.Prompt) > maxPromptBytes || !utf8.ValidString(request.Prompt) || strings.ContainsRune(request.Prompt, 0) {
 		return StartRequest{}, errors.New("agentd prompt is invalid")
@@ -537,6 +551,50 @@ func (s *Supervisor) get(id string) (*sessionEntry, error) {
 	return entry, nil
 }
 
+func (s *Supervisor) validateControlScope(entry *sessionEntry, request ControlRequest) error {
+	if request.Instance == "" || request.Instance != strings.TrimSpace(request.Instance) || len(request.Instance) > 512 ||
+		!utf8.ValidString(request.Instance) || strings.ContainsAny(request.Instance, "\x00\r\n") || request.ProjectID <= 0 ||
+		request.Identity == "" || request.Identity != strings.TrimSpace(request.Identity) || len(request.Identity) > 256 ||
+		!utf8.ValidString(request.Identity) || strings.ContainsAny(request.Identity, "\x00\r\n") {
+		return ErrControlScopeMismatch
+	}
+	entry.mu.Lock()
+	matches := request.Instance == s.instance && request.ProjectID == entry.session.ProjectID && request.Identity == entry.session.Identity
+	entry.mu.Unlock()
+	if !matches {
+		return ErrControlScopeMismatch
+	}
+	return nil
+}
+
+func (e *sessionEntry) replay(operation string, request ControlRequest) (Receipt, bool, error) {
+	if e.controlReplays == nil {
+		return Receipt{}, false, nil
+	}
+	replay, ok := e.controlReplays[request.CorrelationID]
+	if !ok {
+		// Never evict a live session's correlations: an old delivery lease can
+		// arrive late, and forgetting it would turn a retry into a second effect.
+		if len(e.controlReplays) >= maxControlReplayEntries {
+			return Receipt{}, false, ErrControlReplayCapacity
+		}
+		return Receipt{}, false, nil
+	}
+	if replay.operation != operation || replay.textHash != sha256.Sum256([]byte(request.Text)) {
+		return Receipt{}, false, ErrControlReplayConflict
+	}
+	return replay.receipt, true, replay.err
+}
+
+func (e *sessionEntry) remember(operation string, request ControlRequest, receipt Receipt, err error) {
+	if e.controlReplays == nil {
+		e.controlReplays = make(map[string]controlReplay, maxControlReplayEntries)
+	}
+	e.controlReplays[request.CorrelationID] = controlReplay{
+		operation: operation, textHash: sha256.Sum256([]byte(request.Text)), receipt: receipt, err: err,
+	}
+}
+
 func (s *Supervisor) Steer(ctx context.Context, id string, request ControlRequest) (Receipt, error) {
 	if request.Text == "" || len(request.Text) > maxTextBytes || !utf8.ValidString(request.Text) ||
 		strings.ContainsRune(request.Text, 0) || !validCorrelationID(request.CorrelationID) {
@@ -548,6 +606,12 @@ func (s *Supervisor) Steer(ctx context.Context, id string, request ControlReques
 	}
 	entry.controlMu.Lock()
 	defer entry.controlMu.Unlock()
+	if err := s.validateControlScope(entry, request); err != nil {
+		return Receipt{}, err
+	}
+	if receipt, ok, err := entry.replay("steer", request); err != nil || ok {
+		return receipt, err
+	}
 	entry.mu.Lock()
 	if entry.session.State != StateRunning {
 		entry.mu.Unlock()
@@ -557,19 +621,23 @@ func (s *Supervisor) Steer(ctx context.Context, id string, request ControlReques
 		entry.mu.Unlock()
 		return Receipt{}, ErrCapabilityMissing
 	}
-	process, identity := entry.process, entry.session.Identity
+	process, identity, projectID := entry.process, entry.session.Identity, entry.session.ProjectID
 	entry.mu.Unlock()
 	effect, err := process.Steer(ctx, request)
 	if err != nil {
+		entry.remember("steer", request, Receipt{}, err)
 		return Receipt{}, err
 	}
 	if err := validateControlEffect(request, effect); err != nil {
+		entry.remember("steer", request, Receipt{}, err)
 		return Receipt{}, err
 	}
 	entry.observe(AdapterEvent{Kind: EventControlApplied, CorrelationID: request.CorrelationID})
 	_ = s.persist(entry)
 	s.scheduleReport()
-	return effectReceipt("steer", id, identity, effect), nil
+	receipt := s.effectReceipt("steer", id, identity, projectID, effect)
+	entry.remember("steer", request, receipt, nil)
+	return receipt, nil
 }
 
 func (s *Supervisor) Interrupt(ctx context.Context, id string, request ControlRequest) (Receipt, error) {
@@ -582,6 +650,12 @@ func (s *Supervisor) Interrupt(ctx context.Context, id string, request ControlRe
 	}
 	entry.controlMu.Lock()
 	defer entry.controlMu.Unlock()
+	if err := s.validateControlScope(entry, request); err != nil {
+		return Receipt{}, err
+	}
+	if receipt, ok, err := entry.replay("interrupt", request); err != nil || ok {
+		return receipt, err
+	}
 	entry.mu.Lock()
 	if entry.session.State != StateRunning {
 		entry.mu.Unlock()
@@ -591,23 +665,27 @@ func (s *Supervisor) Interrupt(ctx context.Context, id string, request ControlRe
 		entry.mu.Unlock()
 		return Receipt{}, ErrCapabilityMissing
 	}
-	process, identity := entry.process, entry.session.Identity
+	process, identity, projectID := entry.process, entry.session.Identity, entry.session.ProjectID
 	entry.mu.Unlock()
 	effect, err := process.Interrupt(ctx, request)
 	if err != nil {
+		entry.remember("interrupt", request, Receipt{}, err)
 		return Receipt{}, err
 	}
 	if err := validateControlEffect(request, effect); err != nil {
+		entry.remember("interrupt", request, Receipt{}, err)
 		return Receipt{}, err
 	}
 	entry.observe(AdapterEvent{Kind: EventControlApplied, CorrelationID: request.CorrelationID})
 	_ = s.persist(entry)
 	s.scheduleReport()
-	return effectReceipt("interrupt", id, identity, effect), nil
+	receipt := s.effectReceipt("interrupt", id, identity, projectID, effect)
+	entry.remember("interrupt", request, receipt, nil)
+	return receipt, nil
 }
 
-func effectReceipt(operation, id, identity string, effect ControlEffect) Receipt {
-	return Receipt{Operation: operation, SessionID: id, Identity: identity, RequestedLevel: "steer",
+func (s *Supervisor) effectReceipt(operation, id, identity string, projectID int64, effect ControlEffect) Receipt {
+	return Receipt{Operation: operation, SessionID: id, Instance: s.instance, ProjectID: projectID, Identity: identity, RequestedLevel: "steer",
 		EffectiveLevel: "steer", FallbackReason: "", Primitive: effect.Primitive, CorrelationID: effect.CorrelationID,
 		VendorMessageID: effect.VendorMessageID, AppliedAt: time.Now().UTC()}
 }
@@ -630,6 +708,15 @@ func (s *Supervisor) Stop(ctx context.Context, id string, request ControlRequest
 	}
 	entry.controlMu.Lock()
 	defer entry.controlMu.Unlock()
+	if err := s.validateControlScope(entry, request); err != nil {
+		return Receipt{}, err
+	}
+	if receipt, ok, err := entry.replay("stop", request); err != nil || ok {
+		if ok {
+			err = waitSessionFinalized(ctx, entry)
+		}
+		return receipt, err
+	}
 	entry.mu.Lock()
 	if entry.session.State != StateRunning {
 		entry.mu.Unlock()
@@ -642,7 +729,7 @@ func (s *Supervisor) Stop(ctx context.Context, id string, request ControlRequest
 	entry.stopRequested = true
 	entry.session.State = StateStopping
 	entry.refreshSteerableLocked()
-	process, identity := entry.process, entry.session.Identity
+	process, identity, projectID := entry.process, entry.session.Identity, entry.session.ProjectID
 	entry.mu.Unlock()
 	_ = s.persist(entry)
 	s.scheduleReport()
@@ -660,15 +747,19 @@ func (s *Supervisor) Stop(ctx context.Context, id string, request ControlRequest
 		entry.mu.Unlock()
 		_ = s.persist(entry)
 		s.scheduleReport()
+		entry.remember("stop", request, Receipt{}, err)
 		return Receipt{}, err
 	}
 	if err := validateControlEffect(request, effect); err != nil {
+		entry.remember("stop", request, Receipt{}, err)
 		return Receipt{}, err
 	}
+	receipt := s.effectReceipt("stop", id, identity, projectID, effect)
+	entry.remember("stop", request, receipt, nil)
 	if err := waitSessionFinalized(ctx, entry); err != nil {
 		return Receipt{}, err
 	}
-	return effectReceipt("stop", id, identity, effect), nil
+	return receipt, nil
 }
 
 func (s *Supervisor) Close(ctx context.Context) error {

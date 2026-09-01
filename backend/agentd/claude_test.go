@@ -318,14 +318,13 @@ func TestClaudeSupervisorRestartLosesOwnershipWithoutPersistingContent(t *testin
 	t.Cleanup(func() { _ = first.Close(context.Background()) })
 	session, err := first.Start(context.Background(), StartRequest{
 		Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:owned",
-		Prompt: "private initial words 850",
+		Prompt: "private initial words 850", ProjectID: 850,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := first.Steer(context.Background(), session.ID, ControlRequest{
-		CorrelationID: "delivery-durable-850", Text: "private steering words 850",
-	})
+	receipt, err := first.Steer(context.Background(), session.ID,
+		scopedControl(first, session, "delivery-durable-850", "private steering words 850"))
 	if err != nil || receipt.VendorMessageID == "" || receipt.CorrelationID != "delivery-durable-850" {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
@@ -360,10 +359,10 @@ func TestClaudeSupervisorRestartLosesOwnershipWithoutPersistingContent(t *testin
 	if len(recovered) != 1 || recovered[0].ID != session.ID || recovered[0].State != StateOwnershipLost || recovered[0].Steerable || recovered[0].PID != 0 {
 		t.Fatalf("recovered=%+v", recovered)
 	}
-	if _, err := second.Steer(context.Background(), session.ID, ControlRequest{CorrelationID: "delivery-after-restart", Text: "must-fail"}); !errors.Is(err, ErrSessionNotRunning) {
+	if _, err := second.Steer(context.Background(), session.ID, scopedControl(second, recovered[0], "delivery-after-restart", "must-fail")); !errors.Is(err, ErrSessionNotRunning) {
 		t.Fatalf("restart steer error=%v", err)
 	}
-	if _, err := first.Stop(context.Background(), session.ID, ControlRequest{CorrelationID: "cleanup-original-owner"}); err != nil {
+	if _, err := first.Stop(context.Background(), session.ID, scopedControl(first, session, "cleanup-original-owner", "")); err != nil {
 		t.Fatal(err)
 	}
 	// Match t.Cleanup's LIFO order explicitly, then prove Close is a complete

@@ -6,6 +6,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,9 +108,16 @@ func (a *fakeAdapter) Start(_ context.Context, request StartRequest, observe fun
 	return a.process, nil
 }
 
+func scopedControl(supervisor *Supervisor, session Session, correlationID, text string) ControlRequest {
+	return ControlRequest{
+		Instance: supervisor.instance, ProjectID: session.ProjectID, Identity: session.Identity,
+		CorrelationID: correlationID, Text: text,
+	}
+}
+
 func TestSupervisorListsAndControlsOnlyOwnedChildren(t *testing.T) {
 	adapter := &fakeAdapter{name: AdapterCodex, process: newFakeProcess(1234), threadID: "thread-owned"}
-	supervisor, err := NewSupervisor(SupervisorConfig{Adapters: []Adapter{adapter}, HeartbeatInterval: 5 * time.Millisecond})
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-test", Adapters: []Adapter{adapter}, HeartbeatInterval: 5 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +127,7 @@ func TestSupervisorListsAndControlsOnlyOwnedChildren(t *testing.T) {
 		t.Fatalf("unowned steer error=%v, want ErrSessionNotFound", err)
 	}
 	session, err := supervisor.Start(context.Background(), StartRequest{
-		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "build the ticket", Identity: "codex:worker-849",
+		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "build the ticket", Identity: "codex:worker-849", ProjectID: 849,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +139,7 @@ func TestSupervisorListsAndControlsOnlyOwnedChildren(t *testing.T) {
 		t.Fatalf("start request=%+v", adapter.startRequest)
 	}
 
-	receipt, err := supervisor.Steer(context.Background(), session.ID, ControlRequest{CorrelationID: "delivery-live-123", Text: "tighten tests"})
+	receipt, err := supervisor.Steer(context.Background(), session.ID, scopedControl(supervisor, session, "delivery-live-123", "tighten tests"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,25 +155,25 @@ func TestSupervisorListsAndControlsOnlyOwnedChildren(t *testing.T) {
 
 func TestSupervisorSerializesControlsOnExactLiveProcess(t *testing.T) {
 	process := &blockingControlProcess{fakeProcess: newFakeProcess(2234), entered: make(chan string, 2), release: make(chan struct{})}
-	supervisor, err := NewSupervisor(SupervisorConfig{Adapters: []Adapter{&fakeAdapter{name: AdapterCodex, process: process, threadID: "thread-serial"}}})
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-test", Adapters: []Adapter{&fakeAdapter{name: AdapterCodex, process: process, threadID: "thread-serial"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
-	session, err := supervisor.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:serial"})
+	session, err := supervisor.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:serial", ProjectID: 849})
 	if err != nil {
 		t.Fatal(err)
 	}
 	results := make(chan error, 2)
 	go func() {
-		_, callErr := supervisor.Steer(context.Background(), session.ID, ControlRequest{CorrelationID: "delivery-one", Text: "one"})
+		_, callErr := supervisor.Steer(context.Background(), session.ID, scopedControl(supervisor, session, "delivery-one", "one"))
 		results <- callErr
 	}()
 	if got := <-process.entered; got != "delivery-one" {
 		t.Fatalf("first control=%q", got)
 	}
 	go func() {
-		_, callErr := supervisor.Steer(context.Background(), session.ID, ControlRequest{CorrelationID: "delivery-two", Text: "two"})
+		_, callErr := supervisor.Steer(context.Background(), session.ID, scopedControl(supervisor, session, "delivery-two", "two"))
 		results <- callErr
 	}()
 	select {
@@ -195,7 +203,7 @@ func TestSupervisorCloseCancelsAndReapsStartingProcess(t *testing.T) {
 	startDone := make(chan error, 1)
 	go func() {
 		_, startErr := supervisor.Start(context.Background(), StartRequest{
-			Adapter: AdapterCodex, Workspace: workspace, Prompt: "work", Identity: "codex:close-race",
+			Adapter: AdapterCodex, Workspace: workspace, Prompt: "work", Identity: "codex:close-race", ProjectID: 849,
 		})
 		startDone <- startErr
 	}()
@@ -217,17 +225,17 @@ func TestSupervisorCloseCancelsAndReapsStartingProcess(t *testing.T) {
 func TestSupervisorStopRaceWithNaturalExitDoesNotOverwriteTerminalState(t *testing.T) {
 	process := newFakeProcess(4234)
 	process.stopErr = ErrSessionNotRunning
-	supervisor, err := NewSupervisor(SupervisorConfig{Adapters: []Adapter{&fakeAdapter{name: AdapterCodex, process: process, threadID: "thread-stop-race"}}})
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-test", Adapters: []Adapter{&fakeAdapter{name: AdapterCodex, process: process, threadID: "thread-stop-race"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	session, err := supervisor.Start(context.Background(), StartRequest{
-		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:stop-race",
+		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:stop-race", ProjectID: 849,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := supervisor.Stop(context.Background(), session.ID, ControlRequest{CorrelationID: "control-stop-race"}); err != nil {
+	if _, err := supervisor.Stop(context.Background(), session.ID, scopedControl(supervisor, session, "control-stop-race", "")); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(time.Second)
@@ -257,19 +265,28 @@ func TestSupervisorKeepsLiveProcessControlAcrossAdapterReplacement(t *testing.T)
 	process := newFakeProcess(4321)
 	process.steerErr = errors.New("proxy restart")
 	first := &fakeAdapter{name: AdapterCodex, process: process, threadID: "thread-restart"}
-	supervisor, err := NewSupervisor(SupervisorConfig{Adapters: []Adapter{first}})
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-test", Adapters: []Adapter{first}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
 	session, err := supervisor.Start(context.Background(), StartRequest{
-		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:worker",
+		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:worker", ProjectID: 849,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := supervisor.Steer(context.Background(), session.ID, ControlRequest{CorrelationID: "delivery-first", Text: "first"}); err == nil {
+	if _, err := supervisor.Steer(context.Background(), session.ID, scopedControl(supervisor, session, "delivery-first", "first")); err == nil {
 		t.Fatal("first adapter failure was hidden")
+	}
+	if _, err := supervisor.Steer(context.Background(), session.ID, scopedControl(supervisor, session, "delivery-first", "first")); err == nil {
+		t.Fatal("failed control replay was hidden")
+	}
+	process.mu.Lock()
+	failedAttempts := len(process.steers)
+	process.mu.Unlock()
+	if failedAttempts != 1 {
+		t.Fatalf("ambiguous failed control reached process %d times, want once", failedAttempts)
 	}
 
 	restarted := &fakeAdapter{name: AdapterCodex, process: first.process, threadID: first.threadID}
@@ -279,7 +296,7 @@ func TestSupervisorKeepsLiveProcessControlAcrossAdapterReplacement(t *testing.T)
 	process.mu.Lock()
 	process.steerErr = nil
 	process.mu.Unlock()
-	if _, err := supervisor.Steer(context.Background(), session.ID, ControlRequest{CorrelationID: "delivery-second", Text: "second"}); err != nil {
+	if _, err := supervisor.Steer(context.Background(), session.ID, scopedControl(supervisor, session, "delivery-second", "second")); err != nil {
 		t.Fatalf("steer after adapter restart: %v", err)
 	}
 	if got := supervisor.Status().Sessions[0]; !got.Steerable || got.HarnessSessionID != "thread-restart" {
@@ -294,7 +311,7 @@ func TestSupervisorRestartReconcilesPersistedChildrenToOwnershipLost(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := first.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "TOP SECRET prompt 849", Identity: "codex:worker"})
+	session, err := first.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "TOP SECRET prompt 849", Identity: "codex:worker", ProjectID: 849})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +344,7 @@ func TestSupervisorRestartReconcilesPersistedChildrenToOwnershipLost(t *testing.
 	if len(got[0].Capabilities) != 2 || got[0].Capabilities[0] != CapabilityInbox || got[0].Capabilities[1] != CapabilityStatus {
 		t.Fatalf("recovered capabilities=%v", got[0].Capabilities)
 	}
-	if _, err := second.Stop(context.Background(), session.ID, ControlRequest{CorrelationID: "control-after-restart"}); !errors.Is(err, ErrSessionNotRunning) {
+	if _, err := second.Stop(context.Background(), session.ID, scopedControl(second, got[0], "control-after-restart", "")); !errors.Is(err, ErrSessionNotRunning) {
 		t.Fatalf("stop after restart error=%v", err)
 	}
 	process.mu.Lock()
@@ -344,13 +361,44 @@ func TestSupervisorRestartReconcilesPersistedChildrenToOwnershipLost(t *testing.
 	}
 }
 
+func TestSupervisorRestartKeepsLegacyUnscopedHistoryFailClosed(t *testing.T) {
+	root := t.TempDir()
+	journal, err := openRegistryJournal(root, "ppm-legacy", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	legacy := Session{
+		ID: "019d1234-1234-7123-8123-123456789abc", Identity: "codex:legacy", Adapter: AdapterCodex,
+		Workspace: t.TempDir(), Capabilities: []Capability{CapabilityInbox, CapabilityStatus, CapabilitySteer, CapabilityInterrupt, CapabilityStop},
+		Managed: true, State: StateRunning, StartedAt: now.Add(-time.Minute), HeartbeatAt: now,
+	}
+	if err := journal.put(legacy); err != nil {
+		t.Fatal(err)
+	}
+	supervisor, err := NewSupervisor(SupervisorConfig{StateRoot: root, Instance: "ppm-legacy", MaxSessions: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := supervisor.Status().Sessions
+	if len(got) != 1 || got[0].ProjectID != 0 || got[0].State != StateOwnershipLost || got[0].Steerable || got[0].PID != 0 {
+		t.Fatalf("legacy recovery=%+v", got)
+	}
+	if _, err := supervisor.Steer(context.Background(), got[0].ID, ControlRequest{
+		Instance: "ppm-legacy", ProjectID: 870, Identity: got[0].Identity,
+		CorrelationID: "legacy-must-fail", Text: "do not apply",
+	}); !errors.Is(err, ErrControlScopeMismatch) {
+		t.Fatalf("legacy control error=%v, want ErrControlScopeMismatch", err)
+	}
+}
+
 func TestSupervisorStateIsSeparatedByPPMInstance(t *testing.T) {
 	root := t.TempDir()
 	one, err := NewSupervisor(SupervisorConfig{Adapters: []Adapter{&fakeAdapter{name: AdapterCodex, process: newFakeProcess(8888), threadID: "thread-one"}}, StateRoot: root, Instance: "ppm-one"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := one.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:one"}); err != nil {
+	if _, err := one.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:one", ProjectID: 849}); err != nil {
 		t.Fatal(err)
 	}
 	two, err := NewSupervisor(SupervisorConfig{StateRoot: root, Instance: "ppm-two"})
@@ -370,7 +418,7 @@ func TestSupervisorPrunesOwnershipLostHistoryBeforeActiveBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	oldSession := Session{ID: "019d1234-1234-7123-8123-123456789abc", Identity: "codex:old", Adapter: AdapterCodex,
+	oldSession := Session{ID: "019d1234-1234-7123-8123-123456789abc", Identity: "codex:old", ProjectID: 849, Adapter: AdapterCodex,
 		Workspace: t.TempDir(), Capabilities: []Capability{CapabilityInbox, CapabilityStatus}, Managed: true,
 		State: StateOwnershipLost, StartedAt: now.Add(-time.Hour), HeartbeatAt: now, LastErrorCode: "ownership_lost"}
 	if err := journal.put(oldSession); err != nil {
@@ -381,7 +429,7 @@ func TestSupervisorPrunesOwnershipLostHistoryBeforeActiveBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newSession, err := second.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "new", Identity: "codex:new"})
+	newSession, err := second.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "new", Identity: "codex:new", ProjectID: 849})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +457,7 @@ func TestClaudeBoundaryStaysUnsupportedUntilOwnedAdapterExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = supervisor.Start(context.Background(), StartRequest{
-		Adapter: AdapterClaude, Workspace: t.TempDir(), Prompt: "work", Identity: "claude:worker",
+		Adapter: AdapterClaude, Workspace: t.TempDir(), Prompt: "work", Identity: "claude:worker", ProjectID: 850,
 	})
 	if !errors.Is(err, ErrAdapterUnsupported) {
 		t.Fatalf("claude start error=%v, want ErrAdapterUnsupported", err)
@@ -430,5 +478,104 @@ func TestSupervisorReportsHeartbeatWithoutOwnedSessions(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("daemon emitted no empty heartbeat")
+	}
+}
+
+func TestSupervisorRejectsCrossScopeControlBeforeOwnedProcess(t *testing.T) {
+	process := newFakeProcess(8701)
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Instance: "ppm-one",
+		Adapters: []Adapter{&fakeAdapter{name: AdapterCodex, process: process, threadID: "thread-scoped"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{
+		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:scoped", ProjectID: 870,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, request := range []ControlRequest{
+		{Instance: "ppm-two", ProjectID: 870, Identity: "codex:scoped", CorrelationID: "wrong-instance", Text: "do not apply"},
+		{Instance: "ppm-one", ProjectID: 871, Identity: "codex:scoped", CorrelationID: "wrong-project", Text: "do not apply"},
+		{Instance: "ppm-one", ProjectID: 870, Identity: "codex:other", CorrelationID: "wrong-identity", Text: "do not apply"},
+	} {
+		if _, err := supervisor.Steer(context.Background(), session.ID, request); !errors.Is(err, ErrControlScopeMismatch) {
+			t.Fatalf("request=%+v error=%v, want ErrControlScopeMismatch", request, err)
+		}
+	}
+	process.mu.Lock()
+	defer process.mu.Unlock()
+	if len(process.steers) != 0 {
+		t.Fatalf("cross-scope controls reached owned process: %+v", process.steers)
+	}
+}
+
+func TestSupervisorReplaysCompletedControlReceiptWithoutDuplicateEffect(t *testing.T) {
+	process := newFakeProcess(8702)
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Instance: "ppm-replay",
+		Adapters: []Adapter{&fakeAdapter{name: AdapterCodex, process: process, threadID: "thread-replay"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{
+		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:replay", ProjectID: 870,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := ControlRequest{
+		Instance: "ppm-replay", ProjectID: 870, Identity: "codex:replay",
+		CorrelationID: "delivery-replay-870", Text: "apply exactly once",
+	}
+	first, err := supervisor.Steer(context.Background(), session.ID, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := supervisor.Steer(context.Background(), session.ID, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("replayed receipt changed: first=%+v second=%+v", first, second)
+	}
+	process.mu.Lock()
+	steers := len(process.steers)
+	process.mu.Unlock()
+	if steers != 1 {
+		t.Fatalf("completed delivery applied %d times, want once", steers)
+	}
+
+	request.Text = "reuse correlation with different input"
+	if _, err := supervisor.Steer(context.Background(), session.ID, request); !errors.Is(err, ErrControlReplayConflict) {
+		t.Fatalf("correlation reuse error=%v, want ErrControlReplayConflict", err)
+	}
+	request.Text = "bounded input"
+	for i := 1; i < maxControlReplayEntries; i++ {
+		request.CorrelationID = fmt.Sprintf("delivery-replay-%03d", i)
+		if _, err := supervisor.Steer(context.Background(), session.ID, request); err != nil {
+			t.Fatalf("fill replay entry %d: %v", i, err)
+		}
+	}
+	request.CorrelationID = "delivery-over-bound"
+	if _, err := supervisor.Steer(context.Background(), session.ID, request); !errors.Is(err, ErrControlReplayCapacity) {
+		t.Fatalf("over-bound error=%v, want ErrControlReplayCapacity", err)
+	}
+	request.CorrelationID = "delivery-replay-870"
+	request.Text = "apply exactly once"
+	if replayed, err := supervisor.Steer(context.Background(), session.ID, request); err != nil || replayed != first {
+		t.Fatalf("old replay after bound receipt=%+v error=%v", replayed, err)
+	}
+	process.mu.Lock()
+	steers = len(process.steers)
+	process.mu.Unlock()
+	if steers != maxControlReplayEntries {
+		t.Fatalf("bounded controls applied %d times, want %d", steers, maxControlReplayEntries)
 	}
 }

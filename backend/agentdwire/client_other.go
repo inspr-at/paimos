@@ -15,15 +15,23 @@ var (
 	ErrSessionUnavailable    = errors.New("agentd managed session is unavailable")
 	ErrCapabilityUnavailable = errors.New("agentd managed steer capability is unavailable")
 	ErrTransportUnavailable  = errors.New("agentd local transport is unavailable")
+	ErrScopeMismatch         = errors.New("agentd managed control scope mismatch")
+	ErrReplayConflict        = errors.New("agentd managed control replay conflict")
+	ErrReplayCapacity        = errors.New("agentd managed control replay bound reached")
 )
 
 type ControlRequest struct {
+	Instance      string `json:"instance"`
+	ProjectID     int64  `json:"project_id"`
+	Identity      string `json:"identity"`
 	CorrelationID string `json:"correlation_id"`
 	Text          string `json:"text,omitempty"`
 }
 type Receipt struct {
 	Operation       string    `json:"operation"`
 	SessionID       string    `json:"session_id"`
+	Instance        string    `json:"instance"`
+	ProjectID       int64     `json:"project_id"`
 	Identity        string    `json:"identity"`
 	RequestedLevel  string    `json:"requested_level"`
 	EffectiveLevel  string    `json:"effective_level"`

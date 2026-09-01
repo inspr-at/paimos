@@ -30,6 +30,21 @@ func TestVersionAndRequiredInstance(t *testing.T) {
 	}
 }
 
+func TestOwnedSessionCommandsRequireProjectAndIdentityScope(t *testing.T) {
+	var output bytes.Buffer
+	for _, args := range [][]string{
+		{"start", "--instance", "ppm", "--identity", "codex:worker"},
+		{"steer", "--instance", "ppm", "--session", "019d1234-1234-7123-8123-123456789abc", "--identity", "codex:worker"},
+		{"interrupt", "--instance", "ppm", "--session", "019d1234-1234-7123-8123-123456789abc", "--project-id", "870"},
+		{"stop", "--instance", "ppm", "--session", "019d1234-1234-7123-8123-123456789abc", "--project-id", "870"},
+	} {
+		err := run(args, strings.NewReader("body"), &output)
+		if err == nil || (!strings.Contains(err.Error(), "--project-id") && !strings.Contains(err.Error(), "--identity")) {
+			t.Fatalf("args=%v error=%v", args, err)
+		}
+	}
+}
+
 func TestServeRegistersOwnedCodexAndClaudeAdapters(t *testing.T) {
 	adapters := serveAdapters("/operator/codex", "/operator/claude", "/runtime/node", "/operator/sdk.mjs")
 	var names []string

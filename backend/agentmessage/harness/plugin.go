@@ -90,6 +90,9 @@ type DeliverRequest struct {
 	Level         string
 	Body          string
 	TargetRef     string
+	Instance      string
+	ProjectID     int64
+	Identity      string
 	Stdout        io.Writer
 	Stderr        io.Writer
 	ClientVersion string
