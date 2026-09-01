@@ -13,7 +13,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
@@ -73,16 +72,10 @@ func postSessionUtterance(t *testing.T, ts *testServer, projectID int64, cookie,
 
 func seedSessionUtteranceTarget(t *testing.T, projectID, agentID int64, agentName string) (string, string) {
 	t.Helper()
-	targetID := uuid.NewString()
-	address := "codex:" + agentName
-	if _, err := db.DB.Exec(`INSERT INTO agent_message_targets(
-		id,instance,project_id,address,adapter,target_kind,target_ref_cipher,maximum_level,role,enabled,version)
-		VALUES(?,'test',?,?,'codex','codex_thread',zeroblob(29),'simple','primary',1,1)`, targetID, projectID, address); err != nil {
-		t.Fatal(err)
-	}
 	harnessID := seedSessionHomeHarness(t, projectID, agentID, agentName, "codex", "managed", "working",
 		models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true}, true)
-	if _, err := db.DB.Exec(`UPDATE harness_sessions SET message_target_id=? WHERE id=?`, targetID, harnessID); err != nil {
+	var targetID string
+	if err := db.DB.QueryRow(`SELECT message_target_id FROM harness_sessions WHERE id=?`, harnessID).Scan(&targetID); err != nil {
 		t.Fatal(err)
 	}
 	return targetID, harnessID

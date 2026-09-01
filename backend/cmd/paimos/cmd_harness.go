@@ -20,7 +20,7 @@ func harnessCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "harness", Short: "Manage durable harness-session control-plane state"}
 	cmd.AddCommand(harnessRegisterCmd(), harnessListCmd(), harnessStatusCmd(), harnessHeartbeatCmd(), harnessYieldCmd(),
 		harnessDrainCmd(), harnessCompleteDeliveryCmd(), harnessDrainSteerCmd(), harnessCompleteSteerCmd(),
-		harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessCompleteControlCmd(), harnessMarkStoppedCmd())
+		harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessControlGroupCmd(), harnessCompleteControlCmd(), harnessMarkStoppedCmd())
 	return cmd
 }
 
@@ -266,6 +266,11 @@ func harnessDeliveryCompletionCmd(use, short, suffix, defaultLevel string) *cobr
 }
 func harnessControlCmd(kind string) *cobra.Command {
 	return harnessProjectCommand(kind, "Request typed owned "+kind, http.MethodPost, "/{session}/controls/"+kind, func() any { return map[string]any{} }, false)
+}
+func harnessControlGroupCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "control", Short: "Inspect typed owned-control outcomes"}
+	cmd.AddCommand(harnessProjectCommand("get", "Get one scoped typed control outcome", http.MethodGet, "/{session}/controls/{control}", func() any { return nil }, false))
+	return cmd
 }
 func harnessCompleteControlCmd() *cobra.Command {
 	var outcome, reason string

@@ -439,6 +439,31 @@ func scanControl(row interface{ Scan(...any) error }) (models.HarnessControl, er
 	return out, err
 }
 
+// GetControl returns the non-secret operator outcome for one exact
+// project/session/control tuple. The join is intentionally project-scoped so a
+// public UUID from another project cannot be used as an existence oracle.
+func (s *Service) GetControl(ctx context.Context, projectID int64, sessionID, controlID string) (models.HarnessControlOutcome, error) {
+	var out models.HarnessControlOutcome
+	err := s.db.QueryRowContext(ctx, `SELECT c.id,s.project_id,c.harness_session_id,c.sequence,c.kind,c.state,c.reason,
+		c.requested_at,COALESCE(c.claimed_at,''),COALESCE(c.completed_at,'')
+		FROM harness_session_controls c
+		JOIN harness_sessions s ON s.id=c.harness_session_id
+		WHERE s.project_id=? AND s.id=? AND c.id=?`, projectID, strings.TrimSpace(sessionID), strings.TrimSpace(controlID)).
+		Scan(&out.ID, &out.ProjectID, &out.HarnessSessionID, &out.Sequence, &out.Kind, &out.State, &out.Reason,
+			&out.RequestedAt, &out.ClaimedAt, &out.CompletedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.HarnessControlOutcome{}, coded(CodeNotFound, "harness control not found")
+	}
+	if err != nil {
+		return models.HarnessControlOutcome{}, err
+	}
+	out.CorrelationID = out.ID
+	if out.State == ControlApplied || out.State == ControlRejected {
+		out.Outcome = out.State
+	}
+	return out, nil
+}
+
 func (s *Service) RequestControl(ctx context.Context, sessionID, kind string, actor int64) (models.HarnessControl, error) {
 	kind = strings.ToLower(strings.TrimSpace(kind))
 	if (kind != ControlInterrupt && kind != ControlStop) || actor <= 0 {
