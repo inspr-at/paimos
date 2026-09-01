@@ -317,6 +317,51 @@ if GO_COMMAND="$FIXTURES/unsafe-go-list.sh" "$RACE_RUNNER" --dry-run --lane=hand
   fail 'handler race sharder filtered an unsafe discovered test name instead of failing closed'
 fi
 
+if "$RACE_RUNNER" --dry-run --lane=affected \
+  github.com/inspr-at/paimos/backend/agentmode >/dev/null 2>&1; then
+  fail 'affected race lane still allows unindexed package execution'
+fi
+if "$RACE_RUNNER" --dry-run --lane=affected --shard=0/3 \
+  github.com/inspr-at/paimos/backend/agentmode >/dev/null 2>&1; then
+  fail 'affected race lane accepts a drifted shard count'
+fi
+affected_race_plan=
+for shard in 0 1 2 3; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+    github.com/inspr-at/paimos/backend/agentmode \
+    github.com/inspr-at/paimos/backend/auth \
+    github.com/inspr-at/paimos/backend/managedharness \
+    github.com/inspr-at/paimos/backend/db \
+    github.com/inspr-at/paimos/backend/handlers)
+  affected_race_plan+="$plan"$'\n'
+done
+[[ "$(grep -c '^go test -race .* ./agentmode -run ' <<<"$affected_race_plan")" -eq 2 &&
+  "$(grep -c '^go test -race .* ./auth -run ' <<<"$affected_race_plan")" -eq 1 ]] ||
+  fail 'affected race package shards omitted or duplicated a selected package plan'
+[[ "$affected_race_plan" != *'./managedharness'* && "$affected_race_plan" != *'./db'* &&
+  "$affected_race_plan" != *'./handlers'* ]] ||
+  fail 'affected race package shards duplicated an isolated DB, handler, or managed-harness lane'
+affected_broad_plans=()
+affected_broad_plan=
+for shard in 0 1 2 3; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" './...')
+  affected_broad_plans+=("$plan")
+  affected_broad_plan+="$plan"$'\n'
+done
+for package in ./cmd/paimos ./supervision ./agentmessage ./agentmode ./agentd ./localjournal ./ownedprocess; do
+  owners=0
+  for plan in "${affected_broad_plans[@]}"; do
+    [[ "$plan" != *" $package"* ]] || owners=$((owners + 1))
+  done
+  [[ "$owners" -eq 1 ]] ||
+    fail "affected ./... race shards assigned $package to $owners runners, want exactly one"
+done
+[[ "$affected_broad_plan" != *' ./db'* && "$affected_broad_plan" != *' ./handlers'* &&
+  "$affected_broad_plan" != *' ./managedharness'* ]] ||
+  fail 'affected ./... race shards duplicated an isolated package lane'
+[[ "${affected_broad_plans[0]}" != "${affected_broad_plans[1]}" ]] ||
+  fail 'affected ./... race matrix emitted identical shard plans'
+
 sequential_state="$TMP_ROOT/sequential-race"
 mkdir -p "$sequential_state"
 if ! FAKE_GO_STATE="$sequential_state" GO_COMMAND="$FIXTURES/sequential-go.sh" \
@@ -325,29 +370,48 @@ if ! FAKE_GO_STATE="$sequential_state" GO_COMMAND="$FIXTURES/sequential-go.sh" \
 fi
 [[ ! -e "$sequential_state/overlap" && "$(wc -l < "$sequential_state/runs" | tr -d ' ')" -eq 5 ]] ||
   fail 'full backend handler race plan overlapped or omitted an indexed shard'
-agentmode_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected github.com/inspr-at/paimos/backend/agentmode)
+agentmode_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard=0/4 github.com/inspr-at/paimos/backend/agentmode)
 [[ "$agentmode_race_plan" == *'subscribe\ before\ high-water'* && "$agentmode_race_plan" == *'permission\ grant\ and\ revoke'* ]] ||
   fail 'agentmode race plan lost non-performance stream concurrency subtests'
 [[ "$agentmode_race_plan" != *'overflow\ lost\ wake'* ]] ||
   fail 'agentmode race plan includes a latency budget invalid under race instrumentation'
-auth_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected github.com/inspr-at/paimos/backend/auth)
+auth_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard=0/4 github.com/inspr-at/paimos/backend/auth)
 [[ "$(grep -c '^go test -race .* ./auth -run ' <<<"$auth_race_plan")" -eq 1 &&
   "$auth_race_plan" == *'TestResolveAPIKeyUsageStampNeverInheritsSQLiteBusyTimeout'* ]] ||
   fail 'auth PR race plan lost its package-local SQLite contention proofs'
 [[ "$auth_race_plan" != *'TestResolveAPIKeyRecentUsageStaysReadOnlyWhileSQLiteWriterIsBusy'* &&
-  "$auth_race_plan" != *' ./auth$' && "$auth_race_plan" != *'./...'* ]] ||
+  "$(grep -Ec '^go test -race -count=1 -timeout=8m \./auth$' <<<"$auth_race_plan")" -eq 0 &&
+  "$auth_race_plan" != *'./...'* ]] ||
   fail 'auth PR race plan restored the latency-sensitive or exhaustive package suite'
-managedharness_race_match='^(TestStoppedSessionCanRegisterNewActiveGeneration|TestConcurrentInitialRegistrationReplayCreatesOneActiveRow|TestRegisterRecoversAfterTargetCommitBeforeSessionInsert|TestStopRacesControlRequestWithoutStrandingControl)$'
-managedharness_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected github.com/inspr-at/paimos/backend/managedharness)
-[[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$managedharness_race_plan")" -eq 1 ]] ||
-  fail 'managed-harness PR race plan is not one bounded package process'
+managedharness_race_match='^(TestStoppedSessionCanRegisterNewActiveGeneration|Test.*(Concurrent|Concurrency|Race|Atomic|Replay|Recovers).*)$'
+if "$RACE_RUNNER" --dry-run --lane=managedharness \
+  github.com/inspr-at/paimos/backend/managedharness >/dev/null 2>&1; then
+  fail 'managed-harness race lane still allows unindexed execution'
+fi
+if "$RACE_RUNNER" --dry-run --lane=managedharness --shard=0/3 \
+  github.com/inspr-at/paimos/backend/managedharness >/dev/null 2>&1; then
+  fail 'managed-harness race lane accepts a drifted shard count'
+fi
+managedharness_race_plan=
+for shard in 0 1 2 3; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=managedharness --shard="$shard/4" \
+    github.com/inspr-at/paimos/backend/managedharness)
+  [[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$plan")" -eq 1 &&
+    "$(plan_test_names "$plan" | wc -l | tr -d ' ')" -eq 1 ]] ||
+    fail "managed-harness race shard $shard does not own exactly one oracle"
+  managedharness_race_plan+="$plan"$'\n'
+done
 assert_plan_covers_discovery_once 'managed-harness targeted race' "$managedharness_race_plan" \
   ./managedharness "$managedharness_race_match"
-[[ "$managedharness_race_plan" != *' ./managedharness$' && "$managedharness_race_plan" != *'./...'* ]] ||
+[[ "$(grep -Ec '^go test -race -count=1 -timeout=8m \./managedharness$' <<<"$managedharness_race_plan")" -eq 0 &&
+  "$managedharness_race_plan" != *'./...'* ]] ||
   fail 'managed-harness PR race plan restored the exhaustive migration-heavy package suite'
 broad_race_plan=$("$RACE_RUNNER" --dry-run './...')
-[[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")" -eq 1 ]] ||
+[[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")" -eq 4 ]] ||
   fail 'broad race plan omitted or duplicated the managed-harness concurrency and recovery oracles'
+broad_managedharness_plan=$(grep '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")
+assert_plan_covers_discovery_once 'broad managed-harness race' "$broad_managedharness_plan" \
+  ./managedharness "$managedharness_race_match"
 
 job_block() {
   local job="$1" file="${2:-$WORKFLOW}"
@@ -372,6 +436,7 @@ db=$(job_block backend-pr-db)
 handlers=$(job_block backend-pr-handlers)
 performance=$(job_block backend-pr-performance)
 race=$(job_block backend-pr-race)
+managedharness_race=$(job_block backend-pr-managedharness-race)
 db_race=$(job_block backend-pr-db-race)
 handlers_race=$(job_block backend-pr-handlers-race)
 invariants=$(job_block backend-security-invariants)
@@ -414,7 +479,7 @@ done
 [[ "$race" == *"github.event_name == 'pull_request'"* ]] || fail 'race PR lane is not pull-request-only'
 [[ "$race" == *'backend-ci-packages.sh --direct'* && "$race" == *'backend-pr-race.sh --lane=affected'* ]] ||
   fail 'race PR lane does not race changed packages'
-for lane_and_plan in "race:$race" "db-race:$db_race" "handlers-race:$handlers_race"; do
+for lane_and_plan in "race:$race" "managedharness-race:$managedharness_race" "db-race:$db_race" "handlers-race:$handlers_race"; do
   lane=${lane_and_plan%%:*}
   plan=${lane_and_plan#*:}
   [[ "$plan" == *"$CI_SELECTION_CALL"* &&
@@ -423,6 +488,14 @@ for lane_and_plan in "race:$race" "db-race:$db_race" "handlers-race:$handlers_ra
 done
 [[ "$race" != *'-p 1'* && "$race" != *'go test -race -count=1 -timeout=30m ./...'* ]] ||
   fail 'race PR lane still races the full tree'
+[[ "$race" == *'matrix:'* && "$race" == *'shard: [0, 1, 2, 3]'* &&
+  "$race" == *"--shard=\"\${{ matrix.shard }}/4\""* ]] ||
+  fail 'affected race packages do not run on four independent matrix runners'
+[[ "$managedharness_race" == *'backend-ci-packages.sh --direct'* &&
+  "$managedharness_race" == *'backend-pr-race.sh --lane=managedharness'* &&
+  "$managedharness_race" == *'matrix:'* && "$managedharness_race" == *'shard: [0, 1, 2, 3]'* &&
+  "$managedharness_race" == *"--shard=\"\${{ matrix.shard }}/4\""* ]] ||
+  fail 'managed-harness race oracles do not run on four independent matrix runners'
 [[ "$db_race" == *'backend-ci-packages.sh --direct'* && "$db_race" == *'backend-pr-race.sh --lane=db'* ]] ||
   fail 'parallel PR DB race lane is incomplete'
 [[ "$handlers_race" == *'backend-ci-packages.sh --direct'* && "$handlers_race" == *'backend-pr-race.sh --lane=handlers'* ]] ||
@@ -463,11 +536,15 @@ grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-4800' "$FULL_WAITER" ||
   fail 'frontend quality lane lost schema, lint, type, or unit assurance'
 for dependency in \
   backend-pr-vet backend-pr backend-pr-db backend-pr-handlers backend-pr-performance \
-  backend-pr-race backend-pr-db-race backend-pr-handlers-race \
+  backend-pr-race backend-pr-managedharness-race backend-pr-db-race backend-pr-handlers-race \
   backend-security-invariants backend-publish-invariants quality frontend-quality
 do
   [[ "$aggregate" == *"$dependency"* ]] || fail "required test aggregator does not depend on $dependency"
 done
+[[ "$aggregate" == *'BACKEND_PR_MANAGEDHARNESS_RACE: ${{ needs.backend-pr-managedharness-race.result }}'* &&
+  "$aggregate" == *'[[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == '\''success'\'' ]]'* &&
+  "$aggregate" == *'[[ "$BACKEND_PR_MANAGEDHARNESS_RACE" == '\''skipped'\'' ]]'* ]] ||
+  fail 'required test aggregator does not fail closed on the managed-harness race matrix result'
 [[ "$aggregate" != *'backend-full'* ]] || fail 'required PR test aggregator still depends on the full backend suite'
 [[ "$docker" == *'needs.test.result == '\''success'\'''* &&
   "$docker" != *"needs.test.result != 'failure'"* ]] ||

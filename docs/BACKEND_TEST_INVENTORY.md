@@ -90,21 +90,27 @@ covers the original risk.
   transitive reverse test-dependency closure. The affected lane excludes only
   the DB/handler shards and isolated performance duplicate; it still runs the
   parent stream test's other subtests.
-- DB, handler, and other directly changed race targets use separate required
-  runners. The original two M147 SQLite arbitration tests retain 32 simultaneous
-  application goroutines and 32 open connections in the normal DB plan. Companion
-  variants exercise the same exactly-one-winner oracles under `-race`, each in its
-  own process, with the production ten-connection pool and five-second busy
-  timeout. The 664 handler normal tests and 19 handler concurrency contracts
+- DB, handler, managed-harness, and other directly changed race targets use
+  separate required runners. Generic affected race packages are distributed
+  exactly once across four matrix runners. The original two M147 SQLite
+  arbitration tests retain 32 simultaneous application goroutines and 32 open
+  connections in the normal DB plan. Companion variants exercise the same
+  exactly-one-winner oracles under `-race`, each in its own process, with the
+  production ten-connection pool and five-second busy timeout. The 664 handler
+  normal tests and 19 handler concurrency contracts
   each use five independently provisioned matrix runners, after hosted timing
   showed four left too little margin. The PR lanes reject an unindexed local
   multi-process invocation.
   Managed-harness PR race instrumentation is likewise limited to its four true
   concurrent, stop-versus-control, and crash/replay contracts because all 17
-  package tests independently rebuild the full SQLite migration chain. Normal
-  PR selection and the exhaustive full-serial workflow still run all 17; the
-  broad main, nightly, and manually authorized race workflow retains the same
-  complete set of four package-local concurrency and recovery oracles.
+  package tests independently rebuild the full SQLite migration chain. Each
+  oracle owns one independently provisioned PR matrix runner. A new package
+  concurrency/recovery oracle must update the semantic selector and shard
+  topology in the same change; the gate pins the currently selected names
+  exactly once. Normal PR selection and the exhaustive full-serial workflow
+  still run all 17; the broad main, nightly, and manually authorized race
+  workflow retains the same complete set of four package-local concurrency and
+  recovery oracles in four sequential foreground processes.
   E2E and security scanning remain separate required contexts.
 - The protected `test` context is an aggregator over every vet, normal, race,
   performance, backend quality, and frontend quality lane, so GitHub still
