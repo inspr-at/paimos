@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.01.15.52] — 2026-09-01
+
+### Fixed — Deterministic release-tag assurance (PAI-875)
+
+- Made the lease-renewal release oracle wait for the synchronized client state
+  instead of an earlier server-side request count, removing a CI ordering race
+  without changing production control behavior.
+
 ## [26.09.01] — 2026-09-01
 
 ### Added — Secure Agent Intercom operations (PAI-870, PAI-871)
