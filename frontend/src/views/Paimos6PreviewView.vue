@@ -449,11 +449,13 @@ onScopeDispose(() => {
         </div>
         <div v-else-if="home.state.value === 'empty'" class="p6-empty-state">
           <div class="p6-empty-state-copy">
-            <p class="p6-empty-kicker">No managed product sessions</p>
-            <h3>{{ selectedProject?.key ?? 'This project' }} has no managed sessions yet.</h3>
+            <p class="p6-empty-kicker">No Paimos product sessions</p>
+            <h3>
+              {{ selectedProject?.key ?? 'This project' }} has no product-session records yet.
+            </h3>
             <p>
-              Local Codex or Claude sessions started outside Paimos stay unmanaged. Paimos does not
-              adopt them retroactively.
+              Paimos has no product-session record to show. Local Codex or Claude processes started
+              outside Paimos stay unmanaged, and Paimos does not adopt them retroactively.
             </p>
           </div>
           <div class="p6-empty-binding">
@@ -468,10 +470,12 @@ onScopeDispose(() => {
             </p>
             <p v-else-if="orchestrator.projection.value?.displayLabel">
               Configured as <strong>{{ orchestrator.projection.value.displayLabel }}</strong
-              >. No managed sessions are present yet.
+              >. No Paimos product-session records are present yet.
             </p>
             <template v-else>
-              <p>Not configured. This is separate from the project having no managed sessions.</p>
+              <p>
+                Not configured. This is separate from the project having no product-session records.
+              </p>
               <a
                 v-if="auth.isSuperAdmin"
                 :href="ORCHESTRATOR_SETUP_GUIDE"
@@ -828,9 +832,9 @@ onScopeDispose(() => {
   outline: 3px solid rgba(47, 107, 82, 0.3);
   outline-offset: 3px;
 }
-.p6-empty-binding .p6-empty-operator-note {
-  color: #6f7b74;
-  font-size: 10.5px;
+.p6-empty-binding > p.p6-empty-operator-note {
+  color: #59655e;
+  font-size: 11.5px;
 }
 .p6-honesty {
   display: grid;

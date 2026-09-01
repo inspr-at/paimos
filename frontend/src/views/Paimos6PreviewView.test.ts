@@ -658,15 +658,16 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
   it('renders explicit empty and unavailable states without inventing or retaining rows', async () => {
     const empty = await mountWithHome(liveProjection([]))
     await flush()
-    expect(empty.el.textContent).toContain('No managed product sessions')
-    expect(empty.el.textContent).toContain('PAI has no managed sessions yet')
+    expect(empty.el.textContent).toContain('No Paimos product sessions')
+    expect(empty.el.textContent).toContain('PAI has no product-session records yet')
+    expect(empty.el.textContent).toContain('Paimos has no product-session record to show')
     expect(empty.el.textContent).toContain(
-      'Local Codex or Claude sessions started outside Paimos stay unmanaged',
+      'Local Codex or Claude processes started outside Paimos stay unmanaged',
     )
     expect(empty.el.textContent).toContain('Paimos does not adopt them retroactively')
     expect(empty.el.textContent).toContain('Orchestrator binding')
     expect(empty.el.textContent).toContain(
-      'Not configured. This is separate from the project having no managed sessions',
+      'Not configured. This is separate from the project having no product-session records',
     )
     expect(empty.el.textContent).toContain(
       'A super admin can configure it through the documented instance setup',
@@ -692,6 +693,21 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     await unavailable.unmount()
   })
 
+  it('distinguishes an unavailable orchestrator binding from an unset binding', async () => {
+    const pendingOrchestrator = deferred<typeof unsetOrchestrator>()
+    const empty = await mountWithHome(liveProjection([]), pendingOrchestrator.promise)
+    pendingOrchestrator.reject(new Error('offline'))
+    await flush()
+
+    const binding = empty.el.querySelector('.p6-empty-binding')
+    expect(binding?.textContent).toContain('Binding status is unavailable')
+    expect(binding?.textContent).toContain('No orchestrator is inferred')
+    expect(binding?.textContent).not.toContain('Not configured')
+    expect(binding?.querySelector('a')).toBeNull()
+    expect(empty.el.querySelector('.p6-session-card')).toBeNull()
+    await empty.unmount()
+  })
+
   it('gives only an authorized super admin the documented orchestrator setup route', async () => {
     const empty = await mountWithHome(liveProjection([]), unsetOrchestrator, 'super_admin')
     await flush()
@@ -713,7 +729,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
       'Configured as aMY / Primary',
     )
     expect(configured.el.querySelector('.p6-empty-binding')?.textContent).toContain(
-      'No managed sessions are present yet',
+      'No Paimos product-session records are present yet',
     )
     expect(configured.el.querySelector('.p6-empty-binding a')).toBeNull()
     expect(configured.el.querySelector('.p6-session-card')).toBeNull()
