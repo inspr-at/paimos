@@ -6,9 +6,12 @@
 package agentd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +20,58 @@ import (
 
 	"github.com/inspr-at/paimos/backend/agentmessage/harness"
 )
+
+func TestStopTransportNeverTurnsFailedReplayIntoHTTP200(t *testing.T) {
+	stopFailure := &ownedStopFailure{detail: "transport stop failed"}
+	process := &failedStopProcess{fakeProcess: newFakeProcess(9875), failure: stopFailure}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-stop-transport", Adapters: []Adapter{&fakeAdapter{name: AdapterCodex, process: process, threadID: "thread-stop-transport"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{
+		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:stop-transport", ProjectID: 870,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := scopedControl(supervisor, session, "control-stop-transport-replay", "")
+	raw, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func() *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		httpRequest := httptest.NewRequest(http.MethodPost, "/v1/sessions/"+session.ID+"/stop", bytes.NewReader(raw))
+		httpRequest.Header.Set("Content-Type", "application/json")
+		transportHandler(supervisor).ServeHTTP(recorder, httpRequest)
+		return recorder
+	}
+	first := call()
+	if first.Code != http.StatusBadRequest {
+		t.Fatalf("first failed stop status=%d body=%s", first.Code, first.Body.String())
+	}
+	process.waited <- nil
+	entry, err := supervisor.get(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entry.monitorDone:
+	case <-time.After(time.Second):
+		t.Fatal("child finalization did not complete")
+	}
+	replay := call()
+	if replay.Code != first.Code || replay.Body.String() != first.Body.String() {
+		t.Fatalf("failed replay status/body=%d %s want=%d %s", replay.Code, replay.Body.String(), first.Code, first.Body.String())
+	}
+	process.mu.Lock()
+	stops := process.stops
+	process.mu.Unlock()
+	if stops != 1 {
+		t.Fatalf("failed transport replay reached vendor %d times, want once", stops)
+	}
+}
 
 func TestUnixTransportIsPrivateAndRoundTrips(t *testing.T) {
 	process := newFakeProcess(9876)
