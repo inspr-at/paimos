@@ -740,9 +740,15 @@ Commands whose argument is explicitly another resource ID, plus
 ## Harness sessions
 
 - `GET|POST /projects/{id}/harness-sessions` — list/register durable,
-  non-secret managed or unmanaged harness identities.
+  non-secret managed or unmanaged harness identities. Registration includes a
+  distinct private worker lease for that generation; the server stores only
+  its domain-separated digest. Inbox-capable registration creates or reuses
+  the encrypted target first, then commits the active session with both digest
+  and target FK; an interrupted pre-insert attempt leaves only a reusable
+  target, not worker authority.
 - `GET /projects/{id}/harness-sessions/{sessionID}` — status with host and
-  public session attribution; the encrypted private reference is never shown.
+  public session attribution; the private reference and worker lease are never
+  shown.
 - `POST .../{sessionID}/heartbeat` · `POST .../{sessionID}/yield` — attributed
   status/yield and typed owned-control claim.
 - `POST .../{sessionID}/drain` · `POST .../{sessionID}/complete-delivery` —
@@ -752,8 +758,23 @@ Commands whose argument is explicitly another resource ID, plus
 - `POST .../{sessionID}/controls/{interrupt|stop}` ·
   `POST .../{sessionID}/controls/{controlID}/complete` — typed owned-process
   requests; no free-form command or PAI-809 action extension.
+- `GET .../{sessionID}/controls/{controlID}` — ProjectView operator read bound
+  to the exact project, public session, and control UUID. It returns `id`,
+  `project_id`, `harness_session_id`, `correlation_id`, `sequence`, `kind`,
+  `state`, optional terminal `outcome` and `reason`, and
+  `requested_at`/`claimed_at`/`completed_at`; no worker lease, session
+  reference, target reference, body, or requester.
 - `POST .../{sessionID}/stop` — attributed terminal lifecycle transition after
   worker cleanup.
+
+Every worker-side mutation must carry ordinary API authentication, the exact
+project path and public harness-session UUID, matching agent attribution, and
+exactly one `X-Paimos-Harness-Worker-Lease` proof. A public UUID, a caller-set
+agent header, or a ProjectEdit API key is insufficient on its own. Missing,
+duplicate, wrong-generation, and cross-project proofs return the same
+uniform non-enumerating `403` without mutation. The CLI reads the proof from
+`--worker-lease-file`, never argv or a URL, and rejects redirects rather than
+forwarding it.
 
 Capability fields are advertised and server-capped. Unmanaged steer is valid
 only for a bound Codex target whose plugin and durable target both cap at

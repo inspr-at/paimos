@@ -59,11 +59,30 @@ a documented Claude Agent SDK streaming Query, inherits the operator's local
 CLI login, and never accepts a vendor token:
 
 ```bash
-paimos-agentd serve --instance production
+PROJECT_ID="$(paimos --json project show PAI | jq -er '.id')"
+REPORT_HOST=worker-host
+REPORT_URL=https://paimos.example.com
+REPORT_API_KEY_FILE=/absolute/path/to/owner-only-api-key
+paimos-agentd serve --instance production \
+  --report-host "$REPORT_HOST" --report-url "$REPORT_URL" \
+  --report-api-key-file "$REPORT_API_KEY_FILE"
 printf '%s' 'Implement the assigned ticket.' | paimos-agentd start \
-  --instance production --adapter codex --workspace "$PWD" --identity codex:worker
+  --instance production --adapter codex --workspace "$PWD" \
+  --project-id "$PROJECT_ID" --identity codex:worker
 paimos-agentd status --instance production
 ```
+
+Continue with the [Agent Intercom runbook](AGENT_INTERCOM.md) before registering
+targets or starting listeners. It documents the required steer primary plus
+simple fallback, redacted diagnostics, per-generation worker-lease boundary,
+and restart recovery without publishing local capabilities. When durable
+reporting is enabled, keep its shared Paimos API key in a separate protected
+credential file; agentd independently stores each generation lease in its
+instance-scoped owner-only state and never passes either secret in argv.
+The reporting trio is all-or-none; omit all three for local-only status. The
+daemon rejects non-loopback HTTP, redirects, unsafe credential custody, and a
+failed authenticated preflight. Use an absolute `--paimos-path` only when the
+reporting CLI is not discoverable on `PATH`.
 
 Claude owned sessions additionally require Node.js 18+, Claude CLI 2.1.251 or
 newer, and the operator-installed Agent SDK at exactly 0.3.251. Install the SDK

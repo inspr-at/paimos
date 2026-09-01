@@ -21,6 +21,7 @@
 <p align="center">
   <a href="https://paimos.inspr.at">Product site</a> ·
   <a href="#quick-start">Quick start</a> ·
+  <a href="#agent-intercom-quickstart">Agent Intercom</a> ·
   <a href="docs/AGENT_INTERFACE.md">Agent interface</a> ·
   <a href="docs/CONFIGURATION.md">Configuration</a> ·
   <a href="docs/HARDENING.md">Operations</a> ·
@@ -78,7 +79,7 @@ model becomes the context and accountability layer around their work.
 | Voice intake        | A spec workbench that turns continuous speech (or typed input) into a live, editable specification with project detection, impact analysis, ELI5/10/15 understanding checks with spoken playback, per-language (EN/DE) cached artifacts, time-travel history, and one-click issue creation. Voice endpoints are rate-limited, budgeted, and cost-metered. |
 | Project context     | Linked repositories, typed knowledge, canonical project-agent artifacts, issue-to-file anchors, entity graph and blast-radius reads, and mixed-context retrieval.                                            |
 | Agent interfaces    | A typed `paimos` CLI, `paimos-mcp`, REST, curated OpenAPI, self-describing schema, JSON output, file-first multiline input, dry runs, idempotent transitions, and declarative bulk apply.                    |
-| Agent relay         | Durable, project-scoped message threads with issue links, sender allowlists, message-level simple/steer intent, encrypted receiver targets, webhook wake for Grok Bot routines, and exact Codex queue/steer delivery. |
+| Agent Intercom      | Durable, project-scoped message threads with sender allowlists, simple/steer intent, encrypted receiver targets, truthful fallback, and owned Codex/Claude status, steer, interrupt, and stop through `paimos-agentd`. |
 | Assisted work       | Thirteen in-app AI actions with operator-managed prompts, usage limits, cost records, execution profiles, context packs, and metadata-only audit records.                                                    |
 | Implementation runs | Explicit Claude Code and Codex local-runner actions, plus OpenRouter and OpenAI-compatible local-model draft providers. Trusted runners report repository, branch, and before/after commit evidence; draft providers cannot claim repository mutation, tests, shell, or deploy authority. |
 | Collaboration       | Internal roles and project grants, an external customer portal, acceptance workflows, customer-facing summaries, and JSON/PDF project reports.                                                               |
@@ -157,6 +158,77 @@ Two discovery endpoints keep clients from hard-coding local assumptions:
 - `GET /api/openapi.json` describes the stable public scriptable contract.
 - `GET /api/schema` describes enums, transitions, conventions, scopes, and
   resource shapes.
+
+### Agent Intercom quickstart
+
+Agent Intercom keeps the message durable in Paimos while a receiver-side
+listener applies it to an explicitly registered target. `paimos-agentd` adds
+owned local control for fresh Codex and Claude children; it never adopts a
+process from a PID or turns an unmanaged queue/resume into steer.
+
+Start the per-instance daemon in one terminal, then start a child from its
+allowed workspace:
+
+```bash
+INSTANCE=production
+PROJECT=PAI
+PROJECT_ID="$(paimos --json project show "$PROJECT" | jq -er '.id')"
+IDENTITY=codex:worker
+REPORT_HOST=worker-host
+REPORT_URL=https://paimos.example.com
+REPORT_API_KEY_FILE=/absolute/path/to/owner-only-api-key
+paimos-agentd serve --instance "$INSTANCE" \
+  --report-host "$REPORT_HOST" --report-url "$REPORT_URL" \
+  --report-api-key-file "$REPORT_API_KEY_FILE"
+
+SESSION_ID="$({
+  printf '%s' 'Work only on the assigned ticket.' |
+    paimos-agentd start --instance "$INSTANCE" --adapter codex \
+      --workspace "$PWD" --project-id "$PROJECT_ID" --identity "$IDENTITY"
+} | jq -er '.id')"
+
+paimos-agentd status --instance "$INSTANCE"
+```
+
+The reporting trio is all-or-none. It publishes durable status and consumes
+typed interrupt/stop controls; omit all three flags for local-only status.
+`REPORT_API_KEY_FILE` must be absolute and owner-only. Durable steer still uses
+the receiver target and listener below—it is never routed through reporting.
+
+After an administrator has registered the receiver's encrypted
+`agentd_codex` primary, its separate `codex` simple fallback, and the two
+matching listeners, an attributed sender can request a durable steer:
+
+```bash
+eval "$(paimos session start --project PAI --agent coordinator)"
+paimos tell codex:worker --project PAI --level steer \
+  --message 'Re-check the current acceptance criteria.'
+```
+
+Local operator controls use the agentd session ID and a non-secret correlation
+ID. Text enters on stdin:
+
+```bash
+printf '%s' 'Pause and re-check the current diff.' |
+  paimos-agentd steer --instance "$INSTANCE" --session "$SESSION_ID" \
+    --project-id "$PROJECT_ID" --identity "$IDENTITY" \
+    --correlation-id operator-steer-001
+
+paimos-agentd interrupt --instance "$INSTANCE" --session "$SESSION_ID" \
+  --project-id "$PROJECT_ID" --identity "$IDENTITY" \
+  --correlation-id operator-interrupt-001
+
+paimos-agentd stop --instance "$INSTANCE" --session "$SESSION_ID" \
+  --project-id "$PROJECT_ID" --identity "$IDENTITY" \
+  --correlation-id operator-stop-001
+```
+
+The complete secure target setup, capability matrix, trust boundaries,
+diagnostics, recovery, and executable evidence are in the
+[Agent Intercom runbook](docs/AGENT_INTERCOM.md).
+Durable harness reporting binds every worker mutation to a distinct
+per-generation lease kept out of argv and stored server-side only as a digest;
+the public session UUID, agent name, and shared API key are not worker proof.
 
 ### Execution stays local and explicit
 
@@ -358,7 +430,7 @@ Production evidence and open gaps are maintained in
 | Need                        | Start here                                                                                                                                               |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Operate the web application | [Configuration](docs/CONFIGURATION.md), [Hardening](docs/HARDENING.md), [Deploy/Rollback](docs/DEPLOY.md), [Backup/Restore](docs/BACKUP_RESTORE.md)      |
-| Drive Paimos from an agent  | [Agent Interface](docs/AGENT_INTERFACE.md), [Agent Integration](docs/AGENT_INTEGRATION.md), [Implement-this Providers](docs/IMPLEMENT_THIS_PROVIDERS.md) |
+| Drive Paimos from an agent  | [Agent Intercom](docs/AGENT_INTERCOM.md), [Agent Interface](docs/AGENT_INTERFACE.md), [Agent Integration](docs/AGENT_INTEGRATION.md), [Implement-this Providers](docs/IMPLEMENT_THIS_PROVIDERS.md) |
 | Integrate over HTTP         | [Minimal REST reference](docs/api-minimal.md), `GET /api/openapi.json`, `GET /api/schema`                                                                |
 | Understand project context  | [Anchors](docs/ANCHORS.md), [Agent Integration](docs/AGENT_INTEGRATION.md#1a-reading-project-context-for-coding-agents)                                  |
 | Review security posture     | [Security Policy](SECURITY.md), [Threat Model](docs/THREAT_MODEL.md), [Security Review](docs/SECURITY_REVIEW.md)                                         |
