@@ -337,6 +337,17 @@ auth_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected github.com/inspr-at/pa
 [[ "$auth_race_plan" != *'TestResolveAPIKeyRecentUsageStaysReadOnlyWhileSQLiteWriterIsBusy'* &&
   "$auth_race_plan" != *' ./auth$' && "$auth_race_plan" != *'./...'* ]] ||
   fail 'auth PR race plan restored the latency-sensitive or exhaustive package suite'
+managedharness_race_match='^(TestStoppedSessionCanRegisterNewActiveGeneration|TestConcurrentInitialRegistrationReplayCreatesOneActiveRow|TestRegisterRecoversAfterTargetCommitBeforeSessionInsert|TestStopRacesControlRequestWithoutStrandingControl)$'
+managedharness_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected github.com/inspr-at/paimos/backend/managedharness)
+[[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$managedharness_race_plan")" -eq 1 ]] ||
+  fail 'managed-harness PR race plan is not one bounded package process'
+assert_plan_covers_discovery_once 'managed-harness targeted race' "$managedharness_race_plan" \
+  ./managedharness "$managedharness_race_match"
+[[ "$managedharness_race_plan" != *' ./managedharness$' && "$managedharness_race_plan" != *'./...'* ]] ||
+  fail 'managed-harness PR race plan restored the exhaustive migration-heavy package suite'
+broad_race_plan=$("$RACE_RUNNER" --dry-run './...')
+[[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")" -eq 1 ]] ||
+  fail 'broad race plan omitted or duplicated the managed-harness concurrency and recovery oracles'
 
 job_block() {
   local job="$1" file="${2:-$WORKFLOW}"

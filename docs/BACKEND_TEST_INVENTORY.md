@@ -1,9 +1,9 @@
 # Backend test inventory
 
 PAI-852 audited the backend corpus before changing CI selection. At the
-candidate head, the repository contains 1,794 top-level test or fuzz functions
+candidate head, the repository contains 1,797 top-level test or fuzz functions
 in 268 `_test.go` files (267 contain test/fuzz functions and one is the shared
-handlers helper): 1,789 `Test*` functions, five `Fuzz*` functions, and no
+handlers helper): 1,792 `Test*` functions, five `Fuzz*` functions, and no
 benchmarks. Subtests are intentionally counted under their owning function.
 
 The audit found no evidence-based deletion. The only duplicate top-level name,
@@ -39,7 +39,7 @@ Every source-level test is accounted for by its package group below.
 | `backend/secretvault` | 2 | 18 | Keep | Encryption, key sources, rotation rollback, and SQLite transaction safety. |
 | `backend/agentmessage/harness` | 5 | 17 | Keep | Codex/agentd delivery adapters, Unix ownership, and stub boundary behavior. |
 | `backend/ai` | 2 | 15 | Keep | Prompt constraints and provider request/error contracts. |
-| `backend/managedharness` | 1 | 14 | Keep | Managed registration, identity, control routing, and isolated persistence. |
+| `backend/managedharness` | 1 | 17 | Keep | Managed registration, identity, control routing, and isolated persistence. |
 | `backend/contracts` | 4 | 10 | Keep | JSON schema and immutable cross-product fixture compatibility. |
 | `backend/devseed` | 1 | 10 | Keep | `dev_login`-tagged synthetic identities and assets; excluded from production builds and checked separately. |
 | `backend/handlers/crm/hubspot` | 1 | 9 | Keep | Provider-specific authentication, mapping, paging, and shared CRM contract. |
@@ -58,7 +58,7 @@ Every source-level test is accounted for by its package group below.
 | `backend/pharoslink` | 1 | 1 | Keep | PHAROS request identifier validation. |
 | `backend/models` | 1 | 1 | Keep | Entity graph model invariants. |
 | `backend/agentdwire` | 1 | 1 | Keep | Unsupported-platform client behavior. |
-| **Total** | **268** | **1,794** | **Keep: 1,794** | **Fold: 0; drop: 0.** |
+| **Total** | **268** | **1,797** | **Keep: 1,797** | **Fold: 0; drop: 0.** |
 
 ### Fold: zero today
 
@@ -96,6 +96,12 @@ covers the original risk.
   each use five independently provisioned matrix runners, after hosted timing
   showed four left too little margin. The PR lanes reject an unindexed local
   multi-process invocation.
+  Managed-harness PR race instrumentation is likewise limited to its four true
+  concurrent, stop-versus-control, and crash/replay contracts because all 17
+  package tests independently rebuild the full SQLite migration chain. Normal
+  PR selection and the exhaustive full-serial workflow still run all 17; the
+  broad main, nightly, and manually authorized race workflow retains the same
+  complete set of four package-local concurrency and recovery oracles.
   E2E and security scanning remain separate required contexts.
 - The protected `test` context is an aggregator over every vet, normal, race,
   performance, backend quality, and frontend quality lane, so GitHub still

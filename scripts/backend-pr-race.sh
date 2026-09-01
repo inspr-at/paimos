@@ -185,6 +185,13 @@ run_package() {
       # instrumentation invalidates that wall-clock budget.
       run_race ./auth '^TestResolveAPIKeyUsageStampNeverInheritsSQLiteBusyTimeout$'
       ;;
+    ./managedharness)
+      # Every managed-harness test rebuilds the complete SQLite migration chain.
+      # Keep PR race instrumentation on the package's actual concurrency and
+      # crash-replay oracles; normal PR and exhaustive workflows retain all
+      # serial registration, routing, authorization, and lifecycle contracts.
+      run_race ./managedharness '^(TestStoppedSessionCanRegisterNewActiveGeneration|TestConcurrentInitialRegistrationReplayCreatesOneActiveRow|TestRegisterRecoversAfterTargetCommitBeforeSessionInsert|TestStopRacesControlRequestWithoutStrandingControl)$'
+      ;;
     *)
       run_race "$package"
       ;;
@@ -217,6 +224,7 @@ for import_path in "$@"; do
       "$MODULE/cmd/paimos" \
       "$MODULE/supervision" \
       "$MODULE/agentmessage" \
+      "$MODULE/managedharness" \
       "$MODULE/agentmode" \
       "$MODULE/agentd" \
       "$MODULE/localjournal" \
