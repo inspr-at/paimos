@@ -195,6 +195,7 @@ only establishes request attribution, and from the local agentd session ID.
 | `thread_id` | Paimos conversation and hop chain, never a vendor thread |
 | agentd session ID | One child owned by one running daemon instance |
 | harness-session ID | Public durable control-plane generation |
+| control ID | Durable interrupt/stop request and exact agentd correlation UUID |
 | vendor thread/session ID | Receiver-owned capability stored encrypted as a target reference |
 | worker lease | Private authorization proof for one public harness-session generation |
 
@@ -224,7 +225,7 @@ PID is audit/status evidence, not proof that a new daemon owns the old process.
   harness-session UUID, attributed agent, and a distinct per-generation worker
   lease. The lease is neither the vendor session reference nor the shared API
   key. Missing, duplicate, wrong-generation, or cross-project proof fails
-  closed without revealing which field mismatched.
+  closed with one uniform non-enumerating `403` and no mutation.
 - Agentd keeps each worker lease in its instance-scoped, owner-only local state
   store. It never enters argv, a URL, ordinary status, logs, or the lifecycle
   journal. Paimos stores only a domain-separated digest. Secret-bearing worker
@@ -299,6 +300,8 @@ paimos message target list --project PAI --address codex:worker
 paimos message deliveries --project PAI
 paimos harness list --project PAI
 paimos harness status --project PAI --session '<public-harness-session-id>'
+paimos harness control get --project PAI \
+  --session '<public-harness-session-id>' --control-id '<control-id>'
 ```
 
 Interpret delivery state before changing anything:
@@ -328,15 +331,31 @@ An authorized coordinator may request a durable interrupt or stop; the
 reporter later claims and completes it against the exact owned child:
 
 ```bash
-paimos harness interrupt --project "$PROJECT" \
-  --session '<public-harness-session-id>'
-paimos harness stop --project "$PROJECT" \
-  --session '<public-harness-session-id>'
+PUBLIC_SESSION_ID='<public-harness-session-id>'
+CONTROL_ID="$(
+  paimos harness interrupt --project "$PROJECT" \
+    --session "$PUBLIC_SESSION_ID" | jq -er '.id'
+)"
+paimos harness control get --project "$PROJECT" \
+  --session "$PUBLIC_SESSION_ID" --control-id "$CONTROL_ID"
+
+# To terminate the child instead, request stop and inspect its returned ID.
+CONTROL_ID="$(
+  paimos harness stop --project "$PROJECT" \
+    --session "$PUBLIC_SESSION_ID" | jq -er '.id'
+)"
+paimos harness control get --project "$PROJECT" \
+  --session "$PUBLIC_SESSION_ID" --control-id "$CONTROL_ID"
 ```
 
-These commands enqueue typed control requests; their acceptance is not proof
-of the local effect. Inspect the control outcome and local agentd status. Use
-the direct agentd commands for an immediate local receipt.
+`harness interrupt` and `harness stop` return the initial pending request; that
+acceptance is not proof of the local effect. Read the same request with
+`harness control get` until it is terminal, and inspect local agentd status.
+The read is bound to the exact project, public session, and control UUID. It
+returns only `id`, `project_id`, `harness_session_id`, `correlation_id`,
+`sequence`, `kind`, `state`, optional terminal `outcome` and `reason`, and
+request/claim/completion timestamps. The correlation ID equals the control
+UUID. Use the direct agentd commands for an immediate local receipt.
 
 Agentd retains at most 256 control correlation outcomes per live session,
 including successful receipts and remembered failures, and never evicts one
@@ -464,6 +483,9 @@ High-signal proofs include:
 - `TestDiskReporterLeaseStorePersistsAndRejectsUnsafeCustody`
 - `TestHarnessWorkerLeaseRejectsSpoofMissingDuplicateAndCrossSessionProof`
 - `TestHarnessLeaseRequestsNeverFollowRedirects`
+- `TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization`
+- `TestHarnessControlGetUsesExactReadOnlyScopedRoute`
+- `TestGetHarnessControlReturnsScopedNonSecretOutcome`
 - `TestMigration168RetiresUnboundGenerationsAndEnforcesLeaseDigest`
 - `TestRegisterRecoversAfterTargetCommitBeforeSessionInsert`
 - `TestStopRacesControlRequestWithoutStrandingControl`
