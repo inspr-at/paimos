@@ -201,7 +201,10 @@ assert_audited_release_recovery_main() {
     case "$NEW_TAG:$file" in
       v26.09.01:scripts/release.sh|\
       v26.09.01:scripts/release/recovery/v26.09.01.json|\
-      v26.09.01:scripts/test-release.sh)
+      v26.09.01:scripts/test-release.sh|\
+      v26.09.02:scripts/release.sh|\
+      v26.09.02:scripts/release/recovery/v26.09.02.json|\
+      v26.09.02:scripts/test-release.sh)
         ;;
       *) fail "audited release recovery contains an unrelated file: $file" ;;
     esac
@@ -575,6 +578,11 @@ assert_release_recovery_receipt() {
     v26.09.01:canonical_auto_merge_immediate_merge_post_merge_request_missing)
       # PAI-874 records the same GitHub immediate-merge incident for PR #193.
       # Keep this release-specific: the audited receipt and every fail-closed
+      # head/check/tree/ancestry/tag gate below remain mandatory.
+      ;;
+    v26.09.02:manual_squash_merge_missing_auto_merge_provenance)
+      # PAI-886 records the direct protected squash of PR #201. Keep this
+      # release-specific: the audited receipt and every fail-closed
       # head/check/tree/ancestry/tag gate below remain mandatory.
       ;;
     *)

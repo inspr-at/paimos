@@ -740,36 +740,48 @@ test_committed_recovery_receipts_are_exact() {
     }
   ' "$ROOT/scripts/release/recovery/v26.09.01.json" >/dev/null ||
     fail 'committed v26.09.01 recovery receipt is missing or drifted'
+
+  jq -e --arg reason "$MANUAL_RECOVERY_REASON" '
+    . == {
+      schema_version: 1,
+      release: "v26.09.02",
+      pull_request: 201,
+      approved_head: "84e253d5c9f4fb7da48e39e43b2571d83c868073",
+      merge_commit: "2abd06b307bc832214341de50b765aae9b833f09",
+      incident_reason: $reason
+    }
+  ' "$ROOT/scripts/release/recovery/v26.09.02.json" >/dev/null ||
+    fail 'committed v26.09.02 recovery receipt is missing or drifted'
 }
 
-test_calendar_immediate_auto_merge_receipt_recovery() {
-  local version='26.09.01'
+test_calendar_missing_provenance_receipt_recovery() {
+  local version="$1" reason="$2" fixture="$3" bad_reason
   local repo state origin head merge receipt_work valid_main output
 
-  repo=$(setup_repo calendar-immediate-recovery "v$version")
-  state="$TMP_ROOT/calendar-immediate-recovery/gh-state"
+  repo=$(setup_repo "$fixture" "v$version")
+  state="$TMP_ROOT/$fixture/gh-state"
   origin=$(git -C "$repo" remote get-url origin)
   prepend_release_notes "$repo" "$version"
   mkdir -p "$state"
   printf '%s\n' "$version" > "$state/vienna-date"
   touch "$state/missing-auto-merge-provenance"
 
-  output="$TMP_ROOT/calendar-immediate-recovery/missing-output"
+  output="$TMP_ROOT/$fixture/missing-output"
   if FAKE_RELEASE_VERSION="$version" \
      run_release "$repo" "$state" "$version" --no-edit >"$output" 2>&1; then
-    fail 'calendar immediate-merge recovery accepted a missing receipt'
+    fail "$version recovery accepted a missing receipt"
   fi
   grep -qF 'release PR is missing protected squash auto-merge provenance' "$output" ||
-    fail 'calendar immediate-merge interruption reported the wrong failure'
+    fail "$version missing-provenance interruption reported the wrong failure"
   [[ -f "$state/pr-merged" ]] ||
-    fail 'calendar missing-receipt fixture did not produce the protected squash merge'
+    fail "$version missing-receipt fixture did not produce the protected squash merge"
   head=$(git --git-dir="$origin" rev-parse refs/pull/1/head)
   merge=$(<"$state/merge-oid")
   assert_recovery_rejected "$repo" "$state" "$origin" \
     'a missing calendar recovery receipt' \
     'missing tracked release recovery receipt on origin/main' "$version"
 
-  receipt_work="$TMP_ROOT/calendar-immediate-recovery/receipt-work"
+  receipt_work="$TMP_ROOT/$fixture/receipt-work"
   git clone -q "$origin" "$receipt_work"
   git -C "$receipt_work" config user.name 'Recovery Reviewer'
   git -C "$receipt_work" config user.email 'recovery-reviewer@example.test'
@@ -781,12 +793,29 @@ test_calendar_immediate_auto_merge_receipt_recovery() {
     -m 'add reviewed calendar recovery verifier'
 
   publish_recovery_receipt "$receipt_work" 'add wrong calendar recovery receipt' \
-    "v$version" 2 "$head" "$merge" "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON"
+    "v$version" 2 "$head" "$merge" "$reason"
   assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong calendar recovery receipt' \
     'targets PR 2 instead of PR 1' "$version"
 
+  publish_recovery_receipt "$receipt_work" 'mutate calendar recovery head' \
+    "v$version" 1 0000000000000000000000000000000000000000 "$merge" "$reason"
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong calendar recovery head' \
+    'approved head does not match live validated PR head' "$version"
+
+  publish_recovery_receipt "$receipt_work" 'mutate calendar recovery merge' \
+    "v$version" 1 "$head" 0000000000000000000000000000000000000000 "$reason"
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong calendar recovery merge' \
+    'merge does not match live GitHub PR JSON' "$version"
+
+  bad_reason="$MANUAL_RECOVERY_REASON"
+  [[ "$reason" != "$MANUAL_RECOVERY_REASON" ]] || bad_reason="$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON"
+  publish_recovery_receipt "$receipt_work" 'mutate calendar recovery reason' \
+    "v$version" 1 "$head" "$merge" "$bad_reason"
+  assert_recovery_rejected "$repo" "$state" "$origin" 'a wrong calendar recovery reason' \
+    'carries an unrecognized incident reason' "$version"
+
   publish_recovery_receipt "$receipt_work" 'add exact calendar recovery receipt' \
-    "v$version" 1 "$head" "$merge" "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON"
+    "v$version" 1 "$head" "$merge" "$reason"
   valid_main=$(git -C "$receipt_work" rev-parse HEAD)
 
   printf '%s\n' 'unrelated post-release source' > "$receipt_work/unrelated.txt"
@@ -802,7 +831,7 @@ test_calendar_immediate_auto_merge_receipt_recovery() {
   FAKE_RELEASE_VERSION="$version" \
     run_release "$repo" "$state" "$version" --no-edit >/dev/null
   [[ $(git --git-dir="$origin" rev-parse "refs/tags/v$version^{}") == "$merge" ]] ||
-    fail 'calendar receipt recovery did not tag the canonical protected release merge'
+    fail "$version receipt recovery did not tag the canonical protected release merge"
 }
 
 test_protected_release_and_resume_states() {
@@ -1722,7 +1751,10 @@ test_calendar_release_and_rejections() {
 }
 
 write_fake_commands "$TMP_ROOT/fake-bin"
-test_calendar_immediate_auto_merge_receipt_recovery
+test_calendar_missing_provenance_receipt_recovery \
+  26.09.01 "$IMMEDIATE_AUTO_MERGE_RECOVERY_REASON" calendar-immediate-recovery
+test_calendar_missing_provenance_receipt_recovery \
+  26.09.02 "$MANUAL_RECOVERY_REASON" calendar-manual-recovery
 test_interrupted_calendar_descendant_recovery
 test_calendar_release_and_rejections
 test_committed_recovery_receipts_are_exact
