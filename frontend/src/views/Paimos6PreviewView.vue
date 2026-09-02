@@ -19,7 +19,8 @@ import type { Project } from '@/types'
 import {
   orchestratorSetupCommand,
   setupAgents,
-  setupInstanceName,
+  setupDisplayLabelError,
+  setupExpectedDeployment,
   type OrchestratorSetupAgent,
 } from '@/v6/orchestratorSetup'
 import { canonicalPaimos6Zoom, loadPaimos6SessionZoom } from '@/v6/sessionHomeZoom'
@@ -55,10 +56,12 @@ let knowledgeLoadVersion = 0
 let knowledgeController: AbortController | null = null
 const orchestratorSetupState = ref<'idle' | 'loading' | 'ready' | 'empty' | 'unavailable'>('idle')
 const orchestratorSetupAgents = ref<OrchestratorSetupAgent[]>([])
-const orchestratorSetupInstance = ref<string | null>(null)
+const orchestratorSetupExpectedDeployment = ref<string | null>(null)
+const orchestratorSetupCLIInstance = ref('')
 const orchestratorSetupAgentKey = ref('')
 const orchestratorSetupLabel = ref('')
 const orchestratorSetupFeedback = ref('')
+let orchestratorSetupRefreshPending = false
 let orchestratorSetupLoadVersion = 0
 let orchestratorSetupController: AbortController | null = null
 
@@ -143,17 +146,21 @@ const orchestratorSetupEligible = computed(
     orchestrator.state.value === 'ready' &&
     orchestrator.projection.value?.displayLabel === null,
 )
+const orchestratorSetupLabelError = computed(() =>
+  orchestratorSetupLabel.value === '' ? null : setupDisplayLabelError(orchestratorSetupLabel.value),
+)
 const visibleOrchestratorSetupCommand = computed(() => {
   if (
     !orchestratorSetupEligible.value ||
     orchestratorSetupState.value !== 'ready' ||
-    orchestratorSetupInstance.value === null ||
+    orchestratorSetupExpectedDeployment.value === null ||
     selectedProject.value === null ||
     !orchestratorSetupAgents.value.some(({ key }) => key === orchestratorSetupAgentKey.value)
   )
     return null
   return orchestratorSetupCommand({
-    instance: orchestratorSetupInstance.value,
+    cliInstance: orchestratorSetupCLIInstance.value,
+    expectedDeployment: orchestratorSetupExpectedDeployment.value,
     project: selectedProject.value.key,
     agent: orchestratorSetupAgentKey.value,
     displayLabel: orchestratorSetupLabel.value,
@@ -166,17 +173,25 @@ function clearOrchestratorSetup() {
   orchestratorSetupController = null
   orchestratorSetupState.value = 'idle'
   orchestratorSetupAgents.value = []
-  orchestratorSetupInstance.value = null
+  orchestratorSetupExpectedDeployment.value = null
+  orchestratorSetupCLIInstance.value = ''
   orchestratorSetupAgentKey.value = ''
   orchestratorSetupLabel.value = ''
   orchestratorSetupFeedback.value = ''
+  orchestratorSetupRefreshPending = false
 }
 
+watch([selectedProjectId, authorityKey], clearOrchestratorSetup, { flush: 'sync' })
+
 watch(
-  [orchestratorSetupEligible, selectedProjectId, authorityKey],
+  orchestratorSetupEligible,
   () => {
-    clearOrchestratorSetup()
-    if (!orchestratorSetupEligible.value || selectedProjectId.value === null) return
+    if (
+      !orchestratorSetupEligible.value ||
+      selectedProjectId.value === null ||
+      orchestratorSetupState.value !== 'idle'
+    )
+      return
     const projectId = selectedProjectId.value
     const authority = authorityKey.value
     const version = ++orchestratorSetupLoadVersion
@@ -196,13 +211,13 @@ watch(
           !orchestratorSetupEligible.value
         )
           return
-        const instance = setupInstanceName(health)
+        const expectedDeployment = setupExpectedDeployment(health)
         const agents = setupAgents(rawAgents, projectId)
-        if (instance === null || agents === null) {
+        if (expectedDeployment === null || agents === null) {
           orchestratorSetupState.value = 'unavailable'
           return
         }
-        orchestratorSetupInstance.value = instance
+        orchestratorSetupExpectedDeployment.value = expectedDeployment
         orchestratorSetupAgents.value = agents
         orchestratorSetupState.value = agents.length === 0 ? 'empty' : 'ready'
       })
@@ -224,9 +239,25 @@ watch(
   { immediate: true, flush: 'sync' },
 )
 
-watch([orchestratorSetupAgentKey, orchestratorSetupLabel], () => {
+watch([orchestratorSetupCLIInstance, orchestratorSetupAgentKey, orchestratorSetupLabel], () => {
   orchestratorSetupFeedback.value = ''
 })
+
+watch(
+  [() => orchestrator.state.value, () => orchestrator.projection.value?.displayLabel],
+  ([state, displayLabel]) => {
+    if (!orchestratorSetupRefreshPending) return
+    if (state === 'unavailable') {
+      orchestratorSetupRefreshPending = false
+      orchestratorSetupFeedback.value = 'Could not refresh the binding.'
+    } else if (state === 'ready') {
+      orchestratorSetupRefreshPending = false
+      orchestratorSetupFeedback.value = displayLabel
+        ? `Binding refreshed. Configured as ${displayLabel}.`
+        : 'Binding is still not configured. Run the command in Terminal, then refresh again.'
+    }
+  },
+)
 
 async function copyOrchestratorSetupCommand() {
   const command = visibleOrchestratorSetupCommand.value
@@ -244,6 +275,7 @@ async function copyOrchestratorSetupCommand() {
 
 function refreshOrchestratorBinding() {
   if (!auth.isSuperAdmin) return
+  orchestratorSetupRefreshPending = true
   orchestratorSetupFeedback.value = 'Checking the binding…'
   orchestrator.reload()
 }
@@ -611,6 +643,16 @@ onScopeDispose(() => {
                 </p>
                 <template v-else-if="orchestratorSetupState === 'ready'">
                   <label>
+                    Local CLI instance alias
+                    <input
+                      v-model="orchestratorSetupCLIInstance"
+                      type="text"
+                      maxlength="64"
+                      autocomplete="off"
+                      placeholder="For example: ppm"
+                    />
+                  </label>
+                  <label>
                     Canonical agent
                     <select v-model="orchestratorSetupAgentKey">
                       <option value="">Choose an agent…</option>
@@ -630,17 +672,30 @@ onScopeDispose(() => {
                       type="text"
                       maxlength="64"
                       autocomplete="off"
+                      :aria-invalid="orchestratorSetupLabelError !== null"
+                      :aria-describedby="
+                        orchestratorSetupLabelError ? 'p6-orchestrator-label-help' : undefined
+                      "
                       placeholder="For example: Primary orchestrator"
                     />
                   </label>
+                  <p
+                    v-if="orchestratorSetupLabelError"
+                    id="p6-orchestrator-label-help"
+                    class="p6-setup-validation"
+                    role="alert"
+                  >
+                    {{ orchestratorSetupLabelError }}
+                  </p>
                   <p class="p6-setup-note">
-                    The browser only copies this command. Terminal uses your existing credentials
-                    for instance <strong>{{ orchestratorSetupInstance }}</strong
-                    >.
+                    Enter the alias from your local <code>~/.paimos/config.yaml</code>. The browser
+                    cannot know that alias and only copies the command. Terminal verifies the server
+                    identity is <strong>{{ orchestratorSetupExpectedDeployment }}</strong> before
+                    writing.
                   </p>
                   <code class="p6-setup-command" tabindex="0">{{
                     visibleOrchestratorSetupCommand ??
-                    'Choose an agent and enter a valid display label.'
+                    'Enter your local CLI instance alias, choose an agent, and enter a valid display label.'
                   }}</code>
                   <div class="p6-setup-actions">
                     <button
@@ -1074,6 +1129,11 @@ onScopeDispose(() => {
   outline-offset: 2px;
 }
 .p6-setup-feedback {
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.p6-setup-validation {
+  color: #9a3f31;
   font-size: 10.5px;
   line-height: 1.45;
 }

@@ -35,7 +35,7 @@ function unicodeScalarString(value: string): boolean {
   return true
 }
 
-export function setupInstanceName(value: unknown): string | null {
+export function setupExpectedDeployment(value: unknown): string | null {
   const health = record(value)
   if (!health || health.agent_bus_identity_enforced !== true) return null
   const deployment = health.deployment_instance
@@ -72,14 +72,20 @@ export function setupAgents(value: unknown, projectId: number): OrchestratorSetu
   return agents
 }
 
+export function setupDisplayLabelError(value: string): string | null {
+  if (value.length === 0) return 'Enter a display label.'
+  if (value !== value.trim()) return 'Display label must not start or end with whitespace.'
+  if (/[\u0000-\u001f\u007f]/.test(value))
+    return 'Display label must not contain control characters.'
+  if (!unicodeScalarString(value)) return 'Display label must contain valid Unicode text.'
+  if (new TextEncoder().encode(value).byteLength > 64) {
+    return 'Display label must be at most 64 UTF-8 bytes.'
+  }
+  return null
+}
+
 export function validSetupDisplayLabel(value: string): boolean {
-  return (
-    value.length > 0 &&
-    value === value.trim() &&
-    !/[\u0000-\u001f\u007f]/.test(value) &&
-    unicodeScalarString(value) &&
-    new TextEncoder().encode(value).byteLength <= 64
-  )
+  return setupDisplayLabelError(value) === null
 }
 
 function shellQuote(value: string): string {
@@ -87,14 +93,16 @@ function shellQuote(value: string): string {
 }
 
 export function orchestratorSetupCommand(input: {
-  instance: string
+  cliInstance: string
+  expectedDeployment: string
   project: string
   agent: string
   displayLabel: string
 }): string | null {
   if (
-    !INSTANCE_NAME.test(input.instance) ||
-    input.instance === 'default' ||
+    !INSTANCE_NAME.test(input.cliInstance) ||
+    !INSTANCE_NAME.test(input.expectedDeployment) ||
+    input.expectedDeployment === 'default' ||
     !PROJECT_KEY.test(input.project) ||
     !AGENT_KEY.test(input.agent) ||
     input.agent === 'web-ui' ||
@@ -104,9 +112,11 @@ export function orchestratorSetupCommand(input: {
   return [
     'paimos',
     '--instance',
-    shellQuote(input.instance),
+    shellQuote(input.cliInstance),
     'orchestrator',
     'set',
+    '--expect-deployment-instance',
+    shellQuote(input.expectedDeployment),
     '--project',
     shellQuote(input.project),
     '--agent',

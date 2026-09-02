@@ -19,9 +19,16 @@ import (
 )
 
 var (
-	orchestratorProjectKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{2,9}$`)
-	orchestratorAgentKeyPattern   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+	orchestratorInstanceNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	orchestratorProjectKeyPattern   = regexp.MustCompile(`^[A-Z][A-Z0-9]{2,9}$`)
+	orchestratorAgentKeyPattern     = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 )
+
+type orchestratorHealth struct {
+	AgentBusInstance         string `json:"agent_bus_instance"`
+	DeploymentInstance       string `json:"deployment_instance"`
+	AgentBusIdentityEnforced bool   `json:"agent_bus_identity_enforced"`
+}
 
 type orchestratorProject struct {
 	ID  int64  `json:"id"`
@@ -58,7 +65,7 @@ before the compare-and-swap write, so a concurrent change fails closed.`,
 }
 
 func orchestratorSetCmd() *cobra.Command {
-	var projectKey, agentKey, displayLabel string
+	var projectKey, agentKey, displayLabel, expectedDeployment string
 	command := &cobra.Command{
 		Use:   "set",
 		Short: "Set the explicit instance orchestrator",
@@ -66,6 +73,10 @@ func orchestratorSetCmd() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			projectKey = strings.TrimSpace(projectKey)
 			agentKey = strings.TrimSpace(agentKey)
+			expectedDeployment = strings.TrimSpace(expectedDeployment)
+			if !orchestratorInstanceNamePattern.MatchString(expectedDeployment) || expectedDeployment == "default" {
+				return &usageError{msg: "--expect-deployment-instance is required and must be a safe non-default deployment identity"}
+			}
 			if !orchestratorProjectKeyPattern.MatchString(projectKey) {
 				return &usageError{msg: "--project is required and must be an exact canonical project key"}
 			}
@@ -79,6 +90,9 @@ func orchestratorSetCmd() *cobra.Command {
 			client, err := instanceClient()
 			if err != nil {
 				return err
+			}
+			if err := verifyOrchestratorDeployment(client, expectedDeployment); err != nil {
+				return reportError(err)
 			}
 			project, err := resolveExactOrchestratorProject(client, projectKey)
 			if err != nil {
@@ -128,7 +142,24 @@ func orchestratorSetCmd() *cobra.Command {
 	command.Flags().StringVar(&projectKey, "project", "", "exact project key (required)")
 	command.Flags().StringVar(&agentKey, "agent", "", "exact canonical project-agent key (required)")
 	command.Flags().StringVar(&displayLabel, "display-label", "", "display label, 1 to 64 UTF-8 bytes (required)")
+	command.Flags().StringVar(&expectedDeployment, "expect-deployment-instance", "", "expected server deployment identity (required safety check)")
 	return command
+}
+
+func verifyOrchestratorDeployment(client *Client, expected string) error {
+	raw, err := client.do(http.MethodGet, "/api/health", nil)
+	if err != nil {
+		return err
+	}
+	var health orchestratorHealth
+	if err := json.Unmarshal(raw, &health); err != nil {
+		return fmt.Errorf("decode server health: %w", err)
+	}
+	if !health.AgentBusIdentityEnforced ||
+		health.DeploymentInstance != expected || health.AgentBusInstance != expected {
+		return fmt.Errorf("server deployment identity mismatch: expected %q with enforced matching deployment and agent-bus identities", expected)
+	}
+	return nil
 }
 
 func resolveExactOrchestratorProject(client *Client, want string) (orchestratorProject, error) {
