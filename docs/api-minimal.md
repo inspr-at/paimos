@@ -803,14 +803,33 @@ Revision 0 is pristine unset and has `updated_at: null`. After any mutation,
 including clear, revision is positive and `updated_at` is a canonical UTC
 timestamp even when `orchestrator` is null. There is no only-agent fallback or
 cross-instance inheritance. M165 creates only the unset row; configuring an
-instance is a separate authorized operation. For example, after resolving the
-real project ID and reading revision 0, an authorized ppm operation may send:
+instance is a separate authorized operation.
+
+Use the first-class CLI operation shown by the Paimos 6 super-admin empty
+state. It contains no credential and names the configured CLI instance,
+project, canonical agent, and display label explicitly:
+
+```sh
+paimos --instance 'my-local-ppm' orchestrator set --expect-deployment-instance 'ppm' --project 'PAI' --agent 'amy' --display-label 'Amy'
+```
+
+`--instance` is the operator's local CLI configuration alias; the browser
+cannot discover it. `--expect-deployment-instance` is the server identity
+shown by the browser. Before any compare-and-swap write, the CLI reads
+`/health` and requires identity enforcement plus matching deployment and agent
+bus identities. It then resolves the project and canonical agent, reads the
+current revision, and performs one compare-and-swap write. A redirect,
+authorization failure, identity mismatch, missing/non-canonical target,
+ambiguous project, or concurrent revision change fails closed; rerun the same
+command to read fresh state. The equivalent API payload after resolving the
+real project ID and reading revision 0 is:
 
 ```json
 {"expected_revision":0,"orchestrator":{"project_id":42,"key":"amy","display_label":"Amy"}}
 ```
 
-This documentation does not perform that operation, and no other instance is
+Neither viewing nor copying the command performs that operation. Credentials
+remain in the CLI's configured keyring entry, and no other instance is
 implicitly configured.
 
 ---

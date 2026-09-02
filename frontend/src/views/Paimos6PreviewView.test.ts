@@ -27,6 +27,15 @@ const PAIMOS_ID = '37e5d8f7-0b11-4bee-a8a4-a11406de865a'
 const PROJECT_B_PAIMOS_ID = '47e5d8f7-0b11-4bee-a8a4-a11406de865a'
 const PROJECT_A_TITLE = 'Shape the live six home'
 const PROJECT_A_ADDRESS = 'codex:amy'
+const setupHealth = {
+  agent_bus_identity_enforced: true,
+  agent_bus_instance: 'ppm',
+  deployment_instance: 'ppm',
+}
+const setupAgentCatalog = [
+  { project_id: PROJECT_ID, name: 'amy' },
+  { project_id: PROJECT_ID, name: 'reviewer' },
+]
 
 function projectCatalog() {
   return [{ id: PROJECT_ID, key: 'PAI', name: 'Paimos' }]
@@ -283,6 +292,9 @@ async function mountWithHome(
   vi.spyOn(api, 'get').mockImplementation((path: string) => {
     if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
     if (path === '/orchestrator/v1') return Promise.resolve(orchestrator) as never
+    if (path === '/health') return Promise.resolve(setupHealth) as never
+    if (path === `/projects/${PROJECT_ID}/agents`)
+      return Promise.resolve(setupAgentCatalog) as never
     if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`))
       return projectionForPath(home, path) as never
     return Promise.reject(new Error(`unexpected GET ${path}`))
@@ -670,9 +682,11 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
       'Not configured. This is separate from the project having no product-session records',
     )
     expect(empty.el.textContent).toContain(
-      'A super admin can configure it through the documented instance setup',
+      'A super admin can copy an explicit terminal setup command here',
     )
     expect(empty.el.querySelector('a')).toBeNull()
+    expect(empty.el.querySelector('.p6-orchestrator-setup')).toBeNull()
+    expect(empty.el.textContent).not.toContain('paimos --instance')
     expect(empty.el.querySelector('.p6-session-card')).toBeNull()
     await empty.unmount()
 
@@ -708,17 +722,90 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     await empty.unmount()
   })
 
-  it('gives only an authorized super admin the documented orchestrator setup route', async () => {
+  it('fails closed when setup agents are empty or the health identity is unavailable', async () => {
+    authorizePrincipal([PROJECT_ID], 7, 'super_admin')
+    vi.spyOn(api, 'get').mockImplementation((path: string) => {
+      if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
+      if (path === '/orchestrator/v1') return Promise.resolve(unsetOrchestrator) as never
+      if (path === '/health') return Promise.resolve(setupHealth) as never
+      if (path === `/projects/${PROJECT_ID}/agents`) return Promise.resolve([]) as never
+      if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`))
+        return projectionForPath(liveProjection([]), path) as never
+      return Promise.reject(new Error(`unexpected GET ${path}`))
+    })
+    const noAgents = await mountComponent(Paimos6PreviewView)
+    await flush()
+    expect(noAgents.el.querySelector('.p6-orchestrator-setup')?.textContent).toContain(
+      'no canonical agents',
+    )
+    expect(noAgents.el.textContent).not.toContain('paimos --instance')
+    await noAgents.unmount()
+
+    vi.restoreAllMocks()
+    authorizePrincipal([PROJECT_ID], 7, 'super_admin')
+    vi.spyOn(api, 'get').mockImplementation((path: string) => {
+      if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
+      if (path === '/orchestrator/v1') return Promise.resolve(unsetOrchestrator) as never
+      if (path === '/health') {
+        return Promise.resolve({ ...setupHealth, agent_bus_instance: 'pma' }) as never
+      }
+      if (path === `/projects/${PROJECT_ID}/agents`)
+        return Promise.resolve(setupAgentCatalog) as never
+      if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`))
+        return projectionForPath(liveProjection([]), path) as never
+      return Promise.reject(new Error(`unexpected GET ${path}`))
+    })
+    const unavailable = await mountComponent(Paimos6PreviewView)
+    await flush()
+    expect(unavailable.el.querySelector('[role="alert"]')?.textContent).toContain(
+      'Setup choices are unavailable',
+    )
+    expect(unavailable.el.textContent).not.toContain('paimos --instance')
+    await unavailable.unmount()
+  })
+
+  it('lets only an authorized super admin explicitly choose an agent and copy the full safe command', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const put = vi.spyOn(api, 'put')
     const empty = await mountWithHome(liveProjection([]), unsetOrchestrator, 'super_admin')
     await flush()
 
-    const setup = empty.el.querySelector<HTMLAnchorElement>('.p6-empty-binding a')
-    expect(setup?.textContent).toContain('Open authorized setup guide')
-    expect(setup?.href).toBe(
-      'https://github.com/inspr-at/paimos/blob/main/docs/api-minimal.md#instance-orchestrator-pin',
+    const setup = empty.el.querySelector('.p6-orchestrator-setup')!
+    expect(setup.textContent).toContain('Choose an agent')
+    expect(setup.textContent).not.toContain("--agent 'amy'")
+    const inputs = setup.querySelectorAll<HTMLInputElement>('input')
+    inputs[0].value = 'my-local-ppm'
+    inputs[0].dispatchEvent(new Event('input', { bubbles: true }))
+    const select = setup.querySelector<HTMLSelectElement>('select')!
+    select.value = 'amy'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    inputs[1].value = 'é'.repeat(33)
+    inputs[1].dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(setup.querySelector('[role="alert"]')?.textContent).toContain(
+      'Display label must be at most 64 UTF-8 bytes',
     )
-    expect(setup?.target).toBe('_blank')
-    expect(setup?.rel).toContain('noopener')
+    expect(
+      [...setup.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+        button.textContent?.includes('Copy command'),
+      )?.disabled,
+    ).toBe(true)
+    inputs[1].value = `Amy O'Brien`
+    inputs[1].dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+
+    const expected = `paimos --instance 'my-local-ppm' orchestrator set --expect-deployment-instance 'ppm' --project 'PAI' --agent 'amy' --display-label 'Amy O'"'"'Brien'`
+    expect(setup.querySelector('.p6-setup-command')?.textContent).toBe(expected)
+    const copy = [...setup.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes('Copy command'),
+    )!
+    expect(copy.disabled).toBe(false)
+    copy.click()
+    await flush()
+    expect(writeText).toHaveBeenCalledWith(expected)
+    expect(setup.textContent).toContain('Paste it into Terminal')
+    expect(put).not.toHaveBeenCalled()
     expect(empty.el.querySelector('.p6-session-card')).toBeNull()
     await empty.unmount()
 
@@ -731,8 +818,128 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(configured.el.querySelector('.p6-empty-binding')?.textContent).toContain(
       'No Paimos product-session records are present yet',
     )
-    expect(configured.el.querySelector('.p6-empty-binding a')).toBeNull()
+    expect(configured.el.querySelector('.p6-orchestrator-setup')).toBeNull()
     expect(configured.el.querySelector('.p6-session-card')).toBeNull()
     await configured.unmount()
+  })
+
+  it('surfaces clipboard failure and refreshes the read-only binding after Terminal setup', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'))
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    let configured = false
+    const put = vi.spyOn(api, 'put')
+    authorizePrincipal([PROJECT_ID], 7, 'super_admin')
+    vi.spyOn(api, 'get').mockImplementation((path: string) => {
+      if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
+      if (path === '/health') return Promise.resolve(setupHealth) as never
+      if (path === `/projects/${PROJECT_ID}/agents`)
+        return Promise.resolve(setupAgentCatalog) as never
+      if (path === '/orchestrator/v1') {
+        return Promise.resolve(
+          configured ? configuredOrchestrator('Amy') : unsetOrchestrator,
+        ) as never
+      }
+      if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`))
+        return projectionForPath(liveProjection([]), path) as never
+      return Promise.reject(new Error(`unexpected GET ${path}`))
+    })
+    const mounted = await mountComponent(Paimos6PreviewView)
+    await flush()
+    const setup = mounted.el.querySelector('.p6-orchestrator-setup')!
+    const inputs = setup.querySelectorAll<HTMLInputElement>('input')
+    inputs[0].value = 'my-local-ppm'
+    inputs[0].dispatchEvent(new Event('input', { bubbles: true }))
+    const select = setup.querySelector<HTMLSelectElement>('select')!
+    select.value = 'amy'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    inputs[1].value = 'Amy'
+    inputs[1].dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    const buttons = [...setup.querySelectorAll<HTMLButtonElement>('button')]
+    buttons.find((button) => button.textContent?.includes('Copy command'))!.click()
+    await flush()
+    expect(setup.querySelector('[role="alert"]')?.textContent).toContain('Could not copy')
+    buttons.find((button) => button.textContent?.includes('refresh'))!.click()
+    await flush()
+    const preserved = mounted.el.querySelector('.p6-orchestrator-setup')!
+    expect(preserved.querySelector<HTMLSelectElement>('select')?.value).toBe('amy')
+    expect(
+      [...preserved.querySelectorAll<HTMLInputElement>('input')].map(({ value }) => value),
+    ).toEqual(['my-local-ppm', 'Amy'])
+    expect(preserved.textContent).toContain('Binding is still not configured')
+    configured = true
+    const refreshAfterConfigure = [...preserved.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.includes('refresh'),
+    )!
+    refreshAfterConfigure.click()
+    await flush()
+    expect(mounted.el.querySelector('.p6-empty-binding')?.textContent).toContain(
+      'Configured as Amy',
+    )
+    expect(put).not.toHaveBeenCalled()
+    await mounted.unmount()
+  })
+
+  it('clears setup input on authority revocation and project switch', async () => {
+    const auth = authorizePrincipal([PROJECT_ID, PROJECT_B_ID], 7, 'super_admin')
+    const catalog = [
+      { id: PROJECT_ID, key: 'PAI', name: 'Paimos' },
+      { id: PROJECT_B_ID, key: 'PMA', name: 'Other instance project' },
+    ]
+    vi.spyOn(api, 'get').mockImplementation((path: string) => {
+      if (path === '/projects?status=all') return Promise.resolve(catalog) as never
+      if (path === '/orchestrator/v1') return Promise.resolve(unsetOrchestrator) as never
+      if (path === '/health') return Promise.resolve(setupHealth) as never
+      if (path === `/projects/${PROJECT_ID}/agents`)
+        return Promise.resolve(setupAgentCatalog) as never
+      if (path === `/projects/${PROJECT_B_ID}/agents`)
+        return Promise.resolve([{ project_id: PROJECT_B_ID, name: 'jan' }]) as never
+      if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`))
+        return projectionForPath(liveProjection([]), path) as never
+      if (path.startsWith(`/projects/${PROJECT_B_ID}/session-home/zoom/v1?`))
+        return projectionForPath(liveProjection([], PROJECT_B_ID), path) as never
+      return Promise.reject(new Error(`unexpected GET ${path}`))
+    })
+    const mounted = await mountComponent(Paimos6PreviewView)
+    await flush()
+    let setup = mounted.el.querySelector('.p6-orchestrator-setup')!
+    let inputs = setup.querySelectorAll<HTMLInputElement>('input')
+    inputs[0].value = 'local-ppm'
+    inputs[0].dispatchEvent(new Event('input', { bubbles: true }))
+    inputs[1].value = 'Amy'
+    inputs[1].dispatchEvent(new Event('input', { bubbles: true }))
+    const agent = setup.querySelector<HTMLSelectElement>('select')!
+    agent.value = 'amy'
+    agent.dispatchEvent(new Event('change', { bubbles: true }))
+    await nextTick()
+    expect(setup.textContent).toContain("--agent 'amy'")
+
+    const project = mounted.el.querySelector<HTMLSelectElement>('.p6-project-picker select')!
+    project.value = String(PROJECT_B_ID)
+    project.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    setup = mounted.el.querySelector('.p6-orchestrator-setup')!
+    expect(
+      [...setup.querySelectorAll<HTMLInputElement>('input')].map(({ value }) => value),
+    ).toEqual(['', ''])
+    expect(setup.querySelector<HTMLSelectElement>('select')?.value).toBe('')
+    expect(setup.textContent).not.toContain("--agent 'amy'")
+
+    inputs = setup.querySelectorAll<HTMLInputElement>('input')
+    inputs[0].value = 'local-ppm'
+    inputs[0].dispatchEvent(new Event('input', { bubbles: true }))
+    inputs[1].value = 'Jan'
+    inputs[1].dispatchEvent(new Event('input', { bubbles: true }))
+    const projectBAgent = setup.querySelector<HTMLSelectElement>('select')!
+    projectBAgent.value = 'jan'
+    projectBAgent.dispatchEvent(new Event('change', { bubbles: true }))
+    await nextTick()
+    expect(setup.textContent).toContain("--agent 'jan'")
+
+    auth.user = { ...auth.user!, role: 'member', is_super_admin: false } as User
+    await flush()
+    expect(mounted.el.querySelector('.p6-orchestrator-setup')).toBeNull()
+    expect(mounted.el.textContent).not.toContain("--agent 'jan'")
+    await mounted.unmount()
   })
 })
