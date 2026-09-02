@@ -27,6 +27,15 @@ const PAIMOS_ID = '37e5d8f7-0b11-4bee-a8a4-a11406de865a'
 const PROJECT_B_PAIMOS_ID = '47e5d8f7-0b11-4bee-a8a4-a11406de865a'
 const PROJECT_A_TITLE = 'Shape the live six home'
 const PROJECT_A_ADDRESS = 'codex:amy'
+const setupHealth = {
+  agent_bus_identity_enforced: true,
+  agent_bus_instance: 'ppm',
+  deployment_instance: 'ppm',
+}
+const setupAgentCatalog = [
+  { project_id: PROJECT_ID, name: 'amy' },
+  { project_id: PROJECT_ID, name: 'reviewer' },
+]
 
 function projectCatalog() {
   return [{ id: PROJECT_ID, key: 'PAI', name: 'Paimos' }]
@@ -283,6 +292,9 @@ async function mountWithHome(
   vi.spyOn(api, 'get').mockImplementation((path: string) => {
     if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
     if (path === '/orchestrator/v1') return Promise.resolve(orchestrator) as never
+    if (path === '/health') return Promise.resolve(setupHealth) as never
+    if (path === `/projects/${PROJECT_ID}/agents`)
+      return Promise.resolve(setupAgentCatalog) as never
     if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`))
       return projectionForPath(home, path) as never
     return Promise.reject(new Error(`unexpected GET ${path}`))
@@ -670,9 +682,11 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
       'Not configured. This is separate from the project having no product-session records',
     )
     expect(empty.el.textContent).toContain(
-      'A super admin can configure it through the documented instance setup',
+      'A super admin can copy an explicit terminal setup command here',
     )
     expect(empty.el.querySelector('a')).toBeNull()
+    expect(empty.el.querySelector('.p6-orchestrator-setup')).toBeNull()
+    expect(empty.el.textContent).not.toContain('paimos --instance')
     expect(empty.el.querySelector('.p6-session-card')).toBeNull()
     await empty.unmount()
 
@@ -708,17 +722,35 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     await empty.unmount()
   })
 
-  it('gives only an authorized super admin the documented orchestrator setup route', async () => {
+  it('lets only an authorized super admin explicitly choose an agent and copy the full safe command', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const put = vi.spyOn(api, 'put')
     const empty = await mountWithHome(liveProjection([]), unsetOrchestrator, 'super_admin')
     await flush()
 
-    const setup = empty.el.querySelector<HTMLAnchorElement>('.p6-empty-binding a')
-    expect(setup?.textContent).toContain('Open authorized setup guide')
-    expect(setup?.href).toBe(
-      'https://github.com/inspr-at/paimos/blob/main/docs/api-minimal.md#instance-orchestrator-pin',
-    )
-    expect(setup?.target).toBe('_blank')
-    expect(setup?.rel).toContain('noopener')
+    const setup = empty.el.querySelector('.p6-orchestrator-setup')!
+    expect(setup.textContent).toContain('Choose an agent')
+    expect(setup.textContent).not.toContain("--agent 'amy'")
+    const select = setup.querySelector<HTMLSelectElement>('select')!
+    select.value = 'amy'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    const input = setup.querySelector<HTMLInputElement>('input')!
+    input.value = `Amy O'Brien`
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+
+    const expected = `paimos --instance 'ppm' orchestrator set --project 'PAI' --agent 'amy' --display-label 'Amy O'"'"'Brien'`
+    expect(setup.querySelector('.p6-setup-command')?.textContent).toBe(expected)
+    const copy = [...setup.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes('Copy command'),
+    )!
+    expect(copy.disabled).toBe(false)
+    copy.click()
+    await flush()
+    expect(writeText).toHaveBeenCalledWith(expected)
+    expect(setup.textContent).toContain('Paste it into Terminal')
+    expect(put).not.toHaveBeenCalled()
     expect(empty.el.querySelector('.p6-session-card')).toBeNull()
     await empty.unmount()
 
@@ -731,8 +763,52 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(configured.el.querySelector('.p6-empty-binding')?.textContent).toContain(
       'No Paimos product-session records are present yet',
     )
-    expect(configured.el.querySelector('.p6-empty-binding a')).toBeNull()
+    expect(configured.el.querySelector('.p6-orchestrator-setup')).toBeNull()
     expect(configured.el.querySelector('.p6-session-card')).toBeNull()
     await configured.unmount()
+  })
+
+  it('surfaces clipboard failure and refreshes the read-only binding after Terminal setup', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'))
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    let configured = false
+    const put = vi.spyOn(api, 'put')
+    authorizePrincipal([PROJECT_ID], 7, 'super_admin')
+    vi.spyOn(api, 'get').mockImplementation((path: string) => {
+      if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
+      if (path === '/health') return Promise.resolve(setupHealth) as never
+      if (path === `/projects/${PROJECT_ID}/agents`)
+        return Promise.resolve(setupAgentCatalog) as never
+      if (path === '/orchestrator/v1') {
+        return Promise.resolve(
+          configured ? configuredOrchestrator('Amy') : unsetOrchestrator,
+        ) as never
+      }
+      if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`))
+        return projectionForPath(liveProjection([]), path) as never
+      return Promise.reject(new Error(`unexpected GET ${path}`))
+    })
+    const mounted = await mountComponent(Paimos6PreviewView)
+    await flush()
+    const setup = mounted.el.querySelector('.p6-orchestrator-setup')!
+    const select = setup.querySelector<HTMLSelectElement>('select')!
+    select.value = 'amy'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    const input = setup.querySelector<HTMLInputElement>('input')!
+    input.value = 'Amy'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    const buttons = [...setup.querySelectorAll<HTMLButtonElement>('button')]
+    buttons.find((button) => button.textContent?.includes('Copy command'))!.click()
+    await flush()
+    expect(setup.querySelector('[role="alert"]')?.textContent).toContain('Could not copy')
+    configured = true
+    buttons.find((button) => button.textContent?.includes('refresh'))!.click()
+    await flush()
+    expect(mounted.el.querySelector('.p6-empty-binding')?.textContent).toContain(
+      'Configured as Amy',
+    )
+    expect(put).not.toHaveBeenCalled()
+    await mounted.unmount()
   })
 })
