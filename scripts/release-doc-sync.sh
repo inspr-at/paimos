@@ -118,8 +118,13 @@ find_existing_ticket() {
 }
 
 # Previous release tag — the line right after $TAG in chronological order,
-# ignoring operational/bookmark tags such as pai-open-start-*.
-PREV=$(release_tags | awk -v t="$TAG" '$0==t{getline; print; exit}')
+# ignoring operational/bookmark tags such as pai-open-start-*. Consume the
+# complete tag stream: exiting awk after the match sends SIGPIPE upstream and,
+# under this script's pipefail contract, aborts doc-sync before it drafts.
+PREV=$(release_tags | awk -v t="$TAG" '
+  take_next { print; take_next=0 }
+  $0 == t { take_next=1 }
+')
 if [[ -z "$PREV" ]]; then
   echo "warning: no prior tag found before $TAG; falling back to HEAD~20 for diff range" >&2
   PREV="HEAD~20"

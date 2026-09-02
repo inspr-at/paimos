@@ -380,6 +380,9 @@ jobs:
       - name: Release version grammar and Docker metadata
         run: bash ./scripts/test-release-version.sh
 
+      - name: Release documentation sync
+        run: bash ./scripts/test-release-doc-sync.sh
+
       - name: Knowledge freshness — live contract
         run: ./scripts/test-knowledge-freshness.sh
 
