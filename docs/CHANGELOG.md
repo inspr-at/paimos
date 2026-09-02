@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.02] — 2026-09-02
+
+### Added — Safe orchestrator-binding handoff (PAI-884)
+
+- Added a super-admin setup surface that builds and copies one fully visible,
+  secret-free CLI command from an explicit local instance alias and agent
+  choice; the browser never executes the command or infers an agent.
+- Added `paimos orchestrator set` with an explicit expected deployment
+  identity, pre-write health verification, and compare-and-set binding so a
+  mismatched deployment or concurrent update aborts without mutation.
+- Preserved the operator's selected alias, agent, and label while refresh
+  confirms the binding remains unset, while clearing that local state when
+  project or authority context changes.
+
+### Changed — Clearer repository story (PAI-877)
+
+- Clarified the README's product positioning, authorship and INSPR-family
+  context, Paimos 6 maturity note, and recent-product-changes summary.
+
 ## [26.09.01.17.31] — 2026-09-01
 
 ### Changed — Truthful empty Agent Intercom state (PAI-878)
