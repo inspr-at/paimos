@@ -65,8 +65,9 @@ func TestClassifyAttentionTransitionClosedPolicy(t *testing.T) {
 		want AttentionDecision
 	}{
 		{"busy absorbed", AttentionTransition{ActivityState: "busy", ActivityReason: "adapter_activity", ActivityKind: "tool_started"}, AttentionDecision{Disposition: "absorbed"}},
-		{"assigned turn end", AttentionTransition{ActivityState: "idle", ActivityReason: "turn_completed", ActivityKind: "turn_completed", Assigned: true}, AttentionDecision{Disposition: "actionable", Kind: "assignment_turn_ended", Reason: "turn_completed_open_assignment"}},
-		{"unassigned turn end", AttentionTransition{ActivityState: "idle", ActivityReason: "turn_completed", ActivityKind: "turn_completed"}, AttentionDecision{Disposition: "absorbed"}},
+		{"assigned turn end", AttentionTransition{ActivityState: "idle", ActivityReason: "turn_completed", ActivityKind: "turn_completed", AssignmentKnown: true, Assigned: true}, AttentionDecision{Disposition: "actionable", Kind: "assignment_turn_ended", Reason: "turn_completed_open_assignment"}},
+		{"unassigned turn end", AttentionTransition{ActivityState: "idle", ActivityReason: "turn_completed", ActivityKind: "turn_completed", AssignmentKnown: true}, AttentionDecision{Disposition: "absorbed"}},
+		{"historical turn end without assignment snapshot", AttentionTransition{ActivityState: "idle", ActivityReason: "turn_completed", ActivityKind: "turn_completed"}, AttentionDecision{Disposition: "deferred"}},
 		{"unknown worker", AttentionTransition{ActivityState: "unknown", ActivityReason: "heartbeat_stale"}, AttentionDecision{Disposition: "actionable", Kind: "worker_unknown", Reason: "heartbeat_stale"}},
 		{"stale worker retains prior tool", AttentionTransition{ActivityState: "unknown", ActivityReason: "heartbeat_stale", ActivityKind: "tool_started"}, AttentionDecision{Disposition: "actionable", Kind: "worker_unknown", Reason: "heartbeat_stale"}},
 		{"unmanaged evidence deferred", AttentionTransition{ActivityState: "unknown", ActivityReason: "unmanaged_evidence"}, AttentionDecision{Disposition: "deferred"}},

@@ -138,8 +138,12 @@ policy wakes only for stale/unknown or dead workers, a turn ending while an
 open assignment remains, blocked/dead delivery, held action request, or
 rejected control. Ordinary busy/tool heartbeats and an unassigned completed
 turn are absorbed. Unmanaged evidence and new event combinations are deferred
-and do not wake a model until the policy is explicitly widened. Immutable
-harness and message sources advance a per-orchestrator source-row watermark;
+and do not wake a model until the policy is explicitly widened. Each immutable
+harness event snapshots only whether an open assignment existed at that event;
+delayed projection never reconstructs that fact from later mutable issue or
+product-session timestamps. Pre-M171 events have an explicit unknown snapshot
+and remain deferred rather than being relabelled as unassigned. Harness and message sources advance a
+per-orchestrator source-row watermark;
 projection reads only new source rows and holds the SQLite writer lock only
 for the short append-and-watermark transaction. Delivery failures are scoped
 to the configured instance.

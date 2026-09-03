@@ -299,10 +299,17 @@ func activityFromKind(kind string) (state, reason string) {
 }
 
 func appendSessionEventTx(ctx context.Context, tx *sql.Tx, session models.HarnessSession, operation string) error {
+	var assignmentPresent int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM product_sessions ps JOIN issues i ON i.id=ps.node_id
+		WHERE ps.target_project_agent_id=? AND i.deleted_at IS NULL
+		AND i.status NOT IN ('done','delivered','accepted','invoiced','cancelled'))`, session.ProjectAgentID).Scan(&assignmentPresent); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO harness_session_events(
-		harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,activity_sequence,closed_reason)
-		VALUES(?,?,?,?,?,?,?,?,?)`, session.ID, session.Revision, operation, session.Phase, session.ActivityState,
-		session.ActivityReason, session.ActivityKind, session.ActivitySequence, session.ClosedReason)
+		harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,activity_sequence,closed_reason,assignment_present)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`, session.ID, session.Revision, operation, session.Phase, session.ActivityState,
+		session.ActivityReason, session.ActivityKind, session.ActivitySequence, session.ClosedReason, assignmentPresent)
 	return err
 }
 

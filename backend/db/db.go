@@ -12463,6 +12463,8 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		// batches make a coalesced simple wake recoverable across listener
 		// crashes without creating a second worker-state truth.
 		{171, []string{
+			`ALTER TABLE harness_session_events ADD COLUMN assignment_present INTEGER
+			 CHECK(assignment_present IN (0,1))`,
 			`CREATE TABLE agent_attention_items (
 			 id                        INTEGER PRIMARY KEY AUTOINCREMENT,
 			 receiver_project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -12722,6 +12724,14 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 		})
 	},
 	171: func(ctx context.Context, conn *sql.Conn) error {
+		var columns int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('harness_session_events')
+			WHERE name='assignment_present'`).Scan(&columns); err != nil {
+			return fmt.Errorf("inspect M171 harness event assignment snapshot: %w", err)
+		}
+		if columns != 0 {
+			return fmt.Errorf("M171 schema is partially present or locally incompatible: harness event assignment columns=%d", columns)
+		}
 		return checkSchemaObjectsAbsent(ctx, conn, 171, []string{
 			"agent_attention_items", "idx_agent_attention_items_receiver",
 			"trg_agent_attention_items_no_update", "trg_agent_attention_items_no_delete",

@@ -49,17 +49,18 @@ type HarnessSession struct {
 // public worker generation. EventSequence follows the session revision and is
 // therefore stable across exact retries without exposing vendor payloads.
 type HarnessSessionEvent struct {
-	ID               int64  `json:"id"`
-	HarnessSessionID string `json:"harness_session_id"`
-	EventSequence    int64  `json:"event_sequence"`
-	Operation        string `json:"operation"`
-	Phase            string `json:"phase"`
-	ActivityState    string `json:"activity_state"`
-	ActivityReason   string `json:"activity_reason"`
-	ActivityKind     string `json:"activity_event_kind,omitempty"`
-	ActivitySequence int64  `json:"activity_sequence"`
-	ClosedReason     string `json:"closed_reason,omitempty"`
-	CreatedAt        string `json:"created_at"`
+	ID                int64  `json:"id"`
+	HarnessSessionID  string `json:"harness_session_id"`
+	EventSequence     int64  `json:"event_sequence"`
+	Operation         string `json:"operation"`
+	Phase             string `json:"phase"`
+	ActivityState     string `json:"activity_state"`
+	ActivityReason    string `json:"activity_reason"`
+	ActivityKind      string `json:"activity_event_kind,omitempty"`
+	ActivitySequence  int64  `json:"activity_sequence"`
+	AssignmentPresent *bool  `json:"assignment_present,omitempty"`
+	ClosedReason      string `json:"closed_reason,omitempty"`
+	CreatedAt         string `json:"created_at"`
 }
 
 // HarnessControl is a typed interrupt/stop request. Free-form command text is

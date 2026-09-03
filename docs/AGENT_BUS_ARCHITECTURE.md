@@ -196,6 +196,12 @@ orchestrator identity are both re-resolved in the transaction that mutates the
 target or harness record; attention projection, lease/decryption, and cursor
 acknowledgement likewise use transaction-current authority. Revocation,
 demotion, or reassignment cannot rely on a stale middleware snapshot.
+Turn-completion attention uses the immutable harness event's content-free
+`assignment_present` bit captured in the event transaction. Projection does
+not infer past assignment state from mutable current issue or product-session
+timestamps, so a delayed watermark cannot silently discard an actionable turn
+end after an ordinary assignment edit. Events predating this snapshot field
+remain explicitly unknown and deferred instead of being guessed unassigned.
 
 For Codex, `target_ref` must be a Codex session/rollout UUID or an exact Codex
 session name accepted by `codex queue --thread`. It must never be a Cursor chat

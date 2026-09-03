@@ -31,10 +31,11 @@ const (
 // policy. Unknown combinations are deferred and therefore cannot wake a
 // receiver merely because a producer added an enum elsewhere.
 type AttentionTransition struct {
-	ActivityState  string
-	ActivityReason string
-	ActivityKind   string
-	Assigned       bool
+	ActivityState   string
+	ActivityReason  string
+	ActivityKind    string
+	AssignmentKnown bool
+	Assigned        bool
 }
 
 type AttentionDecision struct {
@@ -54,6 +55,9 @@ func ClassifyAttentionTransition(in AttentionTransition) AttentionDecision {
 		}
 	case "idle":
 		if in.ActivityReason == "turn_completed" && in.ActivityKind == "turn_completed" {
+			if !in.AssignmentKnown {
+				return AttentionDecision{Disposition: AttentionDispositionDeferred}
+			}
 			if in.Assigned {
 				return AttentionDecision{Disposition: AttentionDispositionActionable, Kind: "assignment_turn_ended", Reason: "turn_completed_open_assignment"}
 			}
@@ -198,13 +202,7 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 
 	var candidates []attentionCandidate
 	rows, err := s.db.QueryContext(ctx, `SELECT hs.project_id,e.harness_session_id,e.activity_sequence,e.activity_state,
-		e.activity_reason,e.activity_event_kind,strftime('%Y-%m-%dT%H:%M:%fZ',e.created_at),EXISTS(
-		 SELECT 1 FROM product_sessions ps JOIN issues i ON i.id=ps.node_id
-		 WHERE ps.target_project_agent_id=hs.project_agent_id AND i.deleted_at IS NULL
-		 AND i.status NOT IN ('done','delivered','accepted','invoiced','cancelled')
-		 AND strftime('%Y-%m-%dT%H:%M:%fZ',ps.created_at)<=strftime('%Y-%m-%dT%H:%M:%fZ',e.created_at)
-		 AND strftime('%Y-%m-%dT%H:%M:%fZ',ps.updated_at)<=strftime('%Y-%m-%dT%H:%M:%fZ',e.created_at)
-		 AND strftime('%Y-%m-%dT%H:%M:%fZ',i.updated_at)<=strftime('%Y-%m-%dT%H:%M:%fZ',e.created_at))
+		e.activity_reason,e.activity_event_kind,strftime('%Y-%m-%dT%H:%M:%fZ',e.created_at),e.assignment_present
 		FROM harness_session_events e JOIN harness_sessions hs ON hs.id=e.harness_session_id
 		WHERE e.id>? AND e.id<=? AND hs.role='worker' AND hs.project_agent_id<>?
 		ORDER BY e.id`, watermarks["harness_session_event"], highwaters["harness_session_event"], receiver.agentID)
@@ -214,12 +212,15 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 	for rows.Next() {
 		var projectID, sequence int64
 		var sessionID, state, reason, kind, occurredAt string
-		var assigned bool
+		var assigned sql.NullBool
 		if err := rows.Scan(&projectID, &sessionID, &sequence, &state, &reason, &kind, &occurredAt, &assigned); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		decision := ClassifyAttentionTransition(AttentionTransition{ActivityState: state, ActivityReason: reason, ActivityKind: kind, Assigned: assigned})
+		decision := ClassifyAttentionTransition(AttentionTransition{
+			ActivityState: state, ActivityReason: reason, ActivityKind: kind,
+			AssignmentKnown: assigned.Valid, Assigned: assigned.Valid && assigned.Bool,
+		})
 		if decision.Disposition == AttentionDispositionActionable {
 			candidates = append(candidates, attentionCandidate{projectID, "harness_session_event", sessionID, sequence, decision.Kind, decision.Reason, occurredAt})
 		}
