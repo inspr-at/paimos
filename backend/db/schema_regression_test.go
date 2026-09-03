@@ -131,7 +131,9 @@ func TestMigration161AddsDistinctEncryptedReferenceHarnessControlPlane(t *testin
 	if err != nil {
 		t.Fatalf("valid managed session rejected: %v", err)
 	}
-	if _, err := database.Exec(`UPDATE harness_sessions SET phase='stopped' WHERE id='11111111-1111-4111-8111-111111111111'`); err != nil {
+	if _, err := database.Exec(`UPDATE harness_sessions
+		SET phase='stopped',activity_state='dead',activity_reason='stopped',closed_reason='stopped'
+		WHERE id='11111111-1111-4111-8111-111111111111'`); err != nil {
 		t.Fatal(err)
 	}
 	_, err = database.Exec(`INSERT INTO harness_sessions(
