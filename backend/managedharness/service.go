@@ -57,7 +57,6 @@ const (
 	ActivityAdapter     = "adapter_activity"
 	ActivityCompleted   = "turn_completed"
 	ActivityStale       = "heartbeat_stale"
-	ActivityOldEvidence = "stale_evidence"
 	ActivityMalformed   = "malformed_evidence"
 	ActivityUnmanaged   = "unmanaged_evidence"
 	ClosedStopped       = "stopped"
@@ -419,11 +418,17 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 	if in.ManagementMode == ManagementUnmanaged {
 		activityReason = ActivityUnmanaged
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.HarnessSession{}, false, err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, workerDigest, nullString(targetID), in.ManagementMode, in.Role, in.SteerMode,
 		boolInt(c.Inbox), boolInt(c.Status), boolInt(c.Steer), boolInt(c.Interrupt), boolInt(c.Stop), PhaseStarting, activityReason)
 	if err != nil {
+		_ = tx.Rollback()
 		const identityConstraint = "UNIQUE constraint failed: harness_sessions.project_id, harness_sessions.harness, harness_sessions.host, harness_sessions.session_ref_digest"
 		const addressConstraint = "UNIQUE constraint failed: harness_sessions.project_id, harness_sessions.harness, harness_sessions.agent_name"
 		identityConflict := strings.Contains(err.Error(), identityConstraint)
@@ -448,8 +453,17 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		}
 		return models.HarnessSession{}, false, err
 	}
-	created, err := s.GetByID(ctx, id)
-	return created, true, err
+	created, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, id))
+	if err != nil {
+		return models.HarnessSession{}, false, err
+	}
+	if err := appendSessionEventTx(ctx, tx, created, "register"); err != nil {
+		return models.HarnessSession{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.HarnessSession{}, false, err
+	}
+	return created, true, nil
 }
 
 func (s *Service) VerifyWorkerLease(ctx context.Context, projectID int64, sessionID, lease string) (bool, error) {

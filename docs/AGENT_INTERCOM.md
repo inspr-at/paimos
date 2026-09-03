@@ -338,7 +338,11 @@ but an unmanaged, unreported, stale, malformed, or ambiguous worker remains
 
 An owned integration reports only the adapter's monotonic, content-free event
 sequence and a documented kind. `session_started` proves process ownership but
-does not invent busy or idle. The generation lease stays on protected stdin:
+does not invent busy or idle. A strictly older sequence is an idempotent no-op:
+it preserves the authoritative activity tuple, sequence, and evidence age so a
+delayed event cannot downgrade current truth. The `stale_evidence` reason is a
+forward-compatible schema value and is not emitted by the current service.
+The generation lease stays on protected stdin:
 
 ```bash
 paimos harness heartbeat --project "$PROJECT" \

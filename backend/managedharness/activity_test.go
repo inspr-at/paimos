@@ -100,7 +100,7 @@ func TestRoutineHeartbeatYieldCyclesDoNotGrowActivityLog(t *testing.T) {
 		}
 	}
 	var events int
-	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_events WHERE harness_session_id=?`, session.ID).Scan(&events); err != nil || events != 1 {
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_events WHERE harness_session_id=?`, session.ID).Scan(&events); err != nil || events != 2 {
 		t.Fatalf("routine cycle events=%d err=%v", events, err)
 	}
 }
@@ -113,6 +113,70 @@ func TestSessionStartedEvidenceDoesNotInventBusyOrIdle(t *testing.T) {
 	if err != nil || reported.ActivityState != ActivityUnknown || reported.ActivityReason != ActivityUnreported ||
 		reported.ActivitySequence != 1 || reported.ActivityKind != "session_started" || reported.ActivityAt != "" || reported.ActivityAge != nil {
 		t.Fatalf("session-start evidence=%+v err=%v", reported, err)
+	}
+}
+
+func TestRegistrationAppendsGenesisEventAtomically(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	managed := registerActivitySession(t, service, projectID)
+
+	assertGenesis := func(session models.HarnessSession, wantReason string) {
+		t.Helper()
+		var operation, phase, state, reason, kind, closed string
+		var eventSequence, activitySequence int64
+		if err := paimosdb.DB.QueryRow(`SELECT event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,activity_sequence,closed_reason
+			FROM harness_session_events WHERE harness_session_id=?`, session.ID).Scan(
+			&eventSequence, &operation, &phase, &state, &reason, &kind, &activitySequence, &closed); err != nil {
+			t.Fatal(err)
+		}
+		if eventSequence != session.Revision || eventSequence != 1 || operation != "register" || phase != PhaseStarting || state != ActivityUnknown ||
+			reason != wantReason || kind != "" || activitySequence != 0 || closed != "" {
+			t.Fatalf("genesis event session=%s sequence=%d operation=%s phase=%s state=%s reason=%s kind=%s activity_sequence=%d closed=%s",
+				session.ID, eventSequence, operation, phase, state, reason, kind, activitySequence, closed)
+		}
+	}
+	assertGenesis(managed, ActivityUnreported)
+
+	unmanagedInput := RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "external-host", SessionRef: "external-ref", WorkerLease: testWorkerLease,
+		ManagementMode: ManagementUnmanaged, Role: RoleWorker, SteerMode: SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
+	}
+	unmanaged, created, err := service.Register(context.Background(), unmanagedInput)
+	if err != nil || !created {
+		t.Fatalf("unmanaged register created=%v err=%v", created, err)
+	}
+	assertGenesis(unmanaged, ActivityUnmanaged)
+	replay, created, err := service.Register(context.Background(), unmanagedInput)
+	if err != nil || created || replay.ID != unmanaged.ID {
+		t.Fatalf("register replay session=%+v created=%v err=%v", replay, created, err)
+	}
+	var replayEvents int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_events WHERE harness_session_id=?`, unmanaged.ID).Scan(&replayEvents); err != nil || replayEvents != 1 {
+		t.Fatalf("register replay events=%d err=%v", replayEvents, err)
+	}
+
+	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'worker2')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`CREATE TRIGGER fixture_reject_register_event BEFORE INSERT ON harness_session_events
+		WHEN NEW.operation='register' BEGIN SELECT RAISE(ABORT,'fixture register event reject'); END`); err != nil {
+		t.Fatal(err)
+	}
+	_, created, err = service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker2", Harness: "codex", Host: "rollback-host", SessionRef: "rollback-ref", WorkerLease: testWorkerLease,
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
+	})
+	if err == nil || created || !strings.Contains(err.Error(), "fixture register event reject") {
+		t.Fatalf("register event failure created=%v err=%v", created, err)
+	}
+	var rolledBack int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_sessions WHERE project_id=? AND agent_name='worker2'`, projectID).Scan(&rolledBack); err != nil || rolledBack != 0 {
+		t.Fatalf("rolled-back sessions=%d err=%v", rolledBack, err)
+	}
+	var registerEvents int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_events WHERE operation='register'`).Scan(&registerEvents); err != nil || registerEvents != 2 {
+		t.Fatalf("register events after rollback=%d err=%v", registerEvents, err)
 	}
 }
 
@@ -151,7 +215,7 @@ func TestHarnessSessionEventsAreTransactionalImmutableAndPhaseIndependent(t *tes
 		}
 		operations = append(operations, operation)
 	}
-	if got := strings.Join(operations, ","); got != "heartbeat,yield,control_completed,stop" {
+	if got := strings.Join(operations, ","); got != "register,heartbeat,yield,control_completed,stop" {
 		t.Fatalf("operations=%s", got)
 	}
 	if _, err := paimosdb.DB.Exec(`UPDATE harness_session_events SET phase='working' WHERE harness_session_id=?`, session.ID); err == nil || !strings.Contains(err.Error(), "immutable") {
@@ -249,23 +313,28 @@ func TestConcurrentActivityTimeoutAppendsOneTransition(t *testing.T) {
 }
 
 func TestActivityTimeoutSkipsUnmanagedAndContinuesToManagedSession(t *testing.T) {
-	projectID, _ := openManagedHarnessTestDB(t)
+	projectID, agentID := openManagedHarnessTestDB(t)
 	service := NewService(paimosdb.DB)
-	unmanaged, _, err := service.Register(context.Background(), RegisterInput{
-		ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "external-host", SessionRef: "external-ref", WorkerLease: testWorkerLease,
-		ManagementMode: ManagementUnmanaged, Role: RoleWorker, SteerMode: SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	managed := registerActivitySession(t, service, projectID)
 	const unmanagedID = "11111111-1111-4111-8111-111111111111"
 	const managedID = "22222222-2222-4222-8222-222222222222"
-	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET id=? WHERE id=?`, unmanagedID, unmanaged.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET id=? WHERE id=?`, managedID, managed.ID); err != nil {
-		t.Fatal(err)
+	for _, fixture := range []struct {
+		id, harness, mode, reason string
+	}{
+		{unmanagedID, "claude", ManagementUnmanaged, ActivityUnmanaged},
+		{managedID, "codex", ManagementManaged, ActivityUnreported},
+	} {
+		if _, err := paimosdb.DB.Exec(`INSERT INTO harness_sessions(
+			id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,
+			management_mode,role,steer_mode,advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason)
+			VALUES(?,?,?,'worker',?,'timeout-fixture',zeroblob(32),zeroblob(32),?,'worker','none',0,1,0,0,0,'starting',?)`,
+			fixture.id, projectID, agentID, fixture.harness, fixture.mode, fixture.reason); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := paimosdb.DB.Exec(`INSERT INTO harness_session_events(
+			harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,activity_sequence,closed_reason)
+			VALUES(?,1,'register','starting','unknown',?,'',0,'')`, fixture.id, fixture.reason); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := service.HeartbeatWithActivity(context.Background(), unmanagedID, PhaseWorking, ActivityEvidence{Sequence: 1, Kind: "turn_started"}); err != nil {
 		t.Fatal(err)

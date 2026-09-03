@@ -338,8 +338,7 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 		if err := r.heartbeat(ctx, known.publicID, session, workerLease, reporterPhase(session.State)); err != nil {
 			return err
 		}
-		_, err := r.yieldControls(ctx, known.publicID, session, workerLease)
-		return err
+		return r.yieldControls(ctx, known.publicID, session, workerLease)
 	}
 	harness, agentName, err := reporterIdentity(session)
 	if err != nil {
@@ -393,8 +392,7 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	if err := r.heartbeat(ctx, response.ID, session, workerLease, reporterPhase(session.State)); err != nil {
 		return err
 	}
-	_, err = r.yieldControls(ctx, response.ID, session, workerLease)
-	return err
+	return r.yieldControls(ctx, response.ID, session, workerLease)
 }
 
 func reporterIdentity(session agentd.Session) (string, string, error) {
@@ -480,30 +478,29 @@ func (r *cliReporter) heartbeat(ctx context.Context, publicID string, session ag
 	return nil
 }
 
-func (r *cliReporter) yieldControls(ctx context.Context, publicID string, session agentd.Session, workerLease string) (bool, error) {
+func (r *cliReporter) yieldControls(ctx context.Context, publicID string, session agentd.Session, workerLease string) error {
 	_, agentName, err := reporterIdentity(session)
 	if err != nil {
-		return false, err
+		return err
 	}
 	args := []string{"--json", "harness", "yield", "--project", strconv.FormatInt(session.ProjectID, 10), "--session", publicID, "--agent", agentName, "--worker-lease-file", "-"}
 	raw, err := r.run(ctx, r.paimosPath, args, r.environment, strings.NewReader(workerLease))
 	if err != nil {
-		return false, err
+		return err
 	}
 	var response harnessYieldResponse
 	if json.Unmarshal(raw, &response) != nil || response.Session.ID != publicID || response.Session.ProjectID != session.ProjectID || response.Session.AgentName != agentName || response.Session.Harness != session.Adapter {
-		return false, errors.New("paimos reporter returned mismatched yield scope")
+		return errors.New("paimos reporter returned mismatched yield scope")
 	}
-	stopped := false
 	for _, control := range response.Controls {
 		if uuid.Validate(control.ID) != nil || control.HarnessSessionID != publicID || control.State != "claimed" || (control.Kind != "interrupt" && control.Kind != "stop") {
-			return false, errors.New("paimos reporter returned an invalid typed control")
+			return errors.New("paimos reporter returned an invalid typed control")
 		}
 		request := agentd.ControlRequest{Instance: r.instance, ProjectID: session.ProjectID, Identity: session.Identity, CorrelationID: control.ID}
 		outcome, reason := "rejected", "ownership_lost"
 		completion := agentd.ReporterCompletion{ControlID: control.ID, Kind: control.Kind, Outcome: outcome, Reason: reason}
 		if err := r.checkpoint(ctx, session, r.pendingReporterState(session, publicID, completion)); err != nil {
-			return false, err
+			return err
 		}
 		if !terminalAgentdState(session.State) {
 			outcome, reason = "applied", "applied"
@@ -521,18 +518,17 @@ func (r *cliReporter) yieldControls(ctx context.Context, publicID string, sessio
 			}
 			completion = agentd.ReporterCompletion{ControlID: control.ID, Kind: control.Kind, Outcome: outcome, Reason: reason}
 			if err := r.checkpoint(ctx, session, r.pendingReporterState(session, publicID, completion)); err != nil {
-				return false, err
+				return err
 			}
-			stopped = stopped || control.Kind == "stop" && outcome == "applied"
 		}
 		if err := r.completeControl(ctx, publicID, session, agentName, workerLease, completion); err != nil {
-			return false, err
+			return err
 		}
 		if err := r.checkpoint(ctx, session, r.baseReporterState(session, publicID)); err != nil {
-			return false, err
+			return err
 		}
 	}
-	return stopped, nil
+	return nil
 }
 
 func validReporterReceipt(receipt agentd.Receipt, operation string, session agentd.Session, request agentd.ControlRequest) bool {
