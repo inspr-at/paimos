@@ -1379,7 +1379,10 @@ revision and records immutable before/after evidence. A chain may have at most
 16 ancestors, including after moving a node with descendants. Deleting a
 project agent detaches surviving children with the same revisioned event;
 active ticket bindings return conflict on ticket mutation, while hard purge of
-an already-trashed ticket audit-detaches historical stopped sessions.
+an already-trashed ticket audit-detaches historical stopped sessions. Moving a
+ticket to another project is rejected while any active or stopped harness
+session still names it, so historical binding rows cannot become cross-project
+references; detach those sessions explicitly before the move.
 
 `paimos harness orchestrator` returns `resolved` only for exactly one active
 coordinator with fresh managed `busy` or `idle` activity. No coordinator is

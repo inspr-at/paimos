@@ -186,21 +186,35 @@ func Test_SoftDelete_Purge(t *testing.T) {
 
 func Test_SoftDelete_ActiveHarnessBindingConflictsAndPurgeAuditsHistoricalDetach(t *testing.T) {
 	ts, projectID, ticketID, _ := softDeleteSetup(t)
-	resp := ts.post(t, agentsURL(projectID), ts.adminCookie, map[string]any{"name": "worker"})
-	assertStatus(t, resp, http.StatusCreated)
+	for _, name := range []string{"parent", "worker"} {
+		resp := ts.post(t, agentsURL(projectID), ts.adminCookie, map[string]any{"name": name})
+		assertStatus(t, resp, http.StatusCreated)
+	}
 	service := managedharness.NewService(paimosdb.DB)
+	parent, created, err := service.Register(context.Background(), managedharness.RegisterInput{
+		ProjectID: projectID, AgentName: "parent", Harness: "codex", Host: "host-parent", SessionRef: "ref-parent",
+		WorkerLease: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ManagementMode: managedharness.ManagementManaged,
+		Role: managedharness.RoleWorker, SteerMode: managedharness.SteerNone,
+		Capabilities: models.HarnessCapabilities{Status: true},
+	})
+	if err != nil || !created {
+		t.Fatalf("register parent: created=%v err=%v", created, err)
+	}
 	session, created, err := service.Register(context.Background(), managedharness.RegisterInput{
 		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "host-worker", SessionRef: "ref-worker",
 		WorkerLease: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ManagementMode: managedharness.ManagementManaged,
-		Role: managedharness.RoleWorker, TicketID: &ticketID, SteerMode: managedharness.SteerNone,
+		Role: managedharness.RoleWorker, ParentSessionID: &parent.ID, TicketID: &ticketID, SteerMode: managedharness.SteerNone,
 		Capabilities: models.HarnessCapabilities{Status: true},
 	})
 	if err != nil || !created {
 		t.Fatalf("register ticket-bound worker: created=%v err=%v", created, err)
 	}
 
-	resp = ts.del(t, fmt.Sprintf("/api/issues/%d", ticketID), ts.adminCookie)
+	resp := ts.del(t, fmt.Sprintf("/api/issues/%d", ticketID), ts.adminCookie)
 	assertStatus(t, resp, http.StatusConflict)
+	if _, err := service.Stop(context.Background(), parent.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := service.Stop(context.Background(), session.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -209,13 +223,14 @@ func Test_SoftDelete_ActiveHarnessBindingConflictsAndPurgeAuditsHistoricalDetach
 	resp = ts.del(t, fmt.Sprintf("/api/issues/%d/purge", ticketID), ts.adminCookie)
 	assertStatus(t, resp, http.StatusNoContent)
 
+	var storedParent sql.NullString
 	var storedTicket sql.NullInt64
 	var revision int64
-	if err := paimosdb.DB.QueryRow(`SELECT ticket_id,revision FROM harness_sessions WHERE id=?`, session.ID).Scan(&storedTicket, &revision); err != nil {
+	if err := paimosdb.DB.QueryRow(`SELECT parent_harness_session_id,ticket_id,revision FROM harness_sessions WHERE id=?`, session.ID).Scan(&storedParent, &storedTicket, &revision); err != nil {
 		t.Fatal(err)
 	}
-	if storedTicket.Valid {
-		t.Fatalf("purged ticket remains bound: %+v", storedTicket)
+	if !storedParent.Valid || storedParent.String != parent.ID || storedTicket.Valid {
+		t.Fatalf("purge changed stopped parent or retained ticket: parent=%+v ticket=%+v", storedParent, storedTicket)
 	}
 	var operation string
 	var beforeTicket sql.NullInt64

@@ -12529,7 +12529,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 BEGIN SELECT RAISE(ABORT,'harness session binding is invalid'); END`,
 			`CREATE TRIGGER trg_harness_sessions_binding_update BEFORE UPDATE OF parent_harness_session_id,ticket_id ON harness_sessions
 			 WHEN
-			  (NEW.parent_harness_session_id IS NOT NULL AND (
+			  (NEW.parent_harness_session_id IS NOT OLD.parent_harness_session_id AND NEW.parent_harness_session_id IS NOT NULL AND (
 			   NEW.parent_harness_session_id=NEW.id OR
 			   NOT EXISTS(SELECT 1 FROM harness_sessions parent WHERE parent.id=NEW.parent_harness_session_id
 			    AND parent.project_id=NEW.project_id AND parent.phase<>'stopped') OR
@@ -12559,7 +12559,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    )
 			    SELECT COALESCE((SELECT MAX(depth) FROM lineage),0)+COALESCE((SELECT MAX(depth) FROM subtree),0))>16
 			  )) OR
-			  (NEW.ticket_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM issues ticket WHERE ticket.id=NEW.ticket_id
+			  (NEW.ticket_id IS NOT OLD.ticket_id AND NEW.ticket_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM issues ticket WHERE ticket.id=NEW.ticket_id
 			   AND ticket.project_id=NEW.project_id AND ticket.deleted_at IS NULL AND ticket.type IN ('ticket','task')))
 			 BEGIN SELECT RAISE(ABORT,'harness session binding is invalid'); END`,
 			`CREATE TRIGGER trg_harness_sessions_binding_revision BEFORE UPDATE OF parent_harness_session_id,ticket_id ON harness_sessions
@@ -12579,8 +12579,9 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 WHEN EXISTS(SELECT 1 FROM harness_sessions WHERE id=OLD.harness_session_id)
 			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
 			`CREATE TRIGGER trg_issues_bound_harness_move BEFORE UPDATE OF project_id,deleted_at,type ON issues
-			 WHEN EXISTS(SELECT 1 FROM harness_sessions session WHERE session.ticket_id=OLD.id AND session.phase<>'stopped')
-			  AND (NEW.project_id IS NOT OLD.project_id OR NEW.deleted_at IS NOT OLD.deleted_at OR NEW.type NOT IN ('ticket','task'))
+			 WHEN EXISTS(SELECT 1 FROM harness_sessions session WHERE session.ticket_id=OLD.id
+			  AND (NEW.project_id IS NOT OLD.project_id OR (session.phase<>'stopped'
+			   AND (NEW.deleted_at IS NOT OLD.deleted_at OR NEW.type NOT IN ('ticket','task')))))
 			 BEGIN SELECT RAISE(ABORT,'bound harness ticket must be explicitly detached'); END`,
 			`PRAGMA foreign_keys=ON`,
 		}},

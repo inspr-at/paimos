@@ -246,6 +246,11 @@ func Test_ProjectAgents_DeleteDetachesSurvivingHarnessChildrenWithHistory(t *tes
 	}
 	service := managedharness.NewService(paimosdb.DB)
 	lease := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	ticketResult, err := paimosdb.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status) VALUES(?,1,'ticket','Historical binding','backlog')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticketID, _ := ticketResult.LastInsertId()
 	parent, created, err := service.Register(context.Background(), managedharness.RegisterInput{
 		ProjectID: projectID, AgentName: "parent", Harness: "codex", Host: "host-parent", SessionRef: "ref-parent",
 		WorkerLease: lease, ManagementMode: managedharness.ManagementManaged, Role: managedharness.RoleWorker,
@@ -257,21 +262,32 @@ func Test_ProjectAgents_DeleteDetachesSurvivingHarnessChildrenWithHistory(t *tes
 	child, created, err := service.Register(context.Background(), managedharness.RegisterInput{
 		ProjectID: projectID, AgentName: "child", Harness: "codex", Host: "host-child", SessionRef: "ref-child",
 		WorkerLease: lease, ManagementMode: managedharness.ManagementManaged, Role: managedharness.RoleWorker,
-		ParentSessionID: &parent.ID, SteerMode: managedharness.SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
+		ParentSessionID: &parent.ID, TicketID: &ticketID, SteerMode: managedharness.SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
 	})
 	if err != nil || !created {
 		t.Fatalf("register child: created=%v err=%v", created, err)
+	}
+	stoppedChild, err := service.Stop(context.Background(), child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Stop(context.Background(), parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE issues SET deleted_at='2026-09-03 02:00:00' WHERE id=?`, ticketID); err != nil {
+		t.Fatal(err)
 	}
 
 	resp := ts.del(t, agentURL(projectID, "parent"), ts.adminCookie)
 	assertStatus(t, resp, http.StatusNoContent)
 	var parentID sql.NullString
+	var storedTicket sql.NullInt64
 	var revision int64
-	if err := paimosdb.DB.QueryRow(`SELECT parent_harness_session_id,revision FROM harness_sessions WHERE id=?`, child.ID).Scan(&parentID, &revision); err != nil {
+	if err := paimosdb.DB.QueryRow(`SELECT parent_harness_session_id,ticket_id,revision FROM harness_sessions WHERE id=?`, child.ID).Scan(&parentID, &storedTicket, &revision); err != nil {
 		t.Fatal(err)
 	}
-	if parentID.Valid || revision != child.Revision+1 {
-		t.Fatalf("surviving child was not revisioned and detached: parent=%+v revision=%d", parentID, revision)
+	if parentID.Valid || !storedTicket.Valid || storedTicket.Int64 != ticketID || revision != stoppedChild.Revision+1 {
+		t.Fatalf("surviving child was not revisioned and detached safely: parent=%+v ticket=%+v revision=%d", parentID, storedTicket, revision)
 	}
 	var operation string
 	var beforeParent sql.NullString
