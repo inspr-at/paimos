@@ -130,6 +130,65 @@ func TestExactRegistrationReplaySurvivesStoppedParent(t *testing.T) {
 	}
 }
 
+func TestAssignBindingValidatesOnlyChangedFullStateReferences(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	for _, name := range []string{"stopped-parent", "active-parent", "ticket-child", "parent-child", "two-field-child"} {
+		addHierarchyAgent(t, projectID, name)
+	}
+	service := NewService(paimosdb.DB)
+	stoppedParent := registerHierarchySession(t, service, projectID, "stopped-parent", RoleWorker, nil, nil)
+	activeParent := registerHierarchySession(t, service, projectID, "active-parent", RoleWorker, nil, nil)
+	firstTicket := addHierarchyTicket(t, projectID, 910)
+	secondTicket := addHierarchyTicket(t, projectID, 911)
+	historicalTicket := addHierarchyTicket(t, projectID, 912)
+
+	ticketChild := registerHierarchySession(t, service, projectID, "ticket-child", RoleWorker, &stoppedParent.ID, &firstTicket)
+	if _, err := service.Stop(context.Background(), stoppedParent.ID); err != nil {
+		t.Fatal(err)
+	}
+	changedTicket, err := service.AssignBinding(context.Background(), BindingInput{
+		ProjectID: projectID, SessionID: ticketChild.ID, ExpectedRevision: ticketChild.Revision,
+		ParentSessionID: &stoppedParent.ID, TicketID: &secondTicket,
+	})
+	if err != nil || changedTicket.ParentSessionID == nil || *changedTicket.ParentSessionID != stoppedParent.ID ||
+		changedTicket.TicketID == nil || *changedTicket.TicketID != secondTicket {
+		t.Fatalf("ticket-only full-state CAS revalidated stopped parent: session=%+v err=%v", changedTicket, err)
+	}
+
+	parentChild := registerHierarchySession(t, service, projectID, "parent-child", RoleWorker, nil, &historicalTicket)
+	stoppedChild, err := service.Stop(context.Background(), parentChild.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE issues SET deleted_at='2026-09-03 03:00:00' WHERE id=?`, historicalTicket); err != nil {
+		t.Fatal(err)
+	}
+	changedParent, err := service.AssignBinding(context.Background(), BindingInput{
+		ProjectID: projectID, SessionID: stoppedChild.ID, ExpectedRevision: stoppedChild.Revision,
+		ParentSessionID: &activeParent.ID, TicketID: &historicalTicket,
+	})
+	if err != nil || changedParent.ParentSessionID == nil || *changedParent.ParentSessionID != activeParent.ID ||
+		changedParent.TicketID == nil || *changedParent.TicketID != historicalTicket {
+		t.Fatalf("parent-only full-state CAS revalidated trashed ticket: session=%+v err=%v", changedParent, err)
+	}
+
+	twoFieldChild := registerHierarchySession(t, service, projectID, "two-field-child", RoleWorker, nil, nil)
+	twoFields, err := service.AssignBinding(context.Background(), BindingInput{
+		ProjectID: projectID, SessionID: twoFieldChild.ID, ExpectedRevision: twoFieldChild.Revision,
+		ParentSessionID: &activeParent.ID, TicketID: &secondTicket,
+	})
+	if err != nil || twoFields.ParentSessionID == nil || twoFields.TicketID == nil {
+		t.Fatalf("simultaneous valid binding change failed: session=%+v err=%v", twoFields, err)
+	}
+	detached, err := service.AssignBinding(context.Background(), BindingInput{
+		ProjectID: projectID, SessionID: twoFields.ID, ExpectedRevision: twoFields.Revision,
+		ParentSessionID: nil, TicketID: nil,
+	})
+	if err != nil || detached.ParentSessionID != nil || detached.TicketID != nil {
+		t.Fatalf("simultaneous detach failed: session=%+v err=%v", detached, err)
+	}
+}
+
 func TestHierarchyRejectsCrossProjectTerminalCyclesAndAmbiguity(t *testing.T) {
 	projectID, _ := openManagedHarnessTestDB(t)
 	addHierarchyAgent(t, projectID, "coordinator")

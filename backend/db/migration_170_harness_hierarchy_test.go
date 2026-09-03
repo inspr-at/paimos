@@ -66,6 +66,31 @@ func TestMigration170PreservesActivityHistoryAndGuardsBindingHistory(t *testing.
 	if err := migrateThrough(database, 170); err != nil {
 		t.Fatal(err)
 	}
+	for _, index := range []string{"idx_harness_sessions_parent_ref", "idx_harness_sessions_ticket_ref"} {
+		var count int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name='harness_sessions' AND name=?`, index).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("missing reverse binding lookup index %s", index)
+		}
+	}
+	for _, query := range []struct {
+		name, sql, index string
+		arg              any
+	}{
+		{"parent", `EXPLAIN QUERY PLAN SELECT id FROM harness_sessions WHERE parent_harness_session_id=?`, "idx_harness_sessions_parent_ref", parentID},
+		{"ticket", `EXPLAIN QUERY PLAN SELECT id FROM harness_sessions WHERE ticket_id=?`, "idx_harness_sessions_ticket_ref", ticketID},
+	} {
+		var selectID, order, from int
+		var detail string
+		if err := database.QueryRow(query.sql, query.arg).Scan(&selectID, &order, &from, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(detail, "SEARCH harness_sessions") || !strings.Contains(detail, query.index) {
+			t.Fatalf("%s reverse lookup remains an unbounded scan: %s", query.name, detail)
+		}
+	}
 	var operation string
 	var oldParent sql.NullString
 	if err := database.QueryRow(`SELECT operation,before_parent_harness_session_id FROM harness_session_events WHERE harness_session_id=?`, childID).Scan(&operation, &oldParent); err != nil {

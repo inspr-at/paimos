@@ -695,10 +695,24 @@ func (s *Service) AssignBinding(ctx context.Context, input BindingInput) (models
 	if current.Revision != input.ExpectedRevision {
 		return models.HarnessSession{}, coded(CodeConflict, "harness session binding revision is stale")
 	}
-	if equalStringPointers(current.ParentSessionID, parent) && equalInt64Pointers(current.TicketID, ticket) {
+	parentChanged := !equalStringPointers(current.ParentSessionID, parent)
+	ticketChanged := !equalInt64Pointers(current.TicketID, ticket)
+	if !parentChanged && !ticketChanged {
 		return models.HarnessSession{}, coded(CodeConflict, "harness session binding is unchanged")
 	}
-	if err := validateBindingReferences(ctx, tx, input.ProjectID, current.ID, parent, ticket); err != nil {
+	// The request carries the complete desired binding state, but only changed
+	// references are revalidated. Historical stopped/deleted references remain
+	// readable and can therefore coexist while an operator changes the other
+	// field; a changed parent or ticket still receives every normal guard.
+	var parentToValidate *string
+	if parentChanged {
+		parentToValidate = parent
+	}
+	var ticketToValidate *int64
+	if ticketChanged {
+		ticketToValidate = ticket
+	}
+	if err := validateBindingReferences(ctx, tx, input.ProjectID, current.ID, parentToValidate, ticketToValidate); err != nil {
 		return models.HarnessSession{}, err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET parent_harness_session_id=?,ticket_id=?,revision=revision+1,

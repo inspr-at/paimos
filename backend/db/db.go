@@ -12507,8 +12507,12 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 ON harness_session_events(harness_session_id,event_sequence)`,
 			`CREATE INDEX idx_harness_sessions_parent
 			 ON harness_sessions(project_id,parent_harness_session_id) WHERE parent_harness_session_id IS NOT NULL`,
+			`CREATE INDEX idx_harness_sessions_parent_ref
+			 ON harness_sessions(parent_harness_session_id) WHERE parent_harness_session_id IS NOT NULL`,
 			`CREATE INDEX idx_harness_sessions_ticket
 			 ON harness_sessions(project_id,ticket_id) WHERE ticket_id IS NOT NULL`,
+			`CREATE INDEX idx_harness_sessions_ticket_ref
+			 ON harness_sessions(ticket_id) WHERE ticket_id IS NOT NULL`,
 			`CREATE TRIGGER trg_harness_sessions_binding_insert BEFORE INSERT ON harness_sessions
 			 WHEN
 			  (NEW.parent_harness_session_id IS NOT NULL AND (
@@ -12794,7 +12798,8 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			return fmt.Errorf("M170 schema is partially present or locally incompatible: harness event columns=%d", eventColumns)
 		}
 		return checkSchemaObjectsAbsent(ctx, conn, 170, []string{
-			"idx_harness_sessions_parent", "idx_harness_sessions_ticket",
+			"idx_harness_sessions_parent", "idx_harness_sessions_parent_ref",
+			"idx_harness_sessions_ticket", "idx_harness_sessions_ticket_ref",
 			"trg_harness_sessions_binding_insert", "trg_harness_sessions_binding_update",
 			"trg_harness_sessions_binding_revision", "trg_harness_sessions_binding_event",
 			"trg_issues_bound_harness_move",
