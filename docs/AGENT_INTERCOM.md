@@ -177,20 +177,25 @@ paimos listen --attention --as "$ADDRESS" --project PAI --follow --deliver codex
 ```
 
 The server derives this feed from authoritative message, delivery, harness
-activity, control, product-session, and issue records. Its closed transition
+activity, control, and event-time assignment records. Its closed transition
 policy wakes only for stale/unknown or dead workers, a turn ending while an
 open assignment remains, blocked/dead delivery, held action request, or
 rejected control. Ordinary busy/tool heartbeats and an unassigned completed
 turn are absorbed. Unmanaged evidence and new event combinations are deferred
-and do not wake a model until the policy is explicitly widened. Each immutable
-harness event snapshots only whether an open assignment existed at that event;
+and do not wake a model until the policy is explicitly widened. Each
+service-written lifecycle harness event snapshots whether an open direct
+ticket or product-session assignment existed at that event;
 delayed projection never reconstructs that fact from later mutable issue or
-product-session timestamps. Pre-M171 events have an explicit unknown snapshot
-and remain deferred rather than being relabelled as unassigned. Harness and message sources advance a
-per-orchestrator source-row watermark;
-projection reads only new source rows and holds the SQLite writer lock only
-for the short append-and-watermark transaction. Delivery failures are scoped
-to the configured instance.
+product-session state. Binding-change audit events do not represent worker
+activity and intentionally leave that snapshot unknown. Pre-M171 events also
+remain unknown and deferred rather than being relabelled as unassigned. On
+first enablement each source cursor is seeded at its current high-water mark,
+so installation history cannot become a surprise wake flood. Subsequent
+harness and message projection reads only new source rows. Mutable delivery
+and control failures are scoped by instance/worker, bounded by source cursor,
+and anti-joined against already projected transition identities. A no-op poll
+skips the SQLite writer transaction; other polls hold it only for the short
+append-and-watermark transaction.
 
 Each wake is a bounded batch of at most 32 identifier/enum/timestamp records.
 The batch and per-orchestrator cursor are durable across receiver-address
@@ -219,6 +224,10 @@ no authority and a spoofed header cannot read, acknowledge, inspect, replace,
 or requeue this feed's target. Projection commit, lease/decryption, and cursor
 acknowledgement each reauthorize the exact credential in their own mutation
 transaction, so an earlier middleware decision is never the final authority.
+The `--follow` listener keeps polling on a blocked batch or an explicit
+requeue-required response; those are recoverable operator states rather than
+process-crash signals. A one-shot listener returns the adapter-unavailable
+exit code so scripts can deliberately surface the blockage.
 
 In the sender shell, establish attribution and send the durable message:
 

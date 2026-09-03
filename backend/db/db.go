@@ -12624,11 +12624,14 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE TABLE agent_attention_projection_cursors (
 			 receiver_project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 			 receiver_project_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
-			 source_kind               TEXT NOT NULL CHECK(source_kind IN ('harness_session_event','held_agent_message')),
+			 source_kind               TEXT NOT NULL CHECK(source_kind IN ('harness_session_event','held_agent_message','agent_message_delivery','harness_control')),
 			 source_row_id             INTEGER NOT NULL DEFAULT 0 CHECK(source_row_id>=0),
+			 source_updated_at         TEXT NOT NULL DEFAULT '1970-01-01T00:00:00.000Z' CHECK(` + sqlControlTimestampCheck("source_updated_at") + `),
 			 updated_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
 			 PRIMARY KEY(receiver_project_agent_id,source_kind)
 			)`,
+			`CREATE INDEX idx_agent_message_deliveries_attention
+			 ON agent_message_deliveries(instance,state,updated_at)`,
 			`CREATE INDEX idx_harness_session_controls_attention
 			 ON harness_session_controls(state,completed_at,harness_session_id)`,
 			`CREATE TABLE agent_attention_cursors (

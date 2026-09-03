@@ -148,6 +148,60 @@ func TestRunAttentionListenAdapterUnavailableUsesExitFour(t *testing.T) {
 	}
 }
 
+func TestRunAttentionListenFollowKeepsBlockedBatchAlive(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	requests := 0
+	page := attentionPage{Address: "codex:amy", NextCursor: 12, Items: []attentionItem{{
+		Cursor: 12, AttentionID: "attention-12", SourceProjectID: 7, SourceKind: "harness_session_event",
+		SourceID: "worker", SourceSequence: 4, Kind: "worker_dead", Reason: "process_failed", OccurredAt: "2026-09-03T01:02:03.000Z",
+	}}, Work: &attentionWork{
+		BatchID: "11111111-1111-4111-8111-111111111111", Instance: "ppm", ProjectID: 1,
+		State: "blocked", BlockedReason: "capability_missing",
+	}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_ = json.NewEncoder(w).Encode(page)
+		if requests == 2 {
+			cancel()
+		}
+	}))
+	defer srv.Close()
+	client := &Client{baseURL: srv.URL, http: srv.Client()}
+	if err := runAttentionListen(ctx, client, 1, "codex:amy", "amy", true, true, "codex", time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if requests < 2 {
+		t.Fatalf("requests=%d", requests)
+	}
+}
+
+func TestRunAttentionListenFollowRetriesRequeueRequired(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "operator requeue required", "code": "agent_attention_batch_requeue_required",
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(attentionPage{Address: "codex:amy"})
+		cancel()
+	}))
+	defer srv.Close()
+	client := &Client{baseURL: srv.URL, http: srv.Client()}
+	if err := runAttentionListen(ctx, client, 1, "codex:amy", "amy", true, true, "codex", time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests=%d", requests)
+	}
+}
+
 func TestRunListenForeignWorkerReturnsDistinctExitWithoutCompleting(t *testing.T) {
 	message := messageEnvelope{Cursor: 2, MessageID: "m-foreign", DeliveryWork: &messageDeliveryWork{
 		DeliveryID: "d-foreign", State: "pending", Adapter: "managed_harness", TargetKind: "harness_session", RequestedLevel: "steer",

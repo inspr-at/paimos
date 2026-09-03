@@ -169,6 +169,12 @@ func runAttentionListen(ctx context.Context, client *Client, projectID int64, ad
 			if ctx.Err() != nil {
 				return nil
 			}
+			if follow && isRecoverableAttentionListenError(err) {
+				if err := waitListenPoll(ctx, pollInterval); err != nil {
+					return nil
+				}
+				continue
+			}
 			return reportError(err)
 		}
 		if len(page.Items) > 0 {
@@ -195,31 +201,38 @@ func runAttentionListen(ctx context.Context, client *Client, projectID int64, ad
 				if page.Work == nil {
 					return errors.New("attention delivery has no durable batch")
 				}
-				message := messageEnvelope{Cursor: page.NextCursor, ContextID: strconv.FormatInt(projectID, 10), To: address,
-					DeliveryLevel: deliveryLevelSimple, Parts: []struct {
-						Kind string `json:"kind"`
-						Text string `json:"text"`
-					}{{Kind: "text", Text: page.Frame}},
-					DeliveryWork: &messageDeliveryWork{DeliveryID: page.Work.BatchID, Instance: page.Work.Instance, ProjectID: page.Work.ProjectID,
-						State: page.Work.State, Adapter: page.Work.Adapter, TargetKind: page.Work.TargetKind, TargetRef: page.Work.TargetRef,
-						MaximumLevel: page.Work.MaximumLevel, RequestedLevel: deliveryLevelSimple, FallbackReason: page.Work.BlockedReason}}
-				outcome, deliveryErr := deliverHarnessMessage(ctx, message, page.Frame, deliver, "", "queue")
-				if deliveryErr != nil {
-					var unavailable *adapterUnavailableError
-					if errors.As(deliveryErr, &unavailable) {
-						if unavailable.foreignWorker {
-							if !follow {
-								return &listenExitCode{code: listenExitForeignWorker, err: deliveryErr}
-							}
-							handoffComplete = false
-						} else {
-							return &listenExitCode{code: listenExitAdapterUnavailable, err: deliveryErr}
-						}
-					} else {
-						return deliveryErr
+				if page.Work.State == "blocked" {
+					handoffComplete = false
+					if !follow {
+						return &listenExitCode{code: listenExitAdapterUnavailable, err: fmt.Errorf("attention delivery is blocked: %s", page.Work.BlockedReason)}
 					}
-				} else if outcome == nil || outcome.EffectiveLevel != deliveryLevelSimple {
-					return errors.New("attention wake did not complete as simple delivery")
+				} else {
+					message := messageEnvelope{Cursor: page.NextCursor, ContextID: strconv.FormatInt(projectID, 10), To: address,
+						DeliveryLevel: deliveryLevelSimple, Parts: []struct {
+							Kind string `json:"kind"`
+							Text string `json:"text"`
+						}{{Kind: "text", Text: page.Frame}},
+						DeliveryWork: &messageDeliveryWork{DeliveryID: page.Work.BatchID, Instance: page.Work.Instance, ProjectID: page.Work.ProjectID,
+							State: page.Work.State, Adapter: page.Work.Adapter, TargetKind: page.Work.TargetKind, TargetRef: page.Work.TargetRef,
+							MaximumLevel: page.Work.MaximumLevel, RequestedLevel: deliveryLevelSimple, FallbackReason: page.Work.BlockedReason}}
+					outcome, deliveryErr := deliverHarnessMessage(ctx, message, page.Frame, deliver, "", "queue")
+					if deliveryErr != nil {
+						var unavailable *adapterUnavailableError
+						if errors.As(deliveryErr, &unavailable) {
+							if unavailable.foreignWorker {
+								if !follow {
+									return &listenExitCode{code: listenExitForeignWorker, err: deliveryErr}
+								}
+								handoffComplete = false
+							} else {
+								return &listenExitCode{code: listenExitAdapterUnavailable, err: deliveryErr}
+							}
+						} else {
+							return deliveryErr
+						}
+					} else if outcome == nil || outcome.EffectiveLevel != deliveryLevelSimple {
+						return errors.New("attention wake did not complete as simple delivery")
+					}
 				}
 			}
 			if handoffComplete {
@@ -244,13 +257,28 @@ func runAttentionListen(ctx context.Context, client *Client, projectID int64, ad
 			}
 			return nil
 		}
-		timer := time.NewTimer(pollInterval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if err := waitListenPoll(ctx, pollInterval); err != nil {
 			return nil
-		case <-timer.C:
 		}
+	}
+}
+
+func isRecoverableAttentionListenError(err error) bool {
+	var httpErr *httpError
+	if !errors.As(err, &httpErr) {
+		return false
+	}
+	return httpErr.problem().Code == "agent_attention_batch_requeue_required"
+}
+
+func waitListenPoll(ctx context.Context, pollInterval time.Duration) error {
+	timer := time.NewTimer(pollInterval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 

@@ -165,6 +165,21 @@ type attentionQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
+const attentionProjectionEpoch = "1970-01-01T00:00:00.000Z"
+
+var attentionProjectionSources = []string{
+	"harness_session_event",
+	"held_agent_message",
+	"agent_message_delivery",
+	"harness_control",
+}
+
+type attentionProjectionCursor struct {
+	rowID     int64
+	updatedAt string
+	present   bool
+}
+
 // ProjectAttention reads immutable event sources through durable watermarks,
 // then holds the SQLite writer lock only while appending the derived index and
 // advancing those watermarks. Mutable failure sources are selected through
@@ -181,31 +196,113 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 		}
 		return 0, err
 	}
-	watermarks := map[string]int64{"harness_session_event": 0, "held_agent_message": 0}
-	for kind := range watermarks {
-		var watermark int64
-		err := s.db.QueryRowContext(ctx, `SELECT source_row_id FROM agent_attention_projection_cursors
-			WHERE receiver_project_agent_id=? AND source_kind=?`, receiver.agentID, kind).Scan(&watermark)
+	cursors := make(map[string]attentionProjectionCursor, len(attentionProjectionSources))
+	for _, kind := range attentionProjectionSources {
+		var cursor attentionProjectionCursor
+		err := s.db.QueryRowContext(ctx, `SELECT source_row_id,source_updated_at FROM agent_attention_projection_cursors
+			WHERE receiver_project_agent_id=? AND source_kind=?`, receiver.agentID, kind).Scan(&cursor.rowID, &cursor.updatedAt)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return 0, err
 		}
-		watermarks[kind] = watermark
+		cursor.present = err == nil
+		if cursor.updatedAt == "" {
+			cursor.updatedAt = attentionProjectionEpoch
+		}
+		cursors[kind] = cursor
 	}
-	var harnessHighwater, messageHighwater int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM harness_session_events`).Scan(&harnessHighwater); err != nil {
+	highwaters := map[string]attentionProjectionCursor{
+		"harness_session_event":  {updatedAt: attentionProjectionEpoch, present: true},
+		"held_agent_message":     {updatedAt: attentionProjectionEpoch, present: true},
+		"agent_message_delivery": {updatedAt: attentionProjectionEpoch, present: true},
+		"harness_control":        {updatedAt: attentionProjectionEpoch, present: true},
+	}
+	high := highwaters["harness_session_event"]
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM harness_session_events`).Scan(&high.rowID); err != nil {
 		return 0, err
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM agent_messages`).Scan(&messageHighwater); err != nil {
+	highwaters["harness_session_event"] = high
+	high = highwaters["held_agent_message"]
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM agent_messages`).Scan(&high.rowID); err != nil {
 		return 0, err
 	}
-	highwaters := map[string]int64{"harness_session_event": harnessHighwater, "held_agent_message": messageHighwater}
+	highwaters["held_agent_message"] = high
+	loadMutableHighwater := func(kind, query string, args ...any) error {
+		var rowID sql.NullInt64
+		var updatedAt sql.NullString
+		if err := s.db.QueryRowContext(ctx, query, args...).Scan(&rowID, &updatedAt); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+		highwater := highwaters[kind]
+		if rowID.Valid {
+			highwater.rowID = rowID.Int64
+		}
+		if updatedAt.Valid {
+			highwater.updatedAt = updatedAt.String
+		}
+		highwaters[kind] = highwater
+		return nil
+	}
+	if err := loadMutableHighwater("agent_message_delivery", `SELECT rowid,updated_at FROM agent_message_deliveries
+		WHERE instance=? ORDER BY updated_at DESC,rowid DESC LIMIT 1`, instanceName()); err != nil {
+		return 0, err
+	}
+	if err := loadMutableHighwater("harness_control", `SELECT c.rowid,c.completed_at FROM harness_session_controls c
+		JOIN harness_sessions hs ON hs.id=c.harness_session_id WHERE c.completed_at IS NOT NULL
+		AND hs.role='worker' AND hs.project_agent_id<>? ORDER BY c.completed_at DESC,c.rowid DESC LIMIT 1`, receiver.agentID); err != nil {
+		return 0, err
+	}
+
+	// Enabling projection establishes a cutover boundary rather than replaying
+	// the installation's entire operational history. The boundary is written
+	// under current authority and the transaction-current orchestrator identity.
+	missingCursor := false
+	for _, kind := range attentionProjectionSources {
+		missingCursor = missingCursor || !cursors[kind].present
+	}
+	if missingCursor {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return 0, err
+		}
+		defer tx.Rollback()
+		if err := authorizeAttentionTx(ctx, tx, authority); err != nil {
+			return 0, err
+		}
+		writeReceiver, err := resolveAttentionReceiver(ctx, tx)
+		if err != nil {
+			return 0, err
+		}
+		if writeReceiver.agentID != receiver.agentID || writeReceiver.address != receiver.address {
+			return 0, coded("agent_attention_receiver_changed", "attention receiver changed during projection")
+		}
+		for _, kind := range attentionProjectionSources {
+			if cursors[kind].present {
+				continue
+			}
+			highwater := highwaters[kind]
+			if _, err := tx.ExecContext(ctx, `INSERT INTO agent_attention_projection_cursors(
+				receiver_project_id,receiver_project_agent_id,source_kind,source_row_id,source_updated_at,updated_at)
+				VALUES(?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT DO NOTHING`,
+				receiver.projectID, receiver.agentID, kind, highwater.rowID, highwater.updatedAt); err != nil {
+				return 0, err
+			}
+			cursors[kind] = highwater
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
+		return 0, nil
+	}
 
 	var candidates []attentionCandidate
 	rows, err := s.db.QueryContext(ctx, `SELECT hs.project_id,e.harness_session_id,e.activity_sequence,e.activity_state,
 		e.activity_reason,e.activity_event_kind,strftime('%Y-%m-%dT%H:%M:%fZ',e.created_at),e.assignment_present
 		FROM harness_session_events e JOIN harness_sessions hs ON hs.id=e.harness_session_id
 		WHERE e.id>? AND e.id<=? AND hs.role='worker' AND hs.project_agent_id<>?
-		ORDER BY e.id`, watermarks["harness_session_event"], highwaters["harness_session_event"], receiver.agentID)
+		ORDER BY e.id`, cursors["harness_session_event"].rowID, highwaters["harness_session_event"].rowID, receiver.agentID)
 	if err != nil {
 		return 0, err
 	}
@@ -238,7 +335,7 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 	rows, err = s.db.QueryContext(ctx, `SELECT pa.project_id,am.id,am.message_id,am.is_action_request,am.delivered,
 		strftime('%Y-%m-%dT%H:%M:%fZ',am.created_at) FROM agent_messages am
 		JOIN project_agents pa ON pa.id=am.to_agent_id WHERE am.id>? AND am.id<=? ORDER BY am.id`,
-		watermarks["held_agent_message"], highwaters["held_agent_message"])
+		cursors["held_agent_message"].rowID, highwaters["held_agent_message"].rowID)
 	if err != nil {
 		return 0, err
 	}
@@ -270,7 +367,11 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 	}{
 		{`SELECT pa.project_id,d.delivery_id,d.attempt_count,d.state,strftime('%Y-%m-%dT%H:%M:%fZ',d.updated_at)
 		 FROM agent_message_deliveries d JOIN agent_messages am ON am.id=d.message_row_id
-		 JOIN project_agents pa ON pa.id=am.to_agent_id WHERE d.instance=? AND d.state IN ('blocked','dead')`, "agent_message_delivery", "delivery_failed", func(state string) string {
+		 JOIN project_agents pa ON pa.id=am.to_agent_id WHERE d.instance=? AND d.state IN ('blocked','dead')
+		 AND (d.updated_at>? OR (d.updated_at=? AND d.rowid>?))
+		 AND NOT EXISTS(SELECT 1 FROM agent_attention_items ai WHERE ai.receiver_project_agent_id=?
+		  AND ai.source_kind='agent_message_delivery' AND ai.source_id=d.delivery_id
+		  AND ai.source_sequence=d.attempt_count AND ai.reason_code=CASE d.state WHEN 'dead' THEN 'delivery_dead' ELSE 'target_blocked' END)`, "agent_message_delivery", "delivery_failed", func(state string) string {
 			if state == "dead" {
 				return "delivery_dead"
 			}
@@ -278,14 +379,19 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 		}},
 		{`SELECT hs.project_id,c.id,c.sequence,c.state,strftime('%Y-%m-%dT%H:%M:%fZ',c.completed_at) FROM harness_session_controls c
 		 JOIN harness_sessions hs ON hs.id=c.harness_session_id WHERE c.state='rejected' AND c.completed_at IS NOT NULL
-		 AND hs.role='worker' AND hs.project_agent_id<>?`, "harness_control", "control_rejected", func(string) string { return "control_rejected" }},
+		 AND hs.role='worker' AND hs.project_agent_id<>?
+		 AND (c.completed_at>? OR (c.completed_at=? AND c.rowid>?))
+		 AND NOT EXISTS(SELECT 1 FROM agent_attention_items ai WHERE ai.receiver_project_agent_id=?
+		  AND ai.source_kind='harness_control' AND ai.source_id=c.id AND ai.source_sequence=c.sequence
+		  AND ai.reason_code='control_rejected')`, "harness_control", "control_rejected", func(string) string { return "control_rejected" }},
 	}
 	for _, source := range queries {
-		arg := any(instanceName())
+		cursor := cursors[source.sourceKind]
+		args := []any{instanceName(), cursor.updatedAt, cursor.updatedAt, cursor.rowID, receiver.agentID}
 		if source.sourceKind == "harness_control" {
-			arg = receiver.agentID
+			args = []any{receiver.agentID, cursor.updatedAt, cursor.updatedAt, cursor.rowID, receiver.agentID}
 		}
-		rows, err := s.db.QueryContext(ctx, source.sql, arg)
+		rows, err := s.db.QueryContext(ctx, source.sql, args...)
 		if err != nil {
 			return 0, err
 		}
@@ -305,6 +411,14 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 		if err := rows.Close(); err != nil {
 			return 0, err
 		}
+	}
+
+	watermarkChanged := false
+	for _, kind := range attentionProjectionSources {
+		watermarkChanged = watermarkChanged || cursors[kind].rowID != highwaters[kind].rowID || cursors[kind].updatedAt != highwaters[kind].updatedAt
+	}
+	if len(candidates) == 0 && !watermarkChanged {
+		return 0, nil
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -336,13 +450,16 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 		changed, _ := result.RowsAffected()
 		inserted += changed
 	}
-	for _, kind := range []string{"harness_session_event", "held_agent_message"} {
+	for _, kind := range attentionProjectionSources {
+		highwater := highwaters[kind]
 		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_attention_projection_cursors(
-			receiver_project_id,receiver_project_agent_id,source_kind,source_row_id,updated_at)
-			VALUES(?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			receiver_project_id,receiver_project_agent_id,source_kind,source_row_id,source_updated_at,updated_at)
+			VALUES(?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 			ON CONFLICT(receiver_project_agent_id,source_kind) DO UPDATE SET
-			source_row_id=MAX(source_row_id,excluded.source_row_id),updated_at=excluded.updated_at`,
-			receiver.projectID, receiver.agentID, kind, highwaters[kind]); err != nil {
+			source_row_id=CASE WHEN excluded.source_updated_at>source_updated_at THEN excluded.source_row_id
+			 WHEN excluded.source_updated_at=source_updated_at THEN MAX(source_row_id,excluded.source_row_id) ELSE source_row_id END,
+			source_updated_at=MAX(source_updated_at,excluded.source_updated_at),updated_at=excluded.updated_at`,
+			receiver.projectID, receiver.agentID, kind, highwater.rowID, highwater.updatedAt); err != nil {
 			return 0, err
 		}
 	}
@@ -395,7 +512,8 @@ func resolveAttentionReceiver(ctx context.Context, q attentionQueryer) (*attenti
 	}
 	rows, err := q.QueryContext(ctx, `SELECT address,adapter FROM agent_message_targets
 		WHERE instance=? AND project_id=? AND enabled=1
-		ORDER BY CASE role WHEN 'primary' THEN 0 ELSE 1 END,version DESC`, instance, receiver.projectID)
+		ORDER BY CASE WHEN adapter IN ('codex','claude_resume') THEN 0 ELSE 1 END,
+		 CASE role WHEN 'primary' THEN 0 ELSE 1 END,version DESC`, instance, receiver.projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +524,7 @@ func resolveAttentionReceiver(ctx context.Context, q attentionQueryer) (*attenti
 			return nil, err
 		}
 		_, name, err := parseAddress(address)
-		if err == nil && name == receiver.name && isAttentionWakeAdapter(adapter) {
+		if err == nil && name == receiver.name {
 			receiver.address = address
 			return &receiver, nil
 		}

@@ -37,6 +37,9 @@ func configureAttentionReceiver(t *testing.T, service *Service, projectID int64)
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if projected, err := service.ProjectAttention(context.Background()); err != nil || projected != 0 {
+		t.Fatalf("bootstrap attention projection=%d err=%v", projected, err)
+	}
 	return actorID
 }
 
@@ -85,6 +88,43 @@ func TestClassifyAttentionTransitionClosedPolicy(t *testing.T) {
 	}
 }
 
+func TestAttentionFirstEnableSeedsHistoryAndNoOpPollSkipsWriter(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	_, sessionID := addAttentionWorker(t, projectID)
+	if _, err := paimosdb.DB.Exec(`INSERT INTO harness_session_events(harness_session_id,event_sequence,operation,phase,
+		activity_state,activity_reason,activity_event_kind,activity_sequence)
+		VALUES(?,1,'activity_timeout','working','unknown','heartbeat_stale','tool_started',1)`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	configureAttentionReceiver(t, service, projectID)
+	var items, cursors int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_items`).Scan(&items); err != nil {
+		t.Fatal(err)
+	}
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_projection_cursors`).Scan(&cursors); err != nil {
+		t.Fatal(err)
+	}
+	if items != 0 || cursors != len(attentionProjectionSources) {
+		t.Fatalf("historical items=%d cursors=%d", items, cursors)
+	}
+	authorityCalls := 0
+	inserted, err := service.projectAttention(context.Background(), func(context.Context, *sql.Tx) (bool, error) {
+		authorityCalls++
+		return true, nil
+	})
+	if err != nil || inserted != 0 || authorityCalls != 0 {
+		t.Fatalf("no-op projection=%d err=%v writer_authority_calls=%d", inserted, err, authorityCalls)
+	}
+	if _, err := paimosdb.DB.Exec(`INSERT INTO harness_session_events(harness_session_id,event_sequence,operation,phase,
+		activity_state,activity_reason,activity_event_kind,activity_sequence,closed_reason)
+		VALUES(?,2,'stop','stopped','dead','process_exited','tool_started',1,'process_exited')`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 1 {
+		t.Fatalf("new transition projection=%d err=%v", inserted, err)
+	}
+}
+
 func TestAttentionTransactionRevocationLeavesProjectionLeaseAndAckUntouched(t *testing.T) {
 	service, projectID := openBusTestDB(t)
 	configureAttentionReceiver(t, service, projectID)
@@ -104,14 +144,17 @@ func TestAttentionTransactionRevocationLeavesProjectionLeaseAndAckUntouched(t *t
 	if !errors.As(err, &codedErr) || codedErr.Code != "agent_message_unauthorized" {
 		t.Fatalf("list error=%v", err)
 	}
-	for label, query := range map[string]string{
-		"items":   `SELECT COUNT(*) FROM agent_attention_items`,
-		"batches": `SELECT COUNT(*) FROM agent_attention_batches`,
-		"cursors": `SELECT COUNT(*) FROM agent_attention_projection_cursors`,
+	for label, check := range map[string]struct {
+		query string
+		want  int
+	}{
+		"items":   {`SELECT COUNT(*) FROM agent_attention_items`, 0},
+		"batches": {`SELECT COUNT(*) FROM agent_attention_batches`, 0},
+		"cursors": {`SELECT COUNT(*) FROM agent_attention_projection_cursors`, len(attentionProjectionSources)},
 	} {
 		var count int
-		if err := paimosdb.DB.QueryRow(query).Scan(&count); err != nil || count != 0 {
-			t.Fatalf("%s count=%d err=%v", label, count, err)
+		if err := paimosdb.DB.QueryRow(check.query).Scan(&count); err != nil || count != check.want {
+			t.Fatalf("%s count=%d err=%v want=%d", label, count, err, check.want)
 		}
 	}
 
@@ -193,7 +236,7 @@ func TestAttentionProjectionRejectsTransactionCurrentOrchestratorReassignment(t 
 		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
 		Authority: func(ctx context.Context, tx *sql.Tx) (bool, error) {
 			authorityCalls++
-			if authorityCalls == 2 {
+			if authorityCalls == 1 {
 				if _, err := tx.ExecContext(ctx, `UPDATE instance_orchestrator SET project_agent_id=?,display_label='Bob',revision=revision+1,
 					updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton_id=1`, bobID); err != nil {
 					return false, err
@@ -607,15 +650,14 @@ func TestAttentionSteerOnlyTargetBlocksUntilSimpleFallbackIsRegistered(t *testin
 	}); err != nil {
 		t.Fatal(err)
 	}
-	var agentID int64
-	if err := paimosdb.DB.QueryRow(`SELECT id FROM project_agents WHERE project_id=? AND name='amy'`, projectID).Scan(&agentID); err != nil {
+	_, sessionID := addAttentionWorker(t, projectID)
+	if _, err := paimosdb.DB.Exec(`INSERT INTO harness_session_events(harness_session_id,event_sequence,operation,phase,
+		activity_state,activity_reason,activity_event_kind,activity_sequence)
+		VALUES(?,1,'activity_timeout','working','unknown','heartbeat_stale','tool_started',1)`, sessionID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := paimosdb.DB.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
-		source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
-		VALUES(?,?,'codex:amy',?,'harness_session_event','steer-only',1,'worker_unknown','heartbeat_stale',
-		strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, projectID, agentID, projectID); err != nil {
-		t.Fatal(err)
+	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 1 {
+		t.Fatalf("managed-only receiver projection=%d err=%v", inserted, err)
 	}
 	blocked, err := service.ListAttention(context.Background(), AttentionInput{
 		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,

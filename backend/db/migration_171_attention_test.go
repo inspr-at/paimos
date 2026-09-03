@@ -57,7 +57,7 @@ func TestMigration171AttentionLedgerIsClosedAndImmutable(t *testing.T) {
 	if err := database.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='harness_session_events'`).Scan(&eventTableSQL); err != nil || !strings.Contains(eventTableSQL, "CHECK(assignment_present IN (0,1))") {
 		t.Fatalf("assignment snapshot constraint missing err=%v sql=%q", err, eventTableSQL)
 	}
-	for _, object := range []string{"agent_attention_items", "agent_attention_projection_cursors", "agent_attention_cursors", "agent_attention_batches", "idx_agent_attention_batches_open", "idx_harness_session_controls_attention"} {
+	for _, object := range []string{"agent_attention_items", "agent_attention_projection_cursors", "agent_attention_cursors", "agent_attention_batches", "idx_agent_attention_batches_open", "idx_agent_message_deliveries_attention", "idx_harness_session_controls_attention"} {
 		var count int
 		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name=?`, object).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("object %s count=%d err=%v", object, count, err)

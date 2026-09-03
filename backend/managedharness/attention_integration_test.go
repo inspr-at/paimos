@@ -37,6 +37,9 @@ func TestAttentionProjectsRealStaleAndStopTransitionsWithRetainedActivityKind(t 
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if projected, err := attention.ProjectAttention(context.Background()); err != nil || projected != 0 {
+		t.Fatalf("bootstrap attention projection=%d err=%v", projected, err)
+	}
 
 	harness := NewService(paimosdb.DB)
 	session, _, err := harness.Register(context.Background(), RegisterInput{
@@ -97,7 +100,7 @@ func TestAttentionProjectsRealStaleAndStopTransitionsWithRetainedActivityKind(t 
 
 func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) {
 	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "ppm")
-	projectID, assignedAgentID := openManagedHarnessTestDB(t)
+	projectID, _ := openManagedHarnessTestDB(t)
 	var actorID int64
 	if err := paimosdb.DB.QueryRow(`SELECT id FROM users WHERE username='harness-actor'`).Scan(&actorID); err != nil {
 		t.Fatal(err)
@@ -118,6 +121,9 @@ func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) 
 	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'parent-worker')`, projectID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'archived-worker')`, projectID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := paimosdb.DB.Exec(`UPDATE instance_orchestrator SET project_agent_id=?,display_label='Amy',revision=1,
 		updated_by_user_id=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton_id=1`, receiverID, actorID); err != nil {
 		t.Fatal(err)
@@ -130,6 +136,9 @@ func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if projected, err := attention.ProjectAttention(context.Background()); err != nil || projected != 0 {
+		t.Fatalf("bootstrap attention projection=%d err=%v", projected, err)
+	}
 
 	issue, err := paimosdb.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status,priority)
 		VALUES(?,901,'ticket','Assigned work','in-progress','high')`, projectID)
@@ -137,12 +146,12 @@ func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) 
 		t.Fatal(err)
 	}
 	issueID, _ := issue.LastInsertId()
-	if _, err := paimosdb.DB.Exec(`INSERT INTO product_sessions(
-		product_session_id,project_id,target_kind,target_project_agent_id,node_id,title,created_by_user_id,updated_by_user_id)
-		VALUES('11111111-1111-4111-8111-111111111901',?,'project_agent',?,?,'Assigned session',?,?)`,
-		projectID, assignedAgentID, issueID, actorID, actorID); err != nil {
+	archivedIssue, err := paimosdb.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status,priority)
+		VALUES(?,903,'ticket','Archived work','archived','low')`, projectID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	archivedIssueID, _ := archivedIssue.LastInsertId()
 
 	harness := NewService(paimosdb.DB)
 	register := func(name, host, ref string, parentSessionID *string, ticketID *int64) models.HarnessSession {
@@ -162,6 +171,7 @@ func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) 
 	assigned := register("worker", "assignment-snapshot-assigned", "assignment-snapshot-assigned", &parent.ID, &issueID)
 	unassigned := register("unassigned-worker", "assignment-snapshot-unassigned", "assignment-snapshot-unassigned", nil, nil)
 	late := register("late-worker", "assignment-snapshot-late", "assignment-snapshot-late", nil, nil)
+	archived := register("archived-worker", "assignment-snapshot-archived", "assignment-snapshot-archived", nil, &archivedIssueID)
 	completeTurn := func(session models.HarnessSession) {
 		t.Helper()
 		if _, err := harness.HeartbeatWithActivity(context.Background(), session.ID, PhaseWorking, ActivityEvidence{Sequence: 1, Kind: "turn_started"}); err != nil {
@@ -174,6 +184,7 @@ func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) 
 	completeTurn(assigned)
 	completeTurn(unassigned)
 	completeTurn(late)
+	completeTurn(archived)
 
 	// Delayed projection must not derive assignment truth from mutable current
 	// rows. Move the still-open issue's update time strictly after the event;
@@ -225,6 +236,7 @@ func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) 
 		{assigned.ID, 1},
 		{unassigned.ID, 0},
 		{late.ID, 0},
+		{archived.ID, 0},
 	} {
 		var snapshot int
 		if err := paimosdb.DB.QueryRow(`SELECT assignment_present FROM harness_session_events
