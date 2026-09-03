@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -48,6 +49,20 @@ const (
 	ReasonUnsupported   = "unsupported"
 	ReasonOwnershipLost = "ownership_lost"
 	ReasonFailed        = "failed"
+	ActivityBusy        = "busy"
+	ActivityIdle        = "idle"
+	ActivityUnknown     = "unknown"
+	ActivityDead        = "dead"
+	ActivityUnreported  = "unreported"
+	ActivityAdapter     = "adapter_activity"
+	ActivityCompleted   = "turn_completed"
+	ActivityStale       = "heartbeat_stale"
+	ActivityMalformed   = "malformed_evidence"
+	ActivityUnmanaged   = "unmanaged_evidence"
+	ClosedStopped       = "stopped"
+	ClosedProcessExited = "process_exited"
+	ClosedProcessFailed = "process_failed"
+	ClosedOwnershipLost = "ownership_lost"
 
 	CodeInvalid               = "harness_session_invalid"
 	CodeNotFound              = "harness_session_not_found"
@@ -103,6 +118,13 @@ type RegisterInput struct {
 type YieldResult struct {
 	Session  models.HarnessSession   `json:"session"`
 	Controls []models.HarnessControl `json:"controls"`
+}
+
+// ActivityEvidence is the bounded, content-free tail of one owned adapter
+// generation. Sequence is monotonic in agentd and kind is a closed event set.
+type ActivityEvidence struct {
+	Sequence int64  `json:"sequence"`
+	Kind     string `json:"kind"`
 }
 
 type Service struct{ db *sql.DB }
@@ -206,16 +228,78 @@ func nullString(value string) any {
 }
 
 const sessionColumns = `id,project_id,project_agent_id,agent_name,harness,host,COALESCE(message_target_id,''),management_mode,role,steer_mode,
-	advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,COALESCE(heartbeat_at,''),COALESCE(yielded_at,''),yield_sequence,revision,created_at,updated_at`
+	advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,COALESCE(heartbeat_at,''),
+	activity_state,activity_reason,activity_event_kind,COALESCE(activity_at,''),activity_sequence,closed_reason,
+	COALESCE(yielded_at,''),yield_sequence,revision,created_at,updated_at`
 
 func scanSession(row interface{ Scan(...any) error }) (models.HarnessSession, error) {
 	var out models.HarnessSession
 	var inbox, status, steer, interrupt, stop int
 	err := row.Scan(&out.ID, &out.ProjectID, &out.ProjectAgentID, &out.AgentName, &out.Harness, &out.Host, &out.MessageTargetID,
 		&out.ManagementMode, &out.Role, &out.SteerMode, &inbox, &status, &steer, &interrupt, &stop, &out.Phase,
-		&out.HeartbeatAt, &out.YieldedAt, &out.YieldSequence, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
+		&out.HeartbeatAt, &out.ActivityState, &out.ActivityReason, &out.ActivityKind, &out.ActivityAt, &out.ActivitySequence, &out.ClosedReason,
+		&out.YieldedAt, &out.YieldSequence, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
 	out.Capabilities = models.HarnessCapabilities{Inbox: inbox == 1, Status: status == 1, Steer: steer == 1, Interrupt: interrupt == 1, Stop: stop == 1}
+	if parsed, parseErr := time.Parse(time.RFC3339Nano, out.ActivityAt); parseErr == nil {
+		age := int64(time.Since(parsed).Seconds())
+		if age < 0 {
+			age = 0
+		}
+		out.ActivityAge = &age
+	}
 	return out, err
+}
+
+func validActivityKind(kind string) bool {
+	switch kind {
+	case "session_started", "turn_started", "tool_started", "control_applied", "turn_completed":
+		return true
+	default:
+		return false
+	}
+}
+
+func deriveActivity(current models.HarnessSession, evidence ActivityEvidence) (state, reason, kind string, sequence int64, fresh bool) {
+	kind = strings.ToLower(strings.TrimSpace(evidence.Kind))
+	sequence = current.ActivitySequence
+	if current.ManagementMode != ManagementManaged {
+		return ActivityUnknown, ActivityUnmanaged, current.ActivityKind, sequence, false
+	}
+	if evidence.Sequence == 0 && kind == "" {
+		return ActivityUnknown, ActivityUnreported, current.ActivityKind, sequence, false
+	}
+	if evidence.Sequence <= 0 || !validActivityKind(kind) || evidence.Sequence == current.ActivitySequence && kind != current.ActivityKind {
+		return ActivityUnknown, ActivityMalformed, current.ActivityKind, sequence, false
+	}
+	if evidence.Sequence < current.ActivitySequence {
+		return current.ActivityState, current.ActivityReason, current.ActivityKind, sequence, false
+	}
+	if evidence.Sequence == current.ActivitySequence {
+		state, reason = activityFromKind(current.ActivityKind)
+		return state, reason, current.ActivityKind, sequence, false
+	}
+	sequence = evidence.Sequence
+	state, reason = activityFromKind(kind)
+	return state, reason, kind, sequence, kind != "session_started"
+}
+
+func activityFromKind(kind string) (state, reason string) {
+	switch kind {
+	case "turn_completed":
+		return ActivityIdle, ActivityCompleted
+	case "turn_started", "tool_started", "control_applied":
+		return ActivityBusy, ActivityAdapter
+	default:
+		return ActivityUnknown, ActivityUnreported
+	}
+}
+
+func appendSessionEventTx(ctx context.Context, tx *sql.Tx, session models.HarnessSession, operation string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO harness_session_events(
+		harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,activity_sequence,closed_reason)
+		VALUES(?,?,?,?,?,?,?,?,?)`, session.ID, session.Revision, operation, session.Phase, session.ActivityState,
+		session.ActivityReason, session.ActivityKind, session.ActivitySequence, session.ClosedReason)
+	return err
 }
 
 func (s *Service) validateTarget(ctx context.Context, in RegisterInput) (string, error) {
@@ -330,11 +414,21 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 	id := uuid.NewString()
 	workerDigest := digestWorkerLease(in.ProjectID, in.AgentName, id, in.WorkerLease)
 	c := in.Capabilities
-	_, err = s.db.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
-		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, workerDigest, nullString(targetID), in.ManagementMode, in.Role, in.SteerMode,
-		boolInt(c.Inbox), boolInt(c.Status), boolInt(c.Steer), boolInt(c.Interrupt), boolInt(c.Stop), PhaseStarting)
+	activityReason := ActivityUnreported
+	if in.ManagementMode == ManagementUnmanaged {
+		activityReason = ActivityUnmanaged
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return models.HarnessSession{}, false, err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
+		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, workerDigest, nullString(targetID), in.ManagementMode, in.Role, in.SteerMode,
+		boolInt(c.Inbox), boolInt(c.Status), boolInt(c.Steer), boolInt(c.Interrupt), boolInt(c.Stop), PhaseStarting, activityReason)
+	if err != nil {
+		_ = tx.Rollback()
 		const identityConstraint = "UNIQUE constraint failed: harness_sessions.project_id, harness_sessions.harness, harness_sessions.host, harness_sessions.session_ref_digest"
 		const addressConstraint = "UNIQUE constraint failed: harness_sessions.project_id, harness_sessions.harness, harness_sessions.agent_name"
 		identityConflict := strings.Contains(err.Error(), identityConstraint)
@@ -359,8 +453,17 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		}
 		return models.HarnessSession{}, false, err
 	}
-	created, err := s.GetByID(ctx, id)
-	return created, true, err
+	created, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, id))
+	if err != nil {
+		return models.HarnessSession{}, false, err
+	}
+	if err := appendSessionEventTx(ctx, tx, created, "register"); err != nil {
+		return models.HarnessSession{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.HarnessSession{}, false, err
+	}
+	return created, true, nil
 }
 
 func (s *Service) VerifyWorkerLease(ctx context.Context, projectID int64, sessionID, lease string) (bool, error) {
@@ -417,18 +520,56 @@ func (s *Service) List(ctx context.Context, projectID int64) ([]models.HarnessSe
 }
 
 func (s *Service) Heartbeat(ctx context.Context, id, phase string) (models.HarnessSession, error) {
+	return s.HeartbeatWithActivity(ctx, id, phase, ActivityEvidence{})
+}
+
+func (s *Service) HeartbeatWithActivity(ctx context.Context, id, phase string, evidence ActivityEvidence) (models.HarnessSession, error) {
 	phase = strings.ToLower(strings.TrimSpace(phase))
 	if phase != PhaseStarting && phase != PhaseWorking && phase != PhaseYielded && phase != PhaseStopping {
 		return models.HarnessSession{}, coded(CodeInvalid, "heartbeat phase must be starting, working, yielded, or stopping")
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE harness_sessions SET phase=?,heartbeat_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),revision=revision+1 WHERE id=? AND advertised_status=1 AND phase<>'stopped'`, phase, strings.TrimSpace(id))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.HarnessSession{}, err
+	}
+	defer tx.Rollback()
+	current, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, strings.TrimSpace(id)))
+	if err != nil || current.Phase == PhaseStopped || !current.Capabilities.Status {
+		return models.HarnessSession{}, coded(CodeCapabilityUnavailable, "session cannot report status")
+	}
+	state, reason, kind, sequence, newEvidence := deriveActivity(current, evidence)
+	projectionChanged := state != current.ActivityState || reason != current.ActivityReason ||
+		kind != current.ActivityKind || sequence != current.ActivitySequence
+	activityAt := any(nil)
+	if current.ActivityAt != "" {
+		activityAt = current.ActivityAt
+	}
+	if newEvidence {
+		activityAt = time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET phase=?,heartbeat_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		activity_state=?,activity_reason=?,activity_event_kind=?,activity_at=?,activity_sequence=?,closed_reason='',
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),revision=revision+1
+		WHERE id=? AND advertised_status=1 AND phase<>'stopped' AND revision=?`, phase, state, reason, kind, activityAt, sequence, strings.TrimSpace(id), current.Revision)
 	if err != nil {
 		return models.HarnessSession{}, err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
-		return models.HarnessSession{}, coded(CodeCapabilityUnavailable, "session cannot report status")
+		return models.HarnessSession{}, coded(CodeConflict, "harness session changed during heartbeat")
 	}
-	return s.GetByID(ctx, id)
+	out, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, strings.TrimSpace(id)))
+	if err != nil {
+		return models.HarnessSession{}, err
+	}
+	if projectionChanged {
+		if err := appendSessionEventTx(ctx, tx, out, "heartbeat"); err != nil {
+			return models.HarnessSession{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return models.HarnessSession{}, err
+	}
+	return out, nil
 }
 
 const controlColumns = `id,harness_session_id,sequence,kind,state,reason,requested_by_user_id,requested_at,COALESCE(claimed_at,''),COALESCE(completed_at,'')`
@@ -524,7 +665,12 @@ func (s *Service) Yield(ctx context.Context, sessionID string) (YieldResult, err
 		}
 		return YieldResult{}, coded(CodeCapabilityUnavailable, "only an active managed session can yield")
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE harness_session_controls SET state='claimed',claimed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE harness_session_id=? AND state='pending'`, sessionID); err != nil {
+	claimResult, err := tx.ExecContext(ctx, `UPDATE harness_session_controls SET state='claimed',claimed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE harness_session_id=? AND state='pending'`, sessionID)
+	if err != nil {
+		return YieldResult{}, err
+	}
+	claimed, err := claimResult.RowsAffected()
+	if err != nil {
 		return YieldResult{}, err
 	}
 	session, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, sessionID))
@@ -547,6 +693,11 @@ func (s *Service) Yield(ctx context.Context, sessionID string) (YieldResult, err
 	if err := rows.Close(); err != nil {
 		return YieldResult{}, err
 	}
+	if claimed > 0 {
+		if err := appendSessionEventTx(ctx, tx, session, "yield"); err != nil {
+			return YieldResult{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return YieldResult{}, err
 	}
@@ -563,27 +714,59 @@ func (s *Service) CompleteControl(ctx context.Context, sessionID, controlID, out
 	if !valid[reason] || (outcome == ControlApplied) != (reason == ReasonApplied) {
 		return models.HarnessControl{}, coded(CodeInvalid, "control outcome and closed reason do not match")
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE harness_session_controls SET state=?,reason=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND harness_session_id=? AND state='claimed'`, outcome, reason, controlID, sessionID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.HarnessControl{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE harness_session_controls SET state=?,reason=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND harness_session_id=? AND state='claimed'`, outcome, reason, controlID, sessionID)
 	if err != nil {
 		return models.HarnessControl{}, err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
-		existing, getErr := scanControl(s.db.QueryRowContext(ctx, `SELECT `+controlColumns+` FROM harness_session_controls WHERE id=?`, controlID))
+		existing, getErr := scanControl(tx.QueryRowContext(ctx, `SELECT `+controlColumns+` FROM harness_session_controls WHERE id=?`, controlID))
 		if getErr == nil && existing.HarnessSessionID == sessionID && existing.State == outcome && existing.Reason == reason {
 			return existing, nil
 		}
 		return models.HarnessControl{}, coded(CodeConflict, "control is not claimed by this harness session")
 	}
-	return scanControl(s.db.QueryRowContext(ctx, `SELECT `+controlColumns+` FROM harness_session_controls WHERE id=?`, controlID))
+	if _, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET revision=revision+1,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, sessionID); err != nil {
+		return models.HarnessControl{}, err
+	}
+	session, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, sessionID))
+	if err != nil {
+		return models.HarnessControl{}, err
+	}
+	if err := appendSessionEventTx(ctx, tx, session, "control_completed"); err != nil {
+		return models.HarnessControl{}, err
+	}
+	out, err := scanControl(tx.QueryRowContext(ctx, `SELECT `+controlColumns+` FROM harness_session_controls WHERE id=?`, controlID))
+	if err != nil {
+		return models.HarnessControl{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.HarnessControl{}, err
+	}
+	return out, nil
 }
 
 func (s *Service) Stop(ctx context.Context, id string) (models.HarnessSession, error) {
+	return s.StopWithReason(ctx, id, ClosedStopped)
+}
+
+func (s *Service) StopWithReason(ctx context.Context, id, closedReason string) (models.HarnessSession, error) {
+	closedReason = strings.ToLower(strings.TrimSpace(closedReason))
+	validReason := map[string]bool{ClosedStopped: true, ClosedProcessExited: true, ClosedProcessFailed: true, ClosedOwnershipLost: true}
+	if !validReason[closedReason] {
+		return models.HarnessSession{}, coded(CodeInvalid, "stopped harness session requires a closed reason")
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return models.HarnessSession{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET phase='stopped',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),revision=revision+1 WHERE id=? AND phase<>'stopped'`, id)
+	result, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET phase='stopped',activity_state='dead',activity_reason=?,closed_reason=?,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),revision=revision+1 WHERE id=? AND phase<>'stopped'`, closedReason, closedReason, id)
 	if err != nil {
 		return models.HarnessSession{}, err
 	}
@@ -601,6 +784,9 @@ func (s *Service) Stop(ctx context.Context, id string) (models.HarnessSession, e
 	}
 	out, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, strings.TrimSpace(id)))
 	if err != nil {
+		return models.HarnessSession{}, err
+	}
+	if err := appendSessionEventTx(ctx, tx, out, "stop"); err != nil {
 		return models.HarnessSession{}, err
 	}
 	if err := tx.Commit(); err != nil {

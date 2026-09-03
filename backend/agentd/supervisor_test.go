@@ -157,6 +157,39 @@ func scopedControl(supervisor *Supervisor, session Session, correlationID, text 
 	}
 }
 
+func TestSupervisorSeparatesHeartbeatFromAdapterActivity(t *testing.T) {
+	adapter := &fakeAdapter{name: AdapterCodex, process: newFakeProcess(1229), threadID: "thread-activity"}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-activity", Adapters: []Adapter{adapter}, HeartbeatInterval: 5 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{
+		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:activity", ProjectID: 901,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.LastEventKind != EventSessionStarted || session.ActivitySequence != 1 || session.ActivityAt.IsZero() {
+		t.Fatalf("started session=%+v", session)
+	}
+	startedActivityAt := session.ActivityAt
+	time.Sleep(15 * time.Millisecond)
+	status := supervisor.Status()
+	if len(status.Sessions) != 1 || status.Sessions[0].ActivitySequence != 1 || !status.Sessions[0].ActivityAt.Equal(startedActivityAt) || !status.Sessions[0].HeartbeatAt.After(session.HeartbeatAt) {
+		t.Fatalf("heartbeat changed activity evidence: before=%+v after=%+v", session, status.Sessions)
+	}
+	supervisor.sessions[session.ID].observe(AdapterEvent{Kind: EventTurnCompleted})
+	completedStatus := supervisor.Status()
+	if len(completedStatus.Sessions) != 1 {
+		t.Fatalf("completed sessions=%+v", completedStatus.Sessions)
+	}
+	completed := completedStatus.Sessions[0]
+	if completed.LastEventKind != EventTurnCompleted || completed.ActivitySequence != 2 || !completed.ActivityAt.After(startedActivityAt) {
+		t.Fatalf("completed activity=%+v", completed)
+	}
+}
+
 func TestSupervisorListsAndControlsOnlyOwnedChildren(t *testing.T) {
 	adapter := &fakeAdapter{name: AdapterCodex, process: newFakeProcess(1234), threadID: "thread-owned"}
 	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-test", Adapters: []Adapter{adapter}, HeartbeatInterval: 5 * time.Millisecond})

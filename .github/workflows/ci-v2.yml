@@ -218,7 +218,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -229,7 +229,7 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — managed-harness race contracts (four isolated oracle shards)
+      - name: Backend — managed-harness race contracts (six isolated oracle shards)
         working-directory: backend
         run: |
           set -euo pipefail
@@ -241,7 +241,7 @@ jobs:
           if (( ${#packages[@]} == 0 )); then
             echo 'No backend package changed; managed-harness race lane is empty.'
           else
-            ../scripts/backend-pr-race.sh --lane=managedharness --shard="${{ matrix.shard }}/4" "${packages[@]}"
+            ../scripts/backend-pr-race.sh --lane=managedharness --shard="${{ matrix.shard }}/6" "${packages[@]}"
           fi
 
   backend-pr-db-race:

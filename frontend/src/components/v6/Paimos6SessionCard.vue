@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { CircleAlert, CirclePause, Link2, Mail, MessageCircle, Octagon, Radio, ShieldCheck } from 'lucide-vue-next'
 
-import type { Paimos6SessionViewModel } from '@/v6/sessionHome'
+import type { Paimos6ActivityReason, Paimos6ActivityState, Paimos6ClosedReason, Paimos6SessionViewModel } from '@/v6/sessionHome'
 
 defineProps<{
   session: Paimos6SessionViewModel
@@ -13,6 +13,27 @@ defineEmits<{
   clear: []
   action: [label: string, id: string]
 }>()
+
+const activityStateLabels: Record<Paimos6ActivityState, string> = {
+  busy: 'Busy', idle: 'Idle', unknown: 'Unknown', dead: 'Dead',
+}
+const activityReasonLabels: Record<Paimos6ActivityReason, string> = {
+  paimos_target: 'Paimos target', no_active_harness: 'no active harness', stale_harness: 'stale harness',
+  ambiguous_harness: 'ambiguous harness', ownership_mismatch: 'ownership mismatch', unreported: 'unreported',
+  adapter_activity: 'adapter activity', turn_completed: 'turn completed', heartbeat_stale: 'heartbeat stale',
+  stale_evidence: 'stale evidence', malformed_evidence: 'malformed evidence', unmanaged_evidence: 'unmanaged evidence',
+  process_exited: 'process exited', process_failed: 'process failed', ownership_lost: 'ownership lost', stopped: 'stopped',
+}
+const closedReasonLabels: Record<Exclude<Paimos6ClosedReason, ''>, string> = {
+  stopped: 'stopped', process_exited: 'process exited', process_failed: 'process failed', ownership_lost: 'ownership lost',
+}
+
+function evidenceAge(seconds: number | null): string {
+  if (seconds === null) return 'no current evidence'
+  if (seconds < 60) return `evidence ${seconds}s ago`
+  if (seconds < 3600) return `evidence ${Math.floor(seconds / 60)}m ago`
+  return `evidence ${Math.floor(seconds / 3600)}h ago`
+}
 </script>
 
 <template>
@@ -60,6 +81,11 @@ defineEmits<{
 
       <span class="p6-card-facts">
         <span><span class="p6-status-dot" :class="`is-${session.status}`" aria-hidden="true"></span>{{ session.statusLabel }}</span>
+        <span class="p6-activity" :data-activity-state="session.activityState">
+          <span class="p6-activity-dot" :class="`is-${session.activityState}`" aria-hidden="true"></span>
+          Activity · {{ activityStateLabels[session.activityState] }} · {{ activityReasonLabels[session.activityReason] }} · {{ evidenceAge(session.activityAgeSeconds) }}
+          <template v-if="session.closedReason"> · closed {{ closedReasonLabels[session.closedReason] }}</template>
+        </span>
         <span>
           <Mail :size="13" aria-hidden="true" />
           {{ session.unread }} unread
@@ -179,6 +205,10 @@ defineEmits<{
 .p6-card-facts { display: grid; gap: 7px; color: #59655e; font-size: 10.5px; }
 .p6-card-facts > span { gap: 6px; }
 .p6-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #75827b; }
+.p6-activity-dot { width: 7px; height: 7px; border-radius: 50%; background: #75827b; }
+.p6-activity-dot.is-busy { background: #3f8263; box-shadow: 0 0 0 3px rgba(63, 130, 99, 0.12); }
+.p6-activity-dot.is-idle { border: 2px solid #5c806e; background: transparent; }
+.p6-activity-dot.is-dead { background: #8b5d55; }
 .p6-status-dot.is-working { background: #3f8263; }
 .p6-status-dot.is-starting,
 .p6-status-dot.is-yielded,

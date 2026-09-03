@@ -256,6 +256,7 @@ func TestAgentIntercomRunbookPinsReleaseAndAdministratorBoundaries(t *testing.T)
 
 	for _, command := range []string{
 		"go test -count=1 ./db -run '^TestMigration168RetiresUnboundGenerationsAndEnforcesLeaseDigest$'",
+		"go test -count=1 ./db -run '^TestMigration169BackfillsTerminalTruthAndRejectsInconsistentActivity$'",
 		"go test -count=1 ./handlers -run '^(TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization|TestGetHarnessControlReturnsScopedNonSecretOutcome)$'",
 	} {
 		if !strings.Contains(doc, command) {

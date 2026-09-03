@@ -1259,9 +1259,9 @@ Owned Claude also needs a distinct valid simple target and its matching worker
 for ordinary messages and fallback. It must not reuse the non-persistent owned
 Query as an unmanaged resume target.
 
-Only an M161 generation currently reported working and steer-capable, with a
-heartbeat no older than 90 seconds, may take over a failed managed lease. If
-an agentd turn becomes idle or unavailable
+Only an M161 generation with a fresh authenticated `busy` or `idle` activity
+projection, steer capability, and a heartbeat no older than 90 seconds may
+take over a failed managed lease. If an agentd turn becomes idle or unavailable
 after acquisition, the attributed worker reports `delivery-unavailable`; the
 hub atomically re-pends the same delivery for that active generation or the
 snapshotted ordinary simple fallback. The replacement obtains a fresh FIFO

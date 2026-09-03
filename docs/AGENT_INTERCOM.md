@@ -305,6 +305,52 @@ local checkpoint. A redirect, malformed body, mismatched successful response,
 or ambiguous transport result remains a retryable reporter failure and cannot
 authorize a local or remote state transition.
 
+### Worker activity truth
+
+Harness phase, control leasing, and worker activity are deliberately separate.
+`working` says the owned generation may report; it does not mean a model is
+busy. `yielded` says the reporter checked for durable controls; it does not mean
+the model is idle. The reporter therefore publishes its ordinary heartbeat
+before yielding controls, so a failed yield cannot suppress liveness and the
+yield phase cannot overwrite the independent activity conclusion.
+
+The durable activity projection has four closed states:
+
+| State | Required evidence |
+|---|---|
+| `busy` | A monotonically newer, documented adapter `turn_started`, `tool_started`, or `control_applied` event from the current owned generation |
+| `idle` | A monotonically newer, documented adapter `turn_completed` event from the current owned generation |
+| `unknown` | No activity report, process-only `session_started`, malformed evidence, unmanaged evidence, or a heartbeat older than 90 seconds |
+| `dead` | Reporter-confirmed process exit, process failure, ownership loss, or explicit owned stop |
+
+Silence is never interpreted as busy or idle. Ordinary daemon heartbeat ticks
+do not refresh the adapter activity timestamp or sequence. A heartbeat appends
+only when the adapter activity tuple changes. Routine phase-only
+`working`/`yielded` changes and exact heartbeat retries do not grow the log; a
+yield that claims controls, control completion, stop, and activity-timeout
+transition appends the resulting content-free projection in the same
+transaction. Those rows cannot be updated or deleted directly, while deleting
+their parent session cascades them. Session Home schema version 2
+returns the state, safe reason, evidence age, and terminal reason. If no live
+generation remains it may show the latest reporter-confirmed dead generation,
+but an unmanaged, unreported, stale, malformed, or ambiguous worker remains
+`unknown`.
+
+An owned integration reports only the adapter's monotonic, content-free event
+sequence and a documented kind. `session_started` proves process ownership but
+does not invent busy or idle. A strictly older sequence is an idempotent no-op:
+it preserves the authoritative activity tuple, sequence, and evidence age so a
+delayed event cannot downgrade current truth. The `stale_evidence` reason is a
+forward-compatible schema value and is not emitted by the current service.
+The generation lease stays on protected stdin:
+
+```bash
+paimos harness heartbeat --project "$PROJECT" \
+  --session '<public-harness-session-id>' --agent worker \
+  --worker-lease-file "$WORKER_LEASE_FILE" --phase working \
+  --activity-sequence 42 --activity-kind turn_started
+```
+
 ## Diagnostics
 
 All commands below return non-secret or redacted state. The message target and
@@ -415,8 +461,10 @@ agent name, shared API key, vendor reference, or a newly invented lease.
 
 The Paimos message/delivery row survives independently in SQLite. If it has a
 snapshotted simple fallback, an unavailable managed lease can reroute to that
-fallback. A currently working, steer-capable harness generation is eligible
-for managed reroute only while its heartbeat is no more than 90 seconds old.
+fallback. A steer-capable harness generation is eligible for managed reroute
+only while its heartbeat is no more than 90 seconds old and its authenticated
+activity projection is `busy` or `idle`; `unknown` and `dead` never qualify,
+and its phase may independently be `yielded`.
 
 ### Target was missing
 
@@ -454,8 +502,12 @@ history. Unmanaged sessions can never gain interrupt/stop through this process.
 ```bash
 paimos harness mark-stopped --project "$PROJECT" \
   --session '<public-harness-session-id>' --agent worker \
-  --worker-lease-file "$WORKER_LEASE_FILE"
+  --worker-lease-file "$WORKER_LEASE_FILE" --reason process_exited
 ```
+
+If the server committed that close before the reporter could journal
+`remote_closed`, a retry preserves the first immutable terminal reason even if
+the local process is now classified differently.
 
 Agentd terminal cleanup is ordered and restart-safe:
 
@@ -488,6 +540,7 @@ The ordinary backend suite covers the documentation contract:
 cd backend
 go test -count=1 ./cmd/paimos ./cmd/paimos-agentd ./contracts
 go test -count=1 ./db -run '^TestMigration168RetiresUnboundGenerationsAndEnforcesLeaseDigest$'
+go test -count=1 ./db -run '^TestMigration169BackfillsTerminalTruthAndRejectsInconsistentActivity$'
 go test -count=1 ./handlers -run '^(TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization|TestGetHarnessControlReturnsScopedNonSecretOutcome)$'
 go test -race -count=1 ./agentd ./agentmessage ./managedharness
 ```
@@ -508,6 +561,9 @@ High-signal proofs include:
 - `TestHarnessWorkerLeaseRejectsSpoofMissingDuplicateAndCrossSessionProof`
 - `TestHarnessLeaseRequestsNeverFollowRedirects`
 - `TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization`
+- `TestHarnessActivityRequiresTypedCurrentEvidence`
+- `TestHarnessSessionEventsAreTransactionalImmutableAndPhaseIndependent`
+- `TestConcurrentActivityTimeoutAppendsOneTransition`
 - `TestHarnessControlGetUsesExactReadOnlyScopedRoute`
 - `TestGetHarnessControlReturnsScopedNonSecretOutcome`
 - `TestMigration168RetiresUnboundGenerationsAndEnforcesLeaseDigest`

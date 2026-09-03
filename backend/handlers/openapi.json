@@ -1817,8 +1817,8 @@
       },
       "HarnessSession": {
         "type": "object", "additionalProperties": false,
-        "required": ["id", "project_id", "project_agent_id", "agent_name", "harness", "host", "management_mode", "role", "steer_mode", "advertised_capabilities", "phase", "yield_sequence", "revision", "created_at", "updated_at"],
-        "description": "Non-secret durable harness identity. The private harness session reference is encrypted in the message target and is never returned.",
+        "required": ["id", "project_id", "project_agent_id", "agent_name", "harness", "host", "management_mode", "role", "steer_mode", "advertised_capabilities", "phase", "activity_state", "activity_reason", "activity_age_seconds", "activity_sequence", "yield_sequence", "revision", "created_at", "updated_at"],
+        "description": "Non-secret durable harness identity. Phase and typed adapter activity are separate truths; silence or malformed evidence is unknown, and only a reporter-confirmed terminal state is dead. The private harness session reference is encrypted in the message target and is never returned.",
         "properties": {
           "id": {"type": "string", "format": "uuid"}, "project_id": {"type": "integer", "format": "int64"},
           "project_agent_id": {"type": "integer", "format": "int64"}, "agent_name": {"type": "string"},
@@ -1827,6 +1827,13 @@
           "steer_mode": {"type": "string", "enum": ["none", "owned", "codex_external"]},
           "advertised_capabilities": {"$ref": "#/components/schemas/HarnessCapabilities"},
           "phase": {"type": "string", "enum": ["starting", "working", "yielded", "stopping", "stopped"]},
+          "activity_state": {"type": "string", "enum": ["busy", "idle", "unknown", "dead"]},
+          "activity_reason": {"type": "string", "enum": ["unreported", "adapter_activity", "turn_completed", "heartbeat_stale", "stale_evidence", "malformed_evidence", "unmanaged_evidence", "process_exited", "process_failed", "ownership_lost", "stopped"]},
+          "activity_event_kind": {"type": "string", "enum": ["", "session_started", "turn_started", "tool_started", "control_applied", "turn_completed"]},
+          "activity_at": {"type": "string", "format": "date-time"},
+          "activity_age_seconds": {"type": ["integer", "null"], "format": "int64", "minimum": 0},
+          "activity_sequence": {"type": "integer", "format": "int64", "minimum": 0},
+          "closed_reason": {"type": "string", "enum": ["", "stopped", "process_exited", "process_failed", "ownership_lost"]},
           "heartbeat_at": {"type": "string", "format": "date-time"}, "yielded_at": {"type": "string", "format": "date-time"},
           "yield_sequence": {"type": "integer", "format": "int64"}, "revision": {"type": "integer", "format": "int64"},
           "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}
@@ -1844,7 +1851,16 @@
           "steer_mode": {"type": "string", "enum": ["none", "owned", "codex_external"]}, "advertised_capabilities": {"$ref": "#/components/schemas/HarnessCapabilities"}
         }
       },
-      "HarnessHeartbeat": {"type": "object", "additionalProperties": false, "required": ["phase"], "properties": {"phase": {"type": "string", "enum": ["starting", "working", "yielded", "stopping"]}}},
+      "HarnessActivityEvidence": {
+        "type": "object", "additionalProperties": false, "required": ["sequence", "kind"],
+        "description": "Content-free adapter evidence scoped to the authenticated worker generation. Sequence is monotonically increasing per owned process; missing, malformed, or stale evidence projects unknown.",
+        "properties": {
+          "sequence": {"type": "integer", "format": "int64", "minimum": 1},
+          "kind": {"type": "string", "enum": ["session_started", "turn_started", "tool_started", "control_applied", "turn_completed"]}
+        }
+      },
+      "HarnessHeartbeat": {"type": "object", "additionalProperties": false, "required": ["phase"], "properties": {"phase": {"type": "string", "enum": ["starting", "working", "yielded", "stopping"]}, "activity": {"$ref": "#/components/schemas/HarnessActivityEvidence"}}},
+      "HarnessStop": {"type": "object", "additionalProperties": false, "properties": {"reason": {"type": "string", "enum": ["stopped", "process_exited", "process_failed", "ownership_lost"], "default": "stopped"}}},
       "HarnessDeliveryComplete": {"type": "object", "additionalProperties": false, "required": ["cursor", "delivery_id", "effective_level"], "properties": {"cursor": {"type": "integer", "format": "int64"}, "delivery_id": {"type": "string", "format": "uuid"}, "effective_level": {"type": "string", "enum": ["simple", "steer"]}, "fallback_reason": {"type": "string", "enum": ["", "idle", "unsupported", "policy_capped", "target_missing", "not_steerable", "transport_error"]}}},
       "AgentDeliveryUnavailable": {"type": "object", "additionalProperties": false, "required": ["to", "cursor", "delivery_id", "fallback_reason"], "properties": {"to": {"type": "string"}, "cursor": {"type": "integer", "format": "int64"}, "delivery_id": {"type": "string", "format": "uuid"}, "fallback_reason": {"type": "string", "enum": ["idle", "not_steerable", "transport_error"]}}},
       "HarnessControlComplete": {"type": "object", "additionalProperties": false, "required": ["outcome", "reason"], "properties": {"outcome": {"type": "string", "enum": ["applied", "rejected"]}, "reason": {"type": "string", "enum": ["applied", "not_running", "unsupported", "ownership_lost", "failed"]}}},
@@ -1884,10 +1900,14 @@
       },
       "SessionHomeStatusV1": {
         "type": "object", "additionalProperties": false,
-        "required": ["phase", "reason"],
+        "required": ["phase", "reason", "activity_state", "activity_reason", "activity_age_seconds", "closed_reason"],
         "properties": {
-          "phase": {"type": "string", "enum": ["paimos", "starting", "working", "yielded", "stopping", "unavailable"]},
-          "reason": {"type": "string", "enum": ["paimos_target", "active", "no_active_harness", "stale_harness", "ambiguous_harness", "ownership_mismatch"]}
+          "phase": {"type": "string", "enum": ["paimos", "starting", "working", "yielded", "stopping", "stopped", "unavailable"]},
+          "reason": {"type": "string", "enum": ["paimos_target", "active", "closed", "no_active_harness", "stale_harness", "ambiguous_harness", "ownership_mismatch"]},
+          "activity_state": {"type": "string", "enum": ["busy", "idle", "unknown", "dead"]},
+          "activity_reason": {"type": "string", "enum": ["paimos_target", "no_active_harness", "stale_harness", "ambiguous_harness", "ownership_mismatch", "unreported", "adapter_activity", "turn_completed", "heartbeat_stale", "stale_evidence", "malformed_evidence", "unmanaged_evidence", "process_exited", "process_failed", "ownership_lost", "stopped"]},
+          "activity_age_seconds": {"type": ["integer", "null"], "format": "int64", "minimum": 0},
+          "closed_reason": {"type": "string", "enum": ["", "stopped", "process_exited", "process_failed", "ownership_lost"]}
         }
       },
       "SessionHomeHarnessV1": {
@@ -1948,7 +1968,7 @@
         "type": "object", "additionalProperties": false,
         "required": ["schema_version", "project_id", "sessions", "totals"],
         "properties": {
-          "schema_version": {"type": "integer", "const": 1},
+          "schema_version": {"type": "integer", "const": 2},
           "project_id": {"type": "integer", "format": "int64", "minimum": 1},
           "sessions": {"type": "array", "items": {"$ref": "#/components/schemas/SessionHomeRowV1"}},
           "totals": {
@@ -2012,7 +2032,7 @@
         "type": "object", "additionalProperties": false,
         "required": ["schema_version", "project_id", "zoom", "band", "sample_limit", "sample_truncated", "sessions", "selected_session", "totals"],
         "properties": {
-          "schema_version": {"type": "integer", "const": 1},
+          "schema_version": {"type": "integer", "const": 2},
           "project_id": {"type": "integer", "format": "int64", "minimum": 1},
           "zoom": {"type": "string", "pattern": "^[1-9][0-9]{0,63}$", "minLength": 1, "maxLength": 64, "default": "10"},
           "band": {"type": "string", "enum": ["detail", "overview", "aggregate", "far"]},
@@ -5228,7 +5248,7 @@
     },
     "/api/projects/{id}/messages/delivery-unavailable": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
-      "post": {"tags": ["agents"], "summary": "Release an unavailable leased agentd delivery to a live generation or simple fallback", "description": "Does not complete or acknowledge the delivery. The same row must receive a fresh FIFO lease and CompleteLocalDelivery handoff. Working M161 generations require a heartbeat no older than 90 seconds; no valid route becomes blocked target_missing.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentDeliveryUnavailable"}}}}, "responses": {"200": {"description": "Delivery re-pended to an eligible route"}, "400": {"description": "Lease, attribution, or route validation failed"}}}
+      "post": {"tags": ["agents"], "summary": "Release an unavailable leased agentd delivery to a live generation or simple fallback", "description": "Does not complete or acknowledge the delivery. The same row must receive a fresh FIFO lease and CompleteLocalDelivery handoff. A generation requires a heartbeat no older than 90 seconds plus authenticated busy or idle activity; unknown, dead, stale, and stopped generations are ineligible. No valid route becomes blocked target_missing.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentDeliveryUnavailable"}}}}, "responses": {"200": {"description": "Delivery re-pended to an eligible route"}, "400": {"description": "Lease, attribution, or route validation failed"}}}
     },
     "/api/command-palette/v1/settings": {
       "get": {
@@ -5587,7 +5607,7 @@
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/heartbeat": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
-      "post": {"tags": ["agents"], "summary": "Report attributed harness status", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessHeartbeat"}}}}, "responses": {"200": {"description": "Updated harness session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "403": {"description": "Uniform non-enumerating worker authorization failure"}}}
+      "post": {"tags": ["agents"], "summary": "Report attributed harness status and optional typed adapter activity", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessHeartbeat"}}}}, "responses": {"200": {"description": "Updated harness session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "403": {"description": "Uniform non-enumerating worker authorization failure"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/yield": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
@@ -5623,7 +5643,7 @@
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/stop": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],
-      "post": {"tags": ["agents"], "summary": "Atomically stop a worker generation and reject any outstanding controls", "responses": {"200": {"description": "Stopped harness session, including an exact idempotent replay", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "403": {"description": "Uniform non-enumerating worker authorization failure"}}}
+      "post": {"tags": ["agents"], "summary": "Atomically stop a worker generation with reporter-confirmed closure and reject any outstanding controls", "requestBody": {"required": false, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessStop"}}}}, "responses": {"200": {"description": "Stopped harness session, including an exact idempotent replay", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "403": {"description": "Uniform non-enumerating worker authorization failure"}}}
     }
   }
 }

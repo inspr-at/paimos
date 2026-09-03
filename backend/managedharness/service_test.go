@@ -161,7 +161,13 @@ func TestUnavailableAgentdLeaseReroutesToActiveHarnessGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Heartbeat(context.Background(), generation.ID, PhaseWorking); err != nil {
+	if _, err := service.HeartbeatWithActivity(context.Background(), generation.ID, PhaseWorking, ActivityEvidence{
+		Sequence: 1,
+		Kind:     "turn_started",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Yield(context.Background(), generation.ID); err != nil {
 		t.Fatal(err)
 	}
 	route, err := bus.RerouteUnavailableLocalDelivery(context.Background(), agentmessage.RerouteUnavailableInput{
@@ -189,6 +195,28 @@ func TestUnavailableAgentdLeaseReroutesToActiveHarnessGeneration(t *testing.T) {
 		DeliveryID: page.Messages[0].DeliveryWork.DeliveryID, EffectiveLevel: "steer", TargetID: generation.MessageTargetID,
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := service.StopWithReason(context.Background(), generation.ID, ClosedProcessExited); err != nil {
+		t.Fatal(err)
+	}
+	closedMessage, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "closed generation must not steer", DeliveryLevel: "steer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedLease, err := bus.ListInbox(context.Background(), agentmessage.InboxInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterAgentdCodex, Limit: 10,
+	})
+	if err != nil || len(closedLease.Messages) != 1 || closedLease.Messages[0].DeliveryWork == nil {
+		t.Fatalf("closed lease=%#v err=%v", closedLease, err)
+	}
+	closedRoute, err := bus.RerouteUnavailableLocalDelivery(context.Background(), agentmessage.RerouteUnavailableInput{
+		ProjectID: projectID, Address: "codex:worker", Agent: "worker", Cursor: closedMessage.Cursor,
+		DeliveryID: closedLease.Messages[0].DeliveryWork.DeliveryID, FallbackReason: "not_steerable",
+	})
+	if err != nil || closedRoute.Route != "simple_fallback" || closedRoute.TargetID != fallback.ID || closedRoute.HarnessSessionID != "" {
+		t.Fatalf("closed route=%+v generation=%+v err=%v", closedRoute, generation, err)
 	}
 }
 
@@ -358,7 +386,7 @@ func TestUnavailableAgentdIgnoresStaleWorkingGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Heartbeat(context.Background(), stale.ID, PhaseWorking); err != nil {
+	if _, err := service.HeartbeatWithActivity(context.Background(), stale.ID, PhaseWorking, ActivityEvidence{Sequence: 1, Kind: "turn_started"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET heartbeat_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-91 seconds') WHERE id=?`, stale.ID); err != nil {
@@ -637,7 +665,7 @@ func TestUnavailableClaudeAgentdLeaseReroutesToFreshActiveGeneration(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Heartbeat(context.Background(), generation.ID, PhaseWorking); err != nil {
+	if _, err := service.HeartbeatWithActivity(context.Background(), generation.ID, PhaseWorking, ActivityEvidence{Sequence: 1, Kind: "turn_completed"}); err != nil {
 		t.Fatal(err)
 	}
 	route, err := bus.RerouteUnavailableLocalDelivery(context.Background(), agentmessage.RerouteUnavailableInput{

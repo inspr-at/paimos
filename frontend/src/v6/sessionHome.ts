@@ -11,8 +11,11 @@
 import { api } from '@/api/client'
 
 export type Paimos6TargetKind = 'paimos' | 'project_agent'
-export type Paimos6SessionPhase = 'paimos' | 'starting' | 'working' | 'yielded' | 'stopping' | 'unavailable'
-export type Paimos6SessionReason = 'paimos_target' | 'active' | 'no_active_harness' | 'stale_harness' | 'ambiguous_harness' | 'ownership_mismatch'
+export type Paimos6SessionPhase = 'paimos' | 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped' | 'unavailable'
+export type Paimos6SessionReason = 'paimos_target' | 'active' | 'closed' | 'no_active_harness' | 'stale_harness' | 'ambiguous_harness' | 'ownership_mismatch'
+export type Paimos6ActivityState = 'busy' | 'idle' | 'unknown' | 'dead'
+export type Paimos6ActivityReason = 'paimos_target' | 'no_active_harness' | 'stale_harness' | 'ambiguous_harness' | 'ownership_mismatch' | 'unreported' | 'adapter_activity' | 'turn_completed' | 'heartbeat_stale' | 'stale_evidence' | 'malformed_evidence' | 'unmanaged_evidence' | 'process_exited' | 'process_failed' | 'ownership_lost' | 'stopped'
+export type Paimos6ClosedReason = '' | 'stopped' | 'process_exited' | 'process_failed' | 'ownership_lost'
 export type Paimos6ManagementMode = 'managed' | 'unmanaged'
 export type Paimos6SteerMode = 'direct' | 'paimos_nudge'
 export type Paimos6AttentionReason = 'action_request' | 'sender_not_allowed'
@@ -26,7 +29,7 @@ export interface Paimos6AdvertisedCapabilities {
 }
 
 export interface Paimos6SessionHomeWire {
-  schema_version: 1
+  schema_version: 2
   project_id: number
   sessions: Paimos6SessionWire[]
   totals: { sessions: number; unread: number; attention: number }
@@ -44,7 +47,14 @@ export interface Paimos6SessionWire {
     agent_name: string | null
     address: string | null
   }
-  status: { phase: Paimos6SessionPhase; reason: Paimos6SessionReason }
+  status: {
+    phase: Paimos6SessionPhase
+    reason: Paimos6SessionReason
+    activity_state: Paimos6ActivityState
+    activity_reason: Paimos6ActivityReason
+    activity_age_seconds: number | null
+    closed_reason: Paimos6ClosedReason
+  }
   harness: {
     harness: string
     management_mode: Paimos6ManagementMode
@@ -69,6 +79,10 @@ export interface Paimos6SessionViewModel {
   agent: string
   status: Paimos6SessionPhase
   statusLabel: string
+  activityState: Paimos6ActivityState
+  activityReason: Paimos6ActivityReason
+  activityAgeSeconds: number | null
+  closedReason: Paimos6ClosedReason
   attention: boolean
   attentionReason: string | null
   exceptionCount: number
@@ -97,8 +111,11 @@ export class Paimos6SessionHomeContractError extends Error {
 }
 
 const TARGET_KINDS = new Set<Paimos6TargetKind>(['paimos', 'project_agent'])
-const PHASES = new Set<Paimos6SessionPhase>(['paimos', 'starting', 'working', 'yielded', 'stopping', 'unavailable'])
-const REASONS = new Set<Paimos6SessionReason>(['paimos_target', 'active', 'no_active_harness', 'stale_harness', 'ambiguous_harness', 'ownership_mismatch'])
+const PHASES = new Set<Paimos6SessionPhase>(['paimos', 'starting', 'working', 'yielded', 'stopping', 'stopped', 'unavailable'])
+const REASONS = new Set<Paimos6SessionReason>(['paimos_target', 'active', 'closed', 'no_active_harness', 'stale_harness', 'ambiguous_harness', 'ownership_mismatch'])
+const ACTIVITY_STATES = new Set<Paimos6ActivityState>(['busy', 'idle', 'unknown', 'dead'])
+const ACTIVITY_REASONS = new Set<Paimos6ActivityReason>(['paimos_target', 'no_active_harness', 'stale_harness', 'ambiguous_harness', 'ownership_mismatch', 'unreported', 'adapter_activity', 'turn_completed', 'heartbeat_stale', 'stale_evidence', 'malformed_evidence', 'unmanaged_evidence', 'process_exited', 'process_failed', 'ownership_lost', 'stopped'])
+const CLOSED_REASONS = new Set<Paimos6ClosedReason>(['', 'stopped', 'process_exited', 'process_failed', 'ownership_lost'])
 const MANAGEMENT_MODES = new Set<Paimos6ManagementMode>(['managed', 'unmanaged'])
 const STEER_MODES = new Set<Paimos6SteerMode>(['direct', 'paimos_nudge'])
 const ATTENTION_REASONS = new Set<Paimos6AttentionReason>(['action_request', 'sender_not_allowed'])
@@ -164,9 +181,13 @@ export function parsePaimos6SessionRow(value: unknown): Paimos6SessionWire | nul
   const address = target.address === null ? null : nonEmptyText(target.address)
 
   const status = record(row.status)
-  if (!status || !exactKeys(status, ['phase', 'reason'])) return null
+  if (!status || !exactKeys(status, ['phase', 'reason', 'activity_state', 'activity_reason', 'activity_age_seconds', 'closed_reason'])) return null
   const phase = enumValue(status.phase, PHASES)
   const reason = enumValue(status.reason, REASONS)
+  const activityState = enumValue(status.activity_state, ACTIVITY_STATES)
+  const activityReason = enumValue(status.activity_reason, ACTIVITY_REASONS)
+  const activityAgeSeconds = status.activity_age_seconds === null ? null : nonNegativeInteger(status.activity_age_seconds)
+  const closedReason = enumValue(status.closed_reason, CLOSED_REASONS)
 
   let harness: Paimos6SessionWire['harness'] = null
   if (row.harness !== null) {
@@ -218,7 +239,8 @@ export function parsePaimos6SessionRow(value: unknown): Paimos6SessionWire | nul
   const actionRequestCount = nonNegativeInteger(attention.action_request_count)
   const attentionReason = attention.reason === null ? null : enumValue(attention.reason, ATTENTION_REASONS)
 
-  if (!id || !title || summary === null || !revision || !updatedAt || !targetKind || !phase || !reason
+  if (!id || !title || summary === null || !revision || !updatedAt || !targetKind || !phase || !reason || !activityState || !activityReason || closedReason === null
+    || activityAgeSeconds === null && status.activity_age_seconds !== null
     || unreadCount === null || latestUnreadAt === null && inbox.latest_unread_at !== null
     || typeof attention.required !== 'boolean' || exceptionCount === null || actionRequestCount === null
     || attentionReason === null && attention.reason !== null) return null
@@ -233,15 +255,31 @@ export function parsePaimos6SessionRow(value: unknown): Paimos6SessionWire | nul
   if (targetKind === 'paimos') {
     if (projectAgentId !== null || agentName !== null || address !== 'paimos' || harness !== null
       || phase !== 'paimos' || reason !== 'paimos_target' || steer !== 'paimos_nudge'
-      || controls.interrupt || controls.stop) return null
+      || controls.interrupt || controls.stop || activityState !== 'unknown' || activityReason !== 'paimos_target'
+      || activityAgeSeconds !== null || closedReason !== '') return null
   } else {
     if (!projectAgentId || !agentName) return null
     if (phase === 'paimos' || reason === 'paimos_target') return null
     if (harness === null && (address !== null || phase !== 'unavailable' || steer !== 'paimos_nudge'
-      || controls.interrupt || controls.stop)) return null
+      || controls.interrupt || controls.stop || activityState !== 'unknown' || activityReason !== reason
+      || activityAgeSeconds !== null || closedReason !== '')) return null
     if (harness !== null && (address !== `${harness.harness}:${agentName}`
-      || phase === 'unavailable' || reason !== 'active'
+      || phase === 'unavailable' || (phase === 'stopped' ? reason !== 'closed' : reason !== 'active')
       || (steer === 'direct') !== harness.advertised_capabilities.steer)) return null
+    if (harness?.management_mode === 'unmanaged') {
+      if (phase === 'stopped') {
+        if (activityState !== 'dead' || !['stopped', 'process_exited', 'process_failed', 'ownership_lost'].includes(activityReason)
+          || closedReason === '' || activityAgeSeconds !== null) return null
+      } else if (activityState !== 'unknown' || activityReason !== 'unmanaged_evidence'
+        || activityAgeSeconds !== null || closedReason !== '') return null
+    }
+    if (harness?.management_mode === 'managed') {
+      if ((activityState === 'dead') !== (phase === 'stopped') || (activityState === 'dead') !== (closedReason !== '')) return null
+      if (activityState === 'busy' && activityReason !== 'adapter_activity') return null
+      if (activityState === 'idle' && activityReason !== 'turn_completed') return null
+      if (activityState === 'dead' && !['stopped', 'process_exited', 'process_failed', 'ownership_lost'].includes(activityReason)) return null
+      if (activityState !== 'dead' && closedReason !== '') return null
+    }
   }
 
   if (harness?.management_mode === 'unmanaged' && (controls.interrupt || controls.stop)) return null
@@ -256,7 +294,7 @@ export function parsePaimos6SessionRow(value: unknown): Paimos6SessionWire | nul
     revision,
     updated_at: updatedAt,
     target: { kind: targetKind, project_agent_id: projectAgentId, agent_name: agentName, address },
-    status: { phase, reason },
+    status: { phase, reason, activity_state: activityState, activity_reason: activityReason, activity_age_seconds: activityAgeSeconds, closed_reason: closedReason },
     harness,
     controls: { steer, interrupt: controls.interrupt, stop: controls.stop },
     node,
@@ -273,7 +311,7 @@ export function parsePaimos6SessionRow(value: unknown): Paimos6SessionWire | nul
 export function parsePaimos6SessionHome(value: unknown, expectedProjectId: number): Paimos6SessionHomeWire {
   const root = record(value)
   if (!root || !exactKeys(root, ['schema_version', 'project_id', 'sessions', 'totals'])
-    || root.schema_version !== 1 || root.project_id !== expectedProjectId || !Array.isArray(root.sessions)) {
+    || root.schema_version !== 2 || root.project_id !== expectedProjectId || !Array.isArray(root.sessions)) {
     throw new Paimos6SessionHomeContractError()
   }
 
@@ -321,7 +359,7 @@ export function parsePaimos6SessionHome(value: unknown, expectedProjectId: numbe
   }
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     project_id: expectedProjectId,
     sessions,
     totals: { sessions: sessionTotal, unread: unreadTotal, attention: attentionTotal },
@@ -334,12 +372,14 @@ const STATUS_LABELS: Record<Paimos6SessionPhase, string> = {
   working: 'Working',
   yielded: 'Yielded',
   stopping: 'Stopping',
+  stopped: 'Stopped',
   unavailable: 'Unavailable',
 }
 
 const REASON_LABELS: Record<Paimos6SessionReason, string> = {
   paimos_target: 'Paimos-owned target',
   active: 'active harness',
+  closed: 'closed harness',
   no_active_harness: 'no active harness',
   stale_harness: 'stale harness',
   ambiguous_harness: 'ambiguous harness',
@@ -360,6 +400,10 @@ export function toPaimos6SessionViewModel(session: Paimos6SessionWire): Paimos6S
     agent: session.target.kind === 'paimos' ? 'Paimos' : session.target.address ?? 'Unavailable target',
     status: session.status.phase,
     statusLabel: `${STATUS_LABELS[session.status.phase]} · ${REASON_LABELS[session.status.reason]}`,
+    activityState: session.status.activity_state,
+    activityReason: session.status.activity_reason,
+    activityAgeSeconds: session.status.activity_age_seconds,
+    closedReason: session.status.closed_reason,
     attention: session.attention.required,
     attentionReason,
     exceptionCount: session.attention.exception_count,

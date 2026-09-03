@@ -120,6 +120,7 @@ func main() {
 	// server-received supervisor heartbeat evidence. This is process-owned and
 	// does not depend on an issue page or another Implement click.
 	handlers.StartAgentRunReconciler()
+	handlers.StartHarnessActivityReconciler()
 	// PAI-826: instance-local durable webhook outbox for Grok Bot routine
 	// wake targets. Local Codex targets remain owned by paimos listen.
 	agentmessage.StartWebhookDispatcher(db.DB)

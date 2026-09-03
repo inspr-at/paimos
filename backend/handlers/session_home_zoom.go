@@ -51,17 +51,24 @@ target_metrics AS (
  LEFT JOIN agent_messages message ON message.to_agent_id=receiver.id
  GROUP BY target.agent_id
 ),
-active_harnesses AS (
+ranked_harnesses AS (
  SELECT hs.project_id,hs.project_agent_id,hs.agent_name,hs.harness,hs.management_mode,hs.phase,
+        hs.activity_state,hs.activity_reason,hs.activity_at,hs.closed_reason,
         hs.advertised_inbox,hs.advertised_status,hs.advertised_steer,hs.advertised_interrupt,hs.advertised_stop,
-        CASE WHEN hs.phase='starting' THEN julianday(hs.updated_at)>=julianday(scope.freshness_at,'-90 seconds')
-             ELSE hs.heartbeat_at IS NOT NULL AND julianday(hs.heartbeat_at)>=julianday(scope.freshness_at,'-90 seconds') END AS fresh,
-        COUNT(*) OVER(PARTITION BY hs.project_id,hs.project_agent_id) AS candidate_count,
-        ROW_NUMBER() OVER(PARTITION BY hs.project_id,hs.project_agent_id ORDER BY hs.id) AS candidate_rank
+		CASE WHEN hs.phase='stopped' THEN 1 WHEN hs.phase='starting' THEN julianday(hs.updated_at)>=julianday(scope.freshness_at)
+		     ELSE hs.heartbeat_at IS NOT NULL AND julianday(hs.heartbeat_at)>=julianday(scope.freshness_at) END AS fresh,
+        SUM(CASE WHEN hs.phase<>'stopped' THEN 1 ELSE 0 END) OVER(PARTITION BY hs.project_id,hs.project_agent_id) AS active_count,
+        ROW_NUMBER() OVER(PARTITION BY hs.project_id,hs.project_agent_id
+                          ORDER BY CASE WHEN hs.phase='stopped' THEN 1 ELSE 0 END,hs.created_at DESC,hs.id DESC) AS candidate_rank
  FROM harness_sessions hs
  JOIN scope ON scope.project_id=hs.project_id
  JOIN target_ids target ON target.agent_id=hs.project_agent_id
- WHERE hs.phase<>'stopped'
+),
+active_harnesses AS (
+ SELECT ranked.*,
+        CASE WHEN ranked.active_count>0 THEN ranked.active_count ELSE 1 END AS candidate_count
+ FROM ranked_harnesses ranked
+ WHERE (ranked.active_count>0 AND ranked.phase<>'stopped') OR (ranked.active_count=0 AND ranked.candidate_rank=1)
 ),
 composed AS (
  SELECT base.*,
@@ -71,6 +78,7 @@ composed AS (
         COALESCE(harness.candidate_count,0) AS candidate_count,
         harness.project_id AS harness_project_id,harness.project_agent_id AS harness_agent_id,
         harness.agent_name AS harness_agent_name,harness.harness,harness.management_mode,harness.phase,
+        harness.activity_state,harness.activity_reason,harness.activity_at,harness.closed_reason,
         harness.advertised_inbox,harness.advertised_status,harness.advertised_steer,
         harness.advertised_interrupt,harness.advertised_stop,harness.fresh
  FROM project_session_rows base
@@ -84,6 +92,7 @@ const sessionHomeZoomComposedColumns = `
  node_id,owned_node_id,node_key,node_title,title,summary,revision,updated_at,
  unread_count,latest_unread_at,exception_count,action_request_count,candidate_count,
  harness_project_id,harness_agent_id,harness_agent_name,harness,management_mode,phase,
+ activity_state,activity_reason,activity_at,closed_reason,
  advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,fresh`
 
 const sessionHomeZoomSampleSQL = sessionHomeZoomCompositionCTE + `,
@@ -233,7 +242,7 @@ func SessionHomeZoomV1(w http.ResponseWriter, r *http.Request) {
 	}
 
 	snapshot := models.SessionHomeZoomSnapshot{
-		SchemaVersion: 1, ProjectID: projectID, Zoom: input.Zoom, Band: input.Band,
+		SchemaVersion: 2, ProjectID: projectID, Zoom: input.Zoom, Band: input.Band,
 		SampleLimit: input.SampleLimit, Sessions: []models.SessionHomeSession{},
 	}
 	if err := tx.QueryRowContext(r.Context(), sessionHomeZoomTotalsSQL, projectID).Scan(
@@ -244,7 +253,7 @@ func SessionHomeZoomV1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	freshnessAt := requestNow.Format("2006-01-02T15:04:05.000Z")
+	freshnessAt := requestNow.Add(-managedharness.DefaultActivityHeartbeatTimeout).Format("2006-01-02T15:04:05.000Z")
 	rows, err := tx.QueryContext(r.Context(), sessionHomeZoomSampleSQL, projectID, freshnessAt, input.SampleLimit)
 	if err != nil {
 		sessionHomeZoomProblem(w, err)
@@ -312,17 +321,19 @@ func scanSessionHomeZoomRow(row interface{ Scan(...any) error }, projectID int64
 	var candidateCount int64
 	var candidateProjectID, candidateAgentID sql.NullInt64
 	var candidateAgentName, harness, managementMode, phase sql.NullString
+	var activityState, activityReason, activityAt, closedReason sql.NullString
 	var inbox, status, steer, interrupt, stop, fresh sql.NullInt64
 	err := row.Scan(&item.ProductSessionID, &item.Target.Kind, &targetAgentID, &ownedAgentID, &agentName,
 		&nodeID, &ownedNodeID, &nodeKey, &nodeTitle, &item.Title, &item.Summary, &item.Revision, &item.UpdatedAt,
 		&item.Inbox.UnreadCount, &latestUnread, &item.Attention.ExceptionCount, &item.Attention.ActionRequestCount,
 		&candidateCount, &candidateProjectID, &candidateAgentID, &candidateAgentName, &harness, &managementMode,
-		&phase, &inbox, &status, &steer, &interrupt, &stop, &fresh)
+		&phase, &activityState, &activityReason, &activityAt, &closedReason,
+		&inbox, &status, &steer, &interrupt, &stop, &fresh)
 	if err != nil {
 		return item, err
 	}
 	item.Controls = models.SessionHomeControls{Steer: "paimos_nudge"}
-	item.Status = models.SessionHomeStatus{Phase: "unavailable", Reason: "no_active_harness"}
+	item.Status = models.SessionHomeStatus{Phase: "unavailable", Reason: "no_active_harness", ActivityState: managedharness.ActivityUnknown, ActivityReason: "no_active_harness"}
 	if targetAgentID.Valid {
 		value := targetAgentID.Int64
 		item.Target.ProjectAgentID = &value
@@ -372,6 +383,16 @@ func scanSessionHomeZoomRow(row interface{ Scan(...any) error }, projectID int64
 		setUnavailableTarget(&item, "stale_harness")
 		return item, nil
 	}
+	candidate := sessionHomeHarnessCandidate{Phase: phase.String, ActivityState: activityState.String, ActivityReason: activityReason.String,
+		ActivityAt: activityAt.String, ClosedReason: closedReason.String}
+	if phase.String == managedharness.PhaseStopped {
+		address := harness.String + ":" + *item.Target.AgentName
+		item.Target.Address = &address
+		item.Status = sessionHomeCandidateStatus(candidate)
+		item.Harness = &models.SessionHomeHarness{Harness: harness.String, ManagementMode: managementMode.String, Capabilities: models.HarnessCapabilities{}}
+		item.Controls = models.SessionHomeControls{Steer: "paimos_nudge"}
+		return item, nil
+	}
 	caps := models.HarnessCapabilities{Inbox: inbox.Int64 == 1, Status: status.Int64 == 1, Steer: steer.Int64 == 1, Interrupt: interrupt.Int64 == 1, Stop: stop.Int64 == 1}
 	if managementMode.String != managedharness.ManagementManaged {
 		caps.Interrupt = false
@@ -379,7 +400,7 @@ func scanSessionHomeZoomRow(row interface{ Scan(...any) error }, projectID int64
 	}
 	address := harness.String + ":" + *item.Target.AgentName
 	item.Target.Address = &address
-	item.Status = models.SessionHomeStatus{Phase: phase.String, Reason: "active"}
+	item.Status = sessionHomeCandidateStatus(candidate)
 	item.Harness = &models.SessionHomeHarness{Harness: harness.String, ManagementMode: managementMode.String, Capabilities: caps}
 	item.Controls = models.SessionHomeControls{Steer: "paimos_nudge", Interrupt: caps.Interrupt, Stop: caps.Stop}
 	if caps.Steer {

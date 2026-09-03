@@ -693,6 +693,7 @@ export function query({ prompt }) {
           output.push({ type: "system", subtype: "init", session_id: "claude-owned-session", capabilities: process.env.PAIMOS_CLAUDE_TEST_MODE === "missing_interrupt_receipt" ? [] : ["interrupt_receipt_v1"] });
           output.push({ type: "stream_event", session_id: "claude-owned-session" });
           output.push({ type: "assistant", session_id: "claude-owned-session", message: { content: [{ type: "text", text: message.message.content[0].text }] } });
+		  output.push({ type: "result", session_id: "claude-owned-session" });
 		  if (process.env.PAIMOS_CLAUDE_TEST_MODE === "abort_with_pending_input") {
 			setTimeout(() => output.close(), 100);
 			await new Promise(() => {});
@@ -733,6 +734,7 @@ export function query({ prompt }) {
         output.push({ type: "system", subtype: "init", session_id: "claude-owned-session", capabilities: ["interrupt_receipt_v1"] });
         output.push({ type: "stream_event", session_id: "claude-owned-session", user_message_uuid: uuid });
         output.push({ type: "assistant", session_id: "claude-owned-session", user_message_uuid: uuid, message: { content: [{ type: "text", text: message.message.content[0].text }] } });
+		output.push({ type: "result", session_id: "claude-owned-session", user_message_uuid: uuid });
       }
       return { still_queued };
     },

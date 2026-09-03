@@ -464,6 +464,9 @@ func (r *cliReporter) heartbeat(ctx context.Context, publicID string, session ag
 		return err
 	}
 	args := []string{"--json", "harness", "heartbeat", "--project", strconv.FormatInt(session.ProjectID, 10), "--session", publicID, "--agent", agentName, "--worker-lease-file", "-", "--phase", phase}
+	if session.ActivitySequence > 0 && session.LastEventKind != "" {
+		args = append(args, "--activity-sequence", strconv.FormatInt(session.ActivitySequence, 10), "--activity-kind", string(session.LastEventKind))
+	}
 	raw, err := r.run(ctx, r.paimosPath, args, r.environment, strings.NewReader(workerLease))
 	if err != nil {
 		return err
@@ -585,7 +588,7 @@ func (r *cliReporter) markStopped(ctx context.Context, publicID string, session 
 	if err != nil {
 		return err
 	}
-	args := []string{"--json", "harness", "mark-stopped", "--project", strconv.FormatInt(session.ProjectID, 10), "--session", publicID, "--agent", agentName, "--worker-lease-file", "-"}
+	args := []string{"--json", "harness", "mark-stopped", "--project", strconv.FormatInt(session.ProjectID, 10), "--session", publicID, "--agent", agentName, "--worker-lease-file", "-", "--reason", reporterClosedReason(session.State)}
 	raw, err := r.run(ctx, r.paimosPath, args, r.environment, strings.NewReader(workerLease))
 	if err != nil {
 		return fmt.Errorf("agentd reporter could not close harness session: %w", err)
@@ -595,4 +598,17 @@ func (r *cliReporter) markStopped(ctx context.Context, publicID string, session 
 		return errors.New("paimos reporter returned mismatched stopped-session evidence")
 	}
 	return nil
+}
+
+func reporterClosedReason(state agentd.SessionState) string {
+	switch state {
+	case agentd.StateOwnershipLost:
+		return "ownership_lost"
+	case agentd.StateFailed:
+		return "process_failed"
+	case agentd.StateExited:
+		return "process_exited"
+	default:
+		return "stopped"
+	}
 }

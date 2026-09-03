@@ -77,7 +77,7 @@ function managedRow() {
       agent_name: 'amy',
       address: PROJECT_A_ADDRESS,
     },
-    status: { phase: 'working', reason: 'active' },
+    status: { phase: 'working', reason: 'active', activity_state: 'busy', activity_reason: 'adapter_activity', activity_age_seconds: 2, closed_reason: '' },
     harness: {
       harness: 'codex',
       management_mode: 'managed',
@@ -109,7 +109,7 @@ function unmanagedRow() {
       agent_name: 'jan',
       address: 'claude:jan',
     },
-    status: { phase: 'yielded', reason: 'active' },
+    status: { phase: 'yielded', reason: 'active', activity_state: 'unknown', activity_reason: 'unmanaged_evidence', activity_age_seconds: null, closed_reason: '' },
     harness: {
       harness: 'claude',
       management_mode: 'unmanaged',
@@ -141,7 +141,7 @@ function paimosRow() {
     revision: 1,
     updated_at: '2026-08-30T12:00:00Z',
     target: { kind: 'paimos', project_agent_id: null, agent_name: null, address: 'paimos' },
-    status: { phase: 'paimos', reason: 'paimos_target' },
+    status: { phase: 'paimos', reason: 'paimos_target', activity_state: 'unknown', activity_reason: 'paimos_target', activity_age_seconds: null, closed_reason: '' },
     harness: null,
     controls: { steer: 'paimos_nudge', interrupt: false, stop: false },
     node: null,
@@ -202,7 +202,7 @@ function liveProjection(
       .map((row) => row.target.project_agent_id),
   )
   return {
-    schema_version: 1,
+    schema_version: 2,
     project_id: projectId,
     zoom,
     band: zoomBand(zoom),

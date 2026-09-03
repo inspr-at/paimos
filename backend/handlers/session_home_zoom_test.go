@@ -37,7 +37,7 @@ func TestSessionHomeZoomV1StrictQueryEmptyAndUnboundedCanonicalZoom(t *testing.T
 
 	response, snapshot := getSessionHomeZoom(t, ts, projectID, "", ts.adminCookie)
 	assertStatus(t, response, http.StatusOK)
-	if response.Header.Get("Cache-Control") != "private, no-store" || snapshot.SchemaVersion != 1 ||
+	if response.Header.Get("Cache-Control") != "private, no-store" || snapshot.SchemaVersion != 2 ||
 		snapshot.ProjectID != projectID || snapshot.Zoom != "10" || snapshot.Band != "overview" ||
 		snapshot.SampleLimit != 10 || snapshot.SampleTruncated || snapshot.Sessions == nil ||
 		len(snapshot.Sessions) != 0 || snapshot.SelectedSession != nil || snapshot.Totals != (models.SessionHomeZoomTotals{}) {
@@ -135,6 +135,26 @@ func TestSessionHomeZoomV1ExactDeduplicatedTotalsExceptionFirstAndSelectedHydrat
 	selectedJSON, _ := json.Marshal(selected.SelectedSession)
 	if string(sampledJSON) != string(selectedJSON) {
 		t.Fatalf("sampled selection is not byte-equivalent: sample=%s selected=%s", sampledJSON, selectedJSON)
+	}
+}
+
+func TestSessionHomeZoomV1ExposesLatestReporterConfirmedClosure(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "Closed worker zoom", "CWZ")
+	agentID := seedSessionHomeAgent(t, projectID, "closed-worker")
+	seedSessionHomeProductSession(t, projectID, "project_agent", &agentID, nil, "Closed work", "2026-08-30T12:00:00.000Z")
+	seedSessionHomeHarness(t, projectID, agentID, "closed-worker", "codex", "managed", "stopped",
+		models.HarnessCapabilities{Status: true, Interrupt: true, Stop: true}, true)
+
+	response, snapshot := getSessionHomeZoom(t, ts, projectID, "zoom=1", ts.adminCookie)
+	assertStatus(t, response, http.StatusOK)
+	if len(snapshot.Sessions) != 1 {
+		t.Fatalf("sessions=%+v", snapshot.Sessions)
+	}
+	item := snapshot.Sessions[0]
+	if item.Status != (models.SessionHomeStatus{Phase: "stopped", Reason: "closed", ActivityState: "dead", ActivityReason: "stopped", ClosedReason: "stopped"}) ||
+		item.Target.Address == nil || *item.Target.Address != "codex:closed-worker" || item.Harness == nil || item.Controls != (models.SessionHomeControls{Steer: "paimos_nudge"}) {
+		t.Fatalf("closed zoom projection=%+v", item)
 	}
 }
 

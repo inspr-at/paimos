@@ -257,6 +257,7 @@ func (p *codexProcess) handleNotification(message codexRPCMessage) {
 		p.observeEvent(AdapterEvent{Kind: EventToolStarted})
 	case "turn/completed":
 		if json.Unmarshal(message.Params, &params) == nil && validOpaqueID(params.Turn.ID) {
+			p.observeEvent(AdapterEvent{Kind: EventTurnCompleted})
 			p.recordCompletion(params.Turn.ID, params.Turn.Status)
 		}
 	}

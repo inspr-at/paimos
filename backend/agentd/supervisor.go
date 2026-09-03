@@ -348,6 +348,8 @@ func (e *sessionEntry) observe(event AdapterEvent) {
 	}
 	if validEventKind(event.Kind) {
 		e.session.LastEventKind = event.Kind
+		e.session.ActivitySequence++
+		e.session.ActivityAt = time.Now().UTC()
 		if event.Kind == EventSessionStarted || event.Kind == EventTurnStarted {
 			e.controlReady = true
 		}
@@ -372,7 +374,7 @@ func validSafeLabel(value string, maximum int) bool {
 
 func validEventKind(kind EventKind) bool {
 	switch kind {
-	case EventSessionStarted, EventToolStarted, EventControlApplied, EventTurnStarted:
+	case EventSessionStarted, EventToolStarted, EventControlApplied, EventTurnStarted, EventTurnCompleted:
 		return true
 	default:
 		return false
@@ -671,7 +673,6 @@ func (s *Supervisor) Steer(ctx context.Context, id string, request ControlReques
 		entry.remember("steer", request, Receipt{}, err)
 		return Receipt{}, err
 	}
-	entry.observe(AdapterEvent{Kind: EventControlApplied, CorrelationID: request.CorrelationID})
 	_ = s.persist(entry)
 	s.scheduleReport()
 	receipt := s.effectReceipt("steer", id, identity, projectID, effect)
@@ -715,7 +716,6 @@ func (s *Supervisor) Interrupt(ctx context.Context, id string, request ControlRe
 		entry.remember("interrupt", request, Receipt{}, err)
 		return Receipt{}, err
 	}
-	entry.observe(AdapterEvent{Kind: EventControlApplied, CorrelationID: request.CorrelationID})
 	_ = s.persist(entry)
 	s.scheduleReport()
 	receipt := s.effectReceipt("interrupt", id, identity, projectID, effect)
