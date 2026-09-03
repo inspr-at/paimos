@@ -60,19 +60,13 @@ func ClassifyAttentionTransition(in AttentionTransition) AttentionDecision {
 			return AttentionDecision{Disposition: AttentionDispositionAbsorbed}
 		}
 	case "unknown":
-		if in.ActivityKind != "" {
-			return AttentionDecision{Disposition: AttentionDispositionDeferred}
-		}
 		switch in.ActivityReason {
 		case "heartbeat_stale", "stale_evidence", "malformed_evidence":
 			return AttentionDecision{Disposition: AttentionDispositionActionable, Kind: "worker_unknown", Reason: in.ActivityReason}
-		case "unreported":
+		case "unreported", "unmanaged_evidence":
 			return AttentionDecision{Disposition: AttentionDispositionDeferred}
 		}
 	case "dead":
-		if in.ActivityKind != "" {
-			return AttentionDecision{Disposition: AttentionDispositionDeferred}
-		}
 		switch in.ActivityReason {
 		case "process_exited", "process_failed", "ownership_lost", "stopped":
 			return AttentionDecision{Disposition: AttentionDispositionActionable, Kind: "worker_dead", Reason: in.ActivityReason}

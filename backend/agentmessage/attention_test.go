@@ -66,8 +66,10 @@ func TestClassifyAttentionTransitionClosedPolicy(t *testing.T) {
 		{"assigned turn end", AttentionTransition{ActivityState: "idle", ActivityReason: "turn_completed", ActivityKind: "turn_completed", Assigned: true}, AttentionDecision{Disposition: "actionable", Kind: "assignment_turn_ended", Reason: "turn_completed_open_assignment"}},
 		{"unassigned turn end", AttentionTransition{ActivityState: "idle", ActivityReason: "turn_completed", ActivityKind: "turn_completed"}, AttentionDecision{Disposition: "absorbed"}},
 		{"unknown worker", AttentionTransition{ActivityState: "unknown", ActivityReason: "heartbeat_stale"}, AttentionDecision{Disposition: "actionable", Kind: "worker_unknown", Reason: "heartbeat_stale"}},
+		{"stale worker retains prior tool", AttentionTransition{ActivityState: "unknown", ActivityReason: "heartbeat_stale", ActivityKind: "tool_started"}, AttentionDecision{Disposition: "actionable", Kind: "worker_unknown", Reason: "heartbeat_stale"}},
 		{"unmanaged evidence deferred", AttentionTransition{ActivityState: "unknown", ActivityReason: "unmanaged_evidence"}, AttentionDecision{Disposition: "deferred"}},
 		{"dead worker", AttentionTransition{ActivityState: "dead", ActivityReason: "process_failed"}, AttentionDecision{Disposition: "actionable", Kind: "worker_dead", Reason: "process_failed"}},
+		{"dead worker retains prior turn", AttentionTransition{ActivityState: "dead", ActivityReason: "process_exited", ActivityKind: "turn_started"}, AttentionDecision{Disposition: "actionable", Kind: "worker_dead", Reason: "process_exited"}},
 		{"unknown kind", AttentionTransition{ActivityState: "busy", ActivityReason: "adapter_activity", ActivityKind: "future_event"}, AttentionDecision{Disposition: "deferred"}},
 		{"unknown state", AttentionTransition{ActivityState: "future_state", ActivityReason: "future_reason"}, AttentionDecision{Disposition: "deferred"}},
 	}
