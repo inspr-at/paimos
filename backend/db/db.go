@@ -12405,7 +12405,9 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 CHECK(activity_sequence>=0)`,
 			`ALTER TABLE harness_sessions ADD COLUMN closed_reason TEXT NOT NULL DEFAULT ''
 			 CHECK(closed_reason IN ('','stopped','process_exited','process_failed','ownership_lost'))`,
-			`UPDATE harness_sessions SET activity_state='dead',activity_reason='ownership_lost',closed_reason='ownership_lost'
+			`UPDATE harness_sessions SET activity_state='dead',
+			 activity_reason=CASE WHEN worker_lease_digest IS NULL THEN 'ownership_lost' ELSE 'stopped' END,
+			 closed_reason=CASE WHEN worker_lease_digest IS NULL THEN 'ownership_lost' ELSE 'stopped' END
 			 WHERE phase='stopped'`,
 			`UPDATE harness_sessions SET activity_state='unknown',activity_reason='unmanaged_evidence'
 			 WHERE phase<>'stopped' AND management_mode='unmanaged'`,

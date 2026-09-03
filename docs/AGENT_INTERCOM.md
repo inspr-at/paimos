@@ -320,7 +320,7 @@ The durable activity projection has four closed states:
 |---|---|
 | `busy` | A monotonically newer, documented adapter `turn_started`, `tool_started`, or `control_applied` event from the current owned generation |
 | `idle` | A monotonically newer, documented adapter `turn_completed` event from the current owned generation |
-| `unknown` | No activity report, malformed or stale evidence, unmanaged evidence, or a heartbeat older than 90 seconds |
+| `unknown` | No activity report, process-only `session_started`, malformed or stale evidence, unmanaged evidence, or a heartbeat older than 90 seconds |
 | `dead` | Reporter-confirmed process exit, process failure, ownership loss, or explicit owned stop |
 
 Silence is never interpreted as busy or idle. Ordinary daemon heartbeat ticks
@@ -334,6 +334,17 @@ returns the state, safe reason, evidence age, and terminal reason. If no live
 generation remains it may show the latest reporter-confirmed dead generation,
 but an unmanaged, unreported, stale, malformed, or ambiguous worker remains
 `unknown`.
+
+An owned integration reports only the adapter's monotonic, content-free event
+sequence and a documented kind. `session_started` proves process ownership but
+does not invent busy or idle. The generation lease stays on protected stdin:
+
+```bash
+paimos harness heartbeat --project "$PROJECT" \
+  --session '<public-harness-session-id>' --agent worker \
+  --worker-lease-file "$WORKER_LEASE_FILE" --phase working \
+  --activity-sequence 42 --activity-kind turn_started
+```
 
 ## Diagnostics
 
@@ -486,8 +497,12 @@ history. Unmanaged sessions can never gain interrupt/stop through this process.
 ```bash
 paimos harness mark-stopped --project "$PROJECT" \
   --session '<public-harness-session-id>' --agent worker \
-  --worker-lease-file "$WORKER_LEASE_FILE"
+  --worker-lease-file "$WORKER_LEASE_FILE" --reason process_exited
 ```
+
+If the server committed that close before the reporter could journal
+`remote_closed`, a retry preserves the first immutable terminal reason even if
+the local process is now classified differently.
 
 Agentd terminal cleanup is ordered and restart-safe:
 

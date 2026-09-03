@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -22,7 +23,7 @@ func (s *Service) ReconcileStaleActivity(ctx context.Context, now time.Time, tim
 	}
 	cutoff := now.UTC().Add(-timeout).Format("2006-01-02T15:04:05.000Z")
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM harness_sessions
-		WHERE phase<>'stopped' AND heartbeat_at IS NOT NULL AND julianday(heartbeat_at)<=julianday(?)
+		WHERE management_mode='managed' AND phase<>'stopped' AND heartbeat_at IS NOT NULL AND julianday(heartbeat_at)<=julianday(?)
 		AND NOT(activity_state='unknown' AND activity_reason='heartbeat_stale') ORDER BY id`, cutoff)
 	if err != nil {
 		return 0, err
@@ -40,16 +41,18 @@ func (s *Service) ReconcileStaleActivity(ctx context.Context, now time.Time, tim
 		return 0, err
 	}
 	updated := 0
+	var reconcileErrors []error
 	for _, id := range ids {
 		changed, err := s.reconcileOneStaleActivity(ctx, id, cutoff)
 		if err != nil {
-			return updated, err
+			reconcileErrors = append(reconcileErrors, fmt.Errorf("reconcile harness session %s: %w", id, err))
+			continue
 		}
 		if changed {
 			updated++
 		}
 	}
-	return updated, nil
+	return updated, errors.Join(reconcileErrors...)
 }
 
 func (s *Service) reconcileOneStaleActivity(ctx context.Context, id, cutoff string) (bool, error) {
@@ -69,7 +72,7 @@ func (s *Service) reconcileOneStaleActivity(ctx context.Context, id, cutoff stri
 	result, err := tx.ExecContext(ctx, `UPDATE harness_sessions
 		SET activity_state='unknown',activity_reason='heartbeat_stale',closed_reason='',
 		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),revision=revision+1
-		WHERE id=? AND revision=? AND phase<>'stopped' AND heartbeat_at IS NOT NULL
+		WHERE id=? AND revision=? AND management_mode='managed' AND phase<>'stopped' AND heartbeat_at IS NOT NULL
 		AND julianday(heartbeat_at)<=julianday(?)
 		AND NOT(activity_state='unknown' AND activity_reason='heartbeat_stale')`, id, current.Revision, cutoff)
 	if err != nil {

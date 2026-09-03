@@ -716,6 +716,55 @@ func TestCLIReporterTerminalMarkStoppedReplayConverges(t *testing.T) {
 	}
 }
 
+func TestCLIReporterTerminalReasonDriftAfterRemoteCloseCrashConverges(t *testing.T) {
+	remoteReason := ""
+	requestedReasons := []string{}
+	runner := func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+		if args[2] != "mark-stopped" {
+			return nil, errors.New("unexpected terminal command")
+		}
+		reason := ""
+		for index := range args {
+			if args[index] == "--reason" && index+1 < len(args) {
+				reason = args[index+1]
+			}
+		}
+		requestedReasons = append(requestedReasons, reason)
+		if remoteReason == "" {
+			remoteReason = reason
+		}
+		return reporterSessionEvidence("worker", "stopped"), nil
+	}
+	leases := newMemoryReporterLeaseStore()
+	controller := &statefulReporterController{}
+	failed := false
+	controller.fail = func(state agentd.ReporterState) bool {
+		if state.RemoteClosed && !failed {
+			failed = true
+			return true
+		}
+		return false
+	}
+	base := agentd.Session{ID: localReporterSession, ProjectID: 6, Identity: "codex:worker", Adapter: "codex", Managed: true,
+		State: agentd.StateFailed, Reporter: agentd.ReporterState{PublicSessionID: publicReporterSession, Capabilities: []agentd.Capability{agentd.CapabilityStatus, agentd.CapabilityStop}}}
+	first, _ := newCLIReporterWithRunner("ppm", "camyb-box", "/opt/paimos", nil, runner, leases)
+	_ = first.BindController(controller)
+	if err := first.ReportStatus(context.Background(), agentd.Status{Instance: "ppm", Sessions: []agentd.Session{base}}); err == nil {
+		t.Fatal("expected journal failure after accepted remote close")
+	}
+	controller.fail = nil
+	recovered := base
+	recovered.State = agentd.StateOwnershipLost
+	second, _ := newCLIReporterWithRunner("ppm", "camyb-box", "/opt/paimos", nil, runner, leases)
+	_ = second.BindController(controller)
+	if err := second.ReportStatus(context.Background(), agentd.Status{Instance: "ppm", Sessions: []agentd.Session{recovered}}); err != nil {
+		t.Fatal(err)
+	}
+	if remoteReason != "process_failed" || !slices.Equal(requestedReasons, []string{"process_failed", "ownership_lost"}) || !controller.state.Closed {
+		t.Fatalf("remote_reason=%q requested=%v state=%+v", remoteReason, requestedReasons, controller.state)
+	}
+}
+
 func TestCLIReporterRemoteCompletionSuccessThenClearFailureRecoversWithoutSecondEffect(t *testing.T) {
 	completionCalls, sawApplied, failedClear := 0, false, false
 	controller := &statefulReporterController{}

@@ -68,15 +68,51 @@ func TestHarnessActivityRequiresTypedCurrentEvidence(t *testing.T) {
 		t.Fatalf("recovered latest evidence=%+v err=%v", recovered, err)
 	}
 	var heartbeatEvents int
-	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_events WHERE harness_session_id=? AND operation='heartbeat'`, session.ID).Scan(&heartbeatEvents); err != nil || heartbeatEvents != 5 {
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_events WHERE harness_session_id=? AND operation='heartbeat'`, session.ID).Scan(&heartbeatEvents); err != nil || heartbeatEvents != 4 {
 		t.Fatalf("projection heartbeat events=%d err=%v", heartbeatEvents, err)
 	}
 	closed, err := service.StopWithReason(context.Background(), session.ID, ClosedProcessExited)
 	if err != nil || closed.ActivityState != ActivityDead || closed.ClosedReason != ClosedProcessExited {
 		t.Fatalf("closed session=%+v err=%v", closed, err)
 	}
-	if _, err := service.StopWithReason(context.Background(), session.ID, ClosedOwnershipLost); !IsCode(err, CodeConflict) {
-		t.Fatalf("mismatched terminal retry error=%v", err)
+	replayed, err := service.StopWithReason(context.Background(), session.ID, ClosedOwnershipLost)
+	if err != nil || replayed.ClosedReason != ClosedProcessExited || replayed.ActivityReason != ClosedProcessExited {
+		t.Fatalf("terminal retry changed first reason: session=%+v err=%v", replayed, err)
+	}
+	var stopEvents int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_events WHERE harness_session_id=? AND operation='stop'`, session.ID).Scan(&stopEvents); err != nil || stopEvents != 1 {
+		t.Fatalf("stop events=%d err=%v", stopEvents, err)
+	}
+}
+
+func TestRoutineHeartbeatYieldCyclesDoNotGrowActivityLog(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	session := registerActivitySession(t, service, projectID)
+	evidence := ActivityEvidence{Sequence: 1, Kind: "turn_started"}
+	for range 3 {
+		if _, err := service.HeartbeatWithActivity(context.Background(), session.ID, PhaseWorking, evidence); err != nil {
+			t.Fatal(err)
+		}
+		yielded, err := service.Yield(context.Background(), session.ID)
+		if err != nil || len(yielded.Controls) != 0 {
+			t.Fatalf("no-control yield=%+v err=%v", yielded, err)
+		}
+	}
+	var events int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_events WHERE harness_session_id=?`, session.ID).Scan(&events); err != nil || events != 1 {
+		t.Fatalf("routine cycle events=%d err=%v", events, err)
+	}
+}
+
+func TestSessionStartedEvidenceDoesNotInventBusyOrIdle(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	session := registerActivitySession(t, service, projectID)
+	reported, err := service.HeartbeatWithActivity(context.Background(), session.ID, PhaseWorking, ActivityEvidence{Sequence: 1, Kind: "session_started"})
+	if err != nil || reported.ActivityState != ActivityUnknown || reported.ActivityReason != ActivityUnreported ||
+		reported.ActivitySequence != 1 || reported.ActivityKind != "session_started" || reported.ActivityAt != "" || reported.ActivityAge != nil {
+		t.Fatalf("session-start evidence=%+v err=%v", reported, err)
 	}
 }
 
@@ -209,5 +245,48 @@ func TestConcurrentActivityTimeoutAppendsOneTransition(t *testing.T) {
 	}
 	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_events WHERE harness_session_id=? AND operation='heartbeat'`, session.ID).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("projection heartbeat events=%d err=%v", count, err)
+	}
+}
+
+func TestActivityTimeoutSkipsUnmanagedAndContinuesToManagedSession(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	unmanaged, _, err := service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "claude", Host: "external-host", SessionRef: "external-ref", WorkerLease: testWorkerLease,
+		ManagementMode: ManagementUnmanaged, Role: RoleWorker, SteerMode: SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	managed := registerActivitySession(t, service, projectID)
+	const unmanagedID = "11111111-1111-4111-8111-111111111111"
+	const managedID = "22222222-2222-4222-8222-222222222222"
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET id=? WHERE id=?`, unmanagedID, unmanaged.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET id=? WHERE id=?`, managedID, managed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.HeartbeatWithActivity(context.Background(), unmanagedID, PhaseWorking, ActivityEvidence{Sequence: 1, Kind: "turn_started"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.HeartbeatWithActivity(context.Background(), managedID, PhaseWorking, ActivityEvidence{Sequence: 1, Kind: "turn_started"}); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-5 * time.Minute).Format("2006-01-02T15:04:05.000Z")
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET heartbeat_at=? WHERE id IN (?,?)`, old, unmanagedID, managedID); err != nil {
+		t.Fatal(err)
+	}
+	count, err := service.ReconcileStaleActivity(context.Background(), time.Now().UTC(), DefaultActivityHeartbeatTimeout)
+	if err != nil || count != 1 {
+		t.Fatalf("reconcile count=%d err=%v", count, err)
+	}
+	unmanagedAfter, err := service.Get(context.Background(), projectID, unmanagedID)
+	if err != nil || unmanagedAfter.ActivityState != ActivityUnknown || unmanagedAfter.ActivityReason != ActivityUnmanaged {
+		t.Fatalf("unmanaged=%+v err=%v", unmanagedAfter, err)
+	}
+	managedAfter, err := service.Get(context.Background(), projectID, managedID)
+	if err != nil || managedAfter.ActivityState != ActivityUnknown || managedAfter.ActivityReason != ActivityStale {
+		t.Fatalf("managed=%+v err=%v", managedAfter, err)
 	}
 }

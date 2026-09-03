@@ -19,7 +19,7 @@ func TestMigration169BackfillsTerminalTruthAndRejectsInconsistentActivity(t *tes
 	}
 	defer database.Close()
 	t.Setenv("PAIMOS_TEST_MODE", "1")
-	if err := migrateThrough(database, 168); err != nil {
+	if err := migrateThrough(database, 167); err != nil {
 		t.Fatal(err)
 	}
 	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('M169','M169')`)
@@ -34,6 +34,14 @@ func TestMigration169BackfillsTerminalTruthAndRejectsInconsistentActivity(t *tes
 	agentID, _ := agent.LastInsertId()
 	activeID := "11111111-1111-4111-8111-111111111111"
 	stoppedID := "22222222-2222-4222-8222-222222222222"
+	legacyLostID := "33333333-3333-4333-8333-333333333333"
+	if _, err := database.Exec(`INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,management_mode,role,steer_mode,advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase)
+		VALUES(?,?,?,?,?,'m169-legacy',zeroblob(32),'managed','worker','none',0,1,0,0,0,'working')`, legacyLostID, projectID, agentID, "worker", "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateThrough(database, 168); err != nil {
+		t.Fatal(err)
+	}
 	for _, row := range []struct {
 		id, phase string
 	}{
@@ -52,8 +60,14 @@ func TestMigration169BackfillsTerminalTruthAndRejectsInconsistentActivity(t *tes
 	if err := database.QueryRow(`SELECT activity_state,activity_reason,closed_reason FROM harness_sessions WHERE id=?`, stoppedID).Scan(&state, &reason, &closed); err != nil {
 		t.Fatal(err)
 	}
-	if state != "dead" || reason != "ownership_lost" || closed != "ownership_lost" {
+	if state != "dead" || reason != "stopped" || closed != "stopped" {
 		t.Fatalf("terminal backfill state=%s reason=%s closed=%s", state, reason, closed)
+	}
+	if err := database.QueryRow(`SELECT activity_state,activity_reason,closed_reason FROM harness_sessions WHERE id=?`, legacyLostID).Scan(&state, &reason, &closed); err != nil {
+		t.Fatal(err)
+	}
+	if state != "dead" || reason != "ownership_lost" || closed != "ownership_lost" {
+		t.Fatalf("lease-less terminal backfill state=%s reason=%s closed=%s", state, reason, closed)
 	}
 	if _, err := database.Exec(`UPDATE harness_sessions SET activity_state='idle',activity_reason='turn_completed',activity_event_kind='turn_completed' WHERE id=?`, stoppedID); err == nil || !strings.Contains(err.Error(), "inconsistent") {
 		t.Fatalf("stopped-as-idle error=%v", err)

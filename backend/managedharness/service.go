@@ -281,7 +281,7 @@ func deriveActivity(current models.HarnessSession, evidence ActivityEvidence) (s
 	}
 	sequence = evidence.Sequence
 	state, reason = activityFromKind(kind)
-	return state, reason, kind, sequence, true
+	return state, reason, kind, sequence, kind != "session_started"
 }
 
 func activityFromKind(kind string) (state, reason string) {
@@ -524,7 +524,7 @@ func (s *Service) HeartbeatWithActivity(ctx context.Context, id, phase string, e
 		return models.HarnessSession{}, coded(CodeCapabilityUnavailable, "session cannot report status")
 	}
 	state, reason, kind, sequence, newEvidence := deriveActivity(current, evidence)
-	projectionChanged := phase != current.Phase || state != current.ActivityState || reason != current.ActivityReason ||
+	projectionChanged := state != current.ActivityState || reason != current.ActivityReason ||
 		kind != current.ActivityKind || sequence != current.ActivitySequence
 	activityAt := any(nil)
 	if current.ActivityAt != "" {
@@ -651,7 +651,12 @@ func (s *Service) Yield(ctx context.Context, sessionID string) (YieldResult, err
 		}
 		return YieldResult{}, coded(CodeCapabilityUnavailable, "only an active managed session can yield")
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE harness_session_controls SET state='claimed',claimed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE harness_session_id=? AND state='pending'`, sessionID); err != nil {
+	claimResult, err := tx.ExecContext(ctx, `UPDATE harness_session_controls SET state='claimed',claimed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE harness_session_id=? AND state='pending'`, sessionID)
+	if err != nil {
+		return YieldResult{}, err
+	}
+	claimed, err := claimResult.RowsAffected()
+	if err != nil {
 		return YieldResult{}, err
 	}
 	session, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, sessionID))
@@ -674,8 +679,10 @@ func (s *Service) Yield(ctx context.Context, sessionID string) (YieldResult, err
 	if err := rows.Close(); err != nil {
 		return YieldResult{}, err
 	}
-	if err := appendSessionEventTx(ctx, tx, session, "yield"); err != nil {
-		return YieldResult{}, err
+	if claimed > 0 {
+		if err := appendSessionEventTx(ctx, tx, session, "yield"); err != nil {
+			return YieldResult{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return YieldResult{}, err
@@ -753,7 +760,7 @@ func (s *Service) StopWithReason(ctx context.Context, id, closedReason string) (
 		// Exact retries are read-only: a daemon may have committed the remote
 		// stop immediately before crashing, then recover its local terminal row.
 		existing, getErr := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE id=?`, strings.TrimSpace(id)))
-		if getErr == nil && existing.Phase == PhaseStopped && existing.ClosedReason == closedReason {
+		if getErr == nil && existing.Phase == PhaseStopped {
 			return existing, nil
 		}
 		return models.HarnessSession{}, coded(CodeConflict, "harness session is already stopped or missing")

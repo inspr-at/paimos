@@ -13,6 +13,7 @@ import (
 )
 
 const harnessActivityReconcileInterval = 30 * time.Second
+const harnessActivityReconcileTimeout = 10 * time.Second
 
 // StartHarnessActivityReconciler owns the server-side freshness transition.
 // Adapter silence never asserts idle; an expired authenticated heartbeat can
@@ -21,7 +22,9 @@ func StartHarnessActivityReconciler() {
 	service := managedharness.NewService(db.DB)
 	go func() {
 		reconcile := func() {
-			if _, err := service.ReconcileStaleActivity(context.Background(), time.Now().UTC(), managedharness.DefaultActivityHeartbeatTimeout); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), harnessActivityReconcileTimeout)
+			defer cancel()
+			if _, err := service.ReconcileStaleActivity(ctx, time.Now().UTC(), managedharness.DefaultActivityHeartbeatTimeout); err != nil {
 				log.Printf("harness activity reconcile: %v", err)
 			}
 		}
