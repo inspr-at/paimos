@@ -66,6 +66,37 @@ func (*ClaudeAdapter) Capabilities() []Capability {
 	return []Capability{CapabilityInbox, CapabilityStatus, CapabilitySteer, CapabilityInterrupt, CapabilityStop}
 }
 
+func (a *ClaudeAdapter) AccountLabel(ctx context.Context) string {
+	path, err := executable(a.claudePath, "claude", "operator-authenticated Claude CLI")
+	if err != nil {
+		return "unknown"
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	output, err := runAccountProbe(probeCtx, path, 1024, "auth", "status", "--json")
+	if err != nil {
+		return "unknown"
+	}
+	var status struct {
+		LoggedIn         bool   `json:"loggedIn"`
+		AuthMethod       string `json:"authMethod"`
+		SubscriptionType string `json:"subscriptionType"`
+	}
+	if json.Unmarshal(output, &status) != nil || !status.LoggedIn {
+		return "unknown"
+	}
+	if status.AuthMethod == "claude.ai" {
+		switch status.SubscriptionType {
+		case "max", "pro", "team", "enterprise":
+			return "claude_ai_" + status.SubscriptionType
+		}
+	}
+	if status.AuthMethod == "console" {
+		return "console"
+	}
+	return "unknown"
+}
+
 func executable(configured, name, label string) (string, error) {
 	var path string
 	if configured != "" {
@@ -298,7 +329,12 @@ func (a *ClaudeAdapter) Start(ctx context.Context, request StartRequest, observe
 			process.abortStart()
 		}
 	}()
-	if err := process.send(map[string]string{"op": "start", "prompt": request.Prompt}); err != nil {
+	startFrame := map[string]string{"op": "start", "prompt": request.Prompt}
+	if request.ResolvedProfile != nil {
+		startFrame["model"] = request.ResolvedProfile.Model
+		startFrame["effort"] = request.ResolvedProfile.Effort
+	}
+	if err := process.send(startFrame); err != nil {
 		return nil, err
 	}
 	readyCtx, cancel := context.WithTimeout(ctx, claudeOperationTimeout)

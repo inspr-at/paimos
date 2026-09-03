@@ -774,6 +774,54 @@ func TestRegisterEnforcesManagedAndExternalSteerTruth(t *testing.T) {
 	}
 }
 
+func TestRegisterPersistsExactDispatchAndRejectsExclusiveWorkspaceReuse(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'worker2')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(paimosdb.DB)
+	workspace := &models.HarnessWorkspaceProvenance{
+		CanonicalPath: "/workspace/paimos-worktrees/pai-906", GitTopLevel: "/workspace/paimos-worktrees/pai-906",
+		GitBranch: "feat/pai-906-dispatch-profiles", Identity: strings.Repeat("a", 64), Kind: "git_worktree", Mode: "exclusive",
+	}
+	input := RegisterInput{ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "profile-session", WorkerLease: testWorkerLease,
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
+		Workspace:    workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: "chatgpt"}
+	session, created, err := service.Register(context.Background(), input)
+	if err != nil || !created {
+		t.Fatalf("register = %+v created=%v err=%v", session, created, err)
+	}
+	if session.MachineID != "mbp0" || session.Workspace == nil || *session.Workspace != *workspace || session.DispatchProfile == nil ||
+		session.DispatchProfile.ID != "codex-sol-high" || session.DispatchProfile.Model != "gpt-5.6-sol" || session.AccountLabel != "chatgpt" {
+		t.Fatalf("stored provenance = %+v", session)
+	}
+	replay, created, err := service.Register(context.Background(), input)
+	if err != nil || created || replay.ID != session.ID {
+		t.Fatalf("replay = %+v created=%v err=%v", replay, created, err)
+	}
+	conflict := input
+	conflict.AgentName, conflict.SessionRef = "worker2", "profile-session-2"
+	if _, _, err := service.Register(context.Background(), conflict); !IsCode(err, CodeConflict) || !strings.Contains(err.Error(), "workspace") {
+		t.Fatalf("workspace conflict = %v", err)
+	}
+	badProfile := input
+	badProfile.SessionRef, badProfile.DispatchProfileVersion = "profile-session-3", "latest"
+	if _, _, err := service.Register(context.Background(), badProfile); !IsCode(err, CodeInvalid) {
+		t.Fatalf("unpinned profile error = %v", err)
+	}
+}
+
+func TestStoredRetiredDispatchProfileRemainsReadable(t *testing.T) {
+	profile, err := storedDispatchProfile("retired-profile", "2026-08", "codex", "retired-model", "high", "exclusive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.ID != "retired-profile" || profile.Version != "2026-08" || profile.Model != "retired-model" {
+		t.Fatalf("retired profile snapshot = %+v", profile)
+	}
+}
+
 func TestStoppedSessionCanRegisterNewActiveGeneration(t *testing.T) {
 	projectID, _ := openManagedHarnessTestDB(t)
 	service := NewService(paimosdb.DB)

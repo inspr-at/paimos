@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentd"
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 )
 
 const reporterOutputLimit = 64 << 10
@@ -93,14 +94,17 @@ type cliReporter struct {
 }
 
 type harnessSessionResponse struct {
-	ID              string  `json:"id"`
-	ProjectID       int64   `json:"project_id"`
-	AgentName       string  `json:"agent_name"`
-	Harness         string  `json:"harness"`
-	Phase           string  `json:"phase"`
-	Role            string  `json:"role,omitempty"`
-	ParentSessionID *string `json:"parent_harness_session_id"`
-	TicketID        *int64  `json:"ticket_id"`
+	ID              string                      `json:"id"`
+	ProjectID       int64                       `json:"project_id"`
+	AgentName       string                      `json:"agent_name"`
+	Harness         string                      `json:"harness"`
+	Phase           string                      `json:"phase"`
+	Role            string                      `json:"role,omitempty"`
+	ParentSessionID *string                     `json:"parent_harness_session_id"`
+	TicketID        *int64                      `json:"ticket_id"`
+	Workspace       *agentd.WorkspaceProvenance `json:"workspace_provenance"`
+	DispatchProfile *dispatchprofile.Profile    `json:"dispatch_profile"`
+	AccountLabel    string                      `json:"account_label"`
 }
 
 type harnessControlResponse struct {
@@ -174,6 +178,38 @@ func newCLIReporterWithRunner(instance, host, paimosPath string, environment []s
 		run: run, leases: leases, sessions: make(map[string]reportedSession)}, nil
 }
 
+// ResolveDispatchProfile reads the exact catalog from the authenticated
+// execution-options authority. agentd never accepts model or effort strings
+// directly from its local start caller.
+func (r *cliReporter) ResolveDispatchProfile(ctx context.Context, id, version, harness string) (dispatchprofile.Profile, error) {
+	expected, err := dispatchprofile.Resolve(id, version, harness)
+	if err != nil {
+		return dispatchprofile.Profile{}, errors.New("dispatch profile is unavailable")
+	}
+	resolveCtx, cancel := context.WithTimeout(ctx, reporterSessionTimeout)
+	defer cancel()
+	raw, err := r.run(resolveCtx, r.paimosPath, []string{"--json", "curl", "/api/ai/execution-options?dispatch_only=1"}, r.environment, nil)
+	if err != nil {
+		return dispatchprofile.Profile{}, errors.New("authenticated dispatch profile lookup failed")
+	}
+	var response struct {
+		Profiles []dispatchprofile.Profile `json:"dispatch_profiles"`
+	}
+	if json.Unmarshal(raw, &response) != nil || len(response.Profiles) > 64 {
+		return dispatchprofile.Profile{}, errors.New("dispatch profile catalog is invalid")
+	}
+	for _, profile := range response.Profiles {
+		if profile.ID != id || profile.Version != version {
+			continue
+		}
+		if profile.Harness != harness || dispatchprofile.Validate(profile) != nil || profile != expected {
+			return dispatchprofile.Profile{}, errors.New("dispatch profile is incompatible")
+		}
+		return profile, nil
+	}
+	return dispatchprofile.Profile{}, errors.New("dispatch profile is unavailable")
+}
+
 func (r *cliReporter) BindController(controller agentd.Controller) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -212,10 +248,13 @@ func generateReporterLease() (string, error) {
 func runReporterCommand(ctx context.Context, path string, args, environment []string, stdin io.Reader) ([]byte, error) {
 	command := exec.CommandContext(ctx, path, args...) // #nosec G204 -- resolved once at startup; argv is never interpreted by a shell.
 	command.Stdin, command.Env = stdin, environment
-	var output boundedReporterBuffer
-	command.Stdout = &output
+	var output, failure boundedReporterBuffer
+	command.Stdout, command.Stderr = &output, &failure
 	if err := command.Run(); err != nil {
-		return nil, errors.New("authenticated paimos reporter command failed")
+		if failure.overflow {
+			return nil, errors.New("paimos reporter error response exceeded its bound")
+		}
+		return failure.Bytes(), errors.New("authenticated paimos reporter command failed")
 	}
 	if output.overflow {
 		return nil, errors.New("paimos reporter response exceeded its bound")
@@ -365,6 +404,20 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	args := []string{"--json", "harness", "register", "--project", strconv.FormatInt(session.ProjectID, 10),
 		"--agent", agentName, "--harness", harness, "--host", r.host, "--registration-file", "-",
 		"--management", "managed", "--role", role, "--steer-mode", "none", "--capability", capabilities}
+	workspace := session.WorkspaceProvenance
+	if workspace.Identity != "" {
+		args = append(args, "--workspace", workspace.CanonicalPath, "--workspace-identity", workspace.Identity,
+			"--workspace-kind", workspace.Kind, "--workspace-mode", workspace.Mode)
+		if workspace.GitTopLevel != "" {
+			args = append(args, "--git-top-level", workspace.GitTopLevel, "--git-branch", workspace.GitBranch)
+		}
+	}
+	if session.DispatchProfile != nil {
+		args = append(args, "--dispatch-profile", session.DispatchProfile.ID, "--dispatch-profile-version", session.DispatchProfile.Version)
+	}
+	if session.AccountLabel != "" && session.AccountLabel != "unknown" {
+		args = append(args, "--account-label", session.AccountLabel)
+	}
 	if session.ParentSessionID != "" {
 		args = append(args, "--parent-session", session.ParentSessionID)
 	}
@@ -377,11 +430,18 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	}
 	raw, err := r.run(ctx, r.paimosPath, args, r.environment, bytes.NewReader(registration))
 	if err != nil {
+		if reporterErrorCode(raw) == "harness_session_conflict" {
+			request := agentd.ControlRequest{Instance: r.instance, ProjectID: session.ProjectID, Identity: session.Identity, CorrelationID: uuid.NewString()}
+			if rejectErr := r.controller.Reject(ctx, session.ID, request, agentd.ErrorWorkspaceConflict); rejectErr != nil {
+				return rejectErr
+			}
+			return nil
+		}
 		return err
 	}
 	response := harnessSessionResponse{Role: role}
 	if json.Unmarshal(raw, &response) != nil || uuid.Validate(response.ID) != nil || response.ProjectID != session.ProjectID || response.AgentName != agentName || response.Harness != harness ||
-		response.Role != role || !reporterBindingMatches(response, session) {
+		response.Role != role || !reporterBindingMatches(response, session) || !reporterExecutionMatches(response, session) {
 		return errors.New("paimos reporter returned mismatched harness session scope")
 	}
 	if err := r.checkpoint(ctx, session, agentd.ReporterState{PublicSessionID: response.ID, Capabilities: ownedCapabilities}); err != nil {
@@ -407,6 +467,42 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 		return err
 	}
 	return r.yieldControls(ctx, response.ID, session, workerLease)
+}
+
+func reporterExecutionMatches(response harnessSessionResponse, session agentd.Session) bool {
+	if session.WorkspaceProvenance.Identity == "" {
+		if response.Workspace != nil {
+			return false
+		}
+	} else if response.Workspace == nil || *response.Workspace != session.WorkspaceProvenance {
+		return false
+	}
+	if session.DispatchProfile == nil {
+		if response.DispatchProfile != nil {
+			return false
+		}
+	} else if response.DispatchProfile == nil || *response.DispatchProfile != *session.DispatchProfile {
+		return false
+	}
+	sessionLabel := session.AccountLabel
+	if sessionLabel == "" {
+		sessionLabel = "unknown"
+	}
+	responseLabel := response.AccountLabel
+	if responseLabel == "" && session.WorkspaceProvenance.Identity == "" {
+		responseLabel = "unknown"
+	}
+	return responseLabel == sessionLabel
+}
+
+func reporterErrorCode(raw []byte) string {
+	var problem struct {
+		ErrorCode string `json:"error_code"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &problem) != nil || !safeReporterValue(problem.ErrorCode, 128) {
+		return ""
+	}
+	return problem.ErrorCode
 }
 
 func reporterBindingMatches(response harnessSessionResponse, session agentd.Session) bool {

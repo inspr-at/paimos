@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 )
 
 func TestStartRequestOmitsNewHierarchyFieldsForOldDaemon(t *testing.T) {
@@ -91,6 +93,103 @@ type fakeAdapter struct {
 	threadID     string
 	startRequest StartRequest
 	mu           sync.Mutex
+}
+
+type profileResolver struct {
+	profile dispatchprofile.Profile
+	calls   int
+}
+
+func (r *profileResolver) ResolveDispatchProfile(_ context.Context, _, _, _ string) (dispatchprofile.Profile, error) {
+	r.calls++
+	return r.profile, nil
+}
+
+type dispatchAdapter struct {
+	requests []StartRequest
+	label    string
+}
+
+func (*dispatchAdapter) Name() string { return AdapterCodex }
+func (*dispatchAdapter) Capabilities() []Capability {
+	return []Capability{CapabilityInbox, CapabilityStatus, CapabilitySteer, CapabilityInterrupt, CapabilityStop}
+}
+func (a *dispatchAdapter) AccountLabel(context.Context) string { return a.label }
+func (a *dispatchAdapter) Start(_ context.Context, request StartRequest, observe func(AdapterEvent)) (Process, error) {
+	a.requests = append(a.requests, request)
+	observe(AdapterEvent{Kind: EventSessionStarted, HarnessSessionID: "dispatch-thread"})
+	return newFakeProcess(6100 + len(a.requests)), nil
+}
+
+func TestSupervisorResolvesAndRecordsExactDispatchProfileBeforeSpawn(t *testing.T) {
+	profile, err := dispatchprofile.Resolve("codex-sol-xhigh", "1", AdapterCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &profileResolver{profile: profile}
+	adapter := &dispatchAdapter{label: "chatgpt"}
+	inspector := func(_ context.Context, path, mode string) (WorkspaceProvenance, error) {
+		return WorkspaceProvenance{CanonicalPath: path, Identity: strings.Repeat("a", 64), Kind: WorkspaceDirectory, Mode: mode}, nil
+	}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-profile", Adapters: []Adapter{adapter}, DispatchResolver: resolver, WorkspaceInspector: inspector})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:profile", ProjectID: 906, DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolver.calls != 1 || session.DispatchProfile == nil || *session.DispatchProfile != profile || session.AccountLabel != "chatgpt" || session.WorkspaceProvenance.Identity != strings.Repeat("a", 64) {
+		t.Fatalf("recorded session = %+v", session)
+	}
+	if len(adapter.requests) != 1 || adapter.requests[0].ResolvedProfile == nil || *adapter.requests[0].ResolvedProfile != profile {
+		t.Fatalf("adapter request = %+v", adapter.requests)
+	}
+}
+
+func TestSupervisorRejectsProfileDriftAndWorkspaceCollisionBeforeSpawn(t *testing.T) {
+	profile, err := dispatchprofile.Resolve("codex-sol-xhigh", "1", AdapterCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drifted := profile
+	drifted.Model = "gpt-5.6-terra"
+	adapter := &dispatchAdapter{label: "private output must collapse to unknown"}
+	inspector := func(_ context.Context, path, mode string) (WorkspaceProvenance, error) {
+		return WorkspaceProvenance{CanonicalPath: path, Identity: strings.Repeat("b", 64), Kind: WorkspaceDirectory, Mode: mode}, nil
+	}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-profile-conflict", Adapters: []Adapter{adapter}, DispatchResolver: &profileResolver{profile: drifted}, WorkspaceInspector: inspector})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	request := StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:first", ProjectID: 906, DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version}
+	if _, err := supervisor.Start(context.Background(), request); !errors.Is(err, ErrDispatchProfile) || len(adapter.requests) != 0 {
+		t.Fatalf("drifted profile start = %v, requests=%d", err, len(adapter.requests))
+	}
+	supervisor.dispatchResolver = &profileResolver{profile: profile}
+	first, err := supervisor.Start(context.Background(), request)
+	if err != nil || first.AccountLabel != "unknown" {
+		t.Fatalf("first start = %+v, %v", first, err)
+	}
+	request.Identity = "codex:second"
+	if _, err := supervisor.Start(context.Background(), request); !errors.Is(err, ErrWorkspaceConflict) || len(adapter.requests) != 1 {
+		t.Fatalf("workspace collision = %v, requests=%d", err, len(adapter.requests))
+	}
+}
+
+func TestSupervisorRequiresDaemonAuthorizationForSharedWorkspace(t *testing.T) {
+	adapter := &dispatchAdapter{}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-shared", Adapters: []Adapter{adapter}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	_, err = supervisor.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), WorkspaceMode: WorkspaceShared, Prompt: "work", Identity: "codex:shared", ProjectID: 906})
+	if err == nil || len(adapter.requests) != 0 {
+		t.Fatalf("unauthorized shared start = %v, requests=%d", err, len(adapter.requests))
+	}
 }
 
 func TestSupervisorKeepsHierarchyAndTicketSeparateFromIdentityAndPrompt(t *testing.T) {
@@ -557,6 +656,36 @@ func TestSupervisorRestartKeepsLegacyUnscopedHistoryFailClosed(t *testing.T) {
 		CorrelationID: "legacy-must-fail", Text: "do not apply",
 	}); !errors.Is(err, ErrControlScopeMismatch) {
 		t.Fatalf("legacy control error=%v, want ErrControlScopeMismatch", err)
+	}
+}
+
+func TestSupervisorRestartKeepsRetiredDispatchSnapshotReadable(t *testing.T) {
+	root := t.TempDir()
+	journal, err := openRegistryJournal(root, "ppm-retired-profile", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	workspace := t.TempDir()
+	profile := dispatchprofile.Profile{ID: "retired-profile", Version: "2026-08", Harness: AdapterCodex, Model: "retired-model", Effort: "high",
+		MachineSource: dispatchprofile.MachineAuthenticatedReporter, AccountSource: dispatchprofile.AccountLocalProbe, WorkspaceMode: WorkspaceExclusive}
+	session := Session{
+		ID: "019d1234-1234-7123-8123-123456789abd", Identity: "codex:retired", Adapter: AdapterCodex, Workspace: workspace,
+		WorkspaceProvenance: WorkspaceProvenance{CanonicalPath: workspace, Identity: strings.Repeat("b", 64), Kind: WorkspaceDirectory, Mode: WorkspaceExclusive},
+		DispatchProfile:     &profile, AccountLabel: "unknown", ProjectID: 906, Role: "worker",
+		Capabilities: []Capability{CapabilityInbox, CapabilityStatus, CapabilityStop}, Managed: true, State: StateRunning, StartedAt: now.Add(-time.Minute), HeartbeatAt: now,
+	}
+	if err := journal.put(session); err != nil {
+		t.Fatal(err)
+	}
+	supervisor, err := NewSupervisor(SupervisorConfig{StateRoot: root, Instance: "ppm-retired-profile", MaxSessions: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	got := supervisor.Status().Sessions
+	if len(got) != 1 || got[0].DispatchProfile == nil || *got[0].DispatchProfile != profile || got[0].State != StateOwnershipLost {
+		t.Fatalf("retired profile recovery = %+v", got)
 	}
 }
 

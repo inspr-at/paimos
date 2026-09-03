@@ -14,37 +14,61 @@ type HarnessCapabilities struct {
 	Stop      bool `json:"stop"`
 }
 
+type HarnessWorkspaceProvenance struct {
+	CanonicalPath string `json:"canonical_path"`
+	GitTopLevel   string `json:"git_top_level,omitempty"`
+	GitBranch     string `json:"git_branch,omitempty"`
+	Identity      string `json:"identity"`
+	Kind          string `json:"kind"`
+	Mode          string `json:"mode"`
+}
+
+type HarnessDispatchProfile struct {
+	ID            string `json:"id"`
+	Version       string `json:"version"`
+	Harness       string `json:"harness"`
+	Model         string `json:"model"`
+	Effort        string `json:"effort"`
+	MachineSource string `json:"machine_source"`
+	AccountSource string `json:"account_source"`
+	WorkspaceMode string `json:"workspace_mode"`
+}
+
 // HarnessSession is the durable control-plane identity for one agent process
 // or externally managed vendor session. The attribution session created by
 // `paimos session start` is a different resource and never appears here.
 type HarnessSession struct {
-	ID               string              `json:"id"`
-	ProjectID        int64               `json:"project_id"`
-	ProjectAgentID   int64               `json:"project_agent_id"`
-	AgentName        string              `json:"agent_name"`
-	Harness          string              `json:"harness"`
-	Host             string              `json:"host"`
-	MessageTargetID  string              `json:"message_target_id,omitempty"`
-	ManagementMode   string              `json:"management_mode"`
-	Role             string              `json:"role"`
-	ParentSessionID  *string             `json:"parent_harness_session_id"`
-	TicketID         *int64              `json:"ticket_id"`
-	SteerMode        string              `json:"steer_mode"`
-	Capabilities     HarnessCapabilities `json:"advertised_capabilities"`
-	Phase            string              `json:"phase"`
-	HeartbeatAt      string              `json:"heartbeat_at,omitempty"`
-	ActivityState    string              `json:"activity_state"`
-	ActivityReason   string              `json:"activity_reason"`
-	ActivityKind     string              `json:"activity_event_kind,omitempty"`
-	ActivityAt       string              `json:"activity_at,omitempty"`
-	ActivityAge      *int64              `json:"activity_age_seconds"`
-	ActivitySequence int64               `json:"activity_sequence"`
-	ClosedReason     string              `json:"closed_reason,omitempty"`
-	YieldedAt        string              `json:"yielded_at,omitempty"`
-	YieldSequence    int64               `json:"yield_sequence"`
-	Revision         int64               `json:"revision"`
-	CreatedAt        string              `json:"created_at"`
-	UpdatedAt        string              `json:"updated_at"`
+	ID               string                      `json:"id"`
+	ProjectID        int64                       `json:"project_id"`
+	ProjectAgentID   int64                       `json:"project_agent_id"`
+	AgentName        string                      `json:"agent_name"`
+	Harness          string                      `json:"harness"`
+	Host             string                      `json:"host"`
+	MachineID        string                      `json:"machine_id"`
+	MessageTargetID  string                      `json:"message_target_id,omitempty"`
+	ManagementMode   string                      `json:"management_mode"`
+	Role             string                      `json:"role"`
+	ParentSessionID  *string                     `json:"parent_harness_session_id"`
+	TicketID         *int64                      `json:"ticket_id"`
+	Workspace        *HarnessWorkspaceProvenance `json:"workspace_provenance"`
+	DispatchProfile  *HarnessDispatchProfile     `json:"dispatch_profile"`
+	AccountLabel     string                      `json:"account_label"`
+	SteerMode        string                      `json:"steer_mode"`
+	Capabilities     HarnessCapabilities         `json:"advertised_capabilities"`
+	Phase            string                      `json:"phase"`
+	HeartbeatAt      string                      `json:"heartbeat_at,omitempty"`
+	ActivityState    string                      `json:"activity_state"`
+	ActivityReason   string                      `json:"activity_reason"`
+	ActivityKind     string                      `json:"activity_event_kind,omitempty"`
+	ActivityAt       string                      `json:"activity_at,omitempty"`
+	ActivityAge      *int64                      `json:"activity_age_seconds"`
+	ActivitySequence int64                       `json:"activity_sequence"`
+	ClosedReason     string                      `json:"closed_reason,omitempty"`
+	YieldedAt        string                      `json:"yielded_at,omitempty"`
+	YieldSequence    int64                       `json:"yield_sequence"`
+	Revision         int64                       `json:"revision"`
+	CreatedAt        string                      `json:"created_at"`
+	UpdatedAt        string                      `json:"updated_at"`
 }
 
 // HarnessSessionEvent is an immutable, content-free state transition for one

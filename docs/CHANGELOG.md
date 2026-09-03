@@ -1,5 +1,14 @@
 # Changelog
 
+- **PAI-906** — Owned agentd starts now reject concurrent exclusive workspace
+  reuse before spawn and persist canonical Git/worktree provenance. Exact
+  versioned Codex and Claude dispatch profiles are resolved through the
+  authenticated execution-options authority, locally pinned, applied through
+  documented vendor fields, and recorded with reporter-derived machine and
+  bounded non-secret account provenance. Cross-daemon authority conflicts stop
+  the rejected child, and retired profile snapshots remain readable. Legacy
+  starts remain compatible with explicitly unknown optional axes.
+
 All notable changes to PAIMOS are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"github.com/inspr-at/paimos/backend/models"
 	"github.com/inspr-at/paimos/backend/sse"
 )
@@ -30,6 +31,7 @@ type aiExecutionOptionsResponse struct {
 	ContextPacks         []aiContextPackChoice             `json:"context_packs"`
 	RunProviders         []sse.ActionCapability            `json:"run_providers,omitempty"`
 	ProjectPolicy        projectAIPolicyResponse           `json:"project_policy,omitempty"`
+	DispatchProfiles     []dispatchprofile.Profile         `json:"dispatch_profiles"`
 }
 
 type aiSelectorDefaults struct {
@@ -60,6 +62,12 @@ type projectAIPolicyResponse struct {
 }
 
 func AIExecutionOptions(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("dispatch_only") == "1" {
+		jsonOK(w, struct {
+			Profiles []dispatchprofile.Profile `json:"dispatch_profiles"`
+		}{Profiles: dispatchprofile.List()})
+		return
+	}
 	settings, err := LoadAISettings()
 	if err != nil {
 		log.Printf("ai_execution_options: load settings: %v", err)
@@ -123,6 +131,7 @@ func AIExecutionOptions(w http.ResponseWriter, r *http.Request) {
 			DisableHostedDraft:     aiConfig.Policy.DisableHostedDraft,
 			DisableLocalModelDraft: aiConfig.Policy.DisableLocalModelDraft,
 		},
+		DispatchProfiles: dispatchprofile.List(),
 	})
 }
 

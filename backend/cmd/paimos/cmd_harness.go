@@ -50,6 +50,8 @@ func parseHarnessCapabilities(raw []string) (models.HarnessCapabilities, error) 
 
 func harnessRegisterCmd() *cobra.Command {
 	var project, agent, harness, host, refFile, leaseFile, registrationFile, targetID, management, role, parentSessionID, steerMode string
+	var workspacePath, gitTopLevel, gitBranch, workspaceIdentity, workspaceKind, workspaceMode string
+	var dispatchProfileID, dispatchProfileVersion, accountLabel string
 	var ticketID int64
 	var capabilities []string
 	cmd := &cobra.Command{Use: "register", Short: "Register a durable managed or unmanaged harness session", RunE: func(cmd *cobra.Command, args []string) error {
@@ -102,7 +104,11 @@ func harnessRegisterCmd() *cobra.Command {
 		if ticketID > 0 {
 			ticket = &ticketID
 		}
-		input := managedharness.RegisterInput{ProjectID: 1, AgentName: agent, Harness: harness, Host: host, SessionRef: ref, WorkerLease: workerLease, MessageTargetID: targetID, ManagementMode: management, Role: role, ParentSessionID: parent, TicketID: ticket, SteerMode: steerMode, Capabilities: caps}
+		var workspace *models.HarnessWorkspaceProvenance
+		if workspacePath != "" || gitTopLevel != "" || gitBranch != "" || workspaceIdentity != "" || workspaceKind != "" || workspaceMode != "" {
+			workspace = &models.HarnessWorkspaceProvenance{CanonicalPath: workspacePath, GitTopLevel: gitTopLevel, GitBranch: gitBranch, Identity: workspaceIdentity, Kind: workspaceKind, Mode: workspaceMode}
+		}
+		input := managedharness.RegisterInput{ProjectID: 1, AgentName: agent, Harness: harness, Host: host, SessionRef: ref, WorkerLease: workerLease, MessageTargetID: targetID, ManagementMode: management, Role: role, ParentSessionID: parent, TicketID: ticket, SteerMode: steerMode, Capabilities: caps, Workspace: workspace, DispatchProfileID: dispatchProfileID, DispatchProfileVersion: dispatchProfileVersion, AccountLabel: accountLabel}
 		if err := managedharness.ValidateRegistration(input); err != nil {
 			return &usageError{msg: err.Error()}
 		}
@@ -115,6 +121,16 @@ func harnessRegisterCmd() *cobra.Command {
 			return reportError(err)
 		}
 		payload := map[string]any{"agent_name": agent, "harness": harness, "host": host, "harness_session_ref": ref, "worker_lease": workerLease, "message_target_id": targetID, "management_mode": management, "role": role, "steer_mode": steerMode, "advertised_capabilities": caps}
+		if workspace != nil {
+			payload["workspace"] = workspace
+		}
+		if dispatchProfileID != "" {
+			payload["dispatch_profile_id"] = dispatchProfileID
+			payload["dispatch_profile_version"] = dispatchProfileVersion
+		}
+		if accountLabel != "" {
+			payload["account_label"] = accountLabel
+		}
 		if parent != nil {
 			payload["parent_harness_session_id"] = *parent
 		}
@@ -141,6 +157,15 @@ func harnessRegisterCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&ticketID, "ticket-id", 0, "active project ticket numeric ID")
 	cmd.Flags().StringVar(&steerMode, "steer-mode", "none", "none, owned, or codex_external")
 	cmd.Flags().StringSliceVar(&capabilities, "capability", nil, "advertised capabilities: inbox,status,steer,interrupt,stop")
+	cmd.Flags().StringVar(&workspacePath, "workspace", "", "authenticated reporter's canonical workspace path")
+	cmd.Flags().StringVar(&gitTopLevel, "git-top-level", "", "authenticated reporter's canonical Git top level")
+	cmd.Flags().StringVar(&gitBranch, "git-branch", "", "authenticated reporter's Git branch or detached identity")
+	cmd.Flags().StringVar(&workspaceIdentity, "workspace-identity", "", "authenticated reporter's SHA-256 workspace identity")
+	cmd.Flags().StringVar(&workspaceKind, "workspace-kind", "", "directory, git_primary, or git_worktree")
+	cmd.Flags().StringVar(&workspaceMode, "workspace-mode", "", "exclusive or explicitly authorized shared ownership")
+	cmd.Flags().StringVar(&dispatchProfileID, "dispatch-profile", "", "immutable dispatch profile id")
+	cmd.Flags().StringVar(&dispatchProfileVersion, "dispatch-profile-version", "", "immutable dispatch profile version")
+	cmd.Flags().StringVar(&accountLabel, "account-label", "", "bounded non-secret account provenance or unknown")
 	return cmd
 }
 

@@ -68,9 +68,23 @@ paimos-agentd serve --instance production \
   --report-api-key-file "$REPORT_API_KEY_FILE"
 printf '%s' 'Implement the assigned ticket.' | paimos-agentd start \
   --instance production --adapter codex --workspace "$PWD" \
-  --project-id "$PROJECT_ID" --identity codex:worker
+  --project-id "$PROJECT_ID" --identity codex:worker \
+  --dispatch-profile codex-sol-high --dispatch-profile-version 1
 paimos-agentd status --instance production
 ```
+
+The profile ID and exact version must exist in the authenticated
+`/api/ai/execution-options?dispatch_only=1` catalog. Agentd rejects drift before
+spawn and records the resolved profile plus canonical exclusive-workspace
+provenance on the durable harness session. Legacy starts may omit the profile;
+their optional execution axes remain unknown. Shared workspaces require both
+`start --workspace-mode shared` and the separately deliberate
+`serve --allow-shared-workspaces` authorization.
+
+During a rolling upgrade, recovered pre-profile agentd sessions omit the new
+execution fields when reporting to an older server. Upgrade the server before
+starting newly profiled workers; their workspace and profile contract is
+intentionally fail-closed rather than silently downgraded.
 
 Continue with the [Agent Intercom runbook](AGENT_INTERCOM.md) before registering
 targets or starting listeners. It documents the required steer primary plus

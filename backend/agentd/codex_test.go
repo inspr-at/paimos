@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 )
 
 const codexHelperEnvironment = "PAIMOS_CODEX_APP_SERVER_HELPER"
@@ -67,6 +69,26 @@ func TestCodexProcessOwnsExactAppServerSessionForControl(t *testing.T) {
 	}
 	if !seenSession || !seenTurn || !seenControl {
 		t.Fatalf("events session=%t turn=%t control=%t", seenSession, seenTurn, seenControl)
+	}
+}
+
+func TestCodexDispatchProfileUsesDocumentedModelAndEffortFields(t *testing.T) {
+	adapter := NewCodexAdapter(os.Args[0], "test")
+	adapter.command = func(_ string, _ ...string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+		cmd.Env = append(os.Environ(), codexHelperEnvironment+"=profile")
+		return cmd
+	}
+	profile, err := dispatchprofile.Resolve("codex-sol-xhigh", "1", AdapterCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := adapter.Start(context.Background(), StartRequest{Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:test", Adapter: AdapterCodex, ResolvedProfile: &profile}, func(AdapterEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "profile-stop"}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -216,17 +238,30 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 		case "initialize":
 			respond(map[string]any{})
 		case "thread/start":
+			if mode == "profile" {
+				var params struct {
+					Model string `json:"model"`
+				}
+				if json.Unmarshal(request.Params, &params) != nil || params.Model != "gpt-5.6-sol" {
+					os.Exit(2)
+				}
+			}
 			respond(map[string]any{"thread": map[string]any{"id": "thread-owned"}})
 			_ = encoder.Encode(map[string]any{"method": "thread/started", "params": map[string]any{"thread": map[string]any{"id": "thread-owned"}}})
 		case "turn/start":
 			var params struct {
 				ThreadID string `json:"threadId"`
+				Model    string `json:"model"`
+				Effort   string `json:"effort"`
 				Input    []struct {
 					Text string `json:"text"`
 				} `json:"input"`
 			}
 			if json.Unmarshal(request.Params, &params) != nil || params.ThreadID != "thread-owned" || len(params.Input) != 1 || params.Input[0].Text != "secret-not-persisted" {
 				fmt.Fprintln(os.Stderr, "invalid turn/start")
+				os.Exit(2)
+			}
+			if mode == "profile" && (params.Model != "gpt-5.6-sol" || params.Effort != "xhigh") {
 				os.Exit(2)
 			}
 			respond(map[string]any{"turn": map[string]any{"id": "turn-owned", "status": "inProgress"}})

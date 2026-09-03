@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 )
 
 const (
@@ -37,17 +39,43 @@ var (
 	ErrControlScopeMismatch  = errors.New("managed control scope does not match the owned session")
 	ErrControlReplayConflict = errors.New("managed control correlation was reused with different input")
 	ErrControlReplayCapacity = errors.New("managed control replay bound reached")
+	ErrDispatchProfile       = errors.New("managed dispatch profile is unavailable")
+	ErrWorkspaceConflict     = errors.New("managed workspace is already owned")
 )
 
+const (
+	WorkspaceExclusive = "exclusive"
+	WorkspaceShared    = "shared"
+	WorkspaceDirectory = "directory"
+	WorkspacePrimary   = "git_primary"
+	WorkspaceWorktree  = "git_worktree"
+)
+
+// WorkspaceProvenance is collected before spawn with a fixed-argv Git probe.
+// Identity is a digest of the physical Git top-level and Git directory; it is
+// safe to compare while preserving linked-worktree distinction.
+type WorkspaceProvenance struct {
+	CanonicalPath string `json:"canonical_path"`
+	GitTopLevel   string `json:"git_top_level,omitempty"`
+	GitBranch     string `json:"git_branch,omitempty"`
+	Identity      string `json:"identity"`
+	Kind          string `json:"kind"`
+	Mode          string `json:"mode"`
+}
+
 type StartRequest struct {
-	Adapter         string `json:"adapter"`
-	Workspace       string `json:"workspace"`
-	Prompt          string `json:"prompt"`
-	Identity        string `json:"identity"`
-	ProjectID       int64  `json:"project_id"`
-	Role            string `json:"role,omitempty"`
-	ParentSessionID string `json:"parent_harness_session_id,omitempty"`
-	TicketID        int64  `json:"ticket_id,omitempty"`
+	Adapter                string                   `json:"adapter"`
+	Workspace              string                   `json:"workspace"`
+	WorkspaceMode          string                   `json:"workspace_mode,omitempty"`
+	Prompt                 string                   `json:"prompt"`
+	Identity               string                   `json:"identity"`
+	ProjectID              int64                    `json:"project_id"`
+	Role                   string                   `json:"role,omitempty"`
+	ParentSessionID        string                   `json:"parent_harness_session_id,omitempty"`
+	TicketID               int64                    `json:"ticket_id,omitempty"`
+	DispatchProfileID      string                   `json:"dispatch_profile_id,omitempty"`
+	DispatchProfileVersion string                   `json:"dispatch_profile_version,omitempty"`
+	ResolvedProfile        *dispatchprofile.Profile `json:"-"`
 }
 
 type AdapterEvent struct {
@@ -78,6 +106,7 @@ const (
 	ErrorChildStopFailed     ErrorCode = "child_stop_failed"
 	ErrorOwnershipLost       ErrorCode = "ownership_lost"
 	ErrorReporterUnavailable ErrorCode = "reporter_unavailable"
+	ErrorWorkspaceConflict   ErrorCode = "workspace_conflict"
 )
 
 type ControlRequest struct {
@@ -110,6 +139,19 @@ type Adapter interface {
 	Start(context.Context, StartRequest, func(AdapterEvent)) (Process, error)
 }
 
+// AccountProber is optional. Implementations execute only a documented,
+// fixed-argv authentication-status command and collapse its bounded result to
+// a closed non-secret label. Absence or ambiguity is always "unknown".
+type AccountProber interface {
+	AccountLabel(context.Context) string
+}
+
+// DispatchResolver asks the authenticated execution-options authority for an
+// exact immutable profile before any vendor process is started.
+type DispatchResolver interface {
+	ResolveDispatchProfile(context.Context, string, string, string) (dispatchprofile.Profile, error)
+}
+
 type SessionState string
 
 const (
@@ -123,29 +165,32 @@ const (
 )
 
 type Session struct {
-	ID                string        `json:"id"`
-	Identity          string        `json:"identity"`
-	ProjectID         int64         `json:"project_id"`
-	Role              string        `json:"role"`
-	ParentSessionID   string        `json:"parent_harness_session_id,omitempty"`
-	TicketID          int64         `json:"ticket_id,omitempty"`
-	Adapter           string        `json:"adapter"`
-	Workspace         string        `json:"workspace"`
-	HarnessSessionID  string        `json:"harness_session_id,omitempty"`
-	Capabilities      []Capability  `json:"capabilities"`
-	Managed           bool          `json:"managed"`
-	Steerable         bool          `json:"steerable"`
-	State             SessionState  `json:"state"`
-	PID               int           `json:"pid,omitempty"`
-	LastEventKind     EventKind     `json:"last_event_kind,omitempty"`
-	ActivitySequence  int64         `json:"activity_sequence"`
-	ActivityAt        time.Time     `json:"activity_at,omitempty"`
-	LastCorrelationID string        `json:"last_correlation_id,omitempty"`
-	LastErrorCode     ErrorCode     `json:"last_error_code,omitempty"`
-	StartedAt         time.Time     `json:"started_at"`
-	HeartbeatAt       time.Time     `json:"heartbeat_at"`
-	ExitedAt          *time.Time    `json:"exited_at,omitempty"`
-	Reporter          ReporterState `json:"reporter,omitempty"`
+	ID                  string                   `json:"id"`
+	Identity            string                   `json:"identity"`
+	ProjectID           int64                    `json:"project_id"`
+	Role                string                   `json:"role"`
+	ParentSessionID     string                   `json:"parent_harness_session_id,omitempty"`
+	TicketID            int64                    `json:"ticket_id,omitempty"`
+	Adapter             string                   `json:"adapter"`
+	Workspace           string                   `json:"workspace"`
+	WorkspaceProvenance WorkspaceProvenance      `json:"workspace_provenance"`
+	DispatchProfile     *dispatchprofile.Profile `json:"dispatch_profile,omitempty"`
+	AccountLabel        string                   `json:"account_label"`
+	HarnessSessionID    string                   `json:"harness_session_id,omitempty"`
+	Capabilities        []Capability             `json:"capabilities"`
+	Managed             bool                     `json:"managed"`
+	Steerable           bool                     `json:"steerable"`
+	State               SessionState             `json:"state"`
+	PID                 int                      `json:"pid,omitempty"`
+	LastEventKind       EventKind                `json:"last_event_kind,omitempty"`
+	ActivitySequence    int64                    `json:"activity_sequence"`
+	ActivityAt          time.Time                `json:"activity_at,omitempty"`
+	LastCorrelationID   string                   `json:"last_correlation_id,omitempty"`
+	LastErrorCode       ErrorCode                `json:"last_error_code,omitempty"`
+	StartedAt           time.Time                `json:"started_at"`
+	HeartbeatAt         time.Time                `json:"heartbeat_at"`
+	ExitedAt            *time.Time               `json:"exited_at,omitempty"`
+	Reporter            ReporterState            `json:"reporter,omitempty"`
 }
 
 type ReporterState struct {
@@ -181,6 +226,7 @@ type Reporter interface {
 type Controller interface {
 	Interrupt(context.Context, string, ControlRequest) (Receipt, error)
 	Stop(context.Context, string, ControlRequest) (Receipt, error)
+	Reject(context.Context, string, ControlRequest, ErrorCode) error
 	CheckpointReporter(context.Context, string, ControlRequest, ReporterState) error
 }
 

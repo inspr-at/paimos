@@ -114,12 +114,27 @@ func TestAIExecutionOptionsIsMounted(t *testing.T) {
 			ID    string `json:"id"`
 			Label string `json:"label"`
 		} `json:"context_packs"`
+		DispatchProfiles []struct {
+			ID            string `json:"id"`
+			Version       string `json:"version"`
+			Harness       string `json:"harness"`
+			MachineSource string `json:"machine_source"`
+			AccountSource string `json:"account_source"`
+		} `json:"dispatch_profiles"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode execution options: %v", err)
 	}
 	if len(body.Profiles) < 4 {
 		t.Fatalf("profiles len=%d, want at least default/fast/balanced/deep", len(body.Profiles))
+	}
+	if len(body.DispatchProfiles) < 2 {
+		t.Fatalf("dispatch profiles len=%d", len(body.DispatchProfiles))
+	}
+	for _, profile := range body.DispatchProfiles {
+		if profile.ID == "" || profile.Version != "1" || profile.Harness == "" || profile.MachineSource != "authenticated_reporter" || profile.AccountSource != "local_probe" {
+			t.Fatalf("unsafe dispatch profile: %#v", profile)
+		}
 	}
 	foundDeep := false
 	for _, p := range body.Profiles {
@@ -152,6 +167,27 @@ func TestAIExecutionOptionsIsMounted(t *testing.T) {
 	}
 	if len(body.ContextPacks) != 1 || body.ContextPacks[0].ID != "issue" {
 		t.Fatalf("global context packs=%#v, want issue only", body.ContextPacks)
+	}
+}
+
+func TestAIExecutionOptionsDispatchOnlyIsBoundedAndExcludesPromptMaterial(t *testing.T) {
+	ts := newTestServer(t)
+	resp := ts.get(t, "/api/ai/execution-options?dispatch_only=1", ts.memberCookie)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	defer resp.Body.Close()
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 1 || len(raw["dispatch_profiles"]) == 0 {
+		t.Fatalf("dispatch-only shape=%v", raw)
+	}
+	for _, forbidden := range []string{"prompt_presets", "knowledge_suggestions", "context_packs", "action_defaults"} {
+		if _, ok := raw[forbidden]; ok {
+			t.Fatalf("dispatch-only response exposed %s", forbidden)
+		}
 	}
 }
 

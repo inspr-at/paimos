@@ -401,6 +401,10 @@ func TestClaudeReleaseUsesPinnedOperatorSDKWithoutBundledVendorBytes(t *testing.
 		!strings.Contains(bridge, "allowedTools: DEFAULT_TOOLS") || !strings.Contains(bridge, "tools: DEFAULT_TOOLS") {
 		t.Fatalf("bridge default tool policy widened beyond repository edits")
 	}
+	if !strings.Contains(bridge, `...(start.model ? { model: start.model, effort: start.effort } : {})`) ||
+		!strings.Contains(bridge, `!["low", "medium", "high", "xhigh", "max"].includes(start.effort)`) {
+		t.Fatal("bridge does not apply the exact validated dispatch profile through documented SDK fields")
+	}
 }
 
 func TestClaudeBridgeHasNoLegacyPromptStreamSteerQueue(t *testing.T) {

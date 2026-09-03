@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"github.com/inspr-at/paimos/backend/models"
 )
 
@@ -73,6 +75,7 @@ const (
 )
 
 var stableValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
+var workspaceIdentityValue = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // registerMu closes the short in-process gap between claiming an active
 // harness_sessions identity and attaching its encrypted target FK. The partial
@@ -103,19 +106,23 @@ func ErrorCode(err error) string {
 }
 
 type RegisterInput struct {
-	ProjectID       int64
-	AgentName       string
-	Harness         string
-	Host            string
-	SessionRef      string
-	WorkerLease     string
-	MessageTargetID string
-	ManagementMode  string
-	Role            string
-	ParentSessionID *string
-	TicketID        *int64
-	SteerMode       string
-	Capabilities    models.HarnessCapabilities
+	ProjectID              int64
+	AgentName              string
+	Harness                string
+	Host                   string
+	SessionRef             string
+	WorkerLease            string
+	MessageTargetID        string
+	ManagementMode         string
+	Role                   string
+	ParentSessionID        *string
+	TicketID               *int64
+	SteerMode              string
+	Capabilities           models.HarnessCapabilities
+	Workspace              *models.HarnessWorkspaceProvenance
+	DispatchProfileID      string
+	DispatchProfileVersion string
+	AccountLabel           string
 }
 
 type YieldResult struct {
@@ -163,6 +170,22 @@ func normalizeRegister(in RegisterInput) RegisterInput {
 		in.ParentSessionID = &value
 	}
 	in.SteerMode = strings.ToLower(strings.TrimSpace(in.SteerMode))
+	in.DispatchProfileID = strings.TrimSpace(in.DispatchProfileID)
+	in.DispatchProfileVersion = strings.TrimSpace(in.DispatchProfileVersion)
+	in.AccountLabel = strings.ToLower(strings.TrimSpace(in.AccountLabel))
+	if in.AccountLabel == "" {
+		in.AccountLabel = "unknown"
+	}
+	if in.Workspace != nil {
+		workspace := *in.Workspace
+		workspace.CanonicalPath = strings.TrimSpace(workspace.CanonicalPath)
+		workspace.GitTopLevel = strings.TrimSpace(workspace.GitTopLevel)
+		workspace.GitBranch = strings.TrimSpace(workspace.GitBranch)
+		workspace.Identity = strings.TrimSpace(workspace.Identity)
+		workspace.Kind = strings.ToLower(strings.TrimSpace(workspace.Kind))
+		workspace.Mode = strings.ToLower(strings.TrimSpace(workspace.Mode))
+		in.Workspace = &workspace
+	}
 	return in
 }
 
@@ -192,6 +215,12 @@ func validateRegister(in RegisterInput) error {
 	if in.TicketID != nil && *in.TicketID <= 0 {
 		return coded(CodeInvalid, "ticket id must be positive")
 	}
+	if !validAccountLabel(in.AccountLabel) {
+		return coded(CodeInvalid, "account label must be a bounded non-secret stable value")
+	}
+	if err := validateWorkspaceAndDispatch(in); err != nil {
+		return err
+	}
 	if in.SteerMode != SteerNone && in.SteerMode != SteerOwned && in.SteerMode != SteerCodexExternal {
 		return coded(CodeInvalid, "steer mode must be none, owned, or codex_external")
 	}
@@ -220,6 +249,48 @@ func validateRegister(in RegisterInput) error {
 	return nil
 }
 
+func validRecordedPath(value string) bool {
+	return filepath.IsAbs(value) && filepath.Clean(value) == value && utf8.ValidString(value) && len([]byte(value)) <= 4096 && !strings.ContainsAny(value, "\x00\r\n")
+}
+
+func validateWorkspaceAndDispatch(in RegisterInput) error {
+	if in.Workspace == nil {
+		if in.DispatchProfileID != "" || in.DispatchProfileVersion != "" || in.AccountLabel != "unknown" {
+			return coded(CodeInvalid, "dispatch and account provenance require workspace provenance")
+		}
+		return nil
+	}
+	workspace := *in.Workspace
+	if !validRecordedPath(workspace.CanonicalPath) || !workspaceIdentityValue.MatchString(workspace.Identity) {
+		return coded(CodeInvalid, "workspace provenance is invalid")
+	}
+	if workspace.Mode != "exclusive" && workspace.Mode != "shared" {
+		return coded(CodeInvalid, "workspace ownership mode is invalid")
+	}
+	switch workspace.Kind {
+	case "directory":
+		if workspace.GitTopLevel != "" || workspace.GitBranch != "" {
+			return coded(CodeInvalid, "directory workspace cannot claim Git provenance")
+		}
+	case "git_primary", "git_worktree":
+		if !validRecordedPath(workspace.GitTopLevel) || !validGitBranch(workspace.GitBranch) {
+			return coded(CodeInvalid, "Git workspace provenance is invalid")
+		}
+	default:
+		return coded(CodeInvalid, "workspace provenance kind is invalid")
+	}
+	if (in.DispatchProfileID == "") != (in.DispatchProfileVersion == "") {
+		return coded(CodeInvalid, "dispatch profile id and version must be supplied together")
+	}
+	if in.DispatchProfileID != "" {
+		profile, err := dispatchprofile.Resolve(in.DispatchProfileID, in.DispatchProfileVersion, in.Harness)
+		if err != nil || profile.WorkspaceMode != workspace.Mode {
+			return coded(CodeInvalid, "dispatch profile is unavailable for this harness and workspace mode")
+		}
+	}
+	return nil
+}
+
 // ValidateRegistration applies the same closed capability and ownership rules
 // used by Register without touching storage. The CLI uses it to fail closed
 // before making a network request.
@@ -227,6 +298,19 @@ func ValidateRegistration(in RegisterInput) error { return validateRegister(norm
 
 func safeStable(value string, limit int) bool {
 	return utf8.ValidString(value) && len([]byte(value)) >= 1 && len([]byte(value)) <= limit && stableValue.MatchString(value)
+}
+
+func validGitBranch(value string) bool {
+	return utf8.ValidString(value) && len([]byte(value)) >= 1 && len([]byte(value)) <= 512 && !strings.ContainsAny(value, "\x00\r\n")
+}
+
+func validAccountLabel(value string) bool {
+	switch value {
+	case "unknown", "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console":
+		return true
+	default:
+		return false
+	}
 }
 func digestRef(projectID int64, harness, host, ref string) []byte {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("paimos:harness-session-ref:v1\x00%d\x00%s\x00%s\x00%s", projectID, harness, host, ref)))
@@ -357,6 +441,8 @@ func validateBindingReferences(ctx context.Context, query queryRower, projectID 
 
 const sessionColumns = `id,project_id,project_agent_id,agent_name,harness,host,COALESCE(message_target_id,''),management_mode,role,
 	COALESCE(parent_harness_session_id,''),ticket_id,steer_mode,
+	COALESCE(workspace_path,''),COALESCE(git_top_level,''),COALESCE(git_branch,''),COALESCE(workspace_identity,''),workspace_kind,workspace_mode,
+	COALESCE(dispatch_profile_id,''),COALESCE(dispatch_profile_version,''),COALESCE(dispatch_model,''),COALESCE(dispatch_effort,''),account_label,
 	advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,COALESCE(heartbeat_at,''),
 	activity_state,activity_reason,activity_event_kind,COALESCE(activity_at,''),activity_sequence,closed_reason,
 	COALESCE(yielded_at,''),yield_sequence,revision,created_at,updated_at`
@@ -366,11 +452,27 @@ func scanSession(row interface{ Scan(...any) error }) (models.HarnessSession, er
 	var inbox, status, steer, interrupt, stop int
 	var parent string
 	var ticket sql.NullInt64
+	var workspacePath, gitTopLevel, gitBranch, workspaceIdentity, workspaceKind, workspaceMode string
+	var profileID, profileVersion, profileModel, profileEffort, accountLabel string
 	err := row.Scan(&out.ID, &out.ProjectID, &out.ProjectAgentID, &out.AgentName, &out.Harness, &out.Host, &out.MessageTargetID,
-		&out.ManagementMode, &out.Role, &parent, &ticket, &out.SteerMode, &inbox, &status, &steer, &interrupt, &stop, &out.Phase,
+		&out.ManagementMode, &out.Role, &parent, &ticket, &out.SteerMode,
+		&workspacePath, &gitTopLevel, &gitBranch, &workspaceIdentity, &workspaceKind, &workspaceMode,
+		&profileID, &profileVersion, &profileModel, &profileEffort, &accountLabel,
+		&inbox, &status, &steer, &interrupt, &stop, &out.Phase,
 		&out.HeartbeatAt, &out.ActivityState, &out.ActivityReason, &out.ActivityKind, &out.ActivityAt, &out.ActivitySequence, &out.ClosedReason,
 		&out.YieldedAt, &out.YieldSequence, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
 	out.Capabilities = models.HarnessCapabilities{Inbox: inbox == 1, Status: status == 1, Steer: steer == 1, Interrupt: interrupt == 1, Stop: stop == 1}
+	out.MachineID = out.Host
+	out.AccountLabel = accountLabel
+	if workspacePath != "" {
+		out.Workspace = &models.HarnessWorkspaceProvenance{CanonicalPath: workspacePath, GitTopLevel: gitTopLevel, GitBranch: gitBranch, Identity: workspaceIdentity, Kind: workspaceKind, Mode: workspaceMode}
+	}
+	if profileID != "" {
+		out.DispatchProfile, err = storedDispatchProfile(profileID, profileVersion, out.Harness, profileModel, profileEffort, workspaceMode)
+		if err != nil {
+			return out, err
+		}
+	}
 	if parent != "" {
 		out.ParentSessionID = &parent
 	}
@@ -385,6 +487,16 @@ func scanSession(row interface{ Scan(...any) error }) (models.HarnessSession, er
 		out.ActivityAge = &age
 	}
 	return out, err
+}
+
+func storedDispatchProfile(id, version, harness, model, effort, workspaceMode string) (*models.HarnessDispatchProfile, error) {
+	profile := dispatchprofile.Profile{ID: id, Version: version, Harness: harness, Model: model, Effort: effort,
+		MachineSource: dispatchprofile.MachineAuthenticatedReporter, AccountSource: dispatchprofile.AccountLocalProbe, WorkspaceMode: workspaceMode}
+	if err := dispatchprofile.ValidateSnapshot(profile); err != nil {
+		return nil, errors.New("stored dispatch profile is invalid")
+	}
+	return &models.HarnessDispatchProfile{ID: profile.ID, Version: profile.Version, Harness: profile.Harness, Model: profile.Model, Effort: profile.Effort,
+		MachineSource: profile.MachineSource, AccountSource: profile.AccountSource, WorkspaceMode: profile.WorkspaceMode}, nil
 }
 
 func validActivityKind(kind string) bool {
@@ -545,6 +657,17 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 	if active != 0 {
 		return models.HarnessSession{}, false, coded(CodeConflict, "an active harness session already owns this agent address")
 	}
+	if in.Workspace != nil {
+		var conflicting int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM harness_sessions
+			WHERE host=? AND workspace_identity=? AND phase<>'stopped'
+			AND (workspace_mode='exclusive' OR ?='exclusive')`, in.Host, in.Workspace.Identity, in.Workspace.Mode).Scan(&conflicting); err != nil {
+			return models.HarnessSession{}, false, err
+		}
+		if conflicting != 0 {
+			return models.HarnessSession{}, false, coded(CodeConflict, "an active harness session already owns this workspace")
+		}
+	}
 	var agentID int64
 	if err := s.db.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, in.ProjectID, in.AgentName).Scan(&agentID); err != nil {
 		return models.HarnessSession{}, false, coded(CodeNotFound, "agent is not registered in this project")
@@ -571,10 +694,23 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 	if err := validateBindingReferences(ctx, tx, in.ProjectID, id, in.ParentSessionID, in.TicketID); err != nil {
 		return models.HarnessSession{}, false, err
 	}
+	profileModel, profileEffort := "", ""
+	if in.DispatchProfileID != "" {
+		profile, _ := dispatchprofile.Resolve(in.DispatchProfileID, in.DispatchProfileVersion, in.Harness)
+		profileModel, profileEffort = profile.Model, profile.Effort
+	}
+	workspacePath, gitTopLevel, gitBranch, workspaceIdentity, workspaceKind, workspaceMode := "", "", "", "", "unknown", "unknown"
+	if in.Workspace != nil {
+		workspacePath, gitTopLevel, gitBranch = in.Workspace.CanonicalPath, in.Workspace.GitTopLevel, in.Workspace.GitBranch
+		workspaceIdentity, workspaceKind, workspaceMode = in.Workspace.Identity, in.Workspace.Kind, in.Workspace.Mode
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,parent_harness_session_id,ticket_id,steer_mode,
-		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		workspace_path,git_top_level,git_branch,workspace_identity,workspace_kind,workspace_mode,dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,account_label,
+		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, workerDigest, nullString(targetID), in.ManagementMode, in.Role,
 		nullStringPointer(in.ParentSessionID), nullInt64Pointer(in.TicketID), in.SteerMode,
+		workspacePath, gitTopLevel, gitBranch, workspaceIdentity, workspaceKind, workspaceMode,
+		in.DispatchProfileID, in.DispatchProfileVersion, profileModel, profileEffort, in.AccountLabel,
 		boolInt(c.Inbox), boolInt(c.Status), boolInt(c.Steer), boolInt(c.Interrupt), boolInt(c.Stop), PhaseStarting, activityReason)
 	if err != nil {
 		_ = tx.Rollback()
@@ -593,6 +729,9 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 			if replayErr != nil && !errors.Is(replayErr, sql.ErrNoRows) {
 				return models.HarnessSession{}, false, replayErr
 			}
+		}
+		if strings.Contains(err.Error(), "active harness workspace ownership conflicts") {
+			return models.HarnessSession{}, false, coded(CodeConflict, "an active harness session already owns this workspace")
 		}
 		switch {
 		case identityConflict:
@@ -632,10 +771,13 @@ func (s *Service) VerifyWorkerLease(ctx context.Context, projectID int64, sessio
 }
 
 func sameRegistration(s models.HarnessSession, in RegisterInput) bool {
+	workspaceMatches := s.Workspace == nil && in.Workspace == nil || s.Workspace != nil && in.Workspace != nil && *s.Workspace == *in.Workspace
+	profileMatches := s.DispatchProfile == nil && in.DispatchProfileID == "" || s.DispatchProfile != nil &&
+		s.DispatchProfile.ID == in.DispatchProfileID && s.DispatchProfile.Version == in.DispatchProfileVersion
 	return s.ProjectID == in.ProjectID && s.AgentName == in.AgentName && s.Harness == in.Harness && s.Host == in.Host &&
 		s.ManagementMode == in.ManagementMode && s.Role == in.Role && s.SteerMode == in.SteerMode && s.Capabilities == in.Capabilities &&
 		equalStringPointers(s.ParentSessionID, in.ParentSessionID) && equalInt64Pointers(s.TicketID, in.TicketID) &&
-		(in.MessageTargetID == "" || s.MessageTargetID == in.MessageTargetID)
+		(in.MessageTargetID == "" || s.MessageTargetID == in.MessageTargetID) && workspaceMatches && profileMatches && s.AccountLabel == in.AccountLabel
 }
 
 func (s *Service) Get(ctx context.Context, projectID int64, id string) (models.HarnessSession, error) {
