@@ -325,9 +325,10 @@ The durable activity projection has four closed states:
 
 Silence is never interpreted as busy or idle. Ordinary daemon heartbeat ticks
 do not refresh the adapter activity timestamp or sequence. A heartbeat appends
-only when phase or activity truth changes, preventing periodic no-op ticks from
-growing the log; yield, control completion, stop, and activity-timeout
-transitions append the resulting content-free projection in the same
+only when the adapter activity tuple changes. Routine phase-only
+`working`/`yielded` changes and exact heartbeat retries do not grow the log; a
+yield that claims controls, control completion, stop, and activity-timeout
+transition appends the resulting content-free projection in the same
 transaction. Those rows cannot be updated or deleted directly, while deleting
 their parent session cascades them. Session Home schema version 2
 returns the state, safe reason, evidence age, and terminal reason. If no live
