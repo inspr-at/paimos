@@ -333,8 +333,9 @@ func resolveTargetVersionsTx(ctx context.Context, tx *sql.Tx, instance string, p
 }
 
 // RequeueMissingTargets explicitly attaches the receiver's current target
-// versions to never-attempted target_missing deliveries. Target registration
-// itself never releases historical rows.
+// versions to never-attempted target_missing deliveries and recoverable open
+// attention batches. Target registration itself never releases historical
+// rows, and a live attention lease is never silently retargeted.
 func (s *Service) RequeueMissingTargets(ctx context.Context, projectID int64, address string) (int64, error) {
 	harness, agent, err := parseAddress(address)
 	if err != nil {
@@ -395,10 +396,17 @@ func (s *Service) RequeueMissingTargets(ctx context.Context, projectID int64, ad
 		return 0, err
 	}
 	if attentionTargetID != "" {
+		var receiverAgentID int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, projectID, agent).Scan(&receiverAgentID); err != nil {
+			return 0, err
+		}
 		attentionResult, err := tx.ExecContext(ctx, `UPDATE agent_attention_batches SET target_id=?,state='pending',
-			worker_adapter='',blocked_reason='',lease_until=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			WHERE receiver_project_id=? AND address=? AND state='blocked' AND blocked_reason IN ('target_missing','capability_missing')`,
-			attentionTargetID, projectID, address)
+			address=?,worker_adapter='',blocked_reason='',lease_until=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			WHERE receiver_project_id=? AND receiver_project_agent_id=? AND state IN ('pending','leased','blocked') AND (
+			 state='blocked'
+			 OR (state='pending' AND (address<>? OR target_id IS NULL OR target_id<>?))
+			 OR (state='leased' AND lease_until<=strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			)`, attentionTargetID, address, projectID, receiverAgentID, address, attentionTargetID)
 		if err != nil {
 			return 0, err
 		}

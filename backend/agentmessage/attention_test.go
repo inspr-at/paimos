@@ -493,6 +493,163 @@ func TestAttentionSteerOnlyTargetBlocksUntilSimpleFallbackIsRegistered(t *testin
 	}
 }
 
+func TestAttentionExplicitRequeueRetargetsPendingBatchAfterSameAddressRotation(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	var agentID int64
+	if err := paimosdb.DB.QueryRow(`SELECT id FROM project_agents WHERE project_id=? AND name='amy'`, projectID).Scan(&agentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
+		source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
+		VALUES(?,?,'codex:amy',?,'harness_session_event','rotation-pending',1,'worker_unknown','heartbeat_stale',
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, projectID, agentID, projectID); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterClaudeResume,
+	})
+	if err != nil || pending.Work == nil || pending.Work.State != "pending" {
+		t.Fatalf("pending=%#v err=%v", pending, err)
+	}
+	var oldTargetID string
+	if err := paimosdb.DB.QueryRow(`SELECT target_id FROM agent_attention_batches WHERE batch_id=?`, pending.Work.BatchID).Scan(&oldTargetID); err != nil {
+		t.Fatal(err)
+	}
+	newTarget, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:amy", Adapter: AdapterCodex, TargetKind: TargetKindCodexThread,
+		TargetRef: "01a059fb-4bf4-4881-a38a-7a2e8e60af41", MaximumLevel: "simple", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
+	}); err == nil || !strings.Contains(err.Error(), "authorized operator must requeue") {
+		t.Fatalf("stale target listen err=%v", err)
+	}
+	if requeued, err := service.RequeueMissingTargets(context.Background(), projectID, "codex:amy"); err != nil || requeued != 1 {
+		t.Fatalf("rotation requeue=%d err=%v", requeued, err)
+	}
+	var batchID, targetID, state string
+	if err := paimosdb.DB.QueryRow(`SELECT batch_id,target_id,state FROM agent_attention_batches WHERE batch_id=?`, pending.Work.BatchID).Scan(&batchID, &targetID, &state); err != nil {
+		t.Fatal(err)
+	}
+	if batchID != pending.Work.BatchID || targetID != newTarget.ID || targetID == oldTargetID || state != "pending" {
+		t.Fatalf("batch=%s target=%s old=%s new=%s state=%s", batchID, targetID, oldTargetID, newTarget.ID, state)
+	}
+	recovered, err := service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
+	})
+	if err != nil || recovered.Work == nil || recovered.Work.BatchID != batchID || recovered.Work.State != "leased" || recovered.Work.TargetRef == "" {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+}
+
+func TestAttentionExplicitRequeueNeverRetargetsLiveLeaseAndRecoversExpiredTransport(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	var agentID int64
+	if err := paimosdb.DB.QueryRow(`SELECT id FROM project_agents WHERE project_id=? AND name='amy'`, projectID).Scan(&agentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
+		source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
+		VALUES(?,?,'codex:amy',?,'harness_session_event','transport-dead',1,'worker_dead','process_failed',
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, projectID, agentID, projectID); err != nil {
+		t.Fatal(err)
+	}
+	leased, err := service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
+	})
+	if err != nil || leased.Work == nil || leased.Work.State != "leased" {
+		t.Fatalf("leased=%#v err=%v", leased, err)
+	}
+	var oldTargetID string
+	if err := paimosdb.DB.QueryRow(`SELECT target_id FROM agent_attention_batches WHERE batch_id=?`, leased.Work.BatchID).Scan(&oldTargetID); err != nil {
+		t.Fatal(err)
+	}
+	newTarget, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:amy", Adapter: AdapterCodex, TargetKind: TargetKindCodexThread,
+		TargetRef: "01a059fb-4bf4-4881-a38a-7a2e8e60af42", MaximumLevel: "simple", Role: "primary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requeued, err := service.RequeueMissingTargets(context.Background(), projectID, "codex:amy"); err != nil || requeued != 0 {
+		t.Fatalf("live lease requeue=%d err=%v", requeued, err)
+	}
+	var targetID, state string
+	if err := paimosdb.DB.QueryRow(`SELECT target_id,state FROM agent_attention_batches WHERE batch_id=?`, leased.Work.BatchID).Scan(&targetID, &state); err != nil {
+		t.Fatal(err)
+	}
+	if targetID != oldTargetID || state != "leased" {
+		t.Fatalf("live lease target=%s old=%s state=%s", targetID, oldTargetID, state)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE agent_attention_batches SET lease_until='2000-01-01T00:00:00.000Z' WHERE batch_id=?`, leased.Work.BatchID); err != nil {
+		t.Fatal(err)
+	}
+	if requeued, err := service.RequeueMissingTargets(context.Background(), projectID, "codex:amy"); err != nil || requeued != 1 {
+		t.Fatalf("expired transport requeue=%d err=%v", requeued, err)
+	}
+	if err := paimosdb.DB.QueryRow(`SELECT target_id,state FROM agent_attention_batches WHERE batch_id=?`, leased.Work.BatchID).Scan(&targetID, &state); err != nil {
+		t.Fatal(err)
+	}
+	if targetID != newTarget.ID || state != "pending" {
+		t.Fatalf("expired recovery target=%s new=%s state=%s", targetID, newTarget.ID, state)
+	}
+	recovered, err := service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
+	})
+	if err != nil || recovered.Work == nil || recovered.Work.BatchID != leased.Work.BatchID || recovered.Work.State != "leased" {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+}
+
+func TestAttentionExplicitRequeueRecoversExpiredTransportWithoutTargetRotation(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	var agentID int64
+	if err := paimosdb.DB.QueryRow(`SELECT id FROM project_agents WHERE project_id=? AND name='amy'`, projectID).Scan(&agentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
+		source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
+		VALUES(?,?,'codex:amy',?,'harness_session_event','transport-retry',1,'worker_unknown','heartbeat_stale',
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, projectID, agentID, projectID); err != nil {
+		t.Fatal(err)
+	}
+	leased, err := service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
+	})
+	if err != nil || leased.Work == nil || leased.Work.State != "leased" {
+		t.Fatalf("leased=%#v err=%v", leased, err)
+	}
+	var targetBefore string
+	if err := paimosdb.DB.QueryRow(`SELECT target_id FROM agent_attention_batches WHERE batch_id=?`, leased.Work.BatchID).Scan(&targetBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE agent_attention_batches SET lease_until='2000-01-01T00:00:00.000Z' WHERE batch_id=?`, leased.Work.BatchID); err != nil {
+		t.Fatal(err)
+	}
+	if requeued, err := service.RequeueMissingTargets(context.Background(), projectID, "codex:amy"); err != nil || requeued != 1 {
+		t.Fatalf("transport retry requeue=%d err=%v", requeued, err)
+	}
+	var batchID, targetAfter, state string
+	if err := paimosdb.DB.QueryRow(`SELECT batch_id,target_id,state FROM agent_attention_batches WHERE batch_id=?`, leased.Work.BatchID).Scan(&batchID, &targetAfter, &state); err != nil {
+		t.Fatal(err)
+	}
+	if batchID != leased.Work.BatchID || targetAfter != targetBefore || state != "pending" {
+		t.Fatalf("batch=%s target=%s want_target=%s state=%s", batchID, targetAfter, targetBefore, state)
+	}
+	recovered, err := service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
+	})
+	if err != nil || recovered.Work == nil || recovered.Work.BatchID != leased.Work.BatchID || recovered.Work.State != "leased" {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+}
+
 func TestAttentionCoalescingWindowAndPageBoundAreClosed(t *testing.T) {
 	service, projectID := openBusTestDB(t)
 	configureAttentionReceiver(t, service, projectID)

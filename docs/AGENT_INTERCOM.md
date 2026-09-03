@@ -27,7 +27,12 @@ Prerequisites:
   `paimos message target list`, `paimos message target requeue`,
   `paimos message deliveries`, and the per-delivery requeue endpoint. Project
   membership or agent attribution alone is insufficient; use separate
-  least-privilege shells for senders and listeners.
+  least-privilege shells for senders and listeners. The configured
+  orchestrator's attention target is a narrower exception: its inspection,
+  registration/replacement, and target requeue require super-admin authority
+  because that receiver obtains a cross-project portfolio digest. Registering
+  an inbox-capable harness session for that orchestrator has the same gate,
+  since managed registration can create a target version internally.
 - `AGENTD_SOCKET` names an absolute Unix socket in an owner-only directory.
   Do not commit or print it.
 - For durable status and typed interrupt/stop, `REPORT_HOST` is a stable
@@ -137,24 +142,29 @@ to the configured instance.
 
 Each wake is a bounded batch of at most 32 identifier/enum/timestamp records.
 The batch and per-orchestrator cursor are durable across receiver-address
-changes: a crashed listener reacquires the same batch and delivery correlation
-after its lease expires, while completion and cursor acknowledgement commit
-atomically. Codex leases are two minutes; the potentially blocking Claude
-resume adapter gets fifteen minutes. The delivery contract is deliberately
-at-least-once across a process crash: if an external handoff succeeds but the
-durable acknowledgement does not commit, the same stable batch correlation
-may be retried after lease expiry. Receivers should deduplicate that
-correlation; Paimos does not claim vendor-side exactly-once delivery.
+changes. A crashed listener can reacquire the same batch and delivery
+correlation after its lease expires, while completion and cursor
+acknowledgement commit atomically. A changed address or disabled/replaced
+target is never silently attached to an open batch: a super-admin explicitly
+runs target requeue, which preserves that batch correlation. A live lease is
+never retargeted; after it expires, explicit requeue resets it to pending.
+Codex leases are two minutes; the potentially blocking Claude resume adapter
+gets fifteen minutes. The delivery contract is deliberately at-least-once
+across a process crash or transport failure: if an external handoff succeeds
+but the durable acknowledgement does not commit, the same stable batch
+correlation may be retried after lease expiry. Receivers should deduplicate
+that correlation; Paimos does not claim vendor-side exactly-once delivery.
 
 Receiver targets remain encrypted and receiver-owned. A missing, server-side,
 or steer-only capability creates a visible blocked batch; attention never
-falls back to steer, arbitrary prose, or another receiver. An explicit target
-requeue can recover that same batch after a simple-handoff target is
-registered for the same address. The attention HTTP routes are an explicit
-cross-project orchestrator portfolio surface and require a re-authorized
-super-admin principal. `X-Paimos-Agent-Name` only selects the configured
-receiver identity; it grants no authority and a spoofed header cannot read or
-acknowledge this feed.
+falls back to steer, arbitrary prose, or another receiver. An explicit
+super-admin target requeue can recover that same batch after a simple-handoff
+target is registered, rotated, or restored, including an expired transport
+lease. The attention HTTP routes are an explicit cross-project orchestrator
+portfolio surface and require a re-authorized super-admin principal.
+`X-Paimos-Agent-Name` only selects the configured receiver identity; it grants
+no authority and a spoofed header cannot read, acknowledge, inspect, replace,
+or requeue this feed's target.
 
 In the sender shell, establish attribution and send the durable message:
 
@@ -522,10 +532,17 @@ Target registration alone never mutates historical deliveries.
 ### Target is stale or a delivery is dead
 
 All inspection, target registration, target requeue, and per-delivery requeue
-in this recovery path require an authenticated administrator. Registering a
+in this recovery path require an authenticated administrator. Operations on
+the configured orchestrator attention target require a super-admin; ordinary
+per-project receiver targets remain administrator-managed. Registering a
 replacement creates a new target version for new messages; it does not rewrite
-a target already snapshotted onto an attempted delivery. Restore the original
-receiver target before requeueing that delivery. The administrator-only
+a target already snapshotted onto an attempted message delivery. Restore the
+original receiver target before requeueing that delivery. For an open
+attention batch, explicit target requeue instead attaches the current
+simple-handoff target to the same batch when it is blocked, stale pending, or
+has an expired lease; it never changes a live lease. This recovery is
+at-least-once because a transport may have accepted the old lease before its
+durable acknowledgement was lost. The administrator-only
 endpoint `POST /api/projects/{id}/message-deliveries/{deliveryID}/requeue`
 reuses the same delivery ID and snapshot; it does not retarget. If the original
 target cannot be restored, inspect whether any handoff may have occurred and

@@ -186,6 +186,12 @@ Only the operator control plane may create, change, enable, or requeue a
 target. A sender can request a level but cannot supply a vendor thread,
 webhook URL, credentials, or `maximum_level`. Untrusted message text and
 metadata never mutate target or allowlist configuration.
+Ordinary administrators may manage ordinary project receiver targets. The
+configured orchestrator attention receiver is a cross-project portfolio
+boundary, so inspecting, registering/replacing, or requeueing any harness
+address for that stable project-agent identity requires super-admin authority.
+The same gate covers inbox-capable managed harness registration because that
+path can create a target version internally.
 
 For Codex, `target_ref` must be a Codex session/rollout UUID or an exact Codex
 session name accepted by `codex queue --thread`. It must never be a Cursor chat

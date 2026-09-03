@@ -407,6 +407,26 @@ func resolveAttentionReceiver(ctx context.Context, q attentionQueryer) (*attenti
 	return nil, sql.ErrNoRows
 }
 
+// IsOrchestratorAttentionAddress reports whether address names the configured
+// instance orchestrator. It deliberately keys on the stable project-agent
+// identity rather than on a currently enabled target version: rotating or
+// disabling the target must not temporarily downgrade its administration to
+// an ordinary project-admin operation.
+func (s *Service) IsOrchestratorAttentionAddress(ctx context.Context, projectID int64, address string) (bool, error) {
+	_, agent, err := parseAddress(address)
+	if err != nil {
+		return false, err
+	}
+	var protected int
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM instance_orchestrator io
+		JOIN project_agents pa ON pa.id=io.project_agent_id
+		WHERE io.singleton_id=1 AND pa.project_id=? AND pa.name=?)`, projectID, agent).Scan(&protected); err != nil {
+		return false, err
+	}
+	return protected == 1, nil
+}
+
 func scanAttentionItems(rows *sql.Rows) ([]AttentionItem, error) {
 	var items []AttentionItem
 	for rows.Next() {
@@ -512,11 +532,11 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 		return page, nil
 	}
 
-	var batchID, state, blockedReason, selectedTargetID, batchAdapter, batchAddress, batchLeaseUntil string
+	var batchID, state, blockedReason, selectedTargetID, batchAdapter, batchAddress string
 	var fromCursor, toCursor int64
-	err = tx.QueryRowContext(ctx, `SELECT batch_id,state,blocked_reason,COALESCE(target_id,''),worker_adapter,from_cursor,to_cursor,address,COALESCE(lease_until,'')
+	err = tx.QueryRowContext(ctx, `SELECT batch_id,state,blocked_reason,COALESCE(target_id,''),worker_adapter,from_cursor,to_cursor,address
 		FROM agent_attention_batches WHERE receiver_project_agent_id=? AND state IN ('pending','leased','blocked')`, agentID).Scan(
-		&batchID, &state, &blockedReason, &selectedTargetID, &batchAdapter, &fromCursor, &toCursor, &batchAddress, &batchLeaseUntil)
+		&batchID, &state, &blockedReason, &selectedTargetID, &batchAdapter, &fromCursor, &toCursor, &batchAddress)
 	if errors.Is(err, sql.ErrNoRows) {
 		id := uuid.Must(uuid.NewRandom())
 		batchID, fromCursor, toCursor = id.String(), cursor, next
@@ -533,9 +553,9 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 		}
 		created, _ := result.RowsAffected()
 		if created == 0 {
-			if err := tx.QueryRowContext(ctx, `SELECT batch_id,state,blocked_reason,COALESCE(target_id,''),worker_adapter,from_cursor,to_cursor,address,COALESCE(lease_until,'')
+			if err := tx.QueryRowContext(ctx, `SELECT batch_id,state,blocked_reason,COALESCE(target_id,''),worker_adapter,from_cursor,to_cursor,address
 				FROM agent_attention_batches WHERE receiver_project_agent_id=? AND state IN ('pending','leased','blocked')`,
-				agentID).Scan(&batchID, &state, &blockedReason, &selectedTargetID, &batchAdapter, &fromCursor, &toCursor, &batchAddress, &batchLeaseUntil); err != nil {
+				agentID).Scan(&batchID, &state, &blockedReason, &selectedTargetID, &batchAdapter, &fromCursor, &toCursor, &batchAddress); err != nil {
 				return nil, err
 			}
 		}
@@ -543,24 +563,7 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 		return nil, err
 	}
 	if batchAddress != "" && batchAddress != address {
-		now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-		if state == "leased" && batchLeaseUntil > now {
-			page.Items, page.NextCursor = nil, cursor
-			if err := tx.Commit(); err != nil {
-				return nil, err
-			}
-			return page, nil
-		}
-		selectedTargetID, state, blockedReason, err = selectAttentionTarget(ctx, tx, in.ProjectID, address)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE agent_attention_batches SET address=?,state=?,target_id=?,worker_adapter='',
-			blocked_reason=?,lease_until=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE batch_id=?`,
-			address, state, nullableString(selectedTargetID), blockedReason, batchID); err != nil {
-			return nil, err
-		}
-		batchAddress, batchAdapter = address, ""
+		return nil, coded("agent_attention_batch_requeue_required", "the open attention batch belongs to a previous address; an authorized operator must requeue it")
 	}
 
 	// The open batch, not a later page, owns delivery order.
@@ -580,8 +583,10 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 	if state != "blocked" {
 		var cipher []byte
 		if err := tx.QueryRowContext(ctx, `SELECT adapter,target_kind,maximum_level,target_ref_cipher FROM agent_message_targets
-			WHERE id=? AND instance=? AND project_id=? AND address=?`, selectedTargetID, instanceName(), in.ProjectID, address).Scan(
-			&work.Adapter, &work.TargetKind, &work.MaximumLevel, &cipher); err != nil {
+			WHERE id=? AND instance=? AND project_id=? AND address=? AND enabled=1`, selectedTargetID, instanceName(), in.ProjectID, address).Scan(
+			&work.Adapter, &work.TargetKind, &work.MaximumLevel, &cipher); errors.Is(err, sql.ErrNoRows) {
+			return nil, coded("agent_attention_batch_requeue_required", "the open attention batch target is no longer enabled; an authorized operator must requeue it")
+		} else if err != nil {
 			return nil, err
 		}
 		if work.Adapter != in.WorkerAdapter {

@@ -218,7 +218,11 @@ func registerAgentMessageTarget(w http.ResponseWriter, r *http.Request) {
 		messageProblem(w, r, "agent_message_request_invalid", err.Error(), http.StatusBadRequest)
 		return
 	}
-	target, err := agentmessage.NewService(db.DB).RegisterTarget(r.Context(), agentmessage.RegisterTargetInput{
+	service := agentmessage.NewService(db.DB)
+	if !authorizeOrchestratorAttentionTarget(w, r, service, projectID, req.Address) {
+		return
+	}
+	target, err := service.RegisterTarget(r.Context(), agentmessage.RegisterTargetInput{
 		ProjectID: projectID, Address: req.Address, Adapter: req.Adapter, TargetKind: req.TargetKind,
 		TargetRef: req.TargetRef, TargetSecret: req.TargetSecret, MaximumLevel: req.MaximumLevel, Role: req.Role,
 	})
@@ -237,10 +241,29 @@ func listAgentMessageTargets(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
 		return
 	}
-	targets, err := agentmessage.NewService(db.DB).ListTargets(r.Context(), projectID, r.URL.Query().Get("address"))
+	service := agentmessage.NewService(db.DB)
+	address := r.URL.Query().Get("address")
+	if address != "" && !authorizeOrchestratorAttentionTarget(w, r, service, projectID, address) {
+		return
+	}
+	targets, err := service.ListTargets(r.Context(), projectID, address)
 	if err != nil {
 		writeAgentMessageError(w, r, err)
 		return
+	}
+	if !auth.IsSuperAdminRequest(r) {
+		visible := targets[:0]
+		for _, target := range targets {
+			protected, checkErr := service.IsOrchestratorAttentionAddress(r.Context(), projectID, target.Address)
+			if checkErr != nil {
+				writeAgentMessageError(w, r, checkErr)
+				return
+			}
+			if !protected {
+				visible = append(visible, target)
+			}
+		}
+		targets = visible
 	}
 	jsonOK(w, map[string]any{"targets": targets, "count": len(targets)})
 }
@@ -258,12 +281,33 @@ func requeueAgentMessageTargets(w http.ResponseWriter, r *http.Request) {
 		messageProblem(w, r, "agent_message_request_invalid", err.Error(), http.StatusBadRequest)
 		return
 	}
-	count, err := agentmessage.NewService(db.DB).RequeueMissingTargets(r.Context(), projectID, req.Address)
+	service := agentmessage.NewService(db.DB)
+	if !authorizeOrchestratorAttentionTarget(w, r, service, projectID, req.Address) {
+		return
+	}
+	count, err := service.RequeueMissingTargets(r.Context(), projectID, req.Address)
 	if err != nil {
 		writeAgentMessageError(w, r, err)
 		return
 	}
 	jsonOK(w, map[string]any{"address": strings.TrimSpace(req.Address), "requeued": count})
+}
+
+// authorizeOrchestratorAttentionTarget preserves ordinary project-admin
+// target management while reserving the configured cross-project attention
+// receiver for super-admin authority. The address selects the protected
+// identity; request headers never grant it.
+func authorizeOrchestratorAttentionTarget(w http.ResponseWriter, r *http.Request, service *agentmessage.Service, projectID int64, address string) bool {
+	protected, err := service.IsOrchestratorAttentionAddress(r.Context(), projectID, address)
+	if err != nil {
+		writeAgentMessageError(w, r, err)
+		return false
+	}
+	if protected && !auth.IsSuperAdminRequest(r) {
+		messageProblem(w, r, "agent_attention_target_forbidden", "orchestrator attention targets require super-admin authority", http.StatusForbidden)
+		return false
+	}
+	return true
 }
 
 func listAgentMessageDeliveries(w http.ResponseWriter, r *http.Request) {

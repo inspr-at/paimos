@@ -390,9 +390,9 @@ POST /projects/:id/attention/ack       { to, cursor, batch_id? } (super-admin or
 POST /projects/:id/messages/delivery-complete { to, cursor, delivery_id, effective_level, fallback_reason }
 POST /projects/:id/messages/delivery-unavailable { to, cursor, delivery_id, fallback_reason }
 POST /projects/:id/message-allowlist   { receiver, sender }
-POST /projects/:id/message-targets     { address, adapter, target_kind, target_ref, target_secret?, maximum_level?, role? } (admin; target_secret is the write-only routine sender key: required by grok_bot_routine, refused by adapters without a secret header)
-GET  /projects/:id/message-targets     ?address=<receiver> (admin; never returns target_ref or target_secret; has_secret only)
-POST /projects/:id/message-targets/requeue { address } (admin; target_missing only)
+POST /projects/:id/message-targets     { address, adapter, target_kind, target_ref, target_secret?, maximum_level?, role? } (admin; configured orchestrator attention target requires super-admin; target_secret is the write-only routine sender key: required by grok_bot_routine, refused by adapters without a secret header)
+GET  /projects/:id/message-targets     ?address=<receiver> (admin; configured orchestrator attention target requires super-admin and is omitted from ordinary-admin list-all; never returns target_ref or target_secret; has_secret only)
+POST /projects/:id/message-targets/requeue { address } (admin; configured orchestrator attention target requires super-admin; recovers target_missing message rows and blocked/stale/expired-lease attention batches without changing batch correlation or a live lease)
 GET  /projects/:id/message-deliveries  redacted outbox state (admin)
 POST /projects/:id/message-deliveries/:deliveryId/requeue (admin)
 GET  /projects/:id/messages/:messageId
@@ -747,7 +747,9 @@ Commands whose argument is explicitly another resource ID, plus
   its domain-separated digest. Inbox-capable registration creates or reuses
   the encrypted target first, then commits the active session with both digest
   and target FK; an interrupted pre-insert attempt leaves only a reusable
-  target, not worker authority.
+  target, not worker authority. Inbox-capable registration for the configured
+  orchestrator attention identity requires super-admin authority because it
+  can create or rotate that cross-project receiver target.
 - `GET /projects/{id}/harness-sessions/{sessionID}` — status with host and
   public session attribution; the private reference and worker lease are never
   shown.
