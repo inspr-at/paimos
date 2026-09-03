@@ -320,7 +320,7 @@ The durable activity projection has four closed states:
 |---|---|
 | `busy` | A monotonically newer, documented adapter `turn_started`, `tool_started`, or `control_applied` event from the current owned generation |
 | `idle` | A monotonically newer, documented adapter `turn_completed` event from the current owned generation |
-| `unknown` | No activity report, process-only `session_started`, malformed or stale evidence, unmanaged evidence, or a heartbeat older than 90 seconds |
+| `unknown` | No activity report, process-only `session_started`, malformed evidence, unmanaged evidence, or a heartbeat older than 90 seconds |
 | `dead` | Reporter-confirmed process exit, process failure, ownership loss, or explicit owned stop |
 
 Silence is never interpreted as busy or idle. Ordinary daemon heartbeat ticks
