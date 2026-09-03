@@ -540,7 +540,7 @@ func (s *Service) RerouteUnavailableLocalDelivery(ctx context.Context, in Rerout
 	err = tx.QueryRowContext(ctx, `SELECT hs.id,hs.message_target_id
 		FROM harness_sessions hs JOIN agent_message_targets t ON t.id=hs.message_target_id
 		WHERE hs.project_id=? AND hs.harness=? AND hs.agent_name=? AND hs.management_mode='managed'
-		AND hs.phase='working' AND hs.steer_mode='owned' AND hs.advertised_steer=1
+		AND hs.phase<>'stopped' AND hs.activity_state IN ('busy','idle') AND hs.steer_mode='owned' AND hs.advertised_steer=1
 		AND hs.heartbeat_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now',?)
 		AND t.instance=? AND t.adapter=? AND t.maximum_level='steer'
 		ORDER BY hs.created_at DESC,hs.id DESC LIMIT 1`, in.ProjectID, harnessName, agentName,

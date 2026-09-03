@@ -17,7 +17,7 @@ import (
 	"github.com/inspr-at/paimos/backend/models"
 )
 
-const sessionHomeSchemaVersion = 1
+const sessionHomeSchemaVersion = 2
 
 type sessionHomeHarnessCandidate struct {
 	ProjectID      int64
@@ -26,6 +26,10 @@ type sessionHomeHarnessCandidate struct {
 	Harness        string
 	ManagementMode string
 	Phase          string
+	ActivityState  string
+	ActivityReason string
+	ActivityAt     string
+	ClosedReason   string
 	Fresh          bool
 	Capabilities   models.HarnessCapabilities
 }
@@ -155,7 +159,7 @@ func scanSessionHomeBase(row interface{ Scan(...any) error }) (models.SessionHom
 		return item, false, err
 	}
 	item.Controls = models.SessionHomeControls{Steer: "paimos_nudge"}
-	item.Status = models.SessionHomeStatus{Phase: "unavailable", Reason: "no_active_harness"}
+	item.Status = models.SessionHomeStatus{Phase: "unavailable", Reason: "no_active_harness", ActivityState: managedharness.ActivityUnknown, ActivityReason: "no_active_harness"}
 	if targetAgentID.Valid {
 		id := targetAgentID.Int64
 		item.Target.ProjectAgentID = &id
@@ -173,14 +177,14 @@ func scanSessionHomeBase(row interface{ Scan(...any) error }) (models.SessionHom
 func setPaimosTarget(item *models.SessionHomeSession) {
 	address := "paimos"
 	item.Target = models.SessionHomeTarget{Kind: "paimos", Address: &address}
-	item.Status = models.SessionHomeStatus{Phase: "paimos", Reason: "paimos_target"}
+	item.Status = models.SessionHomeStatus{Phase: "paimos", Reason: "paimos_target", ActivityState: managedharness.ActivityUnknown, ActivityReason: "paimos_target"}
 	item.Harness = nil
 	item.Controls = models.SessionHomeControls{Steer: "paimos_nudge"}
 }
 
 func setUnavailableTarget(item *models.SessionHomeSession, reason string) {
 	item.Target.Address = nil
-	item.Status = models.SessionHomeStatus{Phase: "unavailable", Reason: reason}
+	item.Status = models.SessionHomeStatus{Phase: "unavailable", Reason: reason, ActivityState: managedharness.ActivityUnknown, ActivityReason: reason}
 	item.Harness = nil
 	item.Controls = models.SessionHomeControls{Steer: "paimos_nudge"}
 }
@@ -200,6 +204,12 @@ func composeSessionHomeAgent(ctx context.Context, tx *sql.Tx, projectID int64, i
 		candidate := candidates[0]
 		if candidate.ProjectID != projectID || candidate.ProjectAgentID != agentID || candidate.AgentName != agentName {
 			setUnavailableTarget(item, "ownership_mismatch")
+		} else if candidate.Phase == managedharness.PhaseStopped {
+			address := candidate.Harness + ":" + agentName
+			item.Target.Address = &address
+			item.Status = sessionHomeCandidateStatus(candidate)
+			item.Harness = &models.SessionHomeHarness{Harness: candidate.Harness, ManagementMode: candidate.ManagementMode, Capabilities: models.HarnessCapabilities{}}
+			item.Controls = models.SessionHomeControls{Steer: "paimos_nudge"}
 		} else if !candidate.Fresh {
 			setUnavailableTarget(item, "stale_harness")
 		} else {
@@ -210,7 +220,7 @@ func composeSessionHomeAgent(ctx context.Context, tx *sql.Tx, projectID int64, i
 			}
 			address := candidate.Harness + ":" + agentName
 			item.Target.Address = &address
-			item.Status = models.SessionHomeStatus{Phase: candidate.Phase, Reason: "active"}
+			item.Status = sessionHomeCandidateStatus(candidate)
 			item.Harness = &models.SessionHomeHarness{Harness: candidate.Harness, ManagementMode: candidate.ManagementMode, Capabilities: caps}
 			item.Controls = models.SessionHomeControls{Steer: "paimos_nudge", Interrupt: caps.Interrupt, Stop: caps.Stop}
 			if caps.Steer {
@@ -221,29 +231,66 @@ func composeSessionHomeAgent(ctx context.Context, tx *sql.Tx, projectID int64, i
 	return loadSessionHomeInbox(ctx, tx, projectID, agentID, item)
 }
 
+func sessionHomeCandidateStatus(candidate sessionHomeHarnessCandidate) models.SessionHomeStatus {
+	status := models.SessionHomeStatus{Phase: candidate.Phase, Reason: "active", ActivityState: candidate.ActivityState,
+		ActivityReason: candidate.ActivityReason, ClosedReason: candidate.ClosedReason}
+	if candidate.Phase == managedharness.PhaseStopped {
+		status.Reason = "closed"
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, candidate.ActivityAt); err == nil {
+		age := int64(time.Since(parsed).Seconds())
+		if age < 0 {
+			age = 0
+		}
+		status.ActivityAgeSeconds = &age
+	}
+	return status
+}
+
 func loadSessionHomeHarnessCandidates(ctx context.Context, tx *sql.Tx, projectID, agentID int64) ([]sessionHomeHarnessCandidate, error) {
+	cutoff := time.Now().UTC().Add(-managedharness.DefaultActivityHeartbeatTimeout).Format("2006-01-02T15:04:05.000Z")
 	rows, err := tx.QueryContext(ctx, `SELECT project_id,project_agent_id,agent_name,harness,management_mode,phase,
+		activity_state,activity_reason,COALESCE(activity_at,''),closed_reason,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,
-		CASE WHEN phase='starting' THEN julianday(updated_at)>=julianday('now','-90 seconds')
-		     ELSE heartbeat_at IS NOT NULL AND julianday(heartbeat_at)>=julianday('now','-90 seconds') END
-		FROM harness_sessions WHERE project_id=? AND project_agent_id=? AND phase<>'stopped'
-		ORDER BY id`, projectID, agentID)
+		CASE WHEN phase='stopped' THEN 1 WHEN phase='starting' THEN julianday(updated_at)>=julianday(?)
+		     ELSE heartbeat_at IS NOT NULL AND julianday(heartbeat_at)>=julianday(?) END
+		FROM harness_sessions WHERE project_id=? AND project_agent_id=?
+		ORDER BY CASE WHEN phase='stopped' THEN 1 ELSE 0 END,created_at DESC,id DESC`,
+		cutoff, cutoff, projectID, agentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []sessionHomeHarnessCandidate{}
+	active := []sessionHomeHarnessCandidate{}
+	var latestStopped *sessionHomeHarnessCandidate
 	for rows.Next() {
 		var candidate sessionHomeHarnessCandidate
 		var inbox, status, steer, interrupt, stop int
 		if err := rows.Scan(&candidate.ProjectID, &candidate.ProjectAgentID, &candidate.AgentName, &candidate.Harness,
-			&candidate.ManagementMode, &candidate.Phase, &inbox, &status, &steer, &interrupt, &stop, &candidate.Fresh); err != nil {
+			&candidate.ManagementMode, &candidate.Phase, &candidate.ActivityState, &candidate.ActivityReason, &candidate.ActivityAt, &candidate.ClosedReason,
+			&inbox, &status, &steer, &interrupt, &stop, &candidate.Fresh); err != nil {
 			return nil, err
 		}
 		candidate.Capabilities = models.HarnessCapabilities{Inbox: inbox == 1, Status: status == 1, Steer: steer == 1, Interrupt: interrupt == 1, Stop: stop == 1}
-		out = append(out, candidate)
+		if candidate.Phase == managedharness.PhaseStopped {
+			if latestStopped == nil {
+				copy := candidate
+				latestStopped = &copy
+			}
+			continue
+		}
+		active = append(active, candidate)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(active) > 0 {
+		return active, nil
+	}
+	if latestStopped != nil {
+		return []sessionHomeHarnessCandidate{*latestStopped}, nil
+	}
+	return []sessionHomeHarnessCandidate{}, nil
 }
 
 func loadSessionHomeInbox(ctx context.Context, tx *sql.Tx, projectID, agentID int64, item *models.SessionHomeSession) error {

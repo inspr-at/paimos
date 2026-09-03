@@ -232,9 +232,24 @@ func harnessStatusCmd() *cobra.Command {
 	return harnessProjectCommand("status", "Show one non-secret harness session", http.MethodGet, "/{session}", func() any { return nil }, false)
 }
 func harnessHeartbeatCmd() *cobra.Command {
-	var phase string
-	cmd := harnessProjectCommand("heartbeat", "Report harness status", http.MethodPost, "/{session}/heartbeat", func() any { return map[string]string{"phase": phase} }, true)
+	var phase, activityKind string
+	var activitySequence int64
+	cmd := harnessProjectCommand("heartbeat", "Report harness status", http.MethodPost, "/{session}/heartbeat", func() any {
+		body := map[string]any{"phase": phase}
+		if activitySequence > 0 {
+			body["activity"] = managedharness.ActivityEvidence{Sequence: activitySequence, Kind: activityKind}
+		}
+		return body
+	}, true)
+	cmd.PreRunE = func(*cobra.Command, []string) error {
+		if (activitySequence == 0) != (strings.TrimSpace(activityKind) == "") || activitySequence < 0 {
+			return &usageError{msg: "--activity-sequence and --activity-kind must be supplied together with a positive sequence"}
+		}
+		return nil
+	}
 	cmd.Flags().StringVar(&phase, "phase", "working", "starting, working, yielded, or stopping")
+	cmd.Flags().Int64Var(&activitySequence, "activity-sequence", 0, "monotonic content-free adapter event sequence")
+	cmd.Flags().StringVar(&activityKind, "activity-kind", "", "session_started, turn_started, tool_started, control_applied, or turn_completed")
 	return cmd
 }
 func harnessYieldCmd() *cobra.Command {
@@ -281,7 +296,10 @@ func harnessCompleteControlCmd() *cobra.Command {
 }
 
 func harnessMarkStoppedCmd() *cobra.Command {
-	return harnessProjectCommand("mark-stopped", "Mark the attributed session stopped after owned cleanup", http.MethodPost, "/{session}/stop", func() any { return map[string]any{} }, true)
+	var reason string
+	cmd := harnessProjectCommand("mark-stopped", "Mark the attributed session stopped after owned cleanup", http.MethodPost, "/{session}/stop", func() any { return map[string]string{"reason": reason} }, true)
+	cmd.Flags().StringVar(&reason, "reason", managedharness.ClosedStopped, "stopped, process_exited, process_failed, or ownership_lost")
+	return cmd
 }
 
 func printHarnessResponse(raw []byte) error {

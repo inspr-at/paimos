@@ -75,16 +75,24 @@ func seedSessionHomeHarness(t *testing.T, projectID, agentID int64, agentName, h
 	}
 	query := fmt.Sprintf(`INSERT INTO harness_sessions(
 		id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
-		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,heartbeat_at,updated_at)
-		VALUES(?,?,?,?,?,'test-host-'||?,randomblob(32),randomblob(32),?,?,'worker',?, ?,?,?,?,?,?,%s,%s)`, heartbeat, heartbeat)
+		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,heartbeat_at,updated_at,
+		activity_state,activity_reason,closed_reason)
+		VALUES(?,?,?,?,?,'test-host-'||?,randomblob(32),randomblob(32),?,?,'worker',?, ?,?,?,?,?,?,%s,%s,?,?,?)`, heartbeat, heartbeat)
 	steerMode := "none"
 	if caps.Steer && management == "managed" {
 		steerMode = "owned"
 	} else if caps.Steer {
 		steerMode = "codex_external"
 	}
+	activityState, activityReason, closedReason := "unknown", "unreported", ""
+	if management == "unmanaged" {
+		activityReason = "unmanaged_evidence"
+	}
+	if phase == "stopped" {
+		activityState, activityReason, closedReason = "dead", "stopped", "stopped"
+	}
 	_, err := db.DB.Exec(query, id, projectID, agentID, agentName, harness, harness, targetID, management, steerMode,
-		caps.Inbox, caps.Status, caps.Steer, caps.Interrupt, caps.Stop, phase)
+		caps.Inbox, caps.Status, caps.Steer, caps.Interrupt, caps.Stop, phase, activityState, activityReason, closedReason)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +145,7 @@ func TestSessionHomeV1ExactShapeOrderingEmptyLooseAndManyPerNode(t *testing.T) {
 
 	emptyResponse, empty := getSessionHome(t, ts, projectID, ts.adminCookie)
 	assertStatus(t, emptyResponse, http.StatusOK)
-	if emptyResponse.Header.Get("Cache-Control") != "private, no-store" || empty.SchemaVersion != 1 || empty.ProjectID != projectID ||
+	if emptyResponse.Header.Get("Cache-Control") != "private, no-store" || empty.SchemaVersion != 2 || empty.ProjectID != projectID ||
 		empty.Sessions == nil || len(empty.Sessions) != 0 || empty.Totals != (models.SessionHomeTotals{}) {
 		t.Fatalf("empty contract response=%+v cache=%q", empty, emptyResponse.Header.Get("Cache-Control"))
 	}
@@ -163,7 +171,7 @@ func TestSessionHomeV1ExactShapeOrderingEmptyLooseAndManyPerNode(t *testing.T) {
 	for _, item := range snapshot.Sessions {
 		if item.Target.Kind != "paimos" || item.Target.ProjectAgentID != nil || item.Target.AgentName != nil ||
 			item.Target.Address == nil || *item.Target.Address != "paimos" || item.Harness != nil ||
-			item.Status != (models.SessionHomeStatus{Phase: "paimos", Reason: "paimos_target"}) ||
+			item.Status != (models.SessionHomeStatus{Phase: "paimos", Reason: "paimos_target", ActivityState: "unknown", ActivityReason: "paimos_target"}) ||
 			item.Controls != (models.SessionHomeControls{Steer: "paimos_nudge"}) {
 			t.Fatalf("Paimos target invented agent/harness truth: %+v", item)
 		}
@@ -215,6 +223,7 @@ func TestSessionHomeV1ComposesManagedUnmanagedInboxAttentionAndFailClosedHarness
 	}
 	managed := byAgent["managed"]
 	if managed.Harness == nil || managed.Harness.ManagementMode != "managed" || managed.Status.Phase != "working" ||
+		managed.Status.ActivityState != "unknown" || managed.Status.ActivityReason != "unreported" ||
 		managed.Controls != (models.SessionHomeControls{Steer: "direct", Interrupt: true, Stop: true}) ||
 		managed.Inbox.UnreadCount != 1 || managed.Inbox.LatestUnreadAt == nil || !managed.Attention.Required ||
 		managed.Attention.ExceptionCount != 2 || managed.Attention.ActionRequestCount != 1 || managed.Attention.Reason == nil || *managed.Attention.Reason != "action_request" {
@@ -222,19 +231,40 @@ func TestSessionHomeV1ComposesManagedUnmanagedInboxAttentionAndFailClosedHarness
 	}
 	unmanaged := byAgent["unmanaged"]
 	if unmanaged.Harness == nil || unmanaged.Harness.ManagementMode != "unmanaged" ||
+		unmanaged.Status.ActivityState != "unknown" || unmanaged.Status.ActivityReason != "unmanaged_evidence" ||
 		unmanaged.Controls != (models.SessionHomeControls{Steer: "paimos_nudge"}) ||
 		unmanaged.Harness.Capabilities.Interrupt || unmanaged.Harness.Capabilities.Stop {
 		t.Fatalf("unmanaged row advertised owned controls: %+v", unmanaged)
 	}
 	for name, reason := range map[string]string{"stale": "stale_harness", "ambiguous": "ambiguous_harness"} {
 		item := byAgent[name]
-		if item.Harness != nil || item.Target.Address != nil || item.Status != (models.SessionHomeStatus{Phase: "unavailable", Reason: reason}) ||
+		if item.Harness != nil || item.Target.Address != nil || item.Status != (models.SessionHomeStatus{Phase: "unavailable", Reason: reason, ActivityState: "unknown", ActivityReason: reason}) ||
 			item.Controls != (models.SessionHomeControls{Steer: "paimos_nudge"}) {
 			t.Fatalf("%s harness did not fail closed: %+v", name, item)
 		}
 	}
 	if snapshot.Totals.Sessions != 5 || snapshot.Totals.Unread != 1 || snapshot.Totals.Attention != 2 {
 		t.Fatalf("totals=%+v", snapshot.Totals)
+	}
+}
+
+func TestSessionHomeV1ExposesLatestReporterConfirmedClosure(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "Closed worker", "CLW")
+	agentID := seedSessionHomeAgent(t, projectID, "closed-worker")
+	seedSessionHomeProductSession(t, projectID, "project_agent", &agentID, nil, "Closed work", "2026-08-30T12:00:00.000Z")
+	seedSessionHomeHarness(t, projectID, agentID, "closed-worker", "codex", "managed", "stopped",
+		models.HarnessCapabilities{Status: true, Interrupt: true, Stop: true}, true)
+
+	response, snapshot := getSessionHome(t, ts, projectID, ts.adminCookie)
+	assertStatus(t, response, http.StatusOK)
+	if len(snapshot.Sessions) != 1 {
+		t.Fatalf("sessions=%+v", snapshot.Sessions)
+	}
+	item := snapshot.Sessions[0]
+	if item.Status != (models.SessionHomeStatus{Phase: "stopped", Reason: "closed", ActivityState: "dead", ActivityReason: "stopped", ClosedReason: "stopped"}) ||
+		item.Target.Address == nil || *item.Target.Address != "codex:closed-worker" || item.Harness == nil || item.Controls != (models.SessionHomeControls{Steer: "paimos_nudge"}) {
+		t.Fatalf("closed projection=%+v", item)
 	}
 }
 

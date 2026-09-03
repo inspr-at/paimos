@@ -3,7 +3,7 @@
 
 package models
 
-// SessionHomeSnapshot is the strict version-one product-session home read
+// SessionHomeSnapshot is the strict product-session home read
 // model. It is deliberately separate from the frozen Agent Mode schema v1.
 type SessionHomeSnapshot struct {
 	SchemaVersion int                  `json:"schema_version"`
@@ -35,8 +35,12 @@ type SessionHomeTarget struct {
 }
 
 type SessionHomeStatus struct {
-	Phase  string `json:"phase"`
-	Reason string `json:"reason"`
+	Phase              string `json:"phase"`
+	Reason             string `json:"reason"`
+	ActivityState      string `json:"activity_state"`
+	ActivityReason     string `json:"activity_reason"`
+	ActivityAgeSeconds *int64 `json:"activity_age_seconds"`
+	ClosedReason       string `json:"closed_reason"`
 }
 
 type SessionHomeHarness struct {

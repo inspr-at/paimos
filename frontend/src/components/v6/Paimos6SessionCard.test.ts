@@ -21,6 +21,10 @@ function session(
     agent: 'codex:amy',
     status: 'working',
     statusLabel: 'Working · active harness',
+    activityState: 'busy',
+    activityReason: 'adapter_activity',
+    activityAgeSeconds: 2,
+    closedReason: '',
     attention: false,
     attentionReason: null,
     exceptionCount: 0,
@@ -72,11 +76,23 @@ describe('Paimos6SessionCard live truth rendering (PAI-861)', () => {
 
   it('shows owned controls only for a managed row with returned capability truth', () => {
     const root = mountCards([session('managed')])
+    expect(root.querySelector('[data-activity-state="busy"]')?.textContent).toContain('Busy · adapter activity · evidence 2s ago')
     const actions = root.querySelector('.p6-card-actions')?.textContent ?? ''
     expect(actions).toContain('Steer')
     expect(actions).toContain('Interrupt')
     expect(actions).toContain('Stop')
     expect(actions).not.toContain('Ask Paimos')
+  })
+
+  it('renders unknown evidence and reporter-confirmed closure without inferring idle', () => {
+    const root = mountCards([
+      session('unknown', { activityState: 'unknown', activityReason: 'heartbeat_stale', activityAgeSeconds: null }),
+      session('closed', { status: 'stopped', activityState: 'dead', activityReason: 'process_exited', activityAgeSeconds: null, closedReason: 'process_exited' }),
+    ])
+    expect(root.querySelector('[data-activity-state="unknown"]')?.textContent).toContain('Unknown · heartbeat stale · no current evidence')
+    const closed = root.querySelector('[data-activity-state="dead"]')?.textContent
+    expect(closed).toContain('Dead · process exited · no current evidence')
+    expect(closed).toContain('closed process exited')
   })
 
   it('never renders interrupt/stop/direct steer for unmanaged rows and shows the nudge', () => {

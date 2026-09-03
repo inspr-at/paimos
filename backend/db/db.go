@@ -12388,6 +12388,73 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE TRIGGER trg_harness_sessions_worker_lease_immutable BEFORE UPDATE OF worker_lease_digest ON harness_sessions
 			 BEGIN SELECT RAISE(ABORT,'harness worker lease is immutable'); END`,
 		}},
+
+		// M169 / PAI-901: authenticated, content-free worker activity is a
+		// separate truth from harness phase and control leasing. Every mutating
+		// path appends the resulting projection to an immutable event stream.
+		{169, []string{
+			`ALTER TABLE harness_sessions ADD COLUMN activity_state TEXT NOT NULL DEFAULT 'unknown'
+			 CHECK(activity_state IN ('busy','idle','unknown','dead'))`,
+			`ALTER TABLE harness_sessions ADD COLUMN activity_reason TEXT NOT NULL DEFAULT 'unreported'
+			 CHECK(activity_reason IN ('unreported','adapter_activity','turn_completed','heartbeat_stale','stale_evidence','malformed_evidence','unmanaged_evidence','process_exited','process_failed','ownership_lost','stopped'))`,
+			`ALTER TABLE harness_sessions ADD COLUMN activity_event_kind TEXT NOT NULL DEFAULT ''
+			 CHECK(activity_event_kind IN ('','session_started','turn_started','tool_started','control_applied','turn_completed'))`,
+			`ALTER TABLE harness_sessions ADD COLUMN activity_at TEXT
+			 CHECK(` + sqlNullableControlTimestampCheck("activity_at") + `)`,
+			`ALTER TABLE harness_sessions ADD COLUMN activity_sequence INTEGER NOT NULL DEFAULT 0
+			 CHECK(activity_sequence>=0)`,
+			`ALTER TABLE harness_sessions ADD COLUMN closed_reason TEXT NOT NULL DEFAULT ''
+			 CHECK(closed_reason IN ('','stopped','process_exited','process_failed','ownership_lost'))`,
+			`UPDATE harness_sessions SET activity_state='dead',activity_reason='ownership_lost',closed_reason='ownership_lost'
+			 WHERE phase='stopped'`,
+			`UPDATE harness_sessions SET activity_state='unknown',activity_reason='unmanaged_evidence'
+			 WHERE phase<>'stopped' AND management_mode='unmanaged'`,
+			`CREATE TRIGGER trg_harness_sessions_activity_shape_insert BEFORE INSERT ON harness_sessions
+			 WHEN NOT (
+			  (NEW.activity_state='dead' AND NEW.phase='stopped' AND NEW.closed_reason<>'' AND NEW.activity_reason IN ('stopped','process_exited','process_failed','ownership_lost')) OR
+			  (NEW.management_mode='managed' AND NEW.activity_state='idle' AND NEW.phase<>'stopped' AND NEW.closed_reason='' AND NEW.activity_reason='turn_completed' AND NEW.activity_event_kind='turn_completed') OR
+			  (NEW.management_mode='managed' AND NEW.activity_state='busy' AND NEW.phase<>'stopped' AND NEW.closed_reason='' AND NEW.activity_reason='adapter_activity' AND NEW.activity_event_kind IN ('turn_started','tool_started','control_applied')) OR
+			  (NEW.management_mode='managed' AND NEW.activity_state='unknown' AND NEW.phase<>'stopped' AND NEW.closed_reason='' AND NEW.activity_reason IN ('unreported','heartbeat_stale','stale_evidence','malformed_evidence')) OR
+			  (NEW.management_mode='unmanaged' AND NEW.activity_state='unknown' AND NEW.phase<>'stopped' AND NEW.closed_reason='' AND NEW.activity_reason='unmanaged_evidence')
+			 ) BEGIN SELECT RAISE(ABORT,'harness activity state is inconsistent'); END`,
+			`CREATE TRIGGER trg_harness_sessions_activity_shape_update BEFORE UPDATE OF phase,activity_state,activity_reason,activity_event_kind,closed_reason ON harness_sessions
+			 WHEN NOT (
+			  (NEW.activity_state='dead' AND NEW.phase='stopped' AND NEW.closed_reason<>'' AND NEW.activity_reason IN ('stopped','process_exited','process_failed','ownership_lost')) OR
+			  (NEW.management_mode='managed' AND NEW.activity_state='idle' AND NEW.phase<>'stopped' AND NEW.closed_reason='' AND NEW.activity_reason='turn_completed' AND NEW.activity_event_kind='turn_completed') OR
+			  (NEW.management_mode='managed' AND NEW.activity_state='busy' AND NEW.phase<>'stopped' AND NEW.closed_reason='' AND NEW.activity_reason='adapter_activity' AND NEW.activity_event_kind IN ('turn_started','tool_started','control_applied')) OR
+			  (NEW.management_mode='managed' AND NEW.activity_state='unknown' AND NEW.phase<>'stopped' AND NEW.closed_reason='' AND NEW.activity_reason IN ('unreported','heartbeat_stale','stale_evidence','malformed_evidence')) OR
+			  (NEW.management_mode='unmanaged' AND NEW.activity_state='unknown' AND NEW.phase<>'stopped' AND NEW.closed_reason='' AND NEW.activity_reason='unmanaged_evidence')
+			 ) BEGIN SELECT RAISE(ABORT,'harness activity state is inconsistent'); END`,
+			`CREATE TABLE harness_session_events (
+			 id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+			 harness_session_id   TEXT NOT NULL REFERENCES harness_sessions(id) ON DELETE CASCADE,
+			 event_sequence       INTEGER NOT NULL CHECK(event_sequence>0),
+			 operation            TEXT NOT NULL CHECK(operation IN ('register','heartbeat','yield','control_completed','stop','activity_timeout')),
+			 phase                TEXT NOT NULL CHECK(phase IN ('starting','working','yielded','stopping','stopped')),
+			 activity_state       TEXT NOT NULL CHECK(activity_state IN ('busy','idle','unknown','dead')),
+			 activity_reason      TEXT NOT NULL CHECK(activity_reason IN ('unreported','adapter_activity','turn_completed','heartbeat_stale','stale_evidence','malformed_evidence','unmanaged_evidence','process_exited','process_failed','ownership_lost','stopped')),
+			 activity_event_kind  TEXT NOT NULL DEFAULT '' CHECK(activity_event_kind IN ('','session_started','turn_started','tool_started','control_applied','turn_completed')),
+			 activity_sequence    INTEGER NOT NULL CHECK(activity_sequence>=0),
+			 closed_reason        TEXT NOT NULL DEFAULT '' CHECK(closed_reason IN ('','stopped','process_exited','process_failed','ownership_lost')),
+			 created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(harness_session_id,event_sequence),
+			 CHECK(
+			  (activity_state='dead' AND phase='stopped' AND closed_reason<>'' AND activity_reason IN ('stopped','process_exited','process_failed','ownership_lost')) OR
+			  (activity_state='idle' AND phase<>'stopped' AND closed_reason='' AND activity_reason='turn_completed' AND activity_event_kind='turn_completed') OR
+			  (activity_state='busy' AND phase<>'stopped' AND closed_reason='' AND activity_reason='adapter_activity' AND activity_event_kind IN ('turn_started','tool_started','control_applied')) OR
+			  (activity_state='unknown' AND phase<>'stopped' AND closed_reason='' AND activity_reason IN ('unreported','heartbeat_stale','stale_evidence','malformed_evidence','unmanaged_evidence'))
+			 )
+			)`,
+			`CREATE INDEX idx_harness_session_events_session
+			 ON harness_session_events(harness_session_id,event_sequence)`,
+			`CREATE INDEX idx_harness_sessions_activity
+			 ON harness_sessions(activity_state,heartbeat_at) WHERE phase<>'stopped'`,
+			`CREATE TRIGGER trg_harness_session_events_no_update BEFORE UPDATE ON harness_session_events
+			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
+			`CREATE TRIGGER trg_harness_session_events_no_delete BEFORE DELETE ON harness_session_events
+			 WHEN EXISTS(SELECT 1 FROM harness_sessions WHERE id=OLD.harness_session_id)
+			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -12564,6 +12631,21 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 		return nil
 	},
 	167: checkM167SchemaIsUnapplied,
+	169: func(ctx context.Context, conn *sql.Conn) error {
+		var columns int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('harness_sessions')
+			WHERE name IN ('activity_state','activity_reason','activity_event_kind','activity_at','activity_sequence','closed_reason')`).Scan(&columns); err != nil {
+			return fmt.Errorf("inspect M169 harness activity columns: %w", err)
+		}
+		if columns != 0 {
+			return fmt.Errorf("M169 schema is partially present or locally incompatible: harness activity columns=%d", columns)
+		}
+		return checkSchemaObjectsAbsent(ctx, conn, 169, []string{
+			"harness_session_events", "idx_harness_session_events_session", "idx_harness_sessions_activity",
+			"trg_harness_sessions_activity_shape_insert", "trg_harness_sessions_activity_shape_update",
+			"trg_harness_session_events_no_update", "trg_harness_session_events_no_delete",
+		})
+	},
 }
 
 func checkSessionUtteranceFoundation(ctx context.Context, conn *sql.Conn) error {

@@ -27,7 +27,7 @@ export interface Paimos6SessionZoomTotals {
 }
 
 export interface Paimos6SessionZoomWire {
-  schema_version: 1
+  schema_version: 2
   project_id: number
   zoom: string
   band: Paimos6ZoomBand
@@ -157,7 +157,7 @@ export function parsePaimos6SessionZoom(
     'schema_version', 'project_id', 'zoom', 'band', 'sample_limit', 'sample_truncated',
     'sessions', 'selected_session', 'totals',
   ])
-    || root.schema_version !== 1
+    || root.schema_version !== 2
     || root.project_id !== expectedProjectId
     || root.zoom !== expectedZoom
     || typeof root.band !== 'string'
@@ -272,7 +272,7 @@ export function parsePaimos6SessionZoom(
   }
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     project_id: expectedProjectId,
     zoom: expectedZoom,
     band: root.band as Paimos6ZoomBand,

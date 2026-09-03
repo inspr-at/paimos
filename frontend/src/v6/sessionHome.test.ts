@@ -21,7 +21,7 @@ function managedRow(id = '17e5d8f7-0b11-4bee-a8a4-a11406de865a') {
       agent_name: 'amy',
       address: 'codex:amy',
     },
-    status: { phase: 'working', reason: 'active' },
+    status: { phase: 'working', reason: 'active', activity_state: 'busy', activity_reason: 'adapter_activity', activity_age_seconds: 2, closed_reason: '' },
     harness: {
       harness: 'codex',
       management_mode: 'managed',
@@ -45,6 +45,7 @@ function unmanagedRow() {
     ...managedRow('27e5d8f7-0b11-4bee-a8a4-a11406de865a'),
     title: 'Second session on the same node',
     updated_at: '2026-08-30T12:01:00Z',
+    status: { phase: 'working', reason: 'active', activity_state: 'unknown', activity_reason: 'unmanaged_evidence', activity_age_seconds: null, closed_reason: '' },
     target: {
       kind: 'project_agent',
       project_agent_id: 8,
@@ -85,7 +86,7 @@ function unavailableRow() {
       agent_name: 'amy',
       address: null,
     },
-    status: { phase: 'unavailable', reason: 'stale_harness' },
+    status: { phase: 'unavailable', reason: 'stale_harness', activity_state: 'unknown', activity_reason: 'stale_harness', activity_age_seconds: null, closed_reason: '' },
     harness: null,
     controls: { steer: 'paimos_nudge', interrupt: false, stop: false },
   }
@@ -98,7 +99,7 @@ function paimosRow() {
     summary: '',
     updated_at: '2026-08-30T12:00:00Z',
     target: { kind: 'paimos', project_agent_id: null, agent_name: null, address: 'paimos' },
-    status: { phase: 'paimos', reason: 'paimos_target' },
+    status: { phase: 'paimos', reason: 'paimos_target', activity_state: 'unknown', activity_reason: 'paimos_target', activity_age_seconds: null, closed_reason: '' },
     harness: null,
     controls: { steer: 'paimos_nudge', interrupt: false, stop: false },
     node: null,
@@ -119,7 +120,7 @@ function projection(sessions: ProjectionTestRow[] = [managedRow(), unmanagedRow(
     inboxByTarget.set(targetKey, row.inbox.unread_count)
   }
   return {
-    schema_version: 1,
+    schema_version: 2,
     project_id: 42,
     sessions,
     totals: {
@@ -147,13 +148,21 @@ describe('Paimos 6 session-home strict boundary (PAI-861)', () => {
     const paimos = toPaimos6SessionViewModel(parsed.sessions[2])
 
     expect(managed.capabilities).toEqual({ directSteer: true, interrupt: true, stop: true, paimosSteer: false })
+    expect(managed).toMatchObject({ activityState: 'busy', activityReason: 'adapter_activity', activityAgeSeconds: 2, closedReason: '' })
     expect(unmanaged.mode).toBe('unmanaged')
     expect(unmanaged.capabilities).toEqual({ directSteer: false, interrupt: false, stop: false, paimosSteer: true })
     expect(unmanaged.attentionReason).toContain('action request')
     expect(paimos).toMatchObject({ agent: 'Paimos', mode: 'paimos', summary: '' })
   })
 
+  it('accepts reporter-confirmed closure for an otherwise unmanaged session', () => {
+    const closed = unmanagedRow()
+    closed.status = { phase: 'stopped', reason: 'closed', activity_state: 'dead', activity_reason: 'stopped', activity_age_seconds: null, closed_reason: 'stopped' }
+    expect(parsePaimos6SessionHome(projection([closed]), 42).sessions[0].status).toEqual(closed.status)
+  })
+
   it.each([
+    ['obsolete wire version', () => ({ ...projection(), schema_version: 1 })],
     ['unknown root key', () => ({ ...projection(), extra: true })],
     ['wrong project', () => ({ ...projection(), project_id: 43 })],
     ['lying totals', () => ({ ...projection(), totals: { sessions: 99, unread: 1, attention: 1 } })],
@@ -222,7 +231,7 @@ describe('Paimos 6 session-home strict boundary (PAI-861)', () => {
 
   it('accepts an exact empty projection', () => {
     expect(parsePaimos6SessionHome(projection([]), 42)).toEqual({
-      schema_version: 1,
+      schema_version: 2,
       project_id: 42,
       sessions: [],
       totals: { sessions: 0, unread: 0, attention: 0 },

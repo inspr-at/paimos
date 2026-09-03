@@ -305,6 +305,36 @@ local checkpoint. A redirect, malformed body, mismatched successful response,
 or ambiguous transport result remains a retryable reporter failure and cannot
 authorize a local or remote state transition.
 
+### Worker activity truth
+
+Harness phase, control leasing, and worker activity are deliberately separate.
+`working` says the owned generation may report; it does not mean a model is
+busy. `yielded` says the reporter checked for durable controls; it does not mean
+the model is idle. The reporter therefore publishes its ordinary heartbeat
+before yielding controls, so a failed yield cannot suppress liveness and the
+yield phase cannot overwrite the independent activity conclusion.
+
+The durable activity projection has four closed states:
+
+| State | Required evidence |
+|---|---|
+| `busy` | A monotonically newer, documented adapter `turn_started`, `tool_started`, or `control_applied` event from the current owned generation |
+| `idle` | A monotonically newer, documented adapter `turn_completed` event from the current owned generation |
+| `unknown` | No activity report, malformed or stale evidence, unmanaged evidence, or a heartbeat older than 90 seconds |
+| `dead` | Reporter-confirmed process exit, process failure, ownership loss, or explicit owned stop |
+
+Silence is never interpreted as busy or idle. Ordinary daemon heartbeat ticks
+do not refresh the adapter activity timestamp or sequence. A heartbeat appends
+only when phase or activity truth changes, preventing periodic no-op ticks from
+growing the log; yield, control completion, stop, and activity-timeout
+transitions append the resulting content-free projection in the same
+transaction. Those rows cannot be updated or deleted directly, while deleting
+their parent session cascades them. Session Home schema version 2
+returns the state, safe reason, evidence age, and terminal reason. If no live
+generation remains it may show the latest reporter-confirmed dead generation,
+but an unmanaged, unreported, stale, malformed, or ambiguous worker remains
+`unknown`.
+
 ## Diagnostics
 
 All commands below return non-secret or redacted state. The message target and
@@ -415,8 +445,10 @@ agent name, shared API key, vendor reference, or a newly invented lease.
 
 The Paimos message/delivery row survives independently in SQLite. If it has a
 snapshotted simple fallback, an unavailable managed lease can reroute to that
-fallback. A currently working, steer-capable harness generation is eligible
-for managed reroute only while its heartbeat is no more than 90 seconds old.
+fallback. A steer-capable harness generation is eligible for managed reroute
+only while its heartbeat is no more than 90 seconds old and its authenticated
+activity projection is `busy` or `idle`; `unknown` and `dead` never qualify,
+and its phase may independently be `yielded`.
 
 ### Target was missing
 
@@ -488,6 +520,7 @@ The ordinary backend suite covers the documentation contract:
 cd backend
 go test -count=1 ./cmd/paimos ./cmd/paimos-agentd ./contracts
 go test -count=1 ./db -run '^TestMigration168RetiresUnboundGenerationsAndEnforcesLeaseDigest$'
+go test -count=1 ./db -run '^TestMigration169BackfillsTerminalTruthAndRejectsInconsistentActivity$'
 go test -count=1 ./handlers -run '^(TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization|TestGetHarnessControlReturnsScopedNonSecretOutcome)$'
 go test -race -count=1 ./agentd ./agentmessage ./managedharness
 ```
@@ -508,6 +541,9 @@ High-signal proofs include:
 - `TestHarnessWorkerLeaseRejectsSpoofMissingDuplicateAndCrossSessionProof`
 - `TestHarnessLeaseRequestsNeverFollowRedirects`
 - `TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization`
+- `TestHarnessActivityRequiresTypedCurrentEvidence`
+- `TestHarnessSessionEventsAreTransactionalImmutableAndPhaseIndependent`
+- `TestConcurrentActivityTimeoutAppendsOneTransition`
 - `TestHarnessControlGetUsesExactReadOnlyScopedRoute`
 - `TestGetHarnessControlReturnsScopedNonSecretOutcome`
 - `TestMigration168RetiresUnboundGenerationsAndEnforcesLeaseDigest`

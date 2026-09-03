@@ -24,7 +24,7 @@ function managedRow(id = MANAGED_ID) {
     revision: 3,
     updated_at: '2026-08-30T12:02:00Z',
     target: { kind: 'project_agent', project_agent_id: 7, agent_name: 'amy', address: 'codex:amy' },
-    status: { phase: 'working', reason: 'active' },
+    status: { phase: 'working', reason: 'active', activity_state: 'busy', activity_reason: 'adapter_activity', activity_age_seconds: 2, closed_reason: '' },
     harness: {
       harness: 'codex',
       management_mode: 'managed',
@@ -41,6 +41,7 @@ function attentionRow() {
   return {
     ...managedRow(ATTENTION_ID),
     title: 'Exception target',
+    status: { phase: 'working', reason: 'active', activity_state: 'unknown', activity_reason: 'unmanaged_evidence', activity_age_seconds: null, closed_reason: '' },
     target: { kind: 'project_agent', project_agent_id: 8, agent_name: 'jan', address: 'claude:jan' },
     harness: {
       harness: 'claude',
@@ -58,7 +59,7 @@ function paimosRow() {
     ...managedRow(PAIMOS_ID),
     title: 'Paimos session',
     target: { kind: 'paimos', project_agent_id: null, agent_name: null, address: 'paimos' },
-    status: { phase: 'paimos', reason: 'paimos_target' },
+    status: { phase: 'paimos', reason: 'paimos_target', activity_state: 'unknown', activity_reason: 'paimos_target', activity_age_seconds: null, closed_reason: '' },
     harness: null,
     controls: { steer: 'paimos_nudge', interrupt: false, stop: false },
     inbox: { unread_count: 0, latest_unread_at: null },
@@ -81,7 +82,7 @@ function projection(options: {
     .filter((row) => row.target.kind === 'project_agent' && row.attention.required)
     .map((row) => row.target.project_agent_id))
   return {
-    schema_version: 1,
+    schema_version: 2,
     project_id: 42,
     zoom,
     band: paimos6ZoomBand(zoom),
@@ -135,6 +136,7 @@ describe('Paimos 6 semantic-zoom strict boundary (PAI-864)', () => {
   })
 
   it.each([
+    ['obsolete wire version', () => ({ ...projection(), schema_version: 1 })],
     ['extra root key', () => ({ ...projection(), extra: true })],
     ['wrong band', () => ({ ...projection(), band: 'far' })],
     ['wrong limit', () => ({ ...projection(), sample_limit: 99 })],

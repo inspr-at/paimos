@@ -52,7 +52,11 @@ type harnessRegisterRequest struct {
 	Capabilities    models.HarnessCapabilities `json:"advertised_capabilities"`
 }
 type heartbeatRequest struct {
-	Phase string `json:"phase"`
+	Phase    string                          `json:"phase"`
+	Activity managedharness.ActivityEvidence `json:"activity"`
+}
+type stopHarnessRequest struct {
+	Reason string `json:"reason"`
 }
 type completeControlRequest struct {
 	Outcome string `json:"outcome"`
@@ -186,7 +190,7 @@ func heartbeatHarnessSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeHarnessJSON(w, r, &req) {
 		return
 	}
-	out, err := managedharness.NewService(db.DB).Heartbeat(r.Context(), session.ID, req.Phase)
+	out, err := managedharness.NewService(db.DB).HeartbeatWithActivity(r.Context(), session.ID, req.Phase, req.Activity)
 	if err != nil {
 		harnessProblem(w, err, "harness_session_heartbeat_failed", harnessStatus(err))
 		return
@@ -354,7 +358,15 @@ func stopHarnessSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out, err := managedharness.NewService(db.DB).Stop(r.Context(), session.ID)
+	var req stopHarnessRequest
+	if r.ContentLength != 0 && !decodeHarnessJSON(w, r, &req) {
+		return
+	}
+	reason := req.Reason
+	if strings.TrimSpace(reason) == "" {
+		reason = managedharness.ClosedStopped
+	}
+	out, err := managedharness.NewService(db.DB).StopWithReason(r.Context(), session.ID, reason)
 	if err != nil {
 		harnessProblem(w, err, "harness_session_stop_failed", harnessStatus(err))
 		return

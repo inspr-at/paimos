@@ -254,6 +254,11 @@ func TestHarnessWorkerLeaseRejectsSpoofMissingDuplicateAndCrossSessionProof(t *t
 	if err := db.DB.QueryRow(`SELECT state FROM harness_session_controls WHERE id=?`, control.ID).Scan(&state); err != nil || state != managedharness.ControlClaimed {
 		t.Fatalf("unauthorized completion mutated state=%q err=%v", state, err)
 	}
+	emptyStop := httptest.NewRecorder()
+	stopHarnessSession(emptyStop, request(session.ID, "worker", []string{handlerWorkerLease}, "/stop", nil))
+	if emptyStop.Code != http.StatusOK || !strings.Contains(emptyStop.Body.String(), `"closed_reason":"stopped"`) {
+		t.Fatalf("empty-body stop status=%d body=%s", emptyStop.Code, emptyStop.Body.String())
+	}
 }
 
 func TestHarnessWorkerMutationsUseUniformNonEnumeratingAuthorization(t *testing.T) {

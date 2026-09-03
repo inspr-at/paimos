@@ -431,6 +431,8 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 			}
 			p.resolveControl(event, nil)
 			p.observeEvent(AdapterEvent{Kind: EventControlApplied, CorrelationID: event.CorrelationID})
+		case string(EventTurnCompleted):
+			p.observeEvent(AdapterEvent{Kind: EventTurnCompleted})
 		case "control_failed":
 			if event.CorrelationID == "" {
 				p.signalReady(claudeStartupError(event.Reason))

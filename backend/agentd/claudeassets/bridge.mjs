@@ -375,6 +375,7 @@ try {
     }
     observeReaction(message);
     observeTool(message);
+    if (message?.type === "result") emit({ kind: "turn_completed" });
   }
   queryEndedResolve();
   lines.close();

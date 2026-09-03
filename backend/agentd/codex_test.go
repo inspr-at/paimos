@@ -125,10 +125,15 @@ func TestCodexDrainsFinalCompletionBeforeReapingAppServer(t *testing.T) {
 	}
 	eventsMu.Lock()
 	defer eventsMu.Unlock()
+	seenCompleted := false
 	for _, event := range events {
 		if event.ErrorCode == ErrorEventStreamBound {
 			t.Fatalf("normal child exit was misreported as a bounded stream error: %+v", events)
 		}
+		seenCompleted = seenCompleted || event.Kind == EventTurnCompleted
+	}
+	if !seenCompleted {
+		t.Fatalf("documented turn/completed was not reported: %+v", events)
 	}
 }
 

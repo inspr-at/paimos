@@ -338,7 +338,8 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 		if err := r.heartbeat(ctx, known.publicID, session, workerLease, reporterPhase(session.State)); err != nil {
 			return err
 		}
-		return r.yieldControls(ctx, known.publicID, session, workerLease)
+		_, err := r.yieldControls(ctx, known.publicID, session, workerLease)
+		return err
 	}
 	harness, agentName, err := reporterIdentity(session)
 	if err != nil {
@@ -392,7 +393,8 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	if err := r.heartbeat(ctx, response.ID, session, workerLease, reporterPhase(session.State)); err != nil {
 		return err
 	}
-	return r.yieldControls(ctx, response.ID, session, workerLease)
+	_, err = r.yieldControls(ctx, response.ID, session, workerLease)
+	return err
 }
 
 func reporterIdentity(session agentd.Session) (string, string, error) {
@@ -464,6 +466,9 @@ func (r *cliReporter) heartbeat(ctx context.Context, publicID string, session ag
 		return err
 	}
 	args := []string{"--json", "harness", "heartbeat", "--project", strconv.FormatInt(session.ProjectID, 10), "--session", publicID, "--agent", agentName, "--worker-lease-file", "-", "--phase", phase}
+	if session.ActivitySequence > 0 && session.LastEventKind != "" {
+		args = append(args, "--activity-sequence", strconv.FormatInt(session.ActivitySequence, 10), "--activity-kind", string(session.LastEventKind))
+	}
 	raw, err := r.run(ctx, r.paimosPath, args, r.environment, strings.NewReader(workerLease))
 	if err != nil {
 		return err
@@ -475,29 +480,30 @@ func (r *cliReporter) heartbeat(ctx context.Context, publicID string, session ag
 	return nil
 }
 
-func (r *cliReporter) yieldControls(ctx context.Context, publicID string, session agentd.Session, workerLease string) error {
+func (r *cliReporter) yieldControls(ctx context.Context, publicID string, session agentd.Session, workerLease string) (bool, error) {
 	_, agentName, err := reporterIdentity(session)
 	if err != nil {
-		return err
+		return false, err
 	}
 	args := []string{"--json", "harness", "yield", "--project", strconv.FormatInt(session.ProjectID, 10), "--session", publicID, "--agent", agentName, "--worker-lease-file", "-"}
 	raw, err := r.run(ctx, r.paimosPath, args, r.environment, strings.NewReader(workerLease))
 	if err != nil {
-		return err
+		return false, err
 	}
 	var response harnessYieldResponse
 	if json.Unmarshal(raw, &response) != nil || response.Session.ID != publicID || response.Session.ProjectID != session.ProjectID || response.Session.AgentName != agentName || response.Session.Harness != session.Adapter {
-		return errors.New("paimos reporter returned mismatched yield scope")
+		return false, errors.New("paimos reporter returned mismatched yield scope")
 	}
+	stopped := false
 	for _, control := range response.Controls {
 		if uuid.Validate(control.ID) != nil || control.HarnessSessionID != publicID || control.State != "claimed" || (control.Kind != "interrupt" && control.Kind != "stop") {
-			return errors.New("paimos reporter returned an invalid typed control")
+			return false, errors.New("paimos reporter returned an invalid typed control")
 		}
 		request := agentd.ControlRequest{Instance: r.instance, ProjectID: session.ProjectID, Identity: session.Identity, CorrelationID: control.ID}
 		outcome, reason := "rejected", "ownership_lost"
 		completion := agentd.ReporterCompletion{ControlID: control.ID, Kind: control.Kind, Outcome: outcome, Reason: reason}
 		if err := r.checkpoint(ctx, session, r.pendingReporterState(session, publicID, completion)); err != nil {
-			return err
+			return false, err
 		}
 		if !terminalAgentdState(session.State) {
 			outcome, reason = "applied", "applied"
@@ -515,17 +521,18 @@ func (r *cliReporter) yieldControls(ctx context.Context, publicID string, sessio
 			}
 			completion = agentd.ReporterCompletion{ControlID: control.ID, Kind: control.Kind, Outcome: outcome, Reason: reason}
 			if err := r.checkpoint(ctx, session, r.pendingReporterState(session, publicID, completion)); err != nil {
-				return err
+				return false, err
 			}
+			stopped = stopped || control.Kind == "stop" && outcome == "applied"
 		}
 		if err := r.completeControl(ctx, publicID, session, agentName, workerLease, completion); err != nil {
-			return err
+			return false, err
 		}
 		if err := r.checkpoint(ctx, session, r.baseReporterState(session, publicID)); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return nil
+	return stopped, nil
 }
 
 func validReporterReceipt(receipt agentd.Receipt, operation string, session agentd.Session, request agentd.ControlRequest) bool {
@@ -585,7 +592,7 @@ func (r *cliReporter) markStopped(ctx context.Context, publicID string, session 
 	if err != nil {
 		return err
 	}
-	args := []string{"--json", "harness", "mark-stopped", "--project", strconv.FormatInt(session.ProjectID, 10), "--session", publicID, "--agent", agentName, "--worker-lease-file", "-"}
+	args := []string{"--json", "harness", "mark-stopped", "--project", strconv.FormatInt(session.ProjectID, 10), "--session", publicID, "--agent", agentName, "--worker-lease-file", "-", "--reason", reporterClosedReason(session.State)}
 	raw, err := r.run(ctx, r.paimosPath, args, r.environment, strings.NewReader(workerLease))
 	if err != nil {
 		return fmt.Errorf("agentd reporter could not close harness session: %w", err)
@@ -595,4 +602,17 @@ func (r *cliReporter) markStopped(ctx context.Context, publicID string, session 
 		return errors.New("paimos reporter returned mismatched stopped-session evidence")
 	}
 	return nil
+}
+
+func reporterClosedReason(state agentd.SessionState) string {
+	switch state {
+	case agentd.StateOwnershipLost:
+		return "ownership_lost"
+	case agentd.StateFailed:
+		return "process_failed"
+	case agentd.StateExited:
+		return "process_exited"
+	default:
+		return "stopped"
+	}
 }

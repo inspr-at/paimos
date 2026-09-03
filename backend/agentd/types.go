@@ -61,6 +61,7 @@ const (
 	EventToolStarted    EventKind = "tool_started"
 	EventControlApplied EventKind = "control_applied"
 	EventTurnStarted    EventKind = "turn_started"
+	EventTurnCompleted  EventKind = "turn_completed"
 )
 
 // ErrorCode is deliberately finite so adapter events and durable status can
@@ -131,6 +132,8 @@ type Session struct {
 	State             SessionState  `json:"state"`
 	PID               int           `json:"pid,omitempty"`
 	LastEventKind     EventKind     `json:"last_event_kind,omitempty"`
+	ActivitySequence  int64         `json:"activity_sequence"`
+	ActivityAt        time.Time     `json:"activity_at,omitempty"`
 	LastCorrelationID string        `json:"last_correlation_id,omitempty"`
 	LastErrorCode     ErrorCode     `json:"last_error_code,omitempty"`
 	StartedAt         time.Time     `json:"started_at"`

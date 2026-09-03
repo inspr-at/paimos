@@ -56,6 +56,26 @@ func TestSessionHomeZoomOpenAPIClosesWireContract(t *testing.T) {
 	if totals["additionalProperties"] != false || len(totals["required"].([]any)) != 7 {
 		t.Fatalf("totals closure=%v", totals)
 	}
+	status := schemas["SessionHomeStatusV1"].(map[string]any)
+	if status["additionalProperties"] != false || len(status["required"].([]any)) != 6 {
+		t.Fatalf("session activity status closure=%v", status)
+	}
+	statusProperties := status["properties"].(map[string]any)
+	if len(statusProperties["activity_state"].(map[string]any)["enum"].([]any)) != 4 ||
+		len(statusProperties["activity_age_seconds"].(map[string]any)["type"].([]any)) != 2 {
+		t.Fatalf("session activity status=%v", statusProperties)
+	}
+	if snapshot["properties"].(map[string]any)["schema_version"].(map[string]any)["const"] != float64(2) {
+		t.Fatalf("session home zoom schema version=%v", snapshot["properties"])
+	}
+	rootSnapshot := schemas["SessionHomeSnapshotV1"].(map[string]any)
+	if rootSnapshot["properties"].(map[string]any)["schema_version"].(map[string]any)["const"] != float64(2) {
+		t.Fatalf("session home schema version=%v", rootSnapshot["properties"])
+	}
+	heartbeat := schemas["HarnessHeartbeat"].(map[string]any)
+	if heartbeat["additionalProperties"] != false || heartbeat["properties"].(map[string]any)["activity"] == nil {
+		t.Fatalf("heartbeat activity evidence=%v", heartbeat)
+	}
 	paths := document["paths"].(map[string]any)
 	path := paths["/api/projects/{id}/session-home/zoom/v1"].(map[string]any)
 	parameters := path["parameters"].([]any)

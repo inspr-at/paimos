@@ -244,6 +244,69 @@ func TestCLIReporterRegistersExactScopeAndAppliesTypedControl(t *testing.T) {
 	}
 }
 
+func TestCLIReporterHeartbeatsBeforeYieldAndCarriesActivityEvidence(t *testing.T) {
+	var commands []string
+	runner := func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+		commands = append(commands, args[2])
+		switch args[2] {
+		case "register":
+			return json.Marshal(harnessSessionResponse{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: "codex"})
+		case "yield":
+			return json.Marshal(harnessYieldResponse{Session: harnessSessionResponse{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: "codex", Phase: "yielded"}})
+		case "heartbeat":
+			if !slices.Contains(args, "--activity-sequence") || !slices.Contains(args, "3") || !slices.Contains(args, "--activity-kind") || !slices.Contains(args, "tool_started") {
+				t.Fatalf("activity evidence args=%v", args)
+			}
+			return reporterSessionEvidence("worker", "working"), nil
+		default:
+			return nil, errors.New("unexpected reporter command")
+		}
+	}
+	reporter, _ := newCLIReporterWithRunner("ppm", "camyb-box", "/opt/paimos", nil, runner, newMemoryReporterLeaseStore())
+	controller := &recordingReporterController{}
+	if err := reporter.BindController(controller); err != nil {
+		t.Fatal(err)
+	}
+	session := agentd.Session{
+		ID: localReporterSession, ProjectID: 6, Identity: "codex:worker", Adapter: "codex", Managed: true, State: agentd.StateRunning,
+		Capabilities: []agentd.Capability{agentd.CapabilityStatus}, ActivitySequence: 3, LastEventKind: agentd.EventToolStarted,
+	}
+	if err := reporter.ReportStatus(context.Background(), agentd.Status{Instance: "ppm", Sessions: []agentd.Session{session}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(commands, ","); got != "register,heartbeat,yield" {
+		t.Fatalf("report order=%s", got)
+	}
+}
+
+func TestCLIReporterYieldFailureStillRecordsHeartbeatFirst(t *testing.T) {
+	var commands []string
+	runner := func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+		commands = append(commands, args[2])
+		switch args[2] {
+		case "heartbeat":
+			return reporterSessionEvidence("worker", "working"), nil
+		case "yield":
+			return nil, errors.New("yield unavailable")
+		default:
+			return nil, errors.New("unexpected reporter command")
+		}
+	}
+	reporter, _ := newCLIReporterWithRunner("ppm", "camyb-box", "/opt/paimos", nil, runner, newMemoryReporterLeaseStore())
+	if err := reporter.BindController(&recordingReporterController{}); err != nil {
+		t.Fatal(err)
+	}
+	session := agentd.Session{ID: localReporterSession, ProjectID: 6, Identity: "codex:worker", Adapter: "codex", Managed: true,
+		State: agentd.StateRunning, Capabilities: []agentd.Capability{agentd.CapabilityStatus},
+		Reporter: agentd.ReporterState{PublicSessionID: publicReporterSession, Capabilities: []agentd.Capability{agentd.CapabilityStatus}}}
+	if err := reporter.ReportStatus(context.Background(), agentd.Status{Instance: "ppm", Sessions: []agentd.Session{session}}); err == nil {
+		t.Fatal("yield failure was not surfaced")
+	}
+	if got := strings.Join(commands, ","); got != "heartbeat,yield" {
+		t.Fatalf("report order=%s", got)
+	}
+}
+
 func TestCLIReporterRejectsMismatchedAndMalformedRemoteScope(t *testing.T) {
 	runner := func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
 		if args[2] == "register" {
