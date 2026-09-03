@@ -113,6 +113,10 @@ type RegisterInput struct {
 	Role            string
 	SteerMode       string
 	Capabilities    models.HarnessCapabilities
+	// Authority reauthorizes inbox-capable registrations inside the same
+	// transaction as target and harness ownership mutation. Nil is reserved
+	// for trusted in-process callers and tests.
+	Authority agentmessage.TransactionAuthority
 }
 
 type YieldResult struct {
@@ -302,18 +306,17 @@ func appendSessionEventTx(ctx context.Context, tx *sql.Tx, session models.Harnes
 	return err
 }
 
-func (s *Service) validateTarget(ctx context.Context, in RegisterInput) (string, error) {
+func (s *Service) validateTargetTx(ctx context.Context, tx *sql.Tx, in RegisterInput) (string, error) {
 	if !in.Capabilities.Inbox {
 		return "", nil
 	}
-	bus := agentmessage.NewService(s.db)
 	if in.ManagementMode == ManagementManaged {
 		level := harnessplugin.LevelSimple
 		if in.Capabilities.Steer {
 			level = harnessplugin.LevelSteer
 		}
 		address := in.Harness + ":" + in.AgentName
-		targets, err := bus.ListTargets(ctx, in.ProjectID, address)
+		targets, err := agentmessage.ListTargetsTx(ctx, tx, in.ProjectID, address)
 		if err != nil {
 			return "", err
 		}
@@ -326,7 +329,7 @@ func (s *Service) validateTarget(ctx context.Context, in RegisterInput) (string,
 				target.TargetKind != agentmessage.TargetKindHarnessSession {
 				continue
 			}
-			matches, matchErr := bus.TargetRefMatches(ctx, in.ProjectID, target.ID, in.SessionRef)
+			matches, matchErr := agentmessage.TargetRefMatchesTx(ctx, tx, in.ProjectID, target.ID, in.SessionRef)
 			if matchErr != nil {
 				return "", matchErr
 			}
@@ -338,7 +341,7 @@ func (s *Service) validateTarget(ctx context.Context, in RegisterInput) (string,
 				return target.ID, nil
 			}
 		}
-		target, err := bus.RegisterTarget(ctx, agentmessage.RegisterTargetInput{
+		target, err := agentmessage.RegisterTargetTx(ctx, tx, agentmessage.RegisterTargetInput{
 			ProjectID: in.ProjectID, Address: address,
 			Adapter: agentmessage.AdapterManagedHarness, TargetKind: agentmessage.TargetKindHarnessSession,
 			TargetRef: in.SessionRef, MaximumLevel: level, Role: "primary", Standby: standby,
@@ -348,14 +351,14 @@ func (s *Service) validateTarget(ctx context.Context, in RegisterInput) (string,
 		}
 		return target.ID, nil
 	}
-	target, err := bus.GetTarget(ctx, in.ProjectID, in.MessageTargetID)
+	target, err := agentmessage.GetTargetTx(ctx, tx, in.ProjectID, in.MessageTargetID)
 	if err != nil {
 		return "", coded(CodeCapabilityInvalid, "unmanaged message target is unavailable")
 	}
 	if !target.Enabled || target.Address != in.Harness+":"+in.AgentName {
 		return "", coded(CodeCapabilityInvalid, "unmanaged message target does not own this harness address")
 	}
-	matches, err := bus.TargetRefMatches(ctx, in.ProjectID, target.ID, in.SessionRef)
+	matches, err := agentmessage.TargetRefMatchesTx(ctx, tx, in.ProjectID, target.ID, in.SessionRef)
 	if err != nil || !matches {
 		return "", coded(CodeCapabilityInvalid, "unmanaged session reference does not match the encrypted message target")
 	}
@@ -379,14 +382,41 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 	}
 	registerMu.Lock()
 	defer registerMu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.HarnessSession{}, false, err
+	}
+	defer tx.Rollback()
+	if in.Capabilities.Inbox {
+		superAdmin := true
+		if in.Authority != nil {
+			superAdmin, err = in.Authority(ctx, tx)
+			if err != nil {
+				return models.HarnessSession{}, false, err
+			}
+		}
+		protected, err := agentmessage.IsOrchestratorAttentionAddressTx(ctx, tx, in.ProjectID, in.Harness+":"+in.AgentName)
+		if err != nil {
+			return models.HarnessSession{}, false, err
+		}
+		if protected && !superAdmin {
+			return models.HarnessSession{}, false, &agentmessage.CodedError{
+				Code: "agent_attention_target_forbidden",
+				Err:  errors.New("orchestrator attention targets require current super-admin authority"),
+			}
+		}
+	}
 	digest := digestRef(in.ProjectID, in.Harness, in.Host, in.SessionRef)
-	existing, err := scanSession(s.db.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND harness=? AND host=? AND session_ref_digest=? AND phase<>'stopped'`, in.ProjectID, in.Harness, in.Host, digest))
+	existing, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND harness=? AND host=? AND session_ref_digest=? AND phase<>'stopped'`, in.ProjectID, in.Harness, in.Host, digest))
 	if err == nil {
-		if ok, verifyErr := s.VerifyWorkerLease(ctx, existing.ProjectID, existing.ID, in.WorkerLease); verifyErr != nil || !ok {
+		if ok, verifyErr := verifyWorkerLeaseQuery(ctx, tx, existing.ProjectID, existing.ID, in.WorkerLease); verifyErr != nil || !ok {
 			return models.HarnessSession{}, false, coded(CodeInvalid, "harness worker lease is invalid")
 		}
 		if !sameRegistration(existing, in) {
 			return models.HarnessSession{}, false, coded(CodeConflict, "stable external identity is already registered with different agent, ownership, role, or advertised capabilities")
+		}
+		if err := tx.Commit(); err != nil {
+			return models.HarnessSession{}, false, err
 		}
 		return existing, false, nil
 	}
@@ -394,19 +424,19 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		return models.HarnessSession{}, false, err
 	}
 	var active int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM harness_sessions WHERE project_id=? AND harness=? AND agent_name=? AND phase<>'stopped'`, in.ProjectID, in.Harness, in.AgentName).Scan(&active); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM harness_sessions WHERE project_id=? AND harness=? AND agent_name=? AND phase<>'stopped'`, in.ProjectID, in.Harness, in.AgentName).Scan(&active); err != nil {
 		return models.HarnessSession{}, false, err
 	}
 	if active != 0 {
 		return models.HarnessSession{}, false, coded(CodeConflict, "an active harness session already owns this agent address")
 	}
 	var agentID int64
-	if err := s.db.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, in.ProjectID, in.AgentName).Scan(&agentID); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, in.ProjectID, in.AgentName).Scan(&agentID); err != nil {
 		return models.HarnessSession{}, false, coded(CodeNotFound, "agent is not registered in this project")
 	}
 	targetID := ""
 	if in.Capabilities.Inbox {
-		targetID, err = s.validateTarget(ctx, in)
+		targetID, err = s.validateTargetTx(ctx, tx, in)
 		if err != nil {
 			return models.HarnessSession{}, false, err
 		}
@@ -418,11 +448,6 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 	if in.ManagementMode == ManagementUnmanaged {
 		activityReason = ActivityUnmanaged
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return models.HarnessSession{}, false, err
-	}
-	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
 		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, workerDigest, nullString(targetID), in.ManagementMode, in.Role, in.SteerMode,
@@ -467,12 +492,20 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 }
 
 func (s *Service) VerifyWorkerLease(ctx context.Context, projectID int64, sessionID, lease string) (bool, error) {
+	return verifyWorkerLeaseQuery(ctx, s.db, projectID, sessionID, lease)
+}
+
+type workerLeaseQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func verifyWorkerLeaseQuery(ctx context.Context, q workerLeaseQueryer, projectID int64, sessionID, lease string) (bool, error) {
 	if projectID <= 0 || !ValidWorkerLease(strings.TrimSpace(lease)) {
 		return false, nil
 	}
 	var agent string
 	var stored []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT agent_name,worker_lease_digest FROM harness_sessions WHERE project_id=? AND id=?`, projectID, strings.TrimSpace(sessionID)).Scan(&agent, &stored); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT agent_name,worker_lease_digest FROM harness_sessions WHERE project_id=? AND id=?`, projectID, strings.TrimSpace(sessionID)).Scan(&agent, &stored); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
 		}

@@ -115,6 +115,7 @@ type AttentionInput struct {
 	WorkerAdapter string
 	AfterID       int64
 	Limit         int
+	Authority     TransactionAuthority
 }
 
 type AttentionAckInput struct {
@@ -123,6 +124,7 @@ type AttentionAckInput struct {
 	Agent     string
 	Cursor    int64
 	BatchID   string
+	Authority TransactionAuthority
 }
 
 type attentionReceiver struct {
@@ -164,6 +166,10 @@ type attentionQueryer interface {
 // advancing those watermarks. Mutable failure sources are selected through
 // narrow indexes and remain idempotent through their authoritative identity.
 func (s *Service) ProjectAttention(ctx context.Context) (int64, error) {
+	return s.projectAttention(ctx, nil)
+}
+
+func (s *Service) projectAttention(ctx context.Context, authority TransactionAuthority) (int64, error) {
 	receiver, err := resolveAttentionReceiver(ctx, s.db)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -305,6 +311,9 @@ func (s *Service) ProjectAttention(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
+	if err := authorizeAttentionTx(ctx, tx, authority); err != nil {
+		return 0, err
+	}
 	writeReceiver, err := resolveAttentionReceiver(ctx, tx)
 	if err != nil {
 		return 0, err
@@ -413,18 +422,65 @@ func resolveAttentionReceiver(ctx context.Context, q attentionQueryer) (*attenti
 // disabling the target must not temporarily downgrade its administration to
 // an ordinary project-admin operation.
 func (s *Service) IsOrchestratorAttentionAddress(ctx context.Context, projectID int64, address string) (bool, error) {
+	return IsOrchestratorAttentionAddressTx(ctx, s.db, projectID, address)
+}
+
+type orchestratorIdentityQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// IsOrchestratorAttentionAddressTx is the transaction-scoped form used by
+// target and harness mutations so orchestrator reassignment cannot race an
+// authorization decision made against an older snapshot.
+func IsOrchestratorAttentionAddressTx(ctx context.Context, q orchestratorIdentityQueryer, projectID int64, address string) (bool, error) {
 	_, agent, err := parseAddress(address)
 	if err != nil {
 		return false, err
 	}
 	var protected int
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(
 		SELECT 1 FROM instance_orchestrator io
 		JOIN project_agents pa ON pa.id=io.project_agent_id
 		WHERE io.singleton_id=1 AND pa.project_id=? AND pa.name=?)`, projectID, agent).Scan(&protected); err != nil {
 		return false, err
 	}
 	return protected == 1, nil
+}
+
+func authorizeAttentionTx(ctx context.Context, tx *sql.Tx, authority TransactionAuthority) error {
+	if authority == nil {
+		return nil
+	}
+	superAdmin, err := authority(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if !superAdmin {
+		return coded("agent_attention_forbidden", "orchestrator attention requires current super-admin authority")
+	}
+	return nil
+}
+
+func resolveAuthorizedAttentionReceiverTx(ctx context.Context, tx *sql.Tx, projectID int64, address, agent string) (string, int64, error) {
+	address, agentID, err := resolveAttributedInboxQuery(ctx, tx, projectID, address, agent)
+	if err != nil {
+		return "", 0, err
+	}
+	var receiverProjectID, receiverAgentID int64
+	err = tx.QueryRowContext(ctx, `SELECT pa.project_id,pa.id
+		FROM instance_orchestrator io JOIN project_agents pa ON pa.id=io.project_agent_id
+		WHERE io.singleton_id=1 AND io.project_agent_id IS NOT NULL`).Scan(&receiverProjectID, &receiverAgentID)
+	if err != nil {
+		return "", 0, err
+	}
+	// The project-agent identity is authoritative. The inbox address and its
+	// wake-capable target are deliberately separate: a missing, steer-only, or
+	// rotated target must yield durable blocked/requeue work rather than make
+	// the configured orchestrator disappear from the authorization check.
+	if receiverProjectID != projectID || receiverAgentID != agentID {
+		return "", 0, coded("agent_attention_receiver_changed", "attention receiver changed during the operation")
+	}
+	return address, agentID, nil
 }
 
 func scanAttentionItems(rows *sql.Rows) ([]AttentionItem, error) {
@@ -458,13 +514,14 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 	if in.WorkerAdapter != "" && !isAttentionWakeAdapter(in.WorkerAdapter) {
 		return nil, coded("agent_attention_worker_adapter_invalid", "delivery must name a registered local simple-handoff adapter")
 	}
-	// Authorize the attributed inbox before projecting any durable attention
-	// rows. The same attribution is resolved again inside the delivery
-	// transaction below so a target disabled between these steps fails closed.
+	// Validate the attributed inbox before scanning immutable sources. Current
+	// credential authority and orchestrator identity are resolved in the
+	// projection and delivery transactions below, so this early shape check is
+	// never an authorization decision.
 	if _, _, err := s.resolveAttributedInbox(ctx, in.ProjectID, in.Address, in.Agent); err != nil {
 		return nil, err
 	}
-	if _, err := s.ProjectAttention(ctx); err != nil {
+	if _, err := s.projectAttention(ctx, in.Authority); err != nil {
 		return nil, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -472,7 +529,10 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 		return nil, err
 	}
 	defer tx.Rollback()
-	address, agentID, err := resolveAttributedInboxQuery(ctx, tx, in.ProjectID, in.Address, in.Agent)
+	if err := authorizeAttentionTx(ctx, tx, in.Authority); err != nil {
+		return nil, err
+	}
+	address, agentID, err := resolveAuthorizedAttentionReceiverTx(ctx, tx, in.ProjectID, in.Address, in.Agent)
 	if err != nil {
 		return nil, err
 	}
@@ -647,7 +707,10 @@ func (s *Service) AckAttention(ctx context.Context, in AttentionAckInput) (*Curs
 		return nil, err
 	}
 	defer tx.Rollback()
-	address, agentID, err := resolveAttributedInboxQuery(ctx, tx, in.ProjectID, in.Address, in.Agent)
+	if err := authorizeAttentionTx(ctx, tx, in.Authority); err != nil {
+		return nil, err
+	}
+	address, agentID, err := resolveAuthorizedAttentionReceiverTx(ctx, tx, in.ProjectID, in.Address, in.Agent)
 	if err != nil {
 		return nil, err
 	}

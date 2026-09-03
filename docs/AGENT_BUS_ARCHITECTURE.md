@@ -191,7 +191,11 @@ configured orchestrator attention receiver is a cross-project portfolio
 boundary, so inspecting, registering/replacing, or requeueing any harness
 address for that stable project-agent identity requires super-admin authority.
 The same gate covers inbox-capable managed harness registration because that
-path can create a target version internally.
+path can create a target version internally. The credential and stable
+orchestrator identity are both re-resolved in the transaction that mutates the
+target or harness record; attention projection, lease/decryption, and cursor
+acknowledgement likewise use transaction-current authority. Revocation,
+demotion, or reassignment cannot rely on a stale middleware snapshot.
 
 For Codex, `target_ref` must be a Codex session/rollout UUID or an exact Codex
 session name accepted by `codex queue --thread`. It must never be a Cursor chat

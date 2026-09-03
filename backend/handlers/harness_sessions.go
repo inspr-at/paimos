@@ -103,6 +103,15 @@ func harnessProblem(w http.ResponseWriter, err error, fallback string, status in
 	messageProblem(w, nil, code, err.Error(), status)
 }
 func harnessStatus(err error) int {
+	var messageErr *agentmessage.CodedError
+	if errors.As(err, &messageErr) {
+		switch messageErr.Code {
+		case "agent_message_unauthorized":
+			return http.StatusUnauthorized
+		case "agent_message_forbidden", "agent_attention_target_forbidden":
+			return http.StatusForbidden
+		}
+	}
 	if managedharness.IsCode(err, managedharness.CodeNotFound) {
 		return http.StatusNotFound
 	}
@@ -142,13 +151,7 @@ func registerHarnessSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeHarnessJSON(w, r, &req) {
 		return
 	}
-	if req.Capabilities.Inbox {
-		service := agentmessage.NewService(db.DB)
-		if !authorizeOrchestratorAttentionTarget(w, r, service, projectID, req.Harness+":"+req.AgentName) {
-			return
-		}
-	}
-	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, SteerMode: req.SteerMode, Capabilities: req.Capabilities})
+	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, SteerMode: req.SteerMode, Capabilities: req.Capabilities, Authority: harnessRegistrationAuthority(r, projectID)})
 	if err != nil {
 		harnessProblem(w, err, "harness_session_register_failed", harnessStatus(err))
 		return

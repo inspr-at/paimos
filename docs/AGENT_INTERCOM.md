@@ -32,7 +32,11 @@ Prerequisites:
   registration/replacement, and target requeue require super-admin authority
   because that receiver obtains a cross-project portfolio digest. Registering
   an inbox-capable harness session for that orchestrator has the same gate,
-  since managed registration can create a target version internally.
+  since managed registration can create a target version internally. These
+  checks re-resolve the exact session or API-key principal and the current
+  orchestrator identity inside the same database transaction as target or
+  harness mutation. Revocation, demotion, or orchestrator reassignment after
+  middleware admission therefore fails closed without a partial target.
 - `AGENTD_SOCKET` names an absolute Unix socket in an owner-only directory.
   Do not commit or print it.
 - For durable status and typed interrupt/stop, `REPORT_HOST` is a stable
@@ -164,7 +168,9 @@ lease. The attention HTTP routes are an explicit cross-project orchestrator
 portfolio surface and require a re-authorized super-admin principal.
 `X-Paimos-Agent-Name` only selects the configured receiver identity; it grants
 no authority and a spoofed header cannot read, acknowledge, inspect, replace,
-or requeue this feed's target.
+or requeue this feed's target. Projection commit, lease/decryption, and cursor
+acknowledgement each reauthorize the exact credential in their own mutation
+transaction, so an earlier middleware decision is never the final authority.
 
 In the sender shell, establish attribution and send the durable message:
 

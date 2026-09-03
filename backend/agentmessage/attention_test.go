@@ -5,7 +5,9 @@ package agentmessage
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -79,6 +81,156 @@ func TestClassifyAttentionTransitionClosedPolicy(t *testing.T) {
 				t.Fatalf("got=%#v want=%#v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAttentionTransactionRevocationLeavesProjectionLeaseAndAckUntouched(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	_, sessionID := addAttentionWorker(t, projectID)
+	if _, err := paimosdb.DB.Exec(`INSERT INTO harness_session_events(harness_session_id,event_sequence,operation,phase,
+		activity_state,activity_reason,activity_event_kind,activity_sequence)
+		VALUES(?,1,'activity_timeout','working','unknown','heartbeat_stale','tool_started',7)`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	revoked := func(context.Context, *sql.Tx) (bool, error) {
+		return false, coded("agent_message_unauthorized", "current request credential is unavailable")
+	}
+	_, err := service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex, Authority: revoked,
+	})
+	var codedErr *CodedError
+	if !errors.As(err, &codedErr) || codedErr.Code != "agent_message_unauthorized" {
+		t.Fatalf("list error=%v", err)
+	}
+	for label, query := range map[string]string{
+		"items":   `SELECT COUNT(*) FROM agent_attention_items`,
+		"batches": `SELECT COUNT(*) FROM agent_attention_batches`,
+		"cursors": `SELECT COUNT(*) FROM agent_attention_projection_cursors`,
+	} {
+		var count int
+		if err := paimosdb.DB.QueryRow(query).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s count=%d err=%v", label, count, err)
+		}
+	}
+
+	page, err := service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
+	})
+	if err != nil || page.Work == nil || page.Work.State != "leased" {
+		t.Fatalf("trusted list page=%#v err=%v", page, err)
+	}
+	_, err = service.AckAttention(context.Background(), AttentionAckInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", Cursor: page.NextCursor, BatchID: page.Work.BatchID, Authority: revoked,
+	})
+	if !errors.As(err, &codedErr) || codedErr.Code != "agent_message_unauthorized" {
+		t.Fatalf("ack error=%v", err)
+	}
+	var state string
+	if err := paimosdb.DB.QueryRow(`SELECT state FROM agent_attention_batches WHERE batch_id=?`, page.Work.BatchID).Scan(&state); err != nil || state != "leased" {
+		t.Fatalf("batch state=%q err=%v", state, err)
+	}
+	var cursorCount int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_cursors`).Scan(&cursorCount); err != nil || cursorCount != 0 {
+		t.Fatalf("ack cursor count=%d err=%v", cursorCount, err)
+	}
+}
+
+func TestAttentionProjectionRejectsTransactionCurrentOrchestratorReassignment(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	bobResult, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'bob')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobID, _ := bobResult.LastInsertId()
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:bob", Adapter: AdapterCodex, TargetKind: TargetKindCodexThread,
+		TargetRef: "019d-bob-codex-thread", MaximumLevel: "simple", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, sessionID := addAttentionWorker(t, projectID)
+	if _, err := paimosdb.DB.Exec(`INSERT INTO harness_session_events(harness_session_id,event_sequence,operation,phase,
+		activity_state,activity_reason,activity_event_kind,activity_sequence)
+		VALUES(?,1,'activity_timeout','working','unknown','heartbeat_stale','tool_started',7)`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
+		Authority: func(ctx context.Context, tx *sql.Tx) (bool, error) {
+			if _, err := tx.ExecContext(ctx, `UPDATE instance_orchestrator SET project_agent_id=?,display_label='Bob',revision=revision+1,
+				updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton_id=1`, bobID); err != nil {
+				return false, err
+			}
+			return true, nil
+		},
+	})
+	var codedErr *CodedError
+	if !errors.As(err, &codedErr) || codedErr.Code != "agent_attention_receiver_changed" {
+		t.Fatalf("error=%v", err)
+	}
+	for label, query := range map[string]string{
+		"items":   `SELECT COUNT(*) FROM agent_attention_items`,
+		"batches": `SELECT COUNT(*) FROM agent_attention_batches`,
+	} {
+		var count int
+		if err := paimosdb.DB.QueryRow(query).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s count=%d err=%v", label, count, err)
+		}
+	}
+	var name string
+	if err := paimosdb.DB.QueryRow(`SELECT pa.name FROM instance_orchestrator io JOIN project_agents pa ON pa.id=io.project_agent_id`).Scan(&name); err != nil || name != "amy" {
+		t.Fatalf("orchestrator=%q err=%v", name, err)
+	}
+
+	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 1 {
+		t.Fatalf("trusted projection inserted=%d err=%v", inserted, err)
+	}
+	authorityCalls := 0
+	_, err = service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
+		Authority: func(ctx context.Context, tx *sql.Tx) (bool, error) {
+			authorityCalls++
+			if authorityCalls == 2 {
+				if _, err := tx.ExecContext(ctx, `UPDATE instance_orchestrator SET project_agent_id=?,display_label='Bob',revision=revision+1,
+					updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton_id=1`, bobID); err != nil {
+					return false, err
+				}
+			}
+			return true, nil
+		},
+	})
+	if !errors.As(err, &codedErr) || codedErr.Code != "agent_attention_receiver_changed" {
+		t.Fatalf("lease reassignment error=%v calls=%d", err, authorityCalls)
+	}
+	var batchCount int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_batches`).Scan(&batchCount); err != nil || batchCount != 0 {
+		t.Fatalf("batch count=%d err=%v", batchCount, err)
+	}
+
+	page, err := service.ListAttention(context.Background(), AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex,
+	})
+	if err != nil || page.Work == nil || page.Work.State != "leased" {
+		t.Fatalf("trusted lease page=%#v err=%v", page, err)
+	}
+	_, err = service.AckAttention(context.Background(), AttentionAckInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy", Cursor: page.NextCursor, BatchID: page.Work.BatchID,
+		Authority: func(ctx context.Context, tx *sql.Tx) (bool, error) {
+			if _, err := tx.ExecContext(ctx, `UPDATE instance_orchestrator SET project_agent_id=?,display_label='Bob',revision=revision+1,
+				updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton_id=1`, bobID); err != nil {
+				return false, err
+			}
+			return true, nil
+		},
+	})
+	if !errors.As(err, &codedErr) || codedErr.Code != "agent_attention_receiver_changed" {
+		t.Fatalf("ack reassignment error=%v", err)
+	}
+	var state string
+	if err := paimosdb.DB.QueryRow(`SELECT state FROM agent_attention_batches WHERE batch_id=?`, page.Work.BatchID).Scan(&state); err != nil || state != "leased" {
+		t.Fatalf("batch state=%q err=%v", state, err)
 	}
 }
 

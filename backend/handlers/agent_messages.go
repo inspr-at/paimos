@@ -4,12 +4,14 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/inspr-at/paimos/backend/agentmessage"
@@ -219,12 +221,10 @@ func registerAgentMessageTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	service := agentmessage.NewService(db.DB)
-	if !authorizeOrchestratorAttentionTarget(w, r, service, projectID, req.Address) {
-		return
-	}
 	target, err := service.RegisterTarget(r.Context(), agentmessage.RegisterTargetInput{
 		ProjectID: projectID, Address: req.Address, Adapter: req.Adapter, TargetKind: req.TargetKind,
 		TargetRef: req.TargetRef, TargetSecret: req.TargetSecret, MaximumLevel: req.MaximumLevel, Role: req.Role,
+		Authority: messageTargetAuthority(r),
 	})
 	if err != nil {
 		writeAgentMessageError(w, r, err)
@@ -243,27 +243,10 @@ func listAgentMessageTargets(w http.ResponseWriter, r *http.Request) {
 	}
 	service := agentmessage.NewService(db.DB)
 	address := r.URL.Query().Get("address")
-	if address != "" && !authorizeOrchestratorAttentionTarget(w, r, service, projectID, address) {
-		return
-	}
-	targets, err := service.ListTargets(r.Context(), projectID, address)
+	targets, err := service.ListTargetsAuthorized(r.Context(), projectID, address, messageTargetAuthority(r))
 	if err != nil {
 		writeAgentMessageError(w, r, err)
 		return
-	}
-	if !auth.IsSuperAdminRequest(r) {
-		visible := targets[:0]
-		for _, target := range targets {
-			protected, checkErr := service.IsOrchestratorAttentionAddress(r.Context(), projectID, target.Address)
-			if checkErr != nil {
-				writeAgentMessageError(w, r, checkErr)
-				return
-			}
-			if !protected {
-				visible = append(visible, target)
-			}
-		}
-		targets = visible
 	}
 	jsonOK(w, map[string]any{"targets": targets, "count": len(targets)})
 }
@@ -282,10 +265,7 @@ func requeueAgentMessageTargets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	service := agentmessage.NewService(db.DB)
-	if !authorizeOrchestratorAttentionTarget(w, r, service, projectID, req.Address) {
-		return
-	}
-	count, err := service.RequeueMissingTargets(r.Context(), projectID, req.Address)
+	count, err := service.RequeueMissingTargetsAuthorized(r.Context(), projectID, req.Address, messageTargetAuthority(r))
 	if err != nil {
 		writeAgentMessageError(w, r, err)
 		return
@@ -293,21 +273,35 @@ func requeueAgentMessageTargets(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"address": strings.TrimSpace(req.Address), "requeued": count})
 }
 
-// authorizeOrchestratorAttentionTarget preserves ordinary project-admin
-// target management while reserving the configured cross-project attention
-// receiver for super-admin authority. The address selects the protected
-// identity; request headers never grant it.
-func authorizeOrchestratorAttentionTarget(w http.ResponseWriter, r *http.Request, service *agentmessage.Service, projectID int64, address string) bool {
-	protected, err := service.IsOrchestratorAttentionAddress(r.Context(), projectID, address)
-	if err != nil {
-		writeAgentMessageError(w, r, err)
-		return false
+func messageTargetAuthority(r *http.Request) agentmessage.TransactionAuthority {
+	return func(ctx context.Context, tx *sql.Tx) (bool, error) {
+		user, _, err := auth.ReauthorizeRequestPrincipalTx(ctx, tx, r, time.Now().UTC())
+		if err != nil || user == nil {
+			return false, &agentmessage.CodedError{Code: "agent_message_unauthorized", Err: errors.New("current request credential is unavailable")}
+		}
+		superAdmin := auth.IsSuperAdmin(user)
+		if !superAdmin && !auth.IsAdmin(user) {
+			return false, &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("current administrator authority is required")}
+		}
+		return superAdmin, nil
 	}
-	if protected && !auth.IsSuperAdminRequest(r) {
-		messageProblem(w, r, "agent_attention_target_forbidden", "orchestrator attention targets require super-admin authority", http.StatusForbidden)
-		return false
+}
+
+func harnessRegistrationAuthority(r *http.Request, projectID int64) agentmessage.TransactionAuthority {
+	return func(ctx context.Context, tx *sql.Tx) (bool, error) {
+		user, _, err := auth.ReauthorizeRequestPrincipalTx(ctx, tx, r, time.Now().UTC())
+		if err != nil || user == nil {
+			return false, &agentmessage.CodedError{Code: "agent_message_unauthorized", Err: errors.New("current request credential is unavailable")}
+		}
+		allowed, err := canEditProjectTx(ctx, tx, user, projectID)
+		if err != nil {
+			return false, err
+		}
+		if !allowed {
+			return false, &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("current project edit authority is required")}
+		}
+		return auth.IsSuperAdmin(user), nil
 	}
-	return true
 }
 
 func listAgentMessageDeliveries(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +401,7 @@ func listenAgentAttention(w http.ResponseWriter, r *http.Request) {
 	page, err := agentmessage.NewService(db.DB).ListAttention(r.Context(), agentmessage.AttentionInput{
 		ProjectID: projectID, Address: strings.TrimSpace(r.URL.Query().Get("to")), Agent: attributed,
 		WorkerAdapter: strings.ToLower(strings.TrimSpace(r.URL.Query().Get("delivery"))), AfterID: after, Limit: limit,
+		Authority: messageTargetAuthority(r),
 	})
 	if err != nil {
 		writeAgentMessageError(w, r, err)
@@ -463,7 +458,7 @@ func ackAgentAttention(w http.ResponseWriter, r *http.Request) {
 	}
 	state, err := agentmessage.NewService(db.DB).AckAttention(r.Context(), agentmessage.AttentionAckInput{
 		ProjectID: projectID, Address: strings.TrimSpace(req.To), Agent: attributed,
-		Cursor: req.Cursor, BatchID: strings.TrimSpace(req.BatchID),
+		Cursor: req.Cursor, BatchID: strings.TrimSpace(req.BatchID), Authority: messageTargetAuthority(r),
 	})
 	if err != nil {
 		writeAgentMessageError(w, r, err)
@@ -545,8 +540,13 @@ func writeAgentMessageError(w http.ResponseWriter, r *http.Request, err error) {
 	var coded *agentmessage.CodedError
 	if errors.As(err, &coded) {
 		code = coded.Code
-		if code == "agent_message_idempotency_conflict" {
+		switch code {
+		case "agent_message_idempotency_conflict":
 			status = http.StatusConflict
+		case "agent_message_unauthorized", "agent_attention_unauthorized":
+			status = http.StatusUnauthorized
+		case "agent_message_forbidden", "agent_attention_forbidden", "agent_attention_target_forbidden":
+			status = http.StatusForbidden
 		}
 	}
 	if errors.Is(err, agentmessage.ErrBodyTooLarge) {
