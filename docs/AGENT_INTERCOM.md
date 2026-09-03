@@ -74,6 +74,45 @@ SESSION_ID="$({
 paimos-agentd status --instance "$INSTANCE" --socket "$AGENTD_SOCKET"
 ```
 
+An owned child may also carry explicit durable hierarchy and ticket fields;
+they are never encoded into its identity, prompt, workspace, product session,
+or attribution session:
+
+```bash
+printf '%s' 'Work only on the assigned ticket.' |
+  paimos-agentd start --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
+    --adapter codex --workspace "$PWD" --project-id "$PROJECT_ID" \
+    --identity codex:child --role worker \
+    --parent-session '<active-public-parent-harness-session-uuid>' \
+    --ticket-id '<numeric-ticket-id>'
+```
+
+Registration accepts those nullable fields only when explicitly supplied.
+The parent must be active in the same project, the ticket must be a live
+same-project ticket/task, and a parent chain may not cycle or exceed 16
+ancestors. Exact registration replay is idempotent only when both bindings are
+unchanged; it cannot silently reparent an unknown or dead generation.
+
+An authorized operator can explicitly attach, reassign, or detach the full
+binding with revision compare-and-set:
+
+```bash
+paimos harness bind --project "$PROJECT" --session '<public-session-uuid>' \
+  --revision '<current-revision>' \
+  --parent-session '<active-public-parent-harness-session-uuid-or-empty>' \
+  --ticket-id '<numeric-ticket-id-or-zero>'
+```
+
+Every successful reassignment advances the session revision and appends one
+immutable `binding_changed` event containing the before/after parent and
+ticket IDs. Stale revisions, cross-project references, terminal parents,
+cycles, over-depth chains, and invalid tickets fail before mutation. UI worker
+markers must read this durable projection; browser state is never a binding
+source. `paimos harness orchestrator --project "$PROJECT"` resolves a project
+orchestrator only when exactly one active coordinator has known `busy` or
+`idle` evidence. Zero candidates returns `unset`; multiple candidates returns
+`ambiguous`; missing evidence is never interpreted as idle.
+
 Wait until that session reports `state=running`, `steerable=true`, and a
 non-empty `sessions[].harness_session_id` before steering it. In local agentd
 status, `harness_session_id` is the vendor Codex thread or Claude session ID;

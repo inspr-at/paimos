@@ -18,9 +18,9 @@ import (
 
 func harnessCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "harness", Short: "Manage durable harness-session control-plane state"}
-	cmd.AddCommand(harnessRegisterCmd(), harnessListCmd(), harnessStatusCmd(), harnessHeartbeatCmd(), harnessYieldCmd(),
+	cmd.AddCommand(harnessRegisterCmd(), harnessListCmd(), harnessStatusCmd(), harnessOrchestratorCmd(), harnessHeartbeatCmd(), harnessYieldCmd(),
 		harnessDrainCmd(), harnessCompleteDeliveryCmd(), harnessDrainSteerCmd(), harnessCompleteSteerCmd(),
-		harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessControlGroupCmd(), harnessCompleteControlCmd(), harnessMarkStoppedCmd())
+		harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessControlGroupCmd(), harnessCompleteControlCmd(), harnessMarkStoppedCmd(), harnessBindCmd())
 	return cmd
 }
 
@@ -49,11 +49,15 @@ func parseHarnessCapabilities(raw []string) (models.HarnessCapabilities, error) 
 }
 
 func harnessRegisterCmd() *cobra.Command {
-	var project, agent, harness, host, refFile, leaseFile, registrationFile, targetID, management, role, steerMode string
+	var project, agent, harness, host, refFile, leaseFile, registrationFile, targetID, management, role, parentSessionID, steerMode string
+	var ticketID int64
 	var capabilities []string
 	cmd := &cobra.Command{Use: "register", Short: "Register a durable managed or unmanaged harness session", RunE: func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(project) == "" || strings.TrimSpace(agent) == "" || strings.TrimSpace(harness) == "" || strings.TrimSpace(host) == "" {
 			return &usageError{msg: "--project, --agent, --harness, and --host are required"}
+		}
+		if ticketID < 0 {
+			return &usageError{msg: "--ticket-id must be positive when supplied"}
 		}
 		if registrationFile != "" && (refFile != "" || leaseFile != "") {
 			return &usageError{msg: "--registration-file cannot be combined with --harness-session-file or --worker-lease-file"}
@@ -90,7 +94,15 @@ func harnessRegisterCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		input := managedharness.RegisterInput{ProjectID: 1, AgentName: agent, Harness: harness, Host: host, SessionRef: ref, WorkerLease: workerLease, MessageTargetID: targetID, ManagementMode: management, Role: role, SteerMode: steerMode, Capabilities: caps}
+		var parent *string
+		if parentSessionID != "" {
+			parent = &parentSessionID
+		}
+		var ticket *int64
+		if ticketID > 0 {
+			ticket = &ticketID
+		}
+		input := managedharness.RegisterInput{ProjectID: 1, AgentName: agent, Harness: harness, Host: host, SessionRef: ref, WorkerLease: workerLease, MessageTargetID: targetID, ManagementMode: management, Role: role, ParentSessionID: parent, TicketID: ticket, SteerMode: steerMode, Capabilities: caps}
 		if err := managedharness.ValidateRegistration(input); err != nil {
 			return &usageError{msg: err.Error()}
 		}
@@ -102,7 +114,7 @@ func harnessRegisterCmd() *cobra.Command {
 		if err != nil {
 			return reportError(err)
 		}
-		payload := map[string]any{"agent_name": agent, "harness": harness, "host": host, "harness_session_ref": ref, "worker_lease": workerLease, "message_target_id": targetID, "management_mode": management, "role": role, "steer_mode": steerMode, "advertised_capabilities": caps}
+		payload := map[string]any{"agent_name": agent, "harness": harness, "host": host, "harness_session_ref": ref, "worker_lease": workerLease, "message_target_id": targetID, "management_mode": management, "role": role, "parent_harness_session_id": parent, "ticket_id": ticket, "steer_mode": steerMode, "advertised_capabilities": caps}
 		response, err := client.do(http.MethodPost, fmt.Sprintf("/api/projects/%d/harness-sessions", projectID), payload)
 		if err != nil {
 			return reportError(err)
@@ -119,6 +131,8 @@ func harnessRegisterCmd() *cobra.Command {
 	cmd.Flags().StringVar(&targetID, "message-target-id", "", "existing encrypted target id for an unmanaged inbox")
 	cmd.Flags().StringVar(&management, "management", "managed", "managed or unmanaged")
 	cmd.Flags().StringVar(&role, "role", "worker", "coordinator or worker")
+	cmd.Flags().StringVar(&parentSessionID, "parent-session", "", "active parent public harness-session UUID")
+	cmd.Flags().Int64Var(&ticketID, "ticket-id", 0, "active project ticket numeric ID")
 	cmd.Flags().StringVar(&steerMode, "steer-mode", "none", "none, owned, or codex_external")
 	cmd.Flags().StringSliceVar(&capabilities, "capability", nil, "advertised capabilities: inbox,status,steer,interrupt,stop")
 	return cmd
@@ -230,6 +244,35 @@ func harnessListCmd() *cobra.Command {
 }
 func harnessStatusCmd() *cobra.Command {
 	return harnessProjectCommand("status", "Show one non-secret harness session", http.MethodGet, "/{session}", func() any { return nil }, false)
+}
+func harnessOrchestratorCmd() *cobra.Command {
+	return harnessProjectCommand("orchestrator", "Resolve the authoritative project orchestrator", http.MethodGet, "/orchestrator", func() any { return nil }, false)
+}
+
+func harnessBindCmd() *cobra.Command {
+	var revision, ticketID int64
+	var parentSessionID string
+	cmd := harnessProjectCommand("bind", "Explicitly assign hierarchy and ticket bindings with revision CAS", http.MethodPatch, "/{session}/binding", func() any {
+		var parent *string
+		if parentSessionID != "" {
+			parent = &parentSessionID
+		}
+		var ticket *int64
+		if ticketID > 0 {
+			ticket = &ticketID
+		}
+		return map[string]any{"expected_revision": revision, "parent_harness_session_id": parent, "ticket_id": ticket}
+	}, false)
+	cmd.PreRunE = func(cmd *cobra.Command, _ []string) error {
+		if revision <= 0 || !cmd.Flags().Changed("parent-session") || !cmd.Flags().Changed("ticket-id") || ticketID < 0 {
+			return &usageError{msg: "--revision, --parent-session, and --ticket-id are required; use empty/zero to detach"}
+		}
+		return nil
+	}
+	cmd.Flags().Int64Var(&revision, "revision", 0, "exact current harness-session revision")
+	cmd.Flags().StringVar(&parentSessionID, "parent-session", "", "active parent public harness-session UUID, or empty to detach")
+	cmd.Flags().Int64Var(&ticketID, "ticket-id", 0, "active project ticket numeric ID, or zero to detach")
+	return cmd
 }
 func harnessHeartbeatCmd() *cobra.Command {
 	var phase, activityKind string

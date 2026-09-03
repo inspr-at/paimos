@@ -50,13 +50,52 @@ func TestHarnessOpenAPIRequiresWorkerLeaseOnEveryWorkerMutation(t *testing.T) {
 	}
 }
 
+func TestHarnessOpenAPIKeepsSessionAndTicketIdentitiesDistinct(t *testing.T) {
+	raw, err := os.ReadFile("openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		t.Fatal(err)
+	}
+	harness := contract.Components.Schemas["HarnessSession"].Properties
+	product := contract.Components.Schemas["ProductSession"].Properties
+	for _, field := range []string{"id", "parent_harness_session_id", "ticket_id"} {
+		if _, ok := harness[field]; !ok {
+			t.Fatalf("HarnessSession missing distinct %s field", field)
+		}
+	}
+	for _, foreign := range []string{"product_session_id", "attribution_session_id"} {
+		if _, ok := harness[foreign]; ok {
+			t.Fatalf("HarnessSession overloads foreign identity %s", foreign)
+		}
+	}
+	if _, ok := product["product_session_id"]; !ok {
+		t.Fatal("ProductSession lost its dedicated product_session_id")
+	}
+	for _, foreign := range []string{"parent_harness_session_id", "ticket_id"} {
+		if _, ok := product[foreign]; ok {
+			t.Fatalf("ProductSession overloads harness binding %s", foreign)
+		}
+	}
+}
+
 func TestHarnessSessionRoutesAreProjectScopedAndDistinct(t *testing.T) {
 	router := chi.NewRouter()
 	RegisterHarnessSessionRoutes(router)
 	want := map[string]bool{
 		"GET /projects/{id}/harness-sessions":                                            false,
+		"GET /projects/{id}/harness-sessions/orchestrator":                               false,
 		"POST /projects/{id}/harness-sessions":                                           false,
 		"GET /projects/{id}/harness-sessions/{sessionID}":                                false,
+		"PATCH /projects/{id}/harness-sessions/{sessionID}/binding":                      false,
 		"POST /projects/{id}/harness-sessions/{sessionID}/heartbeat":                     false,
 		"POST /projects/{id}/harness-sessions/{sessionID}/yield":                         false,
 		"POST /projects/{id}/harness-sessions/{sessionID}/drain":                         false,
