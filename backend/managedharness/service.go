@@ -69,6 +69,7 @@ const (
 	CodeConflict              = "harness_session_conflict"
 	CodeCapabilityInvalid     = "harness_session_capability_invalid"
 	CodeCapabilityUnavailable = "harness_session_capability_unavailable"
+	MaxHierarchyDepth         = 16
 )
 
 var stableValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
@@ -111,6 +112,8 @@ type RegisterInput struct {
 	MessageTargetID string
 	ManagementMode  string
 	Role            string
+	ParentSessionID *string
+	TicketID        *int64
 	SteerMode       string
 	Capabilities    models.HarnessCapabilities
 }
@@ -129,7 +132,22 @@ type ActivityEvidence struct {
 
 type Service struct{ db *sql.DB }
 
+type queryRower interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 func NewService(database *sql.DB) *Service { return &Service{db: database} }
+
+// BindingInput is an explicit operator-authorized hierarchy/ticket mutation.
+// Both nullable fields are authoritative desired state, and ExpectedRevision
+// is mandatory so an old UI or concurrent controller cannot silently rebind.
+type BindingInput struct {
+	ProjectID        int64
+	SessionID        string
+	ExpectedRevision int64
+	ParentSessionID  *string
+	TicketID         *int64
+}
 
 func normalizeRegister(in RegisterInput) RegisterInput {
 	in.AgentName = strings.TrimSpace(in.AgentName)
@@ -140,6 +158,10 @@ func normalizeRegister(in RegisterInput) RegisterInput {
 	in.MessageTargetID = strings.TrimSpace(in.MessageTargetID)
 	in.ManagementMode = strings.ToLower(strings.TrimSpace(in.ManagementMode))
 	in.Role = strings.ToLower(strings.TrimSpace(in.Role))
+	if in.ParentSessionID != nil {
+		value := strings.TrimSpace(*in.ParentSessionID)
+		in.ParentSessionID = &value
+	}
 	in.SteerMode = strings.ToLower(strings.TrimSpace(in.SteerMode))
 	return in
 }
@@ -163,6 +185,12 @@ func validateRegister(in RegisterInput) error {
 	}
 	if in.Role != RoleCoordinator && in.Role != RoleWorker {
 		return coded(CodeInvalid, "role must be coordinator or worker")
+	}
+	if in.ParentSessionID != nil && uuid.Validate(*in.ParentSessionID) != nil {
+		return coded(CodeInvalid, "parent harness session id must be a UUID")
+	}
+	if in.TicketID != nil && *in.TicketID <= 0 {
+		return coded(CodeInvalid, "ticket id must be positive")
 	}
 	if in.SteerMode != SteerNone && in.SteerMode != SteerOwned && in.SteerMode != SteerCodexExternal {
 		return coded(CodeInvalid, "steer mode must be none, owned, or codex_external")
@@ -227,7 +255,108 @@ func nullString(value string) any {
 	return value
 }
 
-const sessionColumns = `id,project_id,project_agent_id,agent_name,harness,host,COALESCE(message_target_id,''),management_mode,role,steer_mode,
+func nullStringPointer(value *string) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func nullInt64Pointer(value *int64) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func equalStringPointers(left, right *string) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func equalInt64Pointers(left, right *int64) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func normalizeBinding(parent *string, ticket *int64) (*string, *int64, error) {
+	if parent != nil {
+		value := strings.TrimSpace(*parent)
+		if uuid.Validate(value) != nil {
+			return nil, nil, coded(CodeInvalid, "parent harness session id must be a UUID")
+		}
+		parent = &value
+	}
+	if ticket != nil && *ticket <= 0 {
+		return nil, nil, coded(CodeInvalid, "ticket id must be positive")
+	}
+	return parent, ticket, nil
+}
+
+func validateBindingReferences(ctx context.Context, query queryRower, projectID int64, sessionID string, parent *string, ticket *int64) error {
+	if parent != nil {
+		if *parent == sessionID && sessionID != "" {
+			return coded(CodeInvalid, "a harness session cannot be its own parent")
+		}
+		var present int
+		if err := query.QueryRowContext(ctx, `SELECT COUNT(*) FROM harness_sessions WHERE id=? AND project_id=? AND phase<>?`, *parent, projectID, PhaseStopped).Scan(&present); err != nil {
+			return err
+		}
+		if present != 1 {
+			return coded(CodeInvalid, "parent harness session is invalid")
+		}
+		seen := map[string]bool{}
+		if sessionID != "" {
+			seen[sessionID] = true
+		}
+		cursor := *parent
+		ancestorCount := 0
+		for {
+			ancestorCount++
+			if seen[cursor] {
+				return coded(CodeInvalid, "parent harness session would create a cycle")
+			}
+			seen[cursor] = true
+			if ancestorCount > MaxHierarchyDepth {
+				return coded(CodeInvalid, "harness session hierarchy exceeds the maximum depth")
+			}
+			var next sql.NullString
+			if err := query.QueryRowContext(ctx, `SELECT parent_harness_session_id FROM harness_sessions WHERE id=? AND project_id=?`, cursor, projectID).Scan(&next); err != nil {
+				return coded(CodeInvalid, "parent harness session is invalid")
+			}
+			if !next.Valid || next.String == "" {
+				break
+			}
+			cursor = next.String
+		}
+		if sessionID != "" {
+			var subtreeHeight int
+			if err := query.QueryRowContext(ctx, `WITH RECURSIVE subtree(id,depth) AS (
+				SELECT id,0 FROM harness_sessions WHERE id=? AND project_id=?
+				UNION ALL
+				SELECT child.id,subtree.depth+1 FROM harness_sessions child
+				JOIN subtree ON child.parent_harness_session_id=subtree.id
+				WHERE child.project_id=? AND subtree.depth<?
+			) SELECT COALESCE(MAX(depth),0) FROM subtree`, sessionID, projectID, projectID, MaxHierarchyDepth+1).Scan(&subtreeHeight); err != nil {
+				return err
+			}
+			if ancestorCount+subtreeHeight > MaxHierarchyDepth {
+				return coded(CodeInvalid, "harness session hierarchy exceeds the maximum depth")
+			}
+		}
+	}
+	if ticket != nil {
+		var present int
+		if err := query.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE id=? AND project_id=? AND deleted_at IS NULL AND type IN ('ticket','task')`, *ticket, projectID).Scan(&present); err != nil {
+			return err
+		}
+		if present != 1 {
+			return coded(CodeInvalid, "ticket binding is invalid")
+		}
+	}
+	return nil
+}
+
+const sessionColumns = `id,project_id,project_agent_id,agent_name,harness,host,COALESCE(message_target_id,''),management_mode,role,
+	COALESCE(parent_harness_session_id,''),ticket_id,steer_mode,
 	advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,COALESCE(heartbeat_at,''),
 	activity_state,activity_reason,activity_event_kind,COALESCE(activity_at,''),activity_sequence,closed_reason,
 	COALESCE(yielded_at,''),yield_sequence,revision,created_at,updated_at`
@@ -235,11 +364,19 @@ const sessionColumns = `id,project_id,project_agent_id,agent_name,harness,host,C
 func scanSession(row interface{ Scan(...any) error }) (models.HarnessSession, error) {
 	var out models.HarnessSession
 	var inbox, status, steer, interrupt, stop int
+	var parent string
+	var ticket sql.NullInt64
 	err := row.Scan(&out.ID, &out.ProjectID, &out.ProjectAgentID, &out.AgentName, &out.Harness, &out.Host, &out.MessageTargetID,
-		&out.ManagementMode, &out.Role, &out.SteerMode, &inbox, &status, &steer, &interrupt, &stop, &out.Phase,
+		&out.ManagementMode, &out.Role, &parent, &ticket, &out.SteerMode, &inbox, &status, &steer, &interrupt, &stop, &out.Phase,
 		&out.HeartbeatAt, &out.ActivityState, &out.ActivityReason, &out.ActivityKind, &out.ActivityAt, &out.ActivitySequence, &out.ClosedReason,
 		&out.YieldedAt, &out.YieldSequence, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
 	out.Capabilities = models.HarnessCapabilities{Inbox: inbox == 1, Status: status == 1, Steer: steer == 1, Interrupt: interrupt == 1, Stop: stop == 1}
+	if parent != "" {
+		out.ParentSessionID = &parent
+	}
+	if ticket.Valid {
+		out.TicketID = &ticket.Int64
+	}
 	if parsed, parseErr := time.Parse(time.RFC3339Nano, out.ActivityAt); parseErr == nil {
 		age := int64(time.Since(parsed).Seconds())
 		if age < 0 {
@@ -295,10 +432,15 @@ func activityFromKind(kind string) (state, reason string) {
 }
 
 func appendSessionEventTx(ctx context.Context, tx *sql.Tx, session models.HarnessSession, operation string) error {
+	beforeParent, beforeTicket := nullStringPointer(session.ParentSessionID), nullInt64Pointer(session.TicketID)
+	if operation == "register" {
+		beforeParent, beforeTicket = nil, nil
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO harness_session_events(
-		harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,activity_sequence,closed_reason)
-		VALUES(?,?,?,?,?,?,?,?,?)`, session.ID, session.Revision, operation, session.Phase, session.ActivityState,
-		session.ActivityReason, session.ActivityKind, session.ActivitySequence, session.ClosedReason)
+		harness_session_id,event_sequence,operation,before_parent_harness_session_id,after_parent_harness_session_id,before_ticket_id,after_ticket_id,
+		phase,activity_state,activity_reason,activity_event_kind,activity_sequence,closed_reason)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, session.ID, session.Revision, operation, beforeParent, nullStringPointer(session.ParentSessionID), beforeTicket, nullInt64Pointer(session.TicketID),
+		session.Phase, session.ActivityState, session.ActivityReason, session.ActivityKind, session.ActivitySequence, session.ClosedReason)
 	return err
 }
 
@@ -386,11 +528,14 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 			return models.HarnessSession{}, false, coded(CodeInvalid, "harness worker lease is invalid")
 		}
 		if !sameRegistration(existing, in) {
-			return models.HarnessSession{}, false, coded(CodeConflict, "stable external identity is already registered with different agent, ownership, role, or advertised capabilities")
+			return models.HarnessSession{}, false, coded(CodeConflict, "stable external identity is already registered with different agent, ownership, role, hierarchy/ticket bindings, or advertised capabilities")
 		}
 		return existing, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
+		return models.HarnessSession{}, false, err
+	}
+	if err := validateBindingReferences(ctx, s.db, in.ProjectID, "", in.ParentSessionID, in.TicketID); err != nil {
 		return models.HarnessSession{}, false, err
 	}
 	var active int
@@ -423,9 +568,13 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		return models.HarnessSession{}, false, err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,steer_mode,
-		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, workerDigest, nullString(targetID), in.ManagementMode, in.Role, in.SteerMode,
+	if err := validateBindingReferences(ctx, tx, in.ProjectID, id, in.ParentSessionID, in.TicketID); err != nil {
+		return models.HarnessSession{}, false, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,parent_harness_session_id,ticket_id,steer_mode,
+		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, workerDigest, nullString(targetID), in.ManagementMode, in.Role,
+		nullStringPointer(in.ParentSessionID), nullInt64Pointer(in.TicketID), in.SteerMode,
 		boolInt(c.Inbox), boolInt(c.Status), boolInt(c.Steer), boolInt(c.Interrupt), boolInt(c.Stop), PhaseStarting, activityReason)
 	if err != nil {
 		_ = tx.Rollback()
@@ -485,6 +634,7 @@ func (s *Service) VerifyWorkerLease(ctx context.Context, projectID int64, sessio
 func sameRegistration(s models.HarnessSession, in RegisterInput) bool {
 	return s.ProjectID == in.ProjectID && s.AgentName == in.AgentName && s.Harness == in.Harness && s.Host == in.Host &&
 		s.ManagementMode == in.ManagementMode && s.Role == in.Role && s.SteerMode == in.SteerMode && s.Capabilities == in.Capabilities &&
+		equalStringPointers(s.ParentSessionID, in.ParentSessionID) && equalInt64Pointers(s.TicketID, in.TicketID) &&
 		(in.MessageTargetID == "" || s.MessageTargetID == in.MessageTargetID)
 }
 
@@ -517,6 +667,111 @@ func (s *Service) List(ctx context.Context, projectID int64) ([]models.HarnessSe
 		out = append(out, value)
 	}
 	return out, rows.Err()
+}
+
+// AssignBinding performs the only post-registration hierarchy/ticket mutation.
+// It is deliberately separate from worker heartbeats and registration replay:
+// an authenticated operator must supply the exact generation being changed.
+func (s *Service) AssignBinding(ctx context.Context, input BindingInput) (models.HarnessSession, error) {
+	if s == nil || s.db == nil || input.ProjectID <= 0 || uuid.Validate(strings.TrimSpace(input.SessionID)) != nil || input.ExpectedRevision < 1 {
+		return models.HarnessSession{}, coded(CodeInvalid, "project, session, and expected revision are required")
+	}
+	parent, ticket, err := normalizeBinding(input.ParentSessionID, input.TicketID)
+	if err != nil {
+		return models.HarnessSession{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.HarnessSession{}, err
+	}
+	defer tx.Rollback()
+	current, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND id=?`, input.ProjectID, strings.TrimSpace(input.SessionID)))
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.HarnessSession{}, coded(CodeNotFound, "harness session not found")
+	}
+	if err != nil {
+		return models.HarnessSession{}, err
+	}
+	if current.Revision != input.ExpectedRevision {
+		return models.HarnessSession{}, coded(CodeConflict, "harness session binding revision is stale")
+	}
+	parentChanged := !equalStringPointers(current.ParentSessionID, parent)
+	ticketChanged := !equalInt64Pointers(current.TicketID, ticket)
+	if !parentChanged && !ticketChanged {
+		return models.HarnessSession{}, coded(CodeConflict, "harness session binding is unchanged")
+	}
+	// The request carries the complete desired binding state, but only changed
+	// references are revalidated. Historical stopped/deleted references remain
+	// readable and can therefore coexist while an operator changes the other
+	// field; a changed parent or ticket still receives every normal guard.
+	var parentToValidate *string
+	if parentChanged {
+		parentToValidate = parent
+	}
+	var ticketToValidate *int64
+	if ticketChanged {
+		ticketToValidate = ticket
+	}
+	if err := validateBindingReferences(ctx, tx, input.ProjectID, current.ID, parentToValidate, ticketToValidate); err != nil {
+		return models.HarnessSession{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET parent_harness_session_id=?,ticket_id=?,revision=revision+1,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE project_id=? AND id=? AND revision=?`,
+		nullStringPointer(parent), nullInt64Pointer(ticket), input.ProjectID, current.ID, input.ExpectedRevision)
+	if err != nil {
+		return models.HarnessSession{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return models.HarnessSession{}, coded(CodeConflict, "harness session binding revision is stale")
+	}
+	out, err := scanSession(tx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND id=?`, input.ProjectID, current.ID))
+	if err != nil {
+		return models.HarnessSession{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.HarnessSession{}, err
+	}
+	return out, nil
+}
+
+// ProjectOrchestrator returns an explicit three-state projection. Unknown or
+// dead evidence can never be promoted into a usable orchestrator merely
+// because only one coordinator row happens to exist.
+func (s *Service) ProjectOrchestrator(ctx context.Context, projectID int64) (models.HarnessOrchestratorProjection, error) {
+	if s == nil || s.db == nil || projectID <= 0 {
+		return models.HarnessOrchestratorProjection{}, coded(CodeInvalid, "project is required")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=? AND role=? AND phase<>? ORDER BY created_at,id`, projectID, RoleCoordinator, PhaseStopped)
+	if err != nil {
+		return models.HarnessOrchestratorProjection{}, err
+	}
+	defer rows.Close()
+	coordinators := []models.HarnessSession{}
+	for rows.Next() {
+		candidate, scanErr := scanSession(rows)
+		if scanErr != nil {
+			return models.HarnessOrchestratorProjection{}, scanErr
+		}
+		coordinators = append(coordinators, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return models.HarnessOrchestratorProjection{}, err
+	}
+	if len(coordinators) == 0 {
+		return models.HarnessOrchestratorProjection{State: "unset", Reason: "no_active_coordinator"}, nil
+	}
+	if len(coordinators) > 1 {
+		return models.HarnessOrchestratorProjection{State: "ambiguous", Reason: "multiple_active_coordinators"}, nil
+	}
+	candidate := coordinators[0]
+	if candidate.ActivityState != ActivityBusy && candidate.ActivityState != ActivityIdle {
+		return models.HarnessOrchestratorProjection{State: "unset", Reason: "coordinator_unknown"}, nil
+	}
+	heartbeatAt, err := time.Parse(time.RFC3339Nano, candidate.HeartbeatAt)
+	if err != nil || time.Since(heartbeatAt) > DefaultActivityHeartbeatTimeout {
+		return models.HarnessOrchestratorProjection{State: "unset", Reason: "coordinator_unknown"}, nil
+	}
+	return models.HarnessOrchestratorProjection{State: "resolved", Reason: "single_active_coordinator", Session: &candidate}, nil
 }
 
 func (s *Service) Heartbeat(ctx context.Context, id, phase string) (models.HarnessSession, error) {

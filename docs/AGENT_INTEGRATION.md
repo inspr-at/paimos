@@ -1163,7 +1163,9 @@ paimos-agentd serve --instance production \
   --report-api-key-file "$REPORT_API_KEY_FILE"
 printf '%s' 'Implement PAI-849.' | paimos-agentd start \
   --instance production --adapter codex --workspace "$PWD" \
-  --project-id "$PROJECT_ID" --identity codex:worker
+  --project-id "$PROJECT_ID" --identity codex:worker --role worker \
+  --parent-session '<active-public-parent-harness-session-uuid>' \
+  --ticket-id '<numeric-ticket-id>'
 printf '%s' 'Implement PAI-850.' | paimos-agentd start \
   --instance production --adapter claude --workspace "$PWD" \
   --project-id "$PROJECT_ID" --identity claude:worker
@@ -1289,8 +1291,11 @@ does not replace or alias `paimos session start`, which remains attribution
 only. The durable resource is `/api/projects/{id}/harness-sessions`; it records
 the project agent, harness address, non-secret host attribution,
 managed/unmanaged ownership, coordinator/worker role, phase, heartbeat/yield
-state, and advertised `inbox`, `status`, `steer`, `interrupt`, and `stop`
-capabilities.
+state, nullable durable parent-generation and ticket bindings, and advertised
+`inbox`, `status`, `steer`, `interrupt`, and `stop` capabilities. These are
+separate typed resources: a product session, local agentd session, public
+harness generation, ticket, and `X-Paimos-Session-Id` mutation attribution are
+never aliases for one another.
 
 Capabilities are advertisements constrained by PAIMOS policy, never server
 certification of vendor behavior. Managed sessions can advertise owned steer,
@@ -1364,6 +1369,27 @@ snapshots drainable; active retries remain idempotent. Legacy active
 generations without a worker-lease digest are stopped during migration, and
 pending/claimed controls are rejected with `ownership_lost`; they cannot be
 reauthorized after the fact.
+
+Exact active-registration replay compares the persisted parent and ticket but
+does not revalidate a parent that stopped after the child was registered. New
+registrations and explicit rebinding still require an active same-project
+parent. Post-registration changes use `paimos harness bind` with the current
+revision and both desired nullable fields; each successful change advances the
+revision and records immutable before/after evidence. A chain may have at most
+16 ancestors, including after moving a node with descendants. Deleting a
+project agent detaches surviving children with the same revisioned event;
+active ticket bindings return conflict on ticket mutation, while hard purge of
+an already-trashed ticket audit-detaches historical stopped sessions. Moving a
+ticket to another project is rejected while any active or stopped harness
+session still names it, so historical binding rows cannot become cross-project
+references; detach those sessions explicitly before the move.
+
+`paimos harness orchestrator` returns `resolved` only for exactly one active
+coordinator with fresh managed `busy` or `idle` activity. No coordinator is
+`unset`; several are `ambiguous`; stale, unknown, and unmanaged coordinator
+evidence remains `unset`. UI trees and worker markers consume this durable
+projection and never create or infer it from labels, prompt text, workspace,
+PID, or browser state.
 
 Agentd persists only content-free recovery checkpoints, not the lease. The
 lease lives in its separate instance-scoped owner-only credential store. On a

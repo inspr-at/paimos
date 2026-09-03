@@ -61,8 +61,8 @@ case "$LANE" in
     }
     ;;
   managedharness)
-    [[ "$SELECTED_SHARD_COUNT" -eq 6 ]] || {
-      echo "backend-pr-race: managedharness lane requires exactly one --shard=INDEX/6" >&2
+    [[ "$SELECTED_SHARD_COUNT" -eq 7 ]] || {
+      echo "backend-pr-race: managedharness lane requires exactly one --shard=INDEX/7" >&2
       exit 2
     }
     ;;
@@ -211,7 +211,7 @@ run_package() {
       # A new concurrency/recovery oracle must use one of these semantic name
       # markers (or add an explicit alternative) and update the shard contract.
       managedharness_match='^(TestStoppedSessionCanRegisterNewActiveGeneration|Test.*(Concurrent|Concurrency|Race|Atomic|Replay|Recovers).*)$'
-      run_race_shards ./managedharness "$managedharness_match" 6
+      run_race_shards ./managedharness "$managedharness_match" 7
       ;;
     *)
       run_race "$package"

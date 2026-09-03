@@ -138,6 +138,10 @@ func handleDBError(w http.ResponseWriter, err error, entity string) bool {
 		jsonError(w, "remove all parent edges before setting node_depth to 1", http.StatusConflict)
 		return true
 	}
+	if strings.Contains(err.Error(), "bound harness ticket must be explicitly detached") {
+		jsonError(w, "detach active harness sessions before changing this ticket", http.StatusConflict)
+		return true
+	}
 	log.Printf("%s DB error: %v", entity, err)
 	jsonError(w, "internal error", http.StatusInternalServerError)
 	return true

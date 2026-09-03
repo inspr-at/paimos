@@ -748,7 +748,18 @@ Commands whose argument is explicitly another resource ID, plus
   target, not worker authority.
 - `GET /projects/{id}/harness-sessions/{sessionID}` — status with host and
   public session attribution; the private reference and worker lease are never
-  shown.
+  shown. Nullable `parent_harness_session_id` and `ticket_id` are authoritative
+  durable bindings, separate from product sessions and mutation-attribution
+  session headers.
+- `GET /projects/{id}/harness-sessions/orchestrator` — resolves only one active
+  coordinator with fresh, known managed activity. Zero candidates is `unset`,
+  multiple candidates is `ambiguous`, and unmanaged or stale evidence remains
+  `unset`; missing evidence is never interpreted as idle.
+- `PATCH /projects/{id}/harness-sessions/{sessionID}/binding` — explicit
+  full-state parent/ticket assignment with required expected revision. It
+  rejects stale generations, cross-project or terminal parents, cycles,
+  over-depth moved subtrees, and invalid tickets before mutation, then appends
+  one immutable event with the before/after bindings.
 - `POST .../{sessionID}/heartbeat` · `POST .../{sessionID}/yield` — attributed
   status/yield and typed owned-control claim.
 - `POST .../{sessionID}/drain` · `POST .../{sessionID}/complete-delivery` —

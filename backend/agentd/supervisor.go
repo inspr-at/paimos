@@ -202,7 +202,7 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 	now := time.Now().UTC()
 	entry := &sessionEntry{session: Session{
 		ID: uuid.NewString(), Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
-		ProjectID:    validated.ProjectID,
+		ProjectID: validated.ProjectID, Role: validated.Role, ParentSessionID: validated.ParentSessionID, TicketID: validated.TicketID,
 		Capabilities: append([]Capability(nil), capabilities...), Managed: true, State: StateStarting,
 		StartedAt: now, HeartbeatAt: now,
 	}, capabilities: capabilitySet, monitorDone: make(chan struct{})}
@@ -320,6 +320,20 @@ func validateStartRequest(request StartRequest) (StartRequest, error) {
 	}
 	if request.ProjectID <= 0 {
 		return StartRequest{}, errors.New("agentd project is invalid")
+	}
+	request.Role = strings.ToLower(strings.TrimSpace(request.Role))
+	if request.Role == "" {
+		request.Role = "worker"
+	}
+	if request.Role != "worker" && request.Role != "coordinator" {
+		return StartRequest{}, errors.New("agentd role is invalid")
+	}
+	request.ParentSessionID = strings.TrimSpace(request.ParentSessionID)
+	if request.ParentSessionID != "" && uuid.Validate(request.ParentSessionID) != nil {
+		return StartRequest{}, errors.New("agentd parent harness session id is invalid")
+	}
+	if request.TicketID < 0 {
+		return StartRequest{}, errors.New("agentd ticket id is invalid")
 	}
 	if request.Prompt == "" || len(request.Prompt) > maxPromptBytes || !utf8.ValidString(request.Prompt) || strings.ContainsRune(request.Prompt, 0) {
 		return StartRequest{}, errors.New("agentd prompt is invalid")

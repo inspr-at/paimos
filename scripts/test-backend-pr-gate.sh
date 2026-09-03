@@ -388,13 +388,13 @@ if "$RACE_RUNNER" --dry-run --lane=managedharness \
   github.com/inspr-at/paimos/backend/managedharness >/dev/null 2>&1; then
   fail 'managed-harness race lane still allows unindexed execution'
 fi
-if "$RACE_RUNNER" --dry-run --lane=managedharness --shard=0/5 \
+if "$RACE_RUNNER" --dry-run --lane=managedharness --shard=0/6 \
   github.com/inspr-at/paimos/backend/managedharness >/dev/null 2>&1; then
   fail 'managed-harness race lane accepts a drifted shard count'
 fi
 managedharness_race_plan=
-for shard in 0 1 2 3 4 5; do
-  plan=$("$RACE_RUNNER" --dry-run --lane=managedharness --shard="$shard/6" \
+for shard in 0 1 2 3 4 5 6; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=managedharness --shard="$shard/7" \
     github.com/inspr-at/paimos/backend/managedharness)
   [[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$plan")" -eq 1 &&
     "$(plan_test_names "$plan" | wc -l | tr -d ' ')" -eq 1 ]] ||
@@ -407,7 +407,7 @@ assert_plan_covers_discovery_once 'managed-harness targeted race' "$managedharne
   "$managedharness_race_plan" != *'./...'* ]] ||
   fail 'managed-harness PR race plan restored the exhaustive migration-heavy package suite'
 broad_race_plan=$("$RACE_RUNNER" --dry-run './...')
-[[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")" -eq 6 ]] ||
+[[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")" -eq 7 ]] ||
   fail 'broad race plan omitted or duplicated the managed-harness concurrency and recovery oracles'
 broad_managedharness_plan=$(grep '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")
 assert_plan_covers_discovery_once 'broad managed-harness race' "$broad_managedharness_plan" \
@@ -493,9 +493,9 @@ done
   fail 'affected race packages do not run on four independent matrix runners'
 [[ "$managedharness_race" == *'backend-ci-packages.sh --direct'* &&
   "$managedharness_race" == *'backend-pr-race.sh --lane=managedharness'* &&
-  "$managedharness_race" == *'matrix:'* && "$managedharness_race" == *'shard: [0, 1, 2, 3, 4, 5]'* &&
-  "$managedharness_race" == *"--shard=\"\${{ matrix.shard }}/6\""* ]] ||
-  fail 'managed-harness race oracles do not run on six independent matrix runners'
+  "$managedharness_race" == *'matrix:'* && "$managedharness_race" == *'shard: [0, 1, 2, 3, 4, 5, 6]'* &&
+  "$managedharness_race" == *"--shard=\"\${{ matrix.shard }}/7\""* ]] ||
+  fail 'managed-harness race oracles do not run on seven independent matrix runners'
 [[ "$db_race" == *'backend-ci-packages.sh --direct'* && "$db_race" == *'backend-pr-race.sh --lane=db'* ]] ||
   fail 'parallel PR DB race lane is incomplete'
 [[ "$handlers_race" == *'backend-ci-packages.sh --direct'* && "$handlers_race" == *'backend-pr-race.sh --lane=handlers'* ]] ||

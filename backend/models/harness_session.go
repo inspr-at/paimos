@@ -27,6 +27,8 @@ type HarnessSession struct {
 	MessageTargetID  string              `json:"message_target_id,omitempty"`
 	ManagementMode   string              `json:"management_mode"`
 	Role             string              `json:"role"`
+	ParentSessionID  *string             `json:"parent_harness_session_id"`
+	TicketID         *int64              `json:"ticket_id"`
 	SteerMode        string              `json:"steer_mode"`
 	Capabilities     HarnessCapabilities `json:"advertised_capabilities"`
 	Phase            string              `json:"phase"`
@@ -49,17 +51,30 @@ type HarnessSession struct {
 // public worker generation. EventSequence follows the session revision and is
 // therefore stable across exact retries without exposing vendor payloads.
 type HarnessSessionEvent struct {
-	ID               int64  `json:"id"`
-	HarnessSessionID string `json:"harness_session_id"`
-	EventSequence    int64  `json:"event_sequence"`
-	Operation        string `json:"operation"`
-	Phase            string `json:"phase"`
-	ActivityState    string `json:"activity_state"`
-	ActivityReason   string `json:"activity_reason"`
-	ActivityKind     string `json:"activity_event_kind,omitempty"`
-	ActivitySequence int64  `json:"activity_sequence"`
-	ClosedReason     string `json:"closed_reason,omitempty"`
-	CreatedAt        string `json:"created_at"`
+	ID                    int64   `json:"id"`
+	HarnessSessionID      string  `json:"harness_session_id"`
+	EventSequence         int64   `json:"event_sequence"`
+	Operation             string  `json:"operation"`
+	Phase                 string  `json:"phase"`
+	ActivityState         string  `json:"activity_state"`
+	ActivityReason        string  `json:"activity_reason"`
+	ActivityKind          string  `json:"activity_event_kind,omitempty"`
+	ActivitySequence      int64   `json:"activity_sequence"`
+	ClosedReason          string  `json:"closed_reason,omitempty"`
+	BeforeParentSessionID *string `json:"before_parent_harness_session_id"`
+	AfterParentSessionID  *string `json:"after_parent_harness_session_id"`
+	BeforeTicketID        *int64  `json:"before_ticket_id"`
+	AfterTicketID         *int64  `json:"after_ticket_id"`
+	CreatedAt             string  `json:"created_at"`
+}
+
+// HarnessOrchestratorProjection resolves a project coordinator only when the
+// durable harness-session state has exactly one live coordinator candidate.
+// The unset and ambiguous states deliberately omit Session.
+type HarnessOrchestratorProjection struct {
+	State   string          `json:"state"`
+	Reason  string          `json:"reason"`
+	Session *HarnessSession `json:"session"`
 }
 
 // HarnessControl is a typed interrupt/stop request. Free-form command text is

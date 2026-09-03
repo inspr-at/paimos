@@ -25,8 +25,10 @@ const harnessWorkerLeaseHeader = "X-Paimos-Harness-Worker-Lease"
 // the attribution-only `paimos session start` lifecycle.
 func RegisterHarnessSessionRoutes(r chi.Router) {
 	r.With(auth.RequireProjectView).Get("/projects/{id}/harness-sessions", listHarnessSessions)
+	r.With(auth.RequireProjectView).Get("/projects/{id}/harness-sessions/orchestrator", getHarnessOrchestrator)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions", registerHarnessSession)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/harness-sessions/{sessionID}", getHarnessSession)
+	r.With(auth.RequireProjectEdit).Patch("/projects/{id}/harness-sessions/{sessionID}/binding", assignHarnessBinding)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/heartbeat", heartbeatHarnessSession)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/yield", yieldHarnessSession)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/harness-sessions/{sessionID}/drain", drainHarnessDeliveries)
@@ -48,6 +50,8 @@ type harnessRegisterRequest struct {
 	MessageTargetID string                     `json:"message_target_id"`
 	ManagementMode  string                     `json:"management_mode"`
 	Role            string                     `json:"role"`
+	ParentSessionID *string                    `json:"parent_harness_session_id"`
+	TicketID        *int64                     `json:"ticket_id"`
 	SteerMode       string                     `json:"steer_mode"`
 	Capabilities    models.HarnessCapabilities `json:"advertised_capabilities"`
 }
@@ -67,6 +71,11 @@ type completeSteerRequest struct {
 	DeliveryID     string `json:"delivery_id"`
 	EffectiveLevel string `json:"effective_level"`
 	FallbackReason string `json:"fallback_reason"`
+}
+type harnessBindingRequest struct {
+	ExpectedRevision json.Number     `json:"expected_revision"`
+	ParentSessionID  json.RawMessage `json:"parent_harness_session_id"`
+	TicketID         json.RawMessage `json:"ticket_id"`
 }
 
 func harnessProjectID(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -142,7 +151,7 @@ func registerHarnessSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeHarnessJSON(w, r, &req) {
 		return
 	}
-	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, SteerMode: req.SteerMode, Capabilities: req.Capabilities})
+	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, ParentSessionID: req.ParentSessionID, TicketID: req.TicketID, SteerMode: req.SteerMode, Capabilities: req.Capabilities})
 	if err != nil {
 		harnessProblem(w, err, "harness_session_register_failed", harnessStatus(err))
 		return
@@ -152,6 +161,91 @@ func registerHarnessSession(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusCreated
 	}
 	writeHarnessJSON(w, status, session)
+}
+func getHarnessOrchestrator(w http.ResponseWriter, r *http.Request) {
+	id, ok := harnessProjectID(w, r)
+	if !ok {
+		return
+	}
+	out, err := managedharness.NewService(db.DB).ProjectOrchestrator(r.Context(), id)
+	if err != nil {
+		harnessProblem(w, err, "harness_orchestrator_projection_failed", harnessStatus(err))
+		return
+	}
+	writeHarnessJSON(w, http.StatusOK, out)
+}
+
+func decodeNullableString(raw json.RawMessage) (*string, error) {
+	if len(raw) == 0 {
+		return nil, errors.New("binding fields must be explicitly supplied")
+	}
+	if string(raw) == "null" {
+		return nil, nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, errors.New("parent harness session id must be a string or null")
+	}
+	return &value, nil
+}
+
+func decodeNullableInt64(raw json.RawMessage) (*int64, error) {
+	if len(raw) == 0 {
+		return nil, errors.New("binding fields must be explicitly supplied")
+	}
+	if string(raw) == "null" {
+		return nil, nil
+	}
+	var value json.Number
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, errors.New("ticket id must be an integer or null")
+	}
+	parsed, err := StrictControlInt64(value)
+	if err != nil {
+		return nil, err
+	}
+	if parsed <= 0 {
+		return nil, errors.New("ticket id must be positive")
+	}
+	return &parsed, nil
+}
+
+func assignHarnessBinding(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := harnessProjectID(w, r)
+	if !ok {
+		return
+	}
+	var req harnessBindingRequest
+	if !decodeHarnessJSON(w, r, &req) {
+		return
+	}
+	revision, err := StrictControlInt64(req.ExpectedRevision)
+	if err == nil && revision <= 0 {
+		err = errors.New("expected revision must be positive")
+	}
+	if err != nil {
+		harnessProblem(w, err, managedharness.CodeInvalid, http.StatusBadRequest)
+		return
+	}
+	parent, err := decodeNullableString(req.ParentSessionID)
+	if err != nil {
+		harnessProblem(w, err, managedharness.CodeInvalid, http.StatusBadRequest)
+		return
+	}
+	ticket, err := decodeNullableInt64(req.TicketID)
+	if err != nil {
+		harnessProblem(w, err, managedharness.CodeInvalid, http.StatusBadRequest)
+		return
+	}
+	out, err := managedharness.NewService(db.DB).AssignBinding(r.Context(), managedharness.BindingInput{
+		ProjectID: projectID, SessionID: chi.URLParam(r, "sessionID"), ExpectedRevision: revision,
+		ParentSessionID: parent, TicketID: ticket,
+	})
+	if err != nil {
+		harnessProblem(w, err, "harness_session_binding_failed", harnessStatus(err))
+		return
+	}
+	writeHarnessJSON(w, http.StatusOK, out)
 }
 func listHarnessSessions(w http.ResponseWriter, r *http.Request) {
 	id, ok := harnessProjectID(w, r)

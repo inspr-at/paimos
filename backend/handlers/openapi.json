@@ -1817,13 +1817,15 @@
       },
       "HarnessSession": {
         "type": "object", "additionalProperties": false,
-        "required": ["id", "project_id", "project_agent_id", "agent_name", "harness", "host", "management_mode", "role", "steer_mode", "advertised_capabilities", "phase", "activity_state", "activity_reason", "activity_age_seconds", "activity_sequence", "yield_sequence", "revision", "created_at", "updated_at"],
-        "description": "Non-secret durable harness identity. Phase and typed adapter activity are separate truths; silence or malformed evidence is unknown, and only a reporter-confirmed terminal state is dead. The private harness session reference is encrypted in the message target and is never returned.",
+        "required": ["id", "project_id", "project_agent_id", "agent_name", "harness", "host", "management_mode", "role", "parent_harness_session_id", "ticket_id", "steer_mode", "advertised_capabilities", "phase", "activity_state", "activity_reason", "activity_age_seconds", "activity_sequence", "yield_sequence", "revision", "created_at", "updated_at"],
+        "description": "Non-secret durable harness or agentd-session identity. It is distinct from product_session_id and the X-Paimos-Session-Id mutation-attribution header. Phase and typed adapter activity are separate truths; silence or malformed evidence is unknown, and only a reporter-confirmed terminal state is dead. The private harness session reference is encrypted in the message target and is never returned.",
         "properties": {
           "id": {"type": "string", "format": "uuid"}, "project_id": {"type": "integer", "format": "int64"},
           "project_agent_id": {"type": "integer", "format": "int64"}, "agent_name": {"type": "string"},
           "harness": {"type": "string"}, "host": {"type": "string"}, "message_target_id": {"type": "string", "format": "uuid"},
           "management_mode": {"type": "string", "enum": ["managed", "unmanaged"]}, "role": {"type": "string", "enum": ["coordinator", "worker"]},
+          "parent_harness_session_id": {"type": ["string", "null"], "format": "uuid", "description": "Explicit durable parent generation; never inferred from identity, prompt, or workspace."},
+          "ticket_id": {"type": ["integer", "null"], "format": "int64", "minimum": 1, "description": "Explicit active same-project ticket binding; distinct from product and attribution sessions."},
           "steer_mode": {"type": "string", "enum": ["none", "owned", "codex_external"]},
           "advertised_capabilities": {"$ref": "#/components/schemas/HarnessCapabilities"},
           "phase": {"type": "string", "enum": ["starting", "working", "yielded", "stopping", "stopped"]},
@@ -1848,7 +1850,28 @@
           "worker_lease": {"type": "string", "writeOnly": true, "minLength": 43, "maxLength": 43, "pattern": "^[A-Za-z0-9_-]{43}$", "description": "Private 256-bit generation lease. Only its scope-bound SHA-256 digest is stored; it is never returned."},
           "message_target_id": {"type": "string", "format": "uuid", "description": "Existing encrypted target binding required for unmanaged inboxes."},
           "management_mode": {"type": "string", "enum": ["managed", "unmanaged"]}, "role": {"type": "string", "enum": ["coordinator", "worker"]},
+          "parent_harness_session_id": {"type": ["string", "null"], "format": "uuid"},
+          "ticket_id": {"type": ["integer", "null"], "format": "int64", "minimum": 1},
           "steer_mode": {"type": "string", "enum": ["none", "owned", "codex_external"]}, "advertised_capabilities": {"$ref": "#/components/schemas/HarnessCapabilities"}
+        }
+      },
+      "HarnessBindingWrite": {
+        "type": "object", "additionalProperties": false,
+        "required": ["expected_revision", "parent_harness_session_id", "ticket_id"],
+        "description": "Explicit full-state hierarchy/ticket assignment. Null detaches; expected_revision provides fail-closed generation CAS.",
+        "properties": {
+          "expected_revision": {"type": "integer", "format": "int64", "minimum": 1},
+          "parent_harness_session_id": {"type": ["string", "null"], "format": "uuid"},
+          "ticket_id": {"type": ["integer", "null"], "format": "int64", "minimum": 1}
+        }
+      },
+      "HarnessOrchestratorProjection": {
+        "type": "object", "additionalProperties": false, "required": ["state", "reason", "session"],
+        "description": "Authoritative coordinator projection. Zero candidates is unset, multiple candidates is ambiguous, and unknown/dead evidence is never promoted to resolved.",
+        "properties": {
+          "state": {"type": "string", "enum": ["resolved", "unset", "ambiguous"]},
+          "reason": {"type": "string", "enum": ["single_active_coordinator", "no_active_coordinator", "multiple_active_coordinators", "coordinator_unknown"]},
+          "session": {"oneOf": [{"$ref": "#/components/schemas/HarnessSession"}, {"type": "null"}]}
         }
       },
       "HarnessActivityEvidence": {
@@ -5601,9 +5624,17 @@
         "responses": {"200": {"description": "Idempotent replay of the active registration", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "201": {"description": "Registered", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "400": {"description": "Invalid capability or ownership claim"}, "409": {"description": "Active identity or address conflict"}}
       }
     },
+    "/api/projects/{id}/harness-sessions/orchestrator": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {"tags": ["agents"], "summary": "Resolve the authoritative active project orchestrator", "responses": {"200": {"description": "Resolved, unset, or ambiguous coordinator projection", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessOrchestratorProjection"}}}}}}
+    },
     "/api/projects/{id}/harness-sessions/{sessionID}": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
       "get": {"tags": ["agents"], "summary": "Get one durable non-secret harness session", "responses": {"200": {"description": "Harness session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}
+    },
+    "/api/projects/{id}/harness-sessions/{sessionID}/binding": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+      "patch": {"tags": ["agents"], "summary": "Explicitly assign durable hierarchy and ticket bindings", "description": "Operator-authorized full-state mutation with revision CAS. Cross-project, terminal-parent, cyclic, over-depth, deleted-ticket, and stale-generation requests fail before mutation; the before/after change is appended to the immutable harness-session event stream.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessBindingWrite"}}}}, "responses": {"200": {"description": "Updated harness session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HarnessSession"}}}}, "400": {"description": "Invalid hierarchy or ticket binding"}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"description": "Stale revision or unchanged assignment"}}}
     },
     "/api/projects/{id}/harness-sessions/{sessionID}/heartbeat": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/HarnessWorkerLease"}],

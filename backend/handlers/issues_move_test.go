@@ -24,6 +24,8 @@ import (
 
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/delivery"
+	"github.com/inspr-at/paimos/backend/managedharness"
+	"github.com/inspr-at/paimos/backend/models"
 )
 
 type moveResp struct {
@@ -148,6 +150,41 @@ func TestMoveIssue_HappyPath(t *testing.T) {
 	// ...and so does the new key.
 	newResp := ts.get(t, "/api/issues/"+got.NewKey, ts.adminCookie)
 	assertStatus(t, newResp, http.StatusOK)
+}
+
+func TestMoveIssue_StoppedHarnessTicketBindingBlocksCrossProjectReference(t *testing.T) {
+	ts := newTestServer(t)
+	sourceID := seedBatchProject(t, "Bound source", "BDS")
+	targetID := seedBatchProject(t, "Bound target", "BDT")
+	ticket := responseID(t, ts.post(t, fmt.Sprintf("/api/projects/%d/issues", sourceID), ts.adminCookie, map[string]any{
+		"title": "Bound ticket", "type": "ticket", "status": "backlog",
+	}))
+	if _, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,?)`, sourceID, "worker"); err != nil {
+		t.Fatal(err)
+	}
+	service := managedharness.NewService(db.DB)
+	session, created, err := service.Register(context.Background(), managedharness.RegisterInput{
+		ProjectID: sourceID, AgentName: "worker", Harness: "codex", Host: "move-host", SessionRef: "move-ref",
+		WorkerLease: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ManagementMode: managedharness.ManagementManaged,
+		Role: managedharness.RoleWorker, TicketID: &ticket, SteerMode: managedharness.SteerNone,
+		Capabilities: models.HarnessCapabilities{Status: true},
+	})
+	if err != nil || !created {
+		t.Fatalf("register bound worker: created=%v err=%v", created, err)
+	}
+	if _, err := service.Stop(context.Background(), session.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := ts.post(t, fmt.Sprintf("/api/issues/%d/move", ticket), ts.adminCookie, map[string]any{"project_id": targetID})
+	assertStatus(t, resp, http.StatusConflict)
+	if pid, _ := issueProjectAndNumber(t, ticket); pid != sourceID {
+		t.Fatalf("blocked move changed ticket project: got=%d want=%d", pid, sourceID)
+	}
+	var storedTicket int64
+	if err := db.DB.QueryRow(`SELECT ticket_id FROM harness_sessions WHERE id=?`, session.ID).Scan(&storedTicket); err != nil || storedTicket != ticket {
+		t.Fatalf("blocked move changed historical binding: ticket=%d err=%v", storedTicket, err)
+	}
 }
 
 // TestMoveIssue_SameProject rejects a no-op move with 400 rather than churning

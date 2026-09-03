@@ -5,6 +5,7 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,19 @@ import (
 	"testing"
 	"time"
 )
+
+func TestStartRequestOmitsNewHierarchyFieldsForOldDaemon(t *testing.T) {
+	raw, err := json.Marshal(StartRequest{Adapter: AdapterCodex, Workspace: "/tmp/worker", Prompt: "work", Identity: "codex:worker", ProjectID: 27})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(raw)
+	for _, field := range []string{"role", "parent_harness_session_id", "ticket_id"} {
+		if strings.Contains(encoded, `"`+field+`"`) {
+			t.Fatalf("unset forward-compatible field %s leaked into old-daemon request: %s", field, encoded)
+		}
+	}
+}
 
 type fakeProcess struct {
 	pid        int
@@ -77,6 +91,36 @@ type fakeAdapter struct {
 	threadID     string
 	startRequest StartRequest
 	mu           sync.Mutex
+}
+
+func TestSupervisorKeepsHierarchyAndTicketSeparateFromIdentityAndPrompt(t *testing.T) {
+	process := newFakeProcess(4203)
+	adapter := &fakeAdapter{name: AdapterCodex, process: process, threadID: "thread-hierarchy"}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-hierarchy", Adapters: []Adapter{adapter}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	parent := "11111111-1111-4111-8111-111111111111"
+	session, err := supervisor.Start(context.Background(), StartRequest{
+		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "Implement the ticket without embedded routing metadata.",
+		Identity: "codex:child", ProjectID: 27, Role: "worker", ParentSessionID: parent, TicketID: 903,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Role != "worker" || session.ParentSessionID != parent || session.TicketID != 903 || session.Identity != "codex:child" {
+		t.Fatalf("session lost structured attribution: %+v", session)
+	}
+	adapter.mu.Lock()
+	started := adapter.startRequest
+	adapter.mu.Unlock()
+	if started.Role != "worker" || started.ParentSessionID != parent || started.TicketID != 903 || started.Prompt != "Implement the ticket without embedded routing metadata." {
+		t.Fatalf("adapter request lost structured attribution: %+v", started)
+	}
+	if got := supervisor.Status().Sessions[0]; got.ParentSessionID != parent || got.TicketID != 903 {
+		t.Fatalf("status lost structured attribution: %+v", got)
+	}
 }
 
 type blockingControlProcess struct {
