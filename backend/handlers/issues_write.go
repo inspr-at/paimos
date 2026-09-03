@@ -1108,6 +1108,10 @@ func DeleteIssue(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "detach the product session before deleting this node", http.StatusConflict)
 			return
 		}
+		if strings.Contains(err.Error(), "bound harness ticket must be explicitly detached") {
+			jsonError(w, "detach active harness sessions before deleting this ticket", http.StatusConflict)
+			return
+		}
 		jsonError(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
@@ -1228,7 +1232,23 @@ func PurgeIssue(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "purge failed", http.StatusInternalServerError)
 		return
 	}
-	res, err := db.DB.Exec(
+	tx, err := db.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		jsonError(w, "purge failed", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	// PAI-903: trashed tickets can retain historical stopped-worker bindings.
+	// Detach them with the required revision advance so M170 appends immutable
+	// before/after evidence, then hard-delete the ticket in the same transaction.
+	if _, err := tx.ExecContext(r.Context(), `UPDATE harness_sessions
+		SET ticket_id=NULL,revision=revision+1,
+		    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		WHERE ticket_id=?`, id); err != nil {
+		jsonError(w, "purge failed", http.StatusInternalServerError)
+		return
+	}
+	res, err := tx.ExecContext(r.Context(),
 		`DELETE FROM issues WHERE id = ? AND deleted_at IS NOT NULL`, id)
 	if err != nil {
 		jsonError(w, "purge failed", http.StatusInternalServerError)
@@ -1237,6 +1257,10 @@ func PurgeIssue(w http.ResponseWriter, r *http.Request) {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		jsonError(w, "purge failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -12458,6 +12458,138 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
 		}},
 
+		// M170 / PAI-903: explicit, project-scoped worker hierarchy and ticket
+		// bindings. Bindings are current state on harness_sessions; their changes
+		// extend M169's immutable event stream rather than creating a second log.
+		{170, []string{
+			`PRAGMA foreign_keys=OFF`,
+			`ALTER TABLE harness_sessions ADD COLUMN parent_harness_session_id TEXT
+			 REFERENCES harness_sessions(id) ON DELETE RESTRICT`,
+			`ALTER TABLE harness_sessions ADD COLUMN ticket_id INTEGER
+			 REFERENCES issues(id) ON DELETE RESTRICT`,
+			`DROP TRIGGER trg_harness_session_events_no_update`,
+			`DROP TRIGGER trg_harness_session_events_no_delete`,
+			`DROP INDEX idx_harness_session_events_session`,
+			`ALTER TABLE harness_session_events RENAME TO harness_session_events_m169`,
+			`CREATE TABLE harness_session_events (
+			 id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+			 harness_session_id         TEXT NOT NULL REFERENCES harness_sessions(id) ON DELETE CASCADE,
+			 event_sequence             INTEGER NOT NULL CHECK(event_sequence>0),
+			 operation                  TEXT NOT NULL CHECK(operation IN ('register','heartbeat','yield','control_completed','stop','activity_timeout','binding_changed')),
+			 phase                      TEXT NOT NULL CHECK(phase IN ('starting','working','yielded','stopping','stopped')),
+			 activity_state             TEXT NOT NULL CHECK(activity_state IN ('busy','idle','unknown','dead')),
+			 activity_reason            TEXT NOT NULL CHECK(activity_reason IN ('unreported','adapter_activity','turn_completed','heartbeat_stale','stale_evidence','malformed_evidence','unmanaged_evidence','process_exited','process_failed','ownership_lost','stopped')),
+			 activity_event_kind        TEXT NOT NULL DEFAULT '' CHECK(activity_event_kind IN ('','session_started','turn_started','tool_started','control_applied','turn_completed')),
+			 activity_sequence          INTEGER NOT NULL CHECK(activity_sequence>=0),
+			 closed_reason              TEXT NOT NULL DEFAULT '' CHECK(closed_reason IN ('','stopped','process_exited','process_failed','ownership_lost')),
+			 before_parent_harness_session_id TEXT,
+			 after_parent_harness_session_id  TEXT,
+			 before_ticket_id           INTEGER,
+			 after_ticket_id            INTEGER,
+			 created_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(harness_session_id,event_sequence),
+			 CHECK(
+			  (activity_state='dead' AND phase='stopped' AND closed_reason<>'' AND activity_reason IN ('stopped','process_exited','process_failed','ownership_lost')) OR
+			  (activity_state='idle' AND phase<>'stopped' AND closed_reason='' AND activity_reason='turn_completed' AND activity_event_kind='turn_completed') OR
+			  (activity_state='busy' AND phase<>'stopped' AND closed_reason='' AND activity_reason='adapter_activity' AND activity_event_kind IN ('turn_started','tool_started','control_applied')) OR
+			  (activity_state='unknown' AND phase<>'stopped' AND closed_reason='' AND activity_reason IN ('unreported','heartbeat_stale','stale_evidence','malformed_evidence','unmanaged_evidence'))
+			 ),
+			 CHECK(operation<>'binding_changed' OR
+			  before_parent_harness_session_id IS NOT after_parent_harness_session_id OR before_ticket_id IS NOT after_ticket_id)
+			)`,
+			`INSERT INTO harness_session_events(
+			 id,harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,
+			 activity_sequence,closed_reason,created_at)
+			 SELECT id,harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,
+			        activity_sequence,closed_reason,created_at FROM harness_session_events_m169`,
+			`DROP TABLE harness_session_events_m169`,
+			`CREATE INDEX idx_harness_session_events_session
+			 ON harness_session_events(harness_session_id,event_sequence)`,
+			`CREATE INDEX idx_harness_sessions_parent
+			 ON harness_sessions(project_id,parent_harness_session_id) WHERE parent_harness_session_id IS NOT NULL`,
+			`CREATE INDEX idx_harness_sessions_parent_ref
+			 ON harness_sessions(parent_harness_session_id) WHERE parent_harness_session_id IS NOT NULL`,
+			`CREATE INDEX idx_harness_sessions_ticket
+			 ON harness_sessions(project_id,ticket_id) WHERE ticket_id IS NOT NULL`,
+			`CREATE INDEX idx_harness_sessions_ticket_ref
+			 ON harness_sessions(ticket_id) WHERE ticket_id IS NOT NULL`,
+			`CREATE TRIGGER trg_harness_sessions_binding_insert BEFORE INSERT ON harness_sessions
+			 WHEN
+			  (NEW.parent_harness_session_id IS NOT NULL AND (
+			   NEW.parent_harness_session_id=NEW.id OR
+			   NOT EXISTS(SELECT 1 FROM harness_sessions parent WHERE parent.id=NEW.parent_harness_session_id
+			    AND parent.project_id=NEW.project_id AND parent.phase<>'stopped') OR
+			   EXISTS(WITH RECURSIVE lineage(id,parent_id,depth) AS (
+			    SELECT parent.id,parent.parent_harness_session_id,1 FROM harness_sessions parent
+			     WHERE parent.id=NEW.parent_harness_session_id AND parent.project_id=NEW.project_id
+			    UNION ALL
+			    SELECT parent.id,parent.parent_harness_session_id,lineage.depth+1
+			     FROM harness_sessions parent JOIN lineage ON parent.id=lineage.parent_id
+			     WHERE parent.project_id=NEW.project_id AND lineage.depth<17
+			   ) SELECT 1 FROM lineage WHERE id=NEW.id OR (depth>=16 AND parent_id IS NOT NULL))
+			  )) OR
+			  (NEW.ticket_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM issues ticket WHERE ticket.id=NEW.ticket_id
+			   AND ticket.project_id=NEW.project_id AND ticket.deleted_at IS NULL AND ticket.type IN ('ticket','task')))
+			 BEGIN SELECT RAISE(ABORT,'harness session binding is invalid'); END`,
+			`CREATE TRIGGER trg_harness_sessions_binding_update BEFORE UPDATE OF parent_harness_session_id,ticket_id ON harness_sessions
+			 WHEN
+			  (NEW.parent_harness_session_id IS NOT OLD.parent_harness_session_id AND NEW.parent_harness_session_id IS NOT NULL AND (
+			   NEW.parent_harness_session_id=NEW.id OR
+			   NOT EXISTS(SELECT 1 FROM harness_sessions parent WHERE parent.id=NEW.parent_harness_session_id
+			    AND parent.project_id=NEW.project_id AND parent.phase<>'stopped') OR
+			   EXISTS(WITH RECURSIVE lineage(id,parent_id,depth) AS (
+			    SELECT parent.id,parent.parent_harness_session_id,1 FROM harness_sessions parent
+			     WHERE parent.id=NEW.parent_harness_session_id AND parent.project_id=NEW.project_id
+			    UNION ALL
+			    SELECT parent.id,parent.parent_harness_session_id,lineage.depth+1
+			     FROM harness_sessions parent JOIN lineage ON parent.id=lineage.parent_id
+			     WHERE parent.project_id=NEW.project_id AND lineage.depth<17
+			   ) SELECT 1 FROM lineage WHERE id=NEW.id OR (depth>=16 AND parent_id IS NOT NULL)) OR
+			   (WITH RECURSIVE
+			    lineage(id,parent_id,depth) AS (
+			     SELECT parent.id,parent.parent_harness_session_id,1 FROM harness_sessions parent
+			      WHERE parent.id=NEW.parent_harness_session_id AND parent.project_id=NEW.project_id
+			     UNION ALL
+			     SELECT parent.id,parent.parent_harness_session_id,lineage.depth+1
+			      FROM harness_sessions parent JOIN lineage ON parent.id=lineage.parent_id
+			      WHERE parent.project_id=NEW.project_id AND lineage.depth<17
+			    ),
+			    subtree(id,depth) AS (
+			     SELECT OLD.id,0
+			     UNION ALL
+			     SELECT child.id,subtree.depth+1 FROM harness_sessions child
+			      JOIN subtree ON child.parent_harness_session_id=subtree.id
+			      WHERE child.project_id=NEW.project_id AND subtree.depth<17
+			    )
+			    SELECT COALESCE((SELECT MAX(depth) FROM lineage),0)+COALESCE((SELECT MAX(depth) FROM subtree),0))>16
+			  )) OR
+			  (NEW.ticket_id IS NOT OLD.ticket_id AND NEW.ticket_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM issues ticket WHERE ticket.id=NEW.ticket_id
+			   AND ticket.project_id=NEW.project_id AND ticket.deleted_at IS NULL AND ticket.type IN ('ticket','task')))
+			 BEGIN SELECT RAISE(ABORT,'harness session binding is invalid'); END`,
+			`CREATE TRIGGER trg_harness_sessions_binding_revision BEFORE UPDATE OF parent_harness_session_id,ticket_id ON harness_sessions
+			 WHEN (NEW.parent_harness_session_id IS NOT OLD.parent_harness_session_id OR NEW.ticket_id IS NOT OLD.ticket_id)
+			  AND NEW.revision<>OLD.revision+1
+			 BEGIN SELECT RAISE(ABORT,'harness session binding requires revision'); END`,
+			`CREATE TRIGGER trg_harness_sessions_binding_event AFTER UPDATE OF parent_harness_session_id,ticket_id ON harness_sessions
+			 WHEN NEW.parent_harness_session_id IS NOT OLD.parent_harness_session_id OR NEW.ticket_id IS NOT OLD.ticket_id
+			 BEGIN INSERT INTO harness_session_events(
+			  harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,
+			  activity_sequence,closed_reason,before_parent_harness_session_id,after_parent_harness_session_id,before_ticket_id,after_ticket_id)
+			 VALUES(NEW.id,NEW.revision,'binding_changed',NEW.phase,NEW.activity_state,NEW.activity_reason,NEW.activity_event_kind,
+			  NEW.activity_sequence,NEW.closed_reason,OLD.parent_harness_session_id,NEW.parent_harness_session_id,OLD.ticket_id,NEW.ticket_id); END`,
+			`CREATE TRIGGER trg_harness_session_events_no_update BEFORE UPDATE ON harness_session_events
+			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
+			`CREATE TRIGGER trg_harness_session_events_no_delete BEFORE DELETE ON harness_session_events
+			 WHEN EXISTS(SELECT 1 FROM harness_sessions WHERE id=OLD.harness_session_id)
+			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
+			`CREATE TRIGGER trg_issues_bound_harness_move BEFORE UPDATE OF project_id,deleted_at,type ON issues
+			 WHEN EXISTS(SELECT 1 FROM harness_sessions session WHERE session.ticket_id=OLD.id
+			  AND (NEW.project_id IS NOT OLD.project_id OR (session.phase<>'stopped'
+			   AND (NEW.deleted_at IS NOT OLD.deleted_at OR NEW.type NOT IN ('ticket','task')))))
+			 BEGIN SELECT RAISE(ABORT,'bound harness ticket must be explicitly detached'); END`,
+			`PRAGMA foreign_keys=ON`,
+		}},
+
 		// M171 / PAI-902: actionable attention is a derived, content-free
 		// projection over authoritative ledgers. Per-orchestrator cursors and durable
 		// batches make a coalesced simple wake recoverable across listener
@@ -12721,6 +12853,31 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			"harness_session_events", "idx_harness_session_events_session", "idx_harness_sessions_activity",
 			"trg_harness_sessions_activity_shape_insert", "trg_harness_sessions_activity_shape_update",
 			"trg_harness_session_events_no_update", "trg_harness_session_events_no_delete",
+		})
+	},
+	170: func(ctx context.Context, conn *sql.Conn) error {
+		var columns int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('harness_sessions')
+			WHERE name IN ('parent_harness_session_id','ticket_id')`).Scan(&columns); err != nil {
+			return fmt.Errorf("inspect M170 harness binding columns: %w", err)
+		}
+		if columns != 0 {
+			return fmt.Errorf("M170 schema is partially present or locally incompatible: harness binding columns=%d", columns)
+		}
+		var eventColumns int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('harness_session_events')
+			WHERE name IN ('before_parent_harness_session_id','after_parent_harness_session_id','before_ticket_id','after_ticket_id')`).Scan(&eventColumns); err != nil {
+			return fmt.Errorf("inspect M170 harness event columns: %w", err)
+		}
+		if eventColumns != 0 {
+			return fmt.Errorf("M170 schema is partially present or locally incompatible: harness event columns=%d", eventColumns)
+		}
+		return checkSchemaObjectsAbsent(ctx, conn, 170, []string{
+			"idx_harness_sessions_parent", "idx_harness_sessions_parent_ref",
+			"idx_harness_sessions_ticket", "idx_harness_sessions_ticket_ref",
+			"trg_harness_sessions_binding_insert", "trg_harness_sessions_binding_update",
+			"trg_harness_sessions_binding_revision", "trg_harness_sessions_binding_event",
+			"trg_issues_bound_harness_move",
 		})
 	},
 	171: func(ctx context.Context, conn *sql.Conn) error {

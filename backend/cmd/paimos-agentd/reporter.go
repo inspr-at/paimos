@@ -93,11 +93,14 @@ type cliReporter struct {
 }
 
 type harnessSessionResponse struct {
-	ID        string `json:"id"`
-	ProjectID int64  `json:"project_id"`
-	AgentName string `json:"agent_name"`
-	Harness   string `json:"harness"`
-	Phase     string `json:"phase"`
+	ID              string  `json:"id"`
+	ProjectID       int64   `json:"project_id"`
+	AgentName       string  `json:"agent_name"`
+	Harness         string  `json:"harness"`
+	Phase           string  `json:"phase"`
+	Role            string  `json:"role,omitempty"`
+	ParentSessionID *string `json:"parent_harness_session_id"`
+	TicketID        *int64  `json:"ticket_id"`
 }
 
 type harnessControlResponse struct {
@@ -355,9 +358,19 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	if !strings.Contains(","+capabilities+",", ",status,") {
 		return errors.New("agentd reporter session has no status capability")
 	}
+	role := session.Role
+	if role == "" {
+		role = "worker"
+	}
 	args := []string{"--json", "harness", "register", "--project", strconv.FormatInt(session.ProjectID, 10),
 		"--agent", agentName, "--harness", harness, "--host", r.host, "--registration-file", "-",
-		"--management", "managed", "--role", "worker", "--steer-mode", "none", "--capability", capabilities}
+		"--management", "managed", "--role", role, "--steer-mode", "none", "--capability", capabilities}
+	if session.ParentSessionID != "" {
+		args = append(args, "--parent-session", session.ParentSessionID)
+	}
+	if session.TicketID > 0 {
+		args = append(args, "--ticket-id", strconv.FormatInt(session.TicketID, 10))
+	}
 	registration, err := json.Marshal(map[string]string{"harness_session_ref": session.ID, "worker_lease": workerLease})
 	if err != nil {
 		return errors.New("encode private reporter registration: unavailable")
@@ -366,8 +379,9 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	if err != nil {
 		return err
 	}
-	var response harnessSessionResponse
-	if json.Unmarshal(raw, &response) != nil || uuid.Validate(response.ID) != nil || response.ProjectID != session.ProjectID || response.AgentName != agentName || response.Harness != harness {
+	response := harnessSessionResponse{Role: role}
+	if json.Unmarshal(raw, &response) != nil || uuid.Validate(response.ID) != nil || response.ProjectID != session.ProjectID || response.AgentName != agentName || response.Harness != harness ||
+		response.Role != role || !reporterBindingMatches(response, session) {
 		return errors.New("paimos reporter returned mismatched harness session scope")
 	}
 	if err := r.checkpoint(ctx, session, agentd.ReporterState{PublicSessionID: response.ID, Capabilities: ownedCapabilities}); err != nil {
@@ -393,6 +407,14 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 		return err
 	}
 	return r.yieldControls(ctx, response.ID, session, workerLease)
+}
+
+func reporterBindingMatches(response harnessSessionResponse, session agentd.Session) bool {
+	parentMatches := session.ParentSessionID == "" && response.ParentSessionID == nil ||
+		session.ParentSessionID != "" && response.ParentSessionID != nil && *response.ParentSessionID == session.ParentSessionID
+	ticketMatches := session.TicketID == 0 && response.TicketID == nil ||
+		session.TicketID > 0 && response.TicketID != nil && *response.TicketID == session.TicketID
+	return parentMatches && ticketMatches
 }
 
 func reporterIdentity(session agentd.Session) (string, string, error) {

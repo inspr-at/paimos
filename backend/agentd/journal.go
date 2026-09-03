@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/localjournal"
 )
 
@@ -77,6 +78,15 @@ func validateRegistryRecord(record registryRecord) error {
 	if !validOpaqueID(s.ID) || !validOpaqueID(s.Identity) || s.ProjectID < 0 || !filepath.IsAbs(s.Workspace) || s.StartedAt.IsZero() || s.HeartbeatAt.IsZero() ||
 		s.PID != 0 || !s.Managed {
 		return errors.New("invalid agentd registry record")
+	}
+	if s.Role != "" && s.Role != "worker" && s.Role != "coordinator" {
+		return errors.New("invalid agentd session role")
+	}
+	if s.ParentSessionID != "" && uuid.Validate(s.ParentSessionID) != nil {
+		return errors.New("invalid agentd parent harness session id")
+	}
+	if s.TicketID < 0 {
+		return errors.New("invalid agentd ticket id")
 	}
 	switch s.State {
 	case StateStarting, StateRunning, StateStopping, StateStopped, StateExited, StateFailed, StateOwnershipLost:

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -50,13 +51,52 @@ func TestHarnessOpenAPIRequiresWorkerLeaseOnEveryWorkerMutation(t *testing.T) {
 	}
 }
 
+func TestHarnessOpenAPIKeepsSessionAndTicketIdentitiesDistinct(t *testing.T) {
+	raw, err := os.ReadFile("openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		t.Fatal(err)
+	}
+	harness := contract.Components.Schemas["HarnessSession"].Properties
+	product := contract.Components.Schemas["ProductSession"].Properties
+	for _, field := range []string{"id", "parent_harness_session_id", "ticket_id"} {
+		if _, ok := harness[field]; !ok {
+			t.Fatalf("HarnessSession missing distinct %s field", field)
+		}
+	}
+	for _, foreign := range []string{"product_session_id", "attribution_session_id"} {
+		if _, ok := harness[foreign]; ok {
+			t.Fatalf("HarnessSession overloads foreign identity %s", foreign)
+		}
+	}
+	if _, ok := product["product_session_id"]; !ok {
+		t.Fatal("ProductSession lost its dedicated product_session_id")
+	}
+	for _, foreign := range []string{"parent_harness_session_id", "ticket_id"} {
+		if _, ok := product[foreign]; ok {
+			t.Fatalf("ProductSession overloads harness binding %s", foreign)
+		}
+	}
+}
+
 func TestHarnessSessionRoutesAreProjectScopedAndDistinct(t *testing.T) {
 	router := chi.NewRouter()
 	RegisterHarnessSessionRoutes(router)
 	want := map[string]bool{
 		"GET /projects/{id}/harness-sessions":                                            false,
+		"GET /projects/{id}/harness-sessions/orchestrator":                               false,
 		"POST /projects/{id}/harness-sessions":                                           false,
 		"GET /projects/{id}/harness-sessions/{sessionID}":                                false,
+		"PATCH /projects/{id}/harness-sessions/{sessionID}/binding":                      false,
 		"POST /projects/{id}/harness-sessions/{sessionID}/heartbeat":                     false,
 		"POST /projects/{id}/harness-sessions/{sessionID}/yield":                         false,
 		"POST /projects/{id}/harness-sessions/{sessionID}/drain":                         false,
@@ -81,6 +121,87 @@ func TestHarnessSessionRoutesAreProjectScopedAndDistinct(t *testing.T) {
 		if !found {
 			t.Errorf("missing %s", route)
 		}
+	}
+}
+
+func TestHarnessBindingHandlerValidatesOnlyChangedFullStateReferences(t *testing.T) {
+	openChangesTestDB(t)
+	project, err := db.DB.Exec(`INSERT INTO projects(name,key) VALUES('Binding isolation','BIS')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	for _, name := range []string{"stopped-parent", "active-parent", "ticket-child", "parent-child"} {
+		if _, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,?)`, projectID, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newTicket := func(number int) int64 {
+		result, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status) VALUES(?,?,'ticket','Binding','in-progress')`, projectID, number)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	firstTicket := newTicket(1)
+	secondTicket := newTicket(2)
+	historicalTicket := newTicket(3)
+	service := managedharness.NewService(db.DB)
+	register := func(agent string, parent *string, ticket *int64) models.HarnessSession {
+		session, created, err := service.Register(context.Background(), managedharness.RegisterInput{
+			ProjectID: projectID, AgentName: agent, Harness: "codex", Host: "host-" + agent, SessionRef: "ref-" + agent,
+			WorkerLease: handlerWorkerLease, ManagementMode: managedharness.ManagementManaged, Role: managedharness.RoleWorker,
+			ParentSessionID: parent, TicketID: ticket, SteerMode: managedharness.SteerNone,
+			Capabilities: models.HarnessCapabilities{Status: true},
+		})
+		if err != nil || !created {
+			t.Fatalf("register %s: created=%v err=%v", agent, created, err)
+		}
+		return session
+	}
+	patch := func(session models.HarnessSession, parentJSON, ticketJSON string) models.HarnessSession {
+		body := []byte(fmt.Sprintf(`{"expected_revision":%d,"parent_harness_session_id":%s,"ticket_id":%s}`, session.Revision, parentJSON, ticketJSON))
+		req := httptest.NewRequest(http.MethodPatch, "/projects/1/harness-sessions/"+session.ID+"/binding", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		route := chi.NewRouteContext()
+		route.URLParams.Add("id", strconv.FormatInt(projectID, 10))
+		route.URLParams.Add("sessionID", session.ID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
+		recorder := httptest.NewRecorder()
+		assignHarnessBinding(recorder, req)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("binding patch status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		var out models.HarnessSession
+		if err := json.Unmarshal(recorder.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	stoppedParent := register("stopped-parent", nil, nil)
+	activeParent := register("active-parent", nil, nil)
+	ticketChild := register("ticket-child", &stoppedParent.ID, &firstTicket)
+	if _, err := service.Stop(context.Background(), stoppedParent.ID); err != nil {
+		t.Fatal(err)
+	}
+	changedTicket := patch(ticketChild, `"`+stoppedParent.ID+`"`, strconv.FormatInt(secondTicket, 10))
+	if changedTicket.ParentSessionID == nil || *changedTicket.ParentSessionID != stoppedParent.ID || changedTicket.TicketID == nil || *changedTicket.TicketID != secondTicket {
+		t.Fatalf("ticket-only handler patch lost desired state: %+v", changedTicket)
+	}
+
+	parentChild := register("parent-child", nil, &historicalTicket)
+	stoppedChild, err := service.Stop(context.Background(), parentChild.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`UPDATE issues SET deleted_at='2026-09-03 04:00:00' WHERE id=?`, historicalTicket); err != nil {
+		t.Fatal(err)
+	}
+	changedParent := patch(stoppedChild, `"`+activeParent.ID+`"`, strconv.FormatInt(historicalTicket, 10))
+	if changedParent.ParentSessionID == nil || *changedParent.ParentSessionID != activeParent.ID || changedParent.TicketID == nil || *changedParent.TicketID != historicalTicket {
+		t.Fatalf("parent-only handler patch lost desired state: %+v", changedParent)
 	}
 }
 

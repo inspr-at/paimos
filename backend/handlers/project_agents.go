@@ -360,6 +360,19 @@ func DeleteProjectAgent(w http.ResponseWriter, r *http.Request) {
 		writeOrchestratorError(w, http.StatusConflict, "orchestrator_assigned")
 		return
 	}
+	// PAI-903: a project-agent delete retains its existing cascade semantics,
+	// but surviving children must not retain a dangling parent generation. The
+	// revision increment is required by M170 and appends one immutable
+	// binding_changed event before the owned parent sessions are cascaded.
+	if _, err := tx.ExecContext(r.Context(), `UPDATE harness_sessions
+		SET parent_harness_session_id=NULL,revision=revision+1,
+		    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		WHERE parent_harness_session_id IN (
+		 SELECT id FROM harness_sessions WHERE project_agent_id=?
+		)`, agentID); err != nil {
+		jsonError(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
 	res, err := tx.ExecContext(r.Context(), `DELETE FROM project_agents WHERE id=?`, agentID)
 	if err != nil {
 		jsonError(w, "delete failed", http.StatusInternalServerError)

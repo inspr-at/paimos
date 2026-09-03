@@ -40,11 +40,14 @@ var (
 )
 
 type StartRequest struct {
-	Adapter   string `json:"adapter"`
-	Workspace string `json:"workspace"`
-	Prompt    string `json:"prompt"`
-	Identity  string `json:"identity"`
-	ProjectID int64  `json:"project_id"`
+	Adapter         string `json:"adapter"`
+	Workspace       string `json:"workspace"`
+	Prompt          string `json:"prompt"`
+	Identity        string `json:"identity"`
+	ProjectID       int64  `json:"project_id"`
+	Role            string `json:"role,omitempty"`
+	ParentSessionID string `json:"parent_harness_session_id,omitempty"`
+	TicketID        int64  `json:"ticket_id,omitempty"`
 }
 
 type AdapterEvent struct {
@@ -123,6 +126,9 @@ type Session struct {
 	ID                string        `json:"id"`
 	Identity          string        `json:"identity"`
 	ProjectID         int64         `json:"project_id"`
+	Role              string        `json:"role"`
+	ParentSessionID   string        `json:"parent_harness_session_id,omitempty"`
+	TicketID          int64         `json:"ticket_id,omitempty"`
 	Adapter           string        `json:"adapter"`
 	Workspace         string        `json:"workspace"`
 	HarnessSessionID  string        `json:"harness_session_id,omitempty"`

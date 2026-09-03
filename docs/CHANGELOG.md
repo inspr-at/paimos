@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [Unreleased]
+
+### Added — Durable worker hierarchy and ticket binding (PAI-903)
+
+- Added nullable, structured parent-generation and ticket bindings to the
+  authoritative harness-session state, registration, agentd start/reporting,
+  API, and CLI without overloading identity, prompt, workspace, product
+  sessions, or attribution sessions.
+- Added explicit revision-CAS reassignment with immutable before/after events,
+  same-project and active-parent enforcement, cycle/depth guards, and an
+  explicit resolved/unset/ambiguous project-orchestrator projection.
+
 ## [26.09.02] — 2026-09-02
 
 ### Added — Safe orchestrator-binding handoff (PAI-884)

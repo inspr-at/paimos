@@ -115,6 +115,9 @@ func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) 
 	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'unassigned-worker')`, projectID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'parent-worker')`, projectID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := paimosdb.DB.Exec(`UPDATE instance_orchestrator SET project_agent_id=?,display_label='Amy',revision=1,
 		updated_by_user_id=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton_id=1`, receiverID, actorID); err != nil {
 		t.Fatal(err)
@@ -142,21 +145,23 @@ func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) 
 	}
 
 	harness := NewService(paimosdb.DB)
-	register := func(name, host, ref string) models.HarnessSession {
+	register := func(name, host, ref string, parentSessionID *string, ticketID *int64) models.HarnessSession {
 		t.Helper()
 		session, _, err := harness.Register(context.Background(), RegisterInput{
 			ProjectID: projectID, AgentName: name, Harness: "codex", Host: host,
 			SessionRef: ref, WorkerLease: testWorkerLease, ManagementMode: ManagementManaged,
-			Role: RoleWorker, SteerMode: SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
+			Role: RoleWorker, ParentSessionID: parentSessionID, TicketID: ticketID,
+			SteerMode: SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return session
 	}
-	assigned := register("worker", "assignment-snapshot-assigned", "assignment-snapshot-assigned")
-	unassigned := register("unassigned-worker", "assignment-snapshot-unassigned", "assignment-snapshot-unassigned")
-	late := register("late-worker", "assignment-snapshot-late", "assignment-snapshot-late")
+	parent := register("parent-worker", "assignment-snapshot-parent", "assignment-snapshot-parent", nil, nil)
+	assigned := register("worker", "assignment-snapshot-assigned", "assignment-snapshot-assigned", &parent.ID, &issueID)
+	unassigned := register("unassigned-worker", "assignment-snapshot-unassigned", "assignment-snapshot-unassigned", nil, nil)
+	late := register("late-worker", "assignment-snapshot-late", "assignment-snapshot-late", nil, nil)
 	completeTurn := func(session models.HarnessSession) {
 		t.Helper()
 		if _, err := harness.HeartbeatWithActivity(context.Background(), session.ID, PhaseWorking, ActivityEvidence{Sequence: 1, Kind: "turn_started"}); err != nil {
@@ -226,5 +231,14 @@ func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) 
 			WHERE harness_session_id=? AND activity_event_kind='turn_completed'`, check.sessionID).Scan(&snapshot); err != nil || snapshot != check.want {
 			t.Fatalf("session=%s assignment snapshot=%d err=%v want=%d", check.sessionID, snapshot, err, check.want)
 		}
+	}
+	var eventParent string
+	var eventTicket int64
+	if err := paimosdb.DB.QueryRow(`SELECT after_parent_harness_session_id,after_ticket_id FROM harness_session_events
+		WHERE harness_session_id=? AND activity_event_kind='turn_completed'`, assigned.ID).Scan(&eventParent, &eventTicket); err != nil {
+		t.Fatal(err)
+	}
+	if eventParent != parent.ID || eventTicket != issueID {
+		t.Fatalf("bound attention event parent=%q ticket=%d want parent=%q ticket=%d", eventParent, eventTicket, parent.ID, issueID)
 	}
 }

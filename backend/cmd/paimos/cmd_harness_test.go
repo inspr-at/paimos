@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -8,6 +9,40 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestHarnessRegisterOmitsUnsetHierarchyFieldsForOldServer(t *testing.T) {
+	registrationFile := filepath.Join(t.TempDir(), "registration.json")
+	if err := os.WriteFile(registrationFile, []byte(`{"harness_session_ref":"session-1","worker_lease":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var posted map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.RequestURI() == "/api/projects?status=all":
+			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/6/harness-sessions":
+			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = w.Write([]byte(`{"id":"11111111-1111-4111-8111-111111111111"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.String())
+			http.Error(w, `{"error":"unexpected"}`, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv(envURL, server.URL)
+	t.Setenv(envAPIKey, "test_key")
+	if _, _, err := executeCLIForTest(t, "--json", "harness", "register", "--project", "PAI", "--agent", "worker", "--harness", "codex", "--host", "mbp0", "--registration-file", registrationFile, "--management", "managed", "--role", "worker", "--capability", "status"); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"parent_harness_session_id", "ticket_id"} {
+		if _, ok := posted[field]; ok {
+			t.Fatalf("unset forward-compatible field %s sent to old server: %s", field, posted[field])
+		}
+	}
+}
 
 func TestHarnessNounDoesNotCollideWithAttributionSession(t *testing.T) {
 	root := rootCmd()
@@ -27,7 +62,7 @@ func TestHarnessNounDoesNotCollideWithAttributionSession(t *testing.T) {
 			t.Fatal("managed harness control plane must not define a second ambiguous start command")
 		}
 	}
-	for _, name := range []string{"drain", "complete-delivery", "drain-steer", "complete-steer"} {
+	for _, name := range []string{"orchestrator", "bind", "drain", "complete-delivery", "drain-steer", "complete-steer"} {
 		child, _, findErr := root.Find([]string{"harness", name})
 		if findErr != nil || child.Name() != name {
 			t.Fatalf("harness %s command missing: command=%v err=%v", name, child, findErr)

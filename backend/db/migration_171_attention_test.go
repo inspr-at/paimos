@@ -19,6 +19,32 @@ func TestMigration171AttentionLedgerIsClosedAndImmutable(t *testing.T) {
 	}
 	defer database.Close()
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	if err := migrateThrough(database, 170); err != nil {
+		t.Fatal(err)
+	}
+	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Attention','ATTN')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	agent, err := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'amy')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentID, _ := agent.LastInsertId()
+	sessionID := "11111111-1111-4111-8111-111111111171"
+	if _, err := database.Exec(`INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,
+		session_ref_digest,worker_lease_digest,management_mode,role,steer_mode,advertised_inbox,advertised_status,
+		advertised_steer,advertised_interrupt,advertised_stop,phase)
+		VALUES(?,?,?,'amy','codex','m171',zeroblob(32),zeroblob(32),'managed','worker','none',0,1,0,0,0,'working')`,
+		sessionID, projectID, agentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO harness_session_events(harness_session_id,event_sequence,operation,phase,
+		activity_state,activity_reason,activity_event_kind,activity_sequence,before_ticket_id,after_ticket_id)
+		VALUES(?,1,'register','working','unknown','unreported','',0,NULL,NULL)`, sessionID); err != nil {
+		t.Fatal(err)
+	}
 	if err := migrateThrough(database, 171); err != nil {
 		t.Fatal(err)
 	}
@@ -37,16 +63,18 @@ func TestMigration171AttentionLedgerIsClosedAndImmutable(t *testing.T) {
 			t.Fatalf("object %s count=%d err=%v", object, count, err)
 		}
 	}
-	project, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Attention','ATTN')`)
-	if err != nil {
+	var operation string
+	var beforeTicket, afterTicket sql.NullInt64
+	var assignmentPresent sql.NullBool
+	if err := database.QueryRow(`SELECT operation,before_ticket_id,after_ticket_id,assignment_present
+		FROM harness_session_events WHERE harness_session_id=? AND event_sequence=1`, sessionID).
+		Scan(&operation, &beforeTicket, &afterTicket, &assignmentPresent); err != nil {
 		t.Fatal(err)
 	}
-	projectID, _ := project.LastInsertId()
-	agent, err := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'amy')`, projectID)
-	if err != nil {
-		t.Fatal(err)
+	if operation != "register" || beforeTicket.Valid || afterTicket.Valid || assignmentPresent.Valid {
+		t.Fatalf("M170 event changed across M171: operation=%q before_ticket=%+v after_ticket=%+v assignment=%+v",
+			operation, beforeTicket, afterTicket, assignmentPresent)
 	}
-	agentID, _ := agent.LastInsertId()
 	if _, err := database.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
 		source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
 		VALUES(?,?,'codex:amy',?,'harness_session_event','fixture',1,'worker_unknown','heartbeat_stale',

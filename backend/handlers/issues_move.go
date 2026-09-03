@@ -390,6 +390,8 @@ func runMove(r *http.Request, issueID, targetProjectID int64) (*moveResult, int,
 			return nil, http.StatusNotFound, fmt.Errorf("issue or target project not found")
 		case strings.Contains(err.Error(), "product session attached node"):
 			return nil, http.StatusConflict, fmt.Errorf("detach the product session before moving this node")
+		case strings.Contains(err.Error(), "bound harness ticket must be explicitly detached"):
+			return nil, http.StatusConflict, fmt.Errorf("detach harness sessions before moving this ticket")
 		default:
 			return nil, http.StatusInternalServerError, fmt.Errorf("internal error")
 		}
