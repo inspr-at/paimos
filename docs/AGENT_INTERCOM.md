@@ -116,6 +116,31 @@ paimos listen --as "$ADDRESS" --project PAI --follow --deliver agentd_codex
 paimos listen --as "$ADDRESS" --project PAI --follow --deliver codex
 ```
 
+Run the content-free attention worker separately for the configured instance
+orchestrator. It never carries worker prose and never requests steer:
+
+```bash
+paimos listen --attention --as "$ADDRESS" --project PAI --follow --deliver codex
+```
+
+The server derives this feed from authoritative message, delivery, harness
+activity, control, product-session, and issue records. Its closed transition
+policy wakes only for stale/unknown or dead workers, a turn ending while an
+open assignment remains, blocked/dead delivery, held action request, or
+rejected control. Ordinary busy/tool heartbeats and an unassigned completed
+turn are absorbed. New or malformed event combinations are deferred and do
+not wake a model until the policy is explicitly widened.
+
+Each wake is a bounded batch of at most 32 identifier/enum/timestamp records.
+The batch and per-address cursor are durable: a crashed listener reacquires the
+same batch and delivery correlation after its lease expires, while completion
+and cursor acknowledgement commit atomically. Receiver targets remain
+encrypted and receiver-owned. A missing, server-side, or steer-only capability
+creates a visible blocked batch; attention never falls back to steer,
+arbitrary prose, or another receiver. An explicit target requeue can recover
+that same batch after a simple-handoff target is registered for the same
+address.
+
 In the sender shell, establish attribution and send the durable message:
 
 ```bash
@@ -193,6 +218,7 @@ The layers have separate responsibilities:
 |---|---|---|
 | Message ledger | Canonical content, sender/receiver attribution, thread and hop, security decision, durable cursor | Vendor process or target secret |
 | Delivery coordinator | One delivery ID, immutable primary/fallback target versions, FIFO lease, attempts, typed result | A second message body or model response |
+| Attention projection | Content-free actionable references, closed transition policy, coalesced batch, monotonic receiver cursor | Worker state, message content, authorization, or a second truth log |
 | Delivery adapter | One documented vendor handoff primitive and its truthful effective level | Authorization, target selection, or queue-faked steer |
 | Harness control plane | Durable managed/unmanaged identity, advertised capabilities, heartbeat, typed interrupt/stop requests, and a digest of the private generation lease | A worker lease, vendor reference, or local Process/Query handle |
 | `paimos-agentd` | Exact local child Process/Query bound to instance, numeric project, and identity; private Unix transport; local status, replay-safe control receipts, and an owner-only per-generation worker lease | Paimos database, shared API-key contents, or authority to adopt an old PID |

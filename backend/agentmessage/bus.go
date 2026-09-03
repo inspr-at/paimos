@@ -370,6 +370,41 @@ func (s *Service) RequeueMissingTargets(ctx context.Context, projectID int64, ad
 		return 0, err
 	}
 	count, _ := result.RowsAffected()
+	// Attention batches use the same receiver-owned target registry and the
+	// same explicit requeue boundary. Registration alone never retargets
+	// historical work. Pick the first compatible simple-handoff target deliberately;
+	// a server-side webhook is not a model wake capability.
+	var attentionTargetID string
+	rows, queryErr := tx.QueryContext(ctx, `SELECT id,adapter FROM agent_message_targets
+		WHERE instance=? AND project_id=? AND address=? AND enabled=1
+		ORDER BY CASE role WHEN 'primary' THEN 0 ELSE 1 END,version DESC`, instanceName(), projectID, address)
+	if queryErr != nil {
+		return 0, queryErr
+	}
+	for rows.Next() {
+		var id, adapter string
+		if err := rows.Scan(&id, &adapter); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if attentionTargetID == "" && isAttentionWakeAdapter(adapter) {
+			attentionTargetID = id
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if attentionTargetID != "" {
+		attentionResult, err := tx.ExecContext(ctx, `UPDATE agent_attention_batches SET target_id=?,state='pending',
+			worker_adapter='',blocked_reason='',lease_until=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			WHERE receiver_project_id=? AND address=? AND state='blocked' AND blocked_reason IN ('target_missing','capability_missing')`,
+			attentionTargetID, projectID, address)
+		if err != nil {
+			return 0, err
+		}
+		attentionCount, _ := attentionResult.RowsAffected()
+		count += attentionCount
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}

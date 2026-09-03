@@ -28,6 +28,7 @@ Start here when opening this repo cold.
 - `GET /api/issues/{id}/anchors`
 - `GET /api/projects/{id}/agents/{name}.json` — canonical agent artifact (PAI-329)
 - `GET /api/projects/{id}/messages/listen` · `POST /api/projects/{id}/messages/ack` — attributed durable agent inbox (PAI-816)
+- `GET /api/projects/{id}/attention/listen` · `POST /api/projects/{id}/attention/ack` — attributed, content-free actionable attention batches and monotonic cursor (PAI-902)
 - `POST /api/projects/{id}/messages` · `GET|POST /api/projects/{id}/message-targets` · `GET /api/projects/{id}/message-deliveries` — durable send with `delivery_level`, encrypted receiver targets, and redacted delivery state (PAI-826; see [`docs/api-minimal.md`](docs/api-minimal.md))
 - `GET|POST /api/projects/{id}/harness-sessions` · `POST /api/projects/{id}/harness-sessions/{sessionID}/{heartbeat|yield|drain|complete-delivery|stop}` · `POST .../{sessionID}/controls/{kind}` — durable managed/unmanaged harness control plane with attributed full-FIFO inbox delivery and typed owned controls (PAI-848; see [`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md))
 - `POST /api/issues/{id}/implement` · `GET /api/issues/{id}/runs` · `GET|PATCH /api/runs/{id}` · `GET /api/projects/{id}/runners` — "Implement this" run lifecycle (PAI-605; see [`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md))

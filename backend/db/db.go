@@ -12457,6 +12457,69 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 WHEN EXISTS(SELECT 1 FROM harness_sessions WHERE id=OLD.harness_session_id)
 			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
 		}},
+
+		// M171 / PAI-902: actionable attention is a derived, content-free
+		// projection over authoritative ledgers. Per-address cursors and durable
+		// batches make a coalesced simple wake recoverable across listener
+		// crashes without creating a second worker-state truth.
+		{171, []string{
+			`CREATE TABLE agent_attention_items (
+			 id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+			 receiver_project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 receiver_project_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 address                   TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+			 source_project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 source_kind               TEXT NOT NULL CHECK(source_kind IN ('harness_session_event','agent_message_delivery','held_agent_message','harness_control')),
+			 source_id                 TEXT NOT NULL CHECK(length(CAST(source_id AS BLOB)) BETWEEN 1 AND 64 AND source_id=trim(source_id)),
+			 source_sequence           INTEGER NOT NULL CHECK(source_sequence>=0),
+			 attention_kind            TEXT NOT NULL CHECK(attention_kind IN ('worker_unknown','worker_dead','assignment_turn_ended','delivery_failed','held_action','control_rejected')),
+			 reason_code               TEXT NOT NULL CHECK(reason_code IN ('heartbeat_stale','stale_evidence','malformed_evidence','unmanaged_evidence','process_exited','process_failed','ownership_lost','stopped','turn_completed_open_assignment','target_blocked','delivery_dead','action_request_held','control_rejected')),
+			 occurred_at               TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("occurred_at") + `),
+			 created_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(receiver_project_agent_id,address,source_kind,source_id,source_sequence,attention_kind)
+			)`,
+			`CREATE INDEX idx_agent_attention_items_receiver
+			 ON agent_attention_items(receiver_project_id,address,id)`,
+			`CREATE TRIGGER trg_agent_attention_items_no_update BEFORE UPDATE ON agent_attention_items
+			 BEGIN SELECT RAISE(ABORT,'agent attention items are immutable'); END`,
+			`CREATE TRIGGER trg_agent_attention_items_no_delete BEFORE DELETE ON agent_attention_items
+			 WHEN EXISTS(SELECT 1 FROM projects WHERE id=OLD.receiver_project_id)
+			  AND EXISTS(SELECT 1 FROM project_agents WHERE id=OLD.receiver_project_agent_id)
+			  AND EXISTS(SELECT 1 FROM projects WHERE id=OLD.source_project_id)
+			 BEGIN SELECT RAISE(ABORT,'agent attention items are immutable'); END`,
+			`CREATE TABLE agent_attention_cursors (
+			 receiver_project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 receiver_project_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 address                   TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+			 cursor                    INTEGER NOT NULL DEFAULT 0 CHECK(cursor>=0),
+			 updated_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 PRIMARY KEY(receiver_project_id,address)
+			)`,
+			`CREATE TABLE agent_attention_batches (
+			 batch_id                  TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("batch_id") + `),
+			 receiver_project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 receiver_project_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 address                   TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+			 from_cursor               INTEGER NOT NULL CHECK(from_cursor>=0),
+			 to_cursor                 INTEGER NOT NULL CHECK(to_cursor>from_cursor),
+			 item_count                INTEGER NOT NULL CHECK(item_count BETWEEN 1 AND 32),
+			 state                     TEXT NOT NULL CHECK(state IN ('pending','leased','blocked','handed_off')),
+			 target_id                 TEXT REFERENCES agent_message_targets(id),
+			 worker_adapter            TEXT NOT NULL DEFAULT '' CHECK(length(CAST(worker_adapter AS BLOB))<=64),
+			 blocked_reason            TEXT NOT NULL DEFAULT '' CHECK(blocked_reason IN ('','target_missing','capability_missing','foreign_worker')),
+			 lease_until               TEXT CHECK(` + sqlNullableControlTimestampCheck("lease_until") + `),
+			 handed_off_at             TEXT CHECK(` + sqlNullableControlTimestampCheck("handed_off_at") + `),
+			 created_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 updated_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 CHECK((state='blocked')=(blocked_reason<>'')),
+			 CHECK((state='handed_off')=(handed_off_at IS NOT NULL)),
+			 CHECK(state<>'leased' OR (target_id IS NOT NULL AND worker_adapter<>'' AND lease_until IS NOT NULL))
+			)`,
+			`CREATE UNIQUE INDEX idx_agent_attention_batches_open
+			 ON agent_attention_batches(receiver_project_id,address) WHERE state IN ('pending','leased','blocked')`,
+			`CREATE INDEX idx_agent_attention_batches_cursor
+			 ON agent_attention_batches(receiver_project_id,address,to_cursor)`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -12646,6 +12709,14 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			"harness_session_events", "idx_harness_session_events_session", "idx_harness_sessions_activity",
 			"trg_harness_sessions_activity_shape_insert", "trg_harness_sessions_activity_shape_update",
 			"trg_harness_session_events_no_update", "trg_harness_session_events_no_delete",
+		})
+	},
+	171: func(ctx context.Context, conn *sql.Conn) error {
+		return checkSchemaObjectsAbsent(ctx, conn, 171, []string{
+			"agent_attention_items", "idx_agent_attention_items_receiver",
+			"trg_agent_attention_items_no_update", "trg_agent_attention_items_no_delete",
+			"agent_attention_cursors", "agent_attention_batches",
+			"idx_agent_attention_batches_open", "idx_agent_attention_batches_cursor",
 		})
 	},
 }

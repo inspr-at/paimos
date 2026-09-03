@@ -22,7 +22,9 @@ import (
 func RegisterAgentMessageRoutes(r chi.Router) {
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages", sendAgentMessage)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/messages/listen", listenAgentMessages)
+	r.With(auth.RequireProjectView).Get("/projects/{id}/attention/listen", listenAgentAttention)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/ack", ackAgentMessages)
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/attention/ack", ackAgentAttention)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/delivery-complete", completeAgentMessageDelivery)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/delivery-unavailable", rerouteUnavailableAgentMessageDelivery)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/message-allowlist", allowAgentMessageSender)
@@ -39,6 +41,12 @@ func RegisterAgentMessageRoutes(r chi.Router) {
 type ackEnvelopeRequest struct {
 	To     string `json:"to"`
 	Cursor int64  `json:"cursor"`
+}
+
+type ackAttentionRequest struct {
+	To      string `json:"to"`
+	Cursor  int64  `json:"cursor"`
+	BatchID string `json:"batch_id"`
 }
 
 type allowSenderRequest struct {
@@ -337,6 +345,30 @@ func listenAgentMessages(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, page)
 }
 
+func listenAgentAttention(w http.ResponseWriter, r *http.Request) {
+	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonError(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	agent, _ := readAgentAttribution(r)
+	attributed := ""
+	if agent != nil {
+		attributed = *agent
+	}
+	page, err := agentmessage.NewService(db.DB).ListAttention(r.Context(), agentmessage.AttentionInput{
+		ProjectID: projectID, Address: strings.TrimSpace(r.URL.Query().Get("to")), Agent: attributed,
+		WorkerAdapter: strings.ToLower(strings.TrimSpace(r.URL.Query().Get("delivery"))), AfterID: after, Limit: limit,
+	})
+	if err != nil {
+		writeAgentMessageError(w, r, err)
+		return
+	}
+	jsonOK(w, page)
+}
+
 func ackAgentMessages(w http.ResponseWriter, r *http.Request) {
 	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
@@ -357,6 +389,35 @@ func ackAgentMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	state, err := agentmessage.NewService(db.DB).AckInbox(r.Context(), agentmessage.AckInput{
 		ProjectID: projectID, Address: strings.TrimSpace(req.To), Agent: attributed, Cursor: req.Cursor,
+	})
+	if err != nil {
+		writeAgentMessageError(w, r, err)
+		return
+	}
+	jsonOK(w, state)
+}
+
+func ackAgentAttention(w http.ResponseWriter, r *http.Request) {
+	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonError(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	var req ackAttentionRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		messageProblem(w, r, "agent_attention_request_invalid", err.Error(), http.StatusBadRequest)
+		return
+	}
+	agent, _ := readAgentAttribution(r)
+	attributed := ""
+	if agent != nil {
+		attributed = *agent
+	}
+	state, err := agentmessage.NewService(db.DB).AckAttention(r.Context(), agentmessage.AttentionAckInput{
+		ProjectID: projectID, Address: strings.TrimSpace(req.To), Agent: attributed,
+		Cursor: req.Cursor, BatchID: strings.TrimSpace(req.BatchID),
 	})
 	if err != nil {
 		writeAgentMessageError(w, r, err)

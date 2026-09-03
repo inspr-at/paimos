@@ -35,6 +35,75 @@ func TestRunListenNoMessagesUsesExitThree(t *testing.T) {
 	}
 }
 
+func TestRunAttentionListenAcknowledgesOnlyAfterBoundedOutput(t *testing.T) {
+	page := attentionPage{Address: "codex:amy", NextCursor: 12, Items: []attentionItem{{
+		Cursor: 12, AttentionID: "attention-12", SourceProjectID: 7, SourceKind: "harness_session_event",
+		SourceID: "22222222-2222-4222-8222-222222222222", SourceSequence: 4,
+		Kind: "worker_unknown", Reason: "heartbeat_stale", OccurredAt: "2026-09-03T01:02:03.000Z",
+	}}}
+	var ack struct {
+		To      string `json:"to"`
+		Cursor  int64  `json:"cursor"`
+		BatchID string `json:"batch_id"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/projects/1/attention/listen":
+			if got := r.Header.Get(agentAttrHeader); got != "amy" {
+				t.Errorf("agent header=%q", got)
+			}
+			_ = json.NewEncoder(w).Encode(page)
+		case "/api/projects/1/attention/ack":
+			_ = json.NewDecoder(r.Body).Decode(&ack)
+			_ = json.NewEncoder(w).Encode(map[string]any{"cursor": ack.Cursor})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	oldStdout := stdout
+	var out bytes.Buffer
+	stdout = &out
+	defer func() { stdout = oldStdout }()
+	client := &Client{baseURL: srv.URL, http: srv.Client()}
+	if err := runAttentionListen(context.Background(), client, 1, "codex:amy", "amy", false, true, "", time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "kind=worker_unknown") || strings.Contains(out.String(), "body=") {
+		t.Fatalf("output=%q", out.String())
+	}
+	if ack.To != "codex:amy" || ack.Cursor != 12 || ack.BatchID != "" {
+		t.Fatalf("ack=%+v", ack)
+	}
+}
+
+func TestRunAttentionListenDoesNotAckFailedOutput(t *testing.T) {
+	page := attentionPage{Address: "codex:amy", NextCursor: 12, Items: []attentionItem{{
+		Cursor: 12, AttentionID: "attention-12", SourceProjectID: 7, SourceKind: "harness_session_event",
+		SourceID: "worker", SourceSequence: 4, Kind: "worker_dead", Reason: "process_failed", OccurredAt: "2026-09-03T01:02:03.000Z",
+	}}}
+	acks := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/listen") {
+			_ = json.NewEncoder(w).Encode(page)
+			return
+		}
+		acks++
+		_ = json.NewEncoder(w).Encode(map[string]any{"cursor": 12})
+	}))
+	defer srv.Close()
+	oldStdout := stdout
+	stdout = failingListenWriter{}
+	defer func() { stdout = oldStdout }()
+	client := &Client{baseURL: srv.URL, http: srv.Client()}
+	if err := runAttentionListen(context.Background(), client, 1, "codex:amy", "amy", false, true, "", time.Millisecond); err == nil {
+		t.Fatal("expected output failure")
+	}
+	if acks != 0 {
+		t.Fatalf("acks=%d", acks)
+	}
+}
+
 func TestRunListenAdapterUnavailableUsesExitFour(t *testing.T) {
 	message := messageEnvelope{Cursor: 1, MessageID: "m1"}
 	message.Parts = append(message.Parts, struct {

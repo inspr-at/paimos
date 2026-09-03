@@ -186,7 +186,7 @@ run_package() {
       run_race ./supervision '^(TestGrantReplayAndCompetingRevocationUseM147Truth|TestThirtyTwoConcurrentCommandCreateAndConfirmConverge|TestThirtyTwoConcurrentAcceptedEffectReservationAndClaimConverge|TestInputResponseAndSupersedeRaceConvergesToOneTerminalSeal|TestInputResponseAndRunTerminalRaceConvergesToOneTerminalEvent)$'
       ;;
     ./agentmessage)
-      run_race ./agentmessage '^(TestBusConcurrentIdempotencyCreatesOneMessageAndDelivery|TestBusTargetParticipatesInAtomicSecretRotation|TestEnvelopeLedgerAllowSenderIsNameScopedAndIdempotent)$'
+      run_race ./agentmessage '^(TestBusConcurrentIdempotencyCreatesOneMessageAndDelivery|TestBusTargetParticipatesInAtomicSecretRotation|TestEnvelopeLedgerAllowSenderIsNameScopedAndIdempotent|TestAttentionProjectionCoalescedLeaseAndCrashSafeAck|TestConcurrentAttentionListenersLeaseOneBatch)$'
       ;;
     ./agentmode)
       run_race ./agentmode '^TestReaderPinsCatalogBeforeCapturingClockDuringConcurrentEstimateCommit$'

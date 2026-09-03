@@ -385,6 +385,8 @@ POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_
 GET  /projects/:id/messages            ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
 GET  /projects/:id/messages/listen     ?to=<address>&after=<cursor>&limit=<n>
 POST /projects/:id/messages/ack        { to, cursor }
+GET  /projects/:id/attention/listen    ?to=<address>&after=<cursor>&limit=<n>&delivery=<local-adapter>
+POST /projects/:id/attention/ack       { to, cursor, batch_id? }
 POST /projects/:id/messages/delivery-complete { to, cursor, delivery_id, effective_level, fallback_reason }
 POST /projects/:id/messages/delivery-unavailable { to, cursor, delivery_id, fallback_reason }
 POST /projects/:id/message-allowlist   { receiver, sender }
