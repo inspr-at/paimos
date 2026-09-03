@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	paimosdb "github.com/inspr-at/paimos/backend/db"
 )
@@ -65,6 +66,7 @@ func TestClassifyAttentionTransitionClosedPolicy(t *testing.T) {
 		{"assigned turn end", AttentionTransition{ActivityState: "idle", ActivityReason: "turn_completed", ActivityKind: "turn_completed", Assigned: true}, AttentionDecision{Disposition: "actionable", Kind: "assignment_turn_ended", Reason: "turn_completed_open_assignment"}},
 		{"unassigned turn end", AttentionTransition{ActivityState: "idle", ActivityReason: "turn_completed", ActivityKind: "turn_completed"}, AttentionDecision{Disposition: "absorbed"}},
 		{"unknown worker", AttentionTransition{ActivityState: "unknown", ActivityReason: "heartbeat_stale"}, AttentionDecision{Disposition: "actionable", Kind: "worker_unknown", Reason: "heartbeat_stale"}},
+		{"unmanaged evidence deferred", AttentionTransition{ActivityState: "unknown", ActivityReason: "unmanaged_evidence"}, AttentionDecision{Disposition: "deferred"}},
 		{"dead worker", AttentionTransition{ActivityState: "dead", ActivityReason: "process_failed"}, AttentionDecision{Disposition: "actionable", Kind: "worker_dead", Reason: "process_failed"}},
 		{"unknown kind", AttentionTransition{ActivityState: "busy", ActivityReason: "adapter_activity", ActivityKind: "future_event"}, AttentionDecision{Disposition: "deferred"}},
 		{"unknown state", AttentionTransition{ActivityState: "future_state", ActivityReason: "future_reason"}, AttentionDecision{Disposition: "deferred"}},
@@ -75,6 +77,152 @@ func TestClassifyAttentionTransitionClosedPolicy(t *testing.T) {
 				t.Fatalf("got=%#v want=%#v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAttentionProjectsRealHeldActionWithNormalizedTimestampOnce(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	allowBusSender(t, service, projectID, "codex:amy")
+	message, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:amy", Body: "Please decide.", ActionRequest: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 1 {
+		t.Fatalf("real action projection inserted=%d err=%v", inserted, err)
+	}
+	var sourceID, occurredAt string
+	if err := paimosdb.DB.QueryRow(`SELECT source_id,occurred_at FROM agent_attention_items WHERE source_kind='held_agent_message'`).Scan(&sourceID, &occurredAt); err != nil {
+		t.Fatal(err)
+	}
+	if sourceID != message.MessageID || len(occurredAt) != len("2026-09-03T01:02:03.000Z") || !strings.HasSuffix(occurredAt, "Z") {
+		t.Fatalf("source=%q occurred_at=%q", sourceID, occurredAt)
+	}
+	if replay, err := service.ProjectAttention(context.Background()); err != nil || replay != 0 {
+		t.Fatalf("replay inserted=%d err=%v", replay, err)
+	}
+}
+
+func TestAttentionTransitionIdentityDeduplicatesRepeatedEventRows(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	_, sessionID := addAttentionWorker(t, projectID)
+	for eventSequence := 1; eventSequence <= 2; eventSequence++ {
+		if _, err := paimosdb.DB.Exec(`INSERT INTO harness_session_events(harness_session_id,event_sequence,operation,phase,
+			activity_state,activity_reason,activity_event_kind,activity_sequence)
+			VALUES(?,?,'activity_timeout','working','unknown','heartbeat_stale','',7)`, sessionID, eventSequence); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 1 {
+		t.Fatalf("transition projection inserted=%d err=%v", inserted, err)
+	}
+	var count int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_items WHERE source_id=?`, sessionID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("transition rows=%d err=%v", count, err)
+	}
+}
+
+func TestAttentionProjectionExcludesCoordinatorAndReceiverSessions(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	var receiverID int64
+	if err := paimosdb.DB.QueryRow(`SELECT id FROM project_agents WHERE project_id=? AND name='amy'`, projectID).Scan(&receiverID); err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := paimosdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'coordinator')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinatorID, _ := coordinator.LastInsertId()
+	fixtures := []struct {
+		id, name, harness, role string
+		agentID                 int64
+	}{
+		{"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "amy", "codex", "worker", receiverID},
+		{"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "coordinator", "claude", "coordinator", coordinatorID},
+	}
+	for _, fixture := range fixtures {
+		if _, err := paimosdb.DB.Exec(`INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,
+			session_ref_digest,worker_lease_digest,management_mode,role,steer_mode,advertised_inbox,advertised_status,
+			advertised_steer,advertised_interrupt,advertised_stop,phase)
+			VALUES(?,?,?,?,?,'attention-host',zeroblob(32),zeroblob(32),'managed',?,'none',0,1,0,1,1,'working')`,
+			fixture.id, projectID, fixture.agentID, fixture.name, fixture.harness, fixture.role); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := paimosdb.DB.Exec(`INSERT INTO harness_session_events(harness_session_id,event_sequence,operation,phase,
+			activity_state,activity_reason,activity_event_kind,activity_sequence)
+			VALUES(?,1,'activity_timeout','working','unknown','heartbeat_stale','',1)`, fixture.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 0 {
+		t.Fatalf("excluded projection inserted=%d err=%v", inserted, err)
+	}
+}
+
+func TestAttentionSourceIdentitySurvivesReceiverAddressChange(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	_, sessionID := addAttentionWorker(t, projectID)
+	if _, err := paimosdb.DB.Exec(`INSERT INTO harness_session_events(harness_session_id,event_sequence,operation,phase,
+		activity_state,activity_reason,activity_event_kind,activity_sequence)
+		VALUES(?,1,'activity_timeout','working','unknown','heartbeat_stale','',1)`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 1 {
+		t.Fatalf("initial inserted=%d err=%v", inserted, err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE agent_message_targets SET enabled=0 WHERE address='codex:amy'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "claude:amy", Adapter: AdapterClaudeResume, TargetKind: TargetKindClaudeSession,
+		TargetRef: "11111111-1111-4111-8111-111111111111", MaximumLevel: "simple", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if replay, err := service.ProjectAttention(context.Background()); err != nil || replay != 0 {
+		t.Fatalf("address-change replay=%d err=%v", replay, err)
+	}
+	page, err := service.ListAttention(context.Background(), AttentionInput{ProjectID: projectID, Address: "claude:amy", Agent: "amy"})
+	if err != nil || len(page.Items) != 1 || page.Items[0].SourceID != sessionID {
+		t.Fatalf("address-change page=%#v err=%v", page, err)
+	}
+	var count int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_items WHERE source_id=?`, sessionID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("source rows=%d err=%v", count, err)
+	}
+}
+
+func TestAttentionLeaseBoundsAndBatchlessAckCloseReachedBatch(t *testing.T) {
+	if attentionLeaseDuration(AdapterCodex) != 2*time.Minute || attentionLeaseDuration(AdapterClaudeResume) != 15*time.Minute {
+		t.Fatalf("lease bounds codex=%s claude=%s", attentionLeaseDuration(AdapterCodex), attentionLeaseDuration(AdapterClaudeResume))
+	}
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	var agentID int64
+	if err := paimosdb.DB.QueryRow(`SELECT id FROM project_agents WHERE project_id=? AND name='amy'`, projectID).Scan(&agentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
+		source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
+		VALUES(?,?,'codex:amy',?,'harness_session_event','ack-worker',1,'worker_unknown','heartbeat_stale',
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, projectID, agentID, projectID); err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.ListAttention(context.Background(), AttentionInput{ProjectID: projectID, Address: "codex:amy", Agent: "amy", WorkerAdapter: AdapterCodex})
+	if err != nil || page.Work == nil || page.Work.State != "leased" {
+		t.Fatalf("page=%#v err=%v", page, err)
+	}
+	if _, err := service.AckAttention(context.Background(), AttentionAckInput{ProjectID: projectID, Address: "codex:amy", Agent: "amy", Cursor: page.NextCursor}); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := paimosdb.DB.QueryRow(`SELECT state FROM agent_attention_batches WHERE batch_id=?`, page.Work.BatchID).Scan(&state); err != nil || state != "handed_off" {
+		t.Fatalf("batch state=%q err=%v", state, err)
 	}
 }
 

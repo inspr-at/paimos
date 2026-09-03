@@ -125,6 +125,29 @@ func TestRunListenAdapterUnavailableUsesExitFour(t *testing.T) {
 	}
 }
 
+func TestRunAttentionListenAdapterUnavailableUsesExitFour(t *testing.T) {
+	page := attentionPage{Address: "codex:amy", NextCursor: 12, Items: []attentionItem{{
+		Cursor: 12, AttentionID: "attention-12", SourceProjectID: 7, SourceKind: "harness_session_event",
+		SourceID: "worker", SourceSequence: 4, Kind: "worker_dead", Reason: "process_failed", OccurredAt: "2026-09-03T01:02:03.000Z",
+	}}, Work: &attentionWork{
+		BatchID: "11111111-1111-4111-8111-111111111111", Instance: "ppm", ProjectID: 1, State: "leased",
+		Adapter: "codex", TargetKind: "codex_thread", TargetRef: "22222222-2222-4222-8222-222222222222", MaximumLevel: "simple",
+	}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(page)
+	}))
+	defer srv.Close()
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("CODEX_THREAD_ID", "")
+	t.Setenv("CODEX_SESSION_ID", "")
+	client := &Client{baseURL: srv.URL, http: srv.Client()}
+	err := runAttentionListen(context.Background(), client, 1, "codex:amy", "amy", false, true, "codex", time.Millisecond)
+	exit, ok := err.(*listenExitCode)
+	if !ok || exit.code != listenExitAdapterUnavailable {
+		t.Fatalf("error=%#v want listen exit %d", err, listenExitAdapterUnavailable)
+	}
+}
+
 func TestRunListenForeignWorkerReturnsDistinctExitWithoutCompleting(t *testing.T) {
 	message := messageEnvelope{Cursor: 2, MessageID: "m-foreign", DeliveryWork: &messageDeliveryWork{
 		DeliveryID: "d-foreign", State: "pending", Adapter: "managed_harness", TargetKind: "harness_session", RequestedLevel: "steer",

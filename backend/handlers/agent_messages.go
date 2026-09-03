@@ -22,9 +22,11 @@ import (
 func RegisterAgentMessageRoutes(r chi.Router) {
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages", sendAgentMessage)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/messages/listen", listenAgentMessages)
-	r.With(auth.RequireProjectView).Get("/projects/{id}/attention/listen", listenAgentAttention)
+	// Attention is an orchestrator portfolio feed derived across projects. The
+	// agent attribution header selects an inbox but never grants authority.
+	r.With(auth.RequireSuperAdmin).Get("/projects/{id}/attention/listen", listenAgentAttention)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/ack", ackAgentMessages)
-	r.With(auth.RequireProjectEdit).Post("/projects/{id}/attention/ack", ackAgentAttention)
+	r.With(auth.RequireSuperAdmin).Post("/projects/{id}/attention/ack", ackAgentAttention)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/delivery-complete", completeAgentMessageDelivery)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/delivery-unavailable", rerouteUnavailableAgentMessageDelivery)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/message-allowlist", allowAgentMessageSender)

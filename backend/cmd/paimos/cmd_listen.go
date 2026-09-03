@@ -206,11 +206,15 @@ func runAttentionListen(ctx context.Context, client *Client, projectID int64, ad
 				outcome, deliveryErr := deliverHarnessMessage(ctx, message, page.Frame, deliver, "", "queue")
 				if deliveryErr != nil {
 					var unavailable *adapterUnavailableError
-					if errors.As(deliveryErr, &unavailable) && unavailable.foreignWorker {
-						if !follow {
-							return &listenExitCode{code: listenExitForeignWorker, err: deliveryErr}
+					if errors.As(deliveryErr, &unavailable) {
+						if unavailable.foreignWorker {
+							if !follow {
+								return &listenExitCode{code: listenExitForeignWorker, err: deliveryErr}
+							}
+							handoffComplete = false
+						} else {
+							return &listenExitCode{code: listenExitAdapterUnavailable, err: deliveryErr}
 						}
-						handoffComplete = false
 					} else {
 						return deliveryErr
 					}

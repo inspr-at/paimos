@@ -128,18 +128,33 @@ activity, control, product-session, and issue records. Its closed transition
 policy wakes only for stale/unknown or dead workers, a turn ending while an
 open assignment remains, blocked/dead delivery, held action request, or
 rejected control. Ordinary busy/tool heartbeats and an unassigned completed
-turn are absorbed. New or malformed event combinations are deferred and do
-not wake a model until the policy is explicitly widened.
+turn are absorbed. Unmanaged evidence and new event combinations are deferred
+and do not wake a model until the policy is explicitly widened. Immutable
+harness and message sources advance a per-orchestrator source-row watermark;
+projection reads only new source rows and holds the SQLite writer lock only
+for the short append-and-watermark transaction. Delivery failures are scoped
+to the configured instance.
 
 Each wake is a bounded batch of at most 32 identifier/enum/timestamp records.
-The batch and per-address cursor are durable: a crashed listener reacquires the
-same batch and delivery correlation after its lease expires, while completion
-and cursor acknowledgement commit atomically. Receiver targets remain
-encrypted and receiver-owned. A missing, server-side, or steer-only capability
-creates a visible blocked batch; attention never falls back to steer,
-arbitrary prose, or another receiver. An explicit target requeue can recover
-that same batch after a simple-handoff target is registered for the same
-address.
+The batch and per-orchestrator cursor are durable across receiver-address
+changes: a crashed listener reacquires the same batch and delivery correlation
+after its lease expires, while completion and cursor acknowledgement commit
+atomically. Codex leases are two minutes; the potentially blocking Claude
+resume adapter gets fifteen minutes. The delivery contract is deliberately
+at-least-once across a process crash: if an external handoff succeeds but the
+durable acknowledgement does not commit, the same stable batch correlation
+may be retried after lease expiry. Receivers should deduplicate that
+correlation; Paimos does not claim vendor-side exactly-once delivery.
+
+Receiver targets remain encrypted and receiver-owned. A missing, server-side,
+or steer-only capability creates a visible blocked batch; attention never
+falls back to steer, arbitrary prose, or another receiver. An explicit target
+requeue can recover that same batch after a simple-handoff target is
+registered for the same address. The attention HTTP routes are an explicit
+cross-project orchestrator portfolio surface and require a re-authorized
+super-admin principal. `X-Paimos-Agent-Name` only selects the configured
+receiver identity; it grants no authority and a spoofed header cannot read or
+acknowledge this feed.
 
 In the sender shell, establish attribution and send the durable message:
 

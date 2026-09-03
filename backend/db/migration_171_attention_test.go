@@ -22,7 +22,7 @@ func TestMigration171AttentionLedgerIsClosedAndImmutable(t *testing.T) {
 	if err := migrateThrough(database, 171); err != nil {
 		t.Fatal(err)
 	}
-	for _, object := range []string{"agent_attention_items", "agent_attention_cursors", "agent_attention_batches", "idx_agent_attention_batches_open"} {
+	for _, object := range []string{"agent_attention_items", "agent_attention_projection_cursors", "agent_attention_cursors", "agent_attention_batches", "idx_agent_attention_batches_open", "idx_harness_session_controls_attention"} {
 		var count int
 		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name=?`, object).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("object %s count=%d err=%v", object, count, err)
@@ -55,6 +55,23 @@ func TestMigration171AttentionLedgerIsClosedAndImmutable(t *testing.T) {
 		VALUES(?,?,'codex:amy',?,'future_source','fixture-2',1,'worker_unknown','heartbeat_stale',
 		strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, projectID, agentID, projectID); err == nil {
 		t.Fatal("unknown attention source was accepted")
+	}
+	if _, err := database.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
+		source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
+		VALUES(?,?,'claude:amy',?,'harness_session_event','fixture',1,'worker_unknown','heartbeat_stale',
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		ON CONFLICT(receiver_project_agent_id,source_kind,source_id,source_sequence,attention_kind,reason_code) DO NOTHING`, projectID, agentID, projectID); err != nil {
+		t.Fatal(err)
+	}
+	var deduplicated int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM agent_attention_items WHERE source_id='fixture'`).Scan(&deduplicated); err != nil || deduplicated != 1 {
+		t.Fatalf("address-independent source rows=%d err=%v", deduplicated, err)
+	}
+	if _, err := database.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
+		source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
+		VALUES(?,?,'codex:amy',?,'harness_session_event','unmanaged',2,'worker_unknown','unmanaged_evidence',
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, projectID, agentID, projectID); err == nil {
+		t.Fatal("deferred unmanaged evidence was accepted into actionable attention")
 	}
 	if _, err := database.Exec(`DELETE FROM projects WHERE id=?`, projectID); err != nil {
 		t.Fatalf("project cascade was blocked by immutable attention item: %v", err)
