@@ -45,7 +45,7 @@ type StartRequest struct {
 	Prompt          string `json:"prompt"`
 	Identity        string `json:"identity"`
 	ProjectID       int64  `json:"project_id"`
-	Role            string `json:"role"`
+	Role            string `json:"role,omitempty"`
 	ParentSessionID string `json:"parent_harness_session_id,omitempty"`
 	TicketID        int64  `json:"ticket_id,omitempty"`
 }

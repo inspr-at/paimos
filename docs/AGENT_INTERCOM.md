@@ -92,6 +92,9 @@ The parent must be active in the same project, the ticket must be a live
 same-project ticket/task, and a parent chain may not cycle or exceed 16
 ancestors. Exact registration replay is idempotent only when both bindings are
 unchanged; it cannot silently reparent an unknown or dead generation.
+An exact replay remains valid when its previously accepted parent later stops;
+that replay does not mutate the binding, while a new child or reassignment to
+the stopped parent is rejected.
 
 An authorized operator can explicitly attach, reassign, or detach the full
 binding with revision compare-and-set:
@@ -112,6 +115,8 @@ source. `paimos harness orchestrator --project "$PROJECT"` resolves a project
 orchestrator only when exactly one active coordinator has known `busy` or
 `idle` evidence. Zero candidates returns `unset`; multiple candidates returns
 `ambiguous`; missing evidence is never interpreted as idle.
+Because unmanaged activity is deliberately `unknown`, an unmanaged
+coordinator cannot resolve as the project orchestrator.
 
 Wait until that session reports `state=running`, `steerable=true`, and a
 non-empty `sessions[].harness_session_id` before steering it. In local agentd

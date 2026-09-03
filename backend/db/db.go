@@ -12517,11 +12517,11 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND parent.project_id=NEW.project_id AND parent.phase<>'stopped') OR
 			   EXISTS(WITH RECURSIVE lineage(id,parent_id,depth) AS (
 			    SELECT parent.id,parent.parent_harness_session_id,1 FROM harness_sessions parent
-			     WHERE parent.id=NEW.parent_harness_session_id
+			     WHERE parent.id=NEW.parent_harness_session_id AND parent.project_id=NEW.project_id
 			    UNION ALL
 			    SELECT parent.id,parent.parent_harness_session_id,lineage.depth+1
 			     FROM harness_sessions parent JOIN lineage ON parent.id=lineage.parent_id
-			     WHERE lineage.depth<17
+			     WHERE parent.project_id=NEW.project_id AND lineage.depth<17
 			   ) SELECT 1 FROM lineage WHERE id=NEW.id OR (depth>=16 AND parent_id IS NOT NULL))
 			  )) OR
 			  (NEW.ticket_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM issues ticket WHERE ticket.id=NEW.ticket_id
@@ -12535,12 +12535,29 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			    AND parent.project_id=NEW.project_id AND parent.phase<>'stopped') OR
 			   EXISTS(WITH RECURSIVE lineage(id,parent_id,depth) AS (
 			    SELECT parent.id,parent.parent_harness_session_id,1 FROM harness_sessions parent
-			     WHERE parent.id=NEW.parent_harness_session_id
+			     WHERE parent.id=NEW.parent_harness_session_id AND parent.project_id=NEW.project_id
 			    UNION ALL
 			    SELECT parent.id,parent.parent_harness_session_id,lineage.depth+1
 			     FROM harness_sessions parent JOIN lineage ON parent.id=lineage.parent_id
-			     WHERE lineage.depth<17
-			   ) SELECT 1 FROM lineage WHERE id=NEW.id OR (depth>=16 AND parent_id IS NOT NULL))
+			     WHERE parent.project_id=NEW.project_id AND lineage.depth<17
+			   ) SELECT 1 FROM lineage WHERE id=NEW.id OR (depth>=16 AND parent_id IS NOT NULL)) OR
+			   (WITH RECURSIVE
+			    lineage(id,parent_id,depth) AS (
+			     SELECT parent.id,parent.parent_harness_session_id,1 FROM harness_sessions parent
+			      WHERE parent.id=NEW.parent_harness_session_id AND parent.project_id=NEW.project_id
+			     UNION ALL
+			     SELECT parent.id,parent.parent_harness_session_id,lineage.depth+1
+			      FROM harness_sessions parent JOIN lineage ON parent.id=lineage.parent_id
+			      WHERE parent.project_id=NEW.project_id AND lineage.depth<17
+			    ),
+			    subtree(id,depth) AS (
+			     SELECT OLD.id,0
+			     UNION ALL
+			     SELECT child.id,subtree.depth+1 FROM harness_sessions child
+			      JOIN subtree ON child.parent_harness_session_id=subtree.id
+			      WHERE child.project_id=NEW.project_id AND subtree.depth<17
+			    )
+			    SELECT COALESCE((SELECT MAX(depth) FROM lineage),0)+COALESCE((SELECT MAX(depth) FROM subtree),0))>16
 			  )) OR
 			  (NEW.ticket_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM issues ticket WHERE ticket.id=NEW.ticket_id
 			   AND ticket.project_id=NEW.project_id AND ticket.deleted_at IS NULL AND ticket.type IN ('ticket','task')))
@@ -12562,7 +12579,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 WHEN EXISTS(SELECT 1 FROM harness_sessions WHERE id=OLD.harness_session_id)
 			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
 			`CREATE TRIGGER trg_issues_bound_harness_move BEFORE UPDATE OF project_id,deleted_at,type ON issues
-			 WHEN EXISTS(SELECT 1 FROM harness_sessions session WHERE session.ticket_id=OLD.id)
+			 WHEN EXISTS(SELECT 1 FROM harness_sessions session WHERE session.ticket_id=OLD.id AND session.phase<>'stopped')
 			  AND (NEW.project_id IS NOT OLD.project_id OR NEW.deleted_at IS NOT OLD.deleted_at OR NEW.type NOT IN ('ticket','task'))
 			 BEGIN SELECT RAISE(ABORT,'bound harness ticket must be explicitly detached'); END`,
 			`PRAGMA foreign_keys=ON`,

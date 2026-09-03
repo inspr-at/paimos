@@ -296,46 +296,60 @@ func validateBindingReferences(ctx context.Context, query queryRower, projectID 
 		if *parent == sessionID && sessionID != "" {
 			return coded(CodeInvalid, "a harness session cannot be its own parent")
 		}
-		var parentProject int64
-		var parentPhase string
-		if err := query.QueryRowContext(ctx, `SELECT project_id,phase FROM harness_sessions WHERE id=?`, *parent).Scan(&parentProject, &parentPhase); err != nil {
-			return coded(CodeInvalid, "parent harness session is unavailable")
+		var present int
+		if err := query.QueryRowContext(ctx, `SELECT COUNT(*) FROM harness_sessions WHERE id=? AND project_id=? AND phase<>?`, *parent, projectID, PhaseStopped).Scan(&present); err != nil {
+			return err
 		}
-		if parentProject != projectID || parentPhase == PhaseStopped {
-			return coded(CodeInvalid, "parent harness session must be active in the same project")
+		if present != 1 {
+			return coded(CodeInvalid, "parent harness session is invalid")
 		}
 		seen := map[string]bool{}
 		if sessionID != "" {
 			seen[sessionID] = true
 		}
 		cursor := *parent
-		for depth := 1; ; depth++ {
+		ancestorCount := 0
+		for {
+			ancestorCount++
 			if seen[cursor] {
 				return coded(CodeInvalid, "parent harness session would create a cycle")
 			}
 			seen[cursor] = true
-			if depth > MaxHierarchyDepth {
+			if ancestorCount > MaxHierarchyDepth {
 				return coded(CodeInvalid, "harness session hierarchy exceeds the maximum depth")
 			}
 			var next sql.NullString
-			if err := query.QueryRowContext(ctx, `SELECT parent_harness_session_id FROM harness_sessions WHERE id=?`, cursor).Scan(&next); err != nil {
-				return coded(CodeInvalid, "parent harness session lineage is unavailable")
+			if err := query.QueryRowContext(ctx, `SELECT parent_harness_session_id FROM harness_sessions WHERE id=? AND project_id=?`, cursor, projectID).Scan(&next); err != nil {
+				return coded(CodeInvalid, "parent harness session is invalid")
 			}
 			if !next.Valid || next.String == "" {
 				break
 			}
 			cursor = next.String
 		}
+		if sessionID != "" {
+			var subtreeHeight int
+			if err := query.QueryRowContext(ctx, `WITH RECURSIVE subtree(id,depth) AS (
+				SELECT id,0 FROM harness_sessions WHERE id=? AND project_id=?
+				UNION ALL
+				SELECT child.id,subtree.depth+1 FROM harness_sessions child
+				JOIN subtree ON child.parent_harness_session_id=subtree.id
+				WHERE child.project_id=? AND subtree.depth<?
+			) SELECT COALESCE(MAX(depth),0) FROM subtree`, sessionID, projectID, projectID, MaxHierarchyDepth+1).Scan(&subtreeHeight); err != nil {
+				return err
+			}
+			if ancestorCount+subtreeHeight > MaxHierarchyDepth {
+				return coded(CodeInvalid, "harness session hierarchy exceeds the maximum depth")
+			}
+		}
 	}
 	if ticket != nil {
-		var ticketProject int64
-		var ticketType string
-		var deleted sql.NullString
-		if err := query.QueryRowContext(ctx, `SELECT project_id,type,deleted_at FROM issues WHERE id=?`, *ticket).Scan(&ticketProject, &ticketType, &deleted); err != nil {
-			return coded(CodeInvalid, "ticket binding is unavailable")
+		var present int
+		if err := query.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE id=? AND project_id=? AND deleted_at IS NULL AND type IN ('ticket','task')`, *ticket, projectID).Scan(&present); err != nil {
+			return err
 		}
-		if ticketProject != projectID || deleted.Valid || (ticketType != "ticket" && ticketType != "task") {
-			return coded(CodeInvalid, "ticket binding must name an active ticket in the same project")
+		if present != 1 {
+			return coded(CodeInvalid, "ticket binding is invalid")
 		}
 	}
 	return nil
@@ -505,9 +519,6 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 	if err := validateRegister(in); err != nil {
 		return models.HarnessSession{}, false, err
 	}
-	if err := validateBindingReferences(ctx, s.db, in.ProjectID, "", in.ParentSessionID, in.TicketID); err != nil {
-		return models.HarnessSession{}, false, err
-	}
 	registerMu.Lock()
 	defer registerMu.Unlock()
 	digest := digestRef(in.ProjectID, in.Harness, in.Host, in.SessionRef)
@@ -517,11 +528,14 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 			return models.HarnessSession{}, false, coded(CodeInvalid, "harness worker lease is invalid")
 		}
 		if !sameRegistration(existing, in) {
-			return models.HarnessSession{}, false, coded(CodeConflict, "stable external identity is already registered with different agent, ownership, role, or advertised capabilities")
+			return models.HarnessSession{}, false, coded(CodeConflict, "stable external identity is already registered with different agent, ownership, role, hierarchy/ticket bindings, or advertised capabilities")
 		}
 		return existing, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
+		return models.HarnessSession{}, false, err
+	}
+	if err := validateBindingReferences(ctx, s.db, in.ProjectID, "", in.ParentSessionID, in.TicketID); err != nil {
 		return models.HarnessSession{}, false, err
 	}
 	var active int
@@ -737,7 +751,7 @@ func (s *Service) ProjectOrchestrator(ctx context.Context, projectID int64) (mod
 	}
 	candidate := coordinators[0]
 	if candidate.ActivityState != ActivityBusy && candidate.ActivityState != ActivityIdle {
-		return models.HarnessOrchestratorProjection{State: "unset", Reason: "coordinator_" + candidate.ActivityState}, nil
+		return models.HarnessOrchestratorProjection{State: "unset", Reason: "coordinator_unknown"}, nil
 	}
 	heartbeatAt, err := time.Parse(time.RFC3339Nano, candidate.HeartbeatAt)
 	if err != nil || time.Since(heartbeatAt) > DefaultActivityHeartbeatTimeout {

@@ -114,7 +114,13 @@ func harnessRegisterCmd() *cobra.Command {
 		if err != nil {
 			return reportError(err)
 		}
-		payload := map[string]any{"agent_name": agent, "harness": harness, "host": host, "harness_session_ref": ref, "worker_lease": workerLease, "message_target_id": targetID, "management_mode": management, "role": role, "parent_harness_session_id": parent, "ticket_id": ticket, "steer_mode": steerMode, "advertised_capabilities": caps}
+		payload := map[string]any{"agent_name": agent, "harness": harness, "host": host, "harness_session_ref": ref, "worker_lease": workerLease, "message_target_id": targetID, "management_mode": management, "role": role, "steer_mode": steerMode, "advertised_capabilities": caps}
+		if parent != nil {
+			payload["parent_harness_session_id"] = *parent
+		}
+		if ticket != nil {
+			payload["ticket_id"] = *ticket
+		}
 		response, err := client.do(http.MethodPost, fmt.Sprintf("/api/projects/%d/harness-sessions", projectID), payload)
 		if err != nil {
 			return reportError(err)

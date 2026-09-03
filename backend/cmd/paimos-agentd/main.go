@@ -49,7 +49,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	common := addCommonFlags(flags)
-	adapter, workspace, identity, role, parentSessionID := "codex", "", "", "worker", ""
+	adapter, workspace, identity, role, parentSessionID := "codex", "", "", "", ""
 	var projectID, ticketID int64
 	sessionID, correlationID, codexPath := "", "", ""
 	claudePath, nodePath, claudeSDKPath := "", "", ""
@@ -69,7 +69,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.StringVar(&workspace, "workspace", "", "absolute child workspace")
 		flags.StringVar(&identity, "identity", "", "attributed harness identity")
 		flags.Int64Var(&projectID, "project-id", 0, "owning PPM project numeric ID")
-		flags.StringVar(&role, "role", "worker", "durable hierarchy role: coordinator or worker")
+		flags.StringVar(&role, "role", "", "durable hierarchy role: coordinator or worker (default worker)")
 		flags.StringVar(&parentSessionID, "parent-session", "", "active parent public harness-session UUID")
 		flags.Int64Var(&ticketID, "ticket-id", 0, "active project ticket numeric ID")
 	}

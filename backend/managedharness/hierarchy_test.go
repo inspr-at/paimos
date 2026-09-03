@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 
 	paimosdb "github.com/inspr-at/paimos/backend/db"
@@ -103,6 +104,32 @@ func TestPersistentHierarchyBindingCASAndEventHistory(t *testing.T) {
 	}
 }
 
+func TestExactRegistrationReplaySurvivesStoppedParent(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	addHierarchyAgent(t, projectID, "parent")
+	addHierarchyAgent(t, projectID, "child")
+	addHierarchyAgent(t, projectID, "new-child")
+	service := NewService(paimosdb.DB)
+	parent := registerHierarchySession(t, service, projectID, "parent", RoleWorker, nil, nil)
+	child := registerHierarchySession(t, service, projectID, "child", RoleWorker, &parent.ID, nil)
+	if _, err := service.Stop(context.Background(), parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	replay := RegisterInput{ProjectID: projectID, AgentName: "child", Harness: "codex", Host: "host-child", SessionRef: "ref-child",
+		WorkerLease: testWorkerLease, ManagementMode: ManagementManaged, Role: RoleWorker, ParentSessionID: &parent.ID,
+		SteerMode: SteerNone, Capabilities: models.HarnessCapabilities{Status: true}}
+	got, created, err := service.Register(context.Background(), replay)
+	if err != nil || created || got.ID != child.ID {
+		t.Fatalf("exact replay after parent stop: got=%+v created=%v err=%v", got, created, err)
+	}
+	replay.AgentName = "new-child"
+	replay.Host = "host-new-child"
+	replay.SessionRef = "ref-new-child"
+	if _, _, err := service.Register(context.Background(), replay); !IsCode(err, CodeInvalid) {
+		t.Fatalf("new child accepted stopped parent: %v", err)
+	}
+}
+
 func TestHierarchyRejectsCrossProjectTerminalCyclesAndAmbiguity(t *testing.T) {
 	projectID, _ := openManagedHarnessTestDB(t)
 	addHierarchyAgent(t, projectID, "coordinator")
@@ -126,14 +153,28 @@ func TestHierarchyRejectsCrossProjectTerminalCyclesAndAmbiguity(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreign := registerHierarchySession(t, service, otherProjectID, "foreign", RoleWorker, nil, nil)
-	if _, err := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
-		ExpectedRevision: child.Revision, ParentSessionID: &foreign.ID, TicketID: &ticketID}); err == nil {
+	_, foreignParentErr := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
+		ExpectedRevision: child.Revision, ParentSessionID: &foreign.ID, TicketID: &ticketID})
+	if foreignParentErr == nil {
 		t.Fatal("cross-project parent accepted")
 	}
+	missingParent := "99999999-9999-4999-8999-999999999999"
+	_, missingParentErr := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
+		ExpectedRevision: child.Revision, ParentSessionID: &missingParent, TicketID: &ticketID})
+	if missingParentErr == nil || foreignParentErr.Error() != missingParentErr.Error() {
+		t.Fatalf("parent existence oracle: foreign=%v missing=%v", foreignParentErr, missingParentErr)
+	}
 	foreignTicket := addHierarchyTicket(t, otherProjectID, 1)
-	if _, err := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
-		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &foreignTicket}); err == nil {
+	_, foreignTicketErr := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
+		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &foreignTicket})
+	if foreignTicketErr == nil {
 		t.Fatal("cross-project ticket accepted")
+	}
+	missingTicket := int64(999999999)
+	_, missingTicketErr := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
+		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &missingTicket})
+	if missingTicketErr == nil || foreignTicketErr.Error() != missingTicketErr.Error() {
+		t.Fatalf("ticket existence oracle: foreign=%v missing=%v", foreignTicketErr, missingTicketErr)
 	}
 	if _, err := service.Stop(context.Background(), coordinator.ID); err != nil {
 		t.Fatal(err)
@@ -180,10 +221,71 @@ func TestHierarchyDepthBoundAndDatabaseGuardsCannotBeBypassed(t *testing.T) {
 	if err := paimosdb.DB.QueryRow(`SELECT id FROM harness_sessions WHERE agent_name='depth-00'`).Scan(&rootID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET parent_harness_session_id=?,revision=revision+1 WHERE id=?`, last.ID, rootID); err == nil {
-		t.Fatal("database trigger accepted a hierarchy cycle")
+	addHierarchyAgent(t, projectID, "new-root")
+	newRoot := registerHierarchySession(t, service, projectID, "new-root", RoleWorker, nil, nil)
+	root, err := service.Get(context.Background(), projectID, rootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: root.ID,
+		ExpectedRevision: root.Revision, ParentSessionID: &newRoot.ID}); !IsCode(err, CodeInvalid) {
+		t.Fatalf("service accepted reparenting a depth-16 subtree under a new root: %v", err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET parent_harness_session_id=?,revision=revision+1 WHERE id=?`, newRoot.ID, rootID); err == nil {
+		t.Fatal("database trigger accepted an over-depth moved subtree")
 	}
 	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET parent_harness_session_id=NULL WHERE id=?`, last.ID); err == nil {
 		t.Fatal("database trigger accepted a binding change without revision CAS")
+	}
+
+	addHierarchyAgent(t, projectID, "cycle-a")
+	addHierarchyAgent(t, projectID, "cycle-b")
+	cycleA := registerHierarchySession(t, service, projectID, "cycle-a", RoleWorker, nil, nil)
+	cycleB := registerHierarchySession(t, service, projectID, "cycle-b", RoleWorker, &cycleA.ID, nil)
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET parent_harness_session_id=?,revision=revision+1 WHERE id=?`, cycleB.ID, cycleA.ID); err == nil {
+		t.Fatal("database trigger accepted a shallow hierarchy cycle")
+	}
+}
+
+func TestDatabaseBindingGuardsRejectInvalidReferencesAndActiveTicketMutation(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	addHierarchyAgent(t, projectID, "parent")
+	addHierarchyAgent(t, projectID, "child")
+	service := NewService(paimosdb.DB)
+	parent := registerHierarchySession(t, service, projectID, "parent", RoleWorker, nil, nil)
+	child := registerHierarchySession(t, service, projectID, "child", RoleWorker, nil, nil)
+
+	otherProject, err := paimosdb.DB.Exec(`INSERT INTO projects(name,key) VALUES('Foreign hierarchy','FHI')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherProjectID, _ := otherProject.LastInsertId()
+	addHierarchyAgent(t, otherProjectID, "foreign")
+	foreign := registerHierarchySession(t, service, otherProjectID, "foreign", RoleWorker, nil, nil)
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET parent_harness_session_id=?,revision=revision+1 WHERE id=?`, foreign.ID, child.ID); err == nil {
+		t.Fatal("database trigger accepted a cross-project parent")
+	}
+
+	if _, err := service.Stop(context.Background(), parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET parent_harness_session_id=?,revision=revision+1 WHERE id=?`, parent.ID, child.ID); err == nil {
+		t.Fatal("database trigger accepted a terminal parent")
+	}
+
+	deletedTicket := addHierarchyTicket(t, projectID, 904)
+	if _, err := paimosdb.DB.Exec(`UPDATE issues SET deleted_at='2026-09-03 01:00:00' WHERE id=?`, deletedTicket); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET ticket_id=?,revision=revision+1 WHERE id=?`, deletedTicket, child.ID); err == nil {
+		t.Fatal("database trigger accepted a deleted ticket")
+	}
+
+	activeTicket := addHierarchyTicket(t, projectID, 905)
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET ticket_id=?,revision=revision+1 WHERE id=?`, activeTicket, child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE issues SET deleted_at='2026-09-03 01:00:00' WHERE id=?`, activeTicket); err == nil || !strings.Contains(err.Error(), "bound harness ticket") {
+		t.Fatalf("active bound ticket mutation error=%v", err)
 	}
 }

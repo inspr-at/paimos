@@ -18,11 +18,15 @@ package handlers_test
 //   6. DELETE 204 on hit, 404 on miss.
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
+	paimosdb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/managedharness"
 	"github.com/inspr-at/paimos/backend/models"
 )
 
@@ -231,6 +235,52 @@ func Test_ProjectAgents_DELETEOnMissingReturns404(t *testing.T) {
 
 	resp := ts.del(t, agentURL(projectID, "ghost"), ts.adminCookie)
 	assertStatus(t, resp, http.StatusNotFound)
+}
+
+func Test_ProjectAgents_DeleteDetachesSurvivingHarnessChildrenWithHistory(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := createTestProject(t, ts, "Agent hierarchy delete", "AHD")
+	for _, name := range []string{"parent", "child"} {
+		resp := ts.post(t, agentsURL(projectID), ts.adminCookie, map[string]any{"name": name})
+		assertStatus(t, resp, http.StatusCreated)
+	}
+	service := managedharness.NewService(paimosdb.DB)
+	lease := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	parent, created, err := service.Register(context.Background(), managedharness.RegisterInput{
+		ProjectID: projectID, AgentName: "parent", Harness: "codex", Host: "host-parent", SessionRef: "ref-parent",
+		WorkerLease: lease, ManagementMode: managedharness.ManagementManaged, Role: managedharness.RoleWorker,
+		SteerMode: managedharness.SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
+	})
+	if err != nil || !created {
+		t.Fatalf("register parent: created=%v err=%v", created, err)
+	}
+	child, created, err := service.Register(context.Background(), managedharness.RegisterInput{
+		ProjectID: projectID, AgentName: "child", Harness: "codex", Host: "host-child", SessionRef: "ref-child",
+		WorkerLease: lease, ManagementMode: managedharness.ManagementManaged, Role: managedharness.RoleWorker,
+		ParentSessionID: &parent.ID, SteerMode: managedharness.SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
+	})
+	if err != nil || !created {
+		t.Fatalf("register child: created=%v err=%v", created, err)
+	}
+
+	resp := ts.del(t, agentURL(projectID, "parent"), ts.adminCookie)
+	assertStatus(t, resp, http.StatusNoContent)
+	var parentID sql.NullString
+	var revision int64
+	if err := paimosdb.DB.QueryRow(`SELECT parent_harness_session_id,revision FROM harness_sessions WHERE id=?`, child.ID).Scan(&parentID, &revision); err != nil {
+		t.Fatal(err)
+	}
+	if parentID.Valid || revision != child.Revision+1 {
+		t.Fatalf("surviving child was not revisioned and detached: parent=%+v revision=%d", parentID, revision)
+	}
+	var operation string
+	var beforeParent sql.NullString
+	if err := paimosdb.DB.QueryRow(`SELECT operation,before_parent_harness_session_id FROM harness_session_events WHERE harness_session_id=? AND event_sequence=?`, child.ID, revision).Scan(&operation, &beforeParent); err != nil {
+		t.Fatal(err)
+	}
+	if operation != "binding_changed" || !beforeParent.Valid || beforeParent.String != parent.ID {
+		t.Fatalf("agent delete lost detach history: operation=%s before=%+v", operation, beforeParent)
+	}
 }
 
 func Test_ProjectAgents_EmptyBodyReturns400(t *testing.T) {

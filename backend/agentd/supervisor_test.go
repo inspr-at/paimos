@@ -5,6 +5,7 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,19 @@ import (
 	"testing"
 	"time"
 )
+
+func TestStartRequestOmitsNewHierarchyFieldsForOldDaemon(t *testing.T) {
+	raw, err := json.Marshal(StartRequest{Adapter: AdapterCodex, Workspace: "/tmp/worker", Prompt: "work", Identity: "codex:worker", ProjectID: 27})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(raw)
+	for _, field := range []string{"role", "parent_harness_session_id", "ticket_id"} {
+		if strings.Contains(encoded, `"`+field+`"`) {
+			t.Fatalf("unset forward-compatible field %s leaked into old-daemon request: %s", field, encoded)
+		}
+	}
+}
 
 type fakeProcess struct {
 	pid        int

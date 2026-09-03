@@ -1870,7 +1870,7 @@
         "description": "Authoritative coordinator projection. Zero candidates is unset, multiple candidates is ambiguous, and unknown/dead evidence is never promoted to resolved.",
         "properties": {
           "state": {"type": "string", "enum": ["resolved", "unset", "ambiguous"]},
-          "reason": {"type": "string", "enum": ["single_active_coordinator", "no_active_coordinator", "multiple_active_coordinators", "coordinator_unknown", "coordinator_dead"]},
+          "reason": {"type": "string", "enum": ["single_active_coordinator", "no_active_coordinator", "multiple_active_coordinators", "coordinator_unknown"]},
           "session": {"oneOf": [{"$ref": "#/components/schemas/HarnessSession"}, {"type": "null"}]}
         }
       },
