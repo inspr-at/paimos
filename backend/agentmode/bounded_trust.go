@@ -54,7 +54,7 @@ func LoadBoundedTrust(ctx context.Context, database *sql.DB, tx *sql.Tx, issueID
 		return map[int64]BoundedTrustFact{}, nil
 	}
 
-	query := `SELECT id,project_id FROM issues WHERE id IN (` +
+	query := `SELECT id,project_id FROM issues WHERE deleted_at IS NULL AND id IN (` +
 		strings.TrimRight(strings.Repeat("?,", len(ordered)), ",") + `) ORDER BY id`
 	rows, err := tx.QueryContext(ctx, query, anyArgs(ordered)...)
 	if err != nil {

@@ -85,7 +85,7 @@ fleet_candidates AS (
         hs.advertised_inbox,hs.advertised_status,hs.advertised_steer,
         hs.advertised_interrupt,hs.advertised_stop,
         ROW_NUMBER() OVER(PARTITION BY hs.project_agent_id,CASE WHEN hs.phase='stopped' THEN 1 ELSE 0 END
-          ORDER BY hs.created_at DESC,hs.id DESC) AS generation_rank
+          ORDER BY hs.created_at DESC,hs.rowid DESC,hs.id DESC) AS generation_rank
  FROM harness_sessions hs
  JOIN agent_mode_projects access ON access.project_id=hs.project_id
  JOIN projects p ON p.id=hs.project_id

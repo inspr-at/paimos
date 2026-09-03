@@ -4,12 +4,16 @@
 package handlers_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/managedharness"
+	"github.com/inspr-at/paimos/backend/models"
 	"github.com/inspr-at/paimos/backend/workerfleet"
 )
 
@@ -67,4 +71,48 @@ func TestAgentModeWorkerFleetConcealsUnauthorizedAndMissingProjects(t *testing.T
 	}
 	missing := ts.get(t, paths[0], ts.adminCookie)
 	assertStatus(t, missing, http.StatusNotFound)
+}
+
+func TestAgentModeWorkerFleetKeepsStoppedWorkerWhenBoundTicketIsSoftDeleted(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "Deleted ticket fleet", "DTF")
+	issueResult, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status)
+		VALUES(?,904,'ticket','Deleted binding','in-progress')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := issueResult.LastInsertId()
+	if _, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'stopped-worker')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	session, _, err := managedharness.NewService(db.DB).Register(context.Background(), managedharness.RegisterInput{
+		ProjectID: projectID, AgentName: "stopped-worker", Harness: "codex", Host: "test-host",
+		SessionRef: "deleted-ticket-generation", WorkerLease: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		ManagementMode: managedharness.ManagementManaged, Role: managedharness.RoleWorker,
+		TicketID: &issueID, SteerMode: managedharness.SteerNone,
+		Capabilities: models.HarnessCapabilities{Status: true, Interrupt: true, Stop: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := managedharness.NewService(db.DB).Stop(context.Background(), session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`UPDATE issues SET deleted_at=CURRENT_TIMESTAMP WHERE id=?`, issueID); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/api/agent-mode/worker-fleet/v1?zoom=100",
+		"/api/agent-mode/projects/" + itoa(projectID) + "/worker-fleet/v1?zoom=100",
+	} {
+		response := ts.get(t, path, ts.adminCookie)
+		assertStatus(t, response, http.StatusOK)
+		var snapshot workerfleet.Snapshot
+		decode(t, response, &snapshot)
+		if len(snapshot.Workers) != 1 || snapshot.Workers[0].HarnessSessionID != session.ID ||
+			snapshot.Workers[0].Ticket == nil || snapshot.Workers[0].Ticket.ID != issueID ||
+			snapshot.Workers[0].Ticket.DetailsAvailable || snapshot.Workers[0].DeliveryTrust.Reason != "trust_unavailable" {
+			t.Fatalf("soft-deleted ticket fleet path=%s snapshot=%+v", path, snapshot)
+		}
+	}
 }
