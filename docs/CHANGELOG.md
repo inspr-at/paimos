@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.04.20.54] — 2026-09-04
+
+### Fixed — Actionable Agent Intercom empty states (PAI-893)
+
+- Replaced dead-end orchestrator binding states with truthful next actions:
+  authorized operators can open the existing agent editor without losing their
+  selected project, refresh newly created choices, retry unavailable data, or
+  enter the existing talk surface when the orchestrator is already configured.
+- Added a bounded, secret-free admin request for users without setup authority;
+  the browser still never executes terminal commands or receives credentials.
+- Added keyboard, mobile, stale-catalog, retry, and configured-state regression
+  coverage, including production-bundle Playwright checks.
+
 ## [26.09.04] — 2026-09-04
 
 ### Added — Explicit ship and scout task shapes (PAI-907)
