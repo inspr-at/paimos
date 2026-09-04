@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
-## [Unreleased]
+## [26.09.04] — 2026-09-04
 
 ### Added — Explicit ship and scout task shapes (PAI-907)
 
