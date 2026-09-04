@@ -116,7 +116,6 @@ func TestSessionHomeZoomV1ExactDeduplicatedTotalsExceptionFirstAndSelectedHydrat
 		snapshot.Sessions[0].Controls != (models.SessionHomeControls{Steer: "direct", Interrupt: true, Stop: true}) {
 		t.Fatalf("shared-target composition drifted: %+v", snapshot.Sessions)
 	}
-
 	selectedQuery := "zoom=1&selected_session_id=" + url.QueryEscape(paimosSession)
 	response, selected := getSessionHomeZoom(t, ts, projectID, selectedQuery, ts.adminCookie)
 	assertStatus(t, response, http.StatusOK)
@@ -135,6 +134,24 @@ func TestSessionHomeZoomV1ExactDeduplicatedTotalsExceptionFirstAndSelectedHydrat
 	selectedJSON, _ := json.Marshal(selected.SelectedSession)
 	if string(sampledJSON) != string(selectedJSON) {
 		t.Fatalf("sampled selection is not byte-equivalent: sample=%s selected=%s", sampledJSON, selectedJSON)
+	}
+
+	var heldMessageRowID, adminID int64
+	if err := db.DB.QueryRow(`SELECT id FROM agent_messages WHERE body='action request'`).Scan(&heldMessageRowID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.QueryRow(`SELECT id FROM users WHERE username='admin'`).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO agent_message_human_resolutions(
+		resolution_id,message_row_id,project_id,outcome,actor_user_id,actor_session_id,instance,idempotency_key_digest,request_digest)
+		VALUES(?,?,?,?,?,?,?,zeroblob(32),zeroblob(32))`, uuid.NewString(), heldMessageRowID, projectID, "dismissed", adminID, "session-home-zoom-test", "ppm"); err != nil {
+		t.Fatal(err)
+	}
+	response, resolvedSnapshot := getSessionHomeZoom(t, ts, projectID, "zoom=3", ts.adminCookie)
+	assertStatus(t, response, http.StatusOK)
+	if resolvedSnapshot.Totals.ActionRequests != 0 || resolvedSnapshot.Totals.ExceptionMessages != 2 || resolvedSnapshot.Totals.AttentionSessions != 1 {
+		t.Fatalf("resolved action remained in zoom totals: %+v", resolvedSnapshot.Totals)
 	}
 }
 

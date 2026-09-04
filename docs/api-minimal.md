@@ -381,10 +381,14 @@ PATCH  /runs/:id                       lifecycle/report compare-and-set
 Durable A2A messages use registered names rather than numeric agent IDs:
 
 ```
-POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_id?, metadata?, is_action_request?, delivery_level?: "simple"|"steer" }
-GET  /projects/:id/messages            ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
-GET  /projects/:id/messages/listen     ?to=<address>&after=<cursor>&limit=<n>
+POST /projects/:id/messages            frozen v1 fire-and-forget compatibility send
+POST /v2/projects/:id/messages         { to, body, issue_id?, reply_to?, thread_id?, metadata?, is_action_request?, expects_reply?, delivery_level?: "simple"|"steer" }
+GET  /projects/:id/messages            frozen v1 compatibility list
+GET  /v2/projects/:id/messages         ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
+GET  /projects/:id/messages/listen     frozen v1 compatibility inbox
+GET  /v2/projects/:id/messages/listen  ?to=<address>&after=<cursor>&limit=<n>
 POST /projects/:id/messages/ack        { to, cursor }
+POST /projects/:id/messages/:messageId/resolution { outcome: "resolved"|"dismissed" } plus one Idempotency-Key (human session only; API keys forbidden)
 GET  /projects/:id/attention/listen    ?to=<address>&after=<cursor>&limit=<n>&delivery=<local-adapter> (super-admin orchestrator portfolio)
 POST /projects/:id/attention/ack       { to, cursor, batch_id? } (super-admin orchestrator portfolio)
 POST /projects/:id/messages/delivery-complete { to, cursor, delivery_id, effective_level, fallback_reason }
@@ -395,18 +399,44 @@ GET  /projects/:id/message-targets     ?address=<receiver> (admin; configured or
 POST /projects/:id/message-targets/requeue { address } (admin; configured orchestrator attention target requires super-admin; recovers target_missing message rows and blocked/stale/expired-lease attention batches without changing batch correlation or a live lease)
 GET  /projects/:id/message-deliveries  redacted outbox state (admin)
 POST /projects/:id/message-deliveries/:deliveryId/requeue (admin)
-GET  /projects/:id/messages/:messageId
+GET  /projects/:id/messages/:messageId frozen v1 compatibility record
+GET  /v2/projects/:id/messages/:messageId
 GET  /issues/:id/messages              human-visible issue-anchored records (not comments)
+GET  /v2/issues/:id/messages           reply-aware human-visible issue records
 ```
 
 The POST sender is derived from `X-Paimos-Agent-Name`; unknown senders or
 addressees fail closed with stable `agent_message_*` problem codes. Addressee
 reads return delivered, non-action messages only, capped at 10 per cursor page
-and wrapped with the untrusted-message preamble. The v1 envelope schema is
-`backend/contracts/agent-message-v1.schema.json`.
+and wrapped with the untrusted-message preamble. The unversioned message
+send/list/get/listen routes and `backend/contracts/agent-message-v1.schema.json`
+are frozen fire-and-forget v1 compatibility surfaces: v1 rejects
+`expects_reply` and omits v2-only fields. New clients use `/v2/...` and the
+closed `backend/contracts/agent-message-v2.schema.json` contract.
 Explicit `is_action_request=true` rows are stored as held for human inspection
 and never enter listen; conservative prose detection is a fallback, not a
 replacement for the typed marker.
+Explicit `expects_reply=true` is separate from action gating and leaves the
+ordinary send default unchanged. It creates one durable obligation in the
+same transaction as the message. Only a newly committed, accepted counterpart
+reply whose exact `reply_to` names that message closes it; held replies, inbox
+acknowledgement, delivery handoff, and delivery acknowledgement do not. Due
+obligations become eligible for the configured orchestrator's bounded attention
+feed at most six times (after 5 minutes, 15 minutes, 1 hour, 4 hours, 12 hours,
+and 24 hours). An authorized attention/listen projection poll, not an autonomous
+wall-clock scheduler, advances an eligible generation. The obligation then
+remains open but quiet and stops being actionable immediately after closure.
+The resolution endpoint records an immutable `resolved` or `dismissed` audit
+fact for an already-held action request. It requires a human session with
+project-edit authority, refuses API-key principals and agent attribution,
+stores value-free user/session attribution and
+digested idempotency material, and never releases or mutates the held row.
+Exact retries return the first record; a changed outcome returns HTTP 409.
+The issue detail is the session-authenticated producer and labels the two
+decisions explicitly while retaining the held/not-delivered label and a
+persistent no-execution/no-delivery disclaimer. `GET /v2/issues/:id/messages`
+returns only the content-free `human_resolution_outcome`; the frozen v1 issue
+route omits it, and neither projection exposes audit actor/session fields.
 Listen and ack additionally require `X-Paimos-Agent-Name` to match the named
 addressee. Listen resumes from the greater of the supplied and durable cursor;
 acknowledgement is monotonic and rejects cursors that are not delivered rows in
@@ -804,6 +834,10 @@ Commands whose argument is explicitly another resource ID, plus
   canonical full-FIFO message-bus lease/completion for both simple and steer,
   preserving delivery fields. The legacy steer-named pair is a compatibility
   alias for steer-capable workers and also drains older simple work first.
+  Although these harness-session paths are unversioned, their drain response
+  was introduced after the frozen message v1 API and intentionally carries the
+  current closed v2 envelope; it is not a compatibility projection of
+  `/projects/{id}/messages`.
 - `POST .../{sessionID}/controls/{interrupt|stop}` ·
   `POST .../{sessionID}/controls/{controlID}/complete` — typed owned-process
   requests; no free-form command or PAI-809 action extension.

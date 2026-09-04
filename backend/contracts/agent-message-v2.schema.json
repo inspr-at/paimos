@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paimos.example/contracts/agent-message-v2.schema.json",
+  "title": "PAIMOS Agent Message v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cursor", "message_id", "context_id", "role", "parts", "metadata", "from", "to", "thread_id", "hop", "delivered", "is_action_request", "expects_reply", "created_at", "delivery_level", "delivery_fallback", "delivery_target"],
+  "properties": {
+    "cursor": { "type": "integer", "minimum": 1 },
+    "message_id": { "type": "string", "minLength": 1 },
+    "context_id": { "type": "string", "minLength": 1, "description": "Project key" },
+    "task_id": { "type": "string", "description": "Optional issue key" },
+    "role": { "const": "agent" },
+    "parts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/TextPart" } },
+    "metadata": { "type": "object" },
+    "from": { "$ref": "#/$defs/Address" },
+    "to": { "$ref": "#/$defs/Address" },
+    "reply_to": { "type": "string" },
+    "thread_id": { "type": "string", "minLength": 1 },
+    "hop": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "delivered": { "type": "boolean" },
+    "held_reason": { "type": "string" },
+    "is_action_request": { "type": "boolean" },
+    "expects_reply": { "type": "boolean", "description": "True only when this message opened a durable exact-reply obligation" },
+    "human_resolution_outcome": { "enum": ["resolved", "dismissed"], "description": "Content-free authoritative human disposition of a held action request; human/session attribution remains private" },
+    "created_at": { "type": "string" },
+    "read_at": { "type": "string", "description": "Set when the receiver durably acknowledges this row" },
+    "delivery_level": { "enum": ["simple", "steer"] },
+    "delivery_fallback": { "const": "simple" },
+    "delivery_target": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["primary", "simple_fallback"],
+          "properties": {
+            "primary": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/TargetBinding" }] },
+            "simple_fallback": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/TargetBinding" }] }
+          }
+        }
+      ]
+    },
+    "delivery_work": {
+      "type": "object",
+      "description": "Attributed listen-worker context; absent from ordinary ledger reads",
+      "additionalProperties": false,
+      "required": ["delivery_id", "instance", "project_id", "state", "requested_level"],
+      "properties": {
+        "delivery_id": { "type": "string", "minLength": 1 },
+        "instance": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "project_id": { "type": "integer", "minimum": 1 },
+        "state": { "enum": ["pending", "leased", "retry", "blocked", "handed_off", "dead"] },
+        "adapter": { "enum": ["codex", "agentd_codex", "agentd_claude", "managed_harness", "grok_bot_routine", "claude_resume", "claude_channel"] },
+        "target_kind": { "enum": ["codex_thread", "agentd_session", "harness_session", "https_webhook", "claude_session"] },
+        "target_ref": { "type": "string", "minLength": 1 },
+        "maximum_level": { "enum": ["simple", "steer"] },
+        "requested_level": { "enum": ["simple", "steer"] },
+        "fallback_reason": { "enum": ["idle", "unsupported", "policy_capped", "target_missing", "not_steerable", "transport_error"] }
+      }
+    }
+  },
+  "$defs": {
+    "Address": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}:[A-Za-z][A-Za-z0-9_-]{0,63}$" },
+    "TextPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "text"],
+      "properties": { "kind": { "const": "text" }, "text": { "type": "string" } }
+    },
+    "TargetBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binding_id", "kind"],
+      "properties": {
+        "binding_id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["codex_thread", "agentd_session", "harness_session", "https_webhook", "claude_session"] }
+      }
+    }
+  }
+}

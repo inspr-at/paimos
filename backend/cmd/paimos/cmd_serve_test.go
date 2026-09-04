@@ -182,7 +182,7 @@ func captureChannelNotification(t *testing.T, message messageEnvelope) channelNo
 	acked := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/projects/6/messages/listen":
+		case "/api/v2/projects/6/messages/listen":
 			if r.Header.Get(agentAttrHeader) != "claude" {
 				t.Errorf("missing channel attribution")
 			}
@@ -285,7 +285,7 @@ func TestServeMCPClaudeChannelCompletesLeasedRegistryWorkAndSkipsForeignRows(t *
 	completed := make(chan registryCompletion, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/projects/6/messages/listen":
+		case "/api/v2/projects/6/messages/listen":
 			queries <- r.URL.RawQuery
 			_ = json.NewEncoder(w).Encode(inboxPage{Address: "claude:claude", NextCursor: 16, Messages: []messageEnvelope{leased, foreign, missing}})
 		case "/api/projects/6/messages/delivery-complete":

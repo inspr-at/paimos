@@ -229,6 +229,27 @@ func TestSessionHomeV1ComposesManagedUnmanagedInboxAttentionAndFailClosedHarness
 		managed.Attention.ExceptionCount != 2 || managed.Attention.ActionRequestCount != 1 || managed.Attention.Reason == nil || *managed.Attention.Reason != "action_request" {
 		t.Fatalf("managed inbox/attention/capability composition=%+v", managed)
 	}
+	var heldMessageRowID, adminID int64
+	if err := db.DB.QueryRow(`SELECT id FROM agent_messages WHERE body='Please approve this'`).Scan(&heldMessageRowID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.QueryRow(`SELECT id FROM users WHERE username='admin'`).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO agent_message_human_resolutions(
+		resolution_id,message_row_id,project_id,outcome,actor_user_id,actor_session_id,instance,idempotency_key_digest,request_digest)
+		VALUES(?,?,?,?,?,?,?,zeroblob(32),zeroblob(32))`, uuid.NewString(), heldMessageRowID, projectID, "resolved", adminID, "session-home-test", "ppm"); err != nil {
+		t.Fatal(err)
+	}
+	response, afterResolution := getSessionHome(t, ts, projectID, ts.adminCookie)
+	assertStatus(t, response, http.StatusOK)
+	for _, item := range afterResolution.Sessions {
+		if item.Target.AgentName != nil && *item.Target.AgentName == "managed" {
+			if item.Attention.ExceptionCount != 1 || item.Attention.ActionRequestCount != 0 || item.Attention.Reason == nil || *item.Attention.Reason != "sender_not_allowed" {
+				t.Fatalf("resolved action remained in session-home attention: %+v", item.Attention)
+			}
+		}
+	}
 	unmanaged := byAgent["unmanaged"]
 	if unmanaged.Harness == nil || unmanaged.Harness.ManagementMode != "unmanaged" ||
 		unmanaged.Status.ActivityState != "unknown" || unmanaged.Status.ActivityReason != "unmanaged_evidence" ||

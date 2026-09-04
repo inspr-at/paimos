@@ -36,6 +36,7 @@ type SendEnvelopeInput struct {
 	// defence-in-depth fallback, but callers do not have to depend on prose
 	// classification to enter the human-only held path.
 	ActionRequest  bool
+	ExpectsReply   bool
 	DeliveryLevel  string
 	IdempotencyKey string
 }
@@ -229,11 +230,17 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 	}
 
 	isAction := in.ActionRequest || detectActionRequest(in.Body)
+	if isAction && in.ExpectsReply {
+		return nil, coded("agent_message_expectation_invalid", "held action requests use human resolution and cannot expect an agent reply")
+	}
 	authorized := 0
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_message_allowlist WHERE receiver_agent_id=? AND sender_agent_id=?`, toID, fromID).Scan(&authorized); err != nil {
 		return nil, err
 	}
 	delivered := authorized > 0 && !isAction
+	if in.ExpectsReply && !delivered {
+		return nil, coded("agent_message_expectation_unavailable", "a message can expect a reply only when it is accepted into the receiver inbox")
+	}
 	heldReason := ""
 	var deliveredAt any
 	if isAction {
@@ -255,11 +262,11 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 	result, err := tx.ExecContext(ctx, `INSERT INTO agent_messages
 		(from_agent_id,to_agent_id,issue_id,parent_message_id,hop_count,body,is_action_request,delivered,held_reason,delivered_at,
 		 message_id,context_id,task_id,role,parts_json,metadata_json,from_address,to_address,reply_to,thread_id,session_id,
-		 delivery_level,delivery_fallback,delivery_primary_target_id,delivery_fallback_target_id)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 delivery_level,delivery_fallback,delivery_primary_target_id,delivery_fallback_target_id,expects_reply)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		fromID, toID, in.IssueID, parentID, hop, in.Body, boolToInt(isAction), boolToInt(delivered), heldReason, deliveredAt,
 		messageID, projectKey, taskID, "agent", string(partsJSON), string(metadataJSON), fromAddress, toAddress, in.ReplyTo, threadID, strings.TrimSpace(in.SessionID),
-		in.DeliveryLevel, "simple", nullableString(primaryTargetID), nullableString(fallbackTargetID))
+		in.DeliveryLevel, "simple", nullableString(primaryTargetID), nullableString(fallbackTargetID), boolToInt(in.ExpectsReply))
 	if err != nil {
 		if strings.Contains(err.Error(), "paimos_contains_secret_like") {
 			return nil, ErrContainsSecret
@@ -269,6 +276,18 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 	messageRowID, err := result.LastInsertId()
 	if err != nil {
 		return nil, err
+	}
+	if in.ExpectsReply {
+		nextAttentionAt := time.Now().UTC().Add(replyObligationInitialDelay).Format("2006-01-02T15:04:05.000Z")
+		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_reply_obligations(message_row_id,project_id,sender_agent_id,next_attention_at)
+			VALUES(?,?,?,?)`, messageRowID, in.ProjectID, fromID, nextAttentionAt); err != nil {
+			return nil, err
+		}
+	}
+	if parentID != nil {
+		if err := closeReplyObligationTx(ctx, tx, *parentID, messageRowID); err != nil {
+			return nil, err
+		}
 	}
 	if delivered {
 		state, reason := "pending", ""
@@ -313,8 +332,9 @@ func sendRequestDigest(in SendEnvelopeInput, normalizedTo string) ([]byte, error
 		Body          string         `json:"body"`
 		Metadata      map[string]any `json:"metadata"`
 		ActionRequest bool           `json:"is_action_request"`
+		ExpectsReply  bool           `json:"expects_reply"`
 		DeliveryLevel string         `json:"delivery_level"`
-	}{normalizedTo, in.IssueID, strings.TrimSpace(in.ReplyTo), strings.TrimSpace(in.ThreadID), in.Body, metadata, in.ActionRequest, in.DeliveryLevel}
+	}{normalizedTo, in.IssueID, strings.TrimSpace(in.ReplyTo), strings.TrimSpace(in.ThreadID), in.Body, metadata, in.ActionRequest, in.ExpectsReply, in.DeliveryLevel}
 	raw, err := json.Marshal(canonical)
 	if err != nil {
 		return nil, err
@@ -551,6 +571,8 @@ const envelopeSelect = `SELECT am.id,am.message_id,am.context_id,am.task_id,am.r
 	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_primary_target_id),''),
 	COALESCE(am.delivery_fallback_target_id,''),
 	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_fallback_target_id),'')
+	,am.expects_reply,
+	COALESCE((SELECT outcome FROM agent_message_human_resolutions WHERE message_row_id=am.id),'')
 	FROM agent_messages am
 	LEFT JOIN project_agents sender ON sender.id=am.from_agent_id
 	LEFT JOIN project_agents receiver ON receiver.id=am.to_agent_id
@@ -562,7 +584,7 @@ func scanEnvelope(row scanner) (*Envelope, error) {
 	var e Envelope
 	var parts, metadata, primaryID, primaryKind, fallbackID, fallbackKind string
 	if err := row.Scan(&e.Cursor, &e.MessageID, &e.ContextID, &e.TaskID, &e.Role, &parts, &metadata, &e.From, &e.To, &e.ReplyTo, &e.ThreadID, &e.Hop, &e.Delivered, &e.HeldReason, &e.IsActionRequest, &e.CreatedAt, &e.ReadAt,
-		&e.DeliveryLevel, &e.DeliveryFallback, &primaryID, &primaryKind, &fallbackID, &fallbackKind); err != nil {
+		&e.DeliveryLevel, &e.DeliveryFallback, &primaryID, &primaryKind, &fallbackID, &fallbackKind, &e.ExpectsReply, &e.HumanResolutionOutcome); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(parts), &e.Parts); err != nil {

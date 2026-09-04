@@ -31,6 +31,7 @@ type messageEnvelope struct {
 	Delivered        bool                 `json:"delivered"`
 	HeldReason       string               `json:"held_reason,omitempty"`
 	IsActionRequest  bool                 `json:"is_action_request"`
+	ExpectsReply     bool                 `json:"expects_reply"`
 	CreatedAt        string               `json:"created_at"`
 	ReadAt           string               `json:"read_at,omitempty"`
 	DeliveryLevel    string               `json:"delivery_level"`
@@ -59,7 +60,7 @@ type messageDeliveryWork struct {
 // tellCmd writes one durable, session-attributed ledger row.
 func tellCmd() *cobra.Command {
 	var projectRef, ticketRef, replyTo, threadID, message, messageFile, level string
-	var actionRequest bool
+	var actionRequest, expectsReply bool
 	c := &cobra.Command{
 		Use: "tell <harness>:<agent>", Short: "Send a durable message to a registered project agent",
 		Args: cobra.ExactArgs(1),
@@ -98,6 +99,9 @@ func tellCmd() *cobra.Command {
 			if actionRequest {
 				payload["is_action_request"] = true
 			}
+			if expectsReply {
+				payload["expects_reply"] = true
+			}
 			if issueID != nil {
 				payload["issue_id"] = *issueID
 			}
@@ -107,7 +111,7 @@ func tellCmd() *cobra.Command {
 			if threadID != "" {
 				payload["thread_id"] = strings.TrimSpace(threadID)
 			}
-			raw, err := client.do("POST", fmt.Sprintf("/api/projects/%d/messages", projectID), payload)
+			raw, err := client.do("POST", fmt.Sprintf("/api/v2/projects/%d/messages", projectID), payload)
 			if err != nil {
 				return reportError(err)
 			}
@@ -135,6 +139,7 @@ func tellCmd() *cobra.Command {
 	c.Flags().StringVar(&messageFile, "message-file", "", "read message body from file, or - for stdin")
 	c.Flags().StringVar(&level, "level", "simple", "delivery level: simple or steer")
 	c.Flags().BoolVar(&actionRequest, "action-request", false, "mark as a human-gated action request; never deliver to an agent inbox")
+	c.Flags().BoolVar(&expectsReply, "expects-reply", false, "create a durable reply obligation closed only by --reply-to")
 	return c
 }
 
@@ -457,7 +462,7 @@ func messageListCmd() *cobra.Command {
 		if limit > 0 {
 			q.Set("limit", strconv.Itoa(limit))
 		}
-		raw, err := client.do("GET", fmt.Sprintf("/api/projects/%d/messages?%s", pid, q.Encode()), nil)
+		raw, err := client.do("GET", fmt.Sprintf("/api/v2/projects/%d/messages?%s", pid, q.Encode()), nil)
 		if err != nil {
 			return reportError(err)
 		}
@@ -502,7 +507,7 @@ func messageGetCmd() *cobra.Command {
 		if err != nil {
 			return reportError(err)
 		}
-		raw, err := client.do("GET", fmt.Sprintf("/api/projects/%d/messages/%s", pid, url.PathEscape(args[0])), nil)
+		raw, err := client.do("GET", fmt.Sprintf("/api/v2/projects/%d/messages/%s", pid, url.PathEscape(args[0])), nil)
 		if err != nil {
 			return reportError(err)
 		}

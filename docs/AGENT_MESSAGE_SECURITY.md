@@ -48,7 +48,9 @@ the sender from trusted session attribution and the addressee from a
 `<harness>:<registered-agent>` address in the same project; clients cannot
 select numeric agent IDs. The envelope persists stable message/thread/reply
 IDs, project and issue context, text parts, metadata, hop, and session audit
-data. See `backend/contracts/agent-message-v1.schema.json`.
+data. The original closed contract remains frozen in
+`backend/contracts/agent-message-v1.schema.json`; reply obligations use the
+explicit closed `agent-message-v2.schema.json` boundary.
 
 M153 adds a per-project/address durable cursor and message `read_at` timestamp.
 Listen and acknowledge requests bind the address to trusted
@@ -153,21 +155,25 @@ This separation prevents prompt injection: free-text messages cannot trigger act
 
 ### Send Message
 ```
-POST /api/projects/:projectID/messages
+POST /api/v2/projects/:projectID/messages
 {
   "to": "codex:reviewer",
   "issue_id": 123,
   "reply_to": "019...",
   "is_action_request": true,
+  "expects_reply": false,
   "body": "Message content"
 }
 ```
 
 The sender comes from trusted request attribution, never the body.
+The unversioned message send/list/get/listen routes are frozen v1 compatibility
+surfaces. They reject `expects_reply`, omit v2-only reply/disposition facts,
+and retain fire-and-forget semantics. The PAIMOS CLI uses v2.
 
 ### Listen and Acknowledge
 ```
-GET  /api/projects/:projectID/messages/listen?to=codex:reviewer&after=123&limit=10
+GET  /api/v2/projects/:projectID/messages/listen?to=codex:reviewer&after=123&limit=10
 POST /api/projects/:projectID/messages/ack
 {"to":"codex:reviewer","cursor":130}
 ```
@@ -187,6 +193,47 @@ POST /api/projects/:projectID/message-allowlist
 
 The allowlist mutation is an operator control plane. Held rows remain visible
 through project/issue inspection and are never returned by listen.
+
+### Reply obligations and held-action disposition
+
+`expects_reply` is opt-in. Omitting it preserves the existing fire-and-forget
+default. An opted-in message and its single open obligation commit atomically.
+Neither durable inbox acknowledgement nor vendor handoff is a reply. Closure
+requires a separately committed, accepted message from the addressed
+counterpart with the original message's exact durable ID in `reply_to`.
+Unauthorized or otherwise held replies and unrelated thread activity cannot
+satisfy it.
+
+Open obligations resurface only through bounded, content-free orchestrator
+attention records. Deadlines make an obligation eligible; an authorized
+attention/listen projection poll advances the schedule and emits the record.
+There is no autonomous wall-clock scheduler. Polling emits at most six overdue records (5 minutes,
+15 minutes, 1 hour, 4 hours, 12 hours, and 24 hours), then leaves the obligation
+open but quiet. A close transition removes old immutable attention facts from the actionable view
+without rewriting their history. The message's project and sender identity
+remain authoritative; no PAI-903 parent/session relationship is inferred.
+
+A held action request may instead receive a human audit disposition:
+
+```text
+POST /api/projects/:projectID/messages/:messageID/resolution
+Idempotency-Key: <opaque retry key>
+{"outcome":"resolved"}  // or "dismissed"
+```
+
+This route requires an authenticated human session with project-edit authority
+and rejects API-key principals and agent attribution. It appends one immutable,
+value-free record containing only the
+message/project IDs, outcome, current user/session attribution, instance, and
+digests. It never changes `delivered`, the held reason, or message content.
+The same key and outcome replay the original record; changing the outcome or
+attempting a second disposition conflicts. The issue detail is the shipped
+producer: editors choose **Mark resolved** or **Dismiss request**, while the
+held/not-delivered state and a persistent disclaimer remain visible before
+and after either choice. Neither choice executes or delivers the request. Read-only
+users see the held state without mutation controls. The issue message response
+projects only `human_resolution_outcome`; actor/session attribution stays in
+the audit ledger.
 
 ## Usage Example
 
@@ -219,7 +266,7 @@ Canonical-ledger and delivery-boundary tests cover all security controls:
 - `TestEnvelopeLedgerEnforcesBodyCap`: canonical oversized-body rejection
 - `TestCanonicalEnvelopeHoldsAndSurfacesExplicitActionRequests`: typed marker, heuristic fallback, secret rejection, DB invariant, and issue visibility
 - `TestFrameAgentEnvelopePutsTrustedBoundaryBeforeSpoofedBody`: server framing remains ahead of an attempted nested wrapper
-- `IssueAgentMessages security surfacing`: held action requests and unauthorized messages remain visibly human-only
+- `IssueAgentMessages security surfacing`: held action requests and unauthorized messages remain visibly human-only; session-authorized resolve/dismiss controls use stable retry keys and content-free failures
 - durable-listen integration tests: attribution binding, bounded replay,
   monotonic acknowledgement, `read_at`, and future-cursor rejection
 

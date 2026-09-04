@@ -176,6 +176,45 @@ orchestrator. It never carries worker prose and never requests steer:
 paimos listen --attention --as "$ADDRESS" --project PAI --follow --deliver codex
 ```
 
+Messages remain fire-and-forget unless the sender deliberately adds
+`--expects-reply`. That flag commits one reply obligation atomically with the
+message. Only an accepted, durable counterpart `--reply-to <message-id>`
+closes it; held messages, listen acknowledgement, and delivery completion
+never do. An overdue open obligation resurfaces to this same bounded
+orchestrator attention feed when an authorized attention/listen projection
+poll observes its 5-minute deadline, then its 15-minute, 1-hour,
+4 hours, 12 hours, and 24 hours. It then remains authoritatively open but
+quiet until the exact reply arrives. Closure immediately removes its historical attention
+items from the actionable view while preserving the immutable audit trail.
+Deadlines do not run an autonomous wall-clock scheduler; projection polling is
+the explicit mechanism that advances an eligible obligation.
+
+```bash
+PAIMOS_AGENT_NAME=coordinator paimos tell codex:worker --project PAI \
+  --expects-reply --message 'Reply with the validation result.'
+PAIMOS_AGENT_NAME=worker paimos tell paimos:coordinator --project PAI \
+  --reply-to '<exact-message-id>' --message 'Validation passed.'
+```
+
+Human review of a held action request is a separate immutable disposition,
+not a release operation. It is available only through the session-authenticated
+HTTP/UI control plane; the issue detail shows explicit **Mark resolved** and
+**Dismiss request** choices to users with project-edit access. Both choices
+record only the decision and never execute or deliver the held request. The
+held/not-delivered label and that disclaimer remain visible after disposition.
+API-key automation and agent-attributed requests cannot author a human
+decision. The browser supplies an opaque retry key to the resolution endpoint.
+An exact retry is stable, while a different outcome conflicts. Issue message
+reads expose only the outcome; audit-only user/session attribution is not
+projected into the UI response.
+
+Neither an obligation nor a resolution invents a PAI-903 hierarchy binding.
+The stored `sender_agent_id` preserves the original project-scoped sender as
+authoritative provenance; `project_id` routes overdue attention to the single
+configured orchestrator, not directly back to that sender. PAI-903 parent and
+ticket fields continue to come only from explicit harness registration or
+binding changes.
+
 The server derives this feed from authoritative message, delivery, harness
 activity, control, and event-time assignment records. Its closed transition
 policy wakes only for stale/unknown or dead workers, a turn ending while an

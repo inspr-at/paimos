@@ -167,6 +167,20 @@ type attentionQueryer interface {
 
 const attentionProjectionEpoch = "1970-01-01T00:00:00.000Z"
 
+// activeAttentionItemPredicate keeps the append-only attention history
+// separate from authoritative current state. A reply or human resolution
+// ends its matching obligation immediately; acknowledgement is deliberately
+// not part of that decision.
+const activeAttentionItemPredicate = `(ai.source_kind NOT IN ('held_agent_message','reply_obligation')
+	OR (ai.source_kind='held_agent_message' AND NOT EXISTS(
+		SELECT 1 FROM agent_messages message
+		JOIN agent_message_human_resolutions resolution ON resolution.message_row_id=message.id
+		WHERE message.message_id=ai.source_id))
+	OR (ai.source_kind='reply_obligation' AND EXISTS(
+		SELECT 1 FROM agent_messages message
+		JOIN agent_reply_obligations obligation ON obligation.message_row_id=message.id
+		WHERE message.message_id=ai.source_id AND obligation.state='open')))`
+
 var attentionProjectionSources = []string{
 	"harness_session_event",
 	"held_agent_message",
@@ -334,7 +348,9 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 	// that are not action requests. That makes polling proportional to new rows.
 	rows, err = s.db.QueryContext(ctx, `SELECT pa.project_id,am.id,am.message_id,am.is_action_request,am.delivered,
 		strftime('%Y-%m-%dT%H:%M:%fZ',am.created_at) FROM agent_messages am
-		JOIN project_agents pa ON pa.id=am.to_agent_id WHERE am.id>? AND am.id<=? ORDER BY am.id`,
+		JOIN project_agents pa ON pa.id=am.to_agent_id WHERE am.id>? AND am.id<=?
+		AND NOT EXISTS(SELECT 1 FROM agent_message_human_resolutions resolution WHERE resolution.message_row_id=am.id)
+		ORDER BY am.id`,
 		cursors["held_agent_message"].rowID, highwaters["held_agent_message"].rowID)
 	if err != nil {
 		return 0, err
@@ -413,6 +429,37 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 		}
 	}
 
+	// Reply obligations are authoritative mutable state, not an event cursor.
+	// Read only the bounded due frontier; the writer transaction below claims
+	// the exact expected generation before appending an immutable attention item.
+	now := time.Now().UTC()
+	nowText := now.Format("2006-01-02T15:04:05.000Z")
+	rows, err = s.db.QueryContext(ctx, `SELECT obligation.project_id,message.message_id,obligation.resurface_count
+		FROM agent_reply_obligations obligation JOIN agent_messages message ON message.id=obligation.message_row_id
+		WHERE obligation.state='open' AND obligation.next_attention_at<=?
+		ORDER BY obligation.next_attention_at,obligation.message_row_id LIMIT ?`, nowText, MaxAttentionItems)
+	if err != nil {
+		return 0, err
+	}
+	for rows.Next() {
+		var projectID, currentCount int64
+		var messageID string
+		if err := rows.Scan(&projectID, &messageID, &currentCount); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		candidates = append(candidates, attentionCandidate{
+			projectID, "reply_obligation", messageID, currentCount + 1, "reply_overdue", "reply_expected", nowText,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
 	watermarkChanged := false
 	for _, kind := range attentionProjectionSources {
 		watermarkChanged = watermarkChanged || cursors[kind].rowID != highwaters[kind].rowID || cursors[kind].updatedAt != highwaters[kind].updatedAt
@@ -438,6 +485,39 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 	}
 	var inserted int64
 	for _, candidate := range candidates {
+		if candidate.sourceKind == "held_agent_message" {
+			var resolved int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_messages message
+				JOIN agent_message_human_resolutions resolution ON resolution.message_row_id=message.id
+				WHERE message.message_id=?`, candidate.sourceID).Scan(&resolved); err != nil {
+				return 0, err
+			}
+			if resolved != 0 {
+				continue
+			}
+		}
+		if candidate.sourceKind == "reply_obligation" {
+			var nextAttention any
+			if candidate.sourceSequence < replyObligationMaxResurfaces {
+				nextAttention = now.Add(replyObligationDelay(candidate.sourceSequence)).Format("2006-01-02T15:04:05.000Z")
+			}
+			result, claimErr := tx.ExecContext(ctx, `UPDATE agent_reply_obligations SET resurface_count=?,next_attention_at=?
+				WHERE message_row_id=(SELECT id FROM agent_messages WHERE message_id=?) AND project_id=? AND state='open'
+				 AND resurface_count=? AND next_attention_at<=?`, candidate.sourceSequence, nextAttention,
+				candidate.sourceID, candidate.projectID, candidate.sourceSequence-1, nowText)
+			if claimErr != nil {
+				return 0, claimErr
+			}
+			claimed, _ := result.RowsAffected()
+			if claimed == 0 {
+				continue
+			}
+			if _, eventErr := tx.ExecContext(ctx, `INSERT INTO agent_reply_obligation_events(
+				message_row_id,event_sequence,event_kind,occurred_at)
+				SELECT id,?,'resurfaced',? FROM agent_messages WHERE message_id=?`, candidate.sourceSequence, nowText, candidate.sourceID); eventErr != nil {
+				return 0, eventErr
+			}
+		}
 		result, execErr := tx.ExecContext(ctx, `INSERT INTO agent_attention_items(
 			receiver_project_id,receiver_project_agent_id,address,source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?)
@@ -655,6 +735,20 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 	if err != nil {
 		return nil, err
 	}
+	// If every immutable item in an open batch has ceased to be actionable,
+	// close that delivery generation without pretending it was handed off.
+	// The cursor remains unchanged, so unrelated later work cannot be skipped.
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_attention_batches
+		SET state='superseded',blocked_reason='',lease_until=NULL,
+			superseded_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		WHERE receiver_project_id=? AND receiver_project_agent_id=? AND state IN ('pending','leased','blocked')
+		AND NOT EXISTS(SELECT 1 FROM agent_attention_items ai
+			WHERE ai.receiver_project_id=agent_attention_batches.receiver_project_id
+			AND ai.receiver_project_agent_id=agent_attention_batches.receiver_project_agent_id
+			AND ai.id>agent_attention_batches.from_cursor AND ai.id<=agent_attention_batches.to_cursor
+			AND `+activeAttentionItemPredicate+`)`, in.ProjectID, agentID); err != nil {
+		return nil, err
+	}
 	var cursor int64
 	err = tx.QueryRowContext(ctx, `SELECT cursor FROM agent_attention_cursors WHERE receiver_project_agent_id=?`, agentID).Scan(&cursor)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -671,8 +765,9 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 		limit = MaxAttentionItems
 	}
 	var firstCreatedAt string
-	err = tx.QueryRowContext(ctx, `SELECT created_at FROM agent_attention_items
-		WHERE receiver_project_id=? AND receiver_project_agent_id=? AND id>? ORDER BY id LIMIT 1`,
+	err = tx.QueryRowContext(ctx, `SELECT ai.created_at FROM agent_attention_items ai
+		WHERE ai.receiver_project_id=? AND ai.receiver_project_agent_id=? AND ai.id>?
+		AND `+activeAttentionItemPredicate+` ORDER BY ai.id LIMIT 1`,
 		in.ProjectID, agentID, after).Scan(&firstCreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
@@ -688,9 +783,9 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 		return nil, fmt.Errorf("parse attention coalescing timestamp: %w", err)
 	}
 	windowEnd := firstCreated.Add(attentionCoalesceWindow).UTC().Format("2006-01-02T15:04:05.000Z")
-	rows, err := tx.QueryContext(ctx, `SELECT id,printf('attention-%d',id),source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at
-		FROM agent_attention_items WHERE receiver_project_id=? AND receiver_project_agent_id=? AND id>? AND created_at<=?
-		ORDER BY id LIMIT ?`, in.ProjectID, agentID, after, windowEnd, limit)
+	rows, err := tx.QueryContext(ctx, `SELECT ai.id,printf('attention-%d',ai.id),ai.source_project_id,ai.source_kind,ai.source_id,ai.source_sequence,ai.attention_kind,ai.reason_code,ai.occurred_at
+		FROM agent_attention_items ai WHERE ai.receiver_project_id=? AND ai.receiver_project_agent_id=? AND ai.id>? AND ai.created_at<=?
+		AND `+activeAttentionItemPredicate+` ORDER BY ai.id LIMIT ?`, in.ProjectID, agentID, after, windowEnd, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -746,8 +841,9 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 	}
 
 	// The open batch, not a later page, owns delivery order.
-	rows, err = tx.QueryContext(ctx, `SELECT id,printf('attention-%d',id),source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at
-		FROM agent_attention_items WHERE receiver_project_id=? AND receiver_project_agent_id=? AND id>? AND id<=? ORDER BY id`,
+	rows, err = tx.QueryContext(ctx, `SELECT ai.id,printf('attention-%d',ai.id),ai.source_project_id,ai.source_kind,ai.source_id,ai.source_sequence,ai.attention_kind,ai.reason_code,ai.occurred_at
+		FROM agent_attention_items ai WHERE ai.receiver_project_id=? AND ai.receiver_project_agent_id=? AND ai.id>? AND ai.id<=?
+		AND `+activeAttentionItemPredicate+` ORDER BY ai.id`,
 		in.ProjectID, agentID, fromCursor, toCursor)
 	if err != nil {
 		return nil, err
@@ -756,6 +852,13 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 	rows.Close()
 	if err != nil {
 		return nil, err
+	}
+	if len(items) == 0 {
+		page.Items, page.Frame, page.Work, page.NextCursor = nil, "", nil, cursor
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return page, nil
 	}
 	page.Items, page.NextCursor = items, toCursor
 	work := &AttentionDeliveryWork{BatchID: batchID, Instance: instanceName(), ProjectID: in.ProjectID, State: state, BlockedReason: blockedReason}
@@ -851,10 +954,12 @@ func (s *Service) AckAttention(ctx context.Context, in AttentionAckInput) (*Curs
 		if toCursor > in.Cursor {
 			return nil, coded("agent_attention_cursor_invalid", "cursor does not reach attention batch")
 		}
-		if state == "blocked" {
+		if state == "superseded" {
+			// Authoritative state closed the work before handoff. A stale worker
+			// acknowledgement is harmless and must not resurrect the batch.
+		} else if state == "blocked" {
 			return nil, coded("agent_attention_delivery_blocked", "attention delivery is blocked")
-		}
-		if state != "handed_off" {
+		} else if state != "handed_off" {
 			if state != "leased" {
 				return nil, coded("agent_attention_delivery_not_leased", "attention delivery is not leased")
 			}

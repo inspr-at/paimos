@@ -121,6 +121,81 @@
       }
     },
     "schemas": {
+      "AgentMessageV1": {
+        "type": "object", "additionalProperties": false,
+        "description": "Frozen original agent-message envelope. Reply-obligation fields are deliberately absent; use AgentMessageV2 for new consumers.",
+        "required": ["cursor", "message_id", "context_id", "role", "parts", "metadata", "from", "to", "thread_id", "hop", "delivered", "is_action_request", "created_at", "delivery_level", "delivery_fallback", "delivery_target"],
+        "properties": {
+          "cursor": {"type": "integer", "minimum": 1}, "message_id": {"type": "string"}, "context_id": {"type": "string"}, "task_id": {"type": "string"},
+          "role": {"const": "agent"}, "parts": {"type": "array", "items": {"type": "object"}}, "metadata": {"type": "object"},
+          "from": {"type": "string"}, "to": {"type": "string"}, "reply_to": {"type": "string"}, "thread_id": {"type": "string"},
+          "hop": {"type": "integer"}, "delivered": {"type": "boolean"}, "held_reason": {"type": "string"}, "is_action_request": {"type": "boolean"},
+          "created_at": {"type": "string"}, "read_at": {"type": "string"}, "delivery_level": {"enum": ["simple", "steer"]},
+          "delivery_fallback": {"const": "simple"}, "delivery_target": {"type": ["object", "null"]}, "delivery_work": {"type": "object"}
+        }
+      },
+      "AgentMessageV2": {
+        "type": "object", "additionalProperties": false,
+        "description": "Closed v2 agent-message envelope with durable reply-obligation and content-free human-disposition facts. The authoritative closed schema is backend/contracts/agent-message-v2.schema.json.",
+        "required": ["cursor", "message_id", "context_id", "role", "parts", "metadata", "from", "to", "thread_id", "hop", "delivered", "is_action_request", "expects_reply", "created_at", "delivery_level", "delivery_fallback", "delivery_target"],
+        "properties": {
+          "cursor": {"type": "integer", "minimum": 1}, "message_id": {"type": "string"}, "context_id": {"type": "string"}, "task_id": {"type": "string"},
+          "role": {"const": "agent"}, "parts": {"type": "array", "items": {"type": "object"}}, "metadata": {"type": "object"},
+          "from": {"type": "string"}, "to": {"type": "string"}, "reply_to": {"type": "string"}, "thread_id": {"type": "string"},
+          "hop": {"type": "integer"}, "delivered": {"type": "boolean"}, "held_reason": {"type": "string"}, "is_action_request": {"type": "boolean"},
+          "expects_reply": {"type": "boolean"}, "human_resolution_outcome": {"enum": ["resolved", "dismissed"]},
+          "created_at": {"type": "string"}, "read_at": {"type": "string"}, "delivery_level": {"enum": ["simple", "steer"]},
+          "delivery_fallback": {"const": "simple"}, "delivery_target": {"type": ["object", "null"]}, "delivery_work": {"type": "object"}
+        }
+      },
+      "AgentMessageSendV1": {
+        "type": "object", "additionalProperties": false,
+        "description": "Frozen fire-and-forget send request; expects_reply is rejected as unknown.",
+        "required": ["to", "body"],
+        "properties": {"to": {"type": "string"}, "issue_id": {"type": "integer"}, "reply_to": {"type": "string"}, "thread_id": {"type": "string"}, "body": {"type": "string"}, "metadata": {"type": "object"}, "is_action_request": {"type": "boolean"}, "delivery_level": {"enum": ["simple", "steer"]}}
+      },
+      "AgentMessageSendV2": {
+        "type": "object", "additionalProperties": false,
+        "required": ["to", "body"],
+        "properties": {"to": {"type": "string"}, "issue_id": {"type": "integer"}, "reply_to": {"type": "string"}, "thread_id": {"type": "string"}, "body": {"type": "string"}, "metadata": {"type": "object"}, "is_action_request": {"type": "boolean"}, "expects_reply": {"type": "boolean", "default": false}, "delivery_level": {"enum": ["simple", "steer"]}}
+      },
+      "AgentMessageListV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["messages", "count"],
+        "properties": {"messages": {"type": "array", "items": {"$ref": "#/components/schemas/AgentMessageV1"}}, "count": {"type": "integer", "minimum": 0}}
+      },
+      "AgentMessageListV2": {
+        "type": "object", "additionalProperties": false,
+        "required": ["messages", "count"],
+        "properties": {"messages": {"type": "array", "items": {"$ref": "#/components/schemas/AgentMessageV2"}}, "count": {"type": "integer", "minimum": 0}}
+      },
+      "AgentMessageInboxV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["address", "cursor", "next_cursor", "messages"],
+        "properties": {"address": {"type": "string"}, "cursor": {"type": "integer", "minimum": 0}, "next_cursor": {"type": "integer", "minimum": 0}, "messages": {"type": "array", "items": {"$ref": "#/components/schemas/AgentMessageV1"}}}
+      },
+      "AgentMessageInboxV2": {
+        "type": "object", "additionalProperties": false,
+        "required": ["address", "cursor", "next_cursor", "messages"],
+        "properties": {"address": {"type": "string"}, "cursor": {"type": "integer", "minimum": 0}, "next_cursor": {"type": "integer", "minimum": 0}, "messages": {"type": "array", "items": {"$ref": "#/components/schemas/AgentMessageV2"}}}
+      },
+      "AgentMessageIssueListV1": {"type": "array", "items": {"$ref": "#/components/schemas/AgentMessageV1"}},
+      "AgentMessageIssueListV2": {"type": "array", "items": {"$ref": "#/components/schemas/AgentMessageV2"}},
+      "AgentMessageHumanResolutionWrite": {
+        "type": "object", "additionalProperties": false,
+        "required": ["outcome"],
+        "properties": {"outcome": {"enum": ["resolved", "dismissed"]}}
+      },
+      "AgentMessageHumanResolution": {
+        "type": "object", "additionalProperties": false,
+        "description": "Immutable, value-free human disposition. It does not release, deliver, or mutate the held message.",
+        "required": ["resolution_id", "message_id", "outcome", "actor_user_id", "created_at"],
+        "properties": {
+          "resolution_id": {"type": "string"}, "message_id": {"type": "string"},
+          "outcome": {"enum": ["resolved", "dismissed"]}, "actor_user_id": {"type": "integer"},
+          "actor_session_id": {"type": "string"}, "created_at": {"type": "string"}
+        }
+      },
       "Error": {
         "type": "object",
         "required": [
@@ -5375,6 +5450,63 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/projects/{id}/messages": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "post": {"tags": ["agents"], "summary": "Send a frozen v1 fire-and-forget agent message", "description": "Compatibility route. Strictly rejects v2 reply-obligation fields.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageSendV1"}}}}, "responses": {"201": {"description": "Frozen v1 envelope", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageV1"}}}}}},
+      "get": {"tags": ["agents"], "summary": "List frozen v1 project messages", "description": "Compatibility projection; reply-obligation and human-disposition fields are omitted.", "parameters": [{"name": "to", "in": "query", "schema": {"type": "string"}}, {"name": "thread", "in": "query", "schema": {"type": "string"}}, {"name": "after", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1}}], "responses": {"200": {"description": "Frozen v1 message-list wrapper", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageListV1"}}}}}}
+    },
+    "/api/v2/projects/{id}/messages": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "post": {"tags": ["agents"], "summary": "Send a v2 agent message", "description": "Use this version for expects_reply and durable exact reply obligations.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageSendV2"}}}}, "responses": {"201": {"description": "Strict v2 envelope", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageV2"}}}}}},
+      "get": {"tags": ["agents"], "summary": "List v2 project messages", "description": "Reply-aware project inspection with the strict v2 envelope.", "parameters": [{"name": "to", "in": "query", "schema": {"type": "string"}}, {"name": "thread", "in": "query", "schema": {"type": "string"}}, {"name": "after", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1}}], "responses": {"200": {"description": "Strict v2 message-list wrapper", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageListV2"}}}}}}
+    },
+    "/api/projects/{id}/messages/listen": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {"tags": ["agents"], "summary": "Read a frozen v1 attributed inbox", "description": "Compatibility projection; reply-obligation and human-disposition fields are omitted.", "parameters": [{"name": "to", "in": "query", "required": true, "schema": {"type": "string"}}, {"name": "after", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1}}, {"name": "delivery", "in": "query", "schema": {"type": "string"}}], "responses": {"200": {"description": "Attributed inbox whose messages use AgentMessageV1", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageInboxV1"}}}}}}
+    },
+    "/api/v2/projects/{id}/messages/listen": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {"tags": ["agents"], "summary": "Read a v2 attributed inbox", "description": "The paimos CLI uses this route so expects_reply and human_resolution_outcome remain explicit.", "parameters": [{"name": "to", "in": "query", "required": true, "schema": {"type": "string"}}, {"name": "after", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1}}, {"name": "delivery", "in": "query", "schema": {"type": "string"}}], "responses": {"200": {"description": "Attributed inbox whose messages use AgentMessageV2", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageInboxV2"}}}}}}
+    },
+    "/api/projects/{id}/messages/{messageID}": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "messageID", "in": "path", "required": true, "schema": {"type": "string"}}],
+      "get": {"tags": ["agents"], "summary": "Get one frozen v1 message", "description": "Compatibility projection; reply-obligation and human-disposition fields are omitted.", "responses": {"200": {"description": "Frozen v1 envelope", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageV1"}}}}, "404": {"description": "Message not found"}}}
+    },
+    "/api/v2/projects/{id}/messages/{messageID}": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}, {"name": "messageID", "in": "path", "required": true, "schema": {"type": "string"}}],
+      "get": {"tags": ["agents"], "summary": "Get one v2 message", "description": "Reply-aware inspection with the strict v2 envelope.", "responses": {"200": {"description": "Strict v2 envelope", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageV2"}}}}, "404": {"description": "Message not found"}}}
+    },
+    "/api/issues/{id}/messages": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {"tags": ["agents"], "summary": "List frozen v1 issue-anchored agent messages", "description": "Session UI compatibility projection without reply-obligation or human-disposition fields.", "responses": {"200": {"description": "Frozen v1 issue message array", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageIssueListV1"}}}}, "404": {"description": "Issue not found"}}}
+    },
+    "/api/v2/issues/{id}/messages": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {"tags": ["agents"], "summary": "List v2 issue-anchored agent messages", "description": "Session UI projection including reply-obligation and content-free human-disposition facts.", "responses": {"200": {"description": "Strict v2 issue message array", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageIssueListV2"}}}}, "404": {"description": "Issue not found"}}
+      }
+    },
+    "/api/projects/{id}/messages/{messageID}/resolution": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "messageID", "in": "path", "required": true, "schema": {"type": "string"}}
+      ],
+      "post": {
+        "tags": ["agents"],
+        "summary": "Record a human disposition for a held action request",
+        "description": "Session-authenticated human control only; API-key and agent-attributed callers are forbidden. The immutable outcome does not release, execute, deliver, or mutate the held row. An exact idempotency replay returns the original record, while a different outcome conflicts. Missing, foreign, and non-held message IDs share a concealed 404 response.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [{"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 128}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageHumanResolutionWrite"}}}},
+        "responses": {
+          "200": {"description": "Immutable disposition, including stable exact replay", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageHumanResolution"}}}},
+          "400": {"description": "Malformed request or missing idempotency key"},
+          "401": {"description": "No current authenticated principal"},
+          "403": {"description": "API-key, agent-attributed, or unauthorized caller"},
+          "404": {"description": "Concealed missing, foreign, unknown, or non-held message"},
+          "409": {"description": "Idempotency replay changed the recorded outcome"}
         }
       }
     },

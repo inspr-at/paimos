@@ -209,7 +209,7 @@ func TestRunListenForeignWorkerReturnsDistinctExitWithoutCompleting(t *testing.T
 	completes := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/projects/1/messages/listen":
+		case "/api/v2/projects/1/messages/listen":
 			_ = json.NewEncoder(w).Encode(inboxPage{NextCursor: 2, Messages: []messageEnvelope{message}})
 		case "/api/projects/1/messages/delivery-complete":
 			completes++
@@ -260,7 +260,7 @@ func TestRunListenUnavailableAgentdReroutesLeaseWithoutCompletingIt(t *testing.T
 			t.Errorf("agent header=%q", got)
 		}
 		switch r.URL.Path {
-		case "/api/projects/1/messages/listen":
+		case "/api/v2/projects/1/messages/listen":
 			_ = json.NewEncoder(w).Encode(inboxPage{Address: "codex:worker", NextCursor: 17, Messages: []messageEnvelope{message}})
 		case "/api/projects/1/messages/delivery-unavailable":
 			reroutes++
@@ -297,7 +297,7 @@ func TestRunListenAcknowledgesOnlyAfterOutput(t *testing.T) {
 	}{Kind: "text", Text: "untrusted payload"})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/projects/1/messages/listen":
+		case "/api/v2/projects/1/messages/listen":
 			_ = json.NewEncoder(w).Encode(inboxPage{
 				Address: "codex:codex", NextCursor: 9, Messages: []messageEnvelope{message},
 			})
@@ -622,7 +622,7 @@ func claudeListenServer(t *testing.T, message messageEnvelope) (*httptest.Server
 			t.Errorf("agent header=%q want claude", r.Header.Get(agentAttrHeader))
 		}
 		switch r.URL.Path {
-		case "/api/projects/1/messages/listen":
+		case "/api/v2/projects/1/messages/listen":
 			_ = json.NewEncoder(w).Encode(inboxPage{Address: "claude:claude", NextCursor: message.Cursor, Messages: []messageEnvelope{message}})
 		case "/api/projects/1/messages/ack":
 			var body struct {
@@ -886,7 +886,7 @@ func claudeRegistryListenServer(t *testing.T, message messageEnvelope) (*httptes
 			t.Errorf("agent header=%q want claude", r.Header.Get(agentAttrHeader))
 		}
 		switch r.URL.Path {
-		case "/api/projects/1/messages/listen":
+		case "/api/v2/projects/1/messages/listen":
 			mu.Lock()
 			query = r.URL.RawQuery
 			mu.Unlock()

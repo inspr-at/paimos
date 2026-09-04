@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,7 +24,10 @@ import (
 // messaging. The numeric PAI-817 storage API is intentionally not public.
 func RegisterAgentMessageRoutes(r chi.Router) {
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages", sendAgentMessage)
+	r.With(auth.RequireProjectEdit).Post("/v2/projects/{id}/messages", sendAgentMessageV2)
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/{messageID}/resolution", resolveHeldAgentMessage)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/messages/listen", listenAgentMessages)
+	r.With(auth.RequireProjectView).Get("/v2/projects/{id}/messages/listen", listenAgentMessagesV2)
 	// Attention is an orchestrator portfolio feed derived across projects. The
 	// agent attribution header selects an inbox but never grants authority.
 	r.With(auth.RequireSuperAdmin).Get("/projects/{id}/attention/listen", listenAgentAttention)
@@ -39,7 +43,10 @@ func RegisterAgentMessageRoutes(r chi.Router) {
 	r.With(auth.RequireAdmin, auth.RequireProjectView).Post("/projects/{id}/message-deliveries/{deliveryID}/requeue", requeueAgentMessageDelivery)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/messages", listAgentMessages)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/messages/{messageID}", getAgentMessage)
+	r.With(auth.RequireProjectView).Get("/v2/projects/{id}/messages", listAgentMessagesV2)
+	r.With(auth.RequireProjectView).Get("/v2/projects/{id}/messages/{messageID}", getAgentMessageV2)
 	r.With(auth.RequireIssueAccess).Get("/issues/{id}/messages", listIssueAgentMessages)
+	r.With(auth.RequireIssueAccess).Get("/v2/issues/{id}/messages", listIssueAgentMessagesV2)
 }
 
 type ackEnvelopeRequest struct {
@@ -67,6 +74,22 @@ type sendEnvelopeRequest struct {
 	Metadata        map[string]any `json:"metadata"`
 	IsActionRequest bool           `json:"is_action_request"`
 	DeliveryLevel   string         `json:"delivery_level"`
+}
+
+type sendEnvelopeRequestV2 struct {
+	To              string         `json:"to"`
+	IssueID         *int64         `json:"issue_id"`
+	ReplyTo         string         `json:"reply_to"`
+	ThreadID        string         `json:"thread_id"`
+	Body            string         `json:"body"`
+	Metadata        map[string]any `json:"metadata"`
+	IsActionRequest bool           `json:"is_action_request"`
+	ExpectsReply    bool           `json:"expects_reply"`
+	DeliveryLevel   string         `json:"delivery_level"`
+}
+
+type resolveHeldMessageRequest struct {
+	Outcome string `json:"outcome"`
 }
 
 type completeDeliveryRequest struct {
@@ -102,16 +125,39 @@ type requeueTargetRequest struct {
 }
 
 func sendAgentMessage(w http.ResponseWriter, r *http.Request) {
+	var req sendEnvelopeRequest
+	if !decodeAgentMessageRequest(w, r, &req) {
+		return
+	}
+	sendAgentMessageVersion(w, r, sendEnvelopeRequestV2{
+		To: req.To, IssueID: req.IssueID, ReplyTo: req.ReplyTo, ThreadID: req.ThreadID,
+		Body: req.Body, Metadata: req.Metadata, IsActionRequest: req.IsActionRequest,
+		DeliveryLevel: req.DeliveryLevel,
+	}, false)
+}
+
+func sendAgentMessageV2(w http.ResponseWriter, r *http.Request) {
+	var req sendEnvelopeRequestV2
+	if !decodeAgentMessageRequest(w, r, &req) {
+		return
+	}
+	sendAgentMessageVersion(w, r, req, true)
+}
+
+func decodeAgentMessageRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, agentmessage.MaxBodySize+8192))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		messageProblem(w, r, "agent_message_request_invalid", err.Error(), http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+func sendAgentMessageVersion(w http.ResponseWriter, r *http.Request, req sendEnvelopeRequestV2, v2 bool) {
 	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
-		return
-	}
-	var req sendEnvelopeRequest
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, agentmessage.MaxBodySize+8192))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		messageProblem(w, r, "agent_message_request_invalid", err.Error(), http.StatusBadRequest)
 		return
 	}
 	idempotencyKey := ""
@@ -137,6 +183,7 @@ func sendAgentMessage(w http.ResponseWriter, r *http.Request) {
 		ProjectID: projectID, Sender: sender, SessionID: sessionID, To: req.To,
 		IssueID: req.IssueID, ReplyTo: strings.TrimSpace(req.ReplyTo), ThreadID: strings.TrimSpace(req.ThreadID),
 		Body: req.Body, Metadata: req.Metadata, ActionRequest: req.IsActionRequest,
+		ExpectsReply:  req.ExpectsReply,
 		DeliveryLevel: req.DeliveryLevel, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
@@ -145,7 +192,68 @@ func sendAgentMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(msg)
+	if v2 {
+		_ = json.NewEncoder(w).Encode(msg)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(msg.V1())
+}
+
+func resolveHeldAgentMessage(w http.ResponseWriter, r *http.Request) {
+	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonError(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	if agent, _ := readAgentAttribution(r); agent != nil {
+		messageProblem(w, r, "agent_message_resolution_human_required", "agent attribution cannot author a human resolution", http.StatusForbidden)
+		return
+	}
+	var req resolveHeldMessageRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		messageProblem(w, r, "agent_message_resolution_request_invalid", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := dec.Decode(&json.RawMessage{}); !errors.Is(err, io.EOF) {
+		messageProblem(w, r, "agent_message_resolution_request_invalid", "request body must contain exactly one JSON object", http.StatusBadRequest)
+		return
+	}
+	values := r.Header.Values("Idempotency-Key")
+	if len(values) != 1 || strings.TrimSpace(values[0]) == "" {
+		messageProblem(w, r, "agent_message_resolution_idempotency_required", "exactly one non-empty Idempotency-Key header is required", http.StatusBadRequest)
+		return
+	}
+	resolution, err := agentmessage.NewService(db.DB).ResolveHeldMessage(r.Context(), agentmessage.ResolveHeldMessageInput{
+		ProjectID: projectID, MessageID: strings.TrimSpace(chi.URLParam(r, "messageID")), Outcome: req.Outcome,
+		IdempotencyKey: values[0], Authority: humanMessageResolutionAuthority(r, projectID),
+	})
+	if err != nil {
+		writeAgentMessageError(w, r, err)
+		return
+	}
+	jsonOK(w, resolution)
+}
+
+func humanMessageResolutionAuthority(r *http.Request, projectID int64) agentmessage.HumanResolutionAuthority {
+	return func(ctx context.Context, tx *sql.Tx) (int64, string, error) {
+		user, principal, err := auth.ReauthorizeRequestPrincipalTx(ctx, tx, r, time.Now().UTC())
+		if err != nil || user == nil {
+			return 0, "", &agentmessage.CodedError{Code: "agent_message_unauthorized", Err: errors.New("current request credential is unavailable")}
+		}
+		if principal.Kind() != auth.PrincipalSession {
+			return 0, "", &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("a current human session is required")}
+		}
+		allowed, err := canEditProjectTx(ctx, tx, user, projectID)
+		if err != nil {
+			return 0, "", err
+		}
+		if !allowed {
+			return 0, "", &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("current project edit authority is required")}
+		}
+		return principal.ActorUserID(), "session:" + principal.SafeCredentialID(), nil
+	}
 }
 
 func completeAgentMessageDelivery(w http.ResponseWriter, r *http.Request) {
@@ -333,6 +441,14 @@ func requeueAgentMessageDelivery(w http.ResponseWriter, r *http.Request) {
 }
 
 func listAgentMessages(w http.ResponseWriter, r *http.Request) {
+	listAgentMessagesVersion(w, r, false)
+}
+
+func listAgentMessagesV2(w http.ResponseWriter, r *http.Request) {
+	listAgentMessagesVersion(w, r, true)
+}
+
+func listAgentMessagesVersion(w http.ResponseWriter, r *http.Request, v2 bool) {
 	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
@@ -355,10 +471,26 @@ func listAgentMessages(w http.ResponseWriter, r *http.Request) {
 			frameAgentEnvelope(&messages[i])
 		}
 	}
-	jsonOK(w, map[string]any{"messages": messages, "count": len(messages)})
+	if v2 {
+		jsonOK(w, map[string]any{"messages": messages, "count": len(messages)})
+		return
+	}
+	legacy := make([]agentmessage.EnvelopeV1, len(messages))
+	for i := range messages {
+		legacy[i] = messages[i].V1()
+	}
+	jsonOK(w, map[string]any{"messages": legacy, "count": len(legacy)})
 }
 
 func listenAgentMessages(w http.ResponseWriter, r *http.Request) {
+	listenAgentMessagesVersion(w, r, false)
+}
+
+func listenAgentMessagesV2(w http.ResponseWriter, r *http.Request) {
+	listenAgentMessagesVersion(w, r, true)
+}
+
+func listenAgentMessagesVersion(w http.ResponseWriter, r *http.Request, v2 bool) {
 	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
@@ -382,7 +514,11 @@ func listenAgentMessages(w http.ResponseWriter, r *http.Request) {
 	for i := range page.Messages {
 		frameAgentEnvelope(&page.Messages[i])
 	}
-	jsonOK(w, page)
+	if v2 {
+		jsonOK(w, page)
+		return
+	}
+	jsonOK(w, page.V1())
 }
 
 func listenAgentAttention(w http.ResponseWriter, r *http.Request) {
@@ -488,6 +624,14 @@ func allowAgentMessageSender(w http.ResponseWriter, r *http.Request) {
 }
 
 func getAgentMessage(w http.ResponseWriter, r *http.Request) {
+	getAgentMessageVersion(w, r, false)
+}
+
+func getAgentMessageV2(w http.ResponseWriter, r *http.Request) {
+	getAgentMessageVersion(w, r, true)
+}
+
+func getAgentMessageVersion(w http.ResponseWriter, r *http.Request, v2 bool) {
 	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
@@ -503,7 +647,11 @@ func getAgentMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	frameAgentEnvelope(msg)
-	jsonOK(w, msg)
+	if v2 {
+		jsonOK(w, msg)
+		return
+	}
+	jsonOK(w, msg.V1())
 }
 
 func frameAgentEnvelope(message *agentmessage.Envelope) {
@@ -517,6 +665,14 @@ func frameAgentEnvelope(message *agentmessage.Envelope) {
 }
 
 func listIssueAgentMessages(w http.ResponseWriter, r *http.Request) {
+	listIssueAgentMessagesVersion(w, r, false)
+}
+
+func listIssueAgentMessagesV2(w http.ResponseWriter, r *http.Request) {
+	listIssueAgentMessagesVersion(w, r, true)
+}
+
+func listIssueAgentMessagesVersion(w http.ResponseWriter, r *http.Request, v2 bool) {
 	issueID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		jsonError(w, "invalid issue id", http.StatusBadRequest)
@@ -532,7 +688,15 @@ func listIssueAgentMessages(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonOK(w, messages)
+	if v2 {
+		jsonOK(w, messages)
+		return
+	}
+	legacy := make([]agentmessage.EnvelopeV1, len(messages))
+	for i := range messages {
+		legacy[i] = messages[i].V1()
+	}
+	jsonOK(w, legacy)
 }
 
 func writeAgentMessageError(w http.ResponseWriter, r *http.Request, err error) {
@@ -541,8 +705,10 @@ func writeAgentMessageError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.As(err, &coded) {
 		code = coded.Code
 		switch code {
-		case "agent_message_idempotency_conflict":
+		case "agent_message_idempotency_conflict", "agent_message_resolution_idempotency_conflict", "agent_message_resolution_conflict":
 			status = http.StatusConflict
+		case "agent_message_resolution_not_held_action":
+			status = http.StatusNotFound
 		case "agent_message_unauthorized", "agent_attention_unauthorized":
 			status = http.StatusUnauthorized
 		case "agent_message_forbidden", "agent_attention_forbidden", "agent_attention_target_forbidden":

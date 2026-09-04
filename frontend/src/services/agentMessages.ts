@@ -14,9 +14,31 @@ export interface AgentMessage {
   delivered: boolean
   held_reason?: string
   is_action_request: boolean
+  expects_reply: boolean
+  human_resolution_outcome?: 'resolved' | 'dismissed'
   created_at: string
 }
 
+export type HumanResolutionOutcome = 'resolved' | 'dismissed'
+
+export interface HumanResolutionResult {
+  message_id: string
+  outcome: HumanResolutionOutcome
+}
+
 export function loadIssueAgentMessages(issueId: number): Promise<AgentMessage[]> {
-  return api.get<AgentMessage[]>(`/issues/${issueId}/messages`)
+  return api.get<AgentMessage[]>(`/v2/issues/${issueId}/messages`)
+}
+
+export function resolveHeldAgentMessage(
+  projectId: number,
+  messageId: string,
+  outcome: HumanResolutionOutcome,
+  idempotencyKey: string,
+): Promise<HumanResolutionResult> {
+  return api.post<HumanResolutionResult>(
+    `/projects/${projectId}/messages/${encodeURIComponent(messageId)}/resolution`,
+    { outcome },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  )
 }

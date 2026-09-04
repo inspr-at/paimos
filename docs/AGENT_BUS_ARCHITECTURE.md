@@ -45,24 +45,22 @@ with no running delivery worker.
 
 ## 2. Current state
 
-The current production path at `04dea97` is a secure durable inbox, not a push
-bus:
+The durable inbox path is:
 
-1. `POST /api/projects/{id}/messages` (normally `paimos tell`) writes an
+1. `POST /api/v2/projects/{id}/messages` (normally `paimos tell`) writes an
    `agent_messages` row.
 2. The server derives the sender from `X-Paimos-Agent-Name`, resolves the
    `<harness>:<agent>` receiver, applies the receiver's allowlist, action
    hold, hop, rate, body-size, and secret checks, and commits the row.
 3. A receiver learns about an eligible row only by calling
-   `GET /api/projects/{id}/messages/listen`, either once or through
+   `GET /api/v2/projects/{id}/messages/listen`, either once or through
    `paimos listen --follow`. Follow mode polls every two seconds.
 4. `paimos listen --deliver` can hand the server-framed body to a local vendor
    adapter and advances the durable cursor only after successful handoff.
 
-The current envelope has no delivery level. `--deliver-mode queue|steer` is
-process configuration consulted only by the Codex listener, so the sender's
-intent is not durable and different messages in the same inbox cannot request
-different levels.
+The original `/api/projects/{id}/messages...` routes remain a frozen closed v1
+compatibility boundary. New CLI consumers use the closed v2 envelope so durable
+delivery level and reply-obligation facts never change v1 in place.
 
 ```mermaid
 sequenceDiagram
@@ -80,7 +78,7 @@ sequenceDiagram
     Note over P,R: No message-created wake event exists
     alt live listen process
         loop every 2 seconds
-            R->>P: GET messages/listen
+            R->>P: GET v2 messages/listen
             P->>L: read after durable cursor
             L-->>P: eligible rows
             P-->>R: security-framed envelope
@@ -809,6 +807,9 @@ Simple-only managed sessions use the same path; steer-capable sessions must
 complete older simple work before later steer. This keeps the message ledger
 authoritative for FIFO, leases, requested/effective levels, fallback reasons,
 handoff time, and cursor acknowledgement. The harness drain response strips
-the decrypted target reference before crossing HTTP. Unmanaged steer
+the decrypted target reference before crossing HTTP. Its unversioned harness
+path is canonical for the harness-session protocol and intentionally returns
+the current closed v2 message envelope; it is not the frozen agent-message v1
+compatibility route. Unmanaged steer
 additionally requires the existing `codex` adapter and a `steer` target cap;
 CLI validation is only an early error, not the security boundary.
