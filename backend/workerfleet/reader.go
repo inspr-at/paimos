@@ -6,6 +6,7 @@ package workerfleet
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -437,9 +438,15 @@ func loadRecentCommunication(ctx context.Context, tx *sql.Tx, workers []Worker) 
 			agentIDs = append(agentIDs, worker.Agent.ID)
 		}
 	}
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(agentIDs)), ",")
+	encodedAgentIDs, err := json.Marshal(agentIDs)
+	if err != nil {
+		return err
+	}
 	query := `WITH selected_agents AS (
-	SELECT id,project_id FROM project_agents WHERE id IN (` + placeholders + `)
+	SELECT agent.id,agent.project_id
+	FROM project_agents agent
+	JOIN json_each(?) selected ON CAST(selected.value AS INTEGER)=agent.id
+	WHERE json_type(selected.value)='integer'
 ), associations AS (
 	SELECT selected.id AS agent_id,message.id AS message_row_id,'outgoing' AS direction
 	FROM selected_agents selected JOIN agent_messages message ON message.from_agent_id=selected.id
@@ -460,12 +467,7 @@ func loadRecentCommunication(ctx context.Context, tx *sql.Tx, workers []Worker) 
 )
 SELECT agent_id,message_id,delivery_id,direction,requested_level,effective_level,state,
  fallback_reason,last_error_code,strftime('%Y-%m-%dT%H:%M:%fZ',occurred_at),total_count FROM ranked WHERE item_rank<=? ORDER BY agent_id,item_rank`
-	args := make([]any, 0, len(agentIDs)+1)
-	for _, id := range agentIDs {
-		args = append(args, id)
-	}
-	args = append(args, RecentMessagesPerWorker)
-	rows, err := tx.QueryContext(ctx, query, args...)
+	rows, err := tx.QueryContext(ctx, query, string(encodedAgentIDs), RecentMessagesPerWorker)
 	if err != nil {
 		return err
 	}

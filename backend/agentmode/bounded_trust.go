@@ -6,9 +6,9 @@ package agentmode
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/backend/delivery"
@@ -54,9 +54,16 @@ func LoadBoundedTrust(ctx context.Context, database *sql.DB, tx *sql.Tx, issueID
 		return map[int64]BoundedTrustFact{}, nil
 	}
 
-	query := `SELECT id,project_id FROM issues WHERE deleted_at IS NULL AND id IN (` +
-		strings.TrimRight(strings.Repeat("?,", len(ordered)), ",") + `) ORDER BY id`
-	rows, err := tx.QueryContext(ctx, query, anyArgs(ordered)...)
+	encodedIDs, err := json.Marshal(ordered)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+SELECT issue.id,issue.project_id
+FROM issues issue
+JOIN json_each(?) selected ON CAST(selected.value AS INTEGER)=issue.id
+WHERE issue.deleted_at IS NULL AND json_type(selected.value)='integer'
+ORDER BY issue.id`, string(encodedIDs))
 	if err != nil {
 		return nil, err
 	}
