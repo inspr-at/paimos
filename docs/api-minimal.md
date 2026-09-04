@@ -398,6 +398,7 @@ GET  /projects/:id/message-deliveries  redacted outbox state (admin)
 POST /projects/:id/message-deliveries/:deliveryId/requeue (admin)
 GET  /v2/projects/:id/messages/:messageId
 GET  /issues/:id/messages              human-visible issue-anchored records (not comments)
+GET  /v2/issues/:id/messages           reply-aware human-visible issue records
 ```
 
 The POST sender is derived from `X-Paimos-Agent-Name`; unknown senders or
@@ -429,8 +430,9 @@ digested idempotency material, and never releases or mutates the held row.
 Exact retries return the first record; a changed outcome returns HTTP 409.
 The issue detail is the session-authenticated producer and labels the two
 decisions explicitly while retaining the held/not-delivered label and a
-persistent no-execution/no-delivery disclaimer. `GET /issues/:id/messages` returns only the content-free
-`human_resolution_outcome`; audit actor/session fields are not projected.
+persistent no-execution/no-delivery disclaimer. `GET /v2/issues/:id/messages`
+returns only the content-free `human_resolution_outcome`; the frozen v1 issue
+route omits it, and neither projection exposes audit actor/session fields.
 Listen and ack additionally require `X-Paimos-Agent-Name` to match the named
 addressee. Listen resumes from the greater of the supplied and durable cursor;
 acknowledgement is monotonic and rejects cursors that are not delivered rows in
@@ -828,6 +830,10 @@ Commands whose argument is explicitly another resource ID, plus
   canonical full-FIFO message-bus lease/completion for both simple and steer,
   preserving delivery fields. The legacy steer-named pair is a compatibility
   alias for steer-capable workers and also drains older simple work first.
+  Although these harness-session paths are unversioned, their drain response
+  was introduced after the frozen message v1 API and intentionally carries the
+  current closed v2 envelope; it is not a compatibility projection of
+  `/projects/{id}/messages`.
 - `POST .../{sessionID}/controls/{interrupt|stop}` ·
   `POST .../{sessionID}/controls/{controlID}/complete` — typed owned-process
   requests; no free-form command or PAI-809 action extension.

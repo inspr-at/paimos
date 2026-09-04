@@ -807,6 +807,9 @@ Simple-only managed sessions use the same path; steer-capable sessions must
 complete older simple work before later steer. This keeps the message ledger
 authoritative for FIFO, leases, requested/effective levels, fallback reasons,
 handoff time, and cursor acknowledgement. The harness drain response strips
-the decrypted target reference before crossing HTTP. Unmanaged steer
+the decrypted target reference before crossing HTTP. Its unversioned harness
+path is canonical for the harness-session protocol and intentionally returns
+the current closed v2 message envelope; it is not the frozen agent-message v1
+compatibility route. Unmanaged steer
 additionally requires the existing `codex` adapter and a `steer` target cap;
 CLI validation is only an early error, not the security boundary.

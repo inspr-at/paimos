@@ -159,6 +159,21 @@
         "required": ["to", "body"],
         "properties": {"to": {"type": "string"}, "issue_id": {"type": "integer"}, "reply_to": {"type": "string"}, "thread_id": {"type": "string"}, "body": {"type": "string"}, "metadata": {"type": "object"}, "is_action_request": {"type": "boolean"}, "expects_reply": {"type": "boolean", "default": false}, "delivery_level": {"enum": ["simple", "steer"]}}
       },
+      "AgentMessageHumanResolutionWrite": {
+        "type": "object", "additionalProperties": false,
+        "required": ["outcome"],
+        "properties": {"outcome": {"enum": ["resolved", "dismissed"]}}
+      },
+      "AgentMessageHumanResolution": {
+        "type": "object", "additionalProperties": false,
+        "description": "Immutable, value-free human disposition. It does not release, deliver, or mutate the held message.",
+        "required": ["resolution_id", "message_id", "outcome", "actor_user_id", "created_at"],
+        "properties": {
+          "resolution_id": {"type": "string"}, "message_id": {"type": "string"},
+          "outcome": {"enum": ["resolved", "dismissed"]}, "actor_user_id": {"type": "integer"},
+          "actor_session_id": {"type": "string"}, "created_at": {"type": "string"}
+        }
+      },
       "Error": {
         "type": "object",
         "required": [
@@ -5431,6 +5446,28 @@
     "/api/v2/issues/{id}/messages": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
       "get": {"tags": ["agents"], "summary": "List v2 issue-anchored agent messages", "description": "Session UI projection including reply-obligation and content-free human-disposition facts.", "responses": {"200": {"description": "Strict v2 envelopes", "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/AgentMessageV2"}}}}}}
+      }
+    },
+    "/api/projects/{id}/messages/{messageID}/resolution": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "messageID", "in": "path", "required": true, "schema": {"type": "string"}}
+      ],
+      "post": {
+        "tags": ["agents"],
+        "summary": "Record a human disposition for a held action request",
+        "description": "Session-authenticated human control only; API-key and agent-attributed callers are forbidden. The immutable outcome does not release, execute, deliver, or mutate the held row. An exact idempotency replay returns the original record, while a different outcome conflicts. Missing, foreign, and non-held message IDs share a concealed 404 response.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [{"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 128}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageHumanResolutionWrite"}}}},
+        "responses": {
+          "200": {"description": "Immutable disposition, including stable exact replay", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageHumanResolution"}}}},
+          "400": {"description": "Malformed request or missing idempotency key"},
+          "401": {"description": "No current authenticated principal"},
+          "403": {"description": "API-key, agent-attributed, or unauthorized caller"},
+          "404": {"description": "Concealed missing, foreign, unknown, or non-held message"},
+          "409": {"description": "Idempotency replay changed the recorded outcome"}
+        }
       }
     },
     "/api/projects/{id}/messages/delivery-unavailable": {
