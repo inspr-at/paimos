@@ -12718,6 +12718,164 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   AND (active.workspace_mode='exclusive' OR NEW.workspace_mode='exclusive'))
 			 BEGIN SELECT RAISE(ABORT,'active harness workspace ownership conflicts'); END`,
 		}},
+
+		// M172 is reserved by PAI-906's owned-workspace dispatch provenance.
+		// M173 / PAI-905: explicit reply obligations keep one mutable current
+		// state beside append-only lifecycle facts. Human decisions on held action
+		// requests are separate immutable facts and never release the held message.
+		{173, []string{
+			`ALTER TABLE agent_messages ADD COLUMN expects_reply INTEGER NOT NULL DEFAULT 0
+			 CHECK(expects_reply IN (0,1))`,
+			`CREATE TRIGGER trg_agent_messages_expects_reply_immutable BEFORE UPDATE OF expects_reply ON agent_messages
+			 BEGIN SELECT RAISE(ABORT,'message reply expectation is immutable'); END`,
+			`CREATE TABLE agent_reply_obligations (
+			 message_row_id            INTEGER PRIMARY KEY REFERENCES agent_messages(id) ON DELETE CASCADE,
+			 project_id                INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 sender_agent_id           INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 state                     TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open','closed')),
+			 closing_message_row_id    INTEGER UNIQUE REFERENCES agent_messages(id),
+			 resurface_count           INTEGER NOT NULL DEFAULT 0 CHECK(resurface_count>=0),
+			 next_attention_at         TEXT CHECK(` + sqlNullableControlTimestampCheck("next_attention_at") + `),
+			 opened_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("opened_at") + `),
+			 closed_at                 TEXT CHECK(` + sqlNullableControlTimestampCheck("closed_at") + `),
+			 CHECK((state='open' AND closing_message_row_id IS NULL AND closed_at IS NULL AND next_attention_at IS NOT NULL) OR
+			       (state='closed' AND closing_message_row_id IS NOT NULL AND closed_at IS NOT NULL AND next_attention_at IS NULL))
+			)`,
+			`CREATE INDEX idx_agent_reply_obligations_due
+			 ON agent_reply_obligations(state,next_attention_at,message_row_id)`,
+			`CREATE TRIGGER trg_agent_reply_obligation_insert_guard BEFORE INSERT ON agent_reply_obligations
+			 WHEN NOT EXISTS(SELECT 1 FROM agent_messages message JOIN project_agents sender ON sender.id=message.from_agent_id
+			  WHERE message.id=NEW.message_row_id AND message.expects_reply=1 AND sender.project_id=NEW.project_id
+			   AND sender.id=NEW.sender_agent_id)
+			 BEGIN SELECT RAISE(ABORT,'reply obligation does not match its message'); END`,
+			`CREATE TRIGGER trg_agent_reply_obligation_update_guard BEFORE UPDATE ON agent_reply_obligations
+			 WHEN OLD.state='closed' OR NEW.message_row_id<>OLD.message_row_id OR NEW.project_id<>OLD.project_id
+			  OR NEW.sender_agent_id<>OLD.sender_agent_id OR NEW.opened_at<>OLD.opened_at
+			  OR (NEW.state='closed' AND NOT EXISTS(SELECT 1 FROM agent_messages reply
+			      WHERE reply.id=NEW.closing_message_row_id AND reply.parent_message_id=OLD.message_row_id
+			       AND reply.reply_to=(SELECT message_id FROM agent_messages WHERE id=OLD.message_row_id)))
+			 BEGIN SELECT RAISE(ABORT,'reply obligation transition is invalid'); END`,
+			`CREATE TABLE agent_reply_obligation_events (
+			 id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+			 message_row_id         INTEGER NOT NULL REFERENCES agent_messages(id) ON DELETE CASCADE,
+			 event_sequence         INTEGER NOT NULL CHECK(event_sequence>=0),
+			 event_kind             TEXT NOT NULL CHECK(event_kind IN ('opened','resurfaced','closed')),
+			 related_message_row_id INTEGER REFERENCES agent_messages(id),
+			 occurred_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("occurred_at") + `),
+			 UNIQUE(message_row_id,event_sequence),
+			 CHECK((event_kind='closed')=(related_message_row_id IS NOT NULL))
+			)`,
+			`CREATE TRIGGER trg_agent_reply_obligation_events_no_update BEFORE UPDATE ON agent_reply_obligation_events
+			 BEGIN SELECT RAISE(ABORT,'reply obligation events are immutable'); END`,
+			`CREATE TRIGGER trg_agent_reply_obligation_events_no_delete BEFORE DELETE ON agent_reply_obligation_events
+			 WHEN EXISTS(SELECT 1 FROM agent_messages WHERE id=OLD.message_row_id)
+			 BEGIN SELECT RAISE(ABORT,'reply obligation events are immutable'); END`,
+			`CREATE TRIGGER trg_agent_reply_obligation_open_event AFTER INSERT ON agent_reply_obligations
+			 BEGIN INSERT INTO agent_reply_obligation_events(message_row_id,event_sequence,event_kind)
+			 VALUES(NEW.message_row_id,0,'opened'); END`,
+			`CREATE TRIGGER trg_agent_reply_obligation_close_event AFTER UPDATE OF state ON agent_reply_obligations
+			 WHEN OLD.state='open' AND NEW.state='closed'
+			 BEGIN INSERT INTO agent_reply_obligation_events(message_row_id,event_sequence,event_kind,related_message_row_id,occurred_at)
+			 VALUES(NEW.message_row_id,NEW.resurface_count+1,'closed',NEW.closing_message_row_id,NEW.closed_at); END`,
+			`CREATE TABLE agent_message_human_resolutions (
+			 resolution_id          TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("resolution_id") + `),
+			 message_row_id         INTEGER NOT NULL UNIQUE REFERENCES agent_messages(id) ON DELETE CASCADE,
+			 project_id             INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 outcome                TEXT NOT NULL CHECK(outcome IN ('resolved','dismissed')),
+			 actor_user_id          INTEGER NOT NULL REFERENCES users(id),
+			 actor_session_id       TEXT NOT NULL CHECK(length(CAST(actor_session_id AS BLOB)) BETWEEN 1 AND 64
+			  AND instr(actor_session_id,char(0))=0 AND instr(actor_session_id,char(10))=0 AND instr(actor_session_id,char(13))=0),
+			 instance               TEXT NOT NULL CHECK(length(CAST(instance AS BLOB)) BETWEEN 1 AND 64),
+			 idempotency_key_digest BLOB NOT NULL CHECK(length(idempotency_key_digest)=32),
+			 request_digest         BLOB NOT NULL CHECK(length(request_digest)=32),
+			 created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(instance,project_id,actor_user_id,idempotency_key_digest)
+			)`,
+			`CREATE INDEX idx_agent_message_human_resolutions_project
+			 ON agent_message_human_resolutions(project_id,created_at,message_row_id)`,
+			`CREATE TRIGGER trg_agent_message_human_resolution_insert_guard BEFORE INSERT ON agent_message_human_resolutions
+			 WHEN NOT EXISTS(SELECT 1 FROM agent_messages message JOIN project_agents receiver ON receiver.id=message.to_agent_id
+			  WHERE message.id=NEW.message_row_id AND receiver.project_id=NEW.project_id
+			   AND message.is_action_request=1 AND message.delivered=0)
+			 BEGIN SELECT RAISE(ABORT,'human resolution requires a held action request'); END`,
+			`CREATE TRIGGER trg_agent_message_human_resolutions_no_update BEFORE UPDATE ON agent_message_human_resolutions
+			 BEGIN SELECT RAISE(ABORT,'human message resolutions are immutable'); END`,
+			`CREATE TRIGGER trg_agent_message_human_resolutions_no_delete BEFORE DELETE ON agent_message_human_resolutions
+			 WHEN EXISTS(SELECT 1 FROM agent_messages WHERE id=OLD.message_row_id)
+			 BEGIN SELECT RAISE(ABORT,'human message resolutions are immutable'); END`,
+			`PRAGMA foreign_keys=OFF`,
+			`DROP TRIGGER trg_agent_attention_items_no_update`,
+			`DROP TRIGGER trg_agent_attention_items_no_delete`,
+			`DROP INDEX idx_agent_attention_items_receiver`,
+			`ALTER TABLE agent_attention_items RENAME TO agent_attention_items_m171`,
+			`CREATE TABLE agent_attention_items (
+			 id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+			 receiver_project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 receiver_project_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 address                   TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+			 source_project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 source_kind               TEXT NOT NULL CHECK(source_kind IN ('harness_session_event','agent_message_delivery','held_agent_message','harness_control','reply_obligation')),
+			 source_id                 TEXT NOT NULL CHECK(length(CAST(source_id AS BLOB)) BETWEEN 1 AND 64 AND source_id=trim(source_id)),
+			 source_sequence           INTEGER NOT NULL CHECK(source_sequence>=0),
+			 attention_kind            TEXT NOT NULL CHECK(attention_kind IN ('worker_unknown','worker_dead','assignment_turn_ended','delivery_failed','held_action','control_rejected','reply_overdue')),
+			 reason_code               TEXT NOT NULL CHECK(reason_code IN ('heartbeat_stale','stale_evidence','malformed_evidence','process_exited','process_failed','ownership_lost','stopped','turn_completed_open_assignment','target_blocked','delivery_dead','action_request_held','control_rejected','reply_expected')),
+			 occurred_at               TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("occurred_at") + `),
+			 created_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(receiver_project_agent_id,source_kind,source_id,source_sequence,attention_kind,reason_code)
+			)`,
+			`INSERT INTO agent_attention_items(id,receiver_project_id,receiver_project_agent_id,address,source_project_id,
+			 source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at,created_at)
+			 SELECT id,receiver_project_id,receiver_project_agent_id,address,source_project_id,
+			 source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at,created_at
+			 FROM agent_attention_items_m171`,
+			`DROP TABLE agent_attention_items_m171`,
+			`CREATE INDEX idx_agent_attention_items_receiver
+			 ON agent_attention_items(receiver_project_id,receiver_project_agent_id,id)`,
+			`CREATE TRIGGER trg_agent_attention_items_no_update BEFORE UPDATE ON agent_attention_items
+			 BEGIN SELECT RAISE(ABORT,'agent attention items are immutable'); END`,
+			`CREATE TRIGGER trg_agent_attention_items_no_delete BEFORE DELETE ON agent_attention_items
+			 WHEN EXISTS(SELECT 1 FROM projects WHERE id=OLD.receiver_project_id)
+			  AND EXISTS(SELECT 1 FROM project_agents WHERE id=OLD.receiver_project_agent_id)
+			  AND EXISTS(SELECT 1 FROM projects WHERE id=OLD.source_project_id)
+			 BEGIN SELECT RAISE(ABORT,'agent attention items are immutable'); END`,
+			`DROP INDEX idx_agent_attention_batches_open`,
+			`DROP INDEX idx_agent_attention_batches_cursor`,
+			`ALTER TABLE agent_attention_batches RENAME TO agent_attention_batches_m171`,
+			`CREATE TABLE agent_attention_batches (
+			 batch_id                  TEXT PRIMARY KEY CHECK(` + sqlUUIDCheck("batch_id") + `),
+			 receiver_project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 receiver_project_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 address                   TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+			 from_cursor               INTEGER NOT NULL CHECK(from_cursor>=0),
+			 to_cursor                 INTEGER NOT NULL CHECK(to_cursor>from_cursor),
+			 item_count                INTEGER NOT NULL CHECK(item_count BETWEEN 1 AND 32),
+			 state                     TEXT NOT NULL CHECK(state IN ('pending','leased','blocked','handed_off','superseded')),
+			 target_id                 TEXT REFERENCES agent_message_targets(id),
+			 worker_adapter            TEXT NOT NULL DEFAULT '' CHECK(length(CAST(worker_adapter AS BLOB))<=64),
+			 blocked_reason            TEXT NOT NULL DEFAULT '' CHECK(blocked_reason IN ('','target_missing','capability_missing')),
+			 lease_until               TEXT CHECK(` + sqlNullableControlTimestampCheck("lease_until") + `),
+			 handed_off_at             TEXT CHECK(` + sqlNullableControlTimestampCheck("handed_off_at") + `),
+			 superseded_at             TEXT CHECK(` + sqlNullableControlTimestampCheck("superseded_at") + `),
+			 created_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 updated_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("updated_at") + `),
+			 CHECK((state='blocked')=(blocked_reason<>'')),
+			 CHECK((state='handed_off')=(handed_off_at IS NOT NULL)),
+			 CHECK((state='superseded')=(superseded_at IS NOT NULL)),
+			 CHECK(state<>'leased' OR (target_id IS NOT NULL AND worker_adapter<>'' AND lease_until IS NOT NULL))
+			)`,
+			`INSERT INTO agent_attention_batches(batch_id,receiver_project_id,receiver_project_agent_id,address,
+			 from_cursor,to_cursor,item_count,state,target_id,worker_adapter,blocked_reason,lease_until,handed_off_at,
+			 created_at,updated_at)
+			 SELECT batch_id,receiver_project_id,receiver_project_agent_id,address,from_cursor,to_cursor,item_count,state,
+			 target_id,worker_adapter,blocked_reason,lease_until,handed_off_at,created_at,updated_at
+			 FROM agent_attention_batches_m171`,
+			`DROP TABLE agent_attention_batches_m171`,
+			`CREATE UNIQUE INDEX idx_agent_attention_batches_open
+			 ON agent_attention_batches(receiver_project_agent_id) WHERE state IN ('pending','leased','blocked')`,
+			`CREATE INDEX idx_agent_attention_batches_cursor
+			 ON agent_attention_batches(receiver_project_id,receiver_project_agent_id,to_cursor)`,
+			`PRAGMA foreign_keys=ON`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -12965,6 +13123,25 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			"idx_harness_sessions_active_workspace", "trg_harness_sessions_provenance_shape_insert",
 			"trg_harness_sessions_provenance_immutable", "trg_harness_sessions_workspace_collision_insert",
 			"trg_harness_sessions_workspace_collision_activate",
+		})
+	},
+	173: func(ctx context.Context, conn *sql.Conn) error {
+		var columns int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('agent_messages')
+			WHERE name='expects_reply'`).Scan(&columns); err != nil {
+			return fmt.Errorf("inspect M173 message reply expectation: %w", err)
+		}
+		if columns != 0 {
+			return fmt.Errorf("M173 schema is partially present or locally incompatible: agent_messages.expects_reply")
+		}
+		return checkSchemaObjectsAbsent(ctx, conn, 173, []string{
+			"trg_agent_messages_expects_reply_immutable", "agent_reply_obligations", "idx_agent_reply_obligations_due",
+			"trg_agent_reply_obligation_insert_guard", "trg_agent_reply_obligation_update_guard",
+			"agent_reply_obligation_events", "trg_agent_reply_obligation_events_no_update",
+			"trg_agent_reply_obligation_events_no_delete", "trg_agent_reply_obligation_open_event",
+			"trg_agent_reply_obligation_close_event", "agent_message_human_resolutions",
+			"idx_agent_message_human_resolutions_project", "trg_agent_message_human_resolution_insert_guard",
+			"trg_agent_message_human_resolutions_no_update", "trg_agent_message_human_resolutions_no_delete",
 		})
 	},
 }

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ import (
 // messaging. The numeric PAI-817 storage API is intentionally not public.
 func RegisterAgentMessageRoutes(r chi.Router) {
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages", sendAgentMessage)
+	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/{messageID}/resolution", resolveHeldAgentMessage)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/messages/listen", listenAgentMessages)
 	// Attention is an orchestrator portfolio feed derived across projects. The
 	// agent attribution header selects an inbox but never grants authority.
@@ -66,7 +68,12 @@ type sendEnvelopeRequest struct {
 	Body            string         `json:"body"`
 	Metadata        map[string]any `json:"metadata"`
 	IsActionRequest bool           `json:"is_action_request"`
+	ExpectsReply    bool           `json:"expects_reply"`
 	DeliveryLevel   string         `json:"delivery_level"`
+}
+
+type resolveHeldMessageRequest struct {
+	Outcome string `json:"outcome"`
 }
 
 type completeDeliveryRequest struct {
@@ -137,6 +144,7 @@ func sendAgentMessage(w http.ResponseWriter, r *http.Request) {
 		ProjectID: projectID, Sender: sender, SessionID: sessionID, To: req.To,
 		IssueID: req.IssueID, ReplyTo: strings.TrimSpace(req.ReplyTo), ThreadID: strings.TrimSpace(req.ThreadID),
 		Body: req.Body, Metadata: req.Metadata, ActionRequest: req.IsActionRequest,
+		ExpectsReply:  req.ExpectsReply,
 		DeliveryLevel: req.DeliveryLevel, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
@@ -146,6 +154,60 @@ func sendAgentMessage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(msg)
+}
+
+func resolveHeldAgentMessage(w http.ResponseWriter, r *http.Request) {
+	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonError(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	if agent, _ := readAgentAttribution(r); agent != nil {
+		messageProblem(w, r, "agent_message_resolution_human_required", "agent attribution cannot author a human resolution", http.StatusForbidden)
+		return
+	}
+	var req resolveHeldMessageRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		messageProblem(w, r, "agent_message_resolution_request_invalid", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := dec.Decode(&json.RawMessage{}); !errors.Is(err, io.EOF) {
+		messageProblem(w, r, "agent_message_resolution_request_invalid", "request body must contain exactly one JSON object", http.StatusBadRequest)
+		return
+	}
+	values := r.Header.Values("Idempotency-Key")
+	if len(values) != 1 || strings.TrimSpace(values[0]) == "" {
+		messageProblem(w, r, "agent_message_resolution_idempotency_required", "exactly one non-empty Idempotency-Key header is required", http.StatusBadRequest)
+		return
+	}
+	resolution, err := agentmessage.NewService(db.DB).ResolveHeldMessage(r.Context(), agentmessage.ResolveHeldMessageInput{
+		ProjectID: projectID, MessageID: strings.TrimSpace(chi.URLParam(r, "messageID")), Outcome: req.Outcome,
+		IdempotencyKey: values[0], Authority: humanMessageResolutionAuthority(r, projectID),
+	})
+	if err != nil {
+		writeAgentMessageError(w, r, err)
+		return
+	}
+	jsonOK(w, resolution)
+}
+
+func humanMessageResolutionAuthority(r *http.Request, projectID int64) agentmessage.HumanResolutionAuthority {
+	return func(ctx context.Context, tx *sql.Tx) (int64, string, error) {
+		user, principal, err := auth.ReauthorizeRequestPrincipalTx(ctx, tx, r, time.Now().UTC())
+		if err != nil || user == nil {
+			return 0, "", &agentmessage.CodedError{Code: "agent_message_unauthorized", Err: errors.New("current request credential is unavailable")}
+		}
+		allowed, err := canEditProjectTx(ctx, tx, user, projectID)
+		if err != nil {
+			return 0, "", err
+		}
+		if !allowed {
+			return 0, "", &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("current project edit authority is required")}
+		}
+		return principal.ActorUserID(), string(principal.Kind()) + ":" + principal.SafeCredentialID(), nil
+	}
 }
 
 func completeAgentMessageDelivery(w http.ResponseWriter, r *http.Request) {
@@ -541,7 +603,7 @@ func writeAgentMessageError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.As(err, &coded) {
 		code = coded.Code
 		switch code {
-		case "agent_message_idempotency_conflict":
+		case "agent_message_idempotency_conflict", "agent_message_resolution_idempotency_conflict", "agent_message_resolution_conflict":
 			status = http.StatusConflict
 		case "agent_message_unauthorized", "agent_attention_unauthorized":
 			status = http.StatusUnauthorized

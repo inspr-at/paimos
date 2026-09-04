@@ -159,6 +159,7 @@ POST /api/projects/:projectID/messages
   "issue_id": 123,
   "reply_to": "019...",
   "is_action_request": true,
+  "expects_reply": false,
   "body": "Message content"
 }
 ```
@@ -187,6 +188,36 @@ POST /api/projects/:projectID/message-allowlist
 
 The allowlist mutation is an operator control plane. Held rows remain visible
 through project/issue inspection and are never returned by listen.
+
+### Reply obligations and held-action disposition
+
+`expects_reply` is opt-in. Omitting it preserves the existing fire-and-forget
+default. An opted-in message and its single open obligation commit atomically.
+Neither durable inbox acknowledgement nor vendor handoff is a reply. Closure
+requires a separately committed message from the addressed counterpart with
+the original message's exact durable ID in `reply_to`; unrelated thread
+activity cannot satisfy it.
+
+Open obligations resurface only through bounded, content-free orchestrator
+attention records. The schedule backs off to a fixed maximum, and a close
+transition removes old immutable attention facts from the actionable view
+without rewriting their history. The message's project and sender identity
+remain authoritative; no PAI-903 parent/session relationship is inferred.
+
+A held action request may instead receive a human audit disposition:
+
+```text
+POST /api/projects/:projectID/messages/:messageID/resolution
+Idempotency-Key: <opaque retry key>
+{"outcome":"resolved"}  // or "dismissed"
+```
+
+This route requires an authenticated project editor and rejects agent
+attribution. It appends one immutable, value-free record containing only the
+message/project IDs, outcome, current user/session attribution, instance, and
+digests. It never changes `delivered`, the held reason, or message content.
+The same key and outcome replay the original record; changing the outcome or
+attempting a second disposition conflicts.
 
 ## Usage Example
 

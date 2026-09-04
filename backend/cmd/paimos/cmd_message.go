@@ -31,6 +31,7 @@ type messageEnvelope struct {
 	Delivered        bool                 `json:"delivered"`
 	HeldReason       string               `json:"held_reason,omitempty"`
 	IsActionRequest  bool                 `json:"is_action_request"`
+	ExpectsReply     bool                 `json:"expects_reply"`
 	CreatedAt        string               `json:"created_at"`
 	ReadAt           string               `json:"read_at,omitempty"`
 	DeliveryLevel    string               `json:"delivery_level"`
@@ -59,7 +60,7 @@ type messageDeliveryWork struct {
 // tellCmd writes one durable, session-attributed ledger row.
 func tellCmd() *cobra.Command {
 	var projectRef, ticketRef, replyTo, threadID, message, messageFile, level string
-	var actionRequest bool
+	var actionRequest, expectsReply bool
 	c := &cobra.Command{
 		Use: "tell <harness>:<agent>", Short: "Send a durable message to a registered project agent",
 		Args: cobra.ExactArgs(1),
@@ -98,6 +99,9 @@ func tellCmd() *cobra.Command {
 			if actionRequest {
 				payload["is_action_request"] = true
 			}
+			if expectsReply {
+				payload["expects_reply"] = true
+			}
 			if issueID != nil {
 				payload["issue_id"] = *issueID
 			}
@@ -135,12 +139,69 @@ func tellCmd() *cobra.Command {
 	c.Flags().StringVar(&messageFile, "message-file", "", "read message body from file, or - for stdin")
 	c.Flags().StringVar(&level, "level", "simple", "delivery level: simple or steer")
 	c.Flags().BoolVar(&actionRequest, "action-request", false, "mark as a human-gated action request; never deliver to an agent inbox")
+	c.Flags().BoolVar(&expectsReply, "expects-reply", false, "create a durable reply obligation closed only by --reply-to")
 	return c
 }
 
 func messageCmd() *cobra.Command {
 	c := &cobra.Command{Use: "message", Short: "Read the durable agent message ledger"}
-	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd(), messageTargetCmd(), messageDeliveryCmd())
+	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd(), messageResolveCmd(), messageTargetCmd(), messageDeliveryCmd())
+	return c
+}
+
+func messageResolveCmd() *cobra.Command {
+	var projectRef, outcome, idempotencyKey string
+	c := &cobra.Command{
+		Use:   "resolve <message-id>",
+		Short: "Record a human resolution for a held action request",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			outcome = strings.ToLower(strings.TrimSpace(outcome))
+			if strings.TrimSpace(projectRef) == "" {
+				return &usageError{msg: "--project is required"}
+			}
+			if outcome != "resolved" && outcome != "dismissed" {
+				return &usageError{msg: "--outcome must be resolved or dismissed"}
+			}
+			if strings.TrimSpace(idempotencyKey) == "" || len([]byte(idempotencyKey)) > 128 {
+				return &usageError{msg: "--idempotency-key must be 1 to 128 UTF-8 bytes"}
+			}
+			if agent, _ := resolveAgentAttribution(); agent != "" {
+				return &usageError{msg: "human resolution refuses agent attribution; unset --agent-name and PAIMOS_AGENT_NAME"}
+			}
+			client, err := instanceClient()
+			if err != nil {
+				return err
+			}
+			projectID, err := resolveProjectRefToID(client, projectRef)
+			if err != nil {
+				return reportError(err)
+			}
+			raw, err := client.doForHarnessContextWithIdempotency(cmd.Context(), "POST",
+				fmt.Sprintf("/api/projects/%d/messages/%s/resolution", projectID, url.PathEscape(strings.TrimSpace(args[0]))),
+				map[string]string{"outcome": outcome}, "", "", idempotencyKey)
+			if err != nil {
+				return reportError(err)
+			}
+			if flagJSON {
+				fmt.Fprintln(stdout, strings.TrimSpace(string(raw)))
+				return nil
+			}
+			var result struct {
+				ResolutionID string `json:"resolution_id"`
+				MessageID    string `json:"message_id"`
+				Outcome      string `json:"outcome"`
+			}
+			if err := json.Unmarshal(raw, &result); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "✓ held action %s %s\nresolution: %s\n", result.MessageID, result.Outcome, result.ResolutionID)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&projectRef, "project", "", "project key or numeric id (required)")
+	c.Flags().StringVar(&outcome, "outcome", "", "human outcome: resolved or dismissed")
+	c.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "stable retry key (required; never printed)")
 	return c
 }
 

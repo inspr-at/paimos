@@ -95,6 +95,93 @@ func TestTellPersistsRequestedDeliveryLevel(t *testing.T) {
 	}
 }
 
+func TestTellExpectsReplyIsExplicitAndDoesNotChangeDefault(t *testing.T) {
+	var payloads []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
+			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI","name":"PAIMOS"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/6/messages":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			payloads = append(payloads, payload)
+			_, _ = w.Write([]byte(`{"message_id":"m1","thread_id":"m1","delivered":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	if _, _, err := executeCLIForTest(t, "--json", "tell", "codex:reviewer", "--project", "PAI", "--message", "routine"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := executeCLIForTest(t, "--json", "tell", "codex:reviewer", "--project", "PAI", "--message", "answer", "--expects-reply"); err != nil {
+		t.Fatal(err)
+	}
+	if len(payloads) != 2 {
+		t.Fatalf("payload count=%d", len(payloads))
+	}
+	if _, exists := payloads[0]["expects_reply"]; exists {
+		t.Fatalf("ordinary tell changed its wire default: %#v", payloads[0])
+	}
+	if expected, ok := payloads[1]["expects_reply"].(bool); !ok || !expected {
+		t.Fatalf("explicit reply expectation missing: %#v", payloads[1])
+	}
+}
+
+func TestMessageResolveCarriesHumanIdempotencyWithoutPrintingIt(t *testing.T) {
+	const retryKey = "resolution-retry-secret"
+	var payload map[string]any
+	var idempotency, agentHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
+			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI","name":"PAIMOS"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/6/messages/message-1/resolution":
+			idempotency = r.Header.Get("Idempotency-Key")
+			agentHeader = r.Header.Get("X-Paimos-Agent-Name")
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = w.Write([]byte(`{"resolution_id":"resolution-1","message_id":"message-1","outcome":"dismissed"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+	t.Setenv("PAIMOS_AGENT_NAME", "")
+
+	out, errOut, err := executeCLIForTest(t, "message", "resolve", "message-1", "--project", "PAI",
+		"--outcome", "dismissed", "--idempotency-key", retryKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idempotency != retryKey || agentHeader != "" || payload["outcome"] != "dismissed" {
+		t.Fatalf("headers/payload idempotency=%q agent=%q payload=%#v", idempotency, agentHeader, payload)
+	}
+	if strings.Contains(out, retryKey) || strings.Contains(errOut, retryKey) {
+		t.Fatalf("idempotency key leaked in output stdout=%q stderr=%q", out, errOut)
+	}
+}
+
+func TestMessageResolveRefusesAgentAttributionBeforeNetwork(t *testing.T) {
+	t.Setenv("PAIMOS_AGENT_NAME", "worker")
+	command := messageResolveCmd()
+	command.SetArgs([]string{"message-1", "--project", "PAI", "--outcome", "resolved", "--idempotency-key", "key"})
+	err := command.Execute()
+	if err == nil || !strings.Contains(err.Error(), "human resolution refuses agent attribution") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestWebhookTargetRefMustNotEnterProcessArguments(t *testing.T) {
 	command := messageTargetSetCmd()
 	command.SetArgs([]string{

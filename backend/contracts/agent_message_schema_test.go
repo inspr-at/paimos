@@ -21,6 +21,25 @@ func TestAgentMessageV1SchemaIsValidAndClosed(t *testing.T) {
 	}
 }
 
+func TestAgentMessageV1SchemaRequiresReplyExpectationFact(t *testing.T) {
+	raw, err := os.ReadFile("agent-message-v1.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(schema.Required, "expects_reply") || schema.Properties["expects_reply"].Type != "boolean" {
+		t.Fatalf("expects_reply contract is not required boolean: required=%v property=%#v", schema.Required, schema.Properties["expects_reply"])
+	}
+}
+
 func TestAgentMessageDeliveryWorkSchemaAcceptsReachableTargetMissing(t *testing.T) {
 	raw, err := os.ReadFile("agent-message-v1.schema.json")
 	if err != nil {

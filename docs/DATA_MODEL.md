@@ -481,7 +481,7 @@ Both: UNIQUE on `(project_id, name)`; ordering index on `(project_id, sort_order
 inventory and is reused as-is; the canonical agent-artifact endpoint
 inlines all three.
 
-### Durable agent message ledger and bus (M151–M157 — PAI-817, PAI-815, PAI-816, PAI-826, PAI-827, PAI-828, PAI-829)
+### Durable agent message ledger and bus (M151–M173 — PAI-817, PAI-815, PAI-816, PAI-826, PAI-827, PAI-828, PAI-829, PAI-905)
 
 `agent_messages` stores the M151 security fields (`from_agent_id`,
 `to_agent_id`, optional `issue_id`, parent, hop, body, held/delivered state)
@@ -507,6 +507,23 @@ updated_at)`. One row per project/address records the last acknowledged
 delivered message. Acknowledgements are monotonic, must name a real delivered
 non-action row in the attributed inbox, and mark only covered rows read; a
 caller cannot acknowledge an arbitrary future cursor.
+
+M173 adds immutable `agent_messages.expects_reply` with a default of false,
+an authoritative one-row-per-message `agent_reply_obligations` projection,
+and append-only `agent_reply_obligation_events`. Creation shares the message
+transaction. Only an exact counterpart `reply_to` transition closes the
+obligation; delivery and acknowledgement do not. Due generations append
+bounded `reply_overdue` attention items with capped backoff. Closed obligations
+remain in history but are filtered from the actionable view, and an otherwise
+empty open batch becomes terminal `superseded` rather than falsely
+`handed_off`.
+
+M173 also adds append-only `agent_message_human_resolutions` for human
+`resolved|dismissed` outcomes on held action requests. The record stores only
+value-free current user/session attribution and digested idempotency/request
+material. The original held message is never released or rewritten. Session
+home and the PAI-902 attention projection anti-join the resolution so current
+state changes immediately while immutable message/attention history remains.
 
 M154 adds immutable `delivery_level` (`simple|steer`), fixed
 `delivery_fallback='simple'`, and nullable primary/fallback target-version IDs
@@ -641,6 +658,7 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M155 | rebuilt `agent_message_targets` | Adds the `claude_resume` and `claude_channel` adapters with `claude_session` targets while carrying every existing version and ciphertext over; Claude targets are fixed to `maximum_level='simple'` (PAI-827). |
 | M156 | rebuilt `agent_message_targets` | Replaces schema-level vendor allowlists and pairings with bounded lowercase harness plugin keys while preserving all target rows, ciphertext, enabled state, indexes, and foreign-key references; plugin binding and capability validation remain in Go (PAI-829). |
 | M157 | `agent_message_targets.target_secret_cipher` | Nullable, domain-separated ciphertext for the receiver-owned sender secret a server-side webhook adapter sends as `Authorization: Bearer` (Grok Bot routine sender key); existing rows keep `NULL`, and a version without it is never dispatched (PAI-828). |
+| M173 | `agent_messages.expects_reply`, `agent_reply_obligations`, `agent_reply_obligation_events`, `agent_message_human_resolutions`; rebuilt attention items/batches | Opt-in exact-reply closure, bounded overdue resurfacing, value-free idempotent human disposition of held action requests, and immutable-history/current-state separation (PAI-905). |
 
 `agent_runs.status=completed` means implementation finished without a configured
 test command; it never implies tests passed. `tests_passed` and `tests_failed`

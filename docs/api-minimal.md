@@ -381,10 +381,11 @@ PATCH  /runs/:id                       lifecycle/report compare-and-set
 Durable A2A messages use registered names rather than numeric agent IDs:
 
 ```
-POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_id?, metadata?, is_action_request?, delivery_level?: "simple"|"steer" }
+POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_id?, metadata?, is_action_request?, expects_reply?, delivery_level?: "simple"|"steer" }
 GET  /projects/:id/messages            ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
 GET  /projects/:id/messages/listen     ?to=<address>&after=<cursor>&limit=<n>
 POST /projects/:id/messages/ack        { to, cursor }
+POST /projects/:id/messages/:messageId/resolution { outcome: "resolved"|"dismissed" } plus one Idempotency-Key (human session only)
 GET  /projects/:id/attention/listen    ?to=<address>&after=<cursor>&limit=<n>&delivery=<local-adapter> (super-admin orchestrator portfolio)
 POST /projects/:id/attention/ack       { to, cursor, batch_id? } (super-admin orchestrator portfolio)
 POST /projects/:id/messages/delivery-complete { to, cursor, delivery_id, effective_level, fallback_reason }
@@ -407,6 +408,18 @@ and wrapped with the untrusted-message preamble. The v1 envelope schema is
 Explicit `is_action_request=true` rows are stored as held for human inspection
 and never enter listen; conservative prose detection is a fallback, not a
 replacement for the typed marker.
+Explicit `expects_reply=true` is separate from action gating and leaves the
+ordinary send default unchanged. It creates one durable obligation in the
+same transaction as the message. Only a newly committed counterpart reply
+whose exact `reply_to` names that message closes it; inbox acknowledgement,
+delivery handoff, and delivery acknowledgement do not. Due obligations enter
+the configured orchestrator's bounded attention feed with capped backoff and
+stop being actionable immediately after closure.
+The resolution endpoint records an immutable `resolved` or `dismissed` audit
+fact for an already-held action request. It requires project-edit authority,
+refuses agent attribution, stores value-free user/session attribution and
+digested idempotency material, and never releases or mutates the held row.
+Exact retries return the first record; a changed outcome returns HTTP 409.
 Listen and ack additionally require `X-Paimos-Agent-Name` to match the named
 addressee. Listen resumes from the greater of the supplied and durable cursor;
 acknowledgement is monotonic and rejects cursors that are not delivered rows in

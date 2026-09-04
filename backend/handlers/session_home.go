@@ -309,7 +309,8 @@ func loadSessionHomeInbox(ctx context.Context, tx *sql.Tx, projectID, agentID in
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN am.is_action_request=1 THEN 1 ELSE 0 END),0)
 		FROM agent_messages am
 		JOIN project_agents receiver ON receiver.id=am.to_agent_id AND receiver.project_id=?
-		WHERE am.to_agent_id=? AND am.delivered=0`, projectID, agentID).
+		WHERE am.to_agent_id=? AND am.delivered=0
+		AND NOT EXISTS(SELECT 1 FROM agent_message_human_resolutions resolution WHERE resolution.message_row_id=am.id)`, projectID, agentID).
 		Scan(&item.Attention.ExceptionCount, &item.Attention.ActionRequestCount); err != nil {
 		return err
 	}

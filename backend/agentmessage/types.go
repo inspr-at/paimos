@@ -74,6 +74,7 @@ type Envelope struct {
 	Delivered        bool                    `json:"delivered"`
 	HeldReason       string                  `json:"held_reason,omitempty"`
 	IsActionRequest  bool                    `json:"is_action_request"`
+	ExpectsReply     bool                    `json:"expects_reply"`
 	CreatedAt        string                  `json:"created_at"`
 	ReadAt           string                  `json:"read_at,omitempty"`
 	DeliveryLevel    string                  `json:"delivery_level"`
@@ -140,6 +141,17 @@ type Message struct {
 	HeldReason      string
 	CreatedAt       time.Time
 	DeliveredAt     *time.Time
+}
+
+// HumanResolution is an immutable, content-free operator decision on one
+// held action request. It never changes or releases the original message.
+type HumanResolution struct {
+	ResolutionID   string `json:"resolution_id"`
+	MessageID      string `json:"message_id"`
+	Outcome        string `json:"outcome"`
+	ActorUserID    int64  `json:"actor_user_id"`
+	ActorSessionID string `json:"actor_session_id,omitempty"`
+	CreatedAt      string `json:"created_at"`
 }
 
 // AllowlistEntry represents authorization for sender→receiver communication.
