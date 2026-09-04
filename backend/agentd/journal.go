@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"github.com/inspr-at/paimos/backend/localjournal"
 )
 
@@ -88,6 +89,39 @@ func validateRegistryRecord(record registryRecord) error {
 	if s.TicketID < 0 {
 		return errors.New("invalid agentd ticket id")
 	}
+	if s.WorkspaceProvenance.Identity == "" {
+		if s.DispatchProfile != nil || s.AccountLabel != "" && s.AccountLabel != "unknown" {
+			return errors.New("invalid legacy agentd execution provenance")
+		}
+	} else {
+		workspace := s.WorkspaceProvenance
+		if workspace.CanonicalPath != s.Workspace || !filepath.IsAbs(workspace.CanonicalPath) || filepath.Clean(workspace.CanonicalPath) != workspace.CanonicalPath ||
+			len(workspace.Identity) != 64 || !validSafeLabel(workspace.Identity, 64) ||
+			(workspace.Mode != WorkspaceExclusive && workspace.Mode != WorkspaceShared) {
+			return errors.New("invalid agentd workspace provenance")
+		}
+		switch workspace.Kind {
+		case WorkspaceDirectory:
+			if workspace.GitTopLevel != "" || workspace.GitBranch != "" {
+				return errors.New("invalid directory workspace provenance")
+			}
+		case WorkspacePrimary, WorkspaceWorktree:
+			if !filepath.IsAbs(workspace.GitTopLevel) || filepath.Clean(workspace.GitTopLevel) != workspace.GitTopLevel || workspace.GitBranch == "" || strings.ContainsAny(workspace.GitBranch, "\x00\r\n") {
+				return errors.New("invalid Git workspace provenance")
+			}
+		default:
+			return errors.New("invalid agentd workspace kind")
+		}
+		if s.DispatchProfile != nil {
+			profile := *s.DispatchProfile
+			if dispatchprofile.ValidateSnapshot(profile) != nil || profile.Harness != s.Adapter || profile.WorkspaceMode != workspace.Mode {
+				return errors.New("invalid agentd dispatch profile")
+			}
+		}
+		if !validAccountLabel(s.AccountLabel) {
+			return errors.New("invalid agentd account provenance")
+		}
+	}
 	switch s.State {
 	case StateStarting, StateRunning, StateStopping, StateStopped, StateExited, StateFailed, StateOwnershipLost:
 	default:
@@ -117,7 +151,9 @@ func validateRegistryRecord(record registryRecord) error {
 	if s.Reporter.RemoteClosed && (s.Reporter.PublicSessionID == "" || s.Reporter.Pending != nil) {
 		return errors.New("invalid remote-closed agentd reporter state")
 	}
-	if s.Reporter.Closed && !s.Reporter.RemoteClosed {
+	locallyRejected := s.Reporter.Closed && !s.Reporter.RemoteClosed && s.Reporter.PublicSessionID == "" &&
+		s.State == StateFailed && s.LastErrorCode == ErrorWorkspaceConflict
+	if s.Reporter.Closed && !s.Reporter.RemoteClosed && !locallyRejected {
 		return errors.New("invalid closed agentd reporter state")
 	}
 	return nil
@@ -148,14 +184,21 @@ func (j *registryJournal) recovered() []Session {
 	now := time.Now().UTC()
 	for _, record := range records {
 		s := record.Session
+		if s.AccountLabel == "" {
+			s.AccountLabel = "unknown"
+		}
+		locallyRejected := s.Reporter.Closed && !s.Reporter.RemoteClosed && s.Reporter.PublicSessionID == "" &&
+			s.State == StateFailed && s.LastErrorCode == ErrorWorkspaceConflict
 		// A durable row or formerly observed PID cannot prove ownership after a
 		// daemon restart. Preserve history, but make every control fail closed.
-		s.State = StateOwnershipLost
+		if !locallyRejected {
+			s.State = StateOwnershipLost
+			s.LastErrorCode = ErrorOwnershipLost
+		}
 		s.PID = 0
 		s.Steerable = false
 		s.Capabilities = []Capability{CapabilityInbox, CapabilityStatus}
 		s.HeartbeatAt = now
-		s.LastErrorCode = ErrorOwnershipLost
 		out = append(out, s)
 	}
 	return out

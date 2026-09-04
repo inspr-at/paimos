@@ -1815,17 +1815,43 @@
           "interrupt": {"type": "boolean"}, "stop": {"type": "boolean"}
         }
       },
+	  "HarnessWorkspaceProvenance": {
+		"type": "object", "additionalProperties": false,
+		"required": ["canonical_path", "identity", "kind", "mode"],
+		"description": "Immutable authenticated-reporter workspace provenance. Git fields are present only for a Git primary checkout or linked worktree.",
+		"properties": {
+		  "canonical_path": {"type": "string"}, "git_top_level": {"type": "string"}, "git_branch": {"type": "string"},
+		  "identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+		  "kind": {"type": "string", "enum": ["directory", "git_primary", "git_worktree"]},
+		  "mode": {"type": "string", "enum": ["exclusive", "shared"]}
+		}
+	  },
+	  "HarnessDispatchProfile": {
+		"type": "object", "additionalProperties": false,
+		"required": ["id", "version", "harness", "model", "effort", "machine_source", "account_source", "workspace_mode"],
+		"description": "Exact immutable profile resolved through the execution-options authority before process spawn.",
+		"properties": {
+		  "id": {"type": "string"}, "version": {"type": "string"}, "harness": {"type": "string", "enum": ["codex", "claude"]},
+		  "model": {"type": "string"}, "effort": {"type": "string"},
+		  "machine_source": {"type": "string", "enum": ["authenticated_reporter"]},
+		  "account_source": {"type": "string", "enum": ["local_probe"]},
+		  "workspace_mode": {"type": "string", "enum": ["exclusive"]}
+		}
+	  },
       "HarnessSession": {
         "type": "object", "additionalProperties": false,
-        "required": ["id", "project_id", "project_agent_id", "agent_name", "harness", "host", "management_mode", "role", "parent_harness_session_id", "ticket_id", "steer_mode", "advertised_capabilities", "phase", "activity_state", "activity_reason", "activity_age_seconds", "activity_sequence", "yield_sequence", "revision", "created_at", "updated_at"],
+		"required": ["id", "project_id", "project_agent_id", "agent_name", "harness", "host", "machine_id", "management_mode", "role", "parent_harness_session_id", "ticket_id", "workspace_provenance", "dispatch_profile", "account_label", "steer_mode", "advertised_capabilities", "phase", "activity_state", "activity_reason", "activity_age_seconds", "activity_sequence", "yield_sequence", "revision", "created_at", "updated_at"],
         "description": "Non-secret durable harness or agentd-session identity. It is distinct from product_session_id and the X-Paimos-Session-Id mutation-attribution header. Phase and typed adapter activity are separate truths; silence or malformed evidence is unknown, and only a reporter-confirmed terminal state is dead. The private harness session reference is encrypted in the message target and is never returned.",
         "properties": {
           "id": {"type": "string", "format": "uuid"}, "project_id": {"type": "integer", "format": "int64"},
           "project_agent_id": {"type": "integer", "format": "int64"}, "agent_name": {"type": "string"},
-          "harness": {"type": "string"}, "host": {"type": "string"}, "message_target_id": {"type": "string", "format": "uuid"},
+		  "harness": {"type": "string"}, "host": {"type": "string"}, "machine_id": {"type": "string", "description": "Machine provenance supplied by the authenticated reporter, never by the local start request."}, "message_target_id": {"type": "string", "format": "uuid"},
           "management_mode": {"type": "string", "enum": ["managed", "unmanaged"]}, "role": {"type": "string", "enum": ["coordinator", "worker"]},
           "parent_harness_session_id": {"type": ["string", "null"], "format": "uuid", "description": "Explicit durable parent generation; never inferred from identity, prompt, or workspace."},
           "ticket_id": {"type": ["integer", "null"], "format": "int64", "minimum": 1, "description": "Explicit active same-project ticket binding; distinct from product and attribution sessions."},
+		  "workspace_provenance": {"oneOf": [{"$ref": "#/components/schemas/HarnessWorkspaceProvenance"}, {"type": "null"}]},
+		  "dispatch_profile": {"oneOf": [{"$ref": "#/components/schemas/HarnessDispatchProfile"}, {"type": "null"}]},
+		  "account_label": {"type": "string", "enum": ["unknown", "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console"]},
           "steer_mode": {"type": "string", "enum": ["none", "owned", "codex_external"]},
           "advertised_capabilities": {"$ref": "#/components/schemas/HarnessCapabilities"},
           "phase": {"type": "string", "enum": ["starting", "working", "yielded", "stopping", "stopped"]},
@@ -1852,6 +1878,9 @@
           "management_mode": {"type": "string", "enum": ["managed", "unmanaged"]}, "role": {"type": "string", "enum": ["coordinator", "worker"]},
           "parent_harness_session_id": {"type": ["string", "null"], "format": "uuid"},
           "ticket_id": {"type": ["integer", "null"], "format": "int64", "minimum": 1},
+		  "workspace": {"$ref": "#/components/schemas/HarnessWorkspaceProvenance"},
+		  "dispatch_profile_id": {"type": "string"}, "dispatch_profile_version": {"type": "string"},
+		  "account_label": {"type": "string", "enum": ["unknown", "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console"]},
           "steer_mode": {"type": "string", "enum": ["none", "owned", "codex_external"]}, "advertised_capabilities": {"$ref": "#/components/schemas/HarnessCapabilities"}
         }
       },

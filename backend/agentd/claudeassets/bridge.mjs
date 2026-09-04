@@ -27,6 +27,11 @@ function validID(value, maximum = 256) {
     value.trim() === value && !/[\0\r\n]/u.test(value);
 }
 
+function validDispatchValue(value, maximum = 128) {
+  return typeof value === "string" && value.length > 0 && value.length <= maximum &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value);
+}
+
 class InputStream {
   constructor(first) {
     this.first = first;
@@ -161,6 +166,8 @@ try {
 }
 if (start?.op !== "start" || typeof start.prompt !== "string" || start.prompt.length === 0 ||
     Buffer.byteLength(start.prompt) > MAX_PROMPT_BYTES || start.prompt.includes("\0") ||
+    ((start.model !== undefined || start.effort !== undefined) &&
+     (!validDispatchValue(start.model) || !["low", "medium", "high", "xhigh", "max"].includes(start.effort))) ||
     !sdkPath || !claudePath || !workspace) {
   fail();
   process.exit(1);
@@ -219,22 +226,24 @@ try {
   const { query } = await import(pathToFileURL(sdkPath));
   input = new InputStream(userMessage(start.prompt));
   start.prompt = "";
+  const queryOptions = {
+    cwd: workspace,
+    pathToClaudeCodeExecutable: claudePath,
+    persistSession: false,
+    settingSources: [],
+    strictMcpConfig: true,
+    mcpServers: {},
+    plugins: [],
+    includePartialMessages: true,
+    permissionMode: "dontAsk",
+    allowedTools: DEFAULT_TOOLS,
+    tools: DEFAULT_TOOLS,
+    systemPrompt: { type: "preset", preset: "claude_code" },
+    ...(start.model ? { model: start.model, effort: start.effort } : {})
+  };
   queryHandle = query({
     prompt: input,
-    options: {
-      cwd: workspace,
-      pathToClaudeCodeExecutable: claudePath,
-      persistSession: false,
-      settingSources: [],
-      strictMcpConfig: true,
-      mcpServers: {},
-      plugins: [],
-      includePartialMessages: true,
-      permissionMode: "dontAsk",
-      allowedTools: DEFAULT_TOOLS,
-      tools: DEFAULT_TOOLS,
-      systemPrompt: { type: "preset", preset: "claude_code" }
-    }
+    options: queryOptions
   });
   if (!queryHandle || typeof queryHandle.streamInput !== "function" ||
       typeof queryHandle.interrupt !== "function" || typeof queryHandle.close !== "function" ||

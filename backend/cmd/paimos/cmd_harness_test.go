@@ -37,9 +37,45 @@ func TestHarnessRegisterOmitsUnsetHierarchyFieldsForOldServer(t *testing.T) {
 	if _, _, err := executeCLIForTest(t, "--json", "harness", "register", "--project", "PAI", "--agent", "worker", "--harness", "codex", "--host", "mbp0", "--registration-file", registrationFile, "--management", "managed", "--role", "worker", "--capability", "status"); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"parent_harness_session_id", "ticket_id"} {
+	for _, field := range []string{"parent_harness_session_id", "ticket_id", "workspace", "dispatch_profile_id", "dispatch_profile_version", "account_label"} {
 		if _, ok := posted[field]; ok {
 			t.Fatalf("unset forward-compatible field %s sent to old server: %s", field, posted[field])
+		}
+	}
+}
+
+func TestHarnessRegisterSendsTypedExecutionProvenance(t *testing.T) {
+	registrationFile := filepath.Join(t.TempDir(), "registration.json")
+	if err := os.WriteFile(registrationFile, []byte(`{"harness_session_ref":"session-1","worker_lease":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var posted map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI"}]`))
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"id":"11111111-1111-4111-8111-111111111111"}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv(envURL, server.URL)
+	t.Setenv(envAPIKey, "test_key")
+	identity := strings.Repeat("a", 64)
+	_, _, err := executeCLIForTest(t, "--json", "harness", "register", "--project", "PAI", "--agent", "worker", "--harness", "codex", "--host", "mbp0",
+		"--registration-file", registrationFile, "--management", "managed", "--role", "worker", "--steer-mode", "owned", "--capability", "inbox,status,steer,interrupt,stop",
+		"--workspace", "/workspace/paimos", "--git-top-level", "/workspace/paimos", "--git-branch", "feat/pai-906-dispatch-profiles",
+		"--workspace-identity", identity, "--workspace-kind", "git_worktree", "--workspace-mode", "exclusive",
+		"--dispatch-profile", "codex-sol-high", "--dispatch-profile-version", "1", "--account-label", "chatgpt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"workspace", "dispatch_profile_id", "dispatch_profile_version", "account_label"} {
+		if len(posted[field]) == 0 {
+			t.Fatalf("missing %s in payload: %v", field, posted)
 		}
 	}
 }

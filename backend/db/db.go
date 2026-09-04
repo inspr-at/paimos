@@ -12667,6 +12667,57 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE INDEX idx_agent_attention_batches_cursor
 			 ON agent_attention_batches(receiver_project_id,receiver_project_agent_id,to_cursor)`,
 		}},
+
+		// M172 / PAI-906: immutable owned-workspace provenance and the exact
+		// versioned dispatch profile resolved by the authenticated reporter.
+		// Empty/unknown defaults keep pre-profile harness registrations readable.
+		{172, []string{
+			`ALTER TABLE harness_sessions ADD COLUMN workspace_path TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE harness_sessions ADD COLUMN git_top_level TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE harness_sessions ADD COLUMN git_branch TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE harness_sessions ADD COLUMN workspace_identity TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE harness_sessions ADD COLUMN workspace_kind TEXT NOT NULL DEFAULT 'unknown'`,
+			`ALTER TABLE harness_sessions ADD COLUMN workspace_mode TEXT NOT NULL DEFAULT 'unknown'`,
+			`ALTER TABLE harness_sessions ADD COLUMN dispatch_profile_id TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE harness_sessions ADD COLUMN dispatch_profile_version TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE harness_sessions ADD COLUMN dispatch_model TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE harness_sessions ADD COLUMN dispatch_effort TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE harness_sessions ADD COLUMN account_label TEXT NOT NULL DEFAULT 'unknown'`,
+			`CREATE INDEX idx_harness_sessions_active_workspace
+			 ON harness_sessions(host,workspace_identity,workspace_mode) WHERE phase<>'stopped' AND workspace_identity<>''`,
+			`CREATE TRIGGER trg_harness_sessions_provenance_shape_insert BEFORE INSERT ON harness_sessions
+			 WHEN NOT (
+			  (NEW.workspace_identity='' AND NEW.workspace_path='' AND NEW.git_top_level='' AND NEW.git_branch=''
+			   AND NEW.workspace_kind='unknown' AND NEW.workspace_mode='unknown' AND NEW.dispatch_profile_id=''
+			   AND NEW.dispatch_profile_version='' AND NEW.dispatch_model='' AND NEW.dispatch_effort='' AND NEW.account_label='unknown')
+			  OR
+			  (length(NEW.workspace_identity)=64 AND NEW.workspace_identity NOT GLOB '*[^0-9a-f]*'
+			   AND NEW.workspace_path<>'' AND instr(NEW.workspace_path,char(0))=0
+			   AND instr(NEW.workspace_path,char(10))=0 AND instr(NEW.workspace_path,char(13))=0
+			   AND NEW.workspace_kind IN ('directory','git_primary','git_worktree') AND NEW.workspace_mode IN ('exclusive','shared')
+			   AND NEW.account_label IN ('unknown','chatgpt','api_key','claude_ai_max','claude_ai_pro','claude_ai_team','claude_ai_enterprise','console')
+			   AND ((NEW.workspace_kind='directory' AND NEW.git_top_level='' AND NEW.git_branch='')
+			    OR (NEW.workspace_kind IN ('git_primary','git_worktree') AND NEW.git_top_level<>'' AND NEW.git_branch<>''))
+			   AND ((NEW.dispatch_profile_id='' AND NEW.dispatch_profile_version='' AND NEW.dispatch_model='' AND NEW.dispatch_effort='')
+			    OR (NEW.dispatch_profile_id<>'' AND NEW.dispatch_profile_version<>'' AND NEW.dispatch_model<>'' AND NEW.dispatch_effort<>'')))
+			 ) BEGIN SELECT RAISE(ABORT,'harness workspace provenance is invalid'); END`,
+			`CREATE TRIGGER trg_harness_sessions_provenance_immutable BEFORE UPDATE OF
+			 workspace_path,git_top_level,git_branch,workspace_identity,workspace_kind,workspace_mode,
+			 dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,account_label
+			 ON harness_sessions BEGIN SELECT RAISE(ABORT,'harness workspace provenance is immutable'); END`,
+			`CREATE TRIGGER trg_harness_sessions_workspace_collision_insert BEFORE INSERT ON harness_sessions
+			 WHEN NEW.phase<>'stopped' AND NEW.workspace_identity<>'' AND EXISTS(
+			  SELECT 1 FROM harness_sessions active WHERE active.host=NEW.host
+			   AND active.workspace_identity=NEW.workspace_identity AND active.phase<>'stopped'
+			   AND (active.workspace_mode='exclusive' OR NEW.workspace_mode='exclusive'))
+			 BEGIN SELECT RAISE(ABORT,'active harness workspace ownership conflicts'); END`,
+			`CREATE TRIGGER trg_harness_sessions_workspace_collision_activate BEFORE UPDATE OF phase ON harness_sessions
+			 WHEN OLD.phase='stopped' AND NEW.phase<>'stopped' AND NEW.workspace_identity<>'' AND EXISTS(
+			  SELECT 1 FROM harness_sessions active WHERE active.id<>NEW.id AND active.host=NEW.host
+			   AND active.workspace_identity=NEW.workspace_identity AND active.phase<>'stopped'
+			   AND (active.workspace_mode='exclusive' OR NEW.workspace_mode='exclusive'))
+			 BEGIN SELECT RAISE(ABORT,'active harness workspace ownership conflicts'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -12898,6 +12949,22 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			"agent_attention_projection_cursors", "idx_harness_session_controls_attention",
 			"agent_attention_cursors", "agent_attention_batches",
 			"idx_agent_attention_batches_open", "idx_agent_attention_batches_cursor",
+		})
+	},
+	172: func(ctx context.Context, conn *sql.Conn) error {
+		var columns int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('harness_sessions')
+			WHERE name IN ('workspace_path','git_top_level','git_branch','workspace_identity','workspace_kind','workspace_mode',
+			'dispatch_profile_id','dispatch_profile_version','dispatch_model','dispatch_effort','account_label')`).Scan(&columns); err != nil {
+			return fmt.Errorf("inspect M172 harness provenance columns: %w", err)
+		}
+		if columns != 0 {
+			return fmt.Errorf("M172 schema is partially present or locally incompatible: harness provenance columns=%d", columns)
+		}
+		return checkSchemaObjectsAbsent(ctx, conn, 172, []string{
+			"idx_harness_sessions_active_workspace", "trg_harness_sessions_provenance_shape_insert",
+			"trg_harness_sessions_provenance_immutable", "trg_harness_sessions_workspace_collision_insert",
+			"trg_harness_sessions_workspace_collision_activate",
 		})
 	},
 }

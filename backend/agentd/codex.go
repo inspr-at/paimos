@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,18 +40,30 @@ func (*CodexAdapter) Capabilities() []Capability {
 	return []Capability{CapabilityInbox, CapabilityStatus, CapabilitySteer, CapabilityInterrupt, CapabilityStop}
 }
 
-func (a *CodexAdapter) executable() (string, error) {
-	if a.path != "" {
-		if !filepath.IsAbs(a.path) {
-			return "", errors.New("configured Codex executable must be an absolute path")
-		}
-		return a.path, nil
-	}
-	path, err := exec.LookPath("codex")
+func (a *CodexAdapter) AccountLabel(ctx context.Context) string {
+	path, err := a.executable()
 	if err != nil {
-		return "", errors.New("Codex adapter requires the operator-authenticated codex CLI in PATH")
+		return "unknown"
 	}
-	return path, nil
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	output, err := runAccountProbe(probeCtx, path, 512, accountProbeCodex)
+	if err != nil {
+		return "unknown"
+	}
+	status := strings.TrimSpace(string(output))
+	switch {
+	case status == "Logged in using ChatGPT":
+		return "chatgpt"
+	case strings.HasPrefix(status, "Logged in using an API key"):
+		return "api_key"
+	default:
+		return "unknown"
+	}
+}
+
+func (a *CodexAdapter) executable() (string, error) {
+	return resolvePinnedExecutable(a.path, "codex", "operator-authenticated Codex CLI")
 }
 
 // Start owns one documented app-server stdio child and creates the thread and
@@ -114,9 +125,11 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 			ID string `json:"id"`
 		} `json:"thread"`
 	}
-	if err := process.call(operationCtx, "thread/start", map[string]any{
-		"cwd": request.Workspace, "approvalPolicy": "never",
-	}, &threadResponse); err != nil {
+	threadStart := map[string]any{"cwd": request.Workspace, "approvalPolicy": "never"}
+	if request.ResolvedProfile != nil {
+		threadStart["model"] = request.ResolvedProfile.Model
+	}
+	if err := process.call(operationCtx, "thread/start", threadStart, &threadResponse); err != nil {
 		return nil, fmt.Errorf("start Codex app-server thread: %w", err)
 	}
 	if !validOpaqueID(threadResponse.Thread.ID) {
@@ -131,10 +144,15 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 			Status string `json:"status"`
 		} `json:"turn"`
 	}
-	if err := process.call(operationCtx, "turn/start", map[string]any{
+	turnStart := map[string]any{
 		"threadId": threadResponse.Thread.ID,
 		"input":    []map[string]string{{"type": "text", "text": request.Prompt}},
-	}, &turnResponse); err != nil {
+	}
+	if request.ResolvedProfile != nil {
+		turnStart["model"] = request.ResolvedProfile.Model
+		turnStart["effort"] = request.ResolvedProfile.Effort
+	}
+	if err := process.call(operationCtx, "turn/start", turnStart, &turnResponse); err != nil {
 		return nil, fmt.Errorf("start Codex app-server turn: %w", err)
 	}
 	if !validOpaqueID(turnResponse.Turn.ID) || turnResponse.Turn.Status != "inProgress" {

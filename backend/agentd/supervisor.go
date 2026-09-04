@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 )
 
 const defaultHeartbeatInterval = 15 * time.Second
@@ -25,12 +26,15 @@ const sessionFinalizeTimeout = 10 * time.Second
 const maxControlReplayEntries = 256
 
 type SupervisorConfig struct {
-	Adapters          []Adapter
-	HeartbeatInterval time.Duration
-	MaxSessions       int
-	StateRoot         string
-	Instance          string
-	Reporter          Reporter
+	Adapters              []Adapter
+	HeartbeatInterval     time.Duration
+	MaxSessions           int
+	StateRoot             string
+	Instance              string
+	Reporter              Reporter
+	DispatchResolver      DispatchResolver
+	AllowSharedWorkspaces bool
+	WorkspaceInspector    workspaceInspector
 }
 
 type sessionEntry struct {
@@ -42,6 +46,7 @@ type sessionEntry struct {
 	monitorDone    chan struct{}
 	monitorErr     error
 	stopRequested  bool
+	failureCode    ErrorCode
 	controlReady   bool
 	controlReplays map[string]controlReplay
 }
@@ -54,24 +59,27 @@ type controlReplay struct {
 }
 
 type Supervisor struct {
-	mu                sync.RWMutex
-	startMu           sync.Mutex
-	daemonID          string
-	adapters          map[string]Adapter
-	sessions          map[string]*sessionEntry
-	heartbeatInterval time.Duration
-	maxSessions       int
-	closed            bool
-	instance          string
-	journal           *registryJournal
-	reporter          Reporter
-	reporterErrorCode ErrorCode
-	reporterFailures  int64
-	reportMu          sync.Mutex
-	reportWake        chan struct{}
-	done              chan struct{}
-	lifecycleCtx      context.Context
-	lifecycleCancel   context.CancelFunc
+	mu                    sync.RWMutex
+	startMu               sync.Mutex
+	daemonID              string
+	adapters              map[string]Adapter
+	sessions              map[string]*sessionEntry
+	heartbeatInterval     time.Duration
+	maxSessions           int
+	closed                bool
+	instance              string
+	journal               *registryJournal
+	reporter              Reporter
+	dispatchResolver      DispatchResolver
+	allowSharedWorkspaces bool
+	inspectWorkspace      workspaceInspector
+	reporterErrorCode     ErrorCode
+	reporterFailures      int64
+	reportMu              sync.Mutex
+	reportWake            chan struct{}
+	done                  chan struct{}
+	lifecycleCtx          context.Context
+	lifecycleCancel       context.CancelFunc
 }
 
 func NewSupervisor(config SupervisorConfig) (*Supervisor, error) {
@@ -94,6 +102,15 @@ func NewSupervisor(config SupervisorConfig) (*Supervisor, error) {
 		daemonID: uuid.NewString(), adapters: map[string]Adapter{}, sessions: map[string]*sessionEntry{},
 		heartbeatInterval: heartbeat, maxSessions: maximum, instance: config.Instance, reporter: config.Reporter,
 		done: make(chan struct{}), reportWake: make(chan struct{}, 1), lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel,
+		dispatchResolver: config.DispatchResolver, allowSharedWorkspaces: config.AllowSharedWorkspaces, inspectWorkspace: config.WorkspaceInspector,
+	}
+	if s.dispatchResolver == nil {
+		if resolver, ok := config.Reporter.(DispatchResolver); ok {
+			s.dispatchResolver = resolver
+		}
+	}
+	if s.inspectWorkspace == nil {
+		s.inspectWorkspace = inspectWorkspace
 	}
 	if config.StateRoot != "" {
 		journal, err := openRegistryJournal(config.StateRoot, config.Instance, maximum)
@@ -188,6 +205,35 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 	if adapter == nil {
 		return Session{}, ErrAdapterUnsupported
 	}
+	if validated.WorkspaceMode == WorkspaceShared && !s.allowSharedWorkspaces {
+		return Session{}, errors.New("shared managed workspaces require explicit daemon authorization")
+	}
+	var profile *dispatchprofile.Profile
+	if validated.DispatchProfileID != "" {
+		if s.dispatchResolver == nil {
+			return Session{}, ErrDispatchProfile
+		}
+		expected, catalogErr := dispatchprofile.Resolve(validated.DispatchProfileID, validated.DispatchProfileVersion, validated.Adapter)
+		if catalogErr != nil {
+			return Session{}, ErrDispatchProfile
+		}
+		resolved, resolveErr := s.dispatchResolver.ResolveDispatchProfile(ctx, validated.DispatchProfileID, validated.DispatchProfileVersion, validated.Adapter)
+		if resolveErr != nil || dispatchprofile.Validate(resolved) != nil || resolved != expected || resolved.WorkspaceMode != validated.WorkspaceMode {
+			return Session{}, ErrDispatchProfile
+		}
+		profile = &resolved
+		validated.ResolvedProfile = profile
+	}
+	provenance, err := s.inspectWorkspace(ctx, validated.Workspace, validated.WorkspaceMode)
+	if err != nil {
+		return Session{}, err
+	}
+	accountLabel := "unknown"
+	if prober, ok := adapter.(AccountProber); ok {
+		if candidate := prober.AccountLabel(ctx); validAccountLabel(candidate) {
+			accountLabel = candidate
+		}
+	}
 	capabilities, err := canonicalCapabilities(adapter.Capabilities())
 	if err != nil {
 		return Session{}, err
@@ -203,6 +249,7 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 	entry := &sessionEntry{session: Session{
 		ID: uuid.NewString(), Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
 		ProjectID: validated.ProjectID, Role: validated.Role, ParentSessionID: validated.ParentSessionID, TicketID: validated.TicketID,
+		WorkspaceProvenance: provenance, DispatchProfile: profile, AccountLabel: accountLabel,
 		Capabilities: append([]Capability(nil), capabilities...), Managed: true, State: StateStarting,
 		StartedAt: now, HeartbeatAt: now,
 	}, capabilities: capabilitySet, monitorDone: make(chan struct{})}
@@ -269,7 +316,14 @@ func (s *Supervisor) reserveSession(entry *sessionEntry) error {
 		terminal := existing.session.State == StateStopped || existing.session.State == StateExited ||
 			existing.session.State == StateFailed || existing.session.State == StateOwnershipLost
 		remoteClosed := existing.session.Reporter.PublicSessionID == "" || existing.session.Reporter.Closed
+		workspaceConflict := !terminal && existing.session.WorkspaceProvenance.Identity != "" &&
+			existing.session.WorkspaceProvenance.Identity == entry.session.WorkspaceProvenance.Identity &&
+			(existing.session.WorkspaceProvenance.Mode == WorkspaceExclusive || entry.session.WorkspaceProvenance.Mode == WorkspaceExclusive)
 		existing.mu.Unlock()
+		if workspaceConflict {
+			s.mu.Unlock()
+			return ErrWorkspaceConflict
+		}
 		if terminal && remoteClosed {
 			candidates = append(candidates, existing)
 		}
@@ -335,6 +389,19 @@ func validateStartRequest(request StartRequest) (StartRequest, error) {
 	if request.TicketID < 0 {
 		return StartRequest{}, errors.New("agentd ticket id is invalid")
 	}
+	request.WorkspaceMode = strings.ToLower(strings.TrimSpace(request.WorkspaceMode))
+	if request.WorkspaceMode == "" {
+		request.WorkspaceMode = WorkspaceExclusive
+	}
+	if request.WorkspaceMode != WorkspaceExclusive && request.WorkspaceMode != WorkspaceShared {
+		return StartRequest{}, errors.New("agentd workspace mode is invalid")
+	}
+	request.DispatchProfileID = strings.TrimSpace(request.DispatchProfileID)
+	request.DispatchProfileVersion = strings.TrimSpace(request.DispatchProfileVersion)
+	if (request.DispatchProfileID == "") != (request.DispatchProfileVersion == "") ||
+		(request.DispatchProfileID != "" && (!validSafeLabel(request.DispatchProfileID, 128) || !validSafeLabel(request.DispatchProfileVersion, 64))) {
+		return StartRequest{}, errors.New("agentd dispatch profile id and version must be supplied together")
+	}
 	if request.Prompt == "" || len(request.Prompt) > maxPromptBytes || !utf8.ValidString(request.Prompt) || strings.ContainsRune(request.Prompt, 0) {
 		return StartRequest{}, errors.New("agentd prompt is invalid")
 	}
@@ -386,6 +453,15 @@ func validSafeLabel(value string, maximum int) bool {
 	return value == strings.TrimSpace(value) && value != "" && len(value) <= maximum && utf8.ValidString(value) && !strings.ContainsAny(value, "\x00\r\n")
 }
 
+func validAccountLabel(value string) bool {
+	switch value {
+	case "unknown", "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console":
+		return true
+	default:
+		return false
+	}
+}
+
 func validEventKind(kind EventKind) bool {
 	switch kind {
 	case EventSessionStarted, EventToolStarted, EventControlApplied, EventTurnStarted, EventTurnCompleted:
@@ -397,7 +473,7 @@ func validEventKind(kind EventKind) bool {
 
 func validErrorCode(code ErrorCode) bool {
 	switch code {
-	case ErrorEventStreamBound, ErrorAppServerProtocol, ErrorChildExitFailed, ErrorChildStopFailed, ErrorOwnershipLost:
+	case ErrorEventStreamBound, ErrorAppServerProtocol, ErrorChildExitFailed, ErrorChildStopFailed, ErrorOwnershipLost, ErrorWorkspaceConflict:
 		return true
 	default:
 		return false
@@ -426,7 +502,10 @@ func (s *Supervisor) monitor(entry *sessionEntry) {
 			entry.session.ExitedAt = &now
 			entry.session.HeartbeatAt = now
 			entry.session.PID = 0
-			if entry.stopRequested {
+			if entry.failureCode != "" {
+				entry.session.State = StateFailed
+				entry.session.LastErrorCode = entry.failureCode
+			} else if entry.stopRequested {
 				entry.session.State = StateStopped
 			} else if err != nil {
 				entry.session.State = StateFailed
@@ -816,6 +895,59 @@ func (s *Supervisor) Stop(ctx context.Context, id string, request ControlRequest
 		return Receipt{}, err
 	}
 	return receipt, nil
+}
+
+// Reject terminates a child whose authenticated registration authority
+// refused its ownership claim. This is deliberately narrower than Stop: it
+// records a typed terminal failure and closes reporting so a cross-daemon
+// workspace conflict cannot leave an unregistered process running forever.
+func (s *Supervisor) Reject(ctx context.Context, id string, request ControlRequest, code ErrorCode) error {
+	if code != ErrorWorkspaceConflict || request.Text != "" || !validCorrelationID(request.CorrelationID) {
+		return errors.New("agentd rejection is invalid")
+	}
+	entry, err := s.get(id)
+	if err != nil {
+		return err
+	}
+	entry.controlMu.Lock()
+	defer entry.controlMu.Unlock()
+	if err := s.validateControlScope(entry, request); err != nil {
+		return err
+	}
+	entry.mu.Lock()
+	if entry.session.State != StateRunning {
+		entry.mu.Unlock()
+		return ErrSessionNotRunning
+	}
+	entry.session.State = StateStopping
+	entry.failureCode = code
+	entry.refreshSteerableLocked()
+	process := entry.process
+	entry.mu.Unlock()
+	startingPersistErr := s.persist(entry)
+	effect, err := process.Stop(ctx, request)
+	if err != nil {
+		entry.mu.Lock()
+		if entry.session.State == StateStopping {
+			entry.session.State = StateRunning
+			entry.failureCode = ""
+			entry.refreshSteerableLocked()
+		}
+		entry.mu.Unlock()
+		_ = s.persist(entry)
+		return err
+	}
+	effectErr := validateControlEffect(request, effect)
+	waitErr := waitSessionFinalized(ctx, entry)
+	entry.mu.Lock()
+	entry.session.State = StateFailed
+	entry.session.LastErrorCode = code
+	entry.session.Reporter.Closed = true
+	entry.refreshSteerableLocked()
+	entry.mu.Unlock()
+	finalPersistErr := s.persist(entry)
+	s.scheduleReport()
+	return errors.Join(startingPersistErr, effectErr, waitErr, finalPersistErr)
 }
 
 func (s *Supervisor) Close(ctx context.Context) error {

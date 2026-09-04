@@ -1188,6 +1188,46 @@ printf '%s' 'Implement PAI-850.' | paimos-agentd start \
 paimos-agentd status --instance production
 ```
 
+For a typed dispatch, choose an exact `id` and `version` from the authenticated
+`GET /api/ai/execution-options?dispatch_only=1` catalog, then pass only those
+two identifiers to `start`:
+
+```bash
+printf '%s' 'Implement PAI-906.' | paimos-agentd start \
+  --instance production --adapter codex --workspace "$PWD" \
+  --project-id "$PROJECT_ID" --identity codex:worker \
+  --dispatch-profile codex-sol-high --dispatch-profile-version 1
+```
+
+The reporter resolves the profile through that existing authority before the
+adapter starts. Agentd also pins the catalog locally and rejects a missing,
+changed, wrong-harness, unsupported-model, or unsupported-effort result before
+spawn. The resolved harness/model/effort and immutable profile version are
+recorded on the public harness session. Model and effort are applied only
+through documented Codex app-server or Claude Agent SDK fields; profile IDs are
+not vendor flags.
+
+Each new owned session also records the canonical workspace, Git top level and
+branch when present, linked-worktree versus primary-checkout provenance, and a
+non-reversible workspace identity. A second live owner inside one daemon is
+rejected before process creation; an authenticated server conflict from a
+different daemon immediately terminates the newly owned child with a typed
+`workspace_conflict` failure. Shared ownership requires both
+`start --workspace-mode shared` and a separately authorized daemon started
+with `serve --allow-shared-workspaces`; the shipped dispatch profiles remain
+exclusive. Machine identity comes from the authenticated reporter's
+`--report-host`, never start-request prose. Account provenance is reduced by a
+fixed-argv `codex login status` or `claude auth status --json` probe to a small
+non-secret label; output, email addresses, tokens, and credentials are never
+stored. A missing or ambiguous probe becomes `unknown`.
+
+Registrations created before this contract remain readable. They have null
+workspace/profile provenance and an `unknown` account label; PAIMOS does not
+retroactively infer ownership or execution axes from process lists, paths, or
+old text. A recorded dispatch profile is also a historical snapshot: retiring
+that profile from a later catalog does not make old sessions or local agentd
+journals unreadable.
+
 An operator-authenticated live protocol proof is deliberately opt-in because
 it starts a real vendor turn: from `backend`, run
 `PAIMOS_AGENTD_LIVE_CODEX=1 go test ./agentd -run TestCodexLiveOwnedAppServerSteer -count=1`.

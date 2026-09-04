@@ -50,7 +50,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	flags.SetOutput(io.Discard)
 	common := addCommonFlags(flags)
 	adapter, workspace, identity, role, parentSessionID := "codex", "", "", "", ""
+	workspaceMode, dispatchProfile, dispatchProfileVersion := "", "", ""
 	var projectID, ticketID int64
+	var allowSharedWorkspaces bool
 	sessionID, correlationID, codexPath := "", "", ""
 	claudePath, nodePath, claudeSDKPath := "", "", ""
 	reportHost, reportURL, reportAPIKeyFile, paimosPath := "", "", "", ""
@@ -63,6 +65,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.StringVar(&reportURL, "report-url", "", "exact M161 instance URL for non-interactive reporting")
 		flags.StringVar(&reportAPIKeyFile, "report-api-key-file", "", "protected owner-only file containing the M161 API key")
 		flags.StringVar(&paimosPath, "paimos-path", "", "paimos CLI used for authenticated M161 reporting")
+		flags.BoolVar(&allowSharedWorkspaces, "allow-shared-workspaces", false, "separately authorize explicitly shared child workspaces")
 	}
 	if command == "start" {
 		flags.StringVar(&adapter, "adapter", "codex", "harness adapter")
@@ -72,6 +75,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.StringVar(&role, "role", "", "durable hierarchy role: coordinator or worker (default worker)")
 		flags.StringVar(&parentSessionID, "parent-session", "", "active parent public harness-session UUID")
 		flags.Int64Var(&ticketID, "ticket-id", 0, "active project ticket numeric ID")
+		flags.StringVar(&workspaceMode, "workspace-mode", "exclusive", "exclusive or shared workspace ownership")
+		flags.StringVar(&dispatchProfile, "dispatch-profile", "", "execution-options dispatch profile id")
+		flags.StringVar(&dispatchProfileVersion, "dispatch-profile-version", "", "exact immutable dispatch profile version")
 	}
 	if command == "steer" || command == "interrupt" || command == "stop" {
 		flags.StringVar(&sessionID, "session", "", "managed agentd session UUID")
@@ -115,7 +121,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			}
 		}
 		supervisor, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: common.instance, StateRoot: root,
-			Adapters: serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath), Reporter: reporter})
+			Adapters: serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath), Reporter: reporter,
+			AllowSharedWorkspaces: allowSharedWorkspaces})
 		if err != nil {
 			return err
 		}
@@ -140,7 +147,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		output, err = client.Start(ctx, agentd.StartRequest{
 			Adapter: adapter, Workspace: workspace, Identity: identity, ProjectID: projectID, Prompt: string(prompt),
-			Role: role, ParentSessionID: parentSessionID, TicketID: ticketID,
+			Role: role, ParentSessionID: parentSessionID, TicketID: ticketID, WorkspaceMode: workspaceMode,
+			DispatchProfileID: dispatchProfile, DispatchProfileVersion: dispatchProfileVersion,
 		})
 	case "steer":
 		body, readErr := io.ReadAll(io.LimitReader(stdin, (64<<10)+1))

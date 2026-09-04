@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/agentd"
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 )
 
 const (
@@ -25,6 +26,105 @@ const (
 	publicReporterSession = "22222222-2222-4222-8222-222222222222"
 	reporterControlID     = "33333333-3333-4333-8333-333333333333"
 )
+
+func TestCLIReporterResolvesOnlyExactLocallyPinnedDispatchProfile(t *testing.T) {
+	profile, err := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	runner := func(_ context.Context, _ string, args, _ []string, stdin io.Reader) ([]byte, error) {
+		if !slices.Equal(args, []string{"--json", "curl", "/api/ai/execution-options?dispatch_only=1"}) || stdin != nil {
+			t.Fatalf("dispatch lookup argv=%q stdin=%v", args, stdin)
+		}
+		seen = true
+		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
+	}
+	reporter, err := newCLIReporterWithRunner("ppm", "mbp0", "/opt/paimos", nil, runner, newMemoryReporterLeaseStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reporter.ResolveDispatchProfile(context.Background(), profile.ID, profile.Version, profile.Harness)
+	if err != nil || got != profile || !seen {
+		t.Fatalf("resolved=%+v seen=%v err=%v", got, seen, err)
+	}
+	profile.Model = "gpt-5.6-terra"
+	if _, err := reporter.ResolveDispatchProfile(context.Background(), profile.ID, profile.Version, profile.Harness); err == nil {
+		t.Fatal("authority drifted from the locally pinned profile")
+	}
+}
+
+func TestCLIReporterRejectsChildOnAuthorityWorkspaceConflict(t *testing.T) {
+	process := &reporterTestProcess{done: make(chan struct{})}
+	stateRoot := t.TempDir()
+	supervisor, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "ppm", StateRoot: stateRoot, Adapters: []agentd.Adapter{reporterTestAdapter{process: process}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := supervisor.Start(context.Background(), agentd.StartRequest{
+		Adapter: agentd.AdapterCodex, Workspace: t.TempDir(), Prompt: "fixture", Identity: "codex:worker", ProjectID: 6,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+		if len(args) < 3 || args[2] != "register" {
+			return nil, errors.New("unexpected reporter command")
+		}
+		if slices.Contains(args, "--account-label") {
+			t.Fatalf("unknown account label must be omitted for rolling compatibility: %v", args)
+		}
+		return []byte(`{"error":"workspace conflict","code":409,"error_code":"harness_session_conflict"}`), errors.New("API conflict")
+	}
+	reporter, err := newCLIReporterWithRunner("ppm", "mbp0", "/opt/paimos", nil, runner, newMemoryReporterLeaseStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reporter.BindController(supervisor); err != nil {
+		t.Fatal(err)
+	}
+	if err := reporter.ReportStatus(context.Background(), supervisor.Status()); err != nil {
+		t.Fatalf("enforce authority conflict: %v", err)
+	}
+	select {
+	case <-process.done:
+	case <-time.After(time.Second):
+		t.Fatal("authority conflict left owned child running")
+	}
+	got := supervisor.Status().Sessions
+	if len(got) != 1 || got[0].ID != session.ID || got[0].State != agentd.StateFailed || got[0].LastErrorCode != agentd.ErrorWorkspaceConflict || !got[0].Reporter.Closed {
+		t.Fatalf("rejected session = %+v", got)
+	}
+	if err := supervisor.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "ppm", StateRoot: stateRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close(context.Background())
+	recovered := restarted.Status().Sessions
+	if len(recovered) != 1 || recovered[0].State != agentd.StateFailed || recovered[0].LastErrorCode != agentd.ErrorWorkspaceConflict || !recovered[0].Reporter.Closed {
+		t.Fatalf("recovered rejection = %+v", recovered)
+	}
+}
+
+func TestReporterCommandReturnsBoundedJSONErrorForTypedHandling(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "paimos-fixture")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s\\n' '{\"error_code\":\"harness_session_conflict\"}' >&2\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := runReporterCommand(context.Background(), path, nil, os.Environ(), nil)
+	if err == nil || reporterErrorCode(raw) != "harness_session_conflict" {
+		t.Fatalf("raw=%q err=%v", raw, err)
+	}
+}
+
+func TestReporterExecutionMatchesLegacyUnknownAccountOmission(t *testing.T) {
+	if !reporterExecutionMatches(harnessSessionResponse{}, agentd.Session{AccountLabel: "unknown"}) {
+		t.Fatal("legacy response without account label did not normalize to unknown")
+	}
+}
 
 func reporterSessionEvidence(agent, phase string) []byte {
 	raw, _ := json.Marshal(harnessSessionResponse{ID: publicReporterSession, ProjectID: 6, AgentName: agent, Harness: "codex", Phase: phase})
@@ -106,6 +206,9 @@ func (c *statefulReporterController) Interrupt(_ context.Context, session string
 func (*statefulReporterController) Stop(context.Context, string, agentd.ControlRequest) (agentd.Receipt, error) {
 	return agentd.Receipt{}, errors.New("unexpected stop")
 }
+func (*statefulReporterController) Reject(context.Context, string, agentd.ControlRequest, agentd.ErrorCode) error {
+	return errors.New("unexpected reject")
+}
 func (c *statefulReporterController) CheckpointReporter(_ context.Context, _ string, _ agentd.ControlRequest, state agentd.ReporterState) error {
 	if c.fail != nil && c.fail(state) {
 		return errors.New("journal unavailable")
@@ -165,6 +268,10 @@ func (c *recordingReporterController) Interrupt(_ context.Context, session strin
 
 func (*recordingReporterController) Stop(context.Context, string, agentd.ControlRequest) (agentd.Receipt, error) {
 	return agentd.Receipt{}, errors.New("unexpected stop")
+}
+
+func (*recordingReporterController) Reject(context.Context, string, agentd.ControlRequest, agentd.ErrorCode) error {
+	return errors.New("unexpected reject")
 }
 
 func (c *recordingReporterController) CheckpointReporter(_ context.Context, _ string, _ agentd.ControlRequest, state agentd.ReporterState) error {
@@ -511,7 +618,7 @@ func TestCLIReporterRestartRetriesJournaledCompletionWithoutSecondEffect(t *test
 				t.Fatal("registration lease missing")
 			}
 			registeredLease = secret.WorkerLease
-			return json.Marshal(harnessSessionResponse{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: "codex"})
+			return json.Marshal(harnessSessionResponse{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: "codex", Workspace: &session.WorkspaceProvenance, AccountLabel: "unknown"})
 		case "heartbeat":
 			if raw, _ := io.ReadAll(stdin); string(raw) != registeredLease {
 				t.Fatal("heartbeat lease drift")

@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 171
+const latestSchemaVersion = 172
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()

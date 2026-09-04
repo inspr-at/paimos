@@ -42,18 +42,22 @@ func RegisterHarnessSessionRoutes(r chi.Router) {
 }
 
 type harnessRegisterRequest struct {
-	AgentName       string                     `json:"agent_name"`
-	Harness         string                     `json:"harness"`
-	Host            string                     `json:"host"`
-	SessionRef      string                     `json:"harness_session_ref"`
-	WorkerLease     string                     `json:"worker_lease"`
-	MessageTargetID string                     `json:"message_target_id"`
-	ManagementMode  string                     `json:"management_mode"`
-	Role            string                     `json:"role"`
-	ParentSessionID *string                    `json:"parent_harness_session_id"`
-	TicketID        *int64                     `json:"ticket_id"`
-	SteerMode       string                     `json:"steer_mode"`
-	Capabilities    models.HarnessCapabilities `json:"advertised_capabilities"`
+	AgentName              string                             `json:"agent_name"`
+	Harness                string                             `json:"harness"`
+	Host                   string                             `json:"host"`
+	SessionRef             string                             `json:"harness_session_ref"`
+	WorkerLease            string                             `json:"worker_lease"`
+	MessageTargetID        string                             `json:"message_target_id"`
+	ManagementMode         string                             `json:"management_mode"`
+	Role                   string                             `json:"role"`
+	ParentSessionID        *string                            `json:"parent_harness_session_id"`
+	TicketID               *int64                             `json:"ticket_id"`
+	SteerMode              string                             `json:"steer_mode"`
+	Capabilities           models.HarnessCapabilities         `json:"advertised_capabilities"`
+	Workspace              *models.HarnessWorkspaceProvenance `json:"workspace,omitempty"`
+	DispatchProfileID      string                             `json:"dispatch_profile_id,omitempty"`
+	DispatchProfileVersion string                             `json:"dispatch_profile_version,omitempty"`
+	AccountLabel           string                             `json:"account_label,omitempty"`
 }
 type heartbeatRequest struct {
 	Phase    string                          `json:"phase"`
@@ -160,7 +164,7 @@ func registerHarnessSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeHarnessJSON(w, r, &req) {
 		return
 	}
-	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, ParentSessionID: req.ParentSessionID, TicketID: req.TicketID, SteerMode: req.SteerMode, Capabilities: req.Capabilities, Authority: harnessRegistrationAuthority(r, projectID)})
+	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, ParentSessionID: req.ParentSessionID, TicketID: req.TicketID, SteerMode: req.SteerMode, Capabilities: req.Capabilities, Authority: harnessRegistrationAuthority(r, projectID), Workspace: req.Workspace, DispatchProfileID: req.DispatchProfileID, DispatchProfileVersion: req.DispatchProfileVersion, AccountLabel: req.AccountLabel})
 	if err != nil {
 		harnessProblem(w, err, "harness_session_register_failed", harnessStatus(err))
 		return
