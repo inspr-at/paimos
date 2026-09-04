@@ -2,6 +2,7 @@ package managedharness
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -114,6 +115,69 @@ func TestManagedSteerUsesCanonicalLeaseAndCompletion(t *testing.T) {
 	}
 	if state != "handed_off" || requested != "steer" || effective != "steer" || fallback != "" || handedOff == "" {
 		t.Fatalf("state=%s requested=%s effective=%s fallback=%s handed_off_at=%s", state, requested, effective, fallback, handedOff)
+	}
+}
+
+func TestInboxRegistrationUsesTransactionCurrentOrchestratorIdentity(t *testing.T) {
+	projectID, workerID := openManagedHarnessTestDB(t)
+	service := NewService(paimosdb.DB)
+	_, _, err := service.Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "private-thread-ref", WorkerLease: testWorkerLease,
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+		Authority: func(ctx context.Context, tx *sql.Tx) (bool, error) {
+			// Model a reassignment between middleware admission and registration.
+			// Target creation and the harness row must both see this transaction's
+			// current protected identity and roll back together.
+			if _, err := tx.ExecContext(ctx, `UPDATE instance_orchestrator SET project_agent_id=?,display_label='Worker',revision=1,
+				updated_by_user_id=(SELECT id FROM users WHERE username='harness-actor'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				WHERE singleton_id=1`, workerID); err != nil {
+				return false, err
+			}
+			return false, nil
+		},
+	})
+	var messageErr *agentmessage.CodedError
+	if !errors.As(err, &messageErr) || messageErr.Code != "agent_attention_target_forbidden" {
+		t.Fatalf("error=%v", err)
+	}
+	for label, query := range map[string]string{
+		"target":  `SELECT COUNT(*) FROM agent_message_targets WHERE project_id=? AND address='codex:worker'`,
+		"session": `SELECT COUNT(*) FROM harness_sessions WHERE project_id=? AND agent_name='worker'`,
+	} {
+		var count int
+		if err := paimosdb.DB.QueryRow(query, projectID).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s count=%d err=%v", label, count, err)
+		}
+	}
+	var orchestrator sql.NullInt64
+	if err := paimosdb.DB.QueryRow(`SELECT project_agent_id FROM instance_orchestrator WHERE singleton_id=1`).Scan(&orchestrator); err != nil || orchestrator.Valid {
+		t.Fatalf("orchestrator=%#v err=%v", orchestrator, err)
+	}
+}
+
+func TestInboxRegistrationRejectsTransactionRevocationWithoutWrite(t *testing.T) {
+	projectID, _ := openManagedHarnessTestDB(t)
+	_, _, err := NewService(paimosdb.DB).Register(context.Background(), RegisterInput{
+		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "private-thread-ref", WorkerLease: testWorkerLease,
+		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
+		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true},
+		Authority: func(context.Context, *sql.Tx) (bool, error) {
+			return false, &agentmessage.CodedError{Code: "agent_message_unauthorized", Err: errors.New("credential revoked")}
+		},
+	})
+	var messageErr *agentmessage.CodedError
+	if !errors.As(err, &messageErr) || messageErr.Code != "agent_message_unauthorized" {
+		t.Fatalf("error=%v", err)
+	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM agent_message_targets WHERE project_id=?`,
+		`SELECT COUNT(*) FROM harness_sessions WHERE project_id=?`,
+	} {
+		var count int
+		if err := paimosdb.DB.QueryRow(query, projectID).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("query=%q count=%d err=%v", query, count, err)
+		}
 	}
 }
 
