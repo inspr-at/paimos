@@ -150,18 +150,47 @@ func (s *Service) ResolveHeldMessage(ctx context.Context, in ResolveHeldMessageI
 		resolution_id,message_row_id,project_id,outcome,actor_user_id,actor_session_id,instance,idempotency_key_digest,request_digest)
 		VALUES(?,?,?,?,?,?,?,?,?)`, resolutionID, messageRowID, in.ProjectID, in.Outcome, actorUserID,
 		actorSessionID, instance, keyDigest[:], requestDigest[:]); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed: agent_message_human_resolutions.message_row_id") {
-			return nil, coded("agent_message_resolution_conflict", "held action request already has a human resolution")
-		}
-		if strings.Contains(err.Error(), "UNIQUE constraint failed: agent_message_human_resolutions.instance, agent_message_human_resolutions.project_id, agent_message_human_resolutions.actor_user_id, agent_message_human_resolutions.idempotency_key_digest") {
-			return nil, coded("agent_message_resolution_idempotency_conflict", "Idempotency-Key was already used for a different resolution")
-		}
-		return nil, fmt.Errorf("record human message resolution: %w", err)
+		insertErr := err
+		_ = tx.Rollback()
+		return s.classifyResolutionInsertFailure(ctx, in.ProjectID, messageRowID, actorUserID,
+			instance, keyDigest[:], requestDigest[:], insertErr)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.getHumanResolution(ctx, in.ProjectID, resolutionID)
+}
+
+// classifyResolutionInsertFailure re-reads durable state instead of depending
+// on driver-specific UNIQUE error text. A racing exact retry receives the
+// original result, conflicting durable facts keep their stable coded errors,
+// and an unrelated storage failure remains an error.
+func (s *Service) classifyResolutionInsertFailure(ctx context.Context, projectID, messageRowID, actorUserID int64,
+	instance string, keyDigest, requestDigest []byte, insertErr error) (*HumanResolution, error) {
+	var priorDigest []byte
+	var priorID string
+	err := s.db.QueryRowContext(ctx, `SELECT request_digest,resolution_id FROM agent_message_human_resolutions
+		WHERE instance=? AND project_id=? AND actor_user_id=? AND idempotency_key_digest=?`,
+		instance, projectID, actorUserID, keyDigest).Scan(&priorDigest, &priorID)
+	if err == nil {
+		if !bytes.Equal(priorDigest, requestDigest) {
+			return nil, coded("agent_message_resolution_idempotency_conflict", "Idempotency-Key was already used for a different resolution")
+		}
+		return s.getHumanResolution(ctx, projectID, priorID)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("verify human message resolution retry: %w", err)
+	}
+
+	var existing string
+	err = s.db.QueryRowContext(ctx, `SELECT resolution_id FROM agent_message_human_resolutions WHERE message_row_id=?`, messageRowID).Scan(&existing)
+	if err == nil {
+		return nil, coded("agent_message_resolution_conflict", "held action request already has a human resolution")
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("verify held message resolution retry: %w", err)
+	}
+	return nil, fmt.Errorf("record human message resolution: %w", insertErr)
 }
 
 func (s *Service) getHumanResolution(ctx context.Context, projectID int64, resolutionID string) (*HumanResolution, error) {

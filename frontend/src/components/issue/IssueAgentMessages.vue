@@ -117,23 +117,26 @@ async function resolve(message: AgentMessage, outcome: HumanResolutionOutcome) {
       <p v-for="(part, index) in message.parts" :key="index">{{ part.text }}</p>
       <footer>
         thread {{ message.thread_id }} · hop {{ message.hop }}
+        <strong v-if="message.is_action_request">Action request held: not delivered</strong>
+        <strong v-if="message.is_action_request && !message.human_resolution_outcome"
+          >Human decision required</strong
+        >
         <strong v-if="message.human_resolution_outcome === 'resolved'"
           >Human decision recorded: resolved</strong
         >
-        <strong v-else-if="message.human_resolution_outcome === 'dismissed'"
+        <strong v-if="message.human_resolution_outcome === 'dismissed'"
           >Human decision recorded: dismissed</strong
         >
-        <strong v-else-if="message.is_action_request"
-          >Action request held: human decision required</strong
+        <strong v-if="!message.is_action_request && !message.delivered"
+          >Held: {{ message.held_reason }}</strong
         >
-        <strong v-else-if="!message.delivered">Held: {{ message.held_reason }}</strong>
       </footer>
-      <div
-        v-if="message.is_action_request && !message.human_resolution_outcome"
-        class="agent-message__decision"
-      >
-        <p>This records a decision only. It does not execute or deliver the request.</p>
-        <div v-if="canEdit && projectId > 0" class="agent-message__decision-actions">
+      <div v-if="message.is_action_request" class="agent-message__decision">
+        <p>A decision records disposition only. It does not execute or deliver the request.</p>
+        <div
+          v-if="!message.human_resolution_outcome && canEdit && projectId > 0"
+          class="agent-message__decision-actions"
+        >
           <button
             type="button"
             :disabled="pending[message.message_id]"
@@ -150,7 +153,7 @@ async function resolve(message: AgentMessage, outcome: HumanResolutionOutcome) {
             Dismiss request
           </button>
         </div>
-        <p v-else class="agent-message__read-only">
+        <p v-else-if="!message.human_resolution_outcome" class="agent-message__read-only">
           Project edit access is required to record a decision.
         </p>
         <p v-if="resolutionErrors[message.message_id]" class="agent-message__error" role="alert">

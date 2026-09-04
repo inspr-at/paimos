@@ -608,6 +608,8 @@ func writeAgentMessageError(w http.ResponseWriter, r *http.Request, err error) {
 		switch code {
 		case "agent_message_idempotency_conflict", "agent_message_resolution_idempotency_conflict", "agent_message_resolution_conflict":
 			status = http.StatusConflict
+		case "agent_message_resolution_not_held_action":
+			status = http.StatusNotFound
 		case "agent_message_unauthorized", "agent_attention_unauthorized":
 			status = http.StatusUnauthorized
 		case "agent_message_forbidden", "agent_attention_forbidden", "agent_attention_target_forbidden":

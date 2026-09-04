@@ -413,10 +413,11 @@ ordinary send default unchanged. It creates one durable obligation in the
 same transaction as the message. Only a newly committed, accepted counterpart
 reply whose exact `reply_to` names that message closes it; held replies, inbox
 acknowledgement, delivery handoff, and delivery acknowledgement do not. Due
-obligations enter the configured orchestrator's bounded attention feed at most
-six times (after 5 minutes, 15 minutes, 1 hour, 4 hours, 12 hours, and 24
-hours), then remain open but quiet and stop being actionable immediately after
-closure.
+obligations become eligible for the configured orchestrator's bounded attention
+feed at most six times (after 5 minutes, 15 minutes, 1 hour, 4 hours, 12 hours,
+and 24 hours). An authorized attention/listen projection poll, not an autonomous
+wall-clock scheduler, advances an eligible generation. The obligation then
+remains open but quiet and stops being actionable immediately after closure.
 The resolution endpoint records an immutable `resolved` or `dismissed` audit
 fact for an already-held action request. It requires a human session with
 project-edit authority, refuses API-key principals and agent attribution,
@@ -424,7 +425,8 @@ stores value-free user/session attribution and
 digested idempotency material, and never releases or mutates the held row.
 Exact retries return the first record; a changed outcome returns HTTP 409.
 The issue detail is the session-authenticated producer and labels the two
-decisions explicitly. `GET /issues/:id/messages` returns only the content-free
+decisions explicitly while retaining the held/not-delivered label and a
+persistent no-execution/no-delivery disclaimer. `GET /issues/:id/messages` returns only the content-free
 `human_resolution_outcome`; audit actor/session fields are not projected.
 Listen and ack additionally require `X-Paimos-Agent-Name` to match the named
 addressee. Listen resumes from the greater of the supplied and durable cursor;

@@ -79,11 +79,11 @@ func TestHeldActionResolutionHTTPIsHumanOnlyAndIdempotent(t *testing.T) {
 		t.Fatalf("held attention=%#v err=%v", attentionBefore, err)
 	}
 
-	postResolution := func(outcome, key, agent string) *http.Response {
+	postResolutionFor := func(messageID, outcome, key, agent string) *http.Response {
 		t.Helper()
 		body, _ := json.Marshal(map[string]string{"outcome": outcome})
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost,
-			ts.srv.URL+"/api/projects/"+itoa(projectID)+"/messages/"+held.MessageID+"/resolution", bytes.NewReader(body))
+			ts.srv.URL+"/api/projects/"+itoa(projectID)+"/messages/"+messageID+"/resolution", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Cookie", ts.adminCookie)
 		req.Header.Set("Idempotency-Key", key)
@@ -95,6 +95,9 @@ func TestHeldActionResolutionHTTPIsHumanOnlyAndIdempotent(t *testing.T) {
 			t.Fatal(requestErr)
 		}
 		return response
+	}
+	postResolution := func(outcome, key, agent string) *http.Response {
+		return postResolutionFor(held.MessageID, outcome, key, agent)
 	}
 
 	keyResponse := ts.post(t, "/api/auth/api-keys", ts.adminCookie, map[string]string{"name": "resolution-machine"})
@@ -123,6 +126,23 @@ func TestHeldActionResolutionHTTPIsHumanOnlyAndIdempotent(t *testing.T) {
 	}
 	if resolutionCount != 0 {
 		t.Fatalf("forbidden principals committed %d human resolutions", resolutionCount)
+	}
+	unknown := postResolutionFor("00000000-0000-4000-8000-000000000905", "resolved", "unknown-resolution", "")
+	assertStatus(t, unknown, http.StatusNotFound)
+	nonAction, err := service.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "ordinary held message",
+		IdempotencyKey: "handler-held-non-action",
+	})
+	if err != nil || nonAction.Delivered || nonAction.IsActionRequest {
+		t.Fatalf("ordinary held message=%#v err=%v", nonAction, err)
+	}
+	notAction := postResolutionFor(nonAction.MessageID, "resolved", "non-action-resolution", "")
+	assertStatus(t, notAction, http.StatusNotFound)
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_human_resolutions`).Scan(&resolutionCount); err != nil {
+		t.Fatal(err)
+	}
+	if resolutionCount != 0 {
+		t.Fatalf("not-found resolution attempts committed %d facts", resolutionCount)
 	}
 	first := postResolution("resolved", "human-resolution", "")
 	assertStatus(t, first, http.StatusOK)
@@ -169,5 +189,27 @@ func TestHeldActionResolutionHTTPIsHumanOnlyAndIdempotent(t *testing.T) {
 		if strings.Contains(string(serialized), forbidden) {
 			t.Fatalf("issue projection leaked %q: %s", forbidden, serialized)
 		}
+	}
+
+	foreignProjectID := seedBatchProject(t, "OTHER", "OTH")
+	for _, name := range []string{"sender", "codex"} {
+		if _, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,?)`, foreignProjectID, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	foreignHeld, err := service.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+		ProjectID: foreignProjectID, Sender: "sender", To: "codex:codex", Body: "foreign action",
+		ActionRequest: true, IdempotencyKey: "foreign-held-action",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := postResolutionFor(foreignHeld.MessageID, "resolved", "foreign-resolution", "")
+	assertStatus(t, foreign, http.StatusNotFound)
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_human_resolutions`).Scan(&resolutionCount); err != nil {
+		t.Fatal(err)
+	}
+	if resolutionCount != 1 {
+		t.Fatalf("foreign resolution attempt changed durable fact count to %d", resolutionCount)
 	}
 }

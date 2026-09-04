@@ -200,7 +200,9 @@ Unauthorized or otherwise held replies and unrelated thread activity cannot
 satisfy it.
 
 Open obligations resurface only through bounded, content-free orchestrator
-attention records. The schedule emits at most six overdue records (5 minutes,
+attention records. Deadlines make an obligation eligible; an authorized
+attention/listen projection poll advances the schedule and emits the record.
+There is no autonomous wall-clock scheduler. Polling emits at most six overdue records (5 minutes,
 15 minutes, 1 hour, 4 hours, 12 hours, and 24 hours), then leaves the obligation
 open but quiet. A close transition removes old immutable attention facts from the actionable view
 without rewriting their history. The message's project and sender identity
@@ -221,8 +223,9 @@ message/project IDs, outcome, current user/session attribution, instance, and
 digests. It never changes `delivered`, the held reason, or message content.
 The same key and outcome replay the original record; changing the outcome or
 attempting a second disposition conflicts. The issue detail is the shipped
-producer: editors choose **Mark resolved** or **Dismiss request**, with copy
-that makes clear neither choice executes or delivers the request. Read-only
+producer: editors choose **Mark resolved** or **Dismiss request**, while the
+held/not-delivered state and a persistent disclaimer remain visible before
+and after either choice. Neither choice executes or delivers the request. Read-only
 users see the held state without mutation controls. The issue message response
 projects only `human_resolution_outcome`; actor/session attribution stays in
 the audit ledger.

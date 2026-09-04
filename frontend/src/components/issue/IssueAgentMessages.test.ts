@@ -70,7 +70,8 @@ describe('IssueAgentMessages security surfacing', () => {
     app.mount(root)
     await flush()
 
-    expect(root.textContent).toContain('Action request held: human decision required')
+    expect(root.textContent).toContain('Action request held: not delivered')
+    expect(root.textContent).toContain('Human decision required')
     expect(root.textContent).toContain('Held: sender not in receiver allowlist')
     expect(root.textContent).toContain('Restart the service')
     expect(root.textContent).toContain('Project edit access is required to record a decision.')
@@ -105,7 +106,7 @@ describe('IssueAgentMessages security surfacing', () => {
       'Dismiss request',
     ])
     expect(root.textContent).toContain(
-      'This records a decision only. It does not execute or deliver the request.',
+      'A decision records disposition only. It does not execute or deliver the request.',
     )
     buttons[0].click()
     await flush()
@@ -118,6 +119,11 @@ describe('IssueAgentMessages security surfacing', () => {
       expect.any(String),
     )
     expect(root.textContent).toContain('Human decision recorded: resolved')
+    expect(root.textContent).toContain('Action request held: not delivered')
+    expect(root.textContent).toContain(
+      'A decision records disposition only. It does not execute or deliver the request.',
+    )
+    expect(root.textContent).not.toContain('Human decision required')
     expect(root.querySelector('button')).toBeNull()
 
     app.unmount()

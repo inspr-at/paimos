@@ -5,9 +5,11 @@ package agentmessage
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -338,6 +340,83 @@ func TestReplyObligationResurfacesWithBoundedBackoffAndStopsOnReply(t *testing.T
 	}
 }
 
+func TestReplyObligationConcurrentProjectionClaimsOneGeneration(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	if _, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:codex", Adapter: AdapterCodex,
+		TargetKind: TargetKindCodexThread, TargetRef: "01a069e0-f6b5-70d1-a487-02d1d00f1021",
+		MaximumLevel: "simple", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	allowBusSender(t, service, projectID, "codex:codex")
+	original, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "answer requested",
+		ExpectsReply: true, IdempotencyKey: "concurrent-resurface-original",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE agent_reply_obligations SET next_attention_at='2000-01-01T00:00:00.000Z'
+		WHERE message_row_id=?`, original.Cursor); err != nil {
+		t.Fatal(err)
+	}
+
+	const readers = 12
+	start := make(chan struct{})
+	results := make(chan struct {
+		inserted int64
+		err      error
+	}, readers)
+	var wg sync.WaitGroup
+	for range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			inserted, err := service.ProjectAttention(context.Background())
+			results <- struct {
+				inserted int64
+				err      error
+			}{inserted, err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var total int64
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent projection: %v", result.err)
+		}
+		total += result.inserted
+	}
+	if total != 1 {
+		var allItems, replyItems, resurfaceEvents int
+		_ = paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_items`).Scan(&allItems)
+		_ = paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_items WHERE source_kind='reply_obligation'`).Scan(&replyItems)
+		_ = paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_reply_obligation_events WHERE event_kind='resurfaced'`).Scan(&resurfaceEvents)
+		t.Fatalf("concurrent projections inserted=%d want 1; all/reply/events=%d/%d/%d", total, allItems, replyItems, resurfaceEvents)
+	}
+	state, count, closing := obligationState(t, original.MessageID)
+	if state != "open" || count != 1 || closing.Valid {
+		t.Fatalf("obligation=%s/%d/%+v", state, count, closing)
+	}
+	var items, events int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_items
+		WHERE source_kind='reply_obligation' AND source_id=? AND source_sequence=1`, original.MessageID).Scan(&items); err != nil {
+		t.Fatal(err)
+	}
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_reply_obligation_events
+		WHERE message_row_id=? AND event_kind='resurfaced' AND event_sequence=1`, original.Cursor).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if items != 1 || events != 1 {
+		t.Fatalf("concurrent generation items/events=%d/%d", items, events)
+	}
+}
+
 func TestClosedReplyAndResolvedActionDisappearFromActionableAttention(t *testing.T) {
 	service, projectID := openBusTestDB(t)
 	actorID := configureAttentionReceiver(t, service, projectID)
@@ -463,6 +542,39 @@ func TestHumanResolutionIsImmutableValueFreeAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	keyDigest := sha256.Sum256([]byte("ppm\x00held-message-resolution\x00" + input.IdempotencyKey))
+	requestDigest := sha256.Sum256([]byte(input.MessageID + "\x00" + input.Outcome))
+	insertFailure := errors.New("driver-specific insert failure")
+	fallbackReplay, err := service.classifyResolutionInsertFailure(context.Background(), projectID, held.Cursor,
+		actorID, "ppm", keyDigest[:], requestDigest[:], insertFailure)
+	if err != nil || fallbackReplay.ResolutionID != first.ResolutionID {
+		t.Fatalf("insert-failure replay=%#v err=%v", fallbackReplay, err)
+	}
+	differentRequest := sha256.Sum256([]byte(input.MessageID + "\x00resolved"))
+	if _, err := service.classifyResolutionInsertFailure(context.Background(), projectID, held.Cursor,
+		actorID, "ppm", keyDigest[:], differentRequest[:], insertFailure); err == nil {
+		t.Fatal("insert-failure replay accepted changed request")
+	} else {
+		var codedErr *CodedError
+		if !errors.As(err, &codedErr) || codedErr.Code != "agent_message_resolution_idempotency_conflict" {
+			t.Fatalf("insert-failure changed request error=%v", err)
+		}
+	}
+	secondDigest := sha256.Sum256([]byte("ppm\x00held-message-resolution\x00second-resolution-key"))
+	if _, err := service.classifyResolutionInsertFailure(context.Background(), projectID, held.Cursor,
+		actorID, "ppm", secondDigest[:], requestDigest[:], insertFailure); err == nil {
+		t.Fatal("insert failure ignored existing message resolution")
+	} else {
+		var codedErr *CodedError
+		if !errors.As(err, &codedErr) || codedErr.Code != "agent_message_resolution_conflict" {
+			t.Fatalf("insert-failure message conflict error=%v", err)
+		}
+	}
+	missingDigest := sha256.Sum256([]byte("ppm\x00held-message-resolution\x00missing-resolution-key"))
+	if _, err := service.classifyResolutionInsertFailure(context.Background(), projectID, held.Cursor+999,
+		actorID, "ppm", missingDigest[:], requestDigest[:], insertFailure); !errors.Is(err, insertFailure) {
+		t.Fatalf("unrelated insert failure was not preserved: %v", err)
+	}
 	replay, err := service.ResolveHeldMessage(context.Background(), input)
 	if err != nil || replay.ResolutionID != first.ResolutionID {
 		t.Fatalf("resolution replay=%#v err=%v", replay, err)
@@ -508,6 +620,72 @@ func TestHumanResolutionIsImmutableValueFreeAndIdempotent(t *testing.T) {
 	}
 	if _, err := paimosdb.DB.Exec(`UPDATE agent_message_human_resolutions SET outcome='resolved' WHERE resolution_id=?`, first.ResolutionID); err == nil {
 		t.Fatal("immutable human resolution was rewritten")
+	}
+}
+
+func TestHumanResolutionConcurrentExactRetryReturnsOneDurableFact(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	actor, err := paimosdb.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES('concurrent-resolver','disabled','admin','active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorID, _ := actor.LastInsertId()
+	held, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "human decision requested",
+		ActionRequest: true, IdempotencyKey: "concurrent-held-action",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := ResolveHeldMessageInput{
+		ProjectID: projectID, MessageID: held.MessageID, Outcome: "resolved", IdempotencyKey: "concurrent-resolution",
+		Authority: func(context.Context, *sql.Tx) (int64, string, error) {
+			return actorID, "session:concurrent-resolution", nil
+		},
+	}
+
+	const writers = 8
+	start := make(chan struct{})
+	results := make(chan struct {
+		resolution *HumanResolution
+		err        error
+	}, writers)
+	var wg sync.WaitGroup
+	for range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			resolution, err := service.ResolveHeldMessage(context.Background(), input)
+			results <- struct {
+				resolution *HumanResolution
+				err        error
+			}{resolution, err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var resolutionID string
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent exact retry: %v", result.err)
+		}
+		if result.resolution == nil || result.resolution.ResolutionID == "" {
+			t.Fatalf("concurrent result=%#v", result.resolution)
+		}
+		if resolutionID == "" {
+			resolutionID = result.resolution.ResolutionID
+		} else if result.resolution.ResolutionID != resolutionID {
+			t.Fatalf("resolution IDs differ: %q != %q", result.resolution.ResolutionID, resolutionID)
+		}
+	}
+	var count int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_human_resolutions WHERE message_row_id=?`, held.Cursor).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("durable resolutions=%d want 1", count)
 	}
 }
 

@@ -17,6 +17,12 @@ calendar form `yy.mm.dd[.hh.mm]`.
 
 ## [Unreleased]
 
+### Added — Durable reply obligations and held-request decisions (PAI-905)
+
+- Added opt-in, exact-counterpart reply obligations with bounded, poll-driven
+  overdue attention, plus immutable session-authenticated human dispositions
+  for held action requests that never execute, deliver, or mutate the request.
+
 ### Added — Bounded worker fleet projection (PAI-904)
 
 - Added one versioned, worker-rooted read model shared by Agent Mode project
