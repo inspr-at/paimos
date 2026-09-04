@@ -22,6 +22,7 @@
     "held_reason": { "type": "string" },
     "is_action_request": { "type": "boolean" },
     "expects_reply": { "type": "boolean", "description": "True only when this message opened a durable exact-reply obligation" },
+    "human_resolution_outcome": { "enum": ["resolved", "dismissed"], "description": "Content-free authoritative human disposition of a held action request; human/session attribution remains private" },
     "created_at": { "type": "string" },
     "read_at": { "type": "string", "description": "Set when the receiver durably acknowledges this row" },
     "delivery_level": { "enum": ["simple", "steer"] },

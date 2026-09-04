@@ -1541,7 +1541,11 @@ async function cancelEdit() {
     <IssueAttachments ref="attachmentsRef" :issue-id="issueId" :can-edit="canEditThisProject" />
 
     <!-- Comments -->
-    <IssueAgentMessages :issue-id="issueId" />
+    <IssueAgentMessages
+      :issue-id="issueId"
+      :project-id="effectiveProjectId ?? 0"
+      :can-edit="canEditThisProject"
+    />
 
     <IssueComments
       ref="commentsRef"

@@ -195,10 +195,14 @@ PAIMOS_AGENT_NAME=worker paimos tell paimos:coordinator --project PAI \
 
 Human review of a held action request is a separate immutable disposition,
 not a release operation. It is available only through the session-authenticated
-HTTP/UI control plane; API-key automation and agent-attributed requests cannot
-author a human decision. The operator supplies an opaque retry key to the
-resolution endpoint. An exact retry is stable, while a different outcome
-conflicts.
+HTTP/UI control plane; the issue detail shows explicit **Mark resolved** and
+**Dismiss request** choices to users with project-edit access. Both choices
+record only the decision and never execute or deliver the held request.
+API-key automation and agent-attributed requests cannot author a human
+decision. The browser supplies an opaque retry key to the resolution endpoint.
+An exact retry is stable, while a different outcome conflicts. Issue message
+reads expose only the outcome; audit-only user/session attribution is not
+projected into the UI response.
 
 Neither an obligation nor a resolution invents a PAI-903 hierarchy binding.
 The stored `sender_agent_id` preserves the original project-scoped sender as

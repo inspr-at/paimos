@@ -571,7 +571,8 @@ const envelopeSelect = `SELECT am.id,am.message_id,am.context_id,am.task_id,am.r
 	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_primary_target_id),''),
 	COALESCE(am.delivery_fallback_target_id,''),
 	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_fallback_target_id),'')
-	,am.expects_reply
+	,am.expects_reply,
+	COALESCE((SELECT outcome FROM agent_message_human_resolutions WHERE message_row_id=am.id),'')
 	FROM agent_messages am
 	LEFT JOIN project_agents sender ON sender.id=am.from_agent_id
 	LEFT JOIN project_agents receiver ON receiver.id=am.to_agent_id
@@ -583,7 +584,7 @@ func scanEnvelope(row scanner) (*Envelope, error) {
 	var e Envelope
 	var parts, metadata, primaryID, primaryKind, fallbackID, fallbackKind string
 	if err := row.Scan(&e.Cursor, &e.MessageID, &e.ContextID, &e.TaskID, &e.Role, &parts, &metadata, &e.From, &e.To, &e.ReplyTo, &e.ThreadID, &e.Hop, &e.Delivered, &e.HeldReason, &e.IsActionRequest, &e.CreatedAt, &e.ReadAt,
-		&e.DeliveryLevel, &e.DeliveryFallback, &primaryID, &primaryKind, &fallbackID, &fallbackKind, &e.ExpectsReply); err != nil {
+		&e.DeliveryLevel, &e.DeliveryFallback, &primaryID, &primaryKind, &fallbackID, &fallbackKind, &e.ExpectsReply, &e.HumanResolutionOutcome); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(parts), &e.Parts); err != nil {

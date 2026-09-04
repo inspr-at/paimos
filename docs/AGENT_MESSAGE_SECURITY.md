@@ -220,7 +220,12 @@ value-free record containing only the
 message/project IDs, outcome, current user/session attribution, instance, and
 digests. It never changes `delivered`, the held reason, or message content.
 The same key and outcome replay the original record; changing the outcome or
-attempting a second disposition conflicts.
+attempting a second disposition conflicts. The issue detail is the shipped
+producer: editors choose **Mark resolved** or **Dismiss request**, with copy
+that makes clear neither choice executes or delivers the request. Read-only
+users see the held state without mutation controls. The issue message response
+projects only `human_resolution_outcome`; actor/session attribution stays in
+the audit ledger.
 
 ## Usage Example
 
@@ -253,7 +258,7 @@ Canonical-ledger and delivery-boundary tests cover all security controls:
 - `TestEnvelopeLedgerEnforcesBodyCap`: canonical oversized-body rejection
 - `TestCanonicalEnvelopeHoldsAndSurfacesExplicitActionRequests`: typed marker, heuristic fallback, secret rejection, DB invariant, and issue visibility
 - `TestFrameAgentEnvelopePutsTrustedBoundaryBeforeSpoofedBody`: server framing remains ahead of an attempted nested wrapper
-- `IssueAgentMessages security surfacing`: held action requests and unauthorized messages remain visibly human-only
+- `IssueAgentMessages security surfacing`: held action requests and unauthorized messages remain visibly human-only; session-authorized resolve/dismiss controls use stable retry keys and content-free failures
 - durable-listen integration tests: attribution binding, bounded replay,
   monotonic acknowledgement, `read_at`, and future-cursor rejection
 

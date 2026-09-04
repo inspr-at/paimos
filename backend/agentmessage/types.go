@@ -59,28 +59,32 @@ type DeliveryWork struct {
 // Envelope is the canonical project-scoped message contract (PAI-815).
 // Numeric database IDs are deliberately absent from the public shape.
 type Envelope struct {
-	Cursor           int64                   `json:"cursor"`
-	MessageID        string                  `json:"message_id"`
-	ContextID        string                  `json:"context_id"`
-	TaskID           string                  `json:"task_id,omitempty"`
-	Role             string                  `json:"role"`
-	Parts            []TextPart              `json:"parts"`
-	Metadata         map[string]any          `json:"metadata"`
-	From             string                  `json:"from"`
-	To               string                  `json:"to"`
-	ReplyTo          string                  `json:"reply_to,omitempty"`
-	ThreadID         string                  `json:"thread_id"`
-	Hop              int                     `json:"hop"`
-	Delivered        bool                    `json:"delivered"`
-	HeldReason       string                  `json:"held_reason,omitempty"`
-	IsActionRequest  bool                    `json:"is_action_request"`
-	ExpectsReply     bool                    `json:"expects_reply"`
-	CreatedAt        string                  `json:"created_at"`
-	ReadAt           string                  `json:"read_at,omitempty"`
-	DeliveryLevel    string                  `json:"delivery_level"`
-	DeliveryFallback string                  `json:"delivery_fallback"`
-	DeliveryTarget   *DeliveryTargetSnapshot `json:"delivery_target"`
-	DeliveryWork     *DeliveryWork           `json:"delivery_work,omitempty"`
+	Cursor          int64          `json:"cursor"`
+	MessageID       string         `json:"message_id"`
+	ContextID       string         `json:"context_id"`
+	TaskID          string         `json:"task_id,omitempty"`
+	Role            string         `json:"role"`
+	Parts           []TextPart     `json:"parts"`
+	Metadata        map[string]any `json:"metadata"`
+	From            string         `json:"from"`
+	To              string         `json:"to"`
+	ReplyTo         string         `json:"reply_to,omitempty"`
+	ThreadID        string         `json:"thread_id"`
+	Hop             int            `json:"hop"`
+	Delivered       bool           `json:"delivered"`
+	HeldReason      string         `json:"held_reason,omitempty"`
+	IsActionRequest bool           `json:"is_action_request"`
+	ExpectsReply    bool           `json:"expects_reply"`
+	// HumanResolutionOutcome is the content-free authoritative disposition of
+	// a held action request. The human/session attribution remains in the
+	// private audit ledger and is deliberately not projected with messages.
+	HumanResolutionOutcome string                  `json:"human_resolution_outcome,omitempty"`
+	CreatedAt              string                  `json:"created_at"`
+	ReadAt                 string                  `json:"read_at,omitempty"`
+	DeliveryLevel          string                  `json:"delivery_level"`
+	DeliveryFallback       string                  `json:"delivery_fallback"`
+	DeliveryTarget         *DeliveryTargetSnapshot `json:"delivery_target"`
+	DeliveryWork           *DeliveryWork           `json:"delivery_work,omitempty"`
 }
 
 // InboxPage is an attributed receiver read. Cursor is the durable acknowledged

@@ -423,6 +423,9 @@ project-edit authority, refuses API-key principals and agent attribution,
 stores value-free user/session attribution and
 digested idempotency material, and never releases or mutates the held row.
 Exact retries return the first record; a changed outcome returns HTTP 409.
+The issue detail is the session-authenticated producer and labels the two
+decisions explicitly. `GET /issues/:id/messages` returns only the content-free
+`human_resolution_outcome`; audit actor/session fields are not projected.
 Listen and ack additionally require `X-Paimos-Agent-Name` to match the named
 addressee. Listen resumes from the greater of the supplied and durable cursor;
 acknowledgement is monotonic and rejects cursors that are not delivered rows in

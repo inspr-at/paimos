@@ -6,6 +6,7 @@ package handlers_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -13,22 +14,69 @@ import (
 
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/secretvault"
 )
 
 func TestHeldActionResolutionHTTPIsHumanOnlyAndIdempotent(t *testing.T) {
+	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "ppm")
+	t.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	secretvault.ResetForTest()
+	t.Cleanup(secretvault.ResetForTest)
 	ts := newTestServer(t)
 	projectID := seedBatchProject(t, "PAIMOS", "PAI")
-	for _, name := range []string{"sender", "codex"} {
+	var issueID int64
+	issue, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status)
+		VALUES(?,905,'ticket','Human resolution UI','in-progress')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ = issue.LastInsertId()
+	for _, name := range []string{"sender", "codex", "amy"} {
 		if _, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,?)`, projectID, name); err != nil {
 			t.Fatal(err)
 		}
 	}
-	held, err := agentmessage.NewService(db.DB).SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
+	var orchestratorAgentID, adminUserID int64
+	if err := db.DB.QueryRow(`SELECT id FROM project_agents WHERE project_id=? AND name='amy'`, projectID).Scan(&orchestratorAgentID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.QueryRow(`SELECT id FROM users WHERE username='admin'`).Scan(&adminUserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`UPDATE instance_orchestrator SET project_agent_id=?,display_label='Amy',revision=1,
+		updated_by_user_id=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton_id=1`, orchestratorAgentID, adminUserID); err != nil {
+		t.Fatal(err)
+	}
+	service := agentmessage.NewService(db.DB)
+	if _, err := service.RegisterTarget(context.Background(), agentmessage.RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:amy", Adapter: agentmessage.AdapterCodex,
+		TargetKind: agentmessage.TargetKindCodexThread, TargetRef: "01a069e0-f6b5-70d1-a487-02d1d00f1019",
+		MaximumLevel: "simple", Role: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 0 {
+		t.Fatalf("bootstrap attention projection=%d err=%v", inserted, err)
+	}
+	held, err := service.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{
 		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "human decision",
-		ActionRequest: true, IdempotencyKey: "handler-held-action",
+		IssueID: &issueID, ActionRequest: true, IdempotencyKey: "handler-held-action",
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 1 {
+		var maxMessage, heldCursor, attentionRows int64
+		_ = db.DB.QueryRow(`SELECT COALESCE(MAX(id),0) FROM agent_messages`).Scan(&maxMessage)
+		_ = db.DB.QueryRow(`SELECT source_row_id FROM agent_attention_projection_cursors WHERE receiver_project_agent_id=? AND source_kind='held_agent_message'`, orchestratorAgentID).Scan(&heldCursor)
+		_ = db.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_items`).Scan(&attentionRows)
+		t.Fatalf("held attention projection=%d err=%v max_message=%d cursor=%d rows=%d held=%#v", inserted, err, maxMessage, heldCursor, attentionRows, held)
+	}
+	attentionBefore, err := service.ListAttention(context.Background(), agentmessage.AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy",
+	})
+	if err != nil || len(attentionBefore.Items) != 1 || attentionBefore.Items[0].SourceID != held.MessageID {
+		t.Fatalf("held attention=%#v err=%v", attentionBefore, err)
 	}
 
 	postResolution := func(outcome, key, agent string) *http.Response {
@@ -90,4 +138,36 @@ func TestHeldActionResolutionHTTPIsHumanOnlyAndIdempotent(t *testing.T) {
 	}
 	conflict := postResolution("dismissed", "human-resolution", "")
 	assertStatus(t, conflict, http.StatusConflict)
+
+	attentionAfter, err := service.ListAttention(context.Background(), agentmessage.AttentionInput{
+		ProjectID: projectID, Address: "codex:amy", Agent: "amy",
+	})
+	if err != nil || len(attentionAfter.Items) != 0 {
+		t.Fatalf("resolved request remained actionable: %#v err=%v", attentionAfter, err)
+	}
+	var delivered int
+	var heldReason, partsJSON string
+	if err := db.DB.QueryRow(`SELECT delivered,held_reason,parts_json FROM agent_messages WHERE message_id=?`, held.MessageID).
+		Scan(&delivered, &heldReason, &partsJSON); err != nil {
+		t.Fatal(err)
+	}
+	if delivered != 0 || heldReason != held.HeldReason || partsJSON != `[{"kind":"text","text":"human decision"}]` {
+		t.Fatalf("resolution mutated held row: delivered=%d held_reason=%q parts=%q", delivered, heldReason, partsJSON)
+	}
+	listResponse := ts.get(t, "/api/issues/"+itoa(issueID)+"/messages", ts.adminCookie)
+	assertStatus(t, listResponse, http.StatusOK)
+	var listed []map[string]any
+	decode(t, listResponse, &listed)
+	if len(listed) != 1 || listed[0]["human_resolution_outcome"] != "resolved" {
+		t.Fatalf("resolved issue messages=%#v", listed)
+	}
+	serialized, err := json.Marshal(listed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"actor_user_id", "actor_session_id", "resolution_id", "idempotency"} {
+		if strings.Contains(string(serialized), forbidden) {
+			t.Fatalf("issue projection leaked %q: %s", forbidden, serialized)
+		}
+	}
 }
