@@ -655,6 +655,40 @@ version-0 run responses remain compatible.
 
 ## Agent Mode delivery snapshots and events
 
+The worker fleet projection is a separate, worker-rooted Agent Mode read model:
+
+```text
+GET /agent-mode/worker-fleet/v1?zoom=10
+GET /agent-mode/projects/:projectID/worker-fleet/v1?zoom=10
+```
+
+Both routes use the same projection logic and the Agent Mode authorization
+boundary. `zoom` is a canonical positive decimal string; detail, overview,
+aggregate, and far bands return at most 100 workers. Responses always report
+the exact retained worker/project totals visible in scope, sampled and omitted
+counts, and `sample_truncated`. The retained fleet includes every non-terminal
+session plus the newest terminal generation per project agent; the explicit
+`terminal_generations_per_agent` provenance value pins that history bound. A
+parent ID may therefore be present while
+`parent_in_sample=false`.
+
+Each worker reports the current harness-session hierarchy and ticket binding,
+revision, effective controls, and liveness observed at one response timestamp.
+Missing, malformed, stale, unmanaged, or otherwise untrusted reporter evidence
+is `unknown`, never idle. `dead` requires a terminal projection confirmed by
+the agentd reporter or control plane; `liveness.source` distinguishes them.
+Fresh managed workers may steer, while interrupt and stop remain available for
+a non-terminal stale worker so operators can recover it. Recent communication
+is capped at four entries per worker and is
+limited to IDs, levels, timestamps, delivery state, and fallback/error codes;
+each item says `attribution=project_agent` because messages do not identify a
+specific harness generation. These content-free summaries are intentionally
+visible to every internal project viewer; message bodies, target references,
+and privileged delivery internals never enter this schema. Progress and
+ETA remain null unless the existing delivery-trust projection marks each field
+trusted. Provenance currently says `authoritative_database`, `cache=none`, and
+`remote_cache=false`; a future remote cache must change those fields honestly.
+
 ```
 GET    /agent-mode/deliveries                         internal snapshot
 GET    /agent-mode/projects/:projectID/deliveries     project-audience snapshot

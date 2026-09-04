@@ -2095,6 +2095,58 @@
           "totals": {"$ref": "#/components/schemas/SessionHomeZoomTotalsV1"}
         }
       },
+      "WorkerFleetSnapshotV1": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema_version", "observed_at", "scope", "zoom", "band", "sample_limit", "sample_truncated", "totals", "projects", "workers", "provenance"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "scope": {"type": "object", "additionalProperties": false, "required": ["kind", "project_id"], "properties": {"kind": {"type": "string", "enum": ["portfolio", "project"]}, "project_id": {"type": ["integer", "null"], "format": "int64"}}},
+          "zoom": {"type": "string", "pattern": "^[1-9][0-9]{0,63}$", "minLength": 1, "maxLength": 64, "default": "10"},
+          "band": {"type": "string", "enum": ["detail", "overview", "aggregate", "far"]},
+          "sample_limit": {"type": "integer", "minimum": 1, "maximum": 100},
+          "sample_truncated": {"type": "boolean"},
+          "totals": {
+            "type": "object", "additionalProperties": false,
+            "required": ["projects", "sampled_projects", "omitted_projects", "workers", "sampled_workers", "omitted_workers"],
+            "properties": {
+              "projects": {"type": "integer", "format": "int64", "minimum": 0}, "sampled_projects": {"type": "integer", "minimum": 0, "maximum": 100}, "omitted_projects": {"type": "integer", "format": "int64", "minimum": 0},
+              "workers": {"type": "integer", "format": "int64", "minimum": 0}, "sampled_workers": {"type": "integer", "minimum": 0, "maximum": 100}, "omitted_workers": {"type": "integer", "format": "int64", "minimum": 0}
+            }
+          },
+          "projects": {
+            "type": "array", "maxItems": 100, "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["id", "key", "name", "total_workers", "sampled_workers", "omitted_workers", "orchestrator"],
+              "properties": {
+                "id": {"type": "integer", "format": "int64", "minimum": 1}, "key": {"type": "string"}, "name": {"type": "string"},
+                "total_workers": {"type": "integer", "format": "int64", "minimum": 0}, "sampled_workers": {"type": "integer", "minimum": 0}, "omitted_workers": {"type": "integer", "format": "int64", "minimum": 0},
+                "orchestrator": {"type": "object", "additionalProperties": false, "required": ["state", "reason", "session_id"], "properties": {"state": {"type": "string", "enum": ["resolved", "unset", "ambiguous"]}, "reason": {"type": "string", "enum": ["single_active_coordinator", "no_active_coordinator", "multiple_active_coordinators", "coordinator_unknown"]}, "session_id": {"type": ["string", "null"], "format": "uuid"}}}
+              }
+            }
+          },
+          "workers": {
+            "type": "array", "maxItems": 100, "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["harness_session_id", "parent_harness_session_id", "parent_in_sample", "project", "agent", "role", "harness", "management_mode", "ticket", "phase", "revision", "liveness", "capabilities", "recent_communication", "recent_communication_omitted", "delivery_trust"],
+              "properties": {
+                "harness_session_id": {"type": "string", "format": "uuid"}, "parent_harness_session_id": {"type": ["string", "null"], "format": "uuid"}, "parent_in_sample": {"type": "boolean"},
+                "project": {"type": "object", "additionalProperties": false, "required": ["id", "key", "name"], "properties": {"id": {"type": "integer", "format": "int64", "minimum": 1}, "key": {"type": "string"}, "name": {"type": "string"}}},
+                "agent": {"type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": {"id": {"type": "integer", "format": "int64", "minimum": 1}, "name": {"type": "string"}}},
+                "role": {"type": "string", "enum": ["coordinator", "worker"]}, "harness": {"type": "string"}, "management_mode": {"type": "string", "enum": ["managed", "unmanaged"]},
+                "ticket": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["id", "details_available", "key", "title"], "properties": {"id": {"type": "integer", "format": "int64", "minimum": 1}, "details_available": {"type": "boolean"}, "key": {"type": ["string", "null"]}, "title": {"type": ["string", "null"]}}}, {"type": "null"}]},
+                "phase": {"type": "string", "enum": ["starting", "working", "yielded", "stopping", "stopped"]}, "revision": {"type": "integer", "format": "int64", "minimum": 1},
+                "liveness": {"type": "object", "additionalProperties": false, "required": ["state", "reason", "observed_at", "source", "reporter_age_seconds"], "properties": {"state": {"type": "string", "enum": ["busy", "idle", "unknown", "dead"]}, "reason": {"type": "string"}, "observed_at": {"type": "string", "format": "date-time"}, "source": {"type": "string", "enum": ["agentd_reporter", "control_plane", "unmanaged", "unknown"]}, "reporter_age_seconds": {"type": ["integer", "null"], "format": "int64", "minimum": 0}, "closed_reason": {"type": "string"}}},
+                "capabilities": {"type": "object", "additionalProperties": false, "required": ["inbox", "status", "steer", "interrupt", "stop"], "properties": {"inbox": {"type": "boolean"}, "status": {"type": "boolean"}, "steer": {"type": "boolean"}, "interrupt": {"type": "boolean"}, "stop": {"type": "boolean"}}},
+                "recent_communication": {"type": "array", "maxItems": 4, "items": {"type": "object", "additionalProperties": false, "required": ["message_id", "delivery_id", "direction", "attribution", "requested_level", "effective_level", "state", "fallback_code", "error_code", "occurred_at"], "properties": {"message_id": {"type": "string"}, "delivery_id": {"type": ["string", "null"]}, "direction": {"type": "string", "enum": ["incoming", "outgoing"]}, "attribution": {"type": "string", "const": "project_agent"}, "requested_level": {"type": ["string", "null"], "enum": ["simple", "steer", null]}, "effective_level": {"type": ["string", "null"], "enum": ["simple", "steer", null]}, "state": {"type": ["string", "null"]}, "fallback_code": {"type": ["string", "null"]}, "error_code": {"type": ["string", "null"]}, "occurred_at": {"type": "string", "format": "date-time"}}}},
+                "recent_communication_omitted": {"type": "integer", "format": "int64", "minimum": 0},
+                "delivery_trust": {"type": "object", "additionalProperties": false, "required": ["progress_trusted", "eta_trusted", "reason", "trust_revision", "observed_at", "progress_percent", "eta"], "properties": {"progress_trusted": {"type": "boolean"}, "eta_trusted": {"type": "boolean"}, "reason": {"type": "string", "enum": ["trusted", "ticket_unbound", "trust_unavailable", "trust_malformed", "no_estimate", "terminal_complete", "cancelled", "terminal_failed", "waiting_on_human", "blocked", "stale", "unknown_reporter", "no_signal", "estimate_expired", "outlier_heavy", "insufficient_basis", "missing_contributor"]}, "trust_revision": {"type": ["string", "null"]}, "observed_at": {"type": ["string", "null"], "format": "date-time"}, "progress_percent": {"type": ["integer", "null"], "minimum": 0, "maximum": 100}, "eta": {"type": ["string", "null"], "format": "date-time"}}}
+              }
+            }
+          },
+          "provenance": {"type": "object", "additionalProperties": false, "required": ["source", "cache", "remote_cache", "projection_version", "terminal_generations_per_agent"], "properties": {"source": {"type": "string", "const": "authoritative_database"}, "cache": {"type": "string", "const": "none"}, "remote_cache": {"type": "boolean", "const": false}, "projection_version": {"type": "integer", "const": 1}, "terminal_generations_per_agent": {"type": "integer", "const": 1}}}
+        }
+      },
       "ProductSession": {
         "type": "object", "additionalProperties": false,
         "description": "A first-class product session. product_session_id is never an attribution UUID/header session, harness_session_id, agent_run_id, delivery identity, or intake_session_id.",
@@ -4739,6 +4791,34 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/agent-mode/worker-fleet/v1": {
+      "get": {
+        "tags": ["agent-mode"],
+        "summary": "Read the bounded authorized worker fleet",
+        "description": "Returns the versioned worker-rooted portfolio projection. The sample is bounded to 100, with exact in-band omitted counts, explicit liveness uncertainty, hierarchy/ticket bindings, effective capabilities, bounded content-free communication metadata, delivery-trust-gated progress/ETA, and local authoritative provenance.",
+        "parameters": [{"name": "zoom", "in": "query", "schema": {"type": "string", "pattern": "^[1-9][0-9]{0,63}$", "default": "10"}}],
+        "responses": {
+          "200": {"description": "Authorized bounded worker fleet", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkerFleetSnapshotV1"}}}},
+          "400": {"description": "Malformed or duplicate zoom query"},
+          "404": {"description": "Canonical indistinguishable response for external callers"},
+          "500": {"description": "Private storage-invariant failure; no partial snapshot is returned"}
+        }
+      }
+    },
+    "/api/agent-mode/projects/{projectID}/worker-fleet/v1": {
+      "get": {
+        "tags": ["agent-mode"],
+        "summary": "Read one bounded authorized project worker fleet",
+        "description": "Uses the same projection and semantic-zoom sampling logic as the portfolio route. Missing and inaccessible project scopes share the canonical Agent Mode 404 response.",
+        "parameters": [{"$ref": "#/components/parameters/AgentModeProjectPath"}, {"name": "zoom", "in": "query", "schema": {"type": "string", "pattern": "^[1-9][0-9]{0,63}$", "default": "10"}}],
+        "responses": {
+          "200": {"description": "Authorized bounded project worker fleet", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "private, no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkerFleetSnapshotV1"}}}},
+          "400": {"description": "Malformed project id or zoom query"},
+          "404": {"description": "Canonical indistinguishable response for missing, inaccessible, and external project scopes"},
+          "500": {"description": "Private storage-invariant failure; no partial snapshot is returned"}
         }
       }
     },
