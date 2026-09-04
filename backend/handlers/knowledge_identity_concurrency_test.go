@@ -16,6 +16,10 @@ import (
 )
 
 func TestKnowledgeIdentityConcurrentCreateReturnsOneCreatedAndConflicts(t *testing.T) {
+	// These cases deliberately use the same slug in three disjoint scopes. One
+	// real server preserves that cross-scope coexistence proof without rebuilding
+	// the complete production migration chain before every sequential subtest.
+	ts := newTestServer(t)
 	tests := []struct {
 		name     string
 		endpoint func(*testing.T, *testServer) string
@@ -33,7 +37,6 @@ func TestKnowledgeIdentityConcurrentCreateReturnsOneCreatedAndConflicts(t *testi
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ts := newTestServer(t)
 			endpoint := test.endpoint(t, ts)
 			payload, err := json.Marshal(map[string]any{
 				"slug": "one_identity", "title": "One identity",
