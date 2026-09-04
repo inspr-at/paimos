@@ -228,6 +228,10 @@ func TestAgentIntercomRunbookPinsReleaseAndAdministratorBoundaries(t *testing.T)
 		"`paimos message target set`, `paimos message target list`, `paimos message target requeue`, `paimos message deliveries`, and the per-delivery requeue endpoint",
 		"message target and delivery listings are still administrator-only",
 		"All inspection, target registration, target requeue, and per-delivery requeue in this recovery path require an authenticated administrator",
+		"configured orchestrator's attention target is a narrower exception",
+		"Registering an inbox-capable harness session for that orchestrator has the same gate",
+		"A live lease is never retargeted; after it expires, explicit requeue resets it to pending",
+		"explicit target requeue instead attaches the current simple-handoff target to the same batch",
 	} {
 		if !strings.Contains(doc, claim) {
 			t.Errorf("runbook lost release or administrator boundary %q", claim)

@@ -106,7 +106,16 @@ type RegisterTargetInput struct {
 	// Standby creates a disabled managed_harness primary without replacing an
 	// enabled agentd managed primary. It is reserved for M161 generation reroute.
 	Standby bool
+	// Authority re-resolves the current request principal inside the same
+	// transaction as protected target inspection or mutation. A nil callback
+	// is reserved for trusted in-process callers and tests.
+	Authority TransactionAuthority
 }
+
+// TransactionAuthority returns whether the freshly reauthorized principal is
+// a super-admin. Returning nil guarantees at least ordinary administrator
+// authority; callers enforce the narrower super-admin boundary where needed.
+type TransactionAuthority func(context.Context, *sql.Tx) (bool, error)
 
 const targetSelectColumns = `id,instance,project_id,address,adapter,target_kind,maximum_level,role,enabled,version,
 	target_secret_cipher IS NOT NULL,created_at`
@@ -159,9 +168,36 @@ func ValidateInstanceIdentity(expected string, production bool) error {
 // RegisterTarget creates a new encrypted target version and atomically makes
 // it the one enabled binding for its receiver role.
 func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*Target, error) {
-	harness, agent, err := parseAddress(in.Address)
+	prepared, err := prepareTargetInput(ctx, in)
 	if err != nil {
 		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	target, err := registerTargetTx(ctx, tx, prepared)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return target, nil
+}
+
+type preparedTargetInput struct {
+	input        RegisterTargetInput
+	agent        string
+	refCipher    []byte
+	secretCipher []byte
+}
+
+func prepareTargetInput(ctx context.Context, in RegisterTargetInput) (preparedTargetInput, error) {
+	harness, agent, err := parseAddress(in.Address)
+	if err != nil {
+		return preparedTargetInput{}, err
 	}
 	in.Address = harness + ":" + agent
 	in.Adapter = strings.ToLower(strings.TrimSpace(in.Adapter))
@@ -175,30 +211,30 @@ func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*
 		in.Role = "primary"
 	}
 	if in.MaximumLevel != "simple" && in.MaximumLevel != "steer" {
-		return nil, coded("agent_message_target_level_invalid", "maximum_level must be simple or steer")
+		return preparedTargetInput{}, coded("agent_message_target_level_invalid", "maximum_level must be simple or steer")
 	}
 	if in.Role != "primary" && in.Role != "simple_fallback" {
-		return nil, coded("agent_message_target_role_invalid", "role must be primary or simple_fallback")
+		return preparedTargetInput{}, coded("agent_message_target_role_invalid", "role must be primary or simple_fallback")
 	}
 	if in.Role == "simple_fallback" && in.MaximumLevel != "simple" {
-		return nil, coded("agent_message_target_level_invalid", "a simple_fallback target must have maximum_level simple")
+		return preparedTargetInput{}, coded("agent_message_target_level_invalid", "a simple_fallback target must have maximum_level simple")
 	}
 	if in.Standby && (in.Adapter != AdapterManagedHarness || in.Role != "primary") {
-		return nil, coded("agent_message_target_role_invalid", "standby targets are reserved for managed_harness primary generations")
+		return preparedTargetInput{}, coded("agent_message_target_role_invalid", "standby targets are reserved for managed_harness primary generations")
 	}
 	ref := strings.TrimSpace(in.TargetRef)
 	if !utf8.ValidString(ref) || len([]byte(ref)) < 1 || len([]byte(ref)) > 2048 || strings.ContainsAny(ref, "\x00\r\n") {
-		return nil, coded("agent_message_target_ref_invalid", "target_ref must be 1 to 2048 safe UTF-8 bytes")
+		return preparedTargetInput{}, coded("agent_message_target_ref_invalid", "target_ref must be 1 to 2048 safe UTF-8 bytes")
 	}
 	if err := harnessplugin.ValidateBinding(ctx, in.Adapter, in.TargetKind, in.MaximumLevel, ref); err != nil {
 		code := harnessplugin.ErrorCode(err)
 		if code == harnessplugin.CodeUnsupported {
-			return nil, coded("agent_message_target_adapter_invalid", err.Error())
+			return preparedTargetInput{}, coded("agent_message_target_adapter_invalid", err.Error())
 		}
 		if code == "" {
 			code = "agent_message_target_ref_invalid"
 		}
-		return nil, coded(code, err.Error())
+		return preparedTargetInput{}, coded(code, err.Error())
 	}
 	secret := strings.TrimSpace(in.TargetSecret)
 	if err := harnessplugin.ValidateSecret(in.Adapter, secret); err != nil {
@@ -206,27 +242,41 @@ func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*
 		if code == "" || code == harnessplugin.CodeUnsupported {
 			code = harnessplugin.CodeTargetSecretInvalid
 		}
-		return nil, coded(code, err.Error())
+		return preparedTargetInput{}, coded(code, err.Error())
 	}
 	ciphertext, err := secretvault.Encrypt(targetSecretDomain, []byte(ref))
 	if err != nil {
-		return nil, fmt.Errorf("encrypt agent message target: %w", err)
+		return preparedTargetInput{}, fmt.Errorf("encrypt agent message target: %w", err)
 	}
 	var secretCipher []byte
 	if secret != "" {
 		secretCipher, err = secretvault.Encrypt(targetSenderSecretDomain, []byte(secret))
 		if err != nil {
-			return nil, fmt.Errorf("encrypt agent message target secret: %w", err)
+			return preparedTargetInput{}, fmt.Errorf("encrypt agent message target secret: %w", err)
 		}
 	}
+	return preparedTargetInput{input: in, agent: agent, refCipher: ciphertext, secretCipher: secretCipher}, nil
+}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+func registerTargetTx(ctx context.Context, tx *sql.Tx, prepared preparedTargetInput) (*Target, error) {
+	in := prepared.input
+	superAdmin := true
+	if in.Authority != nil {
+		var err error
+		superAdmin, err = in.Authority(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	protected, err := IsOrchestratorAttentionAddressTx(ctx, tx, in.ProjectID, in.Address)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	if protected && !superAdmin {
+		return nil, coded("agent_attention_target_forbidden", "orchestrator attention targets require current super-admin authority")
+	}
 	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_agents WHERE project_id=? AND name=?`, in.ProjectID, agent).Scan(&exists); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_agents WHERE project_id=? AND name=?`, in.ProjectID, prepared.agent).Scan(&exists); err != nil {
 		return nil, err
 	}
 	if exists == 0 {
@@ -255,29 +305,59 @@ func (s *Service) RegisterTarget(ctx context.Context, in RegisterTargetInput) (*
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_targets
 		(id,instance,project_id,address,adapter,target_kind,target_ref_cipher,target_secret_cipher,maximum_level,role,enabled,version)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, targetID, instance, in.ProjectID, in.Address, in.Adapter, in.TargetKind,
-		ciphertext, secretCipher, in.MaximumLevel, in.Role, enabled, version); err != nil {
+		prepared.refCipher, prepared.secretCipher, in.MaximumLevel, in.Role, enabled, version); err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
+	var target Target
+	if err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetSelectColumns+`
+		FROM agent_message_targets WHERE project_id=? AND id=?`, in.ProjectID, targetID), &target); err != nil {
 		return nil, err
 	}
-	return s.GetTarget(ctx, in.ProjectID, targetID)
+	return &target, nil
+}
+
+// RegisterTargetTx creates a target inside a caller-owned transaction. It is
+// used when target creation and another ownership record must share one
+// authoritative authorization snapshot.
+func RegisterTargetTx(ctx context.Context, tx *sql.Tx, in RegisterTargetInput) (*Target, error) {
+	prepared, err := prepareTargetInput(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return registerTargetTx(ctx, tx, prepared)
 }
 
 func (s *Service) GetTarget(ctx context.Context, projectID int64, targetID string) (*Target, error) {
+	return getTargetQuery(ctx, s.db, projectID, targetID)
+}
+
+func getTargetQuery(ctx context.Context, q targetRefQueryer, projectID int64, targetID string) (*Target, error) {
 	var target Target
-	if err := scanTarget(s.db.QueryRowContext(ctx, `SELECT `+targetSelectColumns+`
+	if err := scanTarget(q.QueryRowContext(ctx, `SELECT `+targetSelectColumns+`
 		FROM agent_message_targets WHERE project_id=? AND id=?`, projectID, targetID), &target); err != nil {
 		return nil, err
 	}
 	return &target, nil
 }
 
+// GetTargetTx reads one target from a caller-owned transaction.
+func GetTargetTx(ctx context.Context, tx *sql.Tx, projectID int64, targetID string) (*Target, error) {
+	return getTargetQuery(ctx, tx, projectID, targetID)
+}
+
 // TargetRefMatches compares an expected private reference with target
 // ciphertext without disclosing the stored value to callers.
 func (s *Service) TargetRefMatches(ctx context.Context, projectID int64, targetID, expected string) (bool, error) {
+	return targetRefMatchesQuery(ctx, s.db, projectID, targetID, expected)
+}
+
+type targetRefQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func targetRefMatchesQuery(ctx context.Context, q targetRefQueryer, projectID int64, targetID, expected string) (bool, error) {
 	var cipher []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT target_ref_cipher FROM agent_message_targets WHERE project_id=? AND id=?`, projectID, targetID).Scan(&cipher); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT target_ref_cipher FROM agent_message_targets WHERE project_id=? AND id=?`, projectID, targetID).Scan(&cipher); err != nil {
 		return false, err
 	}
 	plain, err := secretvault.Decrypt(targetSecretDomain, cipher)
@@ -291,7 +371,26 @@ func (s *Service) TargetRefMatches(ctx context.Context, projectID int64, targetI
 	return subtle.ConstantTimeCompare(plain, want) == 1, nil
 }
 
+// TargetRefMatchesTx compares a private target reference inside a caller-owned
+// transaction without disclosing either value.
+func TargetRefMatchesTx(ctx context.Context, tx *sql.Tx, projectID int64, targetID, expected string) (bool, error) {
+	return targetRefMatchesQuery(ctx, tx, projectID, targetID, expected)
+}
+
 func (s *Service) ListTargets(ctx context.Context, projectID int64, address string) ([]Target, error) {
+	return listTargetsQuery(ctx, s.db, projectID, address)
+}
+
+// ListTargetsTx returns target metadata from a caller-owned transaction.
+func ListTargetsTx(ctx context.Context, tx *sql.Tx, projectID int64, address string) ([]Target, error) {
+	return listTargetsQuery(ctx, tx, projectID, address)
+}
+
+type targetQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func listTargetsQuery(ctx context.Context, q targetQueryer, projectID int64, address string) ([]Target, error) {
 	args := []any{projectID, instanceName()}
 	query := `SELECT ` + targetSelectColumns + `
 		FROM agent_message_targets WHERE project_id=? AND instance=?`
@@ -304,7 +403,7 @@ func (s *Service) ListTargets(ctx context.Context, projectID int64, address stri
 		args = append(args, harness+":"+agent)
 	}
 	query += ` ORDER BY address,role,version DESC`
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -320,6 +419,54 @@ func (s *Service) ListTargets(ctx context.Context, projectID int64, address stri
 	return targets, rows.Err()
 }
 
+// ListTargetsAuthorized returns an authority-scoped target inventory from one
+// read transaction. Ordinary administrators cannot inspect any target version
+// belonging to the configured orchestrator attention identity.
+func (s *Service) ListTargetsAuthorized(ctx context.Context, projectID int64, address string, authority TransactionAuthority) ([]Target, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	superAdmin := true
+	if authority != nil {
+		superAdmin, err = authority(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(address) != "" {
+		protected, err := IsOrchestratorAttentionAddressTx(ctx, tx, projectID, address)
+		if err != nil {
+			return nil, err
+		}
+		if protected && !superAdmin {
+			return nil, coded("agent_attention_target_forbidden", "orchestrator attention targets require current super-admin authority")
+		}
+	}
+	targets, err := listTargetsQuery(ctx, tx, projectID, address)
+	if err != nil {
+		return nil, err
+	}
+	if !superAdmin {
+		visible := targets[:0]
+		for _, target := range targets {
+			protected, err := IsOrchestratorAttentionAddressTx(ctx, tx, projectID, target.Address)
+			if err != nil {
+				return nil, err
+			}
+			if !protected {
+				visible = append(visible, target)
+			}
+		}
+		targets = visible
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return targets, nil
+}
+
 func resolveTargetVersionsTx(ctx context.Context, tx *sql.Tx, instance string, projectID int64, address string) (string, string, error) {
 	var primary, fallback sql.NullString
 	err := tx.QueryRowContext(ctx, `SELECT
@@ -333,9 +480,17 @@ func resolveTargetVersionsTx(ctx context.Context, tx *sql.Tx, instance string, p
 }
 
 // RequeueMissingTargets explicitly attaches the receiver's current target
-// versions to never-attempted target_missing deliveries. Target registration
-// itself never releases historical rows.
+// versions to never-attempted target_missing deliveries and recoverable open
+// attention batches. Target registration itself never releases historical
+// rows, and a live attention lease is never silently retargeted.
 func (s *Service) RequeueMissingTargets(ctx context.Context, projectID int64, address string) (int64, error) {
+	return s.RequeueMissingTargetsAuthorized(ctx, projectID, address, nil)
+}
+
+// RequeueMissingTargetsAuthorized applies transaction-time principal
+// reauthorization before resolving either current targets or the protected
+// orchestrator identity.
+func (s *Service) RequeueMissingTargetsAuthorized(ctx context.Context, projectID int64, address string, authority TransactionAuthority) (int64, error) {
 	harness, agent, err := parseAddress(address)
 	if err != nil {
 		return 0, err
@@ -346,6 +501,20 @@ func (s *Service) RequeueMissingTargets(ctx context.Context, projectID int64, ad
 		return 0, err
 	}
 	defer tx.Rollback()
+	superAdmin := true
+	if authority != nil {
+		superAdmin, err = authority(ctx, tx)
+		if err != nil {
+			return 0, err
+		}
+	}
+	protected, err := IsOrchestratorAttentionAddressTx(ctx, tx, projectID, address)
+	if err != nil {
+		return 0, err
+	}
+	if protected && !superAdmin {
+		return 0, coded("agent_attention_target_forbidden", "orchestrator attention targets require current super-admin authority")
+	}
 	primary, fallback, err := resolveTargetVersionsTx(ctx, tx, instanceName(), projectID, address)
 	if err != nil {
 		return 0, err
@@ -370,6 +539,48 @@ func (s *Service) RequeueMissingTargets(ctx context.Context, projectID int64, ad
 		return 0, err
 	}
 	count, _ := result.RowsAffected()
+	// Attention batches use the same receiver-owned target registry and the
+	// same explicit requeue boundary. Registration alone never retargets
+	// historical work. Pick the first compatible simple-handoff target deliberately;
+	// a server-side webhook is not a model wake capability.
+	var attentionTargetID string
+	rows, queryErr := tx.QueryContext(ctx, `SELECT id,adapter FROM agent_message_targets
+		WHERE instance=? AND project_id=? AND address=? AND enabled=1
+		ORDER BY CASE role WHEN 'primary' THEN 0 ELSE 1 END,version DESC`, instanceName(), projectID, address)
+	if queryErr != nil {
+		return 0, queryErr
+	}
+	for rows.Next() {
+		var id, adapter string
+		if err := rows.Scan(&id, &adapter); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if attentionTargetID == "" && isAttentionWakeAdapter(adapter) {
+			attentionTargetID = id
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if attentionTargetID != "" {
+		var receiverAgentID int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM project_agents WHERE project_id=? AND name=?`, projectID, agent).Scan(&receiverAgentID); err != nil {
+			return 0, err
+		}
+		attentionResult, err := tx.ExecContext(ctx, `UPDATE agent_attention_batches SET target_id=?,state='pending',
+			address=?,worker_adapter='',blocked_reason='',lease_until=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			WHERE receiver_project_id=? AND receiver_project_agent_id=? AND state IN ('pending','leased','blocked') AND (
+			 state='blocked'
+			 OR (state='pending' AND (address<>? OR target_id IS NULL OR target_id<>?))
+			 OR (state='leased' AND lease_until<=strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			)`, attentionTargetID, address, projectID, receiverAgentID, address, attentionTargetID)
+		if err != nil {
+			return 0, err
+		}
+		attentionCount, _ := attentionResult.RowsAffected()
+		count += attentionCount
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}

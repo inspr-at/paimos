@@ -84,6 +84,7 @@ type HarnessSessionEvent struct {
 	ActivityReason        string  `json:"activity_reason"`
 	ActivityKind          string  `json:"activity_event_kind,omitempty"`
 	ActivitySequence      int64   `json:"activity_sequence"`
+	AssignmentPresent     *bool   `json:"assignment_present,omitempty"`
 	ClosedReason          string  `json:"closed_reason,omitempty"`
 	BeforeParentSessionID *string `json:"before_parent_harness_session_id"`
 	AfterParentSessionID  *string `json:"after_parent_harness_session_id"`

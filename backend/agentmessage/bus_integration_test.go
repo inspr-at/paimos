@@ -2,8 +2,10 @@ package agentmessage
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -93,6 +95,69 @@ func TestBusPersistsRegisteredThirdAdapterTargetWithoutCoreChanges(t *testing.T)
 	}
 	if strings.Contains(string(listed), "target_ref") || strings.Contains(string(listed), "safe-third-party-reference") {
 		t.Fatalf("target list exposed a secret reference: %s", listed)
+	}
+}
+
+func TestProtectedTargetUsesTransactionCurrentOrchestratorIdentity(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	configureAttentionReceiver(t, service, projectID)
+	var codexID int64
+	if err := paimosdb.DB.QueryRow(`SELECT id FROM project_agents WHERE project_id=? AND name='codex'`, projectID).Scan(&codexID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:codex", Adapter: AdapterCodex, TargetKind: TargetKindCodexThread,
+		TargetRef: "019d-current-codex-thread", MaximumLevel: "simple", Role: "primary",
+		Authority: func(ctx context.Context, tx *sql.Tx) (bool, error) {
+			// Deterministically model reassignment after middleware admission but
+			// before mutation. The authoritative lookup must observe this write in
+			// the same transaction and roll the whole operation back.
+			if _, err := tx.ExecContext(ctx, `UPDATE instance_orchestrator SET project_agent_id=? WHERE singleton_id=1`, codexID); err != nil {
+				return false, err
+			}
+			return false, nil
+		},
+	})
+	var codedErr *CodedError
+	if !errors.As(err, &codedErr) || codedErr.Code != "agent_attention_target_forbidden" {
+		t.Fatalf("error=%v", err)
+	}
+	var count int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_targets WHERE project_id=? AND address='codex:codex'`, projectID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("target count=%d err=%v", count, err)
+	}
+	var currentName string
+	if err := paimosdb.DB.QueryRow(`SELECT pa.name FROM instance_orchestrator io JOIN project_agents pa ON pa.id=io.project_agent_id`).Scan(&currentName); err != nil || currentName != "amy" {
+		t.Fatalf("orchestrator=%q err=%v", currentName, err)
+	}
+	_, err = service.RequeueMissingTargetsAuthorized(context.Background(), projectID, "codex:codex",
+		func(ctx context.Context, tx *sql.Tx) (bool, error) {
+			if _, err := tx.ExecContext(ctx, `UPDATE instance_orchestrator SET project_agent_id=? WHERE singleton_id=1`, codexID); err != nil {
+				return false, err
+			}
+			return false, nil
+		})
+	if !errors.As(err, &codedErr) || codedErr.Code != "agent_attention_target_forbidden" {
+		t.Fatalf("requeue error=%v", err)
+	}
+}
+
+func TestTargetMutationRejectsTransactionRevocationWithoutWrite(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	_, err := service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: projectID, Address: "codex:codex", Adapter: AdapterCodex, TargetKind: TargetKindCodexThread,
+		TargetRef: "019d-current-codex-thread", MaximumLevel: "simple", Role: "primary",
+		Authority: func(context.Context, *sql.Tx) (bool, error) {
+			return false, coded("agent_message_unauthorized", "current request credential is unavailable")
+		},
+	})
+	var codedErr *CodedError
+	if !errors.As(err, &codedErr) || codedErr.Code != "agent_message_unauthorized" {
+		t.Fatalf("error=%v", err)
+	}
+	var count int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_targets WHERE project_id=?`, projectID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("target count=%d err=%v", count, err)
 	}
 }
 

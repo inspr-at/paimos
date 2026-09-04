@@ -116,6 +116,15 @@ func harnessProblem(w http.ResponseWriter, err error, fallback string, status in
 	messageProblem(w, nil, code, err.Error(), status)
 }
 func harnessStatus(err error) int {
+	var messageErr *agentmessage.CodedError
+	if errors.As(err, &messageErr) {
+		switch messageErr.Code {
+		case "agent_message_unauthorized":
+			return http.StatusUnauthorized
+		case "agent_message_forbidden", "agent_attention_target_forbidden":
+			return http.StatusForbidden
+		}
+	}
 	if managedharness.IsCode(err, managedharness.CodeNotFound) {
 		return http.StatusNotFound
 	}
@@ -155,7 +164,7 @@ func registerHarnessSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeHarnessJSON(w, r, &req) {
 		return
 	}
-	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, ParentSessionID: req.ParentSessionID, TicketID: req.TicketID, SteerMode: req.SteerMode, Capabilities: req.Capabilities, Workspace: req.Workspace, DispatchProfileID: req.DispatchProfileID, DispatchProfileVersion: req.DispatchProfileVersion, AccountLabel: req.AccountLabel})
+	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, ParentSessionID: req.ParentSessionID, TicketID: req.TicketID, SteerMode: req.SteerMode, Capabilities: req.Capabilities, Authority: harnessRegistrationAuthority(r, projectID), Workspace: req.Workspace, DispatchProfileID: req.DispatchProfileID, DispatchProfileVersion: req.DispatchProfileVersion, AccountLabel: req.AccountLabel})
 	if err != nil {
 		harnessProblem(w, err, "harness_session_register_failed", harnessStatus(err))
 		return
