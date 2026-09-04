@@ -516,7 +516,7 @@ done
   "$full_authorize" == *"if: $FULL_PR_GUARD"* &&
   "$full_authorize" == *"$FULL_LABEL_ENV"* ]] ||
   fail 'labeled PR exhaustive proof lacks a fail-closed operator-label guard'
-[[ "$full_serial" == *'needs: backend-full-authorize'* && "$full_serial" == *'timeout-minutes: 40'* &&
+[[ "$full_serial" == *'needs: backend-full-authorize'* && "$full_serial" == *'timeout-minutes: 70'* &&
   "$full_serial" == *'go test -count=1 -p 1 -timeout=30m ./...'* &&
   "$full_serial" == *'paimos_test_unsupported'* ]] ||
   fail 'full backend serial/platform assurance lacks an explicit independent budget'
