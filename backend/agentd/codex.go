@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,7 +47,7 @@ func (a *CodexAdapter) AccountLabel(ctx context.Context) string {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	output, err := runAccountProbe(probeCtx, path, 512, "login", "status")
+	output, err := runAccountProbe(probeCtx, path, 512, accountProbeCodex)
 	if err != nil {
 		return "unknown"
 	}
@@ -64,17 +63,7 @@ func (a *CodexAdapter) AccountLabel(ctx context.Context) string {
 }
 
 func (a *CodexAdapter) executable() (string, error) {
-	if a.path != "" {
-		if !filepath.IsAbs(a.path) {
-			return "", errors.New("configured Codex executable must be an absolute path")
-		}
-		return a.path, nil
-	}
-	path, err := exec.LookPath("codex")
-	if err != nil {
-		return "", errors.New("Codex adapter requires the operator-authenticated codex CLI in PATH")
-	}
-	return path, nil
+	return resolvePinnedExecutable(a.path, "codex", "operator-authenticated Codex CLI")
 }
 
 // Start owns one documented app-server stdio child and creates the thread and

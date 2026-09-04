@@ -73,7 +73,7 @@ func (a *ClaudeAdapter) AccountLabel(ctx context.Context) string {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	output, err := runAccountProbe(probeCtx, path, 1024, "auth", "status", "--json")
+	output, err := runAccountProbe(probeCtx, path, 1024, accountProbeClaude)
 	if err != nil {
 		return "unknown"
 	}
@@ -98,24 +98,7 @@ func (a *ClaudeAdapter) AccountLabel(ctx context.Context) string {
 }
 
 func executable(configured, name, label string) (string, error) {
-	var path string
-	if configured != "" {
-		if !filepath.IsAbs(configured) {
-			return "", fmt.Errorf("configured %s executable must be an absolute path", label)
-		}
-		path = configured
-	} else {
-		var err error
-		path, err = exec.LookPath(name)
-		if err != nil {
-			return "", fmt.Errorf("Claude adapter requires %s in PATH", label)
-		}
-	}
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() || info.Mode()&0111 == 0 {
-		return "", fmt.Errorf("Claude adapter requires an executable %s", label)
-	}
-	return path, nil
+	return resolvePinnedExecutable(configured, name, label)
 }
 
 func probeNodeMajor(ctx context.Context, path string) (int, error) {

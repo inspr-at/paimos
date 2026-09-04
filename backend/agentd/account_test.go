@@ -49,6 +49,49 @@ func TestAccountLabelsFailClosedOnUnknownOrOversizedOutput(t *testing.T) {
 	}
 }
 
+func TestAccountProbeRequiresPinnedExecutableAndClosedKind(t *testing.T) {
+	if _, err := runAccountProbe(context.Background(), "relative-probe", 512, accountProbeCodex); err == nil {
+		t.Fatal("relative account probe executable was accepted")
+	}
+	probe := writeProbe(t, "#!/bin/sh\nprintf 'unused\\n'\n")
+	if _, err := runAccountProbe(context.Background(), probe, 512, accountProbeKind(99)); err == nil {
+		t.Fatal("unknown account probe kind was accepted")
+	}
+}
+
+func TestResolvePinnedExecutableCanonicalizesAndRejectsUnsafeFiles(t *testing.T) {
+	if _, err := resolvePinnedExecutable("relative", "unused", "test"); err == nil {
+		t.Fatal("relative configured executable was accepted")
+	}
+	directory := t.TempDir()
+	if _, err := resolvePinnedExecutable(directory, "unused", "test"); err == nil {
+		t.Fatal("directory was accepted as an executable")
+	}
+	nonExecutable := filepath.Join(t.TempDir(), "probe")
+	if err := os.WriteFile(nonExecutable, []byte("not executable"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolvePinnedExecutable(nonExecutable, "unused", "test"); err == nil {
+		t.Fatal("non-executable regular file was accepted")
+	}
+	target := writeProbe(t, "#!/bin/sh\nexit 0\n")
+	link := filepath.Join(t.TempDir(), "probe-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolvePinnedExecutable(link, "unused", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != want {
+		t.Fatalf("resolved executable = %q, want %q", resolved, want)
+	}
+}
+
 func writeProbe(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "probe")
