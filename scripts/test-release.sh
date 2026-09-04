@@ -1378,12 +1378,12 @@ setup_interrupted_calendar_descendant_recovery() {
   git -C "$RECOVERY_REPO" fetch -q origin main
   git -C "$RECOVERY_REPO" merge -q --ff-only origin/main
   mkdir -p "$RECOVERY_REPO/.github/workflows"
-  printf '%s\n' 'jobs:' '  backend-full-race:' '    timeout-minutes: 70' > \
+  printf '%s\n' 'jobs:' '  backend-full-race:' '    timeout-minutes: 90' > \
     "$RECOVERY_REPO/.github/workflows/backend-full.yml"
   printf '%s\n' '#!/usr/bin/env bash' \
-    "grep -q 'timeout-minutes: 70' .github/workflows/backend-full.yml" > \
+    "grep -q 'timeout-minutes: 90' .github/workflows/backend-full.yml" > \
     "$RECOVERY_REPO/scripts/test-backend-pr-gate.sh"
-  printf '\n# Exact-head calendar recovery waiter: 80 minutes.\n' >> \
+  printf '\n# Exact-head calendar recovery waiter: 100 minutes.\n' >> \
     "$RECOVERY_REPO/scripts/wait-backend-full.sh"
   chmod +x "$RECOVERY_REPO/scripts/test-backend-pr-gate.sh"
   git -C "$RECOVERY_REPO" add \

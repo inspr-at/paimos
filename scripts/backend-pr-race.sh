@@ -6,10 +6,21 @@ BACKEND="$ROOT/backend"
 MODULE='github.com/inspr-at/paimos/backend'
 GO_COMMAND=${GO_COMMAND:-go}
 RACE_GOMAXPROCS=${BACKEND_RACE_GOMAXPROCS:-2}
+RACE_PACKAGE_TIMEOUT=${BACKEND_RACE_PACKAGE_TIMEOUT:-8m}
+RACE_PACKAGE_TIMEOUT_MAX_MINUTES=15
 LANE=all
 DRY_RUN=0
 SELECTED_SHARD=-1
 SELECTED_SHARD_COUNT=0
+
+[[ "$RACE_PACKAGE_TIMEOUT" =~ ^[1-9][0-9]*m$ ]] || {
+  echo "backend-pr-race: invalid package timeout: $RACE_PACKAGE_TIMEOUT" >&2
+  exit 2
+}
+(( 10#${RACE_PACKAGE_TIMEOUT%m} <= RACE_PACKAGE_TIMEOUT_MAX_MINUTES )) || {
+  echo "backend-pr-race: package timeout exceeds ${RACE_PACKAGE_TIMEOUT_MAX_MINUTES}m: $RACE_PACKAGE_TIMEOUT" >&2
+  exit 2
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -82,9 +93,9 @@ run_race() {
   local package="$1" pattern="${2:-}"
   if [[ "$DRY_RUN" -eq 1 ]]; then
     if [[ -n "$pattern" ]]; then
-      printf 'go test -race -count=1 -timeout=8m %q -run %q\n' "$package" "$pattern"
+      printf 'go test -race -count=1 -timeout=%s %q -run %q\n' "$RACE_PACKAGE_TIMEOUT" "$package" "$pattern"
     else
-      printf 'go test -race -count=1 -timeout=8m %q\n' "$package"
+      printf 'go test -race -count=1 -timeout=%s %q\n' "$RACE_PACKAGE_TIMEOUT" "$package"
     fi
     return
   fi
@@ -97,9 +108,9 @@ run_race() {
       echo "backend-pr-race: no tests matched $pattern in $package" >&2
       exit 1
     }
-    GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout=8m "$package" -run "$pattern"
+    GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout="$RACE_PACKAGE_TIMEOUT" "$package" -run "$pattern"
   else
-    GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout=8m "$package"
+    GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout="$RACE_PACKAGE_TIMEOUT" "$package"
   fi
 }
 
@@ -145,12 +156,12 @@ run_race_shards() {
     }
     pattern+=')$'
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      printf 'go test -race -count=1 -timeout=8m %q -run %q\n' "$package" "$pattern"
+      printf 'go test -race -count=1 -timeout=%s %q -run %q\n' "$RACE_PACKAGE_TIMEOUT" "$package" "$pattern"
     else
       # An indexed PR job executes one shard. The exhaustive workflow walks all
       # shards here in the foreground so heavyweight SQLite contracts never
       # contend as multiple Go processes on one two-core runner.
-      GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout=8m "$package" -run "$pattern"
+      GOMAXPROCS="$RACE_GOMAXPROCS" "$GO_COMMAND" test -race -count=1 -timeout="$RACE_PACKAGE_TIMEOUT" "$package" -run "$pattern"
     fi
   done
 }

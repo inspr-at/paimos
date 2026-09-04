@@ -371,6 +371,29 @@ if ! FAKE_GO_STATE="$sequential_state" GO_COMMAND="$FIXTURES/sequential-go.sh" \
 fi
 [[ ! -e "$sequential_state/overlap" && "$(wc -l < "$sequential_state/runs" | tr -d ' ')" -eq 5 ]] ||
   fail 'full backend handler race plan overlapped or omitted an indexed shard'
+supervision_default_plan=$(
+  "$RACE_RUNNER" --dry-run github.com/inspr-at/paimos/backend/supervision
+)
+[[ "$supervision_default_plan" == *'-timeout=8m ./supervision'* ]] ||
+  fail 'ordinary race plan lost its bounded eight-minute package timeout'
+supervision_full_plan=$(
+  BACKEND_RACE_PACKAGE_TIMEOUT=15m \
+    "$RACE_RUNNER" --dry-run github.com/inspr-at/paimos/backend/supervision
+)
+[[ "$supervision_full_plan" == *'-timeout=15m ./supervision'* &&
+  "$supervision_full_plan" != *'-timeout=8m'* ]] ||
+  fail 'exhaustive race plan did not apply its measured package timeout'
+for invalid_timeout in 0m 15m30s 16m 600m; do
+  invalid_output=
+  if invalid_output=$(BACKEND_RACE_PACKAGE_TIMEOUT="$invalid_timeout" \
+    "$RACE_RUNNER" --dry-run github.com/inspr-at/paimos/backend/supervision 2>&1); then
+    fail "race runner accepted invalid package timeout $invalid_timeout"
+  else
+    invalid_status=$?
+  fi
+  [[ "$invalid_status" -eq 2 && "$invalid_output" == backend-pr-race:*timeout*"$invalid_timeout" ]] ||
+    fail "race runner did not reject $invalid_timeout with its typed timeout error"
+done
 agentmode_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard=0/4 github.com/inspr-at/paimos/backend/agentmode)
 [[ "$agentmode_race_plan" == *'subscribe\ before\ high-water'* && "$agentmode_race_plan" == *'permission\ grant\ and\ revoke'* ]] ||
   fail 'agentmode race plan lost non-performance stream concurrency subtests'
@@ -451,6 +474,11 @@ frontend=$(job_block frontend-quality)
 aggregate=$(job_block test)
 docker=$(job_block docker)
 
+grep -qF "RACE_PACKAGE_TIMEOUT=\${BACKEND_RACE_PACKAGE_TIMEOUT:-8m}" "$RACE_RUNNER" ||
+  fail 'race package timeout lacks the bounded PR default'
+grep -qF "[[ \"\$RACE_PACKAGE_TIMEOUT\" =~ ^[1-9][0-9]*m\$ ]]" "$RACE_RUNNER" ||
+  fail 'race package timeout accepts an unsafe or unbounded shape'
+
 [[ "$vet" == *"github.event_name == 'pull_request'"* && "$vet" == *'go vet ./...'* ]] ||
   fail 'parallel PR vet lane is incomplete'
 for lane_and_plan in \
@@ -516,11 +544,12 @@ done
   "$full_authorize" == *"if: $FULL_PR_GUARD"* &&
   "$full_authorize" == *"$FULL_LABEL_ENV"* ]] ||
   fail 'labeled PR exhaustive proof lacks a fail-closed operator-label guard'
-[[ "$full_serial" == *'needs: backend-full-authorize'* && "$full_serial" == *'timeout-minutes: 70'* &&
-  "$full_serial" == *'go test -count=1 -p 1 -timeout=30m ./...'* &&
+[[ "$full_serial" == *'needs: backend-full-authorize'* && "$full_serial" == *'timeout-minutes: 90'* &&
+  "$full_serial" == *'go test -count=1 -p 1 -timeout=40m ./...'* &&
   "$full_serial" == *'paimos_test_unsupported'* ]] ||
   fail 'full backend serial/platform assurance lacks an explicit independent budget'
-[[ "$full_race" == *'needs: backend-full-authorize'* && "$full_race" == *'timeout-minutes: 70'* &&
+[[ "$full_race" == *'needs: backend-full-authorize'* && "$full_race" == *'timeout-minutes: 90'* &&
+  "$full_race" == *'BACKEND_RACE_PACKAGE_TIMEOUT: 15m'* &&
   "$full_race" == *"backend-pr-race.sh './...'"* && "$full_race" == *'sequential'* ]] ||
   fail 'full backend broad race lacks an explicit independent budget or sequential topology'
 [[ "$full" == *'needs: [backend-full-authorize, backend-full-serial, backend-full-race]'* &&
@@ -529,7 +558,7 @@ done
   "$full" == *"$FULL_RACE_RESULT"* && "$full" == *"$FULL_SERIAL_ASSERT"* &&
   "$full" == *"$FULL_RACE_ASSERT"* ]] ||
   fail 'full backend workflow lacks a fail-closed serial/race aggregator'
-grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-4800' "$FULL_WAITER" ||
+grep -q 'BACKEND_FULL_TIMEOUT_SECONDS:-6000' "$FULL_WAITER" ||
   fail 'exact-head full-suite waiter budget is not derived from parallel job budgets'
 
 [[ -n "$quality" ]] || fail 'quality lane is missing'
