@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/backend/workshape"
 	"github.com/spf13/cobra"
 )
 
@@ -187,7 +188,10 @@ Exit codes (with --check):
 				readingListSize: readingListSize,
 				cacheNamespace:  client.identity.Namespace,
 			}
-			rev := computeOnboardRev(bundle)
+			if renderAgent != "" {
+				input.workContract = fetchAgentWorkContract(client, projectID, renderAgent)
+			}
+			rev := computeOnboardBriefingRev(bundle, input.workContract)
 			body, err := renderBriefing(input, format, rev)
 			if err != nil {
 				return err
@@ -390,6 +394,39 @@ type briefingInput struct {
 	recent          []recentIssue
 	readingListSize int
 	cacheNamespace  string // proven instance+origin namespace used by bundleCacheDir
+	workContract    workshape.Contract
+}
+
+// fetchAgentWorkContract resolves one active durable generation for the named
+// agent. Zero, multiple, unreadable, or legacy-unclassified generations stay
+// unknown; onboarding never guesses a shape from role, prompt, ticket, or Git.
+func fetchAgentWorkContract(c *Client, projectID int64, agentName string) workshape.Contract {
+	unknown := workshape.For(workshape.Unknown)
+	body, err := c.do("GET", fmt.Sprintf("/api/projects/%d/harness-sessions", projectID), nil)
+	if err != nil {
+		return unknown
+	}
+	var sessions []struct {
+		AgentName string `json:"agent_name"`
+		Phase     string `json:"phase"`
+		WorkShape string `json:"work_shape"`
+	}
+	if json.Unmarshal(body, &sessions) != nil {
+		return unknown
+	}
+	var selected string
+	found := false
+	for _, session := range sessions {
+		if session.AgentName != agentName || session.Phase == "stopped" {
+			continue
+		}
+		if found {
+			return unknown
+		}
+		selected = session.WorkShape
+		found = true
+	}
+	return workshape.For(selected)
 }
 
 // agentArtifactProbe is the subset of the canonical agent artifact the
@@ -547,6 +584,7 @@ func renderBriefingMarkdown(in briefingInput, _ []briefingSection, rev string) s
 
 	// Agent role section — only when --agent supplied.
 	if in.agentName != "" {
+		renderWorkContractMarkdown(&b, in.workContract)
 		probe := decodeAgentArtifact(in.bundle.Agent)
 		fmt.Fprintf(&b, "## If you're playing the %s role\n\n", in.agentName)
 		if d := strings.TrimSpace(probe.Agent.Description); d != "" {
@@ -736,6 +774,7 @@ func renderBriefingHTML(in briefingInput, _ []briefingSection, rev string) strin
 	}
 
 	if in.agentName != "" {
+		renderWorkContractHTML(&b, in.workContract)
 		probe := decodeAgentArtifact(in.bundle.Agent)
 		fmt.Fprintf(&b, "<h2>If you're playing the %s role</h2>\n", html.EscapeString(in.agentName))
 		if d := strings.TrimSpace(probe.Agent.Description); d != "" {
@@ -859,12 +898,9 @@ func buildOnboardHeader(in briefingInput, rev string) string {
 		onboardHeaderPrefix, in.project.Key, rev, agent, time.Now().UTC().Format(time.RFC3339))
 }
 
-// computeOnboardRev returns a stable sha256 prefix over the bundle
-// payload's content. We re-use computeBundleRev (PAI-340) so the
-// briefing rev is identical to the bundle rev — which means a
-// `session start --bundle full` then `onboard` cycle produces a
-// briefing whose rev a later --check can verify against the
-// then-current bundle without re-rendering.
+// computeOnboardRev returns a stable sha256 prefix over the bundle payload's
+// content. computeOnboardBriefingRev extends it with assignment context so a
+// later --check can detect either kind of drift without re-rendering.
 func computeOnboardRev(b *bundlePayload) string {
 	if b == nil {
 		// Empty rev keeps the header well-formed even when the bundle
@@ -878,6 +914,106 @@ func computeOnboardRev(b *bundlePayload) string {
 		return full[:12]
 	}
 	return full
+}
+
+// computeOnboardBriefingRev extends the canonical bundle revision with the
+// value-free assignment contract. A shape reassignment therefore makes an
+// existing agent briefing truthfully report drift.
+func computeOnboardBriefingRev(b *bundlePayload, contract workshape.Contract) string {
+	bundleRev := computeOnboardRev(b)
+	canonical := workshape.For(contract.Shape)
+	raw, _ := json.Marshal(canonical)
+	sum := sha256.Sum256(append([]byte(bundleRev+"\n"), raw...))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+func workShapeOutput(contract workshape.Contract) string {
+	switch contract.OutputKind {
+	case workshape.OutputDelivery:
+		return "Delivery"
+	case workshape.OutputInvestigationEvidence:
+		return "Investigation evidence (not a product delivery)"
+	default:
+		return "Unclassified; explicit classification is required"
+	}
+}
+
+func workShapeLabel(shape string) string {
+	switch workshape.Normalize(shape) {
+	case workshape.Ship:
+		return "ship"
+	case workshape.Scout:
+		return "scout"
+	default:
+		return "unknown (legacy or unclassified; never inferred)"
+	}
+}
+
+var workContractLabels = map[string]string{
+	"implementation_complete":          "implementation complete",
+	"required_stages_succeeded":        "required stages succeeded",
+	"delivery_verified":                "delivery verified",
+	"investigation_question_answered":  "investigation question answered",
+	"evidence_recorded":                "evidence recorded",
+	"uncertainty_reported":             "uncertainty reported",
+	"explicit_classification_required": "explicit classification required",
+	"product_delivery":                 "product delivery",
+	"git_enforcement":                  "Git enforcement (PAIMOS records intent; it does not enforce repository behavior)",
+	"silent_promotion":                 "silent scout-to-ship promotion",
+	"delivery_claim":                   "delivery claim",
+	"shape_inference":                  "shape inference from surrounding activity",
+}
+
+func workContractLabel(code string) string {
+	if label := workContractLabels[code]; label != "" {
+		return label
+	}
+	return strings.ReplaceAll(code, "_", " ")
+}
+
+func renderWorkContractMarkdown(b *strings.Builder, raw workshape.Contract) {
+	contract := workshape.For(raw.Shape)
+	fmt.Fprintln(b, "## Current worker assignment")
+	fmt.Fprintln(b)
+	fmt.Fprintf(b, "- **Shape:** `%s`\n", workShapeLabel(contract.Shape))
+	fmt.Fprintf(b, "- **Expected output:** %s\n", workShapeOutput(contract))
+	fmt.Fprintln(b, "- **Stage defaults:**")
+	for _, stage := range contract.StageApplicability {
+		fmt.Fprintf(b, "  - %s: %s\n", workContractLabel(stage.Stage), workContractLabel(stage.Applicability))
+	}
+	fmt.Fprintln(b, "- **Done when:** "+strings.Join(mapWorkContractLabels(contract.DefinitionOfDone), "; "))
+	fmt.Fprintln(b, "- **Non-goals:** "+strings.Join(mapWorkContractLabels(contract.NonGoals), "; "))
+	if contract.Shape == workshape.Scout {
+		fmt.Fprintln(b, "- **Reassignment:** scout becomes ship only through an authorized, explicit revision-checked assignment.")
+	}
+	fmt.Fprintln(b)
+}
+
+func renderWorkContractHTML(b *strings.Builder, raw workshape.Contract) {
+	contract := workshape.For(raw.Shape)
+	fmt.Fprintln(b, "<h2>Current worker assignment</h2>")
+	fmt.Fprintln(b, "<ul>")
+	fmt.Fprintf(b, "<li><strong>Shape:</strong> <code>%s</code></li>\n", html.EscapeString(workShapeLabel(contract.Shape)))
+	fmt.Fprintf(b, "<li><strong>Expected output:</strong> %s</li>\n", html.EscapeString(workShapeOutput(contract)))
+	fmt.Fprintln(b, "<li><strong>Stage defaults:</strong><ul>")
+	for _, stage := range contract.StageApplicability {
+		fmt.Fprintf(b, "<li>%s: %s</li>\n", html.EscapeString(workContractLabel(stage.Stage)), html.EscapeString(workContractLabel(stage.Applicability)))
+	}
+	fmt.Fprintln(b, "</ul></li>")
+	fmt.Fprintf(b, "<li><strong>Done when:</strong> %s</li>\n", html.EscapeString(strings.Join(mapWorkContractLabels(contract.DefinitionOfDone), "; ")))
+	fmt.Fprintf(b, "<li><strong>Non-goals:</strong> %s</li>\n", html.EscapeString(strings.Join(mapWorkContractLabels(contract.NonGoals), "; ")))
+	if contract.Shape == workshape.Scout {
+		fmt.Fprintln(b, "<li><strong>Reassignment:</strong> scout becomes ship only through an authorized, explicit revision-checked assignment.</li>")
+	}
+	fmt.Fprintln(b, "</ul>")
+}
+
+func mapWorkContractLabels(codes []string) []string {
+	out := make([]string, len(codes))
+	for i, code := range codes {
+		out[i] = workContractLabel(code)
+	}
+	return out
 }
 
 // runOnboardCheck reads the existing on-disk briefing, parses the

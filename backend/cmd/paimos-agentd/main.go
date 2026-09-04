@@ -49,7 +49,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	common := addCommonFlags(flags)
-	adapter, workspace, identity, role, parentSessionID := "codex", "", "", "", ""
+	adapter, workspace, identity, role, parentSessionID, workShape := "codex", "", "", "", "", ""
 	workspaceMode, dispatchProfile, dispatchProfileVersion := "", "", ""
 	var projectID, ticketID int64
 	var allowSharedWorkspaces bool
@@ -75,6 +75,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.StringVar(&role, "role", "", "durable hierarchy role: coordinator or worker (default worker)")
 		flags.StringVar(&parentSessionID, "parent-session", "", "active parent public harness-session UUID")
 		flags.Int64Var(&ticketID, "ticket-id", 0, "active project ticket numeric ID")
+		flags.StringVar(&workShape, "work-shape", "", "closed ticket work shape: ship or scout")
 		flags.StringVar(&workspaceMode, "workspace-mode", "exclusive", "exclusive or shared workspace ownership")
 		flags.StringVar(&dispatchProfile, "dispatch-profile", "", "execution-options dispatch profile id")
 		flags.StringVar(&dispatchProfileVersion, "dispatch-profile-version", "", "exact immutable dispatch profile version")
@@ -147,7 +148,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		output, err = client.Start(ctx, agentd.StartRequest{
 			Adapter: adapter, Workspace: workspace, Identity: identity, ProjectID: projectID, Prompt: string(prompt),
-			Role: role, ParentSessionID: parentSessionID, TicketID: ticketID, WorkspaceMode: workspaceMode,
+			Role: role, ParentSessionID: parentSessionID, TicketID: ticketID, WorkShape: workShape, WorkspaceMode: workspaceMode,
 			DispatchProfileID: dispatchProfile, DispatchProfileVersion: dispatchProfileVersion,
 		})
 	case "steer":

@@ -156,10 +156,14 @@ func TestAttentionTurnEndUsesImmutableEventTimeAssignmentSnapshot(t *testing.T) 
 	harness := NewService(paimosdb.DB)
 	register := func(name, host, ref string, parentSessionID *string, ticketID *int64) models.HarnessSession {
 		t.Helper()
+		shape := ""
+		if ticketID != nil {
+			shape = "ship"
+		}
 		session, _, err := harness.Register(context.Background(), RegisterInput{
 			ProjectID: projectID, AgentName: name, Harness: "codex", Host: host,
 			SessionRef: ref, WorkerLease: testWorkerLease, ManagementMode: ManagementManaged,
-			Role: RoleWorker, ParentSessionID: parentSessionID, TicketID: ticketID,
+			Role: RoleWorker, ParentSessionID: parentSessionID, TicketID: ticketID, WorkShape: shape,
 			SteerMode: SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
 		})
 		if err != nil {

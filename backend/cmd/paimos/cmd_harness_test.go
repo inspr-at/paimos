@@ -37,7 +37,7 @@ func TestHarnessRegisterOmitsUnsetHierarchyFieldsForOldServer(t *testing.T) {
 	if _, _, err := executeCLIForTest(t, "--json", "harness", "register", "--project", "PAI", "--agent", "worker", "--harness", "codex", "--host", "mbp0", "--registration-file", registrationFile, "--management", "managed", "--role", "worker", "--capability", "status"); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"parent_harness_session_id", "ticket_id", "workspace", "dispatch_profile_id", "dispatch_profile_version", "account_label"} {
+	for _, field := range []string{"parent_harness_session_id", "ticket_id", "work_shape", "workspace", "dispatch_profile_id", "dispatch_profile_version", "account_label"} {
 		if _, ok := posted[field]; ok {
 			t.Fatalf("unset forward-compatible field %s sent to old server: %s", field, posted[field])
 		}
@@ -76,6 +76,58 @@ func TestHarnessRegisterSendsTypedExecutionProvenance(t *testing.T) {
 	for _, field := range []string{"workspace", "dispatch_profile_id", "dispatch_profile_version", "account_label"} {
 		if len(posted[field]) == 0 {
 			t.Fatalf("missing %s in payload: %v", field, posted)
+		}
+	}
+}
+
+func TestHarnessRegisterSendsClosedWorkShapeWithTicket(t *testing.T) {
+	registrationFile := filepath.Join(t.TempDir(), "registration.json")
+	if err := os.WriteFile(registrationFile, []byte(`{"harness_session_ref":"session-1","worker_lease":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var posted map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.RequestURI() == "/api/projects?status=all":
+			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/6/harness-sessions":
+			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = w.Write([]byte(`{"id":"11111111-1111-4111-8111-111111111111"}`))
+		default:
+			http.Error(w, `{"error":"unexpected"}`, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv(envURL, server.URL)
+	t.Setenv(envAPIKey, "test_key")
+	_, _, err := executeCLIForTest(t, "--json", "harness", "register", "--project", "PAI", "--agent", "worker", "--harness", "codex", "--host", "mbp0",
+		"--registration-file", registrationFile, "--management", "managed", "--role", "worker", "--ticket-id", "907", "--work-shape", "scout", "--capability", "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if posted["ticket_id"] != float64(907) || posted["work_shape"] != "scout" {
+		t.Fatalf("explicit task-shape payload=%+v", posted)
+	}
+}
+
+func TestHarnessCommandsRejectImplicitOrOpenWorkShapes(t *testing.T) {
+	registration := harnessRegisterCmd()
+	registration.SetArgs([]string{"--project", "PAI", "--agent", "worker", "--harness", "codex", "--host", "mbp0", "--ticket-id", "907"})
+	if err := registration.Execute(); err == nil || !strings.Contains(err.Error(), "--work-shape") {
+		t.Fatalf("ticket registration without shape error=%v", err)
+	}
+	for _, shape := range []string{"", "research", "ship"} {
+		binding := harnessBindCmd()
+		args := []string{"--project", "PAI", "--session", "11111111-1111-4111-8111-111111111111", "--revision", "1", "--parent-session", "", "--ticket-id", "0"}
+		if shape != "" {
+			args = append(args, "--work-shape", shape)
+		}
+		binding.SetArgs(args)
+		if err := binding.Execute(); err == nil {
+			t.Fatalf("detached binding shape %q accepted", shape)
 		}
 	}
 }

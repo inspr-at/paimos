@@ -102,6 +102,7 @@ type harnessSessionResponse struct {
 	Role            string                      `json:"role,omitempty"`
 	ParentSessionID *string                     `json:"parent_harness_session_id"`
 	TicketID        *int64                      `json:"ticket_id"`
+	WorkShape       string                      `json:"work_shape"`
 	Workspace       *agentd.WorkspaceProvenance `json:"workspace_provenance"`
 	DispatchProfile *dispatchprofile.Profile    `json:"dispatch_profile"`
 	AccountLabel    string                      `json:"account_label"`
@@ -422,7 +423,11 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 		args = append(args, "--parent-session", session.ParentSessionID)
 	}
 	if session.TicketID > 0 {
-		args = append(args, "--ticket-id", strconv.FormatInt(session.TicketID, 10))
+		shape := session.WorkShape
+		if shape == "" {
+			shape = "unknown"
+		}
+		args = append(args, "--ticket-id", strconv.FormatInt(session.TicketID, 10), "--work-shape", shape)
 	}
 	registration, err := json.Marshal(map[string]string{"harness_session_ref": session.ID, "worker_lease": workerLease})
 	if err != nil {
@@ -510,7 +515,11 @@ func reporterBindingMatches(response harnessSessionResponse, session agentd.Sess
 		session.ParentSessionID != "" && response.ParentSessionID != nil && *response.ParentSessionID == session.ParentSessionID
 	ticketMatches := session.TicketID == 0 && response.TicketID == nil ||
 		session.TicketID > 0 && response.TicketID != nil && *response.TicketID == session.TicketID
-	return parentMatches && ticketMatches
+	// An older server omits work_shape. Only an unclassified legacy session may
+	// accept that response; classified sessions still require an exact echo.
+	shapeMatches := session.WorkShape == "" && (response.WorkShape == "" || response.WorkShape == "unknown") ||
+		session.WorkShape != "" && response.WorkShape == session.WorkShape
+	return parentMatches && ticketMatches && shapeMatches
 }
 
 func reporterIdentity(session agentd.Session) (string, string, error) {

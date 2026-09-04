@@ -1239,10 +1239,10 @@ func PurgeIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	// PAI-903: trashed tickets can retain historical stopped-worker bindings.
-	// Detach them with the required revision advance so M170 appends immutable
+	// Detach them with the required revision advance so M174 appends immutable
 	// before/after evidence, then hard-delete the ticket in the same transaction.
 	if _, err := tx.ExecContext(r.Context(), `UPDATE harness_sessions
-		SET ticket_id=NULL,revision=revision+1,
+		SET ticket_id=NULL,work_shape=NULL,revision=revision+1,
 		    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE ticket_id=?`, id); err != nil {
 		jsonError(w, "purge failed", http.StatusInternalServerError)

@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"github.com/inspr-at/paimos/backend/localjournal"
+	"github.com/inspr-at/paimos/backend/workshape"
 )
 
 const (
@@ -88,6 +89,12 @@ func validateRegistryRecord(record registryRecord) error {
 	}
 	if s.TicketID < 0 {
 		return errors.New("invalid agentd ticket id")
+	}
+	if s.WorkShape != "" && !workshape.ValidPersisted(s.WorkShape) {
+		return errors.New("invalid agentd work shape")
+	}
+	if s.TicketID == 0 && s.WorkShape != "" {
+		return errors.New("agentd work shape has no ticket binding")
 	}
 	if s.WorkspaceProvenance.Identity == "" {
 		if s.DispatchProfile != nil || s.AccountLabel != "" && s.AccountLabel != "unknown" {

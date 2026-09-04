@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/dispatchprofile"
+	"github.com/inspr-at/paimos/backend/workshape"
 )
 
 const defaultHeartbeatInterval = 15 * time.Second
@@ -248,7 +249,7 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 	now := time.Now().UTC()
 	entry := &sessionEntry{session: Session{
 		ID: uuid.NewString(), Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
-		ProjectID: validated.ProjectID, Role: validated.Role, ParentSessionID: validated.ParentSessionID, TicketID: validated.TicketID,
+		ProjectID: validated.ProjectID, Role: validated.Role, ParentSessionID: validated.ParentSessionID, TicketID: validated.TicketID, WorkShape: validated.WorkShape,
 		WorkspaceProvenance: provenance, DispatchProfile: profile, AccountLabel: accountLabel,
 		Capabilities: append([]Capability(nil), capabilities...), Managed: true, State: StateStarting,
 		StartedAt: now, HeartbeatAt: now,
@@ -388,6 +389,13 @@ func validateStartRequest(request StartRequest) (StartRequest, error) {
 	}
 	if request.TicketID < 0 {
 		return StartRequest{}, errors.New("agentd ticket id is invalid")
+	}
+	request.WorkShape = strings.ToLower(strings.TrimSpace(request.WorkShape))
+	if request.TicketID > 0 && !workshape.ValidPersisted(request.WorkShape) {
+		return StartRequest{}, errors.New("agentd ticket work shape must be ship or scout")
+	}
+	if request.TicketID == 0 && request.WorkShape != "" {
+		return StartRequest{}, errors.New("agentd work shape requires a ticket binding")
 	}
 	request.WorkspaceMode = strings.ToLower(strings.TrimSpace(request.WorkspaceMode))
 	if request.WorkspaceMode == "" {

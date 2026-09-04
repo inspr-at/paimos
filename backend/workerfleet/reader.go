@@ -13,7 +13,10 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"github.com/inspr-at/paimos/backend/managedharness"
+	"github.com/inspr-at/paimos/backend/models"
+	"github.com/inspr-at/paimos/backend/workshape"
 )
 
 type TrustFact struct {
@@ -78,9 +81,14 @@ SELECT EXISTS(SELECT 1 FROM requester WHERE role<>'external'),
 const fleetSampleSQL = auth.AgentModeAuthorizationCTE + `,
 fleet_candidates AS (
  SELECT hs.id,hs.project_id,p.key,p.name,hs.project_agent_id,pa.name AS agent_name,
-        hs.parent_harness_session_id,hs.ticket_id,
+        hs.parent_harness_session_id,hs.ticket_id,COALESCE(hs.work_shape,'') AS work_shape,
         CASE WHEN i.id IS NULL THEN '' ELSE p.key||'-'||i.issue_number END AS ticket_key,
-        COALESCE(i.title,'') AS ticket_title,hs.role,hs.harness,hs.management_mode,hs.phase,
+        COALESCE(i.title,'') AS ticket_title,hs.role,hs.harness,hs.host AS machine_id,
+        COALESCE(hs.workspace_path,'') AS workspace_path,hs.workspace_kind,hs.workspace_mode,
+        COALESCE(hs.dispatch_profile_id,'') AS dispatch_profile_id,
+        COALESCE(hs.dispatch_profile_version,'') AS dispatch_profile_version,
+        COALESCE(hs.dispatch_model,'') AS dispatch_model,COALESCE(hs.dispatch_effort,'') AS dispatch_effort,
+        hs.account_label,hs.management_mode,hs.phase,
         hs.heartbeat_at,hs.activity_state,hs.activity_reason,hs.activity_event_kind,hs.activity_at,
         hs.closed_reason,hs.revision,hs.created_at,
         hs.advertised_inbox,hs.advertised_status,hs.advertised_steer,
@@ -114,8 +122,10 @@ ranked AS (
    created_at DESC,id) AS within_project_rank
  FROM fleet
 )
-SELECT id,project_id,key,name,project_agent_id,agent_name,parent_harness_session_id,ticket_id,
- ticket_key,ticket_title,role,harness,management_mode,phase,heartbeat_at,activity_state,
+SELECT id,project_id,key,name,project_agent_id,agent_name,parent_harness_session_id,ticket_id,work_shape,
+ ticket_key,ticket_title,role,harness,machine_id,workspace_path,workspace_kind,workspace_mode,
+ dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,account_label,
+ management_mode,phase,heartbeat_at,activity_state,
  activity_reason,activity_event_kind,activity_at,closed_reason,revision,
  advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,
  active_coordinator_count,active_coordinator_id,project_worker_count,
@@ -123,13 +133,22 @@ SELECT id,project_id,key,name,project_agent_id,agent_name,parent_harness_session
 FROM ranked ORDER BY within_project_rank,key,project_id,id LIMIT ?`
 
 type fleetRow struct {
-	worker                 Worker
+	worker                 WorkerV2
 	heartbeat              sql.NullString
 	activityAt             sql.NullString
 	activityState          string
 	activityReason         string
 	activityKind           string
 	closedReason           string
+	machineID              string
+	workspacePath          string
+	workspaceKind          string
+	workspaceMode          string
+	profileID              string
+	profileVersion         string
+	profileModel           string
+	profileEffort          string
+	accountLabel           string
 	advertised             Capabilities
 	activeCoordinatorCount int64
 	activeCoordinatorID    sql.NullString
@@ -137,12 +156,24 @@ type fleetRow struct {
 }
 
 func (r *Reader) Read(ctx context.Context, request Request) (Snapshot, error) {
+	snapshot, err := r.read(ctx, request, false)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return projectV1(snapshot), nil
+}
+
+func (r *Reader) ReadV2(ctx context.Context, request Request) (SnapshotV2, error) {
+	return r.read(ctx, request, true)
+}
+
+func (r *Reader) read(ctx context.Context, request Request, includeRuntime bool) (SnapshotV2, error) {
 	if r == nil || r.db == nil || request.UserID <= 0 || (request.RouteProjectID != nil && *request.RouteProjectID <= 0) {
-		return Snapshot{}, ErrInvalid
+		return SnapshotV2{}, ErrInvalid
 	}
 	zoom, band, sampleLimit, err := ParseZoom(request.Zoom)
 	if err != nil {
-		return Snapshot{}, err
+		return SnapshotV2{}, err
 	}
 	routeID := int64(0)
 	if request.RouteProjectID != nil {
@@ -150,26 +181,26 @@ func (r *Reader) Read(ctx context.Context, request Request) (Snapshot, error) {
 	}
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return Snapshot{}, err
+		return SnapshotV2{}, err
 	}
 	defer tx.Rollback()
 	var requesterExists, routeAuthorized int
 	if err := tx.QueryRowContext(ctx, authorizationSQL, request.UserID, routeID, routeID).Scan(&requesterExists, &routeAuthorized); err != nil {
-		return Snapshot{}, err
+		return SnapshotV2{}, err
 	}
 	if requesterExists != 1 || routeAuthorized != 1 {
-		return Snapshot{}, ErrNotFound
+		return SnapshotV2{}, ErrNotFound
 	}
 	// The authorization read pins the SQLite snapshot. Capture the projection
 	// clock only after that boundary so evidence committed into this snapshot
 	// cannot be newer merely because a separate read raced the clock.
 	observedAt := r.clock().UTC()
 	if observedAt.IsZero() {
-		return Snapshot{}, fmt.Errorf("%w: zero clock", ErrInvariant)
+		return SnapshotV2{}, fmt.Errorf("%w: zero clock", ErrInvariant)
 	}
 	rows, err := tx.QueryContext(ctx, fleetSampleSQL, request.UserID, routeID, routeID, TerminalGenerationsPerAgent, sampleLimit)
 	if err != nil {
-		return Snapshot{}, err
+		return SnapshotV2{}, err
 	}
 	fleetRows := []fleetRow{}
 	var totalWorkers, totalProjects int64
@@ -177,17 +208,20 @@ func (r *Reader) Read(ctx context.Context, request Request) (Snapshot, error) {
 		var row fleetRow
 		var parent sql.NullString
 		var ticketID sql.NullInt64
+		var storedWorkShape string
 		var ticketKey, ticketTitle string
 		var advertisedInbox, advertisedStatus, advertisedSteer, advertisedInterrupt, advertisedStop int
 		if err := rows.Scan(&row.worker.HarnessSessionID, &row.worker.Project.ID, &row.worker.Project.Key,
-			&row.worker.Project.Name, &row.worker.Agent.ID, &row.worker.Agent.Name, &parent, &ticketID,
-			&ticketKey, &ticketTitle, &row.worker.Role, &row.worker.Harness, &row.worker.ManagementMode,
+			&row.worker.Project.Name, &row.worker.Agent.ID, &row.worker.Agent.Name, &parent, &ticketID, &storedWorkShape,
+			&ticketKey, &ticketTitle, &row.worker.Role, &row.worker.Harness, &row.machineID,
+			&row.workspacePath, &row.workspaceKind, &row.workspaceMode, &row.profileID, &row.profileVersion, &row.profileModel, &row.profileEffort,
+			&row.accountLabel, &row.worker.ManagementMode,
 			&row.worker.Phase, &row.heartbeat, &row.activityState, &row.activityReason, &row.activityKind,
 			&row.activityAt, &row.closedReason, &row.worker.Revision, &advertisedInbox, &advertisedStatus,
 			&advertisedSteer, &advertisedInterrupt, &advertisedStop, &row.activeCoordinatorCount,
 			&row.activeCoordinatorID, &row.projectWorkerCount, &totalWorkers, &totalProjects); err != nil {
 			rows.Close()
-			return Snapshot{}, err
+			return SnapshotV2{}, err
 		}
 		if parent.Valid {
 			value := parent.String
@@ -200,16 +234,20 @@ func (r *Reader) Read(ctx context.Context, request Request) (Snapshot, error) {
 				row.worker.Ticket.Key, row.worker.Ticket.Title = &ticketKey, &ticketTitle
 			}
 		}
+		row.worker.WorkShape = workshape.Normalize(storedWorkShape)
+		row.worker.WorkContract = workshape.For(row.worker.WorkShape)
+		row.worker.AccountLabel = "unknown"
+		row.worker.RuntimeProvenanceTrust = RuntimeTrustUntrusted
 		row.advertised = Capabilities{Inbox: advertisedInbox == 1, Status: advertisedStatus == 1,
 			Steer: advertisedSteer == 1, Interrupt: advertisedInterrupt == 1, Stop: advertisedStop == 1}
 		row.worker.RecentCommunication = []Communication{}
 		fleetRows = append(fleetRows, row)
 	}
 	if err := rows.Close(); err != nil {
-		return Snapshot{}, err
+		return SnapshotV2{}, err
 	}
 	if err := rows.Err(); err != nil {
-		return Snapshot{}, err
+		return SnapshotV2{}, err
 	}
 	ticketIDs := make([]int64, 0, len(fleetRows))
 	seenTickets := map[int64]bool{}
@@ -223,10 +261,10 @@ func (r *Reader) Read(ctx context.Context, request Request) (Snapshot, error) {
 	if r.loadTrust != nil {
 		trust, err = r.loadTrust(ctx, tx, ticketIDs, observedAt)
 		if err != nil {
-			return Snapshot{}, err
+			return SnapshotV2{}, err
 		}
 	}
-	workers := make([]Worker, len(fleetRows))
+	workers := make([]WorkerV2, len(fleetRows))
 	sampledIDs := make(map[string]bool, len(fleetRows))
 	for _, row := range fleetRows {
 		sampledIDs[row.worker.HarnessSessionID] = true
@@ -234,30 +272,84 @@ func (r *Reader) Read(ctx context.Context, request Request) (Snapshot, error) {
 	for index, row := range fleetRows {
 		row.worker.ParentInSample = row.worker.ParentSessionID != nil && sampledIDs[*row.worker.ParentSessionID]
 		row.worker.Liveness = projectLiveness(row, observedAt)
+		if includeRuntime {
+			if err := projectRuntimeProvenance(&row, observedAt); err != nil {
+				return SnapshotV2{}, err
+			}
+		}
 		row.worker.Capabilities = effectiveCapabilities(row.advertised, row.worker.ManagementMode, row.worker.Phase, row.worker.Liveness)
 		row.worker.DeliveryTrust = trustProjection(row.worker.Ticket, trust)
 		workers[index] = row.worker
 	}
 	if err := loadRecentCommunication(ctx, tx, workers); err != nil {
-		return Snapshot{}, err
+		return SnapshotV2{}, err
 	}
 	projects := projectProjection(fleetRows, workers)
 	if err := tx.Commit(); err != nil {
-		return Snapshot{}, err
+		return SnapshotV2{}, err
 	}
 	scope := Scope{Kind: "portfolio"}
 	if request.RouteProjectID != nil {
 		scope = Scope{Kind: "project", ProjectID: request.RouteProjectID}
 	}
-	snapshot := Snapshot{SchemaVersion: SchemaVersion, ObservedAt: observedAt, Scope: scope, Zoom: zoom,
+	snapshot := SnapshotV2{SchemaVersion: SchemaVersionV2, ObservedAt: observedAt, Scope: scope, Zoom: zoom,
 		Band: band, SampleLimit: sampleLimit, SampleTruncated: totalWorkers > int64(len(workers)),
 		Projects: projects, Workers: workers, Provenance: Provenance{Source: "authoritative_database",
-			Cache: "none", RemoteCache: false, ProjectionVersion: SchemaVersion,
+			Cache: "none", RemoteCache: false, ProjectionVersion: SchemaVersionV2,
 			TerminalGenerationsPerAgent: TerminalGenerationsPerAgent}}
 	snapshot.Totals = Totals{Projects: totalProjects, SampledProjects: len(projects),
 		OmittedProjects: totalProjects - int64(len(projects)), Workers: totalWorkers, SampledWorkers: len(workers),
 		OmittedWorkers: totalWorkers - int64(len(workers))}
 	return snapshot, nil
+}
+
+func projectRuntimeProvenance(row *fleetRow, observedAt time.Time) error {
+	row.worker.MachineID = nil
+	row.worker.WorkspaceProvenance = nil
+	row.worker.DispatchProfile = nil
+	row.worker.AccountLabel = "unknown"
+	row.worker.RuntimeProvenanceTrust = RuntimeTrustUntrusted
+	heartbeat, err := parseTimestamp(row.heartbeat.String)
+	if row.worker.ManagementMode != managedharness.ManagementManaged || row.machineID == "" || row.workspacePath == "" ||
+		!row.heartbeat.Valid || err != nil || heartbeat.After(observedAt.Add(5*time.Second)) {
+		return nil
+	}
+	row.worker.RuntimeProvenanceTrust = RuntimeTrustManagedReporter
+	machineID := row.machineID
+	row.worker.MachineID = &machineID
+	row.worker.WorkspaceProvenance = &WorkspaceProvenance{Kind: row.workspaceKind, Mode: row.workspaceMode}
+	row.worker.AccountLabel = row.accountLabel
+	if row.profileID == "" {
+		return nil
+	}
+	profile := dispatchprofile.Profile{ID: row.profileID, Version: row.profileVersion,
+		Harness: row.worker.Harness, Model: row.profileModel, Effort: row.profileEffort,
+		MachineSource: dispatchprofile.MachineAuthenticatedReporter,
+		AccountSource: dispatchprofile.AccountLocalProbe, WorkspaceMode: row.workspaceMode}
+	if err := dispatchprofile.ValidateSnapshot(profile); err != nil {
+		return fmt.Errorf("%w: invalid dispatch profile snapshot: %v", ErrInvariant, err)
+	}
+	row.worker.DispatchProfile = &models.HarnessDispatchProfile{ID: profile.ID, Version: profile.Version,
+		Harness: profile.Harness, Model: profile.Model, Effort: profile.Effort,
+		MachineSource: profile.MachineSource, AccountSource: profile.AccountSource, WorkspaceMode: profile.WorkspaceMode}
+	return nil
+}
+
+func projectV1(source SnapshotV2) Snapshot {
+	workers := make([]Worker, len(source.Workers))
+	for index, worker := range source.Workers {
+		workers[index] = Worker{HarnessSessionID: worker.HarnessSessionID, ParentSessionID: worker.ParentSessionID,
+			ParentInSample: worker.ParentInSample, Project: worker.Project, Agent: worker.Agent, Role: worker.Role,
+			Harness: worker.Harness, ManagementMode: worker.ManagementMode, Ticket: worker.Ticket, Phase: worker.Phase,
+			Revision: worker.Revision, Liveness: worker.Liveness, Capabilities: worker.Capabilities,
+			RecentCommunication: worker.RecentCommunication, RecentCommunicationOmitted: worker.RecentCommunicationOmitted,
+			DeliveryTrust: worker.DeliveryTrust}
+	}
+	provenance := source.Provenance
+	provenance.ProjectionVersion = SchemaVersion
+	return Snapshot{SchemaVersion: SchemaVersion, ObservedAt: source.ObservedAt, Scope: source.Scope, Zoom: source.Zoom,
+		Band: source.Band, SampleLimit: source.SampleLimit, SampleTruncated: source.SampleTruncated,
+		Totals: source.Totals, Projects: source.Projects, Workers: workers, Provenance: provenance}
 }
 
 func projectLiveness(row fleetRow, observedAt time.Time) Liveness {
@@ -385,9 +477,9 @@ func trustProjection(ticket *Ticket, facts map[int64]TrustFact) DeliveryTrust {
 	return result
 }
 
-func projectProjection(rows []fleetRow, workers []Worker) []Project {
+func projectProjection(rows []fleetRow, workers []WorkerV2) []Project {
 	byProject := map[int64]*Project{}
-	workerByID := make(map[string]Worker, len(workers))
+	workerByID := make(map[string]WorkerV2, len(workers))
 	for _, worker := range workers {
 		workerByID[worker.HarnessSessionID] = worker
 	}
@@ -426,7 +518,7 @@ func projectProjection(rows []fleetRow, workers []Worker) []Project {
 	return projects
 }
 
-func loadRecentCommunication(ctx context.Context, tx *sql.Tx, workers []Worker) error {
+func loadRecentCommunication(ctx context.Context, tx *sql.Tx, workers []WorkerV2) error {
 	if len(workers) == 0 {
 		return nil
 	}

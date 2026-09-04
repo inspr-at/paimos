@@ -73,6 +73,7 @@ type StartRequest struct {
 	Role                   string                   `json:"role,omitempty"`
 	ParentSessionID        string                   `json:"parent_harness_session_id,omitempty"`
 	TicketID               int64                    `json:"ticket_id,omitempty"`
+	WorkShape              string                   `json:"work_shape,omitempty"`
 	DispatchProfileID      string                   `json:"dispatch_profile_id,omitempty"`
 	DispatchProfileVersion string                   `json:"dispatch_profile_version,omitempty"`
 	ResolvedProfile        *dispatchprofile.Profile `json:"-"`
@@ -171,6 +172,7 @@ type Session struct {
 	Role                string                   `json:"role"`
 	ParentSessionID     string                   `json:"parent_harness_session_id,omitempty"`
 	TicketID            int64                    `json:"ticket_id,omitempty"`
+	WorkShape           string                   `json:"work_shape,omitempty"`
 	Adapter             string                   `json:"adapter"`
 	Workspace           string                   `json:"workspace"`
 	WorkspaceProvenance WorkspaceProvenance      `json:"workspace_provenance"`

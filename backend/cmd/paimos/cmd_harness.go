@@ -13,6 +13,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/managedharness"
 	"github.com/inspr-at/paimos/backend/models"
+	"github.com/inspr-at/paimos/backend/workshape"
 	"github.com/spf13/cobra"
 )
 
@@ -49,7 +50,7 @@ func parseHarnessCapabilities(raw []string) (models.HarnessCapabilities, error) 
 }
 
 func harnessRegisterCmd() *cobra.Command {
-	var project, agent, harness, host, refFile, leaseFile, registrationFile, targetID, management, role, parentSessionID, steerMode string
+	var project, agent, harness, host, refFile, leaseFile, registrationFile, targetID, management, role, parentSessionID, steerMode, taskShape string
 	var workspacePath, gitTopLevel, gitBranch, workspaceIdentity, workspaceKind, workspaceMode string
 	var dispatchProfileID, dispatchProfileVersion, accountLabel string
 	var ticketID int64
@@ -60,6 +61,16 @@ func harnessRegisterCmd() *cobra.Command {
 		}
 		if ticketID < 0 {
 			return &usageError{msg: "--ticket-id must be positive when supplied"}
+		}
+		if ticketID > 0 && !cmd.Flags().Changed("work-shape") {
+			return &usageError{msg: "--work-shape ship|scout is required with --ticket-id"}
+		}
+		shape := strings.ToLower(strings.TrimSpace(taskShape))
+		if ticketID > 0 && shape != workshape.Unknown && !workshape.ValidPersisted(shape) {
+			return &usageError{msg: "--work-shape must be ship or scout, or unknown only for an exact legacy replay"}
+		}
+		if ticketID == 0 && strings.TrimSpace(taskShape) != "" {
+			return &usageError{msg: "--work-shape requires --ticket-id"}
 		}
 		if registrationFile != "" && (refFile != "" || leaseFile != "") {
 			return &usageError{msg: "--registration-file cannot be combined with --harness-session-file or --worker-lease-file"}
@@ -108,7 +119,7 @@ func harnessRegisterCmd() *cobra.Command {
 		if workspacePath != "" || gitTopLevel != "" || gitBranch != "" || workspaceIdentity != "" || workspaceKind != "" || workspaceMode != "" {
 			workspace = &models.HarnessWorkspaceProvenance{CanonicalPath: workspacePath, GitTopLevel: gitTopLevel, GitBranch: gitBranch, Identity: workspaceIdentity, Kind: workspaceKind, Mode: workspaceMode}
 		}
-		input := managedharness.RegisterInput{ProjectID: 1, AgentName: agent, Harness: harness, Host: host, SessionRef: ref, WorkerLease: workerLease, MessageTargetID: targetID, ManagementMode: management, Role: role, ParentSessionID: parent, TicketID: ticket, SteerMode: steerMode, Capabilities: caps, Workspace: workspace, DispatchProfileID: dispatchProfileID, DispatchProfileVersion: dispatchProfileVersion, AccountLabel: accountLabel}
+		input := managedharness.RegisterInput{ProjectID: 1, AgentName: agent, Harness: harness, Host: host, SessionRef: ref, WorkerLease: workerLease, MessageTargetID: targetID, ManagementMode: management, Role: role, ParentSessionID: parent, TicketID: ticket, WorkShape: taskShape, SteerMode: steerMode, Capabilities: caps, Workspace: workspace, DispatchProfileID: dispatchProfileID, DispatchProfileVersion: dispatchProfileVersion, AccountLabel: accountLabel}
 		if err := managedharness.ValidateRegistration(input); err != nil {
 			return &usageError{msg: err.Error()}
 		}
@@ -136,6 +147,7 @@ func harnessRegisterCmd() *cobra.Command {
 		}
 		if ticket != nil {
 			payload["ticket_id"] = *ticket
+			payload["work_shape"] = strings.ToLower(strings.TrimSpace(taskShape))
 		}
 		response, err := client.do(http.MethodPost, fmt.Sprintf("/api/projects/%d/harness-sessions", projectID), payload)
 		if err != nil {
@@ -155,6 +167,7 @@ func harnessRegisterCmd() *cobra.Command {
 	cmd.Flags().StringVar(&role, "role", "worker", "coordinator or worker")
 	cmd.Flags().StringVar(&parentSessionID, "parent-session", "", "active parent public harness-session UUID")
 	cmd.Flags().Int64Var(&ticketID, "ticket-id", 0, "active project ticket numeric ID")
+	cmd.Flags().StringVar(&taskShape, "work-shape", "", "ship or scout; unknown only for an exact legacy replay")
 	cmd.Flags().StringVar(&steerMode, "steer-mode", "none", "none, owned, or codex_external")
 	cmd.Flags().StringSliceVar(&capabilities, "capability", nil, "advertised capabilities: inbox,status,steer,interrupt,stop")
 	cmd.Flags().StringVar(&workspacePath, "workspace", "", "authenticated reporter's canonical workspace path")
@@ -282,8 +295,8 @@ func harnessOrchestratorCmd() *cobra.Command {
 
 func harnessBindCmd() *cobra.Command {
 	var revision, ticketID int64
-	var parentSessionID string
-	cmd := harnessProjectCommand("bind", "Explicitly assign hierarchy and ticket bindings with revision CAS", http.MethodPatch, "/{session}/binding", func() any {
+	var parentSessionID, taskShape string
+	cmd := harnessProjectCommand("bind", "Explicitly assign hierarchy, ticket, and work-shape bindings with revision CAS", http.MethodPatch, "/{session}/binding", func() any {
 		var parent *string
 		if parentSessionID != "" {
 			parent = &parentSessionID
@@ -292,17 +305,25 @@ func harnessBindCmd() *cobra.Command {
 		if ticketID > 0 {
 			ticket = &ticketID
 		}
-		return map[string]any{"expected_revision": revision, "parent_harness_session_id": parent, "ticket_id": ticket}
+		return map[string]any{"expected_revision": revision, "parent_harness_session_id": parent, "ticket_id": ticket, "work_shape": strings.ToLower(strings.TrimSpace(taskShape))}
 	}, false)
 	cmd.PreRunE = func(cmd *cobra.Command, _ []string) error {
-		if revision <= 0 || !cmd.Flags().Changed("parent-session") || !cmd.Flags().Changed("ticket-id") || ticketID < 0 {
-			return &usageError{msg: "--revision, --parent-session, and --ticket-id are required; use empty/zero to detach"}
+		shape := strings.ToLower(strings.TrimSpace(taskShape))
+		if revision <= 0 || !cmd.Flags().Changed("parent-session") || !cmd.Flags().Changed("ticket-id") || !cmd.Flags().Changed("work-shape") || ticketID < 0 {
+			return &usageError{msg: "--revision, --parent-session, --ticket-id, and --work-shape are required"}
+		}
+		if ticketID == 0 && shape != workshape.Unknown {
+			return &usageError{msg: "detached ticket bindings require --work-shape unknown"}
+		}
+		if ticketID > 0 && shape != workshape.Unknown && !workshape.ValidPersisted(shape) {
+			return &usageError{msg: "bound tickets require --work-shape unknown, ship, or scout"}
 		}
 		return nil
 	}
 	cmd.Flags().Int64Var(&revision, "revision", 0, "exact current harness-session revision")
 	cmd.Flags().StringVar(&parentSessionID, "parent-session", "", "active parent public harness-session UUID, or empty to detach")
 	cmd.Flags().Int64Var(&ticketID, "ticket-id", 0, "active project ticket numeric ID, or zero to detach")
+	cmd.Flags().StringVar(&taskShape, "work-shape", "", "unknown to preserve a legacy binding, or ship/scout to classify")
 	return cmd
 }
 func harnessHeartbeatCmd() *cobra.Command {

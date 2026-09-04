@@ -966,7 +966,7 @@ or output. It is available to authenticated internal users at:
 - `GET /api/agent-mode/deliveries/{deliveryKey}`
 - `GET /api/agent-mode/deliveries/events`
 
-The related worker-rooted projection is available at
+The frozen PAI-904 worker-rooted projection is available at
 `GET /api/agent-mode/worker-fleet/v1` and
 `GET /api/agent-mode/projects/{projectID}/worker-fleet/v1`. Both routes share
 one read model and authorization rule. They preserve the authoritative
@@ -974,13 +974,35 @@ harness-session hierarchy, ticket binding, liveness and capabilities while
 bounding semantic-zoom samples to 100 and reporting exact omitted counts.
 The retained fleet includes every non-terminal session and only the newest
 terminal generation per project agent; provenance declares that bound.
+
+The explicit v2 extension is available at
+`GET /api/agent-mode/worker-fleet/v2` and
+`GET /api/agent-mode/projects/{projectID}/worker-fleet/v2`. It preserves every
+v1 field and adds runtime and assignment context without mutating v1. Its
+closed `work_shape` is ship, scout, or legacy unknown, with a bounded
+value-free contract. Scout means investigation evidence, never an implicit
+delivery, and promotion to ship requires an authorized revision-CAS binding
+write. These presentation fields do not claim Git enforcement or rewrite
+historical deliveries. Immutable supervision events capture semantic
+transitions, not every heartbeat or yield mutation.
+V2 also carries `management_mode` and the closed
+`runtime_provenance_trust` value. `managed_reporter` requires managed mode,
+complete workspace evidence, and a valid lease-authenticated reporter
+heartbeat. Only then are the machine label, privacy-safe workspace kind/mode,
+exact bounded dispatch profile, and closed non-secret account label eligible.
+For unmanaged, pre-heartbeat, or legacy-unverified rows the trust is
+`untrusted`; machine, workspace, and dispatch are null and account is unknown,
+even if a caller supplied values at registration. This trust is about the
+authenticated reporting channel, not binary or machine attestation. Raw paths,
+workspace identities, Git branches, targets, credentials, and quota are always
+excluded.
 Stale or malformed reporter evidence is unknown rather than idle; unmanaged
 workers never advertise effective steer, interrupt, or stop. Communication is
 limited to four content-free, project-agent-attributed delivery summaries per
 worker for internal project viewers, and progress/ETA
 appear only under their explicit delivery-trust flags. The response declares
-whether a remote cache contributed; schema v1 currently reads the local
-authoritative database directly and reports `remote_cache=false`.
+whether a remote cache contributed; both versions currently read the local
+authoritative database directly and report `remote_cache=false`.
 
 Snapshot responses are `private, no-store` schema-v1 JSON. The top-level
 `cursor` is opaque and bound to the authenticated user, permission epoch,
@@ -1368,9 +1390,21 @@ from separate owner-only files:
 paimos harness register --project PAI --agent worker --harness codex \
   --host build-mbp --harness-session-file "$HARNESS_SESSION_REF_FILE" \
   --worker-lease-file "$WORKER_LEASE_FILE" --management managed \
-  --role worker --steer-mode owned \
+  --role worker --ticket-id 907 --work-shape scout --steer-mode owned \
   --capability inbox,status,steer,interrupt,stop
 ```
+
+Every newly classified ticket binding has one closed work shape: `ship` for a
+product delivery or `scout` for investigation evidence. Scout defaults mark
+implementation, product QA, and deployment not applicable; its done condition
+is an answered investigation backed by recorded evidence and explicit
+uncertainty. Ship uses the existing five delivery stages. These are value-free
+assignment defaults: they do not contain ticket prose, rewrite historical
+delivery attempts, or claim that PAIMOS enforces Git behavior. A pre-M174
+binding with no stored shape is returned as `unknown` until an operator
+classifies it explicitly. Agent-level `paimos onboard --agent <name>` briefings
+render the same bounded shape, stage defaults, done conditions, and non-goals;
+zero or multiple active generations render `unknown` rather than guessing.
 
 The worker lease is not the vendor session reference and is not the shared API
 key. The reference may be encrypted in `agent_message_targets`; M161's separate
@@ -1426,13 +1460,18 @@ generations without a worker-lease digest are stopped during migration, and
 pending/claimed controls are rejected with `ownership_lost`; they cannot be
 reauthorized after the fact.
 
-Exact active-registration replay compares the persisted parent and ticket but
-does not revalidate a parent that stopped after the child was registered. New
+Exact active-registration replay compares the persisted parent, ticket, and
+work shape, but does not revalidate a parent that stopped after the child was
+registered. New
 registrations and explicit rebinding still require an active same-project
 parent. Post-registration changes use `paimos harness bind` with the current
-revision and both desired nullable fields; each successful change advances the
-revision and records immutable before/after evidence. A chain may have at most
-16 ancestors, including after moving a node with descendants. Deleting a
+revision and the complete desired parent, ticket, and work-shape state; each
+successful change advances the revision and records immutable before/after
+evidence. A scout can become ship only through that authorized explicit
+compare-and-set write; activity, delivery evidence, or repository changes
+never promote it. Immutable supervision events record semantic transitions,
+not every replay-equivalent heartbeat or yield request. A chain may have at
+most 16 ancestors, including after moving a node with descendants. Deleting a
 project agent detaches surviving children with the same revisioned event;
 active ticket bindings return conflict on ticket mutation, while hard purge of
 an already-trashed ticket audit-detaches historical stopped sessions. Moving a
