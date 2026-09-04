@@ -27,6 +27,8 @@ var replyObligationBackoff = [...]time.Duration{
 	24 * time.Hour,
 }
 
+const replyObligationMaxResurfaces = int64(len(replyObligationBackoff) + 1)
+
 // HumanResolutionAuthority reauthorizes a human principal in the same
 // transaction that records the decision. Both values are server-derived,
 // value-free audit identities: the real actor user and the safe credential
@@ -41,15 +43,16 @@ type ResolveHeldMessageInput struct {
 	Authority      HumanResolutionAuthority
 }
 
-func closeReplyObligationTx(ctx context.Context, tx *sql.Tx, parentRowID, replyRowID, replySenderID, replyReceiverID int64) error {
+func closeReplyObligationTx(ctx context.Context, tx *sql.Tx, parentRowID, replyRowID int64) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	_, err := tx.ExecContext(ctx, `UPDATE agent_reply_obligations SET state='closed',closing_message_row_id=?,
 		next_attention_at=NULL,closed_at=? WHERE message_row_id=? AND state='open' AND EXISTS(
 		 SELECT 1 FROM agent_messages original JOIN agent_messages reply ON reply.id=?
 		 WHERE original.id=agent_reply_obligations.message_row_id
 		  AND reply.parent_message_id=original.id AND reply.reply_to=original.message_id
-		  AND original.to_agent_id=? AND original.from_agent_id=?)`,
-		replyRowID, now, parentRowID, replyRowID, replySenderID, replyReceiverID)
+		  AND reply.delivered=1 AND reply.is_action_request=0
+		  AND reply.from_agent_id=original.to_agent_id AND reply.to_agent_id=original.from_agent_id)`,
+		replyRowID, now, parentRowID, replyRowID)
 	return err
 }
 
@@ -147,6 +150,12 @@ func (s *Service) ResolveHeldMessage(ctx context.Context, in ResolveHeldMessageI
 		resolution_id,message_row_id,project_id,outcome,actor_user_id,actor_session_id,instance,idempotency_key_digest,request_digest)
 		VALUES(?,?,?,?,?,?,?,?,?)`, resolutionID, messageRowID, in.ProjectID, in.Outcome, actorUserID,
 		actorSessionID, instance, keyDigest[:], requestDigest[:]); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: agent_message_human_resolutions.message_row_id") {
+			return nil, coded("agent_message_resolution_conflict", "held action request already has a human resolution")
+		}
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: agent_message_human_resolutions.instance, agent_message_human_resolutions.project_id, agent_message_human_resolutions.actor_user_id, agent_message_human_resolutions.idempotency_key_digest") {
+			return nil, coded("agent_message_resolution_idempotency_conflict", "Idempotency-Key was already used for a different resolution")
+		}
 		return nil, fmt.Errorf("record human message resolution: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

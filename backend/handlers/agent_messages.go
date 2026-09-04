@@ -199,6 +199,9 @@ func humanMessageResolutionAuthority(r *http.Request, projectID int64) agentmess
 		if err != nil || user == nil {
 			return 0, "", &agentmessage.CodedError{Code: "agent_message_unauthorized", Err: errors.New("current request credential is unavailable")}
 		}
+		if principal.Kind() != auth.PrincipalSession {
+			return 0, "", &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("a current human session is required")}
+		}
 		allowed, err := canEditProjectTx(ctx, tx, user, projectID)
 		if err != nil {
 			return 0, "", err
@@ -206,7 +209,7 @@ func humanMessageResolutionAuthority(r *http.Request, projectID int64) agentmess
 		if !allowed {
 			return 0, "", &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("current project edit authority is required")}
 		}
-		return principal.ActorUserID(), string(principal.Kind()) + ":" + principal.SafeCredentialID(), nil
+		return principal.ActorUserID(), "session:" + principal.SafeCredentialID(), nil
 	}
 }
 

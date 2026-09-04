@@ -178,11 +178,12 @@ paimos listen --attention --as "$ADDRESS" --project PAI --follow --deliver codex
 
 Messages remain fire-and-forget unless the sender deliberately adds
 `--expects-reply`. That flag commits one reply obligation atomically with the
-message. Only an exact durable counterpart `--reply-to <message-id>` closes
-it; listen acknowledgement and delivery completion never do. An overdue open
-obligation resurfaces to this same bounded orchestrator attention feed after
-5 minutes, then at 15 minutes, 1 hour, 4 hours, 12 hours, and no more often
-than every 24 hours. Closure immediately removes its historical attention
+message. Only an accepted, durable counterpart `--reply-to <message-id>`
+closes it; held messages, listen acknowledgement, and delivery completion
+never do. An overdue open obligation resurfaces to this same bounded
+orchestrator attention feed after 5 minutes, then at 15 minutes, 1 hour,
+4 hours, 12 hours, and 24 hours. It then remains authoritatively open but
+quiet until the exact reply arrives. Closure immediately removes its historical attention
 items from the actionable view while preserving the immutable audit trail.
 
 ```bash
@@ -193,18 +194,17 @@ PAIMOS_AGENT_NAME=worker paimos tell paimos:coordinator --project PAI \
 ```
 
 Human review of a held action request is a separate immutable disposition,
-not a release operation. Run it without agent attribution and keep the retry
-key private; an exact retry is stable, while a different outcome conflicts:
-
-```bash
-unset PAIMOS_AGENT_NAME
-paimos message resolve '<held-message-id>' --project PAI \
-  --outcome dismissed --idempotency-key '<operator-owned-retry-key>'
-```
+not a release operation. It is available only through the session-authenticated
+HTTP/UI control plane; API-key automation and agent-attributed requests cannot
+author a human decision. The operator supplies an opaque retry key to the
+resolution endpoint. An exact retry is stable, while a different outcome
+conflicts.
 
 Neither an obligation nor a resolution invents a PAI-903 hierarchy binding.
-The durable project/message identities remain authoritative; PAI-903 parent
-and ticket fields continue to come only from explicit harness registration or
+The stored `sender_agent_id` preserves the original project-scoped sender as
+authoritative provenance; `project_id` routes overdue attention to the single
+configured orchestrator, not directly back to that sender. PAI-903 parent and
+ticket fields continue to come only from explicit harness registration or
 binding changes.
 
 The server derives this feed from authoritative message, delivery, harness

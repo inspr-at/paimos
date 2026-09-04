@@ -49,8 +49,33 @@ func TestHeldActionResolutionHTTPIsHumanOnlyAndIdempotent(t *testing.T) {
 		return response
 	}
 
+	keyResponse := ts.post(t, "/api/auth/api-keys", ts.adminCookie, map[string]string{"name": "resolution-machine"})
+	assertStatus(t, keyResponse, http.StatusCreated)
+	var keyView struct {
+		Key string `json:"key"`
+	}
+	decode(t, keyResponse, &keyView)
+	keyBody, _ := json.Marshal(map[string]string{"outcome": "resolved"})
+	keyRequest, _ := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		ts.srv.URL+"/api/projects/"+itoa(projectID)+"/messages/"+held.MessageID+"/resolution", bytes.NewReader(keyBody))
+	keyRequest.Header.Set("Content-Type", "application/json")
+	keyRequest.Header.Set("Authorization", "Bearer "+keyView.Key)
+	keyRequest.Header.Set("Idempotency-Key", "api-key-resolution")
+	keyResult, err := http.DefaultClient.Do(keyRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, keyResult, http.StatusForbidden)
+
 	spoofed := postResolution("resolved", "human-resolution", "codex")
 	assertStatus(t, spoofed, http.StatusForbidden)
+	var resolutionCount int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_human_resolutions`).Scan(&resolutionCount); err != nil {
+		t.Fatal(err)
+	}
+	if resolutionCount != 0 {
+		t.Fatalf("forbidden principals committed %d human resolutions", resolutionCount)
+	}
 	first := postResolution("resolved", "human-resolution", "")
 	assertStatus(t, first, http.StatusOK)
 	var firstView agentmessage.HumanResolution

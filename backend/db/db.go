@@ -12734,26 +12734,34 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 sender_agent_id           INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
 			 state                     TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open','closed')),
 			 closing_message_row_id    INTEGER UNIQUE REFERENCES agent_messages(id),
-			 resurface_count           INTEGER NOT NULL DEFAULT 0 CHECK(resurface_count>=0),
+			 resurface_count           INTEGER NOT NULL DEFAULT 0 CHECK(resurface_count BETWEEN 0 AND 6),
 			 next_attention_at         TEXT CHECK(` + sqlNullableControlTimestampCheck("next_attention_at") + `),
 			 opened_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("opened_at") + `),
 			 closed_at                 TEXT CHECK(` + sqlNullableControlTimestampCheck("closed_at") + `),
-			 CHECK((state='open' AND closing_message_row_id IS NULL AND closed_at IS NULL AND next_attention_at IS NOT NULL) OR
+			 CHECK((state='open' AND closing_message_row_id IS NULL AND closed_at IS NULL) OR
 			       (state='closed' AND closing_message_row_id IS NOT NULL AND closed_at IS NOT NULL AND next_attention_at IS NULL))
 			)`,
 			`CREATE INDEX idx_agent_reply_obligations_due
 			 ON agent_reply_obligations(state,next_attention_at,message_row_id)`,
 			`CREATE TRIGGER trg_agent_reply_obligation_insert_guard BEFORE INSERT ON agent_reply_obligations
-			 WHEN NOT EXISTS(SELECT 1 FROM agent_messages message JOIN project_agents sender ON sender.id=message.from_agent_id
+			 WHEN NEW.state<>'open' OR NEW.resurface_count<>0 OR NEW.next_attention_at IS NULL OR
+			  NOT EXISTS(SELECT 1 FROM agent_messages message JOIN project_agents sender ON sender.id=message.from_agent_id
 			  WHERE message.id=NEW.message_row_id AND message.expects_reply=1 AND sender.project_id=NEW.project_id
-			   AND sender.id=NEW.sender_agent_id)
+			   AND sender.id=NEW.sender_agent_id AND message.delivered=1 AND message.is_action_request=0)
 			 BEGIN SELECT RAISE(ABORT,'reply obligation does not match its message'); END`,
 			`CREATE TRIGGER trg_agent_reply_obligation_update_guard BEFORE UPDATE ON agent_reply_obligations
 			 WHEN OLD.state='closed' OR NEW.message_row_id<>OLD.message_row_id OR NEW.project_id<>OLD.project_id
 			  OR NEW.sender_agent_id<>OLD.sender_agent_id OR NEW.opened_at<>OLD.opened_at
-			  OR (NEW.state='closed' AND NOT EXISTS(SELECT 1 FROM agent_messages reply
-			      WHERE reply.id=NEW.closing_message_row_id AND reply.parent_message_id=OLD.message_row_id
-			       AND reply.reply_to=(SELECT message_id FROM agent_messages WHERE id=OLD.message_row_id)))
+			  OR (NEW.state='open' AND (OLD.resurface_count=6
+			      OR NEW.resurface_count NOT IN (OLD.resurface_count,OLD.resurface_count+1)
+			      OR (NEW.resurface_count=OLD.resurface_count AND NEW.next_attention_at IS NULL)
+			      OR (NEW.resurface_count=OLD.resurface_count+1 AND NEW.resurface_count<6 AND NEW.next_attention_at IS NULL)
+			      OR (NEW.resurface_count=OLD.resurface_count+1 AND NEW.resurface_count=6 AND NEW.next_attention_at IS NOT NULL)))
+			  OR (NEW.state='closed' AND (NEW.resurface_count<>OLD.resurface_count OR NOT EXISTS(
+			      SELECT 1 FROM agent_messages original JOIN agent_messages reply ON reply.id=NEW.closing_message_row_id
+			      WHERE original.id=OLD.message_row_id AND reply.parent_message_id=original.id
+			       AND reply.reply_to=original.message_id AND reply.delivered=1 AND reply.is_action_request=0
+			       AND reply.from_agent_id=original.to_agent_id AND reply.to_agent_id=original.from_agent_id)))
 			 BEGIN SELECT RAISE(ABORT,'reply obligation transition is invalid'); END`,
 			`CREATE TABLE agent_reply_obligation_events (
 			 id                     INTEGER PRIMARY KEY AUTOINCREMENT,

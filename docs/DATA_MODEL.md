@@ -511,9 +511,11 @@ caller cannot acknowledge an arbitrary future cursor.
 M173 adds immutable `agent_messages.expects_reply` with a default of false,
 an authoritative one-row-per-message `agent_reply_obligations` projection,
 and append-only `agent_reply_obligation_events`. Creation shares the message
-transaction. Only an exact counterpart `reply_to` transition closes the
-obligation; delivery and acknowledgement do not. Due generations append
-bounded `reply_overdue` attention items with capped backoff. Closed obligations
+transaction. Only an accepted exact counterpart `reply_to` transition closes
+the obligation; held replies, delivery and acknowledgement do not. Due
+generations append at most six `reply_overdue` attention items (5 minutes,
+15 minutes, 1 hour, 4 hours, 12 hours, and 24 hours); the open current-state
+row then remains quiet with `resurface_count=6`. Closed obligations
 remain in history but are filtered from the actionable view, and an otherwise
 empty open batch becomes terminal `superseded` rather than falsely
 `handed_off`.

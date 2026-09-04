@@ -385,7 +385,7 @@ POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_
 GET  /projects/:id/messages            ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
 GET  /projects/:id/messages/listen     ?to=<address>&after=<cursor>&limit=<n>
 POST /projects/:id/messages/ack        { to, cursor }
-POST /projects/:id/messages/:messageId/resolution { outcome: "resolved"|"dismissed" } plus one Idempotency-Key (human session only)
+POST /projects/:id/messages/:messageId/resolution { outcome: "resolved"|"dismissed" } plus one Idempotency-Key (human session only; API keys forbidden)
 GET  /projects/:id/attention/listen    ?to=<address>&after=<cursor>&limit=<n>&delivery=<local-adapter> (super-admin orchestrator portfolio)
 POST /projects/:id/attention/ack       { to, cursor, batch_id? } (super-admin orchestrator portfolio)
 POST /projects/:id/messages/delivery-complete { to, cursor, delivery_id, effective_level, fallback_reason }
@@ -410,14 +410,17 @@ and never enter listen; conservative prose detection is a fallback, not a
 replacement for the typed marker.
 Explicit `expects_reply=true` is separate from action gating and leaves the
 ordinary send default unchanged. It creates one durable obligation in the
-same transaction as the message. Only a newly committed counterpart reply
-whose exact `reply_to` names that message closes it; inbox acknowledgement,
-delivery handoff, and delivery acknowledgement do not. Due obligations enter
-the configured orchestrator's bounded attention feed with capped backoff and
-stop being actionable immediately after closure.
+same transaction as the message. Only a newly committed, accepted counterpart
+reply whose exact `reply_to` names that message closes it; held replies, inbox
+acknowledgement, delivery handoff, and delivery acknowledgement do not. Due
+obligations enter the configured orchestrator's bounded attention feed at most
+six times (after 5 minutes, 15 minutes, 1 hour, 4 hours, 12 hours, and 24
+hours), then remain open but quiet and stop being actionable immediately after
+closure.
 The resolution endpoint records an immutable `resolved` or `dismissed` audit
-fact for an already-held action request. It requires project-edit authority,
-refuses agent attribution, stores value-free user/session attribution and
+fact for an already-held action request. It requires a human session with
+project-edit authority, refuses API-key principals and agent attribution,
+stores value-free user/session attribution and
 digested idempotency material, and never releases or mutates the held row.
 Exact retries return the first record; a changed outcome returns HTTP 409.
 Listen and ack additionally require `X-Paimos-Agent-Name` to match the named

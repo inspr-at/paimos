@@ -238,6 +238,9 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		return nil, err
 	}
 	delivered := authorized > 0 && !isAction
+	if in.ExpectsReply && !delivered {
+		return nil, coded("agent_message_expectation_unavailable", "a message can expect a reply only when it is accepted into the receiver inbox")
+	}
 	heldReason := ""
 	var deliveredAt any
 	if isAction {
@@ -282,7 +285,7 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		}
 	}
 	if parentID != nil {
-		if err := closeReplyObligationTx(ctx, tx, *parentID, messageRowID, fromID, toID); err != nil {
+		if err := closeReplyObligationTx(ctx, tx, *parentID, messageRowID); err != nil {
 			return nil, err
 		}
 	}

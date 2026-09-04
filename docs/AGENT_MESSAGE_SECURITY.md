@@ -194,13 +194,15 @@ through project/issue inspection and are never returned by listen.
 `expects_reply` is opt-in. Omitting it preserves the existing fire-and-forget
 default. An opted-in message and its single open obligation commit atomically.
 Neither durable inbox acknowledgement nor vendor handoff is a reply. Closure
-requires a separately committed message from the addressed counterpart with
-the original message's exact durable ID in `reply_to`; unrelated thread
-activity cannot satisfy it.
+requires a separately committed, accepted message from the addressed
+counterpart with the original message's exact durable ID in `reply_to`.
+Unauthorized or otherwise held replies and unrelated thread activity cannot
+satisfy it.
 
 Open obligations resurface only through bounded, content-free orchestrator
-attention records. The schedule backs off to a fixed maximum, and a close
-transition removes old immutable attention facts from the actionable view
+attention records. The schedule emits at most six overdue records (5 minutes,
+15 minutes, 1 hour, 4 hours, 12 hours, and 24 hours), then leaves the obligation
+open but quiet. A close transition removes old immutable attention facts from the actionable view
 without rewriting their history. The message's project and sender identity
 remain authoritative; no PAI-903 parent/session relationship is inferred.
 
@@ -212,8 +214,9 @@ Idempotency-Key: <opaque retry key>
 {"outcome":"resolved"}  // or "dismissed"
 ```
 
-This route requires an authenticated project editor and rejects agent
-attribution. It appends one immutable, value-free record containing only the
+This route requires an authenticated human session with project-edit authority
+and rejects API-key principals and agent attribution. It appends one immutable,
+value-free record containing only the
 message/project IDs, outcome, current user/session attribution, instance, and
 digests. It never changes `delivered`, the held reason, or message content.
 The same key and outcome replay the original record; changing the outcome or

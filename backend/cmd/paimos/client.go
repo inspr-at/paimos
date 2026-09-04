@@ -158,10 +158,6 @@ func (c *Client) doForAgentContext(ctx context.Context, method, path string, bod
 // and its private generation lease. The lease is carried only in an HTTPS
 // header and never in argv, URLs, response bodies, or diagnostics.
 func (c *Client) doForHarnessContext(ctx context.Context, method, path string, body any, agent, workerLease string) ([]byte, error) {
-	return c.doForHarnessContextWithIdempotency(ctx, method, path, body, agent, workerLease, "")
-}
-
-func (c *Client) doForHarnessContextWithIdempotency(ctx context.Context, method, path string, body any, agent, workerLease, idempotencyKey string) ([]byte, error) {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -176,9 +172,6 @@ func (c *Client) doForHarnessContextWithIdempotency(ctx context.Context, method,
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	c.prepareRequest(req, body != nil, "application/json", "application/json")
-	if idempotencyKey != "" {
-		req.Header.Set(idempotencyHeader, idempotencyKey)
-	}
 	if agent = strings.TrimSpace(agent); agent != "" {
 		if len(agent) > agentAttrCap {
 			agent = agent[:agentAttrCap]

@@ -497,7 +497,10 @@ func (s *Service) projectAttention(ctx context.Context, authority TransactionAut
 			}
 		}
 		if candidate.sourceKind == "reply_obligation" {
-			nextAttention := now.Add(replyObligationDelay(candidate.sourceSequence)).Format("2006-01-02T15:04:05.000Z")
+			var nextAttention any
+			if candidate.sourceSequence < replyObligationMaxResurfaces {
+				nextAttention = now.Add(replyObligationDelay(candidate.sourceSequence)).Format("2006-01-02T15:04:05.000Z")
+			}
 			result, claimErr := tx.ExecContext(ctx, `UPDATE agent_reply_obligations SET resurface_count=?,next_attention_at=?
 				WHERE message_row_id=(SELECT id FROM agent_messages WHERE message_id=?) AND project_id=? AND state='open'
 				 AND resurface_count=? AND next_attention_at<=?`, candidate.sourceSequence, nextAttention,

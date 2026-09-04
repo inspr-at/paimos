@@ -76,6 +76,24 @@ func TestMigration173AddsClosedReplyAndResolutionLedgers(t *testing.T) {
 		VALUES(?,?,?,'2030-01-01T00:00:00.000Z')`, messageRowID, projectID, senderID); err == nil {
 		t.Fatal("legacy message without expects_reply accepted an obligation")
 	}
+	expected, err := database.Exec(`INSERT INTO agent_messages(from_agent_id,to_agent_id,body,is_action_request,delivered,
+		held_reason,delivered_at,message_id,context_id,role,parts_json,metadata_json,from_address,to_address,thread_id,expects_reply)
+		VALUES(?,?,'expected',0,1,'',strftime('%Y-%m-%dT%H:%M:%fZ','now'),'33333333-3333-4333-8333-333333333173',
+		'M173','agent','[]','{}','paimos:sender','codex:receiver','33333333-3333-4333-8333-333333333173',1)`, senderID, receiverID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedRowID, _ := expected.LastInsertId()
+	if _, err := database.Exec(`INSERT INTO agent_reply_obligations(message_row_id,project_id,sender_agent_id,next_attention_at)
+		VALUES(?,?,?,'2030-01-01T00:00:00.000Z')`, expectedRowID, projectID, senderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE agent_reply_obligations SET next_attention_at=NULL WHERE message_row_id=?`, expectedRowID); err == nil {
+		t.Fatal("open obligation became quiet before the terminal resurface")
+	}
+	if _, err := database.Exec(`UPDATE agent_reply_obligations SET resurface_count=7 WHERE message_row_id=?`, expectedRowID); err == nil {
+		t.Fatal("reply obligation exceeded the finite resurface bound")
+	}
 	var version int
 	if err := database.QueryRow(`SELECT MAX(version) FROM schema_versions`).Scan(&version); err != nil || version != 173 {
 		t.Fatalf("version=%d err=%v", version, err)

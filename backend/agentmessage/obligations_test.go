@@ -30,9 +30,6 @@ func obligationState(t *testing.T, messageID string) (string, int64, sql.NullInt
 func TestReplyObligationIsExplicitIdempotentAndClosedOnlyByExactReply(t *testing.T) {
 	service, projectID := openBusTestDB(t)
 	allowBusSender(t, service, projectID, "codex:codex")
-	if err := service.AllowSender(context.Background(), projectID, "paimos:sender", "codex:codex"); err != nil {
-		t.Fatal(err)
-	}
 	if err := service.AllowSender(context.Background(), projectID, "paimos:sender", "codex:amy"); err != nil {
 		t.Fatal(err)
 	}
@@ -111,10 +108,35 @@ func TestReplyObligationIsExplicitIdempotentAndClosedOnlyByExactReply(t *testing
 	if state, _, _ := obligationState(t, original.MessageID); state != "open" {
 		t.Fatalf("unaddressed third-party reply closed obligation: %s", state)
 	}
+	if _, err := paimosdb.DB.Exec(`UPDATE agent_reply_obligations SET state='closed',closing_message_row_id=?,
+		next_attention_at=NULL,closed_at='2030-01-01T00:00:00.000Z' WHERE message_row_id=?`, wrong.Cursor, original.Cursor); err == nil {
+		t.Fatal("direct SQL closed obligation with wrong counterpart")
+	}
 
+	undelivered, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "codex", To: "paimos:sender", ReplyTo: original.MessageID,
+		Body: "unaccepted exact answer", IdempotencyKey: "undelivered-exact-reply",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if undelivered.Delivered {
+		t.Fatalf("unauthorized exact reply was delivered: %#v", undelivered)
+	}
+	if state, _, _ := obligationState(t, original.MessageID); state != "open" {
+		t.Fatalf("undelivered exact reply closed obligation: %s", state)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE agent_reply_obligations SET state='closed',closing_message_row_id=?,
+		next_attention_at=NULL,closed_at='2030-01-01T00:00:00.000Z' WHERE message_row_id=?`, undelivered.Cursor, original.Cursor); err == nil {
+		t.Fatal("direct SQL closed obligation with undelivered reply")
+	}
+
+	if err := service.AllowSender(context.Background(), projectID, "paimos:sender", "codex:codex"); err != nil {
+		t.Fatal(err)
+	}
 	replyInput := SendEnvelopeInput{
 		ProjectID: projectID, Sender: "codex", To: "paimos:sender", ReplyTo: original.MessageID,
-		Body: "exact answer", IdempotencyKey: "exact-reply",
+		Body: "accepted exact answer", IdempotencyKey: "accepted-exact-reply",
 	}
 	reply, err := service.SendEnvelope(context.Background(), replyInput)
 	if err != nil {
@@ -132,6 +154,42 @@ func TestReplyObligationIsExplicitIdempotentAndClosedOnlyByExactReply(t *testing
 	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_reply_obligation_events WHERE event_kind='closed'
 		AND related_message_row_id=?`, reply.Cursor).Scan(&closedEvents); err != nil || closedEvents != 1 {
 		t.Fatalf("closed events=%d err=%v", closedEvents, err)
+	}
+}
+
+func TestReplyExpectationRefusesHeldOriginal(t *testing.T) {
+	service, projectID := openBusTestDB(t)
+	if _, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "please answer",
+		ExpectsReply: true, IdempotencyKey: "held-expectation",
+	}); err == nil {
+		t.Fatal("held original accepted a reply expectation")
+	} else {
+		var codedErr *CodedError
+		if !errors.As(err, &codedErr) || codedErr.Code != "agent_message_expectation_unavailable" {
+			t.Fatalf("expectation error=%v", err)
+		}
+	}
+	if _, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
+		ProjectID: projectID, Sender: "sender", To: "codex:codex", Body: "perform this action",
+		ActionRequest: true, ExpectsReply: true, IdempotencyKey: "action-expectation",
+	}); err == nil {
+		t.Fatal("action request accepted a reply expectation")
+	} else {
+		var codedErr *CodedError
+		if !errors.As(err, &codedErr) || codedErr.Code != "agent_message_expectation_invalid" {
+			t.Fatalf("action expectation error=%v", err)
+		}
+	}
+	var messages, obligations int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_messages`).Scan(&messages); err != nil {
+		t.Fatal(err)
+	}
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_reply_obligations`).Scan(&obligations); err != nil {
+		t.Fatal(err)
+	}
+	if messages != 0 || obligations != 0 {
+		t.Fatalf("held expectation committed messages/obligations=%d/%d", messages, obligations)
 	}
 }
 
@@ -207,24 +265,52 @@ func TestReplyObligationResurfacesWithBoundedBackoffAndStopsOnReply(t *testing.T
 	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 0 {
 		t.Fatalf("backoff did not suppress immediate replay: inserted=%d err=%v", inserted, err)
 	}
+	expectedBackoff := map[int64]time.Duration{
+		2: time.Hour,
+		3: 4 * time.Hour,
+		4: 12 * time.Hour,
+		5: 24 * time.Hour,
+	}
+	for wantCount := int64(2); wantCount <= replyObligationMaxResurfaces; wantCount++ {
+		if _, err := paimosdb.DB.Exec(`UPDATE agent_reply_obligations SET next_attention_at='2000-01-01T00:00:00.000Z'
+			WHERE message_row_id=?`, original.Cursor); err != nil {
+			t.Fatal(err)
+		}
+		if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 1 {
+			t.Fatalf("projection %d inserted=%d err=%v", wantCount, inserted, err)
+		}
+		var nextText sql.NullString
+		if err := paimosdb.DB.QueryRow(`SELECT next_attention_at FROM agent_reply_obligations WHERE message_row_id=?`, original.Cursor).Scan(&nextText); err != nil {
+			t.Fatal(err)
+		}
+		if wantCount == replyObligationMaxResurfaces {
+			if nextText.Valid {
+				t.Fatalf("terminal resurface retained schedule %q", nextText.String)
+			}
+			continue
+		}
+		if !nextText.Valid {
+			t.Fatalf("resurface %d lost schedule", wantCount)
+		}
+		next, err := time.Parse("2006-01-02T15:04:05.000Z", nextText.String)
+		if err != nil {
+			t.Fatal(err)
+		}
+		delay := time.Until(next)
+		want := expectedBackoff[wantCount]
+		if delay < want-time.Minute || delay > want+time.Minute {
+			t.Fatalf("resurface %d backoff=%s want about %s", wantCount, delay, want)
+		}
+	}
+	if state, count, closing := obligationState(t, original.MessageID); state != "open" || count != replyObligationMaxResurfaces || closing.Valid {
+		t.Fatalf("terminal quiet obligation=%s/%d/%+v", state, count, closing)
+	}
 	if _, err := paimosdb.DB.Exec(`UPDATE agent_reply_obligations SET next_attention_at='2000-01-01T00:00:00.000Z'
-		WHERE message_row_id=?`, original.Cursor); err != nil {
-		t.Fatal(err)
+		WHERE message_row_id=?`, original.Cursor); err == nil {
+		t.Fatal("terminal quiet obligation accepted a new attention schedule")
 	}
-	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 1 {
-		t.Fatalf("second projection=%d err=%v", inserted, err)
-	}
-	var nextText string
-	if err := paimosdb.DB.QueryRow(`SELECT next_attention_at FROM agent_reply_obligations WHERE message_row_id=?`, original.Cursor).Scan(&nextText); err != nil {
-		t.Fatal(err)
-	}
-	next, err := time.Parse("2006-01-02T15:04:05.000Z", nextText)
-	if err != nil {
-		t.Fatal(err)
-	}
-	delay := time.Until(next)
-	if delay < 59*time.Minute || delay > 61*time.Minute {
-		t.Fatalf("second backoff=%s want about 1h", delay)
+	if inserted, err := service.ProjectAttention(context.Background()); err != nil || inserted != 0 {
+		t.Fatalf("quiet obligation resurfaced: inserted=%d err=%v", inserted, err)
 	}
 
 	if _, err := service.SendEnvelope(context.Background(), SendEnvelopeInput{
@@ -247,8 +333,8 @@ func TestReplyObligationResurfacesWithBoundedBackoffAndStopsOnReply(t *testing.T
 	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_attention_items WHERE source_kind='reply_obligation' AND source_id=?`, original.MessageID).Scan(&items); err != nil {
 		t.Fatal(err)
 	}
-	if events != 4 || items != 2 {
-		t.Fatalf("events/items=%d/%d want opened+2 resurfaced+closed / 2", events, items)
+	if events != 8 || items != 6 {
+		t.Fatalf("events/items=%d/%d want opened+6 resurfaced+closed / 6", events, items)
 	}
 }
 

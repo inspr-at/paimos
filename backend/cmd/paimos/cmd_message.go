@@ -145,63 +145,7 @@ func tellCmd() *cobra.Command {
 
 func messageCmd() *cobra.Command {
 	c := &cobra.Command{Use: "message", Short: "Read the durable agent message ledger"}
-	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd(), messageResolveCmd(), messageTargetCmd(), messageDeliveryCmd())
-	return c
-}
-
-func messageResolveCmd() *cobra.Command {
-	var projectRef, outcome, idempotencyKey string
-	c := &cobra.Command{
-		Use:   "resolve <message-id>",
-		Short: "Record a human resolution for a held action request",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			outcome = strings.ToLower(strings.TrimSpace(outcome))
-			if strings.TrimSpace(projectRef) == "" {
-				return &usageError{msg: "--project is required"}
-			}
-			if outcome != "resolved" && outcome != "dismissed" {
-				return &usageError{msg: "--outcome must be resolved or dismissed"}
-			}
-			if strings.TrimSpace(idempotencyKey) == "" || len([]byte(idempotencyKey)) > 128 {
-				return &usageError{msg: "--idempotency-key must be 1 to 128 UTF-8 bytes"}
-			}
-			if agent, _ := resolveAgentAttribution(); agent != "" {
-				return &usageError{msg: "human resolution refuses agent attribution; unset --agent-name and PAIMOS_AGENT_NAME"}
-			}
-			client, err := instanceClient()
-			if err != nil {
-				return err
-			}
-			projectID, err := resolveProjectRefToID(client, projectRef)
-			if err != nil {
-				return reportError(err)
-			}
-			raw, err := client.doForHarnessContextWithIdempotency(cmd.Context(), "POST",
-				fmt.Sprintf("/api/projects/%d/messages/%s/resolution", projectID, url.PathEscape(strings.TrimSpace(args[0]))),
-				map[string]string{"outcome": outcome}, "", "", idempotencyKey)
-			if err != nil {
-				return reportError(err)
-			}
-			if flagJSON {
-				fmt.Fprintln(stdout, strings.TrimSpace(string(raw)))
-				return nil
-			}
-			var result struct {
-				ResolutionID string `json:"resolution_id"`
-				MessageID    string `json:"message_id"`
-				Outcome      string `json:"outcome"`
-			}
-			if err := json.Unmarshal(raw, &result); err != nil {
-				return err
-			}
-			fmt.Fprintf(stdout, "✓ held action %s %s\nresolution: %s\n", result.MessageID, result.Outcome, result.ResolutionID)
-			return nil
-		},
-	}
-	c.Flags().StringVar(&projectRef, "project", "", "project key or numeric id (required)")
-	c.Flags().StringVar(&outcome, "outcome", "", "human outcome: resolved or dismissed")
-	c.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "stable retry key (required; never printed)")
+	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd(), messageTargetCmd(), messageDeliveryCmd())
 	return c
 }
 
