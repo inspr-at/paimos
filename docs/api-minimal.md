@@ -381,8 +381,11 @@ PATCH  /runs/:id                       lifecycle/report compare-and-set
 Durable A2A messages use registered names rather than numeric agent IDs:
 
 ```
+POST /projects/:id/messages            frozen v1 fire-and-forget compatibility send
 POST /v2/projects/:id/messages         { to, body, issue_id?, reply_to?, thread_id?, metadata?, is_action_request?, expects_reply?, delivery_level?: "simple"|"steer" }
+GET  /projects/:id/messages            frozen v1 compatibility list
 GET  /v2/projects/:id/messages         ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
+GET  /projects/:id/messages/listen     frozen v1 compatibility inbox
 GET  /v2/projects/:id/messages/listen  ?to=<address>&after=<cursor>&limit=<n>
 POST /projects/:id/messages/ack        { to, cursor }
 POST /projects/:id/messages/:messageId/resolution { outcome: "resolved"|"dismissed" } plus one Idempotency-Key (human session only; API keys forbidden)
@@ -396,6 +399,7 @@ GET  /projects/:id/message-targets     ?address=<receiver> (admin; configured or
 POST /projects/:id/message-targets/requeue { address } (admin; configured orchestrator attention target requires super-admin; recovers target_missing message rows and blocked/stale/expired-lease attention batches without changing batch correlation or a live lease)
 GET  /projects/:id/message-deliveries  redacted outbox state (admin)
 POST /projects/:id/message-deliveries/:deliveryId/requeue (admin)
+GET  /projects/:id/messages/:messageId frozen v1 compatibility record
 GET  /v2/projects/:id/messages/:messageId
 GET  /issues/:id/messages              human-visible issue-anchored records (not comments)
 GET  /v2/issues/:id/messages           reply-aware human-visible issue records
