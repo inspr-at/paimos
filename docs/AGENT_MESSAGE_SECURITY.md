@@ -48,7 +48,9 @@ the sender from trusted session attribution and the addressee from a
 `<harness>:<registered-agent>` address in the same project; clients cannot
 select numeric agent IDs. The envelope persists stable message/thread/reply
 IDs, project and issue context, text parts, metadata, hop, and session audit
-data. See `backend/contracts/agent-message-v1.schema.json`.
+data. The original closed contract remains frozen in
+`backend/contracts/agent-message-v1.schema.json`; reply obligations use the
+explicit closed `agent-message-v2.schema.json` boundary.
 
 M153 adds a per-project/address durable cursor and message `read_at` timestamp.
 Listen and acknowledge requests bind the address to trusted
@@ -153,7 +155,7 @@ This separation prevents prompt injection: free-text messages cannot trigger act
 
 ### Send Message
 ```
-POST /api/projects/:projectID/messages
+POST /api/v2/projects/:projectID/messages
 {
   "to": "codex:reviewer",
   "issue_id": 123,
@@ -165,10 +167,13 @@ POST /api/projects/:projectID/messages
 ```
 
 The sender comes from trusted request attribution, never the body.
+The unversioned message send/list/get/listen routes are frozen v1 compatibility
+surfaces. They reject `expects_reply`, omit v2-only reply/disposition facts,
+and retain fire-and-forget semantics. The PAIMOS CLI uses v2.
 
 ### Listen and Acknowledge
 ```
-GET  /api/projects/:projectID/messages/listen?to=codex:reviewer&after=123&limit=10
+GET  /api/v2/projects/:projectID/messages/listen?to=codex:reviewer&after=123&limit=10
 POST /api/projects/:projectID/messages/ack
 {"to":"codex:reviewer","cursor":130}
 ```

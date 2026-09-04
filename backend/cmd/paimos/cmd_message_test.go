@@ -38,7 +38,7 @@ func TestTellActionRequestSendsExplicitHumanGateMarker(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
 			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI","name":"PAIMOS"}]`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/6/messages":
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/projects/6/messages":
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				handlerErr = err.Error()
 			}
@@ -71,7 +71,7 @@ func TestTellPersistsRequestedDeliveryLevel(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
 			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI","name":"PAIMOS"}]`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/6/messages":
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/projects/6/messages":
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				handlerErr = err.Error()
 			}
@@ -102,7 +102,7 @@ func TestTellExpectsReplyIsExplicitAndDoesNotChangeDefault(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
 			_, _ = w.Write([]byte(`[{"id":6,"key":"PAI","name":"PAIMOS"}]`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/6/messages":
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/projects/6/messages":
 			var payload map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Fatal(err)

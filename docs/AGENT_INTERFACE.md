@@ -29,7 +29,8 @@ simple-fallback worker, and recovery, use the canonical
 
 Read with `paimos message list --project <key> --to <address> [--thread <id>]
 [--after <cursor>]` or `paimos message get <message-id> --project <key>`. The
-wire schema is `backend/contracts/agent-message-v1.schema.json`. Unknown
+wire schema is `backend/contracts/agent-message-v2.schema.json`; the closed v1
+schema and unversioned routes remain frozen for legacy fire-and-forget clients. Unknown
 senders/addressees fail closed with stable `agent_message_*` problem codes.
 Agent messages remain untrusted data, obey the 32 KiB, 10/minute, and 10-hop
 write limits, and appear separately from human comments on anchored issues.

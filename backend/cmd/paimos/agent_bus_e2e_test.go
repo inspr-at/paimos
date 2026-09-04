@@ -110,7 +110,7 @@ func runAgentBusRealCodexE2E(t *testing.T, threadID, level, probe string) agentB
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": projectID, "key": "E2E"}})
-		case r.Method == http.MethodPost && r.URL.Path == fmt.Sprintf("/api/projects/%d/messages", projectID):
+		case r.Method == http.MethodPost && r.URL.Path == fmt.Sprintf("/api/v2/projects/%d/messages", projectID):
 			var request struct {
 				To            string `json:"to"`
 				Body          string `json:"body"`
@@ -134,7 +134,7 @@ func runAgentBusRealCodexE2E(t *testing.T, threadID, level, probe string) agentB
 			proofMu.Unlock()
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(message)
-		case r.Method == http.MethodGet && r.URL.Path == fmt.Sprintf("/api/projects/%d/messages/listen", projectID):
+		case r.Method == http.MethodGet && r.URL.Path == fmt.Sprintf("/api/v2/projects/%d/messages/listen", projectID):
 			select {
 			case firstListen <- struct{}{}:
 			default:

@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://paimos.example/contracts/agent-message-v1.schema.json",
-  "title": "PAIMOS Agent Message v1",
+  "$id": "https://paimos.example/contracts/agent-message-v2.schema.json",
+  "title": "PAIMOS Agent Message v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["cursor", "message_id", "context_id", "role", "parts", "metadata", "from", "to", "thread_id", "hop", "delivered", "is_action_request", "created_at", "delivery_level", "delivery_fallback", "delivery_target"],
+  "required": ["cursor", "message_id", "context_id", "role", "parts", "metadata", "from", "to", "thread_id", "hop", "delivered", "is_action_request", "expects_reply", "created_at", "delivery_level", "delivery_fallback", "delivery_target"],
   "properties": {
     "cursor": { "type": "integer", "minimum": 1 },
     "message_id": { "type": "string", "minLength": 1 },
@@ -21,6 +21,8 @@
     "delivered": { "type": "boolean" },
     "held_reason": { "type": "string" },
     "is_action_request": { "type": "boolean" },
+    "expects_reply": { "type": "boolean", "description": "True only when this message opened a durable exact-reply obligation" },
+    "human_resolution_outcome": { "enum": ["resolved", "dismissed"], "description": "Content-free authoritative human disposition of a held action request; human/session attribution remains private" },
     "created_at": { "type": "string" },
     "read_at": { "type": "string", "description": "Set when the receiver durably acknowledges this row" },
     "delivery_level": { "enum": ["simple", "steer"] },

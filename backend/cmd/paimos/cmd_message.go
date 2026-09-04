@@ -111,7 +111,7 @@ func tellCmd() *cobra.Command {
 			if threadID != "" {
 				payload["thread_id"] = strings.TrimSpace(threadID)
 			}
-			raw, err := client.do("POST", fmt.Sprintf("/api/projects/%d/messages", projectID), payload)
+			raw, err := client.do("POST", fmt.Sprintf("/api/v2/projects/%d/messages", projectID), payload)
 			if err != nil {
 				return reportError(err)
 			}
@@ -462,7 +462,7 @@ func messageListCmd() *cobra.Command {
 		if limit > 0 {
 			q.Set("limit", strconv.Itoa(limit))
 		}
-		raw, err := client.do("GET", fmt.Sprintf("/api/projects/%d/messages?%s", pid, q.Encode()), nil)
+		raw, err := client.do("GET", fmt.Sprintf("/api/v2/projects/%d/messages?%s", pid, q.Encode()), nil)
 		if err != nil {
 			return reportError(err)
 		}
@@ -507,7 +507,7 @@ func messageGetCmd() *cobra.Command {
 		if err != nil {
 			return reportError(err)
 		}
-		raw, err := client.do("GET", fmt.Sprintf("/api/projects/%d/messages/%s", pid, url.PathEscape(args[0])), nil)
+		raw, err := client.do("GET", fmt.Sprintf("/api/v2/projects/%d/messages/%s", pid, url.PathEscape(args[0])), nil)
 		if err != nil {
 			return reportError(err)
 		}

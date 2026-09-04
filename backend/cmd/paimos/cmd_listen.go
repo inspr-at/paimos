@@ -432,7 +432,7 @@ func fetchInbox(ctx context.Context, client *Client, projectID int64, address, a
 	if workerAdapter != "" {
 		q.Set("delivery", workerAdapter)
 	}
-	raw, err := client.doForAgentContext(ctx, "GET", fmt.Sprintf("/api/projects/%d/messages/listen?%s", projectID, q.Encode()), nil, agent)
+	raw, err := client.doForAgentContext(ctx, "GET", fmt.Sprintf("/api/v2/projects/%d/messages/listen?%s", projectID, q.Encode()), nil, agent)
 	if err != nil {
 		return nil, err
 	}

@@ -381,9 +381,9 @@ PATCH  /runs/:id                       lifecycle/report compare-and-set
 Durable A2A messages use registered names rather than numeric agent IDs:
 
 ```
-POST /projects/:id/messages            { to, body, issue_id?, reply_to?, thread_id?, metadata?, is_action_request?, expects_reply?, delivery_level?: "simple"|"steer" }
-GET  /projects/:id/messages            ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
-GET  /projects/:id/messages/listen     ?to=<address>&after=<cursor>&limit=<n>
+POST /v2/projects/:id/messages         { to, body, issue_id?, reply_to?, thread_id?, metadata?, is_action_request?, expects_reply?, delivery_level?: "simple"|"steer" }
+GET  /v2/projects/:id/messages         ?to=<address>&thread=<id>&after=<cursor>&limit=<n>
+GET  /v2/projects/:id/messages/listen  ?to=<address>&after=<cursor>&limit=<n>
 POST /projects/:id/messages/ack        { to, cursor }
 POST /projects/:id/messages/:messageId/resolution { outcome: "resolved"|"dismissed" } plus one Idempotency-Key (human session only; API keys forbidden)
 GET  /projects/:id/attention/listen    ?to=<address>&after=<cursor>&limit=<n>&delivery=<local-adapter> (super-admin orchestrator portfolio)
@@ -396,15 +396,18 @@ GET  /projects/:id/message-targets     ?address=<receiver> (admin; configured or
 POST /projects/:id/message-targets/requeue { address } (admin; configured orchestrator attention target requires super-admin; recovers target_missing message rows and blocked/stale/expired-lease attention batches without changing batch correlation or a live lease)
 GET  /projects/:id/message-deliveries  redacted outbox state (admin)
 POST /projects/:id/message-deliveries/:deliveryId/requeue (admin)
-GET  /projects/:id/messages/:messageId
+GET  /v2/projects/:id/messages/:messageId
 GET  /issues/:id/messages              human-visible issue-anchored records (not comments)
 ```
 
 The POST sender is derived from `X-Paimos-Agent-Name`; unknown senders or
 addressees fail closed with stable `agent_message_*` problem codes. Addressee
 reads return delivered, non-action messages only, capped at 10 per cursor page
-and wrapped with the untrusted-message preamble. The v1 envelope schema is
-`backend/contracts/agent-message-v1.schema.json`.
+and wrapped with the untrusted-message preamble. The unversioned message
+send/list/get/listen routes and `backend/contracts/agent-message-v1.schema.json`
+are frozen fire-and-forget v1 compatibility surfaces: v1 rejects
+`expects_reply` and omits v2-only fields. New clients use `/v2/...` and the
+closed `backend/contracts/agent-message-v2.schema.json` contract.
 Explicit `is_action_request=true` rows are stored as held for human inspection
 and never enter listen; conservative prose detection is a fallback, not a
 replacement for the typed marker.

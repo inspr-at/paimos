@@ -39,6 +39,7 @@ function message(overrides: Partial<AgentMessage>): AgentMessage {
     delivered: false,
     held_reason: 'sender not in receiver allowlist',
     is_action_request: false,
+    expects_reply: false,
     created_at: '2026-08-25T10:00:00Z',
     ...overrides,
   }

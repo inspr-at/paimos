@@ -87,6 +87,46 @@ type Envelope struct {
 	DeliveryWork           *DeliveryWork           `json:"delivery_work,omitempty"`
 }
 
+// EnvelopeV1 is the frozen first-version wire projection. Reply obligations
+// and human dispositions were introduced in v2 and must never leak into this
+// closed shape: strict v1 consumers reject unknown properties.
+type EnvelopeV1 struct {
+	Cursor           int64                   `json:"cursor"`
+	MessageID        string                  `json:"message_id"`
+	ContextID        string                  `json:"context_id"`
+	TaskID           string                  `json:"task_id,omitempty"`
+	Role             string                  `json:"role"`
+	Parts            []TextPart              `json:"parts"`
+	Metadata         map[string]any          `json:"metadata"`
+	From             string                  `json:"from"`
+	To               string                  `json:"to"`
+	ReplyTo          string                  `json:"reply_to,omitempty"`
+	ThreadID         string                  `json:"thread_id"`
+	Hop              int                     `json:"hop"`
+	Delivered        bool                    `json:"delivered"`
+	HeldReason       string                  `json:"held_reason,omitempty"`
+	IsActionRequest  bool                    `json:"is_action_request"`
+	CreatedAt        string                  `json:"created_at"`
+	ReadAt           string                  `json:"read_at,omitempty"`
+	DeliveryLevel    string                  `json:"delivery_level"`
+	DeliveryFallback string                  `json:"delivery_fallback"`
+	DeliveryTarget   *DeliveryTargetSnapshot `json:"delivery_target"`
+	DeliveryWork     *DeliveryWork           `json:"delivery_work,omitempty"`
+}
+
+// V1 returns the immutable compatibility projection for the original routes.
+func (e Envelope) V1() EnvelopeV1 {
+	return EnvelopeV1{
+		Cursor: e.Cursor, MessageID: e.MessageID, ContextID: e.ContextID,
+		TaskID: e.TaskID, Role: e.Role, Parts: e.Parts, Metadata: e.Metadata,
+		From: e.From, To: e.To, ReplyTo: e.ReplyTo, ThreadID: e.ThreadID,
+		Hop: e.Hop, Delivered: e.Delivered, HeldReason: e.HeldReason,
+		IsActionRequest: e.IsActionRequest, CreatedAt: e.CreatedAt, ReadAt: e.ReadAt,
+		DeliveryLevel: e.DeliveryLevel, DeliveryFallback: e.DeliveryFallback,
+		DeliveryTarget: e.DeliveryTarget, DeliveryWork: e.DeliveryWork,
+	}
+}
+
 // InboxPage is an attributed receiver read. Cursor is the durable acknowledged
 // position; NextCursor is the highest row returned by this page (or Cursor when
 // there is no new mail).
@@ -95,6 +135,22 @@ type InboxPage struct {
 	Cursor     int64      `json:"cursor"`
 	NextCursor int64      `json:"next_cursor"`
 	Messages   []Envelope `json:"messages"`
+}
+
+// InboxPageV1 preserves the original closed envelope projection.
+type InboxPageV1 struct {
+	Address    string       `json:"address"`
+	Cursor     int64        `json:"cursor"`
+	NextCursor int64        `json:"next_cursor"`
+	Messages   []EnvelopeV1 `json:"messages"`
+}
+
+func (p InboxPage) V1() InboxPageV1 {
+	messages := make([]EnvelopeV1, len(p.Messages))
+	for i := range p.Messages {
+		messages[i] = p.Messages[i].V1()
+	}
+	return InboxPageV1{Address: p.Address, Cursor: p.Cursor, NextCursor: p.NextCursor, Messages: messages}
 }
 
 // CursorState is returned after a monotonic acknowledgement.

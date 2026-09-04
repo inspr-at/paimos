@@ -14,6 +14,7 @@ export interface AgentMessage {
   delivered: boolean
   held_reason?: string
   is_action_request: boolean
+  expects_reply: boolean
   human_resolution_outcome?: 'resolved' | 'dismissed'
   created_at: string
 }
@@ -26,7 +27,7 @@ export interface HumanResolutionResult {
 }
 
 export function loadIssueAgentMessages(issueId: number): Promise<AgentMessage[]> {
-  return api.get<AgentMessage[]>(`/issues/${issueId}/messages`)
+  return api.get<AgentMessage[]>(`/v2/issues/${issueId}/messages`)
 }
 
 export function resolveHeldAgentMessage(

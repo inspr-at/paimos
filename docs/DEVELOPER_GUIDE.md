@@ -71,7 +71,7 @@ backend/
   agentmessage/        durable agent message ledger, delivery bus, adapters, and
                        webhook dispatcher (M151–M156; see AGENT_BUS_ARCHITECTURE.md)
   secretvault/         authenticated encryption for stored secrets and receiver targets
-  contracts/           versioned JSON schemas + fixtures (agent-message-v1, external-stage-v1)
+  contracts/           versioned JSON schemas + fixtures (agent-message-v1/v2, external-stage-v1)
   cmd/paimos/          `paimos` CLI (issue, tell, message, listen, serve, run-agent, …)
   cmd/paimos-mcp/      MCP server binary
   db/                  SQLite open + migrations (each migration inline in db.go)

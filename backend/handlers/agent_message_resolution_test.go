@@ -174,7 +174,14 @@ func TestHeldActionResolutionHTTPIsHumanOnlyAndIdempotent(t *testing.T) {
 	if delivered != 0 || heldReason != held.HeldReason || partsJSON != `[{"kind":"text","text":"human decision"}]` {
 		t.Fatalf("resolution mutated held row: delivered=%d held_reason=%q parts=%q", delivered, heldReason, partsJSON)
 	}
-	listResponse := ts.get(t, "/api/issues/"+itoa(issueID)+"/messages", ts.adminCookie)
+	legacyResponse := ts.get(t, "/api/issues/"+itoa(issueID)+"/messages", ts.adminCookie)
+	assertStatus(t, legacyResponse, http.StatusOK)
+	var legacyListed []map[string]any
+	decode(t, legacyResponse, &legacyListed)
+	if len(legacyListed) != 1 || legacyListed[0]["expects_reply"] != nil || legacyListed[0]["human_resolution_outcome"] != nil {
+		t.Fatalf("v2 reply facts leaked into frozen issue v1: %#v", legacyListed)
+	}
+	listResponse := ts.get(t, "/api/v2/issues/"+itoa(issueID)+"/messages", ts.adminCookie)
 	assertStatus(t, listResponse, http.StatusOK)
 	var listed []map[string]any
 	decode(t, listResponse, &listed)

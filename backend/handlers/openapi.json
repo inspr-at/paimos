@@ -121,6 +121,44 @@
       }
     },
     "schemas": {
+      "AgentMessageV1": {
+        "type": "object", "additionalProperties": false,
+        "description": "Frozen original agent-message envelope. Reply-obligation fields are deliberately absent; use AgentMessageV2 for new consumers.",
+        "required": ["cursor", "message_id", "context_id", "role", "parts", "metadata", "from", "to", "thread_id", "hop", "delivered", "is_action_request", "created_at", "delivery_level", "delivery_fallback", "delivery_target"],
+        "properties": {
+          "cursor": {"type": "integer", "minimum": 1}, "message_id": {"type": "string"}, "context_id": {"type": "string"}, "task_id": {"type": "string"},
+          "role": {"const": "agent"}, "parts": {"type": "array", "items": {"type": "object"}}, "metadata": {"type": "object"},
+          "from": {"type": "string"}, "to": {"type": "string"}, "reply_to": {"type": "string"}, "thread_id": {"type": "string"},
+          "hop": {"type": "integer"}, "delivered": {"type": "boolean"}, "held_reason": {"type": "string"}, "is_action_request": {"type": "boolean"},
+          "created_at": {"type": "string"}, "read_at": {"type": "string"}, "delivery_level": {"enum": ["simple", "steer"]},
+          "delivery_fallback": {"const": "simple"}, "delivery_target": {"type": ["object", "null"]}, "delivery_work": {"type": "object"}
+        }
+      },
+      "AgentMessageV2": {
+        "type": "object", "additionalProperties": false,
+        "description": "Closed v2 agent-message envelope with durable reply-obligation and content-free human-disposition facts. The authoritative closed schema is backend/contracts/agent-message-v2.schema.json.",
+        "required": ["cursor", "message_id", "context_id", "role", "parts", "metadata", "from", "to", "thread_id", "hop", "delivered", "is_action_request", "expects_reply", "created_at", "delivery_level", "delivery_fallback", "delivery_target"],
+        "properties": {
+          "cursor": {"type": "integer", "minimum": 1}, "message_id": {"type": "string"}, "context_id": {"type": "string"}, "task_id": {"type": "string"},
+          "role": {"const": "agent"}, "parts": {"type": "array", "items": {"type": "object"}}, "metadata": {"type": "object"},
+          "from": {"type": "string"}, "to": {"type": "string"}, "reply_to": {"type": "string"}, "thread_id": {"type": "string"},
+          "hop": {"type": "integer"}, "delivered": {"type": "boolean"}, "held_reason": {"type": "string"}, "is_action_request": {"type": "boolean"},
+          "expects_reply": {"type": "boolean"}, "human_resolution_outcome": {"enum": ["resolved", "dismissed"]},
+          "created_at": {"type": "string"}, "read_at": {"type": "string"}, "delivery_level": {"enum": ["simple", "steer"]},
+          "delivery_fallback": {"const": "simple"}, "delivery_target": {"type": ["object", "null"]}, "delivery_work": {"type": "object"}
+        }
+      },
+      "AgentMessageSendV1": {
+        "type": "object", "additionalProperties": false,
+        "description": "Frozen fire-and-forget send request; expects_reply is rejected as unknown.",
+        "required": ["to", "body"],
+        "properties": {"to": {"type": "string"}, "issue_id": {"type": "integer"}, "reply_to": {"type": "string"}, "thread_id": {"type": "string"}, "body": {"type": "string"}, "metadata": {"type": "object"}, "is_action_request": {"type": "boolean"}, "delivery_level": {"enum": ["simple", "steer"]}}
+      },
+      "AgentMessageSendV2": {
+        "type": "object", "additionalProperties": false,
+        "required": ["to", "body"],
+        "properties": {"to": {"type": "string"}, "issue_id": {"type": "integer"}, "reply_to": {"type": "string"}, "thread_id": {"type": "string"}, "body": {"type": "string"}, "metadata": {"type": "object"}, "is_action_request": {"type": "boolean"}, "expects_reply": {"type": "boolean", "default": false}, "delivery_level": {"enum": ["simple", "steer"]}}
+      },
       "Error": {
         "type": "object",
         "required": [
@@ -5376,6 +5414,23 @@
             }
           }
         }
+      }
+    },
+    "/api/projects/{id}/messages": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "post": {"tags": ["agents"], "summary": "Send a frozen v1 fire-and-forget agent message", "description": "Compatibility route. Strictly rejects v2 reply-obligation fields.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageSendV1"}}}}, "responses": {"201": {"description": "Frozen v1 envelope", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageV1"}}}}}}
+    },
+    "/api/v2/projects/{id}/messages": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "post": {"tags": ["agents"], "summary": "Send a v2 agent message", "description": "Use this version for expects_reply and durable exact reply obligations.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageSendV2"}}}}, "responses": {"201": {"description": "Strict v2 envelope", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentMessageV2"}}}}}}
+    },
+    "/api/v2/projects/{id}/messages/listen": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {"tags": ["agents"], "summary": "Read a v2 attributed inbox", "description": "The paimos CLI uses this route so expects_reply and human_resolution_outcome remain explicit.", "responses": {"200": {"description": "Inbox whose messages use AgentMessageV2"}}}
+    },
+    "/api/v2/issues/{id}/messages": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {"tags": ["agents"], "summary": "List v2 issue-anchored agent messages", "description": "Session UI projection including reply-obligation and content-free human-disposition facts.", "responses": {"200": {"description": "Strict v2 envelopes", "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/AgentMessageV2"}}}}}}
       }
     },
     "/api/projects/{id}/messages/delivery-unavailable": {
