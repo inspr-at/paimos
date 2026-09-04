@@ -48,6 +48,72 @@ func TestAgentModeWorkerFleetStrictQueryAndClosedEmptyContract(t *testing.T) {
 		*projectSnapshot.Scope.ProjectID != projectID || projectSnapshot.SampleLimit != 1 {
 		t.Fatalf("project route contract=%+v", projectSnapshot)
 	}
+	v2Response := ts.get(t, "/api/agent-mode/projects/"+itoa(projectID)+"/worker-fleet/v2?zoom=1", ts.adminCookie)
+	assertStatus(t, v2Response, http.StatusOK)
+	var v2Snapshot workerfleet.SnapshotV2
+	decode(t, v2Response, &v2Snapshot)
+	if v2Snapshot.SchemaVersion != workerfleet.SchemaVersionV2 || v2Snapshot.Provenance.ProjectionVersion != workerfleet.SchemaVersionV2 {
+		t.Fatalf("v2 route contract=%+v", v2Snapshot)
+	}
+}
+
+func TestAgentModeWorkerFleetVersionsDoNotCrossWireContracts(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := seedBatchProject(t, "Versioned fleet", "VFL")
+	issueResult, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title,status)
+		VALUES(?,907,'ticket','Versioned worker','in-progress')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := issueResult.LastInsertId()
+	if _, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'versioned-worker')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	session, _, err := managedharness.NewService(db.DB).Register(context.Background(), managedharness.RegisterInput{
+		ProjectID: projectID, AgentName: "versioned-worker", Harness: "codex", Host: "trusted-host",
+		SessionRef: "versioned-generation", WorkerLease: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		ManagementMode: managedharness.ManagementManaged, Role: managedharness.RoleWorker,
+		TicketID: &issueID, WorkShape: "ship", SteerMode: managedharness.SteerNone,
+		Workspace: &models.HarnessWorkspaceProvenance{CanonicalPath: "/versioned/workspace",
+			Identity: strings.Repeat("a", 64), Kind: "directory", Mode: "exclusive"},
+		DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: "chatgpt",
+		Capabilities: models.HarnessCapabilities{Status: true, Interrupt: true, Stop: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := managedharness.NewService(db.DB).HeartbeatWithActivity(context.Background(), session.ID,
+		managedharness.PhaseWorking, managedharness.ActivityEvidence{Sequence: 1, Kind: "turn_started"}); err != nil {
+		t.Fatal(err)
+	}
+	type rawSnapshot struct {
+		SchemaVersion int              `json:"schema_version"`
+		Workers       []map[string]any `json:"workers"`
+		Provenance    struct {
+			ProjectionVersion int `json:"projection_version"`
+		} `json:"provenance"`
+	}
+	v1Response := ts.get(t, "/api/agent-mode/projects/"+itoa(projectID)+"/worker-fleet/v1?zoom=100", ts.adminCookie)
+	assertStatus(t, v1Response, http.StatusOK)
+	var v1 rawSnapshot
+	decode(t, v1Response, &v1)
+	if v1.SchemaVersion != 1 || v1.Provenance.ProjectionVersion != 1 || len(v1.Workers) != 1 {
+		t.Fatalf("v1 version contract=%+v", v1)
+	}
+	for _, v2Only := range []string{"machine_id", "workspace_provenance", "dispatch_profile", "account_label", "runtime_provenance_trust", "work_shape", "work_contract"} {
+		if _, exists := v1.Workers[0][v2Only]; exists {
+			t.Fatalf("v2-only field %q entered v1: %+v", v2Only, v1.Workers[0])
+		}
+	}
+	v2Response := ts.get(t, "/api/agent-mode/projects/"+itoa(projectID)+"/worker-fleet/v2?zoom=100", ts.adminCookie)
+	assertStatus(t, v2Response, http.StatusOK)
+	var v2 rawSnapshot
+	decode(t, v2Response, &v2)
+	if v2.SchemaVersion != 2 || v2.Provenance.ProjectionVersion != 2 || len(v2.Workers) != 1 ||
+		v2.Workers[0]["runtime_provenance_trust"] != workerfleet.RuntimeTrustManagedReporter ||
+		v2.Workers[0]["machine_id"] != "trusted-host" || v2.Workers[0]["work_shape"] != "ship" {
+		t.Fatalf("v2 version/runtime contract=%+v", v2)
+	}
 }
 
 func TestAgentModeWorkerFleetConcealsUnauthorizedAndMissingProjects(t *testing.T) {
@@ -56,6 +122,8 @@ func TestAgentModeWorkerFleetConcealsUnauthorizedAndMissingProjects(t *testing.T
 	paths := []string{
 		"/api/agent-mode/projects/999999/worker-fleet/v1",
 		"/api/agent-mode/projects/" + itoa(projectID) + "/worker-fleet/v1",
+		"/api/agent-mode/projects/999999/worker-fleet/v2",
+		"/api/agent-mode/projects/" + itoa(projectID) + "/worker-fleet/v2",
 	}
 	for _, path := range paths {
 		missing := ts.get(t, path, ts.externalCookie)
@@ -89,7 +157,7 @@ func TestAgentModeWorkerFleetKeepsStoppedWorkerWhenBoundTicketIsSoftDeleted(t *t
 		ProjectID: projectID, AgentName: "stopped-worker", Harness: "codex", Host: "test-host",
 		SessionRef: "deleted-ticket-generation", WorkerLease: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 		ManagementMode: managedharness.ManagementManaged, Role: managedharness.RoleWorker,
-		TicketID: &issueID, SteerMode: managedharness.SteerNone,
+		TicketID: &issueID, WorkShape: "ship", SteerMode: managedharness.SteerNone,
 		Capabilities: models.HarnessCapabilities{Status: true, Interrupt: true, Stop: true},
 	})
 	if err != nil {

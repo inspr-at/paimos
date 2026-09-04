@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/backend/workshape"
 )
 
 // fixtureBriefingInput returns a fully-populated briefingInput with
@@ -91,6 +93,7 @@ func fixtureBriefingInput(withAgent bool) briefingInput {
 	}
 	if withAgent {
 		in.agentName = "ops"
+		in.workContract = workshape.For(workshape.Scout)
 	}
 	return in
 }
@@ -149,6 +152,11 @@ func TestRenderBriefing_AgentLevelMarkdown(t *testing.T) {
 	}
 	wantSubstrings := []string{
 		"[agent=ops]",
+		"## Current worker assignment",
+		"**Shape:** `scout`",
+		"Investigation evidence (not a product delivery)",
+		"Git enforcement (PAIMOS records intent; it does not enforce repository behavior)",
+		"scout becomes ship only through an authorized, explicit revision-checked assignment",
 		"## If you're playing the ops role",
 		"Operate the production rig.",
 		"### Excerpt",
@@ -187,6 +195,9 @@ func TestRenderBriefing_HTMLFormat(t *testing.T) {
 		"<h2>How we work</h2>",
 		"<h2>Recent context</h2>",
 		"CON26-100",
+		"<h2>Current worker assignment</h2>",
+		"Investigation evidence (not a product delivery)",
+		"does not enforce repository behavior",
 		"<h2>If you're playing the ops role</h2>",
 		"<h3>Bootstrap steps</h3>",
 		"<h3>Non-negotiable rules</h3>",
@@ -199,6 +210,37 @@ func TestRenderBriefing_HTMLFormat(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing HTML substring %q\n--- briefing ---\n%s", want, body)
 		}
+	}
+}
+
+func TestRenderBriefingLegacyMissingShapeStaysUnknown(t *testing.T) {
+	in := fixtureBriefingInput(true)
+	in.workContract = workshape.Contract{}
+	body, err := renderBriefing(in, onboardFormatMarkdown, "legacyrev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"**Shape:** `unknown (legacy or unclassified; never inferred)`",
+		"explicit classification required",
+		"shape inference from surrounding activity",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("legacy assignment missing %q\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "**Shape:** `ship`") || strings.Contains(body, "**Shape:** `scout`") {
+		t.Fatalf("legacy shape was inferred\n%s", body)
+	}
+}
+
+func TestOnboardRevisionChangesWithExplicitWorkShape(t *testing.T) {
+	bundle := fixtureBriefingInput(true).bundle
+	ship := computeOnboardBriefingRev(bundle, workshape.For(workshape.Ship))
+	scout := computeOnboardBriefingRev(bundle, workshape.For(workshape.Scout))
+	unknown := computeOnboardBriefingRev(bundle, workshape.Contract{})
+	if ship == scout || ship == unknown || scout == unknown {
+		t.Fatalf("work shape missing from onboarding revision: ship=%s scout=%s unknown=%s", ship, scout, unknown)
 	}
 }
 
@@ -494,6 +536,8 @@ func startOnboardAPI(t *testing.T) *httptest.Server {
 					"metadata": {"environments": ["prod"]}
 				}
 			}`))
+		case r.Method == http.MethodGet && path == "/api/projects/42/harness-sessions":
+			_, _ = w.Write([]byte(`[{"agent_name":"ops","phase":"working","work_shape":"scout"}]`))
 		// PAI-394 — unified knowledge surface. Single path; type
 		// rides on ?type=<seg>.
 		case r.Method == http.MethodGet && path == "/api/projects/42/knowledge":
@@ -588,6 +632,10 @@ func TestOnboard_AgentLevel_E2E(t *testing.T) {
 	}
 	wantSubstrings := []string{
 		"[agent=ops]",
+		"## Current worker assignment",
+		"**Shape:** `scout`",
+		"Investigation evidence (not a product delivery)",
+		"does not enforce repository behavior",
 		"## If you're playing the ops role",
 		"Operate the production rig.",
 		"### Bootstrap steps",

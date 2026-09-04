@@ -12,6 +12,7 @@ import (
 
 	paimosdb "github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/models"
+	"github.com/inspr-at/paimos/backend/workshape"
 )
 
 func addHierarchyAgent(t *testing.T, projectID int64, name string) {
@@ -33,10 +34,14 @@ func addHierarchyTicket(t *testing.T, projectID, number int64) int64 {
 
 func registerHierarchySession(t *testing.T, service *Service, projectID int64, agent, role string, parent *string, ticket *int64) models.HarnessSession {
 	t.Helper()
+	shape := ""
+	if ticket != nil {
+		shape = workshape.Ship
+	}
 	session, created, err := service.Register(context.Background(), RegisterInput{
 		ProjectID: projectID, AgentName: agent, Harness: "codex", Host: "host-" + agent,
 		SessionRef: "ref-" + agent, WorkerLease: testWorkerLease, ManagementMode: ManagementManaged,
-		Role: role, ParentSessionID: parent, TicketID: ticket, SteerMode: SteerNone,
+		Role: role, ParentSessionID: parent, TicketID: ticket, WorkShape: shape, SteerMode: SteerNone,
 		Capabilities: models.HarnessCapabilities{Status: true},
 	})
 	if err != nil || !created {
@@ -62,7 +67,7 @@ func TestPersistentHierarchyBindingCASAndEventHistory(t *testing.T) {
 
 	replay := RegisterInput{ProjectID: projectID, AgentName: "child", Harness: "codex", Host: "host-child", SessionRef: "ref-child",
 		WorkerLease: testWorkerLease, ManagementMode: ManagementManaged, Role: RoleWorker, ParentSessionID: &coordinator.ID,
-		TicketID: &ticketID, SteerMode: SteerNone, Capabilities: models.HarnessCapabilities{Status: true}}
+		TicketID: &ticketID, WorkShape: workshape.Ship, SteerMode: SteerNone, Capabilities: models.HarnessCapabilities{Status: true}}
 	if _, created, err := service.Register(context.Background(), replay); err != nil || created {
 		t.Fatalf("exact replay: created=%v err=%v", created, err)
 	}
@@ -76,12 +81,12 @@ func TestPersistentHierarchyBindingCASAndEventHistory(t *testing.T) {
 		t.Fatalf("projection=%+v err=%v", projection, err)
 	}
 	detached, err := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
-		ExpectedRevision: child.Revision, ParentSessionID: nil, TicketID: nil})
+		ExpectedRevision: child.Revision, ParentSessionID: nil, TicketID: nil, WorkShape: workshape.Unknown})
 	if err != nil || detached.ParentSessionID != nil || detached.TicketID != nil || detached.Revision != child.Revision+1 {
 		t.Fatalf("detached=%+v err=%v", detached, err)
 	}
 	if _, err := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
-		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &ticketID}); !IsCode(err, CodeConflict) {
+		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &ticketID, WorkShape: workshape.Ship}); !IsCode(err, CodeConflict) {
 		t.Fatalf("stale binding CAS accepted: %v", err)
 	}
 
@@ -148,7 +153,7 @@ func TestAssignBindingValidatesOnlyChangedFullStateReferences(t *testing.T) {
 	}
 	changedTicket, err := service.AssignBinding(context.Background(), BindingInput{
 		ProjectID: projectID, SessionID: ticketChild.ID, ExpectedRevision: ticketChild.Revision,
-		ParentSessionID: &stoppedParent.ID, TicketID: &secondTicket,
+		ParentSessionID: &stoppedParent.ID, TicketID: &secondTicket, WorkShape: workshape.Ship,
 	})
 	if err != nil || changedTicket.ParentSessionID == nil || *changedTicket.ParentSessionID != stoppedParent.ID ||
 		changedTicket.TicketID == nil || *changedTicket.TicketID != secondTicket {
@@ -165,7 +170,7 @@ func TestAssignBindingValidatesOnlyChangedFullStateReferences(t *testing.T) {
 	}
 	changedParent, err := service.AssignBinding(context.Background(), BindingInput{
 		ProjectID: projectID, SessionID: stoppedChild.ID, ExpectedRevision: stoppedChild.Revision,
-		ParentSessionID: &activeParent.ID, TicketID: &historicalTicket,
+		ParentSessionID: &activeParent.ID, TicketID: &historicalTicket, WorkShape: workshape.Ship,
 	})
 	if err != nil || changedParent.ParentSessionID == nil || *changedParent.ParentSessionID != activeParent.ID ||
 		changedParent.TicketID == nil || *changedParent.TicketID != historicalTicket {
@@ -175,14 +180,14 @@ func TestAssignBindingValidatesOnlyChangedFullStateReferences(t *testing.T) {
 	twoFieldChild := registerHierarchySession(t, service, projectID, "two-field-child", RoleWorker, nil, nil)
 	twoFields, err := service.AssignBinding(context.Background(), BindingInput{
 		ProjectID: projectID, SessionID: twoFieldChild.ID, ExpectedRevision: twoFieldChild.Revision,
-		ParentSessionID: &activeParent.ID, TicketID: &secondTicket,
+		ParentSessionID: &activeParent.ID, TicketID: &secondTicket, WorkShape: workshape.Ship,
 	})
 	if err != nil || twoFields.ParentSessionID == nil || twoFields.TicketID == nil {
 		t.Fatalf("simultaneous valid binding change failed: session=%+v err=%v", twoFields, err)
 	}
 	detached, err := service.AssignBinding(context.Background(), BindingInput{
 		ProjectID: projectID, SessionID: twoFields.ID, ExpectedRevision: twoFields.Revision,
-		ParentSessionID: nil, TicketID: nil,
+		ParentSessionID: nil, TicketID: nil, WorkShape: workshape.Unknown,
 	})
 	if err != nil || detached.ParentSessionID != nil || detached.TicketID != nil {
 		t.Fatalf("simultaneous detach failed: session=%+v err=%v", detached, err)
@@ -200,7 +205,7 @@ func TestHierarchyRejectsCrossProjectTerminalCyclesAndAmbiguity(t *testing.T) {
 	child := registerHierarchySession(t, service, projectID, "child", RoleWorker, &coordinator.ID, &ticketID)
 
 	if _, err := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: coordinator.ID,
-		ExpectedRevision: coordinator.Revision, ParentSessionID: &child.ID, TicketID: nil}); err == nil {
+		ExpectedRevision: coordinator.Revision, ParentSessionID: &child.ID, TicketID: nil, WorkShape: workshape.Unknown}); err == nil {
 		t.Fatal("hierarchy cycle accepted")
 	}
 	otherProject, err := paimosdb.DB.Exec(`INSERT INTO projects(name,key) VALUES('Other hierarchy','OTH')`)
@@ -213,25 +218,25 @@ func TestHierarchyRejectsCrossProjectTerminalCyclesAndAmbiguity(t *testing.T) {
 	}
 	foreign := registerHierarchySession(t, service, otherProjectID, "foreign", RoleWorker, nil, nil)
 	_, foreignParentErr := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
-		ExpectedRevision: child.Revision, ParentSessionID: &foreign.ID, TicketID: &ticketID})
+		ExpectedRevision: child.Revision, ParentSessionID: &foreign.ID, TicketID: &ticketID, WorkShape: workshape.Ship})
 	if foreignParentErr == nil {
 		t.Fatal("cross-project parent accepted")
 	}
 	missingParent := "99999999-9999-4999-8999-999999999999"
 	_, missingParentErr := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
-		ExpectedRevision: child.Revision, ParentSessionID: &missingParent, TicketID: &ticketID})
+		ExpectedRevision: child.Revision, ParentSessionID: &missingParent, TicketID: &ticketID, WorkShape: workshape.Ship})
 	if missingParentErr == nil || foreignParentErr.Error() != missingParentErr.Error() {
 		t.Fatalf("parent existence oracle: foreign=%v missing=%v", foreignParentErr, missingParentErr)
 	}
 	foreignTicket := addHierarchyTicket(t, otherProjectID, 1)
 	_, foreignTicketErr := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
-		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &foreignTicket})
+		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &foreignTicket, WorkShape: workshape.Ship})
 	if foreignTicketErr == nil {
 		t.Fatal("cross-project ticket accepted")
 	}
 	missingTicket := int64(999999999)
 	_, missingTicketErr := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
-		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &missingTicket})
+		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &missingTicket, WorkShape: workshape.Ship})
 	if missingTicketErr == nil || foreignTicketErr.Error() != missingTicketErr.Error() {
 		t.Fatalf("ticket existence oracle: foreign=%v missing=%v", foreignTicketErr, missingTicketErr)
 	}
@@ -239,7 +244,7 @@ func TestHierarchyRejectsCrossProjectTerminalCyclesAndAmbiguity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: child.ID,
-		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &ticketID}); err == nil {
+		ExpectedRevision: child.Revision, ParentSessionID: &coordinator.ID, TicketID: &ticketID, WorkShape: workshape.Ship}); err == nil {
 		t.Fatal("terminal parent accepted")
 	}
 
@@ -287,7 +292,7 @@ func TestHierarchyDepthBoundAndDatabaseGuardsCannotBeBypassed(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := service.AssignBinding(context.Background(), BindingInput{ProjectID: projectID, SessionID: root.ID,
-		ExpectedRevision: root.Revision, ParentSessionID: &newRoot.ID}); !IsCode(err, CodeInvalid) {
+		ExpectedRevision: root.Revision, ParentSessionID: &newRoot.ID, WorkShape: workshape.Unknown}); !IsCode(err, CodeInvalid) {
 		t.Fatalf("service accepted reparenting a depth-16 subtree under a new root: %v", err)
 	}
 	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET parent_harness_session_id=?,revision=revision+1 WHERE id=?`, newRoot.ID, rootID); err == nil {
@@ -336,12 +341,12 @@ func TestDatabaseBindingGuardsRejectInvalidReferencesAndActiveTicketMutation(t *
 	if _, err := paimosdb.DB.Exec(`UPDATE issues SET deleted_at='2026-09-03 01:00:00' WHERE id=?`, deletedTicket); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET ticket_id=?,revision=revision+1 WHERE id=?`, deletedTicket, child.ID); err == nil {
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET ticket_id=?,work_shape='ship',revision=revision+1 WHERE id=?`, deletedTicket, child.ID); err == nil {
 		t.Fatal("database trigger accepted a deleted ticket")
 	}
 
 	activeTicket := addHierarchyTicket(t, projectID, 905)
-	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET ticket_id=?,revision=revision+1 WHERE id=?`, activeTicket, child.ID); err != nil {
+	if _, err := paimosdb.DB.Exec(`UPDATE harness_sessions SET ticket_id=?,work_shape='ship',revision=revision+1 WHERE id=?`, activeTicket, child.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := paimosdb.DB.Exec(`UPDATE issues SET deleted_at='2026-09-03 01:00:00' WHERE id=?`, activeTicket); err == nil || !strings.Contains(err.Error(), "bound harness ticket") {

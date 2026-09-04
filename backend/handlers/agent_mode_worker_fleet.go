@@ -23,14 +23,22 @@ import (
 )
 
 func AgentModeWorkerFleet(w http.ResponseWriter, r *http.Request) {
-	serveAgentModeWorkerFleet(w, r, false)
+	serveAgentModeWorkerFleet(w, r, false, workerfleet.SchemaVersion)
 }
 
 func AgentModeProjectWorkerFleet(w http.ResponseWriter, r *http.Request) {
-	serveAgentModeWorkerFleet(w, r, true)
+	serveAgentModeWorkerFleet(w, r, true, workerfleet.SchemaVersion)
 }
 
-func serveAgentModeWorkerFleet(w http.ResponseWriter, r *http.Request, projectRoute bool) {
+func AgentModeWorkerFleetV2(w http.ResponseWriter, r *http.Request) {
+	serveAgentModeWorkerFleet(w, r, false, workerfleet.SchemaVersionV2)
+}
+
+func AgentModeProjectWorkerFleetV2(w http.ResponseWriter, r *http.Request) {
+	serveAgentModeWorkerFleet(w, r, true, workerfleet.SchemaVersionV2)
+}
+
+func serveAgentModeWorkerFleet(w http.ResponseWriter, r *http.Request, projectRoute bool, version int) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	user := auth.GetUser(r)
 	if user == nil || user.ID <= 0 {
@@ -66,6 +74,15 @@ func serveAgentModeWorkerFleet(w http.ResponseWriter, r *http.Request, projectRo
 		request.RouteProjectID = &projectID
 	}
 	reader := workerfleet.NewReader(db.DB, workerfleet.ReaderOptions{LoadTrust: loadWorkerFleetTrust})
+	if version == workerfleet.SchemaVersionV2 {
+		snapshot, readErr := reader.ReadV2(r.Context(), request)
+		if readErr != nil {
+			workerFleetError(w, r, readErr)
+			return
+		}
+		jsonOK(w, snapshot)
+		return
+	}
 	snapshot, err := reader.Read(r.Context(), request)
 	if err != nil {
 		workerFleetError(w, r, err)

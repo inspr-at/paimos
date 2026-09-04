@@ -12390,8 +12390,9 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		}},
 
 		// M169 / PAI-901: authenticated, content-free worker activity is a
-		// separate truth from harness phase and control leasing. Every mutating
-		// path appends the resulting projection to an immutable event stream.
+		// separate truth from harness phase and control leasing. Semantic state
+		// transitions append the resulting projection to an immutable event
+		// stream; replay-equivalent heartbeat and yield mutations do not.
 		{169, []string{
 			`ALTER TABLE harness_sessions ADD COLUMN activity_state TEXT NOT NULL DEFAULT 'unknown'
 			 CHECK(activity_state IN ('busy','idle','unknown','dead'))`,
@@ -12719,7 +12720,6 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 BEGIN SELECT RAISE(ABORT,'active harness workspace ownership conflicts'); END`,
 		}},
 
-		// M172 is reserved by PAI-906's owned-workspace dispatch provenance.
 		// M173 / PAI-905: explicit reply obligations keep one mutable current
 		// state beside append-only lifecycle facts. Human decisions on held action
 		// requests are separate immutable facts and never release the held message.
@@ -12899,6 +12899,94 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE INDEX idx_agent_attention_batches_cursor
 			 ON agent_attention_batches(receiver_project_id,receiver_project_agent_id,to_cursor)`,
 			`PRAGMA foreign_keys=ON`,
+		}},
+
+		// M174 / PAI-907: nullable storage keeps pre-shape bindings unknown while
+		// every classified value is the closed ship/scout enum. Binding changes
+		// remain revisioned and append exact before/after shape evidence.
+		{174, []string{
+			`ALTER TABLE harness_sessions ADD COLUMN work_shape TEXT CHECK(work_shape IN ('ship','scout'))`,
+			`DROP TRIGGER trg_harness_sessions_binding_revision`,
+			`DROP TRIGGER trg_harness_sessions_binding_event`,
+			`DROP TRIGGER trg_harness_session_events_no_update`,
+			`DROP TRIGGER trg_harness_session_events_no_delete`,
+			`DROP INDEX idx_harness_session_events_session`,
+			`CREATE TEMP TABLE harness_session_events_m174_sequence (seq INTEGER NOT NULL)`,
+			`INSERT INTO harness_session_events_m174_sequence(seq)
+			 SELECT MAX(
+			  COALESCE((SELECT seq FROM sqlite_sequence WHERE name='harness_session_events'),0),
+			  COALESCE((SELECT MAX(id) FROM harness_session_events),0)
+			 )`,
+			`ALTER TABLE harness_session_events RENAME TO harness_session_events_m173`,
+			`CREATE TABLE harness_session_events (
+			 id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+			 harness_session_id         TEXT NOT NULL REFERENCES harness_sessions(id) ON DELETE CASCADE,
+			 event_sequence             INTEGER NOT NULL CHECK(event_sequence>0),
+			 operation                  TEXT NOT NULL CHECK(operation IN ('register','heartbeat','yield','control_completed','stop','activity_timeout','binding_changed')),
+			 phase                      TEXT NOT NULL CHECK(phase IN ('starting','working','yielded','stopping','stopped')),
+			 activity_state             TEXT NOT NULL CHECK(activity_state IN ('busy','idle','unknown','dead')),
+			 activity_reason            TEXT NOT NULL CHECK(activity_reason IN ('unreported','adapter_activity','turn_completed','heartbeat_stale','stale_evidence','malformed_evidence','unmanaged_evidence','process_exited','process_failed','ownership_lost','stopped')),
+			 activity_event_kind        TEXT NOT NULL DEFAULT '' CHECK(activity_event_kind IN ('','session_started','turn_started','tool_started','control_applied','turn_completed')),
+			 activity_sequence          INTEGER NOT NULL CHECK(activity_sequence>=0),
+			 closed_reason              TEXT NOT NULL DEFAULT '' CHECK(closed_reason IN ('','stopped','process_exited','process_failed','ownership_lost')),
+			 before_parent_harness_session_id TEXT,
+			 after_parent_harness_session_id  TEXT,
+			 before_ticket_id           INTEGER,
+			 after_ticket_id            INTEGER,
+			 assignment_present         INTEGER CHECK(assignment_present IN (0,1)),
+			 before_work_shape          TEXT CHECK(before_work_shape IN ('ship','scout')),
+			 after_work_shape           TEXT CHECK(after_work_shape IN ('ship','scout')),
+			 created_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(harness_session_id,event_sequence),
+			 CHECK(
+			  (activity_state='dead' AND phase='stopped' AND closed_reason<>'' AND activity_reason IN ('stopped','process_exited','process_failed','ownership_lost')) OR
+			  (activity_state='idle' AND phase<>'stopped' AND closed_reason='' AND activity_reason='turn_completed' AND activity_event_kind='turn_completed') OR
+			  (activity_state='busy' AND phase<>'stopped' AND closed_reason='' AND activity_reason='adapter_activity' AND activity_event_kind IN ('turn_started','tool_started','control_applied')) OR
+			  (activity_state='unknown' AND phase<>'stopped' AND closed_reason='' AND activity_reason IN ('unreported','heartbeat_stale','stale_evidence','malformed_evidence','unmanaged_evidence'))
+			 ),
+			 CHECK(operation<>'binding_changed' OR
+			  before_parent_harness_session_id IS NOT after_parent_harness_session_id OR
+			  before_ticket_id IS NOT after_ticket_id OR before_work_shape IS NOT after_work_shape)
+			)`,
+			`INSERT INTO harness_session_events(
+			 id,harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,
+			 activity_sequence,closed_reason,before_parent_harness_session_id,after_parent_harness_session_id,
+			 before_ticket_id,after_ticket_id,assignment_present,created_at)
+			 SELECT id,harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,
+			 activity_sequence,closed_reason,before_parent_harness_session_id,after_parent_harness_session_id,
+			 before_ticket_id,after_ticket_id,assignment_present,created_at FROM harness_session_events_m173`,
+			`DROP TABLE harness_session_events_m173`,
+			`INSERT INTO sqlite_sequence(name,seq)
+			 SELECT 'harness_session_events',seq FROM harness_session_events_m174_sequence
+			 WHERE NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='harness_session_events')`,
+			`UPDATE sqlite_sequence
+			 SET seq=MAX(seq,(SELECT seq FROM harness_session_events_m174_sequence))
+			 WHERE name='harness_session_events'`,
+			`DROP TABLE harness_session_events_m174_sequence`,
+			`CREATE INDEX idx_harness_session_events_session ON harness_session_events(harness_session_id,event_sequence)`,
+			`CREATE TRIGGER trg_harness_sessions_work_shape_insert BEFORE INSERT ON harness_sessions
+			 WHEN (NEW.ticket_id IS NULL)<>(NEW.work_shape IS NULL)
+			 BEGIN SELECT RAISE(ABORT,'harness ticket binding and work shape must be assigned together'); END`,
+			`CREATE TRIGGER trg_harness_sessions_work_shape_update BEFORE UPDATE OF ticket_id,work_shape ON harness_sessions
+			 WHEN (NEW.ticket_id IS NULL)<>(NEW.work_shape IS NULL)
+			  AND (NEW.ticket_id IS NOT OLD.ticket_id OR NEW.work_shape IS NOT OLD.work_shape)
+			 BEGIN SELECT RAISE(ABORT,'harness ticket binding and work shape must be assigned together'); END`,
+			`CREATE TRIGGER trg_harness_sessions_binding_revision BEFORE UPDATE OF parent_harness_session_id,ticket_id,work_shape ON harness_sessions
+			 WHEN (NEW.parent_harness_session_id IS NOT OLD.parent_harness_session_id OR NEW.ticket_id IS NOT OLD.ticket_id OR NEW.work_shape IS NOT OLD.work_shape)
+			  AND NEW.revision<>OLD.revision+1
+			 BEGIN SELECT RAISE(ABORT,'harness session binding requires revision'); END`,
+			`CREATE TRIGGER trg_harness_sessions_binding_event AFTER UPDATE OF parent_harness_session_id,ticket_id,work_shape ON harness_sessions
+			 WHEN NEW.parent_harness_session_id IS NOT OLD.parent_harness_session_id OR NEW.ticket_id IS NOT OLD.ticket_id OR NEW.work_shape IS NOT OLD.work_shape
+			 BEGIN INSERT INTO harness_session_events(
+			  harness_session_id,event_sequence,operation,phase,activity_state,activity_reason,activity_event_kind,
+			  activity_sequence,closed_reason,before_parent_harness_session_id,after_parent_harness_session_id,before_ticket_id,after_ticket_id,before_work_shape,after_work_shape)
+			 VALUES(NEW.id,NEW.revision,'binding_changed',NEW.phase,NEW.activity_state,NEW.activity_reason,NEW.activity_event_kind,
+			  NEW.activity_sequence,NEW.closed_reason,OLD.parent_harness_session_id,NEW.parent_harness_session_id,OLD.ticket_id,NEW.ticket_id,OLD.work_shape,NEW.work_shape); END`,
+			`CREATE TRIGGER trg_harness_session_events_no_update BEFORE UPDATE ON harness_session_events
+			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
+			`CREATE TRIGGER trg_harness_session_events_no_delete BEFORE DELETE ON harness_session_events
+			 WHEN EXISTS(SELECT 1 FROM harness_sessions WHERE id=OLD.harness_session_id)
+			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
 		}},
 	}
 
@@ -13166,6 +13254,26 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			"trg_agent_reply_obligation_close_event", "agent_message_human_resolutions",
 			"idx_agent_message_human_resolutions_project", "trg_agent_message_human_resolution_insert_guard",
 			"trg_agent_message_human_resolutions_no_update", "trg_agent_message_human_resolutions_no_delete",
+		})
+	},
+	174: func(ctx context.Context, conn *sql.Conn) error {
+		var columns int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('harness_sessions') WHERE name='work_shape'`).Scan(&columns); err != nil {
+			return fmt.Errorf("inspect M174 harness work shape: %w", err)
+		}
+		if columns != 0 {
+			return fmt.Errorf("M174 schema is partially present or locally incompatible: harness work-shape columns=%d", columns)
+		}
+		var eventColumns int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('harness_session_events')
+			WHERE name IN ('before_work_shape','after_work_shape')`).Scan(&eventColumns); err != nil {
+			return fmt.Errorf("inspect M174 harness assignment event columns: %w", err)
+		}
+		if eventColumns != 0 {
+			return fmt.Errorf("M174 schema is partially present or locally incompatible: harness assignment event columns=%d", eventColumns)
+		}
+		return checkSchemaObjectsAbsent(ctx, conn, 174, []string{
+			"trg_harness_sessions_work_shape_insert", "trg_harness_sessions_work_shape_update",
 		})
 	},
 }

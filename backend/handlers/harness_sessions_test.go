@@ -68,7 +68,7 @@ func TestHarnessOpenAPIKeepsSessionAndTicketIdentitiesDistinct(t *testing.T) {
 	}
 	harness := contract.Components.Schemas["HarnessSession"].Properties
 	product := contract.Components.Schemas["ProductSession"].Properties
-	for _, field := range []string{"id", "parent_harness_session_id", "ticket_id", "machine_id", "workspace_provenance", "dispatch_profile", "account_label"} {
+	for _, field := range []string{"id", "parent_harness_session_id", "ticket_id", "work_shape", "work_contract", "machine_id", "workspace_provenance", "dispatch_profile", "account_label"} {
 		if _, ok := harness[field]; !ok {
 			t.Fatalf("HarnessSession missing distinct %s field", field)
 		}
@@ -124,6 +124,26 @@ func TestHarnessSessionRoutesAreProjectScopedAndDistinct(t *testing.T) {
 	}
 }
 
+func TestHarnessBindingRequiresExplicitClosedWorkShape(t *testing.T) {
+	for name, raw := range map[string]json.RawMessage{
+		"missing": nil,
+		"null":    json.RawMessage(`null`),
+		"open":    json.RawMessage(`"research"`),
+		"empty":   json.RawMessage(`""`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeWorkShape(raw); err == nil {
+				t.Fatal("invalid binding work shape accepted")
+			}
+		})
+	}
+	for _, raw := range []json.RawMessage{json.RawMessage(`"unknown"`), json.RawMessage(`"ship"`), json.RawMessage(`"scout"`)} {
+		if _, err := decodeWorkShape(raw); err != nil {
+			t.Fatalf("closed binding work shape %s rejected: %v", raw, err)
+		}
+	}
+}
+
 func TestHarnessBindingHandlerValidatesOnlyChangedFullStateReferences(t *testing.T) {
 	openChangesTestDB(t)
 	project, err := db.DB.Exec(`INSERT INTO projects(name,key) VALUES('Binding isolation','BIS')`)
@@ -149,10 +169,14 @@ func TestHarnessBindingHandlerValidatesOnlyChangedFullStateReferences(t *testing
 	historicalTicket := newTicket(3)
 	service := managedharness.NewService(db.DB)
 	register := func(agent string, parent *string, ticket *int64) models.HarnessSession {
+		shape := ""
+		if ticket != nil {
+			shape = "ship"
+		}
 		session, created, err := service.Register(context.Background(), managedharness.RegisterInput{
 			ProjectID: projectID, AgentName: agent, Harness: "codex", Host: "host-" + agent, SessionRef: "ref-" + agent,
 			WorkerLease: handlerWorkerLease, ManagementMode: managedharness.ManagementManaged, Role: managedharness.RoleWorker,
-			ParentSessionID: parent, TicketID: ticket, SteerMode: managedharness.SteerNone,
+			ParentSessionID: parent, TicketID: ticket, WorkShape: shape, SteerMode: managedharness.SteerNone,
 			Capabilities: models.HarnessCapabilities{Status: true},
 		})
 		if err != nil || !created {
@@ -161,7 +185,7 @@ func TestHarnessBindingHandlerValidatesOnlyChangedFullStateReferences(t *testing
 		return session
 	}
 	patch := func(session models.HarnessSession, parentJSON, ticketJSON string) models.HarnessSession {
-		body := []byte(fmt.Sprintf(`{"expected_revision":%d,"parent_harness_session_id":%s,"ticket_id":%s}`, session.Revision, parentJSON, ticketJSON))
+		body := []byte(fmt.Sprintf(`{"expected_revision":%d,"parent_harness_session_id":%s,"ticket_id":%s,"work_shape":%q}`, session.Revision, parentJSON, ticketJSON, session.WorkShape))
 		req := httptest.NewRequest(http.MethodPatch, "/projects/1/harness-sessions/"+session.ID+"/binding", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		route := chi.NewRouteContext()

@@ -523,6 +523,8 @@ func mountAPI(r chi.Router) {
 		r.Get("/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
 		r.Get("/worker-fleet/v1", handlers.AgentModeWorkerFleet)
 		r.Get("/projects/{projectID}/worker-fleet/v1", handlers.AgentModeProjectWorkerFleet)
+		r.Get("/worker-fleet/v2", handlers.AgentModeWorkerFleetV2)
+		r.Get("/projects/{projectID}/worker-fleet/v2", handlers.AgentModeProjectWorkerFleetV2)
 		r.Post("/voice/transcribe", handlers.TranscribeAgentModeVoice)
 		r.Post("/voice/speak", handlers.SpeakAgentModeVoice)
 		handlers.MountAgentModeControlRoutes(r)

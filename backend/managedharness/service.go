@@ -25,6 +25,7 @@ import (
 	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"github.com/inspr-at/paimos/backend/models"
+	"github.com/inspr-at/paimos/backend/workshape"
 )
 
 const (
@@ -117,6 +118,7 @@ type RegisterInput struct {
 	Role                   string
 	ParentSessionID        *string
 	TicketID               *int64
+	WorkShape              string
 	SteerMode              string
 	Capabilities           models.HarnessCapabilities
 	Workspace              *models.HarnessWorkspaceProvenance
@@ -158,6 +160,7 @@ type BindingInput struct {
 	ExpectedRevision int64
 	ParentSessionID  *string
 	TicketID         *int64
+	WorkShape        string
 }
 
 func normalizeRegister(in RegisterInput) RegisterInput {
@@ -169,6 +172,7 @@ func normalizeRegister(in RegisterInput) RegisterInput {
 	in.MessageTargetID = strings.TrimSpace(in.MessageTargetID)
 	in.ManagementMode = strings.ToLower(strings.TrimSpace(in.ManagementMode))
 	in.Role = strings.ToLower(strings.TrimSpace(in.Role))
+	in.WorkShape = strings.ToLower(strings.TrimSpace(in.WorkShape))
 	if in.ParentSessionID != nil {
 		value := strings.TrimSpace(*in.ParentSessionID)
 		in.ParentSessionID = &value
@@ -218,6 +222,15 @@ func validateRegister(in RegisterInput) error {
 	}
 	if in.TicketID != nil && *in.TicketID <= 0 {
 		return coded(CodeInvalid, "ticket id must be positive")
+	}
+	if in.TicketID != nil && in.WorkShape == "" {
+		return coded(CodeInvalid, "ticket binding requires an explicit work shape")
+	}
+	if in.WorkShape != "" && in.WorkShape != workshape.Unknown && !workshape.ValidPersisted(in.WorkShape) {
+		return coded(CodeInvalid, "work shape must be unknown, ship, or scout")
+	}
+	if in.TicketID == nil && in.WorkShape != "" {
+		return coded(CodeInvalid, "work shape requires a ticket binding")
 	}
 	if !validAccountLabel(in.AccountLabel) {
 		return coded(CodeInvalid, "account label must be a bounded non-secret stable value")
@@ -357,6 +370,23 @@ func nullInt64Pointer(value *int64) any {
 	return *value
 }
 
+func nullableWorkShape(value string) any {
+	if !workshape.ValidPersisted(value) {
+		return nil
+	}
+	return value
+}
+
+func modelWorkContract(value string) models.WorkShapeContract {
+	contract := workshape.For(value)
+	stages := make([]models.WorkShapeStageApplicability, len(contract.StageApplicability))
+	for i, stage := range contract.StageApplicability {
+		stages[i] = models.WorkShapeStageApplicability{Stage: stage.Stage, Applicability: stage.Applicability}
+	}
+	return models.WorkShapeContract{Shape: contract.Shape, OutputKind: contract.OutputKind,
+		StageApplicability: stages, DefinitionOfDone: contract.DefinitionOfDone, NonGoals: contract.NonGoals}
+}
+
 func equalStringPointers(left, right *string) bool {
 	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }
@@ -444,7 +474,7 @@ func validateBindingReferences(ctx context.Context, query queryRower, projectID 
 }
 
 const sessionColumns = `id,project_id,project_agent_id,agent_name,harness,host,COALESCE(message_target_id,''),management_mode,role,
-	COALESCE(parent_harness_session_id,''),ticket_id,steer_mode,
+	COALESCE(parent_harness_session_id,''),ticket_id,COALESCE(work_shape,''),steer_mode,
 	COALESCE(workspace_path,''),COALESCE(git_top_level,''),COALESCE(git_branch,''),COALESCE(workspace_identity,''),workspace_kind,workspace_mode,
 	COALESCE(dispatch_profile_id,''),COALESCE(dispatch_profile_version,''),COALESCE(dispatch_model,''),COALESCE(dispatch_effort,''),account_label,
 	advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,COALESCE(heartbeat_at,''),
@@ -456,10 +486,11 @@ func scanSession(row interface{ Scan(...any) error }) (models.HarnessSession, er
 	var inbox, status, steer, interrupt, stop int
 	var parent string
 	var ticket sql.NullInt64
+	var storedWorkShape string
 	var workspacePath, gitTopLevel, gitBranch, workspaceIdentity, workspaceKind, workspaceMode string
 	var profileID, profileVersion, profileModel, profileEffort, accountLabel string
 	err := row.Scan(&out.ID, &out.ProjectID, &out.ProjectAgentID, &out.AgentName, &out.Harness, &out.Host, &out.MessageTargetID,
-		&out.ManagementMode, &out.Role, &parent, &ticket, &out.SteerMode,
+		&out.ManagementMode, &out.Role, &parent, &ticket, &storedWorkShape, &out.SteerMode,
 		&workspacePath, &gitTopLevel, &gitBranch, &workspaceIdentity, &workspaceKind, &workspaceMode,
 		&profileID, &profileVersion, &profileModel, &profileEffort, &accountLabel,
 		&inbox, &status, &steer, &interrupt, &stop, &out.Phase,
@@ -483,6 +514,8 @@ func scanSession(row interface{ Scan(...any) error }) (models.HarnessSession, er
 	if ticket.Valid {
 		out.TicketID = &ticket.Int64
 	}
+	out.WorkShape = workshape.Normalize(storedWorkShape)
+	out.WorkContract = modelWorkContract(out.WorkShape)
 	if parsed, parseErr := time.Parse(time.RFC3339Nano, out.ActivityAt); parseErr == nil {
 		age := int64(time.Since(parsed).Seconds())
 		if age < 0 {
@@ -557,14 +590,14 @@ func appendSessionEventTx(ctx context.Context, tx *sql.Tx, session models.Harnes
 		nullInt64Pointer(session.TicketID), session.ProjectAgentID).Scan(&assignmentPresent); err != nil {
 		return err
 	}
-	beforeParent, beforeTicket := nullStringPointer(session.ParentSessionID), nullInt64Pointer(session.TicketID)
+	beforeParent, beforeTicket, beforeWorkShape := nullStringPointer(session.ParentSessionID), nullInt64Pointer(session.TicketID), nullableWorkShape(session.WorkShape)
 	if operation == "register" {
-		beforeParent, beforeTicket = nil, nil
+		beforeParent, beforeTicket, beforeWorkShape = nil, nil, nil
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO harness_session_events(
-		harness_session_id,event_sequence,operation,before_parent_harness_session_id,after_parent_harness_session_id,before_ticket_id,after_ticket_id,
+		harness_session_id,event_sequence,operation,before_parent_harness_session_id,after_parent_harness_session_id,before_ticket_id,after_ticket_id,before_work_shape,after_work_shape,
 		phase,activity_state,activity_reason,activity_event_kind,activity_sequence,closed_reason,assignment_present)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, session.ID, session.Revision, operation, beforeParent, nullStringPointer(session.ParentSessionID), beforeTicket, nullInt64Pointer(session.TicketID),
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, session.ID, session.Revision, operation, beforeParent, nullStringPointer(session.ParentSessionID), beforeTicket, nullInt64Pointer(session.TicketID), beforeWorkShape, nullableWorkShape(session.WorkShape),
 		session.Phase, session.ActivityState, session.ActivityReason, session.ActivityKind, session.ActivitySequence, session.ClosedReason, assignmentPresent)
 	return err
 }
@@ -686,6 +719,9 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 	if !errors.Is(err, sql.ErrNoRows) {
 		return models.HarnessSession{}, false, err
 	}
+	if in.TicketID != nil && !workshape.ValidPersisted(in.WorkShape) {
+		return models.HarnessSession{}, false, coded(CodeInvalid, "new ticket bindings require ship or scout work shape")
+	}
 	if err := validateBindingReferences(ctx, tx, in.ProjectID, "", in.ParentSessionID, in.TicketID); err != nil {
 		return models.HarnessSession{}, false, err
 	}
@@ -735,11 +771,11 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		workspacePath, gitTopLevel, gitBranch = in.Workspace.CanonicalPath, in.Workspace.GitTopLevel, in.Workspace.GitBranch
 		workspaceIdentity, workspaceKind, workspaceMode = in.Workspace.Identity, in.Workspace.Kind, in.Workspace.Mode
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,parent_harness_session_id,ticket_id,steer_mode,
+	_, err = tx.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,parent_harness_session_id,ticket_id,work_shape,steer_mode,
 		workspace_path,git_top_level,git_branch,workspace_identity,workspace_kind,workspace_mode,dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,account_label,
-		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, workerDigest, nullString(targetID), in.ManagementMode, in.Role,
-		nullStringPointer(in.ParentSessionID), nullInt64Pointer(in.TicketID), in.SteerMode,
+		nullStringPointer(in.ParentSessionID), nullInt64Pointer(in.TicketID), nullableWorkShape(in.WorkShape), in.SteerMode,
 		workspacePath, gitTopLevel, gitBranch, workspaceIdentity, workspaceKind, workspaceMode,
 		in.DispatchProfileID, in.DispatchProfileVersion, profileModel, profileEffort, in.AccountLabel,
 		boolInt(c.Inbox), boolInt(c.Status), boolInt(c.Steer), boolInt(c.Interrupt), boolInt(c.Stop), PhaseStarting, activityReason)
@@ -815,7 +851,7 @@ func sameRegistration(s models.HarnessSession, in RegisterInput) bool {
 		s.DispatchProfile.ID == in.DispatchProfileID && s.DispatchProfile.Version == in.DispatchProfileVersion
 	return s.ProjectID == in.ProjectID && s.AgentName == in.AgentName && s.Harness == in.Harness && s.Host == in.Host &&
 		s.ManagementMode == in.ManagementMode && s.Role == in.Role && s.SteerMode == in.SteerMode && s.Capabilities == in.Capabilities &&
-		equalStringPointers(s.ParentSessionID, in.ParentSessionID) && equalInt64Pointers(s.TicketID, in.TicketID) &&
+		equalStringPointers(s.ParentSessionID, in.ParentSessionID) && equalInt64Pointers(s.TicketID, in.TicketID) && s.WorkShape == workshape.Normalize(in.WorkShape) &&
 		(in.MessageTargetID == "" || s.MessageTargetID == in.MessageTargetID) && workspaceMatches && profileMatches && s.AccountLabel == in.AccountLabel
 }
 
@@ -861,6 +897,10 @@ func (s *Service) AssignBinding(ctx context.Context, input BindingInput) (models
 	if err != nil {
 		return models.HarnessSession{}, err
 	}
+	desiredWorkShape := strings.ToLower(strings.TrimSpace(input.WorkShape))
+	if desiredWorkShape != workshape.Unknown && !workshape.ValidPersisted(desiredWorkShape) {
+		return models.HarnessSession{}, coded(CodeInvalid, "work shape must be unknown, ship, or scout")
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return models.HarnessSession{}, err
@@ -876,9 +916,16 @@ func (s *Service) AssignBinding(ctx context.Context, input BindingInput) (models
 	if current.Revision != input.ExpectedRevision {
 		return models.HarnessSession{}, coded(CodeConflict, "harness session binding revision is stale")
 	}
+	if ticket == nil && desiredWorkShape != workshape.Unknown {
+		return models.HarnessSession{}, coded(CodeInvalid, "a detached ticket binding must have unknown work shape")
+	}
 	parentChanged := !equalStringPointers(current.ParentSessionID, parent)
 	ticketChanged := !equalInt64Pointers(current.TicketID, ticket)
-	if !parentChanged && !ticketChanged {
+	shapeChanged := current.WorkShape != desiredWorkShape
+	if ticket != nil && desiredWorkShape == workshape.Unknown && (ticketChanged || current.WorkShape != workshape.Unknown) {
+		return models.HarnessSession{}, coded(CodeInvalid, "a new or reclassified ticket binding requires ship or scout work shape")
+	}
+	if !parentChanged && !ticketChanged && !shapeChanged {
 		return models.HarnessSession{}, coded(CodeConflict, "harness session binding is unchanged")
 	}
 	// The request carries the complete desired binding state, but only changed
@@ -896,9 +943,9 @@ func (s *Service) AssignBinding(ctx context.Context, input BindingInput) (models
 	if err := validateBindingReferences(ctx, tx, input.ProjectID, current.ID, parentToValidate, ticketToValidate); err != nil {
 		return models.HarnessSession{}, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET parent_harness_session_id=?,ticket_id=?,revision=revision+1,
+	result, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET parent_harness_session_id=?,ticket_id=?,work_shape=?,revision=revision+1,
 		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE project_id=? AND id=? AND revision=?`,
-		nullStringPointer(parent), nullInt64Pointer(ticket), input.ProjectID, current.ID, input.ExpectedRevision)
+		nullStringPointer(parent), nullInt64Pointer(ticket), nullableWorkShape(desiredWorkShape), input.ProjectID, current.ID, input.ExpectedRevision)
 	if err != nil {
 		return models.HarnessSession{}, err
 	}

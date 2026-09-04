@@ -262,7 +262,7 @@ func Test_ProjectAgents_DeleteDetachesSurvivingHarnessChildrenWithHistory(t *tes
 	child, created, err := service.Register(context.Background(), managedharness.RegisterInput{
 		ProjectID: projectID, AgentName: "child", Harness: "codex", Host: "host-child", SessionRef: "ref-child",
 		WorkerLease: lease, ManagementMode: managedharness.ManagementManaged, Role: managedharness.RoleWorker,
-		ParentSessionID: &parent.ID, TicketID: &ticketID, SteerMode: managedharness.SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
+		ParentSessionID: &parent.ID, TicketID: &ticketID, WorkShape: "ship", SteerMode: managedharness.SteerNone, Capabilities: models.HarnessCapabilities{Status: true},
 	})
 	if err != nil || !created {
 		t.Fatalf("register child: created=%v err=%v", created, err)

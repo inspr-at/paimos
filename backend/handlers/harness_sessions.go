@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/managedharness"
 	"github.com/inspr-at/paimos/backend/models"
+	"github.com/inspr-at/paimos/backend/workshape"
 )
 
 const harnessWorkerLeaseHeader = "X-Paimos-Harness-Worker-Lease"
@@ -52,6 +53,7 @@ type harnessRegisterRequest struct {
 	Role                   string                             `json:"role"`
 	ParentSessionID        *string                            `json:"parent_harness_session_id"`
 	TicketID               *int64                             `json:"ticket_id"`
+	WorkShape              string                             `json:"work_shape"`
 	SteerMode              string                             `json:"steer_mode"`
 	Capabilities           models.HarnessCapabilities         `json:"advertised_capabilities"`
 	Workspace              *models.HarnessWorkspaceProvenance `json:"workspace,omitempty"`
@@ -80,6 +82,7 @@ type harnessBindingRequest struct {
 	ExpectedRevision json.Number     `json:"expected_revision"`
 	ParentSessionID  json.RawMessage `json:"parent_harness_session_id"`
 	TicketID         json.RawMessage `json:"ticket_id"`
+	WorkShape        json.RawMessage `json:"work_shape"`
 }
 
 func harnessProjectID(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -164,7 +167,7 @@ func registerHarnessSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeHarnessJSON(w, r, &req) {
 		return
 	}
-	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, ParentSessionID: req.ParentSessionID, TicketID: req.TicketID, SteerMode: req.SteerMode, Capabilities: req.Capabilities, Authority: harnessRegistrationAuthority(r, projectID), Workspace: req.Workspace, DispatchProfileID: req.DispatchProfileID, DispatchProfileVersion: req.DispatchProfileVersion, AccountLabel: req.AccountLabel})
+	session, created, err := managedharness.NewService(db.DB).Register(r.Context(), managedharness.RegisterInput{ProjectID: projectID, AgentName: req.AgentName, Harness: req.Harness, Host: req.Host, SessionRef: req.SessionRef, WorkerLease: req.WorkerLease, MessageTargetID: req.MessageTargetID, ManagementMode: req.ManagementMode, Role: req.Role, ParentSessionID: req.ParentSessionID, TicketID: req.TicketID, WorkShape: req.WorkShape, SteerMode: req.SteerMode, Capabilities: req.Capabilities, Authority: harnessRegistrationAuthority(r, projectID), Workspace: req.Workspace, DispatchProfileID: req.DispatchProfileID, DispatchProfileVersion: req.DispatchProfileVersion, AccountLabel: req.AccountLabel})
 	if err != nil {
 		harnessProblem(w, err, "harness_session_register_failed", harnessStatus(err))
 		return
@@ -223,6 +226,21 @@ func decodeNullableInt64(raw json.RawMessage) (*int64, error) {
 	return &parsed, nil
 }
 
+func decodeWorkShape(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 {
+		return "", errors.New("binding fields must be explicitly supplied")
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", errors.New("work shape must be unknown, ship, or scout")
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value != workshape.Unknown && !workshape.ValidPersisted(value) {
+		return "", errors.New("work shape must be unknown, ship, or scout")
+	}
+	return value, nil
+}
+
 func assignHarnessBinding(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := harnessProjectID(w, r)
 	if !ok {
@@ -250,9 +268,14 @@ func assignHarnessBinding(w http.ResponseWriter, r *http.Request) {
 		harnessProblem(w, err, managedharness.CodeInvalid, http.StatusBadRequest)
 		return
 	}
+	shape, err := decodeWorkShape(req.WorkShape)
+	if err != nil {
+		harnessProblem(w, err, managedharness.CodeInvalid, http.StatusBadRequest)
+		return
+	}
 	out, err := managedharness.NewService(db.DB).AssignBinding(r.Context(), managedharness.BindingInput{
 		ProjectID: projectID, SessionID: chi.URLParam(r, "sessionID"), ExpectedRevision: revision,
-		ParentSessionID: parent, TicketID: ticket,
+		ParentSessionID: parent, TicketID: ticket, WorkShape: shape,
 	})
 	if err != nil {
 		harnessProblem(w, err, "harness_session_binding_failed", harnessStatus(err))

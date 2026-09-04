@@ -303,12 +303,12 @@ func TestCLIReporterRegistersExactScopeAndAppliesTypedControl(t *testing.T) {
 			workerLease = registration.WorkerLease
 			if registration.SessionRef != localReporterSession || len(workerLease) != 43 || slices.Contains(args, workerLease) || slices.Contains(args, "inbox") || slices.Contains(args, "steer") ||
 				!slices.Contains(args, "status,interrupt,stop") || !slices.Contains(args, "--parent-session") || !slices.Contains(args, "33333333-3333-4333-8333-333333333333") ||
-				!slices.Contains(args, "--ticket-id") || !slices.Contains(args, "903") || !slices.Contains(args, "worker") {
+				!slices.Contains(args, "--ticket-id") || !slices.Contains(args, "903") || !slices.Contains(args, "--work-shape") || !slices.Contains(args, "ship") || !slices.Contains(args, "worker") {
 				t.Fatalf("unsafe registration args=%v body=%q", args, body)
 			}
 			parent := "33333333-3333-4333-8333-333333333333"
 			ticket := int64(903)
-			return json.Marshal(harnessSessionResponse{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: "codex", Role: "worker", ParentSessionID: &parent, TicketID: &ticket})
+			return json.Marshal(harnessSessionResponse{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: "codex", Role: "worker", ParentSessionID: &parent, TicketID: &ticket, WorkShape: "ship"})
 		case "heartbeat", "yield", "complete-control":
 			body, _ := io.ReadAll(stdin)
 			if string(body) != workerLease || slices.Contains(args, workerLease) {
@@ -339,7 +339,7 @@ func TestCLIReporterRegistersExactScopeAndAppliesTypedControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := agentd.Session{ID: localReporterSession, ProjectID: 6, Identity: "codex:worker", Adapter: "codex", Managed: true,
-		Role: "worker", ParentSessionID: "33333333-3333-4333-8333-333333333333", TicketID: 903,
+		Role: "worker", ParentSessionID: "33333333-3333-4333-8333-333333333333", TicketID: 903, WorkShape: "ship",
 		State: agentd.StateRunning, Capabilities: []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus, agentd.CapabilitySteer, agentd.CapabilityInterrupt, agentd.CapabilityStop}}
 	if err := reporter.ReportStatus(context.Background(), agentd.Status{Instance: "ppm", HeartbeatAt: time.Now(), Sessions: []agentd.Session{session}}); err != nil {
 		t.Fatal(err)

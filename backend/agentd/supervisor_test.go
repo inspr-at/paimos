@@ -24,7 +24,7 @@ func TestStartRequestOmitsNewHierarchyFieldsForOldDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded := string(raw)
-	for _, field := range []string{"role", "parent_harness_session_id", "ticket_id"} {
+	for _, field := range []string{"role", "parent_harness_session_id", "ticket_id", "work_shape"} {
 		if strings.Contains(encoded, `"`+field+`"`) {
 			t.Fatalf("unset forward-compatible field %s leaked into old-daemon request: %s", field, encoded)
 		}
@@ -203,22 +203,45 @@ func TestSupervisorKeepsHierarchyAndTicketSeparateFromIdentityAndPrompt(t *testi
 	parent := "11111111-1111-4111-8111-111111111111"
 	session, err := supervisor.Start(context.Background(), StartRequest{
 		Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "Implement the ticket without embedded routing metadata.",
-		Identity: "codex:child", ProjectID: 27, Role: "worker", ParentSessionID: parent, TicketID: 903,
+		Identity: "codex:child", ProjectID: 27, Role: "worker", ParentSessionID: parent, TicketID: 903, WorkShape: "ship",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.Role != "worker" || session.ParentSessionID != parent || session.TicketID != 903 || session.Identity != "codex:child" {
+	if session.Role != "worker" || session.ParentSessionID != parent || session.TicketID != 903 || session.WorkShape != "ship" || session.Identity != "codex:child" {
 		t.Fatalf("session lost structured attribution: %+v", session)
 	}
 	adapter.mu.Lock()
 	started := adapter.startRequest
 	adapter.mu.Unlock()
-	if started.Role != "worker" || started.ParentSessionID != parent || started.TicketID != 903 || started.Prompt != "Implement the ticket without embedded routing metadata." {
+	if started.Role != "worker" || started.ParentSessionID != parent || started.TicketID != 903 || started.WorkShape != "ship" || started.Prompt != "Implement the ticket without embedded routing metadata." {
 		t.Fatalf("adapter request lost structured attribution: %+v", started)
 	}
-	if got := supervisor.Status().Sessions[0]; got.ParentSessionID != parent || got.TicketID != 903 {
+	if got := supervisor.Status().Sessions[0]; got.ParentSessionID != parent || got.TicketID != 903 || got.WorkShape != "ship" {
 		t.Fatalf("status lost structured attribution: %+v", got)
+	}
+}
+
+func TestStartRequestRequiresClosedShapeForNewTicketAssignments(t *testing.T) {
+	base := StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:shape", ProjectID: 907}
+	for name, mutate := range map[string]func(*StartRequest){
+		"ticket without shape": func(request *StartRequest) { request.TicketID = 907 },
+		"open enum":            func(request *StartRequest) { request.TicketID, request.WorkShape = 907, "research" },
+		"shape without ticket": func(request *StartRequest) { request.WorkShape = "scout" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := base
+			mutate(&request)
+			if _, err := validateStartRequest(request); err == nil {
+				t.Fatal("invalid task-shape assignment accepted")
+			}
+		})
+	}
+	valid := base
+	valid.TicketID, valid.WorkShape = 907, " SCOUT "
+	normalized, err := validateStartRequest(valid)
+	if err != nil || normalized.WorkShape != "scout" {
+		t.Fatalf("closed work shape normalized=%+v err=%v", normalized, err)
 	}
 }
 

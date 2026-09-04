@@ -1,14 +1,5 @@
 # Changelog
 
-- **PAI-906** — Owned agentd starts now reject concurrent exclusive workspace
-  reuse before spawn and persist canonical Git/worktree provenance. Exact
-  versioned Codex and Claude dispatch profiles are resolved through the
-  authenticated execution-options authority, locally pinned, applied through
-  documented vendor fields, and recorded with reporter-derived machine and
-  bounded non-secret account provenance. Cross-daemon authority conflicts stop
-  the rejected child, and retired profile snapshots remain readable. Legacy
-  starts remain compatible with explicitly unknown optional axes.
-
 All notable changes to PAIMOS are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
@@ -16,6 +7,33 @@ with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
 ## [Unreleased]
+
+### Added — Explicit ship and scout task shapes (PAI-907)
+
+- Added closed `ship` and `scout` classifications to explicit worker-ticket
+  bindings, with revision-checked reassignment and immutable before/after
+  assignment evidence; legacy missing values remain `unknown` until classified.
+- Added bounded value-free work contracts to harness sessions, Agent Mode worker
+  fleet v2 responses, and agent onboarding. Scout means investigation evidence,
+  cannot silently promote to ship, and neither shape claims Git enforcement or
+  rewrites historical delivery attempts.
+- Added an explicit worker-fleet v2 with trust-gated machine, privacy-safe
+  workspace kind/mode, exact dispatch model/effort, and closed account
+  provenance. Frozen v1 remains unchanged; unmanaged and legacy-unverified v2
+  rows suppress caller-supplied runtime axes.
+- Added an on-demand focused-delivery worker context that consumes the
+  authorized bounded project fleet and renders those runtime axes together
+  with task shape and output kind; failures retain no stale worker data.
+
+### Added — Owned workspace and dispatch provenance (PAI-906)
+
+- Owned agentd starts now reject concurrent exclusive workspace reuse before
+  spawn and persist canonical Git/worktree provenance. Exact versioned Codex
+  and Claude dispatch profiles are resolved through the authenticated
+  execution-options authority, pinned, applied through documented vendor
+  fields, and recorded with bounded non-secret machine and account provenance.
+- Cross-daemon authority conflicts stop the rejected child, retired profile
+  snapshots remain readable, and legacy starts retain explicit unknowns.
 
 ### Added — Durable reply obligations and held-request decisions (PAI-905)
 
@@ -33,7 +51,7 @@ calendar form `yy.mm.dd[.hh.mm]`.
   uncertainty, effective capabilities, and local-cache provenance.
 - Added bounded content-free communication metadata and delivery-trust-gated
   progress/ETA fields without exposing message bodies, credentials, target
-  references, host names, provider output, or a second event stream.
+  references, raw workspace data, provider output, or a second event stream.
 
 ### Added — Durable worker hierarchy and ticket binding (PAI-903)
 
@@ -44,6 +62,23 @@ calendar form `yy.mm.dd[.hh.mm]`.
 - Added explicit revision-CAS reassignment with immutable before/after events,
   same-project and active-parent enforcement, cycle/depth guards, and an
   explicit resolved/unset/ambiguous project-orchestrator projection.
+
+### Added — Actionable attention wakes (PAI-902)
+
+- Added a durable, bounded orchestrator attention feed derived from worker,
+  delivery, held-action, and control transitions, with leased/coalesced wake
+  batches, monotonic acknowledgement, and crash-safe recovery.
+- Kept attention content-free and reauthorized target mutations transactionally;
+  the feed does not create a second worker-state truth.
+
+### Added — Truthful worker activity (PAI-901)
+
+- Added authenticated, monotonic adapter activity evidence and explicit
+  busy/idle/unknown/dead projections; stale or malformed evidence becomes
+  unknown rather than inferred idle.
+- Added immutable semantic-transition history, timeout reconciliation, and
+  terminal reason provenance while keeping heartbeat/yield replays out of the
+  event stream.
 
 ## [26.09.02] — 2026-09-02
 

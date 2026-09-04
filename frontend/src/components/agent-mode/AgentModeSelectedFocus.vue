@@ -14,6 +14,7 @@ import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import type { Delivery, DeliveryStage, StageKey } from '@/services/agentMode'
 import AgentModeDeliveryCard from './AgentModeDeliveryCard.vue'
+import AgentModeWorkerContext from './AgentModeWorkerContext.vue'
 import { estimateView } from './agentModePresentation'
 
 const props = defineProps<{
@@ -119,6 +120,8 @@ const attemptLabel = computed(() => {
       :locale="locale"
       @interact="emit('interact')"
     />
+
+    <AgentModeWorkerContext :project-id="delivery.lane.projectId" :ticket-id="delivery.issueId" />
 
     <section class="am-focus-section" :aria-labelledby="`am-stage-title-${delivery.id}`">
       <div class="am-focus-section-head">

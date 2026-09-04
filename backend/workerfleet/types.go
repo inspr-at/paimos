@@ -8,13 +8,19 @@ package workerfleet
 import (
 	"errors"
 	"time"
+
+	"github.com/inspr-at/paimos/backend/models"
+	"github.com/inspr-at/paimos/backend/workshape"
 )
 
 const (
 	SchemaVersion               = 1
+	SchemaVersionV2             = 2
 	MaxSample                   = 100
 	RecentMessagesPerWorker     = 4
 	TerminalGenerationsPerAgent = 1
+	RuntimeTrustManagedReporter = "managed_reporter"
+	RuntimeTrustUntrusted       = "untrusted"
 )
 
 var (
@@ -40,6 +46,23 @@ type Snapshot struct {
 	Totals          Totals     `json:"totals"`
 	Projects        []Project  `json:"projects"`
 	Workers         []Worker   `json:"workers"`
+	Provenance      Provenance `json:"provenance"`
+}
+
+// SnapshotV2 extends the closed PAI-904 wire contract on a new route. Snapshot
+// remains the exact v1 shape so additive runtime and assignment fields cannot
+// silently change an already published projection.
+type SnapshotV2 struct {
+	SchemaVersion   int        `json:"schema_version"`
+	ObservedAt      time.Time  `json:"observed_at"`
+	Scope           Scope      `json:"scope"`
+	Zoom            string     `json:"zoom"`
+	Band            string     `json:"band"`
+	SampleLimit     int        `json:"sample_limit"`
+	SampleTruncated bool       `json:"sample_truncated"`
+	Totals          Totals     `json:"totals"`
+	Projects        []Project  `json:"projects"`
+	Workers         []WorkerV2 `json:"workers"`
 	Provenance      Provenance `json:"provenance"`
 }
 
@@ -98,6 +121,40 @@ type Worker struct {
 	RecentCommunication        []Communication `json:"recent_communication"`
 	RecentCommunicationOmitted int64           `json:"recent_communication_omitted"`
 	DeliveryTrust              DeliveryTrust   `json:"delivery_trust"`
+}
+
+type WorkerV2 struct {
+	HarnessSessionID           string                         `json:"harness_session_id"`
+	ParentSessionID            *string                        `json:"parent_harness_session_id"`
+	ParentInSample             bool                           `json:"parent_in_sample"`
+	Project                    ProjectIdentity                `json:"project"`
+	Agent                      AgentIdentity                  `json:"agent"`
+	Role                       string                         `json:"role"`
+	Harness                    string                         `json:"harness"`
+	MachineID                  *string                        `json:"machine_id"`
+	WorkspaceProvenance        *WorkspaceProvenance           `json:"workspace_provenance"`
+	DispatchProfile            *models.HarnessDispatchProfile `json:"dispatch_profile"`
+	AccountLabel               string                         `json:"account_label"`
+	ManagementMode             string                         `json:"management_mode"`
+	RuntimeProvenanceTrust     string                         `json:"runtime_provenance_trust"`
+	Ticket                     *Ticket                        `json:"ticket"`
+	WorkShape                  string                         `json:"work_shape"`
+	WorkContract               workshape.Contract             `json:"work_contract"`
+	Phase                      string                         `json:"phase"`
+	Revision                   int64                          `json:"revision"`
+	Liveness                   Liveness                       `json:"liveness"`
+	Capabilities               Capabilities                   `json:"capabilities"`
+	RecentCommunication        []Communication                `json:"recent_communication"`
+	RecentCommunicationOmitted int64                          `json:"recent_communication_omitted"`
+	DeliveryTrust              DeliveryTrust                  `json:"delivery_trust"`
+}
+
+// WorkspaceProvenance deliberately excludes raw paths, Git branches, and
+// workspace identities from the worker-facing projection. Kind and mode are
+// enough to inspect isolation without exposing local machine values.
+type WorkspaceProvenance struct {
+	Kind string `json:"kind"`
+	Mode string `json:"mode"`
 }
 
 type ProjectIdentity struct {

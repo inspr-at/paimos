@@ -662,7 +662,12 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M155 | rebuilt `agent_message_targets` | Adds the `claude_resume` and `claude_channel` adapters with `claude_session` targets while carrying every existing version and ciphertext over; Claude targets are fixed to `maximum_level='simple'` (PAI-827). |
 | M156 | rebuilt `agent_message_targets` | Replaces schema-level vendor allowlists and pairings with bounded lowercase harness plugin keys while preserving all target rows, ciphertext, enabled state, indexes, and foreign-key references; plugin binding and capability validation remain in Go (PAI-829). |
 | M157 | `agent_message_targets.target_secret_cipher` | Nullable, domain-separated ciphertext for the receiver-owned sender secret a server-side webhook adapter sends as `Authorization: Bearer` (Grok Bot routine sender key); existing rows keep `NULL`, and a version without it is never dispatched (PAI-828). |
+| M169 | harness activity columns and `harness_session_events` | Authenticated content-free worker activity projection with immutable semantic-transition events (PAI-901). |
+| M170 | harness parent/ticket binding; rebuilt events | Explicit hierarchy and ticket binding with current-state CAS and immutable before/after assignment facts (PAI-903). |
+| M171 | `agent_attention_items`, `agent_attention_cursors`, `agent_attention_batches` | Bounded derived orchestrator attention with monotonic acknowledgement and crash-safe leased wake batches (PAI-902). |
+| M172 | harness workspace and dispatch provenance | Immutable owned-workspace identity, collision guards, versioned dispatch snapshot, and bounded account label (PAI-906). |
 | M173 | `agent_messages.expects_reply`, `agent_reply_obligations`, `agent_reply_obligation_events`, `agent_message_human_resolutions`; rebuilt attention items/batches | Opt-in exact-reply closure, bounded overdue resurfacing, value-free idempotent human disposition of held action requests, and immutable-history/current-state separation (PAI-905). |
+| M174 | `harness_sessions.work_shape`, rebuilt `harness_session_events` | Closed nullable `ship`/`scout` assignment classification with immutable before/after shape facts. Existing missing values remain unclassified and project as `unknown`; the rebuild preserves historical facts and timestamps, and delivery tables are unchanged (PAI-907). |
 
 `agent_runs.status=completed` means implementation finished without a configured
 test command; it never implies tests passed. `tests_passed` and `tests_failed`

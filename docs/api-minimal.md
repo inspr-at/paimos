@@ -690,9 +690,11 @@ The worker fleet projection is a separate, worker-rooted Agent Mode read model:
 ```text
 GET /agent-mode/worker-fleet/v1?zoom=10
 GET /agent-mode/projects/:projectID/worker-fleet/v1?zoom=10
+GET /agent-mode/worker-fleet/v2?zoom=10
+GET /agent-mode/projects/:projectID/worker-fleet/v2?zoom=10
 ```
 
-Both routes use the same projection logic and the Agent Mode authorization
+All four routes use the same projection logic and the Agent Mode authorization
 boundary. `zoom` is a canonical positive decimal string; detail, overview,
 aggregate, and far bands return at most 100 workers. Responses always report
 the exact retained worker/project totals visible in scope, sampled and omitted
@@ -702,8 +704,35 @@ session plus the newest terminal generation per project agent; the explicit
 parent ID may therefore be present while
 `parent_in_sample=false`.
 
-Each worker reports the current harness-session hierarchy and ticket binding,
-revision, effective controls, and liveness observed at one response timestamp.
+V1 is the frozen PAI-904 wire contract: it reports the current harness-session
+hierarchy, ticket binding, revision, effective controls, and liveness. V2 keeps
+that contract on separate routes and adds the
+closed `work_shape` (`ship`, `scout`, or the projected legacy `unknown`) and its
+bounded value-free `work_contract`. Scout means investigation evidence, not a
+product delivery. The contract exposes stage applicability, definition-of-done
+codes, and non-goals; it neither carries ticket prose nor claims Git
+enforcement. Missing historical shape storage remains `unknown` until an
+authorized explicit revision-CAS reassignment classifies it, and scout never
+silently promotes to ship. Immutable supervision events record semantic
+transitions, not every replay-equivalent heartbeat or yield request.
+V2 retains `management_mode` and adds closed `runtime_provenance_trust`.
+`managed_reporter` means a managed row has complete workspace evidence plus a
+valid lease-authenticated reporter heartbeat. Only those rows may expose
+`machine_id`, privacy-safe workspace `kind`/`mode`, the exact bounded dispatch
+snapshot, and the closed non-secret `account_label`. Unmanaged, pre-heartbeat,
+and legacy-unverified rows are `untrusted`: machine/workspace/dispatch are null
+and account is unknown even if their registration supplied values; those axes
+are deliberately suppressed. This is reporting-channel trust, not
+process-binary or machine attestation. Raw paths,
+workspace identities, Git branches, message targets, credentials, and quota
+never enter either fleet contract.
+The focused Agent Mode delivery view consumes the project route only after an
+operator selects **Show worker context**. It consumes v2, filters the
+authorized bounded sample to the selected ticket, and renders machine,
+workspace kind/mode,
+dispatch model/effort, account label, management/trust, shape, and output kind. A failed or
+revoked lookup retains no earlier worker data; a truncated sample is labelled
+as such rather than completed with inferred workers.
 Missing, malformed, stale, unmanaged, or otherwise untrusted reporter evidence
 is `unknown`, never idle. `dead` requires a terminal projection confirmed by
 the agentd reporter or control plane; `liveness.source` distinguishes them.
@@ -824,10 +853,13 @@ Commands whose argument is explicitly another resource ID, plus
   multiple candidates is `ambiguous`, and unmanaged or stale evidence remains
   `unset`; missing evidence is never interpreted as idle.
 - `PATCH /projects/{id}/harness-sessions/{sessionID}/binding` — explicit
-  full-state parent/ticket assignment with required expected revision. It
+  full-state parent/ticket/work-shape assignment with required expected
+  revision. It
   rejects stale generations, cross-project or terminal parents, cycles,
   over-depth moved subtrees, and invalid tickets before mutation, then appends
-  one immutable event with the before/after bindings.
+  one immutable event with the before/after bindings. Scout-to-ship promotion
+  is possible only through this authorized CAS write; it is never inferred
+  from activity, delivery, or Git state.
 - `POST .../{sessionID}/heartbeat` · `POST .../{sessionID}/yield` — attributed
   status/yield and typed owned-control claim.
 - `POST .../{sessionID}/drain` · `POST .../{sessionID}/complete-delivery` —

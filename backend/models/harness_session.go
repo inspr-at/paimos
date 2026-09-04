@@ -50,6 +50,8 @@ type HarnessSession struct {
 	Role             string                      `json:"role"`
 	ParentSessionID  *string                     `json:"parent_harness_session_id"`
 	TicketID         *int64                      `json:"ticket_id"`
+	WorkShape        string                      `json:"work_shape"`
+	WorkContract     WorkShapeContract           `json:"work_contract"`
 	Workspace        *HarnessWorkspaceProvenance `json:"workspace_provenance"`
 	DispatchProfile  *HarnessDispatchProfile     `json:"dispatch_profile"`
 	AccountLabel     string                      `json:"account_label"`
@@ -90,7 +92,24 @@ type HarnessSessionEvent struct {
 	AfterParentSessionID  *string `json:"after_parent_harness_session_id"`
 	BeforeTicketID        *int64  `json:"before_ticket_id"`
 	AfterTicketID         *int64  `json:"after_ticket_id"`
+	BeforeWorkShape       *string `json:"before_work_shape"`
+	AfterWorkShape        *string `json:"after_work_shape"`
 	CreatedAt             string  `json:"created_at"`
+}
+
+type WorkShapeStageApplicability struct {
+	Stage         string `json:"stage"`
+	Applicability string `json:"applicability"`
+}
+
+// WorkShapeContract is a bounded presentation contract, never evidence that
+// PAIMOS enforced repository behavior.
+type WorkShapeContract struct {
+	Shape              string                        `json:"shape"`
+	OutputKind         string                        `json:"output_kind"`
+	StageApplicability []WorkShapeStageApplicability `json:"stage_applicability"`
+	DefinitionOfDone   []string                      `json:"definition_of_done"`
+	NonGoals           []string                      `json:"non_goals"`
 }
 
 // HarnessOrchestratorProjection resolves a project coordinator only when the

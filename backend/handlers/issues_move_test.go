@@ -166,7 +166,7 @@ func TestMoveIssue_StoppedHarnessTicketBindingBlocksCrossProjectReference(t *tes
 	session, created, err := service.Register(context.Background(), managedharness.RegisterInput{
 		ProjectID: sourceID, AgentName: "worker", Harness: "codex", Host: "move-host", SessionRef: "move-ref",
 		WorkerLease: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ManagementMode: managedharness.ManagementManaged,
-		Role: managedharness.RoleWorker, TicketID: &ticket, SteerMode: managedharness.SteerNone,
+		Role: managedharness.RoleWorker, TicketID: &ticket, WorkShape: "ship", SteerMode: managedharness.SteerNone,
 		Capabilities: models.HarnessCapabilities{Status: true},
 	})
 	if err != nil || !created {

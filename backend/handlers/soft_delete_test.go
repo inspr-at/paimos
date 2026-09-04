@@ -60,7 +60,9 @@ func Test_SoftDelete_GoesToTrash(t *testing.T) {
 	// Project list no longer includes it.
 	resp = ts.get(t, fmt.Sprintf("/api/projects/%d/issues", projectID), ts.adminCookie)
 	assertStatus(t, resp, http.StatusOK)
-	var list []struct{ ID int64 `json:"id"` }
+	var list []struct {
+		ID int64 `json:"id"`
+	}
 	decode(t, resp, &list)
 	for _, i := range list {
 		if i.ID == ticketID {
@@ -100,7 +102,9 @@ func Test_SoftDelete_CascadeToDescendants(t *testing.T) {
 	// Both should be in trash.
 	resp = ts.get(t, "/api/issues/trash", ts.adminCookie)
 	assertStatus(t, resp, http.StatusOK)
-	var trash []struct{ ID int64 `json:"id"` }
+	var trash []struct {
+		ID int64 `json:"id"`
+	}
 	decode(t, resp, &trash)
 	seen := map[int64]bool{}
 	for _, i := range trash {
@@ -133,7 +137,9 @@ func Test_SoftDelete_Restore(t *testing.T) {
 	// It's back in the project listing.
 	resp = ts.get(t, fmt.Sprintf("/api/projects/%d/issues", projectID), ts.adminCookie)
 	assertStatus(t, resp, http.StatusOK)
-	var list []struct{ ID int64 `json:"id"` }
+	var list []struct {
+		ID int64 `json:"id"`
+	}
 	decode(t, resp, &list)
 	foundTicket := false
 	foundTask := false
@@ -171,7 +177,9 @@ func Test_SoftDelete_Purge(t *testing.T) {
 	// And it's gone from trash entirely.
 	resp = ts.get(t, "/api/issues/trash", ts.adminCookie)
 	assertStatus(t, resp, http.StatusOK)
-	var trash []struct{ ID int64 `json:"id"` }
+	var trash []struct {
+		ID int64 `json:"id"`
+	}
 	decode(t, resp, &trash)
 	for _, i := range trash {
 		if i.ID == ticketID {
@@ -203,7 +211,7 @@ func Test_SoftDelete_ActiveHarnessBindingConflictsAndPurgeAuditsHistoricalDetach
 	session, created, err := service.Register(context.Background(), managedharness.RegisterInput{
 		ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "host-worker", SessionRef: "ref-worker",
 		WorkerLease: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ManagementMode: managedharness.ManagementManaged,
-		Role: managedharness.RoleWorker, ParentSessionID: &parent.ID, TicketID: &ticketID, SteerMode: managedharness.SteerNone,
+		Role: managedharness.RoleWorker, ParentSessionID: &parent.ID, TicketID: &ticketID, WorkShape: "ship", SteerMode: managedharness.SteerNone,
 		Capabilities: models.HarnessCapabilities{Status: true},
 	})
 	if err != nil || !created {
@@ -225,20 +233,22 @@ func Test_SoftDelete_ActiveHarnessBindingConflictsAndPurgeAuditsHistoricalDetach
 
 	var storedParent sql.NullString
 	var storedTicket sql.NullInt64
+	var storedShape sql.NullString
 	var revision int64
-	if err := paimosdb.DB.QueryRow(`SELECT parent_harness_session_id,ticket_id,revision FROM harness_sessions WHERE id=?`, session.ID).Scan(&storedParent, &storedTicket, &revision); err != nil {
+	if err := paimosdb.DB.QueryRow(`SELECT parent_harness_session_id,ticket_id,work_shape,revision FROM harness_sessions WHERE id=?`, session.ID).Scan(&storedParent, &storedTicket, &storedShape, &revision); err != nil {
 		t.Fatal(err)
 	}
-	if !storedParent.Valid || storedParent.String != parent.ID || storedTicket.Valid {
-		t.Fatalf("purge changed stopped parent or retained ticket: parent=%+v ticket=%+v", storedParent, storedTicket)
+	if !storedParent.Valid || storedParent.String != parent.ID || storedTicket.Valid || storedShape.Valid {
+		t.Fatalf("purge changed stopped parent or retained assignment: parent=%+v ticket=%+v shape=%+v", storedParent, storedTicket, storedShape)
 	}
 	var operation string
 	var beforeTicket sql.NullInt64
-	if err := paimosdb.DB.QueryRow(`SELECT operation,before_ticket_id FROM harness_session_events WHERE harness_session_id=? AND event_sequence=?`, session.ID, revision).Scan(&operation, &beforeTicket); err != nil {
+	var beforeShape sql.NullString
+	if err := paimosdb.DB.QueryRow(`SELECT operation,before_ticket_id,before_work_shape FROM harness_session_events WHERE harness_session_id=? AND event_sequence=?`, session.ID, revision).Scan(&operation, &beforeTicket, &beforeShape); err != nil {
 		t.Fatal(err)
 	}
-	if operation != "binding_changed" || !beforeTicket.Valid || beforeTicket.Int64 != ticketID {
-		t.Fatalf("purge lost historical detach event: operation=%s before=%+v", operation, beforeTicket)
+	if operation != "binding_changed" || !beforeTicket.Valid || beforeTicket.Int64 != ticketID || !beforeShape.Valid || beforeShape.String != "ship" {
+		t.Fatalf("purge lost historical detach event: operation=%s ticket=%+v shape=%+v", operation, beforeTicket, beforeShape)
 	}
 }
 
@@ -267,7 +277,9 @@ func Test_SoftDelete_RestoreReattachesRelations(t *testing.T) {
 	resp = ts.get(t, fmt.Sprintf("/api/issues/%d", ticketID), ts.adminCookie)
 	assertStatus(t, resp, http.StatusOK)
 	var issue struct {
-		Tags []struct{ ID int64 `json:"id"` } `json:"tags"`
+		Tags []struct {
+			ID int64 `json:"id"`
+		} `json:"tags"`
 	}
 	decode(t, resp, &issue)
 	if len(issue.Tags) == 0 {
@@ -276,7 +288,9 @@ func Test_SoftDelete_RestoreReattachesRelations(t *testing.T) {
 
 	resp = ts.get(t, fmt.Sprintf("/api/issues/%d/comments", ticketID), ts.adminCookie)
 	assertStatus(t, resp, http.StatusOK)
-	var comments []struct{ ID int64 `json:"id"` }
+	var comments []struct {
+		ID int64 `json:"id"`
+	}
 	decode(t, resp, &comments)
 	if len(comments) == 0 {
 		t.Error("comment didn't survive soft-delete + restore round trip")
@@ -311,8 +325,10 @@ func Test_SoftDelete_CrossProjectListExcludesTrashed(t *testing.T) {
 
 	// Envelope is { issues: [...], total, offset, limit }.
 	type envT struct {
-		Issues []struct{ ID int64 `json:"id"` } `json:"issues"`
-		Total  int                              `json:"total"`
+		Issues []struct {
+			ID int64 `json:"id"`
+		} `json:"issues"`
+		Total int `json:"total"`
 	}
 
 	// Baseline: ticket shows up.
@@ -356,7 +372,9 @@ func Test_SoftDelete_SearchExcludesTrashed(t *testing.T) {
 	resp = ts.get(t, "/api/search?q=SDT-1", ts.adminCookie)
 	assertStatus(t, resp, http.StatusOK)
 	var res struct {
-		Issues []struct{ ID int64 `json:"id"` } `json:"issues"`
+		Issues []struct {
+			ID int64 `json:"id"`
+		} `json:"issues"`
 	}
 	decode(t, resp, &res)
 	for _, i := range res.Issues {
