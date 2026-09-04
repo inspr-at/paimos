@@ -45,6 +45,37 @@ func TestMigration173AddsClosedReplyAndResolutionLedgers(t *testing.T) {
 		projectID, receiverID); err != nil {
 		t.Fatal(err)
 	}
+	transientProject, err := database.Exec(`INSERT INTO projects(name,key) VALUES('M173 transient','M173-TRANSIENT')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transientProjectID, _ := transientProject.LastInsertId()
+	transientAgent, err := database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'transient')`, transientProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transientAgentID, _ := transientAgent.LastInsertId()
+	for _, sourceID := range []string{"expired-1", "expired-2", "expired-3", "expired-4", "expired-5", "expired-6", "expired-7", "expired-8"} {
+		if _, err := database.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
+			source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
+			VALUES(?,?,'codex:transient',?,'held_agent_message',?,0,'held_action','action_request_held',
+			strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, transientProjectID, transientAgentID, transientProjectID, sourceID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var priorSequence, survivingMaxID int64
+	if err := database.QueryRow(`SELECT seq FROM sqlite_sequence WHERE name='agent_attention_items'`).Scan(&priorSequence); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`DELETE FROM projects WHERE id=?`, transientProjectID); err != nil {
+		t.Fatalf("cascade historical attention rows: %v", err)
+	}
+	if err := database.QueryRow(`SELECT COALESCE(MAX(id),0) FROM agent_attention_items`).Scan(&survivingMaxID); err != nil {
+		t.Fatal(err)
+	}
+	if priorSequence <= survivingMaxID {
+		t.Fatalf("test setup lacks deleted high-water: sequence=%d surviving max=%d", priorSequence, survivingMaxID)
+	}
 	if err := migrateThrough(database, 173); err != nil {
 		t.Fatal(err)
 	}
@@ -63,11 +94,19 @@ func TestMigration173AddsClosedReplyAndResolutionLedgers(t *testing.T) {
 		WHERE batch_id='22222222-2222-4222-8222-222222222173'`); err != nil {
 		t.Fatalf("superseded terminal state rejected: %v", err)
 	}
-	if _, err := database.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
+	newAttention, err := database.Exec(`INSERT INTO agent_attention_items(receiver_project_id,receiver_project_agent_id,address,
 		source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at)
 		VALUES(?,?,'codex:receiver',?,'reply_obligation','11111111-1111-4111-8111-111111111173',1,'reply_overdue','reply_expected',
-		strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, projectID, receiverID, projectID); err != nil {
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, projectID, receiverID, projectID)
+	if err != nil {
 		t.Fatalf("new attention vocabulary rejected: %v", err)
+	}
+	newAttentionID, err := newAttention.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newAttentionID <= priorSequence {
+		t.Fatalf("rebuilt attention sequence regressed: new id=%d prior high-water=%d", newAttentionID, priorSequence)
 	}
 	if _, err := database.Exec(`UPDATE agent_attention_items SET reason_code='reply_expected' WHERE source_id='legacy-source'`); err == nil {
 		t.Fatal("rebuilt attention item lost immutability")

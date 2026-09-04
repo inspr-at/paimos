@@ -12815,6 +12815,15 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`DROP TRIGGER trg_agent_attention_items_no_update`,
 			`DROP TRIGGER trg_agent_attention_items_no_delete`,
 			`DROP INDEX idx_agent_attention_items_receiver`,
+			// Keep the AUTOINCREMENT high-water mark across the table rebuild. A
+			// durable attention cursor may already exceed the largest surviving row
+			// after parent cascades removed historical items.
+			`CREATE TEMP TABLE agent_attention_items_m173_sequence (seq INTEGER NOT NULL)`,
+			`INSERT INTO agent_attention_items_m173_sequence(seq)
+			 SELECT MAX(
+			  COALESCE((SELECT seq FROM sqlite_sequence WHERE name='agent_attention_items'),0),
+			  COALESCE((SELECT MAX(id) FROM agent_attention_items),0)
+			 )`,
 			`ALTER TABLE agent_attention_items RENAME TO agent_attention_items_m171`,
 			`CREATE TABLE agent_attention_items (
 			 id                        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -12837,6 +12846,13 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at,created_at
 			 FROM agent_attention_items_m171`,
 			`DROP TABLE agent_attention_items_m171`,
+			`INSERT INTO sqlite_sequence(name,seq)
+			 SELECT 'agent_attention_items',seq FROM agent_attention_items_m173_sequence
+			 WHERE NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='agent_attention_items')`,
+			`UPDATE sqlite_sequence
+			 SET seq=MAX(seq,(SELECT seq FROM agent_attention_items_m173_sequence))
+			 WHERE name='agent_attention_items'`,
+			`DROP TABLE agent_attention_items_m173_sequence`,
 			`CREATE INDEX idx_agent_attention_items_receiver
 			 ON agent_attention_items(receiver_project_id,receiver_project_agent_id,id)`,
 			`CREATE TRIGGER trg_agent_attention_items_no_update BEFORE UPDATE ON agent_attention_items
