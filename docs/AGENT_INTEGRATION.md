@@ -966,6 +966,22 @@ or output. It is available to authenticated internal users at:
 - `GET /api/agent-mode/deliveries/{deliveryKey}`
 - `GET /api/agent-mode/deliveries/events`
 
+The related worker-rooted projection is available at
+`GET /api/agent-mode/worker-fleet/v1` and
+`GET /api/agent-mode/projects/{projectID}/worker-fleet/v1`. Both routes share
+one read model and authorization rule. They preserve the authoritative
+harness-session hierarchy, ticket binding, liveness and capabilities while
+bounding semantic-zoom samples to 100 and reporting exact omitted counts.
+The retained fleet includes every non-terminal session and only the newest
+terminal generation per project agent; provenance declares that bound.
+Stale or malformed reporter evidence is unknown rather than idle; unmanaged
+workers never advertise effective steer, interrupt, or stop. Communication is
+limited to four content-free, project-agent-attributed delivery summaries per
+worker for internal project viewers, and progress/ETA
+appear only under their explicit delivery-trust flags. The response declares
+whether a remote cache contributed; schema v1 currently reads the local
+authoritative database directly and reports `remote_cache=false`.
+
 Snapshot responses are `private, no-store` schema-v1 JSON. The top-level
 `cursor` is opaque and bound to the authenticated user, permission epoch,
 route audience, and result filters. Project query filtering is not an

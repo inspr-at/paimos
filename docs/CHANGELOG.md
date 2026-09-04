@@ -8,6 +8,16 @@ calendar form `yy.mm.dd[.hh.mm]`.
 
 ## [Unreleased]
 
+### Added — Bounded worker fleet projection (PAI-904)
+
+- Added one versioned, worker-rooted read model shared by Agent Mode project
+  and portfolio routes, with semantic-zoom sample bounds, exact omission
+  counts, authoritative hierarchy/ticket bindings, explicit liveness
+  uncertainty, effective capabilities, and local-cache provenance.
+- Added bounded content-free communication metadata and delivery-trust-gated
+  progress/ETA fields without exposing message bodies, credentials, target
+  references, host names, provider output, or a second event stream.
+
 ### Added — Durable worker hierarchy and ticket binding (PAI-903)
 
 - Added nullable, structured parent-generation and ticket bindings to the

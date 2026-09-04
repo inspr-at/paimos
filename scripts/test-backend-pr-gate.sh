@@ -176,7 +176,8 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/handlers/knowledge \
   github.com/inspr-at/paimos/backend/internal/knowledge857 \
   github.com/inspr-at/paimos/backend/managedharness \
-  github.com/inspr-at/paimos/backend/supervision)
+  github.com/inspr-at/paimos/backend/supervision \
+  github.com/inspr-at/paimos/backend/workerfleet)
 [[ "$db_affected" == "$db_expected" ]] ||
   fail "db reverse-dependency closure drifted: [$db_affected]"
 ! grep -Fxq 'github.com/inspr-at/paimos/backend/pharoslink' <<<"$db_affected" ||
