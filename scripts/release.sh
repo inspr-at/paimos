@@ -159,7 +159,7 @@ assert_calendar_descendant_recovery() {
   [[ -n "$changed" ]] || fail "calendar descendant recovery has no corrective delta"
   while IFS= read -r file; do
     case "$file" in
-      .github/workflows/backend-full.yml|scripts/release.sh|scripts/test-backend-pr-gate.sh|scripts/test-release.sh|scripts/wait-backend-full.sh) ;;
+      .github/workflows/backend-full.yml|scripts/backend-pr-race.sh|scripts/release.sh|scripts/test-backend-pr-gate.sh|scripts/test-release.sh|scripts/wait-backend-full.sh) ;;
       *) fail "calendar descendant recovery contains an unrelated file: $file" ;;
     esac
   done <<<"$changed"
