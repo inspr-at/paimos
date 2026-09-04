@@ -33,7 +33,11 @@ jobs:
   backend-full-serial:
     needs: backend-full-authorize
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Exact-main run 33865882265 reached handlers after 18m23s and was
+    # cancelled by the old 40m job cap while that package was still inside
+    # its unchanged 30m Go timeout. Keep the stricter package timeout and give
+    # the complete serial walk the same bounded measured headroom as race.
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v5
 

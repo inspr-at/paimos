@@ -8,8 +8,8 @@ set -euo pipefail
 
 HEAD_SHA=$1
 GH_COMMAND=${GH_COMMAND:-gh}
-# The serial job has a 40-minute budget and the measured race job has a
-# 70-minute budget; they run in parallel.
+# The serial and measured race jobs each have a 70-minute budget; they run in
+# parallel.
 # Allow ten additional minutes for queueing, setup, and the fail-closed
 # aggregator; exact hosted measurements must remain comfortably inside this.
 BACKEND_FULL_TIMEOUT_SECONDS=${BACKEND_FULL_TIMEOUT_SECONDS:-4800}
