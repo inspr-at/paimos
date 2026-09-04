@@ -668,6 +668,8 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
   })
 
   it('renders explicit empty and unavailable states without inventing or retaining rows', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
     const empty = await mountWithHome(liveProjection([]))
     await flush()
     expect(empty.el.textContent).toContain('No Paimos product sessions')
@@ -688,6 +690,15 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(empty.el.querySelector('.p6-orchestrator-setup')).toBeNull()
     expect(empty.el.textContent).not.toContain('paimos --instance')
     expect(empty.el.querySelector('.p6-session-card')).toBeNull()
+    const adminRequest = [...empty.el.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.includes('Copy admin request'),
+    )!
+    adminRequest.click()
+    await flush()
+    expect(writeText).toHaveBeenCalledWith(
+      'Please configure the Paimos orchestrator for project PAI. Open its Paimos 6 home as a super admin and use the explicit terminal setup command. Do not send credentials through the browser.',
+    )
+    expect(empty.el.textContent).toContain('Admin request copied')
     await empty.unmount()
 
     vi.restoreAllMocks()
@@ -703,6 +714,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     await flush()
     expect(unavailable.el.textContent).toContain('Session home unavailable')
     expect(unavailable.el.textContent).toContain('Previously authorized rows have been cleared')
+    expect(unavailable.el.textContent).toContain('Retry session home')
     expect(unavailable.el.querySelector('.p6-session-card')).toBeNull()
     await unavailable.unmount()
   })
@@ -716,6 +728,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     const binding = empty.el.querySelector('.p6-empty-binding')
     expect(binding?.textContent).toContain('Binding status is unavailable')
     expect(binding?.textContent).toContain('No orchestrator is inferred')
+    expect(binding?.textContent).toContain('Retry binding status')
     expect(binding?.textContent).not.toContain('Not configured')
     expect(binding?.querySelector('a')).toBeNull()
     expect(empty.el.querySelector('.p6-session-card')).toBeNull()
@@ -723,12 +736,13 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
   })
 
   it('fails closed when setup agents are empty or the health identity is unavailable', async () => {
+    let agents: typeof setupAgentCatalog = []
     authorizePrincipal([PROJECT_ID], 7, 'super_admin')
     vi.spyOn(api, 'get').mockImplementation((path: string) => {
       if (path === '/projects?status=all') return Promise.resolve(projectCatalog()) as never
       if (path === '/orchestrator/v1') return Promise.resolve(unsetOrchestrator) as never
       if (path === '/health') return Promise.resolve(setupHealth) as never
-      if (path === `/projects/${PROJECT_ID}/agents`) return Promise.resolve([]) as never
+      if (path === `/projects/${PROJECT_ID}/agents`) return Promise.resolve(agents) as never
       if (path.startsWith(`/projects/${PROJECT_ID}/session-home/zoom/v1?`))
         return projectionForPath(liveProjection([]), path) as never
       return Promise.reject(new Error(`unexpected GET ${path}`))
@@ -738,6 +752,27 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(noAgents.el.querySelector('.p6-orchestrator-setup')?.textContent).toContain(
       'no canonical agents',
     )
+    const agentEditor = noAgents.el.querySelector<HTMLAnchorElement>(
+      '.p6-orchestrator-setup a[href="/projects/42?tab=agents"]',
+    )!
+    expect(agentEditor.target).toBe('_blank')
+    expect(agentEditor.rel).toBe('noopener')
+    agentEditor.focus()
+    expect(document.activeElement).toBe(agentEditor)
+    agentEditor.addEventListener('click', (event) => event.preventDefault(), { once: true })
+    agentEditor.click()
+    await flush()
+    expect(noAgents.el.textContent).toContain('catalog is now treated as stale')
+    agents = setupAgentCatalog
+    const refreshAgents = [...noAgents.el.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.includes('Refresh agent choices'),
+    )!
+    refreshAgents.click()
+    await flush()
+    expect(noAgents.el.querySelector('.p6-orchestrator-setup')?.textContent).toContain(
+      'Choose an agent',
+    )
+    expect(noAgents.el.textContent).not.toContain('treated as stale')
     expect(noAgents.el.textContent).not.toContain('paimos --instance')
     await noAgents.unmount()
 
@@ -760,6 +795,7 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     expect(unavailable.el.querySelector('[role="alert"]')?.textContent).toContain(
       'Setup choices are unavailable',
     )
+    expect(unavailable.el.textContent).toContain('Retry setup choices')
     expect(unavailable.el.textContent).not.toContain('paimos --instance')
     await unavailable.unmount()
   })
@@ -820,6 +856,13 @@ describe('Paimos6PreviewView semantic-zoom session home (PAI-864)', () => {
     )
     expect(configured.el.querySelector('.p6-orchestrator-setup')).toBeNull()
     expect(configured.el.querySelector('.p6-session-card')).toBeNull()
+    const talk = [...configured.el.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes('Talk to orchestrator'),
+    )!
+    talk.click()
+    await flush()
+    expect(configured.el.querySelector('.p6-talk-door')).not.toBeNull()
+    expect(configured.el.querySelector('.p6-talk-door')?.textContent).toContain('aMY / Primary')
     await configured.unmount()
   })
 

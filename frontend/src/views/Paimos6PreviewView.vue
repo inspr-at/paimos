@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, onScopeDispose, ref, watch } from 'vue'
-import { Check, Clipboard, Inbox, Layers3, RadioTower, RefreshCw, WifiOff } from 'lucide-vue-next'
+import {
+  Check,
+  Clipboard,
+  Inbox,
+  Layers3,
+  MessageCircle,
+  RadioTower,
+  RefreshCw,
+  UserPlus,
+  WifiOff,
+} from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
@@ -61,6 +71,8 @@ const orchestratorSetupCLIInstance = ref('')
 const orchestratorSetupAgentKey = ref('')
 const orchestratorSetupLabel = ref('')
 const orchestratorSetupFeedback = ref('')
+const orchestratorOperatorFeedback = ref('')
+const orchestratorSetupCatalogStale = ref(false)
 let orchestratorSetupRefreshPending = false
 let orchestratorSetupLoadVersion = 0
 let orchestratorSetupController: AbortController | null = null
@@ -134,6 +146,9 @@ const selectedProject = computed(
   () => projects.value.find((project) => project.id === selectedProjectId.value) ?? null,
 )
 const orchestratorProjectKey = computed(() => selectedProject.value?.key ?? null)
+const agentManagementURL = computed(() =>
+  selectedProjectId.value === null ? null : `/projects/${selectedProjectId.value}?tab=agents`,
+)
 const orchestrator = usePaimos6Orchestrator({
   principalId,
   authorityKey,
@@ -178,63 +193,69 @@ function clearOrchestratorSetup() {
   orchestratorSetupAgentKey.value = ''
   orchestratorSetupLabel.value = ''
   orchestratorSetupFeedback.value = ''
+  orchestratorOperatorFeedback.value = ''
+  orchestratorSetupCatalogStale.value = false
   orchestratorSetupRefreshPending = false
 }
 
 watch([selectedProjectId, authorityKey], clearOrchestratorSetup, { flush: 'sync' })
 
+function loadOrchestratorSetupChoices() {
+  if (!orchestratorSetupEligible.value || selectedProjectId.value === null) return
+  const projectId = selectedProjectId.value
+  const authority = authorityKey.value
+  const version = ++orchestratorSetupLoadVersion
+  orchestratorSetupController?.abort()
+  const controller = new AbortController()
+  orchestratorSetupController = controller
+  orchestratorSetupState.value = 'loading'
+  orchestratorSetupCatalogStale.value = false
+  orchestratorSetupFeedback.value = ''
+  void Promise.all([
+    api.get<unknown>('/health', { signal: controller.signal }),
+    api.get<unknown>(`/projects/${projectId}/agents`, { signal: controller.signal }),
+  ])
+    .then(([health, rawAgents]) => {
+      if (
+        version !== orchestratorSetupLoadVersion ||
+        controller.signal.aborted ||
+        projectId !== selectedProjectId.value ||
+        authority !== authorityKey.value ||
+        !orchestratorSetupEligible.value
+      )
+        return
+      const expectedDeployment = setupExpectedDeployment(health)
+      const agents = setupAgents(rawAgents, projectId)
+      if (expectedDeployment === null || agents === null) {
+        orchestratorSetupState.value = 'unavailable'
+        return
+      }
+      orchestratorSetupExpectedDeployment.value = expectedDeployment
+      orchestratorSetupAgents.value = agents
+      orchestratorSetupState.value = agents.length === 0 ? 'empty' : 'ready'
+    })
+    .catch(() => {
+      if (
+        version !== orchestratorSetupLoadVersion ||
+        controller.signal.aborted ||
+        projectId !== selectedProjectId.value ||
+        authority !== authorityKey.value ||
+        !orchestratorSetupEligible.value
+      )
+        return
+      orchestratorSetupState.value = 'unavailable'
+    })
+    .finally(() => {
+      if (orchestratorSetupController === controller) orchestratorSetupController = null
+    })
+}
+
 watch(
   orchestratorSetupEligible,
   () => {
-    if (
-      !orchestratorSetupEligible.value ||
-      selectedProjectId.value === null ||
-      orchestratorSetupState.value !== 'idle'
-    )
-      return
-    const projectId = selectedProjectId.value
-    const authority = authorityKey.value
-    const version = ++orchestratorSetupLoadVersion
-    const controller = new AbortController()
-    orchestratorSetupController = controller
-    orchestratorSetupState.value = 'loading'
-    void Promise.all([
-      api.get<unknown>('/health', { signal: controller.signal }),
-      api.get<unknown>(`/projects/${projectId}/agents`, { signal: controller.signal }),
-    ])
-      .then(([health, rawAgents]) => {
-        if (
-          version !== orchestratorSetupLoadVersion ||
-          controller.signal.aborted ||
-          projectId !== selectedProjectId.value ||
-          authority !== authorityKey.value ||
-          !orchestratorSetupEligible.value
-        )
-          return
-        const expectedDeployment = setupExpectedDeployment(health)
-        const agents = setupAgents(rawAgents, projectId)
-        if (expectedDeployment === null || agents === null) {
-          orchestratorSetupState.value = 'unavailable'
-          return
-        }
-        orchestratorSetupExpectedDeployment.value = expectedDeployment
-        orchestratorSetupAgents.value = agents
-        orchestratorSetupState.value = agents.length === 0 ? 'empty' : 'ready'
-      })
-      .catch(() => {
-        if (
-          version !== orchestratorSetupLoadVersion ||
-          controller.signal.aborted ||
-          projectId !== selectedProjectId.value ||
-          authority !== authorityKey.value ||
-          !orchestratorSetupEligible.value
-        )
-          return
-        orchestratorSetupState.value = 'unavailable'
-      })
-      .finally(() => {
-        if (orchestratorSetupController === controller) orchestratorSetupController = null
-      })
+    if (orchestratorSetupEligible.value && orchestratorSetupState.value === 'idle') {
+      loadOrchestratorSetupChoices()
+    }
   },
   { immediate: true, flush: 'sync' },
 )
@@ -278,6 +299,39 @@ function refreshOrchestratorBinding() {
   orchestratorSetupRefreshPending = true
   orchestratorSetupFeedback.value = 'Checking the binding…'
   orchestrator.reload()
+}
+
+function markAgentCatalogStale() {
+  if (!auth.isSuperAdmin || agentManagementURL.value === null) return
+  orchestratorSetupCatalogStale.value = true
+}
+
+async function copyOrchestratorAdminRequest() {
+  const project = selectedProject.value
+  if (project === null || auth.isSuperAdmin) return
+  const request = `Please configure the Paimos orchestrator for project ${project.key}. Open its Paimos 6 home as a super admin and use the explicit terminal setup command. Do not send credentials through the browser.`
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+    await navigator.clipboard.writeText(request)
+    orchestratorOperatorFeedback.value =
+      'Admin request copied. Send it through an authorized channel.'
+  } catch {
+    orchestratorOperatorFeedback.value =
+      'Could not copy. Ask a super admin to configure this project from its Paimos 6 home.'
+  }
+}
+
+function openOrchestratorTalk() {
+  doorOpen.value = true
+  statusMessage.value = 'Talk panel opened for the configured orchestrator. Nothing was sent.'
+}
+
+function retrySessionHome() {
+  if (projectState.value === 'unavailable') {
+    void loadProjects()
+    return
+  }
+  void home.load()
 }
 
 function resetAuxiliaryStatus() {
@@ -599,8 +653,16 @@ onScopeDispose(() => {
           class="p6-load-state is-unavailable"
           role="alert"
         >
-          Session home unavailable. Previously authorized rows have been cleared; no session data is
-          shown.
+          <p>
+            Session home unavailable. Previously authorized rows have been cleared; no session data
+            is shown.
+          </p>
+          <div class="p6-setup-actions p6-load-actions">
+            <button type="button" @click="retrySessionHome">
+              <RefreshCw :size="14" />
+              Retry session home
+            </button>
+          </div>
         </div>
         <div v-else-if="home.state.value === 'empty'" class="p6-empty-state">
           <div class="p6-empty-state-copy">
@@ -616,17 +678,35 @@ onScopeDispose(() => {
           <div class="p6-empty-binding">
             <p class="p6-empty-kicker">Orchestrator binding</p>
             <p v-if="orchestrator.state.value === 'loading'">Checking the instance orchestrator…</p>
-            <p
+            <template
               v-else-if="
                 orchestrator.state.value === 'unavailable' || orchestrator.state.value === 'idle'
               "
             >
-              Binding status is unavailable. No orchestrator is inferred.
-            </p>
-            <p v-else-if="orchestrator.projection.value?.displayLabel">
-              Configured as <strong>{{ orchestrator.projection.value.displayLabel }}</strong
-              >. No Paimos product-session records are present yet.
-            </p>
+              <p>Binding status is unavailable. No orchestrator is inferred.</p>
+              <div class="p6-setup-actions">
+                <button type="button" @click="orchestrator.reload">
+                  <RefreshCw :size="14" />
+                  Retry binding status
+                </button>
+              </div>
+            </template>
+            <template v-else-if="orchestrator.projection.value?.displayLabel">
+              <p>
+                Configured as <strong>{{ orchestrator.projection.value.displayLabel }}</strong
+                >. No Paimos product-session records are present yet.
+              </p>
+              <p class="p6-setup-note">
+                Open the existing talk panel to speak to the configured orchestrator. Sending still
+                requires an explicit action in that panel.
+              </p>
+              <div class="p6-setup-actions">
+                <button type="button" @click="openOrchestratorTalk">
+                  <MessageCircle :size="14" />
+                  Talk to orchestrator
+                </button>
+              </div>
+            </template>
             <template v-else>
               <p>
                 Not configured. This is separate from the project having no product-session records.
@@ -635,12 +715,43 @@ onScopeDispose(() => {
                 <p v-if="orchestratorSetupState === 'loading'" role="status">
                   Loading the authorized setup choices…
                 </p>
-                <p v-else-if="orchestratorSetupState === 'empty'" role="status">
-                  This project has no canonical agents to choose from.
-                </p>
-                <p v-else-if="orchestratorSetupState === 'unavailable'" role="alert">
-                  Setup choices are unavailable. No command was generated.
-                </p>
+                <template v-else-if="orchestratorSetupState === 'empty'">
+                  <p role="status">This project has no canonical agents to choose from.</p>
+                  <p class="p6-setup-note">
+                    Create or register the first canonical agent in the existing Project → Agents
+                    editor. It opens in a new tab so this project and binding context stay here. The
+                    browser does not run a command or receive a secret.
+                  </p>
+                  <div class="p6-setup-actions">
+                    <a
+                      v-if="agentManagementURL"
+                      :href="agentManagementURL"
+                      target="_blank"
+                      rel="noopener"
+                      @click="markAgentCatalogStale"
+                    >
+                      <UserPlus :size="14" />
+                      Open agent editor
+                    </a>
+                    <button type="button" @click="loadOrchestratorSetupChoices">
+                      <RefreshCw :size="14" />
+                      Refresh agent choices
+                    </button>
+                  </div>
+                  <p v-if="orchestratorSetupCatalogStale" class="p6-setup-feedback" role="status">
+                    Agent editor opened. This catalog is now treated as stale; create or register
+                    the agent there, then refresh choices here.
+                  </p>
+                </template>
+                <template v-else-if="orchestratorSetupState === 'unavailable'">
+                  <p role="alert">Setup choices are unavailable. No command was generated.</p>
+                  <div class="p6-setup-actions">
+                    <button type="button" @click="loadOrchestratorSetupChoices">
+                      <RefreshCw :size="14" />
+                      Retry setup choices
+                    </button>
+                  </div>
+                </template>
                 <template v-else-if="orchestratorSetupState === 'ready'">
                   <label>
                     Local CLI instance alias
@@ -724,9 +835,25 @@ onScopeDispose(() => {
                   </p>
                 </template>
               </div>
-              <p v-else class="p6-empty-operator-note">
-                A super admin can copy an explicit terminal setup command here.
-              </p>
+              <template v-else>
+                <p class="p6-empty-operator-note">
+                  A super admin can copy an explicit terminal setup command here. Ask one to
+                  configure this project; do not send credentials through the browser.
+                </p>
+                <div class="p6-setup-actions">
+                  <button type="button" @click="copyOrchestratorAdminRequest">
+                    <Clipboard :size="14" />
+                    Copy admin request
+                  </button>
+                </div>
+                <p
+                  v-if="orchestratorOperatorFeedback"
+                  class="p6-setup-feedback"
+                  :role="orchestratorOperatorFeedback.startsWith('Could not') ? 'alert' : 'status'"
+                >
+                  {{ orchestratorOperatorFeedback }}
+                </p>
+              </template>
             </template>
           </div>
         </div>
@@ -1099,10 +1226,20 @@ onScopeDispose(() => {
   flex-wrap: wrap;
   gap: 8px;
 }
-.p6-setup-actions button {
+.p6-empty-binding > .p6-setup-actions,
+.p6-load-actions {
+  margin-top: 12px;
+}
+.p6-load-actions {
+  justify-content: center;
+}
+.p6-setup-actions button,
+.p6-setup-actions a {
   display: inline-flex;
   min-height: 36px;
+  box-sizing: border-box;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 0 11px;
   border: 1px solid #9db9a9;
@@ -1111,9 +1248,12 @@ onScopeDispose(() => {
   background: #f1f7f3;
   font-size: 10.5px;
   font-weight: 700;
+  line-height: 1.25;
+  text-decoration: none;
   cursor: pointer;
 }
-.p6-setup-actions button:hover:not(:disabled) {
+.p6-setup-actions button:hover:not(:disabled),
+.p6-setup-actions a:hover {
   border-color: #6f967f;
   background: #e8f2eb;
 }
@@ -1122,6 +1262,7 @@ onScopeDispose(() => {
   opacity: 0.55;
 }
 .p6-setup-actions button:focus-visible,
+.p6-setup-actions a:focus-visible,
 .p6-orchestrator-setup select:focus-visible,
 .p6-orchestrator-setup input:focus-visible,
 .p6-setup-command:focus-visible {
@@ -1245,6 +1386,9 @@ onScopeDispose(() => {
   .p6-empty-state-copy,
   .p6-empty-binding {
     padding: 18px;
+  }
+  .p6-setup-actions > * {
+    flex: 1 1 170px;
   }
   .p6-honesty {
     grid-template-columns: auto 1fr;
