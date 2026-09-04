@@ -33,11 +33,11 @@ jobs:
   backend-full-serial:
     needs: backend-full-authorize
     runs-on: ubuntu-latest
-    # Exact-main run 33865882265 reached handlers after 18m23s and was
-    # cancelled by the old 40m job cap while that package was still inside
-    # its unchanged 30m Go timeout. Keep the stricter package timeout and give
-    # the complete serial walk the same bounded measured headroom as race.
-    timeout-minutes: 70
+    # Exact-main run 33871597020 started handlers 19m05s into the full step;
+    # its 747th of 749 tests then exhausted the old 30m Go alarm. A 40m package
+    # alarm gives 33% measured headroom. The 90m job leaves more than 20m over
+    # the observed pre-package + package cap + 4m25s post-package tail.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
 
@@ -48,7 +48,7 @@ jobs:
 
       - name: Backend — full serial suite
         working-directory: backend
-        run: go test -count=1 -p 1 -timeout=30m ./...
+        run: go test -count=1 -p 1 -timeout=40m ./...
 
       - name: Backend — unsupported platform fails closed
         working-directory: backend
@@ -59,10 +59,11 @@ jobs:
   backend-full-race:
     needs: backend-full-authorize
     runs-on: ubuntu-latest
-    # Run 33399087228 passed in 39m57s; run 33407634733 reached agentd after
-    # 39m56s before the 40m clip. Three package-local invocations remained,
-    # each with its unchanged 8m cap, so 70m is bounded measured headroom.
-    timeout-minutes: 70
+    # Exact-main run 33871597020 reached supervision 38m19s into this step;
+    # its last selected test was 28s old when the old 8m package alarm fired.
+    # A 15m package cap plus the current roughly 13m tail projects to 66m19s.
+    # Keep over 20m of outer-job margin for setup and runner variance.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
 
@@ -76,6 +77,11 @@ jobs:
         # The runner walks package-local and handler shard concurrency contracts sequentially.
         # That stays broad without starving latency-budget tests by racing all
         # heavyweight packages against each other on one shared CI machine.
+        # Run 33871597020 proved supervision reached its final selected test at
+        # 7m32s and then exhausted the old 8m package cap during migration 152.
+        # Fifteen minutes keeps a finite per-package alarm within the 90m job.
+        env:
+          BACKEND_RACE_PACKAGE_TIMEOUT: 15m
         run: ../scripts/backend-pr-race.sh './...'
 
   backend-full:
