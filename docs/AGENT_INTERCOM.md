@@ -27,7 +27,16 @@ Prerequisites:
   `paimos message target list`, `paimos message target requeue`,
   `paimos message deliveries`, and the per-delivery requeue endpoint. Project
   membership or agent attribution alone is insufficient; use separate
-  least-privilege shells for senders and listeners.
+  least-privilege shells for senders and listeners. The configured
+  orchestrator's attention target is a narrower exception: its inspection,
+  registration/replacement, and target requeue require super-admin authority
+  because that receiver obtains a cross-project portfolio digest. Registering
+  an inbox-capable harness session for that orchestrator has the same gate,
+  since managed registration can create a target version internally. These
+  checks re-resolve the exact session or API-key principal and the current
+  orchestrator identity inside the same database transaction as target or
+  harness mutation. Revocation, demotion, or orchestrator reassignment after
+  middleware admission therefore fails closed without a partial target.
 - `AGENTD_SOCKET` names an absolute Unix socket in an owner-only directory.
   Do not commit or print it.
 - For durable status and typed interrupt/stop, `REPORT_HOST` is a stable
@@ -160,6 +169,66 @@ paimos listen --as "$ADDRESS" --project PAI --follow --deliver agentd_codex
 paimos listen --as "$ADDRESS" --project PAI --follow --deliver codex
 ```
 
+Run the content-free attention worker separately for the configured instance
+orchestrator. It never carries worker prose and never requests steer:
+
+```bash
+paimos listen --attention --as "$ADDRESS" --project PAI --follow --deliver codex
+```
+
+The server derives this feed from authoritative message, delivery, harness
+activity, control, and event-time assignment records. Its closed transition
+policy wakes only for stale/unknown or dead workers, a turn ending while an
+open assignment remains, blocked/dead delivery, held action request, or
+rejected control. Ordinary busy/tool heartbeats and an unassigned completed
+turn are absorbed. Unmanaged evidence and new event combinations are deferred
+and do not wake a model until the policy is explicitly widened. Each
+service-written lifecycle harness event snapshots whether an open direct
+ticket or product-session assignment existed at that event;
+delayed projection never reconstructs that fact from later mutable issue or
+product-session state. Binding-change audit events do not represent worker
+activity and intentionally leave that snapshot unknown. Pre-M171 events also
+remain unknown and deferred rather than being relabelled as unassigned. On
+first enablement each source cursor is seeded at its current high-water mark,
+so installation history cannot become a surprise wake flood. Subsequent
+harness and message projection reads only new source rows. Mutable delivery
+and control failures are scoped by instance/worker, bounded by source cursor,
+and anti-joined against already projected transition identities. A no-op poll
+skips the SQLite writer transaction; other polls hold it only for the short
+append-and-watermark transaction.
+
+Each wake is a bounded batch of at most 32 identifier/enum/timestamp records.
+The batch and per-orchestrator cursor are durable across receiver-address
+changes. A crashed listener can reacquire the same batch and delivery
+correlation after its lease expires, while completion and cursor
+acknowledgement commit atomically. A changed address or disabled/replaced
+target is never silently attached to an open batch: a super-admin explicitly
+runs target requeue, which preserves that batch correlation. A live lease is
+never retargeted; after it expires, explicit requeue resets it to pending.
+Codex leases are two minutes; the potentially blocking Claude resume adapter
+gets fifteen minutes. The delivery contract is deliberately at-least-once
+across a process crash or transport failure: if an external handoff succeeds
+but the durable acknowledgement does not commit, the same stable batch
+correlation may be retried after lease expiry. Receivers should deduplicate
+that correlation; Paimos does not claim vendor-side exactly-once delivery.
+
+Receiver targets remain encrypted and receiver-owned. A missing, server-side,
+or steer-only capability creates a visible blocked batch; attention never
+falls back to steer, arbitrary prose, or another receiver. An explicit
+super-admin target requeue can recover that same batch after a simple-handoff
+target is registered, rotated, or restored, including an expired transport
+lease. The attention HTTP routes are an explicit cross-project orchestrator
+portfolio surface and require a re-authorized super-admin principal.
+`X-Paimos-Agent-Name` only selects the configured receiver identity; it grants
+no authority and a spoofed header cannot read, acknowledge, inspect, replace,
+or requeue this feed's target. Projection commit, lease/decryption, and cursor
+acknowledgement each reauthorize the exact credential in their own mutation
+transaction, so an earlier middleware decision is never the final authority.
+The `--follow` listener keeps polling on a blocked batch or an explicit
+requeue-required response; those are recoverable operator states rather than
+process-crash signals. A one-shot listener returns the adapter-unavailable
+exit code so scripts can deliberately surface the blockage.
+
 In the sender shell, establish attribution and send the durable message:
 
 ```bash
@@ -237,6 +306,7 @@ The layers have separate responsibilities:
 |---|---|---|
 | Message ledger | Canonical content, sender/receiver attribution, thread and hop, security decision, durable cursor | Vendor process or target secret |
 | Delivery coordinator | One delivery ID, immutable primary/fallback target versions, FIFO lease, attempts, typed result | A second message body or model response |
+| Attention projection | Content-free actionable references, closed transition policy, coalesced batch, monotonic receiver cursor | Worker state, message content, authorization, or a second truth log |
 | Delivery adapter | One documented vendor handoff primitive and its truthful effective level | Authorization, target selection, or queue-faked steer |
 | Harness control plane | Durable managed/unmanaged identity, advertised capabilities, heartbeat, typed interrupt/stop requests, and a digest of the private generation lease | A worker lease, vendor reference, or local Process/Query handle |
 | `paimos-agentd` | Exact local child Process/Query bound to instance, numeric project, and identity; private Unix transport; local status, replay-safe control receipts, and an owner-only per-generation worker lease | Paimos database, shared API-key contents, or authority to adopt an old PID |
@@ -525,10 +595,17 @@ Target registration alone never mutates historical deliveries.
 ### Target is stale or a delivery is dead
 
 All inspection, target registration, target requeue, and per-delivery requeue
-in this recovery path require an authenticated administrator. Registering a
+in this recovery path require an authenticated administrator. Operations on
+the configured orchestrator attention target require a super-admin; ordinary
+per-project receiver targets remain administrator-managed. Registering a
 replacement creates a new target version for new messages; it does not rewrite
-a target already snapshotted onto an attempted delivery. Restore the original
-receiver target before requeueing that delivery. The administrator-only
+a target already snapshotted onto an attempted message delivery. Restore the
+original receiver target before requeueing that delivery. For an open
+attention batch, explicit target requeue instead attaches the current
+simple-handoff target to the same batch when it is blocked, stale pending, or
+has an expired lease; it never changes a live lease. This recovery is
+at-least-once because a transport may have accepted the old lease before its
+durable acknowledgement was lost. The administrator-only
 endpoint `POST /api/projects/{id}/message-deliveries/{deliveryID}/requeue`
 reuses the same delivery ID and snapshot; it does not retarget. If the original
 target cannot be restored, inspect whether any handoff may have occurred and

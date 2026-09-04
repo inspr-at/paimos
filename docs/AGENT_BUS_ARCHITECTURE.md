@@ -186,6 +186,24 @@ Only the operator control plane may create, change, enable, or requeue a
 target. A sender can request a level but cannot supply a vendor thread,
 webhook URL, credentials, or `maximum_level`. Untrusted message text and
 metadata never mutate target or allowlist configuration.
+Ordinary administrators may manage ordinary project receiver targets. The
+configured orchestrator attention receiver is a cross-project portfolio
+boundary, so inspecting, registering/replacing, or requeueing any harness
+address for that stable project-agent identity requires super-admin authority.
+The same gate covers inbox-capable managed harness registration because that
+path can create a target version internally. The credential and stable
+orchestrator identity are both re-resolved in the transaction that mutates the
+target or harness record; attention projection, lease/decryption, and cursor
+acknowledgement likewise use transaction-current authority. Revocation,
+demotion, or reassignment cannot rely on a stale middleware snapshot.
+Turn-completion attention uses each service-written lifecycle harness event's
+content-free `assignment_present` bit captured in the event transaction.
+Binding-change audit events do not represent activity transitions and leave
+that bit unknown. Projection does
+not infer past assignment state from mutable current issue or product-session
+timestamps, so a delayed watermark cannot silently discard an actionable turn
+end after an ordinary assignment edit. Events predating this snapshot field
+remain explicitly unknown and deferred instead of being guessed unassigned.
 
 For Codex, `target_ref` must be a Codex session/rollout UUID or an exact Codex
 session name accepted by `codex queue --thread`. It must never be a Cursor chat

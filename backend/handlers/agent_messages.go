@@ -4,12 +4,14 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/inspr-at/paimos/backend/agentmessage"
@@ -22,7 +24,11 @@ import (
 func RegisterAgentMessageRoutes(r chi.Router) {
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages", sendAgentMessage)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/messages/listen", listenAgentMessages)
+	// Attention is an orchestrator portfolio feed derived across projects. The
+	// agent attribution header selects an inbox but never grants authority.
+	r.With(auth.RequireSuperAdmin).Get("/projects/{id}/attention/listen", listenAgentAttention)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/ack", ackAgentMessages)
+	r.With(auth.RequireSuperAdmin).Post("/projects/{id}/attention/ack", ackAgentAttention)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/delivery-complete", completeAgentMessageDelivery)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/messages/delivery-unavailable", rerouteUnavailableAgentMessageDelivery)
 	r.With(auth.RequireProjectEdit).Post("/projects/{id}/message-allowlist", allowAgentMessageSender)
@@ -39,6 +45,12 @@ func RegisterAgentMessageRoutes(r chi.Router) {
 type ackEnvelopeRequest struct {
 	To     string `json:"to"`
 	Cursor int64  `json:"cursor"`
+}
+
+type ackAttentionRequest struct {
+	To      string `json:"to"`
+	Cursor  int64  `json:"cursor"`
+	BatchID string `json:"batch_id"`
 }
 
 type allowSenderRequest struct {
@@ -208,9 +220,11 @@ func registerAgentMessageTarget(w http.ResponseWriter, r *http.Request) {
 		messageProblem(w, r, "agent_message_request_invalid", err.Error(), http.StatusBadRequest)
 		return
 	}
-	target, err := agentmessage.NewService(db.DB).RegisterTarget(r.Context(), agentmessage.RegisterTargetInput{
+	service := agentmessage.NewService(db.DB)
+	target, err := service.RegisterTarget(r.Context(), agentmessage.RegisterTargetInput{
 		ProjectID: projectID, Address: req.Address, Adapter: req.Adapter, TargetKind: req.TargetKind,
 		TargetRef: req.TargetRef, TargetSecret: req.TargetSecret, MaximumLevel: req.MaximumLevel, Role: req.Role,
+		Authority: messageTargetAuthority(r),
 	})
 	if err != nil {
 		writeAgentMessageError(w, r, err)
@@ -227,7 +241,9 @@ func listAgentMessageTargets(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
 		return
 	}
-	targets, err := agentmessage.NewService(db.DB).ListTargets(r.Context(), projectID, r.URL.Query().Get("address"))
+	service := agentmessage.NewService(db.DB)
+	address := r.URL.Query().Get("address")
+	targets, err := service.ListTargetsAuthorized(r.Context(), projectID, address, messageTargetAuthority(r))
 	if err != nil {
 		writeAgentMessageError(w, r, err)
 		return
@@ -248,12 +264,44 @@ func requeueAgentMessageTargets(w http.ResponseWriter, r *http.Request) {
 		messageProblem(w, r, "agent_message_request_invalid", err.Error(), http.StatusBadRequest)
 		return
 	}
-	count, err := agentmessage.NewService(db.DB).RequeueMissingTargets(r.Context(), projectID, req.Address)
+	service := agentmessage.NewService(db.DB)
+	count, err := service.RequeueMissingTargetsAuthorized(r.Context(), projectID, req.Address, messageTargetAuthority(r))
 	if err != nil {
 		writeAgentMessageError(w, r, err)
 		return
 	}
 	jsonOK(w, map[string]any{"address": strings.TrimSpace(req.Address), "requeued": count})
+}
+
+func messageTargetAuthority(r *http.Request) agentmessage.TransactionAuthority {
+	return func(ctx context.Context, tx *sql.Tx) (bool, error) {
+		user, _, err := auth.ReauthorizeRequestPrincipalTx(ctx, tx, r, time.Now().UTC())
+		if err != nil || user == nil {
+			return false, &agentmessage.CodedError{Code: "agent_message_unauthorized", Err: errors.New("current request credential is unavailable")}
+		}
+		superAdmin := auth.IsSuperAdmin(user)
+		if !superAdmin && !auth.IsAdmin(user) {
+			return false, &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("current administrator authority is required")}
+		}
+		return superAdmin, nil
+	}
+}
+
+func harnessRegistrationAuthority(r *http.Request, projectID int64) agentmessage.TransactionAuthority {
+	return func(ctx context.Context, tx *sql.Tx) (bool, error) {
+		user, _, err := auth.ReauthorizeRequestPrincipalTx(ctx, tx, r, time.Now().UTC())
+		if err != nil || user == nil {
+			return false, &agentmessage.CodedError{Code: "agent_message_unauthorized", Err: errors.New("current request credential is unavailable")}
+		}
+		allowed, err := canEditProjectTx(ctx, tx, user, projectID)
+		if err != nil {
+			return false, err
+		}
+		if !allowed {
+			return false, &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("current project edit authority is required")}
+		}
+		return auth.IsSuperAdmin(user), nil
+	}
 }
 
 func listAgentMessageDeliveries(w http.ResponseWriter, r *http.Request) {
@@ -337,6 +385,31 @@ func listenAgentMessages(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, page)
 }
 
+func listenAgentAttention(w http.ResponseWriter, r *http.Request) {
+	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonError(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	agent, _ := readAgentAttribution(r)
+	attributed := ""
+	if agent != nil {
+		attributed = *agent
+	}
+	page, err := agentmessage.NewService(db.DB).ListAttention(r.Context(), agentmessage.AttentionInput{
+		ProjectID: projectID, Address: strings.TrimSpace(r.URL.Query().Get("to")), Agent: attributed,
+		WorkerAdapter: strings.ToLower(strings.TrimSpace(r.URL.Query().Get("delivery"))), AfterID: after, Limit: limit,
+		Authority: messageTargetAuthority(r),
+	})
+	if err != nil {
+		writeAgentMessageError(w, r, err)
+		return
+	}
+	jsonOK(w, page)
+}
+
 func ackAgentMessages(w http.ResponseWriter, r *http.Request) {
 	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
@@ -357,6 +430,35 @@ func ackAgentMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	state, err := agentmessage.NewService(db.DB).AckInbox(r.Context(), agentmessage.AckInput{
 		ProjectID: projectID, Address: strings.TrimSpace(req.To), Agent: attributed, Cursor: req.Cursor,
+	})
+	if err != nil {
+		writeAgentMessageError(w, r, err)
+		return
+	}
+	jsonOK(w, state)
+}
+
+func ackAgentAttention(w http.ResponseWriter, r *http.Request) {
+	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonError(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	var req ackAttentionRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		messageProblem(w, r, "agent_attention_request_invalid", err.Error(), http.StatusBadRequest)
+		return
+	}
+	agent, _ := readAgentAttribution(r)
+	attributed := ""
+	if agent != nil {
+		attributed = *agent
+	}
+	state, err := agentmessage.NewService(db.DB).AckAttention(r.Context(), agentmessage.AttentionAckInput{
+		ProjectID: projectID, Address: strings.TrimSpace(req.To), Agent: attributed,
+		Cursor: req.Cursor, BatchID: strings.TrimSpace(req.BatchID), Authority: messageTargetAuthority(r),
 	})
 	if err != nil {
 		writeAgentMessageError(w, r, err)
@@ -438,8 +540,13 @@ func writeAgentMessageError(w http.ResponseWriter, r *http.Request, err error) {
 	var coded *agentmessage.CodedError
 	if errors.As(err, &coded) {
 		code = coded.Code
-		if code == "agent_message_idempotency_conflict" {
+		switch code {
+		case "agent_message_idempotency_conflict":
 			status = http.StatusConflict
+		case "agent_message_unauthorized", "agent_attention_unauthorized":
+			status = http.StatusUnauthorized
+		case "agent_message_forbidden", "agent_attention_forbidden", "agent_attention_target_forbidden":
+			status = http.StatusForbidden
 		}
 	}
 	if errors.Is(err, agentmessage.ErrBodyTooLarge) {

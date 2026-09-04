@@ -55,6 +55,39 @@ type deliveryOutcome struct {
 	FallbackReason string
 }
 
+type attentionItem struct {
+	Cursor          int64  `json:"cursor"`
+	AttentionID     string `json:"attention_id"`
+	SourceProjectID int64  `json:"source_project_id"`
+	SourceKind      string `json:"source_kind"`
+	SourceID        string `json:"source_id"`
+	SourceSequence  int64  `json:"source_sequence"`
+	Kind            string `json:"kind"`
+	Reason          string `json:"reason"`
+	OccurredAt      string `json:"occurred_at"`
+}
+
+type attentionPage struct {
+	Address    string          `json:"address"`
+	Cursor     int64           `json:"cursor"`
+	NextCursor int64           `json:"next_cursor"`
+	Items      []attentionItem `json:"items"`
+	Frame      string          `json:"frame"`
+	Work       *attentionWork  `json:"delivery_work,omitempty"`
+}
+
+type attentionWork struct {
+	BatchID       string `json:"batch_id"`
+	Instance      string `json:"instance"`
+	ProjectID     int64  `json:"project_id"`
+	State         string `json:"state"`
+	Adapter       string `json:"adapter,omitempty"`
+	TargetKind    string `json:"target_kind,omitempty"`
+	TargetRef     string `json:"target_ref,omitempty"`
+	MaximumLevel  string `json:"maximum_level,omitempty"`
+	BlockedReason string `json:"blocked_reason,omitempty"`
+}
+
 func listenCmd() *cobra.Command {
 	var (
 		projectRef    string
@@ -65,6 +98,7 @@ func listenCmd() *cobra.Command {
 		deliverTarget string
 		deliverMode   string
 		enableGrok    bool
+		attention     bool
 		pollInterval  time.Duration
 	)
 	c := &cobra.Command{
@@ -104,6 +138,12 @@ func listenCmd() *cobra.Command {
 			if err != nil {
 				return reportError(err)
 			}
+			if attention {
+				if enableGrok || strings.TrimSpace(deliverTarget) != "" || deliverMode == "steer" || deliver == "grok" {
+					return &usageError{msg: "--attention supports only receiver-owned simple local delivery; legacy targets, Grok, and steer are unavailable"}
+				}
+				return runAttentionListen(cmd.Context(), client, projectID, address, agent, follow, ack || deliver != "", deliver, pollInterval)
+			}
 			return runListen(cmd.Context(), client, projectID, address, agent, follow, ack || deliver != "", deliver, strings.TrimSpace(deliverTarget), deliverMode, enableGrok, pollInterval)
 		},
 	}
@@ -116,7 +156,156 @@ func listenCmd() *cobra.Command {
 	c.Flags().StringVar(&deliverMode, "deliver-mode", "queue", "legacy pre-bus delivery mode (queue or steer); bus messages use their durable message level, and Claude has no steer primitive so steer falls back to simple")
 	c.Flags().BoolVar(&enableGrok, "enable-grok-build-delivery", false, "enable the experimental Grok Build delivery adapter")
 	c.Flags().DurationVar(&pollInterval, "poll-interval", listenDefaultPollInterval, "follow polling interval")
+	c.Flags().BoolVar(&attention, "attention", false, "listen for coalesced actionable transitions instead of message bodies")
 	return c
+}
+
+func runAttentionListen(ctx context.Context, client *Client, projectID int64, address, agent string, follow, acknowledge bool, deliver string, pollInterval time.Duration) error {
+	after, seen := int64(0), false
+	worker := workerAdapterFor(deliver)
+	for {
+		page, err := fetchAttention(ctx, client, projectID, address, agent, after, worker)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			if follow && isRecoverableAttentionListenError(err) {
+				if err := waitListenPoll(ctx, pollInterval); err != nil {
+					return nil
+				}
+				continue
+			}
+			return reportError(err)
+		}
+		if len(page.Items) > 0 {
+			seen = true
+			handoffComplete := true
+			if deliver == "" {
+				if flagJSON {
+					raw, marshalErr := json.Marshal(page)
+					if marshalErr != nil {
+						return marshalErr
+					}
+					if _, err = fmt.Fprintln(stdout, string(raw)); err != nil {
+						return err
+					}
+				} else {
+					for _, item := range page.Items {
+						if _, err = fmt.Fprintf(stdout, "cursor=%d attention=%s kind=%s reason=%s source=%s/%s sequence=%d at=%s\n",
+							item.Cursor, item.AttentionID, item.Kind, item.Reason, item.SourceKind, item.SourceID, item.SourceSequence, item.OccurredAt); err != nil {
+							return err
+						}
+					}
+				}
+			} else {
+				if page.Work == nil {
+					return errors.New("attention delivery has no durable batch")
+				}
+				if page.Work.State == "blocked" {
+					handoffComplete = false
+					if !follow {
+						return &listenExitCode{code: listenExitAdapterUnavailable, err: fmt.Errorf("attention delivery is blocked: %s", page.Work.BlockedReason)}
+					}
+				} else {
+					message := messageEnvelope{Cursor: page.NextCursor, ContextID: strconv.FormatInt(projectID, 10), To: address,
+						DeliveryLevel: deliveryLevelSimple, Parts: []struct {
+							Kind string `json:"kind"`
+							Text string `json:"text"`
+						}{{Kind: "text", Text: page.Frame}},
+						DeliveryWork: &messageDeliveryWork{DeliveryID: page.Work.BatchID, Instance: page.Work.Instance, ProjectID: page.Work.ProjectID,
+							State: page.Work.State, Adapter: page.Work.Adapter, TargetKind: page.Work.TargetKind, TargetRef: page.Work.TargetRef,
+							MaximumLevel: page.Work.MaximumLevel, RequestedLevel: deliveryLevelSimple, FallbackReason: page.Work.BlockedReason}}
+					outcome, deliveryErr := deliverHarnessMessage(ctx, message, page.Frame, deliver, "", "queue")
+					if deliveryErr != nil {
+						var unavailable *adapterUnavailableError
+						if errors.As(deliveryErr, &unavailable) {
+							if unavailable.foreignWorker {
+								if !follow {
+									return &listenExitCode{code: listenExitForeignWorker, err: deliveryErr}
+								}
+								handoffComplete = false
+							} else {
+								return &listenExitCode{code: listenExitAdapterUnavailable, err: deliveryErr}
+							}
+						} else {
+							return deliveryErr
+						}
+					} else if outcome == nil || outcome.EffectiveLevel != deliveryLevelSimple {
+						return errors.New("attention wake did not complete as simple delivery")
+					}
+				}
+			}
+			if handoffComplete {
+				after = page.NextCursor
+			}
+			if acknowledge && handoffComplete {
+				batchID := ""
+				if page.Work != nil && deliver != "" {
+					batchID = page.Work.BatchID
+				}
+				if err := ackAttention(ctx, client, projectID, address, agent, after, batchID); err != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
+					return reportError(err)
+				}
+			}
+		}
+		if !follow {
+			if !seen {
+				return &listenExitCode{code: listenExitNoMessages}
+			}
+			return nil
+		}
+		if err := waitListenPoll(ctx, pollInterval); err != nil {
+			return nil
+		}
+	}
+}
+
+func isRecoverableAttentionListenError(err error) bool {
+	var httpErr *httpError
+	if !errors.As(err, &httpErr) {
+		return false
+	}
+	return httpErr.problem().Code == "agent_attention_batch_requeue_required"
+}
+
+func waitListenPoll(ctx context.Context, pollInterval time.Duration) error {
+	timer := time.NewTimer(pollInterval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func fetchAttention(ctx context.Context, client *Client, projectID int64, address, agent string, after int64, workerAdapter string) (*attentionPage, error) {
+	q := url.Values{"to": []string{address}, "limit": []string{strconv.Itoa(agentmessage.MaxAttentionItems)}}
+	if after > 0 {
+		q.Set("after", strconv.FormatInt(after, 10))
+	}
+	if workerAdapter != "" {
+		q.Set("delivery", workerAdapter)
+	}
+	raw, err := client.doForAgentContext(ctx, "GET", fmt.Sprintf("/api/projects/%d/attention/listen?%s", projectID, q.Encode()), nil, agent)
+	if err != nil {
+		return nil, err
+	}
+	var page attentionPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return nil, fmt.Errorf("decode attention: %w", err)
+	}
+	return &page, nil
+}
+
+func ackAttention(ctx context.Context, client *Client, projectID int64, address, agent string, cursor int64, batchID string) error {
+	_, err := client.doForAgentContext(ctx, "POST", fmt.Sprintf("/api/projects/%d/attention/ack", projectID), map[string]any{
+		"to": address, "cursor": cursor, "batch_id": batchID,
+	}, agent)
+	return err
 }
 
 func splitListenAddress(raw string) (string, string, error) {
