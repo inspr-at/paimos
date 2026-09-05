@@ -243,9 +243,10 @@ database guard requires exact equality across environment, version, artifact,
 commit, scheme, channel, release sequence, manifest coordinate, and manifest
 digest. This keeps v1 consumers functional during cutover without weakening
 authority, freshness, replay, or secret boundaries. A Pharos adapter may move
-from v1 to v2 per handoff; after all supported Pharos releases pin the v2
-fixture and schema tuple, a later ticket may retire v1 negotiation. V1 itself
-remains byte-for-byte immutable.
+from v1 to v2 per delivery attempt: deployment evidence must use v2 before a
+verification handoff can bind to that exact v2 deployment identity. After all
+supported Pharos releases pin the v2 fixture and schema tuple, a later ticket
+may retire v1 negotiation. V1 itself remains byte-for-byte immutable.
 
 The canonical v2 owner fixture lives in
 `backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json`. It covers

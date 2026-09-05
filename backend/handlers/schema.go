@@ -82,7 +82,9 @@ import (
 // discover which api-key scopes unlock which endpoints. The scope list
 // is populated at init() from auth.ScopeCatalog() — a single source of
 // truth shared with the runtime check.
-const SchemaVersion = "2.3.0"
+// 2.4.0 (PAI-876): added the additive external-stage v2 media type,
+// fixture digest, contract major, and explicit release-version scheme.
+const SchemaVersion = "2.4.0"
 
 // SchemaPayload is the shape returned by GET /api/schema. See PAI-87.
 type SchemaPayload struct {

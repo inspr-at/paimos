@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-var releaseManifestCoordinatePattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}:[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,190}$`)
+var releaseManifestCoordinatePattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}:[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,189}$`)
 
 // ReportV2 records a scheme-aware report without changing the frozen v1 DTO or
 // its request digest. The complete normalized v2 body owns replay identity;

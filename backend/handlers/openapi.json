@@ -1463,7 +1463,7 @@
           "release_sequence": {"type": "integer", "format": "int64", "minimum": 0},
           "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
           "commit_digest": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
-          "release_manifest_coordinate": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}:[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,190}$"},
+          "release_manifest_coordinate": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}:[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,189}$"},
           "release_manifest_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
         },
         "description": "Explicitly discriminated release identity. inspr-calendar-v1 versions are also calendar-validated by the service; legacy strings are never inferred from punctuation."

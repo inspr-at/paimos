@@ -360,6 +360,7 @@ assert_external_stage_v2_release_pin() {
     'backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json'
     'backend/contracts/external-stage-v2.schema.json'
     'backend/externalstage/contract_v2.go'
+    'backend/externalstage/service_v2.go'
   )
 
   if ! git cat-file -e "$ref:$EXTERNAL_STAGE_MANIFEST_V2" 2>/dev/null; then

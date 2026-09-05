@@ -404,6 +404,28 @@ set_external_stage_manifest_field() {
   mv "$next" "$manifest"
 }
 
+add_external_stage_v2_contract() {
+  local repo="$1" release="$2" pin_commit
+  mkdir -p "$repo/backend/contracts/fixtures/external-stage-v2"
+  printf '%s\n' '{"fixture":"owner-pharos-v2"}' > \
+    "$repo/backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json"
+  printf '%s\n' '{"schema":"external-stage-v2"}' > \
+    "$repo/backend/contracts/external-stage-v2.schema.json"
+  printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/contract_v2.go"
+  printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/service_v2.go"
+  git -C "$repo" add backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json \
+    backend/contracts/external-stage-v2.schema.json backend/externalstage/contract_v2.go \
+    backend/externalstage/service_v2.go
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'add external-stage v2 contract bytes'
+  pin_commit=$(git -C "$repo" rev-parse HEAD)
+  printf '%s\n' \
+    "{\"schema_major\":2,\"media_type\":\"application/vnd.paimos.external-stage.v2+json\",\"paimos_commit\":\"$pin_commit\",\"paimos_release\":\"$release\"}" > \
+    "$repo/backend/contracts/fixtures/external-stage-v2/manifest-v2.json"
+  git -C "$repo" add backend/contracts/fixtures/external-stage-v2/manifest-v2.json
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'pin external-stage v2 release'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+}
+
 prepend_release_notes() {
   local repo="$1"
   local version="${2:-1.0.1}"
@@ -1259,6 +1281,30 @@ test_external_stage_v2_bytes_without_manifest_are_rejected() {
     fail 'missing external-stage v2 manifest rejection was not explicit'
 }
 
+test_external_stage_v2_release_pin_accepts_exact_cut_and_rejects_service_drift() {
+  local repo state drift_repo drift_state output
+  repo=$(setup_repo external-stage-v2-positive v26.09.05)
+  state="$TMP_ROOT/external-stage-v2-positive/gh-state"
+  add_external_stage_v2_contract "$repo" v26.09.05
+  prepend_release_notes "$repo" 26.09.05
+  FAKE_RELEASE_VERSION=26.09.05 run_release "$repo" "$state" 26.09.05 --no-edit >/dev/null
+
+  drift_repo=$(setup_repo external-stage-v2-service-drift v26.09.05)
+  drift_state="$TMP_ROOT/external-stage-v2-service-drift/gh-state"
+  output="$TMP_ROOT/external-stage-v2-service-drift/output"
+  add_external_stage_v2_contract "$drift_repo" v26.09.05
+  printf '%s\n' 'package externalstage // drifted' > "$drift_repo/backend/externalstage/service_v2.go"
+  git -C "$drift_repo" add backend/externalstage/service_v2.go
+  git -C "$drift_repo" commit -q --no-gpg-sign --signoff -m 'drift external-stage v2 validation'
+  FAKE_GH_SERVER_MERGE=1 git -C "$drift_repo" push -q origin main
+  prepend_release_notes "$drift_repo" 26.09.05
+  if FAKE_RELEASE_VERSION=26.09.05 run_release "$drift_repo" "$drift_state" 26.09.05 --no-edit >"$output" 2>&1; then
+    fail 'release accepted drifted external-stage v2 service validation'
+  fi
+  grep -qF 'external-stage v2 file differs from pinned commit: backend/externalstage/service_v2.go' "$output" ||
+    fail 'external-stage v2 service drift rejection was not explicit'
+}
+
 test_existing_tag_external_stage_manifest_drift_is_rejected() {
   local repo state
   repo=$(setup_repo external-stage-manifest-drift)
@@ -1812,6 +1858,7 @@ test_unavailable_external_stage_commit_pin_is_rejected
 test_nonancestor_external_stage_commit_pin_is_rejected
 test_external_stage_pinned_byte_drift_is_rejected
 test_external_stage_v2_bytes_without_manifest_are_rejected
+test_external_stage_v2_release_pin_accepts_exact_cut_and_rejects_service_drift
 test_existing_tag_external_stage_manifest_drift_is_rejected
 
 echo 'test-release: ok'

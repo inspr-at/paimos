@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/contracts"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/externalstage"
 )
@@ -590,6 +591,117 @@ func externalStageTransportJSONRequest(t *testing.T, method, path, accept, idemp
 	request.Header.Set("Accept", accept)
 	request.Header.Set(idempotencyHeader, idempotency)
 	return externalStageRequestWithAuthPrincipal(request, principal)
+}
+
+func TestExternalStageV2TransportPinsNegotiationPullAndReportRouting(t *testing.T) {
+	fixture := setupExternalStageTransportFixture(t)
+	router := externalStageTransportTestRouter()
+	createBody := externalstage.CreateHandoffRequest{
+		StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1, ExpectedAuthorityEpoch: 1,
+		ReporterRegistrationID: fixture.registrationID,
+		ExpiresAt:              time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano),
+	}
+	createRequest := externalStageTransportJSONRequest(t, http.MethodPost,
+		"/api/agent-mode/deliveries/"+fixture.deliveryKey+"/external-stage-handoffs",
+		externalstage.MediaTypeV1, "87600000-0000-4000-8000-000000000001", createBody, fixture.operator)
+	created := httptest.NewRecorder()
+	router.ServeHTTP(created, createRequest)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	var metadata externalstage.HandoffMetadata
+	if err := json.Unmarshal(created.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	mintRequest := externalStageTransportJSONRequest(t, http.MethodPost,
+		"/api/agent-mode/external-stage-handoffs/"+metadata.HandoffID+"/mint",
+		externalstage.SecretMediaTypeV1, "87600000-0000-4000-8000-000000000002",
+		externalstage.CredentialEpochRequest{ExpectedCredentialEpoch: 0}, fixture.operator)
+	minted := httptest.NewRecorder()
+	router.ServeHTTP(minted, mintRequest)
+	if minted.Code != http.StatusCreated || minted.Body.Len() != externalstage.OneTimeSecretBytes {
+		t.Fatalf("mint status=%d bytes=%d body=%s", minted.Code, minted.Body.Len(), minted.Body.String())
+	}
+	secret := append([]byte(nil), minted.Body.Bytes()...)
+	defer zeroBytes(secret)
+	secretHeader := base64.RawURLEncoding.EncodeToString(secret)
+
+	pullRequest := httptest.NewRequest(http.MethodGet, "/api/external-stage/handoffs/"+metadata.HandoffID, nil)
+	pullRequest.Header.Set("Accept", externalstage.MediaTypeV2)
+	pullRequest.Header.Set(externalstage.HandoffSecretHeader, secretHeader)
+	pullRequest = externalStageRequestWithAuthPrincipal(pullRequest, fixture.reporter)
+	pulled := httptest.NewRecorder()
+	router.ServeHTTP(pulled, pullRequest)
+	if pulled.Code != http.StatusOK || pulled.Header().Get("Content-Type") != externalstage.MediaTypeV2 {
+		t.Fatalf("v2 pull status=%d headers=%v body=%s", pulled.Code, pulled.Header(), pulled.Body.String())
+	}
+	var projection externalstage.PullResponseV2
+	if err := json.Unmarshal(pulled.Body.Bytes(), &projection); err != nil {
+		t.Fatal(err)
+	}
+	if projection.ContractMajor != externalstage.ContractMajorV2 ||
+		projection.FixtureDigest != "sha256:"+contracts.ExternalStageV2FixtureDigestHex {
+		t.Fatalf("v2 pull certification=%+v", projection)
+	}
+
+	mutation := func(path, idempotency, contentType string, body any) *httptest.ResponseRecorder {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+		request.Header.Set("Accept", externalstage.MediaTypeV2)
+		request.Header.Set("Content-Type", contentType)
+		request.Header.Set(idempotencyHeader, idempotency)
+		request.Header.Set(externalstage.HandoffSecretHeader, secretHeader)
+		request = externalStageRequestWithAuthPrincipal(request, fixture.reporter)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+	observedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	acceptPath := "/api/external-stage/handoffs/" + metadata.HandoffID + "/accept"
+	mismatch := mutation(acceptPath, "87600000-0000-4000-8000-000000000003", externalstage.MediaTypeV1,
+		externalstage.AcceptRequest{Sequence: 1, ObservedAt: observedAt})
+	if mismatch.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("v2 accept with v1 body status=%d body=%s", mismatch.Code, mismatch.Body.String())
+	}
+	accepted := mutation(acceptPath, "87600000-0000-4000-8000-000000000004", externalstage.MediaTypeV2,
+		externalstage.AcceptRequest{Sequence: 1, ObservedAt: observedAt})
+	if accepted.Code != http.StatusCreated || accepted.Header().Get("Content-Type") != externalstage.MediaTypeV2 {
+		t.Fatalf("v2 accept status=%d headers=%v body=%s", accepted.Code, accepted.Header(), accepted.Body.String())
+	}
+	reportPath := "/api/external-stage/handoffs/" + metadata.HandoffID + "/reports"
+	unknown := mutation(reportPath, "87600000-0000-4000-8000-000000000005", externalstage.MediaTypeV2,
+		map[string]any{"sequence": 2, "state": "active", "observed_at": observedAt, "heartbeat": false, "unexpected": true})
+	if unknown.Code != http.StatusBadRequest {
+		t.Fatalf("v2 unknown-field status=%d body=%s", unknown.Code, unknown.Body.String())
+	}
+	active := mutation(reportPath, "87600000-0000-4000-8000-000000000006", externalstage.MediaTypeV2,
+		externalstage.ReportRequestV2{Sequence: 2, State: externalstage.HandoffStateActive, ObservedAt: observedAt})
+	if active.Code != http.StatusCreated || active.Header().Get("Content-Type") != externalstage.MediaTypeV2 {
+		t.Fatalf("v2 active status=%d headers=%v body=%s", active.Code, active.Header(), active.Body.String())
+	}
+	terminalObserved := time.Now().UTC().Add(time.Millisecond).Format(time.RFC3339Nano)
+	terminal := externalstage.ReportRequestV2{Sequence: 3, State: externalstage.HandoffStateSucceeded, ObservedAt: terminalObserved,
+		PharosEvidence: &externalstage.PharosEvidenceV2{Kind: externalstage.EvidenceKindDeployment,
+			Workflow: "deploy-production", Environment: "production", Result: externalstage.EvidenceResultSucceeded,
+			ObservedAt: terminalObserved, Artifact: externalstage.ArtifactEvidenceV2{
+				VersionScheme: externalstage.VersionSchemeINSPRCalendar, Version: "26.09.05.10.30.01",
+				ReleaseChannel: "stable", ReleaseSequence: 876, Digest: "sha256:" + fmt.Sprintf("%064x", 876),
+				CommitDigest: fmt.Sprintf("%040x", 876), ReleaseManifestCoordinate: "ghcr:inspr-at/pharos/releases/26.09.05.10.30.01",
+				ReleaseManifestDigest: "sha256:" + fmt.Sprintf("%064x", 877)}}}
+	reported := mutation(reportPath, "87600000-0000-4000-8000-000000000007", externalstage.MediaTypeV2, terminal)
+	if reported.Code != http.StatusCreated || reported.Header().Get("Content-Type") != externalstage.MediaTypeV2 {
+		t.Fatalf("v2 terminal status=%d headers=%v body=%s", reported.Code, reported.Header(), reported.Body.String())
+	}
+	var extensionCount int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM external_stage_pharos_evidence_v2`).Scan(&extensionCount); err != nil {
+		t.Fatal(err)
+	}
+	if extensionCount != 1 {
+		t.Fatalf("v2 report extension rows=%d want 1", extensionCount)
+	}
 }
 
 func TestExternalStageTransportPinsSuccessAndReplayStatuses(t *testing.T) {

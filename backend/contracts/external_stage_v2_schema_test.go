@@ -8,13 +8,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/inspr-at/paimos/backend/contracts"
 	"github.com/inspr-at/paimos/backend/externalstage"
 )
 
-const externalStageV2StandaloneSchemaSHA256 = "0c6d66ed6985792b9ac6db72b20475fc8fe6f2b84401b32b45fa90bb85535183"
+const externalStageV2StandaloneSchemaSHA256 = "45735dbb410a02b7e360020d00749949ce0956bf1b68d4bf18cb76d4aa082ebe"
 
 func TestExternalStageV2StandaloneSchemaIsPinnedAndClosed(t *testing.T) {
 	raw, err := os.ReadFile("external-stage-v2.schema.json")
@@ -39,7 +41,7 @@ func TestExternalStageV2StandaloneSchemaIsPinnedAndClosed(t *testing.T) {
 		t.Fatalf("v2 schema certification tuple=%#v", metadata)
 	}
 	definitions, ok := schema["$defs"].(map[string]any)
-	if !ok || len(definitions) != 7 {
+	if !ok || len(definitions) != 10 {
 		t.Fatalf("v2 schema definition inventory=%d", len(definitions))
 	}
 	assertStandaloneSchemaReferencesClosed(t, schema, definitions)
@@ -54,5 +56,27 @@ func TestExternalStageV2StandaloneSchemaIsPinnedAndClosed(t *testing.T) {
 	}
 	if rules, ok := report["allOf"].([]any); !ok || len(rules) != 8 {
 		t.Fatalf("v2 report schema must carry all 8 state/evidence invariants: %#v", report["allOf"])
+	}
+	openAPIRaw, err := os.ReadFile(filepath.Join("..", "handlers", "openapi.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var openAPI struct {
+		Components struct {
+			Schemas map[string]any `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(openAPIRaw, &openAPI); err != nil {
+		t.Fatal(err)
+	}
+	for name, standalone := range definitions {
+		published, ok := openAPI.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("v2 standalone definition %s is absent from OpenAPI", name)
+		}
+		published = rewriteExternalStageSchemaReferences(published)
+		if !reflect.DeepEqual(standalone, published) {
+			t.Fatalf("v2 standalone definition %s drifted from OpenAPI", name)
+		}
 	}
 }
