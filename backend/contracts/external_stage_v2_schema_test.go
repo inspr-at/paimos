@@ -14,7 +14,7 @@ import (
 	"github.com/inspr-at/paimos/backend/externalstage"
 )
 
-const externalStageV2StandaloneSchemaSHA256 = "c7dd884c2d90b7044f7882caef9ada10869c4b843b1b37c1d8769ed9ba6c81dd"
+const externalStageV2StandaloneSchemaSHA256 = "0c6d66ed6985792b9ac6db72b20475fc8fe6f2b84401b32b45fa90bb85535183"
 
 func TestExternalStageV2StandaloneSchemaIsPinnedAndClosed(t *testing.T) {
 	raw, err := os.ReadFile("external-stage-v2.schema.json")
@@ -47,5 +47,12 @@ func TestExternalStageV2StandaloneSchemaIsPinnedAndClosed(t *testing.T) {
 		if definitions[required] == nil {
 			t.Fatalf("missing v2 schema definition %s", required)
 		}
+	}
+	report, ok := definitions["ExternalStageReportRequestV2"].(map[string]any)
+	if !ok {
+		t.Fatal("v2 report schema is not an object")
+	}
+	if rules, ok := report["allOf"].([]any); !ok || len(rules) != 8 {
+		t.Fatalf("v2 report schema must carry all 8 state/evidence invariants: %#v", report["allOf"])
 	}
 }

@@ -351,6 +351,7 @@ setup_repo() {
   git -C "$repo" config user.email 'release-author@example.test'
   mkdir -p "$repo/docs"
   mkdir -p "$repo/backend/contracts/fixtures/external-stage"
+  mkdir -p "$repo/backend/contracts/fixtures/external-stage-v2"
   mkdir -p "$repo/backend/externalstage"
   printf '1.0.0\n' > "$repo/VERSION"
   printf '<code>v1.0.0</code>\n' > "$repo/README.md"
@@ -361,6 +362,11 @@ setup_repo() {
   printf '%s\n' '{"fixture":"owner-pharos-v1"}' > \
     "$repo/backend/contracts/fixtures/external-stage/owner-pharos-v1.json"
   printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/contract.go"
+  printf '%s\n' '{"fixture":"owner-pharos-v2"}' > \
+    "$repo/backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json"
+  printf '%s\n' '{"schema":"external-stage-v2"}' > \
+    "$repo/backend/contracts/external-stage-v2.schema.json"
+  printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/contract_v2.go"
   write_stub_scripts "$repo"
   git -C "$repo" add .
   git -C "$repo" commit -q --signoff -m 'add external-stage v1 contract bytes'
@@ -368,9 +374,14 @@ setup_repo() {
   printf '%s\n' \
     "{\"paimos_commit\":\"$pin_commit\",\"paimos_release\":\"$future_release\"}" > \
     "$repo/backend/contracts/fixtures/external-stage/manifest-v1.json"
-  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
-  git -C "$repo" commit -q --signoff -m 'pin external-stage v1 release'
+  printf '%s\n' \
+    "{\"schema_major\":2,\"media_type\":\"application/vnd.paimos.external-stage.v2+json\",\"paimos_commit\":\"$pin_commit\",\"paimos_release\":\"v26.09.05\"}" > \
+    "$repo/backend/contracts/fixtures/external-stage-v2/manifest-v2.json"
+  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json \
+    backend/contracts/fixtures/external-stage-v2/manifest-v2.json
+  git -C "$repo" commit -q --signoff -m 'pin external-stage release manifests'
   git -C "$repo" tag -a v1.0.0 -m 'release 1.0.0'
+  git -C "$repo" tag -a v26.09.05 -m 'external-stage v2 certification release'
   git -C "$repo" remote add origin "$origin"
   git -C "$repo" push -q -u origin main --tags
   git --git-dir="$origin" symbolic-ref HEAD refs/heads/main

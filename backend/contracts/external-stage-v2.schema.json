@@ -69,7 +69,16 @@
         "pharos_evidence": {"$ref": "#/$defs/ExternalStagePharosEvidenceV2"},
         "janus_evidence": {"$ref": "#/$defs/ExternalStageJanusEvidence"}
       },
-      "not": {"required": ["pharos_evidence", "janus_evidence"]}
+      "allOf": [
+        {"not": {"required": ["pharos_evidence", "janus_evidence"]}},
+        {"if": {"properties": {"heartbeat": {"const": true}}, "required": ["heartbeat"]}, "then": {"properties": {"state": {"enum": ["active", "waiting", "blocked"]}}, "not": {"anyOf": [{"required": ["blocker_codes"]}, {"required": ["pharos_evidence"]}, {"required": ["janus_evidence"]}]}}},
+        {"if": {"properties": {"heartbeat": {"const": false}, "state": {"const": "blocked"}}, "required": ["heartbeat", "state"]}, "then": {"required": ["blocker_codes"], "properties": {"blocker_codes": {"minItems": 1}}}},
+        {"if": {"properties": {"heartbeat": {"const": false}, "state": {"enum": ["active", "waiting", "succeeded", "failed"]}}, "required": ["heartbeat", "state"]}, "then": {"not": {"required": ["blocker_codes"]}}},
+        {"if": {"properties": {"state": {"enum": ["succeeded", "failed"]}}, "required": ["state"]}, "then": {"oneOf": [{"required": ["pharos_evidence"]}, {"required": ["janus_evidence"]}]}},
+        {"if": {"properties": {"state": {"enum": ["active", "waiting"]}}, "required": ["state"]}, "then": {"not": {"anyOf": [{"required": ["pharos_evidence"]}, {"required": ["janus_evidence"]}]}}},
+        {"if": {"required": ["pharos_evidence"]}, "then": {"oneOf": [{"properties": {"state": {"const": "succeeded"}, "pharos_evidence": {"properties": {"result": {"const": "succeeded"}}}}}, {"properties": {"state": {"const": "failed"}, "pharos_evidence": {"properties": {"result": {"const": "failed"}}}}}]}},
+        {"if": {"required": ["janus_evidence"]}, "then": {"oneOf": [{"properties": {"state": {"const": "succeeded"}, "janus_evidence": {"properties": {"result": {"const": "satisfied"}}}}}, {"properties": {"state": {"const": "blocked"}, "janus_evidence": {"properties": {"result": {"const": "blocked"}}}}}]}}
+      ]
     },
     "ExternalStagePullResponseV2": {
       "type": "object",

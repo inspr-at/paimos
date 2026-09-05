@@ -41,6 +41,7 @@ fi
 
 EXPECTED_FILES=$'README.md\nVERSION\ndocs/CHANGELOG.md\ndocs/INSTALL.md'
 EXTERNAL_STAGE_MANIFEST='backend/contracts/fixtures/external-stage/manifest-v1.json'
+EXTERNAL_STAGE_MANIFEST_V2='backend/contracts/fixtures/external-stage-v2/manifest-v2.json'
 RECOVERY_RECEIPT_DIR='scripts/release/recovery'
 CALENDAR_RECOVERY_MERGE_OID=''
 AUDITED_RELEASE_RECOVERY_MERGE_OID=''
@@ -350,6 +351,47 @@ assert_external_stage_release_pin() {
   else
     [[ "$release_pin" == "$new_tag" ]] ||
       fail "external-stage v1 pins unavailable tag $release_pin instead of the release being prepared ($new_tag)"
+  fi
+}
+
+assert_external_stage_v2_release_pin() {
+  local ref="$1" new_tag="$2" manifest pin_record release_pin commit_pin pinned_file current_oid pinned_oid
+  local -a pinned_files=(
+    'backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json'
+    'backend/contracts/external-stage-v2.schema.json'
+    'backend/externalstage/contract_v2.go'
+  )
+
+  git cat-file -e "$ref:$EXTERNAL_STAGE_MANIFEST_V2" 2>/dev/null ||
+    fail "$ref does not carry the external-stage v2 release manifest"
+  manifest=$(git show "$ref:$EXTERNAL_STAGE_MANIFEST_V2")
+  pin_record=$(jq -er '
+    if type == "object" and .schema_major == 2
+      and .media_type == "application/vnd.paimos.external-stage.v2+json"
+      and (.paimos_release | type) == "string" and (.paimos_commit | type) == "string"
+    then [.paimos_release, .paimos_commit] | @tsv
+    else error("invalid v2 certification tuple") end
+  ' <<<"$manifest") || fail "$ref carries an invalid external-stage v2 release manifest"
+  IFS=$'\t' read -r release_pin commit_pin <<<"$pin_record"
+  [[ "$release_pin" =~ ^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}(\.[0-9]{2}\.[0-9]{2})?$ ]] ||
+    fail "external-stage v2 paimos_release is not an INSPR calendar tag: $release_pin"
+  [[ "$commit_pin" =~ ^[0-9a-f]{40}$ ]] || fail "external-stage v2 paimos_commit is not lowercase 40-hex"
+  git cat-file -e "$commit_pin^{commit}" 2>/dev/null || fail "external-stage v2 pinned commit is unavailable: $commit_pin"
+  git merge-base --is-ancestor "$commit_pin" "$ref" || fail "external-stage v2 pinned commit is not an ancestor of $ref"
+  for pinned_file in "${pinned_files[@]}"; do
+    current_oid=$(git rev-parse "$ref:$pinned_file")
+    pinned_oid=$(git rev-parse "$commit_pin:$pinned_file")
+    [[ "$current_oid" == "$pinned_oid" ]] || fail "external-stage v2 file differs from pinned commit: $pinned_file"
+  done
+  if git cat-file -e "refs/tags/$release_pin^{commit}" 2>/dev/null; then
+    git merge-base --is-ancestor "$commit_pin" "refs/tags/$release_pin^{commit}" ||
+      fail "external-stage v2 pinned tag does not contain its certified commit"
+    current_oid=$(git rev-parse "$ref:$EXTERNAL_STAGE_MANIFEST_V2")
+    pinned_oid=$(git rev-parse "refs/tags/$release_pin:$EXTERNAL_STAGE_MANIFEST_V2")
+    [[ "$current_oid" == "$pinned_oid" ]] || fail "external-stage v2 manifest differs from immutable pinned tag"
+  else
+    [[ "$release_pin" == "$new_tag" ]] ||
+      fail "external-stage v2 pins unavailable tag $release_pin instead of release $new_tag"
   fi
 }
 
@@ -1139,6 +1181,7 @@ release_version::is_supported "$NEW" ||
 NEW_TAG="v$NEW"
 RELEASE_BRANCH="release/$NEW_TAG"
 assert_external_stage_release_pin origin/main "$NEW_TAG"
+assert_external_stage_v2_release_pin origin/main "$NEW_TAG"
 REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 [[ -n "$REPO" ]] || fail "could not resolve GitHub repository"
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
