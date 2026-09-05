@@ -7,7 +7,7 @@
     "schema_major": 2,
     "media_type": "application/vnd.paimos.external-stage.v2+json",
     "encoding": "utf-8-json-lf",
-    "fixture_digest": "sha256:a1d5575ffe9e84f984c212f47cf88d48fe3cf65383f34c2a6bc0dff897c5ae66"
+    "fixture_digest": "sha256:6bba9613230c6ea728db58ffea5533399caed19e6d56a8d78ef19d0fde20be8a"
   },
   "oneOf": [
     {"$ref": "#/$defs/ExternalStagePullResponseV2"},

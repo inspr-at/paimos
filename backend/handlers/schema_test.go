@@ -39,7 +39,7 @@ import (
 // version string), so a version bump alone also shifts it.
 func TestSchemaPayloadHash(t *testing.T) {
 	const expectedVersion = "2.4.0"
-	const expectedHash = "24ccccd859f90efaa1da32027b6d4253e2efd1d7f25326e47e85489417edf3e4"
+	const expectedHash = "667341990a9d31c55d7b46ef5038abb989c7ee1ac9222d9ec02a3487009e3907"
 
 	if handlers.SchemaVersion != expectedVersion {
 		t.Errorf("SchemaVersion = %q, test expects %q — update either the code or the test constant",

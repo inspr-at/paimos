@@ -250,14 +250,21 @@ func exactHeader(r *http.Request, name, value string) bool {
 }
 
 func externalStageExternalMedia(r *http.Request, hasBody bool) (string, error) {
-	values := r.Header.Values("Accept")
-	if len(values) != 1 || (values[0] != externalstage.MediaTypeV1 && values[0] != externalstage.MediaTypeV2) {
+	acceptValues := r.Header.Values("Accept")
+	if hasBody {
+		contentTypeValues := r.Header.Values("Content-Type")
+		if len(contentTypeValues) != 1 ||
+			(contentTypeValues[0] != externalstage.MediaTypeV1 && contentTypeValues[0] != externalstage.MediaTypeV2) {
+			return "", errExternalStageContentType
+		}
+	}
+	if len(acceptValues) != 1 || (acceptValues[0] != externalstage.MediaTypeV1 && acceptValues[0] != externalstage.MediaTypeV2) {
 		return "", errExternalStageAccept
 	}
-	if hasBody && !exactHeader(r, "Content-Type", values[0]) {
+	if hasBody && !exactHeader(r, "Content-Type", acceptValues[0]) {
 		return "", errExternalStageContentType
 	}
-	return values[0], nil
+	return acceptValues[0], nil
 }
 
 func decodeExternalStageJSON(w http.ResponseWriter, r *http.Request, contentType, accept string, dst any) error {

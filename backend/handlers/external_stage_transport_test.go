@@ -390,6 +390,10 @@ func TestExternalStageJSONDecoderPinsEnvelopeAndSingleObject(t *testing.T) {
 		{name: "wrong accept", body: `{"sequence":1}`, mutate: func(r *http.Request) {
 			r.Header.Set("Accept", "application/json")
 		}, wantErr: errExternalStageAccept, wantStatus: http.StatusNotAcceptable},
+		{name: "invalid content type precedes invalid accept", body: `{"sequence":1}`, mutate: func(r *http.Request) {
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Accept", "application/json")
+		}, wantErr: errExternalStageContentType, wantStatus: http.StatusUnsupportedMediaType},
 		{name: "duplicate accept", body: `{"sequence":1}`, mutate: func(r *http.Request) {
 			r.Header.Add("Accept", externalstage.MediaTypeV1)
 		}, wantErr: errExternalStageAccept, wantStatus: http.StatusNotAcceptable},

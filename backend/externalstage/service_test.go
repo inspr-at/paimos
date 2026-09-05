@@ -306,6 +306,72 @@ func (f *serviceFixture) sealEmpty(t *testing.T) {
 	}
 }
 
+func (f *serviceFixture) startRetryDeploymentAttempt(t *testing.T) {
+	t.Helper()
+	var reporterID, nextRevision int64
+	if err := f.database.QueryRow(`SELECT reporter_id FROM external_stage_reporter_registrations WHERE id=?`,
+		f.registrationID).Scan(&reporterID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.database.QueryRow(`SELECT COALESCE(MAX(delivery_revision),0)+1 FROM delivery_events WHERE delivery_id=?`,
+		f.deliveryID).Scan(&nextRevision); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,payload_hash,
+		kind,reporter_id,server_received_at) VALUES(?,?,'retry-attempt',zeroblob(32),'attempt_started',?,?)`,
+		f.deliveryID, nextRevision, reporterID, f.now.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startDeliveryEventID, _ := result.LastInsertId()
+	attemptResult, err := f.database.Exec(`INSERT INTO delivery_attempts(delivery_id,attempt_number,plan_revision,previous_attempt_id,
+		start_delivery_event_id,reason_code,created_at) VALUES(?,2,2,?,?,'rollback',?)`,
+		f.deliveryID, f.attemptID, startDeliveryEventID, f.now.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attemptID, _ := attemptResult.LastInsertId()
+	if _, err := f.database.Exec(`INSERT INTO delivery_attempt_stage_policy(delivery_id,attempt_id,stage_key,sort_order,
+		applicability,weight,policy_reference,reason_code,reason_text,authorized_by_reporter_id,created_at)
+		SELECT delivery_id,?,stage_key,sort_order,applicability,weight,policy_reference,reason_code,reason_text,
+		authorized_by_reporter_id,? FROM delivery_attempt_stage_policy WHERE attempt_id=?`,
+		attemptID, f.now.Format(time.RFC3339Nano), f.attemptID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.Exec(`INSERT INTO delivery_attempt_policy_seals(delivery_id,attempt_id,sealed_at) VALUES(?,?,?)`,
+		f.deliveryID, attemptID, f.now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.database.QueryRow(`SELECT COALESCE(MAX(delivery_revision),0)+1 FROM delivery_events WHERE delivery_id=?`,
+		f.deliveryID).Scan(&nextRevision); err != nil {
+		t.Fatal(err)
+	}
+	result, err = f.database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,payload_hash,
+		kind,reporter_id,server_received_at) VALUES(?,?,'retry-deployment-start',zeroblob(32),'stage_execution_started',?,?)`,
+		f.deliveryID, nextRevision, reporterID, f.now.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startEnvelopeID, _ := result.LastInsertId()
+	result, err = f.database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,
+		event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,semantic_state,
+		authority_source_sequence_cutoff,server_received_at) VALUES(?,?,'deployment',1,1,1,?,'execution_started',?,'active',0,?)`,
+		f.deliveryID, attemptID, startEnvelopeID, reporterID, f.now.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	executionStartID, _ := result.LastInsertId()
+	if _, err := f.database.Exec(`INSERT INTO delivery_stage_latest(delivery_id,attempt_id,stage_key,execution_number,
+		authority_epoch,current_reporter_id,execution_start_stage_event_id,authority_stage_event_id,updated_at)
+		VALUES(?,?,'deployment',1,1,?,?,?,?)`, f.deliveryID, attemptID, reporterID, executionStartID,
+		executionStartID, f.now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	f.attemptID = attemptID
+	f.executionStartID = executionStartID
+	f.authorityStageID = executionStartID
+}
+
 func TestServiceActivateOwnerMakesVerificationReachableWithAuditedReplay(t *testing.T) {
 	f := setupServiceFixture(t)
 	f.sealEmpty(t)
@@ -964,6 +1030,207 @@ func TestServiceReportV2PersistsExplicitReleaseIdentityAndBindsReplay(t *testing
 	}
 	if deploymentID != boundID {
 		t.Fatalf("verification bound deployment=%d want %d", boundID, deploymentID)
+	}
+}
+
+func TestServiceMixedEraVerificationFailsClosedWithoutBreakingV1(t *testing.T) {
+	f := setupServiceFixture(t)
+	f.sealEmpty(t)
+	ctx := t.Context()
+	deployment, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, "create-v1-deployment-for-v2-check",
+		CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+			ExpectedAuthorityEpoch: 1, ReporterRegistrationID: f.registrationID,
+			ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deploymentSecret, err := f.service.Mint(ctx, f.operator, deployment.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Accept(ctx, f.reporter, deployment.HandoffID, "accept-v1-deployment-for-v2-check", deploymentSecret,
+		AcceptRequest{Sequence: 1, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Second)
+	observed = f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Report(ctx, f.reporter, deployment.HandoffID, "active-v1-deployment-for-v2-check", deploymentSecret,
+		ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Second)
+	observed = f.now.Format(time.RFC3339Nano)
+	legacyArtifact := ArtifactEvidence{Version: "0.1.95", Digest: "sha256:" + fmt.Sprintf("%064x", 195),
+		CommitDigest: fmt.Sprintf("%040x", 195)}
+	deploymentEvidence := PharosEvidence{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+		Artifact: legacyArtifact, Result: EvidenceResultSucceeded, ObservedAt: observed}
+	if _, err := f.service.Report(ctx, f.reporter, deployment.HandoffID, "report-v1-deployment-for-v2-check", deploymentSecret,
+		ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: observed,
+			PharosEvidence: &deploymentEvidence}); err != nil {
+		t.Fatal(err)
+	}
+
+	f.now = f.now.Add(2 * time.Second)
+	verificationRegistration, err := f.service.RegisterReporter(ctx, f.operator, f.deliveryKey, "register-v1-verifier-for-v2-check",
+		RegisterReporterRequest{APIKeyID: f.reporter.APIKeyID, ReporterClass: ReporterClassPharos,
+			ReporterRole: ReporterRoleOwner, Workflow: "verify-production", Environment: "production"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation, err := f.service.ActivateOwner(ctx, f.operator, f.deliveryKey, "activate-v1-verification-for-v2-check",
+		ActivateOwnerRequest{ReporterRegistrationID: verificationRegistration.RegistrationID, StageKey: "verification",
+			ExpectedAttemptNumber: 1, ExpectedPlanRevision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.SealPrerequisites(ctx, f.operator, f.deliveryKey, "seal-v1-verification-for-v2-check",
+		SealPrerequisitesRequest{StageKey: "verification", ExecutionNumber: activation.ExecutionNumber,
+			ExpectedPlanRevision: 1, ExpectedAuthorityEpoch: activation.AuthorityEpoch, Prerequisites: []Prerequisite{}}); err != nil {
+		t.Fatal(err)
+	}
+	verification, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, "create-v1-verification-for-v2-check",
+		CreateHandoffRequest{StageKey: "verification", ExecutionNumber: activation.ExecutionNumber,
+			ExpectedPlanRevision: 1, ExpectedAuthorityEpoch: activation.AuthorityEpoch,
+			ReporterRegistrationID: verificationRegistration.RegistrationID, ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationSecret, err := f.service.Mint(ctx, f.operator, verification.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed = f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Accept(ctx, f.reporter, verification.HandoffID, "accept-v1-verification-for-v2-check", verificationSecret,
+		AcceptRequest{Sequence: 1, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Second)
+	observed = f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Report(ctx, f.reporter, verification.HandoffID, "active-v1-verification-for-v2-check", verificationSecret,
+		ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Second)
+	observed = f.now.Format(time.RFC3339Nano)
+	verificationEvidence := PharosEvidence{Kind: EvidenceKindVerification, Workflow: "verify-production", Environment: "production",
+		Artifact: legacyArtifact, Result: EvidenceResultSucceeded, ObservedAt: observed}
+	v2Evidence := PharosEvidenceV2{Kind: verificationEvidence.Kind, Workflow: verificationEvidence.Workflow,
+		Environment: verificationEvidence.Environment, Result: verificationEvidence.Result, ObservedAt: observed,
+		Artifact: ArtifactEvidenceV2{VersionScheme: VersionSchemeLegacy, Version: legacyArtifact.Version,
+			ReleaseChannel: "stable", ReleaseSequence: 195, Digest: legacyArtifact.Digest,
+			CommitDigest:              legacyArtifact.CommitDigest,
+			ReleaseManifestCoordinate: "ghcr:inspr-at/pharos/releases/0.1.95",
+			ReleaseManifestDigest:     "sha256:" + fmt.Sprintf("%064x", 196)}}
+	if _, err := f.service.ReportV2(ctx, f.reporter, verification.HandoffID, "reject-v2-over-v1-deployment", verificationSecret,
+		ReportRequestV2{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: observed,
+			PharosEvidence: &v2Evidence}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("v2 verification over v1-only deployment err=%v", err)
+	}
+	var v2Rows int
+	if err := f.database.QueryRow(`SELECT COUNT(*) FROM external_stage_pharos_evidence_v2`).Scan(&v2Rows); err != nil {
+		t.Fatal(err)
+	}
+	if v2Rows != 0 {
+		t.Fatalf("rejected v2 verification left %d extension rows", v2Rows)
+	}
+	verified, err := f.service.Report(ctx, f.reporter, verification.HandoffID, "report-v1-verification-after-v2-rejection", verificationSecret,
+		ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: observed,
+			PharosEvidence: &verificationEvidence})
+	if err != nil || verified.State != HandoffStateSucceeded {
+		t.Fatalf("v1 verification after rejected v2=%+v err=%v", verified, err)
+	}
+}
+
+func TestServiceReportV2RecordsLaterExplicitLegacyRollback(t *testing.T) {
+	f := setupServiceFixture(t)
+	f.sealEmpty(t)
+	ctx := t.Context()
+	reportDeployment := func(idempotencyPrefix string, planRevision int64, evidence PharosEvidenceV2) {
+		t.Helper()
+		handoff, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, idempotencyPrefix+"-create",
+			CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: planRevision,
+				ExpectedAuthorityEpoch: 1, ReporterRegistrationID: f.registrationID,
+				ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		secret, err := f.service.Mint(ctx, f.operator, handoff.HandoffID, 0, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observed := f.now.Format(time.RFC3339Nano)
+		if _, err := f.service.Accept(ctx, f.reporter, handoff.HandoffID, idempotencyPrefix+"-accept", secret,
+			AcceptRequest{Sequence: 1, ObservedAt: observed}); err != nil {
+			t.Fatal(err)
+		}
+		f.now = f.now.Add(time.Second)
+		observed = f.now.Format(time.RFC3339Nano)
+		if _, err := f.service.ReportV2(ctx, f.reporter, handoff.HandoffID, idempotencyPrefix+"-active", secret,
+			ReportRequestV2{Sequence: 2, State: HandoffStateActive, ObservedAt: observed}); err != nil {
+			t.Fatal(err)
+		}
+		f.now = f.now.Add(time.Second)
+		observed = f.now.Format(time.RFC3339Nano)
+		evidence.ObservedAt = observed
+		if _, err := f.service.ReportV2(ctx, f.reporter, handoff.HandoffID, idempotencyPrefix+"-report", secret,
+			ReportRequestV2{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: observed,
+				PharosEvidence: &evidence}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calendar := PharosEvidenceV2{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+		Artifact: ArtifactEvidenceV2{VersionScheme: VersionSchemeINSPRCalendar, Version: "26.09.05.09.00.00",
+			ReleaseChannel: "stable", ReleaseSequence: 260905090000,
+			Digest: "sha256:" + fmt.Sprintf("%064x", 260905), CommitDigest: fmt.Sprintf("%040x", 260905),
+			ReleaseManifestCoordinate: "ghcr:inspr-at/pharos/releases/26.09.05.09.00.00",
+			ReleaseManifestDigest:     "sha256:" + fmt.Sprintf("%064x", 260906)},
+		Result: EvidenceResultSucceeded}
+	reportDeployment("calendar-before-rollback", 1, calendar)
+
+	f.now = f.now.Add(time.Minute)
+	f.startRetryDeploymentAttempt(t)
+	if _, err := f.service.SealPrerequisites(ctx, f.operator, f.deliveryKey, "seal-rollback-deployment",
+		SealPrerequisitesRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 2,
+			ExpectedAuthorityEpoch: 1, Prerequisites: []Prerequisite{}}); err != nil {
+		t.Fatal(err)
+	}
+	rollback := PharosEvidenceV2{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+		Artifact: ArtifactEvidenceV2{VersionScheme: VersionSchemeLegacy, Version: "0.1.94",
+			ReleaseChannel: "rollback", ReleaseSequence: 194,
+			Digest: "sha256:" + fmt.Sprintf("%064x", 194), CommitDigest: fmt.Sprintf("%040x", 194),
+			ReleaseManifestCoordinate: "ghcr:inspr-at/pharos/releases/0.1.94",
+			ReleaseManifestDigest:     "sha256:" + fmt.Sprintf("%064x", 193)},
+		Result: EvidenceResultSucceeded}
+	reportDeployment("explicit-legacy-rollback", 2, rollback)
+
+	rows, err := f.database.Query(`SELECT extension.version_scheme,extension.release_channel,extension.release_sequence,
+		core.artifact_version,core.server_received_at FROM external_stage_pharos_evidence_v2 extension
+		JOIN external_stage_pharos_evidence core ON core.report_event_id=extension.report_event_id
+		ORDER BY extension.report_event_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	type recorded struct {
+		scheme, channel, version, received string
+		sequence                           int64
+	}
+	var records []recorded
+	for rows.Next() {
+		var item recorded
+		if err := rows.Scan(&item.scheme, &item.channel, &item.sequence, &item.version, &item.received); err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, item)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 || records[0].scheme != string(VersionSchemeINSPRCalendar) || records[0].channel != "stable" ||
+		records[1].scheme != string(VersionSchemeLegacy) || records[1].channel != "rollback" || records[1].version != "0.1.94" ||
+		records[1].sequence >= records[0].sequence || records[1].received <= records[0].received {
+		t.Fatalf("rollback did not remain a later immutable fact naming an older release: %+v", records)
 	}
 }
 

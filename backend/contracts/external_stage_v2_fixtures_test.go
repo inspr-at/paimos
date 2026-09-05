@@ -32,12 +32,13 @@ type externalStageFixtureV2 struct {
 }
 
 type externalStageFixtureCaseV2 struct {
-	Name                   string                        `json:"name"`
-	StageKey               string                        `json:"stage_key"`
-	Accept                 externalstage.AcceptRequest   `json:"accept"`
-	Report                 externalstage.ReportRequestV2 `json:"report"`
-	ServerReceivedAt       string                        `json:"server_received_at"`
-	ExpectedCanonicalState string                        `json:"expected_canonical_state"`
+	Name                       string                        `json:"name"`
+	StageKey                   string                        `json:"stage_key"`
+	DeploymentServerReceivedAt string                        `json:"deployment_server_received_at,omitempty"`
+	Accept                     externalstage.AcceptRequest   `json:"accept"`
+	Report                     externalstage.ReportRequestV2 `json:"report"`
+	ServerReceivedAt           string                        `json:"server_received_at"`
+	ExpectedCanonicalState     string                        `json:"expected_canonical_state"`
 }
 
 type externalStageFixtureManifestV2 struct {
@@ -87,15 +88,32 @@ func TestCanonicalExternalStageV2FixtureAndDigest(t *testing.T) {
 		t.Fatalf("fixture has trailing JSON: %v", err)
 	}
 	if fixture.SchemaMajor != externalstage.ContractMajorV2 || fixture.ReporterClass != externalstage.ReporterClassPharos ||
-		fixture.ReporterRole != externalstage.ReporterRoleOwner || len(fixture.Cases) != 3 {
+		fixture.ReporterRole != externalstage.ReporterRoleOwner || len(fixture.Cases) != 4 {
 		t.Fatalf("unexpected fixture identity: %+v", fixture)
 	}
-	wantSchemes := []externalstage.VersionScheme{externalstage.VersionSchemeLegacy, externalstage.VersionSchemeINSPRCalendar, externalstage.VersionSchemeLegacy}
+	wantSchemes := []externalstage.VersionScheme{externalstage.VersionSchemeLegacy, externalstage.VersionSchemeINSPRCalendar,
+		externalstage.VersionSchemeINSPRCalendar, externalstage.VersionSchemeLegacy}
+	wantStates := []string{"deployed_unverified", "deployed_unverified", "verified", "deployed_unverified"}
 	for i, item := range fixture.Cases {
 		if item.Report.PharosEvidence == nil || item.Report.PharosEvidence.Artifact.VersionScheme != wantSchemes[i] ||
-			item.Report.PharosEvidence.Artifact.ReleaseManifestCoordinate == "" || item.Report.PharosEvidence.Artifact.ReleaseManifestDigest == "" {
+			item.Report.PharosEvidence.Artifact.ReleaseManifestCoordinate == "" || item.Report.PharosEvidence.Artifact.ReleaseManifestDigest == "" ||
+			item.ExpectedCanonicalState != wantStates[i] {
 			t.Fatalf("case %d lacks explicit immutable identity: %+v", i, item)
 		}
+	}
+	deployment, verification := fixture.Cases[1], fixture.Cases[2]
+	if verification.StageKey != "verification" || verification.Report.PharosEvidence.Kind != externalstage.EvidenceKindVerification ||
+		verification.DeploymentServerReceivedAt != deployment.ServerReceivedAt ||
+		verification.Report.PharosEvidence.Environment != deployment.Report.PharosEvidence.Environment ||
+		verification.Report.PharosEvidence.Artifact != deployment.Report.PharosEvidence.Artifact {
+		t.Fatalf("verification fixture does not bind the exact calendar deployment: deployment=%+v verification=%+v", deployment, verification)
+	}
+	rollback := fixture.Cases[3]
+	if rollback.StageKey != "deployment" || rollback.Report.PharosEvidence.Kind != externalstage.EvidenceKindDeployment ||
+		rollback.Report.PharosEvidence.Artifact.ReleaseChannel != "rollback" ||
+		rollback.Report.PharosEvidence.Artifact.ReleaseSequence >= deployment.Report.PharosEvidence.Artifact.ReleaseSequence ||
+		rollback.ServerReceivedAt <= verification.ServerReceivedAt {
+		t.Fatalf("rollback fixture must be a later fact naming an older immutable release: %+v", rollback)
 	}
 	hash := sha256.New()
 	_, _ = hash.Write([]byte(externalStageFixtureDomainV2))

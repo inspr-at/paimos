@@ -26,7 +26,7 @@ const ExternalStageV1FixtureDigestHex = "0318f4025902c9d5dd790384950cc9daebb16e0
 // ExternalStageV2FixtureDigestHex is the immutable lowercase SHA-256 of the
 // additive scheme-aware Pharos owner fixture set. Its domain and inventory are
 // pinned independently from v1 so publishing v2 cannot alter v1 bytes.
-const ExternalStageV2FixtureDigestHex = "a1d5575ffe9e84f984c212f47cf88d48fe3cf65383f34c2a6bc0dff897c5ae66"
+const ExternalStageV2FixtureDigestHex = "6bba9613230c6ea728db58ffea5533399caed19e6d56a8d78ef19d0fde20be8a"
 
 // ExternalStageV1FixtureDigest returns a fresh fixed-size digest suitable for
 // externalstage.Options. It cannot expose mutable package-level digest state.

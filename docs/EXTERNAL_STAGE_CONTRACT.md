@@ -250,11 +250,11 @@ may retire v1 negotiation. V1 itself remains byte-for-byte immutable.
 
 The canonical v2 owner fixture lives in
 `backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json`. It covers
-an explicit legacy deployment, an explicit calendar deployment, and an
-explicit legacy rollback. Its fixture-set digest is:
+an explicit legacy deployment, an explicit calendar deployment with its exact
+verification, and a later explicit legacy rollback. Its fixture-set digest is:
 
 ```text
-sha256:a1d5575ffe9e84f984c212f47cf88d48fe3cf65383f34c2a6bc0dff897c5ae66
+sha256:6bba9613230c6ea728db58ffea5533399caed19e6d56a8d78ef19d0fde20be8a
 ```
 
 The v2 fixture digest uses the same framed algorithm with the domain changed to
