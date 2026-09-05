@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [Unreleased]
+
+### Added — Scheme-aware external-stage artifact evidence (PAI-876)
+
+- Added exact v2 media negotiation and DTOs for Pharos evidence with explicit
+  legacy/calendar schemes, original version, channel, monotonic sequence,
+  artifact/source digests, and immutable release-set manifest identity.
+- Added append-only storage that binds each v2 verification to the exact prior
+  v2 deployment across every identity field, plus canonical legacy, calendar,
+  rollback, replay, malformed-input, and downgrade coverage. Frozen v1 bytes
+  and semantics remain unchanged.
+
 ## [26.09.04.20.54] — 2026-09-04
 
 ### Fixed — Actionable Agent Intercom empty states (PAI-893)

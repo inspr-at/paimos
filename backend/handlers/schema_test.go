@@ -159,17 +159,18 @@ func TestSchemaTagColorsMatchValidator(t *testing.T) {
 // which schema enum validates which request field.
 func TestSchemaEnumFieldsResolve(t *testing.T) {
 	want := map[string]string{
-		"issue.type":                            "type",
-		"issue.status":                          "status",
-		"issue.priority":                        "priority",
-		"relation.type":                         "relation",
-		"tag.color":                             "tag_colors",
-		"knowledge.type":                        "knowledge_types",
-		"knowledge.status":                      "knowledge_status",
-		"external_stage_handoff.state":          "external_stage_handoff_state",
-		"external_stage_handoff.reporter_class": "external_stage_reporter_class",
-		"external_stage_handoff.reporter_role":  "external_stage_reporter_role",
-		"external_stage_evidence.kind":          "external_stage_evidence_kind",
+		"issue.type":                             "type",
+		"issue.status":                           "status",
+		"issue.priority":                         "priority",
+		"relation.type":                          "relation",
+		"tag.color":                              "tag_colors",
+		"knowledge.type":                         "knowledge_types",
+		"knowledge.status":                       "knowledge_status",
+		"external_stage_handoff.state":           "external_stage_handoff_state",
+		"external_stage_handoff.reporter_class":  "external_stage_reporter_class",
+		"external_stage_handoff.reporter_role":   "external_stage_reporter_role",
+		"external_stage_evidence.kind":           "external_stage_evidence_kind",
+		"external_stage_artifact.version_scheme": "external_stage_version_scheme",
 	}
 	for binding, domain := range want {
 		got, ok := handlers.Schema.EnumFields[binding]

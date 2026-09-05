@@ -249,6 +249,17 @@ func exactHeader(r *http.Request, name, value string) bool {
 	return len(values) == 1 && values[0] == value
 }
 
+func externalStageExternalMedia(r *http.Request, hasBody bool) (string, error) {
+	values := r.Header.Values("Accept")
+	if len(values) != 1 || (values[0] != externalstage.MediaTypeV1 && values[0] != externalstage.MediaTypeV2) {
+		return "", errExternalStageAccept
+	}
+	if hasBody && !exactHeader(r, "Content-Type", values[0]) {
+		return "", errExternalStageContentType
+	}
+	return values[0], nil
+}
+
 func decodeExternalStageJSON(w http.ResponseWriter, r *http.Request, contentType, accept string, dst any) error {
 	if !exactHeader(r, "Content-Type", contentType) || len(r.Header.Values("Content-Encoding")) != 0 {
 		return errExternalStageContentType
@@ -441,8 +452,9 @@ func revokeExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 }
 
 func pullExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
-	if !exactHeader(r, "Accept", externalstage.MediaTypeV1) {
-		writeExternalStageStatus(w, r, http.StatusNotAcceptable)
+	media, negotiationErr := externalStageExternalMedia(r, false)
+	if negotiationErr != nil {
+		writeExternalStageDecodeError(w, r, negotiationErr)
 		return
 	}
 	if len(r.Header.Values("Content-Type")) != 0 || len(r.Header.Values("Content-Encoding")) != 0 ||
@@ -470,12 +482,22 @@ func pullExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 		writeExternalStageServiceError(w, r, err)
 		return
 	}
-	writeExternalStageJSON(w, 200, externalstage.MediaTypeV1, out)
+	if media == externalstage.MediaTypeV2 {
+		fixture := "sha256:" + contracts.ExternalStageV2FixtureDigestHex
+		writeExternalStageJSON(w, 200, media, externalstage.NewPullResponseV2(out, fixture))
+		return
+	}
+	writeExternalStageJSON(w, 200, media, out)
 }
 
 func acceptExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
+	media, negotiationErr := externalStageExternalMedia(r, true)
+	if negotiationErr != nil {
+		writeExternalStageDecodeError(w, r, negotiationErr)
+		return
+	}
 	var body externalstage.AcceptRequest
-	if err := decodeExternalStageJSON(w, r, externalstage.MediaTypeV1, externalstage.MediaTypeV1, &body); err != nil {
+	if err := decodeExternalStageJSON(w, r, media, media, &body); err != nil {
 		writeExternalStageDecodeError(w, r, err)
 		return
 	}
@@ -484,7 +506,7 @@ func acceptExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 		writeExternalStageStatus(w, r, 400)
 		return
 	}
-	externalStageMutation(w, r, func(p externalstage.Principal, secret []byte) (externalstage.ReportReceipt, error) {
+	externalStageMutationWithMedia(w, r, media, func(p externalstage.Principal, secret []byte) (externalstage.ReportReceipt, error) {
 		service, ok := externalStageServiceForRequest(w, r)
 		if !ok {
 			return externalstage.ReportReceipt{}, errExternalStageResponseWritten
@@ -493,8 +515,18 @@ func acceptExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func reportExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
-	var body externalstage.ReportRequest
-	if err := decodeExternalStageJSON(w, r, externalstage.MediaTypeV1, externalstage.MediaTypeV1, &body); err != nil {
+	media, negotiationErr := externalStageExternalMedia(r, true)
+	if negotiationErr != nil {
+		writeExternalStageDecodeError(w, r, negotiationErr)
+		return
+	}
+	var bodyV1 externalstage.ReportRequest
+	var bodyV2 externalstage.ReportRequestV2
+	decodeTarget := any(&bodyV1)
+	if media == externalstage.MediaTypeV2 {
+		decodeTarget = &bodyV2
+	}
+	if err := decodeExternalStageJSON(w, r, media, media, decodeTarget); err != nil {
 		writeExternalStageDecodeError(w, r, err)
 		return
 	}
@@ -503,15 +535,22 @@ func reportExternalStageHandoff(w http.ResponseWriter, r *http.Request) {
 		writeExternalStageStatus(w, r, 400)
 		return
 	}
-	externalStageMutation(w, r, func(p externalstage.Principal, secret []byte) (externalstage.ReportReceipt, error) {
+	externalStageMutationWithMedia(w, r, media, func(p externalstage.Principal, secret []byte) (externalstage.ReportReceipt, error) {
 		service, ok := externalStageServiceForRequest(w, r)
 		if !ok {
 			return externalstage.ReportReceipt{}, errExternalStageResponseWritten
 		}
-		return service.Report(r.Context(), p, chi.URLParam(r, "handoffID"), idem, secret, body)
+		if media == externalstage.MediaTypeV2 {
+			return service.ReportV2(r.Context(), p, chi.URLParam(r, "handoffID"), idem, secret, bodyV2)
+		}
+		return service.Report(r.Context(), p, chi.URLParam(r, "handoffID"), idem, secret, bodyV1)
 	})
 }
 func externalStageMutation(w http.ResponseWriter, r *http.Request, fn func(externalstage.Principal, []byte) (externalstage.ReportReceipt, error)) {
+	externalStageMutationWithMedia(w, r, externalstage.MediaTypeV1, fn)
+}
+
+func externalStageMutationWithMedia(w http.ResponseWriter, r *http.Request, media string, fn func(externalstage.Principal, []byte) (externalstage.ReportReceipt, error)) {
 	secret, err := externalStageSecret(r)
 	if err != nil {
 		writeControlNotFound(w, r)
@@ -535,7 +574,7 @@ func externalStageMutation(w http.ResponseWriter, r *http.Request, fn func(exter
 	if out.Duplicate {
 		status = http.StatusOK
 	}
-	writeExternalStageJSON(w, status, externalstage.MediaTypeV1, out)
+	writeExternalStageJSON(w, status, media, out)
 }
 func zeroBytes(value []byte) {
 	for i := range value {

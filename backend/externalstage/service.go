@@ -702,19 +702,32 @@ func lookupOperationReceipt(ctx context.Context, tx *sql.Tx, h handoffRow, kind 
 }
 
 func (s *Service) Report(ctx context.Context, p Principal, handoffID, idempotencyKey string, secret []byte, req ReportRequest) (ReportReceipt, error) {
-	if req.Sequence <= 0 || idempotencyKey == "" || !validReportState(req.State) {
-		return ReportReceipt{}, ErrInvalid
+	var err error
+	req, err = s.normalizeReport(req)
+	if err != nil {
+		return ReportReceipt{}, err
+	}
+	requestDigest, err := canonicalDigest(req)
+	if err != nil {
+		return ReportReceipt{}, err
+	}
+	return s.reportNormalized(ctx, p, handoffID, idempotencyKey, secret, req, requestDigest, ContractMajor, nil)
+}
+
+func (s *Service) normalizeReport(req ReportRequest) (ReportRequest, error) {
+	if req.Sequence <= 0 || !validReportState(req.State) {
+		return ReportRequest{}, ErrInvalid
 	}
 	observed, err := time.Parse(time.RFC3339Nano, req.ObservedAt)
 	if err != nil || observed.After(s.clock.Now().UTC().Add(MaxReporterFutureSkew)) {
-		return ReportReceipt{}, ErrInvalid
+		return ReportRequest{}, ErrInvalid
 	}
 	req.ObservedAt = observed.UTC().Format(time.RFC3339Nano)
 	if req.PharosEvidence != nil {
 		evidence := *req.PharosEvidence
 		at, parseErr := time.Parse(time.RFC3339Nano, evidence.ObservedAt)
 		if parseErr != nil || at.After(s.clock.Now().UTC().Add(MaxReporterFutureSkew)) {
-			return ReportReceipt{}, ErrInvalid
+			return ReportRequest{}, ErrInvalid
 		}
 		evidence.ObservedAt = at.UTC().Format(time.RFC3339Nano)
 		req.PharosEvidence = &evidence
@@ -723,14 +736,19 @@ func (s *Service) Report(ctx context.Context, p Principal, handoffID, idempotenc
 		evidence := *req.JanusEvidence
 		at, parseErr := time.Parse(time.RFC3339Nano, evidence.ObservedAt)
 		if parseErr != nil || at.After(s.clock.Now().UTC().Add(MaxReporterFutureSkew)) {
-			return ReportReceipt{}, ErrInvalid
+			return ReportRequest{}, ErrInvalid
 		}
 		evidence.ObservedAt = at.UTC().Format(time.RFC3339Nano)
 		req.JanusEvidence = &evidence
 	}
-	requestDigest, err := canonicalDigest(req)
-	if err != nil {
-		return ReportReceipt{}, err
+	return req, nil
+}
+
+func (s *Service) reportNormalized(ctx context.Context, p Principal, handoffID, idempotencyKey string, secret []byte,
+	req ReportRequest, requestDigest [sha256.Size]byte, contractMajor int, artifactV2 *ArtifactEvidenceV2,
+) (ReportReceipt, error) {
+	if idempotencyKey == "" {
+		return ReportReceipt{}, ErrInvalid
 	}
 	idemDigest := sha256.Sum256([]byte(idempotencyKey))
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -769,7 +787,7 @@ func (s *Service) Report(ctx context.Context, p Principal, handoffID, idempotenc
 	if req.Heartbeat {
 		return s.reportHeartbeat(ctx, tx, h, p, requestDigest, idemDigest, req)
 	}
-	if err := validateSemanticReport(h, req, secret); err != nil {
+	if err := validateSemanticReportContract(h, req, secret, contractMajor, artifactV2); err != nil {
 		return ReportReceipt{}, err
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO external_stage_report_events(handoff_row_id,actor_api_key_id,
@@ -789,7 +807,7 @@ func (s *Service) Report(ctx context.Context, p Principal, handoffID, idempotenc
 			return ReportReceipt{}, ErrInvalid
 		}
 	}
-	if err := insertTypedEvidence(ctx, tx, h, reportID, received, req); err != nil {
+	if err := insertTypedEvidence(ctx, tx, h, reportID, received, req, artifactV2); err != nil {
 		return ReportReceipt{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO external_stage_audit_events(event_kind,handoff_row_id,report_event_id,
@@ -994,6 +1012,26 @@ func reportEvidenceKind(req ReportRequest) any {
 	return nil
 }
 
+func validateSemanticReportContract(h handoffRow, req ReportRequest, secret []byte, contractMajor int, artifactV2 *ArtifactEvidenceV2) error {
+	if contractMajor != ContractMajor && contractMajor != ContractMajorV2 {
+		return ErrInvalid
+	}
+	if contractMajor == ContractMajor && artifactV2 != nil {
+		return ErrInvalid
+	}
+	if contractMajor == ContractMajorV2 {
+		if (req.PharosEvidence == nil) != (artifactV2 == nil) {
+			return ErrInvalid
+		}
+		if artifactV2 != nil {
+			if err := validateArtifactEvidenceV2(*artifactV2, secret); err != nil {
+				return err
+			}
+		}
+	}
+	return validateSemanticReport(h, req, secret)
+}
+
 func validateSemanticReport(h handoffRow, req ReportRequest, secret []byte) error {
 	seen := map[BlockerCode]bool{}
 	for _, b := range req.BlockerCodes {
@@ -1094,12 +1132,47 @@ func decodeWireDigest(value string) ([]byte, error) {
 	return raw, nil
 }
 
-func insertTypedEvidence(ctx context.Context, tx *sql.Tx, h handoffRow, reportID int64, received string, req ReportRequest) error {
+func insertTypedEvidence(ctx context.Context, tx *sql.Tx, h handoffRow, reportID int64, received string, req ReportRequest, artifactV2 *ArtifactEvidenceV2) error {
 	if req.PharosEvidence != nil {
 		e := req.PharosEvidence
 		digest, _ := decodeWireDigest(e.Artifact.Digest)
 		_, err := tx.ExecContext(ctx, `INSERT INTO external_stage_pharos_evidence(report_event_id,evidence_kind,workflow_symbol,
 		environment_symbol,artifact_version,artifact_digest,commit_digest,result,observed_at,server_received_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, reportID, e.Kind, e.Workflow, e.Environment, e.Artifact.Version, digest, e.Artifact.CommitDigest, e.Result, e.ObservedAt, received)
+		if err := mapInvalid(err); err != nil {
+			return err
+		}
+		if artifactV2 == nil {
+			return nil
+		}
+		manifestDigest, _ := decodeWireDigest(artifactV2.ReleaseManifestDigest)
+		var boundDeployment any
+		if e.Kind == EvidenceKindVerification {
+			var deploymentReportID int64
+			if err := tx.QueryRowContext(ctx, `SELECT deployment.report_event_id
+				FROM external_stage_pharos_evidence deployment
+				JOIN external_stage_pharos_evidence_v2 deployment_v2 ON deployment_v2.report_event_id=deployment.report_event_id
+				JOIN external_stage_report_events deployment_report ON deployment_report.id=deployment.report_event_id
+				JOIN external_stage_handoffs deployment_handoff ON deployment_handoff.id=deployment_report.handoff_row_id
+				WHERE deployment_handoff.delivery_id=? AND deployment_handoff.attempt_id=?
+				 AND deployment_handoff.stage_key='deployment' AND deployment_handoff.lifecycle_state='succeeded'
+				 AND deployment.evidence_kind='deployment' AND deployment.result='succeeded'
+				 AND deployment.environment_symbol=? AND deployment.artifact_version=?
+				 AND deployment.artifact_digest=? AND deployment.commit_digest=?
+				 AND deployment_v2.version_scheme=? AND deployment_v2.release_channel=?
+				 AND deployment_v2.release_sequence=? AND deployment_v2.release_manifest_coordinate=?
+				 AND deployment_v2.release_manifest_digest=?
+				ORDER BY deployment.report_event_id DESC LIMIT 1`, h.deliveryID, h.attemptID, e.Environment,
+				e.Artifact.Version, digest, e.Artifact.CommitDigest, artifactV2.VersionScheme,
+				artifactV2.ReleaseChannel, artifactV2.ReleaseSequence, artifactV2.ReleaseManifestCoordinate,
+				manifestDigest).Scan(&deploymentReportID); err != nil {
+				return ErrInvalid
+			}
+			boundDeployment = deploymentReportID
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO external_stage_pharos_evidence_v2(report_event_id,version_scheme,
+			release_channel,release_sequence,release_manifest_coordinate,release_manifest_digest,bound_deployment_report_event_id)
+			VALUES(?,?,?,?,?,?,?)`, reportID, artifactV2.VersionScheme, artifactV2.ReleaseChannel,
+			artifactV2.ReleaseSequence, artifactV2.ReleaseManifestCoordinate, manifestDigest, boundDeployment)
 		return mapInvalid(err)
 	}
 	if req.JanusEvidence != nil {

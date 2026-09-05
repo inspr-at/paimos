@@ -15,9 +15,9 @@ AI profile, effort, prompt, context, agent, runner, and provenance workflow
 to the current Vue and Go surfaces.
 
 **External delivery-stage adapters**:
-[`EXTERNAL_STAGE_CONTRACT.md`](EXTERNAL_STAGE_CONTRACT.md) defines the pinned
-Pharos/Janus v1 routes, credential boundary, canonical fixtures, and release
-pin tuple.
+[`EXTERNAL_STAGE_CONTRACT.md`](EXTERNAL_STAGE_CONTRACT.md) defines the frozen
+Pharos/Janus v1 routes and additive scheme-aware v2 evidence, credential
+boundary, canonical fixtures, and release pin tuples.
 
 **Project-context tooling**:
 - [`ANCHORS.md`](ANCHORS.md) defines `@paimos` source anchors.
@@ -71,7 +71,7 @@ backend/
   agentmessage/        durable agent message ledger, delivery bus, adapters, and
                        webhook dispatcher (M151–M156; see AGENT_BUS_ARCHITECTURE.md)
   secretvault/         authenticated encryption for stored secrets and receiver targets
-  contracts/           versioned JSON schemas + fixtures (agent-message-v1/v2, external-stage-v1)
+  contracts/           versioned JSON schemas + fixtures (agent-message-v1/v2, external-stage-v1/v2)
   cmd/paimos/          `paimos` CLI (issue, tell, message, listen, serve, run-agent, …)
   cmd/paimos-mcp/      MCP server binary
   db/                  SQLite open + migrations (each migration inline in db.go)

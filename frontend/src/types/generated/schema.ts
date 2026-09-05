@@ -124,13 +124,23 @@ export const EXTERNAL_STAGE_EVIDENCE_KINDS = [
 ] as const
 export type ExternalStageEvidenceKind = typeof EXTERNAL_STAGE_EVIDENCE_KINDS[number]
 
+export const EXTERNAL_STAGE_VERSION_SCHEMES = [
+  "legacy",
+  "inspr-calendar-v1",
+] as const
+export type ExternalStageVersionScheme = typeof EXTERNAL_STAGE_VERSION_SCHEMES[number]
+
 export const EXTERNAL_STAGE_CONTRACT_MAJOR = 1 as const
 export const EXTERNAL_STAGE_MEDIA_TYPE = "application/vnd.paimos.external-stage.v1+json" as const
+export const EXTERNAL_STAGE_CONTRACT_MAJOR_V2 = 2 as const
+export const EXTERNAL_STAGE_MEDIA_TYPE_V2 = "application/vnd.paimos.external-stage.v2+json" as const
+export const EXTERNAL_STAGE_FIXTURE_DIGEST_V2 = "sha256:a1d5575ffe9e84f984c212f47cf88d48fe3cf65383f34c2a6bc0dff897c5ae66" as const
 export const EXTERNAL_STAGE_SECRET_MEDIA_TYPE = "application/vnd.paimos.external-stage-secret.v1" as const
 export const EXTERNAL_STAGE_HANDOFF_SECRET_HEADER = "X-PAIMOS-Handoff-Secret" as const
 export const EXTERNAL_STAGE_ONE_TIME_SECRET_BYTES = 32 as const
 
 export const ENUM_FIELDS = {
+  "external_stage_artifact.version_scheme": "external_stage_version_scheme",
   "external_stage_evidence.kind": "external_stage_evidence_kind",
   "external_stage_handoff.reporter_class": "external_stage_reporter_class",
   "external_stage_handoff.reporter_role": "external_stage_reporter_role",

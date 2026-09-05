@@ -285,11 +285,15 @@ func TestExternalStageOpenAPIDTOsMatchGoBothWays(t *testing.T) {
 		"ExternalStageRevokeRequest":          reflect.TypeOf(externalstage.RevokeHandoffRequest{}),
 		"ExternalStageHandoffMetadata":        reflect.TypeOf(externalstage.HandoffMetadata{}),
 		"ExternalStagePullResponse":           reflect.TypeOf(externalstage.PullResponse{}),
+		"ExternalStagePullResponseV2":         reflect.TypeOf(externalstage.PullResponseV2{}),
 		"ExternalStageAcceptRequest":          reflect.TypeOf(externalstage.AcceptRequest{}),
 		"ExternalStageArtifactEvidence":       reflect.TypeOf(externalstage.ArtifactEvidence{}),
+		"ExternalStageArtifactEvidenceV2":     reflect.TypeOf(externalstage.ArtifactEvidenceV2{}),
 		"ExternalStagePharosEvidence":         reflect.TypeOf(externalstage.PharosEvidence{}),
+		"ExternalStagePharosEvidenceV2":       reflect.TypeOf(externalstage.PharosEvidenceV2{}),
 		"ExternalStageJanusEvidence":          reflect.TypeOf(externalstage.JanusEvidence{}),
 		"ExternalStageReportRequest":          reflect.TypeOf(externalstage.ReportRequest{}),
+		"ExternalStageReportRequestV2":        reflect.TypeOf(externalstage.ReportRequestV2{}),
 		"ExternalStageReportReceipt":          reflect.TypeOf(externalstage.ReportReceipt{}),
 	}
 	for name, typ := range cases {
@@ -355,6 +359,8 @@ func TestExternalStageOpenAPINegotiationAndSecretChannelsArePinned(t *testing.T)
 		acceptRef := "#/components/parameters/ExternalStageAcceptHeader"
 		if route.Path == externalstage.InternalMintPath || route.Path == externalstage.InternalRotatePath {
 			acceptRef = "#/components/parameters/ExternalStageSecretAcceptHeader"
+		} else if route.Audience == "external" {
+			acceptRef = "#/components/parameters/ExternalStageExternalAcceptHeader"
 		}
 		if !refs[acceptRef] {
 			t.Errorf("%s %s does not require exact Accept negotiation through %s", route.Method, route.Path, acceptRef)
@@ -363,7 +369,10 @@ func TestExternalStageOpenAPINegotiationAndSecretChannelsArePinned(t *testing.T)
 			if len(operation.RequestBody.Content) != 0 {
 				t.Errorf("GET pull unexpectedly has a body contract: %v", operation.RequestBody.Content)
 			}
-		} else if len(operation.RequestBody.Content) != 1 || operation.RequestBody.Content[externalstage.MediaTypeV1] == nil {
+		} else if route.Audience == "external" && (len(operation.RequestBody.Content) != 2 ||
+			operation.RequestBody.Content[externalstage.MediaTypeV1] == nil || operation.RequestBody.Content[externalstage.MediaTypeV2] == nil) {
+			t.Errorf("%s %s external request media=%v", route.Method, route.Path, operation.RequestBody.Content)
+		} else if route.Audience != "external" && (len(operation.RequestBody.Content) != 1 || operation.RequestBody.Content[externalstage.MediaTypeV1] == nil) {
 			t.Errorf("%s %s request media=%v", route.Method, route.Path, operation.RequestBody.Content)
 		}
 		secretRef := refs["#/components/parameters/ExternalStageSecretHeader"]

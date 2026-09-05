@@ -840,6 +840,133 @@ func TestServiceOwnerLifecycleReplayHeartbeatAndRestart(t *testing.T) {
 	}
 }
 
+func TestServiceReportV2PersistsExplicitReleaseIdentityAndBindsReplay(t *testing.T) {
+	f := setupServiceFixture(t)
+	f.sealEmpty(t)
+	ctx := context.Background()
+	metadata, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, "create-v2-owner",
+		CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: 1, ExpectedPlanRevision: 1,
+			ExpectedAuthorityEpoch: 1, ReporterRegistrationID: f.registrationID,
+			ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := f.service.Mint(ctx, f.operator, metadata.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Accept(ctx, f.reporter, metadata.HandoffID, "accept-v2-owner", secret,
+		AcceptRequest{Sequence: 1, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.ReportV2(ctx, f.reporter, metadata.HandoffID, "active-v2-owner", secret,
+		ReportRequestV2{Sequence: 2, State: HandoffStateActive, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Second)
+	observed = f.now.Format(time.RFC3339Nano)
+	request := ReportRequestV2{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: observed,
+		PharosEvidence: &PharosEvidenceV2{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+			Artifact: ArtifactEvidenceV2{VersionScheme: VersionSchemeINSPRCalendar, Version: "26.09.05.09.30.01",
+				ReleaseChannel: "stable", ReleaseSequence: 260905093001,
+				Digest: "sha256:" + fmt.Sprintf("%064x", 876), CommitDigest: fmt.Sprintf("%040x", 876),
+				ReleaseManifestCoordinate: "ghcr:inspr-at/pharos/releases/26.09.05.09.30.01",
+				ReleaseManifestDigest:     "sha256:" + fmt.Sprintf("%064x", 877)},
+			Result: EvidenceResultSucceeded, ObservedAt: observed}}
+	receipt, err := f.service.ReportV2(ctx, f.reporter, metadata.HandoffID, "terminal-v2-owner", secret, request)
+	if err != nil || receipt.Duplicate {
+		t.Fatalf("report=%+v err=%v", receipt, err)
+	}
+	replay, err := f.service.ReportV2(ctx, f.reporter, metadata.HandoffID, "terminal-v2-owner", secret, request)
+	if err != nil || !replay.Duplicate || replay.ServerReceivedAt != receipt.ServerReceivedAt {
+		t.Fatalf("replay=%+v err=%v", replay, err)
+	}
+	mutated := request
+	mutated.PharosEvidence = new(PharosEvidenceV2)
+	*mutated.PharosEvidence = *request.PharosEvidence
+	mutated.PharosEvidence.Artifact.ReleaseSequence++
+	if _, err := f.service.ReportV2(ctx, f.reporter, metadata.HandoffID, "terminal-v2-owner", secret, mutated); !errors.Is(err, ErrConflict) {
+		t.Fatalf("mutated replay err=%v", err)
+	}
+	var scheme, channel, coordinate string
+	var sequence int64
+	var manifestBytes, boundDeploymentCount int
+	if err := f.database.QueryRow(`SELECT version_scheme,release_channel,release_sequence,
+		release_manifest_coordinate,length(release_manifest_digest),bound_deployment_report_event_id IS NOT NULL
+		FROM external_stage_pharos_evidence_v2`).Scan(&scheme, &channel, &sequence, &coordinate, &manifestBytes, &boundDeploymentCount); err != nil {
+		t.Fatal(err)
+	}
+	if scheme != string(VersionSchemeINSPRCalendar) || channel != "stable" || sequence != 260905093001 ||
+		coordinate != "ghcr:inspr-at/pharos/releases/26.09.05.09.30.01" || manifestBytes != 32 || boundDeploymentCount != 0 {
+		t.Fatalf("stored v2 identity=%s/%s/%d/%s digest=%d bound=%d", scheme, channel, sequence, coordinate, manifestBytes, boundDeploymentCount)
+	}
+
+	deployedAt, err := time.Parse(time.RFC3339Nano, receipt.ServerReceivedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.now = deployedAt.Add(2 * time.Second)
+	activation, err := f.service.ActivateOwner(ctx, f.operator, f.deliveryKey, "activate-v2-verification",
+		ActivateOwnerRequest{ReporterRegistrationID: f.registrationID, StageKey: "verification",
+			ExpectedAttemptNumber: 1, ExpectedPlanRevision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.SealPrerequisites(ctx, f.operator, f.deliveryKey, "seal-v2-verification",
+		SealPrerequisitesRequest{StageKey: "verification", ExecutionNumber: activation.ExecutionNumber,
+			ExpectedPlanRevision: 1, ExpectedAuthorityEpoch: activation.AuthorityEpoch, Prerequisites: []Prerequisite{}}); err != nil {
+		t.Fatal(err)
+	}
+	verification, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, "create-v2-verification",
+		CreateHandoffRequest{StageKey: "verification", ExecutionNumber: activation.ExecutionNumber,
+			ExpectedPlanRevision: 1, ExpectedAuthorityEpoch: activation.AuthorityEpoch,
+			ReporterRegistrationID: f.registrationID, ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationSecret, err := f.service.Mint(ctx, f.operator, verification.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationObserved := f.now.Format(time.RFC3339Nano)
+	if _, err := f.service.Accept(ctx, f.reporter, verification.HandoffID, "accept-v2-verification", verificationSecret,
+		AcceptRequest{Sequence: 1, ObservedAt: verificationObserved}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.ReportV2(ctx, f.reporter, verification.HandoffID, "active-v2-verification", verificationSecret,
+		ReportRequestV2{Sequence: 2, State: HandoffStateActive, ObservedAt: verificationObserved}); err != nil {
+		t.Fatal(err)
+	}
+	verificationEvidence := *request.PharosEvidence
+	verificationEvidence.Kind = EvidenceKindVerification
+	verificationEvidence.ObservedAt = verificationObserved
+	mismatch := verificationEvidence
+	mismatch.Artifact.ReleaseManifestDigest = "sha256:" + fmt.Sprintf("%064x", 999)
+	if _, err := f.service.ReportV2(ctx, f.reporter, verification.HandoffID, "mismatch-v2-verification", verificationSecret,
+		ReportRequestV2{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: verificationObserved,
+			PharosEvidence: &mismatch}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("manifest mismatch err=%v", err)
+	}
+	verified, err := f.service.ReportV2(ctx, f.reporter, verification.HandoffID, "exact-v2-verification", verificationSecret,
+		ReportRequestV2{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: verificationObserved,
+			PharosEvidence: &verificationEvidence})
+	if err != nil || verified.State != HandoffStateSucceeded {
+		t.Fatalf("exact verification=%+v err=%v", verified, err)
+	}
+	var deploymentID, boundID int64
+	if err := f.database.QueryRow(`SELECT deployment.report_event_id,verification.bound_deployment_report_event_id
+		FROM external_stage_pharos_evidence_v2 deployment
+		JOIN external_stage_pharos_evidence deployment_core ON deployment_core.report_event_id=deployment.report_event_id
+		JOIN external_stage_pharos_evidence_v2 verification ON verification.bound_deployment_report_event_id=deployment.report_event_id
+		WHERE deployment_core.evidence_kind='deployment'`).Scan(&deploymentID, &boundID); err != nil {
+		t.Fatal(err)
+	}
+	if deploymentID != boundID {
+		t.Fatalf("verification bound deployment=%d want %d", boundID, deploymentID)
+	}
+}
+
 func TestServiceCurrentExternalBindingMutationsAreConcealed(t *testing.T) {
 	createMintedHandoff := func(t *testing.T) (*serviceFixture, CreateHandoffResult, []byte) {
 		t.Helper()

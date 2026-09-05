@@ -668,6 +668,7 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M172 | harness workspace and dispatch provenance | Immutable owned-workspace identity, collision guards, versioned dispatch snapshot, and bounded account label (PAI-906). |
 | M173 | `agent_messages.expects_reply`, `agent_reply_obligations`, `agent_reply_obligation_events`, `agent_message_human_resolutions`; rebuilt attention items/batches | Opt-in exact-reply closure, bounded overdue resurfacing, value-free idempotent human disposition of held action requests, and immutable-history/current-state separation (PAI-905). |
 | M174 | `harness_sessions.work_shape`, rebuilt `harness_session_events` | Closed nullable `ship`/`scout` assignment classification with immutable before/after shape facts. Existing missing values remain unclassified and project as `unknown`; the rebuild preserves historical facts and timestamps, and delivery tables are unchanged (PAI-907). |
+| M175 | `external_stage_pharos_evidence_v2` | Additive scheme/channel/sequence/release-manifest identity for Pharos evidence, exact-bound to the immutable M148 v1-compatible deployment fact; v1 storage and guards remain unchanged (PAI-876). |
 
 `agent_runs.status=completed` means implementation finished without a configured
 test command; it never implies tests passed. `tests_passed` and `tests_failed`

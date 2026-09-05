@@ -53,10 +53,15 @@ func main() {
 	fmt.Fprintln(&b, "export type ExternalStageReporterRole = typeof EXTERNAL_STAGE_REPORTER_ROLES[number]\n")
 	writeConst(&b, "EXTERNAL_STAGE_EVIDENCE_KINDS", handlers.Schema.Enums["external_stage_evidence_kind"])
 	fmt.Fprintln(&b, "export type ExternalStageEvidenceKind = typeof EXTERNAL_STAGE_EVIDENCE_KINDS[number]\n")
+	writeConst(&b, "EXTERNAL_STAGE_VERSION_SCHEMES", handlers.Schema.Enums["external_stage_version_scheme"])
+	fmt.Fprintln(&b, "export type ExternalStageVersionScheme = typeof EXTERNAL_STAGE_VERSION_SCHEMES[number]\n")
 
 	if external := handlers.Schema.ExternalStage; external != nil {
 		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_CONTRACT_MAJOR = %d as const\n", external.ContractMajor)
 		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_MEDIA_TYPE = %q as const\n", external.MediaType)
+		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_CONTRACT_MAJOR_V2 = %d as const\n", external.ContractMajorV2)
+		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_MEDIA_TYPE_V2 = %q as const\n", external.MediaTypeV2)
+		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_FIXTURE_DIGEST_V2 = %q as const\n", external.FixtureDigestV2)
 		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_SECRET_MEDIA_TYPE = %q as const\n", external.SecretMediaType)
 		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_HANDOFF_SECRET_HEADER = %q as const\n", external.HandoffSecretHeader)
 		fmt.Fprintf(&b, "export const EXTERNAL_STAGE_ONE_TIME_SECRET_BYTES = %d as const\n\n", external.OneTimeSecretBytes)

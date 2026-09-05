@@ -12988,6 +12988,59 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 WHEN EXISTS(SELECT 1 FROM harness_sessions WHERE id=OLD.harness_session_id)
 			 BEGIN SELECT RAISE(ABORT,'harness session events are immutable'); END`,
 		}},
+
+		// M175 / PAI-876: additive scheme-aware identity for Pharos external-
+		// stage evidence. The M148 v1 evidence table and its guards remain
+		// unchanged; v2 rows extend an exact committed v1-compatible fact and
+		// verification names the exact prior v2 deployment fact it matches.
+		{175, []string{
+			`CREATE TABLE external_stage_pharos_evidence_v2 (
+			 report_event_id                 INTEGER PRIMARY KEY REFERENCES external_stage_pharos_evidence(report_event_id),
+			 version_scheme                  TEXT NOT NULL CHECK(version_scheme IN ('legacy','inspr-calendar-v1')),
+			 release_channel                 TEXT NOT NULL CHECK(length(CAST(release_channel AS BLOB)) BETWEEN 1 AND 64 AND
+			  release_channel GLOB '[a-z]*' AND release_channel NOT GLOB '*[^a-z0-9._-]*'),
+			 release_sequence                INTEGER NOT NULL CHECK(release_sequence>=0),
+			 release_manifest_coordinate     TEXT NOT NULL CHECK(length(CAST(release_manifest_coordinate AS BLOB)) BETWEEN 3 AND 255 AND
+			  instr(release_manifest_coordinate,':') BETWEEN 2 AND 65 AND
+			  substr(release_manifest_coordinate,1,1) GLOB '[a-z]' AND
+			  substr(release_manifest_coordinate,1,instr(release_manifest_coordinate,':')-1) NOT GLOB '*[^a-z0-9._-]*' AND
+			  substr(release_manifest_coordinate,instr(release_manifest_coordinate,':')+1,1) GLOB '[A-Za-z0-9]' AND
+			  substr(release_manifest_coordinate,instr(release_manifest_coordinate,':')+1) NOT GLOB '*[^A-Za-z0-9._/@:+-]*'),
+			 release_manifest_digest         BLOB NOT NULL CHECK(typeof(release_manifest_digest)='blob' AND length(release_manifest_digest)=32),
+			 bound_deployment_report_event_id INTEGER REFERENCES external_stage_pharos_evidence_v2(report_event_id)
+			) WITHOUT ROWID`,
+			`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_insert_guard
+			 BEFORE INSERT ON external_stage_pharos_evidence_v2
+			 WHEN NOT EXISTS(
+			  SELECT 1 FROM external_stage_pharos_evidence evidence
+			  JOIN external_stage_report_events report ON report.id=evidence.report_event_id
+			  JOIN external_stage_handoffs handoff ON handoff.id=report.handoff_row_id
+			  WHERE evidence.report_event_id=NEW.report_event_id AND handoff.reporter_class='pharos'
+			   AND ((evidence.evidence_kind='deployment' AND NEW.bound_deployment_report_event_id IS NULL) OR
+			        (evidence.evidence_kind='verification' AND NEW.bound_deployment_report_event_id IS NOT NULL AND EXISTS(
+			          SELECT 1 FROM external_stage_pharos_evidence deployment
+			          JOIN external_stage_pharos_evidence_v2 deployment_v2 ON deployment_v2.report_event_id=deployment.report_event_id
+			          JOIN external_stage_report_events deployment_report ON deployment_report.id=deployment.report_event_id
+			          JOIN external_stage_handoffs deployment_handoff ON deployment_handoff.id=deployment_report.handoff_row_id
+			          WHERE deployment.report_event_id=NEW.bound_deployment_report_event_id
+			           AND deployment.evidence_kind='deployment' AND deployment.result='succeeded'
+			           AND deployment_handoff.delivery_id=handoff.delivery_id AND deployment_handoff.attempt_id=handoff.attempt_id
+			           AND deployment_handoff.stage_key='deployment' AND deployment_handoff.lifecycle_state='succeeded'
+			           AND deployment.environment_symbol=evidence.environment_symbol
+			           AND deployment.artifact_version=evidence.artifact_version
+			           AND deployment.artifact_digest=evidence.artifact_digest
+			           AND deployment.commit_digest=evidence.commit_digest
+			           AND deployment_v2.version_scheme=NEW.version_scheme
+			           AND deployment_v2.release_channel=NEW.release_channel
+			           AND deployment_v2.release_sequence=NEW.release_sequence
+			           AND deployment_v2.release_manifest_coordinate=NEW.release_manifest_coordinate
+			           AND deployment_v2.release_manifest_digest=NEW.release_manifest_digest))))
+			 BEGIN SELECT RAISE(ABORT,'invalid external stage Pharos v2 evidence binding'); END`,
+			`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_no_update BEFORE UPDATE ON external_stage_pharos_evidence_v2
+			 BEGIN SELECT RAISE(ABORT,'external stage v2 evidence is immutable'); END`,
+			`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_no_delete BEFORE DELETE ON external_stage_pharos_evidence_v2
+			 BEGIN SELECT RAISE(ABORT,'external stage v2 evidence is immutable'); END`,
+		}},
 	}
 
 	for _, m := range migrations {
@@ -13274,6 +13327,12 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 		}
 		return checkSchemaObjectsAbsent(ctx, conn, 174, []string{
 			"trg_harness_sessions_work_shape_insert", "trg_harness_sessions_work_shape_update",
+		})
+	},
+	175: func(ctx context.Context, conn *sql.Conn) error {
+		return checkSchemaObjectsAbsent(ctx, conn, 175, []string{
+			"external_stage_pharos_evidence_v2", "trg_external_stage_pharos_evidence_v2_insert_guard",
+			"trg_external_stage_pharos_evidence_v2_no_update", "trg_external_stage_pharos_evidence_v2_no_delete",
 		})
 	},
 }

@@ -1,4 +1,4 @@
-# External delivery-stage contract v1
+# External delivery-stage contracts v1 and v2
 
 PAIMOS external-stage handoffs let registered machine reporters contribute
 deployment or dependency evidence without transferring delivery ownership.
@@ -6,7 +6,7 @@ The v1 wire contract is frozen at Paimos commit
 `e5f4c86bc061775c853d5847e8fb8bb7e3a31c34` and is published through
 `GET /api/openapi.json` and `GET /api/schema`.
 
-## Fixed wire surface
+## Frozen v1 wire surface
 
 All JSON requests and responses use
 `application/vnd.paimos.external-stage.v1+json`. Mint and rotate responses use
@@ -208,3 +208,56 @@ any later release can be published; the first release may establish that tag.
 Changing route spelling, media types, DTO fields, enums, fixture bytes, digest
 algorithm, or evidence semantics requires a new contract major and new fixture
 directory. Never rewrite v1 in place after release.
+
+## Additive scheme-aware v2
+
+External pull, accept, and report routes also support exact negotiation of
+`application/vnd.paimos.external-stage.v2+json`. Internal create, mint, rotate,
+revoke, authority, and credential mechanics remain frozen v1 controls. An
+adapter chooses one exact media type for a request; missing, wildcard,
+parameterized, mixed, or unknown media types fail closed. No version scheme is
+ever inferred from punctuation in the version string.
+
+V2 changes only the Pharos artifact evidence and the pull certification tuple.
+Every Pharos deployment or verification fact carries all of:
+
+- `version_scheme`: exactly `legacy` or `inspr-calendar-v1`;
+- the original `version` spelling, preserved without translation;
+- an explicit symbolic `release_channel` and non-negative monotonic
+  `release_sequence`;
+- the exact artifact SHA-256 and source commit digest from v1;
+- an immutable `release_manifest_coordinate` and its exact SHA-256 digest.
+
+Calendar versions use `yy.mm.dd` or `yy.mm.dd.hh.mm.ss`, with fixed-width
+two-digit fields and real Gregorian dates. Legacy versions remain explicitly
+legacy even when their spelling resembles a calendar. Rollback is an explicit
+new deployment fact naming the older immutable artifact and release-set
+manifest; the service never silently rewrites, downgrades, or promotes an
+earlier fact. Exact idempotent replay returns the original receipt, while any
+same-key mutation of scheme, sequence, channel, manifest, artifact, or source
+identity conflicts.
+
+The additive storage table extends an already committed v1-compatible Pharos
+fact. A v2 verification row names the exact earlier v2 deployment row and the
+database guard requires exact equality across environment, version, artifact,
+commit, scheme, channel, release sequence, manifest coordinate, and manifest
+digest. This keeps v1 consumers functional during cutover without weakening
+authority, freshness, replay, or secret boundaries. A Pharos adapter may move
+from v1 to v2 per handoff; after all supported Pharos releases pin the v2
+fixture and schema tuple, a later ticket may retire v1 negotiation. V1 itself
+remains byte-for-byte immutable.
+
+The canonical v2 owner fixture lives in
+`backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json`. It covers
+an explicit legacy deployment, an explicit calendar deployment, and an
+explicit legacy rollback. Its fixture-set digest is:
+
+```text
+sha256:a1d5575ffe9e84f984c212f47cf88d48fe3cf65383f34c2a6bc0dff897c5ae66
+```
+
+The v2 fixture digest uses the same framed algorithm with the domain changed to
+`paimos.external-stage.fixtures.v2\0`. The v2 OpenAPI components are published
+alongside v1 through `/api/openapi.json`; `/api/schema` advertises both contract
+majors, exact media types, and fixture digests. The immutable certified commit
+and first release are recorded in `manifest-v2.json` beside the fixture.
