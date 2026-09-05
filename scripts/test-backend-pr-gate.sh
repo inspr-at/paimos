@@ -410,6 +410,7 @@ auth_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard=0/4 github.com
 externalstage_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard=0/4 github.com/inspr-at/paimos/backend/externalstage)
 for required_test in \
   TestConcurrentCreateCommitsOneHandoffAndOneReplay \
+  TestServiceJanusDependencyIsAtomicAndCannotOwnCanonicalStage \
   TestServiceOwnerLifecycleReplayHeartbeatAndRestart \
   TestServiceReportV2PersistsExplicitReleaseIdentityAndBindsReplay
 do

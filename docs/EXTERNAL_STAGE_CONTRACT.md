@@ -237,6 +237,12 @@ earlier fact. Exact idempotent replay returns the original receipt, while any
 same-key mutation of scheme, sequence, channel, manifest, artifact, or source
 identity conflicts.
 
+This grammar describes the external Pharos artifact named by the evidence. It
+does not reinterpret PAIMOS's own repository-specific release tag. The
+`paimos_release` field in the fixture manifest pins the PAIMOS release that
+publishes this contract; it is not an external artifact version and therefore
+does not participate in `version_scheme` validation.
+
 The additive storage table extends an already committed v1-compatible Pharos
 fact. A v2 verification row names the exact earlier v2 deployment row and the
 database guard requires exact equality across environment, version, artifact,

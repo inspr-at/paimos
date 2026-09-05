@@ -34,7 +34,7 @@ func TestValidateArtifactEvidenceV2RequiresExplicitSchemeAndImmutableManifest(t 
 	}{
 		{"missing-scheme", func(a *ArtifactEvidenceV2) { a.VersionScheme = "" }},
 		{"unknown-scheme", func(a *ArtifactEvidenceV2) { a.VersionScheme = "semver" }},
-		{"ambiguous-calendar", func(a *ArtifactEvidenceV2) { a.Version = "26.09.05.09.30" }},
+		{"noncanonical-five-part-calendar", func(a *ArtifactEvidenceV2) { a.Version = "26.09.05.09.30" }},
 		{"invalid-calendar", func(a *ArtifactEvidenceV2) { a.Version = "26.02.30" }},
 		{"missing-channel", func(a *ArtifactEvidenceV2) { a.ReleaseChannel = "" }},
 		{"negative-sequence", func(a *ArtifactEvidenceV2) { a.ReleaseSequence = -1 }},
