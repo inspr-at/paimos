@@ -414,6 +414,7 @@ set_external_stage_manifest_field() {
 
 add_external_stage_v2_contract() {
   local repo="$1" release="$2" pin_commit
+  git -C "$repo" switch -q -c external-stage-v2-publication
   mkdir -p "$repo/backend/contracts/fixtures/external-stage-v2"
   printf '%s\n' '{"fixture":"owner-pharos-v2"}' > \
     "$repo/backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json"
@@ -431,6 +432,9 @@ add_external_stage_v2_contract() {
     "$repo/backend/contracts/fixtures/external-stage-v2/manifest-v2.json"
   git -C "$repo" add backend/contracts/fixtures/external-stage-v2/manifest-v2.json
   git -C "$repo" commit -q --no-gpg-sign --signoff -m 'pin external-stage v2 release'
+  git -C "$repo" switch -q main
+  git -C "$repo" merge -q --no-ff --no-gpg-sign --signoff external-stage-v2-publication \
+    -m 'merge external-stage v2 publication'
   FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
 }
 

@@ -248,6 +248,13 @@ verification handoff can bind to that exact v2 deployment identity. After all
 supported Pharos releases pin the v2 fixture and schema tuple, a later ticket
 may retire v1 negotiation. V1 itself remains byte-for-byte immutable.
 
+The first v2 publication pull request must be merged with a true merge commit,
+not a squash or rebase merge. The certified content commit recorded by
+`manifest-v2.json` must remain an ancestor of `main`; the release guard rejects
+an unavailable, non-ancestor, or byte-divergent pin. The executable release
+fixture models this branch-and-merge topology so later changes cannot silently
+make the first calendar release impossible.
+
 The canonical v2 owner fixture lives in
 `backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json`. It covers
 an explicit legacy deployment, an explicit calendar deployment with its exact
@@ -260,5 +267,6 @@ sha256:6bba9613230c6ea728db58ffea5533399caed19e6d56a8d78ef19d0fde20be8a
 The v2 fixture digest uses the same framed algorithm with the domain changed to
 `paimos.external-stage.fixtures.v2\0`. The v2 OpenAPI components are published
 alongside v1 through `/api/openapi.json`; `/api/schema` advertises both contract
-majors, exact media types, and fixture digests. The immutable certified commit
+majors, their exact media types, and the v2 fixture digest (v1 remains available
+through the immutable v1 contract response). The immutable certified commit
 and first release are recorded in `manifest-v2.json` beside the fixture.

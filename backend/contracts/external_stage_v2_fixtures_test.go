@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/backend/contracts"
 	"github.com/inspr-at/paimos/backend/externalstage"
@@ -100,6 +101,15 @@ func TestCanonicalExternalStageV2FixtureAndDigest(t *testing.T) {
 			item.ExpectedCanonicalState != wantStates[i] {
 			t.Fatalf("case %d lacks explicit immutable identity: %+v", i, item)
 		}
+		for field, value := range map[string]string{
+			"accept observed_at": item.Accept.ObservedAt,
+			"report observed_at": item.Report.ObservedAt,
+			"server_received_at": item.ServerReceivedAt,
+		} {
+			if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
+				t.Fatalf("case %d %s invalid: %v", i, field, err)
+			}
+		}
 	}
 	deployment, verification := fixture.Cases[1], fixture.Cases[2]
 	if verification.StageKey != "verification" || verification.Report.PharosEvidence.Kind != externalstage.EvidenceKindVerification ||
@@ -108,11 +118,21 @@ func TestCanonicalExternalStageV2FixtureAndDigest(t *testing.T) {
 		verification.Report.PharosEvidence.Artifact != deployment.Report.PharosEvidence.Artifact {
 		t.Fatalf("verification fixture does not bind the exact calendar deployment: deployment=%+v verification=%+v", deployment, verification)
 	}
+	deployedAt, err := time.Parse(time.RFC3339Nano, verification.DeploymentServerReceivedAt)
+	if err != nil {
+		t.Fatalf("verification deployment receipt invalid: %v", err)
+	}
+	verifiedAt, _ := time.Parse(time.RFC3339Nano, verification.Report.ObservedAt)
+	verificationReceivedAt, _ := time.Parse(time.RFC3339Nano, verification.ServerReceivedAt)
+	if !verifiedAt.After(deployedAt) || !verificationReceivedAt.After(deployedAt) {
+		t.Fatal("verification observation and receipt must both be fresh after the deployment receipt")
+	}
 	rollback := fixture.Cases[3]
+	rollbackReceivedAt, _ := time.Parse(time.RFC3339Nano, rollback.ServerReceivedAt)
 	if rollback.StageKey != "deployment" || rollback.Report.PharosEvidence.Kind != externalstage.EvidenceKindDeployment ||
 		rollback.Report.PharosEvidence.Artifact.ReleaseChannel != "rollback" ||
 		rollback.Report.PharosEvidence.Artifact.ReleaseSequence >= deployment.Report.PharosEvidence.Artifact.ReleaseSequence ||
-		rollback.ServerReceivedAt <= verification.ServerReceivedAt {
+		!rollbackReceivedAt.After(verificationReceivedAt) {
 		t.Fatalf("rollback fixture must be a later fact naming an older immutable release: %+v", rollback)
 	}
 	hash := sha256.New()

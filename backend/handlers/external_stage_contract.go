@@ -254,7 +254,8 @@ func externalStageExternalMedia(r *http.Request, hasBody bool) (string, error) {
 	if hasBody {
 		contentTypeValues := r.Header.Values("Content-Type")
 		if len(contentTypeValues) != 1 ||
-			(contentTypeValues[0] != externalstage.MediaTypeV1 && contentTypeValues[0] != externalstage.MediaTypeV2) {
+			(contentTypeValues[0] != externalstage.MediaTypeV1 && contentTypeValues[0] != externalstage.MediaTypeV2) ||
+			len(r.Header.Values("Content-Encoding")) != 0 {
 			return "", errExternalStageContentType
 		}
 	}
