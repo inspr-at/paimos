@@ -24,11 +24,12 @@ just marketing-captures       # terminal 2: regenerate + verify + publish
 The second command bootstraps Playwright, sources the same local dev-login
 token as `dev-up` without printing it, polishes the gitignored fixture DB
 through the dev binary's initialized SQLite connection,
-captures all six current site images plus two short product flows, transcodes
+captures all seven current site images plus two short product flows, transcodes
 the flows to Safari-compatible fast-start H.264, and publishes everything into
-`../inspr-at`. The six stills include the fixture-backed Agent Mode supervision
-surface, so releases that change its project picker, command hints, or delivery
-density cannot leave the public product gallery behind.
+`../inspr-at`. The seven stills include the session-first Paimos 6 home and the
+fixture-backed Agent Mode supervision surface, so releases that change
+orchestrator setup, project selection, command hints, or delivery density
+cannot leave the public product gallery behind.
 Pass a different reviewed site worktree when needed:
 
 ```sh

@@ -86,7 +86,7 @@ model becomes the context and accountability layer around their work.
 | Voice intake        | A spec workbench that turns continuous speech (or typed input) into a live, editable specification with project detection, impact analysis, ELI5/10/15 understanding checks with spoken playback, per-language (EN/DE) cached artifacts, time-travel history, and one-click issue creation. Voice endpoints are rate-limited, budgeted, and cost-metered. |
 | Project context     | Linked repositories, typed knowledge, canonical project-agent artifacts, issue-to-file anchors, entity graph and blast-radius reads, and mixed-context retrieval.                                            |
 | Agent interfaces    | A typed `paimos` CLI, `paimos-mcp`, REST, curated OpenAPI, self-describing schema, JSON output, file-first multiline input, dry runs, idempotent transitions, and declarative bulk apply.                    |
-| Agent Intercom      | Durable, project-scoped message threads with sender allowlists, simple/steer intent, encrypted receiver targets, truthful fallback, content-free actionable attention wakes, and owned Codex/Claude status, steer, interrupt, and stop through `paimos-agentd`. |
+| Agent Intercom      | Durable, project-scoped message threads with sender allowlists, simple/steer intent, encrypted receiver targets, truthful fallback, content-free actionable attention wakes, owned Codex/Claude status, steer, interrupt, and stop through `paimos-agentd`, plus explicit recovery actions whenever an orchestrator or canonical agent is missing. |
 | Assisted work       | Thirteen in-app AI actions with operator-managed prompts, usage limits, cost records, execution profiles, context packs, and metadata-only audit records.                                                    |
 | Implementation runs | Explicit Claude Code and Codex local-runner actions, plus OpenRouter and OpenAI-compatible local-model draft providers. Trusted runners report repository, branch, and before/after commit evidence; draft providers cannot claim repository mutation, tests, shell, or deploy authority. |
 | Collaboration       | Internal roles and project grants, an external customer portal, acceptance workflows, customer-facing summaries, and JSON/PDF project reports.                                                               |
@@ -99,6 +99,11 @@ shipped code and documented verification.
 
 ### Recent product changes
 
+- Paimos 6 empty states became actionable in 26.09.04.20.54: an authorized
+  operator can open the existing agent editor, refresh stale choices, retry
+  unavailable projections, copy a bounded admin request, or enter the existing
+  talk surface. The browser never runs the terminal command or receives a
+  credential.
 - Paimos 6 promoted the session-first product shell to the authenticated home
   (26.08.31), while preserving the complete 5.x dashboard at `/legacy`.
 - Release tags now use the calendar form `yy.mm.dd[.hh.mm]`; the changelog keeps

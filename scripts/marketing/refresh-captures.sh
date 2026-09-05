@@ -10,6 +10,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 source "$ROOT/scripts/release-version.sh"
 SITE_ROOT="${1:-$ROOT/../inspr-at}"
 CAPTURE_RELEASE=$(tr -d '[:space:]' < "$ROOT/VERSION")
+CAPTURE_RELEASE_KIND=$(release_version::kind "$CAPTURE_RELEASE")
 API_URL=http://localhost:8888
 APP_URL=http://localhost:5173
 CAPTURE_DIR=""
@@ -110,6 +111,7 @@ echo "→ publishing captures into $SITE_ROOT"
 node "$SITE_ROOT/web/scripts/sync-paimos-captures.mjs" \
   --capture-dir "$CAPTURE_DIR" \
   --release "$CAPTURE_RELEASE" \
+  --release-kind "$CAPTURE_RELEASE_KIND" \
   --source-commit "$RELEASE_COMMIT"
 
 echo "✓ one-command capture refresh complete: Paimos v$CAPTURE_RELEASE"
