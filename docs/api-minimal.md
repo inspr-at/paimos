@@ -947,6 +947,23 @@ Neither viewing nor copying the command performs that operation. Credentials
 remain in the CLI's configured keyring entry, and no other instance is
 implicitly configured.
 
+The Paimos 6 home keeps every empty or unavailable state actionable without
+inventing a browser-side mutation:
+
+| Observed state | Truthful next action |
+| --- | --- |
+| Orchestrator configured, no product sessions | Open the existing talk panel; nothing is sent until the operator submits there. |
+| Orchestrator unset, canonical agents available | Choose an explicit agent and copy the visible `paimos orchestrator set` command. |
+| Orchestrator unset, no canonical agents | Open the existing Project → Agents editor in a new tab, treat the current catalog as stale, then refresh the choices. |
+| Binding or setup projection unavailable | Retry only that read; no orchestrator or command is inferred. |
+| Ordinary admin without setup authority | Copy a bounded, secret-free request for a super admin. |
+| Session-home projection unavailable | Retry the authorized session-home read after all prior rows have been cleared. |
+
+Opening the agent editor preserves the selected project and binding context in
+the original tab. The browser never executes the copied command, reads the
+operator's keyring, or receives a secret. Agent creation and registration stay
+on the existing Project → Agents surface; there is no hidden setup endpoint.
+
 ---
 
 ## Create backlog item

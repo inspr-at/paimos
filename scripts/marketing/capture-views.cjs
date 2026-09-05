@@ -152,6 +152,18 @@ function currentAgentModeFixture() {
     },
   });
 
+  await shoot(page, 'ui-session-home', {
+    path: '/',
+    prepare: async (p) => {
+      await p.locator('.p6-project-picker').waitFor({ state: 'visible' });
+      await p.locator('.p6-empty-binding').waitFor({ state: 'visible' });
+      const actions = p.locator('.p6-empty-binding .p6-setup-actions').locator('a, button');
+      if (!(await actions.count())) {
+        throw new Error('session home has no actionable orchestrator setup path');
+      }
+    },
+  });
+
   await shoot(page, 'ui-issues', { path: '/issues' });
 
   await shoot(page, 'ui-board', {
