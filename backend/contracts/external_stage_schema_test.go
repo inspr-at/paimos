@@ -115,7 +115,7 @@ func externalStageOpenAPIDefinitions(t *testing.T) map[string]any {
 	}
 	definitions := make(map[string]any)
 	for name, definition := range document.Components.Schemas {
-		if strings.HasPrefix(name, "ExternalStage") {
+		if strings.HasPrefix(name, "ExternalStage") && !strings.HasSuffix(name, "V2") {
 			definitions[name] = rewriteExternalStageSchemaReferences(definition)
 		}
 	}

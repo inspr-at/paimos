@@ -23,11 +23,24 @@ import (
 // exact committed bytes and fail on inventory, byte, or digest drift.
 const ExternalStageV1FixtureDigestHex = "0318f4025902c9d5dd790384950cc9daebb16e02e79a4a90ce7dddc673e68bed"
 
+// ExternalStageV2FixtureDigestHex is the immutable lowercase SHA-256 of the
+// additive scheme-aware Pharos owner fixture set. Its domain and inventory are
+// pinned independently from v1 so publishing v2 cannot alter v1 bytes.
+const ExternalStageV2FixtureDigestHex = "6bba9613230c6ea728db58ffea5533399caed19e6d56a8d78ef19d0fde20be8a"
+
 // ExternalStageV1FixtureDigest returns a fresh fixed-size digest suitable for
 // externalstage.Options. It cannot expose mutable package-level digest state.
 func ExternalStageV1FixtureDigest() [sha256.Size]byte {
+	return externalStageFixtureDigest(ExternalStageV1FixtureDigestHex)
+}
+
+func ExternalStageV2FixtureDigest() [sha256.Size]byte {
+	return externalStageFixtureDigest(ExternalStageV2FixtureDigestHex)
+}
+
+func externalStageFixtureDigest(value string) [sha256.Size]byte {
 	var digest [sha256.Size]byte
-	raw, err := hex.DecodeString(ExternalStageV1FixtureDigestHex)
+	raw, err := hex.DecodeString(value)
 	if err != nil || len(raw) != len(digest) {
 		// The compile-time literal is covered by tests. Returning zero here keeps
 		// a malformed future edit fail-closed in service option validation.

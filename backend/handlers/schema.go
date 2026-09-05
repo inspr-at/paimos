@@ -82,7 +82,9 @@ import (
 // discover which api-key scopes unlock which endpoints. The scope list
 // is populated at init() from auth.ScopeCatalog() — a single source of
 // truth shared with the runtime check.
-const SchemaVersion = "2.3.0"
+// 2.4.0 (PAI-876): added the additive external-stage v2 media type,
+// fixture digest, contract major, and explicit release-version scheme.
+const SchemaVersion = "2.4.0"
 
 // SchemaPayload is the shape returned by GET /api/schema. See PAI-87.
 type SchemaPayload struct {
@@ -148,6 +150,9 @@ type SchemaAgent struct {
 type SchemaExternalStage struct {
 	ContractMajor       int               `json:"contract_major"`
 	MediaType           string            `json:"media_type"`
+	ContractMajorV2     int               `json:"contract_major_v2"`
+	MediaTypeV2         string            `json:"media_type_v2"`
+	FixtureDigestV2     string            `json:"fixture_digest_v2"`
 	SecretMediaType     string            `json:"secret_media_type"`
 	HandoffSecretHeader string            `json:"handoff_secret_header"`
 	OneTimeSecretBytes  int               `json:"one_time_secret_bytes"`
@@ -171,6 +176,7 @@ var Schema = SchemaPayload{
 		"external_stage_reporter_class": append([]string(nil), externalstage.ReporterClasses...),
 		"external_stage_reporter_role":  append([]string(nil), externalstage.ReporterRoles...),
 		"external_stage_evidence_kind":  append([]string(nil), externalstage.EvidenceKinds...),
+		"external_stage_version_scheme": append([]string(nil), externalstage.VersionSchemesV2...),
 		// tag_colors is populated in init() from handlers.TagColorPalette
 		// so the schema can never drift from the server-side validator.
 		"tag_colors": nil,
@@ -243,18 +249,19 @@ var Schema = SchemaPayload{
 		},
 	},
 	EnumFields: map[string]string{
-		"issue.type":                            "type",
-		"issue.status":                          "status",
-		"issue.priority":                        "priority",
-		"project.status":                        "project_status",
-		"relation.type":                         "relation",
-		"tag.color":                             "tag_colors",
-		"knowledge.type":                        "knowledge_types",
-		"knowledge.status":                      "knowledge_status",
-		"external_stage_handoff.state":          "external_stage_handoff_state",
-		"external_stage_handoff.reporter_class": "external_stage_reporter_class",
-		"external_stage_handoff.reporter_role":  "external_stage_reporter_role",
-		"external_stage_evidence.kind":          "external_stage_evidence_kind",
+		"issue.type":                             "type",
+		"issue.status":                           "status",
+		"issue.priority":                         "priority",
+		"project.status":                         "project_status",
+		"relation.type":                          "relation",
+		"tag.color":                              "tag_colors",
+		"knowledge.type":                         "knowledge_types",
+		"knowledge.status":                       "knowledge_status",
+		"external_stage_handoff.state":           "external_stage_handoff_state",
+		"external_stage_handoff.reporter_class":  "external_stage_reporter_class",
+		"external_stage_handoff.reporter_role":   "external_stage_reporter_role",
+		"external_stage_evidence.kind":           "external_stage_evidence_kind",
+		"external_stage_artifact.version_scheme": "external_stage_version_scheme",
 	},
 	Conventions: map[string]string{
 		"acceptance_criteria":    "markdown checkbox list: `- [ ] ...` / `- [x] ...`",
@@ -354,6 +361,9 @@ func init() {
 	Schema.ExternalStage = &SchemaExternalStage{
 		ContractMajor:       externalstage.ContractMajor,
 		MediaType:           externalstage.MediaTypeV1,
+		ContractMajorV2:     externalstage.ContractMajorV2,
+		MediaTypeV2:         externalstage.MediaTypeV2,
+		FixtureDigestV2:     "sha256:" + contracts.ExternalStageV2FixtureDigestHex,
 		SecretMediaType:     externalstage.SecretMediaTypeV1,
 		HandoffSecretHeader: externalstage.HandoffSecretHeader,
 		OneTimeSecretBytes:  externalstage.OneTimeSecretBytes,

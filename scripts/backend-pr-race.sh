@@ -214,6 +214,13 @@ run_package() {
       # instrumentation invalidates that wall-clock budget.
       run_race ./auth '^TestResolveAPIKeyUsageStampNeverInheritsSQLiteBusyTimeout$'
       ;;
+    ./externalstage)
+      # Every external-stage test rebuilds the complete SQLite migration chain.
+      # Keep PR race instrumentation on the actual concurrent create oracle, the
+      # restart/replay lifecycle, and the new v2 persistence/replay boundary.
+      # Normal PR and exhaustive workflows retain the full serial package.
+      run_race ./externalstage '^(TestConcurrentCreateCommitsOneHandoffAndOneReplay|TestServiceJanusDependencyIsAtomicAndCannotOwnCanonicalStage|TestServiceOwnerLifecycleReplayHeartbeatAndRestart|TestServiceReportV2PersistsExplicitReleaseIdentityAndBindsReplay)$'
+      ;;
     ./managedharness)
       # Every managed-harness test rebuilds the complete SQLite migration chain.
       # Keep PR race instrumentation on the package's actual concurrency and

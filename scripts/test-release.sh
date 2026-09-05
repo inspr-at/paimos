@@ -5,6 +5,10 @@ export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+REAL_GIT=$(type -a -p git | awk '$0 != "/usr/bin/git" { print; exit }')
+[[ -n "$REAL_GIT" ]] || REAL_GIT=/usr/bin/git
+REAL_DATE=$(command -v date)
+export REAL_DATE REAL_GIT
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/paimos-release-test.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -16,6 +20,14 @@ MANUAL_RECOVERY_VERSION='5.19.0'
 fail() {
   echo "test-release: $*" >&2
   exit 1
+}
+
+next_calendar_day() {
+  local iso="$1"
+  if "$REAL_DATE" -u -d "$iso + 1 day" +%y.%m.%d 2>/dev/null; then
+    return
+  fi
+  "$REAL_DATE" -j -u -v+1d -f '%Y-%m-%d' "$iso" +%y.%m.%d
 }
 
 write_stub_scripts() {
@@ -56,7 +68,7 @@ write_fake_commands() {
 #!/usr/bin/env bash
 set -euo pipefail
 
-real_git=/usr/bin/git
+real_git=${REAL_GIT:?}
 advance_main() {
   local label="$1" advance_work="$FAKE_GH_STATE/$1-advance-work"
   "$real_git" clone -q "${FAKE_GH_ORIGIN:?}" "$advance_work" >/dev/null 2>&1
@@ -111,7 +123,7 @@ if [[ -n "${FAKE_GH_STATE:-}" && -f "$FAKE_GH_STATE/vienna-date" ]]; then
       ;;
   esac
 fi
-exec /usr/bin/date "$@"
+exec "${REAL_DATE:?}" "$@"
 DATE
 
   cat > "$bin/docker" <<'DOCKER'
@@ -400,6 +412,32 @@ set_external_stage_manifest_field() {
   mv "$next" "$manifest"
 }
 
+add_external_stage_v2_contract() {
+  local repo="$1" release="$2" pin_commit
+  git -C "$repo" switch -q -c external-stage-v2-publication
+  mkdir -p "$repo/backend/contracts/fixtures/external-stage-v2"
+  printf '%s\n' '{"fixture":"owner-pharos-v2"}' > \
+    "$repo/backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json"
+  printf '%s\n' '{"schema":"external-stage-v2"}' > \
+    "$repo/backend/contracts/external-stage-v2.schema.json"
+  printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/contract_v2.go"
+  printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/service_v2.go"
+  git -C "$repo" add backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json \
+    backend/contracts/external-stage-v2.schema.json backend/externalstage/contract_v2.go \
+    backend/externalstage/service_v2.go
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'add external-stage v2 contract bytes'
+  pin_commit=$(git -C "$repo" rev-parse HEAD)
+  printf '%s\n' \
+    "{\"schema_major\":2,\"media_type\":\"application/vnd.paimos.external-stage.v2+json\",\"paimos_commit\":\"$pin_commit\",\"paimos_release\":\"$release\"}" > \
+    "$repo/backend/contracts/fixtures/external-stage-v2/manifest-v2.json"
+  git -C "$repo" add backend/contracts/fixtures/external-stage-v2/manifest-v2.json
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'pin external-stage v2 release'
+  git -C "$repo" switch -q main
+  git -C "$repo" merge -q --no-ff --no-gpg-sign --signoff external-stage-v2-publication \
+    -m 'merge external-stage v2 publication'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+}
+
 prepend_release_notes() {
   local repo="$1"
   local version="${2:-1.0.1}"
@@ -437,13 +475,14 @@ commit_unreleased_notes() {
 }
 
 run_release() {
-  local repo="$1" state="$2"
+  local repo="$1" state="$2" origin
   shift 2
   (
     cd "$repo"
+    origin=$(git remote get-url origin)
     PATH="$TMP_ROOT/fake-bin:$PATH" \
       FAKE_GH_STATE="$state" \
-      FAKE_GH_ORIGIN="$(git remote get-url origin)" \
+      FAKE_GH_ORIGIN="$origin" \
       FAKE_RELEASE_VERSION="${FAKE_RELEASE_VERSION:-1.0.1}" \
       FAKE_GATE_LOG="${FAKE_GATE_LOG:-}" \
       FAKE_CLAIMS_FAIL_MARKER="${FAKE_CLAIMS_FAIL_MARKER:-}" \
@@ -1236,6 +1275,48 @@ test_external_stage_pinned_byte_drift_is_rejected() {
   fi
 }
 
+test_external_stage_v2_bytes_without_manifest_are_rejected() {
+  local repo state output
+  repo=$(setup_repo external-stage-v2-missing-manifest)
+  state="$TMP_ROOT/external-stage-v2-missing-manifest/gh-state"
+  output="$TMP_ROOT/external-stage-v2-missing-manifest/output"
+  printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/contract_v2.go"
+  git -C "$repo" add backend/externalstage/contract_v2.go
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'add unpinned external-stage v2 bytes'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+  prepend_release_notes "$repo"
+
+  if run_release "$repo" "$state" patch --no-edit >"$output" 2>&1; then
+    fail 'release accepted external-stage v2 bytes without their manifest'
+  fi
+  grep -qF 'carries external-stage v2 bytes without the required release manifest' "$output" ||
+    fail 'missing external-stage v2 manifest rejection was not explicit'
+}
+
+test_external_stage_v2_release_pin_accepts_exact_cut_and_rejects_service_drift() {
+  local repo state drift_repo drift_state output
+  repo=$(setup_repo external-stage-v2-positive v26.09.05)
+  state="$TMP_ROOT/external-stage-v2-positive/gh-state"
+  add_external_stage_v2_contract "$repo" v26.09.05
+  prepend_release_notes "$repo" 26.09.05
+  FAKE_RELEASE_VERSION=26.09.05 run_release "$repo" "$state" 26.09.05 --no-edit >/dev/null
+
+  drift_repo=$(setup_repo external-stage-v2-service-drift v26.09.05)
+  drift_state="$TMP_ROOT/external-stage-v2-service-drift/gh-state"
+  output="$TMP_ROOT/external-stage-v2-service-drift/output"
+  add_external_stage_v2_contract "$drift_repo" v26.09.05
+  printf '%s\n' 'package externalstage // drifted' > "$drift_repo/backend/externalstage/service_v2.go"
+  git -C "$drift_repo" add backend/externalstage/service_v2.go
+  git -C "$drift_repo" commit -q --no-gpg-sign --signoff -m 'drift external-stage v2 validation'
+  FAKE_GH_SERVER_MERGE=1 git -C "$drift_repo" push -q origin main
+  prepend_release_notes "$drift_repo" 26.09.05
+  if FAKE_RELEASE_VERSION=26.09.05 run_release "$drift_repo" "$drift_state" 26.09.05 --no-edit >"$output" 2>&1; then
+    fail 'release accepted drifted external-stage v2 service validation'
+  fi
+  grep -qF 'external-stage v2 file differs from pinned commit: backend/externalstage/service_v2.go' "$output" ||
+    fail 'external-stage v2 service drift rejection was not explicit'
+}
+
 test_existing_tag_external_stage_manifest_drift_is_rejected() {
   local repo state
   repo=$(setup_repo external-stage-manifest-drift)
@@ -1403,8 +1484,7 @@ setup_interrupted_calendar_descendant_recovery() {
 test_interrupted_calendar_descendant_recovery() {
   local calendar_version next_day output later_branch legacy_oid divergent_oid legacy_tag
   calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
-  next_day=$(TZ=Europe/Vienna date -d \
-    "$(TZ=Europe/Vienna date +%Y-%m-%d) + 1 day" +%y.%m.%d)
+  next_day=$(next_calendar_day "$(TZ=Europe/Vienna date +%Y-%m-%d)")
 
   setup_interrupted_calendar_descendant_recovery calendar-descendant-success "$calendar_version"
   rm "$RECOVERY_STATE/backend-full-failed"
@@ -1588,7 +1668,7 @@ test_calendar_release_and_rejections() {
   local repo state origin output calendar_version calendar_iso next_day recut_version merge_oid wrong_oid blob_oid
   calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
   calendar_iso=$(TZ=Europe/Vienna date +%Y-%m-%d)
-  next_day=$(TZ=Europe/Vienna date -d "$calendar_iso + 1 day" +%y.%m.%d)
+  next_day=$(next_calendar_day "$calendar_iso")
   recut_version="$calendar_version.14.05"
   repo=$(setup_repo calendar-release v1.0.0)
   state="$TMP_ROOT/calendar-release/gh-state"
@@ -1788,6 +1868,8 @@ test_invalid_external_stage_commit_pin_is_rejected
 test_unavailable_external_stage_commit_pin_is_rejected
 test_nonancestor_external_stage_commit_pin_is_rejected
 test_external_stage_pinned_byte_drift_is_rejected
+test_external_stage_v2_bytes_without_manifest_are_rejected
+test_external_stage_v2_release_pin_accepts_exact_cut_and_rejects_service_drift
 test_existing_tag_external_stage_manifest_drift_is_rejected
 
 echo 'test-release: ok'

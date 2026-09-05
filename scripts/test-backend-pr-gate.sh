@@ -407,6 +407,19 @@ auth_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard=0/4 github.com
   "$(grep -Ec '^go test -race -count=1 -timeout=8m \./auth$' <<<"$auth_race_plan")" -eq 0 &&
   "$auth_race_plan" != *'./...'* ]] ||
   fail 'auth PR race plan restored the latency-sensitive or exhaustive package suite'
+externalstage_race_plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard=0/4 github.com/inspr-at/paimos/backend/externalstage)
+for required_test in \
+  TestConcurrentCreateCommitsOneHandoffAndOneReplay \
+  TestServiceJanusDependencyIsAtomicAndCannotOwnCanonicalStage \
+  TestServiceOwnerLifecycleReplayHeartbeatAndRestart \
+  TestServiceReportV2PersistsExplicitReleaseIdentityAndBindsReplay
+do
+  [[ "$externalstage_race_plan" == *"$required_test"* ]] ||
+    fail "external-stage PR race plan lost $required_test"
+done
+[[ "$(grep -c '^go test -race .* ./externalstage -run ' <<<"$externalstage_race_plan")" -eq 1 &&
+  "$(grep -Ec '^go test -race -count=1 -timeout=8m \./externalstage$' <<<"$externalstage_race_plan")" -eq 0 ]] ||
+  fail 'external-stage PR race plan restored its exhaustive migration-heavy package suite'
 managedharness_race_match='^(TestStoppedSessionCanRegisterNewActiveGeneration|Test.*(Concurrent|Concurrency|Race|Atomic|Replay|Recovers).*)$'
 if "$RACE_RUNNER" --dry-run --lane=managedharness \
   github.com/inspr-at/paimos/backend/managedharness >/dev/null 2>&1; then
