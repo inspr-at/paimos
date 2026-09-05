@@ -22,6 +22,14 @@ fail() {
   exit 1
 }
 
+next_calendar_day() {
+  local iso="$1"
+  if "$REAL_DATE" -u -d "$iso + 1 day" +%y.%m.%d 2>/dev/null; then
+    return
+  fi
+  "$REAL_DATE" -j -u -v+1d -f '%Y-%m-%d' "$iso" +%y.%m.%d
+}
+
 write_stub_scripts() {
   local repo="$1"
   mkdir -p "$repo/scripts"
@@ -1472,8 +1480,7 @@ setup_interrupted_calendar_descendant_recovery() {
 test_interrupted_calendar_descendant_recovery() {
   local calendar_version next_day output later_branch legacy_oid divergent_oid legacy_tag
   calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
-  next_day=$(TZ=Europe/Vienna date -d \
-    "$(TZ=Europe/Vienna date +%Y-%m-%d) + 1 day" +%y.%m.%d)
+  next_day=$(next_calendar_day "$(TZ=Europe/Vienna date +%Y-%m-%d)")
 
   setup_interrupted_calendar_descendant_recovery calendar-descendant-success "$calendar_version"
   rm "$RECOVERY_STATE/backend-full-failed"
@@ -1657,7 +1664,7 @@ test_calendar_release_and_rejections() {
   local repo state origin output calendar_version calendar_iso next_day recut_version merge_oid wrong_oid blob_oid
   calendar_version=$(TZ=Europe/Vienna date +%y.%m.%d)
   calendar_iso=$(TZ=Europe/Vienna date +%Y-%m-%d)
-  next_day=$(TZ=Europe/Vienna date -d "$calendar_iso + 1 day" +%y.%m.%d)
+  next_day=$(next_calendar_day "$calendar_iso")
   recut_version="$calendar_version.14.05"
   repo=$(setup_repo calendar-release v1.0.0)
   state="$TMP_ROOT/calendar-release/gh-state"
