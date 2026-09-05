@@ -54,3 +54,12 @@ fff415ceacc12d3e6490c78426db1c3803f6656a:backend/secretvault/vault_test.go:gener
 
 # PAI-809 private control-route path/logging canary
 356eca78330b1daefc321714609028963d3d6234:backend/handlers/control_privacy_test.go:generic-api-key:26
+
+# PAI-876 external-stage v2 idempotency-label fixtures (2026-09-05).
+# These are public, test-only operation labels passed beside `deliveryKey`;
+# neither value is a credential. Exact immutable-commit fingerprints preserve
+# full-history scanning without exempting the file, path, or detector. The
+# commits cannot be rewritten because manifest-v2.json certifies bb3b874f as
+# the first v2 content commit and the release guard verifies its ancestry.
+01580158c4f6cb75b98188807399703cf93d1265:backend/externalstage/service_test.go:generic-api-key:916
+bb3b874f22a14fbe3879b1b575f33d55a001312d:backend/externalstage/service_test.go:generic-api-key:1151
