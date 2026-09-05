@@ -40,6 +40,19 @@ type externalStageFixtureCaseV2 struct {
 	ExpectedCanonicalState string                        `json:"expected_canonical_state"`
 }
 
+type externalStageFixtureManifestV2 struct {
+	SchemaMajor   int                                 `json:"schema_major"`
+	Contract      string                              `json:"contract"`
+	MediaType     string                              `json:"media_type"`
+	Encoding      string                              `json:"encoding"`
+	PaimosCommit  string                              `json:"paimos_commit"`
+	PaimosRelease string                              `json:"paimos_release"`
+	FixtureDigest string                              `json:"fixture_digest"`
+	SchemaFile    string                              `json:"schema_file"`
+	SchemaSHA256  string                              `json:"schema_sha256"`
+	Fixtures      []externalStageFixtureManifestEntry `json:"fixtures"`
+}
+
 func TestCanonicalExternalStageV2FixtureAndDigest(t *testing.T) {
 	directory := filepath.Join("fixtures", "external-stage-v2")
 	entries, err := os.ReadDir(directory)
@@ -54,10 +67,10 @@ func TestCanonicalExternalStageV2FixtureAndDigest(t *testing.T) {
 		actual = append(actual, entry.Name())
 	}
 	sort.Strings(actual)
-	if want := []string{"owner-pharos-v2.json"}; !reflect.DeepEqual(actual, want) {
+	if want := []string{"manifest-v2.json", "owner-pharos-v2.json"}; !reflect.DeepEqual(actual, want) {
 		t.Fatalf("fixture inventory=%v want=%v", actual, want)
 	}
-	raw, err := os.ReadFile(filepath.Join(directory, actual[0]))
+	raw, err := os.ReadFile(filepath.Join(directory, "owner-pharos-v2.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +99,7 @@ func TestCanonicalExternalStageV2FixtureAndDigest(t *testing.T) {
 	}
 	hash := sha256.New()
 	_, _ = hash.Write([]byte(externalStageFixtureDomainV2))
-	_, _ = hash.Write([]byte(actual[0]))
+	_, _ = hash.Write([]byte("owner-pharos-v2.json"))
 	_, _ = hash.Write([]byte{0})
 	_, _ = hash.Write(raw)
 	_, _ = hash.Write([]byte{0})
@@ -96,5 +109,41 @@ func TestCanonicalExternalStageV2FixtureAndDigest(t *testing.T) {
 	if got := contracts.ExternalStageV2FixtureDigest(); hex.EncodeToString(got[:]) != contracts.ExternalStageV2FixtureDigestHex {
 		t.Fatalf("digest accessor=%x", got)
 	}
-	assertNoCredentialField(t, actual[0], raw)
+	assertNoCredentialField(t, "owner-pharos-v2.json", raw)
+
+	manifestRaw, err := os.ReadFile(filepath.Join(directory, "manifest-v2.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder = json.NewDecoder(bytes.NewReader(manifestRaw))
+	decoder.DisallowUnknownFields()
+	var manifest externalStageFixtureManifestV2
+	if err := decoder.Decode(&manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		t.Fatalf("manifest has trailing JSON: %v", err)
+	}
+	if manifest.SchemaMajor != externalstage.ContractMajorV2 || manifest.Contract != "paimos.external-stage.v2" ||
+		manifest.MediaType != externalstage.MediaTypeV2 || manifest.Encoding != "utf-8-json-lf" ||
+		manifest.PaimosCommit != "d606f7be1c988555bb9937eb78298eed4f997cb1" || manifest.PaimosRelease != "v26.09.05.10.30" ||
+		manifest.FixtureDigest != "sha256:"+contracts.ExternalStageV2FixtureDigestHex ||
+		manifest.SchemaFile != "backend/contracts/external-stage-v2.schema.json" ||
+		manifest.SchemaSHA256 != externalStageV2StandaloneSchemaSHA256 || len(manifest.Fixtures) != 1 {
+		t.Fatalf("v2 manifest certification tuple=%+v", manifest)
+	}
+	entry := manifest.Fixtures[0]
+	fixtureDigest := sha256.Sum256(raw)
+	if entry.File != "owner-pharos-v2.json" || entry.ReporterClass != externalstage.ReporterClassPharos ||
+		entry.ReporterRole != externalstage.ReporterRoleOwner || entry.Bytes != len(raw) || entry.SHA256 != hex.EncodeToString(fixtureDigest[:]) {
+		t.Fatalf("v2 manifest fixture entry=%+v", entry)
+	}
+	schemaRaw, err := os.ReadFile(filepath.Join("external-stage-v2.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemaDigest := sha256.Sum256(schemaRaw)
+	if manifest.SchemaSHA256 != hex.EncodeToString(schemaDigest[:]) {
+		t.Fatalf("v2 manifest schema digest=%s actual=%x", manifest.SchemaSHA256, schemaDigest)
+	}
 }
