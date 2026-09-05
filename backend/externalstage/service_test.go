@@ -752,6 +752,12 @@ func TestServiceOwnerLifecycleReplayHeartbeatAndRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	deployedAt, err := time.Parse(time.RFC3339Nano, terminal.ServerReceivedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationStartedAt := deployedAt.Add(500 * time.Millisecond)
+	f.now = deployedAt.Add(time.Second)
 	var deploymentTerminalID, nextRevision int64
 	if err := f.database.QueryRow(`SELECT semantic_stage_event_id FROM delivery_stage_latest
 		WHERE attempt_id=? AND stage_key='deployment'`, f.attemptID).Scan(&deploymentTerminalID); err != nil {
@@ -761,24 +767,26 @@ func TestServiceOwnerLifecycleReplayHeartbeatAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := f.database.Exec(`INSERT INTO delivery_events(delivery_id,delivery_revision,idempotency_key,payload_hash,
-		kind,reporter_id,server_received_at) VALUES(?,?,'verification-start',zeroblob(32),'stage_execution_started',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
-		f.deliveryID, nextRevision, verificationRegistration.ReporterID)
+		kind,reporter_id,server_received_at) VALUES(?,?,'verification-start',zeroblob(32),'stage_execution_started',?,?)`,
+		f.deliveryID, nextRevision, verificationRegistration.ReporterID, verificationStartedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
 	verificationEnvelopeID, _ := result.LastInsertId()
 	result, err = f.database.Exec(`INSERT INTO delivery_stage_events(delivery_id,attempt_id,stage_key,execution_number,
 		event_sequence,authority_epoch,delivery_event_id,event_type,reporter_id,based_on_stage_event_id,semantic_state,
-		authority_source_sequence_cutoff,server_received_at) VALUES(?,?,'verification',1,1,1,?,'execution_started',?,?,'active',0,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
-		f.deliveryID, f.attemptID, verificationEnvelopeID, verificationRegistration.ReporterID, deploymentTerminalID)
+		authority_source_sequence_cutoff,server_received_at) VALUES(?,?,'verification',1,1,1,?,'execution_started',?,?,'active',0,?)`,
+		f.deliveryID, f.attemptID, verificationEnvelopeID, verificationRegistration.ReporterID, deploymentTerminalID,
+		verificationStartedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
 	verificationStartID, _ := result.LastInsertId()
 	if _, err := f.database.Exec(`INSERT INTO delivery_stage_latest(delivery_id,attempt_id,stage_key,execution_number,
 		authority_epoch,current_reporter_id,execution_start_stage_event_id,authority_stage_event_id,updated_at)
-		VALUES(?,?,'verification',1,1,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, f.deliveryID, f.attemptID,
-		verificationRegistration.ReporterID, verificationStartID, verificationStartID); err != nil {
+		VALUES(?,?,'verification',1,1,?,?,?,?)`, f.deliveryID, f.attemptID,
+		verificationRegistration.ReporterID, verificationStartID, verificationStartID,
+		verificationStartedAt.Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.service.SealPrerequisites(ctx, f.operator, f.deliveryKey, "seal-verification-empty",
@@ -786,11 +794,6 @@ func TestServiceOwnerLifecycleReplayHeartbeatAndRestart(t *testing.T) {
 			ExpectedAuthorityEpoch: 1, Prerequisites: []Prerequisite{}}); err != nil {
 		t.Fatal(err)
 	}
-	deployedAt, err := time.Parse(time.RFC3339Nano, terminal.ServerReceivedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.now = deployedAt.Add(time.Second)
 	verificationHandoff, err := f.service.CreateHandoff(ctx, f.operator, f.deliveryKey, "create-verification",
 		CreateHandoffRequest{StageKey: "verification", ExecutionNumber: 1, ExpectedPlanRevision: 1,
 			ExpectedAuthorityEpoch: 1, ReporterRegistrationID: verificationRegistration.RegistrationID,
