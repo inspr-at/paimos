@@ -362,8 +362,13 @@ assert_external_stage_v2_release_pin() {
     'backend/externalstage/contract_v2.go'
   )
 
-  git cat-file -e "$ref:$EXTERNAL_STAGE_MANIFEST_V2" 2>/dev/null ||
-    fail "$ref does not carry the external-stage v2 release manifest"
+  if ! git cat-file -e "$ref:$EXTERNAL_STAGE_MANIFEST_V2" 2>/dev/null; then
+    for pinned_file in "${pinned_files[@]}"; do
+      ! git cat-file -e "$ref:$pinned_file" 2>/dev/null ||
+        fail "$ref carries external-stage v2 bytes without the required release manifest"
+    done
+    return
+  fi
   manifest=$(git show "$ref:$EXTERNAL_STAGE_MANIFEST_V2")
   pin_record=$(jq -er '
     if type == "object" and .schema_major == 2

@@ -5,6 +5,10 @@ export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+REAL_GIT=$(type -a -p git | awk '$0 != "/usr/bin/git" { print; exit }')
+[[ -n "$REAL_GIT" ]] || REAL_GIT=/usr/bin/git
+REAL_DATE=$(command -v date)
+export REAL_DATE REAL_GIT
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/paimos-release-test.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -56,7 +60,7 @@ write_fake_commands() {
 #!/usr/bin/env bash
 set -euo pipefail
 
-real_git=/usr/bin/git
+real_git=${REAL_GIT:?}
 advance_main() {
   local label="$1" advance_work="$FAKE_GH_STATE/$1-advance-work"
   "$real_git" clone -q "${FAKE_GH_ORIGIN:?}" "$advance_work" >/dev/null 2>&1
@@ -111,7 +115,7 @@ if [[ -n "${FAKE_GH_STATE:-}" && -f "$FAKE_GH_STATE/vienna-date" ]]; then
       ;;
   esac
 fi
-exec /usr/bin/date "$@"
+exec "${REAL_DATE:?}" "$@"
 DATE
 
   cat > "$bin/docker" <<'DOCKER'
@@ -351,7 +355,6 @@ setup_repo() {
   git -C "$repo" config user.email 'release-author@example.test'
   mkdir -p "$repo/docs"
   mkdir -p "$repo/backend/contracts/fixtures/external-stage"
-  mkdir -p "$repo/backend/contracts/fixtures/external-stage-v2"
   mkdir -p "$repo/backend/externalstage"
   printf '1.0.0\n' > "$repo/VERSION"
   printf '<code>v1.0.0</code>\n' > "$repo/README.md"
@@ -362,11 +365,6 @@ setup_repo() {
   printf '%s\n' '{"fixture":"owner-pharos-v1"}' > \
     "$repo/backend/contracts/fixtures/external-stage/owner-pharos-v1.json"
   printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/contract.go"
-  printf '%s\n' '{"fixture":"owner-pharos-v2"}' > \
-    "$repo/backend/contracts/fixtures/external-stage-v2/owner-pharos-v2.json"
-  printf '%s\n' '{"schema":"external-stage-v2"}' > \
-    "$repo/backend/contracts/external-stage-v2.schema.json"
-  printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/contract_v2.go"
   write_stub_scripts "$repo"
   git -C "$repo" add .
   git -C "$repo" commit -q --signoff -m 'add external-stage v1 contract bytes'
@@ -374,14 +372,9 @@ setup_repo() {
   printf '%s\n' \
     "{\"paimos_commit\":\"$pin_commit\",\"paimos_release\":\"$future_release\"}" > \
     "$repo/backend/contracts/fixtures/external-stage/manifest-v1.json"
-  printf '%s\n' \
-    "{\"schema_major\":2,\"media_type\":\"application/vnd.paimos.external-stage.v2+json\",\"paimos_commit\":\"$pin_commit\",\"paimos_release\":\"v26.09.05\"}" > \
-    "$repo/backend/contracts/fixtures/external-stage-v2/manifest-v2.json"
-  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json \
-    backend/contracts/fixtures/external-stage-v2/manifest-v2.json
-  git -C "$repo" commit -q --signoff -m 'pin external-stage release manifests'
+  git -C "$repo" add backend/contracts/fixtures/external-stage/manifest-v1.json
+  git -C "$repo" commit -q --signoff -m 'pin external-stage v1 release'
   git -C "$repo" tag -a v1.0.0 -m 'release 1.0.0'
-  git -C "$repo" tag -a v26.09.05 -m 'external-stage v2 certification release'
   git -C "$repo" remote add origin "$origin"
   git -C "$repo" push -q -u origin main --tags
   git --git-dir="$origin" symbolic-ref HEAD refs/heads/main
@@ -448,13 +441,14 @@ commit_unreleased_notes() {
 }
 
 run_release() {
-  local repo="$1" state="$2"
+  local repo="$1" state="$2" origin
   shift 2
   (
     cd "$repo"
+    origin=$(git remote get-url origin)
     PATH="$TMP_ROOT/fake-bin:$PATH" \
       FAKE_GH_STATE="$state" \
-      FAKE_GH_ORIGIN="$(git remote get-url origin)" \
+      FAKE_GH_ORIGIN="$origin" \
       FAKE_RELEASE_VERSION="${FAKE_RELEASE_VERSION:-1.0.1}" \
       FAKE_GATE_LOG="${FAKE_GATE_LOG:-}" \
       FAKE_CLAIMS_FAIL_MARKER="${FAKE_CLAIMS_FAIL_MARKER:-}" \
@@ -1247,6 +1241,24 @@ test_external_stage_pinned_byte_drift_is_rejected() {
   fi
 }
 
+test_external_stage_v2_bytes_without_manifest_are_rejected() {
+  local repo state output
+  repo=$(setup_repo external-stage-v2-missing-manifest)
+  state="$TMP_ROOT/external-stage-v2-missing-manifest/gh-state"
+  output="$TMP_ROOT/external-stage-v2-missing-manifest/output"
+  printf '%s\n' 'package externalstage' > "$repo/backend/externalstage/contract_v2.go"
+  git -C "$repo" add backend/externalstage/contract_v2.go
+  git -C "$repo" commit -q --no-gpg-sign --signoff -m 'add unpinned external-stage v2 bytes'
+  FAKE_GH_SERVER_MERGE=1 git -C "$repo" push -q origin main
+  prepend_release_notes "$repo"
+
+  if run_release "$repo" "$state" patch --no-edit >"$output" 2>&1; then
+    fail 'release accepted external-stage v2 bytes without their manifest'
+  fi
+  grep -qF 'carries external-stage v2 bytes without the required release manifest' "$output" ||
+    fail 'missing external-stage v2 manifest rejection was not explicit'
+}
+
 test_existing_tag_external_stage_manifest_drift_is_rejected() {
   local repo state
   repo=$(setup_repo external-stage-manifest-drift)
@@ -1799,6 +1811,7 @@ test_invalid_external_stage_commit_pin_is_rejected
 test_unavailable_external_stage_commit_pin_is_rejected
 test_nonancestor_external_stage_commit_pin_is_rejected
 test_external_stage_pinned_byte_drift_is_rejected
+test_external_stage_v2_bytes_without_manifest_are_rejected
 test_existing_tag_external_stage_manifest_drift_is_rejected
 
 echo 'test-release: ok'
