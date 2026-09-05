@@ -126,7 +126,7 @@ func TestCanonicalExternalStageV2FixtureAndDigest(t *testing.T) {
 	}
 	if manifest.SchemaMajor != externalstage.ContractMajorV2 || manifest.Contract != "paimos.external-stage.v2" ||
 		manifest.MediaType != externalstage.MediaTypeV2 || manifest.Encoding != "utf-8-json-lf" ||
-		manifest.PaimosCommit != "d606f7be1c988555bb9937eb78298eed4f997cb1" || manifest.PaimosRelease != "v26.09.05.10.30" ||
+		manifest.PaimosCommit != "74912e58110336e3928e05696d89f8e4ad2c6d2c" || manifest.PaimosRelease != "v26.09.05" ||
 		manifest.FixtureDigest != "sha256:"+contracts.ExternalStageV2FixtureDigestHex ||
 		manifest.SchemaFile != "backend/contracts/external-stage-v2.schema.json" ||
 		manifest.SchemaSHA256 != externalStageV2StandaloneSchemaSHA256 || len(manifest.Fixtures) != 1 {
