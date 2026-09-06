@@ -183,7 +183,7 @@ func (r *Runtime) Reset(ctx context.Context, token string) (out Report, resultEr
 	if e != nil {
 		return out, errors.New("private archive creation failed")
 	}
-	if os.Chmod(archive, 0700) != nil {
+	if os.Chmod(archive, 0700) != nil { // #nosec G302 -- freshly created private archive directory requires owner execute permission.
 		return out, errors.New("private archive protection failed")
 	}
 	out.Archive = archive

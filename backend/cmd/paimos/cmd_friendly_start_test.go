@@ -418,11 +418,17 @@ func TestFriendlyStartLedgerRejectsSymlinkAndUnsafeModes(t *testing.T) {
 	if _, _, err := readFriendlyStartRecord(alias, "key", "digest"); err == nil {
 		t.Fatal("symlink retry directory accepted")
 	}
+	if err := syncFriendlyStartDir(alias); err == nil {
+		t.Fatal("symlink retry sync directory accepted")
+	}
 	if err := os.Chmod(private, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := readFriendlyStartRecord(private, "key", "digest"); err == nil {
 		t.Fatal("public retry directory accepted")
+	}
+	if err := syncFriendlyStartDir(private); err == nil {
+		t.Fatal("public retry sync directory accepted")
 	}
 }
 

@@ -671,7 +671,7 @@ func friendlyPrompt(path string) (string, error) {
 	if path == "-" {
 		return "", errors.New("--prompt-file must name a file; stdin is reserved for guided input")
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- explicit operator --prompt-file input; bounded to 256 KiB below and never derived from remote input.
 	if err != nil {
 		return "", errors.New("task instruction file is unavailable")
 	}

@@ -26,7 +26,7 @@ func ReadPrivate(path string, limit int64) ([]byte, error) {
 	defer f.Close()
 	var st unix.Stat_t
 	info, e := f.Stat()
-	if e != nil || unix.Fstat(fd, &st) != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || st.Uid != uint32(os.Geteuid()) || st.Nlink != 1 || info.Size() > limit {
+	if e != nil || unix.Fstat(fd, &st) != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || int64(st.Uid) != int64(os.Geteuid()) || st.Nlink != 1 || info.Size() > limit {
 		return nil, ErrOwnership
 	}
 	raw, e := io.ReadAll(io.LimitReader(f, limit+1))

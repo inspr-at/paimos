@@ -164,7 +164,7 @@ func (r *Runtime) pathsSafe(create bool) error {
 			return e
 		}
 	} else {
-		directory, e := os.Open(leases)
+		directory, e := os.Open(leases) // #nosec G304 -- fixed reporter-leases child of the private instance directory, checked by privateDir above; reads metadata only.
 		if e != nil {
 			return errors.New("reporter lease metadata unavailable")
 		}

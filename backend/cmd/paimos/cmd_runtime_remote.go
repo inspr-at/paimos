@@ -36,7 +36,7 @@ func runtimeNamedClient(name string) (*Client, error) {
 	if e != nil {
 		return nil, errors.New("named config unavailable")
 	}
-	f, e := os.Open(path)
+	f, e := os.Open(path) // #nosec G304 -- CLI default config or explicit operator --config path; read-only bounded decode, never a remote path.
 	if e != nil {
 		return nil, errors.New("named config unavailable")
 	}

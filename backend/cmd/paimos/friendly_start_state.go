@@ -57,11 +57,15 @@ func readFriendlyStartRecord(dir, key, digest string) (friendlyStartResult, bool
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() > 64<<10 {
 		return friendlyStartResult{}, false, errors.New("retry record is unsafe or unavailable; inspect local state before retrying")
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- hashed retry key beneath the private ledger; compare opened descriptor with validated metadata before decoding.
 	if err != nil {
 		return friendlyStartResult{}, false, errors.New("retry record could not be read")
 	}
 	defer file.Close()
+	actual, err := file.Stat()
+	if err != nil || !os.SameFile(info, actual) || !actual.Mode().IsRegular() || actual.Mode().Perm() != 0o600 || actual.Size() > 64<<10 {
+		return friendlyStartResult{}, false, errors.New("retry record changed before read")
+	}
 	var record friendlyStartRecord
 	decoder := json.NewDecoder(io.LimitReader(file, (64<<10)+1))
 	decoder.DisallowUnknownFields()
@@ -116,11 +120,19 @@ func completeFriendlyStartRecord(dir, key, digest string, result friendlyStartRe
 	return syncFriendlyStartDir(dir)
 }
 func syncFriendlyStartDir(dir string) error {
-	file, err := os.Open(dir)
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return errors.New("retry directory is unsafe")
+	}
+	file, err := os.Open(dir) // #nosec G304 -- fixed private retry directory, descriptor identity verified below; opened only for directory sync.
 	if err != nil {
 		return errors.New("retry directory is unavailable")
 	}
 	defer file.Close()
+	actual, err := file.Stat()
+	if err != nil || !os.SameFile(info, actual) || !actual.IsDir() || actual.Mode().Perm() != 0o700 {
+		return errors.New("retry directory changed before sync")
+	}
 	if file.Sync() != nil {
 		return errors.New("retry directory could not be synchronized")
 	}
@@ -188,7 +200,7 @@ func validateFriendlyWorkspace(ctx context.Context, path string, sessions []agen
 func friendlyGit(ctx context.Context, path string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", path}, args...)...)
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", path}, args...)...) // #nosec G204 -- fixed git executable, two closed read-only probe argv sets above; operator workspace is a separate -C argument, never shell input.
 	// Match the existing agentd Git isolation: caller Git overrides and global
 	// configuration cannot redirect a cleanliness/ownership probe.
 	for _, entry := range os.Environ() {

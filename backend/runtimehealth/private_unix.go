@@ -74,7 +74,7 @@ func readPrivate(path string, max int64) ([]byte, error) {
 	if i.Size() > max {
 		return nil, errors.New("private state exceeds bound")
 	}
-	f, e := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, e := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) // #nosec G304 -- fixed private runtime state; safeFile plus no-follow and matching descriptor ownership checks fence the read.
 	if e != nil {
 		return nil, errors.New("private state unavailable")
 	}
@@ -118,7 +118,7 @@ func writePrivate(path string, b []byte) error {
 	return syncDir(filepath.Dir(path))
 }
 func syncDir(path string) error {
-	d, e := os.Open(path)
+	d, e := os.Open(path) // #nosec G304 -- internal validated state/archive directory only, opened for directory sync.
 	if e != nil {
 		return errors.New("private directory sync failed")
 	}
@@ -136,7 +136,7 @@ func lockState(dir, name string) (*stateLock, error) {
 		return nil, err
 	}
 	p := filepath.Join(dir, name)
-	f, e := os.OpenFile(p, os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0600)
+	f, e := os.OpenFile(p, os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0600) // #nosec G304 -- fixed lock name under privateDir; no-follow and matching safeFile descriptor checks below.
 	if e != nil {
 		return nil, errors.New("runtime lock unavailable")
 	}
@@ -160,7 +160,7 @@ func lockHeld(dir string) (bool, error) {
 	} else if e != nil {
 		return false, e
 	}
-	f, e := os.OpenFile(p, os.O_RDWR|syscall.O_NOFOLLOW, 0)
+	f, e := os.OpenFile(p, os.O_RDWR|syscall.O_NOFOLLOW, 0) // #nosec G304 -- fixed agentd.lock beneath the private instance directory; safeFile metadata checked above and symlinks refused.
 	if e != nil {
 		return false, errors.New("runtime lock unavailable")
 	}

@@ -334,3 +334,9 @@ func TestRuntimePlatformRecoveryScenarios(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeManagerRefusesUnlistedExecutable(t *testing.T) {
+	if _, err := runManager(context.Background(), "sh", "-c", "exit 0"); err == nil {
+		t.Fatal("platform runner accepted an executable outside its closed manager set")
+	}
+}

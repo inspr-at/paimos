@@ -70,13 +70,16 @@ func NewPlatformService(platform, home, instance, root, file, name string) (*Pla
 	return &PlatformService{Platform: platform, Home: home, Instance: instance, StateRoot: root, File: file, Name: name, Run: runManager}, nil
 }
 func runManager(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if name != "launchctl" && name != "systemctl" {
+		return nil, errors.New("platform manager unsupported")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	path, err := exec.LookPath(name)
 	if err != nil {
 		return nil, errors.New("platform manager unavailable")
 	}
-	cmd := exec.CommandContext(ctx, path, args...)
+	cmd := exec.CommandContext(ctx, path, args...) // #nosec G204 -- allowlisted platform manager; fixed internal verbs/options and validated service name/definition are separate argv, never shell input.
 	var output boundedOutput
 	cmd.Stdout = &output
 	cmd.Stderr = io.Discard
