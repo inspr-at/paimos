@@ -221,6 +221,12 @@ run_package() {
       # Normal PR and exhaustive workflows retain the full serial package.
       run_race ./externalstage '^(TestConcurrentCreateCommitsOneHandoffAndOneReplay|TestServiceJanusDependencyIsAtomicAndCannotOwnCanonicalStage|TestServiceOwnerLifecycleReplayHeartbeatAndRestart|TestServiceReportV2PersistsExplicitReleaseIdentityAndBindsReplay)$'
       ;;
+    ./lifecycleintents)
+      # Every lifecycle fixture rebuilds the complete migration chain. Keep all
+      # discovered tests, but spread their cumulative race cost over the four
+      # existing affected runners (or four sequential processes in lane=all).
+      run_race_shards ./lifecycleintents '^(Test|Fuzz)' 4
+      ;;
     ./managedharness)
       # Every managed-harness test rebuilds the complete SQLite migration chain.
       # Keep PR race instrumentation on the package's actual concurrency and
@@ -245,7 +251,7 @@ run_selected_package() {
       ;;
     affected)
       if [[ "$import_path" != "$MODULE/db" && "$import_path" != "$MODULE/handlers" && "$import_path" != "$MODULE/managedharness" ]]; then
-        if (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
+        if [[ "$import_path" == "$MODULE/lifecycleintents" ]] || (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
           run_package "$import_path"
         fi
         affected_index=$((affected_index + 1))
@@ -276,7 +282,8 @@ for import_path in "$@"; do
       "$MODULE/agentmode" \
       "$MODULE/agentd" \
       "$MODULE/localjournal" \
-      "$MODULE/ownedprocess"
+      "$MODULE/ownedprocess" \
+      "$MODULE/lifecycleintents"
     do
       run_selected_package "$affected"
     done

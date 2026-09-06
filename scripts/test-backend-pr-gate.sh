@@ -166,7 +166,9 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/auth \
   github.com/inspr-at/paimos/backend/cmd/dev-fixture-sql \
   github.com/inspr-at/paimos/backend/cmd/paimos \
+  github.com/inspr-at/paimos/backend/cmd/paimos-agentd \
   github.com/inspr-at/paimos/backend/cmd/paimos-mcp \
+  github.com/inspr-at/paimos/backend/contracts \
   github.com/inspr-at/paimos/backend/db \
   github.com/inspr-at/paimos/backend/delivery \
   github.com/inspr-at/paimos/backend/externalstage \
@@ -175,11 +177,20 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/handlers/crm/hubspot \
   github.com/inspr-at/paimos/backend/handlers/knowledge \
   github.com/inspr-at/paimos/backend/internal/knowledge857 \
+  github.com/inspr-at/paimos/backend/lifecycleclient \
+  github.com/inspr-at/paimos/backend/lifecycleintents \
   github.com/inspr-at/paimos/backend/managedharness \
   github.com/inspr-at/paimos/backend/supervision \
   github.com/inspr-at/paimos/backend/workerfleet)
 [[ "$db_affected" == "$db_expected" ]] ||
   fail "db reverse-dependency closure drifted: [$db_affected]"
+# Contracts imports agentmessage from its schema tests, not its production
+# package. The reverse test closure must retain that real test-only dependency.
+check_selection_contains 'backend/agentmessage/bus.go' \
+  github.com/inspr-at/paimos/backend/contracts
+check_selection_contains 'backend/lifecycleclient/runner_server_test.go' \
+  github.com/inspr-at/paimos/backend/lifecycleclient \
+  github.com/inspr-at/paimos/backend/cmd/paimos-agentd
 ! grep -Fxq 'github.com/inspr-at/paimos/backend/pharoslink' <<<"$db_affected" ||
   fail 'db reverse-dependency closure included an unrelated package'
 check_selection_contains 'backend/contracts/fixtures/external-stage/dependency-janus-v1.json' \
@@ -443,9 +454,57 @@ assert_plan_covers_discovery_once 'managed-harness targeted race' "$managedharne
 [[ "$(grep -Ec '^go test -race -count=1 -timeout=8m \./managedharness$' <<<"$managedharness_race_plan")" -eq 0 &&
   "$managedharness_race_plan" != *'./...'* ]] ||
   fail 'managed-harness PR race plan restored the exhaustive migration-heavy package suite'
+# Lifecycle fixtures each rebuild all migrations. Split the complete discovered
+# set over the existing four runners without pruning authorization/replay tests.
+lifecycle_race_plan=
+for shard in 0 1 2 3; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+    github.com/inspr-at/paimos/backend/agentd \
+    github.com/inspr-at/paimos/backend/lifecycleintents \
+    github.com/inspr-at/paimos/backend/localjournal)
+  [[ "$(grep -c '^go test -race -count=1 -timeout=8m ./lifecycleintents -run ' <<<"$plan")" -eq 1 ]] ||
+    fail "lifecycle race shard $shard did not retain one bounded invocation"
+  lifecycle_race_plan+="$plan"$'\n'
+done
+lifecycle_only_plan=$(grep '^go test -race .* ./lifecycleintents -run ' <<<"$lifecycle_race_plan")
+assert_plan_covers_discovery_once 'affected lifecycle race' "$lifecycle_only_plan" ./lifecycleintents '^(Test|Fuzz)'
+[[ "$(grep -c '^go test -race .* ./agentd$' <<<"$lifecycle_race_plan")" -eq 1 &&
+  "$(grep -c '^go test -race .* ./localjournal$' <<<"$lifecycle_race_plan")" -eq 1 ]] ||
+  fail 'lifecycle sharding duplicated or omitted another affected package'
+lifecycle_first_count=$(plan_test_names "$(sed -n '1p' <<<"$lifecycle_only_plan")" | wc -l)
+lifecycle_last_count=$(plan_test_names "$(sed -n '4p' <<<"$lifecycle_only_plan")" | wc -l)
+(( lifecycle_first_count >= lifecycle_last_count && lifecycle_first_count - lifecycle_last_count <= 1 )) ||
+  fail 'lifecycle test names were not balanced across the four race runners'
+for shard in 0 1 2 3; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+    github.com/inspr-at/paimos/backend/agentd github.com/inspr-at/paimos/backend/localjournal)
+  [[ "$plan" != *'./lifecycleintents'* ]] || fail 'unselected lifecycle package leaked into the affected race plan'
+done
+lifecycle_all_plan=$("$RACE_RUNNER" --dry-run --lane=all github.com/inspr-at/paimos/backend/lifecycleintents)
+[[ "$(grep -c '^go test -race -count=1 -timeout=8m ./lifecycleintents -run ' <<<"$lifecycle_all_plan")" -eq 4 ]] ||
+  fail 'all-lane lifecycle race did not retain all four bounded invocations'
+assert_plan_covers_discovery_once 'all lifecycle race' "$lifecycle_all_plan" ./lifecycleintents '^(Test|Fuzz)'
+lifecycle_sequential_state="$TMP_ROOT/lifecycle-sequential-race"
+mkdir -p "$lifecycle_sequential_state"
+if ! FAKE_GO_STATE="$lifecycle_sequential_state" GO_COMMAND="$FIXTURES/sequential-go.sh" \
+  "$RACE_RUNNER" --lane=all github.com/inspr-at/paimos/backend/lifecycleintents >/dev/null 2>&1; then
+  fail 'all-lane lifecycle race did not execute sequentially'
+fi
+[[ ! -e "$lifecycle_sequential_state/overlap" && "$(wc -l < "$lifecycle_sequential_state/runs" | tr -d ' ')" -eq 4 ]] ||
+  fail 'all-lane lifecycle race overlapped or omitted a shard'
+if GO_COMMAND="$FIXTURES/unsafe-go-list.sh" "$RACE_RUNNER" --dry-run --lane=affected \
+  --shard=0/4 github.com/inspr-at/paimos/backend/lifecycleintents >/dev/null 2>&1; then
+  fail 'lifecycle race sharder accepted an unsafe discovered test name'
+fi
 broad_race_plan=$("$RACE_RUNNER" --dry-run './...')
 [[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")" -eq 7 ]] ||
   fail 'broad race plan omitted or duplicated the managed-harness concurrency and recovery oracles'
+broad_lifecycle_plan=$(grep '^go test -race .* ./lifecycleintents -run ' <<<"$broad_race_plan")
+[[ "$(grep -c '^go test -race .* ./lifecycleintents -run ' <<<"$affected_broad_plan")" -eq 4 ]] ||
+  fail 'broad affected lifecycle race omitted or duplicated a runner'
+assert_plan_covers_discovery_once 'broad affected lifecycle race' \
+  "$(grep '^go test -race .* ./lifecycleintents -run ' <<<"$affected_broad_plan")" ./lifecycleintents '^(Test|Fuzz)'
+assert_plan_covers_discovery_once 'broad all lifecycle race' "$broad_lifecycle_plan" ./lifecycleintents '^(Test|Fuzz)'
 broad_managedharness_plan=$(grep '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")
 assert_plan_covers_discovery_once 'broad managed-harness race' "$broad_managedharness_plan" \
   ./managedharness "$managedharness_race_match"
