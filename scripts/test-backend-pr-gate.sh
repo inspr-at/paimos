@@ -442,16 +442,25 @@ if "$RACE_RUNNER" --dry-run --lane=managedharness --shard=0/6 \
   fail 'managed-harness race lane accepts a drifted shard count'
 fi
 managedharness_race_plan=
+managedharness_min_oracles=999
+managedharness_max_oracles=0
 for shard in 0 1 2 3 4 5 6; do
   plan=$("$RACE_RUNNER" --dry-run --lane=managedharness --shard="$shard/7" \
     github.com/inspr-at/paimos/backend/managedharness)
+  managedharness_oracles=$(plan_test_names "$plan" | wc -l | tr -d ' ')
   [[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$plan")" -eq 1 &&
-    "$(plan_test_names "$plan" | wc -l | tr -d ' ')" -eq 1 ]] ||
-    fail "managed-harness race shard $shard does not own exactly one oracle"
+    "$managedharness_oracles" -ge 1 ]] ||
+    fail "managed-harness race shard $shard does not own one nonempty invocation"
+  (( managedharness_oracles < managedharness_min_oracles )) &&
+    managedharness_min_oracles=$managedharness_oracles
+  (( managedharness_oracles > managedharness_max_oracles )) &&
+    managedharness_max_oracles=$managedharness_oracles
   managedharness_race_plan+="$plan"$'\n'
 done
 assert_plan_covers_discovery_once 'managed-harness targeted race' "$managedharness_race_plan" \
   ./managedharness "$managedharness_race_match"
+(( managedharness_max_oracles - managedharness_min_oracles <= 1 )) ||
+  fail 'managed-harness race oracles are not balanced across seven runners'
 [[ "$(grep -Ec '^go test -race -count=1 -timeout=8m \./managedharness$' <<<"$managedharness_race_plan")" -eq 0 &&
   "$managedharness_race_plan" != *'./...'* ]] ||
   fail 'managed-harness PR race plan restored the exhaustive migration-heavy package suite'
