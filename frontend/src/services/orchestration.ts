@@ -1,5 +1,5 @@
 /* PAIMOS — Copyright (C) 2026 Markus Barta; AGPL-3.0-only. */
-import { api } from '@/api/client'
+import { api, ApiError, parsePermissionsEpochHeader } from '@/api/client'
 import wireSchema from '../../../backend/contracts/orchestration-v1.schema.json'
 import { parseIsoInstant } from './agentModeAggregateSchema'
 import type { OrchestrationSnapshotV1 } from './orchestrationTypes'
@@ -221,7 +221,7 @@ export function parseOrchestrationSnapshot(value: unknown): OrchestrationSnapsho
 }
 
 export async function loadOrchestration(
-  options: { projectId?: number; zoom?: string | number } = {},
+  options: { projectId?: number; zoom?: string | number; signal?: AbortSignal } = {},
 ): Promise<OrchestrationSnapshotV1> {
   const { projectId, zoom = '10' } = options
   if (
@@ -234,7 +234,17 @@ export async function loadOrchestration(
     projectId === undefined
       ? '/agent-mode/orchestration/v1'
       : `/agent-mode/projects/${projectId}/orchestration/v1`
-  const result = parseOrchestrationSnapshot(await api.get<unknown>(`${path}?zoom=${zoom}`))
+  const response = await api.getWithMeta<unknown>(`${path}?zoom=${zoom}`, {
+    signal: options.signal,
+  })
+  if (
+    response.permissionsEpoch == null ||
+    parsePermissionsEpochHeader(response.permissionsEpoch) !== response.permissionsEpoch ||
+    !Number.isSafeInteger(response.permissionsEpochGeneration) ||
+    response.permissionsEpochGeneration < 0
+  )
+    throw new ApiError(response.status, 'Worker snapshot is missing its authority epoch')
+  const result = parseOrchestrationSnapshot(response.data)
   if (result.fleet.scope.project_id !== (projectId ?? null) || result.fleet.zoom !== String(zoom))
     invalid()
   return result

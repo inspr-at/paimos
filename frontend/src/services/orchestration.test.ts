@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import fixture from '../../../backend/contracts/fixtures/orchestration-v1.json'
 import { loadOrchestration, parseOrchestrationSnapshot } from './orchestration'
 import { api } from '@/api/client'
-vi.mock('@/api/client', () => ({ api: { get: vi.fn() } }))
+vi.mock('@/api/client', async (original) => ({
+  ...(await original<typeof import('@/api/client')>()),
+  api: { getWithMeta: vi.fn() },
+}))
 const copy = () => structuredClone(fixture)
 
 describe('orchestration v1 boundary', () => {
@@ -118,14 +121,24 @@ describe('orchestration v1 boundary', () => {
   })
 
   it('validates request scope and zoom before issuing a request', async () => {
-    vi.mocked(api.get).mockClear()
+    vi.mocked(api.getWithMeta).mockClear()
     await expect(loadOrchestration({ projectId: -1 })).rejects.toThrow()
     await expect(loadOrchestration({ zoom: '01' })).rejects.toThrow()
-    expect(api.get).not.toHaveBeenCalled()
-    vi.mocked(api.get).mockResolvedValue(copy())
+    expect(api.getWithMeta).not.toHaveBeenCalled()
+    vi.mocked(api.getWithMeta).mockResolvedValue({
+      data: copy(),
+      status: 200,
+      etag: null,
+      lastModified: null,
+      permissionsEpoch: '1',
+      permissionsEpochGeneration: 0,
+    })
     const result = await loadOrchestration({ zoom: fixture.fleet.zoom })
     expect(result).toEqual(fixture)
-    expect(api.get).toHaveBeenCalledWith(`/agent-mode/orchestration/v1?zoom=${fixture.fleet.zoom}`)
+    expect(api.getWithMeta).toHaveBeenCalledWith(
+      `/agent-mode/orchestration/v1?zoom=${fixture.fleet.zoom}`,
+      { signal: undefined },
+    )
     await expect(loadOrchestration({ projectId: 999, zoom: fixture.fleet.zoom })).rejects.toThrow()
   })
 })
