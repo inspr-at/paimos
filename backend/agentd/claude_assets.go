@@ -9,7 +9,7 @@ const (
 	claudeAgentSDKVersion   = "0.3.251"
 	claudeAgentSDKSHA256    = "9235fac983c29e614d7f572a578406dc5dbda006305faa99f9447f577738eb93"
 	claudeMinimumCLIVersion = "2.1.251"
-	claudeBridgeSHA256      = "b516fd4dcef367db8347832722a7d2f9034b0ff37ff419f4a79c83923d71b0e2"
+	claudeBridgeSHA256      = "0ba565e5c7da3739b5d28c30058da60a337e3c2e700bd102b81fed7739175637"
 )
 
 var (

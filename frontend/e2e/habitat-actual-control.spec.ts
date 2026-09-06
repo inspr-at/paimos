@@ -358,8 +358,10 @@ test('actual browser controls one fresh owned child and closes every generation'
     id: string,
     kind: 'interrupt' | 'stop',
     staleReviewAvailable = true,
-    expectedState: 'applied' | 'rejected' = 'applied',
-    expectedReason = expectedState === 'applied' ? 'applied' : 'not_running',
+    expectedOutcomes: ReadonlyArray<{
+      state: 'applied' | 'rejected'
+      reason: 'applied' | 'not_running'
+    }> = [{ state: 'applied', reason: 'applied' }],
   ): Promise<{ id: unknown; state: unknown; reason: unknown }> {
     const label = kind[0]!.toUpperCase() + kind.slice(1)
     await target.getByRole('button', { name: label, exact: true }).click()
@@ -406,7 +408,7 @@ test('actual browser controls one fresh owned child and closes every generation'
         mutation_applied: false,
         new_request_required: true,
       })
-      return controlSelected(target, id, kind, false, expectedState, expectedReason)
+      return controlSelected(target, id, kind, false, expectedOutcomes)
     }
     expect(requested.status()).toBe(200)
     const created = record((await requested.json()).control)
@@ -430,8 +432,11 @@ test('actual browser controls one fresh owned child and closes every generation'
       terminal = await readJSON(checked)
       terminalResponse = checked
     }
-    expect(terminal.state).toBe(expectedState)
-    expect(terminal.reason).toBe(expectedReason)
+    expect(
+      expectedOutcomes.some(
+        (outcome) => terminal.state === outcome.state && terminal.reason === outcome.reason,
+      ),
+    ).toBe(true)
     await saveRaw(`${kind}-control-terminal-${id.slice(0, 8)}`, terminalResponse)
     return { id: created.id, state: terminal.state, reason: terminal.reason }
   }
@@ -813,17 +818,22 @@ test('actual browser controls one fresh owned child and closes every generation'
       childID,
       'interrupt',
       true,
-      busyAtInterrupt ? 'applied' : 'rejected',
-      busyAtInterrupt ? 'applied' : 'not_running',
+      [
+        { state: 'applied', reason: 'applied' },
+        { state: 'rejected', reason: 'not_running' },
+      ],
     )
+    const interruptApplied = interrupt.state === 'applied' && interrupt.reason === 'applied'
     receipt.steps.push({
       step: 'interrupt',
       ...interrupt,
       busy_observed_before_steer: busyObserved,
       busy_observed_immediately_before_request: busyAtInterrupt,
-      claim: busyAtInterrupt
+      claim: busyAtInterrupt && interruptApplied
         ? 'active-turn interruption'
-        : 'idle interruption rejected; no active turn observed',
+        : interruptApplied
+          ? 'interrupt applied; active turn not independently observed'
+          : 'turn completed or idle before receipt; interruption rejected',
     })
     await waitForWorkerState(context.request, childID, 'idle')
 

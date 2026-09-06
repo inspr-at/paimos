@@ -216,6 +216,10 @@ function observeReaction(message) {
   if (state.applied) deleteCorrelation(uuid);
 }
 
+function observeTurnActivity(message) {
+  if (message?.type === "assistant" || message?.type === "stream_event") turnActive = true;
+}
+
 function observeTool(message) {
   if (message?.type === "assistant" && Array.isArray(message.message?.content) &&
       message.message.content.some((block) => block?.type === "tool_use")) {
@@ -410,6 +414,7 @@ try {
         emit({ kind: "turn_started" });
       }
     }
+    observeTurnActivity(message);
     observeReaction(message);
     observeTool(message);
     if (message?.type === "result") {

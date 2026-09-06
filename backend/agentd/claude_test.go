@@ -215,6 +215,51 @@ func TestClaudeInterruptRejectsTurnThatCompletesBeforeReceipt(t *testing.T) {
 	}
 }
 
+func TestClaudeInterruptAcceptsSubsequentActivityWithoutReactionUUID(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node runtime unavailable")
+	}
+	t.Setenv("PAIMOS_CLAUDE_TEST_MODE", "subsequent_activity_without_reaction")
+	adapter := newTestClaudeAdapter(t, node)
+	events := make(chan AdapterEvent, 16)
+	process, err := adapter.Start(context.Background(), StartRequest{
+		Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:test", Prompt: "initial turn",
+	}, func(event AdapterEvent) { events <- event })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	seenCompleted := false
+	for {
+		select {
+		case event := <-events:
+			seenCompleted = seenCompleted || event.Kind == EventTurnCompleted
+			if seenCompleted && event.Kind == EventToolStarted {
+				goto active
+			}
+		case <-deadline:
+			t.Fatal("subsequent uncorrelated vendor activity was not observed")
+		}
+	}
+
+active:
+	interrupt, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "subsequent-interrupt"})
+	if err != nil {
+		t.Fatalf("interrupt subsequent uncorrelated activity: %v", err)
+	}
+	if interrupt.Primitive != claudeInterruptPrimitive || interrupt.CorrelationID != "subsequent-interrupt" {
+		t.Fatalf("interrupt=%+v", interrupt)
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "subsequent-stop"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClaudeAdapterFailsClosedWithoutDocumentedRuntime(t *testing.T) {
 	adapter := NewClaudeAdapter("/missing/operator-claude", "/missing/node", "/missing/sdk.mjs")
 	_, err := adapter.Start(context.Background(), StartRequest{
@@ -797,6 +842,9 @@ export function query({ prompt }) {
           output.push({ type: "assistant", session_id: "claude-owned-session", message: { content: [{ type: "text", text: message.message.content[0].text }] } });
 		  if (["hold_initial_turn", "complete_before_interrupt_receipt"].includes(process.env.PAIMOS_CLAUDE_TEST_MODE)) initialResultPending = true;
 		  else output.push({ type: "result", session_id: "claude-owned-session" });
+		  if (process.env.PAIMOS_CLAUDE_TEST_MODE === "subsequent_activity_without_reaction") {
+			setTimeout(() => output.push({ type: "assistant", session_id: "claude-owned-session", message: { content: [{ type: "tool_use", name: "bounded_fixture" }] } }), 10);
+		  }
 		  if (process.env.PAIMOS_CLAUDE_TEST_MODE === "abort_with_pending_input") {
 			setTimeout(() => output.close(), 100);
 			await new Promise(() => {});
