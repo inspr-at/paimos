@@ -23,6 +23,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import AppModal from '@/components/AppModal.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import changelogRaw from '@docs/CHANGELOG.md?raw'
 import { formatDateWithLocale } from '@/composables/useDateFormat'
 import { parseChangelog, type VersionEntry } from '@/utils/changelog'
@@ -66,6 +67,19 @@ function fmtFullDate(iso: string): string {
   return formatDateWithLocale(iso, undefined, {
     year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
   })
+}
+
+function selectRelease(index: number) {
+  if (index < 0 || index >= entries.value.length) return
+  selectedIndex.value = index
+}
+
+function selectPreviousRelease() {
+  selectRelease(selectedIndex.value + 1)
+}
+
+function selectNextRelease() {
+  selectRelease(selectedIndex.value - 1)
 }
 
 // ── Keyboard nav ────────────────────────────────────────────────────
@@ -140,7 +154,7 @@ watch(
               role="option"
               :aria-selected="i === selectedIndex"
               :data-version="e.version"
-              @click="selectedIndex = i"
+              @click="selectRelease(i)"
             >
               <span class="cl-row-dot" />
               <span class="cl-row-ver">{{ e.version }}</span>
@@ -154,10 +168,34 @@ watch(
       <!-- ── Content pane ────────────────────────────────────── -->
       <section class="cl-content" aria-live="polite">
         <header v-if="selected" class="cl-content-head">
-          <div class="cl-content-head-id">
-            <span :class="['cl-row-dot', 'cl-row-dot--lg', `cl-row--${selected.bumpKind}`]" />
-            <h2>v{{ selected.version }}</h2>
-            <span v-if="selected.bumpKind !== 'unknown'" class="cl-bump-label">{{ selected.bumpKind }}</span>
+          <div class="cl-content-toolbar">
+            <div class="cl-content-head-id">
+              <span :class="['cl-row-dot', 'cl-row-dot--lg', `cl-row--${selected.bumpKind}`]" />
+              <h2>v{{ selected.version }}</h2>
+              <span v-if="selected.bumpKind !== 'unknown'" class="cl-bump-label">{{ selected.bumpKind }}</span>
+            </div>
+            <nav class="cl-release-nav" aria-label="Release navigation">
+              <button
+                type="button"
+                class="cl-release-nav-btn"
+                :disabled="selectedIndex >= entries.length - 1"
+                aria-label="Previous release"
+                @click="selectPreviousRelease"
+              >
+                <AppIcon name="chevron-left" :size="14" aria-hidden="true" />
+                <span>Previous</span>
+              </button>
+              <button
+                type="button"
+                class="cl-release-nav-btn"
+                :disabled="selectedIndex <= 0"
+                aria-label="Next release"
+                @click="selectNextRelease"
+              >
+                <span>Next</span>
+                <AppIcon name="chevron-right" :size="14" aria-hidden="true" />
+              </button>
+            </nav>
           </div>
           <time class="cl-content-head-date" :datetime="selected.date">
             {{ fmtFullDate(selected.date) }}
@@ -185,7 +223,7 @@ watch(
 */
 .cl-shell {
   display: grid;
-  grid-template-columns: 168px 1fr;
+  grid-template-columns: 252px minmax(0, 1fr);
   margin: -1.5rem;
   height: min(560px, 70vh);
   overflow: hidden;
@@ -232,7 +270,7 @@ watch(
 .cl-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 7px 1fr auto;
+  grid-template-columns: 8px minmax(0, 1fr) max-content;
   align-items: center;
   gap: .45rem;
   padding: .3rem .55rem;
@@ -278,6 +316,7 @@ watch(
   font-size: 12px; font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -.01em;
+  white-space: nowrap;
   /* No "v" prefix in the rail — saves 6 pixels per row and the column
      header / content header carry the format already. */
 }
@@ -316,7 +355,7 @@ watch(
 }
 
 .cl-content-head {
-  display: flex; align-items: baseline; justify-content: space-between;
+  display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
   gap: 1rem;
   padding-bottom: .85rem;
   border-bottom: 1px solid var(--border);
@@ -325,6 +364,12 @@ watch(
   z-index: 1;
   margin-top: -1.1rem;
   padding-top: 1.1rem;
+}
+
+.cl-content-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
 }
 
 .cl-content-head-id {
@@ -352,6 +397,45 @@ watch(
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.cl-release-nav {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  flex-shrink: 0;
+}
+
+.cl-release-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  min-height: 28px;
+  padding: .25rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.cl-release-nav-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg);
+}
+.cl-release-nav-btn:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 1px;
+}
+.cl-release-nav-btn:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+@media (max-width: 520px) {
+  .cl-content-toolbar { align-items: flex-start; flex-direction: column; gap: .65rem; }
+  .cl-release-nav { align-self: flex-end; }
 }
 
 /* ── Markdown body ─────────────────────────────────────────────── */
