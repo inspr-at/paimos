@@ -261,6 +261,29 @@ func TestRepairReopensOwnershipChangedStreamForVerifiedSuccessor(t *testing.T) {
 		t.Fatal("verified successor did not reopen the address stream")
 	}
 }
+func TestRepairKeepsPendingEffectWhenOwnershipChanged(t *testing.T) {
+	dir := t.TempDir()
+	d := &fixtureDriver{verifyErr: ErrOwnership}
+	s := fixtureSupervisor(t, dir, d)
+	b := fixtureBinding()
+	_ = s.Step(context.Background(), b)
+	s.Stop()
+	d.verifyErr = nil
+	b.Generation = "daemon-two"
+	b.Session = "session-two"
+	b.Revision = "target-two"
+	s = fixtureSupervisor(t, dir, d)
+	pending := checkpoint{Key: digest(struct{ ID string }{"pending"}), Binding: b.Key(), Phase: "pending"}
+	if err := s.receipts.Put(pending); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(s.Repair(context.Background(), b), ErrUnknown) {
+		t.Fatal("repair discarded a pending effect after ownership changed")
+	}
+	if got := s.receipts.Snapshot(); len(got) != 1 || got[0] != pending || d.effects != 0 {
+		t.Fatal("repair mutated a pending effect or executed work")
+	}
+}
 func TestBusyDeferralDoesNotReserveReceiptOrCountFailure(t *testing.T) {
 	d := &fixtureDriver{works: []Work{{ID: "one", Cursor: 1}}, prepareErr: ErrDeferred}
 	s := fixtureSupervisor(t, t.TempDir(), d)

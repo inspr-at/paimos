@@ -381,8 +381,8 @@ func (s *Supervisor) Stop() {
 	}
 }
 
-// Repair reopens only a transient-failure circuit after exact binding authority
-// is verified again. Pending receipts remain quarantined; no receipt is erased.
+// Repair reopens only a recoverable circuit after exact binding authority is
+// verified again. Pending receipts remain quarantined; no receipt is erased.
 func (s *Supervisor) Repair(ctx context.Context, b Binding) error {
 	s.stepMu.Lock()
 	defer s.stepMu.Unlock()
