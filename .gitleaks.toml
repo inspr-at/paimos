@@ -44,3 +44,14 @@ description = "Fixed synthetic CLI idempotency UUID"
 rules       = ["generic-api-key"]
 regexTarget = "secret"
 regexes     = ['''^9f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f$''']
+
+# Synthetic unsafe message used to prove that the browser-message service
+# rejects credential-like content. The path, upstream rule, and complete
+# extracted value must all match; neighboring values remain findings.
+[[allowlists]]
+description = "Fixed browser-message credential rejection fixture"
+condition   = "AND"
+rules       = ["generic-api-key"]
+paths       = ['''^backend/managedharness/browser_messages_test\.go$''']
+regexTarget = "secret"
+regexes     = ['''^abcdef1234567890$''']
