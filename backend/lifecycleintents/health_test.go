@@ -70,7 +70,11 @@ func TestLifecycleRuntimeHealthFreshStaleOfflineAndUnknown(t *testing.T) {
 }
 
 func TestLifecycleRuntimeHealthViewerReauthorizationAndNoCountOracle(t *testing.T) {
-	f := setup(t)
+	// Pin the service clock so every secondary credential must use it too;
+	// wall-clock inserts can otherwise become future-created under slow CI.
+	f := setupWithClock(t, func() time.Time {
+		return time.Date(2026, time.January, 2, 3, 4, 5, 123000000, time.UTC)
+	})
 	ctx := context.Background()
 	res, e := db.DB.Exec(`INSERT INTO users(username,password,role,role_key,status) VALUES('health-viewer','disabled','member','member','active')`)
 	if e != nil {
@@ -78,7 +82,7 @@ func TestLifecycleRuntimeHealthViewerReauthorizationAndNoCountOracle(t *testing.
 	}
 	user, _ := res.LastInsertId()
 	credential := uuid.NewString()
-	if _, e = db.DB.Exec(`INSERT INTO sessions(id,user_id,credential_id,expires_at,created_at) VALUES(?,?,?,datetime('now','+1 hour'),datetime('now'))`, uuid.NewString(), user, credential); e != nil {
+	if _, e = db.DB.Exec(`INSERT INTO sessions(id,user_id,credential_id,expires_at,created_at) VALUES(?,?,?,?,?)`, uuid.NewString(), user, credential, stamp(f.now.Add(time.Hour)), stamp(f.now)); e != nil {
 		t.Fatal(e)
 	}
 	viewer, _ := auth.NewSessionPrincipal(credential, user, user, false)
