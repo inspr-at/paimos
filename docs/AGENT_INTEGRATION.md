@@ -242,8 +242,9 @@ idle session; PAIMOS cannot detect a live interactive turn on the same
 session. Resuming from a different directory needs Claude Code v2.1.223 or
 later.
 
-Claude has no steer primitive. There is no `claude steer`, no send-to-session
-command, and no documented messaging-socket user frame, so a `steer` request
+Unmanaged Claude CLI/resume delivery through `paimos listen` has no steer
+primitive. There is no documented `claude steer`, send-to-session command, or
+messaging-socket user frame, so a `steer` request
 (the durable `paimos tell --level steer`, or legacy `--deliver-mode steer` on
 a pre-bus row) delivers the same simple turn and records
 `fallback_reason=unsupported` instead of guessing a vendor command. The Claude
