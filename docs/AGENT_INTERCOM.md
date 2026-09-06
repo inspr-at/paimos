@@ -17,7 +17,10 @@ daemon builds. Release 26.09.05 does not include these workflows. The earlier
 use the verified corrective release 26.09.06.21.31. The reference operator Mac
 now runs its matching CLI and daemon with the protected lifecycle mapping; its
 read-only doctor confirms the owned lifecycle executor while optional receiver
-layers remain unavailable with zero owned sessions.
+layers remain unavailable with zero owned sessions. A live API-key UI review
+also passed the control-room geometry, style, changelog, and all four Projects
+zoom checks. Runtime-health remains a human-session-only endpoint, so that
+review's expected `403` is not human-browser runtime-health evidence.
 
 This guide uses only public command names and placeholder identities. Keep
 actual target references, socket paths, credentials, and message content out of
