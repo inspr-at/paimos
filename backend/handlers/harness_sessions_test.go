@@ -258,7 +258,8 @@ func TestHarnessSteerCompatibilityDrainCompletesOlderSimpleFIFO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "steer second", DeliveryLevel: "steer"}); err != nil {
+	steer, err := bus.SendEnvelope(context.Background(), agentmessage.SendEnvelopeInput{ProjectID: projectID, Sender: "sender", To: "codex:worker", Body: "steer second", DeliveryLevel: "steer"})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -281,18 +282,43 @@ func TestHarnessSteerCompatibilityDrainCompletesOlderSimpleFIFO(t *testing.T) {
 	if err := json.Unmarshal(drainRecorder.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Messages) != 1 || page.Messages[0].Cursor != simple.Cursor || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.RequestedLevel != "simple" {
+	if len(page.Messages) != 2 || page.Cursor != 0 || page.NextCursor != steer.Cursor || page.Messages[0].Cursor != simple.Cursor || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.RequestedLevel != "simple" || page.Messages[0].DeliveryWork.State != "leased" {
 		t.Fatalf("steer compatibility drain skipped older simple work: %#v", page)
 	}
 	work := page.Messages[0].DeliveryWork
-	if work.TargetRef != "" {
+	blocked := page.Messages[1].DeliveryWork
+	if page.Messages[1].Cursor != steer.Cursor || blocked == nil || blocked.State != "pending" || blocked.RequestedLevel != "steer" || blocked.FallbackReason != "fifo_blocked" {
+		t.Fatal("later steer must remain an unleased FIFO diagnostic")
+	}
+	if work.TargetRef != "" || blocked.TargetRef != "" {
 		t.Fatal("private target reference escaped the harness drain response")
+	}
+	prematurePayload, _ := json.Marshal(completeSteerRequest{Cursor: steer.Cursor, DeliveryID: blocked.DeliveryID, EffectiveLevel: "steer"})
+	prematureRecorder := httptest.NewRecorder()
+	completeHarnessSteer(prematureRecorder, request(http.MethodPost, "/complete-steer", prematurePayload))
+	if prematureRecorder.Code != http.StatusBadRequest || !strings.Contains(prematureRecorder.Body.String(), "agent_message_delivery_not_leased") {
+		t.Fatal("unleased diagnostic was accepted as executed steer")
+	}
+	var leased, pendingWithoutLease, cursors int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_deliveries WHERE state='leased'`).Scan(&leased); err != nil || leased != 1 {
+		t.Fatalf("drain issued %d leases, want only the simple head: %v", leased, err)
+	}
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_deliveries WHERE delivery_id=? AND state='pending' AND attempt_count=0 AND lease_until IS NULL AND last_error_code='fifo_blocked'`, blocked.DeliveryID).Scan(&pendingWithoutLease); err != nil || pendingWithoutLease != 1 {
+		t.Fatal("blocked steer obtained a durable attempt or lease")
+	}
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_cursors WHERE project_id=? AND cursor>0`, projectID).Scan(&cursors); err != nil || cursors != 0 {
+		t.Fatal("drain or refused completion advanced the durable cursor")
 	}
 	payload, _ := json.Marshal(completeSteerRequest{Cursor: simple.Cursor, DeliveryID: work.DeliveryID, EffectiveLevel: "simple"})
 	completeRecorder := httptest.NewRecorder()
 	completeHarnessSteer(completeRecorder, request(http.MethodPost, "/complete-steer", payload))
 	if completeRecorder.Code != http.StatusOK {
 		t.Fatalf("complete status=%d body=%s", completeRecorder.Code, completeRecorder.Body.String())
+	}
+
+	var completed agentmessage.CursorState
+	if err := json.Unmarshal(completeRecorder.Body.Bytes(), &completed); err != nil || completed.Cursor != simple.Cursor {
+		t.Fatal("simple completion advanced beyond its leased head")
 	}
 
 	nextRecorder := httptest.NewRecorder()
@@ -303,7 +329,7 @@ func TestHarnessSteerCompatibilityDrainCompletesOlderSimpleFIFO(t *testing.T) {
 	if err := json.Unmarshal(nextRecorder.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Messages) != 1 || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.RequestedLevel != "steer" {
+	if len(page.Messages) != 1 || page.Cursor != simple.Cursor || page.Messages[0].Cursor != steer.Cursor || page.Messages[0].DeliveryWork == nil || page.Messages[0].DeliveryWork.DeliveryID != blocked.DeliveryID || page.Messages[0].DeliveryWork.RequestedLevel != "steer" || page.Messages[0].DeliveryWork.State != "leased" || page.Messages[0].DeliveryWork.TargetRef != "" {
 		t.Fatalf("later steer remained FIFO-blocked: %#v", page)
 	}
 }
