@@ -105,6 +105,20 @@ func Serve(ctx context.Context, socket string, supervisor *Supervisor) error {
 
 func transportHandler(supervisor *Supervisor) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/runtime", func(w http.ResponseWriter, r *http.Request) {
+		writeTransportJSON(w, http.StatusOK, supervisor.RuntimeStatus(r.Context()))
+	})
+	mux.HandleFunc("POST /v1/runtime/quiesce", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Generation string   `json:"generation"`
+			Sessions   []string `json:"sessions"`
+		}
+		if decodeTransportJSON(w, r, &request) != nil {
+			return
+		}
+		err := supervisor.QuiesceRuntime(r.Context(), request.Generation, request.Sessions)
+		writeTransportResult(w, struct{}{}, err)
+	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeTransportJSON(w, http.StatusOK, supervisor.Status())
 	})
@@ -254,4 +268,13 @@ func (c *Client) Stop(ctx context.Context, id string, request ControlRequest) (R
 	var out Receipt
 	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/stop", request, &out)
 	return out, err
+}
+
+func (c *Client) RuntimeStatus(ctx context.Context) (RuntimeStatus, error) {
+	var out RuntimeStatus
+	err := c.request(ctx, http.MethodGet, "/v1/runtime", nil, &out)
+	return out, err
+}
+func (c *Client) QuiesceRuntime(ctx context.Context, generation string, sessions []string) error {
+	return c.request(ctx, http.MethodPost, "/v1/runtime/quiesce", map[string]any{"generation": generation, "sessions": sessions}, &struct{}{})
 }

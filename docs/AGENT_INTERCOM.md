@@ -13,6 +13,104 @@ with 5.21.0 or 26.08.31. It uses only public command names and placeholder
 identities. Keep actual target references, socket paths, credentials, and
 message content out of documentation and logs.
 
+## Local runtime setup, doctor, repair and reset
+
+Use the same explicit configured instance for the CLI and the platform service:
+
+```bash
+paimos --instance example runtime doctor --project-id 123
+paimos --instance example runtime setup --project-id 123
+paimos --instance example runtime repair --project-id 123
+paimos --instance example --json runtime reset
+```
+
+`doctor` is read-only. It does not migrate legacy credentials, replay a journal,
+create directories, start a service, or change a target. It reports CLI/auth,
+authenticated server identity, canonical agents, immutable profiles, targets,
+service ownership, private paths, socket/lock, journal integrity, reporter lease,
+stale generations, workspace ownership, consumers and browser intents separately.
+It rejects an ambient instance URL when an explicit named instance is selected.
+The expected deployment identity defaults to that name; use
+`--expect-deployment-instance` when the configured alias differs. Server responses,
+credentials, reporter key paths, target references, prompts and vendor payloads
+never become diagnostics. A target list alone does not prove consumer ownership.
+
+The default service names are `cm.paimos.agentd.<instance>` under
+`~/Library/LaunchAgents` on macOS and `paimos-agentd-<instance>.service` under
+`~/.config/systemd/user` on Linux. `--service-name`, `--service-file`, and
+`--state-root` select an existing operator-reviewed declaration. A declaration
+must execute an installed absolute `paimos-agentd` directly, with `serve`, the
+exact `--instance`, and an explicit matching `--state-root`. A custom socket must
+be that instance's `agentd.sock`. Reporter configuration must use the same URL as
+the named instance. Reporter keys are inspected only for private file metadata by
+runtime diagnostics; the daemon retains its existing authenticated preflight.
+LaunchAgent file logs must be inside the private instance directory with one of
+the documented runtime log names below, with LaunchAgent `Umask` set to 63
+(decimal 077); Linux logs use the user service journal.
+
+Home Manager/Nix symlinks are followed for read-only verification. Setup never
+rewrites those declarations, installs a binary, enables a unit, or invokes
+Home Manager/Nix. Shell wrappers, system-service impersonation, unreviewed Linux
+drop-ins, environment overrides, extra executable lifecycle hooks and shared
+workspace authorization require a separate operator review and fail closed here.
+If the declaration is missing or incompatible, configure it through the selected
+Home Manager/service workflow first. A verified stopped declaration includes the
+exact explicit `launchctl bootstrap` or `systemctl --user enable --now` action in
+its readiness output. Setup can reconnect/start that already reviewed service
+idempotently and creates missing owned 0700 state directories. It preserves
+existing unsafe modes for operator correction instead of silently changing them.
+
+Repair can stop/restart only the verified instance service and remove a stale
+private socket while holding agentd's instance lock. It retains the lock inode;
+a held lock with unavailable ownership evidence is never treated as stale.
+It does not repair ambiguous journal contents, adopt old PIDs, change worktrees,
+install accounts, or mutate remote identities/targets. Three persisted start
+attempts, with 1/2/4-second backoff and bounded readiness probes, exhaust its
+budget across command invocations. A tripped circuit disables the platform
+restart loop and writes one content-free 0600 `runtime-attention.json` item.
+An interrupted stop is completed on the next repair invocation. Attention is
+local and durable; publishing it through an owned attention consumer belongs to
+PAI-923 and does not wake a model from this command. After correcting the cause,
+a confirmed reset archives the budget so a new bootstrap can start explicitly.
+
+Reset without `--confirm` only previews exact daemon/child PIDs and eligible
+paths. Apply the copyable command printed with its preview token. The token
+binds the selected instance, declaration, current daemon generation, exact owned
+session set and paths. Agentd rechecks the session set while holding its spawn
+gate, closes that gate and reaps only its own children before the service is
+stopped. A changed generation/session set or missing ownership proof rejects the
+operation. After the platform service stops, reset acquires the same instance
+lock and verifies that the service is no longer running before archiving state.
+
+Eligible files are `sessions.checkpoint.json`, `sessions.journal`,
+`runtime-repair.json`, `runtime-attention.json`, `agentd.log`,
+`agentd.stdout.log`, and `agentd.stderr.log`, inside the selected private instance
+directory only. Archives are unique timestamped 0700 directories under the
+selected state root's `reset-archives`, with 0600 files and a content-free
+manifest. Validated journals/budget state are archived normally. Corrupt journals,
+raw logs and other unclassified eligible originals are preserved in a separate
+private `quarantine` subdirectory; they are never claimed to be secret-free or
+replayed automatically. Socket/lock recovery records inert metadata, removes the
+stale socket and retains the lock inode. A partial failure leaves original and
+already moved files recoverable, with the archive path in the result.
+
+Credentials, reporter lease material, CLI configuration, declarative service
+files, platform journal history, remote session/target/event history,
+orchestrator bindings, worktrees, unrelated files and shared vendor services
+remain preserved. An `ownership_lost` record grants no PID authority: reset does
+not claim that an unknown old process has exited. Restoring a reviewed journal
+while the service is stopped can recover local history; bootstrap always creates
+a fresh daemon generation and never adopts the restored processes. Reset prints
+a bootstrap command retaining the selected instance, state root and service
+options.
+
+Human and JSON output distinguish `known`, `unknown`, `action_required`,
+`repaired` and `preserved`. `ready` requires every readiness layer to be supported
+by evidence. Setup/repair can complete a local action while readiness still
+requires work. The PAI-922 implementation reports consumer ownership and browser
+intent readiness as unknown until the PAI-923/PAI-924 authenticated adapters are
+integrated; service liveness does not stand in for those capabilities.
+
 ## Fast path: owned Codex
 
 Prerequisites:

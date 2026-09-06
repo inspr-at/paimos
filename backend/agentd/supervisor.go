@@ -68,6 +68,7 @@ type Supervisor struct {
 	heartbeatInterval     time.Duration
 	maxSessions           int
 	closed                bool
+	runtimeQuiescing      bool
 	instance              string
 	journal               *registryJournal
 	reporter              Reporter
@@ -76,6 +77,7 @@ type Supervisor struct {
 	inspectWorkspace      workspaceInspector
 	reporterErrorCode     ErrorCode
 	reporterFailures      int64
+	reporterLastSuccess   time.Time
 	reportMu              sync.Mutex
 	reportWake            chan struct{}
 	done                  chan struct{}
@@ -198,7 +200,7 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 	defer s.startMu.Unlock()
 	s.mu.RLock()
 	adapter := s.adapters[validated.Adapter]
-	closed := s.closed
+	closed := s.closed || s.runtimeQuiescing
 	s.mu.RUnlock()
 	if closed {
 		return Session{}, errors.New("agentd supervisor is closed")
@@ -307,7 +309,7 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 
 func (s *Supervisor) reserveSession(entry *sessionEntry) error {
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || s.runtimeQuiescing {
 		s.mu.Unlock()
 		return errors.New("agentd supervisor is closed")
 	}
@@ -584,6 +586,7 @@ func (s *Supervisor) report(ctx context.Context) {
 		s.reporterFailures++
 	} else {
 		s.reporterErrorCode = ""
+		s.reporterLastSuccess = time.Now().UTC()
 	}
 	s.mu.Unlock()
 }
