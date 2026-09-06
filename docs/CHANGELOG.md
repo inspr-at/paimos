@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [Unreleased]
+
+### Fixed — complete Habitat and CLI release (PAI-917, PAI-928)
+
+- Include the shared orchestration contracts in the container's frontend build,
+  allowing the new Habitat UI and guided CLI workflows to ship together.
+- Supersede the incomplete 26.09.06 release: its CLI artifacts were built, but
+  its server image was not published. Install the corrected server and matching
+  CLI together. The complete Habitat and runtime feature notes remain below.
+- Clarify that unmanaged Claude CLI/resume delivery cannot steer an active
+  turn; the owned Agent SDK runtime has separate typed controls. Record the
+  completed local Codex/Claude handoff proofs without closing clean-machine or
+  named cross-machine acceptance gaps.
+
 ## [26.09.06] — 2026-09-06
 
 ### Added — Habitat and owned runtime controls (PAI-917)

@@ -24,6 +24,7 @@ COPY frontend/ ./
 # AppChangelogModal.vue imports @docs/CHANGELOG.md?raw (alias -> ../docs/).
 COPY VERSION /VERSION
 COPY docs/ /docs/
+COPY backend/contracts/ /backend/contracts/
 RUN npm run build \
   && find /src/dist -exec touch -d "@${SOURCE_DATE_EPOCH}" {} +
 

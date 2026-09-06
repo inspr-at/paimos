@@ -437,10 +437,10 @@ The boundaries below are part of the product description, not fine print:
   to advertised workspaces, profiles and typed actions; they do not grant a
   general remote shell or autonomous deployment authority.
 - Habitat and the runtime/lifecycle changes documented here have focused
-  automated evidence and require matching PAI-917 builds. Clean-machine
-  onboarding, real vendor handoffs and live rollout acceptance remain separate
-  checks; an API receipt alone does not establish that a worker started or
-  completed its assignment.
+  automated evidence and operator-owned local Codex and Claude handoff proofs
+  with matching PAI-917 builds. Clean-machine onboarding, named cross-machine
+  handoffs and live rollout acceptance remain separate checks; an API receipt
+  alone does not establish that a worker started or completed its assignment.
 
 Production evidence and open gaps are maintained in
 [Reference Deployments](docs/REFERENCE_DEPLOYMENTS.md), the
