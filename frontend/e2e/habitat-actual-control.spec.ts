@@ -37,6 +37,7 @@ type Handoff = {
   }
   private_human_password_file: string
   private_message_file: string
+  private_steer_file: string
   evidence_directory: string
   served_frontend: { source: string; index_sha256: string }
   browser_proof: {
@@ -75,7 +76,7 @@ type Receipt = {
   failure?: { name: string }
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-57][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 const record = (value: unknown): JSONRecord => value as JSONRecord
 
@@ -97,7 +98,7 @@ function requireHandoff(value: unknown): Handoff {
   expect(h?.agents?.coordinator?.name).toMatch(/^browser-proof-[a-z0-9-]+$/)
   expect(h?.browser_proof?.fresh_agent_addresses).toBe(true)
   expect(h?.browser_proof?.max_queries).toBe(3)
-  expect(h?.browser_proof?.max_input_turns).toBeGreaterThanOrEqual(1)
+  expect(h?.browser_proof?.max_input_turns).toBeGreaterThanOrEqual(5)
   expect(h?.browser_proof?.max_input_turns).toBeLessThanOrEqual(6)
   expect(h?.browser_proof?.cleanup_owner).toMatch(/^\/root(?:\/[a-z0-9_-]+)?$/)
   expect(expires).toBeGreaterThan(Date.now() + 60_000)
@@ -141,9 +142,12 @@ test('actual browser controls one fresh owned child and closes every generation'
   await expect(stat(resultPath)).rejects.toThrow()
   const password = (await requirePrivateFile(handoff.private_human_password_file)).trimEnd()
   const message = (await requirePrivateFile(handoff.private_message_file)).trim()
+  const steer = (await requirePrivateFile(handoff.private_steer_file)).trim()
   expect(password.length).toBeGreaterThan(0)
   expect(message.length).toBeGreaterThan(0)
   expect(message.length).toBeLessThanOrEqual(8_000)
+  expect(steer.length).toBeGreaterThan(0)
+  expect(steer.length).toBeLessThanOrEqual(8_000)
 
   const receipt: Receipt = {
     evidence_kind: handoff.evidence_kind,
@@ -169,11 +173,10 @@ test('actual browser controls one fresh owned child and closes every generation'
   const mutationPaths = [
     /^\/api\/orchestrator\/v1\/config$/,
     new RegExp(`^/api/projects/${project}/lifecycle/v1/intents$`),
-    new RegExp(`^/api/v2/projects/${project}/messages$`),
-    new RegExp(
-      `^/api/projects/${project}/harness-sessions/[0-9a-f-]+/controls/v1/(?:interrupt|stop)$`,
-    ),
   ]
+  const ownedHarnessMutation = new RegExp(
+    `^/api/projects/${project}/harness-sessions/([0-9a-f-]+)/(?:messages/v1|controls/v1/(?:interrupt|stop))$`,
+  )
   const context = await browser.newContext({
     baseURL: handoff.url,
     viewport: { width: 1440, height: 1000 },
@@ -210,7 +213,10 @@ test('actual browser controls one fresh owned child and closes every generation'
         return route.abort()
       }
       if (!['GET', 'HEAD'].includes(request.method())) {
-        const allowed = mutationPaths.some((pattern) => pattern.test(url.pathname))
+        const owned = ownedHarnessMutation.exec(url.pathname)
+        const allowed =
+          mutationPaths.some((pattern) => pattern.test(url.pathname)) ||
+          (!!owned && receipt.owned_session_ids.includes(owned[1]!))
         if (!allowed) {
           receipt.unexpected_mutations_blocked.push(`${request.method()} ${url.pathname}`)
           return route.abort()
@@ -339,7 +345,7 @@ test('actual browser controls one fresh owned child and closes every generation'
       target.getByRole('button', { name: `Confirm ${kind}`, exact: true }).click(),
     ])
     await saveRaw(`${kind}-control-created-${id.slice(0, 8)}`, requested)
-    expect(requested.status()).toBe(201)
+    expect(requested.status()).toBe(200)
     const created = record((await requested.json()).control)
     let terminal = created
     let terminalResponse = requested
@@ -369,6 +375,56 @@ test('actual browser controls one fresh owned child and closes every generation'
   async function control(target: Page, id: string, kind: 'interrupt' | 'stop') {
     await selectOwnedWorker(target, id)
     return controlSelected(target, id, kind)
+  }
+
+  async function sendMessage(
+    target: Page,
+    id: string,
+    level: 'simple' | 'steer',
+    body: string,
+  ) {
+    const openLabel = level === 'simple' ? 'Message' : 'Steer'
+    const submitLabel = level === 'simple' ? 'Send message' : 'Confirm steer'
+    await target.getByRole('button', { name: openLabel, exact: true }).click()
+    await target.getByLabel('Message draft', { exact: true }).fill(body)
+    const path = `/api/projects/${project}/harness-sessions/${id}/messages/v1`
+    const [sent] = await Promise.all([
+      target.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' && new URL(response.url()).pathname === path,
+      ),
+      target.getByRole('button', { name: submitLabel, exact: true }).click(),
+    ])
+    await saveRaw(`${level}-message-created`, sent)
+    expect(sent.status()).toBe(201)
+    const acknowledgement = await readJSON(sent)
+    expect(acknowledgement.schema_version).toBe(1)
+    expect(acknowledgement.harness_session_id).toBe(id)
+    expect(acknowledgement.delivery_level).toBe(level)
+    expect(UUID.test(String(acknowledgement.message_id))).toBe(true)
+    expect(UUID.test(String(acknowledgement.delivery_id))).toBe(true)
+    let delivery: JSONRecord | null = null
+    for (let attempt = 0; attempt < 80 && delivery?.state !== 'handed_off'; attempt++) {
+      const value = await getJSON(context.request, `/api/projects/${project}/message-deliveries`)
+      const rows = Array.isArray(value) ? value : (record(value).deliveries as JSONRecord[])
+      delivery = rows.find((row) => row.delivery_id === acknowledgement.delivery_id) ?? null
+      if (
+        delivery?.last_error_code ||
+        ['failed', 'unknown', 'handoff_required'].includes(String(delivery?.state))
+      )
+        throw new Error(`${level}_message_delivery_failed`)
+      if (delivery?.state !== 'handed_off') await target.waitForTimeout(250)
+    }
+    expect(delivery?.message_id).toBe(acknowledgement.message_id)
+    expect(delivery?.state).toBe('handed_off')
+    expect(delivery?.effective_level).toBe(level)
+    return {
+      message_id: acknowledgement.message_id,
+      delivery_id: acknowledgement.delivery_id,
+      requested_level: level,
+      effective_level: delivery!.effective_level,
+      state: delivery!.state,
+    }
   }
 
   async function cleanupOwned(api: APIRequestContext) {
@@ -577,41 +633,7 @@ test('actual browser controls one fresh owned child and closes every generation'
     pages.delete(stalePage)
 
     await selectOwnedWorker(page, childID)
-    await page.getByRole('button', { name: 'Message', exact: true }).click()
-    await page.getByLabel('Message draft', { exact: true }).fill(message)
-    const [sent] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === `/api/v2/projects/${project}/messages`,
-      ),
-      page.getByRole('button', { name: 'Send message', exact: true }).click(),
-    ])
-    await saveRaw('message-created', sent)
-    expect(sent.status()).toBe(201)
-    const messageReceipt = await readJSON(sent)
-    expect(messageReceipt.delivered).toBe(true)
-    const messageID = String(messageReceipt.message_id)
-    let delivery: JSONRecord | null = null
-    for (let attempt = 0; attempt < 80 && delivery?.state !== 'handed_off'; attempt++) {
-      const value = await getJSON(context.request, `/api/projects/${project}/message-deliveries`)
-      const rows = Array.isArray(value) ? value : (record(value).deliveries as JSONRecord[])
-      delivery = rows.find((row) => row.message_id === messageID) ?? null
-      if (
-        delivery?.last_error_code ||
-        ['failed', 'unknown', 'handoff_required'].includes(String(delivery?.state))
-      )
-        throw new Error('message_delivery_failed')
-      if (delivery?.state !== 'handed_off') await page.waitForTimeout(250)
-    }
-    expect(delivery?.state).toBe('handed_off')
-    receipt.steps.push({
-      step: 'message',
-      message_id: messageID,
-      delivery_id: delivery!.delivery_id,
-      state: delivery!.state,
-      effective_level: delivery!.effective_level,
-    })
+    receipt.steps.push({ step: 'message', ...(await sendMessage(page, childID, 'simple', message)) })
 
     let busyObserved = false
     for (let attempt = 0; attempt < 24 && !busyObserved; attempt++) {
@@ -619,6 +641,7 @@ test('actual browser controls one fresh owned child and closes every generation'
       busyObserved = !!current?.liveness && record(current.liveness).state === 'busy'
       if (!busyObserved) await page.waitForTimeout(250)
     }
+    receipt.steps.push({ step: 'steer', ...(await sendMessage(page, childID, 'steer', steer)) })
     const interrupt = await controlSelected(page, childID, 'interrupt')
     receipt.steps.push({
       step: 'interrupt',

@@ -13285,6 +13285,9 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		 WHEN EXISTS(SELECT 1 FROM agent_message_deliveries WHERE delivery_id=OLD.delivery_id)
 		 BEGIN SELECT RAISE(ABORT,'delivery recovery history is immutable'); END`,
 	}})
+	// M180 / PAI-926: authenticated human messages address one exact
+	// runtime-owned harness generation and retain immutable replay evidence.
+	migrations = append(migrations, migration{version: 180})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue
@@ -13319,6 +13322,9 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 func applyMigration(ctx context.Context, conn *sql.Conn, m migration) error {
 	if m.version == 178 {
 		return applyMessageBodyMigration178(ctx, conn)
+	}
+	if m.version == 180 {
+		return applyHarnessMessagesMigration180(ctx, conn)
 	}
 	if migrationUsesForeignKeyPragma(m) {
 		return applyForeignKeyRebuildMigration(ctx, conn, m)

@@ -16,6 +16,7 @@ import (
 
 func RegisterHarnessBrowserRoutes(r chi.Router) {
 	r.Post("/projects/{id}/harness-sessions/{sessionID}/controls/v1/{kind}", requestHarnessControlV1)
+	r.Post("/projects/{id}/harness-sessions/{sessionID}/messages/v1", sendHarnessMessageV1)
 	r.Get("/projects/{id}/harness-sessions/{sessionID}/assignment-history/v1", getHarnessAssignmentHistoryV1)
 }
 func harnessBrowserError(w http.ResponseWriter, err error) {
@@ -56,6 +57,26 @@ func requestHarnessControlV1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeHarnessJSON(w, 200, out)
+}
+func sendHarnessMessageV1(w http.ResponseWriter, r *http.Request) {
+	p, project, ok := harnessBrowserContext(w, r)
+	if !ok {
+		return
+	}
+	var request managedharness.BrowserMessageRequest
+	if r.URL.RawQuery != "" || len(r.Header.Values("X-Paimos-Agent-Name")) != 0 ||
+		DecodeControlJSON(w, r, 64*1024, &request) != nil {
+		harnessBrowserError(w, managedharness.ErrBrowserInvalid)
+		return
+	}
+	out, err := managedharness.NewService(db.DB).SendBrowserMessageCAS(
+		r.Context(), p, project, chi.URLParam(r, "sessionID"), request,
+	)
+	if err != nil {
+		harnessBrowserError(w, err)
+		return
+	}
+	writeHarnessJSON(w, http.StatusCreated, out)
 }
 func getHarnessAssignmentHistoryV1(w http.ResponseWriter, r *http.Request) {
 	p, project, ok := harnessBrowserContext(w, r)

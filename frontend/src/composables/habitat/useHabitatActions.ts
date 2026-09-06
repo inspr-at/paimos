@@ -1,8 +1,9 @@
 import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
-import { api, ApiError } from '@/api/client'
+import { ApiError } from '@/api/client'
 import {
   requestHabitatControl,
   loadHabitatControl,
+  sendHabitatMessage,
   type HabitatControl,
 } from '@/components/habitat/habitatControls'
 import { loadOrchestration } from '@/services/orchestration'
@@ -25,6 +26,7 @@ export function useHabitatActions(options: {
   let controller: AbortController | null = null
   let messageKey: string | null = null
   let submittedBody: string | null = null
+  let submittedLevel: 'simple' | 'steer' | null = null
   const allowed = (capability: keyof HabitatWorker['capabilities']) =>
     !!options.worker.value &&
     canControlWorker(options.worker.value, capability, options.editable.value, options.fresh.value)
@@ -42,6 +44,7 @@ export function useHabitatActions(options: {
     messageKey = null
     controlKey = null
     submittedBody = null
+    submittedLevel = null
   }
   watch(signature, clear, { flush: 'sync' })
   watch(
@@ -106,33 +109,27 @@ export function useHabitatActions(options: {
         )
         if (peers.length !== 1 || latest.fleet.sample_truncated)
           throw new ApiError(409, 'ambiguous recipient')
-        if (submittedBody !== body || !messageKey) {
-          messageKey = crypto.randomUUID()
+        if (submittedBody !== body || submittedLevel !== kind || !messageKey) {
+          messageKey = `utt_${crypto.randomUUID().replace(/-/g, '')}`
           submittedBody = body
+          submittedLevel = kind
         }
-        const raw = await api.post<unknown>(
-          `/v2/projects/${worker.project.id}/messages`,
-          {
-            to: `${worker.harness}:${worker.agent.name}`,
-            body,
-            delivery_level: kind,
-            issue_id: worker.ticket?.id ?? null,
-          },
-          { signal, headers: { 'Idempotency-Key': messageKey } },
+        await sendHabitatMessage(
+          worker.project.id,
+          worker.harness_session_id,
+          revision!,
+          messageKey,
+          body,
+          kind,
+          signal,
         )
         if (!current()) return
-        const result = raw as { message_id?: unknown; delivered?: unknown }
-        if (
-          !result ||
-          typeof result.message_id !== 'string' ||
-          typeof result.delivered !== 'boolean'
-        )
-          throw new Error('invalid acknowledgement')
         feedback.value =
           'Message recorded. Delivery and execution are separate; refresh recent communication for evidence.'
         draft.value = ''
         messageKey = null
         submittedBody = null
+        submittedLevel = null
       } else {
         // Revision and ownership are checked atomically by the versioned endpoint.
         const result = await requestHabitatControl(

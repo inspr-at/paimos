@@ -894,6 +894,19 @@ Commands whose argument is explicitly another resource ID, plus
   `state`, optional terminal `outcome` and `reason`, and
   `requested_at`/`claimed_at`/`completed_at`; no worker lease, session
   reference, target reference, body, or requester.
+- `POST /projects/{id}/harness-sessions/{sessionID}/messages/v1` — a
+  non-impersonated human browser session sends `simple` or `steer` to the exact
+  selected managed generation with `expected_revision` and an
+  `utt_<32-lowercase-hex>` replay identity. The write transaction reauthorizes
+  both the human editor and the current runtime reporter, then checks the
+  generation mapping, machine/account provenance, freshness, advertised
+  capability, non-stopping phase, and enabled primary target. It creates a durable product
+  conversation on first send and records the canonical message as `human`
+  from `user:<id>`; it never supplies agent attribution or a fallback target.
+  Exact replay returns the original receipt even after that generation stops,
+  while a changed tuple or stale selected revision conflicts. Internal
+  newlines are byte-preserved; NUL, controls, oversized text, and
+  credential-like content fail without body diagnostics.
 - `POST .../{sessionID}/stop` — attributed terminal lifecycle transition after
   worker cleanup.
 

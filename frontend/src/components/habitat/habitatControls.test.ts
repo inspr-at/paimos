@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { api } from '@/api/client'
 import {
   parseAssignmentHistory,
   parseHabitatControlOutcome,
   parseHabitatControlReceipt,
+  parseHabitatMessageReceipt,
+  sendHabitatMessage,
 } from './habitatControls'
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const now = '2026-09-06T10:00:00Z'
@@ -16,6 +19,35 @@ const pending = {
   requested_by_user_id: 1,
 }
 describe('Strict control and assignment evidence', () => {
+  it('binds a human message acknowledgement to the selected generation, revision, and level', async () => {
+    const utterance = 'utt_0123456789abcdef0123456789abcdef'
+    const wire = {
+      schema_version: 1,
+      utterance_id: utterance,
+      harness_session_id: id(2),
+      harness_session_revision: 4,
+      message_id: id(7),
+      delivery_id: id(8),
+      delivery_level: 'steer',
+      created_at: now,
+    }
+    const post = vi.spyOn(api, 'post').mockResolvedValue(wire)
+    await expect(sendHabitatMessage(1, id(2), 4, utterance, 'Line one\nLine two', 'steer'))
+      .resolves.toEqual({ messageId: id(7), deliveryId: id(8), deliveryLevel: 'steer', revision: 4 })
+    expect(post).toHaveBeenCalledWith(
+      `/projects/1/harness-sessions/${id(2)}/messages/v1`,
+      {
+        schema_version: 1,
+        utterance_id: utterance,
+        expected_revision: 4,
+        text: 'Line one\nLine two',
+        delivery_level: 'steer',
+      },
+      { signal: undefined },
+    )
+    expect(() => parseHabitatMessageReceipt({ ...wire, delivery_level: 'simple' }, id(2), utterance, 4, 'steer')).toThrow()
+    expect(() => parseHabitatMessageReceipt({ ...wire, agent_name: 'impersonated' }, id(2), utterance, 4, 'steer')).toThrow()
+  })
   it('does not confuse a pending receipt with execution and rejects mismatched or unproved outcomes', () => {
     const control = parseHabitatControlReceipt(
       { schema_version: 1, control: pending, state: 'requested' },

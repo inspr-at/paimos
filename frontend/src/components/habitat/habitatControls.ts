@@ -3,6 +3,13 @@ import { api } from '@/api/client'
 import { parseIsoInstant } from '@/services/agentModeAggregateSchema'
 import { epoch, fields, invalid, object, positive, uuid } from './habitatBoundary'
 export type ControlKind = 'interrupt' | 'stop'
+export type HabitatMessageLevel = 'simple' | 'steer'
+export interface HabitatMessageReceipt {
+  messageId: string
+  deliveryId: string
+  deliveryLevel: HabitatMessageLevel
+  revision: number
+}
 export interface HabitatControl {
   id: string
   kind: ControlKind
@@ -111,6 +118,80 @@ export async function requestHabitatControl(
     ),
     sessionId,
     kind,
+  )
+}
+export function parseHabitatMessageReceipt(
+  value: unknown,
+  sessionId: string,
+  utteranceId: string,
+  revision: number,
+  deliveryLevel: HabitatMessageLevel,
+): HabitatMessageReceipt {
+  const root = object(value)
+  fields(root, [
+    'schema_version',
+    'utterance_id',
+    'harness_session_id',
+    'harness_session_revision',
+    'message_id',
+    'delivery_id',
+    'delivery_level',
+    'created_at',
+  ])
+  if (
+    root.schema_version !== 1 ||
+    root.utterance_id !== utteranceId ||
+    root.harness_session_id !== sessionId ||
+    root.harness_session_revision !== revision ||
+    root.delivery_level !== deliveryLevel ||
+    !uuid(root.message_id) ||
+    !uuid(root.delivery_id) ||
+    !parseIsoInstant(root.created_at)
+  )
+    invalid()
+  return {
+    messageId: root.message_id as string,
+    deliveryId: root.delivery_id as string,
+    deliveryLevel,
+    revision,
+  }
+}
+export async function sendHabitatMessage(
+  projectId: number,
+  sessionId: string,
+  revision: number,
+  utteranceId: string,
+  text: string,
+  deliveryLevel: HabitatMessageLevel,
+  signal?: AbortSignal,
+) {
+  if (
+    !positive(projectId) ||
+    !positive(revision) ||
+    !uuid(sessionId) ||
+    !/^utt_[0-9a-f]{32}$/.test(utteranceId) ||
+    !text ||
+    text !== text.trim() ||
+    new TextEncoder().encode(text).length > 8192 ||
+    !['simple', 'steer'].includes(deliveryLevel)
+  )
+    invalid()
+  return parseHabitatMessageReceipt(
+    await api.post<unknown>(
+      `/projects/${projectId}/harness-sessions/${sessionId}/messages/v1`,
+      {
+        schema_version: 1,
+        utterance_id: utteranceId,
+        expected_revision: revision,
+        text,
+        delivery_level: deliveryLevel,
+      },
+      { signal },
+    ),
+    sessionId,
+    utteranceId,
+    revision,
+    deliveryLevel,
   )
 }
 export async function loadHabitatControl(

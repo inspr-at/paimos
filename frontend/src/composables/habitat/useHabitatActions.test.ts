@@ -66,9 +66,9 @@ describe('Habitat owned action boundaries', () => {
     scope.stop()
   })
   it('clears drafts and in-flight acknowledgements across an authority switch', async () => {
-    const { subject, scope, authority } = setup()
+    const { subject, scope, authority, worker } = setup()
     let resolve!: (value: unknown) => void
-    vi.spyOn(api, 'post').mockImplementation(
+    const post = vi.spyOn(api, 'post').mockImplementation(
       () =>
         new Promise((yes) => {
           resolve = yes as typeof resolve
@@ -80,7 +80,17 @@ describe('Habitat owned action boundaries', () => {
     await vi.waitFor(() => expect(resolve).toBeTypeOf('function'))
     authority.value = 'human:2'
     expect(subject.draft.value).toBe('')
-    resolve({ message_id: 'fixture-message', delivered: true })
+    const request = post.mock.calls[0][1] as { utterance_id: string }
+    resolve({
+      schema_version: 1,
+      utterance_id: request.utterance_id,
+      harness_session_id: worker.value.harness_session_id,
+      harness_session_revision: worker.value.revision,
+      message_id: '00000000-0000-4000-8000-000000000091',
+      delivery_id: '00000000-0000-4000-8000-000000000092',
+      delivery_level: 'simple',
+      created_at: new Date().toISOString(),
+    })
     await operation
     expect(subject.feedback.value).toBe('')
     expect(subject.control.value).toBeNull()
