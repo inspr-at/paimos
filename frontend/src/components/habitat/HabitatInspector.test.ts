@@ -35,6 +35,11 @@ describe('Habitat inspector', () => {
     await nextTick()
     expect(document.activeElement?.textContent).toBe('Confirm stop')
     expect(mounted.el.querySelector('[aria-label="Confirm stop"]')).not.toBeNull()
+    button(mounted.el, 'Cancel').click()
+    await nextTick()
+    expect(document.activeElement).toBe(button(mounted.el, 'Stop'))
+    button(mounted.el, 'Stop').click()
+    await nextTick()
     props.worker = fixture.fleet.workers[1]
     await nextTick()
     expect(button(mounted.el, 'Stop').disabled).toBe(true)

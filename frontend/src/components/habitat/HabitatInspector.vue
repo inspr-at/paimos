@@ -52,6 +52,7 @@ const projectDeliveries = computed(() =>
 )
 const confirmButton = ref<HTMLButtonElement | null>(null)
 const draftInput = ref<HTMLTextAreaElement | null>(null)
+const actionTrigger = ref<HTMLButtonElement | null>(null)
 watch(action, (value) => {
   if (value)
     void nextTick(() =>
@@ -64,9 +65,23 @@ const mic = useMicTranscript()
 const voiceFeedback = ref('')
 let voiceGeneration = 0
 let voiceController: AbortController | null = null
+function prepareAction(kind: 'simple' | 'steer' | 'interrupt' | 'stop', event: Event) {
+  actionTrigger.value = event.currentTarget as HTMLButtonElement
+  actions.prepare(kind)
+}
+function restoreActionFocus() {
+  const trigger = actionTrigger.value
+  actionTrigger.value = null
+  if (trigger?.isConnected && !trigger.disabled) trigger.focus()
+}
 function cancelAction() {
   action.value = null
   stopVoice()
+  void nextTick(restoreActionFocus)
+}
+async function submitAction() {
+  await actions.submit()
+  if (!action.value) void nextTick(restoreActionFocus)
 }
 function stopVoice() {
   voiceGeneration++
@@ -248,26 +263,26 @@ onScopeDispose(stopVoice)
         <button
           type="button"
           :disabled="!actions.allowed('inbox') || busy"
-          @click="actions.prepare('simple')"
+          @click="prepareAction('simple', $event)"
         >
           Message</button
         ><button
           type="button"
           :disabled="!actions.allowed('steer') || busy"
-          @click="actions.prepare('steer')"
+          @click="prepareAction('steer', $event)"
         >
           Steer</button
         ><button
           type="button"
           :disabled="!actions.allowed('interrupt') || busy"
-          @click="actions.prepare('interrupt')"
+          @click="prepareAction('interrupt', $event)"
         >
           Interrupt</button
         ><button
           type="button"
           class="habitat-danger"
           :disabled="!actions.allowed('stop') || busy"
-          @click="actions.prepare('stop')"
+          @click="prepareAction('stop', $event)"
         >
           Stop</button
         ><button type="button" @click="emit('refresh')">Refresh status</button
@@ -348,7 +363,7 @@ onScopeDispose(stopVoice)
             type="button"
             :disabled="busy || ((action === 'simple' || action === 'steer') && !draft.trim())"
             :class="action === 'stop' ? 'habitat-danger' : 'habitat-primary'"
-            @click="actions.submit()"
+            @click="submitAction"
           >
             {{
               busy

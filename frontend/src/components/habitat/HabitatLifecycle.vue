@@ -59,6 +59,9 @@ const intentFresh = ref(false),
   busy = ref(false),
   reviewing = ref(false)
 const confirmRef = ref<HTMLButtonElement | null>(null)
+const prepareRef = ref<HTMLButtonElement | null>(null)
+const runtimeRef = ref<HTMLSelectElement | null>(null)
+const operationRef = ref<HTMLSelectElement | null>(null)
 const now = ref(Date.now())
 let attempted = false,
   savedAt = 0,
@@ -482,12 +485,17 @@ function discardReview() {
   if (!intent.value && !attempted && !busy.value) {
     pendingRequest.value = null
     reviewing.value = false
+    void nextTick(() => prepareRef.value?.focus())
   }
 }
-function finishReview() {
+async function finishReview() {
   if (terminal.value && intentFresh.value && !busy.value) {
     clearSavedEvidence()
-    void refreshRuntimes()
+    await refreshRuntimes()
+    await nextTick()
+    const prepare = prepareRef.value
+    if (prepare && !prepare.disabled) prepare.focus()
+    else (operationRef.value ?? runtimeRef.value)?.focus()
   }
 }
 const poll = setInterval(() => {
@@ -522,7 +530,12 @@ onScopeDispose(() => {
       </div>
       <div v-else class="habitat-form">
         <label
-          >Runtime<select v-model="runtimeId" aria-label="Runtime" :disabled="!!pendingRequest">
+          >Runtime<select
+            ref="runtimeRef"
+            v-model="runtimeId"
+            aria-label="Runtime"
+            :disabled="!!pendingRequest"
+          >
             <option value="">Choose one runtime</option>
             <option v-for="row in runtimes" :key="row.id" :value="row.id">
               {{ row.machine_id }} · {{ humanize(row.account_label) }} · {{ row.id.slice(0, 8) }}
@@ -535,6 +548,7 @@ onScopeDispose(() => {
         <template v-if="runtime">
           <label
             >Operation<select
+              ref="operationRef"
               v-model="operation"
               aria-label="Operation"
               :disabled="!!pendingRequest"
@@ -677,7 +691,13 @@ onScopeDispose(() => {
               ready.
             </p>
           </details>
-          <button v-if="!pendingRequest" type="button" :disabled="!canPrepare" @click="prepare">
+          <button
+            v-if="!pendingRequest"
+            ref="prepareRef"
+            type="button"
+            :disabled="!canPrepare"
+            @click="prepare"
+          >
             Review {{ operation }} request
           </button>
         </template>

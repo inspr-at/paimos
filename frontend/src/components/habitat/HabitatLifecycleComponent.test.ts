@@ -78,6 +78,11 @@ describe('Habitat browser lifecycle', () => {
     button(mounted.el, 'Review start request').click()
     await nextTick()
     expect(submitHabitatIntent).not.toHaveBeenCalled()
+    button(mounted.el, 'Cancel review').click()
+    await nextTick()
+    expect(document.activeElement).toBe(button(mounted.el, 'Review start request'))
+    button(mounted.el, 'Review start request').click()
+    await nextTick()
     button(mounted.el, 'Confirm exact request').click()
     await vi.waitFor(() => expect(mounted.el.textContent).toContain('No outcome confirmed'))
     expect(button(mounted.el, 'Cancel review')).toBeUndefined()
@@ -107,6 +112,11 @@ describe('Habitat browser lifecycle', () => {
     })
     button(mounted.el, 'Refresh intent evidence').click()
     await vi.waitFor(() => expect(mounted.el.textContent).toContain('The intent failed'))
+    button(mounted.el, 'Finish reviewing this result').click()
+    await vi.waitFor(() => expect(loadHabitatRuntimes).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(button(mounted.el, 'Review start request')),
+    )
     await mounted.unmount()
   })
   it('re-reads a saved receipt after navigation without repeating its mutation', async () => {
