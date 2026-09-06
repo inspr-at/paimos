@@ -295,6 +295,93 @@ func TestCodexEarlyCompletionRequiresReturnedOwnedTurn(t *testing.T) {
 	}
 }
 
+func TestCodexEarlyToolActivityRequiresReturnedOwnedTurn(t *testing.T) {
+	for _, returned := range []string{"turn-early", "different-turn"} {
+		var events []AdapterEvent
+		p := &codexProcess{persistent: true, threadID: "thread-owned", observe: func(e AdapterEvent) { events = append(events, e) }}
+		if !p.beginTurn() {
+			t.Fatal("begin failed")
+		}
+		for _, turn := range []string{"turn-early", "foreign-turn"} {
+			raw, _ := json.Marshal(map[string]any{"threadId": "thread-owned", "turnId": turn, "item": map[string]string{"id": "item", "type": "commandExecution"}})
+			p.handleNotification(codexRPCMessage{Method: "item/started", Params: raw})
+		}
+		if len(events) != 0 {
+			t.Fatal("early tool was not yet proved by RPC")
+		}
+		p.setTurn(returned)
+		if returned == "turn-early" {
+			if len(events) != 1 || events[0].Kind != EventToolStarted {
+				t.Fatalf("proved early tool lost: %+v", events)
+			}
+		} else if len(events) != 0 {
+			t.Fatal("foreign early tool emitted activity")
+		}
+	}
+}
+
+func TestCodexAmbiguousInboxStartClosesInsteadOfReopeningInbox(t *testing.T) {
+	for _, mode := range []string{"persistent-timeout", "persistent-invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			adapter := NewCodexAdapter(os.Args[0], "test")
+			adapter.command = func(string, ...string) *exec.Cmd {
+				cmd := exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+				cmd.Env = append(os.Environ(), codexHelperEnvironment+"="+mode)
+				return cmd
+			}
+			events := make(chan AdapterEvent, 32)
+			p, err := adapter.Start(context.Background(), StartRequest{KeepAlive: true, Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:ambiguous"}, func(e AdapterEvent) { events <- e })
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _, _ = p.Stop(context.Background(), ControlRequest{CorrelationID: "ambiguous-cleanup"}) })
+			ready := p.(interface{ InboxReady() bool })
+			deadline := time.Now().Add(3 * time.Second)
+			for !ready.InboxReady() {
+				if time.Now().After(deadline) {
+					t.Fatal("initial turn never idle")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			inbox := p.(InboxProcess)
+			if _, err = inbox.Inbox(ctx, ControlRequest{CorrelationID: "ambiguous", Text: "fixture-next-input"}); err == nil {
+				t.Fatal("ambiguous start succeeded")
+			}
+			if ready.InboxReady() {
+				t.Fatal("ambiguous accepted turn reopened inbox")
+			}
+			if _, err = inbox.Inbox(context.Background(), ControlRequest{CorrelationID: "must-not-retry", Text: "no extra vendor input"}); !errors.Is(err, ErrCapabilityMissing) {
+				t.Fatalf("subsequent inbox not fenced: %v", err)
+			}
+			seen := false
+			for len(events) > 0 {
+				e := <-events
+				if e.ErrorCode == ErrorAppServerProtocol {
+					seen = true
+				}
+			}
+			if !seen {
+				t.Fatal("finite ambiguity evidence missing")
+			}
+			waited := make(chan error, 1)
+			go func() { waited <- p.Wait() }()
+			select {
+			case err := <-waited:
+				if err == nil {
+					t.Fatal("ambiguous process Wait succeeded")
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("ambiguous owned process not reaped")
+			}
+			if !errors.Is(syscall.Kill(-p.PID(), 0), syscall.ESRCH) {
+				t.Fatal("ambiguous owned group remains")
+			}
+		})
+	}
+}
+
 func TestCodexPersistentTerminalFailureClosesExactOwnedGroup(t *testing.T) {
 	for _, tc := range []struct {
 		status string
@@ -449,7 +536,7 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 					Text string `json:"text"`
 				} `json:"input"`
 			}
-			if mode == "persistent" {
+			if strings.HasPrefix(mode, "persistent") {
 				if json.Unmarshal(request.Params, &params) != nil || params.ThreadID != "thread-owned" || len(params.Input) != 1 {
 					os.Exit(2)
 				}
@@ -457,6 +544,13 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 					respond(map[string]any{"turn": map[string]any{"id": "turn-owned", "status": "inProgress"}})
 					_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-owned", "turn": map[string]any{"id": "turn-owned", "status": "completed"}}})
 				} else if params.Input[0].Text == "fixture-next-input" {
+					if mode == "persistent-timeout" {
+						continue
+					}
+					if mode == "persistent-invalid" {
+						respond(map[string]any{"turn": map[string]string{"id": "turn-next", "status": "invalid-terminal-status"}})
+						continue
+					}
 					respond(map[string]any{"turn": map[string]any{"id": "turn-next", "status": "inProgress"}})
 				} else {
 					os.Exit(2)

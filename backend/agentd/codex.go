@@ -190,6 +190,7 @@ type codexProcess struct {
 	observe func(AdapterEvent)
 
 	writeMu sync.Mutex
+	eventMu sync.Mutex
 	rpcMu   sync.Mutex
 	nextID  int
 	pending map[string]chan codexRPCMessage
@@ -201,6 +202,7 @@ type codexProcess struct {
 	earlyCompletedState string
 	startingTurn        bool
 	terminalFailure     bool
+	earlyToolTurns      map[string]bool
 	turnDone            chan codexTurnResult
 	turnDoneOnce        sync.Once
 	streamDone          chan struct{}
@@ -267,6 +269,8 @@ func (p *codexProcess) abortStream() {
 }
 
 func (p *codexProcess) handleNotification(message codexRPCMessage) {
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
 	var params struct {
 		ThreadID string `json:"threadId"`
 		TurnID   string `json:"turnId"`
@@ -292,12 +296,28 @@ func (p *codexProcess) handleNotification(message codexRPCMessage) {
 			p.observeEvent(AdapterEvent{Kind: EventTurnStarted})
 		}
 	case "item/started":
-		if json.Unmarshal(message.Params, &params) != nil || !validOpaqueID(params.Item.ID) || !codexToolItem(params.Item.Type) {
+		if json.Unmarshal(message.Params, &params) != nil || !validOpaqueID(params.Item.ID) || !validOpaqueID(params.TurnID) || !codexToolItem(params.Item.Type) {
 			return
 		}
 		p.stateMu.Lock()
-		owned := params.ThreadID == p.threadID && params.TurnID != "" && params.TurnID == p.turnID && !p.terminalFailure
+		ownedThread := params.ThreadID != "" && params.ThreadID == p.threadID && !p.terminalFailure
+		owned := ownedThread && params.TurnID == p.turnID
+		overflow := false
+		if ownedThread && p.startingTurn {
+			if len(p.earlyToolTurns) < 8 || p.earlyToolTurns[params.TurnID] {
+				if p.earlyToolTurns == nil {
+					p.earlyToolTurns = make(map[string]bool)
+				}
+				p.earlyToolTurns[params.TurnID] = true
+			} else {
+				overflow = true
+			}
+		}
 		p.stateMu.Unlock()
+		if overflow {
+			p.failAmbiguousTurn()
+			return
+		}
 		if owned {
 			p.observeEvent(AdapterEvent{Kind: EventToolStarted})
 		}
@@ -375,12 +395,25 @@ func (p *codexProcess) setThread(threadID string) {
 }
 
 func (p *codexProcess) setTurn(turnID string) {
+	// The RPC response and notification stream race. Serialize their evidence
+	// so a proved early tool cannot appear after this turn's completion.
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
 	p.stateMu.Lock()
+	if p.terminalFailure {
+		p.stateMu.Unlock()
+		return
+	}
 	p.turnID = turnID
 	p.startingTurn = false
 	earlyID, earlyStatus := p.earlyCompleted, p.earlyCompletedState
+	earlyTool := p.earlyToolTurns[turnID]
+	p.earlyToolTurns = nil
 	p.earlyCompleted, p.earlyCompletedState = "", ""
 	p.stateMu.Unlock()
+	if earlyTool {
+		p.observeEvent(AdapterEvent{Kind: EventToolStarted})
+	}
 	if earlyID == turnID {
 		p.completeTurn(turnID, earlyStatus)
 	}
@@ -393,7 +426,19 @@ func (p *codexProcess) beginTurn() bool {
 		return false
 	}
 	p.startingTurn = true
+	p.earlyToolTurns = nil
 	return true
+}
+
+func (p *codexProcess) failAmbiguousTurn() {
+	p.stateMu.Lock()
+	p.terminalFailure = true
+	p.startingTurn = false
+	p.earlyToolTurns = nil
+	p.earlyCompleted, p.earlyCompletedState = "", ""
+	p.stateMu.Unlock()
+	p.observeEvent(AdapterEvent{ErrorCode: ErrorAppServerProtocol})
+	p.abortStream()
 }
 
 func (p *codexProcess) target() (string, string, error) {
@@ -586,12 +631,6 @@ func (p *codexProcess) Inbox(ctx context.Context, request ControlRequest) (Contr
 	if !p.persistent || !p.beginTurn() {
 		return ControlEffect{}, ErrCapabilityMissing
 	}
-	cancelStart := func() {
-		p.stateMu.Lock()
-		p.startingTurn = false
-		p.earlyCompleted, p.earlyCompletedState = "", ""
-		p.stateMu.Unlock()
-	}
 	params := map[string]any{"threadId": thread, "input": []map[string]string{{"type": "text", "text": request.Text}}}
 	if p.model != "" {
 		params["model"] = p.model
@@ -606,11 +645,13 @@ func (p *codexProcess) Inbox(ctx context.Context, request ControlRequest) (Contr
 	operationCtx, cancel := codexControlContext(ctx)
 	defer cancel()
 	if err := p.call(operationCtx, "turn/start", params, &response); err != nil {
-		cancelStart()
+		// The vendor may already have accepted this input. Never reopen an idle
+		// handle after a lost response, even when the caller's deadline expired.
+		p.failAmbiguousTurn()
 		return ControlEffect{}, err
 	}
 	if !validOpaqueID(response.Turn.ID) || response.Turn.Status != "inProgress" {
-		cancelStart()
+		p.failAmbiguousTurn()
 		return ControlEffect{}, ErrCapabilityMissing
 	}
 	p.setTurn(response.Turn.ID)
