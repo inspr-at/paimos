@@ -21,13 +21,13 @@ just dev-up                    # terminal 1: backend :8888 + Vite :5173
 just marketing-captures       # terminal 2: regenerate + verify + publish
 ```
 
-The second command bootstraps Playwright, sources the same local dev-login
-token as `dev-up` without printing it, polishes the gitignored fixture DB
+The second command writes fixture data and the selected site working tree. It
+bootstraps Playwright, sources the same local dev-login token as `dev-up` without printing it, polishes the gitignored fixture DB
 through the dev binary's initialized SQLite connection,
 captures all seven current site images plus two short product flows, transcodes
 the flows to Safari-compatible fast-start H.264, and publishes everything into
-`../inspr-at`. The seven stills include the session-first Paimos 6 home and the
-fixture-backed Agent Mode supervision surface, so releases that change
+`../inspr-at`. The seven stills include Habitat Home with its coordinator
+setup action and the fixture-backed Agent Mode supervision surface, so releases that change
 orchestrator setup, project selection, command hints, or delivery density
 cannot leave the public product gallery behind.
 Pass a different reviewed site worktree when needed:
@@ -35,6 +35,34 @@ Pass a different reviewed site worktree when needed:
 ```sh
 just marketing-captures ../inspr-at-pai-695
 ```
+
+For a separately booted synthetic stack, select its origins, data directory and
+reviewed site working copy explicitly. API and app must use the same loopback
+hostname so the development login cookie remains scoped correctly. Defaults
+remain `localhost:8888`, `localhost:5173`, this repository's `data/`, and the
+sibling site directory.
+
+```sh
+PAIMOS_CAPTURE_API_URL=http://127.0.0.1:59441 \
+PAIMOS_CAPTURE_APP_URL=http://127.0.0.1:59442 \
+PAIMOS_CAPTURE_DATA_DIR=/tmp/paimos-marketing/data \
+./scripts/marketing/refresh-captures.sh --dry-run /tmp/reviewed-inspr-site
+```
+
+`--dry-run` validates and prints configuration only: no token reads, network,
+DB writes, browser installation/launch, or site writes. After reviewing the
+selected seeded stack and target, omit `--dry-run` to capture. The script does
+not start or reconfigure servers. `PAIMOS_CAPTURE_SITE_DIR` also selects a site
+when no positional site path is supplied. Keep existing previews and unrelated
+site-branch changes out of the capture run.
+
+The publisher is owned by the selected **inspr-site** working copy. Before a
+refresh, confirm its inventory includes `ui-session-home.png` and its version
+validation supports the shipped calendar version, including a same-day recut.
+The Paimos wrapper cannot add a missing gallery asset to an older site publisher.
+
+Configuration and Home selector regression checks need no server or vendor:
+`node --test scripts/marketing/capture-config.test.cjs`.
 
 The command refuses a live/non-local instance, an app version that does not
 match `VERSION`, or backend/frontend code that differs from the corresponding

@@ -2,11 +2,14 @@
 // instance. Runbook #3594: 1600x1000 @2x, dev chrome hidden, provenance
 // in every caption.
 const { chromium } = require('playwright');
+const { prepareHabitatHome } = require('./capture-home.cjs');
 const fs = require('fs');
 const path = require('path');
 
-const API = 'http://localhost:8888';
-const APP = 'http://localhost:5173';
+const { captureConfig } = require('./capture-config.cjs');
+const capture = captureConfig();
+const API = capture.apiUrl;
+const APP = capture.appUrl;
 const OUT = process.env.OUT_DIR || '/tmp/pai746';
 const TOKEN = process.env.PAIMOS_DEV_LOGIN_TOKEN || '';
 const AGENT_MODE_FIXTURE = JSON.parse(fs.readFileSync(
@@ -154,14 +157,7 @@ function currentAgentModeFixture() {
 
   await shoot(page, 'ui-session-home', {
     path: '/',
-    prepare: async (p) => {
-      await p.locator('.p6-project-picker').waitFor({ state: 'visible' });
-      await p.locator('.p6-empty-binding').waitFor({ state: 'visible' });
-      const actions = p.locator('.p6-empty-binding .p6-setup-actions').locator('a, button');
-      if (!(await actions.count())) {
-        throw new Error('session home has no actionable orchestrator setup path');
-      }
-    },
+    prepare: prepareHabitatHome,
   });
 
   await shoot(page, 'ui-issues', { path: '/issues' });
