@@ -29,6 +29,11 @@ type fixture struct {
 
 func setup(t *testing.T) *fixture {
 	t.Helper()
+	return setupWithClock(t, time.Now)
+}
+
+func setupWithClock(t *testing.T, now func() time.Time) *fixture {
+	t.Helper()
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
 	t.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
@@ -36,7 +41,7 @@ func setup(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.DB.Close(); db.DB = nil })
-	f := &fixture{s: NewService(db.DB), now: time.Now().UTC()}
+	f := &fixture{s: NewService(db.DB), now: now().UTC()}
 	f.s.now = func() time.Time { return f.now }
 	res, e := db.DB.Exec(`INSERT INTO users(username,password,role,role_key,status,is_super_admin) VALUES('lifecycle-admin','disabled','admin','super_admin','active',1)`)
 	if e != nil {
@@ -53,7 +58,7 @@ func setup(t *testing.T) *fixture {
 		t.Fatal(e)
 	}
 	credential := uuid.NewString()
-	_, e = db.DB.Exec(`INSERT INTO sessions(id,user_id,credential_id,expires_at,created_at) VALUES(?,?,?,datetime('now','+1 hour'),datetime('now'))`, uuid.NewString(), f.user, credential)
+	_, e = db.DB.Exec(`INSERT INTO sessions(id,user_id,credential_id,expires_at,created_at) VALUES(?,?,?,?,?)`, uuid.NewString(), f.user, credential, stamp(f.now.Add(time.Hour)), stamp(f.now))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -77,6 +82,41 @@ func setup(t *testing.T) *fixture {
 	}
 	return f
 }
+
+func TestLifecycleFixtureClockAndFutureCreatedCredential(t *testing.T) {
+	// Keep the service clock independent of wall time so a fixture that creates
+	// credentials with SQLite datetime('now') fails deterministically.
+	f := setupWithClock(t, func() time.Time {
+		return time.Date(2026, time.January, 2, 3, 4, 5, 123000000, time.UTC)
+	})
+	f.submit(t, f.request("repair"))
+
+	// Crossing the next whole second reproduces the original authority refusal:
+	// a credential created after the frozen service clock must remain unusable.
+	created := f.now.Truncate(time.Second).Add(time.Second)
+	credential := uuid.NewString()
+	if _, err := db.DB.Exec(`INSERT INTO sessions(id,user_id,credential_id,expires_at,created_at) VALUES(?,?,?,?,?)`, uuid.NewString(), f.user, credential, stamp(created.Add(time.Hour)), stamp(created)); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	f.human, err = auth.NewSessionPrincipal(credential, f.user, f.user, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := f.request("repair")
+	if _, created, err := f.s.Submit(context.Background(), f.human, f.project, request); !errors.Is(err, ErrUnavailable) || created {
+		t.Fatalf("future-created credential: created=%v error=%v", created, err)
+	}
+	var intents int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM lifecycle_intents`).Scan(&intents); err != nil || intents != 1 {
+		t.Fatalf("refused credential changed ledger: intents=%d error=%v", intents, err)
+	}
+	// Once the same clock reaches creation, the unchanged credential and request
+	// are valid; no auth rule or production clock needs to be relaxed.
+	f.now = created
+	f.submit(t, request)
+}
+
 func (f *fixture) request(operation string) Request {
 	r := Request{RequestKey: uuid.NewString(), Operation: operation, RuntimeID: f.runtime.ID, RuntimeGeneration: f.runtime.Generation, AccountLabel: f.runtime.AccountLabel, TTLSeconds: 120}
 	if operation == "repair" {
