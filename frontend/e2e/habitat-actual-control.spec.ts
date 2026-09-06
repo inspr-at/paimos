@@ -632,6 +632,14 @@ test('actual browser controls one fresh owned child and closes every generation'
     await stalePage.close()
     pages.delete(stalePage)
 
+    // Reconcile the owned primary receiver after both initial generations are
+    // registered and the child binding is final. Message delivery depends on
+    // this listener evidence; proving it after the messages would be circular.
+    await page.getByLabel('Operation', { exact: true }).selectOption('repair')
+    await page.getByLabel('Repair layer', { exact: true }).selectOption('listeners')
+    const repairIntent = await submitIntent('repair')
+    expect(repairIntent.result_session_id ?? null).toBeNull()
+
     await selectOwnedWorker(page, childID)
     receipt.steps.push({ step: 'message', ...(await sendMessage(page, childID, 'simple', message)) })
 
@@ -671,11 +679,6 @@ test('actual browser controls one fresh owned child and closes every generation'
     expect(UUID.test(replacementID)).toBe(true)
     expect(replacementID).not.toBe(childID)
     receipt.owned_session_ids.push(replacementID)
-
-    await page.getByLabel('Operation', { exact: true }).selectOption('repair')
-    await page.getByLabel('Repair layer', { exact: true }).selectOption('listeners')
-    const repairIntent = await submitIntent('repair')
-    expect(repairIntent.result_session_id ?? null).toBeNull()
 
     receipt.steps.push({
       step: 'stop-replacement',
