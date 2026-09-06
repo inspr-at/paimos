@@ -32,9 +32,17 @@ export function workerRows(workers: HabitatWorker[], expanded: ReadonlySet<strin
   return rows
 }
 
+export function workerIntentionallyStopped(worker: HabitatWorker): boolean {
+  return (
+    worker.phase === 'stopped' &&
+    worker.liveness.state === 'dead' &&
+    worker.liveness.closed_reason === 'stopped'
+  )
+}
+
 export function workerNeedsAttention(worker: HabitatWorker): boolean {
   return (
-    ['unknown', 'dead'].includes(worker.liveness.state) ||
+    (['unknown', 'dead'].includes(worker.liveness.state) && !workerIntentionallyStopped(worker)) ||
     ['waiting_on_human', 'blocked', 'terminal_failed'].includes(worker.delivery_trust.reason) ||
     worker.recent_communication.some(
       (message) => message.error_code !== null || message.fallback_code !== null,

@@ -9,7 +9,69 @@ import {
 import { habitatFixture } from './__fixtures__/orchestration'
 import { parseDispatchProfiles, parseRootConfig, workerStartCommand } from './habitatSetup'
 
+function stoppedWorker() {
+  const worker = habitatFixture().fleet.workers[0]
+  worker.phase = 'stopped'
+  worker.liveness.state = 'dead'
+  worker.liveness.reason = 'stopped'
+  worker.liveness.closed_reason = 'stopped'
+  worker.delivery_trust.reason = 'ticket_unbound'
+  worker.recent_communication = []
+  return worker
+}
+
 describe('Habitat truth and setup boundaries', () => {
+  it('keeps an explicitly stopped generation quiet without granting live controls', () => {
+    const worker = stoppedWorker()
+    expect(workerNeedsAttention(worker)).toBe(false)
+    expect(canControlWorker(worker, 'stop', true, true)).toBe(false)
+  })
+  it.each(['process_failed', 'ownership_lost', 'process_exited', undefined])(
+    'retains attention for terminal history with close reason %s',
+    (reason) => {
+      const worker = stoppedWorker()
+      worker.liveness.closed_reason = reason
+      expect(workerNeedsAttention(worker)).toBe(true)
+    },
+  )
+  it('retains attention for dead working generations and unknown evidence', () => {
+    const worker = stoppedWorker()
+    worker.phase = 'working'
+    expect(workerNeedsAttention(worker)).toBe(true)
+    worker.phase = 'stopped'
+    worker.liveness.state = 'unknown'
+    expect(workerNeedsAttention(worker)).toBe(true)
+  })
+  it.each(['waiting_on_human', 'blocked', 'terminal_failed'] as const)(
+    'retains independent %s delivery attention after an intentional stop',
+    (reason) => {
+      const worker = stoppedWorker()
+      worker.delivery_trust.reason = reason
+      expect(workerNeedsAttention(worker)).toBe(true)
+    },
+  )
+  it.each(['error_code', 'fallback_code'] as const)(
+    'retains independent communication %s after an intentional stop',
+    (field) => {
+      const worker = stoppedWorker()
+      worker.recent_communication = [
+        {
+          message_id: 'test',
+          delivery_id: null,
+          direction: 'incoming',
+          attribution: 'project_agent',
+          requested_level: 'simple',
+          effective_level: null,
+          state: null,
+          fallback_code: null,
+          error_code: null,
+          occurred_at: '2026-09-06T12:00:00Z',
+          [field]: 'delivery_unavailable',
+        },
+      ]
+      expect(workerNeedsAttention(worker)).toBe(true)
+    },
+  )
   it('uses the canonical parser for every fixture zoom and empty shape', () => {
     for (const zoom of ['1', '10', '100', '1000'])
       for (const empty of [false, true])

@@ -6,7 +6,12 @@ import { ArrowRight, ChevronRight, MessageSquare, ShieldCheck, Info, Plus } from
 import type { OrchestrationSnapshotV1 } from '@/services/orchestrationTypes'
 import type { Delivery } from '@/services/agentMode'
 import type { Paimos6SessionZoomTotals } from '@/v6/sessionHomeZoom'
-import { humanize, workerNeedsAttention, type HabitatWorker } from './habitatModel'
+import {
+  humanize,
+  workerIntentionallyStopped,
+  workerNeedsAttention,
+  type HabitatWorker,
+} from './habitatModel'
 
 const props = defineProps<{
   snapshot: OrchestrationSnapshotV1
@@ -94,6 +99,7 @@ const activity = computed(() =>
 )
 function workerLabel(worker: HabitatWorker) {
   if (!props.fresh) return 'Last snapshot'
+  if (workerIntentionallyStopped(worker)) return 'Stopped'
   if (workerNeedsAttention(worker))
     return worker.liveness.state === 'dead'
       ? 'Disconnected'
