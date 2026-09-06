@@ -493,6 +493,60 @@ func TestCodexFailureReachesSupervisorTerminalReporterSnapshot(t *testing.T) {
 	}
 }
 
+func TestCodexAppServerHelperStdoutContainsOnlyProtocolFrames(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+	cmd.Env = append(os.Environ(), codexHelperEnvironment+"=terminal-failed")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	requests := []map[string]any{
+		{"id": 1, "method": "initialize", "params": map[string]any{}},
+		{"method": "initialized", "params": map[string]any{}},
+		{"id": 2, "method": "thread/start", "params": map[string]any{}},
+		{"id": 3, "method": "turn/start", "params": map[string]any{
+			"threadId": "thread-owned", "input": []map[string]string{{"text": "secret-not-persisted"}},
+		}},
+	}
+	encoder := json.NewEncoder(stdin)
+	for _, request := range requests {
+		if err := encoder.Encode(request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := stdin.Close(); err != nil {
+		t.Fatal(err)
+	}
+	scanner := bufio.NewScanner(stdout)
+	frames := 0
+	for scanner.Scan() {
+		frames++
+		if !json.Valid(scanner.Bytes()) {
+			t.Fatalf("helper emitted non-protocol stdout frame %q", scanner.Text())
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if frames != 6 {
+		t.Fatalf("helper protocol frames=%d want=6", frames)
+	}
+}
+
 func TestCodexAppServerHelperProcess(t *testing.T) {
 	mode := os.Getenv(codexHelperEnvironment)
 	if mode == "" {
@@ -581,7 +635,7 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 					_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"threadId": "thread-owned", "turnId": "turn-owned", "item": map[string]any{"id": "item-owned", "type": "commandExecution"}}})
 				}
 				_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-owned", "turn": map[string]any{"id": "turn-owned", "status": "completed"}}})
-				return
+				os.Exit(0)
 			}
 			if strings.HasPrefix(mode, "terminal-") {
 				_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-owned", "turn": map[string]any{"id": "turn-owned", "status": strings.TrimPrefix(mode, "terminal-"), "error": map[string]string{"message": "private vendor error must never surface"}}}})
@@ -595,4 +649,7 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 			os.Exit(2)
 		}
 	}
+	// Returning lets the Go test harness append its plain-text PASS marker to
+	// stdout, which is the helper's JSON-RPC transport in these subprocesses.
+	os.Exit(0)
 }
