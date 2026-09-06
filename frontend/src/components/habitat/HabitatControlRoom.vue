@@ -15,6 +15,7 @@ import {
   type HabitatWorker,
 } from './habitatModel'
 import HabitatInspector from './HabitatInspector.vue'
+import HabitatHome from './HabitatHome.vue'
 import HabitatSetup from './HabitatSetup.vue'
 import HabitatDeliveryEvidence from './HabitatDeliveryEvidence.vue'
 
@@ -25,23 +26,23 @@ const { t } = useI18n({
   useScope: 'local',
   messages: {
     en: {
-      home: 'Your attention belongs here.',
-      workers: 'Who is doing what, with which authority.',
-      projects: 'A little distance. A clearer picture.',
-      assign: 'Give the next generation a clear start.',
-      homeDeck:
-        'Decisions, handoffs and recovery come forward. Healthy background work stays quiet.',
-      workersDeck:
-        'From the instance orchestrator to each project and worker. Select a presence to inspect the evidence behind it.',
-      projectsDeck:
-        'Move between a single delivery and your portfolio. Progress remains grounded in trusted evidence.',
-      assignDeck:
-        'Bind an identity, choose a project, then start an owned worker with an explicit dispatch profile.',
+      home: 'Your workspace.',
+      workers: 'Your workers and their current work.',
+      projects: 'Your projects.',
+      assign: 'Start something new.',
+      attention: 'Needs you.',
+      homeDeck: 'Your projects, your workers, and what’s next.',
+      workersDeck: 'See who’s working, what they’re doing, and where you can help.',
+      projectsDeck: 'Open a project to see its workers, current work, and next steps.',
+      assignDeck: 'Choose a worker, give it a project, and set a clear first task.',
+      attentionDeck: 'Decisions and questions that move the work forward.',
     },
     de: {
       home: 'Hier ist deine Aufmerksamkeit gefragt.',
       workers: 'Wer arbeitet woran, mit welcher Befugnis.',
-      projects: 'Etwas Abstand. Mehr Überblick.',
+      projects: 'Deine Projekte.',
+      attention: 'Braucht dich.',
+      attentionDeck: 'Entscheidungen und Fragen, die die Arbeit weiterbringen.',
       assign: 'Ein klarer Start für die nächste Generation.',
       homeDeck:
         'Entscheidungen, Übergaben und Wiederherstellung stehen im Vordergrund. Gesunde Hintergrundarbeit bleibt ruhig.',
@@ -55,7 +56,7 @@ const { t } = useI18n({
   },
 })
 const view = computed(() =>
-  ['workers', 'projects', 'assign'].includes(String(route.query.view))
+  ['workers', 'projects', 'assign', 'attention'].includes(String(route.query.view))
     ? String(route.query.view)
     : 'home',
 )
@@ -104,21 +105,21 @@ const projectSelection = ref<number | null>(null)
 const inspector = ref<HTMLElement | null>(null)
 const inspectorActions = ref<InstanceType<typeof HabitatInspector> | null>(null)
 const announcement = ref('')
+const viewOptions = ref(false)
+const firstName = computed(
+  () => (auth.user?.nickname || auth.user?.first_name || '').split(/\s+/)[0],
+)
+const greeting = computed(() => (firstName.value ? `Welcome back, ${firstName.value}.` : t('home')))
+function closeInspector() {
+  selectedId.value = null
+  projectSelection.value = null
+}
 const selectedProject = computed(
   () =>
     snapshot.value?.project_coordination.find((p) => p.project.id === projectSelection.value) ??
     null,
 )
 const projects = computed(() => snapshot.value?.project_coordination ?? [])
-const attentionWorkers = computed(
-  () => snapshot.value?.fleet.workers.filter(workerNeedsAttention) ?? [],
-)
-const attentionDeliveries = computed(
-  () =>
-    deliveries.value?.deliveries.filter(
-      (d) => d.attention.level >= 2 || ['blocked', 'stale', 'attention'].includes(d.health),
-    ) ?? [],
-)
 const projectWorkers = (id: number) =>
   snapshot.value?.fleet.workers.filter((w) => w.project.id === id) ?? []
 const projectDeliveryRows = (id: number) =>
@@ -198,11 +199,12 @@ function setZoom(value: string) {
   }
   void router.replace({ query: { ...route.query, zoom: value } })
 }
-function assign(project?: number) {
+function assign(project?: number, sessionId?: string) {
   void router.replace({
     query: {
       ...route.query,
       view: 'assign',
+      worker: sessionId,
       project: project === undefined ? route.query.project : String(project),
     },
   })
@@ -246,7 +248,7 @@ onScopeDispose(() => registerContext?.(null))
 
 <template>
   <main id="habitat-main" class="habitat-main" tabindex="-1">
-    <div class="habitat-context">
+    <div v-show="viewOptions || !['home', 'attention'].includes(view)" class="habitat-context">
       <span
         >Habitat / {{ view === 'home' ? 'Needs you' : humanize(view)
         }}<template v-if="projectId"> / Project {{ projectId }}</template></span
@@ -282,19 +284,40 @@ onScopeDispose(() => registerContext?.(null))
     <header class="habitat-hero">
       <div>
         <span class="habitat-eyebrow">{{
-          view === 'home' ? 'Home · needs you' : `Habitat · ${humanize(view)}`
+          view === 'home' ? 'Your workspace' : `Habitat · ${humanize(view)}`
         }}</span>
-        <h1>{{ t(view) }}</h1>
+        <h1>{{ view === 'home' ? greeting : t(view) }}</h1>
         <p>{{ t(`${view}Deck`) }}</p>
       </div>
-      <button v-if="view !== 'assign'" type="button" class="habitat-primary" @click="assign()">
-        Assign / start <ArrowUpRight :size="16" aria-hidden="true" />
+      <button
+        v-if="!['assign', 'home', 'attention'].includes(view)"
+        type="button"
+        class="habitat-primary"
+        @click="assign()"
+      >
+        Start work <ArrowUpRight :size="16" aria-hidden="true" />
+      </button>
+      <button
+        v-if="['home', 'attention'].includes(view)"
+        class="habitat-view-options"
+        type="button"
+        :aria-expanded="viewOptions"
+        @click="viewOptions = !viewOptions"
+      >
+        View options <ChevronDown :size="13" aria-hidden="true" />
       </button>
     </header>
-    <p class="habitat-status" role="status" aria-live="polite">{{ announcement }}</p>
+    <p
+      class="habitat-status"
+      :class="{ 'habitat-sr-only': !announcement }"
+      role="status"
+      aria-live="polite"
+    >
+      {{ announcement }}
+    </p>
     <div v-if="state === 'loading'" class="habitat-loading" role="status">
       <span class="habitat-eyebrow">Connecting to your work</span>
-      <h2>Reading the authorized projection…</h2>
+      <h2>Loading your workers…</h2>
       <p>Worker state will appear when the server provides its evidence.</p>
     </div>
     <div v-else-if="state !== 'ready'" class="habitat-card habitat-error" role="alert">
@@ -323,14 +346,20 @@ onScopeDispose(() => registerContext?.(null))
         This snapshot is stale. Controls are paused until a successful refresh confirms current
         ownership. <button type="button" @click="habitat.refresh()">Refresh evidence</button>
       </div>
-      <div class="habitat-section-head habitat-muted">
+      <div
+        v-if="!['home', 'attention'].includes(view)"
+        class="habitat-section-head habitat-muted habitat-snapshot-line"
+      >
         <span>{{ bandCopy }}</span
         ><span
           >Server snapshot · {{ new Date(snapshot.fleet.observed_at).toLocaleString() }} · refreshes
           every 15s</span
         >
       </div>
-      <div class="habitat-workspace">
+      <div
+        class="habitat-workspace"
+        :class="{ 'has-inspector': selectedWorker || selectedProject }"
+      >
         <div class="habitat-stage habitat-stack">
           <HabitatSetup
             v-if="view === 'assign'"
@@ -338,10 +367,12 @@ onScopeDispose(() => registerContext?.(null))
             :project-id="projectId"
             :authority="authority"
             :root="snapshot.instance_root"
+            :workers="snapshot.fleet.workers"
+            :fresh="!stale && state === 'ready'"
             @refresh="habitat.refresh()"
           />
           <template v-else>
-            <section class="habitat-card habitat-root">
+            <section v-if="!['home', 'attention'].includes(view)" class="habitat-card habitat-root">
               <span
                 class="habitat-orb"
                 :data-state="rootWorker?.liveness.state ?? 'unknown'"
@@ -371,140 +402,23 @@ onScopeDispose(() => registerContext?.(null))
                 </button>
               </div>
             </section>
-            <template v-if="view === 'home'">
-              <section class="habitat-stack" aria-labelledby="habitat-needs-heading">
-                <div class="habitat-section-head">
-                  <h2 id="habitat-needs-heading">Needs you</h2>
-                  <RouterLink :to="{ query: { ...route.query, view: 'sessions' } }"
-                    >Unanswered messages &amp; decisions</RouterLink
-                  >
-                </div>
-                <p v-if="messageState === 'loading'" class="habitat-muted">
-                  Checking unanswered messages and decisions…
-                </p>
-                <article
-                  v-for="row in messageAttention.filter(
-                    (row) => row.totals && row.totals.exception_messages > 0,
-                  )"
-                  :key="`messages-${row.projectId}`"
-                  class="habitat-card habitat-attention"
-                >
-                  <span class="habitat-eyebrow">Unanswered messages &amp; decisions</span>
-                  <h3>
-                    {{
-                      projects.find((project) => project.project.id === row.projectId)?.project.name
-                    }}
-                  </h3>
-                  <p>
-                    {{ row.totals?.action_requests }} held action requests ·
-                    {{ row.totals?.exception_messages }} exceptional messages ·
-                    {{ row.totals?.attention_sessions }} product sessions need attention.
-                  </p>
-                  <RouterLink
-                    class="habitat-button"
-                    :to="{
-                      query: { ...route.query, project: String(row.projectId), view: 'sessions' },
-                    }"
-                    >Review messages &amp; decisions</RouterLink
-                  >
-                </article>
-                <div
-                  v-if="messageAttention.some((row) => row.totals === null)"
-                  class="habitat-card"
-                >
-                  <h3>Some message attention is unknown.</h3>
-                  <p>
-                    {{ messageAttention.filter((row) => row.totals === null).length }} project
-                    message reads are unavailable. Open Product sessions or refresh to check
-                    outstanding decisions.
-                  </p>
-                  <button type="button" @click="habitat.refresh()">Refresh message evidence</button>
-                </div>
-                <p v-if="messageState === 'ready'" class="habitat-muted">
-                  Message attention checked for {{ messageAttention.length }} sampled projects;
-                  {{ snapshot.coordination_bounds.total_projects - messageAttention.length }}
-                  authorized projects are outside this message sample.
-                </p>
-                <div v-if="deliveryState === 'unavailable'" class="habitat-card">
-                  <h3>Delivery attention is unavailable.</h3>
-                  <p>
-                    Worker evidence is separate. Unanswered delivery decisions cannot be counted
-                    from this snapshot.
-                  </p>
-                  <button type="button" @click="habitat.refresh()">Retry delivery read</button>
-                </div>
-                <div
-                  v-for="delivery in attentionDeliveries"
-                  :key="delivery.id"
-                  class="habitat-card habitat-attention"
-                >
-                  <span class="habitat-eyebrow">{{
-                    humanize(delivery.attention.reason ?? delivery.health)
-                  }}</span>
-                  <h3>{{ delivery.issueKey }} · {{ delivery.title }}</h3>
-                  <p>
-                    {{ humanize(delivery.stage.key) }} ·
-                    {{ humanize(delivery.freshness.state) }} evidence ·
-                    {{ delivery.freshness.lastReportAt ?? 'Report time unknown' }}
-                  </p>
-                  <RouterLink
-                    class="habitat-button"
-                    :to="`/projects/${delivery.lane.projectId}/issues/${delivery.issueId}`"
-                    >Review decision / evidence</RouterLink
-                  >
-                </div>
-                <div
-                  v-for="worker in attentionWorkers"
-                  :key="worker.harness_session_id"
-                  class="habitat-card habitat-attention"
-                >
-                  <span class="habitat-eyebrow">{{
-                    worker.liveness.state === 'dead' ? 'Recovery' : 'Check evidence'
-                  }}</span>
-                  <h3>{{ worker.agent.name }} · {{ worker.project.name }}</h3>
-                  <p>
-                    {{ humanize(worker.liveness.state) }} · {{ humanize(worker.liveness.reason) }}.
-                    Delivery: {{ humanize(worker.delivery_trust.reason) }}.
-                  </p>
-                  <button type="button" @click="selectWorker(worker)">Inspect &amp; recover</button>
-                </div>
-                <div
-                  v-for="project in projects.filter((p) => p.coordinator.state !== 'resolved')"
-                  :key="project.project.id"
-                  class="habitat-card"
-                >
-                  <span class="habitat-eyebrow">Project coordination</span>
-                  <h3>{{ project.project.name }}</h3>
-                  <p>
-                    {{ humanize(project.coordinator.reason) }}. A configured identity alone does not
-                    prove that a worker is running.
-                  </p>
-                  <button type="button" @click="assign(project.project.id)">
-                    Review project setup
-                  </button>
-                </div>
-                <div
-                  v-if="
-                    !attentionWorkers.length &&
-                    !attentionDeliveries.length &&
-                    deliveryState === 'ready' &&
-                    messageState === 'ready' &&
-                    messageAttention.every(
-                      (row) => row.totals !== null && row.totals.exception_messages === 0,
-                    ) &&
-                    projects.every((p) => p.coordinator.state === 'resolved')
-                  "
-                  class="habitat-card"
-                >
-                  <h3>No actionable transition in this sample.</h3>
-                  <p>
-                    Healthy work stays quiet here. Message decisions remain available in Product
-                    sessions; omitted work is listed below.
-                  </p>
-                  <button type="button" @click="showWorkers()">See workers</button>
-                </div>
-              </section>
-            </template>
+            <HabitatHome
+              v-if="view === 'home' || view === 'attention'"
+              :snapshot="snapshot"
+              :deliveries="deliveries?.deliveries ?? []"
+              :messages="messageAttention"
+              :message-state="messageState"
+              :delivery-state="deliveryState"
+              :fresh="!stale && state === 'ready'"
+              :attention-only="view === 'attention'"
+              :authority="authority"
+              @assign="assign"
+              @select-worker="selectWorker"
+              @select-project="selectProject"
+              @workers="showWorkers()"
+              @projects="router.replace({ query: { ...route.query, view: 'projects' } })"
+              @refresh="habitat.refresh()"
+            />
             <section
               v-else-if="view === 'workers'"
               class="habitat-tree"
@@ -725,8 +639,8 @@ onScopeDispose(() => registerContext?.(null))
               <RouterLink class="habitat-button" to="/projects">Open project workspace</RouterLink>
             </section>
           </template>
-          <div class="habitat-card habitat-muted">
-            <strong>Scope &amp; evidence</strong>
+          <details class="habitat-view-evidence habitat-muted">
+            <summary>About this view</summary>
             <p>
               {{ snapshot.coordination_bounds.sampled_projects }} of
               {{ snapshot.coordination_bounds.total_projects }} authorized projects ·
@@ -740,9 +654,24 @@ onScopeDispose(() => registerContext?.(null))
               agent. Recent communication is bounded metadata; it is not proof of a reply or active
               conversation.</small
             >
-          </div>
+          </details>
         </div>
-        <aside ref="inspector" class="habitat-inspector" aria-label="Inspector" tabindex="-1">
+        <aside
+          v-if="selectedWorker || selectedProject"
+          ref="inspector"
+          class="habitat-inspector"
+          aria-label="Inspector"
+          tabindex="-1"
+          @keydown.esc="closeInspector"
+        >
+          <button
+            type="button"
+            class="habitat-inspector-close"
+            aria-label="Close inspector"
+            @click="closeInspector"
+          >
+            Close <span aria-hidden="true">×</span>
+          </button>
           <HabitatInspector
             ref="inspectorActions"
             :worker="selectedWorker"
@@ -753,7 +682,7 @@ onScopeDispose(() => registerContext?.(null))
             :authority="authority"
             @refresh="habitat.refresh()"
             @select-worker="selectWorker"
-            @assign="assign($event)"
+            @assign="assign"
           />
         </aside>
       </div>

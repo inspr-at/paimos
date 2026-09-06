@@ -15,6 +15,7 @@
  * License along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+import { clearHabitatIntentRecovery } from '@/constants/storage'
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import {
@@ -225,6 +226,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isSuperAdmin = computed(() => user.value?.role === 'super_admin' || !!user.value?.is_super_admin)
 
   function clearPrincipalProjection() {
+    clearHabitatIntentRecovery()
     user.value = null
     allProjects.value = false
     accessibleProjects.value = new Map()

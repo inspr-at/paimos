@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import HabitatAssignmentHistory from './HabitatAssignmentHistory.vue'
 import { RouterLink } from 'vue-router'
 import { computed, nextTick, onScopeDispose, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -20,7 +21,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   refresh: []
   selectWorker: [worker: HabitatWorker]
-  assign: [projectId: number]
+  assign: [projectId: number, sessionId?: string]
 }>()
 const auth = useAuthStore()
 const { locale } = useI18n()
@@ -192,8 +193,7 @@ onScopeDispose(stopVoice)
             {{ child.agent.name }}
           </button>
         </dd>
-        <dt>Revision</dt>
-        <dd>{{ worker.revision }}</dd>
+
         <dt>Progress</dt>
         <dd>
           {{
@@ -213,12 +213,9 @@ onScopeDispose(stopVoice)
         {{ humanize(worker.delivery_trust.reason) }} ·
         {{ worker.delivery_trust.observed_at ?? 'No trusted delivery report' }}
       </p>
+      <HabitatAssignmentHistory :worker="worker" :workers="workers" :authority="authority" />
       <details>
-        <summary>Assignment history &amp; work contract</summary>
-        <p>
-          The current binding is revision {{ worker.revision }}. Historical assignment events are
-          not exposed by this projection.
-        </p>
+        <summary>Work contract</summary>
         <p>Output: {{ humanize(worker.work_contract.output_kind) }}</p>
         <ul>
           <li v-for="stage in worker.work_contract.stage_applicability" :key="stage.stage">
@@ -274,7 +271,10 @@ onScopeDispose(stopVoice)
         >
           Stop</button
         ><button type="button" @click="emit('refresh')">Refresh status</button
-        ><button type="button" @click="emit('assign', worker.project.id)">
+        ><button
+          type="button"
+          @click="emit('assign', worker.project.id, worker.harness_session_id)"
+        >
           Restart / repair options
         </button>
       </div>
@@ -448,7 +448,7 @@ onScopeDispose(stopVoice)
   </template>
   <template v-else-if="project"
     ><h2>{{ project.project.name }}</h2>
-    <p>{{ project.project.key }} · Project authority domain</p>
+    <p>{{ project.project.key }} · Project</p>
     <section>
       <h3>Coordination</h3>
       <p>{{ humanize(project.coordinator.state) }} · {{ humanize(project.coordinator.reason) }}</p>

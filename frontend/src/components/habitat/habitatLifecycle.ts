@@ -1,5 +1,6 @@
 // Browser lifecycle boundary; the server and agentd remain execution authorities.
-import { api, ApiError, parsePermissionsEpochHeader } from '@/api/client'
+import { api } from '@/api/client'
+import { epoch, fields, invalid, object, positive, uuid } from './habitatBoundary'
 import { parseIsoInstant } from '@/services/agentModeAggregateSchema'
 export interface HabitatRuntime {
   id: string
@@ -7,10 +8,10 @@ export interface HabitatRuntime {
   generation: string
   machine_id: string
   account_label: string
-  workspaces: { handle: string; identity: string }[]
+  workspaces: { handle: string; identity: string; label?: string }[]
   profiles: { id: string; version: string }[]
   expires_at: string
-  sessions: { session_id: string; generation: string }[]
+  sessions: { session_id: string; generation: string; workspace_handle?: string }[]
 }
 export type HabitatStartRequest = {
   request_key: string
@@ -28,6 +29,12 @@ export type HabitatStartRequest = {
   role: 'worker' | 'coordinator'
   parent_harness_session_id: string | null
 }
+export type HabitatExistingRequest = Omit<HabitatStartRequest, 'operation'> & {
+  operation: 'attach' | 'reassign' | 'restart'
+  session_id: string
+  session_generation: string
+  expected_revision: number
+}
 export type HabitatRepairRequest = {
   request_key: string
   operation: 'repair'
@@ -37,7 +44,10 @@ export type HabitatRepairRequest = {
   ttl_seconds: number
   repair_layer: 'reporter' | 'listeners'
 }
-export type HabitatLifecycleRequest = HabitatStartRequest | HabitatRepairRequest
+export type HabitatLifecycleRequest =
+  | HabitatStartRequest
+  | HabitatExistingRequest
+  | HabitatRepairRequest
 export type IntentState =
   | 'requested'
   | 'claimed'
@@ -58,7 +68,6 @@ export interface HabitatIntent {
   newGeneration: string | null
   resultSessionId: string | null
 }
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const ACCOUNTS = [
   'chatgpt',
   'api_key',
@@ -69,30 +78,81 @@ const ACCOUNTS = [
   'console',
 ]
 const STATES = ['requested', 'claimed', 'executing', 'completed', 'failed', 'expired', 'cancelled']
-const invalid = (): never => {
-  throw new Error('Invalid lifecycle response')
-}
-const object = (value: unknown): Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : invalid()
 const token = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
-const uuid = (value: unknown): value is string => typeof value === 'string' && UUID.test(value)
-function fields(value: Record<string, unknown>, required: string[], optional: string[] = []) {
+/** Validate even locally restored review snapshots. Local storage is untrusted. */
+export function parseHabitatRequest(value: unknown): HabitatLifecycleRequest {
+  const row = object(value)
+  const common = [
+    'request_key',
+    'operation',
+    'runtime_id',
+    'runtime_generation',
+    'account_label',
+    'ttl_seconds',
+  ]
+  const binding = [
+    'workspace_handle',
+    'agent_name',
+    'dispatch_profile_id',
+    'dispatch_profile_version',
+    'work_shape',
+    'role',
+  ]
+  const nullable = ['ticket_id', 'parent_harness_session_id']
+  const existing = ['session_id', 'session_generation', 'expected_revision']
+  if (!['start', 'attach', 'reassign', 'restart', 'repair'].includes(String(row.operation)))
+    invalid()
+  fields(
+    row,
+    [
+      ...common,
+      ...(row.operation === 'repair'
+        ? ['repair_layer']
+        : [...binding, ...(row.operation === 'start' ? [] : existing)]),
+    ],
+    row.operation === 'repair' ? [] : nullable,
+  )
   if (
-    required.some((key) => !(key in value)) ||
-    Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
+    !uuid(row.request_key) ||
+    !uuid(row.runtime_id) ||
+    !uuid(row.runtime_generation) ||
+    !ACCOUNTS.includes(String(row.account_label)) ||
+    !Number.isSafeInteger(row.ttl_seconds) ||
+    Number(row.ttl_seconds) < 30 ||
+    Number(row.ttl_seconds) > 600
   )
     invalid()
-}
-function epoch<T>(result: { data: T; permissionsEpoch: string | null }): T {
+  if (row.operation === 'repair') {
+    if (row.repair_layer !== 'reporter' && row.repair_layer !== 'listeners') invalid()
+    return { ...row } as HabitatRepairRequest
+  }
+  const ticket = row.ticket_id ?? null,
+    parent = row.parent_harness_session_id ?? null
   if (
-    !result.permissionsEpoch ||
-    parsePermissionsEpochHeader(result.permissionsEpoch) !== result.permissionsEpoch
+    !uuid(row.workspace_handle) ||
+    !token(row.agent_name) ||
+    String(row.agent_name).length > 64 ||
+    !token(row.dispatch_profile_id) ||
+    !token(row.dispatch_profile_version) ||
+    !['worker', 'coordinator'].includes(String(row.role)) ||
+    (ticket === null
+      ? row.work_shape !== 'unknown'
+      : !positive(ticket) || !['ship', 'scout'].includes(String(row.work_shape))) ||
+    (parent !== null && !uuid(parent))
   )
-    throw new ApiError(0, 'Lifecycle response authority unavailable')
-  return result.data
+    invalid()
+  if (
+    row.operation !== 'start' &&
+    (!uuid(row.session_id) ||
+      !uuid(row.session_generation) ||
+      !positive(row.expected_revision) ||
+      parent === row.session_id)
+  )
+    invalid()
+  return { ...row, ticket_id: ticket, parent_harness_session_id: parent } as
+    | HabitatStartRequest
+    | HabitatExistingRequest
 }
 export function parseHabitatRuntimes(value: unknown, projectId: number): HabitatRuntime[] {
   const root = object(value)
@@ -132,10 +192,11 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
     const sessionIds = new Set<string>()
     for (const raw of runtime.sessions as unknown[]) {
       const session = object(raw)
-      fields(session, ['session_id', 'generation'])
+      fields(session, ['session_id', 'generation'], ['workspace_handle'])
       if (
         !uuid(session.session_id) ||
         !uuid(session.generation) ||
+        (session.workspace_handle !== undefined && !uuid(session.workspace_handle)) ||
         sessionIds.has(String(session.session_id))
       )
         invalid()
@@ -144,15 +205,26 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
     const workspaceIds = new Set<string>()
     for (const raw of runtime.workspaces as unknown[]) {
       const workspace = object(raw)
-      fields(workspace, ['handle', 'identity'])
+      fields(workspace, ['handle', 'identity'], ['label'])
       if (
         !uuid(workspace.handle) ||
+        (workspace.label !== undefined &&
+          (typeof workspace.label !== 'string' ||
+            !/^[A-Za-z0-9 ._-]{1,48}$/.test(workspace.label))) ||
         typeof workspace.identity !== 'string' ||
         !/^[a-f0-9]{64}$/.test(workspace.identity) ||
         workspaceIds.has(workspace.handle)
       )
         invalid()
       workspaceIds.add(String(workspace.handle))
+    }
+    for (const raw of runtime.sessions as unknown[]) {
+      const mapping = object(raw)
+      if (
+        mapping.workspace_handle !== undefined &&
+        !workspaceIds.has(String(mapping.workspace_handle))
+      )
+        invalid()
     }
     const profileIds = new Set<string>()
     for (const raw of runtime.profiles as unknown[]) {
@@ -215,7 +287,8 @@ export function parseHabitatIntent(
     (root.result_session_id !== undefined && !uuid(root.result_session_id))
   )
     invalid()
-  const request = object(root.request)
+  expected = parseHabitatRequest(expected)
+  const request = object(parseHabitatRequest(root.request))
   // The server omits optional null fields; every other value must match the
   // exact review the user submitted, including generation, account and scope.
   if (Object.keys(request).some((key) => !(key in expected))) invalid()
@@ -224,8 +297,32 @@ export function parseHabitatIntent(
   if (
     root.state === 'completed' &&
     (root.reason !== 'applied' ||
-      (expected.operation === 'start' &&
+      (['start', 'restart'].includes(expected.operation) &&
         (!uuid(root.new_generation) || !uuid(root.result_session_id))))
+  )
+    invalid()
+  const creating = expected.operation === 'start' || expected.operation === 'restart'
+  if (creating ? !uuid(root.new_generation) : root.new_generation !== undefined) invalid()
+  if (
+    ['requested', 'claimed', 'executing'].includes(String(root.state)) &&
+    (root.reason !== '' || root.result_session_id !== undefined)
+  )
+    invalid()
+  if (
+    root.state === 'completed' &&
+    (expected.operation === 'attach' || expected.operation === 'reassign') &&
+    root.result_session_id !== expected.session_id
+  )
+    invalid()
+  if (root.state !== 'completed' && root.result_session_id !== undefined) invalid()
+  if (root.state === 'cancelled' && root.reason !== 'cancelled') invalid()
+  if (root.state === 'expired' && !['expired', 'outcome_unknown'].includes(String(root.reason)))
+    invalid()
+  if (
+    root.state === 'failed' &&
+    !['failed', 'unsupported', 'ownership_lost', 'outcome_unknown', 'authority_revoked'].includes(
+      String(root.reason),
+    )
   )
     invalid()
   return {
@@ -254,6 +351,7 @@ export async function submitHabitatIntent(
   request: HabitatLifecycleRequest,
   signal?: AbortSignal,
 ) {
+  request = parseHabitatRequest(request)
   // api.post owns CSRF and authentication/permission-generation fencing.
   return parseHabitatIntent(
     await api.post<unknown>(`/projects/${projectId}/lifecycle/v1/intents`, request, { signal }),
@@ -285,7 +383,7 @@ export async function cancelHabitatIntent(
   request: HabitatLifecycleRequest,
   signal?: AbortSignal,
 ) {
-  return parseHabitatIntent(
+  const result = parseHabitatIntent(
     await api.post<unknown>(
       `/projects/${intent.projectId}/lifecycle/v1/intents/${intent.id}/cancel`,
       { expected_revision: intent.revision },
@@ -294,4 +392,6 @@ export async function cancelHabitatIntent(
     intent.projectId,
     request,
   )
+  if (result.id !== intent.id || result.revision < intent.revision) invalid()
+  return result
 }

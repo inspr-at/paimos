@@ -12,11 +12,13 @@ import {
 import type { HarnessDispatchProfile, OrchestrationRootV1 } from '@/services/orchestrationTypes'
 import { parseRootConfig, parseDispatchProfiles, workerStartCommand } from './habitatSetup'
 import HabitatLifecycle from './HabitatLifecycle.vue'
-import { humanize, type HabitatProject } from './habitatModel'
+import { humanize, type HabitatProject, type HabitatWorker } from './habitatModel'
 const props = defineProps<{
   projects: HabitatProject[]
   projectId: number | null
   authority: string
+  workers?: HabitatWorker[]
+  fresh?: boolean
   root: OrchestrationRootV1
 }>()
 const emit = defineEmits<{ refresh: [] }>()
@@ -188,7 +190,7 @@ onScopeDispose(() => {
 <template>
   <div class="habitat-stack" data-testid="habitat-setup">
     <section class="habitat-card">
-      <span class="habitat-eyebrow">01 · Choose the authority domain</span>
+      <span class="habitat-eyebrow">01 · Project &amp; agent</span>
       <h2>Project &amp; canonical agent</h2>
       <p>
         Agent definitions are project-owned roles. A definition does not prove that a process is
@@ -212,7 +214,7 @@ onScopeDispose(() => {
           </option>
         </select></label
       >
-      <p v-if="state === 'loading'" role="status">Reading authorized setup choices…</p>
+      <p v-if="state === 'loading'" role="status">Loading setup choices…</p>
       <div v-else-if="state === 'unavailable'" class="habitat-error">
         <p>Setup evidence is unavailable. No compatible agent or profile can be assumed.</p>
         <button type="button" @click="load">Retry setup</button>
@@ -286,18 +288,15 @@ onScopeDispose(() => {
     </section>
     <section class="habitat-card">
       <span class="habitat-eyebrow">03 · Start / restart / repair</span>
-      <h2>Prepare an owned generation</h2>
-      <p>
-        Existing-generation restart, attach and reassignment are not enabled here yet. Inspect
-        ownership before recovery; a fresh start never silently adopts a previous process.
-      </p>
+      <h2>Start, assign or recover a worker</h2>
+      <p>Start a worker, change an idle worker’s assignment, or recover a stopped generation.</p>
       <p>
         Choose an immutable profile and a runtime for a durable browser start or bounded repair. The
         guided CLI remains available when local execution cannot be reached.
       </p>
       <div class="habitat-form">
         <label
-          >Immutable dispatch profile<select v-model="profileKey" :disabled="state !== 'ready'">
+          >Profile for a new worker<select v-model="profileKey" :disabled="state !== 'ready'">
             <option value="">Choose one explicit profile</option>
             <option
               v-for="profile in profiles"
@@ -330,6 +329,10 @@ onScopeDispose(() => {
           :agent="agentKey"
           :profile="selectedProfile"
           :authority="authority"
+          :deployment="deployment"
+          :workers="workers"
+          :fresh="fresh"
+          :selected-session-id="typeof route.query.worker === 'string' ? route.query.worker : ''"
           @refresh="emit('refresh')"
         />
         <h3>Guided CLI fallback</h3>

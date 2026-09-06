@@ -1,5 +1,10 @@
 import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { api, ApiError } from '@/api/client'
+import {
+  requestHabitatControl,
+  loadHabitatControl,
+  type HabitatControl,
+} from '@/components/habitat/habitatControls'
 import { loadOrchestration } from '@/services/orchestration'
 import { canControlWorker, type HabitatWorker } from '@/components/habitat/habitatModel'
 
@@ -13,13 +18,8 @@ export function useHabitatActions(options: {
   const draft = ref('')
   const feedback = ref('')
   const busy = ref(false)
-  const control = ref<{
-    id: string
-    kind: string
-    state: string
-    outcome: string | null
-    reason: string | null
-  } | null>(null)
+  const control = ref<HabitatControl | null>(null)
+  let controlKey: string | null = null
   let revision: number | null = null
   let generation = 0
   let controller: AbortController | null = null
@@ -40,6 +40,7 @@ export function useHabitatActions(options: {
     busy.value = false
     control.value = null
     messageKey = null
+    controlKey = null
     submittedBody = null
   }
   watch(signature, clear, { flush: 'sync' })
@@ -55,6 +56,8 @@ export function useHabitatActions(options: {
   )
   function prepare(kind: NonNullable<typeof action.value>) {
     if (!allowed(kind === 'simple' ? 'inbox' : kind)) return
+    if (kind !== action.value || revision !== options.worker.value!.revision) controlKey = null
+    if (kind === 'interrupt' || kind === 'stop') controlKey ??= crypto.randomUUID()
     action.value = kind
     revision = options.worker.value!.revision
     feedback.value = ''
@@ -73,26 +76,27 @@ export function useHabitatActions(options: {
     busy.value = true
     feedback.value = ''
     try {
-      // Existing controls name the immutable generation. Refresh the projection
-      // before issuing a request; the server independently enforces ownership.
-      const projectionRequest = { projectId: worker.project.id, zoom: '100', signal }
-      const latest = await loadOrchestration(projectionRequest)
-      if (!current()) return
-      const next = latest.fleet.workers.find(
-        (row) => row.harness_session_id === worker.harness_session_id,
-      )
-      if (
-        !next ||
-        next.revision !== revision ||
-        !canControlWorker(
-          next,
-          kind === 'simple' ? 'inbox' : kind,
-          options.editable.value,
-          options.fresh.value,
-        )
-      )
-        throw new ApiError(409, 'stale worker')
       if (kind === 'simple' || kind === 'steer') {
+        const latest = await loadOrchestration({
+          projectId: worker.project.id,
+          zoom: '100',
+          signal,
+        })
+        if (!current()) return
+        const next = latest.fleet.workers.find(
+          (row) => row.harness_session_id === worker.harness_session_id,
+        )
+        if (
+          !next ||
+          next.revision !== revision ||
+          !canControlWorker(
+            next,
+            kind === 'simple' ? 'inbox' : kind,
+            options.editable.value,
+            options.fresh.value,
+          )
+        )
+          throw new ApiError(409, 'stale worker')
         const body = draft.value.trim()
         const peers = latest.fleet.workers.filter(
           (row) =>
@@ -130,34 +134,18 @@ export function useHabitatActions(options: {
         messageKey = null
         submittedBody = null
       } else {
-        const raw = await api.post<unknown>(
-          `/projects/${worker.project.id}/harness-sessions/${encodeURIComponent(worker.harness_session_id)}/controls/${kind}`,
-          {},
-          { signal },
+        // Revision and ownership are checked atomically by the versioned endpoint.
+        const result = await requestHabitatControl(
+          worker.project.id,
+          worker.harness_session_id,
+          kind,
+          revision!,
+          controlKey!,
+          signal,
         )
         if (!current()) return
-        const result = raw as {
-          id?: unknown
-          harness_session_id?: unknown
-          kind?: unknown
-          state?: unknown
-        }
-        if (
-          !result ||
-          typeof result.id !== 'string' ||
-          !/^[0-9a-f-]{36}$/.test(result.id) ||
-          result.harness_session_id !== worker.harness_session_id ||
-          result.kind !== kind ||
-          !['pending', 'claimed', 'applied', 'rejected'].includes(String(result.state))
-        )
-          throw new Error('invalid control acknowledgement')
-        control.value = {
-          id: result.id,
-          kind,
-          state: String(result.state),
-          outcome: null,
-          reason: null,
-        }
+        control.value = result
+        controlKey = null
         feedback.value =
           'Control requested. Waiting for owned runtime evidence; completion is not yet confirmed.'
       }
@@ -184,27 +172,14 @@ export function useHabitatActions(options: {
     const signal = controller.signal
     busy.value = true
     try {
-      const raw = await api.get<unknown>(
-        `/projects/${worker.project.id}/harness-sessions/${encodeURIComponent(worker.harness_session_id)}/controls/${requested.id}`,
-        { signal },
+      const result = await loadHabitatControl(
+        worker.project.id,
+        worker.harness_session_id,
+        requested,
+        signal,
       )
       if (signal.aborted || version !== generation) return
-      const result = raw as Record<string, unknown>
-      if (
-        !result ||
-        result.id !== requested.id ||
-        result.project_id !== worker.project.id ||
-        result.harness_session_id !== worker.harness_session_id ||
-        result.kind !== requested.kind ||
-        !['pending', 'claimed', 'applied', 'rejected'].includes(String(result.state))
-      )
-        throw new Error('invalid outcome')
-      control.value = {
-        ...requested,
-        state: String(result.state),
-        outcome: typeof result.outcome === 'string' ? result.outcome : null,
-        reason: typeof result.reason === 'string' ? result.reason : null,
-      }
+      control.value = result
       feedback.value = 'Control evidence refreshed.'
     } catch {
       if (!signal.aborted && version === generation)

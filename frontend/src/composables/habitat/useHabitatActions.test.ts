@@ -1,6 +1,6 @@
 import { effectScope, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import { loadOrchestration } from '@/services/orchestration'
 import { habitatFixture } from '@/components/habitat/__fixtures__/orchestration'
 import { useHabitatActions } from './useHabitatActions'
@@ -20,33 +20,48 @@ function setup() {
 describe('Habitat owned action boundaries', () => {
   it('requires explicit confirmation, requests a real scoped control, and waits for outcome evidence', async () => {
     const { subject, scope, worker } = setup()
-    const post = vi.spyOn(api, 'post').mockResolvedValue({
-      id: '00000000-0000-4000-8000-000000000099',
-      harness_session_id: worker.value.harness_session_id,
-      kind: 'stop',
-      state: 'pending',
-    })
+    const post = vi
+      .spyOn(api, 'post')
+      .mockRejectedValue(new ApiError(409, 'stale worker'))
+      .mockResolvedValue({
+        schema_version: 1,
+        state: 'requested',
+        control: {
+          sequence: 1,
+          requested_at: new Date().toISOString(),
+          requested_by_user_id: 1,
+          id: '00000000-0000-4000-8000-000000000099',
+          harness_session_id: worker.value.harness_session_id,
+          kind: 'stop',
+          state: 'pending',
+        },
+      })
     subject.prepare('stop')
     expect(post).not.toHaveBeenCalled()
     await subject.submit()
     expect(post).toHaveBeenCalledWith(
-      `/projects/1/harness-sessions/${worker.value.harness_session_id}/controls/stop`,
-      {},
+      `/projects/1/harness-sessions/${worker.value.harness_session_id}/controls/v1/stop`,
+      { expected_revision: worker.value.revision, request_key: expect.any(String) },
       expect.any(Object),
     )
     expect(subject.control.value?.state).toBe('pending')
     expect(subject.feedback.value).toContain('completion is not yet confirmed')
     scope.stop()
   })
-  it('refuses a stale worker revision before a mutation', async () => {
+  it('sends the selected revision to the atomic control endpoint and rejects a conflict', async () => {
     const { subject, scope, fixture } = setup()
-    const post = vi.spyOn(api, 'post')
+    const post = vi.spyOn(api, 'post').mockRejectedValue(new ApiError(409, 'stale worker'))
     subject.prepare('interrupt')
     const newer = structuredClone(fixture)
     newer.fleet.workers[0].revision++
     vi.mocked(loadOrchestration).mockResolvedValue(newer)
     await subject.submit()
-    expect(post).not.toHaveBeenCalled()
+    expect(post).toHaveBeenCalledWith(
+      expect.stringContaining('/controls/v1/interrupt'),
+      expect.objectContaining({ expected_revision: fixture.fleet.workers[0].revision }),
+      expect.any(Object),
+    )
+    expect(subject.control.value).toBeNull()
     expect(subject.feedback.value).toContain('revision or recipient changed')
     scope.stop()
   })

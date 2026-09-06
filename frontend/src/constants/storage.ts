@@ -33,24 +33,24 @@
 
 // Sidebar layout
 export const LS_SIDEBAR_COLLAPSED = 'paimos:sidebar:collapsed'
-export const LS_SIDEBAR_PINNED    = 'paimos:sidebar:pinned'
-export const LS_SIDEBAR_WIDTH     = 'paimos:sidebar:width'
+export const LS_SIDEBAR_PINNED = 'paimos:sidebar:pinned'
+export const LS_SIDEBAR_WIDTH = 'paimos:sidebar:width'
 
 // Sidebar colors (legacy names)
-export const LS_SIDEBAR_BG_COLOR      = 'sidebar-color-bg'
+export const LS_SIDEBAR_BG_COLOR = 'sidebar-color-bg'
 export const LS_SIDEBAR_PATTERN_COLOR = 'sidebar-color-pattern'
 
 // Branding
 export const LS_BRANDING_FILE = 'paimos:branding-file'
 
 // Issue type colors
-export const LS_TYPE_COLOR_EPIC   = 'paimos:type-color-epic'
+export const LS_TYPE_COLOR_EPIC = 'paimos:type-color-epic'
 export const LS_TYPE_COLOR_TICKET = 'paimos:type-color-ticket'
-export const LS_TYPE_COLOR_TASK   = 'paimos:type-color-task'
+export const LS_TYPE_COLOR_TASK = 'paimos:type-color-task'
 
 // Table row appearance
-export const LS_TABLE_ROW_BORDERS      = 'paimos:table-row-borders'
-export const LS_TABLE_ROW_STRIPES      = 'paimos:table-row-stripes'
+export const LS_TABLE_ROW_BORDERS = 'paimos:table-row-borders'
+export const LS_TABLE_ROW_STRIPES = 'paimos:table-row-stripes'
 export const LS_TABLE_ROW_BORDER_COLOR = 'paimos:table-row-border-color'
 export const LS_TABLE_ROW_STRIPE_COLOR = 'paimos:table-row-stripe-color'
 
@@ -101,8 +101,7 @@ export const lsLastViewKey = (userId: number | undefined, scope: string) =>
   `paimos:views:last:${userId ?? 0}:${scope}`
 
 /** Toolbar sprint selection per project (or "global"). */
-export const lsSprintNavKey = (id: number | string) =>
-  `paimos:sprint-nav:${id}`
+export const lsSprintNavKey = (id: number | string) => `paimos:sprint-nav:${id}`
 
 /** PAI-709: Voice Intake — persisted ELI tab level ("eli5" | "eli10" | "eli15"). */
 export const LS_INTAKE_ELI_LEVEL = 'paimos:intake:eli-level'
@@ -126,3 +125,25 @@ export const lsAgentModeDensityKey = (userId: number | undefined) =>
  * it with localStorage. */
 export const ssAgentModeControlCommandKey = (userId: number, deliveryKey: string) =>
   `paimos:agent-mode:control-command:${userId}:${encodeURIComponent(deliveryKey)}`
+
+/** Habitat appearance; retains the first shipped key for preference continuity. */
+export const LS_HABITAT_THEME = 'paimos:habitat-theme'
+/** Session-only, non-secret lifecycle recovery; never execution authority. */
+export const SS_HABITAT_INTENT_PREFIX = 'paimos:habitat:intent:'
+export const ssHabitatIntentKey = (
+  origin: string,
+  instance: string,
+  principalId: number,
+  projectId: number,
+) =>
+  `${SS_HABITAT_INTENT_PREFIX}${encodeURIComponent(origin)}:${encodeURIComponent(instance)}:${principalId}:${projectId}`
+export function clearHabitatIntentRecovery() {
+  try {
+    for (let index = sessionStorage.length - 1; index >= 0; index--) {
+      const key = sessionStorage.key(index)
+      if (key?.startsWith(SS_HABITAT_INTENT_PREFIX)) sessionStorage.removeItem(key)
+    }
+  } catch {
+    /* Storage can be unavailable; no local evidence is authoritative. */
+  }
+}

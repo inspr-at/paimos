@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mountComponent } from '@/components/ai/testMount'
 import { habitatFixture } from './__fixtures__/orchestration'
 import HabitatInspector from './HabitatInspector.vue'
+vi.mock('./habitatControls', async (original) => ({
+  ...(await original<typeof import('./habitatControls')>()),
+  loadAssignmentHistory: vi.fn().mockResolvedValue({ events: [], next: null }),
+}))
 vi.mock('vue-router', () => ({ RouterLink: { props: ['to'], template: '<a><slot /></a>' } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canEdit: () => true }) }))
 afterEach(() => {
@@ -23,7 +27,8 @@ describe('Habitat inspector', () => {
     })
     const mounted = await mountComponent(HabitatInspector, props)
     expect(mounted.el.textContent).toContain('Assignment history')
-    expect(mounted.el.textContent).toContain('Historical assignment events are not exposed')
+    button(mounted.el, 'Refresh assignment history').click()
+    await vi.waitFor(() => expect(mounted.el.textContent).toContain('No assignment changes'))
     expect(button(mounted.el, 'Stop').disabled).toBe(false)
     button(mounted.el, 'Stop').click()
     await nextTick()

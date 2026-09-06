@@ -1,5 +1,19 @@
 <script setup lang="ts">
-import { Command, LogOut, Mic, Moon, Sun } from 'lucide-vue-next'
+import { LS_HABITAT_THEME } from '@/constants/storage'
+import {
+  Command,
+  LogOut,
+  Mic,
+  Moon,
+  Sun,
+  Home,
+  Users,
+  LayoutGrid,
+  Inbox,
+  Plus,
+  Settings,
+  Search,
+} from 'lucide-vue-next'
 import { computed, nextTick, onScopeDispose, provide, ref, shallowRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
@@ -114,13 +128,27 @@ void loadInstance()
 const displayName = computed(
   () => auth.user?.nickname || auth.user?.first_name || auth.user?.username || 'Account',
 )
+const initials = computed(() =>
+  displayName.value
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase(),
+)
+const navigation = [
+  { view: 'home', label: 'Home', icon: Home },
+  { view: 'workers', label: 'Workers', icon: Users },
+  { view: 'projects', label: 'Projects', icon: LayoutGrid },
+  { view: 'attention', label: 'Needs you', icon: Inbox },
+]
 const view = computed(() =>
   typeof route.query.session === 'string' ? 'sessions' : route.query.view || 'home',
 )
 const theme = ref<'day' | 'night'>(initialTheme())
 function initialTheme(): 'day' | 'night' {
   try {
-    const saved = localStorage.getItem('paimos:habitat-theme')
+    const saved = localStorage.getItem(LS_HABITAT_THEME)
     if (saved === 'day' || saved === 'night') return saved
   } catch {
     /* Storage may be disabled. */
@@ -130,7 +158,7 @@ function initialTheme(): 'day' | 'night' {
 function toggleTheme() {
   theme.value = theme.value === 'day' ? 'night' : 'day'
   try {
-    localStorage.setItem('paimos:habitat-theme', theme.value)
+    localStorage.setItem(LS_HABITAT_THEME, theme.value)
   } catch {
     /* Memory-only theme remains usable. */
   }
@@ -150,83 +178,122 @@ onScopeDispose(() => {
     <AppImpersonationBanner />
     <SessionExpiredModal />
     <a class="habitat-skip" href="#habitat-main">Skip to content</a>
-    <header class="habitat-header">
-      <a class="habitat-brand" href="/" :aria-label="brandName + ' home'">
-        <BrandLogo :src="branding.logo" :alt="brandName" />
-        <span
-          ><strong>{{ brandName }}</strong
-          ><small>Agent Intercom</small></span
-        >
-      </a>
-      <nav class="habitat-nav" aria-label="Control room">
-        <RouterLink
-          v-for="item in [
-            ['home', 'Home'],
-            ['workers', 'Workers'],
-            ['projects', 'Projects'],
-            ['assign', 'Assign / start'],
-          ]"
-          :key="item[0]"
-          :to="{ path: '/', query: { ...route.query, view: item[0], session: undefined } }"
-          :aria-current="view === item[0] ? 'page' : undefined"
-          >{{ item[1] }}</RouterLink
-        >
-      </nav>
-      <div class="habitat-header-tools">
-        <button type="button" class="habitat-voice" @click="openTalk">
-          <Mic :size="16" aria-hidden="true" /><span>Voice</span>
-        </button>
-        <button
-          ref="commandButton"
-          type="button"
-          class="p6-command-mount"
-          :aria-label="`Open command palette (${shortcutLabel})`"
-          @click="palette.show"
-        >
-          <Command :size="15" aria-hidden="true" /><kbd>{{ shortcutLabel }}</kbd>
-        </button>
-        <button
-          type="button"
-          :aria-label="theme === 'day' ? 'Switch to dark mode' : 'Switch to bright mode'"
-          @click="toggleTheme"
-        >
-          <Moon v-if="theme === 'day'" :size="16" aria-hidden="true" /><Sun
-            v-else
-            :size="16"
-            aria-hidden="true"
-          />
-        </button>
-        <RouterLink
-          class="habitat-account"
-          to="/settings?tab=account"
-          :aria-label="`Signed in as ${displayName}. Open settings`"
-          >{{ displayName }}</RouterLink
-        >
-        <button type="button" aria-label="Log out" @click="auth.logout()">
-          <LogOut :size="16" aria-hidden="true" />
-        </button>
+    <div class="habitat-app-frame">
+      <aside class="habitat-rail" aria-label="Workspace navigation">
+        <a class="habitat-brand" href="/" :aria-label="brandName + ' home'">
+          <BrandLogo :src="branding.logo" :alt="brandName" />
+          <span
+            ><strong>{{ brandName }}</strong
+            ><small>Agent Intercom</small></span
+          >
+        </a>
+        <div class="habitat-workspace-identity">
+          <span class="habitat-workspace-symbol">{{ brandName.charAt(0) }}</span>
+          <span
+            ><strong>{{ instanceLabel || 'Your workspace' }}</strong
+            ><small>{{ instanceHostname || 'Instance identity unavailable' }}</small></span
+          >
+        </div>
+        <nav class="habitat-nav" aria-label="Control room">
+          <RouterLink
+            v-for="item in navigation"
+            :key="item.view"
+            :to="{ path: '/', query: { ...route.query, view: item.view, session: undefined } }"
+            :aria-current="view === item.view ? 'page' : undefined"
+            :aria-label="item.label"
+            ><component :is="item.icon" :size="18" aria-hidden="true" /><span>{{
+              item.label
+            }}</span></RouterLink
+          >
+        </nav>
+        <div class="habitat-rail-bottom">
+          <RouterLink
+          class="habitat-rail-start"
+          aria-label="Start work"
+            :to="{ path: '/', query: { ...route.query, view: 'assign', session: undefined } }"
+            ><Plus :size="18" aria-hidden="true" /><span>Start work</span></RouterLink
+          >
+          <RouterLink class="habitat-rail-settings" to="/settings" aria-label="Settings"
+            ><Settings :size="17" aria-hidden="true" /><span>Settings</span></RouterLink
+          >
+          <RouterLink
+            class="habitat-rail-account"
+            to="/settings?tab=account"
+            :aria-label="`Signed in as ${displayName}. Open settings`"
+            ><span class="habitat-avatar">{{ initials }}</span
+            ><span
+              ><strong>{{ displayName }}</strong
+              ><small>Authenticated account</small></span
+            ></RouterLink
+          >
+        </div>
+      </aside>
+      <div class="habitat-app-content">
+        <header class="habitat-header">
+          <div class="habitat-location">
+            <span>Workspace</span><span>/</span
+            ><strong>{{
+              navigation.find((item) => item.view === view)?.label ||
+              (view === 'assign' ? 'Start work' : 'Product sessions')
+            }}</strong>
+          </div>
+          <div class="habitat-header-tools">
+            <button type="button" class="habitat-voice" @click="openTalk">
+              <Mic :size="16" aria-hidden="true" /><span>Voice</span>
+            </button>
+            <button
+              ref="commandButton"
+              type="button"
+              class="p6-command-mount habitat-search"
+              :aria-label="`Open command palette (${shortcutLabel})`"
+              @click="palette.show"
+            >
+              <Search :size="15" aria-hidden="true" /><span>Search anything</span
+              ><kbd><Command :size="11" aria-hidden="true" />{{ shortcutLabel }}</kbd>
+            </button>
+            <button
+              type="button"
+              :aria-label="theme === 'day' ? 'Switch to dark mode' : 'Switch to bright mode'"
+              @click="toggleTheme"
+            >
+              <Moon v-if="theme === 'day'" :size="16" aria-hidden="true" /><Sun
+                v-else
+                :size="16"
+                aria-hidden="true"
+              />
+            </button>
+            <RouterLink
+              class="habitat-account habitat-mobile-account"
+              to="/settings?tab=account"
+              :aria-label="`Signed in as ${displayName}. Open settings`"
+              >{{ displayName }}</RouterLink
+            >
+            <button type="button" aria-label="Log out" @click="auth.logout()">
+              <LogOut :size="16" aria-hidden="true" />
+            </button>
+          </div>
+        </header>
+        <div class="habitat-source">
+          <span>{{ instanceHostname || 'Instance identity unavailable' }}</span
+          ><span>Authenticated browser session</span>
+        </div>
+        <div v-if="show2FAWarning" class="habitat-security" role="alert">
+          Protect your account with two-factor authentication.
+          <RouterLink to="/settings?tab=account#two-factor-authentication"
+            >Set up two-factor authentication</RouterLink
+          >
+        </div>
+        <div class="p6-shell-content"><slot /></div>
+        <footer class="habitat-footer">
+          <span>Agent Intercom · {{ brandName }}</span>
+          <RouterLink :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"
+            >Product sessions</RouterLink
+          >
+          <RouterLink to="/legacy">Classic workspace</RouterLink>
+          <RouterLink to="/settings">Settings</RouterLink>
+        </footer>
       </div>
-    </header>
-    <div class="habitat-source">
-      <span>{{ instanceHostname || 'Instance identity unavailable' }}</span
-      ><span>Authenticated browser session</span>
     </div>
-    <div v-if="instanceLabel" class="habitat-instance" role="status">{{ instanceLabel }}</div>
-    <div v-if="show2FAWarning" class="habitat-security" role="alert">
-      Protect your account with two-factor authentication.
-      <RouterLink to="/settings?tab=account#two-factor-authentication"
-        >Set up two-factor authentication</RouterLink
-      >
-    </div>
-    <div class="p6-shell-content"><slot /></div>
-    <footer class="habitat-footer">
-      <span>Agent Intercom · {{ brandName }}</span>
-      <RouterLink :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"
-        >Product sessions</RouterLink
-      >
-      <RouterLink to="/legacy">Classic workspace</RouterLink>
-      <RouterLink to="/settings">Settings</RouterLink>
-    </footer>
     <Paimos6CommandPalette
       :open="palette.open.value"
       :query="palette.query.value"

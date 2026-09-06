@@ -7,7 +7,7 @@ import deliveryFixture from '../../backend/contracts/fixtures/agent-mode/snapsho
 // The controller runs this against the exact compiled bundle. Every HTTP route
 // is intercepted; this spec never starts or contacts a Paimos runtime.
 const SELF_HOST = process.env.PAI927_SELF_HOST_DIST === '1'
-const ORIGIN = 'http://pai927.local'
+const ORIGIN = 'https://pai927.local'
 const DIST = resolve(process.cwd(), 'dist')
 const SHOTS = process.env.PAI927_SHOT_DIR ?? '/tmp/pai927-shots'
 test.skip(!SELF_HOST, 'Set PAI927_SELF_HOST_DIST=1 after building the production bundle')
@@ -191,14 +191,24 @@ async function installFixture(page: Page) {
         Object.assign(state.intent, { state: 'failed', reason: 'unsupported', revision: 2 })
       return fulfill(state.intent)
     }
-    if (/\/harness-sessions\/[^/]+\/controls\/stop$/.test(path)) {
+    if (/\/harness-sessions\/[^/]+\/controls\/v1\/stop$/.test(path)) {
+      const body = route.request().postDataJSON()
+      if (body.expected_revision !== state.revision)
+        return fulfill({ error: 'revision_conflict' }, 409)
       state.controls++
       return fulfill(
         {
-          id: '00000000-0000-4000-8000-000000000099',
-          harness_session_id: path.split('/')[5],
-          kind: 'stop',
-          state: 'pending',
+          schema_version: 1,
+          state: 'requested',
+          control: {
+            sequence: 1,
+            requested_by_user_id: 7,
+            requested_at: new Date().toISOString(),
+            id: '00000000-0000-4000-8000-000000000099',
+            harness_session_id: path.split('/')[5],
+            kind: 'stop',
+            state: 'pending',
+          },
         },
         201,
       )
@@ -214,7 +224,15 @@ async function installFixture(page: Page) {
         state: 'applied',
         outcome: 'applied',
         reason: 'applied',
+        completed_at: new Date().toISOString(),
         requested_at: new Date().toISOString(),
+      })
+    if (path.endsWith('/assignment-history/v1'))
+      return fulfill({
+        schema_version: 1,
+        session_id: path.split('/')[5],
+        events: [],
+        next_after_revision: null,
       })
     if (path.startsWith('/api/')) return fulfill([])
     const relative =
@@ -256,7 +274,7 @@ test('Habitat selected design: bright/dark, worker tree, phone, short laptop, 20
   await installFixture(page)
   await page.goto(`${ORIGIN}/?view=workers`)
   await expect(
-    page.getByRole('heading', { name: 'Who is doing what, with which authority.' }),
+    page.getByRole('heading', { name: 'Your workers and their current work.' }),
   ).toBeVisible()
   await page.getByRole('button', { name: 'Expand coordinator descendants' }).click()
   await page
@@ -366,7 +384,9 @@ test('browser setup uses CAS and lifecycle shows disconnect/reconnect and a fail
 }) => {
   const fixture = await installFixture(page)
   await page.goto(`${ORIGIN}/?view=assign&project=1`)
-  await page.getByLabel('Canonical agent', { exact: true }).selectOption('coordinator')
+  await page
+    .getByRole('combobox', { name: 'Canonical agent', exact: true })
+    .selectOption('coordinator')
   await page.getByLabel('Root display label').fill('Reviewed fixture root')
   await page.getByRole('button', { name: 'Review root binding' }).click()
   fixture.conflict = true
@@ -379,9 +399,11 @@ test('browser setup uses CAS and lifecycle shows disconnect/reconnect and a fail
   await expect(page.getByText('No live advertised runtime')).toBeVisible()
   fixture.runtimeOffline = false
   await page.getByRole('button', { name: 'Refresh runtimes', exact: true }).click()
-  await page.getByLabel('Immutable dispatch profile').selectOption({ index: 1 })
-  await page.getByLabel('Authenticated runtime').selectOption({ index: 1 })
-  await page.getByLabel('Workspace handle', { exact: true }).selectOption({ index: 1 })
+  await page
+    .getByRole('combobox', { name: 'Profile for a new worker', exact: true })
+    .selectOption({ index: 1 })
+  await page.getByRole('combobox', { name: 'Runtime', exact: true }).selectOption({ index: 1 })
+  await page.getByRole('combobox', { name: 'Workspace', exact: true }).selectOption({ index: 1 })
   await page.getByRole('button', { name: 'Review start request' }).click()
   expect(fixture.intent).toBeNull()
   await page.getByRole('button', { name: 'Confirm exact request' }).click()
@@ -389,9 +411,7 @@ test('browser setup uses CAS and lifecycle shows disconnect/reconnect and a fail
   fixture.failedStart = true
   await page.getByRole('button', { name: 'Refresh intent evidence' }).click()
   await expect(
-    page.getByText(
-      'The intent failed. Review the reported reason and runtime evidence before recovery.',
-    ),
+    page.getByText('The intent failed. Review the reported reason and runtime before recovery.'),
   ).toBeVisible()
   await page.screenshot({ path: `${SHOTS}/failed-start.png`, fullPage: true })
 })

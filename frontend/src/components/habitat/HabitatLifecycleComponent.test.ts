@@ -9,10 +9,14 @@ import {
   type HabitatIntent,
 } from './habitatLifecycle'
 import HabitatLifecycle from './HabitatLifecycle.vue'
+import { api } from '@/api/client'
+import { loadOrchestration } from '@/services/orchestration'
+vi.mock('@/services/orchestration', () => ({ loadOrchestration: vi.fn() }))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ isSuperAdmin: true, impersonation: null }),
+  useAuthStore: () => ({ user: { id: 1 }, isSuperAdmin: true, impersonation: null }),
 }))
-vi.mock('./habitatLifecycle', () => ({
+vi.mock('./habitatLifecycle', async (original) => ({
+  ...(await original<typeof import('./habitatLifecycle')>()),
   loadHabitatRuntimes: vi.fn(),
   submitHabitatIntent: vi.fn(),
   loadHabitatIntent: vi.fn(),
@@ -21,13 +25,23 @@ vi.mock('./habitatLifecycle', () => ({
 afterEach(() => {
   vi.restoreAllMocks()
   document.body.innerHTML = ''
+  sessionStorage.clear()
 })
 const id = (n: string) => `00000000-0000-4000-8000-${n.padStart(12, '0')}`
 const button = (el: HTMLElement, text: string) =>
   [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === text)!
 describe('Habitat browser lifecycle', () => {
   it('requires review and retains an exact ambiguous request key before showing a failed outcome', async () => {
+    vi.spyOn(api, 'getWithMeta').mockResolvedValue({
+      data: { issues: [], has_more: false },
+      status: 200,
+      permissionsEpoch: '1',
+      permissionsEpochGeneration: 0,
+      etag: null,
+      lastModified: null,
+    })
     const profile = habitatFixture().fleet.workers[0].dispatch_profile!
+    vi.mocked(loadOrchestration).mockResolvedValue(habitatFixture('100', 1))
     vi.mocked(loadHabitatRuntimes).mockResolvedValue([
       {
         id: id('1'),
@@ -47,6 +61,8 @@ describe('Habitat browser lifecycle', () => {
       agent: 'coordinator',
       profile,
       authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
     })
     await vi.waitFor(() => expect(mounted.el.textContent).toContain('fixture-machine'))
     let selects = mounted.el.querySelectorAll<HTMLSelectElement>('select')
@@ -78,7 +94,7 @@ describe('Habitat browser lifecycle', () => {
     }
     vi.mocked(submitHabitatIntent).mockResolvedValueOnce(pending)
     button(mounted.el, 'Confirm exact request').click()
-    await vi.waitFor(() => expect(mounted.el.textContent).toContain('Intent recorded'))
+    await vi.waitFor(() => expect(mounted.el.textContent).toContain('Request recorded'))
     expect(vi.mocked(submitHabitatIntent).mock.calls[1][1]).toEqual(request)
     expect(mounted.el.textContent).not.toContain('Runtime completion recorded')
     vi.mocked(loadHabitatIntent).mockResolvedValueOnce({

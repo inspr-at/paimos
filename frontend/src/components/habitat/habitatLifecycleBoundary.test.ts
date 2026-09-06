@@ -48,6 +48,23 @@ function intent() {
   }
 }
 describe('Habitat lifecycle response authority', () => {
+  it('accepts safe workspace labels and only server-proved handles from the runtime advertisement', () => {
+    const mapped = {
+      ...runtime,
+      workspaces: [{ ...runtime.workspaces[0], label: 'Paimos - feature work' }],
+      sessions: [{ ...runtime.sessions[0], workspace_handle: id('4') }],
+    }
+    expect(
+      parseHabitatRuntimes({ schema_version: 1, runtimes: [mapped] }, 1)[0].sessions[0]
+        .workspace_handle,
+    ).toBe(id('4'))
+    for (const changed of [
+      { ...mapped, sessions: [{ ...mapped.sessions[0], workspace_handle: id('99') }] },
+      { ...mapped, workspaces: [{ ...mapped.workspaces[0], label: '/private/local/path' }] },
+      { ...mapped, workspaces: [{ ...mapped.workspaces[0], label: 'a'.repeat(49) }] },
+    ])
+      expect(() => parseHabitatRuntimes({ schema_version: 1, runtimes: [changed] }, 1)).toThrow()
+  })
   it('accepts scoped proof and rejects hidden fields, cross-project identities and duplicate mapping', () => {
     expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [runtime] }, 1)[0].sessions).toEqual(
       runtime.sessions,
