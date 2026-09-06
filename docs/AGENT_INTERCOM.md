@@ -111,6 +111,26 @@ requires work. The PAI-922 implementation reports consumer ownership and browser
 intent readiness as unknown until the PAI-923/PAI-924 authenticated adapters are
 integrated; service liveness does not stand in for those capabilities.
 
+Runtime commands are registered in the main CLI. `runtime doctor --project PAI`
+resolves an authorized project key; `--project-id` remains supported. The named
+configuration selects credentials, while `--expect-deployment-instance` selects
+the daemon/service namespace and verifies the remote deployment identity.
+
+`worker start --guided` (also automatic on a human TTY) displays authorized
+project, agent, active parent and immutable profile choices, including model and
+effort. Select a row number or its exact displayed key. Guided, preview and JSON
+starts use the same resolver; preview does not write a retry record or spawn.
+Explicit account constraints require the adapter's actual account probe; machine
+constraints require an authenticated reporter and its configured stable host.
+That host is operator provenance, not external hardware attestation or a PID hint.
+
+Daemon starts with an idempotency key save a private, bounded intent before spawn.
+Exact retries preserve the original generation; conflicting retries fail closed.
+The CLI can reconcile a lost response through read-only daemon lookup and public
+registration verification. Ambiguous adapter outcomes stay unknown and never
+respawn automatically. `starts.journal` and `starts.checkpoint.json` are preserved
+by runtime reset, as are CLI retry records, so reset cannot erase this protection.
+
 ## Fast path: owned Codex
 
 Prerequisites:

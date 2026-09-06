@@ -122,6 +122,16 @@ func transportHandler(supervisor *Supervisor) http.Handler {
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeTransportJSON(w, http.StatusOK, supervisor.Status())
 	})
+	mux.HandleFunc("POST /v1/starts/lookup", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Key string `json:"idempotency_key"`
+		}
+		if decodeTransportJSON(w, r, &request) != nil {
+			return
+		}
+		session, err := supervisor.LookupStart(r.Context(), request.Key)
+		writeTransportResult(w, session, err)
+	})
 	mux.HandleFunc("POST /v1/sessions", func(w http.ResponseWriter, r *http.Request) {
 		var request StartRequest
 		if err := decodeTransportJSON(w, r, &request); err != nil {
@@ -175,6 +185,12 @@ func writeTransportResult(w http.ResponseWriter, value any, err error) {
 	}
 	status, code := http.StatusBadRequest, "invalid_request"
 	switch {
+	case errors.Is(err, ErrStartOutcomeUnknown):
+		status, code = http.StatusConflict, "start_outcome_unknown"
+	case errors.Is(err, ErrStartRejected):
+		status, code = http.StatusConflict, "start_rejected"
+	case errors.Is(err, ErrStartReplayConflict):
+		status, code = http.StatusConflict, "start_replay_conflict"
 	case errors.Is(err, ErrSessionNotFound):
 		status, code = http.StatusNotFound, "session_not_found"
 	case errors.Is(err, ErrSessionNotRunning):
@@ -221,6 +237,14 @@ func (c *Client) request(ctx context.Context, method, path string, input, output
 			Error string `json:"error"`
 		}
 		_ = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&problem)
+		switch problem.Error {
+		case "start_outcome_unknown":
+			return ErrStartOutcomeUnknown
+		case "start_rejected":
+			return ErrStartRejected
+		case "start_replay_conflict":
+			return ErrStartReplayConflict
+		}
 		if problem.Error == "session_not_found" {
 			return ErrSessionNotFound
 		}
@@ -277,4 +301,10 @@ func (c *Client) RuntimeStatus(ctx context.Context) (RuntimeStatus, error) {
 }
 func (c *Client) QuiesceRuntime(ctx context.Context, generation string, sessions []string) error {
 	return c.request(ctx, http.MethodPost, "/v1/runtime/quiesce", map[string]any{"generation": generation, "sessions": sessions}, &struct{}{})
+}
+
+func (c *Client) LookupStart(ctx context.Context, key string) (Session, error) {
+	var session Session
+	err := c.request(ctx, http.MethodPost, "/v1/starts/lookup", map[string]string{"idempotency_key": key}, &session)
+	return session, err
 }

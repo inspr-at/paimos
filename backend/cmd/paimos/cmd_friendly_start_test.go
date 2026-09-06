@@ -41,7 +41,8 @@ func (f *friendlyFakeDaemon) Start(_ context.Context, request agentd.StartReques
 	if f.startErr != nil {
 		return agentd.Session{}, f.startErr
 	}
-	s := agentd.Session{ID: "local-generation", HarnessSessionID: "private-vendor-reference", ProjectID: request.ProjectID, Identity: request.Identity, Adapter: request.Adapter, Role: request.Role, ParentSessionID: request.ParentSessionID, TicketID: request.TicketID, WorkShape: request.WorkShape, Managed: true, State: agentd.StateRunning, Capabilities: []agentd.Capability{agentd.CapabilityStatus, agentd.CapabilitySteer, agentd.CapabilityStop, agentd.CapabilityInterrupt}}
+	profile, _ := dispatchprofile.Resolve(request.DispatchProfileID, request.DispatchProfileVersion, request.Adapter)
+	s := agentd.Session{DispatchProfile: &profile, ID: "local-generation", HarnessSessionID: "private-vendor-reference", ProjectID: request.ProjectID, Identity: request.Identity, Adapter: request.Adapter, Role: request.Role, ParentSessionID: request.ParentSessionID, TicketID: request.TicketID, WorkShape: request.WorkShape, Managed: true, State: agentd.StateRunning, Capabilities: []agentd.Capability{agentd.CapabilityStatus, agentd.CapabilitySteer, agentd.CapabilityStop, agentd.CapabilityInterrupt}}
 	if f.public {
 		s.Reporter.PublicSessionID = friendlyPublicID
 	}
@@ -307,7 +308,7 @@ func TestFriendlyStartGuidedAndJSONUseSameResolver(t *testing.T) {
 	o.Parent = ""
 	o.Profile = ""
 	var guidance bytes.Buffer
-	if err := guideFriendlyStart(strings.NewReader("PAI\nbuilder\nPAI-921\nship\ncodex:root\ncodex-sol-high@1\n"), &guidance, &o); err != nil {
+	if err := guideFriendlyStart(context.Background(), strings.NewReader("PAI\nbuilder\nPAI-921\nship\ncodex:root\ncodex-sol-high@1\n"), &guidance, &o); err != nil {
 		t.Fatal(err)
 	}
 	result, err := runFriendlyStart(context.Background(), o)
@@ -419,5 +420,75 @@ func TestFriendlyStartLedgerRejectsSymlinkAndUnsafeModes(t *testing.T) {
 	}
 	if _, _, err := readFriendlyStartRecord(private, "key", "digest"); err == nil {
 		t.Fatal("public retry directory accepted")
+	}
+}
+
+func TestFriendlyGuidedCLISelectsDisplayedRowsWithoutProfileIDs(t *testing.T) {
+	f := newFriendlyFixture(t)
+	var out, guidance bytes.Buffer
+	oldOut, oldJSON := stdout, flagJSON
+	stdout = &out
+	defer func() { stdout = oldOut; flagJSON = oldJSON }()
+	cmd := rootCmd()
+	// The catalog is alphabetically ordered: codex-sol-high is row five.
+	cmd.SetIn(strings.NewReader("1\n1\nPAI-921\n1\n1\n5\n"))
+	cmd.SetErr(&guidance)
+	cmd.SetArgs([]string{"worker", "start", "--guided", "--dry-run", "--json", "--workspace", f.opts.Workspace, "--state-root", f.opts.StateRoot, "--expect-deployment-instance", f.opts.Deployment})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var guided friendlyStartResult
+	if json.Unmarshal(out.Bytes(), &guided) != nil || guided.Outcome != "validated" || guided.Plan.Profile.ID != "codex-sol-high" {
+		t.Fatal("guided rows did not resolve expected plan")
+	}
+	for _, label := range []string{"Project choices:", "PAI", "Agent choices:", "builder", "Parent choices:", "codex:root", "Profile choices:", "gpt-5.6-sol / high"} {
+		if !strings.Contains(guidance.String(), label) {
+			t.Fatalf("missing readable choice %s", label)
+		}
+	}
+	f.opts.DryRun = true
+	explicit, err := runFriendlyStart(context.Background(), f.opts)
+	if err != nil || explicit.Plan.Profile != guided.Plan.Profile || explicit.Plan.Parent != guided.Plan.Parent || explicit.Plan.Agent != guided.Plan.Agent || f.writes != 0 || f.daemon.startCount != 0 {
+		t.Fatal("guided preview diverged from shared resolver or wrote state")
+	}
+}
+
+func TestFriendlyGuidanceRefusesUndisplayedChoices(t *testing.T) {
+	f := newFriendlyFixture(t)
+	f.opts.Project = ""
+	var out bytes.Buffer
+	if err := guideFriendlyStart(context.Background(), strings.NewReader("99\n"), &out, &f.opts); err == nil || f.writes != 0 {
+		t.Fatal("undisplayed choice accepted")
+	}
+}
+
+type friendlyLostResponseDaemon struct {
+	*friendlyFakeDaemon
+	original agentd.Session
+	key      string
+}
+
+func (d *friendlyLostResponseDaemon) Start(ctx context.Context, r agentd.StartRequest) (agentd.Session, error) {
+	d.original, _ = d.friendlyFakeDaemon.Start(ctx, r)
+	d.key = r.IdempotencyKey
+	return agentd.Session{}, errors.New("lost response")
+}
+func (d *friendlyLostResponseDaemon) LookupStart(_ context.Context, key string) (agentd.Session, error) {
+	if key != d.key {
+		return agentd.Session{}, errors.New("wrong key")
+	}
+	return d.original, nil
+}
+func TestFriendlyReconcilesLostDaemonResponseWithoutRepeatedSpawn(t *testing.T) {
+	f := newFriendlyFixture(t)
+	daemon := &friendlyLostResponseDaemon{friendlyFakeDaemon: f.daemon}
+	friendlyDaemonClient = func(string) (friendlyDaemon, error) { return daemon, nil }
+	result, err := runFriendlyStart(context.Background(), f.opts)
+	if err != nil || result.Outcome != "unknown" {
+		t.Fatal("lost response did not stay unknown")
+	}
+	result, err = runFriendlyStart(context.Background(), f.opts)
+	if err != nil || result.Outcome != "started" || !result.Replayed || result.PublicSessionID != friendlyPublicID || f.daemon.startCount != 1 {
+		t.Fatal("original outcome was not reconciled")
 	}
 }

@@ -19,17 +19,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Registered by the CLI integration lane. No service is installed implicitly;
+// No service is installed implicitly;
 // every mutation is scoped to a verified platform declaration and private root.
 func runtimeCmd() *cobra.Command {
 	var root, file, service, expected, confirm string
 	var projectID int64
+	var projectKey string
 	cache, _ := os.UserCacheDir()
 	cmd := &cobra.Command{Use: "runtime", Short: "Set up, diagnose, repair or reset one local Agent Intercom runtime", Args: cobra.NoArgs}
 	cmd.PersistentFlags().StringVar(&root, "state-root", filepath.Join(cache, "paimos", "agentd"), "private agentd state root")
 	cmd.PersistentFlags().StringVar(&file, "service-file", "", "reviewed LaunchAgent plist or Linux user unit (default: named-instance service)")
 	cmd.PersistentFlags().StringVar(&service, "service-name", "", "platform service label or unit name")
 	cmd.PersistentFlags().StringVar(&expected, "expect-deployment-instance", "", "expected authenticated deployment identity (defaults to named instance)")
+	cmd.PersistentFlags().StringVar(&projectKey, "project", "", "authorized canonical project key for scoped diagnosis")
 	cmd.PersistentFlags().Int64Var(&projectID, "project-id", 0, "authorized project for canonical-agent and target diagnosis")
 	for _, operation := range []string{"doctor", "setup", "repair", "reset"} {
 		child := &cobra.Command{Use: operation, Short: map[string]string{"doctor": "Report independent readiness layers without changing runtime state", "setup": "Verify the declarative service and reconnect idempotently", "repair": "Repair owned state within a persistent three-attempt budget", "reset": "Preview recoverable reset; --confirm applies that exact preview"}[operation], Args: cobra.NoArgs}
@@ -46,15 +48,29 @@ func runtimeCmd() *cobra.Command {
 			if projectID < 0 {
 				return &usageError{msg: "--project-id must be positive when supplied"}
 			}
+			if projectKey != "" {
+				named, err := runtimeNamedClient(flagInstance)
+				if err != nil {
+					return errors.New("project diagnosis requires named instance authentication")
+				}
+				project, err := resolveExactOrchestratorProject(named, projectKey)
+				if err != nil {
+					return errors.New("authorized project key could not be resolved")
+				}
+				if projectID != 0 && projectID != project.ID {
+					return errors.New("--project and --project-id disagree")
+				}
+				projectID = project.ID
+			}
 			home, e := os.UserHomeDir()
 			if e != nil {
 				return errors.New("runtime home unavailable")
 			}
-			manager, e := runtimehealth.NewPlatformService(runtime.GOOS, home, flagInstance, root, file, service)
+			manager, e := runtimehealth.NewPlatformService(runtime.GOOS, home, expected, root, file, service)
 			if e != nil {
 				return e
 			}
-			dir, e := agentd.InstanceStateDir(root, flagInstance)
+			dir, e := agentd.InstanceStateDir(root, expected)
 			if e != nil {
 				return errors.New("runtime state root invalid")
 			}
@@ -66,7 +82,7 @@ func runtimeCmd() *cobra.Command {
 				manager.ExpectedURL = named.baseURL
 			}
 			remote := runtimeRemoteProbe(flagInstance, expected, projectID)
-			local, e := runtimehealth.New(runtimehealth.Config{Instance: flagInstance, StateRoot: root, Service: manager, Daemon: daemon, Remote: remote})
+			local, e := runtimehealth.New(runtimehealth.Config{Instance: expected, StateRoot: root, Service: manager, Daemon: daemon, Remote: remote})
 			if e != nil {
 				return e
 			}

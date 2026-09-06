@@ -64,6 +64,9 @@ type WorkspaceProvenance struct {
 }
 
 type StartRequest struct {
+	IdempotencyKey         string                   `json:"idempotency_key,omitempty"`
+	ExpectedAccountLabel   string                   `json:"expected_account_label,omitempty"`
+	ExpectedMachineID      string                   `json:"expected_machine_id,omitempty"`
 	Adapter                string                   `json:"adapter"`
 	Workspace              string                   `json:"workspace"`
 	WorkspaceMode          string                   `json:"workspace_mode,omitempty"`
@@ -145,6 +148,12 @@ type Adapter interface {
 // a closed non-secret label. Absence or ambiguity is always "unknown".
 type AccountProber interface {
 	AccountLabel(context.Context) string
+}
+
+// MachineProber returns the stable host identity accepted by the authenticated
+// reporter authority. It is operator-supplied provenance, not hardware attestation.
+type MachineProber interface {
+	AuthenticatedMachineID(context.Context) (string, error)
 }
 
 // DispatchResolver asks the authenticated execution-options authority for an

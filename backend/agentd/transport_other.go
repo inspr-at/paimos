@@ -40,3 +40,7 @@ func (c *Client) RuntimeStatus(context.Context) (RuntimeStatus, error) {
 func (c *Client) QuiesceRuntime(context.Context, string, []string) error {
 	return errors.New("agentd transport is unsupported")
 }
+
+func (*Client) LookupStart(context.Context, string) (Session, error) {
+	return Session{}, errors.New("agentd transport is unsupported")
+}

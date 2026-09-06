@@ -71,6 +71,7 @@ type Supervisor struct {
 	runtimeQuiescing      bool
 	instance              string
 	journal               *registryJournal
+	starts                *startJournal
 	reporter              Reporter
 	dispatchResolver      DispatchResolver
 	allowSharedWorkspaces bool
@@ -121,6 +122,10 @@ func NewSupervisor(config SupervisorConfig) (*Supervisor, error) {
 			return nil, err
 		}
 		s.journal = journal
+		s.starts, err = openStartJournal(config.StateRoot, config.Instance)
+		if err != nil {
+			return nil, err
+		}
 		for _, recovered := range journal.recovered() {
 			capabilities := map[Capability]bool{CapabilityInbox: true, CapabilityStatus: true}
 			s.sessions[recovered.ID] = &sessionEntry{session: recovered, capabilities: capabilities}
@@ -191,13 +196,11 @@ func canonicalCapabilities(input []Capability) ([]Capability, error) {
 	return out, nil
 }
 
-func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, error) {
+func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attempted *bool, generation string) (Session, error) {
 	validated, err := validateStartRequest(request)
 	if err != nil {
 		return Session{}, err
 	}
-	s.startMu.Lock()
-	defer s.startMu.Unlock()
 	s.mu.RLock()
 	adapter := s.adapters[validated.Adapter]
 	closed := s.closed || s.runtimeQuiescing
@@ -237,6 +240,19 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 			accountLabel = candidate
 		}
 	}
+	if validated.ExpectedAccountLabel != "" && (accountLabel == "unknown" || accountLabel != validated.ExpectedAccountLabel) {
+		return Session{}, errors.New("managed account constraint could not be verified")
+	}
+	if validated.ExpectedMachineID != "" {
+		prober, ok := s.reporter.(MachineProber)
+		if !ok {
+			return Session{}, errors.New("authenticated reporter machine provenance unavailable")
+		}
+		machine, probeErr := prober.AuthenticatedMachineID(ctx)
+		if probeErr != nil || machine != validated.ExpectedMachineID {
+			return Session{}, errors.New("managed machine constraint could not be verified")
+		}
+	}
 	capabilities, err := canonicalCapabilities(adapter.Capabilities())
 	if err != nil {
 		return Session{}, err
@@ -249,8 +265,11 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 		return Session{}, ErrAdapterUnsupported
 	}
 	now := time.Now().UTC()
+	if generation == "" {
+		generation = uuid.NewString()
+	}
 	entry := &sessionEntry{session: Session{
-		ID: uuid.NewString(), Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
+		ID: generation, Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
 		ProjectID: validated.ProjectID, Role: validated.Role, ParentSessionID: validated.ParentSessionID, TicketID: validated.TicketID, WorkShape: validated.WorkShape,
 		WorkspaceProvenance: provenance, DispatchProfile: profile, AccountLabel: accountLabel,
 		Capabilities: append([]Capability(nil), capabilities...), Managed: true, State: StateStarting,
@@ -269,6 +288,7 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 		stopLifecycleCancel()
 		cancelStart()
 	}()
+	*attempted = true
 	process, err := adapter.Start(startCtx, validated, observe)
 	if err != nil {
 		s.releaseReservation(entry.session.ID)
@@ -366,6 +386,12 @@ func (s *Supervisor) releaseReservation(id string) {
 }
 
 func validateStartRequest(request StartRequest) (StartRequest, error) {
+	if request.ExpectedAccountLabel != "" && (!validAccountLabel(request.ExpectedAccountLabel) || request.ExpectedAccountLabel == "unknown") {
+		return request, errors.New("invalid expected account label")
+	}
+	if request.ExpectedMachineID != "" && !validSafeLabel(request.ExpectedMachineID, 128) {
+		return request, errors.New("invalid expected machine identity")
+	}
 	request.Adapter = strings.TrimSpace(request.Adapter)
 	request.Identity = strings.TrimSpace(request.Identity)
 	if request.Adapter == "" || len(request.Adapter) > 64 || strings.ContainsAny(request.Adapter, "\x00\r\n/ ") {

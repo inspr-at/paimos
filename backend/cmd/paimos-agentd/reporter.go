@@ -182,6 +182,18 @@ func newCLIReporterWithRunner(instance, host, paimosPath string, environment []s
 // ResolveDispatchProfile reads the exact catalog from the authenticated
 // execution-options authority. agentd never accepts model or effort strings
 // directly from its local start caller.
+// AuthenticatedMachineID verifies reporter credentials before using the same host
+// value sent to managed registration. This is authenticated operator provenance,
+// never an assertion that a local hostname or PID is externally attested.
+func (r *cliReporter) AuthenticatedMachineID(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, reporterPreflightTimeout)
+	defer cancel()
+	if _, err := r.run(ctx, r.paimosPath, []string{"--json", "auth", "whoami"}, r.environment, nil); err != nil {
+		return "", errors.New("authenticated reporter machine provenance unavailable")
+	}
+	return r.host, nil
+}
+
 func (r *cliReporter) ResolveDispatchProfile(ctx context.Context, id, version, harness string) (dispatchprofile.Profile, error) {
 	expected, err := dispatchprofile.Resolve(id, version, harness)
 	if err != nil {

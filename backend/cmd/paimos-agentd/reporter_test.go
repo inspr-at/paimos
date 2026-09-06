@@ -965,3 +965,26 @@ func TestCLIReporterClaimCheckpointFailureNeverInvokesOwnedEffect(t *testing.T) 
 		t.Fatalf("owned effect ran before durable claim fallback: %d", controller.interrupts)
 	}
 }
+
+func TestAuthenticatedMachineProvenanceUsesProtectedReporter(t *testing.T) {
+	unavailable := false
+	reporter, err := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", []string{"PAIMOS_API_KEY_FILE=/fixture/protected"}, func(_ context.Context, _ string, args, environment []string, input io.Reader) ([]byte, error) {
+		if !slices.Equal(args, []string{"--json", "auth", "whoami"}) || input != nil || !slices.Equal(environment, []string{"PAIMOS_API_KEY_FILE=/fixture/protected"}) {
+			t.Fatal("machine probe bypassed protected reporter")
+		}
+		if unavailable {
+			return nil, errors.New("unavailable")
+		}
+		return []byte(`{}`), nil
+	}, newMemoryReporterLeaseStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if machine, err := reporter.AuthenticatedMachineID(context.Background()); err != nil || machine != "fixture-host" {
+		t.Fatal("missing authenticated host provenance")
+	}
+	unavailable = true
+	if machine, err := reporter.AuthenticatedMachineID(context.Background()); err == nil || machine != "" {
+		t.Fatal("local host hint survived failed authentication")
+	}
+}

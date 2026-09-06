@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -89,7 +88,7 @@ func friendlyStartCmd(coordinator bool) *cobra.Command {
 			return friendlyStartError("--guided and --non-interactive cannot be combined")
 		}
 		if o.Guided || (!o.NonInteractive && !flagJSON && term.IsTerminal(int(os.Stdin.Fd()))) {
-			if err := guideFriendlyStart(cmd.InOrStdin(), cmd.ErrOrStderr(), &o); err != nil {
+			if err := guideFriendlyStart(cmd.Context(), cmd.InOrStdin(), cmd.ErrOrStderr(), &o); err != nil {
 				return friendlyStartError(err.Error())
 			}
 		}
@@ -167,54 +166,6 @@ func friendlyStartError(reason string) error {
 		return &apiError{inner: errors.New(reason)}
 	}
 	return errors.New(reason)
-}
-
-func guideFriendlyStart(in io.Reader, out io.Writer, o *friendlyStartOptions) error {
-	reader := bufio.NewReader(io.LimitReader(in, 16<<10))
-	fields := []struct {
-		name  string
-		value *string
-	}{{"Project key", &o.Project}, {"Canonical agent key", &o.Agent}}
-	if !o.Coordinator {
-		fields = append(fields, struct {
-			name  string
-			value *string
-		}{"Ticket key", &o.Ticket}, struct {
-			name  string
-			value *string
-		}{"Work shape (ship/scout)", &o.Shape}, struct {
-			name  string
-			value *string
-		}{"Parent public session ID or harness:agent handle", &o.Parent})
-	}
-	if o.Profile == "" && o.Harness == "" && o.Model == "" && o.Effort == "" {
-		fields = append(fields, struct {
-			name  string
-			value *string
-		}{"Immutable profile ID@version", &o.Profile})
-	}
-	if o.Coordinator && o.Label == "" {
-		o.Label = o.Agent
-	}
-	for _, field := range fields {
-		if *field.value != "" {
-			continue
-		}
-		fmt.Fprintf(out, "%s: ", field.name)
-		line, err := reader.ReadString('\n')
-		if err != nil && err != io.EOF {
-			return errors.New("guided input could not be read")
-		}
-		*field.value = strings.TrimSpace(line)
-		if *field.value == "" {
-			return errors.New("guided input is incomplete; supply the required flags")
-		}
-	}
-	if o.Key == "" {
-		o.Key = uuid.NewString()
-		fmt.Fprintf(out, "Retry key: %s\n", o.Key)
-	}
-	return nil
 }
 
 func validateFriendlyStart(o friendlyStartOptions) error {
@@ -504,6 +455,14 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 	fingerprint := friendlyStartFingerprint(o, prompt)
 	if !o.DryRun && !o.Explain {
 		if result, found, err := readFriendlyStartRecord(ledgerDir, o.Key, fingerprint); err != nil || found {
+			if err == nil && result.Outcome == "unknown" {
+				result = reconcileFriendlyStart(ctx, client, o, runtimeDir, result)
+				if result.Outcome != "unknown" {
+					if e := completeFriendlyStartRecord(ledgerDir, o.Key, fingerprint, result); e != nil {
+						return friendlyStartResult{}, errors.New("reconciled start could not be checkpointed")
+					}
+				}
+			}
 			return result, err
 		}
 	}
@@ -568,6 +527,8 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 			plan.BindingRevision = &configured.Revision
 		}
 	}
+	// Namespace the daemon key by authenticated origin as well as selected instance.
+	plan.request.IdempotencyKey = client.identity.Namespace + ":" + o.Key
 	session, startErr := daemon.Start(ctx, plan.request)
 	if startErr != nil {
 		result.Reason = "Daemon start failed or its response was lost; inspect runtime doctor and harness list before any new start."
