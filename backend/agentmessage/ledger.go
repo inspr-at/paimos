@@ -601,6 +601,22 @@ const envelopeSelect = `SELECT am.id,am.message_id,am.context_id,am.task_id,am.r
 	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_primary_target_id),''),
 	COALESCE(am.delivery_fallback_target_id,''),
 	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_fallback_target_id),'')
+	,COALESCE((SELECT recovery.new_target_id FROM agent_message_delivery_recoveries recovery
+	           JOIN agent_message_deliveries delivery ON delivery.delivery_id=recovery.delivery_id
+	           WHERE delivery.message_row_id=am.id ORDER BY recovery.sequence DESC LIMIT 1),'')
+	,COALESCE((SELECT target.target_kind FROM agent_message_delivery_recoveries recovery
+	           JOIN agent_message_deliveries delivery ON delivery.delivery_id=recovery.delivery_id
+	           JOIN agent_message_targets target ON target.id=recovery.new_target_id
+	           WHERE delivery.message_row_id=am.id ORDER BY recovery.sequence DESC LIMIT 1),'')
+	,COALESCE((SELECT recovery.new_target_version FROM agent_message_delivery_recoveries recovery
+	           JOIN agent_message_deliveries delivery ON delivery.delivery_id=recovery.delivery_id
+	           WHERE delivery.message_row_id=am.id ORDER BY recovery.sequence DESC LIMIT 1),0)
+	,COALESCE((SELECT recovery.new_harness_session_id FROM agent_message_delivery_recoveries recovery
+	           JOIN agent_message_deliveries delivery ON delivery.delivery_id=recovery.delivery_id
+	           WHERE delivery.message_row_id=am.id ORDER BY recovery.sequence DESC LIMIT 1),'')
+	,COALESCE((SELECT recovery.sequence FROM agent_message_delivery_recoveries recovery
+	           JOIN agent_message_deliveries delivery ON delivery.delivery_id=recovery.delivery_id
+	           WHERE delivery.message_row_id=am.id ORDER BY recovery.sequence DESC LIMIT 1),0)
 	,am.expects_reply,
 	COALESCE((SELECT outcome FROM agent_message_human_resolutions WHERE message_row_id=am.id),'')
 	FROM agent_messages am
@@ -613,8 +629,12 @@ type scanner interface{ Scan(...any) error }
 func scanEnvelope(row scanner) (*Envelope, error) {
 	var e Envelope
 	var parts, metadata, primaryID, primaryKind, fallbackID, fallbackKind string
+	var effectiveID, effectiveKind, effectiveSessionID string
+	var effectiveVersion, effectiveSequence int
 	if err := row.Scan(&e.Cursor, &e.MessageID, &e.ContextID, &e.TaskID, &e.Role, &parts, &metadata, &e.From, &e.To, &e.ReplyTo, &e.ThreadID, &e.Hop, &e.Delivered, &e.HeldReason, &e.IsActionRequest, &e.CreatedAt, &e.ReadAt,
-		&e.DeliveryLevel, &e.DeliveryFallback, &primaryID, &primaryKind, &fallbackID, &fallbackKind, &e.ExpectsReply, &e.HumanResolutionOutcome); err != nil {
+		&e.DeliveryLevel, &e.DeliveryFallback, &primaryID, &primaryKind, &fallbackID, &fallbackKind,
+		&effectiveID, &effectiveKind, &effectiveVersion, &effectiveSessionID, &effectiveSequence,
+		&e.ExpectsReply, &e.HumanResolutionOutcome); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(parts), &e.Parts); err != nil {
@@ -631,6 +651,10 @@ func scanEnvelope(row scanner) (*Envelope, error) {
 		if fallbackID != "" {
 			e.DeliveryTarget.SimpleFallback = &DeliveryTargetBinding{BindingID: fallbackID, Kind: fallbackKind}
 		}
+	}
+	if effectiveID != "" {
+		e.DeliveryEffectiveTarget = &DeliveryRecoveryBinding{BindingID: effectiveID, Kind: effectiveKind,
+			Version: effectiveVersion, HarnessSessionID: effectiveSessionID, Sequence: effectiveSequence}
 	}
 	return &e, nil
 }

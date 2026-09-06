@@ -13207,6 +13207,84 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 	// M178 changes only the message-body guard, preserving multiline bytes and
 	// all existing ledger references through an atomic table rebuild.
 	migrations = append(migrations, migration{version: 178})
+
+	// M179 / PAI-923: explicit recovery of never-claimed delivery work from a
+	// publicly closed managed generation. Canonical message and delivery target
+	// snapshots remain immutable; this bounded ledger records the separately
+	// selected effective binding.
+	migrations = append(migrations, migration{version: 179, steps: []string{
+		`CREATE TABLE agent_message_delivery_recoveries (
+		 delivery_id              TEXT NOT NULL REFERENCES agent_message_deliveries(delivery_id) ON DELETE CASCADE,
+		 sequence                 INTEGER NOT NULL CHECK(sequence BETWEEN 1 AND 8),
+		 project_id               INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		 old_target_id            TEXT NOT NULL REFERENCES agent_message_targets(id),
+		 old_target_version       INTEGER NOT NULL CHECK(old_target_version>0),
+		 old_harness_session_id   TEXT NOT NULL REFERENCES harness_sessions(id),
+		 old_runtime_id           TEXT NOT NULL REFERENCES lifecycle_runtimes(id),
+		 old_session_generation   TEXT NOT NULL,
+		 new_target_id            TEXT NOT NULL REFERENCES agent_message_targets(id),
+		 new_target_version       INTEGER NOT NULL CHECK(new_target_version>0),
+		 new_harness_session_id   TEXT NOT NULL REFERENCES harness_sessions(id),
+		 new_runtime_id           TEXT NOT NULL REFERENCES lifecycle_runtimes(id),
+		 new_runtime_generation   TEXT NOT NULL,
+		 new_session_generation   TEXT NOT NULL,
+		 actor_user_id            INTEGER NOT NULL REFERENCES users(id),
+		 created_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+		 PRIMARY KEY(delivery_id,sequence),
+		 UNIQUE(delivery_id,new_target_id),
+		 CHECK(old_target_id<>new_target_id),
+		 CHECK(old_harness_session_id<>new_harness_session_id)
+		)`,
+		`CREATE INDEX idx_agent_message_delivery_recoveries_project
+		 ON agent_message_delivery_recoveries(project_id,created_at,delivery_id)`,
+		`CREATE TRIGGER trg_agent_message_delivery_recovery_guard BEFORE INSERT ON agent_message_delivery_recoveries
+		 WHEN NOT EXISTS(
+		  SELECT 1 FROM agent_message_deliveries delivery
+		  JOIN agent_messages message ON message.id=delivery.message_row_id
+		  JOIN project_agents receiver ON receiver.id=message.to_agent_id
+		  JOIN agent_message_targets old_target ON old_target.id=NEW.old_target_id
+		  JOIN harness_sessions old_session ON old_session.id=NEW.old_harness_session_id
+		  JOIN agent_message_targets new_target ON new_target.id=NEW.new_target_id
+		  JOIN harness_sessions new_session ON new_session.id=NEW.new_harness_session_id
+		  WHERE delivery.delivery_id=NEW.delivery_id AND receiver.project_id=NEW.project_id
+		   AND delivery.instance=old_target.instance AND old_target.instance=new_target.instance
+		   AND old_target.project_id=NEW.project_id AND new_target.project_id=NEW.project_id
+		   AND old_target.address=message.to_address AND new_target.address=message.to_address
+		   AND old_target.adapter='managed_harness' AND new_target.adapter='managed_harness'
+		   AND old_target.target_kind='harness_session' AND new_target.target_kind='harness_session'
+		   AND old_target.version=NEW.old_target_version AND new_target.version=NEW.new_target_version
+		   AND old_session.project_id=NEW.project_id AND old_session.message_target_id=NEW.old_target_id
+		   AND old_session.phase='stopped'
+		   AND EXISTS(SELECT 1 FROM lifecycle_runtime_sessions old_binding
+		              WHERE old_binding.session_id=NEW.old_harness_session_id
+		               AND old_binding.runtime_id=NEW.old_runtime_id
+		               AND old_binding.generation=NEW.old_session_generation)
+		   AND new_session.project_id=NEW.project_id AND new_session.message_target_id=NEW.new_target_id
+		   AND new_session.phase<>'stopped' AND new_session.management_mode='managed'
+		   AND new_session.steer_mode='owned' AND new_session.advertised_inbox=1 AND new_session.advertised_status=1
+		   AND EXISTS(SELECT 1 FROM lifecycle_runtime_sessions new_binding
+		              JOIN lifecycle_runtimes runtime ON runtime.id=new_binding.runtime_id
+		              WHERE new_binding.session_id=NEW.new_harness_session_id
+		               AND new_binding.runtime_id=NEW.new_runtime_id
+		               AND new_binding.generation=NEW.new_session_generation
+		               AND runtime.generation=NEW.new_runtime_generation
+		               AND runtime.project_id=NEW.project_id AND runtime.machine_id=new_session.host
+		               AND runtime.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		   AND delivery.state='pending' AND delivery.attempt_count=0 AND delivery.consumer_fence=0
+		   AND delivery.lease_until IS NULL AND delivery.handed_off_at IS NULL AND delivery.effective_level IS NULL
+		   AND NOT EXISTS(SELECT 1 FROM agent_consumer_attempts attempt WHERE attempt.resource_id=delivery.delivery_id)
+		   AND NEW.sequence=COALESCE((SELECT MAX(previous.sequence)+1 FROM agent_message_delivery_recoveries previous
+		                              WHERE previous.delivery_id=NEW.delivery_id),1)
+		   AND NEW.old_target_id=COALESCE((SELECT previous.new_target_id FROM agent_message_delivery_recoveries previous
+		                                  WHERE previous.delivery_id=NEW.delivery_id ORDER BY previous.sequence DESC LIMIT 1),
+		                                 delivery.primary_target_id)
+		 ) BEGIN SELECT RAISE(ABORT,'invalid closed-target delivery recovery'); END`,
+		`CREATE TRIGGER trg_agent_message_delivery_recovery_no_update BEFORE UPDATE ON agent_message_delivery_recoveries
+		 BEGIN SELECT RAISE(ABORT,'delivery recovery history is immutable'); END`,
+		`CREATE TRIGGER trg_agent_message_delivery_recovery_no_delete BEFORE DELETE ON agent_message_delivery_recoveries
+		 WHEN EXISTS(SELECT 1 FROM agent_message_deliveries WHERE delivery_id=OLD.delivery_id)
+		 BEGIN SELECT RAISE(ABORT,'delivery recovery history is immutable'); END`,
+	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

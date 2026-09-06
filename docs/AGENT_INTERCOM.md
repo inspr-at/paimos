@@ -927,6 +927,31 @@ reuses the same delivery ID and snapshot; it does not retarget. If the original
 target cannot be restored, inspect whether any handoff may have occurred and
 send a new message only as an explicit operator decision.
 
+One narrower case has a supported audited recovery: the delivery is still
+`pending`, has zero attempts and consumer fence zero, its exact managed target
+session is publicly `stopped`, and a distinct fresh owned managed generation
+for the same address has the same delivery capability. First inspect without
+changing state:
+
+```bash
+paimos message delivery recover-closed-target --project PAI \
+  --delivery '<delivery-id>' \
+  --closed-session '<stopped-public-session-id>' \
+  --replacement-session '<fresh-public-session-id>'
+```
+
+The dry-run prints the original and proposed effective bindings and a complete
+copyable apply command containing the exact target ID/version and consumer
+fence. Review that line, then run it unchanged. Apply reauthorizes the current
+administrator and project-edit permission inside the same transaction that
+wins against a concurrent listener claim. It appends an immutable recovery
+record; it does not rewrite the canonical message, original target snapshot,
+frozen v1 envelope, or a human message's product session. The replacement
+listener must still lease and complete the same delivery ID normally. Any
+attempt, lease, fallback, held/action row, stale reporter, changed successor,
+or other effect ambiguity fails closed; use the ordinary evidence-based
+operator decision instead of editing the database.
+
 ### Stop and recreate a durable harness generation
 
 After the integration has cleaned up its owned process, close the old public

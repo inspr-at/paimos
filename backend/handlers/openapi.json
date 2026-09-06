@@ -1098,7 +1098,42 @@
           "hop": {"type": "integer"}, "delivered": {"type": "boolean"}, "held_reason": {"type": "string"}, "is_action_request": {"type": "boolean"},
           "expects_reply": {"type": "boolean"}, "human_resolution_outcome": {"enum": ["resolved", "dismissed"]},
           "created_at": {"type": "string"}, "read_at": {"type": "string"}, "delivery_level": {"enum": ["simple", "steer"]},
-          "delivery_fallback": {"const": "simple"}, "delivery_target": {"type": ["object", "null"]}, "delivery_work": {"type": "object"}
+          "delivery_fallback": {"const": "simple"}, "delivery_target": {"type": ["object", "null"]},
+          "delivery_effective_target": {"$ref": "#/components/schemas/AgentMessageRecoveryBinding"}, "delivery_work": {"type": "object"}
+        }
+      },
+      "AgentMessageRecoveryBinding": {
+        "type": "object", "additionalProperties": false,
+        "required": ["binding_id", "kind", "version", "harness_session_id", "sequence"],
+        "properties": {
+          "binding_id": {"type": "string"}, "kind": {"const": "harness_session"}, "version": {"type": "integer", "minimum": 1},
+          "harness_session_id": {"type": "string"}, "sequence": {"type": "integer", "minimum": 1, "maximum": 8}
+        }
+      },
+      "ClosedTargetRecoveryTarget": {
+        "type": "object", "additionalProperties": false,
+        "required": ["target_id", "target_version", "harness_session_id", "session_generation"],
+        "properties": {"target_id": {"type": "string"}, "target_version": {"type": "integer", "minimum": 1}, "harness_session_id": {"type": "string"}, "session_generation": {"type": "string"}}
+      },
+      "ClosedTargetRecoveryPlan": {
+        "type": "object", "additionalProperties": false,
+        "required": ["delivery_id", "address", "state", "attempt_count", "consumer_fence", "recovery_sequence", "original_target", "effective_target", "replacement_target", "recovered"],
+        "properties": {
+          "delivery_id": {"type": "string"}, "address": {"type": "string"}, "state": {"type": "string"},
+          "attempt_count": {"type": "integer", "minimum": 0}, "consumer_fence": {"type": "integer", "minimum": 0},
+          "recovery_sequence": {"type": "integer", "minimum": 1, "maximum": 8},
+          "original_target": {"$ref": "#/components/schemas/ClosedTargetRecoveryTarget"},
+          "effective_target": {"$ref": "#/components/schemas/ClosedTargetRecoveryTarget"},
+          "replacement_target": {"$ref": "#/components/schemas/ClosedTargetRecoveryTarget"}, "recovered": {"type": "boolean"}
+        }
+      },
+      "ClosedTargetRecoveryWrite": {
+        "type": "object", "additionalProperties": false,
+        "required": ["expected_closed_session_id", "expected_target_id", "expected_target_version", "expected_consumer_fence", "replacement_session_id"],
+        "properties": {
+          "expected_closed_session_id": {"type": "string"}, "expected_target_id": {"type": "string"},
+          "expected_target_version": {"type": "integer", "minimum": 1}, "expected_consumer_fence": {"const": 0},
+          "replacement_session_id": {"type": "string"}
         }
       },
       "AgentMessageSendV1": {
@@ -8241,6 +8276,27 @@
     "/api/projects/{id}/messages/delivery-unavailable": {
       "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
       "post": {"tags": ["agents"], "summary": "Release an unavailable leased agentd delivery to a live generation or simple fallback", "description": "Does not complete or acknowledge the delivery. The same row must receive a fresh FIFO lease and CompleteLocalDelivery handoff. A generation requires a heartbeat no older than 90 seconds plus authenticated busy or idle activity; unknown, dead, stale, and stopped generations are ineligible. No valid route becomes blocked target_missing.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AgentDeliveryUnavailable"}}}}, "responses": {"200": {"description": "Delivery re-pended to an eligible route"}, "400": {"description": "Lease, attribution, or route validation failed"}}}
+    },
+    "/api/projects/{id}/message-deliveries/{deliveryID}/closed-target-recovery": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "deliveryID", "in": "path", "required": true, "schema": {"type": "string"}}
+      ],
+      "get": {
+        "tags": ["agents"], "summary": "Inspect a never-claimed closed-target delivery recovery",
+        "description": "Administrator dry-run. Reauthorizes project-edit access in the read transaction and returns only content-free exact compare-and-swap bindings.",
+        "parameters": [
+          {"name": "expected_closed_session_id", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "replacement_session_id", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "Eligible exact recovery plan", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ClosedTargetRecoveryPlan"}}}}, "400": {"description": "Ineligible or unavailable binding"}, "401": {"description": "Current authority unavailable"}, "403": {"description": "Administrator and project-edit authority required"}}
+      },
+      "post": {
+        "tags": ["agents"], "summary": "Append an audited effective binding for a closed-target delivery",
+        "description": "Exact compare-and-swap for pending, zero-attempt, zero-fence work only. The same transaction wins against listener claim. Canonical message and original delivery target bytes remain unchanged; exact replays are idempotent after fresh authorization.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ClosedTargetRecoveryWrite"}}}},
+        "responses": {"200": {"description": "Audited effective recovery binding", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ClosedTargetRecoveryPlan"}}}}, "400": {"description": "Unsafe or ineligible recovery"}, "401": {"description": "Current authority unavailable"}, "403": {"description": "Administrator and project-edit authority required"}, "409": {"description": "Compare-and-swap lost or changed successor"}}
+      }
     },
     "/api/command-palette/v1/settings": {
       "get": {

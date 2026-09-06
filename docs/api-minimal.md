@@ -399,6 +399,8 @@ GET  /projects/:id/message-targets     ?address=<receiver> (admin; configured or
 POST /projects/:id/message-targets/requeue { address } (admin; configured orchestrator attention target requires super-admin; recovers target_missing message rows and blocked/stale/expired-lease attention batches without changing batch correlation or a live lease)
 GET  /projects/:id/message-deliveries  redacted outbox state (admin)
 POST /projects/:id/message-deliveries/:deliveryId/requeue (admin)
+GET  /projects/:id/message-deliveries/:deliveryId/closed-target-recovery ?expected_closed_session_id=<stopped-public-session>&replacement_session_id=<fresh-public-session> (admin dry-run; project-edit authority rechecked in the read transaction)
+POST /projects/:id/message-deliveries/:deliveryId/closed-target-recovery { expected_closed_session_id, expected_target_id, expected_target_version, expected_consumer_fence: 0, replacement_session_id } (admin; exact audited compare-and-swap)
 GET  /projects/:id/messages/:messageId frozen v1 compatibility record
 GET  /v2/projects/:id/messages/:messageId
 GET  /issues/:id/messages              human-visible issue-anchored records (not comments)
@@ -457,6 +459,19 @@ whose heartbeat is at most 90 seconds old, or its snapshotted ordinary simple
 fallback. A missing route becomes `blocked/target_missing`; the replacement
 worker must lease the same durable row and still finish through
 `delivery-complete`.
+
+A pending managed delivery whose exact target generation is publicly stopped
+may be rebound only through `closed-target-recovery`. The dry-run returns the
+original, current effective, and proposed replacement target/session bindings
+plus the exact zero-attempt consumer fence. Apply accepts only those reviewed
+compare-and-swap fields. It refuses held or action-request rows, any lease,
+attempt, consumer claim, handoff, effective level, fallback transition,
+capability change, stale/unowned replacement, or cross-project/address binding.
+Successful recovery appends one immutable bounded audit record and leaves the
+canonical message, frozen v1 envelope, original delivery target columns, and
+human `product_session_id` unchanged. V2 envelopes may add
+`delivery_effective_target` so clients can distinguish that audited effective
+binding from the original snapshot.
 
 PAI-800 runner liveness/progress uses the PAI-799 integration seam directly:
 `POST /runs/:id/telemetry`. The supervisor owns stable correlation plus

@@ -61,7 +61,12 @@ func IsLocalWorkerAdapter(adapter string) bool {
 	return err == nil && plugin.Mode() == harnessplugin.ModeLocal
 }
 
-const selectedDeliveryTargetSQL = `(CASE
+const recoveredDeliveryTargetSQL = `(SELECT recovery.new_target_id
+	FROM agent_message_delivery_recoveries recovery
+	WHERE recovery.delivery_id=d.delivery_id
+	ORDER BY recovery.sequence DESC LIMIT 1)`
+
+const selectedDeliveryTargetSQL = `COALESCE(` + recoveredDeliveryTargetSQL + `,(CASE
 	WHEN d.last_error_code='managed_target_unavailable' AND d.fallback_target_id IS NOT NULL
 	THEN d.fallback_target_id
 	WHEN d.requested_level='simple' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
@@ -69,7 +74,7 @@ const selectedDeliveryTargetSQL = `(CASE
 	THEN d.fallback_target_id
 	WHEN d.requested_level='steer' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
 	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id)='simple'
-	THEN d.fallback_target_id ELSE COALESCE(d.primary_target_id,d.fallback_target_id) END)`
+	THEN d.fallback_target_id ELSE COALESCE(d.primary_target_id,d.fallback_target_id) END))`
 
 // ManagedGenerationLivenessWindow aligns reroute eligibility with the M161
 // heartbeat contract: three missed 30-second heartbeats make a working row
@@ -649,12 +654,13 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 		// lease work after an operator rotates the address to another target.
 		return false, nil
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE agent_message_deliveries SET state='leased',attempt_count=attempt_count+1,last_error_code='',
+	result, err := s.db.ExecContext(ctx, `UPDATE agent_message_deliveries AS d SET state='leased',attempt_count=attempt_count+1,last_error_code='',
 		lease_until=strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 seconds'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE delivery_id=? AND ((state IN ('pending','retry') AND next_attempt_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		 OR (state='leased' AND lease_until<=strftime('%Y-%m-%dT%H:%M:%fZ','now')))
+		AND `+selectedDeliveryTargetSQL+`=?
 		AND NOT EXISTS (`+olderDeliveryFIFOQuery+`)`,
-		work.DeliveryID, instanceName(), address, agentID, work.DeliveryID)
+		work.DeliveryID, selectedID, instanceName(), address, agentID, work.DeliveryID)
 	if err != nil {
 		return false, err
 	}
@@ -914,24 +920,34 @@ func (s *Service) CompleteLocalDelivery(ctx context.Context, in CompleteDelivery
 
 // DeliveryStatus is the redacted operator view of outbox state.
 type DeliveryStatus struct {
-	DeliveryID     string `json:"delivery_id"`
-	MessageID      string `json:"message_id"`
-	Address        string `json:"address"`
-	RequestedLevel string `json:"requested_level"`
-	EffectiveLevel string `json:"effective_level,omitempty"`
-	State          string `json:"state"`
-	FallbackReason string `json:"fallback_reason,omitempty"`
-	AttemptCount   int    `json:"attempt_count"`
-	LastErrorCode  string `json:"last_error_code,omitempty"`
-	HandedOffAt    string `json:"handed_off_at,omitempty"`
-	UpdatedAt      string `json:"updated_at"`
+	DeliveryID             string `json:"delivery_id"`
+	MessageID              string `json:"message_id"`
+	Address                string `json:"address"`
+	RequestedLevel         string `json:"requested_level"`
+	EffectiveLevel         string `json:"effective_level,omitempty"`
+	State                  string `json:"state"`
+	FallbackReason         string `json:"fallback_reason,omitempty"`
+	AttemptCount           int    `json:"attempt_count"`
+	LastErrorCode          string `json:"last_error_code,omitempty"`
+	HandedOffAt            string `json:"handed_off_at,omitempty"`
+	UpdatedAt              string `json:"updated_at"`
+	OriginalTargetID       string `json:"original_target_id,omitempty"`
+	OriginalTargetVersion  int    `json:"original_target_version,omitempty"`
+	EffectiveTargetID      string `json:"effective_target_id,omitempty"`
+	EffectiveTargetVersion int    `json:"effective_target_version,omitempty"`
+	RecoveryCount          int    `json:"recovery_count"`
 }
 
 func (s *Service) ListDeliveryStatus(ctx context.Context, projectID int64) ([]DeliveryStatus, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT d.delivery_id,am.message_id,am.to_address,d.requested_level,
 		COALESCE(d.effective_level,''),d.state,d.fallback_reason,d.attempt_count,d.last_error_code,
-		COALESCE(d.handed_off_at,''),d.updated_at FROM agent_message_deliveries d
+		COALESCE(d.handed_off_at,''),d.updated_at,COALESCE(d.primary_target_id,''),COALESCE(original.version,0),
+		COALESCE(`+selectedDeliveryTargetSQL+`,''),COALESCE(effective.version,0),
+		(SELECT COUNT(*) FROM agent_message_delivery_recoveries recovery WHERE recovery.delivery_id=d.delivery_id)
+		FROM agent_message_deliveries d
 		JOIN agent_messages am ON am.id=d.message_row_id JOIN project_agents pa ON pa.id=am.to_agent_id
+		LEFT JOIN agent_message_targets original ON original.id=d.primary_target_id
+		LEFT JOIN agent_message_targets effective ON effective.id=`+selectedDeliveryTargetSQL+`
 		WHERE pa.project_id=? AND d.instance=? ORDER BY am.id`, projectID, instanceName())
 	if err != nil {
 		return nil, err
@@ -942,7 +958,9 @@ func (s *Service) ListDeliveryStatus(ctx context.Context, projectID int64) ([]De
 		var status DeliveryStatus
 		if err := rows.Scan(&status.DeliveryID, &status.MessageID, &status.Address, &status.RequestedLevel,
 			&status.EffectiveLevel, &status.State, &status.FallbackReason, &status.AttemptCount,
-			&status.LastErrorCode, &status.HandedOffAt, &status.UpdatedAt); err != nil {
+			&status.LastErrorCode, &status.HandedOffAt, &status.UpdatedAt,
+			&status.OriginalTargetID, &status.OriginalTargetVersion, &status.EffectiveTargetID,
+			&status.EffectiveTargetVersion, &status.RecoveryCount); err != nil {
 			return nil, err
 		}
 		out = append(out, status)

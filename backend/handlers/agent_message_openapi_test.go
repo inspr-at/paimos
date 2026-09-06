@@ -63,7 +63,7 @@ func TestAgentMessageOpenAPIPreservesV1AndDeclaresV2(t *testing.T) {
 	}
 	v1 := schemas["AgentMessageV1"].(map[string]any)
 	v1Properties := v1["properties"].(map[string]any)
-	if v1Properties["expects_reply"] != nil || v1Properties["human_resolution_outcome"] != nil {
+	if v1Properties["expects_reply"] != nil || v1Properties["human_resolution_outcome"] != nil || v1Properties["delivery_effective_target"] != nil {
 		t.Fatalf("v2 fields leaked into OpenAPI v1: %v", v1Properties)
 	}
 	v2 := schemas["AgentMessageV2"].(map[string]any)
@@ -74,6 +74,10 @@ func TestAgentMessageOpenAPIPreservesV1AndDeclaresV2(t *testing.T) {
 	}
 	if !slices.Contains(requiredNames, "expects_reply") {
 		t.Fatalf("OpenAPI v2 does not require expects_reply: %v", requiredNames)
+	}
+	v2Properties := v2["properties"].(map[string]any)
+	if v2Properties["delivery_effective_target"].(map[string]any)["$ref"] != "#/components/schemas/AgentMessageRecoveryBinding" {
+		t.Fatalf("OpenAPI v2 omits effective recovery binding: %v", v2Properties["delivery_effective_target"])
 	}
 	for wrapper, envelope := range map[string]string{
 		"AgentMessageListV1":      "AgentMessageV1",
@@ -95,6 +99,15 @@ func TestAgentMessageOpenAPIPreservesV1AndDeclaresV2(t *testing.T) {
 		}
 		if got, want := items["$ref"], "#/components/schemas/"+envelope; got != want {
 			t.Fatalf("wrapper schema %s items = %v, want %s", wrapper, got, want)
+		}
+	}
+	recovery := paths["/api/projects/{id}/message-deliveries/{deliveryID}/closed-target-recovery"].(map[string]any)
+	for _, method := range []string{"get", "post"} {
+		operation := recovery[method].(map[string]any)
+		response := operation["responses"].(map[string]any)["200"].(map[string]any)
+		ref := response["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["$ref"]
+		if ref != "#/components/schemas/ClosedTargetRecoveryPlan" {
+			t.Fatalf("closed-target recovery %s response=%v", method, ref)
 		}
 	}
 	resolution := paths["/api/projects/{id}/messages/{messageID}/resolution"].(map[string]any)["post"].(map[string]any)

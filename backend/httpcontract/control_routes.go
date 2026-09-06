@@ -67,6 +67,7 @@ const (
 	ControlRouteConsumerExecute          ControlRouteClass = "runtime.consumer.execute"
 	ControlRouteConsumerComplete         ControlRouteClass = "runtime.consumer.complete"
 	ControlRouteRuntimeHealth            ControlRouteClass = "runtime.health.publish"
+	ControlRouteClosedTargetRecovery     ControlRouteClass = "message.delivery.closed_target_recovery"
 )
 
 // controlRouteParam marks a segment the caller supplies. Like chi, it permits
@@ -88,6 +89,7 @@ var controlRoutes = []struct {
 	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "attempts", controlRouteParam, "execute"}, ControlRouteConsumerExecute},
 	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "attempts", controlRouteParam, "complete"}, ControlRouteConsumerComplete},
 	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "runtime-health"}, ControlRouteRuntimeHealth},
+	{[]string{"api", "projects", controlRouteParam, "message-deliveries", controlRouteParam, "closed-target-recovery"}, ControlRouteClosedTargetRecovery},
 	{[]string{"api", "agent-mode", "deliveries", controlRouteParam, "control-capability-grants"}, ControlRouteDeliveryCapabilityGrants},
 	{[]string{"api", "agent-mode", "deliveries", controlRouteParam, "control-commands"}, ControlRouteDeliveryCommands},
 	{[]string{"api", "agent-mode", "control-capability-grants", controlRouteParam}, ControlRouteCapabilityGrantDetail},

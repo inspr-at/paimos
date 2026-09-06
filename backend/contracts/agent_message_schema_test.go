@@ -37,12 +37,14 @@ func TestAgentMessageV1SchemaRemainsFrozenBeforeReplyObligations(t *testing.T) {
 		Required   []string `json:"required"`
 		Properties map[string]struct {
 			Type string `json:"type"`
+			Ref  string `json:"$ref"`
 		} `json:"properties"`
 	}
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(schema.Required, "expects_reply") || schema.Properties["expects_reply"].Type != "" || schema.Properties["human_resolution_outcome"].Type != "" {
+	if slices.Contains(schema.Required, "expects_reply") || schema.Properties["expects_reply"].Type != "" ||
+		schema.Properties["human_resolution_outcome"].Type != "" || schema.Properties["delivery_effective_target"].Ref != "" {
 		t.Fatalf("v2 reply fields leaked into frozen v1: required=%v properties=%#v", schema.Required, schema.Properties)
 	}
 }
@@ -58,6 +60,7 @@ func TestAgentMessageV2SchemaRequiresReplyExpectationFact(t *testing.T) {
 		Properties           map[string]struct {
 			Type string   `json:"type"`
 			Enum []string `json:"enum"`
+			Ref  string   `json:"$ref"`
 		} `json:"properties"`
 	}
 	if err := json.Unmarshal(raw, &schema); err != nil {
@@ -68,6 +71,9 @@ func TestAgentMessageV2SchemaRequiresReplyExpectationFact(t *testing.T) {
 	}
 	if !slices.Equal(schema.Properties["human_resolution_outcome"].Enum, []string{"resolved", "dismissed"}) {
 		t.Fatalf("v2 human resolution outcomes=%v", schema.Properties["human_resolution_outcome"].Enum)
+	}
+	if schema.Properties["delivery_effective_target"].Ref != "#/$defs/RecoveryBinding" {
+		t.Fatalf("v2 recovery binding=%#v", schema.Properties["delivery_effective_target"])
 	}
 }
 
