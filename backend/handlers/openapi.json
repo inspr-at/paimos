@@ -122,6 +122,580 @@
       }
     },
     "schemas": {
+  "ConsumerRegistrationV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "runtime_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "runtime_generation": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "session_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "session_generation": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "consumer_generation": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "target_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "fallback",
+          "attention"
+        ]
+      },
+      "target_version": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "required": [
+      "runtime_id",
+      "runtime_generation",
+      "session_id",
+      "session_generation",
+      "consumer_generation",
+      "target_id",
+      "kind",
+      "target_version"
+    ]
+  },
+  "ConsumerStreamV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "type": "integer",
+        "const": 1
+      },
+      "id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "revision": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "generation": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "fallback",
+          "attention"
+        ]
+      },
+      "expires_at": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "required": [
+      "schema_version",
+      "id",
+      "revision",
+      "generation",
+      "kind",
+      "expires_at"
+    ]
+  },
+  "ConsumerClaimV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "request_key": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "request_key"
+    ]
+  },
+  "ConsumerAttemptV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "stream_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "request_key": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "resource_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "stream_revision": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "cursor": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "claimed",
+          "executing",
+          "completed",
+          "released",
+          "outcome_unknown"
+        ]
+      },
+      "expires_at": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "required": [
+      "id",
+      "stream_id",
+      "request_key",
+      "resource_id",
+      "stream_revision",
+      "cursor",
+      "state",
+      "expires_at"
+    ]
+  },
+  "ConsumerDeliveryV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "envelope": {
+        "$ref": "#/components/schemas/AgentMessageV2"
+      },
+      "work": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "delivery_id": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "adapter": {
+            "type": "string"
+          },
+          "target_kind": {
+            "type": "string"
+          },
+          "target_ref": {
+            "type": "string"
+          },
+          "maximum_level": {
+            "type": "string"
+          },
+          "requested_level": {
+            "type": "string"
+          },
+          "fallback_reason": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "delivery_id",
+          "instance",
+          "project_id",
+          "state",
+          "requested_level"
+        ]
+      }
+    },
+    "required": [
+      "envelope",
+      "work"
+    ]
+  },
+  "ConsumerAttentionV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "address": {
+        "type": "string"
+      },
+      "cursor": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "next_cursor": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "items": {
+        "type": "array",
+        "maxItems": 32,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "attention_id": {
+              "type": "string"
+            },
+            "source_kind": {
+              "type": "string"
+            },
+            "source_id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "cursor": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "source_project_id": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "source_sequence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "occurred_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "attention_id",
+            "source_kind",
+            "source_id",
+            "kind",
+            "reason",
+            "cursor",
+            "source_project_id",
+            "source_sequence",
+            "occurred_at"
+          ]
+        }
+      },
+      "frame": {
+        "type": "string"
+      },
+      "delivery_work": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "instance": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "adapter": {
+            "type": "string"
+          },
+          "target_kind": {
+            "type": "string"
+          },
+          "target_ref": {
+            "type": "string"
+          },
+          "maximum_level": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "batch_id": {
+            "type": "string"
+          },
+          "blocked_reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch_id",
+          "instance",
+          "project_id",
+          "state"
+        ]
+      }
+    },
+    "required": [
+      "address",
+      "cursor",
+      "next_cursor",
+      "items"
+    ]
+  },
+  "ConsumerClaimPageV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "type": "integer",
+        "const": 1
+      },
+      "attempt": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/ConsumerAttemptV1"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "schema_version",
+      "attempt"
+    ]
+  },
+  "ConsumerExecutePageV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "type": "integer",
+        "const": 1
+      },
+      "attempt": {
+        "$ref": "#/components/schemas/ConsumerAttemptV1"
+      },
+      "delivery": {
+        "$ref": "#/components/schemas/ConsumerDeliveryV1"
+      },
+      "attention": {
+        "$ref": "#/components/schemas/ConsumerAttentionV1"
+      }
+    },
+    "required": [
+      "schema_version",
+      "attempt"
+    ]
+  },
+  "ConsumerExecuteV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "required": [
+      "expected_revision"
+    ]
+  },
+  "ConsumerCompleteV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "outcome": {
+        "type": "string",
+        "enum": [
+          "applied",
+          "outcome_unknown"
+        ]
+      },
+      "effective_level": {
+        "type": "string",
+        "enum": [
+          "simple"
+        ]
+      },
+      "fallback_reason": {
+        "type": "string",
+        "enum": [
+          "",
+          "idle",
+          "unsupported",
+          "policy_capped",
+          "target_missing",
+          "not_steerable",
+          "transport_error"
+        ]
+      }
+    },
+    "required": [
+      "expected_revision",
+      "outcome",
+      "effective_level",
+      "fallback_reason"
+    ]
+  },
+  "ConsumerResultV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "type": "integer",
+        "const": 1
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "outcome_unknown"
+        ]
+      },
+      "cursor": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "required": [
+      "schema_version",
+      "state",
+      "cursor"
+    ]
+  },
+  "RuntimeHealthWriteV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "runtime_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "runtime_generation": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "sequence": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "layer": {
+        "type": "string",
+        "enum": [
+          "reporter",
+          "primary",
+          "fallback",
+          "attention"
+        ]
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "healthy",
+          "unhealthy"
+        ]
+      },
+      "reason": {
+        "type": "string",
+        "enum": [
+          "recovered",
+          "consumer_crash_loop",
+          "consumer_authority_unavailable",
+          "consumer_transport_failed"
+        ]
+      },
+      "failure_count": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10
+      }
+    },
+    "required": [
+      "runtime_id",
+      "runtime_generation",
+      "sequence",
+      "layer",
+      "state",
+      "reason",
+      "failure_count"
+    ]
+  },
+  "RuntimeHealthResultV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "type": "integer",
+        "const": 1
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "healthy",
+          "unhealthy"
+        ]
+      },
+      "sequence": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "published": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "schema_version",
+      "state",
+      "sequence",
+      "published"
+    ]
+  },
+  "ConsumerProblemV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "error": {
+        "type": "string",
+        "enum": [
+          "consumer_invalid",
+          "consumer_unavailable",
+          "consumer_conflict",
+          "consumer_handoff_required",
+          "consumer_outcome_unknown",
+          "consumer_storage_unavailable"
+        ]
+      }
+    },
+    "required": [
+      "error"
+    ]
+  },
+
       "OrchestrationCoordinatorV1": {
         "type": "object",
         "additionalProperties": false,
@@ -3303,6 +3877,1107 @@
     }
   ],
   "paths": {
+  "/api/projects/{id}/consumers/v1/streams": {
+    "post": {
+      "tags": [
+        "consumers"
+      ],
+      "summary": "POST consumer /streams",
+      "description": "Exact API-key super-admin reporter with agent-controls:runner scope and private runtime proof. Consumer operations also require private consumer proof; claim/execute/complete require a unique exact attempt nonce. Headers are canonical unpadded base64url 32-byte proofs. Request limit 4096 bytes; duplicate and unknown fields refused. Claim returns NO payload. Execute commits executing before returning one transient payload; repeats never return payload. Lost response or ambiguous handoff is outcome_unknown and never re-leased. Expired unexecuted claims release safely. Stream fencing remains after expiry, preventing old binaries from claiming, requeueing or acknowledging owned work. Legacy leased work must drain first. Canonical FIFO deliveries, batches and cursors are preserved. Exact original completion retries retain original cursor after safe replacement. Runtime health is typed, bounded and coalesced into the existing attention ledger. No vendor exactly-once guarantee.",
+      "security": [
+        {
+          "bearerAPIKey": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        {
+          "name": "X-Paimos-Runtime-Lease",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          },
+          "description": "Private daemon-generated 32-byte base64url lease, never a browser value."
+        },
+        {
+          "name": "X-Paimos-Consumer-Lease",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Authorized result",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerStreamV1"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "503": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        }
+      },
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ConsumerRegistrationV1"
+            }
+          }
+        }
+      }
+    }
+  },
+  "/api/projects/{id}/consumers/v1/streams/{streamID}/claim": {
+    "post": {
+      "tags": [
+        "consumers"
+      ],
+      "summary": "POST consumer /streams/{streamID}/claim",
+      "description": "Exact API-key super-admin reporter with agent-controls:runner scope and private runtime proof. Consumer operations also require private consumer proof; claim/execute/complete require a unique exact attempt nonce. Headers are canonical unpadded base64url 32-byte proofs. Request limit 4096 bytes; duplicate and unknown fields refused. Claim returns NO payload. Execute commits executing before returning one transient payload; repeats never return payload. Lost response or ambiguous handoff is outcome_unknown and never re-leased. Expired unexecuted claims release safely. Stream fencing remains after expiry, preventing old binaries from claiming, requeueing or acknowledging owned work. Legacy leased work must drain first. Canonical FIFO deliveries, batches and cursors are preserved. Exact original completion retries retain original cursor after safe replacement. Runtime health is typed, bounded and coalesced into the existing attention ledger. No vendor exactly-once guarantee.",
+      "security": [
+        {
+          "bearerAPIKey": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        {
+          "name": "X-Paimos-Runtime-Lease",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          },
+          "description": "Private daemon-generated 32-byte base64url lease, never a browser value."
+        },
+        {
+          "name": "streamID",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "X-Paimos-Consumer-Lease",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          }
+        },
+        {
+          "name": "X-Paimos-Consumer-Attempt",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Authorized result",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerClaimPageV1"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "503": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        }
+      },
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ConsumerClaimV1"
+            }
+          }
+        }
+      }
+    }
+  },
+  "/api/projects/{id}/consumers/v1/streams/{streamID}/attempts/{attemptID}/execute": {
+    "post": {
+      "tags": [
+        "consumers"
+      ],
+      "summary": "POST consumer /streams/{streamID}/attempts/{attemptID}/execute",
+      "description": "Exact API-key super-admin reporter with agent-controls:runner scope and private runtime proof. Consumer operations also require private consumer proof; claim/execute/complete require a unique exact attempt nonce. Headers are canonical unpadded base64url 32-byte proofs. Request limit 4096 bytes; duplicate and unknown fields refused. Claim returns NO payload. Execute commits executing before returning one transient payload; repeats never return payload. Lost response or ambiguous handoff is outcome_unknown and never re-leased. Expired unexecuted claims release safely. Stream fencing remains after expiry, preventing old binaries from claiming, requeueing or acknowledging owned work. Legacy leased work must drain first. Canonical FIFO deliveries, batches and cursors are preserved. Exact original completion retries retain original cursor after safe replacement. Runtime health is typed, bounded and coalesced into the existing attention ledger. No vendor exactly-once guarantee.",
+      "security": [
+        {
+          "bearerAPIKey": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        {
+          "name": "X-Paimos-Runtime-Lease",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          },
+          "description": "Private daemon-generated 32-byte base64url lease, never a browser value."
+        },
+        {
+          "name": "streamID",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "attemptID",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "X-Paimos-Consumer-Lease",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          }
+        },
+        {
+          "name": "X-Paimos-Consumer-Attempt",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Authorized result",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerExecutePageV1"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "503": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        }
+      },
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ConsumerExecuteV1"
+            }
+          }
+        }
+      }
+    }
+  },
+  "/api/projects/{id}/consumers/v1/streams/{streamID}/attempts/{attemptID}/complete": {
+    "post": {
+      "tags": [
+        "consumers"
+      ],
+      "summary": "POST consumer /streams/{streamID}/attempts/{attemptID}/complete",
+      "description": "Exact API-key super-admin reporter with agent-controls:runner scope and private runtime proof. Consumer operations also require private consumer proof; claim/execute/complete require a unique exact attempt nonce. Headers are canonical unpadded base64url 32-byte proofs. Request limit 4096 bytes; duplicate and unknown fields refused. Claim returns NO payload. Execute commits executing before returning one transient payload; repeats never return payload. Lost response or ambiguous handoff is outcome_unknown and never re-leased. Expired unexecuted claims release safely. Stream fencing remains after expiry, preventing old binaries from claiming, requeueing or acknowledging owned work. Legacy leased work must drain first. Canonical FIFO deliveries, batches and cursors are preserved. Exact original completion retries retain original cursor after safe replacement. Runtime health is typed, bounded and coalesced into the existing attention ledger. No vendor exactly-once guarantee.",
+      "security": [
+        {
+          "bearerAPIKey": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        {
+          "name": "X-Paimos-Runtime-Lease",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          },
+          "description": "Private daemon-generated 32-byte base64url lease, never a browser value."
+        },
+        {
+          "name": "streamID",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "attemptID",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "X-Paimos-Consumer-Lease",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          }
+        },
+        {
+          "name": "X-Paimos-Consumer-Attempt",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Authorized result",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerResultV1"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "503": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        }
+      },
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ConsumerCompleteV1"
+            }
+          }
+        }
+      }
+    }
+  },
+  "/api/projects/{id}/consumers/v1/runtime-health": {
+    "post": {
+      "tags": [
+        "consumers"
+      ],
+      "summary": "POST consumer /runtime-health",
+      "description": "Exact API-key super-admin reporter with agent-controls:runner scope and private runtime proof. Consumer operations also require private consumer proof; claim/execute/complete require a unique exact attempt nonce. Headers are canonical unpadded base64url 32-byte proofs. Request limit 4096 bytes; duplicate and unknown fields refused. Claim returns NO payload. Execute commits executing before returning one transient payload; repeats never return payload. Lost response or ambiguous handoff is outcome_unknown and never re-leased. Expired unexecuted claims release safely. Stream fencing remains after expiry, preventing old binaries from claiming, requeueing or acknowledging owned work. Legacy leased work must drain first. Canonical FIFO deliveries, batches and cursors are preserved. Exact original completion retries retain original cursor after safe replacement. Runtime health is typed, bounded and coalesced into the existing attention ledger. No vendor exactly-once guarantee.",
+      "security": [
+        {
+          "bearerAPIKey": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        {
+          "name": "X-Paimos-Runtime-Lease",
+          "in": "header",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          },
+          "description": "Private daemon-generated 32-byte base64url lease, never a browser value."
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Authorized result",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeHealthResultV1"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        },
+        "503": {
+          "description": "Bounded refusal; no request values echoed.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumerProblemV1"
+              }
+            }
+          }
+        }
+      },
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeHealthWriteV1"
+            }
+          }
+        }
+      }
+    }
+  },
+
     "/api/agent-mode/orchestration/v1": {
       "get": {
         "tags": [

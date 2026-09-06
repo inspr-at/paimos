@@ -576,6 +576,7 @@ func mountAPI(r chi.Router) {
 		r.Use(auth.CSRFMiddleware)
 		r.Use(auth.MustChangePasswordGate)
 		handlers.RegisterLifecycleIntentRoutes(r)
+		handlers.RegisterConsumerRoutes(r)
 		handlers.RegisterHarnessBrowserRoutes(r)
 	})
 

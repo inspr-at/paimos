@@ -496,6 +496,9 @@ func (s *Service) AckInbox(ctx context.Context, in AckInput) (*CursorState, erro
 }
 
 func ackInboxTx(ctx context.Context, tx *sql.Tx, projectID int64, address string, agentID, cursor int64) (*CursorState, error) {
+	return ackInboxConsumerTx(ctx, tx, projectID, address, agentID, cursor, false)
+}
+func ackInboxConsumerTx(ctx context.Context, tx *sql.Tx, projectID int64, address string, agentID, cursor int64, fenced bool) (*CursorState, error) {
 	var current int64
 	err := tx.QueryRowContext(ctx, `SELECT cursor FROM agent_message_cursors WHERE project_id=? AND address=?`, projectID, address).Scan(&current)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -514,16 +517,29 @@ func ackInboxTx(ctx context.Context, tx *sql.Tx, projectID int64, address string
 	if exists == 0 {
 		return nil, coded("agent_message_cursor_unknown", "cursor is not a delivered message in this inbox")
 	}
+	if !fenced {
+		var owned int
+		if tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_consumer_streams WHERE project_id=? AND agent_id=? AND kind='fallback'`, projectID, agentID).Scan(&owned) != nil {
+			return nil, ErrConsumerStorage
+		}
+		if owned > 0 {
+			return nil, ErrConsumerUnavailable
+		}
+	}
+	fence := 0
+	if fenced {
+		fence = 1
+	}
 	readAt := time.Now().UTC().Format(time.RFC3339)
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_messages SET read_at=COALESCE(read_at,?)
 		WHERE to_agent_id=? AND to_address=? AND delivered=1 AND is_action_request=0 AND id>? AND id<=?`,
 		readAt, agentID, address, current, cursor); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_cursors(project_id,project_agent_id,address,cursor,updated_at)
-		VALUES(?,?,?,?,?)
-		ON CONFLICT(project_id,address) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at
-		WHERE excluded.cursor>agent_message_cursors.cursor`, projectID, agentID, address, cursor, readAt); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_cursors(project_id,project_agent_id,address,cursor,updated_at,consumer_fence)
+		VALUES(?,?,?,?,?,?)
+		ON CONFLICT(project_id,address) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at,consumer_fence=agent_message_cursors.consumer_fence+excluded.consumer_fence
+		WHERE excluded.cursor>agent_message_cursors.cursor`, projectID, agentID, address, cursor, readAt, fence); err != nil {
 		return nil, err
 	}
 	return &CursorState{Address: address, Cursor: cursor}, nil

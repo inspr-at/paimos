@@ -13118,6 +13118,89 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE TRIGGER IF NOT EXISTS lifecycle_event_no_delete BEFORE DELETE ON lifecycle_intent_events
 			 BEGIN SELECT RAISE(ABORT,'immutable lifecycle event'); END`,
 		}},
+
+		// M177 / PAI-923: sticky generation-fenced consumer ownership and typed runtime health.
+		{177, []string{
+			`CREATE TABLE IF NOT EXISTS agent_consumer_streams (
+ id TEXT PRIMARY KEY, project_id INTEGER NOT NULL, agent_id INTEGER NOT NULL, address TEXT NOT NULL,
+ kind TEXT NOT NULL CHECK(kind IN ('fallback','attention')), revision INTEGER NOT NULL CHECK(revision>0),
+ generation TEXT NOT NULL, registration_json TEXT NOT NULL CHECK(json_valid(registration_json)),
+ runtime_id TEXT NOT NULL, runtime_generation TEXT NOT NULL, session_id TEXT NOT NULL, session_generation TEXT NOT NULL,
+ user_id INTEGER NOT NULL, api_key_id INTEGER NOT NULL, target_id TEXT NOT NULL, target_version INTEGER NOT NULL,
+ lease_digest BLOB NOT NULL CHECK(length(lease_digest)=32), expires_at TEXT NOT NULL,
+ UNIQUE(project_id,agent_id,kind))`,
+			`CREATE TABLE IF NOT EXISTS agent_consumer_attempts (
+ id TEXT PRIMARY KEY,stream_id TEXT NOT NULL REFERENCES agent_consumer_streams(id),stream_revision INTEGER NOT NULL,
+ request_key TEXT NOT NULL, nonce_digest BLOB NOT NULL CHECK(length(nonce_digest)=32),
+ owner_json TEXT NOT NULL CHECK(json_valid(owner_json)), consumer_digest BLOB NOT NULL CHECK(length(consumer_digest)=32),
+ resource_id TEXT NOT NULL, cursor INTEGER NOT NULL CHECK(cursor>0),
+ state TEXT NOT NULL CHECK(state IN ('claimed','executing','completed','released','outcome_unknown')),
+ expires_at TEXT NOT NULL, result_json TEXT NOT NULL DEFAULT '',
+ UNIQUE(stream_id,stream_revision,request_key),UNIQUE(stream_id,nonce_digest))`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_consumer_attempt_open ON agent_consumer_attempts(stream_id) WHERE state IN ('claimed','executing','outcome_unknown')`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attempt_identity BEFORE UPDATE OF id,stream_id,stream_revision,request_key,nonce_digest,owner_json,consumer_digest,resource_id,cursor,expires_at ON agent_consumer_attempts
+ BEGIN SELECT RAISE(ABORT,'immutable consumer attempt'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attempt_terminal BEFORE UPDATE ON agent_consumer_attempts
+ WHEN OLD.state IN ('completed','released','outcome_unknown') OR NOT ((OLD.state='claimed' AND NEW.state IN ('executing','released')) OR (OLD.state='executing' AND NEW.state IN ('completed','outcome_unknown')))
+ BEGIN SELECT RAISE(ABORT,'invalid consumer transition'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attempt_no_delete BEFORE DELETE ON agent_consumer_attempts BEGIN SELECT RAISE(ABORT,'immutable consumer attempt'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_stream_no_delete BEFORE DELETE ON agent_consumer_streams BEGIN SELECT RAISE(ABORT,'sticky consumer ownership'); END`,
+			`ALTER TABLE agent_message_deliveries ADD COLUMN consumer_fence INTEGER NOT NULL DEFAULT 0 CHECK(consumer_fence>=0)`,
+			`ALTER TABLE agent_attention_batches ADD COLUMN consumer_fence INTEGER NOT NULL DEFAULT 0 CHECK(consumer_fence>=0)`,
+			`ALTER TABLE agent_message_cursors ADD COLUMN consumer_fence INTEGER NOT NULL DEFAULT 0 CHECK(consumer_fence>=0)`,
+			`ALTER TABLE agent_attention_cursors ADD COLUMN consumer_fence INTEGER NOT NULL DEFAULT 0 CHECK(consumer_fence>=0)`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_delivery_fence BEFORE UPDATE ON agent_message_deliveries WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s JOIN agent_messages m ON m.to_agent_id=s.agent_id AND m.to_address=s.address WHERE s.kind='fallback' AND m.id=OLD.message_row_id AND (
+ EXISTS(SELECT 1 FROM agent_message_targets t WHERE t.id=(CASE
+	WHEN OLD.last_error_code='managed_target_unavailable' AND OLD.fallback_target_id IS NOT NULL
+	THEN OLD.fallback_target_id
+	WHEN OLD.requested_level='simple' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id) IN ('agentd_codex','agentd_claude')
+	THEN OLD.fallback_target_id
+	WHEN OLD.requested_level='steer' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
+	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id)='simple'
+	THEN OLD.fallback_target_id ELSE COALESCE(OLD.primary_target_id,OLD.fallback_target_id) END) AND t.adapter='codex')
+ OR EXISTS(SELECT 1 FROM agent_consumer_attempts a WHERE a.stream_id=s.id AND a.resource_id=OLD.delivery_id))) AND NEW.consumer_fence<>OLD.consumer_fence+1 BEGIN SELECT RAISE(ABORT,'consumer ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attention_insert BEFORE INSERT ON agent_attention_batches WHEN NEW.state='leased' AND EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='attention' AND s.project_id=NEW.receiver_project_id AND s.agent_id=NEW.receiver_project_agent_id) AND NEW.consumer_fence<=0 BEGIN SELECT RAISE(ABORT,'consumer ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attention_fence BEFORE UPDATE ON agent_attention_batches WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='attention' AND s.project_id=OLD.receiver_project_id AND s.agent_id=OLD.receiver_project_agent_id) AND NEW.consumer_fence<>OLD.consumer_fence+1 BEGIN SELECT RAISE(ABORT,'consumer ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_fallback_cursor_insert BEFORE INSERT ON agent_message_cursors WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='fallback' AND s.project_id=NEW.project_id AND s.agent_id=NEW.project_agent_id) AND (NEW.consumer_fence<=0) BEGIN SELECT RAISE(ABORT,'consumer cursor ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_fallback_cursor_update BEFORE UPDATE ON agent_message_cursors WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='fallback' AND s.project_id=NEW.project_id AND s.agent_id=NEW.project_agent_id) AND (NEW.cursor>OLD.cursor AND NEW.consumer_fence<>OLD.consumer_fence+1) BEGIN SELECT RAISE(ABORT,'consumer cursor ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attention_cursor_insert BEFORE INSERT ON agent_attention_cursors WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='attention' AND s.project_id=NEW.receiver_project_id AND s.agent_id=NEW.receiver_project_agent_id) AND (NEW.consumer_fence<=0) BEGIN SELECT RAISE(ABORT,'consumer cursor ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attention_cursor_update BEFORE UPDATE ON agent_attention_cursors WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='attention' AND s.project_id=NEW.receiver_project_id AND s.agent_id=NEW.receiver_project_agent_id) AND (NEW.cursor>OLD.cursor AND NEW.consumer_fence<>OLD.consumer_fence+1) BEGIN SELECT RAISE(ABORT,'consumer cursor ownership required'); END`,
+			`CREATE TABLE IF NOT EXISTS agent_runtime_health (
+ id TEXT PRIMARY KEY,runtime_id TEXT NOT NULL,project_id INTEGER NOT NULL,layer TEXT NOT NULL CHECK(layer IN ('reporter','primary','fallback','attention')),
+ sequence INTEGER NOT NULL CHECK(sequence>0),state TEXT NOT NULL CHECK(state IN ('healthy','unhealthy')),
+ reason TEXT NOT NULL CHECK(reason IN ('recovered','consumer_crash_loop','consumer_authority_unavailable','consumer_transport_failed')),
+ failure_count INTEGER NOT NULL CHECK(failure_count BETWEEN 0 AND 10),episode INTEGER NOT NULL CHECK(episode BETWEEN 0 AND 10000),published INTEGER NOT NULL DEFAULT 0 CHECK(published IN (0,1)),published_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+ UNIQUE(runtime_id,layer))`,
+			`DROP TRIGGER IF EXISTS trg_agent_attention_items_no_update`,
+			`DROP TRIGGER IF EXISTS trg_agent_attention_items_no_delete`,
+			`DROP INDEX IF EXISTS idx_agent_attention_items_receiver`,
+			`CREATE TEMP TABLE consumer_attention_sequence AS SELECT seq FROM sqlite_sequence WHERE name='agent_attention_items'`,
+			`ALTER TABLE agent_attention_items RENAME TO agent_attention_items_m176`,
+			`CREATE TABLE IF NOT EXISTS agent_attention_items (
+			 id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+			 receiver_project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 receiver_project_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 address                   TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+			 source_project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 source_kind               TEXT NOT NULL CHECK(source_kind IN ('harness_session_event','agent_message_delivery','held_agent_message','harness_control','reply_obligation','runtime_health')),
+			 source_id                 TEXT NOT NULL CHECK(length(CAST(source_id AS BLOB)) BETWEEN 1 AND 64 AND source_id=trim(source_id)),
+			 source_sequence           INTEGER NOT NULL CHECK(source_sequence>=0),
+			 attention_kind            TEXT NOT NULL CHECK(attention_kind IN ('worker_unknown','worker_dead','assignment_turn_ended','delivery_failed','held_action','control_rejected','reply_overdue','runtime_unhealthy')),
+			 reason_code               TEXT NOT NULL CHECK(reason_code IN ('heartbeat_stale','stale_evidence','malformed_evidence','process_exited','process_failed','ownership_lost','stopped','turn_completed_open_assignment','target_blocked','delivery_dead','action_request_held','control_rejected','reply_expected','consumer_crash_loop','consumer_authority_unavailable','consumer_transport_failed')),
+			 occurred_at               TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("occurred_at") + `),
+			 created_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(receiver_project_agent_id,source_kind,source_id,source_sequence,attention_kind,reason_code)
+			)`,
+			`INSERT INTO agent_attention_items SELECT * FROM agent_attention_items_m176`,
+			`DROP TABLE agent_attention_items_m176`,
+			`UPDATE sqlite_sequence SET seq=MAX(seq,COALESCE((SELECT seq FROM consumer_attention_sequence),0)) WHERE name='agent_attention_items'`,
+			`INSERT INTO sqlite_sequence(name,seq) SELECT 'agent_attention_items',seq FROM consumer_attention_sequence WHERE NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='agent_attention_items')`,
+			`DROP TABLE consumer_attention_sequence`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_attention_items_receiver ON agent_attention_items(receiver_project_id,receiver_project_agent_id,id)`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_attention_items_no_update BEFORE UPDATE ON agent_attention_items BEGIN SELECT RAISE(ABORT,'agent attention items are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_attention_items_no_delete BEFORE DELETE ON agent_attention_items WHEN EXISTS(SELECT 1 FROM projects WHERE id=OLD.receiver_project_id) AND EXISTS(SELECT 1 FROM project_agents WHERE id=OLD.receiver_project_agent_id) AND EXISTS(SELECT 1 FROM projects WHERE id=OLD.source_project_id) BEGIN SELECT RAISE(ABORT,'agent attention items are immutable'); END`,
+		}},
 	}
 
 	for _, m := range migrations {

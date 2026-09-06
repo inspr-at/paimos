@@ -630,6 +630,13 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 		instanceName(), projectID, address).Scan(&work.Adapter, &work.TargetKind, &cipher, &work.MaximumLevel); err != nil {
 		return false, err
 	}
+	var owned int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_consumer_streams WHERE project_id=? AND agent_id=? AND kind='fallback'`, projectID, agentID).Scan(&owned); err != nil {
+		return false, ErrConsumerStorage
+	}
+	if owned > 0 && (workerAdapter == AdapterCodex || (workerAdapter == AdapterManagedHarness && workerTargetID == "")) {
+		return false, ErrConsumerUnavailable
+	}
 	if work.Adapter != workerAdapter {
 		// Another worker (or the server-side webhook dispatcher) owns this
 		// target. Return state for observability without ever exposing the
@@ -895,7 +902,7 @@ func (s *Service) CompleteLocalDelivery(ctx context.Context, in CompleteDelivery
 			return nil, coded("agent_message_delivery_raced", "delivery lease changed before completion")
 		}
 	}
-	stateOut, err := ackInboxTx(ctx, tx, in.ProjectID, address, agentID, in.Cursor)
+	stateOut, err := ackInboxConsumerTx(ctx, tx, in.ProjectID, address, agentID, in.Cursor, in.TargetID != "" && adapter == AdapterManagedHarness)
 	if err != nil {
 		return nil, err
 	}

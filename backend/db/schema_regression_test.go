@@ -32,7 +32,53 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 175
+const latestSchemaVersion = 177
+
+func TestMigration177PreservesAttentionLedgerAndSequence(t *testing.T) {
+	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m177.db")+"?_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err = migrateThrough(database, 176); err != nil {
+		t.Fatal(err)
+	}
+	res, err := database.Exec(`INSERT INTO projects(name,key) VALUES('Consumer fixture','CFX')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, _ := res.LastInsertId()
+	res, err = database.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'receiver')`, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, _ := res.LastInsertId()
+	_, err = database.Exec(`INSERT INTO agent_attention_items(id,receiver_project_id,receiver_project_agent_id,address,source_project_id,source_kind,source_id,source_sequence,attention_kind,reason_code,occurred_at) VALUES(42,?,?,'codex:receiver',?,'harness_session_event','fixture-event',1,'worker_unknown','heartbeat_stale',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, project, agent, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(`UPDATE sqlite_sequence SET seq=99 WHERE name='agent_attention_items'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = migrateThrough(database, 177); err != nil {
+		t.Fatal(err)
+	}
+	if err = migrateThrough(database, 177); err != nil {
+		t.Fatal("migration not idempotent", err)
+	}
+	var id, sequence int64
+	var source string
+	if err = database.QueryRow(`SELECT id,source_id FROM agent_attention_items`).Scan(&id, &source); err != nil || id != 42 || source != "fixture-event" {
+		t.Fatal("immutable attention ledger changed")
+	}
+	if err = database.QueryRow(`SELECT seq FROM sqlite_sequence WHERE name='agent_attention_items'`).Scan(&sequence); err != nil || sequence != 99 {
+		t.Fatalf("attention sequence=%d error=%v", sequence, err)
+	}
+	if _, err = database.Exec(`UPDATE agent_attention_items SET reason_code='stopped'`); err == nil {
+		t.Fatal("attention immutability lost")
+	}
+}
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()

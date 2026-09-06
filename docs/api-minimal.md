@@ -1073,3 +1073,46 @@ Their execution stage is unreported. Steer message delivery queued/attempted/
 acknowledged maps to requested/executing/completed **delivery evidence only**;
 it never proves task completion or a reply. Existing root configuration remains
 the super-admin `/api/orchestrator/v1/config` CAS surface.
+
+### Generation-owned inbox and attention consumers (PAI-923)
+
+`/api/projects/{id}/consumers/v1` requires the exact current API-key super-admin
+reporter with `agent-controls:runner` (or `*`) and private
+`X-Paimos-Runtime-Lease`. `POST /streams` registers a fallback or attention owner
+bound to the proved runtime/session generations and selected immutable target
+ID/version; `X-Paimos-Consumer-Lease` is a separate daemon-generated private
+32-byte base64url proof. Refresh the same registration within its 120-second
+lease. Public generation IDs and encrypted-target metadata never authenticate
+an owner. The closed `Consumer*V1` OpenAPI schemas define the full wire.
+
+`POST /streams/{streamID}/claim` carries `expected_revision` and UUID
+`request_key`, plus a fresh private `X-Paimos-Consumer-Attempt` nonce. Persist
+that nonce locally before claiming. Claims reserve the existing FIFO delivery
+or attention batch and return content-free attempt metadata only. The
+`.../attempts/{attemptID}/execute` call carries `expected_revision` and all three
+proofs. It commits `executing` before returning a transient payload once;
+retries return only attempt state. Never log or journal execution payloads.
+
+`.../complete` carries the exact revision/nonce, `outcome` (`applied` or
+`outcome_unknown`), `effective_level: simple` and a closed `fallback_reason`
+(empty for attention). Applied completion advances the existing delivery/batch
+and cursor atomically. Exact original completion retries retain their saved
+cursor after safe owner replacement. Unexecuted claims expire after 60 seconds
+and can release safely. Issued payloads with an ambiguous outcome are quarantined
+and never re-leased. Lost execute responses never authorize a vendor retry.
+
+Sticky database fences refuse legacy claims, requeues and acknowledgements even
+after stream expiry. An existing legacy lease must finish before registration;
+an expired legacy lease still requires safe handoff. The managed harness's
+existing exact worker-lease primary path remains supported. There is no second
+queue and no claim of exactly-once vendor effects. Streams cap at 256 per
+project and retained attempts at 10,000 per stream; reaching either cap refuses
+new work without deleting replay evidence. Request bodies cap at 4096 bytes.
+
+`POST /runtime-health` uses only runtime proof and monotonic sequence per
+runtime/layer (`reporter`, `primary`, `fallback`, `attention`). Typed healthy or
+unhealthy reports carry a closed reason and failure count 0–10. One unhealthy
+episode produces an existing-ledger attention item, with a one-minute publish
+throttle; recovery resolves that source. The typed health row persists even if
+no attention receiver is configured. All responses are `private, no-store`;
+wrong, missing, foreign and revoked authority share `consumer_unavailable`.

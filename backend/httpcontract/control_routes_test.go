@@ -24,6 +24,11 @@ func TestClassifyControlPathCoversEveryFrozenFamily(t *testing.T) {
 		path string
 		want ControlRouteClass
 	}{
+		{"/api/projects/17/consumers/v1/streams", ControlRouteConsumer},
+		{"/api/projects/17/consumers/v1/streams/private/claim", ControlRouteConsumer},
+		{"/api/projects/17/consumers/v1/streams/private/attempts/private/execute", ControlRouteConsumer},
+		{"/api/projects/17/consumers/v1/streams/private/attempts/private/complete", ControlRouteConsumer},
+		{"/api/projects/17/consumers/v1/runtime-health", ControlRouteConsumer},
 		{"/api/agent-mode/deliveries/PAI-809-42/control-capability-grants", ControlRouteDeliveryCapabilityGrants},
 		{"/api/agent-mode/deliveries/PAI-809-42/control-commands", ControlRouteDeliveryCommands},
 		{"/api/agent-mode/control-capability-grants/01JD8K3P0000000000000000AB", ControlRouteCapabilityGrantDetail},
