@@ -6,12 +6,12 @@ The user selected these original assets on 2026-09-06 as the baseline for every 
 
 Original directory: `/Users/markus/Library/CloudStorage/GoogleDrive-markus.barta@augmentoring.com/Meine Ablage/Augmentoring/Design/Products/paimos/`.
 
-| Original          | Repository copy                                                                     | SHA-256                                                            |
-| ----------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `paimos-hero.png` | [`frontend/public/brand/paimos-hero.png`](../frontend/public/brand/paimos-hero.png) | `f9467ce93d4d076a9dd9e555ae76047077171a401048fdca828634ff379588ba` |
-| `paimos-logo.svg` | [`frontend/public/brand/paimos-logo.svg`](../frontend/public/brand/paimos-logo.svg) | `970f026a738885b60bf9fac122b3563fe2b9fe242199845920acdc3975628396` |
+| Original          | Repository copy                                                                                   | SHA-256                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `paimos-hero.png` | [`frontend/public/assets/brand/paimos-hero.png`](../frontend/public/assets/brand/paimos-hero.png) | `f9467ce93d4d076a9dd9e555ae76047077171a401048fdca828634ff379588ba` |
+| `paimos-logo.svg` | [`frontend/public/assets/brand/paimos-logo.svg`](../frontend/public/assets/brand/paimos-logo.svg) | `970f026a738885b60bf9fac122b3563fe2b9fe242199845920acdc3975628396` |
 
-Both copies are byte-identical originals. Public `logo.svg`, `favicon.svg` and `app-icon.svg` are byte-identical aliases of the supplied mark for existing application/default-branding URLs. Explicitly configured customer branding remains supported.
+Both copies are byte-identical originals. Bundled assets use `/assets/brand/`; `/brand/` is reserved by the server for administrator-uploaded branding. Public `logo.svg`, `favicon.svg` and `app-icon.svg` are byte-identical aliases of the supplied mark for existing application/default-branding URLs. Explicitly configured customer branding remains supported.
 
 ## Palette and material
 

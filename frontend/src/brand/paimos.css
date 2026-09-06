@@ -9,7 +9,7 @@
 }
 
 /* Pearl backing preserves the original two-color mark on any application shell. */
-:root img:is([src='/logo.svg'], [src='/brand/paimos-logo.svg'], [src='/app-icon.svg']) {
+:root img:is([src='/logo.svg'], [src='/assets/brand/paimos-logo.svg'], [src='/app-icon.svg']) {
   background: var(--paimos-pearl);
   border-radius: 6px;
   filter: none;

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 import { habitatFixture } from '../src/components/habitat/__fixtures__/orchestration'
 import deliveryFixture from '../../backend/contracts/fixtures/agent-mode/snapshot-v1-1.json' with { type: 'json' }
@@ -18,6 +18,8 @@ test.beforeAll(async () => {
 async function installFixture(page: Page) {
   const state = {
     empty: false,
+    stopped: false,
+    outsideRequests: [] as string[],
     denied: false,
     offline: false,
     runtimeOffline: true,
@@ -46,7 +48,10 @@ async function installFixture(page: Page) {
   })
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url())
-    if (url.origin !== ORIGIN) return route.abort()
+    if (url.origin !== ORIGIN) {
+      state.outsideRequests.push(url.origin)
+      return route.abort()
+    }
     const path = url.pathname
     const fulfill = (json: unknown, status = 200) =>
       route.fulfill({
@@ -100,6 +105,29 @@ async function installFixture(page: Page) {
       for (const worker of snapshot.fleet.workers) {
         worker.liveness.observed_at = snapshot.fleet.observed_at
         worker.revision = state.revision
+        if (state.stopped) {
+          worker.phase = 'stopped'
+          worker.liveness.state = 'dead'
+          worker.liveness.reason = 'stopped'
+          worker.liveness.closed_reason = 'stopped'
+          worker.delivery_trust.reason = 'ticket_unbound'
+          worker.recent_communication = []
+        }
+      }
+      if (state.stopped) {
+        snapshot.instance_root.active_generation = {
+          state: 'unset',
+          reason: 'no_active_root_generation',
+          session_id: null,
+        }
+        snapshot.project_coordination[0].coordinator = {
+          state: 'unset',
+          reason: 'no_active_coordinator',
+          session_id: null,
+        }
+        snapshot.fleet.projects[0].orchestrator = {
+          ...snapshot.project_coordination[0].coordinator,
+        }
       }
       return fulfill(snapshot)
     }
@@ -237,8 +265,11 @@ async function installFixture(page: Page) {
         next_after_revision: null,
       })
     if (path.startsWith('/api/')) return fulfill([])
+    // Production reserves this prefix for administrator-uploaded branding.
+    // Bundled originals must use /assets/brand, never the upload route.
+    if (path.startsWith('/brand/')) return fulfill({ error: 'not found' }, 404)
     const relative =
-      path.startsWith('/assets/') || ['/logo.svg', '/favicon.svg', '/favicon.png'].includes(path)
+      path.startsWith('/assets/') || ['/logo.svg', '/favicon.svg', '/app-icon.svg'].includes(path)
         ? path.slice(1)
         : 'index.html'
     const types: Record<string, string> = {
@@ -270,12 +301,136 @@ async function assertFits(page: Page) {
   ).toBe(true)
 }
 
+test('the original brand assets and local fonts render intact in bright and dark setup', async ({
+  page,
+}) => {
+  const fixture = await installFixture(page)
+  fixture.empty = true
+  const fontResponses: number[] = []
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname.endsWith('.woff2')) fontResponses.push(response.status())
+  })
+  await page.goto(`${ORIGIN}/?view=home`)
+  await expect(page.locator('.habitat-welcome')).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
+  expect(await page.evaluate(() => document.fonts.check('14px "DM Sans"'))).toBe(true)
+  expect(fontResponses.length).toBeGreaterThan(0)
+  expect(fontResponses.every((status) => status === 200)).toBe(true)
+
+  const assets = []
+  for (const [path, expected] of [
+    ['/logo.svg', '970f026a738885b60bf9fac122b3563fe2b9fe242199845920acdc3975628396'],
+    ['/favicon.svg', '970f026a738885b60bf9fac122b3563fe2b9fe242199845920acdc3975628396'],
+    ['/app-icon.svg', '970f026a738885b60bf9fac122b3563fe2b9fe242199845920acdc3975628396'],
+    [
+      '/assets/brand/paimos-logo.svg',
+      '970f026a738885b60bf9fac122b3563fe2b9fe242199845920acdc3975628396',
+    ],
+    [
+      '/assets/brand/paimos-hero.png',
+      'f9467ce93d4d076a9dd9e555ae76047077171a401048fdca828634ff379588ba',
+    ],
+  ]) {
+    const asset = await page.evaluate(async (path) => {
+      const response = await fetch(path)
+      const digest = await crypto.subtle.digest('SHA-256', await response.arrayBuffer())
+      return {
+        path,
+        status: response.status,
+        sha256: [...new Uint8Array(digest)]
+          .map((byte) => byte.toString(16).padStart(2, '0'))
+          .join(''),
+      }
+    }, path)
+    expect(asset.status).toBe(200)
+    expect(asset.sha256).toBe(expected)
+    assets.push(asset)
+  }
+  const renders = []
+  for (const [width, height] of [
+    [1440, 900],
+    [320, 740],
+    [390, 844],
+  ]) {
+    await page.setViewportSize({ width, height })
+    for (const theme of ['day', 'night'] as const) {
+      if ((await page.locator('.habitat-shell').getAttribute('data-theme')) !== theme)
+        await page
+          .getByRole('button', {
+            name: theme === 'night' ? 'Switch to dark mode' : 'Switch to bright mode',
+          })
+          .click()
+      const mark = page.locator('.habitat-brand img')
+      await expect(mark).toBeVisible()
+      const render = await mark.evaluate((img: HTMLImageElement) => {
+        const style = getComputedStyle(img)
+        const box = img.getBoundingClientRect()
+        return {
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+          width: box.width,
+          height: box.height,
+          filter: style.filter,
+          opacity: style.opacity,
+          backing: style.backgroundColor,
+        }
+      })
+      expect(render.naturalWidth).toBeGreaterThan(0)
+      expect(render.naturalWidth).toBe(render.naturalHeight)
+      expect(render.filter).toBe('none')
+      expect(render.opacity).toBe('1')
+      expect(render.backing).toBe('rgb(247, 246, 242)')
+      renders.push({ viewportWidth: width, theme, ...render })
+      if (width === 1440) {
+        const hero = page.locator('.habitat-welcome-art img')
+        await expect(hero).toBeVisible()
+        expect(
+          await hero.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]),
+        ).toEqual([1672, 941])
+      }
+      const primary = page.getByRole('button', { name: 'Set up coordinator', exact: true })
+      await primary.focus()
+      await expect(primary).toBeFocused()
+      await assertFits(page)
+      await page.screenshot({ path: `${SHOTS}/setup-hero-${width}-${theme}.png`, fullPage: true })
+    }
+  }
+  await page.goto(`${ORIGIN}/?view=assign&project=1`)
+  await expect(page.getByRole('heading', { name: 'Project & canonical agent' })).toBeVisible()
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ]) {
+    await page.setViewportSize({ width, height })
+    for (const theme of ['day', 'night'] as const) {
+      if ((await page.locator('.habitat-shell').getAttribute('data-theme')) !== theme)
+        await page
+          .getByRole('button', {
+            name: theme === 'night' ? 'Switch to dark mode' : 'Switch to bright mode',
+          })
+          .click()
+      await assertFits(page)
+      await page.screenshot({ path: `${SHOTS}/setup-form-${width}-${theme}.png`, fullPage: true })
+    }
+  }
+  expect(fixture.outsideRequests).toEqual([])
+  await writeFile(
+    `${SHOTS}/brand-assets.json`,
+    JSON.stringify(
+      { assets, renders, fontResponses, outsideRequests: fixture.outsideRequests },
+      null,
+      2,
+    ),
+  )
+})
+
 test('Home is truthful and fits rich and empty workspaces in both themes at desktop and phone widths', async ({
   page,
 }) => {
   const fixture = await installFixture(page)
-  for (const scenario of ['rich', 'empty'] as const) {
+  for (const scenario of ['rich', 'empty', 'stopped'] as const) {
     fixture.empty = scenario === 'empty'
+    fixture.stopped = scenario === 'stopped'
     await page.goto(`${ORIGIN}/?view=home`)
     await expect(page.getByRole('heading', { name: 'Your projects', exact: false })).toBeVisible()
     const sample = habitatFixture('10', null, fixture.empty)
@@ -292,12 +447,18 @@ test('Home is truthful and fits rich and empty workspaces in both themes at desk
       await expect(page.locator('.habitat-roster-row')).toHaveCount(
         Math.min(4, sample.fleet.workers.length),
       )
-      await expect(page.getByRole('heading', { name: 'Needs you', exact: false })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Needs you', level: 2 })).toBeVisible()
       await expect(page.locator('.habitat-welcome')).toHaveCount(0)
+      if (fixture.stopped) {
+        await expect(page.locator('.habitat-worker-request')).toHaveCount(0)
+        await expect(page.locator('.habitat-roster-state')).toHaveText(['Stopped', 'Stopped'])
+        await expect(page.getByRole('button', { name: 'Review start', exact: true })).toBeVisible()
+      }
     }
     for (const [label, width, height] of [
       ['desktop', 1440, 900],
       ['phone', 320, 740],
+      ['phone-390', 390, 844],
     ] as const) {
       await page.setViewportSize({ width, height })
       for (const theme of ['day', 'night'] as const) {
@@ -336,6 +497,7 @@ test('Habitat selected design: bright/dark, worker tree, phone, short laptop, 20
     ['desktop', 1440, 900],
     ['short', 1280, 650],
     ['phone', 320, 740],
+    ['phone-390', 390, 844],
   ] as const) {
     await page.setViewportSize({ width, height })
     for (const theme of ['day', 'night'] as const) {
@@ -347,8 +509,10 @@ test('Habitat selected design: bright/dark, worker tree, phone, short laptop, 20
             name: theme === 'night' ? 'Switch to dark mode' : 'Switch to bright mode',
           })
           .click()
+      await assertFits(page)
+      await page.screenshot({ path: `${SHOTS}/workers-${label}-${theme}.png`, fullPage: true })
       await workerSelect.click()
-      if (width === 320) {
+      if (width <= 390) {
         await expect(page.getByRole('dialog', { name: 'Inspector' })).toHaveAttribute(
           'aria-modal',
           'true',

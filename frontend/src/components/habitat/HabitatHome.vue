@@ -163,7 +163,7 @@ function projectStatus(id: number) {
         </div>
       </div>
       <div class="habitat-welcome-art" aria-hidden="true">
-        <img src="/brand/paimos-hero.png" alt="" />
+        <img src="/assets/brand/paimos-hero.png" alt="" />
       </div>
     </section>
 
