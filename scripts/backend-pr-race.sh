@@ -9,6 +9,7 @@ RACE_GOMAXPROCS=${BACKEND_RACE_GOMAXPROCS:-2}
 RACE_PACKAGE_TIMEOUT=${BACKEND_RACE_PACKAGE_TIMEOUT:-8m}
 RACE_PACKAGE_TIMEOUT_MAX_MINUTES=15
 LANE=all
+BROAD_GROUP=all
 DRY_RUN=0
 SELECTED_SHARD=-1
 SELECTED_SHARD_COUNT=0
@@ -30,6 +31,17 @@ while [[ $# -gt 0 ]]; do
       ;;
     --lane=*)
       LANE=${1#--lane=}
+      shift
+      ;;
+    --group=*)
+      BROAD_GROUP=${1#--group=}
+      case "$BROAD_GROUP" in
+        core|runtime) ;;
+        *)
+          echo "backend-pr-race: invalid broad group: $BROAD_GROUP" >&2
+          exit 2
+          ;;
+      esac
       shift
       ;;
     --shard=*)
@@ -85,9 +97,13 @@ case "$LANE" in
     ;;
 esac
 [[ $# -gt 0 ]] || {
-  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers|managedharness] [--shard=INDEX/COUNT] <changed-package>..." >&2
+  echo "usage: $0 [--dry-run] [--lane=all|affected|db|handlers|managedharness] [--shard=INDEX/COUNT] [--group=core|runtime] <changed-package>..." >&2
   exit 2
 }
+if [[ "$BROAD_GROUP" != all && ( "$LANE" != all || $# -ne 1 || "$1" != './...' ) ]]; then
+  echo 'backend-pr-race: --group requires lane=all and exactly ./...' >&2
+  exit 2
+fi
 
 run_race() {
   local package="$1" pattern="${2:-}"
@@ -278,24 +294,28 @@ run_selected_package() {
 affected_index=0
 for import_path in "$@"; do
   if [[ "$import_path" == './...' ]]; then
+    # One membership list owns the default broad plan and both exhaustive
+    # groups. Each group stays sequential on its own CI runner.
     for affected in \
-      "$MODULE/db" \
-      "$MODULE/handlers" \
-      "$MODULE/cmd/paimos" \
-      "$MODULE/supervision" \
-      "$MODULE/agentmessage" \
-      "$MODULE/managedharness" \
-      "$MODULE/agentmode" \
-      "$MODULE/agentd" \
-      "$MODULE/localjournal" \
-      "$MODULE/ownedprocess" \
-      "$MODULE/lifecycleintents" \
-      "$MODULE/lifecycleclient" \
-      "$MODULE/runtimeconsumer" \
-      "$MODULE/runtimehealth" \
-      "$MODULE"
+      "core:$MODULE/db" \
+      "core:$MODULE/handlers" \
+      "core:$MODULE/cmd/paimos" \
+      "core:$MODULE/supervision" \
+      "core:$MODULE/agentmessage" \
+      "core:$MODULE/managedharness" \
+      "core:$MODULE/agentmode" \
+      "core:$MODULE/agentd" \
+      "core:$MODULE/localjournal" \
+      "core:$MODULE/ownedprocess" \
+      "runtime:$MODULE/lifecycleintents" \
+      "runtime:$MODULE/lifecycleclient" \
+      "runtime:$MODULE/runtimeconsumer" \
+      "runtime:$MODULE/runtimehealth" \
+      "runtime:$MODULE"
     do
-      run_selected_package "$affected"
+      if [[ "$BROAD_GROUP" == all || "$BROAD_GROUP" == "${affected%%:*}" ]]; then
+        run_selected_package "${affected#*:}"
+      fi
     done
   else
     run_selected_package "$import_path"

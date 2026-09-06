@@ -556,6 +556,60 @@ broad_managedharness_plan=$(grep '^go test -race .* ./managedharness -run ' <<<"
 assert_plan_covers_discovery_once 'broad managed-harness race' "$broad_managedharness_plan" \
   ./managedharness "$managedharness_race_match"
 
+# Exhaustive groups partition the exact default plan, including every root and
+# lifecycle shard. They only affect broad all-lane runs, never PR selection.
+core_group_plan=$("$RACE_RUNNER" --dry-run --group=core './...')
+runtime_group_plan=$("$RACE_RUNNER" --dry-run --group=runtime './...')
+[[ -n "$core_group_plan" && -n "$runtime_group_plan" ]] || fail 'a broad race group is empty'
+group_union=$(printf '%s\n' "$core_group_plan" "$runtime_group_plan" | LC_ALL=C sort)
+[[ "$group_union" == "$(LC_ALL=C sort <<<"$broad_race_plan")" ]] ||
+  fail 'broad groups omitted, duplicated, or changed a default race invocation'
+[[ -z "$(comm -12 <(LC_ALL=C sort <<<"$core_group_plan") <(LC_ALL=C sort <<<"$runtime_group_plan"))" ]] ||
+  fail 'broad core and runtime groups overlap'
+expected_runtime_group=$(printf '%s\n' "$lifecycle_all_plan" \
+  'go test -race -count=1 -timeout=8m ./lifecycleclient' \
+  'go test -race -count=1 -timeout=8m ./runtimeconsumer' \
+  'go test -race -count=1 -timeout=8m ./runtimehealth' "$root_all_plan")
+[[ "$runtime_group_plan" == "$expected_runtime_group" ]] ||
+  fail 'runtime broad group changed its bounded package ownership or ordering'
+for invalid_group in '' all unknown; do
+  if "$RACE_RUNNER" --dry-run --group="$invalid_group" './...' >/dev/null 2>&1; then
+    fail "race runner accepted invalid or empty broad group [$invalid_group]"
+  fi
+done
+for group in core runtime; do
+  if "$RACE_RUNNER" --dry-run --group="$group" github.com/inspr-at/paimos/backend >/dev/null 2>&1 ||
+    "$RACE_RUNNER" --dry-run --group="$group" --lane=affected --shard=0/4 './...' >/dev/null 2>&1; then
+    fail 'broad group filtering escaped its all-lane ./... interface'
+  fi
+done
+# The existing overlap detector needs at least seven listed tests for the
+# managed-harness group. Supply only discovery here; every fake race execution
+# still goes through the shared fixture's exclusive in-progress marker.
+group_go="$TMP_ROOT/group-sequential-go.sh"
+cat >"$group_go" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " $* " == *' test '* && " $* " == *' -list '* ]]; then
+  for index in {1..14}; do printf 'TestConcurrent%s\n' "$index"; done
+  exit 0
+fi
+exec "${SEQUENTIAL_GO_FIXTURE:?}" "$@"
+EOF
+chmod +x "$group_go"
+for group in core runtime; do
+  group_state="$TMP_ROOT/$group-sequential-race"
+  mkdir -p "$group_state"
+  expected_group_plan=$(GO_COMMAND="$group_go" "$RACE_RUNNER" --dry-run --group="$group" './...')
+  if ! FAKE_GO_STATE="$group_state" SEQUENTIAL_GO_FIXTURE="$FIXTURES/sequential-go.sh" \
+    GO_COMMAND="$group_go" "$RACE_RUNNER" --group="$group" './...' >/dev/null 2>&1; then
+    fail "$group broad race group did not execute sequentially"
+  fi
+  [[ ! -e "$group_state/overlap" &&
+    "$(wc -l < "$group_state/runs" | tr -d ' ')" -eq "$(wc -l <<<"$expected_group_plan" | tr -d ' ')" ]] ||
+    fail "$group broad race group overlapped or omitted an invocation"
+done
+
 job_block() {
   local job="$1" file="${2:-$WORKFLOW}"
   awk -v start="  ${job}:" '
@@ -669,7 +723,10 @@ done
   fail 'full backend serial/platform assurance lacks an explicit independent budget'
 [[ "$full_race" == *'needs: backend-full-authorize'* && "$full_race" == *'timeout-minutes: 90'* &&
   "$full_race" == *'BACKEND_RACE_PACKAGE_TIMEOUT: 15m'* &&
-  "$full_race" == *"backend-pr-race.sh './...'"* && "$full_race" == *'sequential'* ]] ||
+  "$full_race" == *'matrix:'* && "$full_race" == *'group: [core, runtime]'* &&
+  "$full_race" == *'fail-fast: false'* && "$full_race" != *'continue-on-error:'* &&
+  "$full_race" == *"backend-pr-race.sh --group=\"\${{ matrix.group }}\" './...'"* &&
+  "$full_race" == *'sequential'* ]] ||
   fail 'full backend broad race lacks an explicit independent budget or sequential topology'
 [[ "$full" == *'needs: [backend-full-authorize, backend-full-serial, backend-full-race]'* &&
   "$full" == *"if: $FULL_AGGREGATE_GUARD"* && "$full" == *"$FULL_AUTH_RESULT"* &&
