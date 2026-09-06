@@ -446,6 +446,7 @@ export default {
       at_risk: 'Gefährdet',
       blocked: 'Blockiert',
       unknown: 'Unbekannt',
+      stale: 'Veraltet',
     },
     activity: {
       working: 'Arbeitet',

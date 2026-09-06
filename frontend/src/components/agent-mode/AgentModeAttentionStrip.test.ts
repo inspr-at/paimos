@@ -17,6 +17,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import i18n from '@/i18n'
 
 import { mountComponent } from '@/components/ai/testMount'
 import type { Delivery } from '@/services/agentMode'
@@ -82,7 +83,24 @@ function expectHidden(root: HTMLElement, count: number) {
 describe('AgentModeAttentionStrip (PAI-807) — authoritative hidden count', () => {
   afterEach(() => {
     document.body.innerHTML = ''
+    i18n.global.locale.value = 'en'
   })
+
+  it.each([['en', 'Stale'], ['de', 'Veraltet']] as const)(
+    'renders a canonical stale health label in %s without leaking the translation key',
+    async (locale, label) => {
+      i18n.global.locale.value = locale
+      const stale = { ...withAttention(base[0]), health: 'stale' as const }
+      const mounted = await mountStrip('', [stale], {
+        total: 1,
+        items: [{ deliveryId: stale.id, level: 1, primaryReason: 'stale_no_signal', flags: ['stale_no_signal'], since: FIXTURE_BASE_TIME }],
+      })
+
+      expect(mounted.el.querySelector('.am-attention-item')?.textContent).toContain(label)
+      expect(mounted.el.textContent).not.toContain('agentMode.health.stale')
+      await mounted.unmount()
+    },
+  )
 
   it('subtracts an active attentive pinned selection already present in the bounded list', async () => {
     const authoritative = aggregate()
