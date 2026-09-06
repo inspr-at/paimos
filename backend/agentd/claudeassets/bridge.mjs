@@ -180,6 +180,7 @@ let stopping = false;
 let sessionStarted = false;
 let sessionID = "";
 let initialTurnStarted = false;
+let turnActive = false;
 let interruptReceipt = false;
 const correlations = new Map();
 
@@ -210,6 +211,7 @@ function observeReaction(message) {
   if (!state || state.reacted) return;
   state.reacted = true;
   state.resolveReaction();
+  turnActive = true;
   emit({ kind: "turn_started", correlation_id: state.correlationID });
   if (state.applied) deleteCorrelation(uuid);
 }
@@ -344,10 +346,18 @@ const handleControlLine = (line) => {
           fail("app_server_protocol", correlationID);
           return;
         }
+        if (!turnActive) {
+          fail("app_server_protocol", correlationID, "not_running");
+          return;
+        }
         const receipt = await queryHandle.interrupt();
         if (!receipt || !Array.isArray(receipt.still_queued)) {
           fatal = true;
           throw new Error("receipt");
+        }
+        if (!turnActive) {
+          fail("app_server_protocol", correlationID, "not_running");
+          return;
         }
         emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "stop") {
@@ -396,12 +406,16 @@ try {
       }
       if (!initialTurnStarted) {
         initialTurnStarted = true;
+        turnActive = true;
         emit({ kind: "turn_started" });
       }
     }
     observeReaction(message);
     observeTool(message);
-    if (message?.type === "result") emit({ kind: "turn_completed" });
+    if (message?.type === "result") {
+      turnActive = false;
+      emit({ kind: "turn_completed" });
+    }
   }
   queryEndedResolve();
   lines.close();

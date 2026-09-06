@@ -481,6 +481,8 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 
 func claudeControlError(reason string) error {
 	switch reason {
+	case "not_running":
+		return ErrSessionNotRunning
 	case "stream_input_failed":
 		return errors.New("Claude Agent SDK Query.streamInput failed")
 	case "interrupt_receipt_failed":

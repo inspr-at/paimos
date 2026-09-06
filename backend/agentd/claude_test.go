@@ -43,6 +43,7 @@ func TestClaudeProcessBindsSteerAndInterruptToOneLiveQuery(t *testing.T) {
 	}
 	logPath := t.TempDir() + "/sdk-events.log"
 	t.Setenv("PAIMOS_CLAUDE_TEST_LOG", logPath)
+	t.Setenv("PAIMOS_CLAUDE_TEST_MODE", "hold_initial_turn")
 	adapter := newTestClaudeAdapter(t, node)
 	events := make(chan AdapterEvent, 32)
 	process, err := adapter.Start(context.Background(), StartRequest{
@@ -58,6 +59,13 @@ func TestClaudeProcessBindsSteerAndInterruptToOneLiveQuery(t *testing.T) {
 	}
 	runtimeDir := claude.runtimeDir
 
+	interrupt, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "control-live-850"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if interrupt.Primitive != claudeInterruptPrimitive || interrupt.CorrelationID != "control-live-850" {
+		t.Fatalf("interrupt=%+v", interrupt)
+	}
 	steer, err := process.Steer(context.Background(), ControlRequest{
 		CorrelationID: "delivery-live-850", Text: "beta direction must not escape",
 	})
@@ -66,13 +74,6 @@ func TestClaudeProcessBindsSteerAndInterruptToOneLiveQuery(t *testing.T) {
 	}
 	if steer.Primitive != claudeSteerPrimitive || steer.CorrelationID != "delivery-live-850" || steer.VendorMessageID == "" {
 		t.Fatalf("steer=%+v", steer)
-	}
-	interrupt, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "control-live-850"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if interrupt.Primitive != claudeInterruptPrimitive || interrupt.CorrelationID != "control-live-850" {
-		t.Fatalf("interrupt=%+v", interrupt)
 	}
 
 	deadline := time.After(2 * time.Second)
@@ -119,6 +120,98 @@ func TestClaudeProcessBindsSteerAndInterruptToOneLiveQuery(t *testing.T) {
 		if strings.Contains(logText, privateText) || strings.Contains(string(evidence), privateText) {
 			t.Fatalf("content leaked into evidence log: %q", privateText)
 		}
+	}
+}
+
+func TestClaudeInterruptRejectsIdleQueryWithoutAppliedActivity(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node runtime unavailable")
+	}
+	logPath := t.TempDir() + "/sdk-events.log"
+	t.Setenv("PAIMOS_CLAUDE_TEST_LOG", logPath)
+	adapter := newTestClaudeAdapter(t, node)
+	events := make(chan AdapterEvent, 16)
+	process, err := adapter.Start(context.Background(), StartRequest{
+		Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:test", Prompt: "finish",
+	}, func(event AdapterEvent) { events <- event })
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Kind == EventTurnCompleted {
+				goto idle
+			}
+		case <-deadline:
+			t.Fatal("initial Query did not become idle")
+		}
+	}
+
+idle:
+	if _, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "idle-interrupt"}); !errors.Is(err, ErrSessionNotRunning) {
+		t.Fatalf("idle interrupt err=%v", err)
+	}
+	for len(events) > 0 {
+		event := <-events
+		if event.Kind == EventControlApplied && event.CorrelationID == "idle-interrupt" {
+			t.Fatal("idle interrupt emitted applied activity")
+		}
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "idle-stop"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := os.ReadFile(logPath); err != nil || strings.Contains(string(body), "interrupt query=owned-query") {
+		t.Fatalf("idle interrupt reached SDK: body=%q err=%v", body, err)
+	}
+}
+
+func TestClaudeInterruptRejectsTurnThatCompletesBeforeReceipt(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node runtime unavailable")
+	}
+	logPath := t.TempDir() + "/sdk-events.log"
+	t.Setenv("PAIMOS_CLAUDE_TEST_LOG", logPath)
+	t.Setenv("PAIMOS_CLAUDE_TEST_MODE", "complete_before_interrupt_receipt")
+	adapter := newTestClaudeAdapter(t, node)
+	events := make(chan AdapterEvent, 16)
+	process, err := adapter.Start(context.Background(), StartRequest{
+		Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:test", Prompt: "finish during interrupt",
+	}, func(event AdapterEvent) { events <- event })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "raced-interrupt"}); !errors.Is(err, ErrSessionNotRunning) {
+		t.Fatalf("interrupt completed after turn err=%v", err)
+	}
+	seenCompleted := false
+	for len(events) > 0 {
+		event := <-events
+		if event.Kind == EventTurnCompleted {
+			seenCompleted = true
+		}
+		if event.Kind == EventControlApplied && event.CorrelationID == "raced-interrupt" {
+			t.Fatal("interrupt completed after turn emitted applied activity")
+		}
+	}
+	if !seenCompleted {
+		t.Fatal("turn completion was not observed before interrupt rejection")
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "raced-stop"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := os.ReadFile(logPath); err != nil || !strings.Contains(string(body), "interrupt query=owned-query") {
+		t.Fatalf("active interrupt did not reach SDK before completion: body=%q err=%v", body, err)
 	}
 }
 
@@ -536,8 +629,12 @@ func TestClaudeInputDeliveryTimeoutReleasesControlChain(t *testing.T) {
 	if _, err := process.Steer(context.Background(), ControlRequest{CorrelationID: "wedge-steer", Text: "steer"}); err == nil {
 		t.Fatal("unconsumed SDK streamInput unexpectedly succeeded")
 	}
-	if _, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "after-wedge"}); err != nil {
-		t.Fatalf("control chain remained wedged after bounded input failure: %v", err)
+	interruptStarted := time.Now()
+	if _, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "after-wedge"}); !errors.Is(err, ErrSessionNotRunning) {
+		t.Fatalf("idle interrupt after bounded input failure err=%v", err)
+	}
+	if elapsed := time.Since(interruptStarted); elapsed > 250*time.Millisecond {
+		t.Fatalf("control chain remained wedged after bounded input failure: %s", elapsed)
 	}
 	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "wedge-stop"}); err != nil {
 		t.Fatal(err)
@@ -689,6 +786,7 @@ export function query({ prompt }) {
   const output = new Queue();
   const queued = [];
   let first = true;
+  let initialResultPending = false;
   (async () => {
     for await (const message of prompt) {
       if (first) {
@@ -697,7 +795,8 @@ export function query({ prompt }) {
           output.push({ type: "system", subtype: "init", session_id: "claude-owned-session", capabilities: process.env.PAIMOS_CLAUDE_TEST_MODE === "missing_interrupt_receipt" ? [] : ["interrupt_receipt_v1"] });
           output.push({ type: "stream_event", session_id: "claude-owned-session" });
           output.push({ type: "assistant", session_id: "claude-owned-session", message: { content: [{ type: "text", text: message.message.content[0].text }] } });
-		  output.push({ type: "result", session_id: "claude-owned-session" });
+		  if (["hold_initial_turn", "complete_before_interrupt_receipt"].includes(process.env.PAIMOS_CLAUDE_TEST_MODE)) initialResultPending = true;
+		  else output.push({ type: "result", session_id: "claude-owned-session" });
 		  if (process.env.PAIMOS_CLAUDE_TEST_MODE === "abort_with_pending_input") {
 			setTimeout(() => output.close(), 100);
 			await new Promise(() => {});
@@ -731,6 +830,11 @@ export function query({ prompt }) {
     async interrupt() {
       if (process.env.PAIMOS_CLAUDE_TEST_MODE === "abort_with_pending_input") throw new Error("query aborted");
       log("interrupt query=owned-query");
+      if (initialResultPending && process.env.PAIMOS_CLAUDE_TEST_MODE === "complete_before_interrupt_receipt") {
+        initialResultPending = false;
+        output.push({ type: "result", session_id: "claude-owned-session" });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+      }
       const messages = queued.splice(0);
       const still_queued = messages.map((message) => message.uuid);
       for (const message of messages) {

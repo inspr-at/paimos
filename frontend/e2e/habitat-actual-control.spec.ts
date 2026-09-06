@@ -358,6 +358,8 @@ test('actual browser controls one fresh owned child and closes every generation'
     id: string,
     kind: 'interrupt' | 'stop',
     staleReviewAvailable = true,
+    expectedState: 'applied' | 'rejected' = 'applied',
+    expectedReason = expectedState === 'applied' ? 'applied' : 'not_running',
   ): Promise<{ id: unknown; state: unknown; reason: unknown }> {
     const label = kind[0]!.toUpperCase() + kind.slice(1)
     await target.getByRole('button', { name: label, exact: true }).click()
@@ -404,7 +406,7 @@ test('actual browser controls one fresh owned child and closes every generation'
         mutation_applied: false,
         new_request_required: true,
       })
-      return controlSelected(target, id, kind, false)
+      return controlSelected(target, id, kind, false, expectedState, expectedReason)
     }
     expect(requested.status()).toBe(200)
     const created = record((await requested.json()).control)
@@ -428,7 +430,8 @@ test('actual browser controls one fresh owned child and closes every generation'
       terminal = await readJSON(checked)
       terminalResponse = checked
     }
-    expect(terminal.state).toBe('applied')
+    expect(terminal.state).toBe(expectedState)
+    expect(terminal.reason).toBe(expectedReason)
     await saveRaw(`${kind}-control-terminal-${id.slice(0, 8)}`, terminalResponse)
     return { id: created.id, state: terminal.state, reason: terminal.reason }
   }
@@ -805,7 +808,14 @@ test('actual browser controls one fresh owned child and closes every generation'
     const beforeInterrupt = await workerRow(context.request, childID)
     const busyAtInterrupt =
       !!beforeInterrupt?.liveness && record(beforeInterrupt.liveness).state === 'busy'
-    const interrupt = await controlSelected(page, childID, 'interrupt')
+    const interrupt = await controlSelected(
+      page,
+      childID,
+      'interrupt',
+      true,
+      busyAtInterrupt ? 'applied' : 'rejected',
+      busyAtInterrupt ? 'applied' : 'not_running',
+    )
     receipt.steps.push({
       step: 'interrupt',
       ...interrupt,
@@ -813,7 +823,7 @@ test('actual browser controls one fresh owned child and closes every generation'
       busy_observed_immediately_before_request: busyAtInterrupt,
       claim: busyAtInterrupt
         ? 'active-turn interruption'
-        : 'control acceptance only; no active turn observed',
+        : 'idle interruption rejected; no active turn observed',
     })
     await waitForWorkerState(context.request, childID, 'idle')
 
