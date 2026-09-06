@@ -69,17 +69,35 @@ test('backend + DB: dev-login, seeded projects, issues list endpoint', async ({ 
   expect(issues.ok(), `issues list failed: ${issues.status()}`).toBeTruthy()
 })
 
-test('frontend serves Paimos 6 at root with an exact 5.x dashboard escape', async ({ page, context }) => {
+test('frontend serves Habitat Home at root with an exact classic dashboard escape', async ({
+  page,
+  context,
+}) => {
   await devLogin(context.request)
   await page.goto('/')
   await expect(page).toHaveTitle(/PAIMOS/i)
   // authenticated session → the login form must not be shown
   await expect(page.locator('input[type="password"]')).toHaveCount(0)
-  await expect(page.locator('[data-shell="v6"]')).toBeVisible()
-  await expect(page.getByText('6.0', { exact: true })).toBeVisible()
-  await expect(page.locator('.p6-back')).toHaveAttribute('href', '/legacy')
+  const shell = page.locator('[data-shell="v6"]')
+  await expect(shell).toBeVisible()
+  await expect(shell.getByRole('main')).toBeVisible()
+  const navigation = shell.getByRole('navigation', { name: 'Control room', exact: true })
+  await expect(navigation).toBeVisible()
+  for (const name of ['Home', 'Workers', 'Projects', 'Needs you']) {
+    await expect(navigation.getByRole('link', { name, exact: true })).toBeVisible()
+  }
+  await expect(navigation.getByRole('link', { name: 'Home', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+  await expect(shell.getByRole('link', { name: 'Start work', exact: true })).toBeVisible()
+  await expect(shell.getByRole('button', { name: 'Voice', exact: true })).toBeVisible()
+  await expect(shell.getByRole('button', { name: 'Log out', exact: true })).toBeVisible()
+  const classicWorkspace = shell.getByRole('link', { name: 'Classic workspace', exact: true })
+  await expect(classicWorkspace).toHaveAttribute('href', '/legacy')
 
-  await page.goto('/legacy')
+  await classicWorkspace.click()
+  await expect(page).toHaveURL((url) => url.pathname === '/legacy')
   await expect(page.locator('.app-shell')).toBeVisible()
   await expect(page.locator('[data-shell="v6"]')).toHaveCount(0)
   await expect(page.getByText('Dashboard', { exact: true }).first()).toBeVisible()
