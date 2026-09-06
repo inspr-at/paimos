@@ -122,6 +122,158 @@
       }
     },
     "schemas": {
+  "LifecycleSessionProjectionV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "generation": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "workspace_handle": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "required": [
+      "session_id",
+      "generation"
+    ]
+  },
+  "RuntimeLayerHealthV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "layer": {
+        "type": "string",
+        "enum": [
+          "reporter",
+          "primary",
+          "fallback",
+          "attention"
+        ]
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "healthy",
+          "unhealthy",
+          "unknown"
+        ]
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "fresh",
+          "stale",
+          "offline",
+          "unknown"
+        ]
+      },
+      "reason": {
+        "type": "string",
+        "enum": [
+          "recovered",
+          "consumer_crash_loop",
+          "consumer_authority_unavailable",
+          "consumer_transport_failed",
+          "not_reported"
+        ]
+      },
+      "failure_count": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10
+      },
+      "updated_at": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "required": [
+      "layer",
+      "state",
+      "status",
+      "reason",
+      "failure_count"
+    ]
+  },
+  "RuntimeHealthStatusV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "runtime_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "runtime_generation": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "machine_id": {
+        "type": "string",
+        "maxLength": 128
+      },
+      "expires_at": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "fresh",
+          "offline"
+        ]
+      },
+      "layers": {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "items": {
+          "$ref": "#/components/schemas/RuntimeLayerHealthV1"
+        }
+      }
+    },
+    "required": [
+      "runtime_id",
+      "runtime_generation",
+      "machine_id",
+      "expires_at",
+      "status",
+      "layers"
+    ]
+  },
+  "RuntimeHealthPageV1": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "type": "integer",
+        "const": 1
+      },
+      "observed_at": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "runtimes": {
+        "type": "array",
+        "maxItems": 32,
+        "items": {
+          "$ref": "#/components/schemas/RuntimeHealthStatusV1"
+        }
+      }
+    },
+    "required": [
+      "schema_version",
+      "observed_at",
+      "runtimes"
+    ]
+  },
+
   "ConsumerRegistrationV1": {
     "type": "object",
     "additionalProperties": false,
@@ -3627,11 +3779,30 @@
         "required": ["id","version"]
       },
       "LifecycleWorkspaceV1": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {"handle":{"type":"string","format":"uuid"},"identity":{"type":"string","pattern":"^[0-9a-f]{64}$"}},
-        "required": ["handle","identity"]
-      },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "handle": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 48,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._-]{0,47}$",
+      "description": "Optional explicit operator-configured nonsecret display label. Trimmed; never a path or derived from a path."
+    }
+  },
+  "required": [
+    "handle",
+    "identity"
+  ]
+},
       "LifecycleRuntimeRegistrationV1": {
         "type": "object",
         "additionalProperties": false,
@@ -3639,11 +3810,74 @@
         "required": ["generation","host","account_label","workspaces","profiles"]
       },
       "LifecycleRuntimeV1": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {"id":{"type":"string","format":"uuid"},"project_id":{"type":"integer","minimum":1},"generation":{"type":"string","format":"uuid"},"machine_id":{"type":"string"},"account_label":{"type":"string","enum":["chatgpt","api_key","claude_ai_max","claude_ai_pro","claude_ai_team","claude_ai_enterprise","console"]},"workspaces":{"type":"array","maxItems":16,"items":{"$ref":"#/components/schemas/LifecycleWorkspaceV1"}},"profiles":{"type":"array","maxItems":16,"items":{"$ref":"#/components/schemas/LifecycleProfileV1"}},"expires_at":{"type":"string","format":"date-time"},"sessions":{"type":"array","maxItems":128,"items":{"$ref":"#/components/schemas/LifecycleSessionRegistrationV1"}}},
-        "required": ["id","project_id","generation","machine_id","account_label","workspaces","profiles","expires_at","sessions"]
-      },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "project_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "generation": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "machine_id": {
+      "type": "string"
+    },
+    "account_label": {
+      "type": "string",
+      "enum": [
+        "chatgpt",
+        "api_key",
+        "claude_ai_max",
+        "claude_ai_pro",
+        "claude_ai_team",
+        "claude_ai_enterprise",
+        "console"
+      ]
+    },
+    "workspaces": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/components/schemas/LifecycleWorkspaceV1"
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/components/schemas/LifecycleProfileV1"
+      }
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sessions": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/components/schemas/LifecycleSessionProjectionV1"
+      }
+    }
+  },
+  "required": [
+    "id",
+    "project_id",
+    "generation",
+    "machine_id",
+    "account_label",
+    "workspaces",
+    "profiles",
+    "expires_at",
+    "sessions"
+  ]
+},
       "LifecycleRequestV1": {
         "type": "object",
         "additionalProperties": false,
@@ -3877,6 +4111,183 @@
     }
   ],
   "paths": {
+  "/api/projects/{id}/lifecycle/v1/runtime-health": {
+    "get": {
+      "tags": [
+        "lifecycle"
+      ],
+      "summary": "Read bounded runtime layer health",
+      "description": "Current nonimpersonated browser session with canonical Agent Mode project view access, including normal internal viewers. Reporter owner is reauthorized transactionally before any record enters the response. Latest runtime generation per machine, at most 32 visible records; no totals, offsets or unauthorized counts. Four closed layers per runtime. Missing evidence is unknown/not_reported; reports older than 60 seconds are stale; expired runtimes and their layers are offline. State and reason retain the last observed report and are not current healthy evidence unless status is fresh. No private proofs, credentials, paths, prompts or target references.",
+      "security": [
+        {
+          "sessionCookie": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Authorized result",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeHealthPageV1"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Bounded failure (no payload echo)",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleProblemV1"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Bounded failure (no payload echo)",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "Generic lifecycle_unavailable after service authorization; standard CSRF/auth gates may return their existing bounded error.",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleProblemV1"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Bounded failure (no payload echo)",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleProblemV1"
+              }
+            }
+          }
+        },
+        "503": {
+          "description": "Bounded failure (no payload echo)",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string"
+              },
+              "description": "private, no-store"
+            },
+            "X-Permissions-Epoch": {
+              "$ref": "#/components/headers/PermissionsEpoch"
+            },
+            "X-Session-Expires-At": {
+              "$ref": "#/components/headers/SessionExpiresAt"
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleProblemV1"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+
   "/api/projects/{id}/consumers/v1/streams": {
     "post": {
       "tags": [

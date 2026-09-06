@@ -19,6 +19,7 @@ import (
 func RegisterLifecycleIntentRoutes(r chi.Router) {
 	r.Route("/projects/{id}/lifecycle/v1", func(r chi.Router) {
 		r.Get("/runtimes", lifecycleRuntimes)
+		r.Get("/runtime-health", lifecycleRuntimeHealth)
 		r.Post("/runtimes", lifecycleRegisterRuntime)
 		r.Post("/runtimes/{runtimeID}/sessions", lifecycleRegisterSession)
 		r.Post("/runtimes/{runtimeID}/claim", lifecycleClaim)
@@ -122,6 +123,14 @@ func lifecycleRuntimes(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := lifecycleintents.NewService(db.DB).Runtimes(r.Context(), p, project)
 	lifecycleReply(w, map[string]any{"schema_version": 1, "runtimes": out}, err)
+}
+func lifecycleRuntimeHealth(w http.ResponseWriter, r *http.Request) {
+	p, project, ok := lifecycleContext(w, r)
+	if !ok {
+		return
+	}
+	out, err := lifecycleintents.NewService(db.DB).RuntimeHealth(r.Context(), p, project)
+	lifecycleReply(w, out, err)
 }
 func lifecycleRegisterRuntime(w http.ResponseWriter, r *http.Request) {
 	p, project, ok := lifecycleContext(w, r)

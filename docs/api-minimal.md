@@ -1032,6 +1032,25 @@ credential and the original browser session. Logging out or revoking either
 principal closes outstanding authority. Status/history/cancel require the
 creating user to remain an authorized browser super-admin.
 
+Workspace advertisements may include an explicit operator-configured `label`
+(1–48 trimmed ASCII letters/digits/spaces/dot/underscore/hyphen, with a leading
+letter or digit). Secret-like values and paths are refused. The server adds
+`workspace_handle` to a discovered session only when its current managed
+workspace identity matches exactly one advertised identity. An absent handle
+means unknown; clients must never infer one from a path or fingerprint.
+Session registration still accepts only `session_id` and `generation`.
+
+`GET /runtime-health` is a separate content-free browser read for current
+internal project viewers, using the canonical Agent Mode permission predicate.
+It reauthorizes the exact browser session and every reporter owner, returns the
+latest runtime per machine with a maximum of 32 records, and exposes no totals.
+Each record has four typed layers (`reporter`, `primary`, `fallback`, `attention`).
+Missing reports have `state/status: unknown` and `reason: not_reported`; evidence
+older than 60 seconds has `status: stale`; expired runtimes and their layers have
+`status: offline`. Reported state/reason/count/time are retained as last observed
+evidence and never imply current health when status is stale/offline. Revoked
+reporters are omitted. The `RuntimeHealthPageV1` schema freezes the bounded wire.
+
 States are `requested`, `claimed`, `executing`, `completed`, `failed`, `expired`
 and `cancelled`, with immutable audit events and terminal outcomes. Request keys
 are UUIDs; exact retries return the original record and conflicting reuse fails.

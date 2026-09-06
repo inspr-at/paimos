@@ -68,7 +68,7 @@ func validateRegistration(in Registration) error {
 	}
 	seen := map[string]bool{}
 	for _, w := range in.Workspaces {
-		if !validID(w.Handle) || !identity.MatchString(w.Identity) || seen[w.Handle] || seen[w.Identity] {
+		if !validID(w.Handle) || !identity.MatchString(w.Identity) || !validWorkspaceLabel(w.Label) || seen[w.Handle] || seen[w.Identity] {
 			return ErrInvalid
 		}
 		seen[w.Handle] = true
@@ -146,7 +146,23 @@ func (s *Service) RegisterRuntime(ctx context.Context, p auth.Principal, project
 	return out, nil
 }
 func runtimeProjection(id string, project int64, in Registration, deadline string) Runtime {
-	return Runtime{ID: id, ProjectID: project, Generation: in.Generation, MachineID: in.Host, AccountLabel: in.AccountLabel, Workspaces: in.Workspaces, Profiles: in.Profiles, ExpiresAt: deadline, Sessions: []SessionRegistration{}}
+	return Runtime{ID: id, ProjectID: project, Generation: in.Generation, MachineID: in.Host, AccountLabel: in.AccountLabel, Workspaces: in.Workspaces, Profiles: in.Profiles, ExpiresAt: deadline, Sessions: []SessionProjection{}}
+}
+func workspaceHandleForIdentity(workspaces []Workspace, identity string) string {
+	if identity == "" {
+		return ""
+	}
+	result, matches := "", 0
+	for _, workspace := range workspaces {
+		if workspace.Identity == identity {
+			result = workspace.Handle
+			matches++
+		}
+	}
+	if matches != 1 {
+		return ""
+	}
+	return result
 }
 func (s *Service) runtime(ctx context.Context, tx *sql.Tx, project int64, id string, p *auth.Principal, lease string, live bool) (Runtime, error) {
 	var body, deadline string
@@ -172,16 +188,18 @@ func (s *Service) runtime(ctx context.Context, tx *sql.Tx, project int64, id str
 		return Runtime{}, ErrUnavailable
 	}
 	out := runtimeProjection(id, project, in, deadline)
-	rows, err := tx.QueryContext(ctx, `SELECT session_id,generation FROM lifecycle_runtime_sessions WHERE runtime_id=? ORDER BY session_id LIMIT 128`, id)
+	rows, err := tx.QueryContext(ctx, `SELECT own.session_id,own.generation,s.workspace_identity FROM lifecycle_runtime_sessions own JOIN harness_sessions s ON s.id=own.session_id WHERE own.runtime_id=? AND s.project_id=? AND s.management_mode='managed' AND s.host=? AND s.account_label=? ORDER BY own.session_id LIMIT 128`, id, project, out.MachineID, out.AccountLabel)
 	if err != nil {
 		return Runtime{}, ErrStorage
 	}
 	for rows.Next() {
-		var session SessionRegistration
-		if rows.Scan(&session.SessionID, &session.Generation) != nil {
+		var session SessionProjection
+		var workspaceIdentity string
+		if rows.Scan(&session.SessionID, &session.Generation, &workspaceIdentity) != nil {
 			rows.Close()
 			return Runtime{}, ErrStorage
 		}
+		session.WorkspaceHandle = workspaceHandleForIdentity(out.Workspaces, workspaceIdentity)
 		out.Sessions = append(out.Sessions, session)
 	}
 	err = rows.Err()

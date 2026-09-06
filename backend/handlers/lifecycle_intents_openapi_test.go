@@ -16,7 +16,7 @@ func TestLifecycleOpenAPIClosedContract(t *testing.T) {
 		t.Fatal("invalid OpenAPI")
 	}
 	schemas := d["components"].(map[string]any)["schemas"].(map[string]any)
-	for _, name := range []string{"LifecycleRequestV1", "LifecycleIntentV1", "LifecycleRuntimeV1", "LifecycleTransitionV1", "LifecycleEventV1", "LifecycleRuntimeRegistrationV1", "LifecycleSessionRegistrationV1"} {
+	for _, name := range []string{"LifecycleRequestV1", "LifecycleIntentV1", "LifecycleRuntimeV1", "LifecycleTransitionV1", "LifecycleEventV1", "LifecycleRuntimeRegistrationV1", "LifecycleSessionRegistrationV1", "LifecycleSessionProjectionV1", "RuntimeHealthPageV1", "RuntimeHealthStatusV1", "RuntimeLayerHealthV1"} {
 		schema, ok := schemas[name].(map[string]any)
 		if !ok || schema["additionalProperties"] != false {
 			t.Fatalf("schema %s not closed", name)
@@ -27,7 +27,7 @@ func TestLifecycleOpenAPIClosedContract(t *testing.T) {
 		t.Fatal("missing operation-specific field restrictions")
 	}
 	paths := d["paths"].(map[string]any)
-	for _, suffix := range []string{"/runtimes", "/runtimes/{runtimeID}/sessions", "/runtimes/{runtimeID}/claim", "/intents", "/intents/{intentID}", "/intents/{intentID}/events", "/intents/{intentID}/cancel", "/intents/{intentID}/transition"} {
+	for _, suffix := range []string{"/runtime-health", "/runtimes", "/runtimes/{runtimeID}/sessions", "/runtimes/{runtimeID}/claim", "/intents", "/intents/{intentID}", "/intents/{intentID}/events", "/intents/{intentID}/cancel", "/intents/{intentID}/transition"} {
 		path, ok := paths["/api/projects/{id}/lifecycle/v1"+suffix].(map[string]any)
 		if !ok {
 			t.Fatalf("missing route %s", suffix)

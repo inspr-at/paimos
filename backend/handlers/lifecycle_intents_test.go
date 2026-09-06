@@ -74,6 +74,12 @@ func TestLifecycleHTTPClosedBodiesAndCredentialSeparation(t *testing.T) {
 	if !strings.Contains(response.Header().Get("Cache-Control"), "no-store") {
 		t.Fatal("response cacheable")
 	}
+	if health := call(human, "GET", "runtime-health", ""); health.Code != 200 || !strings.Contains(health.Body.String(), `"status":"unknown"`) || !strings.Contains(health.Header().Get("Cache-Control"), "no-store") {
+		t.Fatal("runtime health route omitted unknown evidence or cache policy")
+	}
+	if health := call(reporter, "GET", "runtime-health", ""); health.Code != 403 {
+		t.Fatal("reporter accessed browser health")
+	}
 	var in lifecycleintents.Intent
 	if json.Unmarshal(response.Body.Bytes(), &in) != nil {
 		t.Fatal("invalid response")

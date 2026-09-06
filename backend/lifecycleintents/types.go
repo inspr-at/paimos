@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/dispatchprofile"
+	"github.com/inspr-at/paimos/backend/safetext"
 )
 
 const RuntimeLeaseHeader = "X-Paimos-Runtime-Lease"
@@ -25,11 +26,13 @@ var (
 	ErrStorage     = errors.New("lifecycle_storage_unavailable")
 	stable         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	identity       = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	workspaceLabel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,47}$`)
 )
 
 type Workspace struct {
 	Handle   string `json:"handle"`
 	Identity string `json:"identity"`
+	Label    string `json:"label,omitempty"`
 }
 type Profile struct {
 	ID      string `json:"id"`
@@ -43,15 +46,15 @@ type Registration struct {
 	Profiles     []Profile   `json:"profiles"`
 }
 type Runtime struct {
-	ID           string                `json:"id"`
-	ProjectID    int64                 `json:"project_id"`
-	Generation   string                `json:"generation"`
-	MachineID    string                `json:"machine_id"`
-	AccountLabel string                `json:"account_label"`
-	Workspaces   []Workspace           `json:"workspaces"`
-	Profiles     []Profile             `json:"profiles"`
-	ExpiresAt    string                `json:"expires_at"`
-	Sessions     []SessionRegistration `json:"sessions"`
+	ID           string              `json:"id"`
+	ProjectID    int64               `json:"project_id"`
+	Generation   string              `json:"generation"`
+	MachineID    string              `json:"machine_id"`
+	AccountLabel string              `json:"account_label"`
+	Workspaces   []Workspace         `json:"workspaces"`
+	Profiles     []Profile           `json:"profiles"`
+	ExpiresAt    string              `json:"expires_at"`
+	Sessions     []SessionProjection `json:"sessions"`
 }
 type Request struct {
 	RequestKey             string  `json:"request_key"`
@@ -97,6 +100,19 @@ type SessionRegistration struct {
 	SessionID  string `json:"session_id"`
 	Generation string `json:"generation"`
 }
+
+// WorkspaceHandle is derived from current server-held provenance. It is never
+// accepted as evidence in a daemon's session-registration request.
+type SessionProjection struct {
+	SessionID       string `json:"session_id"`
+	Generation      string `json:"generation"`
+	WorkspaceHandle string `json:"workspace_handle,omitempty"`
+}
+
+func validWorkspaceLabel(v string) bool {
+	return v == "" || (v == strings.TrimSpace(v) && workspaceLabel.MatchString(v) && !safetext.ContainsSecretLike(v))
+}
+
 type Transition struct {
 	RuntimeID         string `json:"runtime_id"`
 	RuntimeGeneration string `json:"runtime_generation"`
