@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentd"
 	"github.com/inspr-at/paimos/backend/agentmessage"
+	"github.com/inspr-at/paimos/backend/models"
 )
 
 type nativeFixtureProcess struct {
@@ -71,7 +72,7 @@ func TestNativeConsumersUsePrivateWorkerLeaseAndExactCanonicalFIFO(t *testing.T)
 	if err := controller.CheckpointReporter(context.Background(), session.ID, agentd.ControlRequest{Instance: "fixture", ProjectID: 42, Identity: "codex:worker"}, agentd.ReporterState{PublicSessionID: public, Capabilities: []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus, agentd.CapabilitySteer, agentd.CapabilityStop}}); err != nil {
 		t.Fatal(err)
 	}
-	remote := harnessSessionResponse{ID: public, ProjectID: 42, AgentName: "worker", Harness: "codex", Host: "fixture-host", ManagementMode: "managed", MessageTargetID: target, Phase: "working"}
+	remote := models.HarnessSession{ID: public, ProjectID: 42, AgentName: "worker", Harness: "codex", Host: "fixture-host", ManagementMode: "managed", MessageTargetID: target, Phase: "working"}
 	remote.Capabilities.Inbox = true
 	remote.Capabilities.Steer = true
 	pending := []agentmessage.Envelope{}

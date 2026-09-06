@@ -101,7 +101,7 @@ type harnessSessionResponse struct {
 	Capabilities    struct {
 		Inbox bool `json:"inbox"`
 		Steer bool `json:"steer"`
-	} `json:"capabilities"`
+	} `json:"advertised_capabilities"`
 	ID              string                      `json:"id"`
 	ProjectID       int64                       `json:"project_id"`
 	AgentName       string                      `json:"agent_name"`

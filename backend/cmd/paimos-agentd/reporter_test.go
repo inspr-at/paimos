@@ -20,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/agentd"
 	"github.com/inspr-at/paimos/backend/dispatchprofile"
+	"github.com/inspr-at/paimos/backend/models"
 )
 
 const (
@@ -1001,7 +1002,7 @@ func TestNativeReporterAdvertisesOnlyOwnedInboxWithMatchingAuthority(t *testing.
 		t.Run(fmt.Sprintf("supported_%t", supported), func(t *testing.T) {
 			controller := &nativeRecordingController{supported: supported}
 			session := agentd.Session{ID: localReporterSession, Identity: "codex:worker", ProjectID: 6, Adapter: "codex", Role: "worker", Managed: true, State: agentd.StateRunning, Capabilities: []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus, agentd.CapabilitySteer, agentd.CapabilityStop}}
-			response := harnessSessionResponse{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: "codex", Host: "fixture-host", ManagementMode: "managed", MessageTargetID: reporterControlID, Role: "worker", Phase: "working"}
+			response := models.HarnessSession{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: "codex", Host: "fixture-host", ManagementMode: "managed", MessageTargetID: reporterControlID, Role: "worker", Phase: "working"}
 			response.Capabilities.Inbox = supported
 			response.Capabilities.Steer = supported
 			registered := false
@@ -1018,7 +1019,7 @@ func TestNativeReporterAdvertisesOnlyOwnedInboxWithMatchingAuthority(t *testing.
 				case "heartbeat":
 					return json.Marshal(response)
 				case "yield":
-					return json.Marshal(harnessYieldResponse{Session: response})
+					return json.Marshal(map[string]any{"session": response})
 				}
 				return nil, errors.New("unexpected fixture command")
 			}, newMemoryReporterLeaseStore())
@@ -1033,5 +1034,77 @@ func TestNativeReporterAdvertisesOnlyOwnedInboxWithMatchingAuthority(t *testing.
 				t.Fatal("native registration failed")
 			}
 		})
+	}
+}
+
+func TestNativeReporterAcceptsProductionRegistrationWire(t *testing.T) {
+	for _, harness := range []string{"codex", "claude"} {
+		for _, tc := range []struct {
+			name   string
+			change func(*models.HarnessSession)
+		}{
+			{name: "owned_inbox_and_steer"},
+			{name: "missing_inbox", change: func(s *models.HarnessSession) { s.Capabilities.Inbox = false }},
+			{name: "missing_steer", change: func(s *models.HarnessSession) { s.Capabilities.Steer = false }},
+			{name: "wrong_host", change: func(s *models.HarnessSession) { s.Host = "other-host" }},
+			{name: "missing_target", change: func(s *models.HarnessSession) { s.MessageTargetID = "" }},
+		} {
+			t.Run(harness+"/"+tc.name, func(t *testing.T) {
+				controller := &nativeRecordingController{supported: true}
+				session := agentd.Session{ID: localReporterSession, Identity: harness + ":worker", ProjectID: 6, Adapter: harness,
+					Role: "worker", Managed: true, State: agentd.StateRunning,
+					Capabilities: []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus, agentd.CapabilitySteer, agentd.CapabilityStop}}
+				// Serialize the server's production response type, independently of
+				// the reporter decoder, so a mistaken JSON tag cannot validate itself.
+				response := models.HarnessSession{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: harness,
+					Host: "fixture-host", ManagementMode: "managed", MessageTargetID: reporterControlID, Role: "worker", Phase: "working",
+					Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Stop: true}}
+				if tc.change != nil {
+					tc.change(&response)
+				}
+				var commands []string
+				r, err := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil,
+					func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+						commands = append(commands, args[2])
+						switch args[2] {
+						case "register", "heartbeat":
+							return json.Marshal(response)
+						case "yield":
+							return json.Marshal(map[string]any{"session": response})
+						default:
+							return nil, errors.New("unexpected fixture command")
+						}
+					}, newMemoryReporterLeaseStore())
+				if err != nil {
+					t.Fatal(err)
+				}
+				r.nativeDelivery = true
+				if err := r.BindController(controller); err != nil {
+					t.Fatal(err)
+				}
+				err = r.ReportStatus(context.Background(), agentd.Status{Instance: "fixture", Sessions: []agentd.Session{session}})
+				accepted := tc.change == nil
+				if (err == nil) != accepted {
+					t.Fatalf("registration accepted=%t want=%t: %v", err == nil, accepted, err)
+				}
+				checkpointed := false
+				for _, checkpoint := range controller.checkpoints {
+					if checkpoint.PublicSessionID == publicReporterSession {
+						checkpointed = true
+					}
+				}
+				_, mapped := r.sessions[session.ID]
+				if checkpointed != accepted || mapped != accepted {
+					t.Fatalf("public mapping checkpointed=%t mapped=%t want=%t", checkpointed, mapped, accepted)
+				}
+				wantCommands := []string{"register"}
+				if accepted {
+					wantCommands = append(wantCommands, "heartbeat", "yield")
+				}
+				if !slices.Equal(commands, wantCommands) {
+					t.Fatalf("reporter commands=%v want=%v", commands, wantCommands)
+				}
+			})
+		}
 	}
 }
