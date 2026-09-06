@@ -5,13 +5,19 @@ owned local controls. The Paimos ledger is the source of truth; local delivery
 workers and `paimos-agentd` apply a message to a receiver only after leasing
 that durable work.
 
-The base owned-session commands first appeared in 5.21.0. The complete surface
-documented here—including scoped controls, generation worker leases, durable
-reporting, control-outcome reads, and the M168 database guards—requires the
-upcoming calendar release 26.09.01 or later. Do not use this guide as written
-with 5.21.0 or 26.08.31. It uses only public command names and placeholder
-identities. Keep actual target references, socket paths, credentials, and
-message content out of documentation and logs.
+The base owned-session commands first appeared in 5.21.0. Historical scoped
+controls, generation worker leases, durable reporting, control-outcome reads,
+and the M168 database guards require 26.09.01 or later; they are not available
+as documented here in 5.21.0 or 26.08.31.
+
+The new guided start, runtime-management, and Habitat lifecycle workflows in
+this development guide are unreleased PAI-917 work. They require matching
+candidate builds of the Paimos server, CLI, and daemon. The installed 26.09.05
+release does not include these workflows.
+
+This guide uses only public command names and placeholder identities. Keep
+actual target references, socket paths, credentials, and message content out of
+documentation and logs.
 
 ## Local runtime setup, doctor, repair and reset
 
