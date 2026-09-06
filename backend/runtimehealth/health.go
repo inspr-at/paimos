@@ -102,13 +102,25 @@ func (r *Runtime) Doctor(ctx context.Context) Report {
 		}
 	}
 	out.Layers = append(out.Layers, reporter, generations, workspace)
-	extensions := []Layer{layer("consumers", Unknown, "consumer_supervision_unavailable", "PAI-923 must provide authenticated generation-scoped consumer evidence"), layer("browser_intents", Unknown, "browser_intents_unavailable", "PAI-924 must provide authenticated intent readiness")}
+	extensions := []Layer{layer("consumers", Unknown, "consumer_supervision_unavailable", "configure the authenticated owned receiver consumers"), layer("browser_intents", Unknown, "browser_intents_unavailable", "configure the reviewed lifecycle project/account/profile/workspace mapping")}
 	if trusted && r.Extensions != nil {
 		for _, l := range r.Extensions(ctx, status) {
+			found := false
 			for i := range extensions {
 				if l.Name == extensions[i].Name {
 					extensions[i] = l
+					found = true
 				}
+			}
+			if !found && l.Name == "primary_inbox" {
+				extensions = append(extensions, l)
+			}
+		}
+	}
+	if trusted && !status.Closed && remote.Auth.State == Known && remote.Identity.State == Known && remote.Targets.Code == "target_registration_observed_ownership_unverified" && attestedTargets(status, remote.ProjectID, r.Now()) {
+		for i := range out.Layers {
+			if out.Layers[i].Name == "targets" {
+				out.Layers[i] = layer("targets", Known, "owned_target_consumers_verified", "")
 			}
 		}
 	}

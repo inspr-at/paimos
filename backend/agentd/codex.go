@@ -159,7 +159,9 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 		return nil, errors.New("Codex app-server returned an invalid active turn")
 	}
 	process.setTurn(turnResponse.Turn.ID)
-	process.observeEvent(AdapterEvent{Kind: EventTurnStarted})
+	if _, _, e := process.target(); e == nil {
+		process.observeEvent(AdapterEvent{Kind: EventTurnStarted})
+	}
 	return process, nil
 }
 
@@ -542,7 +544,9 @@ func (p *codexProcess) Inbox(ctx context.Context, request ControlRequest) (Contr
 		return ControlEffect{}, ErrCapabilityMissing
 	}
 	p.setTurn(response.Turn.ID)
-	p.observeEvent(AdapterEvent{Kind: EventTurnStarted, CorrelationID: request.CorrelationID})
+	if _, _, e := p.target(); e == nil {
+		p.observeEvent(AdapterEvent{Kind: EventTurnStarted, CorrelationID: request.CorrelationID})
+	}
 	return ControlEffect{Primitive: "codex app-server turn/start", CorrelationID: request.CorrelationID, VendorMessageID: response.Turn.ID}, nil
 }
 

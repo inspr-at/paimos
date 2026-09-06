@@ -248,7 +248,7 @@ func (c *nativeConsumers) Prepare(_ context.Context, b runtimeconsumer.Binding, 
 	if !c.controller.SupportsInbox(session.ID) || session.Adapter != "codex" && session.Adapter != "claude" {
 		return runtimeconsumer.ErrUnsupported
 	}
-	if session.Adapter == "codex" && (m.DeliveryWork.RequestedLevel == "simple" || m.DeliveryWork.MaximumLevel == "simple" || !session.Steerable) && !c.controller.InboxReady(session.ID) {
+	if (m.DeliveryWork.RequestedLevel == "simple" || m.DeliveryWork.MaximumLevel == "simple" || !session.Steerable) && !c.controller.InboxReady(session.ID) {
 		return runtimeconsumer.ErrDeferred
 	}
 	body := nativeMessageText(m)
@@ -275,13 +275,13 @@ func (c *nativeConsumers) Execute(ctx context.Context, b runtimeconsumer.Binding
 	request := agentd.ControlRequest{Instance: b.Instance, ProjectID: b.Project, Identity: b.Address, CorrelationID: w.ID, Text: nativeMessageText(message)}
 	outcome := runtimeconsumer.Outcome{Level: "simple"}
 	var receipt agentd.Receipt
-	if message.DeliveryWork.RequestedLevel == "steer" && message.DeliveryWork.MaximumLevel == "steer" && session.Steerable && !(session.Adapter == "codex" && session.LastEventKind == agentd.EventTurnCompleted && c.controller.InboxReady(session.ID)) {
+	if message.DeliveryWork.RequestedLevel == "steer" && message.DeliveryWork.MaximumLevel == "steer" && session.Steerable && !c.controller.InboxReady(session.ID) {
 		receipt, err = c.controller.Steer(ctx, b.Session, request)
 		outcome.Level = "steer"
 	} else {
 		if message.DeliveryWork.RequestedLevel == "steer" {
 			outcome.Reason = "not_steerable"
-			if session.Adapter == "codex" && c.controller.InboxReady(session.ID) {
+			if c.controller.InboxReady(session.ID) {
 				outcome.Reason = "idle"
 			}
 			if message.DeliveryWork.MaximumLevel == "simple" {
@@ -314,12 +314,24 @@ var _ runtimeconsumer.Driver = (*nativeConsumers)(nil)
 var _ agentd.RuntimeConsumers = (*nativeConsumers)(nil)
 
 func (c *nativeConsumers) Repair(ctx context.Context) error {
-	c.reconcileMu.Lock()
+	return c.RepairProject(ctx, 0)
+}
+func (c *nativeConsumers) RepairProject(ctx context.Context, project int64) error {
+	for !c.reconcileMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 	defer c.reconcileMu.Unlock()
 	if len(c.bindings) == 0 {
 		return runtimeconsumer.ErrAuthority
 	}
 	for key, session := range c.bindings {
+		if project > 0 && session.ProjectID != project {
+			continue
+		}
 		status := c.controller.Status()
 		b := runtimeconsumer.Binding{Instance: status.Instance, Machine: c.reporter.host, Generation: status.DaemonID, Session: session.ID, Address: session.Identity, Project: session.ProjectID, Kind: "primary", Revision: session.Reporter.PublicSessionID}
 		if b.Key() != key {

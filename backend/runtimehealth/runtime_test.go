@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/agentd"
+	"github.com/inspr-at/paimos/backend/runtimeconsumer"
 )
 
 type fixtureDaemon struct {
@@ -406,5 +407,27 @@ func TestRuntimeThirdAttemptCanSucceedWithoutResettingBudget(t *testing.T) {
 	c, e = r.readCircuit()
 	if e != nil || !c.Open {
 		t.Fatal("subsequent crash did not trip circuit")
+	}
+}
+
+func TestDoctorPromotesTargetsOnlyWithAttestedSelectedProject(t *testing.T) {
+	r, service, daemon, _ := fixtureRuntime(t)
+	service.state.Running, service.state.PID = true, 42
+	daemon.unavailable, daemon.status.PID = false, 42
+	r.Remote = func(ctx context.Context) RemoteEvidence {
+		e := readyRemote(ctx)
+		e.ProjectID = 42
+		e.Targets.Code = "target_registration_observed_ownership_unverified"
+		return e
+	}
+	for _, kind := range []string{"fallback", "attention"} {
+		daemon.status.Consumers = append(daemon.status.Consumers, runtimeconsumer.Evidence{Kind: kind, ProjectID: 42, Generation: daemon.status.DaemonID, State: "ready", LastSuccess: time.Now()})
+	}
+	if got := findLayer(t, r.Doctor(context.Background()), "targets"); got.State != Known || got.Code != "owned_target_consumers_verified" {
+		t.Fatal("fresh owned target evidence ignored", got)
+	}
+	daemon.status.Consumers[1].ProjectID = 99
+	if got := findLayer(t, r.Doctor(context.Background()), "targets"); got.State != Unknown {
+		t.Fatal("foreign project target became ready")
 	}
 }

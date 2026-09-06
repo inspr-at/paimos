@@ -24,8 +24,9 @@ type nativeFixtureProcess struct {
 	inboxes, steers int
 }
 
-func (p *nativeFixtureProcess) PID() int    { return 4242 }
-func (p *nativeFixtureProcess) Wait() error { <-p.done; return nil }
+func (p *nativeFixtureProcess) PID() int         { return 4242 }
+func (p *nativeFixtureProcess) InboxReady() bool { return p.inboxes == 0 }
+func (p *nativeFixtureProcess) Wait() error      { <-p.done; return nil }
 func (p *nativeFixtureProcess) Inbox(_ context.Context, r agentd.ControlRequest) (agentd.ControlEffect, error) {
 	p.inboxes++
 	return agentd.ControlEffect{Primitive: "codex queue --thread", CorrelationID: r.CorrelationID}, nil

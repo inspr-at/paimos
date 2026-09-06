@@ -81,10 +81,13 @@ func (r Report) WriteHuman(w io.Writer) error {
 	return err
 }
 
-type RemoteEvidence struct{ Auth, Identity, Agents, Profiles, Targets Layer }
+type RemoteEvidence struct {
+	Auth, Identity, Agents, Profiles, Targets Layer
+	ProjectID                                 int64
+}
 type RemoteProbe func(context.Context) RemoteEvidence
 
-// Future consumers and typed intents report authenticated current-generation
+// Owned consumers and typed intents report authenticated current-generation
 // evidence here. Nil means unknown; a socket alone cannot imply readiness.
 type ExtensionProbe func(context.Context, agentd.RuntimeStatus) []Layer
 

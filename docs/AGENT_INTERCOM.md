@@ -18,9 +18,9 @@ message content out of documentation and logs.
 Use the same explicit configured instance for the CLI and the platform service:
 
 ```bash
-paimos --instance example runtime doctor --project-id 123
-paimos --instance example runtime setup --project-id 123
-paimos --instance example runtime repair --project-id 123
+paimos --instance example runtime doctor --project PAI
+paimos --instance example runtime setup --project PAI
+paimos --instance example runtime repair --project PAI
 paimos --instance example --json runtime reset
 ```
 
@@ -107,9 +107,10 @@ options.
 Human and JSON output distinguish `known`, `unknown`, `action_required`,
 `repaired` and `preserved`. `ready` requires every readiness layer to have fresh
 exact-generation evidence. Native primary consumer evidence now comes from the
-supervisor's authenticated worker drain/completion. Fallback and attention remain
-`authority_unavailable` until their server generation fences and client adapters
-are integrated. Browser intent readiness remains independent.
+supervisor's authenticated worker drain/completion. The daemon's configured lifecycle authority supplies fenced fallback and attention
+clients and independent browser intent evidence. `primary_inbox` reports ordinary
+messaging separately: missing optional receiver setup does not disable an already
+healthy primary inbox.
 
 Runtime commands are registered in the main CLI. `runtime doctor --project PAI`
 resolves an authorized project key; `--project-id` remains supported. The named
@@ -133,9 +134,13 @@ by runtime reset, as are CLI retry records, so reset cannot erase this protectio
 
 The authenticated daemon starts its native primary consumer automatically for
 owned, registered Codex and Claude generations. Registration advertises inbox
-only when the actual owned process implements it. Simple Codex delivery uses the
-pinned CLI's documented `queue --thread` primitive; Claude uses the owned Query's
-`streamInput` without interrupting, requiring a correlated Query reaction. Steer uses the existing owned primitive. A
+only when the actual owned process implements it. Simple Codex delivery starts a new turn through the same owned app-server stdio
+connection only when that thread is idle, retaining its immutable profile and
+account. The app-server stays owned across turns. Claude uses the owned Query's
+`streamInput` without interrupting and requires a correlated Query reaction.
+Busy simple deliveries remain in the canonical server FIFO without reserving a
+local effect receipt or consuming the failure budget. Steer uses the existing
+owned primitive. A
 simple policy cap or non-steerable generation is reported as an explicit simple
 handoff only after that primitive confirms success; an ambiguous steer never
 triggers a second fallback effect.
@@ -154,8 +159,9 @@ can replay the original completion; a missing effect receipt stays unknown and
 blocks repeat execution. A new generation or target cannot reuse the old receipt.
 `consumer-circuits.journal` / `consumer-circuits.checkpoint.json` persist three
 attempts with bounded jitter/backoff and one coalesced, content-free local attention
-record per failed stream. Remote publication awaits the typed health producer
-contract. These files and `consumers.lock` survive runtime reset. Receipt storage
+record per failed stream. Configured lifecycle runtimes publish coalesced typed health through
+`consumers/v1/runtime-health`; missing, stale and foreign-project evidence can
+never publish healthy state. These files and `consumers.lock` survive runtime reset. Receipt storage
 is bounded at 4096 records and circuits at 512 streams; exhaustion fails closed.
 Do not delete pending receipts or circuits to force delivery retries.
 
@@ -166,8 +172,117 @@ Stop only the listener terminal/service you own, let its active lease drain and
 reconcile uncertain effects before registering the replacement generation.
 Never force-requeue an ambiguous effect or kill a process by a name/PID guess.
 The private consumer lock excludes cooperating local supervisors. Older binaries
-can bypass local locks, so fallback/attention migration remains unavailable until
-server-side generation/target/attempt fences reject those legacy claims and acks.
+can bypass local locks; server-side generation/target/attempt fences reject
+legacy claims and acknowledgements after an owned stream is registered. A leased
+legacy item must drain safely first. An unknown effect is never force-requeued.
+
+## Browser lifecycle and owned simple receivers
+
+The reviewed service must include `--lifecycle-config /absolute/private/runtime.json`
+alongside its existing `--report-host`, `--report-url`, and
+`--report-api-key-file`. Provision the declaration and protected configuration in
+the selected Home Manager/service workflow, then run
+`paimos --instance example runtime setup --project PAI`. Setup verifies and starts
+that declaration; it does not install a service or create account credentials.
+
+The configuration is owner-only (0600 or 0400), regular and single-linked. It
+explicitly maps public workspace handles to physical local workspaces and exact
+profiles/accounts. Generate a candidate workspace entry with the read-only command:
+
+```bash
+paimos-agentd workspace-identity --instance example --workspace /absolute/reviewed/worktree
+```
+
+Copy its `handle`, `identity`, and `path` into the reviewed configuration. An
+optional `label` is a short non-secret display name chosen by the operator; it
+is never inferred from a path. Example structure with placeholder identities:
+
+```json
+{
+  "projects": [{
+    "project_id": 123,
+    "account_label": "chatgpt",
+    "profiles": [{"id": "codex-sol-high", "version": "1"}],
+    "workspaces": [{
+      "handle": "11111111-1111-4111-8111-111111111111",
+      "identity": "0000000000000000000000000000000000000000000000000000000000000000",
+      "path": "/absolute/reviewed/worktree",
+      "label": "Reviewed worktree"
+    }]
+  }]
+}
+```
+
+Each project has one explicitly configured account label; up to four independent
+project loops run in one daemon. Identity is re-probed from the physical workspace,
+the catalog supplies the exact immutable profile, and the configured vendor binary
+supplies the non-secret account label. The authenticated reporter host is operator
+provenance, not hardware attestation. Browser input never supplies a path, model
+argv, shell command, credential or free-form starting prompt. Starting instructions
+come from the authorized canonical agent artifact and selected ticket.
+
+The daemon journals a private 32-byte runtime proof before registration, refreshes
+its exact advertisement every 30 seconds, and treats expiry after 120 seconds as
+ownership lost. It does not revive an expired generation or adopt its old children.
+Every public session mapping requires both this runtime proof and the exact private
+harness worker lease. `start` and `restart` create the server-reserved new generation
+through agentd's durable start journal. Restart requires the old owned generation to
+be terminal; active or uncertain generations cannot be restarted through this path.
+`attach` and `reassign` require the same owned idle specification; the server applies
+the binding CAS on completion before the daemon mirrors it locally. `repair`
+performs a fresh reporter pass or bounded listener repair for the selected project.
+It does not restart arbitrary processes.
+
+Primary ordinary messages and controls work after native managed registration.
+Optional simple fallback and root attention require a one-time target binding for
+the new owned vendor generation. After a successful friendly `worker start` or
+`orchestrator start`, the `receiver-setup` next command is a scoped pipe from
+`paimos-agentd receiver-reference` directly into the existing
+`paimos message target set --target-ref-file - --role simple_fallback
+--maximum-level simple`. Both ends retain the selected instance. The target command retains the project
+key; the generated reader includes its resolved project ID for an exact ownership
+check. The private reference never enters argv. Use this command as a pipe, never print
+or copy the reference into logs. The helper refuses stopped, unregistered, foreign
+or ownership-lost generations.
+
+A setup pipe is offered only after current public target metadata proves the
+receiver slot empty. Existing or uncertain targets produce a `runtime handoff`
+review action instead; a cached start response also requires a fresh handoff review.
+Do not replace a legacy target until its leased work has drained and uncertain
+outcomes have been reconciled. For Codex, the exact owned `codex_thread` target
+supports fallback and instance-root attention. Claude root attention uses
+`claude_resume` target metadata, but the daemon delivers through its already owned
+Query; it never launches a resume process. The fallback server contract currently
+accepts Codex only. A private target reference that does not match the selected
+owned vendor session is quarantined without invoking any external receiver.
+
+Fenced clients persist stream proofs and a fresh attempt nonce before claim.
+The execute endpoint commits execution before releasing its transient payload;
+only that first payload response permits a handoff. Lost execute responses or
+ambiguous vendor outcomes become unknown and are never repeated. A saved applied
+receipt retries the exact completion, including after a lost acknowledgement.
+A lifecycle completion rejected at its exact recorded revision is quarantined
+without changing its local effect receipt. Later authorized intents may proceed,
+while runtime health continues to report the unresolved outcome. Transport failures
+remain retryable and never authorize repeating the local effect.
+Listener repair may reset a transient retry budget only after rechecking ownership;
+it preserves all effect receipts and refuses unknown executions. Repair verifies
+listener readiness before reporting completion.
+
+The bounded private `lifecycle-runtimes` journal, per-project lifecycle intent
+journals and `fenced-consumers` journals survive runtime reset alongside the primary
+consumer receipts. They contain authority proofs and content-free intent/attempt
+metadata, never message bodies, target references, agent prompts or vendor output.
+Corruption fails startup closed with a private-journal diagnostic. The generic
+runtime reset deliberately does not delete or repair these files: stop the reviewed
+service, preserve the originals, reconcile outstanding server outcomes, and restore
+only a verified private backup. Clearing a journal to force retries is unsafe.
+
+The local and HTTP fixtures cover lost-response recovery, proof binding, exact
+reserved spawn, server-first binding completion, foreign receiver rejection and
+project-scoped health. Vendor live tests remain opt-in and require the explicit
+available profile, authentication and quota; these fixtures do not assert a live
+vendor or cross-machine acceptance run.
 
 ## Fast path: owned Codex
 

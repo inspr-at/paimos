@@ -97,11 +97,12 @@ func runtimeRead(ctx context.Context, c *Client, path string, out any) error {
 func runtimeRemoteProbe(name, expected string, projectID int64) runtimehealth.RemoteProbe {
 	return func(ctx context.Context) runtimehealth.RemoteEvidence {
 		e := runtimehealth.RemoteEvidence{
-			Auth:     runtimeLayer("cli_auth", runtimehealth.Unknown, "named_auth_unavailable", "run paimos auth login for the named instance"),
-			Identity: runtimeLayer("server_identity", runtimehealth.Unknown, "server_identity_unverified", "verify the named deployment"),
-			Agents:   runtimeLayer("canonical_agents", runtimehealth.Unknown, "project_not_selected", "supply --project-id for an authorized project"),
-			Profiles: runtimeLayer("dispatch_profiles", runtimehealth.Unknown, "profiles_unverified", "inspect immutable execution profiles"),
-			Targets:  runtimeLayer("targets", runtimehealth.Unknown, "target_ownership_unverified", "supply --project-id; target inspection requires existing administration authority"),
+			ProjectID: projectID,
+			Auth:      runtimeLayer("cli_auth", runtimehealth.Unknown, "named_auth_unavailable", "run paimos auth login for the named instance"),
+			Identity:  runtimeLayer("server_identity", runtimehealth.Unknown, "server_identity_unverified", "verify the named deployment"),
+			Agents:    runtimeLayer("canonical_agents", runtimehealth.Unknown, "project_not_selected", "supply --project for an authorized project"),
+			Profiles:  runtimeLayer("dispatch_profiles", runtimehealth.Unknown, "profiles_unverified", "inspect immutable execution profiles"),
+			Targets:   runtimeLayer("targets", runtimehealth.Unknown, "target_ownership_unverified", "supply --project; target inspection requires existing administration authority"),
 		}
 		c, err := runtimeNamedClient(name)
 		if err != nil {
@@ -165,11 +166,11 @@ func runtimeRemoteProbe(name, expected string, projectID int64) runtimehealth.Re
 			}
 			if runtimeRead(ctx, c, fmt.Sprintf("/api/projects/%d/message-targets", projectID), &targets) == nil {
 				// A project target list is not proof of this daemon's receiver ownership.
-				// PAI-923 must attest target revision and consumer lease together.
+				// Fresh owned-consumer evidence must attest the target revision and lease.
 				if len(targets.Targets) == 0 {
 					e.Targets = runtimeLayer("targets", runtimehealth.ActionRequired, "no_registered_targets", "register exact targets through the authorized target workflow")
 				} else {
-					e.Targets = runtimeLayer("targets", runtimehealth.Unknown, "target_registration_observed_ownership_unverified", "verify exact daemon consumer and target revision via PAI-923")
+					e.Targets = runtimeLayer("targets", runtimehealth.Unknown, "target_registration_observed_ownership_unverified", "verify the exact owned daemon consumer and target revision")
 				}
 			}
 		}

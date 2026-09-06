@@ -6,6 +6,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,28 @@ func TestStartConstraintsProbeBeforeAnySpawn(t *testing.T) {
 				t.Fatalf("pass=%v spawned=%d error=%v", tc.pass, len(adapter.requests), err)
 			}
 		})
+	}
+}
+
+func TestTrustedReservedStartNeverReusesGenerationForAnotherIntent(t *testing.T) {
+	a := &dispatchAdapter{label: "chatgpt"}
+	s, e := NewSupervisor(SupervisorConfig{Instance: "fixture", StateRoot: t.TempDir(), Adapters: []Adapter{a}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.Close(context.Background())
+	request := StartRequest{Adapter: AdapterCodex, ProjectID: 42, Identity: "codex:fixture", Workspace: t.TempDir(), Prompt: "fixture", IdempotencyKey: "lifecycle:first"}
+	generation := uuid.NewString()
+	session, e := s.StartReserved(context.Background(), request, generation)
+	if e != nil || session.ID != generation {
+		t.Fatal("reserved generation not used", e)
+	}
+	if _, e = s.StartReserved(context.Background(), request, generation); e != nil || len(a.requests) != 1 {
+		t.Fatal("same intent respawned", e)
+	}
+	request.IdempotencyKey = "lifecycle:other"
+	if _, e = s.StartReserved(context.Background(), request, generation); !errors.Is(e, ErrStartReplayConflict) || len(a.requests) != 1 {
+		t.Fatal("generation was reused by another intent", e)
 	}
 }
 

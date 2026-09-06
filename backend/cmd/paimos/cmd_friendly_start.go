@@ -463,7 +463,7 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 					}
 				}
 			}
-			return result, err
+			return friendlyReplayCommands(result, client, o), err
 		}
 	}
 	resolvedWorkspace, err := filepath.EvalSymlinks(o.Workspace)
@@ -498,7 +498,7 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 	result := friendlyStartResult{Outcome: "unknown", State: "unknown", Plan: &plan, Key: o.Key, Reason: "Start outcome is uncertain. Inspect runtime doctor and harness list; do not issue a fresh start key until reconciled."}
 	if err := reserveFriendlyStartRecord(ledgerDir, o.Key, fingerprint, result); err != nil {
 		if previous, found, readErr := readFriendlyStartRecord(ledgerDir, o.Key, fingerprint); readErr == nil && found {
-			return previous, nil
+			return friendlyReplayCommands(previous, client, o), nil
 		}
 		return friendlyStartResult{}, err
 	}
@@ -572,8 +572,23 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 	}
 	result.PublicSessionID = public.ID
 	result.PublicPhase = public.Phase
-	result.Commands = friendlyStartCommands(client.identity.Name, o, plan, public, session)
-	result.Reason = "Public registration verified. Generation state is the observed daemon state, not proof of task completion. Message/steer commands submit durable intents; delivery requires the runtime-owned receiver target and listener."
+	var targetInventory struct {
+		Targets []struct {
+			Address, Adapter, Role string
+			Enabled                bool
+		} `json:"targets"`
+	}
+	freeReceiverSlot := false
+	if friendlyRead(ctx, client, fmt.Sprintf("/api/projects/%d/message-targets?address=%s", public.ProjectID, url.QueryEscape(session.Identity)), &targetInventory) == nil {
+		freeReceiverSlot = true
+		for _, target := range targetInventory.Targets {
+			if target.Address != session.Identity || target.Enabled && (target.Role == "simple_fallback" || target.Role == "primary" && target.Adapter != "managed_harness") {
+				freeReceiverSlot = false
+			}
+		}
+	}
+	result.Commands = friendlyStartCommands(client.identity.Name, o, plan, public, session, freeReceiverSlot)
+	result.Reason = "Public registration verified. Generation state is the observed daemon state, not proof of task completion. Ordinary messages and controls use the automatic owned primary inbox. Optional simple fallback and root attention require the reviewed receiver-setup action."
 	result.Outcome = "started"
 	if friendlyTerminal(session.State) || public.Phase == "stopped" {
 		result.Outcome = "failed"
@@ -587,6 +602,15 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 	return finish(result)
 }
 
+// A cached start outcome is immutable, while a receiver slot can change later.
+// Never replay an old mutating setup suggestion without a new target review.
+func friendlyReplayCommands(result friendlyStartResult, client *Client, o friendlyStartOptions) friendlyStartResult {
+	if result.Commands != nil {
+		result.Commands["receiver-setup"] = friendlyCLIBase(client) + " runtime handoff --project " + shellQuote(o.Project)
+	}
+	return result
+}
+
 func friendlyTerminal(state agentd.SessionState) bool {
 	return state == agentd.StateStopped || state == agentd.StateExited || state == agentd.StateFailed || state == agentd.StateOwnershipLost
 }
@@ -597,7 +621,7 @@ func friendlyGenerationState(state agentd.SessionState) string {
 	}
 	return "unknown"
 }
-func friendlyStartCommands(instance string, o friendlyStartOptions, p friendlyStartPlan, s models.HarnessSession, local agentd.Session) map[string]string {
+func friendlyStartCommands(instance string, o friendlyStartOptions, p friendlyStartPlan, s models.HarnessSession, local agentd.Session, freeReceiverSlot ...bool) map[string]string {
 	base := "paimos"
 	if flagConfigPath != "" {
 		base += " --config " + shellQuote(flagConfigPath)
@@ -608,8 +632,20 @@ func friendlyStartCommands(instance string, o friendlyStartOptions, p friendlySt
 	scope := " --project " + shellQuote(o.Project)
 	sessionScope := scope + " --session " + shellQuote(s.ID)
 	commands := map[string]string{"status": base + " harness status" + sessionScope, "doctor": base + " runtime doctor"}
-	// Name-addressed messages are durable intents; their delivery readiness is
-	// owned by the separate receiver target/listener, not public harness caps.
+	commands["receiver-setup"] = base + " runtime handoff" + scope
+	if len(freeReceiverSlot) > 0 && freeReceiverSlot[0] && s.ProjectID > 0 && uuid.Validate(local.ID) == nil && (p.Profile.Harness == "codex" || p.Profile.Harness == "claude") {
+		adapter, kind := "codex", "codex_thread"
+		if p.Profile.Harness == "claude" {
+			adapter, kind = "claude_resume", "claude_session"
+		}
+		reader := "paimos-agentd receiver-reference --instance " + shellQuote(o.Deployment) + " --session " + shellQuote(local.ID) + " --identity " + shellQuote(local.Identity) + fmt.Sprintf(" --project-id %d", s.ProjectID)
+		if o.StateRoot != "" {
+			reader += " --state-root " + shellQuote(o.StateRoot)
+		}
+		commands["receiver-setup"] = reader + " | " + base + " message target set" + scope + " --address " + shellQuote(local.Identity) + " --adapter " + adapter + " --kind " + kind + " --role simple_fallback --maximum-level simple --target-ref-file -"
+	}
+	// Native registration supplies the owned primary inbox; public harness
+	// control capabilities determine the additional generation-scoped actions.
 	commands["message"] = base + " tell " + shellQuote(p.Profile.Harness+":"+o.Agent) + scope + " --level simple -m 'YOUR MESSAGE'"
 	steer := false
 	for _, capability := range local.Capabilities {

@@ -261,7 +261,7 @@ func verifyServeArgs(args []string, instance, root, expectedURL string) error {
 		switch k {
 		case "--allow-shared-workspaces":
 			return errors.New("shared workspace service requires separate review")
-		case "--instance", "--state-root", "--socket", "--codex-path", "--claude-path", "--node-path", "--claude-sdk-path", "--report-host", "--report-url", "--report-api-key-file", "--paimos-path":
+		case "--instance", "--state-root", "--socket", "--codex-path", "--claude-path", "--node-path", "--claude-sdk-path", "--report-host", "--report-url", "--report-api-key-file", "--paimos-path", "--lifecycle-config":
 		default:
 			return errors.New("service arguments unsupported")
 		}
@@ -287,6 +287,14 @@ func verifyServeArgs(args []string, instance, root, expectedURL string) error {
 		}
 	}
 	report := values["--report-host"] != "" || values["--report-url"] != "" || values["--report-api-key-file"] != ""
+	if v := values["--lifecycle-config"]; v != "" {
+		if !report || !filepath.IsAbs(v) {
+			return errors.New("lifecycle service configuration invalid")
+		}
+		if _, e := safeFile(v, false); e != nil {
+			return errors.New("lifecycle configuration metadata unsafe")
+		}
+	}
 	if report {
 		if expectedURL != "" && strings.TrimRight(values["--report-url"], "/") != strings.TrimRight(expectedURL, "/") {
 			return errors.New("reporter deployment mismatch")

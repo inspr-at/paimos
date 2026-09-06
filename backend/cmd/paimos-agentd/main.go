@@ -12,12 +12,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/inspr-at/paimos/backend/agentd"
 )
@@ -56,7 +58,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	sessionID, correlationID, codexPath := "", "", ""
 	claudePath, nodePath, claudeSDKPath := "", "", ""
 	reportHost, reportURL, reportAPIKeyFile, paimosPath := "", "", "", ""
+	lifecycleConfigPath := ""
 	if command == "serve" {
+		flags.StringVar(&lifecycleConfigPath, "lifecycle-config", "", "protected explicit project/account/profile/workspace JSON configuration for browser lifecycle authority")
 		flags.StringVar(&codexPath, "codex-path", "", "absolute Codex CLI path")
 		flags.StringVar(&claudePath, "claude-path", "", "absolute operator-authenticated Claude CLI path")
 		flags.StringVar(&nodePath, "node-path", "", "absolute Node.js >=18 runtime path")
@@ -80,7 +84,10 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.StringVar(&dispatchProfile, "dispatch-profile", "", "execution-options dispatch profile id")
 		flags.StringVar(&dispatchProfileVersion, "dispatch-profile-version", "", "exact immutable dispatch profile version")
 	}
-	if command == "steer" || command == "interrupt" || command == "stop" {
+	if command == "workspace-identity" {
+		flags.StringVar(&workspace, "workspace", "", "existing absolute workspace to inspect without mutation")
+	}
+	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" {
 		flags.StringVar(&sessionID, "session", "", "managed agentd session UUID")
 		flags.StringVar(&correlationID, "correlation-id", "", "durable message/delivery/control ID")
 		flags.StringVar(&identity, "identity", "", "expected attributed harness identity")
@@ -91,6 +98,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if common.instance == "" {
 		return errors.New("--instance is required")
+	}
+	if command == "receiver-reference" && (strings.TrimSpace(identity) == "" || uuid.Validate(sessionID) != nil || projectID <= 0) {
+		return errors.New("receiver reference requires exact --session generation, --identity and positive --project-id")
 	}
 	if command == "start" || command == "steer" || command == "interrupt" || command == "stop" {
 		if projectID <= 0 {
@@ -104,6 +114,27 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if command == "workspace-identity" {
+		if !filepath.IsAbs(workspace) {
+			return errors.New("workspace inspection requires an absolute --workspace")
+		}
+		physical, e := filepath.EvalSymlinks(workspace)
+		if e != nil {
+			return errors.New("workspace inspection unavailable")
+		}
+		local, e := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: common.instance})
+		if e != nil {
+			return e
+		}
+		defer local.Close(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		provenance, e := local.InspectWorkspace(ctx, physical, agentd.WorkspaceExclusive)
+		if e != nil {
+			return errors.New("workspace provenance unavailable")
+		}
+		return json.NewEncoder(stdout).Encode(configuredWorkspace{Handle: uuid.NewString(), Identity: provenance.Identity, Path: provenance.CanonicalPath})
+	}
 	if command == "serve" {
 		reportConfigured := reportHost != "" || reportURL != "" || reportAPIKeyFile != "" || paimosPath != ""
 		if reportConfigured && (reportHost == "" || reportURL == "" || reportAPIKeyFile == "") {
@@ -116,8 +147,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		defer lock.Close()
 		var reporter agentd.Reporter
 		var consumers *nativeConsumers
+		var bridge *cliReporter
 		if reportConfigured {
-			var bridge *cliReporter
 			bridge, err = newCLIReporter(common.instance, root, reportHost, paimosPath, reportURL, reportAPIKeyFile)
 			if err == nil {
 				consumers, err = newNativeConsumers(root, common.instance, bridge)
@@ -138,10 +169,23 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		if consumers != nil {
 			consumers.controller = supervisor
-			if err := supervisor.AttachConsumers(consumers); err != nil {
+			var services agentd.RuntimeConsumers = consumers
+			if lifecycleConfigPath != "" {
+				lifecycle, e := newDaemonLifecycle(lifecycleConfigPath, root, common.instance, reportURL, reportAPIKeyFile, supervisor, consumers, bridge)
+				if e != nil {
+					_ = supervisor.Close(context.Background())
+					return e
+				}
+				services = &runtimeServices{primary: consumers, lifecycle: lifecycle}
+			}
+			if err := supervisor.AttachConsumers(services); err != nil {
 				_ = supervisor.Close(context.Background())
 				return err
 			}
+		}
+		if lifecycleConfigPath != "" && consumers == nil {
+			_ = supervisor.Close(context.Background())
+			return errors.New("lifecycle authority requires the configured authenticated reporter")
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
@@ -155,6 +199,17 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	ctx := context.Background()
 	var output any
 	switch command {
+	case "receiver-reference":
+		status, e := client.Status(ctx)
+		if e != nil {
+			return errors.New("owned runtime unavailable")
+		}
+		ref, e := ownedReceiverReference(status, common.instance, sessionID, identity, projectID)
+		if e != nil {
+			return e
+		}
+		_, e = io.WriteString(stdout, ref)
+		return e
 	case "status":
 		output, err = client.Status(ctx)
 	case "start":
@@ -184,12 +239,24 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			Instance: common.instance, ProjectID: projectID, Identity: identity, CorrelationID: correlationID,
 		})
 	default:
-		return errors.New("command must be serve, start, status, steer, interrupt, stop, or version")
+		return errors.New("command must be serve, start, status, workspace-identity, receiver-reference, steer, interrupt, stop, or version")
 	}
 	if err != nil {
 		return err
 	}
 	return json.NewEncoder(stdout).Encode(output)
+}
+
+func ownedReceiverReference(status agentd.Status, instance, session, identity string, project int64) (string, error) {
+	if project <= 0 || status.Instance != instance || uuid.Validate(session) != nil || uuid.Validate(status.DaemonID) != nil {
+		return "", errors.New("owned receiver scope unavailable")
+	}
+	for _, s := range status.Sessions {
+		if s.ID == session && s.Identity == identity && s.ProjectID > 0 && s.ProjectID == project && s.State == agentd.StateRunning && s.PID > 0 && s.Managed && !s.Reporter.Closed && s.Reporter.PublicSessionID != "" && s.HarnessSessionID != "" {
+			return s.HarnessSessionID, nil
+		}
+	}
+	return "", errors.New("owned receiver generation is not running and publicly registered")
 }
 
 func serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath string) []agentd.Adapter {

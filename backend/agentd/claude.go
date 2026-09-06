@@ -362,12 +362,14 @@ type claudeProcess struct {
 	readyMu sync.Once
 	cleanup sync.Once
 	stopped bool
+	active  bool
 }
 
 func newClaudeProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, runtimeDir string, observe func(AdapterEvent)) *claudeProcess {
 	p := &claudeProcess{
 		ownedProcess: newOwnedProcess(cmd), stdin: stdin, runtimeDir: runtimeDir, observe: observe,
 		pending: map[string]chan claudeControlResult{}, ready: make(chan error, 1),
+		active: true,
 	}
 	go p.readLoop(stdout)
 	return p
@@ -432,6 +434,9 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 			}
 			p.observeEvent(AdapterEvent{Kind: EventSessionStarted, HarnessSessionID: event.HarnessSessionID})
 		case string(EventTurnStarted):
+			p.stateMu.Lock()
+			p.active = true
+			p.stateMu.Unlock()
 			if event.CorrelationID != "" && !validClaudeBridgeID(event.CorrelationID, 128) {
 				p.protocolFailure(ErrorAppServerProtocol)
 				return
@@ -441,6 +446,9 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 				p.signalReady(nil)
 			}
 		case string(EventToolStarted):
+			p.stateMu.Lock()
+			p.active = true
+			p.stateMu.Unlock()
 			p.observeEvent(AdapterEvent{Kind: EventToolStarted})
 		case string(EventControlApplied):
 			if !validClaudeBridgeID(event.CorrelationID, 128) ||
@@ -451,6 +459,9 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 			p.resolveControl(event, nil)
 			p.observeEvent(AdapterEvent{Kind: EventControlApplied, CorrelationID: event.CorrelationID})
 		case string(EventTurnCompleted):
+			p.stateMu.Lock()
+			p.active = false
+			p.stateMu.Unlock()
 			p.observeEvent(AdapterEvent{Kind: EventTurnCompleted})
 		case "control_failed":
 			if event.CorrelationID == "" {
@@ -706,4 +717,10 @@ func (p *claudeProcess) Inbox(ctx context.Context, request ControlRequest) (Cont
 		return ControlEffect{}, errors.New("Claude inbox produced no Query input evidence")
 	}
 	return ControlEffect{Primitive: "claude Query.streamInput", CorrelationID: request.CorrelationID, VendorMessageID: event.VendorMessageID}, nil
+}
+
+func (p *claudeProcess) InboxReady() bool {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return !p.active && !p.stopped
 }

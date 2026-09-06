@@ -131,6 +131,8 @@ func newFriendlyFixture(t *testing.T) *friendlyFixture {
 				config.Orchestrator = &orchestratorTarget{ProjectID: 42, ProjectKey: "PAI", ProjectAgentID: 7, Key: "builder", DisplayLabel: "builder"}
 			}
 			json.NewEncoder(w).Encode(config)
+		case "/api/projects/42/message-targets":
+			ioString(w, `{"targets":[]}`)
 		default:
 			t.Errorf("unexpected fixture route: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -534,4 +536,25 @@ func friendlyNamedFixture(t *testing.T) {
 	}
 	t.Setenv(envURL, "")
 	t.Setenv(envAPIKey, "")
+}
+
+func TestFriendlyReceiverSetupRequiresFreshEmptySlotAndExactScope(t *testing.T) {
+	profile := dispatchprofile.Profile{Harness: "codex"}
+	o := friendlyStartOptions{Project: "PAI", Agent: "worker", Deployment: "canonical-instance"}
+	local := agentd.Session{ID: friendlyParentID, Identity: "codex:worker", HarnessSessionID: "private-fixture-reference"}
+	public := models.HarnessSession{ID: friendlyPublicID, ProjectID: 42}
+	plan := friendlyStartPlan{Profile: profile}
+	for _, available := range []bool{false, true} {
+		command := friendlyStartCommands("selected-instance", o, plan, public, local, available)["receiver-setup"]
+		if strings.Contains(command, local.HarnessSessionID) || !strings.Contains(command, "--instance 'selected-instance'") || !strings.Contains(command, "--project 'PAI'") {
+			t.Fatal("receiver suggestion leaked reference or lost selected scope")
+		}
+		if available {
+			if !strings.Contains(command, "--project-id 42") || !strings.Contains(command, "--session '"+local.ID+"'") || !strings.Contains(command, "--instance 'canonical-instance'") || !strings.Contains(command, " | ") || !strings.Contains(command, "--target-ref-file -") {
+				t.Fatal("receiver pipe missing exact owned scope")
+			}
+		} else if strings.Contains(command, "target set") || !strings.Contains(command, "runtime handoff") {
+			t.Fatal("existing or unverified target offered replacement")
+		}
+	}
 }

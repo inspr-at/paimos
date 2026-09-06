@@ -84,6 +84,7 @@ type Driver interface {
 }
 
 type Evidence struct {
+	ProjectID   int64     `json:"project_id,omitempty"`
 	Kind        string    `json:"kind"`
 	State       string    `json:"state"`
 	Reason      string    `json:"reason,omitempty"`
@@ -176,11 +177,12 @@ func (s *Supervisor) Step(ctx context.Context, b Binding) error {
 	if !b.valid() {
 		return ErrAuthority
 	}
-	state := Evidence{Kind: b.Kind, Generation: b.Generation, State: "ready"}
+	state := Evidence{Kind: b.Kind, Generation: b.Generation, State: "ready", ProjectID: b.Project}
 	for _, c := range s.circuits.Snapshot() {
 		if c.Key == b.Stream() {
 			state = c.Evidence
 			state.Generation = b.Generation
+			state.ProjectID = b.Project
 			break
 		}
 	}
@@ -404,7 +406,7 @@ func (s *Supervisor) Repair(ctx context.Context, b Binding) error {
 				return ErrUnknown
 			}
 		}
-		state := Evidence{Kind: b.Kind, Generation: b.Generation, State: "ready"}
+		state := Evidence{Kind: b.Kind, Generation: b.Generation, State: "ready", ProjectID: b.Project}
 		if err := s.circuits.Put(circuit{b.Stream(), state}); err != nil {
 			return ErrUnknown
 		}

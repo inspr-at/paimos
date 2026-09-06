@@ -75,6 +75,20 @@ func openStartJournal(root, instance string) (*startJournal, error) {
 // before calling an adapter. An ambiguous attempt is never executed again,
 // including after daemon restart. Records are bounded and never silently evicted.
 func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, error) {
+	return s.startKeyed(ctx, request, "")
+}
+
+// StartReserved is an in-process authority seam. A browser cannot set a local
+// generation through StartRequest or the socket. The lifecycle executor calls
+// this only after the server commits executing for its reserved new generation.
+func (s *Supervisor) StartReserved(ctx context.Context, request StartRequest, generation string) (Session, error) {
+	if uuid.Validate(generation) != nil || request.IdempotencyKey == "" {
+		return Session{}, ErrStartReplayConflict
+	}
+	return s.startKeyed(ctx, request, generation)
+}
+
+func (s *Supervisor) startKeyed(ctx context.Context, request StartRequest, generation string) (Session, error) {
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
 	attempted := false
@@ -88,13 +102,26 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 		return Session{}, errors.New("durable managed start journal unavailable")
 	}
 	key := sha256.Sum256([]byte(request.IdempotencyKey))
-	raw, err := json.Marshal(request)
+	var fingerprintInput any = request
+	if generation != "" {
+		fingerprintInput = struct {
+			Request    StartRequest
+			Generation string
+		}{request, generation}
+	}
+	raw, err := json.Marshal(fingerprintInput)
 	if err != nil {
 		return Session{}, errors.New("invalid managed start request")
 	}
 	fingerprint := sha256.Sum256(raw)
 	record := startRecord{Generation: uuid.NewString(), Key: hex.EncodeToString(key[:]), Fingerprint: hex.EncodeToString(fingerprint[:]), Outcome: "unknown"}
+	if generation != "" {
+		record.Generation = generation
+	}
 	for _, previous := range s.starts.journal.Snapshot() {
+		if previous.Generation == record.Generation && previous.Key != record.Key {
+			return Session{}, ErrStartReplayConflict
+		}
 		if previous.Key != record.Key {
 			continue
 		}
