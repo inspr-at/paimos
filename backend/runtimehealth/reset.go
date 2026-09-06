@@ -142,6 +142,7 @@ func (r *Runtime) Reset(ctx context.Context, token string) (out Report, resultEr
 		}
 		status, e := r.Daemon.RuntimeStatus(ctx)
 		if e != nil || status.DaemonID != plan.Generation || !status.Closed {
+			out.Layers = append(out.Layers, layer("reset", ActionRequired, "owned_quiesce_unconfirmed", "inspect the current daemon; no archive was made"))
 			return out, ErrActionRequired
 		}
 		for _, s := range status.Sessions {
@@ -151,20 +152,27 @@ func (r *Runtime) Reset(ctx context.Context, token string) (out Report, resultEr
 		}
 	}
 	if e = r.Service.Stop(ctx); e != nil {
+		out.Layers = append(out.Layers, layer("reset", ActionRequired, "service_stop_failed", "inspect the exact reviewed service; no archive was made"))
 		return out, ErrActionRequired
 	}
-	// Stop completion alone is insufficient: take the same lock as serve and
-	// check the platform PID again before moving any state.
-	lock, e := lockState(r.directory, "agentd.lock")
+	ownedPID := 0
+	for _, process := range plan.Processes {
+		if process.Kind == "owned_daemon" {
+			ownedPID = process.PID
+		}
+	}
+	lock, e := r.awaitStoppedLock(ctx, plan.Definition, ownedPID)
 	if e != nil {
+		code := "service_stop_ownership_unconfirmed"
+		if errors.Is(e, context.DeadlineExceeded) || errors.Is(e, context.Canceled) {
+			code = "service_stop_deadline"
+		}
+		out.Layers = append(out.Layers, layer("reset", ActionRequired, code, "the reviewed service or its lock did not confirm stopped ownership; no archive was made; inspect service state and preview again"))
 		return out, ErrActionRequired
 	}
 	defer lock.Close()
-	service, e := r.Service.Inspect(ctx)
-	if e != nil || service.Running || service.Definition != plan.Definition {
-		return out, ErrActionRequired
-	}
 	if e = r.verifyStaleSocket(); e != nil {
+		out.Layers = append(out.Layers, layer("reset", ActionRequired, "socket_stop_unconfirmed", "the socket still has an owner or its state is unknown; no archive was made"))
 		return out, ErrActionRequired
 	}
 	archiveRoot := filepath.Join(r.StateRoot, "reset-archives")

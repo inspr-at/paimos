@@ -163,9 +163,9 @@ func (r *Runtime) Repair(ctx context.Context) (Report, error) {
 		if e = r.Service.Stop(ctx); e != nil {
 			return r.Doctor(ctx), ErrActionRequired
 		}
-		// Flock serializes socket cleanup against serve. The lock inode is retained:
-		// unlinking a flock file could give a new daemon a different lock domain.
-		lock, e := lockState(r.directory, "agentd.lock")
+		// Confirm platform stop and retain the existing ownership lock before
+		// socket cleanup. A stop command may return while the daemon exits.
+		lock, e := r.awaitStoppedLock(ctx, svc.Definition, svc.PID)
 		if e != nil {
 			return r.Doctor(ctx), ErrActionRequired
 		}
@@ -263,7 +263,15 @@ func (r *Runtime) stopCircuit(ctx context.Context) error {
 			return ErrActionRequired
 		}
 	}
-	return r.Service.Stop(ctx)
+	if e = r.Service.Stop(ctx); e != nil {
+		return e
+	}
+	lock, e := r.awaitStoppedLock(ctx, svc.Definition, svc.PID)
+	if e != nil {
+		return e
+	}
+	lock.Close()
+	return nil
 }
 
 func (r *Runtime) verifyStaleSocket() error {

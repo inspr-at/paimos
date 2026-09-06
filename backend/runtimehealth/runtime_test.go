@@ -431,3 +431,100 @@ func TestDoctorPromotesTargetsOnlyWithAttestedSelectedProject(t *testing.T) {
 		t.Fatal("foreign project target became ready")
 	}
 }
+
+func TestRuntimeResetWaitsForVerifiedStopAndLockRelease(t *testing.T) {
+	r, service, daemon, _ := fixtureRuntime(t)
+	service.state.Running, service.state.Loaded, service.state.PID = true, true, 222
+	daemon.unavailable, daemon.status.PID = false, 222
+	lock, err := lockState(r.directory, "agentd.lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if lock != nil {
+			lock.Close()
+		}
+	})
+	before, _ := os.Stat(filepath.Join(r.directory, "agentd.lock"))
+	putFixture(t, filepath.Join(r.directory, "sessions.checkpoint.json"), `{"version":1,"records":[]}`)
+	preview, err := r.PreviewReset(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	waits := 0
+	r.Wait = func(ctx context.Context, delay time.Duration) error {
+		if service.stops != 1 || daemon.quiesces != 1 {
+			t.Fatal("wait preceded exact quiesce and service stop")
+		}
+		if _, e := os.Stat(filepath.Join(r.directory, "sessions.checkpoint.json")); e != nil {
+			t.Fatal("state moved before lock release")
+		}
+		waits++
+		if waits == 3 {
+			lock.Close()
+			lock = nil
+		}
+		return nil
+	}
+	result, err := r.Reset(context.Background(), preview.Plan.Token)
+	if err != nil || waits != 3 || result.Archive == "" {
+		t.Fatalf("asynchronous stop was not confirmed: waits=%d error=%v", waits, err)
+	}
+	after, _ := os.Stat(filepath.Join(r.directory, "agentd.lock"))
+	if !os.SameFile(before, after) {
+		t.Fatal("stop wait rotated the ownership lock")
+	}
+}
+
+func TestRuntimeResetStopWaitPreservesStateOnDeadlineOrOwnershipChange(t *testing.T) {
+	for _, failure := range []string{"deadline", "definition", "replacement_pid"} {
+		t.Run(failure, func(t *testing.T) {
+			r, service, daemon, _ := fixtureRuntime(t)
+			service.state.Running, service.state.Loaded, service.state.PID = true, true, 222
+			daemon.unavailable, daemon.status.PID = false, 222
+			lock, err := lockState(r.directory, "agentd.lock")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lock.Close()
+			path := filepath.Join(r.directory, "sessions.checkpoint.json")
+			putFixture(t, path, `{"version":1,"records":[]}`)
+			preview, err := r.PreviewReset(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			waits := 0
+			r.Wait = func(ctx context.Context, delay time.Duration) error {
+				waits++
+				switch failure {
+				case "deadline":
+					<-ctx.Done()
+					return ctx.Err()
+				case "definition":
+					service.state.Definition = "replacement"
+				case "replacement_pid":
+					service.state.Running, service.state.PID = true, 999
+				}
+				return nil
+			}
+			result, err := r.Reset(ctx, preview.Plan.Token)
+			if err == nil || waits != 1 || result.Archive != "" {
+				t.Fatal("unconfirmed stop mutated state or ignored boundary", waits, err)
+			}
+			if _, e := os.Stat(path); e != nil {
+				t.Fatal("unconfirmed stop archived state")
+			}
+			if failure == "deadline" && findLayer(t, result, "reset").Code != "service_stop_deadline" {
+				t.Fatal("stop deadline stage hidden")
+			}
+			if failure != "deadline" && findLayer(t, result, "reset").Code != "service_stop_ownership_unconfirmed" {
+				t.Fatal("changed stop ownership hidden")
+			}
+			if service.stops != 1 {
+				t.Fatal("stop was blindly repeated")
+			}
+		})
+	}
+}

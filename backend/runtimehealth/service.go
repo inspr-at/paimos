@@ -478,3 +478,54 @@ func launchArguments(raw []byte, name, root, instance string) ([]string, error) 
 	}
 	return args, nil
 }
+
+// Platform stop commands may return before the owned daemon exits. Wait only
+// for the reviewed service/PID and its existing lock domain; a replacement or
+// changed definition is an ownership failure, never a reason to signal again.
+func (r *Runtime) awaitStoppedLock(ctx context.Context, definition string, ownedPID int) (*stateLock, error) {
+	const interval = 100 * time.Millisecond
+	const limit = 5 * time.Second
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	for attempt := 0; attempt <= int(limit/interval); attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		service, err := r.Service.Inspect(ctx)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil || !service.Verified || service.Definition != definition || service.PID > 0 && service.PID != ownedPID {
+			return nil, ErrActionRequired
+		}
+		held, err := lockHeld(r.directory)
+		if err != nil {
+			return nil, ErrActionRequired
+		}
+		if !service.Running && service.PID == 0 && !held {
+			lock, err := lockState(r.directory, "agentd.lock")
+			if err != nil {
+				return nil, ErrActionRequired
+			}
+			// Acquiring the lock and observing the service are separate operations.
+			// Recheck after acquisition before the caller may archive or reconnect.
+			service, err = r.Service.Inspect(ctx)
+			if ctx.Err() != nil {
+				lock.Close()
+				return nil, ctx.Err()
+			}
+			if err != nil || !service.Verified || service.Running || service.PID != 0 || service.Definition != definition {
+				lock.Close()
+				return nil, ErrActionRequired
+			}
+			return lock, nil
+		}
+		if attempt == int(limit/interval) {
+			break
+		}
+		if err = r.Wait(ctx, interval); err != nil {
+			return nil, err
+		}
+	}
+	return nil, context.DeadlineExceeded
+}
