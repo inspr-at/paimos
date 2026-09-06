@@ -410,6 +410,9 @@ func (p *projectLifecycle) Execute(ctx context.Context, in lifecycleintents.Inte
 			}
 			if err == nil {
 				for _, kind := range []string{"fallback", "attention"} {
+					if p.optionalReceiverUnconfigured(kind) {
+						continue
+					}
 					state, _, _ := healthEvidence(kind, p.config.ProjectID, p.consumerEvidence, time.Now())
 					if state != "healthy" {
 						err = lifecycleclient.ErrOwnership
@@ -457,6 +460,23 @@ func (p *projectLifecycle) Execute(ctx context.Context, in lifecycleintents.Inte
 		case <-timer.C:
 		}
 	}
+}
+
+// An absent optional receiver remains explicitly unconfigured after a primary
+// repair. Missing, stale or mixed evidence cannot stand in for that observation.
+func (p *projectLifecycle) optionalReceiverUnconfigured(kind string) bool {
+	seen := false
+	generation := p.owner.supervisor.Status().DaemonID
+	for _, evidence := range p.consumerEvidence {
+		if evidence.Kind != kind || evidence.ProjectID != p.config.ProjectID {
+			continue
+		}
+		seen = true
+		if evidence.Generation != generation || evidence.State != "unavailable" || evidence.Reason != "receiver_not_configured" {
+			return false
+		}
+	}
+	return seen
 }
 func (p *projectLifecycle) Committed(ctx context.Context, in lifecycleintents.Intent) error {
 	if in.Request.Operation != "attach" && in.Request.Operation != "reassign" {
