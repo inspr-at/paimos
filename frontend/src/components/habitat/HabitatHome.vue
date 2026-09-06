@@ -122,15 +122,23 @@ function projectStatus(id: number) {
     <div class="habitat-overview" aria-label="Workspace summary">
       <button type="button" @click="emit('workers')">
         <strong>{{ snapshot.fleet.totals.workers }}</strong
-        ><span>known workers</span>
+        ><span>{{ snapshot.fleet.totals.workers === 1 ? 'known worker' : 'known workers' }}</span>
       </button>
       <button type="button" @click="emit('projects')">
         <strong>{{ snapshot.coordination_bounds.total_projects }}</strong
-        ><span>projects</span>
+        ><span>{{
+          snapshot.coordination_bounds.total_projects === 1 ? 'project' : 'projects'
+        }}</span>
       </button>
       <span class="habitat-overview-attention"
         ><strong>{{ attentionUnknown ? '—' : attentionCount }}</strong
-        ><span>{{ attentionUnknown ? 'attention checking' : 'items need you' }}</span></span
+        ><span>{{
+          attentionUnknown
+            ? 'attention checking'
+            : attentionCount === 1
+              ? 'item needs you'
+              : 'items need you'
+        }}</span></span
       >
       <span class="habitat-overview-source">{{
         fresh ? 'Current snapshot' : 'Last snapshot'
