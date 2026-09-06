@@ -75,9 +75,10 @@ attempts, with 1/2/4-second backoff and bounded readiness probes, exhaust its
 budget across command invocations. A tripped circuit disables the platform
 restart loop and writes one content-free 0600 `runtime-attention.json` item.
 An interrupted stop is completed on the next repair invocation. Attention is
-local and durable; publishing it through an owned attention consumer belongs to
-PAI-923 and does not wake a model from this command. After correcting the cause,
-a confirmed reset archives the budget so a new bootstrap can start explicitly.
+local and durable. In the unreleased candidate, a configured owned attention
+consumer publishes runtime health through its separate fenced path; this repair
+command does not wake a model. After correcting the cause, a confirmed reset
+archives the budget so a new bootstrap can start explicitly.
 
 Reset without `--confirm` only previews exact daemon/child PIDs and eligible
 paths. Apply the copyable command printed with its preview token. The token
@@ -182,7 +183,7 @@ can bypass local locks; server-side generation/target/attempt fences reject
 legacy claims and acknowledgements after an owned stream is registered. A leased
 legacy item must drain safely first. An unknown effect is never force-requeued.
 
-## Browser lifecycle and owned simple receivers
+## Browser lifecycle and owned message receivers
 
 The reviewed service must include `--lifecycle-config /absolute/private/runtime.json`
 alongside its existing `--report-host`, `--report-url`, and

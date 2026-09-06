@@ -218,10 +218,11 @@ paimos --instance production worker start --guided \
 `--dry-run` or `--explain` resolves the same plan without starting a child.
 Scripts can supply the choices explicitly with `--non-interactive`, `--json`
 and a stable `--idempotency-key`. Exact retries preserve the original generation;
-an unknown result needs reconciliation before any new start. Successful output
-includes the public session and matching status, message, steer, interrupt,
-stop and diagnosis commands. Choose `scout` for investigation work whose result
-is evidence rather than an implementation.
+an unknown result needs reconciliation before any new start. The unreleased
+candidate output includes the public session and matching status, message and
+diagnosis commands, plus steer, interrupt and stop when the observed generation
+advertises those capabilities. Choose `scout` for investigation work whose
+result is evidence rather than an implementation.
 
 `runtime doctor` reports independent readiness layers. `runtime repair` acts
 only on the verified instance within a persistent retry budget. `runtime reset`
