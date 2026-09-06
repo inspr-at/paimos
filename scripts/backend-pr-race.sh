@@ -283,7 +283,10 @@ for import_path in "$@"; do
       "$MODULE/agentd" \
       "$MODULE/localjournal" \
       "$MODULE/ownedprocess" \
-      "$MODULE/lifecycleintents"
+      "$MODULE/lifecycleintents" \
+      "$MODULE/lifecycleclient" \
+      "$MODULE/runtimeconsumer" \
+      "$MODULE/runtimehealth"
     do
       run_selected_package "$affected"
     done

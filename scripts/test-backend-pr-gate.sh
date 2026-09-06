@@ -360,7 +360,8 @@ for shard in 0 1 2 3; do
   affected_broad_plans+=("$plan")
   affected_broad_plan+="$plan"$'\n'
 done
-for package in ./cmd/paimos ./supervision ./agentmessage ./agentmode ./agentd ./localjournal ./ownedprocess; do
+for package in ./cmd/paimos ./supervision ./agentmessage ./agentmode ./agentd ./localjournal ./ownedprocess \
+  ./lifecycleclient ./runtimeconsumer ./runtimehealth; do
   owners=0
   for plan in "${affected_broad_plans[@]}"; do
     [[ "$plan" != *" $package"* ]] || owners=$((owners + 1))
@@ -497,6 +498,12 @@ if GO_COMMAND="$FIXTURES/unsafe-go-list.sh" "$RACE_RUNNER" --dry-run --lane=affe
   fail 'lifecycle race sharder accepted an unsafe discovered test name'
 fi
 broad_race_plan=$("$RACE_RUNNER" --dry-run './...')
+for package in ./lifecycleclient ./runtimeconsumer ./runtimehealth; do
+  invocation="go test -race -count=1 -timeout=8m $package"
+  [[ "$(grep -Fxc "$invocation" <<<"$affected_broad_plan")" -eq 1 &&
+    "$(grep -Fxc "$invocation" <<<"$broad_race_plan")" -eq 1 ]] ||
+    fail "broad race plan omitted, duplicated, or filtered the full $package suite"
+done
 [[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")" -eq 7 ]] ||
   fail 'broad race plan omitted or duplicated the managed-harness concurrency and recovery oracles'
 broad_lifecycle_plan=$(grep '^go test -race .* ./lifecycleintents -run ' <<<"$broad_race_plan")
