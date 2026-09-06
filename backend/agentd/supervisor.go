@@ -60,6 +60,8 @@ type controlReplay struct {
 }
 
 type Supervisor struct {
+	consumers             RuntimeConsumers
+	consumersDone         chan struct{}
 	mu                    sync.RWMutex
 	startMu               sync.Mutex
 	daemonID              string
@@ -1001,6 +1003,16 @@ func (s *Supervisor) Close(ctx context.Context) error {
 	// Start holds this gate from reservation through Process publication. The
 	// lifecycle cancellation above makes an in-flight adapter unwind; taking
 	// the gate guarantees no starting child can be skipped by the snapshot.
+	s.mu.RLock()
+	consumersDone := s.consumersDone
+	s.mu.RUnlock()
+	if consumersDone != nil {
+		select {
+		case <-consumersDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
 	s.mu.Lock()

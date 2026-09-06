@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/backend/agentd"
 	"github.com/inspr-at/paimos/backend/dispatchprofile"
 	"github.com/inspr-at/paimos/backend/models"
+	"github.com/zalando/go-keyring"
 )
 
 const friendlyParentID = "11111111-1111-4111-8111-111111111111"
@@ -491,4 +492,46 @@ func TestFriendlyReconcilesLostDaemonResponseWithoutRepeatedSpawn(t *testing.T) 
 	if err != nil || result.Outcome != "started" || !result.Replayed || result.PublicSessionID != friendlyPublicID || f.daemon.startCount != 1 {
 		t.Fatal("original outcome was not reconciled")
 	}
+}
+
+func TestFriendlyMissingParentGivesSelectedInstanceBootstrap(t *testing.T) {
+	f := newFriendlyFixture(t)
+	f.sessions = nil
+	f.opts.Parent = ""
+	friendlyNamedFixture(t)
+	var out bytes.Buffer
+	err := guideFriendlyStart(context.Background(), strings.NewReader(""), &out, &f.opts)
+	if err == nil || (!strings.Contains(err.Error(), "paimos --instance 'fixture-instance'") || !strings.Contains(err.Error(), "orchestrator start --project PAI --guided")) {
+		t.Fatal("missing parent guidance omitted selected instance/project bootstrap")
+	}
+	if f.writes != 0 || f.daemon.startCount != 0 {
+		t.Fatal("guidance mutated state")
+	}
+}
+func TestFriendlyDaemonHintIncludesSelectedInstance(t *testing.T) {
+	f := newFriendlyFixture(t)
+	f.daemon.statusErr = errors.New("unavailable")
+	friendlyNamedFixture(t)
+	_, err := runFriendlyStart(context.Background(), f.opts)
+	if err == nil || !strings.Contains(err.Error(), "paimos --instance 'fixture-instance'") || !strings.Contains(err.Error(), "runtime setup") || !strings.Contains(err.Error(), "runtime doctor") {
+		t.Fatal("daemon hint omitted selected instance")
+	}
+}
+
+func friendlyNamedFixture(t *testing.T) {
+	t.Helper()
+	old, oldConfig := flagInstance, flagConfigPath
+	flagInstance = "fixture-instance"
+	flagConfigPath = filepath.Join(t.TempDir(), "config.yaml")
+	t.Cleanup(func() { flagInstance = old; flagConfigPath = oldConfig })
+	raw := "instances:\n  fixture-instance:\n    url: " + os.Getenv(envURL) + "\n"
+	if err := os.WriteFile(flagConfigPath, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	keyring.MockInit()
+	if err := keyringSet("fixture-instance", "fixture-credential"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envURL, "")
+	t.Setenv(envAPIKey, "")
 }

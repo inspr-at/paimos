@@ -191,6 +191,7 @@ function deleteCorrelation(uuid) {
 
 function addCorrelation(uuid, correlationID) {
   const state = { correlationID, reacted: false, applied: false, expiresAt: Date.now() + CORRELATION_TTL_MS };
+  state.reaction = new Promise((resolve) => { state.resolveReaction = resolve; });
   state.timer = setTimeout(() => deleteCorrelation(uuid), CORRELATION_TTL_MS);
   state.timer.unref?.();
   correlations.set(uuid, state);
@@ -208,6 +209,7 @@ function observeReaction(message) {
   const state = correlations.get(uuid);
   if (!state || state.reacted) return;
   state.reacted = true;
+  state.resolveReaction();
   emit({ kind: "turn_started", correlation_id: state.correlationID });
   if (state.applied) deleteCorrelation(uuid);
 }
@@ -295,10 +297,10 @@ const handleControlLine = (line) => {
     let fatal = false;
     let failureReason = "control_failed";
     try {
-      if (request.op === "steer") {
+      if (request.op === "steer" || request.op === "inbox") {
         expireCorrelations();
         if (typeof request.text !== "string" || request.text.length === 0 ||
-            Buffer.byteLength(request.text) > MAX_STEER_BYTES || request.text.includes("\0") || !interruptReceipt) {
+            Buffer.byteLength(request.text) > MAX_STEER_BYTES || request.text.includes("\0") || (request.op === "steer" && !interruptReceipt)) {
           fail("app_server_protocol", correlationID);
           return;
         }
@@ -312,11 +314,26 @@ const handleControlLine = (line) => {
         failureReason = "stream_input_failed";
         await streamInputBound(userMessage(request.text, uuid));
         request.text = "";
-        failureReason = "interrupt_receipt_failed";
-        const receipt = await queryHandle.interrupt();
-        if (!receipt || !Array.isArray(receipt.still_queued)) {
-          fatal = true;
-          throw new Error("receipt");
+        if (request.op === "steer") {
+          failureReason = "interrupt_receipt_failed";
+          const receipt = await queryHandle.interrupt();
+          if (!receipt || !Array.isArray(receipt.still_queued)) {
+            fatal = true;
+            throw new Error("receipt");
+          }
+        }
+        if (request.op === "inbox") {
+          // Consuming our iterator is not external acceptance. Require the
+          // live Query's matching input UUID reaction before reporting handoff.
+          failureReason = "input_reaction_unconfirmed";
+          let reactionTimer;
+          try {
+            await Promise.race([
+              state.reaction,
+              queryEnded.then(() => { throw new Error("Query ended"); }),
+              new Promise((_, reject) => { reactionTimer = setTimeout(() => reject(new Error("reaction timeout")), 20000); })
+            ]);
+          } finally { clearTimeout(reactionTimer); }
         }
         state.applied = true;
         emit({ kind: "control_applied", correlation_id: correlationID, vendor_message_id: uuid });

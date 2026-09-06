@@ -187,20 +187,40 @@ func TestCodexLiveOwnedAppServerSteer(t *testing.T) {
 		t.Skip("set PAIMOS_AGENTD_LIVE_CODEX=1 with an authenticated codex CLI to run live proof")
 	}
 	adapter := NewCodexAdapter("", "live-proof")
-	process, err := adapter.Start(context.Background(), StartRequest{
+	profile, err := dispatchprofile.Resolve("codex-sol-high", dispatchprofile.CatalogVersion, AdapterCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	active := make(chan struct{}, 1)
+	process, err := adapter.Start(ctx, StartRequest{
 		Workspace: t.TempDir(), Adapter: AdapterCodex, Identity: "codex:live-proof",
-		Prompt: "Keep this turn active briefly while inspecting the empty workspace.",
-	}, nil)
+		ResolvedProfile: &profile,
+		Prompt:          "Run the command sleep 20 in the empty workspace, then say done. This bounded delay verifies live owned control.",
+	}, func(event AdapterEvent) {
+		if event.Kind == EventToolStarted {
+			select {
+			case active <- struct{}{}:
+			default:
+			}
+		}
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "live-proof-cleanup"})
 	})
-	if _, err := process.Steer(context.Background(), ControlRequest{CorrelationID: "live-proof-delivery", Text: "Acknowledge this steer before finishing."}); err != nil {
+	select {
+	case <-active:
+	case <-ctx.Done():
+		t.Fatal("live Codex active tool boundary unavailable; model access, quota, or execution did not permit the proof")
+	}
+	if _, err := process.Steer(ctx, ControlRequest{CorrelationID: "live-proof-delivery", Text: "Acknowledge this steer before finishing."}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "live-proof-interrupt"}); err != nil {
+	if _, err := process.Interrupt(ctx, ControlRequest{CorrelationID: "live-proof-interrupt"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := process.Wait(); err != nil {

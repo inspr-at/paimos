@@ -580,7 +580,7 @@ func (p *claudeProcess) control(ctx context.Context, operation string, request C
 		p.stateMu.Unlock()
 	}()
 	frame := map[string]string{"op": operation, "correlation_id": request.CorrelationID}
-	if operation == "steer" {
+	if operation == "steer" || operation == "inbox" {
 		frame["text"] = request.Text
 	}
 	if err := p.send(frame); err != nil {
@@ -692,4 +692,18 @@ func (p *claudeProcess) Wait() error {
 		return nil
 	}
 	return err
+}
+
+// Inbox streams a correlated user input without the interruption requested by
+// Steer. A matching Query reaction to the input UUID is required for a simple
+// handoff receipt; consuming the local input iterator alone is insufficient.
+func (p *claudeProcess) Inbox(ctx context.Context, request ControlRequest) (ControlEffect, error) {
+	event, err := p.control(ctx, "inbox", request)
+	if err != nil {
+		return ControlEffect{}, err
+	}
+	if event.VendorMessageID == "" {
+		return ControlEffect{}, errors.New("Claude inbox produced no Query input evidence")
+	}
+	return ControlEffect{Primitive: "claude Query.streamInput", CorrelationID: request.CorrelationID, VendorMessageID: event.VendorMessageID}, nil
 }

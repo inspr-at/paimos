@@ -6,6 +6,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"github.com/inspr-at/paimos/backend/runtimeconsumer"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,14 +17,15 @@ import (
 // RuntimeStatus is a content-free local ownership projection. It intentionally
 // excludes target references, identities, workspace paths and reporter leases.
 type RuntimeStatus struct {
-	DaemonID            string           `json:"daemon_id"`
-	Instance            string           `json:"instance"`
-	PID                 int              `json:"pid"`
-	ReporterConfigured  bool             `json:"reporter_configured"`
-	ReporterLastSuccess time.Time        `json:"reporter_last_success"`
-	ReporterUnavailable bool             `json:"reporter_unavailable"`
-	Sessions            []RuntimeSession `json:"sessions"`
-	Closed              bool             `json:"closed"`
+	Consumers           []runtimeconsumer.Evidence `json:"consumers,omitempty"`
+	DaemonID            string                     `json:"daemon_id"`
+	Instance            string                     `json:"instance"`
+	PID                 int                        `json:"pid"`
+	ReporterConfigured  bool                       `json:"reporter_configured"`
+	ReporterLastSuccess time.Time                  `json:"reporter_last_success"`
+	ReporterUnavailable bool                       `json:"reporter_unavailable"`
+	Sessions            []RuntimeSession           `json:"sessions"`
+	Closed              bool                       `json:"closed"`
 }
 type RuntimeSession struct {
 	ID                string       `json:"id"`
@@ -40,7 +42,11 @@ func (s *Supervisor) RuntimeStatus(ctx context.Context) RuntimeStatus {
 	status := s.Status()
 	s.mu.Lock()
 	out := RuntimeStatus{DaemonID: s.daemonID, Instance: s.instance, PID: os.Getpid(), ReporterConfigured: s.reporter != nil, ReporterLastSuccess: s.reporterLastSuccess, ReporterUnavailable: s.reporterErrorCode != "", Closed: s.closed, Sessions: []RuntimeSession{}}
+	consumers := s.consumers
 	s.mu.Unlock()
+	if consumers != nil {
+		out.Consumers = consumers.Snapshot()
+	}
 	for _, session := range status.Sessions {
 		owned := session.PID > 0 && session.State != StateOwnershipLost && session.State != StateExited && session.State != StateStopped
 		verified := false

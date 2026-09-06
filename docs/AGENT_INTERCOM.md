@@ -105,11 +105,11 @@ a bootstrap command retaining the selected instance, state root and service
 options.
 
 Human and JSON output distinguish `known`, `unknown`, `action_required`,
-`repaired` and `preserved`. `ready` requires every readiness layer to be supported
-by evidence. Setup/repair can complete a local action while readiness still
-requires work. The PAI-922 implementation reports consumer ownership and browser
-intent readiness as unknown until the PAI-923/PAI-924 authenticated adapters are
-integrated; service liveness does not stand in for those capabilities.
+`repaired` and `preserved`. `ready` requires every readiness layer to have fresh
+exact-generation evidence. Native primary consumer evidence now comes from the
+supervisor's authenticated worker drain/completion. Fallback and attention remain
+`authority_unavailable` until their server generation fences and client adapters
+are integrated. Browser intent readiness remains independent.
 
 Runtime commands are registered in the main CLI. `runtime doctor --project PAI`
 resolves an authorized project key; `--project-id` remains supported. The named
@@ -130,6 +130,44 @@ The CLI can reconcile a lost response through read-only daemon lookup and public
 registration verification. Ambiguous adapter outcomes stay unknown and never
 respawn automatically. `starts.journal` and `starts.checkpoint.json` are preserved
 by runtime reset, as are CLI retry records, so reset cannot erase this protection.
+
+The authenticated daemon starts its native primary consumer automatically for
+owned, registered Codex and Claude generations. Registration advertises inbox
+only when the actual owned process implements it. Simple Codex delivery uses the
+pinned CLI's documented `queue --thread` primitive; Claude uses the owned Query's
+`streamInput` without interrupting, requiring a correlated Query reaction. Steer uses the existing owned primitive. A
+simple policy cap or non-steerable generation is reported as an explicit simple
+handoff only after that primitive confirms success; an ambiguous steer never
+triggers a second fallback effect.
+
+The consumer reuses M161 `harness drain` and `complete-delivery` with its private
+worker lease, canonical delivery IDs, exact immutable target binding and durable
+FIFO. Reporter credentials and worker leases use the existing protected file and
+stdin mechanism. The consumer retains neither message text nor target references
+in status, receipts or logs. Each pass is bounded and daemon shutdown cancels and
+drains the consumer before stopping its owned children.
+
+`consumer-effects.journal` / `consumer-effects.checkpoint.json` contain only
+hashed binding/delivery identities and closed outcome receipts. An effect intent
+is synced before a vendor call, the outcome before acknowledgement. A lost ack
+can replay the original completion; a missing effect receipt stays unknown and
+blocks repeat execution. A new generation or target cannot reuse the old receipt.
+`consumer-circuits.journal` / `consumer-circuits.checkpoint.json` persist three
+attempts with bounded jitter/backoff and one coalesced, content-free local attention
+record per failed stream. Remote publication awaits the typed health producer
+contract. These files and `consumers.lock` survive runtime reset. Receipt storage
+is bounded at 4096 records and circuits at 512 streams; exhaustion fails closed.
+Do not delete pending receipts or circuits to force delivery retries.
+
+`paimos --instance example runtime handoff` is a read-only migration preview.
+Legacy receiver target conflicts are detected through authenticated metadata;
+this does not establish ownership of a PID or prove that an old listener exited.
+Stop only the listener terminal/service you own, let its active lease drain and
+reconcile uncertain effects before registering the replacement generation.
+Never force-requeue an ambiguous effect or kill a process by a name/PID guess.
+The private consumer lock excludes cooperating local supervisors. Older binaries
+can bypass local locks, so fallback/attention migration remains unavailable until
+server-side generation/target/attempt fences reject those legacy claims and acks.
 
 ## Fast path: owned Codex
 

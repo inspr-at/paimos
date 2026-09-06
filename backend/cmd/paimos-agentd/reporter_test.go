@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -986,5 +987,51 @@ func TestAuthenticatedMachineProvenanceUsesProtectedReporter(t *testing.T) {
 	unavailable = true
 	if machine, err := reporter.AuthenticatedMachineID(context.Background()); err == nil || machine != "" {
 		t.Fatal("local host hint survived failed authentication")
+	}
+}
+
+type nativeRecordingController struct {
+	recordingReporterController
+	supported bool
+}
+
+func (c *nativeRecordingController) SupportsInbox(string) bool { return c.supported }
+func TestNativeReporterAdvertisesOnlyOwnedInboxWithMatchingAuthority(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		t.Run(fmt.Sprintf("supported_%t", supported), func(t *testing.T) {
+			controller := &nativeRecordingController{supported: supported}
+			session := agentd.Session{ID: localReporterSession, Identity: "codex:worker", ProjectID: 6, Adapter: "codex", Role: "worker", Managed: true, State: agentd.StateRunning, Capabilities: []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus, agentd.CapabilitySteer, agentd.CapabilityStop}}
+			response := harnessSessionResponse{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: "codex", Host: "fixture-host", ManagementMode: "managed", MessageTargetID: reporterControlID, Role: "worker", Phase: "working"}
+			response.Capabilities.Inbox = supported
+			response.Capabilities.Steer = supported
+			registered := false
+			r, err := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+				switch args[2] {
+				case "register":
+					caps := args[slices.Index(args, "--capability")+1]
+					mode := args[slices.Index(args, "--steer-mode")+1]
+					if strings.Contains(caps, "inbox") != supported || (mode == "owned") != supported {
+						t.Fatal("unowned capability advertised")
+					}
+					registered = true
+					return json.Marshal(response)
+				case "heartbeat":
+					return json.Marshal(response)
+				case "yield":
+					return json.Marshal(harnessYieldResponse{Session: response})
+				}
+				return nil, errors.New("unexpected fixture command")
+			}, newMemoryReporterLeaseStore())
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.nativeDelivery = true
+			if err := r.BindController(controller); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.ReportStatus(context.Background(), agentd.Status{Instance: "fixture", Sessions: []agentd.Session{session}}); err != nil || !registered {
+				t.Fatal("native registration failed")
+			}
+		})
 	}
 }

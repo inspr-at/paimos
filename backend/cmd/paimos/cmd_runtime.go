@@ -33,8 +33,8 @@ func runtimeCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&expected, "expect-deployment-instance", "", "expected authenticated deployment identity (defaults to named instance)")
 	cmd.PersistentFlags().StringVar(&projectKey, "project", "", "authorized canonical project key for scoped diagnosis")
 	cmd.PersistentFlags().Int64Var(&projectID, "project-id", 0, "authorized project for canonical-agent and target diagnosis")
-	for _, operation := range []string{"doctor", "setup", "repair", "reset"} {
-		child := &cobra.Command{Use: operation, Short: map[string]string{"doctor": "Report independent readiness layers without changing runtime state", "setup": "Verify the declarative service and reconnect idempotently", "repair": "Repair owned state within a persistent three-attempt budget", "reset": "Preview recoverable reset; --confirm applies that exact preview"}[operation], Args: cobra.NoArgs}
+	for _, operation := range []string{"doctor", "setup", "repair", "reset", "handoff"} {
+		child := &cobra.Command{Use: operation, Short: map[string]string{"handoff": "Preview safe legacy listener migration without stopping any process", "doctor": "Report independent readiness layers without changing runtime state", "setup": "Verify the declarative service and reconnect idempotently", "repair": "Repair owned state within a persistent three-attempt budget", "reset": "Preview recoverable reset; --confirm applies that exact preview"}[operation], Args: cobra.NoArgs}
 		child.RunE = func(c *cobra.Command, _ []string) error {
 			if !orchestratorInstanceNamePattern.MatchString(flagInstance) {
 				return &usageError{msg: "runtime requires --instance with a safe configured name"}
@@ -82,7 +82,7 @@ func runtimeCmd() *cobra.Command {
 				manager.ExpectedURL = named.baseURL
 			}
 			remote := runtimeRemoteProbe(flagInstance, expected, projectID)
-			local, e := runtimehealth.New(runtimehealth.Config{Instance: expected, StateRoot: root, Service: manager, Daemon: daemon, Remote: remote})
+			local, e := runtimehealth.New(runtimehealth.Config{Instance: expected, StateRoot: root, Service: manager, Daemon: daemon, Remote: remote, Extensions: runtimehealth.ConsumerExtensions})
 			if e != nil {
 				return e
 			}
@@ -90,6 +90,10 @@ func runtimeCmd() *cobra.Command {
 			defer cancel()
 			var report runtimehealth.Report
 			switch operation {
+			case "handoff":
+				report = local.Doctor(ctx)
+				report.Layers = append(report.Layers, runtimehealth.Layer{Name: "legacy_handoff", State: runtimehealth.ActionRequired, Code: "preview_only", Action: "identify and stop only your owned listener terminal or reviewed service; wait for active leases to drain, reconcile unknown delivery outcomes, then register the new generation; do not kill by PID/name or force-requeue uncertain work"})
+				e = runtimehealth.ErrActionRequired
 			case "doctor":
 				report = local.Doctor(ctx)
 				if !report.Ready {
@@ -113,7 +117,9 @@ func runtimeCmd() *cobra.Command {
 			if service != "" {
 				report.Bootstrap += " --service-name " + runtimeShellQuote(service)
 			}
-			if projectID > 0 {
+			if projectKey != "" {
+				report.Bootstrap += " --project " + runtimeShellQuote(projectKey)
+			} else if projectID > 0 {
 				report.Bootstrap += fmt.Sprintf(" --project-id %d", projectID)
 			}
 			if operation == "reset" && confirm == "" && report.Plan != nil && report.Plan.CanApply {

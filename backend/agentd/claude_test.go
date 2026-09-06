@@ -746,3 +746,32 @@ export function query({ prompt }) {
   };
 }
 `
+
+func TestClaudeInboxStreamsWithoutInterruptingQuery(t *testing.T) {
+	// This fixture emits a matching input reaction without requiring interrupt.
+	// Merely consuming streamInput is deliberately insufficient for acceptance.
+	t.Setenv("PAIMOS_CLAUDE_TEST_MODE", "consumed_before_receipt")
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node runtime unavailable")
+	}
+	logPath := filepath.Join(t.TempDir(), "events")
+	t.Setenv("PAIMOS_CLAUDE_TEST_LOG", logPath)
+	adapter := newTestClaudeAdapter(t, node)
+	process, err := adapter.Start(context.Background(), StartRequest{Adapter: AdapterClaude, Workspace: t.TempDir(), Identity: "claude:fixture", Prompt: "initial fixture"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer process.Stop(context.Background(), ControlRequest{CorrelationID: "cleanup"})
+	effect, err := process.(InboxProcess).Inbox(context.Background(), ControlRequest{CorrelationID: "inbox-fixture", Text: "simple fixture input"})
+	if err != nil || effect.Primitive != "claude Query.streamInput" || effect.VendorMessageID == "" || effect.CorrelationID != "inbox-fixture" {
+		t.Fatal("simple Query handoff unconfirmed")
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "interrupt") {
+		t.Fatal("simple inbox interrupted Query")
+	}
+}

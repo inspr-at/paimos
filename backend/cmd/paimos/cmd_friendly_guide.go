@@ -31,6 +31,9 @@ func guideFriendlyStart(ctx context.Context, in io.Reader, out io.Writer, o *fri
 		if *dst != "" {
 			return nil
 		}
+		if len(choices) == 0 && name == "Parent" {
+			return fmt.Errorf("no active parent is available; bootstrap one with: %s orchestrator start --project %s --guided", friendlyCLIBase(client), o.Project)
+		}
 		if len(choices) == 0 {
 			return fmt.Errorf("no authorized %s choices are available; inspect the project or runtime configuration", name)
 		}

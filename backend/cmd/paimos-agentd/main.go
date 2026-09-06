@@ -115,8 +115,17 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		defer lock.Close()
 		var reporter agentd.Reporter
+		var consumers *nativeConsumers
 		if reportConfigured {
-			reporter, err = newCLIReporter(common.instance, root, reportHost, paimosPath, reportURL, reportAPIKeyFile)
+			var bridge *cliReporter
+			bridge, err = newCLIReporter(common.instance, root, reportHost, paimosPath, reportURL, reportAPIKeyFile)
+			if err == nil {
+				consumers, err = newNativeConsumers(root, common.instance, bridge)
+				if err == nil {
+					bridge.nativeDelivery = true
+					reporter = bridge
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -126,6 +135,13 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			AllowSharedWorkspaces: allowSharedWorkspaces})
 		if err != nil {
 			return err
+		}
+		if consumers != nil {
+			consumers.controller = supervisor
+			if err := supervisor.AttachConsumers(consumers); err != nil {
+				_ = supervisor.Close(context.Background())
+				return err
+			}
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()

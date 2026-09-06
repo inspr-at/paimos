@@ -99,6 +99,7 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 		return nil, err
 	}
 	process := newCodexProcess(cmd, stdin, stdout, observe)
+	process.executable = path
 	defer func() {
 		if returnErr != nil {
 			_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "agentd-codex-start-failed"})
@@ -178,6 +179,7 @@ type codexRPCMessage struct {
 type codexTurnResult struct{ failed bool }
 
 type codexProcess struct {
+	executable string
 	*ownedProcess
 	stdin   io.WriteCloser
 	observe func(AdapterEvent)
@@ -488,4 +490,34 @@ func (p *codexProcess) Wait() error {
 			return errors.New("Codex app-server event stream ended before turn completion")
 		}
 	}
+}
+
+// Inbox uses the documented non-interrupting queue primitive for the exact
+// thread created by this owned process. No vendor output is retained.
+func (p *codexProcess) Inbox(ctx context.Context, request ControlRequest) (ControlEffect, error) {
+	p.stateMu.Lock()
+	thread := p.threadID
+	p.stateMu.Unlock()
+	if thread == "" || p.executable == "" {
+		return ControlEffect{}, ErrCapabilityMissing
+	}
+	command := exec.CommandContext(ctx, p.executable, "queue", "--thread", thread, "--message", request.Text)
+	command.Stdout, command.Stderr = io.Discard, io.Discard
+	configured := ownedprocess.Configure(command)
+	command.Cancel = func() error { return ownedprocess.Signal(command, true) }
+	command.WaitDelay = 2 * time.Second
+	if err := command.Start(); err != nil {
+		return ControlEffect{}, errors.New("Codex inbox handoff unavailable")
+	}
+	if err := ownedprocess.Verify(command, configured); err != nil {
+		_ = ownedprocess.Signal(command, true)
+		_ = command.Wait()
+		return ControlEffect{}, errors.New("Codex inbox process ownership unavailable")
+	}
+	// Cancellation kills the owned command group as well as its wrapper.
+	err := command.Wait()
+	if err != nil {
+		return ControlEffect{}, errors.New("Codex inbox handoff unconfirmed")
+	}
+	return ControlEffect{Primitive: "codex queue --thread", CorrelationID: request.CorrelationID}, nil
 }

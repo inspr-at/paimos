@@ -81,19 +81,27 @@ type reportedSession struct {
 // child reads the protected API-key file itself; agentd never reads or copies
 // credentials, vendor traffic, prompts, or output.
 type cliReporter struct {
-	mu          sync.Mutex
-	instance    string
-	host        string
-	paimosPath  string
-	environment []string
-	run         reporterCommand
-	leases      reporterLeaseStore
-	sessions    map[string]reportedSession
-	controller  agentd.Controller
-	nextSession int
+	nativeDelivery bool
+	mu             sync.Mutex
+	instance       string
+	host           string
+	paimosPath     string
+	environment    []string
+	run            reporterCommand
+	leases         reporterLeaseStore
+	sessions       map[string]reportedSession
+	controller     agentd.Controller
+	nextSession    int
 }
 
 type harnessSessionResponse struct {
+	Host            string `json:"host"`
+	ManagementMode  string `json:"management_mode"`
+	MessageTargetID string `json:"message_target_id"`
+	Capabilities    struct {
+		Inbox bool `json:"inbox"`
+		Steer bool `json:"steer"`
+	} `json:"capabilities"`
 	ID              string                      `json:"id"`
 	ProjectID       int64                       `json:"project_id"`
 	AgentName       string                      `json:"agent_name"`
@@ -324,6 +332,10 @@ func (r *cliReporter) ReportStatus(ctx context.Context, status agentd.Status) er
 }
 
 func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session) error {
+	if r.nativeDelivery && session.State == agentd.StateStarting {
+		return nil
+	}
+
 	terminal := terminalAgentdState(session.State)
 	if (terminal && len(session.Reporter.Capabilities) == 0) || session.ProjectID <= 0 || !session.Managed {
 		return nil
@@ -402,6 +414,14 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	ownedCapabilities := session.Reporter.Capabilities
 	if len(ownedCapabilities) == 0 {
 		ownedCapabilities = reporterCapabilitySet(session.Capabilities)
+		if r.nativeDelivery && (session.Adapter == "codex" || session.Adapter == "claude") && nativeInboxSupported(r.controller, session) {
+			ownedCapabilities = append(ownedCapabilities, agentd.CapabilityInbox)
+			for _, cap := range session.Capabilities {
+				if cap == agentd.CapabilitySteer {
+					ownedCapabilities = append(ownedCapabilities, cap)
+				}
+			}
+		}
 		if err := r.checkpoint(ctx, session, agentd.ReporterState{Capabilities: ownedCapabilities}); err != nil {
 			return err
 		}
@@ -414,9 +434,15 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	if role == "" {
 		role = "worker"
 	}
+	steerMode := "none"
+	for _, cap := range ownedCapabilities {
+		if cap == agentd.CapabilitySteer {
+			steerMode = "owned"
+		}
+	}
 	args := []string{"--json", "harness", "register", "--project", strconv.FormatInt(session.ProjectID, 10),
 		"--agent", agentName, "--harness", harness, "--host", r.host, "--registration-file", "-",
-		"--management", "managed", "--role", role, "--steer-mode", "none", "--capability", capabilities}
+		"--management", "managed", "--role", role, "--steer-mode", steerMode, "--capability", capabilities}
 	workspace := session.WorkspaceProvenance
 	if workspace.Identity != "" {
 		args = append(args, "--workspace", workspace.CanonicalPath, "--workspace-identity", workspace.Identity,
@@ -460,6 +486,9 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	if json.Unmarshal(raw, &response) != nil || uuid.Validate(response.ID) != nil || response.ProjectID != session.ProjectID || response.AgentName != agentName || response.Harness != harness ||
 		response.Role != role || !reporterBindingMatches(response, session) || !reporterExecutionMatches(response, session) {
 		return errors.New("paimos reporter returned mismatched harness session scope")
+	}
+	if r.nativeDelivery && nativeInboxSupported(r.controller, session) && (!response.Capabilities.Inbox || response.Capabilities.Steer != (steerMode == "owned") || response.Host != r.host || uuid.Validate(response.MessageTargetID) != nil) {
+		return errors.New("native consumer registration capability or host evidence unavailable")
 	}
 	if err := r.checkpoint(ctx, session, agentd.ReporterState{PublicSessionID: response.ID, Capabilities: ownedCapabilities}); err != nil {
 		return err
@@ -750,4 +779,17 @@ func reporterClosedReason(state agentd.SessionState) string {
 	default:
 		return "stopped"
 	}
+}
+
+func nativeInboxSupported(controller agentd.Controller, session agentd.Session) bool {
+	supports, ok := controller.(interface{ SupportsInbox(string) bool })
+	if !ok || !supports.SupportsInbox(session.ID) {
+		return false
+	}
+	for _, cap := range session.Capabilities {
+		if cap == agentd.CapabilityInbox {
+			return true
+		}
+	}
+	return false
 }

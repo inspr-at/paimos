@@ -137,6 +137,11 @@ type Process interface {
 
 // Adapter is the PAI-849/PAI-850 handoff. Implementations start only a fresh
 // child process and may control only the harness thread reported by that child.
+// InboxProcess supports a documented simple handoff to the owned child.
+type InboxProcess interface {
+	Inbox(context.Context, ControlRequest) (ControlEffect, error)
+}
+
 type Adapter interface {
 	Name() string
 	Capabilities() []Capability

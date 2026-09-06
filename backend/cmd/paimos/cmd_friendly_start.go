@@ -480,11 +480,11 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 	plan.request.Workspace = resolvedWorkspace
 	daemon, err := friendlyDaemonClient(filepath.Join(runtimeDir, "agentd.sock"))
 	if err != nil {
-		return friendlyStartResult{}, errors.New("local daemon transport is unavailable; run paimos runtime doctor for the selected instance")
+		return friendlyStartResult{}, fmt.Errorf("local daemon transport is unavailable; run %s runtime doctor", friendlyCLIBase(client))
 	}
 	status, err := daemon.Status(ctx)
 	if err != nil {
-		return friendlyStartResult{}, errors.New("local daemon is unavailable; run paimos runtime setup, then paimos runtime doctor for the selected instance")
+		return friendlyStartResult{}, fmt.Errorf("local daemon is unavailable; run %s runtime setup, then %s runtime doctor", friendlyCLIBase(client), friendlyCLIBase(client))
 	}
 	if status.Instance != o.Deployment || status.DaemonID == "" {
 		return friendlyStartResult{}, errors.New("local daemon identity does not match the verified deployment; inspect paimos runtime doctor")
@@ -658,4 +658,17 @@ func friendlyTicketValue(value *int64) int64 {
 		return 0
 	}
 	return *value
+}
+
+func friendlyCLIBase(client *Client) string {
+	base := "paimos"
+	if client.identity.Name != "" && client.identity.Name != "env" {
+		base += " --instance " + shellQuote(client.identity.Name)
+	} else if flagInstance != "" {
+		base += " --instance " + shellQuote(flagInstance)
+	}
+	if flagConfigPath != "" {
+		base += " --config " + shellQuote(flagConfigPath)
+	}
+	return base
 }
