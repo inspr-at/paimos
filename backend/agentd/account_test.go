@@ -38,6 +38,27 @@ printf 'Logged in using an API key - suffix\n'
 	}
 }
 
+func TestCodexAccountProbeAcceptsOneBoundedStatusStream(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"stdout", "printf 'Logged in using ChatGPT\\n'", "chatgpt"},
+		{"stderr", "printf 'Logged in using ChatGPT\\n' >&2", "chatgpt"},
+		{"stderr-api-key", "printf 'Logged in using an API key - suffix\\n' >&2", "api_key"},
+		{"unknown", "printf 'private diagnostic\\n' >&2", "unknown"},
+		{"conflicting-streams", "printf 'Logged in using ChatGPT\\n'; printf 'Logged in using an API key - suffix\\n' >&2", "unknown"},
+		{"duplicate-streams", "printf 'Logged in using ChatGPT\\n'; printf 'Logged in using ChatGPT\\n' >&2", "unknown"},
+		{"mixed-one-stream", "printf 'Logged in using an API key - suffix\\nLogged in using ChatGPT\\n' >&2", "unknown"},
+		{"nonzero", "printf 'Logged in using ChatGPT\\n' >&2; exit 1", "unknown"},
+		{"oversized-stderr", "printf '" + strings.Repeat("x", 600) + "' >&2", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			probe := writeProbe(t, "#!/bin/sh\n[ \"$1:$2\" = \"login:status\" ] || exit 9\n"+tc.body+"\n")
+			if got := NewCodexAdapter(probe, "test").AccountLabel(context.Background()); got != tc.want {
+				t.Fatalf("closed label=%q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAccountLabelsFailClosedOnUnknownOrOversizedOutput(t *testing.T) {
 	unknown := writeProbe(t, "#!/bin/sh\nprintf 'private@example.invalid\\n'\n")
 	if got := NewCodexAdapter(unknown, "test").AccountLabel(context.Background()); got != "unknown" {

@@ -39,11 +39,31 @@ func runAccountProbe(ctx context.Context, path string, maximum int, kind account
 		return nil, errors.New("account probe kind is invalid")
 	}
 	output := &boundedAccountOutput{maximum: maximum}
+	diagnostic := &boundedAccountOutput{maximum: maximum}
 	command := exec.CommandContext(ctx, path, args...) // #nosec G204 G702 -- canonical executable and closed internal argv above.
 	command.Stdout = output
 	command.Stderr = io.Discard
-	if err := command.Run(); err != nil || output.overflow {
+	if kind == accountProbeCodex {
+		// Codex 0.153 writes its public login-status line to stderr. Keep each
+		// stream bounded and separate so mixed/conflicting output fails closed;
+		// no raw diagnostic is persisted or exposed by the closed label parser.
+		command.Stderr = diagnostic
+	}
+	if err := command.Run(); err != nil || output.overflow || diagnostic.overflow || output.Len()+diagnostic.Len() > maximum {
 		return nil, errors.New("account probe unavailable")
+	}
+	if kind == accountProbeCodex {
+		status, other := strings.TrimSpace(output.String()), strings.TrimSpace(diagnostic.String())
+		if status != "" && other != "" {
+			return nil, errors.New("account probe ambiguous")
+		}
+		if status == "" {
+			status = other
+		}
+		if strings.ContainsAny(status, "\r\n") {
+			return nil, errors.New("account probe ambiguous")
+		}
+		return []byte(status), nil
 	}
 	return output.Bytes(), nil
 }
