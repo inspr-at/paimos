@@ -451,10 +451,10 @@ onUnmounted(() => {
   cursor: default;
 }
 .undo-row--undo {
-  border-left: 3px solid color-mix(in srgb, var(--brand-blue) 55%, transparent);
+  border-left: 3px solid transparent;
 }
 .undo-row--redo {
-  border-left: 3px solid color-mix(in srgb, var(--brand-green) 55%, transparent);
+  border-left: 3px solid transparent;
 }
 .undo-row--history {
   opacity: 0.78;

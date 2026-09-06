@@ -60,22 +60,28 @@ type controlReplay struct {
 }
 
 type Supervisor struct {
+	consumers             RuntimeConsumers
+	consumersDone         chan struct{}
 	mu                    sync.RWMutex
 	startMu               sync.Mutex
+	closeMu               sync.Mutex
 	daemonID              string
 	adapters              map[string]Adapter
 	sessions              map[string]*sessionEntry
 	heartbeatInterval     time.Duration
 	maxSessions           int
 	closed                bool
+	runtimeQuiescing      bool
 	instance              string
 	journal               *registryJournal
+	starts                *startJournal
 	reporter              Reporter
 	dispatchResolver      DispatchResolver
 	allowSharedWorkspaces bool
 	inspectWorkspace      workspaceInspector
 	reporterErrorCode     ErrorCode
 	reporterFailures      int64
+	reporterLastSuccess   time.Time
 	reportMu              sync.Mutex
 	reportWake            chan struct{}
 	done                  chan struct{}
@@ -119,6 +125,10 @@ func NewSupervisor(config SupervisorConfig) (*Supervisor, error) {
 			return nil, err
 		}
 		s.journal = journal
+		s.starts, err = openStartJournal(config.StateRoot, config.Instance)
+		if err != nil {
+			return nil, err
+		}
 		for _, recovered := range journal.recovered() {
 			capabilities := map[Capability]bool{CapabilityInbox: true, CapabilityStatus: true}
 			s.sessions[recovered.ID] = &sessionEntry{session: recovered, capabilities: capabilities}
@@ -189,16 +199,14 @@ func canonicalCapabilities(input []Capability) ([]Capability, error) {
 	return out, nil
 }
 
-func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, error) {
+func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attempted *bool, generation string) (Session, error) {
 	validated, err := validateStartRequest(request)
 	if err != nil {
 		return Session{}, err
 	}
-	s.startMu.Lock()
-	defer s.startMu.Unlock()
 	s.mu.RLock()
 	adapter := s.adapters[validated.Adapter]
-	closed := s.closed
+	closed := s.closed || s.runtimeQuiescing
 	s.mu.RUnlock()
 	if closed {
 		return Session{}, errors.New("agentd supervisor is closed")
@@ -235,6 +243,19 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 			accountLabel = candidate
 		}
 	}
+	if validated.ExpectedAccountLabel != "" && (accountLabel == "unknown" || accountLabel != validated.ExpectedAccountLabel) {
+		return Session{}, errors.New("managed account constraint could not be verified")
+	}
+	if validated.ExpectedMachineID != "" {
+		prober, ok := s.reporter.(MachineProber)
+		if !ok {
+			return Session{}, errors.New("authenticated reporter machine provenance unavailable")
+		}
+		machine, probeErr := prober.AuthenticatedMachineID(ctx)
+		if probeErr != nil || machine != validated.ExpectedMachineID {
+			return Session{}, errors.New("managed machine constraint could not be verified")
+		}
+	}
 	capabilities, err := canonicalCapabilities(adapter.Capabilities())
 	if err != nil {
 		return Session{}, err
@@ -247,8 +268,11 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 		return Session{}, ErrAdapterUnsupported
 	}
 	now := time.Now().UTC()
+	if generation == "" {
+		generation = uuid.NewString()
+	}
 	entry := &sessionEntry{session: Session{
-		ID: uuid.NewString(), Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
+		ID: generation, Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
 		ProjectID: validated.ProjectID, Role: validated.Role, ParentSessionID: validated.ParentSessionID, TicketID: validated.TicketID, WorkShape: validated.WorkShape,
 		WorkspaceProvenance: provenance, DispatchProfile: profile, AccountLabel: accountLabel,
 		Capabilities: append([]Capability(nil), capabilities...), Managed: true, State: StateStarting,
@@ -267,6 +291,8 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 		stopLifecycleCancel()
 		cancelStart()
 	}()
+	*attempted = true
+	validated.KeepAlive = true
 	process, err := adapter.Start(startCtx, validated, observe)
 	if err != nil {
 		s.releaseReservation(entry.session.ID)
@@ -307,7 +333,7 @@ func (s *Supervisor) Start(ctx context.Context, request StartRequest) (Session, 
 
 func (s *Supervisor) reserveSession(entry *sessionEntry) error {
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || s.runtimeQuiescing {
 		s.mu.Unlock()
 		return errors.New("agentd supervisor is closed")
 	}
@@ -364,6 +390,12 @@ func (s *Supervisor) releaseReservation(id string) {
 }
 
 func validateStartRequest(request StartRequest) (StartRequest, error) {
+	if request.ExpectedAccountLabel != "" && (!validAccountLabel(request.ExpectedAccountLabel) || request.ExpectedAccountLabel == "unknown") {
+		return request, errors.New("invalid expected account label")
+	}
+	if request.ExpectedMachineID != "" && !validSafeLabel(request.ExpectedMachineID, 128) {
+		return request, errors.New("invalid expected machine identity")
+	}
 	request.Adapter = strings.TrimSpace(request.Adapter)
 	request.Identity = strings.TrimSpace(request.Identity)
 	if request.Adapter == "" || len(request.Adapter) > 64 || strings.ContainsAny(request.Adapter, "\x00\r\n/ ") {
@@ -448,6 +480,9 @@ func (e *sessionEntry) observe(event AdapterEvent) {
 	}
 	if validErrorCode(event.ErrorCode) {
 		e.session.LastErrorCode = event.ErrorCode
+		if event.ErrorCode == ErrorTurnFailed || event.ErrorCode == ErrorAppServerProtocol {
+			e.failureCode = event.ErrorCode
+		}
 	}
 	e.session.HeartbeatAt = time.Now().UTC()
 	e.refreshSteerableLocked()
@@ -481,7 +516,7 @@ func validEventKind(kind EventKind) bool {
 
 func validErrorCode(code ErrorCode) bool {
 	switch code {
-	case ErrorEventStreamBound, ErrorAppServerProtocol, ErrorChildExitFailed, ErrorChildStopFailed, ErrorOwnershipLost, ErrorWorkspaceConflict:
+	case ErrorEventStreamBound, ErrorAppServerProtocol, ErrorChildExitFailed, ErrorTurnFailed, ErrorChildStopFailed, ErrorOwnershipLost, ErrorWorkspaceConflict:
 		return true
 	default:
 		return false
@@ -584,6 +619,7 @@ func (s *Supervisor) report(ctx context.Context) {
 		s.reporterFailures++
 	} else {
 		s.reporterErrorCode = ""
+		s.reporterLastSuccess = time.Now().UTC()
 	}
 	s.mu.Unlock()
 }
@@ -959,30 +995,63 @@ func (s *Supervisor) Reject(ctx context.Context, id string, request ControlReque
 }
 
 func (s *Supervisor) Close(ctx context.Context) error {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil
+	if !s.closed {
+		s.closed = true
+		s.lifecycleCancel()
+		close(s.done)
 	}
-	s.closed = true
-	s.lifecycleCancel()
-	close(s.done)
 	s.mu.Unlock()
+	var errs []error
 
 	// Start holds this gate from reservation through Process publication. The
 	// lifecycle cancellation above makes an in-flight adapter unwind; taking
 	// the gate guarantees no starting child can be skipped by the snapshot.
-	s.startMu.Lock()
-	defer s.startMu.Unlock()
+	s.mu.RLock()
+	consumersDone := s.consumersDone
+	s.mu.RUnlock()
+	if consumersDone != nil {
+		drainCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		select {
+		case <-consumersDone:
+		case <-drainCtx.Done():
+			errs = append(errs, errors.New("runtime consumer drain incomplete"))
+		}
+		cancel()
+	}
+	// An expired caller deadline must not strand this generation's children.
+	// Teardown has its own small bound; another Close may retry unfinished work.
+	teardownCtx, cancelTeardown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelTeardown()
+	locked := false
+	for !locked {
+		locked = s.startMu.TryLock()
+		if locked {
+			break
+		}
+		select {
+		case <-teardownCtx.Done():
+			errs = append(errs, errors.New("runtime start drain incomplete"))
+		case <-time.After(10 * time.Millisecond):
+			continue
+		}
+		break
+	}
+	if locked {
+		defer s.startMu.Unlock()
+	}
 	s.mu.Lock()
 	entries := make([]*sessionEntry, 0, len(s.sessions))
 	for _, entry := range s.sessions {
 		entries = append(entries, entry)
 	}
 	s.mu.Unlock()
-	var errs []error
 	for _, entry := range entries {
-		entry.controlMu.Lock()
+		controlLocked := entry.controlMu.TryLock()
+		// A cancel-insensitive delivery may retain its control gate. Its durable
+		// receipt stays unknown while Stop still reaps the exact owned process.
 		entry.mu.Lock()
 		state := entry.session.State
 		if entry.process != nil && (state == StateRunning || state == StateStopping || state == StateFailed) {
@@ -992,17 +1061,21 @@ func (s *Supervisor) Close(ctx context.Context) error {
 			}
 			process := entry.process
 			entry.mu.Unlock()
-			if _, err := process.Stop(ctx, ControlRequest{CorrelationID: "agentd-shutdown"}); err != nil {
+			if _, err := process.Stop(teardownCtx, ControlRequest{CorrelationID: "agentd-shutdown"}); err != nil {
 				errs = append(errs, err)
 			}
-			entry.controlMu.Unlock()
+			if controlLocked {
+				entry.controlMu.Unlock()
+			}
 			continue
 		}
 		entry.mu.Unlock()
-		entry.controlMu.Unlock()
+		if controlLocked {
+			entry.controlMu.Unlock()
+		}
 	}
 	for _, entry := range entries {
-		if err := waitSessionFinalized(ctx, entry); err != nil {
+		if err := waitSessionFinalized(teardownCtx, entry); err != nil {
 			errs = append(errs, err)
 		}
 	}

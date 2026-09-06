@@ -398,14 +398,15 @@ watch(activeIndex, () => {
   font-size: 13px;
   transition: background .08s;
 }
-.sp-item:hover,
+.sp-item:hover:not(.sp-item--active),
 .sp-item--active,
-.sp-more:hover,
+.sp-more:hover:not(.sp-more--active),
 .sp-more--active {
   background: color-mix(in srgb, var(--brand-blue) 9%, var(--bg-card));
 }
 .sp-item--active {
-  box-shadow: inset 3px 0 0 var(--brand-blue);
+  background: color-mix(in srgb, var(--paimos-aqua) 24%, var(--bg-card));
+  color: var(--paimos-selection-ink);
 }
 .sp-item--direct {
   flex-direction: column;
@@ -462,7 +463,8 @@ watch(activeIndex, () => {
   border-top: 1px solid var(--border);
 }
 .sp-more--active {
-  box-shadow: inset 3px 0 0 var(--brand-blue);
+  background: color-mix(in srgb, var(--paimos-aqua) 24%, var(--bg-card));
+  color: var(--paimos-selection-ink);
 }
 .sp-more-text {
   font-size: 11px;

@@ -11,11 +11,12 @@
 const { chromium } = require('playwright');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
-const path = require('path');
 
-const API = 'http://localhost:8888';
-const APP = 'http://localhost:5173';
-const DB = process.env.PAIMOS_DB || path.resolve(__dirname, '../../data/paimos.db');
+const { captureConfig } = require('./capture-config.cjs');
+const capture = captureConfig();
+const API = capture.apiUrl;
+const APP = capture.appUrl;
+const DB = process.env.PAIMOS_DB || capture.database;
 const OUT = process.env.OUT_DIR || '/tmp/pai746';
 const TOKEN = process.env.PAIMOS_DEV_LOGIN_TOKEN || '';
 

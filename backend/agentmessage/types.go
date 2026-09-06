@@ -40,6 +40,18 @@ type DeliveryTargetSnapshot struct {
 	SimpleFallback *DeliveryTargetBinding `json:"simple_fallback"`
 }
 
+// DeliveryRecoveryBinding is the content-free effective routing evidence for
+// a message whose original target snapshot could not safely be executed after
+// its managed generation closed. It is a v2/internal extension; EnvelopeV1
+// deliberately omits it.
+type DeliveryRecoveryBinding struct {
+	BindingID        string `json:"binding_id"`
+	Kind             string `json:"kind"`
+	Version          int    `json:"version"`
+	HarnessSessionID string `json:"harness_session_id"`
+	Sequence         int    `json:"sequence"`
+}
+
 // DeliveryWork is disclosed only by the attributed listen endpoint to the
 // receiver-side worker. TargetRef is decrypted for that worker and is never
 // returned by ordinary message list/get APIs.
@@ -78,13 +90,14 @@ type Envelope struct {
 	// HumanResolutionOutcome is the content-free authoritative disposition of
 	// a held action request. The human/session attribution remains in the
 	// private audit ledger and is deliberately not projected with messages.
-	HumanResolutionOutcome string                  `json:"human_resolution_outcome,omitempty"`
-	CreatedAt              string                  `json:"created_at"`
-	ReadAt                 string                  `json:"read_at,omitempty"`
-	DeliveryLevel          string                  `json:"delivery_level"`
-	DeliveryFallback       string                  `json:"delivery_fallback"`
-	DeliveryTarget         *DeliveryTargetSnapshot `json:"delivery_target"`
-	DeliveryWork           *DeliveryWork           `json:"delivery_work,omitempty"`
+	HumanResolutionOutcome  string                   `json:"human_resolution_outcome,omitempty"`
+	CreatedAt               string                   `json:"created_at"`
+	ReadAt                  string                   `json:"read_at,omitempty"`
+	DeliveryLevel           string                   `json:"delivery_level"`
+	DeliveryFallback        string                   `json:"delivery_fallback"`
+	DeliveryTarget          *DeliveryTargetSnapshot  `json:"delivery_target"`
+	DeliveryEffectiveTarget *DeliveryRecoveryBinding `json:"delivery_effective_target,omitempty"`
+	DeliveryWork            *DeliveryWork            `json:"delivery_work,omitempty"`
 }
 
 // EnvelopeV1 is the frozen first-version wire projection. Reply obligations

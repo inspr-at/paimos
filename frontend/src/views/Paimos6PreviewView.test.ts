@@ -17,7 +17,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 import { api, ApiError } from '@/api/client'
 import { mountComponent } from '@/components/ai/testMount'
 import { useAuthStore, type User } from '@/stores/auth'
-import Paimos6PreviewView from './Paimos6PreviewView.vue'
+import Paimos6PreviewView from './Paimos6SessionsView.vue'
 
 const PROJECT_ID = 42
 const PROJECT_B_ID = 99

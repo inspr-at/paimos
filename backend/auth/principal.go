@@ -190,6 +190,27 @@ func ReauthorizeRequestPrincipalTx(ctx context.Context, tx *sql.Tx, r *http.Requ
 	return ReauthorizePrincipalTx(ctx, tx, principal, now)
 }
 
+// ReauthorizeRuntimeReporterTx verifies the current credential behind a
+// persisted runtime owner. A future runtime lease is not authority by itself:
+// the exact API key must still belong to an active super-admin, retain the
+// runner scope, and name an active project in this same transaction.
+func ReauthorizeRuntimeReporterTx(ctx context.Context, tx *sql.Tx, userID, apiKeyID, projectID int64, now time.Time) (*models.User, Principal, error) {
+	expected, err := NewAPIKeyPrincipal(apiKeyID, userID, ParseScopes("*"))
+	if err != nil {
+		return nil, Principal{}, ErrCredentialUnavailable
+	}
+	user, current, err := ReauthorizePrincipalTx(ctx, tx, expected, now)
+	if err != nil || user == nil || current.Kind() != PrincipalAPIKey || current.Impersonated() ||
+		!IsSuperAdmin(user) || !current.HasScope(ScopeAgentControlsRunner) {
+		return nil, Principal{}, ErrCredentialUnavailable
+	}
+	var active int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM projects WHERE id=? AND status='active'`, projectID).Scan(&active); err != nil {
+		return nil, Principal{}, ErrCredentialUnavailable
+	}
+	return user, current, nil
+}
+
 func reauthorizeSessionPrincipalTx(ctx context.Context, tx *sql.Tx, expected Principal, now time.Time) (*models.User, Principal, error) {
 	if expected.kind != PrincipalSession || !validSessionCredentialID(expected.sessionCredentialID) || expected.apiKeyID != 0 {
 		return nil, Principal{}, ErrCredentialUnavailable

@@ -728,7 +728,7 @@ onUnmounted(stopColumnResize)
 .issue-table td { padding: .6rem .85rem; font-size: 13px; vertical-align: middle; box-sizing: border-box; }
 
 .clickable { cursor: pointer; }
-.issue-table tbody tr.clickable:hover { background: #f0f2f4; }
+.issue-table tbody tr.clickable:hover:not(.row-active-panel) { background: #f0f2f4; }
 .inline-edit-cell { cursor: default; position: relative; overflow: visible; }
 .inline-control { display: inline-flex; align-items: center; min-height: 28px; max-width: 100%; }
 .inline-control :deep(.meta-select-trigger) { min-width: 112px; }
@@ -787,13 +787,13 @@ onUnmounted(stopColumnResize)
   z-index: 12;
 }
 .issue-table thead .sel-th { background: var(--bg); z-index: 13; }
-.issue-table tbody tr.row-active-panel .sel-td { background: color-mix(in srgb, var(--brand-blue) 8%, var(--bg-card)); }
+.issue-table tbody tr.row-active-panel .sel-td { background: color-mix(in srgb, var(--paimos-aqua) 24%, var(--bg-card)); }
 .issue-table tbody tr.row-selected .sel-td { background: var(--brand-blue-pale); }
-.issue-table tbody tr:hover .sel-td { background: #f0f2f4; }
+.issue-table tbody tr:hover:not(.row-active-panel) .sel-td { background: #f0f2f4; }
 .issue-table tbody tr.row-selected:hover .sel-td { background: var(--brand-blue-pale); }
 .sel-cb { width: 15px; height: 15px; padding: 0; border: revert; border-radius: revert; background: revert; cursor: pointer; accent-color: var(--brand-blue); }
 .row-selected { background: var(--brand-blue-pale) !important; }
-.row-active-panel { background: color-mix(in srgb, var(--brand-blue) 8%, var(--bg-card)); box-shadow: inset 3px 0 0 var(--brand-blue); }
+.row-active-panel { background: color-mix(in srgb, var(--paimos-aqua) 24%, var(--bg-card)); }
 
 .sortable-th { cursor: pointer; user-select: none; white-space: nowrap; }
 .sortable-th:hover { color: var(--text); background: var(--border) !important; }
@@ -831,9 +831,9 @@ onUnmounted(stopColumnResize)
 .issue-table--selection-mode .col-key { left: 36px; }
 .issue-table thead .col-key { background: var(--bg); z-index: 12; }
 .issue-table tbody .col-key { background: var(--bg-card); }
-.issue-table tbody tr.row-active-panel .col-key { background: color-mix(in srgb, var(--brand-blue) 8%, var(--bg-card)); }
+.issue-table tbody tr.row-active-panel .col-key { background: color-mix(in srgb, var(--paimos-aqua) 24%, var(--bg-card)); }
 .issue-table tbody tr.row-selected .col-key { background: var(--brand-blue-pale); }
-.issue-table tbody tr:hover .col-key { background: #f0f2f4; }
+.issue-table tbody tr:hover:not(.row-active-panel) .col-key { background: #f0f2f4; }
 .issue-table tbody tr.row-selected:hover .col-key { background: var(--brand-blue-pale); }
 .key-cell { white-space: nowrap; }
 .issue-title-cell { min-width: 220px; }
@@ -926,16 +926,16 @@ onUnmounted(stopColumnResize)
 .col-actions { position: sticky; right: 0; text-align: center; white-space: nowrap; padding-left: 1rem; padding-right: 1rem; }
 .issue-table thead .col-actions { z-index: 12; background: var(--bg); }
 .issue-table tbody .col-actions { z-index: 11; background: var(--bg-card); }
-.issue-table tbody tr.row-active-panel .col-actions { background: color-mix(in srgb, var(--brand-blue) 8%, var(--bg-card)); }
+.issue-table tbody tr.row-active-panel .col-actions { background: color-mix(in srgb, var(--paimos-aqua) 24%, var(--bg-card)); }
 .issue-table tbody tr.row-selected .col-actions { background: var(--brand-blue-pale); }
-.issue-table tbody tr:hover .col-actions { background: #f0f2f4; }
+.issue-table tbody tr:hover:not(.row-active-panel) .col-actions { background: #f0f2f4; }
 .issue-table tbody tr.row-selected:hover .col-actions { background: var(--brand-blue-pale); }
 
 .th-toggle { cursor: pointer; }
 .unit-toggle { color: var(--brand-blue); font-weight: 600; text-decoration: underline; text-decoration-style: dotted; }
 
 
-.row-expanded > td:first-child { border-left: 2px solid var(--brand-blue); }
+.row-expanded > td:first-child { border-left: 2px solid transparent; }
 .expand-panel-row { background: var(--surface-2); }
 .expand-panel-cell { padding: 0 !important; border-bottom: 1px solid var(--border); }
 .expand-empty { font-size: 12px; color: var(--text-muted); padding: .5rem 1rem; font-style: italic; }

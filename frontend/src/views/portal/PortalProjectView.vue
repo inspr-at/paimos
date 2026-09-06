@@ -754,16 +754,10 @@ async function submitRequest() {
   gap: 0.5rem;
 }
 .pv__tab--active {
-  color: var(--brand, #2563eb);
-}
-.pv__tab--active::after {
-  content: '';
-  position: absolute;
-  left: 0.5rem;
-  right: 0.5rem;
-  bottom: -1px;
-  height: 2px;
-  background: var(--brand, #2563eb);
+  color: var(--paimos-selection-ink);
+  background: var(--paimos-selection-fill);
+  border-radius: 5px 5px 0 0;
+  font-weight: 600;
 }
 .pv__tab-count {
   background: var(--bg-subtle, #f3f4f6);

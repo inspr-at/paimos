@@ -151,6 +151,8 @@ Get started:
 	// PAI-506: first-class project-agent CRUD.
 	cmd.AddCommand(agentCmd())
 	cmd.AddCommand(orchestratorCmd())
+	cmd.AddCommand(workerCmd())
+	cmd.AddCommand(runtimeCmd())
 	// PAI-330: skill render with adapter dispatch.
 	cmd.AddCommand(skillCmd())
 	// PAI-352: paimos onboard — human-readable briefing renderer.

@@ -163,7 +163,9 @@ test('zero-agent setup stays actionable, contextual, keyboard reachable, and mob
 }) => {
   const fixture = await installFixture(page)
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto(`${APP_ORIGIN}/?project=${PROJECT_ID}`, { waitUntil: 'networkidle' })
+  await page.goto(`${APP_ORIGIN}/?view=sessions&project=${PROJECT_ID}`, {
+    waitUntil: 'networkidle',
+  })
 
   const editor = page.getByRole('link', { name: 'Open agent editor' })
   await expect(editor).toHaveAttribute('href', `/projects/${PROJECT_ID}?tab=agents`)
@@ -209,7 +211,9 @@ test('zero-agent setup stays actionable, contextual, keyboard reachable, and mob
 test('configured empty state reaches the existing talk panel without sending', async ({ page }) => {
   const fixture = await installFixture(page)
   fixture.configureOrchestrator('Amy / Primary')
-  await page.goto(`${APP_ORIGIN}/?project=${PROJECT_ID}`, { waitUntil: 'networkidle' })
+  await page.goto(`${APP_ORIGIN}/?view=sessions&project=${PROJECT_ID}`, {
+    waitUntil: 'networkidle',
+  })
 
   await page.getByRole('button', { name: 'Talk to orchestrator' }).click()
   await expect(page.locator('.p6-talk-door')).toBeVisible()

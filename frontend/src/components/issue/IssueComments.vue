@@ -427,8 +427,10 @@ async function flipVisibility(comment: Comment) {
 .comment-vis-badge:not(:disabled) { cursor: pointer; }
 .comment-vis-badge:not(:disabled):hover { filter: brightness(0.95); }
 .comment--external .comment-body-wrap {
-  /* subtle left rail picks out customer-visible items in the thread */
-  border-left: 2px solid var(--brand-blue, #2563eb);
+  /* The visibility badge carries the meaning; the body stays quietly tinted. */
+  border-left: 2px solid transparent;
+  background: color-mix(in srgb, var(--brand-blue) 4%, var(--bg-card));
+  border-radius: 4px;
   padding-left: .55rem;
   margin-left: -.55rem;
 }

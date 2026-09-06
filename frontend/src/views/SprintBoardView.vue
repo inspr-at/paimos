@@ -880,7 +880,7 @@ function sprintLabel(s: Sprint): string {
   margin-bottom: -2px; transition: color .15s, border-color .15s;
 }
 .sb-tab:hover { color: var(--text); }
-.sb-tab.active { color: var(--brand-blue); border-bottom-color: var(--brand-blue); font-weight: 600; }
+.sb-tab.active { color: var(--paimos-selection-ink); background: var(--paimos-selection-fill); font-weight: 600; }
 .sb-tab-spacer { flex: 1; }
 .sb-tree-btn {
   background: none; border: none; cursor: pointer; padding: .3rem .4rem;
@@ -1012,10 +1012,6 @@ function sprintLabel(s: Sprint): string {
   height: 3px; background: var(--color-primary, #2563eb); border-radius: 2px;
   pointer-events: none;
 }
-.sb-ticket--backlog     { border-left-color: #6b7280; }
-.sb-ticket--in-progress { border-left-color: #d97706; }
-.sb-ticket--done        { border-left-color: #059669; }
-.sb-ticket--cancelled   { border-left-color: #dc2626; }
 
 .sb-expand-btn {
   background: none; border: none; padding: .1rem; cursor: pointer;

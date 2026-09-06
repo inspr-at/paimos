@@ -98,7 +98,7 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 		_ = cmd.Wait()
 		return nil, err
 	}
-	process := newCodexProcess(cmd, stdin, stdout, observe)
+	process := newCodexProcess(cmd, stdin, stdout, observe, request)
 	defer func() {
 		if returnErr != nil {
 			_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "agentd-codex-start-failed"})
@@ -152,6 +152,9 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 		turnStart["model"] = request.ResolvedProfile.Model
 		turnStart["effort"] = request.ResolvedProfile.Effort
 	}
+	if !process.beginTurn() {
+		return nil, ErrCapabilityMissing
+	}
 	if err := process.call(operationCtx, "turn/start", turnStart, &turnResponse); err != nil {
 		return nil, fmt.Errorf("start Codex app-server turn: %w", err)
 	}
@@ -159,7 +162,9 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 		return nil, errors.New("Codex app-server returned an invalid active turn")
 	}
 	process.setTurn(turnResponse.Turn.ID)
-	process.observeEvent(AdapterEvent{Kind: EventTurnStarted})
+	if _, _, e := process.target(); e == nil {
+		process.observeEvent(AdapterEvent{Kind: EventTurnStarted})
+	}
 	return process, nil
 }
 
@@ -178,11 +183,14 @@ type codexRPCMessage struct {
 type codexTurnResult struct{ failed bool }
 
 type codexProcess struct {
+	persistent    bool
+	model, effort string
 	*ownedProcess
 	stdin   io.WriteCloser
 	observe func(AdapterEvent)
 
 	writeMu sync.Mutex
+	eventMu sync.Mutex
 	rpcMu   sync.Mutex
 	nextID  int
 	pending map[string]chan codexRPCMessage
@@ -192,15 +200,24 @@ type codexProcess struct {
 	turnID              string
 	earlyCompleted      string
 	earlyCompletedState string
+	startingTurn        bool
+	terminalFailure     bool
+	earlyToolTurns      map[string]bool
 	turnDone            chan codexTurnResult
 	turnDoneOnce        sync.Once
 	streamDone          chan struct{}
 	streamDoneOnce      sync.Once
 }
 
-func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent)) *codexProcess {
+func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent), requests ...StartRequest) *codexProcess {
 	p := &codexProcess{ownedProcess: newOwnedProcess(cmd), stdin: stdin, observe: observe,
 		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1), streamDone: make(chan struct{})}
+	if len(requests) > 0 {
+		p.persistent = requests[0].KeepAlive
+		if requests[0].ResolvedProfile != nil {
+			p.model, p.effort = requests[0].ResolvedProfile.Model, requests[0].ResolvedProfile.Effort
+		}
+	}
 	go p.readLoop(stdout)
 	return p
 }
@@ -222,7 +239,7 @@ func (p *codexProcess) readLoop(reader io.Reader) {
 	for scanner.Scan() {
 		var message codexRPCMessage
 		if json.Unmarshal(scanner.Bytes(), &message) != nil {
-			p.observeEvent(AdapterEvent{Kind: EventToolStarted, ErrorCode: ErrorAppServerProtocol})
+			p.observeEvent(AdapterEvent{ErrorCode: ErrorAppServerProtocol})
 			p.abortStream()
 			return
 		}
@@ -241,7 +258,7 @@ func (p *codexProcess) readLoop(reader io.Reader) {
 		p.handleNotification(message)
 	}
 	if scanner.Err() != nil {
-		p.observeEvent(AdapterEvent{Kind: EventToolStarted, ErrorCode: ErrorEventStreamBound})
+		p.observeEvent(AdapterEvent{ErrorCode: ErrorEventStreamBound})
 		p.abortStream()
 	}
 }
@@ -252,9 +269,16 @@ func (p *codexProcess) abortStream() {
 }
 
 func (p *codexProcess) handleNotification(message codexRPCMessage) {
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
 	var params struct {
 		ThreadID string `json:"threadId"`
-		Thread   struct {
+		TurnID   string `json:"turnId"`
+		Item     struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"item"`
+		Thread struct {
 			ID string `json:"id"`
 		} `json:"thread"`
 		Turn struct {
@@ -272,33 +296,96 @@ func (p *codexProcess) handleNotification(message codexRPCMessage) {
 			p.observeEvent(AdapterEvent{Kind: EventTurnStarted})
 		}
 	case "item/started":
-		p.observeEvent(AdapterEvent{Kind: EventToolStarted})
+		if json.Unmarshal(message.Params, &params) != nil || !validOpaqueID(params.Item.ID) || !validOpaqueID(params.TurnID) || !codexToolItem(params.Item.Type) {
+			return
+		}
+		p.stateMu.Lock()
+		ownedThread := params.ThreadID != "" && params.ThreadID == p.threadID && !p.terminalFailure
+		owned := ownedThread && params.TurnID == p.turnID
+		overflow := false
+		if ownedThread && p.startingTurn {
+			if len(p.earlyToolTurns) < 8 || p.earlyToolTurns[params.TurnID] {
+				if p.earlyToolTurns == nil {
+					p.earlyToolTurns = make(map[string]bool)
+				}
+				p.earlyToolTurns[params.TurnID] = true
+			} else {
+				overflow = true
+			}
+		}
+		p.stateMu.Unlock()
+		if overflow {
+			p.failAmbiguousTurn()
+			return
+		}
+		if owned {
+			p.observeEvent(AdapterEvent{Kind: EventToolStarted})
+		}
 	case "turn/completed":
 		if json.Unmarshal(message.Params, &params) == nil && validOpaqueID(params.Turn.ID) {
-			p.observeEvent(AdapterEvent{Kind: EventTurnCompleted})
-			p.recordCompletion(params.Turn.ID, params.Turn.Status)
+			p.recordCompletion(params.ThreadID, params.Turn.ID, params.Turn.Status)
 		}
 	}
 }
 
-func (p *codexProcess) recordCompletion(turnID, status string) {
+// This allowlist follows the installed app-server's ThreadItem schema. User
+// messages, reasoning, plans and unknown future items are not tool executions.
+func codexToolItem(kind string) bool {
+	switch kind {
+	case "commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall", "collabAgentToolCall", "webSearch", "imageView", "sleep", "imageGeneration":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *codexProcess) recordCompletion(threadID, turnID, status string) {
 	p.stateMu.Lock()
-	if p.turnID == "" {
+	if threadID == "" || threadID != p.threadID || p.terminalFailure {
+		p.stateMu.Unlock()
+		return
+	}
+	if p.startingTurn {
 		p.earlyCompleted, p.earlyCompletedState = turnID, status
 		p.stateMu.Unlock()
 		return
 	}
-	matches := p.turnID == turnID
+	matches := p.turnID != "" && p.turnID == turnID
 	p.stateMu.Unlock()
 	if matches {
-		p.completeTurn(status)
+		p.completeTurn(turnID, status)
 	}
 }
 
-func (p *codexProcess) completeTurn(status string) {
-	p.turnDoneOnce.Do(func() {
-		p.turnDone <- codexTurnResult{failed: status != "completed" && status != "interrupted"}
-	})
+func (p *codexProcess) completeTurn(turnID, status string) {
+	failed := status != "completed" && status != "interrupted"
+	p.stateMu.Lock()
+	if p.turnID != turnID || p.terminalFailure {
+		p.stateMu.Unlock()
+		return
+	}
+	p.terminalFailure = failed
+	p.turnID = ""
+	p.earlyCompleted, p.earlyCompletedState = "", ""
+	p.stateMu.Unlock()
+	if failed {
+		code := ErrorAppServerProtocol
+		if status == "failed" {
+			code = ErrorTurnFailed
+		}
+		p.observeEvent(AdapterEvent{ErrorCode: code})
+	} else {
+		p.observeEvent(AdapterEvent{Kind: EventTurnCompleted})
+	}
+	if !p.persistent {
+		p.turnDoneOnce.Do(func() { p.turnDone <- codexTurnResult{failed: failed} })
+	}
+	if failed {
+		// A failed terminal turn must never leave a reusable, falsely idle handle.
+		// Close only this live owned app-server; the existing drain path reaps it.
+		p.abortStream()
+		return
+	}
 }
 
 func (p *codexProcess) setThread(threadID string) {
@@ -308,13 +395,50 @@ func (p *codexProcess) setThread(threadID string) {
 }
 
 func (p *codexProcess) setTurn(turnID string) {
+	// The RPC response and notification stream race. Serialize their evidence
+	// so a proved early tool cannot appear after this turn's completion.
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
 	p.stateMu.Lock()
-	p.turnID = turnID
-	earlyID, earlyStatus := p.earlyCompleted, p.earlyCompletedState
-	p.stateMu.Unlock()
-	if earlyID == turnID {
-		p.completeTurn(earlyStatus)
+	if p.terminalFailure {
+		p.stateMu.Unlock()
+		return
 	}
+	p.turnID = turnID
+	p.startingTurn = false
+	earlyID, earlyStatus := p.earlyCompleted, p.earlyCompletedState
+	earlyTool := p.earlyToolTurns[turnID]
+	p.earlyToolTurns = nil
+	p.earlyCompleted, p.earlyCompletedState = "", ""
+	p.stateMu.Unlock()
+	if earlyTool {
+		p.observeEvent(AdapterEvent{Kind: EventToolStarted})
+	}
+	if earlyID == turnID {
+		p.completeTurn(turnID, earlyStatus)
+	}
+}
+
+func (p *codexProcess) beginTurn() bool {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	if p.threadID == "" || p.turnID != "" || p.startingTurn || p.terminalFailure {
+		return false
+	}
+	p.startingTurn = true
+	p.earlyToolTurns = nil
+	return true
+}
+
+func (p *codexProcess) failAmbiguousTurn() {
+	p.stateMu.Lock()
+	p.terminalFailure = true
+	p.startingTurn = false
+	p.earlyToolTurns = nil
+	p.earlyCompleted, p.earlyCompletedState = "", ""
+	p.stateMu.Unlock()
+	p.observeEvent(AdapterEvent{ErrorCode: ErrorAppServerProtocol})
+	p.abortStream()
 }
 
 func (p *codexProcess) target() (string, string, error) {
@@ -448,6 +572,22 @@ func (p *codexProcess) Stop(ctx context.Context, request ControlRequest) (Contro
 }
 
 func (p *codexProcess) Wait() error {
+	if p.persistent {
+		select {
+		case <-p.done:
+		case <-p.streamDone:
+		}
+		err := p.ownedProcess.Wait()
+		p.stateMu.Lock()
+		failed := p.terminalFailure
+		p.stateMu.Unlock()
+		if failed {
+			// Closing stdin can let the child exit zero before the owned signal.
+			// Physical reap success must not erase the logical turn failure.
+			return errors.New("Codex terminal turn failed")
+		}
+		return err
+	}
 	select {
 	case result := <-p.turnDone:
 		p.closeInput()
@@ -488,4 +628,50 @@ func (p *codexProcess) Wait() error {
 			return errors.New("Codex app-server event stream ended before turn completion")
 		}
 	}
+}
+
+// Inbox starts a new turn only after the owned thread is idle. It uses the same
+// initialized stdio connection, account, thread and immutable execution profile.
+// Busy delivery stays in the canonical server FIFO; there is no local queue.
+func (p *codexProcess) Inbox(ctx context.Context, request ControlRequest) (ControlEffect, error) {
+	p.stateMu.Lock()
+	thread := p.threadID
+	p.stateMu.Unlock()
+	if !p.persistent || !p.beginTurn() {
+		return ControlEffect{}, ErrCapabilityMissing
+	}
+	params := map[string]any{"threadId": thread, "input": []map[string]string{{"type": "text", "text": request.Text}}}
+	if p.model != "" {
+		params["model"] = p.model
+		params["effort"] = p.effort
+	}
+	var response struct {
+		Turn struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"turn"`
+	}
+	operationCtx, cancel := codexControlContext(ctx)
+	defer cancel()
+	if err := p.call(operationCtx, "turn/start", params, &response); err != nil {
+		// The vendor may already have accepted this input. Never reopen an idle
+		// handle after a lost response, even when the caller's deadline expired.
+		p.failAmbiguousTurn()
+		return ControlEffect{}, err
+	}
+	if !validOpaqueID(response.Turn.ID) || response.Turn.Status != "inProgress" {
+		p.failAmbiguousTurn()
+		return ControlEffect{}, ErrCapabilityMissing
+	}
+	p.setTurn(response.Turn.ID)
+	if _, _, e := p.target(); e == nil {
+		p.observeEvent(AdapterEvent{Kind: EventTurnStarted, CorrelationID: request.CorrelationID})
+	}
+	return ControlEffect{Primitive: "codex app-server turn/start", CorrelationID: request.CorrelationID, VendorMessageID: response.Turn.ID}, nil
+}
+
+func (p *codexProcess) InboxReady() bool {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return p.persistent && p.threadID != "" && p.turnID == "" && !p.startingTurn && !p.terminalFailure
 }

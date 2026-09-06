@@ -33,3 +33,14 @@ func (*Client) Interrupt(context.Context, string, ControlRequest) (Receipt, erro
 func (*Client) Stop(context.Context, string, ControlRequest) (Receipt, error) {
 	return Receipt{}, errors.New("agentd Unix transport is unsupported")
 }
+
+func (c *Client) RuntimeStatus(context.Context) (RuntimeStatus, error) {
+	return RuntimeStatus{}, errors.New("agentd transport is unsupported")
+}
+func (c *Client) QuiesceRuntime(context.Context, string, []string) error {
+	return errors.New("agentd transport is unsupported")
+}
+
+func (*Client) LookupStart(context.Context, string) (Session, error) {
+	return Session{}, errors.New("agentd transport is unsupported")
+}

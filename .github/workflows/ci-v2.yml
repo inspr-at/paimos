@@ -568,6 +568,13 @@ jobs:
       - name: E2E smoke (boots backend + vite, runs Playwright)
         run: bash scripts/e2e.sh
 
+      - name: Habitat production build browser checks
+        working-directory: frontend
+        env:
+          PAI927_SELF_HOST_DIST: '1'
+          PAI927_SHOT_DIR: ${{ runner.temp }}/pai927-shots
+        run: npx playwright test e2e/habitat-control-room.spec.ts --timeout=90000
+
   security-scan:
     # PAI-365: skip on tag pushes — same reasoning as `test` above.
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'

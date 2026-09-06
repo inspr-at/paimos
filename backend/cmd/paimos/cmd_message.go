@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/inspr-at/paimos/backend/agentmessage"
 	harnessplugin "github.com/inspr-at/paimos/backend/agentmessage/harness"
 	"github.com/spf13/cobra"
 )
@@ -145,7 +147,7 @@ func tellCmd() *cobra.Command {
 
 func messageCmd() *cobra.Command {
 	c := &cobra.Command{Use: "message", Short: "Read the durable agent message ledger"}
-	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd(), messageTargetCmd(), messageDeliveryCmd())
+	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd(), messageTargetCmd(), messageDeliveryCmd(), messageDeliveryRecoveryCmd())
 	return c
 }
 
@@ -387,6 +389,78 @@ func messageDeliveryCmd() *cobra.Command {
 		return nil
 	}}
 	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
+	return c
+}
+
+func messageDeliveryRecoveryCmd() *cobra.Command {
+	c := &cobra.Command{Use: "delivery", Short: "Inspect and recover one message delivery"}
+	c.AddCommand(messageRecoverClosedTargetCmd())
+	return c
+}
+
+func messageRecoverClosedTargetCmd() *cobra.Command {
+	var projectRef, deliveryID, closedSessionID, replacementSessionID, expectedTargetID string
+	var expectedTargetVersion int
+	var expectedConsumerFence int64
+	var apply bool
+	c := &cobra.Command{Use: "recover-closed-target", Short: "Recover never-claimed work from a closed managed generation", RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(projectRef) == "" || strings.TrimSpace(deliveryID) == "" || strings.TrimSpace(closedSessionID) == "" || strings.TrimSpace(replacementSessionID) == "" {
+			return &usageError{msg: "--project, --delivery, --closed-session, and --replacement-session are required"}
+		}
+		client, err := instanceClient()
+		if err != nil {
+			return err
+		}
+		projectID, err := resolveProjectRefToID(client, projectRef)
+		if err != nil {
+			return reportError(err)
+		}
+		path := fmt.Sprintf("/api/projects/%d/message-deliveries/%s/closed-target-recovery", projectID, url.PathEscape(strings.TrimSpace(deliveryID)))
+		var raw []byte
+		if apply {
+			if strings.TrimSpace(expectedTargetID) == "" || expectedTargetVersion <= 0 || expectedConsumerFence != 0 {
+				return &usageError{msg: "--apply requires --expected-target, --expected-target-version, and --expected-consumer-fence=0 from dry-run output"}
+			}
+			raw, err = client.do("POST", path, map[string]any{
+				"expected_closed_session_id": strings.TrimSpace(closedSessionID),
+				"expected_target_id":         strings.TrimSpace(expectedTargetID),
+				"expected_target_version":    expectedTargetVersion,
+				"expected_consumer_fence":    expectedConsumerFence,
+				"replacement_session_id":     strings.TrimSpace(replacementSessionID),
+			})
+		} else {
+			query := url.Values{}
+			query.Set("expected_closed_session_id", strings.TrimSpace(closedSessionID))
+			query.Set("replacement_session_id", strings.TrimSpace(replacementSessionID))
+			raw, err = client.do("GET", path+"?"+query.Encode(), nil)
+		}
+		if err != nil {
+			return reportError(err)
+		}
+		if flagJSON || apply {
+			fmt.Fprintln(stdout, strings.TrimSpace(string(raw)))
+			return nil
+		}
+		var plan agentmessage.ClosedTargetRecoveryPlan
+		if err := json.Unmarshal(raw, &plan); err != nil {
+			return errors.New("closed-target recovery inspection returned invalid JSON")
+		}
+		fmt.Fprintf(stdout, "Delivery %s is eligible: target %s v%d (closed session %s) → target %s v%d (replacement session %s).\n",
+			plan.DeliveryID, plan.EffectiveTarget.TargetID, plan.EffectiveTarget.TargetVersion, plan.EffectiveTarget.HarnessSessionID,
+			plan.ReplacementTarget.TargetID, plan.ReplacementTarget.TargetVersion, plan.ReplacementTarget.HarnessSessionID)
+		fmt.Fprintf(stdout, "Apply exactly:\npaimos message delivery recover-closed-target --project %d --delivery %s --closed-session %s --replacement-session %s --expected-target %s --expected-target-version %d --expected-consumer-fence %d --apply\n",
+			projectID, plan.DeliveryID, plan.EffectiveTarget.HarnessSessionID, plan.ReplacementTarget.HarnessSessionID,
+			plan.EffectiveTarget.TargetID, plan.EffectiveTarget.TargetVersion, plan.ConsumerFence)
+		return nil
+	}}
+	c.Flags().StringVarP(&projectRef, "project", "p", "", "project key or numeric id (required)")
+	c.Flags().StringVar(&deliveryID, "delivery", "", "delivery id (required)")
+	c.Flags().StringVar(&closedSessionID, "closed-session", "", "exact publicly stopped harness session id (required)")
+	c.Flags().StringVar(&replacementSessionID, "replacement-session", "", "exact live replacement harness session id (required)")
+	c.Flags().StringVar(&expectedTargetID, "expected-target", "", "exact effective target id from dry-run")
+	c.Flags().IntVar(&expectedTargetVersion, "expected-target-version", 0, "exact effective target version from dry-run")
+	c.Flags().Int64Var(&expectedConsumerFence, "expected-consumer-fence", -1, "exact never-claimed consumer fence from dry-run")
+	c.Flags().BoolVar(&apply, "apply", false, "append the audited recovery after exact compare-and-swap validation")
 	return c
 }
 

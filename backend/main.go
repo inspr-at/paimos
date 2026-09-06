@@ -521,6 +521,7 @@ func mountAPI(r chi.Router) {
 		r.Get("/deliveries", handlers.AgentModeDeliveries)
 		r.Get("/projects/{projectID}/deliveries", handlers.AgentModeProjectDeliveries)
 		r.Get("/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
+		handlers.RegisterOrchestrationProjectionRoutes(r)
 		r.Get("/worker-fleet/v1", handlers.AgentModeWorkerFleet)
 		r.Get("/projects/{projectID}/worker-fleet/v1", handlers.AgentModeProjectWorkerFleet)
 		r.Get("/worker-fleet/v2", handlers.AgentModeWorkerFleetV2)
@@ -566,6 +567,17 @@ func mountAPI(r chi.Router) {
 		handlers.RegisterSessionHomeRoutes(r)
 		handlers.RegisterOrchestratorRoutes(r)
 		handlers.RegisterCommandPaletteRoutes(r)
+	})
+
+	// PAI-924: private lifecycle authority, including early auth/CSRF refusals.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.AgentModePrivateNoStore)
+		r.Use(auth.Middleware)
+		r.Use(auth.CSRFMiddleware)
+		r.Use(auth.MustChangePasswordGate)
+		handlers.RegisterLifecycleIntentRoutes(r)
+		handlers.RegisterConsumerRoutes(r)
+		handlers.RegisterHarnessBrowserRoutes(r)
 	})
 
 	// PAI-863: the structured-knowledge surface is private on every outcome.

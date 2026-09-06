@@ -184,33 +184,75 @@ func TestAgentIntercomREADMEQuickstartUsesShippedCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := string(raw)
-	root := rootCmd()
+	// Join shell continuations, but keep command boundaries: a flag on the
+	// next example must not satisfy the current command's scope contract.
+	doc := strings.ReplaceAll(string(raw), "\\\n", " ")
+	oldInstance := flagInstance
+	t.Cleanup(func() { flagInstance = oldInstance })
 	tests := []struct {
 		path  []string
 		flags []string
 	}{
-		{[]string{"project", "show"}, nil},
-		{[]string{"session", "start"}, []string{"project", "agent"}},
-		{[]string{"tell"}, []string{"project", "level", "message"}},
+		{[]string{"runtime", "doctor"}, []string{"instance", "project"}},
+		{[]string{"runtime", "setup"}, []string{"instance", "project"}},
+		{[]string{"orchestrator", "start"}, []string{"instance", "project", "guided", "workspace"}},
+		{[]string{"worker", "start"}, []string{"instance", "project", "guided", "workspace", "ticket", "work-shape"}},
 	}
+	var instance, project, coordinatorWorkspace string
 	for _, test := range tests {
 		name := strings.Join(test.path, " ")
-		command, remaining, findErr := root.Find(test.path)
-		if findErr != nil || len(remaining) != 0 || command == root {
-			t.Fatalf("README command %q unavailable: command=%v remaining=%v error=%v", name, command, remaining, findErr)
-		}
-		for _, flag := range test.flags {
-			if command.Flags().Lookup(flag) == nil && command.InheritedFlags().Lookup(flag) == nil {
-				t.Errorf("README command %q lost --%s", name, flag)
+		var example []string
+		for _, line := range strings.Split(doc, "\n") {
+			line = strings.Join(strings.Fields(line), " ")
+			if strings.HasPrefix(line, "paimos ") && strings.Contains(line, " "+name+" ") {
+				example = strings.Fields(line)[1:]
+				break
 			}
 		}
-		if len(test.flags) > 0 && !documentedCommandHasFlags(doc, "paimos "+name, test.flags) {
-			t.Errorf("README does not show %q with all required flags %v", name, test.flags)
+		if len(example) == 0 {
+			t.Fatalf("README does not show a scoped %q command", name)
 		}
-	}
-	if root.PersistentFlags().Lookup("json") == nil || !strings.Contains(doc, "paimos --json project show") {
-		t.Error("README numeric project lookup drifted from --json project show")
+		root := rootCmd()
+		command, remaining, findErr := root.Find(example)
+		if findErr != nil || command.CommandPath() != root.Name()+" "+name {
+			t.Fatalf("README command %q unavailable: command=%v remaining=%v error=%v", name, command, remaining, findErr)
+		}
+		// Parse only: this validates the documented executable flags without
+		// loading credentials, contacting a runtime or starting a child.
+		if err := command.ParseFlags(remaining); err != nil {
+			t.Fatalf("README command %q has invalid flags: %v", name, err)
+		}
+		if args := command.Flags().Args(); len(args) != 0 {
+			t.Fatalf("README command %q has unexpected arguments: %v", name, args)
+		}
+		values := map[string]string{}
+		for _, name := range test.flags {
+			flag := command.Flags().Lookup(name)
+			if flag == nil || !flag.Changed || strings.TrimSpace(flag.Value.String()) == "" {
+				t.Fatalf("README command %q needs an explicit --%s value", command.CommandPath(), name)
+			}
+			values[name] = flag.Value.String()
+		}
+		if instance == "" {
+			instance, project = values["instance"], values["project"]
+		}
+		if values["instance"] != instance || values["project"] != project {
+			t.Errorf("README %q leaves the instance/project selected during diagnosis", name)
+		}
+		if test.path[1] == "start" && values["guided"] != "true" {
+			t.Errorf("README %q must guide unresolved agent/profile choices", name)
+		}
+		if test.path[0] == "orchestrator" {
+			coordinatorWorkspace = values["workspace"]
+		}
+		if test.path[0] == "worker" {
+			if values["workspace"] == coordinatorWorkspace {
+				t.Error("README coordinator and worker must use distinct exclusive workspaces")
+			}
+			if !friendlyTicketKey.MatchString(values["ticket"]) || !strings.HasPrefix(values["ticket"], project+"-") || (values["work-shape"] != "ship" && values["work-shape"] != "scout") {
+				t.Error("README worker must name a ticket in the selected project and a supported work shape")
+			}
+		}
 	}
 }
 
@@ -222,8 +264,10 @@ func TestAgentIntercomRunbookPinsReleaseAndAdministratorBoundaries(t *testing.T)
 	doc := strings.Join(strings.Fields(string(raw)), " ")
 	for _, claim := range []string{
 		"base owned-session commands first appeared in 5.21.0",
-		"requires the upcoming calendar release 26.09.01 or later",
-		"Do not use this guide as written with 5.21.0 or 26.08.31",
+		"M168 database guards require 26.09.01 or later",
+		"they are not available as documented here in 5.21.0 or 26.08.31",
+		"guided start, runtime-management, and Habitat lifecycle workflows in this development guide require matching Paimos server, CLI, and daemon builds that include PAI-917",
+		"Release 26.09.05 does not include these workflows",
 		"authenticated Paimos administrator performs every message-target and delivery administration operation",
 		"`paimos message target set`, `paimos message target list`, `paimos message target requeue`, `paimos message deliveries`, and the per-delivery requeue endpoint",
 		"message target and delivery listings are still administrator-only",
@@ -239,6 +283,11 @@ func TestAgentIntercomRunbookPinsReleaseAndAdministratorBoundaries(t *testing.T)
 	}
 	if strings.Contains(doc, "shipped surface in 5.21.0 and later") {
 		t.Error("runbook restored the false legacy release floor")
+	}
+	for _, stale := range []string{"unreleased PAI-917 work", "matching candidate builds"} {
+		if strings.Contains(doc, stale) {
+			t.Errorf("runbook retained release-relative wording %q", stale)
+		}
 	}
 
 	handlerRaw, err := os.ReadFile(filepath.Join("..", "..", "handlers", "agent_messages.go")) // #nosec G304 -- fixed in-repo authorization source.
@@ -418,7 +467,7 @@ func TestAgentIntercomDocsKeepWorkerLeaseTrustAndRecoveryContract(t *testing.T) 
 		t.Fatal(err)
 	}
 	readme := strings.Join(strings.Fields(string(readmeRaw)), " ")
-	for _, claim := range []string{"per-generation lease", "kept out of argv", "server-side only as a digest", "shared API key are not worker proof"} {
+	for _, claim := range []string{"per-generation worker lease", "kept out of argv", "server-side only as a digest", "shared API key are not worker proof"} {
 		if !strings.Contains(readme, claim) {
 			t.Errorf("README lost concise worker-lease boundary %q", claim)
 		}

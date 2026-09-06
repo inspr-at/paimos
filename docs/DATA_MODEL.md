@@ -669,6 +669,15 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M173 | `agent_messages.expects_reply`, `agent_reply_obligations`, `agent_reply_obligation_events`, `agent_message_human_resolutions`; rebuilt attention items/batches | Opt-in exact-reply closure, bounded overdue resurfacing, value-free idempotent human disposition of held action requests, and immutable-history/current-state separation (PAI-905). |
 | M174 | `harness_sessions.work_shape`, rebuilt `harness_session_events` | Closed nullable `ship`/`scout` assignment classification with immutable before/after shape facts. Existing missing values remain unclassified and project as `unknown`; the rebuild preserves historical facts and timestamps, and delivery tables are unchanged (PAI-907). |
 | M175 | `external_stage_pharos_evidence_v2` | Additive scheme/channel/sequence/release-manifest identity for Pharos evidence, exact-bound to the immutable M148 v1-compatible deployment fact; v1 storage and guards remain unchanged (PAI-876). |
+| M176 | `lifecycle_runtimes`, `lifecycle_runtime_sessions`, `lifecycle_intents`, `lifecycle_intent_events` | Immutable runtime-generation ownership and typed browser lifecycle requests with fenced transitions and append-only outcomes (PAI-924). |
+| M177 | `agent_consumer_streams`, `agent_consumer_attempts`, `agent_runtime_health`; consumer fences on delivery, batch, and cursor tables; rebuilt `agent_attention_items` | Generation-fenced fallback and attention consumer ownership, one open attempt per stream, and content-free runtime-health attention (PAI-923). |
+| M178 | rebuilt `agent_messages` | Replace only the message-body guard so canonical multiline bytes are accepted while the scoped secret-like-content guard, rows, foreign keys, indexes, triggers, and autoincrement high-water are preserved. |
+| M179 | `agent_message_delivery_recoveries` | Immutable, bounded recovery history for never-claimed deliveries whose managed target closed; the canonical message and original delivery target snapshot remain unchanged (PAI-923). |
+| M180 | `harness_conversation_bindings`, `harness_message_receipts` | One product conversation per human and exact harness generation, plus immutable idempotency receipts for authenticated human `simple` and `steer` deliveries (PAI-926). |
+
+M176-M180 describe the database surface in builds that include PAI-917. Runtime
+workflows using that surface require matching PAI-917 server, CLI, and daemon
+artifacts.
 
 `agent_runs.status=completed` means implementation finished without a configured
 test command; it never implies tests passed. `tests_passed` and `tests_failed`

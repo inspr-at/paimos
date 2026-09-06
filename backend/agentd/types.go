@@ -64,6 +64,10 @@ type WorkspaceProvenance struct {
 }
 
 type StartRequest struct {
+	KeepAlive              bool                     `json:"-"`
+	IdempotencyKey         string                   `json:"idempotency_key,omitempty"`
+	ExpectedAccountLabel   string                   `json:"expected_account_label,omitempty"`
+	ExpectedMachineID      string                   `json:"expected_machine_id,omitempty"`
 	Adapter                string                   `json:"adapter"`
 	Workspace              string                   `json:"workspace"`
 	WorkspaceMode          string                   `json:"workspace_mode,omitempty"`
@@ -104,6 +108,7 @@ const (
 	ErrorEventStreamBound    ErrorCode = "event_stream_bound"
 	ErrorAppServerProtocol   ErrorCode = "app_server_protocol"
 	ErrorChildExitFailed     ErrorCode = "child_exit_failed"
+	ErrorTurnFailed          ErrorCode = "turn_failed"
 	ErrorChildStopFailed     ErrorCode = "child_stop_failed"
 	ErrorOwnershipLost       ErrorCode = "ownership_lost"
 	ErrorReporterUnavailable ErrorCode = "reporter_unavailable"
@@ -134,6 +139,11 @@ type Process interface {
 
 // Adapter is the PAI-849/PAI-850 handoff. Implementations start only a fresh
 // child process and may control only the harness thread reported by that child.
+// InboxProcess supports a documented simple handoff to the owned child.
+type InboxProcess interface {
+	Inbox(context.Context, ControlRequest) (ControlEffect, error)
+}
+
 type Adapter interface {
 	Name() string
 	Capabilities() []Capability
@@ -145,6 +155,12 @@ type Adapter interface {
 // a closed non-secret label. Absence or ambiguity is always "unknown".
 type AccountProber interface {
 	AccountLabel(context.Context) string
+}
+
+// MachineProber returns the stable host identity accepted by the authenticated
+// reporter authority. It is operator-supplied provenance, not hardware attestation.
+type MachineProber interface {
+	AuthenticatedMachineID(context.Context) (string, error)
 }
 
 // DispatchResolver asks the authenticated execution-options authority for an

@@ -23,6 +23,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import AppModal from '@/components/AppModal.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import changelogRaw from '@docs/CHANGELOG.md?raw'
 import { formatDateWithLocale } from '@/composables/useDateFormat'
 import { parseChangelog, type VersionEntry } from '@/utils/changelog'
@@ -68,10 +69,30 @@ function fmtFullDate(iso: string): string {
   })
 }
 
+function selectRelease(index: number) {
+  if (index < 0 || index >= entries.value.length || index === selectedIndex.value) return
+  selectedIndex.value = index
+  nextTick(() => {
+    // Keep every selection path (rail clicks and release controls) anchored
+    // to the active row without moving focus away from the triggering control.
+    railRef.value?.querySelector<HTMLElement>('.cl-row--active')?.scrollIntoView({ block: 'nearest' })
+    contentRef.value?.scrollTo({ top: 0, behavior: 'auto' })
+  })
+}
+
+function selectPreviousRelease() {
+  selectRelease(selectedIndex.value + 1)
+}
+
+function selectNextRelease() {
+  selectRelease(selectedIndex.value - 1)
+}
+
 // ── Keyboard nav ────────────────────────────────────────────────────
 // Wired on the rail itself (tabindex 0). Doesn't conflict with the
 // modal's Escape handler — different target, different keys.
 const railRef = ref<HTMLElement | null>(null)
+const contentRef = ref<HTMLElement | null>(null)
 
 function onRailKey(e: KeyboardEvent) {
   const max = entries.value.length - 1
@@ -87,18 +108,7 @@ function onRailKey(e: KeyboardEvent) {
     default: return
   }
   e.preventDefault()
-  if (next !== selectedIndex.value) {
-    selectedIndex.value = next
-    nextTick(() => {
-      // Scroll the freshly-selected button into view if it slipped past
-      // the viewport bounds — `block: 'nearest'` keeps the rail still
-      // when the active item is already visible.
-      const el = railRef.value?.querySelector<HTMLElement>(
-        `[data-version="${entries.value[next].version}"]`,
-      )
-      el?.scrollIntoView({ block: 'nearest' })
-    })
-  }
+  selectRelease(next)
 }
 
 // Auto-focus the rail on open so arrow keys work without a click first.
@@ -140,7 +150,7 @@ watch(
               role="option"
               :aria-selected="i === selectedIndex"
               :data-version="e.version"
-              @click="selectedIndex = i"
+              @click="selectRelease(i)"
             >
               <span class="cl-row-dot" />
               <span class="cl-row-ver">{{ e.version }}</span>
@@ -152,12 +162,36 @@ watch(
       </div>
 
       <!-- ── Content pane ────────────────────────────────────── -->
-      <section class="cl-content" aria-live="polite">
+      <section ref="contentRef" class="cl-content" aria-live="polite">
         <header v-if="selected" class="cl-content-head">
-          <div class="cl-content-head-id">
-            <span :class="['cl-row-dot', 'cl-row-dot--lg', `cl-row--${selected.bumpKind}`]" />
-            <h2>v{{ selected.version }}</h2>
-            <span v-if="selected.bumpKind !== 'unknown'" class="cl-bump-label">{{ selected.bumpKind }}</span>
+          <div class="cl-content-toolbar">
+            <div class="cl-content-head-id">
+              <span :class="['cl-row-dot', 'cl-row-dot--lg', `cl-row--${selected.bumpKind}`]" />
+              <h2>v{{ selected.version }}</h2>
+              <span v-if="selected.bumpKind !== 'unknown'" class="cl-bump-label">{{ selected.bumpKind }}</span>
+            </div>
+            <nav class="cl-release-nav" aria-label="Release navigation">
+              <button
+                type="button"
+                class="cl-release-nav-btn"
+                :disabled="selectedIndex >= entries.length - 1"
+                aria-label="Previous release"
+                @click="selectPreviousRelease"
+              >
+                <AppIcon name="chevron-left" :size="14" aria-hidden="true" />
+                <span>Previous</span>
+              </button>
+              <button
+                type="button"
+                class="cl-release-nav-btn"
+                :disabled="selectedIndex <= 0"
+                aria-label="Next release"
+                @click="selectNextRelease"
+              >
+                <span>Next</span>
+                <AppIcon name="chevron-right" :size="14" aria-hidden="true" />
+              </button>
+            </nav>
           </div>
           <time class="cl-content-head-date" :datetime="selected.date">
             {{ fmtFullDate(selected.date) }}
@@ -185,7 +219,7 @@ watch(
 */
 .cl-shell {
   display: grid;
-  grid-template-columns: 168px 1fr;
+  grid-template-columns: 252px minmax(0, 1fr);
   margin: -1.5rem;
   height: min(560px, 70vh);
   overflow: hidden;
@@ -232,28 +266,27 @@ watch(
 .cl-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 7px 1fr auto;
+  grid-template-columns: 8px minmax(0, 1fr) max-content;
   align-items: center;
   gap: .45rem;
   padding: .3rem .55rem;
   background: transparent;
   border: none;
-  border-left: 2px solid transparent;
-  border-radius: 0 4px 4px 0;
+  padding-left: calc(.55rem + 2px);
+  border-radius: 4px;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
   color: var(--text);
   /* No height: row is content-tall (~26 px); dense by design. */
-  transition: background .1s, border-color .1s;
+  transition: background .1s;
 }
 .cl-row:hover { background: rgba(82, 82, 91, .06); }
 .cl-row--active {
-  background: var(--brand-blue-pale);
-  border-left-color: var(--brand-blue);
+  background: var(--paimos-selection-fill);
 }
 .cl-row--active .cl-row-ver {
-  color: var(--brand-blue-dark);
+  color: var(--paimos-selection-ink);
 }
 
 .cl-row-dot {
@@ -278,6 +311,7 @@ watch(
   font-size: 12px; font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -.01em;
+  white-space: nowrap;
   /* No "v" prefix in the rail — saves 6 pixels per row and the column
      header / content header carry the format already. */
 }
@@ -316,7 +350,7 @@ watch(
 }
 
 .cl-content-head {
-  display: flex; align-items: baseline; justify-content: space-between;
+  display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
   gap: 1rem;
   padding-bottom: .85rem;
   border-bottom: 1px solid var(--border);
@@ -325,6 +359,13 @@ watch(
   z-index: 1;
   margin-top: -1.1rem;
   padding-top: 1.1rem;
+}
+
+.cl-content-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  min-width: 0;
 }
 
 .cl-content-head-id {
@@ -338,6 +379,7 @@ watch(
   margin: 0;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .cl-bump-label {
@@ -352,6 +394,46 @@ watch(
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.cl-release-nav {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.cl-release-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  min-height: 28px;
+  padding: .25rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.cl-release-nav-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg);
+}
+.cl-release-nav-btn:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 1px;
+}
+.cl-release-nav-btn:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+@media (max-width: 520px) {
+  .cl-content-toolbar { align-items: flex-start; flex-direction: column; gap: .65rem; }
+  .cl-release-nav { align-self: flex-end; }
 }
 
 /* ── Markdown body ─────────────────────────────────────────────── */

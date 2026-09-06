@@ -166,7 +166,9 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/auth \
   github.com/inspr-at/paimos/backend/cmd/dev-fixture-sql \
   github.com/inspr-at/paimos/backend/cmd/paimos \
+  github.com/inspr-at/paimos/backend/cmd/paimos-agentd \
   github.com/inspr-at/paimos/backend/cmd/paimos-mcp \
+  github.com/inspr-at/paimos/backend/contracts \
   github.com/inspr-at/paimos/backend/db \
   github.com/inspr-at/paimos/backend/delivery \
   github.com/inspr-at/paimos/backend/externalstage \
@@ -175,11 +177,20 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/handlers/crm/hubspot \
   github.com/inspr-at/paimos/backend/handlers/knowledge \
   github.com/inspr-at/paimos/backend/internal/knowledge857 \
+  github.com/inspr-at/paimos/backend/lifecycleclient \
+  github.com/inspr-at/paimos/backend/lifecycleintents \
   github.com/inspr-at/paimos/backend/managedharness \
   github.com/inspr-at/paimos/backend/supervision \
   github.com/inspr-at/paimos/backend/workerfleet)
 [[ "$db_affected" == "$db_expected" ]] ||
   fail "db reverse-dependency closure drifted: [$db_affected]"
+# Contracts imports agentmessage from its schema tests, not its production
+# package. The reverse test closure must retain that real test-only dependency.
+check_selection_contains 'backend/agentmessage/bus.go' \
+  github.com/inspr-at/paimos/backend/contracts
+check_selection_contains 'backend/lifecycleclient/runner_server_test.go' \
+  github.com/inspr-at/paimos/backend/lifecycleclient \
+  github.com/inspr-at/paimos/backend/cmd/paimos-agentd
 ! grep -Fxq 'github.com/inspr-at/paimos/backend/pharoslink' <<<"$db_affected" ||
   fail 'db reverse-dependency closure included an unrelated package'
 check_selection_contains 'backend/contracts/fixtures/external-stage/dependency-janus-v1.json' \
@@ -349,7 +360,8 @@ for shard in 0 1 2 3; do
   affected_broad_plans+=("$plan")
   affected_broad_plan+="$plan"$'\n'
 done
-for package in ./cmd/paimos ./supervision ./agentmessage ./agentmode ./agentd ./localjournal ./ownedprocess; do
+for package in ./cmd/paimos ./supervision ./agentmessage ./agentmode ./agentd ./localjournal ./ownedprocess \
+  ./lifecycleclient ./runtimeconsumer ./runtimehealth; do
   owners=0
   for plan in "${affected_broad_plans[@]}"; do
     [[ "$plan" != *" $package"* ]] || owners=$((owners + 1))
@@ -430,25 +442,182 @@ if "$RACE_RUNNER" --dry-run --lane=managedharness --shard=0/6 \
   fail 'managed-harness race lane accepts a drifted shard count'
 fi
 managedharness_race_plan=
+managedharness_min_oracles=999
+managedharness_max_oracles=0
 for shard in 0 1 2 3 4 5 6; do
   plan=$("$RACE_RUNNER" --dry-run --lane=managedharness --shard="$shard/7" \
     github.com/inspr-at/paimos/backend/managedharness)
+  managedharness_oracles=$(plan_test_names "$plan" | wc -l | tr -d ' ')
   [[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$plan")" -eq 1 &&
-    "$(plan_test_names "$plan" | wc -l | tr -d ' ')" -eq 1 ]] ||
-    fail "managed-harness race shard $shard does not own exactly one oracle"
+    "$managedharness_oracles" -ge 1 ]] ||
+    fail "managed-harness race shard $shard does not own one nonempty invocation"
+  (( managedharness_oracles < managedharness_min_oracles )) &&
+    managedharness_min_oracles=$managedharness_oracles
+  (( managedharness_oracles > managedharness_max_oracles )) &&
+    managedharness_max_oracles=$managedharness_oracles
   managedharness_race_plan+="$plan"$'\n'
 done
 assert_plan_covers_discovery_once 'managed-harness targeted race' "$managedharness_race_plan" \
   ./managedharness "$managedharness_race_match"
+(( managedharness_max_oracles - managedharness_min_oracles <= 1 )) ||
+  fail 'managed-harness race oracles are not balanced across seven runners'
 [[ "$(grep -Ec '^go test -race -count=1 -timeout=8m \./managedharness$' <<<"$managedharness_race_plan")" -eq 0 &&
   "$managedharness_race_plan" != *'./...'* ]] ||
   fail 'managed-harness PR race plan restored the exhaustive migration-heavy package suite'
+# Lifecycle fixtures each rebuild all migrations. Split the complete discovered
+# set over the existing four runners without pruning authorization/replay tests.
+lifecycle_race_plan=
+for shard in 0 1 2 3; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+    github.com/inspr-at/paimos/backend/agentd \
+    github.com/inspr-at/paimos/backend/lifecycleintents \
+    github.com/inspr-at/paimos/backend/localjournal)
+  [[ "$(grep -c '^go test -race -count=1 -timeout=8m ./lifecycleintents -run ' <<<"$plan")" -eq 1 ]] ||
+    fail "lifecycle race shard $shard did not retain one bounded invocation"
+  lifecycle_race_plan+="$plan"$'\n'
+done
+lifecycle_only_plan=$(grep '^go test -race .* ./lifecycleintents -run ' <<<"$lifecycle_race_plan")
+assert_plan_covers_discovery_once 'affected lifecycle race' "$lifecycle_only_plan" ./lifecycleintents '^(Test|Fuzz)'
+[[ "$(grep -c '^go test -race .* ./agentd$' <<<"$lifecycle_race_plan")" -eq 1 &&
+  "$(grep -c '^go test -race .* ./localjournal$' <<<"$lifecycle_race_plan")" -eq 1 ]] ||
+  fail 'lifecycle sharding duplicated or omitted another affected package'
+lifecycle_first_count=$(plan_test_names "$(sed -n '1p' <<<"$lifecycle_only_plan")" | wc -l)
+lifecycle_last_count=$(plan_test_names "$(sed -n '4p' <<<"$lifecycle_only_plan")" | wc -l)
+(( lifecycle_first_count >= lifecycle_last_count && lifecycle_first_count - lifecycle_last_count <= 1 )) ||
+  fail 'lifecycle test names were not balanced across the four race runners'
+for shard in 0 1 2 3; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+    github.com/inspr-at/paimos/backend/agentd github.com/inspr-at/paimos/backend/localjournal)
+  [[ "$plan" != *'./lifecycleintents'* ]] || fail 'unselected lifecycle package leaked into the affected race plan'
+done
+lifecycle_all_plan=$("$RACE_RUNNER" --dry-run --lane=all github.com/inspr-at/paimos/backend/lifecycleintents)
+[[ "$(grep -c '^go test -race -count=1 -timeout=8m ./lifecycleintents -run ' <<<"$lifecycle_all_plan")" -eq 4 ]] ||
+  fail 'all-lane lifecycle race did not retain all four bounded invocations'
+assert_plan_covers_discovery_once 'all lifecycle race' "$lifecycle_all_plan" ./lifecycleintents '^(Test|Fuzz)'
+lifecycle_sequential_state="$TMP_ROOT/lifecycle-sequential-race"
+mkdir -p "$lifecycle_sequential_state"
+if ! FAKE_GO_STATE="$lifecycle_sequential_state" GO_COMMAND="$FIXTURES/sequential-go.sh" \
+  "$RACE_RUNNER" --lane=all github.com/inspr-at/paimos/backend/lifecycleintents >/dev/null 2>&1; then
+  fail 'all-lane lifecycle race did not execute sequentially'
+fi
+[[ ! -e "$lifecycle_sequential_state/overlap" && "$(wc -l < "$lifecycle_sequential_state/runs" | tr -d ' ')" -eq 4 ]] ||
+  fail 'all-lane lifecycle race overlapped or omitted a shard'
+if GO_COMMAND="$FIXTURES/unsafe-go-list.sh" "$RACE_RUNNER" --dry-run --lane=affected \
+  --shard=0/4 github.com/inspr-at/paimos/backend/lifecycleintents >/dev/null 2>&1; then
+  fail 'lifecycle race sharder accepted an unsafe discovered test name'
+fi
+# The root package has the same cumulative migration budget issue. Both root
+# and lifecycle must fan out when selected together, without duplicating peers.
+root_race_plan=
+for shard in 0 1 2 3; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+    github.com/inspr-at/paimos/backend \
+    github.com/inspr-at/paimos/backend/agentd \
+    github.com/inspr-at/paimos/backend/lifecycleintents)
+  [[ "$(grep -Fc 'go test -race -count=1 -timeout=8m . -run ' <<<"$plan")" -eq 1 &&
+    "$(grep -Fc 'go test -race -count=1 -timeout=8m ./lifecycleintents -run ' <<<"$plan")" -eq 1 ]] ||
+    fail "root and lifecycle race shard $shard did not retain one bounded invocation each"
+  root_race_plan+="$plan"$'\n'
+  absent=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+    github.com/inspr-at/paimos/backend/agentd)
+  [[ "$absent" != *' . -run '* ]] || fail 'unselected root package leaked into the affected race plan'
+done
+root_only_plan=$(grep -F ' . -run ' <<<"$root_race_plan")
+assert_plan_covers_discovery_once 'affected root race' "$root_only_plan" . '^(Test|Fuzz)'
+[[ "$(grep -Fxc 'go test -race -count=1 -timeout=8m ./agentd' <<<"$root_race_plan")" -eq 1 ]] ||
+  fail 'root sharding duplicated or omitted another affected package'
+root_all_plan=$("$RACE_RUNNER" --dry-run --lane=all github.com/inspr-at/paimos/backend)
+[[ "$(grep -Fc 'go test -race -count=1 -timeout=8m . -run ' <<<"$root_all_plan")" -eq 4 ]] ||
+  fail 'all-lane root race did not retain all four bounded invocations'
+assert_plan_covers_discovery_once 'all root race' "$root_all_plan" . '^(Test|Fuzz)'
+root_full_plan=$(BACKEND_RACE_PACKAGE_TIMEOUT=15m \
+  "$RACE_RUNNER" --dry-run --lane=all github.com/inspr-at/paimos/backend)
+[[ "$(grep -Fc 'go test -race -count=1 -timeout=15m . -run ' <<<"$root_full_plan")" -eq 4 ]] ||
+  fail 'all-lane root race lost its explicit exhaustive package timeout'
+root_sequential_state="$TMP_ROOT/root-sequential-race"
+mkdir -p "$root_sequential_state"
+if ! FAKE_GO_STATE="$root_sequential_state" GO_COMMAND="$FIXTURES/sequential-go.sh" \
+  "$RACE_RUNNER" --lane=all github.com/inspr-at/paimos/backend >/dev/null 2>&1; then
+  fail 'all-lane root race did not execute sequentially'
+fi
+[[ ! -e "$root_sequential_state/overlap" && "$(wc -l < "$root_sequential_state/runs" | tr -d ' ')" -eq 4 ]] ||
+  fail 'all-lane root race overlapped or omitted a shard'
 broad_race_plan=$("$RACE_RUNNER" --dry-run './...')
+assert_plan_covers_discovery_once 'broad affected root race' \
+  "$(grep -F ' . -run ' <<<"$affected_broad_plan")" . '^(Test|Fuzz)'
+assert_plan_covers_discovery_once 'broad all root race' \
+  "$(grep -F ' . -run ' <<<"$broad_race_plan")" . '^(Test|Fuzz)'
+for package in ./lifecycleclient ./runtimeconsumer ./runtimehealth; do
+  invocation="go test -race -count=1 -timeout=8m $package"
+  [[ "$(grep -Fxc "$invocation" <<<"$affected_broad_plan")" -eq 1 &&
+    "$(grep -Fxc "$invocation" <<<"$broad_race_plan")" -eq 1 ]] ||
+    fail "broad race plan omitted, duplicated, or filtered the full $package suite"
+done
 [[ "$(grep -c '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")" -eq 7 ]] ||
   fail 'broad race plan omitted or duplicated the managed-harness concurrency and recovery oracles'
+broad_lifecycle_plan=$(grep '^go test -race .* ./lifecycleintents -run ' <<<"$broad_race_plan")
+[[ "$(grep -c '^go test -race .* ./lifecycleintents -run ' <<<"$affected_broad_plan")" -eq 4 ]] ||
+  fail 'broad affected lifecycle race omitted or duplicated a runner'
+assert_plan_covers_discovery_once 'broad affected lifecycle race' \
+  "$(grep '^go test -race .* ./lifecycleintents -run ' <<<"$affected_broad_plan")" ./lifecycleintents '^(Test|Fuzz)'
+assert_plan_covers_discovery_once 'broad all lifecycle race' "$broad_lifecycle_plan" ./lifecycleintents '^(Test|Fuzz)'
 broad_managedharness_plan=$(grep '^go test -race .* ./managedharness -run ' <<<"$broad_race_plan")
 assert_plan_covers_discovery_once 'broad managed-harness race' "$broad_managedharness_plan" \
   ./managedharness "$managedharness_race_match"
+
+# Exhaustive groups partition the exact default plan, including every root and
+# lifecycle shard. They only affect broad all-lane runs, never PR selection.
+core_group_plan=$("$RACE_RUNNER" --dry-run --group=core './...')
+runtime_group_plan=$("$RACE_RUNNER" --dry-run --group=runtime './...')
+[[ -n "$core_group_plan" && -n "$runtime_group_plan" ]] || fail 'a broad race group is empty'
+group_union=$(printf '%s\n' "$core_group_plan" "$runtime_group_plan" | LC_ALL=C sort)
+[[ "$group_union" == "$(LC_ALL=C sort <<<"$broad_race_plan")" ]] ||
+  fail 'broad groups omitted, duplicated, or changed a default race invocation'
+[[ -z "$(comm -12 <(LC_ALL=C sort <<<"$core_group_plan") <(LC_ALL=C sort <<<"$runtime_group_plan"))" ]] ||
+  fail 'broad core and runtime groups overlap'
+expected_runtime_group=$(printf '%s\n' "$lifecycle_all_plan" \
+  'go test -race -count=1 -timeout=8m ./lifecycleclient' \
+  'go test -race -count=1 -timeout=8m ./runtimeconsumer' \
+  'go test -race -count=1 -timeout=8m ./runtimehealth' "$root_all_plan")
+[[ "$runtime_group_plan" == "$expected_runtime_group" ]] ||
+  fail 'runtime broad group changed its bounded package ownership or ordering'
+for invalid_group in '' all unknown; do
+  if "$RACE_RUNNER" --dry-run --group="$invalid_group" './...' >/dev/null 2>&1; then
+    fail "race runner accepted invalid or empty broad group [$invalid_group]"
+  fi
+done
+for group in core runtime; do
+  if "$RACE_RUNNER" --dry-run --group="$group" github.com/inspr-at/paimos/backend >/dev/null 2>&1 ||
+    "$RACE_RUNNER" --dry-run --group="$group" --lane=affected --shard=0/4 './...' >/dev/null 2>&1; then
+    fail 'broad group filtering escaped its all-lane ./... interface'
+  fi
+done
+# The existing overlap detector needs at least seven listed tests for the
+# managed-harness group. Supply only discovery here; every fake race execution
+# still goes through the shared fixture's exclusive in-progress marker.
+group_go="$TMP_ROOT/group-sequential-go.sh"
+cat >"$group_go" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " $* " == *' test '* && " $* " == *' -list '* ]]; then
+  for index in {1..14}; do printf 'TestConcurrent%s\n' "$index"; done
+  exit 0
+fi
+exec "${SEQUENTIAL_GO_FIXTURE:?}" "$@"
+EOF
+chmod +x "$group_go"
+for group in core runtime; do
+  group_state="$TMP_ROOT/$group-sequential-race"
+  mkdir -p "$group_state"
+  expected_group_plan=$(GO_COMMAND="$group_go" "$RACE_RUNNER" --dry-run --group="$group" './...')
+  if ! FAKE_GO_STATE="$group_state" SEQUENTIAL_GO_FIXTURE="$FIXTURES/sequential-go.sh" \
+    GO_COMMAND="$group_go" "$RACE_RUNNER" --group="$group" './...' >/dev/null 2>&1; then
+    fail "$group broad race group did not execute sequentially"
+  fi
+  [[ ! -e "$group_state/overlap" &&
+    "$(wc -l < "$group_state/runs" | tr -d ' ')" -eq "$(wc -l <<<"$expected_group_plan" | tr -d ' ')" ]] ||
+    fail "$group broad race group overlapped or omitted an invocation"
+done
 
 job_block() {
   local job="$1" file="${2:-$WORKFLOW}"
@@ -563,7 +732,10 @@ done
   fail 'full backend serial/platform assurance lacks an explicit independent budget'
 [[ "$full_race" == *'needs: backend-full-authorize'* && "$full_race" == *'timeout-minutes: 90'* &&
   "$full_race" == *'BACKEND_RACE_PACKAGE_TIMEOUT: 15m'* &&
-  "$full_race" == *"backend-pr-race.sh './...'"* && "$full_race" == *'sequential'* ]] ||
+  "$full_race" == *'matrix:'* && "$full_race" == *'group: [core, runtime]'* &&
+  "$full_race" == *'fail-fast: false'* && "$full_race" != *'continue-on-error:'* &&
+  "$full_race" == *"backend-pr-race.sh --group=\"\${{ matrix.group }}\" './...'"* &&
+  "$full_race" == *'sequential'* ]] ||
   fail 'full backend broad race lacks an explicit independent budget or sequential topology'
 [[ "$full" == *'needs: [backend-full-authorize, backend-full-serial, backend-full-race]'* &&
   "$full" == *"if: $FULL_AGGREGATE_GUARD"* && "$full" == *"$FULL_AUTH_RESULT"* &&

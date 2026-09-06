@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,6 +24,12 @@ import (
 )
 
 const codexHelperEnvironment = "PAIMOS_CODEX_APP_SERVER_HELPER"
+
+// A protocol fixture is not a CLI auth probe. Invoking a Go test binary with
+// `login status` would recursively run its whole suite instead of probing auth.
+type codexProtocolTestAdapter struct{ *CodexAdapter }
+
+func (codexProtocolTestAdapter) AccountLabel(context.Context) string { return "unknown" }
 
 func TestCodexProcessOwnsExactAppServerSessionForControl(t *testing.T) {
 	adapter := NewCodexAdapter(os.Args[0], "test")
@@ -171,7 +178,7 @@ func TestCodexPrematureStreamEOFWaitsForExactChildReap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := process.Wait(); err == nil || !strings.Contains(err.Error(), "event stream ended") {
+	if err := process.Wait(); err == nil || (err.Error() != "Codex app-server event stream ended before turn completion" && err.Error() != "Codex app-server exited before turn completion") {
 		t.Fatalf("wait error=%v", err)
 	}
 	if child.ProcessState == nil || child.ProcessState.Pid() != child.Process.Pid {
@@ -187,24 +194,356 @@ func TestCodexLiveOwnedAppServerSteer(t *testing.T) {
 		t.Skip("set PAIMOS_AGENTD_LIVE_CODEX=1 with an authenticated codex CLI to run live proof")
 	}
 	adapter := NewCodexAdapter("", "live-proof")
-	process, err := adapter.Start(context.Background(), StartRequest{
+	profile, err := dispatchprofile.Resolve("codex-sol-high", dispatchprofile.CatalogVersion, AdapterCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	active := make(chan struct{}, 1)
+	process, err := adapter.Start(ctx, StartRequest{
 		Workspace: t.TempDir(), Adapter: AdapterCodex, Identity: "codex:live-proof",
-		Prompt: "Keep this turn active briefly while inspecting the empty workspace.",
-	}, nil)
+		ResolvedProfile: &profile,
+		Prompt:          "Run the command sleep 20 in the empty workspace, then say done. This bounded delay verifies live owned control.",
+	}, func(event AdapterEvent) {
+		if event.Kind == EventToolStarted {
+			select {
+			case active <- struct{}{}:
+			default:
+			}
+		}
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "live-proof-cleanup"})
 	})
-	if _, err := process.Steer(context.Background(), ControlRequest{CorrelationID: "live-proof-delivery", Text: "Acknowledge this steer before finishing."}); err != nil {
+	select {
+	case <-active:
+	case <-ctx.Done():
+		t.Fatal("live Codex active tool boundary unavailable; model access, quota, or execution did not permit the proof")
+	}
+	if _, err := process.Steer(ctx, ControlRequest{CorrelationID: "live-proof-delivery", Text: "Acknowledge this steer before finishing."}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := process.Interrupt(context.Background(), ControlRequest{CorrelationID: "live-proof-interrupt"}); err != nil {
+	if _, err := process.Interrupt(ctx, ControlRequest{CorrelationID: "live-proof-interrupt"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := process.Wait(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCodexOnlyOwnedToolItemsReportToolActivity(t *testing.T) {
+	for _, itemType := range []string{"commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall", "collabAgentToolCall", "webSearch", "imageView", "sleep", "imageGeneration", "agentMessage", "reasoning", "userMessage", "plan", "functionCallOutput", "hookPrompt", "subAgentActivity", "contextCompaction", "unknown"} {
+		t.Run(itemType, func(t *testing.T) {
+			var events []AdapterEvent
+			p := &codexProcess{threadID: "thread-owned", turnID: "turn-owned", observe: func(e AdapterEvent) { events = append(events, e) }}
+			raw, _ := json.Marshal(map[string]any{"threadId": "thread-owned", "turnId": "turn-owned", "item": map[string]any{"id": "item-owned", "type": itemType, "text": "private-message", "arguments": "private-arguments"}})
+			p.handleNotification(codexRPCMessage{Method: "item/started", Params: raw})
+			want := slices.Contains([]string{"commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall", "collabAgentToolCall", "webSearch", "imageView", "sleep", "imageGeneration"}, itemType)
+			if (len(events) == 1) != want || len(events) > 1 {
+				t.Fatalf("tool activity events=%+v want tool=%t", events, want)
+			}
+			if want && events[0] != (AdapterEvent{Kind: EventToolStarted}) {
+				t.Fatalf("content leaked or event changed: %+v", events)
+			}
+		})
+	}
+	for _, params := range []string{
+		`{"threadId":"foreign-thread","turnId":"turn-owned","item":{"type":"commandExecution","id":"item"}}`,
+		`{"threadId":"thread-owned","turnId":"foreign-turn","item":{"type":"commandExecution","id":"item"}}`,
+		`{"threadId":"thread-owned","turnId":"turn-owned","item":{"type":"commandExecution"}}`,
+		`{"item":`,
+	} {
+		p := &codexProcess{threadID: "thread-owned", turnID: "turn-owned", observe: func(e AdapterEvent) { t.Errorf("unproven item emitted %+v", e) }}
+		p.handleNotification(codexRPCMessage{Method: "item/started", Params: json.RawMessage(params)})
+	}
+}
+
+func TestCodexForeignCompletionCannotMakeOwnedTurnIdle(t *testing.T) {
+	for _, ids := range [][2]string{{"other-thread", "turn-owned"}, {"thread-owned", "other-turn"}} {
+		p := &codexProcess{persistent: true, threadID: "thread-owned", turnID: "turn-owned", observe: func(e AdapterEvent) { t.Errorf("foreign completion emitted %+v", e) }}
+		raw, _ := json.Marshal(map[string]any{"threadId": ids[0], "turn": map[string]string{"id": ids[1], "status": "completed"}})
+		p.handleNotification(codexRPCMessage{Method: "turn/completed", Params: raw})
+		if p.InboxReady() || p.turnID != "turn-owned" {
+			t.Fatal("foreign completion changed owned turn")
+		}
+	}
+}
+
+func TestCodexEarlyCompletionRequiresReturnedOwnedTurn(t *testing.T) {
+	for _, returned := range []string{"turn-early", "different-turn"} {
+		var events []AdapterEvent
+		p := &codexProcess{persistent: true, threadID: "thread-owned", observe: func(e AdapterEvent) { events = append(events, e) }}
+		if !p.beginTurn() {
+			t.Fatal("could not begin owned turn")
+		}
+		p.recordCompletion("thread-owned", "turn-early", "completed")
+		if len(events) != 0 || p.InboxReady() {
+			t.Fatal("unproved early completion appeared idle")
+		}
+		p.setTurn(returned)
+		if returned == "turn-early" {
+			if !p.InboxReady() || len(events) != 1 || events[0].Kind != EventTurnCompleted {
+				t.Fatalf("proved completion missing: %+v", events)
+			}
+		} else if p.InboxReady() || len(events) != 0 {
+			t.Fatal("wrong early turn changed current turn")
+		}
+	}
+	var events []AdapterEvent
+	p := &codexProcess{persistent: true, threadID: "thread-owned", observe: func(e AdapterEvent) { events = append(events, e) }}
+	p.recordCompletion("thread-owned", "stale-idle-turn", "completed")
+	if len(events) != 0 || p.earlyCompleted != "" {
+		t.Fatal("idle history was treated as pending turn")
+	}
+}
+
+func TestCodexEarlyToolActivityRequiresReturnedOwnedTurn(t *testing.T) {
+	for _, returned := range []string{"turn-early", "different-turn"} {
+		var events []AdapterEvent
+		p := &codexProcess{persistent: true, threadID: "thread-owned", observe: func(e AdapterEvent) { events = append(events, e) }}
+		if !p.beginTurn() {
+			t.Fatal("begin failed")
+		}
+		for _, turn := range []string{"turn-early", "foreign-turn"} {
+			raw, _ := json.Marshal(map[string]any{"threadId": "thread-owned", "turnId": turn, "item": map[string]string{"id": "item", "type": "commandExecution"}})
+			p.handleNotification(codexRPCMessage{Method: "item/started", Params: raw})
+		}
+		if len(events) != 0 {
+			t.Fatal("early tool was not yet proved by RPC")
+		}
+		p.setTurn(returned)
+		if returned == "turn-early" {
+			if len(events) != 1 || events[0].Kind != EventToolStarted {
+				t.Fatalf("proved early tool lost: %+v", events)
+			}
+		} else if len(events) != 0 {
+			t.Fatal("foreign early tool emitted activity")
+		}
+	}
+}
+
+func TestCodexAmbiguousInboxStartClosesInsteadOfReopeningInbox(t *testing.T) {
+	for _, mode := range []string{"persistent-timeout", "persistent-invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			adapter := NewCodexAdapter(os.Args[0], "test")
+			adapter.command = func(string, ...string) *exec.Cmd {
+				cmd := exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+				cmd.Env = append(os.Environ(), codexHelperEnvironment+"="+mode)
+				return cmd
+			}
+			events := make(chan AdapterEvent, 32)
+			p, err := adapter.Start(context.Background(), StartRequest{KeepAlive: true, Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:ambiguous"}, func(e AdapterEvent) { events <- e })
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _, _ = p.Stop(context.Background(), ControlRequest{CorrelationID: "ambiguous-cleanup"}) })
+			ready := p.(interface{ InboxReady() bool })
+			deadline := time.Now().Add(3 * time.Second)
+			for !ready.InboxReady() {
+				if time.Now().After(deadline) {
+					t.Fatal("initial turn never idle")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			inbox := p.(InboxProcess)
+			if _, err = inbox.Inbox(ctx, ControlRequest{CorrelationID: "ambiguous", Text: "fixture-next-input"}); err == nil {
+				t.Fatal("ambiguous start succeeded")
+			}
+			if ready.InboxReady() {
+				t.Fatal("ambiguous accepted turn reopened inbox")
+			}
+			if _, err = inbox.Inbox(context.Background(), ControlRequest{CorrelationID: "must-not-retry", Text: "no extra vendor input"}); !errors.Is(err, ErrCapabilityMissing) {
+				t.Fatalf("subsequent inbox not fenced: %v", err)
+			}
+			seen := false
+			for len(events) > 0 {
+				e := <-events
+				if e.ErrorCode == ErrorAppServerProtocol {
+					seen = true
+				}
+			}
+			if !seen {
+				t.Fatal("finite ambiguity evidence missing")
+			}
+			waited := make(chan error, 1)
+			go func() { waited <- p.Wait() }()
+			select {
+			case err := <-waited:
+				if err == nil {
+					t.Fatal("ambiguous process Wait succeeded")
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("ambiguous owned process not reaped")
+			}
+			if !errors.Is(syscall.Kill(-p.PID(), 0), syscall.ESRCH) {
+				t.Fatal("ambiguous owned group remains")
+			}
+		})
+	}
+}
+
+func TestCodexPersistentTerminalFailureClosesExactOwnedGroup(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		code   ErrorCode
+	}{{"completed", ""}, {"interrupted", ""}, {"failed", ErrorTurnFailed}, {"unknown-status", ErrorAppServerProtocol}} {
+		t.Run(tc.status, func(t *testing.T) {
+			adapter := NewCodexAdapter(os.Args[0], "test")
+			adapter.command = func(string, ...string) *exec.Cmd {
+				cmd := exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+				cmd.Env = append(os.Environ(), codexHelperEnvironment+"=terminal-"+tc.status)
+				return cmd
+			}
+			events := make(chan AdapterEvent, 16)
+			p, err := adapter.Start(context.Background(), StartRequest{KeepAlive: true, Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:terminal"}, func(e AdapterEvent) { events <- e })
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _, _ = p.Stop(context.Background(), ControlRequest{CorrelationID: "terminal-cleanup"}) })
+			deadline := time.After(3 * time.Second)
+			var terminal AdapterEvent
+		waitTerminal:
+			for {
+				select {
+				case e := <-events:
+					if e.Kind == EventTurnCompleted || e.ErrorCode != "" {
+						terminal = e
+						break waitTerminal
+					}
+				case <-deadline:
+					t.Fatal("missing terminal evidence")
+				}
+			}
+			if terminal.ErrorCode != tc.code {
+				t.Fatalf("terminal=%+v want %s", terminal, tc.code)
+			}
+			if tc.code == "" {
+				if terminal.Kind != EventTurnCompleted || !p.(interface{ InboxReady() bool }).InboxReady() {
+					t.Fatalf("legitimate completion not reusable: %+v", terminal)
+				}
+				return
+			}
+			if terminal.Kind != "" || p.(interface{ InboxReady() bool }).InboxReady() {
+				t.Fatalf("failed completion falsely idle: %+v", terminal)
+			}
+			waited := make(chan error, 1)
+			go func() { waited <- p.Wait() }()
+			select {
+			case err := <-waited:
+				if err == nil {
+					t.Fatal("failed turn Wait succeeded")
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("failed owned process not reaped")
+			}
+			end := time.Now().Add(time.Second)
+			for !errors.Is(syscall.Kill(-p.PID(), 0), syscall.ESRCH) {
+				if time.Now().After(end) {
+					t.Fatal("exact owned group remains")
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
+	}
+}
+
+func TestCodexFailureReachesSupervisorTerminalReporterSnapshot(t *testing.T) {
+	adapter := NewCodexAdapter(os.Args[0], "test")
+	adapter.command = func(string, ...string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+		cmd.Env = append(os.Environ(), codexHelperEnvironment+"=terminal-failed")
+		return cmd
+	}
+	reporter := &fakeReporter{reports: make(chan Status, 64)}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "codex-failure", StateRoot: t.TempDir(), Adapters: []Adapter{codexProtocolTestAdapter{adapter}}, Reporter: reporter, HeartbeatInterval: 5 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:worker", ProjectID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case status := <-reporter.reports:
+			for _, got := range status.Sessions {
+				if got.ID != session.ID || got.State != StateFailed {
+					continue
+				}
+				if got.PID != 0 || got.ExitedAt == nil || got.LastErrorCode != ErrorTurnFailed || got.LastEventKind == EventTurnCompleted {
+					t.Fatalf("failed turn not terminal: %+v", got)
+				}
+				raw, _ := json.Marshal(got)
+				if strings.Contains(string(raw), "private vendor") || strings.Contains(string(raw), "secret-not-persisted") {
+					t.Fatal("vendor content escaped finite failure evidence")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("failed turn never reached terminal reporter snapshot")
+		}
+	}
+}
+
+func TestCodexAppServerHelperStdoutContainsOnlyProtocolFrames(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+	cmd.Env = append(os.Environ(), codexHelperEnvironment+"=terminal-failed")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	requests := []map[string]any{
+		{"id": 1, "method": "initialize", "params": map[string]any{}},
+		{"method": "initialized", "params": map[string]any{}},
+		{"id": 2, "method": "thread/start", "params": map[string]any{}},
+		{"id": 3, "method": "turn/start", "params": map[string]any{
+			"threadId": "thread-owned", "input": []map[string]string{{"text": "secret-not-persisted"}},
+		}},
+	}
+	encoder := json.NewEncoder(stdin)
+	for _, request := range requests {
+		if err := encoder.Encode(request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := stdin.Close(); err != nil {
+		t.Fatal(err)
+	}
+	scanner := bufio.NewScanner(stdout)
+	frames := 0
+	for scanner.Scan() {
+		frames++
+		if !json.Valid(scanner.Bytes()) {
+			t.Fatalf("helper emitted non-protocol stdout frame %q", scanner.Text())
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if frames != 6 {
+		t.Fatalf("helper protocol frames=%d want=6", frames)
 	}
 }
 
@@ -257,6 +596,27 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 					Text string `json:"text"`
 				} `json:"input"`
 			}
+			if strings.HasPrefix(mode, "persistent") {
+				if json.Unmarshal(request.Params, &params) != nil || params.ThreadID != "thread-owned" || len(params.Input) != 1 {
+					os.Exit(2)
+				}
+				if params.Input[0].Text == "secret-not-persisted" {
+					respond(map[string]any{"turn": map[string]any{"id": "turn-owned", "status": "inProgress"}})
+					_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-owned", "turn": map[string]any{"id": "turn-owned", "status": "completed"}}})
+				} else if params.Input[0].Text == "fixture-next-input" {
+					if mode == "persistent-timeout" {
+						continue
+					}
+					if mode == "persistent-invalid" {
+						respond(map[string]any{"turn": map[string]string{"id": "turn-next", "status": "invalid-terminal-status"}})
+						continue
+					}
+					respond(map[string]any{"turn": map[string]any{"id": "turn-next", "status": "inProgress"}})
+				} else {
+					os.Exit(2)
+				}
+				continue
+			}
 			if json.Unmarshal(request.Params, &params) != nil || params.ThreadID != "thread-owned" || len(params.Input) != 1 || params.Input[0].Text != "secret-not-persisted" {
 				fmt.Fprintln(os.Stderr, "invalid turn/start")
 				os.Exit(2)
@@ -272,10 +632,13 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 			}
 			if mode == "complete-and-exit" {
 				for range 48 {
-					_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{}})
+					_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{"threadId": "thread-owned", "turnId": "turn-owned", "item": map[string]any{"id": "item-owned", "type": "commandExecution"}}})
 				}
 				_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-owned", "turn": map[string]any{"id": "turn-owned", "status": "completed"}}})
-				return
+				os.Exit(0)
+			}
+			if strings.HasPrefix(mode, "terminal-") {
+				_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-owned", "turn": map[string]any{"id": "turn-owned", "status": strings.TrimPrefix(mode, "terminal-"), "error": map[string]string{"message": "private vendor error must never surface"}}}})
 			}
 		case "turn/steer":
 			respond(map[string]any{"turnId": "turn-owned"})
@@ -286,4 +649,7 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 			os.Exit(2)
 		}
 	}
+	// Returning lets the Go test harness append its plain-text PASS marker to
+	// stdout, which is the helper's JSON-RPC transport in these subprocesses.
+	os.Exit(0)
 }

@@ -4,12 +4,14 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +43,8 @@ func RegisterAgentMessageRoutes(r chi.Router) {
 	r.With(auth.RequireAdmin, auth.RequireProjectView).Post("/projects/{id}/message-targets/requeue", requeueAgentMessageTargets)
 	r.With(auth.RequireAdmin, auth.RequireProjectView).Get("/projects/{id}/message-deliveries", listAgentMessageDeliveries)
 	r.With(auth.RequireAdmin, auth.RequireProjectView).Post("/projects/{id}/message-deliveries/{deliveryID}/requeue", requeueAgentMessageDelivery)
+	r.With(auth.RequireAdmin, auth.RequireProjectView).Get("/projects/{id}/message-deliveries/{deliveryID}/closed-target-recovery", inspectClosedTargetRecovery)
+	r.With(auth.RequireAdmin, auth.RequireProjectView).Post("/projects/{id}/message-deliveries/{deliveryID}/closed-target-recovery", recoverClosedTargetDelivery)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/messages", listAgentMessages)
 	r.With(auth.RequireProjectView).Get("/projects/{id}/messages/{messageID}", getAgentMessage)
 	r.With(auth.RequireProjectView).Get("/v2/projects/{id}/messages", listAgentMessagesV2)
@@ -105,6 +109,14 @@ type unavailableDeliveryRequest struct {
 	Cursor         int64  `json:"cursor"`
 	DeliveryID     string `json:"delivery_id"`
 	FallbackReason string `json:"fallback_reason"`
+}
+
+type closedTargetRecoveryRequest struct {
+	ExpectedClosedSessionID string `json:"expected_closed_session_id"`
+	ExpectedTargetID        string `json:"expected_target_id"`
+	ExpectedTargetVersion   int    `json:"expected_target_version"`
+	ExpectedConsumerFence   int64  `json:"expected_consumer_fence"`
+	ReplacementSessionID    string `json:"replacement_session_id"`
 }
 
 // registerTargetRequest is the closed admin registration contract. target_ref
@@ -440,6 +452,108 @@ func requeueAgentMessageDelivery(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"delivery_id": deliveryID, "state": "pending"})
 }
 
+func inspectClosedTargetRecovery(w http.ResponseWriter, r *http.Request) {
+	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonError(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	closedSessionID, replacementSessionID, ok := closedTargetRecoveryQuery(w, r)
+	if !ok {
+		return
+	}
+	plan, err := agentmessage.NewService(db.DB).InspectClosedTargetRecovery(r.Context(), agentmessage.ClosedTargetRecoveryInput{
+		ProjectID: projectID, DeliveryID: strings.TrimSpace(chi.URLParam(r, "deliveryID")),
+		ExpectedClosedSessionID: closedSessionID,
+		ReplacementSessionID:    replacementSessionID,
+		Authority:               closedTargetRecoveryAuthority(r),
+	})
+	if err != nil {
+		writeAgentMessageError(w, r, err)
+		return
+	}
+	jsonOK(w, plan)
+}
+
+func recoverClosedTargetDelivery(w http.ResponseWriter, r *http.Request) {
+	projectID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonError(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	if r.URL.RawQuery != "" {
+		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery request is invalid", http.StatusBadRequest)
+		return
+	}
+	var req closedTargetRecoveryRequest
+	if !decodeClosedTargetRecoveryRequest(w, r, &req) {
+		return
+	}
+	plan, err := agentmessage.NewService(db.DB).RecoverClosedTarget(r.Context(), agentmessage.ClosedTargetRecoveryInput{
+		ProjectID: projectID, DeliveryID: strings.TrimSpace(chi.URLParam(r, "deliveryID")),
+		ExpectedClosedSessionID: req.ExpectedClosedSessionID, ExpectedTargetID: req.ExpectedTargetID,
+		ExpectedTargetVersion: req.ExpectedTargetVersion, ExpectedConsumerFence: req.ExpectedConsumerFence,
+		ReplacementSessionID: req.ReplacementSessionID, Authority: closedTargetRecoveryAuthority(r),
+	})
+	if err != nil {
+		writeAgentMessageError(w, r, err)
+		return
+	}
+	jsonOK(w, plan)
+}
+
+func closedTargetRecoveryQuery(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+	query, parseErr := url.ParseQuery(r.URL.RawQuery)
+	closed, closedOK := query["expected_closed_session_id"]
+	replacement, replacementOK := query["replacement_session_id"]
+	if parseErr != nil || len(query) != 2 || !closedOK || !replacementOK || len(closed) != 1 || len(replacement) != 1 ||
+		strings.TrimSpace(closed[0]) == "" || strings.TrimSpace(replacement[0]) == "" {
+		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery query is invalid", http.StatusBadRequest)
+		return "", "", false
+	}
+	return strings.TrimSpace(closed[0]), strings.TrimSpace(replacement[0]), true
+}
+
+func decodeClosedTargetRecoveryRequest(w http.ResponseWriter, r *http.Request, req *closedTargetRecoveryRequest) bool {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	if err != nil || len(raw) == 0 || rejectDuplicateJSONNames(raw) != nil {
+		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery request is invalid", http.StatusBadRequest)
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err = dec.Decode(req); err != nil {
+		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery request is invalid", http.StatusBadRequest)
+		return false
+	}
+	var trailing any
+	if err = dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery request is invalid", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+func closedTargetRecoveryAuthority(r *http.Request) agentmessage.RecoveryAuthority {
+	return func(ctx context.Context, tx *sql.Tx, projectID int64) (int64, error) {
+		user, _, err := auth.ReauthorizeRequestPrincipalTx(ctx, tx, r, time.Now().UTC())
+		if err != nil || user == nil {
+			return 0, &agentmessage.CodedError{Code: "agent_message_unauthorized", Err: errors.New("current request credential is unavailable")}
+		}
+		if !auth.IsAdmin(user) && !auth.IsSuperAdmin(user) {
+			return 0, &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("current administrator authority is required")}
+		}
+		allowed, err := canEditProjectTx(ctx, tx, user, projectID)
+		if err != nil {
+			return 0, err
+		}
+		if !allowed {
+			return 0, &agentmessage.CodedError{Code: "agent_message_forbidden", Err: errors.New("current project edit authority is required")}
+		}
+		return user.ID, nil
+	}
+}
+
 func listAgentMessages(w http.ResponseWriter, r *http.Request) {
 	listAgentMessagesVersion(w, r, false)
 }
@@ -705,7 +819,7 @@ func writeAgentMessageError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.As(err, &coded) {
 		code = coded.Code
 		switch code {
-		case "agent_message_idempotency_conflict", "agent_message_resolution_idempotency_conflict", "agent_message_resolution_conflict":
+		case "agent_message_idempotency_conflict", "agent_message_resolution_idempotency_conflict", "agent_message_resolution_conflict", "agent_message_delivery_recovery_conflict":
 			status = http.StatusConflict
 		case "agent_message_resolution_not_held_action":
 			status = http.StatusNotFound

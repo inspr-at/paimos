@@ -42,14 +42,15 @@ type SendEnvelopeInput struct {
 }
 
 type ListFilter struct {
-	ProjectID     int64
-	To            string
-	ThreadID      string
-	IssueID       *int64
-	DeliveredOnly bool
-	DeliveryLevel string
-	AfterID       int64
-	Limit         int
+	includeOutstandingDeliveries bool
+	ProjectID                    int64
+	To                           string
+	ThreadID                     string
+	IssueID                      *int64
+	DeliveredOnly                bool
+	DeliveryLevel                string
+	AfterID                      int64
+	Limit                        int
 }
 
 type InboxInput struct {
@@ -268,7 +269,7 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		messageID, projectKey, taskID, "agent", string(partsJSON), string(metadataJSON), fromAddress, toAddress, in.ReplyTo, threadID, strings.TrimSpace(in.SessionID),
 		in.DeliveryLevel, "simple", nullableString(primaryTargetID), nullableString(fallbackTargetID), boolToInt(in.ExpectsReply))
 	if err != nil {
-		if strings.Contains(err.Error(), "paimos_contains_secret_like") {
+		if strings.Contains(err.Error(), "paimos_contains_secret_like") || strings.Contains(err.Error(), "paimos_message_body_contains_secret_like") {
 			return nil, ErrContainsSecret
 		}
 		return nil, err
@@ -365,8 +366,19 @@ func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, 
 		f.Limit = MaxDeliveredPerTurn
 	}
 	q := envelopeSelect + ` WHERE ((am.role='agent' AND sender.project_id=?) OR
-		(am.role='human' AND (receiver.project_id=? OR session.project_id=?))) AND am.id>?`
-	args := []any{f.ProjectID, f.ProjectID, f.ProjectID, f.AfterID}
+		(am.role='human' AND (receiver.project_id=? OR session.project_id=?)))`
+	args := []any{f.ProjectID, f.ProjectID, f.ProjectID}
+	if f.includeOutstandingDeliveries {
+		// Reading is not delivery. Recover authorized outbox work even below
+		// either the durable read cursor or a listener's in-memory cursor.
+		// Terminal deliveries never reappear; pre-bus rows keep cursor semantics.
+		q += ` AND ((am.id>? AND NOT EXISTS (SELECT 1 FROM agent_message_deliveries d WHERE d.message_row_id=am.id AND d.instance=?))
+            OR EXISTS (SELECT 1 FROM agent_message_deliveries d WHERE d.message_row_id=am.id AND d.instance=? AND d.state NOT IN ('handed_off','dead')))`
+		args = append(args, f.AfterID, instanceName(), instanceName())
+	} else {
+		q += ` AND am.id>?`
+		args = append(args, f.AfterID)
+	}
 	if f.To != "" {
 		q += ` AND am.to_address=?`
 		args = append(args, f.To)
@@ -410,6 +422,8 @@ func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, 
 // ListInbox binds an addressee read to trusted request attribution and starts
 // after the receiver's durable acknowledged cursor. A caller may advance the
 // in-memory position with AfterID, but only AckInbox changes durable state.
+// Delivery workers also recover outstanding authorized deliveries below that
+// read cursor; plain read acknowledgements never fabricate or cancel handoffs.
 func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, error) {
 	if in.WorkerAdapter != "" && !IsLocalWorkerAdapter(in.WorkerAdapter) {
 		return nil, coded("agent_message_worker_adapter_invalid", "delivery must name a registered local worker adapter")
@@ -427,7 +441,7 @@ func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, err
 		in.AfterID = cursor
 	}
 	messages, err := s.ListEnvelopes(ctx, ListFilter{
-		ProjectID: in.ProjectID, To: address, DeliveredOnly: true, DeliveryLevel: in.DeliveryLevel, AfterID: in.AfterID, Limit: in.Limit,
+		includeOutstandingDeliveries: in.WorkerAdapter != "", ProjectID: in.ProjectID, To: address, DeliveredOnly: true, DeliveryLevel: in.DeliveryLevel, AfterID: in.AfterID, Limit: in.Limit,
 	})
 	if err != nil {
 		return nil, err
@@ -482,6 +496,9 @@ func (s *Service) AckInbox(ctx context.Context, in AckInput) (*CursorState, erro
 }
 
 func ackInboxTx(ctx context.Context, tx *sql.Tx, projectID int64, address string, agentID, cursor int64) (*CursorState, error) {
+	return ackInboxConsumerTx(ctx, tx, projectID, address, agentID, cursor, false)
+}
+func ackInboxConsumerTx(ctx context.Context, tx *sql.Tx, projectID int64, address string, agentID, cursor int64, fenced bool) (*CursorState, error) {
 	var current int64
 	err := tx.QueryRowContext(ctx, `SELECT cursor FROM agent_message_cursors WHERE project_id=? AND address=?`, projectID, address).Scan(&current)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -500,16 +517,29 @@ func ackInboxTx(ctx context.Context, tx *sql.Tx, projectID int64, address string
 	if exists == 0 {
 		return nil, coded("agent_message_cursor_unknown", "cursor is not a delivered message in this inbox")
 	}
+	if !fenced {
+		var owned int
+		if tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_consumer_streams WHERE project_id=? AND agent_id=? AND kind='fallback'`, projectID, agentID).Scan(&owned) != nil {
+			return nil, ErrConsumerStorage
+		}
+		if owned > 0 {
+			return nil, ErrConsumerUnavailable
+		}
+	}
+	fence := 0
+	if fenced {
+		fence = 1
+	}
 	readAt := time.Now().UTC().Format(time.RFC3339)
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_messages SET read_at=COALESCE(read_at,?)
 		WHERE to_agent_id=? AND to_address=? AND delivered=1 AND is_action_request=0 AND id>? AND id<=?`,
 		readAt, agentID, address, current, cursor); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_cursors(project_id,project_agent_id,address,cursor,updated_at)
-		VALUES(?,?,?,?,?)
-		ON CONFLICT(project_id,address) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at
-		WHERE excluded.cursor>agent_message_cursors.cursor`, projectID, agentID, address, cursor, readAt); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_cursors(project_id,project_agent_id,address,cursor,updated_at,consumer_fence)
+		VALUES(?,?,?,?,?,?)
+		ON CONFLICT(project_id,address) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at,consumer_fence=agent_message_cursors.consumer_fence+excluded.consumer_fence
+		WHERE excluded.cursor>agent_message_cursors.cursor`, projectID, agentID, address, cursor, readAt, fence); err != nil {
 		return nil, err
 	}
 	return &CursorState{Address: address, Cursor: cursor}, nil
@@ -571,6 +601,22 @@ const envelopeSelect = `SELECT am.id,am.message_id,am.context_id,am.task_id,am.r
 	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_primary_target_id),''),
 	COALESCE(am.delivery_fallback_target_id,''),
 	COALESCE((SELECT target_kind FROM agent_message_targets WHERE id=am.delivery_fallback_target_id),'')
+	,COALESCE((SELECT recovery.new_target_id FROM agent_message_delivery_recoveries recovery
+	           JOIN agent_message_deliveries delivery ON delivery.delivery_id=recovery.delivery_id
+	           WHERE delivery.message_row_id=am.id ORDER BY recovery.sequence DESC LIMIT 1),'')
+	,COALESCE((SELECT target.target_kind FROM agent_message_delivery_recoveries recovery
+	           JOIN agent_message_deliveries delivery ON delivery.delivery_id=recovery.delivery_id
+	           JOIN agent_message_targets target ON target.id=recovery.new_target_id
+	           WHERE delivery.message_row_id=am.id ORDER BY recovery.sequence DESC LIMIT 1),'')
+	,COALESCE((SELECT recovery.new_target_version FROM agent_message_delivery_recoveries recovery
+	           JOIN agent_message_deliveries delivery ON delivery.delivery_id=recovery.delivery_id
+	           WHERE delivery.message_row_id=am.id ORDER BY recovery.sequence DESC LIMIT 1),0)
+	,COALESCE((SELECT recovery.new_harness_session_id FROM agent_message_delivery_recoveries recovery
+	           JOIN agent_message_deliveries delivery ON delivery.delivery_id=recovery.delivery_id
+	           WHERE delivery.message_row_id=am.id ORDER BY recovery.sequence DESC LIMIT 1),'')
+	,COALESCE((SELECT recovery.sequence FROM agent_message_delivery_recoveries recovery
+	           JOIN agent_message_deliveries delivery ON delivery.delivery_id=recovery.delivery_id
+	           WHERE delivery.message_row_id=am.id ORDER BY recovery.sequence DESC LIMIT 1),0)
 	,am.expects_reply,
 	COALESCE((SELECT outcome FROM agent_message_human_resolutions WHERE message_row_id=am.id),'')
 	FROM agent_messages am
@@ -583,8 +629,12 @@ type scanner interface{ Scan(...any) error }
 func scanEnvelope(row scanner) (*Envelope, error) {
 	var e Envelope
 	var parts, metadata, primaryID, primaryKind, fallbackID, fallbackKind string
+	var effectiveID, effectiveKind, effectiveSessionID string
+	var effectiveVersion, effectiveSequence int
 	if err := row.Scan(&e.Cursor, &e.MessageID, &e.ContextID, &e.TaskID, &e.Role, &parts, &metadata, &e.From, &e.To, &e.ReplyTo, &e.ThreadID, &e.Hop, &e.Delivered, &e.HeldReason, &e.IsActionRequest, &e.CreatedAt, &e.ReadAt,
-		&e.DeliveryLevel, &e.DeliveryFallback, &primaryID, &primaryKind, &fallbackID, &fallbackKind, &e.ExpectsReply, &e.HumanResolutionOutcome); err != nil {
+		&e.DeliveryLevel, &e.DeliveryFallback, &primaryID, &primaryKind, &fallbackID, &fallbackKind,
+		&effectiveID, &effectiveKind, &effectiveVersion, &effectiveSessionID, &effectiveSequence,
+		&e.ExpectsReply, &e.HumanResolutionOutcome); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(parts), &e.Parts); err != nil {
@@ -601,6 +651,10 @@ func scanEnvelope(row scanner) (*Envelope, error) {
 		if fallbackID != "" {
 			e.DeliveryTarget.SimpleFallback = &DeliveryTargetBinding{BindingID: fallbackID, Kind: fallbackKind}
 		}
+	}
+	if effectiveID != "" {
+		e.DeliveryEffectiveTarget = &DeliveryRecoveryBinding{BindingID: effectiveID, Kind: effectiveKind,
+			Version: effectiveVersion, HarnessSessionID: effectiveSessionID, Sequence: effectiveSequence}
 	}
 	return &e, nil
 }

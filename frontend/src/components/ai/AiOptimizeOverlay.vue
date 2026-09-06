@@ -427,8 +427,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   padding: 0 .85rem;
   border-left: 3px solid transparent;
 }
-.ai-line--del { background: #fef2f2; border-left-color: #fca5a5; }
-.ai-line--add { background: #f0fdf4; border-left-color: #86efac; }
+.ai-line--del { background: #fef2f2; }
+.ai-line--add { background: #f0fdf4; }
 .ai-line--pad { color: transparent; user-select: none; }
 /* PAI-219: a rejected hunk dims its rows and strikes through the
    AI's proposed text on the right while the original stays

@@ -11,6 +11,7 @@ Start here when opening this repo cold.
 
 ## High-signal docs
 
+- For every Paimos design, color or style choice, follow the user-supplied hero and exact mark in [`docs/DESIGN_REFERENCE.md`](docs/DESIGN_REFERENCE.md).
 - [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md)
 - [`docs/AGENT_INTERFACE.md`](docs/AGENT_INTERFACE.md)
 - [`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md)

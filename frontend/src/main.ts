@@ -23,6 +23,7 @@ import i18n from './i18n'
 import { vAutoGrow } from '@/directives/autoGrow'
 import { useBranding } from '@/composables/useBranding'
 import { syncSidebarWithBranding } from '@/composables/useSidebarColors'
+import '@/brand/paimos.css'
 
 // PAI-118: bundle fonts at build time so the SPA never makes a runtime
 // request to fonts.googleapis.com / fonts.gstatic.com. Each weight is a

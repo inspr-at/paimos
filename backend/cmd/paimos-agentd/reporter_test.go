@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/backend/agentd"
 	"github.com/inspr-at/paimos/backend/dispatchprofile"
+	"github.com/inspr-at/paimos/backend/models"
 )
 
 const (
@@ -827,6 +829,32 @@ func TestCLIReporterTerminalMarkStoppedReplayConverges(t *testing.T) {
 	}
 }
 
+func TestCLIReporterCodexTurnFailureClosesPublicSession(t *testing.T) {
+	for _, code := range []agentd.ErrorCode{agentd.ErrorTurnFailed, agentd.ErrorAppServerProtocol} {
+		t.Run(string(code), func(t *testing.T) {
+			marks := 0
+			runner := func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+				if args[2] != "mark-stopped" || !slices.Contains(args, "process_failed") {
+					t.Fatalf("failed Codex turn reported as live/idle: %v", args)
+				}
+				marks++
+				return reporterSessionEvidence("worker", "stopped"), nil
+			}
+			controller := &statefulReporterController{}
+			reporter, _ := newCLIReporterWithRunner("ppm", "camyb-box", "/opt/paimos", nil, runner, newMemoryReporterLeaseStore())
+			_ = reporter.BindController(controller)
+			status := agentd.Status{Instance: "ppm", Sessions: []agentd.Session{{ID: localReporterSession, ProjectID: 6, Identity: "codex:worker", Adapter: "codex", Managed: true, State: agentd.StateFailed, LastErrorCode: code,
+				Reporter: agentd.ReporterState{PublicSessionID: publicReporterSession, Capabilities: []agentd.Capability{agentd.CapabilityStatus, agentd.CapabilityStop}}}}}
+			if err := reporter.ReportStatus(context.Background(), status); err != nil {
+				t.Fatal(err)
+			}
+			if marks != 1 || !controller.state.RemoteClosed || !controller.state.Closed {
+				t.Fatalf("public failure closure incomplete: marks=%d state=%+v", marks, controller.state)
+			}
+		})
+	}
+}
+
 func TestCLIReporterTerminalReasonDriftAfterRemoteCloseCrashConverges(t *testing.T) {
 	remoteReason := ""
 	requestedReasons := []string{}
@@ -963,5 +991,146 @@ func TestCLIReporterClaimCheckpointFailureNeverInvokesOwnedEffect(t *testing.T) 
 	}
 	if controller.interrupts != 0 {
 		t.Fatalf("owned effect ran before durable claim fallback: %d", controller.interrupts)
+	}
+}
+
+func TestAuthenticatedMachineProvenanceUsesProtectedReporter(t *testing.T) {
+	unavailable := false
+	reporter, err := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", []string{"PAIMOS_API_KEY_FILE=/fixture/protected"}, func(_ context.Context, _ string, args, environment []string, input io.Reader) ([]byte, error) {
+		if !slices.Equal(args, []string{"--json", "auth", "whoami"}) || input != nil || !slices.Equal(environment, []string{"PAIMOS_API_KEY_FILE=/fixture/protected"}) {
+			t.Fatal("machine probe bypassed protected reporter")
+		}
+		if unavailable {
+			return nil, errors.New("unavailable")
+		}
+		return []byte(`{}`), nil
+	}, newMemoryReporterLeaseStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if machine, err := reporter.AuthenticatedMachineID(context.Background()); err != nil || machine != "fixture-host" {
+		t.Fatal("missing authenticated host provenance")
+	}
+	unavailable = true
+	if machine, err := reporter.AuthenticatedMachineID(context.Background()); err == nil || machine != "" {
+		t.Fatal("local host hint survived failed authentication")
+	}
+}
+
+type nativeRecordingController struct {
+	recordingReporterController
+	supported bool
+}
+
+func (c *nativeRecordingController) SupportsInbox(string) bool { return c.supported }
+func TestNativeReporterAdvertisesOnlyOwnedInboxWithMatchingAuthority(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		t.Run(fmt.Sprintf("supported_%t", supported), func(t *testing.T) {
+			controller := &nativeRecordingController{supported: supported}
+			session := agentd.Session{ID: localReporterSession, Identity: "codex:worker", ProjectID: 6, Adapter: "codex", Role: "worker", Managed: true, State: agentd.StateRunning, Capabilities: []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus, agentd.CapabilitySteer, agentd.CapabilityStop}}
+			response := models.HarnessSession{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: "codex", Host: "fixture-host", ManagementMode: "managed", MessageTargetID: reporterControlID, Role: "worker", Phase: "working"}
+			response.Capabilities.Inbox = supported
+			response.Capabilities.Steer = supported
+			registered := false
+			r, err := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+				switch args[2] {
+				case "register":
+					caps := args[slices.Index(args, "--capability")+1]
+					mode := args[slices.Index(args, "--steer-mode")+1]
+					if strings.Contains(caps, "inbox") != supported || (mode == "owned") != supported {
+						t.Fatal("unowned capability advertised")
+					}
+					registered = true
+					return json.Marshal(response)
+				case "heartbeat":
+					return json.Marshal(response)
+				case "yield":
+					return json.Marshal(map[string]any{"session": response})
+				}
+				return nil, errors.New("unexpected fixture command")
+			}, newMemoryReporterLeaseStore())
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.nativeDelivery = true
+			if err := r.BindController(controller); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.ReportStatus(context.Background(), agentd.Status{Instance: "fixture", Sessions: []agentd.Session{session}}); err != nil || !registered {
+				t.Fatal("native registration failed")
+			}
+		})
+	}
+}
+
+func TestNativeReporterAcceptsProductionRegistrationWire(t *testing.T) {
+	for _, harness := range []string{"codex", "claude"} {
+		for _, tc := range []struct {
+			name   string
+			change func(*models.HarnessSession)
+		}{
+			{name: "owned_inbox_and_steer"},
+			{name: "missing_inbox", change: func(s *models.HarnessSession) { s.Capabilities.Inbox = false }},
+			{name: "missing_steer", change: func(s *models.HarnessSession) { s.Capabilities.Steer = false }},
+			{name: "wrong_host", change: func(s *models.HarnessSession) { s.Host = "other-host" }},
+			{name: "missing_target", change: func(s *models.HarnessSession) { s.MessageTargetID = "" }},
+		} {
+			t.Run(harness+"/"+tc.name, func(t *testing.T) {
+				controller := &nativeRecordingController{supported: true}
+				session := agentd.Session{ID: localReporterSession, Identity: harness + ":worker", ProjectID: 6, Adapter: harness,
+					Role: "worker", Managed: true, State: agentd.StateRunning,
+					Capabilities: []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus, agentd.CapabilitySteer, agentd.CapabilityStop}}
+				// Serialize the server's production response type, independently of
+				// the reporter decoder, so a mistaken JSON tag cannot validate itself.
+				response := models.HarnessSession{ID: publicReporterSession, ProjectID: 6, AgentName: "worker", Harness: harness,
+					Host: "fixture-host", ManagementMode: "managed", MessageTargetID: reporterControlID, Role: "worker", Phase: "working",
+					Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Stop: true}}
+				if tc.change != nil {
+					tc.change(&response)
+				}
+				var commands []string
+				r, err := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil,
+					func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+						commands = append(commands, args[2])
+						switch args[2] {
+						case "register", "heartbeat":
+							return json.Marshal(response)
+						case "yield":
+							return json.Marshal(map[string]any{"session": response})
+						default:
+							return nil, errors.New("unexpected fixture command")
+						}
+					}, newMemoryReporterLeaseStore())
+				if err != nil {
+					t.Fatal(err)
+				}
+				r.nativeDelivery = true
+				if err := r.BindController(controller); err != nil {
+					t.Fatal(err)
+				}
+				err = r.ReportStatus(context.Background(), agentd.Status{Instance: "fixture", Sessions: []agentd.Session{session}})
+				accepted := tc.change == nil
+				if (err == nil) != accepted {
+					t.Fatalf("registration accepted=%t want=%t: %v", err == nil, accepted, err)
+				}
+				checkpointed := false
+				for _, checkpoint := range controller.checkpoints {
+					if checkpoint.PublicSessionID == publicReporterSession {
+						checkpointed = true
+					}
+				}
+				_, mapped := r.sessions[session.ID]
+				if checkpointed != accepted || mapped != accepted {
+					t.Fatalf("public mapping checkpointed=%t mapped=%t want=%t", checkpointed, mapped, accepted)
+				}
+				wantCommands := []string{"register"}
+				if accepted {
+					wantCommands = append(wantCommands, "heartbeat", "yield")
+				}
+				if !slices.Equal(commands, wantCommands) {
+					t.Fatalf("reporter commands=%v want=%v", commands, wantCommands)
+				}
+			})
+		}
 	}
 }

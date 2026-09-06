@@ -62,10 +62,17 @@ const (
 	ControlRouteExternalHandoffPull      ControlRouteClass = "external_stage.handoff_pull"
 	ControlRouteExternalHandoffAccept    ControlRouteClass = "external_stage.handoff_accept"
 	ControlRouteExternalHandoffReport    ControlRouteClass = "external_stage.handoff_report"
+	ControlRouteConsumerRegister         ControlRouteClass = "runtime.consumer.register"
+	ControlRouteConsumerClaim            ControlRouteClass = "runtime.consumer.claim"
+	ControlRouteConsumerExecute          ControlRouteClass = "runtime.consumer.execute"
+	ControlRouteConsumerComplete         ControlRouteClass = "runtime.consumer.complete"
+	ControlRouteRuntimeHealth            ControlRouteClass = "runtime.health.publish"
+	ControlRouteClosedTargetRecovery     ControlRouteClass = "message.delivery.closed_target_recovery"
 )
 
-// controlRouteParam marks a segment the caller supplies. It matches any
-// single non-empty segment and contributes nothing to the label.
+// controlRouteParam marks a segment the caller supplies. Like chi, it permits
+// an empty interior segment, but not an empty terminal parameter. It contributes
+// nothing to the label; the handler still validates the parameter value.
 const controlRouteParam = ""
 
 // controlRoutes is the frozen family list. Matching is by exact
@@ -77,6 +84,12 @@ var controlRoutes = []struct {
 	segments []string
 	class    ControlRouteClass
 }{
+	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams"}, ControlRouteConsumerRegister},
+	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "claim"}, ControlRouteConsumerClaim},
+	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "attempts", controlRouteParam, "execute"}, ControlRouteConsumerExecute},
+	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "attempts", controlRouteParam, "complete"}, ControlRouteConsumerComplete},
+	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "runtime-health"}, ControlRouteRuntimeHealth},
+	{[]string{"api", "projects", controlRouteParam, "message-deliveries", controlRouteParam, "closed-target-recovery"}, ControlRouteClosedTargetRecovery},
 	{[]string{"api", "agent-mode", "deliveries", controlRouteParam, "control-capability-grants"}, ControlRouteDeliveryCapabilityGrants},
 	{[]string{"api", "agent-mode", "deliveries", controlRouteParam, "control-commands"}, ControlRouteDeliveryCommands},
 	{[]string{"api", "agent-mode", "control-capability-grants", controlRouteParam}, ControlRouteCapabilityGrantDetail},
@@ -136,10 +149,10 @@ func ClassifyControlPath(path string) (ControlRouteClass, bool) {
 func matchControlSegments(want, got []string) bool {
 	for i, segment := range want {
 		if segment == controlRouteParam {
-			// A parameter matches one opaque, non-empty segment. Empty
-			// means a doubled or trailing slash, which is a different
-			// route to the mux and must stay one here too.
-			if got[i] == "" {
+			// Chi accepts an empty parameter before the next slash/literal,
+			// but cannot enter a terminal parameter with no path remaining.
+			// Even invalid IDs dispatched to a handler need private logging.
+			if got[i] == "" && i == len(want)-1 {
 				return false
 			}
 			continue

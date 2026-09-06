@@ -41,6 +41,10 @@
         }
       ]
     },
+    "delivery_effective_target": {
+      "$ref": "#/$defs/RecoveryBinding",
+      "description": "Audited effective managed target after closed-generation recovery; absent when the canonical delivery target remains effective"
+    },
     "delivery_work": {
       "type": "object",
       "description": "Attributed listen-worker context; absent from ordinary ledger reads",
@@ -75,6 +79,18 @@
       "properties": {
         "binding_id": { "type": "string", "minLength": 1 },
         "kind": { "enum": ["codex_thread", "agentd_session", "harness_session", "https_webhook", "claude_session"] }
+      }
+    },
+    "RecoveryBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binding_id", "kind", "version", "harness_session_id", "sequence"],
+      "properties": {
+        "binding_id": { "type": "string", "minLength": 1 },
+        "kind": { "const": "harness_session" },
+        "version": { "type": "integer", "minimum": 1 },
+        "harness_session_id": { "type": "string", "minLength": 1 },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 8 }
       }
     }
   }

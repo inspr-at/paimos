@@ -362,12 +362,14 @@ type claudeProcess struct {
 	readyMu sync.Once
 	cleanup sync.Once
 	stopped bool
+	active  bool
 }
 
 func newClaudeProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, runtimeDir string, observe func(AdapterEvent)) *claudeProcess {
 	p := &claudeProcess{
 		ownedProcess: newOwnedProcess(cmd), stdin: stdin, runtimeDir: runtimeDir, observe: observe,
 		pending: map[string]chan claudeControlResult{}, ready: make(chan error, 1),
+		active: true,
 	}
 	go p.readLoop(stdout)
 	return p
@@ -432,6 +434,9 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 			}
 			p.observeEvent(AdapterEvent{Kind: EventSessionStarted, HarnessSessionID: event.HarnessSessionID})
 		case string(EventTurnStarted):
+			p.stateMu.Lock()
+			p.active = true
+			p.stateMu.Unlock()
 			if event.CorrelationID != "" && !validClaudeBridgeID(event.CorrelationID, 128) {
 				p.protocolFailure(ErrorAppServerProtocol)
 				return
@@ -441,6 +446,9 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 				p.signalReady(nil)
 			}
 		case string(EventToolStarted):
+			p.stateMu.Lock()
+			p.active = true
+			p.stateMu.Unlock()
 			p.observeEvent(AdapterEvent{Kind: EventToolStarted})
 		case string(EventControlApplied):
 			if !validClaudeBridgeID(event.CorrelationID, 128) ||
@@ -451,6 +459,9 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 			p.resolveControl(event, nil)
 			p.observeEvent(AdapterEvent{Kind: EventControlApplied, CorrelationID: event.CorrelationID})
 		case string(EventTurnCompleted):
+			p.stateMu.Lock()
+			p.active = false
+			p.stateMu.Unlock()
 			p.observeEvent(AdapterEvent{Kind: EventTurnCompleted})
 		case "control_failed":
 			if event.CorrelationID == "" {
@@ -470,6 +481,8 @@ func (p *claudeProcess) readLoop(reader io.Reader) {
 
 func claudeControlError(reason string) error {
 	switch reason {
+	case "not_running":
+		return ErrSessionNotRunning
 	case "stream_input_failed":
 		return errors.New("Claude Agent SDK Query.streamInput failed")
 	case "interrupt_receipt_failed":
@@ -580,7 +593,7 @@ func (p *claudeProcess) control(ctx context.Context, operation string, request C
 		p.stateMu.Unlock()
 	}()
 	frame := map[string]string{"op": operation, "correlation_id": request.CorrelationID}
-	if operation == "steer" {
+	if operation == "steer" || operation == "inbox" {
 		frame["text"] = request.Text
 	}
 	if err := p.send(frame); err != nil {
@@ -692,4 +705,24 @@ func (p *claudeProcess) Wait() error {
 		return nil
 	}
 	return err
+}
+
+// Inbox streams a correlated user input without the interruption requested by
+// Steer. A matching Query reaction to the input UUID is required for a simple
+// handoff receipt; consuming the local input iterator alone is insufficient.
+func (p *claudeProcess) Inbox(ctx context.Context, request ControlRequest) (ControlEffect, error) {
+	event, err := p.control(ctx, "inbox", request)
+	if err != nil {
+		return ControlEffect{}, err
+	}
+	if event.VendorMessageID == "" {
+		return ControlEffect{}, errors.New("Claude inbox produced no Query input evidence")
+	}
+	return ControlEffect{Primitive: "claude Query.streamInput", CorrelationID: request.CorrelationID, VendorMessageID: event.VendorMessageID}, nil
+}
+
+func (p *claudeProcess) InboxReady() bool {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return !p.active && !p.stopped
 }

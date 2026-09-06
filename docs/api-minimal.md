@@ -399,6 +399,8 @@ GET  /projects/:id/message-targets     ?address=<receiver> (admin; configured or
 POST /projects/:id/message-targets/requeue { address } (admin; configured orchestrator attention target requires super-admin; recovers target_missing message rows and blocked/stale/expired-lease attention batches without changing batch correlation or a live lease)
 GET  /projects/:id/message-deliveries  redacted outbox state (admin)
 POST /projects/:id/message-deliveries/:deliveryId/requeue (admin)
+GET  /projects/:id/message-deliveries/:deliveryId/closed-target-recovery ?expected_closed_session_id=<stopped-public-session>&replacement_session_id=<fresh-public-session> (admin dry-run; project-edit authority rechecked in the read transaction)
+POST /projects/:id/message-deliveries/:deliveryId/closed-target-recovery { expected_closed_session_id, expected_target_id, expected_target_version, expected_consumer_fence: 0, replacement_session_id } (admin; exact audited compare-and-swap)
 GET  /projects/:id/messages/:messageId frozen v1 compatibility record
 GET  /v2/projects/:id/messages/:messageId
 GET  /issues/:id/messages              human-visible issue-anchored records (not comments)
@@ -457,6 +459,19 @@ whose heartbeat is at most 90 seconds old, or its snapshotted ordinary simple
 fallback. A missing route becomes `blocked/target_missing`; the replacement
 worker must lease the same durable row and still finish through
 `delivery-complete`.
+
+A pending managed delivery whose exact target generation is publicly stopped
+may be rebound only through `closed-target-recovery`. The dry-run returns the
+original, current effective, and proposed replacement target/session bindings
+plus the exact zero-attempt consumer fence. Apply accepts only those reviewed
+compare-and-swap fields. It refuses held or action-request rows, any lease,
+attempt, consumer claim, handoff, effective level, fallback transition,
+capability change, stale/unowned replacement, or cross-project/address binding.
+Successful recovery appends one immutable bounded audit record and leaves the
+canonical message, frozen v1 envelope, original delivery target columns, and
+human `product_session_id` unchanged. V2 envelopes may add
+`delivery_effective_target` so clients can distinguish that audited effective
+binding from the original snapshot.
 
 PAI-800 runner liveness/progress uses the PAI-799 integration seam directly:
 `POST /runs/:id/telemetry`. The supervisor owns stable correlation plus
@@ -879,6 +894,19 @@ Commands whose argument is explicitly another resource ID, plus
   `state`, optional terminal `outcome` and `reason`, and
   `requested_at`/`claimed_at`/`completed_at`; no worker lease, session
   reference, target reference, body, or requester.
+- `POST /projects/{id}/harness-sessions/{sessionID}/messages/v1` — a
+  non-impersonated human browser session sends `simple` or `steer` to the exact
+  selected managed generation with `expected_revision` and an
+  `utt_<32-lowercase-hex>` replay identity. The write transaction reauthorizes
+  both the human editor and the current runtime reporter, then checks the
+  generation mapping, machine/account provenance, freshness, advertised
+  capability, non-stopping phase, and enabled primary target. It creates a durable product
+  conversation on first send and records the canonical message as `human`
+  from `user:<id>`; it never supplies agent attribution or a fallback target.
+  Exact replay returns the original receipt even after that generation stops,
+  while a changed tuple or stale selected revision conflicts. Internal
+  newlines are byte-preserved; NUL, controls, oversized text, and
+  credential-like content fail without body diagnostics.
 - `POST .../{sessionID}/stop` — attributed terminal lifecycle transition after
   worker cleanup.
 
@@ -980,3 +1008,158 @@ curl -s -H "Authorization: Bearer $KEY" \
   -d '{"title":"...","type":"ticket","status":"backlog","priority":"medium",
        "description":"...","acceptance_criteria":"- [ ] ..."}'
 ```
+
+### Orchestration projection v1 (PAI-925)
+
+`GET /agent-mode/orchestration/v1?zoom=10` and
+`GET /agent-mode/projects/:projectID/orchestration/v1?zoom=10` compose the configured
+instance root, its active generation, project coordination, and the unchanged
+worker-fleet v2 snapshot. The closed contract is
+[`orchestration-v1.schema.json`](../backend/contracts/orchestration-v1.schema.json).
+Both routes use Agent Mode authorization and `private, no-store`, including
+concealed 404 responses. Counts include authorized projects only; the separate
+`coordination_bounds` includes empty projects, while fleet totals retain their
+existing meaning. Zoom and communication/history bounds are inherited from fleet
+v2. Root generation outside the visible sample is explicitly unknown; configured
+identity exposes only the existing display label. Project coordination never
+creates cross-project parent-session edges.
+
+### Browser-to-agentd lifecycle intents (PAI-924)
+
+`/api/projects/{id}/lifecycle/v1` is an additive typed authority; it does not
+change the PAI-925 orchestration projection or execute local processes. The
+OpenAPI `Lifecycle*V1` schemas freeze its complete wire contract.
+
+- Browser super-admin sessions: `GET /runtimes`, `POST /intents`,
+  `GET /intents/{intentID}`, `GET /intents/{intentID}/events`, and
+  `POST /intents/{intentID}/cancel` with `expected_revision`.
+- API-key super-admin reporters with `agent-controls:runner` (or `*`):
+  `POST /runtimes`, `POST /runtimes/{runtimeID}/sessions`,
+  `POST /runtimes/{runtimeID}/claim`, and
+  `POST /intents/{intentID}/transition`. Private runtime lease proofs use
+  `X-Paimos-Runtime-Lease`; session registration also requires the existing
+  `X-Paimos-Harness-Worker-Lease`. Proofs never appear in responses.
+
+Start carries canonical agent, exact immutable profile, explicit ticket/work
+shape/role and optional same-project parent. Attach/reassign additionally require
+an owned session generation and its expected revision; completion applies the
+binding CAS and existing assignment event atomically. Restart requires one
+owned terminal generation and reserves a new explicit generation. Repair is
+bounded to the named `reporter` or `listeners` runtime layer. Starting an
+already occupied agent address, exclusive workspace or coordinator is refused.
+All these requests retain super-admin authority because an admin daemon must
+not grant managed target privileges to a lower-role browser requester.
+
+Runtime discovery advertises opaque workspace handles and identity digests,
+immutable profiles, one bounded account label, and proved public
+`session_id`/`generation` mappings. Machine provenance uses the existing
+**authenticated reporter's Host mapped to MachineID** trust gate; this is not
+hardware attestation. A daemon generation may advertise separate project-bound
+handles. Every authoritative transition reauthorizes both the exact reporter
+credential and the original browser session. Logging out or revoking either
+principal closes outstanding authority. Status/history/cancel require the
+creating user to remain an authorized browser super-admin.
+
+Workspace advertisements may include an explicit operator-configured `label`
+(1–48 trimmed ASCII letters/digits/spaces/dot/underscore/hyphen, with a leading
+letter or digit). Secret-like values and paths are refused. The server adds
+`workspace_handle` to a discovered session only when its current managed
+workspace identity matches exactly one advertised identity. An absent handle
+means unknown; clients must never infer one from a path or fingerprint.
+Session registration still accepts only `session_id` and `generation`.
+
+`GET /runtime-health` is a separate content-free browser read for current
+internal project viewers, using the canonical Agent Mode permission predicate.
+It reauthorizes the exact browser session and every reporter owner, returns the
+latest runtime per machine with a maximum of 32 records, and exposes no totals.
+Each record has four typed layers (`reporter`, `primary`, `fallback`, `attention`).
+Missing reports have `state/status: unknown` and `reason: not_reported`; evidence
+older than 60 seconds has `status: stale`; expired runtimes and their layers have
+`status: offline`. Reported state/reason/count/time are retained as last observed
+evidence and never imply current health when status is stale/offline. Revoked
+reporters are omitted. The `RuntimeHealthPageV1` schema freezes the bounded wire.
+
+States are `requested`, `claimed`, `executing`, `completed`, `failed`, `expired`
+and `cancelled`, with immutable audit events and terminal outcomes. Request keys
+are UUIDs; exact retries return the original record and conflicting reuse fails.
+One intent may be claimed/executing per runtime. Cancel uses CAS and is allowed
+only before executing commits; it cannot pretend to undo an external effect.
+Intent TTL is 30–600 seconds and runtime lease TTL is 120 seconds. Refresh the
+same immutable runtime advertisement before lease expiry; an expired daemon
+generation cannot be revived. Expiry is materialized on authorized
+status/events/claim access. Claimed/executing expiry records `outcome_unknown`;
+no retry may reinterpret this as permission to spawn again.
+
+Bodies are limited to 8192 bytes; duplicate/unknown fields and arbitrary argv,
+shell, prompts, credentials, paths and private target references are rejected.
+Each project admits at most 32 live intents, 32 live runtimes, 10,000 durable
+intent replay records and 1,024 durable runtime records. A runtime admits 16
+workspaces, 16 profiles and 128 proved session generations. Reaching a durable
+record cap refuses new requests; automatic history deletion is not provided.
+Responses are private/no-store and inherit authenticated response metadata.
+Foreign, missing, revoked and wrong-provenance targets share a bounded refusal;
+no private payload or credential identity is echoed.
+
+Daemon integration must implement `lifecycleintents.RuntimeAuthority`, register
+its exact principal/generation/proof, and claim/transition through these routes.
+Before local effects it must journal the intent ID durably, resolve only an
+explicitly configured local workspace handle, reverify provenance/account and
+immutable profile, and obtain instructions from authorized canonical agent and
+ticket resources. Commit `executing` before invoking an operation; after a crash,
+report a proved original outcome or `outcome_unknown`, never automatically
+respawn. Start/restart completion requires a newly registered managed session
+with the reserved generation and exact authorized specification. Repair
+completion records an authenticated reporter's applied result, not independent
+server attestation of a local repair. Receipt-only code cannot complete PAI-924;
+local execution, durable replay and browser end-to-end integration remain
+required before this contract represents an operational lifecycle workflow.
+
+Existing controls remain compatible: harness `pending` maps to `requested`,
+`claimed` to `claimed`, `applied` to `completed`, and `rejected` to `failed`.
+Their execution stage is unreported. Steer message delivery queued/attempted/
+acknowledged maps to requested/executing/completed **delivery evidence only**;
+it never proves task completion or a reply. Existing root configuration remains
+the super-admin `/api/orchestrator/v1/config` CAS surface.
+
+### Generation-owned inbox and attention consumers (PAI-923)
+
+`/api/projects/{id}/consumers/v1` requires the exact current API-key super-admin
+reporter with `agent-controls:runner` (or `*`) and private
+`X-Paimos-Runtime-Lease`. `POST /streams` registers a fallback or attention owner
+bound to the proved runtime/session generations and selected immutable target
+ID/version; `X-Paimos-Consumer-Lease` is a separate daemon-generated private
+32-byte base64url proof. Refresh the same registration within its 120-second
+lease. Public generation IDs and encrypted-target metadata never authenticate
+an owner. The closed `Consumer*V1` OpenAPI schemas define the full wire.
+
+`POST /streams/{streamID}/claim` carries `expected_revision` and UUID
+`request_key`, plus a fresh private `X-Paimos-Consumer-Attempt` nonce. Persist
+that nonce locally before claiming. Claims reserve the existing FIFO delivery
+or attention batch and return content-free attempt metadata only. The
+`.../attempts/{attemptID}/execute` call carries `expected_revision` and all three
+proofs. It commits `executing` before returning a transient payload once;
+retries return only attempt state. Never log or journal execution payloads.
+
+`.../complete` carries the exact revision/nonce, `outcome` (`applied` or
+`outcome_unknown`), `effective_level: simple` and a closed `fallback_reason`
+(empty for attention). Applied completion advances the existing delivery/batch
+and cursor atomically. Exact original completion retries retain their saved
+cursor after safe owner replacement. Unexecuted claims expire after 60 seconds
+and can release safely. Issued payloads with an ambiguous outcome are quarantined
+and never re-leased. Lost execute responses never authorize a vendor retry.
+
+Sticky database fences refuse legacy claims, requeues and acknowledgements even
+after stream expiry. An existing legacy lease must finish before registration;
+an expired legacy lease still requires safe handoff. The managed harness's
+existing exact worker-lease primary path remains supported. There is no second
+queue and no claim of exactly-once vendor effects. Streams cap at 256 per
+project and retained attempts at 10,000 per stream; reaching either cap refuses
+new work without deleting replay evidence. Request bodies cap at 4096 bytes.
+
+`POST /runtime-health` uses only runtime proof and monotonic sequence per
+runtime/layer (`reporter`, `primary`, `fallback`, `attention`). Typed healthy or
+unhealthy reports carry a closed reason and failure count 0–10. One unhealthy
+episode produces an existing-ledger attention item, with a one-minute publish
+throttle; recovery resolves that source. The typed health row persists even if
+no attention receiver is configured. All responses are `private, no-store`;
+wrong, missing, foreign and revoked authority share `consumer_unavailable`.

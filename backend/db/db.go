@@ -51,6 +51,7 @@ var paimosUnicodeCaseFolder = cases.Fold()
 func init() {
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_cosine", 2, paimosCosineSQL)
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_contains_secret_like", 1, paimosContainsSecretLikeSQL)
+	sqlite.MustRegisterDeterministicScalarFunction("paimos_message_body_contains_secret_like", 1, paimosMessageBodyContainsSecretLikeSQL)
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_domain_sha256", -1, paimosDomainSHA256SQL)
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_casefold", 1, paimosCasefoldSQL)
 
@@ -13041,8 +13042,252 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_no_delete BEFORE DELETE ON external_stage_pharos_evidence_v2
 			 BEGIN SELECT RAISE(ABORT,'external stage v2 evidence is immutable'); END`,
 		}},
+
+		// M176 / PAI-924: immutable typed requests and one audited outcome per
+		// intent. Reporter leases never appear in browser projections.
+		{176, []string{
+			`CREATE TABLE IF NOT EXISTS lifecycle_runtimes (
+			 id TEXT PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+			 generation TEXT NOT NULL, machine_id TEXT NOT NULL,
+			 user_id INTEGER NOT NULL REFERENCES users(id), api_key_id INTEGER NOT NULL CHECK(api_key_id>0),
+			 lease_digest BLOB NOT NULL CHECK(length(lease_digest)=32),
+			 registration_json TEXT NOT NULL CHECK(json_valid(registration_json) AND length(registration_json)<=8192),
+			 expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
+			 UNIQUE(project_id,generation))`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_runtime_no_delete BEFORE DELETE ON lifecycle_runtimes
+			 BEGIN SELECT RAISE(ABORT,'immutable runtime history'); END`,
+			`CREATE INDEX IF NOT EXISTS idx_lifecycle_runtime_project ON lifecycle_runtimes(project_id,expires_at)`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_runtime_identity BEFORE UPDATE OF id,project_id,generation,machine_id,user_id,api_key_id,lease_digest,registration_json,created_at ON lifecycle_runtimes
+			 BEGIN SELECT RAISE(ABORT,'immutable runtime identity'); END`,
+			`CREATE TABLE IF NOT EXISTS lifecycle_runtime_sessions (
+			 session_id TEXT PRIMARY KEY,
+			 runtime_id TEXT NOT NULL REFERENCES lifecycle_runtimes(id),
+			 generation TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_runtime_session_immutable BEFORE UPDATE ON lifecycle_runtime_sessions
+			 BEGIN SELECT RAISE(ABORT,'immutable runtime session generation'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_runtime_session_no_delete BEFORE DELETE ON lifecycle_runtime_sessions
+			 BEGIN SELECT RAISE(ABORT,'immutable runtime session generation'); END`,
+			`CREATE TABLE IF NOT EXISTS lifecycle_intents (
+			 id TEXT PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+			 runtime_id TEXT NOT NULL REFERENCES lifecycle_runtimes(id),
+			 user_id INTEGER NOT NULL REFERENCES users(id), session_credential_id TEXT NOT NULL,
+			 request_key TEXT NOT NULL, request_json TEXT NOT NULL CHECK(json_valid(request_json) AND length(request_json)<=8192),
+			 new_generation TEXT NOT NULL DEFAULT '', result_session_id TEXT NOT NULL DEFAULT '',
+			 state TEXT NOT NULL CHECK(state IN ('requested','claimed','executing','completed','failed','expired','cancelled')),
+			 reason TEXT NOT NULL DEFAULT '' CHECK(reason IN ('','applied','failed','unsupported','ownership_lost','outcome_unknown','authority_revoked','expired','cancelled')),
+			 revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 5),
+			 created_at TEXT NOT NULL, expires_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			 actor_kind TEXT NOT NULL CHECK(actor_kind IN ('session','api_key')), actor_user_id INTEGER NOT NULL, actor_credential_id TEXT NOT NULL,
+			 UNIQUE(project_id,user_id,request_key),
+			 CHECK((state IN ('requested','claimed','executing') AND reason='' AND result_session_id='') OR
+			 (state='completed' AND reason='applied') OR
+			 (state='failed' AND reason IN ('failed','unsupported','ownership_lost','outcome_unknown','authority_revoked') AND result_session_id='') OR
+			 (state='expired' AND reason IN ('expired','outcome_unknown') AND result_session_id='') OR
+			 (state='cancelled' AND reason='cancelled' AND result_session_id='')))`,
+			`CREATE INDEX IF NOT EXISTS idx_lifecycle_intent_queue ON lifecycle_intents(runtime_id,state,created_at,id)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_lifecycle_intent_inflight ON lifecycle_intents(runtime_id) WHERE state IN ('claimed','executing')`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_lifecycle_intent_agent_reservation
+             ON lifecycle_intents(project_id,json_extract(request_json,'$.agent_name'))
+             WHERE state IN ('claimed','executing') AND json_extract(request_json,'$.operation') IN ('start','restart')`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_identity BEFORE UPDATE OF id,project_id,runtime_id,user_id,session_credential_id,request_key,request_json,new_generation,created_at,expires_at ON lifecycle_intents
+			 BEGIN SELECT RAISE(ABORT,'immutable lifecycle intent'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_transition BEFORE UPDATE ON lifecycle_intents
+			 WHEN NEW.revision<>OLD.revision+1 OR NOT (
+			 (OLD.state='requested' AND NEW.state IN ('claimed','failed','expired','cancelled')) OR
+			 (OLD.state='claimed' AND NEW.state IN ('executing','failed','expired','cancelled')) OR
+			 (OLD.state='executing' AND NEW.state IN ('completed','failed','expired')))
+			 BEGIN SELECT RAISE(ABORT,'invalid lifecycle transition'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_initial BEFORE INSERT ON lifecycle_intents
+			 WHEN NEW.state<>'requested' OR NEW.revision<>1 OR NEW.reason<>'' OR NEW.result_session_id<>''
+			 BEGIN SELECT RAISE(ABORT,'invalid lifecycle initial state'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_no_delete BEFORE DELETE ON lifecycle_intents
+			 BEGIN SELECT RAISE(ABORT,'immutable lifecycle history'); END`,
+			`CREATE TABLE IF NOT EXISTS lifecycle_intent_events (
+			 intent_id TEXT NOT NULL REFERENCES lifecycle_intents(id), revision INTEGER NOT NULL,
+			 state TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL,
+			 actor_kind TEXT NOT NULL, actor_user_id INTEGER NOT NULL, actor_credential_id TEXT NOT NULL,
+			 PRIMARY KEY(intent_id,revision)) WITHOUT ROWID`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_insert_event AFTER INSERT ON lifecycle_intents
+			 BEGIN INSERT INTO lifecycle_intent_events VALUES(NEW.id,NEW.revision,NEW.state,NEW.reason,NEW.updated_at,NEW.actor_kind,NEW.actor_user_id,NEW.actor_credential_id); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_update_event AFTER UPDATE ON lifecycle_intents
+			 BEGIN INSERT INTO lifecycle_intent_events VALUES(NEW.id,NEW.revision,NEW.state,NEW.reason,NEW.updated_at,NEW.actor_kind,NEW.actor_user_id,NEW.actor_credential_id); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_event_insert_guard BEFORE INSERT ON lifecycle_intent_events
+			 WHEN NOT EXISTS(SELECT 1 FROM lifecycle_intents i WHERE i.id=NEW.intent_id AND i.revision=NEW.revision AND i.state=NEW.state AND i.reason=NEW.reason AND i.updated_at=NEW.created_at AND i.actor_kind=NEW.actor_kind AND i.actor_user_id=NEW.actor_user_id AND i.actor_credential_id=NEW.actor_credential_id)
+			 BEGIN SELECT RAISE(ABORT,'invalid lifecycle event'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_event_no_update BEFORE UPDATE ON lifecycle_intent_events
+			 BEGIN SELECT RAISE(ABORT,'immutable lifecycle event'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_event_no_delete BEFORE DELETE ON lifecycle_intent_events
+			 BEGIN SELECT RAISE(ABORT,'immutable lifecycle event'); END`,
+		}},
+
+		// M177 / PAI-923: sticky generation-fenced consumer ownership and typed runtime health.
+		{177, []string{
+			`CREATE TABLE IF NOT EXISTS agent_consumer_streams (
+ id TEXT PRIMARY KEY, project_id INTEGER NOT NULL, agent_id INTEGER NOT NULL, address TEXT NOT NULL,
+ kind TEXT NOT NULL CHECK(kind IN ('fallback','attention')), revision INTEGER NOT NULL CHECK(revision>0),
+ generation TEXT NOT NULL, registration_json TEXT NOT NULL CHECK(json_valid(registration_json)),
+ runtime_id TEXT NOT NULL, runtime_generation TEXT NOT NULL, session_id TEXT NOT NULL, session_generation TEXT NOT NULL,
+ user_id INTEGER NOT NULL, api_key_id INTEGER NOT NULL, target_id TEXT NOT NULL, target_version INTEGER NOT NULL,
+ lease_digest BLOB NOT NULL CHECK(length(lease_digest)=32), expires_at TEXT NOT NULL,
+ UNIQUE(project_id,agent_id,kind))`,
+			`CREATE TABLE IF NOT EXISTS agent_consumer_attempts (
+ id TEXT PRIMARY KEY,stream_id TEXT NOT NULL REFERENCES agent_consumer_streams(id),stream_revision INTEGER NOT NULL,
+ request_key TEXT NOT NULL, nonce_digest BLOB NOT NULL CHECK(length(nonce_digest)=32),
+ owner_json TEXT NOT NULL CHECK(json_valid(owner_json)), consumer_digest BLOB NOT NULL CHECK(length(consumer_digest)=32),
+ resource_id TEXT NOT NULL, cursor INTEGER NOT NULL CHECK(cursor>0),
+ state TEXT NOT NULL CHECK(state IN ('claimed','executing','completed','released','outcome_unknown')),
+ expires_at TEXT NOT NULL, result_json TEXT NOT NULL DEFAULT '',
+ UNIQUE(stream_id,stream_revision,request_key),UNIQUE(stream_id,nonce_digest))`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_consumer_attempt_open ON agent_consumer_attempts(stream_id) WHERE state IN ('claimed','executing','outcome_unknown')`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attempt_identity BEFORE UPDATE OF id,stream_id,stream_revision,request_key,nonce_digest,owner_json,consumer_digest,resource_id,cursor,expires_at ON agent_consumer_attempts
+ BEGIN SELECT RAISE(ABORT,'immutable consumer attempt'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attempt_terminal BEFORE UPDATE ON agent_consumer_attempts
+ WHEN OLD.state IN ('completed','released','outcome_unknown') OR NOT ((OLD.state='claimed' AND NEW.state IN ('executing','released')) OR (OLD.state='executing' AND NEW.state IN ('completed','outcome_unknown')))
+ BEGIN SELECT RAISE(ABORT,'invalid consumer transition'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attempt_no_delete BEFORE DELETE ON agent_consumer_attempts BEGIN SELECT RAISE(ABORT,'immutable consumer attempt'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_stream_no_delete BEFORE DELETE ON agent_consumer_streams BEGIN SELECT RAISE(ABORT,'sticky consumer ownership'); END`,
+			`ALTER TABLE agent_message_deliveries ADD COLUMN consumer_fence INTEGER NOT NULL DEFAULT 0 CHECK(consumer_fence>=0)`,
+			`ALTER TABLE agent_attention_batches ADD COLUMN consumer_fence INTEGER NOT NULL DEFAULT 0 CHECK(consumer_fence>=0)`,
+			`ALTER TABLE agent_message_cursors ADD COLUMN consumer_fence INTEGER NOT NULL DEFAULT 0 CHECK(consumer_fence>=0)`,
+			`ALTER TABLE agent_attention_cursors ADD COLUMN consumer_fence INTEGER NOT NULL DEFAULT 0 CHECK(consumer_fence>=0)`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_delivery_fence BEFORE UPDATE ON agent_message_deliveries WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s JOIN agent_messages m ON m.to_agent_id=s.agent_id AND m.to_address=s.address WHERE s.kind='fallback' AND m.id=OLD.message_row_id AND (
+ EXISTS(SELECT 1 FROM agent_message_targets t WHERE t.id=(CASE
+	WHEN OLD.last_error_code='managed_target_unavailable' AND OLD.fallback_target_id IS NOT NULL
+	THEN OLD.fallback_target_id
+	WHEN OLD.requested_level='simple' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id) IN ('agentd_codex','agentd_claude')
+	THEN OLD.fallback_target_id
+	WHEN OLD.requested_level='steer' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
+	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id)='simple'
+	THEN OLD.fallback_target_id ELSE COALESCE(OLD.primary_target_id,OLD.fallback_target_id) END) AND t.adapter='codex')
+ OR EXISTS(SELECT 1 FROM agent_consumer_attempts a WHERE a.stream_id=s.id AND a.resource_id=OLD.delivery_id))) AND NEW.consumer_fence<>OLD.consumer_fence+1 BEGIN SELECT RAISE(ABORT,'consumer ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attention_insert BEFORE INSERT ON agent_attention_batches WHEN NEW.state='leased' AND EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='attention' AND s.project_id=NEW.receiver_project_id AND s.agent_id=NEW.receiver_project_agent_id) AND NEW.consumer_fence<=0 BEGIN SELECT RAISE(ABORT,'consumer ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attention_fence BEFORE UPDATE ON agent_attention_batches WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='attention' AND s.project_id=OLD.receiver_project_id AND s.agent_id=OLD.receiver_project_agent_id) AND NEW.consumer_fence<>OLD.consumer_fence+1 BEGIN SELECT RAISE(ABORT,'consumer ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_fallback_cursor_insert BEFORE INSERT ON agent_message_cursors WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='fallback' AND s.project_id=NEW.project_id AND s.agent_id=NEW.project_agent_id) AND (NEW.consumer_fence<=0) BEGIN SELECT RAISE(ABORT,'consumer cursor ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_fallback_cursor_update BEFORE UPDATE ON agent_message_cursors WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='fallback' AND s.project_id=NEW.project_id AND s.agent_id=NEW.project_agent_id) AND (NEW.cursor>OLD.cursor AND NEW.consumer_fence<>OLD.consumer_fence+1) BEGIN SELECT RAISE(ABORT,'consumer cursor ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attention_cursor_insert BEFORE INSERT ON agent_attention_cursors WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='attention' AND s.project_id=NEW.receiver_project_id AND s.agent_id=NEW.receiver_project_agent_id) AND (NEW.consumer_fence<=0) BEGIN SELECT RAISE(ABORT,'consumer cursor ownership required'); END`,
+			`CREATE TRIGGER IF NOT EXISTS consumer_attention_cursor_update BEFORE UPDATE ON agent_attention_cursors WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s WHERE s.kind='attention' AND s.project_id=NEW.receiver_project_id AND s.agent_id=NEW.receiver_project_agent_id) AND (NEW.cursor>OLD.cursor AND NEW.consumer_fence<>OLD.consumer_fence+1) BEGIN SELECT RAISE(ABORT,'consumer cursor ownership required'); END`,
+			`CREATE TABLE IF NOT EXISTS agent_runtime_health (
+ id TEXT PRIMARY KEY,runtime_id TEXT NOT NULL,project_id INTEGER NOT NULL,layer TEXT NOT NULL CHECK(layer IN ('reporter','primary','fallback','attention')),
+ sequence INTEGER NOT NULL CHECK(sequence>0),state TEXT NOT NULL CHECK(state IN ('healthy','unhealthy')),
+ reason TEXT NOT NULL CHECK(reason IN ('recovered','consumer_crash_loop','consumer_authority_unavailable','consumer_transport_failed')),
+ failure_count INTEGER NOT NULL CHECK(failure_count BETWEEN 0 AND 10),episode INTEGER NOT NULL CHECK(episode BETWEEN 0 AND 10000),published INTEGER NOT NULL DEFAULT 0 CHECK(published IN (0,1)),published_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+ UNIQUE(runtime_id,layer))`,
+			`DROP TRIGGER IF EXISTS trg_agent_attention_items_no_update`,
+			`DROP TRIGGER IF EXISTS trg_agent_attention_items_no_delete`,
+			`DROP INDEX IF EXISTS idx_agent_attention_items_receiver`,
+			`CREATE TEMP TABLE consumer_attention_sequence AS SELECT seq FROM sqlite_sequence WHERE name='agent_attention_items'`,
+			`ALTER TABLE agent_attention_items RENAME TO agent_attention_items_m176`,
+			`CREATE TABLE IF NOT EXISTS agent_attention_items (
+			 id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+			 receiver_project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 receiver_project_agent_id INTEGER NOT NULL REFERENCES project_agents(id) ON DELETE CASCADE,
+			 address                   TEXT NOT NULL CHECK(length(CAST(address AS BLOB)) BETWEEN 3 AND 129),
+			 source_project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			 source_kind               TEXT NOT NULL CHECK(source_kind IN ('harness_session_event','agent_message_delivery','held_agent_message','harness_control','reply_obligation','runtime_health')),
+			 source_id                 TEXT NOT NULL CHECK(length(CAST(source_id AS BLOB)) BETWEEN 1 AND 64 AND source_id=trim(source_id)),
+			 source_sequence           INTEGER NOT NULL CHECK(source_sequence>=0),
+			 attention_kind            TEXT NOT NULL CHECK(attention_kind IN ('worker_unknown','worker_dead','assignment_turn_ended','delivery_failed','held_action','control_rejected','reply_overdue','runtime_unhealthy')),
+			 reason_code               TEXT NOT NULL CHECK(reason_code IN ('heartbeat_stale','stale_evidence','malformed_evidence','process_exited','process_failed','ownership_lost','stopped','turn_completed_open_assignment','target_blocked','delivery_dead','action_request_held','control_rejected','reply_expected','consumer_crash_loop','consumer_authority_unavailable','consumer_transport_failed')),
+			 occurred_at               TEXT NOT NULL CHECK(` + sqlControlTimestampCheck("occurred_at") + `),
+			 created_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+			 UNIQUE(receiver_project_agent_id,source_kind,source_id,source_sequence,attention_kind,reason_code)
+			)`,
+			`INSERT INTO agent_attention_items SELECT * FROM agent_attention_items_m176`,
+			`DROP TABLE agent_attention_items_m176`,
+			`UPDATE sqlite_sequence SET seq=MAX(seq,COALESCE((SELECT seq FROM consumer_attention_sequence),0)) WHERE name='agent_attention_items'`,
+			`INSERT INTO sqlite_sequence(name,seq) SELECT 'agent_attention_items',seq FROM consumer_attention_sequence WHERE NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='agent_attention_items')`,
+			`DROP TABLE consumer_attention_sequence`,
+			`CREATE INDEX IF NOT EXISTS idx_agent_attention_items_receiver ON agent_attention_items(receiver_project_id,receiver_project_agent_id,id)`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_attention_items_no_update BEFORE UPDATE ON agent_attention_items BEGIN SELECT RAISE(ABORT,'agent attention items are immutable'); END`,
+			`CREATE TRIGGER IF NOT EXISTS trg_agent_attention_items_no_delete BEFORE DELETE ON agent_attention_items WHEN EXISTS(SELECT 1 FROM projects WHERE id=OLD.receiver_project_id) AND EXISTS(SELECT 1 FROM project_agents WHERE id=OLD.receiver_project_agent_id) AND EXISTS(SELECT 1 FROM projects WHERE id=OLD.source_project_id) BEGIN SELECT RAISE(ABORT,'agent attention items are immutable'); END`,
+		}},
 	}
 
+	// M178 changes only the message-body guard, preserving multiline bytes and
+	// all existing ledger references through an atomic table rebuild.
+	migrations = append(migrations, migration{version: 178})
+
+	// M179 / PAI-923: explicit recovery of never-claimed delivery work from a
+	// publicly closed managed generation. Canonical message and delivery target
+	// snapshots remain immutable; this bounded ledger records the separately
+	// selected effective binding.
+	migrations = append(migrations, migration{version: 179, steps: []string{
+		`CREATE TABLE agent_message_delivery_recoveries (
+		 delivery_id              TEXT NOT NULL REFERENCES agent_message_deliveries(delivery_id) ON DELETE CASCADE,
+		 sequence                 INTEGER NOT NULL CHECK(sequence BETWEEN 1 AND 8),
+		 project_id               INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		 old_target_id            TEXT NOT NULL REFERENCES agent_message_targets(id),
+		 old_target_version       INTEGER NOT NULL CHECK(old_target_version>0),
+		 old_harness_session_id   TEXT NOT NULL REFERENCES harness_sessions(id),
+		 old_runtime_id           TEXT NOT NULL REFERENCES lifecycle_runtimes(id),
+		 old_session_generation   TEXT NOT NULL,
+		 new_target_id            TEXT NOT NULL REFERENCES agent_message_targets(id),
+		 new_target_version       INTEGER NOT NULL CHECK(new_target_version>0),
+		 new_harness_session_id   TEXT NOT NULL REFERENCES harness_sessions(id),
+		 new_runtime_id           TEXT NOT NULL REFERENCES lifecycle_runtimes(id),
+		 new_runtime_generation   TEXT NOT NULL,
+		 new_session_generation   TEXT NOT NULL,
+		 actor_user_id            INTEGER NOT NULL REFERENCES users(id),
+		 created_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK(` + sqlControlTimestampCheck("created_at") + `),
+		 PRIMARY KEY(delivery_id,sequence),
+		 UNIQUE(delivery_id,new_target_id),
+		 CHECK(old_target_id<>new_target_id),
+		 CHECK(old_harness_session_id<>new_harness_session_id)
+		)`,
+		`CREATE INDEX idx_agent_message_delivery_recoveries_project
+		 ON agent_message_delivery_recoveries(project_id,created_at,delivery_id)`,
+		`CREATE TRIGGER trg_agent_message_delivery_recovery_guard BEFORE INSERT ON agent_message_delivery_recoveries
+		 WHEN NOT EXISTS(
+		  SELECT 1 FROM agent_message_deliveries delivery
+		  JOIN agent_messages message ON message.id=delivery.message_row_id
+		  JOIN project_agents receiver ON receiver.id=message.to_agent_id
+		  JOIN agent_message_targets old_target ON old_target.id=NEW.old_target_id
+		  JOIN harness_sessions old_session ON old_session.id=NEW.old_harness_session_id
+		  JOIN agent_message_targets new_target ON new_target.id=NEW.new_target_id
+		  JOIN harness_sessions new_session ON new_session.id=NEW.new_harness_session_id
+		  WHERE delivery.delivery_id=NEW.delivery_id AND receiver.project_id=NEW.project_id
+		   AND delivery.instance=old_target.instance AND old_target.instance=new_target.instance
+		   AND old_target.project_id=NEW.project_id AND new_target.project_id=NEW.project_id
+		   AND old_target.address=message.to_address AND new_target.address=message.to_address
+		   AND old_target.adapter='managed_harness' AND new_target.adapter='managed_harness'
+		   AND old_target.target_kind='harness_session' AND new_target.target_kind='harness_session'
+		   AND old_target.version=NEW.old_target_version AND new_target.version=NEW.new_target_version
+		   AND old_session.project_id=NEW.project_id AND old_session.message_target_id=NEW.old_target_id
+		   AND old_session.phase='stopped'
+		   AND EXISTS(SELECT 1 FROM lifecycle_runtime_sessions old_binding
+		              WHERE old_binding.session_id=NEW.old_harness_session_id
+		               AND old_binding.runtime_id=NEW.old_runtime_id
+		               AND old_binding.generation=NEW.old_session_generation)
+		   AND new_session.project_id=NEW.project_id AND new_session.message_target_id=NEW.new_target_id
+		   AND new_session.phase<>'stopped' AND new_session.management_mode='managed'
+		   AND new_session.steer_mode='owned' AND new_session.advertised_inbox=1 AND new_session.advertised_status=1
+		   AND EXISTS(SELECT 1 FROM lifecycle_runtime_sessions new_binding
+		              JOIN lifecycle_runtimes runtime ON runtime.id=new_binding.runtime_id
+		              WHERE new_binding.session_id=NEW.new_harness_session_id
+		               AND new_binding.runtime_id=NEW.new_runtime_id
+		               AND new_binding.generation=NEW.new_session_generation
+		               AND runtime.generation=NEW.new_runtime_generation
+		               AND runtime.project_id=NEW.project_id AND runtime.machine_id=new_session.host
+		               AND runtime.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		   AND delivery.state='pending' AND delivery.attempt_count=0 AND delivery.consumer_fence=0
+		   AND delivery.lease_until IS NULL AND delivery.handed_off_at IS NULL AND delivery.effective_level IS NULL
+		   AND NOT EXISTS(SELECT 1 FROM agent_consumer_attempts attempt WHERE attempt.resource_id=delivery.delivery_id)
+		   AND NEW.sequence=COALESCE((SELECT MAX(previous.sequence)+1 FROM agent_message_delivery_recoveries previous
+		                              WHERE previous.delivery_id=NEW.delivery_id),1)
+		   AND NEW.old_target_id=COALESCE((SELECT previous.new_target_id FROM agent_message_delivery_recoveries previous
+		                                  WHERE previous.delivery_id=NEW.delivery_id ORDER BY previous.sequence DESC LIMIT 1),
+		                                 delivery.primary_target_id)
+		 ) BEGIN SELECT RAISE(ABORT,'invalid closed-target delivery recovery'); END`,
+		`CREATE TRIGGER trg_agent_message_delivery_recovery_no_update BEFORE UPDATE ON agent_message_delivery_recoveries
+		 BEGIN SELECT RAISE(ABORT,'delivery recovery history is immutable'); END`,
+		`CREATE TRIGGER trg_agent_message_delivery_recovery_no_delete BEFORE DELETE ON agent_message_delivery_recoveries
+		 WHEN EXISTS(SELECT 1 FROM agent_message_deliveries WHERE delivery_id=OLD.delivery_id)
+		 BEGIN SELECT RAISE(ABORT,'delivery recovery history is immutable'); END`,
+	}})
+	// M180 / PAI-926: authenticated human messages address one exact
+	// runtime-owned harness generation and retain immutable replay evidence.
+	migrations = append(migrations, migration{version: 180})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue
@@ -13075,6 +13320,12 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 }
 
 func applyMigration(ctx context.Context, conn *sql.Conn, m migration) error {
+	if m.version == 178 {
+		return applyMessageBodyMigration178(ctx, conn)
+	}
+	if m.version == 180 {
+		return applyHarnessMessagesMigration180(ctx, conn)
+	}
 	if migrationUsesForeignKeyPragma(m) {
 		return applyForeignKeyRebuildMigration(ctx, conn, m)
 	}

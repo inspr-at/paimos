@@ -8,11 +8,33 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck disable=SC1091
 source "$ROOT/scripts/release-version.sh"
-SITE_ROOT="${1:-$ROOT/../inspr-at}"
+SITE_ARGUMENT=""
+DRY_RUN=0
+for argument in "$@"; do
+  case "$argument" in
+    --dry-run) DRY_RUN=1 ;;
+    --*) echo "marketing captures: unknown option: $argument" >&2; exit 2 ;;
+    *)
+      [[ -z "$SITE_ARGUMENT" ]] || { echo 'marketing captures: supply only one site path' >&2; exit 2; }
+      SITE_ARGUMENT="$argument"
+      ;;
+  esac
+done
+CONFIG="$ROOT/scripts/marketing/capture-config.cjs"
+# Validate every endpoint/path before token reads, network access, DB changes,
+# browser bootstrap or site writes. --dry-run has none of those effects.
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  exec node "$CONFIG" --json "$SITE_ARGUMENT"
+fi
+SITE_ROOT=$(node "$CONFIG" siteRoot "$SITE_ARGUMENT")
+API_URL=$(node "$CONFIG" apiUrl "$SITE_ARGUMENT")
+APP_URL=$(node "$CONFIG" appUrl "$SITE_ARGUMENT")
+CAPTURE_DATA_DIR=$(node "$CONFIG" dataDir "$SITE_ARGUMENT")
+export PAIMOS_CAPTURE_API_URL="$API_URL"
+export PAIMOS_CAPTURE_APP_URL="$APP_URL"
+export PAIMOS_CAPTURE_DATA_DIR="$CAPTURE_DATA_DIR"
 CAPTURE_RELEASE=$(tr -d '[:space:]' < "$ROOT/VERSION")
 CAPTURE_RELEASE_KIND=$(release_version::kind "$CAPTURE_RELEASE")
-API_URL=http://localhost:8888
-APP_URL=http://localhost:5173
 CAPTURE_DIR=""
 
 cleanup() {
@@ -51,7 +73,7 @@ if ! git -C "$ROOT" diff --quiet "v$CAPTURE_RELEASE" -- \
 fi
 
 HEALTH=$(curl -fsS "$API_URL/api/health") || \
-  die "the seeded dev backend is not running; start it with: just dev-up"
+  die "the selected seeded dev backend is not running at $API_URL"
 HEALTH_VERSION=$(printf '%s' "$HEALTH" | node -e \
   'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.parse(s).version||""))')
 if [[ "$HEALTH_VERSION" != "$CAPTURE_RELEASE" && "$HEALTH_VERSION" != "dev" ]]; then
@@ -61,7 +83,7 @@ if [[ "$HEALTH_VERSION" == "dev" ]]; then
   echo "→ dev binary confirmed; backend/frontend source matches v$CAPTURE_RELEASE"
 fi
 curl -fsS "$APP_URL" >/dev/null || \
-  die "the seeded Vite app is not running; start it with: just dev-up"
+  die "the selected seeded app is not running at $APP_URL"
 
 TOKEN_FILE="${PAIMOS_DEV_LOGIN_TOKEN_FILE:-$HOME/Secrets/dev/PAIMOS_DEV_LOGIN_TOKEN.env}"
 if [[ -z "${PAIMOS_DEV_LOGIN_TOKEN:-}" ]]; then
@@ -82,14 +104,14 @@ for fixture_sql in \
   demo-memory.sql \
   demo-intake-session.sql \
   demo-intake-events.sql; do
-  (cd "$ROOT/backend" && DATA_DIR="$ROOT/data" PAIMOS_ENV=development \
+  (cd "$ROOT/backend" && DATA_DIR="$CAPTURE_DATA_DIR" PAIMOS_ENV=development \
     go run ./cmd/dev-fixture-sql < "$ROOT/scripts/marketing/$fixture_sql")
 done
 
 echo "→ capturing Paimos v$CAPTURE_RELEASE at 1600×1000 @2x"
 OUT_DIR="$CAPTURE_DIR" NODE_PATH="$TOOL/node_modules" \
   node "$ROOT/scripts/marketing/capture-views.cjs"
-OUT_DIR="$CAPTURE_DIR" NODE_PATH="$TOOL/node_modules" PAIMOS_DB="$ROOT/data/paimos.db" \
+OUT_DIR="$CAPTURE_DIR" NODE_PATH="$TOOL/node_modules" PAIMOS_DB="$CAPTURE_DATA_DIR/paimos.db" \
   node "$ROOT/scripts/marketing/capture-intake.cjs"
 OUT_DIR="$CAPTURE_DIR" NODE_PATH="$TOOL/node_modules" \
   node "$ROOT/scripts/marketing/capture-loops.cjs"

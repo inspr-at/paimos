@@ -889,7 +889,7 @@ async function cancelMiteImport() {
   font-family: inherit;
 }
 .tab-btn:hover { color: var(--text); }
-.tab-btn.active { color: var(--brand-blue); border-bottom-color: var(--brand-blue); }
+.tab-btn.active { color: var(--paimos-selection-ink); background: var(--paimos-selection-fill); font-weight: 600; }
 
 /* ── Tab panel ────────────────────────────────────────────────────────────── */
 .tab-panel { min-height: 200px; }

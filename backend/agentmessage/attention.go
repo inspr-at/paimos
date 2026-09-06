@@ -171,7 +171,7 @@ const attentionProjectionEpoch = "1970-01-01T00:00:00.000Z"
 // separate from authoritative current state. A reply or human resolution
 // ends its matching obligation immediately; acknowledgement is deliberately
 // not part of that decision.
-const activeAttentionItemPredicate = `(ai.source_kind NOT IN ('held_agent_message','reply_obligation')
+const activeAttentionItemPredicate = `(ai.source_kind<>'runtime_health' OR EXISTS(SELECT 1 FROM agent_runtime_health rh WHERE rh.id=ai.source_id AND rh.state='unhealthy' AND rh.episode=ai.source_sequence)) AND (ai.source_kind NOT IN ('held_agent_message','reply_obligation')
 	OR (ai.source_kind='held_agent_message' AND NOT EXISTS(
 		SELECT 1 FROM agent_messages message
 		JOIN agent_message_human_resolutions resolution ON resolution.message_row_id=message.id
@@ -735,6 +735,13 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 	if err != nil {
 		return nil, err
 	}
+	var owned int
+	if tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_consumer_streams WHERE project_id=? AND agent_id=? AND kind='attention'`, in.ProjectID, agentID).Scan(&owned) != nil {
+		return nil, ErrConsumerStorage
+	}
+	if owned > 0 && in.WorkerAdapter != "" {
+		return nil, ErrConsumerUnavailable
+	}
 	// If every immutable item in an open batch has ceased to be actionable,
 	// close that delivery generation without pretending it was handed off.
 	// The cursor remains unchanged, so unrelated later work cannot be skipped.
@@ -742,6 +749,7 @@ func (s *Service) ListAttention(ctx context.Context, in AttentionInput) (*Attent
 		SET state='superseded',blocked_reason='',lease_until=NULL,
 			superseded_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE receiver_project_id=? AND receiver_project_agent_id=? AND state IN ('pending','leased','blocked')
+		AND NOT EXISTS(SELECT 1 FROM agent_consumer_streams cs WHERE cs.kind='attention' AND cs.agent_id=agent_attention_batches.receiver_project_agent_id)
 		AND NOT EXISTS(SELECT 1 FROM agent_attention_items ai
 			WHERE ai.receiver_project_id=agent_attention_batches.receiver_project_id
 			AND ai.receiver_project_agent_id=agent_attention_batches.receiver_project_agent_id
@@ -935,6 +943,13 @@ func (s *Service) AckAttention(ctx context.Context, in AttentionAckInput) (*Curs
 	address, agentID, err := resolveAuthorizedAttentionReceiverTx(ctx, tx, in.ProjectID, in.Address, in.Agent)
 	if err != nil {
 		return nil, err
+	}
+	var owned int
+	if tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_consumer_streams WHERE project_id=? AND agent_id=? AND kind='attention'`, in.ProjectID, agentID).Scan(&owned) != nil {
+		return nil, ErrConsumerStorage
+	}
+	if owned > 0 {
+		return nil, ErrConsumerUnavailable
 	}
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_attention_items

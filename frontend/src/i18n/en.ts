@@ -455,6 +455,7 @@ export default {
       at_risk: 'At risk',
       blocked: 'Blocked',
       unknown: 'Unknown',
+      stale: 'Stale',
     },
     activity: {
       working: 'Working',

@@ -59,10 +59,15 @@ jobs:
   backend-full-race:
     needs: backend-full-authorize
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [core, runtime]
     # Exact-main run 33871597020 reached supervision 38m19s into this step;
     # its last selected test was 28s old when the old 8m package alarm fired.
     # A 15m package cap plus the current roughly 13m tail projects to 66m19s.
-    # Keep over 20m of outer-job margin for setup and runner variance.
+    # The added root/runtime fixtures project to roughly 30m. Give them a
+    # separate runner so the core group retains its original outer-job margin.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
@@ -72,7 +77,7 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: backend/go.sum
 
-      - name: Backend — broad control-plane race
+      - name: Backend — broad control-plane race (${{ matrix.group }})
         working-directory: backend
         # The runner walks package-local and handler shard concurrency contracts sequentially.
         # That stays broad without starving latency-budget tests by racing all
@@ -82,7 +87,7 @@ jobs:
         # Fifteen minutes keeps a finite per-package alarm within the 90m job.
         env:
           BACKEND_RACE_PACKAGE_TIMEOUT: 15m
-        run: ../scripts/backend-pr-race.sh './...'
+        run: ../scripts/backend-pr-race.sh --group="${{ matrix.group }}" './...'
 
   backend-full:
     if: always() && (github.event_name != 'pull_request' || github.event.label.name == 'backend-full-evidence')
@@ -90,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require both exhaustive assurance lanes
+      - name: Require serial assurance and every race group
         env:
           AUTHORIZATION: ${{ needs.backend-full-authorize.result }}
           SERIAL: ${{ needs.backend-full-serial.result }}

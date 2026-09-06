@@ -1,8 +1,8 @@
 // PAIMOS — Your Professional & Personal AI Project OS
 // Copyright (C) 2026 Markus Barta <markus@barta.com>
 
-// Package safetext owns the single secret-like text predicate shared by HTTP
-// ingestion, delivery projections, and SQLite backstops.
+// Package safetext shares credential patterns between strict scalar projections,
+// multiline message bodies, and their SQLite backstops.
 package safetext
 
 import (
@@ -32,6 +32,23 @@ func ContainsSecretLike(value string) bool {
 	if strings.ContainsAny(value, "\x00\r\n") {
 		return true
 	}
+	return matchesSecretPattern(value)
+}
+
+// MessageBodyContainsSecretLike permits message formatting without changing the
+// strict scalar/projection contract above. The joined shadow catches credentials
+// split across lines; neither scan normalizes the body stored or delivered.
+func MessageBodyContainsSecretLike(value string) bool {
+	if strings.ContainsRune(value, '\x00') || matchesSecretPattern(value) {
+		return true
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		return matchesSecretPattern(strings.NewReplacer("\r", "", "\n", "").Replace(value))
+	}
+	return false
+}
+
+func matchesSecretPattern(value string) bool {
 	for _, pattern := range secretPatterns {
 		if pattern.MatchString(value) {
 			return true

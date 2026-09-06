@@ -272,6 +272,75 @@ func TestTargetSetHasNoArgvSenderKeyFlag(t *testing.T) {
 	}
 }
 
+func TestMessageClosedTargetRecoveryDryRunPrintsExactApplyCommand(t *testing.T) {
+	var handlerErr string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
+			_, _ = w.Write([]byte(`[{"id":17,"key":"PAI","name":"PAIMOS"}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/17/message-deliveries/delivery-1/closed-target-recovery":
+			if r.URL.Query().Get("expected_closed_session_id") != "closed-session-1" || r.URL.Query().Get("replacement_session_id") != "replacement-session-2" {
+				handlerErr = "dry-run omitted exact session bindings"
+			}
+			_, _ = w.Write([]byte(`{"delivery_id":"delivery-1","address":"codex:amy","state":"pending","attempt_count":0,"consumer_fence":0,"recovery_sequence":1,"original_target":{"target_id":"target-old","target_version":4,"harness_session_id":"closed-session-1","session_generation":"generation-old"},"effective_target":{"target_id":"target-old","target_version":4,"harness_session_id":"closed-session-1","session_generation":"generation-old"},"replacement_target":{"target_id":"target-new","target_version":5,"harness_session_id":"replacement-session-2","session_generation":"generation-new"},"recovered":false}`))
+		default:
+			handlerErr = fmt.Sprintf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+	out, _, err := executeCLIForTest(t, "message", "delivery", "recover-closed-target", "--project", "PAI",
+		"--delivery", "delivery-1", "--closed-session", "closed-session-1", "--replacement-session", "replacement-session-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handlerErr != "" {
+		t.Fatal(handlerErr)
+	}
+	want := "paimos message delivery recover-closed-target --project 17 --delivery delivery-1 --closed-session closed-session-1 --replacement-session replacement-session-2 --expected-target target-old --expected-target-version 4 --expected-consumer-fence 0 --apply"
+	if !strings.Contains(out, want) {
+		t.Fatalf("dry-run output omitted copyable apply command:\n%s", out)
+	}
+}
+
+func TestMessageClosedTargetRecoveryApplySendsExactCAS(t *testing.T) {
+	var payload map[string]any
+	var handlerErr string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
+			_, _ = w.Write([]byte(`[{"id":17,"key":"PAI","name":"PAIMOS"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/projects/17/message-deliveries/delivery-1/closed-target-recovery":
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				handlerErr = err.Error()
+			}
+			_, _ = w.Write([]byte(`{"delivery_id":"delivery-1","recovered":true}`))
+		default:
+			handlerErr = fmt.Sprintf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+	if _, _, err := executeCLIForTest(t, "message", "delivery", "recover-closed-target", "--project", "PAI",
+		"--delivery", "delivery-1", "--closed-session", "closed-session-1", "--replacement-session", "replacement-session-2",
+		"--expected-target", "target-old", "--expected-target-version", "4", "--expected-consumer-fence", "0", "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	if handlerErr != "" {
+		t.Fatal(handlerErr)
+	}
+	if payload["expected_closed_session_id"] != "closed-session-1" || payload["replacement_session_id"] != "replacement-session-2" ||
+		payload["expected_target_id"] != "target-old" || payload["expected_target_version"] != float64(4) || payload["expected_consumer_fence"] != float64(0) {
+		t.Fatalf("apply payload=%#v", payload)
+	}
+}
+
 // newTargetRegistrationServer records the registration payload so tests can
 // prove which file inputs reached the API and which were refused locally.
 func newTargetRegistrationServer(t *testing.T, payload *map[string]any) *httptest.Server {

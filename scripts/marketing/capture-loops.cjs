@@ -7,8 +7,10 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 
-const API = 'http://localhost:8888';
-const APP = 'http://localhost:5173';
+const { captureConfig } = require('./capture-config.cjs');
+const capture = captureConfig();
+const API = capture.apiUrl;
+const APP = capture.appUrl;
 const OUT = process.env.OUT_DIR || '/tmp/paimos-loops';
 const TOKEN = process.env.PAIMOS_DEV_LOGIN_TOKEN || '';
 
