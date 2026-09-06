@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
-## [Unreleased]
+## [26.09.06] — 2026-09-06
 
 ### Added — Habitat and owned runtime controls (PAI-917)
 
