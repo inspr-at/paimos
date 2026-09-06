@@ -368,6 +368,7 @@ watch(
 
 .cl-content-toolbar {
   display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap;
   gap: 1rem;
   min-width: 0;
 }
@@ -383,6 +384,7 @@ watch(
   margin: 0;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .cl-bump-label {
@@ -403,6 +405,7 @@ watch(
   display: flex;
   align-items: center;
   gap: .35rem;
+  margin-left: auto;
   flex-shrink: 0;
 }
 
