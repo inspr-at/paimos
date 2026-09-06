@@ -37,9 +37,7 @@ func setupWithClock(t *testing.T, now func() time.Time) *fixture {
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
 	t.Setenv("PAIMOS_SECRET_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
-	if err := db.Open(); err != nil {
-		t.Fatal(err)
-	}
+	openLifecycleFixtureDB(t)
 	t.Cleanup(func() { db.DB.Close(); db.DB = nil })
 	f := &fixture{s: NewService(db.DB), now: now().UTC()}
 	f.s.now = func() time.Time { return f.now }
