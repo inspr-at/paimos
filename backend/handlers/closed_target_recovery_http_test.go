@@ -70,6 +70,7 @@ func TestClosedTargetRecoveryHTTPRejectsAmbiguousInputsWithFixedDetail(t *testin
 		base + "?expected_closed_session_id=old&replacement_session_id=new&extra=value",
 		base + "?expected_closed_session_id=old&expected_closed_session_id=other&replacement_session_id=new",
 		base + "?expected_closed_session_id=old&replacement_session_id=new&expected_target_id=target",
+		base + "?expected_closed_session_id=old&replacement_session_id=new&discarded=%ZZ",
 	} {
 		response := ts.get(t, path, ts.adminCookie)
 		assertStatus(t, response, http.StatusBadRequest)

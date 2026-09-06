@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -480,7 +481,7 @@ func recoverClosedTargetDelivery(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
 		return
 	}
-	if len(r.URL.Query()) != 0 {
+	if r.URL.RawQuery != "" {
 		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery request is invalid", http.StatusBadRequest)
 		return
 	}
@@ -502,10 +503,10 @@ func recoverClosedTargetDelivery(w http.ResponseWriter, r *http.Request) {
 }
 
 func closedTargetRecoveryQuery(w http.ResponseWriter, r *http.Request) (string, string, bool) {
-	query := r.URL.Query()
+	query, parseErr := url.ParseQuery(r.URL.RawQuery)
 	closed, closedOK := query["expected_closed_session_id"]
 	replacement, replacementOK := query["replacement_session_id"]
-	if len(query) != 2 || !closedOK || !replacementOK || len(closed) != 1 || len(replacement) != 1 ||
+	if parseErr != nil || len(query) != 2 || !closedOK || !replacementOK || len(closed) != 1 || len(replacement) != 1 ||
 		strings.TrimSpace(closed[0]) == "" || strings.TrimSpace(replacement[0]) == "" {
 		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery query is invalid", http.StatusBadRequest)
 		return "", "", false

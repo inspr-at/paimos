@@ -344,6 +344,11 @@ func TestClosedTargetRecoveryPreservesLaterUnavailableFallback(t *testing.T) {
 	if err != nil || len(statuses) != 1 || statuses[0].OriginalTargetID != f.oldTarget.ID || statuses[0].EffectiveTargetID != fallback.ID || statuses[0].RecoveryCount != 1 {
 		t.Fatalf("fallback selection after recovery=%+v err=%v", statuses, err)
 	}
+	replay, err := f.service.RecoverClosedTarget(context.Background(), f.input)
+	if err != nil || replay.EffectiveTarget.TargetID != f.newTarget.ID ||
+		replay.EffectiveTarget.HarnessSessionID != f.newSession || replay.RecoverySequence != 1 {
+		t.Fatalf("idempotent recovery mixed fallback and recovered-primary bindings: plan=%+v err=%v", replay, err)
+	}
 }
 
 func TestClosedTargetRecoveryRequiresCurrentReporterAuthority(t *testing.T) {

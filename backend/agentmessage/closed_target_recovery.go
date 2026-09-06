@@ -318,7 +318,7 @@ func loadIdempotentClosedTargetRecovery(ctx context.Context, tx *sql.Tx, in Clos
 		JOIN agent_message_deliveries d ON d.delivery_id=recovery.delivery_id
 		JOIN agent_messages message ON message.id=d.message_row_id
 		JOIN agent_message_targets original ON original.id=d.primary_target_id
-		JOIN agent_message_targets effective ON effective.id=`+selectedDeliveryTargetSQL+`
+		JOIN agent_message_targets effective ON effective.id=`+effectivePrimaryDeliveryTargetSQL+`
 		WHERE recovery.delivery_id=? AND recovery.project_id=? AND recovery.old_target_id=?
 		 AND recovery.old_target_version=? AND recovery.old_harness_session_id=? AND recovery.new_harness_session_id=?`,
 		in.DeliveryID, in.ProjectID, in.ExpectedTargetID, in.ExpectedTargetVersion,
