@@ -35,13 +35,13 @@ async function load() {
       if (
         !positive(row.id) ||
         row.project_id !== props.projectId ||
-        typeof row.key !== 'string' ||
-        row.key.length > 64 ||
+        typeof row.issue_key !== 'string' ||
+        row.issue_key.length > 64 ||
         typeof row.title !== 'string' ||
         row.title.length > 2048
       )
         invalid()
-      return { id: Number(row.id), key: String(row.key), title: String(row.title) }
+      return { id: Number(row.id), key: String(row.issue_key), title: String(row.title) }
     })
     if (version !== generation || signal.aborted) return
     tickets.value = rows
