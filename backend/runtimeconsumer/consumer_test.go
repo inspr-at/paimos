@@ -228,6 +228,39 @@ func TestTransientRepairKeepsDurableEffectsAndUnknownQuarantined(t *testing.T) {
 		t.Fatal("repair discarded ambiguous effect")
 	}
 }
+func TestRepairReopensOwnershipChangedStreamForVerifiedSuccessor(t *testing.T) {
+	dir := t.TempDir()
+	d := &fixtureDriver{verifyErr: ErrOwnership}
+	s := fixtureSupervisor(t, dir, d)
+	b := fixtureBinding()
+	if !errors.Is(s.Step(context.Background(), b), ErrOwnership) {
+		t.Fatal("ownership loss did not fence the stream")
+	}
+	if got := s.Snapshot(); len(got) != 1 || got[0].State != "circuit_open" || got[0].Reason != "ownership_changed" {
+		t.Fatal("ownership loss did not persist a closed circuit")
+	}
+	if !errors.Is(s.Repair(context.Background(), b), ErrOwnership) {
+		t.Fatal("repair admitted an unverified binding")
+	}
+	s.Stop()
+	d.verifyErr = nil
+	b.Generation = "daemon-two"
+	b.Session = "session-two"
+	b.Revision = "target-two"
+	s = fixtureSupervisor(t, dir, d)
+	if err := s.Repair(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Step(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	if d.effects != 0 || len(s.receipts.Snapshot()) != 0 {
+		t.Fatal("successor repair created an effect without work")
+	}
+	if got := s.Snapshot(); len(got) != 1 || got[0].State != "ready" || got[0].Failures != 0 || got[0].Generation != "daemon-two" {
+		t.Fatal("verified successor did not reopen the address stream")
+	}
+}
 func TestBusyDeferralDoesNotReserveReceiptOrCountFailure(t *testing.T) {
 	d := &fixtureDriver{works: []Work{{ID: "one", Cursor: 1}}, prepareErr: ErrDeferred}
 	s := fixtureSupervisor(t, t.TempDir(), d)

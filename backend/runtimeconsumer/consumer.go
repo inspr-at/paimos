@@ -396,7 +396,7 @@ func (s *Supervisor) Repair(ctx context.Context, b Binding) error {
 		if c.Key != b.Stream() {
 			continue
 		}
-		if c.Evidence.Reason != "transport_unavailable" && c.Evidence.Reason != "authority_unavailable" && c.Evidence.Reason != "" {
+		if c.Evidence.Reason != "transport_unavailable" && c.Evidence.Reason != "authority_unavailable" && c.Evidence.Reason != "ownership_changed" && c.Evidence.Reason != "" {
 			return ErrUnknown
 		}
 		// Every retained unknown is checked again by Step even if it belongs to
