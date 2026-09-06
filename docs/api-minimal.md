@@ -980,3 +980,18 @@ curl -s -H "Authorization: Bearer $KEY" \
   -d '{"title":"...","type":"ticket","status":"backlog","priority":"medium",
        "description":"...","acceptance_criteria":"- [ ] ..."}'
 ```
+
+### Orchestration projection v1 (PAI-925)
+
+`GET /agent-mode/orchestration/v1?zoom=10` and
+`GET /agent-mode/projects/:projectID/orchestration/v1?zoom=10` compose the configured
+instance root, its active generation, project coordination, and the unchanged
+worker-fleet v2 snapshot. The closed contract is
+[`orchestration-v1.schema.json`](../backend/contracts/orchestration-v1.schema.json).
+Both routes use Agent Mode authorization and `private, no-store`, including
+concealed 404 responses. Counts include authorized projects only; the separate
+`coordination_bounds` includes empty projects, while fleet totals retain their
+existing meaning. Zoom and communication/history bounds are inherited from fleet
+v2. Root generation outside the visible sample is explicitly unknown; configured
+identity exposes only the existing display label. Project coordination never
+creates cross-project parent-session edges.

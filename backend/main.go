@@ -521,6 +521,7 @@ func mountAPI(r chi.Router) {
 		r.Get("/deliveries", handlers.AgentModeDeliveries)
 		r.Get("/projects/{projectID}/deliveries", handlers.AgentModeProjectDeliveries)
 		r.Get("/deliveries/{deliveryKey}", handlers.AgentModeDelivery)
+		handlers.RegisterOrchestrationProjectionRoutes(r)
 		r.Get("/worker-fleet/v1", handlers.AgentModeWorkerFleet)
 		r.Get("/projects/{projectID}/worker-fleet/v1", handlers.AgentModeProjectWorkerFleet)
 		r.Get("/worker-fleet/v2", handlers.AgentModeWorkerFleetV2)

@@ -121,6 +121,232 @@
       }
     },
     "schemas": {
+      "OrchestrationCoordinatorV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "reason",
+          "session_id"
+        ],
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "resolved",
+              "unset",
+              "ambiguous"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "single_active_coordinator",
+              "no_active_coordinator",
+              "multiple_active_coordinators",
+              "coordinator_unknown"
+            ]
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "OrchestrationRootV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "configured_identity",
+          "binding_revision",
+          "binding_updated_at",
+          "active_generation"
+        ],
+        "properties": {
+          "configured_identity": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "display_label"
+                ],
+                "properties": {
+                  "display_label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "binding_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "binding_updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "active_generation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "state",
+              "reason",
+              "session_id"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "resolved",
+                  "unset",
+                  "ambiguous",
+                  "unknown"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "root_not_configured",
+                  "generation_unavailable",
+                  "no_active_root_generation",
+                  "multiple_active_root_generations",
+                  "generation_not_in_sample",
+                  "root_generation_unknown",
+                  "single_active_root_generation"
+                ]
+              },
+              "session_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              }
+            }
+          }
+        }
+      },
+      "ProjectCoordinationV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "coordinator",
+          "relationship",
+          "root_binding_revision"
+        ],
+        "properties": {
+          "project": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "key",
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1
+              },
+              "key": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "coordinator": {
+            "$ref": "#/components/schemas/OrchestrationCoordinatorV1"
+          },
+          "relationship": {
+            "type": "string",
+            "const": "instance_root_coordination"
+          },
+          "root_binding_revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
+      "OrchestrationSnapshotV1": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "instance_root",
+          "fleet",
+          "project_coordination",
+          "coordination_bounds"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "instance_root": {
+            "$ref": "#/components/schemas/OrchestrationRootV1"
+          },
+          "fleet": {
+            "$ref": "#/components/schemas/WorkerFleetSnapshotV2"
+          },
+          "project_coordination": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/ProjectCoordinationV1"
+            }
+          },
+          "coordination_bounds": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sample_limit",
+              "total_projects",
+              "sampled_projects",
+              "omitted_projects"
+            ],
+            "properties": {
+              "sample_limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              },
+              "total_projects": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sampled_projects": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "omitted_projects": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      },
       "AgentMessageV1": {
         "type": "object", "additionalProperties": false,
         "description": "Frozen original agent-message envelope. Reply-obligation fields are deliberately absent; use AgentMessageV2 for new consumers.",
@@ -2972,6 +3198,107 @@
     }
   ],
   "paths": {
+    "/api/agent-mode/orchestration/v1": {
+      "get": {
+        "tags": [
+          "agent-mode"
+        ],
+        "summary": "Read bounded instance-root and project orchestration",
+        "description": "Composes the redacted configured instance root, independently resolved active generation, bounded project coordination, and unchanged fleet v2 truth in one authorized database snapshot. No cross-project parent-session edges are created. Root generations outside the visible sample remain unknown; all aggregate counts exclude inaccessible projects.",
+        "parameters": [
+          {
+            "name": "zoom",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,63}$",
+              "default": "10"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized bounded orchestration v1",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrchestrationSnapshotV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or duplicate zoom query"
+          },
+          "404": {
+            "description": "Canonical indistinguishable response for external callers"
+          },
+          "500": {
+            "description": "Private storage-invariant failure; no partial snapshot is returned"
+          }
+        }
+      }
+    },
+    "/api/agent-mode/projects/{projectID}/orchestration/v1": {
+      "get": {
+        "tags": [
+          "agent-mode"
+        ],
+        "summary": "Read bounded instance-root and project orchestration",
+        "description": "Uses the same orchestration implementation with an authorized project scope, including an explicit unset coordinator for an empty project. Missing and inaccessible projects share the canonical Agent Mode 404 response.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentModeProjectPath"
+          },
+          {
+            "name": "zoom",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,63}$",
+              "default": "10"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized bounded project orchestration v1",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrchestrationSnapshotV1"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed project id or zoom query"
+          },
+          "404": {
+            "description": "Canonical indistinguishable response for missing, inaccessible, and external project scopes"
+          },
+          "500": {
+            "description": "Private storage-invariant failure; no partial snapshot is returned"
+          }
+        }
+      }
+    },
     "/api/orchestrator/v1": {
       "get": {
         "tags": ["orchestrator"], "summary": "Read the redacted instance orchestrator identity",
