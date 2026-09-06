@@ -24,11 +24,11 @@ func TestClassifyControlPathCoversEveryFrozenFamily(t *testing.T) {
 		path string
 		want ControlRouteClass
 	}{
-		{"/api/projects/17/consumers/v1/streams", ControlRouteConsumer},
-		{"/api/projects/17/consumers/v1/streams/private/claim", ControlRouteConsumer},
-		{"/api/projects/17/consumers/v1/streams/private/attempts/private/execute", ControlRouteConsumer},
-		{"/api/projects/17/consumers/v1/streams/private/attempts/private/complete", ControlRouteConsumer},
-		{"/api/projects/17/consumers/v1/runtime-health", ControlRouteConsumer},
+		{"/api/projects/17/consumers/v1/streams", ControlRouteConsumerRegister},
+		{"/api/projects/17/consumers/v1/streams/private/claim", ControlRouteConsumerClaim},
+		{"/api/projects/17/consumers/v1/streams/private/attempts/private/execute", ControlRouteConsumerExecute},
+		{"/api/projects/17/consumers/v1/streams/private/attempts/private/complete", ControlRouteConsumerComplete},
+		{"/api/projects/17/consumers/v1/runtime-health", ControlRouteRuntimeHealth},
 		{"/api/agent-mode/deliveries/PAI-809-42/control-capability-grants", ControlRouteDeliveryCapabilityGrants},
 		{"/api/agent-mode/deliveries/PAI-809-42/control-commands", ControlRouteDeliveryCommands},
 		{"/api/agent-mode/control-capability-grants/01JD8K3P0000000000000000AB", ControlRouteCapabilityGrantDetail},
@@ -182,6 +182,11 @@ func TestClassifyControlRequestMatchesChiDispatch(t *testing.T) {
 	router := chi.NewRouter()
 	hit := false
 	for _, pattern := range []string{
+		"/api/projects/{id}/consumers/v1/streams",
+		"/api/projects/{id}/consumers/v1/streams/{streamID}/claim",
+		"/api/projects/{id}/consumers/v1/streams/{streamID}/attempts/{attemptID}/execute",
+		"/api/projects/{id}/consumers/v1/streams/{streamID}/attempts/{attemptID}/complete",
+		"/api/projects/{id}/consumers/v1/runtime-health",
 		"/api/agent-mode/deliveries/{deliveryKey}/control-capability-grants",
 		"/api/agent-mode/deliveries/{deliveryKey}/control-commands",
 		"/api/agent-mode/control-capability-grants/{id}",
@@ -203,6 +208,13 @@ func TestClassifyControlRequestMatchesChiDispatch(t *testing.T) {
 	}
 
 	targets := []string{
+		"/api/projects/17/consumers/v1/streams",
+		"/api/projects/17/consumers/v1/streams/a%2Fb/claim",
+		"/api/projects/17/consumers/v1/streams/opaque/attempts/opaque/execute",
+		"/api/projects/17/consumers/v1/streams/opaque/attempts/opaque/complete",
+		"/api/projects/17/consumers/v1/runtime-health?private=opaque",
+		"/api/projects/17/consumers/v1/streams/opaque/claim/extra",
+		"/api/projects/17/consumers/v1/streams/opaque/attempts/opaque/%65xecute",
 		"/api/control-commands/17",
 		"/api/control-commands/a%2Fb",
 		"/api/control-commands/%2e%2e",

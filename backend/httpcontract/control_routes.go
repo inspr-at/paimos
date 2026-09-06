@@ -62,7 +62,11 @@ const (
 	ControlRouteExternalHandoffPull      ControlRouteClass = "external_stage.handoff_pull"
 	ControlRouteExternalHandoffAccept    ControlRouteClass = "external_stage.handoff_accept"
 	ControlRouteExternalHandoffReport    ControlRouteClass = "external_stage.handoff_report"
-	ControlRouteConsumer                 ControlRouteClass = "runtime.consumer"
+	ControlRouteConsumerRegister         ControlRouteClass = "runtime.consumer.register"
+	ControlRouteConsumerClaim            ControlRouteClass = "runtime.consumer.claim"
+	ControlRouteConsumerExecute          ControlRouteClass = "runtime.consumer.execute"
+	ControlRouteConsumerComplete         ControlRouteClass = "runtime.consumer.complete"
+	ControlRouteRuntimeHealth            ControlRouteClass = "runtime.health.publish"
 )
 
 // controlRouteParam marks a segment the caller supplies. It matches any
@@ -78,11 +82,11 @@ var controlRoutes = []struct {
 	segments []string
 	class    ControlRouteClass
 }{
-	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams"}, ControlRouteConsumer},
-	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "claim"}, ControlRouteConsumer},
-	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "attempts", controlRouteParam, "execute"}, ControlRouteConsumer},
-	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "attempts", controlRouteParam, "complete"}, ControlRouteConsumer},
-	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "runtime-health"}, ControlRouteConsumer},
+	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams"}, ControlRouteConsumerRegister},
+	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "claim"}, ControlRouteConsumerClaim},
+	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "attempts", controlRouteParam, "execute"}, ControlRouteConsumerExecute},
+	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "streams", controlRouteParam, "attempts", controlRouteParam, "complete"}, ControlRouteConsumerComplete},
+	{[]string{"api", "projects", controlRouteParam, "consumers", "v1", "runtime-health"}, ControlRouteRuntimeHealth},
 	{[]string{"api", "agent-mode", "deliveries", controlRouteParam, "control-capability-grants"}, ControlRouteDeliveryCapabilityGrants},
 	{[]string{"api", "agent-mode", "deliveries", controlRouteParam, "control-commands"}, ControlRouteDeliveryCommands},
 	{[]string{"api", "agent-mode", "control-capability-grants", controlRouteParam}, ControlRouteCapabilityGrantDetail},

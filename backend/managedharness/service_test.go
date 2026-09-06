@@ -284,6 +284,57 @@ func TestUnavailableAgentdLeaseReroutesToActiveHarnessGeneration(t *testing.T) {
 	}
 }
 
+// Delivery reads include FIFO diagnostics after the executable head. A later
+// row must have no receiver reference, durable attempt, or completion authority.
+func requireSingleFIFOLease(t *testing.T, bus *agentmessage.Service, projectID int64, agent, targetID string, page *agentmessage.InboxPage, cursors ...int64) *agentmessage.DeliveryWork {
+	t.Helper()
+	if page == nil || len(page.Messages) != len(cursors) || len(cursors) == 0 || page.NextCursor != cursors[len(cursors)-1] {
+		t.Fatalf("FIFO page does not match outstanding cursors %v", cursors)
+	}
+	for i, message := range page.Messages {
+		work := message.DeliveryWork
+		if message.Cursor != cursors[i] || work == nil || work.DeliveryID == "" {
+			t.Fatalf("FIFO row %d lost canonical cursor/delivery identity", i)
+		}
+		if i == 0 {
+			if work.State != "leased" || work.TargetRef == "" {
+				t.Fatal("FIFO head has no executable lease and receiver reference")
+			}
+			continue
+		}
+		if work.State != "pending" || work.FallbackReason != "fifo_blocked" || work.TargetRef != "" {
+			t.Fatalf("FIFO row %d is not a blocked diagnostic without receiver authority", i)
+		}
+		var state, reason string
+		var attempts int
+		var lease sql.NullString
+		if err := paimosdb.DB.QueryRow(`SELECT state,attempt_count,lease_until,last_error_code FROM agent_message_deliveries WHERE delivery_id=?`, work.DeliveryID).Scan(&state, &attempts, &lease, &reason); err != nil {
+			t.Fatal(err)
+		}
+		if state != "pending" || attempts != 0 || lease.Valid || reason != "fifo_blocked" {
+			t.Fatal("later FIFO row obtained a durable delivery attempt or lease")
+		}
+		_, err := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+			ProjectID: projectID, Address: page.Address, Agent: agent, TargetID: targetID,
+			Cursor: message.Cursor, DeliveryID: work.DeliveryID, EffectiveLevel: "simple",
+		})
+		var coded *agentmessage.CodedError
+		if !errors.As(err, &coded) || coded.Code != "agent_message_delivery_not_leased" {
+			t.Fatalf("unleased FIFO row %d completion was not rejected: %v", i, err)
+		}
+	}
+	var leased int
+	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_deliveries d JOIN agent_messages m ON m.id=d.message_row_id JOIN project_agents a ON a.id=m.to_agent_id WHERE a.project_id=? AND m.to_address=? AND d.state='leased'`, projectID, page.Address).Scan(&leased); err != nil || leased != 1 {
+		t.Fatalf("FIFO owns %d leases, want exactly one: %v", leased, err)
+	}
+	var cursor int64
+	err := paimosdb.DB.QueryRow(`SELECT cursor FROM agent_message_cursors WHERE project_id=? AND address=?`, projectID, page.Address).Scan(&cursor)
+	if (err != nil && !errors.Is(err, sql.ErrNoRows)) || cursor != page.Cursor {
+		t.Fatal("diagnostic read or rejected completion advanced the durable cursor")
+	}
+	return page.Messages[0].DeliveryWork
+}
+
 func TestUnavailableAgentdLeaseFallsBackWithoutWedgingFIFO(t *testing.T) {
 	projectID, _ := openManagedHarnessTestDB(t)
 	bus := agentmessage.NewService(paimosdb.DB)
@@ -329,22 +380,24 @@ func TestUnavailableAgentdLeaseFallsBackWithoutWedgingFIFO(t *testing.T) {
 	if err != nil || route.Route != "simple_fallback" {
 		t.Fatalf("route=%+v err=%v", route, err)
 	}
-	completeFallback := func(wantCursor int64, wantReason string) {
+	completeFallback := func(wantCursor int64, wantReason string, waiting ...int64) {
 		t.Helper()
 		page, listErr := bus.ListInbox(context.Background(), agentmessage.InboxInput{
 			ProjectID: projectID, Address: "codex:worker", Agent: "worker", WorkerAdapter: agentmessage.AdapterCodex, Limit: 10,
 		})
-		if listErr != nil || len(page.Messages) != 1 || page.Messages[0].Cursor != wantCursor || page.Messages[0].DeliveryWork == nil {
-			t.Fatalf("fallback cursor=%d page=%#v err=%v", wantCursor, page, listErr)
+		if listErr != nil {
+			t.Fatal(listErr)
 		}
-		if _, completeErr := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+		work := requireSingleFIFOLease(t, bus, projectID, "worker", "", page, append([]int64{wantCursor}, waiting...)...)
+		completed, completeErr := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
 			ProjectID: projectID, Address: "codex:worker", Agent: "worker", Cursor: wantCursor,
-			DeliveryID: page.Messages[0].DeliveryWork.DeliveryID, EffectiveLevel: "simple", FallbackReason: wantReason,
-		}); completeErr != nil {
-			t.Fatal(completeErr)
+			DeliveryID: work.DeliveryID, EffectiveLevel: "simple", FallbackReason: wantReason,
+		})
+		if completeErr != nil || completed.Cursor != wantCursor {
+			t.Fatalf("fallback completion did not advance exactly its leased cursor: %v", completeErr)
 		}
 	}
-	completeFallback(first.Cursor, "idle")
+	completeFallback(first.Cursor, "idle", second.Cursor)
 	completeFallback(second.Cursor, "")
 	var rows int
 	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_deliveries WHERE state='handed_off' AND effective_level='simple' AND handed_off_at IS NOT NULL`).Scan(&rows); err != nil || rows != 2 {
@@ -938,27 +991,28 @@ func TestStoppedSessionCanRegisterNewActiveGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	drain := func(wantCursor int64, wantLevel string) {
+	drain := func(wantCursor int64, wantLevel string, waiting ...int64) {
 		t.Helper()
 		page, listErr := bus.ListInbox(context.Background(), agentmessage.InboxInput{
 			ProjectID: projectID, Address: Address(second), Agent: second.AgentName,
 			WorkerAdapter: agentmessage.AdapterManagedHarness, TargetID: second.MessageTargetID, Limit: 100,
 		})
-		if listErr != nil || len(page.Messages) != 1 || page.Messages[0].Cursor != wantCursor || page.Messages[0].DeliveryWork == nil {
-			t.Fatalf("drain cursor=%d level=%s page=%#v err=%v", wantCursor, wantLevel, page, listErr)
+		if listErr != nil {
+			t.Fatal(listErr)
 		}
-		work := page.Messages[0].DeliveryWork
+		work := requireSingleFIFOLease(t, bus, projectID, second.AgentName, second.MessageTargetID, page, append([]int64{wantCursor}, waiting...)...)
 		if work.RequestedLevel != wantLevel || work.State != "leased" || work.TargetRef != input.SessionRef {
 			t.Fatalf("drain work=%#v want level=%s", work, wantLevel)
 		}
-		if _, completeErr := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
+		completed, completeErr := bus.CompleteLocalDelivery(context.Background(), agentmessage.CompleteDeliveryInput{
 			ProjectID: projectID, Address: Address(second), Agent: second.AgentName, Cursor: wantCursor,
 			DeliveryID: work.DeliveryID, EffectiveLevel: wantLevel, TargetID: second.MessageTargetID,
-		}); completeErr != nil {
-			t.Fatalf("complete cursor=%d level=%s: %v", wantCursor, wantLevel, completeErr)
+		})
+		if completeErr != nil || completed.Cursor != wantCursor {
+			t.Fatalf("complete cursor=%d level=%s did not advance exactly its lease: %v", wantCursor, wantLevel, completeErr)
 		}
 	}
-	drain(simpleMessage.Cursor, "simple")
+	drain(simpleMessage.Cursor, "simple", steerMessage.Cursor)
 	drain(steerMessage.Cursor, "steer")
 	var handedOff int
 	if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_deliveries WHERE state='handed_off' AND handed_off_at IS NOT NULL`).Scan(&handedOff); err != nil || handedOff != 2 {
