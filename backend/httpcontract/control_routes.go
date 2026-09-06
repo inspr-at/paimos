@@ -69,8 +69,9 @@ const (
 	ControlRouteRuntimeHealth            ControlRouteClass = "runtime.health.publish"
 )
 
-// controlRouteParam marks a segment the caller supplies. It matches any
-// single non-empty segment and contributes nothing to the label.
+// controlRouteParam marks a segment the caller supplies. Like chi, it permits
+// an empty interior segment, but not an empty terminal parameter. It contributes
+// nothing to the label; the handler still validates the parameter value.
 const controlRouteParam = ""
 
 // controlRoutes is the frozen family list. Matching is by exact
@@ -146,10 +147,10 @@ func ClassifyControlPath(path string) (ControlRouteClass, bool) {
 func matchControlSegments(want, got []string) bool {
 	for i, segment := range want {
 		if segment == controlRouteParam {
-			// A parameter matches one opaque, non-empty segment. Empty
-			// means a doubled or trailing slash, which is a different
-			// route to the mux and must stay one here too.
-			if got[i] == "" {
+			// Chi accepts an empty parameter before the next slash/literal,
+			// but cannot enter a terminal parameter with no path remaining.
+			// Even invalid IDs dispatched to a handler need private logging.
+			if got[i] == "" && i == len(want)-1 {
 				return false
 			}
 			continue

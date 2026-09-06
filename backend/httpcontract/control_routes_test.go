@@ -8,6 +8,7 @@
 package httpcontract
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,14 +72,12 @@ func TestClassifyControlPathCoversEveryFrozenFamily(t *testing.T) {
 // exact structure, never from a substring or a prefix.
 func TestClassifyControlPathRejectsNearMisses(t *testing.T) {
 	nearMisses := []string{
-		// Missing or empty parameter segment.
+		// Missing or empty terminal parameter segment.
 		"/api/control-commands",
 		"/api/control-commands/",
 		"/api/control-capability-leases",
 		"/api/agent-mode/control-commands",
 		"/api/agent-mode/control-capability-grants",
-		"/api/agent-mode/deliveries//control-commands",
-		"/api/runs//input-requests",
 		// Extra segment beyond the family.
 		"/api/control-commands/17/extra",
 		"/api/agent-mode/control-capability-grants/17/audit",
@@ -264,6 +263,50 @@ func TestAgentModeNotFoundOmitsControlInstance(t *testing.T) {
 	WriteAgentModeNotFound(ordinary, ordinaryRequest)
 	if !strings.Contains(ordinary.Body.String(), `"instance":"/api/agent-mode/deliveries/missing?view=1"`) {
 		t.Fatalf("ordinary Agent Mode 404 lost its instance: %s", ordinary.Body.String())
+	}
+}
+
+// Chi accepts an empty interior parameter when a following slash/literal
+// remains to dispatch, but rejects an empty terminal parameter. Compare every
+// frozen family's parameter positions against the actual mux, not a URL guess.
+func TestClassifyControlEmptyParametersMatchChiDispatch(t *testing.T) {
+	for _, route := range controlRoutes {
+		t.Run(string(route.class), func(t *testing.T) {
+			pattern := append([]string(nil), route.segments...)
+			path := append([]string(nil), route.segments...)
+			var parameters []int
+			for i, segment := range route.segments {
+				if segment == controlRouteParam {
+					pattern[i] = fmt.Sprintf("{param%d}", i)
+					path[i] = "opaque"
+					parameters = append(parameters, i)
+				}
+			}
+			router := chi.NewRouter()
+			hit := false
+			router.Handle("/"+strings.Join(pattern, "/"), http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hit = true }))
+			check := func(parts []string) {
+				t.Helper()
+				request := httptest.NewRequest(http.MethodPost, "/"+strings.Join(parts, "/"), nil)
+				hit = false
+				router.ServeHTTP(httptest.NewRecorder(), request)
+				class, classified := ClassifyControlRequest(request)
+				if classified != hit || (hit && class != route.class) {
+					t.Errorf("path=%q classifier=%v/%q chi_dispatch=%v", request.URL.Path, classified, class, hit)
+				}
+			}
+			for _, i := range parameters {
+				empty := append([]string(nil), path...)
+				empty[i] = ""
+				check(empty)
+			}
+			allEmpty := append([]string(nil), path...)
+			for _, i := range parameters {
+				allEmpty[i] = ""
+			}
+			check(allEmpty)
+			check(append(path, "")) // A trailing slash is still an extra segment.
+		})
 	}
 }
 

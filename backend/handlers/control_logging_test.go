@@ -15,6 +15,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/inspr-at/paimos/backend/db"
 )
 
 // controlLogLine is the whole permitted shape of a control access-log
@@ -264,5 +267,53 @@ func TestControlAwareRecovererDoesNotLogArbitraryPanicValues(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "status=500") {
 		t.Fatalf("safe access log lost recovered status: %q", logs.String())
+	}
+}
+
+// Use the real malformed consumer route and its unchanged authorization gate.
+// Even a refusal must not send private request material through ordinary logs.
+func TestMalformedConsumerRouteKeepsPrivacyEnvelope(t *testing.T) {
+	openChangesTestDB(t)
+	t.Setenv("PAIMOS_AUDIT_SESSIONS", "true")
+	ordinaryCalls := 0
+	countOrdinaryLoggerCalls(t, &ordinaryCalls)
+	logs := captureHandlerLog(t)
+	router := chi.NewRouter()
+	router.Use(ControlAwareRequestLogger, RequestIDMiddleware, ClassifiedControlCachePolicyMiddleware, SessionAuditMiddleware)
+	router.Route("/api", RegisterConsumerRoutes)
+	router.Post("/api/privacy-fixture", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/privacy-fixture", nil))
+	var baseline int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM session_activity`).Scan(&baseline); err != nil || baseline != 1 || ordinaryCalls != 1 {
+		t.Fatalf("ordinary audit/logger baseline unavailable: rows=%d calls=%d err=%v", baseline, ordinaryCalls, err)
+	}
+	logs.Reset()
+	ordinaryCalls = 0
+	path := "/api/projects/17/consumers/v1/streams/" + logCanaryDelivery + "/attempts//execute"
+	request := hostileControlRequest(path)
+	request.Header.Set(RequestIDHeader, logCanaryIdempotency)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), "consumer_unavailable") {
+		t.Fatalf("malformed route bypassed consumer authorization: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if ordinaryCalls != 0 || !controlLogLine.MatchString(strings.TrimSpace(logs.String())) {
+		t.Fatal("malformed consumer request escaped the closed control logger")
+	}
+	if recorder.Header().Get("Cache-Control") != "private, no-store" || recorder.Header().Get(RequestIDHeader) == "" {
+		t.Fatal("malformed consumer refusal lost private cache policy or server request ID")
+	}
+	var activity int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM session_activity`).Scan(&activity); err != nil || activity != baseline {
+		t.Fatal("malformed consumer request persisted incidental session activity")
+	}
+	response := logs.String() + recorder.Body.String()
+	for _, values := range recorder.Header() {
+		response += strings.Join(values, " ")
+	}
+	for _, canary := range []string{logCanaryDelivery, logCanaryQuery, logCanaryOrigin, logCanarySession, logCanaryIdempotency, logCanaryBearer, logCanaryBody, path} {
+		if strings.Contains(response, canary) {
+			t.Fatalf("malformed consumer privacy envelope reflected %q", canary)
+		}
 	}
 }
