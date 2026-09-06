@@ -17,6 +17,7 @@ const ENABLED = process.env.PAI926_ACTUAL_CONTROL === '1'
 const HANDOFF_PATH = process.env.PAI926_ACTUAL_HANDOFF
 test.skip(!ENABLED, 'Set PAI926_ACTUAL_CONTROL=1 with a reviewed PAI926_ACTUAL_HANDOFF')
 test.setTimeout(8 * 60_000)
+test.use({ actionTimeout: 15_000 })
 
 type JSONRecord = Record<string, unknown>
 type Handoff = {
@@ -467,7 +468,9 @@ test('actual browser controls one fresh owned child and closes every generation'
   async function restoreRootBinding() {
     if (!page || !rootBindingChanged || !originalRoot) return
     await page.goto(`/?view=assign&project=${project}`, { waitUntil: 'domcontentloaded' })
-    await page.getByLabel('Canonical agent', { exact: true }).selectOption(originalRoot.key)
+    await page
+      .getByRole('combobox', { name: 'Canonical agent', exact: true })
+      .selectOption(originalRoot.key)
     await page.getByLabel('Root display label', { exact: true }).fill(originalRoot.displayLabel)
     await page.getByRole('button', { name: 'Review root binding', exact: true }).click()
     const [restored] = await Promise.all([
@@ -524,7 +527,7 @@ test('actual browser controls one fresh owned child and closes every generation'
 
     await page.goto(`/?view=assign&project=${project}`, { waitUntil: 'domcontentloaded' })
     await page
-      .getByLabel('Canonical agent', { exact: true })
+      .getByRole('combobox', { name: 'Canonical agent', exact: true })
       .selectOption(handoff.agents.coordinator.name)
     await page
       .getByLabel('Root display label', { exact: true })
@@ -553,30 +556,38 @@ test('actual browser controls one fresh owned child and closes every generation'
     })
 
     await page
-      .getByLabel('Profile for a new worker', { exact: true })
+      .getByRole('combobox', { name: 'Profile for a new worker', exact: true })
       .selectOption(`${handoff.profile.id}@${handoff.profile.version}`)
-    await page.getByLabel('Runtime', { exact: true }).selectOption(handoff.runtime.id)
     await page
-      .getByLabel('Workspace', { exact: true })
+      .getByRole('combobox', { name: 'Runtime', exact: true })
+      .selectOption(handoff.runtime.id)
+    await page
+      .getByRole('combobox', { name: 'Workspace', exact: true })
       .selectOption(handoff.workspaces.coordinator.handle)
-    await page.getByLabel('Role', { exact: true }).selectOption('coordinator')
+    await page
+      .getByRole('combobox', { name: 'Role', exact: true })
+      .selectOption('coordinator')
     const rootIntent = await submitIntent('start')
     const rootID = String(rootIntent.result_session_id)
     expect(UUID.test(rootID)).toBe(true)
     receipt.owned_session_ids.push(rootID)
 
     await page
-      .getByLabel('Canonical agent', { exact: true })
+      .getByRole('combobox', { name: 'Canonical agent', exact: true })
       .selectOption(handoff.agents.worker.name)
     await page
-      .getByLabel('Profile for a new worker', { exact: true })
+      .getByRole('combobox', { name: 'Profile for a new worker', exact: true })
       .selectOption(`${handoff.profile.id}@${handoff.profile.version}`)
-    await expect(page.getByLabel('Runtime', { exact: true })).toBeEnabled()
-    await page.getByLabel('Runtime', { exact: true }).selectOption(handoff.runtime.id)
+    await expect(
+      page.getByRole('combobox', { name: 'Runtime', exact: true }),
+    ).toBeEnabled()
     await page
-      .getByLabel('Workspace', { exact: true })
+      .getByRole('combobox', { name: 'Runtime', exact: true })
+      .selectOption(handoff.runtime.id)
+    await page
+      .getByRole('combobox', { name: 'Workspace', exact: true })
       .selectOption(handoff.workspaces.worker.handle)
-    await page.getByLabel('Role', { exact: true }).selectOption('worker')
+    await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('worker')
     const childIntent = await submitIntent('start')
     const childID = String(childIntent.result_session_id)
     expect(UUID.test(childID)).toBe(true)
@@ -599,11 +610,21 @@ test('actual browser controls one fresh owned child and closes every generation'
     await page.goto(`/?view=assign&project=${project}&worker=${childID}`, {
       waitUntil: 'domcontentloaded',
     })
-    await expect(page.getByLabel('Operation', { exact: true })).toHaveValue('reassign')
-    await page.getByLabel('Operation', { exact: true }).selectOption('attach')
-    await expect(page.getByLabel('Lifecycle worker', { exact: true })).toHaveValue(childID)
-    await page.getByLabel('Ticket', { exact: true }).selectOption(String(handoff.ticket.id))
-    await page.getByLabel('Parent worker', { exact: true }).selectOption(rootID)
+    await expect(page.getByRole('combobox', { name: 'Operation', exact: true })).toHaveValue(
+      'reassign',
+    )
+    await page
+      .getByRole('combobox', { name: 'Operation', exact: true })
+      .selectOption('attach')
+    await expect(
+      page.getByRole('combobox', { name: 'Lifecycle worker', exact: true }),
+    ).toHaveValue(childID)
+    await page
+      .getByRole('combobox', { name: 'Ticket', exact: true })
+      .selectOption(String(handoff.ticket.id))
+    await page
+      .getByRole('combobox', { name: 'Parent worker', exact: true })
+      .selectOption(rootID)
     const attachIntent = await submitIntent('attach')
     expect(attachIntent.result_session_id).toBe(childID)
 
@@ -635,8 +656,12 @@ test('actual browser controls one fresh owned child and closes every generation'
     // Reconcile the owned primary receiver after both initial generations are
     // registered and the child binding is final. Message delivery depends on
     // this listener evidence; proving it after the messages would be circular.
-    await page.getByLabel('Operation', { exact: true }).selectOption('repair')
-    await page.getByLabel('Repair layer', { exact: true }).selectOption('listeners')
+    await page
+      .getByRole('combobox', { name: 'Operation', exact: true })
+      .selectOption('repair')
+    await page
+      .getByRole('combobox', { name: 'Repair layer', exact: true })
+      .selectOption('listeners')
     const repairIntent = await submitIntent('repair')
     expect(repairIntent.result_session_id ?? null).toBeNull()
 
@@ -673,7 +698,9 @@ test('actual browser controls one fresh owned child and closes every generation'
     await page.goto(`/?view=assign&project=${project}&worker=${childID}`, {
       waitUntil: 'domcontentloaded',
     })
-    await expect(page.getByLabel('Operation', { exact: true })).toHaveValue('restart')
+    await expect(page.getByRole('combobox', { name: 'Operation', exact: true })).toHaveValue(
+      'restart',
+    )
     const restartIntent = await submitIntent('restart')
     const replacementID = String(restartIntent.result_session_id)
     expect(UUID.test(replacementID)).toBe(true)
