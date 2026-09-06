@@ -1297,12 +1297,17 @@ test_external_stage_v2_release_pin_accepts_exact_cut_and_rejects_service_drift()
   local repo state drift_repo drift_state output
   repo=$(setup_repo external-stage-v2-positive v26.09.05)
   state="$TMP_ROOT/external-stage-v2-positive/gh-state"
+  # Freeze the historical cut date so these cases reach the contract-pin checks.
+  mkdir -p "$state"
+  printf '%s\n' '26.09.05' > "$state/vienna-date"
   add_external_stage_v2_contract "$repo" v26.09.05
   prepend_release_notes "$repo" 26.09.05
   FAKE_RELEASE_VERSION=26.09.05 run_release "$repo" "$state" 26.09.05 --no-edit >/dev/null
 
   drift_repo=$(setup_repo external-stage-v2-service-drift v26.09.05)
   drift_state="$TMP_ROOT/external-stage-v2-service-drift/gh-state"
+  mkdir -p "$drift_state"
+  printf '%s\n' '26.09.05' > "$drift_state/vienna-date"
   output="$TMP_ROOT/external-stage-v2-service-drift/output"
   add_external_stage_v2_contract "$drift_repo" v26.09.05
   printf '%s\n' 'package externalstage // drifted' > "$drift_repo/backend/externalstage/service_v2.go"
