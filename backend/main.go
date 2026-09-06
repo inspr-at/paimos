@@ -569,6 +569,15 @@ func mountAPI(r chi.Router) {
 		handlers.RegisterCommandPaletteRoutes(r)
 	})
 
+	// PAI-924: private lifecycle authority, including early auth/CSRF refusals.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.AgentModePrivateNoStore)
+		r.Use(auth.Middleware)
+		r.Use(auth.CSRFMiddleware)
+		r.Use(auth.MustChangePasswordGate)
+		handlers.RegisterLifecycleIntentRoutes(r)
+	})
+
 	// PAI-863: the structured-knowledge surface is private on every outcome.
 	// No-store must wrap authentication and every refusal gate so even early
 	// 401/403/concealed-404 responses cannot be cached. Keep this dedicated

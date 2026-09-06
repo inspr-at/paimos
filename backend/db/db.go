@@ -13041,6 +13041,83 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			`CREATE TRIGGER trg_external_stage_pharos_evidence_v2_no_delete BEFORE DELETE ON external_stage_pharos_evidence_v2
 			 BEGIN SELECT RAISE(ABORT,'external stage v2 evidence is immutable'); END`,
 		}},
+
+		// M176 / PAI-924: immutable typed requests and one audited outcome per
+		// intent. Reporter leases never appear in browser projections.
+		{176, []string{
+			`CREATE TABLE IF NOT EXISTS lifecycle_runtimes (
+			 id TEXT PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+			 generation TEXT NOT NULL, machine_id TEXT NOT NULL,
+			 user_id INTEGER NOT NULL REFERENCES users(id), api_key_id INTEGER NOT NULL CHECK(api_key_id>0),
+			 lease_digest BLOB NOT NULL CHECK(length(lease_digest)=32),
+			 registration_json TEXT NOT NULL CHECK(json_valid(registration_json) AND length(registration_json)<=8192),
+			 expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
+			 UNIQUE(project_id,generation))`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_runtime_no_delete BEFORE DELETE ON lifecycle_runtimes
+			 BEGIN SELECT RAISE(ABORT,'immutable runtime history'); END`,
+			`CREATE INDEX IF NOT EXISTS idx_lifecycle_runtime_project ON lifecycle_runtimes(project_id,expires_at)`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_runtime_identity BEFORE UPDATE OF id,project_id,generation,machine_id,user_id,api_key_id,lease_digest,registration_json,created_at ON lifecycle_runtimes
+			 BEGIN SELECT RAISE(ABORT,'immutable runtime identity'); END`,
+			`CREATE TABLE IF NOT EXISTS lifecycle_runtime_sessions (
+			 session_id TEXT PRIMARY KEY,
+			 runtime_id TEXT NOT NULL REFERENCES lifecycle_runtimes(id),
+			 generation TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_runtime_session_immutable BEFORE UPDATE ON lifecycle_runtime_sessions
+			 BEGIN SELECT RAISE(ABORT,'immutable runtime session generation'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_runtime_session_no_delete BEFORE DELETE ON lifecycle_runtime_sessions
+			 BEGIN SELECT RAISE(ABORT,'immutable runtime session generation'); END`,
+			`CREATE TABLE IF NOT EXISTS lifecycle_intents (
+			 id TEXT PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+			 runtime_id TEXT NOT NULL REFERENCES lifecycle_runtimes(id),
+			 user_id INTEGER NOT NULL REFERENCES users(id), session_credential_id TEXT NOT NULL,
+			 request_key TEXT NOT NULL, request_json TEXT NOT NULL CHECK(json_valid(request_json) AND length(request_json)<=8192),
+			 new_generation TEXT NOT NULL DEFAULT '', result_session_id TEXT NOT NULL DEFAULT '',
+			 state TEXT NOT NULL CHECK(state IN ('requested','claimed','executing','completed','failed','expired','cancelled')),
+			 reason TEXT NOT NULL DEFAULT '' CHECK(reason IN ('','applied','failed','unsupported','ownership_lost','outcome_unknown','authority_revoked','expired','cancelled')),
+			 revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 5),
+			 created_at TEXT NOT NULL, expires_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			 actor_kind TEXT NOT NULL CHECK(actor_kind IN ('session','api_key')), actor_user_id INTEGER NOT NULL, actor_credential_id TEXT NOT NULL,
+			 UNIQUE(project_id,user_id,request_key),
+			 CHECK((state IN ('requested','claimed','executing') AND reason='' AND result_session_id='') OR
+			 (state='completed' AND reason='applied') OR
+			 (state='failed' AND reason IN ('failed','unsupported','ownership_lost','outcome_unknown','authority_revoked') AND result_session_id='') OR
+			 (state='expired' AND reason IN ('expired','outcome_unknown') AND result_session_id='') OR
+			 (state='cancelled' AND reason='cancelled' AND result_session_id='')))`,
+			`CREATE INDEX IF NOT EXISTS idx_lifecycle_intent_queue ON lifecycle_intents(runtime_id,state,created_at,id)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_lifecycle_intent_inflight ON lifecycle_intents(runtime_id) WHERE state IN ('claimed','executing')`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_lifecycle_intent_agent_reservation
+             ON lifecycle_intents(project_id,json_extract(request_json,'$.agent_name'))
+             WHERE state IN ('claimed','executing') AND json_extract(request_json,'$.operation') IN ('start','restart')`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_identity BEFORE UPDATE OF id,project_id,runtime_id,user_id,session_credential_id,request_key,request_json,new_generation,created_at,expires_at ON lifecycle_intents
+			 BEGIN SELECT RAISE(ABORT,'immutable lifecycle intent'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_transition BEFORE UPDATE ON lifecycle_intents
+			 WHEN NEW.revision<>OLD.revision+1 OR NOT (
+			 (OLD.state='requested' AND NEW.state IN ('claimed','failed','expired','cancelled')) OR
+			 (OLD.state='claimed' AND NEW.state IN ('executing','failed','expired','cancelled')) OR
+			 (OLD.state='executing' AND NEW.state IN ('completed','failed','expired')))
+			 BEGIN SELECT RAISE(ABORT,'invalid lifecycle transition'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_initial BEFORE INSERT ON lifecycle_intents
+			 WHEN NEW.state<>'requested' OR NEW.revision<>1 OR NEW.reason<>'' OR NEW.result_session_id<>''
+			 BEGIN SELECT RAISE(ABORT,'invalid lifecycle initial state'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_no_delete BEFORE DELETE ON lifecycle_intents
+			 BEGIN SELECT RAISE(ABORT,'immutable lifecycle history'); END`,
+			`CREATE TABLE IF NOT EXISTS lifecycle_intent_events (
+			 intent_id TEXT NOT NULL REFERENCES lifecycle_intents(id), revision INTEGER NOT NULL,
+			 state TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL,
+			 actor_kind TEXT NOT NULL, actor_user_id INTEGER NOT NULL, actor_credential_id TEXT NOT NULL,
+			 PRIMARY KEY(intent_id,revision)) WITHOUT ROWID`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_insert_event AFTER INSERT ON lifecycle_intents
+			 BEGIN INSERT INTO lifecycle_intent_events VALUES(NEW.id,NEW.revision,NEW.state,NEW.reason,NEW.updated_at,NEW.actor_kind,NEW.actor_user_id,NEW.actor_credential_id); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_intent_update_event AFTER UPDATE ON lifecycle_intents
+			 BEGIN INSERT INTO lifecycle_intent_events VALUES(NEW.id,NEW.revision,NEW.state,NEW.reason,NEW.updated_at,NEW.actor_kind,NEW.actor_user_id,NEW.actor_credential_id); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_event_insert_guard BEFORE INSERT ON lifecycle_intent_events
+			 WHEN NOT EXISTS(SELECT 1 FROM lifecycle_intents i WHERE i.id=NEW.intent_id AND i.revision=NEW.revision AND i.state=NEW.state AND i.reason=NEW.reason AND i.updated_at=NEW.created_at AND i.actor_kind=NEW.actor_kind AND i.actor_user_id=NEW.actor_user_id AND i.actor_credential_id=NEW.actor_credential_id)
+			 BEGIN SELECT RAISE(ABORT,'invalid lifecycle event'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_event_no_update BEFORE UPDATE ON lifecycle_intent_events
+			 BEGIN SELECT RAISE(ABORT,'immutable lifecycle event'); END`,
+			`CREATE TRIGGER IF NOT EXISTS lifecycle_event_no_delete BEFORE DELETE ON lifecycle_intent_events
+			 BEGIN SELECT RAISE(ABORT,'immutable lifecycle event'); END`,
+		}},
 	}
 
 	for _, m := range migrations {

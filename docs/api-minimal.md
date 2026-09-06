@@ -995,3 +995,81 @@ existing meaning. Zoom and communication/history bounds are inherited from fleet
 v2. Root generation outside the visible sample is explicitly unknown; configured
 identity exposes only the existing display label. Project coordination never
 creates cross-project parent-session edges.
+
+### Browser-to-agentd lifecycle intents (PAI-924)
+
+`/api/projects/{id}/lifecycle/v1` is an additive typed authority; it does not
+change the PAI-925 orchestration projection or execute local processes. The
+OpenAPI `Lifecycle*V1` schemas freeze its complete wire contract.
+
+- Browser super-admin sessions: `GET /runtimes`, `POST /intents`,
+  `GET /intents/{intentID}`, `GET /intents/{intentID}/events`, and
+  `POST /intents/{intentID}/cancel` with `expected_revision`.
+- API-key super-admin reporters with `agent-controls:runner` (or `*`):
+  `POST /runtimes`, `POST /runtimes/{runtimeID}/sessions`,
+  `POST /runtimes/{runtimeID}/claim`, and
+  `POST /intents/{intentID}/transition`. Private runtime lease proofs use
+  `X-Paimos-Runtime-Lease`; session registration also requires the existing
+  `X-Paimos-Harness-Worker-Lease`. Proofs never appear in responses.
+
+Start carries canonical agent, exact immutable profile, explicit ticket/work
+shape/role and optional same-project parent. Attach/reassign additionally require
+an owned session generation and its expected revision; completion applies the
+binding CAS and existing assignment event atomically. Restart requires one
+owned terminal generation and reserves a new explicit generation. Repair is
+bounded to the named `reporter` or `listeners` runtime layer. Starting an
+already occupied agent address, exclusive workspace or coordinator is refused.
+All these requests retain super-admin authority because an admin daemon must
+not grant managed target privileges to a lower-role browser requester.
+
+Runtime discovery advertises opaque workspace handles and identity digests,
+immutable profiles, one bounded account label, and proved public
+`session_id`/`generation` mappings. Machine provenance uses the existing
+**authenticated reporter's Host mapped to MachineID** trust gate; this is not
+hardware attestation. A daemon generation may advertise separate project-bound
+handles. Every authoritative transition reauthorizes both the exact reporter
+credential and the original browser session. Logging out or revoking either
+principal closes outstanding authority. Status/history/cancel require the
+creating user to remain an authorized browser super-admin.
+
+States are `requested`, `claimed`, `executing`, `completed`, `failed`, `expired`
+and `cancelled`, with immutable audit events and terminal outcomes. Request keys
+are UUIDs; exact retries return the original record and conflicting reuse fails.
+One intent may be claimed/executing per runtime. Cancel uses CAS and is allowed
+only before executing commits; it cannot pretend to undo an external effect.
+Intent TTL is 30–600 seconds and runtime lease TTL is 120 seconds. Refresh the
+same immutable runtime advertisement before lease expiry; an expired daemon
+generation cannot be revived. Expiry is materialized on authorized
+status/events/claim access. Claimed/executing expiry records `outcome_unknown`;
+no retry may reinterpret this as permission to spawn again.
+
+Bodies are limited to 8192 bytes; duplicate/unknown fields and arbitrary argv,
+shell, prompts, credentials, paths and private target references are rejected.
+Each project admits at most 32 live intents, 32 live runtimes, 10,000 durable
+intent replay records and 1,024 durable runtime records. A runtime admits 16
+workspaces, 16 profiles and 128 proved session generations. Reaching a durable
+record cap refuses new requests; automatic history deletion is not provided.
+Responses are private/no-store and inherit authenticated response metadata.
+Foreign, missing, revoked and wrong-provenance targets share a bounded refusal;
+no private payload or credential identity is echoed.
+
+Daemon integration must implement `lifecycleintents.RuntimeAuthority`, register
+its exact principal/generation/proof, and claim/transition through these routes.
+Before local effects it must journal the intent ID durably, resolve only an
+explicitly configured local workspace handle, reverify provenance/account and
+immutable profile, and obtain instructions from authorized canonical agent and
+ticket resources. Commit `executing` before invoking an operation; after a crash,
+report a proved original outcome or `outcome_unknown`, never automatically
+respawn. Start/restart completion requires a newly registered managed session
+with the reserved generation and exact authorized specification. Repair
+completion records an authenticated reporter's applied result, not independent
+server attestation of a local repair. Receipt-only code cannot complete PAI-924;
+local execution, durable replay and browser end-to-end integration remain
+required before this contract represents an operational lifecycle workflow.
+
+Existing controls remain compatible: harness `pending` maps to `requested`,
+`claimed` to `claimed`, `applied` to `completed`, and `rejected` to `failed`.
+Their execution stage is unreported. Steer message delivery queued/attempted/
+acknowledged maps to requested/executing/completed **delivery evidence only**;
+it never proves task completion or a reply. Existing root configuration remains
+the super-admin `/api/orchestrator/v1/config` CAS surface.
