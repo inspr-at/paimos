@@ -829,6 +829,32 @@ func TestCLIReporterTerminalMarkStoppedReplayConverges(t *testing.T) {
 	}
 }
 
+func TestCLIReporterCodexTurnFailureClosesPublicSession(t *testing.T) {
+	for _, code := range []agentd.ErrorCode{agentd.ErrorTurnFailed, agentd.ErrorAppServerProtocol} {
+		t.Run(string(code), func(t *testing.T) {
+			marks := 0
+			runner := func(_ context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+				if args[2] != "mark-stopped" || !slices.Contains(args, "process_failed") {
+					t.Fatalf("failed Codex turn reported as live/idle: %v", args)
+				}
+				marks++
+				return reporterSessionEvidence("worker", "stopped"), nil
+			}
+			controller := &statefulReporterController{}
+			reporter, _ := newCLIReporterWithRunner("ppm", "camyb-box", "/opt/paimos", nil, runner, newMemoryReporterLeaseStore())
+			_ = reporter.BindController(controller)
+			status := agentd.Status{Instance: "ppm", Sessions: []agentd.Session{{ID: localReporterSession, ProjectID: 6, Identity: "codex:worker", Adapter: "codex", Managed: true, State: agentd.StateFailed, LastErrorCode: code,
+				Reporter: agentd.ReporterState{PublicSessionID: publicReporterSession, Capabilities: []agentd.Capability{agentd.CapabilityStatus, agentd.CapabilityStop}}}}}
+			if err := reporter.ReportStatus(context.Background(), status); err != nil {
+				t.Fatal(err)
+			}
+			if marks != 1 || !controller.state.RemoteClosed || !controller.state.Closed {
+				t.Fatalf("public failure closure incomplete: marks=%d state=%+v", marks, controller.state)
+			}
+		})
+	}
+}
+
 func TestCLIReporterTerminalReasonDriftAfterRemoteCloseCrashConverges(t *testing.T) {
 	remoteReason := ""
 	requestedReasons := []string{}

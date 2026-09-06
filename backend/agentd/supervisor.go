@@ -480,6 +480,9 @@ func (e *sessionEntry) observe(event AdapterEvent) {
 	}
 	if validErrorCode(event.ErrorCode) {
 		e.session.LastErrorCode = event.ErrorCode
+		if event.ErrorCode == ErrorTurnFailed || event.ErrorCode == ErrorAppServerProtocol {
+			e.failureCode = event.ErrorCode
+		}
 	}
 	e.session.HeartbeatAt = time.Now().UTC()
 	e.refreshSteerableLocked()
@@ -513,7 +516,7 @@ func validEventKind(kind EventKind) bool {
 
 func validErrorCode(code ErrorCode) bool {
 	switch code {
-	case ErrorEventStreamBound, ErrorAppServerProtocol, ErrorChildExitFailed, ErrorChildStopFailed, ErrorOwnershipLost, ErrorWorkspaceConflict:
+	case ErrorEventStreamBound, ErrorAppServerProtocol, ErrorChildExitFailed, ErrorTurnFailed, ErrorChildStopFailed, ErrorOwnershipLost, ErrorWorkspaceConflict:
 		return true
 	default:
 		return false

@@ -108,6 +108,7 @@ const (
 	ErrorEventStreamBound    ErrorCode = "event_stream_bound"
 	ErrorAppServerProtocol   ErrorCode = "app_server_protocol"
 	ErrorChildExitFailed     ErrorCode = "child_exit_failed"
+	ErrorTurnFailed          ErrorCode = "turn_failed"
 	ErrorChildStopFailed     ErrorCode = "child_stop_failed"
 	ErrorOwnershipLost       ErrorCode = "ownership_lost"
 	ErrorReporterUnavailable ErrorCode = "reporter_unavailable"
