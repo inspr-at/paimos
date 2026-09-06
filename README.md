@@ -100,7 +100,8 @@ shipped code and documented verification.
 ### Recent product changes
 
 - The unreleased Habitat work adds a worker-focused control room with Home,
-  Fleet, worker detail, profile/workspace choices and activity history. Runtime
+  Workers, Projects and Needs you, plus worker detail, profile/workspace choices
+  and activity history. Runtime
   health distinguishes fresh, stale, offline and missing evidence; assignments
   and controls retain their existing authorization and revision checks.
 - Guided orchestrator/worker starts and instance-scoped runtime setup, diagnosis,

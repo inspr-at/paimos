@@ -10,8 +10,9 @@ calendar form `yy.mm.dd[.hh.mm]`.
 
 ### Added — Habitat and owned runtime controls (PAI-917)
 
-- Added the Habitat worker control room with Home, Fleet, focused worker
-  details, profile/workspace choices and activity history. Existing project,
+- Added the Habitat worker control room with Home, Workers, Projects and Needs
+  you, plus focused worker details, profile/workspace choices and activity
+  history. Existing project,
   assignment, orchestration and delivery projections remain authoritative.
 - Added guided `paimos orchestrator start` and `paimos worker start` with
   canonical agent/profile selection, explicit ticket/work-shape/parent binding,
@@ -35,6 +36,14 @@ calendar form `yy.mm.dd[.hh.mm]`.
   reauthorization and explicit fresh/stale/offline/unknown evidence. Optional
   operator workspace labels and server-proved session-to-workspace handles make
   choices meaningful without exposing paths.
+
+### Fixed — FIFO recovery and MCP schema compatibility (PAI-914)
+
+- Delivery workers recover outstanding canonical FIFO handoffs even after a
+  read acknowledgement advances the inbox cursor. Terminal handoffs stay
+  closed, and blocked deliveries report a bounded `fifo_blocked` reason.
+- MCP tool schemas emit `required: []` when no fields are required, preserving
+  compatibility with clients that reject `required: null`.
 
 ### Changed — Verification and rollout evidence (PAI-928)
 
