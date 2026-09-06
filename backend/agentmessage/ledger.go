@@ -269,7 +269,7 @@ func (s *Service) SendEnvelope(ctx context.Context, in SendEnvelopeInput) (*Enve
 		messageID, projectKey, taskID, "agent", string(partsJSON), string(metadataJSON), fromAddress, toAddress, in.ReplyTo, threadID, strings.TrimSpace(in.SessionID),
 		in.DeliveryLevel, "simple", nullableString(primaryTargetID), nullableString(fallbackTargetID), boolToInt(in.ExpectsReply))
 	if err != nil {
-		if strings.Contains(err.Error(), "paimos_contains_secret_like") {
+		if strings.Contains(err.Error(), "paimos_contains_secret_like") || strings.Contains(err.Error(), "paimos_message_body_contains_secret_like") {
 			return nil, ErrContainsSecret
 		}
 		return nil, err

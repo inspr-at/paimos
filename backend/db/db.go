@@ -51,6 +51,7 @@ var paimosUnicodeCaseFolder = cases.Fold()
 func init() {
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_cosine", 2, paimosCosineSQL)
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_contains_secret_like", 1, paimosContainsSecretLikeSQL)
+	sqlite.MustRegisterDeterministicScalarFunction("paimos_message_body_contains_secret_like", 1, paimosMessageBodyContainsSecretLikeSQL)
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_domain_sha256", -1, paimosDomainSHA256SQL)
 	sqlite.MustRegisterDeterministicScalarFunction("paimos_casefold", 1, paimosCasefoldSQL)
 
@@ -13203,6 +13204,9 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 		}},
 	}
 
+	// M178 changes only the message-body guard, preserving multiline bytes and
+	// all existing ledger references through an atomic table rebuild.
+	migrations = append(migrations, migration{version: 178})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue
@@ -13235,6 +13239,9 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 }
 
 func applyMigration(ctx context.Context, conn *sql.Conn, m migration) error {
+	if m.version == 178 {
+		return applyMessageBodyMigration178(ctx, conn)
+	}
 	if migrationUsesForeignKeyPragma(m) {
 		return applyForeignKeyRebuildMigration(ctx, conn, m)
 	}
