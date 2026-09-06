@@ -6,6 +6,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [Unreleased]
+
+### Added — Habitat and owned runtime controls (PAI-917)
+
+- Added the Habitat worker control room with Home, Fleet, focused worker
+  details, profile/workspace choices and activity history. Existing project,
+  assignment, orchestration and delivery projections remain authoritative.
+- Added guided `paimos orchestrator start` and `paimos worker start` with
+  canonical agent/profile selection, explicit ticket/work-shape/parent binding,
+  preview and scriptable modes, durable exact retries and public registration
+  checks. Canonical personas and owned process generations remain distinct.
+- Added named-instance runtime setup, read-only diagnosis, bounded repair and
+  preview-confirmed reset for operator-reviewed macOS and Linux user-service
+  declarations. Credentials, workspaces and generation replay evidence remain
+  outside reset's eligible archive set.
+- Added typed browser lifecycle intents, private runtime/session authority,
+  revision-checked controls and immutable assignment history. Explicit local
+  workspace/profile configuration determines which effects a daemon can accept;
+  public browser metadata contains no runtime proof or local path.
+- Added private consumer and per-attempt proofs for canonical FIFO inbox and
+  attention handoffs. Claims carry no payload; execution releases a transient
+  payload once; ambiguous outcomes remain quarantined. Sticky database fences
+  prevent legacy consumers from reclaiming or acknowledging owned work after
+  expiry, while exact completion replay retains the original result.
+- Added coalesced typed runtime-health attention and a bounded browser health
+  read for authorized internal project viewers, with current reporter
+  reauthorization and explicit fresh/stale/offline/unknown evidence. Optional
+  operator workspace labels and server-proved session-to-workspace handles make
+  choices meaningful without exposing paths.
+
+### Changed — Verification and rollout evidence (PAI-928)
+
+- Added authority, replay, concurrency, ambiguous-outcome, legacy-fence,
+  migration-preservation, browser-permission and workspace-mapping coverage.
+  Habitat's production-build Playwright checks run explicitly in the existing
+  required E2E job rather than depending on an opt-in local environment.
+- Updated the runtime quickstart and API contracts. Clean-machine onboarding,
+  real vendor handoff and live rollout acceptance remain separate verification
+  steps; these notes do not claim those checks are complete.
+
 ## [26.09.05] — 2026-09-05
 
 ### Added — Scheme-aware external-stage artifact evidence (PAI-876)
@@ -644,7 +684,10 @@ calendar form `yy.mm.dd[.hh.mm]`.
   reporter-role ceilings, stale authority, and exact-artifact verification now
   fail closed under focused, full-backend, SAST, and cross-model review.
 
-## [Unreleased]
+## Historical development notes — PAI-810
+
+The original notes below did not identify a release; their placement and content
+are preserved without assigning them to a new release.
 
 ### Fixed — PAI-810 production reachability
 
@@ -1063,8 +1106,6 @@ calendar form `yy.mm.dd[.hh.mm]`.
 - chore: point registry, deploy, and release tooling at inspr-at
 - chore: rename Go module to the inspr-at namespace
 - fix(deploy): reach csb1 via Tailscale IP, not MagicDNS name
-
-## [Unreleased]
 
 ## [5.0.0] — 2026-07-23
 

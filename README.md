@@ -99,6 +99,16 @@ shipped code and documented verification.
 
 ### Recent product changes
 
+- The unreleased Habitat work adds a worker-focused control room with Home,
+  Fleet, worker detail, profile/workspace choices and activity history. Runtime
+  health distinguishes fresh, stale, offline and missing evidence; assignments
+  and controls retain their existing authorization and revision checks.
+- Guided orchestrator/worker starts and instance-scoped runtime setup, diagnosis,
+  repair and reset now share the same explicit ownership model. Typed browser
+  lifecycle requests and generation-fenced inbox/attention consumers connect to
+  that local runtime. See the [Unreleased notes](docs/CHANGELOG.md#unreleased)
+  for the implementation scope and remaining verification boundary.
+
 - Paimos 6 empty states became actionable in 26.09.04.20.54: an authorized
   operator can open the existing agent editor, refresh stale choices, retry
   unavailable projections, copy a bounded admin request, or enter the existing
@@ -177,74 +187,59 @@ Two discovery endpoints keep clients from hard-coding local assumptions:
 
 ### Agent Intercom quickstart
 
-Agent Intercom keeps the message durable in Paimos while a receiver-side
-listener applies it to an explicitly registered target. `paimos-agentd` adds
-owned local control for fresh Codex and Claude children; it never adopts a
-process from a PID or turns an unmanaged queue/resume into steer.
+Agent Intercom keeps messages and assignments durable in Paimos. An
+operator-owned `paimos-agentd` runtime starts and controls local Codex or Claude
+children. A canonical project agent is the reusable identity; a running worker
+is one owned generation with an explicit workspace, profile and assignment.
 
-Start the per-instance daemon in one terminal, then start a child from its
-allowed workspace:
-
-```bash
-INSTANCE=production
-PROJECT=PAI
-PROJECT_ID="$(paimos --json project show "$PROJECT" | jq -er '.id')"
-IDENTITY=codex:worker
-REPORT_HOST=worker-host
-REPORT_URL=https://paimos.example.com
-REPORT_API_KEY_FILE=/absolute/path/to/owner-only-api-key
-paimos-agentd serve --instance "$INSTANCE" \
-  --report-host "$REPORT_HOST" --report-url "$REPORT_URL" \
-  --report-api-key-file "$REPORT_API_KEY_FILE"
-
-SESSION_ID="$({
-  printf '%s' 'Work only on the assigned ticket.' |
-    paimos-agentd start --instance "$INSTANCE" --adapter codex \
-      --workspace "$PWD" --project-id "$PROJECT_ID" --identity "$IDENTITY"
-} | jq -er '.id')"
-
-paimos-agentd status --instance "$INSTANCE"
-```
-
-The reporting trio is all-or-none. It publishes durable status and consumes
-typed interrupt/stop controls; omit all three flags for local-only status.
-`REPORT_API_KEY_FILE` must be absolute and owner-only. Durable steer still uses
-the receiver target and listener below—it is never routed through reporting.
-
-After an administrator has registered the receiver's encrypted
-`agentd_codex` primary, its separate `codex` simple fallback, and the two
-matching listeners, an attributed sender can request a durable steer:
+First configure a named CLI instance and its reviewed macOS LaunchAgent or
+Linux user service as described in the [Agent Intercom runbook](docs/AGENT_INTERCOM.md#local-runtime-setup-doctor-repair-and-reset).
+Setup verifies that declaration and reconnects the selected runtime; it does
+not install a service, rewrite Home Manager configuration, or choose credentials.
 
 ```bash
-eval "$(paimos session start --project PAI --agent coordinator)"
-paimos tell codex:worker --project PAI --level steer \
-  --message 'Re-check the current acceptance criteria.'
+paimos --instance production runtime doctor --project PAI
+paimos --instance production runtime setup --project PAI
 ```
 
-Local operator controls use the agentd session ID and a non-secret correlation
-ID. Text enters on stdin:
+Use the guided commands to choose authorized agents, immutable dispatch profiles
+and parent sessions. Give each exclusive generation its own clean workspace:
 
 ```bash
-printf '%s' 'Pause and re-check the current diff.' |
-  paimos-agentd steer --instance "$INSTANCE" --session "$SESSION_ID" \
-    --project-id "$PROJECT_ID" --identity "$IDENTITY" \
-    --correlation-id operator-steer-001
+paimos --instance production orchestrator start --guided \
+  --project PAI --workspace /path/to/coordinator-workspace
 
-paimos-agentd interrupt --instance "$INSTANCE" --session "$SESSION_ID" \
-  --project-id "$PROJECT_ID" --identity "$IDENTITY" \
-  --correlation-id operator-interrupt-001
-
-paimos-agentd stop --instance "$INSTANCE" --session "$SESSION_ID" \
-  --project-id "$PROJECT_ID" --identity "$IDENTITY" \
-  --correlation-id operator-stop-001
+paimos --instance production worker start --guided \
+  --project PAI --ticket PAI-123 --work-shape ship \
+  --workspace /path/to/worker-workspace
 ```
 
-The complete secure target setup, capability matrix, trust boundaries,
-diagnostics, recovery, and executable evidence are in the
-[Agent Intercom runbook](docs/AGENT_INTERCOM.md).
-Durable harness reporting binds every worker mutation to a distinct
-per-generation lease kept out of argv and stored server-side only as a digest;
-the public session UUID, agent name, and shared API key are not worker proof.
+`--dry-run` or `--explain` resolves the same plan without starting a child.
+Scripts can supply the choices explicitly with `--non-interactive`, `--json`
+and a stable `--idempotency-key`. Exact retries preserve the original generation;
+an unknown result needs reconciliation before any new start. Successful output
+includes the public session and matching status, message, steer, interrupt,
+stop and diagnosis commands. Choose `scout` for investigation work whose result
+is evidence rather than an implementation.
+
+`runtime doctor` reports independent readiness layers. `runtime repair` acts
+only on the verified instance within a persistent retry budget. `runtime reset`
+first produces an exact preview; its confirmation archives eligible owned state
+while preserving credentials, workspaces and replay protection. Follow the
+runbook's recovery instructions when ownership or a delivery outcome is unknown.
+
+Browser lifecycle controls require an explicitly configured reporter and private
+`--lifecycle-config` workspace/profile mappings on the daemon. Local paths stay
+in that owner-only configuration; the browser receives opaque workspace handles
+and optional operator labels. Runtime discovery, health and typed intent contracts
+are documented in the [REST reference](docs/api-minimal.md#browser-to-agentd-lifecycle-intents-pai-924).
+Only the daemon executes local effects. Private runtime, worker and consumer
+proofs bind authority to exact generations; public session UUIDs are not proofs.
+
+For encrypted target setup, daemon consumer ownership, supported vendor
+capabilities and manual low-level commands, use the
+[Agent Intercom runbook](docs/AGENT_INTERCOM.md). Ambiguous issued handoffs are
+quarantined rather than retried as if a vendor effect were known to be absent.
 
 ### Execution stays local and explicit
 
@@ -432,9 +427,14 @@ The boundaries below are part of the product description, not fine print:
 - The published container currently has no non-root `USER` declaration. Run it
   with an explicit runtime user and correctly owned storage when your deployment
   requires that boundary.
-- Local AI runners can edit a repository only after a developer starts and
-  authorizes the repo-scoped watcher. Paimos is not a general remote shell or an
-  autonomous deployment service.
+- Local execution requires an operator-started repository watcher or an
+  explicitly configured agentd runtime. Browser lifecycle requests are limited
+  to advertised workspaces, profiles and typed actions; they do not grant a
+  general remote shell or autonomous deployment authority.
+- Habitat and the runtime/lifecycle changes in the Unreleased section have
+  focused automated evidence. Clean-machine onboarding, real vendor handoffs
+  and live rollout acceptance remain separate checks; an API receipt alone
+  does not establish that a worker started or completed its assignment.
 
 Production evidence and open gaps are maintained in
 [Reference Deployments](docs/REFERENCE_DEPLOYMENTS.md), the
