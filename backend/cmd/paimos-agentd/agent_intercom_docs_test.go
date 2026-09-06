@@ -15,9 +15,8 @@ import (
 	"github.com/inspr-at/paimos/backend/agentd"
 )
 
-func TestAgentIntercomDocsUseShippedAgentdCommandsAndFlags(t *testing.T) {
+func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 	paths := map[string]string{
-		"README":  filepath.Join("..", "..", "..", "README.md"),
 		"runbook": filepath.Join("..", "..", "..", "docs", "AGENT_INTERCOM.md"),
 	}
 	docs := make(map[string]string, len(paths))
@@ -41,14 +40,6 @@ func TestAgentIntercomDocsUseShippedAgentdCommandsAndFlags(t *testing.T) {
 		}
 	}
 
-	readmeFlags := map[string][]string{
-		"serve":     {"instance", "report-host", "report-url", "report-api-key-file"},
-		"start":     {"instance", "adapter", "workspace", "project-id", "identity"},
-		"status":    {"instance"},
-		"steer":     {"instance", "session", "project-id", "identity", "correlation-id"},
-		"interrupt": {"instance", "session", "project-id", "identity", "correlation-id"},
-		"stop":      {"instance", "session", "project-id", "identity", "correlation-id"},
-	}
 	runbookFlags := map[string][]string{
 		"serve":     {"instance", "socket", "report-host", "report-url", "report-api-key-file"},
 		"start":     {"instance", "socket", "adapter", "workspace", "project-id", "identity"},
@@ -57,7 +48,7 @@ func TestAgentIntercomDocsUseShippedAgentdCommandsAndFlags(t *testing.T) {
 		"interrupt": {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
 		"stop":      {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
 	}
-	for name, contract := range map[string]map[string][]string{"README": readmeFlags, "runbook": runbookFlags} {
+	for name, contract := range map[string]map[string][]string{"runbook": runbookFlags} {
 		for command, names := range contract {
 			if !allDocumentedAgentdCommandsHaveFlags(docs[name], command, names) {
 				t.Errorf("%s has a paimos-agentd %s example without exact scope flags %v", name, command, names)
@@ -80,6 +71,29 @@ func TestAgentIntercomDocsUseShippedAgentdCommandsAndFlags(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "flag needs an argument") {
 				t.Errorf("paimos-agentd %s lost --%s: %v", command, name, err)
 			}
+		}
+	}
+}
+
+func TestAgentIntercomREADMELinksGuidedStartsToOwnedRuntime(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md")) // #nosec G304 -- fixed in-repo documentation path.
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := strings.Join(strings.Fields(string(raw)), " ")
+	for _, claim := range []string{
+		"runtime doctor --project",
+		"runtime setup --project",
+		"orchestrator start --guided",
+		"worker start --guided",
+		"reviewed macOS LaunchAgent or Linux user service",
+		"does not install a service",
+		"each exclusive generation its own clean workspace",
+		"unknown result needs reconciliation before any new start",
+		"docs/AGENT_INTERCOM.md#local-runtime-setup-doctor-repair-and-reset",
+	} {
+		if !strings.Contains(doc, claim) {
+			t.Errorf("README lost guided runtime ownership boundary %q", claim)
 		}
 	}
 }

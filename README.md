@@ -235,7 +235,9 @@ in that owner-only configuration; the browser receives opaque workspace handles
 and optional operator labels. Runtime discovery, health and typed intent contracts
 are documented in the [REST reference](docs/api-minimal.md#browser-to-agentd-lifecycle-intents-pai-924).
 Only the daemon executes local effects. Private runtime, worker and consumer
-proofs bind authority to exact generations; public session UUIDs are not proofs.
+proofs bind authority to exact generations. The per-generation worker lease is
+kept out of argv and stored server-side only as a digest; public session UUIDs
+and a shared API key are not worker proof.
 
 For encrypted target setup, daemon consumer ownership, supported vendor
 capabilities and manual low-level commands, use the
