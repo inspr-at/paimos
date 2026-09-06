@@ -449,6 +449,7 @@ test('actual browser controls one fresh owned child and closes every generation'
     delivery_id: unknown
     requested_level: 'simple' | 'steer'
     effective_level: unknown
+    fallback_reason: unknown
     state: unknown
   }> {
     const openLabel = level === 'simple' ? 'Message' : 'Steer'
@@ -513,7 +514,9 @@ test('actual browser controls one fresh owned child and closes every generation'
     for (let attempt = 0; attempt < 80 && delivery?.state !== 'handed_off'; attempt++) {
       const value = await getJSON(context.request, `/api/projects/${project}/message-deliveries`)
       const rows = Array.isArray(value) ? value : (record(value).deliveries as JSONRecord[])
-      delivery = rows.find((row) => row.delivery_id === acknowledgement.delivery_id) ?? null
+      const correlated = rows.filter((row) => row.delivery_id === acknowledgement.delivery_id)
+      expect(correlated).toHaveLength(1)
+      delivery = correlated[0] ?? null
       if (
         delivery?.last_error_code ||
         ['failed', 'unknown', 'handoff_required'].includes(String(delivery?.state))
@@ -522,13 +525,23 @@ test('actual browser controls one fresh owned child and closes every generation'
       if (delivery?.state !== 'handed_off') await target.waitForTimeout(250)
     }
     expect(delivery?.message_id).toBe(acknowledgement.message_id)
+    expect(delivery?.requested_level).toBe(level)
     expect(delivery?.state).toBe('handed_off')
-    expect(delivery?.effective_level).toBe(level)
+    if (level === 'simple') {
+      expect(delivery?.effective_level).toBe('simple')
+      expect(delivery?.fallback_reason ?? '').toBe('')
+    } else if (delivery?.effective_level === 'steer') {
+      expect(delivery?.fallback_reason ?? '').toBe('')
+    } else {
+      expect(delivery?.effective_level).toBe('simple')
+      expect(delivery?.fallback_reason).toBe('idle')
+    }
     return {
       message_id: acknowledgement.message_id,
       delivery_id: acknowledgement.delivery_id,
       requested_level: level,
       effective_level: delivery!.effective_level,
+      fallback_reason: delivery!.fallback_reason ?? '',
       state: delivery!.state,
     }
   }
