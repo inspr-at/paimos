@@ -10,6 +10,7 @@ import {
 } from './habitatLifecycle'
 import HabitatLifecycle from './HabitatLifecycle.vue'
 import { api } from '@/api/client'
+import { writeIntentRecovery } from './habitatRecovery'
 import { loadOrchestration } from '@/services/orchestration'
 vi.mock('@/services/orchestration', () => ({ loadOrchestration: vi.fn() }))
 vi.mock('@/stores/auth', () => ({
@@ -24,6 +25,7 @@ vi.mock('./habitatLifecycle', async (original) => ({
 }))
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.clearAllMocks()
   document.body.innerHTML = ''
   sessionStorage.clear()
 })
@@ -105,6 +107,67 @@ describe('Habitat browser lifecycle', () => {
     })
     button(mounted.el, 'Refresh intent evidence').click()
     await vi.waitFor(() => expect(mounted.el.textContent).toContain('The intent failed'))
+    await mounted.unmount()
+  })
+  it('re-reads a saved receipt after navigation without repeating its mutation', async () => {
+    vi.spyOn(api, 'getWithMeta').mockResolvedValue({
+      data: { issues: [] },
+      status: 200,
+      permissionsEpoch: '1',
+      permissionsEpochGeneration: 0,
+      etag: null,
+      lastModified: null,
+    })
+    vi.mocked(loadOrchestration).mockResolvedValue(habitatFixture('100', 1))
+    vi.mocked(loadHabitatRuntimes).mockResolvedValue([])
+    const request = {
+      request_key: id('11'),
+      operation: 'start' as const,
+      runtime_id: id('12'),
+      runtime_generation: id('13'),
+      account_label: 'chatgpt',
+      ttl_seconds: 120,
+      workspace_handle: id('14'),
+      agent_name: 'coordinator',
+      dispatch_profile_id: 'fixture-profile',
+      dispatch_profile_version: '1',
+      ticket_id: null,
+      work_shape: 'unknown' as const,
+      role: 'coordinator' as const,
+      parent_harness_session_id: null,
+    }
+    expect(
+      writeIntentRecovery(
+        { origin: location.origin, instance: 'fixture', principalId: 1, projectId: 1 },
+        { intentId: id('15'), request, savedAt: Date.now() },
+      ),
+    ).toBe(true)
+    vi.mocked(loadHabitatIntent).mockResolvedValue({
+      id: id('15'),
+      projectId: 1,
+      state: 'requested',
+      revision: 1,
+      reason: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 120000).toISOString(),
+      newGeneration: id('16'),
+      resultSessionId: null,
+    })
+    const mounted = await mountComponent(HabitatLifecycle, {
+      projectId: 1,
+      agent: 'coordinator',
+      profile: habitatFixture().fleet.workers[0].dispatch_profile,
+      authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
+    })
+    await vi.waitFor(() =>
+      expect(loadHabitatIntent).toHaveBeenCalledWith(1, id('15'), request, expect.any(AbortSignal)),
+    )
+    expect(submitHabitatIntent).not.toHaveBeenCalled()
+    expect(mounted.el.textContent).toContain('Request status refreshed')
+    expect(mounted.el.textContent).not.toContain('Runtime completion recorded')
     await mounted.unmount()
   })
 })

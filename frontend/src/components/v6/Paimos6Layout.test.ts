@@ -40,7 +40,7 @@ describe('Paimos6Layout (PAI-854 / PAI-867 isolated production shell)', () => {
     router.push.mockReset().mockResolvedValue(undefined)
   })
 
-  it('mounts the live Paimos 6 home and command affordances without ordinary CRUD chrome or a rail', async () => {
+  it('mounts the compact workspace navigation and commands without ordinary CRUD chrome', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({
       schema_version: 1,
       default_shortcut: 'Mod+KeyK',
@@ -69,8 +69,12 @@ describe('Paimos6Layout (PAI-854 / PAI-867 isolated production shell)', () => {
       'Open command palette',
     )
     expect(shell.querySelector('.fixture-home')?.textContent).toBe('session home')
-    expect(shell.querySelector('aside')).toBeNull()
+    expect(shell.querySelector('aside')?.getAttribute('aria-label')).toBe('Workspace navigation')
     expect(shell.querySelector('nav')?.getAttribute('aria-label')).toBe('Control room')
+    expect(
+      [...shell.querySelectorAll('.habitat-nav a')].map((link) => link.getAttribute('aria-label')),
+    ).toEqual(['Home', 'Workers', 'Projects', 'Needs you'])
+    expect(shell.querySelector('[aria-label="Start work"]')).not.toBeNull()
     for (const label of ['Customers', 'Reporting', 'New Issue', 'Timer', 'Undo']) {
       expect(text).not.toContain(label)
     }

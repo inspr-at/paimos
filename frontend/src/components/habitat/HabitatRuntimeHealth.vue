@@ -16,7 +16,16 @@ const reports = computed(() => [
     pages.value.flatMap((page) => page.runtimes).map((runtime) => [runtime.runtime_id, runtime]),
   ).values(),
 ])
-const stale = computed(() => !props.fresh || now.value - observed.value > 45000)
+const stale = computed(
+  () =>
+    !props.fresh ||
+    now.value - observed.value > 45000 ||
+    pages.value.some(
+      (page) =>
+        now.value - Date.parse(page.observed_at) > 45000 ||
+        Date.parse(page.observed_at) > now.value + 5000,
+    ),
+)
 const issues = computed(() =>
   reports.value.filter(
     (runtime) =>
