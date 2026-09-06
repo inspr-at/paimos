@@ -1297,7 +1297,7 @@ func (b *contextBroker) runClaudeChannel(ctx context.Context, enc *lockedJSONEnc
 					// belongs to another adapter such as a claude_resume
 					// listener. Leave it to that worker or to an explicit
 					// operator requeue; never push or acknowledge it here.
-					b.auditChannelSkip(message.MessageID, work.Adapter, work.State)
+					b.auditChannelSkip(message.MessageID, work.Adapter, work.State, work.FallbackReason)
 					continue
 				}
 				// PAI-827: the Channels path is a simple handoff. The requested
@@ -1374,8 +1374,12 @@ func (b *contextBroker) runClaudeChannel(ctx context.Context, enc *lockedJSONEnc
 // auditChannelSkip records once per state change that the channel left a
 // delivery row to another worker or to an operator requeue, so a long-lived
 // channel does not repeat the same audit line on every poll.
-func (b *contextBroker) auditChannelSkip(messageID, adapter, state string) {
-	key := adapter + "/" + state
+func (b *contextBroker) auditChannelSkip(messageID, adapter, state string, reasons ...string) {
+	reason := ""
+	if len(reasons) > 0 && reasons[0] == "fifo_blocked" {
+		reason = "fifo_blocked"
+	}
+	key := adapter + "/" + state + "/" + reason
 	if b.channelSkipped == nil {
 		b.channelSkipped = map[string]string{}
 	}
@@ -1383,7 +1387,7 @@ func (b *contextBroker) auditChannelSkip(messageID, adapter, state string) {
 		return
 	}
 	b.channelSkipped[messageID] = key
-	b.audit("claude_channel_skip", map[string]any{"address": b.channelAddress, "message_id": messageID, "adapter": adapter, "state": state}, 0, nil)
+	b.audit("claude_channel_skip", map[string]any{"address": b.channelAddress, "message_id": messageID, "adapter": adapter, "state": state, "reason": reason}, 0, nil)
 }
 
 func (b *contextBroker) callMCPTool(name string, args json.RawMessage) (any, error) {
@@ -1519,7 +1523,7 @@ func objectSchema(properties map[string]any, required ...string) map[string]any 
 	return map[string]any{
 		"type":                 "object",
 		"properties":           properties,
-		"required":             required,
+		"required":             append([]string{}, required...),
 		"additionalProperties": false,
 	}
 }

@@ -354,3 +354,42 @@ func TestChannelSkipAuditIsRecordedOncePerStateChange(t *testing.T) {
 		t.Fatalf("skip audits=%d want 3 (one per message and state change)\n%s", got, logs.String())
 	}
 }
+
+func TestMCPToolsListRequiredIsAlwaysAnArrayOnWire(t *testing.T) {
+	b, _ := newTestBroker(t)
+	result, err := b.handleMCPRequest(mcpRequest{Method: "tools/list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Tools []struct {
+			Name   string                     `json:"name"`
+			Schema map[string]json.RawMessage `json:"inputSchema"`
+		} `json:"tools"`
+	}
+	if json.Unmarshal(raw, &wire) != nil || len(wire.Tools) == 0 {
+		t.Fatal("invalid tools list")
+	}
+	for _, tool := range wire.Tools {
+		var required []string
+		if json.Unmarshal(tool.Schema["required"], &required) != nil || required == nil {
+			t.Errorf("%s required must be a JSON array", tool.Name)
+		}
+	}
+}
+
+func TestChannelFIFOAuditIsBoundedAndExplicit(t *testing.T) {
+	b, _ := newTestBroker(t)
+	var logs bytes.Buffer
+	b.logger = log.New(&logs, "", 0)
+	for range 5 {
+		b.auditChannelSkip("fixture-message", "claude_channel", "pending", "fifo_blocked")
+	}
+	if strings.Count(logs.String(), "claude_channel_skip") != 1 || !strings.Contains(logs.String(), "fifo_blocked") {
+		t.Fatal("FIFO wait was not explicit and coalesced")
+	}
+}

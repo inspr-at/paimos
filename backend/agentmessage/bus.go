@@ -593,13 +593,20 @@ func (s *Service) RequeueMissingTargetsAuthorized(ctx context.Context, projectID
 // receiver-owned reference. Work that belongs to another adapter is returned
 // as redacted state for observability and is never leased or disclosed;
 // webhook capabilities are never disclosed through listen.
+const olderDeliveryFIFOQuery = `SELECT 1 FROM agent_message_deliveries older
+ JOIN agent_messages older_message ON older_message.id=older.message_row_id
+ WHERE older.instance=? AND older_message.to_address=? AND older_message.to_agent_id=?
+ AND older_message.id<(SELECT message_row_id FROM agent_message_deliveries WHERE delivery_id=?)
+ AND older.state NOT IN ('handed_off','dead')`
+
 func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, address, agent, workerAdapter, workerTargetID string, envelope *Envelope) (bool, error) {
-	if _, _, err := s.resolveAttributedInbox(ctx, projectID, address, agent); err != nil {
+	_, agentID, err := s.resolveAttributedInbox(ctx, projectID, address, agent)
+	if err != nil {
 		return false, err
 	}
 	work := DeliveryWork{Instance: instanceName(), ProjectID: projectID}
 	var selectedTargetID sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT d.delivery_id,d.state,d.requested_level,d.fallback_reason,`+selectedDeliveryTargetSQL+`
+	err = s.db.QueryRowContext(ctx, `SELECT d.delivery_id,d.state,d.requested_level,d.fallback_reason,`+selectedDeliveryTargetSQL+`
 		FROM agent_message_deliveries d JOIN agent_messages am ON am.id=d.message_row_id
 		WHERE am.message_id=? AND d.instance=?`, envelope.MessageID, instanceName()).Scan(
 		&work.DeliveryID, &work.State, &work.RequestedLevel, &work.FallbackReason, &selectedTargetID)
@@ -609,7 +616,7 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 	if err != nil {
 		return false, err
 	}
-	if work.State == "handed_off" {
+	if work.State == "handed_off" || work.State == "dead" {
 		return false, nil
 	}
 	selectedID := selectedTargetID.String
@@ -635,23 +642,33 @@ func (s *Service) attachDeliveryWork(ctx context.Context, projectID int64, addre
 		// lease work after an operator rotates the address to another target.
 		return false, nil
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE agent_message_deliveries SET state='leased',attempt_count=attempt_count+1,
+	result, err := s.db.ExecContext(ctx, `UPDATE agent_message_deliveries SET state='leased',attempt_count=attempt_count+1,last_error_code='',
 		lease_until=strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 seconds'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE delivery_id=? AND ((state IN ('pending','retry') AND next_attempt_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		 OR (state='leased' AND lease_until<=strftime('%Y-%m-%dT%H:%M:%fZ','now')))
-		AND NOT EXISTS (SELECT 1 FROM agent_message_deliveries older
-		 JOIN agent_messages older_message ON older_message.id=older.message_row_id
-		 WHERE older.instance=? AND older_message.to_address=?
-		 AND older_message.id<(SELECT current_message.id FROM agent_message_deliveries current_delivery
-		  JOIN agent_messages current_message ON current_message.id=current_delivery.message_row_id
-		  WHERE current_delivery.delivery_id=?) AND older.state NOT IN ('handed_off','dead'))`,
-		work.DeliveryID, instanceName(), address, work.DeliveryID)
+		AND NOT EXISTS (`+olderDeliveryFIFOQuery+`)`,
+		work.DeliveryID, instanceName(), address, agentID, work.DeliveryID)
 	if err != nil {
 		return false, err
 	}
 	leased, _ := result.RowsAffected()
 	if leased == 0 {
-		return false, nil
+		var blocked bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (`+olderDeliveryFIFOQuery+`)`, instanceName(), address, agentID, work.DeliveryID).Scan(&blocked); err != nil {
+			return false, err
+		}
+		if !blocked {
+			return false, nil
+		}
+		// Bounded content-free diagnostic; never expose a reference without a
+		// lease. Consumers can distinguish real FIFO wait from an empty inbox.
+		if _, err := s.db.ExecContext(ctx, `UPDATE agent_message_deliveries SET last_error_code='fifo_blocked'
+            WHERE delivery_id=? AND state IN ('pending','retry') AND last_error_code<>'fifo_blocked'`, work.DeliveryID); err != nil {
+			return false, err
+		}
+		work.FallbackReason = "fifo_blocked"
+		envelope.DeliveryWork = &work
+		return true, nil
 	}
 	plain, err := secretvault.Decrypt(targetSecretDomain, cipher)
 	if err != nil {

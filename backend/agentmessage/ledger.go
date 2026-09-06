@@ -42,14 +42,15 @@ type SendEnvelopeInput struct {
 }
 
 type ListFilter struct {
-	ProjectID     int64
-	To            string
-	ThreadID      string
-	IssueID       *int64
-	DeliveredOnly bool
-	DeliveryLevel string
-	AfterID       int64
-	Limit         int
+	includeOutstandingDeliveries bool
+	ProjectID                    int64
+	To                           string
+	ThreadID                     string
+	IssueID                      *int64
+	DeliveredOnly                bool
+	DeliveryLevel                string
+	AfterID                      int64
+	Limit                        int
 }
 
 type InboxInput struct {
@@ -365,8 +366,19 @@ func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, 
 		f.Limit = MaxDeliveredPerTurn
 	}
 	q := envelopeSelect + ` WHERE ((am.role='agent' AND sender.project_id=?) OR
-		(am.role='human' AND (receiver.project_id=? OR session.project_id=?))) AND am.id>?`
-	args := []any{f.ProjectID, f.ProjectID, f.ProjectID, f.AfterID}
+		(am.role='human' AND (receiver.project_id=? OR session.project_id=?)))`
+	args := []any{f.ProjectID, f.ProjectID, f.ProjectID}
+	if f.includeOutstandingDeliveries {
+		// Reading is not delivery. Recover authorized outbox work even below
+		// either the durable read cursor or a listener's in-memory cursor.
+		// Terminal deliveries never reappear; pre-bus rows keep cursor semantics.
+		q += ` AND ((am.id>? AND NOT EXISTS (SELECT 1 FROM agent_message_deliveries d WHERE d.message_row_id=am.id AND d.instance=?))
+            OR EXISTS (SELECT 1 FROM agent_message_deliveries d WHERE d.message_row_id=am.id AND d.instance=? AND d.state NOT IN ('handed_off','dead')))`
+		args = append(args, f.AfterID, instanceName(), instanceName())
+	} else {
+		q += ` AND am.id>?`
+		args = append(args, f.AfterID)
+	}
 	if f.To != "" {
 		q += ` AND am.to_address=?`
 		args = append(args, f.To)
@@ -410,6 +422,8 @@ func (s *Service) ListEnvelopes(ctx context.Context, f ListFilter) ([]Envelope, 
 // ListInbox binds an addressee read to trusted request attribution and starts
 // after the receiver's durable acknowledged cursor. A caller may advance the
 // in-memory position with AfterID, but only AckInbox changes durable state.
+// Delivery workers also recover outstanding authorized deliveries below that
+// read cursor; plain read acknowledgements never fabricate or cancel handoffs.
 func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, error) {
 	if in.WorkerAdapter != "" && !IsLocalWorkerAdapter(in.WorkerAdapter) {
 		return nil, coded("agent_message_worker_adapter_invalid", "delivery must name a registered local worker adapter")
@@ -427,7 +441,7 @@ func (s *Service) ListInbox(ctx context.Context, in InboxInput) (*InboxPage, err
 		in.AfterID = cursor
 	}
 	messages, err := s.ListEnvelopes(ctx, ListFilter{
-		ProjectID: in.ProjectID, To: address, DeliveredOnly: true, DeliveryLevel: in.DeliveryLevel, AfterID: in.AfterID, Limit: in.Limit,
+		includeOutstandingDeliveries: in.WorkerAdapter != "", ProjectID: in.ProjectID, To: address, DeliveredOnly: true, DeliveryLevel: in.DeliveryLevel, AfterID: in.AfterID, Limit: in.Limit,
 	})
 	if err != nil {
 		return nil, err
