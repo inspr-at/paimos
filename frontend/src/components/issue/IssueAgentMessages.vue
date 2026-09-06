@@ -185,7 +185,6 @@ async function resolve(message: AgentMessage, outcome: HumanResolutionOutcome) {
 }
 .agent-message {
   border: 1px solid var(--border);
-  border-left: 3px solid var(--brand-blue);
   border-radius: 6px;
   padding: 0.8rem 1rem;
   margin: 0.6rem 0;

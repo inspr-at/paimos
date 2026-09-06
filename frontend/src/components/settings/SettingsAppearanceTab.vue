@@ -370,7 +370,7 @@ loadBrandings()
   display: inline-flex; align-items: center; gap: .55rem;
   padding: .55rem .8rem .55rem .9rem;
   background: var(--accruals-accent-soft, #e6f0f6);
-  border-left: 2px solid var(--accruals-accent, #006497);
+  border-left: 2px solid transparent;
   border-radius: 2px;
   font-family: 'Bricolage Grotesque', system-ui, sans-serif;
 }

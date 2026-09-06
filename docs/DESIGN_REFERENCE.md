@@ -33,7 +33,8 @@ Canonical brand tokens live in `frontend/src/brand/paimos.css`; Habitat's semant
 ## Rules
 
 - Preserve the supplied SVG geometry, square viewBox and two fills. Do not redraw, invert, grayscale, recolor or replace it with the old P-shaped mark. Use pearl backing when contrast requires it; do not dim the mark through inherited opacity.
-- Keep reading surfaces solid. Use aqua light at their edges, subtle elevation and fine gold details. Gold is an accent, not small text on ivory. Verify text contrast in both themes.
+- Keep reading surfaces solid with restrained aqua/pearl fills and subtle uniform depth. Gold is an accent, not small text on ivory. Verify text contrast in both themes.
+- Decorative colored edge-accent rails are prohibited across Paimos, including selected navigation, cards, rows and callouts. Use a calm aqua/pearl fill and readable teal text/icons for selection. Preserve accessible keyboard focus, functional dividers, hierarchy connectors and drag/drop indicators.
 - Use the original hero selectively as decorative artwork, never as evidence of real workers or topology. It may appear in setup's illustration area; hide it when space is needed for controls. Do not enlarge it into a marketing header above operational work.
 - Keep useful work, one clear next action, current identity and security state visible. Preserve responsive reflow, keyboard focus, reduced motion, inspection, voice and all command authorization boundaries.
 - Presence must follow authoritative evidence. Unknown and stopped generations stay visually quiet; intentional stops are labeled Stopped. Gold lines and aqua animation must not invent activity, parent relationships or recovery needs.

@@ -760,7 +760,6 @@ function finishAndClose() {
   padding: .65rem .85rem;
   background: var(--bg-card, #f6f8fb);
   border: 1px solid var(--border, #dde3eb);
-  border-left: 3px solid var(--brand, #4a7);
   border-radius: 6px;
 }
 .bgs-resume-text { display: flex; flex-direction: column; gap: .15rem; font-size: 12px; color: var(--text); }

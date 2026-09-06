@@ -153,16 +153,7 @@ function evidenceAge(seconds: number | null): string {
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
-.p6-session-card::before {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: transparent;
-  content: "";
-}
-
-.p6-session-card.needs-attention::before { background: #b86a38; }
-.p6-session-card.is-selected { border-color: #5b8b74; box-shadow: 0 0 0 3px rgba(47, 107, 82, 0.11), 0 16px 40px rgba(35, 54, 44, 0.07); }
+.p6-session-card.is-selected { background: var(--paimos-selection-fill); box-shadow: 0 8px 24px rgba(35, 54, 44, 0.06); }
 
 .p6-card-select {
   display: flex;

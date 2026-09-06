@@ -317,27 +317,12 @@ function onKeydown(event: KeyboardEvent) {
 }
 .am-card:hover { border-color: var(--am-line-strong); box-shadow: 0 6px 18px color-mix(in srgb, var(--am-ink) 8%, transparent); }
 
-/* attention: amber rail on the left edge — an offer, not a selection */
-.am-card.is-attention::before {
-  content: '';
-  position: absolute;
-  top: 14px;
-  bottom: 14px;
-  left: -1px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--am-amber);
-}
-
-/* selection: accent border + ring + label — the strongest persistent
-   anchor, independent from hover & focus; attention stays visible on top */
+/* Selection uses a quiet fill and the existing label; focus remains independent. */
 .am-card.is-selected {
-  border-color: var(--am-select);
-  box-shadow: 0 0 0 1px var(--am-select), 0 0 0 5px color-mix(in srgb, var(--am-select) 14%, transparent);
-  background: color-mix(in srgb, var(--am-select) 4%, var(--am-surface));
+  background: color-mix(in srgb, var(--paimos-aqua) 26%, var(--am-surface));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--am-ink) 6%, transparent);
 }
-.am-card.is-selected:hover { border-color: var(--am-select); }
-.am-card.is-selected.is-attention::before { left: 0; border-radius: 3px; }
+.am-card.is-selected:hover { border-color: var(--am-line-strong); }
 
 .am-card.is-stale,
 .am-card.is-degraded { border-style: dashed; }

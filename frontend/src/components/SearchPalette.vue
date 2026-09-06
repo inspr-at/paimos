@@ -405,7 +405,8 @@ watch(activeIndex, () => {
   background: color-mix(in srgb, var(--brand-blue) 9%, var(--bg-card));
 }
 .sp-item--active {
-  box-shadow: inset 3px 0 0 var(--brand-blue);
+  background: var(--paimos-selection-fill);
+  color: var(--paimos-selection-ink);
 }
 .sp-item--direct {
   flex-direction: column;
@@ -462,7 +463,8 @@ watch(activeIndex, () => {
   border-top: 1px solid var(--border);
 }
 .sp-more--active {
-  box-shadow: inset 3px 0 0 var(--brand-blue);
+  background: var(--paimos-selection-fill);
+  color: var(--paimos-selection-ink);
 }
 .sp-more-text {
   font-size: 11px;

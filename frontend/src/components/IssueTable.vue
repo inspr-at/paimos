@@ -793,7 +793,7 @@ onUnmounted(stopColumnResize)
 .issue-table tbody tr.row-selected:hover .sel-td { background: var(--brand-blue-pale); }
 .sel-cb { width: 15px; height: 15px; padding: 0; border: revert; border-radius: revert; background: revert; cursor: pointer; accent-color: var(--brand-blue); }
 .row-selected { background: var(--brand-blue-pale) !important; }
-.row-active-panel { background: color-mix(in srgb, var(--brand-blue) 8%, var(--bg-card)); box-shadow: inset 3px 0 0 var(--brand-blue); }
+.row-active-panel { background: var(--paimos-selection-fill); }
 
 .sortable-th { cursor: pointer; user-select: none; white-space: nowrap; }
 .sortable-th:hover { color: var(--text); background: var(--border) !important; }
@@ -935,7 +935,7 @@ onUnmounted(stopColumnResize)
 .unit-toggle { color: var(--brand-blue); font-weight: 600; text-decoration: underline; text-decoration-style: dotted; }
 
 
-.row-expanded > td:first-child { border-left: 2px solid var(--brand-blue); }
+.row-expanded > td:first-child { border-left: 2px solid transparent; }
 .expand-panel-row { background: var(--surface-2); }
 .expand-panel-cell { padding: 0 !important; border-bottom: 1px solid var(--border); }
 .expand-empty { font-size: 12px; color: var(--text-muted); padding: .5rem 1rem; font-style: italic; }

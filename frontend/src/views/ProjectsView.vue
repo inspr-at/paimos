@@ -776,12 +776,6 @@ textarea { resize: vertical; min-height: 80px; }
   box-shadow: 0 1px 0 rgba(15,20,25,.02);
   overflow: hidden;
 }
-.accruals-bar::before {
-  /* hairline accent rule on the left edge — ledger margin */
-  content: '';
-  position: absolute; top: 10px; bottom: 10px; left: 0;
-  width: 2px; background: var(--accruals-accent);
-}
 
 .accruals-bar-inner {
   display: flex; align-items: center; gap: 1.1rem;

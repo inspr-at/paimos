@@ -155,7 +155,7 @@ function rowCanEdit(issue: Issue): boolean {
 .tree-actions { margin-left: auto; display: flex; gap: .2rem; flex-shrink: 0; }
 
 .row-selected { background: var(--brand-blue-pale) !important; }
-.row-active-panel { background: color-mix(in srgb, var(--brand-blue) 8%, var(--bg-card)); box-shadow: inset 3px 0 0 var(--brand-blue); }
+.row-active-panel { background: var(--paimos-selection-fill); }
 
 .issue-key-copy { font-size: 11px; font-weight: 700; letter-spacing: .04em; font-family: monospace; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; cursor: pointer; position: relative; display: inline-flex; align-items: center; gap: 3px; }
 .issue-key-copy:hover { color: var(--text); }

@@ -806,7 +806,7 @@ watch(
   cursor: help;
 }
 .pku-row--needs-review {
-  box-shadow: inset 3px 0 0 #f59e0b;
+  background: color-mix(in srgb, #f59e0b 5%, var(--bg-card));
 }
 .pku-row__pill--muted {
   background: var(--surface-2, var(--bg));

@@ -470,7 +470,6 @@ async function deleteTimeEntry(entry: TimeEntry) {
 <style scoped>
 .te-bar {
   border: 1px solid color-mix(in srgb, var(--brand-green, #16a34a) 15%, var(--border));
-  border-left: 3px solid var(--brand-green, #16a34a);
   border-radius: 8px; margin: 1.25rem 1.5rem 1rem; overflow: hidden;
   background: color-mix(in srgb, var(--brand-green, #16a34a) 4%, var(--bg-card));
 }
@@ -606,7 +605,6 @@ async function deleteTimeEntry(entry: TimeEntry) {
 .te-live { color: var(--brand-green, #16a34a); font-weight: 700; }
 .te-row-running {
   background: color-mix(in srgb, var(--brand-green, #16a34a) 6%, var(--bg-card));
-  box-shadow: inset 3px 0 0 var(--brand-green, #16a34a);
 }
 .te-row-stop {
   background: none; border: none; cursor: pointer; padding: 2px 6px;

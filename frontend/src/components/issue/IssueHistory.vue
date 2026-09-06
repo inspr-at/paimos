@@ -312,7 +312,7 @@ function hasAttribution(entry: HistoryEntry | null): boolean {
 
 .hist-text     { font-size: 13px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
 .hist-text-old { font-size: 12px; color: var(--text-muted); background: #fde8e8; padding: .4rem .5rem; border-radius: 4px; white-space: pre-wrap; line-height: 1.5; text-decoration: line-through; }
-.hist-text-new { font-size: 13px; color: var(--text); background: #fffbeb; padding: .4rem .5rem; border-radius: 4px; white-space: pre-wrap; line-height: 1.6; border-left: 3px solid #f5d66a; }
+.hist-text-new { font-size: 13px; color: var(--text); background: #fffbeb; padding: .4rem .5rem; border-radius: 4px; white-space: pre-wrap; line-height: 1.6; border-left: 3px solid transparent; }
 
 .hist-ai {
   display: flex;

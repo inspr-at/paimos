@@ -6,6 +6,8 @@
   --paimos-ivory: #fffefa;
   --paimos-aqua: #c7efec;
   --paimos-ink: #203c3d;
+  --paimos-selection-fill: #e0f3f0;
+  --paimos-selection-ink: #0e6f6c;
 }
 
 /* Pearl backing preserves the original two-color mark on any application shell. */

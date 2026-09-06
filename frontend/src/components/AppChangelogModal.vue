@@ -272,22 +272,21 @@ watch(
   padding: .3rem .55rem;
   background: transparent;
   border: none;
-  border-left: 2px solid transparent;
-  border-radius: 0 4px 4px 0;
+  padding-left: calc(.55rem + 2px);
+  border-radius: 4px;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
   color: var(--text);
   /* No height: row is content-tall (~26 px); dense by design. */
-  transition: background .1s, border-color .1s;
+  transition: background .1s;
 }
 .cl-row:hover { background: rgba(82, 82, 91, .06); }
 .cl-row--active {
-  background: var(--brand-blue-pale);
-  border-left-color: var(--brand-blue);
+  background: var(--paimos-selection-fill);
 }
 .cl-row--active .cl-row-ver {
-  color: var(--brand-blue-dark);
+  color: var(--paimos-selection-ink);
 }
 
 .cl-row-dot {
