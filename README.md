@@ -99,7 +99,7 @@ shipped code and documented verification.
 
 ### Recent product changes
 
-- The unreleased Habitat work adds a worker-focused control room with Home,
+- PAI-917 adds a worker-focused Habitat control room with Home,
   Workers, Projects and Needs you, plus worker detail, profile/workspace choices
   and activity history. Runtime
   health distinguishes fresh, stale, offline and missing evidence; assignments
@@ -107,8 +107,9 @@ shipped code and documented verification.
 - Guided orchestrator/worker starts and instance-scoped runtime setup, diagnosis,
   repair and reset now share the same explicit ownership model. Typed browser
   lifecycle requests and generation-fenced inbox/attention consumers connect to
-  that local runtime. See the [Unreleased notes](docs/CHANGELOG.md#unreleased)
-  for the implementation scope and remaining verification boundary.
+  that local runtime. These workflows require matching PAI-917 server, CLI,
+  and daemon builds. See the [release notes](docs/CHANGELOG.md) for the
+  implementation scope and remaining verification boundary.
 
 - Paimos 6 empty states became actionable in 26.09.04.20.54: an authorized
   operator can open the existing agent editor, refresh stale choices, retry
@@ -218,8 +219,8 @@ paimos --instance production worker start --guided \
 `--dry-run` or `--explain` resolves the same plan without starting a child.
 Scripts can supply the choices explicitly with `--non-interactive`, `--json`
 and a stable `--idempotency-key`. Exact retries preserve the original generation;
-an unknown result needs reconciliation before any new start. The unreleased
-candidate output includes the public session and matching status, message and
+an unknown result needs reconciliation before any new start. Matching PAI-917
+builds return the public session and matching status, message and
 diagnosis commands, plus steer, interrupt and stop when the observed generation
 advertises those capabilities. Choose `scout` for investigation work whose
 result is evidence rather than an implementation.
@@ -435,10 +436,11 @@ The boundaries below are part of the product description, not fine print:
   explicitly configured agentd runtime. Browser lifecycle requests are limited
   to advertised workspaces, profiles and typed actions; they do not grant a
   general remote shell or autonomous deployment authority.
-- Habitat and the runtime/lifecycle changes in the Unreleased section have
-  focused automated evidence. Clean-machine onboarding, real vendor handoffs
-  and live rollout acceptance remain separate checks; an API receipt alone
-  does not establish that a worker started or completed its assignment.
+- Habitat and the runtime/lifecycle changes documented here have focused
+  automated evidence and require matching PAI-917 builds. Clean-machine
+  onboarding, real vendor handoffs and live rollout acceptance remain separate
+  checks; an API receipt alone does not establish that a worker started or
+  completed its assignment.
 
 Production evidence and open gaps are maintained in
 [Reference Deployments](docs/REFERENCE_DEPLOYMENTS.md), the
