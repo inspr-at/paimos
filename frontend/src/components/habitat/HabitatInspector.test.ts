@@ -165,7 +165,9 @@ describe('Habitat inspector', () => {
           resolve = yes
         }),
     )
-    const post = vi.spyOn(api, 'post')
+    const post = vi
+      .spyOn(api, 'post')
+      .mockRejectedValue(new Error('stale transcription must not reach the network'))
     const mounted = await mountComponent(HabitatInspector, props)
 
     button(mounted.el, 'Voice to selected worker').click()
