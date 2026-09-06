@@ -398,14 +398,14 @@ watch(activeIndex, () => {
   font-size: 13px;
   transition: background .08s;
 }
-.sp-item:hover,
+.sp-item:hover:not(.sp-item--active),
 .sp-item--active,
-.sp-more:hover,
+.sp-more:hover:not(.sp-more--active),
 .sp-more--active {
   background: color-mix(in srgb, var(--brand-blue) 9%, var(--bg-card));
 }
 .sp-item--active {
-  background: var(--paimos-selection-fill);
+  background: color-mix(in srgb, var(--paimos-aqua) 24%, var(--bg-card));
   color: var(--paimos-selection-ink);
 }
 .sp-item--direct {
@@ -463,7 +463,7 @@ watch(activeIndex, () => {
   border-top: 1px solid var(--border);
 }
 .sp-more--active {
-  background: var(--paimos-selection-fill);
+  background: color-mix(in srgb, var(--paimos-aqua) 24%, var(--bg-card));
   color: var(--paimos-selection-ink);
 }
 .sp-more-text {

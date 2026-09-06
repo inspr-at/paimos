@@ -144,7 +144,7 @@ function rowCanEdit(issue: Issue): boolean {
 .tree-row-ticket { background: var(--bg-card); }
 .tree-row-task   { background: #fafcfa; }
 .tree-row.clickable { cursor: pointer; }
-.tree-row.clickable:hover { background: #f0f2f4; }
+.tree-row.clickable:hover:not(.row-active-panel) { background: #f0f2f4; }
 .tree-row.row-selected.clickable:hover { background: var(--brand-blue-pale); }
 .tree-indent { width: 20px; flex-shrink: 0; }
 .tree-toggle { background: none; border: none; cursor: pointer; padding: 2px; color: var(--text-muted); border-radius: 3px; display: flex; align-items: center; flex-shrink: 0; transition: color .1s, background .1s; }
@@ -155,7 +155,7 @@ function rowCanEdit(issue: Issue): boolean {
 .tree-actions { margin-left: auto; display: flex; gap: .2rem; flex-shrink: 0; }
 
 .row-selected { background: var(--brand-blue-pale) !important; }
-.row-active-panel { background: var(--paimos-selection-fill); }
+.row-active-panel { background: color-mix(in srgb, var(--paimos-aqua) 24%, var(--bg-card)); }
 
 .issue-key-copy { font-size: 11px; font-weight: 700; letter-spacing: .04em; font-family: monospace; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; cursor: pointer; position: relative; display: inline-flex; align-items: center; gap: 3px; }
 .issue-key-copy:hover { color: var(--text); }
