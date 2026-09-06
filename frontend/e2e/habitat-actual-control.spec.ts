@@ -252,6 +252,26 @@ test('actual browser controls one fresh owned child and closes every generation'
     return workers.find((row) => row.harness_session_id === id) ?? null
   }
 
+  async function waitForWorkerState(
+    api: APIRequestContext,
+    id: string,
+    expected: 'idle' | 'stopped',
+  ) {
+    await expect
+      .poll(
+        async () => {
+          const current = await workerRow(api, id)
+          if (!current?.liveness) return false
+          const liveness = record(current.liveness).state
+          return expected === 'stopped'
+            ? current.phase === 'stopped' && liveness === 'dead'
+            : !['stopped', 'stopping'].includes(String(current.phase)) && liveness === 'idle'
+        },
+        { timeout: 60_000, intervals: [250, 500] },
+      )
+      .toBe(true)
+  }
+
   async function submitIntent(label: string) {
     const review = page!.getByRole('button', { name: `Review ${label} request`, exact: true })
     await expect(review).toBeEnabled()
@@ -333,7 +353,12 @@ test('actual browser controls one fresh owned child and closes every generation'
     throw new Error('owned_worker_not_visible')
   }
 
-  async function controlSelected(target: Page, id: string, kind: 'interrupt' | 'stop') {
+  async function controlSelected(
+    target: Page,
+    id: string,
+    kind: 'interrupt' | 'stop',
+    staleReviewAvailable = true,
+  ): Promise<{ id: unknown; state: unknown; reason: unknown }> {
     const label = kind[0]!.toUpperCase() + kind.slice(1)
     await target.getByRole('button', { name: label, exact: true }).click()
     await expect(target.getByRole('button', { name: `Confirm ${kind}`, exact: true })).toBeFocused()
@@ -345,7 +370,42 @@ test('actual browser controls one fresh owned child and closes every generation'
       ),
       target.getByRole('button', { name: `Confirm ${kind}`, exact: true }).click(),
     ])
-    await saveRaw(`${kind}-control-created-${id.slice(0, 8)}`, requested)
+    await saveRaw(
+      `${kind}-control-${requested.status() === 409 ? 'conflict' : 'created'}-${
+        staleReviewAvailable ? 'initial' : 'reviewed'
+      }-${id.slice(0, 8)}`,
+      requested,
+    )
+    if (requested.status() === 409 && staleReviewAvailable) {
+      await expect(
+        target.getByText(
+          'Worker revision or recipient changed. Refresh and review before trying again.',
+        ),
+      ).toBeVisible()
+      const [refreshed] = await Promise.all([
+        target.waitForResponse(
+          (response) =>
+            response.request().method() === 'GET' &&
+            new URL(response.url()).pathname ===
+              `/api/agent-mode/projects/${project}/orchestration/v1`,
+        ),
+        target.getByRole('button', { name: 'Refresh status', exact: true }).click(),
+      ])
+      expect(refreshed.status()).toBe(200)
+      await expect(
+        target.getByRole('button', { name: `Confirm ${kind}`, exact: true }),
+      ).toHaveCount(0)
+      await expect(target.getByRole('button', { name: label, exact: true })).toBeEnabled()
+      receipt.steps.push({
+        step: 'control-stale-review',
+        kind,
+        session_id: id,
+        status: requested.status(),
+        mutation_applied: false,
+        new_request_required: true,
+      })
+      return controlSelected(target, id, kind, false)
+    }
     expect(requested.status()).toBe(200)
     const created = record((await requested.json()).control)
     let terminal = created
@@ -383,19 +443,64 @@ test('actual browser controls one fresh owned child and closes every generation'
     id: string,
     level: 'simple' | 'steer',
     body: string,
-  ) {
+    staleReviewAvailable = true,
+  ): Promise<{
+    message_id: unknown
+    delivery_id: unknown
+    requested_level: 'simple' | 'steer'
+    effective_level: unknown
+    state: unknown
+  }> {
     const openLabel = level === 'simple' ? 'Message' : 'Steer'
     const submitLabel = level === 'simple' ? 'Send message' : 'Confirm steer'
     await target.getByRole('button', { name: openLabel, exact: true }).click()
     await target.getByLabel('Message draft', { exact: true }).fill(body)
     const path = `/api/projects/${project}/harness-sessions/${id}/messages/v1`
-    const [sent] = await Promise.all([
-      target.waitForResponse(
+    const sentPromise = target
+      .waitForResponse(
         (response) =>
           response.request().method() === 'POST' && new URL(response.url()).pathname === path,
-      ),
-      target.getByRole('button', { name: submitLabel, exact: true }).click(),
-    ])
+        { timeout: 8_000 },
+      )
+      .catch(() => null)
+    await target.getByRole('button', { name: submitLabel, exact: true }).click()
+    const sent = await sentPromise
+    const stale = target.getByText(
+      'Worker revision or recipient changed. Refresh and review before trying again.',
+    )
+    if (!sent || sent.status() === 409) {
+      if (sent)
+        await saveRaw(
+          `${level}-message-conflict-${staleReviewAvailable ? 'initial' : 'reviewed'}`,
+          sent,
+        )
+      await expect(stale).toBeVisible()
+      expect(staleReviewAvailable).toBe(true)
+      const [refreshed] = await Promise.all([
+        target.waitForResponse(
+          (response) =>
+            response.request().method() === 'GET' &&
+            new URL(response.url()).pathname ===
+              `/api/agent-mode/projects/${project}/orchestration/v1`,
+        ),
+        target.getByRole('button', { name: 'Refresh status', exact: true }).click(),
+      ])
+      expect(refreshed.status()).toBe(200)
+      await expect(
+        target.getByRole('button', { name: submitLabel, exact: true }),
+      ).toHaveCount(0)
+      await expect(target.getByRole('button', { name: openLabel, exact: true })).toBeEnabled()
+      receipt.steps.push({
+        step: 'message-stale-review',
+        level,
+        session_id: id,
+        status: sent?.status() ?? null,
+        post_observed: sent !== null,
+        mutation_applied: false,
+        same_utterance_retry: true,
+      })
+      return sendMessage(target, id, level, body, false)
+    }
     await saveRaw(`${level}-message-created`, sent)
     expect(sent.status()).toBe(201)
     const acknowledgement = await readJSON(sent)
@@ -453,6 +558,7 @@ test('actual browser controls one fresh owned child and closes every generation'
       if (!current || current.phase === 'stopped') continue
       try {
         await control(page!, id, 'stop')
+        await waitForWorkerState(api, id, 'stopped')
         ;(receipt.cleanup.stopped as unknown[]).push(id)
       } catch {
         ;(receipt.cleanup.unresolved as unknown[]).push(id)
@@ -594,6 +700,11 @@ test('actual browser controls one fresh owned child and closes every generation'
     expect(childID).not.toBe(rootID)
     receipt.owned_session_ids.push(childID)
 
+    // A completed start intent proves the process was spawned, while the
+    // initial bounded worker turn may still be running. Assignment controls
+    // deliberately expose only an idle, currently owned generation.
+    await waitForWorkerState(context.request, childID, 'idle')
+
     const stalePage = await context.newPage()
     await guard(stalePage)
     // Keep this second tab on its original read. This is an injected browser
@@ -616,6 +727,9 @@ test('actual browser controls one fresh owned child and closes every generation'
     await page
       .getByRole('combobox', { name: 'Operation', exact: true })
       .selectOption('attach')
+    await page
+      .getByRole('combobox', { name: 'Lifecycle worker', exact: true })
+      .selectOption(childID)
     await expect(
       page.getByRole('combobox', { name: 'Lifecycle worker', exact: true }),
     ).toHaveValue(childID)
@@ -688,9 +802,11 @@ test('actual browser controls one fresh owned child and closes every generation'
         ? 'active-turn interruption'
         : 'control acceptance only; no active turn observed',
     })
+    await waitForWorkerState(context.request, childID, 'idle')
 
     const stoppedChild = await control(page, childID, 'stop')
     receipt.steps.push({ step: 'stop-child', ...stoppedChild })
+    await waitForWorkerState(context.request, childID, 'stopped')
     await selectOwnedWorker(page, childID)
     await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeDisabled()
     receipt.steps.push({ step: 'stopped-generation-control-denied', mutation_applied: false })
@@ -707,11 +823,12 @@ test('actual browser controls one fresh owned child and closes every generation'
     expect(replacementID).not.toBe(childID)
     receipt.owned_session_ids.push(replacementID)
 
-    receipt.steps.push({
-      step: 'stop-replacement',
-      ...(await control(page, replacementID, 'stop')),
-    })
-    receipt.steps.push({ step: 'stop-coordinator', ...(await control(page, rootID, 'stop')) })
+    const stoppedReplacement = await control(page, replacementID, 'stop')
+    receipt.steps.push({ step: 'stop-replacement', ...stoppedReplacement })
+    await waitForWorkerState(context.request, replacementID, 'stopped')
+    const stoppedCoordinator = await control(page, rootID, 'stop')
+    receipt.steps.push({ step: 'stop-coordinator', ...stoppedCoordinator })
+    await waitForWorkerState(context.request, rootID, 'stopped')
     await cleanupOwned(context.request)
     await restoreRootBinding()
     const terminal = record(receipt.cleanup).public_terminal as JSONRecord[]
