@@ -44,7 +44,7 @@ A deployment that meets 4-of-5 (e.g., never upgraded yet) is a *candidate* refer
 
 ## 2 · Reference deployment register
 
-The register contains two validated deployment histories. As of 2026-06-30, ppm is the only active deploy target; the second-operator instance is historical and inactive since the operator exit in June 2026. The current ppm proof is the live `5.18.0` deployment verified on 2026-08-27 (`/api/health` plus an authenticated `paimos --instance ppm doctor` including schema `2.3.0`); the preceding `5.17.1` verification on 2026-08-25 covered the protected release, supply-chain verification, composeStack pin-bump, authenticated operator smoke, and a live two-way Claude Code ↔ Codex relay check.
+The register contains two validated deployment histories. As of 2026-06-30, ppm is the only active deploy target; the second-operator instance is historical and inactive since the operator exit in June 2026. The current ppm proof is the live `26.09.06.21.31` server deployment verified on 2026-09-06 using public `/api/health`, exact image/source identity, and schema `180`. The release passed signature, SBOM-attestation and build-provenance verification before its protected composeStack pin-bump. A full stopped-volume backup preceded activation. The matching Mac CLI/daemon and protected lifecycle mapping are activated; read-only doctor confirms the owned lifecycle executor with zero owned sessions, while optional receiver layers remain unavailable as expected. The release-bound public site is deployed and its desktop/mobile galleries are verified. A live API-key UI review passed geometry, style, changelog, and all four Projects zoom checks; its expected runtime-health `403` preserves the endpoint's human-session-only contract, so human-browser runtime-health remains pending. Operational evidence: PAI-928; `04-exact-live-verification.json`, SHA-256 `b0c2b36946a3260a3292103377132e31a87ce8ee80522d53a4168927983bc89e`; `mac-2131-activation-receipt.json`, SHA-256 `f320ed979c798be5632102404569d0fe52d57b1b992cc67711f7d1936c16fbcc`; post-install `receipt.json`, SHA-256 `1728eca8df1180b35ee266e7bf96e7d35a5eeb957e8402da27c28fb3ea235819`; site `receipt.json`, SHA-256 `2edbc16fd8f6a38876f4d5eb0944d3dbfc08619ccb5f614123fde5c4eeab805f`; API-key UI `receipt.json`, SHA-256 `ca6e9b7586d9f7c681cda8c3e39677b91e4f38348c8c4df6808a21cbb59cabe0` (overall `FAIL` only because human-session runtime-health was unavailable to that principal). The earlier `5.18.0` proof on 2026-08-27 and the `5.17.1` proof on 2026-08-25 remain historical; the latter included a live Claude Code ↔ Codex relay check.
 
 ### 2.1 · ppm · `pm.barta.cm`
 
@@ -58,7 +58,7 @@ The register contains two validated deployment histories. As of 2026-06-30, ppm 
 | AI assist | OpenRouter (configured), `anthropic/claude-sonnet-4.5` model |
 | OIDC | configured against Zitadel (`auth.inspr.at`) via generic OIDC + PKCE; local password + TOTP remain available |
 | Active since | v1.x (continuously upgraded; no fresh-install in current era) |
-| Last verified runtime | 2026-08-27: `5.18.0` (`/api/health`, `paimos --instance ppm doctor` incl. auth + schema `2.3.0`). Previous: 2026-08-25 `5.17.1` with live Claude Code ↔ Codex message IDs `01a038cf-d364-716b-8d11-021fb06bca52` / `01a038d0-33f1-724b-a78c-20e5b4beed3a` |
+| Last verified runtime | 2026-09-06: live server `26.09.06.21.31`, protected source `64feac0463534f4c7f3c4e801c3bcf8afb2e4d93`, OCI index `sha256:9c0c09cb3c9d3cec646a4c8667ce9aa807652f683f14f029908b7a561b7a1cdb`, public health `200/ok`, deployment identity `ppm`, and schema `180`. The matching Mac CLI/daemon and lifecycle mapping passed read-only post-install verification with zero owned sessions. API-key Habitat geometry/projection checks passed; human-session runtime-health remains pending. Evidence: PAI-928. |
 | Backup pattern | per-deploy volume tar + manifest under `/home/mba/paimos-backups/ppm/<ts>/` (composeStack path, see [`DEPLOY.md`](DEPLOY.md)); backups on the same host (acknowledged limitation tracked under [§3 Findings](#3--structured-findings) F-08) |
 | Audience | the maintainer + a small group; current production canary |
 
@@ -69,6 +69,8 @@ The register contains two validated deployment histories. As of 2026-06-30, ppm 
 **2026-06-01 drift note:** ppm was briefly behind the second-operator instance because the deploy script still edited the old `/home/mba/docker` compose directory while the live csb1 stack was sourced from `/home/mba/Code/nixcfg/hosts/csb1/docker`. The deploy config and nixcfg compose pin now agree on `3.8.3`. The broader freshness guardrail is tracked by PAI-551.
 
 **2026-07-07 proxy note:** live ppm (`container=ppm`) is routed by Traefik from the `csb1_traefik` Docker network, with a router rule for `pm.barta.cm`, TLS resolver `default`, and backend port `8888`. Earlier reference text still said Caddy; Caddy remains present on the host for other sites, but not as the live ppm router.
+
+**26.09.06.21.31 recovery proof:** A separate isolated drill used the signed, digest-qualified old and new release images with synthetic records. It verified the schema 175 → 180 upgrade, preserved canonical message/delivery state, and restored the complete old stopped-volume archive into a separate fresh volume before booting the old image. Original and restored preboot archive members matched; the upgrade-only marker was absent after restore. The drill ran under the existing Colima amd64-emulation environment. This is a recovery-procedure drill, not a production rollback, clean-OS, or multi-architecture onboarding claim. Evidence: PAI-928; recovery receipt `result.json`, SHA-256 `7d82bbe0f45689c5208da9a960f57e2ab1db2fbcefd7e7fb12db038ce274fd8c`.
 
 ### 2.2 · second-operator instance (retired June 2026)
 
@@ -129,7 +131,8 @@ Per workflow, has each reference deployment exercised it in a way that produced 
 |---|---|---|
 | Fresh install from scratch | ❌ (continuously upgraded) | ✓ (initial install verified) |
 | Image upgrade `just deploy-* <tag>` | ✓ (every release; ~30+ cycles) | ✓ (every release) |
-| Rollback (image-pin only, per `DEPLOY.md` § Rollback) | ✓ (≥1 real rollback) | ✓ (≥1 real rollback) |
+| Historical rollback (image-pin-only procedure) | ✓ (≥1 historical real rollback; current procedure requires matching image and data) | ✓ (≥1 historical real rollback) |
+| Current signed-image and full stopped-volume recovery drill | Synthetic-data drill: 26.09.05 → 26.09.06.21.31 → 26.09.05, see §2.1 | Not run; retired instance |
 | Full DB restore from tarball | drilled (per `BACKUP_RESTORE.md` § 5) | drilled |
 | Schema migration through a minor version | ✓ (M77, M78, M79 in v1.10.x; M80+ in v2.0.x) | ✓ (same) |
 | GDPR export / erase | ❌ (not exercised against real users; capability shipped) | ❌ (same) |
