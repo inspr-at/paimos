@@ -10,10 +10,9 @@ controls, generation worker leases, durable reporting, control-outcome reads,
 and the M168 database guards require 26.09.01 or later; they are not available
 as documented here in 5.21.0 or 26.08.31.
 
-The new guided start, runtime-management, and Habitat lifecycle workflows in
-this development guide are unreleased PAI-917 work. They require matching
-candidate builds of the Paimos server, CLI, and daemon. The installed 26.09.05
-release does not include these workflows.
+The guided start, runtime-management, and Habitat lifecycle workflows in this
+development guide require matching Paimos server, CLI, and daemon builds that
+include PAI-917. Release 26.09.05 does not include these workflows.
 
 This guide uses only public command names and placeholder identities. Keep
 actual target references, socket paths, credentials, and message content out of
@@ -75,10 +74,11 @@ attempts, with 1/2/4-second backoff and bounded readiness probes, exhaust its
 budget across command invocations. A tripped circuit disables the platform
 restart loop and writes one content-free 0600 `runtime-attention.json` item.
 An interrupted stop is completed on the next repair invocation. Attention is
-local and durable. In the unreleased candidate, a configured owned attention
-consumer publishes runtime health through its separate fenced path; this repair
-command does not wake a model. After correcting the cause, a confirmed reset
-archives the budget so a new bootstrap can start explicitly.
+local and durable. With matching PAI-917 server, CLI, and daemon builds, a
+configured owned attention consumer publishes runtime health through its
+separate fenced path; this repair command does not wake a model. After correcting
+the cause, a confirmed reset archives the budget so a new bootstrap can start
+explicitly.
 
 Reset without `--confirm` only previews exact daemon/child PIDs and eligible
 paths. Apply the copyable command printed with its preview token. The token

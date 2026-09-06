@@ -266,9 +266,8 @@ func TestAgentIntercomRunbookPinsReleaseAndAdministratorBoundaries(t *testing.T)
 		"base owned-session commands first appeared in 5.21.0",
 		"M168 database guards require 26.09.01 or later",
 		"they are not available as documented here in 5.21.0 or 26.08.31",
-		"new guided start, runtime-management, and Habitat lifecycle workflows in this development guide are unreleased PAI-917 work",
-		"They require matching candidate builds of the Paimos server, CLI, and daemon",
-		"installed 26.09.05 release does not include these workflows",
+		"guided start, runtime-management, and Habitat lifecycle workflows in this development guide require matching Paimos server, CLI, and daemon builds that include PAI-917",
+		"Release 26.09.05 does not include these workflows",
 		"authenticated Paimos administrator performs every message-target and delivery administration operation",
 		"`paimos message target set`, `paimos message target list`, `paimos message target requeue`, `paimos message deliveries`, and the per-delivery requeue endpoint",
 		"message target and delivery listings are still administrator-only",
@@ -284,6 +283,11 @@ func TestAgentIntercomRunbookPinsReleaseAndAdministratorBoundaries(t *testing.T)
 	}
 	if strings.Contains(doc, "shipped surface in 5.21.0 and later") {
 		t.Error("runbook restored the false legacy release floor")
+	}
+	for _, stale := range []string{"unreleased PAI-917 work", "matching candidate builds"} {
+		if strings.Contains(doc, stale) {
+			t.Errorf("runbook retained release-relative wording %q", stale)
+		}
 	}
 
 	handlerRaw, err := os.ReadFile(filepath.Join("..", "..", "handlers", "agent_messages.go")) // #nosec G304 -- fixed in-repo authorization source.
