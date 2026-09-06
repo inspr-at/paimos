@@ -64,6 +64,7 @@ type WorkspaceProvenance struct {
 }
 
 type StartRequest struct {
+	KeepAlive              bool                     `json:"-"`
 	IdempotencyKey         string                   `json:"idempotency_key,omitempty"`
 	ExpectedAccountLabel   string                   `json:"expected_account_label,omitempty"`
 	ExpectedMachineID      string                   `json:"expected_machine_id,omitempty"`

@@ -64,6 +64,7 @@ type Supervisor struct {
 	consumersDone         chan struct{}
 	mu                    sync.RWMutex
 	startMu               sync.Mutex
+	closeMu               sync.Mutex
 	daemonID              string
 	adapters              map[string]Adapter
 	sessions              map[string]*sessionEntry
@@ -291,6 +292,7 @@ func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attemp
 		cancelStart()
 	}()
 	*attempted = true
+	validated.KeepAlive = true
 	process, err := adapter.Start(startCtx, validated, observe)
 	if err != nil {
 		s.releaseReservation(entry.session.ID)
@@ -990,15 +992,16 @@ func (s *Supervisor) Reject(ctx context.Context, id string, request ControlReque
 }
 
 func (s *Supervisor) Close(ctx context.Context) error {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil
+	if !s.closed {
+		s.closed = true
+		s.lifecycleCancel()
+		close(s.done)
 	}
-	s.closed = true
-	s.lifecycleCancel()
-	close(s.done)
 	s.mu.Unlock()
+	var errs []error
 
 	// Start holds this gate from reservation through Process publication. The
 	// lifecycle cancellation above makes an in-flight adapter unwind; taking
@@ -1007,23 +1010,45 @@ func (s *Supervisor) Close(ctx context.Context) error {
 	consumersDone := s.consumersDone
 	s.mu.RUnlock()
 	if consumersDone != nil {
+		drainCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		select {
 		case <-consumersDone:
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-drainCtx.Done():
+			errs = append(errs, errors.New("runtime consumer drain incomplete"))
 		}
+		cancel()
 	}
-	s.startMu.Lock()
-	defer s.startMu.Unlock()
+	// An expired caller deadline must not strand this generation's children.
+	// Teardown has its own small bound; another Close may retry unfinished work.
+	teardownCtx, cancelTeardown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelTeardown()
+	locked := false
+	for !locked {
+		locked = s.startMu.TryLock()
+		if locked {
+			break
+		}
+		select {
+		case <-teardownCtx.Done():
+			errs = append(errs, errors.New("runtime start drain incomplete"))
+		case <-time.After(10 * time.Millisecond):
+			continue
+		}
+		break
+	}
+	if locked {
+		defer s.startMu.Unlock()
+	}
 	s.mu.Lock()
 	entries := make([]*sessionEntry, 0, len(s.sessions))
 	for _, entry := range s.sessions {
 		entries = append(entries, entry)
 	}
 	s.mu.Unlock()
-	var errs []error
 	for _, entry := range entries {
-		entry.controlMu.Lock()
+		controlLocked := entry.controlMu.TryLock()
+		// A cancel-insensitive delivery may retain its control gate. Its durable
+		// receipt stays unknown while Stop still reaps the exact owned process.
 		entry.mu.Lock()
 		state := entry.session.State
 		if entry.process != nil && (state == StateRunning || state == StateStopping || state == StateFailed) {
@@ -1033,17 +1058,21 @@ func (s *Supervisor) Close(ctx context.Context) error {
 			}
 			process := entry.process
 			entry.mu.Unlock()
-			if _, err := process.Stop(ctx, ControlRequest{CorrelationID: "agentd-shutdown"}); err != nil {
+			if _, err := process.Stop(teardownCtx, ControlRequest{CorrelationID: "agentd-shutdown"}); err != nil {
 				errs = append(errs, err)
 			}
-			entry.controlMu.Unlock()
+			if controlLocked {
+				entry.controlMu.Unlock()
+			}
 			continue
 		}
 		entry.mu.Unlock()
-		entry.controlMu.Unlock()
+		if controlLocked {
+			entry.controlMu.Unlock()
+		}
 	}
 	for _, entry := range entries {
-		if err := waitSessionFinalized(ctx, entry); err != nil {
+		if err := waitSessionFinalized(teardownCtx, entry); err != nil {
 			errs = append(errs, err)
 		}
 	}

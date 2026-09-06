@@ -203,3 +203,41 @@ func TestConsumerSelectedTargetChangeFencesAppliedReceipt(t *testing.T) {
 		t.Fatal("new target completed old effect")
 	}
 }
+
+func TestTransientRepairKeepsDurableEffectsAndUnknownQuarantined(t *testing.T) {
+	d := &fixtureDriver{verifyErr: errors.New("offline")}
+	s := fixtureSupervisor(t, t.TempDir(), d)
+	b := fixtureBinding()
+	for range 3 {
+		_ = s.Step(context.Background(), b)
+		advance(s)
+	}
+	if s.Snapshot()[0].State != "circuit_open" {
+		t.Fatal("fixture circuit did not open")
+	}
+	d.verifyErr = nil
+	if err := s.Repair(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	d.works = []Work{{ID: "one", Cursor: 1}}
+	d.executeErr = ErrUnknown
+	if !errors.Is(s.Step(context.Background(), b), ErrUnknown) {
+		t.Fatal("effect not quarantined")
+	}
+	if !errors.Is(s.Repair(context.Background(), b), ErrUnknown) || len(s.receipts.Snapshot()) != 1 || d.effects != 1 {
+		t.Fatal("repair discarded ambiguous effect")
+	}
+}
+func TestBusyDeferralDoesNotReserveReceiptOrCountFailure(t *testing.T) {
+	d := &fixtureDriver{works: []Work{{ID: "one", Cursor: 1}}, prepareErr: ErrDeferred}
+	s := fixtureSupervisor(t, t.TempDir(), d)
+	b := fixtureBinding()
+	for range 8 {
+		if err := s.Step(context.Background(), b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(s.receipts.Snapshot()) != 0 || s.Snapshot()[0].Failures != 0 || d.effects != 0 {
+		t.Fatal("busy FIFO created ambiguous receipt or opened circuit")
+	}
+}

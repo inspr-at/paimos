@@ -25,6 +25,7 @@ var (
 	ErrUnsupported = errors.New("consumer primitive unsupported")
 	ErrConflict    = errors.New("consumer singleton conflict")
 	ErrLegacy      = errors.New("legacy receiver handoff required")
+	ErrDeferred    = errors.New("owned receiver is busy; keep canonical FIFO pending")
 )
 
 // Binding contains no delivery target reference or credential. Generation is
@@ -191,6 +192,9 @@ func (s *Supervisor) Step(ctx context.Context, b Binding) error {
 		return nil
 	}
 	err := s.step(ctx, b)
+	if errors.Is(err, ErrDeferred) {
+		err = nil
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -373,4 +377,39 @@ func (s *Supervisor) Stop() {
 		e.State = "stopped"
 		s.states[k] = e
 	}
+}
+
+// Repair reopens only a transient-failure circuit after exact binding authority
+// is verified again. Pending receipts remain quarantined; no receipt is erased.
+func (s *Supervisor) Repair(ctx context.Context, b Binding) error {
+	s.stepMu.Lock()
+	defer s.stepMu.Unlock()
+	if s.stopped || !b.valid() {
+		return ErrOwnership
+	}
+	if err := s.driver.Verify(ctx, b); err != nil {
+		return err
+	}
+	for _, c := range s.circuits.Snapshot() {
+		if c.Key != b.Stream() {
+			continue
+		}
+		if c.Evidence.Reason != "transport_unavailable" && c.Evidence.Reason != "authority_unavailable" && c.Evidence.Reason != "" {
+			return ErrUnknown
+		}
+		// Every retained unknown is checked again by Step even if it belongs to
+		// another binding. Conservatively refuse repair while any effect is pending.
+		for _, receipt := range s.receipts.Snapshot() {
+			if receipt.Phase == "pending" {
+				return ErrUnknown
+			}
+		}
+		state := Evidence{Kind: b.Kind, Generation: b.Generation, State: "ready"}
+		if err := s.circuits.Put(circuit{b.Stream(), state}); err != nil {
+			return ErrUnknown
+		}
+		s.publish(b, state)
+		return nil
+	}
+	return nil
 }

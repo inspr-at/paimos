@@ -7,7 +7,7 @@ import (
 	"context"
 	"github.com/inspr-at/paimos/backend/runtimeconsumer"
 	"os"
-	"path/filepath"
+	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -52,17 +52,65 @@ func TestConsumerShutdownDrainsBeforeChildStop(t *testing.T) {
 		t.Fatal("owned child not stopped")
 	}
 }
-func TestCodexInboxUsesPinnedQueueAndDiscardsVendorOutput(t *testing.T) {
-	// The only executable is a fixture script; no operator Codex process runs.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "codex-fixture")
-	script := "#!/bin/sh\n[ \"$1\" = queue ] && [ \"$2\" = --thread ] && [ \"$3\" = fixture-thread ] && [ \"$4\" = --message ] && [ \"$5\" = fixture-text ] || exit 9\nprintf 'fixture vendor output'\n"
-	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+
+type stuckConsumers struct{ release chan struct{} }
+
+func (c *stuckConsumers) Run(context.Context)                  { <-c.release }
+func (c *stuckConsumers) Snapshot() []runtimeconsumer.Evidence { return nil }
+func TestConsumerDeadlineStillReapsOwnedChildAndAllowsCloseRetry(t *testing.T) {
+	s, err := NewSupervisor(SupervisorConfig{Instance: "fixture", Adapters: []Adapter{&dispatchAdapter{label: "unknown"}}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	p := &codexProcess{executable: path, threadID: "fixture-thread"}
-	effect, err := p.Inbox(context.Background(), ControlRequest{CorrelationID: "fixture", Text: "fixture-text"})
-	if err != nil || effect.Primitive != "codex queue --thread" || effect.CorrelationID != "fixture" || effect.VendorMessageID != "" {
-		t.Fatal("queue handoff not proven")
+	_, err = s.Start(context.Background(), StartRequest{Adapter: AdapterCodex, ProjectID: 42, Identity: "codex:fixture", Workspace: t.TempDir(), Prompt: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &stuckConsumers{release: make(chan struct{})}
+	if err = s.AttachConsumers(c); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err = s.Close(ctx); err == nil {
+		t.Fatal("incomplete drain reported success")
+	}
+	if s.Status().Sessions[0].State != StateStopped {
+		t.Fatal("caller deadline stranded owned child")
+	}
+	close(c.release)
+	if err = s.Close(context.Background()); err != nil {
+		t.Fatal("cleanup retry did not finish", err)
+	}
+}
+func TestCodexInboxUsesOwnedIdleAppServerTurn(t *testing.T) {
+	adapter := NewCodexAdapter(os.Args[0], "test")
+	adapter.command = func(string, ...string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+		cmd.Env = append(os.Environ(), codexHelperEnvironment+"=persistent")
+		return cmd
+	}
+	process, err := adapter.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "secret-not-persisted", KeepAlive: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer process.Stop(context.Background(), ControlRequest{CorrelationID: "cleanup"})
+	p := process.(*codexProcess)
+	deadline := time.Now().Add(time.Second)
+	for !p.InboxReady() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !p.InboxReady() {
+		t.Fatal("first turn did not become idle")
+	}
+	effect, err := p.Inbox(context.Background(), ControlRequest{CorrelationID: "fixture", Text: "fixture-next-input"})
+	if err != nil || effect.Primitive != "codex app-server turn/start" || effect.VendorMessageID != "turn-next" {
+		t.Fatal("owned same-thread next-turn handoff missing", err)
+	}
+	if p.InboxReady() {
+		t.Fatal("active next turn was reported idle")
+	}
+	if _, err = p.Inbox(context.Background(), ControlRequest{CorrelationID: "busy", Text: "must not deliver"}); err == nil {
+		t.Fatal("busy thread accepted a second simple input")
 	}
 }

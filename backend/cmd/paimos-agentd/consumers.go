@@ -22,13 +22,14 @@ import (
 )
 
 type nativeConsumers struct {
-	reporter   *cliReporter
-	controller *agentd.Supervisor
-	supervisor *runtimeconsumer.Supervisor
-	mu         sync.Mutex
-	evidence   []runtimeconsumer.Evidence
-	bindings   map[string]agentd.Session
-	targets    map[string]string
+	reporter    *cliReporter
+	controller  *agentd.Supervisor
+	supervisor  *runtimeconsumer.Supervisor
+	mu          sync.Mutex
+	reconcileMu sync.Mutex
+	evidence    []runtimeconsumer.Evidence
+	bindings    map[string]agentd.Session
+	targets     map[string]string
 }
 
 func newNativeConsumers(root, instance string, r *cliReporter) (*nativeConsumers, error) {
@@ -57,6 +58,8 @@ func (c *nativeConsumers) Run(ctx context.Context) {
 	}
 }
 func (c *nativeConsumers) reconcile(ctx context.Context) {
+	c.reconcileMu.Lock()
+	defer c.reconcileMu.Unlock()
 	status := c.controller.Status()
 	var bindings []runtimeconsumer.Binding
 	var evidence []runtimeconsumer.Evidence
@@ -245,6 +248,9 @@ func (c *nativeConsumers) Prepare(_ context.Context, b runtimeconsumer.Binding, 
 	if !c.controller.SupportsInbox(session.ID) || session.Adapter != "codex" && session.Adapter != "claude" {
 		return runtimeconsumer.ErrUnsupported
 	}
+	if session.Adapter == "codex" && (m.DeliveryWork.RequestedLevel == "simple" || m.DeliveryWork.MaximumLevel == "simple" || !session.Steerable) && !c.controller.InboxReady(session.ID) {
+		return runtimeconsumer.ErrDeferred
+	}
 	body := nativeMessageText(m)
 	if body == "" || len(body) > 64<<10 {
 		return runtimeconsumer.ErrUnsupported
@@ -269,12 +275,15 @@ func (c *nativeConsumers) Execute(ctx context.Context, b runtimeconsumer.Binding
 	request := agentd.ControlRequest{Instance: b.Instance, ProjectID: b.Project, Identity: b.Address, CorrelationID: w.ID, Text: nativeMessageText(message)}
 	outcome := runtimeconsumer.Outcome{Level: "simple"}
 	var receipt agentd.Receipt
-	if message.DeliveryWork.RequestedLevel == "steer" && message.DeliveryWork.MaximumLevel == "steer" && session.Steerable {
+	if message.DeliveryWork.RequestedLevel == "steer" && message.DeliveryWork.MaximumLevel == "steer" && session.Steerable && !(session.Adapter == "codex" && session.LastEventKind == agentd.EventTurnCompleted && c.controller.InboxReady(session.ID)) {
 		receipt, err = c.controller.Steer(ctx, b.Session, request)
 		outcome.Level = "steer"
 	} else {
 		if message.DeliveryWork.RequestedLevel == "steer" {
 			outcome.Reason = "not_steerable"
+			if session.Adapter == "codex" && c.controller.InboxReady(session.ID) {
+				outcome.Reason = "idle"
+			}
 			if message.DeliveryWork.MaximumLevel == "simple" {
 				outcome.Reason = "policy_capped"
 			}
@@ -303,3 +312,25 @@ func (c *nativeConsumers) Complete(ctx context.Context, b runtimeconsumer.Bindin
 
 var _ runtimeconsumer.Driver = (*nativeConsumers)(nil)
 var _ agentd.RuntimeConsumers = (*nativeConsumers)(nil)
+
+func (c *nativeConsumers) Repair(ctx context.Context) error {
+	c.reconcileMu.Lock()
+	defer c.reconcileMu.Unlock()
+	if len(c.bindings) == 0 {
+		return runtimeconsumer.ErrAuthority
+	}
+	for key, session := range c.bindings {
+		status := c.controller.Status()
+		b := runtimeconsumer.Binding{Instance: status.Instance, Machine: c.reporter.host, Generation: status.DaemonID, Session: session.ID, Address: session.Identity, Project: session.ProjectID, Kind: "primary", Revision: session.Reporter.PublicSessionID}
+		if b.Key() != key {
+			return runtimeconsumer.ErrOwnership
+		}
+		if err := c.supervisor.Repair(ctx, b); err != nil {
+			return err
+		}
+		if err := c.supervisor.Step(ctx, b); err != nil {
+			return err
+		}
+	}
+	return nil
+}

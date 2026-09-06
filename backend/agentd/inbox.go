@@ -65,3 +65,16 @@ func (s *Supervisor) SupportsInbox(id string) bool {
 	_, supported := entry.process.(InboxProcess)
 	return supported && entry.session.State == StateRunning && entry.capabilities[CapabilityInbox]
 }
+
+func (s *Supervisor) InboxReady(id string) bool {
+	entry, err := s.get(id)
+	if err != nil {
+		return false
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if ready, ok := entry.process.(interface{ InboxReady() bool }); ok {
+		return ready.InboxReady()
+	}
+	return entry.session.State == StateRunning
+}

@@ -277,6 +277,20 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 					Text string `json:"text"`
 				} `json:"input"`
 			}
+			if mode == "persistent" {
+				if json.Unmarshal(request.Params, &params) != nil || params.ThreadID != "thread-owned" || len(params.Input) != 1 {
+					os.Exit(2)
+				}
+				if params.Input[0].Text == "secret-not-persisted" {
+					respond(map[string]any{"turn": map[string]any{"id": "turn-owned", "status": "inProgress"}})
+					_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-owned", "turn": map[string]any{"id": "turn-owned", "status": "completed"}}})
+				} else if params.Input[0].Text == "fixture-next-input" {
+					respond(map[string]any{"turn": map[string]any{"id": "turn-next", "status": "inProgress"}})
+				} else {
+					os.Exit(2)
+				}
+				continue
+			}
 			if json.Unmarshal(request.Params, &params) != nil || params.ThreadID != "thread-owned" || len(params.Input) != 1 || params.Input[0].Text != "secret-not-persisted" {
 				fmt.Fprintln(os.Stderr, "invalid turn/start")
 				os.Exit(2)

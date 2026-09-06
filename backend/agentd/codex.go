@@ -98,8 +98,7 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 		_ = cmd.Wait()
 		return nil, err
 	}
-	process := newCodexProcess(cmd, stdin, stdout, observe)
-	process.executable = path
+	process := newCodexProcess(cmd, stdin, stdout, observe, request)
 	defer func() {
 		if returnErr != nil {
 			_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "agentd-codex-start-failed"})
@@ -179,7 +178,8 @@ type codexRPCMessage struct {
 type codexTurnResult struct{ failed bool }
 
 type codexProcess struct {
-	executable string
+	persistent    bool
+	model, effort string
 	*ownedProcess
 	stdin   io.WriteCloser
 	observe func(AdapterEvent)
@@ -200,9 +200,15 @@ type codexProcess struct {
 	streamDoneOnce      sync.Once
 }
 
-func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent)) *codexProcess {
+func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, observe func(AdapterEvent), requests ...StartRequest) *codexProcess {
 	p := &codexProcess{ownedProcess: newOwnedProcess(cmd), stdin: stdin, observe: observe,
 		pending: map[string]chan codexRPCMessage{}, turnDone: make(chan codexTurnResult, 1), streamDone: make(chan struct{})}
+	if len(requests) > 0 {
+		p.persistent = requests[0].KeepAlive
+		if requests[0].ResolvedProfile != nil {
+			p.model, p.effort = requests[0].ResolvedProfile.Model, requests[0].ResolvedProfile.Effort
+		}
+	}
 	go p.readLoop(stdout)
 	return p
 }
@@ -298,6 +304,13 @@ func (p *codexProcess) recordCompletion(turnID, status string) {
 }
 
 func (p *codexProcess) completeTurn(status string) {
+	if p.persistent {
+		p.stateMu.Lock()
+		p.turnID = ""
+		p.earlyCompleted, p.earlyCompletedState = "", ""
+		p.stateMu.Unlock()
+		return
+	}
 	p.turnDoneOnce.Do(func() {
 		p.turnDone <- codexTurnResult{failed: status != "completed" && status != "interrupted"}
 	})
@@ -450,6 +463,13 @@ func (p *codexProcess) Stop(ctx context.Context, request ControlRequest) (Contro
 }
 
 func (p *codexProcess) Wait() error {
+	if p.persistent {
+		select {
+		case <-p.done:
+		case <-p.streamDone:
+		}
+		return p.ownedProcess.Wait()
+	}
 	select {
 	case result := <-p.turnDone:
 		p.closeInput()
@@ -492,32 +512,42 @@ func (p *codexProcess) Wait() error {
 	}
 }
 
-// Inbox uses the documented non-interrupting queue primitive for the exact
-// thread created by this owned process. No vendor output is retained.
+// Inbox starts a new turn only after the owned thread is idle. It uses the same
+// initialized stdio connection, account, thread and immutable execution profile.
+// Busy delivery stays in the canonical server FIFO; there is no local queue.
 func (p *codexProcess) Inbox(ctx context.Context, request ControlRequest) (ControlEffect, error) {
 	p.stateMu.Lock()
-	thread := p.threadID
+	thread, turn := p.threadID, p.turnID
 	p.stateMu.Unlock()
-	if thread == "" || p.executable == "" {
+	if !p.persistent || thread == "" || turn != "" {
 		return ControlEffect{}, ErrCapabilityMissing
 	}
-	command := exec.CommandContext(ctx, p.executable, "queue", "--thread", thread, "--message", request.Text)
-	command.Stdout, command.Stderr = io.Discard, io.Discard
-	configured := ownedprocess.Configure(command)
-	command.Cancel = func() error { return ownedprocess.Signal(command, true) }
-	command.WaitDelay = 2 * time.Second
-	if err := command.Start(); err != nil {
-		return ControlEffect{}, errors.New("Codex inbox handoff unavailable")
+	params := map[string]any{"threadId": thread, "input": []map[string]string{{"type": "text", "text": request.Text}}}
+	if p.model != "" {
+		params["model"] = p.model
+		params["effort"] = p.effort
 	}
-	if err := ownedprocess.Verify(command, configured); err != nil {
-		_ = ownedprocess.Signal(command, true)
-		_ = command.Wait()
-		return ControlEffect{}, errors.New("Codex inbox process ownership unavailable")
+	var response struct {
+		Turn struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"turn"`
 	}
-	// Cancellation kills the owned command group as well as its wrapper.
-	err := command.Wait()
-	if err != nil {
-		return ControlEffect{}, errors.New("Codex inbox handoff unconfirmed")
+	operationCtx, cancel := codexControlContext(ctx)
+	defer cancel()
+	if err := p.call(operationCtx, "turn/start", params, &response); err != nil {
+		return ControlEffect{}, err
 	}
-	return ControlEffect{Primitive: "codex queue --thread", CorrelationID: request.CorrelationID}, nil
+	if !validOpaqueID(response.Turn.ID) || response.Turn.Status != "inProgress" {
+		return ControlEffect{}, ErrCapabilityMissing
+	}
+	p.setTurn(response.Turn.ID)
+	p.observeEvent(AdapterEvent{Kind: EventTurnStarted, CorrelationID: request.CorrelationID})
+	return ControlEffect{Primitive: "codex app-server turn/start", CorrelationID: request.CorrelationID, VendorMessageID: response.Turn.ID}, nil
+}
+
+func (p *codexProcess) InboxReady() bool {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return p.persistent && p.threadID != "" && p.turnID == ""
 }
