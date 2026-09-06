@@ -179,6 +179,12 @@ run_package() {
   }
 
   case "$package" in
+    .)
+      # The root routing and seed contracts rebuild six complete databases.
+      # Retain every discovered test while bounding cumulative migration cost
+      # on the existing affected runners or sequential all-lane processes.
+      run_race_shards . '^(Test|Fuzz)' 4
+      ;;
     ./db)
       run_race ./db '^(TestApplyMigrationAtomic.*|TestSchemaAgentRunTelemetryTerminalWriteRace)$'
       # Race instrumentation uses the production pool in isolated processes.
@@ -251,7 +257,7 @@ run_selected_package() {
       ;;
     affected)
       if [[ "$import_path" != "$MODULE/db" && "$import_path" != "$MODULE/handlers" && "$import_path" != "$MODULE/managedharness" ]]; then
-        if [[ "$import_path" == "$MODULE/lifecycleintents" ]] || (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
+        if [[ "$import_path" == "$MODULE" || "$import_path" == "$MODULE/lifecycleintents" ]] || (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
           run_package "$import_path"
         fi
         affected_index=$((affected_index + 1))
@@ -286,7 +292,8 @@ for import_path in "$@"; do
       "$MODULE/lifecycleintents" \
       "$MODULE/lifecycleclient" \
       "$MODULE/runtimeconsumer" \
-      "$MODULE/runtimehealth"
+      "$MODULE/runtimehealth" \
+      "$MODULE"
     do
       run_selected_package "$affected"
     done

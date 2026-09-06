@@ -497,7 +497,47 @@ if GO_COMMAND="$FIXTURES/unsafe-go-list.sh" "$RACE_RUNNER" --dry-run --lane=affe
   --shard=0/4 github.com/inspr-at/paimos/backend/lifecycleintents >/dev/null 2>&1; then
   fail 'lifecycle race sharder accepted an unsafe discovered test name'
 fi
+# The root package has the same cumulative migration budget issue. Both root
+# and lifecycle must fan out when selected together, without duplicating peers.
+root_race_plan=
+for shard in 0 1 2 3; do
+  plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+    github.com/inspr-at/paimos/backend \
+    github.com/inspr-at/paimos/backend/agentd \
+    github.com/inspr-at/paimos/backend/lifecycleintents)
+  [[ "$(grep -Fc 'go test -race -count=1 -timeout=8m . -run ' <<<"$plan")" -eq 1 &&
+    "$(grep -Fc 'go test -race -count=1 -timeout=8m ./lifecycleintents -run ' <<<"$plan")" -eq 1 ]] ||
+    fail "root and lifecycle race shard $shard did not retain one bounded invocation each"
+  root_race_plan+="$plan"$'\n'
+  absent=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
+    github.com/inspr-at/paimos/backend/agentd)
+  [[ "$absent" != *' . -run '* ]] || fail 'unselected root package leaked into the affected race plan'
+done
+root_only_plan=$(grep -F ' . -run ' <<<"$root_race_plan")
+assert_plan_covers_discovery_once 'affected root race' "$root_only_plan" . '^(Test|Fuzz)'
+[[ "$(grep -Fxc 'go test -race -count=1 -timeout=8m ./agentd' <<<"$root_race_plan")" -eq 1 ]] ||
+  fail 'root sharding duplicated or omitted another affected package'
+root_all_plan=$("$RACE_RUNNER" --dry-run --lane=all github.com/inspr-at/paimos/backend)
+[[ "$(grep -Fc 'go test -race -count=1 -timeout=8m . -run ' <<<"$root_all_plan")" -eq 4 ]] ||
+  fail 'all-lane root race did not retain all four bounded invocations'
+assert_plan_covers_discovery_once 'all root race' "$root_all_plan" . '^(Test|Fuzz)'
+root_full_plan=$(BACKEND_RACE_PACKAGE_TIMEOUT=15m \
+  "$RACE_RUNNER" --dry-run --lane=all github.com/inspr-at/paimos/backend)
+[[ "$(grep -Fc 'go test -race -count=1 -timeout=15m . -run ' <<<"$root_full_plan")" -eq 4 ]] ||
+  fail 'all-lane root race lost its explicit exhaustive package timeout'
+root_sequential_state="$TMP_ROOT/root-sequential-race"
+mkdir -p "$root_sequential_state"
+if ! FAKE_GO_STATE="$root_sequential_state" GO_COMMAND="$FIXTURES/sequential-go.sh" \
+  "$RACE_RUNNER" --lane=all github.com/inspr-at/paimos/backend >/dev/null 2>&1; then
+  fail 'all-lane root race did not execute sequentially'
+fi
+[[ ! -e "$root_sequential_state/overlap" && "$(wc -l < "$root_sequential_state/runs" | tr -d ' ')" -eq 4 ]] ||
+  fail 'all-lane root race overlapped or omitted a shard'
 broad_race_plan=$("$RACE_RUNNER" --dry-run './...')
+assert_plan_covers_discovery_once 'broad affected root race' \
+  "$(grep -F ' . -run ' <<<"$affected_broad_plan")" . '^(Test|Fuzz)'
+assert_plan_covers_discovery_once 'broad all root race' \
+  "$(grep -F ' . -run ' <<<"$broad_race_plan")" . '^(Test|Fuzz)'
 for package in ./lifecycleclient ./runtimeconsumer ./runtimehealth; do
   invocation="go test -race -count=1 -timeout=8m $package"
   [[ "$(grep -Fxc "$invocation" <<<"$affected_broad_plan")" -eq 1 &&
