@@ -25,6 +25,12 @@ import (
 
 const codexHelperEnvironment = "PAIMOS_CODEX_APP_SERVER_HELPER"
 
+// A protocol fixture is not a CLI auth probe. Invoking a Go test binary with
+// `login status` would recursively run its whole suite instead of probing auth.
+type codexProtocolTestAdapter struct{ *CodexAdapter }
+
+func (codexProtocolTestAdapter) AccountLabel(context.Context) string { return "unknown" }
+
 func TestCodexProcessOwnsExactAppServerSessionForControl(t *testing.T) {
 	adapter := NewCodexAdapter(os.Args[0], "test")
 	var argv []string
@@ -172,7 +178,7 @@ func TestCodexPrematureStreamEOFWaitsForExactChildReap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := process.Wait(); err == nil || !strings.Contains(err.Error(), "event stream ended") {
+	if err := process.Wait(); err == nil || (err.Error() != "Codex app-server event stream ended before turn completion" && err.Error() != "Codex app-server exited before turn completion") {
 		t.Fatalf("wait error=%v", err)
 	}
 	if child.ProcessState == nil || child.ProcessState.Pid() != child.Process.Pid {
@@ -455,7 +461,7 @@ func TestCodexFailureReachesSupervisorTerminalReporterSnapshot(t *testing.T) {
 		return cmd
 	}
 	reporter := &fakeReporter{reports: make(chan Status, 64)}
-	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "codex-failure", StateRoot: t.TempDir(), Adapters: []Adapter{adapter}, Reporter: reporter, HeartbeatInterval: 5 * time.Millisecond})
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "codex-failure", StateRoot: t.TempDir(), Adapters: []Adapter{codexProtocolTestAdapter{adapter}}, Reporter: reporter, HeartbeatInterval: 5 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
