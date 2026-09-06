@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/backend/agentd"
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/inspr-at/paimos/backend/models"
+	"github.com/inspr-at/paimos/backend/runtimeconsumer"
 )
 
 type nativeFixtureProcess struct {
@@ -169,5 +170,20 @@ func TestNativeConsumersUsePrivateWorkerLeaseAndExactCanonicalFIFO(t *testing.T)
 	}
 	if !found {
 		t.Fatal("legacy receiver conflict was hidden")
+	}
+}
+
+func TestNativeConsumerRepairRefusesUnboundProject(t *testing.T) {
+	// Other projects' retained bindings are not authority to repair this project.
+	// There is intentionally no driver: a refusal must not verify, poll or clear
+	// another project's stream circuit.
+	consumers := &nativeConsumers{bindings: map[string]agentd.Session{
+		"other-project": {ProjectID: 42},
+	}}
+	if err := consumers.RepairProject(context.Background(), 43); !errors.Is(err, runtimeconsumer.ErrAuthority) {
+		t.Fatalf("repair without an owned binding for the requested project: %v", err)
+	}
+	if len(consumers.bindings) != 1 || consumers.bindings["other-project"].ProjectID != 42 {
+		t.Fatal("refused repair changed another project's binding")
 	}
 }

@@ -131,10 +131,10 @@ func (c *nativeConsumers) command(ctx context.Context, b runtimeconsumer.Binding
 	if err != nil {
 		return nil, runtimeconsumer.ErrAuthority
 	}
-	args := []string{"--json", "harness", operation, "--project", strconv.FormatInt(b.Project, 10), "--session", session.Reporter.PublicSessionID, "--agent", agent}
+	args := []string{"--json", "harness", operation, "--project", strconv.FormatInt(b.Project, 10), "--session", session.Reporter.PublicSessionID}
 	var stdin io.Reader
 	if operation != "status" {
-		args = append(args, "--worker-lease-file", "-")
+		args = append(args, "--agent", agent, "--worker-lease-file", "-")
 		stdin = strings.NewReader(lease)
 	}
 	args = append(args, extra...)
@@ -328,10 +328,12 @@ func (c *nativeConsumers) RepairProject(ctx context.Context, project int64) erro
 	if len(c.bindings) == 0 {
 		return runtimeconsumer.ErrAuthority
 	}
+	matched := false
 	for key, session := range c.bindings {
 		if project > 0 && session.ProjectID != project {
 			continue
 		}
+		matched = true
 		status := c.controller.Status()
 		b := runtimeconsumer.Binding{Instance: status.Instance, Machine: c.reporter.host, Generation: status.DaemonID, Session: session.ID, Address: session.Identity, Project: session.ProjectID, Kind: "primary", Revision: session.Reporter.PublicSessionID}
 		if b.Key() != key {
@@ -343,6 +345,9 @@ func (c *nativeConsumers) RepairProject(ctx context.Context, project int64) erro
 		if err := c.supervisor.Step(ctx, b); err != nil {
 			return err
 		}
+	}
+	if !matched {
+		return runtimeconsumer.ErrAuthority
 	}
 	return nil
 }
