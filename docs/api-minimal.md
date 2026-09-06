@@ -1070,7 +1070,9 @@ Session registration still accepts only `session_id` and `generation`.
 
 `GET /runtime-health` is a separate content-free browser read for current
 internal project viewers, using the canonical Agent Mode permission predicate.
-It reauthorizes the exact browser session and every reporter owner, returns the
+It requires a current, non-impersonated human session. API keys, including
+owner/admin and reporter keys, receive `403 lifecycle_unavailable`. The endpoint
+reauthorizes the exact browser session and every reporter owner, returns the
 latest runtime per machine with a maximum of 32 records, and exposes no totals.
 Each record has four typed layers (`reporter`, `primary`, `fallback`, `attention`).
 Missing reports have `state/status: unknown` and `reason: not_reported`; evidence
