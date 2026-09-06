@@ -577,7 +577,16 @@ func (p *codexProcess) Wait() error {
 		case <-p.done:
 		case <-p.streamDone:
 		}
-		return p.ownedProcess.Wait()
+		err := p.ownedProcess.Wait()
+		p.stateMu.Lock()
+		failed := p.terminalFailure
+		p.stateMu.Unlock()
+		if failed {
+			// Closing stdin can let the child exit zero before the owned signal.
+			// Physical reap success must not erase the logical turn failure.
+			return errors.New("Codex terminal turn failed")
+		}
+		return err
 	}
 	select {
 	case result := <-p.turnDone:
