@@ -36,6 +36,17 @@ calendar form `yy.mm.dd[.hh.mm]`.
   reauthorization and explicit fresh/stale/offline/unknown evidence. Optional
   operator workspace labels and server-proved session-to-workspace handles make
   choices meaningful without exposing paths.
+- Applied the supplied Paimos logo and hero artwork with the pearl, aqua, teal
+  and gold visual system across Habitat. Bundled originals use stable asset
+  routes outside user-upload storage.
+- Added authenticated human Message and Steer actions for one exact selected
+  managed generation. The server rechecks the user, project, runtime reporter,
+  generation, revision and target in one transaction, records canonical
+  `human` attribution, and returns an immutable idempotent delivery receipt.
+- Added an explicit reviewed recovery action for a never-claimed pending
+  delivery whose managed target generation has stopped. Recovery binds one
+  proved fresh replacement while retaining the canonical message, original
+  target snapshot, product session and an immutable recovery audit trail.
 
 ### Fixed — FIFO recovery and MCP schema compatibility (PAI-914)
 
@@ -44,6 +55,16 @@ calendar form `yy.mm.dd[.hh.mm]`.
   closed, and blocked deliveries report a bounded `fifo_blocked` reason.
 - MCP tool schemas emit `required: []` when no fields are required, preserving
   compatibility with clients that reject `required: null`.
+
+### Fixed — Installed runtime and frontend polish (PAI-917)
+
+- Codex account discovery now accepts the installed CLI's bounded login status
+  stream while rejecting mixed or multiline diagnostics. Tool activity and
+  completion bind to the exact app-server thread and turn; terminal errors
+  fail closed and remain failed even when the child process exits cleanly.
+- Changelog release navigation now aligns consistently, wraps on narrow
+  screens, and resets the selected release to its beginning. Habitat actions
+  restore keyboard focus to a meaningful control after cancel or completion.
 
 ### Changed — Verification and rollout evidence (PAI-928)
 
