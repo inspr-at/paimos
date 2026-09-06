@@ -642,12 +642,16 @@ test('actual browser controls one fresh owned child and closes every generation'
       if (!busyObserved) await page.waitForTimeout(250)
     }
     receipt.steps.push({ step: 'steer', ...(await sendMessage(page, childID, 'steer', steer)) })
+    const beforeInterrupt = await workerRow(context.request, childID)
+    const busyAtInterrupt =
+      !!beforeInterrupt?.liveness && record(beforeInterrupt.liveness).state === 'busy'
     const interrupt = await controlSelected(page, childID, 'interrupt')
     receipt.steps.push({
       step: 'interrupt',
       ...interrupt,
-      busy_observed_before_request: busyObserved,
-      claim: busyObserved
+      busy_observed_before_steer: busyObserved,
+      busy_observed_immediately_before_request: busyAtInterrupt,
+      claim: busyAtInterrupt
         ? 'active-turn interruption'
         : 'control acceptance only; no active turn observed',
     })
