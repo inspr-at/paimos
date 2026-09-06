@@ -1,39 +1,56 @@
 .habitat-shell {
   container: habitat / inline-size;
-  --h-bg: #f6f5ef;
-  --h-surface: #fffefa;
+  --h-bg: var(--paimos-pearl, #f7f6f2);
+  --h-surface: var(--paimos-ivory, #fffefa);
   --h-raised: #fff;
-  --h-text: #163d32;
-  --h-muted: #596f61;
-  --h-line: #dce3d6;
-  --h-mint: #147752;
-  --h-fill: #d9f5e6;
-  --h-coral: #994b2f;
-  --h-alert: #fff1e9;
-  --h-shadow: 0 18px 42px #253b2320;
+  --h-text: var(--paimos-ink, #203c3d);
+  --h-muted: #596e70;
+  --h-line: #d8e2df;
+  --h-mint: var(--paimos-teal, #0e6f6c);
+  --h-fill: #e0f3f0;
+  --h-coral: #94513c;
+  --h-alert: #fff2e8;
+  --h-rail: #eef2ef;
+  --h-gold: var(--paimos-gold, #d69b31);
+  --h-gold-line: #d69b3152;
+  --h-glow: #c7efec65;
+  --h-sheen: #ffffffbd;
+  --h-action: var(--paimos-teal, #0e6f6c);
+  --h-action-text: #fffefa;
+  --h-shadow: 0 16px 48px #204e4d15;
+  --h-card-shadow: 0 1px 1px #fff inset, 0 6px 20px #204e4d05;
   min-height: 100dvh;
   color: var(--h-text);
-  background: var(--h-bg);
+  background: radial-gradient(ellipse at 85% 0, var(--h-glow), transparent 42%), var(--h-bg);
   font:
-    14px/1.55 -apple-system,
+    14px/1.55 'DM Sans',
+    -apple-system,
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
 }
 .habitat-shell[data-theme='night'] {
-  --h-bg: #0d1813;
-  --h-surface: #14241c;
-  --h-raised: #192d22;
-  --h-text: #efeede;
-  --h-muted: #a5b7a7;
-  --h-line: #2c4332;
-  --h-mint: #79e2b7;
-  --h-fill: #173e2d;
-  --h-coral: #ff9681;
-  --h-alert: #31221b;
-  --h-shadow: 0 18px 42px #0003;
+  --h-bg: #102327;
+  --h-surface: #183034;
+  --h-raised: #203c40;
+  --h-text: #edf4f0;
+  --h-muted: #acc3c2;
+  --h-line: #365356;
+  --h-mint: #a4e5df;
+  --h-fill: #214749;
+  --h-coral: #efb39b;
+  --h-alert: #3b2d29;
+  --h-rail: #122b2e;
+  --h-gold-line: #d69b316b;
+  --h-glow: #397e7a24;
+  --h-sheen: #bdeae50d;
+  --h-action: #b4e7df;
+  --h-action-text: #123b3c;
+  --h-shadow: 0 18px 48px #06161959;
+  --h-card-shadow: 0 1px 0 #bdeae514 inset, 0 8px 28px #06161914;
   color-scheme: dark;
 }
+
 .habitat-shell * {
   box-sizing: border-box;
 }
@@ -75,14 +92,16 @@
   outline-offset: 3px;
 }
 .habitat-shell .habitat-primary {
-  color: var(--h-bg);
-  background: var(--h-text);
-  border-color: var(--h-text);
+  color: var(--h-action-text);
+  background: var(--h-action);
+  border-color: var(--h-action);
+  box-shadow: 0 2px 4px #0e6f6c14;
   font-weight: 700;
 }
 .habitat-shell .habitat-primary:hover:not(:disabled) {
-  color: var(--h-bg);
-  background: var(--h-mint);
+  color: var(--h-action-text);
+  background: color-mix(in srgb, var(--h-action), var(--h-text) 14%);
+  border-color: var(--h-action);
 }
 .habitat-shell .habitat-danger {
   color: var(--h-coral);
@@ -124,7 +143,7 @@
   object-fit: contain;
 }
 [data-theme='night'] .habitat-brand img {
-  background: #f4f2e8;
+  background: var(--paimos-pearl, #f7f6f2);
   border-radius: 5px;
   padding: 3px;
 }
@@ -356,7 +375,15 @@
   box-shadow:
     0 0 0 5px var(--h-surface),
     0 0 0 6px var(--h-line);
-  background: radial-gradient(circle at 34% 28%, #d6fbea, #478c70 26%, #1c5344 52%, #10271f 77%);
+  background: radial-gradient(
+    circle at 32% 24%,
+    #fff 0,
+    #e7fbf7 10%,
+    #c0eeeb 26%,
+    #75bab7 57%,
+    #276c70 88%
+  );
+  border-color: #8cc7c4;
 }
 .habitat-root > .habitat-orb {
   width: 64px;
@@ -365,8 +392,8 @@
 }
 .habitat-orb[data-state='unknown'],
 .habitat-orb[data-state='dead'] {
-  filter: grayscale(1);
-  opacity: 0.65;
+  background: radial-gradient(circle at 32% 24%, #fffefa, #e7e8e2 32%, #a5b6b5 70%, #677f80);
+  border-color: var(--h-line);
 }
 .habitat-orb[data-recent='true'] {
   animation: habitat-presence 3s ease-in-out infinite;
@@ -398,10 +425,7 @@
   padding: 22px;
   border: 1px solid var(--h-line);
   border-radius: 22px;
-  background:
-    linear-gradient(var(--h-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--h-line) 1px, transparent 1px), var(--h-bg);
-  background-size: 48px 48px;
+  background: radial-gradient(ellipse at 50% 0, var(--h-glow), transparent 70%), var(--h-bg);
 }
 .habitat-project-tree {
   padding: 20px;
@@ -694,7 +718,7 @@
   overflow-wrap: anywhere;
 }
 
-/* Habitat Home: operational hierarchy, warm paper and restrained forest presence. */
+/* Habitat: pearl architecture, aqua glass and fine gold details. See DESIGN_REFERENCE.md. */
 .habitat-shell {
   display: block;
 }
@@ -710,23 +734,20 @@
   position: sticky;
   top: 0;
   height: 100dvh;
-  background: #eeefe6;
+  background: linear-gradient(150deg, var(--h-sheen), transparent 58%), var(--h-rail);
   border-right: 1px solid var(--h-line);
   padding: 28px 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 28px;
 }
-[data-theme='night'] .habitat-rail {
-  background: #101f18;
-}
 .habitat-rail .habitat-brand {
   padding: 0 8px;
   gap: 11px;
 }
 .habitat-rail .habitat-brand img {
-  width: 34px;
-  height: 32px;
+  width: 38px;
+  height: 38px;
 }
 .habitat-rail .habitat-brand strong {
   font-size: 13px;
@@ -758,8 +779,8 @@
   background: var(--h-fill);
   color: var(--h-text);
   font:
-    19px Georgia,
-    serif;
+    600 16px/1 'DM Sans',
+    sans-serif;
 }
 .habitat-workspace-identity strong {
   font-size: 12px;
@@ -792,10 +813,12 @@
   min-height: 44px;
 }
 .habitat-rail .habitat-nav a[aria-current='page'] {
-  background: var(--h-surface);
-  color: var(--h-text);
   font-weight: 650;
-  box-shadow: 0 2px 8px #213f2105;
+  box-shadow:
+    inset 2px 0 var(--h-gold),
+    var(--h-card-shadow);
+  background: linear-gradient(115deg, var(--h-sheen), var(--h-fill));
+  color: var(--h-mint);
 }
 .habitat-rail .habitat-nav a:hover {
   background: var(--h-surface);
@@ -936,7 +959,8 @@
 }
 .habitat-hero h1 {
   font:
-    550 34px/1.2 -apple-system,
+    550 34px/1.2 'DM Sans',
+    -apple-system,
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
@@ -1042,9 +1066,9 @@
   padding: 10px 14px;
 }
 .habitat-shell[data-theme='night'] .habitat-primary {
-  background: #b6e9c6;
-  color: #143321;
-  border-color: #b6e9c6;
+  background: var(--h-action);
+  color: var(--h-action-text);
+  border-color: var(--h-action);
 }
 .habitat-root {
   padding: 21px 25px;
@@ -1097,7 +1121,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   border-radius: 17px;
-  box-shadow: 0 20px 100px #09221630;
+  box-shadow: var(--h-shadow);
   padding: 21px;
 }
 .habitat-shell .habitat-inspector-close {
@@ -1117,7 +1141,7 @@
   position: fixed;
   inset: 0;
   z-index: 44;
-  background: #08190f70;
+  background: #08272b70;
   backdrop-filter: blur(2px);
 }
 .habitat-inspector h2 {
@@ -1178,10 +1202,9 @@
   border-radius: 16px;
   overflow: hidden;
   position: relative;
-  background: radial-gradient(ellipse at 90% 25%, #e1ebd550, transparent 60%), var(--h-surface);
-}
-[data-theme='night'] .habitat-welcome {
-  background: radial-gradient(ellipse at 90% 25%, #38543250, transparent 60%), var(--h-surface);
+  background: radial-gradient(ellipse at 90% 25%, var(--h-glow), transparent 65%), var(--h-surface);
+  box-shadow: var(--h-card-shadow);
+  border-top-color: var(--h-gold-line);
 }
 .habitat-welcome h2 {
   font-size: 28px;
@@ -1206,62 +1229,20 @@
   height: 194px;
   display: grid;
   place-items: center;
-  opacity: 0.78;
-}
-.habitat-orbit {
-  position: absolute;
-  width: 188px;
-  height: 188px;
-  border: 1px solid var(--h-line);
-  border-radius: 50%;
-}
-.habitat-orbit.outer {
-  width: 255px;
-  height: 255px;
-  opacity: 0.5;
-}
-.habitat-orbit.inner {
-  width: 121px;
-  height: 121px;
-  border-style: dashed;
-}
-.habitat-decorative-orb {
-  width: 73px;
-  height: 73px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 32% 24%, #edf3df, #9ebc90 21%, #547b48 48%, #2b4a31 75%);
+  pointer-events: none;
+  overflow: hidden;
+  border: 1px solid var(--h-gold-line);
+  border-radius: 50% 50% 18px 18px;
+  background: var(--paimos-pearl, #f7f6f2);
   box-shadow:
-    0 0 0 8px var(--h-surface),
-    0 0 0 9px var(--h-line),
-    0 16px 38px #1b392413;
+    0 14px 28px #204e4d10,
+    0 0 0 7px var(--h-surface);
 }
-.habitat-satellite {
-  position: absolute;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--h-line);
-  border-radius: 50%;
-  width: 32px;
-  height: 32px;
-  background: var(--h-surface);
-  font-size: 14px;
-  color: var(--h-muted);
-}
-.habitat-satellite.one {
-  left: 41px;
-  top: 11px;
-}
-.habitat-satellite.two {
-  left: 86px;
-  bottom: 3px;
-  width: 26px;
-  height: 26px;
-}
-.habitat-satellite.three {
-  right: 16px;
-  top: 86px;
-  width: 36px;
-  height: 36px;
+.habitat-welcome-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 52%;
 }
 .habitat-home-columns {
   display: grid;
@@ -1295,10 +1276,7 @@
   border: 0;
 }
 .habitat-home-request:first-child {
-  background: radial-gradient(ellipse at 100% 0, #e1ebd550, transparent 70%);
-}
-[data-theme='night'] .habitat-home-request:first-child {
-  background: radial-gradient(ellipse at 100% 0, #314d2940, transparent 70%);
+  background: radial-gradient(ellipse at 100% 0, var(--h-glow), transparent 70%);
 }
 .habitat-home-request:not(:first-child) {
   padding-top: 19px;
@@ -1462,20 +1440,20 @@
   border-radius: 8px;
   font-size: 12px;
   font-weight: 550;
-  color: #496043;
-  background: #e5ebdb;
+  color: #155e5e;
+  background: #dcefea;
 }
 .habitat-project-initial[data-color='1'] {
-  background: #efe6d7;
-  color: #785a34;
+  background: #f2e7cf;
+  color: #785820;
 }
 .habitat-project-initial[data-color='2'] {
-  background: #e4e9ed;
-  color: #4c6377;
+  background: #e0edef;
+  color: #385e68;
 }
 .habitat-project-initial[data-color='3'] {
-  background: #eee6e9;
-  color: #77596a;
+  background: #ebe8de;
+  color: #65604c;
 }
 .habitat-project-status {
   font-size: 12px;
@@ -1969,12 +1947,7 @@
     font-size: 13px;
   }
   .habitat-welcome-art {
-    position: absolute;
-    top: -20px;
-    right: -110px;
-    width: 220px;
-    transform: scale(0.66);
-    opacity: 0.27;
+    display: none;
   }
   .habitat-home-secondary {
     grid-template-columns: minmax(0, 1fr);
@@ -2100,4 +2073,32 @@
     font-size: 12px;
     max-width: 75px;
   }
+}
+
+/* Solid reading surfaces with a fine architectural edge; no glass behind data. */
+.habitat-card,
+.habitat-project-tree,
+.habitat-context,
+.habitat-attention-list,
+.habitat-project-table-wrap,
+.habitat-home-roster {
+  box-shadow: var(--h-card-shadow);
+}
+.habitat-root {
+  border-top-color: var(--h-gold-line);
+}
+.habitat-project-tree {
+  border-top-color: var(--h-gold-line);
+}
+.habitat-worker-row {
+  box-shadow: 0 1px 0 var(--h-sheen) inset;
+}
+.habitat-setup-step:not(:last-child)::after {
+  background: var(--h-gold-line);
+}
+.habitat-setup-step > span {
+  border-color: var(--h-gold-line);
+}
+.habitat-form :is(input, select, textarea):focus {
+  border-color: var(--h-mint);
 }

@@ -1,0 +1,17 @@
+/* Canonical reference: docs/DESIGN_REFERENCE.md. Keep supplied logo fills intact. */
+:root {
+  --paimos-teal: #0e6f6c;
+  --paimos-gold: #d69b31;
+  --paimos-pearl: #f7f6f2;
+  --paimos-ivory: #fffefa;
+  --paimos-aqua: #c7efec;
+  --paimos-ink: #203c3d;
+}
+
+/* Pearl backing preserves the original two-color mark on any application shell. */
+:root img:is([src='/logo.svg'], [src='/brand/paimos-logo.svg'], [src='/app-icon.svg']) {
+  background: var(--paimos-pearl);
+  border-radius: 6px;
+  filter: none;
+  opacity: 1;
+}

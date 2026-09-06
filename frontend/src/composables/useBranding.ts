@@ -90,7 +90,7 @@ const defaults: BrandingConfig = {
   tagline: 'Project Management Online',
   website: 'https://paimos.com',
   logo: DEFAULT_BRAND_LOGO,
-  favicon: '/favicon.png',
+  favicon: '/favicon.svg',
   backgroundPattern: 'triangle',
   colors: {
     primary: '#52525b',

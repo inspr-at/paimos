@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import HabitatRuntimeHealth from './HabitatRuntimeHealth.vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { ArrowRight, ChevronRight, MessageSquare, ShieldCheck, Info, Plus } from 'lucide-vue-next'
+import { ArrowRight, ChevronRight, MessageSquare, ShieldCheck, Info } from 'lucide-vue-next'
 import type { OrchestrationSnapshotV1 } from '@/services/orchestrationTypes'
 import type { Delivery } from '@/services/agentMode'
 import type { Paimos6SessionZoomTotals } from '@/v6/sessionHomeZoom'
@@ -163,10 +163,7 @@ function projectStatus(id: number) {
         </div>
       </div>
       <div class="habitat-welcome-art" aria-hidden="true">
-        <span class="habitat-orbit outer"></span><span class="habitat-orbit"></span
-        ><span class="habitat-orbit inner"></span><span class="habitat-decorative-orb"></span
-        ><span class="habitat-satellite one"><Plus :size="14" /></span
-        ><span class="habitat-satellite two">◇</span><span class="habitat-satellite three">↗</span>
+        <img src="/brand/paimos-hero.png" alt="" />
       </div>
     </section>
 
