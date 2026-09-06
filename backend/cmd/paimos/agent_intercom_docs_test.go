@@ -264,8 +264,11 @@ func TestAgentIntercomRunbookPinsReleaseAndAdministratorBoundaries(t *testing.T)
 	doc := strings.Join(strings.Fields(string(raw)), " ")
 	for _, claim := range []string{
 		"base owned-session commands first appeared in 5.21.0",
-		"requires the upcoming calendar release 26.09.01 or later",
-		"Do not use this guide as written with 5.21.0 or 26.08.31",
+		"M168 database guards require 26.09.01 or later",
+		"they are not available as documented here in 5.21.0 or 26.08.31",
+		"new guided start, runtime-management, and Habitat lifecycle workflows in this development guide are unreleased PAI-917 work",
+		"They require matching candidate builds of the Paimos server, CLI, and daemon",
+		"installed 26.09.05 release does not include these workflows",
 		"authenticated Paimos administrator performs every message-target and delivery administration operation",
 		"`paimos message target set`, `paimos message target list`, `paimos message target requeue`, `paimos message deliveries`, and the per-delivery requeue endpoint",
 		"message target and delivery listings are still administrator-only",
