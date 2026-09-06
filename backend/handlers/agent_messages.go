@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -456,10 +457,14 @@ func inspectClosedTargetRecovery(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
 		return
 	}
+	closedSessionID, replacementSessionID, ok := closedTargetRecoveryQuery(w, r)
+	if !ok {
+		return
+	}
 	plan, err := agentmessage.NewService(db.DB).InspectClosedTargetRecovery(r.Context(), agentmessage.ClosedTargetRecoveryInput{
 		ProjectID: projectID, DeliveryID: strings.TrimSpace(chi.URLParam(r, "deliveryID")),
-		ExpectedClosedSessionID: strings.TrimSpace(r.URL.Query().Get("expected_closed_session_id")),
-		ReplacementSessionID:    strings.TrimSpace(r.URL.Query().Get("replacement_session_id")),
+		ExpectedClosedSessionID: closedSessionID,
+		ReplacementSessionID:    replacementSessionID,
 		Authority:               closedTargetRecoveryAuthority(r),
 	})
 	if err != nil {
@@ -475,11 +480,12 @@ func recoverClosedTargetDelivery(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid project id", http.StatusBadRequest)
 		return
 	}
+	if len(r.URL.Query()) != 0 {
+		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery request is invalid", http.StatusBadRequest)
+		return
+	}
 	var req closedTargetRecoveryRequest
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		messageProblem(w, r, "agent_message_request_invalid", err.Error(), http.StatusBadRequest)
+	if !decodeClosedTargetRecoveryRequest(w, r, &req) {
 		return
 	}
 	plan, err := agentmessage.NewService(db.DB).RecoverClosedTarget(r.Context(), agentmessage.ClosedTargetRecoveryInput{
@@ -493,6 +499,38 @@ func recoverClosedTargetDelivery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, plan)
+}
+
+func closedTargetRecoveryQuery(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+	query := r.URL.Query()
+	closed, closedOK := query["expected_closed_session_id"]
+	replacement, replacementOK := query["replacement_session_id"]
+	if len(query) != 2 || !closedOK || !replacementOK || len(closed) != 1 || len(replacement) != 1 ||
+		strings.TrimSpace(closed[0]) == "" || strings.TrimSpace(replacement[0]) == "" {
+		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery query is invalid", http.StatusBadRequest)
+		return "", "", false
+	}
+	return strings.TrimSpace(closed[0]), strings.TrimSpace(replacement[0]), true
+}
+
+func decodeClosedTargetRecoveryRequest(w http.ResponseWriter, r *http.Request, req *closedTargetRecoveryRequest) bool {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	if err != nil || len(raw) == 0 || rejectDuplicateJSONNames(raw) != nil {
+		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery request is invalid", http.StatusBadRequest)
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err = dec.Decode(req); err != nil {
+		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery request is invalid", http.StatusBadRequest)
+		return false
+	}
+	var trailing any
+	if err = dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		messageProblem(w, r, "agent_message_request_invalid", "closed-target recovery request is invalid", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 func closedTargetRecoveryAuthority(r *http.Request) agentmessage.RecoveryAuthority {

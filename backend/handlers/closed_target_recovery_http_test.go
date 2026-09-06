@@ -4,6 +4,8 @@
 package handlers_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,5 +51,60 @@ func TestClosedTargetRecoveryHTTPIsAdminGatedAndContentFree(t *testing.T) {
 	}
 	if got := admin.Header.Get("Cache-Control"); got != "private, no-store" {
 		t.Fatalf("Cache-Control=%q", got)
+	}
+}
+
+func TestClosedTargetRecoveryHTTPRejectsAmbiguousInputsWithFixedDetail(t *testing.T) {
+	ts := newTestServer(t)
+	created := ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Recovery strict", "key": "RSTRICT"})
+	assertStatus(t, created, http.StatusCreated)
+	var project struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(created.Body).Decode(&project); err != nil {
+		t.Fatal(err)
+	}
+	created.Body.Close()
+	base := fmt.Sprintf("/api/projects/%d/message-deliveries/delivery/closed-target-recovery", project.ID)
+	for _, path := range []string{
+		base + "?expected_closed_session_id=old&replacement_session_id=new&extra=value",
+		base + "?expected_closed_session_id=old&expected_closed_session_id=other&replacement_session_id=new",
+		base + "?expected_closed_session_id=old&replacement_session_id=new&expected_target_id=target",
+	} {
+		response := ts.get(t, path, ts.adminCookie)
+		assertStatus(t, response, http.StatusBadRequest)
+		var problem struct{ Code, Detail string }
+		if err := json.NewDecoder(response.Body).Decode(&problem); err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if problem.Code != "agent_message_request_invalid" || problem.Detail != "closed-target recovery query is invalid" {
+			t.Fatalf("unexpected query refusal: %+v", problem)
+		}
+	}
+	body := `{"expected_closed_session_id":"old","expected_target_id":"target","expected_target_version":1,"expected_consumer_fence":0,"replacement_session_id":"new"}`
+	for _, test := range []struct{ name, path, body string }{
+		{name: "trailing object", path: base, body: body + `{}`},
+		{name: "duplicate field", path: base, body: `{"expected_closed_session_id":"old","expected_closed_session_id":"other"}`},
+		{name: "mutation query", path: base + "?expected_target_id=target", body: body},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, ts.srv.URL+test.path, bytes.NewBufferString(test.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Cookie", ts.adminCookie)
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertStatus(t, response, http.StatusBadRequest)
+			var problem struct{ Code, Detail string }
+			if err := json.NewDecoder(response.Body).Decode(&problem); err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if problem.Code != "agent_message_request_invalid" || problem.Detail != "closed-target recovery request is invalid" {
+				t.Fatalf("unexpected body refusal: %+v", problem)
+			}
+		})
 	}
 }

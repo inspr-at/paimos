@@ -28,7 +28,7 @@ func newClosedTargetFixture(t *testing.T) closedTargetFixture {
 	t.Helper()
 	service, project := openBusTestDB(t)
 	allowBusSender(t, service, project, "codex:amy")
-	result, err := paimosdb.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES('recovery-admin','fixture','admin','active')`)
+	result, err := paimosdb.DB.Exec(`INSERT INTO users(username,password,role,role_key,status,is_super_admin) VALUES('recovery-admin','fixture','admin','super_admin','active',1)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,9 +82,15 @@ func insertRecoverySession(t *testing.T, project int64, targetID, phase, machine
 	if err := paimosdb.DB.QueryRow(`SELECT id FROM users WHERE username='recovery-admin'`).Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
+	keyResult, err := paimosdb.DB.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes)
+		VALUES(?,'recovery-runtime',?,'recovery','agent-controls:runner')`, userID, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiKeyID, _ := keyResult.LastInsertId()
 	if _, err := paimosdb.DB.Exec(`INSERT INTO lifecycle_runtimes(id,project_id,generation,machine_id,user_id,api_key_id,
-		lease_digest,registration_json,expires_at,created_at) VALUES(?,?,?,?,?,1,zeroblob(32),?,strftime('%Y-%m-%dT%H:%M:%fZ','now','+1 hour'),strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
-		runtimeID, project, runtimeGeneration, machine, userID, `{"account_label":"chatgpt"}`); err != nil {
+		lease_digest,registration_json,expires_at,created_at) VALUES(?,?,?,?,?,?,zeroblob(32),?,strftime('%Y-%m-%dT%H:%M:%fZ','now','+1 hour'),strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+		runtimeID, project, runtimeGeneration, machine, userID, apiKeyID, `{"account_label":"chatgpt"}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := paimosdb.DB.Exec(`INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,
@@ -311,6 +317,65 @@ func TestClosedTargetRecoveryFreshnessBoundary(t *testing.T) {
 	}
 }
 
+func TestClosedTargetRecoveryPreservesLaterUnavailableFallback(t *testing.T) {
+	f := newClosedTargetFixture(t)
+	fallback, err := f.service.RegisterTarget(context.Background(), RegisterTargetInput{
+		ProjectID: f.project, Address: "codex:amy", Adapter: AdapterCodex,
+		TargetKind: TargetKindCodexThread, TargetRef: uuid.NewString(), MaximumLevel: "simple", Role: "simple_fallback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE agent_message_deliveries SET fallback_target_id=? WHERE delivery_id=?`, fallback.ID, f.delivery.DeliveryID); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := f.service.InspectClosedTargetRecovery(context.Background(), f.input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.input.ExpectedTargetID, f.input.ExpectedTargetVersion = plan.EffectiveTarget.TargetID, plan.EffectiveTarget.TargetVersion
+	if _, err := f.service.RecoverClosedTarget(context.Background(), f.input); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := paimosdb.DB.Exec(`UPDATE agent_message_deliveries SET last_error_code='managed_target_unavailable' WHERE delivery_id=?`, f.delivery.DeliveryID); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err := f.service.ListDeliveryStatus(context.Background(), f.project)
+	if err != nil || len(statuses) != 1 || statuses[0].OriginalTargetID != f.oldTarget.ID || statuses[0].EffectiveTargetID != fallback.ID || statuses[0].RecoveryCount != 1 {
+		t.Fatalf("fallback selection after recovery=%+v err=%v", statuses, err)
+	}
+}
+
+func TestClosedTargetRecoveryRequiresCurrentReporterAuthority(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate string
+	}{
+		{name: "revoked key", mutate: `UPDATE api_keys SET disabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=(SELECT runtime.api_key_id FROM lifecycle_runtimes runtime JOIN lifecycle_runtime_sessions binding ON binding.runtime_id=runtime.id WHERE binding.session_id=?)`},
+		{name: "expired key", mutate: `UPDATE api_keys SET expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 second') WHERE id=(SELECT runtime.api_key_id FROM lifecycle_runtimes runtime JOIN lifecycle_runtime_sessions binding ON binding.runtime_id=runtime.id WHERE binding.session_id=?)`},
+		{name: "runner scope removed", mutate: `UPDATE api_keys SET scopes='issues:read' WHERE id=(SELECT runtime.api_key_id FROM lifecycle_runtimes runtime JOIN lifecycle_runtime_sessions binding ON binding.runtime_id=runtime.id WHERE binding.session_id=?)`},
+		{name: "reporter owner demoted", mutate: `UPDATE users SET role_key='admin',is_super_admin=0 WHERE id=(SELECT runtime.user_id FROM lifecycle_runtimes runtime JOIN lifecycle_runtime_sessions binding ON binding.runtime_id=runtime.id WHERE binding.session_id=?)`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newClosedTargetFixture(t)
+			if _, err := paimosdb.DB.Exec(test.mutate, f.newSession); err != nil {
+				t.Fatal(err)
+			}
+			var leaseStillFuture int
+			if err := paimosdb.DB.QueryRow(`SELECT expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM lifecycle_runtimes runtime JOIN lifecycle_runtime_sessions binding ON binding.runtime_id=runtime.id WHERE binding.session_id=?`, f.newSession).Scan(&leaseStillFuture); err != nil || leaseStillFuture != 1 {
+				t.Fatalf("runtime lease was not a future-dated fixture: future=%d err=%v", leaseStillFuture, err)
+			}
+			if _, err := f.service.InspectClosedTargetRecovery(context.Background(), f.input); err == nil {
+				t.Fatal("replacement with stale reporter authority was accepted")
+			}
+			var recoveries int
+			if err := paimosdb.DB.QueryRow(`SELECT COUNT(*) FROM agent_message_delivery_recoveries WHERE delivery_id=?`, f.delivery.DeliveryID).Scan(&recoveries); err != nil || recoveries != 0 {
+				t.Fatalf("unauthorized replacement changed recovery ledger: count=%d err=%v", recoveries, err)
+			}
+		})
+	}
+}
+
 func TestClosedTargetRecoveryHistoryIsBoundedAndSelectsDeterministicTail(t *testing.T) {
 	f := newClosedTargetFixture(t)
 	input := f.input
@@ -366,7 +431,7 @@ func TestClosedTargetRecoveryPreservesHumanProductSessionBinding(t *testing.T) {
 	if err := paimosdb.DB.QueryRow(`SELECT id FROM project_agents WHERE project_id=? AND name='amy'`, project).Scan(&receiver); err != nil {
 		t.Fatal(err)
 	}
-	result, err := paimosdb.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES('recovery-admin','fixture','admin','active')`)
+	result, err := paimosdb.DB.Exec(`INSERT INTO users(username,password,role,role_key,status,is_super_admin) VALUES('recovery-admin','fixture','admin','super_admin','active',1)`)
 	if err != nil {
 		t.Fatal(err)
 	}

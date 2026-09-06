@@ -8,6 +8,9 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
+
+	"github.com/inspr-at/paimos/backend/auth"
 )
 
 const maxClosedTargetRecoveries = 8
@@ -55,6 +58,7 @@ type recoveryFacts struct {
 	originalMaximum, effectiveMaximum, replacementMaximum                  string
 	effectiveRole, effectiveAdapter, replacementRole, replacementAdapter   string
 	effectiveRuntimeID, replacementRuntimeID, replacementRuntimeGeneration string
+	replacementRuntimeUserID, replacementRuntimeAPIKeyID                   int64
 	messageDelivered, actionRequest                                        int
 	heldReason                                                             string
 	leaseUntil, handedOffAt, effectiveLevel                                sql.NullString
@@ -234,7 +238,7 @@ func loadClosedTargetRecoveryFacts(ctx context.Context, tx *sql.Tx, in ClosedTar
 	facts.plan.EffectiveTarget.HarnessSessionID = in.ExpectedClosedSessionID
 	var replacementKind string
 	err = tx.QueryRowContext(ctx, `SELECT target.id,target.version,target.target_kind,target.maximum_level,target.role,target.adapter,
-		binding.runtime_id,runtime.generation,binding.generation
+		binding.runtime_id,runtime.generation,binding.generation,runtime.user_id,runtime.api_key_id
 		FROM harness_sessions session
 		JOIN agent_message_targets target ON target.id=session.message_target_id
 		JOIN lifecycle_runtime_sessions binding ON binding.session_id=session.id
@@ -251,8 +255,13 @@ func loadClosedTargetRecoveryFacts(ctx context.Context, tx *sql.Tx, in ClosedTar
 		in.ReplacementSessionID, in.ProjectID, "-90 seconds", instanceName(), in.ProjectID, facts.plan.Address, in.ProjectID).Scan(
 		&facts.plan.ReplacementTarget.TargetID, &facts.plan.ReplacementTarget.TargetVersion, &replacementKind,
 		&facts.replacementMaximum, &facts.replacementRole, &facts.replacementAdapter,
-		&facts.replacementRuntimeID, &facts.replacementRuntimeGeneration, &facts.plan.ReplacementTarget.SessionGeneration)
+		&facts.replacementRuntimeID, &facts.replacementRuntimeGeneration, &facts.plan.ReplacementTarget.SessionGeneration,
+		&facts.replacementRuntimeUserID, &facts.replacementRuntimeAPIKeyID)
 	if err != nil {
+		return facts, coded("agent_message_delivery_recovery_replacement_invalid", "replacement generation lacks a fresh authenticated owned binding")
+	}
+	if _, _, err = auth.ReauthorizeRuntimeReporterTx(ctx, tx, facts.replacementRuntimeUserID,
+		facts.replacementRuntimeAPIKeyID, in.ProjectID, time.Now().UTC()); err != nil {
 		return facts, coded("agent_message_delivery_recovery_replacement_invalid", "replacement generation lacks a fresh authenticated owned binding")
 	}
 	facts.plan.ReplacementTarget.HarnessSessionID = in.ReplacementSessionID

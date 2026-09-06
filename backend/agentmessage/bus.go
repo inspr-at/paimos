@@ -66,15 +66,17 @@ const recoveredDeliveryTargetSQL = `(SELECT recovery.new_target_id
 	WHERE recovery.delivery_id=d.delivery_id
 	ORDER BY recovery.sequence DESC LIMIT 1)`
 
-const selectedDeliveryTargetSQL = `COALESCE(` + recoveredDeliveryTargetSQL + `,(CASE
+const effectivePrimaryDeliveryTargetSQL = `COALESCE(` + recoveredDeliveryTargetSQL + `,d.primary_target_id)`
+
+const selectedDeliveryTargetSQL = `(CASE
 	WHEN d.last_error_code='managed_target_unavailable' AND d.fallback_target_id IS NOT NULL
 	THEN d.fallback_target_id
-	WHEN d.requested_level='simple' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
-	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id) IN ('agentd_codex','agentd_claude')
+	WHEN d.requested_level='simple' AND ` + effectivePrimaryDeliveryTargetSQL + ` IS NOT NULL AND d.fallback_target_id IS NOT NULL
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=` + effectivePrimaryDeliveryTargetSQL + `) IN ('agentd_codex','agentd_claude')
 	THEN d.fallback_target_id
-	WHEN d.requested_level='steer' AND d.primary_target_id IS NOT NULL AND d.fallback_target_id IS NOT NULL
-	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=d.primary_target_id)='simple'
-	THEN d.fallback_target_id ELSE COALESCE(d.primary_target_id,d.fallback_target_id) END))`
+	WHEN d.requested_level='steer' AND ` + effectivePrimaryDeliveryTargetSQL + ` IS NOT NULL AND d.fallback_target_id IS NOT NULL
+	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=` + effectivePrimaryDeliveryTargetSQL + `)='simple'
+	THEN d.fallback_target_id ELSE COALESCE(` + effectivePrimaryDeliveryTargetSQL + `,d.fallback_target_id) END)`
 
 // ManagedGenerationLivenessWindow aligns reroute eligibility with the M161
 // heartbeat contract: three missed 30-second heartbeats make a working row
