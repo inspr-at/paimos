@@ -67,6 +67,7 @@ describe('Habitat production composition', () => {
     expect(mounted.el.querySelector('[aria-label="Inspector"]')).toBeNull()
     expect(mounted.el.querySelector<HTMLElement>('.habitat-stage')?.inert).toBe(false)
     expect(document.activeElement).toBe(trigger)
+    expect(mounted.el.textContent).not.toContain('no longer in this authorized sample')
     await mounted.unmount()
   })
   it('keeps explicit hierarchy and selected button focus through an ordinary live update', async () => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onScopeDispose, ref, watch } from 'vue'
+import { computed, inject, nextTick, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ArrowUpRight, ChevronDown, ChevronRight, RefreshCw } from 'lucide-vue-next'
@@ -112,9 +112,23 @@ const firstName = computed(
 const greeting = computed(() => (firstName.value ? `Welcome back, ${firstName.value}.` : t('home')))
 const inspectorTrigger = ref<HTMLElement | null>(null)
 const compactMedia = globalThis.matchMedia?.('(max-width: 760px)')
-const compactInspector = ref(compactMedia?.matches ?? false)
+const compactViewport = ref(compactMedia?.matches ?? false)
+const compactShell = ref(false)
+const compactInspector = computed(() => compactViewport.value || compactShell.value)
+let shellResize: ResizeObserver | null = null
+onMounted(() => {
+  const shell = document.querySelector('#habitat-main')?.closest<HTMLElement>('.habitat-shell')
+  if (shell && typeof ResizeObserver !== 'undefined') {
+    compactShell.value = shell.clientWidth <= 760
+    shellResize = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (width !== undefined) compactShell.value = width <= 760
+    })
+    shellResize.observe(shell)
+  }
+})
 function updateCompactInspector() {
-  compactInspector.value = compactMedia?.matches ?? false
+  compactViewport.value = compactMedia?.matches ?? false
 }
 compactMedia?.addEventListener('change', updateCompactInspector)
 const inertBackground = new Map<HTMLElement, boolean>()
@@ -215,6 +229,7 @@ function rememberInspectorTrigger() {
 onScopeDispose(() => {
   modalGeneration++
   compactMedia?.removeEventListener('change', updateCompactInspector)
+  shellResize?.disconnect()
   restoreInspectorBackground()
 })
 const projects = computed(() => snapshot.value?.project_coordination ?? [])
@@ -267,7 +282,13 @@ watch(
   },
 )
 watch(selectedWorker, (worker, prior) => {
-  if (!worker && prior) {
+  if (
+    !worker &&
+    prior &&
+    !snapshot.value?.fleet.workers.some(
+      (row) => row.harness_session_id === prior.harness_session_id,
+    )
+  ) {
     announcement.value =
       'The selected worker is no longer in this authorized sample. Refresh or change detail to locate it.'
     if (inspector.value?.contains(document.activeElement)) void nextTick(restoreInspectorFocus)
