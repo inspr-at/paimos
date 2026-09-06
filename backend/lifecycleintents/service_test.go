@@ -159,6 +159,135 @@ func (f *fixture) transition(t *testing.T, in Intent, state, result string) Inte
 	}
 	return out
 }
+
+func prepareAttachIntent(t *testing.T) (*fixture, *managedharness.Service, models.HarnessSession, int64, Request) {
+	t.Helper()
+	f := setup(t)
+	ctx := context.Background()
+	current := f.managed(t)
+	generation := uuid.NewString()
+	if err := f.s.RegisterSession(ctx, f.reporter, f.project, f.runtime.ID, testLease, testLease, SessionRegistration{SessionID: current.ID, Generation: generation}); err != nil {
+		t.Fatal(err)
+	}
+	hs := managedharness.NewService(db.DB)
+	current, err := hs.HeartbeatWithActivity(ctx, current.ID, "yielded", managedharness.ActivityEvidence{Sequence: 1, Kind: "turn_completed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.now = time.Now().UTC().Add(time.Second)
+	result, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,title,type) VALUES(?,1,'Attach target','ticket')`, f.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, _ := result.LastInsertId()
+	req := f.request("attach")
+	req.SessionID = current.ID
+	req.SessionGeneration = generation
+	req.ExpectedRevision = current.Revision
+	req.TicketID = &ticket
+	req.WorkShape = "ship"
+	return f, hs, current, ticket, req
+}
+
+func replayReporterPoll(t *testing.T, f *fixture, hs *managedharness.Service, sessionID string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := hs.HeartbeatWithActivity(ctx, sessionID, "working", managedharness.ActivityEvidence{Sequence: 1, Kind: "turn_completed"}); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := hs.Yield(ctx, sessionID); err != nil || len(result.Controls) != 0 {
+		t.Fatalf("replay-equivalent yield=%+v err=%v", result, err)
+	}
+	f.now = time.Now().UTC().Add(time.Second)
+}
+
+func TestLifecycleAttachSurvivesReplayEquivalentReporterPolls(t *testing.T) {
+	f, hs, current, ticket, req := prepareAttachIntent(t)
+	in := f.submit(t, req)
+	replayReporterPoll(t, f, hs, current.ID)
+	in = f.claim(t)
+	replayReporterPoll(t, f, hs, current.ID)
+	in = f.transition(t, in, "executing", "")
+	replayReporterPoll(t, f, hs, current.ID)
+	in = f.transition(t, in, "completed", current.ID)
+	bound, err := hs.Get(context.Background(), f.project, current.ID)
+	if err != nil || in.ResultSessionID != current.ID || bound.TicketID == nil || *bound.TicketID != ticket || bound.Revision <= req.ExpectedRevision {
+		t.Fatalf("attach result=%+v bound=%+v err=%v", in, bound, err)
+	}
+	var laterEvents int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM harness_session_events WHERE harness_session_id=? AND event_sequence>? AND operation<>'binding_changed'`, current.ID, req.ExpectedRevision).Scan(&laterEvents); err != nil || laterEvents != 0 {
+		t.Fatalf("replay polls emitted semantic events=%d err=%v", laterEvents, err)
+	}
+}
+
+func TestLifecycleAttachRejectsInterveningSemanticChanges(t *testing.T) {
+	t.Run("stale submit", func(t *testing.T) {
+		f, hs, current, _, req := prepareAttachIntent(t)
+		replayReporterPoll(t, f, hs, current.ID)
+		if _, created, err := f.s.Submit(context.Background(), f.human, f.project, req); err != ErrUnavailable || created {
+			t.Fatalf("stale submit created=%v err=%v", created, err)
+		}
+	})
+
+	t.Run("binding", func(t *testing.T) {
+		f, hs, current, _, req := prepareAttachIntent(t)
+		in := f.submit(t, req)
+		other, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,title,type) VALUES(?,2,'Concurrent binding','ticket')`, f.project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherTicket, _ := other.LastInsertId()
+		if _, err = hs.AssignBinding(context.Background(), managedharness.BindingInput{ProjectID: f.project, SessionID: current.ID, ExpectedRevision: current.Revision, TicketID: &otherTicket, WorkShape: "ship"}); err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := f.s.Claim(context.Background(), f.reporter, f.project, f.runtime.ID, testLease)
+		if err != nil || claimed != nil {
+			t.Fatalf("semantic binding claim=%+v err=%v", claimed, err)
+		}
+		failed, err := f.s.Get(context.Background(), f.human, f.project, in.ID)
+		if err != nil || failed.State != "failed" || failed.Reason != "ownership_lost" {
+			t.Fatalf("semantic binding outcome=%+v err=%v", failed, err)
+		}
+	})
+
+	t.Run("control", func(t *testing.T) {
+		f, hs, current, _, req := prepareAttachIntent(t)
+		in := f.submit(t, req)
+		if _, err := hs.RequestControl(context.Background(), current.ID, "interrupt", f.user); err != nil {
+			t.Fatal(err)
+		}
+		if result, err := hs.Yield(context.Background(), current.ID); err != nil || len(result.Controls) != 1 {
+			t.Fatalf("control yield=%+v err=%v", result, err)
+		}
+		f.now = time.Now().UTC().Add(time.Second)
+		claimed, err := f.s.Claim(context.Background(), f.reporter, f.project, f.runtime.ID, testLease)
+		if err != nil || claimed != nil {
+			t.Fatalf("semantic control claim=%+v err=%v", claimed, err)
+		}
+		failed, err := f.s.Get(context.Background(), f.human, f.project, in.ID)
+		if err != nil || failed.State != "failed" || failed.Reason != "ownership_lost" {
+			t.Fatalf("semantic control outcome=%+v err=%v", failed, err)
+		}
+	})
+
+	t.Run("stopping", func(t *testing.T) {
+		f, hs, current, _, req := prepareAttachIntent(t)
+		in := f.submit(t, req)
+		if _, err := hs.HeartbeatWithActivity(context.Background(), current.ID, "stopping", managedharness.ActivityEvidence{Sequence: 1, Kind: "turn_completed"}); err != nil {
+			t.Fatal(err)
+		}
+		f.now = time.Now().UTC().Add(time.Second)
+		claimed, err := f.s.Claim(context.Background(), f.reporter, f.project, f.runtime.ID, testLease)
+		if err != nil || claimed != nil {
+			t.Fatalf("stopping claim=%+v err=%v", claimed, err)
+		}
+		failed, err := f.s.Get(context.Background(), f.human, f.project, in.ID)
+		if err != nil || failed.State != "failed" || failed.Reason != "ownership_lost" {
+			t.Fatalf("stopping outcome=%+v err=%v", failed, err)
+		}
+	})
+}
+
 func TestLifecycleRepairDurableReplayAndConcurrency(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
@@ -351,7 +480,7 @@ func TestLifecycleCancelAndClaimCrashExpiry(t *testing.T) {
 }
 func (f *fixture) managed(t *testing.T) models.HarnessSession {
 	t.Helper()
-	s, _, e := managedharness.NewService(db.DB).Register(context.Background(), managedharness.RegisterInput{ProjectID: f.project, AgentName: "worker", Harness: "codex", Host: f.runtime.MachineID, SessionRef: uuid.NewString(), WorkerLease: testLease, ManagementMode: "managed", Role: "worker", SteerMode: "none", Capabilities: models.HarnessCapabilities{Status: true}, Workspace: &models.HarnessWorkspaceProvenance{CanonicalPath: "/fixture/workspace", Kind: "directory", Mode: "exclusive", Identity: f.runtime.Workspaces[0].Identity}, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: f.runtime.AccountLabel})
+	s, _, e := managedharness.NewService(db.DB).Register(context.Background(), managedharness.RegisterInput{ProjectID: f.project, AgentName: "worker", Harness: "codex", Host: f.runtime.MachineID, SessionRef: uuid.NewString(), WorkerLease: testLease, ManagementMode: "managed", Role: "worker", SteerMode: "none", Capabilities: models.HarnessCapabilities{Status: true, Interrupt: true}, Workspace: &models.HarnessWorkspaceProvenance{CanonicalPath: "/fixture/workspace", Kind: "directory", Mode: "exclusive", Identity: f.runtime.Workspaces[0].Identity}, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: f.runtime.AccountLabel})
 	if e != nil {
 		t.Fatal(e)
 	}

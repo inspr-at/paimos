@@ -55,8 +55,48 @@ func sameSpecification(current session, r Request, runtime Runtime) bool {
 func sameBinding(current session, r Request) bool {
 	return current.ticket.Valid == (r.TicketID != nil) && (r.TicketID == nil || current.ticket.Int64 == *r.TicketID) && current.parent.Valid == (r.ParentSessionID != nil) && (r.ParentSessionID == nil || current.parent.String == *r.ParentSessionID) && current.shape == r.WorkShape
 }
+
+// The authenticated reporter refreshes heartbeat_at and alternates the active
+// working/yielded projection while polling. Those replay-equivalent writes
+// advance the row revision without appending a semantic session event. An
+// accepted lifecycle intent may cross only those gaps: every activity,
+// control, binding, timeout or terminal change appends an event at its new
+// revision and therefore keeps the original CAS closed.
+func replayEquivalentRevision(ctx context.Context, tx *sql.Tx, current session, expected int64) (int64, error) {
+	if current.revision < expected {
+		return 0, ErrUnavailable
+	}
+	if current.revision == expected {
+		return current.revision, nil
+	}
+	var changed int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM harness_session_events
+		WHERE harness_session_id=? AND event_sequence>?
+	)`, current.id, expected).Scan(&changed); err != nil {
+		return 0, ErrStorage
+	}
+	if changed != 0 {
+		return 0, ErrUnavailable
+	}
+	return current.revision, nil
+}
+
 func (s *Service) validateTarget(ctx context.Context, tx *sql.Tx, project int64, r Request, runtime Runtime) error {
-	return s.validateTargetForOutcome(ctx, tx, project, r, runtime, "", "")
+	if err := s.validateTargetForOutcome(ctx, tx, project, r, runtime, "", ""); err != nil {
+		return err
+	}
+	if r.Operation == "start" || r.Operation == "repair" {
+		return nil
+	}
+	current, err := loadSession(ctx, tx, project, r.SessionID)
+	if err != nil {
+		return err
+	}
+	if current.revision != r.ExpectedRevision {
+		return ErrUnavailable
+	}
+	return nil
 }
 func (s *Service) validateTargetForOutcome(ctx context.Context, tx *sql.Tx, project int64, r Request, runtime Runtime, result, ownIntentID string) error {
 	if runtime.Generation != r.RuntimeGeneration || runtime.AccountLabel != r.AccountLabel {
@@ -127,8 +167,11 @@ func (s *Service) validateTargetForOutcome(ctx context.Context, tx *sql.Tx, proj
 	if err != nil {
 		return err
 	}
-	if !sameSpecification(current, r, runtime) || current.revision != r.ExpectedRevision {
+	if !sameSpecification(current, r, runtime) {
 		return ErrUnavailable
+	}
+	if _, err = replayEquivalentRevision(ctx, tx, current, r.ExpectedRevision); err != nil {
+		return err
 	}
 	var present int
 	if tx.QueryRowContext(ctx, `SELECT 1 FROM lifecycle_runtime_sessions WHERE session_id=? AND runtime_id=? AND generation=?`, r.SessionID, r.RuntimeID, r.SessionGeneration).Scan(&present) != nil {
@@ -140,7 +183,17 @@ func (s *Service) validateTargetForOutcome(ctx context.Context, tx *sql.Tx, proj
 		}
 	} else {
 		hb, e := time.Parse(time.RFC3339Nano, current.heartbeat)
-		if e != nil || hb.After(s.now()) || s.now().Sub(hb) > managedharness.DefaultActivityHeartbeatTimeout || current.activity != "idle" || current.phase == "stopped" || current.phase == "stopping" || sameBinding(current, r) {
+		if e != nil || hb.After(s.now()) || s.now().Sub(hb) > managedharness.DefaultActivityHeartbeatTimeout || current.activity != "idle" || (current.phase != "working" && current.phase != "yielded") || sameBinding(current, r) {
+			return ErrUnavailable
+		}
+		var openControl int
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1 FROM harness_session_controls
+			WHERE harness_session_id=? AND state IN ('pending','claimed')
+		)`, current.id).Scan(&openControl); err != nil {
+			return ErrStorage
+		}
+		if openControl != 0 {
 			return ErrUnavailable
 		}
 	}
@@ -253,6 +306,14 @@ func (s *Service) completeEffect(ctx context.Context, tx *sql.Tx, in Intent, run
 		if result != r.SessionID {
 			return ErrUnavailable
 		}
+		current, err := loadSession(ctx, tx, in.ProjectID, r.SessionID)
+		if err != nil {
+			return err
+		}
+		revision, err := replayEquivalentRevision(ctx, tx, current, r.ExpectedRevision)
+		if err != nil {
+			return err
+		}
 		var parent, ticket, shape any
 		if r.ParentSessionID != nil {
 			parent = *r.ParentSessionID
@@ -261,7 +322,7 @@ func (s *Service) completeEffect(ctx context.Context, tx *sql.Tx, in Intent, run
 			ticket = *r.TicketID
 			shape = r.WorkShape
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET parent_harness_session_id=?,ticket_id=?,work_shape=?,revision=revision+1,updated_at=? WHERE project_id=? AND id=? AND revision=?`, parent, ticket, shape, stamp(s.now()), in.ProjectID, r.SessionID, r.ExpectedRevision)
+		res, err := tx.ExecContext(ctx, `UPDATE harness_sessions SET parent_harness_session_id=?,ticket_id=?,work_shape=?,revision=revision+1,updated_at=? WHERE project_id=? AND id=? AND revision=?`, parent, ticket, shape, stamp(s.now()), in.ProjectID, r.SessionID, revision)
 		if err != nil {
 			return ErrStorage
 		}
