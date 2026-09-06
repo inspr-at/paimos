@@ -576,6 +576,7 @@ func mountAPI(r chi.Router) {
 		r.Use(auth.CSRFMiddleware)
 		r.Use(auth.MustChangePasswordGate)
 		handlers.RegisterLifecycleIntentRoutes(r)
+		handlers.RegisterHarnessBrowserRoutes(r)
 	})
 
 	// PAI-863: the structured-knowledge surface is private on every outcome.
