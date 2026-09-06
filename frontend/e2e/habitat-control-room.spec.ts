@@ -170,6 +170,8 @@ async function installFixture(page: Page) {
             ],
       })
     }
+    if (path === '/api/projects/1/lifecycle/v1/runtime-health')
+      return fulfill({ schema_version: 1, observed_at: new Date().toISOString(), runtimes: [] })
     if (path === '/api/projects/1/lifecycle/v1/intents' && route.request().method() === 'POST') {
       state.intent = {
         schema_version: 1,
@@ -268,6 +270,53 @@ async function assertFits(page: Page) {
   ).toBe(true)
 }
 
+test('Home is truthful and fits rich and empty workspaces in both themes at desktop and phone widths', async ({
+  page,
+}) => {
+  const fixture = await installFixture(page)
+  for (const scenario of ['rich', 'empty'] as const) {
+    fixture.empty = scenario === 'empty'
+    await page.goto(`${ORIGIN}/?view=home`)
+    await expect(page.getByRole('heading', { name: 'Your projects', exact: false })).toBeVisible()
+    const sample = habitatFixture('10', null, fixture.empty)
+    await expect(page.locator('.habitat-overview > button').first()).toContainText(
+      `${sample.fleet.totals.workers}`,
+    )
+    if (fixture.empty) {
+      await expect(
+        page.getByRole('button', { name: 'Set up coordinator', exact: true }),
+      ).toBeVisible()
+      await expect(page.locator('.habitat-roster-row')).toHaveCount(0)
+      await expect(page.locator('.habitat-project-table')).toContainText('No workers yet')
+    } else {
+      await expect(page.locator('.habitat-roster-row')).toHaveCount(
+        Math.min(4, sample.fleet.workers.length),
+      )
+      await expect(page.getByRole('heading', { name: 'Needs you', exact: false })).toBeVisible()
+      await expect(page.locator('.habitat-welcome')).toHaveCount(0)
+    }
+    for (const [label, width, height] of [
+      ['desktop', 1440, 900],
+      ['phone', 320, 740],
+    ] as const) {
+      await page.setViewportSize({ width, height })
+      for (const theme of ['day', 'night'] as const) {
+        if ((await page.locator('.habitat-shell').getAttribute('data-theme')) !== theme)
+          await page
+            .getByRole('button', {
+              name: theme === 'night' ? 'Switch to dark mode' : 'Switch to bright mode',
+            })
+            .click()
+        await assertFits(page)
+        await page.screenshot({
+          path: `${SHOTS}/home-${scenario}-${label}-${theme}.png`,
+          fullPage: true,
+        })
+      }
+    }
+  }
+})
+
 test('Habitat selected design: bright/dark, worker tree, phone, short laptop, 200% and reduced motion', async ({
   page,
 }) => {
@@ -280,6 +329,9 @@ test('Habitat selected design: bright/dark, worker tree, phone, short laptop, 20
   await page
     .locator('[data-worker-id="00000000-0000-4000-8000-000000000001"] .habitat-worker-select')
     .click()
+  const workerSelect = page.locator(
+    '[data-worker-id="00000000-0000-4000-8000-000000000001"] .habitat-worker-select',
+  )
   for (const [label, width, height] of [
     ['desktop', 1440, 900],
     ['short', 1280, 650],
@@ -287,16 +339,38 @@ test('Habitat selected design: bright/dark, worker tree, phone, short laptop, 20
   ] as const) {
     await page.setViewportSize({ width, height })
     for (const theme of ['day', 'night'] as const) {
+      if (await page.getByRole('button', { name: 'Close inspector' }).count())
+        await page.getByRole('button', { name: 'Close inspector' }).click()
       if ((await page.locator('.habitat-shell').getAttribute('data-theme')) !== theme)
         await page
           .getByRole('button', {
             name: theme === 'night' ? 'Switch to dark mode' : 'Switch to bright mode',
           })
           .click()
+      await workerSelect.click()
+      if (width === 320) {
+        await expect(page.getByRole('dialog', { name: 'Inspector' })).toHaveAttribute(
+          'aria-modal',
+          'true',
+        )
+        await expect(page.locator('.habitat-stage')).toHaveAttribute('inert', '')
+        await expect(page.getByRole('button', { name: 'Close inspector' })).toBeFocused()
+        await page.keyboard.press('Shift+Tab')
+        expect(
+          await page
+            .locator('[aria-label="Inspector"]')
+            .evaluate((el) => el.contains(document.activeElement)),
+        ).toBe(true)
+        await page.keyboard.press('Tab')
+        await expect(page.getByRole('button', { name: 'Close inspector' })).toBeFocused()
+      }
       await assertFits(page)
       await page.screenshot({ path: `${SHOTS}/${label}-${theme}.png`, fullPage: true })
     }
   }
+  await page.keyboard.press('Escape')
+  await expect(workerSelect).toBeFocused()
+  await expect(page.locator('.habitat-stage')).not.toHaveAttribute('inert', '')
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.evaluate(() => {
     document.documentElement.style.zoom = '2'

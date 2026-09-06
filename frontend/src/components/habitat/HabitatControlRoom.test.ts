@@ -31,9 +31,44 @@ vi.mock('@/v6/sessionHomeZoom', () => ({
 import HabitatControlRoom from './HabitatControlRoom.vue'
 afterEach(() => {
   vi.clearAllMocks()
+  vi.unstubAllGlobals()
   document.body.innerHTML = ''
 })
 describe('Habitat production composition', () => {
+  it('makes a compact inspector modal and restores its worker trigger on Escape', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    )
+    context.route = reactive({ query: { view: 'workers' } })
+    vi.mocked(loadOrchestration).mockResolvedValue(habitatFixture())
+    vi.mocked(fetchAgentModeSnapshot).mockResolvedValue({
+      deliveries: [],
+      aggregates: null,
+    } as unknown as AgentModeSnapshot)
+    const mounted = await mountComponent(HabitatControlRoom)
+    await vi.waitFor(() =>
+      expect(mounted.el.querySelector('.habitat-worker-select')).not.toBeNull(),
+    )
+    const trigger = mounted.el.querySelector<HTMLButtonElement>('.habitat-worker-select')!
+    trigger.focus()
+    trigger.click()
+    await nextTick()
+    await nextTick()
+    expect(mounted.el.querySelector('[aria-label="Inspector"]')?.getAttribute('aria-modal')).toBe(
+      'true',
+    )
+    expect(mounted.el.querySelector<HTMLElement>('.habitat-stage')?.inert).toBe(true)
+    const close = mounted.el.querySelector<HTMLButtonElement>('[aria-label="Close inspector"]')!
+    expect(document.activeElement).toBe(close)
+    close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    await nextTick()
+    expect(mounted.el.querySelector('[aria-label="Inspector"]')).toBeNull()
+    expect(mounted.el.querySelector<HTMLElement>('.habitat-stage')?.inert).toBe(false)
+    expect(document.activeElement).toBe(trigger)
+    await mounted.unmount()
+  })
   it('keeps explicit hierarchy and selected button focus through an ordinary live update', async () => {
     context.route = reactive({ query: { view: 'workers' } })
     vi.mocked(loadOrchestration).mockResolvedValue(habitatFixture())

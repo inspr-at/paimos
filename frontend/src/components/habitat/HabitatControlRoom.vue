@@ -110,15 +110,113 @@ const firstName = computed(
   () => (auth.user?.nickname || auth.user?.first_name || '').split(/\s+/)[0],
 )
 const greeting = computed(() => (firstName.value ? `Welcome back, ${firstName.value}.` : t('home')))
+const inspectorTrigger = ref<HTMLElement | null>(null)
+const compactMedia = globalThis.matchMedia?.('(max-width: 760px)')
+const compactInspector = ref(compactMedia?.matches ?? false)
+function updateCompactInspector() {
+  compactInspector.value = compactMedia?.matches ?? false
+}
+compactMedia?.addEventListener('change', updateCompactInspector)
+const inertBackground = new Map<HTMLElement, boolean>()
+let priorBodyOverflow: string | null = null
+let modalGeneration = 0
+function restoreInspectorBackground() {
+  for (const [element, prior] of inertBackground) element.inert = prior
+  inertBackground.clear()
+  if (priorBodyOverflow !== null) {
+    document.body.style.overflow = priorBodyOverflow
+    priorBodyOverflow = null
+  }
+}
+function restoreInspectorFocus() {
+  const trigger = inspectorTrigger.value
+  if (trigger?.isConnected) trigger.focus()
+  else document.querySelector<HTMLElement>('#habitat-main')?.focus()
+}
 function closeInspector() {
   selectedId.value = null
   projectSelection.value = null
+  restoreInspectorBackground()
+  void nextTick(restoreInspectorFocus)
 }
 const selectedProject = computed(
   () =>
     snapshot.value?.project_coordination.find((p) => p.project.id === projectSelection.value) ??
     null,
 )
+const inspectorOpen = computed(() => !!(selectedWorker.value || selectedProject.value))
+watch([compactInspector, inspectorOpen], async ([compact, open]) => {
+  const version = ++modalGeneration
+  const focusedInside = inspector.value?.contains(document.activeElement)
+  restoreInspectorBackground()
+  if (!open) {
+    if (focusedInside) void nextTick(restoreInspectorFocus)
+    return
+  }
+  if (!compact) return
+  await nextTick()
+  if (version !== modalGeneration || !inspector.value) return
+  const shell = inspector.value.closest('.habitat-shell') ?? document
+  for (const element of shell.querySelectorAll<HTMLElement>(
+    '.habitat-rail, .habitat-header, .habitat-source, .habitat-security, .habitat-footer, .habitat-hero, .habitat-context, .habitat-stage, .habitat-snapshot-line',
+  )) {
+    inertBackground.set(element, element.inert)
+    element.inert = true
+  }
+  priorBodyOverflow = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
+  inspector.value.querySelector<HTMLButtonElement>('.habitat-inspector-close')?.focus()
+})
+function inspectorKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeInspector()
+    return
+  }
+  if (
+    !compactInspector.value ||
+    event.key !== 'Tab' ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.altKey
+  )
+    return
+  const focusable = [
+    ...(inspector.value?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+    ) ?? []),
+  ].filter((element) => element.getClientRects().length > 0 && !element.closest('[inert]'))
+  const first = focusable[0],
+    last = focusable[focusable.length - 1]
+  if (!first || !last) {
+    event.preventDefault()
+    inspector.value?.focus()
+    return
+  }
+  if (
+    event.shiftKey &&
+    (document.activeElement === first || document.activeElement === inspector.value)
+  ) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+function rememberInspectorTrigger() {
+  if (
+    document.activeElement instanceof HTMLElement &&
+    !inspector.value?.contains(document.activeElement)
+  )
+    inspectorTrigger.value = document.activeElement
+}
+onScopeDispose(() => {
+  modalGeneration++
+  compactMedia?.removeEventListener('change', updateCompactInspector)
+  restoreInspectorBackground()
+})
 const projects = computed(() => snapshot.value?.project_coordination ?? [])
 const projectWorkers = (id: number) =>
   snapshot.value?.fleet.workers.filter((w) => w.project.id === id) ?? []
@@ -172,16 +270,17 @@ watch(selectedWorker, (worker, prior) => {
   if (!worker && prior) {
     announcement.value =
       'The selected worker is no longer in this authorized sample. Refresh or change detail to locate it.'
-    if (inspector.value?.contains(document.activeElement))
-      void nextTick(() => inspector.value?.focus())
+    if (inspector.value?.contains(document.activeElement)) void nextTick(restoreInspectorFocus)
   }
 })
 function selectWorker(worker: HabitatWorker) {
+  rememberInspectorTrigger()
   selectedId.value = worker.harness_session_id
   projectSelection.value = null
   announcement.value = `Inspecting ${worker.agent.name}, ${worker.project.name}.`
 }
 function selectProject(id: number) {
+  rememberInspectorTrigger()
   selectedId.value = null
   projectSelection.value = id
   announcement.value = 'Project selected. Details are in the inspector.'
@@ -200,6 +299,7 @@ function setZoom(value: string) {
   void router.replace({ query: { ...route.query, zoom: value } })
 }
 function assign(project?: number, sessionId?: string) {
+  if (inspectorOpen.value) closeInspector()
   void router.replace({
     query: {
       ...route.query,
@@ -656,13 +756,21 @@ onScopeDispose(() => registerContext?.(null))
             >
           </details>
         </div>
+        <div
+          v-if="compactInspector && inspectorOpen"
+          class="habitat-inspector-backdrop"
+          aria-hidden="true"
+          @click="closeInspector"
+        ></div>
         <aside
           v-if="selectedWorker || selectedProject"
           ref="inspector"
           class="habitat-inspector"
           aria-label="Inspector"
+          :role="compactInspector ? 'dialog' : undefined"
+          :aria-modal="compactInspector ? 'true' : undefined"
           tabindex="-1"
-          @keydown.esc="closeInspector"
+          @keydown="inspectorKeydown"
         >
           <button
             type="button"

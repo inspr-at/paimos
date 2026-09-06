@@ -1112,6 +1112,13 @@
   font-size: 19px;
   line-height: 1;
 }
+.habitat-inspector-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  background: #08190f70;
+  backdrop-filter: blur(2px);
+}
 .habitat-inspector h2 {
   font-size: 23px;
 }
