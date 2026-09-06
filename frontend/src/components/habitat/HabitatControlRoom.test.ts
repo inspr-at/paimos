@@ -1,12 +1,23 @@
-import { reactive, nextTick } from 'vue'
+import { defineComponent, h, nextTick, provide, reactive } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mountComponent } from '@/components/ai/testMount'
 import { loadOrchestration } from '@/services/orchestration'
 import { fetchAgentModeSnapshot, type AgentModeSnapshot } from '@/services/agentMode'
+import { PAIMOS6_COMMAND_CONTEXT_KEY, type Paimos6CommandContext } from '@/v6/commandPaletteContext'
 import { habitatFixture } from './__fixtures__/orchestration'
 const context = vi.hoisted(() => ({
   route: { query: { view: 'workers' } as Record<string, string> },
   replace: vi.fn(),
+}))
+const voice = vi.hoisted(() => ({
+  state: { value: 'idle' },
+  level: { value: 0 },
+  errorMessage: { value: null },
+  isActive: { value: false },
+  start: vi.fn(async () => true),
+  finish: vi.fn(() => true),
+  stop: vi.fn(),
+  micSupported: vi.fn(() => true),
 }))
 vi.mock('vue-router', () => ({
   useRoute: () => context.route,
@@ -23,18 +34,73 @@ vi.mock('@/stores/auth', () => ({
 }))
 vi.mock('@/services/orchestration', () => ({ loadOrchestration: vi.fn() }))
 vi.mock('@/services/agentMode', () => ({ fetchAgentModeSnapshot: vi.fn() }))
+vi.mock('@/composables/useMicTranscript', () => ({
+  useMicTranscript: () => voice,
+}))
+vi.mock('@/services/agentModeVoice', () => ({ transcribeAgentModeAudio: vi.fn() }))
 vi.mock('@/v6/sessionHomeZoom', () => ({
   loadPaimos6SessionZoom: vi.fn().mockResolvedValue({
     totals: { sessions: 0, exception_messages: 0, action_requests: 0, attention_sessions: 0 },
   }),
 }))
 import HabitatControlRoom from './HabitatControlRoom.vue'
+let commandContext: Paimos6CommandContext | null = null
+const CommandContextHost = defineComponent({
+  setup() {
+    provide(PAIMOS6_COMMAND_CONTEXT_KEY, (next) => {
+      commandContext = next
+    })
+    return () => h(HabitatControlRoom)
+  },
+})
 afterEach(() => {
   vi.clearAllMocks()
   vi.unstubAllGlobals()
+  commandContext = null
   document.body.innerHTML = ''
 })
 describe('Habitat production composition', () => {
+  it('routes the command context to voice on the selected real inspector', async () => {
+    context.route = reactive({ query: { view: 'workers' } })
+    vi.mocked(loadOrchestration).mockResolvedValue(habitatFixture())
+    vi.mocked(fetchAgentModeSnapshot).mockResolvedValue({
+      deliveries: [],
+      aggregates: null,
+    } as unknown as AgentModeSnapshot)
+    const mounted = await mountComponent(CommandContextHost)
+    await vi.waitFor(() =>
+      expect(mounted.el.querySelector('.habitat-worker-select')).not.toBeNull(),
+    )
+    mounted.el.querySelector<HTMLButtonElement>('.habitat-worker-select')!.click()
+    await vi.waitFor(() =>
+      expect(mounted.el.querySelector('[aria-label="Inspector"]')).not.toBeNull(),
+    )
+
+    commandContext!.openTalk()
+    await vi.waitFor(() => expect(voice.start).toHaveBeenCalledTimes(1))
+    expect(context.replace).not.toHaveBeenCalled()
+    expect(mounted.el.querySelector('[aria-label="Confirm simple"]')).not.toBeNull()
+    await mounted.unmount()
+  })
+
+  it('routes command-context talk without a worker to the exact sessions conversation query', async () => {
+    context.route = reactive({ query: { view: 'workers', project: '1', zoom: '10' } })
+    vi.mocked(loadOrchestration).mockResolvedValue(habitatFixture())
+    vi.mocked(fetchAgentModeSnapshot).mockResolvedValue({
+      deliveries: [],
+      aggregates: null,
+    } as unknown as AgentModeSnapshot)
+    const mounted = await mountComponent(CommandContextHost)
+    await vi.waitFor(() => expect(commandContext).not.toBeNull())
+
+    commandContext!.openTalk()
+    expect(context.replace).toHaveBeenCalledWith({
+      query: { view: 'sessions', project: '1', zoom: '10', talk: '1' },
+    })
+    expect(voice.start).not.toHaveBeenCalled()
+    await mounted.unmount()
+  })
+
   it('makes a compact inspector modal and restores its worker trigger on Escape', async () => {
     vi.stubGlobal(
       'matchMedia',
