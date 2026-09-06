@@ -145,7 +145,7 @@ func (c *Consumers) Step(ctx context.Context, in agentmessage.ConsumerRegistrati
 		}
 		if errors.Is(returnErr, ErrHandoff) {
 			r.Blocked = "legacy_handoff_required"
-			r.Next = time.Now().Add(30 * time.Second)
+			r.Next = time.Now().Add(consumerRetryDelay(r.Key, 30*time.Second))
 			_ = c.put(r)
 			return
 		}
@@ -154,7 +154,7 @@ func (c *Consumers) Step(ctx context.Context, in agentmessage.ConsumerRegistrati
 			if r.Failures > 3 {
 				r.Failures = 3
 			}
-			r.Next = time.Now().Add(time.Duration(1<<r.Failures) * time.Second)
+			r.Next = time.Now().Add(consumerRetryDelay(r.Key, time.Duration(1<<r.Failures)*time.Second))
 			_ = c.put(r)
 		}
 	}()
@@ -352,4 +352,12 @@ func (c *Consumers) Repair() error {
 		}
 	}
 	return nil
+}
+
+// Stable per-stream jitter disperses retries without changing their base budget
+// after journal recovery. Both transient retries and handoff checks add 0–25%.
+func consumerRetryDelay(key string, base time.Duration) time.Duration {
+	digest := sha256.Sum256([]byte(key))
+	fraction := time.Duration(uint16(digest[0])<<8 | uint16(digest[1]))
+	return base + fraction*(base/4)/65535
 }

@@ -183,3 +183,23 @@ func TestFencedConsumerServerUnknownPersistsAndCannotBeRepaired(t *testing.T) {
 		t.Fatal("server unknown custody was cleared or retried")
 	}
 }
+
+func TestConsumerRetryDelayIsStableBoundedAndDispersed(t *testing.T) {
+	for _, base := range []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 30 * time.Second} {
+		seen := map[time.Duration]bool{}
+		for n := 0; n < 32; n++ {
+			key := strings.Repeat(string(rune('a'+n)), 64)
+			delay := consumerRetryDelay(key, base)
+			if delay < base || delay > base+base/4 {
+				t.Fatalf("retry delay %v outside base %v plus at most 25 percent", delay, base)
+			}
+			if delay != consumerRetryDelay(key, base) {
+				t.Fatal("same persisted consumer key changed retry delay")
+			}
+			seen[delay] = true
+		}
+		if len(seen) < 16 {
+			t.Fatal("consumer keys failed to disperse retry timing")
+		}
+	}
+}
