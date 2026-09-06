@@ -727,6 +727,72 @@ an agent's lifecycle: `session`, `skill`, `sync`, `onboard`, and
 `memory propose`. Run `paimos <verb> --help` for the full flag set —
 this section captures the integration shape, not the per-flag docs.
 
+### Friendly owned starts (PAI-921)
+
+A **canonical agent** is a project-owned persona and its instructions. A
+**worker** is one running, daemon-owned generation of that agent, with an
+explicit public session ID, project, role, parent, ticket and work shape.
+`session start` remains attribution-only; existing `harness`, `orchestrator set`,
+and `paimos-agentd` commands keep their low-level behavior.
+
+Start the instance coordinator with project/agent keys and an immutable profile:
+
+```sh
+paimos --instance my-instance orchestrator start --project ACME26 --agent ops \
+  --profile codex-sol-high@1 --workspace /path/to/clean/coordinator-worktree \
+  --idempotency-key coordinator-first-start
+
+paimos --instance my-instance worker start --project ACME26 --agent builder \
+  --ticket ACME26-42 --work-shape ship --parent codex:ops \
+  --profile codex-sol-high@1 --workspace /path/to/clean/worker-worktree \
+  --idempotency-key worker-acme26-42
+```
+
+The named instance must match the enforced deployment identity, or supply
+`--expect-deployment-instance`. The coordinator command reads the instance
+binding and writes with revision CAS; `--expected-revision` adds an explicit
+revision check. The instance root has no fabricated cross-project parent.
+Workers accept a public parent UUID or a unique `harness:agent` handle in the
+same project. Missing, ambiguous, stopping or terminal parents fail before spawn.
+
+Use `--guided` to fill missing inputs, or `--non-interactive` to forbid prompts.
+`--dry-run` and `--explain` run the same resolver and daemon/workspace checks
+without writes or spawn. Preview does not reserve a workspace or guarantee
+that later execution succeeds. `--json` emits the sanitized plan/outcome.
+Canonical instructions enter the child prompt in memory; optional task text
+comes from `--prompt-file`. Neither is printed or retained in retry records.
+
+Instead of `--profile ID@version`, select an exact compatible combination of
+`--harness`, `--model` and `--effort`. Zero or multiple matches list supported
+profile choices and require more specific input. Explicit profiles and selectors
+must agree. `--account local_probe` and `--machine authenticated_reporter`
+select the supported provenance sources. Pinning a non-secret account label or
+machine ID requires matching daemon pre-spawn constraint support; older runtime
+contracts reject these constraints explicitly instead of guessing their values.
+
+The workspace must be clean and available for exclusive ownership. The command
+never cleans, creates or switches a repository worktree. The daemon remains the
+final authority for reservation and spawn. `--state-root` locates a fixture or
+non-default private daemon root; its default matches `paimos-agentd`.
+
+Always reuse the same `--idempotency-key` for an exact retry. Private durable
+records bind it to the selected instance origin and input digest. Completed
+retries return the original outcome, even if the parent has since stopped.
+Changed input with the same key fails closed. An interrupted CLI or lost daemon
+response leaves an **unknown** outcome and never automatically respawns. Inspect
+`paimos runtime doctor` and `paimos harness list --project <key>` before issuing a
+new key; retain retry records until that uncertainty is reconciled.
+
+Success requires the reporter's public session ID to match the server's managed
+session and assignment. Output includes the observed generation state and
+copyable status/message/steer/interrupt/stop commands for supported capabilities.
+Message and steer commands submit durable intents through the separate runtime-owned
+receiver target/listener; public registration alone does not prove delivery readiness.
+A local ID or vendor session reference never substitutes for a public session ID.
+`--wait` bounds registration waiting (default 10s, maximum 30s); missing evidence
+returns `unknown` and a nonzero exit, and a terminal generation is not reported
+as a successful start. A start is not evidence of ticket completion.
+
 ### `paimos session start` (PAI-325)
 
 Mints a session UUID and emits env-var assignments that subsequent

@@ -60,7 +60,7 @@ canonical project-agent key, and display label. The current revision is read jus
 before the compare-and-swap write, so a concurrent change fails closed.`,
 		Args: cobra.NoArgs,
 	}
-	command.AddCommand(orchestratorSetCmd())
+	command.AddCommand(orchestratorSetCmd(), friendlyStartCmd(true))
 	return command
 }
 
