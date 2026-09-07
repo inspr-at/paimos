@@ -34,7 +34,7 @@ Start here when opening this repo cold.
 - `POST /api/projects/{id}/messages` · `GET|POST /api/projects/{id}/message-targets` · `GET /api/projects/{id}/message-deliveries` — durable send with `delivery_level`, encrypted receiver targets, and redacted delivery state (PAI-826; see [`docs/api-minimal.md`](docs/api-minimal.md))
 - `GET|POST /api/projects/{id}/harness-sessions` · `GET .../orchestrator` · `PATCH .../{sessionID}/binding` · `POST .../{sessionID}/{heartbeat|yield|drain|complete-delivery|stop}` · `POST .../{sessionID}/controls/{kind}` — durable managed/unmanaged harness control plane with explicit hierarchy/ticket binding, attributed full-FIFO inbox delivery, and typed owned controls (PAI-848 / PAI-903; see [`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md))
 - `POST /api/issues/{id}/implement` · `GET /api/issues/{id}/runs` · `GET|PATCH /api/runs/{id}` · `GET /api/projects/{id}/runners` — "Implement this" run lifecycle (PAI-605; see [`docs/AGENT_INTEGRATION.md`](docs/AGENT_INTEGRATION.md))
-- `GET|POST /api/projects/{id}/baseline-batches…` — opt-in Aithema handover draft, owned `inspr.readiness.v1` probe, and immutable baseline batch mapped onto delivery attempts, lifecycle intents and owned harness controls (PAI-956)
+- `GET|POST /api/projects/{id}/baseline-batches…` — opt-in Aithema handover draft, owned `inspr.readiness.v1` probe, immutable baseline batch mapped onto delivery attempts, and the PAI-960 bridge from reviewed specification through scoped implementation/QA evidence into existing Pharos external-stage handoffs (`POST .../reconcile`; see [`docs/api-minimal.md`](docs/api-minimal.md))
 
 ## Repo-side tooling
 

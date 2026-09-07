@@ -573,6 +573,88 @@ describe('ProjectBaselineBatchSection', () => {
     expect(login.checked).toBe(false)
     app.unmount()
   })
+
+  it('shows setup-required and never renders an unconditional advance control', async () => {
+    vi.mocked(api.get).mockResolvedValue(workflowFixture({
+      active_batch: batchFixture({
+        progress: {
+          stages: [{
+            stage_key: 'deployment', applicability: 'required', weight: 15, state: 'pending', phase: '',
+            activity: '', needs_input: false, performed: false, policy_satisfied: false, stale: false, never_signaled: true,
+          }],
+          evidence_fresh: true,
+          evidence_observed: true,
+          setup_required: 'handoff_secret_mint',
+          next_action: 'mint_handoff_secret',
+          handoff: { stage_key: 'deployment', handoff_id: '01HTESTHANDOFF000000000000', state: 'offered', credential_epoch: 0, mint_required: true },
+        },
+      }),
+    }))
+    const { el, app } = mount()
+    await settle()
+    expect(el.querySelector('[data-testid="batch-setup-required"]')!.textContent).toContain('handoff_secret_mint')
+    expect(el.querySelector('[data-testid="batch-next-action"]')!.textContent).toContain('mint_handoff_secret')
+    expect(el.querySelector('[data-testid="batch-handoff"]')!.textContent).toContain('01HTESTHANDOFF000000000000')
+    expect(el.textContent).toContain('secret-file')
+    expect(el.textContent).not.toContain('Advance')
+    expect(el.querySelector('[data-testid="reconcile-handoff"]')).toBeNull()
+    expect(vi.mocked(api.post).mock.calls.filter((call) => String(call[0]).includes('/reconcile'))).toHaveLength(0)
+    app.unmount()
+  })
+
+  it('reconciles automatic authorized handoffs on load and assisted only on the bound control', async () => {
+    const automatic = batchFixture({
+      execution_mode: 'automatic',
+      progress: {
+        stages: [],
+        evidence_fresh: true,
+        evidence_observed: true,
+        next_action: 'authorize_pharos_handoff',
+      },
+    })
+    const after = batchFixture({
+      execution_mode: 'automatic',
+      progress: {
+        stages: [],
+        evidence_fresh: true,
+        evidence_observed: true,
+        setup_required: 'handoff_secret_mint',
+        next_action: 'mint_handoff_secret',
+        handoff: { stage_key: 'deployment', handoff_id: '01HAUTO0000000000000000000', state: 'offered', credential_epoch: 0, mint_required: true },
+      },
+    })
+    vi.mocked(api.get).mockResolvedValue(workflowFixture({ active_batch: automatic, draft: null }))
+    vi.mocked(api.post).mockResolvedValue(after)
+    const first = mount()
+    await settle()
+    expect(vi.mocked(api.post).mock.calls[0][0]).toBe('/projects/9/baseline-batches/batches/4/reconcile')
+    expect(first.el.querySelector('[data-testid="batch-setup-required"]')!.textContent).toContain('handoff_secret_mint')
+    first.app.unmount()
+
+    vi.mocked(api.post).mockClear()
+    vi.mocked(api.get).mockResolvedValue(workflowFixture({
+      draft: null,
+      active_batch: batchFixture({
+        execution_mode: 'assisted',
+        progress: {
+          stages: [],
+          evidence_fresh: true,
+          evidence_observed: true,
+          next_action: 'authorize_pharos_handoff',
+        },
+      }),
+    }))
+    const second = mount()
+    await settle()
+    expect(vi.mocked(api.post).mock.calls.filter((call) => String(call[0]).includes('/reconcile'))).toHaveLength(0)
+    const button = second.el.querySelector('[data-testid="reconcile-handoff"]') as HTMLButtonElement
+    expect(button).not.toBeNull()
+    expect(button.textContent).toContain('Authorize next Pharos handoff')
+    button.click()
+    await settle()
+    expect(vi.mocked(api.post).mock.calls[0][0]).toBe('/projects/9/baseline-batches/batches/4/reconcile')
+    second.app.unmount()
+  })
 })
 
 function startCalls() {

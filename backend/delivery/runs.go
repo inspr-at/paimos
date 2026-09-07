@@ -680,6 +680,13 @@ func currentPassedEvidence(ctx context.Context, q DBTX, attemptID int64, stage s
 	return out, rows.Err()
 }
 
+// IssueSpecDigestTx is the digest a specification report must present. Human
+// baseline review and implementation approval both bind this exact current
+// issue text; a worker finishing does not.
+func IssueSpecDigestTx(ctx context.Context, q DBTX, issueID int64) (string, error) {
+	return canonicalIssueSpecDigest(ctx, q, issueID)
+}
+
 func canonicalIssueSpecDigest(ctx context.Context, q DBTX, issueID int64) (string, error) {
 	var title, description, criteria string
 	if err := q.QueryRowContext(ctx, `SELECT title,description,acceptance_criteria FROM issues WHERE id=? AND deleted_at IS NULL`, issueID).

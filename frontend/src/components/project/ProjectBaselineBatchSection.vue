@@ -9,6 +9,7 @@ import {
   getBaselineWorkflow,
   importBaselineHandover,
   patchBaselineDraft,
+  reconcileBaselineBatch,
   requestBaselineReadiness,
   reviewBaselineDraft,
   setBaselineStreamEnabled,
@@ -32,6 +33,7 @@ const workflow = ref<Workflow | null>(null)
 const handoverText = ref('')
 const confirmStart = ref(false)
 const busy = ref(false)
+const reconciled = ref<Set<number>>(new Set())
 const mode = ref<'manual' | 'assisted' | 'automatic'>('manual')
 const selected = ref<string[]>([])
 const runtimeId = ref('')
@@ -162,16 +164,58 @@ function hydrateFromDraft(d: Draft) {
 
 const draftUnresolved = computed(() => draft.value?.unresolved ?? [])
 
+function authorizedHandoffAction(batch: Batch) {
+  return batch.progress.next_action === 'authorize_pharos_handoff'
+    || batch.progress.next_action === 'authorize_verification_handoff'
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
     workflow.value = await getBaselineWorkflow(props.projectId)
     if (workflow.value.draft) hydrateFromDraft(workflow.value.draft)
+    await maybeReconcileAutomatic()
   } catch (e) {
     error.value = errMsg(e, 'Could not load delivery draft.')
   } finally {
     loading.value = false
+  }
+}
+
+async function maybeReconcileAutomatic() {
+  const batch = workflow.value?.active_batch
+  if (!props.canWrite || !batch || batch.execution_mode !== 'automatic' || !authorizedHandoffAction(batch)) return
+  if (reconciled.value.has(batch.id)) return
+  reconciled.value.add(batch.id)
+  try {
+    const updated = await reconcileBaselineBatch(props.projectId, batch.id)
+    applyBatch(updated)
+  } catch (e) {
+    error.value = errMsg(e, 'Could not apply the currently authorized Pharos handoff.')
+  }
+}
+
+function applyBatch(updated: Batch) {
+  const current = workflow.value
+  if (!current) return
+  workflow.value = {
+    ...current,
+    active_batch: current.active_batch?.id === updated.id ? updated : current.active_batch,
+    batches: current.batches.map((row) => (row.id === updated.id ? updated : row)),
+  }
+}
+
+async function reconcileAuthorized(batch: Batch) {
+  if (!authorizedHandoffAction(batch)) return
+  busy.value = true
+  error.value = ''
+  try {
+    applyBatch(await reconcileBaselineBatch(props.projectId, batch.id))
+  } catch (e) {
+    error.value = errMsg(e, 'Could not apply the currently authorized Pharos handoff.')
+  } finally {
+    busy.value = false
   }
 }
 
@@ -448,6 +492,16 @@ function stateLabel(d: Draft | null, b: Batch | null) {
       <p v-if="active.progress.blocking_reason" class="bb-unresolved" data-testid="batch-blocking-reason">
         Blocked: {{ active.progress.blocking_reason }}
       </p>
+      <p v-if="active.progress.setup_required" class="bb-unresolved" data-testid="batch-setup-required">
+        Setup required: {{ active.progress.setup_required }}. Use the existing operator external-stage CLI; this screen never carries handoff secrets.
+      </p>
+      <p v-if="active.progress.next_action" class="bb-meta" data-testid="batch-next-action">
+        Next: {{ active.progress.next_action }}
+      </p>
+      <p v-if="active.progress.handoff" class="bb-meta" data-testid="batch-handoff">
+        Handoff {{ active.progress.handoff.handoff_id }} · {{ active.progress.handoff.state }}
+        <span v-if="active.progress.handoff.mint_required"> · mint required on the owner-only secret-file path</span>
+      </p>
       <ul class="bb-forecasts" data-testid="batch-forecasts">
         <li v-for="f in active.forecasts" :key="f.kind + f.subject">
           {{ forecastLine(f, batchForecastCtx(active)) }} <span class="bb-meta">({{ f.basis }})</span>
@@ -472,6 +526,16 @@ function stateLabel(d: Draft | null, b: Batch | null) {
           @click="control(active, option.action)"
         >
           {{ option.action }}
+        </button>
+        <button
+          v-if="active.execution_mode === 'assisted' && authorizedHandoffAction(active)"
+          type="button"
+          class="btn btn-sm"
+          data-testid="reconcile-handoff"
+          :disabled="busy"
+          @click="reconcileAuthorized(active)"
+        >
+          Authorize next Pharos handoff
         </button>
       </div>
       <p v-for="option in unavailableControls(active)" :key="`why-${option.action}`" class="bb-meta">

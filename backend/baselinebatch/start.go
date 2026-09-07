@@ -173,6 +173,9 @@ func (s *Service) Start(ctx context.Context, actor Actor, projectID int64, req S
 	if err != nil {
 		return Batch{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
+	if err := s.recordSpecificationEvidenceTx(ctx, tx, effects, actor, issueID, attempt.AttemptNumber, "batch:"+req.IdempotencyKey); err != nil {
+		return Batch{}, err
+	}
 
 	intentID := ""
 	if req.ExecutionMode != ModeManual {
@@ -241,7 +244,44 @@ func (s *Service) Start(ctx context.Context, actor Actor, projectID int64, req S
 		return Batch{}, err
 	}
 	effects.Dispatch(ctx)
+	if stored.ExecutionMode != ModeManual {
+		if reconciled, recErr := s.Reconcile(ctx, actor, projectID, batch.ID); recErr == nil {
+			return reconciled, nil
+		}
+	}
 	return batch, nil
+}
+
+// recordSpecificationEvidenceTx writes the only completion the human review
+// actually established: specification. Implementation, QA, deployment and
+// verification stay pending until their own scoped evidence arrives.
+func (s *Service) recordSpecificationEvidenceTx(ctx context.Context, tx *sql.Tx, effects *delivery.Effects, actor Actor, issueID, attemptNumber int64, idempotencyKey string) error {
+	reporter := delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", actor.UserID)}
+	spec, err := s.Delivery.StartStageRetryTx(ctx, tx, effects, delivery.StageStartRequest{
+		IssueID: issueID, AttemptNumber: attemptNumber, StageKey: delivery.StageSpecification, Reporter: reporter,
+		ReasonCode: "baseline_review", ReasonText: "Human review of the immutable Aithema baseline",
+		IdempotencyKey: idempotencyKey + ":spec:start",
+	})
+	if err != nil {
+		return fmt.Errorf("%w: specification start: %v", ErrUnavailable, err)
+	}
+	digest, err := delivery.IssueSpecDigestTx(ctx, tx, issueID)
+	if err != nil {
+		return fmt.Errorf("%w: specification digest: %v", ErrUnavailable, err)
+	}
+	if _, err := s.Delivery.ReportStageTx(ctx, tx, effects, delivery.StageReport{
+		IssueID: issueID, AttemptNumber: attemptNumber, StageKey: delivery.StageSpecification,
+		ExecutionNumber: spec.ExecutionNumber, AuthorityEpoch: spec.AuthorityEpoch, Reporter: reporter,
+		IdempotencyKey: idempotencyKey + ":spec:report", Kind: "semantic", State: "succeeded",
+		Activity: "Reviewed baseline accepted as specification",
+		Evidence: []delivery.Evidence{{
+			Type: "spec_acceptance", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: digest,
+		}},
+		ReasonCode: "baseline_review",
+	}); err != nil {
+		return fmt.Errorf("%w: specification evidence: %v", ErrUnavailable, err)
+	}
+	return nil
 }
 
 // submitStartIntent routes the reviewed selection through the one lifecycle

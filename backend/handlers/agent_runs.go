@@ -180,8 +180,8 @@ func getAgentRunByID(id int64) (*AgentRun, error) {
 // issue's project inside the caller's transaction, so this deliberately does
 // not trust the run's requester/claimer or its historical project_id.
 // Projectless issues retain the existing RequireIssueEdit orphan semantics.
-func deliveryStoreForRequest(r *http.Request) *delivery.Store {
-	return delivery.NewStore(db.DB, delivery.Options{Freshness: deliveryFreshnessPolicy(), Observer: agentmode.NotifyChange, Authorizer: delivery.AuthorizerFunc(
+func deliveryAuthorizerForRequest(r *http.Request) delivery.Authorizer {
+	return delivery.AuthorizerFunc(
 		func(_ context.Context, req delivery.AuthorizationRequest) error {
 			user := auth.GetUser(r)
 			if user == nil || user.Status != "active" {
@@ -192,7 +192,11 @@ func deliveryStoreForRequest(r *http.Request) *delivery.Store {
 			}
 			return nil
 		},
-	)})
+	)
+}
+
+func deliveryStoreForRequest(r *http.Request) *delivery.Store {
+	return delivery.NewStore(db.DB, delivery.Options{Freshness: deliveryFreshnessPolicy(), Observer: agentmode.NotifyChange, Authorizer: deliveryAuthorizerForRequest(r)})
 }
 
 func deliveryFreshnessPolicy() delivery.FreshnessPolicy {

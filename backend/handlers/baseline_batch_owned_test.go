@@ -497,14 +497,14 @@ func TestBaselineBatchOwnedExecution(t *testing.T) {
 	if active.ActiveBatch.Progress.SessionID == "" || active.ActiveBatch.Progress.IntentState != "completed" {
 		t.Fatalf("progress not derived from the owned feeds: %+v", active.ActiveBatch.Progress)
 	}
-	if active.ActiveBatch.Progress.EvidenceObserved {
-		t.Fatalf("no stage has signalled yet, but evidence is claimed observed: %+v", active.ActiveBatch.Progress)
+	if !active.ActiveBatch.Progress.EvidenceObserved {
+		t.Fatalf("specification evidence missing after owned start: %+v", active.ActiveBatch.Progress)
 	}
 	measured, guess := forecastKinds(active.ActiveBatch.Forecasts)
 	if measured == nil || guess == nil {
 		t.Fatalf("forecasts=%+v", active.ActiveBatch.Forecasts)
 	}
-	if measured.Percent != 0 || measured.Label != "observed" || measured.Observed {
+	if measured.Percent != 10 || measured.Label != "observed" || !measured.Observed {
 		t.Fatalf("measured forecast misreports evidence: %+v", measured)
 	}
 	if measured.EducatedETASeconds == nil || measured.EducatedETALabel != "guessed" {

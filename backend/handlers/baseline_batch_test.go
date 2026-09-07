@@ -202,7 +202,7 @@ func TestBaselineBatchVerticalSlice(t *testing.T) {
 	if guess == nil || guess.Label != "guessed" || guess.Observed {
 		t.Fatalf("educated guess=%+v", guess)
 	}
-	if measured == nil || measured.Label != "observed" || measured.Percent != 0 || measured.Observed {
+	if measured == nil || measured.Label != "observed" || measured.Percent != 10 || !measured.Observed {
 		t.Fatalf("measured forecast=%+v", measured)
 	}
 	if measured.ETASeconds != nil {
@@ -216,6 +216,19 @@ func TestBaselineBatchVerticalSlice(t *testing.T) {
 	}
 	if len(batch.Progress.Stages) != 5 {
 		t.Fatalf("canonical stages=%d", len(batch.Progress.Stages))
+	}
+	spec := stageByKey(batch.Progress.Stages, "specification")
+	if spec == nil || !spec.Satisfied || spec.NeverSignaled {
+		t.Fatalf("reviewed start did not record specification evidence: %+v", batch.Progress.Stages)
+	}
+	if batch.Progress.NextAction != baselinebatch.NextActionImplementationEvidence {
+		t.Fatalf("next_action=%q", batch.Progress.NextAction)
+	}
+	for _, key := range []string{"implementation", "qa", "deployment", "verification"} {
+		stage := stageByKey(batch.Progress.Stages, key)
+		if stage == nil || stage.Satisfied {
+			t.Fatalf("start treated %s as done: %+v", key, stage)
+		}
 	}
 
 	replay := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/start", projectID, draft.ID), startBody)
@@ -583,6 +596,53 @@ func TestBaselineBatchStartDelimiterCollidingMemberships(t *testing.T) {
 	}
 }
 
+func TestBaselineBatchReconcileIsNotUnconditionalAdvance(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Reconcile bridge", "key": "RCB"}))
+	optIn(t, ts, projectID)
+	handover, _ := validHandover(t)
+	imported := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/import", projectID), map[string]any{
+		"handover": json.RawMessage(handover),
+	})
+	if imported.StatusCode != 201 {
+		t.Fatalf("import=%d %s", imported.StatusCode, baselineReadBody(imported))
+	}
+	var draft baselinebatch.Draft
+	decode(t, imported, &draft)
+	review := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/review", projectID, draft.ID), map[string]any{
+		"execution_mode":            "manual",
+		"selected_requirement_refs": []string{"req.login"},
+	})
+	decode(t, review, &draft)
+	started := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/start", projectID, draft.ID), map[string]any{
+		"idempotency_key":           "reconcile-manual-start",
+		"review_id":                 *draft.ReviewID,
+		"draft_revision":            draft.Revision,
+		"confirm":                   true,
+		"content_digest":            draft.Baseline.ContentDigest,
+		"revision_seal":             draft.Baseline.RevisionSeal,
+		"execution_mode":            "manual",
+		"selected_requirement_refs": []string{"req.login"},
+		"worker":                    map[string]any{},
+	})
+	if started.StatusCode != 200 {
+		t.Fatalf("start=%d %s", started.StatusCode, baselineReadBody(started))
+	}
+	var batch baselinebatch.Batch
+	decode(t, started, &batch)
+	reconciled := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/reconcile", projectID, batch.ID), map[string]any{})
+	if reconciled.StatusCode != 200 {
+		t.Fatalf("manual reconcile=%d %s", reconciled.StatusCode, baselineReadBody(reconciled))
+	}
+	decode(t, reconciled, &batch)
+	if batch.Progress.Handoff != nil {
+		t.Fatalf("manual reconcile created a handoff: %+v", batch.Progress.Handoff)
+	}
+	if batch.Progress.NextAction != baselinebatch.NextActionImplementationEvidence {
+		t.Fatalf("manual reconcile next_action=%q", batch.Progress.NextAction)
+	}
+}
+
 func validHandover(t *testing.T) ([]byte, []baselinebatch.Requirement) {
 	t.Helper()
 	reqs := []baselinebatch.Requirement{{
@@ -740,10 +800,10 @@ func TestBaselineBatchExportSafeJSON(t *testing.T) {
 
 	var payload struct {
 		Baseline struct {
-			ContentDigest string                       `json:"content_digest"`
-			RevisionSeal  string                       `json:"revision_seal"`
-			Requirements  []baselinebatch.Requirement  `json:"requirements"`
-			Constraints   []baselinebatch.Constraint     `json:"constraints"`
+			ContentDigest string                      `json:"content_digest"`
+			RevisionSeal  string                      `json:"revision_seal"`
+			Requirements  []baselinebatch.Requirement `json:"requirements"`
+			Constraints   []baselinebatch.Constraint  `json:"constraints"`
 		} `json:"baseline"`
 	}
 	if err := json.Unmarshal([]byte(body), &payload); err != nil {
@@ -763,4 +823,13 @@ func TestBaselineBatchExportSafeJSON(t *testing.T) {
 	if roundtripSeal != seal || payload.Baseline.RevisionSeal != seal {
 		t.Fatalf("seal roundtrip=%s stored=%s want=%s", roundtripSeal, payload.Baseline.RevisionSeal, seal)
 	}
+}
+
+func stageByKey(stages []baselinebatch.StageView, key string) *baselinebatch.StageView {
+	for i := range stages {
+		if stages[i].StageKey == key {
+			return &stages[i]
+		}
+	}
+	return nil
 }

@@ -116,6 +116,17 @@ export type Progress = {
   evidence_observed: boolean
   freshness_as_of?: string
   blocking_reason?: string
+  setup_required?: string
+  next_action?: string
+  handoff?: HandoffView | null
+}
+
+export type HandoffView = {
+  stage_key: string
+  handoff_id: string
+  state: string
+  credential_epoch: number
+  mint_required: boolean
 }
 
 export type ControlOption = {
@@ -210,4 +221,8 @@ export function controlBaselineBatch(projectId: number, batchId: number, action:
     action,
     request_key: requestKey,
   })
+}
+
+export function reconcileBaselineBatch(projectId: number, batchId: number) {
+  return api.post<Batch>(`/projects/${projectId}/baseline-batches/batches/${batchId}/reconcile`, {})
 }

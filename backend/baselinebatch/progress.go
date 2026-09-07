@@ -130,54 +130,61 @@ func (s *Service) batchState(ctx context.Context, tx *sql.Tx, stored storedBatch
 	complete := required > 0 && satisfied == required
 	switch {
 	case stored.ControlState == ControlCancelled:
-		return BatchCancelled, progress, snapshot, nil
+		return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchCancelled)
 	case complete:
-		return BatchCompleted, progress, snapshot, nil
+		return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchCompleted)
 	case stored.ControlState == ControlPaused:
 		progress.BlockingReason = stored.ControlReason
-		return BatchPaused, progress, snapshot, nil
+		return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchPaused)
 	case snapshot.Failed || snapshot.Cancelled:
 		progress.BlockingReason = "delivery_attempt_" + snapshot.State
-		return BatchBlocked, progress, snapshot, nil
+		return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchBlocked)
 	}
 	if stored.ExecutionMode == ModeManual {
 		if blocked {
 			progress.BlockingReason = "stage_needs_input"
-			return BatchBlocked, progress, snapshot, nil
+			return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchBlocked)
 		}
-		return BatchActive, progress, snapshot, nil
+		return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchActive)
 	}
 	switch execution.IntentState {
 	case "requested", "claimed":
-		return BatchQueued, progress, snapshot, nil
+		return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchQueued)
 	case "executing":
-		return BatchActive, progress, snapshot, nil
+		return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchActive)
 	case "completed":
 		switch execution.SessionPhase {
 		case "working", "yielded":
 			if blocked {
 				progress.BlockingReason = "stage_needs_input"
-				return BatchBlocked, progress, snapshot, nil
+				return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchBlocked)
 			}
-			return BatchActive, progress, snapshot, nil
+			return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchActive)
 		case "":
 			progress.BlockingReason = "owned_session_unreported"
-			return BatchBlocked, progress, snapshot, nil
+			return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchBlocked)
 		default:
 			// The worker's process is gone while required stages are still
 			// unsatisfied. That is unfinished delivery, not a delivered product.
 			progress.BlockingReason = "worker_stopped_before_delivery_evidence"
-			return BatchBlocked, progress, snapshot, nil
+			return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchBlocked)
 		}
 	case "failed", "expired", "cancelled":
 		progress.BlockingReason = "lifecycle_" + execution.IntentState
 		if execution.IntentReason != "" {
 			progress.BlockingReason += "_" + execution.IntentReason
 		}
-		return BatchBlocked, progress, snapshot, nil
+		return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchBlocked)
 	}
 	progress.BlockingReason = "start_intent_missing"
-	return BatchBlocked, progress, snapshot, nil
+	return s.finishBatchState(ctx, tx, stored, snapshot, progress, BatchBlocked)
+}
+
+func (s *Service) finishBatchState(ctx context.Context, tx *sql.Tx, stored storedBatch, snapshot delivery.Snapshot, progress Progress, state string) (string, Progress, delivery.Snapshot, error) {
+	if err := s.annotateBridge(ctx, tx, stored, snapshot, &progress, &state); err != nil {
+		return BatchBlocked, progress, snapshot, err
+	}
+	return state, progress, snapshot, nil
 }
 
 // forecasts always returns the durable educated guess plus everything the real
