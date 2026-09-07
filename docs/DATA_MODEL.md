@@ -674,6 +674,7 @@ The post-M101 migration ledger is active in `backend/db/db.go` and should stay r
 | M178 | rebuilt `agent_messages` | Replace only the message-body guard so canonical multiline bytes are accepted while the scoped secret-like-content guard, rows, foreign keys, indexes, triggers, and autoincrement high-water are preserved. |
 | M179 | `agent_message_delivery_recoveries` | Immutable, bounded recovery history for never-claimed deliveries whose managed target closed; the canonical message and original delivery target snapshot remain unchanged (PAI-923). |
 | M180 | `harness_conversation_bindings`, `harness_message_receipts` | One product conversation per human and exact harness generation, plus immutable idempotency receipts for authenticated human `simple` and `steer` deliveries (PAI-926). |
+| M183 | rebuilt `trg_harness_sessions_provenance_shape_insert` | Adds closed `pi_context` account class for operator-selected Pi `PI_CODING_AGENT_DIR` context, distinct from Codex/Claude provider identity labels and from opaque `account_key` (PAI-957). |
 
 M176-M180 describe the database surface in builds that include PAI-917. Runtime
 workflows using that surface require matching PAI-917 server, CLI, and daemon
@@ -850,6 +851,12 @@ cannot outlive the ownership that produced it. The row is insert-only
 
 INSPR gating is this path only, and only after `projects.inspr_stream_enabled`
 is set by an authorized human — legacy projects do not require a baseline.
+
+### Owned Pi selected context (M183 — PAI-957)
+
+`account_label=pi_context` records that a managed session bound an operator
+registry key to a protected Pi agent directory. It is not a verified provider
+account id. Opaque `account_key` remains distinct from that class label.
 
 ---
 

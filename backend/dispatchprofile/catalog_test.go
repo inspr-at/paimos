@@ -7,12 +7,19 @@ import "testing"
 
 func TestCatalogIsStableClosedAndDetached(t *testing.T) {
 	profiles := List()
-	if len(profiles) != 7 {
+	if len(profiles) != 8 {
 		t.Fatalf("profile count = %d", len(profiles))
 	}
+	var sawPi bool
 	for index, profile := range profiles {
 		if err := Validate(profile); err != nil {
 			t.Fatalf("profile %q: %v", profile.ID, err)
+		}
+		if profile.ID == "pi-anthropic-sonnet-high" {
+			sawPi = true
+			if profile.Harness != "pi" {
+				t.Fatalf("pi profile harness=%q", profile.Harness)
+			}
 		}
 		if index > 0 && profiles[index-1].ID >= profile.ID {
 			t.Fatal("catalog is not in stable id order")
@@ -21,6 +28,9 @@ func TestCatalogIsStableClosedAndDetached(t *testing.T) {
 		if err != nil || resolved != profile {
 			t.Fatalf("resolve %q = %#v, %v", profile.ID, resolved, err)
 		}
+	}
+	if !sawPi {
+		t.Fatal("catalog lost the human-selected Pi profile")
 	}
 	profiles[0].Model = "tampered"
 	if fresh := List(); fresh[0].Model == "tampered" {

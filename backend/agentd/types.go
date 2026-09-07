@@ -16,6 +16,11 @@ import (
 const (
 	AdapterCodex  = "codex"
 	AdapterClaude = "claude"
+	AdapterPi     = "pi"
+
+	// AccountPiContext is the closed class for an operator-selected Pi
+	// PI_CODING_AGENT_DIR. It is not a verified provider identity.
+	AccountPiContext = "pi_context"
 
 	maxPromptBytes = 256 << 10
 	maxTextBytes   = 64 << 10
@@ -82,6 +87,8 @@ type StartRequest struct {
 	DispatchProfileID      string                   `json:"dispatch_profile_id,omitempty"`
 	DispatchProfileVersion string                   `json:"dispatch_profile_version,omitempty"`
 	ResolvedProfile        *dispatchprofile.Profile `json:"-"`
+	queue                  *piQueueStore            `json:"-"`
+	generation             string                   `json:"-"`
 }
 
 type AdapterEvent struct {
@@ -211,6 +218,16 @@ type Session struct {
 	HeartbeatAt         time.Time                `json:"heartbeat_at"`
 	ExitedAt            *time.Time               `json:"exited_at,omitempty"`
 	Reporter            ReporterState            `json:"reporter,omitempty"`
+}
+
+// QueueRetentionReport is the content-free operator view of owned Pi queue
+// retention. Exact instruction text stays owner-private in HeldQueue and is
+// never copied into this report, receipts, status, or logs.
+type QueueRetentionReport struct {
+	Generation string `json:"generation"`
+	Outcome    string `json:"outcome"`
+	Steering   int    `json:"steering"`
+	FollowUp   int    `json:"follow_up"`
 }
 
 type ReporterState struct {

@@ -122,6 +122,24 @@ describe('worker fleet ticket companion', () => {
     await expect(loadWorkerFleetTicket(6, 907)).rejects.toThrow('invalid worker fleet response')
   })
 
+  it('loads a valid pi_context worker and still rejects unknown account labels', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      schema_version: 2,
+      sample_truncated: false,
+      workers: [worker({ account_label: 'pi_context' })],
+    })
+    expect((await loadWorkerFleetTicket(6, 907)).workers[0]).toMatchObject({
+      accountLabel: 'pi_context',
+    })
+
+    vi.mocked(api.get).mockResolvedValue({
+      schema_version: 2,
+      sample_truncated: false,
+      workers: [worker({ account_label: 'not-a-label' })],
+    })
+    await expect(loadWorkerFleetTicket(6, 907)).rejects.toThrow('invalid worker fleet response')
+  })
+
   it('rejects frozen v1 responses on the explicit v2 companion', async () => {
     vi.mocked(api.get).mockResolvedValue({
       schema_version: 1,

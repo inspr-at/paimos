@@ -29,6 +29,7 @@ export interface WorkerFleetContext {
     | 'claude_ai_team'
     | 'claude_ai_enterprise'
     | 'console'
+    | 'pi_context'
   managementMode: 'managed' | 'unmanaged'
   runtimeProvenanceTrust: 'managed_reporter' | 'untrusted'
   shape: WorkerShape
@@ -53,6 +54,7 @@ const ACCOUNT_LABELS = new Set([
   'claude_ai_team',
   'claude_ai_enterprise',
   'console',
+  'pi_context',
 ])
 const OUTPUT_KINDS = new Set(['unclassified', 'delivery', 'investigation_evidence'])
 const MANAGEMENT_MODES = new Set(['managed', 'unmanaged'])

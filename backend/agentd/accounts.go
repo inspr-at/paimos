@@ -171,3 +171,81 @@ func applyCodexHome(env []string, home string) []string {
 	}
 	return append(out, "CODEX_HOME="+home)
 }
+
+const maxPiAccountRegistryBytes = 64 << 10
+
+// PiAccountRegistry maps opaque non-secret keys to protected Pi agent
+// directories. Directories never enter public start requests or receipts.
+type PiAccountRegistry struct {
+	byKey map[string]piAccount
+}
+
+type piAccount struct {
+	agentDir string
+}
+
+type piAccountRegistryFile struct {
+	Accounts []piAccountRegistryEntry `json:"accounts"`
+}
+
+type piAccountRegistryEntry struct {
+	Key      string `json:"key"`
+	AgentDir string `json:"agent_dir"`
+}
+
+// ParsePiAccountRegistry loads an operator-controlled Pi context registry.
+// Public APIs never receive these directories; callers pass only the opaque key.
+func ParsePiAccountRegistry(raw []byte) (PiAccountRegistry, error) {
+	if len(raw) == 0 || len(raw) > maxPiAccountRegistryBytes {
+		return PiAccountRegistry{}, errors.New("pi account registry is unavailable")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var file piAccountRegistryFile
+	if decoder.Decode(&file) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(file.Accounts) == 0 || len(file.Accounts) > 16 {
+		return PiAccountRegistry{}, errors.New("pi account registry is invalid")
+	}
+	out := PiAccountRegistry{byKey: map[string]piAccount{}}
+	dirs := map[string]string{}
+	for _, entry := range file.Accounts {
+		key := strings.TrimSpace(entry.Key)
+		if !validAccountKey(key) || out.byKey[key].agentDir != "" {
+			return PiAccountRegistry{}, errors.New("pi account registry key is invalid")
+		}
+		dir, err := canonicalPiAgentDir(entry.AgentDir)
+		if err != nil {
+			return PiAccountRegistry{}, err
+		}
+		if dirs[dir] != "" {
+			return PiAccountRegistry{}, errors.New("pi account registry is invalid")
+		}
+		dirs[dir] = key
+		out.byKey[key] = piAccount{agentDir: dir}
+	}
+	return out, nil
+}
+
+func canonicalPiAgentDir(value string) (string, error) {
+	if !filepath.IsAbs(value) || filepath.Clean(value) != value || strings.ContainsAny(value, "\x00\r\n") {
+		return "", errors.New("pi account directory is invalid")
+	}
+	canonical, err := filepath.EvalSymlinks(value)
+	if err != nil || !filepath.IsAbs(canonical) || filepath.Clean(canonical) != canonical || strings.ContainsAny(canonical, "\x00\r\n") {
+		return "", errors.New("pi account directory cannot be pinned")
+	}
+	info, err := os.Stat(canonical)
+	if err != nil || !info.IsDir() {
+		return "", errors.New("pi account directory is not a directory")
+	}
+	return canonical, nil
+}
+
+func (r PiAccountRegistry) lookup(key string) (piAccount, bool) {
+	account, ok := r.byKey[key]
+	return account, ok
+}
+
+func (r PiAccountRegistry) HasAccount(key string) bool {
+	_, ok := r.lookup(key)
+	return ok
+}
