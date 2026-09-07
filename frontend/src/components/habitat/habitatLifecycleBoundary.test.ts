@@ -109,7 +109,7 @@ describe('Habitat lifecycle response authority', () => {
     ])
       expect(() => parseHabitatRuntimes({ schema_version: 1, runtimes: [changed] }, 1)).toThrow()
   })
-  it('accepts pi_context runtimes and requests and still rejects unknown labels and closed keys', () => {
+  it('accepts pi_context and cursor_context runtimes and requests and still rejects unknown labels and closed keys', () => {
     const piRuntime = { ...runtime, account_label: 'pi_context' }
     expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [piRuntime] }, 1)[0].account_label).toBe(
       'pi_context',
@@ -123,6 +123,13 @@ describe('Habitat lifecycle response authority', () => {
         account_label: 'pi_context',
       }).state,
     ).toBe('requested')
+    const cursorRuntime = { ...runtime, account_label: 'cursor_context' }
+    expect(
+      parseHabitatRuntimes({ schema_version: 1, runtimes: [cursorRuntime] }, 1)[0].account_label,
+    ).toBe('cursor_context')
+    expect(parseHabitatRequest({ ...request, account_label: 'cursor_context' }).account_label).toBe(
+      'cursor_context',
+    )
     expect(() =>
       parseHabitatRuntimes(
         { schema_version: 1, runtimes: [{ ...runtime, account_label: 'not-a-label' }] },
@@ -135,6 +142,13 @@ describe('Habitat lifecycle response authority', () => {
         ...request,
         account_label: 'pi_context',
         account_key: 'pi_context',
+      }),
+    ).toThrow()
+    expect(() =>
+      parseHabitatRequest({
+        ...request,
+        account_label: 'cursor_context',
+        account_key: 'cursor_context',
       }),
     ).toThrow()
   })

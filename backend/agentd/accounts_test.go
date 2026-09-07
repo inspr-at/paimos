@@ -60,7 +60,7 @@ func TestApplyCodexHomeReplacesInheritedHomeAndPreservesAllowlist(t *testing.T) 
 }
 
 func TestValidAccountKeyRejectsClassLabelsAndPaths(t *testing.T) {
-	if validAccountKey("chatgpt") || validAccountKey("api_key") || validAccountKey("/tmp/codex") || validAccountKey("local_probe") || validAccountKey("pi_context") || !validAccountKey("coordinator") {
+	if validAccountKey("chatgpt") || validAccountKey("api_key") || validAccountKey("/tmp/codex") || validAccountKey("local_probe") || validAccountKey("pi_context") || validAccountKey("cursor_context") || !validAccountKey("coordinator") {
 		t.Fatal("account key validation drifted")
 	}
 }
@@ -112,5 +112,46 @@ func TestParsePiAccountRegistryPinsOpaqueKeysAndRejectsCodexShape(t *testing.T) 
 	}
 	if _, err := ParsePiAccountRegistry([]byte(`{"accounts":[{"key":"pi_context","agent_dir":"` + dir + `"}]}`)); err == nil {
 		t.Fatal("accepted reserved pi_context key")
+	}
+}
+
+func TestParseCursorAccountRegistryPinsOpaqueKeysAndRejectsHomes(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{
+		"accounts": []map[string]string{{"key": "operator-cursor", "email": "cursor-operator@example.invalid"}},
+	})
+	registry, err := ParseCursorAccountRegistry(raw)
+	if err != nil || !registry.HasAccount("operator-cursor") || registry.HasAccount("chatgpt") {
+		t.Fatalf("registry=%+v err=%v", registry, err)
+	}
+	account, ok := registry.lookup("operator-cursor")
+	if !ok || account.email != "cursor-operator@example.invalid" || account.userID != "" {
+		t.Fatalf("lookup=%+v ok=%t", account, ok)
+	}
+	withUser, _ := json.Marshal(map[string]any{
+		"accounts": []map[string]string{{"key": "operator-cursor", "email": "cursor-operator@example.invalid", "user_id": "usr_fixture"}},
+	})
+	registry, err = ParseCursorAccountRegistry(withUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, ok = registry.lookup("operator-cursor")
+	if !ok || account.userID != "usr_fixture" {
+		t.Fatalf("user id lookup=%+v ok=%t", account, ok)
+	}
+	home := t.TempDir()
+	codexShaped, _ := json.Marshal(map[string]any{
+		"accounts": []map[string]string{{"key": "coordinator", "home": home, "email": "one@example.invalid"}},
+	})
+	if _, err := ParseCursorAccountRegistry(codexShaped); err == nil {
+		t.Fatal("cursor registry accepted a Codex registry shape")
+	}
+	piShaped, _ := json.Marshal(map[string]any{
+		"accounts": []map[string]string{{"key": "operator-pi", "agent_dir": home}},
+	})
+	if _, err := ParseCursorAccountRegistry(piShaped); err == nil {
+		t.Fatal("cursor registry accepted a Pi registry shape")
+	}
+	if _, err := ParseCursorAccountRegistry([]byte(`{"accounts":[{"key":"cursor_context","email":"cursor-operator@example.invalid"}]}`)); err == nil {
+		t.Fatal("accepted reserved cursor_context key")
 	}
 }

@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 183
+const latestSchemaVersion = 184
 
 func TestMigration177PreservesAttentionLedgerAndSequence(t *testing.T) {
 	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m177.db")+"?_txlock=immediate")

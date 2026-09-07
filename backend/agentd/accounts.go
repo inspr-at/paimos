@@ -249,3 +249,90 @@ func (r PiAccountRegistry) HasAccount(key string) bool {
 	_, ok := r.lookup(key)
 	return ok
 }
+
+const maxCursorAccountRegistryBytes = 64 << 10
+
+// CursorAccountRegistry maps opaque non-secret keys to expected Cursor
+// identity. Emails and user ids stay in the operator-local registry; they
+// never enter public start requests, profiles, or receipts. Tokens remain in
+// the vendor store: this mapping does not copy auth or set HOME.
+type CursorAccountRegistry struct {
+	byKey map[string]cursorAccount
+}
+
+type cursorAccount struct {
+	email  string
+	userID string
+}
+
+type cursorAccountRegistryFile struct {
+	Accounts []cursorAccountRegistryEntry `json:"accounts"`
+}
+
+type cursorAccountRegistryEntry struct {
+	Key    string `json:"key"`
+	Email  string `json:"email"`
+	UserID string `json:"user_id,omitempty"`
+}
+
+// ParseCursorAccountRegistry loads an operator-controlled Cursor identity
+// registry. Public APIs never receive these emails; callers pass only the
+// opaque key.
+func ParseCursorAccountRegistry(raw []byte) (CursorAccountRegistry, error) {
+	if len(raw) == 0 || len(raw) > maxCursorAccountRegistryBytes {
+		return CursorAccountRegistry{}, errors.New("cursor account registry is unavailable")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var file cursorAccountRegistryFile
+	if decoder.Decode(&file) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(file.Accounts) == 0 || len(file.Accounts) > 16 {
+		return CursorAccountRegistry{}, errors.New("cursor account registry is invalid")
+	}
+	out := CursorAccountRegistry{byKey: map[string]cursorAccount{}}
+	emails := map[string]string{}
+	userIDs := map[string]string{}
+	for _, entry := range file.Accounts {
+		key := strings.TrimSpace(entry.Key)
+		if !validAccountKey(key) || out.byKey[key].email != "" {
+			return CursorAccountRegistry{}, errors.New("cursor account registry key is invalid")
+		}
+		email := strings.TrimSpace(entry.Email)
+		if !validExpectedEmail(email) {
+			return CursorAccountRegistry{}, errors.New("cursor account registry identity is invalid")
+		}
+		userID := strings.TrimSpace(entry.UserID)
+		if userID != "" && !validCursorUserID(userID) {
+			return CursorAccountRegistry{}, errors.New("cursor account registry identity is invalid")
+		}
+		folded := strings.ToLower(email)
+		if emails[folded] != "" {
+			return CursorAccountRegistry{}, errors.New("cursor account registry is invalid")
+		}
+		if userID != "" && userIDs[userID] != "" {
+			return CursorAccountRegistry{}, errors.New("cursor account registry is invalid")
+		}
+		emails[folded] = key
+		if userID != "" {
+			userIDs[userID] = key
+		}
+		out.byKey[key] = cursorAccount{email: email, userID: userID}
+	}
+	return out, nil
+}
+
+func validCursorUserID(value string) bool {
+	if value == "" || len(value) > 128 || strings.ContainsAny(value, " \t\x00\r\n") {
+		return false
+	}
+	return true
+}
+
+func (r CursorAccountRegistry) lookup(key string) (cursorAccount, bool) {
+	account, ok := r.byKey[key]
+	return account, ok
+}
+
+func (r CursorAccountRegistry) HasAccount(key string) bool {
+	_, ok := r.lookup(key)
+	return ok
+}

@@ -23,8 +23,13 @@ func TestCatalogIsStableClosedAndDetached(t *testing.T) {
 		}
 		if profile.ID == "cursor-composer" {
 			sawCursor = true
-			if profile.Harness != "cursor" || profile.Model != "composer" {
+			if profile.Harness != "cursor" || profile.Model != "composer-2.5" || profile.Effort != "default" {
 				t.Fatalf("cursor profile=%#v", profile)
+			}
+		}
+		if profile.ID == "cursor-grok" {
+			if profile.Harness != "cursor" || profile.Model != "grok-4.6" || profile.Effort != "high" {
+				t.Fatalf("cursor grok profile=%#v", profile)
 			}
 		}
 		if index > 0 && profiles[index-1].ID >= profile.ID {
@@ -68,5 +73,9 @@ func TestValidateSnapshotDoesNotRequireLiveCatalogMembership(t *testing.T) {
 	}
 	if _, err := Resolve(profile.ID, profile.Version, profile.Harness); err == nil {
 		t.Fatal("retired snapshot unexpectedly became a live catalog entry")
+	}
+	if err := ValidateSnapshot(Profile{ID: "cursor-default", Version: "1", Harness: "codex", Model: "gpt-5.6-sol", Effort: "default",
+		MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"}); err == nil {
+		t.Fatal("default effort leaked onto a non-Cursor harness")
 	}
 }

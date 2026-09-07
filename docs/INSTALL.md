@@ -122,9 +122,12 @@ available. Override executable discovery only with absolute `--node-path` and
 
 Cursor owned sessions require the pinned operator CLI `2026.09.02-c22c1a3` and
 documented `agent acp` stdio. Optional `--cursor-path` pins that executable;
-otherwise `cursor-agent` on `PATH` is resolved once. The daemon never copies
-auth files, never passes `--api-key`, and never calls `login` / `authenticate`
-as part of ordinary start. Catalog models are included Composer/Grok only.
+otherwise `cursor-agent` on `PATH` is resolved once. Named starts require
+`--cursor-accounts` mapping opaque keys to expected email/userId; the daemon
+never copies auth files, never sets `HOME`, never passes `--api-key`, and never
+calls `login` / `authenticate` as part of ordinary start. Catalog models are
+included Composer (`composer-2.5`) and Grok (`grok-4.6` with acknowledged high)
+only.
 
 ---
 

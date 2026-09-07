@@ -23,6 +23,11 @@ const (
 	// PI_CODING_AGENT_DIR. It is not a verified provider identity.
 	AccountPiContext = "pi_context"
 
+	// AccountCursorContext is the closed class for an operator-selected
+	// Cursor identity mapping. It is not a subscription tier and is not
+	// claimed from an unkeyed status probe.
+	AccountCursorContext = "cursor_context"
+
 	maxPromptBytes = 256 << 10
 	maxTextBytes   = 64 << 10
 )

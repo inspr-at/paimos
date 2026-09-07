@@ -59,7 +59,7 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 	}
 
 	actualFlags := map[string][]string{
-		"serve":        {"instance", "socket", "codex-path", "claude-path", "node-path", "claude-sdk-path", "pi-path", "pi-accounts", "cursor-path", "report-host", "report-url", "report-api-key-file", "paimos-path"},
+		"serve":        {"instance", "socket", "codex-path", "claude-path", "node-path", "claude-sdk-path", "pi-path", "pi-accounts", "cursor-path", "cursor-accounts", "report-host", "report-url", "report-api-key-file", "paimos-path"},
 		"start":        {"instance", "socket", "adapter", "workspace", "project-id", "identity", "account-key"},
 		"status":       {"instance", "socket"},
 		"steer":        {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
@@ -247,7 +247,7 @@ func TestAgentIntercomMatrixMatchesShippedControlBoundaries(t *testing.T) {
 			continue
 		}
 		if name == "Owned Cursor (`agentd_cursor`)" {
-			for _, claim := range []string{"session/prompt", "No; requested steer", "session/cancel", "never inbox/steer"} {
+			for _, claim := range []string{"session/prompt", "No; requested steer", "session/cancel", "never inbox/steer", "cursor_context"} {
 				if !strings.Contains(row, claim) {
 					t.Errorf("%s matrix row lost supported control claim %q: %s", name, claim, row)
 				}

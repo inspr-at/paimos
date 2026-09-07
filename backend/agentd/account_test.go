@@ -28,7 +28,7 @@ printf '%s\n' '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max
 	}
 	cursor := writeProbe(t, `#!/bin/sh
 [ "$1:$2:$3" = "status:--format:json" ] || exit 9
-printf '%s\n' '{"loggedIn":true,"email":"must-not-be-recorded@example.invalid"}'
+printf '%s\n' '{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"must-not-be-recorded@example.invalid"}}'
 `)
 	if got := NewCursorAdapter(cursor, "test").AccountLabel(context.Background()); got != "unknown" {
 		t.Fatalf("Cursor account label = %q", got)

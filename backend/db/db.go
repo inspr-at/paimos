@@ -13155,7 +13155,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 	WHEN OLD.last_error_code='managed_target_unavailable' AND OLD.fallback_target_id IS NOT NULL
 	THEN OLD.fallback_target_id
 	WHEN OLD.requested_level='simple' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
-	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id) IN ('agentd_codex','agentd_claude','agentd_pi','agentd_cursor')
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id) IN ('agentd_codex','agentd_claude','agentd_pi')
 	THEN OLD.fallback_target_id
 	WHEN OLD.requested_level='steer' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
 	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id)='simple'
@@ -13493,6 +13493,46 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			   AND ((NEW.dispatch_profile_id='' AND NEW.dispatch_profile_version='' AND NEW.dispatch_model='' AND NEW.dispatch_effort='')
 			    OR (NEW.dispatch_profile_id<>'' AND NEW.dispatch_profile_version<>'' AND NEW.dispatch_model<>'' AND NEW.dispatch_effort<>'')))
 			 ) BEGIN SELECT RAISE(ABORT,'harness workspace provenance is invalid'); END`,
+	}})
+	// M184 / PAI-963: closed Cursor selected-identity account class, and live
+	// consumer fence membership for owned Cursor targets. Historical M177/M183
+	// SQL stays unchanged so existing v183 databases receive this upgrade.
+	migrations = append(migrations, migration{version: 184, steps: []string{
+		`DROP TRIGGER IF EXISTS trg_harness_sessions_provenance_shape_insert`,
+		`CREATE TRIGGER trg_harness_sessions_provenance_shape_insert BEFORE INSERT ON harness_sessions
+			 WHEN NOT (
+			  (NEW.workspace_identity='' AND NEW.workspace_path='' AND NEW.git_top_level='' AND NEW.git_branch=''
+			   AND NEW.workspace_kind='unknown' AND NEW.workspace_mode='unknown' AND NEW.dispatch_profile_id=''
+			   AND NEW.dispatch_profile_version='' AND NEW.dispatch_model='' AND NEW.dispatch_effort='' AND NEW.account_label='unknown'
+			   AND NEW.account_key='')
+			  OR
+			  (length(NEW.workspace_identity)=64 AND NEW.workspace_identity NOT GLOB '*[^0-9a-f]*'
+			   AND NEW.workspace_path<>'' AND instr(NEW.workspace_path,char(0))=0
+			   AND instr(NEW.workspace_path,char(10))=0 AND instr(NEW.workspace_path,char(13))=0
+			   AND NEW.workspace_kind IN ('directory','git_primary','git_worktree') AND NEW.workspace_mode IN ('exclusive','shared')
+			   AND NEW.account_label IN ('unknown','chatgpt','api_key','claude_ai_max','claude_ai_pro','claude_ai_team','claude_ai_enterprise','console','pi_context','cursor_context')
+			   AND (NEW.account_key='' OR (length(NEW.account_key) BETWEEN 1 AND 128
+			    AND NEW.account_key GLOB '[A-Za-z0-9]*' AND NEW.account_key NOT GLOB '*[^A-Za-z0-9._:-]*'
+			    AND instr(NEW.account_key,'/')=0 AND instr(NEW.account_key,char(0))=0
+			    AND instr(NEW.account_key,char(10))=0 AND instr(NEW.account_key,char(13))=0
+			    AND NEW.account_key NOT IN ('unknown','chatgpt','api_key','claude_ai_max','claude_ai_pro','claude_ai_team','claude_ai_enterprise','console','local_probe','pi_context','cursor_context')))
+			   AND ((NEW.workspace_kind='directory' AND NEW.git_top_level='' AND NEW.git_branch='')
+			    OR (NEW.workspace_kind IN ('git_primary','git_worktree') AND NEW.git_top_level<>'' AND NEW.git_branch<>''))
+			   AND ((NEW.dispatch_profile_id='' AND NEW.dispatch_profile_version='' AND NEW.dispatch_model='' AND NEW.dispatch_effort='')
+			    OR (NEW.dispatch_profile_id<>'' AND NEW.dispatch_profile_version<>'' AND NEW.dispatch_model<>'' AND NEW.dispatch_effort<>'')))
+			 ) BEGIN SELECT RAISE(ABORT,'harness workspace provenance is invalid'); END`,
+		`DROP TRIGGER IF EXISTS consumer_delivery_fence`,
+		`CREATE TRIGGER consumer_delivery_fence BEFORE UPDATE ON agent_message_deliveries WHEN EXISTS(SELECT 1 FROM agent_consumer_streams s JOIN agent_messages m ON m.to_agent_id=s.agent_id AND m.to_address=s.address WHERE s.kind='fallback' AND m.id=OLD.message_row_id AND (
+ EXISTS(SELECT 1 FROM agent_message_targets t WHERE t.id=(CASE
+	WHEN OLD.last_error_code='managed_target_unavailable' AND OLD.fallback_target_id IS NOT NULL
+	THEN OLD.fallback_target_id
+	WHEN OLD.requested_level='simple' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id) IN ('agentd_codex','agentd_claude','agentd_pi','agentd_cursor')
+	THEN OLD.fallback_target_id
+	WHEN OLD.requested_level='steer' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
+	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id)='simple'
+	THEN OLD.fallback_target_id ELSE COALESCE(OLD.primary_target_id,OLD.fallback_target_id) END) AND t.adapter='codex')
+ OR EXISTS(SELECT 1 FROM agent_consumer_attempts a WHERE a.stream_id=s.id AND a.resource_id=OLD.delivery_id))) AND NEW.consumer_fence<>OLD.consumer_fence+1 BEGIN SELECT RAISE(ABORT,'consumer ownership required'); END`,
 	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {

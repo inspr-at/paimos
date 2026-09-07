@@ -31,6 +31,10 @@ func newTestCursorAdapter(t *testing.T, mode string) (*CursorAdapter, *[]string)
 	t.Helper()
 	adapter := NewCursorAdapter(os.Args[0], "test")
 	adapter.cliVersion = func(context.Context, string) (string, error) { return cursorSupportedCLIVersion, nil }
+	adapter.SetAccounts(cursorTestRegistry(t))
+	adapter.statusJSON = func(context.Context, string) ([]byte, error) {
+		return cursorAuthenticatedStatusJSON(), nil
+	}
 	var argv []string
 	adapter.command = func(_ string, args ...string) *exec.Cmd {
 		argv = append([]string(nil), args...)
@@ -39,6 +43,62 @@ func newTestCursorAdapter(t *testing.T, mode string) (*CursorAdapter, *[]string)
 		return cmd
 	}
 	return adapter, &argv
+}
+
+func cursorTestRegistry(t *testing.T) CursorAccountRegistry {
+	t.Helper()
+	raw, err := json.Marshal(cursorAccountRegistryFile{Accounts: []cursorAccountRegistryEntry{
+		{Key: "operator-cursor", Email: "cursor-operator@example.invalid"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := ParseCursorAccountRegistry(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
+}
+
+func cursorAuthenticatedStatusJSON() []byte {
+	return []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid"}}`)
+}
+
+func cursorOwnedStart(t *testing.T, profile dispatchprofile.Profile) StartRequest {
+	t.Helper()
+	return StartRequest{
+		KeepAlive: true, Workspace: t.TempDir(), Prompt: "secret-not-persisted",
+		Identity: "cursor:test", Adapter: AdapterCursor, ProjectID: 963,
+		AccountKey: "operator-cursor", ExpectedAccountLabel: AccountCursorContext,
+		ResolvedProfile: &profile,
+	}
+}
+
+func cursorHelperSessionNew(currentModelID string) map[string]any {
+	return map[string]any{
+		"sessionId": "sess-owned",
+		"modes": map[string]any{
+			"currentModeId": "agent",
+			"availableModes": []map[string]string{
+				{"id": "agent", "name": "Agent", "description": "Full agent capabilities with tool access"},
+				{"id": "plan", "name": "Plan", "description": "Read-only mode for planning"},
+				{"id": "ask", "name": "Ask", "description": "Q&A mode"},
+			},
+		},
+		"models": map[string]any{
+			"currentModelId": currentModelID,
+			"availableModels": []map[string]string{
+				{"modelId": "default[]", "name": "Auto"},
+				{"modelId": cursorGrokACPModel, "name": "grok-4.6"},
+				{"modelId": cursorComposerACPModel, "name": "composer-2.5"},
+				{"modelId": "claude-opus-5[thinking=true,context=300k,effort=high,fast=false]", "name": "claude-opus-5"},
+			},
+		},
+		"configOptions": []map[string]any{
+			{"id": "mode", "currentValue": "agent"},
+			{"id": "model", "currentValue": currentModelID},
+		},
+	}
 }
 
 func cursorTestProfile(t *testing.T) dispatchprofile.Profile {
@@ -54,15 +114,13 @@ func TestCursorProcessOwnsExactACPSessionForControl(t *testing.T) {
 	adapter, argv := newTestCursorAdapter(t, "serve")
 	profile := cursorTestProfile(t)
 	events := make(chan AdapterEvent, 16)
-	process, err := adapter.Start(context.Background(), StartRequest{
-		KeepAlive: true, Workspace: t.TempDir(), Prompt: "secret-not-persisted",
-		Identity: "cursor:test", Adapter: AdapterCursor, ResolvedProfile: &profile,
-	}, func(event AdapterEvent) { events <- event })
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), func(event AdapterEvent) { events <- event })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(*argv, []string{"--model", "composer", "acp"}) || process.PID() <= 0 {
-		t.Fatalf("argv=%q pid=%d", *argv, process.PID())
+	key, label := process.(accountSelection).AccountSelection()
+	if !slices.Equal(*argv, []string{"--model", cursorComposerArgv, "acp"}) || process.PID() <= 0 || key != "operator-cursor" || label != AccountCursorContext {
+		t.Fatalf("argv=%q pid=%d key=%q label=%q", *argv, process.PID(), key, label)
 	}
 	if _, err := process.Steer(context.Background(), ControlRequest{CorrelationID: "steer-unsupported", Text: "same-turn"}); !errors.Is(err, ErrCapabilityMissing) {
 		t.Fatalf("steer err=%v", err)
@@ -94,10 +152,7 @@ func TestCursorProcessOwnsExactACPSessionForControl(t *testing.T) {
 func TestCursorInboxDeliversNextTurnAfterIdle(t *testing.T) {
 	adapter, _ := newTestCursorAdapter(t, "idle")
 	profile := cursorTestProfile(t)
-	process, err := adapter.Start(context.Background(), StartRequest{
-		KeepAlive: true, Workspace: t.TempDir(), Prompt: "first-turn",
-		Identity: "cursor:test", Adapter: AdapterCursor, ResolvedProfile: &profile,
-	}, nil)
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,26 +184,51 @@ func TestCursorInboxDeliversNextTurnAfterIdle(t *testing.T) {
 
 func TestCursorRefusesUnapprovedAndAutoModels(t *testing.T) {
 	adapter, _ := newTestCursorAdapter(t, "serve")
-	for _, model := range []string{"auto", "Auto", "gpt-5", "sonnet-4-thinking"} {
+	adapter.command = func(string, ...string) *exec.Cmd { t.Fatal("child must not spawn"); return nil }
+	for _, model := range []string{"auto", "Auto", "composer", "grok", "gpt-5", "sonnet-4-thinking"} {
 		profile := dispatchprofile.Profile{
 			ID: "cursor-unapproved", Version: "1", Harness: AdapterCursor, Model: model, Effort: "high",
 			MachineSource: dispatchprofile.MachineAuthenticatedReporter, AccountSource: dispatchprofile.AccountLocalProbe, WorkspaceMode: "exclusive",
 		}
-		_, err := adapter.Start(context.Background(), StartRequest{
-			Workspace: t.TempDir(), Prompt: "work", Identity: "cursor:test", Adapter: AdapterCursor, ResolvedProfile: &profile,
-		}, nil)
+		req := cursorOwnedStart(t, profile)
+		_, err := adapter.Start(context.Background(), req, nil)
 		if err == nil {
 			t.Fatalf("model %q was accepted", model)
 		}
 	}
 }
 
+func TestCursorComposerRefusesInventedHighEffort(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "serve")
+	adapter.command = func(string, ...string) *exec.Cmd { t.Fatal("child must not spawn"); return nil }
+	profile := dispatchprofile.Profile{
+		ID: "cursor-composer", Version: "1", Harness: AdapterCursor, Model: cursorComposerArgv, Effort: "high",
+		MachineSource: dispatchprofile.MachineAuthenticatedReporter, AccountSource: dispatchprofile.AccountLocalProbe, WorkspaceMode: "exclusive",
+	}
+	_, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "does not advertise a reasoning effort") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestCursorStartRequiresDispatchProfile(t *testing.T) {
 	adapter, _ := newTestCursorAdapter(t, "serve")
-	_, err := adapter.Start(context.Background(), StartRequest{
-		Workspace: t.TempDir(), Prompt: "work", Identity: "cursor:test", Adapter: AdapterCursor,
-	}, nil)
+	req := cursorOwnedStart(t, dispatchprofile.Profile{})
+	req.ResolvedProfile = nil
+	_, err := adapter.Start(context.Background(), req, nil)
 	if !errors.Is(err, ErrDispatchProfile) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestCursorStartRequiresNamedAccount(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "serve")
+	adapter.command = func(string, ...string) *exec.Cmd { t.Fatal("child must not spawn"); return nil }
+	profile := cursorTestProfile(t)
+	req := cursorOwnedStart(t, profile)
+	req.AccountKey = ""
+	_, err := adapter.Start(context.Background(), req, nil)
+	if err == nil || !strings.Contains(err.Error(), "managed account selection is unavailable") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -156,6 +236,8 @@ func TestCursorStartRequiresDispatchProfile(t *testing.T) {
 func TestCursorStartCancellationReapsInFlightACP(t *testing.T) {
 	adapter := NewCursorAdapter(os.Args[0], "test")
 	adapter.cliVersion = func(context.Context, string) (string, error) { return cursorSupportedCLIVersion, nil }
+	adapter.SetAccounts(cursorTestRegistry(t))
+	adapter.statusJSON = func(context.Context, string) ([]byte, error) { return cursorAuthenticatedStatusJSON(), nil }
 	var child *exec.Cmd
 	adapter.command = func(_ string, _ ...string) *exec.Cmd {
 		child = exec.Command(os.Args[0], "-test.run=^TestCursorACPHelperProcess$")
@@ -165,9 +247,7 @@ func TestCursorStartCancellationReapsInFlightACP(t *testing.T) {
 	profile := cursorTestProfile(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
-	_, err := adapter.Start(ctx, StartRequest{
-		Workspace: t.TempDir(), Prompt: "work", Identity: "cursor:test", Adapter: AdapterCursor, ResolvedProfile: &profile,
-	}, nil)
+	_, err := adapter.Start(ctx, cursorOwnedStart(t, profile), nil)
 	if !errors.Is(err, context.DeadlineExceeded) || child == nil || child.Process == nil || child.ProcessState == nil {
 		t.Fatalf("err=%v child=%v", err, child)
 	}
@@ -176,9 +256,7 @@ func TestCursorStartCancellationReapsInFlightACP(t *testing.T) {
 func TestCursorRejectsOversizedAndMalformedFrames(t *testing.T) {
 	adapter, _ := newTestCursorAdapter(t, "malformed")
 	profile := cursorTestProfile(t)
-	_, err := adapter.Start(context.Background(), StartRequest{
-		Workspace: t.TempDir(), Prompt: "work", Identity: "cursor:test", Adapter: AdapterCursor, ResolvedProfile: &profile,
-	}, nil)
+	_, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
 	if err == nil {
 		t.Fatal("malformed ACP initialize was accepted")
 	}
@@ -188,10 +266,7 @@ func TestCursorPermissionAndExtensionRequestsFailClosed(t *testing.T) {
 	adapter, _ := newTestCursorAdapter(t, "permission")
 	profile := cursorTestProfile(t)
 	events := make(chan AdapterEvent, 8)
-	process, err := adapter.Start(context.Background(), StartRequest{
-		KeepAlive: true, Workspace: t.TempDir(), Prompt: "work",
-		Identity: "cursor:test", Adapter: AdapterCursor, ResolvedProfile: &profile,
-	}, func(event AdapterEvent) { events <- event })
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), func(event AdapterEvent) { events <- event })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,29 +289,84 @@ func TestCursorPermissionAndExtensionRequestsFailClosed(t *testing.T) {
 func TestCursorPinnedVersionMismatchRefusesStart(t *testing.T) {
 	adapter := NewCursorAdapter(os.Args[0], "test")
 	adapter.cliVersion = func(context.Context, string) (string, error) { return "2026.01.01-deadbeef", nil }
+	adapter.SetAccounts(cursorTestRegistry(t))
+	adapter.statusJSON = func(context.Context, string) ([]byte, error) { return cursorAuthenticatedStatusJSON(), nil }
 	adapter.command = func(string, ...string) *exec.Cmd { t.Fatal("child must not spawn"); return nil }
 	profile := cursorTestProfile(t)
-	_, err := adapter.Start(context.Background(), StartRequest{
-		Workspace: t.TempDir(), Prompt: "work", Identity: "cursor:test", Adapter: AdapterCursor, ResolvedProfile: &profile,
-	}, nil)
+	_, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
 	if err == nil || !strings.Contains(err.Error(), "pinned Cursor CLI version") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
-func TestCursorAccountProbeUsesStatusJSONAndStaysUnknownWithoutClosedClass(t *testing.T) {
+func TestCursorAccountProbeUsesOfficialStatusJSONAndStaysUnknownWithoutNamedContext(t *testing.T) {
 	probe := writeProbe(t, `#!/bin/sh
 [ "$1:$2:$3" = "status:--format:json" ] || exit 9
-printf '%s\n' '{"loggedIn":true,"email":"must-not-be-recorded@example.invalid"}'
+printf '%s\n' '{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"must-not-be-recorded@example.invalid"}}'
 `)
 	if got := NewCursorAdapter(probe, "test").AccountLabel(context.Background()); got != "unknown" {
 		t.Fatalf("closed label=%q", got)
 	}
-	loggedOut := writeProbe(t, `#!/bin/sh
-printf '%s\n' '{"loggedIn":false}'
+	loggedInShaped := writeProbe(t, `#!/bin/sh
+printf '%s\n' '{"loggedIn":true,"email":"must-not-be-recorded@example.invalid"}'
 `)
-	if got := NewCursorAdapter(loggedOut, "test").AccountLabel(context.Background()); got != "unknown" {
-		t.Fatalf("logged-out label=%q", got)
+	if got := NewCursorAdapter(loggedInShaped, "test").AccountLabel(context.Background()); got != "unknown" {
+		t.Fatalf("loggedIn-shaped label=%q", got)
+	}
+	unauthenticated := writeProbe(t, `#!/bin/sh
+printf '%s\n' '{"status":"unauthenticated","isAuthenticated":false}'
+`)
+	if got := NewCursorAdapter(unauthenticated, "test").AccountLabel(context.Background()); got != "unknown" {
+		t.Fatalf("unauthenticated label=%q", got)
+	}
+}
+
+func TestCursorStartRefusesLoggedInShapedAndMismatchedIdentity(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "serve")
+	adapter.command = func(string, ...string) *exec.Cmd { t.Fatal("child must not spawn"); return nil }
+	profile := cursorTestProfile(t)
+	adapter.statusJSON = func(context.Context, string) ([]byte, error) {
+		return []byte(`{"loggedIn":true,"email":"cursor-operator@example.invalid"}`), nil
+	}
+	_, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "managed account identity could not be verified") {
+		t.Fatalf("loggedIn-shaped err=%v", err)
+	}
+	adapter.statusJSON = func(context.Context, string) ([]byte, error) {
+		return []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"other@example.invalid"}}`), nil
+	}
+	_, err = adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "managed account identity could not be verified") {
+		t.Fatalf("mismatch err=%v", err)
+	}
+}
+
+func TestCursorSessionNewMustAcknowledgeModelAndConfigBeforePrompt(t *testing.T) {
+	profile := cursorTestProfile(t)
+	for _, mode := range []string{"session-id-only", "auto-model", "wrong-model", "disagree-config"} {
+		adapter, _ := newTestCursorAdapter(t, mode)
+		_, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+		if err == nil {
+			t.Fatalf("mode %q started without model acknowledgement", mode)
+		}
+	}
+}
+
+func TestCursorGrokLaunchUsesExactIncludedModel(t *testing.T) {
+	adapter, argv := newTestCursorAdapter(t, "grok")
+	profile, err := dispatchprofile.Resolve("cursor-grok", dispatchprofile.CatalogVersion, AdapterCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(*argv, []string{"--model", cursorGrokArgv, "acp"}) {
+		t.Fatalf("argv=%q", *argv)
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "grok-stop"}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -249,10 +379,14 @@ func TestCursorSupervisorReplayAndLostOwnership(t *testing.T) {
 	}
 	defer supervisor.Close(context.Background())
 	session, err := supervisor.Start(context.Background(), StartRequest{
-		Adapter: AdapterCursor, Workspace: t.TempDir(), Prompt: "work", Identity: "cursor:worker", ProjectID: 963, ResolvedProfile: &profile,
+		Adapter: AdapterCursor, Workspace: t.TempDir(), Prompt: "work", Identity: "cursor:worker", ProjectID: 963,
+		AccountKey: "operator-cursor", ExpectedAccountLabel: AccountCursorContext, ResolvedProfile: &profile,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if session.AccountKey != "operator-cursor" || session.AccountLabel != AccountCursorContext {
+		t.Fatalf("session account=%q %q", session.AccountKey, session.AccountLabel)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for !supervisor.InboxReady(session.ID) {
@@ -325,6 +459,9 @@ func TestCursorACPHelperProcess(t *testing.T) {
 			os.Exit(2)
 		}
 		method, _ := message["method"].(string)
+		if method == "" {
+			continue
+		}
 		id := message["id"]
 		switch method {
 		case "initialize":
@@ -337,7 +474,27 @@ func TestCursorACPHelperProcess(t *testing.T) {
 				"agentInfo": map[string]string{"name": "cursor-agent", "version": cursorSupportedCLIVersion},
 			})
 		case "session/new":
-			respond(id, map[string]any{"sessionId": "sess-owned"})
+			current := cursorComposerACPModel
+			switch mode {
+			case "grok":
+				current = cursorGrokACPModel
+			case "auto-model":
+				current = "default[]"
+			case "wrong-model":
+				current = "claude-opus-5[thinking=true,context=300k,effort=high,fast=false]"
+			case "session-id-only":
+				respond(id, map[string]any{"sessionId": "sess-owned"})
+				continue
+			case "disagree-config":
+				result := cursorHelperSessionNew(cursorComposerACPModel)
+				result["configOptions"] = []map[string]any{
+					{"id": "mode", "currentValue": "agent"},
+					{"id": "model", "currentValue": "default[]"},
+				}
+				respond(id, result)
+				continue
+			}
+			respond(id, cursorHelperSessionNew(current))
 			if mode == "permission" {
 				request("perm-1", "session/request_permission", map[string]any{
 					"sessionId": "sess-owned",
@@ -351,6 +508,9 @@ func TestCursorACPHelperProcess(t *testing.T) {
 				request("unknown-1", "cursor/unknown_extension", map[string]any{"toolCallId": "call-x"})
 			}
 		case "session/prompt":
+			if mode == "session-id-only" || mode == "auto-model" || mode == "wrong-model" || mode == "disagree-config" {
+				os.Exit(3)
+			}
 			promptIDs[id] = true
 			notify("session/update", map[string]any{
 				"sessionId": "sess-owned",

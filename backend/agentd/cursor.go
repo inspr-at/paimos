@@ -29,6 +29,10 @@ const (
 	cursorPromptPrimitive     = "cursor acp session/prompt"
 	cursorCancelPrimitive     = "cursor acp session/cancel"
 	cursorStopPrimitive       = "cursor acp owned process-group stop"
+	cursorComposerArgv        = "composer-2.5"
+	cursorComposerACPModel    = "composer-2.5[fast=true]"
+	cursorGrokArgv            = "grok-4.6[effort=high,fast=true]"
+	cursorGrokACPModel        = "grok-4.6[effort=high,fast=true]"
 )
 
 // CursorAdapter owns one documented `agent acp` stdio child. Composer and Grok
@@ -38,6 +42,8 @@ type CursorAdapter struct {
 	clientVersion string
 	command       func(string, ...string) *exec.Cmd
 	cliVersion    func(context.Context, string) (string, error)
+	statusJSON    func(context.Context, string) ([]byte, error)
+	accounts      CursorAccountRegistry
 }
 
 func NewCursorAdapter(path, clientVersion string) *CursorAdapter {
@@ -45,6 +51,14 @@ func NewCursorAdapter(path, clientVersion string) *CursorAdapter {
 		path: strings.TrimSpace(path), clientVersion: strings.TrimSpace(clientVersion),
 		command: exec.Command, cliVersion: probeCursorCLIVersion,
 	}
+}
+
+func (a *CursorAdapter) SetAccounts(registry CursorAccountRegistry) {
+	a.accounts = registry
+}
+
+func (a *CursorAdapter) HasAccount(key string) bool {
+	return a.accounts.HasAccount(key)
 }
 
 func (*CursorAdapter) Name() string { return AdapterCursor }
@@ -60,24 +74,57 @@ func (a *CursorAdapter) AccountLabel(ctx context.Context) string {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	output, err := runAccountProbe(probeCtx, path, 1024, accountProbeCursor)
+	output, err := a.readStatusJSON(probeCtx, path)
 	if err != nil {
 		return "unknown"
 	}
-	return cursorAccountLabel(output)
+	_, _, ok := parseCursorStatusIdentity(output)
+	if !ok {
+		return "unknown"
+	}
+	// Official status documents authentication, not a selected trusted
+	// identity mapping. cursor_context is bound only after a named start.
+	return "unknown"
 }
 
 func (a *CursorAdapter) executable() (string, error) {
 	return resolvePinnedExecutable(a.path, "cursor-agent", "operator-authenticated Cursor CLI")
 }
 
+func (a *CursorAdapter) readStatusJSON(ctx context.Context, path string) ([]byte, error) {
+	if a.statusJSON != nil {
+		return a.statusJSON(ctx, path)
+	}
+	return runAccountProbe(ctx, path, 1024, accountProbeCursor)
+}
+
 func (a *CursorAdapter) Start(ctx context.Context, request StartRequest, observe func(AdapterEvent)) (_ Process, returnErr error) {
-	model, err := cursorLaunchModel(request)
+	accountKey := strings.TrimSpace(request.AccountKey)
+	if accountKey == "" {
+		return nil, errors.New("managed account selection is unavailable")
+	}
+	account, ok := a.accounts.lookup(accountKey)
+	if !ok {
+		return nil, errors.New("managed account selection is unavailable")
+	}
+	if request.ExpectedAccountLabel != "" && request.ExpectedAccountLabel != AccountCursorContext {
+		return nil, errors.New("managed account selection is unavailable")
+	}
+	argvModel, expectedACP, err := cursorLaunchModel(request)
 	if err != nil {
 		return nil, err
 	}
 	path, err := a.executable()
 	if err != nil {
+		return nil, err
+	}
+	probeCtx, cancelProbe := context.WithTimeout(ctx, 5*time.Second)
+	statusOutput, err := a.readStatusJSON(probeCtx, path)
+	cancelProbe()
+	if err != nil {
+		return nil, errors.New("managed account identity could not be verified")
+	}
+	if err := verifyCursorAccountIdentity(statusOutput, account); err != nil {
 		return nil, err
 	}
 	version, err := a.cliVersion(ctx, path)
@@ -88,7 +135,7 @@ func (a *CursorAdapter) Start(ctx context.Context, request StartRequest, observe
 	if command == nil {
 		command = exec.Command
 	}
-	cmd := command(path, "--model", model, "acp") // #nosec G204 G702 -- fixed adapter argv and operator-selected executable.
+	cmd := command(path, "--model", argvModel, "acp") // #nosec G204 G702 -- fixed adapter argv and operator-selected executable.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, errors.New("open Cursor ACP stdin")
@@ -135,16 +182,14 @@ func (a *CursorAdapter) Start(ctx context.Context, request StartRequest, observe
 		return nil, errors.New("Cursor ACP protocol version is unsupported")
 	}
 	process.setInitialize(initialize)
-	var created struct {
-		SessionID string `json:"sessionId"`
-	}
+	var created cursorSessionNewResult
 	if err := process.call(operationCtx, "session/new", map[string]any{
 		"cwd": request.Workspace, "mcpServers": []any{},
 	}, &created); err != nil {
 		return nil, fmt.Errorf("create Cursor ACP session: %w", err)
 	}
-	if !validOpaqueID(created.SessionID) {
-		return nil, errors.New("Cursor ACP returned an invalid session")
+	if err := acknowledgeCursorSession(created, expectedACP); err != nil {
+		return nil, err
 	}
 	if err := process.setSession(created.SessionID); err != nil {
 		return nil, err
@@ -156,34 +201,102 @@ func (a *CursorAdapter) Start(ctx context.Context, request StartRequest, observe
 	return process, nil
 }
 
-func cursorLaunchModel(request StartRequest) (string, error) {
+func cursorLaunchModel(request StartRequest) (argv, expectedACP string, err error) {
 	if request.ResolvedProfile == nil || request.ResolvedProfile.Harness != AdapterCursor {
-		return "", ErrDispatchProfile
+		return "", "", ErrDispatchProfile
 	}
 	if err := dispatchprofile.ValidateSnapshot(*request.ResolvedProfile); err != nil {
-		return "", ErrDispatchProfile
+		return "", "", ErrDispatchProfile
 	}
 	model := strings.TrimSpace(request.ResolvedProfile.Model)
+	effort := strings.TrimSpace(request.ResolvedProfile.Effort)
 	switch model {
-	case "composer", "grok":
-		return model, nil
-	case "auto", "Auto":
-		return "", errors.New("Cursor Auto model is refused")
+	case cursorComposerArgv:
+		if effort != "default" {
+			return "", "", errors.New("Cursor Composer does not advertise a reasoning effort")
+		}
+		return cursorComposerArgv, cursorComposerACPModel, nil
+	case "grok-4.6":
+		if effort != "high" {
+			return "", "", errors.New("Cursor Grok high effort must be acknowledged")
+		}
+		return cursorGrokArgv, cursorGrokACPModel, nil
+	case "auto", "Auto", "default[]":
+		return "", "", errors.New("Cursor Auto model is refused")
 	default:
-		return "", errors.New("Cursor model is unapproved")
+		return "", "", errors.New("Cursor model is unapproved")
 	}
 }
 
-func cursorAccountLabel(output []byte) string {
+func parseCursorStatusIdentity(output []byte) (email, userID string, ok bool) {
 	var status struct {
-		LoggedIn *bool `json:"loggedIn"`
+		Status          string `json:"status"`
+		IsAuthenticated bool   `json:"isAuthenticated"`
+		UserInfo        *struct {
+			Email  string `json:"email"`
+			UserID string `json:"userId"`
+		} `json:"userInfo"`
 	}
-	if json.Unmarshal(output, &status) != nil || status.LoggedIn == nil || !*status.LoggedIn {
-		return "unknown"
+	if json.Unmarshal(output, &status) != nil || status.Status != "authenticated" || !status.IsAuthenticated || status.UserInfo == nil {
+		return "", "", false
 	}
-	// status --format json documents authentication status, not a closed
-	// subscription class. A true loggedIn bit is not a durable account label.
-	return "unknown"
+	email = strings.TrimSpace(status.UserInfo.Email)
+	userID = strings.TrimSpace(status.UserInfo.UserID)
+	if !validExpectedEmail(email) {
+		return "", "", false
+	}
+	return email, userID, true
+}
+
+func verifyCursorAccountIdentity(output []byte, expected cursorAccount) error {
+	email, userID, ok := parseCursorStatusIdentity(output)
+	if !ok || !strings.EqualFold(email, expected.email) {
+		return errors.New("managed account identity could not be verified")
+	}
+	if expected.userID != "" && userID != expected.userID {
+		return errors.New("managed account identity could not be verified")
+	}
+	return nil
+}
+
+func acknowledgeCursorSession(created cursorSessionNewResult, expectedACP string) error {
+	if !validOpaqueID(created.SessionID) {
+		return errors.New("Cursor ACP returned an invalid session")
+	}
+	if created.Modes == nil || strings.TrimSpace(created.Modes.CurrentModeID) == "" {
+		return errors.New("Cursor ACP session modes were not acknowledged")
+	}
+	if created.Models == nil {
+		return errors.New("Cursor ACP session models were not acknowledged")
+	}
+	current := strings.TrimSpace(created.Models.CurrentModelID)
+	if current == "" || current == "default[]" || strings.HasPrefix(current, "default[") {
+		return errors.New("Cursor Auto model is refused")
+	}
+	configModel := ""
+	for _, option := range created.ConfigOptions {
+		if option.ID == "model" {
+			configModel = strings.TrimSpace(option.CurrentValue)
+			break
+		}
+	}
+	if configModel == "" || configModel != current {
+		return errors.New("Cursor ACP model acknowledgement is inconsistent")
+	}
+	if current != expectedACP {
+		return errors.New("Cursor ACP model acknowledgement does not match the selected profile")
+	}
+	listed := false
+	for _, model := range created.Models.AvailableModels {
+		if strings.TrimSpace(model.ModelID) == current {
+			listed = true
+			break
+		}
+	}
+	if !listed {
+		return errors.New("Cursor ACP model acknowledgement does not match the selected profile")
+	}
+	return nil
 }
 
 func probeCursorCLIVersion(ctx context.Context, path string) (string, error) {
@@ -221,6 +334,24 @@ type cursorInitializeResult struct {
 	} `json:"agentCapabilities"`
 }
 
+type cursorSessionNewResult struct {
+	SessionID string `json:"sessionId"`
+	Modes     *struct {
+		CurrentModeID string `json:"currentModeId"`
+	} `json:"modes"`
+	Models *struct {
+		CurrentModelID  string `json:"currentModelId"`
+		AvailableModels []struct {
+			ModelID string `json:"modelId"`
+			Name    string `json:"name"`
+		} `json:"availableModels"`
+	} `json:"models"`
+	ConfigOptions []struct {
+		ID           string `json:"id"`
+		CurrentValue string `json:"currentValue"`
+	} `json:"configOptions"`
+}
+
 type cursorPromptResult struct {
 	StopReason string `json:"stopReason"`
 }
@@ -228,6 +359,7 @@ type cursorPromptResult struct {
 type cursorProcess struct {
 	persistent bool
 	model      string
+	accountKey string
 	*ownedProcess
 	stdin   io.WriteCloser
 	observe func(AdapterEvent)
@@ -253,12 +385,17 @@ func newCursorProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, obs
 		pending: map[string]chan cursorRPCMessage{}, streamDone: make(chan struct{})}
 	if len(requests) > 0 {
 		p.persistent = requests[0].KeepAlive
+		p.accountKey = strings.TrimSpace(requests[0].AccountKey)
 		if requests[0].ResolvedProfile != nil {
 			p.model = requests[0].ResolvedProfile.Model
 		}
 	}
 	go p.readLoop(stdout)
 	return p
+}
+
+func (p *cursorProcess) AccountSelection() (string, string) {
+	return p.accountKey, AccountCursorContext
 }
 
 func (p *cursorProcess) setInitialize(result cursorInitializeResult) {

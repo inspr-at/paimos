@@ -59,7 +59,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	sessionID, correlationID, codexPath := "", "", ""
 	claudePath, nodePath, claudeSDKPath, piPath, cursorPath := "", "", "", "", ""
 	reportHost, reportURL, reportAPIKeyFile, paimosPath := "", "", "", ""
-	lifecycleConfigPath, codexAccountsPath, piAccountsPath, accountKey := "", "", "", ""
+	lifecycleConfigPath, codexAccountsPath, piAccountsPath, cursorAccountsPath, accountKey := "", "", "", "", ""
 	if command == "serve" {
 		flags.StringVar(&lifecycleConfigPath, "lifecycle-config", "", "protected explicit project/account/profile/workspace JSON configuration for browser lifecycle authority")
 		flags.StringVar(&codexPath, "codex-path", "", "absolute Codex CLI path")
@@ -75,6 +75,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.BoolVar(&allowSharedWorkspaces, "allow-shared-workspaces", false, "separately authorize explicitly shared child workspaces")
 		flags.StringVar(&codexAccountsPath, "codex-accounts", "", "protected operator-controlled JSON registry of opaque Codex account keys")
 		flags.StringVar(&piAccountsPath, "pi-accounts", "", "protected operator-controlled JSON registry of opaque Pi account keys")
+		flags.StringVar(&cursorAccountsPath, "cursor-accounts", "", "protected operator-controlled JSON registry of opaque Cursor account keys")
 	}
 	if command == "start" {
 		flags.StringVar(&adapter, "adapter", "codex", "harness adapter")
@@ -194,6 +195,19 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			}
 			if pi, ok := adapters[2].(*agentd.PiAdapter); ok {
 				pi.SetAccounts(registry)
+			}
+		}
+		if cursorAccountsPath != "" {
+			raw, e := lifecycleclient.ReadPrivate(cursorAccountsPath, 64<<10)
+			if e != nil {
+				return errors.New("cursor account registry requires a protected owner-only JSON file")
+			}
+			registry, e := agentd.ParseCursorAccountRegistry(raw)
+			if e != nil {
+				return e
+			}
+			if cursor, ok := adapters[3].(*agentd.CursorAdapter); ok {
+				cursor.SetAccounts(registry)
 			}
 		}
 		supervisor, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: common.instance, StateRoot: root,
