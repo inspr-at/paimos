@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
-## [Unreleased]
+## [26.09.07.11.03] — 2026-09-07
 
 ### Fixed — Habitat lifecycle drafts (PAI-950)
 
