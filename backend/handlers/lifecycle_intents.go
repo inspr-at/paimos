@@ -75,7 +75,7 @@ func lifecycleDecode(w http.ResponseWriter, r *http.Request, v any) bool {
 			return false
 		}
 		allowed := map[string]bool{}
-		names := []string{"request_key", "operation", "runtime_id", "runtime_generation", "account_label", "ttl_seconds"}
+		names := []string{"request_key", "operation", "runtime_id", "runtime_generation", "account_label", "account_key", "ttl_seconds"}
 		if req.Operation == "repair" {
 			names = append(names, "repair_layer")
 		} else {

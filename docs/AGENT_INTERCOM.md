@@ -221,7 +221,10 @@ is never inferred from a path. Example structure with placeholder identities:
   "projects": [{
     "project_id": 123,
     "account_label": "chatgpt",
-    "account_key": "coordinator",
+    "accounts": [
+      {"key": "coordinator", "label": "Coordinator"},
+      {"key": "personal", "label": "Personal"}
+    ],
     "profiles": [{"id": "codex-sol-high", "version": "1"}],
     "workspaces": [{
       "handle": "11111111-1111-4111-8111-111111111111",
@@ -233,13 +236,21 @@ is never inferred from a path. Example structure with placeholder identities:
 }
 ```
 
-Each project has one explicitly configured account class label and, optionally,
-one opaque named-account key from the daemon's `--codex-accounts` registry. Up
-to four independent project loops run in one daemon. Identity is re-probed from
-the physical workspace, the catalog supplies the exact immutable profile, and
-named Codex accounts are verified from the selected home rather than from class
-labels. Omitting `account_key` keeps the legacy class probe and does not claim
-named-account verification. The authenticated reporter host is operator
+Each project has one explicitly configured account class label. It may also
+advertise one or more opaque named-account choices from the daemon's
+`--codex-accounts` registry (`accounts` with operator labels, or the legacy
+single `account_key`). One daemon can therefore offer several named accounts as
+distinct browser choices for the same project. Opaque keys and operator labels
+stay distinct from account class, harness, model, worker identity and runtime
+generation. The browser selects only from a fresh owned advertisement; forged,
+unconfigured or stale keys fail closed on the server and in the daemon before
+any model turn. Changing the selected account invalidates a reviewed start and
+cannot adopt an existing worker. Omitting `accounts` and `account_key` keeps the
+legacy class probe and does not claim named-account verification. Up to four
+independent project loops run in one daemon. Identity is re-probed from the
+physical workspace, the catalog supplies the exact immutable profile, and named
+Codex accounts are verified from the selected home rather than from class
+labels. The authenticated reporter host is operator
 provenance, not hardware attestation. Browser input never supplies a path, model
 argv, shell command, credential, account home, or free-form starting prompt. Starting instructions
 come from the authorized canonical agent artifact and selected ticket.

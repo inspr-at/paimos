@@ -8,6 +8,8 @@ export interface HabitatRuntime {
   generation: string
   machine_id: string
   account_label: string
+  accounts?: { key: string; label: string }[]
+  schema_version?: 2
   workspaces: { handle: string; identity: string; label?: string }[]
   profiles: { id: string; version: string }[]
   expires_at: string
@@ -19,6 +21,7 @@ export type HabitatStartRequest = {
   runtime_id: string
   runtime_generation: string
   account_label: string
+  account_key?: string
   ttl_seconds: number
   workspace_handle: string
   agent_name: string
@@ -41,6 +44,7 @@ export type HabitatRepairRequest = {
   runtime_id: string
   runtime_generation: string
   account_label: string
+  account_key?: string
   ttl_seconds: number
   repair_layer: 'reporter' | 'listeners'
 }
@@ -80,6 +84,8 @@ const ACCOUNTS = [
 const STATES = ['requested', 'claimed', 'executing', 'completed', 'failed', 'expired', 'cancelled']
 const token = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
+const accountKey = (value: unknown): value is string =>
+  token(value) && !ACCOUNTS.includes(value) && value !== 'unknown' && value !== 'local_probe'
 /** Validate even locally restored review snapshots. Local storage is untrusted. */
 export function parseHabitatRequest(value: unknown): HabitatLifecycleRequest {
   const row = object(value)
@@ -111,13 +117,14 @@ export function parseHabitatRequest(value: unknown): HabitatLifecycleRequest {
         ? ['repair_layer']
         : [...binding, ...(row.operation === 'start' ? [] : existing)]),
     ],
-    row.operation === 'repair' ? [] : nullable,
+    row.operation === 'repair' ? ['account_key'] : [...nullable, 'account_key'],
   )
   if (
     !uuid(row.request_key) ||
     !uuid(row.runtime_id) ||
     !uuid(row.runtime_generation) ||
     !ACCOUNTS.includes(String(row.account_label)) ||
+    (row.account_key !== undefined && !accountKey(row.account_key)) ||
     !Number.isSafeInteger(row.ttl_seconds) ||
     Number(row.ttl_seconds) < 30 ||
     Number(row.ttl_seconds) > 600
@@ -172,7 +179,8 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
       'profiles',
       'expires_at',
       'sessions',
-    ])
+    ], ['accounts', 'schema_version'])
+    const accounts = runtime.accounts
     if (
       !uuid(runtime.id) ||
       !uuid(runtime.generation) ||
@@ -184,7 +192,13 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
       !Array.isArray(runtime.profiles) ||
       runtime.workspaces.length > 64 ||
       runtime.profiles.length > 128 ||
-      seen.has(String(runtime.id))
+      seen.has(String(runtime.id)) ||
+      (accounts === undefined
+        ? runtime.schema_version !== undefined
+        : runtime.schema_version !== 2 ||
+          !Array.isArray(accounts) ||
+          accounts.length < 1 ||
+          accounts.length > 16)
     )
       invalid()
     seen.add(String(runtime.id))
@@ -238,6 +252,32 @@ export function parseHabitatRuntimes(value: unknown, projectId: number): Habitat
         invalid()
       profileIds.add(`${profile.id}@${profile.version}`)
     }
+    if (accounts !== undefined) {
+      const keys = new Set<string>()
+      const labels = new Set<string>()
+      for (const raw of accounts as unknown[]) {
+        const choice = object(raw)
+        fields(choice, ['key', 'label'])
+        if (
+          !accountKey(choice.key) ||
+          typeof choice.label !== 'string' ||
+          !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,47}$/.test(choice.label) ||
+          ACCOUNTS.includes(String(choice.label)) ||
+          choice.key === runtime.generation ||
+          choice.key === runtime.id ||
+          choice.key === runtime.account_label ||
+          choice.label === runtime.account_label ||
+          [...(runtime.profiles as { id: string; version: string }[])].some(
+            (profile) => profile.id === choice.key || profile.version === choice.key,
+          ) ||
+          keys.has(String(choice.key)) ||
+          labels.has(choice.label)
+        )
+          invalid()
+        keys.add(String(choice.key))
+        labels.add(String(choice.label))
+      }
+    }
     return runtime as unknown as HabitatRuntime
   })
 }
@@ -264,7 +304,7 @@ export function parseHabitatIntent(
     ['new_generation', 'result_session_id'],
   )
   if (
-    root.schema_version !== 1 ||
+    (root.schema_version !== 1 && root.schema_version !== 2) ||
     !uuid(root.id) ||
     root.project_id !== projectId ||
     !STATES.includes(String(root.state)) ||
@@ -289,6 +329,8 @@ export function parseHabitatIntent(
     invalid()
   expected = parseHabitatRequest(expected)
   const request = object(parseHabitatRequest(root.request))
+  const named = expected.account_key !== undefined
+  if ((named && root.schema_version !== 2) || (!named && root.schema_version !== 1)) invalid()
   // The server omits optional null fields; every other value must match the
   // exact review the user submitted, including generation, account and scope.
   if (Object.keys(request).some((key) => !(key in expected))) invalid()
