@@ -250,13 +250,13 @@ func baselineBatchExport(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
-	raw, err := baselineBatchService(r).Export(r.Context(), actor, projectID, draftID)
+	out, err := baselineBatchService(r).Export(r.Context(), actor, projectID, draftID)
 	if err != nil {
 		baselineBatchError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(raw)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	jsonOK(w, out)
 }
 
 func baselineBatchGet(w http.ResponseWriter, r *http.Request) {

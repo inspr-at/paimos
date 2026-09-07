@@ -666,3 +666,101 @@ func baselineReadBody(resp *http.Response) string {
 	resp.Body = io.NopCloser(bytes.NewReader(b))
 	return string(b)
 }
+
+func TestBaselineBatchExportSafeJSON(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Export boundary", "key": "EXP"}))
+	optIn(t, ts, projectID)
+
+	reqs := []baselinebatch.Requirement{{
+		Ref:       "req.xss",
+		Statement: `<img src=x onerror=alert(1)>`,
+		AcceptanceCriteria: []string{
+			"Line one\u2028line two",
+			`</script><script>alert(1)</script>`,
+			"\uf8ff after \U0001f642",
+		},
+		ConstraintRefs: []string{"con.\uf8ff"},
+	}}
+	cons := []baselinebatch.Constraint{{
+		Ref: "con.\uf8ff", Kind: "technical", Statement: "Private-use <script>alert(1)</script>.",
+	}}
+	digest, err := baselinebatch.ContentDigest(reqs, cons)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal, err := baselinebatch.RevisionSeal("baseline:v1", 1, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handover, err := json.Marshal(map[string]any{
+		"handover_version": baselinebatch.HandoverVersion,
+		"stream_ref":       "stream:export",
+		"exported_at":      "2026-09-07T11:05:00.000Z",
+		"baseline": map[string]any{
+			"baseline_ref":   "baseline:v1",
+			"revision":       1,
+			"content_digest": digest,
+			"revision_seal":  seal,
+			"approved_by":    "party:forged",
+			"approved_at":    "2026-09-07T11:00:00.000Z",
+			"requirements":   reqs,
+			"constraints":    cons,
+		},
+		"pending_proposals": []any{},
+		"decisions":         []any{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	imported := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/import", projectID), map[string]any{
+		"handover": json.RawMessage(handover),
+	})
+	if imported.StatusCode != 201 {
+		t.Fatalf("import=%d %s", imported.StatusCode, baselineReadBody(imported))
+	}
+	var draft baselinebatch.Draft
+	decode(t, imported, &draft)
+
+	export := ts.get(t, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/export", projectID, draft.ID), ts.adminCookie)
+	if export.StatusCode != 200 {
+		t.Fatalf("export=%d %s", export.StatusCode, baselineReadBody(export))
+	}
+	if ct := export.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("content-type=%q", ct)
+	}
+	if export.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("missing nosniff header")
+	}
+	body := baselineReadBody(export)
+	if strings.Contains(body, "<script") || strings.Contains(body, "<img") {
+		t.Fatalf("export body contains unescaped HTML: %s", body)
+	}
+
+	var payload struct {
+		Baseline struct {
+			ContentDigest string                       `json:"content_digest"`
+			RevisionSeal  string                       `json:"revision_seal"`
+			Requirements  []baselinebatch.Requirement  `json:"requirements"`
+			Constraints   []baselinebatch.Constraint     `json:"constraints"`
+		} `json:"baseline"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("export is not valid JSON: %v", err)
+	}
+	roundtripDigest, err := baselinebatch.ContentDigest(payload.Baseline.Requirements, payload.Baseline.Constraints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roundtripDigest != digest || payload.Baseline.ContentDigest != digest {
+		t.Fatalf("digest roundtrip=%s stored=%s want=%s", roundtripDigest, payload.Baseline.ContentDigest, digest)
+	}
+	roundtripSeal, err := baselinebatch.RevisionSeal("baseline:v1", 1, roundtripDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roundtripSeal != seal || payload.Baseline.RevisionSeal != seal {
+		t.Fatalf("seal roundtrip=%s stored=%s want=%s", roundtripSeal, payload.Baseline.RevisionSeal, seal)
+	}
+}

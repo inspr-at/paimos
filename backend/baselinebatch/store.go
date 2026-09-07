@@ -480,7 +480,7 @@ func (s *Service) Review(ctx context.Context, actor Actor, projectID, draftID in
 	return draft, nil
 }
 
-func (s *Service) Export(ctx context.Context, actor Actor, projectID, draftID int64) ([]byte, error) {
+func (s *Service) Export(ctx context.Context, actor Actor, projectID, draftID int64) (map[string]any, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -510,7 +510,10 @@ func (s *Service) Export(ctx context.Context, actor Actor, projectID, draftID in
 		"unresolved": draft.Unresolved,
 		"note":       "Imported approved_by remains an untrusted claim; current Paimos human attestation is required to start.",
 	}
-	return compactJSON(payload)
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func (s *Service) listRuntimeChoices(ctx context.Context, tx *sql.Tx, projectID int64) ([]RuntimeChoice, error) {

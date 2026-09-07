@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,19 +19,28 @@ const readinessWorkspaceIdentity = "b1946ac92492d2347c6235b4d2611184b1946ac92492
 
 // readinessHost builds a real on-disk host fixture: an activated generation
 // symlink into a store-shaped directory, a wired doctrine loader and kernel, and
-// a workspace. The probe reads all of them for real.
+// a workspace. The probe reads all of them for real using the host kind that
+// observeHostKind can actually observe on this GOOS.
 type readinessHost struct {
-	root       string
-	workspace  string
-	generation string
-	kernel     string
-	loader     string
+	root              string
+	workspace         string
+	kernel            string
+	loader            string
+	hostKind          string
+	generationDigest  string
+	platformInputs    ReadinessInputs
 }
 
 func newReadinessHost(t *testing.T) readinessHost {
 	t.Helper()
-	// Resolve the temporary root: the workspace probe demands a canonical
-	// physical path, exactly as it does for a real owned workspace.
+	if runtime.GOOS == "darwin" {
+		return newDarwinHomeManagerReadinessHost(t)
+	}
+	return newLinuxNixOSHomeManagerReadinessHost(t)
+}
+
+func newDarwinHomeManagerReadinessHost(t *testing.T) readinessHost {
+	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -43,19 +53,76 @@ func newReadinessHost(t *testing.T) readinessHost {
 	if err = os.Symlink(store, current); err != nil {
 		t.Fatal(err)
 	}
-	workspace := filepath.Join(root, "workspace")
+	workspace, kernel, loader := readinessWorkspaceFixture(t, root)
+	return readinessHost{
+		root: root, workspace: workspace, kernel: kernel, loader: loader,
+		hostKind:         "macos-home-manager",
+		generationDigest: digestText("3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-home-manager-generation"),
+		platformInputs:   ReadinessInputs{HomeManagerCurrent: current},
+	}
+}
+
+func newLinuxNixOSHomeManagerReadinessHost(t *testing.T) readinessHost {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeNix := filepath.Join(root, "store", "3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-nixos-system")
+	if err = os.MkdirAll(storeNix, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nixCurrent := filepath.Join(root, "nixos-system")
+	if err = os.Symlink(storeNix, nixCurrent); err != nil {
+		t.Fatal(err)
+	}
+	storeHM := filepath.Join(root, "store", "3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-home-manager-generation")
+	if err = os.MkdirAll(storeHM, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hmCurrent := filepath.Join(root, "home-manager")
+	if err = os.Symlink(storeHM, hmCurrent); err != nil {
+		t.Fatal(err)
+	}
+	nixosMarker := filepath.Join(root, "etc", "nixos")
+	if err = os.MkdirAll(nixosMarker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workspace, kernel, loader := readinessWorkspaceFixture(t, root)
+	return readinessHost{
+		root: root, workspace: workspace, kernel: kernel, loader: loader,
+		hostKind:         "nixos-home-manager",
+		generationDigest: digestText("3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-nixos-system"),
+		platformInputs: ReadinessInputs{
+			NixOSMarker:        nixosMarker,
+			NixOSCurrent:       nixCurrent,
+			HomeManagerCurrent: hmCurrent,
+		},
+	}
+}
+
+func readinessWorkspaceFixture(t *testing.T, root string) (workspace, kernel, loader string) {
+	t.Helper()
+	workspace = filepath.Join(root, "workspace")
 	if err := os.MkdirAll(filepath.Join(workspace, "doctrine", "docs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	kernel := filepath.Join(workspace, "doctrine", "docs", "AGENTS-KERNEL.md")
+	kernel = filepath.Join(workspace, "doctrine", "docs", "AGENTS-KERNEL.md")
 	if err := os.WriteFile(kernel, []byte("# AGENTS — Kernel\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loader := filepath.Join(workspace, "CLAUDE.md")
+	loader = filepath.Join(workspace, "CLAUDE.md")
 	if err := os.WriteFile(loader, []byte("@./doctrine/docs/AGENTS-KERNEL.md\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return readinessHost{root: root, workspace: workspace, generation: current, kernel: kernel, loader: loader}
+	return workspace, kernel, loader
+}
+
+func mismatchedReadinessHostKind() string {
+	if runtime.GOOS == "darwin" {
+		return "macos"
+	}
+	return "macos-home-manager"
 }
 
 func (h readinessHost) spec(t *testing.T) ReadinessSpec {
@@ -74,19 +141,23 @@ func (h readinessHost) spec(t *testing.T) ReadinessSpec {
 		AccountKey:     "coordinator",
 		Profile:        profile,
 		Expect: ReadinessExpectation{
-			HostKind:             "macos-home-manager",
-			GenerationDigest:     digestText("3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-home-manager-generation"),
+			HostKind:             h.hostKind,
+			GenerationDigest:     h.generationDigest,
 			DoctrineKernelDigest: digestBytes(kernel),
 			Tools:                []string{"git"},
 		},
 		Inputs: ReadinessInputs{
-			WorkspaceRoot:      h.workspace,
-			WorkspaceIdentity:  readinessWorkspaceIdentity,
-			WorkspaceMode:      WorkspaceExclusive,
-			DoctrineKernel:     h.kernel,
-			DoctrineLoader:     h.loader,
-			HomeManagerCurrent: h.generation,
-			Instance:           "ppm-readiness",
+			WorkspaceRoot:        h.workspace,
+			WorkspaceIdentity:    readinessWorkspaceIdentity,
+			WorkspaceMode:        WorkspaceExclusive,
+			DoctrineKernel:       h.kernel,
+			DoctrineLoader:       h.loader,
+			HomeManagerCurrent:   h.platformInputs.HomeManagerCurrent,
+			HomeManagerInstalled: h.platformInputs.HomeManagerInstalled,
+			NixOSMarker:          h.platformInputs.NixOSMarker,
+			NixOSCurrent:         h.platformInputs.NixOSCurrent,
+			NixOSInstalled:       h.platformInputs.NixOSInstalled,
+			Instance:             "ppm-readiness",
 		},
 		Doctor: func(context.Context) (ReadinessDoctorReport, error) {
 			return ReadinessDoctorReport{Instance: "ppm-readiness", Ready: true,
@@ -198,6 +269,8 @@ func TestObserveReadinessBlocksOnRealHostDefects(t *testing.T) {
 			"paimos_account", "fail", "account_label_mismatch"},
 		{"named account unavailable", func(spec *ReadinessSpec) { spec.AccountKey = "not-registered" },
 			"paimos_account", "fail", "named_account_unavailable"},
+		{"host kind mismatch", func(spec *ReadinessSpec) { spec.Expect.HostKind = mismatchedReadinessHostKind() },
+			"host_kind", "fail", "host_kind_mismatch"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
