@@ -48,7 +48,7 @@ type runTelemetryReport struct {
 }
 
 func runCmd() *cobra.Command {
-	c := &cobra.Command{Use: "run", Short: "Inspect and report one agent run"}
+	c := commandGroup(&cobra.Command{Use: "run", Short: "Inspect and report one agent run"})
 	c.AddCommand(runReportCmd())
 	return c
 }

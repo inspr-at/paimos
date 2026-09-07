@@ -74,3 +74,42 @@ func TestCurlCommandPostsInlineJSON(t *testing.T) {
 		t.Fatalf("body=%q", gotBody)
 	}
 }
+
+func TestCurlCommandReportsHTTPFailureInJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"forbidden","code":"forbidden"}`, http.StatusForbidden)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(envURL, srv.URL)
+	t.Setenv(envAPIKey, "test_key")
+
+	_, errOut, err := executeCLIForTest(t, "--json", "curl", "/api/secret")
+	if err == nil {
+		t.Fatal("HTTP failure unexpectedly succeeded")
+	}
+	if _, ok := err.(*apiError); !ok {
+		t.Fatalf("error type=%T, want *apiError", err)
+	}
+	if !strings.Contains(errOut, `"code":403`) || !strings.Contains(errOut, "forbidden") {
+		t.Fatalf("stderr=%q, want one machine-readable reported failure", errOut)
+	}
+}
+
+func TestCurlCommandReportsTransportFailureInJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+	t.Setenv(envURL, url)
+	t.Setenv(envAPIKey, "test_key")
+
+	_, errOut, err := executeCLIForTest(t, "--json", "curl", "/api/unavailable")
+	if err == nil {
+		t.Fatal("transport failure unexpectedly succeeded")
+	}
+	if _, ok := err.(*apiError); !ok {
+		t.Fatalf("error type=%T, want *apiError", err)
+	}
+	if !strings.Contains(errOut, "HTTP GET") || strings.Count(errOut, `"error"`) != 1 {
+		t.Fatalf("stderr=%q, want one reported transport failure", errOut)
+	}
+}

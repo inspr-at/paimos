@@ -41,7 +41,7 @@ type cliTag struct {
 }
 
 func tagCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "tag",
 		Short: "List and manage tags",
 		Long: `List and manage the global tag catalog.
@@ -49,7 +49,7 @@ func tagCmd() *cobra.Command {
 Tags are shared globally, then attached to issues or projects. Use
 "paimos issue tag add/rm" for assigning existing tags to issues; use
 "paimos tag create --project PAI" when bootstrapping a project taxonomy.`,
-	}
+	})
 	c.AddCommand(tagListCmd())
 	c.AddCommand(tagCreateCmd())
 	c.AddCommand(tagUpdateCmd())

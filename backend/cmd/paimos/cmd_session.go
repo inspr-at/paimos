@@ -46,7 +46,7 @@ import (
 // ticket marks as nice-to-have. They land here so the CLI surface stays
 // consistent regardless of which subset is wired up.
 func sessionCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "session",
 		Short: "Manage paimos agent-attribution sessions",
 		Long: `Session verbs read the project's declared agents (PAI-326), mint a
@@ -59,7 +59,7 @@ Typical usage from a slash-command activation hook:
 
 Subsequent ` + "`paimos`" + ` writes from that shell carry
 PAIMOS_AGENT_NAME / PAIMOS_SESSION_ID headers automatically.`,
-	}
+	})
 	c.AddCommand(sessionStartCmd())
 	c.AddCommand(sessionShowCmd())
 	c.AddCommand(sessionEndCmd())

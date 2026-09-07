@@ -146,13 +146,13 @@ func tellCmd() *cobra.Command {
 }
 
 func messageCmd() *cobra.Command {
-	c := &cobra.Command{Use: "message", Short: "Read the durable agent message ledger"}
+	c := commandGroup(&cobra.Command{Use: "message", Short: "Read the durable agent message ledger"})
 	c.AddCommand(messageListCmd(), messageGetCmd(), messageAllowCmd(), messageTargetCmd(), messageDeliveryCmd(), messageDeliveryRecoveryCmd())
 	return c
 }
 
 func messageTargetCmd() *cobra.Command {
-	c := &cobra.Command{Use: "target", Short: "Manage receiver-owned delivery target versions"}
+	c := commandGroup(&cobra.Command{Use: "target", Short: "Manage receiver-owned delivery target versions"})
 	c.AddCommand(messageTargetSetCmd(), messageTargetListCmd(), messageTargetRequeueCmd())
 	return c
 }
@@ -393,7 +393,7 @@ func messageDeliveryCmd() *cobra.Command {
 }
 
 func messageDeliveryRecoveryCmd() *cobra.Command {
-	c := &cobra.Command{Use: "delivery", Short: "Inspect and recover one message delivery"}
+	c := commandGroup(&cobra.Command{Use: "delivery", Short: "Inspect and recover one message delivery"})
 	c.AddCommand(messageRecoverClosedTargetCmd())
 	return c
 }
