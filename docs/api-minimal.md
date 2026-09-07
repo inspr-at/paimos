@@ -1036,7 +1036,11 @@ account choices are an optional versioned extension of the same runtime object:
 `schema_version: 2` with `accounts[]` of `LifecycleAccountChoiceV2` (`key` plus
 operator `label`). Intent `account_key` is optional and is used only with those
 versioned named choices. Omitting `accounts` keeps the v1 class-only
-advertisement.
+advertisement. The authenticated reporter client accepts claimed and
+transitioned intents with schema 1 or named-account schema 2 and keeps the
+claim envelope at `schema_version: 1`. Unknown intent schemas, mismatched
+runtime/project bindings, and schema/account-key mismatches fail closed before
+local execution.
 
 - Browser super-admin sessions: `GET /runtimes`, `POST /intents`,
   `GET /intents/{intentID}`, `GET /intents/{intentID}/events`, and

@@ -149,6 +149,37 @@ func TestLifecycleLostExecutingNeverCallsExecutorOnRecovery(t *testing.T) {
 		t.Fatal("ambiguous execution was respawned", err)
 	}
 }
+func TestLifecycleNamedAccountSchema2CompletesOnce(t *testing.T) {
+	r, a := runtimeFixture()
+	a.in.SchemaVersion = lifecycleintents.AccountChoiceSchemaV2
+	a.in.Request.AccountKey = "coordinator"
+	e := &fixtureExecutor{}
+	runner := openFixtureRunner(t, t.TempDir(), r, a, e)
+	if err := runner.Step(context.Background(), r); err != nil || e.effects != 1 || e.commits != 1 || a.in.State != "completed" || a.in.SchemaVersion != lifecycleintents.AccountChoiceSchemaV2 {
+		t.Fatal("named-account schema2 did not complete", err)
+	}
+	if err := runner.Step(context.Background(), r); err != nil || e.effects != 1 {
+		t.Fatal("named-account schema2 repeated", err)
+	}
+}
+func TestLifecycleUnknownAndMalformedIntentSchemasRefuseEffect(t *testing.T) {
+	for _, mutate := range []func(*lifecycleintents.Intent){
+		func(in *lifecycleintents.Intent) { in.SchemaVersion = 3 },
+		func(in *lifecycleintents.Intent) { in.SchemaVersion = lifecycleintents.AccountChoiceSchemaV2 },
+		func(in *lifecycleintents.Intent) {
+			in.SchemaVersion = lifecycleintents.RuntimeSchemaV1
+			in.Request.AccountKey = "coordinator"
+		},
+	} {
+		r, a := runtimeFixture()
+		mutate(&a.in)
+		e := &fixtureExecutor{}
+		runner := openFixtureRunner(t, t.TempDir(), r, a, e)
+		if !errors.Is(runner.Step(context.Background(), r), ErrOwnership) || e.effects != 0 {
+			t.Fatal("unsupported intent schema executed")
+		}
+	}
+}
 func TestLifecycleExpiredAndChangedGenerationRefuseEffect(t *testing.T) {
 	r, a := runtimeFixture()
 	e := &fixtureExecutor{}
