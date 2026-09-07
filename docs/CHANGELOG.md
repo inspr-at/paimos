@@ -6,6 +6,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.07] — 2026-09-07
+
+### Fixed — reliable runtime coordination and guided CLI (PAI-934–942, PAI-948)
+
+- Preserve failed receiver-inventory evidence so another healthy receiver cannot
+  hide missing runtime coverage. Process independent inbox streams with bounded
+  concurrency while retaining per-stream fencing and stop/repair draining.
+- Surface recovery-journal write failures and retain the failed checkpoint in
+  memory until explicit repair, preventing silent loss of retry backoff.
+- Reject missing or unknown CLI subcommands with a nonzero status. Keep guided
+  parent selections bound to the active session UUID despite stopped history,
+  offer only supported receiver fallback setup, and report raw HTTP errors in
+  human and JSON modes.
+- Check all projects included in Habitat's bounded snapshot and show incomplete
+  attention coverage when projects or workers are omitted or stale. Refresh
+  expired runtime advertisements, preserve valid form choices, and invalidate
+  unsubmitted reviews when authority changes. Keep a review open across unrelated
+  worker heartbeat updates.
+- Align the runbook guard with the shipped release and matching-build contract
+  while retaining the administrator-boundary checks.
+
+### Added — isolated UX experiment (PAI-943–946)
+
+- Include an opt-in static discussion prototype at
+  `/prototypes/simple/index.html`. It uses simulated data and optional browser
+  speech features; it does not create accounts, execute jobs or publish work.
+  This experiment is not the product's default interface or an accepted simple
+  UX design; a substantially simpler flow is being discussed separately.
+
 ## [26.09.06.21.31] — 2026-09-06
 
 ### Fixed — complete Habitat and CLI release (PAI-917, PAI-928)
