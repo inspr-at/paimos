@@ -172,10 +172,6 @@ func validAccountKey(value string) bool {
 	return !validAccount(value) && value != "unknown" && value != "local_probe"
 }
 
-func validAccountChoiceLabel(value string) bool {
-	return value == strings.TrimSpace(value) && workspaceLabel.MatchString(value) && !safetext.ContainsSecretLike(value) && !validAccount(value) && value != "unknown" && value != "local_probe"
-}
-
 func intentSchema(req Request) int {
 	if req.AccountKey != "" {
 		return AccountChoiceSchemaV2

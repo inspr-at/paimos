@@ -292,3 +292,158 @@ func TestDaemonLifecycleAdvertisesTwoAccountsAndRejectsWrongKey(t *testing.T) {
 		t.Fatal("second configured account could not be prepared")
 	}
 }
+
+func TestDaemonLifecycleLegacyAccountKeyAdvertisesContractValidLabels(t *testing.T) {
+	long := strings.Repeat("n", 49)
+	cases := []struct {
+		name, key, instance string
+	}{
+		{"ordinary", "coordinator", "legacy-ordinary"},
+		{"namespaced", "team:alpha", "legacy-namespaced"},
+		{"long", long, "legacy-long"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d, cleanup := daemonLifecycleFromProject(t, tc.instance, configuredProject{
+				ProjectID: 42, AccountLabel: "chatgpt", AccountKey: tc.key,
+			})
+			defer cleanup()
+			reg := d.projects[0].registration
+			if reg.SchemaVersion != lifecycleintents.AccountChoiceSchemaV2 || len(reg.Accounts) != 1 {
+				t.Fatalf("advertisement=%+v", reg)
+			}
+			if reg.Accounts[0].Key != tc.key {
+				t.Fatalf("legacy key rewritten: %+v", reg.Accounts[0])
+			}
+			if !lifecycleintents.ValidAccountChoiceLabel(reg.Accounts[0].Label) {
+				t.Fatalf("derived label not contract-valid: %+v", reg.Accounts[0])
+			}
+			if err := lifecycleintents.ValidateAdvertisedAccounts(reg); err != nil {
+				t.Fatalf("server contract rejected registration: %v %+v", err, reg.Accounts[0])
+			}
+			if tc.name == "ordinary" && reg.Accounts[0].Label != "coordinator" {
+				t.Fatalf("ordinary key was not reused as label: %+v", reg.Accounts[0])
+			}
+			if tc.name == "namespaced" && (reg.Accounts[0].Label == tc.key || strings.Contains(reg.Accounts[0].Label, ":")) {
+				t.Fatalf("colon key used as label: %+v", reg.Accounts[0])
+			}
+			if tc.name == "long" && (len(reg.Accounts[0].Label) > 48 || reg.Accounts[0].Label == tc.key) {
+				t.Fatalf("long key used as label: %+v", reg.Accounts[0])
+			}
+		})
+	}
+}
+
+func TestDaemonLifecycleRejectsInvalidAccountChoiceLabelsBeforeRegistration(t *testing.T) {
+	secret := "sk-live-abcdefghijk"
+	cases := []struct {
+		name, label, cause string
+	}{
+		{"colon", "Work: Main", "colon not allowed"},
+		{"too-long", strings.Repeat("a", 60), "exceeds 48 characters"},
+		{"secret-like", secret, "secret-like value"},
+		{"whitespace", " Coordinator", "surrounding whitespace"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err, cleanup := daemonLifecycleErrFromProject(t, "invalid-label-"+tc.name, configuredProject{
+				ProjectID:    42,
+				AccountLabel: "chatgpt",
+				Accounts:     []configuredAccount{{Key: "coordinator", Label: tc.label}},
+			})
+			defer cleanup()
+			if err == nil {
+				t.Fatal("invalid label loaded")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "accounts[0].label") || !strings.Contains(msg, tc.cause) {
+				t.Fatalf("error=%q", msg)
+			}
+			if strings.Contains(msg, tc.label) {
+				t.Fatalf("error echoed configured label: %q", msg)
+			}
+		})
+	}
+	_, err, cleanup := daemonLifecycleErrFromProject(t, "invalid-label-profile", configuredProject{
+		ProjectID:    42,
+		AccountLabel: "chatgpt",
+		Accounts:     []configuredAccount{{Key: "coordinator", Label: "codex-sol-high"}},
+	})
+	defer cleanup()
+	if err == nil || !strings.Contains(err.Error(), "accounts[0].label collides with profile") {
+		t.Fatalf("profile collision error=%v", err)
+	}
+	_, err, cleanup2 := daemonLifecycleErrFromProject(t, "invalid-label-key-ambiguity", configuredProject{
+		ProjectID:    42,
+		AccountLabel: "chatgpt",
+		Accounts: []configuredAccount{
+			{Key: "coordinator", Label: "Coordinator"},
+			{Key: "personal", Label: "coordinator"},
+		},
+	})
+	defer cleanup2()
+	if err == nil || !strings.Contains(err.Error(), "accounts[1].label collides with account key") {
+		t.Fatalf("key/label ambiguity error=%v", err)
+	}
+}
+
+func daemonLifecycleFromProject(t *testing.T, instance string, project configuredProject) (*daemonLifecycle, func()) {
+	t.Helper()
+	d, err, cleanup := daemonLifecycleErrFromProject(t, instance, project)
+	if err != nil {
+		cleanup()
+		t.Fatal(err)
+	}
+	return d, cleanup
+}
+
+func daemonLifecycleErrFromProject(t *testing.T, instance string, project configuredProject) (*daemonLifecycle, error, func()) {
+	t.Helper()
+	ctx := context.Background()
+	root := t.TempDir()
+	workspace, _ := filepath.EvalSymlinks(t.TempDir())
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
+		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
+	}, newMemoryReporterLeaseStore())
+	accounts := map[string]bool{"coordinator": true, "personal": true, "team:alpha": true, strings.Repeat("n", 49): true}
+	a := &lifecycleFixtureAdapter{accounts: accounts}
+	reporter := &lifecycleFixtureReporter{public: uuid.NewString()}
+	controller, e := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: instance, StateRoot: root, Adapters: []agentd.Adapter{a}, Reporter: reporter, DispatchResolver: bridge, HeartbeatInterval: 20 * time.Millisecond})
+	if e != nil {
+		t.Fatal(e)
+	}
+	primary, e := newNativeConsumers(root, instance, bridge)
+	if e != nil {
+		controller.Close(context.Background())
+		t.Fatal(e)
+	}
+	primary.controller = controller
+	handle := uuid.NewString()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", 404)
+	}))
+	cleanup := func() {
+		server.Close()
+		primary.supervisor.Stop()
+		controller.Close(context.Background())
+	}
+	if project.Profiles == nil {
+		project.Profiles = []lifecycleintents.Profile{{ID: profile.ID, Version: profile.Version}}
+	}
+	if project.Workspaces == nil {
+		provenance, err := controller.InspectWorkspace(ctx, workspace, agentd.WorkspaceExclusive)
+		if err != nil {
+			cleanup()
+			t.Fatal(err)
+		}
+		project.Workspaces = []configuredWorkspace{{Handle: handle, Path: workspace, Identity: provenance.Identity, Label: "Fixture workspace"}}
+	}
+	configPath := filepath.Join(t.TempDir(), "runtime.json")
+	keyPath := filepath.Join(t.TempDir(), "key")
+	raw, _ := json.Marshal(lifecycleConfig{Projects: []configuredProject{project}})
+	_ = os.WriteFile(configPath, raw, 0600)
+	_ = os.WriteFile(keyPath, []byte("fixture-key"), 0600)
+	d, err := newDaemonLifecycle(configPath, root, instance, server.URL, keyPath, controller, primary, bridge)
+	return d, err, cleanup
+}

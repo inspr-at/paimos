@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -114,15 +113,19 @@ func newDaemonLifecycle(path, root, instance, reportURL, keyFile string, supervi
 		if c.AccountKey != "" && (len(c.Accounts) > 0 || !agentd.ValidAccountKey(c.AccountKey)) {
 			return nil, errors.New("lifecycle project configuration invalid")
 		}
-		accounts, err := advertisedAccounts(c)
+		generation := supervisor.Status().DaemonID
+		accounts, err := advertisedAccounts(c, generation, reporter.host)
 		if err != nil {
 			return nil, err
 		}
 		seen[c.ProjectID] = true
 		p := &projectLifecycle{owner: d, config: c, bound: map[string]bool{}, prepared: map[string]agentd.StartRequest{}}
-		p.registration = lifecycleintents.Registration{Generation: supervisor.Status().DaemonID, Host: reporter.host, AccountLabel: c.AccountLabel, Accounts: accounts, Profiles: c.Profiles, Workspaces: []lifecycleintents.Workspace{}}
+		p.registration = lifecycleintents.Registration{Generation: generation, Host: reporter.host, AccountLabel: c.AccountLabel, Accounts: accounts, Profiles: c.Profiles, Workspaces: []lifecycleintents.Workspace{}}
 		if len(accounts) > 0 {
 			p.registration.SchemaVersion = lifecycleintents.AccountChoiceSchemaV2
+		}
+		if err = lifecycleintents.ValidateAdvertisedAccounts(p.registration); err != nil {
+			return nil, errors.New("lifecycle advertised accounts rejected by server contract")
 		}
 		workspaces := map[string]bool{}
 		for _, w := range c.Workspaces {
@@ -180,27 +183,61 @@ func configuredProfile(id, version string) (dispatchprofile.Profile, error) {
 	return dispatchprofile.Profile{}, errors.New("configured immutable lifecycle profile unavailable")
 }
 
-func advertisedAccounts(c configuredProject) ([]lifecycleintents.AccountChoice, error) {
+func advertisedAccounts(c configuredProject, generation, host string) ([]lifecycleintents.AccountChoice, error) {
+	reserved := advertisedAccountReservedNames(c, generation, host)
 	if len(c.Accounts) == 0 {
 		if c.AccountKey == "" {
 			return nil, nil
 		}
-		return []lifecycleintents.AccountChoice{{Key: c.AccountKey, Label: c.AccountKey}}, nil
+		label := lifecycleintents.DisplayLabelForAccountKey(c.AccountKey, reserved)
+		if !lifecycleintents.ValidAccountChoiceLabel(label) {
+			return nil, errors.New("lifecycle account_key cannot derive a safe display label")
+		}
+		return []lifecycleintents.AccountChoice{{Key: c.AccountKey, Label: label}}, nil
 	}
 	if len(c.Accounts) > 16 {
-		return nil, errors.New("lifecycle project configuration invalid")
+		return nil, errors.New("lifecycle accounts exceeds 16 entries")
 	}
 	out := make([]lifecycleintents.AccountChoice, 0, len(c.Accounts))
 	keys, labels := map[string]bool{}, map[string]bool{}
-	for _, account := range c.Accounts {
-		if !agentd.ValidAccountKey(account.Key) || account.Label != strings.TrimSpace(account.Label) || account.Label == "" || keys[account.Key] || labels[account.Label] {
-			return nil, errors.New("lifecycle project configuration invalid")
+	for i, account := range c.Accounts {
+		if !agentd.ValidAccountKey(account.Key) {
+			return nil, fmt.Errorf("lifecycle accounts[%d].key invalid", i)
+		}
+		if cause := lifecycleintents.AccountChoiceLabelCause(account.Label); cause != "" {
+			return nil, fmt.Errorf("lifecycle accounts[%d].label invalid: %s", i, cause)
+		}
+		if keys[account.Key] {
+			return nil, fmt.Errorf("lifecycle accounts[%d].key duplicate", i)
+		}
+		if labels[account.Label] {
+			return nil, fmt.Errorf("lifecycle accounts[%d].label duplicate", i)
+		}
+		if keys[account.Label] && account.Label != account.Key {
+			return nil, fmt.Errorf("lifecycle accounts[%d].label collides with account key", i)
+		}
+		if labels[account.Key] && account.Key != account.Label {
+			return nil, fmt.Errorf("lifecycle accounts[%d].key collides with account label", i)
+		}
+		if cause := lifecycleintents.AccountChoiceDimensionCollisionCause(account.Key, generation, host, c.AccountLabel, c.Profiles); cause != "" {
+			return nil, fmt.Errorf("lifecycle accounts[%d].key %s", i, cause)
+		}
+		if cause := lifecycleintents.AccountChoiceDimensionCollisionCause(account.Label, generation, host, c.AccountLabel, c.Profiles); cause != "" {
+			return nil, fmt.Errorf("lifecycle accounts[%d].label %s", i, cause)
 		}
 		keys[account.Key] = true
 		labels[account.Label] = true
 		out = append(out, lifecycleintents.AccountChoice{Key: account.Key, Label: account.Label})
 	}
 	return out, nil
+}
+
+func advertisedAccountReservedNames(c configuredProject, generation, host string) []string {
+	reserved := []string{generation, host, c.AccountLabel}
+	for _, profile := range c.Profiles {
+		reserved = append(reserved, profile.ID, profile.Version)
+	}
+	return reserved
 }
 
 func (p *projectLifecycle) configuredAccountKey(key string) bool {

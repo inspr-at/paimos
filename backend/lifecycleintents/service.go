@@ -66,7 +66,7 @@ func validateRegistration(in Registration) error {
 	if !validID(in.Generation) || !label(in.Host, 128) || !validAccount(in.AccountLabel) || len(in.Workspaces) > 16 || len(in.Profiles) > 16 || in.Workspaces == nil || in.Profiles == nil {
 		return ErrInvalid
 	}
-	if err := validateAdvertisedAccounts(in); err != nil {
+	if err := ValidateAdvertisedAccounts(in); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -90,34 +90,6 @@ func validateRegistration(in Registration) error {
 	return nil
 }
 
-func validateAdvertisedAccounts(in Registration) error {
-	if len(in.Accounts) == 0 {
-		if in.SchemaVersion != 0 && in.SchemaVersion != RuntimeSchemaV1 {
-			return ErrInvalid
-		}
-		return nil
-	}
-	if in.SchemaVersion != AccountChoiceSchemaV2 || len(in.Accounts) > maxAdvertisedAccounts {
-		return ErrInvalid
-	}
-	keys, labels := map[string]bool{}, map[string]bool{}
-	for _, choice := range in.Accounts {
-		if !validAccountKey(choice.Key) || !validAccountChoiceLabel(choice.Label) || keys[choice.Key] || labels[choice.Label] {
-			return ErrInvalid
-		}
-		if choice.Key == in.Generation || choice.Key == in.Host || choice.Key == in.AccountLabel || choice.Label == in.Host || choice.Label == in.Generation {
-			return ErrInvalid
-		}
-		for _, profile := range in.Profiles {
-			if choice.Key == profile.ID || choice.Key == profile.Version || choice.Label == profile.ID || choice.Label == profile.Version {
-				return ErrInvalid
-			}
-		}
-		keys[choice.Key] = true
-		labels[choice.Label] = true
-	}
-	return nil
-}
 func (s *Service) RegisterRuntime(ctx context.Context, p auth.Principal, project int64, lease string, in Registration) (Runtime, error) {
 	mutationMu.Lock()
 	defer mutationMu.Unlock()

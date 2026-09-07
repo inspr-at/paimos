@@ -12,7 +12,14 @@ as documented here in 5.21.0 or 26.08.31.
 
 The guided start, runtime-management, and Habitat lifecycle workflows in this
 guide are available in 26.09.07 and require matching Paimos server, CLI, and
-daemon builds. Release 26.09.05 does not include these workflows. The earlier
+daemon builds. Named account choices (`accounts` / `schema_version: 2`, and
+optional intent `account_key`) are an unreleased source extension in this tree;
+they are not part of the released 26.09.07 daemon, server, or CLI. A 26.09.07
+daemon decoder uses `DisallowUnknownFields`, so copying the `accounts` example
+below into a released 26.09.07 lifecycle config fails with `lifecycle project
+configuration invalid`. Released 26.09.07 Habitat lifecycle still advertises
+class-only runtimes (`account_label` without `accounts`). Release 26.09.05 does
+not include these workflows. The earlier
 26.09.06 release is incomplete because its container image was not published;
 the corrective 26.09.06.21.31 release remains the prior production record.
 Current production verification for 26.09.07 found public health `200/ok` on
@@ -214,7 +221,9 @@ paimos-agentd workspace-identity --instance example --workspace /absolute/review
 
 Copy its `handle`, `identity`, and `path` into the reviewed configuration. An
 optional `label` is a short non-secret display name chosen by the operator; it
-is never inferred from a path. Example structure with placeholder identities:
+is never inferred from a path. The `accounts` array below is the unreleased
+named-choice shape; omit it on 26.09.07. Example structure with placeholder
+identities:
 
 ```json
 {
@@ -236,17 +245,22 @@ is never inferred from a path. Example structure with placeholder identities:
 }
 ```
 
-Each project has one explicitly configured account class label. It may also
-advertise one or more opaque named-account choices from the daemon's
-`--codex-accounts` registry (`accounts` with operator labels, or the legacy
-single `account_key`). One daemon can therefore offer several named accounts as
-distinct browser choices for the same project. Opaque keys and operator labels
-stay distinct from account class, harness, model, worker identity and runtime
-generation. The browser selects only from a fresh owned advertisement; forged,
-unconfigured or stale keys fail closed on the server and in the daemon before
-any model turn. Changing the selected account invalidates a reviewed start and
-cannot adopt an existing worker. Omitting `accounts` and `account_key` keeps the
-legacy class probe and does not claim named-account verification. Up to four
+Each project has one explicitly configured account class label. This unreleased
+source extension may also advertise one or more opaque named-account choices
+from the daemon's `--codex-accounts` registry (`accounts` with operator labels,
+or the legacy single `account_key`). One daemon can therefore offer several
+named accounts as distinct browser choices for the same project. Opaque keys and
+operator labels stay distinct from account class, harness, model, worker
+identity and runtime generation. A legacy `account_key` remains a valid opaque
+key even when it cannot be shown as a label (`:` or length); the daemon then
+derives a stable non-secret display label rather than rejecting the key.
+Explicit `accounts[].label` values stay operator-chosen and are rejected at
+config load when they are not contract-valid. The browser selects only from a
+fresh owned advertisement; forged, unconfigured or stale keys fail closed on
+the server and in the daemon before any model turn. Changing the selected
+account invalidates a reviewed start and cannot adopt an existing worker.
+Omitting `accounts` and `account_key` keeps the legacy class probe and does not
+claim named-account verification. Up to four
 independent project loops run in one daemon. Identity is re-probed from the
 physical workspace, the catalog supplies the exact immutable profile, and named
 Codex accounts are verified from the selected home rather than from class
