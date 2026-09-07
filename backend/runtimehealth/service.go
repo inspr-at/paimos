@@ -254,6 +254,7 @@ func verifyServeArgs(args []string, instance, root, expectedURL string) error {
 		return errors.New("agentd executable unavailable")
 	}
 	values := map[string]string{}
+	seen := map[string]struct{}{}
 	for _, a := range args {
 		if strings.ContainsAny(a, "\x00\r\n") {
 			return errors.New("service arguments invalid")
@@ -264,14 +265,18 @@ func verifyServeArgs(args []string, instance, root, expectedURL string) error {
 		switch k {
 		case "--allow-shared-workspaces":
 			return errors.New("shared workspace service requires separate review")
-		case "--instance", "--state-root", "--socket", "--codex-path", "--claude-path", "--node-path", "--claude-sdk-path", "--report-host", "--report-url", "--report-api-key-file", "--paimos-path", "--lifecycle-config":
+		case "--instance", "--state-root", "--socket", "--codex-path", "--claude-path", "--node-path", "--claude-sdk-path", "--report-host", "--report-url", "--report-api-key-file", "--paimos-path", "--lifecycle-config", "--codex-accounts":
 		default:
 			return errors.New("service arguments unsupported")
 		}
-		if i+1 >= len(args) || values[k] != "" {
+		if i+1 >= len(args) {
+			return errors.New("service arguments ambiguous")
+		}
+		if _, dup := seen[k]; dup {
 			return errors.New("service arguments ambiguous")
 		}
 		i++
+		seen[k] = struct{}{}
 		values[k] = args[i]
 	}
 	if values["--instance"] != instance || values["--state-root"] != root {
@@ -296,6 +301,15 @@ func verifyServeArgs(args []string, instance, root, expectedURL string) error {
 		}
 		if _, e := safeFile(v, false); e != nil {
 			return errors.New("lifecycle configuration metadata unsafe")
+		}
+	}
+	if _, present := seen["--codex-accounts"]; present {
+		v := values["--codex-accounts"]
+		if v == "" || !filepath.IsAbs(v) {
+			return errors.New("codex account registry invalid")
+		}
+		if _, e := safeFile(v, false); e != nil {
+			return errors.New("codex account registry metadata unsafe")
 		}
 	}
 	if report {
