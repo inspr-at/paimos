@@ -59,6 +59,61 @@ function ownedLifecycleFixture(phase: 'working' | 'stopped') {
   worker.work_shape = 'ship'
   return { snapshot, coordinator, worker }
 }
+
+function mockTicketList() {
+  vi.spyOn(api, 'getWithMeta').mockResolvedValue({
+    data: {
+      issues: [
+        {
+          id: 917,
+          project_id: 1,
+          issue_key: 'PAI-917',
+          title: 'Fast iteration and runtime lifecycle',
+        },
+      ],
+      total: 1,
+      offset: 0,
+      limit: 50,
+      has_more: false,
+    },
+    status: 200,
+    permissionsEpoch: '0',
+    permissionsEpochGeneration: 0,
+    etag: null,
+    lastModified: null,
+  })
+}
+
+function ownedRuntime(
+  active: ReturnType<typeof ownedLifecycleFixture>,
+  workspace: string,
+  sessions = [
+    {
+      session_id: active.coordinator.harness_session_id,
+      generation: id('33'),
+      workspace_handle: workspace,
+    },
+    {
+      session_id: active.worker.harness_session_id,
+      generation: id('34'),
+      workspace_handle: workspace,
+    },
+  ],
+) {
+  const profile = active.worker.dispatch_profile!
+  return {
+    id: id('31'),
+    project_id: 1,
+    generation: id('32'),
+    machine_id: active.worker.machine_id!,
+    account_label: active.worker.account_label,
+    workspaces: [{ handle: workspace, identity: 'b'.repeat(64) }],
+    profiles: [{ id: profile.id, version: profile.version }],
+    sessions,
+    expires_at: new Date(Date.now() + 120000).toISOString(),
+  }
+}
+
 describe('Habitat browser lifecycle', () => {
   it('makes attach, listener repair and restart reviewable from exact owned evidence', async () => {
     vi.spyOn(api, 'getWithMeta').mockResolvedValue({
@@ -478,6 +533,172 @@ describe('Habitat browser lifecycle', () => {
 
     expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).not.toBeNull()
     expect(mounted.el.querySelector('.habitat-facts')?.textContent).toBe(exactRequestBefore)
+    await mounted.unmount()
+  })
+
+  it.each(['reassign', 'attach', 'restart'] as const)(
+    'preserves an edited %s draft when refreshed worker objects only report a heartbeat',
+    async (operation) => {
+      mockTicketList()
+      const active = ownedLifecycleFixture(operation === 'restart' ? 'stopped' : 'working')
+      const profile = active.worker.dispatch_profile!
+      const workspace = id('71')
+      const runtime = ownedRuntime(active, workspace)
+      const props = reactive({
+        projectId: 1,
+        agent: 'coordinator',
+        profile,
+        authority: 'human:1',
+        deployment: 'fixture',
+        fresh: true,
+        selectedSessionId: active.worker.harness_session_id,
+        workers: structuredClone(active.snapshot.fleet.workers),
+      })
+      vi.mocked(loadOrchestration)
+        .mockResolvedValueOnce(active.snapshot)
+        .mockImplementation(() => Promise.resolve(structuredClone(active.snapshot)))
+      vi.mocked(loadHabitatRuntimes).mockResolvedValue([runtime])
+
+      const mounted = await mountComponent(HabitatLifecycle, props)
+      await vi.waitFor(() => expect(combobox(mounted.el, 'Runtime').value).toBe(runtime.id))
+
+      if (operation === 'attach') {
+        const operationSelect = combobox(mounted.el, 'Operation')
+        operationSelect.value = operation
+        operationSelect.dispatchEvent(new Event('change'))
+        await nextTick()
+      } else await vi.waitFor(() => expect(combobox(mounted.el, 'Operation').value).toBe(operation))
+      await vi.waitFor(() =>
+        expect(combobox(mounted.el, 'Lifecycle worker').value).toBe(
+          active.worker.harness_session_id,
+        ),
+      )
+      await vi.waitFor(() => expect(combobox(mounted.el, 'Ticket').disabled).toBe(false))
+
+      const ticket = combobox(mounted.el, 'Ticket')
+      ticket.value = '917'
+      ticket.dispatchEvent(new Event('change'))
+      await nextTick()
+      const shape = combobox(mounted.el, 'Work shape')
+      shape.value = 'scout'
+      shape.dispatchEvent(new Event('change'))
+      await nextTick()
+      const parent = combobox(mounted.el, 'Parent worker')
+      parent.value = active.coordinator.harness_session_id
+      parent.dispatchEvent(new Event('change'))
+      await nextTick()
+
+      props.workers[0]!.liveness.reason = 'background_heartbeat'
+      await nextTick()
+      await vi.waitFor(() => expect(loadOrchestration).toHaveBeenCalledTimes(2))
+
+      expect(combobox(mounted.el, 'Ticket').value).toBe('917')
+      expect(combobox(mounted.el, 'Work shape').value).toBe('scout')
+      expect(combobox(mounted.el, 'Parent worker').value).toBe(
+        active.coordinator.harness_session_id,
+      )
+      await mounted.unmount()
+    },
+  )
+
+  it('initializes binding fields when the selected worker changes', async () => {
+    mockTicketList()
+    const active = ownedLifecycleFixture('working')
+    const second = structuredClone(active.worker)
+    second.harness_session_id = id('72')
+    second.ticket = {
+      id: 917,
+      details_available: true,
+      key: 'PAI-917',
+      title: 'Fast iteration and runtime lifecycle',
+    }
+    second.parent_harness_session_id = null
+    second.work_shape = 'scout'
+    const snapshot = structuredClone(active.snapshot)
+    snapshot.fleet.workers.push(second)
+    const profile = active.worker.dispatch_profile!
+    const workspace = id('73')
+    const runtime = ownedRuntime(active, workspace, [
+      {
+        session_id: active.worker.harness_session_id,
+        generation: id('74'),
+        workspace_handle: workspace,
+      },
+      {
+        session_id: second.harness_session_id,
+        generation: id('75'),
+        workspace_handle: workspace,
+      },
+    ])
+    vi.mocked(loadOrchestration).mockResolvedValue(snapshot)
+    vi.mocked(loadHabitatRuntimes).mockResolvedValue([runtime])
+    const mounted = await mountComponent(HabitatLifecycle, {
+      projectId: 1,
+      agent: 'coordinator',
+      profile,
+      authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
+    })
+    await vi.waitFor(() => expect(combobox(mounted.el, 'Runtime')).toBeDefined())
+    const runtimeSelect = combobox(mounted.el, 'Runtime')
+    runtimeSelect.value = runtime.id
+    runtimeSelect.dispatchEvent(new Event('change'))
+    await nextTick()
+    const operation = combobox(mounted.el, 'Operation')
+    operation.value = 'reassign'
+    operation.dispatchEvent(new Event('change'))
+    await nextTick()
+    const worker = combobox(mounted.el, 'Lifecycle worker')
+    worker.value = second.harness_session_id
+    worker.dispatchEvent(new Event('change'))
+    await nextTick()
+    await vi.waitFor(() => expect(combobox(mounted.el, 'Ticket').value).toBe('917'))
+    expect(combobox(mounted.el, 'Work shape').value).toBe('scout')
+    expect(combobox(mounted.el, 'Parent worker').value).toBe('')
+    await mounted.unmount()
+  })
+
+  it('drops an unsubmitted review when the selected worker revision changes', async () => {
+    mockTicketList()
+    const active = ownedLifecycleFixture('working')
+    const profile = active.worker.dispatch_profile!
+    const workspace = id('76')
+    const runtime = ownedRuntime(active, workspace)
+    const props = reactive({
+      projectId: 1,
+      agent: 'coordinator',
+      profile,
+      authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
+      selectedSessionId: active.worker.harness_session_id,
+      workers: structuredClone(active.snapshot.fleet.workers),
+    })
+    const changed = structuredClone(active.snapshot)
+    changed.fleet.workers[1]!.revision += 1
+    vi.mocked(loadOrchestration)
+      .mockResolvedValueOnce(active.snapshot)
+      .mockResolvedValueOnce(changed)
+    vi.mocked(loadHabitatRuntimes).mockResolvedValue([runtime])
+    const mounted = await mountComponent(HabitatLifecycle, props)
+    await vi.waitFor(() => expect(combobox(mounted.el, 'Runtime').value).toBe(runtime.id))
+    await vi.waitFor(() =>
+      expect(combobox(mounted.el, 'Lifecycle worker').value).toBe(active.worker.harness_session_id),
+    )
+    button(mounted.el, 'Review reassign request').click()
+    await nextTick()
+    expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).not.toBeNull()
+
+    props.workers[0]!.liveness.reason = 'background_heartbeat'
+    await nextTick()
+    await vi.waitFor(() => expect(loadOrchestration).toHaveBeenCalledTimes(2))
+
+    await vi.waitFor(() =>
+      expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).toBeNull(),
+    )
+    expect(button(mounted.el, 'Review reassign request')).toBeDefined()
+    expect(submitHabitatIntent).not.toHaveBeenCalled()
     await mounted.unmount()
   })
 })

@@ -366,12 +366,23 @@ watch(
   },
   { deep: true },
 )
-watch(selectedWorker, (worker) => {
-  if (pendingRequest.value || !worker) return
-  ticketId.value = worker.ticket?.id ?? null
-  workShape.value = worker.work_shape === 'scout' ? 'scout' : 'ship'
-  parentId.value = worker.parent_harness_session_id ?? ''
-})
+watch(
+  [
+    () => selectedWorker.value?.harness_session_id,
+    () => selectedWorker.value?.revision,
+    () => selectedWorker.value?.ticket?.id ?? null,
+    () => selectedWorker.value?.work_shape,
+    () => selectedWorker.value?.parent_harness_session_id ?? '',
+  ],
+  () => {
+    const worker = selectedWorker.value
+    if (pendingRequest.value || !worker) return
+    ticketId.value = worker.ticket?.id ?? null
+    workShape.value = worker.work_shape === 'scout' ? 'scout' : 'ship'
+    parentId.value = worker.parent_harness_session_id ?? ''
+  },
+  { immediate: true },
+)
 watch(requestIdentity, () => {
   if (!attempted) {
     reviewing.value = false
