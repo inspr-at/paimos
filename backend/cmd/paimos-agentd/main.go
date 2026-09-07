@@ -92,11 +92,13 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if command == "workspace-identity" {
 		flags.StringVar(&workspace, "workspace", "", "existing absolute workspace to inspect without mutation")
 	}
-	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" {
+	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" || command == "held-queue" || command == "resume-queue" {
 		flags.StringVar(&sessionID, "session", "", "managed agentd session UUID")
-		flags.StringVar(&correlationID, "correlation-id", "", "durable message/delivery/control ID")
 		flags.StringVar(&identity, "identity", "", "expected attributed harness identity")
 		flags.Int64Var(&projectID, "project-id", 0, "expected PPM project numeric ID")
+	}
+	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" || command == "resume-queue" {
+		flags.StringVar(&correlationID, "correlation-id", "", "durable message/delivery/control ID")
 	}
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -107,7 +109,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if command == "receiver-reference" && (strings.TrimSpace(identity) == "" || uuid.Validate(sessionID) != nil || projectID <= 0) {
 		return errors.New("receiver reference requires exact --session generation, --identity and positive --project-id")
 	}
-	if command == "start" || command == "steer" || command == "interrupt" || command == "stop" {
+	if command == "start" || command == "steer" || command == "interrupt" || command == "stop" || command == "held-queue" || command == "resume-queue" {
 		if projectID <= 0 {
 			return errors.New("--project-id is required")
 		}
@@ -270,8 +272,16 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		output, err = client.Stop(ctx, sessionID, agentd.ControlRequest{
 			Instance: common.instance, ProjectID: projectID, Identity: identity, CorrelationID: correlationID,
 		})
+	case "held-queue":
+		output, err = client.QueueRetention(ctx, sessionID, agentd.ControlRequest{
+			Instance: common.instance, ProjectID: projectID, Identity: identity,
+		})
+	case "resume-queue":
+		output, err = client.ResumeQueue(ctx, sessionID, agentd.ControlRequest{
+			Instance: common.instance, ProjectID: projectID, Identity: identity, CorrelationID: correlationID,
+		})
 	default:
-		return errors.New("command must be serve, start, status, workspace-identity, receiver-reference, steer, interrupt, stop, or version")
+		return errors.New("command must be serve, start, status, workspace-identity, receiver-reference, steer, interrupt, stop, held-queue, resume-queue, or version")
 	}
 	if err != nil {
 		return err

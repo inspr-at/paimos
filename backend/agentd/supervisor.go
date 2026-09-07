@@ -952,6 +952,15 @@ func (s *Supervisor) Stop(ctx context.Context, id string, request ControlRequest
 		effect = ControlEffect{Primitive: "owned process already exited", CorrelationID: request.CorrelationID}
 		err = nil
 	}
+	if err != nil && effect.Primitive == piStopPrimitive {
+		if vErr := validateControlEffect(request, effect); vErr != nil {
+			entry.remember("stop", request, Receipt{}, vErr)
+			return Receipt{}, vErr
+		}
+		receipt := s.effectReceipt("stop", id, identity, projectID, effect)
+		entry.remember("stop", request, receipt, err)
+		return receipt, errors.Join(err, waitSessionFinalized(ctx, entry))
+	}
 	if err != nil {
 		entry.mu.Lock()
 		if entry.session.State == StateStopping {

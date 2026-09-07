@@ -108,6 +108,29 @@ func (s *Supervisor) HeldQueue(id string) (HeldQueue, error) {
 	return s.queue.held(entry.session.ID)
 }
 
+func (s *Supervisor) QueueRetention(id string, request ControlRequest) (QueueRetentionReport, error) {
+	if request.Text != "" {
+		return QueueRetentionReport{}, errors.New("agentd queue-retention request is invalid")
+	}
+	entry, err := s.get(id)
+	if err != nil {
+		return QueueRetentionReport{}, err
+	}
+	if err := s.validateControlScope(entry, request); err != nil {
+		return QueueRetentionReport{}, err
+	}
+	held, err := s.HeldQueue(id)
+	if err != nil {
+		return QueueRetentionReport{}, err
+	}
+	return QueueRetentionReport{
+		Generation: held.Generation,
+		Outcome:    held.Outcome,
+		Steering:   len(held.Steering),
+		FollowUp:   len(held.FollowUp),
+	}, nil
+}
+
 func (s *Supervisor) ResumeQueue(ctx context.Context, id string, request ControlRequest) (Receipt, error) {
 	if request.Text != "" || !validCorrelationID(request.CorrelationID) {
 		return Receipt{}, errors.New("agentd resume request is invalid")

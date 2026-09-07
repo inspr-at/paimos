@@ -376,44 +376,41 @@ func (p *piProcess) Interrupt(ctx context.Context, request ControlRequest) (Cont
 func (p *piProcess) Stop(ctx context.Context, request ControlRequest) (ControlEffect, error) {
 	p.controlMu.Lock()
 	defer p.controlMu.Unlock()
-	if p.queue == nil {
-		p.closeSessionInput()
-		effect, err := p.ownedProcess.Stop(ctx, request)
-		if err != nil {
-			return effect, err
-		}
-		effect.Primitive = piStopPrimitive
-		return effect, errPiDurableUnavailable
-	}
-	if p.queue.hasAmbiguous(p.scope.Generation) {
-		return ControlEffect{}, errPiQueueAmbiguous
-	}
-	opCtx, cancel := p.operationContext(ctx)
-	defer cancel()
-	if p.queue.holdCommitted(p.scope.Generation) || p.pauseAccounted() {
-		if err := p.queue.markTerminal(p.scope.Generation, request.CorrelationID); err != nil {
-			return ControlEffect{}, err
-		}
-	} else {
-		if err := p.queue.beginHold(p.scope.Generation, request.CorrelationID); err != nil {
-			return ControlEffect{}, err
-		}
-		data, acc, err := p.session.ClearQueue(opCtx, request.CorrelationID+"-stop-clear")
-		if err != nil || !acc.Accepted {
-			_ = p.queue.rollbackHold(p.scope.Generation)
-			return ControlEffect{}, errors.New("pi rpc clear_queue rejected")
-		}
-		if err := p.queue.commitHold(p.scope.Generation, request.CorrelationID, data, true); err != nil {
-			return ControlEffect{}, err
+	var residual error
+	switch {
+	case p.queue == nil:
+		residual = errPiDurableUnavailable
+	case p.queue.hasAmbiguous(p.scope.Generation):
+		residual = errPiQueueAmbiguous
+	default:
+		opCtx, cancel := p.operationContext(ctx)
+		defer cancel()
+		if p.queue.holdCommitted(p.scope.Generation) || p.pauseAccounted() {
+			if err := p.queue.markTerminal(p.scope.Generation, request.CorrelationID); err != nil {
+				residual = err
+			}
+		} else if err := p.queue.beginHold(p.scope.Generation, request.CorrelationID); err != nil {
+			residual = err
+		} else {
+			data, acc, err := p.session.ClearQueue(opCtx, request.CorrelationID+"-stop-clear")
+			if err != nil || !acc.Accepted {
+				_ = p.queue.rollbackHold(p.scope.Generation)
+				residual = errors.New("pi rpc clear_queue rejected")
+			} else if err := p.queue.commitHold(p.scope.Generation, request.CorrelationID, data, true); err != nil {
+				residual = err
+			}
 		}
 	}
 	p.closeSessionInput()
 	effect, err := p.ownedProcess.Stop(ctx, request)
-	if err == nil {
-		p.observeEvent(AdapterEvent{Kind: EventControlApplied, CorrelationID: request.CorrelationID})
-		effect.Primitive = piStopPrimitive
+	if err != nil {
+		return effect, err
 	}
-	return effect, err
+	if residual == nil {
+		p.observeEvent(AdapterEvent{Kind: EventControlApplied, CorrelationID: request.CorrelationID})
+	}
+	effect.Primitive = piStopPrimitive
+	return effect, residual
 }
 
 func (p *piProcess) Inbox(ctx context.Context, request ControlRequest) (ControlEffect, error) {

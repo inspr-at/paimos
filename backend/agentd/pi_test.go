@@ -4,13 +4,17 @@
 package agentd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -411,6 +415,10 @@ func TestPiQueueUnicodeRetainedAfterSupervisorRestart(t *testing.T) {
 	if err != nil || after.Outcome != piHeldOutcomeTerminal || len(after.Steering) != 1 || after.Steering[0] != wantSteer || len(after.FollowUp) != 1 || after.FollowUp[0] != wantFollow {
 		t.Fatalf("after restart held=%+v err=%v", after, err)
 	}
+	report, err := recovered.QueueRetention(session.ID, ControlRequest{Instance: "ppm-pi-restart", ProjectID: 957, Identity: "pi:worker"})
+	if err != nil || report.Outcome != piHeldOutcomeTerminal || report.Steering != 1 || report.FollowUp != 1 || report.Generation != session.ID {
+		t.Fatalf("after restart retention=%+v err=%v", report, err)
+	}
 	if _, err := recovered.ResumeQueue(context.Background(), session.ID, ControlRequest{Instance: "ppm-pi-restart", ProjectID: 957, Identity: "pi:worker", CorrelationID: "resume-dead"}); err == nil {
 		t.Fatal("resume after restart must refuse a dead generation")
 	}
@@ -469,11 +477,20 @@ func TestPiStopRefusesWhenClearQueueFails(t *testing.T) {
 	if _, err := process.(InboxProcess).Inbox(context.Background(), ControlRequest{CorrelationID: "queued-stop-eof", Text: "keep"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "stop-eof"}); err == nil {
+	pid := process.PID()
+	if pid <= 0 {
+		t.Fatal("child was not running")
+	}
+	effect, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "stop-eof"})
+	if err == nil {
 		t.Fatal("stop must refuse success when clear_queue fails")
 	}
-	if process.PID() <= 0 {
-		t.Fatal("failed stop killed the child")
+	if effect.Primitive != piStopPrimitive {
+		t.Fatalf("stop must still reap with a stop primitive: %+v", effect)
+	}
+	assertOwnedChildReaped(t, process, pid)
+	if !strings.Contains(strings.Join(retainedPiQueueTexts(t, process), "\n"), "keep") {
+		t.Fatal("failed clear discarded durable queued text")
 	}
 }
 
@@ -484,7 +501,6 @@ func TestPiUnaccountedNativeExtraRefusesPause(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "pi-test-stop"}) }()
 	if _, err := process.(InboxProcess).Inbox(context.Background(), ControlRequest{CorrelationID: "follow-extra", Text: "mine"}); err != nil {
 		t.Fatal(err)
 	}
@@ -497,6 +513,22 @@ func TestPiUnaccountedNativeExtraRefusesPause(t *testing.T) {
 	held, err := process.(*piProcess).queue.held(process.(*piProcess).scope.Generation)
 	if err != nil || held.Outcome != piHeldOutcomeAmbiguous || !strings.Contains(strings.Join(held.FollowUp, "\n"), "ghost-extra") {
 		t.Fatalf("unaccounted extra was not retained: %+v err=%v", held, err)
+	}
+	pid := process.PID()
+	if pid <= 0 {
+		t.Fatal("child was not running")
+	}
+	effect, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "stop-extra"})
+	if err == nil || !errors.Is(err, errPiQueueAmbiguous) {
+		t.Fatalf("ambiguous stop must not advertise loss-free success: effect=%+v err=%v", effect, err)
+	}
+	if effect.Primitive != piStopPrimitive {
+		t.Fatalf("ambiguous stop must still reap: %+v", effect)
+	}
+	assertOwnedChildReaped(t, process, pid)
+	held, err = process.(*piProcess).queue.held(process.(*piProcess).scope.Generation)
+	if err != nil || held.Outcome != piHeldOutcomeAmbiguous || !strings.Contains(strings.Join(held.FollowUp, "\n"), "ghost-extra") {
+		t.Fatalf("stop dropped ambiguous extras: %+v err=%v", held, err)
 	}
 }
 
@@ -536,8 +568,8 @@ func TestPiQueueStoreRecoversUnicodeAfterReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	held, err := recovered.held(generation)
-	if err != nil || held.Outcome != piHeldOutcomeHeld || len(held.Steering) != 1 || held.Steering[0] != wantSteer || len(held.FollowUp) != 1 || held.FollowUp[0] != wantFollow {
-		t.Fatalf("reopened store lost unicode: %+v err=%v", held, err)
+	if err != nil || held.Outcome != piHeldOutcomeHeld || held.Outcome == piHeldOutcomeTerminal || len(held.Steering) != 1 || held.Steering[0] != wantSteer || len(held.FollowUp) != 1 || held.FollowUp[0] != wantFollow {
+		t.Fatalf("unclean reopen lost held unicode or rewrote terminal: %+v err=%v", held, err)
 	}
 }
 
@@ -642,6 +674,194 @@ func TestPiSteerAcceptIsNotTerminalExecution(t *testing.T) {
 		t.Fatal("steer accept must not be observed as terminal execution")
 	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+func TestPiQueueRetentionControlSurface(t *testing.T) {
+	profile := piTestProfile(t)
+	adapter, _ := piTestAdapter(t, "native-queue")
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Instance: "ppm-pi-queue-ctl", Adapters: []Adapter{adapter}, DispatchResolver: &profileResolver{profile: profile},
+		StateRoot: t.TempDir(), WorkspaceInspector: piWorkspaceInspector,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{
+		Adapter: AdapterPi, Workspace: t.TempDir(), Prompt: "secret-prompt-must-not-leak", Identity: "pi:worker", ProjectID: 957,
+		DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version,
+		AccountKey: "operator-pi", ExpectedAccountLabel: AccountPiContext,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := ControlRequest{Instance: "ppm-pi-queue-ctl", ProjectID: 957, Identity: "pi:worker"}
+	wrong := scope
+	wrong.ProjectID++
+	if _, err := supervisor.QueueRetention(session.ID, wrong); !errors.Is(err, ErrControlScopeMismatch) {
+		t.Fatalf("queue-retention scope error=%v", err)
+	}
+	if _, err := supervisor.ResumeQueue(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-pi-queue-ctl", ProjectID: 958, Identity: "pi:worker", CorrelationID: "resume-wrong-scope",
+	}); !errors.Is(err, ErrControlScopeMismatch) {
+		t.Fatalf("resume-queue scope error=%v", err)
+	}
+	if _, err := supervisor.ResumeQueue(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-pi-queue-ctl", ProjectID: 957, Identity: "pi:worker", CorrelationID: "resume-not-paused",
+	}); err == nil {
+		t.Fatal("resume of a live unpaused generation must refuse")
+	}
+	wantSteer := "keep\u2028secret-steer"
+	wantFollow := "keep\u2029secret-follow"
+	if _, err := supervisor.Steer(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-pi-queue-ctl", ProjectID: 957, Identity: "pi:worker", CorrelationID: "steer-keep", Text: wantSteer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := supervisor.Inbox(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-pi-queue-ctl", ProjectID: 957, Identity: "pi:worker", CorrelationID: "follow-keep", Text: wantFollow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := supervisor.Interrupt(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-pi-queue-ctl", ProjectID: 957, Identity: "pi:worker", CorrelationID: "pause-keep",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	report, err := supervisor.QueueRetention(session.ID, scope)
+	if err != nil || report.Outcome != piHeldOutcomeHeld || report.Steering != 1 || report.FollowUp != 1 || report.Generation != session.ID {
+		t.Fatalf("held retention=%+v err=%v", report, err)
+	}
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), wantSteer) || strings.Contains(string(encoded), wantFollow) || strings.Contains(string(encoded), "secret-prompt-must-not-leak") {
+		t.Fatalf("queue-retention leaked payload text: %s", encoded)
+	}
+	raw, err := json.Marshal(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	httpRequest := httptest.NewRequest(http.MethodPost, "/v1/sessions/"+session.ID+"/queue-retention", bytes.NewReader(raw))
+	httpRequest.Header.Set("Content-Type", "application/json")
+	transportHandler(supervisor).ServeHTTP(recorder, httpRequest)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("queue-retention HTTP %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), wantSteer) || strings.Contains(recorder.Body.String(), wantFollow) {
+		t.Fatalf("transport queue-retention leaked payload text: %s", recorder.Body.String())
+	}
+	wrongRaw, err := json.Marshal(wrong)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := httptest.NewRecorder()
+	httpRequest = httptest.NewRequest(http.MethodPost, "/v1/sessions/"+session.ID+"/queue-retention", bytes.NewReader(wrongRaw))
+	httpRequest.Header.Set("Content-Type", "application/json")
+	transportHandler(supervisor).ServeHTTP(forbidden, httpRequest)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("queue-retention scope HTTP %d body=%s", forbidden.Code, forbidden.Body.String())
+	}
+	first, err := supervisor.ResumeQueue(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-pi-queue-ctl", ProjectID: 957, Identity: "pi:worker", CorrelationID: "resume-keep",
+	})
+	if err != nil || first.CorrelationID != "resume-keep" || first.Primitive != piResumePrimitive {
+		t.Fatalf("resume=%+v err=%v", first, err)
+	}
+	again, err := supervisor.ResumeQueue(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-pi-queue-ctl", ProjectID: 957, Identity: "pi:worker", CorrelationID: "resume-keep",
+	})
+	if err != nil || again.CorrelationID != first.CorrelationID || again.Primitive != first.Primitive {
+		t.Fatalf("resume replay=%+v err=%v", again, err)
+	}
+}
+
+func TestPiSupervisorStopReapsAmbiguousQueue(t *testing.T) {
+	profile := piTestProfile(t)
+	adapter, _ := piTestAdapter(t, "clear-extra")
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Instance: "ppm-pi-stop-amb", Adapters: []Adapter{adapter}, DispatchResolver: &profileResolver{profile: profile},
+		StateRoot: t.TempDir(), WorkspaceInspector: piWorkspaceInspector,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{
+		Adapter: AdapterPi, Workspace: t.TempDir(), Prompt: "work", Identity: "pi:worker", ProjectID: 957,
+		DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version,
+		AccountKey: "operator-pi", ExpectedAccountLabel: AccountPiContext,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := supervisor.Inbox(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-pi-stop-amb", ProjectID: 957, Identity: "pi:worker", CorrelationID: "follow-extra", Text: "mine",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := supervisor.Interrupt(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-pi-stop-amb", ProjectID: 957, Identity: "pi:worker", CorrelationID: "pause-extra",
+	}); err == nil {
+		t.Fatal("unaccounted extra must not advertise pause")
+	}
+	pid := 0
+	for _, row := range supervisor.Status().Sessions {
+		if row.ID == session.ID {
+			pid = row.PID
+		}
+	}
+	if pid <= 0 {
+		t.Fatal("child was not running")
+	}
+	receipt, err := supervisor.Stop(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-pi-stop-amb", ProjectID: 957, Identity: "pi:worker", CorrelationID: "stop-extra",
+	})
+	if err == nil || !errors.Is(err, errPiQueueAmbiguous) {
+		t.Fatalf("ambiguous supervisor stop must not advertise loss-free success: receipt=%+v err=%v", receipt, err)
+	}
+	if receipt.Primitive != piStopPrimitive || receipt.Operation != "stop" || receipt.SessionID != session.ID {
+		t.Fatalf("ambiguous stop receipt=%+v", receipt)
+	}
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Fatal("supervisor stop left the owned child live")
+	}
+	held, err := supervisor.HeldQueue(session.ID)
+	if err != nil || held.Outcome != piHeldOutcomeAmbiguous || !strings.Contains(strings.Join(held.FollowUp, "\n"), "ghost-extra") {
+		t.Fatalf("stop dropped ambiguous extras: %+v err=%v", held, err)
+	}
+}
+
+func assertOwnedChildReaped(t *testing.T, process Process, pid int) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- process.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("owned child Wait did not complete after stop")
+	}
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Fatalf("owned child pid %d is still live", pid)
+	}
+}
+
+func retainedPiQueueTexts(t *testing.T, process Process) []string {
+	t.Helper()
+	pp := process.(*piProcess)
+	pp.queue.mu.Lock()
+	defer pp.queue.mu.Unlock()
+	var texts []string
+	for _, record := range pp.queue.generationRecordsLocked(pp.scope.Generation) {
+		text, err := pp.queue.readPayload(record.Key, record.TextSHA256, record.TextBytes)
+		if err != nil {
+			continue
+		}
+		texts = append(texts, text)
+	}
+	return texts
 }
 
 // TestPiFakeChildProcess hosts the test-only fake Pi RPC child.

@@ -95,7 +95,10 @@ func openPiQueueStore(root, instance string) (*piQueueStore, error) {
 		return nil, err
 	}
 	journal, err := localjournal.Open(localjournal.Config[piQueueRecord]{
-		Directory: dir, Prefix: "pi-queue", Version: 1, MaxBytes: 8 << 20, MaxRecords: 4096,
+		Directory: dir, Prefix: "pi-queue", Version: 1, MaxBytes: 8 << 20,
+		// Fail-closed: a 4097th distinct key is rejected. Older generations and
+		// payloads are never silently evicted, including crash-held records.
+		MaxRecords: 4096,
 		Key: func(r piQueueRecord) (string, error) {
 			if !validPiQueueKey(r.Key) {
 				return "", errors.New("invalid pi queue key")

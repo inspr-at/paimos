@@ -220,6 +220,16 @@ type Session struct {
 	Reporter            ReporterState            `json:"reporter,omitempty"`
 }
 
+// QueueRetentionReport is the content-free operator view of owned Pi queue
+// retention. Exact instruction text stays owner-private in HeldQueue and is
+// never copied into this report, receipts, status, or logs.
+type QueueRetentionReport struct {
+	Generation string `json:"generation"`
+	Outcome    string `json:"outcome"`
+	Steering   int    `json:"steering"`
+	FollowUp   int    `json:"follow_up"`
+}
+
 type ReporterState struct {
 	PublicSessionID string              `json:"public_session_id,omitempty"`
 	Capabilities    []Capability        `json:"capabilities,omitempty"`

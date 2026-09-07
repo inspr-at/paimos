@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   parseHabitatIntent,
+  parseHabitatRequest,
   parseHabitatRuntimes,
   type HabitatStartRequest,
 } from './habitatLifecycle'
@@ -107,6 +108,35 @@ describe('Habitat lifecycle response authority', () => {
       { ...runtime, sessions: [runtime.sessions[0], runtime.sessions[0]] },
     ])
       expect(() => parseHabitatRuntimes({ schema_version: 1, runtimes: [changed] }, 1)).toThrow()
+  })
+  it('accepts pi_context runtimes and requests and still rejects unknown labels and closed keys', () => {
+    const piRuntime = { ...runtime, account_label: 'pi_context' }
+    expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [piRuntime] }, 1)[0].account_label).toBe(
+      'pi_context',
+    )
+    expect(parseHabitatRequest({ ...request, account_label: 'pi_context' }).account_label).toBe(
+      'pi_context',
+    )
+    expect(
+      parseHabitatIntent({ ...intent(), request: { ...request, account_label: 'pi_context' } }, 1, {
+        ...request,
+        account_label: 'pi_context',
+      }).state,
+    ).toBe('requested')
+    expect(() =>
+      parseHabitatRuntimes(
+        { schema_version: 1, runtimes: [{ ...runtime, account_label: 'not-a-label' }] },
+        1,
+      ),
+    ).toThrow()
+    expect(() => parseHabitatRequest({ ...request, account_label: 'not-a-label' })).toThrow()
+    expect(() =>
+      parseHabitatRequest({
+        ...request,
+        account_label: 'pi_context',
+        account_key: 'pi_context',
+      }),
+    ).toThrow()
   })
   it('preserves pending evidence while tolerating server omitted nulls', () => {
     expect(parseHabitatIntent(intent(), 1, request).state).toBe('requested')

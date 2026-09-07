@@ -685,6 +685,13 @@ paimos-agentd interrupt --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
   --session "$SESSION_ID" --project-id "$PROJECT_ID" --identity "$ADDRESS" \
   --correlation-id operator-interrupt-001
 
+paimos-agentd held-queue --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
+  --session "$SESSION_ID" --project-id "$PROJECT_ID" --identity "$ADDRESS"
+
+paimos-agentd resume-queue --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
+  --session "$SESSION_ID" --project-id "$PROJECT_ID" --identity "$ADDRESS" \
+  --correlation-id operator-resume-001
+
 paimos-agentd stop --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
   --session "$SESSION_ID" --project-id "$PROJECT_ID" --identity "$ADDRESS" \
   --correlation-id operator-stop-001
@@ -692,6 +699,10 @@ paimos-agentd stop --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
 
 `interrupt` stops the current turn; `stop` closes the owned harness and reaps
 the process group. Neither command invents a vendor session from a PID.
+`held-queue` returns content-free retention counts for that generation;
+`resume-queue` re-injects held steer/follow-up onto a still-running paused
+generation. JSON output is the report or receipt only — never the raw queue
+text.
 
 Owned Pi interrupt is not abort-only. Installed `pi --mode rpc` continues
 queued steering and follow-up after `abort` if those messages remain in the
@@ -701,13 +712,18 @@ generation, project, account/profile, and correlation ID) **before** native
 `clear_queue` is allowed. Interrupt then `clear_queue`s, commits the native
 reply against that ownership, and only then `abort`s. Concurrent inbox/steer
 delivery is blocked while paused or while queue state is ambiguous. Duplicate
-interrupt correlations replay. Stop also requires a successful `clear_queue`
-account before kill; a failed clear does not advertise stop. Native extras the
-adapter did not dispatch are retained as ambiguous and refuse advertised pause.
-`ResumeQueue` re-injects held steer/follow-up onto a still-running paused
-generation. After daemon restart the child is gone: held Unicode text remains
-as terminal retention and resume is refused. There is no Pi `pause` RPC.
-Receipts, status, reporter events, and public logs never carry the raw text.
+interrupt correlations replay. Pause and resume still refuse advertised
+loss-free success when extras are unaccounted or `clear_queue` fails. Stop and
+shutdown still reap the owned child in those cases; they do not advertise a
+loss-free clear, and known durable records stay queued or ambiguous. Native
+extras the adapter did not dispatch are retained as ambiguous and refuse
+advertised pause. After a clean stop, held Unicode text remains as terminal
+retention and resume is refused. After an unclean crash the same texts stay
+`held` (not rewritten terminal) for the dead generation; resume is refused
+because there is no live paused child. The owner-private journal is fail-closed
+at 4096 records and never silently evicts older generations. There is no Pi
+`pause` RPC. Receipts, status, reporter events, and public logs never carry
+the raw text.
 
 ## Architecture
 
@@ -808,7 +824,7 @@ PID is audit/status evidence, not proof that a new daemon owns the old process.
 | Durable inbox only | Read and acknowledge | No vendor control | No process status | No | Message remains a framed, untrusted inbox item |
 | Owned Codex (`agentd_codex`) | Separate `codex` fallback target and worker required | Yes, exact live app-server turn | Local always; durable harness heartbeat when reporting is enabled | Local exact owned process; durable typed interrupt/stop when reporting is enabled | Reporter advertises status/interrupt/stop, never inbox/steer |
 | Owned Claude (`agentd_claude`) | Separate valid simple target and worker required | Yes, exact live Agent SDK Query | Local always; durable harness heartbeat when reporting is enabled | Local exact owned Query/process; durable typed interrupt/stop when reporting is enabled | Reporter advertises status/interrupt/stop, never inbox/steer; pinned SDK required |
-| Owned Pi (`agentd_pi`) | Separate valid simple target and worker required | Yes, exact live `pi rpc steer` | Local always; durable harness heartbeat when reporting is enabled | Local exact owned process: interrupt is durable ownership then `clear_queue` then `abort` (not abort-only); stop kills only after successful queue account | Fake-native proof only in this slice; no live provider support claim. Pause retains exact steering/follow-up in an owner-private spool and blocks further delivery; live `ResumeQueue` re-injects onto the same generation; restart keeps terminal retention and refuses resume. Unaccounted native extras refuse advertised pause. `pi_context` is selected trusted `PI_CODING_AGENT_DIR`, not a verified provider account id |
+| Owned Pi (`agentd_pi`) | Separate valid simple target and worker required | Yes, exact live `pi rpc steer` | Local always; durable harness heartbeat when reporting is enabled | Local exact owned process: interrupt is durable ownership then `clear_queue` then `abort` (not abort-only); stop reaps even when queue reconciliation remains ambiguous and does not advertise loss-free clear | Fake-native proof only in this slice; no live provider support claim. Pause retains exact steering/follow-up in an owner-private spool and blocks further delivery; live `held-queue` / `resume-queue` report counts and re-inject onto the same generation; clean restart keeps terminal retention and refuses resume; unclean crash keeps held records for the dead generation. Unaccounted native extras refuse advertised pause. `pi_context` is selected trusted `PI_CODING_AGENT_DIR`, not a verified provider account id |
 | Unmanaged Codex | Yes, documented queue primitive | Yes only for a bound target using documented external steer | Only if its integration reports status | No owned interrupt/stop | Cannot claim process ownership |
 | Unmanaged Claude (`claude_resume` / `claude_channel`) | Yes | No; requested steer records effective `simple` with `unsupported` | Only if its integration reports status | No | Resume/channel handoff is never called steer |
 | Grok Bot routine / gated Grok Build path | Wake or new-turn handoff only | No; effective behavior is simple | No owned process status | No | A webhook or CLI resume is never queue-faked as steer |

@@ -334,7 +334,8 @@
                   "claude_ai_pro",
                   "claude_ai_team",
                   "claude_ai_enterprise",
-                  "console"
+                  "console",
+                  "pi_context"
                 ]
               },
               "account_key": {

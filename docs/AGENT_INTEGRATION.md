@@ -1265,12 +1265,17 @@ human-selected by id and are not an automatic paid-model default.
 Owned Pi interrupt durably owns exact steer/follow-up text in an owner-private
 spool before documented `clear_queue`, then `abort`s. Abort alone continues
 queued steering/follow-up. Concurrent delivery is blocked while paused or
-ambiguous; stop requires a successful clear account before kill. Live
-`ResumeQueue` re-injects held texts onto the same generation; after daemon
-restart those texts remain as terminal retention and resume is refused.
-Unaccounted native extras refuse advertised pause. Receipts and status never
-carry the raw text. This slice is fake-native composition only and does not
-claim fully live Pi support.
+ambiguous. Pause and resume refuse advertised success when reconciliation
+fails; stop and shutdown still reap the owned child without claiming a
+loss-free clear, and they do not drop known durable records. Live
+`paimos-agentd resume-queue` re-injects held texts onto the same generation;
+`paimos-agentd held-queue` reports content-free counts only. After a clean
+daemon stop those texts remain as terminal retention and resume is refused.
+After an unclean crash they stay held for the dead generation; resume is
+refused because there is no live paused child. The spool is fail-closed at
+4096 records and never silently evicts. Unaccounted native extras refuse
+advertised pause. Receipts and status never carry the raw text. This slice is
+fake-native composition only and does not claim fully live Pi support.
 
 Registrations created before this contract remain readable. They have null
 workspace/profile provenance and an `unknown` account label; PAIMOS does not
