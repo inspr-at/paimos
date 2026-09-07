@@ -11,16 +11,18 @@ and the M168 database guards require 26.09.01 or later; they are not available
 as documented here in 5.21.0 or 26.08.31.
 
 The guided start, runtime-management, and Habitat lifecycle workflows in this
-guide are available in 26.09.06.21.31 and require matching Paimos server, CLI, and
+guide are available in 26.09.07 and require matching Paimos server, CLI, and
 daemon builds. Release 26.09.05 does not include these workflows. The earlier
 26.09.06 release is incomplete because its container image was not published;
-use the verified corrective release 26.09.06.21.31. The reference operator Mac
-now runs its matching CLI and daemon with the protected lifecycle mapping; its
-read-only doctor confirms the owned lifecycle executor while optional receiver
-layers remain unavailable with zero owned sessions. A live API-key UI review
-also passed the control-room geometry, style, changelog, and all four Projects
-zoom checks. Runtime-health remains a human-session-only endpoint, so that
-review's expected `403` is not human-browser runtime-health evidence.
+the corrective 26.09.06.21.31 release remains the prior production record.
+Current production verification for 26.09.07 found public health `200/ok` on
+`ppm`, matching Mac CLI/daemon `26.09.07`, and passed 12 installed-CLI
+black-box checks plus 6 headless-browser fixtures after activation. Runtime
+doctor retains `targets ownership unverified`, `receiver not configured`, and
+`primary inbox unavailable`; human-session runtime-health, clean-OS onboarding,
+named cross-machine handoffs, VoiceOver/accessibility, exact deployed-static
+variant, and UI draft-refresh checks remain open. The public marketing site
+remains on the prior `26.09.06.21.31` provenance.
 
 This guide uses only public command names and placeholder identities. Keep
 actual target references, socket paths, credentials, and message content out of
