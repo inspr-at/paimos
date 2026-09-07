@@ -297,3 +297,95 @@ func TestBusyDeferralDoesNotReserveReceiptOrCountFailure(t *testing.T) {
 		t.Fatal("busy FIFO created ambiguous receipt or opened circuit")
 	}
 }
+
+type stalledStreamDriver struct {
+	fixtureDriver
+	entered chan string
+	release chan struct{}
+}
+
+func (d *stalledStreamDriver) Poll(ctx context.Context, b Binding) (*Work, error) {
+	d.entered <- b.Address
+	if b.Address == "codex:stalled" {
+		select {
+		case <-d.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, nil
+}
+
+func TestConsumerIndependentStreamProgressAndLifecycleDrain(t *testing.T) {
+	d := &stalledStreamDriver{entered: make(chan string, 8), release: make(chan struct{})}
+	s := fixtureSupervisor(t, t.TempDir(), d)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a := fixtureBinding()
+	a.Address = "codex:stalled"
+	aDone := make(chan error, 1)
+	go func() { aDone <- s.Step(ctx, a) }()
+	select {
+	case <-d.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first stream never entered")
+	}
+	b := a
+	b.Address, b.Session = "codex:healthy", "session-two"
+	bDone := make(chan error, 1)
+	go func() { bDone <- s.Step(ctx, b) }()
+	select {
+	case err := <-bDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("healthy stream blocked behind stalled stream")
+	}
+	<-d.entered
+	replacement := a
+	replacement.Generation, replacement.Revision = "new-daemon", "new-target"
+	waiting, stopWaiting := context.WithCancel(ctx)
+	nextDone := make(chan error, 1)
+	go func() { nextDone <- s.Step(waiting, replacement) }()
+	select {
+	case <-d.entered:
+		t.Fatal("replacement overtook stalled generation")
+	case <-nextDone:
+		t.Fatal("replacement completed before its predecessor")
+	case <-time.After(30 * time.Millisecond):
+	}
+	stopWaiting()
+	select {
+	case err := <-nextDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("same-stream wait ignored cancellation")
+	}
+	select {
+	case <-d.entered:
+		t.Fatal("replacement overtook stalled generation")
+	default:
+	}
+	stopped := make(chan struct{})
+	go func() { s.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("stop returned before active stream drained")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(d.release)
+	if err := <-aDone; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stop did not drain")
+	}
+	if err := s.Step(ctx, b); !errors.Is(err, ErrOwnership) {
+		t.Fatal("stopped supervisor admitted work", err)
+	}
+}

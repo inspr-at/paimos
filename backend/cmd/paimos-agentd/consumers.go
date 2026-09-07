@@ -74,22 +74,28 @@ func (c *nativeConsumers) reconcile(ctx context.Context) {
 		// from host/PID hints, and no old process or external thread is adopted.
 		bound := runtimeconsumer.Binding{Instance: status.Instance, Machine: c.reporter.host, Generation: status.DaemonID, Session: session.ID, Address: session.Identity, Project: session.ProjectID, Kind: "primary", Revision: session.Reporter.PublicSessionID}
 		bindings = append(bindings, bound)
+		c.mu.Lock()
 		c.bindings[bound.Key()] = session
-		stepCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
-		_ = c.supervisor.Step(stepCtx, bound)
-		cancel()
+		c.mu.Unlock()
 	}
+	runConsumerTasks(len(bindings), func(i int) {
+		stepCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+		defer cancel()
+		_ = c.supervisor.Step(stepCtx, bindings[i])
+	})
 	c.supervisor.Retain(bindings)
 	keep := map[string]bool{}
 	for _, b := range bindings {
 		keep[b.Key()] = true
 	}
+	c.mu.Lock()
 	for k := range c.bindings {
 		if !keep[k] {
 			delete(c.bindings, k)
 			delete(c.targets, k)
 		}
 	}
+	c.mu.Unlock()
 	if len(bindings) == 0 {
 		evidence = append(evidence, runtimeconsumer.Evidence{Kind: "primary", State: "unavailable", Reason: "no_owned_registered_generation", Generation: status.DaemonID})
 	}
@@ -163,6 +169,8 @@ func (c *nativeConsumers) Verify(ctx context.Context, b runtimeconsumer.Binding)
 	}
 	// The public session is immutable-bound to this target. Both drain and
 	// complete verify its private worker lease and TargetID on the server.
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if previous := c.targets[b.Key()]; previous != "" && previous != remote.MessageTargetID {
 		return runtimeconsumer.ErrOwnership
 	}
@@ -187,13 +195,16 @@ func (c *nativeConsumers) Poll(ctx context.Context, b runtimeconsumer.Binding) (
 	if inventoryErr != nil || len(inventory) > reporterOutputLimit || json.Unmarshal(inventory, &inventoryResponse) != nil {
 		return nil, runtimeconsumer.ErrAuthority
 	}
+	c.mu.Lock()
+	targetID := c.targets[b.Key()]
+	c.mu.Unlock()
 	own := false
 	for _, target := range inventoryResponse.Targets {
 		if target.Instance != b.Instance || target.ProjectID != b.Project || target.Address != b.Address {
 			return nil, runtimeconsumer.ErrAuthority
 		}
 		if target.Enabled && target.Role == "primary" {
-			if target.ID == c.targets[b.Key()] && target.Adapter == agentmessage.AdapterManagedHarness {
+			if target.ID == targetID && target.Adapter == agentmessage.AdapterManagedHarness {
 				own = true
 				continue
 			}
@@ -226,7 +237,7 @@ func (c *nativeConsumers) Poll(ctx context.Context, b runtimeconsumer.Binding) (
 		if delivery.TargetRef != "" || delivery.Instance != b.Instance || delivery.ProjectID != b.Project || message.To != b.Address || uuid.Validate(delivery.DeliveryID) != nil || work != nil {
 			return nil, runtimeconsumer.ErrAuthority
 		}
-		work = &runtimeconsumer.Work{ID: delivery.DeliveryID, Cursor: message.Cursor, Payload: message, Revision: c.targets[b.Key()]}
+		work = &runtimeconsumer.Work{ID: delivery.DeliveryID, Cursor: message.Cursor, Payload: message, Revision: targetID}
 	}
 	if work == nil && len(page.Messages) > 0 {
 		return nil, runtimeconsumer.ErrConflict
@@ -325,11 +336,17 @@ func (c *nativeConsumers) RepairProject(ctx context.Context, project int64) erro
 		}
 	}
 	defer c.reconcileMu.Unlock()
-	if len(c.bindings) == 0 {
+	c.mu.Lock()
+	bindings := make(map[string]agentd.Session, len(c.bindings))
+	for key, session := range c.bindings {
+		bindings[key] = session
+	}
+	c.mu.Unlock()
+	if len(bindings) == 0 {
 		return runtimeconsumer.ErrAuthority
 	}
 	matched := false
-	for key, session := range c.bindings {
+	for key, session := range bindings {
 		if project > 0 && session.ProjectID != project {
 			continue
 		}
@@ -350,4 +367,25 @@ func (c *nativeConsumers) RepairProject(ctx context.Context, project int64) erro
 		return runtimeconsumer.ErrAuthority
 	}
 	return nil
+}
+
+// The fixed worker set drains before reconciliation publishes or retires any
+// binding. Session count cannot create unbounded goroutines or external calls.
+func runConsumerTasks(count int, task func(int)) {
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range min(count, runtimeconsumer.MaxConcurrentStreams) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				task(i)
+			}
+		}()
+	}
+	for i := range count {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
 }

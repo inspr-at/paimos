@@ -16,11 +16,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/inspr-at/paimos/backend/localjournal"
+	"github.com/inspr-at/paimos/backend/runtimeconsumer"
 )
 
 type ConsumerEffect func(context.Context, agentmessage.ConsumerPage) (string, error)
 
 var ErrCircuit = errors.New("consumer transient recovery budget exhausted")
+
+// ErrPersistence requires an explicit repair before this consumer can retry.
+// It retains ErrUnknown compatibility without exposing private journal details.
+var ErrPersistence = fmt.Errorf("consumer recovery journal unavailable: %w", ErrUnknown)
 
 type consumerRecord struct {
 	Key          string                            `json:"key"`
@@ -37,9 +42,13 @@ type consumerRecord struct {
 	Next         time.Time                         `json:"next,omitempty"`
 }
 type Consumers struct {
-	mu      sync.Mutex
-	http    *HTTP
-	journal *localjournal.Journal[consumerRecord]
+	// Repair takes exclusive ownership after all independent steps drain.
+	lifecycleMu sync.RWMutex
+	streams     runtimeconsumer.StreamGate
+	failedMu    sync.Mutex
+	http        *HTTP
+	journal     *localjournal.Journal[consumerRecord]
+	failed      map[string]consumerRecord
 }
 
 func NewConsumers(directory string, h *HTTP) (*Consumers, error) {
@@ -63,7 +72,7 @@ func NewConsumers(directory string, h *HTTP) (*Consumers, error) {
 	if e != nil {
 		return nil, ErrUnknown
 	}
-	return &Consumers{http: h, journal: j}, nil
+	return &Consumers{http: h, journal: j, failed: map[string]consumerRecord{}}, nil
 }
 func consumerKey(in agentmessage.ConsumerRegistration) string {
 	in.Generation = ""
@@ -83,7 +92,12 @@ func (c *Consumers) headers(r consumerRecord) map[string]string {
 }
 func (c *Consumers) put(r consumerRecord) error {
 	if c.journal.Put(r) != nil {
-		return ErrUnknown
+		// Retain the exact failed checkpoint. A later Step must not load an
+		// older durable record and forget backoff, custody, or an applied effect.
+		c.failedMu.Lock()
+		c.failed[r.Key] = r
+		c.failedMu.Unlock()
+		return ErrPersistence
 	}
 	return nil
 }
@@ -92,9 +106,28 @@ func (c *Consumers) put(r consumerRecord) error {
 // Only the first execute response with a payload permits a vendor handoff.
 // A lost response or interrupted local effect is quarantined, never redelivered.
 func (c *Consumers) Step(ctx context.Context, in agentmessage.ConsumerRegistration, ready bool, effect ConsumerEffect) (returnErr error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.lifecycleMu.RLock()
+	defer c.lifecycleMu.RUnlock()
+	// A target's revisions and owner generations share one local gate. The
+	// server remains authoritative for replacement targets and stream fencing.
+	release, err := c.streams.Acquire(ctx, in.TargetID+":"+in.Kind)
+	if err != nil {
+		return err
+	}
+	defer release()
 	key := consumerKey(in)
+	c.failedMu.Lock()
+	latched := false
+	for _, failed := range c.failed {
+		if failed.Registration.TargetID == in.TargetID && failed.Registration.Kind == in.Kind {
+			latched = true
+			break
+		}
+	}
+	c.failedMu.Unlock()
+	if latched {
+		return ErrPersistence
+	}
 	r := consumerRecord{Key: key, Registration: in, Phase: "idle"}
 	found := false
 	for _, saved := range c.journal.Snapshot() {
@@ -138,15 +171,18 @@ func (c *Consumers) Step(ctx context.Context, in agentmessage.ConsumerRegistrati
 		return ErrCircuit
 	}
 	defer func() {
+		if errors.Is(returnErr, ErrPersistence) {
+			return
+		}
 		if errors.Is(returnErr, ErrUnknown) {
 			r.Blocked = "outcome_unknown"
-			_ = c.put(r)
+			returnErr = errors.Join(returnErr, c.put(r))
 			return
 		}
 		if errors.Is(returnErr, ErrHandoff) {
 			r.Blocked = "legacy_handoff_required"
 			r.Next = time.Now().Add(consumerRetryDelay(r.Key, 30*time.Second))
-			_ = c.put(r)
+			returnErr = errors.Join(returnErr, c.put(r))
 			return
 		}
 		if returnErr != nil && !errors.Is(returnErr, ErrCircuit) && r.Phase != "unknown" {
@@ -155,7 +191,7 @@ func (c *Consumers) Step(ctx context.Context, in agentmessage.ConsumerRegistrati
 				r.Failures = 3
 			}
 			r.Next = time.Now().Add(consumerRetryDelay(r.Key, time.Duration(1<<r.Failures)*time.Second))
-			_ = c.put(r)
+			returnErr = errors.Join(returnErr, c.put(r))
 		}
 	}()
 	// Keep the same proof alive while a transient effect circuit awaits repair.
@@ -294,7 +330,9 @@ func (c *Consumers) complete(ctx context.Context, r *consumerRecord) error {
 	err := c.http.Request(ctx, http.MethodPost, c.route("/streams/"+r.Stream.ID+"/attempts/"+r.Attempt.ID+"/complete"), c.headers(*r), agentmessage.ConsumerCompletion{ExpectedRevision: r.Stream.Revision, Outcome: outcome, EffectiveLevel: "simple", FallbackReason: reason}, &out)
 	if errors.Is(err, ErrUnknown) {
 		r.Blocked = "outcome_unknown"
-		_ = c.put(*r)
+		if writeErr := c.put(*r); writeErr != nil {
+			return errors.Join(err, writeErr)
+		}
 	}
 	if err != nil {
 		return err
@@ -303,7 +341,8 @@ func (c *Consumers) complete(ctx context.Context, r *consumerRecord) error {
 		return ErrOwnership
 	}
 	if outcome == "outcome_unknown" {
-		return ErrUnknown
+		r.Blocked = "outcome_unknown"
+		return errors.Join(ErrUnknown, c.put(*r))
 	}
 	r.Phase = "idle"
 	r.Attempt = nil
@@ -318,8 +357,17 @@ func (c *Consumers) complete(ctx context.Context, r *consumerRecord) error {
 // Repair retains the exact stream proofs and every ambiguous attempt. A claim
 // may be retried with its original nonce; executing work can only become unknown.
 func (c *Consumers) Repair() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	// The exclusive lifecycle lock also excludes every failed-map writer.
+	// Flush latched checkpoints before evaluating recovery. Successful storage
+	// alone cannot clear unknown custody or an executing effect.
+	for key, r := range c.failed {
+		if c.journal.Put(r) != nil {
+			return ErrPersistence
+		}
+		delete(c.failed, key)
+	}
 	for _, r := range c.journal.Snapshot() {
 		if r.Blocked == "outcome_unknown" || r.Phase == "executing" || r.Phase == "unknown" {
 			return ErrUnknown

@@ -105,15 +105,17 @@ type circuit struct {
 	Evidence Evidence `json:"evidence"`
 }
 type Supervisor struct {
-	unlock   func()
-	stopped  bool
-	mu       sync.Mutex
-	stepMu   sync.Mutex
-	driver   Driver
-	receipts *localjournal.Journal[checkpoint]
-	circuits *localjournal.Journal[circuit]
-	now      func() time.Time
-	states   map[string]Evidence
+	unlock  func()
+	stopped bool
+	mu      sync.Mutex
+	// Shared during Step; exclusive repair/stop drains every admitted call.
+	lifecycleMu sync.RWMutex
+	streams     StreamGate
+	driver      Driver
+	receipts    *localjournal.Journal[checkpoint]
+	circuits    *localjournal.Journal[circuit]
+	now         func() time.Time
+	states      map[string]Evidence
 }
 
 func New(directory string, driver Driver) (_ *Supervisor, returnErr error) {
@@ -166,8 +168,13 @@ func New(directory string, driver Driver) (_ *Supervisor, returnErr error) {
 // Step runs at most one canonical leased item. The in-memory gate also drains
 // target changes: an old step finishes/cancels before a replacement can execute.
 func (s *Supervisor) Step(ctx context.Context, b Binding) error {
-	s.stepMu.Lock()
-	defer s.stepMu.Unlock()
+	s.lifecycleMu.RLock()
+	defer s.lifecycleMu.RUnlock()
+	release, err := s.streams.Acquire(ctx, b.Stream())
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -193,7 +200,7 @@ func (s *Supervisor) Step(ctx context.Context, b Binding) error {
 	if s.now().Before(state.NextAttempt) {
 		return nil
 	}
-	err := s.step(ctx, b)
+	err = s.step(ctx, b)
 	if errors.Is(err, ErrDeferred) {
 		err = nil
 	}
@@ -363,8 +370,8 @@ func (s *Supervisor) Retain(bindings []Binding) {
 	}
 }
 func (s *Supervisor) Stop() {
-	s.stepMu.Lock()
-	defer s.stepMu.Unlock()
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	if s.stopped {
 		return
 	}
@@ -384,8 +391,8 @@ func (s *Supervisor) Stop() {
 // Repair reopens only a recoverable circuit after exact binding authority is
 // verified again. Pending receipts remain quarantined; no receipt is erased.
 func (s *Supervisor) Repair(ctx context.Context, b Binding) error {
-	s.stepMu.Lock()
-	defer s.stepMu.Unlock()
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	if s.stopped || !b.valid() {
 		return ErrOwnership
 	}
