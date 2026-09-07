@@ -26,10 +26,12 @@ import (
 type lifecycleFixtureAdapter struct {
 	mu       sync.Mutex
 	requests []agentd.StartRequest
+	accounts map[string]bool
 }
 
 func (*lifecycleFixtureAdapter) Name() string                        { return "codex" }
 func (*lifecycleFixtureAdapter) AccountLabel(context.Context) string { return "chatgpt" }
+func (a *lifecycleFixtureAdapter) HasAccount(key string) bool        { return a.accounts[key] }
 func (*lifecycleFixtureAdapter) Capabilities() []agentd.Capability {
 	return []agentd.Capability{agentd.CapabilityInbox, agentd.CapabilityStatus, agentd.CapabilityStop}
 }
@@ -202,4 +204,246 @@ func TestDaemonLifecycleStartsReservedGenerationAndProvesPublicMapping(t *testin
 	if controller.Status().Sessions[0].ID != reserved {
 		t.Fatal("server-reserved generation was not actual local generation")
 	}
+}
+
+func TestDaemonLifecycleAdvertisesTwoAccountsAndRejectsWrongKey(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	workspace, _ := filepath.EvalSymlinks(t.TempDir())
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
+		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
+	}, newMemoryReporterLeaseStore())
+	a := &lifecycleFixtureAdapter{accounts: map[string]bool{"coordinator": true, "personal": true}}
+	reporter := &lifecycleFixtureReporter{public: uuid.NewString()}
+	controller, e := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "named-accounts", StateRoot: root, Adapters: []agentd.Adapter{a}, Reporter: reporter, DispatchResolver: bridge, HeartbeatInterval: 20 * time.Millisecond})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer controller.Close(context.Background())
+	provenance, e := controller.InspectWorkspace(ctx, workspace, agentd.WorkspaceExclusive)
+	if e != nil {
+		t.Fatal(e)
+	}
+	primary, e := newNativeConsumers(root, "named-accounts", bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer primary.supervisor.Stop()
+	primary.controller = controller
+	handle := uuid.NewString()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/agents/worker.json") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"project": map[string]any{"id": 42, "key": "FIX"}, "agent": map[string]any{"project_id": 42, "name": "worker", "body": "canonical fixture instructions"}})
+			return
+		}
+		http.Error(w, "unavailable", 404)
+	}))
+	defer server.Close()
+	configPath := filepath.Join(t.TempDir(), "runtime.json")
+	keyPath := filepath.Join(t.TempDir(), "key")
+	config := lifecycleConfig{Projects: []configuredProject{{
+		ProjectID: 42, AccountLabel: "chatgpt",
+		Accounts:   []configuredAccount{{Key: "coordinator", Label: "Coordinator"}, {Key: "personal", Label: "Personal"}},
+		Profiles:   []lifecycleintents.Profile{{ID: profile.ID, Version: profile.Version}},
+		Workspaces: []configuredWorkspace{{Handle: handle, Path: workspace, Identity: provenance.Identity, Label: "Fixture workspace"}},
+	}}}
+	raw, _ := json.Marshal(config)
+	_ = os.WriteFile(configPath, raw, 0600)
+	_ = os.WriteFile(keyPath, []byte("fixture-key"), 0600)
+	d, e := newDaemonLifecycle(configPath, root, "named-accounts", server.URL, keyPath, controller, primary, bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	reg := d.projects[0].registration
+	if reg.SchemaVersion != lifecycleintents.AccountChoiceSchemaV2 || len(reg.Accounts) != 2 || reg.Accounts[0].Key != "coordinator" || reg.AccountLabel != "chatgpt" {
+		t.Fatalf("advertisement=%+v", reg)
+	}
+	mixed := config
+	mixed.Projects[0].AccountKey = "coordinator"
+	mixedRaw, _ := json.Marshal(mixed)
+	mixedPath := filepath.Join(t.TempDir(), "runtime.json")
+	_ = os.WriteFile(mixedPath, mixedRaw, 0600)
+	if _, err := newDaemonLifecycle(mixedPath, root, "named-accounts-mixed", server.URL, keyPath, controller, primary, bridge); err == nil {
+		t.Fatal("mixed account_key and accounts was accepted")
+	}
+	intent := lifecycleintents.Intent{
+		SchemaVersion: lifecycleintents.AccountChoiceSchemaV2, ID: uuid.NewString(), ProjectID: 42, State: "claimed", NewGeneration: uuid.NewString(),
+		Request: lifecycleintents.Request{
+			RequestKey: uuid.NewString(), Operation: "start", RuntimeID: uuid.NewString(), RuntimeGeneration: controller.Status().DaemonID,
+			AccountLabel: "chatgpt", AccountKey: "missing", TTLSeconds: 120, WorkspaceHandle: handle, AgentName: "worker",
+			DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version, Role: "worker", WorkShape: "unknown",
+		},
+	}
+	if err := d.projects[0].Prepare(ctx, intent); err == nil {
+		t.Fatal("unconfigured account was prepared")
+	}
+	intent.Request.AccountKey = "coordinator"
+	if err := d.projects[0].Prepare(ctx, intent); err != nil {
+		t.Fatal(err)
+	}
+	prepared := d.projects[0].prepared[intent.ID]
+	if prepared.AccountKey != "coordinator" || prepared.ExpectedAccountLabel != "chatgpt" {
+		t.Fatalf("prepared=%+v", prepared)
+	}
+	intent.ID, intent.Request.AccountKey, intent.NewGeneration = uuid.NewString(), "personal", uuid.NewString()
+	if err := d.projects[0].Prepare(ctx, intent); err != nil || d.projects[0].prepared[intent.ID].AccountKey != "personal" {
+		t.Fatal("second configured account could not be prepared")
+	}
+}
+
+func TestDaemonLifecycleLegacyAccountKeyAdvertisesContractValidLabels(t *testing.T) {
+	long := strings.Repeat("n", 49)
+	cases := []struct {
+		name, key, instance string
+	}{
+		{"ordinary", "coordinator", "legacy-ordinary"},
+		{"namespaced", "team:alpha", "legacy-namespaced"},
+		{"long", long, "legacy-long"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d, cleanup := daemonLifecycleFromProject(t, tc.instance, configuredProject{
+				ProjectID: 42, AccountLabel: "chatgpt", AccountKey: tc.key,
+			})
+			defer cleanup()
+			reg := d.projects[0].registration
+			if reg.SchemaVersion != lifecycleintents.AccountChoiceSchemaV2 || len(reg.Accounts) != 1 {
+				t.Fatalf("advertisement=%+v", reg)
+			}
+			if reg.Accounts[0].Key != tc.key {
+				t.Fatalf("legacy key rewritten: %+v", reg.Accounts[0])
+			}
+			if !lifecycleintents.ValidAccountChoiceLabel(reg.Accounts[0].Label) {
+				t.Fatalf("derived label not contract-valid: %+v", reg.Accounts[0])
+			}
+			if err := lifecycleintents.ValidateAdvertisedAccounts(reg); err != nil {
+				t.Fatalf("server contract rejected registration: %v %+v", err, reg.Accounts[0])
+			}
+			if tc.name == "ordinary" && reg.Accounts[0].Label != "coordinator" {
+				t.Fatalf("ordinary key was not reused as label: %+v", reg.Accounts[0])
+			}
+			if tc.name == "namespaced" && (reg.Accounts[0].Label == tc.key || strings.Contains(reg.Accounts[0].Label, ":")) {
+				t.Fatalf("colon key used as label: %+v", reg.Accounts[0])
+			}
+			if tc.name == "long" && (len(reg.Accounts[0].Label) > 48 || reg.Accounts[0].Label == tc.key) {
+				t.Fatalf("long key used as label: %+v", reg.Accounts[0])
+			}
+		})
+	}
+}
+
+func TestDaemonLifecycleRejectsInvalidAccountChoiceLabelsBeforeRegistration(t *testing.T) {
+	secret := "sk-live-abcdefghijk"
+	cases := []struct {
+		name, label, cause string
+	}{
+		{"colon", "Work: Main", "colon not allowed"},
+		{"too-long", strings.Repeat("a", 60), "exceeds 48 characters"},
+		{"secret-like", secret, "secret-like value"},
+		{"whitespace", " Coordinator", "surrounding whitespace"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err, cleanup := daemonLifecycleErrFromProject(t, "invalid-label-"+tc.name, configuredProject{
+				ProjectID:    42,
+				AccountLabel: "chatgpt",
+				Accounts:     []configuredAccount{{Key: "coordinator", Label: tc.label}},
+			})
+			defer cleanup()
+			if err == nil {
+				t.Fatal("invalid label loaded")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "accounts[0].label") || !strings.Contains(msg, tc.cause) {
+				t.Fatalf("error=%q", msg)
+			}
+			if strings.Contains(msg, tc.label) {
+				t.Fatalf("error echoed configured label: %q", msg)
+			}
+		})
+	}
+	_, err, cleanup := daemonLifecycleErrFromProject(t, "invalid-label-profile", configuredProject{
+		ProjectID:    42,
+		AccountLabel: "chatgpt",
+		Accounts:     []configuredAccount{{Key: "coordinator", Label: "codex-sol-high"}},
+	})
+	defer cleanup()
+	if err == nil || !strings.Contains(err.Error(), "accounts[0].label collides with profile") {
+		t.Fatalf("profile collision error=%v", err)
+	}
+	_, err, cleanup2 := daemonLifecycleErrFromProject(t, "invalid-label-key-ambiguity", configuredProject{
+		ProjectID:    42,
+		AccountLabel: "chatgpt",
+		Accounts: []configuredAccount{
+			{Key: "coordinator", Label: "Coordinator"},
+			{Key: "personal", Label: "coordinator"},
+		},
+	})
+	defer cleanup2()
+	if err == nil || !strings.Contains(err.Error(), "accounts[1].label collides with account key") {
+		t.Fatalf("key/label ambiguity error=%v", err)
+	}
+}
+
+func daemonLifecycleFromProject(t *testing.T, instance string, project configuredProject) (*daemonLifecycle, func()) {
+	t.Helper()
+	d, err, cleanup := daemonLifecycleErrFromProject(t, instance, project)
+	if err != nil {
+		cleanup()
+		t.Fatal(err)
+	}
+	return d, cleanup
+}
+
+func daemonLifecycleErrFromProject(t *testing.T, instance string, project configuredProject) (*daemonLifecycle, error, func()) {
+	t.Helper()
+	ctx := context.Background()
+	root := t.TempDir()
+	workspace, _ := filepath.EvalSymlinks(t.TempDir())
+	profile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
+		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{profile}})
+	}, newMemoryReporterLeaseStore())
+	accounts := map[string]bool{"coordinator": true, "personal": true, "team:alpha": true, strings.Repeat("n", 49): true}
+	a := &lifecycleFixtureAdapter{accounts: accounts}
+	reporter := &lifecycleFixtureReporter{public: uuid.NewString()}
+	controller, e := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: instance, StateRoot: root, Adapters: []agentd.Adapter{a}, Reporter: reporter, DispatchResolver: bridge, HeartbeatInterval: 20 * time.Millisecond})
+	if e != nil {
+		t.Fatal(e)
+	}
+	primary, e := newNativeConsumers(root, instance, bridge)
+	if e != nil {
+		controller.Close(context.Background())
+		t.Fatal(e)
+	}
+	primary.controller = controller
+	handle := uuid.NewString()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", 404)
+	}))
+	cleanup := func() {
+		server.Close()
+		primary.supervisor.Stop()
+		controller.Close(context.Background())
+	}
+	if project.Profiles == nil {
+		project.Profiles = []lifecycleintents.Profile{{ID: profile.ID, Version: profile.Version}}
+	}
+	if project.Workspaces == nil {
+		provenance, err := controller.InspectWorkspace(ctx, workspace, agentd.WorkspaceExclusive)
+		if err != nil {
+			cleanup()
+			t.Fatal(err)
+		}
+		project.Workspaces = []configuredWorkspace{{Handle: handle, Path: workspace, Identity: provenance.Identity, Label: "Fixture workspace"}}
+	}
+	configPath := filepath.Join(t.TempDir(), "runtime.json")
+	keyPath := filepath.Join(t.TempDir(), "key")
+	raw, _ := json.Marshal(lifecycleConfig{Projects: []configuredProject{project}})
+	_ = os.WriteFile(configPath, raw, 0600)
+	_ = os.WriteFile(keyPath, []byte("fixture-key"), 0600)
+	d, err := newDaemonLifecycle(configPath, root, instance, server.URL, keyPath, controller, primary, bridge)
+	return d, err, cleanup
 }

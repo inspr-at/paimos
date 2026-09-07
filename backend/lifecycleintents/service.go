@@ -66,6 +66,9 @@ func validateRegistration(in Registration) error {
 	if !validID(in.Generation) || !label(in.Host, 128) || !validAccount(in.AccountLabel) || len(in.Workspaces) > 16 || len(in.Profiles) > 16 || in.Workspaces == nil || in.Profiles == nil {
 		return ErrInvalid
 	}
+	if err := ValidateAdvertisedAccounts(in); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for _, w := range in.Workspaces {
 		if !validID(w.Handle) || !identity.MatchString(w.Identity) || !validWorkspaceLabel(w.Label) || seen[w.Handle] || seen[w.Identity] {
@@ -86,6 +89,7 @@ func validateRegistration(in Registration) error {
 	}
 	return nil
 }
+
 func (s *Service) RegisterRuntime(ctx context.Context, p auth.Principal, project int64, lease string, in Registration) (Runtime, error) {
 	mutationMu.Lock()
 	defer mutationMu.Unlock()
@@ -146,7 +150,7 @@ func (s *Service) RegisterRuntime(ctx context.Context, p auth.Principal, project
 	return out, nil
 }
 func runtimeProjection(id string, project int64, in Registration, deadline string) Runtime {
-	return Runtime{ID: id, ProjectID: project, Generation: in.Generation, MachineID: in.Host, AccountLabel: in.AccountLabel, Workspaces: in.Workspaces, Profiles: in.Profiles, ExpiresAt: deadline, Sessions: []SessionProjection{}}
+	return Runtime{ID: id, ProjectID: project, Generation: in.Generation, MachineID: in.Host, AccountLabel: in.AccountLabel, Accounts: in.Accounts, Workspaces: in.Workspaces, Profiles: in.Profiles, ExpiresAt: deadline, Sessions: []SessionProjection{}, SchemaVersion: in.SchemaVersion}
 }
 func workspaceHandleForIdentity(workspaces []Workspace, identity string) string {
 	if identity == "" {
@@ -260,6 +264,7 @@ func loadIntent(ctx context.Context, tx *sql.Tx, project int64, id string) (Inte
 	if json.Unmarshal([]byte(raw), &out.Request) != nil {
 		return Intent{}, ErrStorage
 	}
+	out.SchemaVersion = intentSchema(out.Request)
 	return out, nil
 }
 func (s *Service) creator(ctx context.Context, tx *sql.Tx, in Intent) error {
@@ -373,7 +378,7 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, project int64, r
 		newGeneration = uuid.NewString()
 	}
 	at := stamp(s.now())
-	in := Intent{SchemaVersion: 1, ID: uuid.NewString(), ProjectID: project, Request: req, State: "requested", Revision: 1, CreatedAt: at, ExpiresAt: stamp(s.now().Add(time.Duration(req.TTLSeconds) * time.Second)), UpdatedAt: at, NewGeneration: newGeneration}
+	in := Intent{SchemaVersion: intentSchema(req), ID: uuid.NewString(), ProjectID: project, Request: req, State: "requested", Revision: 1, CreatedAt: at, ExpiresAt: stamp(s.now().Add(time.Duration(req.TTLSeconds) * time.Second)), UpdatedAt: at, NewGeneration: newGeneration}
 	_, err = tx.ExecContext(ctx, `INSERT INTO lifecycle_intents(id,project_id,runtime_id,user_id,session_credential_id,request_key,request_json,new_generation,state,revision,created_at,expires_at,updated_at,actor_kind,actor_user_id,actor_credential_id) VALUES(?,?,?,?,?,?,?,?,'requested',1,?,?,?,?,?,?)`, in.ID, project, req.RuntimeID, p.UserID(), p.SessionCredentialID(), req.RequestKey, encode(req), newGeneration, at, in.ExpiresAt, at, p.Kind(), p.UserID(), p.SafeCredentialID())
 	if err != nil {
 		return Intent{}, false, ErrStorage

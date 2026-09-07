@@ -162,7 +162,8 @@ export function parseOrchestrationSnapshot(value: unknown): OrchestrationSnapsho
       (worker.machine_id !== null ||
         worker.workspace_provenance !== null ||
         worker.dispatch_profile !== null ||
-        worker.account_label !== 'unknown')
+        worker.account_label !== 'unknown' ||
+        worker.account_key)
     )
       invalid()
     if (

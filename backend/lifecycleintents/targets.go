@@ -15,27 +15,28 @@ import (
 )
 
 type session struct {
-	id        string
-	agent     string
-	host      string
-	account   string
-	workspace string
-	profile   string
-	version   string
-	role      string
-	phase     string
-	activity  string
-	heartbeat string
-	createdAt string
-	revision  int64
-	ticket    sql.NullInt64
-	parent    sql.NullString
-	shape     string
+	id         string
+	agent      string
+	host       string
+	account    string
+	accountKey string
+	workspace  string
+	profile    string
+	version    string
+	role       string
+	phase      string
+	activity   string
+	heartbeat  string
+	createdAt  string
+	revision   int64
+	ticket     sql.NullInt64
+	parent     sql.NullString
+	shape      string
 }
 
 func loadSession(ctx context.Context, tx *sql.Tx, project int64, id string) (session, error) {
 	var out session
-	err := tx.QueryRowContext(ctx, `SELECT id,agent_name,host,account_label,COALESCE(workspace_identity,''),dispatch_profile_id,dispatch_profile_version,role,phase,activity_state,COALESCE(heartbeat_at,''),revision,ticket_id,parent_harness_session_id,COALESCE(work_shape,'unknown'),created_at FROM harness_sessions WHERE id=? AND project_id=? AND management_mode='managed'`, id, project).Scan(&out.id, &out.agent, &out.host, &out.account, &out.workspace, &out.profile, &out.version, &out.role, &out.phase, &out.activity, &out.heartbeat, &out.revision, &out.ticket, &out.parent, &out.shape, &out.createdAt)
+	err := tx.QueryRowContext(ctx, `SELECT id,agent_name,host,account_label,COALESCE(account_key,''),COALESCE(workspace_identity,''),dispatch_profile_id,dispatch_profile_version,role,phase,activity_state,COALESCE(heartbeat_at,''),revision,ticket_id,parent_harness_session_id,COALESCE(work_shape,'unknown'),created_at FROM harness_sessions WHERE id=? AND project_id=? AND management_mode='managed'`, id, project).Scan(&out.id, &out.agent, &out.host, &out.account, &out.accountKey, &out.workspace, &out.profile, &out.version, &out.role, &out.phase, &out.activity, &out.heartbeat, &out.revision, &out.ticket, &out.parent, &out.shape, &out.createdAt)
 	if err != nil {
 		return session{}, ErrUnavailable
 	}
@@ -50,7 +51,7 @@ func workspaceIdentity(r Runtime, handle string) string {
 	return ""
 }
 func sameSpecification(current session, r Request, runtime Runtime) bool {
-	return current.agent == r.AgentName && current.host == runtime.MachineID && current.account == r.AccountLabel && current.workspace == workspaceIdentity(runtime, r.WorkspaceHandle) && current.profile == r.DispatchProfileID && current.version == r.DispatchProfileVersion && current.role == r.Role
+	return current.agent == r.AgentName && current.host == runtime.MachineID && current.account == r.AccountLabel && current.accountKey == r.AccountKey && current.workspace == workspaceIdentity(runtime, r.WorkspaceHandle) && current.profile == r.DispatchProfileID && current.version == r.DispatchProfileVersion && current.role == r.Role
 }
 func sameBinding(current session, r Request) bool {
 	return current.ticket.Valid == (r.TicketID != nil) && (r.TicketID == nil || current.ticket.Int64 == *r.TicketID) && current.parent.Valid == (r.ParentSessionID != nil) && (r.ParentSessionID == nil || current.parent.String == *r.ParentSessionID) && current.shape == r.WorkShape
@@ -103,7 +104,13 @@ func (s *Service) validateTargetForOutcome(ctx context.Context, tx *sql.Tx, proj
 		return ErrUnavailable
 	}
 	if r.Operation == "repair" {
+		if r.AccountKey != "" && !runtime.matchAccount(r.AccountKey) {
+			return ErrUnavailable
+		}
 		return nil
+	}
+	if !runtime.matchAccount(r.AccountKey) {
+		return ErrUnavailable
 	}
 	profile, err := resolveProfile(r.DispatchProfileID, r.DispatchProfileVersion)
 	if err != nil {
@@ -254,7 +261,7 @@ func (s *Service) RegisterSession(ctx context.Context, p auth.Principal, project
 	if err != nil {
 		return err
 	}
-	if current.host != runtime.MachineID || current.account != runtime.AccountLabel {
+	if current.host != runtime.MachineID || current.account != runtime.AccountLabel || !runtime.matchAccount(current.accountKey) {
 		return ErrUnavailable
 	}
 	var stored []byte

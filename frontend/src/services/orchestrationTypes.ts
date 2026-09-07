@@ -64,6 +64,7 @@ export type WorkerFleetSnapshotV2 = {
       | 'claude_ai_team'
       | 'claude_ai_enterprise'
       | 'console'
+    account_key?: string
     management_mode: 'managed' | 'unmanaged'
     runtime_provenance_trust: 'managed_reporter' | 'untrusted'
     ticket: {

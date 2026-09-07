@@ -65,6 +65,37 @@ describe('Habitat lifecycle response authority', () => {
     ])
       expect(() => parseHabitatRuntimes({ schema_version: 1, runtimes: [changed] }, 1)).toThrow()
   })
+  it('accepts advertised named accounts on schema 2 and rejects forged keys or class-only extras', () => {
+    const named = {
+      ...runtime,
+      schema_version: 2,
+      accounts: [
+        { key: 'coordinator', label: 'Coordinator' },
+        { key: 'personal', label: 'Personal' },
+      ],
+    }
+    expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [named] }, 1)[0].accounts).toEqual(
+      named.accounts,
+    )
+    expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [runtime] }, 1)[0].accounts).toBeUndefined()
+    for (const changed of [
+      { ...named, schema_version: 1 },
+      { ...named, accounts: [{ key: 'chatgpt', label: 'Coordinator' }] },
+      { ...named, accounts: [{ key: 'coordinator', label: 'chatgpt' }] },
+      { ...named, accounts: [{ key: named.generation, label: 'Coordinator' }] },
+      { ...runtime, accounts: named.accounts },
+      { ...named, accounts: [named.accounts[0], named.accounts[0]] },
+    ])
+      expect(() => parseHabitatRuntimes({ schema_version: 1, runtimes: [changed] }, 1)).toThrow()
+    const namedRequest = { ...request, account_key: 'coordinator' }
+    expect(parseHabitatIntent({ ...intent(), schema_version: 2, request: namedRequest }, 1, namedRequest).state).toBe(
+      'requested',
+    )
+    expect(() => parseHabitatIntent({ ...intent(), request: namedRequest }, 1, namedRequest)).toThrow()
+    expect(() =>
+      parseHabitatIntent({ ...intent(), schema_version: 2 }, 1, request),
+    ).toThrow()
+  })
   it('accepts scoped proof and rejects hidden fields, cross-project identities and duplicate mapping', () => {
     expect(parseHabitatRuntimes({ schema_version: 1, runtimes: [runtime] }, 1)[0].sessions).toEqual(
       runtime.sessions,

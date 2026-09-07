@@ -25,8 +25,15 @@ var (
 	ErrConflict    = errors.New("lifecycle_conflict")
 	ErrStorage     = errors.New("lifecycle_storage_unavailable")
 	stable         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	accountKey     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	identity       = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	workspaceLabel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,47}$`)
+)
+
+const (
+	RuntimeSchemaV1       = 1
+	AccountChoiceSchemaV2 = 2
+	maxAdvertisedAccounts = 16
 )
 
 type Workspace struct {
@@ -38,23 +45,35 @@ type Profile struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
 }
+
+// AccountChoice is a non-secret advertised named-account selection. Key and
+// operator label are distinct from account class, harness, model, worker id
+// and runtime generation. Homes, emails and credentials never appear here.
+type AccountChoice struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+}
 type Registration struct {
-	Generation   string      `json:"generation"`
-	Host         string      `json:"host"`
-	AccountLabel string      `json:"account_label"`
-	Workspaces   []Workspace `json:"workspaces"`
-	Profiles     []Profile   `json:"profiles"`
+	Generation    string          `json:"generation"`
+	Host          string          `json:"host"`
+	AccountLabel  string          `json:"account_label"`
+	Accounts      []AccountChoice `json:"accounts,omitempty"`
+	Workspaces    []Workspace     `json:"workspaces"`
+	Profiles      []Profile       `json:"profiles"`
+	SchemaVersion int             `json:"schema_version,omitempty"`
 }
 type Runtime struct {
-	ID           string              `json:"id"`
-	ProjectID    int64               `json:"project_id"`
-	Generation   string              `json:"generation"`
-	MachineID    string              `json:"machine_id"`
-	AccountLabel string              `json:"account_label"`
-	Workspaces   []Workspace         `json:"workspaces"`
-	Profiles     []Profile           `json:"profiles"`
-	ExpiresAt    string              `json:"expires_at"`
-	Sessions     []SessionProjection `json:"sessions"`
+	ID            string              `json:"id"`
+	ProjectID     int64               `json:"project_id"`
+	Generation    string              `json:"generation"`
+	MachineID     string              `json:"machine_id"`
+	AccountLabel  string              `json:"account_label"`
+	Accounts      []AccountChoice     `json:"accounts,omitempty"`
+	Workspaces    []Workspace         `json:"workspaces"`
+	Profiles      []Profile           `json:"profiles"`
+	ExpiresAt     string              `json:"expires_at"`
+	Sessions      []SessionProjection `json:"sessions"`
+	SchemaVersion int                 `json:"schema_version,omitempty"`
 }
 type Request struct {
 	RequestKey             string  `json:"request_key"`
@@ -62,6 +81,7 @@ type Request struct {
 	RuntimeID              string  `json:"runtime_id"`
 	RuntimeGeneration      string  `json:"runtime_generation"`
 	AccountLabel           string  `json:"account_label"`
+	AccountKey             string  `json:"account_key,omitempty"`
 	TTLSeconds             int     `json:"ttl_seconds"`
 	WorkspaceHandle        string  `json:"workspace_handle,omitempty"`
 	AgentName              string  `json:"agent_name,omitempty"`
@@ -144,8 +164,41 @@ func validAccount(value string) bool {
 	}
 	return false
 }
+
+func validAccountKey(value string) bool {
+	if !accountKey.MatchString(value) || strings.ContainsAny(value, "/\\") {
+		return false
+	}
+	return !validAccount(value) && value != "unknown" && value != "local_probe"
+}
+
+func intentSchema(req Request) int {
+	if req.AccountKey != "" {
+		return AccountChoiceSchemaV2
+	}
+	return RuntimeSchemaV1
+}
+
+func (r Runtime) matchAccount(key string) bool {
+	if len(r.Accounts) == 0 {
+		return key == ""
+	}
+	if key == "" {
+		return false
+	}
+	for _, choice := range r.Accounts {
+		if choice.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
 func (r Request) validate() error {
 	if !validID(r.RequestKey) || !validID(r.RuntimeID) || !validID(r.RuntimeGeneration) || !validAccount(r.AccountLabel) || r.TTLSeconds < 30 || r.TTLSeconds > 600 {
+		return ErrInvalid
+	}
+	if r.AccountKey != "" && !validAccountKey(r.AccountKey) {
 		return ErrInvalid
 	}
 	if r.Operation == "repair" {

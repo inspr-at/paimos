@@ -1031,7 +1031,12 @@ creates cross-project parent-session edges.
 
 `/api/projects/{id}/lifecycle/v1` is an additive typed authority; it does not
 change the PAI-925 orchestration projection or execute local processes. The
-OpenAPI `Lifecycle*V1` schemas freeze its complete wire contract.
+OpenAPI `Lifecycle*V1` schemas freeze the class-only wire contract. Named
+account choices are an optional versioned extension of the same runtime object:
+`schema_version: 2` with `accounts[]` of `LifecycleAccountChoiceV2` (`key` plus
+operator `label`). Intent `account_key` is optional and is used only with those
+versioned named choices. Omitting `accounts` keeps the v1 class-only
+advertisement.
 
 - Browser super-admin sessions: `GET /runtimes`, `POST /intents`,
   `GET /intents/{intentID}`, `GET /intents/{intentID}/events`, and
@@ -1054,7 +1059,8 @@ All these requests retain super-admin authority because an admin daemon must
 not grant managed target privileges to a lower-role browser requester.
 
 Runtime discovery advertises opaque workspace handles and identity digests,
-immutable profiles, one bounded account label, and proved public
+immutable profiles, one bounded account class label, optional versioned named
+account choices (`accounts[]` with `schema_version: 2`), and proved public
 `session_id`/`generation` mappings. Machine provenance uses the existing
 **authenticated reporter's Host mapped to MachineID** trust gate; this is not
 hardware attestation. A daemon generation may advertise separate project-bound
