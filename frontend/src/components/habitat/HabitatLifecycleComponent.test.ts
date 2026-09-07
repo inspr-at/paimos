@@ -1,4 +1,4 @@
-import { nextTick } from 'vue'
+import { nextTick, reactive } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mountComponent } from '@/components/ai/testMount'
 import { habitatFixture } from './__fixtures__/orchestration'
@@ -173,7 +173,9 @@ describe('Habitat browser lifecycle', () => {
       selectedSessionId: stopped.worker.harness_session_id,
     })
     await vi.waitFor(() => expect(combobox(restart.el, 'Operation').value).toBe('restart'))
-    await vi.waitFor(() => expect(button(restart.el, 'Review restart request').disabled).toBe(false))
+    await vi.waitFor(() =>
+      expect(button(restart.el, 'Review restart request').disabled).toBe(false),
+    )
     expect(combobox(restart.el, 'Lifecycle worker').value).toBe(stopped.worker.harness_session_id)
     await restart.unmount()
   })
@@ -323,6 +325,109 @@ describe('Habitat browser lifecycle', () => {
     expect(submitHabitatIntent).not.toHaveBeenCalled()
     expect(mounted.el.textContent).toContain('Request status refreshed')
     expect(mounted.el.textContent).not.toContain('Runtime completion recorded')
+    await mounted.unmount()
+  })
+
+  it('refreshes an expired advertisement without losing the selected draft', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+    const snapshot = habitatFixture('100', 1)
+    const profile = snapshot.fleet.workers[0]!.dispatch_profile!
+    const workspace = id('41')
+    const firstRuntime = {
+      id: id('42'),
+      project_id: 1,
+      generation: id('43'),
+      machine_id: 'fixture-machine',
+      account_label: 'chatgpt' as const,
+      workspaces: [{ handle: workspace, identity: 'a'.repeat(64) }],
+      profiles: [{ id: profile.id, version: profile.version }],
+      sessions: [],
+      expires_at: new Date(Date.now() + 120000).toISOString(),
+    }
+    const refreshedRuntime = {
+      ...firstRuntime,
+      generation: id('44'),
+      expires_at: new Date(Date.now() + 300000).toISOString(),
+    }
+    vi.mocked(loadOrchestration).mockResolvedValue(snapshot)
+    vi.mocked(loadHabitatRuntimes)
+      .mockResolvedValueOnce([firstRuntime])
+      .mockResolvedValue([refreshedRuntime])
+    const mounted = await mountComponent(HabitatLifecycle, {
+      projectId: 1,
+      agent: 'coordinator',
+      profile,
+      authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
+    })
+    await vi.waitFor(() => expect(combobox(mounted.el, 'Runtime').value).toBe(''))
+    const runtimeSelect = combobox(mounted.el, 'Runtime')
+    runtimeSelect.value = firstRuntime.id
+    runtimeSelect.dispatchEvent(new Event('change'))
+    await nextTick()
+    const workspaceSelect = combobox(mounted.el, 'Workspace')
+    workspaceSelect.value = workspace
+    workspaceSelect.dispatchEvent(new Event('change'))
+    await nextTick()
+    expect(button(mounted.el, 'Review start request').disabled).toBe(false)
+    button(mounted.el, 'Review start request').click()
+    await nextTick()
+    expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).not.toBeNull()
+
+    await vi.advanceTimersByTimeAsync(130000)
+    await nextTick()
+
+    expect(loadHabitatRuntimes).toHaveBeenCalledTimes(2)
+    expect(combobox(mounted.el, 'Runtime').value).toBe(firstRuntime.id)
+    expect(combobox(mounted.el, 'Workspace').value).toBe(workspace)
+    expect(mounted.el.textContent).not.toContain('This runtime advertisement expired')
+    expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).toBeNull()
+    expect(button(mounted.el, 'Refresh runtime evidence')).toBeDefined()
+    await mounted.unmount()
+  })
+
+  it('clears an unattempted review when authority changes and never submits its stale request', async () => {
+    const props = reactive({
+      projectId: 1,
+      agent: 'coordinator',
+      profile: habitatFixture().fleet.workers[0]!.dispatch_profile,
+      authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
+    })
+    const snapshot = habitatFixture('100', 1)
+    const runtime = {
+      id: id('51'),
+      project_id: 1,
+      generation: id('52'),
+      machine_id: 'fixture-machine',
+      account_label: 'chatgpt' as const,
+      workspaces: [{ handle: id('53'), identity: 'b'.repeat(64) }],
+      profiles: [{ id: props.profile!.id, version: props.profile!.version }],
+      sessions: [],
+      expires_at: new Date(Date.now() + 120000).toISOString(),
+    }
+    vi.mocked(loadOrchestration).mockResolvedValue(snapshot)
+    vi.mocked(loadHabitatRuntimes).mockResolvedValue([runtime])
+    const mounted = await mountComponent(HabitatLifecycle, props)
+    await vi.waitFor(() => expect(combobox(mounted.el, 'Runtime')).toBeDefined())
+    const runtimeSelect = combobox(mounted.el, 'Runtime')
+    runtimeSelect.value = runtime.id
+    runtimeSelect.dispatchEvent(new Event('change'))
+    await nextTick()
+    const workspaceSelect = combobox(mounted.el, 'Workspace')
+    workspaceSelect.value = runtime.workspaces[0]!.handle
+    workspaceSelect.dispatchEvent(new Event('change'))
+    await nextTick()
+    button(mounted.el, 'Review start request').click()
+    await nextTick()
+    expect(mounted.el.textContent).toContain('Review start request')
+
+    props.authority = 'human:2'
+    await nextTick()
+    expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).toBeNull()
+    expect(submitHabitatIntent).not.toHaveBeenCalled()
     await mounted.unmount()
   })
 })

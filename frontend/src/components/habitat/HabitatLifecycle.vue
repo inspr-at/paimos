@@ -57,7 +57,8 @@ const intentFresh = ref(false),
   recovering = ref(false),
   feedback = ref(''),
   busy = ref(false),
-  reviewing = ref(false)
+  reviewing = ref(false),
+  refreshingRuntimes = ref(false)
 const confirmRef = ref<HTMLButtonElement | null>(null)
 const prepareRef = ref<HTMLButtonElement | null>(null)
 const runtimeRef = ref<HTMLSelectElement | null>(null)
@@ -67,8 +68,10 @@ let attempted = false,
   savedAt = 0,
   recoveryId: string | null = null,
   preparedIdentity = '',
-  generation = 0
+  generation = 0,
+  lastRuntimeRefreshAt = 0
 let controller: AbortController | null = null
+const RUNTIME_REFRESH_COOLDOWN_MS = 30_000
 const scope = computed<RecoveryScope | null>(() =>
   auth.user?.id &&
   !sessionExpired.value &&
@@ -229,6 +232,7 @@ function invalidate() {
   reviewing.value = false
   feedback.value = ''
   busy.value = false
+  refreshingRuntimes.value = false
   runtimeId.value = ''
   workspace.value = ''
   ticketId.value = null
@@ -240,51 +244,62 @@ function invalidate() {
 async function refreshRuntimes() {
   if (!eligible.value || !props.projectId) {
     runtimeState.value = 'unauthorized'
+    refreshingRuntimes.value = false
     return
   }
+  if (refreshingRuntimes.value) return
   const version = generation,
     signal = controller!.signal,
     project = props.projectId
-  runtimeState.value = 'loading'
-  candidateState.value = 'loading'
-  const [runtimeResult, workerResult] = await Promise.allSettled([
-    loadHabitatRuntimes(project, signal),
-    loadOrchestration({ projectId: project, zoom: '100', signal }),
-  ])
-  if (version !== generation || signal.aborted) return
-  now.value = Date.now()
-  if (runtimeResult.status === 'fulfilled') {
-    runtimes.value = runtimeResult.value
-    runtimeState.value = 'ready'
-  } else {
-    runtimes.value = []
-    runtimeState.value = 'unavailable'
-    const error = runtimeResult.reason
-    if (error instanceof ApiError && [401, 403].includes(error.status)) {
-      runtimeState.value = 'unauthorized'
-      clearSavedEvidence()
+  refreshingRuntimes.value = true
+  lastRuntimeRefreshAt = Date.now()
+  if (runtimeState.value !== 'ready') runtimeState.value = 'loading'
+  if (candidateState.value !== 'ready') candidateState.value = 'loading'
+  try {
+    const [runtimeResult, workerResult] = await Promise.allSettled([
+      loadHabitatRuntimes(project, signal),
+      loadOrchestration({ projectId: project, zoom: '100', signal }),
+    ])
+    if (version !== generation || signal.aborted) return
+    now.value = Date.now()
+    if (runtimeResult.status === 'fulfilled') {
+      runtimes.value = runtimeResult.value
+      runtimeState.value = 'ready'
+    } else {
+      runtimes.value = []
+      runtimeState.value = 'unavailable'
+      const error = runtimeResult.reason
+      if (error instanceof ApiError && [401, 403].includes(error.status)) {
+        runtimeState.value = 'unauthorized'
+        clearSavedEvidence()
+      }
     }
-  }
-  if (workerResult.status === 'fulfilled') {
-    candidates.value = workerResult.value.fleet.workers
-    candidateTruncated.value = workerResult.value.fleet.sample_truncated
-    candidateState.value = 'ready'
-  } else {
-    candidates.value = []
-    candidateState.value = 'unavailable'
-  }
-  if (!pendingRequest.value && props.selectedSessionId) {
-    const worker = candidates.value.find(
-      (row) => row.harness_session_id === props.selectedSessionId,
-    )
-    const owners = runtimes.value.filter((row) =>
-      row.sessions.some((mapping) => mapping.session_id === props.selectedSessionId),
-    )
-    if (worker && owners.length === 1) {
-      runtimeId.value = owners[0]!.id
-      operation.value = worker.phase === 'stopped' ? 'restart' : 'reassign'
-      sessionId.value = worker.harness_session_id
+    if (workerResult.status === 'fulfilled') {
+      candidates.value = workerResult.value.fleet.workers
+      candidateTruncated.value = workerResult.value.fleet.sample_truncated
+      candidateState.value = 'ready'
+    } else {
+      candidates.value = []
+      candidateTruncated.value = false
+      candidateState.value = 'unavailable'
     }
+    // Initial route selection is useful, but an advertisement refresh must not
+    // silently replace a user's valid runtime choice or an immutable request.
+    if (!pendingRequest.value && !runtimeId.value && props.selectedSessionId) {
+      const worker = candidates.value.find(
+        (row) => row.harness_session_id === props.selectedSessionId,
+      )
+      const owners = runtimes.value.filter((row) =>
+        row.sessions.some((mapping) => mapping.session_id === props.selectedSessionId),
+      )
+      if (worker && owners.length === 1) {
+        runtimeId.value = owners[0]!.id
+        operation.value = worker.phase === 'stopped' ? 'restart' : 'reassign'
+        sessionId.value = worker.harness_session_id
+      }
+    }
+  } finally {
+    if (version === generation && !signal.aborted) refreshingRuntimes.value = false
   }
 }
 function clearSavedEvidence() {
@@ -324,7 +339,14 @@ async function recover() {
       'A saved request has no confirmed receipt. Nothing was repeated. Explicitly retry the exact request to recover its result.'
 }
 watch(
-  () => [props.authority, props.projectId, props.deployment, eligible.value, sessionExpired.value],
+  () => [
+    props.authority,
+    props.projectId,
+    props.deployment,
+    props.selectedSessionId,
+    eligible.value,
+    sessionExpired.value,
+  ],
   () => {
     if (!auth.user?.id || sessionExpired.value || auth.impersonation || !auth.isSuperAdmin)
       clearHabitatIntentRecovery()
@@ -333,6 +355,21 @@ watch(
     void recover()
   },
   { immediate: true, flush: 'sync' },
+)
+watch(
+  () => props.workers,
+  () => {
+    // The parent snapshot can change a worker's revision or liveness between
+    // runtime polls. Re-read authoritative candidates and discard only a review
+    // that has not crossed the submission boundary.
+    if (pendingRequest.value && !attempted) {
+      pendingRequest.value = null
+      reviewing.value = false
+      preparedIdentity = ''
+    }
+    void refreshRuntimes()
+  },
+  { deep: true },
 )
 watch(selectedWorker, (worker) => {
   if (pendingRequest.value || !worker) return
@@ -344,6 +381,7 @@ watch(requestIdentity, () => {
   if (!attempted) {
     reviewing.value = false
     pendingRequest.value = null
+    preparedIdentity = ''
   }
 })
 watch(reviewing, (value) => {
@@ -500,6 +538,16 @@ async function finishReview() {
 }
 const poll = setInterval(() => {
   now.value = Date.now()
+  const hasExpiredAdvertisement = runtimes.value.some(
+    (row) => Date.parse(row.expires_at) <= now.value,
+  )
+  if (
+    !document.hidden &&
+    !refreshingRuntimes.value &&
+    (hasExpiredAdvertisement || (runtimeId.value !== '' && !runtime.value)) &&
+    now.value - lastRuntimeRefreshAt >= RUNTIME_REFRESH_COOLDOWN_MS
+  )
+    void refreshRuntimes()
   if (!document.hidden && recoveryId && (!terminal.value || !intentFresh.value)) void check()
 }, 10_000)
 onScopeDispose(() => {
@@ -515,7 +563,12 @@ onScopeDispose(() => {
       the guided CLI below when browser access is unavailable.
     </p>
     <template v-else>
-      <p v-if="runtimeState === 'loading'" role="status">Finding available runtimes…</p>
+      <p v-if="runtimeState === 'loading'" role="status">
+        Finding available runtimes…
+        <button type="button" :disabled="refreshingRuntimes" @click="refreshRuntimes">
+          Refresh runtime evidence
+        </button>
+      </p>
       <div v-else-if="runtimeState !== 'ready'" class="habitat-error">
         <p>Runtime access is unavailable. Reconnect or check your access, then refresh.</p>
         <button type="button" @click="refreshRuntimes">Refresh runtime evidence</button>
@@ -529,6 +582,11 @@ onScopeDispose(() => {
         <button type="button" @click="refreshRuntimes">Refresh runtimes</button>
       </div>
       <div v-else class="habitat-form">
+        <div class="habitat-actions">
+          <button type="button" :disabled="refreshingRuntimes" @click="refreshRuntimes">
+            {{ refreshingRuntimes ? 'Refreshing runtime evidence…' : 'Refresh runtime evidence' }}
+          </button>
+        </div>
         <label
           >Runtime<select
             ref="runtimeRef"
