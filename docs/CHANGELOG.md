@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
-## [Unreleased]
+## [26.09.07.11.41] — 2026-09-07
 
 ### Fixed — release documentation alignment (PAI-949)
 
