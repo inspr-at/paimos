@@ -139,4 +139,41 @@ describe('Home presents actual next steps', () => {
     expect(mounted.el.textContent).not.toContain('At work')
     await mounted.unmount()
   })
+
+  it('does not claim all-clear when the scoped project or worker sample is incomplete', async () => {
+    const snapshot = habitatFixture()
+    snapshot.coordination_bounds = {
+      sample_limit: 10,
+      total_projects: 11,
+      sampled_projects: 1,
+      omitted_projects: 10,
+    }
+    snapshot.fleet.sample_truncated = true
+    snapshot.fleet.totals.omitted_workers = 1
+    const mounted = await mountComponent(HabitatHome, {
+      snapshot,
+      deliveries: [],
+      messages: [{ projectId: 1, totals: { ...emptyMessageTotals() } }],
+      messageState: 'ready',
+      deliveryState: 'ready',
+      fresh: true,
+      authority: 'fixture:1',
+      attentionOnly: true,
+    })
+    expect(mounted.el.textContent).toContain('Attention coverage is incomplete')
+    expect(mounted.el.textContent).not.toContain('Nothing needs your attention')
+    await mounted.unmount()
+  })
 })
+
+function emptyMessageTotals() {
+  return {
+    sessions: 0,
+    unread: 0,
+    attention_sessions: 0,
+    exception_messages: 0,
+    action_requests: 0,
+    exception_targets: 0,
+    sampled_exception_targets: 0,
+  }
+}
