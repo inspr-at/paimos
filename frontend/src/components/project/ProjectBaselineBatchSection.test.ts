@@ -655,6 +655,58 @@ describe('ProjectBaselineBatchSection', () => {
     expect(vi.mocked(api.post).mock.calls[0][0]).toBe('/projects/9/baseline-batches/batches/4/reconcile')
     second.app.unmount()
   })
+
+  it('retries automatic reconcile when attempt or next action changes', async () => {
+    const authorize = batchFixture({
+      id: 4,
+      attempt_id: 11,
+      execution_mode: 'automatic',
+      progress: {
+        stages: [],
+        evidence_fresh: true,
+        evidence_observed: true,
+        next_action: 'authorize_pharos_handoff',
+      },
+    })
+    const failed = batchFixture({
+      id: 4,
+      attempt_id: 11,
+      execution_mode: 'automatic',
+      progress: {
+        stages: [],
+        evidence_fresh: true,
+        evidence_observed: true,
+        next_action: 'authorize_pharos_handoff',
+      },
+    })
+    vi.mocked(api.get).mockResolvedValue(workflowFixture({ active_batch: authorize, draft: null }))
+    vi.mocked(api.post).mockRejectedValueOnce(new Error('transient'))
+    const first = mount()
+    await settle()
+    expect(vi.mocked(api.post).mock.calls.filter((call) => String(call[0]).includes('/reconcile'))).toHaveLength(1)
+    first.app.unmount()
+
+    vi.mocked(api.post).mockClear()
+    vi.mocked(api.post).mockResolvedValue(failed)
+    vi.mocked(api.get).mockResolvedValue(workflowFixture({
+      draft: null,
+      active_batch: batchFixture({
+        id: 4,
+        attempt_id: 12,
+        execution_mode: 'automatic',
+        progress: {
+          stages: [],
+          evidence_fresh: true,
+          evidence_observed: true,
+          next_action: 'authorize_verification_handoff',
+        },
+      }),
+    }))
+    const second = mount()
+    await settle()
+    expect(vi.mocked(api.post).mock.calls.filter((call) => String(call[0]).includes('/reconcile'))).toHaveLength(1)
+    second.app.unmount()
+  })
 })
 
 function startCalls() {

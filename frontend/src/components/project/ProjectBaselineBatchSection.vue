@@ -33,7 +33,7 @@ const workflow = ref<Workflow | null>(null)
 const handoverText = ref('')
 const confirmStart = ref(false)
 const busy = ref(false)
-const reconciled = ref<Set<number>>(new Set())
+const reconciled = ref<Set<string>>(new Set())
 const mode = ref<'manual' | 'assisted' | 'automatic'>('manual')
 const selected = ref<string[]>([])
 const runtimeId = ref('')
@@ -167,6 +167,18 @@ const draftUnresolved = computed(() => draft.value?.unresolved ?? [])
 function authorizedHandoffAction(batch: Batch) {
   return batch.progress.next_action === 'authorize_pharos_handoff'
     || batch.progress.next_action === 'authorize_verification_handoff'
+    || batch.progress.next_action === 'rotate_revoked_handoff'
+}
+
+function reconcileDedupeKey(batch: Batch) {
+  return [
+    batch.id,
+    batch.attempt_id ?? '',
+    batch.progress.next_action,
+    batch.progress.handoff?.stage_key ?? '',
+    batch.progress.handoff?.handoff_id ?? '',
+    batch.progress.setup_required ?? '',
+  ].join(':')
 }
 
 async function load() {
@@ -186,8 +198,8 @@ async function load() {
 async function maybeReconcileAutomatic() {
   const batch = workflow.value?.active_batch
   if (!props.canWrite || !batch || batch.execution_mode !== 'automatic' || !authorizedHandoffAction(batch)) return
-  if (reconciled.value.has(batch.id)) return
-  reconciled.value.add(batch.id)
+  if (reconciled.value.has(reconcileDedupeKey(batch))) return
+  reconciled.value.add(reconcileDedupeKey(batch))
   try {
     const updated = await reconcileBaselineBatch(props.projectId, batch.id)
     applyBatch(updated)

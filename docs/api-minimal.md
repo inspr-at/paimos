@@ -95,8 +95,10 @@ external-stage `RegisterReporter` / `ActivateOwner` / `SealPrerequisites` /
 `CreateHandoff` path. `POST .../reconcile` applies the next currently authorized
 step of that frozen plan: manual never auto-creates a handoff, assisted requires
 the current editor session, and automatic may use that session or a live scoped
-API key with `agent-controls:write`. Missing Pharos registration or handoff
-setup is `setup_required` plus `next_action`; credentials stay on the owner-only
+API key with `agent-controls:write`. Missing Pharos registration, an unsealed
+prerequisite set, or a revoked current-generation handoff is `setup_required`
+plus `next_action` (`human_review_required` when specification is unsatisfied).
+Credentials stay on the owner-only
 secret-file mint CLI and never appear in the batch JSON. Pause and cancel write
 real PAI-903 harness controls (or release a not-yet-claimed start intent through
 the lifecycle revision CAS); an action with no owned effect is reported as

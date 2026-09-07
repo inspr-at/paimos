@@ -24,6 +24,21 @@ type storedHandoff struct {
 	CredentialEpoch int64
 	ExecutionNumber int64
 	AuthorityEpoch  int64
+	RevokedAt       string
+}
+
+type generationRef struct {
+	AttemptID       int64
+	AttemptNumber   int64
+	PlanRevision    int64
+	ExecutionNumber int64
+	AuthorityEpoch  int64
+}
+
+type sealedPrerequisiteSet struct {
+	DeclaredCount int
+	SealedAt      string
+	PlanRevision  int64
 }
 
 // Reconcile applies the next currently authorized step of the immutable
@@ -136,26 +151,43 @@ func (s *Service) currentPharosOwnerRegistration(ctx context.Context, principal 
 	return 0, nil
 }
 
+func (s *Service) janusPrerequisites(ctx context.Context, principal externalstage.Principal, deliveryKey string) ([]externalstage.Prerequisite, error) {
+	listed, err := s.External.ListReporters(ctx, principal, deliveryKey)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]externalstage.Prerequisite, 0)
+	for _, row := range listed.Registrations {
+		if row.ReporterClass == externalstage.ReporterClassJanus && row.ReporterRole == externalstage.ReporterRoleDependency && row.RevokedAt == "" {
+			out = append(out, externalstage.Prerequisite{
+				DependencyKey:          row.DependencyKey,
+				ReporterRegistrationID: row.RegistrationID,
+				Requirement:            externalstage.PrerequisiteRequired,
+			})
+		}
+	}
+	return out, nil
+}
+
 func (s *Service) ensureStageHandoff(ctx context.Context, principal externalstage.Principal, stored storedBatch, snapshot delivery.Snapshot, stage string, registrationID int64, deliveryKey string) error {
-	existing, err := loadStageHandoff(ctx, s.DB, stored, stage)
+	gen := currentGeneration(snapshot, stage)
+	existing, err := loadLiveOwnerHandoff(ctx, s.DB, stored, gen, stage)
 	if err != nil {
 		return err
 	}
 	if existing.HandoffID != "" {
 		return nil
 	}
-	stageSnap := snapshotStage(snapshot, stage)
-	execution, epoch := stageSnap.ExecutionNumber, stageSnap.AuthorityEpoch
+	execution, epoch := gen.ExecutionNumber, gen.AuthorityEpoch
 	if execution == 0 {
-		expectedExecution, expectedEpoch := int64(0), int64(0)
-		activation, err := s.External.ActivateOwner(ctx, principal, deliveryKey, stored.BatchKey+":"+stage+":activate",
+		activation, err := s.External.ActivateOwner(ctx, principal, deliveryKey, bridgeIdempotency(stored, snapshot, stage, "activate", 0, 0),
 			externalstage.ActivateOwnerRequest{
 				ReporterRegistrationID:        registrationID,
 				StageKey:                      stage,
 				ExpectedAttemptNumber:         snapshot.AttemptNumber,
 				ExpectedPlanRevision:          snapshot.PlanRevision,
-				ExpectedCurrentExecution:      expectedExecution,
-				ExpectedCurrentAuthorityEpoch: expectedEpoch,
+				ExpectedCurrentExecution:      0,
+				ExpectedCurrentAuthorityEpoch: 0,
 			})
 		if err != nil {
 			return mapExternal(err)
@@ -165,18 +197,44 @@ func (s *Service) ensureStageHandoff(ctx context.Context, principal externalstag
 			return err
 		}
 	}
-	if _, err := s.External.SealPrerequisites(ctx, principal, deliveryKey, stored.BatchKey+":"+stage+":prereq",
-		externalstage.SealPrerequisitesRequest{
-			StageKey: stage, ExecutionNumber: execution, ExpectedPlanRevision: snapshot.PlanRevision,
-			ExpectedAuthorityEpoch: epoch, Prerequisites: []externalstage.Prerequisite{},
-		}); err != nil {
-		return mapExternal(err)
+	gen.ExecutionNumber, gen.AuthorityEpoch = execution, epoch
+	sealed, err := loadSealedPrerequisiteSet(ctx, s.DB, stored, gen, stage)
+	if err != nil {
+		return err
+	}
+	if sealed.SealedAt == "" {
+		prereqs, err := s.janusPrerequisites(ctx, principal, deliveryKey)
+		if err != nil {
+			return err
+		}
+		if len(prereqs) == 0 {
+			// Absence is not an operator-decided empty set. An explicit CLI
+			// seal of [] remains valid and is reused on the next reconcile.
+			return nil
+		}
+		if _, err := s.External.SealPrerequisites(ctx, principal, deliveryKey, bridgeIdempotency(stored, snapshot, stage, "prereq", execution, epoch),
+			externalstage.SealPrerequisitesRequest{
+				StageKey: stage, ExecutionNumber: execution, ExpectedPlanRevision: snapshot.PlanRevision,
+				ExpectedAuthorityEpoch: epoch, Prerequisites: prereqs,
+			}); err != nil {
+			return mapExternal(err)
+		}
+	} else if sealed.PlanRevision != snapshot.PlanRevision {
+		return fmt.Errorf("%w: sealed prerequisites belong to a different plan revision", ErrConflict)
 	}
 	if err := s.crashAfter(stage + "_prereq"); err != nil {
 		return err
 	}
+	revoked, err := countRevokedOwnerHandoffs(ctx, s.DB, stored, gen, stage)
+	if err != nil {
+		return err
+	}
+	step := "handoff"
+	if revoked > 0 {
+		step = fmt.Sprintf("handoff:r%d", revoked)
+	}
 	expires := s.now().Add(handoffTTL).Format(time.RFC3339Nano)
-	if _, err := s.External.CreateHandoff(ctx, principal, deliveryKey, stored.BatchKey+":"+stage+":handoff",
+	if _, err := s.External.CreateHandoff(ctx, principal, deliveryKey, bridgeIdempotency(stored, snapshot, stage, step, execution, epoch),
 		externalstage.CreateHandoffRequest{
 			StageKey: stage, ExecutionNumber: execution, ExpectedPlanRevision: snapshot.PlanRevision,
 			ExpectedAuthorityEpoch: epoch, ReporterRegistrationID: registrationID, ExpiresAt: expires,
@@ -225,6 +283,24 @@ func snapshotStage(snapshot delivery.Snapshot, key string) delivery.StageSnapsho
 	return delivery.StageSnapshot{StageKey: key}
 }
 
+func currentGeneration(snapshot delivery.Snapshot, stage string) generationRef {
+	stageSnap := snapshotStage(snapshot, stage)
+	gen := generationRef{
+		AttemptNumber:   snapshot.AttemptNumber,
+		PlanRevision:    snapshot.PlanRevision,
+		ExecutionNumber: stageSnap.ExecutionNumber,
+		AuthorityEpoch:  stageSnap.AuthorityEpoch,
+	}
+	if snapshot.AttemptID != nil {
+		gen.AttemptID = *snapshot.AttemptID
+	}
+	return gen
+}
+
+func bridgeIdempotency(stored storedBatch, snapshot delivery.Snapshot, stage, step string, execution, epoch int64) string {
+	return fmt.Sprintf("%s:%s:a%d:p%d:e%d:g%d:%s", stored.BatchKey, stage, snapshot.AttemptNumber, snapshot.PlanRevision, execution, epoch, step)
+}
+
 func (s *Service) annotateBridge(ctx context.Context, tx *sql.Tx, stored storedBatch, snapshot delivery.Snapshot, progress *Progress, state *string) error {
 	if progress == nil || state == nil {
 		return nil
@@ -239,7 +315,11 @@ func (s *Service) annotateBridge(ctx context.Context, tx *sql.Tx, stored storedB
 	verify := snapshotStage(snapshot, delivery.StageVerification)
 	switch {
 	case !spec.PolicySatisfied:
-		progress.NextAction = NextActionImplementationEvidence
+		progress.NextAction = NextActionHumanReview
+		progress.BlockingReason = "specification_requires_human_review"
+		if *state != BatchPaused {
+			*state = BatchBlocked
+		}
 		return nil
 	case !impl.PolicySatisfied:
 		progress.NextAction = NextActionImplementationEvidence
@@ -258,7 +338,7 @@ func (s *Service) annotateBridge(ctx context.Context, tx *sql.Tx, stored storedB
 			progress.NextAction = NextActionExternalStageCLI
 			return nil
 		}
-		handoff, err := loadPreferredHandoff(ctx, tx, stored, deploy, verify)
+		handoff, err := loadPreferredHandoff(ctx, tx, stored, snapshot, deploy, verify)
 		if err != nil {
 			return err
 		}
@@ -295,14 +375,30 @@ func (s *Service) annotateBridge(ctx context.Context, tx *sql.Tx, stored storedB
 		}
 		return nil
 	}
-	handoff, err := loadPreferredHandoff(ctx, tx, stored, deploy, verify)
+	handoff, err := loadPreferredHandoff(ctx, tx, stored, snapshot, deploy, verify)
 	if err != nil {
 		return err
 	}
-	progress.Handoff = handoffView(handoff)
+	target := deploy
+	targetStage := delivery.StageDeployment
+	if deploy.PolicySatisfied {
+		target = verify
+		targetStage = delivery.StageVerification
+	}
+	if !target.PolicySatisfied {
+		live, err := loadLiveOwnerHandoff(ctx, tx, stored, currentGeneration(snapshot, targetStage), targetStage)
+		if err != nil {
+			return err
+		}
+		progress.Handoff = handoffView(live)
+		if live.HandoffID == "" {
+			return annotatePendingHandoff(ctx, tx, stored, snapshot, progress, state, currentGeneration(snapshot, targetStage), targetStage, deploy.PolicySatisfied)
+		}
+		handoff = live
+	} else {
+		progress.Handoff = handoffView(handoff)
+	}
 	switch {
-	case !deploy.PolicySatisfied && handoff.HandoffID == "":
-		progress.NextAction = NextActionAuthorizeHandoff
 	case handoff.HandoffID != "" && handoff.CredentialEpoch == 0:
 		progress.SetupRequired = SetupRequiredHandoffSecretMint
 		progress.NextAction = NextActionMintHandoffSecret
@@ -327,6 +423,45 @@ func (s *Service) annotateBridge(ctx context.Context, tx *sql.Tx, stored storedB
 	return nil
 }
 
+func annotatePendingHandoff(ctx context.Context, tx *sql.Tx, stored storedBatch, snapshot delivery.Snapshot, progress *Progress, state *string, gen generationRef, stage string, deploySatisfied bool) error {
+	authorize := NextActionAuthorizeHandoff
+	if deploySatisfied {
+		authorize = NextActionVerificationHandoff
+	}
+	if gen.ExecutionNumber == 0 {
+		progress.NextAction = authorize
+		return nil
+	}
+	sealed, err := loadSealedPrerequisiteSet(ctx, tx, stored, gen, stage)
+	if err != nil {
+		return err
+	}
+	if sealed.SealedAt == "" {
+		progress.SetupRequired = SetupRequiredPrerequisiteSeal
+		progress.NextAction = NextActionExternalStageCLI
+		progress.BlockingReason = "setup_required_" + SetupRequiredPrerequisiteSeal
+		if *state != BatchPaused {
+			*state = BatchBlocked
+		}
+		return nil
+	}
+	revoked, err := countRevokedOwnerHandoffs(ctx, tx, stored, gen, stage)
+	if err != nil {
+		return err
+	}
+	if revoked > 0 {
+		progress.SetupRequired = SetupRequiredHandoffRevoked
+		progress.NextAction = NextActionRotateHandoff
+		progress.BlockingReason = "setup_required_" + SetupRequiredHandoffRevoked
+		if *state != BatchPaused {
+			*state = BatchBlocked
+		}
+		return nil
+	}
+	progress.NextAction = authorize
+	return nil
+}
+
 func hasPharosOwnerRegistration(ctx context.Context, tx *sql.Tx, stored storedBatch) (bool, error) {
 	if stored.DeliveryID == nil {
 		return false, nil
@@ -341,29 +476,67 @@ func hasPharosOwnerRegistration(ctx context.Context, tx *sql.Tx, stored storedBa
 	return n > 0, nil
 }
 
-func loadPreferredHandoff(ctx context.Context, tx *sql.Tx, stored storedBatch, deploy, verify delivery.StageSnapshot) (storedHandoff, error) {
+func loadPreferredHandoff(ctx context.Context, tx *sql.Tx, stored storedBatch, snapshot delivery.Snapshot, deploy, verify delivery.StageSnapshot) (storedHandoff, error) {
 	if verify.PolicySatisfied || deploy.PolicySatisfied {
-		if h, err := loadStageHandoff(ctx, tx, stored, delivery.StageVerification); err != nil {
+		if h, err := loadLiveOwnerHandoff(ctx, tx, stored, currentGeneration(snapshot, delivery.StageVerification), delivery.StageVerification); err != nil {
 			return storedHandoff{}, err
 		} else if h.HandoffID != "" {
 			return h, nil
 		}
 	}
-	return loadStageHandoff(ctx, tx, stored, delivery.StageDeployment)
+	return loadLiveOwnerHandoff(ctx, tx, stored, currentGeneration(snapshot, delivery.StageDeployment), delivery.StageDeployment)
 }
 
-func loadStageHandoff(ctx context.Context, q interface {
+func loadLiveOwnerHandoff(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, stored storedBatch, stage string) (storedHandoff, error) {
+}, stored storedBatch, gen generationRef, stage string) (storedHandoff, error) {
+	if gen.AttemptID == 0 || gen.ExecutionNumber == 0 || gen.AuthorityEpoch == 0 || gen.PlanRevision == 0 {
+		return storedHandoff{}, nil
+	}
 	var h storedHandoff
-	err := q.QueryRowContext(ctx, `SELECT handoff_id,stage_key,lifecycle_state,credential_epoch,execution_number,authority_epoch
-		FROM external_stage_handoffs WHERE root_issue_id=? AND project_id=? AND stage_key=? AND COALESCE(revoked_at,'')=''
-		ORDER BY id DESC LIMIT 1`, stored.IssueID, stored.ProjectID, stage).
-		Scan(&h.HandoffID, &h.StageKey, &h.State, &h.CredentialEpoch, &h.ExecutionNumber, &h.AuthorityEpoch)
+	err := q.QueryRowContext(ctx, `SELECT handoff_id,stage_key,lifecycle_state,credential_epoch,execution_number,authority_epoch,COALESCE(revoked_at,'')
+		FROM external_stage_handoffs WHERE root_issue_id=? AND project_id=? AND stage_key=? AND attempt_id=? AND plan_revision=?
+		 AND execution_number=? AND authority_epoch=? AND reporter_role='owner' AND COALESCE(revoked_at,'')=''
+		ORDER BY id DESC LIMIT 1`, stored.IssueID, stored.ProjectID, stage, gen.AttemptID, gen.PlanRevision, gen.ExecutionNumber, gen.AuthorityEpoch).
+		Scan(&h.HandoffID, &h.StageKey, &h.State, &h.CredentialEpoch, &h.ExecutionNumber, &h.AuthorityEpoch, &h.RevokedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storedHandoff{}, nil
 	}
 	return h, err
+}
+
+func countRevokedOwnerHandoffs(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, stored storedBatch, gen generationRef, stage string) (int64, error) {
+	if gen.AttemptID == 0 || gen.ExecutionNumber == 0 {
+		return 0, nil
+	}
+	var n int64
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_stage_handoffs
+		WHERE root_issue_id=? AND project_id=? AND stage_key=? AND attempt_id=? AND plan_revision=?
+		 AND execution_number=? AND authority_epoch=? AND reporter_role='owner' AND COALESCE(revoked_at,'')<>''`,
+		stored.IssueID, stored.ProjectID, stage, gen.AttemptID, gen.PlanRevision, gen.ExecutionNumber, gen.AuthorityEpoch).Scan(&n)
+	return n, err
+}
+
+func loadSealedPrerequisiteSet(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, stored storedBatch, gen generationRef, stage string) (sealedPrerequisiteSet, error) {
+	if stored.DeliveryID == nil || gen.AttemptID == 0 || gen.ExecutionNumber == 0 {
+		return sealedPrerequisiteSet{}, nil
+	}
+	var out sealedPrerequisiteSet
+	err := q.QueryRowContext(ctx, `SELECT prerequisite_set.declared_count,COALESCE(prerequisite_set.sealed_at,''),attempt.plan_revision
+		FROM external_stage_prerequisite_sets prerequisite_set
+		JOIN delivery_attempts attempt ON attempt.id=prerequisite_set.attempt_id AND attempt.delivery_id=prerequisite_set.delivery_id
+		WHERE prerequisite_set.delivery_id=? AND prerequisite_set.attempt_id=? AND prerequisite_set.stage_key=?
+		 AND prerequisite_set.execution_number=? AND prerequisite_set.authority_epoch=?`,
+		*stored.DeliveryID, gen.AttemptID, stage, gen.ExecutionNumber, gen.AuthorityEpoch).
+		Scan(&out.DeclaredCount, &out.SealedAt, &out.PlanRevision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sealedPrerequisiteSet{}, nil
+	}
+	return out, err
 }
 
 func handoffView(h storedHandoff) *HandoffView {

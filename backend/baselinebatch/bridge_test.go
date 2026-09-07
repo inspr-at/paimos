@@ -21,13 +21,19 @@ import (
 	appdb "github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/delivery"
 	"github.com/inspr-at/paimos/backend/externalstage"
+	"github.com/inspr-at/paimos/backend/lifecycleintents"
+	"github.com/inspr-at/paimos/backend/managedharness"
 )
 
 const (
-	bridgeCommit   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	bridgeConfig   = "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-	bridgeManifest = "sha256:4444444444444444444444444444444444444444444444444444444444444444"
-	bridgeVersion  = "26.09.07.12.00.00"
+	bridgeCommit     = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	bridgeConfig     = "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+	bridgeManifest   = "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+	bridgeVersion    = "26.09.07.12.00.00"
+	bridgeChannel    = "stable"
+	bridgeSequence   = int64(260907120000)
+	bridgeCoordinate = "ghcr:inspr-at/pharos/releases/" + bridgeVersion
+	bridgeIdentity   = "inspr-calendar-v1:stable:260907120000:26.09.07.12.00.00"
 )
 
 type bridgeFixture struct {
@@ -39,11 +45,26 @@ type bridgeFixture struct {
 	operator  externalstage.Principal
 	reporter  externalstage.Principal
 	projectID int64
+	userID    int64
 	batch     Batch
 	now       time.Time
+	daemon    *ownedDaemon
 }
 
 func openBridgeFixture(t *testing.T) *bridgeFixture {
+	t.Helper()
+	return openBridgeFixtureMode(t, ModeManual)
+}
+
+func openAgentBridgeFixture(t *testing.T, mode string) *bridgeFixture {
+	t.Helper()
+	if mode != ModeAssisted && mode != ModeAutomatic {
+		t.Fatalf("agent fixture mode=%s", mode)
+	}
+	return openBridgeFixtureMode(t, mode)
+}
+
+func openBridgeFixtureMode(t *testing.T, mode string) *bridgeFixture {
 	t.Helper()
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
@@ -51,8 +72,10 @@ func openBridgeFixture(t *testing.T) *bridgeFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = appdb.DB.Close()
-		appdb.DB = nil
+		if appdb.DB != nil {
+			_ = appdb.DB.Close()
+			appdb.DB = nil
+		}
 	})
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	result, err := appdb.DB.Exec(`INSERT INTO projects(name,key,inspr_stream_enabled) VALUES('Bridge','BRG',1)`)
@@ -65,34 +88,45 @@ func openBridgeFixture(t *testing.T) *bridgeFixture {
 		t.Fatal(err)
 	}
 	userID, _ := result.LastInsertId()
+	if _, err := appdb.DB.Exec(`UPDATE users SET is_super_admin=1 WHERE id=?`, userID); err != nil {
+		t.Fatal(err)
+	}
 	cred := "96000000-0000-4000-8000-000000000960"
 	if _, err := appdb.DB.Exec(`INSERT INTO sessions(id,user_id,expires_at,created_at,credential_id)
 		VALUES('bridge-session',?,datetime('now','+1 hour'),datetime('now'),?)`, userID, cred); err != nil {
 		t.Fatal(err)
 	}
-	deliveryStore := delivery.NewStore(appdb.DB, delivery.Options{Clock: delivery.ClockFunc(func() time.Time { return now })})
+	f := &bridgeFixture{t: t, now: now, projectID: projectID, userID: userID,
+		actor:    Actor{Kind: "session", UserID: userID, SessionCredentialID: cred},
+		operator: externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: cred}}
+	clk := clockNow{now: &f.now}
+	deliveryStore := delivery.NewStore(appdb.DB, delivery.Options{Clock: delivery.ClockFunc(func() time.Time { return *clk.now })})
 	ext, err := externalstage.NewService(appdb.DB, externalstage.Options{
 		FixtureDigest: contracts.ExternalStageV1FixtureDigest(), Random: cryptorand.Reader,
-		Clock: clockNow{now: now},
+		Clock: clk,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := NewService(appdb.DB, ClockFunc(func() time.Time { return now }), deliveryStore, nil, nil, nil)
+	svc := NewService(appdb.DB, ClockFunc(func() time.Time { return *clk.now }), deliveryStore,
+		lifecycleintents.NewService(appdb.DB), managedharness.NewService(appdb.DB), nil)
 	svc.External = ext
-	actor := Actor{Kind: "session", UserID: userID, SessionCredentialID: cred}
-	f := &bridgeFixture{t: t, svc: svc, ext: ext, delivery: deliveryStore, actor: actor,
-		operator:  externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: cred},
-		projectID: projectID, now: now}
-	f.batch = f.startReviewedBatch("bridge-start-key-01")
+	f.svc, f.ext, f.delivery = svc, ext, deliveryStore
+	if mode != ModeManual {
+		if _, err := appdb.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'codex')`, projectID); err != nil {
+			t.Fatal(err)
+		}
+		f.daemon = newOwnedDaemon(t, projectID, userID)
+	}
+	f.batch = f.startReviewedBatch(mode, "bridge-start-key-01")
 	return f
 }
 
-type clockNow struct{ now time.Time }
+type clockNow struct{ now *time.Time }
 
-func (c clockNow) Now() time.Time { return c.now }
+func (c clockNow) Now() time.Time { return c.now.UTC() }
 
-func (f *bridgeFixture) startReviewedBatch(idem string) Batch {
+func (f *bridgeFixture) startReviewedBatch(mode, idem string) Batch {
 	f.t.Helper()
 	reqs := []Requirement{{
 		Ref: "req.login", Statement: "Users sign in with email",
@@ -124,18 +158,45 @@ func (f *bridgeFixture) startReviewedBatch(idem string) Batch {
 	if err != nil {
 		f.t.Fatal(err)
 	}
+	worker := WorkerSelection{}
+	if mode != ModeManual {
+		worker = f.daemon.worker()
+		if _, err := f.svc.PatchDraft(ctx, f.actor, f.projectID, draft.ID, PatchDraftRequest{
+			ExecutionMode: &mode, Worker: &worker,
+		}); err != nil {
+			f.t.Fatal(err)
+		}
+	}
 	reviewed, err := f.svc.Review(ctx, f.actor, f.projectID, draft.ID, ReviewRequest{
-		ExecutionMode: ModeManual, Selected: []string{"req.login"},
+		ExecutionMode: mode, Selected: []string{"req.login"}, Worker: worker,
 	})
 	if err != nil {
 		f.t.Fatal(err)
 	}
+	if mode != ModeManual {
+		if _, err := f.svc.RequestReadiness(ctx, f.actor, f.projectID, draft.ID); err != nil {
+			f.t.Fatal(err)
+		}
+		if f.daemon.step(nil) == nil {
+			f.t.Fatal("owned daemon found no readiness intent")
+		}
+	}
 	batch, err := f.svc.Start(ctx, f.actor, f.projectID, StartRequest{
 		IdempotencyKey: idem, ReviewID: *reviewed.ReviewID, DraftRevision: reviewed.Revision, Confirm: true,
-		ContentDigest: digest, RevisionSeal: seal, ExecutionMode: ModeManual, Selected: []string{"req.login"},
+		ContentDigest: digest, RevisionSeal: seal, ExecutionMode: mode, Selected: []string{"req.login"}, Worker: worker,
 	})
 	if err != nil {
 		f.t.Fatal(err)
+	}
+	if mode != ModeManual {
+		if f.daemon.step(nil) == nil {
+			f.t.Fatal("owned daemon found no start intent")
+		}
+		got, err := f.svc.GetBatch(ctx, f.actor, f.projectID, batch.ID)
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		batch = got
 	}
 	return batch
 }
@@ -166,48 +227,183 @@ func (f *bridgeFixture) registerPharos() int64 {
 	return reg.RegistrationID
 }
 
+func (f *bridgeFixture) registerJanus() int64 {
+	f.t.Helper()
+	result, err := appdb.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES('janus-bridge','x','member','active')`)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	reporterUser, _ := result.LastInsertId()
+	if _, err := appdb.DB.Exec(`INSERT INTO project_members(user_id,project_id,access_level) VALUES(?,?,'editor')`, reporterUser, f.projectID); err != nil {
+		f.t.Fatal(err)
+	}
+	result, err = appdb.DB.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes)
+		VALUES(?,'janus-bridge',?,'paimos_janus_bridge','*')`, reporterUser, fmt.Sprintf("%064d", 962))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	keyID, _ := result.LastInsertId()
+	reg, err := f.ext.RegisterReporter(context.Background(), f.operator, fmt.Sprintf("issue:%d", f.batch.IssueID), "register-janus",
+		externalstage.RegisterReporterRequest{APIKeyID: keyID, ReporterClass: externalstage.ReporterClassJanus,
+			ReporterRole: externalstage.ReporterRoleDependency, DependencyKey: "cluster-admission"})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return reg.RegistrationID
+}
+
 func (f *bridgeFixture) reportBuildAndQA() {
+	f.reportBuildAndQAOn(1, "")
+}
+
+func (f *bridgeFixture) reportBuildAndQAOn(attempt int64, suffix string) {
 	f.t.Helper()
 	ctx := context.Background()
 	reporter := delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", f.actor.UserID)}
 	impl, err := f.delivery.StartStageRetry(ctx, delivery.StageStartRequest{
-		IssueID: f.batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageImplementation, Reporter: reporter,
-		ReasonCode: "implementation_start", IdempotencyKey: f.batch.BatchKey + ":impl:start",
+		IssueID: f.batch.IssueID, AttemptNumber: attempt, StageKey: delivery.StageImplementation, Reporter: reporter,
+		ReasonCode: "implementation_start", IdempotencyKey: fmt.Sprintf("%s:impl%s:start", f.batch.BatchKey, suffix),
 	})
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	if _, err := f.delivery.ReportStage(ctx, delivery.StageReport{
-		IssueID: f.batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageImplementation,
+		IssueID: f.batch.IssueID, AttemptNumber: attempt, StageKey: delivery.StageImplementation,
 		ExecutionNumber: impl.ExecutionNumber, AuthorityEpoch: impl.AuthorityEpoch, Reporter: reporter,
-		IdempotencyKey: f.batch.BatchKey + ":impl:report", Kind: "semantic", State: "succeeded",
+		IdempotencyKey: fmt.Sprintf("%s:impl%s:report", f.batch.BatchKey, suffix), Kind: "semantic", State: "succeeded",
 		Evidence: []delivery.Evidence{
 			{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: bridgeCommit},
 			{Type: "artifact", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: strings.TrimPrefix(bridgeConfig, "sha256:")},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: bridgeCoordinate},
 		},
 		ReasonCode: "implementation_result",
 	}); err != nil {
 		f.t.Fatal(err)
 	}
 	qa, err := f.delivery.StartStageRetry(ctx, delivery.StageStartRequest{
-		IssueID: f.batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageQA, Reporter: reporter,
-		ReasonCode: "qa_start", IdempotencyKey: f.batch.BatchKey + ":qa:start",
+		IssueID: f.batch.IssueID, AttemptNumber: attempt, StageKey: delivery.StageQA, Reporter: reporter,
+		ReasonCode: "qa_start", IdempotencyKey: fmt.Sprintf("%s:qa%s:start", f.batch.BatchKey, suffix),
 	})
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	if _, err := f.delivery.ReportStage(ctx, delivery.StageReport{
-		IssueID: f.batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageQA,
+		IssueID: f.batch.IssueID, AttemptNumber: attempt, StageKey: delivery.StageQA,
 		ExecutionNumber: qa.ExecutionNumber, AuthorityEpoch: qa.AuthorityEpoch, Reporter: reporter,
-		IdempotencyKey: f.batch.BatchKey + ":qa:report", Kind: "semantic", State: "succeeded",
-		Evidence: []delivery.Evidence{{
-			Type: "test_result", Outcome: "passed", ReferenceKind: "digest",
-			DigestSHA256: strings.TrimPrefix(bridgeManifest, "sha256:"),
-		}},
+		IdempotencyKey: fmt.Sprintf("%s:qa%s:report", f.batch.BatchKey, suffix), Kind: "semantic", State: "succeeded",
+		Evidence: []delivery.Evidence{
+			{Type: "test_result", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: strings.TrimPrefix(bridgeManifest, "sha256:")},
+			{Type: "test_result", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: bridgeIdentity},
+		},
 		ReasonCode: "test_result",
 	}); err != nil {
 		f.t.Fatal(err)
 	}
+}
+
+func (f *bridgeFixture) reportSpecificationOn(attempt int64, suffix string) {
+	f.t.Helper()
+	ctx := context.Background()
+	reporter := delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", f.actor.UserID)}
+	spec, err := f.delivery.StartStageRetry(ctx, delivery.StageStartRequest{
+		IssueID: f.batch.IssueID, AttemptNumber: attempt, StageKey: delivery.StageSpecification, Reporter: reporter,
+		ReasonCode: "baseline_review", IdempotencyKey: fmt.Sprintf("%s:spec%s:start", f.batch.BatchKey, suffix),
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	tx, err := appdb.DB.BeginTx(ctx, nil)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	digest, err := delivery.IssueSpecDigestTx(ctx, tx, f.batch.IssueID)
+	_ = tx.Rollback()
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := f.delivery.ReportStage(ctx, delivery.StageReport{
+		IssueID: f.batch.IssueID, AttemptNumber: attempt, StageKey: delivery.StageSpecification,
+		ExecutionNumber: spec.ExecutionNumber, AuthorityEpoch: spec.AuthorityEpoch, Reporter: reporter,
+		IdempotencyKey: fmt.Sprintf("%s:spec%s:report", f.batch.BatchKey, suffix), Kind: "semantic", State: "succeeded",
+		Evidence: []delivery.Evidence{{
+			Type: "spec_acceptance", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: digest,
+		}},
+		ReasonCode: "baseline_review",
+	}); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func (f *bridgeFixture) liveHandoff(stage string) storedHandoff {
+	f.t.Helper()
+	h, err := loadLiveOwnerHandoff(context.Background(), appdb.DB, f.stored(), currentGeneration(f.snapshot(), stage), stage)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return h
+}
+
+func (f *bridgeFixture) sealedCount(stage string) int {
+	f.t.Helper()
+	set, err := loadSealedPrerequisiteSet(context.Background(), appdb.DB, f.stored(), currentGeneration(f.snapshot(), stage), stage)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if set.SealedAt == "" {
+		return -1
+	}
+	return set.DeclaredCount
+}
+
+func (f *bridgeFixture) authorizeHandoff() Batch {
+	f.t.Helper()
+	ctx := context.Background()
+	if _, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID); err != nil {
+		f.t.Fatalf("activate reconcile: %v", err)
+	}
+	stage := delivery.StageDeployment
+	if stageSatisfied(f.snapshot(), delivery.StageDeployment) {
+		stage = delivery.StageVerification
+	}
+	gen := currentGeneration(f.snapshot(), stage)
+	if gen.ExecutionNumber == 0 {
+		f.t.Fatalf("owner activation did not start %s", stage)
+	}
+	if f.sealedCount(stage) < 0 {
+		if _, err := f.ext.SealPrerequisites(ctx, f.operator, fmt.Sprintf("issue:%d", f.batch.IssueID),
+			fmt.Sprintf("%s:cli-empty-seal:%s:a%d:e%d:g%d", f.batch.BatchKey, stage, f.snapshot().AttemptNumber, gen.ExecutionNumber, gen.AuthorityEpoch),
+			externalstage.SealPrerequisitesRequest{
+				StageKey: stage, ExecutionNumber: gen.ExecutionNumber,
+				ExpectedPlanRevision: f.snapshot().PlanRevision, ExpectedAuthorityEpoch: gen.AuthorityEpoch,
+				Prerequisites: []externalstage.Prerequisite{},
+			}); err != nil {
+			f.t.Fatalf("operator empty seal: %v", err)
+		}
+	}
+	got, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		f.t.Fatalf("handoff reconcile: %v", err)
+	}
+	return got
+}
+
+func (f *bridgeFixture) secondEditor() (Actor, externalstage.Principal) {
+	f.t.Helper()
+	result, err := appdb.DB.Exec(`INSERT INTO users(username,password,role,status) VALUES('bridge-editor','x','member','active')`)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	userID, _ := result.LastInsertId()
+	if _, err := appdb.DB.Exec(`INSERT INTO project_members(user_id,project_id,access_level) VALUES(?,?,'editor')`, userID, f.projectID); err != nil {
+		f.t.Fatal(err)
+	}
+	cred := "96000000-0000-4000-8000-000000000961"
+	if _, err := appdb.DB.Exec(`INSERT INTO sessions(id,user_id,expires_at,created_at,credential_id)
+		VALUES('bridge-editor-session',?,datetime('now','+1 hour'),datetime('now'),?)`, userID, cred); err != nil {
+		f.t.Fatal(err)
+	}
+	return Actor{Kind: "session", UserID: userID, SessionCredentialID: cred},
+		externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: cred}
 }
 
 func (f *bridgeFixture) snapshot() delivery.Snapshot {
@@ -247,8 +443,8 @@ func (f *bridgeFixture) artifact(kind externalstage.EvidenceKind) externalstage.
 		Kind: kind, Workflow: "deploy-production", Environment: "production-eu1",
 		Artifact: externalstage.ArtifactEvidenceV2{
 			VersionScheme: externalstage.VersionSchemeINSPRCalendar, Version: bridgeVersion,
-			ReleaseChannel: "stable", ReleaseSequence: 260907120000, Digest: bridgeConfig,
-			CommitDigest: bridgeCommit, ReleaseManifestCoordinate: "ghcr:inspr-at/pharos/releases/" + bridgeVersion,
+			ReleaseChannel: bridgeChannel, ReleaseSequence: bridgeSequence, Digest: bridgeConfig,
+			CommitDigest: bridgeCommit, ReleaseManifestCoordinate: bridgeCoordinate,
 			ReleaseManifestDigest: bridgeManifest,
 		},
 		Result: externalstage.EvidenceResultSucceeded,
@@ -282,11 +478,7 @@ func TestBridgeManualReconcileDoesNotCreateHandoff(t *testing.T) {
 	if _, err := f.svc.Reconcile(context.Background(), f.actor, f.projectID, f.batch.ID); err != nil {
 		t.Fatal(err)
 	}
-	h, err := loadStageHandoff(context.Background(), appdb.DB, f.stored(), delivery.StageDeployment)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if h.HandoffID != "" {
+	if h := f.liveHandoff(delivery.StageDeployment); h.HandoffID != "" {
 		t.Fatalf("manual mode created a handoff: %+v", h)
 	}
 	got, err := f.svc.GetBatch(context.Background(), f.actor, f.projectID, f.batch.ID)
@@ -299,27 +491,20 @@ func TestBridgeManualReconcileDoesNotCreateHandoff(t *testing.T) {
 }
 
 func TestBridgeReviewedBatchToPharosVerification(t *testing.T) {
-	f := openBridgeFixture(t)
-	registrationID := f.registerPharos()
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
 	f.reportBuildAndQA()
 	ctx := context.Background()
-	if _, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID); err != nil {
-		t.Fatal(err)
-	}
+	got := f.authorizeHandoff()
 	if snapshotStage(f.snapshot(), delivery.StageDeployment).PolicySatisfied {
 		t.Fatal("deployment satisfied before Pharos receipt")
 	}
-	stored := f.stored()
-	if err := f.svc.ensureStageHandoff(ctx, f.operator, stored, f.snapshot(), delivery.StageDeployment, registrationID, fmt.Sprintf("issue:%d", f.batch.IssueID)); err != nil {
-		t.Fatal(err)
+	handoff := f.liveHandoff(delivery.StageDeployment)
+	if handoff.HandoffID == "" || handoff.CredentialEpoch != 0 {
+		t.Fatalf("handoff=%+v", handoff)
 	}
-	replay := f.svc.ensureStageHandoff(ctx, f.operator, stored, f.snapshot(), delivery.StageDeployment, registrationID, fmt.Sprintf("issue:%d", f.batch.IssueID))
-	if replay != nil {
-		t.Fatalf("same-request replay err=%v", replay)
-	}
-	handoff, err := loadStageHandoff(ctx, appdb.DB, stored, delivery.StageDeployment)
-	if err != nil || handoff.HandoffID == "" || handoff.CredentialEpoch != 0 {
-		t.Fatalf("handoff=%+v err=%v", handoff, err)
+	if got.Progress.NextAction != NextActionMintHandoffSecret {
+		t.Fatalf("next_action=%q", got.Progress.NextAction)
 	}
 	secret, err := f.ext.Mint(ctx, f.operator, handoff.HandoffID, 0, false)
 	if err != nil {
@@ -335,8 +520,27 @@ func TestBridgeReviewedBatchToPharosVerification(t *testing.T) {
 		externalstage.ReportRequestV2{Sequence: 2, State: externalstage.HandoffStateActive, ObservedAt: observed}); err != nil {
 		t.Fatal(err)
 	}
+	wrong := f.artifact(externalstage.EvidenceKindDeployment)
+	wrong.ObservedAt = f.now.Add(2 * time.Second).Format(time.RFC3339Nano)
+	wrong.Artifact.Digest = "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+	wrong.Artifact.CommitDigest = strings.Repeat("b", 40)
+	wrong.Artifact.Version = "26.09.07.12.00.01"
+	wrong.Artifact.ReleaseManifestDigest = "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+	if _, err := f.ext.ReportV2(ctx, f.reporter, handoff.HandoffID, "wrong-built-artifact", secret,
+		externalstage.ReportRequestV2{Sequence: 3, State: externalstage.HandoffStateSucceeded, ObservedAt: wrong.ObservedAt,
+			PharosEvidence: &wrong}); !errors.Is(err, externalstage.ErrInvalid) {
+		t.Fatalf("wrong built artifact err=%v", err)
+	}
 	if snapshotStage(f.snapshot(), delivery.StageDeployment).PolicySatisfied {
-		t.Fatal("unconfirmed Pharos job completed deployment")
+		t.Fatal("wrong artifact completed deployment")
+	}
+	wrongEnv := f.artifact(externalstage.EvidenceKindDeployment)
+	wrongEnv.ObservedAt = f.now.Add(time.Second).Format(time.RFC3339Nano)
+	wrongEnv.Environment = "staging-us1"
+	if _, err := f.ext.ReportV2(ctx, f.reporter, handoff.HandoffID, "wrong-environment", secret,
+		externalstage.ReportRequestV2{Sequence: 3, State: externalstage.HandoffStateSucceeded, ObservedAt: wrongEnv.ObservedAt,
+			PharosEvidence: &wrongEnv}); !errors.Is(err, externalstage.ErrInvalid) {
+		t.Fatalf("wrong environment err=%v", err)
 	}
 	f.now = f.now.Add(2 * time.Second)
 	f.svc.Clock = ClockFunc(func() time.Time { return f.now })
@@ -355,12 +559,10 @@ func TestBridgeReviewedBatchToPharosVerification(t *testing.T) {
 		t.Fatal("verification completed from deployment alone")
 	}
 	time.Sleep(20 * time.Millisecond)
-	if err := f.svc.ensureStageHandoff(ctx, f.operator, f.stored(), f.snapshot(), delivery.StageVerification, registrationID, fmt.Sprintf("issue:%d", f.batch.IssueID)); err != nil {
-		t.Fatal(err)
-	}
-	verify, err := loadStageHandoff(ctx, appdb.DB, f.stored(), delivery.StageVerification)
-	if err != nil || verify.HandoffID == "" {
-		t.Fatalf("verification handoff=%+v err=%v", verify, err)
+	got = f.authorizeHandoff()
+	verify := f.liveHandoff(delivery.StageVerification)
+	if verify.HandoffID == "" {
+		t.Fatalf("verification handoff missing progress=%+v", got.Progress)
 	}
 	verifySecret, err := f.ext.Mint(ctx, f.operator, verify.HandoffID, 0, false)
 	if err != nil {
@@ -383,12 +585,12 @@ func TestBridgeReviewedBatchToPharosVerification(t *testing.T) {
 	}
 	time.Sleep(50 * time.Millisecond)
 	later := time.Now().UTC().Format(time.RFC3339Nano)
-	wrong := f.artifact(externalstage.EvidenceKindVerification)
-	wrong.ObservedAt = later
-	wrong.Artifact.Digest = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+	wrongVerify := f.artifact(externalstage.EvidenceKindVerification)
+	wrongVerify.ObservedAt = later
+	wrongVerify.Artifact.Digest = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
 	if _, err := f.ext.ReportV2(ctx, f.reporter, verify.HandoffID, "wrong-artifact", verifySecret,
-		externalstage.ReportRequestV2{Sequence: 3, State: externalstage.HandoffStateSucceeded, ObservedAt: wrong.ObservedAt,
-			PharosEvidence: &wrong}); !errors.Is(err, externalstage.ErrInvalid) {
+		externalstage.ReportRequestV2{Sequence: 3, State: externalstage.HandoffStateSucceeded, ObservedAt: wrongVerify.ObservedAt,
+			PharosEvidence: &wrongVerify}); !errors.Is(err, externalstage.ErrInvalid) {
 		t.Fatalf("wrong artifact err=%v", err)
 	}
 	match := f.artifact(externalstage.EvidenceKindVerification)
@@ -410,22 +612,18 @@ func TestBridgeReviewedBatchToPharosVerification(t *testing.T) {
 }
 
 func TestBridgeCrashWindowAndPermissionLoss(t *testing.T) {
-	f := openBridgeFixture(t)
-	registrationID := f.registerPharos()
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
 	f.reportBuildAndQA()
 	ctx := context.Background()
 	f.svc.failAfter = "deployment_activate"
-	err := f.svc.ensureStageHandoff(ctx, f.operator, f.stored(), f.snapshot(), delivery.StageDeployment, registrationID, fmt.Sprintf("issue:%d", f.batch.IssueID))
-	if !errors.Is(err, ErrUnavailable) {
+	if _, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("crash err=%v", err)
 	}
 	f.svc.failAfter = ""
-	if err := f.svc.ensureStageHandoff(ctx, f.operator, f.stored(), f.snapshot(), delivery.StageDeployment, registrationID, fmt.Sprintf("issue:%d", f.batch.IssueID)); err != nil {
-		t.Fatal(err)
-	}
-	h, err := loadStageHandoff(ctx, appdb.DB, f.stored(), delivery.StageDeployment)
-	if err != nil || h.HandoffID == "" {
-		t.Fatalf("handoff after crash recovery=%+v err=%v", h, err)
+	got := f.authorizeHandoff()
+	if got.Progress.Handoff == nil || got.Progress.Handoff.HandoffID == "" {
+		t.Fatalf("handoff after crash recovery=%+v", got.Progress)
 	}
 	if _, err := f.svc.Reconcile(ctx, f.actor, f.projectID+1, f.batch.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("wrong project err=%v", err)
@@ -439,34 +637,34 @@ func TestBridgeCrashWindowAndPermissionLoss(t *testing.T) {
 }
 
 func TestBridgeUnavailableHandoffConfigAndMissingRegistration(t *testing.T) {
-	f := openBridgeFixture(t)
-	f.reportBuildAndQA()
-	got, err := f.svc.GetBatch(context.Background(), f.actor, f.projectID, f.batch.ID)
+	manual := openBridgeFixture(t)
+	manual.reportBuildAndQA()
+	got, err := manual.svc.GetBatch(context.Background(), manual.actor, manual.projectID, manual.batch.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Progress.SetupRequired != SetupRequiredPharosRegistration || got.Progress.NextAction != NextActionExternalStageCLI {
 		t.Fatalf("manual missing registration progress=%+v", got.Progress)
 	}
-	stored := f.stored()
-	stored.ExecutionMode = ModeAssisted
+}
+
+func TestBridgeAssistedUnavailableHandoffConfig(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.reportBuildAndQA()
+	blocked, err := f.svc.GetBatch(context.Background(), f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Progress.SetupRequired != SetupRequiredPharosRegistration {
+		t.Fatalf("assisted missing registration progress=%+v", blocked.Progress)
+	}
 	f.svc.External = nil
-	tx, err := appdb.DB.BeginTx(context.Background(), nil)
+	blocked, err = f.svc.GetBatch(context.Background(), f.actor, f.projectID, f.batch.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
-	snap, err := f.delivery.SnapshotByIssueTx(context.Background(), tx, stored.IssueID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	progress := Progress{}
-	state := BatchActive
-	if err := f.svc.annotateBridge(context.Background(), tx, stored, snap, &progress, &state); err != nil {
-		t.Fatal(err)
-	}
-	if progress.SetupRequired != SetupRequiredHandoffConfig || state != BatchBlocked {
-		t.Fatalf("unavailable handoff config progress=%+v state=%s", progress, state)
+	if blocked.Progress.SetupRequired != SetupRequiredHandoffConfig || blocked.Status != BatchBlocked {
+		t.Fatalf("unavailable handoff config progress=%+v status=%s", blocked.Progress, blocked.Status)
 	}
 }
 
@@ -523,13 +721,11 @@ func assertSecretAbsentFromBatch(t *testing.T, svc *Service, actor Actor, projec
 }
 
 func TestBridgeConflictingReplayActivate(t *testing.T) {
-	f := openBridgeFixture(t)
+	f := openAgentBridgeFixture(t, ModeAssisted)
 	registrationID := f.registerPharos()
 	f.reportBuildAndQA()
 	ctx := context.Background()
-	if err := f.svc.ensureStageHandoff(ctx, f.operator, f.stored(), f.snapshot(), delivery.StageDeployment, registrationID, fmt.Sprintf("issue:%d", f.batch.IssueID)); err != nil {
-		t.Fatal(err)
-	}
+	f.authorizeHandoff()
 	if _, err := f.ext.ActivateOwner(ctx, f.operator, fmt.Sprintf("issue:%d", f.batch.IssueID), f.batch.BatchKey+":deployment:activate-again",
 		externalstage.ActivateOwnerRequest{
 			ReporterRegistrationID: registrationID, StageKey: delivery.StageDeployment,
@@ -540,52 +736,245 @@ func TestBridgeConflictingReplayActivate(t *testing.T) {
 }
 
 func TestBridgeAssistedReconcileCreatesHandoff(t *testing.T) {
-	f := openBridgeFixture(t)
+	f := openAgentBridgeFixture(t, ModeAssisted)
 	f.registerPharos()
 	f.reportBuildAndQA()
 	ctx := context.Background()
-	stored := f.stored()
-	stored.ExecutionMode = ModeAssisted
-	if err := f.svc.reconcileAuthorizedSteps(ctx, f.actor, stored, f.snapshot()); err != nil {
+	got := f.authorizeHandoff()
+	if got.Progress.Handoff == nil || got.Progress.Handoff.HandoffID == "" {
+		t.Fatalf("assisted reconcile handoff=%+v", got.Progress)
+	}
+	replay, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := loadStageHandoff(ctx, appdb.DB, stored, delivery.StageDeployment)
-	if err != nil || h.HandoffID == "" {
-		t.Fatalf("assisted reconcile handoff=%+v err=%v", h, err)
-	}
-	if err := f.svc.reconcileAuthorizedSteps(ctx, f.actor, stored, f.snapshot()); err != nil {
-		t.Fatal(err)
-	}
-	replay, err := loadStageHandoff(ctx, appdb.DB, stored, delivery.StageDeployment)
-	if err != nil || replay.HandoffID != h.HandoffID {
-		t.Fatalf("assisted replay=%+v err=%v", replay, err)
+	if replay.Progress.Handoff == nil || replay.Progress.Handoff.HandoffID != got.Progress.Handoff.HandoffID {
+		t.Fatalf("assisted replay=%+v", replay.Progress.Handoff)
 	}
 	keyActor := f.operatorWriteKey()
-	if err := f.svc.reconcileAuthorizedSteps(ctx, keyActor, stored, f.snapshot()); !errors.Is(err, ErrForbidden) {
+	if _, err := f.svc.Reconcile(ctx, keyActor, f.projectID, f.batch.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("assisted api key err=%v", err)
 	}
 }
 
 func TestBridgeAutomaticAPIKeyReconcile(t *testing.T) {
-	f := openBridgeFixture(t)
+	f := openAgentBridgeFixture(t, ModeAutomatic)
 	f.registerPharos()
 	f.reportBuildAndQA()
 	ctx := context.Background()
-	stored := f.stored()
-	stored.ExecutionMode = ModeAutomatic
+	f.authorizeHandoff()
 	keyActor := f.operatorWriteKey()
-	if err := f.svc.reconcileAuthorizedSteps(ctx, keyActor, stored, f.snapshot()); err != nil {
+	got, err := f.svc.Reconcile(ctx, keyActor, f.projectID, f.batch.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := loadStageHandoff(ctx, appdb.DB, stored, delivery.StageDeployment)
-	if err != nil || h.HandoffID == "" {
-		t.Fatalf("automatic api-key reconcile handoff=%+v err=%v", h, err)
+	if got.Progress.Handoff == nil || got.Progress.Handoff.HandoffID == "" {
+		t.Fatalf("automatic api-key reconcile handoff=%+v", got.Progress)
 	}
 	if _, err := appdb.DB.Exec(`UPDATE api_keys SET expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour') WHERE id=?`, keyActor.APIKeyID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.svc.Reconcile(ctx, keyActor, f.projectID, f.batch.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("expired api key err=%v", err)
+	}
+}
+
+func TestBridgeDoesNotDefaultSealEmptyJanusSet(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
+	janusID := f.registerJanus()
+	f.reportBuildAndQA()
+	ctx := context.Background()
+	got, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.sealedCount(delivery.StageDeployment) != 1 {
+		t.Fatalf("declared_count=%d progress=%+v", f.sealedCount(delivery.StageDeployment), got.Progress)
+	}
+	if _, err := f.ext.SealPrerequisites(ctx, f.operator, fmt.Sprintf("issue:%d", f.batch.IssueID),
+		"operator-empty-after-janus", externalstage.SealPrerequisitesRequest{
+			StageKey: delivery.StageDeployment, ExecutionNumber: currentGeneration(f.snapshot(), delivery.StageDeployment).ExecutionNumber,
+			ExpectedPlanRevision:   f.snapshot().PlanRevision,
+			ExpectedAuthorityEpoch: currentGeneration(f.snapshot(), delivery.StageDeployment).AuthorityEpoch,
+			Prerequisites:          []externalstage.Prerequisite{},
+		}); !errors.Is(err, externalstage.ErrConflict) {
+		t.Fatalf("empty reseal after Janus err=%v", err)
+	}
+	if janusID == 0 {
+		t.Fatal("janus registration missing")
+	}
+}
+
+func TestBridgeOperatorEmptySealThenHandoff(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
+	f.reportBuildAndQA()
+	ctx := context.Background()
+	if _, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.svc.GetBatch(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Progress.SetupRequired != SetupRequiredPrerequisiteSeal || f.liveHandoff(delivery.StageDeployment).HandoffID != "" {
+		t.Fatalf("expected setup-required empty seal, got %+v", got.Progress)
+	}
+	got = f.authorizeHandoff()
+	if got.Progress.Handoff == nil {
+		t.Fatalf("operator-decided empty seal did not unlock handoff: %+v", got.Progress)
+	}
+}
+
+func TestBridgeReusesOperatorPresealAndCrossPrincipalCrash(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	registrationID := f.registerPharos()
+	janusID := f.registerJanus()
+	f.reportBuildAndQA()
+	ctx := context.Background()
+	deliveryKey := fmt.Sprintf("issue:%d", f.batch.IssueID)
+	activation, err := f.ext.ActivateOwner(ctx, f.operator, deliveryKey, "operator-preseal-activate",
+		externalstage.ActivateOwnerRequest{
+			ReporterRegistrationID: registrationID, StageKey: delivery.StageDeployment,
+			ExpectedAttemptNumber: 1, ExpectedPlanRevision: 1, ExpectedCurrentExecution: 0, ExpectedCurrentAuthorityEpoch: 0,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ext.SealPrerequisites(ctx, f.operator, deliveryKey, "operator-preseal",
+		externalstage.SealPrerequisitesRequest{
+			StageKey: delivery.StageDeployment, ExecutionNumber: activation.ExecutionNumber,
+			ExpectedPlanRevision: 1, ExpectedAuthorityEpoch: activation.AuthorityEpoch,
+			Prerequisites: []externalstage.Prerequisite{{
+				DependencyKey: "cluster-admission", ReporterRegistrationID: janusID, Requirement: externalstage.PrerequisiteRequired,
+			}},
+		}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Progress.Handoff == nil {
+		t.Fatalf("preseal reconcile %+v", got.Progress)
+	}
+}
+
+func TestBridgeCrossPrincipalCrashAfterSeal(t *testing.T) {
+	g := openAgentBridgeFixture(t, ModeAssisted)
+	g.registerPharos()
+	g.registerJanus()
+	g.reportBuildAndQA()
+	ctx := context.Background()
+	g.svc.failAfter = "deployment_prereq"
+	if _, err := g.svc.Reconcile(ctx, g.actor, g.projectID, g.batch.ID); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("prereq crash err=%v", err)
+	}
+	g.svc.failAfter = ""
+	editor, _ := g.secondEditor()
+	recovered, err := g.svc.Reconcile(ctx, editor, g.projectID, g.batch.ID)
+	if err != nil {
+		t.Fatalf("cross-principal recovery: %v", err)
+	}
+	if recovered.Progress.Handoff == nil {
+		t.Fatalf("cross-principal recovery progress=%+v", recovered.Progress)
+	}
+}
+
+func TestBridgeRetryDoesNotProjectStaleHandoff(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
+	f.reportBuildAndQA()
+	ctx := context.Background()
+	first := f.authorizeHandoff()
+	staleID := first.Progress.Handoff.HandoffID
+	reporter := delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", f.actor.UserID)}
+	if _, err := f.delivery.StartAttempt(ctx, delivery.AttemptRequest{
+		IssueID: f.batch.IssueID, Actor: reporter, Policies: delivery.DefaultPolicy(),
+		ReasonCode: "retry", ReasonText: "new plan", IdempotencyKey: f.batch.BatchKey + ":retry",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.reportSpecificationOn(2, ":a2")
+	f.reportBuildAndQAOn(2, ":a2")
+	got, err := f.svc.GetBatch(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Progress.Handoff != nil && got.Progress.Handoff.HandoffID == staleID {
+		t.Fatalf("projected stale handoff %s", staleID)
+	}
+	if got.Progress.NextAction == NextActionMintHandoffSecret {
+		t.Fatal("offered mint for a superseded generation")
+	}
+	next := f.authorizeHandoff()
+	if next.Progress.Handoff == nil || next.Progress.Handoff.HandoffID == staleID {
+		t.Fatalf("retry handoff=%+v stale=%s", next.Progress.Handoff, staleID)
+	}
+}
+
+func TestBridgeRevokedHandoffIsActionable(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
+	f.reportBuildAndQA()
+	ctx := context.Background()
+	got := f.authorizeHandoff()
+	if _, err := f.ext.Revoke(ctx, f.operator, got.Progress.Handoff.HandoffID, "revoke-current", 0); err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := f.svc.GetBatch(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Progress.SetupRequired != SetupRequiredHandoffRevoked || blocked.Progress.NextAction != NextActionRotateHandoff {
+		t.Fatalf("revoked projection=%+v", blocked.Progress)
+	}
+	rotated, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotated.Progress.Handoff == nil || rotated.Progress.Handoff.HandoffID == got.Progress.Handoff.HandoffID {
+		t.Fatalf("rotation did not create a new handoff: %+v", rotated.Progress)
+	}
+}
+
+func TestBridgeInvalidSpecificationAsksForHumanReview(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	if _, err := appdb.DB.Exec(`UPDATE issues SET description=? WHERE id=?`, "material scope change", f.batch.IssueID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.svc.GetBatch(context.Background(), f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Progress.NextAction != NextActionHumanReview {
+		t.Fatalf("next_action=%q progress=%+v", got.Progress.NextAction, got.Progress)
+	}
+}
+
+func TestBridgeExpiredHandoffSecretRefusesReport(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
+	f.reportBuildAndQA()
+	ctx := context.Background()
+	got := f.authorizeHandoff()
+	secret, err := f.ext.Mint(ctx, f.operator, got.Progress.Handoff.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := f.now.Format(time.RFC3339Nano)
+	if _, err := f.ext.Accept(ctx, f.reporter, got.Progress.Handoff.HandoffID, "accept-expired", secret,
+		externalstage.AcceptRequest{Sequence: 1, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(25 * time.Hour)
+	evidence := f.artifact(externalstage.EvidenceKindDeployment)
+	evidence.ObservedAt = f.now.Format(time.RFC3339Nano)
+	if _, err := f.ext.ReportV2(ctx, f.reporter, got.Progress.Handoff.HandoffID, "expired-secret", secret,
+		externalstage.ReportRequestV2{Sequence: 2, State: externalstage.HandoffStateSucceeded, ObservedAt: evidence.ObservedAt,
+			PharosEvidence: &evidence}); err == nil {
+		t.Fatal("expired secret was accepted")
 	}
 }
 

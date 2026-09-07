@@ -53,7 +53,10 @@ const (
 	SetupRequiredPharosRegistration = "pharos_owner_registration"
 	SetupRequiredHandoffSecretMint  = "handoff_secret_mint"
 	SetupRequiredHandoffConfig      = "handoff_config"
+	SetupRequiredPrerequisiteSeal   = "prerequisite_seal"
+	SetupRequiredHandoffRevoked     = "handoff_revoked"
 
+	NextActionHumanReview            = "human_review_required"
 	NextActionImplementationEvidence = "implementation_evidence"
 	NextActionQAEvidence             = "qa_evidence"
 	NextActionPharosRegistration     = "pharos_owner_registration"
@@ -62,6 +65,7 @@ const (
 	NextActionDeploymentReceipt      = "pharos_deployment_receipt"
 	NextActionVerificationHandoff    = "authorize_verification_handoff"
 	NextActionVerificationObserve    = "pharos_verification_observation"
+	NextActionRotateHandoff          = "rotate_revoked_handoff"
 	NextActionExternalStageCLI       = "operator_external_stage_cli"
 
 	maxImportBytes    = 256 << 10
