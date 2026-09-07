@@ -87,7 +87,8 @@ func (s *Service) validateTarget(ctx context.Context, tx *sql.Tx, project int64,
 	if err := s.validateTargetForOutcome(ctx, tx, project, r, runtime, "", ""); err != nil {
 		return err
 	}
-	if r.Operation == "start" || r.Operation == "repair" {
+	// start, repair and readiness never name an existing session.
+	if r.Operation == "start" || r.Operation == "repair" || r.Operation == "readiness" {
 		return nil
 	}
 	current, err := loadSession(ctx, tx, project, r.SessionID)
@@ -105,6 +106,26 @@ func (s *Service) validateTargetForOutcome(ctx context.Context, tx *sql.Tx, proj
 	}
 	if r.Operation == "repair" {
 		if r.AccountKey != "" && !runtime.matchAccount(r.AccountKey) {
+			return ErrUnavailable
+		}
+		return nil
+	}
+	if r.Operation == "readiness" {
+		// A probe observes the exact advertised account, catalog profile and
+		// workspace. It reserves nothing: observing a host does not occupy an
+		// agent, a coordinator seat or an exclusive workspace.
+		if !runtime.matchAccount(r.AccountKey) {
+			return ErrUnavailable
+		}
+		profile, err := resolveProfile(r.DispatchProfileID, r.DispatchProfileVersion)
+		if err != nil {
+			return err
+		}
+		advertised := false
+		for _, p := range runtime.Profiles {
+			advertised = advertised || (p.ID == profile.ID && p.Version == profile.Version)
+		}
+		if !advertised || workspaceIdentity(runtime, r.WorkspaceHandle) == "" {
 			return ErrUnavailable
 		}
 		return nil
@@ -301,9 +322,12 @@ func (s *Service) RegisterSession(ctx context.Context, p auth.Principal, project
 	}
 	return nil
 }
-func (s *Service) completeEffect(ctx context.Context, tx *sql.Tx, in Intent, runtime Runtime, result string) error {
+func (s *Service) completeEffect(ctx context.Context, tx *sql.Tx, in Intent, runtime Runtime, t Transition) error {
 	r := in.Request
+	result := t.ResultSessionID
 	switch r.Operation {
+	case "readiness":
+		return s.recordReadinessTx(ctx, tx, in, runtime, t.Readiness)
 	case "repair":
 		if result != "" {
 			return ErrInvalid

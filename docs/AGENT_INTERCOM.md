@@ -248,6 +248,48 @@ identities:
 }
 ```
 
+### Owned readiness observation (PAI-956)
+
+A project entry may add an operator-declared `readiness` block. It is what this
+host is *supposed* to be running; the daemon compares it against real local
+observation and reports the difference. It never asserts readiness by itself,
+and an absent or incomplete block cannot produce a ready observation — the
+browser stays blocked with the reason instead.
+
+```json
+"readiness": {
+  "host_kind": "macos-home-manager",
+  "generation_digest": "sha256:<digest of the activated store generation name>",
+  "doctrine_kernel_digest": "sha256:<digest of AGENTS-KERNEL.md>",
+  "tools": ["nix", "git", "paimos"],
+  "home_manager_current": "/absolute/state/nix/profiles/home-manager"
+}
+```
+
+When the browser asks for a readiness check, the server submits a `readiness`
+lifecycle intent bound to the exact runtime generation, account, dispatch
+profile, workspace handle and baseline digest. This daemon claims it like any
+other intent and runs the `inspr.readiness.v1` required checks locally:
+`host_kind`, `activated_generation` (the activated profile symlink resolved to
+its store generation), `doctrine_loader` (loader wiring plus kernel digest),
+`workspace_isolation` (the same fixed-argv git provenance probe a start uses),
+`tool_prerequisites` (each declared tool resolved to a canonical executable
+outside the workspace), `paimos_runtime_doctor` (the local `runtime doctor`
+layers, in-process and read-only), and `paimos_account` (the fixed-argv account
+probe plus the named-account resolver). `dispatch_profile` is optional.
+
+Only closed check codes and digests leave the host: no path, executable,
+environment value or command output is ever reported. The daemon reports its own
+observation time; the server binds the observation to what it authorized and
+clamps its freshness to the runtime registration. Nothing else — an
+advertisement, a cached file, an operator assertion or a browser `ready:true` —
+can make an agent-mode start available.
+
+Rollout dependency: a host whose `readiness` block is absent, whose declared
+tools are not installed, or whose runtime doctor reports an unready local layer
+is reported `needs_setup`/`unavailable` with a next action. Manual delivery
+remains fully usable on such a host.
+
 Each project has one explicitly configured account class label. This unreleased
 source extension may also advertise one or more opaque named-account choices
 from the daemon's `--codex-accounts` registry (`accounts` with operator labels,

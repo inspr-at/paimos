@@ -106,6 +106,12 @@ func (t Transition) validate() error {
 	if t.ResultSessionID != "" && !validID(t.ResultSessionID) {
 		return ErrInvalid
 	}
+	if t.Readiness != nil {
+		if t.State != "completed" || t.ResultSessionID != "" {
+			return ErrInvalid
+		}
+		return validateReadinessReport(t.Readiness)
+	}
 	return nil
 }
 func (s *Service) Transition(ctx context.Context, p auth.Principal, project int64, id, lease string, t Transition) (Intent, error) {
@@ -125,6 +131,16 @@ func (s *Service) Transition(ctx context.Context, p auth.Principal, project int6
 	}
 	if in.Request.RuntimeID != t.RuntimeID || in.Request.RuntimeGeneration != t.RuntimeGeneration {
 		return Intent{}, ErrUnavailable
+	}
+	// Only a readiness intent may carry an observation, and a readiness intent
+	// can only complete by carrying one. A report attached to any other
+	// operation, or a bare readiness completion, is refused outright.
+	readinessIntent := in.Request.Operation == "readiness"
+	if !readinessIntent && t.Readiness != nil {
+		return Intent{}, ErrInvalid
+	}
+	if readinessIntent && t.State == "completed" && t.Readiness == nil {
+		return Intent{}, ErrInvalid
 	}
 	// A retired generation may read its exact terminal replay with its original
 	// proof, but can never claim or alter an outcome after lease expiry.
@@ -173,7 +189,7 @@ func (s *Service) Transition(ctx context.Context, p auth.Principal, project int6
 		}
 	}
 	if t.State == "completed" {
-		if err = s.completeEffect(ctx, tx, in, runtime, t.ResultSessionID); err != nil {
+		if err = s.completeEffect(ctx, tx, in, runtime, t); err != nil {
 			return Intent{}, err
 		}
 	}

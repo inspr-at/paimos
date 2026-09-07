@@ -10,6 +10,7 @@
 // Overview is "the at-a-glance card" — drilldowns happen in Issues /
 // Knowledge tabs.
 
+import ProjectBaselineBatchSection from '@/components/project/ProjectBaselineBatchSection.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { errMsg } from '@/api/client'
@@ -22,6 +23,7 @@ import type { Issue, KnowledgeEntry, Project } from '@/types'
 const props = defineProps<{
   project: Project
   issues: Issue[]
+  canWrite?: boolean
 }>()
 
 const description = computed(() => props.project.description ?? '')
@@ -115,6 +117,7 @@ onMounted(() => {
         teammates a quick sense of what this project is for.
       </div>
     </section>
+    <ProjectBaselineBatchSection :project-id="project.id" :can-write="!!canWrite" />
 
     <div class="pot-grid">
       <!-- Current state callouts -->

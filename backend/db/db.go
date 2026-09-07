@@ -13321,6 +13321,152 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			 dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,account_label,account_key
 			 ON harness_sessions BEGIN SELECT RAISE(ABORT,'harness workspace provenance is immutable'); END`,
 	}})
+	// M182 / PAI-956: project-bound Aithema handover drafts and immutable
+	// baseline batches mapped onto existing delivery attempts, lifecycle
+	// intents and the owned readiness observations that authorize them.
+	migrations = append(migrations, migration{version: 182, steps: []string{
+		`CREATE TABLE baseline_batch_drafts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			revision INTEGER NOT NULL DEFAULT 1,
+			status TEXT NOT NULL CHECK (status IN ('open','reviewing','closed')),
+			baseline_ref TEXT NOT NULL,
+			baseline_revision INTEGER NOT NULL,
+			content_digest TEXT NOT NULL,
+			revision_seal TEXT NOT NULL,
+			stream_ref TEXT NOT NULL,
+			imported_claimed_approved_by TEXT NOT NULL DEFAULT '',
+			imported_claimed_approved_at TEXT NOT NULL DEFAULT '',
+			imported_authenticity TEXT NOT NULL DEFAULT 'untrusted_imported_claim',
+			bounded_content_json TEXT NOT NULL,
+			selected_requirement_refs_json TEXT NOT NULL,
+			selected_constraint_refs_json TEXT NOT NULL,
+			execution_mode TEXT NOT NULL DEFAULT '' CHECK (execution_mode IN ('','manual','assisted','automatic')),
+			worker_json TEXT NOT NULL DEFAULT '{}',
+			created_by INTEGER NOT NULL REFERENCES users(id),
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			CHECK (length(CAST(baseline_ref AS BLOB)) BETWEEN 1 AND 128),
+			CHECK (length(CAST(content_digest AS BLOB)) = 71),
+			CHECK (length(CAST(revision_seal AS BLOB)) = 71),
+			CHECK (imported_authenticity = 'untrusted_imported_claim')
+		)`,
+		`CREATE UNIQUE INDEX idx_baseline_batch_open_draft ON baseline_batch_drafts(project_id) WHERE status IN ('open','reviewing')`,
+		`CREATE TABLE baseline_batch_reviews (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			draft_id INTEGER NOT NULL REFERENCES baseline_batch_drafts(id),
+			draft_revision INTEGER NOT NULL,
+			binding_hash TEXT NOT NULL,
+			execution_mode TEXT NOT NULL CHECK (execution_mode IN ('manual','assisted','automatic')),
+			worker_json TEXT NOT NULL,
+			selected_requirement_refs_json TEXT NOT NULL,
+			human_user_id INTEGER NOT NULL REFERENCES users(id),
+			session_credential_id TEXT NOT NULL,
+			confirmed INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			invalidated_at TEXT,
+			invalidate_reason TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX idx_baseline_batch_reviews_draft ON baseline_batch_reviews(draft_id, draft_revision)`,
+		`CREATE TABLE baseline_batch_batches (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			batch_key TEXT NOT NULL UNIQUE,
+			draft_id INTEGER NOT NULL REFERENCES baseline_batch_drafts(id),
+			draft_revision INTEGER NOT NULL,
+			review_id INTEGER NOT NULL REFERENCES baseline_batch_reviews(id),
+			baseline_ref TEXT NOT NULL,
+			content_digest TEXT NOT NULL,
+			revision_seal TEXT NOT NULL,
+			execution_mode TEXT NOT NULL CHECK (execution_mode IN ('manual','assisted','automatic')),
+			scope_json TEXT NOT NULL,
+			worker_json TEXT NOT NULL,
+			issue_id INTEGER NOT NULL REFERENCES issues(id),
+			delivery_id INTEGER,
+			attempt_id INTEGER,
+			lifecycle_intent_id TEXT NOT NULL DEFAULT '',
+			readiness_intent_id TEXT NOT NULL DEFAULT '',
+			control_state TEXT NOT NULL DEFAULT 'started' CHECK (control_state IN ('started','paused','cancelled')),
+			control_reason TEXT NOT NULL DEFAULT '',
+			confirmation_json TEXT NOT NULL,
+			idempotency_key TEXT NOT NULL,
+			imported_claimed_approved_by TEXT NOT NULL DEFAULT '',
+			imported_claimed_approved_at TEXT NOT NULL DEFAULT '',
+			imported_authenticity TEXT NOT NULL DEFAULT 'untrusted_imported_claim',
+			stream_ref TEXT NOT NULL DEFAULT '',
+			started_by INTEGER NOT NULL REFERENCES users(id),
+			started_at TEXT NOT NULL,
+			CHECK (imported_authenticity = 'untrusted_imported_claim'),
+			UNIQUE(project_id, idempotency_key)
+		)`,
+		`CREATE INDEX idx_baseline_batch_batches_project ON baseline_batch_batches(project_id, control_state)`,
+		// Human control actions on a started batch. The durable owned effect is a
+		// lifecycle intent revision change or a harness session control row; this
+		// ledger records which human asked for it, what it actually reached, and
+		// makes a repeated request idempotent.
+		`CREATE TABLE baseline_batch_controls (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			batch_id INTEGER NOT NULL REFERENCES baseline_batch_batches(id),
+			request_key TEXT NOT NULL,
+			action TEXT NOT NULL CHECK (action IN ('pause','resume','cancel')),
+			effect TEXT NOT NULL CHECK (effect IN ('harness_control','lifecycle_cancel','lifecycle_resubmit','manual_hold','manual_release','manual_cancel')),
+			effect_ref TEXT NOT NULL DEFAULT '',
+			actor_user_id INTEGER NOT NULL REFERENCES users(id),
+			actor_credential_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			UNIQUE(batch_id, request_key)
+		)`,
+		// Owned readiness evidence. One row per completed readiness intent; the
+		// server binds project, runtime generation, account, profile, workspace and
+		// baseline, and clamps the deadline to the ownership that produced it.
+		`CREATE TABLE lifecycle_readiness_observations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			intent_id TEXT NOT NULL UNIQUE REFERENCES lifecycle_intents(id),
+			runtime_id TEXT NOT NULL,
+			runtime_generation TEXT NOT NULL,
+			account_label TEXT NOT NULL,
+			account_key TEXT NOT NULL DEFAULT '',
+			dispatch_profile_id TEXT NOT NULL,
+			dispatch_profile_version TEXT NOT NULL,
+			workspace_handle TEXT NOT NULL,
+			workspace_identity TEXT NOT NULL,
+			baseline_digest TEXT NOT NULL,
+			contract_version TEXT NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('ready','needs_setup','unavailable')),
+			next_action TEXT NOT NULL DEFAULT 'none',
+			host_kind TEXT NOT NULL,
+			checks_json TEXT NOT NULL,
+			observed_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			recorded_at TEXT NOT NULL,
+			CHECK (contract_version = 'inspr.readiness.v1'),
+			CHECK (length(workspace_identity) = 64 AND workspace_identity NOT GLOB '*[^0-9a-f]*'),
+			CHECK (length(CAST(baseline_digest AS BLOB)) = 71),
+			CHECK (observed_at < expires_at)
+		)`,
+		`CREATE INDEX idx_lifecycle_readiness_current ON lifecycle_readiness_observations(
+			project_id, baseline_digest, runtime_id, runtime_generation, expires_at)`,
+		`CREATE TRIGGER trg_lifecycle_readiness_immutable BEFORE UPDATE ON lifecycle_readiness_observations
+			BEGIN SELECT RAISE(ABORT,'readiness observation is immutable'); END`,
+		`ALTER TABLE projects ADD COLUMN inspr_stream_enabled INTEGER NOT NULL DEFAULT 0
+			CHECK (inspr_stream_enabled IN (0,1))`,
+		`CREATE TABLE baseline_batch_forecasts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			batch_id INTEGER NOT NULL REFERENCES baseline_batch_batches(id),
+			subject TEXT NOT NULL,
+			percent REAL NOT NULL CHECK (percent >= 0 AND percent <= 100),
+			eta_seconds INTEGER,
+			kind TEXT NOT NULL CHECK (kind IN ('measured','worker_estimate','educated_guess')),
+			basis TEXT NOT NULL,
+			as_of TEXT NOT NULL,
+			UNIQUE(batch_id, subject)
+		)`,
+		`CREATE TRIGGER trg_baseline_batch_batches_immutable_identity BEFORE UPDATE OF
+			batch_key,draft_id,draft_revision,review_id,baseline_ref,content_digest,revision_seal,execution_mode,
+			scope_json,worker_json,issue_id,delivery_id,attempt_id,idempotency_key,started_by,readiness_intent_id
+			ON baseline_batch_batches BEGIN SELECT RAISE(ABORT,'baseline batch identity is immutable'); END`,
+	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

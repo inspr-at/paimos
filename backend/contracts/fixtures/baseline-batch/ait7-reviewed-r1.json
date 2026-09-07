@@ -1,0 +1,35 @@
+{
+  "handover_version": "aithema.handover/0.1",
+  "stream_ref": "stream:portable",
+  "exported_at": "2026-09-07T16:20:00.000Z",
+  "baseline": {
+    "baseline_ref": "baseline:portable-v1",
+    "revision": 1,
+    "content_digest": "sha256:95635d8523bf66e224d1c535626b888d435cd7a2077d445a33c5f6b3051f5eb7",
+    "revision_seal": "sha256:92d19c033584ae6c48a0eca89c8928920d05b124b869b668d42683bf68aa70dc",
+    "approved_by": "party:approver",
+    "approved_at": "2026-09-07T16:00:00.000Z",
+    "requirements": [
+      {
+        "requirement_ref": "req.unicode",
+        "statement": "Users can read Straße café — and <script>alert(1)</script> stays text",
+        "acceptance_criteria": [
+          "=cmd|' /C calc'!A0 is not a formula",
+          "Long-id wraps: baseline:very-long-identifier-that-must-wrap"
+        ],
+        "constraint_refs": [
+          "constraint:data.eu"
+        ]
+      }
+    ],
+    "constraints": [
+      {
+        "constraint_ref": "constraint:data.eu",
+        "kind": "data",
+        "statement": "Personal data stays in the EU"
+      }
+    ]
+  },
+  "pending_proposals": [],
+  "decisions": []
+}

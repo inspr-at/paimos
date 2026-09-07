@@ -754,6 +754,7 @@ func mountAPI(r chi.Router) {
 		r.With(auth.RequireProjectView).Get("/projects/{id}/graph", handlers.ListProjectEntityRelations)
 		r.With(auth.RequireProjectView).Get("/projects/{id}/graph/blast-radius", handlers.BlastRadius)
 		r.With(auth.RequireProjectView).Post("/projects/{id}/retrieve", handlers.RetrieveProjectContext)
+		handlers.RegisterBaselineBatchRoutes(r)
 
 		// Project key suggestion
 		r.Get("/projects/suggest-key", handlers.SuggestProjectKey)

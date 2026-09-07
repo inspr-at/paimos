@@ -30,6 +30,26 @@ type configuredWorkspace struct {
 	Handle   string `json:"handle"`
 	Identity string `json:"identity"`
 	Path     string `json:"path"`
+	// Optional overrides; both default to the doctrine layout inside the
+	// workspace itself, which is where an authorized agent would read them.
+	DoctrineKernel string `json:"doctrine_kernel,omitempty"`
+	DoctrineLoader string `json:"doctrine_loader,omitempty"`
+}
+
+// configuredReadiness is the operator's declaration of what this host should be
+// running. Readiness compares it against real local observation; an absent or
+// incomplete declaration cannot produce a ready observation, it blocks.
+type configuredReadiness struct {
+	HostKind             string   `json:"host_kind"`
+	GenerationDigest     string   `json:"generation_digest"`
+	DoctrineKernelDigest string   `json:"doctrine_kernel_digest"`
+	DoctrineLoaderRef    string   `json:"doctrine_loader_ref,omitempty"`
+	Tools                []string `json:"tools"`
+	HomeManagerCurrent   string   `json:"home_manager_current,omitempty"`
+	HomeManagerInstalled string   `json:"home_manager_installed,omitempty"`
+	NixOSMarker          string   `json:"nixos_marker,omitempty"`
+	NixOSCurrent         string   `json:"nixos_current,omitempty"`
+	NixOSInstalled       string   `json:"nixos_installed,omitempty"`
 }
 type configuredAccount struct {
 	Key   string `json:"key"`
@@ -42,6 +62,7 @@ type configuredProject struct {
 	Accounts     []configuredAccount        `json:"accounts,omitempty"`
 	Profiles     []lifecycleintents.Profile `json:"profiles"`
 	Workspaces   []configuredWorkspace      `json:"workspaces"`
+	Readiness    *configuredReadiness       `json:"readiness,omitempty"`
 }
 type lifecycleConfig struct {
 	Projects []configuredProject `json:"projects"`
@@ -56,6 +77,8 @@ type runtimeRegistrationRecord struct {
 }
 type daemonLifecycle struct {
 	mu         sync.Mutex
+	stateRoot  string
+	instance   string
 	supervisor *agentd.Supervisor
 	primary    *nativeConsumers
 	reporter   *cliReporter
@@ -104,7 +127,7 @@ func newDaemonLifecycle(path, root, instance, reportURL, keyFile string, supervi
 	if err != nil {
 		return nil, errors.New("private lifecycle authority journal unavailable; preserve it and reconcile outstanding intents")
 	}
-	d := &daemonLifecycle{supervisor: supervisor, primary: primary, reporter: reporter, journal: journal}
+	d := &daemonLifecycle{stateRoot: root, instance: instance, supervisor: supervisor, primary: primary, reporter: reporter, journal: journal}
 	seen := map[int64]bool{}
 	for _, c := range config.Projects {
 		if c.ProjectID <= 0 || seen[c.ProjectID] || len(c.Workspaces) == 0 || len(c.Workspaces) > 16 || len(c.Profiles) == 0 || len(c.Profiles) > 16 {
@@ -406,6 +429,18 @@ func (p *projectLifecycle) Prepare(ctx context.Context, in lifecycleintents.Inte
 		}
 		return nil
 	}
+	if in.Request.Operation == "readiness" {
+		// A readiness probe reserves nothing and starts nothing. It still has to
+		// name an account, profile and workspace this daemon actually owns.
+		if !p.configuredAccountKey(in.Request.AccountKey) {
+			return lifecycleclient.ErrOwnership
+		}
+		if e := p.verifyConfiguration(ctx); e != nil {
+			return e
+		}
+		_, e := p.readinessSpec(in)
+		return e
+	}
 	if !p.configuredAccountKey(in.Request.AccountKey) {
 		return lifecycleclient.ErrOwnership
 	}
@@ -527,6 +562,9 @@ func (p *projectLifecycle) Execute(ctx context.Context, in lifecycleintents.Inte
 			}
 		}
 		return lifecycleclient.Result{Reason: "applied"}, err
+	}
+	if in.Request.Operation == "readiness" {
+		return p.observeReadiness(ctx, in)
 	}
 	if in.Request.Operation == "attach" || in.Request.Operation == "reassign" {
 		if _, e := p.ownSession(in); e != nil {
