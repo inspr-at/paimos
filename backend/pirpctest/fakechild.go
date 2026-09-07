@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -24,6 +26,8 @@ const (
 	piCodingAgentDirEnvName = "PI_CODING_AGENT_DIR"
 )
 
+var traceFileName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
 type command struct {
 	ID      string `json:"id"`
 	Type    string `json:"type"`
@@ -33,9 +37,21 @@ type command struct {
 // Command returns a test-only Command seam that re-executes the current test
 // binary as a fake Pi RPC child. helperTest must be the TestXxx host in the
 // calling package.
+//
+// The adapter executable path and native Launch argv are discarded. This helper
+// always re-execs os.Args[0] (the synthetic test binary) with a closed
+// `-test.run=^Test…$` argument. Launch argv is recorded only in ArgvEnv for
+// get_state echo, never as exec arguments.
 func Command(helperTest, mode string, extraEnv ...string) func(string, ...string) *exec.Cmd {
-	return func(path string, args ...string) *exec.Cmd {
-		cmd := exec.Command(path, "-test.run=^"+helperTest+"$")
+	run := "-test.run=^TestPiFakeChildProcess$"
+	switch helperTest {
+	case "TestPiFakeChildProcess":
+		run = "-test.run=^TestPiFakeChildProcess$"
+	case "TestPiRPCChildProcess":
+		run = "-test.run=^TestPiRPCChildProcess$"
+	}
+	return func(_ string, args ...string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], run) // #nosec G204 G702 -- test-only re-exec of this test binary (os.Args[0]) with one of two closed `-test.run=^Test…$` constants; adapter executable path and native Launch argv are discarded and never become exec argv (Launch args stay in ArgvEnv for get_state echo only).
 		env := append(os.Environ(),
 			HelperEnv+"="+mode,
 			ArgvEnv+"="+strings.Join(args, "\x1e"),
@@ -443,10 +459,24 @@ func copyStrings(in []string) []string {
 
 func trace(line string) {
 	path := strings.TrimSpace(os.Getenv(TraceEnv))
-	if path == "" {
+	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.Contains(path, "..") {
 		return
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	if !traceFileName.MatchString(base) {
+		return
+	}
+	info, err := os.Lstat(dir) // #nosec G703 -- test-only command-type trace (never prompt text); absolute Clean path, allowlisted basename, real non-symlink directory, then os.Root binds the write.
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return
+	}
+	root, err := os.OpenRoot(dir) // #nosec G703 -- test-only command-type trace directory after the Lstat bind above.
+	if err != nil {
+		return
+	}
+	defer root.Close()
+	f, err := root.OpenFile(base, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}

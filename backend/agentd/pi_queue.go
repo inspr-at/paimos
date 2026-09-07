@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,7 +74,7 @@ type piQueueRecord struct {
 type piQueueStore struct {
 	mu       sync.Mutex
 	journal  *localjournal.Journal[piQueueRecord]
-	payloads string
+	payloads *os.Root
 }
 
 func openPiQueueStore(root, instance string) (*piQueueStore, error) {
@@ -86,31 +87,76 @@ func openPiQueueStore(root, instance string) (*piQueueStore, error) {
 		return nil, err
 	}
 	info, err := os.Lstat(payloads)
-	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm() != 0o700 {
 		return nil, errors.New("pi queue payload directory has unsafe mode or type")
+	}
+	payloadRoot, err := os.OpenRoot(payloads)
+	if err != nil {
+		return nil, err
 	}
 	journal, err := localjournal.Open(localjournal.Config[piQueueRecord]{
 		Directory: dir, Prefix: "pi-queue", Version: 1, MaxBytes: 8 << 20, MaxRecords: 4096,
 		Key: func(r piQueueRecord) (string, error) {
-			if r.Key == "" {
-				return "", errors.New("missing pi queue key")
+			if !validPiQueueKey(r.Key) {
+				return "", errors.New("invalid pi queue key")
 			}
 			return r.Key, nil
 		},
 		Validate: validatePiQueueRecord,
 	})
 	if err != nil {
+		_ = payloadRoot.Close()
 		return nil, err
 	}
-	return &piQueueStore{journal: journal, payloads: payloads}, nil
+	return &piQueueStore{journal: journal, payloads: payloadRoot}, nil
+}
+
+func validPiQueueKey(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalPiQueueKey(value string) (string, error) {
+	if !validPiQueueKey(value) {
+		return "", errors.New("invalid pi queue key")
+	}
+	raw, err := hex.DecodeString(value)
+	if err != nil || len(raw) != 32 {
+		return "", errors.New("invalid pi queue key")
+	}
+	return hex.EncodeToString(raw), nil
+}
+
+func piQueuePayloadName(key string) (string, error) {
+	key, err := canonicalPiQueueKey(key)
+	if err != nil {
+		return "", err
+	}
+	return key + ".txt", nil
+}
+
+func piQueuePayloadTmpName(key string) (string, error) {
+	key, err := canonicalPiQueueKey(key)
+	if err != nil {
+		return "", err
+	}
+	return "." + key + ".tmp", nil
 }
 
 func validatePiQueueRecord(r piQueueRecord) error {
-	if len(r.Key) != 64 || r.Generation == "" || !validOpaqueID(r.Generation) || r.ProjectID <= 0 ||
+	if !validPiQueueKey(r.Key) || r.Generation == "" || !validOpaqueID(r.Generation) || r.ProjectID <= 0 ||
 		!validOpaqueID(r.Identity) || !validAccountLabel(r.AccountLabel) ||
 		(r.AccountKey != "" && !validAccountKey(r.AccountKey)) ||
 		!validCorrelationID(r.CorrelationID) || r.TextBytes <= 0 || r.TextBytes > maxTextBytes ||
-		len(r.TextSHA256) != 64 {
+		!validPiQueueKey(r.TextSHA256) {
 		return errors.New("invalid pi queue record")
 	}
 	switch r.Kind {
@@ -134,33 +180,39 @@ func piQueueKey(generation, correlation, kind string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *piQueueStore) payloadPath(key string) string {
-	return filepath.Join(s.payloads, key+".txt")
-}
-
 func (s *piQueueStore) writePayload(key, text string) error {
+	if s == nil || s.payloads == nil {
+		return errPiDurableUnavailable
+	}
 	if !utf8.ValidString(text) || strings.ContainsRune(text, 0) || text == "" || len(text) > maxTextBytes {
 		return errors.New("pi queue payload is invalid")
 	}
-	path := s.payloadPath(key)
-	tmp, err := os.CreateTemp(s.payloads, "."+key+".*")
+	name, err := piQueuePayloadName(key)
 	if err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpName) }
+	tmpName, err := piQueuePayloadTmpName(key)
+	if err != nil {
+		return err
+	}
+	_ = s.payloads.Remove(tmpName)
+	tmp, err := s.payloads.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	cleanup := func() { _ = s.payloads.Remove(tmpName) }
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		cleanup()
 		return err
 	}
 	if _, err := tmp.WriteString(text); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		cleanup()
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		cleanup()
 		return err
 	}
@@ -168,25 +220,45 @@ func (s *piQueueStore) writePayload(key, text string) error {
 		cleanup()
 		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := s.payloads.Rename(tmpName, name); err != nil {
 		cleanup()
 		return err
 	}
-	dir, err := os.Open(s.payloads) // #nosec G304 -- owner-only queue payload directory.
+	dir, err := s.payloads.Open(".")
 	if err != nil {
 		return err
 	}
 	err = dir.Sync()
-	_ = dir.Close()
+	if closeErr := dir.Close(); err == nil {
+		err = closeErr
+	}
 	return err
 }
 
 func (s *piQueueStore) readPayload(key, digest string, size int) (string, error) {
-	raw, err := os.ReadFile(s.payloadPath(key)) // #nosec G304 -- hashed owner-only payload name.
+	if s == nil || s.payloads == nil || size <= 0 || size > maxTextBytes || !validPiQueueKey(digest) {
+		return "", errPiQueueAmbiguous
+	}
+	name, err := piQueuePayloadName(key)
 	if err != nil {
 		return "", errPiQueueAmbiguous
 	}
-	if len(raw) != size || strings.ContainsRune(string(raw), 0) || !utf8.ValidString(string(raw)) {
+	info, err := s.payloads.Lstat(name)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() != int64(size) {
+		return "", errPiQueueAmbiguous
+	}
+	file, err := s.payloads.OpenFile(name, os.O_RDONLY, 0)
+	if err != nil {
+		return "", errPiQueueAmbiguous
+	}
+	defer file.Close()
+	fdInfo, err := file.Stat()
+	if err != nil || !fdInfo.Mode().IsRegular() || fdInfo.Mode().Perm() != 0o600 || fdInfo.Size() != int64(size) {
+		return "", errPiQueueAmbiguous
+	}
+	limited := io.LimitReader(file, int64(size)+1)
+	raw, err := io.ReadAll(limited)
+	if err != nil || len(raw) != size || strings.ContainsRune(string(raw), 0) || !utf8.ValidString(string(raw)) {
 		return "", errPiQueueAmbiguous
 	}
 	sum := sha256.Sum256(raw)
