@@ -223,6 +223,132 @@ func TestRuntimeReporterURLMustMatchNamedDeployment(t *testing.T) {
 	}
 }
 
+func fullServeArgs(p *PlatformService, extra ...string) []string {
+	args := []string{filepath.Join(p.Home, "paimos-agentd"), "serve", "--instance", p.Instance, "--state-root", p.StateRoot}
+	return append(args, extra...)
+}
+
+func reportingLifecycleArgs(key, lifecycle string, extra ...string) []string {
+	args := []string{
+		"--report-host", "fixture-host",
+		"--report-url", "https://selected.example.invalid",
+		"--report-api-key-file", key,
+		"--lifecycle-config", lifecycle,
+	}
+	return append(args, extra...)
+}
+
+func putServiceArgs(t *testing.T, p *PlatformService, args []string) {
+	t.Helper()
+	var definition string
+	if p.Platform == "darwin" {
+		var b strings.Builder
+		b.WriteString(`<plist version="1.0"><dict><key>Label</key><string>` + p.Name + `</string><key>ProgramArguments</key><array>`)
+		for _, a := range args {
+			b.WriteString("<string>")
+			_ = xml.EscapeText(&b, []byte(a))
+			b.WriteString("</string>")
+		}
+		b.WriteString(`</array><key>KeepAlive</key><true/></dict></plist>`)
+		definition = b.String()
+	} else {
+		definition = "[Unit]\nDescription=fixture\n[Service]\nExecStart=" + strings.Join(args, " ") + "\nRestart=on-failure\n[Install]\nWantedBy=default.target\n"
+	}
+	putFixture(t, p.File, definition)
+}
+
+func protectedDummy(t *testing.T, dir, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	putFixture(t, path, "fixture metadata only; never a credential")
+	return path
+}
+
+func TestRuntimeServiceAcceptsReportingLifecycleWithOptionalCodexAccounts(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		for _, kind := range []string{"legacy", "accounts"} {
+			t.Run(platform+"/"+kind, func(t *testing.T) {
+				p, _, calls := serviceFixture(t, platform)
+				key := protectedDummy(t, p.Home, "reporter-key")
+				lifecycle := protectedDummy(t, p.Home, "lifecycle.json")
+				extra := reportingLifecycleArgs(key, lifecycle)
+				if kind == "accounts" {
+					extra = append(extra, "--codex-accounts", protectedDummy(t, p.Home, "codex-accounts.json"))
+				}
+				putServiceArgs(t, p, fullServeArgs(p, extra...))
+				s, e := p.Inspect(context.Background())
+				if e != nil || !s.Verified {
+					t.Fatalf("reporting+lifecycle+%s definition not verified: %v", kind, e)
+				}
+				if len(*calls) == 0 {
+					t.Fatal("verified definition never reached the platform manager")
+				}
+			})
+		}
+	}
+}
+
+func TestRuntimeServiceRejectsHostileCodexAccountsRegistry(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		for _, kind := range []string{"missing", "empty", "duplicate", "relative", "symlink", "hardlink", "mode", "directory", "unknown", "ambiguous"} {
+			t.Run(platform+"/"+kind, func(t *testing.T) {
+				p, _, calls := serviceFixture(t, platform)
+				key := protectedDummy(t, p.Home, "reporter-key")
+				lifecycle := protectedDummy(t, p.Home, "lifecycle.json")
+				accounts := filepath.Join(p.Home, "codex-accounts.json")
+				extra := reportingLifecycleArgs(key, lifecycle)
+				switch kind {
+				case "missing":
+					extra = append(extra, "--codex-accounts", accounts)
+				case "empty":
+					extra = append(extra, "--codex-accounts", "")
+				case "duplicate":
+					putFixture(t, accounts, "fixture metadata only; never a credential")
+					extra = append(extra, "--codex-accounts", accounts, "--codex-accounts", accounts)
+				case "relative":
+					putFixture(t, accounts, "fixture metadata only; never a credential")
+					extra = append(extra, "--codex-accounts", "codex-accounts.json")
+				case "symlink":
+					real := protectedDummy(t, p.Home, "accounts-real.json")
+					if e := os.Symlink(real, accounts); e != nil {
+						t.Fatal(e)
+					}
+					extra = append(extra, "--codex-accounts", accounts)
+				case "hardlink":
+					real := protectedDummy(t, p.Home, "accounts-real.json")
+					if e := os.Link(real, accounts); e != nil {
+						t.Fatal(e)
+					}
+					extra = append(extra, "--codex-accounts", accounts)
+				case "mode":
+					putFixture(t, accounts, "fixture metadata only; never a credential")
+					if e := os.Chmod(accounts, 0644); e != nil {
+						t.Fatal(e)
+					}
+					extra = append(extra, "--codex-accounts", accounts)
+				case "directory":
+					if e := os.Mkdir(accounts, 0700); e != nil {
+						t.Fatal(e)
+					}
+					extra = append(extra, "--codex-accounts", accounts)
+				case "unknown":
+					putFixture(t, accounts, "fixture metadata only; never a credential")
+					extra = append(extra, "--codex-accounts", accounts, "--foreign-flag", "x")
+				case "ambiguous":
+					extra = append(extra, "--codex-accounts")
+				}
+				putServiceArgs(t, p, fullServeArgs(p, extra...))
+				if _, e := p.Inspect(context.Background()); e == nil {
+					t.Fatal("hostile registry accepted")
+				}
+				if len(*calls) != 0 {
+					t.Fatal("manager reached with invalid definition")
+				}
+			})
+		}
+	}
+}
+
 func TestRuntimePlatformSupportsFullNamedInstanceLength(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		if _, e := NewPlatformService(platform, t.TempDir(), strings.Repeat("x", 64), t.TempDir(), "", ""); e != nil {

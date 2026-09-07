@@ -206,8 +206,11 @@ legacy item must drain safely first. An unknown effect is never force-requeued.
 
 The reviewed service must include `--lifecycle-config /absolute/private/runtime.json`
 alongside its existing `--report-host`, `--report-url`, and
-`--report-api-key-file`. Provision the declaration and protected configuration in
-the selected Home Manager/service workflow, then run
+`--report-api-key-file`. The closed verifier also accepts exactly one
+`--codex-accounts` pair whose path is a protected regular owner-only registry
+file; it checks path and file metadata only and does not read account contents.
+Declarations without that flag remain valid. Provision the declaration and
+protected configuration in the selected Home Manager/service workflow, then run
 `paimos --instance example runtime setup --project PAI`. Setup verifies and starts
 that declaration; it does not install a service or create account credentials.
 
