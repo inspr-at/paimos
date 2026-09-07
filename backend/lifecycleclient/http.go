@@ -186,7 +186,7 @@ func (h *HTTP) Claim(ctx context.Context, runtime string) (*lifecycleintents.Int
 		Intent        *lifecycleintents.Intent `json:"intent"`
 	}
 	err := h.Request(ctx, http.MethodPost, h.route("/runtimes/"+runtime+"/claim"), nil, struct{}{}, &out)
-	if err == nil && (out.SchemaVersion != 1 || out.Intent != nil && (out.Intent.ProjectID != h.project || out.Intent.Request.RuntimeID != runtime)) {
+	if err == nil && (out.SchemaVersion != 1 || out.Intent != nil && (out.Intent.ProjectID != h.project || out.Intent.Request.RuntimeID != runtime || !acceptedIntent(*out.Intent))) {
 		err = ErrOwnership
 	}
 	return out.Intent, err
@@ -197,10 +197,23 @@ func (h *HTTP) Transition(ctx context.Context, id string, in lifecycleintents.Tr
 	}
 	var out lifecycleintents.Intent
 	err := h.Request(ctx, http.MethodPost, h.route("/intents/"+id+"/transition"), nil, in, &out)
-	if err == nil && (out.ID != id || out.ProjectID != h.project || out.Request.RuntimeID != in.RuntimeID || out.Request.RuntimeGeneration != in.RuntimeGeneration || out.SchemaVersion != 1) {
+	if err == nil && (out.ID != id || out.ProjectID != h.project || out.Request.RuntimeID != in.RuntimeID || out.Request.RuntimeGeneration != in.RuntimeGeneration || !acceptedIntent(out)) {
 		err = ErrOwnership
 	}
 	return out, err
+}
+
+// acceptedIntent allows frozen class-only schema 1 and named-account schema 2.
+// The claim envelope stays schema 1; unknown schemas and schema/account mismatches fail closed.
+func acceptedIntent(in lifecycleintents.Intent) bool {
+	switch in.SchemaVersion {
+	case lifecycleintents.RuntimeSchemaV1:
+		return in.Request.AccountKey == ""
+	case lifecycleintents.AccountChoiceSchemaV2:
+		return in.Request.AccountKey != ""
+	default:
+		return false
+	}
 }
 func equal(a, b any) bool { x, _ := json.Marshal(a); y, _ := json.Marshal(b); return bytes.Equal(x, y) }
 

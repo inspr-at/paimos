@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [Unreleased]
+
+### Fixed — named-account intent schema compatibility (PAI-959)
+
+- Accept lifecycle intent schema 1 and named-account schema 2 on reporter
+  claim, executing, and completed paths. Keep the claim envelope at schema 1.
+  Unknown schemas and account, runtime, or project mismatches still fail closed
+  before local execution.
+
 ## [26.09.07.17.12] — 2026-09-07
 
 ### Added — verified worker account selection (PAI-952, PAI-953)

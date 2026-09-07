@@ -108,7 +108,7 @@ func (r *Runner) Step(ctx context.Context, runtime lifecycleintents.Runtime) (st
 	if cleanup, ok := r.executor.(interface{ Forget(string) }); ok {
 		defer cleanup.Forget(in.ID)
 	}
-	if in.SchemaVersion != 1 || uuid.Validate(in.ID) != nil || in.Request.RuntimeID != runtime.ID || in.Request.RuntimeGeneration != runtime.Generation || in.ProjectID != runtime.ProjectID || (in.State != "claimed" && in.State != "executing") {
+	if !acceptedIntent(*in) || uuid.Validate(in.ID) != nil || in.Request.RuntimeID != runtime.ID || in.Request.RuntimeGeneration != runtime.Generation || in.ProjectID != runtime.ProjectID || (in.State != "claimed" && in.State != "executing") {
 		return ErrOwnership
 	}
 	c := record{ID: in.ID, Digest: intentDigest(*in), Phase: "reserved", Intent: *in}
