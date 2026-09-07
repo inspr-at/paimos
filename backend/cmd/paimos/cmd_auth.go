@@ -20,10 +20,10 @@ import (
 )
 
 func authCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "auth",
 		Short: "Authenticate with a PAIMOS instance",
-	}
+	})
 	c.AddCommand(authLoginCmd())
 	c.AddCommand(authWhoAmICmd())
 	c.AddCommand(authLogoutCmd())

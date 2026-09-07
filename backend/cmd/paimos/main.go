@@ -182,6 +182,17 @@ Get started:
 	return cmd
 }
 
+// commandGroup makes noun-only commands fail closed when a caller omits or
+// misspells the verb. Cobra otherwise treats a non-runnable parent as a help
+// request and returns success, while explicit --help remains successful.
+func commandGroup(cmd *cobra.Command) *cobra.Command {
+	cmd.Args = cobra.NoArgs
+	cmd.RunE = func(c *cobra.Command, _ []string) error {
+		return &usageError{msg: c.CommandPath() + " requires a subcommand; use --help to list available commands"}
+	}
+	return cmd
+}
+
 // usageError is returned for bad CLI invocations so main() can map to
 // exit code 2. Use fmt.Errorf for actual runtime failures (→ exit 1).
 type usageError struct{ msg string }

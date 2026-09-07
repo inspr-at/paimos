@@ -18,7 +18,7 @@ import (
 )
 
 func harnessCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "harness", Short: "Manage durable harness-session control-plane state"}
+	cmd := commandGroup(&cobra.Command{Use: "harness", Short: "Manage durable harness-session control-plane state"})
 	cmd.AddCommand(harnessRegisterCmd(), harnessListCmd(), harnessStatusCmd(), harnessOrchestratorCmd(), harnessHeartbeatCmd(), harnessYieldCmd(),
 		harnessDrainCmd(), harnessCompleteDeliveryCmd(), harnessDrainSteerCmd(), harnessCompleteSteerCmd(),
 		harnessControlCmd("interrupt"), harnessControlCmd("stop"), harnessControlGroupCmd(), harnessCompleteControlCmd(), harnessMarkStoppedCmd(), harnessBindCmd())
@@ -378,7 +378,7 @@ func harnessControlCmd(kind string) *cobra.Command {
 	return harnessProjectCommand(kind, "Request typed owned "+kind, http.MethodPost, "/{session}/controls/"+kind, func() any { return map[string]any{} }, false)
 }
 func harnessControlGroupCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "control", Short: "Inspect typed owned-control outcomes"}
+	cmd := commandGroup(&cobra.Command{Use: "control", Short: "Inspect typed owned-control outcomes"})
 	cmd.AddCommand(harnessProjectCommand("get", "Get one scoped typed control outcome", http.MethodGet, "/{session}/controls/{control}", func() any { return nil }, false))
 	return cmd
 }

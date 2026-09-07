@@ -73,7 +73,7 @@ type knowledgeEntryShape struct {
 }
 
 func knowledgeCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "knowledge",
 		Short: "List and manage project knowledge entries",
 		Long: `Drive the unified /api/projects/{id}/knowledge surface
@@ -84,7 +84,7 @@ URL segment (kebab-singular) on every subcommand.
 Memory-specific operations live under "knowledge memory" — they
 operate on the same data but target the named subroutes on the
 server (references / stale / proposed-stale).`,
-	}
+	})
 	c.AddCommand(knowledgeListCmd())
 	c.AddCommand(knowledgeGetCmd())
 	c.AddCommand(knowledgeCreateCmd())

@@ -57,7 +57,7 @@ stdout so callers can pipe it to jq.`,
 			}
 			raw, err := client.doRaw(method, path, body)
 			if err != nil {
-				return &apiError{inner: err}
+				return reportError(err)
 			}
 			if _, err := stdout.Write(raw); err != nil {
 				return err

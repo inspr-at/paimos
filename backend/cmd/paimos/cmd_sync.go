@@ -171,7 +171,7 @@ func buildDefaultSyncRegistry() (*sync.Registry, error) {
 }
 
 func syncCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "sync",
 		Short: "Pull canonical artifacts from the paimos instance into a local cache",
 		Long: `sync — generic init / pull / watch / check engine.
@@ -180,7 +180,7 @@ Operates over a kind registry. Today the only registered kind is
 "skill" (the claude-code-adapter-rendered agent files); PAI-341 will
 extend with knowledge-plane kinds (memory, runbook, external_system,
 related_project, guideline) using the same verbs.`,
-	}
+	})
 	c.AddCommand(syncInitCmd())
 	c.AddCommand(syncPullCmd())
 	c.AddCommand(syncWatchCmd())

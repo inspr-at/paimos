@@ -71,7 +71,7 @@ var friendlySafeValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`
 var friendlyTicketKey = regexp.MustCompile(`^[A-Z][A-Z0-9]{2,9}-[1-9][0-9]*$`)
 
 func workerCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "worker", Short: "Start an owned generation of a canonical project agent"}
+	cmd := commandGroup(&cobra.Command{Use: "worker", Short: "Start an owned generation of a canonical project agent"})
 	cmd.AddCommand(friendlyStartCmd(false))
 	return cmd
 }
@@ -633,16 +633,12 @@ func friendlyStartCommands(instance string, o friendlyStartOptions, p friendlySt
 	sessionScope := scope + " --session " + shellQuote(s.ID)
 	commands := map[string]string{"status": base + " harness status" + sessionScope, "doctor": base + " runtime doctor"}
 	commands["receiver-setup"] = base + " runtime handoff" + scope
-	if len(freeReceiverSlot) > 0 && freeReceiverSlot[0] && s.ProjectID > 0 && uuid.Validate(local.ID) == nil && (p.Profile.Harness == "codex" || p.Profile.Harness == "claude") {
-		adapter, kind := "codex", "codex_thread"
-		if p.Profile.Harness == "claude" {
-			adapter, kind = "claude_resume", "claude_session"
-		}
+	if len(freeReceiverSlot) > 0 && freeReceiverSlot[0] && s.ProjectID > 0 && uuid.Validate(local.ID) == nil && p.Profile.Harness == "codex" {
 		reader := "paimos-agentd receiver-reference --instance " + shellQuote(o.Deployment) + " --session " + shellQuote(local.ID) + " --identity " + shellQuote(local.Identity) + fmt.Sprintf(" --project-id %d", s.ProjectID)
 		if o.StateRoot != "" {
 			reader += " --state-root " + shellQuote(o.StateRoot)
 		}
-		commands["receiver-setup"] = reader + " | " + base + " message target set" + scope + " --address " + shellQuote(local.Identity) + " --adapter " + adapter + " --kind " + kind + " --role simple_fallback --maximum-level simple --target-ref-file -"
+		commands["receiver-setup"] = reader + " | " + base + " message target set" + scope + " --address " + shellQuote(local.Identity) + " --adapter codex --kind codex_thread --role simple_fallback --maximum-level simple --target-ref-file -"
 	}
 	// Native registration supplies the owned primary inbox; public harness
 	// control capabilities determine the additional generation-scoped actions.

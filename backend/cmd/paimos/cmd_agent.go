@@ -72,7 +72,7 @@ type agentArtifactShape struct {
 }
 
 func agentCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "agent",
 		Short: "List and manage project agents",
 		Long: `Drive the project-scoped /api/projects/{id}/agents surface
@@ -84,7 +84,7 @@ Multi-line / structured fields accept file inputs: --body-file for the
 markdown body, --bootstrap-steps-file and --rules-file for the
 structured bootstrap_steps / non_negotiable_rules JSON arrays — so
 shell quoting never distorts the content.`,
-	}
+	})
 	c.AddCommand(agentListCmd())
 	c.AddCommand(agentGetCmd())
 	c.AddCommand(agentCreateCmd())

@@ -39,10 +39,10 @@ type anchorRecord struct {
 var anchorPattern = regexp.MustCompile(`^\s*(?://|#|--|<!--)\s*@paimos\s+([A-Z][A-Z0-9]{0,15}-\d+)(?:\s+"([^"]+)")?\s*(?:-->)?\s*$`)
 
 func anchorsCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "anchors",
 		Short: "Scan, verify, and upload issue anchors from a repo checkout",
-	}
+	})
 	c.AddCommand(anchorsScanCmd())
 	c.AddCommand(anchorsVerifyCmd())
 	c.AddCommand(anchorsUploadCmd())

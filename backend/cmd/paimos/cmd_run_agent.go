@@ -55,10 +55,10 @@ const (
 var claudeToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.*:-]+$`)
 
 func runAgentCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "run-agent",
 		Short: "Local runner for UI-triggered 'Implement this' jobs (PAI-608)",
-	}
+	})
 	c.AddCommand(runAgentWatchCmd())
 	return c
 }
