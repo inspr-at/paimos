@@ -359,14 +359,9 @@ watch(
 watch(
   () => props.workers,
   () => {
-    // The parent snapshot can change a worker's revision or liveness between
-    // runtime polls. Re-read authoritative candidates and discard only a review
-    // that has not crossed the submission boundary.
-    if (pendingRequest.value && !attempted) {
-      pendingRequest.value = null
-      reviewing.value = false
-      preparedIdentity = ''
-    }
+    // Re-read authoritative candidates when the parent snapshot changes. The
+    // request-identity watcher below decides whether a selected review is stale;
+    // an unrelated heartbeat must not dismiss an otherwise exact review.
     void refreshRuntimes()
   },
   { deep: true },
