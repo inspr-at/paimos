@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f6f2" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Dein einfacher Arbeitsplatz · Paimos Prototyp</title>
+    <link rel="icon" href="../../assets/brand/paimos-logo.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./style.css" />
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Zum Inhalt</a>
+    <header class="masthead">
+      <a class="brand" href="./index.html" aria-label="Paimos – aktuellen Stand öffnen">
+        <img src="../../assets/brand/paimos-logo.svg" alt="" width="43" height="43" />
+        <span>paimos<span class="brand-caption">Raum für das Wesentliche</span></span>
+      </a>
+      <nav id="navigation" aria-label="Mein Bereich"></nav>
+      <div class="header-end">
+        <span class="pill prototype">Klickprototyp</span
+        ><button class="quiet" data-action="about">Über diese Demo</button>
+      </div>
+    </header>
+    <div class="context-strip">
+      <span id="identity">Gast · nur in diesem Browser</span
+      ><button id="email-state" class="quiet" data-action="email">
+        Ohne Anmeldung ausprobieren
+      </button>
+    </div>
+    <main id="main" tabindex="-1"></main>
+    <footer class="page-footer">
+      <span id="save-state">Dein Entwurf bleibt in diesem Browser.</span
+      ><button class="quiet" data-action="reset">Demo neu beginnen</button>
+    </footer>
+    <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+    <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+    <noscript
+      >Dieser Klickprototyp braucht JavaScript. Es werden keine Konten angelegt und keine Aufträge
+      ausgeführt.</noscript
+    >
+  </body>
+</html>
