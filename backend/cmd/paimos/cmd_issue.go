@@ -51,10 +51,10 @@ func normalizeCLIRequiredIssueRef(raw string) (string, error) {
 }
 
 func issueCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "issue",
 		Short: "Operate on issues",
-	}
+	})
 	c.AddCommand(issueGetCmd())
 	c.AddCommand(issueListCmd())
 	c.AddCommand(searchCmd())

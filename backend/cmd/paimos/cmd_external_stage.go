@@ -130,7 +130,7 @@ type externalStageOwnerActivation struct {
 }
 
 func externalStageCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "external-stage",
 		Short: "Create and report pinned v1 external delivery-stage handoffs",
 		Long: `Create internal handoffs and drive the pinned external-stage v1 protocol.
@@ -141,7 +141,7 @@ rotate require a new output file and create it with owner-only permissions befor
 the request is sent. Pull, accept, and report read raw credential bytes only from
 an owner-only file or stdin and send their base64url form only in the
 X-PAIMOS-Handoff-Secret request header.`,
-	}
+	})
 	c.AddCommand(externalStageCreateCmd())
 	c.AddCommand(externalStageRegistrationsCmd())
 	c.AddCommand(externalStagePrerequisitesCmd())
@@ -156,7 +156,7 @@ X-PAIMOS-Handoff-Secret request header.`,
 }
 
 func externalStageOwnerCmd() *cobra.Command {
-	c := &cobra.Command{Use: "owner", Short: "Activate exact Pharos owners for deployment or verification"}
+	c := commandGroup(&cobra.Command{Use: "owner", Short: "Activate exact Pharos owners for deployment or verification"})
 	c.AddCommand(externalStageOwnerActivateCmd())
 	return c
 }
@@ -254,10 +254,10 @@ func externalStageCreateCmd() *cobra.Command {
 }
 
 func externalStageRegistrationsCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "registrations",
 		Short: "Discover and administer audited external reporter registrations",
-	}
+	})
 	c.AddCommand(externalStageRegistrationsListCmd())
 	c.AddCommand(externalStageRegistrationsCreateCmd())
 	c.AddCommand(externalStageRegistrationsRevokeCmd())
@@ -378,10 +378,10 @@ func externalStageRegistrationsRevokeCmd() *cobra.Command {
 }
 
 func externalStagePrerequisitesCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "prerequisites",
 		Short: "Seal exact external dependency prerequisites",
-	}
+	})
 	c.AddCommand(externalStagePrerequisitesSealCmd())
 	return c
 }

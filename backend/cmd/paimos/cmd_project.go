@@ -18,10 +18,10 @@ import (
 )
 
 func projectCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "project",
 		Short: "Operate on projects",
-	}
+	})
 	c.AddCommand(projectListCmd())
 	c.AddCommand(projectShowCmd())
 	c.AddCommand(projectReposCmd())

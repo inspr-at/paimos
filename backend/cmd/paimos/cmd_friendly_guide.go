@@ -17,7 +17,10 @@ import (
 	"github.com/inspr-at/paimos/backend/models"
 )
 
-type friendlyChoice struct{ key, label string }
+type friendlyChoice struct {
+	key, label string
+	value      string
+}
 
 // Guidance only fills selectors from the principal's read-only catalogs. The
 // same authoritative resolver used by non-interactive/JSON rechecks every choice.
@@ -49,6 +52,9 @@ func guideFriendlyStart(ctx context.Context, in io.Reader, out io.Writer, o *fri
 		selected := strings.TrimSpace(line)
 		if n, e := strconv.Atoi(selected); e == nil && n > 0 && n <= len(choices) {
 			*dst = choices[n-1].key
+			if choices[n-1].value != "" {
+				*dst = choices[n-1].value
+			}
 			return nil
 		}
 		matches := 0
@@ -56,6 +62,9 @@ func guideFriendlyStart(ctx context.Context, in io.Reader, out io.Writer, o *fri
 			if c.key == selected {
 				matches++
 				*dst = c.key
+				if c.value != "" {
+					*dst = c.value
+				}
 			}
 		}
 		if matches != 1 {
@@ -71,7 +80,7 @@ func guideFriendlyStart(ctx context.Context, in io.Reader, out io.Writer, o *fri
 		var choices []friendlyChoice
 		for _, p := range projects {
 			if p.ID > 0 && orchestratorProjectKeyPattern.MatchString(p.Key) {
-				choices = append(choices, friendlyChoice{p.Key, p.Key})
+				choices = append(choices, friendlyChoice{key: p.Key, label: p.Key})
 			}
 		}
 		if err := choose("Project", &o.Project, choices); err != nil {
@@ -90,7 +99,7 @@ func guideFriendlyStart(ctx context.Context, in io.Reader, out io.Writer, o *fri
 		var choices []friendlyChoice
 		for _, a := range agents {
 			if orchestratorAgentKeyPattern.MatchString(a.Name) && a.Name != "web-ui" {
-				choices = append(choices, friendlyChoice{a.Name, a.Name})
+				choices = append(choices, friendlyChoice{key: a.Name, label: a.Name})
 			}
 		}
 		if err := choose("Agent", &o.Agent, choices); err != nil {
@@ -109,7 +118,7 @@ func guideFriendlyStart(ctx context.Context, in io.Reader, out io.Writer, o *fri
 				return errors.New("ticket input is required; supply --ticket or rerun --guided")
 			}
 		}
-		if err := choose("Work shape", &o.Shape, []friendlyChoice{{"ship", "ship"}, {"scout", "scout"}}); err != nil {
+		if err := choose("Work shape", &o.Shape, []friendlyChoice{{key: "ship", label: "ship"}, {key: "scout", label: "scout"}}); err != nil {
 			return err
 		}
 		if o.Parent == "" {
@@ -130,7 +139,7 @@ func guideFriendlyStart(ctx context.Context, in io.Reader, out io.Writer, o *fri
 					if counts[key] != 1 {
 						key = s.ID
 					}
-					choices = append(choices, friendlyChoice{key, fmt.Sprintf("%s (%s; %s; %s)", key, s.Role, s.Phase, s.ID)})
+					choices = append(choices, friendlyChoice{key: key, label: fmt.Sprintf("%s (%s; %s; %s)", key, s.Role, s.Phase, s.ID), value: s.ID})
 				}
 			}
 			if err := choose("Parent", &o.Parent, choices); err != nil {
@@ -151,7 +160,7 @@ func guideFriendlyStart(ctx context.Context, in io.Reader, out io.Writer, o *fri
 			selected.Profile = p.ID + "@" + p.Version
 			if _, err := resolveFriendlyProfile([]dispatchprofile.Profile{p}, selected); err == nil {
 				key := p.ID + "@" + p.Version
-				choices = append(choices, friendlyChoice{key, fmt.Sprintf("%s — %s / %s / %s", key, p.Harness, p.Model, p.Effort)})
+				choices = append(choices, friendlyChoice{key: key, label: fmt.Sprintf("%s — %s / %s / %s", key, p.Harness, p.Model, p.Effort)})
 			}
 		}
 		if err := choose("Profile", &o.Profile, choices); err != nil {

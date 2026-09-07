@@ -90,7 +90,7 @@ func registerDiscoveredAdapters(reg *adapters.Registry) {
 }
 
 func skillCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "skill",
 		Short: "Render canonical agent artifacts into harness-specific skill files",
 		Long: `skill — turn paimos canonical agent artifacts into harness-specific
@@ -100,7 +100,7 @@ The canonical artifact lives at GET /api/projects/<id>/agents/<name>.json
 and is consumed by an adapter (e.g. claude-code) that produces the file
 your harness expects (e.g. .claude/commands/<name>.md). Rendered files
 carry a paimos-managed header line so PAI-331 can detect drift.`,
-	}
+	})
 	c.AddCommand(skillRenderCmd())
 	c.AddCommand(skillListAdaptersCmd())
 	c.AddCommand(skillTestAdapterCmd())

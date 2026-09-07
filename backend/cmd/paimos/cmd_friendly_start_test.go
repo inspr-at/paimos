@@ -434,6 +434,9 @@ func TestFriendlyStartLedgerRejectsSymlinkAndUnsafeModes(t *testing.T) {
 
 func TestFriendlyGuidedCLISelectsDisplayedRowsWithoutProfileIDs(t *testing.T) {
 	f := newFriendlyFixture(t)
+	// A stopped predecessor with the same harness:agent handle must not make
+	// the one currently selectable active parent ambiguous.
+	f.sessions = append(f.sessions, models.HarnessSession{ID: "33333333-3333-4333-8333-333333333333", ProjectID: 42, AgentName: "root", Harness: "codex", Role: "coordinator", Phase: "stopped"})
 	var out, guidance bytes.Buffer
 	oldOut, oldJSON := stdout, flagJSON
 	stdout = &out
@@ -447,7 +450,7 @@ func TestFriendlyGuidedCLISelectsDisplayedRowsWithoutProfileIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	var guided friendlyStartResult
-	if json.Unmarshal(out.Bytes(), &guided) != nil || guided.Outcome != "validated" || guided.Plan.Profile.ID != "codex-sol-high" {
+	if json.Unmarshal(out.Bytes(), &guided) != nil || guided.Outcome != "validated" || guided.Plan.Profile.ID != "codex-sol-high" || guided.Plan.Parent != friendlyParentID {
 		t.Fatal("guided rows did not resolve expected plan")
 	}
 	for _, label := range []string{"Project choices:", "PAI", "Agent choices:", "builder", "Parent choices:", "codex:root", "Profile choices:", "gpt-5.6-sol / high"} {
@@ -459,6 +462,19 @@ func TestFriendlyGuidedCLISelectsDisplayedRowsWithoutProfileIDs(t *testing.T) {
 	explicit, err := runFriendlyStart(context.Background(), f.opts)
 	if err != nil || explicit.Plan.Profile != guided.Plan.Profile || explicit.Plan.Parent != guided.Plan.Parent || explicit.Plan.Agent != guided.Plan.Agent || f.writes != 0 || f.daemon.startCount != 0 {
 		t.Fatal("guided preview diverged from shared resolver or wrote state")
+	}
+}
+
+func TestFriendlyParentManualSelectionRetainsAmbiguityAndProjectGuards(t *testing.T) {
+	active := models.HarnessSession{ID: friendlyParentID, ProjectID: 42, AgentName: "root", Harness: "codex", Phase: "working"}
+	stopped := models.HarnessSession{ID: "33333333-3333-4333-8333-333333333333", ProjectID: 42, AgentName: "root", Harness: "codex", Phase: "stopped"}
+	if _, err := resolveFriendlyParent([]models.HarnessSession{active, stopped}, 42, "codex:root"); err == nil {
+		t.Fatal("manual handle selection must reject active ambiguity")
+	}
+	foreign := active
+	foreign.ProjectID = 99
+	if _, err := resolveFriendlyParent([]models.HarnessSession{foreign}, 42, foreign.ID); err == nil || !strings.Contains(err.Error(), "cross-project") {
+		t.Fatalf("cross-project parent was not rejected: %v", err)
 	}
 }
 
@@ -562,5 +578,9 @@ func TestFriendlyReceiverSetupRequiresFreshEmptySlotAndExactScope(t *testing.T) 
 		} else if strings.Contains(command, "target set") || !strings.Contains(command, "runtime handoff") {
 			t.Fatal("existing or unverified target offered replacement")
 		}
+	}
+	claude := friendlyStartCommands("selected-instance", o, friendlyStartPlan{Profile: dispatchprofile.Profile{Harness: "claude"}}, public, local, true)["receiver-setup"]
+	if strings.Contains(claude, "simple_fallback") || strings.Contains(claude, "target set") {
+		t.Fatalf("Claude received unsupported fallback setup: %q", claude)
 	}
 }

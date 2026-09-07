@@ -51,7 +51,7 @@ type orchestratorConfig struct {
 }
 
 func orchestratorCmd() *cobra.Command {
-	command := &cobra.Command{
+	command := commandGroup(&cobra.Command{
 		Use:   "orchestrator",
 		Short: "Configure the current instance orchestrator",
 		Long: `Configure the explicit orchestrator pin on exactly the selected PAIMOS
@@ -59,7 +59,7 @@ instance. This command never guesses an agent: set requires an exact project key
 canonical project-agent key, and display label. The current revision is read just
 before the compare-and-swap write, so a concurrent change fails closed.`,
 		Args: cobra.NoArgs,
-	}
+	})
 	command.AddCommand(orchestratorSetCmd(), friendlyStartCmd(true))
 	return command
 }

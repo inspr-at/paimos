@@ -36,10 +36,10 @@ type cliTimeEntry struct {
 }
 
 func timeCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "time",
 		Short: "Manage issue time entries",
-	}
+	})
 	c.AddCommand(timeStartCmd())
 	c.AddCommand(timeStopCmd())
 	c.AddCommand(timeListCmd())

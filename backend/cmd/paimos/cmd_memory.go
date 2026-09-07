@@ -37,7 +37,7 @@ import (
 // ships `propose`; future siblings (e.g. `accept`, `reject`) can land
 // here without reshaping the surface.
 func memoryCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "memory",
 		Short: "Manage memory entries (PAI-349 propose verb + future siblings)",
 		Long: `Memory verbs operate on the project's memory knowledge entries.
@@ -46,7 +46,7 @@ Today the only verb is ` + "`propose`" + `, which drafts a memory
 entry in 'proposed' status pending operator review (PAI-349). The
 draft is visible in the Knowledge tab's "Proposed" inbox; accept /
 edit / reject from there.`,
-	}
+	})
 	c.AddCommand(memoryProposeCmd())
 	c.AddCommand(memoryDepsCmd())
 	return c

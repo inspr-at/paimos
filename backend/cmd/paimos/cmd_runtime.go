@@ -26,7 +26,7 @@ func runtimeCmd() *cobra.Command {
 	var projectID int64
 	var projectKey string
 	cache, _ := os.UserCacheDir()
-	cmd := &cobra.Command{Use: "runtime", Short: "Set up, diagnose, repair or reset one local Agent Intercom runtime", Args: cobra.NoArgs}
+	cmd := commandGroup(&cobra.Command{Use: "runtime", Short: "Set up, diagnose, repair or reset one local Agent Intercom runtime"})
 	cmd.PersistentFlags().StringVar(&root, "state-root", filepath.Join(cache, "paimos", "agentd"), "private agentd state root")
 	cmd.PersistentFlags().StringVar(&file, "service-file", "", "reviewed LaunchAgent plist or Linux user unit (default: named-instance service)")
 	cmd.PersistentFlags().StringVar(&service, "service-name", "", "platform service label or unit name")

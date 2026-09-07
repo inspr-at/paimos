@@ -752,10 +752,10 @@ func issueCommentCmd() *cobra.Command {
 
 // relationCmd: paimos relation add <source> <type> <target>
 func relationCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "relation",
 		Short: "Operate on issue relations",
-	}
+	})
 	c.AddCommand(relationAddCmd())
 	return c
 }
@@ -850,10 +850,10 @@ func resolveIssueRefToID(client *Client, ref string) (int64, error) {
 
 // issueTagCmd: paimos issue tag {add|rm} <ref> [--tag <key> | --tag-id N]
 func issueTagCmd() *cobra.Command {
-	c := &cobra.Command{
+	c := commandGroup(&cobra.Command{
 		Use:   "tag",
 		Short: "Add or remove tags on an issue",
-	}
+	})
 	c.AddCommand(issueTagAddCmd())
 	c.AddCommand(issueTagRmCmd())
 	return c
