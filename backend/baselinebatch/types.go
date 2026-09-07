@@ -55,6 +55,9 @@ const (
 	SetupRequiredHandoffConfig      = "handoff_config"
 	SetupRequiredPrerequisiteSeal   = "prerequisite_seal"
 	SetupRequiredHandoffRevoked     = "handoff_revoked"
+	SetupRequiredPrerequisiteReview = "prerequisite_review"
+	SetupRequiredBuiltArtifact      = "built_artifact_identity"
+	SetupRequiredV2Report           = "v2_report"
 
 	NextActionHumanReview            = "human_review_required"
 	NextActionImplementationEvidence = "implementation_evidence"

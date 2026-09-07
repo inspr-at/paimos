@@ -176,6 +176,9 @@ func (s *Service) ensureStageHandoff(ctx context.Context, principal externalstag
 		return err
 	}
 	if existing.HandoffID != "" {
+		if ok, err := s.stageReadyForHandoff(ctx, stored, snapshot, gen, stage); err != nil || !ok {
+			return err
+		}
 		return nil
 	}
 	execution, epoch := gen.ExecutionNumber, gen.AuthorityEpoch
@@ -208,8 +211,6 @@ func (s *Service) ensureStageHandoff(ctx context.Context, principal externalstag
 			return err
 		}
 		if len(prereqs) == 0 {
-			// Absence is not an operator-decided empty set. An explicit CLI
-			// seal of [] remains valid and is reused on the next reconcile.
 			return nil
 		}
 		if _, err := s.External.SealPrerequisites(ctx, principal, deliveryKey, bridgeIdempotency(stored, snapshot, stage, "prereq", execution, epoch),
@@ -223,6 +224,9 @@ func (s *Service) ensureStageHandoff(ctx context.Context, principal externalstag
 		return fmt.Errorf("%w: sealed prerequisites belong to a different plan revision", ErrConflict)
 	}
 	if err := s.crashAfter(stage + "_prereq"); err != nil {
+		return err
+	}
+	if ok, err := s.stageReadyForHandoff(ctx, stored, snapshot, gen, stage); err != nil || !ok {
 		return err
 	}
 	revoked, err := countRevokedOwnerHandoffs(ctx, s.DB, stored, gen, stage)
@@ -242,6 +246,28 @@ func (s *Service) ensureStageHandoff(ctx context.Context, principal externalstag
 		return mapExternal(err)
 	}
 	return s.crashAfter(stage + "_handoff")
+}
+
+func (s *Service) stageReadyForHandoff(ctx context.Context, stored storedBatch, snapshot delivery.Snapshot, gen generationRef, stage string) (bool, error) {
+	if stored.DeliveryID == nil {
+		return false, nil
+	}
+	match, err := externalstage.SealedPrerequisitesMatchActiveJanus(ctx, s.DB, *stored.DeliveryID, gen.AttemptID, stage, gen.ExecutionNumber, gen.AuthorityEpoch)
+	if err != nil || !match {
+		return false, err
+	}
+	return s.builtIdentityComplete(ctx, stored, snapshot)
+}
+
+func (s *Service) builtIdentityComplete(ctx context.Context, stored storedBatch, snapshot delivery.Snapshot) (bool, error) {
+	if stored.DeliveryID == nil || snapshot.AttemptID == nil {
+		return false, nil
+	}
+	artifact, err := externalstage.LoadExplicitBuiltArtifact(ctx, s.DB, *stored.DeliveryID, *snapshot.AttemptID)
+	if err != nil {
+		return false, err
+	}
+	return artifact.Complete(), nil
 }
 
 func (s *Service) crashAfter(step string) error {
@@ -328,6 +354,17 @@ func (s *Service) annotateBridge(ctx context.Context, tx *sql.Tx, stored storedB
 		progress.NextAction = NextActionQAEvidence
 		return nil
 	}
+	if complete, err := builtIdentityCompleteTx(ctx, tx, stored, snapshot); err != nil {
+		return err
+	} else if !complete {
+		progress.SetupRequired = SetupRequiredBuiltArtifact
+		progress.NextAction = NextActionImplementationEvidence
+		progress.BlockingReason = "setup_required_" + SetupRequiredBuiltArtifact
+		if *state != BatchPaused {
+			*state = BatchBlocked
+		}
+		return nil
+	}
 	registration, err := hasPharosOwnerRegistration(ctx, tx, stored)
 	if err != nil {
 		return err
@@ -394,6 +431,9 @@ func (s *Service) annotateBridge(ctx context.Context, tx *sql.Tx, stored storedB
 		if live.HandoffID == "" {
 			return annotatePendingHandoff(ctx, tx, stored, snapshot, progress, state, currentGeneration(snapshot, targetStage), targetStage, deploy.PolicySatisfied)
 		}
+		if blocked, err := annotateDivergedPrerequisites(ctx, tx, stored, currentGeneration(snapshot, targetStage), targetStage, progress, state); err != nil || blocked {
+			return err
+		}
 		handoff = live
 	} else {
 		progress.Handoff = handoffView(handoff)
@@ -402,23 +442,27 @@ func (s *Service) annotateBridge(ctx context.Context, tx *sql.Tx, stored storedB
 	case handoff.HandoffID != "" && handoff.CredentialEpoch == 0:
 		progress.SetupRequired = SetupRequiredHandoffSecretMint
 		progress.NextAction = NextActionMintHandoffSecret
-		progress.BlockingReason = "setup_required_" + SetupRequiredHandoffSecretMint
+		progress.BlockingReason = "v2_report_required"
 		if *state != BatchPaused {
 			*state = BatchBlocked
 		}
 	case !deploy.PolicySatisfied:
+		progress.SetupRequired = SetupRequiredV2Report
 		progress.NextAction = NextActionDeploymentReceipt
+		progress.BlockingReason = "v2_report_required"
 	case !verify.PolicySatisfied && (handoff.StageKey != delivery.StageVerification || handoff.HandoffID == ""):
 		progress.NextAction = NextActionVerificationHandoff
 	case !verify.PolicySatisfied && handoff.CredentialEpoch == 0:
 		progress.SetupRequired = SetupRequiredHandoffSecretMint
 		progress.NextAction = NextActionMintHandoffSecret
-		progress.BlockingReason = "setup_required_" + SetupRequiredHandoffSecretMint
+		progress.BlockingReason = "v2_report_required"
 		if *state != BatchPaused {
 			*state = BatchBlocked
 		}
 	case !verify.PolicySatisfied:
+		progress.SetupRequired = SetupRequiredV2Report
 		progress.NextAction = NextActionVerificationObserve
+		progress.BlockingReason = "v2_report_required"
 	}
 	return nil
 }
@@ -445,6 +489,9 @@ func annotatePendingHandoff(ctx context.Context, tx *sql.Tx, stored storedBatch,
 		}
 		return nil
 	}
+	if blocked, err := annotateDivergedPrerequisites(ctx, tx, stored, gen, stage, progress, state); err != nil || blocked {
+		return err
+	}
 	revoked, err := countRevokedOwnerHandoffs(ctx, tx, stored, gen, stage)
 	if err != nil {
 		return err
@@ -460,6 +507,37 @@ func annotatePendingHandoff(ctx context.Context, tx *sql.Tx, stored storedBatch,
 	}
 	progress.NextAction = authorize
 	return nil
+}
+
+func annotateDivergedPrerequisites(ctx context.Context, tx *sql.Tx, stored storedBatch, gen generationRef, stage string, progress *Progress, state *string) (bool, error) {
+	if stored.DeliveryID == nil {
+		return false, nil
+	}
+	match, err := externalstage.SealedPrerequisitesMatchActiveJanus(ctx, tx, *stored.DeliveryID, gen.AttemptID, stage, gen.ExecutionNumber, gen.AuthorityEpoch)
+	if err != nil {
+		return false, err
+	}
+	if match {
+		return false, nil
+	}
+	progress.SetupRequired = SetupRequiredPrerequisiteReview
+	progress.NextAction = NextActionExternalStageCLI
+	progress.BlockingReason = "setup_required_" + SetupRequiredPrerequisiteReview
+	if *state != BatchPaused {
+		*state = BatchBlocked
+	}
+	return true, nil
+}
+
+func builtIdentityCompleteTx(ctx context.Context, tx *sql.Tx, stored storedBatch, snapshot delivery.Snapshot) (bool, error) {
+	if stored.DeliveryID == nil || snapshot.AttemptID == nil {
+		return false, nil
+	}
+	artifact, err := externalstage.LoadExplicitBuiltArtifact(ctx, tx, *stored.DeliveryID, *snapshot.AttemptID)
+	if err != nil {
+		return false, err
+	}
+	return artifact.Complete(), nil
 }
 
 func hasPharosOwnerRegistration(ctx context.Context, tx *sql.Tx, stored storedBatch) (bool, error) {

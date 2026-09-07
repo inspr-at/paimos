@@ -23,7 +23,6 @@ import (
 	"io"
 	"math"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +35,7 @@ var (
 	ErrInvalid     = errors.New("invalid external stage request")
 	ErrConflict    = errors.New("external stage conflict")
 	ErrUnavailable = errors.New("external stage dependency unavailable")
+	ErrV2Required  = errors.New("external stage v2 report required")
 
 	handoffIDPattern = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
 	symbolPattern    = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
@@ -794,6 +794,11 @@ func (s *Service) reportNormalized(ctx context.Context, p Principal, handoffID, 
 	if err := validateSemanticReportContract(h, req, secret, contractMajor, artifactV2); err != nil {
 		return ReportReceipt{}, err
 	}
+	if h.role == string(ReporterRoleOwner) && req.State == HandoffStateSucceeded {
+		if err := assertSealedPrerequisitesMatchActiveJanusTx(ctx, tx, h); err != nil {
+			return ReportReceipt{}, err
+		}
+	}
 	if err := bindBuiltOwnerArtifactTx(ctx, tx, h, req, artifactV2); err != nil {
 		return ReportReceipt{}, err
 	}
@@ -1137,131 +1142,6 @@ func decodeWireDigest(value string) ([]byte, error) {
 		return nil, ErrInvalid
 	}
 	return raw, nil
-}
-
-func bindBuiltOwnerArtifactTx(ctx context.Context, tx *sql.Tx, h handoffRow, req ReportRequest, artifactV2 *ArtifactEvidenceV2) error {
-	if h.role != string(ReporterRoleOwner) || req.PharosEvidence == nil || req.PharosEvidence.Kind != EvidenceKindDeployment ||
-		req.PharosEvidence.Result != EvidenceResultSucceeded {
-		return nil
-	}
-	expected, found, err := loadBuiltOwnerArtifactTx(ctx, tx, h)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return nil
-	}
-	e := req.PharosEvidence
-	digest, err := decodeWireDigest(e.Artifact.Digest)
-	if err != nil {
-		return ErrInvalid
-	}
-	if len(expected.digest) > 0 && subtle.ConstantTimeCompare(digest, expected.digest) != 1 {
-		return ErrInvalid
-	}
-	if expected.commit != "" && e.Artifact.CommitDigest != expected.commit {
-		return ErrInvalid
-	}
-	if e.Workflow != h.workflow || e.Environment != h.environment {
-		return ErrInvalid
-	}
-	if len(expected.manifest) > 0 {
-		if artifactV2 == nil {
-			return ErrInvalid
-		}
-		manifest, err := decodeWireDigest(artifactV2.ReleaseManifestDigest)
-		if err != nil || subtle.ConstantTimeCompare(manifest, expected.manifest) != 1 {
-			return ErrInvalid
-		}
-		if expected.coordinate != "" && artifactV2.ReleaseManifestCoordinate != expected.coordinate {
-			return ErrInvalid
-		}
-		if expected.version != "" && artifactV2.Version != expected.version {
-			return ErrInvalid
-		}
-		if expected.channel != "" && artifactV2.ReleaseChannel != expected.channel {
-			return ErrInvalid
-		}
-		if expected.sequence != 0 && artifactV2.ReleaseSequence != expected.sequence {
-			return ErrInvalid
-		}
-		if expected.scheme != "" && string(artifactV2.VersionScheme) != expected.scheme {
-			return ErrInvalid
-		}
-	}
-	return nil
-}
-
-type builtOwnerArtifact struct {
-	digest     []byte
-	commit     string
-	manifest   []byte
-	coordinate string
-	version    string
-	channel    string
-	sequence   int64
-	scheme     string
-}
-
-func loadBuiltOwnerArtifactTx(ctx context.Context, tx *sql.Tx, h handoffRow) (builtOwnerArtifact, bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT latest.stage_key,evidence.evidence_type,evidence.reference_kind,
-		evidence.reference_value,evidence.digest_sha256
-		FROM delivery_stage_latest latest
-		JOIN delivery_stage_events terminal ON terminal.id=latest.semantic_stage_event_id
-		 AND terminal.semantic_state='succeeded'
-		JOIN delivery_evidence evidence ON evidence.stage_event_id=latest.semantic_stage_event_id
-		WHERE latest.delivery_id=? AND latest.attempt_id=? AND latest.stage_key IN ('implementation','qa')
-		ORDER BY evidence.ordinal`, h.deliveryID, h.attemptID)
-	if err != nil {
-		return builtOwnerArtifact{}, false, err
-	}
-	defer rows.Close()
-	var expected builtOwnerArtifact
-	found := false
-	for rows.Next() {
-		var stage, evidenceType, kind, value, digestHex string
-		if err := rows.Scan(&stage, &evidenceType, &kind, &value, &digestHex); err != nil {
-			return builtOwnerArtifact{}, false, err
-		}
-		found = true
-		switch {
-		case stage == delivery.StageImplementation && evidenceType == "artifact" && kind == "digest" && digestHex != "":
-			raw, err := hex.DecodeString(digestHex)
-			if err != nil || len(raw) != 32 {
-				return builtOwnerArtifact{}, false, ErrInvalid
-			}
-			expected.digest = raw
-		case stage == delivery.StageImplementation && evidenceType == "implementation_result" && kind == "commit":
-			expected.commit = value
-		case stage == delivery.StageQA && evidenceType == "test_result" && kind == "digest" && digestHex != "":
-			raw, err := hex.DecodeString(digestHex)
-			if err != nil || len(raw) != 32 {
-				return builtOwnerArtifact{}, false, ErrInvalid
-			}
-			expected.manifest = raw
-		case stage == delivery.StageImplementation && evidenceType == "artifact" && kind == "external_ref":
-			expected.coordinate = value
-		case stage == delivery.StageQA && evidenceType == "test_result" && kind == "external_ref":
-			parseBuiltReleaseIdentity(value, &expected)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return builtOwnerArtifact{}, false, err
-	}
-	return expected, found, nil
-}
-
-func parseBuiltReleaseIdentity(value string, expected *builtOwnerArtifact) {
-	parts := strings.Split(value, ":")
-	if len(parts) < 4 {
-		return
-	}
-	expected.scheme = parts[0]
-	expected.channel = parts[1]
-	if seq, err := strconv.ParseInt(parts[2], 10, 64); err == nil {
-		expected.sequence = seq
-	}
-	expected.version = strings.Join(parts[3:], ":")
 }
 
 func insertTypedEvidence(ctx context.Context, tx *sql.Tx, h handoffRow, reportID int64, received string, req ReportRequest, artifactV2 *ArtifactEvidenceV2) error {

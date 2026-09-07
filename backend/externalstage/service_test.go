@@ -2019,3 +2019,153 @@ func TestExternalEffectiveRoleCannotRegisterOrUseReporterBinding(t *testing.T) {
 		t.Fatalf("external role accepted handoff: %v", err)
 	}
 }
+
+func TestOwnerSuccessRefusesJanusRegisteredAfterEmptySeal(t *testing.T) {
+	f := setupServiceFixture(t)
+	f.sealEmpty(t)
+	owner, secret := createAcceptedServiceHandoff(t, f, f.registrationID, f.reporter, "janus-after-empty", f.now.Add(time.Hour))
+	if _, err := f.service.Report(t.Context(), f.reporter, owner.HandoffID, "janus-after-empty-active", secret,
+		ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: f.now.Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.RegisterReporter(t.Context(), f.operator, f.deliveryKey, "register-janus-after-empty",
+		RegisterReporterRequest{APIKeyID: f.reporter.APIKeyID, ReporterClass: ReporterClassJanus,
+			ReporterRole: ReporterRoleDependency, DependencyKey: "late.admission"}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := &PharosEvidence{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+		Artifact: ArtifactEvidence{Version: "v4.0.0", Digest: "sha256:" + fmt.Sprintf("%064x", 821), CommitDigest: fmt.Sprintf("%040x", 821)},
+		Result:   EvidenceResultSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano)}
+	if _, err := f.service.Report(t.Context(), f.reporter, owner.HandoffID, "janus-after-empty-succeeded", secret,
+		ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano), PharosEvidence: evidence}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("owner success after late Janus err=%v", err)
+	}
+}
+
+func TestOwnerV1ReportSucceedsWithDigestBearingQAWithoutBaseline(t *testing.T) {
+	f := setupServiceFixture(t)
+	plan, execution, epoch, err := attachDigestBearingBuildEvidence(t, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := LoadExplicitBuiltArtifact(t.Context(), f.database, f.deliveryID, f.attemptID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expected.Complete() || len(expected.Manifest) != 0 || expected.Coordinate != "" {
+		t.Fatalf("QA digest became release identity: %+v", expected)
+	}
+	if len(expected.Digest) != 32 || expected.Commit != fmt.Sprintf("%040x", 333) {
+		t.Fatalf("implementation identity missing: %+v", expected)
+	}
+	if _, err := f.service.SealPrerequisites(t.Context(), f.operator, f.deliveryKey, "seal-v1-qa-digest",
+		SealPrerequisitesRequest{StageKey: "deployment", ExecutionNumber: execution, ExpectedPlanRevision: plan,
+			ExpectedAuthorityEpoch: epoch, Prerequisites: []Prerequisite{}}); err != nil {
+		t.Fatal(err)
+	}
+	handoff, err := f.service.CreateHandoff(t.Context(), f.operator, f.deliveryKey, "create-v1-with-qa-digest",
+		CreateHandoffRequest{StageKey: "deployment", ExecutionNumber: execution, ExpectedPlanRevision: plan,
+			ExpectedAuthorityEpoch: epoch, ReporterRegistrationID: f.registrationID,
+			ExpiresAt: f.now.Add(time.Hour).Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := f.service.Mint(t.Context(), f.operator, handoff.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Accept(t.Context(), f.reporter, handoff.HandoffID, "accept-v1-with-qa-digest", secret,
+		AcceptRequest{Sequence: 1, ObservedAt: f.now.Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Report(t.Context(), f.reporter, handoff.HandoffID, "v1-with-qa-active", secret,
+		ReportRequest{Sequence: 2, State: HandoffStateActive, ObservedAt: f.now.Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	digest := "sha256:" + fmt.Sprintf("%064x", 333)
+	commit := fmt.Sprintf("%040x", 333)
+	evidence := &PharosEvidence{Kind: EvidenceKindDeployment, Workflow: "deploy-production", Environment: "production",
+		Artifact: ArtifactEvidence{Version: "v4.0.0", Digest: digest, CommitDigest: commit},
+		Result:   EvidenceResultSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano)}
+	receipt, err := f.service.Report(t.Context(), f.reporter, handoff.HandoffID, "v1-with-qa-succeeded", secret,
+		ReportRequest{Sequence: 3, State: HandoffStateSucceeded, ObservedAt: f.now.Format(time.RFC3339Nano), PharosEvidence: evidence})
+	if err != nil || receipt.State != HandoffStateSucceeded {
+		t.Fatalf("non-baseline v1 with QA digest=%+v err=%v", receipt, err)
+	}
+}
+
+func attachDigestBearingBuildEvidence(t *testing.T, f *serviceFixture) (plan, execution, epoch int64, err error) {
+	t.Helper()
+	ctx := t.Context()
+	actor := delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", f.operator.UserID)}
+	attempt, err := f.service.delivery.StartAttempt(ctx, delivery.AttemptRequest{
+		IssueID: f.issueID, Actor: actor, Policies: delivery.DefaultPolicy(),
+		ReasonCode: "policy_change", IdempotencyKey: "digest-bearing-qa-attempt",
+	})
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	f.attemptID = attempt.ID
+	specDigest, err := delivery.IssueSpecDigestTx(ctx, f.database, f.issueID)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	report := func(stage, startKey, reportKey, reason string, evidence []delivery.Evidence) (delivery.StageRef, error) {
+		started, startErr := f.service.delivery.StartStageRetry(ctx, delivery.StageStartRequest{
+			IssueID: f.issueID, AttemptNumber: attempt.AttemptNumber, StageKey: stage, Reporter: actor,
+			ReasonCode: reason + "_start", IdempotencyKey: startKey,
+		})
+		if startErr != nil {
+			return delivery.StageRef{}, startErr
+		}
+		if _, reportErr := f.service.delivery.ReportStage(ctx, delivery.StageReport{
+			IssueID: f.issueID, AttemptNumber: attempt.AttemptNumber, StageKey: stage,
+			ExecutionNumber: started.ExecutionNumber, AuthorityEpoch: started.AuthorityEpoch, Reporter: actor,
+			IdempotencyKey: reportKey, Kind: "semantic", State: "succeeded", Evidence: evidence, ReasonCode: reason,
+		}); reportErr != nil {
+			return delivery.StageRef{}, reportErr
+		}
+		return started, nil
+	}
+	if _, err = report(delivery.StageSpecification, "v1-qa-spec-start", "v1-qa-spec-report", "spec_acceptance",
+		[]delivery.Evidence{{Type: "spec_acceptance", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: specDigest}}); err != nil {
+		return 0, 0, 0, err
+	}
+	if _, err = report(delivery.StageImplementation, "v1-qa-impl-start", "v1-qa-impl-report", "implementation_result",
+		[]delivery.Evidence{
+			{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: fmt.Sprintf("%040x", 333)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: fmt.Sprintf("%064x", 333)},
+		}); err != nil {
+		return 0, 0, 0, err
+	}
+	if _, err = report(delivery.StageQA, "v1-qa-qa-start", "v1-qa-qa-report", "test_result",
+		[]delivery.Evidence{{Type: "test_result", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: fmt.Sprintf("%064x", 444)}}); err != nil {
+		return 0, 0, 0, err
+	}
+	deploy, err := f.service.delivery.StartStageRetry(ctx, delivery.StageStartRequest{
+		IssueID: f.issueID, AttemptNumber: attempt.AttemptNumber, StageKey: delivery.StageDeployment, Reporter: actor,
+		ReasonCode: "deployment_start", IdempotencyKey: "v1-qa-deploy-start",
+	})
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	var ownerKey string
+	if err := f.database.QueryRowContext(ctx, `SELECT reporter.opaque_key FROM delivery_reporters reporter
+		JOIN external_stage_reporter_registrations registration ON registration.reporter_id=reporter.id
+		WHERE registration.id=?`, f.registrationID).Scan(&ownerKey); err != nil {
+		return 0, 0, 0, err
+	}
+	handed, err := f.service.delivery.RecordHandoff(ctx, delivery.HandoffRequest{
+		IssueID: f.issueID, AttemptNumber: attempt.AttemptNumber, StageKey: delivery.StageDeployment,
+		ExecutionNumber: deploy.ExecutionNumber, AuthorityEpoch: deploy.AuthorityEpoch,
+		From: actor, To: delivery.Actor{Type: "external", OpaqueKey: ownerKey},
+		ReasonCode: "external_owner_activation", ReasonText: "Pharos owner for digest-bearing QA",
+		IdempotencyKey: "v1-qa-deploy-handoff",
+	})
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	f.executionStartID = handed.ExecutionStartEventID
+	f.authorityStageID = handed.ExecutionStartEventID
+	return attempt.PlanRevision, handed.ExecutionNumber, handed.AuthorityEpoch, nil
+}
