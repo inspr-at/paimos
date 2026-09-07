@@ -30,12 +30,21 @@ func (p *projectLifecycle) consume(ctx context.Context) error {
 		}
 		if e := p.authority.Request(ctx, http.MethodGet, fmt.Sprintf("/api/projects/%d/message-targets?address=%s", s.ProjectID, url.QueryEscape(s.Identity)), nil, nil, &inventory); e != nil {
 			failures = append(failures, e)
+			// An unread inventory cannot establish that an optional receiver is
+			// absent. Keep its failed coverage even when another session succeeds.
+			for _, kind := range []string{"fallback", "attention"} {
+				seen[kind] = true
+				evidence = append(evidence, runtimeconsumer.Evidence{Kind: kind, Generation: p.owner.supervisor.Status().DaemonID, ProjectID: p.config.ProjectID, State: "unavailable", Reason: "transport_unavailable", Failures: 1})
+			}
 			continue
 		}
 		for _, kind := range []string{"fallback", "attention"} {
 			selected, selectionErr := selectOwnedConsumerTarget(inventory.Targets, p.owner.reporter.instance, s, kind)
 			if selectionErr != nil {
-				return selectionErr
+				seen[kind] = true
+				evidence = append(evidence, runtimeconsumer.Evidence{Kind: kind, Generation: p.owner.supervisor.Status().DaemonID, ProjectID: p.config.ProjectID, State: "unavailable", Reason: "authority_unavailable", Failures: 1})
+				failures = append(failures, selectionErr)
+				continue
 			}
 			if selected == nil {
 				continue
@@ -50,6 +59,7 @@ func (p *projectLifecycle) consume(ctx context.Context) error {
 			})
 			e := runtimeconsumer.Evidence{Kind: kind, Generation: p.owner.supervisor.Status().DaemonID, ProjectID: p.config.ProjectID, State: "ready", LastSuccess: time.Now().UTC()}
 			if err != nil {
+				e.LastSuccess = time.Time{}
 				e.State = "backoff"
 				e.Reason = "transport_unavailable"
 				e.Failures = 1
