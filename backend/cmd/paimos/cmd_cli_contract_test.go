@@ -55,7 +55,7 @@ func TestCLICommandGroupsRejectUnknownAndMissingSubcommands(t *testing.T) {
 	if err == nil {
 		t.Fatal("human curl HTTP failure exited 0")
 	}
-	if !strings.Contains(string(output), "Error: API error 403") || strings.Count(string(output), "forbidden") != 1 {
+	if !strings.Contains(string(output), "paimos: API error 403") || strings.Count(string(output), "forbidden") != 1 {
 		t.Fatalf("human curl failure output=%q, want one reported error", output)
 	}
 }

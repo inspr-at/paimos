@@ -303,6 +303,9 @@ func TestFriendlyStartDirtyWorkspaceAndGitEnvironmentIsolation(t *testing.T) {
 }
 func TestFriendlyStartGuidedAndJSONUseSameResolver(t *testing.T) {
 	f := newFriendlyFixture(t)
+	// Keep a stopped predecessor in the catalog: guided selection must retain
+	// the exact active UUID, and the retry must use that same resolved input.
+	f.sessions = append(f.sessions, models.HarnessSession{ID: "33333333-3333-4333-8333-333333333333", ProjectID: 42, AgentName: "root", Harness: "codex", Role: "coordinator", Phase: "stopped"})
 	o := f.opts
 	o.Project = ""
 	o.Agent = ""
@@ -318,7 +321,7 @@ func TestFriendlyStartGuidedAndJSONUseSameResolver(t *testing.T) {
 	if err != nil || result.Outcome != "started" {
 		t.Fatalf("guided start: %v", err)
 	}
-	out, _, err := executeCLIForTest(t, "worker", "start", "--json", "--non-interactive", "--project", "PAI", "--agent", "builder", "--ticket", "PAI-921", "--work-shape", "ship", "--parent", "codex:root", "--profile", "codex-sol-high@1", "--workspace", o.Workspace, "--state-root", o.StateRoot, "--expect-deployment-instance", o.Deployment, "--idempotency-key", o.Key, "--wait", "0s")
+	out, _, err := executeCLIForTest(t, "worker", "start", "--json", "--non-interactive", "--project", "PAI", "--agent", "builder", "--ticket", "PAI-921", "--work-shape", "ship", "--parent", o.Parent, "--profile", "codex-sol-high@1", "--workspace", o.Workspace, "--state-root", o.StateRoot, "--expect-deployment-instance", o.Deployment, "--idempotency-key", o.Key, "--wait", "0s")
 	var parsed friendlyStartResult
 	if err != nil || json.Unmarshal([]byte(out), &parsed) != nil || parsed.PublicSessionID != friendlyPublicID || f.daemon.startCount != 1 {
 		t.Fatal("CLI JSON did not replay the same validated request")
