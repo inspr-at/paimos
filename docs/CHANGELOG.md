@@ -8,12 +8,6 @@ calendar form `yy.mm.dd[.hh.mm]`.
 
 ## [26.09.07.20.15] — 2026-09-07
 
-### Fixed — protected account registry diagnostics (PAI-958)
-
-- Recognize the managed daemon account-registry argument during runtime health
-  checks. Validate the protected registry file metadata without reading its
-  credential contents; unknown or duplicate service arguments remain invalid.
-
 ### Fixed — named-account intent schema compatibility (PAI-959)
 
 - Accept lifecycle intent schema 1 and named-account schema 2 on reporter
