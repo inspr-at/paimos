@@ -79,12 +79,39 @@ const attentionCount = computed(
     attentionDeliveries.value.length +
     attentionMessages.value.length,
 )
+const attentionCoverageIncomplete = computed(() => {
+  const bounds = props.snapshot.coordination_bounds
+  const fleet = props.snapshot.fleet
+  const projectIds = new Set(projects.value.map((row) => row.project.id))
+  const messageProjectIds = new Set(props.messages.map((row) => row.projectId))
+  return (
+    !props.fresh ||
+    bounds.sampled_projects !== bounds.total_projects ||
+    bounds.sampled_projects !== projects.value.length ||
+    bounds.omitted_projects > 0 ||
+    messageProjectIds.size !== projects.value.length ||
+    [...projectIds].some((projectId) => !messageProjectIds.has(projectId)) ||
+    fleet.sample_truncated ||
+    fleet.totals.sampled_workers !== fleet.totals.workers ||
+    fleet.totals.omitted_workers > 0 ||
+    fleet.totals.sampled_projects !== fleet.totals.projects ||
+    fleet.totals.omitted_projects > 0
+  )
+})
 const attentionUnknown = computed(
   () =>
     props.messageState !== 'ready' ||
     props.deliveryState !== 'ready' ||
-    props.messages.some((row) => row.totals === null),
+    props.messages.some((row) => row.totals === null) ||
+    attentionCoverageIncomplete.value,
 )
+const attentionUnknownCopy = computed(() => {
+  if (props.messageState === 'loading' || props.deliveryState === 'loading')
+    return 'Checking messages and delivery decisions…'
+  if (attentionCoverageIncomplete.value)
+    return 'Attention coverage is incomplete. Some projects or workers are outside this snapshot.'
+  return 'Some attention is unknown. Refresh to check messages and delivery decisions.'
+})
 const atWork = computed(() => props.snapshot.fleet.workers.slice(0, 4))
 const rootWorker = computed(() =>
   props.snapshot.fleet.workers.find(
@@ -261,13 +288,7 @@ function projectStatus(id: number) {
             <div v-if="attentionUnknown" class="habitat-home-unknown">
               <Info :size="15" aria-hidden="true" />
               <div>
-                <p>
-                  {{
-                    messageState === 'loading' || deliveryState === 'loading'
-                      ? 'Checking messages and delivery decisions…'
-                      : 'Some attention is unknown. Refresh to check messages and delivery decisions.'
-                  }}
-                </p>
+                <p>{{ attentionUnknownCopy }}</p>
                 <button
                   v-if="messageState === 'ready' && deliveryState !== 'loading'"
                   type="button"

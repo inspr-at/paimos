@@ -5,6 +5,8 @@ import { loadOrchestration } from '@/services/orchestration'
 import type { OrchestrationSnapshotV1 } from '@/services/orchestrationTypes'
 import { fetchAgentModeSnapshot, type AgentModeSnapshot } from '@/services/agentMode'
 
+const MAX_ATTENTION_PROJECTS = 100
+
 export function useHabitat(options: {
   authority: Readonly<Ref<string>>
   principal: Readonly<Ref<number | null>>
@@ -71,7 +73,10 @@ export function useHabitat(options: {
             !result.fleet.workers.some((w) => w.harness_session_id === selectedId.value)
           )
             selectedId.value = null
-          const rows = result.project_coordination.slice(0, 10)
+          // Orchestration already caps portfolio project samples at 100. Keep the
+          // follow-up fan-out on that same bound, but do not add a second ten-row
+          // cap that can hide an included project's held decision.
+          const rows = result.project_coordination.slice(0, MAX_ATTENTION_PROJECTS)
           const counts = await Promise.allSettled(
             rows.map((row) => loadPaimos6SessionZoom(row.project.id, '1', null, signal)),
           )
