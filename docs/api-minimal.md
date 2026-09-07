@@ -103,8 +103,9 @@ dependencies (`prerequisite_review`), incomplete built artifact identity
 is unsatisfied; `v2_report` when a baseline-owned Pharos receipt must use the
 owner-v2 artifact tuple). Baseline-owned deliveries require the typed
 implementation evidence contract in [`docs/EXTERNAL_STAGE_CONTRACT.md`](EXTERNAL_STAGE_CONTRACT.md)
-before handoff or owner completion; generic `external_ref` strings and QA
-`test_result` digests are not release identity. Credentials stay on the owner-only
+before handoff or owner completion; generic `external_ref` strings, QA
+`test_result` digests, and OCI index/manifest refs are not the release-set
+identity named by owner-v2 `release_manifest_digest`. Credentials stay on the owner-only
 secret-file mint CLI and never appear in the batch JSON. Pause and cancel write
 real PAI-903 harness controls (or release a not-yet-claimed start intent through
 the lifecycle revision CAS); an action with no owned effect is reported as

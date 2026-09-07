@@ -2052,7 +2052,7 @@ func TestOwnerV1ReportSucceedsWithDigestBearingQAWithoutBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expected.Complete() || len(expected.Manifest) != 0 || expected.Coordinate != "" {
+	if expected.Complete() || len(expected.ReleaseManifest) != 0 || len(expected.OCIIndex) != 0 || expected.Coordinate != "" {
 		t.Fatalf("QA digest became release identity: %+v", expected)
 	}
 	if len(expected.Digest) != 32 || expected.Commit != fmt.Sprintf("%040x", 333) {

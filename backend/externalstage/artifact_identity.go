@@ -20,28 +20,33 @@ import (
 )
 
 const (
-	ociManifestRefPrefix       = "oci-manifest:sha256:"
+	ociIndexRefPrefix          = "oci-manifest:sha256:"
+	releaseManifestRefPrefix   = "release-manifest:sha256:"
 	releaseCoordinateRefPrefix = "release-coordinate:"
 	releaseIdentityPrefix      = "inspr-release-v1:"
 )
 
 // BuiltOwnerArtifact is the server-owned expected identity for a baseline
-// batch. Digest is the running OCI image config. Manifest is the immutable
-// OCI manifest or index. Coordinate, scheme, channel, sequence, and version
-// identify the release set. Commit is the source revision.
+// batch. Digest is the running OCI image config. ReleaseManifest is the
+// immutable release-set document digest named by owner-v2
+// release_manifest_digest. OCIIndex is an optional OCI image index or
+// manifest and is never a release-set stand-in. Coordinate, scheme, channel,
+// sequence, and version identify the release set. Commit is the source
+// revision.
 type BuiltOwnerArtifact struct {
-	Digest     []byte
-	Manifest   []byte
-	Commit     string
-	Coordinate string
-	Scheme     string
-	Channel    string
-	Sequence   int64
-	Version    string
+	Digest          []byte
+	ReleaseManifest []byte
+	OCIIndex        []byte
+	Commit          string
+	Coordinate      string
+	Scheme          string
+	Channel         string
+	Sequence        int64
+	Version         string
 }
 
 func (a BuiltOwnerArtifact) Complete() bool {
-	return len(a.Digest) == 32 && len(a.Manifest) == 32 && commitPattern.MatchString(a.Commit) &&
+	return len(a.Digest) == 32 && len(a.ReleaseManifest) == 32 && commitPattern.MatchString(a.Commit) &&
 		releaseManifestCoordinatePattern.MatchString(a.Coordinate) &&
 		(a.Scheme == string(VersionSchemeLegacy) || a.Scheme == string(VersionSchemeINSPRCalendar)) &&
 		symbolPattern.MatchString(a.Channel) && a.Sequence >= 0 && versionPattern.MatchString(a.Version)
@@ -52,7 +57,11 @@ func FormatReleaseIdentity(scheme VersionScheme, channel string, sequence int64,
 }
 
 func FormatOCIManifestRef(digestHex string) string {
-	return ociManifestRefPrefix + strings.TrimPrefix(digestHex, "sha256:")
+	return ociIndexRefPrefix + strings.TrimPrefix(digestHex, "sha256:")
+}
+
+func FormatReleaseManifestRef(digestHex string) string {
+	return releaseManifestRefPrefix + strings.TrimPrefix(digestHex, "sha256:")
 }
 
 func FormatReleaseCoordinateRef(coordinate string) string {
@@ -108,31 +117,88 @@ func LoadExplicitBuiltArtifact(ctx context.Context, q interface {
 		if stage != delivery.StageImplementation {
 			continue
 		}
-		switch {
-		case evidenceType == "artifact" && kind == "digest" && digestHex != "":
-			raw, err := hex.DecodeString(digestHex)
-			if err != nil || len(raw) != 32 {
-				return BuiltOwnerArtifact{}, ErrInvalid
-			}
-			expected.Digest = raw
-		case evidenceType == "artifact" && kind == "external_ref" && strings.HasPrefix(value, ociManifestRefPrefix):
-			raw, err := hex.DecodeString(strings.TrimPrefix(value, ociManifestRefPrefix))
-			if err != nil || len(raw) != 32 {
-				return BuiltOwnerArtifact{}, ErrInvalid
-			}
-			expected.Manifest = raw
-		case evidenceType == "artifact" && kind == "external_ref" && strings.HasPrefix(value, releaseCoordinateRefPrefix):
-			expected.Coordinate = strings.TrimPrefix(value, releaseCoordinateRefPrefix)
-		case evidenceType == "artifact" && kind == "external_ref":
-			scheme, channel, version, sequence, parsed := ParseReleaseIdentity(value)
-			if parsed {
-				expected.Scheme, expected.Channel, expected.Version, expected.Sequence = scheme, channel, version, sequence
-			}
-		case evidenceType == "implementation_result" && kind == "commit":
-			expected.Commit = value
+		if err := applyImplementationEvidence(&expected, evidenceType, kind, value, digestHex); err != nil {
+			return BuiltOwnerArtifact{}, err
 		}
 	}
 	return expected, rows.Err()
+}
+
+func applyImplementationEvidence(expected *BuiltOwnerArtifact, evidenceType, kind, value, digestHex string) error {
+	switch {
+	case evidenceType == "artifact" && kind == "digest" && digestHex != "":
+		raw, err := hex.DecodeString(digestHex)
+		if err != nil || len(raw) != 32 {
+			return ErrInvalid
+		}
+		return assignDigest(&expected.Digest, raw)
+	case evidenceType == "artifact" && kind == "external_ref" && strings.HasPrefix(value, releaseManifestRefPrefix):
+		raw, err := decodePrefixedDigest(value, releaseManifestRefPrefix)
+		if err != nil {
+			return err
+		}
+		return assignDigest(&expected.ReleaseManifest, raw)
+	case evidenceType == "artifact" && kind == "external_ref" && strings.HasPrefix(value, ociIndexRefPrefix):
+		raw, err := decodePrefixedDigest(value, ociIndexRefPrefix)
+		if err != nil {
+			return err
+		}
+		return assignDigest(&expected.OCIIndex, raw)
+	case evidenceType == "artifact" && kind == "external_ref" && strings.HasPrefix(value, releaseCoordinateRefPrefix):
+		coordinate := strings.TrimPrefix(value, releaseCoordinateRefPrefix)
+		if !releaseManifestCoordinatePattern.MatchString(coordinate) {
+			return ErrInvalid
+		}
+		return assignString(&expected.Coordinate, coordinate)
+	case evidenceType == "artifact" && kind == "external_ref" && strings.HasPrefix(value, releaseIdentityPrefix):
+		scheme, channel, version, sequence, parsed := ParseReleaseIdentity(value)
+		if !parsed {
+			return ErrInvalid
+		}
+		if expected.Scheme != "" {
+			if expected.Scheme != scheme || expected.Channel != channel || expected.Version != version || expected.Sequence != sequence {
+				return ErrInvalid
+			}
+			return nil
+		}
+		expected.Scheme, expected.Channel, expected.Version, expected.Sequence = scheme, channel, version, sequence
+		return nil
+	case evidenceType == "artifact" && kind == "external_ref":
+		return nil
+	case evidenceType == "implementation_result" && kind == "commit":
+		return assignString(&expected.Commit, value)
+	}
+	return nil
+}
+
+func decodePrefixedDigest(value, prefix string) ([]byte, error) {
+	raw, err := hex.DecodeString(strings.TrimPrefix(value, prefix))
+	if err != nil || len(raw) != 32 {
+		return nil, ErrInvalid
+	}
+	return raw, nil
+}
+
+func assignDigest(dst *[]byte, raw []byte) error {
+	if len(*dst) == 0 {
+		*dst = raw
+		return nil
+	}
+	if subtle.ConstantTimeCompare(*dst, raw) != 1 {
+		return ErrInvalid
+	}
+	return nil
+}
+
+func assignString(dst *string, value string) error {
+	if *dst == "" {
+		*dst = value
+		return nil
+	}
+	if *dst != value {
+		return ErrInvalid
+	}
+	return nil
 }
 
 func baselineOwnedDeliveryTx(ctx context.Context, tx *sql.Tx, deliveryID int64) (bool, error) {
@@ -195,7 +261,7 @@ func matchBuiltOwnerArtifact(expected BuiltOwnerArtifact, e *PharosEvidence, art
 		return ErrInvalid
 	}
 	manifest, err := decodeWireDigest(artifactV2.ReleaseManifestDigest)
-	if err != nil || subtle.ConstantTimeCompare(manifest, expected.Manifest) != 1 {
+	if err != nil || subtle.ConstantTimeCompare(manifest, expected.ReleaseManifest) != 1 {
 		return ErrInvalid
 	}
 	if artifactV2.ReleaseManifestCoordinate != expected.Coordinate || artifactV2.Version != expected.Version ||

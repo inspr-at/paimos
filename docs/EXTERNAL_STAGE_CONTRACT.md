@@ -259,14 +259,20 @@ built before owner deployment completion. That expected identity is taken only
 from implementation evidence:
 
 - `artifact` / `digest` — running OCI image **config** digest (`sha256`, 32 bytes);
-- `artifact` / `external_ref` prefixed `oci-manifest:sha256:` — immutable OCI
-  image **manifest or index** digest;
+- `artifact` / `external_ref` prefixed `release-manifest:sha256:` — immutable
+  **release-set** document digest (the bytes named by owner-v2
+  `release_manifest_digest`, e.g. Pharos `release-set.json`);
 - `artifact` / `external_ref` prefixed `release-coordinate:` — immutable
-  registry coordinate of that manifest or index;
+  coordinate of that **release-set**, not an OCI registry index;
+- `artifact` / `external_ref` prefixed `oci-manifest:sha256:` — optional OCI
+  image **index or manifest** digest; it may be recorded but is never a
+  release-set digest and never fills `release_manifest_digest`;
 - `artifact` / `external_ref` prefixed `inspr-release-v1:` — typed
   `{scheme}/{channel}/{sequence}/{version}` where `scheme` is `legacy` or
   `inspr-calendar-v1`. Generic `external_ref` strings, including colon-delimited
-  tuples without that prefix, are ignored and never parsed as release identity;
+  tuples without that prefix, are ignored and never parsed as release identity.
+  A recognized prefix with a malformed or conflicting payload is refused rather
+  than guessed as another digest class;
 - `implementation_result` / `commit` — source revision.
 
 A QA `test_result` digest remains the delivery QA binding digest from

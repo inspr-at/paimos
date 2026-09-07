@@ -29,8 +29,9 @@ import (
 const (
 	bridgeCommit     = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	bridgeConfig     = "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-	bridgeManifest   = "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+	bridgeIndex      = "sha256:4444444444444444444444444444444444444444444444444444444444444444"
 	bridgeQADigest   = "5555555555555555555555555555555555555555555555555555555555555555"
+	bridgeReleaseSet = "sha256:6666666666666666666666666666666666666666666666666666666666666666"
 	bridgeVersion    = "26.09.07.12.00.00"
 	bridgeChannel    = "stable"
 	bridgeSequence   = int64(260907120000)
@@ -280,7 +281,8 @@ func (f *bridgeFixture) reportBuildAndQAOn(attempt int64, suffix string) {
 		Evidence: []delivery.Evidence{
 			{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: bridgeCommit},
 			{Type: "artifact", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: strings.TrimPrefix(bridgeConfig, "sha256:")},
-			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatOCIManifestRef(bridgeManifest)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatOCIManifestRef(bridgeIndex)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseManifestRef(bridgeReleaseSet)},
 			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseCoordinateRef(bridgeCoordinate)},
 			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref",
 				ReferenceValue: externalstage.FormatReleaseIdentity(externalstage.VersionSchemeINSPRCalendar, bridgeChannel, bridgeSequence, bridgeVersion)},
@@ -498,7 +500,7 @@ func (f *bridgeFixture) artifact(kind externalstage.EvidenceKind) externalstage.
 			VersionScheme: externalstage.VersionSchemeINSPRCalendar, Version: bridgeVersion,
 			ReleaseChannel: bridgeChannel, ReleaseSequence: bridgeSequence, Digest: bridgeConfig,
 			CommitDigest: bridgeCommit, ReleaseManifestCoordinate: bridgeCoordinate,
-			ReleaseManifestDigest: bridgeManifest,
+			ReleaseManifestDigest: bridgeReleaseSet,
 		},
 		Result: externalstage.EvidenceResultSucceeded,
 	}
@@ -1180,7 +1182,7 @@ func TestBridgeMalformedReleaseIdentityBlocksHandoff(t *testing.T) {
 	f.reportPartialBuildAndQA([]delivery.Evidence{
 		{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: bridgeCommit},
 		{Type: "artifact", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: strings.TrimPrefix(bridgeConfig, "sha256:")},
-		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatOCIManifestRef(bridgeManifest)},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatOCIManifestRef(bridgeIndex)},
 		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseCoordinateRef(bridgeCoordinate)},
 		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: "inspr-calendar-v1:stable:260907120000:" + bridgeVersion},
 	})
@@ -1190,6 +1192,109 @@ func TestBridgeMalformedReleaseIdentityBlocksHandoff(t *testing.T) {
 	}
 	if got.Progress.SetupRequired != SetupRequiredBuiltArtifact {
 		t.Fatalf("malformed identity setup=%q progress=%+v", got.Progress.SetupRequired, got.Progress)
+	}
+}
+
+func TestBridgeIndexAndQADigestDoNotFillReleaseManifest(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
+	ctx := context.Background()
+	reporter := delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", f.actor.UserID)}
+	impl, err := f.delivery.StartStageRetry(ctx, delivery.StageStartRequest{
+		IssueID: f.batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageImplementation, Reporter: reporter,
+		ReasonCode: "implementation_start", IdempotencyKey: f.batch.BatchKey + ":impl:start",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.delivery.ReportStage(ctx, delivery.StageReport{
+		IssueID: f.batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageImplementation,
+		ExecutionNumber: impl.ExecutionNumber, AuthorityEpoch: impl.AuthorityEpoch, Reporter: reporter,
+		IdempotencyKey: f.batch.BatchKey + ":impl:report", Kind: "semantic", State: "succeeded",
+		Evidence: []delivery.Evidence{
+			{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: bridgeCommit},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: strings.TrimPrefix(bridgeConfig, "sha256:")},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatOCIManifestRef(bridgeIndex)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseCoordinateRef(bridgeCoordinate)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref",
+				ReferenceValue: externalstage.FormatReleaseIdentity(externalstage.VersionSchemeINSPRCalendar, bridgeChannel, bridgeSequence, bridgeVersion)},
+		},
+		ReasonCode: "implementation_result",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	qa, err := f.delivery.StartStageRetry(ctx, delivery.StageStartRequest{
+		IssueID: f.batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageQA, Reporter: reporter,
+		ReasonCode: "qa_start", IdempotencyKey: f.batch.BatchKey + ":qa:start",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.delivery.ReportStage(ctx, delivery.StageReport{
+		IssueID: f.batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageQA,
+		ExecutionNumber: qa.ExecutionNumber, AuthorityEpoch: qa.AuthorityEpoch, Reporter: reporter,
+		IdempotencyKey: f.batch.BatchKey + ":qa:report", Kind: "semantic", State: "succeeded",
+		Evidence: []delivery.Evidence{
+			{Type: "test_result", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: bridgeQADigest},
+		},
+		ReasonCode: "test_result",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.svc.GetBatch(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Progress.SetupRequired != SetupRequiredBuiltArtifact || f.liveHandoff(delivery.StageDeployment).HandoffID != "" {
+		t.Fatalf("index/QA filled release-set identity progress=%+v", got.Progress)
+	}
+	if _, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID); err != nil {
+		t.Fatal(err)
+	}
+	if f.liveHandoff(delivery.StageDeployment).HandoffID != "" {
+		t.Fatal("reconcile handed off without release-set digest")
+	}
+}
+
+func TestBridgeOwnerReportRejectsIndexAsReleaseManifest(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
+	f.reportBuildAndQA()
+	ctx := context.Background()
+	got := f.authorizeHandoff()
+	secret, err := f.ext.Mint(ctx, f.operator, got.Progress.Handoff.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := f.now.Format(time.RFC3339Nano)
+	if _, err := f.ext.Accept(ctx, f.reporter, got.Progress.Handoff.HandoffID, "accept-index-as-manifest", secret,
+		externalstage.AcceptRequest{Sequence: 1, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ext.Report(ctx, f.reporter, got.Progress.Handoff.HandoffID, "active-index-as-manifest", secret,
+		externalstage.ReportRequest{Sequence: 2, State: externalstage.HandoffStateActive, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	wrong := f.artifact(externalstage.EvidenceKindDeployment)
+	wrong.ObservedAt = observed
+	wrong.Artifact.ReleaseManifestDigest = bridgeIndex
+	if _, err := f.ext.ReportV2(ctx, f.reporter, got.Progress.Handoff.HandoffID, "index-as-release-set", secret,
+		externalstage.ReportRequestV2{Sequence: 3, State: externalstage.HandoffStateSucceeded, ObservedAt: observed,
+			PharosEvidence: &wrong}); !errors.Is(err, externalstage.ErrInvalid) {
+		t.Fatalf("index as release-set err=%v", err)
+	}
+	if snapshotStage(f.snapshot(), delivery.StageDeployment).PolicySatisfied {
+		t.Fatal("OCI index satisfied release-set binding")
+	}
+	evidence := f.artifact(externalstage.EvidenceKindDeployment)
+	evidence.ObservedAt = observed
+	if _, err := f.ext.ReportV2(ctx, f.reporter, got.Progress.Handoff.HandoffID, "release-set-match", secret,
+		externalstage.ReportRequestV2{Sequence: 3, State: externalstage.HandoffStateSucceeded, ObservedAt: observed,
+			PharosEvidence: &evidence}); err != nil {
+		t.Fatal(err)
+	}
+	if !snapshotStage(f.snapshot(), delivery.StageDeployment).PolicySatisfied {
+		t.Fatal("matching release-set report did not satisfy deployment")
 	}
 }
 

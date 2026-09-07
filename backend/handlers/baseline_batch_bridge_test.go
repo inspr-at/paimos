@@ -21,8 +21,9 @@ import (
 const (
 	bridgeHTTPCommit     = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	bridgeHTTPConfig     = "3333333333333333333333333333333333333333333333333333333333333333"
-	bridgeHTTPManifest   = "4444444444444444444444444444444444444444444444444444444444444444"
+	bridgeHTTPIndex      = "4444444444444444444444444444444444444444444444444444444444444444"
 	bridgeHTTPQADigest   = "5555555555555555555555555555555555555555555555555555555555555555"
+	bridgeHTTPReleaseSet = "6666666666666666666666666666666666666666666666666666666666666666"
 	bridgeHTTPVersion    = "26.09.07.12.00.00"
 	bridgeHTTPChannel    = "stable"
 	bridgeHTTPSequence   = int64(260907120000)
@@ -269,7 +270,8 @@ func reportHTTPBuildAndQA(t *testing.T, store *delivery.Store, userID int64, bat
 		Evidence: []delivery.Evidence{
 			{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: bridgeHTTPCommit},
 			{Type: "artifact", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: bridgeHTTPConfig},
-			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatOCIManifestRef(bridgeHTTPManifest)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatOCIManifestRef(bridgeHTTPIndex)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseManifestRef(bridgeHTTPReleaseSet)},
 			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseCoordinateRef(bridgeHTTPCoordinate)},
 			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref",
 				ReferenceValue: externalstage.FormatReleaseIdentity(externalstage.VersionSchemeINSPRCalendar, bridgeHTTPChannel, bridgeHTTPSequence, bridgeHTTPVersion)},

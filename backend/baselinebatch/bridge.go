@@ -265,6 +265,9 @@ func (s *Service) builtIdentityComplete(ctx context.Context, stored storedBatch,
 	}
 	artifact, err := externalstage.LoadExplicitBuiltArtifact(ctx, s.DB, *stored.DeliveryID, *snapshot.AttemptID)
 	if err != nil {
+		if errors.Is(err, externalstage.ErrInvalid) {
+			return false, nil
+		}
 		return false, err
 	}
 	return artifact.Complete(), nil
