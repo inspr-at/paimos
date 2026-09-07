@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentmessage"
 	"github.com/inspr-at/paimos/backend/localjournal"
+	"github.com/inspr-at/paimos/backend/runtimeconsumer"
 )
 
 type ConsumerEffect func(context.Context, agentmessage.ConsumerPage) (string, error)
@@ -41,10 +42,13 @@ type consumerRecord struct {
 	Next         time.Time                         `json:"next,omitempty"`
 }
 type Consumers struct {
-	mu      sync.Mutex
-	http    *HTTP
-	journal *localjournal.Journal[consumerRecord]
-	failed  map[string]consumerRecord
+	// Repair takes exclusive ownership after all independent steps drain.
+	lifecycleMu sync.RWMutex
+	streams     runtimeconsumer.StreamGate
+	failedMu    sync.Mutex
+	http        *HTTP
+	journal     *localjournal.Journal[consumerRecord]
+	failed      map[string]consumerRecord
 }
 
 func NewConsumers(directory string, h *HTTP) (*Consumers, error) {
@@ -90,7 +94,9 @@ func (c *Consumers) put(r consumerRecord) error {
 	if c.journal.Put(r) != nil {
 		// Retain the exact failed checkpoint. A later Step must not load an
 		// older durable record and forget backoff, custody, or an applied effect.
+		c.failedMu.Lock()
 		c.failed[r.Key] = r
+		c.failedMu.Unlock()
 		return ErrPersistence
 	}
 	return nil
@@ -100,13 +106,27 @@ func (c *Consumers) put(r consumerRecord) error {
 // Only the first execute response with a payload permits a vendor handoff.
 // A lost response or interrupted local effect is quarantined, never redelivered.
 func (c *Consumers) Step(ctx context.Context, in agentmessage.ConsumerRegistration, ready bool, effect ConsumerEffect) (returnErr error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.lifecycleMu.RLock()
+	defer c.lifecycleMu.RUnlock()
+	// A target's revisions and owner generations share one local gate. The
+	// server remains authoritative for replacement targets and stream fencing.
+	release, err := c.streams.Acquire(ctx, in.TargetID+":"+in.Kind)
+	if err != nil {
+		return err
+	}
+	defer release()
 	key := consumerKey(in)
+	c.failedMu.Lock()
+	latched := false
 	for _, failed := range c.failed {
 		if failed.Registration.TargetID == in.TargetID && failed.Registration.Kind == in.Kind {
-			return ErrPersistence
+			latched = true
+			break
 		}
+	}
+	c.failedMu.Unlock()
+	if latched {
+		return ErrPersistence
 	}
 	r := consumerRecord{Key: key, Registration: in, Phase: "idle"}
 	found := false
@@ -337,8 +357,9 @@ func (c *Consumers) complete(ctx context.Context, r *consumerRecord) error {
 // Repair retains the exact stream proofs and every ambiguous attempt. A claim
 // may be retried with its original nonce; executing work can only become unknown.
 func (c *Consumers) Repair() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	// The exclusive lifecycle lock also excludes every failed-map writer.
 	// Flush latched checkpoints before evaluating recovery. Successful storage
 	// alone cannot clear unknown custody or an executing effect.
 	for key, r := range c.failed {
