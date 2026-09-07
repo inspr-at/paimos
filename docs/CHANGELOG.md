@@ -6,6 +6,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.07.17.12] — 2026-09-07
+
+### Added — verified worker account selection (PAI-952, PAI-953)
+
+- Bind owned Codex workers to an operator-configured account key and isolated
+  Codex home. Verify the native account identity before dispatch and preserve
+  that binding through retries, steering and owned inbox delivery.
+- Advertise named account choices separately from subscription class, model,
+  profile and runtime. Habitat requires explicit selection and review; changing
+  the account invalidates an unsubmitted review, and a recorded start keeps its
+  selected account locked.
+- Reject stale, forged or mismatched account selections and cross-account
+  adoption. Public runtime metadata carries account keys and safe display labels,
+  without exposing local home paths or authentication credentials.
+
+### Operator compatibility
+
+- Existing class-only lifecycle configuration remains supported. Ordinary
+  legacy account keys retain their labels; colon-containing or long keys receive
+  safe derived labels without changing their opaque keys.
+- Invalid, reserved or dimension-colliding named keys and invalid explicit
+  labels fail configuration or registration validation. Check configured account
+  choices before upgrading; the daemon never silently chooses another account.
+- Named accounts require explicit operator enrollment and matching server and
+  runtime versions. This release adds the account-control foundation; it does
+  not yet provide the complete INSPR delivery stream or all harness adapters.
+
 ## [26.09.07.11.41] — 2026-09-07
 
 ### Fixed — release documentation alignment (PAI-949)
