@@ -420,7 +420,8 @@ REPORT_URL=https://paimos.example.com
 REPORT_API_KEY_FILE=/absolute/path/to/owner-only-api-key
 paimos-agentd serve --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
   --report-host "$REPORT_HOST" --report-url "$REPORT_URL" \
-  --report-api-key-file "$REPORT_API_KEY_FILE"
+  --report-api-key-file "$REPORT_API_KEY_FILE" \
+  --pi-path /absolute/path/to/pi --pi-accounts /absolute/owner-only/pi-accounts.json
 ```
 
 The three reporting flags are all-or-none. Agentd performs an authenticated
@@ -445,6 +446,21 @@ SESSION_ID="$({
 } | jq -er '.id')"
 
 paimos-agentd status --instance "$INSTANCE" --socket "$AGENTD_SOCKET"
+```
+
+Owned Pi is a separate adapter. It requires an operator-authenticated `--pi-path`,
+an explicit `--pi-accounts` registry (opaque key → protected
+`PI_CODING_AGENT_DIR`; never a shared default `~/.pi`), a human-selected catalog
+profile, and `--account-key`. Friendly `paimos` worker start remains Codex/Claude
+only. `account_label=pi_context` means that selected directory was bound; it is
+not a verified provider account id.
+
+```bash
+printf '%s' 'Work only on the assigned ticket.' |
+  paimos-agentd start --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
+    --adapter pi --workspace "$PWD" --project-id "$PROJECT_ID" \
+    --identity pi:worker --account-key operator-pi \
+    --dispatch-profile pi-anthropic-sonnet-high --dispatch-profile-version 1
 ```
 
 An owned child may also carry explicit durable hierarchy and ticket fields;
@@ -677,6 +693,22 @@ paimos-agentd stop --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
 `interrupt` stops the current turn; `stop` closes the owned harness and reaps
 the process group. Neither command invents a vendor session from a PID.
 
+Owned Pi interrupt is not abort-only. Installed `pi --mode rpc` continues
+queued steering and follow-up after `abort` if those messages remain in the
+session. Agentd therefore durably owns exact steer/follow-up text in an
+owner-private queue spool (payload files + content-free index, bound to
+generation, project, account/profile, and correlation ID) **before** native
+`clear_queue` is allowed. Interrupt then `clear_queue`s, commits the native
+reply against that ownership, and only then `abort`s. Concurrent inbox/steer
+delivery is blocked while paused or while queue state is ambiguous. Duplicate
+interrupt correlations replay. Stop also requires a successful `clear_queue`
+account before kill; a failed clear does not advertise stop. Native extras the
+adapter did not dispatch are retained as ambiguous and refuse advertised pause.
+`ResumeQueue` re-injects held steer/follow-up onto a still-running paused
+generation. After daemon restart the child is gone: held Unicode text remains
+as terminal retention and resume is refused. There is no Pi `pause` RPC.
+Receipts, status, reporter events, and public logs never carry the raw text.
+
 ## Architecture
 
 ```text
@@ -700,7 +732,7 @@ Paimos API -- allowlist, hold, size, hop, and scope checks
                          |
                          | exact owned Process / Query
                          v
-                   Codex or Claude
+                   Codex, Claude, or Pi
 ```
 
 The layers have separate responsibilities:
@@ -776,6 +808,7 @@ PID is audit/status evidence, not proof that a new daemon owns the old process.
 | Durable inbox only | Read and acknowledge | No vendor control | No process status | No | Message remains a framed, untrusted inbox item |
 | Owned Codex (`agentd_codex`) | Separate `codex` fallback target and worker required | Yes, exact live app-server turn | Local always; durable harness heartbeat when reporting is enabled | Local exact owned process; durable typed interrupt/stop when reporting is enabled | Reporter advertises status/interrupt/stop, never inbox/steer |
 | Owned Claude (`agentd_claude`) | Separate valid simple target and worker required | Yes, exact live Agent SDK Query | Local always; durable harness heartbeat when reporting is enabled | Local exact owned Query/process; durable typed interrupt/stop when reporting is enabled | Reporter advertises status/interrupt/stop, never inbox/steer; pinned SDK required |
+| Owned Pi (`agentd_pi`) | Separate valid simple target and worker required | Yes, exact live `pi rpc steer` | Local always; durable harness heartbeat when reporting is enabled | Local exact owned process: interrupt is durable ownership then `clear_queue` then `abort` (not abort-only); stop kills only after successful queue account | Fake-native proof only in this slice; no live provider support claim. Pause retains exact steering/follow-up in an owner-private spool and blocks further delivery; live `ResumeQueue` re-injects onto the same generation; restart keeps terminal retention and refuses resume. Unaccounted native extras refuse advertised pause. `pi_context` is selected trusted `PI_CODING_AGENT_DIR`, not a verified provider account id |
 | Unmanaged Codex | Yes, documented queue primitive | Yes only for a bound target using documented external steer | Only if its integration reports status | No owned interrupt/stop | Cannot claim process ownership |
 | Unmanaged Claude (`claude_resume` / `claude_channel`) | Yes | No; requested steer records effective `simple` with `unsupported` | Only if its integration reports status | No | Resume/channel handoff is never called steer |
 | Grok Bot routine / gated Grok Build path | Wake or new-turn handoff only | No; effective behavior is simple | No owned process status | No | A webhook or CLI resume is never queue-faked as steer |

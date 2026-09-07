@@ -75,6 +75,7 @@ type Supervisor struct {
 	instance              string
 	journal               *registryJournal
 	starts                *startJournal
+	queue                 *piQueueStore
 	reporter              Reporter
 	dispatchResolver      DispatchResolver
 	allowSharedWorkspaces bool
@@ -126,6 +127,10 @@ func NewSupervisor(config SupervisorConfig) (*Supervisor, error) {
 		}
 		s.journal = journal
 		s.starts, err = openStartJournal(config.StateRoot, config.Instance)
+		if err != nil {
+			return nil, err
+		}
+		s.queue, err = openPiQueueStore(config.StateRoot, config.Instance)
 		if err != nil {
 			return nil, err
 		}
@@ -300,6 +305,8 @@ func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attemp
 	}()
 	*attempted = true
 	validated.KeepAlive = true
+	validated.queue = s.queue
+	validated.generation = entry.session.ID
 	process, err := adapter.Start(startCtx, validated, observe)
 	if err != nil {
 		s.releaseReservation(entry.session.ID)
@@ -526,7 +533,7 @@ func validSafeLabel(value string, maximum int) bool {
 
 func validAccountLabel(value string) bool {
 	switch value {
-	case "unknown", "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console":
+	case "unknown", "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console", AccountPiContext:
 		return true
 	default:
 		return false

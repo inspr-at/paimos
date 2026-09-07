@@ -256,8 +256,11 @@ func (c *nativeConsumers) Prepare(_ context.Context, b runtimeconsumer.Binding, 
 	if m.DeliveryWork.RequestedLevel != "simple" && m.DeliveryWork.RequestedLevel != "steer" {
 		return runtimeconsumer.ErrUnsupported
 	}
-	if !c.controller.SupportsInbox(session.ID) || session.Adapter != "codex" && session.Adapter != "claude" {
+	if !c.controller.SupportsInbox(session.ID) || session.Adapter != "codex" && session.Adapter != "claude" && session.Adapter != "pi" {
 		return runtimeconsumer.ErrUnsupported
+	}
+	if c.controller.DeliveryHeld(session.ID) {
+		return runtimeconsumer.ErrDeferred
 	}
 	if (m.DeliveryWork.RequestedLevel == "simple" || m.DeliveryWork.MaximumLevel == "simple" || !session.Steerable) && !c.controller.InboxReady(session.ID) {
 		return runtimeconsumer.ErrDeferred

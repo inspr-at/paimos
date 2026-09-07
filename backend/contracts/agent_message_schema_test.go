@@ -172,7 +172,7 @@ func TestAgentMessageDeliveryWorkSchemaIncludesBothOwnedAgentdAdapters(t *testin
 		t.Fatal(err)
 	}
 	allowed := schema.Properties["delivery_work"].Properties["adapter"].Enum
-	for _, adapter := range []string{"agentd_codex", "agentd_claude", "managed_harness"} {
+	for _, adapter := range []string{"agentd_codex", "agentd_claude", "agentd_pi", "managed_harness"} {
 		if !slices.Contains(allowed, adapter) {
 			t.Fatalf("owned adapter %q missing from enum %v", adapter, allowed)
 		}

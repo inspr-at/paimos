@@ -16,6 +16,11 @@ import (
 const (
 	AdapterCodex  = "codex"
 	AdapterClaude = "claude"
+	AdapterPi     = "pi"
+
+	// AccountPiContext is the closed class for an operator-selected Pi
+	// PI_CODING_AGENT_DIR. It is not a verified provider identity.
+	AccountPiContext = "pi_context"
 
 	maxPromptBytes = 256 << 10
 	maxTextBytes   = 64 << 10
@@ -82,6 +87,8 @@ type StartRequest struct {
 	DispatchProfileID      string                   `json:"dispatch_profile_id,omitempty"`
 	DispatchProfileVersion string                   `json:"dispatch_profile_version,omitempty"`
 	ResolvedProfile        *dispatchprofile.Profile `json:"-"`
+	queue                  *piQueueStore            `json:"-"`
+	generation             string                   `json:"-"`
 }
 
 type AdapterEvent struct {

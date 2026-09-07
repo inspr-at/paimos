@@ -55,7 +55,7 @@
         "instance": { "type": "string", "minLength": 1, "maxLength": 64 },
         "project_id": { "type": "integer", "minimum": 1 },
         "state": { "enum": ["pending", "leased", "retry", "blocked", "handed_off", "dead"] },
-        "adapter": { "enum": ["codex", "agentd_codex", "agentd_claude", "managed_harness", "grok_bot_routine", "claude_resume", "claude_channel"] },
+        "adapter": { "enum": ["codex", "agentd_codex", "agentd_claude", "agentd_pi", "managed_harness", "grok_bot_routine", "claude_resume", "claude_channel"] },
         "target_kind": { "enum": ["codex_thread", "agentd_session", "harness_session", "https_webhook", "claude_session"] },
         "target_ref": { "type": "string", "minLength": 1 },
         "maximum_level": { "enum": ["simple", "steer"] },

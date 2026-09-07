@@ -1250,6 +1250,28 @@ app-server `account/read` `{refreshToken:false}` against the expected ChatGPT
 email before `thread/start` or `turn/start`. Class labels alone never prove a
 named account. Legacy starts omit the key and do not claim that verification.
 
+Named Pi accounts are a separate operator-local registry (`paimos-agentd serve
+--pi-accounts`), distinct from Codex homes and quota pools. An opaque key maps
+to one protected absolute directory that is applied as `PI_CODING_AGENT_DIR`
+for that owned child only. The adapter does not read `~/.pi`, does not adopt a
+shared default context, and does not treat Pi `get_state` as a verified
+provider account id. The closed class label is `pi_context`: selected trusted
+context, not a fake ChatGPT/Claude identity. Absent keys, Codex-shaped
+registry rows, mixed Codex keys, and changed directories fail before launch.
+Effective provider/model/thinking remain gated by `get_state`. Native Pi
+configuration and live provider proof remain later; catalog profiles are
+human-selected by id and are not an automatic paid-model default.
+
+Owned Pi interrupt durably owns exact steer/follow-up text in an owner-private
+spool before documented `clear_queue`, then `abort`s. Abort alone continues
+queued steering/follow-up. Concurrent delivery is blocked while paused or
+ambiguous; stop requires a successful clear account before kill. Live
+`ResumeQueue` re-injects held texts onto the same generation; after daemon
+restart those texts remain as terminal retention and resume is refused.
+Unaccounted native extras refuse advertised pause. Receipts and status never
+carry the raw text. This slice is fake-native composition only and does not
+claim fully live Pi support.
+
 Registrations created before this contract remain readable. They have null
 workspace/profile provenance and an `unknown` account label; PAIMOS does not
 retroactively infer ownership or execution axes from process lists, paths, or

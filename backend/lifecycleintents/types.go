@@ -295,7 +295,7 @@ func resolveProfile(id, version string) (dispatchprofile.Profile, error) {
 // Match the shipped managedharness/local probe vocabulary, excluding unknown.
 func validAccount(value string) bool {
 	switch value {
-	case "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console":
+	case "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console", "pi_context":
 		return true
 	}
 	return false

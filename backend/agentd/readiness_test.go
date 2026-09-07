@@ -320,3 +320,48 @@ func TestObserveReadinessRequiresBoundWorkspaceAndBaseline(t *testing.T) {
 		t.Fatal("unbound observation produced")
 	}
 }
+
+type piReadinessAdapter struct {
+	keyedDispatchAdapter
+}
+
+func (*piReadinessAdapter) Name() string { return AdapterPi }
+
+func (*piReadinessAdapter) AccountLabel(context.Context) string { return "unknown" }
+
+func TestObserveReadinessPiNamedContextIsNotVerifiedIdentity(t *testing.T) {
+	host := newReadinessHost(t)
+	adapter := &piReadinessAdapter{keyedDispatchAdapter: keyedDispatchAdapter{
+		dispatchAdapter: dispatchAdapter{label: "unknown"},
+		keys:            map[string]bool{"operator-pi": true},
+	}}
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Instance: "ppm-readiness", Adapters: []Adapter{adapter},
+		WorkspaceInspector: func(_ context.Context, path, mode string) (WorkspaceProvenance, error) {
+			return WorkspaceProvenance{CanonicalPath: path, Identity: readinessWorkspaceIdentity, Kind: WorkspaceDirectory, Mode: mode}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	spec := host.spec(t)
+	profile, err := dispatchprofile.Resolve("pi-anthropic-sonnet-high", dispatchprofile.CatalogVersion, AdapterPi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Profile = profile
+	spec.AccountLabel = AccountPiContext
+	spec.AccountKey = "operator-pi"
+	observation, err := supervisor.ObserveReadiness(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := checkByID(t, observation, "paimos_account")
+	if got.Status != "pass" || got.Reason != "named_context_selected" {
+		t.Fatalf("pi account check=%+v", got)
+	}
+	if got.Reason == "account_verified" {
+		t.Fatal("selected Pi context was mislabeled as verified provider identity")
+	}
+}

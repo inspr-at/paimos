@@ -78,3 +78,76 @@ func (s *Supervisor) InboxReady(id string) bool {
 	}
 	return entry.session.State == StateRunning
 }
+
+// DeliveryHeld reports that the owned child has paused native delivery so
+// queued instructions stay unconsumed instead of continuing after abort.
+func (s *Supervisor) DeliveryHeld(id string) bool {
+	entry, err := s.get(id)
+	if err != nil {
+		return false
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if held, ok := entry.process.(interface{ DeliveryHeld() bool }); ok {
+		return held.DeliveryHeld()
+	}
+	if s.queue != nil {
+		return s.queue.deliveryHeld(entry.session.ID)
+	}
+	return false
+}
+
+func (s *Supervisor) HeldQueue(id string) (HeldQueue, error) {
+	entry, err := s.get(id)
+	if err != nil {
+		return HeldQueue{}, err
+	}
+	if s.queue == nil {
+		return HeldQueue{}, errPiDurableUnavailable
+	}
+	return s.queue.held(entry.session.ID)
+}
+
+func (s *Supervisor) ResumeQueue(ctx context.Context, id string, request ControlRequest) (Receipt, error) {
+	if request.Text != "" || !validCorrelationID(request.CorrelationID) {
+		return Receipt{}, errors.New("agentd resume request is invalid")
+	}
+	entry, err := s.get(id)
+	if err != nil {
+		return Receipt{}, err
+	}
+	entry.controlMu.Lock()
+	defer entry.controlMu.Unlock()
+	if err := s.validateControlScope(entry, request); err != nil {
+		return Receipt{}, err
+	}
+	if receipt, ok, err := entry.replay("resume-queue", request); err != nil || ok {
+		return receipt, err
+	}
+	entry.mu.Lock()
+	if entry.session.State != StateRunning {
+		entry.mu.Unlock()
+		return Receipt{}, ErrSessionNotRunning
+	}
+	resumer, ok := entry.process.(interface {
+		ResumeQueue(context.Context, ControlRequest) (ControlEffect, error)
+	})
+	if !ok || entry.process == nil {
+		entry.mu.Unlock()
+		return Receipt{}, errPiResumeUnavailable
+	}
+	identity, projectID := entry.session.Identity, entry.session.ProjectID
+	entry.mu.Unlock()
+	effect, err := resumer.ResumeQueue(ctx, request)
+	if err != nil {
+		entry.remember("resume-queue", request, Receipt{}, err)
+		return Receipt{}, err
+	}
+	if err := validateControlEffect(request, effect); err != nil {
+		entry.remember("resume-queue", request, Receipt{}, err)
+		return Receipt{}, err
+	}
+	receipt := s.effectReceipt("resume-queue", id, identity, projectID, effect)
+	entry.remember("resume-queue", request, receipt, nil)
+	return receipt, nil
+}

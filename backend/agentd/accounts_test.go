@@ -60,7 +60,7 @@ func TestApplyCodexHomeReplacesInheritedHomeAndPreservesAllowlist(t *testing.T) 
 }
 
 func TestValidAccountKeyRejectsClassLabelsAndPaths(t *testing.T) {
-	if validAccountKey("chatgpt") || validAccountKey("api_key") || validAccountKey("/tmp/codex") || validAccountKey("local_probe") || !validAccountKey("coordinator") {
+	if validAccountKey("chatgpt") || validAccountKey("api_key") || validAccountKey("/tmp/codex") || validAccountKey("local_probe") || validAccountKey("pi_context") || !validAccountKey("coordinator") {
 		t.Fatal("account key validation drifted")
 	}
 }
@@ -85,4 +85,32 @@ func testCodexRegistry(t *testing.T, entries ...codexAccountRegistryEntry) Codex
 		t.Fatal(err)
 	}
 	return registry
+}
+
+func TestParsePiAccountRegistryPinsOpaqueKeysAndRejectsCodexShape(t *testing.T) {
+	dir := t.TempDir()
+	raw, _ := json.Marshal(map[string]any{
+		"accounts": []map[string]string{{"key": "operator-pi", "agent_dir": dir}},
+	})
+	registry, err := ParsePiAccountRegistry(raw)
+	if err != nil || !registry.HasAccount("operator-pi") || registry.HasAccount("codex-home") {
+		t.Fatalf("registry=%+v err=%v", registry, err)
+	}
+	canonical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, ok := registry.lookup("operator-pi")
+	if !ok || account.agentDir != canonical {
+		t.Fatalf("lookup=%+v ok=%t canonical=%s", account, ok, canonical)
+	}
+	codexShaped, _ := json.Marshal(map[string]any{
+		"accounts": []map[string]string{{"key": "coordinator", "home": dir, "email": "one@example.invalid"}},
+	})
+	if _, err := ParsePiAccountRegistry(codexShaped); err == nil {
+		t.Fatal("pi registry accepted a Codex registry shape")
+	}
+	if _, err := ParsePiAccountRegistry([]byte(`{"accounts":[{"key":"pi_context","agent_dir":"` + dir + `"}]}`)); err == nil {
+		t.Fatal("accepted reserved pi_context key")
+	}
 }
