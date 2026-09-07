@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -65,13 +66,15 @@ type ownedDaemon struct {
 	supervisor *agentd.Supervisor
 	runtime    lifecycleintents.Runtime
 	host       string
-	generation string
 	workspace  string
 	identity   string
 	kernel     string
 	loader     string
 	accountKey string
 	profile    dispatchprofile.Profile
+	hostKind   string
+	generationDigest string
+	platformInputs   agentd.ReadinessInputs
 }
 
 func newOwnedDaemon(t *testing.T, projectID, userID int64) *ownedDaemon {
@@ -80,26 +83,8 @@ func newOwnedDaemon(t *testing.T, projectID, userID int64) *ownedDaemon {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := filepath.Join(root, "store", "3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-home-manager-generation")
-	if err = os.MkdirAll(store, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	generation := filepath.Join(root, "home-manager")
-	if err = os.Symlink(store, generation); err != nil {
-		t.Fatal(err)
-	}
-	workspace := filepath.Join(root, "workspace")
-	if err = os.MkdirAll(filepath.Join(workspace, "doctrine", "docs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	kernel := filepath.Join(workspace, "doctrine", "docs", "AGENTS-KERNEL.md")
-	if err = os.WriteFile(kernel, []byte("# AGENTS — Kernel\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loader := filepath.Join(workspace, "CLAUDE.md")
-	if err = os.WriteFile(loader, []byte("@./doctrine/docs/AGENTS-KERNEL.md\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	hostKind, generationDigest, platformInputs := ownedPlatformFixture(t, root)
+	workspace, kernel, loader := ownedWorkspaceFixture(t, root)
 	identity := strings.Repeat("d", 64)
 	supervisor, err := agentd.NewSupervisor(agentd.SupervisorConfig{
 		Instance: "ppm-owned", Adapters: []agentd.Adapter{probeAdapter{label: "chatgpt", keys: map[string]bool{"coordinator": true}}},
@@ -126,11 +111,73 @@ func newOwnedDaemon(t *testing.T, projectID, userID int64) *ownedDaemon {
 	}
 	daemon := &ownedDaemon{
 		t: t, project: projectID, service: lifecycleintents.NewService(db.DB), harness: managedharness.NewService(db.DB),
-		reporter: reporter, supervisor: supervisor, host: "owned-fixture-host", generation: generation,
+		reporter: reporter, supervisor: supervisor, host: "owned-fixture-host",
 		workspace: workspace, identity: identity, kernel: kernel, loader: loader, accountKey: "coordinator", profile: profile,
+		hostKind: hostKind, generationDigest: generationDigest, platformInputs: platformInputs,
 	}
 	daemon.register()
 	return daemon
+}
+
+func ownedWorkspaceFixture(t *testing.T, root string) (workspace, kernel, loader string) {
+	t.Helper()
+	workspace = filepath.Join(root, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, "doctrine", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	kernel = filepath.Join(workspace, "doctrine", "docs", "AGENTS-KERNEL.md")
+	if err := os.WriteFile(kernel, []byte("# AGENTS — Kernel\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loader = filepath.Join(workspace, "CLAUDE.md")
+	if err := os.WriteFile(loader, []byte("@./doctrine/docs/AGENTS-KERNEL.md\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return workspace, kernel, loader
+}
+
+func ownedPlatformFixture(t *testing.T, root string) (hostKind, generationDigest string, inputs agentd.ReadinessInputs) {
+	t.Helper()
+	if runtime.GOOS == "darwin" {
+		store := filepath.Join(root, "store", "3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-home-manager-generation")
+		if err := os.MkdirAll(store, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		current := filepath.Join(root, "home-manager")
+		if err := os.Symlink(store, current); err != nil {
+			t.Fatal(err)
+		}
+		return "macos-home-manager",
+			ownedDigest([]byte("3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-home-manager-generation")),
+			agentd.ReadinessInputs{HomeManagerCurrent: current}
+	}
+	storeNix := filepath.Join(root, "store", "3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-nixos-system")
+	if err := os.MkdirAll(storeNix, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nixCurrent := filepath.Join(root, "nixos-system")
+	if err := os.Symlink(storeNix, nixCurrent); err != nil {
+		t.Fatal(err)
+	}
+	storeHM := filepath.Join(root, "store", "3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-home-manager-generation")
+	if err := os.MkdirAll(storeHM, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hmCurrent := filepath.Join(root, "home-manager")
+	if err := os.Symlink(storeHM, hmCurrent); err != nil {
+		t.Fatal(err)
+	}
+	nixosMarker := filepath.Join(root, "etc", "nixos")
+	if err := os.MkdirAll(nixosMarker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return "nixos-home-manager",
+		ownedDigest([]byte("3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-nixos-system")),
+		agentd.ReadinessInputs{
+			NixOSMarker:        nixosMarker,
+			NixOSCurrent:       nixCurrent,
+			HomeManagerCurrent: hmCurrent,
+		}
 }
 
 // register performs the real authenticated runtime registration; the returned
@@ -173,14 +220,19 @@ func (d *ownedDaemon) readinessSpec(intent lifecycleintents.Intent, mutate func(
 		AccountKey:     intent.Request.AccountKey,
 		Profile:        d.profile,
 		Expect: agentd.ReadinessExpectation{
-			HostKind:             "macos-home-manager",
-			GenerationDigest:     ownedDigest([]byte("3dz1kvq6mrfjxc7g8w2p4nhy5bt9saul-home-manager-generation")),
+			HostKind:             d.hostKind,
+			GenerationDigest:     d.generationDigest,
 			DoctrineKernelDigest: ownedDigest(kernel),
 			Tools:                []string{"git"},
 		},
 		Inputs: agentd.ReadinessInputs{
 			WorkspaceRoot: d.workspace, WorkspaceIdentity: d.identity, WorkspaceMode: d.profile.WorkspaceMode,
-			DoctrineKernel: d.kernel, DoctrineLoader: d.loader, HomeManagerCurrent: d.generation, Instance: "ppm-owned",
+			DoctrineKernel: d.kernel, DoctrineLoader: d.loader, Instance: "ppm-owned",
+			HomeManagerCurrent:   d.platformInputs.HomeManagerCurrent,
+			HomeManagerInstalled: d.platformInputs.HomeManagerInstalled,
+			NixOSMarker:          d.platformInputs.NixOSMarker,
+			NixOSCurrent:         d.platformInputs.NixOSCurrent,
+			NixOSInstalled:       d.platformInputs.NixOSInstalled,
 		},
 		Doctor: func(context.Context) (agentd.ReadinessDoctorReport, error) {
 			return agentd.ReadinessDoctorReport{Instance: "ppm-owned", Ready: true,
