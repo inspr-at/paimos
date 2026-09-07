@@ -12,6 +12,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -260,6 +261,72 @@ func TestCursorRejectsOversizedAndMalformedFrames(t *testing.T) {
 	if err == nil {
 		t.Fatal("malformed ACP initialize was accepted")
 	}
+
+	oversized, _ := newTestCursorAdapter(t, "oversized")
+	events := make(chan AdapterEvent, 8)
+	_, err = oversized.Start(context.Background(), cursorOwnedStart(t, profile), func(event AdapterEvent) { events <- event })
+	if err == nil {
+		t.Fatal("oversized ACP frame was accepted")
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.ErrorCode == ErrorEventStreamBound {
+				return
+			}
+		case <-deadline:
+			t.Fatal("oversized ACP frame did not fail the event-stream bound")
+		}
+	}
+}
+
+func TestCursorEOFMidPromptFailsClosed(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "eof-prompt")
+	profile := cursorTestProfile(t)
+	events := make(chan AdapterEvent, 8)
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), func(event AdapterEvent) { events <- event })
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.ErrorCode == ErrorAppServerProtocol {
+				ready, ok := process.(interface{ InboxReady() bool })
+				if ok && ready.InboxReady() {
+					t.Fatal("inbox stayed ready after EOF mid-prompt")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("EOF mid-prompt did not fail closed")
+		}
+	}
+}
+
+func TestCursorIDBearingNotificationMethodsFailClosed(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "id-notifications")
+	profile := cursorTestProfile(t)
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, ok := process.(interface{ InboxReady() bool })
+	if !ok {
+		t.Fatal("cursor process does not implement inbox ready")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !ready.InboxReady() {
+		if time.Now().After(deadline) {
+			t.Fatal("id-bearing notification methods hung the owned turn")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "id-note-stop"}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCursorPermissionAndExtensionRequestsFailClosed(t *testing.T) {
@@ -300,12 +367,17 @@ func TestCursorPinnedVersionMismatchRefusesStart(t *testing.T) {
 }
 
 func TestCursorAccountProbeUsesOfficialStatusJSONAndStaysUnknownWithoutNamedContext(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "official-argv")
 	probe := writeProbe(t, `#!/bin/sh
 [ "$1:$2:$3" = "status:--format:json" ] || exit 9
+touch '`+marker+`'
 printf '%s\n' '{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"must-not-be-recorded@example.invalid"}}'
 `)
 	if got := NewCursorAdapter(probe, "test").AccountLabel(context.Background()); got != "unknown" {
 		t.Fatalf("closed label=%q", got)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("official status argv was not probed")
 	}
 	loggedInShaped := writeProbe(t, `#!/bin/sh
 printf '%s\n' '{"loggedIn":true,"email":"must-not-be-recorded@example.invalid"}'
@@ -447,12 +519,26 @@ func TestCursorACPHelperProcess(t *testing.T) {
 		_, _ = os.Stdout.Write([]byte("{not-json\n"))
 		os.Exit(0)
 	}
+	if mode == "oversized" {
+		_, _ = os.Stdout.Write([]byte(strings.Repeat("x", maxCursorFrameBytes+1) + "\n"))
+		os.Exit(0)
+	}
 	if mode == "block" {
 		scanner.Scan()
 		time.Sleep(time.Hour)
 		os.Exit(0)
 	}
 	promptIDs := map[any]bool{}
+	pendingUnsupported := map[string]bool{}
+	var promptWaiting any
+	completePrompt := func(id any) {
+		promptIDs[id] = true
+		notify("session/update", map[string]any{
+			"sessionId": "sess-owned",
+			"update":    map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "ok"}},
+		})
+		respond(id, map[string]any{"stopReason": "end_turn"})
+	}
 	for scanner.Scan() {
 		var message map[string]any
 		if json.Unmarshal(scanner.Bytes(), &message) != nil {
@@ -460,6 +546,18 @@ func TestCursorACPHelperProcess(t *testing.T) {
 		}
 		method, _ := message["method"].(string)
 		if method == "" {
+			if mode == "id-notifications" {
+				id, _ := message["id"].(string)
+				errObj, _ := message["error"].(map[string]any)
+				code, _ := errObj["code"].(float64)
+				if code == -32601 {
+					delete(pendingUnsupported, id)
+				}
+				if promptWaiting != nil && len(pendingUnsupported) == 0 {
+					completePrompt(promptWaiting)
+					promptWaiting = nil
+				}
+			}
 			continue
 		}
 		id := message["id"]
@@ -507,15 +605,37 @@ func TestCursorACPHelperProcess(t *testing.T) {
 				request("plan-1", "cursor/create_plan", map[string]any{"toolCallId": "call-p", "plan": "secret-plan"})
 				request("unknown-1", "cursor/unknown_extension", map[string]any{"toolCallId": "call-x"})
 			}
+			if mode == "id-notifications" {
+				pendingUnsupported["todo-1"] = true
+				pendingUnsupported["task-1"] = true
+				pendingUnsupported["img-1"] = true
+				request("todo-1", "cursor/update_todos", map[string]any{"sessionId": "sess-owned", "todos": []any{}})
+				request("task-1", "cursor/task", map[string]any{"sessionId": "sess-owned"})
+				request("img-1", "cursor/generate_image", map[string]any{"sessionId": "sess-owned"})
+				notify("cursor/update_todos", map[string]any{"sessionId": "sess-owned", "todos": []any{}})
+				notify("cursor/task", map[string]any{"sessionId": "sess-owned"})
+				notify("cursor/generate_image", map[string]any{"sessionId": "sess-owned"})
+			}
 		case "session/prompt":
 			if mode == "session-id-only" || mode == "auto-model" || mode == "wrong-model" || mode == "disagree-config" {
 				os.Exit(3)
+			}
+			if mode == "eof-prompt" {
+				os.Exit(0)
 			}
 			promptIDs[id] = true
 			notify("session/update", map[string]any{
 				"sessionId": "sess-owned",
 				"update":    map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "ok"}},
 			})
+			if mode == "id-notifications" {
+				if len(pendingUnsupported) > 0 {
+					promptWaiting = id
+					continue
+				}
+				respond(id, map[string]any{"stopReason": "end_turn"})
+				continue
+			}
 			if mode == "idle" || mode == "permission" {
 				respond(id, map[string]any{"stopReason": "end_turn"})
 			}

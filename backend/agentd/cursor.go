@@ -181,7 +181,6 @@ func (a *CursorAdapter) Start(ctx context.Context, request StartRequest, observe
 	if initialize.ProtocolVersion != cursorInitializeVersion {
 		return nil, errors.New("Cursor ACP protocol version is unsupported")
 	}
-	process.setInitialize(initialize)
 	var created cursorSessionNewResult
 	if err := process.call(operationCtx, "session/new", map[string]any{
 		"cwd": request.Workspace, "mcpServers": []any{},
@@ -328,10 +327,7 @@ type cursorRPCMessage struct {
 }
 
 type cursorInitializeResult struct {
-	ProtocolVersion   int `json:"protocolVersion"`
-	AgentCapabilities struct {
-		LoadSession bool `json:"loadSession"`
-	} `json:"agentCapabilities"`
+	ProtocolVersion int `json:"protocolVersion"`
 }
 
 type cursorSessionNewResult struct {
@@ -371,7 +367,6 @@ type cursorProcess struct {
 
 	stateMu           sync.Mutex
 	sessionID         string
-	loadSession       bool
 	promptID          string
 	promptCorrelation string
 	startingPrompt    bool
@@ -396,12 +391,6 @@ func newCursorProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, obs
 
 func (p *cursorProcess) AccountSelection() (string, string) {
 	return p.accountKey, AccountCursorContext
-}
-
-func (p *cursorProcess) setInitialize(result cursorInitializeResult) {
-	p.stateMu.Lock()
-	p.loadSession = result.AgentCapabilities.LoadSession
-	p.stateMu.Unlock()
 }
 
 func (p *cursorProcess) setSession(sessionID string) error {
@@ -477,8 +466,11 @@ func (p *cursorProcess) handlePeer(message cursorRPCMessage) {
 	case "cursor/create_plan":
 		p.rejectBlockingExtension(message, map[string]any{"outcome": map[string]any{"outcome": "cancelled"}})
 	case "cursor/update_todos", "cursor/task", "cursor/generate_image":
-		// Documented fire-and-forget notifications. No approval is implied.
-		return
+		if len(message.ID) == 0 {
+			// Documented fire-and-forget notifications. No approval is implied.
+			return
+		}
+		fallthrough
 	default:
 		if len(message.ID) > 0 {
 			p.failClosedPeer(message.ID, -32601, "method not found")
