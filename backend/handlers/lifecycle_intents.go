@@ -76,9 +76,13 @@ func lifecycleDecode(w http.ResponseWriter, r *http.Request, v any) bool {
 		}
 		allowed := map[string]bool{}
 		names := []string{"request_key", "operation", "runtime_id", "runtime_generation", "account_label", "account_key", "ttl_seconds"}
-		if req.Operation == "repair" {
+		switch {
+		case req.Operation == "repair":
 			names = append(names, "repair_layer")
-		} else {
+		case req.Operation == "readiness":
+			// A readiness probe names only what it observes.
+			names = append(names, "workspace_handle", "dispatch_profile_id", "dispatch_profile_version", "baseline_digest")
+		default:
 			names = append(names, "workspace_handle", "agent_name", "dispatch_profile_id", "dispatch_profile_version", "ticket_id", "work_shape", "role", "parent_harness_session_id")
 			if req.Operation != "start" {
 				names = append(names, "session_id", "session_generation", "expected_revision")

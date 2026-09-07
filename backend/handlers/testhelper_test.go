@@ -303,6 +303,7 @@ func buildRouter() http.Handler {
 			r.With(auth.RequireProjectView).Get("/projects/{id}/graph", handlers.ListProjectEntityRelations)
 			r.With(auth.RequireProjectView).Get("/projects/{id}/graph/blast-radius", handlers.BlastRadius)
 			r.With(auth.RequireProjectView).Post("/projects/{id}/retrieve", handlers.RetrieveProjectContext)
+			handlers.RegisterBaselineBatchRoutes(r)
 			r.Get("/projects/suggest-key", handlers.SuggestProjectKey)
 
 			r.With(auth.RequireProjectView).Get("/projects/{id}/issues", handlers.ListIssues)

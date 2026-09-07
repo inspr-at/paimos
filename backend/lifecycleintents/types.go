@@ -20,14 +20,16 @@ const HarnessLeaseHeader = "X-Paimos-Harness-Worker-Lease"
 const RuntimeTTLSeconds = 120
 
 var (
-	ErrInvalid     = errors.New("lifecycle_invalid")
-	ErrUnavailable = errors.New("lifecycle_unavailable")
-	ErrConflict    = errors.New("lifecycle_conflict")
-	ErrStorage     = errors.New("lifecycle_storage_unavailable")
-	stable         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-	accountKey     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-	identity       = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	workspaceLabel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,47}$`)
+	ErrInvalid        = errors.New("lifecycle_invalid")
+	ErrUnavailable    = errors.New("lifecycle_unavailable")
+	ErrConflict       = errors.New("lifecycle_conflict")
+	ErrStorage        = errors.New("lifecycle_storage_unavailable")
+	stable            = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	contentDigestBody = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	readinessReason   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	accountKey        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+	identity          = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	workspaceLabel    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,47}$`)
 )
 
 const (
@@ -75,9 +77,83 @@ type Runtime struct {
 	Sessions      []SessionProjection `json:"sessions"`
 	SchemaVersion int                 `json:"schema_version,omitempty"`
 }
+
+// ReadinessContractVersion is the inspr readiness evidence contract this
+// authority accepts from an owned daemon. Reports naming any other version are
+// refused; an observation is never inferred from a registration advertisement.
+const ReadinessContractVersion = "inspr.readiness.v1"
+
+// ReadinessTTLSeconds bounds how long one owned observation may be reused. The
+// stored deadline is additionally clamped to the runtime registration and the
+// intent, so evidence can never outlive the ownership that produced it.
+const ReadinessTTLSeconds = 300
+
+// RequiredReadinessChecks must all be present and passing before a report may
+// call itself ready. They are the required set of the accepted contract
+// profile; dispatch_profile stays optional.
+var RequiredReadinessChecks = []string{
+	"host_kind",
+	"activated_generation",
+	"doctrine_loader",
+	"workspace_isolation",
+	"tool_prerequisites",
+	"paimos_runtime_doctor",
+	"paimos_account",
+}
+
+var optionalReadinessChecks = []string{"dispatch_profile"}
+
+// ReadinessCheck is one bounded, closed-vocabulary probe outcome. Reasons are
+// closed codes; raw paths, executables, environments and output never appear.
+type ReadinessCheck struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+	Digest string `json:"digest,omitempty"`
+}
+
+// ReadinessReport is the daemon-reported observation attached to a completed
+// readiness intent. ObservedAt is the daemon's own observation time, not a
+// server clock reading, and the server refuses reports it cannot bind to the
+// exact runtime, account, profile, workspace and baseline it authorized.
+type ReadinessReport struct {
+	ContractVersion   string           `json:"contract_version"`
+	Status            string           `json:"status"`
+	ObservedAt        string           `json:"observed_at"`
+	TTLSeconds        int              `json:"ttl_seconds"`
+	HostKind          string           `json:"host_kind"`
+	NextAction        string           `json:"next_action"`
+	WorkspaceIdentity string           `json:"workspace_identity"`
+	AccountKey        string           `json:"account_key,omitempty"`
+	BaselineDigest    string           `json:"baseline_digest"`
+	Checks            []ReadinessCheck `json:"checks"`
+}
+
+// ReadinessObservation is the durable projection of one accepted report.
+type ReadinessObservation struct {
+	IntentID          string           `json:"intent_id"`
+	ProjectID         int64            `json:"project_id"`
+	RuntimeID         string           `json:"runtime_id"`
+	RuntimeGeneration string           `json:"runtime_generation"`
+	AccountLabel      string           `json:"account_label"`
+	AccountKey        string           `json:"account_key,omitempty"`
+	ProfileID         string           `json:"dispatch_profile_id"`
+	ProfileVersion    string           `json:"dispatch_profile_version"`
+	WorkspaceHandle   string           `json:"workspace_handle"`
+	WorkspaceIdentity string           `json:"workspace_identity"`
+	BaselineDigest    string           `json:"baseline_digest"`
+	HostKind          string           `json:"host_kind"`
+	Status            string           `json:"status"`
+	NextAction        string           `json:"next_action"`
+	ObservedAt        string           `json:"observed_at"`
+	ExpiresAt         string           `json:"expires_at"`
+	Checks            []ReadinessCheck `json:"checks"`
+}
+
 type Request struct {
 	RequestKey             string  `json:"request_key"`
 	Operation              string  `json:"operation"`
+	BaselineDigest         string  `json:"baseline_digest,omitempty"`
 	RuntimeID              string  `json:"runtime_id"`
 	RuntimeGeneration      string  `json:"runtime_generation"`
 	AccountLabel           string  `json:"account_label"`
@@ -134,12 +210,72 @@ func validWorkspaceLabel(v string) bool {
 }
 
 type Transition struct {
-	RuntimeID         string `json:"runtime_id"`
-	RuntimeGeneration string `json:"runtime_generation"`
-	ExpectedRevision  int64  `json:"expected_revision"`
-	State             string `json:"state"`
-	Reason            string `json:"reason"`
-	ResultSessionID   string `json:"result_session_id,omitempty"`
+	RuntimeID         string           `json:"runtime_id"`
+	RuntimeGeneration string           `json:"runtime_generation"`
+	ExpectedRevision  int64            `json:"expected_revision"`
+	State             string           `json:"state"`
+	Reason            string           `json:"reason"`
+	ResultSessionID   string           `json:"result_session_id,omitempty"`
+	Readiness         *ReadinessReport `json:"readiness,omitempty"`
+}
+
+// validateReadinessReport applies the closed contract before any observation can
+// be stored. Shape, vocabulary and required-check coverage are all server-side:
+// a daemon cannot promote itself to ready by asserting a status string.
+func validateReadinessReport(in *ReadinessReport) error {
+	if in == nil || in.ContractVersion != ReadinessContractVersion {
+		return ErrInvalid
+	}
+	switch in.Status {
+	case "ready", "needs_setup", "unavailable":
+	default:
+		return ErrInvalid
+	}
+	if !readinessReason.MatchString(in.NextAction) || in.TTLSeconds < 30 || in.TTLSeconds > ReadinessTTLSeconds {
+		return ErrInvalid
+	}
+	if !identity.MatchString(in.WorkspaceIdentity) || !ValidBaselineDigest(in.BaselineDigest) {
+		return ErrInvalid
+	}
+	if in.HostKind != "macos-home-manager" && in.HostKind != "nixos-home-manager" {
+		return ErrInvalid
+	}
+	if in.AccountKey != "" && !validAccountKey(in.AccountKey) {
+		return ErrInvalid
+	}
+	if len(in.Checks) == 0 || len(in.Checks) > len(RequiredReadinessChecks)+len(optionalReadinessChecks) {
+		return ErrInvalid
+	}
+	known := map[string]bool{}
+	for _, id := range append(append([]string{}, RequiredReadinessChecks...), optionalReadinessChecks...) {
+		known[id] = true
+	}
+	passed := map[string]bool{}
+	seen := map[string]bool{}
+	for _, check := range in.Checks {
+		if !known[check.ID] || seen[check.ID] || !readinessReason.MatchString(check.Reason) {
+			return ErrInvalid
+		}
+		seen[check.ID] = true
+		switch check.Status {
+		case "pass", "fail", "warn", "unknown", "unsupported", "stale":
+		default:
+			return ErrInvalid
+		}
+		if check.Digest != "" && !ValidBaselineDigest(check.Digest) {
+			return ErrInvalid
+		}
+		passed[check.ID] = check.Status == "pass"
+	}
+	for _, id := range RequiredReadinessChecks {
+		if !seen[id] {
+			return ErrInvalid
+		}
+		if in.Status == "ready" && !passed[id] {
+			return ErrInvalid
+		}
+	}
+	return nil
 }
 
 func validID(v string) bool {
@@ -194,12 +330,33 @@ func (r Runtime) matchAccount(key string) bool {
 	return false
 }
 
+// ValidBaselineDigest accepts only the canonical Aithema content digest form.
+func ValidBaselineDigest(v string) bool {
+	return len(v) == 71 && strings.HasPrefix(v, "sha256:") && contentDigestBody.MatchString(v[7:])
+}
+
 func (r Request) validate() error {
 	if !validID(r.RequestKey) || !validID(r.RuntimeID) || !validID(r.RuntimeGeneration) || !validAccount(r.AccountLabel) || r.TTLSeconds < 30 || r.TTLSeconds > 600 {
 		return ErrInvalid
 	}
 	if r.AccountKey != "" && !validAccountKey(r.AccountKey) {
 		return ErrInvalid
+	}
+	if r.Operation != "readiness" && r.BaselineDigest != "" {
+		return ErrInvalid
+	}
+	if r.Operation == "readiness" {
+		// A readiness probe observes; it never binds a session, ticket, agent or
+		// hierarchy, and it must name the exact baseline whose start it gates.
+		if !ValidBaselineDigest(r.BaselineDigest) || !validID(r.WorkspaceHandle) ||
+			!label(r.DispatchProfileID, 128) || !label(r.DispatchProfileVersion, 128) {
+			return ErrInvalid
+		}
+		if r.AgentName != "" || r.TicketID != nil || r.WorkShape != "" || r.Role != "" || r.RepairLayer != "" ||
+			r.ParentSessionID != nil || r.SessionID != "" || r.SessionGeneration != "" || r.ExpectedRevision != 0 {
+			return ErrInvalid
+		}
+		return nil
 	}
 	if r.Operation == "repair" {
 		if (r.RepairLayer != "reporter" && r.RepairLayer != "listeners") || r.WorkspaceHandle != "" || r.AgentName != "" || r.DispatchProfileID != "" || r.DispatchProfileVersion != "" || r.TicketID != nil || r.WorkShape != "" || r.Role != "" || r.ParentSessionID != nil || r.SessionID != "" || r.SessionGeneration != "" || r.ExpectedRevision != 0 {

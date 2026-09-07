@@ -164,6 +164,7 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/agentmessage \
   github.com/inspr-at/paimos/backend/agentmode \
   github.com/inspr-at/paimos/backend/auth \
+  github.com/inspr-at/paimos/backend/baselinebatch \
   github.com/inspr-at/paimos/backend/cmd/dev-fixture-sql \
   github.com/inspr-at/paimos/backend/cmd/paimos \
   github.com/inspr-at/paimos/backend/cmd/paimos-agentd \

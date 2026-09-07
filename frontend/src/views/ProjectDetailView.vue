@@ -1023,7 +1023,7 @@ watch(
            there is no nesting / double scroll. -->
       <div v-else class="pd-tab-scroll">
         <!-- Overview tab — README-like + state callouts ───────────────── -->
-        <ProjectOverviewTab v-if="primaryTab === 'overview'" :project="project" :issues="issues" />
+        <ProjectOverviewTab v-if="primaryTab === 'overview'" :project="project" :issues="issues" :can-write="canEditProject" />
 
         <!-- Knowledge tab — PAI-360 unified list + PAI-350 graph view. -->
         <template v-else-if="primaryTab === 'knowledge'">

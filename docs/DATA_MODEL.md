@@ -812,6 +812,45 @@ stored copy of a confirmed private note response.
 
 PAI-553 tracks the remaining hardening: keep this ledger and the published schema version aligned whenever future migrations land.
 
+### Baseline delivery batches (M182 — PAI-956)
+
+`baseline_batch_drafts` holds one open or reviewing project-bound Aithema
+handover snapshot with bounded imported content. `approved_by` is stored only
+as `imported_authenticity=untrusted_imported_claim`. `baseline_batch_reviews`
+bind a human session to exact digest, seal, mode, scope, and worker choices;
+draft edits invalidate unsubmitted reviews, and a consumed (confirmed) review
+can never revive its closed draft.
+
+`baseline_batch_batches` are immutable after start apart from the human control
+record (`control_state`, `control_reason`) and the current
+`lifecycle_intent_id`. They map onto an existing `delivery_attempts` row and,
+for agent modes, onto the `lifecycle_intents` start intent plus the
+`lifecycle_readiness_observations` row that authorized it; owned execution
+creates no `agent_runs` row, because the owned daemon — not the local run
+runner — performs it. `baseline_batch_controls` records which human asked for
+which control, the durable owned effect it reached (a PAI-903 harness control,
+a lifecycle cancel or resubmit, or a manual hold), and makes a repeated request
+key idempotent.
+
+Workflow state, stage progress and forecasts are **not stored**: they are
+derived on read from the delivery attempt's canonical stages, the lifecycle
+intent and the owned harness session. The only persisted forecast is the
+`educated_guess` recorded at confirmation; `measured` and `worker_estimate`
+come from the delivery read model, and each forecast reports `observed` and
+`fresh` separately from its number. `completed` requires every required stage
+to be policy-satisfied — a worker finishing is not delivery evidence.
+
+`lifecycle_readiness_observations` stores one accepted `inspr.readiness.v1`
+report per completed readiness intent, bound to project, runtime generation,
+account label and key, dispatch profile, workspace handle and identity, and
+baseline digest. `observed_at` is the daemon's own observation time and
+`expires_at` is clamped to the runtime registration and the intent, so evidence
+cannot outlive the ownership that produced it. The row is insert-only
+(`trg_lifecycle_readiness_immutable`).
+
+INSPR gating is this path only, and only after `projects.inspr_stream_enabled`
+is set by an authorized human — legacy projects do not require a baseline.
+
 ---
 
 ## Related

@@ -324,19 +324,47 @@ func (s *Service) refresh(ctx context.Context, tx *sql.Tx, p auth.Principal, in 
 	}
 	return nil
 }
+
+// LockMutations serializes lifecycle authority mutations for a caller that has
+// to span its own transaction — a baseline batch commits its immutable batch
+// and the start intent together. Acquire it before beginning that transaction
+// so the lock is always taken before the SQLite write lock, never after.
+func LockMutations() { mutationMu.Lock() }
+
+// UnlockMutations releases LockMutations after the caller's transaction ends.
+func UnlockMutations() { mutationMu.Unlock() }
+
 func (s *Service) Submit(ctx context.Context, p auth.Principal, project int64, req Request) (Intent, bool, error) {
 	mutationMu.Lock()
 	defer mutationMu.Unlock()
-	tx, err := s.begin(ctx, p, project, auth.PrincipalSession)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Intent{}, false, ErrStorage
+	}
+	defer tx.Rollback()
+	in, created, err := s.SubmitTx(ctx, tx, p, project, req)
 	if err != nil {
 		return Intent{}, false, err
 	}
-	defer tx.Rollback()
-	if err = req.validate(); err != nil {
+	if tx.Commit() != nil {
+		return Intent{}, false, ErrStorage
+	}
+	return in, created, nil
+}
+
+// SubmitTx is the single submission path: the same reauthorization, request
+// validation, target and reservation checks, and caps that Submit applies,
+// performed inside a caller-owned transaction. Callers must already hold
+// LockMutations. There is no second way to create a lifecycle intent.
+func (s *Service) SubmitTx(ctx context.Context, tx *sql.Tx, p auth.Principal, project int64, req Request) (Intent, bool, error) {
+	if err := s.authorize(ctx, tx, p, project, auth.PrincipalSession); err != nil {
+		return Intent{}, false, err
+	}
+	if err := req.validate(); err != nil {
 		return Intent{}, false, err
 	}
 	var id, raw string
-	err = tx.QueryRowContext(ctx, `SELECT id,request_json FROM lifecycle_intents WHERE project_id=? AND user_id=? AND request_key=?`, project, p.UserID(), req.RequestKey).Scan(&id, &raw)
+	err := tx.QueryRowContext(ctx, `SELECT id,request_json FROM lifecycle_intents WHERE project_id=? AND user_id=? AND request_key=?`, project, p.UserID(), req.RequestKey).Scan(&id, &raw)
 	if err == nil {
 		if raw != encode(req) {
 			return Intent{}, false, ErrConflict
@@ -347,9 +375,6 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, project int64, r
 		}
 		if e = s.refresh(ctx, tx, p, &in); e != nil {
 			return Intent{}, false, e
-		}
-		if tx.Commit() != nil {
-			return Intent{}, false, ErrStorage
 		}
 		return in, false, nil
 	}
@@ -383,9 +408,6 @@ func (s *Service) Submit(ctx context.Context, p auth.Principal, project int64, r
 	if err != nil {
 		return Intent{}, false, ErrStorage
 	}
-	if tx.Commit() != nil {
-		return Intent{}, false, ErrStorage
-	}
 	return in, true, nil
 }
 func (s *Service) Get(ctx context.Context, p auth.Principal, project int64, id string) (Intent, error) {
@@ -400,36 +422,53 @@ func (s *Service) Cancel(ctx context.Context, p auth.Principal, project int64, i
 func (s *Service) readOrCancel(ctx context.Context, p auth.Principal, project int64, id string, cancel int64) (Intent, error) {
 	mutationMu.Lock()
 	defer mutationMu.Unlock()
-	tx, err := s.begin(ctx, p, project, auth.PrincipalSession)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Intent{}, err
+		return Intent{}, ErrStorage
 	}
 	defer tx.Rollback()
-	in, err := loadIntent(ctx, tx, project, id)
+	in, conflict, err := s.ReadOrCancelTx(ctx, tx, p, project, id, cancel)
 	if err != nil {
 		return Intent{}, err
-	}
-	if owner(ctx, tx, in, p) != nil {
-		return Intent{}, ErrUnavailable
-	}
-	if err = s.refresh(ctx, tx, p, &in); err != nil {
-		return Intent{}, err
-	}
-	if cancel > 0 && !(in.State == "cancelled" && cancel == in.Revision-1) {
-		if terminal(in.State) || in.State == "executing" || in.Revision != cancel {
-			if tx.Commit() != nil {
-				return Intent{}, ErrStorage
-			}
-			return Intent{}, ErrConflict
-		}
-		if err = s.change(ctx, tx, p, &in, "cancelled", "cancelled", ""); err != nil {
-			return Intent{}, err
-		}
 	}
 	if tx.Commit() != nil {
 		return Intent{}, ErrStorage
 	}
+	if conflict {
+		return Intent{}, ErrConflict
+	}
 	return in, nil
+}
+
+// ReadOrCancelTx reads, or revision-CAS cancels, one intent inside a
+// caller-owned transaction. It applies the same expiry/authority refresh and
+// ownership rules as Cancel, keeps `executing` uncancellable, and attributes
+// the change to the acting principal. A true conflict flag means the caller
+// should commit the refresh it caused and then report the conflict. Callers
+// must already hold LockMutations.
+func (s *Service) ReadOrCancelTx(ctx context.Context, tx *sql.Tx, p auth.Principal, project int64, id string, cancel int64) (Intent, bool, error) {
+	if err := s.authorize(ctx, tx, p, project, auth.PrincipalSession); err != nil {
+		return Intent{}, false, err
+	}
+	in, err := loadIntent(ctx, tx, project, id)
+	if err != nil {
+		return Intent{}, false, err
+	}
+	if owner(ctx, tx, in, p) != nil {
+		return Intent{}, false, ErrUnavailable
+	}
+	if err = s.refresh(ctx, tx, p, &in); err != nil {
+		return Intent{}, false, err
+	}
+	if cancel > 0 && !(in.State == "cancelled" && cancel == in.Revision-1) {
+		if terminal(in.State) || in.State == "executing" || in.Revision != cancel {
+			return in, true, nil
+		}
+		if err = s.change(ctx, tx, p, &in, "cancelled", "cancelled", ""); err != nil {
+			return Intent{}, false, err
+		}
+	}
+	return in, false, nil
 }
 func (s *Service) Events(ctx context.Context, p auth.Principal, project int64, id string) ([]Event, error) {
 	mutationMu.Lock()

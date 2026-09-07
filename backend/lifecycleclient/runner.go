@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/inspr-at/paimos/backend/agentd"
 	"github.com/inspr-at/paimos/backend/lifecycleintents"
 	"github.com/inspr-at/paimos/backend/localjournal"
 )
@@ -19,7 +20,35 @@ import (
 type Result struct {
 	SessionID string `json:"session_id,omitempty"`
 	Reason    string `json:"reason"`
+	// Readiness carries the owned probe observation for a readiness intent. It
+	// is journalled with the outcome so a lost response replays the exact same
+	// observation instead of re-probing a host that may have changed.
+	Readiness *lifecycleintents.ReadinessReport `json:"readiness,omitempty"`
 }
+
+// ReadinessResult shapes one owned probe observation as the outcome the
+// authority accepts. Both the daemon and its tests go through this single
+// mapping, so nothing can reach the server that the probe did not observe.
+func ReadinessResult(observation agentd.ReadinessObservation) Result {
+	report := lifecycleintents.ReadinessReport{
+		ContractVersion:   observation.ContractVersion,
+		Status:            observation.Status,
+		ObservedAt:        observation.ObservedAt.UTC().Format(time.RFC3339Nano),
+		TTLSeconds:        observation.TTLSeconds,
+		HostKind:          observation.HostKind,
+		NextAction:        observation.NextAction,
+		WorkspaceIdentity: observation.WorkspaceIdentity,
+		AccountKey:        observation.AccountKey,
+		BaselineDigest:    observation.BaselineDigest,
+	}
+	for _, check := range observation.Checks {
+		report.Checks = append(report.Checks, lifecycleintents.ReadinessCheck{
+			ID: check.ID, Status: check.Status, Reason: check.Reason, Digest: check.Digest,
+		})
+	}
+	return Result{Reason: "applied", Readiness: &report}
+}
+
 type Executor interface {
 	Prepare(context.Context, lifecycleintents.Intent) error
 	Execute(context.Context, lifecycleintents.Intent) (Result, error)
@@ -177,7 +206,7 @@ func (r *Runner) complete(ctx context.Context, runtime lifecycleintents.Runtime,
 	if c.Result.Reason == "applied" {
 		state = "completed"
 	}
-	out, err := r.authority.Transition(ctx, in.ID, lifecycleintents.Transition{RuntimeID: runtime.ID, RuntimeGeneration: runtime.Generation, ExpectedRevision: in.Revision, State: state, Reason: c.Result.Reason, ResultSessionID: c.Result.SessionID})
+	out, err := r.authority.Transition(ctx, in.ID, lifecycleintents.Transition{RuntimeID: runtime.ID, RuntimeGeneration: runtime.Generation, ExpectedRevision: in.Revision, State: state, Reason: c.Result.Reason, ResultSessionID: c.Result.SessionID, Readiness: c.Result.Readiness})
 	if errors.Is(err, lifecycleintents.ErrConflict) {
 		// The authority refused this exact recorded revision/outcome. Preserve
 		// the effect evidence without treating it as accepted or retrying it.

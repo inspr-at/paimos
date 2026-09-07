@@ -53,7 +53,44 @@ POST   /projects/:id/anchors        {repo_id, schema_version, repo_revision, gen
 GET    /projects/:id/graph          ?root=issue:42&depth=2
 GET    /projects/:id/graph/blast-radius ?issue=PAI-79&depth=3
 POST   /projects/:id/retrieve       {q, k}
+GET    /projects/:id/baseline-batches/
+POST   /projects/:id/baseline-batches/opt-in
+POST   /projects/:id/baseline-batches/import
+PATCH  /projects/:id/baseline-batches/:draftID
+POST   /projects/:id/baseline-batches/:draftID/readiness
+POST   /projects/:id/baseline-batches/:draftID/review
+POST   /projects/:id/baseline-batches/:draftID/start
+GET    /projects/:id/baseline-batches/:draftID/export
+GET    /projects/:id/baseline-batches/batches/:batchID
+POST   /projects/:id/baseline-batches/batches/:batchID/control
 ```
+
+PAI-956 baseline batches are an opt-in INSPR stream on a project: every route
+above answers 409 until an authorized human posts `opt-in`, and a project that
+never opts in behaves exactly as before. Imported `aithema.handover/0.1` JSON is
+a claim: `approved_by` never authenticates a human. Start requires a current
+human session, project edit, and an explicit confirmation bound to
+digest/seal/revision/scope/mode.
+
+Assisted and automatic modes require a current **owned readiness observation**:
+`readiness` submits an `inspr.readiness.v1` probe as a lifecycle intent, the
+operator-owned daemon claims it, runs the host checks (`host_kind`,
+`activated_generation`, `doctrine_loader`, `workspace_isolation`,
+`tool_prerequisites`, `paimos_runtime_doctor`, `paimos_account`) and reports the
+observation back through the lifecycle transition. The server binds it to
+project, runtime generation, account, dispatch profile, workspace and baseline
+digest, keeps the daemon-reported observation time, and clamps freshness to the
+runtime registration. Missing, stale, non-ready or unbindable evidence blocks the
+start with a typed reason; client `ready:true` is refused outright. Manual mode
+does not invent an AI account.
+
+Batch state, stage progress, forecasts and the available controls are derived
+from the delivery attempt, the lifecycle intent and the owned harness session on
+every read. `completed` follows only from every required delivery stage being
+satisfied, never from a worker finishing. Pause and cancel write real PAI-903
+harness controls (or release a not-yet-claimed start intent through the
+lifecycle revision CAS); an action with no owned effect is reported as
+unavailable with its reason instead of being offered.
 
 Project lifecycle is operational, not decorative: only `active` projects
 accept new issues (including clones, batch creates, intake filing, and issue
