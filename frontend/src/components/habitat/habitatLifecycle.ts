@@ -80,6 +80,7 @@ const ACCOUNTS = [
   'claude_ai_team',
   'claude_ai_enterprise',
   'console',
+  'pi_context',
 ]
 const STATES = ['requested', 'claimed', 'executing', 'completed', 'failed', 'expired', 'cancelled']
 const token = (value: unknown): value is string =>

@@ -145,20 +145,26 @@ func transportHandler(supervisor *Supervisor) http.Handler {
 		if err := decodeTransportJSON(w, r, &request); err != nil {
 			return
 		}
-		var receipt Receipt
-		var err error
+		id := r.PathValue("id")
 		switch r.PathValue("operation") {
 		case "steer":
-			receipt, err = supervisor.Steer(r.Context(), r.PathValue("id"), request)
+			receipt, err := supervisor.Steer(r.Context(), id, request)
+			writeTransportResult(w, receipt, err)
 		case "interrupt":
-			receipt, err = supervisor.Interrupt(r.Context(), r.PathValue("id"), request)
+			receipt, err := supervisor.Interrupt(r.Context(), id, request)
+			writeTransportResult(w, receipt, err)
 		case "stop":
-			receipt, err = supervisor.Stop(r.Context(), r.PathValue("id"), request)
+			receipt, err := supervisor.Stop(r.Context(), id, request)
+			writeTransportResult(w, receipt, err)
+		case "queue-retention":
+			report, err := supervisor.QueueRetention(id, request)
+			writeTransportResult(w, report, err)
+		case "resume-queue":
+			receipt, err := supervisor.ResumeQueue(r.Context(), id, request)
+			writeTransportResult(w, receipt, err)
 		default:
 			writeTransportJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
-			return
 		}
-		writeTransportResult(w, receipt, err)
 	})
 	return mux
 }
@@ -291,6 +297,16 @@ func (c *Client) Interrupt(ctx context.Context, id string, request ControlReques
 func (c *Client) Stop(ctx context.Context, id string, request ControlRequest) (Receipt, error) {
 	var out Receipt
 	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/stop", request, &out)
+	return out, err
+}
+func (c *Client) QueueRetention(ctx context.Context, id string, request ControlRequest) (QueueRetentionReport, error) {
+	var out QueueRetentionReport
+	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/queue-retention", request, &out)
+	return out, err
+}
+func (c *Client) ResumeQueue(ctx context.Context, id string, request ControlRequest) (Receipt, error) {
+	var out Receipt
+	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/resume-queue", request, &out)
 	return out, err
 }
 

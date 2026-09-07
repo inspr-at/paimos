@@ -328,7 +328,7 @@ func validGitBranch(value string) bool {
 
 func validAccountLabel(value string) bool {
 	switch value {
-	case "unknown", "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console":
+	case "unknown", "chatgpt", "api_key", "claude_ai_max", "claude_ai_pro", "claude_ai_team", "claude_ai_enterprise", "console", "pi_context":
 		return true
 	default:
 		return false

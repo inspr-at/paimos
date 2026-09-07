@@ -43,6 +43,8 @@ var catalog = []Profile{
 	{ID: "claude-sonnet-high", Version: CatalogVersion, Harness: "claude", Model: "sonnet", Effort: "high", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
 	{ID: "claude-opus-xhigh", Version: CatalogVersion, Harness: "claude", Model: "opus", Effort: "xhigh", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
 	{ID: "claude-fable-xhigh", Version: CatalogVersion, Harness: "claude", Model: "fable", Effort: "xhigh", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
+	// Pi profiles are human-selected by id. None is an automatic paid-model default.
+	{ID: "pi-anthropic-sonnet-high", Version: CatalogVersion, Harness: "pi", Model: "anthropic:claude-sonnet-4-20250514", Effort: "high", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
 }
 
 // List returns a detached, stable-order catalog for the execution-options API.
@@ -90,7 +92,7 @@ func ValidateSnapshot(profile Profile) error {
 			return errors.New("dispatch profile contains an invalid stable value")
 		}
 	}
-	if profile.Harness != "codex" && profile.Harness != "claude" {
+	if profile.Harness != "codex" && profile.Harness != "claude" && profile.Harness != "pi" {
 		return errors.New("dispatch profile harness is unsupported")
 	}
 	if profile.MachineSource != MachineAuthenticatedReporter || profile.AccountSource != AccountLocalProbe {

@@ -19,6 +19,7 @@ import (
 const (
 	AdapterAgentdCodex  = "agentd_codex"
 	AdapterAgentdClaude = "agentd_claude"
+	AdapterAgentdPi     = "agentd_pi"
 	KindAgentdSession   = "agentd_session"
 )
 
@@ -29,6 +30,7 @@ type AgentdTarget struct {
 
 type AgentdCodexPlugin struct{}
 type AgentdClaudePlugin struct{}
+type AgentdPiPlugin struct{}
 
 func (AgentdCodexPlugin) Name() string          { return AdapterAgentdCodex }
 func (AgentdCodexPlugin) Kind() string          { return KindAgentdSession }
@@ -38,6 +40,10 @@ func (AgentdClaudePlugin) Name() string         { return AdapterAgentdClaude }
 func (AgentdClaudePlugin) Kind() string         { return KindAgentdSession }
 func (AgentdClaudePlugin) MaximumLevel() string { return LevelSteer }
 func (AgentdClaudePlugin) Mode() string         { return ModeLocal }
+func (AgentdPiPlugin) Name() string             { return AdapterAgentdPi }
+func (AgentdPiPlugin) Kind() string             { return KindAgentdSession }
+func (AgentdPiPlugin) MaximumLevel() string     { return LevelSteer }
+func (AgentdPiPlugin) Mode() string             { return ModeLocal }
 
 func decodeAgentdTarget(ref string) (AgentdTarget, error) {
 	if len(ref) > 4096 || !json.Valid([]byte(ref)) {
@@ -70,6 +76,10 @@ func (AgentdClaudePlugin) ValidateTarget(ctx context.Context, ref string) error 
 	return (AgentdCodexPlugin{}).ValidateTarget(ctx, ref)
 }
 
+func (AgentdPiPlugin) ValidateTarget(ctx context.Context, ref string) error {
+	return (AgentdCodexPlugin{}).ValidateTarget(ctx, ref)
+}
+
 // Deliver is intentionally steer-only and lease-correlated. Simple delivery
 // remains on the ordinary inbox adapter; managed control never queue-fakes a
 // steer and cannot be invoked through the legacy unleased --deliver-target.
@@ -79,6 +89,10 @@ func (AgentdCodexPlugin) Deliver(ctx context.Context, request DeliverRequest) (D
 
 func (AgentdClaudePlugin) Deliver(ctx context.Context, request DeliverRequest) (DeliverResult, error) {
 	return deliverAgentdSteer(ctx, request, agentdwire.ClaudeSteerPrimitive, true)
+}
+
+func (AgentdPiPlugin) Deliver(ctx context.Context, request DeliverRequest) (DeliverResult, error) {
+	return deliverAgentdSteer(ctx, request, "pi rpc steer", false)
 }
 
 func deliverAgentdSteer(ctx context.Context, request DeliverRequest, primitive string, requireVendorMessageID bool) (DeliverResult, error) {
@@ -139,6 +153,9 @@ func init() {
 		panic(err)
 	}
 	if err := Register(AgentdClaudePlugin{}); err != nil {
+		panic(err)
+	}
+	if err := Register(AgentdPiPlugin{}); err != nil {
 		panic(err)
 	}
 }

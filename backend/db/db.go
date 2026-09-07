@@ -13155,7 +13155,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 	WHEN OLD.last_error_code='managed_target_unavailable' AND OLD.fallback_target_id IS NOT NULL
 	THEN OLD.fallback_target_id
 	WHEN OLD.requested_level='simple' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
-	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id) IN ('agentd_codex','agentd_claude')
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id) IN ('agentd_codex','agentd_claude','agentd_pi')
 	THEN OLD.fallback_target_id
 	WHEN OLD.requested_level='steer' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
 	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id)='simple'
@@ -13466,6 +13466,33 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 			batch_key,draft_id,draft_revision,review_id,baseline_ref,content_digest,revision_seal,execution_mode,
 			scope_json,worker_json,issue_id,delivery_id,attempt_id,idempotency_key,started_by,readiness_intent_id
 			ON baseline_batch_batches BEGIN SELECT RAISE(ABORT,'baseline batch identity is immutable'); END`,
+	}})
+	// M183 / PAI-957: closed Pi selected-context account class, distinct from
+	// Codex/Claude provider identity labels and from opaque account keys.
+	migrations = append(migrations, migration{version: 183, steps: []string{
+		`DROP TRIGGER IF EXISTS trg_harness_sessions_provenance_shape_insert`,
+		`CREATE TRIGGER trg_harness_sessions_provenance_shape_insert BEFORE INSERT ON harness_sessions
+			 WHEN NOT (
+			  (NEW.workspace_identity='' AND NEW.workspace_path='' AND NEW.git_top_level='' AND NEW.git_branch=''
+			   AND NEW.workspace_kind='unknown' AND NEW.workspace_mode='unknown' AND NEW.dispatch_profile_id=''
+			   AND NEW.dispatch_profile_version='' AND NEW.dispatch_model='' AND NEW.dispatch_effort='' AND NEW.account_label='unknown'
+			   AND NEW.account_key='')
+			  OR
+			  (length(NEW.workspace_identity)=64 AND NEW.workspace_identity NOT GLOB '*[^0-9a-f]*'
+			   AND NEW.workspace_path<>'' AND instr(NEW.workspace_path,char(0))=0
+			   AND instr(NEW.workspace_path,char(10))=0 AND instr(NEW.workspace_path,char(13))=0
+			   AND NEW.workspace_kind IN ('directory','git_primary','git_worktree') AND NEW.workspace_mode IN ('exclusive','shared')
+			   AND NEW.account_label IN ('unknown','chatgpt','api_key','claude_ai_max','claude_ai_pro','claude_ai_team','claude_ai_enterprise','console','pi_context')
+			   AND (NEW.account_key='' OR (length(NEW.account_key) BETWEEN 1 AND 128
+			    AND NEW.account_key GLOB '[A-Za-z0-9]*' AND NEW.account_key NOT GLOB '*[^A-Za-z0-9._:-]*'
+			    AND instr(NEW.account_key,'/')=0 AND instr(NEW.account_key,char(0))=0
+			    AND instr(NEW.account_key,char(10))=0 AND instr(NEW.account_key,char(13))=0
+			    AND NEW.account_key NOT IN ('unknown','chatgpt','api_key','claude_ai_max','claude_ai_pro','claude_ai_team','claude_ai_enterprise','console','local_probe','pi_context')))
+			   AND ((NEW.workspace_kind='directory' AND NEW.git_top_level='' AND NEW.git_branch='')
+			    OR (NEW.workspace_kind IN ('git_primary','git_worktree') AND NEW.git_top_level<>'' AND NEW.git_branch<>''))
+			   AND ((NEW.dispatch_profile_id='' AND NEW.dispatch_profile_version='' AND NEW.dispatch_model='' AND NEW.dispatch_effort='')
+			    OR (NEW.dispatch_profile_id<>'' AND NEW.dispatch_profile_version<>'' AND NEW.dispatch_model<>'' AND NEW.dispatch_effort<>'')))
+			 ) BEGIN SELECT RAISE(ABORT,'harness workspace provenance is invalid'); END`,
 	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {

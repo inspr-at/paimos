@@ -27,7 +27,7 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 		}
 		docs[name] = string(raw)
 	}
-	for _, command := range []string{"serve", "start", "status", "steer", "interrupt", "stop"} {
+	for _, command := range []string{"serve", "start", "status", "steer", "interrupt", "stop", "held-queue", "resume-queue"} {
 		for name, doc := range docs {
 			if !strings.Contains(doc, "paimos-agentd "+command) {
 				t.Errorf("%s quickstart lost paimos-agentd %s", name, command)
@@ -41,12 +41,14 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 	}
 
 	runbookFlags := map[string][]string{
-		"serve":     {"instance", "socket", "report-host", "report-url", "report-api-key-file"},
-		"start":     {"instance", "socket", "adapter", "workspace", "project-id", "identity"},
-		"status":    {"instance", "socket"},
-		"steer":     {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"interrupt": {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"stop":      {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"serve":        {"instance", "socket", "report-host", "report-url", "report-api-key-file"},
+		"start":        {"instance", "socket", "adapter", "workspace", "project-id", "identity"},
+		"status":       {"instance", "socket"},
+		"steer":        {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"interrupt":    {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"stop":         {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"held-queue":   {"instance", "socket", "session", "project-id", "identity"},
+		"resume-queue": {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
 	}
 	for name, contract := range map[string]map[string][]string{"runbook": runbookFlags} {
 		for command, names := range contract {
@@ -57,12 +59,14 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 	}
 
 	actualFlags := map[string][]string{
-		"serve":     {"instance", "socket", "codex-path", "claude-path", "node-path", "claude-sdk-path", "report-host", "report-url", "report-api-key-file", "paimos-path"},
-		"start":     {"instance", "socket", "adapter", "workspace", "project-id", "identity"},
-		"status":    {"instance", "socket"},
-		"steer":     {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"interrupt": {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
-		"stop":      {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"serve":        {"instance", "socket", "codex-path", "claude-path", "node-path", "claude-sdk-path", "pi-path", "pi-accounts", "report-host", "report-url", "report-api-key-file", "paimos-path"},
+		"start":        {"instance", "socket", "adapter", "workspace", "project-id", "identity", "account-key"},
+		"status":       {"instance", "socket"},
+		"steer":        {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"interrupt":    {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"stop":         {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
+		"held-queue":   {"instance", "socket", "session", "project-id", "identity"},
+		"resume-queue": {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
 	}
 	for command, names := range actualFlags {
 		for _, name := range names {
@@ -217,11 +221,20 @@ func TestAgentIntercomMatrixMatchesShippedControlBoundaries(t *testing.T) {
 	for name, adapter := range map[string]agentd.Adapter{
 		"Owned Codex (`agentd_codex`)":   agentd.NewCodexAdapter("codex", ""),
 		"Owned Claude (`agentd_claude`)": agentd.NewClaudeAdapter("claude", "node", "sdk.mjs"),
+		"Owned Pi (`agentd_pi`)":         agentd.NewPiAdapter("pi"),
 	} {
 		if capabilities := adapter.Capabilities(); !slices.Equal(capabilities, wantOwned) {
 			t.Fatalf("%s shipped capabilities=%v want=%v", name, capabilities, wantOwned)
 		}
 		row := intercomMatrixRow(doc, name)
+		if name == "Owned Pi (`agentd_pi`)" {
+			for _, claim := range []string{"Yes, exact live", "Local always", "clear_queue", "Fake-native proof", "pi_context"} {
+				if !strings.Contains(row, claim) {
+					t.Errorf("%s matrix row lost supported control claim %q: %s", name, claim, row)
+				}
+			}
+			continue
+		}
 		for _, claim := range []string{"Yes, exact live", "Local always", "durable typed interrupt/stop", "never inbox/steer"} {
 			if !strings.Contains(row, claim) {
 				t.Errorf("%s matrix row lost supported control claim %q: %s", name, claim, row)
