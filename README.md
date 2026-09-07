@@ -444,9 +444,11 @@ The boundaries below are part of the product description, not fine print:
   scoped post-live CLI and browser-fixture checks. Runtime doctor still reports
   unverified targets, an unconfigured receiver, and an unavailable primary
   inbox; human-session runtime-health, clean-OS onboarding, named cross-machine
-  handoffs, accessibility review, and exact deployed-static-variant/UI refresh
-  checks remain separate open checks. The public marketing site remains on the
-  prior `26.09.06.21.31` provenance.
+  handoffs, accessibility review, and UI draft-refresh checks remain separate
+  open checks; the draft-refresh follow-up is tracked in
+  [PAI-950](https://pm.barta.cm/projects/6/issues/PAI-950). The deployed static
+  asset variant was verified from the running container. The public marketing
+  site remains on the prior `26.09.06.21.31` provenance.
 
 Production evidence and open gaps are maintained in
 [Reference Deployments](docs/REFERENCE_DEPLOYMENTS.md), the

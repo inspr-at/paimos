@@ -20,9 +20,11 @@ Current production verification for 26.09.07 found public health `200/ok` on
 black-box checks plus 6 headless-browser fixtures after activation. Runtime
 doctor retains `targets ownership unverified`, `receiver not configured`, and
 `primary inbox unavailable`; human-session runtime-health, clean-OS onboarding,
-named cross-machine handoffs, VoiceOver/accessibility, exact deployed-static
-variant, and UI draft-refresh checks remain open. The public marketing site
-remains on the prior `26.09.06.21.31` provenance.
+named cross-machine handoffs and VoiceOver/accessibility remain open. The
+deployed static asset variant was verified from the running container; the UI
+draft-refresh follow-up remains open in
+[PAI-950](https://pm.barta.cm/projects/6/issues/PAI-950). The public marketing
+site remains on the prior `26.09.06.21.31` provenance.
 
 This guide uses only public command names and placeholder identities. Keep
 actual target references, socket paths, credentials, and message content out of
