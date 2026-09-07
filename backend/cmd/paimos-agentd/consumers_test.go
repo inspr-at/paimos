@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/agentd"
@@ -185,5 +187,110 @@ func TestNativeConsumerRepairRefusesUnboundProject(t *testing.T) {
 	}
 	if len(consumers.bindings) != 1 || consumers.bindings["other-project"].ProjectID != 42 {
 		t.Fatal("refused repair changed another project's binding")
+	}
+}
+
+func TestNativeConsumersHealthySessionProgressesWhileFirstStalls(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	root := t.TempDir()
+	process := &nativeFixtureProcess{done: make(chan struct{})}
+	controller, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "fixture", StateRoot: root, Adapters: []agentd.Adapter{nativeFixtureAdapter{process}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer controller.Close(context.Background())
+	remotes := map[string]models.HarnessSession{}
+	targets := map[string]string{}
+	for _, name := range []string{"one", "two"} {
+		session, err := controller.Start(ctx, agentd.StartRequest{Adapter: "codex", Identity: "codex:" + name, ProjectID: 42, Workspace: t.TempDir(), Prompt: "fixture"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		public, target := uuid.NewString(), uuid.NewString()
+		if err := controller.CheckpointReporter(ctx, session.ID, agentd.ControlRequest{Instance: "fixture", ProjectID: 42, Identity: session.Identity}, agentd.ReporterState{PublicSessionID: public, Capabilities: []agentd.Capability{agentd.CapabilityInbox}}); err != nil {
+			t.Fatal(err)
+		}
+		remotes[public] = models.HarnessSession{ID: public, ProjectID: 42, AgentName: name, Harness: "codex", Host: "fixture-host", ManagementMode: "managed", MessageTargetID: target, Phase: "working", Capabilities: models.HarnessCapabilities{Inbox: true}}
+		targets[session.Identity] = target
+	}
+	first := controller.Status().Sessions[0].Reporter.PublicSessionID
+	entered, release, healthy := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var enteredOnce, healthyOnce sync.Once
+	reporter, err := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(callCtx context.Context, _ string, args, _ []string, _ io.Reader) ([]byte, error) {
+		if args[1] == "curl" {
+			route, err := url.Parse(args[2])
+			if err != nil {
+				return nil, err
+			}
+			address := route.Query().Get("address")
+			return json.Marshal(map[string]any{"targets": []agentmessage.Target{{ID: targets[address], Instance: "fixture", ProjectID: 42, Address: address, Adapter: agentmessage.AdapterManagedHarness, Enabled: true, Role: "primary", Version: 1}}})
+		}
+		public := args[slices.Index(args, "--session")+1]
+		remote := remotes[public]
+		switch args[2] {
+		case "status":
+			if public == first {
+				enteredOnce.Do(func() { close(entered) })
+				select {
+				case <-release:
+				case <-callCtx.Done():
+					return nil, callCtx.Err()
+				}
+			} else {
+				select {
+				case <-entered:
+				case <-callCtx.Done():
+					return nil, callCtx.Err()
+				}
+			}
+			return json.Marshal(remote)
+		case "drain":
+			if public != first {
+				healthyOnce.Do(func() { close(healthy) })
+			}
+			return json.Marshal(agentmessage.InboxPage{Address: remote.Harness + ":" + remote.AgentName})
+		default:
+			return nil, errors.New("unexpected command")
+		}
+	}, newMemoryReporterLeaseStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := newNativeConsumers(root, "fixture", reporter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.controller = controller
+	defer c.supervisor.Stop()
+	// Cancel active driver calls before Stop drains, including on test failure.
+	defer cancel()
+	done := make(chan struct{})
+	go func() { c.reconcile(ctx); close(done) }()
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first session never entered")
+	}
+	select {
+	case <-healthy:
+	case <-time.After(3 * time.Second):
+		t.Fatal("healthy session waited behind stalled first session")
+	}
+	// Concurrent snapshots and repair must not race with per-session map updates.
+	_ = c.Snapshot()
+	repairCtx, stopRepair := context.WithCancel(ctx)
+	stopRepair()
+	if err := c.RepairProject(repairCtx, 42); !errors.Is(err, context.Canceled) {
+		t.Fatal("repair did not wait for reconcile drain", err)
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("reconcile failed to drain")
+	}
+	if err := c.RepairProject(ctx, 42); err != nil {
+		t.Fatal(err)
 	}
 }

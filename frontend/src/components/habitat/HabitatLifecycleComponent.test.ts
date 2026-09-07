@@ -430,4 +430,54 @@ describe('Habitat browser lifecycle', () => {
     expect(submitHabitatIntent).not.toHaveBeenCalled()
     await mounted.unmount()
   })
+
+  it('keeps an exact review through an unrelated worker heartbeat refresh', async () => {
+    const snapshot = habitatFixture('100', 1)
+    const profile = snapshot.fleet.workers[0]!.dispatch_profile!
+    const workspace = id('61')
+    const props = reactive({
+      projectId: 1,
+      agent: 'coordinator',
+      profile,
+      authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
+      workers: structuredClone(snapshot.fleet.workers),
+    })
+    const runtime = {
+      id: id('62'),
+      project_id: 1,
+      generation: id('63'),
+      machine_id: 'fixture-machine',
+      account_label: 'chatgpt' as const,
+      workspaces: [{ handle: workspace, identity: 'c'.repeat(64) }],
+      profiles: [{ id: profile.id, version: profile.version }],
+      sessions: [],
+      expires_at: new Date(Date.now() + 120000).toISOString(),
+    }
+    vi.mocked(loadOrchestration).mockResolvedValue(snapshot)
+    vi.mocked(loadHabitatRuntimes).mockResolvedValue([runtime])
+    const mounted = await mountComponent(HabitatLifecycle, props)
+    await vi.waitFor(() => expect(combobox(mounted.el, 'Runtime')).toBeDefined())
+    const runtimeSelect = combobox(mounted.el, 'Runtime')
+    runtimeSelect.value = runtime.id
+    runtimeSelect.dispatchEvent(new Event('change'))
+    await nextTick()
+    const workspaceSelect = combobox(mounted.el, 'Workspace')
+    workspaceSelect.value = workspace
+    workspaceSelect.dispatchEvent(new Event('change'))
+    await nextTick()
+    button(mounted.el, 'Review start request').click()
+    await nextTick()
+    const exactRequestBefore = mounted.el.querySelector('.habitat-facts')?.textContent
+    expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).not.toBeNull()
+
+    props.workers[0]!.liveness.reason = 'background_heartbeat'
+    await nextTick()
+    await vi.waitFor(() => expect(loadHabitatRuntimes).toHaveBeenCalledTimes(2))
+
+    expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).not.toBeNull()
+    expect(mounted.el.querySelector('.habitat-facts')?.textContent).toBe(exactRequestBefore)
+    await mounted.unmount()
+  })
 })

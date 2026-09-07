@@ -18,60 +18,23 @@ import (
 )
 
 func (p *projectLifecycle) consume(ctx context.Context) error {
+	var sessions []agentd.Session
+	for _, s := range p.owner.supervisor.Status().Sessions {
+		if s.ProjectID == p.config.ProjectID && s.State == agentd.StateRunning && p.bound[s.ID] {
+			sessions = append(sessions, s)
+		}
+	}
+	results := make([][]runtimeconsumer.Evidence, len(sessions))
+	failures := make([]error, len(sessions))
+	runConsumerTasks(len(sessions), func(i int) {
+		results[i], failures[i] = p.consumeSession(ctx, sessions[i])
+	})
 	var evidence []runtimeconsumer.Evidence
 	seen := map[string]bool{}
-	var failures []error
-	for _, s := range p.owner.supervisor.Status().Sessions {
-		if s.ProjectID != p.config.ProjectID || s.State != agentd.StateRunning || !p.bound[s.ID] {
-			continue
-		}
-		var inventory struct {
-			Targets []agentmessage.Target `json:"targets"`
-		}
-		if e := p.authority.Request(ctx, http.MethodGet, fmt.Sprintf("/api/projects/%d/message-targets?address=%s", s.ProjectID, url.QueryEscape(s.Identity)), nil, nil, &inventory); e != nil {
-			failures = append(failures, e)
-			continue
-		}
-		for _, kind := range []string{"fallback", "attention"} {
-			selected, selectionErr := selectOwnedConsumerTarget(inventory.Targets, p.owner.reporter.instance, s, kind)
-			if selectionErr != nil {
-				return selectionErr
-			}
-			if selected == nil {
-				continue
-			}
-			seen[kind] = true
-			registration := agentmessage.ConsumerRegistration{RuntimeID: p.record.Runtime.ID, RuntimeGeneration: p.record.Runtime.Generation, SessionID: s.Reporter.PublicSessionID, SessionGeneration: s.ID, Kind: kind, TargetID: selected.ID, TargetVersion: int64(selected.Version)}
-			// The exact owned receiver must be idle before execute releases its
-			// payload. Foreign private target references are quarantined.
-			ready := p.owner.supervisor.InboxReady(s.ID)
-			err := p.consumers.Step(ctx, registration, ready, func(callCtx context.Context, page agentmessage.ConsumerPage) (string, error) {
-				return p.deliverConsumer(callCtx, s, *selected, kind, page)
-			})
-			e := runtimeconsumer.Evidence{Kind: kind, Generation: p.owner.supervisor.Status().DaemonID, ProjectID: p.config.ProjectID, State: "ready", LastSuccess: time.Now().UTC()}
-			if err != nil {
-				e.State = "backoff"
-				e.Reason = "transport_unavailable"
-				e.Failures = 1
-				failures = append(failures, err)
-				if errors.Is(err, lifecycleclient.ErrCircuit) {
-					e.State = "circuit_open"
-					e.Reason = "transport_unavailable"
-					e.Failures = 3
-					e.Attention = true
-				} else if errors.Is(err, lifecycleclient.ErrUnknown) {
-					e.State = "circuit_open"
-					e.Reason = "outcome_unknown"
-					e.Attention = true
-				} else if errors.Is(err, lifecycleclient.ErrHandoff) {
-					e.State = "unavailable"
-					e.Reason = "legacy_handoff_required"
-				} else if errors.Is(err, lifecycleclient.ErrOwnership) {
-					e.State = "unavailable"
-					e.Reason = "authority_unavailable"
-				}
-			}
-			evidence = append(evidence, e)
+	for _, result := range results {
+		evidence = append(evidence, result...)
+		for _, e := range result {
+			seen[e.Kind] = true
 		}
 	}
 	for _, kind := range []string{"fallback", "attention"} {
@@ -83,6 +46,69 @@ func (p *projectLifecycle) consume(ctx context.Context) error {
 	p.consumerEvidence = evidence
 	p.owner.mu.Unlock()
 	return errors.Join(failures...)
+}
+
+// Each task owns its evidence until all session work drains. Only the caller
+// publishes the complete snapshot or advances lifecycle/repair state.
+func (p *projectLifecycle) consumeSession(ctx context.Context, s agentd.Session) ([]runtimeconsumer.Evidence, error) {
+	var evidence []runtimeconsumer.Evidence
+	var failures []error
+	var inventory struct {
+		Targets []agentmessage.Target `json:"targets"`
+	}
+	if e := p.authority.Request(ctx, http.MethodGet, fmt.Sprintf("/api/projects/%d/message-targets?address=%s", s.ProjectID, url.QueryEscape(s.Identity)), nil, nil, &inventory); e != nil {
+		failures = append(failures, e)
+		// An unread inventory cannot establish that an optional receiver is
+		// absent. Keep its failed coverage even when another session succeeds.
+		for _, kind := range []string{"fallback", "attention"} {
+			evidence = append(evidence, runtimeconsumer.Evidence{Kind: kind, Generation: p.owner.supervisor.Status().DaemonID, ProjectID: p.config.ProjectID, State: "unavailable", Reason: "transport_unavailable", Failures: 1})
+		}
+		return evidence, errors.Join(failures...)
+	}
+	for _, kind := range []string{"fallback", "attention"} {
+		selected, selectionErr := selectOwnedConsumerTarget(inventory.Targets, p.owner.reporter.instance, s, kind)
+		if selectionErr != nil {
+			evidence = append(evidence, runtimeconsumer.Evidence{Kind: kind, Generation: p.owner.supervisor.Status().DaemonID, ProjectID: p.config.ProjectID, State: "unavailable", Reason: "authority_unavailable", Failures: 1})
+			failures = append(failures, selectionErr)
+			continue
+		}
+		if selected == nil {
+			continue
+		}
+		registration := agentmessage.ConsumerRegistration{RuntimeID: p.record.Runtime.ID, RuntimeGeneration: p.record.Runtime.Generation, SessionID: s.Reporter.PublicSessionID, SessionGeneration: s.ID, Kind: kind, TargetID: selected.ID, TargetVersion: int64(selected.Version)}
+		// The exact owned receiver must be idle before execute releases its
+		// payload. Foreign private target references are quarantined.
+		ready := p.owner.supervisor.InboxReady(s.ID)
+		err := p.consumers.Step(ctx, registration, ready, func(callCtx context.Context, page agentmessage.ConsumerPage) (string, error) {
+			return p.deliverConsumer(callCtx, s, *selected, kind, page)
+		})
+		e := runtimeconsumer.Evidence{Kind: kind, Generation: p.owner.supervisor.Status().DaemonID, ProjectID: p.config.ProjectID, State: "ready", LastSuccess: time.Now().UTC()}
+		if err != nil {
+			e.LastSuccess = time.Time{}
+			e.State = "backoff"
+			e.Reason = "transport_unavailable"
+			e.Failures = 1
+			failures = append(failures, err)
+			if errors.Is(err, lifecycleclient.ErrCircuit) {
+				e.State = "circuit_open"
+				e.Reason = "transport_unavailable"
+				e.Failures = 3
+				e.Attention = true
+			} else if errors.Is(err, lifecycleclient.ErrUnknown) {
+				e.State = "circuit_open"
+				e.Reason = "outcome_unknown"
+				e.Attention = true
+			} else if errors.Is(err, lifecycleclient.ErrHandoff) {
+				e.State = "unavailable"
+				e.Reason = "legacy_handoff_required"
+			} else if errors.Is(err, lifecycleclient.ErrOwnership) {
+				e.State = "unavailable"
+				e.Reason = "authority_unavailable"
+			}
+		}
+		evidence = append(evidence, e)
+	}
+	return evidence, errors.Join(failures...)
 }
 
 func (p *projectLifecycle) deliverConsumer(ctx context.Context, s agentd.Session, target agentmessage.Target, kind string, page agentmessage.ConsumerPage) (string, error) {

@@ -203,3 +203,86 @@ func TestConsumerRetryDelayIsStableBoundedAndDispersed(t *testing.T) {
 		}
 	}
 }
+
+func TestFencedConsumerRecoveryWriteFailureLatchesUntilRepair(t *testing.T) {
+	for _, failure := range []string{"transport", "handoff", "unknown"} {
+		t.Run(failure, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.Chmod(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			var c *Consumers
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if calls == 1 {
+					if err := os.Chmod(c.journal.JournalPath(), 0400); err != nil {
+						t.Error(err)
+					}
+				}
+				if failure == "transport" {
+					http.Error(w, "unavailable", 503)
+					return
+				}
+				w.WriteHeader(409)
+				code := "consumer_handoff_required"
+				if failure == "unknown" {
+					code = "consumer_outcome_unknown"
+				}
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
+			}))
+			defer server.Close()
+			proof, _ := NewProof()
+			h, err := NewHTTP(server.URL, 42, proof, func() (string, error) { return "fixture", nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err = NewConsumers(dir, h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			in := agentmessage.ConsumerRegistration{RuntimeID: uuid.NewString(), RuntimeGeneration: uuid.NewString(), SessionID: uuid.NewString(), SessionGeneration: uuid.NewString(), TargetID: uuid.NewString(), TargetVersion: 1, Kind: "fallback"}
+			original := ErrTransport
+			if failure == "handoff" {
+				original = ErrHandoff
+			}
+			if failure == "unknown" {
+				original = ErrUnknown
+			}
+			err = c.Step(context.Background(), in, false, nil)
+			if !errors.Is(err, original) || !errors.Is(err, ErrUnknown) || err == original {
+				t.Errorf("recovery write failure was hidden: %v", err)
+			}
+			if err := os.Chmod(c.journal.JournalPath(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			originalRegistration := in
+			for range 4 {
+				// A changed generation must not bypass the affected target latch.
+				in.RuntimeGeneration = uuid.NewString()
+				if err := c.Step(context.Background(), in, false, nil); !errors.Is(err, ErrUnknown) {
+					t.Errorf("failed persistence did not latch: %v", err)
+				}
+			}
+			in = originalRegistration
+			if calls != 1 {
+				t.Fatalf("latched stream retried HTTP %d times", calls)
+			}
+			err = c.Repair()
+			if failure == "unknown" {
+				if !errors.Is(err, ErrUnknown) {
+					t.Fatal("repair cleared unknown custody", err)
+				}
+				saved := c.journal.Snapshot()[0]
+				if saved.Blocked != "outcome_unknown" {
+					t.Fatal("repair lost blocked recovery record")
+				}
+				if err := c.Step(context.Background(), in, false, nil); !errors.Is(err, ErrUnknown) || calls != 1 {
+					t.Fatal("unknown custody retried")
+				}
+			} else if err != nil {
+				t.Fatal("safe repair refused", err)
+			}
+		})
+	}
+}
