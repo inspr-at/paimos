@@ -445,7 +445,7 @@ func (s *Service) annotateBridge(ctx context.Context, tx *sql.Tx, stored storedB
 	case handoff.HandoffID != "" && handoff.CredentialEpoch == 0:
 		progress.SetupRequired = SetupRequiredHandoffSecretMint
 		progress.NextAction = NextActionMintHandoffSecret
-		progress.BlockingReason = "v2_report_required"
+		progress.BlockingReason = "setup_required_" + SetupRequiredHandoffSecretMint
 		if *state != BatchPaused {
 			*state = BatchBlocked
 		}
@@ -458,7 +458,7 @@ func (s *Service) annotateBridge(ctx context.Context, tx *sql.Tx, stored storedB
 	case !verify.PolicySatisfied && handoff.CredentialEpoch == 0:
 		progress.SetupRequired = SetupRequiredHandoffSecretMint
 		progress.NextAction = NextActionMintHandoffSecret
-		progress.BlockingReason = "v2_report_required"
+		progress.BlockingReason = "setup_required_" + SetupRequiredHandoffSecretMint
 		if *state != BatchPaused {
 			*state = BatchBlocked
 		}
@@ -538,6 +538,9 @@ func builtIdentityCompleteTx(ctx context.Context, tx *sql.Tx, stored storedBatch
 	}
 	artifact, err := externalstage.LoadExplicitBuiltArtifact(ctx, tx, *stored.DeliveryID, *snapshot.AttemptID)
 	if err != nil {
+		if errors.Is(err, externalstage.ErrInvalid) {
+			return false, nil
+		}
 		return false, err
 	}
 	return artifact.Complete(), nil

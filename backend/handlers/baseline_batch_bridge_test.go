@@ -411,6 +411,118 @@ func TestBaselineBatchPartialIdentityHTTP(t *testing.T) {
 	}
 }
 
+func TestBaselineBatchConflictingReleaseManifestHTTP(t *testing.T) {
+	ts := newTestServer(t)
+	userID := promoteSuperAdmin(t, "admin")
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Conflict identity", "key": "CID"}))
+	if _, err := db.DB.Exec(`INSERT INTO project_agents(project_id,name) VALUES(?,'codex')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	optIn(t, ts, projectID)
+	handover, _ := validHandover(t)
+	imported := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/import", projectID),
+		map[string]any{"handover": json.RawMessage(handover)})
+	var draft baselinebatch.Draft
+	decode(t, imported, &draft)
+	daemon := newOwnedDaemon(t, projectID, userID)
+	worker := daemon.workerSelection("codex")
+	if resp := patchBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d", projectID, draft.ID),
+		map[string]any{"execution_mode": "assisted", "worker": worker}); resp.StatusCode != 200 {
+		t.Fatal(baselineReadBody(resp))
+	}
+	review := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/review", projectID, draft.ID),
+		map[string]any{"execution_mode": "assisted", "worker": worker, "selected_requirement_refs": []string{"req.login"}})
+	decode(t, review, &draft)
+	if resp := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/readiness", projectID, draft.ID), nil); resp.StatusCode != 200 {
+		t.Fatal(baselineReadBody(resp))
+	}
+	if daemon.step(nil) == nil {
+		t.Fatal("no readiness intent")
+	}
+	started := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/start", projectID, draft.ID), map[string]any{
+		"idempotency_key": "conflict-identity-start", "review_id": *draft.ReviewID, "draft_revision": draft.Revision,
+		"confirm": true, "content_digest": draft.Baseline.ContentDigest, "revision_seal": draft.Baseline.RevisionSeal,
+		"execution_mode": "assisted", "selected_requirement_refs": []string{"req.login"}, "worker": worker,
+	})
+	if started.StatusCode != 200 {
+		t.Fatalf("start=%d %s", started.StatusCode, baselineReadBody(started))
+	}
+	var batch baselinebatch.Batch
+	decode(t, started, &batch)
+	if daemon.step(nil) == nil {
+		t.Fatal("no start intent")
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	store := delivery.NewStore(db.DB, delivery.Options{Clock: delivery.ClockFunc(func() time.Time { return now })})
+	reporter := delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)}
+	impl, err := store.StartStageRetry(context.Background(), delivery.StageStartRequest{
+		IssueID: batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageImplementation, Reporter: reporter,
+		ReasonCode: "implementation_start", IdempotencyKey: batch.BatchKey + ":conflict-impl:start",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRelease := "7777777777777777777777777777777777777777777777777777777777777777"
+	if _, err := store.ReportStage(context.Background(), delivery.StageReport{
+		IssueID: batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageImplementation,
+		ExecutionNumber: impl.ExecutionNumber, AuthorityEpoch: impl.AuthorityEpoch, Reporter: reporter,
+		IdempotencyKey: batch.BatchKey + ":conflict-impl:report", Kind: "semantic", State: "succeeded",
+		Evidence: []delivery.Evidence{
+			{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: bridgeHTTPCommit},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: bridgeHTTPConfig},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatOCIManifestRef(bridgeHTTPIndex)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseManifestRef(bridgeHTTPReleaseSet)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseManifestRef(otherRelease)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseCoordinateRef(bridgeHTTPCoordinate)},
+			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref",
+				ReferenceValue: externalstage.FormatReleaseIdentity(externalstage.VersionSchemeINSPRCalendar, bridgeHTTPChannel, bridgeHTTPSequence, bridgeHTTPVersion)},
+		},
+		ReasonCode: "implementation_result",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	qa, err := store.StartStageRetry(context.Background(), delivery.StageStartRequest{
+		IssueID: batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageQA, Reporter: reporter,
+		ReasonCode: "qa_start", IdempotencyKey: batch.BatchKey + ":conflict-qa:start",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReportStage(context.Background(), delivery.StageReport{
+		IssueID: batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageQA,
+		ExecutionNumber: qa.ExecutionNumber, AuthorityEpoch: qa.AuthorityEpoch, Reporter: reporter,
+		IdempotencyKey: batch.BatchKey + ":conflict-qa:report", Kind: "semantic", State: "succeeded",
+		Evidence:   []delivery.Evidence{{Type: "test_result", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: bridgeHTTPQADigest}},
+		ReasonCode: "test_result",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := ts.get(t, fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d", projectID, batch.ID), ts.adminCookie)
+	if got.StatusCode != 200 {
+		t.Fatalf("get=%d %s", got.StatusCode, baselineReadBody(got))
+	}
+	decode(t, got, &batch)
+	if batch.Progress.SetupRequired != baselinebatch.SetupRequiredBuiltArtifact || batch.Progress.Handoff != nil {
+		t.Fatalf("get conflicting identity %+v", batch.Progress)
+	}
+	resp := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/reconcile", projectID, batch.ID), map[string]any{})
+	if resp.StatusCode != 200 {
+		t.Fatalf("reconcile=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+	decode(t, resp, &batch)
+	if batch.Progress.SetupRequired != baselinebatch.SetupRequiredBuiltArtifact || batch.Progress.Handoff != nil {
+		t.Fatalf("reconcile conflicting identity %+v", batch.Progress)
+	}
+	cancel := postBaseline(t, ts, ts.adminCookie, controlPath(projectID, batch.ID), map[string]any{"action": "cancel"})
+	if cancel.StatusCode != 200 {
+		t.Fatalf("cancel=%d %s", cancel.StatusCode, baselineReadBody(cancel))
+	}
+	decode(t, cancel, &batch)
+	if batch.ControlState != baselinebatch.ControlCancelled {
+		t.Fatalf("cancel state=%s", batch.ControlState)
+	}
+}
+
 func TestBaselineBatchJanusAfterEmptySealHTTP(t *testing.T) {
 	ts := newTestServer(t)
 	userID := promoteSuperAdmin(t, "admin")

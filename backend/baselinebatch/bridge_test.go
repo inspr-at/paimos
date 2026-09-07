@@ -558,8 +558,9 @@ func TestBridgeReviewedBatchToPharosVerification(t *testing.T) {
 	if handoff.HandoffID == "" || handoff.CredentialEpoch != 0 {
 		t.Fatalf("handoff=%+v", handoff)
 	}
-	if got.Progress.NextAction != NextActionMintHandoffSecret {
-		t.Fatalf("next_action=%q", got.Progress.NextAction)
+	if got.Progress.NextAction != NextActionMintHandoffSecret || got.Progress.SetupRequired != SetupRequiredHandoffSecretMint ||
+		got.Progress.BlockingReason != "setup_required_"+SetupRequiredHandoffSecretMint {
+		t.Fatalf("next_action=%q setup=%q reason=%q", got.Progress.NextAction, got.Progress.SetupRequired, got.Progress.BlockingReason)
 	}
 	secret, err := f.ext.Mint(ctx, f.operator, handoff.HandoffID, 0, false)
 	if err != nil {
@@ -1336,6 +1337,115 @@ func TestBridgeBaselineOwnerReportRequiresV2(t *testing.T) {
 	}
 	if !snapshotStage(f.snapshot(), delivery.StageDeployment).PolicySatisfied {
 		t.Fatal("matching v2 report did not satisfy deployment")
+	}
+}
+
+func TestBridgeCancelKeepsBaselineArtifactBinding(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
+	f.reportBuildAndQA()
+	ctx := context.Background()
+	got := f.authorizeHandoff()
+	secret, err := f.ext.Mint(ctx, f.operator, got.Progress.Handoff.HandoffID, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := f.now.Format(time.RFC3339Nano)
+	if _, err := f.ext.Accept(ctx, f.reporter, got.Progress.Handoff.HandoffID, "accept-before-cancel", secret,
+		externalstage.AcceptRequest{Sequence: 1, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ext.Report(ctx, f.reporter, got.Progress.Handoff.HandoffID, "active-before-cancel", secret,
+		externalstage.ReportRequest{Sequence: 2, State: externalstage.HandoffStateActive, ObservedAt: observed}); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := f.svc.Control(ctx, f.actor, f.projectID, f.batch.ID, ControlRequest{Action: "cancel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.ControlState != ControlCancelled {
+		t.Fatalf("control_state=%s", cancelled.ControlState)
+	}
+	wrong := f.artifact(externalstage.EvidenceKindDeployment)
+	wrong.ObservedAt = observed
+	wrong.Artifact.Version = "26.09.09.09.09.09"
+	wrong.Artifact.ReleaseChannel = "canary"
+	wrong.Artifact.ReleaseManifestDigest = bridgeIndex
+	if _, err := f.ext.ReportV2(ctx, f.reporter, got.Progress.Handoff.HandoffID, "cancel-mismatch", secret,
+		externalstage.ReportRequestV2{Sequence: 3, State: externalstage.HandoffStateSucceeded, ObservedAt: observed,
+			PharosEvidence: &wrong}); !errors.Is(err, externalstage.ErrInvalid) {
+		t.Fatalf("cancelled mismatched identity err=%v", err)
+	}
+	v1 := f.v1Evidence()
+	v1.ObservedAt = observed
+	if _, err := f.ext.Report(ctx, f.reporter, got.Progress.Handoff.HandoffID, "cancel-v1", secret,
+		externalstage.ReportRequest{Sequence: 3, State: externalstage.HandoffStateSucceeded, ObservedAt: observed,
+			PharosEvidence: &v1}); !errors.Is(err, externalstage.ErrV2Required) {
+		t.Fatalf("cancelled v1 err=%v", err)
+	}
+	if snapshotStage(f.snapshot(), delivery.StageDeployment).PolicySatisfied {
+		t.Fatal("cancel weakened baseline owner binding")
+	}
+}
+
+func TestBridgeConflictingReleaseManifestIsIdentityBoundary(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
+	otherRelease := "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+	f.reportPartialBuildAndQA([]delivery.Evidence{
+		{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: bridgeCommit},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: strings.TrimPrefix(bridgeConfig, "sha256:")},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatOCIManifestRef(bridgeIndex)},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseManifestRef(bridgeReleaseSet)},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseManifestRef(otherRelease)},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseCoordinateRef(bridgeCoordinate)},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref",
+			ReferenceValue: externalstage.FormatReleaseIdentity(externalstage.VersionSchemeINSPRCalendar, bridgeChannel, bridgeSequence, bridgeVersion)},
+	})
+	ctx := context.Background()
+	got, err := f.svc.GetBatch(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Progress.SetupRequired != SetupRequiredBuiltArtifact || f.liveHandoff(delivery.StageDeployment).HandoffID != "" {
+		t.Fatalf("conflicting identity progress=%+v", got.Progress)
+	}
+	if _, err := f.svc.Reconcile(ctx, f.actor, f.projectID, f.batch.ID); err != nil {
+		t.Fatal(err)
+	}
+	if f.liveHandoff(delivery.StageDeployment).HandoffID != "" {
+		t.Fatal("reconcile handed off conflicting identity")
+	}
+	cancelled, err := f.svc.Control(ctx, f.actor, f.projectID, f.batch.ID, ControlRequest{Action: "cancel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.ControlState != ControlCancelled {
+		t.Fatalf("cancel after conflict state=%s", cancelled.ControlState)
+	}
+}
+
+func TestBridgeMalformedReleaseManifestIsIdentityBoundary(t *testing.T) {
+	f := openAgentBridgeFixture(t, ModeAssisted)
+	f.registerPharos()
+	f.reportPartialBuildAndQA([]delivery.Evidence{
+		{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: bridgeCommit},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: strings.TrimPrefix(bridgeConfig, "sha256:")},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: "release-manifest:sha256:notadigest"},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseCoordinateRef(bridgeCoordinate)},
+		{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref",
+			ReferenceValue: externalstage.FormatReleaseIdentity(externalstage.VersionSchemeINSPRCalendar, bridgeChannel, bridgeSequence, bridgeVersion)},
+	})
+	ctx := context.Background()
+	got, err := f.svc.GetBatch(ctx, f.actor, f.projectID, f.batch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Progress.SetupRequired != SetupRequiredBuiltArtifact {
+		t.Fatalf("malformed prefix progress=%+v", got.Progress)
+	}
+	if _, err := f.svc.Control(ctx, f.actor, f.projectID, f.batch.ID, ControlRequest{Action: "pause"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

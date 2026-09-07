@@ -203,18 +203,23 @@ func assignString(dst *string, value string) error {
 
 func baselineOwnedDeliveryTx(ctx context.Context, tx *sql.Tx, deliveryID int64) (bool, error) {
 	var n int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM baseline_batch_batches
-		WHERE delivery_id=? AND control_state<>'cancelled'`, deliveryID).Scan(&n)
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM baseline_batch_batches WHERE delivery_id=?`, deliveryID).Scan(&n)
 	return n > 0, err
 }
 
 func bindBuiltOwnerArtifactTx(ctx context.Context, tx *sql.Tx, h handoffRow, req ReportRequest, artifactV2 *ArtifactEvidenceV2) error {
-	if h.role != string(ReporterRoleOwner) || req.PharosEvidence == nil || req.PharosEvidence.Kind != EvidenceKindDeployment ||
-		req.PharosEvidence.Result != EvidenceResultSucceeded {
+	if h.role != string(ReporterRoleOwner) || req.PharosEvidence == nil || req.PharosEvidence.Result != EvidenceResultSucceeded {
+		return nil
+	}
+	kind := req.PharosEvidence.Kind
+	if kind != EvidenceKindDeployment && kind != EvidenceKindVerification {
 		return nil
 	}
 	if err := assertSealedPrerequisitesMatchActiveJanusTx(ctx, tx, h); err != nil {
 		return err
+	}
+	if kind != EvidenceKindDeployment {
+		return nil
 	}
 	baseline, err := baselineOwnedDeliveryTx(ctx, tx, h.deliveryID)
 	if err != nil {
