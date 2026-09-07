@@ -337,6 +337,12 @@
                   "console"
                 ]
               },
+              "account_key": {
+                "type": "string",
+                "maxLength": 128,
+                "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                "description": "Opaque named-account selection when runtime_provenance_trust is managed_reporter. Distinct from account_label. Omitted when empty. Never a path, env, executable, or credential."
+              },
               "management_mode": {
                 "type": "string",
                 "enum": [

@@ -238,12 +238,19 @@ func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attemp
 		return Session{}, err
 	}
 	accountLabel := "unknown"
-	if prober, ok := adapter.(AccountProber); ok {
+	if validated.AccountKey != "" {
+		resolver, ok := adapter.(accountContextResolver)
+		if !ok || !resolver.HasAccount(validated.AccountKey) {
+			return Session{}, errors.New("managed account selection is unavailable")
+		}
+	} else if prober, ok := adapter.(AccountProber); ok {
 		if candidate := prober.AccountLabel(ctx); validAccountLabel(candidate) {
 			accountLabel = candidate
 		}
-	}
-	if validated.ExpectedAccountLabel != "" && (accountLabel == "unknown" || accountLabel != validated.ExpectedAccountLabel) {
+		if validated.ExpectedAccountLabel != "" && (accountLabel == "unknown" || accountLabel != validated.ExpectedAccountLabel) {
+			return Session{}, errors.New("managed account constraint could not be verified")
+		}
+	} else if validated.ExpectedAccountLabel != "" {
 		return Session{}, errors.New("managed account constraint could not be verified")
 	}
 	if validated.ExpectedMachineID != "" {
@@ -274,7 +281,7 @@ func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attemp
 	entry := &sessionEntry{session: Session{
 		ID: generation, Identity: validated.Identity, Adapter: validated.Adapter, Workspace: validated.Workspace,
 		ProjectID: validated.ProjectID, Role: validated.Role, ParentSessionID: validated.ParentSessionID, TicketID: validated.TicketID, WorkShape: validated.WorkShape,
-		WorkspaceProvenance: provenance, DispatchProfile: profile, AccountLabel: accountLabel,
+		WorkspaceProvenance: provenance, DispatchProfile: profile, AccountLabel: accountLabel, AccountKey: validated.AccountKey,
 		Capabilities: append([]Capability(nil), capabilities...), Managed: true, State: StateStarting,
 		StartedAt: now, HeartbeatAt: now,
 	}, capabilities: capabilitySet, monitorDone: make(chan struct{})}
@@ -304,6 +311,23 @@ func (s *Supervisor) startOnce(ctx context.Context, request StartRequest, attemp
 		}
 		s.releaseReservation(entry.session.ID)
 		return Session{}, errors.New("agentd adapter returned an invalid owned process")
+	}
+	if validated.AccountKey != "" {
+		selected, ok := process.(accountSelection)
+		key, label := "", ""
+		if ok {
+			key, label = selected.AccountSelection()
+		}
+		if !ok || key != validated.AccountKey || !validAccountLabel(label) || label == "unknown" ||
+			(validated.ExpectedAccountLabel != "" && label != validated.ExpectedAccountLabel) {
+			_, _ = process.Stop(context.Background(), ControlRequest{CorrelationID: "agentd-account-mismatch"})
+			s.releaseReservation(entry.session.ID)
+			return Session{}, errors.New("managed account identity could not be verified")
+		}
+		entry.mu.Lock()
+		entry.session.AccountKey = key
+		entry.session.AccountLabel = label
+		entry.mu.Unlock()
 	}
 	s.mu.RLock()
 	closed = s.closed
@@ -392,6 +416,10 @@ func (s *Supervisor) releaseReservation(id string) {
 func validateStartRequest(request StartRequest) (StartRequest, error) {
 	if request.ExpectedAccountLabel != "" && (!validAccountLabel(request.ExpectedAccountLabel) || request.ExpectedAccountLabel == "unknown") {
 		return request, errors.New("invalid expected account label")
+	}
+	request.AccountKey = strings.TrimSpace(request.AccountKey)
+	if request.AccountKey != "" && !validAccountKey(request.AccountKey) {
+		return request, errors.New("invalid managed account selection")
 	}
 	if request.ExpectedMachineID != "" && !validSafeLabel(request.ExpectedMachineID, 128) {
 		return request, errors.New("invalid expected machine identity")

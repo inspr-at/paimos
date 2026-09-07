@@ -904,17 +904,17 @@ func TestRegisterPersistsExactDispatchAndRejectsExclusiveWorkspaceReuse(t *testi
 	input := RegisterInput{ProjectID: projectID, AgentName: "worker", Harness: "codex", Host: "mbp0", SessionRef: "profile-session", WorkerLease: testWorkerLease,
 		ManagementMode: ManagementManaged, Role: RoleWorker, SteerMode: SteerOwned,
 		Capabilities: models.HarnessCapabilities{Inbox: true, Status: true, Steer: true, Interrupt: true, Stop: true},
-		Workspace:    workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: "chatgpt"}
+		Workspace:    workspace, DispatchProfileID: "codex-sol-high", DispatchProfileVersion: "1", AccountLabel: "chatgpt", AccountKey: "coordinator"}
 	session, created, err := service.Register(context.Background(), input)
 	if err != nil || !created {
 		t.Fatalf("register = %+v created=%v err=%v", session, created, err)
 	}
 	if session.MachineID != "mbp0" || session.Workspace == nil || *session.Workspace != *workspace || session.DispatchProfile == nil ||
-		session.DispatchProfile.ID != "codex-sol-high" || session.DispatchProfile.Model != "gpt-5.6-sol" || session.AccountLabel != "chatgpt" {
+		session.DispatchProfile.ID != "codex-sol-high" || session.DispatchProfile.Model != "gpt-5.6-sol" || session.AccountLabel != "chatgpt" || session.AccountKey != "coordinator" {
 		t.Fatalf("stored provenance = %+v", session)
 	}
 	replay, created, err := service.Register(context.Background(), input)
-	if err != nil || created || replay.ID != session.ID {
+	if err != nil || created || replay.ID != session.ID || replay.AccountKey != "coordinator" {
 		t.Fatalf("replay = %+v created=%v err=%v", replay, created, err)
 	}
 	conflict := input
@@ -926,6 +926,16 @@ func TestRegisterPersistsExactDispatchAndRejectsExclusiveWorkspaceReuse(t *testi
 	badProfile.SessionRef, badProfile.DispatchProfileVersion = "profile-session-3", "latest"
 	if _, _, err := service.Register(context.Background(), badProfile); !IsCode(err, CodeInvalid) {
 		t.Fatalf("unpinned profile error = %v", err)
+	}
+	pathKey := input
+	pathKey.SessionRef, pathKey.AccountKey = "profile-session-4", "/tmp/codex"
+	if _, _, err := service.Register(context.Background(), pathKey); !IsCode(err, CodeInvalid) {
+		t.Fatalf("path account key error = %v", err)
+	}
+	classKey := input
+	classKey.SessionRef, classKey.AccountKey = "profile-session-5", "chatgpt"
+	if _, _, err := service.Register(context.Background(), classKey); !IsCode(err, CodeInvalid) {
+		t.Fatalf("class label account key error = %v", err)
 	}
 }
 

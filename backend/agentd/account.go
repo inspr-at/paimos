@@ -23,6 +23,10 @@ const (
 )
 
 func runAccountProbe(ctx context.Context, path string, maximum int, kind accountProbeKind) ([]byte, error) {
+	return runAccountProbeEnv(ctx, path, maximum, kind, nil)
+}
+
+func runAccountProbeEnv(ctx context.Context, path string, maximum int, kind accountProbeKind, env []string) ([]byte, error) {
 	if maximum < 1 || maximum > 4096 {
 		return nil, errors.New("account probe bound is invalid")
 	}
@@ -41,6 +45,9 @@ func runAccountProbe(ctx context.Context, path string, maximum int, kind account
 	output := &boundedAccountOutput{maximum: maximum}
 	diagnostic := &boundedAccountOutput{maximum: maximum}
 	command := exec.CommandContext(ctx, path, args...) // #nosec G204 G702 -- canonical executable and closed internal argv above.
+	if env != nil {
+		command.Env = env
+	}
 	command.Stdout = output
 	command.Stderr = io.Discard
 	if kind == accountProbeCodex {

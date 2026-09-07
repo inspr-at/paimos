@@ -97,7 +97,7 @@ func validateRegistryRecord(record registryRecord) error {
 		return errors.New("agentd work shape has no ticket binding")
 	}
 	if s.WorkspaceProvenance.Identity == "" {
-		if s.DispatchProfile != nil || s.AccountLabel != "" && s.AccountLabel != "unknown" {
+		if s.DispatchProfile != nil || s.AccountKey != "" || s.AccountLabel != "" && s.AccountLabel != "unknown" {
 			return errors.New("invalid legacy agentd execution provenance")
 		}
 	} else {
@@ -127,6 +127,9 @@ func validateRegistryRecord(record registryRecord) error {
 		}
 		if !validAccountLabel(s.AccountLabel) {
 			return errors.New("invalid agentd account provenance")
+		}
+		if s.AccountKey != "" && !validAccountKey(s.AccountKey) {
+			return errors.New("invalid agentd account selection")
 		}
 	}
 	switch s.State {

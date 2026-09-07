@@ -135,6 +135,7 @@ type WorkerV2 struct {
 	WorkspaceProvenance        *WorkspaceProvenance           `json:"workspace_provenance"`
 	DispatchProfile            *models.HarnessDispatchProfile `json:"dispatch_profile"`
 	AccountLabel               string                         `json:"account_label"`
+	AccountKey                 string                         `json:"account_key,omitempty"`
 	ManagementMode             string                         `json:"management_mode"`
 	RuntimeProvenanceTrust     string                         `json:"runtime_provenance_trust"`
 	Ticket                     *Ticket                        `json:"ticket"`

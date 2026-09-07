@@ -185,3 +185,31 @@ func TestStartAmbiguousAttemptNeverRespawns(t *testing.T) {
 		t.Fatal("ambiguous attempt was retried")
 	}
 }
+
+func TestStartJournalRejectsConflictingAccountKeyRetry(t *testing.T) {
+	adapter := &keyedDispatchAdapter{dispatchAdapter: dispatchAdapter{label: "chatgpt"}, keys: map[string]bool{"one": true, "two": true}}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "account-retry", StateRoot: t.TempDir(), Adapters: []Adapter{adapter}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	request := StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:worker", ProjectID: 952, IdempotencyKey: "retry-key", AccountKey: "one"}
+	session, err := supervisor.Start(context.Background(), request)
+	if err != nil || session.AccountKey != "one" {
+		t.Fatalf("first start=%+v err=%v", session, err)
+	}
+	conflict := request
+	conflict.AccountKey = "two"
+	if _, err := supervisor.Start(context.Background(), conflict); !errors.Is(err, ErrStartReplayConflict) || len(adapter.requests) != 1 {
+		t.Fatalf("conflicting account retry spawned=%d err=%v", len(adapter.requests), err)
+	}
+	dropped := request
+	dropped.AccountKey = ""
+	if _, err := supervisor.Start(context.Background(), dropped); !errors.Is(err, ErrStartReplayConflict) || len(adapter.requests) != 1 {
+		t.Fatalf("dropped account retry spawned=%d err=%v", len(adapter.requests), err)
+	}
+	replay, err := supervisor.Start(context.Background(), request)
+	if err != nil || replay.ID != session.ID || replay.AccountKey != "one" || len(adapter.requests) != 1 {
+		t.Fatalf("exact account retry respawned: %+v err=%v spawned=%d", replay, err, len(adapter.requests))
+	}
+}

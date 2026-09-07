@@ -34,6 +34,7 @@ type configuredWorkspace struct {
 type configuredProject struct {
 	ProjectID    int64                      `json:"project_id"`
 	AccountLabel string                     `json:"account_label"`
+	AccountKey   string                     `json:"account_key,omitempty"`
 	Profiles     []lifecycleintents.Profile `json:"profiles"`
 	Workspaces   []configuredWorkspace      `json:"workspaces"`
 }
@@ -102,6 +103,9 @@ func newDaemonLifecycle(path, root, instance, reportURL, keyFile string, supervi
 	seen := map[int64]bool{}
 	for _, c := range config.Projects {
 		if c.ProjectID <= 0 || seen[c.ProjectID] || len(c.Workspaces) == 0 || len(c.Workspaces) > 16 || len(c.Profiles) == 0 || len(c.Profiles) > 16 {
+			return nil, errors.New("lifecycle project configuration invalid")
+		}
+		if c.AccountKey != "" && !agentd.ValidAccountKey(c.AccountKey) {
 			return nil, errors.New("lifecycle project configuration invalid")
 		}
 		seen[c.ProjectID] = true
@@ -226,7 +230,16 @@ func (p *projectLifecycle) verifyConfiguration(ctx context.Context) error {
 			return e
 		}
 		actual, e := p.owner.reporter.ResolveDispatchProfile(ctx, v.ID, v.Version, profile.Harness)
-		if e != nil || actual != profile || p.owner.supervisor.ProbeAccount(ctx, profile.Harness) != p.config.AccountLabel {
+		if e != nil || actual != profile {
+			return lifecycleclient.ErrOwnership
+		}
+		if p.config.AccountKey != "" {
+			if !p.owner.supervisor.HasAccount(profile.Harness, p.config.AccountKey) {
+				return lifecycleclient.ErrOwnership
+			}
+			continue
+		}
+		if p.owner.supervisor.ProbeAccount(ctx, profile.Harness) != p.config.AccountLabel {
 			return lifecycleclient.ErrOwnership
 		}
 	}
@@ -262,7 +275,7 @@ func (p *projectLifecycle) step(ctx context.Context) error {
 		p.refresh = now.Add(30 * time.Second)
 	}
 	for _, s := range p.owner.supervisor.Status().Sessions {
-		if s.ProjectID != p.config.ProjectID || s.AccountLabel != p.config.AccountLabel || s.Reporter.PublicSessionID == "" || s.State == agentd.StateOwnershipLost || s.Reporter.Closed || s.PID <= 0 || p.bound[s.ID] {
+		if s.ProjectID != p.config.ProjectID || s.AccountLabel != p.config.AccountLabel || s.AccountKey != p.config.AccountKey || s.Reporter.PublicSessionID == "" || s.State == agentd.StateOwnershipLost || s.Reporter.Closed || s.PID <= 0 || p.bound[s.ID] {
 			continue
 		}
 		if e := p.registerSession(ctx, s); e != nil {
@@ -287,7 +300,7 @@ func (p *projectLifecycle) registerSession(ctx context.Context, s agentd.Session
 }
 func (p *projectLifecycle) ownSession(in lifecycleintents.Intent) (agentd.Session, error) {
 	for _, s := range p.owner.supervisor.Status().Sessions {
-		if s.ID == in.Request.SessionGeneration && s.Reporter.PublicSessionID == in.Request.SessionID && p.bound[s.ID] && s.ProjectID == p.config.ProjectID && s.AccountLabel == p.config.AccountLabel {
+		if s.ID == in.Request.SessionGeneration && s.Reporter.PublicSessionID == in.Request.SessionID && p.bound[s.ID] && s.ProjectID == p.config.ProjectID && s.AccountLabel == p.config.AccountLabel && s.AccountKey == p.config.AccountKey {
 			return s, nil
 		}
 	}
@@ -382,7 +395,7 @@ func (p *projectLifecycle) Prepare(ctx context.Context, in lifecycleintents.Inte
 	if len(prompt) > 256<<10 {
 		return lifecycleclient.ErrOwnership
 	}
-	request := agentd.StartRequest{IdempotencyKey: "lifecycle:" + in.ID, Adapter: profile.Harness, Workspace: workspace, WorkspaceMode: profile.WorkspaceMode, ExpectedAccountLabel: p.config.AccountLabel, ExpectedMachineID: p.registration.Host, Identity: profile.Harness + ":" + in.Request.AgentName, ProjectID: p.config.ProjectID, Role: in.Request.Role, DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version, Prompt: prompt}
+	request := agentd.StartRequest{IdempotencyKey: "lifecycle:" + in.ID, Adapter: profile.Harness, Workspace: workspace, WorkspaceMode: profile.WorkspaceMode, ExpectedAccountLabel: p.config.AccountLabel, AccountKey: p.config.AccountKey, ExpectedMachineID: p.registration.Host, Identity: profile.Harness + ":" + in.Request.AgentName, ProjectID: p.config.ProjectID, Role: in.Request.Role, DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version, Prompt: prompt}
 	if in.Request.TicketID != nil {
 		request.TicketID = *in.Request.TicketID
 		request.WorkShape = in.Request.WorkShape

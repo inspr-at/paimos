@@ -209,7 +209,7 @@ func TestWorkerFleetV2ContractFixture(t *testing.T) {
 		t.Fatalf("v2 fixture lost trusted runtime/shape fields: %+v", trusted)
 	}
 	if untrusted.RuntimeProvenanceTrust != RuntimeTrustUntrusted || untrusted.ManagementMode != managedharness.ManagementUnmanaged ||
-		untrusted.MachineID != nil || untrusted.WorkspaceProvenance != nil || untrusted.DispatchProfile != nil || untrusted.AccountLabel != "unknown" {
+		untrusted.MachineID != nil || untrusted.WorkspaceProvenance != nil || untrusted.DispatchProfile != nil || untrusted.AccountLabel != "unknown" || untrusted.AccountKey != "" {
 		t.Fatalf("v2 fixture elevated untrusted runtime fields: %+v", untrusted)
 	}
 }

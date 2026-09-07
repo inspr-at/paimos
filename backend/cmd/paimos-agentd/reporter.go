@@ -114,6 +114,7 @@ type harnessSessionResponse struct {
 	Workspace       *agentd.WorkspaceProvenance `json:"workspace_provenance"`
 	DispatchProfile *dispatchprofile.Profile    `json:"dispatch_profile"`
 	AccountLabel    string                      `json:"account_label"`
+	AccountKey      string                      `json:"account_key,omitempty"`
 }
 
 type harnessControlResponse struct {
@@ -457,6 +458,9 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	if session.AccountLabel != "" && session.AccountLabel != "unknown" {
 		args = append(args, "--account-label", session.AccountLabel)
 	}
+	if session.AccountKey != "" {
+		args = append(args, "--account-key", session.AccountKey)
+	}
 	if session.ParentSessionID != "" {
 		args = append(args, "--parent-session", session.ParentSessionID)
 	}
@@ -538,7 +542,7 @@ func reporterExecutionMatches(response harnessSessionResponse, session agentd.Se
 	if responseLabel == "" && session.WorkspaceProvenance.Identity == "" {
 		responseLabel = "unknown"
 	}
-	return responseLabel == sessionLabel
+	return responseLabel == sessionLabel && response.AccountKey == session.AccountKey
 }
 
 func reporterErrorCode(raw []byte) string {

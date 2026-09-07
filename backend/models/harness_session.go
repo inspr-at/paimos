@@ -55,6 +55,7 @@ type HarnessSession struct {
 	Workspace        *HarnessWorkspaceProvenance `json:"workspace_provenance"`
 	DispatchProfile  *HarnessDispatchProfile     `json:"dispatch_profile"`
 	AccountLabel     string                      `json:"account_label"`
+	AccountKey       string                      `json:"account_key,omitempty"`
 	SteerMode        string                      `json:"steer_mode"`
 	Capabilities     HarnessCapabilities         `json:"advertised_capabilities"`
 	Phase            string                      `json:"phase"`

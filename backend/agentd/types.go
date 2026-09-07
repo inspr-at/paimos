@@ -67,6 +67,7 @@ type StartRequest struct {
 	KeepAlive              bool                     `json:"-"`
 	IdempotencyKey         string                   `json:"idempotency_key,omitempty"`
 	ExpectedAccountLabel   string                   `json:"expected_account_label,omitempty"`
+	AccountKey             string                   `json:"account_key,omitempty"`
 	ExpectedMachineID      string                   `json:"expected_machine_id,omitempty"`
 	Adapter                string                   `json:"adapter"`
 	Workspace              string                   `json:"workspace"`
@@ -194,6 +195,7 @@ type Session struct {
 	WorkspaceProvenance WorkspaceProvenance      `json:"workspace_provenance"`
 	DispatchProfile     *dispatchprofile.Profile `json:"dispatch_profile,omitempty"`
 	AccountLabel        string                   `json:"account_label"`
+	AccountKey          string                   `json:"account_key,omitempty"`
 	HarnessSessionID    string                   `json:"harness_session_id,omitempty"`
 	Capabilities        []Capability             `json:"capabilities"`
 	Managed             bool                     `json:"managed"`

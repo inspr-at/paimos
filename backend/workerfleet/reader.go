@@ -88,7 +88,7 @@ fleet_candidates AS (
         COALESCE(hs.dispatch_profile_id,'') AS dispatch_profile_id,
         COALESCE(hs.dispatch_profile_version,'') AS dispatch_profile_version,
         COALESCE(hs.dispatch_model,'') AS dispatch_model,COALESCE(hs.dispatch_effort,'') AS dispatch_effort,
-        hs.account_label,hs.management_mode,hs.phase,
+        hs.account_label,COALESCE(hs.account_key,'') AS account_key,hs.management_mode,hs.phase,
         hs.heartbeat_at,hs.activity_state,hs.activity_reason,hs.activity_event_kind,hs.activity_at,
         hs.closed_reason,hs.revision,hs.created_at,
         hs.advertised_inbox,hs.advertised_status,hs.advertised_steer,
@@ -124,7 +124,7 @@ ranked AS (
 )
 SELECT id,project_id,key,name,project_agent_id,agent_name,parent_harness_session_id,ticket_id,work_shape,
  ticket_key,ticket_title,role,harness,machine_id,workspace_path,workspace_kind,workspace_mode,
- dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,account_label,
+ dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,account_label,account_key,
  management_mode,phase,heartbeat_at,activity_state,
  activity_reason,activity_event_kind,activity_at,closed_reason,revision,
  advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,
@@ -149,6 +149,7 @@ type fleetRow struct {
 	profileModel           string
 	profileEffort          string
 	accountLabel           string
+	accountKey             string
 	advertised             Capabilities
 	activeCoordinatorCount int64
 	activeCoordinatorID    sql.NullString
@@ -215,7 +216,7 @@ func (r *Reader) read(ctx context.Context, request Request, includeRuntime bool)
 			&row.worker.Project.Name, &row.worker.Agent.ID, &row.worker.Agent.Name, &parent, &ticketID, &storedWorkShape,
 			&ticketKey, &ticketTitle, &row.worker.Role, &row.worker.Harness, &row.machineID,
 			&row.workspacePath, &row.workspaceKind, &row.workspaceMode, &row.profileID, &row.profileVersion, &row.profileModel, &row.profileEffort,
-			&row.accountLabel, &row.worker.ManagementMode,
+			&row.accountLabel, &row.accountKey, &row.worker.ManagementMode,
 			&row.worker.Phase, &row.heartbeat, &row.activityState, &row.activityReason, &row.activityKind,
 			&row.activityAt, &row.closedReason, &row.worker.Revision, &advertisedInbox, &advertisedStatus,
 			&advertisedSteer, &advertisedInterrupt, &advertisedStop, &row.activeCoordinatorCount,
@@ -308,6 +309,7 @@ func projectRuntimeProvenance(row *fleetRow, observedAt time.Time) error {
 	row.worker.WorkspaceProvenance = nil
 	row.worker.DispatchProfile = nil
 	row.worker.AccountLabel = "unknown"
+	row.worker.AccountKey = ""
 	row.worker.RuntimeProvenanceTrust = RuntimeTrustUntrusted
 	heartbeat, err := parseTimestamp(row.heartbeat.String)
 	if row.worker.ManagementMode != managedharness.ManagementManaged || row.machineID == "" || row.workspacePath == "" ||
@@ -319,6 +321,7 @@ func projectRuntimeProvenance(row *fleetRow, observedAt time.Time) error {
 	row.worker.MachineID = &machineID
 	row.worker.WorkspaceProvenance = &WorkspaceProvenance{Kind: row.workspaceKind, Mode: row.workspaceMode}
 	row.worker.AccountLabel = row.accountLabel
+	row.worker.AccountKey = row.accountKey
 	if row.profileID == "" {
 		return nil
 	}

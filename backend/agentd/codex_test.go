@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -547,6 +548,91 @@ func TestCodexAppServerHelperStdoutContainsOnlyProtocolFrames(t *testing.T) {
 	}
 }
 
+func helperCodexAdapter(t *testing.T, mode string, registry CodexAccountRegistry) *CodexAdapter {
+	t.Helper()
+	adapter := NewCodexAdapter(os.Args[0], "test")
+	adapter.SetAccounts(registry)
+	adapter.command = func(_ string, _ ...string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestCodexAppServerHelperProcess$")
+		cmd.Env = append(os.Environ(), codexHelperEnvironment+"="+mode)
+		return cmd
+	}
+	return adapter
+}
+
+func TestCodexNamedAccountsUseDistinctHomesAndRefuseWrongOrMissingIdentity(t *testing.T) {
+	homeOne := writeCodexHome(t, "one@example.invalid")
+	homeTwo := writeCodexHome(t, "two@example.invalid")
+	registry := testCodexRegistry(t,
+		codexAccountRegistryEntry{Key: "one", Home: homeOne, Email: "one@example.invalid"},
+		codexAccountRegistryEntry{Key: "two", Home: homeTwo, Email: "two@example.invalid"},
+	)
+	adapter := helperCodexAdapter(t, "serve", registry)
+	first, err := adapter.Start(context.Background(), StartRequest{Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:one", Adapter: AdapterCodex, AccountKey: "one"}, func(AdapterEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = first.Stop(context.Background(), ControlRequest{CorrelationID: "one-stop"}) })
+	second, err := adapter.Start(context.Background(), StartRequest{Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:two", Adapter: AdapterCodex, AccountKey: "two"}, func(AdapterEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = second.Stop(context.Background(), ControlRequest{CorrelationID: "two-stop"}) })
+	if first.PID() == second.PID() {
+		t.Fatal("two accounts shared one child")
+	}
+	key, label := first.(accountSelection).AccountSelection()
+	if key != "one" || label != "chatgpt" {
+		t.Fatalf("first selection=%s %s", key, label)
+	}
+	if _, err := os.Stat(filepath.Join(homeOne, "spawned")); err != nil {
+		t.Fatal("first account did not spawn in its home")
+	}
+	if _, err := os.Stat(filepath.Join(homeTwo, "spawned")); err != nil {
+		t.Fatal("second account did not spawn in its home")
+	}
+	wrong := helperCodexAdapter(t, "account-wrong", registry)
+	if _, err := wrong.Start(context.Background(), StartRequest{Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:one", Adapter: AdapterCodex, AccountKey: "one"}, nil); err == nil || strings.Contains(err.Error(), "@") {
+		t.Fatalf("wrong identity started a model turn or leaked identity: %v", err)
+	}
+	missing := helperCodexAdapter(t, "account-missing", registry)
+	if _, err := missing.Start(context.Background(), StartRequest{Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:one", Adapter: AdapterCodex, AccountKey: "one"}, nil); err == nil {
+		t.Fatal("unavailable account/read started a model turn")
+	}
+	unavailable := helperCodexAdapter(t, "account-unavailable", registry)
+	if _, err := unavailable.Start(context.Background(), StartRequest{Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:one", Adapter: AdapterCodex, AccountKey: "one"}, nil); err == nil {
+		t.Fatal("failed account/read started a model turn")
+	}
+	legacy, err := helperCodexAdapter(t, "serve", CodexAccountRegistry{}).Start(context.Background(), StartRequest{Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:legacy", Adapter: AdapterCodex}, func(AdapterEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = legacy.Stop(context.Background(), ControlRequest{CorrelationID: "legacy-stop"}) })
+	if key, label := legacy.(accountSelection).AccountSelection(); key != "" || label != "" {
+		t.Fatalf("legacy start claimed named-account verification: %s %s", key, label)
+	}
+}
+
+func TestCodexNamedAccountFreezesHomeForSteerAndCleanup(t *testing.T) {
+	home := writeCodexHome(t, "frozen@example.invalid")
+	registry := testCodexRegistry(t, codexAccountRegistryEntry{Key: "frozen", Home: home, Email: "frozen@example.invalid"})
+	adapter := helperCodexAdapter(t, "serve", registry)
+	process, err := adapter.Start(context.Background(), StartRequest{Workspace: t.TempDir(), Prompt: "secret-not-persisted", Identity: "codex:frozen", Adapter: AdapterCodex, AccountKey: "frozen"}, func(AdapterEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steer, err := process.Steer(context.Background(), ControlRequest{CorrelationID: "frozen-steer", Text: "new direction"})
+	if err != nil || steer.VendorMessageID != "turn-owned" {
+		t.Fatalf("steer=%+v err=%v", steer, err)
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "frozen-stop"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "spawned")); err != nil {
+		t.Fatal("frozen account left its home unused")
+	}
+}
+
 func TestCodexAppServerHelperProcess(t *testing.T) {
 	mode := os.Getenv(codexHelperEnvironment)
 	if mode == "" {
@@ -576,6 +662,38 @@ func TestCodexAppServerHelperProcess(t *testing.T) {
 			continue
 		case "initialize":
 			respond(map[string]any{})
+		case "account/read":
+			if mode == "account-unavailable" {
+				os.Exit(2)
+			}
+			var params struct {
+				RefreshToken *bool `json:"refreshToken"`
+			}
+			if json.Unmarshal(request.Params, &params) != nil || params.RefreshToken == nil || *params.RefreshToken {
+				os.Exit(2)
+			}
+			home := os.Getenv("CODEX_HOME")
+			if home != "" {
+				_ = os.WriteFile(filepath.Join(home, "spawned"), []byte("1"), 0o600)
+			}
+			if mode == "account-missing" {
+				respond(map[string]any{"requiresOpenaiAuth": true, "account": nil})
+				continue
+			}
+			email := "fixture@example.invalid"
+			if home != "" {
+				if raw, err := os.ReadFile(filepath.Join(home, "paimos-fixture-identity")); err == nil {
+					email = strings.TrimSpace(string(raw))
+				}
+			}
+			if mode == "account-wrong" {
+				email = "wrong@example.invalid"
+			}
+			if email == "" {
+				respond(map[string]any{"requiresOpenaiAuth": true, "account": map[string]any{"type": "chatgpt", "email": nil, "planType": "plus"}})
+				continue
+			}
+			respond(map[string]any{"requiresOpenaiAuth": true, "account": map[string]any{"type": "chatgpt", "email": email, "planType": "plus"}})
 		case "thread/start":
 			if mode == "profile" {
 				var params struct {

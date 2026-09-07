@@ -145,7 +145,11 @@ func (p *projectLifecycle) deliverConsumer(ctx context.Context, s agentd.Session
 	}
 	// The owned connection is the only consumer for its own private thread.
 	if ref == s.HarnessSessionID {
-		if p.owner.supervisor.ProbeAccount(ctx, s.Adapter) != p.config.AccountLabel {
+		if p.config.AccountKey != "" {
+			if s.AccountKey != p.config.AccountKey {
+				return "", lifecycleclient.ErrOwnership
+			}
+		} else if p.owner.supervisor.ProbeAccount(ctx, s.Adapter) != p.config.AccountLabel {
 			return "", lifecycleclient.ErrOwnership
 		}
 		receipt, e := p.owner.supervisor.Inbox(ctx, s.ID, agentd.ControlRequest{Instance: p.owner.reporter.instance, ProjectID: s.ProjectID, Identity: s.Identity, CorrelationID: page.Attempt.ID, Text: body})

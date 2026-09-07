@@ -37,7 +37,7 @@ func TestHarnessRegisterOmitsUnsetHierarchyFieldsForOldServer(t *testing.T) {
 	if _, _, err := executeCLIForTest(t, "--json", "harness", "register", "--project", "PAI", "--agent", "worker", "--harness", "codex", "--host", "mbp0", "--registration-file", registrationFile, "--management", "managed", "--role", "worker", "--capability", "status"); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"parent_harness_session_id", "ticket_id", "work_shape", "workspace", "dispatch_profile_id", "dispatch_profile_version", "account_label"} {
+	for _, field := range []string{"parent_harness_session_id", "ticket_id", "work_shape", "workspace", "dispatch_profile_id", "dispatch_profile_version", "account_label", "account_key"} {
 		if _, ok := posted[field]; ok {
 			t.Fatalf("unset forward-compatible field %s sent to old server: %s", field, posted[field])
 		}

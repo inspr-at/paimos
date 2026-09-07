@@ -76,6 +76,9 @@ func TestCLIReporterRejectsChildOnAuthorityWorkspaceConflict(t *testing.T) {
 		if slices.Contains(args, "--account-label") {
 			t.Fatalf("unknown account label must be omitted for rolling compatibility: %v", args)
 		}
+		if slices.Contains(args, "--account-key") {
+			t.Fatalf("empty account key must be omitted for rolling compatibility: %v", args)
+		}
 		return []byte(`{"error":"workspace conflict","code":409,"error_code":"harness_session_conflict"}`), errors.New("API conflict")
 	}
 	reporter, err := newCLIReporterWithRunner("ppm", "mbp0", "/opt/paimos", nil, runner, newMemoryReporterLeaseStore())
