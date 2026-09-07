@@ -17,6 +17,7 @@ const (
 	AdapterCodex  = "codex"
 	AdapterClaude = "claude"
 	AdapterPi     = "pi"
+	AdapterCursor = "cursor"
 
 	// AccountPiContext is the closed class for an operator-selected Pi
 	// PI_CODING_AGENT_DIR. It is not a verified provider identity.

@@ -7,10 +7,10 @@ import "testing"
 
 func TestCatalogIsStableClosedAndDetached(t *testing.T) {
 	profiles := List()
-	if len(profiles) != 8 {
+	if len(profiles) != 10 {
 		t.Fatalf("profile count = %d", len(profiles))
 	}
-	var sawPi bool
+	var sawPi, sawCursor bool
 	for index, profile := range profiles {
 		if err := Validate(profile); err != nil {
 			t.Fatalf("profile %q: %v", profile.ID, err)
@@ -19,6 +19,12 @@ func TestCatalogIsStableClosedAndDetached(t *testing.T) {
 			sawPi = true
 			if profile.Harness != "pi" {
 				t.Fatalf("pi profile harness=%q", profile.Harness)
+			}
+		}
+		if profile.ID == "cursor-composer" {
+			sawCursor = true
+			if profile.Harness != "cursor" || profile.Model != "composer" {
+				t.Fatalf("cursor profile=%#v", profile)
 			}
 		}
 		if index > 0 && profiles[index-1].ID >= profile.ID {
@@ -31,6 +37,9 @@ func TestCatalogIsStableClosedAndDetached(t *testing.T) {
 	}
 	if !sawPi {
 		t.Fatal("catalog lost the human-selected Pi profile")
+	}
+	if !sawCursor {
+		t.Fatal("catalog lost the human-selected Cursor Composer profile")
 	}
 	profiles[0].Model = "tampered"
 	if fresh := List(); fresh[0].Model == "tampered" {

@@ -120,6 +120,12 @@ available. Override executable discovery only with absolute `--node-path` and
 `--claude-path` values. The default Claude tool boundary is
 `Read,Glob,Grep,Edit,Write`; durable messages never grant Bash.
 
+Cursor owned sessions require the pinned operator CLI `2026.09.02-c22c1a3` and
+documented `agent acp` stdio. Optional `--cursor-path` pins that executable;
+otherwise `cursor-agent` on `PATH` is resolved once. The daemon never copies
+auth files, never passes `--api-key`, and never calls `login` / `authenticate`
+as part of ordinary start. Catalog models are included Composer/Grok only.
+
 ---
 
 ## Linux

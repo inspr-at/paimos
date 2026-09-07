@@ -13155,7 +13155,7 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 	WHEN OLD.last_error_code='managed_target_unavailable' AND OLD.fallback_target_id IS NOT NULL
 	THEN OLD.fallback_target_id
 	WHEN OLD.requested_level='simple' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
-	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id) IN ('agentd_codex','agentd_claude','agentd_pi')
+	 AND (SELECT adapter FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id) IN ('agentd_codex','agentd_claude','agentd_pi','agentd_cursor')
 	THEN OLD.fallback_target_id
 	WHEN OLD.requested_level='steer' AND OLD.primary_target_id IS NOT NULL AND OLD.fallback_target_id IS NOT NULL
 	 AND (SELECT maximum_level FROM agent_message_targets policy_target WHERE policy_target.id=OLD.primary_target_id)='simple'

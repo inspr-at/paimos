@@ -1277,6 +1277,19 @@ refused because there is no live paused child. The spool is fail-closed at
 advertised pause. Receipts and status never carry the raw text. This slice is
 fake-native composition only and does not claim fully live Pi support.
 
+Owned Cursor ACP is a fourth adapter. It starts the pinned operator
+`cursor-agent` (`2026.09.02-c22c1a3`) with documented `acp` stdio and a
+human-selected included model (`composer` or `grok` via catalog ids
+`cursor-composer` / `cursor-grok`). Auto and unapproved third-party models are
+refused before spawn. The child uses official ACP `initialize`, `session/new`,
+`session/prompt`, and `session/cancel` only; there is no PTY, private RPC, or
+same-turn text steer. Permission, plan, and question requests fail closed
+(reject-once / cancelled). `status --format json` is a bounded
+authentication-status probe and does not invent a durable subscription class;
+ambiguous output stays `unknown`. Native included-model inference proof is
+deliberately later and must not copy auth files or call `authenticate` /
+`login` from this slice.
+
 Registrations created before this contract remain readable. They have null
 workspace/profile provenance and an `unknown` account label; PAIMOS does not
 retroactively infer ownership or execution axes from process lists, paths, or
