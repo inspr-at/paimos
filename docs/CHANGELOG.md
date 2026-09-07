@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [Unreleased]
+
+### Fixed — Habitat lifecycle drafts (PAI-950)
+
+- Preserve ticket, work-shape and parent choices when an unchanged worker is
+  refreshed, while continuing to invalidate unsubmitted reviews after a
+  binding revision changes.
+
 ## [26.09.07] — 2026-09-07
 
 ### Fixed — reliable runtime coordination and guided CLI (PAI-934–942, PAI-948)
