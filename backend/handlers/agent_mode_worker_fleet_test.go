@@ -100,7 +100,7 @@ func TestAgentModeWorkerFleetVersionsDoNotCrossWireContracts(t *testing.T) {
 	if v1.SchemaVersion != 1 || v1.Provenance.ProjectionVersion != 1 || len(v1.Workers) != 1 {
 		t.Fatalf("v1 version contract=%+v", v1)
 	}
-	for _, v2Only := range []string{"machine_id", "workspace_provenance", "dispatch_profile", "account_label", "runtime_provenance_trust", "work_shape", "work_contract"} {
+	for _, v2Only := range []string{"machine_id", "workspace_provenance", "dispatch_profile", "account_label", "account_key", "runtime_provenance_trust", "work_shape", "work_contract"} {
 		if _, exists := v1.Workers[0][v2Only]; exists {
 			t.Fatalf("v2-only field %q entered v1: %+v", v2Only, v1.Workers[0])
 		}

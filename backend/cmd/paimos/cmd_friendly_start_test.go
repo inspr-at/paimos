@@ -362,12 +362,19 @@ func TestFriendlyStartProfileCapabilityAndConstraintFailClosed(t *testing.T) {
 		t.Fatal("altered immutable profile accepted")
 	}
 	request := agentd.StartRequest{Adapter: "codex"}
-	for _, selector := range []string{"account", "machine"} {
+	for _, selector := range []string{"account-class", "account-key", "machine"} {
 		scoped := o
-		if selector == "account" {
+		field := ""
+		switch selector {
+		case "account-class":
 			scoped.Account = "chatgpt"
-		} else {
+			field = "expected_account_label"
+		case "account-key":
+			scoped.Account = "coordinator"
+			field = "account_key"
+		default:
 			scoped.Machine = "fixture-machine"
+			field = "expected_machine_id"
 		}
 		got, err := friendlyConstrainedRequest(request, scoped)
 		if err != nil {
@@ -376,10 +383,6 @@ func TestFriendlyStartProfileCapabilityAndConstraintFailClosed(t *testing.T) {
 			}
 		} else {
 			raw, _ := json.Marshal(got)
-			field := "expected_account_label"
-			if selector == "machine" {
-				field = "expected_machine_id"
-			}
 			if !strings.Contains(string(raw), field) {
 				t.Fatal("constraint silently dropped")
 			}

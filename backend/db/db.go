@@ -13288,6 +13288,39 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 	// M180 / PAI-926: authenticated human messages address one exact
 	// runtime-owned harness generation and retain immutable replay evidence.
 	migrations = append(migrations, migration{version: 180})
+	// M181 / PAI-952: opaque non-secret Codex account selection, distinct from
+	// the closed chatgpt/api_key class label. Empty keeps legacy starts readable.
+	migrations = append(migrations, migration{version: 181, steps: []string{
+		`ALTER TABLE harness_sessions ADD COLUMN account_key TEXT NOT NULL DEFAULT ''`,
+		`DROP TRIGGER IF EXISTS trg_harness_sessions_provenance_shape_insert`,
+		`DROP TRIGGER IF EXISTS trg_harness_sessions_provenance_immutable`,
+		`CREATE TRIGGER trg_harness_sessions_provenance_shape_insert BEFORE INSERT ON harness_sessions
+			 WHEN NOT (
+			  (NEW.workspace_identity='' AND NEW.workspace_path='' AND NEW.git_top_level='' AND NEW.git_branch=''
+			   AND NEW.workspace_kind='unknown' AND NEW.workspace_mode='unknown' AND NEW.dispatch_profile_id=''
+			   AND NEW.dispatch_profile_version='' AND NEW.dispatch_model='' AND NEW.dispatch_effort='' AND NEW.account_label='unknown'
+			   AND NEW.account_key='')
+			  OR
+			  (length(NEW.workspace_identity)=64 AND NEW.workspace_identity NOT GLOB '*[^0-9a-f]*'
+			   AND NEW.workspace_path<>'' AND instr(NEW.workspace_path,char(0))=0
+			   AND instr(NEW.workspace_path,char(10))=0 AND instr(NEW.workspace_path,char(13))=0
+			   AND NEW.workspace_kind IN ('directory','git_primary','git_worktree') AND NEW.workspace_mode IN ('exclusive','shared')
+			   AND NEW.account_label IN ('unknown','chatgpt','api_key','claude_ai_max','claude_ai_pro','claude_ai_team','claude_ai_enterprise','console')
+			   AND (NEW.account_key='' OR (length(NEW.account_key) BETWEEN 1 AND 128
+			    AND NEW.account_key GLOB '[A-Za-z0-9]*' AND NEW.account_key NOT GLOB '*[^A-Za-z0-9._:-]*'
+			    AND instr(NEW.account_key,'/')=0 AND instr(NEW.account_key,char(0))=0
+			    AND instr(NEW.account_key,char(10))=0 AND instr(NEW.account_key,char(13))=0
+			    AND NEW.account_key NOT IN ('unknown','chatgpt','api_key','claude_ai_max','claude_ai_pro','claude_ai_team','claude_ai_enterprise','console','local_probe')))
+			   AND ((NEW.workspace_kind='directory' AND NEW.git_top_level='' AND NEW.git_branch='')
+			    OR (NEW.workspace_kind IN ('git_primary','git_worktree') AND NEW.git_top_level<>'' AND NEW.git_branch<>''))
+			   AND ((NEW.dispatch_profile_id='' AND NEW.dispatch_profile_version='' AND NEW.dispatch_model='' AND NEW.dispatch_effort='')
+			    OR (NEW.dispatch_profile_id<>'' AND NEW.dispatch_profile_version<>'' AND NEW.dispatch_model<>'' AND NEW.dispatch_effort<>'')))
+			 ) BEGIN SELECT RAISE(ABORT,'harness workspace provenance is invalid'); END`,
+		`CREATE TRIGGER trg_harness_sessions_provenance_immutable BEFORE UPDATE OF
+			 workspace_path,git_top_level,git_branch,workspace_identity,workspace_kind,workspace_mode,
+			 dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,account_label,account_key
+			 ON harness_sessions BEGIN SELECT RAISE(ABORT,'harness workspace provenance is immutable'); END`,
+	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue
@@ -13585,6 +13618,16 @@ var migrationPreconditions = map[int]func(context.Context, *sql.Conn) error{
 			"external_stage_pharos_evidence_v2", "trg_external_stage_pharos_evidence_v2_insert_guard",
 			"trg_external_stage_pharos_evidence_v2_no_update", "trg_external_stage_pharos_evidence_v2_no_delete",
 		})
+	},
+	181: func(ctx context.Context, conn *sql.Conn) error {
+		var columns int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('harness_sessions') WHERE name='account_key'`).Scan(&columns); err != nil {
+			return fmt.Errorf("inspect M181 harness account key: %w", err)
+		}
+		if columns != 0 {
+			return fmt.Errorf("M181 schema is partially present or locally incompatible: harness account_key columns=%d", columns)
+		}
+		return nil
 	},
 }
 

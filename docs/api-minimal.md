@@ -734,7 +734,10 @@ V2 retains `management_mode` and adds closed `runtime_provenance_trust`.
 `managed_reporter` means a managed row has complete workspace evidence plus a
 valid lease-authenticated reporter heartbeat. Only those rows may expose
 `machine_id`, privacy-safe workspace `kind`/`mode`, the exact bounded dispatch
-snapshot, and the closed non-secret `account_label`. Unmanaged, pre-heartbeat,
+snapshot, and the closed non-secret `account_label`. Trusted rows may also
+include an optional opaque `account_key` for named Codex selection; it is
+omitted when empty and is never a path, env, executable, or credential.
+Unmanaged, pre-heartbeat,
 and legacy-unverified rows are `untrusted`: machine/workspace/dispatch are null
 and account is unknown even if their registration supplied values; those axes
 are deliberately suppressed. This is reporting-channel trust, not

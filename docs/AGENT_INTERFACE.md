@@ -766,9 +766,12 @@ Instead of `--profile ID@version`, select an exact compatible combination of
 `--harness`, `--model` and `--effort`. Zero or multiple matches list supported
 profile choices and require more specific input. Explicit profiles and selectors
 must agree. `--account local_probe` and `--machine authenticated_reporter`
-select the supported provenance sources. Pinning a non-secret account label or
-machine ID requires matching daemon pre-spawn constraint support; older runtime
-contracts reject these constraints explicitly instead of guessing their values.
+select the supported provenance sources. `--account chatgpt` (or another closed
+class label) still pins only that class. Any other safe `--account` value is an
+opaque operator registry key; it never carries a path, env, executable, or
+credential. Pinning a class label, named-account key, or machine ID requires
+matching daemon pre-spawn constraint support; older runtime contracts reject
+these constraints explicitly instead of guessing their values.
 
 The workspace must be clean and available for exclusive ownership. The command
 never cleans, creates or switches a repository worktree. The daemon remains the

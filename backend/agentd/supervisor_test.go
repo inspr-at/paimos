@@ -24,7 +24,7 @@ func TestStartRequestOmitsNewHierarchyFieldsForOldDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded := string(raw)
-	for _, field := range []string{"role", "parent_harness_session_id", "ticket_id", "work_shape"} {
+	for _, field := range []string{"role", "parent_harness_session_id", "ticket_id", "work_shape", "account_key"} {
 		if strings.Contains(encoded, `"`+field+`"`) {
 			t.Fatalf("unset forward-compatible field %s leaked into old-daemon request: %s", field, encoded)
 		}
@@ -32,15 +32,17 @@ func TestStartRequestOmitsNewHierarchyFieldsForOldDaemon(t *testing.T) {
 }
 
 type fakeProcess struct {
-	pid        int
-	waited     chan error
-	stopOnce   sync.Once
-	mu         sync.Mutex
-	steers     []ControlRequest
-	interrupts []ControlRequest
-	stops      int
-	steerErr   error
-	stopErr    error
+	pid          int
+	waited       chan error
+	stopOnce     sync.Once
+	mu           sync.Mutex
+	steers       []ControlRequest
+	interrupts   []ControlRequest
+	stops        int
+	steerErr     error
+	stopErr      error
+	accountKey   string
+	accountLabel string
 }
 
 func TestSupervisorPrunesOnlyAfterDurableReporterClosure(t *testing.T) {
@@ -64,9 +66,14 @@ func TestSupervisorPrunesOnlyAfterDurableReporterClosure(t *testing.T) {
 	}
 }
 
-func newFakeProcess(pid int) *fakeProcess { return &fakeProcess{pid: pid, waited: make(chan error, 1)} }
-func (p *fakeProcess) PID() int           { return p.pid }
-func (p *fakeProcess) Wait() error        { return <-p.waited }
+func (p *fakeProcess) PID() int    { return p.pid }
+func (p *fakeProcess) Wait() error { return <-p.waited }
+func newFakeProcess(pid int) *fakeProcess {
+	return &fakeProcess{pid: pid, waited: make(chan error, 1)}
+}
+func (p *fakeProcess) AccountSelection() (string, string) {
+	return p.accountKey, p.accountLabel
+}
 func (p *fakeProcess) Steer(_ context.Context, request ControlRequest) (ControlEffect, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -916,5 +923,55 @@ func TestSupervisorReplaysCompletedControlReceiptWithoutDuplicateEffect(t *testi
 	process.mu.Unlock()
 	if steers != maxControlReplayEntries {
 		t.Fatalf("bounded controls applied %d times, want %d", steers, maxControlReplayEntries)
+	}
+}
+
+type keyedDispatchAdapter struct {
+	dispatchAdapter
+	keys map[string]bool
+}
+
+func (a *keyedDispatchAdapter) HasAccount(key string) bool { return a.keys[key] }
+func (a *keyedDispatchAdapter) Start(_ context.Context, request StartRequest, observe func(AdapterEvent)) (Process, error) {
+	a.requests = append(a.requests, request)
+	observe(AdapterEvent{Kind: EventSessionStarted, HarnessSessionID: "dispatch-thread"})
+	process := newFakeProcess(7100 + len(a.requests))
+	process.accountKey = request.AccountKey
+	process.accountLabel = a.label
+	if process.accountLabel == "" {
+		process.accountLabel = "chatgpt"
+	}
+	return process, nil
+}
+
+func TestSupervisorSelectsRegisteredAccountKeyAndRejectsUnknownOrUnverified(t *testing.T) {
+	adapter := &keyedDispatchAdapter{dispatchAdapter: dispatchAdapter{label: "chatgpt"}, keys: map[string]bool{"coordinator": true}}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-account-key", Adapters: []Adapter{adapter}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	session, err := supervisor.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:worker", ProjectID: 952, AccountKey: "coordinator"})
+	if err != nil || session.AccountKey != "coordinator" || session.AccountLabel != "chatgpt" {
+		t.Fatalf("named account session=%+v err=%v", session, err)
+	}
+	if _, err := supervisor.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:other", ProjectID: 952, AccountKey: "missing"}); err == nil || len(adapter.requests) != 1 {
+		t.Fatalf("unknown key spawned=%d err=%v", len(adapter.requests), err)
+	}
+	if _, err := supervisor.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:path", ProjectID: 952, AccountKey: "/tmp/codex"}); err == nil {
+		t.Fatal("path account key was accepted")
+	}
+}
+
+func TestSupervisorNamedAccountMismatchStopsBeforeDurableGeneration(t *testing.T) {
+	adapter := &keyedDispatchAdapter{dispatchAdapter: dispatchAdapter{label: "api_key"}, keys: map[string]bool{"admin": true}}
+	supervisor, err := NewSupervisor(SupervisorConfig{Instance: "ppm-account-mismatch", Adapters: []Adapter{adapter}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
+	_, err = supervisor.Start(context.Background(), StartRequest{Adapter: AdapterCodex, Workspace: t.TempDir(), Prompt: "work", Identity: "codex:worker", ProjectID: 952, AccountKey: "admin", ExpectedAccountLabel: "chatgpt"})
+	if err == nil || len(supervisor.Status().Sessions) != 0 {
+		t.Fatalf("mismatched class was recorded: err=%v sessions=%v", err, supervisor.Status().Sessions)
 	}
 }

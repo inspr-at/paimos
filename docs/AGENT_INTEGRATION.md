@@ -1241,8 +1241,14 @@ with `serve --allow-shared-workspaces`; the shipped dispatch profiles remain
 exclusive. Machine identity comes from the authenticated reporter's
 `--report-host`, never start-request prose. Account provenance is reduced by a
 fixed-argv `codex login status` or `claude auth status --json` probe to a small
-non-secret label; output, email addresses, tokens, and credentials are never
-stored. A missing or ambiguous probe becomes `unknown`.
+non-secret class label; output, email addresses, tokens, and credentials are never
+stored. A missing or ambiguous class probe becomes `unknown`. Named Codex
+accounts are a separate operator-local registry (`paimos-agentd serve
+--codex-accounts`) that maps opaque keys to private homes. A selected key is
+applied as `CODEX_HOME` for that owned child only, then verified with documented
+app-server `account/read` `{refreshToken:false}` against the expected ChatGPT
+email before `thread/start` or `turn/start`. Class labels alone never prove a
+named account. Legacy starts omit the key and do not claim that verification.
 
 Registrations created before this contract remain readable. They have null
 workspace/profile provenance and an `unknown` account label; PAIMOS does not

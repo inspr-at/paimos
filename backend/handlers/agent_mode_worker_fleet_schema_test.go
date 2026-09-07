@@ -46,7 +46,7 @@ func TestWorkerFleetOpenAPIPreservesV1AndClosesV2(t *testing.T) {
 	}
 	v1Worker := assertFleetBounds("v1", v1, 1)
 	v1Properties := v1Worker["properties"].(map[string]any)
-	for _, v2Only := range []string{"machine_id", "workspace_provenance", "dispatch_profile", "account_label", "runtime_provenance_trust", "work_shape", "work_contract"} {
+	for _, v2Only := range []string{"machine_id", "workspace_provenance", "dispatch_profile", "account_label", "account_key", "runtime_provenance_trust", "work_shape", "work_contract"} {
 		if _, exists := v1Properties[v2Only]; exists {
 			t.Fatalf("v2-only field %q entered frozen v1 schema", v2Only)
 		}
@@ -62,6 +62,9 @@ func TestWorkerFleetOpenAPIPreservesV1AndClosesV2(t *testing.T) {
 		if !required[field] {
 			t.Fatalf("v2 worker field %q is optional", field)
 		}
+	}
+	if _, exists := v2Properties["account_key"]; !exists || required["account_key"] {
+		t.Fatal("v2 account_key must be present and optional")
 	}
 	shape := v2Properties["work_shape"].(map[string]any)["enum"].([]any)
 	if len(shape) != 3 || shape[0] != "unknown" || shape[1] != "ship" || shape[2] != "scout" ||

@@ -52,7 +52,7 @@ func parseHarnessCapabilities(raw []string) (models.HarnessCapabilities, error) 
 func harnessRegisterCmd() *cobra.Command {
 	var project, agent, harness, host, refFile, leaseFile, registrationFile, targetID, management, role, parentSessionID, steerMode, taskShape string
 	var workspacePath, gitTopLevel, gitBranch, workspaceIdentity, workspaceKind, workspaceMode string
-	var dispatchProfileID, dispatchProfileVersion, accountLabel string
+	var dispatchProfileID, dispatchProfileVersion, accountLabel, accountKey string
 	var ticketID int64
 	var capabilities []string
 	cmd := &cobra.Command{Use: "register", Short: "Register a durable managed or unmanaged harness session", RunE: func(cmd *cobra.Command, args []string) error {
@@ -119,7 +119,7 @@ func harnessRegisterCmd() *cobra.Command {
 		if workspacePath != "" || gitTopLevel != "" || gitBranch != "" || workspaceIdentity != "" || workspaceKind != "" || workspaceMode != "" {
 			workspace = &models.HarnessWorkspaceProvenance{CanonicalPath: workspacePath, GitTopLevel: gitTopLevel, GitBranch: gitBranch, Identity: workspaceIdentity, Kind: workspaceKind, Mode: workspaceMode}
 		}
-		input := managedharness.RegisterInput{ProjectID: 1, AgentName: agent, Harness: harness, Host: host, SessionRef: ref, WorkerLease: workerLease, MessageTargetID: targetID, ManagementMode: management, Role: role, ParentSessionID: parent, TicketID: ticket, WorkShape: taskShape, SteerMode: steerMode, Capabilities: caps, Workspace: workspace, DispatchProfileID: dispatchProfileID, DispatchProfileVersion: dispatchProfileVersion, AccountLabel: accountLabel}
+		input := managedharness.RegisterInput{ProjectID: 1, AgentName: agent, Harness: harness, Host: host, SessionRef: ref, WorkerLease: workerLease, MessageTargetID: targetID, ManagementMode: management, Role: role, ParentSessionID: parent, TicketID: ticket, WorkShape: taskShape, SteerMode: steerMode, Capabilities: caps, Workspace: workspace, DispatchProfileID: dispatchProfileID, DispatchProfileVersion: dispatchProfileVersion, AccountLabel: accountLabel, AccountKey: accountKey}
 		if err := managedharness.ValidateRegistration(input); err != nil {
 			return &usageError{msg: err.Error()}
 		}
@@ -141,6 +141,9 @@ func harnessRegisterCmd() *cobra.Command {
 		}
 		if accountLabel != "" {
 			payload["account_label"] = accountLabel
+		}
+		if accountKey != "" {
+			payload["account_key"] = accountKey
 		}
 		if parent != nil {
 			payload["parent_harness_session_id"] = *parent
@@ -178,7 +181,8 @@ func harnessRegisterCmd() *cobra.Command {
 	cmd.Flags().StringVar(&workspaceMode, "workspace-mode", "", "exclusive or explicitly authorized shared ownership")
 	cmd.Flags().StringVar(&dispatchProfileID, "dispatch-profile", "", "immutable dispatch profile id")
 	cmd.Flags().StringVar(&dispatchProfileVersion, "dispatch-profile-version", "", "immutable dispatch profile version")
-	cmd.Flags().StringVar(&accountLabel, "account-label", "", "bounded non-secret account provenance or unknown")
+	cmd.Flags().StringVar(&accountLabel, "account-label", "", "bounded non-secret account class or unknown")
+	cmd.Flags().StringVar(&accountKey, "account-key", "", "opaque named-account selection; never a path, env, or credential")
 	return cmd
 }
 

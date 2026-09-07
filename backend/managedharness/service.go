@@ -125,6 +125,7 @@ type RegisterInput struct {
 	DispatchProfileID      string
 	DispatchProfileVersion string
 	AccountLabel           string
+	AccountKey             string
 	// Authority reauthorizes inbox-capable registrations inside the same
 	// transaction as target and harness ownership mutation. Nil is reserved
 	// for trusted in-process callers and tests.
@@ -184,6 +185,7 @@ func normalizeRegister(in RegisterInput) RegisterInput {
 	if in.AccountLabel == "" {
 		in.AccountLabel = "unknown"
 	}
+	in.AccountKey = strings.TrimSpace(in.AccountKey)
 	if in.Workspace != nil {
 		workspace := *in.Workspace
 		workspace.CanonicalPath = strings.TrimSpace(workspace.CanonicalPath)
@@ -235,6 +237,9 @@ func validateRegister(in RegisterInput) error {
 	if !validAccountLabel(in.AccountLabel) {
 		return coded(CodeInvalid, "account label must be a bounded non-secret stable value")
 	}
+	if in.AccountKey != "" && !validAccountKey(in.AccountKey) {
+		return coded(CodeInvalid, "account key must be an opaque non-secret selection")
+	}
 	if err := validateWorkspaceAndDispatch(in); err != nil {
 		return err
 	}
@@ -272,7 +277,7 @@ func validRecordedPath(value string) bool {
 
 func validateWorkspaceAndDispatch(in RegisterInput) error {
 	if in.Workspace == nil {
-		if in.DispatchProfileID != "" || in.DispatchProfileVersion != "" || in.AccountLabel != "unknown" {
+		if in.DispatchProfileID != "" || in.DispatchProfileVersion != "" || in.AccountLabel != "unknown" || in.AccountKey != "" {
 			return coded(CodeInvalid, "dispatch and account provenance require workspace provenance")
 		}
 		return nil
@@ -328,6 +333,16 @@ func validAccountLabel(value string) bool {
 	default:
 		return false
 	}
+}
+
+func validAccountKey(value string) bool {
+	if !stableValue.MatchString(value) || len(value) > 128 || strings.ContainsAny(value, "/\\") {
+		return false
+	}
+	if validAccountLabel(value) && value != "unknown" {
+		return false
+	}
+	return value != "unknown" && value != "local_probe"
 }
 func digestRef(projectID int64, harness, host, ref string) []byte {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("paimos:harness-session-ref:v1\x00%d\x00%s\x00%s\x00%s", projectID, harness, host, ref)))
@@ -477,6 +492,7 @@ const sessionColumns = `id,project_id,project_agent_id,agent_name,harness,host,C
 	COALESCE(parent_harness_session_id,''),ticket_id,COALESCE(work_shape,''),steer_mode,
 	COALESCE(workspace_path,''),COALESCE(git_top_level,''),COALESCE(git_branch,''),COALESCE(workspace_identity,''),workspace_kind,workspace_mode,
 	COALESCE(dispatch_profile_id,''),COALESCE(dispatch_profile_version,''),COALESCE(dispatch_model,''),COALESCE(dispatch_effort,''),account_label,
+	COALESCE(account_key,''),
 	advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,COALESCE(heartbeat_at,''),
 	activity_state,activity_reason,activity_event_kind,COALESCE(activity_at,''),activity_sequence,closed_reason,
 	COALESCE(yielded_at,''),yield_sequence,revision,created_at,updated_at`
@@ -488,17 +504,18 @@ func scanSession(row interface{ Scan(...any) error }) (models.HarnessSession, er
 	var ticket sql.NullInt64
 	var storedWorkShape string
 	var workspacePath, gitTopLevel, gitBranch, workspaceIdentity, workspaceKind, workspaceMode string
-	var profileID, profileVersion, profileModel, profileEffort, accountLabel string
+	var profileID, profileVersion, profileModel, profileEffort, accountLabel, accountKey string
 	err := row.Scan(&out.ID, &out.ProjectID, &out.ProjectAgentID, &out.AgentName, &out.Harness, &out.Host, &out.MessageTargetID,
 		&out.ManagementMode, &out.Role, &parent, &ticket, &storedWorkShape, &out.SteerMode,
 		&workspacePath, &gitTopLevel, &gitBranch, &workspaceIdentity, &workspaceKind, &workspaceMode,
-		&profileID, &profileVersion, &profileModel, &profileEffort, &accountLabel,
+		&profileID, &profileVersion, &profileModel, &profileEffort, &accountLabel, &accountKey,
 		&inbox, &status, &steer, &interrupt, &stop, &out.Phase,
 		&out.HeartbeatAt, &out.ActivityState, &out.ActivityReason, &out.ActivityKind, &out.ActivityAt, &out.ActivitySequence, &out.ClosedReason,
 		&out.YieldedAt, &out.YieldSequence, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
 	out.Capabilities = models.HarnessCapabilities{Inbox: inbox == 1, Status: status == 1, Steer: steer == 1, Interrupt: interrupt == 1, Stop: stop == 1}
 	out.MachineID = out.Host
 	out.AccountLabel = accountLabel
+	out.AccountKey = accountKey
 	if workspacePath != "" {
 		out.Workspace = &models.HarnessWorkspaceProvenance{CanonicalPath: workspacePath, GitTopLevel: gitTopLevel, GitBranch: gitBranch, Identity: workspaceIdentity, Kind: workspaceKind, Mode: workspaceMode}
 	}
@@ -772,12 +789,12 @@ func (s *Service) Register(ctx context.Context, raw RegisterInput) (models.Harne
 		workspaceIdentity, workspaceKind, workspaceMode = in.Workspace.Identity, in.Workspace.Kind, in.Workspace.Mode
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,message_target_id,management_mode,role,parent_harness_session_id,ticket_id,work_shape,steer_mode,
-		workspace_path,git_top_level,git_branch,workspace_identity,workspace_kind,workspace_mode,dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,account_label,
-		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		workspace_path,git_top_level,git_branch,workspace_identity,workspace_kind,workspace_mode,dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,account_label,account_key,
+		advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,activity_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, in.ProjectID, agentID, in.AgentName, in.Harness, in.Host, digest, workerDigest, nullString(targetID), in.ManagementMode, in.Role,
 		nullStringPointer(in.ParentSessionID), nullInt64Pointer(in.TicketID), nullableWorkShape(in.WorkShape), in.SteerMode,
 		workspacePath, gitTopLevel, gitBranch, workspaceIdentity, workspaceKind, workspaceMode,
-		in.DispatchProfileID, in.DispatchProfileVersion, profileModel, profileEffort, in.AccountLabel,
+		in.DispatchProfileID, in.DispatchProfileVersion, profileModel, profileEffort, in.AccountLabel, in.AccountKey,
 		boolInt(c.Inbox), boolInt(c.Status), boolInt(c.Steer), boolInt(c.Interrupt), boolInt(c.Stop), PhaseStarting, activityReason)
 	if err != nil {
 		_ = tx.Rollback()
@@ -852,7 +869,7 @@ func sameRegistration(s models.HarnessSession, in RegisterInput) bool {
 	return s.ProjectID == in.ProjectID && s.AgentName == in.AgentName && s.Harness == in.Harness && s.Host == in.Host &&
 		s.ManagementMode == in.ManagementMode && s.Role == in.Role && s.SteerMode == in.SteerMode && s.Capabilities == in.Capabilities &&
 		equalStringPointers(s.ParentSessionID, in.ParentSessionID) && equalInt64Pointers(s.TicketID, in.TicketID) && s.WorkShape == workshape.Normalize(in.WorkShape) &&
-		(in.MessageTargetID == "" || s.MessageTargetID == in.MessageTargetID) && workspaceMatches && profileMatches && s.AccountLabel == in.AccountLabel
+		(in.MessageTargetID == "" || s.MessageTargetID == in.MessageTargetID) && workspaceMatches && profileMatches && s.AccountLabel == in.AccountLabel && s.AccountKey == in.AccountKey
 }
 
 func (s *Service) Get(ctx context.Context, projectID int64, id string) (models.HarnessSession, error) {

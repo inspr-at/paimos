@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/backend/agentd"
+	"github.com/inspr-at/paimos/backend/lifecycleclient"
 )
 
 var Version = "dev"
@@ -58,7 +59,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	sessionID, correlationID, codexPath := "", "", ""
 	claudePath, nodePath, claudeSDKPath := "", "", ""
 	reportHost, reportURL, reportAPIKeyFile, paimosPath := "", "", "", ""
-	lifecycleConfigPath := ""
+	lifecycleConfigPath, codexAccountsPath, accountKey := "", "", ""
 	if command == "serve" {
 		flags.StringVar(&lifecycleConfigPath, "lifecycle-config", "", "protected explicit project/account/profile/workspace JSON configuration for browser lifecycle authority")
 		flags.StringVar(&codexPath, "codex-path", "", "absolute Codex CLI path")
@@ -70,6 +71,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.StringVar(&reportAPIKeyFile, "report-api-key-file", "", "protected owner-only file containing the M161 API key")
 		flags.StringVar(&paimosPath, "paimos-path", "", "paimos CLI used for authenticated M161 reporting")
 		flags.BoolVar(&allowSharedWorkspaces, "allow-shared-workspaces", false, "separately authorize explicitly shared child workspaces")
+		flags.StringVar(&codexAccountsPath, "codex-accounts", "", "protected operator-controlled JSON registry of opaque Codex account keys")
 	}
 	if command == "start" {
 		flags.StringVar(&adapter, "adapter", "codex", "harness adapter")
@@ -83,6 +85,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		flags.StringVar(&workspaceMode, "workspace-mode", "exclusive", "exclusive or shared workspace ownership")
 		flags.StringVar(&dispatchProfile, "dispatch-profile", "", "execution-options dispatch profile id")
 		flags.StringVar(&dispatchProfileVersion, "dispatch-profile-version", "", "exact immutable dispatch profile version")
+		flags.StringVar(&accountKey, "account-key", "", "opaque operator registry account key; never a path, env, or credential")
 	}
 	if command == "workspace-identity" {
 		flags.StringVar(&workspace, "workspace", "", "existing absolute workspace to inspect without mutation")
@@ -161,8 +164,22 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 				return err
 			}
 		}
+		adapters := serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath)
+		if codexAccountsPath != "" {
+			raw, e := lifecycleclient.ReadPrivate(codexAccountsPath, 64<<10)
+			if e != nil {
+				return errors.New("codex account registry requires a protected owner-only JSON file")
+			}
+			registry, e := agentd.ParseCodexAccountRegistry(raw)
+			if e != nil {
+				return e
+			}
+			if codex, ok := adapters[0].(*agentd.CodexAdapter); ok {
+				codex.SetAccounts(registry)
+			}
+		}
 		supervisor, err := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: common.instance, StateRoot: root,
-			Adapters: serveAdapters(codexPath, claudePath, nodePath, claudeSDKPath), Reporter: reporter,
+			Adapters: adapters, Reporter: reporter,
 			AllowSharedWorkspaces: allowSharedWorkspaces})
 		if err != nil {
 			return err
@@ -220,7 +237,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		output, err = client.Start(ctx, agentd.StartRequest{
 			Adapter: adapter, Workspace: workspace, Identity: identity, ProjectID: projectID, Prompt: string(prompt),
 			Role: role, ParentSessionID: parentSessionID, TicketID: ticketID, WorkShape: workShape, WorkspaceMode: workspaceMode,
-			DispatchProfileID: dispatchProfile, DispatchProfileVersion: dispatchProfileVersion,
+			DispatchProfileID: dispatchProfile, DispatchProfileVersion: dispatchProfileVersion, AccountKey: accountKey,
 		})
 	case "steer":
 		body, readErr := io.ReadAll(io.LimitReader(stdin, (64<<10)+1))

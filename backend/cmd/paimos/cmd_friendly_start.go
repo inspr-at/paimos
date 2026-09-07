@@ -143,7 +143,7 @@ func friendlyStartCmd(coordinator bool) *cobra.Command {
 	f.StringVar(&o.Harness, "harness", "", "codex or claude")
 	f.StringVar(&o.Model, "model", "", "exact supported model selector")
 	f.StringVar(&o.Effort, "effort", "", "exact supported effort selector")
-	f.StringVar(&o.Account, "account", "", "non-secret account label constraint (requires daemon support); local_probe selects its source")
+	f.StringVar(&o.Account, "account", "", "opaque named-account key from the operator registry, or a closed class label; local_probe selects the class source without named-account verification")
 	f.StringVar(&o.Machine, "machine", "", "authenticated machine ID constraint (requires daemon support); authenticated_reporter selects its source")
 	f.StringVar(&o.Workspace, "workspace", ".", "clean, exclusively available workspace")
 	f.StringVar(&o.PromptFile, "prompt-file", "", "task instructions from file; never included in output or retry records")
@@ -387,7 +387,11 @@ func friendlyConstrainedRequest(request agentd.StartRequest, o friendlyStartOpti
 	_ = json.Unmarshal(raw, &fields)
 	constraints := map[string]string{}
 	if o.Account != "" && o.Account != dispatchprofile.AccountLocalProbe {
-		constraints["expected_account_label"] = o.Account
+		if agentd.IsClosedAccountLabel(o.Account) {
+			constraints["expected_account_label"] = o.Account
+		} else {
+			constraints["account_key"] = o.Account
+		}
 	}
 	if o.Machine != "" && o.Machine != dispatchprofile.MachineAuthenticatedReporter {
 		constraints["expected_machine_id"] = o.Machine
@@ -556,7 +560,7 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 			}
 		}
 	}
-	if session.ProjectID != plan.request.ProjectID || session.Identity != plan.request.Identity || session.Adapter != plan.request.Adapter || session.Role != plan.request.Role || session.ParentSessionID != plan.request.ParentSessionID || session.TicketID != plan.request.TicketID || session.WorkShape != plan.request.WorkShape || !session.Managed {
+	if session.ProjectID != plan.request.ProjectID || session.Identity != plan.request.Identity || session.Adapter != plan.request.Adapter || session.Role != plan.request.Role || session.ParentSessionID != plan.request.ParentSessionID || session.TicketID != plan.request.TicketID || session.WorkShape != plan.request.WorkShape || session.AccountKey != plan.request.AccountKey || !session.Managed {
 		result.Reason = "Daemon returned an unexpected generation; inspect runtime doctor."
 		return finish(result)
 	}
@@ -566,7 +570,7 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 		return finish(result)
 	}
 	var public models.HarnessSession
-	if err := friendlyRead(ctx, client, fmt.Sprintf("/api/projects/%d/harness-sessions/%s", plan.request.ProjectID, session.Reporter.PublicSessionID), &public); err != nil || public.ID != session.Reporter.PublicSessionID || public.ProjectID != plan.request.ProjectID || public.AgentName != o.Agent || public.Harness != plan.Profile.Harness || public.ManagementMode != "managed" || public.Role != plan.Role || (public.WorkShape != plan.Shape && !(plan.Shape == "" && public.WorkShape == "unknown")) || friendlyParentValue(public.ParentSessionID) != plan.Parent || friendlyTicketValue(public.TicketID) != plan.request.TicketID || public.DispatchProfile == nil || *public.DispatchProfile != (models.HarnessDispatchProfile(plan.Profile)) {
+	if err := friendlyRead(ctx, client, fmt.Sprintf("/api/projects/%d/harness-sessions/%s", plan.request.ProjectID, session.Reporter.PublicSessionID), &public); err != nil || public.ID != session.Reporter.PublicSessionID || public.ProjectID != plan.request.ProjectID || public.AgentName != o.Agent || public.Harness != plan.Profile.Harness || public.ManagementMode != "managed" || public.Role != plan.Role || (public.WorkShape != plan.Shape && !(plan.Shape == "" && public.WorkShape == "unknown")) || friendlyParentValue(public.ParentSessionID) != plan.Parent || friendlyTicketValue(public.TicketID) != plan.request.TicketID || public.DispatchProfile == nil || *public.DispatchProfile != (models.HarnessDispatchProfile(plan.Profile)) || public.AccountKey != plan.request.AccountKey {
 		result.Reason = "Reporter registration could not be verified against the public authority; inspect runtime doctor and harness list."
 		return finish(result)
 	}

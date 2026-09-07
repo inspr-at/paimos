@@ -29,10 +29,19 @@ type CodexAdapter struct {
 	path          string
 	clientVersion string
 	command       func(string, ...string) *exec.Cmd
+	accounts      CodexAccountRegistry
 }
 
 func NewCodexAdapter(path, clientVersion string) *CodexAdapter {
 	return &CodexAdapter{path: strings.TrimSpace(path), clientVersion: strings.TrimSpace(clientVersion), command: exec.Command}
+}
+
+func (a *CodexAdapter) SetAccounts(registry CodexAccountRegistry) {
+	a.accounts = registry
+}
+
+func (a *CodexAdapter) HasAccount(key string) bool {
+	return a.accounts.HasAccount(key)
 }
 
 func (*CodexAdapter) Name() string { return AdapterCodex }
@@ -80,6 +89,16 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 		command = exec.Command
 	}
 	cmd := command(path, "app-server", "--listen", "stdio://") // #nosec G204 G702 -- fixed adapter argv and operator-selected executable.
+	accountKey := strings.TrimSpace(request.AccountKey)
+	var selectedAccount codexAccount
+	if accountKey != "" {
+		account, ok := a.accounts.lookup(accountKey)
+		if !ok {
+			return nil, errors.New("managed account selection is unavailable")
+		}
+		selectedAccount = account
+		cmd.Env = applyCodexHome(cmd.Env, account.home)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, errors.New("open Codex app-server stdin")
@@ -119,6 +138,16 @@ func (a *CodexAdapter) Start(ctx context.Context, request StartRequest, observe 
 	}
 	if err := process.notify("initialized", map[string]any{}); err != nil {
 		return nil, errors.New("notify Codex app-server initialized")
+	}
+	if accountKey != "" {
+		label, err := process.verifyChatGPTAccount(operationCtx, selectedAccount.email)
+		if err != nil {
+			return nil, err
+		}
+		process.stateMu.Lock()
+		process.accountKey = accountKey
+		process.accountLabel = label
+		process.stateMu.Unlock()
 	}
 	var threadResponse struct {
 		Thread struct {
@@ -185,6 +214,8 @@ type codexTurnResult struct{ failed bool }
 type codexProcess struct {
 	persistent    bool
 	model, effort string
+	accountKey    string
+	accountLabel  string
 	*ownedProcess
 	stdin   io.WriteCloser
 	observe func(AdapterEvent)
@@ -220,6 +251,32 @@ func newCodexProcess(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, obse
 	}
 	go p.readLoop(stdout)
 	return p
+}
+
+func (p *codexProcess) AccountSelection() (string, string) {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return p.accountKey, p.accountLabel
+}
+
+func (p *codexProcess) verifyChatGPTAccount(ctx context.Context, expectedEmail string) (string, error) {
+	var response struct {
+		Account *struct {
+			Type  string  `json:"type"`
+			Email *string `json:"email"`
+		} `json:"account"`
+	}
+	if err := p.call(ctx, "account/read", map[string]any{"refreshToken": false}, &response); err != nil {
+		return "", errors.New("managed account identity could not be verified")
+	}
+	if response.Account == nil || response.Account.Type != "chatgpt" || response.Account.Email == nil {
+		return "", errors.New("managed account identity could not be verified")
+	}
+	actual := strings.TrimSpace(*response.Account.Email)
+	if actual == "" || !strings.EqualFold(actual, expectedEmail) {
+		return "", errors.New("managed account identity could not be verified")
+	}
+	return "chatgpt", nil
 }
 
 func (p *codexProcess) observeEvent(event AdapterEvent) {

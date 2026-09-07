@@ -32,6 +32,14 @@ func (s *Supervisor) ProbeAccount(ctx context.Context, adapter string) string {
 	return "unknown"
 }
 
+func (s *Supervisor) HasAccount(adapter, key string) bool {
+	s.mu.RLock()
+	a := s.adapters[adapter]
+	s.mu.RUnlock()
+	resolver, ok := a.(accountContextResolver)
+	return ok && resolver.HasAccount(key)
+}
+
 // RepairReporter performs a fresh authenticated reporting pass on this exact
 // daemon. It does not signal, replace or adopt another process.
 func (s *Supervisor) RepairReporter(ctx context.Context) error {

@@ -68,7 +68,7 @@ func TestHarnessOpenAPIKeepsSessionAndTicketIdentitiesDistinct(t *testing.T) {
 	}
 	harness := contract.Components.Schemas["HarnessSession"].Properties
 	product := contract.Components.Schemas["ProductSession"].Properties
-	for _, field := range []string{"id", "parent_harness_session_id", "ticket_id", "work_shape", "work_contract", "machine_id", "workspace_provenance", "dispatch_profile", "account_label"} {
+	for _, field := range []string{"id", "parent_harness_session_id", "ticket_id", "work_shape", "work_contract", "machine_id", "workspace_provenance", "dispatch_profile", "account_label", "account_key"} {
 		if _, ok := harness[field]; !ok {
 			t.Fatalf("HarnessSession missing distinct %s field", field)
 		}
