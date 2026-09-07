@@ -6,7 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
-## [Unreleased]
+## [26.09.07.20.15] — 2026-09-07
+
+### Fixed — protected account registry diagnostics (PAI-958)
+
+- Recognize the managed daemon account-registry argument during runtime health
+  checks. Validate the protected registry file metadata without reading its
+  credential contents; unknown or duplicate service arguments remain invalid.
 
 ### Fixed — named-account intent schema compatibility (PAI-959)
 
