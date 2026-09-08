@@ -23,6 +23,7 @@ import Paimos6CommandPalette, {
 } from '@/components/v6/Paimos6CommandPalette.vue'
 import { usePaimos6CommandPalette } from '@/composables/v6/usePaimos6CommandPalette'
 import BrandLogo from '@/components/BrandLogo.vue'
+import FlowHost from '@/components/flow/FlowHost.vue'
 import AppDevLoginBanner from '@/components/AppDevLoginBanner.vue'
 import AppImpersonationBanner from '@/components/AppImpersonationBanner.vue'
 import SessionExpiredModal from '@/components/SessionExpiredModal.vue'
@@ -46,6 +47,7 @@ const projectId = computed(() => {
   const parsed = Number(raw)
   return Number.isSafeInteger(parsed) ? parsed : null
 })
+const flowHostActive = ref(false)
 const authorityKey = computed(() =>
   JSON.stringify([
     globalThis.location?.origin ?? 'unknown-origin',
@@ -229,7 +231,9 @@ onScopeDispose(() => {
         </div>
       </aside>
       <div class="habitat-app-content">
-        <header class="habitat-header">
+        <FlowHost :project-id="projectId" @active="flowHostActive = $event">
+          <template #toolbar>
+            <header class="habitat-header" :class="{ 'habitat-header--flow-toolbar': flowHostActive }">
           <div class="habitat-location">
             <span>Workspace</span><span>/</span
             ><strong>{{
@@ -273,17 +277,19 @@ onScopeDispose(() => {
             </button>
           </div>
         </header>
-        <div class="habitat-source">
-          <span>{{ instanceHostname || 'Instance identity unavailable' }}</span
-          ><span>Authenticated browser session</span>
-        </div>
-        <div v-if="show2FAWarning" class="habitat-security" role="alert">
-          Protect your account with two-factor authentication.
-          <RouterLink to="/settings?tab=account#two-factor-authentication"
-            >Set up two-factor authentication</RouterLink
-          >
-        </div>
-        <div class="p6-shell-content"><slot /></div>
+            <div class="habitat-source">
+              <span>{{ instanceHostname || 'Instance identity unavailable' }}</span
+              ><span>Authenticated browser session</span>
+            </div>
+            <div v-if="show2FAWarning" class="habitat-security" role="alert">
+              Protect your account with two-factor authentication.
+              <RouterLink to="/settings?tab=account#two-factor-authentication"
+                >Set up two-factor authentication</RouterLink
+              >
+            </div>
+          </template>
+          <div class="p6-shell-content"><slot /></div>
+        </FlowHost>
         <footer class="habitat-footer">
           <span>Agent Intercom · {{ brandName }}</span>
           <RouterLink :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"

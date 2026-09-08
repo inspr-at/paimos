@@ -20,6 +20,7 @@ import { instanceLabel, loadInstance } from '@/api/instance'
 import AppIcon from '@/components/AppIcon.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
 import AppHeader from '@/components/AppHeader.vue'
+import FlowHost from '@/components/flow/FlowHost.vue'
 import { useSidePanelPinned } from '@/composables/useSidePanelPinned'
 import { useSidePanelWidth } from '@/composables/useSidePanelWidth'
 import SidebarTimerPanel from '@/components/SidebarTimerPanel.vue'
@@ -46,6 +47,7 @@ const { sidebarSprints, loadSidebarSprints } = useSidebarSprints()
 const { loadRecentProjects, startVisitTracking } = useRecentProjects()
 
 const appHeaderRef = ref<InstanceType<typeof AppHeader> | null>(null)
+const flowHostActive = ref(false)
 const { init: initKeyboardShortcuts } = useKeyboardShortcuts(appHeaderRef)
 initKeyboardShortcuts()
 
@@ -271,31 +273,19 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="main" :style="mainStyle">
-      <!-- ── Top chrome ─────────────────────────────────────── -->
-      <AppHeader ref="appHeaderRef" />
-
-      <!-- ── Page content ──────────────────────────────────────
-           PAI-361 layout cleanup: route component is a direct child
-           of .main-content (no .view-body wrapper). Self-scroll
-           routes (/issues, /projects/:id) toggle a class that
-           replaces overflow-y:auto with overflow:hidden, providing
-           the bounded flex viewport their inner table-wrap needs.
-           Each self-scroll route's root already declares
-           `flex: 1; min-height: 0` (.pd-page, .issues-view-root). -->
-      <div :class="['main-content', { 'main-content--self-scroll': route.meta.scrollMode === 'self' }]">
-        <div v-if="show2FAWarning" class="totp-warning" role="alert">
-          <span class="totp-warning-pulse" aria-hidden="true"></span>
-          <span class="totp-warning-label">Two-factor authentication is not enabled. <button class="totp-warning-link" type="button" @click="goTo2FASetup">Set it up now</button> to secure your account.</span>
+      <FlowHost :project-id="routeProjectId" @active="flowHostActive = $event">
+        <template #toolbar>
+          <AppHeader ref="appHeaderRef" :compact="flowHostActive" />
+        </template>
+        <div :class="['main-content', { 'main-content--self-scroll': route.meta.scrollMode === 'self' }]">
+          <div v-if="show2FAWarning" class="totp-warning" role="alert">
+            <span class="totp-warning-pulse" aria-hidden="true"></span>
+            <span class="totp-warning-label">Two-factor authentication is not enabled. <button class="totp-warning-link" type="button" @click="goTo2FASetup">Set it up now</button> to secure your account.</span>
+          </div>
+          <slot />
         </div>
-        <slot />
-      </div>
-
-      <!-- ── Bottom chrome ─────────────────────────────────────
-           PAI-361: footer slot is a peer of AppHeader, not nested
-           inside .main-content. Mirrors the structural symmetry of
-           top/bottom chrome. Empty :display:none on non-project
-           views. ProjectDetailView teleports into it. -->
-      <div id="project-footer-slot" class="project-footer-slot"></div>
+        <div id="project-footer-slot" class="project-footer-slot"></div>
+      </FlowHost>
     </main>
     </div>
   </div>
