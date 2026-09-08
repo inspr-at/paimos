@@ -27,7 +27,7 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 		}
 		docs[name] = string(raw)
 	}
-	for _, command := range []string{"serve", "start", "status", "steer", "interrupt", "stop", "held-queue", "resume-queue", "decisions", "answer"} {
+	for _, command := range []string{"serve", "start", "status", "steer", "interrupt", "stop", "held-queue", "resume-queue", "decisions", "inspect", "output", "answer"} {
 		for name, doc := range docs {
 			if !strings.Contains(doc, "paimos-agentd "+command) {
 				t.Errorf("%s quickstart lost paimos-agentd %s", name, command)
@@ -50,6 +50,8 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 		"held-queue":   {"instance", "socket", "session", "project-id", "identity"},
 		"resume-queue": {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
 		"decisions":    {"instance", "socket", "session", "project-id", "identity"},
+		"inspect":      {"instance", "socket", "session", "project-id", "identity", "request-id", "digest"},
+		"output":       {"instance", "socket", "session", "project-id", "identity"},
 		"answer":       {"instance", "socket", "session", "project-id", "identity", "correlation-id", "request-id", "digest", "option-id"},
 	}
 	for name, contract := range map[string]map[string][]string{"runbook": runbookFlags} {
@@ -70,6 +72,8 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 		"held-queue":   {"instance", "socket", "session", "project-id", "identity"},
 		"resume-queue": {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
 		"decisions":    {"instance", "socket", "session", "project-id", "identity"},
+		"inspect":      {"instance", "socket", "session", "project-id", "identity", "request-id", "digest"},
+		"output":       {"instance", "socket", "session", "project-id", "identity"},
 		"answer":       {"instance", "socket", "session", "project-id", "identity", "correlation-id", "request-id", "digest", "option-id"},
 	}
 	for command, names := range actualFlags {

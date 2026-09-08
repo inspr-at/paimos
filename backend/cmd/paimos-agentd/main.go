@@ -95,7 +95,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if command == "workspace-identity" {
 		flags.StringVar(&workspace, "workspace", "", "existing absolute workspace to inspect without mutation")
 	}
-	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" || command == "held-queue" || command == "resume-queue" || command == "decisions" || command == "answer" {
+	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" || command == "held-queue" || command == "resume-queue" || command == "decisions" || command == "answer" || command == "inspect" || command == "output" {
 		flags.StringVar(&sessionID, "session", "", "managed agentd session UUID")
 		flags.StringVar(&identity, "identity", "", "expected attributed harness identity")
 		flags.Int64Var(&projectID, "project-id", 0, "expected PPM project numeric ID")
@@ -103,9 +103,11 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if command == "steer" || command == "interrupt" || command == "stop" || command == "receiver-reference" || command == "resume-queue" || command == "answer" {
 		flags.StringVar(&correlationID, "correlation-id", "", "durable message/delivery/control ID")
 	}
-	if command == "answer" {
+	if command == "answer" || command == "inspect" {
 		flags.StringVar(&requestID, "request-id", "", "exact owned ACP decision request id")
 		flags.StringVar(&digest, "digest", "", "exact tool/input digest for the pending request")
+	}
+	if command == "answer" {
 		flags.StringVar(&optionID, "option-id", "", "exact offered ACP option id")
 	}
 	if err := flags.Parse(args); err != nil {
@@ -117,7 +119,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if command == "receiver-reference" && (strings.TrimSpace(identity) == "" || uuid.Validate(sessionID) != nil || projectID <= 0) {
 		return errors.New("receiver reference requires exact --session generation, --identity and positive --project-id")
 	}
-	if command == "start" || command == "steer" || command == "interrupt" || command == "stop" || command == "held-queue" || command == "resume-queue" || command == "decisions" || command == "answer" {
+	if command == "start" || command == "steer" || command == "interrupt" || command == "stop" || command == "held-queue" || command == "resume-queue" || command == "decisions" || command == "answer" || command == "inspect" || command == "output" {
 		if projectID <= 0 {
 			return errors.New("--project-id is required")
 		}
@@ -321,8 +323,17 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			RequestID: requestID, Generation: sessionID, Digest: digest, OptionID: optionID,
 			Authority: agentd.DecisionAuthorityLocalOperator,
 		})
+	case "inspect":
+		output, err = client.Inspect(ctx, sessionID, agentd.DecisionInspectRequest{
+			Instance: common.instance, ProjectID: projectID, Identity: identity,
+			RequestID: requestID, Generation: sessionID, Digest: digest,
+		})
+	case "output":
+		output, err = client.VisibleOutput(ctx, sessionID, agentd.ControlRequest{
+			Instance: common.instance, ProjectID: projectID, Identity: identity,
+		})
 	default:
-		return errors.New("command must be serve, start, status, workspace-identity, receiver-reference, steer, interrupt, stop, held-queue, resume-queue, decisions, answer, or version")
+		return errors.New("command must be serve, start, status, workspace-identity, receiver-reference, steer, interrupt, stop, held-queue, resume-queue, decisions, inspect, output, answer, or version")
 	}
 	if err != nil {
 		return err

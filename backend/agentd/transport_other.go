@@ -42,6 +42,12 @@ func (*Client) ResumeQueue(context.Context, string, ControlRequest) (Receipt, er
 func (*Client) Answer(context.Context, string, DecisionAnswer) (Receipt, error) {
 	return Receipt{}, errors.New("agentd Unix transport is unsupported")
 }
+func (*Client) Inspect(context.Context, string, DecisionInspectRequest) (DecisionInspect, error) {
+	return DecisionInspect{}, errors.New("agentd Unix transport is unsupported")
+}
+func (*Client) VisibleOutput(context.Context, string, ControlRequest) (VisibleOutput, error) {
+	return VisibleOutput{}, errors.New("agentd Unix transport is unsupported")
+}
 
 func (c *Client) RuntimeStatus(context.Context) (RuntimeStatus, error) {
 	return RuntimeStatus{}, errors.New("agentd transport is unsupported")

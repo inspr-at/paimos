@@ -4,6 +4,7 @@
 package agentd
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,6 +17,8 @@ import (
 const (
 	maxCursorPendingDecisions = 8
 	maxCursorDecisionRefusals = 8
+	maxCursorInspectBytes     = 8 << 10
+	maxCursorVisibleBytes     = 16 << 10
 	cursorDecisionTTL         = 2 * time.Minute
 	cursorPermissionPrimitive = "cursor acp session/request_permission"
 	cursorQuestionPrimitive   = "cursor acp cursor/ask_question"
@@ -27,6 +30,7 @@ type cursorHeldDecision struct {
 	rpcID      json.RawMessage
 	optionKind map[string]string
 	questionID string
+	inspect    DecisionInspect
 	used       bool
 	timer      *time.Timer
 }
@@ -97,6 +101,10 @@ func (p *cursorProcess) Answer(_ context.Context, request DecisionAnswer) (Contr
 		p.stateMu.Unlock()
 		return ControlEffect{}, ErrDecisionMismatch
 	}
+	if held.inspect.Incomplete && cursorOptionApproves(held.public.Kind, kind) {
+		p.stateMu.Unlock()
+		return ControlEffect{}, ErrDecisionIncomplete
+	}
 	held.used = true
 	if held.timer != nil {
 		held.timer.Stop()
@@ -119,6 +127,83 @@ func (p *cursorProcess) Answer(_ context.Context, request DecisionAnswer) (Contr
 	})
 	p.observeEvent(AdapterEvent{Kind: EventControlApplied, CorrelationID: request.CorrelationID})
 	return ControlEffect{Primitive: primitive, CorrelationID: request.CorrelationID, VendorMessageID: sessionID}, nil
+}
+
+func cursorOptionApproves(kind DecisionKind, optionKind string) bool {
+	switch kind {
+	case DecisionPermission:
+		return optionKind == "allow_once" || optionKind == "allow_always"
+	case DecisionPlan:
+		return optionKind == "accepted"
+	default:
+		return true
+	}
+}
+
+func (p *cursorProcess) Inspect(request DecisionInspectRequest) (DecisionInspect, error) {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	if request.RequestID == "" || request.Generation != p.generation || request.Digest == "" {
+		return DecisionInspect{}, ErrDecisionMismatch
+	}
+	if p.terminalFailure {
+		return DecisionInspect{}, ErrSessionNotRunning
+	}
+	held := p.held[request.RequestID]
+	if held == nil || held.used || time.Now().After(held.public.ExpiresAt) {
+		return DecisionInspect{}, ErrDecisionUnknown
+	}
+	if request.Digest != held.public.Digest {
+		return DecisionInspect{}, ErrDecisionMismatch
+	}
+	out := held.inspect
+	out.OptionIDs = append([]string(nil), held.public.OptionIDs...)
+	out.Options = append([]DecisionOption(nil), held.inspect.Options...)
+	out.ExpiresAt = held.public.ExpiresAt
+	out.Untrusted = true
+	return out, nil
+}
+
+func (p *cursorProcess) VisibleOutput() (VisibleOutput, error) {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	text := p.visible.String()
+	sum := sha256.Sum256([]byte(text))
+	return VisibleOutput{
+		Generation: p.generation, Text: text, Digest: hex.EncodeToString(sum[:]),
+		Bytes: len(text), Truncated: p.visibleTruncated,
+	}, nil
+}
+
+func (p *cursorProcess) appendVisible(text string) {
+	if text == "" {
+		return
+	}
+	if _, ok, _ := inspectableText(text, maxCursorVisibleBytes); !ok {
+		return
+	}
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	if p.visible.Len() >= maxCursorVisibleBytes {
+		p.visibleTruncated = true
+		return
+	}
+	remain := maxCursorVisibleBytes - p.visible.Len()
+	if len(text) > remain {
+		text = string([]byte(text)[:remain])
+		for !utf8.ValidString(text) && len(text) > 0 {
+			text = text[:len(text)-1]
+		}
+		p.visibleTruncated = true
+	}
+	p.visible.WriteString(text)
+}
+
+func (p *cursorProcess) clearVisible() {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	p.visible.Reset()
+	p.visibleTruncated = false
 }
 
 func cursorDecisionResult(kind DecisionKind, optionID, questionID string) (map[string]any, string) {
@@ -164,6 +249,7 @@ func (p *cursorProcess) holdPeerDecision(message cursorRPCMessage) {
 		ttl = cursorDecisionTTL
 	}
 	parsed.public.ExpiresAt = time.Now().UTC().Add(ttl)
+	parsed.inspect.ExpiresAt = parsed.public.ExpiresAt
 	if !owned {
 		p.failClosedPeer(message.ID, -32602, "invalid params")
 		p.noteRefusal(parsed.public.Method, "unowned")
@@ -289,10 +375,12 @@ func parseCursorPermission(message cursorRPCMessage, sessionID, generation strin
 		ToolCall  *struct {
 			ToolCallID string          `json:"toolCallId"`
 			Kind       string          `json:"kind"`
+			Title      string          `json:"title"`
 			RawInput   json.RawMessage `json:"rawInput"`
 		} `json:"toolCall"`
 		Options []struct {
 			OptionID string `json:"optionId"`
+			Name     string `json:"name"`
 			Kind     string `json:"kind"`
 		} `json:"options"`
 	}
@@ -303,10 +391,20 @@ func parseCursorPermission(message cursorRPCMessage, sessionID, generation strin
 		return nil, false
 	}
 	toolKind := closedToolKind(params.ToolCall.Kind)
+	title, titleOK, titleTrunc := inspectableText(params.ToolCall.Title, 256)
+	if params.ToolCall.Title != "" && !titleOK {
+		return nil, false
+	}
+	toolInput, inputOK, inputTrunc := inspectableRawInput(params.ToolCall.RawInput)
+	if !inputOK {
+		return nil, false
+	}
 	optionIDs := make([]string, 0, len(params.Options))
 	optionKind := map[string]string{}
+	options := make([]DecisionOption, 0, len(params.Options))
 	for _, option := range params.Options {
-		if !validOpaqueID(option.OptionID) || len(option.OptionID) > 64 || optionKind[option.OptionID] != "" {
+		label, labelOK, labelTrunc := inspectableText(option.Name, 128)
+		if !validOpaqueID(option.OptionID) || len(option.OptionID) > 64 || optionKind[option.OptionID] != "" || !labelOK || label == "" || labelTrunc {
 			return nil, false
 		}
 		kind := strings.TrimSpace(option.Kind)
@@ -317,20 +415,33 @@ func parseCursorPermission(message cursorRPCMessage, sessionID, generation strin
 		}
 		optionIDs = append(optionIDs, option.OptionID)
 		optionKind[option.OptionID] = kind
+		options = append(options, DecisionOption{ID: option.OptionID, Label: label, Kind: kind})
 	}
-	digest := cursorDecisionDigest(generation, message.Method, params.SessionID, params.ToolCall.ToolCallID, toolKind, params.ToolCall.RawInput, optionIDs)
-	return newHeldDecision(message, PendingDecision{
+	if title == "" && toolInput == "" {
+		return nil, false
+	}
+	incomplete := titleTrunc || inputTrunc
+	display := title + "\x00" + toolInput + "\x00" + cursorOptionBinding(options)
+	digest := cursorDecisionDigest(generation, message.Method, params.SessionID, params.ToolCall.ToolCallID, toolKind, params.ToolCall.RawInput, optionIDs, display)
+	public := PendingDecision{
 		RequestID: cursorDecisionRequestID(generation, message.ID, message.Method), Generation: generation,
 		Method: message.Method, Kind: DecisionPermission, ToolKind: toolKind, Digest: digest, OptionIDs: optionIDs,
-	}, optionKind, ""), true
+	}
+	return newHeldDecision(message, public, optionKind, "", DecisionInspect{
+		RequestID: public.RequestID, Generation: generation, Method: message.Method, Kind: DecisionPermission,
+		ToolKind: toolKind, Digest: digest, OptionIDs: optionIDs, Options: options, Title: title, ToolInput: toolInput,
+		Incomplete: incomplete, Untrusted: true,
+	}), true
 }
 
 func parseCursorQuestion(message cursorRPCMessage, sessionID, generation string) (*cursorHeldDecision, bool) {
 	var params struct {
 		SessionID  string `json:"sessionId"`
 		ToolCallID string `json:"toolCallId"`
+		Title      string `json:"title"`
 		Questions  []struct {
 			ID      string `json:"id"`
+			Prompt  string `json:"prompt"`
 			Options []struct {
 				ID    string `json:"id"`
 				Label string `json:"label"`
@@ -351,27 +462,50 @@ func parseCursorQuestion(message cursorRPCMessage, sessionID, generation string)
 	if !validOpaqueID(question.ID) || len(question.Options) == 0 || len(question.Options) > 8 {
 		return nil, false
 	}
+	title, titleOK, titleTrunc := inspectableText(params.Title, 256)
+	if params.Title != "" && !titleOK {
+		return nil, false
+	}
+	prompt, promptOK, promptTrunc := inspectableText(question.Prompt, maxCursorInspectBytes)
+	if !promptOK || prompt == "" {
+		return nil, false
+	}
 	optionIDs := make([]string, 0, len(question.Options))
 	optionKind := map[string]string{}
+	options := make([]DecisionOption, 0, len(question.Options))
 	for _, option := range question.Options {
-		if !validOpaqueID(option.ID) || optionKind[option.ID] != "" {
+		label, labelOK, labelTrunc := inspectableText(option.Label, 128)
+		if !validOpaqueID(option.ID) || optionKind[option.ID] != "" || !labelOK || label == "" || labelTrunc {
 			return nil, false
 		}
 		optionIDs = append(optionIDs, option.ID)
 		optionKind[option.ID] = "choice"
+		options = append(options, DecisionOption{ID: option.ID, Label: label, Kind: "choice"})
 	}
 	raw, _ := json.Marshal(params.Questions)
-	digest := cursorDecisionDigest(generation, message.Method, sessionID, params.ToolCallID, "", raw, optionIDs)
-	return newHeldDecision(message, PendingDecision{
+	boundSession := sessionID
+	if boundSession == "" {
+		boundSession = params.SessionID
+	}
+	incomplete := titleTrunc || promptTrunc
+	display := title + "\x00" + prompt + "\x00" + cursorOptionBinding(options)
+	digest := cursorDecisionDigest(generation, message.Method, boundSession, params.ToolCallID, "", raw, optionIDs, display)
+	public := PendingDecision{
 		RequestID: cursorDecisionRequestID(generation, message.ID, message.Method), Generation: generation,
 		Method: message.Method, Kind: DecisionQuestion, Digest: digest, OptionIDs: optionIDs,
-	}, optionKind, question.ID), true
+	}
+	return newHeldDecision(message, public, optionKind, question.ID, DecisionInspect{
+		RequestID: public.RequestID, Generation: generation, Method: message.Method, Kind: DecisionQuestion,
+		Digest: digest, OptionIDs: optionIDs, Options: options, Title: title, Detail: prompt, Incomplete: incomplete, Untrusted: true,
+	}), true
 }
 
 func parseCursorPlan(message cursorRPCMessage, sessionID, generation string) (*cursorHeldDecision, bool) {
 	var params struct {
 		SessionID  string `json:"sessionId"`
 		ToolCallID string `json:"toolCallId"`
+		Name       string `json:"name"`
+		Overview   string `json:"overview"`
 		Plan       string `json:"plan"`
 	}
 	if json.Unmarshal(message.Params, &params) != nil {
@@ -383,17 +517,48 @@ func parseCursorPlan(message cursorRPCMessage, sessionID, generation string) (*c
 	if !validOpaqueID(params.ToolCallID) || strings.TrimSpace(params.Plan) == "" || len(params.Plan) > maxTextBytes {
 		return nil, false
 	}
+	title, titleOK, titleTrunc := inspectableText(params.Name, 256)
+	if params.Name != "" && !titleOK {
+		return nil, false
+	}
+	overview, overviewOK, overviewTrunc := inspectableText(params.Overview, 512)
+	if params.Overview != "" && !overviewOK {
+		return nil, false
+	}
+	plan, planOK, planTrunc := inspectableText(params.Plan, maxCursorInspectBytes)
+	if !planOK || plan == "" {
+		return nil, false
+	}
 	optionIDs := []string{"accepted", "rejected"}
 	optionKind := map[string]string{"accepted": "accepted", "rejected": "rejected"}
-	digest := cursorDecisionDigest(generation, message.Method, sessionID, params.ToolCallID, "", []byte(params.Plan), optionIDs)
-	return newHeldDecision(message, PendingDecision{
+	options := []DecisionOption{
+		{ID: "accepted", Label: "accepted", Kind: "accepted"},
+		{ID: "rejected", Label: "rejected", Kind: "rejected"},
+	}
+	boundSession := sessionID
+	if boundSession == "" {
+		boundSession = params.SessionID
+	}
+	incomplete := titleTrunc || overviewTrunc || planTrunc || len(params.Plan) > maxCursorInspectBytes
+	detail := plan
+	if overview != "" {
+		detail = overview + "\n" + plan
+	}
+	display := title + "\x00" + detail
+	digest := cursorDecisionDigest(generation, message.Method, boundSession, params.ToolCallID, "", []byte(params.Plan), optionIDs, display)
+	public := PendingDecision{
 		RequestID: cursorDecisionRequestID(generation, message.ID, message.Method), Generation: generation,
 		Method: message.Method, Kind: DecisionPlan, Digest: digest, OptionIDs: optionIDs,
-	}, optionKind, ""), true
+	}
+	return newHeldDecision(message, public, optionKind, "", DecisionInspect{
+		RequestID: public.RequestID, Generation: generation, Method: message.Method, Kind: DecisionPlan,
+		Digest: digest, OptionIDs: optionIDs, Options: options, Title: title, Detail: detail, Incomplete: incomplete, Untrusted: true,
+	}), true
 }
 
-func newHeldDecision(message cursorRPCMessage, public PendingDecision, optionKind map[string]string, questionID string) *cursorHeldDecision {
-	return &cursorHeldDecision{public: public, rpcID: append(json.RawMessage(nil), message.ID...), optionKind: optionKind, questionID: questionID}
+func newHeldDecision(message cursorRPCMessage, public PendingDecision, optionKind map[string]string, questionID string, inspect DecisionInspect) *cursorHeldDecision {
+	inspect.ExpiresAt = public.ExpiresAt
+	return &cursorHeldDecision{public: public, rpcID: append(json.RawMessage(nil), message.ID...), optionKind: optionKind, questionID: questionID, inspect: inspect}
 }
 
 func cursorDecisionRequestID(generation string, rpcID json.RawMessage, method string) string {
@@ -401,9 +566,9 @@ func cursorDecisionRequestID(generation string, rpcID json.RawMessage, method st
 	return hex.EncodeToString(sum[:16])
 }
 
-func cursorDecisionDigest(generation, method, sessionID, toolCallID, toolKind string, raw json.RawMessage, optionIDs []string) string {
+func cursorDecisionDigest(generation, method, sessionID, toolCallID, toolKind string, raw json.RawMessage, optionIDs []string, display string) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
-		generation, method, sessionID, toolCallID, toolKind, hex.EncodeToString(rawSHA(raw)), strings.Join(optionIDs, ","),
+		generation, method, sessionID, toolCallID, toolKind, hex.EncodeToString(rawSHA(raw)), strings.Join(optionIDs, ","), display,
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])
 }
@@ -411,6 +576,49 @@ func cursorDecisionDigest(generation, method, sessionID, toolCallID, toolKind st
 func rawSHA(raw json.RawMessage) []byte {
 	sum := sha256.Sum256(raw)
 	return sum[:]
+}
+
+func cursorOptionBinding(options []DecisionOption) string {
+	parts := make([]string, 0, len(options))
+	for _, option := range options {
+		parts = append(parts, option.ID+"="+option.Label)
+	}
+	return strings.Join(parts, ",")
+}
+
+func inspectableRawInput(raw json.RawMessage) (string, bool, bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return "", true, false
+	}
+	var decoded any
+	if json.Unmarshal(raw, &decoded) != nil {
+		return "", false, false
+	}
+	compact, err := json.Marshal(decoded)
+	if err != nil {
+		return "", false, false
+	}
+	return inspectableText(string(compact), maxCursorInspectBytes)
+}
+
+func inspectableText(value string, max int) (string, bool, bool) {
+	if !utf8.ValidString(value) {
+		return "", false, false
+	}
+	for _, r := range value {
+		if r == 0 || r == 0x7f || (r < 0x20 && r != '\n' && r != '\t') {
+			return "", false, false
+		}
+	}
+	if max > 0 && len(value) > max {
+		out := value[:max]
+		for !utf8.ValidString(out) && len(out) > 0 {
+			out = out[:len(out)-1]
+		}
+		return out, true, true
+	}
+	return value, true, false
 }
 
 func closedToolKind(kind string) string {

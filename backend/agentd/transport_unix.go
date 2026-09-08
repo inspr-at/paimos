@@ -151,6 +151,24 @@ func transportHandler(supervisor *Supervisor) http.Handler {
 			writeTransportResult(w, receipt, err)
 			return
 		}
+		if r.PathValue("operation") == "inspect" {
+			var request DecisionInspectRequest
+			if decodeTransportJSON(w, r, &request) != nil {
+				return
+			}
+			inspect, err := supervisor.Inspect(r.Context(), id, request)
+			writeTransportResult(w, inspect, err)
+			return
+		}
+		if r.PathValue("operation") == "output" {
+			var request ControlRequest
+			if decodeTransportJSON(w, r, &request) != nil {
+				return
+			}
+			output, err := supervisor.VisibleOutput(r.Context(), id, request)
+			writeTransportResult(w, output, err)
+			return
+		}
 		var request ControlRequest
 		if err := decodeTransportJSON(w, r, &request); err != nil {
 			return
@@ -341,6 +359,16 @@ func (c *Client) ResumeQueue(ctx context.Context, id string, request ControlRequ
 func (c *Client) Answer(ctx context.Context, id string, request DecisionAnswer) (Receipt, error) {
 	var out Receipt
 	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/answer", request, &out)
+	return out, err
+}
+func (c *Client) Inspect(ctx context.Context, id string, request DecisionInspectRequest) (DecisionInspect, error) {
+	var out DecisionInspect
+	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/inspect", request, &out)
+	return out, err
+}
+func (c *Client) VisibleOutput(ctx context.Context, id string, request ControlRequest) (VisibleOutput, error) {
+	var out VisibleOutput
+	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/output", request, &out)
 	return out, err
 }
 

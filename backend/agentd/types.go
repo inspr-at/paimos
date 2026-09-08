@@ -57,6 +57,7 @@ var (
 	ErrDecisionExpired       = errors.New("managed decision request expired")
 	ErrDecisionConsumed      = errors.New("managed decision request was already used")
 	ErrDecisionAuthority     = errors.New("managed decision authority is unavailable")
+	ErrDecisionIncomplete    = errors.New("managed decision is missing inspectable context")
 )
 
 const (
@@ -178,6 +179,48 @@ type DecisionAnswer struct {
 	Authority     string `json:"authority"`
 }
 
+type DecisionInspectRequest struct {
+	Instance   string `json:"instance"`
+	ProjectID  int64  `json:"project_id"`
+	Identity   string `json:"identity"`
+	RequestID  string `json:"request_id"`
+	Generation string `json:"generation"`
+	Digest     string `json:"digest"`
+}
+
+type DecisionOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Kind  string `json:"kind,omitempty"`
+}
+
+// DecisionInspect is owner-only Unix-socket display data. It is untrusted,
+// never an authority token, and never written into public status or PPM.
+type DecisionInspect struct {
+	RequestID  string           `json:"request_id"`
+	Generation string           `json:"generation"`
+	Method     string           `json:"method"`
+	Kind       DecisionKind     `json:"kind"`
+	ToolKind   string           `json:"tool_kind,omitempty"`
+	Digest     string           `json:"digest"`
+	OptionIDs  []string         `json:"option_ids"`
+	Options    []DecisionOption `json:"options"`
+	Title      string           `json:"title,omitempty"`
+	Detail     string           `json:"detail,omitempty"`
+	ToolInput  string           `json:"tool_input,omitempty"`
+	Incomplete bool             `json:"incomplete"`
+	Untrusted  bool             `json:"untrusted"`
+	ExpiresAt  time.Time        `json:"expires_at"`
+}
+
+type VisibleOutput struct {
+	Generation string `json:"generation"`
+	Text       string `json:"text"`
+	Digest     string `json:"digest"`
+	Bytes      int    `json:"bytes"`
+	Truncated  bool   `json:"truncated"`
+}
+
 type ControlRequest struct {
 	Instance      string `json:"instance"`
 	ProjectID     int64  `json:"project_id"`
@@ -214,6 +257,8 @@ type DecisionProcess interface {
 	PendingDecisions() []PendingDecision
 	DecisionRefusals() []DecisionRefusal
 	Answer(context.Context, DecisionAnswer) (ControlEffect, error)
+	Inspect(DecisionInspectRequest) (DecisionInspect, error)
+	VisibleOutput() (VisibleOutput, error)
 }
 
 type Adapter interface {

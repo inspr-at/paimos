@@ -418,6 +418,8 @@ type cursorProcess struct {
 	decisionTTL       time.Duration
 	held              map[string]*cursorHeldDecision
 	refusals          []DecisionRefusal
+	visible           strings.Builder
+	visibleTruncated  bool
 	streamDone        chan struct{}
 	streamDoneOnce    sync.Once
 }
@@ -508,6 +510,7 @@ func (p *cursorProcess) readLoop(reader io.Reader) {
 
 func (p *cursorProcess) abortStream() {
 	p.cancelHeldDecisions()
+	p.clearVisible()
 	p.closeInput()
 	_, _ = p.signalOwned(true)
 }
@@ -562,11 +565,10 @@ func (p *cursorProcess) handleUpdate(raw json.RawMessage) {
 	}
 	switch params.Update.SessionUpdate {
 	case "agent_message_chunk":
+		p.appendVisible(params.Update.Content.Text)
 		p.recordOutputDigest("message", params.Update.Content.Text)
-	case "tool_call", "tool_call_update":
-		if params.Update.Content.Text != "" {
-			p.recordOutputDigest(closedToolKind(params.Update.Kind), params.Update.Content.Text)
-		}
+	case "agent_thought_chunk":
+		return
 	}
 }
 
@@ -663,6 +665,7 @@ func (p *cursorProcess) startPrompt(text, correlation string) error {
 	p.startingPrompt = true
 	p.promptCorrelation = correlation
 	p.stateMu.Unlock()
+	p.clearVisible()
 
 	p.rpcMu.Lock()
 	p.nextID++
@@ -811,6 +814,7 @@ func (p *cursorProcess) closeInput() {
 
 func (p *cursorProcess) Stop(ctx context.Context, request ControlRequest) (ControlEffect, error) {
 	_, _ = p.Interrupt(ctx, request)
+	p.clearVisible()
 	p.closeInput()
 	effect, err := p.ownedProcess.Stop(ctx, request)
 	if err == nil {

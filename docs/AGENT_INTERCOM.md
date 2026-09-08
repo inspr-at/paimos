@@ -724,6 +724,13 @@ paimos-agentd resume-queue --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
 paimos-agentd decisions --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
   --session "$SESSION_ID" --project-id "$PROJECT_ID" --identity "$ADDRESS"
 
+paimos-agentd inspect --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
+  --session "$SESSION_ID" --project-id "$PROJECT_ID" --identity "$ADDRESS" \
+  --request-id "$REQUEST_ID" --digest "$DIGEST"
+
+paimos-agentd output --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
+  --session "$SESSION_ID" --project-id "$PROJECT_ID" --identity "$ADDRESS"
+
 paimos-agentd answer --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
   --session "$SESSION_ID" --project-id "$PROJECT_ID" --identity "$ADDRESS" \
   --correlation-id operator-answer-001 --request-id "$REQUEST_ID" --digest "$DIGEST" \
@@ -743,10 +750,17 @@ text.
 `decisions` is the local operator view of pending Cursor ACP permission,
 question, and plan requests plus visible refusals. It carries request ids,
 tool kind, offered option ids, and a digest — never raw tool input, plan
-text, or model transcripts. `answer` applies one exact option for that
-generation/request/digest and records authority as `local_operator`. It
-does not claim a server human session, does not accept API-key
-impersonation, and never remembers `allow-always`. Interrupt, stop, expiry,
+text, or model transcripts. `inspect` is the owner-only Unix-socket display
+of the exact pending request: option labels, question or plan text, and a
+bounded tool description bound to that same digest. Treat inspect payloads as
+untrusted display data, never as authority or a terminal command. `output`
+returns the current generation's ephemeral visible assistant text (hash and
+length stay in the owner evidence journal). It never includes hidden
+reasoning, credentials, or raw tool results. `answer` applies one exact
+option for that generation/request/digest and records authority as
+`local_operator`. It does not claim a server human session, does not accept
+API-key impersonation, and never remembers `allow-always`. Incomplete or
+truncated inspectable context cannot be approved. Interrupt, stop, expiry,
 and restart cancel held requests; they do not revive a stale approval.
 
 Owned Pi interrupt is not abort-only. Installed `pi --mode rpc` continues

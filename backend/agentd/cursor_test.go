@@ -369,6 +369,15 @@ func TestCursorPermissionAndExtensionRequestsFailClosed(t *testing.T) {
 	if pending[0].Digest == "" || strings.Contains(pending[0].Digest, "secret-plan") {
 		t.Fatalf("plan digest leaked raw text: %+v", pending[0])
 	}
+	inspect, err := decider.Inspect(cursorLocalInspect(pending[0]))
+	if err != nil || inspect.Detail != "secret-plan" || !inspect.Untrusted {
+		t.Fatalf("inspect=%+v err=%v", inspect, err)
+	}
+	encoded, err := json.Marshal(pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCursorPublicContent(t, encoded, "secret-plan")
 	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "perm-stop"}); err != nil {
 		t.Fatal(err)
 	}
@@ -387,6 +396,31 @@ func TestCursorScopedPermissionDecision(t *testing.T) {
 	pending := waitCursorPending(t, process, 1)
 	if pending[0].Kind != DecisionPermission || pending[0].ToolKind != "read" || !slices.Contains(pending[0].OptionIDs, "allow-once") {
 		t.Fatalf("pending=%+v", pending)
+	}
+	encoded, err := json.Marshal(pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCursorPublicContent(t, encoded, "README.md", "Allow once", "secret-reasoning")
+	inspect, err := process.(DecisionProcess).Inspect(cursorLocalInspect(pending[0]))
+	if err != nil || !inspect.Untrusted || inspect.Incomplete || inspect.Digest != pending[0].Digest {
+		t.Fatalf("inspect=%+v err=%v", inspect, err)
+	}
+	if inspect.Title != "Read README.md" || !strings.Contains(inspect.ToolInput, "README.md") {
+		t.Fatalf("inspect title=%q tool_input=%q", inspect.Title, inspect.ToolInput)
+	}
+	if !hasDecisionOption(inspect.Options, "allow-once", "Allow once") {
+		t.Fatalf("inspect options=%+v", inspect.Options)
+	}
+	wrongInspect := cursorLocalInspect(pending[0])
+	wrongInspect.Generation = "00000000-0000-4000-8000-000000000000"
+	if _, err := process.(DecisionProcess).Inspect(wrongInspect); !errors.Is(err, ErrDecisionMismatch) {
+		t.Fatalf("wrong generation inspect err=%v", err)
+	}
+	wrongInspect = cursorLocalInspect(pending[0])
+	wrongInspect.Digest = strings.Repeat("ab", 32)
+	if _, err := process.(DecisionProcess).Inspect(wrongInspect); !errors.Is(err, ErrDecisionMismatch) {
+		t.Fatalf("wrong digest inspect err=%v", err)
 	}
 	wrong := cursorLocalAnswer(pending[0], "allow-once")
 	wrong.Digest = strings.Repeat("ab", 32)
@@ -418,8 +452,19 @@ func TestCursorScopedPermissionDecision(t *testing.T) {
 		t.Fatalf("duplicate err=%v", err)
 	}
 	waitCursorInboxReady(t, process)
+	visible, err := process.(DecisionProcess).VisibleOutput()
+	if err != nil || !strings.Contains(visible.Text, "ok") || strings.Contains(visible.Text, "secret-reasoning") {
+		t.Fatalf("visible=%+v err=%v", visible, err)
+	}
 	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "perm-hold-stop"}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := process.(DecisionProcess).Inspect(cursorLocalInspect(pending[0])); !errors.Is(err, ErrDecisionUnknown) && !errors.Is(err, ErrSessionNotRunning) {
+		t.Fatalf("stopped inspect err=%v", err)
+	}
+	visible, err = process.(DecisionProcess).VisibleOutput()
+	if err != nil || visible.Text != "" || strings.Contains(visible.Text, "ok") || strings.Contains(visible.Text, "secret-reasoning") {
+		t.Fatalf("stopped visible=%+v err=%v", visible, err)
 	}
 	foundOutput := false
 	for _, record := range process.(*cursorProcess).EvidenceRecords() {
@@ -446,6 +491,25 @@ func TestCursorQuestionAndPlanRemainHumanOwned(t *testing.T) {
 			t.Fatal(err)
 		}
 		pending := waitCursorPending(t, process, 1)
+		inspect, err := process.(DecisionProcess).Inspect(cursorLocalInspect(pending[0]))
+		if err != nil || inspect.Incomplete || !inspect.Untrusted {
+			t.Fatalf("%s inspect=%+v err=%v", tc.mode, inspect, err)
+		}
+		switch tc.mode {
+		case "question-hold":
+			if inspect.Detail != "Choose" || !hasDecisionOption(inspect.Options, "opt-a", "A") {
+				t.Fatalf("question inspect=%+v", inspect)
+			}
+		case "plan-hold":
+			if inspect.Detail != "inspect then patch" || !hasDecisionOption(inspect.Options, "accepted", "accepted") {
+				t.Fatalf("plan inspect=%+v", inspect)
+			}
+		}
+		encoded, err := json.Marshal(pending)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertNoCursorPublicContent(t, encoded, "Choose", "inspect then patch", "secret-reasoning")
 		if _, err := process.(DecisionProcess).Answer(context.Background(), cursorLocalAnswer(pending[0], tc.option)); err != nil {
 			t.Fatalf("%s err=%v", tc.mode, err)
 		}
@@ -506,6 +570,173 @@ func TestCursorDecisionExpiryAndWrongAuthority(t *testing.T) {
 		t.Fatalf("expired err=%v", err)
 	}
 	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "expired-stop"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCursorControlCharacterOptionsFailClosed(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "perm-control")
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, cursorTestProfile(t)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	var refusals []DecisionRefusal
+	for time.Now().Before(deadline) {
+		refusals = process.(DecisionProcess).DecisionRefusals()
+		if hasDecisionRefusal(refusals, "session/request_permission", "invalid") {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !hasDecisionRefusal(refusals, "session/request_permission", "invalid") {
+		t.Fatalf("control-character option was held: pending=%+v refusals=%+v", process.(DecisionProcess).PendingDecisions(), refusals)
+	}
+	if got := process.(DecisionProcess).PendingDecisions(); len(got) != 0 {
+		t.Fatalf("control-character option became pending: %+v", got)
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "control-stop"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCursorIncompletePlanRejectsSilentApproval(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "plan-overflow")
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, cursorTestProfile(t)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := waitCursorPending(t, process, 1)
+	inspect, err := process.(DecisionProcess).Inspect(cursorLocalInspect(pending[0]))
+	if err != nil || !inspect.Incomplete || inspect.Detail == "" {
+		t.Fatalf("inspect=%+v err=%v", inspect, err)
+	}
+	if _, err := process.(DecisionProcess).Answer(context.Background(), cursorLocalAnswer(pending[0], "accepted")); !errors.Is(err, ErrDecisionIncomplete) {
+		t.Fatalf("truncated plan accepted err=%v", err)
+	}
+	if got := process.(DecisionProcess).PendingDecisions(); len(got) != 1 {
+		t.Fatalf("incomplete accept consumed the request: %+v", got)
+	}
+	if _, err := process.(DecisionProcess).Answer(context.Background(), cursorLocalAnswer(pending[0], "rejected")); err != nil {
+		t.Fatalf("truncated plan reject err=%v", err)
+	}
+	waitCursorInboxReady(t, process)
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "overflow-plan-stop"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCursorSupervisorInspectScopeAndRestart(t *testing.T) {
+	root := t.TempDir()
+	adapter, _ := newTestCursorAdapter(t, "perm-hold")
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Instance: "ppm-cursor", StateRoot: root, Adapters: []Adapter{cursorProtocolTestAdapter{adapter}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := cursorTestProfile(t)
+	session, err := supervisor.Start(context.Background(), StartRequest{
+		KeepAlive: true, Workspace: t.TempDir(), Prompt: "secret-not-persisted",
+		Identity: "cursor:test", Adapter: AdapterCursor, ProjectID: 963,
+		AccountKey: "operator-cursor", ExpectedAccountLabel: AccountCursorContext,
+		ResolvedProfile: &profile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	var pending []PendingDecision
+	for time.Now().Before(deadline) {
+		pending = supervisor.Status().Sessions[0].PendingDecisions
+		if len(pending) == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("status pending=%+v", supervisor.Status().Sessions[0])
+	}
+	statusJSON, err := json.Marshal(supervisor.Status())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCursorPublicContent(t, statusJSON, "README.md", "Allow once", "secret-reasoning", "Read README.md")
+	inspect, err := supervisor.Inspect(context.Background(), session.ID, DecisionInspectRequest{
+		Instance: "ppm-cursor", ProjectID: 963, Identity: "cursor:test",
+		RequestID: pending[0].RequestID, Generation: session.ID, Digest: pending[0].Digest,
+	})
+	if err != nil || !strings.Contains(inspect.ToolInput, "README.md") || !hasDecisionOption(inspect.Options, "allow-once", "Allow once") {
+		t.Fatalf("inspect=%+v err=%v", inspect, err)
+	}
+	if _, err := supervisor.Inspect(context.Background(), session.ID, DecisionInspectRequest{
+		Instance: "ppm-other", ProjectID: 963, Identity: "cursor:test",
+		RequestID: pending[0].RequestID, Generation: session.ID, Digest: pending[0].Digest,
+	}); !errors.Is(err, ErrControlScopeMismatch) {
+		t.Fatalf("foreign inspect err=%v", err)
+	}
+	if _, err := supervisor.Inspect(context.Background(), session.ID, DecisionInspectRequest{
+		Instance: "ppm-cursor", ProjectID: 963, Identity: "cursor:test",
+		RequestID: pending[0].RequestID, Generation: session.ID, Digest: strings.Repeat("ab", 32),
+	}); !errors.Is(err, ErrDecisionMismatch) {
+		t.Fatalf("stale digest inspect err=%v", err)
+	}
+	if _, err := supervisor.Answer(context.Background(), session.ID, DecisionAnswer{
+		Instance: "ppm-cursor", ProjectID: 963, Identity: "cursor:test", CorrelationID: "answer-inspect",
+		RequestID: pending[0].RequestID, Generation: session.ID, Digest: pending[0].Digest, OptionID: "allow-once",
+		Authority: DecisionAuthorityLocalOperator,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	inboxDeadline := time.Now().Add(2 * time.Second)
+	for !supervisor.InboxReady(session.ID) {
+		if time.Now().After(inboxDeadline) {
+			t.Fatal("owned cursor session never became inbox-ready")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	visible, err := supervisor.VisibleOutput(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-cursor", ProjectID: 963, Identity: "cursor:test",
+	})
+	if err != nil || !strings.Contains(visible.Text, "ok") || strings.Contains(visible.Text, "secret-reasoning") {
+		t.Fatalf("visible=%+v err=%v", visible, err)
+	}
+	if _, err := supervisor.Stop(context.Background(), session.ID, ControlRequest{
+		Instance: "ppm-cursor", ProjectID: 963, Identity: "cursor:test", CorrelationID: "stop-inspect",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := supervisor.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := NewSupervisor(SupervisorConfig{
+		Instance: "ppm-cursor", StateRoot: root, Adapters: []Adapter{cursorProtocolTestAdapter{adapter}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovered.Close(context.Background())
+	for _, recoveredSession := range recovered.Status().Sessions {
+		if len(recoveredSession.PendingDecisions) != 0 {
+			t.Fatalf("recovered pending=%+v", recoveredSession.PendingDecisions)
+		}
+		encoded, err := json.Marshal(recoveredSession)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertNoCursorPublicContent(t, encoded, "README.md", "Allow once", "secret-reasoning", "Read README.md")
+	}
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		assertNoCursorPublicContent(t, raw, "README.md", "Allow once", "secret-reasoning", "Read README.md")
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -670,6 +901,32 @@ func cursorLocalAnswer(pending PendingDecision, optionID string) DecisionAnswer 
 		Instance: "test", ProjectID: 963, Identity: "cursor:test", CorrelationID: "answer-" + pending.RequestID,
 		RequestID: pending.RequestID, Generation: pending.Generation, Digest: pending.Digest, OptionID: optionID,
 		Authority: DecisionAuthorityLocalOperator,
+	}
+}
+
+func cursorLocalInspect(pending PendingDecision) DecisionInspectRequest {
+	return DecisionInspectRequest{
+		Instance: "test", ProjectID: 963, Identity: "cursor:test",
+		RequestID: pending.RequestID, Generation: pending.Generation, Digest: pending.Digest,
+	}
+}
+
+func hasDecisionOption(options []DecisionOption, id, label string) bool {
+	for _, option := range options {
+		if option.ID == id && option.Label == label {
+			return true
+		}
+	}
+	return false
+}
+
+func assertNoCursorPublicContent(t *testing.T, raw []byte, secrets ...string) {
+	t.Helper()
+	body := string(raw)
+	for _, secret := range secrets {
+		if strings.Contains(body, secret) {
+			t.Fatalf("public payload leaked %q: %s", secret, body)
+		}
 	}
 }
 
@@ -974,6 +1231,10 @@ func TestCursorACPHelperProcess(t *testing.T) {
 		promptIDs[id] = true
 		notify("session/update", map[string]any{
 			"sessionId": "sess-owned",
+			"update":    map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]string{"type": "text", "text": "secret-reasoning"}},
+		})
+		notify("session/update", map[string]any{
+			"sessionId": "sess-owned",
 			"update":    map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "ok"}},
 		})
 		respond(id, map[string]any{"stopReason": "end_turn"})
@@ -997,7 +1258,7 @@ func TestCursorACPHelperProcess(t *testing.T) {
 					promptWaiting = nil
 				}
 			}
-			if mode == "perm-hold" || mode == "question-hold" || mode == "plan-hold" {
+			if mode == "perm-hold" || mode == "question-hold" || mode == "plan-hold" || mode == "plan-overflow" {
 				delete(pendingHold, id)
 				if promptWaiting != nil && len(pendingHold) == 0 {
 					completePrompt(promptWaiting)
@@ -1056,13 +1317,26 @@ func TestCursorACPHelperProcess(t *testing.T) {
 				request("perm-1", "session/request_permission", map[string]any{
 					"sessionId": "sess-owned",
 					"toolCall": map[string]any{
+						"toolCallId": "call-read", "kind": "read", "title": "Read README.md",
+						"rawInput": map[string]string{"path": "README.md"},
+					},
+					"options": []map[string]string{
+						{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+						{"optionId": "reject-once", "name": "Reject once", "kind": "reject_once"},
+						{"optionId": "allow-always", "name": "Allow always", "kind": "allow_always"},
+					},
+				})
+			}
+			if mode == "perm-control" {
+				request("perm-1", "session/request_permission", map[string]any{
+					"sessionId": "sess-owned",
+					"toolCall": map[string]any{
 						"toolCallId": "call-read", "kind": "read",
 						"rawInput": map[string]string{"path": "README.md"},
 					},
 					"options": []map[string]string{
-						{"optionId": "allow-once", "kind": "allow_once"},
-						{"optionId": "reject-once", "kind": "reject_once"},
-						{"optionId": "allow-always", "kind": "allow_always"},
+						{"optionId": "allow-once", "name": "Allow\u0001once", "kind": "allow_once"},
+						{"optionId": "reject-once", "name": "Reject once", "kind": "reject_once"},
 					},
 				})
 			}
@@ -1082,18 +1356,25 @@ func TestCursorACPHelperProcess(t *testing.T) {
 					"sessionId": "sess-owned", "toolCallId": "call-p", "plan": "inspect then patch",
 				})
 			}
+			if mode == "plan-overflow" {
+				pendingHold["plan-1"] = true
+				request("plan-1", "cursor/create_plan", map[string]any{
+					"sessionId": "sess-owned", "toolCallId": "call-p",
+					"plan": strings.Repeat("p", maxCursorInspectBytes+64),
+				})
+			}
 			if mode == "perm-overflow" {
 				for i := 1; i <= 9; i++ {
 					id := "perm-" + strconv.Itoa(i)
 					request(id, "session/request_permission", map[string]any{
 						"sessionId": "sess-owned",
 						"toolCall": map[string]any{
-							"toolCallId": "call-" + strconv.Itoa(i), "kind": "read",
+							"toolCallId": "call-" + strconv.Itoa(i), "kind": "read", "title": "Read README.md",
 							"rawInput": map[string]string{"path": "README.md"},
 						},
 						"options": []map[string]string{
-							{"optionId": "allow-once", "kind": "allow_once"},
-							{"optionId": "reject-once", "kind": "reject_once"},
+							{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+							{"optionId": "reject-once", "name": "Reject once", "kind": "reject_once"},
 						},
 					})
 				}
@@ -1116,7 +1397,7 @@ func TestCursorACPHelperProcess(t *testing.T) {
 			if mode == "eof-prompt" {
 				os.Exit(0)
 			}
-			if mode == "perm-hold" || mode == "question-hold" || mode == "plan-hold" {
+			if mode == "perm-hold" || mode == "question-hold" || mode == "plan-hold" || mode == "plan-overflow" {
 				if len(pendingHold) > 0 {
 					promptWaiting = id
 					continue
@@ -1125,6 +1406,10 @@ func TestCursorACPHelperProcess(t *testing.T) {
 				continue
 			}
 			promptIDs[id] = true
+			notify("session/update", map[string]any{
+				"sessionId": "sess-owned",
+				"update":    map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]string{"type": "text", "text": "secret-reasoning"}},
+			})
 			notify("session/update", map[string]any{
 				"sessionId": "sess-owned",
 				"update":    map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "ok"}},
@@ -1137,7 +1422,7 @@ func TestCursorACPHelperProcess(t *testing.T) {
 				respond(id, map[string]any{"stopReason": "end_turn"})
 				continue
 			}
-			if mode == "idle" || mode == "permission" || mode == "perm-overflow" {
+			if mode == "idle" || mode == "permission" || mode == "perm-overflow" || mode == "perm-control" {
 				respond(id, map[string]any{"stopReason": "end_turn"})
 			}
 		case "session/cancel":

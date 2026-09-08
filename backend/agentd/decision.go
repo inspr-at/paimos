@@ -171,6 +171,75 @@ func (s *Supervisor) Answer(ctx context.Context, id string, request DecisionAnsw
 	return receipt, nil
 }
 
+func (s *Supervisor) Inspect(_ context.Context, id string, request DecisionInspectRequest) (DecisionInspect, error) {
+	if err := validateDecisionInspect(request); err != nil {
+		return DecisionInspect{}, err
+	}
+	entry, err := s.get(id)
+	if err != nil {
+		return DecisionInspect{}, err
+	}
+	if err := s.validateControlScope(entry, ControlRequest{
+		Instance: request.Instance, ProjectID: request.ProjectID, Identity: request.Identity,
+	}); err != nil {
+		return DecisionInspect{}, err
+	}
+	entry.mu.Lock()
+	if entry.session.State != StateRunning {
+		entry.mu.Unlock()
+		return DecisionInspect{}, ErrSessionNotRunning
+	}
+	process, ok := entry.process.(DecisionProcess)
+	if !ok || entry.process == nil {
+		entry.mu.Unlock()
+		return DecisionInspect{}, ErrCapabilityMissing
+	}
+	generation := entry.session.ID
+	entry.mu.Unlock()
+	if request.Generation != generation {
+		return DecisionInspect{}, ErrDecisionMismatch
+	}
+	return process.Inspect(request)
+}
+
+func (s *Supervisor) VisibleOutput(_ context.Context, id string, request ControlRequest) (VisibleOutput, error) {
+	entry, err := s.get(id)
+	if err != nil {
+		return VisibleOutput{}, err
+	}
+	if err := s.validateControlScope(entry, request); err != nil {
+		return VisibleOutput{}, err
+	}
+	entry.mu.Lock()
+	if entry.session.State != StateRunning {
+		entry.mu.Unlock()
+		return VisibleOutput{}, ErrSessionNotRunning
+	}
+	process, ok := entry.process.(DecisionProcess)
+	if !ok || entry.process == nil {
+		entry.mu.Unlock()
+		return VisibleOutput{}, ErrCapabilityMissing
+	}
+	entry.mu.Unlock()
+	return process.VisibleOutput()
+}
+
+func validateDecisionInspect(request DecisionInspectRequest) error {
+	if !validOpaqueID(request.RequestID) || len(request.RequestID) > 64 ||
+		len(request.Digest) != 64 || !validOpaqueID(request.Generation) {
+		return errors.New("agentd decision inspect is invalid")
+	}
+	if request.Digest != strings.ToLower(request.Digest) || !utf8.ValidString(request.Digest) {
+		return errors.New("agentd decision digest is invalid")
+	}
+	for _, b := range request.Digest {
+		if (b < '0' || b > '9') && (b < 'a' || b > 'f') {
+			return errors.New("agentd decision digest is invalid")
+		}
+	}
+	return nil
+}
+
 func validateDecisionAnswer(request DecisionAnswer) error {
 	if !validCorrelationID(request.CorrelationID) || !validOpaqueID(request.RequestID) || len(request.RequestID) > 64 ||
 		len(request.Digest) != 64 || !validOpaqueID(request.OptionID) || len(request.OptionID) > 64 ||
