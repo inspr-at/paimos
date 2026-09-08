@@ -4,6 +4,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/json"
@@ -273,6 +274,88 @@ func TestImplementOnBaselineIssueIsConflictAndOrdinaryIssueStillImplements(t *te
 	if ordinary.StatusCode != http.StatusCreated {
 		t.Fatalf("ordinary implement=%d %s", ordinary.StatusCode, baselineReadBody(ordinary))
 	}
+}
+
+func TestBaselineBatchBuiltReceiptHTTPRejectsDuplicateFieldsBeforeEffects(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Receipt duplicates", "key": "RCD"}))
+	batch := startManualHTTPBatch(t, ts, projectID, "receipt-dup-start")
+	path := fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/built-receipt", projectID, batch.ID)
+	secondCommit := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	for _, tc := range []struct {
+		name  string
+		field string
+		extra any
+	}{
+		{name: "commit", field: "commit", extra: secondCommit},
+		{name: "cas", field: "expected_implementation_execution", extra: int64(7)},
+		{name: "idempotency", field: "idempotency_key", extra: "receipt-dup-other"},
+	} {
+		body := httpBuiltReceiptJSON("receipt-dup-" + tc.name)
+		resp := postBaseline(t, ts, ts.adminCookie, path, json.RawMessage(duplicateHTTPJSONField(t, body, tc.field, tc.extra)))
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s duplicate=%d %s", tc.name, resp.StatusCode, baselineReadBody(resp))
+		}
+	}
+	if snapshotStageMust(t, batch.IssueID, delivery.StageImplementation).ExecutionNumber != 0 {
+		t.Fatal("duplicate JSON mutated implementation")
+	}
+	var stolen int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM delivery_evidence WHERE reference_value=?`, secondCommit).Scan(&stolen); err != nil {
+		t.Fatal(err)
+	}
+	if stolen != 0 {
+		t.Fatal("duplicate commit last-wins was recorded")
+	}
+}
+
+func TestBaselineBatchBuiltReceiptHTTPReplayOriginalCAS(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Receipt replay CAS", "key": "RCR"}))
+	batch := startManualHTTPBatch(t, ts, projectID, "receipt-replay-http-start")
+	path := fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/built-receipt", projectID, batch.ID)
+	original := httpBuiltReceiptJSON("receipt-http-replay-01")
+	if resp := postBaseline(t, ts, ts.adminCookie, path, original); resp.StatusCode != 200 {
+		t.Fatalf("first receipt=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+	if resp := postBaseline(t, ts, ts.adminCookie, path, original); resp.StatusCode != 200 {
+		t.Fatalf("exact original replay=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+	mutated := httpBuiltReceiptJSON("receipt-http-replay-01")
+	mutated["expected_implementation_execution"] = 7
+	mutated["expected_implementation_authority_epoch"] = 7
+	if resp := postBaseline(t, ts, ts.adminCookie, path, mutated); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("mutated CAS replay=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+	impl := snapshotStageMust(t, batch.IssueID, delivery.StageImplementation)
+	if impl.ExecutionNumber != 1 || impl.AuthorityEpoch != 1 || !impl.PolicySatisfied {
+		t.Fatalf("mutated CAS changed implementation: %+v", impl)
+	}
+	if resp := postBaseline(t, ts, ts.adminCookie, path, original); resp.StatusCode != 200 {
+		t.Fatalf("exact replay after mutated CAS=%d", resp.StatusCode)
+	}
+}
+
+func duplicateHTTPJSONField(t *testing.T, body map[string]any, field string, extra any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := json.Marshal(body[field])
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := json.Marshal(extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	needle := []byte(`"` + field + `":` + string(first))
+	dup := []byte(`"` + field + `":` + string(first) + `,"` + field + `":` + string(second))
+	if !bytes.Contains(raw, needle) {
+		t.Fatalf("missing %s in %s", field, raw)
+	}
+	return bytes.Replace(raw, needle, dup, 1)
 }
 
 func TestImplementOnBaselineLookupFailureRefusesBeforeEffects(t *testing.T) {

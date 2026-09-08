@@ -330,15 +330,8 @@ func baselineBatchBuiltReceipt(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
-	var req baselinebatch.BuiltReceiptRequest
-	dec := json.NewDecoder(io.LimitReader(r.Body, 64<<10+1))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		jsonError(w, "invalid built receipt", http.StatusBadRequest)
-		return
-	}
-	var extra any
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+	req, err := baselinebatch.DecodeBuiltReceiptJSON(r.Body)
+	if err != nil {
 		jsonError(w, "invalid built receipt", http.StatusBadRequest)
 		return
 	}

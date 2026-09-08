@@ -30,6 +30,10 @@ type ownedExecution struct {
 
 func loadOwnedExecution(ctx context.Context, tx *sql.Tx, projectID int64, intentID string) (ownedExecution, error) {
 	out := ownedExecution{}
+	// Manual batches store no lifecycle intent. A non-empty id with no row is a
+	// broken ownership binding: refuse rather than treating the zero value as
+	// "not revoked". A missing harness session after a live intent is still
+	// allowed (the daemon may not have claimed yet).
 	if intentID == "" {
 		return out, nil
 	}
@@ -38,7 +42,7 @@ func loadOwnedExecution(ctx context.Context, tx *sql.Tx, projectID int64, intent
 		FROM lifecycle_intents WHERE id=? AND project_id=?`, intentID, projectID).
 		Scan(&out.IntentState, &out.IntentReason, &out.IntentRevision, &result)
 	if errors.Is(err, sql.ErrNoRows) {
-		return out, nil
+		return ownedExecution{}, fmt.Errorf("%w: lifecycle ownership is missing", ErrForbidden)
 	}
 	if err != nil {
 		return out, err

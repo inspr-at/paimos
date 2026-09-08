@@ -117,6 +117,51 @@ func TestRecordBuiltReceiptRejectsMalformedIdentityBeforeMutation(t *testing.T) 
 	}
 }
 
+func TestRecordBuiltReceiptReplayMatchesOriginalCASNotCurrentLedger(t *testing.T) {
+	f := openBridgeFixture(t)
+	original := calendarReceipt("receipt-replay-cas-01")
+	if _, err := f.svc.RecordBuiltReceipt(context.Background(), f.actor, f.projectID, f.batch.ID, original); err != nil {
+		t.Fatal(err)
+	}
+	impl := snapshotStage(f.snapshot(), delivery.StageImplementation)
+	if impl.ExecutionNumber != 1 || impl.AuthorityEpoch != 1 || !impl.PolicySatisfied {
+		t.Fatalf("post-receipt implementation=%+v", impl)
+	}
+	if _, err := f.svc.RecordBuiltReceipt(context.Background(), f.actor, f.projectID, f.batch.ID, original); err != nil {
+		t.Fatalf("exact original replay: %v", err)
+	}
+	mutated := original
+	mutated.ExpectedImplementationExecution = 7
+	mutated.ExpectedImplementationAuthorityEpoch = 7
+	if _, err := f.svc.RecordBuiltReceipt(context.Background(), f.actor, f.projectID, f.batch.ID, mutated); !errors.Is(err, ErrConflict) {
+		t.Fatalf("mutated CAS replay: %v", err)
+	}
+	again := snapshotStage(f.snapshot(), delivery.StageImplementation)
+	if again.ExecutionNumber != 1 || again.AuthorityEpoch != 1 || !again.PolicySatisfied {
+		t.Fatalf("mutated CAS changed implementation: %+v", again)
+	}
+	if _, err := f.svc.RecordBuiltReceipt(context.Background(), f.actor, f.projectID, f.batch.ID, original); err != nil {
+		t.Fatalf("exact replay after mutated CAS: %v", err)
+	}
+}
+
+func TestLoadOwnedExecutionMissingIntentRefuses(t *testing.T) {
+	f := openBridgeFixture(t)
+	tx, err := appdb.DB.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	empty, err := loadOwnedExecution(context.Background(), tx, f.projectID, "")
+	if err != nil || empty.IntentState != "" {
+		t.Fatalf("manual empty intent=%+v err=%v", empty, err)
+	}
+	_, err = loadOwnedExecution(context.Background(), tx, f.projectID, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("missing intent: %v", err)
+	}
+}
+
 func TestRecordBuiltReceiptDoesNotCoerceIndexIntoReleaseSet(t *testing.T) {
 	f := openBridgeFixture(t)
 	req := calendarReceipt("receipt-no-coerce-01")

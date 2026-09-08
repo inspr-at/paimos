@@ -4,9 +4,7 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,8 +14,6 @@ import (
 	"github.com/inspr-at/paimos/backend/baselinebatch"
 	"github.com/spf13/cobra"
 )
-
-const builtReceiptMaxJSONBytes = 64 << 10
 
 func baselineBatchCmd() *cobra.Command {
 	c := commandGroup(&cobra.Command{
@@ -62,7 +58,7 @@ func baselineBatchReportBuiltCmd() *cobra.Command {
 		Long: `POST a typed built receipt for one baseline batch.
 
 Supply either --receipt-file (or "-" for stdin) or the explicit identity and
-CAS flags. Unknown JSON fields fail before any network call. No secret
+CAS flags. Unknown and duplicate JSON fields fail before any network call. No secret
 arguments or outputs.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 0 {
@@ -159,13 +155,14 @@ func loadBuiltReceiptRequest(cmd *cobra.Command, receiptFile string, fromFlags b
 		return baselinebatch.BuiltReceiptRequest{}, &usageError{msg: "use either --receipt-file or explicit identity flags, not both"}
 	}
 	if file != "" {
-		raw, err := readBuiltReceiptFile(file)
+		src, err := openBuiltReceiptSource(file)
 		if err != nil {
 			return baselinebatch.BuiltReceiptRequest{}, err
 		}
-		var req baselinebatch.BuiltReceiptRequest
-		if err := decodeBuiltReceiptJSON(bytes.NewReader(raw), &req); err != nil {
-			return baselinebatch.BuiltReceiptRequest{}, &usageError{msg: "invalid receipt JSON: " + err.Error()}
+		defer src.Close()
+		req, err := baselinebatch.DecodeBuiltReceiptJSON(src)
+		if err != nil {
+			return baselinebatch.BuiltReceiptRequest{}, &usageError{msg: "invalid receipt JSON"}
 		}
 		return req, nil
 	}
@@ -187,37 +184,13 @@ func builtReceiptFlagsChanged(cmd *cobra.Command) bool {
 	return false
 }
 
-func readBuiltReceiptFile(path string) ([]byte, error) {
-	var (
-		raw []byte
-		err error
-	)
+func openBuiltReceiptSource(path string) (io.ReadCloser, error) {
 	if path == "-" {
-		raw, err = io.ReadAll(io.LimitReader(os.Stdin, builtReceiptMaxJSONBytes+1))
-	} else {
-		raw, err = os.ReadFile(path) // #nosec G304 -- operator-selected receipt file
+		return io.NopCloser(os.Stdin), nil
 	}
+	src, err := os.Open(path) // #nosec G304 -- operator-selected receipt file
 	if err != nil {
 		return nil, &usageError{msg: "could not read --receipt-file"}
 	}
-	if len(raw) == 0 || len(raw) > builtReceiptMaxJSONBytes {
-		return nil, &usageError{msg: "receipt JSON is empty or too large"}
-	}
-	return raw, nil
-}
-
-func decodeBuiltReceiptJSON(reader io.Reader, target any) error {
-	decoder := json.NewDecoder(reader)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("expected exactly one JSON value")
-		}
-		return err
-	}
-	return nil
+	return src, nil
 }

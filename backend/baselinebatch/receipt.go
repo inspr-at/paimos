@@ -189,11 +189,11 @@ func (s *Service) replayBuiltReceiptTx(ctx context.Context, tx *sql.Tx, actor Ac
 	if !sameBuiltArtifact(got, parsed.artifact) || qaDigest != parsed.qaDigest {
 		return Batch{}, false, fmt.Errorf("%w: conflicting built receipt", ErrConflict)
 	}
-	hasStart, err := reporterHasEnvelope(ctx, tx, stored.IssueID, reporter, req.IdempotencyKey+":impl:start")
+	matched, err := s.Delivery.MatchStageStartEnvelopeTx(ctx, tx, implStartRequest(stored.IssueID, snapshot.AttemptNumber, req, reporter))
 	if err != nil {
-		return Batch{}, false, err
+		return Batch{}, false, mapDelivery(err)
 	}
-	if !hasStart {
+	if !matched {
 		return Batch{}, false, fmt.Errorf("%w: stale built receipt replacement", ErrConflict)
 	}
 	batch, err := s.projectBatch(ctx, tx, stored)
@@ -207,21 +207,8 @@ func (s *Service) replayBuiltReceiptTx(ctx context.Context, tx *sql.Tx, actor Ac
 }
 
 func (s *Service) recordBuiltReceiptTx(ctx context.Context, tx *sql.Tx, effects *delivery.Effects, stored storedBatch, snapshot delivery.Snapshot, req BuiltReceiptRequest, parsed parsedBuiltReceipt, reporter delivery.Actor) error {
-	reason := receiptReasonHuman
-	activity := "Typed built artifact and scoped QA receipt"
-	if reporter.Type == "system" {
-		reason = receiptReasonMachine
-		activity = "Automatic built artifact and scoped QA receipt"
-	}
-	expectedExec := req.ExpectedImplementationExecution
-	expectedEpoch := req.ExpectedImplementationAuthorityEpoch
-	impl, err := s.Delivery.StartStageRetryTx(ctx, tx, effects, delivery.StageStartRequest{
-		IssueID: stored.IssueID, AttemptNumber: snapshot.AttemptNumber, StageKey: delivery.StageImplementation,
-		Reporter: reporter, ReasonCode: reason, ReasonText: activity,
-		IdempotencyKey:                req.IdempotencyKey + ":impl:start",
-		ExpectedCurrentExecution:      &expectedExec,
-		ExpectedCurrentAuthorityEpoch: &expectedEpoch,
-	})
+	reason, activity := receiptStartMeta(reporter)
+	impl, err := s.Delivery.StartStageRetryTx(ctx, tx, effects, implStartRequest(stored.IssueID, snapshot.AttemptNumber, req, reporter))
 	if err != nil {
 		return mapDelivery(err)
 	}
@@ -363,6 +350,25 @@ func receiptReporter(actor Actor) delivery.Actor {
 	return delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", actor.UserID)}
 }
 
+func receiptStartMeta(reporter delivery.Actor) (reason, activity string) {
+	if reporter.Type == "system" {
+		return receiptReasonMachine, "Automatic built artifact and scoped QA receipt"
+	}
+	return receiptReasonHuman, "Typed built artifact and scoped QA receipt"
+}
+
+func implStartRequest(issueID, attemptNumber int64, req BuiltReceiptRequest, reporter delivery.Actor) delivery.StageStartRequest {
+	reason, activity := receiptStartMeta(reporter)
+	exec, epoch := req.ExpectedImplementationExecution, req.ExpectedImplementationAuthorityEpoch
+	return delivery.StageStartRequest{
+		IssueID: issueID, AttemptNumber: attemptNumber, StageKey: delivery.StageImplementation,
+		Reporter: reporter, ReasonCode: reason, ReasonText: activity,
+		IdempotencyKey:                req.IdempotencyKey + ":impl:start",
+		ExpectedCurrentExecution:      &exec,
+		ExpectedCurrentAuthorityEpoch: &epoch,
+	}
+}
+
 func qaActive(snapshot delivery.Snapshot) bool {
 	stage := snapshotStage(snapshot, delivery.StageQA)
 	return stage.ExecutionNumber > 0 && !stage.PolicySatisfied && stage.SemanticState == "active"
@@ -390,16 +396,6 @@ func sameBuiltArtifact(got, want externalstage.BuiltOwnerArtifact) bool {
 		got.Commit == want.Commit && got.Coordinate == want.Coordinate &&
 		got.Scheme == want.Scheme && got.Channel == want.Channel &&
 		got.Sequence == want.Sequence && got.Version == want.Version
-}
-
-func reporterHasEnvelope(ctx context.Context, tx *sql.Tx, issueID int64, reporter delivery.Actor, key string) (bool, error) {
-	var n int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM delivery_events e
-		JOIN deliveries d ON d.id=e.delivery_id
-		JOIN delivery_reporters r ON r.id=e.reporter_id
-		WHERE d.issue_id=? AND e.idempotency_key=? AND r.reporter_type=? AND r.opaque_key=?`,
-		issueID, key, reporter.Type, reporter.OpaqueKey).Scan(&n)
-	return n > 0, err
 }
 
 func mapDelivery(err error) error {
