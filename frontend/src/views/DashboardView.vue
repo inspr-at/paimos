@@ -14,6 +14,7 @@ import { formatInteger } from '@/composables/useNumberFormat'
 import { TYPE_SVGS, STATUS_DOT_STYLE, STATUS_LABEL, PRIORITY_ICON, PRIORITY_COLOR, PRIORITY_LABEL } from '@/composables/useIssueDisplay'
 import type { Project } from './ProjectsView.vue'
 import type { Issue } from '@/types'
+import { publicURL } from '@/publicPath'
 
 const auth = useAuthStore()
 const projects = ref<Project[]>([])
@@ -76,7 +77,7 @@ function priorityLabel(p: string) { return PRIORITY_LABEL[p] ?? p }
             <li v-for="p in projects" :key="p.id" class="project-row">
               <RouterLink :to="`/projects/${p.id}`" class="project-row-link">
                 <div class="project-thumb">
-                  <img v-if="p.logo_path" :src="p.logo_path" class="project-logo" :alt="p.name" />
+                  <img v-if="p.logo_path" :src="publicURL(p.logo_path)" class="project-logo" :alt="p.name" />
                   <span v-else class="project-key-box">{{ p.key }}</span>
                 </div>
                 <div class="project-info">

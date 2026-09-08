@@ -20,6 +20,7 @@
 import { computed } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import { useExternalProvider } from '@/composables/useExternalProvider'
+import { publicURL } from '@/publicPath'
 
 const props = withDefaults(defineProps<{
   /** External provider id from the customer row, or null for manual customers. */
@@ -53,7 +54,7 @@ const logoUrl = computed(() => provider.value?.logo_url ?? '')
     :title="`Linked to ${label}` + (externalUrl ? ' — open in CRM' : '')"
     @click.stop
   >
-    <img v-if="logoUrl" :src="logoUrl" :alt="label" class="pb-logo" />
+    <img v-if="logoUrl" :src="publicURL(logoUrl)" :alt="label" class="pb-logo" />
     <AppIcon v-else name="globe" :size="variant === 'full' ? 14 : 12" />
     <span v-if="variant === 'full'" class="pb-name">{{ label }}</span>
     <AppIcon v-if="externalUrl && variant === 'full'" name="external-link" :size="12" class="pb-arrow" />

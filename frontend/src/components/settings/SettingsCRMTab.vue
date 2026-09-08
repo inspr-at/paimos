@@ -21,6 +21,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import { useExternalProvider } from '@/composables/useExternalProvider'
 import { formatTimeWithLocale } from '@/composables/useDateFormat'
 import type { CRMTestResult, ExternalProvider, ExternalProviderConfig, ExternalProviderConfigField } from '@/types'
+import { publicURL } from '@/publicPath'
 
 const providers = ref<ExternalProvider[]>([])
 const loading = ref(true)
@@ -271,7 +272,7 @@ const hasProviders = computed(() => providers.value.length > 0)
       <article v-for="p in providers" :key="p.id" :class="['crm-card', { 'crm-card--open': expanded[p.id] }]">
         <header class="crm-head" @click="toggleExpand(p)">
           <div class="crm-head-id">
-            <img v-if="p.logo_url" :src="p.logo_url" :alt="p.name" class="crm-logo" />
+            <img v-if="p.logo_url" :src="publicURL(p.logo_url)" :alt="p.name" class="crm-logo" />
             <AppIcon v-else name="globe" :size="20" />
             <div class="crm-id-text">
               <h3 class="crm-name">{{ p.name }}</h3>

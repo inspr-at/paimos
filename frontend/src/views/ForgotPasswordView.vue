@@ -6,6 +6,7 @@ import { useBranding } from '@/composables/useBranding'
 import { useSidebarColors } from '@/composables/useSidebarColors'
 import { formatDisplayVersion } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
+import { publicURL } from '@/publicPath'
 
 const { branding } = useBranding()
 const { bgColor, patternImage } = useSidebarColors()
@@ -44,7 +45,7 @@ async function submit() {
 
     <div class="login-card">
       <div class="login-header">
-        <img :src="branding.logo" :alt="branding.company" class="login-logo" />
+        <img :src="publicURL(branding.logo)" :alt="branding.company" class="login-logo" />
         <h1 class="login-title">Reset password</h1>
         <p class="login-sub">We'll email you a link to choose a new one.</p>
       </div>
@@ -85,7 +86,7 @@ async function submit() {
       </div>
 
       <footer class="login-footer">
-        <img :src="branding.logo" alt="" class="footer-logo" aria-hidden="true" />
+        <img :src="publicURL(branding.logo)" alt="" class="footer-logo" aria-hidden="true" />
         <span>{{ branding.company }}</span>
         <span class="footer-sep">·</span>
         <span>v{{ version }}</span>

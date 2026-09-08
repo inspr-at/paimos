@@ -19,6 +19,7 @@ import AppModal from '@/components/AppModal.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import { api, errMsg } from '@/api/client'
 import type { ExternalProvider } from '@/types'
+import { publicURL } from '@/publicPath'
 
 const props = defineProps<{ open: boolean; provider: ExternalProvider | null }>()
 const emit = defineEmits<{ close: []; imported: [customerId: number] }>()
@@ -63,7 +64,7 @@ async function submit() {
   >
     <div v-if="provider" class="import-body">
       <div class="provider-pill">
-        <img v-if="provider.logo_url" :src="provider.logo_url" :alt="provider.name" class="pp-logo" />
+        <img v-if="provider.logo_url" :src="publicURL(provider.logo_url)" :alt="provider.name" class="pp-logo" />
         <AppIcon v-else name="globe" :size="16" />
         <span>{{ provider.name }}</span>
       </div>

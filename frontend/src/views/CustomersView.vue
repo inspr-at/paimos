@@ -25,6 +25,7 @@ import CustomerCreateModal from '@/components/customer/CustomerCreateModal.vue'
 import CustomerImportModal from '@/components/customer/CustomerImportModal.vue'
 import { formatCurrency } from '@/composables/useNumberFormat'
 import type { Customer, ExternalProvider } from '@/types'
+import { publicURL } from '@/publicPath'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -253,7 +254,7 @@ function fmtRate(v: number | null | undefined): string {
         </div>
         <div v-for="g in remoteResults" :key="g.id" class="cv-remote-group">
           <div class="cv-remote-group-head">
-            <img v-if="g.logo_url" :src="g.logo_url" :alt="g.name" class="cv-remote-logo" />
+            <img v-if="g.logo_url" :src="publicURL(g.logo_url)" :alt="g.name" class="cv-remote-logo" />
             <AppIcon v-else name="globe" :size="14" />
             <span>From {{ g.name }}</span>
             <span v-if="remoteLoading" class="cv-remote-group-loading">
@@ -350,7 +351,7 @@ function fmtRate(v: number | null | undefined): string {
           class="cv-add-menu-item"
           @click="openImport(p)"
         >
-          <img v-if="p.logo_url" :src="p.logo_url" :alt="p.name" class="cv-add-menu-logo" />
+          <img v-if="p.logo_url" :src="publicURL(p.logo_url)" :alt="p.name" class="cv-add-menu-logo" />
           <AppIcon v-else name="globe" :size="14" />
           <span>{{ p.name }}</span>
         </button>

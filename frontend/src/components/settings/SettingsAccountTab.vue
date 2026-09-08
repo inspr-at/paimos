@@ -490,7 +490,7 @@ init()
       <div class="profile-avatar-col">
         <div class="profile-avatar-wrap">
           <div v-if="auth.user?.avatar_path" class="profile-avatar-img-wrap">
-            <img :src="auth.user.avatar_path" class="profile-avatar-img" alt="Avatar" />
+            <img :src="publicURL(auth.user.avatar_path)" class="profile-avatar-img" alt="Avatar" />
           </div>
           <div v-else class="profile-avatar-placeholder">
             {{ userInitials(auth.user) }}

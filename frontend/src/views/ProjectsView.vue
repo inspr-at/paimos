@@ -531,7 +531,7 @@ onMounted(() => {
         <div class="project-card-top">
           <span class="project-key-badge">{{ p.key }}</span>
           <span v-if="p.status !== 'active'" :class="`badge badge-${p.status}`">{{ p.status }}</span>
-          <img v-if="p.logo_path" :src="p.logo_path" class="project-card-logo" :alt="p.name" />
+          <img v-if="p.logo_path" :src="publicURL(p.logo_path)" class="project-card-logo" :alt="p.name" />
         </div>
         <div class="project-card-name">{{ p.name }}</div>
         <RouterLink

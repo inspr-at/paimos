@@ -33,6 +33,7 @@ import { useSidebarColors } from '@/composables/useSidebarColors'
 import { useTotpNag } from '@/composables/useTotpNag'
 import { useAuthStore } from '@/stores/auth'
 import { userInitials } from '@/utils/userDisplay'
+import { publicURL } from '@/publicPath'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -82,7 +83,7 @@ function logout() {
 
         <div class="aml-rail-bottom">
           <RouterLink to="/settings?tab=account" class="aml-avatar" :title="signedInAs" :aria-label="signedInAs">
-            <img v-if="auth.user?.avatar_path" :src="auth.user.avatar_path" class="aml-avatar-img" alt="" />
+            <img v-if="auth.user?.avatar_path" :src="publicURL(auth.user.avatar_path)" class="aml-avatar-img" alt="" />
             <span v-else aria-hidden="true">{{ userInitials(auth.user) }}</span>
           </RouterLink>
           <button type="button" class="aml-rail-btn aml-logout" :title="t('agentMode.shell.logout')" :aria-label="t('agentMode.shell.logout')" @click="logout">

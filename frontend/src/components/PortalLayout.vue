@@ -5,6 +5,7 @@ import { useSearchStore } from '@/stores/search'
 import { useRouter } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
 import { useBranding } from '@/composables/useBranding'
+import { publicURL } from '@/publicPath'
 
 const { branding } = useBranding()
 
@@ -31,7 +32,7 @@ async function logout() {
   <div class="portal-shell">
     <header class="portal-header">
       <div class="portal-header-left">
-        <img :src="branding.logo" alt="" class="portal-logo" />
+        <img :src="publicURL(branding.logo)" alt="" class="portal-logo" />
         <span class="portal-brand">{{ branding.company }}</span>
         <span class="portal-sep">|</span>
         <router-link to="/portal" class="portal-nav-link">{{ $t('portal.title') }}</router-link>
@@ -64,7 +65,7 @@ async function logout() {
       <slot />
     </main>
     <footer class="portal-footer">
-      <img :src="branding.logo" alt="" class="portal-footer-logo" aria-hidden="true" />
+      <img :src="publicURL(branding.logo)" alt="" class="portal-footer-logo" aria-hidden="true" />
       <span>{{ branding.company }}</span>
     </footer>
   </div>

@@ -7,6 +7,7 @@ import { useSidebarColors } from '@/composables/useSidebarColors'
 import { formatDisplayVersion } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
 import LoadingText from '@/components/LoadingText.vue'
+import { publicURL } from '@/publicPath'
 
 const route = useRoute()
 const router = useRouter()
@@ -92,7 +93,7 @@ const invalidMessage = computed(() => {
 
     <div class="login-card">
       <div class="login-header">
-        <img :src="branding.logo" :alt="branding.company" class="login-logo" />
+        <img :src="publicURL(branding.logo)" :alt="branding.company" class="login-logo" />
         <h1 class="login-title">Choose a new password</h1>
       </div>
 
@@ -150,7 +151,7 @@ const invalidMessage = computed(() => {
       </form>
 
       <footer class="login-footer">
-        <img :src="branding.logo" alt="" class="footer-logo" aria-hidden="true" />
+        <img :src="publicURL(branding.logo)" alt="" class="footer-logo" aria-hidden="true" />
         <span>{{ branding.company }}</span>
         <span class="footer-sep">·</span>
         <span>v{{ version }}</span>

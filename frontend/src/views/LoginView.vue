@@ -190,7 +190,7 @@ function backToLogin() {
 
     <div class="login-card">
       <div class="login-header">
-        <img :src="branding.logo" :alt="branding.company" class="login-logo" />
+        <img :src="publicURL(branding.logo)" :alt="branding.company" class="login-logo" />
         <h1 class="login-title">{{ branding.product }}</h1>
         <p class="login-sub">{{ branding.company }} {{ branding.tagline }}</p>
       </div>
@@ -316,7 +316,7 @@ function backToLogin() {
       </div>
 
       <footer class="login-footer">
-        <img :src="branding.logo" alt="" class="footer-logo" aria-hidden="true" />
+        <img :src="publicURL(branding.logo)" alt="" class="footer-logo" aria-hidden="true" />
         <span>{{ branding.company }}</span>
         <span class="footer-sep">·</span>
         <span>v{{ version }}</span>

@@ -81,6 +81,7 @@ async function mountLayout(setup: (auth: ReturnType<typeof useAuthStore>) => voi
 describe('AgentModeLayout (PAI-805 reduced shell)', () => {
   afterEach(() => {
     document.body.innerHTML = ''
+    window.__PAIMOS_PUBLIC_BASE_PATH__ = ''
     vi.clearAllMocks()
   })
 
@@ -136,6 +137,18 @@ describe('AgentModeLayout (PAI-805 reduced shell)', () => {
     const logout = vi.spyOn(auth, 'logout').mockResolvedValue(undefined as never)
     root.querySelector<HTMLButtonElement>('button.aml-logout')!.click()
     expect(logout).toHaveBeenCalledTimes(1)
+    unmount()
+  })
+
+  it('prefixes the rail logo and server-returned avatar path', async () => {
+    window.__PAIMOS_PUBLIC_BASE_PATH__ = '/paimos'
+    const { root, unmount } = await mountLayout((auth) => {
+      auth.user = fakeUser({ avatar_path: '/api/avatars/9001.jpg' }) as never
+    })
+
+    expect(root.querySelector<HTMLImageElement>('.aml-brand-logo')?.getAttribute('src')).toBe('/paimos/logo.svg')
+    expect(root.querySelector<HTMLImageElement>('.aml-avatar-img')?.getAttribute('src'))
+      .toBe('/paimos/api/avatars/9001.jpg')
     unmount()
   })
 

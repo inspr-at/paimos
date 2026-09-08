@@ -12,6 +12,7 @@ import { formatInteger } from '@/composables/useNumberFormat'
 import AppIcon from '@/components/AppIcon.vue'
 import LoadingText from '@/components/LoadingText.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
+import { publicURL } from '@/publicPath'
 
 interface PortalProject {
   id: number
@@ -303,7 +304,7 @@ function reportItemCount(n: number): string {
             class="project-card"
           >
             <div class="card-header">
-              <img v-if="p.logo_path" :src="p.logo_path" class="card-logo" alt="" />
+              <img v-if="p.logo_path" :src="publicURL(p.logo_path)" class="card-logo" alt="" />
               <div class="card-key">{{ p.key }}</div>
             </div>
             <h3 class="card-name">{{ p.name }}</h3>

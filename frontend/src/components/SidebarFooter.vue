@@ -7,6 +7,7 @@ import { formatDisplayVersion } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
 import AppChangelogModal from '@/components/AppChangelogModal.vue'
 import { userInitials } from '@/utils/userDisplay'
+import { publicURL } from '@/publicPath'
 
 defineProps<{
   isExpanded: boolean
@@ -35,7 +36,7 @@ function isActive(path: string) {
   <div class="user-row">
     <RouterLink to="/settings?tab=account" class="user-profile-link" :title="isExpanded ? 'Profile settings' : (auth.user?.nickname || auth.user?.first_name || auth.user?.username || '')">
       <div class="user-avatar">
-        <img v-if="auth.user?.avatar_path" :src="auth.user.avatar_path" class="user-avatar-img" :alt="auth.user.username" />
+        <img v-if="auth.user?.avatar_path" :src="publicURL(auth.user.avatar_path)" class="user-avatar-img" :alt="auth.user.username" />
         <span v-else>{{ userInitials(auth.user) }}</span>
       </div>
       <div class="user-info sl">
