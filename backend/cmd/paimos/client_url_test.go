@@ -7,7 +7,19 @@
 
 package main
 
-import "testing"
+import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+type clientURLRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f clientURLRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 func TestJoinInstanceAPIOnce(t *testing.T) {
 	cases := []struct {
@@ -29,6 +41,57 @@ func TestJoinInstanceAPIOnce(t *testing.T) {
 		if count := countAPISeg(got); count != 1 {
 			t.Errorf("join(%q,%q) contains %d /api segments", tc.base, tc.path, count)
 		}
+	}
+}
+
+func TestPrefixedClientMessagingReadinessSeam(t *testing.T) {
+	oldAgent := flagAgentName
+	flagAgentName = "codex"
+	t.Cleanup(func() { flagAgentName = oldAgent })
+
+	seen := make([]string, 0, 3)
+	client := &Client{
+		baseURL: "https://pm.example.test/paimos",
+		http: &http.Client{Transport: clientURLRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method != http.MethodGet {
+				t.Fatalf("readiness probe mutated state with %s", r.Method)
+			}
+			if !strings.HasPrefix(r.URL.Path, "/paimos/api/") {
+				t.Fatalf("readiness request escaped public prefix: %s", r.URL.Path)
+			}
+			seen = append(seen, r.URL.RequestURI())
+			body := ""
+			switch r.URL.Path {
+			case "/paimos/api/projects/42/agents":
+				body = `[{"id":7,"project_id":42,"name":"codex"}]`
+			case "/paimos/api/projects/42/message-allowlist":
+				if r.URL.Query().Get("receiver") != "cursor:worker" {
+					t.Fatalf("allowlist receiver=%q", r.URL.Query().Get("receiver"))
+				}
+				body = `{"receiver":"cursor:worker","senders":["paimos:codex"]}`
+			case "/paimos/api/projects/42/message-targets":
+				if r.URL.Query().Get("address") != "cursor:worker" {
+					t.Fatalf("target address=%q", r.URL.Query().Get("address"))
+				}
+				body = `{"targets":[]}`
+			default:
+				t.Fatalf("unexpected readiness route: %s", r.URL.RequestURI())
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Request:    r,
+			}, nil
+		})},
+	}
+
+	readiness := probeFriendlyMessaging(context.Background(), client, 42, "cursor:worker", nil, false)
+	if readiness.Sender.State != friendlyReady || readiness.Policy.State != friendlyReady || readiness.Fallback.State != friendlyMissing {
+		t.Fatalf("readiness=%+v", readiness)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("readiness requests=%v", seen)
 	}
 }
 
