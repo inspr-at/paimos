@@ -54,9 +54,12 @@ const (
 	MailPending            = "pending"
 	MailSent               = "sent"
 	MailFailed             = "failed"
+	MailQueued             = "queued"
+	MailSending            = "sending"
+	MailAmbiguous          = "ambiguous"
 	maxBodyBytes           = 64 << 10
-	maxAttempts            = 8
-	opaqueRefPattern       = `^[A-Za-z][A-Za-z0-9._:-]*$`
+	defaultMailLease       = 30 * time.Second
+	defaultSendTimeout     = 20 * time.Second
 )
 
 type Actor struct {
@@ -125,19 +128,25 @@ type Party struct {
 }
 
 type Confirmation struct {
-	PartyRef    string `json:"party_ref"`
-	Decision    string `json:"decision"`
-	Source      string `json:"source"`
-	ActorUserID int64  `json:"actor_user_id"`
-	Attestation string `json:"attestation,omitempty"`
-	ConfirmedAt string `json:"confirmed_at"`
+	PartyRef           string `json:"party_ref"`
+	PartyName          string `json:"party_name,omitempty"`
+	Decision           string `json:"decision"`
+	Source             string `json:"source"`
+	SourceLabel        string `json:"source_label,omitempty"`
+	ActorUserID        int64  `json:"actor_user_id"`
+	Attestation        string `json:"attestation,omitempty"`
+	ConfirmedAt        string `json:"confirmed_at"`
+	AcceptanceRevision int64  `json:"acceptance_revision"`
 }
 
 type EmailEvidence struct {
 	MessageRef         string   `json:"message_ref"`
 	ReleaseRevision    int64    `json:"acceptance_revision"`
 	RecipientPartyRefs []string `json:"recipient_party_refs"`
+	RecipientNames     []string `json:"recipient_names,omitempty"`
 	State              string   `json:"state"`
+	DisplayState       string   `json:"display_state,omitempty"`
+	OutboxState        string   `json:"outbox_state,omitempty"`
 	Source             string   `json:"source"`
 	RecordedAt         string   `json:"recorded_at"`
 	SentAt             *string  `json:"sent_at"`
@@ -203,6 +212,7 @@ type Acceptance struct {
 	Defaults           CooperationDefaults `json:"defaults"`
 	OfferDisclaimer    string              `json:"offer_disclaimer"`
 	MailRecovery       string              `json:"mail_recovery,omitempty"`
+	MailInFlight       bool                `json:"mail_in_flight,omitempty"`
 }
 
 type StandingPolicy struct {
@@ -225,10 +235,12 @@ type StandingPolicy struct {
 }
 
 type Service struct {
-	DB        *sql.DB
-	Artifacts ArtifactSource
-	Mail      mailer.Mailer
-	Clock     Clock
+	DB          *sql.DB
+	Artifacts   ArtifactSource
+	Mail        mailer.Mailer
+	Clock       Clock
+	Lease       time.Duration
+	SendTimeout time.Duration
 }
 
 func NewService(database *sql.DB, artifacts ArtifactSource, mail mailer.Mailer, clock Clock) *Service {
@@ -241,7 +253,10 @@ func NewService(database *sql.DB, artifacts ArtifactSource, mail mailer.Mailer, 
 	if clock == nil {
 		clock = ClockFunc(func() time.Time { return time.Now().UTC() })
 	}
-	return &Service{DB: database, Artifacts: artifacts, Mail: mail, Clock: clock}
+	return &Service{
+		DB: database, Artifacts: artifacts, Mail: mail, Clock: clock,
+		Lease: defaultMailLease, SendTimeout: defaultSendTimeout,
+	}
 }
 
 func ModeLabel(mode string) string {

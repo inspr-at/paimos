@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/brand"
 	appdb "github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/mailer"
 )
@@ -74,6 +75,9 @@ func openFixture(t *testing.T) *fixture {
 	t.Helper()
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("PAIMOS_TEST_MODE", "1")
+	prevFrom := brand.Default.EmailFrom
+	brand.Default.EmailFrom = "paimos@example.test"
+	t.Cleanup(func() { brand.Default.EmailFrom = prevFrom })
 	if err := appdb.Open(); err != nil {
 		t.Fatal(err)
 	}

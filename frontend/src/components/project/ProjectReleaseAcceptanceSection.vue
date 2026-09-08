@@ -49,11 +49,14 @@ const previewSubject = ref('')
 const previewBody = ref('')
 const confirmSend = ref(false)
 const selectedRecipients = ref<string[]>([])
+const attestedParties = ref<string[]>([])
+const confirmAttest = ref(false)
+const sendRequestKey = ref(`send-${Date.now()}`)
 const externalRaw = ref('')
 const externalAttestation = ref('')
 const policyRef = ref('policy_customer')
 const policyUse = ref('Same approved baseline implementation updates only.')
-const policyExpires = ref('2026-12-01T00:00:00Z')
+const policyExpires = ref(defaultLocalExpiry())
 const users = ref<User[]>([])
 let partySeq = 0
 
@@ -132,6 +135,28 @@ function slugRef(prefix: string, label: string, fallback: string) {
   return slug ? `${prefix}_${slug}` : fallback
 }
 
+function defaultLocalExpiry() {
+  const d = new Date()
+  d.setDate(d.getDate() + 90)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function localInputToRFC3339(value: string) {
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toISOString()
+}
+
+function partyName(ref: string) {
+  const party = acceptance.value?.parties.find((p) => p.party_ref === ref)
+  return party?.display_name || party?.email || ref
+}
+
+function mailState(row: { display_state?: string; state: string }) {
+  return row.display_state || row.state
+}
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -192,7 +217,9 @@ function syncForm(acc: Acceptance) {
   }
   previewSubject.value = acc.preview_subject || ''
   previewBody.value = acc.preview_body || ''
-  selectedRecipients.value = (acc.parties ?? []).map((p) => p.party_ref)
+  if (!acc.mail_in_flight) {
+    sendRequestKey.value = `send-${Date.now()}`
+  }
 }
 
 function configureBody(): ConfigureRequest {
@@ -329,7 +356,7 @@ onMounted(() => { void load() })
           <button type="button" class="btn btn-sm" data-testid="add-gap" @click="addGap">Add gap</button>
         </div>
         <ul v-else class="ra-list">
-          <li v-for="g in acceptance.disclosed_gaps" :key="g.gap_ref">{{ g.gap_ref }}: {{ g.statement }}</li>
+          <li v-for="g in acceptance.disclosed_gaps" :key="g.gap_ref">{{ g.statement }}</li>
           <li v-if="!acceptance.disclosed_gaps.length">None disclosed.</li>
         </ul>
         <div v-if="canWrite" class="ra-stack" data-testid="party-editor">
@@ -383,13 +410,20 @@ onMounted(() => { void load() })
         <strong class="ra-meta">Missing</strong>
         <ul class="ra-list" data-testid="missing-list">
           <li v-if="acceptance.missing.preview">Reviewable message</li>
-          <li v-for="ref in acceptance.missing.confirmations" :key="'c-'+ref">Confirmation: {{ ref }}</li>
-          <li v-for="ref in acceptance.missing.email_coverage" :key="'e-'+ref">Sent email covering {{ ref }}</li>
+          <li v-for="ref in acceptance.missing.confirmations" :key="'c-'+ref">Confirmation: {{ partyName(ref) }}</li>
+          <li v-for="ref in acceptance.missing.email_coverage" :key="'e-'+ref">Sent email covering {{ partyName(ref) }}</li>
           <li v-if="!acceptance.missing.preview && !acceptance.missing.confirmations.length && !acceptance.missing.email_coverage.length">Nothing missing.</li>
         </ul>
-        <ul class="ra-list">
+        <ul class="ra-list" data-testid="confirmation-list">
           <li v-for="c in acceptance.confirmations" :key="c.party_ref + c.confirmed_at">
-            {{ c.party_ref }} · {{ c.source }} · actor {{ c.actor_user_id }}
+            {{ c.party_name || partyName(c.party_ref) }} · {{ c.source_label || c.source }} · revision {{ c.acceptance_revision || acceptance.revision }}
+          </li>
+        </ul>
+        <ul v-if="acceptance.email_evidence.length" class="ra-list" data-testid="email-evidence">
+          <li v-for="e in acceptance.email_evidence" :key="e.message_ref">
+            {{ mailState(e) }} · {{ (e.recipient_names && e.recipient_names.length) ? e.recipient_names.join(', ') : e.recipient_party_refs.map(partyName).join(', ') }}
+            · {{ e.recorded_at }}{{ e.sent_at ? ` · sent ${e.sent_at}` : '' }}
+            · {{ e.source === 'platform_send' ? 'platform send' : 'recorded email' }}
           </li>
         </ul>
         <p v-if="acceptance.mail_recovery" class="ra-error" data-testid="mail-recovery">{{ acceptance.mail_recovery }}</p>
@@ -414,8 +448,8 @@ onMounted(() => { void load() })
             Save preview
           </button>
         </div>
-        <fieldset class="ra-stack">
-          <legend class="ra-meta">Recipients</legend>
+        <fieldset class="ra-stack" data-testid="recipient-picker">
+          <legend class="ra-meta">Email recipients</legend>
           <label v-for="p in acceptance.parties" :key="'r-'+p.party_ref">
             <input v-model="selectedRecipients" type="checkbox" :value="p.party_ref">
             {{ p.display_name }} · {{ p.email }}
@@ -429,9 +463,9 @@ onMounted(() => { void load() })
           type="button"
           class="btn btn-sm"
           data-testid="authorize-send"
-          :disabled="busy || !confirmSend"
+          :disabled="busy || !confirmSend || !!acceptance.mail_in_flight"
           @click="run(() => authorizeAcceptanceSend(projectId, acceptance!.release.id, {
-            request_key: `send-${Date.now()}`,
+            request_key: sendRequestKey,
             recipient_party_refs: selectedRecipients,
             preview_revision: acceptance!.preview_revision,
             confirm_send: confirmSend,
@@ -439,22 +473,37 @@ onMounted(() => { void load() })
         >
           Authorize send
         </button>
+        <p v-if="acceptance.mail_in_flight" class="ra-note">A send is already queued or in flight. Wait for it to finish; do not start another.</p>
         <label>Manual received email
           <textarea v-model="externalRaw" rows="4" class="ra-input" />
         </label>
         <label>Attestation (recorder, not sender identity)
           <input v-model="externalAttestation" class="ra-input">
         </label>
+        <fieldset class="ra-stack" data-testid="attest-picker">
+          <legend class="ra-meta">Attest acceptance for</legend>
+          <p class="ra-note">None selected. Recipients of the recorded email are not consent. Linked members can still confirm themselves.</p>
+          <label v-for="p in acceptance.parties" :key="'a-'+p.party_ref">
+            <input v-model="attestedParties" type="checkbox" :value="p.party_ref" data-testid="attest-party">
+            {{ p.display_name }}
+          </label>
+        </fieldset>
+        <label class="ra-confirm">
+          <input v-model="confirmAttest" type="checkbox" data-testid="confirm-attest">
+          I attest, as the recording human, that these selected parties accepted this same release revision. This does not verify the sender.
+        </label>
         <button
           type="button"
           class="btn btn-sm"
-          :disabled="busy || !externalRaw.trim() || !externalAttestation.trim()"
+          data-testid="record-external"
+          :disabled="busy || !externalRaw.trim() || !externalAttestation.trim() || (attestedParties.length > 0 && !confirmAttest)"
           @click="run(() => recordExternalAcceptanceEmail(projectId, acceptance!.release.id, {
             request_key: `ext-${Date.now()}`,
             recipient_party_refs: selectedRecipients,
             raw_message: externalRaw,
             attestation: externalAttestation,
-            attested_party_refs: selectedRecipients,
+            attested_party_refs: attestedParties,
+            confirm_attest: confirmAttest,
           }))"
         >
           Record external email
@@ -471,7 +520,9 @@ onMounted(() => { void load() })
         <strong class="ra-meta">Standing policy (customer-operated only; does not send mail)</strong>
         <label>Policy ref <input v-model="policyRef" class="ra-input"></label>
         <label>Bounded use <input v-model="policyUse" class="ra-input"></label>
-        <label>Expires <input v-model="policyExpires" class="ra-input"></label>
+        <label>Expires
+          <input v-model="policyExpires" class="ra-input" type="datetime-local" data-testid="policy-expires">
+        </label>
         <button
           type="button"
           class="btn btn-sm"
@@ -484,9 +535,11 @@ onMounted(() => { void load() })
             agreement_ref: agreement,
             gaps: gapRows.filter((g) => g.statement.trim()),
             bounded_use: policyUse,
-            expires_at: policyExpires,
+            expires_at: localInputToRFC3339(policyExpires),
             release_channel: acceptance!.release.release_channel,
             artifact_digest: acceptance!.release.artifact_digest,
+            target_ref: acceptance!.release.artifact_coordinate,
+            model_ref: acceptance!.release.version_scheme,
           }))"
         >
           Approve policy

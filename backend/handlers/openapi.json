@@ -9129,7 +9129,7 @@
       "post": {
         "tags": ["release-acceptance"],
         "summary": "Record a manually received acceptance email",
-        "description": "Live non-impersonated human session with project edit. CSRF required. Retains the raw message and hash. Attribution is the recording human; this is attestation, not verified sender identity. Remote HTML content is rejected.",
+        "description": "Live non-impersonated human session with project edit. CSRF required. Recipients of a recorded message are not consent. attested_party_refs require explicit confirm_attest on the same acceptance revision and never default from the recipient list. Attribution is the recording human; this is attestation, not verified sender identity. Remote HTML content is rejected.",
         "security": [{"sessionCookie": []}],
         "parameters": [
           {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},

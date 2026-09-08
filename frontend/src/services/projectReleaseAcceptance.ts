@@ -21,18 +21,24 @@ export type Party = {
 
 export type Confirmation = {
   party_ref: string
+  party_name?: string
   decision: string
   source: string
+  source_label?: string
   actor_user_id: number
   attestation?: string
   confirmed_at: string
+  acceptance_revision?: number
 }
 
 export type EmailEvidence = {
   message_ref: string
   acceptance_revision: number
   recipient_party_refs: string[]
+  recipient_names?: string[]
   state: 'pending' | 'sent' | 'failed'
+  display_state?: 'queued' | 'sending' | 'sent' | 'failed' | 'ambiguous'
+  outbox_state?: string
   source: string
   recorded_at: string
   sent_at: string | null
@@ -91,6 +97,7 @@ export type Acceptance = {
   defaults: { agreement_ref: string; notes?: string }
   offer_disclaimer: string
   mail_recovery?: string
+  mail_in_flight?: boolean
 }
 
 export type StandingPolicy = {
@@ -172,7 +179,14 @@ export function authorizeAcceptanceSend(
 export function recordExternalAcceptanceEmail(
   projectId: number,
   releaseId: number,
-  body: { request_key: string; recipient_party_refs: string[]; raw_message: string; attestation: string; attested_party_refs: string[] },
+  body: {
+    request_key: string
+    recipient_party_refs: string[]
+    raw_message: string
+    attestation: string
+    attested_party_refs: string[]
+    confirm_attest: boolean
+  },
 ) {
   return api.post<Acceptance>(`/projects/${projectId}/release-records/${releaseId}/acceptance/email/record-external`, body)
 }

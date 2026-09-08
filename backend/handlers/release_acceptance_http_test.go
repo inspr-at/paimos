@@ -18,6 +18,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/inspr-at/paimos/backend/brand"
 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/mailer"
@@ -126,6 +127,9 @@ func configureBody(memberID, externalID int64, revision int64, mode string) map[
 
 func mintFromBuiltReceipt(t *testing.T, ts *testServer, projectID int64) releaseacceptance.Acceptance {
 	t.Helper()
+	prev := brand.Default.EmailFrom
+	brand.Default.EmailFrom = "paimos@example.test"
+	t.Cleanup(func() { brand.Default.EmailFrom = prev })
 	batch := startManualHTTPBatch(t, ts, projectID, "acc-mint-"+fmt.Sprint(projectID))
 	batch = postHTTPBuiltReceipt(t, ts, projectID, batch)
 	resp := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/release-record", projectID, batch.ID), map[string]any{})

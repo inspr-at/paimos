@@ -230,7 +230,7 @@ func TestManualExternalEmailPath(t *testing.T) {
 	got, err := f.svc.RecordExternal(context.Background(), f.admin, f.projectID, rel.Release.ID, RecordExternalRequest{
 		RequestKey: "ext-1", RecipientPartyRefs: []string{"party_customer", "party_delivery"},
 		RawMessage: raw, Attestation: "I attest this is the received acceptance email; it does not verify sender identity.",
-		AttestedPartyRefs: []string{"party_customer", "party_delivery"},
+		AttestedPartyRefs: []string{"party_customer", "party_delivery"}, ConfirmAttest: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -471,5 +471,184 @@ func TestQueuedSendHonorsRevokedSession(t *testing.T) {
 	}
 	if out.MailRecovery == "" {
 		t.Fatal("missing recovery after revoked send")
+	}
+}
+
+func TestRecordExternalDoesNotAttestFromRecipients(t *testing.T) {
+	f := openFixture(t)
+	rel := f.mint()
+	f.configure(rel.Release.ID, ModeAgencySupported)
+	raw := "From: a@example.test\r\nTo: acc-customer@example.test\r\nSubject: Accept\r\n\r\nWe accept.\r\n"
+	got, err := f.svc.RecordExternal(context.Background(), f.admin, f.projectID, rel.Release.ID, RecordExternalRequest{
+		RequestKey: "ext-no-attest", RecipientPartyRefs: []string{"party_customer", "party_delivery"},
+		RawMessage: raw, Attestation: "I recorded this email. Recipients are not consent.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Confirmations) != 0 {
+		t.Fatalf("recipients auto-attested: %+v", got.Confirmations)
+	}
+	if got.Status == StatusAccepted {
+		t.Fatal("unattested recorded email finalized")
+	}
+	_, err = f.svc.RecordExternal(context.Background(), f.admin, f.projectID, rel.Release.ID, RecordExternalRequest{
+		RequestKey: "ext-attest-required", RecipientPartyRefs: []string{"party_customer"},
+		RawMessage: raw + "x", Attestation: "same recorder", AttestedPartyRefs: []string{"party_customer"},
+	})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("missing confirm_attest err=%v", err)
+	}
+}
+
+func TestDisplayNameChangeBumpsRevision(t *testing.T) {
+	f := openFixture(t)
+	rel := f.mint()
+	acc := f.configure(rel.Release.ID, ModeAgencySupported)
+	if _, err := f.svc.Confirm(context.Background(), f.customer, f.projectID, rel.Release.ID, "party_customer", ""); err != nil {
+		t.Fatal(err)
+	}
+	next, err := f.svc.Configure(context.Background(), f.admin, f.projectID, rel.Release.ID, ConfigureRequest{
+		ExpectedRevision:  acc.Revision,
+		OperatingMode:     ModeAgencySupported,
+		AgreementRef:      "SOW-9",
+		DisclosedGaps:     []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		DeliveryPartyRef:  "party_delivery",
+		OperatorPartyRef:  "party_customer",
+		RequiredPartyRefs: []string{"party_delivery", "party_customer"},
+		Parties: []PartyInput{
+			{PartyRef: "party_customer", Kind: PartyLinkedUser, UserID: f.customerID, Email: "acc-customer@example.test", DisplayName: "Customer GmbH", Roles: []string{"acceptance_party", "operator"}},
+			{PartyRef: "party_delivery", Kind: PartyLinkedUser, UserID: f.deliveryID, Email: "acc-delivery@example.test", DisplayName: "Delivery", Roles: []string{"acceptance_party", "delivery_party"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Revision <= acc.Revision {
+		t.Fatalf("display_name edit did not bump revision: %d", next.Revision)
+	}
+	if len(next.Confirmations) != 0 {
+		t.Fatalf("stale confirmation after rename: %+v", next.Confirmations)
+	}
+	var name string
+	if err := appdb.DB.QueryRow(`SELECT display_name FROM acceptance_parties WHERE acceptance_id=? AND acceptance_revision=? AND party_ref='party_customer'`, next.ID, next.Revision).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Customer GmbH" {
+		t.Fatalf("display_name=%q", name)
+	}
+}
+
+func TestCRLFEmailRejected(t *testing.T) {
+	f := openFixture(t)
+	rel := f.mint()
+	req := ConfigureRequest{
+		OperatingMode: ModeAgencySupported, AgreementRef: "SOW-9",
+		DisclosedGaps:    []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		DeliveryPartyRef: "party_delivery", OperatorPartyRef: "party_customer",
+		RequiredPartyRefs: []string{"party_delivery", "party_customer"},
+		Parties: []PartyInput{
+			{PartyRef: "party_customer", Kind: PartyManualEmail, Email: "evil@example.test\r\nBcc: hidden@example.test", DisplayName: "Evil", Roles: []string{"acceptance_party", "operator"}},
+			{PartyRef: "party_delivery", Kind: PartyLinkedUser, UserID: f.deliveryID, Email: "acc-delivery@example.test", DisplayName: "Delivery", Roles: []string{"acceptance_party", "delivery_party"}},
+		},
+	}
+	if _, err := f.svc.Configure(context.Background(), f.admin, f.projectID, rel.Release.ID, req); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("CRLF email err=%v", err)
+	}
+}
+
+func TestPolicyExpiryAndBindings(t *testing.T) {
+	f := openFixture(t)
+	rel := f.mint()
+	f.configure(rel.Release.ID, ModeCustomerOperated)
+	if _, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
+		PolicyRef: "policy_bad_date", ContentDigest: testDigest, RevisionSeal: testSeal,
+		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
+		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2026-9-1",
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("loose expiry err=%v", err)
+	}
+	if _, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
+		PolicyRef: "policy_expired", ContentDigest: testDigest, RevisionSeal: testSeal,
+		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
+		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2020-01-01T00:00:00Z",
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expired approve err=%v", err)
+	}
+	policy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
+		PolicyRef: "policy_bind", ContentDigest: testDigest, RevisionSeal: testSeal,
+		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
+		Gaps:           []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		BoundedUse:     "Same approved baseline implementation updates only.",
+		ExpiresAt:      "2026-12-01T00:00:00Z",
+		TargetRef:      "other-target",
+		ModelRef:       "other-model",
+		ReleaseChannel: "stable",
+		ArtifactDigest: testArt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, policy.ID); !errors.Is(err, ErrStale) {
+		t.Fatalf("unenforced target err=%v", err)
+	}
+	okPolicy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
+		PolicyRef: "policy_ok_bind", ContentDigest: testDigest, RevisionSeal: testSeal,
+		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
+		Gaps:           []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		BoundedUse:     "Same approved baseline implementation updates only.",
+		ExpiresAt:      "2026-12-01T00:00:00Z",
+		TargetRef:      "ghcr:inspr-at/demo:acc",
+		ModelRef:       "inspr-calendar-v1",
+		ReleaseChannel: "stable",
+		ArtifactDigest: testArt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, okPolicy.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExpiredSendingIsAmbiguousWithoutResend(t *testing.T) {
+	f := openFixture(t)
+	rel := f.mint()
+	f.configure(rel.Release.ID, ModeAgencySupported)
+	if _, err := f.svc.SavePreview(context.Background(), f.admin, f.projectID, rel.Release.ID, PreviewRequest{Subject: "A", Body: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
+	res, err := appdb.DB.Exec(`INSERT INTO acceptance_email_evidence(
+		acceptance_id,release_id,acceptance_revision,message_ref,request_key,recipient_party_refs_json,state,source,
+		recorded_at,actor_user_id,session_credential_id,attestation,body_sha256,raw_message)
+		VALUES(?,?,?,'message_inflight','inflight-1','["party_customer"]','pending','platform_send',?,?,?,'','deadbeef',?)`,
+		got.ID, rel.Release.ID, got.Revision, f.svc.now(), f.adminID, f.admin.SessionCredentialID, []byte("Subject: A\r\n\r\nB\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	evID, _ := res.LastInsertId()
+	if _, err := appdb.DB.Exec(`INSERT INTO acceptance_mail_outbox(
+		evidence_id,request_key,state,attempt_count,last_error_class,authorized_by,session_credential_id,preview_revision,lease_until,created_at,updated_at)
+		VALUES(?,'inflight-1','sending',1,'',?,?,?,'2020-01-01T00:00:00Z',?,?)`, evID, f.adminID, f.admin.SessionCredentialID, got.PreviewRevision, f.svc.now(), f.svc.now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.DrainOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.mail.messages) != 0 {
+		t.Fatal("expired sending was retried")
+	}
+	out, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.EmailEvidence) != 1 || out.EmailEvidence[0].DisplayState != MailAmbiguous {
+		t.Fatalf("expired sending=%+v", out.EmailEvidence)
+	}
+	if !strings.Contains(out.MailRecovery, "Do not send this message again") {
+		t.Fatalf("recovery invites resend: %q", out.MailRecovery)
 	}
 }

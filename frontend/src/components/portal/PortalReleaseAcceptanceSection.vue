@@ -22,6 +22,11 @@ const ownParty = computed(() => {
   return acceptance.value.parties.find((p) => p.kind === 'linked_user' && p.user_id === uid) ?? null
 })
 
+function partyName(ref: string) {
+  const party = acceptance.value?.parties.find((p) => p.party_ref === ref)
+  return party?.display_name || party?.email || ref
+}
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -63,9 +68,17 @@ onMounted(() => { void load() })
       <p class="pra-meta">{{ acceptance.release.release_ref }} · {{ acceptance.release.version }} · {{ acceptance.operating_mode_label }} · {{ acceptance.status }}</p>
       <p class="pra-note">{{ acceptance.offer_disclaimer }}</p>
       <ul class="pra-list">
-        <li v-for="g in acceptance.disclosed_gaps" :key="g.gap_ref">{{ g.gap_ref }}: {{ g.statement }}</li>
+        <li v-for="g in acceptance.disclosed_gaps" :key="g.gap_ref">{{ g.statement }}</li>
       </ul>
-      <p v-if="acceptance.missing.confirmations.length" class="pra-meta">Still missing confirmation from: {{ acceptance.missing.confirmations.join(', ') }}</p>
+      <ul class="pra-list" data-testid="portal-confirmations">
+        <li v-for="c in acceptance.confirmations" :key="c.party_ref + c.confirmed_at">
+          {{ c.party_name || c.party_ref }} · {{ c.source_label || c.source }} · revision {{ c.acceptance_revision || acceptance.revision }}
+        </li>
+      </ul>
+      <p v-if="acceptance.missing.confirmations.length" class="pra-meta">
+        Still missing confirmation from:
+        {{ acceptance.missing.confirmations.map(partyName).join(', ') }}
+      </p>
       <button
         v-if="ownParty && acceptance.status !== 'accepted'"
         type="button"

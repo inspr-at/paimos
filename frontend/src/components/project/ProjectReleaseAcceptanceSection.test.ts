@@ -133,6 +133,11 @@ describe('ProjectReleaseAcceptanceSection', () => {
     expect(host.querySelector('[data-testid="gap-editor"]')).toBeTruthy()
     expect(host.querySelector('textarea')?.getAttribute('placeholder') ?? '').not.toContain('|')
     expect(text).not.toContain('ref | kind | user_id')
+    expect(host.querySelector('[data-testid="missing-list"]')?.textContent).toContain('Customer')
+    expect(host.querySelector('[data-testid="missing-list"]')?.textContent).not.toContain('party_customer')
+    const attests = [...host.querySelectorAll<HTMLInputElement>('[data-testid="attest-party"]')]
+    expect(attests.length).toBeGreaterThan(0)
+    expect(attests.every((box) => !box.checked)).toBe(true)
     expect(host.querySelector('select')).toBeTruthy()
 
     host.querySelector<HTMLButtonElement>('[data-testid="add-party"]')!.click()
@@ -165,18 +170,64 @@ describe('ProjectReleaseAcceptanceSection', () => {
     host.querySelector<HTMLInputElement>('[data-testid="confirm-send"]')!.click()
     await settle()
     expect(host.querySelector<HTMLButtonElement>('[data-testid="authorize-send"]')?.disabled).toBe(false)
+    expect(host.textContent).not.toContain('actor 44')
+    app.unmount()
+  })
+
+  it('renders mail evidence and keeps send disabled while a message is in flight', async () => {
+    mockLoads({
+      ...acceptanceFixture,
+      mail_in_flight: true,
+      mail_recovery: 'Delivery is uncertain. Do not send this message again until it is reconciled. Automatic retry is not used.',
+      confirmations: [{
+        party_ref: 'party_customer',
+        party_name: 'Customer',
+        decision: 'accept',
+        source: 'platform',
+        source_label: 'platform confirmation',
+        actor_user_id: 44,
+        confirmed_at: '2026-09-08T12:01:00Z',
+        acceptance_revision: 1,
+      }],
+      email_evidence: [{
+        message_ref: 'message_1',
+        acceptance_revision: 1,
+        recipient_party_refs: ['party_customer'],
+        recipient_names: ['Customer'],
+        state: 'pending',
+        display_state: 'sending',
+        source: 'platform_send',
+        recorded_at: '2026-09-08T12:00:00Z',
+        sent_at: null,
+        actor_user_id: 1,
+        body_sha256: 'abc',
+        last_error_class: '',
+      }],
+    })
+    const { host, app } = await mountSection()
+    expect(host.querySelector('[data-testid="email-evidence"]')?.textContent).toContain('sending')
+    expect(host.querySelector('[data-testid="email-evidence"]')?.textContent).toContain('Customer')
+    expect(host.querySelector('[data-testid="confirmation-list"]')?.textContent).toContain('platform confirmation')
+    expect(host.querySelector('[data-testid="confirmation-list"]')?.textContent).toContain('revision 1')
+    expect(host.textContent).not.toContain('actor 44')
+    host.querySelector<HTMLInputElement>('[data-testid="confirm-send"]')!.click()
+    await settle()
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="authorize-send"]')?.disabled).toBe(true)
+    expect(host.querySelector('[data-testid="mail-recovery"]')?.textContent).toContain('Do not send this message again')
     app.unmount()
   })
 
   it('shows load and save errors without treating failed mail as accepted', async () => {
     mockLoads({
       ...acceptanceFixture,
-      mail_recovery: 'Send did not complete. Review the message and authorize a new send. Automatic retry is not used after an uncertain delivery.',
+      mail_recovery: 'Send did not complete before the server accepted the message. After fixing transport, authorize a new send with a new request key.',
       email_evidence: [{
         message_ref: 'message_1',
         acceptance_revision: 1,
         recipient_party_refs: ['party_customer'],
+        recipient_names: ['Customer'],
         state: 'failed',
+        display_state: 'failed',
         source: 'platform_send',
         recorded_at: '2026-09-08T12:00:00Z',
         sent_at: null,

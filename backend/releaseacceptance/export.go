@@ -40,7 +40,7 @@ func (s *Service) Export(ctx context.Context, actor Actor, projectID, releaseID 
 func (s *Service) rawMessages(ctx context.Context, projectID, releaseID int64) ([]byte, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT e.raw_message FROM acceptance_email_evidence e
 		JOIN release_records r ON r.id=e.release_id
-		WHERE r.project_id=? AND r.id=? AND e.state='sent' AND e.raw_message IS NOT NULL
+		WHERE r.project_id=? AND r.id=? AND e.raw_message IS NOT NULL
 		ORDER BY e.id`, projectID, releaseID)
 	if err != nil {
 		return nil, err
@@ -96,19 +96,31 @@ func printableHTML(acc Acceptance) string {
 		b.WriteString("<li>None disclosed. Gaps listed here are not a universal legal checklist.</li>")
 	}
 	for _, g := range acc.DisclosedGaps {
-		b.WriteString("<li>" + html.EscapeString(g.GapRef) + ": " + html.EscapeString(g.Statement) + "</li>")
+		b.WriteString("<li>" + html.EscapeString(g.Statement) + "</li>")
 	}
 	b.WriteString("</ul><h2>Parties</h2><ul>")
 	for _, p := range acc.Parties {
-		b.WriteString("<li>" + html.EscapeString(p.PartyRef) + " · " + html.EscapeString(p.Kind) + "</li>")
+		label := p.DisplayName
+		if label == "" {
+			label = p.Email
+		}
+		b.WriteString("<li>" + html.EscapeString(label) + "</li>")
 	}
 	b.WriteString("</ul><h2>Confirmations</h2><ul>")
 	for _, c := range acc.Confirmations {
-		b.WriteString("<li>" + html.EscapeString(c.PartyRef) + " · " + html.EscapeString(c.Source) + " · " + html.EscapeString(c.ConfirmedAt) + "</li>")
+		name := c.PartyName
+		if name == "" {
+			name = c.PartyRef
+		}
+		b.WriteString("<li>" + html.EscapeString(name) + " · " + html.EscapeString(c.SourceLabel) + " · revision " + html.EscapeString(fmt.Sprintf("%d", c.AcceptanceRevision)) + " · " + html.EscapeString(c.ConfirmedAt) + "</li>")
 	}
 	b.WriteString("</ul><h2>Email evidence</h2><ul>")
 	for _, e := range acc.EmailEvidence {
-		b.WriteString("<li>" + html.EscapeString(e.MessageRef) + " · " + html.EscapeString(e.State) + " · " + html.EscapeString(e.BodySHA256) + "</li>")
+		state := e.DisplayState
+		if state == "" {
+			state = e.State
+		}
+		b.WriteString("<li>" + html.EscapeString(state) + " · " + html.EscapeString(strings.Join(e.RecipientNames, ", ")) + " · " + html.EscapeString(e.RecordedAt) + "</li>")
 	}
 	b.WriteString("</ul><h2>Missing</h2><p>Confirmations: " + html.EscapeString(strings.Join(acc.Missing.Confirmations, ", ")) +
 		"<br>Email coverage: " + html.EscapeString(strings.Join(acc.Missing.EmailCoverage, ", ")) + "</p>")

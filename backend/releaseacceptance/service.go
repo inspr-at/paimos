@@ -14,6 +14,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"mime"
+	"net/mail"
 	"sort"
 	"strings"
 	"time"
@@ -300,6 +302,7 @@ type RecordExternalRequest struct {
 	RawMessage         string   `json:"raw_message"`
 	Attestation        string   `json:"attestation"`
 	AttestedPartyRefs  []string `json:"attested_party_refs"`
+	ConfirmAttest      bool     `json:"confirm_attest"`
 }
 
 func (s *Service) RecordExternal(ctx context.Context, actor Actor, projectID, releaseID int64, req RecordExternalRequest) (Acceptance, error) {
@@ -328,6 +331,18 @@ func (s *Service) RecordExternal(ctx context.Context, actor Actor, projectID, re
 	if err := coverKnownParties(acc, req.RecipientPartyRefs); err != nil {
 		return Acceptance{}, err
 	}
+	attested := sortedUnique(req.AttestedPartyRefs)
+	if len(attested) > 0 && !req.ConfirmAttest {
+		return Acceptance{}, fmt.Errorf("%w: explicit confirm_attest is required to record party acceptance", ErrInvalid)
+	}
+	if !req.ConfirmAttest {
+		attested = nil
+	}
+	for _, partyRef := range attested {
+		if _, ok := partyByRef(acc.Parties, partyRef); !ok {
+			return Acceptance{}, fmt.Errorf("%w: attested party", ErrInvalid)
+		}
+	}
 	sum := sha256.Sum256(raw)
 	hash := hex.EncodeToString(sum[:])
 	var existing int64
@@ -349,20 +364,15 @@ func (s *Service) RecordExternal(ctx context.Context, actor Actor, projectID, re
 	recip, _ := json.Marshal(sortedUnique(req.RecipientPartyRefs))
 	messageRef := "message_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	now := s.now()
-	res, err := tx.ExecContext(ctx, `INSERT INTO acceptance_email_evidence(
+	if _, err := tx.ExecContext(ctx, `INSERT INTO acceptance_email_evidence(
 		acceptance_id,release_id,acceptance_revision,message_ref,request_key,recipient_party_refs_json,state,source,
 		recorded_at,sent_at,actor_user_id,session_credential_id,attestation,body_sha256,raw_message)
 		VALUES(?,?,?,?,?,?,'sent','external_manual',?,?,?,?,?,?,?)`,
 		acc.ID, acc.Release.ID, acc.Revision, messageRef, req.RequestKey, string(recip), now, now,
-		actor.UserID, actor.SessionCredentialID, strings.TrimSpace(req.Attestation), hash, raw)
-	if err != nil {
+		actor.UserID, actor.SessionCredentialID, strings.TrimSpace(req.Attestation), hash, raw); err != nil {
 		return Acceptance{}, err
 	}
-	_, _ = res.LastInsertId()
-	for _, partyRef := range sortedUnique(req.AttestedPartyRefs) {
-		if _, ok := partyByRef(acc.Parties, partyRef); !ok {
-			return Acceptance{}, fmt.Errorf("%w: attested party", ErrInvalid)
-		}
+	for _, partyRef := range attested {
 		if err := insertConfirmation(ctx, tx, acc, actor, partyRef, SourceExternalEmail, strings.TrimSpace(req.Attestation), now); err != nil {
 			return Acceptance{}, err
 		}
@@ -399,7 +409,7 @@ func (s *Service) SavePreview(ctx context.Context, actor Actor, projectID, relea
 	}
 	subject := strings.TrimSpace(req.Subject)
 	body := strings.TrimSpace(req.Body)
-	if subject == "" || body == "" || len(body) > maxBodyBytes {
+	if subject == "" || body == "" || len(body) > maxBodyBytes || !headerSafe(subject) {
 		return Acceptance{}, fmt.Errorf("%w: reviewable message is required", ErrInvalid)
 	}
 	next := acc.PreviewRevision + 1
@@ -457,7 +467,11 @@ func (s *Service) AuthorizeSend(ctx context.Context, actor Actor, projectID, rel
 	if err := coverKnownParties(acc, req.RecipientPartyRefs); err != nil {
 		return Acceptance{}, err
 	}
-	raw := buildRawMessage(acc, req.RecipientPartyRefs)
+	from := mailer.SenderAddress(s.Mail)
+	if from == "" {
+		return Acceptance{}, fmt.Errorf("%w: operator sender is not configured", ErrUnavailable)
+	}
+	raw := buildRawMessage(acc, req.RecipientPartyRefs, from, s.Clock.Now().UTC(), uuid.NewString())
 	sum := sha256.Sum256(raw)
 	hash := hex.EncodeToString(sum[:])
 	var evidenceID int64
@@ -498,12 +512,26 @@ func (s *Service) AuthorizeSend(ctx context.Context, actor Actor, projectID, rel
 }
 
 func failQueuedMail(ctx context.Context, tx *sql.Tx, outboxID, evidenceID int64, class, now string) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE acceptance_email_evidence SET state='failed' WHERE id=?`, evidenceID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE acceptance_email_evidence SET state='failed' WHERE id=? AND state<>'sent'`, evidenceID); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='failed',last_error_class=?,lease_until=NULL,updated_at=? WHERE id=?`,
+	_, err := tx.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='failed',last_error_class=?,lease_until=NULL,updated_at=? WHERE id=? AND state<>'sent'`,
 		class, now, outboxID)
 	return err
+}
+
+func (s *Service) mailLease() time.Duration {
+	if s.Lease > 0 {
+		return s.Lease
+	}
+	return defaultMailLease
+}
+
+func (s *Service) mailSendTimeout() time.Duration {
+	if s.SendTimeout > 0 {
+		return s.SendTimeout
+	}
+	return defaultSendTimeout
 }
 
 func (s *Service) DrainOnce(ctx context.Context) error {
@@ -512,22 +540,32 @@ func (s *Service) DrainOnce(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	var outboxID, evidenceID, previewRev, authorizedBy int64
-	var attempts int
-	var authCred string
-	err = tx.QueryRowContext(ctx, `SELECT id,evidence_id,attempt_count,preview_revision,authorized_by,session_credential_id
-		FROM acceptance_mail_outbox
-		WHERE state IN ('queued','sending') AND (lease_until IS NULL OR lease_until<=?)
-		ORDER BY id LIMIT 1`, s.now()).Scan(&outboxID, &evidenceID, &attempts, &previewRev, &authorizedBy, &authCred)
+	now := s.now()
+	if err := s.reconcileExpiredSending(ctx, tx, now); err != nil {
+		return err
+	}
+	var outboxID int64
+	err = tx.QueryRowContext(ctx, `SELECT id FROM acceptance_mail_outbox WHERE state='queued' ORDER BY id LIMIT 1`).Scan(&outboxID)
 	if err == sql.ErrNoRows {
 		return tx.Commit()
 	}
 	if err != nil {
 		return err
 	}
-	now := s.now()
-	lease := s.Clock.Now().UTC().Add(15 * time.Second).Format("2006-01-02T15:04:05Z")
-	if _, err := tx.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='sending',lease_until=?,updated_at=? WHERE id=?`, lease, now, outboxID); err != nil {
+	lease := s.Clock.Now().UTC().Add(s.mailLease()).Format(time.RFC3339)
+	res, err := tx.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='sending',attempt_count=attempt_count+1,lease_until=?,updated_at=?
+		WHERE id=? AND state='queued'`, lease, now, outboxID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return tx.Commit()
+	}
+	var evidenceID, previewRev, authorizedBy int64
+	var authCred string
+	if err := tx.QueryRowContext(ctx, `SELECT evidence_id,preview_revision,authorized_by,session_credential_id
+		FROM acceptance_mail_outbox WHERE id=?`, outboxID).Scan(&evidenceID, &previewRev, &authorizedBy, &authCred); err != nil {
 		return err
 	}
 	var raw []byte
@@ -543,10 +581,10 @@ func (s *Service) DrainOnce(ctx context.Context) error {
 		}
 		return tx.Commit()
 	}
-	var liveRev, livePreview int64
+	var liveRev, livePreview, projectID int64
 	var liveStatus string
-	if err := tx.QueryRowContext(ctx, `SELECT revision,preview_revision,status FROM release_acceptances WHERE id=?`, accID).
-		Scan(&liveRev, &livePreview, &liveStatus); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT a.revision,a.preview_revision,a.status,a.project_id FROM release_acceptances a WHERE a.id=?`, accID).
+		Scan(&liveRev, &livePreview, &liveStatus, &projectID); err != nil {
 		return err
 	}
 	if liveStatus == StatusAccepted || liveRev != evidenceRev || livePreview != previewRev {
@@ -555,11 +593,8 @@ func (s *Service) DrainOnce(ctx context.Context) error {
 		}
 		return tx.Commit()
 	}
-	var liveSessions int
-	_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions
-		WHERE credential_id=? AND COALESCE(acting_as_user_id,user_id)=? AND expires_at>datetime('now')`,
-		authCred, authorizedBy).Scan(&liveSessions)
-	if liveSessions == 0 {
+	authorizer := Actor{Kind: string("session"), UserID: authorizedBy, SessionCredentialID: authCred}
+	if _, err := s.currentAuthority(ctx, tx, authorizer, projectID, true); err != nil {
 		if err := failQueuedMail(ctx, tx, outboxID, evidenceID, "smtp_revoked", now); err != nil {
 			return err
 		}
@@ -569,10 +604,27 @@ func (s *Service) DrainOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	for _, addr := range to {
+		if !validEmail(addr) {
+			if err := failQueuedMail(ctx, tx, outboxID, evidenceID, "smtp_rejected", now); err != nil {
+				return err
+			}
+			return tx.Commit()
+		}
+	}
+	from := mailer.SenderAddress(s.Mail)
+	if from == "" {
+		if err := failQueuedMail(ctx, tx, outboxID, evidenceID, "smtp_unconfigured", now); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	sendErr := s.Mail.Send(ctx, mailer.Message{To: to, Raw: raw})
+	sendCtx, cancel := context.WithTimeout(ctx, s.mailSendTimeout())
+	defer cancel()
+	sendErr := s.Mail.Send(sendCtx, mailer.Message{From: from, To: to, Raw: raw})
 	tx2, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -583,7 +635,7 @@ func (s *Service) DrainOnce(ctx context.Context) error {
 		if _, err := tx2.ExecContext(ctx, `UPDATE acceptance_email_evidence SET state='sent',sent_at=? WHERE id=?`, now, evidenceID); err != nil {
 			return err
 		}
-		if _, err := tx2.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='sent',last_error_class='',updated_at=? WHERE id=?`, now, outboxID); err != nil {
+		if _, err := tx2.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='sent',last_error_class='',lease_until=NULL,updated_at=? WHERE id=?`, now, outboxID); err != nil {
 			return err
 		}
 		if err := s.maybeFinalize(ctx, tx2, releaseID); err != nil {
@@ -592,13 +644,36 @@ func (s *Service) DrainOnce(ctx context.Context) error {
 		return tx2.Commit()
 	}
 	class := mailer.ErrorClass(sendErr)
-	if mailer.Retryable(sendErr) {
-		class = "smtp_ambiguous"
-	}
 	if err := failQueuedMail(ctx, tx2, outboxID, evidenceID, class, now); err != nil {
 		return err
 	}
 	return tx2.Commit()
+}
+
+func (s *Service) reconcileExpiredSending(ctx context.Context, tx *sql.Tx, now string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id,evidence_id FROM acceptance_mail_outbox
+		WHERE state='sending' AND (lease_until IS NULL OR lease_until<=?)`, now)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var ids [][2]int64
+	for rows.Next() {
+		var outboxID, evidenceID int64
+		if err := rows.Scan(&outboxID, &evidenceID); err != nil {
+			return err
+		}
+		ids = append(ids, [2]int64{outboxID, evidenceID})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := failQueuedMail(ctx, tx, id[0], id[1], "smtp_ambiguous", now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type PolicyRequest struct {
@@ -625,8 +700,12 @@ func (s *Service) ApprovePolicy(ctx context.Context, actor Actor, projectID int6
 	if _, err := s.currentAuthority(ctx, tx, actor, projectID, true); err != nil {
 		return StandingPolicy{}, err
 	}
-	if !validOpaqueRef(req.PolicyRef) || strings.TrimSpace(req.BoundedUse) == "" || strings.TrimSpace(req.ExpiresAt) == "" {
+	if !validOpaqueRef(req.PolicyRef) || strings.TrimSpace(req.BoundedUse) == "" {
 		return StandingPolicy{}, fmt.Errorf("%w: standing policy", ErrInvalid)
+	}
+	expires, err := parsePolicyExpiry(req.ExpiresAt, s.Clock.Now().UTC())
+	if err != nil {
+		return StandingPolicy{}, err
 	}
 	if len(req.ContentDigest) != 71 || len(req.RevisionSeal) != 71 {
 		return StandingPolicy{}, fmt.Errorf("%w: baseline binding", ErrInvalid)
@@ -641,7 +720,7 @@ func (s *Service) ApprovePolicy(ctx context.Context, actor Actor, projectID int6
 		projectID, req.PolicyRef, actor.UserID, actor.SessionCredentialID, req.ContentDigest, req.RevisionSeal,
 		strings.TrimSpace(req.TargetRef), string(partiesJSON), strings.TrimSpace(req.ModelRef), strings.TrimSpace(req.AgreementRef),
 		string(gapsJSON), strings.TrimSpace(req.ReleaseChannel), strings.TrimSpace(req.ArtifactDigest),
-		strings.TrimSpace(req.BoundedUse), strings.TrimSpace(req.ExpiresAt), now)
+		strings.TrimSpace(req.BoundedUse), expires, now)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return StandingPolicy{}, fmt.Errorf("%w: policy_ref", ErrConflict)
@@ -749,7 +828,7 @@ func (s *Service) ApplyPolicy(ctx context.Context, actor Actor, projectID, relea
 	if err != nil {
 		return Acceptance{}, err
 	}
-	if err := policyMatches(policy, acc, s.Clock.Now().UTC().Format("2006-01-02T15:04:05Z")); err != nil {
+	if err := policyMatches(policy, acc, s.Clock.Now().UTC()); err != nil {
 		return Acceptance{}, err
 	}
 	if policy.RevokedAt != nil {
@@ -816,13 +895,90 @@ func (s *Service) projectAcceptance(ctx context.Context, tx *sql.Tx, projectID, 
 	acc.OfferDisclaimer = OfferDisclaimer
 	acc.Defaults = loadDefaults(ctx, tx, projectID)
 	acc.Missing = computeMissing(acc)
-	for _, e := range acc.EmailEvidence {
-		if e.State == MailFailed {
-			acc.MailRecovery = "Send did not complete. Review the message and authorize a new send. Automatic retry is not used after an uncertain delivery."
-			break
+	annotateProjection(&acc)
+	return acc, nil
+}
+
+func annotateProjection(acc *Acceptance) {
+	names := map[string]string{}
+	for _, p := range acc.Parties {
+		label := strings.TrimSpace(p.DisplayName)
+		if label == "" {
+			label = p.Email
+		}
+		if label == "" {
+			label = p.PartyRef
+		}
+		names[p.PartyRef] = label
+	}
+	for i := range acc.Confirmations {
+		acc.Confirmations[i].PartyName = names[acc.Confirmations[i].PartyRef]
+		acc.Confirmations[i].SourceLabel = sourceLabel(acc.Confirmations[i].Source)
+		if acc.Confirmations[i].AcceptanceRevision == 0 {
+			acc.Confirmations[i].AcceptanceRevision = acc.Revision
 		}
 	}
-	return acc, nil
+	inFlight := false
+	for i := range acc.EmailEvidence {
+		e := &acc.EmailEvidence[i]
+		e.DisplayState = displayMailState(e.State, e.OutboxState, e.LastErrorClass)
+		e.RecipientNames = nil
+		for _, ref := range e.RecipientPartyRefs {
+			e.RecipientNames = append(e.RecipientNames, names[ref])
+		}
+		if e.DisplayState == MailQueued || e.DisplayState == MailSending {
+			inFlight = true
+		}
+		if acc.MailRecovery == "" {
+			acc.MailRecovery = recoveryText(e.DisplayState, e.LastErrorClass)
+		}
+	}
+	acc.MailInFlight = inFlight
+}
+
+func sourceLabel(source string) string {
+	switch source {
+	case SourcePlatform:
+		return "platform confirmation"
+	case SourceExternalEmail:
+		return "attested from recorded email"
+	case SourceStandingPolicy:
+		return "standing policy"
+	default:
+		return source
+	}
+}
+
+func displayMailState(state, outbox, class string) string {
+	if state == MailSent {
+		return MailSent
+	}
+	if class == "smtp_ambiguous" {
+		return MailAmbiguous
+	}
+	if state == MailFailed {
+		return MailFailed
+	}
+	if outbox == MailSending {
+		return MailSending
+	}
+	if outbox == MailQueued || state == MailPending {
+		return MailQueued
+	}
+	return state
+}
+
+func recoveryText(display, class string) string {
+	if display == MailAmbiguous || class == "smtp_ambiguous" {
+		return "Delivery is uncertain. Do not send this message again until it is reconciled. Automatic retry is not used."
+	}
+	if class == "smtp_stale" || class == "smtp_revoked" {
+		return "This queued send is no longer authorized. Review the current acceptance before any new send."
+	}
+	if display == MailFailed || class == "smtp_rejected" || class == "smtp_unconfigured" {
+		return "Send did not complete before the server accepted the message. After fixing transport, authorize a new send with a new request key."
+	}
+	return ""
 }
 
 func loadDefaults(ctx context.Context, tx *sql.Tx, projectID int64) CooperationDefaults {
@@ -924,7 +1080,7 @@ func loadParties(ctx context.Context, tx *sql.Tx, accID, rev int64) ([]Party, er
 }
 
 func loadConfirmations(ctx context.Context, tx *sql.Tx, accID, rev int64) ([]Confirmation, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT party_ref,decision,source,actor_user_id,attestation,confirmed_at
+	rows, err := tx.QueryContext(ctx, `SELECT party_ref,decision,source,actor_user_id,attestation,confirmed_at,acceptance_revision
 		FROM acceptance_confirmations WHERE acceptance_id=? AND acceptance_revision=? ORDER BY id`, accID, rev)
 	if err != nil {
 		return nil, err
@@ -933,7 +1089,7 @@ func loadConfirmations(ctx context.Context, tx *sql.Tx, accID, rev int64) ([]Con
 	out := []Confirmation{}
 	for rows.Next() {
 		var c Confirmation
-		if err := rows.Scan(&c.PartyRef, &c.Decision, &c.Source, &c.ActorUserID, &c.Attestation, &c.ConfirmedAt); err != nil {
+		if err := rows.Scan(&c.PartyRef, &c.Decision, &c.Source, &c.ActorUserID, &c.Attestation, &c.ConfirmedAt, &c.AcceptanceRevision); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -942,7 +1098,7 @@ func loadConfirmations(ctx context.Context, tx *sql.Tx, accID, rev int64) ([]Con
 }
 
 func loadEvidence(ctx context.Context, tx *sql.Tx, accID, rev int64) ([]EmailEvidence, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT e.message_ref,e.acceptance_revision,e.recipient_party_refs_json,e.state,e.source,e.recorded_at,e.sent_at,e.actor_user_id,e.attestation,e.body_sha256,COALESCE(o.last_error_class,'')
+	rows, err := tx.QueryContext(ctx, `SELECT e.message_ref,e.acceptance_revision,e.recipient_party_refs_json,e.state,e.source,e.recorded_at,e.sent_at,e.actor_user_id,e.attestation,e.body_sha256,COALESCE(o.last_error_class,''),COALESCE(o.state,'')
 		FROM acceptance_email_evidence e
 		LEFT JOIN acceptance_mail_outbox o ON o.evidence_id=e.id
 		WHERE e.acceptance_id=? AND e.acceptance_revision=? ORDER BY e.id`, accID, rev)
@@ -954,7 +1110,7 @@ func loadEvidence(ctx context.Context, tx *sql.Tx, accID, rev int64) ([]EmailEvi
 	for rows.Next() {
 		var e EmailEvidence
 		var sent sql.NullString
-		if err := rows.Scan(&e.MessageRef, &e.ReleaseRevision, newJSONScan(&e.RecipientPartyRefs), &e.State, &e.Source, &e.RecordedAt, &sent, &e.ActorUserID, &e.Attestation, &e.BodySHA256, &e.LastErrorClass); err != nil {
+		if err := rows.Scan(&e.MessageRef, &e.ReleaseRevision, newJSONScan(&e.RecipientPartyRefs), &e.State, &e.Source, &e.RecordedAt, &sent, &e.ActorUserID, &e.Attestation, &e.BodySHA256, &e.LastErrorClass, &e.OutboxState); err != nil {
 			return nil, err
 		}
 		if sent.Valid {
@@ -1006,7 +1162,9 @@ func partiesDiffer(ctx context.Context, tx *sql.Tx, accID, rev int64, next []Par
 		if p.UserID != nil {
 			user = *p.UserID
 		}
-		if p.Kind != n.Kind || user != n.UserID || strings.ToLower(strings.TrimSpace(p.Email)) != strings.ToLower(strings.TrimSpace(n.Email)) {
+		if p.Kind != n.Kind || user != n.UserID ||
+			strings.ToLower(strings.TrimSpace(p.Email)) != strings.ToLower(strings.TrimSpace(n.Email)) ||
+			strings.TrimSpace(p.DisplayName) != strings.TrimSpace(n.DisplayName) {
 			return true, nil
 		}
 	}
@@ -1063,6 +1221,9 @@ func (s *Service) validateParties(ctx context.Context, tx *sql.Tx, projectID int
 		}
 		if !validEmail(p.Email) {
 			return fmt.Errorf("%w: party email", ErrInvalid)
+		}
+		if !headerSafe(p.DisplayName) {
+			return fmt.Errorf("%w: party display name", ErrInvalid)
 		}
 		if p.Kind == PartyLinkedUser {
 			if p.UserID <= 0 {
@@ -1184,11 +1345,15 @@ func computeMissing(acc Acceptance) Missing {
 	return missing
 }
 
-func policyMatches(policy StandingPolicy, acc Acceptance, now string) error {
+func policyMatches(policy StandingPolicy, acc Acceptance, now time.Time) error {
 	if policy.RevokedAt != nil {
 		return fmt.Errorf("%w: policy revoked", ErrForbidden)
 	}
-	if policy.ExpiresAt <= now {
+	expires, err := time.Parse(time.RFC3339, policy.ExpiresAt)
+	if err != nil {
+		expires, err = time.Parse(time.RFC3339Nano, policy.ExpiresAt)
+	}
+	if err != nil || !expires.After(now.UTC()) {
 		return fmt.Errorf("%w: policy expired", ErrForbidden)
 	}
 	if policy.ContentDigest != acc.Release.ContentDigest || policy.RevisionSeal != acc.Release.RevisionSeal {
@@ -1205,6 +1370,12 @@ func policyMatches(policy StandingPolicy, acc Acceptance, now string) error {
 	}
 	if policy.ArtifactDigest != "" && policy.ArtifactDigest != acc.Release.ArtifactDigest {
 		return fmt.Errorf("%w: policy artifact drift", ErrStale)
+	}
+	if policy.TargetRef != "" && policy.TargetRef != acc.Release.ArtifactCoordinate {
+		return fmt.Errorf("%w: policy target drift", ErrStale)
+	}
+	if policy.ModelRef != "" && policy.ModelRef != acc.Release.VersionScheme {
+		return fmt.Errorf("%w: policy model drift", ErrStale)
 	}
 	for _, p := range policy.Parties {
 		if !contains(acc.RequiredPartyRefs, p) && !partyListed(acc.Parties, p) {
@@ -1262,17 +1433,39 @@ func recipientsForEvidence(ctx context.Context, tx *sql.Tx, evidenceID int64) ([
 	return to, nil
 }
 
-func buildRawMessage(acc Acceptance, recipients []string) []byte {
+func buildRawMessage(acc Acceptance, recipients []string, from string, now time.Time, id string) []byte {
 	var to []string
 	for _, ref := range recipients {
 		if p, ok := partyByRef(acc.Parties, ref); ok {
-			to = append(to, p.Email)
+			addr, err := mail.ParseAddress(p.Email)
+			if err != nil {
+				continue
+			}
+			to = append(to, addr.Address)
 		}
 	}
-	return []byte("Subject: " + acc.PreviewSubject + "\r\n" +
+	fromAddr := mail.Address{Address: from}
+	host := "localhost"
+	if parsed, err := mail.ParseAddress(from); err == nil {
+		fromAddr = *parsed
+		if i := strings.LastIndex(parsed.Address, "@"); i >= 0 {
+			host = parsed.Address[i+1:]
+		}
+	}
+	msgid := strings.TrimSpace(id)
+	msgid = strings.ReplaceAll(msgid, "<", "")
+	msgid = strings.ReplaceAll(msgid, ">", "")
+	if msgid == "" {
+		msgid = uuid.NewString()
+	}
+	return []byte("From: " + fromAddr.String() + "\r\n" +
+		"Date: " + now.UTC().Format("Mon, 02 Jan 2006 15:04:05 -0700") + "\r\n" +
+		"Message-ID: <" + msgid + "@" + host + ">\r\n" +
+		"Subject: " + mime.QEncoding.Encode("utf-8", acc.PreviewSubject) + "\r\n" +
 		"To: " + strings.Join(to, ", ") + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
 		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"Content-Transfer-Encoding: 8bit\r\n" +
 		"\r\n" + acc.PreviewBody + "\r\n")
 }
 

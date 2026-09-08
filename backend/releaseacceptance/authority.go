@@ -12,7 +12,10 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"net/mail"
 	"strings"
+	"time"
+	"unicode"
 
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/externalstage"
@@ -151,9 +154,47 @@ func validOpaqueRef(v string) bool {
 
 func validEmail(v string) bool {
 	v = strings.TrimSpace(v)
-	at := strings.IndexByte(v, '@')
-	if at < 1 || at >= len(v)-1 || strings.Contains(v, " ") {
+	if v == "" || !headerSafe(v) {
 		return false
 	}
-	return strings.Contains(v[at+1:], ".")
+	addr, err := mail.ParseAddress(v)
+	if err != nil || addr.Address == "" || !headerSafe(addr.Address) {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(addr.Address), v)
+}
+
+func headerSafe(v string) bool {
+	if strings.ContainsAny(v, "\r\n\x00") {
+		return false
+	}
+	for _, r := range v {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func parsePolicyExpiry(raw string, now time.Time) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !headerSafe(raw) {
+		return "", fmt.Errorf("%w: expires_at", ErrInvalid)
+	}
+	var parsed time.Time
+	var err error
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		parsed, err = time.Parse(layout, raw)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return "", fmt.Errorf("%w: expires_at must be RFC3339", ErrInvalid)
+	}
+	parsed = parsed.UTC()
+	if !parsed.After(now.UTC()) {
+		return "", fmt.Errorf("%w: standing policy already expired", ErrInvalid)
+	}
+	return parsed.Format(time.RFC3339), nil
 }
