@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
   -o /paimos . \
   && touch -d "@${SOURCE_DATE_EPOCH}" /paimos
 
-FROM node:22-alpine AS spa-build
+FROM node:24-alpine AS spa-build
 ARG SOURCE_DATE_EPOCH=0
 ENV SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH
 WORKDIR /src

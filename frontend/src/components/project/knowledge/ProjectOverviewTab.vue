@@ -118,7 +118,9 @@ onMounted(() => {
         teammates a quick sense of what this project is for.
       </div>
     </section>
-    <ProjectBaselineBatchSection :project-id="project.id" :can-write="!!canWrite" />
+    <div id="baseline-batch">
+      <ProjectBaselineBatchSection :project-id="project.id" :can-write="!!canWrite" />
+    </div>
     <ProjectReleaseAcceptanceSection :project-id="project.id" :can-write="!!canWrite" />
 
     <div class="pot-grid">

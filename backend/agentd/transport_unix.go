@@ -141,11 +141,38 @@ func transportHandler(supervisor *Supervisor) http.Handler {
 		writeTransportResult(w, session, err)
 	})
 	mux.HandleFunc("POST /v1/sessions/{id}/{operation}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if r.PathValue("operation") == "answer" {
+			var request DecisionAnswer
+			if decodeTransportJSON(w, r, &request) != nil {
+				return
+			}
+			receipt, err := supervisor.Answer(r.Context(), id, request)
+			writeTransportResult(w, receipt, err)
+			return
+		}
+		if r.PathValue("operation") == "inspect" {
+			var request DecisionInspectRequest
+			if decodeTransportJSON(w, r, &request) != nil {
+				return
+			}
+			inspect, err := supervisor.Inspect(r.Context(), id, request)
+			writeTransportResult(w, inspect, err)
+			return
+		}
+		if r.PathValue("operation") == "output" {
+			var request ControlRequest
+			if decodeTransportJSON(w, r, &request) != nil {
+				return
+			}
+			output, err := supervisor.VisibleOutput(r.Context(), id, request)
+			writeTransportResult(w, output, err)
+			return
+		}
 		var request ControlRequest
 		if err := decodeTransportJSON(w, r, &request); err != nil {
 			return
 		}
-		id := r.PathValue("id")
 		switch r.PathValue("operation") {
 		case "steer":
 			receipt, err := supervisor.Steer(r.Context(), id, request)
@@ -209,6 +236,14 @@ func writeTransportResult(w http.ResponseWriter, value any, err error) {
 		status, code = http.StatusTooManyRequests, "control_replay_capacity"
 	case errors.Is(err, ErrAdapterUnsupported), errors.Is(err, ErrCapabilityMissing):
 		status, code = http.StatusUnprocessableEntity, "unsupported"
+	case errors.Is(err, ErrDecisionUnknown):
+		status, code = http.StatusNotFound, "decision_unknown"
+	case errors.Is(err, ErrDecisionMismatch), errors.Is(err, ErrDecisionAuthority):
+		status, code = http.StatusForbidden, "decision_mismatch"
+	case errors.Is(err, ErrDecisionExpired):
+		status, code = http.StatusConflict, "decision_expired"
+	case errors.Is(err, ErrDecisionConsumed):
+		status, code = http.StatusConflict, "decision_consumed"
 	}
 	writeTransportJSON(w, status, map[string]string{"error": code})
 }
@@ -269,6 +304,18 @@ func (c *Client) request(ctx context.Context, method, path string, input, output
 		if problem.Error == "unsupported" {
 			return ErrCapabilityMissing
 		}
+		if problem.Error == "decision_unknown" {
+			return ErrDecisionUnknown
+		}
+		if problem.Error == "decision_mismatch" {
+			return ErrDecisionMismatch
+		}
+		if problem.Error == "decision_expired" {
+			return ErrDecisionExpired
+		}
+		if problem.Error == "decision_consumed" {
+			return ErrDecisionConsumed
+		}
 		return fmt.Errorf("agentd request failed with HTTP %d", response.StatusCode)
 	}
 	return json.NewDecoder(io.LimitReader(response.Body, maxTransportBody+1)).Decode(output)
@@ -307,6 +354,21 @@ func (c *Client) QueueRetention(ctx context.Context, id string, request ControlR
 func (c *Client) ResumeQueue(ctx context.Context, id string, request ControlRequest) (Receipt, error) {
 	var out Receipt
 	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/resume-queue", request, &out)
+	return out, err
+}
+func (c *Client) Answer(ctx context.Context, id string, request DecisionAnswer) (Receipt, error) {
+	var out Receipt
+	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/answer", request, &out)
+	return out, err
+}
+func (c *Client) Inspect(ctx context.Context, id string, request DecisionInspectRequest) (DecisionInspect, error) {
+	var out DecisionInspect
+	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/inspect", request, &out)
+	return out, err
+}
+func (c *Client) VisibleOutput(ctx context.Context, id string, request ControlRequest) (VisibleOutput, error) {
+	var out VisibleOutput
+	err := c.request(ctx, http.MethodPost, "/v1/sessions/"+id+"/output", request, &out)
 	return out, err
 }
 
