@@ -4119,7 +4119,7 @@
           "expected_plan_revision": {"type": "integer", "format": "int64", "minimum": 1},
           "expected_implementation_execution": {"type": "integer", "format": "int64", "minimum": 0, "description": "0 with a paired 0 authority epoch means no current implementation execution."},
           "expected_implementation_authority_epoch": {"type": "integer", "format": "int64", "minimum": 0},
-          "expected_account_key": {"type": "string", "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", "description": "Required for automatic API-key receipts; must match the stored worker account."},
+          "expected_account_key": {"type": "string", "maxLength": 128, "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", "description": "For automatic API-key receipts, must equal the stored worker account. Omitted or empty only when review stored a validated class-only scope; named accounts still require the matching key."},
           "expected_runtime_generation": {"type": "string", "format": "uuid", "description": "Required for automatic API-key receipts; must match the stored worker runtime generation."},
           "commit": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
           "oci_config_digest": {"$ref": "#/components/schemas/BaselineBatchDigestHex"},
@@ -8948,7 +8948,7 @@
       "post": {
         "tags": ["baseline-batches"],
         "summary": "Record typed implementation and scoped QA on a baseline batch",
-        "description": "Project-editor mutation. Browser callers use a live non-impersonated session cookie plus CSRF. Automatic batches may instead use a live bearer API key whose owner is the start confirmer, with agent-controls:write, matching expected_account_key and expected_runtime_generation. Manual and assisted receipts require the human session; API keys are refused. Exact same-body replay returns 200 only when the payload and live authority still match; a changed payload on the same idempotency key is 409. Unknown and duplicate JSON fields are rejected before any StartStageRetry. Body max 65536 bytes. This route never exposes generic ReportStage, never PATCHes /runs, never starts deployment, and never mints handoff secrets. Authenticated reported evidence, not cryptographic proof a test ran.",
+        "description": "Project-editor mutation. Browser callers use a live non-impersonated session cookie plus CSRF. Automatic batches may instead use a live bearer API key whose owner is the start confirmer, with agent-controls:write, matching expected_runtime_generation and the stored worker account (expected_account_key omitted only for a validated class-only scope). Manual and assisted receipts require the human session; API keys are refused. Exact same-body replay returns 200 only when the payload and live authority still match; a changed payload on the same idempotency key is 409. Unknown and duplicate JSON fields are rejected before any StartStageRetry. Body max 65536 bytes. This route never exposes generic ReportStage, never PATCHes /runs, never starts deployment, and never mints handoff secrets. Authenticated reported evidence, not cryptographic proof a test ran.",
         "security": [{"sessionCookie": []}, {"bearerAPIKey": []}],
         "parameters": [
           {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},

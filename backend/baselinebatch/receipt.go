@@ -153,8 +153,11 @@ func (s *Service) authorizeReceipt(ctx context.Context, tx *sql.Tx, actor Actor,
 			if actor.UserID != stored.StartedBy {
 				return fmt.Errorf("%w: automatic receipt is bound to the start confirmer", ErrForbidden)
 			}
-			if strings.TrimSpace(req.ExpectedAccountKey) == "" || strings.TrimSpace(req.ExpectedRuntimeGeneration) == "" {
+			if strings.TrimSpace(req.ExpectedRuntimeGeneration) == "" {
 				return fmt.Errorf("%w: automatic receipt requires the selected worker account and runtime generation", ErrForbidden)
+			}
+			if strings.TrimSpace(req.ExpectedAccountKey) != stored.Worker.AccountKey {
+				return fmt.Errorf("%w: selected worker account", ErrForbidden)
 			}
 		default:
 			return fmt.Errorf("%w: current editor session or scoped api key required", ErrForbidden)
