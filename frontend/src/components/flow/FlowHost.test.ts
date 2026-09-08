@@ -4,6 +4,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineComponent, h, nextTick } from 'vue'
 
 import { permissionsEpoch, sessionExpired } from '@/api/client'
@@ -141,6 +144,49 @@ describe('Flow host UI', () => {
     await nextTick()
     expect(getFlowHostState).not.toHaveBeenCalled()
     expect(mounted.el.querySelector('inspr-flow-shell')).toBeNull()
+    await mounted.unmount()
+  })
+
+  it('keeps bounded footer reservation in host integration CSS', () => {
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), 'FlowHost.vue'),
+      'utf8',
+    )
+    expect(source).toMatch(/\.paimos-flow-host[\s\S]*padding-bottom:\s*var\(--shell-footer-space\)/)
+  })
+
+  it('keeps host footer slots mounted under bounded shell with App-level padding reset', async () => {
+    const reset = document.createElement('style')
+    reset.textContent = '*, *::before, *::after { margin: 0; padding: 0; }'
+    document.head.appendChild(reset)
+
+    getFlowHostState.mockResolvedValue(usableState())
+    const mounted = await mountComponent(
+      FlowHost,
+      { projectId: 9 },
+      {
+        default: () =>
+          h('div', [
+            h('div', { id: 'project-footer-slot', class: 'project-footer-slot' }),
+            h('footer', { class: 'habitat-footer' }, [
+              h('a', { href: '/legacy' }, 'Classic workspace'),
+              h('a', { href: '/settings' }, 'Settings'),
+              h('a', { href: '/sessions' }, 'Product sessions'),
+            ]),
+          ]),
+      },
+    )
+    await vi.waitFor(() => expect(getFlowHostState).toHaveBeenCalledWith(9))
+
+    const shell = mounted.el.querySelector('inspr-flow-shell')
+    const flowBody = mounted.el.querySelector('.paimos-flow-body')
+    expect(shell).not.toBeNull()
+    expect(shell?.classList.contains('paimos-flow-host')).toBe(true)
+    expect(shell?.getAttribute('layout-mode')).toBe('bounded')
+    expect(flowBody?.querySelector('#project-footer-slot')).not.toBeNull()
+    expect(flowBody?.querySelector('footer.habitat-footer')).not.toBeNull()
+
+    reset.remove()
     await mounted.unmount()
   })
 })

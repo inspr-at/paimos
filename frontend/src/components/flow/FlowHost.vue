@@ -140,6 +140,7 @@ async function onFlowIntent(event: Event) {
   flex: 1;
   min-height: 0;
   min-width: 0;
+  padding-bottom: var(--shell-footer-space);
 }
 .paimos-flow-toolbar,
 .paimos-flow-body {
