@@ -32,7 +32,7 @@ func schemaNames(t *testing.T, database *sql.DB, query string) []string {
 	return names
 }
 
-const latestSchemaVersion = 184
+const latestSchemaVersion = 186
 
 func TestMigration177PreservesAttentionLedgerAndSequence(t *testing.T) {
 	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "m177.db")+"?_txlock=immediate")
@@ -1882,5 +1882,35 @@ func TestMigration160IndexesMutationLogParentWithoutChangingRows(t *testing.T) {
 	var violations int
 	if err := database.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&violations); err != nil || violations != 0 {
 		t.Fatalf("foreign-key violations=%d err=%v", violations, err)
+	}
+}
+
+func TestMigration185ReleaseAcceptanceTables(t *testing.T) {
+	database := openTestDB(t)
+	for _, table := range []string{
+		"release_records",
+		"release_acceptances",
+		"acceptance_parties",
+		"acceptance_confirmations",
+		"acceptance_email_evidence",
+		"acceptance_mail_outbox",
+		"acceptance_standing_policies",
+	} {
+		if !tableExists(t, database, table) {
+			t.Fatalf("M185 table %s missing", table)
+		}
+	}
+}
+
+func TestMigration186AcceptanceTargetBindings(t *testing.T) {
+	database := openTestDB(t)
+	if !tableExists(t, database, "acceptance_target_bindings") {
+		t.Fatal("M186 table acceptance_target_bindings missing")
+	}
+	if !columnExists(t, database, "acceptance_target_bindings", "target_ref") {
+		t.Fatal("M186 target_ref missing")
+	}
+	if !columnExists(t, database, "acceptance_target_bindings", "registration_id") {
+		t.Fatal("M186 registration_id missing")
 	}
 }

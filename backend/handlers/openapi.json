@@ -108,6 +108,10 @@
     {
       "name": "baseline-batches",
       "description": "Opt-in INSPR baseline-batch stream, including the typed built-receipt producer for implementation and QA"
+    },
+    {
+      "name": "release-acceptance",
+      "description": "Release-specific go-live acceptance and email evidence. Consent and send authorization require a live human session; API keys cannot consent. Deployment completion is distinct from acceptance."
     }
   ],
   "components": {
@@ -9097,6 +9101,270 @@
           "404": {"description": "Unknown project or batch.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "409": {"description": "Conflict, stale CAS, cancelled/paused batch, or non-matching replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "503": {"description": "Delivery or storage unavailable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/api/projects/{id}/release-records": {
+      "get": {
+        "tags": ["release-acceptance"],
+        "summary": "List release records for a project",
+        "description": "Live human session with project view. Lists minted release records bound to baseline batches. Does not list issue-type release labels.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+        "responses": {
+          "200": {"description": "Release records."},
+          "401": {"description": "Authentication required."},
+          "404": {"description": "Unknown project."}
+        }
+      }
+    },
+    "/api/projects/{id}/baseline-batches/batches/{batchID}/release-record": {
+      "get": {
+        "tags": ["release-acceptance"],
+        "summary": "Get the release record minted from a baseline batch",
+        "description": "Live human session with project view. Returns the acceptance projection for the unique release bound to this batch.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "batchID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {"description": "Acceptance projection."},
+          "401": {"description": "Authentication required."},
+          "404": {"description": "Unknown project, batch, or release."}
+        }
+      },
+      "post": {
+        "tags": ["release-acceptance"],
+        "summary": "Mint a release record from a built-receipt artifact",
+        "description": "Live non-impersonated human session with project edit. Idempotent on (project, batch). Requires an actual built-receipt artifact. Never starts deployment and never treats minting as acceptance. API keys cannot mint.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "batchID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {"description": "Minted or existing release acceptance projection."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Not a current human editor."},
+          "404": {"description": "Unknown project or batch."},
+          "409": {"description": "Built receipt artifact missing or incomplete."}
+        }
+      }
+    },
+    "/api/projects/{id}/release-records/{releaseID}/acceptance": {
+      "get": {
+        "tags": ["release-acceptance"],
+        "summary": "Get release acceptance projection",
+        "description": "Live human session with project view, including portal viewers on the portal routes. Returns parties, confirmations, email evidence, missing steps, and disclosed gaps.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "releaseID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {"description": "Acceptance projection."},
+          "401": {"description": "Authentication required."},
+          "404": {"description": "Unknown project or release."}
+        }
+      },
+      "put": {
+        "tags": ["release-acceptance"],
+        "summary": "Configure operating arrangement, parties, and disclosed gaps",
+        "description": "Live non-impersonated human session with project edit. Binding changes bump the acceptance revision and drop stale confirmations, preview, and send authorization. CSRF required. API keys cannot configure.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "releaseID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object"}}}},
+        "responses": {
+          "200": {"description": "Updated acceptance projection."},
+          "400": {"description": "Invalid configuration."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Not a current human editor."},
+          "409": {"description": "Stale revision or already accepted."}
+        }
+      }
+    },
+    "/api/projects/{id}/release-records/{releaseID}/acceptance/confirm": {
+      "post": {
+        "tags": ["release-acceptance"],
+        "summary": "Confirm own linked party acceptance",
+        "description": "Live non-impersonated human session with project view. A linked party may confirm only their own party. API keys, agents, and impersonation cannot consent. CSRF required.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "releaseID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["party_ref"], "properties": {"party_ref": {"type": "string"}, "attestation": {"type": "string"}}}}}},
+        "responses": {
+          "200": {"description": "Updated acceptance projection."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Wrong party or not a current human."},
+          "409": {"description": "Already accepted."}
+        }
+      }
+    },
+    "/api/projects/{id}/release-records/{releaseID}/acceptance/email/preview": {
+      "post": {
+        "tags": ["release-acceptance"],
+        "summary": "Save a reviewable acceptance message",
+        "description": "Live non-impersonated human session with project edit. CSRF required. API keys cannot author the message.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "releaseID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["subject", "body"], "properties": {"subject": {"type": "string"}, "body": {"type": "string"}}}}}},
+        "responses": {
+          "200": {"description": "Updated acceptance projection."},
+          "400": {"description": "Message missing."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Not a current human editor."}
+        }
+      }
+    },
+    "/api/projects/{id}/release-records/{releaseID}/acceptance/email/authorize-send": {
+      "post": {
+        "tags": ["release-acceptance"],
+        "summary": "Authorize sending the reviewed acceptance email",
+        "description": "Live non-impersonated human session with project edit and explicit confirm_send. CSRF required. API keys cannot authorize mail. Unconfigured SMTP leaves evidence pending or failed, never sent. SMTP success is transport evidence, not recipient consent.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "releaseID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object"}}}},
+        "responses": {
+          "200": {"description": "Updated acceptance projection."},
+          "400": {"description": "Missing confirm_send or preview."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Not a current human editor."},
+          "409": {"description": "Stale preview revision."}
+        }
+      }
+    },
+    "/api/projects/{id}/release-records/{releaseID}/acceptance/email/record-external": {
+      "post": {
+        "tags": ["release-acceptance"],
+        "summary": "Record a manually received acceptance email",
+        "description": "Live non-impersonated human session with project edit. CSRF required. Recipients of a recorded message are not consent. attested_party_refs require explicit confirm_attest on the same acceptance revision and never default from the recipient list. Attribution is the recording human; this is attestation, not verified sender identity. Remote HTML content is rejected.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "releaseID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object"}}}},
+        "responses": {
+          "200": {"description": "Updated acceptance projection."},
+          "400": {"description": "Missing evidence or remote content."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Not a current human editor."}
+        }
+      }
+    },
+    "/api/projects/{id}/release-records/{releaseID}/acceptance/evidence": {
+      "get": {
+        "tags": ["release-acceptance"],
+        "summary": "Export acceptance evidence",
+        "description": "Live human session with project view. format=json|eml|html. Evidence stays authorization-checked. HTML is escaped and does not load remote content.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "releaseID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "format", "in": "query", "schema": {"type": "string", "enum": ["json", "eml", "html"]}}
+        ],
+        "responses": {
+          "200": {"description": "Exported evidence."},
+          "401": {"description": "Authentication required."},
+          "404": {"description": "Unknown project or release."}
+        }
+      }
+    },
+    "/api/projects/{id}/release-records/{releaseID}/acceptance/deployment-target": {
+      "post": {
+        "tags": ["release-acceptance"],
+        "summary": "Bind an exact deployment target to this release",
+        "description": "Live non-impersonated human session with project edit. CSRF required. Existence of a Pharos owner environment or a sole project environment is not selection. The bound identity includes registration or environment row id, delivery/attempt generation, and created_at so same-name retargeting, revocation, and generation changes invalidate standing policy. No fallback across namespaces.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "releaseID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["kind"], "properties": {
+          "kind": {"type": "string", "enum": ["pharos_owner", "project_environment"]},
+          "registration_id": {"type": "integer", "format": "int64", "minimum": 1},
+          "environment_id": {"type": "integer", "format": "int64", "minimum": 1}
+        }}}}},
+        "responses": {
+          "200": {"description": "Updated acceptance projection with the bound target identity."},
+          "400": {"description": "Unknown or unusable target."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Not a current human editor."}
+        }
+      }
+    },
+    "/api/projects/{id}/acceptance-standing-policies": {
+      "get": {
+        "tags": ["release-acceptance"],
+        "summary": "List customer-operated standing policies",
+        "description": "Live human session with project view. Standing policy is never inferred from cooperation notes.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+        "responses": {
+          "200": {"description": "Standing policies."},
+          "401": {"description": "Authentication required."}
+        }
+      },
+      "post": {
+        "tags": ["release-acceptance"],
+        "summary": "Approve a customer-operated standing policy",
+        "description": "Live non-impersonated human session with project edit. CSRF required. Customer-operated only. Does not authorize future email sends. target_ref is the provenance digest of an explicitly bound deployment target for this baseline. model_ref is the customer-operated arrangement. Names, artifact coordinates, and inferred sole environments are refused.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object"}}}},
+        "responses": {
+          "200": {"description": "Approved policy."},
+          "400": {"description": "Invalid policy."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Not a current human editor."}
+        }
+      }
+    },
+    "/api/projects/{id}/acceptance-standing-policies/{policyID}/revoke": {
+      "post": {
+        "tags": ["release-acceptance"],
+        "summary": "Revoke a standing policy",
+        "description": "Live non-impersonated human session with project edit. CSRF required.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "policyID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {"description": "Revoked policy."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Not a current human editor."}
+        }
+      }
+    },
+    "/api/projects/{id}/release-records/{releaseID}/acceptance/apply-policy": {
+      "post": {
+        "tags": ["release-acceptance"],
+        "summary": "Apply a standing policy to the current actor's own party",
+        "description": "Live non-impersonated human session with project view. Confirms only the current actor's listed party when the policy still matches. Does not send mail. Drift, expiry, revocation, unknown deployment target, or agency modes force fresh confirmation.",
+        "security": [{"sessionCookie": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},
+          {"name": "releaseID", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["policy_id"], "properties": {"policy_id": {"type": "integer"}}}}}},
+        "responses": {
+          "200": {"description": "Updated acceptance projection."},
+          "401": {"description": "Authentication required."},
+          "403": {"description": "Policy does not cover this party or mode."},
+          "409": {"description": "Policy drift."}
         }
       }
     }

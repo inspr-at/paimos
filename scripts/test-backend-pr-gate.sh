@@ -182,6 +182,7 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/lifecycleclient \
   github.com/inspr-at/paimos/backend/lifecycleintents \
   github.com/inspr-at/paimos/backend/managedharness \
+  github.com/inspr-at/paimos/backend/releaseacceptance \
   github.com/inspr-at/paimos/backend/supervision \
   github.com/inspr-at/paimos/backend/workerfleet)
 [[ "$db_affected" == "$db_expected" ]] ||
@@ -333,20 +334,50 @@ fi
 if "$RACE_RUNNER" --dry-run --lane=handlers --shard=0/4 github.com/inspr-at/paimos/backend/handlers >/dev/null 2>&1; then
   fail 'handler race lane accepts a drifted shard count'
 fi
+HANDLER_RACE_MATCH='^Test.*(Concurrent|Concurrency|Race|Atomic|BatchesReleaseWriter|RacedPoke).*$'
+HANDLER_RACE_GROUP_SIZE=4
+handler_listed_names=()
+while IFS= read -r name; do
+  handler_listed_names+=("$name")
+done < <(discover_test_names_ordered ./handlers "$HANDLER_RACE_MATCH")
+handler_expected_order=
+handler_expected_groups=0
 for shard in 0 1 2 3 4; do
+  shard_names=()
+  for ((index = shard; index < ${#handler_listed_names[@]}; index += 5)); do
+    shard_names+=("${handler_listed_names[$index]}")
+  done
+  (( ${#shard_names[@]} > 0 )) || fail "handler race shard $shard is empty"
+  shard_groups=$(( (${#shard_names[@]} + HANDLER_RACE_GROUP_SIZE - 1) / HANDLER_RACE_GROUP_SIZE ))
+  handler_expected_groups=$((handler_expected_groups + shard_groups))
   plan=$("$RACE_RUNNER" --dry-run --lane=handlers --shard="$shard/5" github.com/inspr-at/paimos/backend/handlers)
-  [[ "$(grep -c '^go test -race .* ./handlers -run ' <<<"$plan")" -eq 1 ]] ||
-    fail "handler race shard $shard does not own exactly one invocation"
-  [[ "$(printf '%s\n' "$plan" | rg -o 'Test[A-Za-z0-9_]+' | wc -l | tr -d ' ')" -gt 0 ]] ||
-    fail "handler race shard $shard is empty"
+  [[ "$(grep -c '^go test -race -count=1 -timeout=8m ./handlers -run ' <<<"$plan")" -eq "$shard_groups" ]] ||
+    fail "handler race shard $shard did not retain $shard_groups bounded groups"
+  shard_plan=$(grep '^go test -race .* ./handlers -run ' <<<"$plan")
+  group_index=0
+  while IFS= read -r group_line; do
+    group_count=$(plan_test_names_ordered "$group_line" | wc -l | tr -d ' ')
+    (( group_count >= 1 && group_count <= HANDLER_RACE_GROUP_SIZE )) ||
+      fail "handler shard $shard group $group_index has $group_count tests, want 1-$HANDLER_RACE_GROUP_SIZE"
+    group_index=$((group_index + 1))
+  done <<<"$shard_plan"
+  [[ "$group_index" -eq "$shard_groups" ]] ||
+    fail "handler shard $shard emitted $group_index groups, want $shard_groups"
+  handler_expected_order+="$(printf '%s\n' "${shard_names[@]}")"$'\n'
   handler_race_plan+="$plan"$'\n'
 done
 [[ "$handler_race_plan" == *'Concurrent'* && "$handler_race_plan" != *'TestRegression_'* && "$handler_race_plan" != *'TestAuthzFuzz_'* ]] ||
   fail 'handler race plan is not limited to concurrency contracts'
-[[ "$(grep -c '^go test -race .* ./handlers -run ' <<<"$handler_race_plan")" -eq 5 ]] ||
-  fail 'handler concurrency race does not have five independently runnable shards'
+[[ "$(grep -c '^go test -race .* ./handlers -run ' <<<"$handler_race_plan")" -eq "$handler_expected_groups" ]] ||
+  fail 'handler concurrency race omitted or duplicated a bounded group'
 assert_plan_covers_discovery_once 'handler concurrency race' "$handler_race_plan" ./handlers \
-  '^Test.*(Concurrent|Concurrency|Race|Atomic|BatchesReleaseWriter|RacedPoke).*$'
+  "$HANDLER_RACE_MATCH"
+[[ "$(plan_test_names_ordered "$handler_race_plan")" == "$(printf '%s' "$handler_expected_order")" ]] ||
+  fail 'handler grouped race plan changed discovery order, uniqueness, or round-robin assignment'
+handler_all_plan=$("$RACE_RUNNER" --dry-run --lane=all github.com/inspr-at/paimos/backend/handlers)
+[[ "$(grep -c '^go test -race -count=1 -timeout=8m ./handlers -run ' <<<"$handler_all_plan")" -eq "$handler_expected_groups" ]] ||
+  fail "all-lane handler race did not retain all $handler_expected_groups bounded invocations"
+assert_plan_covers_discovery_once 'all handler race' "$handler_all_plan" ./handlers "$HANDLER_RACE_MATCH"
 if GO_COMMAND="$FIXTURES/unsafe-go-list.sh" "$RACE_RUNNER" --dry-run --lane=handlers \
   --shard=0/5 github.com/inspr-at/paimos/backend/handlers >/dev/null 2>&1; then
   fail 'handler race sharder filtered an unsafe discovered test name instead of failing closed'
@@ -523,7 +554,7 @@ assert_plan_covers_discovery_once 'all lifecycle race' "$lifecycle_all_plan" ./l
 # Keep every discovered test on the existing four runners and split each
 # runner into sequential groups of four (~346s vs 480s on hosted timings).
 MIGRATION_RACE_GROUP_SIZE=4
-for sharded in delivery baselinebatch; do
+for sharded in delivery baselinebatch releaseacceptance; do
   package="./$sharded"
   import="github.com/inspr-at/paimos/backend/$sharded"
   sharded_race_plan=

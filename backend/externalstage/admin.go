@@ -372,6 +372,29 @@ const registrationSelect = `SELECT id,reporter_id,api_key_id,reporter_class,repo
 	COALESCE(workflow_symbol,''),COALESCE(environment_symbol,''),allow_deployment,allow_verification,
 	allow_authorization,allow_credential_handoff,created_at,COALESCE(revoked_at,'') FROM external_stage_reporter_registrations `
 
+// CurrentReporterAuthoritySQL is the owning-domain liveness predicate for a
+// reporter registration row aliased as `registration`: live non-disabled
+// non-expired API key, active non-external user role, and current project
+// membership. ListReporters and Pharos target binding must use this exact
+// fragment rather than a weaker copy.
+const CurrentReporterAuthoritySQL = `EXISTS(SELECT 1 FROM api_keys api_key JOIN external_stage_user_roles reporter_user
+ ON reporter_user.id=api_key.user_id AND reporter_user.status='active' WHERE api_key.id=registration.api_key_id
+ AND api_key.user_id=registration.user_id AND api_key.disabled_at IS NULL
+ AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
+ AND reporter_user.effective_role<>'external'
+ AND (reporter_user.effective_role IN ('admin','super_admin') OR EXISTS(SELECT 1 FROM project_members membership
+  WHERE membership.user_id=reporter_user.id AND membership.project_id=registration.project_id AND membership.access_level IN ('viewer','editor')) OR
+  (reporter_user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
+   WHERE membership.user_id=reporter_user.id AND membership.project_id=registration.project_id))))`
+
+// LivePharosOwnerSQL is the current Pharos owner that may bind a deployment
+// target. Alias the registration row as `registration`.
+const LivePharosOwnerSQL = `registration.reporter_class='pharos' AND registration.reporter_role='owner'
+ AND registration.revoked_at IS NULL AND registration.allow_deployment=1 AND registration.dependency_key IS NULL
+ AND EXISTS(SELECT 1 FROM delivery_reporters reporter WHERE reporter.id=registration.reporter_id
+  AND reporter.delivery_id=registration.delivery_id AND reporter.reporter_type='external')
+ AND ` + CurrentReporterAuthoritySQL
+
 func (s *Service) RegisterReporter(ctx context.Context, p Principal, deliveryKey, idempotencyKey string, req RegisterReporterRequest) (ReporterRegistration, error) {
 	if _, _, _, err := principalColumns(p); err != nil {
 		return ReporterRegistration{}, err
@@ -462,15 +485,7 @@ func (s *Service) ListReporters(ctx context.Context, p Principal, deliveryKey st
 		return ReporterRegistrationList{}, err
 	}
 	rows, err := tx.QueryContext(ctx, registrationSelect+`registration WHERE registration.delivery_id=? AND registration.project_id=?
-		AND registration.revoked_at IS NULL AND EXISTS(SELECT 1 FROM api_keys api_key JOIN external_stage_user_roles reporter_user
-		 ON reporter_user.id=api_key.user_id AND reporter_user.status='active' WHERE api_key.id=registration.api_key_id
-		 AND api_key.user_id=registration.user_id AND api_key.disabled_at IS NULL
-		 AND (api_key.expires_at IS NULL OR julianday(api_key.expires_at)>julianday('now'))
-		 AND reporter_user.effective_role<>'external'
-		 AND (reporter_user.effective_role IN ('admin','super_admin') OR EXISTS(SELECT 1 FROM project_members membership
-		  WHERE membership.user_id=reporter_user.id AND membership.project_id=registration.project_id AND membership.access_level IN ('viewer','editor')) OR
-		  (reporter_user.effective_role='member' AND NOT EXISTS(SELECT 1 FROM project_members membership
-		   WHERE membership.user_id=reporter_user.id AND membership.project_id=registration.project_id)))) ORDER BY registration.id`, deliveryID, projectID)
+		AND registration.revoked_at IS NULL AND `+CurrentReporterAuthoritySQL+` ORDER BY registration.id`, deliveryID, projectID)
 	if err != nil {
 		return ReporterRegistrationList{}, err
 	}

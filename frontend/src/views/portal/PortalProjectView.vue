@@ -27,6 +27,7 @@ import { useI18n } from 'vue-i18n'
 import { api, errMsg } from '@/api/client'
 import { useBranding } from '@/composables/useBranding'
 import IssueList from '@/components/IssueList.vue'
+import PortalReleaseAcceptanceSection from '@/components/portal/PortalReleaseAcceptanceSection.vue'
 import { useIssueQuery } from '@/composables/useIssueQuery'
 import { createPortalFetcher } from '@/composables/issueQueryFetchers'
 import { provideIssueContext } from '@/composables/useIssueContext'
@@ -502,6 +503,8 @@ async function submitRequest() {
         <span class="pv__stat-label">{{ $t('portal.tabs.review') }}</span>
       </div>
     </div>
+
+    <PortalReleaseAcceptanceSection v-if="project" :project-id="project.id" />
 
     <!-- Filter card — PAI-474/476: tag filter stays disabled for customers;
          the shared IssueList renders the table and portal side panel. -->

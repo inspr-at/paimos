@@ -239,7 +239,12 @@ run_package() {
       run_race ./db '^TestM147ConcurrentRuntimeAcceptanceHasOneEffectOwnerProductionPool$'
       ;;
     ./handlers)
-      run_race_shards ./handlers '^Test.*(Concurrent|Concurrency|Race|Atomic|BatchesReleaseWriter|RacedPoke).*$' 5
+      # Hosted PR 247 backend-pr-handlers-race(0) exhausted 8m on a six-test
+      # shard: the new Concurrent HTTP export/confirm test shifted an Atomic
+      # contract onto shard 0. Each oracle still rebuilds the migration chain
+      # (~50-87s hosted). Keep the five matrix runners and split each shard
+      # into sequential groups of four so every race contract still runs.
+      run_race_shards ./handlers '^Test.*(Concurrent|Concurrency|Race|Atomic|BatchesReleaseWriter|RacedPoke).*$' 5 4
       ;;
     ./cmd/paimos)
       run_race ./cmd/paimos '^(TestRunnerControlFakeAdapterConformance|TestRunnerControlJournalSerializesPumpAndResultWriters|TestHTTPRunnerReportTransportSerializesConcurrentSequence|TestAgentRunner.*Conflict.*)$'
@@ -294,6 +299,14 @@ run_package() {
       # group of four is ~346s vs 480s. Keep every test; do not raise timeout.
       run_race_shards ./baselinebatch '^(Test|Fuzz)' 4 4
       ;;
+    ./releaseacceptance)
+      # Every release-acceptance fixture rebuilds the complete migration chain.
+      # Hosted PR 247 backend-pr-race(0) exhausted 8m on the unsharded package
+      # while TestRevokedSessionCannotConfirm was 54s into openFixture
+      # (migrateThrough ~169/186). Same ~50-87s/test hosted cost as delivery;
+      # groups of four stay under 480s. Keep every test; do not raise timeout.
+      run_race_shards ./releaseacceptance '^(Test|Fuzz)' 4 4
+      ;;
     ./managedharness)
       # Every managed-harness test rebuilds the complete SQLite migration chain.
       # Keep PR race instrumentation on the package's actual concurrency and
@@ -321,7 +334,8 @@ run_selected_package() {
         if [[ "$import_path" == "$MODULE" ||
               "$import_path" == "$MODULE/lifecycleintents" ||
               "$import_path" == "$MODULE/delivery" ||
-              "$import_path" == "$MODULE/baselinebatch" ]] || (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
+              "$import_path" == "$MODULE/baselinebatch" ||
+              "$import_path" == "$MODULE/releaseacceptance" ]] || (( affected_index % SELECTED_SHARD_COUNT == SELECTED_SHARD )); then
           run_package "$import_path"
         fi
         affected_index=$((affected_index + 1))

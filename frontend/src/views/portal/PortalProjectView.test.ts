@@ -41,6 +41,10 @@ vi.mock('@/components/IssueList.vue', () => ({
   },
 }))
 
+vi.mock('@/components/portal/PortalReleaseAcceptanceSection.vue', () => ({
+  default: { props: ['projectId'], template: '<div class="portal-release-stub" />' },
+}))
+
 function makeIssue(id: number) {
   return {
     id,
