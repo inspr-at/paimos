@@ -181,6 +181,7 @@ db_expected=$(printf '%s\n' \
   github.com/inspr-at/paimos/backend/lifecycleclient \
   github.com/inspr-at/paimos/backend/lifecycleintents \
   github.com/inspr-at/paimos/backend/managedharness \
+  github.com/inspr-at/paimos/backend/releaseacceptance \
   github.com/inspr-at/paimos/backend/supervision \
   github.com/inspr-at/paimos/backend/workerfleet)
 [[ "$db_affected" == "$db_expected" ]] ||

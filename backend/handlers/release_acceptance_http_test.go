@@ -223,6 +223,87 @@ func TestReleaseAcceptanceHTTPMintConfirmPortalAndSend(t *testing.T) {
 	}
 }
 
+func TestReleaseAcceptanceHTTPExportKeepsMaliciousInputInert(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Accept XSS", "key": "ACX"}))
+	memberID, externalID := seedAcceptancePeople(t, projectID)
+	acc := mintFromBuiltReceipt(t, ts, projectID)
+
+	body := configureBody(memberID, externalID, acc.Revision, releaseacceptance.ModeAgencySupported)
+	body["agreement_ref"] = "SOW <script>alert(1)</script>"
+	body["disclosed_gaps"] = []map[string]string{{
+		"gap_ref": "gap_backup", "statement": `<img src=x onerror=alert(1)> restore gap`,
+	}}
+	parties := body["parties"].([]map[string]any)
+	parties[0]["display_name"] = `Customer <img src="https://evil.example" onerror="alert(1)">`
+	cfg := putAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance", projectID, acc.Release.ID), body)
+	if cfg.StatusCode != 200 {
+		t.Fatalf("configure=%d %s", cfg.StatusCode, baselineReadBody(cfg))
+	}
+	cfg.Body.Close()
+
+	preview := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/email/preview", projectID, acc.Release.ID),
+		map[string]any{"subject": `Accept <script>alert(1)</script>`, "body": `<img src="https://evil.example" onerror="alert(1)"> and text`})
+	if preview.StatusCode != 200 {
+		t.Fatalf("preview=%d %s", preview.StatusCode, baselineReadBody(preview))
+	}
+	preview.Body.Close()
+
+	htmlResp := ts.get(t, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/evidence?format=html", projectID, acc.Release.ID), ts.adminCookie)
+	htmlBody := readEvidenceExport(t, htmlResp, "text/html")
+	if htmlResp.Header.Get("Content-Security-Policy") != "default-src 'none'" {
+		t.Fatalf("html csp=%q", htmlResp.Header.Get("Content-Security-Policy"))
+	}
+	if strings.Contains(htmlBody, "<script>") || strings.Contains(htmlBody, "<img") ||
+		strings.Contains(htmlBody, `src="https://evil.example"`) {
+		t.Fatalf("html still contains raw markup: %s", htmlBody)
+	}
+	if !strings.Contains(htmlBody, "&lt;script&gt;") || !strings.Contains(htmlBody, "&lt;img") {
+		t.Fatalf("html missing escapes: %s", htmlBody)
+	}
+
+	jsonResp := ts.get(t, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/evidence?format=json", projectID, acc.Release.ID), ts.adminCookie)
+	jsonBody := readEvidenceExport(t, jsonResp, "application/json")
+	if strings.Contains(jsonBody, "&lt;script&gt;") {
+		t.Fatalf("json HTML-escaped stored text: %s", jsonBody)
+	}
+	var exported releaseacceptance.Acceptance
+	if err := json.Unmarshal([]byte(jsonBody), &exported); err != nil {
+		t.Fatalf("json unmarshal: %v %s", err, jsonBody)
+	}
+	if exported.AgreementRef != "SOW <script>alert(1)</script>" {
+		t.Fatalf("json agreement=%q", exported.AgreementRef)
+	}
+	if exported.PreviewSubject != "Accept <script>alert(1)</script>" {
+		t.Fatalf("json subject=%q", exported.PreviewSubject)
+	}
+
+	eml := ts.get(t, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/evidence?format=eml", projectID, acc.Release.ID), ts.adminCookie)
+	_ = readEvidenceExport(t, eml, "message/rfc822")
+}
+
+func readEvidenceExport(t *testing.T, resp *http.Response, wantType string) string {
+	t.Helper()
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("export %s status=%d %s", wantType, resp.StatusCode, raw)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, wantType) {
+		t.Fatalf("export %s content-type=%q", wantType, got)
+	}
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("export %s missing nosniff", wantType)
+	}
+	if resp.Header.Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("export %s cache-control=%q", wantType, resp.Header.Get("Cache-Control"))
+	}
+	return string(raw)
+}
+
 func TestReleaseAcceptanceHTTPRejectsKeysImpersonationRevokedAndCrossProject(t *testing.T) {
 	ts := newTestServer(t)
 	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Accept deny", "key": "ACD"}))

@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/inspr-at/paimos/backend/auth"
@@ -295,7 +296,12 @@ func releaseAcceptanceEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if strings.HasPrefix(ct, "text/html") {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	}
 	w.WriteHeader(http.StatusOK)
+	// #nosec G705 -- JSON and message/rfc822 are non-HTML content types; HTML interpolates only html.EscapeString values and is served with nosniff plus default-src 'none'.
 	_, _ = w.Write(body)
 }
 

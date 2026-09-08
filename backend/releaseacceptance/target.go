@@ -27,6 +27,16 @@ const (
 	targetUnknownGeneration = "bound delivery or attempt generation no longer matches this release"
 	targetUnknownChanged    = "bound project environment identity changed or is missing"
 	targetUnknownProvenance = "bound deployment target provenance no longer matches"
+
+	livePharosIdentitySQL = `SELECT registration.delivery_id, COALESCE(registration.workflow_symbol,''), COALESCE(registration.environment_symbol,''),
+		registration.created_at, registration.api_key_id, registration.user_id, registration.reporter_id, registration.allow_deployment
+		FROM external_stage_reporter_registrations registration
+		WHERE registration.id=? AND registration.project_id=? AND ` + externalstage.LivePharosOwnerSQL
+
+	livePharosCandidatesSQL = `SELECT registration.id, COALESCE(registration.workflow_symbol,''), COALESCE(registration.environment_symbol,'')
+		FROM external_stage_reporter_registrations registration
+		WHERE registration.delivery_id=? AND registration.project_id=? AND ` + externalstage.LivePharosOwnerSQL + `
+		ORDER BY registration.id`
 )
 
 type TargetCandidate struct {
@@ -156,10 +166,7 @@ func loadPharosIdentity(ctx context.Context, tx *sql.Tx, rel ReleaseRecord, regi
 	}
 	var workflow, env, created string
 	var regDelivery, apiKeyID, userID, reporterID, allowDeployment int64
-	err = tx.QueryRowContext(ctx, `SELECT registration.delivery_id, COALESCE(registration.workflow_symbol,''), COALESCE(registration.environment_symbol,''),
-		registration.created_at, registration.api_key_id, registration.user_id, registration.reporter_id, registration.allow_deployment
-		FROM external_stage_reporter_registrations registration
-		WHERE registration.id=? AND registration.project_id=? AND `+externalstage.LivePharosOwnerSQL,
+	err = tx.QueryRowContext(ctx, livePharosIdentitySQL,
 		registrationID, rel.ProjectID).Scan(&regDelivery, &workflow, &env, &created, &apiKeyID, &userID, &reporterID, &allowDeployment)
 	if err == sql.ErrNoRows {
 		return targetIdentity{}, fmt.Errorf("%w: pharos owner registration", ErrInvalid)
@@ -341,10 +348,7 @@ func listTargetCandidates(ctx context.Context, tx *sql.Tx, rel ReleaseRecord) []
 	out := []TargetCandidate{}
 	deliveryID, _, err := batchDelivery(ctx, tx, rel.ProjectID, rel.BatchID)
 	if err == nil && deliveryID > 0 {
-		rows, qerr := tx.QueryContext(ctx, `SELECT registration.id, COALESCE(registration.workflow_symbol,''), COALESCE(registration.environment_symbol,'')
-			FROM external_stage_reporter_registrations registration
-			WHERE registration.delivery_id=? AND registration.project_id=? AND `+externalstage.LivePharosOwnerSQL+`
-			ORDER BY registration.id`, deliveryID, rel.ProjectID)
+		rows, qerr := tx.QueryContext(ctx, livePharosCandidatesSQL, deliveryID, rel.ProjectID)
 		if qerr == nil {
 			for rows.Next() {
 				var id int64
