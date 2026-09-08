@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/lifecyclefence"
 	"github.com/inspr-at/paimos/backend/managedharness"
 	"github.com/inspr-at/paimos/backend/models"
 )
@@ -769,5 +771,17 @@ func TestLifecycleExpiredClaimDoesNotPoisonExplicitFreshRequest(t *testing.T) {
 	old, e := f.s.Get(ctx, f.human, f.project, old.ID)
 	if e != nil || old.State != "expired" || old.Reason != "outcome_unknown" {
 		t.Fatal("expiry lost ambiguous original outcome")
+	}
+}
+
+func TestListOwnedRuntimeSessionsSQLKeepsOwnershipFence(t *testing.T) {
+	if !strings.Contains(listOwnedRuntimeSessionsSQL, lifecyclefence.OwnershipSQLRuntimeS) {
+		t.Fatal("projection query lost ownership fence")
+	}
+	if !strings.Contains(listOwnedRuntimeSessionsSQL, "runtime.registration_json") {
+		t.Fatal("missing runtime alias")
+	}
+	if !strings.Contains(listOwnedRuntimeSessionsSQL, "s.account_label") {
+		t.Fatal("missing session alias")
 	}
 }

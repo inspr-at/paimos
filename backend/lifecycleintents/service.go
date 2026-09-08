@@ -14,13 +14,33 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
-	"github.com/inspr-at/paimos/backend/lifecyclefence"
 	"github.com/inspr-at/paimos/backend/managedharness"
 )
 
 // Serialize this low-volume authority across HTTP Service instances. SQLite
 // constraints and transaction CAS remain authoritative across server restarts.
 var mutationMu sync.Mutex
+
+var listOwnedRuntimeSessionsSQL = `SELECT own.session_id,own.generation,s.workspace_identity FROM lifecycle_runtime_sessions own JOIN harness_sessions s ON s.id=own.session_id JOIN lifecycle_runtimes runtime ON runtime.id=own.runtime_id WHERE own.runtime_id=? AND s.project_id=? AND s.management_mode='managed' AND s.host=? AND (CASE
+ WHEN CAST(json_extract(runtime.registration_json,'$.schema_version') AS INTEGER)=3 THEN CASE WHEN EXISTS(
+  SELECT 1 FROM json_each(runtime.registration_json,'$.account_scopes') AS scope
+  WHERE json_extract(scope.value,'$.account_label')=s.account_label
+   AND (
+    (COALESCE(json_array_length(json_extract(scope.value,'$.accounts')),0)=0 AND COALESCE(s.account_key,'')='')
+    OR EXISTS(
+     SELECT 1 FROM json_each(scope.value,'$.accounts') AS account
+     WHERE json_extract(account.value,'$.key')=s.account_key
+      AND COALESCE(s.account_key,'')<>''
+    )
+   )
+   AND EXISTS(
+    SELECT 1 FROM json_each(scope.value,'$.profiles') AS profile
+    WHERE json_extract(profile.value,'$.id')=s.dispatch_profile_id
+     AND json_extract(profile.value,'$.version')=s.dispatch_profile_version
+   )
+ ) THEN 1 ELSE 0 END
+ WHEN json_extract(runtime.registration_json,'$.account_label')=s.account_label THEN 1
+ ELSE 0 END) ORDER BY own.session_id LIMIT 128`
 
 type Service struct {
 	db  *sql.DB
@@ -219,7 +239,7 @@ func (s *Service) runtime(ctx context.Context, tx *sql.Tx, project int64, id str
 		return Runtime{}, ErrUnavailable
 	}
 	out := runtimeProjection(id, project, in, deadline)
-	rows, err := tx.QueryContext(ctx, `SELECT own.session_id,own.generation,s.workspace_identity FROM lifecycle_runtime_sessions own JOIN harness_sessions s ON s.id=own.session_id JOIN lifecycle_runtimes runtime ON runtime.id=own.runtime_id WHERE own.runtime_id=? AND s.project_id=? AND s.management_mode='managed' AND s.host=? AND `+lifecyclefence.RuntimeSessionOwnershipSQL("runtime", "s")+` ORDER BY own.session_id LIMIT 128`, id, project, out.MachineID)
+	rows, err := tx.QueryContext(ctx, listOwnedRuntimeSessionsSQL, id, project, out.MachineID)
 	if err != nil {
 		return Runtime{}, ErrStorage
 	}

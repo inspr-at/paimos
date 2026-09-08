@@ -6,12 +6,14 @@ package managedharness
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/lifecyclefence"
 	"github.com/inspr-at/paimos/backend/models"
 )
 
@@ -336,5 +338,25 @@ func TestBrowserMessageTextPreservesMultilineAndRejectsControls(t *testing.T) {
 		if validBrowserMessageText(value) {
 			t.Fatalf("unsafe text accepted: %q", value)
 		}
+	}
+}
+
+func TestBrowserTargetQueriesKeepOwnershipFence(t *testing.T) {
+	for name, query := range map[string]string{
+		"simple": browserTargetQuerySimple,
+		"steer":  browserTargetQuerySteer,
+	} {
+		if !strings.Contains(query, lifecyclefence.OwnershipSQLRuntimeHarness) {
+			t.Fatalf("%s query lost ownership fence", name)
+		}
+		if !strings.Contains(query, "harness.account_label") {
+			t.Fatalf("%s query missing session alias", name)
+		}
+	}
+	if !strings.Contains(browserTargetQuerySimple, browserTargetLevelSimple) {
+		t.Fatal("simple query lost level guard")
+	}
+	if !strings.Contains(browserTargetQuerySteer, browserTargetLevelSteer) {
+		t.Fatal("steer query lost level guard")
 	}
 }
