@@ -6,34 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
-
-	appdb "github.com/inspr-at/paimos/backend/db"
 )
-
-func openDeliveryTestDB(t *testing.T) *sql.DB {
-	t.Helper()
-	oldDir, oldMode := os.Getenv("DATA_DIR"), os.Getenv("PAIMOS_TEST_MODE")
-	if err := os.Setenv("DATA_DIR", t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Setenv("PAIMOS_TEST_MODE", "1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := appdb.Open(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = appdb.DB.Close()
-		appdb.DB = nil
-		_ = os.Setenv("DATA_DIR", oldDir)
-		_ = os.Setenv("PAIMOS_TEST_MODE", oldMode)
-	})
-	return appdb.DB
-}
 
 func seedDeliveryIssue(t *testing.T, database *sql.DB) (issueID, projectID, userID int64) {
 	t.Helper()
