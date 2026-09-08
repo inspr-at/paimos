@@ -55,6 +55,47 @@ func TestStandaloneDualWriteAndDualRead(t *testing.T) {
 	}
 }
 
+func TestCookieSecurityFlags(t *testing.T) {
+	publicbase.SetCurrent("")
+	t.Cleanup(func() { publicbase.SetCurrent("") })
+	originalCookieSecure := cookieSecure
+	t.Cleanup(func() { cookieSecure = originalCookieSecure })
+
+	for _, tc := range []struct {
+		name   string
+		secure bool
+	}{
+		{name: "local HTTP", secure: false},
+		{name: "HTTPS deployment", secure: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cookieSecure = tc.secure
+			rec := httptest.NewRecorder()
+			setSessionCookieValue(rec, "sid", time.Now().Add(time.Hour))
+			SetCSRFCookie(rec, "csrf")
+			setShortCookie(rec, oidcStateCookie, legacyOIDCStateCookie, "state")
+
+			cookies := make(map[string]*http.Cookie)
+			for _, cookie := range rec.Result().Cookies() {
+				cookies[cookie.Name] = cookie
+			}
+			assertCookieSecurityFlags(t, cookies[sessionCookie], true, http.SameSiteLaxMode, tc.secure)
+			assertCookieSecurityFlags(t, cookies[CSRFCookieName], false, http.SameSiteStrictMode, tc.secure)
+			assertCookieSecurityFlags(t, cookies[oidcStateCookie], true, http.SameSiteLaxMode, tc.secure)
+		})
+	}
+}
+
+func assertCookieSecurityFlags(t *testing.T, cookie *http.Cookie, httpOnly bool, sameSite http.SameSite, secure bool) {
+	t.Helper()
+	if cookie == nil {
+		t.Fatal("cookie was not written")
+	}
+	if cookie.Path != "/" || cookie.HttpOnly != httpOnly || cookie.SameSite != sameSite || cookie.Secure != secure {
+		t.Fatalf("cookie %q security flags: Path=%q HttpOnly=%t SameSite=%d Secure=%t", cookie.Name, cookie.Path, cookie.HttpOnly, cookie.SameSite, cookie.Secure)
+	}
+}
+
 func TestSharedOriginRejectsGenericCookiesAndDoesNotWriteThem(t *testing.T) {
 	prefix, err := publicbase.Parse("/paimos")
 	if err != nil {
