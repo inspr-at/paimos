@@ -273,6 +273,24 @@ func (c *Client) doMultipartFile(path, fieldName, filePath string) ([]byte, erro
 	return c.doRequest(req)
 }
 
+var errMalformedJSON = errors.New("response JSON is malformed")
+
+// getJSON is the shared authenticated GET used by friendly-start and
+// runtime readiness probes. It never sends write attribution.
+func (c *Client) getJSON(ctx context.Context, path string, out any) error {
+	if c == nil {
+		return errors.New("client is unavailable")
+	}
+	raw, err := c.doForAgentContext(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return err
+	}
+	if json.Unmarshal(raw, out) != nil {
+		return errMalformedJSON
+	}
+	return nil
+}
+
 func (c *Client) doDownload(path string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
 	if err != nil {

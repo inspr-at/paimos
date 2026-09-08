@@ -792,6 +792,9 @@ copyable status/message/steer/interrupt/stop commands for supported capabilities
 Message and steer commands submit canonical message deliveries through the separate
 runtime-owned receiver target/listener. Typed browser lifecycle intents remain a
 distinct control path; public registration alone does not prove delivery readiness.
+Sender registration and the exact receiver allowlist are separate readiness layers
+from generation start and from optional fallback; start does not infer them from a
+parent or PID, and it does not grant a sender.
 A local ID or vendor session reference never substitutes for a public session ID.
 `--wait` bounds registration waiting (default 10s, maximum 30s); missing evidence
 returns `unknown` and a nonzero exit, and a terminal generation is not reported

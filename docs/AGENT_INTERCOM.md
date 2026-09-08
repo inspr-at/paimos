@@ -332,9 +332,21 @@ the binding CAS on completion before the daemon mirrors it locally. `repair`
 performs a fresh reporter pass or bounded listener repair for the selected project.
 It does not restart arbitrary processes.
 
-Primary ordinary messages and controls work after native managed registration.
-Optional simple fallback and root attention require a one-time target binding for
-the new owned vendor generation. After a successful friendly `worker start` or
+Native managed registration proves the owned generation and its harness control
+capabilities. It does not prove that this attributed sender can already deliver
+ordinary messages. Friendly start reads the canonical project-agent registry and,
+when the public API exposes it, exact receiver allowlist metadata. Those layers
+are independent of process startup and of optional fallback. Ready, missing
+registration or grant, and unavailable, stale, or unknown evidence are reported
+separately. A parent session, running PID, or successful spawn is not a grant.
+Unknown caller attribution stays unknown. When both identities are authoritative
+and the exact grant is missing, start may suggest one reviewed
+`paimos message allow <sender-address> --project <key> --for <receiver-address>`
+command. It never auto-grants, uses wildcards, impersonates a parent, replaces
+existing targets, releases held history, or bypasses action-request review.
+
+Optional simple fallback and root attention remain a separate one-time target
+binding for the new owned vendor generation. After a successful friendly `worker start` or
 `orchestrator start`, the `receiver-setup` next command is a scoped pipe from
 `paimos-agentd receiver-reference` directly into the existing
 `paimos message target set --target-ref-file - --role simple_fallback

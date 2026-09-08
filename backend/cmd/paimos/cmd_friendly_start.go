@@ -50,15 +50,16 @@ type friendlyStartPlan struct {
 }
 
 type friendlyStartResult struct {
-	Outcome         string             `json:"outcome"`
-	State           string             `json:"generation_state"`
-	PublicSessionID string             `json:"public_session_id,omitempty"`
-	PublicPhase     string             `json:"public_phase,omitempty"`
-	Replayed        bool               `json:"replayed,omitempty"`
-	Plan            *friendlyStartPlan `json:"plan,omitempty"`
-	Commands        map[string]string  `json:"commands,omitempty"`
-	Reason          string             `json:"reason,omitempty"`
-	Key             string             `json:"idempotency_key,omitempty"`
+	Outcome         string                      `json:"outcome"`
+	State           string                      `json:"generation_state"`
+	PublicSessionID string                      `json:"public_session_id,omitempty"`
+	PublicPhase     string                      `json:"public_phase,omitempty"`
+	Replayed        bool                        `json:"replayed,omitempty"`
+	Plan            *friendlyStartPlan          `json:"plan,omitempty"`
+	Commands        map[string]string           `json:"commands,omitempty"`
+	Reason          string                      `json:"reason,omitempty"`
+	Key             string                      `json:"idempotency_key,omitempty"`
+	Readiness       *friendlyMessagingReadiness `json:"readiness,omitempty"`
 }
 
 type friendlyDaemon interface {
@@ -121,7 +122,7 @@ func friendlyStartCmd(coordinator bool) *cobra.Command {
 			if result.Reason != "" {
 				fmt.Fprintln(stdout, result.Reason)
 			}
-			for _, name := range []string{"status", "message", "steer", "interrupt", "stop", "doctor"} {
+			for _, name := range []string{"status", "message", "allow", "steer", "interrupt", "stop", "doctor"} {
 				if line := result.Commands[name]; line != "" {
 					fmt.Fprintf(stdout, "%s: %s\n", name, line)
 				}
@@ -217,12 +218,11 @@ func validateFriendlyStart(o friendlyStartOptions) error {
 }
 
 func friendlyRead(ctx context.Context, client *Client, path string, out any) error {
-	raw, err := client.doForAgentContext(ctx, http.MethodGet, path, nil, "")
-	if err != nil {
+	if err := client.getJSON(ctx, path, out); err != nil {
+		if errors.Is(err, errMalformedJSON) {
+			return errors.New("authority returned malformed data; no start was attempted")
+		}
 		return fmt.Errorf("required authority read failed for %s; verify instance authentication and project access", strings.Split(path, "?")[0])
-	}
-	if json.Unmarshal(raw, out) != nil {
-		return errors.New("authority returned malformed data; no start was attempted")
 	}
 	return nil
 }
@@ -467,7 +467,7 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 					}
 				}
 			}
-			return friendlyReplayCommands(result, client, o), err
+			return friendlyReplayCommands(ctx, result, client, o), err
 		}
 	}
 	resolvedWorkspace, err := filepath.EvalSymlinks(o.Workspace)
@@ -502,7 +502,7 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 	result := friendlyStartResult{Outcome: "unknown", State: "unknown", Plan: &plan, Key: o.Key, Reason: "Start outcome is uncertain. Inspect runtime doctor and harness list; do not issue a fresh start key until reconciled."}
 	if err := reserveFriendlyStartRecord(ledgerDir, o.Key, fingerprint, result); err != nil {
 		if previous, found, readErr := readFriendlyStartRecord(ledgerDir, o.Key, fingerprint); readErr == nil && found {
-			return friendlyReplayCommands(previous, client, o), nil
+			return friendlyReplayCommands(ctx, previous, client, o), nil
 		}
 		return friendlyStartResult{}, err
 	}
@@ -576,23 +576,8 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 	}
 	result.PublicSessionID = public.ID
 	result.PublicPhase = public.Phase
-	var targetInventory struct {
-		Targets []struct {
-			Address, Adapter, Role string
-			Enabled                bool
-		} `json:"targets"`
-	}
-	freeReceiverSlot := false
-	if friendlyRead(ctx, client, fmt.Sprintf("/api/projects/%d/message-targets?address=%s", public.ProjectID, url.QueryEscape(session.Identity)), &targetInventory) == nil {
-		freeReceiverSlot = true
-		for _, target := range targetInventory.Targets {
-			if target.Address != session.Identity || target.Enabled && (target.Role == "simple_fallback" || target.Role == "primary" && target.Adapter != "managed_harness") {
-				freeReceiverSlot = false
-			}
-		}
-	}
+	freeReceiverSlot, _ := friendlyReceiverSlot(ctx, client, public.ProjectID, session.Identity)
 	result.Commands = friendlyStartCommands(client.identity.Name, o, plan, public, session, freeReceiverSlot)
-	result.Reason = "Public registration verified. Generation state is the observed daemon state, not proof of task completion. Ordinary messages and controls use the automatic owned primary inbox. Optional simple fallback and root attention require the reviewed receiver-setup action."
 	result.Outcome = "started"
 	if friendlyTerminal(session.State) || public.Phase == "stopped" {
 		result.Outcome = "failed"
@@ -600,6 +585,7 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 	if result.State == "unknown" {
 		result.Outcome = "unknown"
 	}
+	result = friendlyApplyMessaging(ctx, client, o, result, public, session, false)
 	if result.State == "unknown" || public.ActivityState == "unknown" {
 		result.Reason += " Activity may be unknown until fresh evidence arrives."
 	}
@@ -608,11 +594,11 @@ func runFriendlyStart(ctx context.Context, o friendlyStartOptions) (friendlyStar
 
 // A cached start outcome is immutable, while a receiver slot can change later.
 // Never replay an old mutating setup suggestion without a new target review.
-func friendlyReplayCommands(result friendlyStartResult, client *Client, o friendlyStartOptions) friendlyStartResult {
+func friendlyReplayCommands(ctx context.Context, result friendlyStartResult, client *Client, o friendlyStartOptions) friendlyStartResult {
 	if result.Commands != nil {
 		result.Commands["receiver-setup"] = friendlyCLIBase(client) + " runtime handoff --project " + shellQuote(o.Project)
 	}
-	return result
+	return friendlyApplyMessaging(ctx, client, o, result, models.HarnessSession{ID: result.PublicSessionID, ProjectID: 0}, agentd.Session{}, true)
 }
 
 func friendlyTerminal(state agentd.SessionState) bool {

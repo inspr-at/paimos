@@ -32,6 +32,7 @@ func TestAgentIntercomRunbookUsesShippedCLI(t *testing.T) {
 		{[]string{"project", "show"}, nil},
 		{[]string{"session", "start"}, []string{"project", "agent"}},
 		{[]string{"tell"}, []string{"project", "level", "message"}},
+		{[]string{"message", "allow"}, []string{"project", "for"}},
 		{[]string{"listen"}, []string{"as", "project", "follow", "deliver"}},
 		{[]string{"message", "target", "set"}, []string{"project", "address", "adapter", "kind", "maximum-level", "role", "target-ref-file"}},
 		{[]string{"message", "target", "list"}, []string{"project", "address"}},
