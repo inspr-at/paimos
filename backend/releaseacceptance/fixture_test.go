@@ -11,6 +11,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -75,13 +78,90 @@ type fixture struct {
 	viewerID   int64
 }
 
+func restoreEnv(key, prev string) {
+	if prev == "" {
+		_ = os.Unsetenv(key)
+		return
+	}
+	_ = os.Setenv(key, prev)
+}
+
+var (
+	schemaSnapshotOnce sync.Once
+	schemaSnapshotPath string
+	schemaSnapshotErr  error
+)
+
+func migratedSchemaSnapshot() (string, error) {
+	schemaSnapshotOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "paimos-ra-schema-")
+		if err != nil {
+			schemaSnapshotErr = err
+			return
+		}
+		prevDir := os.Getenv("DATA_DIR")
+		prevMode := os.Getenv("PAIMOS_TEST_MODE")
+		if schemaSnapshotErr = os.Setenv("DATA_DIR", dir); schemaSnapshotErr != nil {
+			return
+		}
+		if schemaSnapshotErr = os.Setenv("PAIMOS_TEST_MODE", "1"); schemaSnapshotErr != nil {
+			restoreEnv("DATA_DIR", prevDir)
+			return
+		}
+		defer func() {
+			restoreEnv("DATA_DIR", prevDir)
+			restoreEnv("PAIMOS_TEST_MODE", prevMode)
+			if appdb.DB != nil {
+				_ = appdb.DB.Close()
+				appdb.DB = nil
+			}
+		}()
+		if err := appdb.Open(); err != nil {
+			schemaSnapshotErr = err
+			return
+		}
+		snap := filepath.Join(dir, "schema-snapshot.db")
+		quoted := "'" + strings.ReplaceAll(snap, "'", "''") + "'"
+		// #nosec G202 -- snap is a MkdirTemp path owned by this process; not user input.
+		if _, err := appdb.DB.Exec(`VACUUM INTO ` + quoted); err != nil {
+			schemaSnapshotErr = err
+			return
+		}
+		schemaSnapshotPath = snap
+	})
+	return schemaSnapshotPath, schemaSnapshotErr
+}
+
+func cloneMigratedSchema(destDir string) error {
+	src, err := migratedSchemaSnapshot()
+	if err != nil {
+		return err
+	}
+	in, err := os.Open(src) // #nosec G304 -- src is the process-local migrated test snapshot.
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(filepath.Join(destDir, brand.Default.DBFilename), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
 func openFixture(t *testing.T) *fixture {
 	t.Helper()
-	t.Setenv("DATA_DIR", t.TempDir())
+	dir := t.TempDir()
+	t.Setenv("DATA_DIR", dir)
 	t.Setenv("PAIMOS_TEST_MODE", "1")
 	prevFrom := brand.Default.EmailFrom
 	brand.Default.EmailFrom = "paimos@example.test"
 	t.Cleanup(func() { brand.Default.EmailFrom = prevFrom })
+	if err := cloneMigratedSchema(dir); err != nil {
+		t.Fatal(err)
+	}
 	if err := appdb.Open(); err != nil {
 		t.Fatal(err)
 	}
@@ -352,4 +432,27 @@ func (f *fixture) mint() Acceptance {
 		f.t.Fatal(err)
 	}
 	return acc
+}
+
+func TestFixtureSnapshotClonesStayIsolated(t *testing.T) {
+	t.Run("mutate", func(t *testing.T) {
+		f := openFixture(t)
+		if _, err := appdb.DB.Exec(`UPDATE projects SET name='mutated-acceptance' WHERE id=?`, f.projectID); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("fresh", func(t *testing.T) {
+		f := openFixture(t)
+		var name string
+		if err := appdb.DB.QueryRow(`SELECT name FROM projects WHERE id=?`, f.projectID).Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		if name != "Accept" {
+			t.Fatalf("fresh clone reused prior fixture rows: %q", name)
+		}
+		var versions int
+		if err := appdb.DB.QueryRow(`SELECT COUNT(*) FROM schema_versions`).Scan(&versions); err != nil || versions < 180 {
+			t.Fatalf("cloned schema versions=%d err=%v", versions, err)
+		}
+	})
 }
