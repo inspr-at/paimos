@@ -5,6 +5,7 @@ package agentd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -232,19 +233,60 @@ func parseCursorStatusIdentity(output []byte) (email, userID string, ok bool) {
 		Status          string `json:"status"`
 		IsAuthenticated bool   `json:"isAuthenticated"`
 		UserInfo        *struct {
-			Email  string `json:"email"`
-			UserID string `json:"userId"`
+			Email  string          `json:"email"`
+			UserID json.RawMessage `json:"userId"`
 		} `json:"userInfo"`
 	}
 	if json.Unmarshal(output, &status) != nil || status.Status != "authenticated" || !status.IsAuthenticated || status.UserInfo == nil {
 		return "", "", false
 	}
 	email = strings.TrimSpace(status.UserInfo.Email)
-	userID = strings.TrimSpace(status.UserInfo.UserID)
 	if !validExpectedEmail(email) {
 		return "", "", false
 	}
+	userID, idOK := parseCursorUserID(status.UserInfo.UserID)
+	if !idOK {
+		return "", "", false
+	}
 	return email, userID, true
+}
+
+func parseCursorUserID(raw json.RawMessage) (string, bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return "", true
+	}
+	if raw[0] == '"' {
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			return "", false
+		}
+		value = strings.TrimSpace(value)
+		if !validCursorUserID(value) {
+			return "", false
+		}
+		return value, true
+	}
+	if !canonicalPositiveDecimalID(raw) {
+		return "", false
+	}
+	id := string(raw)
+	if !validCursorUserID(id) {
+		return "", false
+	}
+	return id, true
+}
+
+func canonicalPositiveDecimalID(raw []byte) bool {
+	if len(raw) == 0 || len(raw) > 128 || raw[0] == '0' {
+		return false
+	}
+	for _, b := range raw {
+		if b < '0' || b > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func verifyCursorAccountIdentity(output []byte, expected cursorAccount) error {
@@ -252,7 +294,7 @@ func verifyCursorAccountIdentity(output []byte, expected cursorAccount) error {
 	if !ok || !strings.EqualFold(email, expected.email) {
 		return errors.New("managed account identity could not be verified")
 	}
-	if expected.userID != "" && userID != expected.userID {
+	if expected.userID != "" && (userID == "" || userID != expected.userID) {
 		return errors.New("managed account identity could not be verified")
 	}
 	return nil

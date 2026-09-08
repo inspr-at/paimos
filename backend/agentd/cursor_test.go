@@ -48,8 +48,13 @@ func newTestCursorAdapter(t *testing.T, mode string) (*CursorAdapter, *[]string)
 
 func cursorTestRegistry(t *testing.T) CursorAccountRegistry {
 	t.Helper()
+	return cursorTestRegistryWithUserID(t, "")
+}
+
+func cursorTestRegistryWithUserID(t *testing.T, userID string) CursorAccountRegistry {
+	t.Helper()
 	raw, err := json.Marshal(cursorAccountRegistryFile{Accounts: []cursorAccountRegistryEntry{
-		{Key: "operator-cursor", Email: "cursor-operator@example.invalid"},
+		{Key: "operator-cursor", Email: "cursor-operator@example.invalid", UserID: userID},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +67,7 @@ func cursorTestRegistry(t *testing.T) CursorAccountRegistry {
 }
 
 func cursorAuthenticatedStatusJSON() []byte {
-	return []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid"}}`)
+	return []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid","userId":9007199254740993}}`)
 }
 
 func cursorOwnedStart(t *testing.T, profile dispatchprofile.Profile) StartRequest {
@@ -410,6 +415,115 @@ func TestCursorStartRefusesLoggedInShapedAndMismatchedIdentity(t *testing.T) {
 	_, err = adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
 	if err == nil || !strings.Contains(err.Error(), "managed account identity could not be verified") {
 		t.Fatalf("mismatch err=%v", err)
+	}
+}
+
+func TestParseCursorStatusIdentityAcceptsNativeIntegerUserID(t *testing.T) {
+	native := cursorAuthenticatedStatusJSON()
+	email, userID, ok := parseCursorStatusIdentity(native)
+	if !ok || email != "cursor-operator@example.invalid" || userID != "9007199254740993" {
+		t.Fatalf("native identity email=%q userID=%q ok=%t", email, userID, ok)
+	}
+	if err := verifyCursorAccountIdentity(native, cursorAccount{email: "cursor-operator@example.invalid"}); err != nil {
+		t.Fatalf("email-only registry refused native integer userId: %v", err)
+	}
+	largerThanInt64 := []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid","userId":9223372036854775808}}`)
+	_, userID, ok = parseCursorStatusIdentity(largerThanInt64)
+	if !ok || userID != "9223372036854775808" {
+		t.Fatalf("int64 overflow identity userID=%q ok=%t", userID, ok)
+	}
+	stringID := []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid","userId":"usr_fixture"}}`)
+	_, userID, ok = parseCursorStatusIdentity(stringID)
+	if !ok || userID != "usr_fixture" {
+		t.Fatalf("string identity userID=%q ok=%t", userID, ok)
+	}
+	missing := []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid"}}`)
+	_, userID, ok = parseCursorStatusIdentity(missing)
+	if !ok || userID != "" {
+		t.Fatalf("missing optional identity userID=%q ok=%t", userID, ok)
+	}
+}
+
+func TestParseCursorStatusIdentityRejectsAmbiguousUserIDs(t *testing.T) {
+	prefix := `{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid","userId":`
+	for _, raw := range []string{`{}`, `[]`, `true`, `1.5`, `1.0`, `1e2`, `-3`, `+3`, `01`, `0`, `" "`} {
+		output := []byte(prefix + raw + `}}`)
+		if _, _, ok := parseCursorStatusIdentity(output); ok {
+			t.Fatalf("accepted ambiguous userId %s", raw)
+		}
+		if err := verifyCursorAccountIdentity(output, cursorAccount{email: "cursor-operator@example.invalid"}); err == nil {
+			t.Fatalf("email-only registry skipped invalid userId %s", raw)
+		}
+	}
+}
+
+func TestVerifyCursorAccountIdentityConfiguredUserID(t *testing.T) {
+	native := cursorAuthenticatedStatusJSON()
+	expected := cursorAccount{email: "cursor-operator@example.invalid", userID: "9007199254740993"}
+	if err := verifyCursorAccountIdentity(native, expected); err != nil {
+		t.Fatalf("matching configured id: %v", err)
+	}
+	expected.userID = "1"
+	if err := verifyCursorAccountIdentity(native, expected); err == nil {
+		t.Fatal("accepted mismatched configured id")
+	}
+	missing := []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid"}}`)
+	expected.userID = "9007199254740993"
+	if err := verifyCursorAccountIdentity(missing, expected); err == nil {
+		t.Fatal("skipped missing configured id")
+	}
+	stringNative := []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid","userId":"usr_fixture"}}`)
+	if err := verifyCursorAccountIdentity(stringNative, cursorAccount{email: "cursor-operator@example.invalid", userID: "usr_fixture"}); err != nil {
+		t.Fatalf("matching string id: %v", err)
+	}
+}
+
+func TestCursorStartAcceptsNativeNumericUserIDWithEmailOnlyRegistry(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "serve")
+	profile := cursorTestProfile(t)
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "numeric-id-stop"}); err != nil {
+		t.Fatal(err)
+	}
+	adapter.SetAccounts(cursorTestRegistryWithUserID(t, "9007199254740993"))
+	process, err = adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "configured-id-stop"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCursorStartRefusesInvalidAndMismatchedUserID(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "serve")
+	adapter.command = func(string, ...string) *exec.Cmd { t.Fatal("child must not spawn"); return nil }
+	profile := cursorTestProfile(t)
+	adapter.SetAccounts(cursorTestRegistryWithUserID(t, "9007199254740993"))
+	adapter.statusJSON = func(context.Context, string) ([]byte, error) {
+		return []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid"}}`), nil
+	}
+	_, err := adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "managed account identity could not be verified") {
+		t.Fatalf("missing configured id err=%v", err)
+	}
+	adapter.statusJSON = func(context.Context, string) ([]byte, error) {
+		return []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid","userId":1}}`), nil
+	}
+	_, err = adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "managed account identity could not be verified") {
+		t.Fatalf("mismatched configured id err=%v", err)
+	}
+	adapter.SetAccounts(cursorTestRegistry(t))
+	adapter.statusJSON = func(context.Context, string) ([]byte, error) {
+		return []byte(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"email":"cursor-operator@example.invalid","userId":1.5}}`), nil
+	}
+	_, err = adapter.Start(context.Background(), cursorOwnedStart(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "managed account identity could not be verified") {
+		t.Fatalf("fractional userId err=%v", err)
 	}
 }
 
