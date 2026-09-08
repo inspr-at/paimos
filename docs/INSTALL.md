@@ -17,7 +17,7 @@ curl -fL https://github.com/inspr-at/paimos/releases/latest/download/paimos_darw
 Or, pinned to a version:
 
 ```bash
-VER=26.09.08
+VER=26.09.08.09.02
 curl -fL https://github.com/inspr-at/paimos/releases/download/v$VER/paimos_${VER}_darwin_universal.tar.gz \
   | tar xz -C /usr/local/bin paimos
 ```
@@ -151,7 +151,7 @@ artifact on an operator workstation.
 Every release ships a `sha256sums.txt` next to the tarballs:
 
 ```bash
-VER=26.09.08
+VER=26.09.08.09.02
 curl -fLO https://github.com/inspr-at/paimos/releases/download/v$VER/sha256sums.txt
 curl -fLO https://github.com/inspr-at/paimos/releases/download/v$VER/paimos_${VER}_darwin_universal.tar.gz
 shasum -a 256 -c sha256sums.txt --ignore-missing
@@ -178,7 +178,7 @@ also builds from source declaratively.
 ## After install — first-use checklist
 
 ```bash
-paimos --version    # 26.09.08
+paimos --version    # 26.09.08.09.02
 ```
 
 ### 1. Log in
