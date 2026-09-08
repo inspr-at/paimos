@@ -6,12 +6,14 @@ package managedharness
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/lifecyclefence"
 	"github.com/inspr-at/paimos/backend/models"
 )
 
@@ -28,7 +30,17 @@ func newBrowserMessageFixture(t *testing.T) browserMessageFixture {
 	return newBrowserMessageFixtureWithRuntime(t, "", "")
 }
 
+func newBrowserMessageFixtureWithRegistration(t *testing.T, registration func(generation, host string) string) browserMessageFixture {
+	t.Helper()
+	return newBrowserMessageFixtureRegistration(t, "", "", registration)
+}
+
 func newBrowserMessageFixtureWithRuntime(t *testing.T, machine, account string) browserMessageFixture {
+	t.Helper()
+	return newBrowserMessageFixtureRegistration(t, machine, account, nil)
+}
+
+func newBrowserMessageFixtureRegistration(t *testing.T, machine, account string, registrationFn func(generation, host string) string) browserMessageFixture {
 	t.Helper()
 	t.Setenv("PAIMOS_AGENT_BUS_INSTANCE", "browser-message-test")
 	project, _ := openManagedHarnessTestDB(t)
@@ -78,6 +90,9 @@ func newBrowserMessageFixtureWithRuntime(t *testing.T, machine, account string) 
 	}
 	registration := fmt.Sprintf(`{"generation":%q,"host":%q,"account_label":%q,"workspaces":[],"profiles":[]}`,
 		runtimeGeneration, machine, account)
+	if registrationFn != nil {
+		registration = registrationFn(runtimeGeneration, machine)
+	}
 	if _, err = db.DB.Exec(`INSERT INTO lifecycle_runtimes(
 		id,project_id,generation,machine_id,user_id,api_key_id,lease_digest,registration_json,expires_at,created_at)
 		VALUES(?,?,?,?,?,?,zeroblob(32),?,strftime('%Y-%m-%dT%H:%M:%fZ','now','+10 minutes'),strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
@@ -229,6 +244,35 @@ func TestBrowserMessageCASRejectsWrongRuntimeProvenance(t *testing.T) {
 	}
 }
 
+func TestBrowserMessageCASUsesV3ScopeFence(t *testing.T) {
+	v3 := func(scopes string) func(generation, host string) string {
+		return func(generation, host string) string {
+			return fmt.Sprintf(`{"schema_version":3,"generation":%q,"host":%q,"workspaces":[],"account_scopes":%s}`, generation, host, scopes)
+		}
+	}
+	t.Run("match", func(t *testing.T) {
+		f := newBrowserMessageFixtureWithRegistration(t, v3(`[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"1"}]},{"account_label":"cursor_context","accounts":[{"key":"cursor-op","label":"Cursor"}],"profiles":[{"id":"cursor-composer","version":"1"}]}]`))
+		request := browserMessageRequest(f.session, "utt_6123456789abcdef0123456789abcdef", "simple", "Scoped tell")
+		if _, err := f.service.SendBrowserMessageCAS(context.Background(), f.principal, f.project, f.session.ID, request); err != nil {
+			t.Fatalf("matching v3 chatgpt scope refused: %v", err)
+		}
+	})
+	t.Run("cross-class", func(t *testing.T) {
+		f := newBrowserMessageFixtureWithRegistration(t, v3(`[{"account_label":"cursor_context","accounts":[{"key":"cursor-op","label":"Cursor"}],"profiles":[{"id":"cursor-composer","version":"1"}]}]`))
+		request := browserMessageRequest(f.session, "utt_7123456789abcdef0123456789abcdef", "simple", "Cross class")
+		if _, err := f.service.SendBrowserMessageCAS(context.Background(), f.principal, f.project, f.session.ID, request); err != ErrBrowserUnavailable {
+			t.Fatalf("cross-class v3 tell accepted: %v", err)
+		}
+	})
+	t.Run("wrong-key", func(t *testing.T) {
+		f := newBrowserMessageFixtureWithRegistration(t, v3(`[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}]`))
+		request := browserMessageRequest(f.session, "utt_8123456789abcdef0123456789abcdef", "simple", "Wrong key")
+		if _, err := f.service.SendBrowserMessageCAS(context.Background(), f.principal, f.project, f.session.ID, request); err != ErrBrowserUnavailable {
+			t.Fatalf("named chatgpt scope accepted class-only session: %v", err)
+		}
+	})
+}
+
 func TestBrowserMessageCASRejectsStoppingGeneration(t *testing.T) {
 	f := newBrowserMessageFixture(t)
 	stopping, err := f.service.Heartbeat(context.Background(), f.session.ID, PhaseStopping)
@@ -294,5 +338,25 @@ func TestBrowserMessageTextPreservesMultilineAndRejectsControls(t *testing.T) {
 		if validBrowserMessageText(value) {
 			t.Fatalf("unsafe text accepted: %q", value)
 		}
+	}
+}
+
+func TestBrowserTargetQueriesKeepOwnershipFence(t *testing.T) {
+	for name, query := range map[string]string{
+		"simple": browserTargetQuerySimple,
+		"steer":  browserTargetQuerySteer,
+	} {
+		if !strings.Contains(query, lifecyclefence.OwnershipSQLRuntimeHarness) {
+			t.Fatalf("%s query lost ownership fence", name)
+		}
+		if !strings.Contains(query, "harness.account_label") {
+			t.Fatalf("%s query missing session alias", name)
+		}
+	}
+	if !strings.Contains(browserTargetQuerySimple, browserTargetLevelSimple) {
+		t.Fatal("simple query lost level guard")
+	}
+	if !strings.Contains(browserTargetQuerySteer, browserTargetLevelSteer) {
+		t.Fatal("steer query lost level guard")
 	}
 }

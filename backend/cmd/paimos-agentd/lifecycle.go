@@ -56,13 +56,14 @@ type configuredAccount struct {
 	Label string `json:"label"`
 }
 type configuredProject struct {
-	ProjectID    int64                      `json:"project_id"`
-	AccountLabel string                     `json:"account_label"`
-	AccountKey   string                     `json:"account_key,omitempty"`
-	Accounts     []configuredAccount        `json:"accounts,omitempty"`
-	Profiles     []lifecycleintents.Profile `json:"profiles"`
-	Workspaces   []configuredWorkspace      `json:"workspaces"`
-	Readiness    *configuredReadiness       `json:"readiness,omitempty"`
+	ProjectID     int64                           `json:"project_id"`
+	AccountLabel  string                          `json:"account_label,omitempty"`
+	AccountKey    string                          `json:"account_key,omitempty"`
+	Accounts      []configuredAccount             `json:"accounts,omitempty"`
+	Profiles      []lifecycleintents.Profile      `json:"profiles,omitempty"`
+	AccountScopes []lifecycleintents.AccountScope `json:"account_scopes,omitempty"`
+	Workspaces    []configuredWorkspace           `json:"workspaces"`
+	Readiness     *configuredReadiness            `json:"readiness,omitempty"`
 }
 type lifecycleConfig struct {
 	Projects []configuredProject `json:"projects"`
@@ -130,26 +131,35 @@ func newDaemonLifecycle(path, root, instance, reportURL, keyFile string, supervi
 	d := &daemonLifecycle{stateRoot: root, instance: instance, supervisor: supervisor, primary: primary, reporter: reporter, journal: journal}
 	seen := map[int64]bool{}
 	for _, c := range config.Projects {
-		if c.ProjectID <= 0 || seen[c.ProjectID] || len(c.Workspaces) == 0 || len(c.Workspaces) > 16 || len(c.Profiles) == 0 || len(c.Profiles) > 16 {
+		scoped := len(c.AccountScopes) > 0
+		if c.ProjectID <= 0 || seen[c.ProjectID] || len(c.Workspaces) == 0 || len(c.Workspaces) > 16 {
+			return nil, errors.New("lifecycle project configuration invalid")
+		}
+		if scoped {
+			if c.AccountLabel != "" || c.AccountKey != "" || len(c.Accounts) > 0 || len(c.Profiles) > 0 {
+				return nil, errors.New("lifecycle project configuration invalid")
+			}
+		} else if len(c.Profiles) == 0 || len(c.Profiles) > 16 {
 			return nil, errors.New("lifecycle project configuration invalid")
 		}
 		if c.AccountKey != "" && (len(c.Accounts) > 0 || !agentd.ValidAccountKey(c.AccountKey)) {
 			return nil, errors.New("lifecycle project configuration invalid")
 		}
 		generation := supervisor.Status().DaemonID
-		accounts, err := advertisedAccounts(c, generation, reporter.host)
-		if err != nil {
-			return nil, err
+		p := &projectLifecycle{owner: d, config: c, bound: map[string]bool{}, prepared: map[string]agentd.StartRequest{}}
+		if scoped {
+			p.registration = lifecycleintents.Registration{Generation: generation, Host: reporter.host, AccountScopes: c.AccountScopes, SchemaVersion: lifecycleintents.AccountScopeSchemaV3, Workspaces: []lifecycleintents.Workspace{}}
+		} else {
+			accounts, err := advertisedAccounts(c, generation, reporter.host)
+			if err != nil {
+				return nil, err
+			}
+			p.registration = lifecycleintents.Registration{Generation: generation, Host: reporter.host, AccountLabel: c.AccountLabel, Accounts: accounts, Profiles: c.Profiles, Workspaces: []lifecycleintents.Workspace{}}
+			if len(accounts) > 0 {
+				p.registration.SchemaVersion = lifecycleintents.AccountChoiceSchemaV2
+			}
 		}
 		seen[c.ProjectID] = true
-		p := &projectLifecycle{owner: d, config: c, bound: map[string]bool{}, prepared: map[string]agentd.StartRequest{}}
-		p.registration = lifecycleintents.Registration{Generation: generation, Host: reporter.host, AccountLabel: c.AccountLabel, Accounts: accounts, Profiles: c.Profiles, Workspaces: []lifecycleintents.Workspace{}}
-		if len(accounts) > 0 {
-			p.registration.SchemaVersion = lifecycleintents.AccountChoiceSchemaV2
-		}
-		if err = lifecycleintents.ValidateAdvertisedAccounts(p.registration); err != nil {
-			return nil, errors.New("lifecycle advertised accounts rejected by server contract")
-		}
 		workspaces := map[string]bool{}
 		for _, w := range c.Workspaces {
 			if uuid.Validate(w.Handle) != nil || len(w.Identity) != 64 || !filepath.IsAbs(w.Path) || workspaces[w.Handle] {
@@ -158,10 +168,8 @@ func newDaemonLifecycle(path, root, instance, reportURL, keyFile string, supervi
 			workspaces[w.Handle] = true
 			p.registration.Workspaces = append(p.registration.Workspaces, lifecycleintents.Workspace{Handle: w.Handle, Identity: w.Identity, Label: w.Label})
 		}
-		for _, selected := range c.Profiles {
-			if _, e := configuredProfile(selected.ID, selected.Version); e != nil {
-				return nil, e
-			}
+		if err := lifecycleintents.ValidateRegistration(p.registration); err != nil {
+			return nil, errors.New("lifecycle advertised accounts rejected by server contract")
 		}
 		lease, e := lifecycleclient.NewProof()
 		if e != nil {
@@ -262,18 +270,6 @@ func advertisedAccountReservedNames(c configuredProject, generation, host string
 	}
 	return reserved
 }
-
-func (p *projectLifecycle) configuredAccountKey(key string) bool {
-	if len(p.registration.Accounts) == 0 {
-		return key == ""
-	}
-	for _, account := range p.registration.Accounts {
-		if account.Key == key {
-			return true
-		}
-	}
-	return false
-}
 func (d *daemonLifecycle) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for index, p := range d.projects {
@@ -332,25 +328,27 @@ func (p *projectLifecycle) verifyConfiguration(ctx context.Context) error {
 			return lifecycleclient.ErrOwnership
 		}
 	}
-	for _, v := range p.config.Profiles {
-		profile, e := configuredProfile(v.ID, v.Version)
-		if e != nil {
-			return e
-		}
-		actual, e := p.owner.reporter.ResolveDispatchProfile(ctx, v.ID, v.Version, profile.Harness)
-		if e != nil || actual != profile {
-			return lifecycleclient.ErrOwnership
-		}
-		if len(p.registration.Accounts) > 0 {
-			for _, account := range p.registration.Accounts {
-				if !p.owner.supervisor.HasAccount(profile.Harness, account.Key) {
-					return lifecycleclient.ErrOwnership
-				}
+	for _, scope := range p.registration.Scopes() {
+		for _, v := range scope.Profiles {
+			profile, e := configuredProfile(v.ID, v.Version)
+			if e != nil {
+				return e
 			}
-			continue
-		}
-		if p.owner.supervisor.ProbeAccount(ctx, profile.Harness) != p.config.AccountLabel {
-			return lifecycleclient.ErrOwnership
+			actual, e := p.owner.reporter.ResolveDispatchProfile(ctx, v.ID, v.Version, profile.Harness)
+			if e != nil || actual != profile {
+				return lifecycleclient.ErrOwnership
+			}
+			if len(scope.Accounts) > 0 {
+				for _, account := range scope.Accounts {
+					if !p.owner.supervisor.HasAccount(profile.Harness, account.Key) {
+						return lifecycleclient.ErrOwnership
+					}
+				}
+				continue
+			}
+			if p.owner.supervisor.ProbeAccount(ctx, profile.Harness) != scope.AccountLabel {
+				return lifecycleclient.ErrOwnership
+			}
 		}
 	}
 	return nil
@@ -385,7 +383,7 @@ func (p *projectLifecycle) step(ctx context.Context) error {
 		p.refresh = now.Add(30 * time.Second)
 	}
 	for _, s := range p.owner.supervisor.Status().Sessions {
-		if s.ProjectID != p.config.ProjectID || s.AccountLabel != p.config.AccountLabel || !p.configuredAccountKey(s.AccountKey) || s.Reporter.PublicSessionID == "" || s.State == agentd.StateOwnershipLost || s.Reporter.Closed || s.PID <= 0 || p.bound[s.ID] {
+		if s.ProjectID != p.config.ProjectID || !p.ownsManagedSession(s) || s.Reporter.PublicSessionID == "" || s.State == agentd.StateOwnershipLost || s.Reporter.Closed || s.PID <= 0 || p.bound[s.ID] {
 			continue
 		}
 		if e := p.registerSession(ctx, s); e != nil {
@@ -410,18 +408,24 @@ func (p *projectLifecycle) registerSession(ctx context.Context, s agentd.Session
 }
 func (p *projectLifecycle) ownSession(in lifecycleintents.Intent) (agentd.Session, error) {
 	for _, s := range p.owner.supervisor.Status().Sessions {
-		if s.ID == in.Request.SessionGeneration && s.Reporter.PublicSessionID == in.Request.SessionID && p.bound[s.ID] && s.ProjectID == p.config.ProjectID && s.AccountLabel == p.config.AccountLabel && s.AccountKey == in.Request.AccountKey && p.configuredAccountKey(s.AccountKey) {
+		if s.ID == in.Request.SessionGeneration && s.Reporter.PublicSessionID == in.Request.SessionID && p.bound[s.ID] && s.ProjectID == p.config.ProjectID && s.AccountLabel == in.Request.AccountLabel && s.AccountKey == in.Request.AccountKey && p.ownsManagedSession(s) {
 			return s, nil
 		}
 	}
 	return agentd.Session{}, lifecycleclient.ErrOwnership
 }
-func (p *projectLifecycle) Prepare(ctx context.Context, in lifecycleintents.Intent) error {
-	if in.Request.AccountLabel != p.config.AccountLabel {
-		return lifecycleclient.ErrOwnership
+func (p *projectLifecycle) ownsManagedSession(s agentd.Session) bool {
+	profileID, version := "", ""
+	requireProfile := false
+	if s.DispatchProfile != nil {
+		profileID, version = s.DispatchProfile.ID, s.DispatchProfile.Version
+		requireProfile = true
 	}
+	return p.registration.MatchScope(s.AccountLabel, s.AccountKey, profileID, version, requireProfile)
+}
+func (p *projectLifecycle) Prepare(ctx context.Context, in lifecycleintents.Intent) error {
 	if in.Request.Operation == "repair" {
-		if in.Request.AccountKey != "" && !p.configuredAccountKey(in.Request.AccountKey) {
+		if !p.registration.MatchRepair(in.Request.AccountLabel, in.Request.AccountKey) {
 			return lifecycleclient.ErrOwnership
 		}
 		if in.Request.RepairLayer != "reporter" && in.Request.RepairLayer != "listeners" {
@@ -429,20 +433,17 @@ func (p *projectLifecycle) Prepare(ctx context.Context, in lifecycleintents.Inte
 		}
 		return nil
 	}
+	if !p.registration.MatchScope(in.Request.AccountLabel, in.Request.AccountKey, in.Request.DispatchProfileID, in.Request.DispatchProfileVersion, true) {
+		return lifecycleclient.ErrOwnership
+	}
 	if in.Request.Operation == "readiness" {
 		// A readiness probe reserves nothing and starts nothing. It still has to
 		// name an account, profile and workspace this daemon actually owns.
-		if !p.configuredAccountKey(in.Request.AccountKey) {
-			return lifecycleclient.ErrOwnership
-		}
 		if e := p.verifyConfiguration(ctx); e != nil {
 			return e
 		}
 		_, e := p.readinessSpec(in)
 		return e
-	}
-	if !p.configuredAccountKey(in.Request.AccountKey) {
-		return lifecycleclient.ErrOwnership
 	}
 	if e := p.verifyConfiguration(ctx); e != nil {
 		return e
@@ -450,13 +451,6 @@ func (p *projectLifecycle) Prepare(ctx context.Context, in lifecycleintents.Inte
 	profile, e := configuredProfile(in.Request.DispatchProfileID, in.Request.DispatchProfileVersion)
 	if e != nil {
 		return e
-	}
-	selected := false
-	for _, v := range p.config.Profiles {
-		selected = selected || v.ID == profile.ID && v.Version == profile.Version
-	}
-	if !selected {
-		return lifecycleclient.ErrOwnership
 	}
 	workspace := ""
 	identity := ""
@@ -523,7 +517,7 @@ func (p *projectLifecycle) Prepare(ctx context.Context, in lifecycleintents.Inte
 	if len(prompt) > 256<<10 {
 		return lifecycleclient.ErrOwnership
 	}
-	request := agentd.StartRequest{IdempotencyKey: "lifecycle:" + in.ID, Adapter: profile.Harness, Workspace: workspace, WorkspaceMode: profile.WorkspaceMode, ExpectedAccountLabel: p.config.AccountLabel, AccountKey: in.Request.AccountKey, ExpectedMachineID: p.registration.Host, Identity: profile.Harness + ":" + in.Request.AgentName, ProjectID: p.config.ProjectID, Role: in.Request.Role, DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version, Prompt: prompt}
+	request := agentd.StartRequest{IdempotencyKey: "lifecycle:" + in.ID, Adapter: profile.Harness, Workspace: workspace, WorkspaceMode: profile.WorkspaceMode, ExpectedAccountLabel: in.Request.AccountLabel, AccountKey: in.Request.AccountKey, ExpectedMachineID: p.registration.Host, Identity: profile.Harness + ":" + in.Request.AgentName, ProjectID: p.config.ProjectID, Role: in.Request.Role, DispatchProfileID: profile.ID, DispatchProfileVersion: profile.Version, Prompt: prompt}
 	if in.Request.TicketID != nil {
 		request.TicketID = *in.Request.TicketID
 		request.WorkShape = in.Request.WorkShape

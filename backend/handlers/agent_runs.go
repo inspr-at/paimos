@@ -291,6 +291,15 @@ func ImplementIssue(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "issue not found", http.StatusNotFound)
 		return
 	}
+	owned, err := issueHasBaselineBatch(issueID)
+	if err != nil {
+		jsonError(w, "could not verify baseline ownership", http.StatusInternalServerError)
+		return
+	}
+	if owned {
+		jsonError(w, "baseline-owned issue cannot be implemented; report a built receipt on the batch", http.StatusConflict)
+		return
+	}
 	var body struct {
 		DeviceID         string          `json:"device_id"`
 		DeployTarget     string          `json:"deploy_target"`
@@ -1860,4 +1869,21 @@ func agentRunCodeEvidenceSummary(run *AgentRun) string {
 		return fmt.Sprintf(" Code: `%s..%s`.", short(base), short(head))
 	}
 	return fmt.Sprintf(" Code: `%s`.", short(head))
+}
+
+// issueHasBaselineBatch reports whether any baseline_batch_batches row
+// references this issue, including cancelled, paused, completed, and
+// otherwise historical rows. Ownership is permanent on that issue: a later
+// change of work is a new Aithema handover, draft, and start, which mints a
+// fresh issue and delivery. Reopening Implement-this here would let
+// BootstrapRunTx retry specification on an accepted baseline attempt.
+func issueHasBaselineBatch(issueID int64) (bool, error) {
+	if db.DB == nil {
+		return false, fmt.Errorf("database unavailable")
+	}
+	var n int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM baseline_batch_batches WHERE issue_id=?`, issueID).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }

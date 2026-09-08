@@ -29,6 +29,9 @@ func testConsumerProof(n byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 func newConsumerFixture(t *testing.T, kind string) *consumerFixture {
+	return newConsumerFixtureOwned(t, kind, `{"account_label":"chatgpt"}`, "chatgpt", "", "", "", "", "")
+}
+func newConsumerFixtureOwned(t *testing.T, kind, registrationJSON, accountLabel, accountKey, profileID, profileVersion, profileModel, profileEffort string) *consumerFixture {
 	t.Helper()
 	s, project := openBusTestDB(t)
 	f := &consumerFixture{s: s, project: project}
@@ -52,11 +55,11 @@ func newConsumerFixture(t *testing.T, kind string) *consumerFixture {
 		t.Fatal(e)
 	}
 	digest := sha256.Sum256([]byte("paimos-lifecycle-runtime-v1\x00" + f.r.RuntimeGeneration + "\x00" + f.c.RuntimeLease))
-	_, e = s.db.Exec(`INSERT INTO lifecycle_runtimes(id,project_id,generation,machine_id,user_id,api_key_id,lease_digest,registration_json,expires_at,created_at) VALUES(?,?,?,'consumer-machine',?,?,?, ?,?,?)`, f.r.RuntimeID, project, f.r.RuntimeGeneration, user, key, digest[:], `{"account_label":"chatgpt"}`, consumerStamp(time.Now().Add(time.Hour)), consumerStamp(time.Now()))
+	_, e = s.db.Exec(`INSERT INTO lifecycle_runtimes(id,project_id,generation,machine_id,user_id,api_key_id,lease_digest,registration_json,expires_at,created_at) VALUES(?,?,?,'consumer-machine',?,?,?, ?,?,?)`, f.r.RuntimeID, project, f.r.RuntimeGeneration, user, key, digest[:], registrationJSON, consumerStamp(time.Now().Add(time.Hour)), consumerStamp(time.Now()))
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, e = s.db.Exec(`INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,management_mode,role,steer_mode,advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,account_label,workspace_identity,workspace_path,workspace_kind,workspace_mode) VALUES(?,?,?,'amy','codex','consumer-machine',zeroblob(32),zeroblob(32),'managed','worker','none',0,1,0,1,1,'working','chatgpt',printf('%064d',1),'/fixture/workspace','directory','exclusive')`, f.r.SessionID, project, f.agent)
+	_, e = s.db.Exec(`INSERT INTO harness_sessions(id,project_id,project_agent_id,agent_name,harness,host,session_ref_digest,worker_lease_digest,management_mode,role,steer_mode,advertised_inbox,advertised_status,advertised_steer,advertised_interrupt,advertised_stop,phase,account_label,account_key,dispatch_profile_id,dispatch_profile_version,dispatch_model,dispatch_effort,workspace_identity,workspace_path,workspace_kind,workspace_mode) VALUES(?,?,?,'amy','codex','consumer-machine',zeroblob(32),zeroblob(32),'managed','worker','none',0,1,0,1,1,'working',?,?,?,?,?,?,printf('%064d',1),'/fixture/workspace','directory','exclusive')`, f.r.SessionID, project, f.agent, accountLabel, accountKey, profileID, profileVersion, profileModel, profileEffort)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -397,5 +400,21 @@ func TestConsumerAttentionHealthCoalescingAndFences(t *testing.T) {
 	in.Reason = "private free text"
 	if _, e = f.s.PublishRuntimeHealth(ctx, f.c, f.project, in); e != ErrConsumerInvalid {
 		t.Fatal("health accepted free text")
+	}
+}
+
+func TestConsumerV3ScopeFenceMatchAndCrossClass(t *testing.T) {
+	v3 := `{"schema_version":3,"account_scopes":[{"account_label":"chatgpt","profiles":[{"id":"codex-sol-high","version":"1"}]},{"account_label":"cursor_context","accounts":[{"key":"cursor-op","label":"Cursor"}],"profiles":[{"id":"cursor-composer","version":"1"}]}]}`
+	match := newConsumerFixtureOwned(t, "fallback", v3, "chatgpt", "", "codex-sol-high", "1", "codex", "high")
+	if _, err := match.s.RegisterConsumer(context.Background(), match.c, match.project, match.r); err != nil {
+		t.Fatalf("matching v3 chatgpt consumer refused: %v", err)
+	}
+	crossed := newConsumerFixtureOwned(t, "fallback", v3, "cursor_context", "codex-work", "codex-sol-high", "1", "codex", "high")
+	if _, err := crossed.s.RegisterConsumer(context.Background(), crossed.c, crossed.project, crossed.r); err != ErrConsumerUnavailable {
+		t.Fatalf("cross-class v3 consumer accepted: %v", err)
+	}
+	named := newConsumerFixtureOwned(t, "fallback", `{"schema_version":3,"account_scopes":[{"account_label":"chatgpt","accounts":[{"key":"codex-work","label":"Work"}],"profiles":[{"id":"codex-sol-high","version":"1"}]}]}`, "chatgpt", "", "codex-sol-high", "1", "codex", "high")
+	if _, err := named.s.RegisterConsumer(context.Background(), named.c, named.project, named.r); err != ErrConsumerUnavailable {
+		t.Fatalf("named chatgpt scope accepted class-only consumer: %v", err)
 	}
 }

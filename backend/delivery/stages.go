@@ -32,6 +32,45 @@ func (s *Store) StartStageRetryTx(ctx context.Context, tx *sql.Tx, effects *Effe
 	return s.startStageRetryTx(ctx, tx, effects, req, false)
 }
 
+type stageStartPayload struct {
+	AttemptNumber            int64  `json:"attempt_number"`
+	StageKey                 string `json:"stage_key"`
+	ReporterType             string `json:"reporter_type"`
+	ReporterKey              string `json:"reporter_key"`
+	ReasonCode               string `json:"reason_code"`
+	ReasonText               string `json:"reason_text"`
+	ExpectedCurrentExecution *int64 `json:"expected_current_execution,omitempty"`
+	ExpectedCurrentEpoch     *int64 `json:"expected_current_authority_epoch,omitempty"`
+}
+
+func stageStartEnvelopePayload(req StageStartRequest) stageStartPayload {
+	return stageStartPayload{req.AttemptNumber, req.StageKey, req.Reporter.Type, req.Reporter.OpaqueKey, req.ReasonCode, req.ReasonText,
+		req.ExpectedCurrentExecution, req.ExpectedCurrentAuthorityEpoch}
+}
+
+// MatchStageStartEnvelopeTx reports whether this start request is an exact
+// replay of the originally admitted envelope, including CAS fields. Duplicate
+// lookup happens before currentness checks, so an original 0/0 retry still
+// matches after the ledger advanced to 1/1. A same-key payload that differs
+// is ErrConflict.
+func (s *Store) MatchStageStartEnvelopeTx(ctx context.Context, tx *sql.Tx, req StageStartRequest) (bool, error) {
+	if req.IssueID <= 0 || stageOrder(req.StageKey) == 0 || validateActor(req.Reporter) != nil || req.IdempotencyKey == "" {
+		return false, fmt.Errorf("%w: invalid stage start", ErrInvalid)
+	}
+	d, err := loadDeliveryByIssue(ctx, tx, req.IssueID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	prior, err := lookupEnvelopeDuplicateForActor(ctx, tx, d, req.Reporter, "stage_execution_started", req.IdempotencyKey, stageStartEnvelopePayload(req))
+	if err != nil {
+		return false, err
+	}
+	return prior.Duplicate, nil
+}
+
 func (s *Store) startStageRetryTx(ctx context.Context, tx *sql.Tx, effects *Effects, req StageStartRequest, allowAtomicRunLink bool) (StageRef, error) {
 	if req.IssueID <= 0 || stageOrder(req.StageKey) == 0 || validateActor(req.Reporter) != nil || req.IdempotencyKey == "" {
 		return StageRef{}, fmt.Errorf("%w: invalid stage start", ErrInvalid)
@@ -74,17 +113,7 @@ func (s *Store) startStageRetryTx(ctx context.Context, tx *sql.Tx, effects *Effe
 	if err != nil {
 		return StageRef{}, err
 	}
-	payload := struct {
-		AttemptNumber            int64  `json:"attempt_number"`
-		StageKey                 string `json:"stage_key"`
-		ReporterType             string `json:"reporter_type"`
-		ReporterKey              string `json:"reporter_key"`
-		ReasonCode               string `json:"reason_code"`
-		ReasonText               string `json:"reason_text"`
-		ExpectedCurrentExecution *int64 `json:"expected_current_execution,omitempty"`
-		ExpectedCurrentEpoch     *int64 `json:"expected_current_authority_epoch,omitempty"`
-	}{req.AttemptNumber, req.StageKey, req.Reporter.Type, req.Reporter.OpaqueKey, req.ReasonCode, req.ReasonText,
-		req.ExpectedCurrentExecution, req.ExpectedCurrentAuthorityEpoch}
+	payload := stageStartEnvelopePayload(req)
 	if prior, err := lookupEnvelopeDuplicateForActor(ctx, tx, d, req.Reporter, "stage_execution_started", req.IdempotencyKey, payload); err != nil {
 		return StageRef{}, err
 	} else if prior.Duplicate {

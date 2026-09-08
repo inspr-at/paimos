@@ -426,6 +426,8 @@ server-side — a run can't be moved back out of one.
 
 ```bash
 # Create a run (the "Implement this" / provider action button). Project-editor gated.
+# Baseline-owned issues stay sealed (409), including cancelled or completed batches;
+# later work is a new handover/draft/start and a fresh issue, never same-issue reuse.
 # Optional body:
 #   {
 #     "action_key": "claude_cli.implement",

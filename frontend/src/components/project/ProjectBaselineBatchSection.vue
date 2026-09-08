@@ -14,6 +14,11 @@ import {
   reviewBaselineDraft,
   setBaselineStreamEnabled,
   startBaselineBatch,
+  isClassOnlyScope,
+  runtimeChoiceProblem,
+  runtimeScopes,
+  scopedAccounts,
+  scopedProfiles,
   type Batch,
   type ControlOption,
   type Draft,
@@ -37,6 +42,7 @@ const reconciled = ref<Set<string>>(new Set())
 const mode = ref<'manual' | 'assisted' | 'automatic'>('manual')
 const selected = ref<string[]>([])
 const runtimeId = ref('')
+const accountLabel = ref('')
 const accountKey = ref('')
 const profileKey = ref('')
 const workspaceHandle = ref('')
@@ -50,10 +56,16 @@ const runtimes = computed(() => workflow.value?.choices.runtimes ?? [])
 const runtime = computed(() => runtimes.value.find((r) => r.runtime_id === runtimeId.value) ?? runtimes.value[0] ?? null)
 const agentMode = computed(() => mode.value !== 'manual')
 const readiness = computed(() => workflow.value?.readiness ?? null)
+const scopeProblem = computed(() => (agentMode.value ? runtimeChoiceProblem(runtime.value) : ''))
+const accountClasses = computed(() => runtime.value ? runtimeScopes(runtime.value).map((scope) => scope.account_label) : [])
+const namedAccounts = computed(() => scopedAccounts(runtime.value, accountLabel.value))
+const classProfiles = computed(() => scopedProfiles(runtime.value, accountLabel.value))
+const classOnly = computed(() => isClassOnlyScope(runtime.value, accountLabel.value))
 // Agent execution needs a current owned observation. Manual delivery does not,
 // and never invents one.
 const startBlockedReason = computed(() => {
   if (!agentMode.value) return ''
+  if (scopeProblem.value) return scopeProblem.value
   if (!readiness.value) return 'Select a runtime, account, profile and workspace, then check readiness.'
   if (readiness.value.status === 'ready') return ''
   return readiness.value.blocking_reason || readiness.value.status
@@ -68,13 +80,31 @@ function canonicalScopeKey(refs: string[] | undefined) {
   return JSON.stringify(sortedRefs(refs))
 }
 
+function setupRequiredCopy(kind: string) {
+  if (kind === 'built_artifact_identity') {
+    return 'Setup required: built_artifact_identity. Report the typed built receipt with paimos baseline-batch report-built; this screen never starts deployment.'
+  }
+  return `Setup required: ${kind}. Use the existing operator external-stage CLI; this screen never carries handoff secrets.`
+}
+
 function workerInputs(modeValue: string, worker: WorkerSelection) {
   if (modeValue === 'manual') {
-    return { worker_name: '', runtime_id: '', account_key: '', profile_id: '', profile_version: '', workspace_handle: '' }
+    return {
+      worker_name: '',
+      runtime_id: '',
+      runtime_generation: '',
+      account_label: '',
+      account_key: '',
+      profile_id: '',
+      profile_version: '',
+      workspace_handle: '',
+    }
   }
   return {
     worker_name: (worker.worker_name ?? '').trim(),
     runtime_id: worker.runtime_id ?? '',
+    runtime_generation: worker.runtime_generation ?? '',
+    account_label: worker.account_label ?? '',
     account_key: worker.account_key ?? '',
     profile_id: worker.profile_id ?? '',
     profile_version: worker.profile_version ?? '',
@@ -89,6 +119,8 @@ function localReviewInputs() {
     ...workerInputs(mode.value, {
       worker_name: workerName.value,
       runtime_id: runtime.value?.runtime_id || runtimeId.value,
+      runtime_generation: runtime.value?.runtime_generation ?? '',
+      account_label: accountLabel.value,
       account_key: accountKey.value,
       profile_id: profileKey.value.split('@')[0],
       profile_version: profileKey.value.split('@').slice(1).join('@'),
@@ -110,6 +142,8 @@ function sameReviewInputs(local: ReturnType<typeof localReviewInputs>, reviewed:
     && canonicalScopeKey(local.selected) === canonicalScopeKey(reviewed.selected)
     && local.worker_name === reviewed.worker_name
     && local.runtime_id === reviewed.runtime_id
+    && local.runtime_generation === reviewed.runtime_generation
+    && local.account_label === reviewed.account_label
     && local.account_key === reviewed.account_key
     && local.profile_id === reviewed.profile_id
     && local.profile_version === reviewed.profile_version
@@ -135,12 +169,29 @@ watch(runtime, (r) => {
   // during hydration would make a rightful binding look dirty.
   if (draft.value?.review_valid) return
   if (!runtimeId.value) runtimeId.value = r.runtime_id
-  if (!accountKey.value && r.accounts[0]) accountKey.value = r.accounts[0].key
-  if (!profileKey.value && r.profiles[0]) profileKey.value = `${r.profiles[0].id}@${r.profiles[0].version}`
+  const classes = runtimeScopes(r).map((scope) => scope.account_label)
+  // A unique advertised class is not a first-scope guess. Mixed v3 stays
+  // empty until the human names the class. Named keys and profiles are never
+  // inferred from the first advertised row.
+  if (!accountLabel.value && classes.length === 1) accountLabel.value = classes[0] ?? ''
+  if (accountLabel.value && !classes.includes(accountLabel.value)) {
+    accountLabel.value = ''
+    accountKey.value = ''
+    profileKey.value = ''
+  }
   if (!workspaceHandle.value && r.workspaces[0]) workspaceHandle.value = r.workspaces[0].handle
 })
 
-watch([mode, selected, runtimeId, accountKey, profileKey, workspaceHandle, workerName], () => {
+watch(accountLabel, (label) => {
+  const keys = scopedAccounts(runtime.value, label).map((account) => account.key)
+  if (accountKey.value && !keys.includes(accountKey.value)) accountKey.value = ''
+  const profiles = scopedProfiles(runtime.value, label)
+  if (profileKey.value && !profiles.some((profile) => `${profile.id}@${profile.version}` === profileKey.value)) {
+    profileKey.value = ''
+  }
+})
+
+watch([mode, selected, runtimeId, accountLabel, accountKey, profileKey, workspaceHandle, workerName], () => {
   confirmStart.value = false
 })
 
@@ -156,6 +207,7 @@ function hydrateFromDraft(d: Draft) {
     mode.value = d.execution_mode
   }
   runtimeId.value = d.worker.runtime_id ?? ''
+  accountLabel.value = d.worker.account_label ?? ''
   accountKey.value = d.worker.account_key ?? ''
   profileKey.value = d.worker.profile_id ? `${d.worker.profile_id}@${d.worker.profile_version ?? ''}` : ''
   workspaceHandle.value = d.worker.workspace_handle ?? ''
@@ -264,16 +316,17 @@ async function importHandover() {
 function workerPayload() {
   if (!agentMode.value) return {}
   const [profileId, profileVersion] = profileKey.value.split('@')
-  return {
+  const payload: WorkerSelection = {
     worker_name: workerName.value.trim(),
     runtime_id: runtime.value?.runtime_id,
     runtime_generation: runtime.value?.runtime_generation,
-    account_label: runtime.value?.account_label,
-    account_key: accountKey.value,
+    account_label: accountLabel.value,
     profile_id: profileId,
     profile_version: profileVersion,
     workspace_handle: workspaceHandle.value,
   }
+  if (accountKey.value) payload.account_key = accountKey.value
+  return payload
 }
 
 // The selection is stored on the draft first so the owned probe and the review
@@ -505,7 +558,7 @@ function stateLabel(d: Draft | null, b: Batch | null) {
         Blocked: {{ active.progress.blocking_reason }}
       </p>
       <p v-if="active.progress.setup_required" class="bb-unresolved" data-testid="batch-setup-required">
-        Setup required: {{ active.progress.setup_required }}. Use the existing operator external-stage CLI; this screen never carries handoff secrets.
+        {{ setupRequiredCopy(active.progress.setup_required) }}
       </p>
       <p v-if="active.progress.next_action" class="bb-meta" data-testid="batch-next-action">
         Next: {{ active.progress.next_action }}
@@ -588,16 +641,26 @@ function stateLabel(d: Draft | null, b: Batch | null) {
         <select v-model="runtimeId" class="bb-input" data-testid="baseline-runtime">
           <option v-for="r in runtimes" :key="r.runtime_id" :value="r.runtime_id">Runtime {{ r.runtime_id.slice(0, 8) }}</option>
         </select>
-        <select v-model="accountKey" class="bb-input" data-testid="baseline-account">
-          <option v-for="a in runtime?.accounts ?? []" :key="a.key" :value="a.key">{{ a.label }}</option>
+        <select v-model="accountLabel" class="bb-input" data-testid="baseline-account-class">
+          <option disabled value="">Account class</option>
+          <option v-for="cls in accountClasses" :key="cls" :value="cls">{{ cls }}</option>
         </select>
+        <select v-if="namedAccounts.length" v-model="accountKey" class="bb-input" data-testid="baseline-account">
+          <option disabled value="">Named account</option>
+          <option v-for="a in namedAccounts" :key="a.key" :value="a.key">{{ a.label }}</option>
+        </select>
+        <p v-else-if="classOnly" class="bb-note" data-testid="baseline-class-only">
+          Class-only {{ accountLabel }}: no named account key.
+        </p>
         <select v-model="profileKey" class="bb-input" data-testid="baseline-profile">
-          <option v-for="p in runtime?.profiles ?? []" :key="p.id + p.version" :value="`${p.id}@${p.version}`">{{ p.id }} {{ p.version }}</option>
+          <option disabled value="">Profile</option>
+          <option v-for="p in classProfiles" :key="p.id + p.version" :value="`${p.id}@${p.version}`">{{ p.id }} {{ p.version }}</option>
         </select>
         <select v-model="workspaceHandle" class="bb-input" data-testid="baseline-workspace">
           <option v-for="w in runtime?.workspaces ?? []" :key="w.handle" :value="w.handle">{{ w.label || w.handle.slice(0, 8) }}</option>
         </select>
-        <p v-if="!runtimes.length" class="bb-note">No owned runtime advertised. Assisted and automatic stay blocked until an owned probe proves this development target. Manual remains usable.</p>
+        <p v-if="scopeProblem" class="bb-unresolved" data-testid="baseline-scope-error">{{ scopeProblem }}</p>
+        <p v-else-if="!runtimes.length" class="bb-note">No owned runtime advertised. Assisted and automatic stay blocked until an owned probe proves this development target. Manual remains usable.</p>
       </div>
       <div v-if="agentMode" class="bb-readiness" data-testid="readiness">
         <p class="bb-meta">

@@ -428,7 +428,7 @@ func daemonLifecycleErrFromProject(t *testing.T, instance string, project config
 		primary.supervisor.Stop()
 		controller.Close(context.Background())
 	}
-	if project.Profiles == nil {
+	if project.Profiles == nil && len(project.AccountScopes) == 0 {
 		project.Profiles = []lifecycleintents.Profile{{ID: profile.ID, Version: profile.Version}}
 	}
 	if project.Workspaces == nil {
@@ -446,4 +446,109 @@ func daemonLifecycleErrFromProject(t *testing.T, instance string, project config
 	_ = os.WriteFile(keyPath, []byte("fixture-key"), 0600)
 	d, err := newDaemonLifecycle(configPath, root, instance, server.URL, keyPath, controller, primary, bridge)
 	return d, err, cleanup
+}
+
+type namedLifecycleAdapter struct {
+	lifecycleFixtureAdapter
+	name, label string
+}
+
+func (a *namedLifecycleAdapter) Name() string                        { return a.name }
+func (a *namedLifecycleAdapter) AccountLabel(context.Context) string { return a.label }
+
+func TestDaemonLifecyclePreparesMixedCodexAndCursorScopes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	codexWorkspace, _ := filepath.EvalSymlinks(t.TempDir())
+	cursorWorkspace, _ := filepath.EvalSymlinks(t.TempDir())
+	codexProfile, _ := dispatchprofile.Resolve("codex-sol-high", "1", "codex")
+	cursorProfile, _ := dispatchprofile.Resolve("cursor-composer", "1", "cursor")
+	bridge, _ := newCLIReporterWithRunner("fixture", "fixture-host", "/fixture/paimos", nil, func(context.Context, string, []string, []string, io.Reader) ([]byte, error) {
+		return json.Marshal(map[string]any{"dispatch_profiles": []dispatchprofile.Profile{codexProfile, cursorProfile}})
+	}, newMemoryReporterLeaseStore())
+	codex := &namedLifecycleAdapter{lifecycleFixtureAdapter: lifecycleFixtureAdapter{accounts: map[string]bool{"codex-work": true, "codex-home": true, "codex-lab": true}}, name: "codex", label: "chatgpt"}
+	cursor := &namedLifecycleAdapter{lifecycleFixtureAdapter: lifecycleFixtureAdapter{accounts: map[string]bool{"cursor-op": true}}, name: "cursor", label: "cursor_context"}
+	reporter := &lifecycleFixtureReporter{public: uuid.NewString()}
+	controller, e := agentd.NewSupervisor(agentd.SupervisorConfig{Instance: "mixed-scopes", StateRoot: root, Adapters: []agentd.Adapter{codex, cursor}, Reporter: reporter, DispatchResolver: bridge, HeartbeatInterval: 20 * time.Millisecond})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer controller.Close(context.Background())
+	codexProvenance, e := controller.InspectWorkspace(ctx, codexWorkspace, agentd.WorkspaceExclusive)
+	if e != nil {
+		t.Fatal(e)
+	}
+	cursorProvenance, e := controller.InspectWorkspace(ctx, cursorWorkspace, agentd.WorkspaceExclusive)
+	if e != nil {
+		t.Fatal(e)
+	}
+	primary, e := newNativeConsumers(root, "mixed-scopes", bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer primary.supervisor.Stop()
+	primary.controller = controller
+	codexHandle, cursorHandle := uuid.NewString(), uuid.NewString()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/agents/") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"project": map[string]any{"id": 42, "key": "FIX"}, "agent": map[string]any{"project_id": 42, "name": "worker", "body": "canonical fixture instructions"}})
+			return
+		}
+		http.Error(w, "unavailable", 404)
+	}))
+	defer server.Close()
+	config := lifecycleConfig{Projects: []configuredProject{{
+		ProjectID: 42,
+		AccountScopes: []lifecycleintents.AccountScope{
+			{AccountLabel: "chatgpt", Accounts: []lifecycleintents.AccountChoice{{Key: "codex-work", Label: "Work"}, {Key: "codex-home", Label: "Home"}, {Key: "codex-lab", Label: "Lab"}}, Profiles: []lifecycleintents.Profile{{ID: codexProfile.ID, Version: codexProfile.Version}}},
+			{AccountLabel: "cursor_context", Accounts: []lifecycleintents.AccountChoice{{Key: "cursor-op", Label: "Cursor"}}, Profiles: []lifecycleintents.Profile{{ID: cursorProfile.ID, Version: cursorProfile.Version}}},
+		},
+		Workspaces: []configuredWorkspace{
+			{Handle: codexHandle, Path: codexWorkspace, Identity: codexProvenance.Identity, Label: "Codex"},
+			{Handle: cursorHandle, Path: cursorWorkspace, Identity: cursorProvenance.Identity, Label: "Cursor"},
+		},
+	}}}
+	configPath := filepath.Join(t.TempDir(), "runtime.json")
+	keyPath := filepath.Join(t.TempDir(), "key")
+	raw, _ := json.Marshal(config)
+	_ = os.WriteFile(configPath, raw, 0600)
+	_ = os.WriteFile(keyPath, []byte("fixture-key"), 0600)
+	d, e := newDaemonLifecycle(configPath, root, "mixed-scopes", server.URL, keyPath, controller, primary, bridge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	reg := d.projects[0].registration
+	if reg.SchemaVersion != lifecycleintents.AccountScopeSchemaV3 || reg.AccountLabel != "" || len(reg.AccountScopes) != 2 {
+		t.Fatalf("advertisement=%+v", reg)
+	}
+	mixed := config
+	mixed.Projects[0].AccountLabel = "chatgpt"
+	mixedPath := filepath.Join(t.TempDir(), "mixed.json")
+	mixedRaw, _ := json.Marshal(mixed)
+	_ = os.WriteFile(mixedPath, mixedRaw, 0600)
+	if _, err := newDaemonLifecycle(mixedPath, root, "mixed-scopes-class", server.URL, keyPath, controller, primary, bridge); err == nil {
+		t.Fatal("mixed singular class and account_scopes was accepted")
+	}
+	cursorIntent := lifecycleintents.Intent{
+		SchemaVersion: lifecycleintents.AccountChoiceSchemaV2, ID: uuid.NewString(), ProjectID: 42, State: "claimed", NewGeneration: uuid.NewString(),
+		Request: lifecycleintents.Request{
+			RequestKey: uuid.NewString(), Operation: "start", RuntimeID: uuid.NewString(), RuntimeGeneration: controller.Status().DaemonID,
+			AccountLabel: "cursor_context", AccountKey: "cursor-op", TTLSeconds: 120, WorkspaceHandle: cursorHandle, AgentName: "worker",
+			DispatchProfileID: cursorProfile.ID, DispatchProfileVersion: cursorProfile.Version, Role: "worker", WorkShape: "unknown",
+		},
+	}
+	if err := d.projects[0].Prepare(ctx, cursorIntent); err != nil {
+		t.Fatal(err)
+	}
+	prepared := d.projects[0].prepared[cursorIntent.ID]
+	if prepared.ExpectedAccountLabel != "cursor_context" || prepared.AccountKey != "cursor-op" || prepared.Adapter != "cursor" {
+		t.Fatalf("prepared=%+v", prepared)
+	}
+	crossed := cursorIntent
+	crossed.ID, crossed.NewGeneration, crossed.Request.RequestKey = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	crossed.Request.AccountLabel, crossed.Request.AccountKey = "chatgpt", "codex-work"
+	if err := d.projects[0].Prepare(ctx, crossed); err == nil {
+		t.Fatal("codex class prepared a cursor profile")
+	}
 }

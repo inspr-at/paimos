@@ -64,6 +64,7 @@ GET    /projects/:id/baseline-batches/:draftID/export
 GET    /projects/:id/baseline-batches/batches/:batchID
 POST   /projects/:id/baseline-batches/batches/:batchID/control
 POST   /projects/:id/baseline-batches/batches/:batchID/reconcile
+POST   /projects/:id/baseline-batches/batches/:batchID/built-receipt
 ```
 
 PAI-956 baseline batches are an opt-in INSPR stream on a project: every route
@@ -89,8 +90,22 @@ Batch state, stage progress, forecasts and the available controls are derived
 from the delivery attempt, the lifecycle intent and the owned harness session on
 every read. `completed` follows only from every required delivery stage being
 satisfied, never from a worker finishing. Human review of the immutable Aithema
-baseline records specification evidence only. Implementation/QA require scoped
-source and test evidence; Pharos deployment and verification reuse the existing
+baseline records specification evidence only. Implementation and QA are recorded
+by `POST .../built-receipt` (`paimos baseline-batch report-built`): a typed OCI
+config digest, release-set digest/coordinate/scheme/channel/sequence/version,
+source commit, and scoped QA digest on the current sealed attempt. That receipt
+is authenticated reported evidence, not cryptographic proof a test ran, and it
+never starts deployment or mints handoff secrets. Automatic receipts may use the
+start confirmer's live `agent-controls:write` key bound to the selected worker
+account and runtime generation; they are stored as system reporters, not human
+evidence. `POST /api/issues/{id}/implement` is refused on any issue that already
+has a baseline-batch row, in any `control_state`, so BootstrapRunTx cannot
+rewrite the accepted specification. That seal is historical: cancelling or
+completing the batch does not reopen Implement-this on the same issue. Later
+work is a new Aithema handover, draft, and start, which mints a fresh issue
+and delivery. A lookup failure refuses with a server error before any run is
+created; it never treats an unknown ownership check as “not a baseline issue”.
+Pharos deployment and verification reuse the existing
 external-stage `RegisterReporter` / `ActivateOwner` / `SealPrerequisites` /
 `CreateHandoff` path. `POST .../reconcile` applies the next currently authorized
 step of that frozen plan: manual never auto-creates a handoff, assisted requires
@@ -100,7 +115,8 @@ prerequisite set, a sealed set that does not cover currently active Janus
 dependencies (`prerequisite_review`), incomplete built artifact identity
 (`built_artifact_identity`), or a revoked current-generation handoff is
 `setup_required` plus `next_action` (`human_review_required` when specification
-is unsatisfied; `v2_report` when a baseline-owned Pharos receipt must use the
+is unsatisfied; `implementation_evidence` / `qa_evidence` until the typed
+receipt is recorded; `v2_report` when a baseline-owned Pharos receipt must use the
 owner-v2 artifact tuple). Baseline-owned deliveries require the typed
 implementation evidence contract in [`docs/EXTERNAL_STAGE_CONTRACT.md`](EXTERNAL_STAGE_CONTRACT.md)
 before handoff or owner completion; generic `external_ref` strings, QA

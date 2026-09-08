@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/lifecyclefence"
 	"github.com/inspr-at/paimos/backend/safetext"
 )
 
@@ -31,6 +32,36 @@ const (
 var (
 	browserMessageIDPattern = regexp.MustCompile(`^utt_[0-9a-f]{32}$`)
 	browserMessageMu        sync.Mutex
+)
+
+const (
+	browserTargetLevelSimple = "target.maximum_level IN ('simple','steer')"
+	browserTargetLevelSteer  = "target.maximum_level='steer'"
+)
+
+var browserTargetQueryPrefix = `SELECT owned.runtime_id,runtime.generation,owned.generation,target.id,
+		runtime.user_id,runtime.api_key_id
+		FROM harness_sessions harness
+		JOIN lifecycle_runtime_sessions owned ON owned.session_id=harness.id
+		JOIN lifecycle_runtimes runtime ON runtime.id=owned.runtime_id
+		 AND runtime.project_id=harness.project_id AND runtime.machine_id=harness.host
+		 AND ` + lifecyclefence.OwnershipSQLRuntimeHarness + `
+		JOIN agent_message_targets target ON target.id=harness.message_target_id
+		 AND target.instance=? AND target.project_id=harness.project_id AND target.enabled=1
+		 AND target.role='primary' AND target.adapter='managed_harness'
+		 AND target.target_kind='harness_session'
+		 AND target.address=lower(harness.harness)||':'||harness.agent_name
+		WHERE harness.project_id=? AND harness.id=? AND harness.management_mode='managed'
+		 AND harness.phase NOT IN ('stopping','stopped') AND harness.revision=? AND runtime.expires_at>?
+		 AND `
+
+var browserTargetQuerySuffix = `
+		 AND (CASE WHEN harness.phase='starting' THEN harness.updated_at>=?
+		           ELSE harness.heartbeat_at IS NOT NULL AND harness.heartbeat_at>=? END)`
+
+var (
+	browserTargetQuerySimple = browserTargetQueryPrefix + browserTargetLevelSimple + browserTargetQuerySuffix
+	browserTargetQuerySteer  = browserTargetQueryPrefix + browserTargetLevelSteer + browserTargetQuerySuffix
 )
 
 type BrowserMessageRequest struct {
@@ -209,27 +240,10 @@ func (s *Service) SendBrowserMessageCAS(ctx context.Context, p auth.Principal, p
 	createdAt := browserMessageStamp(now)
 	stale := browserMessageStamp(now.Add(-90 * time.Second))
 	var target browserMessageTarget
-	levelGuard := "target.maximum_level IN ('simple','steer')"
+	targetQuery := browserTargetQuerySimple
 	if in.DeliveryLevel == "steer" {
-		levelGuard = "target.maximum_level='steer'"
+		targetQuery = browserTargetQuerySteer
 	}
-	targetQuery := `SELECT owned.runtime_id,runtime.generation,owned.generation,target.id,
-		runtime.user_id,runtime.api_key_id
-		FROM harness_sessions harness
-		JOIN lifecycle_runtime_sessions owned ON owned.session_id=harness.id
-		JOIN lifecycle_runtimes runtime ON runtime.id=owned.runtime_id
-		 AND runtime.project_id=harness.project_id AND runtime.machine_id=harness.host
-		 AND json_extract(runtime.registration_json,'$.account_label')=harness.account_label
-		JOIN agent_message_targets target ON target.id=harness.message_target_id
-		 AND target.instance=? AND target.project_id=harness.project_id AND target.enabled=1
-		 AND target.role='primary' AND target.adapter='managed_harness'
-		 AND target.target_kind='harness_session'
-		 AND target.address=lower(harness.harness)||':'||harness.agent_name
-		WHERE harness.project_id=? AND harness.id=? AND harness.management_mode='managed'
-		 AND harness.phase NOT IN ('stopping','stopped') AND harness.revision=? AND runtime.expires_at>?
-		 AND ` + levelGuard + `
-		 AND (CASE WHEN harness.phase='starting' THEN harness.updated_at>=?
-		           ELSE harness.heartbeat_at IS NOT NULL AND harness.heartbeat_at>=? END)`
 	err = tx.QueryRowContext(ctx, targetQuery, instance, project, sessionID, in.ExpectedRevision,
 		createdAt, stale, stale).Scan(&target.runtimeID, &target.runtimeGeneration, &target.sessionGeneration,
 		&target.targetID, &target.runtimeUserID, &target.runtimeAPIKeyID)

@@ -353,15 +353,35 @@ func TestBaselineBatchVerticalSlice(t *testing.T) {
 	}
 
 	// Agent mode without an owned observation blocks, and manual stays usable.
+	// Review binds only a current advertised generation; invented IDs fail
+	// closed before start instead of pretending a missing host was reviewed.
 	blockedProject := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Agent stream", "key": "AGT"}))
 	optIn(t, ts, blockedProject)
 	blockedHandover, _ := validHandover(t)
 	imp := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/import", blockedProject), map[string]any{"handover": json.RawMessage(blockedHandover)})
 	decode(t, imp, &draft)
-	worker := map[string]any{
+	invented := map[string]any{
 		"worker_name": "codex", "runtime_id": uuid.NewString(), "runtime_generation": uuid.NewString(),
 		"account_label": "chatgpt", "account_key": "coordinator", "profile_id": "codex-sol-high",
 		"profile_version": "1", "workspace_handle": uuid.NewString(),
+	}
+	if resp := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/review", blockedProject, draft.ID), map[string]any{
+		"execution_mode": "automatic", "worker": invented, "selected_requirement_refs": []string{"req.login"},
+	}); resp.StatusCode != 400 || !strings.Contains(baselineReadBody(resp), "current advertised generation") {
+		t.Fatalf("invented generation review=%d %s", resp.StatusCode, baselineReadBody(resp))
+	}
+	workspace := uuid.NewString()
+	runtimeID, runtimeGen := insertSyntheticRuntime(t, blockedProject, userIDFor(t, "admin"), map[string]any{
+		"generation": uuid.NewString(), "host": "fixture-host", "schema_version": 2,
+		"account_label": "chatgpt",
+		"accounts":      []map[string]string{{"key": "coordinator", "label": "Coordinator"}},
+		"profiles":      []map[string]string{{"id": "codex-sol-high", "version": "1"}},
+		"workspaces":    []map[string]any{{"handle": workspace, "identity": strings.Repeat("a", 64), "label": "Work"}},
+	})
+	worker := map[string]any{
+		"worker_name": "codex", "runtime_id": runtimeID, "runtime_generation": runtimeGen,
+		"account_label": "chatgpt", "account_key": "coordinator", "profile_id": "codex-sol-high",
+		"profile_version": "1", "workspace_handle": workspace,
 	}
 	rev := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/%d/review", blockedProject, draft.ID), map[string]any{
 		"execution_mode": "automatic", "worker": worker, "selected_requirement_refs": []string{"req.login"},
@@ -381,8 +401,8 @@ func TestBaselineBatchVerticalSlice(t *testing.T) {
 		"selected_requirement_refs": []string{"req.login"},
 		"worker":                    worker,
 	})
-	if autoStart.StatusCode != 409 || !strings.Contains(baselineReadBody(autoStart), "runtime_offline") {
-		t.Fatalf("unknown proof start=%d %s", autoStart.StatusCode, baselineReadBody(autoStart))
+	if autoStart.StatusCode != 409 || !strings.Contains(baselineReadBody(autoStart), "readiness_observation_missing") {
+		t.Fatalf("missing observation start=%d %s", autoStart.StatusCode, baselineReadBody(autoStart))
 	}
 
 	// Deleted project invalidates stale authority.

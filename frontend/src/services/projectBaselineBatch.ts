@@ -43,6 +43,93 @@ export type WorkerSelection = {
   runtime_generation?: string
 }
 
+export const BASELINE_ACCOUNT_CLASSES = [
+  'chatgpt',
+  'api_key',
+  'claude_ai_max',
+  'claude_ai_pro',
+  'claude_ai_team',
+  'claude_ai_enterprise',
+  'console',
+  'pi_context',
+  'cursor_context',
+] as const
+
+export type BaselineAccountClass = (typeof BASELINE_ACCOUNT_CLASSES)[number]
+
+export type BaselineAccountScope = {
+  account_label: string
+  accounts?: { key: string; label: string }[]
+  profiles: { id: string; version: string }[]
+}
+
+export type RuntimeChoice = {
+  runtime_id: string
+  runtime_generation: string
+  account_label?: string
+  accounts: { key: string; label: string }[]
+  profiles: { id: string; version: string }[]
+  account_scopes?: BaselineAccountScope[]
+  schema_version?: number
+  workspaces: { handle: string; identity: string; label?: string }[]
+  expires_at?: string
+}
+
+export function runtimeChoiceProblem(runtime: RuntimeChoice | null): string {
+  if (!runtime) return ''
+  const schema = runtime.schema_version ?? 0
+  if (schema !== 0 && schema !== 1 && schema !== 2 && schema !== 3) {
+    return 'Unknown runtime account schema. Assisted and automatic stay blocked until the advertised scopes are recognizable.'
+  }
+  if (schema === 3) {
+    const scopes = runtime.account_scopes ?? []
+    if (scopes.length < 1) {
+      return 'This runtime advertises no account scopes. Assisted and automatic stay blocked.'
+    }
+    const classes = new Set<string>()
+    for (const scope of scopes) {
+      if (!BASELINE_ACCOUNT_CLASSES.includes(scope.account_label as BaselineAccountClass)) {
+        return 'This runtime advertises an unknown account class. Assisted and automatic stay blocked.'
+      }
+      if (classes.has(scope.account_label)) {
+        return 'This runtime advertises ambiguous account scopes. Assisted and automatic stay blocked.'
+      }
+      classes.add(scope.account_label)
+      if (!scope.profiles?.length) {
+        return 'This runtime advertises a scope without profiles. Assisted and automatic stay blocked.'
+      }
+    }
+    return ''
+  }
+  return ''
+}
+
+export function runtimeScopes(runtime: RuntimeChoice): BaselineAccountScope[] {
+  if ((runtime.schema_version ?? 0) === 3) return runtime.account_scopes ?? []
+  if (!runtime.account_label) return []
+  return [{
+    account_label: runtime.account_label,
+    accounts: runtime.accounts,
+    profiles: runtime.profiles ?? [],
+  }]
+}
+
+export function scopedAccounts(runtime: RuntimeChoice | null, accountLabel: string) {
+  if (!runtime || !accountLabel) return []
+  return runtimeScopes(runtime).find((scope) => scope.account_label === accountLabel)?.accounts ?? []
+}
+
+export function scopedProfiles(runtime: RuntimeChoice | null, accountLabel: string) {
+  if (!runtime || !accountLabel) return []
+  return runtimeScopes(runtime).find((scope) => scope.account_label === accountLabel)?.profiles ?? []
+}
+
+export function isClassOnlyScope(runtime: RuntimeChoice | null, accountLabel: string) {
+  if (!runtime || !accountLabel) return false
+  const scope = runtimeScopes(runtime).find((row) => row.account_label === accountLabel)
+  return !!scope && !(scope.accounts?.length)
+}
+
 export type ReadinessCheck = { id: string; status: string; reason: string }
 
 export type Readiness = {
@@ -169,14 +256,7 @@ export type Workflow = {
   readiness?: Readiness | null
   choices: {
     execution_modes: string[]
-    runtimes: {
-      runtime_id: string
-      runtime_generation: string
-      account_label: string
-      accounts: { key: string; label: string }[]
-      profiles: { id: string; version: string }[]
-      workspaces: { handle: string; identity: string; label?: string }[]
-    }[]
+    runtimes: RuntimeChoice[]
     note: string
   }
 }

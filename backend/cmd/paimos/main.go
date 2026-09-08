@@ -169,6 +169,7 @@ Get started:
 	cmd.AddCommand(listenCmd())   // PAI-816: durable receiver cursor and native adapters
 	// PAI-810: pinned external delivery-stage handoff protocol.
 	cmd.AddCommand(externalStageCmd())
+	cmd.AddCommand(baselineBatchCmd())
 	// PAI-358: migrateCmd removed; the only verb (manifest-to-knowledge)
 	// is meaningless now that the project_manifests table is gone.
 

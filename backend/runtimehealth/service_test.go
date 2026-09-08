@@ -264,6 +264,207 @@ func protectedDummy(t *testing.T, dir, name string) string {
 	return path
 }
 
+func protectedExecutable(t *testing.T, dir, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if e := os.WriteFile(path, []byte("fixture executable never invoked"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	return path
+}
+
+func harnessArgs(t *testing.T, p *PlatformService, kind string) []string {
+	t.Helper()
+	key := protectedDummy(t, p.Home, "reporter-key")
+	lifecycle := protectedDummy(t, p.Home, "lifecycle.json")
+	extra := reportingLifecycleArgs(key, lifecycle)
+	pi := protectedExecutable(t, p.Home, "pi")
+	cursor := protectedExecutable(t, p.Home, "cursor-agent")
+	codex := protectedExecutable(t, p.Home, "codex")
+	switch kind {
+	case "pi":
+		extra = append(extra, "--pi-path", pi, "--pi-accounts", protectedDummy(t, p.Home, "pi-accounts.json"))
+	case "cursor":
+		extra = append(extra, "--cursor-path", cursor, "--cursor-accounts", protectedDummy(t, p.Home, "cursor-accounts.json"))
+	case "both":
+		extra = append(extra,
+			"--pi-path", pi, "--pi-accounts", protectedDummy(t, p.Home, "pi-accounts.json"),
+			"--cursor-path", cursor, "--cursor-accounts", protectedDummy(t, p.Home, "cursor-accounts.json"),
+		)
+	case "mixed":
+		extra = append(extra,
+			"--codex-path", codex, "--codex-accounts", protectedDummy(t, p.Home, "codex-accounts.json"),
+			"--pi-path", pi, "--pi-accounts", protectedDummy(t, p.Home, "pi-accounts.json"),
+			"--cursor-path", cursor, "--cursor-accounts", protectedDummy(t, p.Home, "cursor-accounts.json"),
+		)
+	case "pi-symlink":
+		real := protectedExecutable(t, p.Home, "pi-real")
+		link := filepath.Join(p.Home, "pi-link")
+		if e := os.Symlink(real, link); e != nil {
+			t.Fatal(e)
+		}
+		extra = append(extra, "--pi-path", link, "--pi-accounts", protectedDummy(t, p.Home, "pi-accounts.json"))
+	case "cursor-symlink":
+		real := protectedExecutable(t, p.Home, "cursor-real")
+		link := filepath.Join(p.Home, "cursor-link")
+		if e := os.Symlink(real, link); e != nil {
+			t.Fatal(e)
+		}
+		extra = append(extra, "--cursor-path", link, "--cursor-accounts", protectedDummy(t, p.Home, "cursor-accounts.json"))
+	default:
+		t.Fatalf("unknown harness kind %q", kind)
+	}
+	return extra
+}
+
+func TestRuntimeServiceAcceptsMixedHarnessFlags(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		for _, kind := range []string{"pi", "cursor", "both", "mixed", "pi-symlink", "cursor-symlink"} {
+			t.Run(platform+"/"+kind, func(t *testing.T) {
+				p, _, calls := serviceFixture(t, platform)
+				putServiceArgs(t, p, fullServeArgs(p, harnessArgs(t, p, kind)...))
+				s, e := p.Inspect(context.Background())
+				if e != nil || !s.Verified {
+					t.Fatalf("%s harness definition not verified: %v", kind, e)
+				}
+				if len(*calls) == 0 {
+					t.Fatal("verified definition never reached the platform manager")
+				}
+			})
+		}
+	}
+}
+
+func TestRuntimeServiceRejectsHostileHarnessRegistry(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		for _, harness := range []struct {
+			name string
+			flag string
+		}{
+			{"pi", "--pi-accounts"},
+			{"cursor", "--cursor-accounts"},
+		} {
+			for _, kind := range []string{"missing", "empty", "duplicate", "relative", "symlink", "hardlink", "mode", "directory", "unknown", "ambiguous"} {
+				t.Run(platform+"/"+harness.name+"-accounts/"+kind, func(t *testing.T) {
+					p, _, calls := serviceFixture(t, platform)
+					key := protectedDummy(t, p.Home, "reporter-key")
+					lifecycle := protectedDummy(t, p.Home, "lifecycle.json")
+					exe := protectedExecutable(t, p.Home, harness.name)
+					accounts := filepath.Join(p.Home, harness.name+"-accounts.json")
+					extra := reportingLifecycleArgs(key, lifecycle,
+						"--"+harness.name+"-path", exe,
+					)
+					switch kind {
+					case "missing":
+						extra = append(extra, harness.flag, accounts)
+					case "empty":
+						extra = append(extra, harness.flag, "")
+					case "duplicate":
+						putFixture(t, accounts, "fixture metadata only; never a credential")
+						extra = append(extra, harness.flag, accounts, harness.flag, accounts)
+					case "relative":
+						putFixture(t, accounts, "fixture metadata only; never a credential")
+						extra = append(extra, harness.flag, harness.name+"-accounts.json")
+					case "symlink":
+						real := protectedDummy(t, p.Home, harness.name+"-accounts-real.json")
+						if e := os.Symlink(real, accounts); e != nil {
+							t.Fatal(e)
+						}
+						extra = append(extra, harness.flag, accounts)
+					case "hardlink":
+						real := protectedDummy(t, p.Home, harness.name+"-accounts-real.json")
+						if e := os.Link(real, accounts); e != nil {
+							t.Fatal(e)
+						}
+						extra = append(extra, harness.flag, accounts)
+					case "mode":
+						putFixture(t, accounts, "fixture metadata only; never a credential")
+						if e := os.Chmod(accounts, 0644); e != nil {
+							t.Fatal(e)
+						}
+						extra = append(extra, harness.flag, accounts)
+					case "directory":
+						if e := os.Mkdir(accounts, 0700); e != nil {
+							t.Fatal(e)
+						}
+						extra = append(extra, harness.flag, accounts)
+					case "unknown":
+						putFixture(t, accounts, "fixture metadata only; never a credential")
+						extra = append(extra, harness.flag, accounts, "--foreign-flag", "x")
+					case "ambiguous":
+						extra = append(extra, harness.flag)
+					}
+					putServiceArgs(t, p, fullServeArgs(p, extra...))
+					if _, e := p.Inspect(context.Background()); e == nil {
+						t.Fatal("hostile registry accepted")
+					}
+					if len(*calls) != 0 {
+						t.Fatal("manager reached with invalid definition")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestRuntimeServiceRejectsHostileHarnessExecutablePaths(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		for _, harness := range []string{"pi", "cursor"} {
+			for _, kind := range []string{"missing", "relative", "mode", "directory"} {
+				t.Run(platform+"/"+harness+"/"+kind, func(t *testing.T) {
+					p, _, calls := serviceFixture(t, platform)
+					extra := harnessArgs(t, p, harness)
+					flag := "--" + harness + "-path"
+					missing := filepath.Join(p.Home, harness+"-missing")
+					switch kind {
+					case "missing":
+						for i := 0; i < len(extra); i++ {
+							if extra[i] == flag {
+								extra[i+1] = missing
+								break
+							}
+						}
+					case "relative":
+						for i := 0; i < len(extra); i++ {
+							if extra[i] == flag {
+								extra[i+1] = harness
+								break
+							}
+						}
+					case "mode":
+						for i := 0; i < len(extra); i++ {
+							if extra[i] == flag {
+								if e := os.Chmod(extra[i+1], 0600); e != nil {
+									t.Fatal(e)
+								}
+								break
+							}
+						}
+					case "directory":
+						dir := filepath.Join(p.Home, harness+"-dir")
+						if e := os.Mkdir(dir, 0700); e != nil {
+							t.Fatal(e)
+						}
+						for i := 0; i < len(extra); i++ {
+							if extra[i] == flag {
+								extra[i+1] = dir
+								break
+							}
+						}
+					}
+					putServiceArgs(t, p, fullServeArgs(p, extra...))
+					if _, e := p.Inspect(context.Background()); e == nil {
+						t.Fatal("hostile executable path accepted")
+					}
+					if len(*calls) != 0 {
+						t.Fatal("manager reached with invalid definition")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestRuntimeServiceAcceptsReportingLifecycleWithOptionalCodexAccounts(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		for _, kind := range []string{"legacy", "accounts"} {

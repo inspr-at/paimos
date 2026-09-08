@@ -101,11 +101,11 @@ func (s *Service) validateTarget(ctx context.Context, tx *sql.Tx, project int64,
 	return nil
 }
 func (s *Service) validateTargetForOutcome(ctx context.Context, tx *sql.Tx, project int64, r Request, runtime Runtime, result, ownIntentID string) error {
-	if runtime.Generation != r.RuntimeGeneration || runtime.AccountLabel != r.AccountLabel {
+	if runtime.Generation != r.RuntimeGeneration {
 		return ErrUnavailable
 	}
 	if r.Operation == "repair" {
-		if r.AccountKey != "" && !runtime.matchAccount(r.AccountKey) {
+		if !runtime.MatchRepair(r.AccountLabel, r.AccountKey) {
 			return ErrUnavailable
 		}
 		return nil
@@ -114,36 +114,25 @@ func (s *Service) validateTargetForOutcome(ctx context.Context, tx *sql.Tx, proj
 		// A probe observes the exact advertised account, catalog profile and
 		// workspace. It reserves nothing: observing a host does not occupy an
 		// agent, a coordinator seat or an exclusive workspace.
-		if !runtime.matchAccount(r.AccountKey) {
+		if !runtime.MatchScope(r.AccountLabel, r.AccountKey, r.DispatchProfileID, r.DispatchProfileVersion, true) {
 			return ErrUnavailable
 		}
-		profile, err := resolveProfile(r.DispatchProfileID, r.DispatchProfileVersion)
-		if err != nil {
+		if _, err := resolveProfile(r.DispatchProfileID, r.DispatchProfileVersion); err != nil {
 			return err
 		}
-		advertised := false
-		for _, p := range runtime.Profiles {
-			advertised = advertised || (p.ID == profile.ID && p.Version == profile.Version)
-		}
-		if !advertised || workspaceIdentity(runtime, r.WorkspaceHandle) == "" {
+		if workspaceIdentity(runtime, r.WorkspaceHandle) == "" {
 			return ErrUnavailable
 		}
 		return nil
 	}
-	if !runtime.matchAccount(r.AccountKey) {
+	if !runtime.MatchScope(r.AccountLabel, r.AccountKey, r.DispatchProfileID, r.DispatchProfileVersion, true) {
 		return ErrUnavailable
 	}
 	profile, err := resolveProfile(r.DispatchProfileID, r.DispatchProfileVersion)
 	if err != nil {
 		return err
 	}
-	advertised := false
-	for _, p := range runtime.Profiles {
-		if p.ID == profile.ID && p.Version == profile.Version {
-			advertised = true
-		}
-	}
-	if !advertised || workspaceIdentity(runtime, r.WorkspaceHandle) == "" {
+	if workspaceIdentity(runtime, r.WorkspaceHandle) == "" {
 		return ErrUnavailable
 	}
 	var agent int64
@@ -282,7 +271,7 @@ func (s *Service) RegisterSession(ctx context.Context, p auth.Principal, project
 	if err != nil {
 		return err
 	}
-	if current.host != runtime.MachineID || current.account != runtime.AccountLabel || !runtime.matchAccount(current.accountKey) {
+	if current.host != runtime.MachineID || !runtime.MatchScope(current.account, current.accountKey, current.profile, current.version, true) {
 		return ErrUnavailable
 	}
 	var stored []byte

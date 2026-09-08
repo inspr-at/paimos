@@ -35,6 +35,7 @@ func RegisterBaselineBatchRoutes(r chi.Router) {
 		r.With(auth.RequireProjectView).Get("/batches/{batchID}", baselineBatchGet)
 		r.With(auth.RequireProjectEdit).Post("/batches/{batchID}/control", baselineBatchControl)
 		r.With(auth.RequireProjectEdit).Post("/batches/{batchID}/reconcile", baselineBatchReconcile)
+		r.With(auth.RequireProjectEdit).Post("/batches/{batchID}/built-receipt", baselineBatchBuiltReceipt)
 	})
 }
 
@@ -314,6 +315,27 @@ func baselineBatchReconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := baselineBatchService(r).Reconcile(r.Context(), actor, projectID, batchID)
+	if err != nil {
+		baselineBatchError(w, err)
+		return
+	}
+	jsonOK(w, out)
+}
+
+func baselineBatchBuiltReceipt(w http.ResponseWriter, r *http.Request) {
+	actor, ok := baselineBatchActor(r)
+	projectID, okID := baselineBatchProject(r)
+	batchID, err := strconv.ParseInt(chi.URLParam(r, "batchID"), 10, 64)
+	if !ok || !okID || err != nil {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+	req, err := baselinebatch.DecodeBuiltReceiptJSON(r.Body)
+	if err != nil {
+		jsonError(w, "invalid built receipt", http.StatusBadRequest)
+		return
+	}
+	out, err := baselineBatchService(r).RecordBuiltReceipt(r.Context(), actor, projectID, batchID, req)
 	if err != nil {
 		baselineBatchError(w, err)
 		return

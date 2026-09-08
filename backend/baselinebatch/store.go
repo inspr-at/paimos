@@ -449,8 +449,11 @@ func (s *Service) Review(ctx context.Context, actor Actor, projectID, draftID in
 	}
 	selected = canonicalRequirementRefs(selected)
 	if req.ExecutionMode != ModeManual {
-		if req.Worker.RuntimeID == "" || req.Worker.AccountKey == "" || req.Worker.ProfileID == "" || req.Worker.WorkspaceHandle == "" || req.Worker.WorkerName == "" {
-			return Draft{}, fmt.Errorf("%w: agent execution requires named worker, account, profile and workspace", ErrInvalid)
+		if err := requireNamedWorker(req.Worker); err != nil {
+			return Draft{}, err
+		}
+		if err := s.validateAgentWorker(ctx, tx, projectID, req.Worker); err != nil {
+			return Draft{}, err
 		}
 	} else {
 		req.Worker = WorkerSelection{}
@@ -540,12 +543,16 @@ func (s *Service) listRuntimeChoices(ctx context.Context, tx *sql.Tx, projectID 
 		if json.Unmarshal([]byte(body), &reg) != nil {
 			continue
 		}
-		choice := RuntimeChoice{RuntimeID: id, RuntimeGeneration: generation, AccountLabel: reg.AccountLabel, ExpiresAt: expires}
-		for _, a := range reg.Accounts {
-			choice.Accounts = append(choice.Accounts, AccountChoice{Key: a.Key, Label: a.Label})
-		}
-		for _, p := range reg.Profiles {
-			choice.Profiles = append(choice.Profiles, ProfileChoice{ID: p.ID, Version: p.Version})
+		choice := RuntimeChoice{RuntimeID: id, RuntimeGeneration: generation, AccountLabel: reg.AccountLabel, ExpiresAt: expires, SchemaVersion: reg.SchemaVersion}
+		if reg.SchemaVersion == lifecycleintents.AccountScopeSchemaV3 {
+			choice.AccountScopes = append([]lifecycleintents.AccountScope(nil), reg.AccountScopes...)
+		} else {
+			for _, a := range reg.Accounts {
+				choice.Accounts = append(choice.Accounts, AccountChoice{Key: a.Key, Label: a.Label})
+			}
+			for _, p := range reg.Profiles {
+				choice.Profiles = append(choice.Profiles, ProfileChoice{ID: p.ID, Version: p.Version})
+			}
 		}
 		for _, w := range reg.Workspaces {
 			choice.Workspaces = append(choice.Workspaces, WorkspaceChoice{Handle: w.Handle, Identity: w.Identity, Label: w.Label})
