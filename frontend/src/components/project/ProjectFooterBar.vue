@@ -74,6 +74,12 @@ const tabs = computed<TabSpec[]>(() => [
 function select(t: ProjectPrimaryTab) {
   if (t !== props.modelValue) emit('update:modelValue', t)
 }
+
+function tabAriaLabel(t: TabSpec): string {
+  if (t.count !== null && t.count !== undefined) return `${t.label}, ${formatInteger(t.count)}`
+  if (t.dot) return `${t.label}, populated`
+  return t.label
+}
 </script>
 
 <template>
@@ -86,6 +92,7 @@ function select(t: ProjectPrimaryTab) {
       :class="{ 'pfb__tab--active': modelValue === t.key }"
       role="tab"
       :aria-selected="modelValue === t.key"
+      :aria-label="tabAriaLabel(t)"
       @click="select(t.key)"
     >
       <AppIcon :name="t.icon" :size="13" class="pfb__icon" />
@@ -109,6 +116,7 @@ function select(t: ProjectPrimaryTab) {
       :class="{ 'pfb__tab--active': modelValue === 'settings' }"
       role="tab"
       :aria-selected="modelValue === 'settings'"
+      aria-label="Settings"
       @click="select('settings')"
     >
       <AppIcon name="settings" :size="13" class="pfb__icon" />
@@ -137,9 +145,14 @@ function select(t: ProjectPrimaryTab) {
   gap: 0;
   height: 36px;
   width: 100%;
+  min-width: 0;
   padding: 0 1.25rem;
   background: var(--bg-card, var(--bg, #fff));
   border-top: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .pfb__tab {
@@ -147,8 +160,10 @@ function select(t: ProjectPrimaryTab) {
   display: inline-flex;
   align-items: center;
   gap: .4rem;
+  flex-shrink: 0;
   padding: 0 .85rem;
   height: 100%;
+  scroll-margin-inline: .85rem;
   font-family: inherit;
   font-size: 13px;
   font-weight: 500;
@@ -194,7 +209,7 @@ function select(t: ProjectPrimaryTab) {
    Settings tab. Pushes Settings to the far edge without disturbing the
    left-aligned cluster. */
 .pfb__spacer {
-  flex: 1 1 auto;
+  flex: 1 0 1rem;
   min-width: 1rem;
 }
 

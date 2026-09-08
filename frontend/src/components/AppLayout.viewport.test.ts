@@ -180,5 +180,6 @@ describe('AppLayout viewport allocation (PAI-967)', () => {
     expect(source).not.toMatch(/\.layout\s*\{[\s\S]*min-height:\s*100vh/)
     expect(source).not.toMatch(/\.main\s*\{[\s\S]*height:\s*100vh/)
     expect(source).not.toMatch(/\.sidebar\s*\{[\s\S]*height:\s*100vh/)
+    expect(source).toMatch(/data-flow-host-region="footer"/)
   })
 })

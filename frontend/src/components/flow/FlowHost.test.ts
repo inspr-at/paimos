@@ -168,7 +168,7 @@ describe('Flow host UI', () => {
       {
         default: () =>
           h('div', [
-            h('div', { id: 'project-footer-slot', class: 'project-footer-slot' }),
+            h('div', { id: 'project-footer-slot', class: 'project-footer-slot', 'data-flow-host-region': 'footer' }),
             h('footer', { class: 'habitat-footer' }, [
               h('a', { href: '/legacy' }, 'Classic workspace'),
               h('a', { href: '/settings' }, 'Settings'),
@@ -186,6 +186,9 @@ describe('Flow host UI', () => {
     expect(shell?.getAttribute('layout-mode')).toBe('bounded')
     expect(shell?.getAttribute('content-layout')).toBeNull()
     expect(flowBody?.querySelector('#project-footer-slot')).not.toBeNull()
+    expect(flowBody?.querySelector('#project-footer-slot')?.getAttribute('data-flow-host-region')).toBe(
+      'footer',
+    )
     expect(flowBody?.querySelector('footer.habitat-footer')).not.toBeNull()
 
     reset.remove()
@@ -202,7 +205,7 @@ describe('Flow host UI', () => {
         default: () =>
           h('div', [
             h('div', { class: 'main-content' }, 'Scroll body'),
-            h('div', { id: 'project-footer-slot', class: 'project-footer-slot' }),
+            h('div', { id: 'project-footer-slot', class: 'project-footer-slot', 'data-flow-host-region': 'footer' }),
           ]),
       },
     )
@@ -214,7 +217,7 @@ describe('Flow host UI', () => {
     expect(shell?.getAttribute('content-layout')).toBe('fill')
     expect(toolbar?.getAttribute('data-flow-host-region')).toBe('toolbar')
     expect(body?.getAttribute('data-flow-host-region')).toBe('body')
-    expect(body?.querySelector('#project-footer-slot')).not.toBeNull()
+    expect(body?.querySelector('#project-footer-slot')?.getAttribute('data-flow-host-region')).toBe('footer')
 
     await mounted.unmount()
   })

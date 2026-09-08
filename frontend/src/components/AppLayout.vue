@@ -284,7 +284,7 @@ onBeforeUnmount(() => {
           </div>
           <slot />
         </div>
-        <div id="project-footer-slot" class="project-footer-slot"></div>
+        <div id="project-footer-slot" class="project-footer-slot" data-flow-host-region="footer"></div>
       </FlowHost>
     </main>
     </div>
