@@ -13534,6 +13534,165 @@ func migrateThrough(db *sql.DB, maxVersion int) error {
 	THEN OLD.fallback_target_id ELSE COALESCE(OLD.primary_target_id,OLD.fallback_target_id) END) AND t.adapter='codex')
  OR EXISTS(SELECT 1 FROM agent_consumer_attempts a WHERE a.stream_id=s.id AND a.resource_id=OLD.delivery_id))) AND NEW.consumer_fence<>OLD.consumer_fence+1 BEGIN SELECT RAISE(ABORT,'consumer ownership required'); END`,
 	}})
+	// M185 / PAI-968: release-specific go-live acceptance and email evidence.
+	// Deployment completion stays distinct from acceptance. Cooperation
+	// metadata is not copied here as authorization.
+	migrations = append(migrations, migration{version: 185, steps: []string{
+		`CREATE TABLE release_records (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			batch_id INTEGER NOT NULL REFERENCES baseline_batch_batches(id),
+			release_ref TEXT NOT NULL UNIQUE,
+			batch_key TEXT NOT NULL,
+			baseline_ref TEXT NOT NULL,
+			content_digest TEXT NOT NULL,
+			revision_seal TEXT NOT NULL,
+			artifact_digest TEXT NOT NULL,
+			artifact_coordinate TEXT NOT NULL,
+			version_scheme TEXT NOT NULL,
+			release_channel TEXT NOT NULL,
+			release_sequence INTEGER NOT NULL,
+			version TEXT NOT NULL,
+			commit_sha TEXT NOT NULL,
+			state TEXT NOT NULL CHECK (state IN ('built','acceptance_pending','accepted')),
+			revision INTEGER NOT NULL DEFAULT 1,
+			minted_by INTEGER NOT NULL REFERENCES users(id),
+			minted_session_credential_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			CHECK (length(CAST(content_digest AS BLOB)) = 71),
+			CHECK (length(CAST(revision_seal AS BLOB)) = 71),
+			CHECK (length(CAST(artifact_digest AS BLOB)) = 71),
+			CHECK (length(CAST(release_ref AS BLOB)) BETWEEN 1 AND 160),
+			UNIQUE(project_id, batch_id)
+		)`,
+		`CREATE INDEX idx_release_records_project ON release_records(project_id, id DESC)`,
+		`CREATE TRIGGER trg_release_records_immutable_identity BEFORE UPDATE OF
+			project_id,batch_id,release_ref,batch_key,baseline_ref,content_digest,revision_seal,
+			artifact_digest,artifact_coordinate,version_scheme,release_channel,release_sequence,
+			version,commit_sha,minted_by,minted_session_credential_id,created_at
+			ON release_records BEGIN SELECT RAISE(ABORT,'release identity is immutable'); END`,
+		`CREATE TRIGGER trg_release_records_state_guard BEFORE UPDATE OF state ON release_records
+			WHEN NOT (
+				(OLD.state='built' AND NEW.state IN ('built','acceptance_pending','accepted')) OR
+				(OLD.state='acceptance_pending' AND NEW.state IN ('acceptance_pending','accepted')) OR
+				(OLD.state='accepted' AND NEW.state='accepted')
+			)
+			BEGIN SELECT RAISE(ABORT,'invalid release state transition'); END`,
+		`CREATE TABLE release_acceptances (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			release_id INTEGER NOT NULL REFERENCES release_records(id),
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			revision INTEGER NOT NULL DEFAULT 1,
+			status TEXT NOT NULL CHECK (status IN ('pending','accepted')),
+			operating_mode TEXT NOT NULL CHECK (operating_mode IN ('customer_operated','agency_supported','agency_operated')),
+			agreement_ref TEXT NOT NULL DEFAULT '',
+			disclosed_gaps_json TEXT NOT NULL DEFAULT '[]',
+			required_party_refs_json TEXT NOT NULL DEFAULT '[]',
+			delivery_party_ref TEXT NOT NULL DEFAULT '',
+			operator_party_ref TEXT NOT NULL DEFAULT '',
+			support_party_ref TEXT,
+			preview_subject TEXT NOT NULL DEFAULT '',
+			preview_body TEXT NOT NULL DEFAULT '',
+			preview_revision INTEGER NOT NULL DEFAULT 0,
+			configured_by INTEGER REFERENCES users(id),
+			configured_session_credential_id TEXT NOT NULL DEFAULT '',
+			configured_at TEXT,
+			UNIQUE(release_id)
+		)`,
+		`CREATE TRIGGER trg_release_acceptances_no_unaccept BEFORE UPDATE OF status ON release_acceptances
+			WHEN OLD.status='accepted' AND NEW.status<>'accepted'
+			BEGIN SELECT RAISE(ABORT,'acceptance cannot be un-finalized'); END`,
+		`CREATE TABLE acceptance_parties (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			acceptance_id INTEGER NOT NULL REFERENCES release_acceptances(id),
+			acceptance_revision INTEGER NOT NULL,
+			party_ref TEXT NOT NULL,
+			party_kind TEXT NOT NULL CHECK (party_kind IN ('linked_user','manual_email')),
+			user_id INTEGER REFERENCES users(id),
+			email TEXT NOT NULL,
+			display_name TEXT NOT NULL DEFAULT '',
+			roles_json TEXT NOT NULL,
+			UNIQUE(acceptance_id, acceptance_revision, party_ref),
+			CHECK (length(CAST(party_ref AS BLOB)) BETWEEN 1 AND 160),
+			CHECK ((party_kind='linked_user' AND user_id IS NOT NULL) OR (party_kind='manual_email' AND user_id IS NULL))
+		)`,
+		`CREATE INDEX idx_acceptance_parties_user ON acceptance_parties(user_id, acceptance_id)`,
+		`CREATE TABLE acceptance_confirmations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			acceptance_id INTEGER NOT NULL REFERENCES release_acceptances(id),
+			release_id INTEGER NOT NULL REFERENCES release_records(id),
+			acceptance_revision INTEGER NOT NULL,
+			party_ref TEXT NOT NULL,
+			decision TEXT NOT NULL CHECK (decision='accept'),
+			source TEXT NOT NULL CHECK (source IN ('platform','external_email','standing_policy')),
+			actor_user_id INTEGER NOT NULL REFERENCES users(id),
+			session_credential_id TEXT NOT NULL,
+			attestation TEXT NOT NULL DEFAULT '',
+			confirmed_at TEXT NOT NULL,
+			UNIQUE(acceptance_id, acceptance_revision, party_ref)
+		)`,
+		`CREATE TRIGGER trg_acceptance_confirmations_immutable BEFORE UPDATE ON acceptance_confirmations
+			BEGIN SELECT RAISE(ABORT,'acceptance confirmation is immutable'); END`,
+		`CREATE TABLE acceptance_email_evidence (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			acceptance_id INTEGER NOT NULL REFERENCES release_acceptances(id),
+			release_id INTEGER NOT NULL REFERENCES release_records(id),
+			acceptance_revision INTEGER NOT NULL,
+			message_ref TEXT NOT NULL UNIQUE,
+			request_key TEXT NOT NULL,
+			recipient_party_refs_json TEXT NOT NULL,
+			state TEXT NOT NULL CHECK (state IN ('pending','sent','failed')),
+			source TEXT NOT NULL CHECK (source IN ('platform_send','external_manual')),
+			recorded_at TEXT NOT NULL,
+			sent_at TEXT,
+			actor_user_id INTEGER NOT NULL REFERENCES users(id),
+			session_credential_id TEXT NOT NULL,
+			attestation TEXT NOT NULL DEFAULT '',
+			body_sha256 TEXT NOT NULL,
+			raw_message BLOB,
+			UNIQUE(acceptance_id, request_key)
+		)`,
+		`CREATE INDEX idx_acceptance_email_evidence_acceptance ON acceptance_email_evidence(acceptance_id, acceptance_revision)`,
+		`CREATE TABLE acceptance_mail_outbox (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			evidence_id INTEGER NOT NULL UNIQUE REFERENCES acceptance_email_evidence(id),
+			request_key TEXT NOT NULL UNIQUE,
+			state TEXT NOT NULL CHECK (state IN ('queued','sending','sent','failed')),
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			last_error_class TEXT NOT NULL DEFAULT '',
+			authorized_by INTEGER NOT NULL REFERENCES users(id),
+			session_credential_id TEXT NOT NULL,
+			preview_revision INTEGER NOT NULL,
+			lease_until TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX idx_acceptance_mail_outbox_dispatch ON acceptance_mail_outbox(state, id)`,
+		`CREATE TABLE acceptance_standing_policies (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			policy_ref TEXT NOT NULL UNIQUE,
+			operating_mode TEXT NOT NULL CHECK (operating_mode='customer_operated'),
+			approved_by INTEGER NOT NULL REFERENCES users(id),
+			session_credential_id TEXT NOT NULL,
+			content_digest TEXT NOT NULL,
+			revision_seal TEXT NOT NULL,
+			target_ref TEXT NOT NULL DEFAULT '',
+			parties_json TEXT NOT NULL,
+			model_ref TEXT NOT NULL DEFAULT '',
+			agreement_ref TEXT NOT NULL DEFAULT '',
+			gaps_json TEXT NOT NULL DEFAULT '[]',
+			release_channel TEXT NOT NULL DEFAULT '',
+			artifact_digest TEXT NOT NULL DEFAULT '',
+			bounded_use TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			revoked_at TEXT,
+			created_at TEXT NOT NULL,
+			CHECK (length(CAST(content_digest AS BLOB)) = 71),
+			CHECK (length(CAST(revision_seal AS BLOB)) = 71)
+		)`,
+		`CREATE INDEX idx_acceptance_standing_policies_project ON acceptance_standing_policies(project_id, id DESC)`,
+	}})
 	for _, m := range migrations {
 		if m.version > maxVersion {
 			continue

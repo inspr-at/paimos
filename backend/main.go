@@ -37,6 +37,8 @@ import (
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/handlers/crm"
 	"github.com/inspr-at/paimos/backend/handlers/knowledge"
+	"github.com/inspr-at/paimos/backend/mailer"
+	"github.com/inspr-at/paimos/backend/releaseacceptance"
 	"github.com/inspr-at/paimos/backend/secretinput"
 	"github.com/inspr-at/paimos/backend/storage"
 
@@ -124,6 +126,7 @@ func main() {
 	// PAI-826: instance-local durable webhook outbox for Grok Bot routine
 	// wake targets. Local Codex targets remain owned by paimos listen.
 	agentmessage.StartWebhookDispatcher(db.DB)
+	releaseacceptance.StartMailDispatcher(db.DB, mailer.FromEnv())
 
 	r := chi.NewRouter()
 	// PAI-809: first and unconditional for every structurally classified
@@ -615,6 +618,7 @@ func mountAPI(r chi.Router) {
 		r.Get("/portal/projects/{id}/summary", handlers.PortalProjectSummary)
 		r.Get("/portal/projects/{id}/projektberichte", handlers.ListProjectReports)
 		r.Get("/portal/projects/{id}/acceptance-report", handlers.AcceptanceReport)
+		handlers.RegisterPortalReleaseAcceptanceRoutes(r)
 	})
 
 	// Internal (admin + member; blocked for external)
@@ -755,6 +759,7 @@ func mountAPI(r chi.Router) {
 		r.With(auth.RequireProjectView).Get("/projects/{id}/graph/blast-radius", handlers.BlastRadius)
 		r.With(auth.RequireProjectView).Post("/projects/{id}/retrieve", handlers.RetrieveProjectContext)
 		handlers.RegisterBaselineBatchRoutes(r)
+		handlers.RegisterReleaseAcceptanceRoutes(r)
 
 		// Project key suggestion
 		r.Get("/projects/suggest-key", handlers.SuggestProjectKey)

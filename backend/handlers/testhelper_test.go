@@ -226,6 +226,7 @@ func buildRouter() http.Handler {
 			r.Post("/portal/issues/{id}/accept", handlers.PortalAcceptIssue)
 			r.Get("/portal/projects/{id}/summary", handlers.PortalProjectSummary)
 			r.Get("/portal/projects/{id}/projektberichte", handlers.ListProjectReports)
+			handlers.RegisterPortalReleaseAcceptanceRoutes(r)
 		})
 
 		// Internal (blocked for external)
@@ -304,6 +305,7 @@ func buildRouter() http.Handler {
 			r.With(auth.RequireProjectView).Get("/projects/{id}/graph/blast-radius", handlers.BlastRadius)
 			r.With(auth.RequireProjectView).Post("/projects/{id}/retrieve", handlers.RetrieveProjectContext)
 			handlers.RegisterBaselineBatchRoutes(r)
+			handlers.RegisterReleaseAcceptanceRoutes(r)
 			r.Get("/projects/suggest-key", handlers.SuggestProjectKey)
 
 			r.With(auth.RequireProjectView).Get("/projects/{id}/issues", handlers.ListIssues)

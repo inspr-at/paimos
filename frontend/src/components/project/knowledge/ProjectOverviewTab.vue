@@ -11,6 +11,7 @@
 // Knowledge tabs.
 
 import ProjectBaselineBatchSection from '@/components/project/ProjectBaselineBatchSection.vue'
+import ProjectReleaseAcceptanceSection from '@/components/project/ProjectReleaseAcceptanceSection.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { errMsg } from '@/api/client'
@@ -118,6 +119,7 @@ onMounted(() => {
       </div>
     </section>
     <ProjectBaselineBatchSection :project-id="project.id" :can-write="!!canWrite" />
+    <ProjectReleaseAcceptanceSection :project-id="project.id" :can-write="!!canWrite" />
 
     <div class="pot-grid">
       <!-- Current state callouts -->
