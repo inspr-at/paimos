@@ -227,6 +227,27 @@ plan_test_names() {
   printf '%s\n' "$plan" | rg -o '(Test|Fuzz)[A-Za-z0-9_]+' | LC_ALL=C sort
 }
 
+plan_test_names_ordered() {
+  local plan="$1"
+  printf '%s\n' "$plan" | rg -o '(Test|Fuzz)[A-Za-z0-9_]+'
+}
+
+discover_test_names_ordered() {
+  local package="$1" match="$2" listed name names=()
+  listed=$(cd "$ROOT/backend" && "$GO_COMMAND" test -list "$match" "$package")
+  while IFS= read -r name; do
+    case "$name" in
+      Test*|Fuzz*)
+        [[ "$name" =~ ^(Test|Fuzz)[A-Za-z0-9_]+$ ]] ||
+          fail "unsafe discovered test name in $package: $name"
+        names+=("$name")
+        ;;
+    esac
+  done <<<"$listed"
+  (( ${#names[@]} > 0 )) || fail "no tests discovered for $package / $match"
+  printf '%s\n' "${names[@]}"
+}
+
 assert_plan_covers_discovery_once() {
   local label="$1" plan="$2" package="$3" match="$4" expected actual
   expected=$(discover_test_names "$package" "$match")
@@ -495,31 +516,60 @@ lifecycle_all_plan=$("$RACE_RUNNER" --dry-run --lane=all github.com/inspr-at/pai
 [[ "$(grep -c '^go test -race -count=1 -timeout=8m ./lifecycleintents -run ' <<<"$lifecycle_all_plan")" -eq 4 ]] ||
   fail 'all-lane lifecycle race did not retain all four bounded invocations'
 assert_plan_covers_discovery_once 'all lifecycle race' "$lifecycle_all_plan" ./lifecycleintents '^(Test|Fuzz)'
-# Delivery and baseline-batch fixtures each rebuild all migrations. CI run
-# 34171714168 exhausted the 8m PR package timeout in db.Open/migrateThrough
-# (sqlite parser / foreign-key rebuild), not a deadlock. Split the complete
-# discovered set over the existing four runners without dropping tests.
+# Delivery and baseline-batch fixtures each rebuild all migrations. Hosted
+# CI 34175171447 still exhausted the 8m package timeout on 12-test shards
+# after five completed Open()/migrateThrough fixtures (28-47s into the next).
+# Keep every discovered test on the existing four runners and split each
+# runner into sequential groups of four (~346s vs 480s on hosted timings).
+MIGRATION_RACE_GROUP_SIZE=4
 for sharded in delivery baselinebatch; do
   package="./$sharded"
   import="github.com/inspr-at/paimos/backend/$sharded"
   sharded_race_plan=
-  for shard in 0 1 2 3; do
+  listed_names=()
+  while IFS= read -r name; do
+    listed_names+=("$name")
+  done < <(discover_test_names_ordered "$package" '^(Test|Fuzz)')
+  expected_order=
+  for ((shard = 0; shard < 4; shard++)); do
+    shard_names=()
+    for ((index = shard; index < ${#listed_names[@]}; index += 4)); do
+      shard_names+=("${listed_names[$index]}")
+    done
+    (( ${#shard_names[@]} > 0 )) || fail "$sharded race shard $shard is empty"
+    expected_groups=$(( (${#shard_names[@]} + MIGRATION_RACE_GROUP_SIZE - 1) / MIGRATION_RACE_GROUP_SIZE ))
     plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
       github.com/inspr-at/paimos/backend/agentd \
       "$import" \
       github.com/inspr-at/paimos/backend/localjournal)
-    [[ "$(grep -c "^go test -race -count=1 -timeout=8m $package -run " <<<"$plan")" -eq 1 ]] ||
-      fail "$sharded race shard $shard did not retain one bounded invocation"
+    [[ "$(grep -c "^go test -race -count=1 -timeout=8m $package -run " <<<"$plan")" -eq "$expected_groups" ]] ||
+      fail "$sharded race shard $shard did not retain $expected_groups bounded groups"
+    shard_plan=$(grep "^go test -race .* $package -run " <<<"$plan")
+    group_index=0
+    while IFS= read -r group_line; do
+      group_count=$(plan_test_names_ordered "$group_line" | wc -l | tr -d ' ')
+      (( group_count >= 1 && group_count <= MIGRATION_RACE_GROUP_SIZE )) ||
+        fail "$sharded shard $shard group $group_index has $group_count tests, want 1-$MIGRATION_RACE_GROUP_SIZE"
+      group_index=$((group_index + 1))
+    done <<<"$shard_plan"
+    [[ "$group_index" -eq "$expected_groups" ]] ||
+      fail "$sharded shard $shard emitted $group_index groups, want $expected_groups"
+    expected_order+="$(printf '%s\n' "${shard_names[@]}")"$'\n'
     sharded_race_plan+="$plan"$'\n'
   done
   sharded_only_plan=$(grep "^go test -race .* $package -run " <<<"$sharded_race_plan")
   assert_plan_covers_discovery_once "affected $sharded race" "$sharded_only_plan" "$package" '^(Test|Fuzz)'
+  [[ "$(plan_test_names_ordered "$sharded_only_plan")" == "$(printf '%s' "$expected_order")" ]] ||
+    fail "$sharded grouped race plan changed discovery order, uniqueness, or round-robin assignment"
   [[ "$(grep -c '^go test -race .* ./agentd$' <<<"$sharded_race_plan")" -eq 1 &&
     "$(grep -c '^go test -race .* ./localjournal$' <<<"$sharded_race_plan")" -eq 1 ]] ||
     fail "$sharded sharding duplicated or omitted another affected package"
-  sharded_first_count=$(plan_test_names "$(sed -n '1p' <<<"$sharded_only_plan")" | wc -l)
-  sharded_last_count=$(plan_test_names "$(sed -n '4p' <<<"$sharded_only_plan")" | wc -l)
-  (( sharded_first_count >= sharded_last_count && sharded_first_count - sharded_last_count <= 1 )) ||
+  shard_counts=()
+  for shard in 0 1 2 3; do
+    plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" "$import")
+    shard_counts+=("$(plan_test_names "$plan" | wc -l | tr -d ' ')")
+  done
+  (( shard_counts[0] >= shard_counts[3] && shard_counts[0] - shard_counts[3] <= 1 )) ||
     fail "$sharded test names were not balanced across the four race runners"
   for shard in 0 1 2 3; do
     plan=$("$RACE_RUNNER" --dry-run --lane=affected --shard="$shard/4" \
@@ -527,17 +577,25 @@ for sharded in delivery baselinebatch; do
     [[ "$plan" != *"$package"* ]] || fail "unselected $sharded package leaked into the affected race plan"
   done
   sharded_all_plan=$("$RACE_RUNNER" --dry-run --lane=all "$import")
-  [[ "$(grep -c "^go test -race -count=1 -timeout=8m $package -run " <<<"$sharded_all_plan")" -eq 4 ]] ||
-    fail "all-lane $sharded race did not retain all four bounded invocations"
+  expected_all_groups=0
+  for shard in 0 1 2 3; do
+    shard_n=0
+    for ((index = shard; index < ${#listed_names[@]}; index += 4)); do
+      shard_n=$((shard_n + 1))
+    done
+    expected_all_groups=$((expected_all_groups + (shard_n + MIGRATION_RACE_GROUP_SIZE - 1) / MIGRATION_RACE_GROUP_SIZE))
+  done
+  [[ "$(grep -c "^go test -race -count=1 -timeout=8m $package -run " <<<"$sharded_all_plan")" -eq "$expected_all_groups" ]] ||
+    fail "all-lane $sharded race did not retain all $expected_all_groups bounded invocations"
   assert_plan_covers_discovery_once "all $sharded race" "$sharded_all_plan" "$package" '^(Test|Fuzz)'
   sharded_sequential_state="$TMP_ROOT/$sharded-sequential-race"
   mkdir -p "$sharded_sequential_state"
-  if ! FAKE_GO_STATE="$sharded_sequential_state" GO_COMMAND="$FIXTURES/sequential-go.sh" \
+  if ! FAKE_GO_STATE="$sharded_sequential_state" GO_COMMAND="$FIXTURES/grouped-go.sh" \
     "$RACE_RUNNER" --lane=all "$import" >/dev/null 2>&1; then
     fail "all-lane $sharded race did not execute sequentially"
   fi
-  [[ ! -e "$sharded_sequential_state/overlap" && "$(wc -l < "$sharded_sequential_state/runs" | tr -d ' ')" -eq 4 ]] ||
-    fail "all-lane $sharded race overlapped or omitted a shard"
+  [[ ! -e "$sharded_sequential_state/overlap" && "$(wc -l < "$sharded_sequential_state/runs" | tr -d ' ')" -eq 8 ]] ||
+    fail "all-lane $sharded race overlapped or omitted a grouped shard invocation"
   if GO_COMMAND="$FIXTURES/unsafe-go-list.sh" "$RACE_RUNNER" --dry-run --lane=affected \
     --shard=0/4 "$import" >/dev/null 2>&1; then
     fail "$sharded race sharder accepted an unsafe discovered test name"
