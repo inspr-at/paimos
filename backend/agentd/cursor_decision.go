@@ -232,43 +232,62 @@ func (p *cursorProcess) holdPeerDecision(message cursorRPCMessage) {
 		p.noteRefusal(closedPeerMethod(message.Method), "missing_id")
 		return
 	}
-	parsed, ok := parseCursorDecisionRequest(message, p.sessionID, p.generation)
-	if !ok {
-		p.failClosedPeer(message.ID, -32602, "invalid params")
-		p.noteRefusal(closedPeerMethod(message.Method), "invalid")
-		p.recordEvidence(cursorEvidenceRecord{Generation: p.generation, Method: closedPeerMethod(message.Method), Outcome: "refused"})
-		p.observeEvent(AdapterEvent{ErrorCode: ErrorDecisionRefused})
-		return
-	}
 	p.stateMu.Lock()
-	owned := !p.terminalFailure && (p.sessionID == "" || parsed.public.Generation == p.generation)
-	overflow := len(p.held) >= maxCursorPendingDecisions
+	sessionID := p.sessionID
+	generation := p.generation
+	terminal := p.terminalFailure
 	ttl := p.decisionTTL
 	p.stateMu.Unlock()
 	if ttl <= 0 {
 		ttl = cursorDecisionTTL
 	}
-	parsed.public.ExpiresAt = time.Now().UTC().Add(ttl)
-	parsed.inspect.ExpiresAt = parsed.public.ExpiresAt
-	if !owned {
+	if sessionID == "" || terminal {
 		p.failClosedPeer(message.ID, -32602, "invalid params")
-		p.noteRefusal(parsed.public.Method, "unowned")
-		return
-	}
-	if overflow {
-		p.cancelRPC(message.ID)
-		p.noteRefusal(parsed.public.Method, "overflow")
-		p.recordEvidence(cursorEvidenceRecord{Generation: p.generation, RequestID: parsed.public.RequestID, Method: parsed.public.Method, Digest: parsed.public.Digest, Outcome: "refused"})
+		p.noteRefusal(closedPeerMethod(message.Method), "unowned")
+		p.recordEvidence(cursorEvidenceRecord{Generation: generation, Method: closedPeerMethod(message.Method), Outcome: "refused"})
 		p.observeEvent(AdapterEvent{ErrorCode: ErrorDecisionRefused})
 		return
 	}
+	parsed, ok := parseCursorDecisionRequest(message, sessionID, generation)
+	if !ok {
+		p.failClosedPeer(message.ID, -32602, "invalid params")
+		p.noteRefusal(closedPeerMethod(message.Method), "invalid")
+		p.recordEvidence(cursorEvidenceRecord{Generation: generation, Method: closedPeerMethod(message.Method), Outcome: "refused"})
+		p.observeEvent(AdapterEvent{ErrorCode: ErrorDecisionRefused})
+		return
+	}
+	parsed.public.ExpiresAt = time.Now().UTC().Add(ttl)
+	parsed.inspect.ExpiresAt = parsed.public.ExpiresAt
 	requestID := parsed.public.RequestID
-	parsed.timer = time.AfterFunc(ttl, func() { p.expireHeld(requestID) })
 	p.stateMu.Lock()
+	if p.terminalFailure || p.sessionID == "" || p.sessionID != sessionID {
+		p.stateMu.Unlock()
+		p.failClosedPeer(message.ID, -32602, "invalid params")
+		p.noteRefusal(parsed.public.Method, "unowned")
+		p.recordEvidence(cursorEvidenceRecord{Generation: generation, RequestID: requestID, Method: parsed.public.Method, Digest: parsed.public.Digest, Outcome: "refused"})
+		p.observeEvent(AdapterEvent{ErrorCode: ErrorDecisionRefused})
+		return
+	}
+	if existing := p.held[requestID]; existing != nil {
+		p.stateMu.Unlock()
+		p.noteRefusal(parsed.public.Method, "collision")
+		p.recordEvidence(cursorEvidenceRecord{Generation: generation, RequestID: requestID, Method: parsed.public.Method, Digest: parsed.public.Digest, Outcome: "refused"})
+		p.observeEvent(AdapterEvent{ErrorCode: ErrorDecisionRefused})
+		return
+	}
+	if len(p.held) >= maxCursorPendingDecisions {
+		p.stateMu.Unlock()
+		p.cancelRPC(message.ID)
+		p.noteRefusal(parsed.public.Method, "overflow")
+		p.recordEvidence(cursorEvidenceRecord{Generation: generation, RequestID: requestID, Method: parsed.public.Method, Digest: parsed.public.Digest, Outcome: "refused"})
+		p.observeEvent(AdapterEvent{ErrorCode: ErrorDecisionRefused})
+		return
+	}
+	parsed.timer = time.AfterFunc(ttl, func() { p.expireHeld(requestID) })
 	p.held[requestID] = parsed
 	p.stateMu.Unlock()
 	p.recordEvidence(cursorEvidenceRecord{
-		Generation: p.generation, RequestID: requestID, Method: parsed.public.Method, Digest: parsed.public.Digest,
+		Generation: generation, RequestID: requestID, Method: parsed.public.Method, Digest: parsed.public.Digest,
 		Outcome: "pending", ToolKind: parsed.public.ToolKind,
 	})
 }
@@ -384,7 +403,7 @@ func parseCursorPermission(message cursorRPCMessage, sessionID, generation strin
 			Kind     string `json:"kind"`
 		} `json:"options"`
 	}
-	if json.Unmarshal(message.Params, &params) != nil || params.SessionID == "" || (sessionID != "" && params.SessionID != sessionID) || params.ToolCall == nil {
+	if json.Unmarshal(message.Params, &params) != nil || sessionID == "" || params.SessionID != sessionID || params.ToolCall == nil {
 		return nil, false
 	}
 	if !validOpaqueID(params.ToolCall.ToolCallID) || len(params.Options) == 0 || len(params.Options) > 8 {
@@ -452,7 +471,7 @@ func parseCursorQuestion(message cursorRPCMessage, sessionID, generation string)
 	if json.Unmarshal(message.Params, &params) != nil {
 		return nil, false
 	}
-	if params.SessionID != "" && sessionID != "" && params.SessionID != sessionID {
+	if sessionID == "" || (params.SessionID != "" && params.SessionID != sessionID) {
 		return nil, false
 	}
 	if !validOpaqueID(params.ToolCallID) || len(params.Questions) != 1 || params.Questions[0].AllowMultiple {
@@ -483,13 +502,9 @@ func parseCursorQuestion(message cursorRPCMessage, sessionID, generation string)
 		options = append(options, DecisionOption{ID: option.ID, Label: label, Kind: "choice"})
 	}
 	raw, _ := json.Marshal(params.Questions)
-	boundSession := sessionID
-	if boundSession == "" {
-		boundSession = params.SessionID
-	}
 	incomplete := titleTrunc || promptTrunc
 	display := title + "\x00" + prompt + "\x00" + cursorOptionBinding(options)
-	digest := cursorDecisionDigest(generation, message.Method, boundSession, params.ToolCallID, "", raw, optionIDs, display)
+	digest := cursorDecisionDigest(generation, message.Method, sessionID, params.ToolCallID, "", raw, optionIDs, display)
 	public := PendingDecision{
 		RequestID: cursorDecisionRequestID(generation, message.ID, message.Method), Generation: generation,
 		Method: message.Method, Kind: DecisionQuestion, Digest: digest, OptionIDs: optionIDs,
@@ -511,7 +526,7 @@ func parseCursorPlan(message cursorRPCMessage, sessionID, generation string) (*c
 	if json.Unmarshal(message.Params, &params) != nil {
 		return nil, false
 	}
-	if params.SessionID != "" && sessionID != "" && params.SessionID != sessionID {
+	if sessionID == "" || (params.SessionID != "" && params.SessionID != sessionID) {
 		return nil, false
 	}
 	if !validOpaqueID(params.ToolCallID) || strings.TrimSpace(params.Plan) == "" || len(params.Plan) > maxTextBytes {
@@ -535,17 +550,13 @@ func parseCursorPlan(message cursorRPCMessage, sessionID, generation string) (*c
 		{ID: "accepted", Label: "accepted", Kind: "accepted"},
 		{ID: "rejected", Label: "rejected", Kind: "rejected"},
 	}
-	boundSession := sessionID
-	if boundSession == "" {
-		boundSession = params.SessionID
-	}
 	incomplete := titleTrunc || overviewTrunc || planTrunc || len(params.Plan) > maxCursorInspectBytes
 	detail := plan
 	if overview != "" {
 		detail = overview + "\n" + plan
 	}
 	display := title + "\x00" + detail
-	digest := cursorDecisionDigest(generation, message.Method, boundSession, params.ToolCallID, "", []byte(params.Plan), optionIDs, display)
+	digest := cursorDecisionDigest(generation, message.Method, sessionID, params.ToolCallID, "", []byte(params.Plan), optionIDs, display)
 	public := PendingDecision{
 		RequestID: cursorDecisionRequestID(generation, message.ID, message.Method), Generation: generation,
 		Method: message.Method, Kind: DecisionPlan, Digest: digest, OptionIDs: optionIDs,
@@ -622,11 +633,10 @@ func inspectableText(value string, max int) (string, bool, bool) {
 }
 
 func closedToolKind(kind string) string {
-	switch strings.TrimSpace(kind) {
+	kind = strings.TrimSpace(kind)
+	switch kind {
 	case "read", "edit", "delete", "move", "search", "execute", "think", "fetch", "other":
 		return kind
-	case "":
-		return "other"
 	default:
 		return "other"
 	}

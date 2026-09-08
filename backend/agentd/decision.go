@@ -80,6 +80,14 @@ func validateCursorEvidenceRecord(record cursorEvidenceRecord) error {
 	if record.Authority != "" && record.Authority != DecisionAuthorityLocalOperator {
 		return errors.New("cursor evidence authority is invalid")
 	}
+	if record.Method != closedPeerMethod(record.Method) {
+		return errors.New("cursor evidence method is invalid")
+	}
+	switch record.ToolKind {
+	case "", "read", "edit", "delete", "move", "search", "execute", "think", "fetch", "other", "message":
+	default:
+		return errors.New("cursor evidence tool kind is invalid")
+	}
 	return nil
 }
 

@@ -81,6 +81,21 @@ func cursorOwnedStart(t *testing.T, profile dispatchprofile.Profile) StartReques
 	}
 }
 
+func cursorHelperPermission(sessionID, kind string) map[string]any {
+	return map[string]any{
+		"sessionId": sessionID,
+		"toolCall": map[string]any{
+			"toolCallId": "call-read", "kind": kind, "title": "Read README.md",
+			"rawInput": map[string]string{"path": "README.md"},
+		},
+		"options": []map[string]string{
+			{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+			{"optionId": "reject-once", "name": "Reject once", "kind": "reject_once"},
+			{"optionId": "allow-always", "name": "Allow always", "kind": "allow_always"},
+		},
+	}
+}
+
 func cursorHelperSessionNew(currentModelID string) map[string]any {
 	return map[string]any{
 		"sessionId": "sess-owned",
@@ -600,6 +615,96 @@ func TestCursorControlCharacterOptionsFailClosed(t *testing.T) {
 	}
 }
 
+func TestClosedToolKindAndEvidenceBounds(t *testing.T) {
+	padded := strings.Repeat(" ", 200000) + "read" + strings.Repeat("\n", 6)
+	if got := closedToolKind(padded); got != "read" {
+		t.Fatalf("kind=%q len=%d", got, len(got))
+	}
+	record := cursorEvidenceRecord{
+		Key: "evidence-kind", Generation: "gen", Method: "session/request_permission",
+		Outcome: "pending", ToolKind: closedToolKind(padded), At: time.Now().UTC(),
+	}
+	if err := validateCursorEvidenceRecord(record); err != nil {
+		t.Fatal(err)
+	}
+	record.ToolKind = padded
+	if err := validateCursorEvidenceRecord(record); err == nil {
+		t.Fatal("padded tool kind was persisted")
+	}
+	record.ToolKind = "read"
+	record.Method = "session/request_permission\n"
+	if err := validateCursorEvidenceRecord(record); err == nil {
+		t.Fatal("control method was persisted")
+	}
+}
+
+func TestCursorEarlyAndForeignSessionDecisionsFailClosed(t *testing.T) {
+	for _, tc := range []struct{ mode, reason string }{
+		{"perm-early", "unowned"},
+		{"perm-foreign", "invalid"},
+	} {
+		adapter, _ := newTestCursorAdapter(t, tc.mode)
+		process, err := adapter.Start(context.Background(), cursorOwnedStart(t, cursorTestProfile(t)), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		refusals := waitCursorRefusal(t, process, "session/request_permission", tc.reason)
+		if got := process.(DecisionProcess).PendingDecisions(); len(got) != 0 {
+			t.Fatalf("%s pending=%+v refusals=%+v", tc.mode, got, refusals)
+		}
+		if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: tc.mode + "-stop"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestCursorPaddedToolKindStaysClosed(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "perm-padded")
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, cursorTestProfile(t)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := waitCursorPending(t, process, 1)
+	if pending[0].ToolKind != "read" {
+		t.Fatalf("tool kind=%q", pending[0].ToolKind)
+	}
+	encoded, err := json.Marshal(pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCursorPublicContent(t, encoded, strings.Repeat(" ", 32), "\nread")
+	for _, record := range process.(*cursorProcess).EvidenceRecords() {
+		if record.ToolKind != "" && record.ToolKind != closedToolKind(record.ToolKind) {
+			t.Fatalf("evidence tool kind leaked: %q", record.ToolKind)
+		}
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "padded-stop"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCursorDuplicateRPCDecisionCollisionPreservesOriginal(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "perm-dup")
+	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, cursorTestProfile(t)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := waitCursorPending(t, process, 1)
+	refusals := waitCursorRefusal(t, process, "session/request_permission", "collision")
+	if len(pending) != 1 || pending[0].ToolKind != "read" {
+		t.Fatalf("pending=%+v refusals=%+v", pending, refusals)
+	}
+	original := pending[0].RequestID
+	cp := process.(*cursorProcess)
+	cp.expireHeld(original)
+	if got := process.(DecisionProcess).PendingDecisions(); len(got) != 0 {
+		t.Fatalf("expired original revived a replacement: %+v", got)
+	}
+	if _, err := process.Stop(context.Background(), ControlRequest{CorrelationID: "dup-stop"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCursorIncompletePlanRejectsSilentApproval(t *testing.T) {
 	adapter, _ := newTestCursorAdapter(t, "plan-overflow")
 	process, err := adapter.Start(context.Background(), cursorOwnedStart(t, cursorTestProfile(t)), nil)
@@ -876,6 +981,24 @@ func waitCursorInboxReady(t *testing.T, process Process) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+func waitCursorRefusal(t *testing.T, process Process, method, reason string) []DecisionRefusal {
+	t.Helper()
+	decider, ok := process.(DecisionProcess)
+	if !ok {
+		t.Fatal("cursor process does not implement decisions")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		refusals := decider.DecisionRefusals()
+		if hasDecisionRefusal(refusals, method, reason) {
+			return refusals
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("refusals=%+v pending=%+v", decider.DecisionRefusals(), decider.PendingDecisions())
+	return nil
 }
 
 func waitCursorPending(t *testing.T, process Process, n int) []PendingDecision {
@@ -1258,7 +1381,7 @@ func TestCursorACPHelperProcess(t *testing.T) {
 					promptWaiting = nil
 				}
 			}
-			if mode == "perm-hold" || mode == "question-hold" || mode == "plan-hold" || mode == "plan-overflow" {
+			if mode == "perm-hold" || mode == "perm-padded" || mode == "perm-dup" || mode == "question-hold" || mode == "plan-hold" || mode == "plan-overflow" {
 				delete(pendingHold, id)
 				if promptWaiting != nil && len(pendingHold) == 0 {
 					completePrompt(promptWaiting)
@@ -1299,6 +1422,11 @@ func TestCursorACPHelperProcess(t *testing.T) {
 				respond(id, result)
 				continue
 			}
+			if mode == "perm-early" {
+				request("perm-1", "session/request_permission", cursorHelperPermission("sess-owned", "read"))
+				respond(id, cursorHelperSessionNew(current))
+				continue
+			}
 			respond(id, cursorHelperSessionNew(current))
 			if mode == "permission" {
 				request("perm-1", "session/request_permission", map[string]any{
@@ -1314,18 +1442,20 @@ func TestCursorACPHelperProcess(t *testing.T) {
 			}
 			if mode == "perm-hold" {
 				pendingHold["perm-1"] = true
-				request("perm-1", "session/request_permission", map[string]any{
-					"sessionId": "sess-owned",
-					"toolCall": map[string]any{
-						"toolCallId": "call-read", "kind": "read", "title": "Read README.md",
-						"rawInput": map[string]string{"path": "README.md"},
-					},
-					"options": []map[string]string{
-						{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
-						{"optionId": "reject-once", "name": "Reject once", "kind": "reject_once"},
-						{"optionId": "allow-always", "name": "Allow always", "kind": "allow_always"},
-					},
-				})
+				request("perm-1", "session/request_permission", cursorHelperPermission("sess-owned", "read"))
+			}
+			if mode == "perm-foreign" {
+				request("perm-1", "session/request_permission", cursorHelperPermission("sess-other", "read"))
+			}
+			if mode == "perm-padded" {
+				pendingHold["perm-1"] = true
+				request("perm-1", "session/request_permission", cursorHelperPermission("sess-owned", strings.Repeat(" ", 200000)+"read"+"\n\n"))
+			}
+			if mode == "perm-dup" {
+				pendingHold["perm-1"] = true
+				params := cursorHelperPermission("sess-owned", "read")
+				request("perm-1", "session/request_permission", params)
+				request("perm-1", "session/request_permission", params)
 			}
 			if mode == "perm-control" {
 				request("perm-1", "session/request_permission", map[string]any{
@@ -1397,7 +1527,7 @@ func TestCursorACPHelperProcess(t *testing.T) {
 			if mode == "eof-prompt" {
 				os.Exit(0)
 			}
-			if mode == "perm-hold" || mode == "question-hold" || mode == "plan-hold" || mode == "plan-overflow" {
+			if mode == "perm-hold" || mode == "perm-padded" || mode == "perm-dup" || mode == "question-hold" || mode == "plan-hold" || mode == "plan-overflow" {
 				if len(pendingHold) > 0 {
 					promptWaiting = id
 					continue

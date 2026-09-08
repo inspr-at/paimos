@@ -404,10 +404,11 @@ type cursorProcess struct {
 	observe  func(AdapterEvent)
 	evidence *cursorEvidenceStore
 
-	writeMu sync.Mutex
-	rpcMu   sync.Mutex
-	nextID  int
-	pending map[string]chan cursorRPCMessage
+	writeMu      sync.Mutex
+	rpcMu        sync.Mutex
+	nextID       int
+	pending      map[string]chan cursorRPCMessage
+	sessionNewID string
 
 	stateMu           sync.Mutex
 	sessionID         string
@@ -452,10 +453,17 @@ func (p *cursorProcess) AccountSelection() (string, string) {
 }
 
 func (p *cursorProcess) setSession(sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || !validOpaqueID(sessionID) {
+		return errors.New("Cursor ACP session is invalid")
+	}
 	p.stateMu.Lock()
 	defer p.stateMu.Unlock()
 	if p.sessionID != "" {
-		return errors.New("Cursor ACP session is already bound")
+		if p.sessionID != sessionID {
+			return errors.New("Cursor ACP session is already bound")
+		}
+		return nil
 	}
 	p.sessionID = sessionID
 	return nil
@@ -487,8 +495,10 @@ func (p *cursorProcess) readLoop(reader io.Reader) {
 			return
 		}
 		if len(message.ID) > 0 && message.Method == "" {
+			id := string(message.ID)
+			p.bindSessionFromResponse(id, message.Result)
 			p.rpcMu.Lock()
-			response := p.pending[string(message.ID)]
+			response := p.pending[id]
 			p.rpcMu.Unlock()
 			if response != nil {
 				select {
@@ -590,6 +600,22 @@ func rawJSON(value json.RawMessage) any {
 	return decoded
 }
 
+func (p *cursorProcess) bindSessionFromResponse(id string, result json.RawMessage) {
+	p.rpcMu.Lock()
+	expect := p.sessionNewID
+	p.rpcMu.Unlock()
+	if expect == "" || id != expect || len(result) == 0 {
+		return
+	}
+	var created struct {
+		SessionID string `json:"sessionId"`
+	}
+	if json.Unmarshal(result, &created) != nil {
+		return
+	}
+	_ = p.setSession(created.SessionID)
+}
+
 func (p *cursorProcess) send(value any) error {
 	body, err := json.Marshal(value)
 	if err != nil {
@@ -628,6 +654,9 @@ func (p *cursorProcess) roundTrip(ctx context.Context, method string, params any
 	id := strconv.Itoa(requestID)
 	response := make(chan cursorRPCMessage, 1)
 	p.pending[id] = response
+	if method == "session/new" {
+		p.sessionNewID = id
+	}
 	p.rpcMu.Unlock()
 	defer func() {
 		p.rpcMu.Lock()
