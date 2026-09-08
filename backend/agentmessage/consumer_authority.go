@@ -30,6 +30,8 @@ var (
 	ErrConsumerStorage     = errors.New("consumer_storage_unavailable")
 )
 
+var consumerBindingSQL = `SELECT s.project_agent_id,s.agent_name,s.harness,s.phase FROM harness_sessions s JOIN lifecycle_runtime_sessions own ON own.session_id=s.id JOIN lifecycle_runtimes runtime ON runtime.id=own.runtime_id WHERE s.id=? AND s.project_id=? AND own.runtime_id=? AND own.generation=? AND s.management_mode='managed' AND s.host=? AND ` + lifecyclefence.OwnershipSQLRuntimeS
+
 type ConsumerCredentials struct {
 	Principal                                 auth.Principal
 	RuntimeLease, ConsumerLease, AttemptNonce string
@@ -119,7 +121,7 @@ func consumerBinding(ctx context.Context, tx *sql.Tx, c ConsumerCredentials, pro
 	}
 	var agentID int64
 	var name, harness, phase string
-	e = tx.QueryRowContext(ctx, `SELECT s.project_agent_id,s.agent_name,s.harness,s.phase FROM harness_sessions s JOIN lifecycle_runtime_sessions own ON own.session_id=s.id JOIN lifecycle_runtimes runtime ON runtime.id=own.runtime_id WHERE s.id=? AND s.project_id=? AND own.runtime_id=? AND own.generation=? AND s.management_mode='managed' AND s.host=? AND `+lifecyclefence.RuntimeSessionOwnershipSQL("runtime", "s"), r.SessionID, project, r.RuntimeID, r.SessionGeneration, host).Scan(&agentID, &name, &harness, &phase)
+	e = tx.QueryRowContext(ctx, consumerBindingSQL, r.SessionID, project, r.RuntimeID, r.SessionGeneration, host).Scan(&agentID, &name, &harness, &phase)
 	if e != nil || (live && phase == "stopped") {
 		return consumerOwner{}, ErrConsumerUnavailable
 	}

@@ -16,6 +16,22 @@ import (
 
 const maxClosedTargetRecoveries = 8
 
+var closedTargetReplacementSQL = `SELECT target.id,target.version,target.target_kind,target.maximum_level,target.role,target.adapter,
+		binding.runtime_id,runtime.generation,binding.generation,runtime.user_id,runtime.api_key_id
+		FROM harness_sessions session
+		JOIN agent_message_targets target ON target.id=session.message_target_id
+		JOIN lifecycle_runtime_sessions binding ON binding.session_id=session.id
+		JOIN lifecycle_runtimes runtime ON runtime.id=binding.runtime_id
+		WHERE session.id=? AND session.project_id=? AND session.management_mode='managed' AND session.phase<>'stopped'
+		 AND session.steer_mode='owned' AND session.advertised_inbox=1 AND session.advertised_status=1
+		 AND session.heartbeat_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now',?)
+		 AND target.instance=? AND target.project_id=? AND target.address=? AND target.enabled=1
+		 AND target.adapter='managed_harness' AND target.target_kind='harness_session'
+		 AND runtime.project_id=? AND runtime.machine_id=session.host
+		 AND runtime.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 AND runtime.user_id>0 AND runtime.api_key_id>0
+		 AND ` + lifecyclefence.OwnershipSQLRuntimeSession
+
 // RecoveryAuthority reauthorizes the current human operator inside the same
 // transaction that inspects or appends recovery evidence.
 type RecoveryAuthority func(context.Context, *sql.Tx, int64) (actorUserID int64, err error)
@@ -238,21 +254,7 @@ func loadClosedTargetRecoveryFacts(ctx context.Context, tx *sql.Tx, in ClosedTar
 	}
 	facts.plan.EffectiveTarget.HarnessSessionID = in.ExpectedClosedSessionID
 	var replacementKind string
-	err = tx.QueryRowContext(ctx, `SELECT target.id,target.version,target.target_kind,target.maximum_level,target.role,target.adapter,
-		binding.runtime_id,runtime.generation,binding.generation,runtime.user_id,runtime.api_key_id
-		FROM harness_sessions session
-		JOIN agent_message_targets target ON target.id=session.message_target_id
-		JOIN lifecycle_runtime_sessions binding ON binding.session_id=session.id
-		JOIN lifecycle_runtimes runtime ON runtime.id=binding.runtime_id
-		WHERE session.id=? AND session.project_id=? AND session.management_mode='managed' AND session.phase<>'stopped'
-		 AND session.steer_mode='owned' AND session.advertised_inbox=1 AND session.advertised_status=1
-		 AND session.heartbeat_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now',?)
-		 AND target.instance=? AND target.project_id=? AND target.address=? AND target.enabled=1
-		 AND target.adapter='managed_harness' AND target.target_kind='harness_session'
-		 AND runtime.project_id=? AND runtime.machine_id=session.host
-		 AND runtime.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 AND runtime.user_id>0 AND runtime.api_key_id>0
-		 AND `+lifecyclefence.RuntimeSessionOwnershipSQL("runtime", "session"),
+	err = tx.QueryRowContext(ctx, closedTargetReplacementSQL,
 		in.ReplacementSessionID, in.ProjectID, "-90 seconds", instanceName(), in.ProjectID, facts.plan.Address, in.ProjectID).Scan(
 		&facts.plan.ReplacementTarget.TargetID, &facts.plan.ReplacementTarget.TargetVersion, &replacementKind,
 		&facts.replacementMaximum, &facts.replacementRole, &facts.replacementAdapter,

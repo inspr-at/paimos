@@ -50,3 +50,11 @@ func sqlIdent(name string) string {
 	}
 	return name
 }
+
+// Production alias pairs. Callers bind user values with placeholders; these
+// identifiers are compile-time table aliases, never request input.
+var (
+	OwnershipSQLRuntimeS       = RuntimeSessionOwnershipSQL("runtime", "s")
+	OwnershipSQLRuntimeSession = RuntimeSessionOwnershipSQL("runtime", "session")
+	OwnershipSQLRuntimeHarness = RuntimeSessionOwnershipSQL("runtime", "harness")
+)

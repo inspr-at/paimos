@@ -7,12 +7,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	paimosdb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/lifecyclefence"
 )
 
 type closedTargetFixture struct {
@@ -572,4 +574,22 @@ func newClosedTargetFixtureOwned(t *testing.T, oldRegistration, newRegistration 
 		Authority: func(context.Context, *sql.Tx, int64) (int64, error) { return actor, nil }}
 	return closedTargetFixture{service: service, project: project, actor: actor, delivery: deliveries[0],
 		oldTarget: oldTarget, newTarget: newTarget, oldSession: oldSession, newSession: newSession, input: input}
+}
+
+func TestClosedTargetReplacementSQLKeepsOwnershipFence(t *testing.T) {
+	if !strings.Contains(closedTargetReplacementSQL, lifecyclefence.OwnershipSQLRuntimeSession) {
+		t.Fatal("replacement query lost ownership fence")
+	}
+	if !strings.Contains(closedTargetReplacementSQL, "session.account_label") {
+		t.Fatal("missing session alias")
+	}
+}
+
+func TestConsumerBindingSQLKeepsOwnershipFence(t *testing.T) {
+	if !strings.Contains(consumerBindingSQL, lifecyclefence.OwnershipSQLRuntimeS) {
+		t.Fatal("consumer binding query lost ownership fence")
+	}
+	if !strings.Contains(consumerBindingSQL, "s.account_label") {
+		t.Fatal("missing session alias")
+	}
 }

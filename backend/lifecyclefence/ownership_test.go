@@ -4,6 +4,7 @@ package lifecyclefence
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -58,5 +59,48 @@ CREATE TABLE session_row(account_label TEXT, account_key TEXT, dispatch_profile_
 	}
 	if RuntimeSessionOwnershipSQL("runtime;drop", "session") != "(0)" {
 		t.Fatal("non-identifier alias must fail closed")
+	}
+}
+
+func TestProductionOwnershipSQLParity(t *testing.T) {
+	pairs := []struct {
+		name    string
+		got     string
+		runtime string
+		session string
+	}{
+		{"runtime,s", OwnershipSQLRuntimeS, "runtime", "s"},
+		{"runtime,session", OwnershipSQLRuntimeSession, "runtime", "session"},
+		{"runtime,harness", OwnershipSQLRuntimeHarness, "runtime", "harness"},
+	}
+	needles := []string{
+		"schema_version",
+		"account_scopes",
+		"account_label",
+		"account_key",
+		"dispatch_profile_id",
+		"dispatch_profile_version",
+		"=3 THEN CASE WHEN EXISTS(",
+		"json_each(",
+		"WHEN json_extract(",
+		"THEN 1",
+		"ELSE 0 END)",
+	}
+	for _, tc := range pairs {
+		want := RuntimeSessionOwnershipSQL(tc.runtime, tc.session)
+		if tc.got != want {
+			t.Fatalf("%s: production fragment drifted from RuntimeSessionOwnershipSQL(%q, %q)", tc.name, tc.runtime, tc.session)
+		}
+		for _, needle := range needles {
+			if !strings.Contains(tc.got, needle) {
+				t.Fatalf("%s: missing ownership condition %q", tc.name, needle)
+			}
+		}
+		if !strings.Contains(tc.got, tc.runtime+".registration_json") {
+			t.Fatalf("%s: missing runtime alias", tc.name)
+		}
+		if !strings.Contains(tc.got, tc.session+".account_label") {
+			t.Fatalf("%s: missing session alias", tc.name)
+		}
 	}
 }
