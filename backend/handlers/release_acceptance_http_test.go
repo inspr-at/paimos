@@ -18,8 +18,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/brand"
+	"github.com/inspr-at/paimos/backend/contracts"
 	"github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/externalstage"
 	"github.com/inspr-at/paimos/backend/handlers"
 	"github.com/inspr-at/paimos/backend/mailer"
 	"github.com/inspr-at/paimos/backend/releaseacceptance"
@@ -384,12 +387,91 @@ func TestReleaseAcceptanceHTTPStaleReplayConcurrentAndFailedMail(t *testing.T) {
 
 func insertHTTPProjectEnv(t *testing.T, projectID int64, name string) int64 {
 	t.Helper()
-	res, err := db.DB.Exec(`INSERT INTO project_environments(project_id, name, url, host_alias, host_ip, sort_order) VALUES(?,?,'','','',0)`, projectID, name)
+	res, err := db.DB.Exec(`INSERT INTO project_environments(project_id, name, url, host_alias, host_ip, sort_order)
+		VALUES(?,?,?,?,?,0)`, projectID, name, "https://old-target.example.invalid", "qa-old-target", "192.0.2.10")
 	if err != nil {
 		t.Fatal(err)
 	}
 	id, _ := res.LastInsertId()
 	return id
+}
+
+func adminSessionCredential(t *testing.T) string {
+	t.Helper()
+	var cred string
+	if err := db.DB.QueryRow(`SELECT credential_id FROM sessions WHERE user_id=? AND expires_at>datetime('now') ORDER BY created_at DESC LIMIT 1`,
+		userIDByUsername(t, "admin")).Scan(&cred); err != nil {
+		t.Fatal(err)
+	}
+	return cred
+}
+
+func seedHTTPPharosOwner(t *testing.T, projectID, batchID int64, environment string) (registrationID, apiKeyID, userID int64, deliveryKey string) {
+	t.Helper()
+	var deliveryID int64
+	if err := db.DB.QueryRow(`SELECT delivery_id FROM baseline_batch_batches WHERE id=? AND project_id=?`, batchID, projectID).Scan(&deliveryID); err != nil || deliveryID <= 0 {
+		t.Fatalf("batch delivery missing: %v %d", err, deliveryID)
+	}
+	if err := db.DB.QueryRow(`SELECT delivery_key FROM deliveries WHERE id=?`, deliveryID).Scan(&deliveryKey); err != nil {
+		t.Fatal(err)
+	}
+	return seedHTTPPharosOwnerOnKey(t, projectID, deliveryKey, environment)
+}
+
+func seedHTTPPharosOnNewDelivery(t *testing.T, projectID int64) int64 {
+	t.Helper()
+	var next int64
+	if err := db.DB.QueryRow(`SELECT COALESCE(MAX(issue_number),0)+1 FROM issues WHERE project_id=?`, projectID).Scan(&next); err != nil {
+		t.Fatal(err)
+	}
+	issue, err := db.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title) VALUES(?,?,'ticket','other-pharos')`, projectID, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, _ := issue.LastInsertId()
+	deliveryKey := fmt.Sprintf("issue:%d", issueID)
+	delivery, err := db.DB.Exec(`INSERT INTO deliveries(issue_id,delivery_key,project_id_hint,created_at,updated_at)
+		VALUES(?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, issueID, deliveryKey, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = delivery.LastInsertId()
+	regID, _, _, _ := seedHTTPPharosOwnerOnKey(t, projectID, deliveryKey, "staging")
+	return regID
+}
+
+func seedHTTPPharosOwnerOnKey(t *testing.T, projectID int64, deliveryKey, environment string) (registrationID, apiKeyID, userID int64, key string) {
+	t.Helper()
+	user, err := db.DB.Exec(`INSERT INTO users(username,password,role,status,email) VALUES(?,?,?,'active',?)`,
+		"pharos-http-"+uuid.NewString()[:8], "x", "member", "pharos-http-"+uuid.NewString()[:8]+"@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ = user.LastInsertId()
+	if _, err := db.DB.Exec(`INSERT INTO project_members(project_id,user_id,access_level) VALUES(?,?,'editor')`, projectID, userID); err != nil {
+		t.Fatal(err)
+	}
+	keyRow, err := db.DB.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes) VALUES(?,?,?,?,?)`,
+		userID, "pharos-other", strings.ReplaceAll(uuid.NewString()+uuid.NewString(), "-", "")[:64], "paimos_pharos", "*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiKeyID, _ = keyRow.LastInsertId()
+	stage, err := externalstage.NewService(db.DB, externalstage.Options{FixtureDigest: contracts.ExternalStageV1FixtureDigest()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminID := userIDByUsername(t, "admin")
+	reg, err := stage.RegisterReporter(context.Background(), externalstage.Principal{
+		UserID: adminID, Kind: "session", SessionCredentialID: adminSessionCredential(t),
+	}, deliveryKey, "register-other-pharos-"+uuid.NewString(), externalstage.RegisterReporterRequest{
+		APIKeyID: apiKeyID, ReporterClass: externalstage.ReporterClassPharos,
+		ReporterRole: externalstage.ReporterRoleOwner, Workflow: "deploy-" + environment, Environment: environment,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reg.RegistrationID, apiKeyID, userID, deliveryKey
 }
 
 func TestReleaseAcceptanceHTTPRecordExternalAndStandingPolicy(t *testing.T) {
@@ -543,6 +625,26 @@ func TestReleaseAcceptanceHTTPRecordExternalAndStandingPolicy(t *testing.T) {
 		t.Fatalf("standing policy confirmation missing: %+v", acc.Confirmations)
 	}
 
+	moved := ts.put(t, fmt.Sprintf("/api/projects/%d/environments/%d", projectID, envID), ts.adminCookie, map[string]any{
+		"name": "production", "url": "https://new-target.example.invalid",
+		"host_alias": "qa-new-target", "host_ip": "192.0.2.20", "sort_order": 0,
+	})
+	if moved.StatusCode != 200 {
+		t.Fatalf("PUT environment=%d %s", moved.StatusCode, baselineReadBody(moved))
+	}
+	moved.Body.Close()
+	afterMove := ts.get(t, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance", projectID, acc.Release.ID), ts.adminCookie)
+	acc = readAcceptance(t, afterMove)
+	if acc.DeploymentTarget != "" {
+		t.Fatalf("HTTP destination PUT kept digest: %q", acc.DeploymentTarget)
+	}
+	blockedMove := postAcceptance(t, ts, ts.memberCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/apply-policy", projectID, acc.Release.ID),
+		map[string]any{"policy_id": policy.ID})
+	if blockedMove.StatusCode != http.StatusForbidden {
+		t.Fatalf("apply after destination PUT=%d %s", blockedMove.StatusCode, baselineReadBody(blockedMove))
+	}
+	blockedMove.Body.Close()
+
 	if _, err := db.DB.Exec(`DELETE FROM project_environments WHERE id=?`, envID); err != nil {
 		t.Fatal(err)
 	}
@@ -580,4 +682,111 @@ func TestReleaseAcceptanceHTTPRecordExternalAndStandingPolicy(t *testing.T) {
 		t.Fatalf("apply revoked=%d %s", afterRevoke.StatusCode, baselineReadBody(afterRevoke))
 	}
 	afterRevoke.Body.Close()
+}
+
+func TestReleaseAcceptanceHTTPPharosTargetAuthority(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Accept pharos HTTP", "key": "APH"}))
+	memberID, externalID := seedAcceptancePeople(t, projectID)
+	acc := mintFromBuiltReceipt(t, ts, projectID)
+	cfg := putAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance", projectID, acc.Release.ID),
+		configureBody(memberID, externalID, acc.Revision, releaseacceptance.ModeCustomerOperated))
+	if cfg.StatusCode != 200 {
+		t.Fatalf("configure=%d %s", cfg.StatusCode, baselineReadBody(cfg))
+	}
+	acc = readAcceptance(t, cfg)
+	_ = insertHTTPProjectEnv(t, projectID, "production")
+	regID, apiKeyID, userID, deliveryKey := seedHTTPPharosOwner(t, projectID, acc.Release.BatchID, "production")
+
+	listed := ts.get(t, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance", projectID, acc.Release.ID), ts.adminCookie)
+	acc = readAcceptance(t, listed)
+	if acc.DeploymentTarget != "" {
+		t.Fatalf("pharos existence auto-bound over HTTP: %q", acc.DeploymentTarget)
+	}
+	found := false
+	for _, c := range acc.TargetCandidates {
+		if c.Kind == releaseacceptance.TargetKindPharosOwner && c.RegistrationID == regID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("HTTP candidates missing live pharos owner: %+v", acc.TargetCandidates)
+	}
+
+	wrongID := seedHTTPPharosOnNewDelivery(t, projectID)
+	wrong := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/deployment-target", projectID, acc.Release.ID),
+		map[string]any{"kind": "pharos_owner", "registration_id": wrongID})
+	if wrong.StatusCode != http.StatusBadRequest {
+		t.Fatalf("wrong delivery bind=%d %s", wrong.StatusCode, baselineReadBody(wrong))
+	}
+	wrong.Body.Close()
+
+	bound := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/deployment-target", projectID, acc.Release.ID),
+		map[string]any{"kind": "pharos_owner", "registration_id": regID})
+	if bound.StatusCode != 200 {
+		t.Fatalf("pharos bind=%d %s", bound.StatusCode, baselineReadBody(bound))
+	}
+	acc = readAcceptance(t, bound)
+	if acc.DeploymentTarget == "" || acc.DeploymentTargetKind != releaseacceptance.TargetKindPharosOwner {
+		t.Fatalf("HTTP pharos bind identity=%+v", acc)
+	}
+	boundRef := acc.DeploymentTarget
+
+	approved := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/acceptance-standing-policies", projectID), map[string]any{
+		"policy_ref": "policy_pharos_http", "content_digest": acc.Release.ContentDigest, "revision_seal": acc.Release.RevisionSeal,
+		"parties": []string{"party_delivery", "party_customer"}, "agreement_ref": "SOW-9",
+		"gaps":        []map[string]string{{"gap_ref": "gap_backup", "statement": "Backup restore not proven for this target."}},
+		"bounded_use": "Same approved baseline implementation updates only.", "expires_at": "2026-12-01T00:00:00Z",
+		"release_channel": acc.Release.ReleaseChannel, "artifact_digest": acc.Release.ArtifactDigest,
+		"target_ref": boundRef, "model_ref": "customer_operated",
+	})
+	if approved.StatusCode != 200 {
+		t.Fatalf("approve pharos=%d %s", approved.StatusCode, baselineReadBody(approved))
+	}
+	var policy releaseacceptance.StandingPolicy
+	decode(t, approved, &policy)
+
+	applied := postAcceptance(t, ts, ts.memberCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/apply-policy", projectID, acc.Release.ID),
+		map[string]any{"policy_id": policy.ID})
+	if applied.StatusCode != 200 {
+		t.Fatalf("apply pharos=%d %s", applied.StatusCode, baselineReadBody(applied))
+	}
+	applied.Body.Close()
+
+	if _, err := db.DB.Exec(`UPDATE api_keys SET disabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, apiKeyID); err != nil {
+		t.Fatal(err)
+	}
+	afterDisable := ts.get(t, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance", projectID, acc.Release.ID), ts.adminCookie)
+	acc = readAcceptance(t, afterDisable)
+	if acc.DeploymentTarget != "" {
+		t.Fatalf("disabled pharos key kept HTTP bind: %q", acc.DeploymentTarget)
+	}
+	blockedKey := postAcceptance(t, ts, ts.memberCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/apply-policy", projectID, acc.Release.ID),
+		map[string]any{"policy_id": policy.ID})
+	if blockedKey.StatusCode != http.StatusForbidden {
+		t.Fatalf("apply after disabled key=%d %s", blockedKey.StatusCode, baselineReadBody(blockedKey))
+	}
+	blockedKey.Body.Close()
+
+	stage, err := externalstage.NewService(db.DB, externalstage.Options{FixtureDigest: contracts.ExternalStageV1FixtureDigest()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stage.RevokeReporter(context.Background(), externalstage.Principal{
+		UserID: userIDByUsername(t, "admin"), Kind: "session", SessionCredentialID: adminSessionCredential(t),
+	}, deliveryKey, "revoke-http-pharos", regID); err != nil {
+		t.Fatal(err)
+	}
+	afterRevoke := ts.get(t, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance", projectID, acc.Release.ID), ts.adminCookie)
+	acc = readAcceptance(t, afterRevoke)
+	if acc.DeploymentTarget != "" {
+		t.Fatalf("revoked pharos fell back over HTTP: %q", acc.DeploymentTarget)
+	}
+	blocked := postAcceptance(t, ts, ts.memberCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/apply-policy", projectID, acc.Release.ID),
+		map[string]any{"policy_id": policy.ID})
+	if blocked.StatusCode != http.StatusForbidden {
+		t.Fatalf("apply after pharos revoke=%d %s", blocked.StatusCode, baselineReadBody(blocked))
+	}
+	blocked.Body.Close()
+	_ = userID
 }

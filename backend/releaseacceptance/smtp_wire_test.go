@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	appdb 	"github.com/inspr-at/paimos/backend/db"
+	appdb "github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/mailer"
 	"github.com/inspr-at/paimos/backend/mailer/smtptest"
 )

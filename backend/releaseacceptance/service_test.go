@@ -591,7 +591,7 @@ func TestPolicyExpiryAndBindings(t *testing.T) {
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expired approve err=%v", err)
 	}
-	envID := f.insertProjectEnv("production")
+	envID := f.insertProjectEnvDest("production", "https://old-target.example.invalid", "qa-old-target", "192.0.2.10")
 	got, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -607,8 +607,8 @@ func TestPolicyExpiryAndBindings(t *testing.T) {
 		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
 		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
 		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2026-12-01T00:00:00Z",
-		TargetRef:  "production",
-		ModelRef:   ModeCustomerOperated,
+		TargetRef: "production",
+		ModelRef:  ModeCustomerOperated,
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("environment name as target err=%v", err)
 	}
@@ -617,8 +617,8 @@ func TestPolicyExpiryAndBindings(t *testing.T) {
 		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
 		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
 		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2026-12-01T00:00:00Z",
-		TargetRef:  "ghcr:inspr-at/demo:acc",
-		ModelRef:   ModeCustomerOperated,
+		TargetRef: "ghcr:inspr-at/demo:acc",
+		ModelRef:  ModeCustomerOperated,
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unverified target err=%v", err)
 	}
@@ -632,6 +632,20 @@ func TestPolicyExpiryAndBindings(t *testing.T) {
 	}
 	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, okPolicy.ID); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := appdb.DB.Exec(`UPDATE project_environments SET url=?, host_alias=?, host_ip=?, updated_at=datetime('now') WHERE id=?`,
+		"https://new-target.example.invalid", "qa-new-target", "192.0.2.20", envID); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.DeploymentTarget != "" {
+		t.Fatalf("destination PUT kept bound digest: %q", moved.DeploymentTarget)
+	}
+	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, okPolicy.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("apply after destination PUT err=%v", err)
 	}
 	if _, err := appdb.DB.Exec(`DELETE FROM project_environments WHERE id=?`, envID); err != nil {
 		t.Fatal(err)
@@ -764,30 +778,121 @@ func TestExportMarksDeliveryState(t *testing.T) {
 	}
 }
 
-func TestPharosBindingDoesNotFallBackToProjectEnv(t *testing.T) {
+func TestPharosOwnerGraphBindRevokeAndAuthority(t *testing.T) {
 	f := openFixture(t)
-	rel := f.mint()
+	owner := f.seedPharosOwner("production")
+	rel := f.mintBatch(owner.BatchID)
 	f.configure(rel.Release.ID, ModeCustomerOperated)
-	_ = f.insertProjectEnv("production")
-	digest := targetDigest(targetIdentity{
-		Kind: TargetKindPharosOwner, ProjectID: f.projectID, RegistrationID: 999,
-		DeliveryID: 1, AttemptID: 1, EnvironmentSymbol: "production", CreatedAt: "2026-09-08T12:00:00.000Z",
-	})
-	if _, err := appdb.DB.Exec(`INSERT INTO acceptance_target_bindings(
-		project_id,release_id,kind,target_ref,registration_id,environment_id,delivery_id,attempt_id,
-		environment_symbol,bound_by,session_credential_id,bound_at)
-		VALUES(?,?,'pharos_owner',?,?,NULL,1,1,'production',?,?,?)`,
-		f.projectID, rel.Release.ID, digest, 999, f.adminID, f.admin.SessionCredentialID, f.svc.now()); err != nil {
-		t.Fatal(err)
-	}
+	envID := f.insertProjectEnv("production")
 	got, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.DeploymentTarget != "" {
-		t.Fatalf("missing Pharos registration fell back to project environment: %+v", got)
+		t.Fatalf("pharos existence auto-bound: %+v", got)
 	}
-	if !strings.Contains(got.TargetUnknownReason, "cannot fall back") {
-		t.Fatalf("reason=%q", got.TargetUnknownReason)
+	foundPharos := false
+	for _, c := range got.TargetCandidates {
+		if c.Kind == TargetKindPharosOwner && c.RegistrationID == owner.RegistrationID {
+			foundPharos = true
+		}
+	}
+	if !foundPharos {
+		t.Fatalf("live pharos owner missing from candidates: %+v", got.TargetCandidates)
+	}
+
+	wrong := f.seedPharosOwner("staging")
+	if _, err := f.svc.BindTarget(context.Background(), f.admin, f.projectID, rel.Release.ID, BindTargetRequest{
+		Kind: TargetKindPharosOwner, RegistrationID: wrong.RegistrationID,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("wrong delivery bind err=%v", err)
+	}
+
+	bound := f.bindPharos(rel.Release.ID, owner.RegistrationID)
+	if bound.DeploymentTargetLabel != "" && strings.Contains(strings.ToLower(bound.DeploymentTargetLabel), "http") {
+		t.Fatalf("portal label leaked destination: %q", bound.DeploymentTargetLabel)
+	}
+	policy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_pharos", bound.DeploymentTarget))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, policy.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	f.revokePharos(owner.DeliveryKey, owner.RegistrationID)
+	afterRevoke, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRevoke.DeploymentTarget != "" {
+		t.Fatalf("revoked pharos fell back to project env: %+v", afterRevoke)
+	}
+	if !strings.Contains(afterRevoke.TargetUnknownReason, "cannot fall back") {
+		t.Fatalf("reason=%q", afterRevoke.TargetUnknownReason)
+	}
+	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, policy.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("apply after revoke err=%v", err)
+	}
+	_ = envID
+}
+
+func TestPharosAuthorityLossInvalidatesPolicy(t *testing.T) {
+	cases := []struct {
+		name string
+		lose func(*fixture, pharosOwner)
+	}{
+		{"disabled key", func(f *fixture, o pharosOwner) {
+			if _, err := appdb.DB.Exec(`UPDATE api_keys SET disabled_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, o.APIKeyID); err != nil {
+				f.t.Fatal(err)
+			}
+		}},
+		{"expired key", func(f *fixture, o pharosOwner) {
+			if _, err := appdb.DB.Exec(`UPDATE api_keys SET expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour') WHERE id=?`, o.APIKeyID); err != nil {
+				f.t.Fatal(err)
+			}
+		}},
+		{"owner role", func(f *fixture, o pharosOwner) {
+			if _, err := appdb.DB.Exec(`UPDATE users SET role='external' WHERE id=?`, o.UserID); err != nil {
+				f.t.Fatal(err)
+			}
+		}},
+		{"membership", func(f *fixture, o pharosOwner) {
+			if _, err := appdb.DB.Exec(`UPDATE project_members SET access_level='none' WHERE project_id=? AND user_id=?`, f.projectID, o.UserID); err != nil {
+				f.t.Fatal(err)
+			}
+		}},
+		{"archived user", func(f *fixture, o pharosOwner) {
+			if _, err := appdb.DB.Exec(`UPDATE users SET status='archived' WHERE id=?`, o.UserID); err != nil {
+				f.t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := openFixture(t)
+			owner := f.seedPharosOwner("production")
+			rel := f.mintBatch(owner.BatchID)
+			f.configure(rel.Release.ID, ModeCustomerOperated)
+			bound := f.bindPharos(rel.Release.ID, owner.RegistrationID)
+			policy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_"+strings.ReplaceAll(tc.name, " ", "_"), bound.DeploymentTarget))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, policy.ID); err != nil {
+				t.Fatal(err)
+			}
+			tc.lose(f, owner)
+			got, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.DeploymentTarget != "" {
+				t.Fatalf("%s kept bound target: %+v", tc.name, got)
+			}
+			if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, policy.ID); !errors.Is(err, ErrForbidden) {
+				t.Fatalf("%s apply err=%v", tc.name, err)
+			}
+		})
 	}
 }

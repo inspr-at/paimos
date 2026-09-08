@@ -10,6 +10,7 @@ package releaseacceptance
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +19,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
 	"github.com/inspr-at/paimos/backend/brand"
+	"github.com/inspr-at/paimos/backend/contracts"
 	appdb "github.com/inspr-at/paimos/backend/db"
+	"github.com/inspr-at/paimos/backend/externalstage"
 	"github.com/inspr-at/paimos/backend/mailer"
 )
 
@@ -141,6 +144,11 @@ func (f *fixture) insertBatch() int64 {
 		f.t.Fatal(err)
 	}
 	issueID, _ := issue.LastInsertId()
+	return f.insertBatchForIssue(issueID, nil, nil)
+}
+
+func (f *fixture) insertBatchForIssue(issueID int64, deliveryID, attemptID any) int64 {
+	f.t.Helper()
 	draft, err := appdb.DB.Exec(`INSERT INTO baseline_batch_drafts(
 		project_id,revision,status,baseline_ref,baseline_revision,content_digest,revision_seal,stream_ref,
 		bounded_content_json,selected_requirement_refs_json,selected_constraint_refs_json,created_by,created_at,updated_at)
@@ -160,9 +168,9 @@ func (f *fixture) insertBatch() int64 {
 	key := "batch-acc-" + uuid.NewString()
 	batch, err := appdb.DB.Exec(`INSERT INTO baseline_batch_batches(
 		project_id,batch_key,draft_id,draft_revision,review_id,baseline_ref,content_digest,revision_seal,execution_mode,scope_json,worker_json,
-		issue_id,confirmation_json,idempotency_key,started_by,started_at)
-		VALUES(?,?,?,1,?,?,?,?,'manual','{}','{}',?,'{}',?,?,'2026-09-08T11:00:00Z')`,
-		f.projectID, key, draftID, reviewID, "baseline_7", testDigest, testSeal, issueID, "mint-"+uuid.NewString(), f.adminID)
+		issue_id,delivery_id,attempt_id,confirmation_json,idempotency_key,started_by,started_at)
+		VALUES(?,?,?,1,?,?,?,?,'manual','{}','{}',?,?,?,'{}',?,?,'2026-09-08T11:00:00Z')`,
+		f.projectID, key, draftID, reviewID, "baseline_7", testDigest, testSeal, issueID, deliveryID, attemptID, "mint-"+uuid.NewString(), f.adminID)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -171,9 +179,13 @@ func (f *fixture) insertBatch() int64 {
 }
 
 func (f *fixture) insertProjectEnv(name string) int64 {
+	return f.insertProjectEnvDest(name, "", "", "")
+}
+
+func (f *fixture) insertProjectEnvDest(name, url, alias, ip string) int64 {
 	f.t.Helper()
 	res, err := appdb.DB.Exec(`INSERT INTO project_environments(project_id, name, url, host_alias, host_ip, sort_order)
-		VALUES(?,?,'','','',0)`, f.projectID, name)
+		VALUES(?,?,?,?,?,0)`, f.projectID, name, url, alias, ip)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -193,6 +205,103 @@ func (f *fixture) bindProjectEnv(releaseID, envID int64) Acceptance {
 		f.t.Fatalf("bind did not store provenance identity: %+v", acc)
 	}
 	return acc
+}
+
+type pharosOwner struct {
+	RegistrationID int64
+	APIKeyID       int64
+	UserID         int64
+	DeliveryID     int64
+	DeliveryKey    string
+	BatchID        int64
+}
+
+func (f *fixture) seedPharosOwner(environment string) pharosOwner {
+	f.t.Helper()
+	var next int64
+	if err := appdb.DB.QueryRow(`SELECT COALESCE(MAX(issue_number),0)+1 FROM issues WHERE project_id=?`, f.projectID).Scan(&next); err != nil {
+		f.t.Fatal(err)
+	}
+	issue, err := appdb.DB.Exec(`INSERT INTO issues(project_id,issue_number,type,title) VALUES(?,?,'ticket','pharos-owner')`, f.projectID, next)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	issueID, _ := issue.LastInsertId()
+	deliveryKey := fmt.Sprintf("issue:%d", issueID)
+	delivery, err := appdb.DB.Exec(`INSERT INTO deliveries(issue_id,delivery_key,project_id_hint,created_at,updated_at)
+		VALUES(?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, issueID, deliveryKey, f.projectID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	deliveryID, _ := delivery.LastInsertId()
+	user, err := appdb.DB.Exec(`INSERT INTO users(username,password,role,status,email) VALUES(?,?,?,'active',?)`,
+		"pharos-owner-"+uuid.NewString()[:8], "x", "member", "pharos-owner@example.test")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	userID, _ := user.LastInsertId()
+	if _, err := appdb.DB.Exec(`INSERT INTO project_members(project_id,user_id,access_level) VALUES(?,?,'editor')`, f.projectID, userID); err != nil {
+		f.t.Fatal(err)
+	}
+	key, err := appdb.DB.Exec(`INSERT INTO api_keys(user_id,name,key_hash,key_prefix,scopes) VALUES(?,?,?,?,?)`,
+		userID, "pharos-owner", strings.ReplaceAll(uuid.NewString()+uuid.NewString(), "-", "")[:64], "paimos_pharos", "*")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	apiKeyID, _ := key.LastInsertId()
+	stage, err := externalstage.NewService(appdb.DB, externalstage.Options{FixtureDigest: contracts.ExternalStageV1FixtureDigest()})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	reg, err := stage.RegisterReporter(context.Background(), externalstage.Principal{
+		UserID: f.adminID, Kind: "session", SessionCredentialID: f.admin.SessionCredentialID,
+	}, deliveryKey, "register-pharos-"+uuid.NewString(), externalstage.RegisterReporterRequest{
+		APIKeyID: apiKeyID, ReporterClass: externalstage.ReporterClassPharos,
+		ReporterRole: externalstage.ReporterRoleOwner, Workflow: "deploy-production", Environment: environment,
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return pharosOwner{
+		RegistrationID: reg.RegistrationID, APIKeyID: apiKeyID, UserID: userID,
+		DeliveryID: deliveryID, DeliveryKey: deliveryKey, BatchID: f.insertBatchForIssue(issueID, deliveryID, nil),
+	}
+}
+
+func (f *fixture) bindPharos(releaseID, registrationID int64) Acceptance {
+	f.t.Helper()
+	acc, err := f.svc.BindTarget(context.Background(), f.admin, f.projectID, releaseID, BindTargetRequest{
+		Kind: TargetKindPharosOwner, RegistrationID: registrationID,
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if acc.DeploymentTarget == "" || !strings.HasPrefix(acc.DeploymentTarget, "sha256:") || acc.DeploymentTargetKind != TargetKindPharosOwner {
+		f.t.Fatalf("pharos bind identity=%+v", acc)
+	}
+	return acc
+}
+
+func (f *fixture) mintBatch(batchID int64) Acceptance {
+	f.t.Helper()
+	acc, err := f.svc.Mint(context.Background(), f.admin, f.projectID, batchID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return acc
+}
+
+func (f *fixture) revokePharos(deliveryKey string, registrationID int64) {
+	f.t.Helper()
+	stage, err := externalstage.NewService(appdb.DB, externalstage.Options{FixtureDigest: contracts.ExternalStageV1FixtureDigest()})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := stage.RevokeReporter(context.Background(), externalstage.Principal{
+		UserID: f.adminID, Kind: "session", SessionCredentialID: f.admin.SessionCredentialID,
+	}, deliveryKey, "revoke-pharos-"+uuid.NewString(), registrationID); err != nil {
+		f.t.Fatal(err)
+	}
 }
 
 func (f *fixture) standingPolicy(policyRef, targetRef string, extras ...func(*PolicyRequest)) PolicyRequest {

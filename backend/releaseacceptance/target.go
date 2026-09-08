@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/inspr-at/paimos/backend/externalstage"
 	"strings"
 )
 
@@ -52,7 +53,15 @@ type targetIdentity struct {
 	WorkflowSymbol    string `json:"workflow_symbol,omitempty"`
 	EnvironmentSymbol string `json:"environment_symbol,omitempty"`
 	EnvironmentID     int64  `json:"environment_id,omitempty"`
+	APIKeyID          int64  `json:"api_key_id,omitempty"`
+	UserID            int64  `json:"user_id,omitempty"`
+	ReporterID        int64  `json:"reporter_id,omitempty"`
+	AllowDeployment   int64  `json:"allow_deployment,omitempty"`
+	URL               string `json:"url,omitempty"`
+	HostAlias         string `json:"host_alias,omitempty"`
+	HostIP            string `json:"host_ip,omitempty"`
 	CreatedAt         string `json:"created_at,omitempty"`
+	UpdatedAt         string `json:"updated_at,omitempty"`
 }
 
 type storedBinding struct {
@@ -145,38 +154,38 @@ func loadPharosIdentity(ctx context.Context, tx *sql.Tx, rel ReleaseRecord, regi
 	if deliveryID == 0 {
 		return targetIdentity{}, fmt.Errorf("%w: batch has no delivery for a Pharos target", ErrInvalid)
 	}
-	var workflow, env, created, revoked sql.NullString
-	var regDelivery int64
-	err = tx.QueryRowContext(ctx, `SELECT delivery_id, COALESCE(workflow_symbol,''), COALESCE(environment_symbol,''), created_at, revoked_at
-		FROM external_stage_reporter_registrations
-		WHERE id=? AND project_id=? AND reporter_class='pharos' AND reporter_role='owner'`,
-		registrationID, rel.ProjectID).Scan(&regDelivery, &workflow, &env, &created, &revoked)
+	var workflow, env, created string
+	var regDelivery, apiKeyID, userID, reporterID, allowDeployment int64
+	err = tx.QueryRowContext(ctx, `SELECT registration.delivery_id, COALESCE(registration.workflow_symbol,''), COALESCE(registration.environment_symbol,''),
+		registration.created_at, registration.api_key_id, registration.user_id, registration.reporter_id, registration.allow_deployment
+		FROM external_stage_reporter_registrations registration
+		WHERE registration.id=? AND registration.project_id=? AND `+externalstage.LivePharosOwnerSQL,
+		registrationID, rel.ProjectID).Scan(&regDelivery, &workflow, &env, &created, &apiKeyID, &userID, &reporterID, &allowDeployment)
 	if err == sql.ErrNoRows {
 		return targetIdentity{}, fmt.Errorf("%w: pharos owner registration", ErrInvalid)
 	}
 	if err != nil {
 		return targetIdentity{}, err
 	}
-	if revoked.Valid && strings.TrimSpace(revoked.String) != "" {
-		return targetIdentity{}, fmt.Errorf("%w: pharos owner registration is revoked", ErrInvalid)
-	}
 	if regDelivery != deliveryID {
 		return targetIdentity{}, fmt.Errorf("%w: pharos registration is not on this release delivery", ErrInvalid)
 	}
-	if !validOpaqueRef(env.String) {
+	if !validOpaqueRef(env) {
 		return targetIdentity{}, fmt.Errorf("%w: pharos environment", ErrInvalid)
 	}
 	return targetIdentity{
 		Kind: TargetKindPharosOwner, ProjectID: rel.ProjectID, RegistrationID: registrationID,
-		DeliveryID: deliveryID, AttemptID: attemptID, WorkflowSymbol: workflow.String,
-		EnvironmentSymbol: env.String, CreatedAt: created.String,
+		DeliveryID: deliveryID, AttemptID: attemptID, WorkflowSymbol: workflow,
+		EnvironmentSymbol: env, CreatedAt: created, APIKeyID: apiKeyID, UserID: userID,
+		ReporterID: reporterID, AllowDeployment: allowDeployment,
 	}, nil
 }
 
 func loadProjectEnvIdentity(ctx context.Context, tx *sql.Tx, projectID, environmentID int64) (targetIdentity, error) {
-	var name, created string
-	err := tx.QueryRowContext(ctx, `SELECT name, created_at FROM project_environments WHERE id=? AND project_id=?`,
-		environmentID, projectID).Scan(&name, &created)
+	var name, created, url, alias, ip, updated string
+	err := tx.QueryRowContext(ctx, `SELECT name, created_at, COALESCE(url,''), COALESCE(host_alias,''), COALESCE(host_ip,''), COALESCE(updated_at,'')
+		FROM project_environments WHERE id=? AND project_id=?`,
+		environmentID, projectID).Scan(&name, &created, &url, &alias, &ip, &updated)
 	if err == sql.ErrNoRows {
 		return targetIdentity{}, fmt.Errorf("%w: project environment", ErrInvalid)
 	}
@@ -189,7 +198,8 @@ func loadProjectEnvIdentity(ctx context.Context, tx *sql.Tx, projectID, environm
 	}
 	return targetIdentity{
 		Kind: TargetKindProjectEnv, ProjectID: projectID, EnvironmentID: environmentID,
-		EnvironmentSymbol: name, CreatedAt: created,
+		EnvironmentSymbol: name, CreatedAt: created, URL: strings.TrimSpace(url),
+		HostAlias: strings.TrimSpace(alias), HostIP: strings.TrimSpace(ip), UpdatedAt: strings.TrimSpace(updated),
 	}, nil
 }
 
@@ -331,10 +341,10 @@ func listTargetCandidates(ctx context.Context, tx *sql.Tx, rel ReleaseRecord) []
 	out := []TargetCandidate{}
 	deliveryID, _, err := batchDelivery(ctx, tx, rel.ProjectID, rel.BatchID)
 	if err == nil && deliveryID > 0 {
-		rows, qerr := tx.QueryContext(ctx, `SELECT id, COALESCE(workflow_symbol,''), COALESCE(environment_symbol,'')
-			FROM external_stage_reporter_registrations
-			WHERE delivery_id=? AND project_id=? AND reporter_class='pharos' AND reporter_role='owner' AND revoked_at IS NULL
-			ORDER BY id`, deliveryID, rel.ProjectID)
+		rows, qerr := tx.QueryContext(ctx, `SELECT registration.id, COALESCE(registration.workflow_symbol,''), COALESCE(registration.environment_symbol,'')
+			FROM external_stage_reporter_registrations registration
+			WHERE registration.delivery_id=? AND registration.project_id=? AND `+externalstage.LivePharosOwnerSQL+`
+			ORDER BY registration.id`, deliveryID, rel.ProjectID)
 		if qerr == nil {
 			for rows.Next() {
 				var id int64
