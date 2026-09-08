@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.08.16.12] — 2026-09-08
+
+### Added — shared delivery navigation (PAI-967)
+
+- Embed the published INSPR Flow shell with scoped project context, delivery
+  progress and guarded review/start navigation. The bounded host layout keeps
+  existing project pages usable on mobile and desktop.
+
+### Added — release-specific acceptance (PAI-968)
+
+- Bind acceptance parties, confirmations and a minimal readiness checklist to
+  an exact release and deployment target. Keep deployment and acceptance
+  separate, with email preview, delivery evidence and recorded-email support.
+  A platform status alone does not establish completed acceptance.
+
+### Fixed — owned Cursor interactions (PAI-963)
+
+- Route Cursor permission, plan and question requests through explicit local
+  operator decisions bound to the exact session, generation, request and
+  digest. Expose bounded assistant output privately while keeping public
+  status and journals free of message content.
+
 ## [26.09.08.09.02] — 2026-09-08
 
 ### Added — scoped build and QA receipts (PAI-960)
