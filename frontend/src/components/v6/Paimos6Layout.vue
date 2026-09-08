@@ -289,15 +289,15 @@ onScopeDispose(() => {
             </div>
           </template>
           <div class="p6-shell-content"><slot /></div>
+          <footer class="habitat-footer">
+            <span>Agent Intercom · {{ brandName }}</span>
+            <RouterLink :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"
+              >Product sessions</RouterLink
+            >
+            <RouterLink to="/legacy">Classic workspace</RouterLink>
+            <RouterLink to="/settings">Settings</RouterLink>
+          </footer>
         </FlowHost>
-        <footer class="habitat-footer">
-          <span>Agent Intercom · {{ brandName }}</span>
-          <RouterLink :to="{ path: '/', query: { ...route.query, view: 'sessions' } }"
-            >Product sessions</RouterLink
-          >
-          <RouterLink to="/legacy">Classic workspace</RouterLink>
-          <RouterLink to="/settings">Settings</RouterLink>
-        </footer>
       </div>
     </div>
     <Paimos6CommandPalette
