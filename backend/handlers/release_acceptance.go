@@ -59,13 +59,17 @@ func releaseAcceptanceActor(r *http.Request) (releaseacceptance.Actor, bool) {
 	if !ok {
 		return releaseacceptance.Actor{}, false
 	}
-	return releaseacceptance.Actor{
+	actor := releaseacceptance.Actor{
 		Kind:                string(p.Kind()),
 		UserID:              p.UserID(),
 		SessionCredentialID: p.SessionCredentialID(),
 		APIKeyID:            p.APIKeyID(),
 		Impersonated:        p.Impersonated(),
-	}, true
+	}
+	if agent, _ := readAgentAttribution(r); agent != nil {
+		actor.Kind = "agent"
+	}
+	return actor, true
 }
 
 func releaseAcceptanceIDs(r *http.Request) (projectID, releaseID int64, ok bool) {

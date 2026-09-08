@@ -144,6 +144,7 @@ type EmailEvidence struct {
 	ActorUserID        int64    `json:"actor_user_id"`
 	Attestation        string   `json:"attestation,omitempty"`
 	BodySHA256         string   `json:"body_sha256"`
+	LastErrorClass     string   `json:"last_error_class,omitempty"`
 }
 
 type Missing struct {
@@ -201,6 +202,7 @@ type Acceptance struct {
 	Missing            Missing             `json:"missing"`
 	Defaults           CooperationDefaults `json:"defaults"`
 	OfferDisclaimer    string              `json:"offer_disclaimer"`
+	MailRecovery       string              `json:"mail_recovery,omitempty"`
 }
 
 type StandingPolicy struct {

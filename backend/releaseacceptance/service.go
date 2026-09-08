@@ -497,34 +497,70 @@ func (s *Service) AuthorizeSend(ctx context.Context, actor Actor, projectID, rel
 	return s.Get(ctx, actor, projectID, releaseID)
 }
 
+func failQueuedMail(ctx context.Context, tx *sql.Tx, outboxID, evidenceID int64, class, now string) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE acceptance_email_evidence SET state='failed' WHERE id=?`, evidenceID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='failed',last_error_class=?,lease_until=NULL,updated_at=? WHERE id=?`,
+		class, now, outboxID)
+	return err
+}
+
 func (s *Service) DrainOnce(ctx context.Context) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var outboxID, evidenceID int64
+	var outboxID, evidenceID, previewRev, authorizedBy int64
 	var attempts int
-	err = tx.QueryRowContext(ctx, `SELECT id,evidence_id,attempt_count FROM acceptance_mail_outbox
+	var authCred string
+	err = tx.QueryRowContext(ctx, `SELECT id,evidence_id,attempt_count,preview_revision,authorized_by,session_credential_id
+		FROM acceptance_mail_outbox
 		WHERE state IN ('queued','sending') AND (lease_until IS NULL OR lease_until<=?)
-		ORDER BY id LIMIT 1`, s.now()).Scan(&outboxID, &evidenceID, &attempts)
+		ORDER BY id LIMIT 1`, s.now()).Scan(&outboxID, &evidenceID, &attempts, &previewRev, &authorizedBy, &authCred)
 	if err == sql.ErrNoRows {
 		return tx.Commit()
 	}
 	if err != nil {
 		return err
 	}
+	now := s.now()
 	lease := s.Clock.Now().UTC().Add(15 * time.Second).Format("2006-01-02T15:04:05Z")
-	if _, err := tx.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='sending',lease_until=?,updated_at=? WHERE id=?`, lease, s.now(), outboxID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='sending',lease_until=?,updated_at=? WHERE id=?`, lease, now, outboxID); err != nil {
 		return err
 	}
 	var raw []byte
 	var state string
-	if err := tx.QueryRowContext(ctx, `SELECT raw_message,state FROM acceptance_email_evidence WHERE id=?`, evidenceID).Scan(&raw, &state); err != nil {
+	var evidenceRev, releaseID, accID int64
+	if err := tx.QueryRowContext(ctx, `SELECT raw_message,state,acceptance_revision,release_id,acceptance_id FROM acceptance_email_evidence WHERE id=?`, evidenceID).
+		Scan(&raw, &state, &evidenceRev, &releaseID, &accID); err != nil {
 		return err
 	}
 	if state == MailSent {
-		if _, err := tx.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='sent',updated_at=? WHERE id=?`, s.now(), outboxID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='sent',updated_at=? WHERE id=?`, now, outboxID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	var liveRev, livePreview int64
+	var liveStatus string
+	if err := tx.QueryRowContext(ctx, `SELECT revision,preview_revision,status FROM release_acceptances WHERE id=?`, accID).
+		Scan(&liveRev, &livePreview, &liveStatus); err != nil {
+		return err
+	}
+	if liveStatus == StatusAccepted || liveRev != evidenceRev || livePreview != previewRev {
+		if err := failQueuedMail(ctx, tx, outboxID, evidenceID, "smtp_stale", now); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	var liveSessions int
+	_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions
+		WHERE credential_id=? AND COALESCE(acting_as_user_id,user_id)=? AND expires_at>datetime('now')`,
+		authCred, authorizedBy).Scan(&liveSessions)
+	if liveSessions == 0 {
+		if err := failQueuedMail(ctx, tx, outboxID, evidenceID, "smtp_revoked", now); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -542,8 +578,7 @@ func (s *Service) DrainOnce(ctx context.Context) error {
 		return err
 	}
 	defer tx2.Rollback()
-	class := mailer.ErrorClass(sendErr)
-	now := s.now()
+	now = s.now()
 	if sendErr == nil {
 		if _, err := tx2.ExecContext(ctx, `UPDATE acceptance_email_evidence SET state='sent',sent_at=? WHERE id=?`, now, evidenceID); err != nil {
 			return err
@@ -551,25 +586,16 @@ func (s *Service) DrainOnce(ctx context.Context) error {
 		if _, err := tx2.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state='sent',last_error_class='',updated_at=? WHERE id=?`, now, outboxID); err != nil {
 			return err
 		}
-		var releaseID int64
-		_ = tx2.QueryRowContext(ctx, `SELECT release_id FROM acceptance_email_evidence WHERE id=?`, evidenceID).Scan(&releaseID)
 		if err := s.maybeFinalize(ctx, tx2, releaseID); err != nil {
 			return err
 		}
 		return tx2.Commit()
 	}
-	attempts++
-	next := MailPending
-	outboxState := "queued"
-	if !mailer.Retryable(sendErr) || attempts >= maxAttempts {
-		next = MailFailed
-		outboxState = MailFailed
+	class := mailer.ErrorClass(sendErr)
+	if mailer.Retryable(sendErr) {
+		class = "smtp_ambiguous"
 	}
-	if _, err := tx2.ExecContext(ctx, `UPDATE acceptance_email_evidence SET state=? WHERE id=?`, next, evidenceID); err != nil {
-		return err
-	}
-	if _, err := tx2.ExecContext(ctx, `UPDATE acceptance_mail_outbox SET state=?,attempt_count=?,last_error_class=?,lease_until=NULL,updated_at=? WHERE id=?`,
-		outboxState, attempts, class, now, outboxID); err != nil {
+	if err := failQueuedMail(ctx, tx2, outboxID, evidenceID, class, now); err != nil {
 		return err
 	}
 	return tx2.Commit()
@@ -790,6 +816,12 @@ func (s *Service) projectAcceptance(ctx context.Context, tx *sql.Tx, projectID, 
 	acc.OfferDisclaimer = OfferDisclaimer
 	acc.Defaults = loadDefaults(ctx, tx, projectID)
 	acc.Missing = computeMissing(acc)
+	for _, e := range acc.EmailEvidence {
+		if e.State == MailFailed {
+			acc.MailRecovery = "Send did not complete. Review the message and authorize a new send. Automatic retry is not used after an uncertain delivery."
+			break
+		}
+	}
 	return acc, nil
 }
 
@@ -910,8 +942,10 @@ func loadConfirmations(ctx context.Context, tx *sql.Tx, accID, rev int64) ([]Con
 }
 
 func loadEvidence(ctx context.Context, tx *sql.Tx, accID, rev int64) ([]EmailEvidence, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT message_ref,acceptance_revision,recipient_party_refs_json,state,source,recorded_at,sent_at,actor_user_id,attestation,body_sha256
-		FROM acceptance_email_evidence WHERE acceptance_id=? AND acceptance_revision=? ORDER BY id`, accID, rev)
+	rows, err := tx.QueryContext(ctx, `SELECT e.message_ref,e.acceptance_revision,e.recipient_party_refs_json,e.state,e.source,e.recorded_at,e.sent_at,e.actor_user_id,e.attestation,e.body_sha256,COALESCE(o.last_error_class,'')
+		FROM acceptance_email_evidence e
+		LEFT JOIN acceptance_mail_outbox o ON o.evidence_id=e.id
+		WHERE e.acceptance_id=? AND e.acceptance_revision=? ORDER BY e.id`, accID, rev)
 	if err != nil {
 		return nil, err
 	}
@@ -920,7 +954,7 @@ func loadEvidence(ctx context.Context, tx *sql.Tx, accID, rev int64) ([]EmailEvi
 	for rows.Next() {
 		var e EmailEvidence
 		var sent sql.NullString
-		if err := rows.Scan(&e.MessageRef, &e.ReleaseRevision, newJSONScan(&e.RecipientPartyRefs), &e.State, &e.Source, &e.RecordedAt, &sent, &e.ActorUserID, &e.Attestation, &e.BodySHA256); err != nil {
+		if err := rows.Scan(&e.MessageRef, &e.ReleaseRevision, newJSONScan(&e.RecipientPartyRefs), &e.State, &e.Source, &e.RecordedAt, &sent, &e.ActorUserID, &e.Attestation, &e.BodySHA256, &e.LastErrorClass); err != nil {
 			return nil, err
 		}
 		if sent.Valid {

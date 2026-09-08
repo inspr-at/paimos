@@ -39,6 +39,7 @@ export type EmailEvidence = {
   actor_user_id: number
   attestation?: string
   body_sha256: string
+  last_error_class?: string
 }
 
 export type ReleaseRecord = {
@@ -89,6 +90,7 @@ export type Acceptance = {
   }
   defaults: { agreement_ref: string; notes?: string }
   offer_disclaimer: string
+  mail_recovery?: string
 }
 
 export type StandingPolicy = {

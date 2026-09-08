@@ -2,8 +2,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import LoadingText from '@/components/LoadingText.vue'
-import { errMsg } from '@/api/client'
+import { errMsg, api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import type { User } from '@/types'
 import { getBaselineWorkflow } from '@/services/projectBaselineBatch'
 import {
   applyStandingPolicy,
@@ -21,7 +22,6 @@ import {
   saveAcceptancePreview,
   type Acceptance,
   type ConfigureRequest,
-  type Party,
   type StandingPolicy,
 } from '@/services/projectReleaseAcceptance'
 
@@ -43,20 +43,32 @@ const mintBatchId = ref(0)
 
 const mode = ref('customer_operated')
 const agreement = ref('')
-const gapsText = ref('')
-const partiesText = ref('')
-const deliveryRef = ref('party_delivery')
-const operatorRef = ref('party_operator')
-const requiredText = ref('party_delivery, party_operator')
+const partyRows = ref<PartyDraft[]>([])
+const gapRows = ref<{ gap_ref: string; statement: string }[]>([])
 const previewSubject = ref('')
 const previewBody = ref('')
 const confirmSend = ref(false)
-const recipientsText = ref('')
+const selectedRecipients = ref<string[]>([])
 const externalRaw = ref('')
 const externalAttestation = ref('')
 const policyRef = ref('policy_customer')
 const policyUse = ref('Same approved baseline implementation updates only.')
 const policyExpires = ref('2026-12-01T00:00:00Z')
+const users = ref<User[]>([])
+let partySeq = 0
+
+type PartyDraft = {
+  key: string
+  party_ref: string
+  kind: 'linked_user' | 'manual_email'
+  user_id: number | null
+  email: string
+  display_name: string
+  required: boolean
+  delivery: boolean
+  operator: boolean
+  support: boolean
+}
 
 const ownParty = computed(() => {
   const uid = auth.user?.id
@@ -64,48 +76,75 @@ const ownParty = computed(() => {
   return acceptance.value.parties.find((p) => p.kind === 'linked_user' && p.user_id === uid) ?? null
 })
 
+const linkedUsers = computed(() => users.value.filter((u) => u.status === 'active'))
+
 const modes = [
   { value: 'customer_operated', label: 'customer-operated' },
   { value: 'agency_supported', label: 'agency-supported' },
   { value: 'agency_operated', label: 'provider-operated' },
 ] as const
 
-function parseGaps(text: string) {
-  return text.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [ref, ...rest] = line.split('|')
-    return { gap_ref: ref.trim(), statement: rest.join('|').trim() || ref.trim() }
-  }).filter((g) => g.gap_ref)
+function nextPartyRef() {
+  partySeq += 1
+  return `party_${partySeq}`
 }
 
-function parseParties(text: string): ConfigureRequest['parties'] {
-  return text.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [party_ref, kind, user, email, name, roles] = line.split('|').map((p) => p.trim())
-    return {
-      party_ref,
-      kind: (kind === 'manual_email' ? 'manual_email' : 'linked_user') as Party['kind'],
-      user_id: user ? Number(user) : undefined,
-      email,
-      display_name: name || party_ref,
-      roles: (roles || 'acceptance_party').split(',').map((r) => r.trim()).filter(Boolean),
-    }
-  }).filter((p) => p.party_ref && p.email)
+function emptyParty(): PartyDraft {
+  return {
+    key: nextPartyRef(),
+    party_ref: '',
+    kind: 'linked_user',
+    user_id: null,
+    email: '',
+    display_name: '',
+    required: true,
+    delivery: false,
+    operator: false,
+    support: false,
+  }
 }
 
-function refs(text: string) {
-  return text.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean)
+function onLinkedUser(row: PartyDraft) {
+  const user = linkedUsers.value.find((u) => u.id === row.user_id)
+  if (!user) return
+  row.email = user.email || row.email
+  row.display_name = user.nickname || `${user.first_name} ${user.last_name}`.trim() || user.username
+}
+
+function addParty() {
+  partyRows.value = [...partyRows.value, emptyParty()]
+}
+
+function removeParty(key: string) {
+  partyRows.value = partyRows.value.filter((p) => p.key !== key)
+}
+
+function addGap() {
+  gapRows.value = [...gapRows.value, { gap_ref: `gap_${gapRows.value.length + 1}`, statement: '' }]
+}
+
+function removeGap(index: number) {
+  gapRows.value = gapRows.value.filter((_, i) => i !== index)
+}
+
+function slugRef(prefix: string, label: string, fallback: string) {
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+  return slug ? `${prefix}_${slug}` : fallback
 }
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [list, workflow, policyList] = await Promise.all([
+    const [list, workflow, policyList, userList] = await Promise.all([
       listReleaseRecords(props.projectId),
       getBaselineWorkflow(props.projectId).catch(() => null),
       listStandingPolicies(props.projectId).catch(() => []),
+      api.get<User[]>('/users').catch(() => [] as User[]),
     ])
     records.value = list
     policies.value = policyList
+    users.value = userList
     batches.value = (workflow?.batches ?? []).map((b) => ({ id: b.id, batch_key: b.batch_key }))
     if (workflow?.active_batch) {
       mintBatchId.value = workflow.active_batch.id
@@ -129,16 +168,67 @@ async function load() {
 function syncForm(acc: Acceptance) {
   mode.value = acc.operating_mode || 'customer_operated'
   agreement.value = acc.agreement_ref || acc.defaults.agreement_ref || ''
-  gapsText.value = (acc.disclosed_gaps ?? []).map((g) => `${g.gap_ref} | ${g.statement}`).join('\n')
-  partiesText.value = (acc.parties ?? []).map((p) =>
-    [p.party_ref, p.kind, p.user_id ?? '', p.email, p.display_name, (p.roles ?? []).join(',')].join(' | '),
-  ).join('\n')
-  deliveryRef.value = acc.delivery_party_ref || deliveryRef.value
-  operatorRef.value = acc.operator_party_ref || operatorRef.value
-  requiredText.value = (acc.required_party_refs ?? []).join(', ')
+  gapRows.value = (acc.disclosed_gaps ?? []).map((g) => ({ gap_ref: g.gap_ref, statement: g.statement }))
+  partyRows.value = (acc.parties ?? []).map((p) => ({
+    key: p.party_ref,
+    party_ref: p.party_ref,
+    kind: p.kind,
+    user_id: p.user_id ?? null,
+    email: p.email,
+    display_name: p.display_name,
+    required: (acc.required_party_refs ?? []).includes(p.party_ref),
+    delivery: acc.delivery_party_ref === p.party_ref,
+    operator: acc.operator_party_ref === p.party_ref,
+    support: acc.support_party_ref === p.party_ref,
+  }))
+  if (!partyRows.value.length && props.canWrite) {
+    const delivery = emptyParty()
+    delivery.delivery = true
+    delivery.display_name = 'Delivery'
+    const operator = emptyParty()
+    operator.operator = true
+    operator.display_name = 'Customer'
+    partyRows.value = [delivery, operator]
+  }
   previewSubject.value = acc.preview_subject || ''
   previewBody.value = acc.preview_body || ''
-  recipientsText.value = (acc.parties ?? []).map((p) => p.party_ref).join(', ')
+  selectedRecipients.value = (acc.parties ?? []).map((p) => p.party_ref)
+}
+
+function configureBody(): ConfigureRequest {
+  const parties = partyRows.value.map((row, index) => {
+    const party_ref = row.party_ref || slugRef('party', row.display_name, `party_${index + 1}`)
+    row.party_ref = party_ref
+    const roles = ['acceptance_party']
+    if (row.delivery) roles.push('delivery_party')
+    if (row.operator) roles.push('operator')
+    if (row.support) roles.push('support')
+    return {
+      party_ref,
+      kind: row.kind,
+      user_id: row.kind === 'linked_user' ? row.user_id || undefined : undefined,
+      email: row.email,
+      display_name: row.display_name || party_ref,
+      roles,
+    }
+  })
+  const delivery = partyRows.value.find((p) => p.delivery)?.party_ref || parties[0]?.party_ref || ''
+  const operator = partyRows.value.find((p) => p.operator)?.party_ref || parties[1]?.party_ref || delivery
+  const support = partyRows.value.find((p) => p.support)?.party_ref
+  return {
+    expected_revision: acceptance.value?.revision,
+    operating_mode: mode.value,
+    agreement_ref: agreement.value,
+    disclosed_gaps: gapRows.value.filter((g) => g.statement.trim()).map((g, i) => ({
+      gap_ref: g.gap_ref || `gap_${i + 1}`,
+      statement: g.statement.trim(),
+    })),
+    parties,
+    delivery_party_ref: delivery,
+    operator_party_ref: operator,
+    support_party_ref: support || null,
+    required_party_refs: partyRows.value.filter((p) => p.required).map((p) => p.party_ref).filter(Boolean),
+  }
 }
 
 async function run(fn: () => Promise<Acceptance | StandingPolicy | void>) {
@@ -156,19 +246,6 @@ async function run(fn: () => Promise<Acceptance | StandingPolicy | void>) {
     error.value = errMsg(e, 'Release acceptance action failed.')
   } finally {
     busy.value = false
-  }
-}
-
-function configureBody(): ConfigureRequest {
-  return {
-    expected_revision: acceptance.value?.revision,
-    operating_mode: mode.value,
-    agreement_ref: agreement.value,
-    disclosed_gaps: parseGaps(gapsText.value),
-    parties: parseParties(partiesText.value),
-    delivery_party_ref: deliveryRef.value,
-    operator_party_ref: operatorRef.value,
-    required_party_refs: refs(requiredText.value),
   }
 }
 
@@ -242,30 +319,59 @@ onMounted(() => { void load() })
           Agreement reference
           <input v-model="agreement" class="ra-input" :placeholder="acceptance.defaults.agreement_ref || 'agreement'">
         </label>
-        <label v-if="canWrite">
-          Disclosed gaps (ref | statement)
-          <textarea v-model="gapsText" rows="3" class="ra-input" />
-        </label>
+        <div v-if="canWrite" class="ra-stack" data-testid="gap-editor">
+          <strong class="ra-meta">Disclosed gaps</strong>
+          <div v-for="(gap, index) in gapRows" :key="index" class="ra-row">
+            <input v-model="gap.gap_ref" class="ra-input" placeholder="label" aria-label="Gap label">
+            <input v-model="gap.statement" class="ra-input" placeholder="What is not proven" aria-label="Gap statement">
+            <button type="button" class="btn btn-sm" @click="removeGap(index)">Remove</button>
+          </div>
+          <button type="button" class="btn btn-sm" data-testid="add-gap" @click="addGap">Add gap</button>
+        </div>
         <ul v-else class="ra-list">
           <li v-for="g in acceptance.disclosed_gaps" :key="g.gap_ref">{{ g.gap_ref }}: {{ g.statement }}</li>
           <li v-if="!acceptance.disclosed_gaps.length">None disclosed.</li>
         </ul>
-        <label v-if="canWrite">
-          Parties (ref | kind | user_id | email | name | roles)
-          <textarea v-model="partiesText" rows="3" class="ra-input" />
-        </label>
-        <ul v-else class="ra-list">
-          <li v-for="p in acceptance.parties" :key="p.party_ref">{{ p.display_name }} · {{ p.party_ref }} · {{ p.kind }}</li>
-        </ul>
-        <div v-if="canWrite" class="ra-row">
-          <label>Delivery <input v-model="deliveryRef" class="ra-input"></label>
-          <label>Operator <input v-model="operatorRef" class="ra-input"></label>
-          <label>Required <input v-model="requiredText" class="ra-input"></label>
+        <div v-if="canWrite" class="ra-stack" data-testid="party-editor">
+          <strong class="ra-meta">Parties</strong>
+          <div v-for="row in partyRows" :key="row.key" class="ra-party">
+            <label>Name <input v-model="row.display_name" class="ra-input"></label>
+            <label>
+              Kind
+              <select v-model="row.kind" class="ra-input">
+                <option value="linked_user">Project member</option>
+                <option value="manual_email">External email</option>
+              </select>
+            </label>
+            <label v-if="row.kind === 'linked_user'">
+              Member
+              <select v-model.number="row.user_id" class="ra-input" @change="onLinkedUser(row)">
+                <option :value="null">Select a member</option>
+                <option v-for="u in linkedUsers" :key="u.id" :value="u.id">{{ u.username }}{{ u.email ? ` · ${u.email}` : '' }}</option>
+              </select>
+            </label>
+            <label>
+              Email
+              <input v-model="row.email" class="ra-input" type="email" :placeholder="row.kind === 'manual_email' ? 'external@example.com' : ''">
+            </label>
+            <div class="ra-row">
+              <label><input v-model="row.required" type="checkbox"> Required</label>
+              <label><input v-model="row.delivery" type="checkbox"> Delivery</label>
+              <label><input v-model="row.operator" type="checkbox"> Operator</label>
+              <label><input v-model="row.support" type="checkbox"> Support</label>
+            </div>
+            <button type="button" class="btn btn-sm" @click="removeParty(row.key)">Remove party</button>
+          </div>
+          <button type="button" class="btn btn-sm" data-testid="add-party" @click="addParty">Add party</button>
         </div>
+        <ul v-else class="ra-list">
+          <li v-for="p in acceptance.parties" :key="p.party_ref">{{ p.display_name }} · {{ p.kind }} · {{ p.email }}</li>
+        </ul>
         <button
           v-if="canWrite && acceptance.status !== 'accepted'"
           type="button"
           class="btn btn-sm"
+          data-testid="save-arrangement"
           :disabled="busy"
           @click="run(() => configureReleaseAcceptance(projectId, acceptance!.release.id, configureBody()))"
         >
@@ -286,6 +392,7 @@ onMounted(() => { void load() })
             {{ c.party_ref }} · {{ c.source }} · actor {{ c.actor_user_id }}
           </li>
         </ul>
+        <p v-if="acceptance.mail_recovery" class="ra-error" data-testid="mail-recovery">{{ acceptance.mail_recovery }}</p>
         <button
           v-if="ownParty && acceptance.status !== 'accepted'"
           type="button"
@@ -296,28 +403,36 @@ onMounted(() => { void load() })
         >
           Confirm as {{ ownParty.display_name }}
         </button>
+        <p v-else-if="!ownParty" class="ra-note">You can confirm on the platform only as a linked project member. External email parties need a recorded attestation.</p>
       </div>
 
       <div v-if="canWrite" class="ra-card">
         <label>Subject <input v-model="previewSubject" class="ra-input"></label>
         <label>Message <textarea v-model="previewBody" rows="4" class="ra-input" /></label>
         <div class="ra-row">
-          <button type="button" class="btn btn-sm" :disabled="busy" @click="run(() => saveAcceptancePreview(projectId, acceptance!.release.id, previewSubject, previewBody))">
+          <button type="button" class="btn btn-sm" data-testid="save-preview" :disabled="busy" @click="run(() => saveAcceptancePreview(projectId, acceptance!.release.id, previewSubject, previewBody))">
             Save preview
           </button>
         </div>
-        <label>Recipients <input v-model="recipientsText" class="ra-input"></label>
+        <fieldset class="ra-stack">
+          <legend class="ra-meta">Recipients</legend>
+          <label v-for="p in acceptance.parties" :key="'r-'+p.party_ref">
+            <input v-model="selectedRecipients" type="checkbox" :value="p.party_ref">
+            {{ p.display_name }} · {{ p.email }}
+          </label>
+        </fieldset>
         <label class="ra-confirm">
-          <input v-model="confirmSend" type="checkbox">
+          <input v-model="confirmSend" type="checkbox" data-testid="confirm-send">
           I authorize sending this reviewed message to these recipients. SMTP success is transport evidence, not consent.
         </label>
         <button
           type="button"
           class="btn btn-sm"
+          data-testid="authorize-send"
           :disabled="busy || !confirmSend"
           @click="run(() => authorizeAcceptanceSend(projectId, acceptance!.release.id, {
             request_key: `send-${Date.now()}`,
-            recipient_party_refs: refs(recipientsText),
+            recipient_party_refs: selectedRecipients,
             preview_revision: acceptance!.preview_revision,
             confirm_send: confirmSend,
           }))"
@@ -336,10 +451,10 @@ onMounted(() => { void load() })
           :disabled="busy || !externalRaw.trim() || !externalAttestation.trim()"
           @click="run(() => recordExternalAcceptanceEmail(projectId, acceptance!.release.id, {
             request_key: `ext-${Date.now()}`,
-            recipient_party_refs: refs(recipientsText),
+            recipient_party_refs: selectedRecipients,
             raw_message: externalRaw,
             attestation: externalAttestation,
-            attested_party_refs: refs(recipientsText),
+            attested_party_refs: selectedRecipients,
           }))"
         >
           Record external email
@@ -365,9 +480,9 @@ onMounted(() => { void load() })
             policy_ref: policyRef,
             content_digest: acceptance!.release.content_digest,
             revision_seal: acceptance!.release.revision_seal,
-            parties: refs(requiredText),
+            parties: partyRows.filter((p) => p.required).map((p) => p.party_ref).filter(Boolean),
             agreement_ref: agreement,
-            gaps: parseGaps(gapsText),
+            gaps: gapRows.filter((g) => g.statement.trim()),
             bounded_use: policyUse,
             expires_at: policyExpires,
             release_channel: acceptance!.release.release_channel,
@@ -452,6 +567,12 @@ onMounted(() => { void load() })
   flex-wrap: wrap;
   gap: .6rem;
   font-size: 12px;
+}
+.ra-stack, .ra-party {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  min-width: 0;
 }
 .ra-confirm {
   display: flex;
