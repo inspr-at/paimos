@@ -275,6 +275,50 @@ func TestImplementOnBaselineIssueIsConflictAndOrdinaryIssueStillImplements(t *te
 	}
 }
 
+func TestImplementOnBaselineLookupFailureRefusesBeforeEffects(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Lookup fence", "key": "ILF"}))
+	batch := startManualHTTPBatch(t, ts, projectID, "implement-lookup-start")
+	if _, err := db.DB.Exec(`ALTER TABLE baseline_batch_batches RENAME TO baseline_batch_batches_hidden`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.DB.Exec(`ALTER TABLE baseline_batch_batches_hidden RENAME TO baseline_batch_batches`)
+	})
+	failed := ts.post(t, "/api/issues/"+fmt.Sprint(batch.IssueID)+"/implement", ts.adminCookie, map[string]any{})
+	if failed.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("forced lookup implement=%d %s", failed.StatusCode, baselineReadBody(failed))
+	}
+	var runs int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM agent_runs WHERE issue_id=?`, batch.IssueID).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 0 {
+		t.Fatalf("lookup failure created %d runs", runs)
+	}
+	spec := snapshotStageMust(t, batch.IssueID, delivery.StageSpecification)
+	if spec.ExecutionNumber != 1 || !spec.PolicySatisfied {
+		t.Fatalf("lookup failure rewrote specification: %+v", spec)
+	}
+	if _, err := db.DB.Exec(`ALTER TABLE baseline_batch_batches_hidden RENAME TO baseline_batch_batches`); err != nil {
+		t.Fatal(err)
+	}
+	owned := ts.post(t, "/api/issues/"+fmt.Sprint(batch.IssueID)+"/implement", ts.adminCookie, map[string]any{})
+	if owned.StatusCode != http.StatusConflict {
+		t.Fatalf("owned implement after restore=%d %s", owned.StatusCode, baselineReadBody(owned))
+	}
+	res, err := db.DB.Exec(`INSERT INTO issues(project_id, issue_number, type, title, status) VALUES(?,?,?,?,?)`,
+		projectID, 88, "ticket", "Ordinary after lookup failure", "backlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinaryID, _ := res.LastInsertId()
+	ordinary := ts.post(t, "/api/issues/"+fmt.Sprint(ordinaryID)+"/implement", ts.adminCookie, map[string]any{})
+	if ordinary.StatusCode != http.StatusCreated {
+		t.Fatalf("ordinary implement after lookup failure=%d %s", ordinary.StatusCode, baselineReadBody(ordinary))
+	}
+}
+
 func TestBaselineBatchBuiltReceiptAPIKeyOnAssistedForbidden(t *testing.T) {
 	ts := newTestServer(t)
 	userID := promoteSuperAdmin(t, "admin")

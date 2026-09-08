@@ -99,8 +99,13 @@ never starts deployment or mints handoff secrets. Automatic receipts may use the
 start confirmer's live `agent-controls:write` key bound to the selected worker
 account and runtime generation; they are stored as system reporters, not human
 evidence. `POST /api/issues/{id}/implement` is refused on any issue that already
-has a baseline-batch row so BootstrapRunTx cannot rewrite the accepted
-specification. Pharos deployment and verification reuse the existing
+has a baseline-batch row, in any `control_state`, so BootstrapRunTx cannot
+rewrite the accepted specification. That seal is historical: cancelling or
+completing the batch does not reopen Implement-this on the same issue. Later
+work is a new Aithema handover, draft, and start, which mints a fresh issue
+and delivery. A lookup failure refuses with a server error before any run is
+created; it never treats an unknown ownership check as “not a baseline issue”.
+Pharos deployment and verification reuse the existing
 external-stage `RegisterReporter` / `ActivateOwner` / `SealPrerequisites` /
 `CreateHandoff` path. `POST .../reconcile` applies the next currently authorized
 step of that frozen plan: manual never auto-creates a handoff, assisted requires
