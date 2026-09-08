@@ -602,6 +602,32 @@ describe('ProjectBaselineBatchSection', () => {
     app.unmount()
   })
 
+  it('surfaces missing built receipt without claiming it starts deployment', async () => {
+    vi.mocked(api.get).mockResolvedValue(workflowFixture({
+      active_batch: batchFixture({
+        progress: {
+          stages: [{
+            stage_key: 'implementation', applicability: 'required', weight: 45, state: 'pending', phase: '',
+            activity: '', needs_input: false, performed: false, policy_satisfied: false, stale: false, never_signaled: true,
+          }],
+          evidence_fresh: false,
+          evidence_observed: false,
+          setup_required: 'built_artifact_identity',
+          next_action: 'implementation_evidence',
+        },
+      }),
+    }))
+    const { el, app } = mount()
+    await settle()
+    const copy = el.querySelector('[data-testid="batch-setup-required"]')!.textContent ?? ''
+    expect(copy).toContain('built_artifact_identity')
+    expect(copy).toContain('baseline-batch report-built')
+    expect(copy).toContain('never starts deployment')
+    expect(copy).not.toContain('handoff secrets')
+    expect(copy).not.toContain('external-stage CLI')
+    app.unmount()
+  })
+
   it('reconciles automatic authorized handoffs on load and assisted only on the bound control', async () => {
     const automatic = batchFixture({
       execution_mode: 'automatic',

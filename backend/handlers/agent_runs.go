@@ -291,6 +291,10 @@ func ImplementIssue(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "issue not found", http.StatusNotFound)
 		return
 	}
+	if issueHasBaselineBatch(issueID) {
+		jsonError(w, "baseline-owned issue cannot be implemented; report a built receipt on the batch", http.StatusConflict)
+		return
+	}
 	var body struct {
 		DeviceID         string          `json:"device_id"`
 		DeployTarget     string          `json:"deploy_target"`
@@ -1860,4 +1864,12 @@ func agentRunCodeEvidenceSummary(run *AgentRun) string {
 		return fmt.Sprintf(" Code: `%s..%s`.", short(base), short(head))
 	}
 	return fmt.Sprintf(" Code: `%s`.", short(head))
+}
+
+func issueHasBaselineBatch(issueID int64) bool {
+	var n int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM baseline_batch_batches WHERE issue_id=?`, issueID).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
 }

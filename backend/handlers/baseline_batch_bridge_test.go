@@ -89,7 +89,7 @@ func TestBaselineBatchAssistedReconcileHTTP(t *testing.T) {
 	}
 	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: operatorSessionCredential(t, userID)}
 	registerHTTPPharos(t, ext, operator, projectID, batch.IssueID)
-	reportHTTPBuildAndQA(t, store, userID, batch)
+	batch = postHTTPBuiltReceipt(t, ts, projectID, batch)
 
 	activated := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/reconcile", projectID, batch.ID), map[string]any{})
 	if activated.StatusCode != 200 {
@@ -164,7 +164,6 @@ func TestBaselineBatchAssistedReconcileSealsRequiredJanusHTTP(t *testing.T) {
 		t.Fatal("no start intent")
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	store := delivery.NewStore(db.DB, delivery.Options{Clock: delivery.ClockFunc(func() time.Time { return now })})
 	ext, err := externalstage.NewService(db.DB, externalstage.Options{
 		FixtureDigest: contracts.ExternalStageV1FixtureDigest(), Random: cryptorand.Reader,
 		Clock: clockNow{now: now},
@@ -175,7 +174,7 @@ func TestBaselineBatchAssistedReconcileSealsRequiredJanusHTTP(t *testing.T) {
 	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: operatorSessionCredential(t, userID)}
 	registerHTTPPharos(t, ext, operator, projectID, batch.IssueID)
 	registerHTTPJanus(t, ext, operator, projectID, batch.IssueID)
-	reportHTTPBuildAndQA(t, store, userID, batch)
+	batch = postHTTPBuiltReceipt(t, ts, projectID, batch)
 	resp := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/reconcile", projectID, batch.ID), map[string]any{})
 	if resp.StatusCode != 200 {
 		t.Fatalf("reconcile=%d %s", resp.StatusCode, baselineReadBody(resp))
@@ -261,54 +260,6 @@ func registerHTTPJanus(t *testing.T, ext *externalstage.Service, operator extern
 	if _, err := ext.RegisterReporter(context.Background(), operator, fmt.Sprintf("issue:%d", issueID), "http-register-janus",
 		externalstage.RegisterReporterRequest{APIKeyID: keyID, ReporterClass: externalstage.ReporterClassJanus,
 			ReporterRole: externalstage.ReporterRoleDependency, DependencyKey: "cluster-admission"}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func reportHTTPBuildAndQA(t *testing.T, store *delivery.Store, userID int64, batch baselinebatch.Batch) {
-	t.Helper()
-	ctx := context.Background()
-	reporter := delivery.Actor{Type: "user", OpaqueKey: fmt.Sprintf("user:%d", userID)}
-	impl, err := store.StartStageRetry(ctx, delivery.StageStartRequest{
-		IssueID: batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageImplementation, Reporter: reporter,
-		ReasonCode: "implementation_start", IdempotencyKey: batch.BatchKey + ":http-impl:start",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.ReportStage(ctx, delivery.StageReport{
-		IssueID: batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageImplementation,
-		ExecutionNumber: impl.ExecutionNumber, AuthorityEpoch: impl.AuthorityEpoch, Reporter: reporter,
-		IdempotencyKey: batch.BatchKey + ":http-impl:report", Kind: "semantic", State: "succeeded",
-		Evidence: []delivery.Evidence{
-			{Type: "implementation_result", Outcome: "passed", ReferenceKind: "commit", ReferenceValue: bridgeHTTPCommit},
-			{Type: "artifact", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: bridgeHTTPConfig},
-			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatOCIManifestRef(bridgeHTTPIndex)},
-			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseManifestRef(bridgeHTTPReleaseSet)},
-			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref", ReferenceValue: externalstage.FormatReleaseCoordinateRef(bridgeHTTPCoordinate)},
-			{Type: "artifact", Outcome: "passed", ReferenceKind: "external_ref",
-				ReferenceValue: externalstage.FormatReleaseIdentity(externalstage.VersionSchemeINSPRCalendar, bridgeHTTPChannel, bridgeHTTPSequence, bridgeHTTPVersion)},
-		},
-		ReasonCode: "implementation_result",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	qa, err := store.StartStageRetry(ctx, delivery.StageStartRequest{
-		IssueID: batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageQA, Reporter: reporter,
-		ReasonCode: "qa_start", IdempotencyKey: batch.BatchKey + ":http-qa:start",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.ReportStage(ctx, delivery.StageReport{
-		IssueID: batch.IssueID, AttemptNumber: 1, StageKey: delivery.StageQA,
-		ExecutionNumber: qa.ExecutionNumber, AuthorityEpoch: qa.AuthorityEpoch, Reporter: reporter,
-		IdempotencyKey: batch.BatchKey + ":http-qa:report", Kind: "semantic", State: "succeeded",
-		Evidence: []delivery.Evidence{{
-			Type: "test_result", Outcome: "passed", ReferenceKind: "digest", DigestSHA256: bridgeHTTPQADigest,
-		}},
-		ReasonCode: "test_result",
-	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -584,7 +535,7 @@ func TestBaselineBatchJanusAfterEmptySealHTTP(t *testing.T) {
 	}
 	operator := externalstage.Principal{UserID: userID, Kind: "session", SessionCredentialID: operatorSessionCredential(t, userID)}
 	registerHTTPPharos(t, ext, operator, projectID, batch.IssueID)
-	reportHTTPBuildAndQA(t, store, userID, batch)
+	batch = postHTTPBuiltReceipt(t, ts, projectID, batch)
 	activated := postBaseline(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/baseline-batches/batches/%d/reconcile", projectID, batch.ID), map[string]any{})
 	if activated.StatusCode != 200 {
 		t.Fatal(baselineReadBody(activated))

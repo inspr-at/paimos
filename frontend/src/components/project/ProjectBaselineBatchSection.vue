@@ -68,6 +68,13 @@ function canonicalScopeKey(refs: string[] | undefined) {
   return JSON.stringify(sortedRefs(refs))
 }
 
+function setupRequiredCopy(kind: string) {
+  if (kind === 'built_artifact_identity') {
+    return 'Setup required: built_artifact_identity. Report the typed built receipt with paimos baseline-batch report-built; this screen never starts deployment.'
+  }
+  return `Setup required: ${kind}. Use the existing operator external-stage CLI; this screen never carries handoff secrets.`
+}
+
 function workerInputs(modeValue: string, worker: WorkerSelection) {
   if (modeValue === 'manual') {
     return { worker_name: '', runtime_id: '', account_key: '', profile_id: '', profile_version: '', workspace_handle: '' }
@@ -505,7 +512,7 @@ function stateLabel(d: Draft | null, b: Batch | null) {
         Blocked: {{ active.progress.blocking_reason }}
       </p>
       <p v-if="active.progress.setup_required" class="bb-unresolved" data-testid="batch-setup-required">
-        Setup required: {{ active.progress.setup_required }}. Use the existing operator external-stage CLI; this screen never carries handoff secrets.
+        {{ setupRequiredCopy(active.progress.setup_required) }}
       </p>
       <p v-if="active.progress.next_action" class="bb-meta" data-testid="batch-next-action">
         Next: {{ active.progress.next_action }}
