@@ -98,6 +98,8 @@ export type Acceptance = {
   offer_disclaimer: string
   mail_recovery?: string
   mail_in_flight?: boolean
+  deployment_target?: string
+  target_unknown_reason?: string
 }
 
 export type StandingPolicy = {

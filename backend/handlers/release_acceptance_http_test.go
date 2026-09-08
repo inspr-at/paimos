@@ -381,3 +381,163 @@ func TestReleaseAcceptanceHTTPStaleReplayConcurrentAndFailedMail(t *testing.T) {
 	}
 	priv.Body.Close()
 }
+
+func bindHTTPDeploymentTarget(t *testing.T, projectID int64, name string) {
+	t.Helper()
+	if _, err := db.DB.Exec(`INSERT INTO project_environments(project_id, name, url, host_alias, host_ip, sort_order) VALUES(?,?,'','','',0)`, projectID, name); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReleaseAcceptanceHTTPRecordExternalAndStandingPolicy(t *testing.T) {
+	ts := newTestServer(t)
+	projectID := responseID(t, ts.post(t, "/api/projects", ts.adminCookie, map[string]string{"name": "Accept policy HTTP", "key": "ACP"}))
+	memberID, externalID := seedAcceptancePeople(t, projectID)
+	acc := mintFromBuiltReceipt(t, ts, projectID)
+	cfg := putAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance", projectID, acc.Release.ID),
+		configureBody(memberID, externalID, acc.Revision, releaseacceptance.ModeCustomerOperated))
+	if cfg.StatusCode != 200 {
+		t.Fatalf("configure=%d %s", cfg.StatusCode, baselineReadBody(cfg))
+	}
+	acc = readAcceptance(t, cfg)
+
+	missingAttest := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/email/record-external", projectID, acc.Release.ID),
+		map[string]any{
+			"request_key": "http-ext-missing-confirm", "recipient_party_refs": []string{"party_customer"},
+			"raw_message": "From: a@example.test\r\nSubject: Accept\r\n\r\nWe accept.\r\n",
+			"attestation": "I recorded this email. Recipients are not consent.",
+			"attested_party_refs": []string{"party_customer"},
+		})
+	if missingAttest.StatusCode != http.StatusBadRequest {
+		t.Fatalf("missing confirm_attest=%d %s", missingAttest.StatusCode, baselineReadBody(missingAttest))
+	}
+	missingAttest.Body.Close()
+
+	noAttest := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/email/record-external", projectID, acc.Release.ID),
+		map[string]any{
+			"request_key": "http-ext-recipients-only", "recipient_party_refs": []string{"party_customer"},
+			"raw_message": "From: a@example.test\r\nSubject: Accept\r\n\r\nWe accept.\r\n",
+			"attestation": "I recorded this email. Recipients are not consent.",
+			"attested_party_refs": []string{},
+			"confirm_attest": false,
+		})
+	if noAttest.StatusCode != 200 {
+		t.Fatalf("recipients-only record=%d %s", noAttest.StatusCode, baselineReadBody(noAttest))
+	}
+	acc = readAcceptance(t, noAttest)
+	if len(acc.Confirmations) != 0 || acc.Status == releaseacceptance.StatusAccepted {
+		t.Fatalf("recipients auto-attested over HTTP: status=%s confirmations=%+v", acc.Status, acc.Confirmations)
+	}
+
+	withAttest := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/email/record-external", projectID, acc.Release.ID),
+		map[string]any{
+			"request_key": "http-ext-attest", "recipient_party_refs": []string{"party_customer"},
+			"raw_message": "From: a@example.test\r\nSubject: Accept\r\n\r\nWe accept again.\r\n",
+			"attestation": "I attest, as the recording human, that the selected party accepted this same release revision.",
+			"attested_party_refs": []string{"party_customer"},
+			"confirm_attest": true,
+		})
+	if withAttest.StatusCode != 200 {
+		t.Fatalf("attested record=%d %s", withAttest.StatusCode, baselineReadBody(withAttest))
+	}
+	acc = readAcceptance(t, withAttest)
+	if len(acc.Confirmations) != 1 || acc.Confirmations[0].PartyRef != "party_customer" || acc.Confirmations[0].Source != releaseacceptance.SourceExternalEmail {
+		t.Fatalf("attested confirmations=%+v", acc.Confirmations)
+	}
+
+	unknownApplyBody := map[string]any{
+		"policy_ref": "policy_customer", "content_digest": acc.Release.ContentDigest, "revision_seal": acc.Release.RevisionSeal,
+		"parties": []string{"party_delivery", "party_customer"}, "agreement_ref": "SOW-9",
+		"gaps": []map[string]string{{"gap_ref": "gap_backup", "statement": "Backup restore not proven for this target."}},
+		"bounded_use": "Same approved baseline implementation updates only.", "expires_at": "2026-12-01T00:00:00Z",
+		"release_channel": acc.Release.ReleaseChannel, "artifact_digest": acc.Release.ArtifactDigest,
+		"target_ref": acc.DeploymentTarget, "model_ref": "customer_operated",
+	}
+	unknownPolicy := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/acceptance-standing-policies", projectID), unknownApplyBody)
+	if unknownPolicy.StatusCode != 200 {
+		t.Fatalf("approve unknown target=%d %s", unknownPolicy.StatusCode, baselineReadBody(unknownPolicy))
+	}
+	var unknown releaseacceptance.StandingPolicy
+	decode(t, unknownPolicy, &unknown)
+	if unknown.TargetRef != "" || unknown.ModelRef != releaseacceptance.ModeCustomerOperated {
+		t.Fatalf("HTTP stored unverified scope: %+v", unknown)
+	}
+	blocked := postAcceptance(t, ts, ts.memberCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/apply-policy", projectID, acc.Release.ID),
+		map[string]any{"policy_id": unknown.ID})
+	if blocked.StatusCode != http.StatusForbidden {
+		t.Fatalf("apply without target=%d %s", blocked.StatusCode, baselineReadBody(blocked))
+	}
+	blocked.Body.Close()
+
+	bindHTTPDeploymentTarget(t, projectID, "production")
+	got := ts.get(t, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance", projectID, acc.Release.ID), ts.adminCookie)
+	acc = readAcceptance(t, got)
+	if acc.DeploymentTarget != "production" {
+		t.Fatalf("bound target not projected: %+v", acc)
+	}
+	uiBody := map[string]any{
+		"policy_ref": "policy_customer_bound", "content_digest": acc.Release.ContentDigest, "revision_seal": acc.Release.RevisionSeal,
+		"parties": []string{"party_delivery", "party_customer"}, "agreement_ref": "SOW-9",
+		"gaps": []map[string]string{{"gap_ref": "gap_backup", "statement": "Backup restore not proven for this target."}},
+		"bounded_use": "Same approved baseline implementation updates only.", "expires_at": "2026-12-01T00:00:00Z",
+		"release_channel": acc.Release.ReleaseChannel, "artifact_digest": acc.Release.ArtifactDigest,
+		"target_ref": acc.DeploymentTarget, "model_ref": "customer_operated",
+	}
+	approved := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/acceptance-standing-policies", projectID), uiBody)
+	if approved.StatusCode != 200 {
+		t.Fatalf("approve UI body=%d %s", approved.StatusCode, baselineReadBody(approved))
+	}
+	var policy releaseacceptance.StandingPolicy
+	decode(t, approved, &policy)
+	if policy.TargetRef != "production" || policy.ModelRef != releaseacceptance.ModeCustomerOperated {
+		t.Fatalf("UI policy scope=%+v", policy)
+	}
+
+	driftCfg := configureBody(memberID, externalID, acc.Revision, releaseacceptance.ModeCustomerOperated)
+	driftCfg["agreement_ref"] = "SOW-CHANGED"
+	drift := putAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance", projectID, acc.Release.ID), driftCfg)
+	if drift.StatusCode != 200 {
+		t.Fatalf("drift configure=%d %s", drift.StatusCode, baselineReadBody(drift))
+	}
+	acc = readAcceptance(t, drift)
+	stale := postAcceptance(t, ts, ts.memberCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/apply-policy", projectID, acc.Release.ID),
+		map[string]any{"policy_id": policy.ID})
+	if stale.StatusCode != http.StatusConflict {
+		t.Fatalf("apply drift=%d %s", stale.StatusCode, baselineReadBody(stale))
+	}
+	stale.Body.Close()
+
+	restore := configureBody(memberID, externalID, acc.Revision, releaseacceptance.ModeCustomerOperated)
+	restored := putAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance", projectID, acc.Release.ID), restore)
+	if restored.StatusCode != 200 {
+		t.Fatalf("restore configure=%d %s", restored.StatusCode, baselineReadBody(restored))
+	}
+	acc = readAcceptance(t, restored)
+	applied := postAcceptance(t, ts, ts.memberCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/apply-policy", projectID, acc.Release.ID),
+		map[string]any{"policy_id": policy.ID})
+	if applied.StatusCode != 200 {
+		t.Fatalf("apply=%d %s", applied.StatusCode, baselineReadBody(applied))
+	}
+	acc = readAcceptance(t, applied)
+	found := false
+	for _, c := range acc.Confirmations {
+		if c.PartyRef == "party_delivery" && c.Source == releaseacceptance.SourceStandingPolicy {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("standing policy confirmation missing: %+v", acc.Confirmations)
+	}
+
+	revoked := postAcceptance(t, ts, ts.adminCookie, fmt.Sprintf("/api/projects/%d/acceptance-standing-policies/%d/revoke", projectID, policy.ID), map[string]any{})
+	if revoked.StatusCode != 200 {
+		t.Fatalf("revoke=%d %s", revoked.StatusCode, baselineReadBody(revoked))
+	}
+	revoked.Body.Close()
+	afterRevoke := postAcceptance(t, ts, ts.memberCookie, fmt.Sprintf("/api/projects/%d/release-records/%d/acceptance/apply-policy", projectID, acc.Release.ID),
+		map[string]any{"policy_id": policy.ID})
+	if afterRevoke.StatusCode != http.StatusForbidden {
+		t.Fatalf("apply revoked=%d %s", afterRevoke.StatusCode, baselineReadBody(afterRevoke))
+	}
+	afterRevoke.Body.Close()
+}

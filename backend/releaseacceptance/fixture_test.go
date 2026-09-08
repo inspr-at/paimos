@@ -169,6 +169,35 @@ func (f *fixture) insertBatch() int64 {
 	return id
 }
 
+func (f *fixture) bindDeploymentTarget(name string) {
+	f.t.Helper()
+	if _, err := appdb.DB.Exec(`INSERT INTO project_environments(project_id, name, url, host_alias, host_ip, sort_order)
+		VALUES(?,?,'','','',0)`, f.projectID, name); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func (f *fixture) standingPolicy(policyRef string, extras ...func(*PolicyRequest)) PolicyRequest {
+	req := PolicyRequest{
+		PolicyRef:      policyRef,
+		ContentDigest:  testDigest,
+		RevisionSeal:   testSeal,
+		Parties:        []string{"party_customer"},
+		AgreementRef:   "SOW-9",
+		Gaps:           []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		BoundedUse:     "Same approved baseline implementation updates only.",
+		ExpiresAt:      "2026-12-01T00:00:00Z",
+		TargetRef:      "production",
+		ModelRef:       ModeCustomerOperated,
+		ReleaseChannel: "stable",
+		ArtifactDigest: testArt,
+	}
+	for _, extra := range extras {
+		extra(&req)
+	}
+	return req
+}
+
 func (f *fixture) configure(releaseID int64, mode string) Acceptance {
 	f.t.Helper()
 	acc, err := f.svc.Configure(context.Background(), f.admin, f.projectID, releaseID, ConfigureRequest{

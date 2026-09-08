@@ -38,8 +38,10 @@ func (s *Service) Export(ctx context.Context, actor Actor, projectID, releaseID 
 }
 
 func (s *Service) rawMessages(ctx context.Context, projectID, releaseID int64) ([]byte, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT e.raw_message FROM acceptance_email_evidence e
+	rows, err := s.DB.QueryContext(ctx, `SELECT e.raw_message, e.state, COALESCE(o.state,''), COALESCE(o.last_error_class,'')
+		FROM acceptance_email_evidence e
 		JOIN release_records r ON r.id=e.release_id
+		LEFT JOIN acceptance_mail_outbox o ON o.evidence_id=e.id
 		WHERE r.project_id=? AND r.id=? AND e.raw_message IS NOT NULL
 		ORDER BY e.id`, projectID, releaseID)
 	if err != nil {
@@ -49,12 +51,15 @@ func (s *Service) rawMessages(ctx context.Context, projectID, releaseID int64) (
 	var parts [][]byte
 	for rows.Next() {
 		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
+		var state, outbox, class string
+		if err := rows.Scan(&raw, &state, &outbox, &class); err != nil {
 			return nil, err
 		}
-		if len(raw) > 0 {
-			parts = append(parts, raw)
+		if len(raw) == 0 {
+			continue
 		}
+		marker := []byte("X-Paimos-Delivery-State: " + displayMailState(state, outbox, class) + "\r\n")
+		parts = append(parts, append(marker, raw...))
 	}
 	if len(parts) == 0 {
 		return []byte("Subject: (no sent email evidence)\r\n\r\n"), nil
@@ -110,7 +115,7 @@ func printableHTML(acc Acceptance) string {
 	for _, c := range acc.Confirmations {
 		name := c.PartyName
 		if name == "" {
-			name = c.PartyRef
+			name = partyDisplayName(acc, c.PartyRef)
 		}
 		b.WriteString("<li>" + html.EscapeString(name) + " · " + html.EscapeString(c.SourceLabel) + " · revision " + html.EscapeString(fmt.Sprintf("%d", c.AcceptanceRevision)) + " · " + html.EscapeString(c.ConfirmedAt) + "</li>")
 	}
@@ -122,10 +127,18 @@ func printableHTML(acc Acceptance) string {
 		}
 		b.WriteString("<li>" + html.EscapeString(state) + " · " + html.EscapeString(strings.Join(e.RecipientNames, ", ")) + " · " + html.EscapeString(e.RecordedAt) + "</li>")
 	}
-	b.WriteString("</ul><h2>Missing</h2><p>Confirmations: " + html.EscapeString(strings.Join(acc.Missing.Confirmations, ", ")) +
-		"<br>Email coverage: " + html.EscapeString(strings.Join(acc.Missing.EmailCoverage, ", ")) + "</p>")
+	b.WriteString("</ul><h2>Missing</h2><p>Confirmations: " + html.EscapeString(strings.Join(namedPartyList(acc, acc.Missing.Confirmations), ", ")) +
+		"<br>Email coverage: " + html.EscapeString(strings.Join(namedPartyList(acc, acc.Missing.EmailCoverage), ", ")) + "</p>")
 	b.WriteString("<h2>Reviewable message</h2><pre>")
 	b.WriteString(html.EscapeString(acc.PreviewSubject + "\n\n" + acc.PreviewBody))
 	b.WriteString("</pre></body></html>")
 	return b.String()
+}
+
+func namedPartyList(acc Acceptance, refs []string) []string {
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, partyDisplayName(acc, ref))
+	}
+	return out
 }

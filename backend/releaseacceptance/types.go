@@ -211,8 +211,10 @@ type Acceptance struct {
 	Missing            Missing             `json:"missing"`
 	Defaults           CooperationDefaults `json:"defaults"`
 	OfferDisclaimer    string              `json:"offer_disclaimer"`
-	MailRecovery       string              `json:"mail_recovery,omitempty"`
-	MailInFlight       bool                `json:"mail_in_flight,omitempty"`
+	MailRecovery         string              `json:"mail_recovery,omitempty"`
+	MailInFlight         bool                `json:"mail_in_flight,omitempty"`
+	DeploymentTarget     string              `json:"deployment_target,omitempty"`
+	TargetUnknownReason  string              `json:"target_unknown_reason,omitempty"`
 }
 
 type StandingPolicy struct {

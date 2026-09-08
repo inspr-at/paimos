@@ -261,14 +261,13 @@ func TestStandingPolicyDriftAndRevocation(t *testing.T) {
 	f := openFixture(t)
 	rel := f.mint()
 	f.configure(rel.Release.ID, ModeCustomerOperated)
-	policy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
-		PolicyRef: "policy_acc", ContentDigest: testDigest, RevisionSeal: testSeal,
-		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
-		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
-		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2026-12-01T00:00:00Z",
-	})
+	f.bindDeploymentTarget("production")
+	policy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_acc"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if policy.TargetRef != "production" || policy.ModelRef != ModeCustomerOperated {
+		t.Fatalf("policy bound wrong scope: %+v", policy)
 	}
 	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, policy.ID); err != nil {
 		t.Fatal(err)
@@ -319,6 +318,12 @@ func TestExportEscapesHTML(t *testing.T) {
 	if !strings.Contains(html, "&lt;script&gt;") {
 		t.Fatalf("missing escape: %s", html)
 	}
+	if strings.Contains(html, "party_customer") || strings.Contains(html, "party_delivery") {
+		t.Fatalf("printable missing still leaks storage refs: %s", html)
+	}
+	if !strings.Contains(html, "Customer") || !strings.Contains(html, "Delivery") {
+		t.Fatalf("printable missing omitted party names: %s", html)
+	}
 }
 
 func TestAuthorizeSendRequiresExplicitConfirm(t *testing.T) {
@@ -367,6 +372,15 @@ func TestAmbiguousMailFailsClosedWithoutRetry(t *testing.T) {
 	}
 	if len(f.mail.messages) != 0 {
 		t.Fatalf("automatic retry after ambiguous delivery: %d", len(f.mail.messages))
+	}
+	if !got.MailInFlight {
+		t.Fatal("ambiguous delivery must block further authorize")
+	}
+	if _, err := f.svc.AuthorizeSend(context.Background(), f.admin, f.projectID, rel.Release.ID, AuthorizeSendRequest{
+		RequestKey: "retry-2", RecipientPartyRefs: []string{"party_customer"},
+		PreviewRevision: got.PreviewRevision, ConfirmSend: true,
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second authorize after ambiguous err=%v", err)
 	}
 }
 
@@ -577,39 +591,62 @@ func TestPolicyExpiryAndBindings(t *testing.T) {
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expired approve err=%v", err)
 	}
-	policy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
-		PolicyRef: "policy_bind", ContentDigest: testDigest, RevisionSeal: testSeal,
+	if _, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
+		PolicyRef: "policy_artifact_as_target", ContentDigest: testDigest, RevisionSeal: testSeal,
 		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
-		Gaps:           []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
-		BoundedUse:     "Same approved baseline implementation updates only.",
-		ExpiresAt:      "2026-12-01T00:00:00Z",
-		TargetRef:      "other-target",
-		ModelRef:       "other-model",
-		ReleaseChannel: "stable",
-		ArtifactDigest: testArt,
+		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2026-12-01T00:00:00Z",
+		TargetRef:  "ghcr:inspr-at/demo:acc",
+		ModelRef:   ModeCustomerOperated,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unverified target err=%v", err)
+	}
+	if _, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
+		PolicyRef: "policy_scheme_as_model", ContentDigest: testDigest, RevisionSeal: testSeal,
+		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
+		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2026-12-01T00:00:00Z",
+		ModelRef:   "inspr-calendar-v1",
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("version scheme as model err=%v", err)
+	}
+	unknown, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
+		PolicyRef: "policy_unknown_target", ContentDigest: testDigest, RevisionSeal: testSeal,
+		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
+		Gaps:       []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
+		BoundedUse: "Same approved baseline implementation updates only.", ExpiresAt: "2026-12-01T00:00:00Z",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, policy.ID); !errors.Is(err, ErrStale) {
-		t.Fatalf("unenforced target err=%v", err)
+	if unknown.TargetRef != "" || unknown.ModelRef != ModeCustomerOperated {
+		t.Fatalf("unknown policy stored unverified scope: %+v", unknown)
 	}
-	okPolicy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, PolicyRequest{
-		PolicyRef: "policy_ok_bind", ContentDigest: testDigest, RevisionSeal: testSeal,
-		Parties: []string{"party_customer"}, AgreementRef: "SOW-9",
-		Gaps:           []Gap{{GapRef: "gap_backup", Statement: "Backup restore not proven for this target."}},
-		BoundedUse:     "Same approved baseline implementation updates only.",
-		ExpiresAt:      "2026-12-01T00:00:00Z",
-		TargetRef:      "ghcr:inspr-at/demo:acc",
-		ModelRef:       "inspr-calendar-v1",
-		ReleaseChannel: "stable",
-		ArtifactDigest: testArt,
-	})
+	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, unknown.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("unknown target apply err=%v", err)
+	}
+	got, err := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got.DeploymentTarget != "" || got.TargetUnknownReason == "" {
+		t.Fatalf("projection hid unknown target: %+v", got)
+	}
+	f.bindDeploymentTarget("production")
+	okPolicy, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_ok_bind"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if okPolicy.TargetRef != "production" || okPolicy.ModelRef != ModeCustomerOperated {
+		t.Fatalf("bound policy=%+v", okPolicy)
 	}
 	if _, err := f.svc.ApplyPolicy(context.Background(), f.customer, f.projectID, rel.Release.ID, okPolicy.ID); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := f.svc.ApprovePolicy(context.Background(), f.admin, f.projectID, f.standingPolicy("policy_wrong_target", func(req *PolicyRequest) {
+		req.TargetRef = "other-target"
+	})); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("mismatched target err=%v", err)
 	}
 }
 
@@ -650,5 +687,73 @@ func TestExpiredSendingIsAmbiguousWithoutResend(t *testing.T) {
 	}
 	if !strings.Contains(out.MailRecovery, "Do not send this message again") {
 		t.Fatalf("recovery invites resend: %q", out.MailRecovery)
+	}
+	if !out.MailInFlight {
+		t.Fatal("expired sending must be treated as in-flight")
+	}
+}
+
+func TestAmbiguousRecoveryDominatesPriorReject(t *testing.T) {
+	f := openFixture(t)
+	rel := f.mint()
+	f.configure(rel.Release.ID, ModeAgencySupported)
+	if _, err := f.svc.SavePreview(context.Background(), f.admin, f.projectID, rel.Release.ID, PreviewRequest{Subject: "A", Body: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
+	f.mail.err = mailer.ErrRejected
+	got, err := f.svc.AuthorizeSend(context.Background(), f.admin, f.projectID, rel.Release.ID, AuthorizeSendRequest{
+		RequestKey: "reject-first", RecipientPartyRefs: []string{"party_customer"},
+		PreviewRevision: got.PreviewRevision, ConfirmSend: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.MailRecovery, "authorize a new send") {
+		t.Fatalf("rejected recovery=%q", got.MailRecovery)
+	}
+	f.mail.err = mailer.ErrAmbiguous
+	got, err = f.svc.AuthorizeSend(context.Background(), f.admin, f.projectID, rel.Release.ID, AuthorizeSendRequest{
+		RequestKey: "ambiguous-second", RecipientPartyRefs: []string{"party_customer"},
+		PreviewRevision: got.PreviewRevision, ConfirmSend: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.MailRecovery, "Do not send this message again") {
+		t.Fatalf("ambiguous did not dominate: %q", got.MailRecovery)
+	}
+	if !got.MailInFlight {
+		t.Fatal("ambiguous must disable further authorize")
+	}
+	if _, err := f.svc.AuthorizeSend(context.Background(), f.admin, f.projectID, rel.Release.ID, AuthorizeSendRequest{
+		RequestKey: "ambiguous-third", RecipientPartyRefs: []string{"party_customer"},
+		PreviewRevision: got.PreviewRevision, ConfirmSend: true,
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("third authorize err=%v", err)
+	}
+}
+
+func TestExportMarksDeliveryState(t *testing.T) {
+	f := openFixture(t)
+	rel := f.mint()
+	f.configure(rel.Release.ID, ModeAgencySupported)
+	if _, err := f.svc.SavePreview(context.Background(), f.admin, f.projectID, rel.Release.ID, PreviewRequest{Subject: "A", Body: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := f.svc.Get(context.Background(), f.admin, f.projectID, rel.Release.ID)
+	f.mail.err = mailer.ErrRejected
+	if _, err := f.svc.AuthorizeSend(context.Background(), f.admin, f.projectID, rel.Release.ID, AuthorizeSendRequest{
+		RequestKey: "export-fail", RecipientPartyRefs: []string{"party_customer"},
+		PreviewRevision: got.PreviewRevision, ConfirmSend: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, body, err := f.svc.Export(context.Background(), f.admin, f.projectID, rel.Release.ID, "eml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "X-Paimos-Delivery-State: failed") {
+		t.Fatalf("eml missing delivery state: %s", body)
 	}
 }

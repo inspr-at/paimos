@@ -15,17 +15,18 @@ import (
 	"testing"
 	"time"
 
-	appdb "github.com/inspr-at/paimos/backend/db"
+	appdb 	"github.com/inspr-at/paimos/backend/db"
 	"github.com/inspr-at/paimos/backend/mailer"
+	"github.com/inspr-at/paimos/backend/mailer/smtptest"
 )
 
 func TestLoopbackSMTPWireAndAmbiguousDATA(t *testing.T) {
-	okServer, err := mailer.StartLoopback(mailer.LoopbackOK, 0)
+	okServer, err := smtptest.Start(smtptest.OK, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(okServer.Close)
-	host, port := mailer.SplitHostPort(okServer.Addr)
+	host, port := smtptest.SplitHostPort(okServer.Addr)
 	f := openFixture(t)
 	f.svc.Mail = mailer.SMTP{Host: host, Port: port, From: "paimos@example.test"}
 	rel := f.mint()
@@ -56,16 +57,19 @@ func TestLoopbackSMTPWireAndAmbiguousDATA(t *testing.T) {
 		t.Fatalf("missing rfc5322 headers: %s", raw)
 	}
 	encoded := mime.QEncoding.Encode("utf-8", subject)
-	if !strings.Contains(raw, encoded) || !strings.Contains(raw, "Bitte die gebaute Version prüfen.") {
+	if strings.Contains(raw, "Content-Transfer-Encoding: 8bit") {
+		t.Fatalf("8bit without 8BITMIME: %s", raw)
+	}
+	if !strings.Contains(raw, encoded) || !strings.Contains(raw, "Content-Transfer-Encoding: quoted-printable") || !strings.Contains(raw, "pr=C3=BCfen") {
 		t.Fatalf("unicode payload missing: %s", raw)
 	}
 
-	hang, err := mailer.StartLoopback(mailer.LoopbackHangAfterDATA, 0)
+	hang, err := smtptest.Start(smtptest.HangAfterDATA, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(hang.Close)
-	hHost, hPort := mailer.SplitHostPort(hang.Addr)
+	hHost, hPort := smtptest.SplitHostPort(hang.Addr)
 	f.svc.Mail = mailer.SMTP{Host: hHost, Port: hPort, From: "paimos@example.test"}
 	f.svc.SendTimeout = 400 * time.Millisecond
 	f.svc.Lease = time.Hour
@@ -91,12 +95,12 @@ func TestLoopbackSMTPWireAndAmbiguousDATA(t *testing.T) {
 }
 
 func TestParallelDrainDoesNotDoubleSend(t *testing.T) {
-	slow, err := mailer.StartLoopback(mailer.LoopbackSlowAfterDATA, 600*time.Millisecond)
+	slow, err := smtptest.Start(smtptest.SlowAfterDATA, 600*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(slow.Close)
-	host, port := mailer.SplitHostPort(slow.Addr)
+	host, port := smtptest.SplitHostPort(slow.Addr)
 	f := openFixture(t)
 	f.svc.Clock = ClockFunc(time.Now)
 	f.svc.Mail = mailer.SMTP{Host: host, Port: port, From: "paimos@example.test"}
@@ -138,12 +142,12 @@ func TestParallelDrainDoesNotDoubleSend(t *testing.T) {
 }
 
 func TestSMTPRejectBeforeDATAIsRejected(t *testing.T) {
-	srv, err := mailer.StartLoopback(mailer.LoopbackRejectMAIL, 0)
+	srv, err := smtptest.Start(smtptest.RejectMAIL, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(srv.Close)
-	host, port := mailer.SplitHostPort(srv.Addr)
+	host, port := smtptest.SplitHostPort(srv.Addr)
 	f := openFixture(t)
 	f.svc.Mail = mailer.SMTP{Host: host, Port: port, From: "paimos@example.test"}
 	rel := f.mint()

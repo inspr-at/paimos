@@ -9177,7 +9177,7 @@
       "post": {
         "tags": ["release-acceptance"],
         "summary": "Approve a customer-operated standing policy",
-        "description": "Live non-impersonated human session with project edit. CSRF required. Customer-operated only. Does not authorize future email sends.",
+        "description": "Live non-impersonated human session with project edit. CSRF required. Customer-operated only. Does not authorize future email sends. target_ref is a bound deployment target (Pharos owner environment on the batch delivery, or a unique project environment). model_ref is the customer-operated arrangement. Unknown or freeform target/model values are refused.",
         "security": [{"sessionCookie": []}],
         "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object"}}}},
@@ -9210,7 +9210,7 @@
       "post": {
         "tags": ["release-acceptance"],
         "summary": "Apply a standing policy to the current actor's own party",
-        "description": "Live non-impersonated human session with project view. Confirms only the current actor's listed party when the policy still matches. Does not send mail. Drift, expiry, revocation, or agency modes force fresh confirmation.",
+        "description": "Live non-impersonated human session with project view. Confirms only the current actor's listed party when the policy still matches. Does not send mail. Drift, expiry, revocation, unknown deployment target, or agency modes force fresh confirmation.",
         "security": [{"sessionCookie": []}],
         "parameters": [
           {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}},

@@ -169,8 +169,12 @@ describe('ProjectReleaseAcceptanceSection', () => {
     expect(host.querySelector<HTMLButtonElement>('[data-testid="authorize-send"]')?.disabled).toBe(true)
     host.querySelector<HTMLInputElement>('[data-testid="confirm-send"]')!.click()
     await settle()
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="authorize-send"]')?.disabled).toBe(true)
+    host.querySelector<HTMLInputElement>('[data-testid="recipient-party"]')!.click()
+    await settle()
     expect(host.querySelector<HTMLButtonElement>('[data-testid="authorize-send"]')?.disabled).toBe(false)
     expect(host.textContent).not.toContain('actor 44')
+    expect(host.querySelector('[data-testid="attest-summary"]')?.textContent).toContain('None selected')
     app.unmount()
   })
 
@@ -214,6 +218,101 @@ describe('ProjectReleaseAcceptanceSection', () => {
     await settle()
     expect(host.querySelector<HTMLButtonElement>('[data-testid="authorize-send"]')?.disabled).toBe(true)
     expect(host.querySelector('[data-testid="mail-recovery"]')?.textContent).toContain('Do not send this message again')
+    app.unmount()
+  })
+
+  it('posts record-external with selected recipients separate from attested parties', async () => {
+    mockLoads()
+    vi.mocked(api.post).mockResolvedValue(acceptanceFixture)
+    const { host, app } = await mountSection()
+    const raw = host.querySelector<HTMLTextAreaElement>('[data-testid="external-raw"]')!
+    raw.value = 'From: a@example.test\r\nSubject: Accept\r\n\r\nWe accept.\r\n'
+    raw.dispatchEvent(new Event('input', { bubbles: true }))
+    const attestation = host.querySelector<HTMLInputElement>('[data-testid="external-attestation"]')!
+    attestation.value = 'I recorded this email. Recipients are not consent.'
+    attestation.dispatchEvent(new Event('input', { bubbles: true }))
+    host.querySelectorAll<HTMLInputElement>('[data-testid="recipient-party"]')[0].click()
+    await settle()
+    host.querySelector<HTMLButtonElement>('[data-testid="record-external"]')!.click()
+    await settle()
+    const first = vi.mocked(api.post).mock.calls.find((call) => String(call[0]).endsWith('/email/record-external'))
+    expect(first?.[1]).toEqual(expect.objectContaining({
+      recipient_party_refs: ['party_customer'],
+      attested_party_refs: [],
+      confirm_attest: false,
+      raw_message: expect.stringContaining('We accept.'),
+    }))
+
+    host.querySelectorAll<HTMLInputElement>('[data-testid="recipient-party"]')[0].click()
+    host.querySelectorAll<HTMLInputElement>('[data-testid="attest-party"]')[0].click()
+    await settle()
+    expect(host.querySelector('[data-testid="attest-summary"]')?.textContent).toContain('Customer selected')
+    expect(host.querySelector('[data-testid="attest-summary"]')?.textContent).not.toMatch(/^None selected/)
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="record-external"]')?.disabled).toBe(true)
+    host.querySelector<HTMLInputElement>('[data-testid="confirm-attest"]')!.click()
+    await settle()
+    host.querySelector<HTMLButtonElement>('[data-testid="record-external"]')!.click()
+    await settle()
+    const attested = vi.mocked(api.post).mock.calls.filter((call) => String(call[0]).endsWith('/email/record-external'))
+    expect(attested[attested.length - 1]?.[1]).toEqual(expect.objectContaining({
+      recipient_party_refs: ['party_customer'],
+      attested_party_refs: ['party_customer'],
+      confirm_attest: true,
+    }))
+    app.unmount()
+  })
+
+  it('resets attestation and send confirmation after a recording round-trip', async () => {
+    mockLoads()
+    vi.mocked(api.post).mockImplementation(async (path: string) => {
+      if (String(path).endsWith('/email/record-external')) {
+        return { ...acceptanceFixture, revision: 2 }
+      }
+      return acceptanceFixture
+    })
+    const { host, app } = await mountSection()
+    const raw = host.querySelector<HTMLTextAreaElement>('[data-testid="external-raw"]')!
+    raw.value = 'From: a@example.test\r\n\r\nWe accept.\r\n'
+    raw.dispatchEvent(new Event('input', { bubbles: true }))
+    const attestation = host.querySelector<HTMLInputElement>('[data-testid="external-attestation"]')!
+    attestation.value = 'recorded'
+    attestation.dispatchEvent(new Event('input', { bubbles: true }))
+    host.querySelectorAll<HTMLInputElement>('[data-testid="attest-party"]')[0].click()
+    host.querySelector<HTMLInputElement>('[data-testid="confirm-attest"]')!.click()
+    host.querySelector<HTMLInputElement>('[data-testid="confirm-send"]')!.click()
+    await settle()
+    host.querySelector<HTMLButtonElement>('[data-testid="record-external"]')!.click()
+    await settle()
+    expect(host.querySelectorAll<HTMLInputElement>('[data-testid="attest-party"]')[0].checked).toBe(false)
+    expect(host.querySelector<HTMLInputElement>('[data-testid="confirm-attest"]')?.checked).toBe(false)
+    expect(host.querySelector<HTMLInputElement>('[data-testid="confirm-send"]')?.checked).toBe(false)
+    expect(host.querySelectorAll<HTMLInputElement>('[data-testid="recipient-party"]')[0].checked).toBe(false)
+    expect(host.querySelector('[data-testid="attest-summary"]')?.textContent).toContain('None selected')
+    app.unmount()
+  })
+
+  it('approves standing policy with operating mode and bound deployment target, not artifact identity', async () => {
+    mockLoads({
+      ...acceptanceFixture,
+      operating_mode: 'customer_operated',
+      operating_mode_label: 'customer-operated',
+      deployment_target: 'production',
+      target_unknown_reason: '',
+    })
+    vi.mocked(api.post).mockResolvedValue({ id: 3, policy_ref: 'policy_customer', operating_mode: 'customer_operated', target_ref: 'production', model_ref: 'customer_operated' })
+    const { host, app } = await mountSection()
+    expect(host.querySelector('[data-testid="deployment-target"]')?.textContent).toContain('production')
+    host.querySelector<HTMLButtonElement>('[data-testid="approve-policy"]')!.click()
+    await settle()
+    const call = vi.mocked(api.post).mock.calls.find((item) => String(item[0]).endsWith('/acceptance-standing-policies'))
+    expect(call?.[1]).toEqual(expect.objectContaining({
+      target_ref: 'production',
+      model_ref: 'customer_operated',
+    }))
+    expect(call?.[1]).not.toEqual(expect.objectContaining({
+      target_ref: 'ghcr:demo:acc',
+      model_ref: 'inspr-calendar-v1',
+    }))
     app.unmount()
   })
 

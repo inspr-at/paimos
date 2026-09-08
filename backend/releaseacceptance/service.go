@@ -8,6 +8,7 @@
 package releaseacceptance
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -15,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime"
+	"mime/quotedprintable"
 	"net/mail"
 	"sort"
 	"strings"
@@ -464,6 +466,20 @@ func (s *Service) AuthorizeSend(ctx context.Context, actor Actor, projectID, rel
 	if strings.TrimSpace(req.RequestKey) == "" {
 		return Acceptance{}, fmt.Errorf("%w: request_key", ErrInvalid)
 	}
+	var existingEvidence int64
+	err = tx.QueryRowContext(ctx, `SELECT id FROM acceptance_email_evidence WHERE acceptance_id=? AND request_key=?`, acc.ID, req.RequestKey).Scan(&existingEvidence)
+	if err == nil {
+		if err := tx.Commit(); err != nil {
+			return Acceptance{}, err
+		}
+		return s.Get(ctx, actor, projectID, releaseID)
+	}
+	if err != sql.ErrNoRows {
+		return Acceptance{}, err
+	}
+	if acc.MailInFlight {
+		return Acceptance{}, fmt.Errorf("%w: delivery already in flight or unresolved; do not authorize another send", ErrConflict)
+	}
 	if err := coverKnownParties(acc, req.RecipientPartyRefs); err != nil {
 		return Acceptance{}, err
 	}
@@ -474,18 +490,7 @@ func (s *Service) AuthorizeSend(ctx context.Context, actor Actor, projectID, rel
 	raw := buildRawMessage(acc, req.RecipientPartyRefs, from, s.Clock.Now().UTC(), uuid.NewString())
 	sum := sha256.Sum256(raw)
 	hash := hex.EncodeToString(sum[:])
-	var evidenceID int64
-	err = tx.QueryRowContext(ctx, `SELECT id FROM acceptance_email_evidence WHERE acceptance_id=? AND request_key=?`, acc.ID, req.RequestKey).Scan(&evidenceID)
 	now := s.now()
-	if err == nil {
-		if err := tx.Commit(); err != nil {
-			return Acceptance{}, err
-		}
-		return s.Get(ctx, actor, projectID, releaseID)
-	}
-	if err != sql.ErrNoRows {
-		return Acceptance{}, err
-	}
 	recip, _ := json.Marshal(sortedUnique(req.RecipientPartyRefs))
 	messageRef := "message_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	res, err := tx.ExecContext(ctx, `INSERT INTO acceptance_email_evidence(
@@ -497,7 +502,7 @@ func (s *Service) AuthorizeSend(ctx context.Context, actor Actor, projectID, rel
 	if err != nil {
 		return Acceptance{}, err
 	}
-	evidenceID, _ = res.LastInsertId()
+	evidenceID, _ := res.LastInsertId()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO acceptance_mail_outbox(
 		evidence_id,request_key,state,attempt_count,last_error_class,authorized_by,session_credential_id,preview_revision,created_at,updated_at)
 		VALUES(?,?,'queued',0,'',?,?,?,?,?)`,
@@ -710,6 +715,10 @@ func (s *Service) ApprovePolicy(ctx context.Context, actor Actor, projectID int6
 	if len(req.ContentDigest) != 71 || len(req.RevisionSeal) != 71 {
 		return StandingPolicy{}, fmt.Errorf("%w: baseline binding", ErrInvalid)
 	}
+	targetRef, modelRef, err := bindStandingPolicyScope(ctx, tx, projectID, req)
+	if err != nil {
+		return StandingPolicy{}, err
+	}
 	gapsJSON, _ := json.Marshal(canonicalGaps(req.Gaps))
 	partiesJSON, _ := json.Marshal(sortedUnique(req.Parties))
 	now := s.now()
@@ -718,7 +727,7 @@ func (s *Service) ApprovePolicy(ctx context.Context, actor Actor, projectID int6
 		parties_json,model_ref,agreement_ref,gaps_json,release_channel,artifact_digest,bounded_use,expires_at,created_at)
 		VALUES(?,?,'customer_operated',?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		projectID, req.PolicyRef, actor.UserID, actor.SessionCredentialID, req.ContentDigest, req.RevisionSeal,
-		strings.TrimSpace(req.TargetRef), string(partiesJSON), strings.TrimSpace(req.ModelRef), strings.TrimSpace(req.AgreementRef),
+		targetRef, string(partiesJSON), modelRef, strings.TrimSpace(req.AgreementRef),
 		string(gapsJSON), strings.TrimSpace(req.ReleaseChannel), strings.TrimSpace(req.ArtifactDigest),
 		strings.TrimSpace(req.BoundedUse), expires, now)
 	if err != nil {
@@ -895,6 +904,7 @@ func (s *Service) projectAcceptance(ctx context.Context, tx *sql.Tx, projectID, 
 	acc.OfferDisclaimer = OfferDisclaimer
 	acc.Defaults = loadDefaults(ctx, tx, projectID)
 	acc.Missing = computeMissing(acc)
+	s.annotateDeploymentTarget(ctx, tx, &acc)
 	annotateProjection(&acc)
 	return acc, nil
 }
@@ -919,19 +929,37 @@ func annotateProjection(acc *Acceptance) {
 		}
 	}
 	inFlight := false
+	ambiguous := ""
+	other := ""
 	for i := range acc.EmailEvidence {
 		e := &acc.EmailEvidence[i]
 		e.DisplayState = displayMailState(e.State, e.OutboxState, e.LastErrorClass)
 		e.RecipientNames = nil
 		for _, ref := range e.RecipientPartyRefs {
-			e.RecipientNames = append(e.RecipientNames, names[ref])
+			label := names[ref]
+			if label == "" {
+				label = partyDisplayName(*acc, ref)
+			}
+			e.RecipientNames = append(e.RecipientNames, label)
 		}
-		if e.DisplayState == MailQueued || e.DisplayState == MailSending {
+		if e.DisplayState == MailQueued || e.DisplayState == MailSending || e.DisplayState == MailAmbiguous {
 			inFlight = true
 		}
-		if acc.MailRecovery == "" {
-			acc.MailRecovery = recoveryText(e.DisplayState, e.LastErrorClass)
+		text := recoveryText(e.DisplayState, e.LastErrorClass)
+		if e.DisplayState == MailAmbiguous || e.LastErrorClass == "smtp_ambiguous" {
+			if ambiguous == "" {
+				ambiguous = text
+			}
+			continue
 		}
+		if other == "" {
+			other = text
+		}
+	}
+	if ambiguous != "" {
+		acc.MailRecovery = ambiguous
+	} else {
+		acc.MailRecovery = other
 	}
 	acc.MailInFlight = inFlight
 }
@@ -1371,10 +1399,13 @@ func policyMatches(policy StandingPolicy, acc Acceptance, now time.Time) error {
 	if policy.ArtifactDigest != "" && policy.ArtifactDigest != acc.Release.ArtifactDigest {
 		return fmt.Errorf("%w: policy artifact drift", ErrStale)
 	}
-	if policy.TargetRef != "" && policy.TargetRef != acc.Release.ArtifactCoordinate {
+	if strings.TrimSpace(policy.TargetRef) == "" || strings.TrimSpace(acc.DeploymentTarget) == "" {
+		return fmt.Errorf("%w: %s", ErrForbidden, targetUnknownUnbound)
+	}
+	if policy.TargetRef != acc.DeploymentTarget {
 		return fmt.Errorf("%w: policy target drift", ErrStale)
 	}
-	if policy.ModelRef != "" && policy.ModelRef != acc.Release.VersionScheme {
+	if policy.ModelRef != acc.OperatingMode {
 		return fmt.Errorf("%w: policy model drift", ErrStale)
 	}
 	for _, p := range policy.Parties {
@@ -1458,6 +1489,7 @@ func buildRawMessage(acc Acceptance, recipients []string, from string, now time.
 	if msgid == "" {
 		msgid = uuid.NewString()
 	}
+	cte, payload := encodeMailBody(acc.PreviewBody)
 	return []byte("From: " + fromAddr.String() + "\r\n" +
 		"Date: " + now.UTC().Format("Mon, 02 Jan 2006 15:04:05 -0700") + "\r\n" +
 		"Message-ID: <" + msgid + "@" + host + ">\r\n" +
@@ -1465,8 +1497,49 @@ func buildRawMessage(acc Acceptance, recipients []string, from string, now time.
 		"To: " + strings.Join(to, ", ") + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
 		"Content-Type: text/plain; charset=utf-8\r\n" +
-		"Content-Transfer-Encoding: 8bit\r\n" +
-		"\r\n" + acc.PreviewBody + "\r\n")
+		"Content-Transfer-Encoding: " + cte + "\r\n" +
+		"\r\n" + payload)
+}
+
+func encodeMailBody(body string) (cte, payload string) {
+	if isSevenBit(body) {
+		if !strings.HasSuffix(body, "\r\n") {
+			body += "\r\n"
+		}
+		return "7bit", body
+	}
+	var buf bytes.Buffer
+	w := quotedprintable.NewWriter(&buf)
+	_, _ = w.Write([]byte(body))
+	if !strings.HasSuffix(body, "\n") {
+		_, _ = w.Write([]byte("\r\n"))
+	}
+	_ = w.Close()
+	return "quoted-printable", buf.String()
+}
+
+func isSevenBit(s string) bool {
+	if strings.ContainsRune(s, 0) {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] > 127 {
+			return false
+		}
+	}
+	return true
+}
+
+func partyDisplayName(acc Acceptance, ref string) string {
+	if p, ok := partyByRef(acc.Parties, ref); ok {
+		if strings.TrimSpace(p.DisplayName) != "" {
+			return p.DisplayName
+		}
+		if strings.TrimSpace(p.Email) != "" {
+			return p.Email
+		}
+	}
+	return ref
 }
 
 func lookslikeHTMLRemote(raw []byte) bool {

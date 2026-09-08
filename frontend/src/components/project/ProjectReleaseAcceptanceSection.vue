@@ -157,6 +157,18 @@ function mailState(row: { display_state?: string; state: string }) {
   return row.display_state || row.state
 }
 
+const attestSummary = computed(() => {
+  if (!attestedParties.value.length) {
+    return 'None selected. Recipients of the recorded email are not consent. Linked members can still confirm themselves.'
+  }
+  const names = attestedParties.value.map((ref) => partyName(ref)).join(', ')
+  return `${names} selected. Recipients of the recorded email are not consent. Linked members can still confirm themselves.`
+})
+
+const canAuthorizeSend = computed(() => {
+  return !busy.value && confirmSend.value && !acceptance.value?.mail_in_flight && selectedRecipients.value.length > 0
+})
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -217,6 +229,10 @@ function syncForm(acc: Acceptance) {
   }
   previewSubject.value = acc.preview_subject || ''
   previewBody.value = acc.preview_body || ''
+  selectedRecipients.value = []
+  attestedParties.value = []
+  confirmAttest.value = false
+  confirmSend.value = false
   if (!acc.mail_in_flight) {
     sendRequestKey.value = `send-${Date.now()}`
   }
@@ -451,7 +467,7 @@ onMounted(() => { void load() })
         <fieldset class="ra-stack" data-testid="recipient-picker">
           <legend class="ra-meta">Email recipients</legend>
           <label v-for="p in acceptance.parties" :key="'r-'+p.party_ref">
-            <input v-model="selectedRecipients" type="checkbox" :value="p.party_ref">
+            <input v-model="selectedRecipients" type="checkbox" :value="p.party_ref" data-testid="recipient-party">
             {{ p.display_name }} · {{ p.email }}
           </label>
         </fieldset>
@@ -463,7 +479,7 @@ onMounted(() => { void load() })
           type="button"
           class="btn btn-sm"
           data-testid="authorize-send"
-          :disabled="busy || !confirmSend || !!acceptance.mail_in_flight"
+          :disabled="!canAuthorizeSend"
           @click="run(() => authorizeAcceptanceSend(projectId, acceptance!.release.id, {
             request_key: sendRequestKey,
             recipient_party_refs: selectedRecipients,
@@ -475,14 +491,14 @@ onMounted(() => { void load() })
         </button>
         <p v-if="acceptance.mail_in_flight" class="ra-note">A send is already queued or in flight. Wait for it to finish; do not start another.</p>
         <label>Manual received email
-          <textarea v-model="externalRaw" rows="4" class="ra-input" />
+          <textarea v-model="externalRaw" rows="4" class="ra-input" data-testid="external-raw" />
         </label>
         <label>Attestation (recorder, not sender identity)
-          <input v-model="externalAttestation" class="ra-input">
+          <input v-model="externalAttestation" class="ra-input" data-testid="external-attestation">
         </label>
         <fieldset class="ra-stack" data-testid="attest-picker">
           <legend class="ra-meta">Attest acceptance for</legend>
-          <p class="ra-note">None selected. Recipients of the recorded email are not consent. Linked members can still confirm themselves.</p>
+          <p class="ra-note" data-testid="attest-summary">{{ attestSummary }}</p>
           <label v-for="p in acceptance.parties" :key="'a-'+p.party_ref">
             <input v-model="attestedParties" type="checkbox" :value="p.party_ref" data-testid="attest-party">
             {{ p.display_name }}
@@ -523,9 +539,14 @@ onMounted(() => { void load() })
         <label>Expires
           <input v-model="policyExpires" class="ra-input" type="datetime-local" data-testid="policy-expires">
         </label>
+        <p class="ra-meta" data-testid="deployment-target">
+          <template v-if="acceptance.deployment_target">Deployment target: {{ acceptance.deployment_target }}</template>
+          <template v-else>{{ acceptance.target_unknown_reason || 'Deployment target is unknown. Standing policy cannot apply until an explicit target is bound.' }}</template>
+        </p>
         <button
           type="button"
           class="btn btn-sm"
+          data-testid="approve-policy"
           :disabled="busy || !acceptance.release.content_digest"
           @click="run(() => approveStandingPolicy(projectId, {
             policy_ref: policyRef,
@@ -538,8 +559,8 @@ onMounted(() => { void load() })
             expires_at: localInputToRFC3339(policyExpires),
             release_channel: acceptance!.release.release_channel,
             artifact_digest: acceptance!.release.artifact_digest,
-            target_ref: acceptance!.release.artifact_coordinate,
-            model_ref: acceptance!.release.version_scheme,
+            target_ref: acceptance!.deployment_target || '',
+            model_ref: 'customer_operated',
           }))"
         >
           Approve policy
@@ -548,7 +569,16 @@ onMounted(() => { void load() })
           <li v-for="p in policies" :key="p.id">
             {{ p.policy_ref }} · {{ p.revoked_at ? 'revoked' : 'active' }}
             <button v-if="!p.revoked_at" type="button" class="btn btn-sm" @click="run(() => revokeStandingPolicy(projectId, p.id))">Revoke</button>
-            <button v-if="!p.revoked_at && ownParty" type="button" class="btn btn-sm" @click="run(() => applyStandingPolicy(projectId, acceptance!.release.id, p.id))">Apply to me</button>
+            <button
+              v-if="!p.revoked_at && ownParty"
+              type="button"
+              class="btn btn-sm"
+              data-testid="apply-policy"
+              :disabled="busy || !acceptance.deployment_target"
+              @click="run(() => applyStandingPolicy(projectId, acceptance!.release.id, p.id))"
+            >
+              Apply to me
+            </button>
           </li>
         </ul>
       </div>
