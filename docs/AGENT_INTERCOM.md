@@ -421,7 +421,8 @@ REPORT_API_KEY_FILE=/absolute/path/to/owner-only-api-key
 paimos-agentd serve --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
   --report-host "$REPORT_HOST" --report-url "$REPORT_URL" \
   --report-api-key-file "$REPORT_API_KEY_FILE" \
-  --pi-path /absolute/path/to/pi --pi-accounts /absolute/owner-only/pi-accounts.json
+  --pi-path /absolute/path/to/pi --pi-accounts /absolute/owner-only/pi-accounts.json \
+  --cursor-path /absolute/path/to/cursor-agent --cursor-accounts /absolute/owner-only/cursor-accounts.json
 ```
 
 The three reporting flags are all-or-none. Agentd performs an authenticated
@@ -461,6 +462,28 @@ printf '%s' 'Work only on the assigned ticket.' |
     --adapter pi --workspace "$PWD" --project-id "$PROJECT_ID" \
     --identity pi:worker --account-key operator-pi \
     --dispatch-profile pi-anthropic-sonnet-high --dispatch-profile-version 1
+```
+
+Owned Cursor is a separate adapter. It requires an operator-authenticated
+`--cursor-path` (or `cursor-agent` on `PATH`), an explicit `--cursor-accounts`
+registry (opaque key → expected email/userId in the vendor login; never a
+copied auth home), a human-selected catalog profile (`cursor-composer` or
+`cursor-grok`), `--account-key`, and the pinned CLI `2026.09.02-c22c1a3`. It
+does not copy or swap auth files or set `HOME`. Official `status --format json`
+must be `{status:"authenticated",isAuthenticated:true,userInfo:{email:...}}`
+and match the selected expected identity before spawn. `account_label=cursor_context`
+means that mapping was verified; it is not a subscription tier. Catalog models
+are exact included IDs (`composer-2.5` with unsupported/default effort, and
+`grok-4.6` with acknowledged high as `grok-4.6[effort=high,fast=true]`). Auto
+and paid fallbacks are refused. Composer and Grok are Cursor harness models,
+distinct from unmanaged Grok Bot/Build.
+
+```bash
+printf '%s' 'Work only on the assigned ticket.' |
+  paimos-agentd start --instance "$INSTANCE" --socket "$AGENTD_SOCKET" \
+    --adapter cursor --workspace "$PWD" --project-id "$PROJECT_ID" \
+    --identity cursor:worker --account-key operator-cursor \
+    --dispatch-profile cursor-composer --dispatch-profile-version 1
 ```
 
 An owned child may also carry explicit durable hierarchy and ticket fields;
@@ -774,7 +797,7 @@ only establishes request attribution, and from the local agentd session ID.
 | `delivery_id` | The retry/lease record for that message; also the managed bus steer correlation |
 | `thread_id` | Paimos conversation and hop chain, never a vendor thread |
 | agentd session ID | One child owned by one running daemon instance |
-| agentd status `sessions[].harness_session_id` | Vendor Codex thread or Claude session; receiver capability, not a public generation |
+| agentd status `sessions[].harness_session_id` | Vendor Codex thread, Claude session, or Cursor ACP session; receiver capability, not a public generation |
 | agentd status `sessions[].reporter.public_session_id` | Public durable control-plane generation; the Paimos harness-session ID |
 | harness API `harness_session_id` | Public durable generation on a control-plane response |
 | control ID | Durable interrupt/stop request and exact agentd correlation UUID |
@@ -825,13 +848,17 @@ PID is audit/status evidence, not proof that a new daemon owns the old process.
 | Owned Codex (`agentd_codex`) | Separate `codex` fallback target and worker required | Yes, exact live app-server turn | Local always; durable harness heartbeat when reporting is enabled | Local exact owned process; durable typed interrupt/stop when reporting is enabled | Reporter advertises status/interrupt/stop, never inbox/steer |
 | Owned Claude (`agentd_claude`) | Separate valid simple target and worker required | Yes, exact live Agent SDK Query | Local always; durable harness heartbeat when reporting is enabled | Local exact owned Query/process; durable typed interrupt/stop when reporting is enabled | Reporter advertises status/interrupt/stop, never inbox/steer; pinned SDK required |
 | Owned Pi (`agentd_pi`) | Separate valid simple target and worker required | Yes, exact live `pi rpc steer` | Local always; durable harness heartbeat when reporting is enabled | Local exact owned process: interrupt is durable ownership then `clear_queue` then `abort` (not abort-only); stop reaps even when queue reconciliation remains ambiguous and does not advertise loss-free clear | Fake-native proof only in this slice; no live provider support claim. Pause retains exact steering/follow-up in an owner-private spool and blocks further delivery; live `held-queue` / `resume-queue` report counts and re-inject onto the same generation; clean restart keeps terminal retention and refuses resume; unclean crash keeps held records for the dead generation. Unaccounted native extras refuse advertised pause. `pi_context` is selected trusted `PI_CODING_AGENT_DIR`, not a verified provider account id |
+| Owned Cursor (`agentd_cursor`) | Native next-turn `session/prompt` on the owned ACP child; a separate simple fallback target remains available | No; requested steer records effective `simple` with `unsupported` or `not_steerable`. `session/cancel` is interrupt, not same-turn text steer | Local always; durable harness heartbeat when reporting is enabled | Local exact owned process; durable typed interrupt/stop when reporting is enabled (`session/cancel` then process-group stop) | Reporter advertises status/interrupt/stop, never inbox/steer. Official ACP stdio only; no PTY or private RPC. Permission, plan, and question requests fail closed. Composer/Grok are Cursor harness models, not unmanaged Grok Bot/Build. Auto and unapproved third-party models are refused. `cursor_context` is selected trusted identity mapping after official `status --format json` matches the operator registry; it is not a subscription tier. Native included-model proof remains later. |
 | Unmanaged Codex | Yes, documented queue primitive | Yes only for a bound target using documented external steer | Only if its integration reports status | No owned interrupt/stop | Cannot claim process ownership |
 | Unmanaged Claude (`claude_resume` / `claude_channel`) | Yes | No; requested steer records effective `simple` with `unsupported` | Only if its integration reports status | No | Resume/channel handoff is never called steer |
 | Grok Bot routine / gated Grok Build path | Wake or new-turn handoff only | No; effective behavior is simple | No owned process status | No | A webhook or CLI resume is never queue-faked as steer |
 
-Managed agentd targets are deliberately steer-only. Without the separate
-simple fallback target and matching listener, an ordinary message cannot be
-truthfully handed off and remains recoverable instead of being mislabeled.
+Managed agentd Codex, Claude, and Pi targets are deliberately steer-only.
+Owned Cursor ACP is next-turn `session/prompt` only: a steer request records
+an explicit unsupported/not_steerable fallback and never a queue-faked PASS.
+Without the separate simple fallback target and matching listener, an ordinary
+Codex/Claude/Pi message cannot be truthfully handed off and remains recoverable
+instead of being mislabeled.
 
 ### Durable reporting and worker authorization
 

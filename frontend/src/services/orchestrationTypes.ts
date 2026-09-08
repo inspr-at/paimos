@@ -65,6 +65,7 @@ export type WorkerFleetSnapshotV2 = {
       | 'claude_ai_enterprise'
       | 'console'
       | 'pi_context'
+      | 'cursor_context'
     account_key?: string
     management_mode: 'managed' | 'unmanaged'
     runtime_provenance_trust: 'managed_reporter' | 'untrusted'
@@ -150,9 +151,9 @@ export type WorkerWorkspaceProvenance = {
 export type HarnessDispatchProfile = {
   id: string
   version: string
-  harness: 'codex' | 'claude'
+  harness: 'codex' | 'claude' | 'pi' | 'cursor'
   model: string
-  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'default'
   machine_source: 'authenticated_reporter'
   account_source: 'local_probe'
   workspace_mode: 'exclusive' | 'shared'

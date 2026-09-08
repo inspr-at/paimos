@@ -415,7 +415,7 @@ func (r *cliReporter) reportSession(ctx context.Context, session agentd.Session)
 	ownedCapabilities := session.Reporter.Capabilities
 	if len(ownedCapabilities) == 0 {
 		ownedCapabilities = reporterCapabilitySet(session.Capabilities)
-		if r.nativeDelivery && (session.Adapter == "codex" || session.Adapter == "claude") && nativeInboxSupported(r.controller, session) {
+		if r.nativeDelivery && (session.Adapter == "codex" || session.Adapter == "claude" || session.Adapter == "cursor") && nativeInboxSupported(r.controller, session) {
 			ownedCapabilities = append(ownedCapabilities, agentd.CapabilityInbox)
 			for _, cap := range session.Capabilities {
 				if cap == agentd.CapabilitySteer {

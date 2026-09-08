@@ -256,7 +256,7 @@ func (c *nativeConsumers) Prepare(_ context.Context, b runtimeconsumer.Binding, 
 	if m.DeliveryWork.RequestedLevel != "simple" && m.DeliveryWork.RequestedLevel != "steer" {
 		return runtimeconsumer.ErrUnsupported
 	}
-	if !c.controller.SupportsInbox(session.ID) || session.Adapter != "codex" && session.Adapter != "claude" && session.Adapter != "pi" {
+	if !c.controller.SupportsInbox(session.ID) || session.Adapter != "codex" && session.Adapter != "claude" && session.Adapter != "pi" && session.Adapter != "cursor" {
 		return runtimeconsumer.ErrUnsupported
 	}
 	if c.controller.DeliveryHeld(session.ID) {

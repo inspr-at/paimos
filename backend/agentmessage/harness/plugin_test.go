@@ -44,6 +44,7 @@ func TestRegisterBuiltinsAndLookupByName(t *testing.T) {
 		AdapterAgentdCodex:    {KindAgentdSession, LevelSteer, ModeLocal},
 		AdapterAgentdClaude:   {KindAgentdSession, LevelSteer, ModeLocal},
 		AdapterAgentdPi:       {KindAgentdSession, LevelSteer, ModeLocal},
+		AdapterAgentdCursor:   {KindAgentdSession, LevelSimple, ModeLocal},
 		AdapterClaudeResume:   {KindClaudeSession, LevelSimple, ModeLocal},
 		AdapterClaudeChannel:  {KindClaudeSession, LevelSimple, ModeLocal},
 		AdapterGrokBotRoutine: {KindHTTPSWebhook, LevelSimple, ModeServer},

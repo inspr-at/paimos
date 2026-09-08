@@ -45,6 +45,11 @@ var catalog = []Profile{
 	{ID: "claude-fable-xhigh", Version: CatalogVersion, Harness: "claude", Model: "fable", Effort: "xhigh", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
 	// Pi profiles are human-selected by id. None is an automatic paid-model default.
 	{ID: "pi-anthropic-sonnet-high", Version: CatalogVersion, Harness: "pi", Model: "anthropic:claude-sonnet-4-20250514", Effort: "high", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
+	// Cursor profiles are human-selected included Composer/Grok models. Auto and
+	// third-party paid models are refused by the owned ACP adapter. Composer
+	// does not advertise a reasoning effort; Grok high is acknowledged.
+	{ID: "cursor-composer", Version: CatalogVersion, Harness: "cursor", Model: "composer-2.5", Effort: "default", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
+	{ID: "cursor-grok", Version: CatalogVersion, Harness: "cursor", Model: "grok-4.6", Effort: "high", MachineSource: MachineAuthenticatedReporter, AccountSource: AccountLocalProbe, WorkspaceMode: "exclusive"},
 }
 
 // List returns a detached, stable-order catalog for the execution-options API.
@@ -92,7 +97,7 @@ func ValidateSnapshot(profile Profile) error {
 			return errors.New("dispatch profile contains an invalid stable value")
 		}
 	}
-	if profile.Harness != "codex" && profile.Harness != "claude" && profile.Harness != "pi" {
+	if profile.Harness != "codex" && profile.Harness != "claude" && profile.Harness != "pi" && profile.Harness != "cursor" {
 		return errors.New("dispatch profile harness is unsupported")
 	}
 	if profile.MachineSource != MachineAuthenticatedReporter || profile.AccountSource != AccountLocalProbe {
@@ -103,6 +108,10 @@ func ValidateSnapshot(profile Profile) error {
 	}
 	switch profile.Effort {
 	case "low", "medium", "high", "xhigh", "max":
+	case "default":
+		if profile.Harness != "cursor" {
+			return errors.New("dispatch profile effort is unsupported")
+		}
 	default:
 		return errors.New("dispatch profile effort is unsupported")
 	}

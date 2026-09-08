@@ -335,7 +335,8 @@
                   "claude_ai_team",
                   "claude_ai_enterprise",
                   "console",
-                  "pi_context"
+                  "pi_context",
+                  "cursor_context"
                 ]
               },
               "account_key": {
@@ -759,7 +760,9 @@
           "type": "string",
           "enum": [
             "codex",
-            "claude"
+            "claude",
+            "pi",
+            "cursor"
           ]
         },
         "model": {
@@ -775,7 +778,8 @@
             "medium",
             "high",
             "xhigh",
-            "max"
+            "max",
+            "default"
           ]
         },
         "machine_source": {

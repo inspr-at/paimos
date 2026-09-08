@@ -7,7 +7,7 @@
 import { api } from '@/api/client'
 
 export type WorkerShape = 'unknown' | 'ship' | 'scout'
-type DispatchEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+type DispatchEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'default'
 type WorkspaceKind = 'directory' | 'git_primary' | 'git_worktree'
 type WorkspaceMode = 'exclusive' | 'shared'
 
@@ -30,6 +30,7 @@ export interface WorkerFleetContext {
     | 'claude_ai_enterprise'
     | 'console'
     | 'pi_context'
+    | 'cursor_context'
   managementMode: 'managed' | 'unmanaged'
   runtimeProvenanceTrust: 'managed_reporter' | 'untrusted'
   shape: WorkerShape
@@ -44,7 +45,7 @@ export interface WorkerFleetTicketContext {
 const SHAPES = new Set<WorkerShape>(['unknown', 'ship', 'scout'])
 const WORKSPACE_KINDS = new Set<WorkspaceKind>(['directory', 'git_primary', 'git_worktree'])
 const WORKSPACE_MODES = new Set<WorkspaceMode>(['exclusive', 'shared'])
-const EFFORTS = new Set<DispatchEffort>(['low', 'medium', 'high', 'xhigh', 'max'])
+const EFFORTS = new Set<DispatchEffort>(['low', 'medium', 'high', 'xhigh', 'max', 'default'])
 const ACCOUNT_LABELS = new Set([
   'unknown',
   'chatgpt',
@@ -55,6 +56,7 @@ const ACCOUNT_LABELS = new Set([
   'claude_ai_enterprise',
   'console',
   'pi_context',
+  'cursor_context',
 ])
 const OUTPUT_KINDS = new Set(['unclassified', 'delivery', 'investigation_evidence'])
 const MANAGEMENT_MODES = new Set(['managed', 'unmanaged'])

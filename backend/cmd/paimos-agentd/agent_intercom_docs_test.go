@@ -59,7 +59,7 @@ func TestAgentIntercomRunbookUsesShippedAgentdCommandsAndFlags(t *testing.T) {
 	}
 
 	actualFlags := map[string][]string{
-		"serve":        {"instance", "socket", "codex-path", "claude-path", "node-path", "claude-sdk-path", "pi-path", "pi-accounts", "report-host", "report-url", "report-api-key-file", "paimos-path"},
+		"serve":        {"instance", "socket", "codex-path", "claude-path", "node-path", "claude-sdk-path", "pi-path", "pi-accounts", "cursor-path", "cursor-accounts", "report-host", "report-url", "report-api-key-file", "paimos-path"},
 		"start":        {"instance", "socket", "adapter", "workspace", "project-id", "identity", "account-key"},
 		"status":       {"instance", "socket"},
 		"steer":        {"instance", "socket", "session", "project-id", "identity", "correlation-id"},
@@ -122,7 +122,7 @@ func TestAgentIntercomDocsDistinguishVendorAndPublicSessionIDs(t *testing.T) {
 	}
 	doc := strings.Join(strings.Fields(string(raw)), " ")
 	for _, claim := range []string{
-		"agentd status `sessions[].harness_session_id` | Vendor Codex thread or Claude session",
+		"agentd status `sessions[].harness_session_id` | Vendor Codex thread, Claude session, or Cursor ACP session",
 		"agentd status `sessions[].reporter.public_session_id` | Public durable control-plane generation",
 		"harness API `harness_session_id` | Public durable generation on a control-plane response",
 		"fallback reference is the vendor Codex thread ID in local agentd `sessions[].harness_session_id`",
@@ -218,17 +218,36 @@ func TestAgentIntercomMatrixMatchesShippedControlBoundaries(t *testing.T) {
 		agentd.CapabilityInterrupt,
 		agentd.CapabilityStop,
 	}
+	wantCursor := []agentd.Capability{
+		agentd.CapabilityInbox,
+		agentd.CapabilityStatus,
+		agentd.CapabilityInterrupt,
+		agentd.CapabilityStop,
+	}
 	for name, adapter := range map[string]agentd.Adapter{
 		"Owned Codex (`agentd_codex`)":   agentd.NewCodexAdapter("codex", ""),
 		"Owned Claude (`agentd_claude`)": agentd.NewClaudeAdapter("claude", "node", "sdk.mjs"),
 		"Owned Pi (`agentd_pi`)":         agentd.NewPiAdapter("pi"),
+		"Owned Cursor (`agentd_cursor`)": agentd.NewCursorAdapter("cursor-agent", ""),
 	} {
-		if capabilities := adapter.Capabilities(); !slices.Equal(capabilities, wantOwned) {
-			t.Fatalf("%s shipped capabilities=%v want=%v", name, capabilities, wantOwned)
+		want := wantOwned
+		if name == "Owned Cursor (`agentd_cursor`)" {
+			want = wantCursor
+		}
+		if capabilities := adapter.Capabilities(); !slices.Equal(capabilities, want) {
+			t.Fatalf("%s shipped capabilities=%v want=%v", name, capabilities, want)
 		}
 		row := intercomMatrixRow(doc, name)
 		if name == "Owned Pi (`agentd_pi`)" {
 			for _, claim := range []string{"Yes, exact live", "Local always", "clear_queue", "Fake-native proof", "pi_context"} {
+				if !strings.Contains(row, claim) {
+					t.Errorf("%s matrix row lost supported control claim %q: %s", name, claim, row)
+				}
+			}
+			continue
+		}
+		if name == "Owned Cursor (`agentd_cursor`)" {
+			for _, claim := range []string{"session/prompt", "No; requested steer", "session/cancel", "never inbox/steer", "cursor_context"} {
 				if !strings.Contains(row, claim) {
 					t.Errorf("%s matrix row lost supported control claim %q: %s", name, claim, row)
 				}

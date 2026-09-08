@@ -135,6 +135,15 @@ describe('worker fleet ticket companion', () => {
     vi.mocked(api.get).mockResolvedValue({
       schema_version: 2,
       sample_truncated: false,
+      workers: [worker({ account_label: 'cursor_context' })],
+    })
+    expect((await loadWorkerFleetTicket(6, 907)).workers[0]).toMatchObject({
+      accountLabel: 'cursor_context',
+    })
+
+    vi.mocked(api.get).mockResolvedValue({
+      schema_version: 2,
+      sample_truncated: false,
       workers: [worker({ account_label: 'not-a-label' })],
     })
     await expect(loadWorkerFleetTicket(6, 907)).rejects.toThrow('invalid worker fleet response')

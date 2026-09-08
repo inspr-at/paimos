@@ -27,6 +27,19 @@ func TestAgentdManagedDeliveryRequiresLeasedSteerCorrelation(t *testing.T) {
 	}
 }
 
+func TestAgentdCursorPluginRefusesSameTurnSteer(t *testing.T) {
+	plugin := AgentdCursorPlugin{}
+	if plugin.Name() != AdapterAgentdCursor || plugin.Kind() != KindAgentdSession || plugin.MaximumLevel() != LevelSimple {
+		t.Fatalf("plugin=%s/%s/%s", plugin.Name(), plugin.Kind(), plugin.MaximumLevel())
+	}
+	target := `{"socket":"/tmp/agentd.sock","session_id":"019d1234-1234-7123-8123-123456789abc"}`
+	_, err := plugin.Deliver(context.Background(), DeliverRequest{Level: LevelSteer, TargetRef: target, Body: "mid-turn", CorrelationID: "delivery-1"})
+	var unavailable *UnavailableError
+	if !errors.As(err, &unavailable) || unavailable.FallbackReason != "unsupported" || !unavailable.Reroute {
+		t.Fatalf("steer unavailable=%v err=%v", unavailable, err)
+	}
+}
+
 func TestAgentdClaudePluginIsDistinctFromUnmanagedClaude(t *testing.T) {
 	plugin := AgentdClaudePlugin{}
 	if plugin.Name() != AdapterAgentdClaude || plugin.Kind() != KindAgentdSession || plugin.MaximumLevel() != LevelSteer {
