@@ -6,6 +6,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 with legacy releases using Semantic Versioning and new product cuts using the
 calendar form `yy.mm.dd[.hh.mm]`.
 
+## [26.09.08] — 2026-09-08
+
+### Added — deliberate baseline delivery controls (PAI-956)
+
+- Opt-in INSPR baseline batches with human review, owned `inspr.readiness.v1`
+  observation, immutable batch start, and durable pause/cancel controls mapped
+  onto delivery attempts and owned harness sessions.
+
+### Added — owned Pi protocol controls (PAI-957)
+
+- Managed `agentd_pi` sessions bind operator-selected `PI_CODING_AGENT_DIR`
+  context with durable queue steer, held-queue pause/resume, and owned
+  interrupt/stop primitives. Protocol controls are proved with a deterministic
+  local provider fixture; real provider authentication and installed live
+  cross-service delivery remain operator setup after upgrade.
+
+### Added — reviewed baseline bridge and controlled reconcile (PAI-960)
+
+- Bridge reviewed Aithema specifications through scoped implementation/QA
+  evidence into existing Pharos external-stage handoffs. `reconcile` applies
+  the next authorized Pharos step with typed setup gates; cancel preserves
+  baseline artifact binding on live handoffs.
+
+### Added — owned Cursor ACP harness (PAI-963)
+
+- Add `agentd_cursor` with operator-selected identity checks, included-model
+  preflight, native next-turn inbox via `session/prompt`, `session/cancel`, and
+  owned stop. Composer and Grok harness models use the actual ACP protocol;
+  same-turn text steer is explicitly unsupported. End-to-end operator wiring,
+  billing, and installed service delivery follow this release.
+
+### Operator compatibility
+
+- Release `26.09.07.20.15` shipped named-account controls only. Upgrade
+  agentd configuration and register new receiver targets before using Pi or
+  Cursor managed harnesses.
+
 ## [26.09.07.20.15] — 2026-09-07
 
 ### Fixed — named-account intent schema compatibility (PAI-959)
