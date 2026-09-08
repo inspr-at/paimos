@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/backend/auth"
+	"github.com/inspr-at/paimos/backend/lifecyclefence"
 	"github.com/inspr-at/paimos/backend/managedharness"
 )
 
@@ -63,19 +64,30 @@ func leaseDigest(generation, lease string) []byte {
 	return d[:]
 }
 func validateRegistration(in Registration) error {
-	if !validID(in.Generation) || !label(in.Host, 128) || !validAccount(in.AccountLabel) || len(in.Workspaces) > 16 || len(in.Profiles) > 16 || in.Workspaces == nil || in.Profiles == nil {
+	if in.SchemaVersion != 0 && in.SchemaVersion != RuntimeSchemaV1 && in.SchemaVersion != AccountChoiceSchemaV2 && in.SchemaVersion != AccountScopeSchemaV3 {
 		return ErrInvalid
+	}
+	if !validID(in.Generation) || !label(in.Host, 128) || len(in.Workspaces) > 16 || in.Workspaces == nil {
+		return ErrInvalid
+	}
+	if in.SchemaVersion == AccountScopeSchemaV3 {
+		if err := ValidateAccountScopes(in); err != nil {
+			return err
+		}
+		return validateWorkspaces(in.Workspaces)
+	}
+	if !validAccount(in.AccountLabel) || len(in.Profiles) > 16 || in.Profiles == nil {
+		return ErrInvalid
+	}
+	if err := ValidateAccountScopes(in); err != nil {
+		return err
 	}
 	if err := ValidateAdvertisedAccounts(in); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
-	for _, w := range in.Workspaces {
-		if !validID(w.Handle) || !identity.MatchString(w.Identity) || !validWorkspaceLabel(w.Label) || seen[w.Handle] || seen[w.Identity] {
-			return ErrInvalid
-		}
-		seen[w.Handle] = true
-		seen[w.Identity] = true
+	if err := validateWorkspacesInto(in.Workspaces, seen); err != nil {
+		return err
 	}
 	for _, p := range in.Profiles {
 		key := p.ID + ":" + p.Version
@@ -86,6 +98,21 @@ func validateRegistration(in Registration) error {
 		if _, err := resolveProfile(p.ID, p.Version); err != nil {
 			return ErrUnavailable
 		}
+	}
+	return nil
+}
+
+func validateWorkspaces(workspaces []Workspace) error {
+	return validateWorkspacesInto(workspaces, map[string]bool{})
+}
+
+func validateWorkspacesInto(workspaces []Workspace, seen map[string]bool) error {
+	for _, w := range workspaces {
+		if !validID(w.Handle) || !identity.MatchString(w.Identity) || !validWorkspaceLabel(w.Label) || seen[w.Handle] || seen[w.Identity] {
+			return ErrInvalid
+		}
+		seen[w.Handle] = true
+		seen[w.Identity] = true
 	}
 	return nil
 }
@@ -150,7 +177,7 @@ func (s *Service) RegisterRuntime(ctx context.Context, p auth.Principal, project
 	return out, nil
 }
 func runtimeProjection(id string, project int64, in Registration, deadline string) Runtime {
-	return Runtime{ID: id, ProjectID: project, Generation: in.Generation, MachineID: in.Host, AccountLabel: in.AccountLabel, Accounts: in.Accounts, Workspaces: in.Workspaces, Profiles: in.Profiles, ExpiresAt: deadline, Sessions: []SessionProjection{}, SchemaVersion: in.SchemaVersion}
+	return Runtime{ID: id, ProjectID: project, Generation: in.Generation, MachineID: in.Host, AccountLabel: in.AccountLabel, Accounts: in.Accounts, Workspaces: in.Workspaces, Profiles: in.Profiles, ExpiresAt: deadline, Sessions: []SessionProjection{}, SchemaVersion: in.SchemaVersion, AccountScopes: in.AccountScopes}
 }
 func workspaceHandleForIdentity(workspaces []Workspace, identity string) string {
 	if identity == "" {
@@ -192,7 +219,7 @@ func (s *Service) runtime(ctx context.Context, tx *sql.Tx, project int64, id str
 		return Runtime{}, ErrUnavailable
 	}
 	out := runtimeProjection(id, project, in, deadline)
-	rows, err := tx.QueryContext(ctx, `SELECT own.session_id,own.generation,s.workspace_identity FROM lifecycle_runtime_sessions own JOIN harness_sessions s ON s.id=own.session_id WHERE own.runtime_id=? AND s.project_id=? AND s.management_mode='managed' AND s.host=? AND s.account_label=? ORDER BY own.session_id LIMIT 128`, id, project, out.MachineID, out.AccountLabel)
+	rows, err := tx.QueryContext(ctx, `SELECT own.session_id,own.generation,s.workspace_identity FROM lifecycle_runtime_sessions own JOIN harness_sessions s ON s.id=own.session_id JOIN lifecycle_runtimes runtime ON runtime.id=own.runtime_id WHERE own.runtime_id=? AND s.project_id=? AND s.management_mode='managed' AND s.host=? AND `+lifecyclefence.RuntimeSessionOwnershipSQL("runtime", "s")+` ORDER BY own.session_id LIMIT 128`, id, project, out.MachineID)
 	if err != nil {
 		return Runtime{}, ErrStorage
 	}

@@ -63,6 +63,7 @@ type Registration struct {
 	Workspaces    []Workspace     `json:"workspaces"`
 	Profiles      []Profile       `json:"profiles"`
 	SchemaVersion int             `json:"schema_version,omitempty"`
+	AccountScopes []AccountScope  `json:"account_scopes,omitempty"`
 }
 type Runtime struct {
 	ID            string              `json:"id"`
@@ -76,6 +77,7 @@ type Runtime struct {
 	ExpiresAt     string              `json:"expires_at"`
 	Sessions      []SessionProjection `json:"sessions"`
 	SchemaVersion int                 `json:"schema_version,omitempty"`
+	AccountScopes []AccountScope      `json:"account_scopes,omitempty"`
 }
 
 // ReadinessContractVersion is the inspr readiness evidence contract this

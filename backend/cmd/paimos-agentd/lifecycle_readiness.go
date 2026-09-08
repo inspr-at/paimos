@@ -109,7 +109,7 @@ func (p *projectLifecycle) readinessSpec(in lifecycleintents.Intent) (agentd.Rea
 	expect := p.config.Readiness
 	return agentd.ReadinessSpec{
 		BaselineDigest: in.Request.BaselineDigest,
-		AccountLabel:   p.config.AccountLabel,
+		AccountLabel:   in.Request.AccountLabel,
 		AccountKey:     in.Request.AccountKey,
 		Profile:        profile,
 		Expect: agentd.ReadinessExpectation{

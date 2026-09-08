@@ -540,12 +540,16 @@ func (s *Service) listRuntimeChoices(ctx context.Context, tx *sql.Tx, projectID 
 		if json.Unmarshal([]byte(body), &reg) != nil {
 			continue
 		}
-		choice := RuntimeChoice{RuntimeID: id, RuntimeGeneration: generation, AccountLabel: reg.AccountLabel, ExpiresAt: expires}
-		for _, a := range reg.Accounts {
-			choice.Accounts = append(choice.Accounts, AccountChoice{Key: a.Key, Label: a.Label})
-		}
-		for _, p := range reg.Profiles {
-			choice.Profiles = append(choice.Profiles, ProfileChoice{ID: p.ID, Version: p.Version})
+		choice := RuntimeChoice{RuntimeID: id, RuntimeGeneration: generation, AccountLabel: reg.AccountLabel, ExpiresAt: expires, SchemaVersion: reg.SchemaVersion}
+		if reg.SchemaVersion == lifecycleintents.AccountScopeSchemaV3 {
+			choice.AccountScopes = append([]lifecycleintents.AccountScope(nil), reg.AccountScopes...)
+		} else {
+			for _, a := range reg.Accounts {
+				choice.Accounts = append(choice.Accounts, AccountChoice{Key: a.Key, Label: a.Label})
+			}
+			for _, p := range reg.Profiles {
+				choice.Profiles = append(choice.Profiles, ProfileChoice{ID: p.ID, Version: p.Version})
+			}
 		}
 		for _, w := range reg.Workspaces {
 			choice.Workspaces = append(choice.Workspaces, WorkspaceChoice{Handle: w.Handle, Identity: w.Identity, Label: w.Label})

@@ -6,6 +6,8 @@ package baselinebatch
 import (
 	"errors"
 	"time"
+
+	"github.com/inspr-at/paimos/backend/lifecycleintents"
 )
 
 var (
@@ -301,13 +303,15 @@ type WorkflowChoices struct {
 }
 
 type RuntimeChoice struct {
-	RuntimeID         string            `json:"runtime_id"`
-	RuntimeGeneration string            `json:"runtime_generation"`
-	AccountLabel      string            `json:"account_label"`
-	Accounts          []AccountChoice   `json:"accounts"`
-	Profiles          []ProfileChoice   `json:"profiles"`
-	Workspaces        []WorkspaceChoice `json:"workspaces"`
-	ExpiresAt         string            `json:"expires_at"`
+	RuntimeID         string                          `json:"runtime_id"`
+	RuntimeGeneration string                          `json:"runtime_generation"`
+	AccountLabel      string                          `json:"account_label,omitempty"`
+	Accounts          []AccountChoice                 `json:"accounts"`
+	Profiles          []ProfileChoice                 `json:"profiles"`
+	AccountScopes     []lifecycleintents.AccountScope `json:"account_scopes,omitempty"`
+	SchemaVersion     int                             `json:"schema_version,omitempty"`
+	Workspaces        []WorkspaceChoice               `json:"workspaces"`
+	ExpiresAt         string                          `json:"expires_at"`
 }
 
 type AccountChoice struct {

@@ -239,6 +239,18 @@ func TestCursorStartRequiresNamedAccount(t *testing.T) {
 	}
 }
 
+func TestCursorStartRefusesCodexExpectedClass(t *testing.T) {
+	adapter, _ := newTestCursorAdapter(t, "serve")
+	adapter.command = func(string, ...string) *exec.Cmd { t.Fatal("child must not spawn"); return nil }
+	profile := cursorTestProfile(t)
+	req := cursorOwnedStart(t, profile)
+	req.ExpectedAccountLabel = "chatgpt"
+	_, err := adapter.Start(context.Background(), req, nil)
+	if err == nil || !strings.Contains(err.Error(), "managed account selection is unavailable") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestCursorStartCancellationReapsInFlightACP(t *testing.T) {
 	adapter := NewCursorAdapter(os.Args[0], "test")
 	adapter.cliVersion = func(context.Context, string) (string, error) { return cursorSupportedCLIVersion, nil }

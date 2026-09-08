@@ -159,7 +159,7 @@ func (h *HTTP) route(s string) string {
 func (h *HTTP) RegisterRuntime(ctx context.Context, registration lifecycleintents.Registration) (lifecycleintents.Runtime, error) {
 	var out lifecycleintents.Runtime
 	err := h.Request(ctx, http.MethodPost, h.route("/runtimes"), nil, registration, &out)
-	if err == nil && (uuid.Validate(out.ID) != nil || out.ProjectID != h.project || out.Generation != registration.Generation || out.MachineID != registration.Host || out.AccountLabel != registration.AccountLabel || !equal(out.Workspaces, registration.Workspaces) || !equal(out.Profiles, registration.Profiles)) {
+	if err == nil && (uuid.Validate(out.ID) != nil || out.ProjectID != h.project || out.Generation != registration.Generation || out.MachineID != registration.Host || out.AccountLabel != registration.AccountLabel || out.SchemaVersion != registration.SchemaVersion || !equal(out.Workspaces, registration.Workspaces) || !equal(out.Profiles, registration.Profiles) || !equal(out.AccountScopes, registration.AccountScopes) || !equal(out.Accounts, registration.Accounts)) {
 		err = ErrOwnership
 	}
 	return out, err

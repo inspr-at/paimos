@@ -739,7 +739,7 @@ describe('Habitat browser lifecycle', () => {
     const account = combobox(mounted.el, 'Named account')
     expect(account.value).toBe('')
     expect(button(mounted.el, 'Review start request').disabled).toBe(true)
-    account.value = 'coordinator'
+    account.value = 'chatgpt\0coordinator'
     account.dispatchEvent(new Event('change'))
     await nextTick()
     combobox(mounted.el, 'Workspace').value = id('53')
@@ -749,11 +749,169 @@ describe('Habitat browser lifecycle', () => {
     button(mounted.el, 'Review start request').click()
     await nextTick()
     expect(mounted.el.textContent).toContain('coordinator')
-    account.value = 'personal'
+    account.value = 'chatgpt\0personal'
     account.dispatchEvent(new Event('change'))
     await nextTick()
     expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).toBeNull()
     expect(submitHabitatIntent).not.toHaveBeenCalled()
     await mounted.unmount()
+  })
+
+  it('invalidates review when the chosen class+account tuple changes on a v3 runtime', async () => {
+    mockTicketList()
+    const profile = habitatFixture().fleet.workers[0]!.dispatch_profile!
+    vi.mocked(loadOrchestration).mockResolvedValue(habitatFixture('100', 1))
+    vi.mocked(loadHabitatRuntimes).mockResolvedValue([
+      {
+        id: id('61'),
+        project_id: 1,
+        generation: id('62'),
+        machine_id: 'fixture-machine',
+        schema_version: 3,
+        workspaces: [{ handle: id('63'), identity: 'a'.repeat(64) }],
+        account_scopes: [
+          {
+            account_label: 'chatgpt',
+            accounts: [{ key: 'codex-work', label: 'Work' }],
+            profiles: [{ id: profile.id, version: profile.version }],
+          },
+          {
+            account_label: 'api_key',
+            accounts: [{ key: 'codex-api', label: 'API' }],
+            profiles: [{ id: profile.id, version: profile.version }],
+          },
+        ],
+        sessions: [],
+        expires_at: new Date(Date.now() + 120000).toISOString(),
+      },
+    ])
+    const mounted = await mountComponent(HabitatLifecycle, {
+      projectId: 1,
+      agent: 'coordinator',
+      profile,
+      authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
+    })
+    await vi.waitFor(() => expect(mounted.el.textContent).toContain('fixture-machine'))
+    combobox(mounted.el, 'Runtime').value = id('61')
+    combobox(mounted.el, 'Runtime').dispatchEvent(new Event('change'))
+    await nextTick()
+    const account = combobox(mounted.el, 'Named account')
+    account.value = 'chatgpt\0codex-work'
+    account.dispatchEvent(new Event('change'))
+    await nextTick()
+    combobox(mounted.el, 'Workspace').value = id('63')
+    combobox(mounted.el, 'Workspace').dispatchEvent(new Event('change'))
+    await nextTick()
+    button(mounted.el, 'Review start request').click()
+    await nextTick()
+    expect(mounted.el.textContent).toContain('Work')
+    account.value = 'api_key\0codex-api'
+    account.dispatchEvent(new Event('change'))
+    await nextTick()
+    expect(mounted.el.querySelector('[aria-label="Lifecycle request review"]')).toBeNull()
+    expect(submitHabitatIntent).not.toHaveBeenCalled()
+    await mounted.unmount()
+  })
+
+  it('repairs a unique v2 class without a named key and refuses empty mixed-class v3 repair', async () => {
+    mockTicketList()
+    const profile = habitatFixture().fleet.workers[0]!.dispatch_profile!
+    vi.mocked(loadOrchestration).mockResolvedValue(habitatFixture('100', 1))
+    const v2 = {
+      id: id('71'),
+      project_id: 1,
+      generation: id('72'),
+      machine_id: 'fixture-machine',
+      account_label: 'chatgpt',
+      schema_version: 2 as const,
+      accounts: [
+        { key: 'coordinator', label: 'Coordinator' },
+        { key: 'personal', label: 'Personal' },
+      ],
+      workspaces: [{ handle: id('73'), identity: 'a'.repeat(64) }],
+      profiles: [{ id: profile.id, version: profile.version }],
+      sessions: [],
+      expires_at: new Date(Date.now() + 120000).toISOString(),
+    }
+    vi.mocked(loadHabitatRuntimes).mockResolvedValue([v2])
+    const unique = await mountComponent(HabitatLifecycle, {
+      projectId: 1,
+      agent: 'coordinator',
+      profile,
+      authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
+    })
+    await vi.waitFor(() => expect(unique.el.textContent).toContain('fixture-machine'))
+    combobox(unique.el, 'Runtime').value = id('71')
+    combobox(unique.el, 'Runtime').dispatchEvent(new Event('change'))
+    await nextTick()
+    combobox(unique.el, 'Operation').value = 'repair'
+    combobox(unique.el, 'Operation').dispatchEvent(new Event('change'))
+    await nextTick()
+    expect(button(unique.el, 'Review repair request').disabled).toBe(false)
+    expect(() => button(unique.el, 'Review repair request').click()).not.toThrow()
+    await nextTick()
+    expect(unique.el.querySelector('[aria-label="Lifecycle request review"]')).not.toBeNull()
+    expect(unique.el.textContent).toContain('chatgpt')
+    expect(submitHabitatIntent).not.toHaveBeenCalled()
+    await unique.unmount()
+
+    const v3 = {
+      id: id('81'),
+      project_id: 1,
+      generation: id('82'),
+      machine_id: 'fixture-machine',
+      schema_version: 3 as const,
+      workspaces: [{ handle: id('83'), identity: 'a'.repeat(64) }],
+      account_scopes: [
+        {
+          account_label: 'chatgpt',
+          accounts: [{ key: 'codex-work', label: 'Work' }],
+          profiles: [{ id: profile.id, version: profile.version }],
+        },
+        {
+          account_label: 'cursor_context',
+          accounts: [{ key: 'cursor-op', label: 'Cursor' }],
+          profiles: [{ id: 'cursor-composer', version: '1' }],
+        },
+      ],
+      sessions: [],
+      expires_at: new Date(Date.now() + 120000).toISOString(),
+    }
+    vi.mocked(loadHabitatRuntimes).mockResolvedValue([v3])
+    const mixed = await mountComponent(HabitatLifecycle, {
+      projectId: 1,
+      agent: 'coordinator',
+      profile,
+      authority: 'human:1',
+      deployment: 'fixture',
+      fresh: true,
+    })
+    await vi.waitFor(() => expect(mixed.el.textContent).toContain('fixture-machine'))
+    combobox(mixed.el, 'Runtime').value = id('81')
+    combobox(mixed.el, 'Runtime').dispatchEvent(new Event('change'))
+    await nextTick()
+    combobox(mixed.el, 'Operation').value = 'repair'
+    combobox(mixed.el, 'Operation').dispatchEvent(new Event('change'))
+    await nextTick()
+    expect(button(mixed.el, 'Review repair request').disabled).toBe(true)
+    expect(mixed.el.textContent).toContain('Choose one advertised account')
+    expect(() => button(mixed.el, 'Review repair request').click()).not.toThrow()
+    await nextTick()
+    expect(mixed.el.querySelector('[aria-label="Lifecycle request review"]')).toBeNull()
+    const account = combobox(mixed.el, 'Named account')
+    account.value = 'chatgpt\0codex-work'
+    account.dispatchEvent(new Event('change'))
+    await nextTick()
+    expect(button(mixed.el, 'Review repair request').disabled).toBe(false)
+    expect(() => button(mixed.el, 'Review repair request').click()).not.toThrow()
+    await nextTick()
+    expect(mixed.el.querySelector('[aria-label="Lifecycle request review"]')).not.toBeNull()
+    expect(mixed.el.textContent).toContain('Work')
+    expect(submitHabitatIntent).not.toHaveBeenCalled()
+    await mixed.unmount()
   })
 })
