@@ -25,6 +25,7 @@ type FlowShellElement = HTMLElement & {
 
 const props = defineProps<{
   projectId: number | null
+  contentLayout?: 'document' | 'fill'
 }>()
 
 const emit = defineEmits<{
@@ -37,6 +38,7 @@ const projectRef = computed(() => props.projectId)
 const { state, active, notice, submitIntent } = useFlowHost(projectRef)
 const logoSrc = flowLogo as string
 const shellEl = ref<FlowShellElement | null>(null)
+const useFillLayout = computed(() => props.contentLayout === 'fill')
 
 watch(active, (value) => emit('active', value), { immediate: true })
 
@@ -109,14 +111,21 @@ async function onFlowIntent(event: Event) {
     ref="shellEl"
     class="paimos-flow-host"
     layout-mode="bounded"
+    :content-layout="useFillLayout ? 'fill' : undefined"
     :logo-src="logoSrc"
     data-testid="paimos-flow-host"
     @flow-intent="onFlowIntent"
   >
-    <div class="paimos-flow-toolbar">
+    <div
+      class="paimos-flow-toolbar"
+      :data-flow-host-region="useFillLayout ? 'toolbar' : undefined"
+    >
       <slot name="toolbar" />
     </div>
-    <div class="paimos-flow-body">
+    <div
+      class="paimos-flow-body"
+      :data-flow-host-region="useFillLayout ? 'body' : undefined"
+    >
       <slot />
     </div>
   </inspr-flow-shell>
@@ -151,6 +160,9 @@ async function onFlowIntent(event: Event) {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+.paimos-flow-host[content-layout='fill'] .paimos-flow-body {
+  height: 100%;
 }
 </style>
 

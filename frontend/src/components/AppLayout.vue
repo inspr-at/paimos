@@ -273,7 +273,7 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="main" :style="mainStyle">
-      <FlowHost :project-id="routeProjectId" @active="flowHostActive = $event">
+      <FlowHost :project-id="routeProjectId" content-layout="fill" @active="flowHostActive = $event">
         <template #toolbar>
           <AppHeader ref="appHeaderRef" :compact="flowHostActive" />
         </template>

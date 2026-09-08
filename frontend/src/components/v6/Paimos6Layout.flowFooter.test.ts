@@ -95,8 +95,9 @@ function expectFooterInsideBoundedFlowShell(root: ParentNode) {
   const footer = appContent.querySelector('footer.habitat-footer')
   expect(shell).not.toBeNull()
   expect(shell!.contains(footer)).toBe(true)
-  expect(shell!.getAttribute('layout-mode')).toBe('bounded')
-  expect(shell!.querySelector('.paimos-flow-body')!.contains(footer)).toBe(true)
+    expect(shell!.getAttribute('layout-mode')).toBe('bounded')
+    expect(shell!.getAttribute('content-layout')).toBeNull()
+    expect(shell!.querySelector('.paimos-flow-body')!.contains(footer)).toBe(true)
 }
 
 describe('Paimos6Layout Flow footer placement (PAI-967)', () => {

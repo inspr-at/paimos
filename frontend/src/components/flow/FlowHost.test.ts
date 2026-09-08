@@ -100,6 +100,7 @@ describe('Flow host UI', () => {
     const shell = mounted.el.querySelector('inspr-flow-shell')
     expect(shell).not.toBeNull()
     expect(shell?.getAttribute('layout-mode')).toBe('bounded')
+    expect(shell?.getAttribute('content-layout')).toBeNull()
     shell?.dispatchEvent(
       new CustomEvent('flow-intent', {
         bubbles: true,
@@ -183,10 +184,38 @@ describe('Flow host UI', () => {
     expect(shell).not.toBeNull()
     expect(shell?.classList.contains('paimos-flow-host')).toBe(true)
     expect(shell?.getAttribute('layout-mode')).toBe('bounded')
+    expect(shell?.getAttribute('content-layout')).toBeNull()
     expect(flowBody?.querySelector('#project-footer-slot')).not.toBeNull()
     expect(flowBody?.querySelector('footer.habitat-footer')).not.toBeNull()
 
     reset.remove()
+    await mounted.unmount()
+  })
+
+  it('marks classic fill hosts with region slots for bounded footer measurement', async () => {
+    getFlowHostState.mockResolvedValue(usableState())
+    const mounted = await mountComponent(
+      FlowHost,
+      { projectId: 9, contentLayout: 'fill' },
+      {
+        toolbar: () => h('header', { 'data-testid': 'classic-toolbar' }, 'Toolbar'),
+        default: () =>
+          h('div', [
+            h('div', { class: 'main-content' }, 'Scroll body'),
+            h('div', { id: 'project-footer-slot', class: 'project-footer-slot' }),
+          ]),
+      },
+    )
+    await vi.waitFor(() => expect(getFlowHostState).toHaveBeenCalledWith(9))
+
+    const shell = mounted.el.querySelector('inspr-flow-shell')
+    const toolbar = mounted.el.querySelector('.paimos-flow-toolbar')
+    const body = mounted.el.querySelector('.paimos-flow-body')
+    expect(shell?.getAttribute('content-layout')).toBe('fill')
+    expect(toolbar?.getAttribute('data-flow-host-region')).toBe('toolbar')
+    expect(body?.getAttribute('data-flow-host-region')).toBe('body')
+    expect(body?.querySelector('#project-footer-slot')).not.toBeNull()
+
     await mounted.unmount()
   })
 })
